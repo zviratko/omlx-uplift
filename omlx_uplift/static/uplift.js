@@ -22,6 +22,49 @@ const API = qp.has('api') ? qp.get('api') : API_DEFAULT;
 const prefs = C.loadPrefs(localStorage);
 const layout = C.loadLayout(localStorage);
 const tracker = C.createRequestTracker(2000);
+
+/* ---------------- i18n bootstrap (classic pattern) ---------------------
+   GET /uplift/api/locale -> {lang, strings}: classic's catalog merged
+   with uplift's overlay (package locales/*.json). Until the fetch lands
+   everything renders via key-fallback (English literals stay in place as
+   data-en fallbacks, see applyI18n). window.t alias = classic parity for
+   anything copied over from dashboard.js. */
+window.t = (key, vars) => C.t(key, vars);
+function applyI18n(root) {
+    (root || document).querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.dataset.i18n;
+        if (el.dataset.en === undefined) el.dataset.en = el.textContent;
+        const s = C.t(key);
+        el.textContent = s === key ? el.dataset.en : s;
+    });
+    (root || document).querySelectorAll('[data-i18n-title]').forEach(el => {
+        const key = el.dataset.i18nTitle;
+        if (el.dataset.enTitle === undefined) el.dataset.enTitle = el.getAttribute('title') || '';
+        const s = C.t(key);
+        el.setAttribute('title', s === key ? el.dataset.enTitle : s);
+    });
+    (root || document).querySelectorAll('[data-i18n-ph]').forEach(el => {
+        const key = el.dataset.i18nPh;
+        if (el.dataset.enPh === undefined) el.dataset.enPh = el.getAttribute('placeholder') || '';
+        const s = C.t(key);
+        el.setAttribute('placeholder', s === key ? el.dataset.enPh : s);
+    });
+}
+async function loadLocale(lang) {
+    try {
+        const url = API + '/uplift/api/locale' + (lang ? '?lang=' + encodeURIComponent(lang) : '');
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('locale HTTP ' + r.status);
+        const j = await r.json();
+        C.setLocale(j.lang, j.strings);
+        applyI18n(document);
+        document.documentElement.lang = j.lang;
+    } catch (e) {
+        /* key-fallback keeps the UI fully English; not worth a toast */
+        console.warn('uplift locale load failed:', e);
+    }
+}
+
 let stats = null, prevStats = null, failCount = 0, timer = null;
 let usageRange = qp.get('range') || 'today';
 const PERCENTILES = { p50: 50, p90: 90, p95: 95, p99: 99 };
@@ -3695,6 +3738,10 @@ async function gsSaveNow(fields) {
         GS_ORIG = JSON.parse(JSON.stringify(GS));
         if (GS._shadow) GS_ORIG._shadow = body;
         gsSavedAt = Date.now();
+        // Language change -> hot-reload our catalog (classic refreshes
+        // its Jinja globals on language change; our endpoint re-reads
+        // files per request, so just re-fetch + re-apply).
+        if ('ui_language' in fields) loadLocale(fields.ui_language);
         $('gs-sub').textContent = GW_LIVE
             ? 'saved ✓'
             : 'saved ✓ (shadow — real oMLX untouched)';
@@ -5414,6 +5461,7 @@ document.addEventListener('visibilitychange', () => {
 applyPrefs();
 applyOrder();
 applyLayout();
+loadLocale();          // translate static shell as soon as catalog lands
 createCharts();
 resizeCharts();
 applyTab();

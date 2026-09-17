@@ -266,6 +266,26 @@ function fmtDuration(s) {
 }
 function fmtNumber(n) { return n === null ? '—' : Math.round(n).toLocaleString('en-US'); }
 
+/* ---------- i18n (classic pattern: catalog + t(key); {placeholder}
+   interpolation; missing key falls back to the key itself, same as
+   classic's window.t). Pure state — DOM application lives in uplift.js,
+   bootstrap/fetch lives in uplift.js; core stays testable. ---------- */
+let _locale = { lang: 'en', strings: {} };
+function setLocale(lang, strings) {
+    _locale = { lang: lang || 'en', strings: strings || {} };
+    return _locale;
+}
+function getLocale() { return _locale; }
+function t(key, vars) {
+    let s = _locale.strings[key];
+    if (typeof s !== 'string') return key;
+    if (vars) {
+        s = s.replace(/\{(\w+)\}/g, (m, k) =>
+            vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : m);
+    }
+    return s;
+}
+
 /* Backfill merge: server history points (res fine|hourly) into a live
    column pair [ts[], v[]]. Drops points outside (now-window, now+slack],
    drops older live points the server covers (hourly buckets supersede
@@ -316,6 +336,7 @@ function errorText(body) {
 
 return { num, r, normalize, modelState, appendSample, pruneOlderThan, eventsBetween, milestonesBetween,
          createRequestTracker, percentile, mean, mergeHistory,
+         setLocale, getLocale, t,
          PREFS_KEY, PREFS_DEFAULTS, THEMES, loadPrefs, savePrefs,
          LAYOUT_KEY, LAYOUT_DEFAULTS, LAYOUT_WINDOWS, LAYOUT_INTERVALS, LAYOUT_PERCENTILES, loadLayout, saveLayout, clampSpan,
          fmtCompact, fmtBytes, fmtDuration, fmtNumber, errorText };

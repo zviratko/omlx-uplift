@@ -114,6 +114,14 @@ def build_viewer_app(api_base: str = "") -> FastAPI:
         request.__dict__["_body"] = await request.body()
         if path == "metrics/series":
             return _metrics_local(request)
+        if path == "locale":
+            # local catalog: vanilla upstream has no locale endpoint on
+            # /admin/api; load_locale falls back to package-only files
+            # when omlx is not importable here.
+            from .router import load_locale
+
+            lang = request.query_params.get("lang") or "en"
+            return JSONResponse({"lang": lang, "strings": load_locale(lang)})
         return _proxy(f"/admin/api/{path}", request)
 
     @app.get("/uplift/{path:path}", include_in_schema=False)

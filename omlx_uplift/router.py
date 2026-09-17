@@ -26,6 +26,7 @@ Route map (register() mounts api_router under /uplift/api AND /admin/api):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -304,6 +305,75 @@ async def uplift_static(path: str, request: Request):
 @page_router.get("/admin/uplift/{path:path}", include_in_schema=False)
 async def uplift_static_legacy(path: str, request: Request):
     return await uplift_static(path, request)
+
+
+# --------------------------------------------------------------------------
+# i18n: merged locale catalog for the uplift UI
+#   layer 1: classic's omlx/admin/i18n/<lang>.json (READ-ONLY via import;
+#            same English-fallback semantics as classic's _load_locale)
+#   layer 2: our own locales/<lang>.json additive keys (uplift-only
+#            strings). Classic wins on collision is WRONG for uplift-owned
+#            words, so overlay wins — uplift keys use the `uplift.*`
+#            namespace by convention, collisions are a bug either way.
+# --------------------------------------------------------------------------
+
+_PACKAGE_LOCALES = Path(__file__).resolve().parent / "locales"
+_LANG_RE = __import__("re").compile(r"^[a-zA-Z-]{2,10}$")
+
+
+def _safe_lang(lang: str) -> str:
+    lang = (lang or "en").strip()
+    return lang if _LANG_RE.match(lang) else "en"
+
+
+def _read_json_dict(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def load_locale(lang: str) -> dict:
+    """Merged catalog for LANG. Classic JSON read through classic's own
+    loader when available (its fallback chain is the reference), then our
+    overlay on top; without omlx (viewer mode) our files alone."""
+    lang = _safe_lang(lang)
+    base: dict = {}
+    try:
+        from omlx.admin.routes import _load_locale, _i18n_dir  # read-only reuse
+
+        base = _load_locale(lang)
+    except Exception:
+        # viewer / no omlx: our own dir replicates the same fallback shape
+        base = _read_json_dict(_PACKAGE_LOCALES / "en.json")
+        if lang != "en":
+            base.update(_read_json_dict(_PACKAGE_LOCALES / f"{lang}.json"))
+        return base
+    # current server language not needed — we serve whatever lang was asked
+    overlay = _read_json_dict(_PACKAGE_LOCALES / f"{lang}.json")
+    if lang != "en":
+        en_overlay = _read_json_dict(_PACKAGE_LOCALES / "en.json")
+        merged_overlay = {**en_overlay, **overlay}
+    else:
+        merged_overlay = overlay
+    _ = _i18n_dir  # referenced only to prove the import path exists
+    return {**base, **merged_overlay}
+
+
+@api_router.get("/locale")
+async def locale_catalog(lang: Optional[str] = None):
+    """Merged i18n catalog for the uplift UI (classic keys + uplift
+    overlay). No lang given -> the server's configured ui.language, same
+    source classic templates use. Public: mirrors classic, whose login
+    page renders locale strings before authentication."""
+    if not lang:
+        try:
+            lang = global_settings().ui.language
+        except Exception:
+            lang = "en"
+    lang = _safe_lang(lang)
+    return {"lang": lang, "strings": await asyncio.to_thread(load_locale, lang)}
 
 
 # --------------------------------------------------------------------------

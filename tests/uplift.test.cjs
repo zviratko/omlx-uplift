@@ -269,3 +269,26 @@ test('mergeHistory: malformed points ignored; empty inputs safe', () => {
     assert.deepEqual(e.ts, []);
     assert.equal(e.boundary, 0);
 });
+
+/* ---------- i18n: t() catalog lookup + interpolation ---------- */
+test('t(): fallback to key when missing, English default', () => {
+    C.setLocale('en', {});
+    assert.strictEqual(C.t('uplift.nope'), 'uplift.nope');
+});
+test('t(): direct lookup + interpolation', () => {
+    C.setLocale('cs', { 'uplift.greet': 'Ahoj {name}', 'common.cancel': 'Zrušit' });
+    assert.strictEqual(C.t('common.cancel'), 'Zrušit');
+    assert.strictEqual(C.t('uplift.greet', { name: 'Petra' }), 'Ahoj Petra');
+});
+test('t(): missing interpolation var keeps placeholder; null vars ok', () => {
+    C.setLocale('en', { k: 'a{b}c' });
+    assert.strictEqual(C.t('k', {}), 'a{b}c');
+    assert.strictEqual(C.t('k', { b: null }), 'a{b}c');
+    assert.strictEqual(C.t('k', { b: 0 }), 'a0c');   // 0 is a legit value
+});
+test('setLocale(): bad args reset to en/{}; getLocale reflects last call', () => {
+    C.setLocale('ja', { a: 'あ' });
+    assert.strictEqual(C.getLocale().lang, 'ja');
+    C.setLocale(null, undefined);
+    assert.deepStrictEqual(C.getLocale(), { lang: 'en', strings: {} });
+});
