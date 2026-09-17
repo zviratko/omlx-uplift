@@ -891,8 +891,8 @@ function renderLive(s) {
     const list = $('live-list');
     const rows = [];
     for (const m of s.models) {
-        for (const p of m.prefilling) rows.push({ model: m.id, kind: 'Prefilling', prompt: p.prompt, progress: p.progress });
-        for (const g of m.generating) rows.push({ model: m.id, kind: 'Generating', prompt: g.prompt, generated: g.generated, tps: g.tps });
+        for (const p of m.prefilling) rows.push({ model: m.id, kind: C.t('uplift.inflight.prefilling'), prompt: p.prompt, progress: p.progress });
+        for (const g of m.generating) rows.push({ model: m.id, kind: C.t('uplift.inflight.generating'), prompt: g.prompt, generated: g.generated, tps: g.tps });
     }
     $('live-count').textContent = rows.length ? `${rows.length}` : '';
     if (!rows.length) {
@@ -1081,7 +1081,7 @@ async function pollGatewayInfo() {
             ? (GW_LIVE ? 'gw↑LIVE' : `gw↑ok · r${d.observed_real}/s${d.simulated}`)
             : 'gw↑down';
         chip.classList.toggle('state-ok', !!d.ok);
-        chip.title = `gateway → ${d.upstream}: ${d.ok ? 'reachable' : (d.last_error || 'unreachable')}\n` +
+        chip.title = `gateway → ${d.upstream}: ${d.ok ? C.t('uplift.gw.reachable') : (d.last_error || C.t('uplift.gw.unreachable'))}\n` +
                      (GW_LIVE ? ''
                               : `shadow overrides: ${Object.keys(d.overrides || {}).length} · `) +
                      `sim ${d.sim_rate}/s`;
@@ -1158,15 +1158,15 @@ function pushServerEvent(ev) {
         if (ev.state === 'error') flashCard('v-errrate', 'bad');
         if (ev.state === 'complete') flashCard('v-requests', 'ok');
     } else if (ev.type === 'model-load') {
-        pushFeed([{ kind: 'model-add', model: ev.id, text: `${ev.id} load requested` }]);
+        pushFeed([{ kind: 'model-add', model: ev.id, text: C.t('uplift.feed.load_requested', {model: ev.id}) }]);
     } else if (ev.type === 'model-unload') {
-        pushFeed([{ kind: 'model-remove', model: ev.id, text: `${ev.id} unload` }]);
+        pushFeed([{ kind: 'model-remove', model: ev.id, text: C.t('uplift.feed.unload', {model: ev.id}) }]);
     } else if (ev.type === 'model-ready') {
-        pushFeed([{ kind: 'model-add', model: ev.id, text: `${ev.id} ready` }]);
+        pushFeed([{ kind: 'model-add', model: ev.id, text: C.t('uplift.feed.ready', {model: ev.id}) }]);
     } else if (ev.type === 'settings') {
-        pushFeed([{ kind: 'requests', text: `${ev.id}: settings ${ev.changed.join(', ')}` }]);
+        pushFeed([{ kind: 'requests', text: C.t('uplift.feed.settings_changed', {model: ev.id, keys: ev.changed.join(', ')}) }]);
     } else if (ev.type === 'mock-reset') {
-        pushFeed([{ kind: 'requests', text: 'gateway shadow state reset' }]);
+        pushFeed([{ kind: 'requests', text: C.t('uplift.feed.gw_reset') }]);
     }
 }
 function connectEventStream() {
