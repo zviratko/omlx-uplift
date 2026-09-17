@@ -1332,13 +1332,16 @@ function seBind(kind, key, opts) {
     const label = document.createElement('label');
     label.className = 'se-row';
     const name = document.createElement('span');
-    name.textContent = opts && opts.label ? opts.label : key;
+    // localize by field key; the passed literal is the English fallback
+    name.textContent = C.tf('uplift.se.' + key, opts && opts.label ? opts.label : key);
     let input;
     if (kind === 'select') {
         input = document.createElement('select');
         for (const o of (opts.options || [])) {
             const el = document.createElement('option');
-            el.value = o.value; el.textContent = o.label != null ? o.label : o.value;
+            el.value = o.value;
+            el.textContent = C.tf('uplift.se.' + key + '.opt.' + o.value,
+                                   o.label != null ? o.label : o.value);
             if (String(seValues[key]) === String(o.value)) el.selected = true;
             input.append(el);
         }

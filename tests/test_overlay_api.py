@@ -122,22 +122,23 @@ async def test_delete_model_settings():
 def test_locale_overlays_key_sync():
     """Overlay key discipline, two families:
     - UI keys (shell/toast/feed): every locale must carry the full set.
-    - uplift.gs.* labels: subset allowed (documented EN-fallback design
-      mirroring classic's partial catalogs), but placeholders must match
-      wherever a key IS present."""
+    - uplift.gs.* / uplift.se.* labels: subset allowed (documented
+      EN-fallback design mirroring classic's partial catalogs), but
+      placeholders must match wherever a key IS present."""
     import re
     from omlx_uplift.router import _PACKAGE_LOCALES
 
     en = json.loads((_PACKAGE_LOCALES / "en.json").read_text(encoding="utf-8"))
     assert en, "en overlay must not be empty"
-    ui_en = {k: v for k, v in en.items() if not k.startswith("uplift.gs.")}
+    FALLBACK_FAMILIES = ("uplift.gs.", "uplift.se.")
+    ui_en = {k: v for k, v in en.items() if not k.startswith(FALLBACK_FAMILIES)}
     langs = {"zh", "zh-TW", "ja", "ko", "ru", "es", "fr", "pt-BR"}
     for lang in langs:
         data = json.loads(((_PACKAGE_LOCALES / f"{lang}.json")).read_text(encoding="utf-8"))
         assert set(ui_en) <= set(data), f"{lang} missing UI keys: {sorted(set(ui_en) - set(data))[:5]}"
         for k, v in en.items():
             if k not in data:
-                assert k.startswith("uplift.gs."), f"{lang}:{k} missing but not a gs.* key"
+                assert k.startswith(FALLBACK_FAMILIES), f"{lang}:{k} missing but not a fallback-family key"
                 continue
             src = set(re.findall(r"\{(\w+)\}", v))
             got = set(re.findall(r"\{(\w+)\}", data[k]))
