@@ -1286,7 +1286,7 @@ function renderEdChanges() {
     box.textContent = '';
     if (!lines.length) return;
     const head = document.createElement('div'); head.className = 'ch-head';
-    head.textContent = 'CHANGES (' + lines.length + ')';
+    head.textContent = C.tf('uplift.ui.changes', 'CHANGES (') + lines.length + ')';
     box.append(head);
     for (const ln of lines) {
         const d = document.createElement('div'); d.className = 'ch-line';
@@ -1468,7 +1468,7 @@ function seBind(kind, key, opts) {
     const slot = document.createElement('span'); slot.className = 'se-slot';
     const rd = document.createElement('span'); rd.className = 'diff-out'; rd.hidden = true;
     const o = document.createElement('span'); o.className = 'diff-o';
-    o.title = 'Click to revert';
+    o.title = C.tf('uplift.ui.click_to_revert', 'Click to revert');
     o.onclick = (ev) => {
         ev.preventDefault();
         const t = seTab(); if (!t) return;
@@ -1603,7 +1603,7 @@ function renderEditorFields(container) {
         if (m.thinking_default !== undefined && m.thinking_default !== null || seValues.enable_thinking != null) {
             const tv = seValues.enable_thinking;
             g.append(seBind('select', 'enable_thinking', {
-                label: 'Enable Thinking', disabled: !!m.thinking_forced,
+                label: C.tf('uplift.ui.enable_thinking', 'Enable Thinking'), disabled: !!m.thinking_forced,
                 hint: 'Enable reasoning/thinking mode for this model.',
                 options: [{ value: '', label: m.thinking_default === true
                                ? 'Using model default (on)' : 'Using model default (off)' },
@@ -1637,14 +1637,14 @@ function renderEditorFields(container) {
             onChange: renderEditorFields.bind(null, container) }));
         if (seValues.enableThinkingBudget)
             sub(g).append(seBind('number', 'thinking_budget_tokens',
-                { label: 'Thinking budget (tokens)', min: 1, step: 1 }));
+                { label: C.tf('uplift.ui.thinking_budget_tokens', 'Thinking budget (tokens)'), min: 1, step: 1 }));
         // cache_reasoning_output: tri-state (null = auto: cache when history
         // preserves <think>). Upstream #3525; classic modal has no widget —
         // additive, same keys as the API.
         {
             const cv = seValues.cache_reasoning_output;
             g.append(seBind('select', 'cache_reasoning_output', {
-                label: 'Cache Reasoning Output',
+                label: C.tf('uplift.ui.cache_reasoning_output', 'Cache Reasoning Output'),
                 hint: 'Cache <think> output for the next turn. Auto = only when history keeps it.',
                 options: [{ value: '', label: 'Auto' },
                           { value: 'true', label: 'Always' },
@@ -1661,14 +1661,14 @@ function renderEditorFields(container) {
             onChange: renderEditorFields.bind(null, container) }));
         if (seValues.enableToolResultLimit)
             sub(g).append(seBind('number', 'max_tool_result_tokens',
-                { label: 'Tool result token limit', min: 1, step: 1 }));
+                { label: C.tf('uplift.ui.tool_result_token_limit', 'Tool result token limit'), min: 1, step: 1 }));
     }
     /* ---- grammar (R10-5: own section, wide mono textarea) ---- */
     section('Grammar');
     g = grid();
     if (!S.isDiffusion(m)) {
         const ggWrap = seBind('textarea', 'guided_grammar', {
-            label: 'Guided Grammar',
+            label: C.tf('uplift.ui.guided_grammar', 'Guided Grammar'),
             hint: 'EBNF / regex / JSON-schema grammar applied to generation when enabled.' });
         ggWrap.classList.add('se-wide');
         const ggInp = ggWrap.querySelector('textarea');
@@ -1677,7 +1677,7 @@ function renderEditorFields(container) {
         // own input event so dirty-marking and tab bookkeeping stay exact.
         const expandB = document.createElement('button');
         expandB.type = 'button'; expandB.className = 'se-btn act';
-        expandB.textContent = 'EXPAND ⤢'; expandB.title = 'Edit the grammar in a larger window';
+        expandB.textContent = 'EXPAND ⤢'; expandB.title = C.tf('uplift.ui.edit_the_grammar_in_a_larger_window', 'Edit the grammar in a larger window');
         expandB.onclick = () => openGrammarPop(ggInp, expandB);
         // R10-9: preset examples. Shape is server-pluggable later: keep it
         // a list of {id, display_name, grammar} so a route can replace this.
@@ -1692,7 +1692,7 @@ function renderEditorFields(container) {
                 'root     ::= expr\nexpr     ::= term (("+" / "-") term)*\nterm     ::= atom (("*" / "/") atom)*\natom     ::= [0-9]+ / "(" expr ")"' },
         ];
         const presetSel = document.createElement('select');
-        presetSel.title = 'Insert an example grammar';
+        presetSel.title = C.tf('uplift.ui.insert_an_example_grammar', 'Insert an example grammar');
         const ph = document.createElement('option');
         ph.value = ''; ph.textContent = 'Insert example…';
         presetSel.append(ph, ...GRAMMAR_PRESETS.map(p => {
@@ -1740,7 +1740,7 @@ function renderEditorFields(container) {
             onChange: renderEditorFields.bind(null, container) }));
         if (seValues.enableIndexCache)
             sub(g).append(seBind('number', 'index_cache_freq',
-                { label: 'Frequency (every Nth layer keeps indexer)', min: 1, step: 1 }));
+                { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 1, step: 1 }));
     }
     if (seValues.turboquant_kv_enabled !== undefined && !S.isDiffusion(m)) {
         g.append(seBind('bool', 'turboquant_kv_enabled', { label: 'TurboQuant KV Cache',
@@ -1748,7 +1748,7 @@ function renderEditorFields(container) {
             onChange: renderEditorFields.bind(null, container) }));
         if (seValues.turboquant_kv_enabled)
             sub(g).append(seBind('number', 'turboquant_kv_bits',
-                { label: 'Bits per channel', min: 2, max: 8, step: 0.25 }));
+                { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'), min: 2, max: 8, step: 0.25 }));
     }
     if (m.qwen4_ple_ssd_offload_supported || seValues.qwen4_ple_ssd_offload)
         g.append(seBind('bool', 'qwen4_ple_ssd_offload', { label: 'SSD N-gram Offload (Qwen4 only)',
@@ -1758,11 +1758,11 @@ function renderEditorFields(container) {
             disabled: !!m.qwen4_ple_ssd_offload_forced }));
     if (seValues.deepseek_v41_ced_prefill_supported)
         g.append(seBind('bool', 'deepseek_v41_ced_prefill_enabled',
-            { label: 'CED Prefill Acceleration (DeepSeek V4.1)',
+            { label: C.tf('uplift.ui.ced_prefill_acceleration_deepseek_v4_1', 'CED Prefill Acceleration (DeepSeek V4.1)'),
               hint: 'Improves prefill speed by approximately 74-79% in tested configuration.' }));
     if (m.deepseek_v41_engram_ssd_offload_supported)
         g.append(seBind('bool', 'deepseek_v41_engram_ssd_offload', {
-            label: 'SSD N-gram Offload (DeepSeek V4.1)',
+            label: C.tf('uplift.ui.ssd_n_gram_offload_deepseek_v4_1', 'SSD N-gram Offload (DeepSeek V4.1)'),
             hint: m.deepseek_v41_engram_ssd_offload_forced
                 ? 'Required because resident loading exceeds the configured model-memory limit.'
                 : 'Keep Engram tables on SSD and prefetch required rows. Saves memory; speed depends on storage.',
@@ -1773,7 +1773,7 @@ function renderEditorFields(container) {
             onChange: renderEditorFields.bind(null, container) }));
         if (seValues.moe_expert_offload_enabled)
             sub(g).append(seBind('number', 'moe_expert_offload_resident_fraction',
-                { label: 'Resident experts (fraction)', min: 0.01, max: 1, step: 0.01 }));
+                { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.01, max: 1, step: 0.01 }));
     }
     if (S.isQwenOqA8(m)) {
         g.append(seBind('bool', 'qwen35_oq_a8_enabled', { label: 'Qwen INT8 Activation Prefill',
@@ -1781,7 +1781,7 @@ function renderEditorFields(container) {
             onChange: renderEditorFields.bind(null, container) }));
         if (seValues.qwen35_oq_a8_enabled)
             sub(g).append(seBind('number', 'qwen35_oq_a8_min_tokens',
-                { label: 'Minimum prompt tokens', min: 1, step: 1 }));
+                { label: C.tf('uplift.ui.minimum_prompt_tokens', 'Minimum prompt tokens'), min: 1, step: 1 }));
     }
     if (m.ane_prefill_backend && !S.isDiffusion(m)) renderAne(container, g);
 
@@ -1798,7 +1798,7 @@ function renderEditorFields(container) {
                 const sb = sub(g);
                 const pool = S_.specprefillCandidates(models, m.id).map(x => ({ value: x.id }));
                 sb.append(seBind('select', 'specprefill_draft_model',
-                    { label: 'Draft Model', options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
+                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
                 sb.append(seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
                     { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
                     { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
@@ -1807,7 +1807,7 @@ function renderEditorFields(container) {
                     { value: '0.4', label: '40% — Mild (~1.8x)' },
                     { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true }));
                 sb.append(seBind('number', 'specprefill_threshold',
-                    { label: 'Threshold (tokens)', min: 1024, max: 131072, step: 1024 }));
+                    { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 }));
             }
         }
         if (seValues.dflash_enabled !== undefined) {
@@ -1818,7 +1818,7 @@ function renderEditorFields(container) {
                 const sb = sub(g);
                 const pool = S_.dflashCandidates(models, m.id).map(x => ({ value: x.id }));
                 sb.append(seBind('select', 'dflash_draft_model',
-                    { label: 'Draft Model', options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
+                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
                 sb.append(seBind('bool', 'dflash_draft_quant_enabled', { label: 'Quantization',
                     onChange: renderEditorFields.bind(null, container) }));
                 if (seValues.dflash_draft_quant_enabled) {
@@ -1833,16 +1833,16 @@ function renderEditorFields(container) {
                     onChange: renderEditorFields.bind(null, container) }));
                 if (seValues.dflash_in_memory_cache) {
                     sb.append(seBind('number', 'dflash_in_memory_cache_max_entries',
-                        { label: 'In-memory cache max entries', min: 1, step: 1 }));
+                        { label: C.tf('uplift.ui.in_memory_cache_max_entries', 'In-memory cache max entries'), min: 1, step: 1 }));
                     sb.append(seBind('number', 'dflash_in_memory_cache_max_gib',
-                        { label: 'In-memory cache size (GiB)', min: 1, step: 1,
+                        { label: C.tf('uplift.ui.in_memory_cache_size_gib', 'In-memory cache size (GiB)'), min: 1, step: 1,
                           hint: 'Byte budget for L1 snapshots; LRU evicts when exceeded.' }));
                     if (seValues.dflash_ssd_cache_available) {
                         sb.append(seBind('bool', 'dflash_ssd_cache', { label: 'SSD cache',
                             hint: 'Requires in-memory cache to be enabled.' }));
                         if (seValues.dflash_ssd_cache)
                             sb.append(seBind('number', 'dflash_ssd_cache_max_gib',
-                                { label: 'SSD cache size (GiB)', min: 1, step: 1 }));
+                                { label: C.tf('uplift.ui.ssd_cache_size_gib', 'SSD cache size (GiB)'), min: 1, step: 1 }));
                     }
                 }
                 sb.append(seBind('number', 'dflash_draft_window_size', { label: 'Draft window size' }));
@@ -1862,7 +1862,7 @@ function renderEditorFields(container) {
                 onChange: renderEditorFields.bind(null, container) }));
             if (seValues.mtp_enabled)
                 sub(g).append(seBind('number', 'mtp_num_draft_tokens', {
-                    label: 'Max draft tokens per cycle', min: 1, step: 1,
+                    label: C.tf('uplift.ui.max_draft_tokens_per_cycle', 'Max draft tokens per cycle'), min: 1, step: 1,
                     hint: 'Speculative depth. Empty = model default (usually 3); '
                         + 'an adaptive controller picks 1..max from acceptance rates. '
                         + 'Set 1 to fix depth-1 cycles.' }));
@@ -1879,7 +1879,7 @@ function renderEditorFields(container) {
                 sb.append(seBind('select', 'vlm_mtp_draft_model', { label: 'Drafter model', options: [
                     { value: '', label: 'Select an assistant or MTP drafter…' }, ...pool], picker: true }));
                 sb.append(seBind('number', 'vlm_mtp_draft_block_size',
-                    { label: 'Draft block size (tokens per round, blank = 4)', step: 1 }));
+                    { label: C.tf('uplift.ui.draft_block_size_tokens_per_round_blank_4', 'Draft block size (tokens per round, blank = 4)'), step: 1 }));
             }
         }
     }
@@ -1907,45 +1907,45 @@ function renderAne(container, g) {
     const sbA = (function () { const d = document.createElement('div');
         d.className = 'se-sub'; g.append(d); return d; })();
     sbA.append(seBind('number', 'qwen35_ane_prefill_sequence_length',
-        { label: 'Prompt block', min: 1024, step: 64 }));
+        { label: C.tf('uplift.ui.prompt_block', 'Prompt block'), min: 1024, step: 64 }));
     if (!k2) sbA.append(seBind('number', 'qwen35_ane_prefill_tail_padding_min_tokens',
-        { label: 'Pad tails from', min: 0, step: 1 }));
+        { label: C.tf('uplift.ui.pad_tails_from', 'Pad tails from'), min: 0, step: 1 }));
     sbA.append(seBind('number', 'qwen35_ane_prefill_fraction',
-        { label: 'MLP on ANE', min: 0, max: 1, step: 0.01 }));
+        { label: C.tf('uplift.ui.mlp_on_ane', 'MLP on ANE'), min: 0, max: 1, step: 0.01 }));
     sbA.append(seBind('number', 'qwen35_ane_prefill_shared_fraction',
-        { label: 'Shared MLP on ANE', min: 0, max: 1, step: 0.01 }));
+        { label: C.tf('uplift.ui.shared_mlp_on_ane', 'Shared MLP on ANE'), min: 0, max: 1, step: 0.01 }));
     if (!k2) {
         sbA.append(seBind('number', 'qwen35_ane_prefill_max_layers',
-            { label: 'MLP layer limit', min: 1, step: 1 }));
+            { label: C.tf('uplift.ui.mlp_layer_limit', 'MLP layer limit'), min: 1, step: 1 }));
         sbA.append(seBind('bool', 'qwen35_ane_prefill_dual_ane',
-            { label: 'Use both ANEs', hint: 'Pin one resident program to each physical ANE instance.' }));
+            { label: C.tf('uplift.ui.use_both_anes', 'Use both ANEs'), hint: 'Pin one resident program to each physical ANE instance.' }));
     }
     sbA.append(seBind('bool', 'qwen35_ane_prefill_gdn',
-        { label: 'Accelerate GDN', hint: 'Also split eligible GDN input projections across the ANEs and GPU.',
+        { label: C.tf('uplift.ui.accelerate_gdn', 'Accelerate GDN'), hint: 'Also split eligible GDN input projections across the ANEs and GPU.',
           onChange: renderEditorFields.bind(null, container) }));
     if (seValues.qwen35_ane_prefill_gdn) {
         sbA.append(seBind('number', 'qwen35_ane_prefill_gdn_fraction',
-            { label: 'GDN on ANE (fraction)', min: 0, max: 1, step: 0.01 }));
+            { label: C.tf('uplift.ui.gdn_on_ane_fraction', 'GDN on ANE (fraction)'), min: 0, max: 1, step: 0.01 }));
         sbA.append(seBind('number', 'qwen35_ane_prefill_gdn_max_layers',
-            { label: 'GDN layer limit', min: 0, step: 1 }));
+            { label: C.tf('uplift.ui.gdn_layer_limit', 'GDN layer limit'), min: 0, step: 1 }));
     }
     sbA.append(seBind('bool', 'qwen35_ane_prefill_cpu_enabled',
-        { label: 'Share MLP work with CPU',
+        { label: C.tf('uplift.ui.share_mlp_work_with_cpu', 'Share MLP work with CPU'),
           hint: 'Requires a separate Qwen q4 checkpoint clone with floating tensors converted.',
           onChange: renderEditorFields.bind(null, container) }));
     if (seValues.qwen35_ane_prefill_cpu_enabled) {
         const sbC = (function () { const d = document.createElement('div');
             d.className = 'se-sub'; sbA.append(d); return d; })();
         sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_fraction',
-            { label: 'MLP on CPU (fraction)', min: 0, max: 1, step: 0.001 }));
+            { label: C.tf('uplift.ui.mlp_on_cpu_fraction', 'MLP on CPU (fraction)'), min: 0, max: 1, step: 0.001 }));
         sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_down_fraction',
-            { label: 'Down projection on CPU (fraction, 0 = disabled)', min: 0, max: 1, step: 0.001 }));
+            { label: C.tf('uplift.ui.down_projection_on_cpu_fraction_0_disabled', 'Down projection on CPU (fraction, 0 = disabled)'), min: 0, max: 1, step: 0.001 }));
         sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_gdn_fraction',
-            { label: 'GDN on CPU (fraction)', min: 0, max: 1, step: 0.001 }));
+            { label: C.tf('uplift.ui.gdn_on_cpu_fraction', 'GDN on CPU (fraction)'), min: 0, max: 1, step: 0.001 }));
         sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_threads',
-            { label: 'CPU workers (0 = automatic)', min: 0, step: 1 }));
+            { label: C.tf('uplift.ui.cpu_workers_0_automatic', 'CPU workers (0 = automatic)'), min: 0, step: 1 }));
         sbC.append(seBind('bool', 'qwen35_ane_prefill_cpu_shared_resource',
-            { label: 'Performance-aware scheduling',
+            { label: C.tf('uplift.ui.performance_aware_scheduling', 'Performance-aware scheduling'),
               hint: "Uses Apple's shared-resource scheduler hint and falls back automatically." }));
     }
 }
@@ -1968,7 +1968,7 @@ function renderCtKwargs(container) {   // R10-5: container is the section body
     const S = window.UpliftModelSpec;
     const hint = document.createElement('div');
     hint.className = 'se-hint';
-    hint.textContent = 'Parameters passed to chat template. Force: API requests cannot override this value.';
+    hint.textContent = C.tf('uplift.ui.parameters_passed_to_chat_template_force_api_req', 'Parameters passed to chat template. Force: API requests cannot override this value.');
     container.append(hint);
     const g = document.createElement('div');
     g.className = 'pair'; container.append(g);
@@ -2119,7 +2119,7 @@ function openGrammarPop(srcTa, btn) {
     panel.className = 'modal nasa grammar-pop';
     const head = document.createElement('div');
     head.className = 'editor-head';
-    head.textContent = 'GUIDED GRAMMAR — ' + seModel;
+    head.textContent = C.tf('uplift.ui.guided_grammar', 'GUIDED GRAMMAR — ') + seModel;
     const ta = document.createElement('textarea');
     ta.value = srcTa.value;
     ta.spellcheck = false;
@@ -2997,7 +2997,7 @@ async function renderModelAdmin(force) {
             const acts = document.createElement('span'); acts.className = 'rowacts';
             const ds = document.createElement('button');
             ds.className = 'se-btn act danger'; ds.textContent = 'DELETE SETTINGS';
-            ds.title = 'Delete stored settings for this missing model';
+            ds.title = C.tf('uplift.ui.delete_stored_settings_for_this_missing_model', 'Delete stored settings for this missing model');
             ds.onclick = () => confirmDialog('Delete settings',
                 `Remove stored configuration for ${e.id}? The model is not on disk; `
                 + 'its settings record is deleted. This cannot be undone.',
@@ -3407,7 +3407,7 @@ const GS_LABELS = {
             'pt-BR': 'Português (Brasil)' },
     auth: { api_key: 'API Key',
         api_key_hint: 'Clients must send this key in the Authorization header.',
-        api_key_placeholder: 'Enter new API key',
+        api_key_placeholder: C.tf('uplift.ui.enter_new_api_key', 'Enter new API key'),
         base_path: 'Base Path',
         base_path_hint: 'URL prefix when served behind a reverse proxy (e.g. /omlx).',
         skip: 'Skip API key verification',
@@ -3422,10 +3422,10 @@ const GS_LABELS = {
                  ['debug','Debug'],['trace','Trace']] },
     model: { dirs: 'Model Directories', ph_primary: '/path/to/models',
         ph_additional: 'Additional directory…',
-        fallback: 'Model Fallback', fallback_desc: 'Alias to use when the requested model is unavailable.',
-        hide_helper: 'Hide helper models', hide_helper_desc: 'Keep drafters and assistants out of model lists.',
-        hf_cache: 'Hugging Face cache', hf_cache_desc: 'Reuse downloaded models from the local HF cache.',
-        idle: 'Idle Timeout', idle_desc: 'Unload a model after it has been unused for this long.',
+        fallback: 'Model Fallback', fallback_desc: C.tf('uplift.ui.alias_to_use_when_the_requested_model_is_unavail', 'Alias to use when the requested model is unavailable.'),
+        hide_helper: 'Hide helper models', hide_helper_desc: C.tf('uplift.ui.keep_drafters_and_assistants_out_of_model_lists', 'Keep drafters and assistants out of model lists.'),
+        hf_cache: 'Hugging Face cache', hf_cache_desc: C.tf('uplift.ui.reuse_downloaded_models_from_the_local_hf_cache', 'Reuse downloaded models from the local HF cache.'),
+        idle: 'Idle Timeout', idle_desc: C.tf('uplift.ui.unload_a_model_after_it_has_been_unused_for_this', 'Unload a model after it has been unused for this long.'),
         idle_opts: [['','Never'],['900','15 minutes'],['1800','30 minutes'],
                     ['3600','1 hour'],['7200','2 hours'],['28800','8 hours'],
                     ['86400','24 hours']] },
@@ -3433,18 +3433,18 @@ const GS_LABELS = {
         max_conc_hint: 'Requests admitted at once; others queue.',
         batch: 'Embedding Batch Size',
         batch_hint: 'Texts encoded per embedding forward pass.',
-        chunked: 'Chunked Prefill', chunked_desc: 'Split long prompts to interleave with decode.',
-        fairness: 'Decode Fairness', fairness_desc: 'Round-robin decode slots across requests.',
+        chunked: 'Chunked Prefill', chunked_desc: C.tf('uplift.ui.split_long_prompts_to_interleave_with_decode', 'Split long prompts to interleave with decode.'),
+        fairness: 'Decode Fairness', fairness_desc: C.tf('uplift.ui.round_robin_decode_slots_across_requests', 'Round-robin decode slots across requests.'),
         prio: 'Prefill Priority', prio_speed: 'Speed', prio_context: 'Max Context',
         guard: 'Prefill Memory Guard',
-        guard_desc: 'Refuse prefill when free memory is below the guard.',
+        guard_desc: C.tf('uplift.ui.refuse_prefill_when_free_memory_is_below_the_gua', 'Refuse prefill when free memory is below the guard.'),
         tier: 'Memory Guard Tier',
         tiers: [['safe','Safe'],['balanced','Balanced'],['aggressive','Aggressive'],
                 ['custom','Custom']],
         custom: 'Custom Ceiling (GB)',
         custom_ph: 'e.g. 48',
         cold: 'Cold Cache Limit',
-        cold_desc: 'Cap on non-hot KV cache blocks.',
+        cold_desc: C.tf('uplift.ui.cap_on_non_hot_kv_cache_blocks', 'Cap on non-hot KV cache blocks.'),
         hot: 'Hot Cache Limit' },
     cache: { enabled: 'KV Cache', enabled_hint: 'Keep KV blocks between requests.',
         hot_only: 'Hot Cache Only',
@@ -3684,7 +3684,7 @@ function renderDirtyList() {
     box.textContent = '';
     if (!keys.length) return;
     const head = document.createElement('div'); head.className = 'ch-head';
-    head.textContent = 'CHANGES (' + keys.length + ')';
+    head.textContent = C.tf('uplift.ui.changes', 'CHANGES (') + keys.length + ')';
     box.append(head);
     for (const k of keys) {
         const line = document.createElement('div'); line.className = 'ch-line';
@@ -3739,7 +3739,7 @@ async function gsRestartServer() {
         toast(d.restarting === false && d.detail
             ? ('restart: ' + d.detail) : 'Restart requested — server respawns in ~5 s');
         $('banner').classList.add('show');
-        $('banner-text').textContent = 'Server restarting — dashboard reconnecting…';
+        $('banner-text').textContent = C.tf('uplift.ui.server_restarting_dashboard_reconnecting', 'Server restarting — dashboard reconnecting…');
     } catch (e) { toast(C.t('uplift.toast.restart_failed', {msg: e.message})); }
     b.disabled = false;
     gsUpdateSaveBtn();
@@ -3808,7 +3808,7 @@ function gsBadge() {
     const bang = document.createElement('span');
     bang.className = 'rqmark'; bang.textContent = '!';
     b.append(bang, document.createTextNode(' ' + GS_LABELS.badge));
-    b.title = 'Applied after oMLX restart';
+    b.title = C.tf('uplift.ui.applied_after_omlx_restart', 'Applied after oMLX restart');
     return b;
 }
 
@@ -3826,7 +3826,7 @@ function gsRow(sec, labelTxt, hint, control, opts) {
         // permanent red ! on fields whose change needs a server restart
         const m = document.createElement('span');
         m.className = 'rqmark'; m.textContent = '!';
-        m.title = 'Applied after oMLX restart';
+        m.title = C.tf('uplift.ui.applied_after_omlx_restart', 'Applied after oMLX restart');
         lab.append(m);
     }
     if (hint) {
@@ -3839,7 +3839,7 @@ function gsRow(sec, labelTxt, hint, control, opts) {
     const slot = document.createElement('span'); slot.className = 'diffslot';
     const rd = document.createElement('span'); rd.className = 'diff-out'; rd.hidden = true;
     const o = document.createElement('span'); o.className = 'diff-o';
-    o.title = 'Click to revert to the original value';
+    o.title = C.tf('uplift.ui.click_to_revert_to_the_original_value', 'Click to revert to the original value');
     o.onclick = () => { if (opts.flat) revertField(opts.flat); };
     // the new value is the live control itself; slot shows |original| → only
     rd.append(o, document.createTextNode('→'));
@@ -3986,7 +3986,7 @@ function renderGlobalSettings() {
     const bpIn = document.createElement('input');
     bpIn.type = 'text'; bpIn.value = GS.base_path || '';
     bpIn.disabled = true;
-    bpIn.title = 'Set at launch (--base-path); read-only';
+    bpIn.title = C.tf('uplift.ui.set_at_launch_base_path_read_only', 'Set at launch (--base-path); read-only');
     body.append(gsRow('auth', L.auth.base_path, L.auth.base_path_hint, bpIn));
     body.append(gsRow('auth', L.auth.skip, L.auth.skip_hint + ' ' + L.auth.skip_warning,
         gsToggle('skip_api_key_verification', gsGet('auth','skip_api_key_verification')),
@@ -4764,7 +4764,7 @@ function renderQuantizer() {
         const rowText = qzField(adv, 'Text only', cbText);
         const vlmWarn = document.createElement('small');
         vlmWarn.className = 'warn-text';
-        vlmWarn.textContent = 'Selected model is a VLM — vision tower will be skipped.';
+        vlmWarn.textContent = C.tf('uplift.ui.selected_model_is_a_vlm_vision_tower_will_be_ski', 'Selected model is a VLM — vision tower will be skipped.');
         vlmWarn.hidden = true; rowText.append(vlmWarn);
         g.append(adv);
 
@@ -4931,7 +4931,7 @@ function renderUploader() {
     listT.className = 'se-hint'; listT.textContent = 'oQ Models';
     host.append(listT, list);
     const tasksT = document.createElement('h3');
-    tasksT.textContent = 'Upload Queue'; tasksT.style.margin = '16px 0 6px';
+    tasksT.textContent = C.tf('uplift.ui.upload_queue', 'Upload Queue'); tasksT.style.margin = '16px 0 6px';
 
     function loadModels() {
         fetchJson(`${API}/admin/api/upload/oq-models`).then(d => {
@@ -4956,12 +4956,12 @@ function renderUploader() {
     }
 
     vbtn.onclick = () => {
-        if (!tok.value.trim()) { vmsg.textContent = 'Invalid token. Ensure it has write access.'; return; }
+        if (!tok.value.trim()) { vmsg.textContent = C.tf('uplift.ui.invalid_token_ensure_it_has_write_access', 'Invalid token. Ensure it has write access.'); return; }
         vbtn.disabled = true; vmsg.textContent = 'Validating...';
         postJson(`${API}/admin/api/upload/validate-token`, { hf_token: tok.value.trim() })
             .then(d => {
                 st.validated = true; st.ns = d.username || 'you';
-                vmsg.textContent = 'Authenticated as ' + st.ns;
+                vmsg.textContent = C.tf('uplift.ui.authenticated_as', 'Authenticated as ') + st.ns;
                 tok.value = tok.value;   // stays in the browser only
                 loadModels();
             })
@@ -5014,7 +5014,7 @@ function renderUploader() {
         document.body.append(overlay);
     }
 
-    vmsg.textContent = 'Enter a token to list uploadable oQ models.';
+    vmsg.textContent = C.tf('uplift.ui.enter_a_token_to_list_uploadable_oq_models', 'Enter a token to list uploadable oQ models.');
     renderTasks('up-tasks', 'upload');
 }
 
@@ -5035,7 +5035,7 @@ async function openPruneDialog() {
     h.textContent = `Prune model settings (${orphans.length})`;
     const sub = document.createElement('div');
     sub.className = 'se-hint';
-    sub.textContent = 'Stored configuration for models that no longer exist on disk. '
+    sub.textContent = C.tf('uplift.ui.stored_configuration_for_models_that_no_longer_e', 'Stored configuration for models that no longer exist on disk. ')
         + (GW_LIVE
             ? 'Removed entries are deleted from this server\'s model_settings.json.'
             : 'Removed entries are deleted from the sandbox model_settings.json.');
@@ -5053,17 +5053,17 @@ async function openPruneDialog() {
     const bar = document.createElement('div');
     bar.className = 'row buttons';
     const all = document.createElement('button');
-    all.textContent = 'Select all';
+    all.textContent = C.tf('uplift.ui.select_all', 'Select all');
     all.onclick = () => checks.forEach(c => c.checked = true);
     const none = document.createElement('button');
-    none.textContent = 'Select none';
+    none.textContent = C.tf('uplift.ui.select_none', 'Select none');
     none.onclick = () => checks.forEach(c => c.checked = false);
     const cancel = document.createElement('button');
     cancel.textContent = 'Cancel';
     cancel.onclick = () => overlay.remove();
     const doIt = document.createElement('button');
     doIt.className = 'danger';
-    doIt.textContent = 'Prune selected';
+    doIt.textContent = C.tf('uplift.ui.prune_selected', 'Prune selected');
     doIt.onclick = async () => {
         const ids = checks.filter(c => c.checked).map(c => c.value);
         if (!ids.length) { toast(C.t('uplift.toast.nothing_selected')); return; }
@@ -5245,7 +5245,7 @@ async function renderHelperModels() {
     if (integ.markitdown_pdf_processing_engine === 'markitdown') {
         const warn = document.createElement('small');
         warn.className = 'fhint warn';
-        warn.textContent = 'Scanned or image-only PDFs will fail when MarkItDown is selected, '
+        warn.textContent = C.tf('uplift.ui.scanned_or_image_only_pdfs_will_fail_when_markit', 'Scanned or image-only PDFs will fail when MarkItDown is selected, ')
             + 'and PDFs with tables may not be processed correctly.';
         pdfField.append(warn);
     }
@@ -5262,7 +5262,7 @@ async function renderHelperModels() {
     cliHead.className = 'mk-head';
     const cliTitle = document.createElement('div');
     cliTitle.className = 'mk-title';
-    cliTitle.textContent = 'CLI Assistants';
+    cliTitle.textContent = C.tf('uplift.ui.cli_assistants', 'CLI Assistants');
     const cliHint = document.createElement('small');
     cliHint.className = 'dim';
     cliHint.textContent = 'Model each launched CLI assistant defaults to (blank = ask every launch).';
@@ -5304,7 +5304,7 @@ async function renderHelperModels() {
     wsHead.className = 'mk-head';
     const wsTitle = document.createElement('div');
     wsTitle.className = 'mk-title';
-    wsTitle.textContent = 'Web Search';
+    wsTitle.textContent = C.tf('uplift.ui.web_search', 'Web Search');
     wsHead.append(wsTitle);
     const wsGrid = document.createElement('div');
     wsGrid.className = 'mk-fields';
@@ -5388,7 +5388,7 @@ async function renderHelperModels() {
     testRow.className = 'row buttons';
     const testBtn = document.createElement('button');
     testBtn.className = 'se-btn';
-    testBtn.textContent = 'Test search';
+    testBtn.textContent = C.tf('uplift.ui.test_search', 'Test search');
     const testOut = cell('');
     testOut.className = 'dim';
     testBtn.onclick = async () => {
@@ -5414,9 +5414,9 @@ async function renderHelperModels() {
                 ? `Search OK: ${(r.results || []).length} results`
                 : ('Search test failed: ' + ((r.error && r.error.message) || 'unknown'));
         } catch (err) {
-            testOut.textContent = 'Search test failed: ' + err.message;
+            testOut.textContent = C.tf('uplift.ui.search_test_failed', 'Search test failed: ') + err.message;
         }
-        testBtn.disabled = false; testBtn.textContent = 'Test search';
+        testBtn.disabled = false; testBtn.textContent = C.tf('uplift.ui.test_search', 'Test search');
     };
     testRow.append(testBtn, testOut);
     testRow.className = 'mk-row';
