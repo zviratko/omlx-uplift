@@ -47,22 +47,88 @@ def _resolve_site_packages(python: str | None) -> Path:
     return user
 
 
+def _brew_omlx_python() -> Path | None:
+    """Path to a Homebrew oMLX keg interpreter, if brew + omlx exist."""
+    import shutil
+    import subprocess
+
+    brew = shutil.which("brew")
+    if not brew:
+        return None
+    try:
+        prefix = subprocess.run(
+            [brew, "--prefix", "omlx"], capture_output=True, text=True, timeout=15
+        ).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):  # pragma: no cover
+        return None
+    cand = Path(prefix) / "libexec" / "bin" / "python"
+    return cand if prefix and cand.is_file() else None
+
+
+def _target_can_import(python: Path) -> bool:
+    import subprocess
+
+    return (
+        subprocess.run(
+            [str(python), "-c", "import omlx_uplift"],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
+def _pth_content(target: Path | None) -> str:
+    """The .pth body. If the target interpreter can import omlx_uplift on
+    its own (package lives in its own site-packages), a bare import
+    suffices. Otherwise bootstrap sys.path with OUR package parent dir
+    first — a .pth line starting with 'import ' is executed, any other
+    line is appended to sys.path, so the keg needs exactly this ONE file,
+    nothing else. Order matters: path line first."""
+    lines: list[str] = []
+    if target is not None and not _target_can_import(target):
+        pkg_parent = str(Path(__file__).resolve().parent.parent)
+        # brew kegs live under a VERSIONED Cellar dir; point the .pth at
+        # the stable opt/ symlink instead so `brew upgrade omlx-uplift`
+        # needs no remount.
+        if "/Cellar/omlx-uplift/" in pkg_parent:
+            base, rest = pkg_parent.split("/Cellar/omlx-uplift/", 1)
+            rest = rest.split("/", 1)[1]  # drop the version directory
+            pkg_parent = f"{base}/opt/omlx-uplift/{rest}"
+        lines.append(pkg_parent)
+    lines.append("import omlx_uplift.autopatch")
+    return "\n".join(lines) + "\n"
+
+
+def _default_target_python() -> str | None:
+    """No --python given: prefer a Homebrew oMLX keg (the common case for
+    tap users), else stay in the current interpreter."""
+    keg = _brew_omlx_python()
+    return str(keg) if keg else None
+
+
 def cmd_install(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="omlx-uplift install")
-    ap.add_argument("--python", help="target interpreter (default: this one)")
+    ap.add_argument("--python", help="target interpreter "
+                    "(default: Homebrew oMLX keg if present, else this one)")
     args = ap.parse_args(argv)
-    sp = _resolve_site_packages(args.python)
+    target = args.python or _default_target_python()
+    sp = _resolve_site_packages(target)
     pth = sp / PTH_NAME
-    pth.write_text("import omlx_uplift.autopatch\n")
+    body = _pth_content(Path(target) if target else None)
+    pth.write_text(body)
     print(f"installed autopatch: {pth}")
+    if "\nimport " in "\n" + body and body.count("\n") > 1:
+        print("  (bootstraps sys.path to this package — keg holds no copy)")
     return 0
 
 
 def cmd_uninstall(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="omlx-uplift uninstall")
-    ap.add_argument("--python", help="target interpreter (default: this one)")
+    ap.add_argument("--python", help="target interpreter "
+                    "(default: Homebrew oMLX keg if present, else this one)")
     args = ap.parse_args(argv)
-    pth = _resolve_site_packages(args.python) / PTH_NAME
+    target = args.python or _default_target_python()
+    pth = _resolve_site_packages(target) / PTH_NAME
     if pth.exists():
         pth.unlink()
         print(f"removed {pth}")
