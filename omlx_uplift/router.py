@@ -27,6 +27,7 @@ Route map (register() mounts api_router under /uplift/api AND /admin/api):
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -43,6 +44,7 @@ except ImportError as e:  # pragma: no cover
     ) from e
 
 from .request_log import get_request_tracker
+from .collector import get_collector
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -402,6 +404,98 @@ async def prune_model_settings(
         raise HTTPException(status_code=400, detail="ids required")
     removed = [mid for mid in dict.fromkeys(req.ids) if mgr.delete_settings(mid)]
     return {"removed": removed, "removed_templates": []}
+
+
+# --------------------------------------------------------------------------
+# Persistent metrics: merge uplift's sub-hour samples with vanilla's
+# hourly rollups (~/.omlx/usage.sqlite3, opened READ-ONLY — we never write
+# it). Points carry res='fine'|'hourly' so the UI can label the resolution
+# boundary honestly instead of pretending one uniform series.
+# --------------------------------------------------------------------------
+
+# uplift sample key -> derivation from a model_usage_hourly aggregate row
+_HOURLY_DERIVE = {
+    "rate.prompt_tokens_s":   lambda r: r["prompt_tokens"] / 3600.0,
+    "rate.completion_tokens_s": lambda r: r["completion_tokens"] / 3600.0,
+    "rate.requests_s":        lambda r: r["requests"] / 3600.0,
+    "cache_efficiency":       lambda r: (r["cached_tokens"] / r["prompt_tokens"])
+                                        if r["prompt_tokens"] else None,
+    "avg_prefill_tps":        lambda r: (r["prompt_tokens"] / r["prefill_seconds"])
+                                        if r["prefill_seconds"] else None,
+    "avg_generation_tps":     lambda r: (r["completion_tokens"] / r["generation_seconds"])
+                                        if r["generation_seconds"] else None,
+}
+
+# usage columns needed by the derivations above
+_USAGE_COLS = ("requests", "prompt_tokens", "completion_tokens",
+               "cached_tokens", "prefill_seconds", "generation_seconds")
+
+
+@api_router.get("/metrics/series")
+async def metrics_series(
+    key: str,
+    window: str = "1h",
+    is_admin: bool = Depends(require_admin),
+):
+    """Time series for one collector key over WINDOW (15m|1h|6h|24h|7d|30d)."""
+    import asyncio
+
+    window_s = _parse_window(window)
+    store = get_collector().store
+    fine = await asyncio.to_thread(store.series, key, window_s)
+    for p in fine:
+        p["res"] = "fine"
+
+    hourly = []
+    derive = _HOURLY_DERIVE.get(key)
+    if derive is not None:
+        hourly = await asyncio.to_thread(_hourly_points, derive, window_s)
+
+    # Fine points win where both exist (dedupe by hour bucket).
+    fine_hours = {int(p["ts"] // 3600) for p in fine}
+    merged = fine + [p for p in hourly if int(p["ts"] // 3600) not in fine_hours]
+    merged.sort(key=lambda p: p["ts"])
+    return {"key": key, "window": window, "window_s": window_s, "series": merged}
+
+
+def _parse_window(window: str) -> float:
+    units = {"m": 60, "h": 3600, "d": 86400}
+    w = (window or "1h").strip().lower()
+    if w[-1] in units and w[:-1].isdigit():
+        return int(w[:-1]) * units[w[-1]]
+    raise HTTPException(status_code=400,
+                        detail=f"bad window '{window}' (use e.g. 15m/1h/6h/24h/7d)")
+
+
+def _hourly_points(derive, window_s: float) -> list[dict]:
+    """Coarse history from vanilla's usage.sqlite3, READ-ONLY."""
+    from .store import open_usage_ro
+
+    try:
+        conn = open_usage_ro()
+    except Exception:
+        return []  # DB missing/locked — fine layer alone is honest
+    try:
+        t0 = time.time() - window_s
+        cols = ", ".join(_USAGE_COLS)
+        cur = conn.execute(
+            f"SELECT timestamp_hour, {cols} FROM model_usage_hourly "
+            "WHERE timestamp_hour >= ? ORDER BY timestamp_hour",
+            (int(t0),),
+        )
+        out = []
+        for row in cur.fetchall():
+            agg = dict(zip(("timestamp_hour",) + _USAGE_COLS, row))
+            ts = agg.pop("timestamp_hour")
+            try:
+                v = derive(agg)
+            except Exception:
+                continue
+            if v is not None:
+                out.append({"ts": float(ts), "v": float(v), "res": "hourly"})
+        return out
+    finally:
+        conn.close()
 
 
 # --------------------------------------------------------------------------

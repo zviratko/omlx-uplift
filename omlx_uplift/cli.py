@@ -100,7 +100,7 @@ def cmd_view(argv=None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="omlx-uplift view",
-        help="standalone Uplift viewer (for DMG/remote oMLX over HTTP)",
+        description="standalone Uplift viewer (for DMG/remote oMLX over HTTP)",
     )
     ap.add_argument("--api", default="", help="oMLX base URL, e.g. http://host:8000")
     ap.add_argument("--host", default="0.0.0.0")

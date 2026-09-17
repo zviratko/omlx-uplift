@@ -112,32 +112,52 @@ def build_viewer_app(api_base: str = "") -> FastAPI:
                    methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False)
     async def api_uplift(path: str, request: Request):
         request.__dict__["_body"] = await request.body()
-        if path.startswith("metrics/"):
-            return _metrics_local(path)
+        if path == "metrics/series":
+            return _metrics_local(request)
         return _proxy(f"/admin/api/{path}", request)
 
     @app.get("/uplift/{path:path}", include_in_schema=False)
     async def static(path: str):
         return _static_file(path or "index.html")
 
-    def _metrics_local(path: str) -> Response:
-        """Read-only history from a locally reachable usage.sqlite3."""
-        from .store import default_db_path, open_usage_ro
+    def _metrics_local(request: Request) -> Response:
+        """Same /metrics/series shape as the served router, built from
+        whatever is locally reachable: uplift's own fine samples (only on
+        the same machine) merged over vanilla's hourly rollups READ-ONLY."""
+        from fastapi import HTTPException
 
-        usage_path = default_db_path().parent.parent / "usage.sqlite3"
-        if not usage_path.exists():
-            return JSONResponse({"origin": "none", "series": []})
+        from .router import _HOURLY_DERIVE, _hourly_points, _parse_window
+
+        key = request.query_params.get("key", "")
+        window = request.query_params.get("window", "1h")
         try:
-            conn = open_usage_ro(usage_path)
-            rows = conn.execute(
-                "SELECT timestamp_hour, model_id, requests, prompt_tokens,"
-                " completion_tokens, cached_tokens, request_seconds"
-                " FROM model_usage_hourly ORDER BY timestamp_hour DESC LIMIT ?",
-                (int(path.rsplit("hours=", 1)[1]) if "hours=" in path else 168,),
-            ).fetchall()
-            conn.close()
-            return JSONResponse({"origin": "usage.sqlite3", "rows": [dict(r) for r in rows]})
-        except Exception as e:
-            return JSONResponse({"origin": "error", "detail": str(e), "series": []})
+            window_s = _parse_window(window)
+        except HTTPException as e:
+            return JSONResponse({"detail": e.detail}, status_code=400)
+
+        fine: list[dict] = []
+        derive = _HOURLY_DERIVE.get(key)
+        if not key:
+            return JSONResponse({"detail": "key required"}, status_code=400)
+        try:
+            from .store import MetricsStore, default_db_path
+
+            db = default_db_path()
+            if db.exists():
+                st = MetricsStore(db, read_only=True)
+                fine = st.series(key, window_s)
+                for p in fine:
+                    p["res"] = "fine"
+                st.close()  # read-only here; the server-side collector owns writes
+        except Exception:
+            fine = []
+        hourly = _hourly_points(derive, window_s) if derive else []
+        fine_hours = {int(p["ts"] // 3600) for p in fine}
+        merged = fine + [p for p in hourly if int(p["ts"] // 3600) not in fine_hours]
+        merged.sort(key=lambda p: p["ts"])
+        origin = "local" if (fine or hourly) else "none"
+        return JSONResponse({"key": key, "window": window,
+                             "window_s": window_s, "origin": origin,
+                             "series": merged})
 
     return app

@@ -53,13 +53,22 @@ def open_usage_ro(path: Path | None = None) -> sqlite3.Connection:
 
 
 class MetricsStore:
-    def __init__(self, path: Path | None = None):
+    def __init__(self, path: Path | None = None, read_only: bool = False):
         self.path = Path(path) if path else default_db_path()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._init_schema()
+        if read_only:
+            if not self.path.exists():
+                raise FileNotFoundError(self.path)
+            self._conn = sqlite3.connect(
+                f"file:{self.path}?mode=ro", uri=True, check_same_thread=False
+            )
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(
+                str(self.path), check_same_thread=False
+            )
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._init_schema()
 
     def _init_schema(self):
         with self._lock, self._conn:
