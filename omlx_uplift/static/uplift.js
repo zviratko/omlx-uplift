@@ -57,6 +57,7 @@ async function loadLocale(lang) {
         if (!r.ok) throw new Error('locale HTTP ' + r.status);
         const j = await r.json();
         C.setLocale(j.lang, j.strings);
+        gsLocalize();
         applyI18n(document);
         document.documentElement.lang = j.lang;
     } catch (e) {
@@ -3365,6 +3366,35 @@ $('logs-dl').onclick = () => {
    conditional visibility (i18n strings copied from the original catalog).
    Saves replicate classic saveGlobalSettings(): full flat payload POSTed to
    global-settings — the gateway shadows it, real oMLX is never modified. */
+/* ---------------- global-settings labels i18n ----------------
+   GS_LABELS holds the English literals. When a non-en catalog lands we
+   overwrite in place (deep walk; keys = 'uplift.gs.' + dotted path;
+   option arrays localize their second element). Missing key -> the
+   English literal stays (same fallback semantics as C.tf). Language
+   self-names and path placeholders are never translated. */
+const GS_EN = JSON.parse(JSON.stringify({}));   // filled on first localize: pristine EN
+function gsLocalize() {
+    const strings = C.getLocale().strings;
+    if (!Object.keys(GS_EN).length) Object.assign(GS_EN, JSON.parse(JSON.stringify(GS_LABELS)));
+    (function walk(en, cur, prefix) {
+        for (const k of Object.keys(en)) {
+            const ev = en[k], cv = cur[k];
+            const path = prefix + k;
+            if (ev && typeof ev === 'object' && !Array.isArray(ev)) { walk(ev, cv, path + '.'); continue; }
+            if (/^lang\.|_placeholder$/.test(path)) continue;
+            if (typeof ev === 'string') {
+                const s = strings['uplift.gs.' + path];
+                cur[k] = (typeof s === 'string' && s) ? s : ev;      // restore-or-translate, idempotent
+            } else if (Array.isArray(ev) && Array.isArray(ev[0])) {  // [[value,label],…]
+                cur[k] = ev.map(([v, lbl]) => {
+                    const s = strings['uplift.gs.' + path + '.' + v];
+                    return [v, (typeof s === 'string' && s) ? s : lbl];
+                });
+            }
+        }
+    })(GS_EN, GS_LABELS, '');
+}
+
 const GS_LABELS = {
     lang: { en: 'English', zh: '中文（简体）', 'zh-TW': '中文（繁體）', ko: '한국어',
             ja: '日本語', ru: 'Русский', es: 'Español', fr: 'Français',
@@ -3874,7 +3904,9 @@ function gsSelect(flat, options, cur) {
 
 function gsTitle(t) {
     const h = document.createElement('div');
-    h.className = 'gs-title'; h.textContent = t;
+    // section titles localize via slug key; English literal is fallback
+    const slug = t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    h.className = 'gs-title'; h.textContent = C.tf('uplift.gs.title.' + slug, t);
     return h;
 }
 
@@ -3906,7 +3938,7 @@ function renderGlobalSettings() {
 
     // ---- Language
     body.append(gsTitle('Language'));
-    body.append(gsRow('ui', 'Interface language', '',
+    body.append(gsRow('ui', C.t('uplift.gs.ui.interface_language'), '',
         gsSelect('ui_language', Object.entries(L.lang), gsGet('ui','language')),
         { flat: 'ui_language' }));
 
@@ -4002,7 +4034,7 @@ function renderGlobalSettings() {
         dl.append(one);
     });
     const add = document.createElement('button');
-    add.className = 'se-btn act'; add.textContent = '+ add directory';
+    add.className = 'se-btn act'; add.textContent = C.t('uplift.gs.model.add_directory');
     add.onclick = async () => {
         if (await gsSaveNow({ model_dirs: dirs.concat('') })) renderGlobalSettings();
     };
@@ -4019,7 +4051,7 @@ function renderGlobalSettings() {
         { flat: 'hf_cache_enabled' }));
     const hfp = cell((GS.huggingface || {}).hf_cache_path || '—');
     hfp.className = 'dim';
-    body.append(gsRow('model', 'HF cache path', '', hfp));
+    body.append(gsRow('model', C.t('uplift.gs.model.hf_path_label'), '', hfp));
     body.append(gsRow('model', L.model.idle, L.model.idle_desc,
         gsSelect('idle_timeout_seconds', L.model.idle_opts,
                  gsGet('idle_timeout','idle_timeout_seconds') ?? ''),
@@ -5464,7 +5496,8 @@ document.addEventListener('visibilitychange', () => {
 applyPrefs();
 applyOrder();
 applyLayout();
-loadLocale();          // translate static shell as soon as catalog lands
+// ?lang=xx overrides the locale (testing/demo; server setting is default)
+loadLocale(new URLSearchParams(location.search).get('lang') || undefined);
 createCharts();
 resizeCharts();
 applyTab();

@@ -285,6 +285,17 @@ function t(key, vars) {
     }
     return s;
 }
+/* tf: t() with an English fallback instead of the raw key — for labels
+   that live inline in JS. Missing key -> the literal you passed. */
+function tf(key, fallback, vars) {
+    let s = _locale.strings[key];
+    if (typeof s !== 'string') return fallback;
+    if (vars) {
+        s = s.replace(/\{(\w+)\}/g, (m, k) =>
+            vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : m);
+    }
+    return s;
+}
 
 /* Backfill merge: server history points (res fine|hourly) into a live
    column pair [ts[], v[]]. Drops points outside (now-window, now+slack],
@@ -336,7 +347,7 @@ function errorText(body) {
 
 return { num, r, normalize, modelState, appendSample, pruneOlderThan, eventsBetween, milestonesBetween,
          createRequestTracker, percentile, mean, mergeHistory,
-         setLocale, getLocale, t,
+         setLocale, getLocale, t, tf,
          PREFS_KEY, PREFS_DEFAULTS, THEMES, loadPrefs, savePrefs,
          LAYOUT_KEY, LAYOUT_DEFAULTS, LAYOUT_WINDOWS, LAYOUT_INTERVALS, LAYOUT_PERCENTILES, loadLayout, saveLayout, clampSpan,
          fmtCompact, fmtBytes, fmtDuration, fmtNumber, errorText };
