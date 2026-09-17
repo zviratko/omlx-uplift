@@ -1,0 +1,38 @@
+# Uplift dashboard — opt-in companion UI + metrics for oMLX.
+# Vanilla oMLX stays byte-identical; this package mounts itself into
+# omlx.server.app via the autopatch .pth (pip/brew) or the `omlx-uplift
+# serve` wrapper, and serves the same UI standalone for DMG users
+# (`omlx-uplift view`).
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omlx-uplift"
+dynamic = ["version"]
+description = "Uplift dashboard: opt-in companion UI, live request feed and persistent metrics for oMLX"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "omlx",
+    "fastapi>=0.110",
+    "uvicorn",
+]
+
+[project.scripts]
+omlx-uplift = "omlx_uplift.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "omlx_uplift.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["omlx_uplift*"]
+
+[tool.setuptools.package-data]
+"omlx_uplift" = ["static/**/*"]
+
+# Autopatch .pth ('import omlx_uplift.autopatch') is written by
+# `omlx-uplift install [--python PATH]` — used by brew post_install and the
+# deploy script, because pip data_files placement varies across venv
+# layouts. Without the .pth everything still works via `omlx-uplift serve`.
+# DMG environments never install this package and stay untouched.
