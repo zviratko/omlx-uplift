@@ -325,8 +325,8 @@ for (const card of cards) {
 }
 fillSelect($('opt-cols'), [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5']], layout.cols);
 $('opt-cols').onchange = e => { layout.cols = Number(e.target.value); applyLayout(); resizeCharts(); };
-fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, s >= 3600 ? '1 hour' : `${s / 60} min`]), layout.chartWindowSec);
-$('opt-window').onchange = e => { layout.chartWindowSec = Number(e.target.value); redrawCharts(); C.saveLayout(localStorage, layout); };
+fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, s >= 3600 ? `${s / 3600} hour` : `${s / 60} min`]), layout.chartWindowSec);
+$('opt-window').onchange = e => { layout.chartWindowSec = Number(e.target.value); historyDirty = true; loadChartHistory(); C.saveLayout(localStorage, layout); };
 fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`]), layout.intervalMs);
 $('opt-interval').onchange = e => { layout.intervalMs = Number(e.target.value); C.saveLayout(localStorage, layout); restartPolling(); };
 $('opt-hide-debug').checked = layout.logsHideDebug;
@@ -337,7 +337,8 @@ $('btn-layout-reset').onclick = () => {
     applyOrder();   // F-017: defaults mean markup order; without this the
                     // dragged order stays on screen until a manual reload
     fillSelect($('opt-cols'), [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5']], layout.cols);
-    fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, s >= 3600 ? '1 hour' : `${s / 60} min`]), layout.chartWindowSec);
+    fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, s >= 3600 ? `${s / 3600} hour` : `${s / 60} min`]), layout.chartWindowSec);
+    historyDirty = true; loadChartHistory();
     fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`]), layout.intervalMs);
     $('opt-hide-debug').checked = layout.logsHideDebug;
     restartPolling();
@@ -417,6 +418,55 @@ function restoreCursor(c) {
 const tpsData = [[], [], []];        // time, generation tok/s, prefill tok/s
 const memData = [[], [], [], [], [], []];  // time, memory %, cache GB, hot1, hot2, hot3
 const MAX_POINTS = 4000;
+
+/* Server-side chart history (uplift fine samples merged with vanilla's
+   hourly rollups): backfills the live tick buffers so windows longer than
+   this session — and gaps across server restarts — actually draw. Live
+   ticks always win when newer than the newest history point; the coarse
+   boundary gets labeled honestly in the window readout. */
+let chartHist = { gen: [], prefill: [] };   // arrays of {ts, v, res}
+let historyDirty = true, historyLoading = false;
+function windowToParam() {
+    const w = layout.chartWindowSec;
+    return w >= 86400 ? '24h' : w >= 21600 ? '6h' : w >= 3600 ? '1h'
+         : w >= 900 ? '15m' : '5m';
+}
+async function loadChartHistory() {
+    if (historyLoading) return;
+    historyLoading = true;
+    try {
+        const w = windowToParam();
+        const [g, p] = await Promise.all([
+            fetchJson(`${API}/uplift/api/metrics/series?key=avg_generation_tps&window=${w}`).catch(() => null),
+            fetchJson(`${API}/uplift/api/metrics/series?key=avg_prefill_tps&window=${w}`).catch(() => null),
+        ]);
+        const conv = a => (a && a.series ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })) : []);
+        // Only adopt if the window did not change mid-flight (stale-window
+        // race: a slow 24h response landing over a fresh 5m selection).
+        if (w === windowToParam()) {
+            chartHist = { gen: conv(g), prefill: conv(p) };   // server ts is epoch SECONDS -> ms
+            historyDirty = false;
+            if (tpsChart) redrawCharts();
+        } else {
+            historyDirty = true;
+        }
+    } finally {
+        historyLoading = false;
+        if (historyDirty) loadChartHistory();   // a newer window was requested mid-flight
+    }
+}
+/* Columns for the throughput chart: windowed history+live, value-aligned
+   on the union of timestamps (uPlot requires one shared x column). */
+function tpsWindowed() {
+    const now = Date.now();
+    const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], layout.chartWindowSec, now);
+    const p = C.mergeHistory(chartHist.prefill, tpsData[0], tpsData[2], layout.chartWindowSec, now);
+    const ts = [...new Set(g.ts.concat(p.ts))].sort((a, b) => a - b);
+    const gi = new Map(g.ts.map((t, i) => [t, g.v[i]]));
+    const pi = new Map(p.ts.map((t, i) => [t, p.v[i]]));
+    return [ts, ts.map(t => (gi.has(t) ? gi.get(t) : null)),
+                ts.map(t => (pi.has(t) ? pi.get(t) : null))];
+}
 let cacheSeriesIds = [];             // top-3 models currently drawn on mem chart
 
 function chartColors() {
@@ -602,7 +652,7 @@ function createCharts() {
                   Object.assign(yAxis(col, { side: 1, grid: false, label: 'prefill tok/s', stroke: col.gold, size: 58 }), { scale: 'y2' })] },
         legendUpdater());
     // y2 axis sits on the right; uPlot axis 'side': 1=right of grid, 3=left.
-    tpsChart = new uPlot(tpsOpts, windowedData(tpsData), $('chart-tps'));
+    tpsChart = new uPlot(tpsOpts, tpsWindowed(), $('chart-tps'));
     window.__uplotTps = tpsChart;   // debug handle
     // Memory % left; runtime cache GB (total + top-3 models' hot cache) right.
     const memSpecs = [line('model memory', 'blue', true, 'y'),
@@ -628,14 +678,22 @@ function createCharts() {
 }
 function redrawCharts() {
     if (!tpsChart) return;
-    tpsChart.setData(windowedData(tpsData));
+    tpsChart.setData(tpsWindowed());
     memChart.setData(windowedData(memData));
     // Keep the hovered position pinned across polls (index shifts otherwise);
     // when not hovering, show the latest samples.
     restoreCursor(tpsChart) || legendUpdater()(tpsChart);
     restoreCursor(memChart) || legendUpdater()(memChart);
-    const shown = windowedData(tpsData)[0].length;
-    $('chart-tps-window').textContent = shown > 1 ? `${layout.chartWindowSec >= 3600 ? '1h' : layout.chartWindowSec / 60 + 'm'} window` : '';
+    const shown = tpsChart.data[0].length;
+    let label = shown > 1
+        ? `${layout.chartWindowSec >= 3600 ? layout.chartWindowSec / 3600 + 'h' : layout.chartWindowSec / 60 + 'm'} window` : '';
+    // Honest resolution badge: hourly rollups backfill older stretches.
+    const now = Date.now();
+    const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], layout.chartWindowSec, now);
+    if (shown > 1 && g.boundary && g.boundary < now - 120000) {
+        label += ` · hourly ≤ ${new Date(g.boundary).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    $('chart-tps-window').textContent = label;
 }
 function rerenderChartsTheme() { createCharts(); if (usageChart) createUsageChart(); }
 function resizeCharts() {
@@ -5361,6 +5419,8 @@ resizeCharts();
 applyTab();
 restartPolling();
 pollGatewayInfo();
+loadChartHistory();
+setInterval(() => { if (!document.hidden) loadChartHistory(); }, 60000);
 pollUsage(); pollLogs();
 connectEventStream();
 setInterval(pollGatewayInfo, 10000);

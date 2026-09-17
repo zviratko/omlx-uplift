@@ -475,7 +475,9 @@ def _parse_window(window: str) -> float:
 
 
 def _hourly_points(derive, window_s: float) -> list[dict]:
-    """Coarse history from vanilla's usage.sqlite3, READ-ONLY."""
+    """Coarse history from vanilla's usage.sqlite3, READ-ONLY. Rows are
+    per (hour, model) — aggregate to per-hour totals BEFORE deriving, so
+    one rate = one point per hour (a server-wide chart, not per-model)."""
     from .store import open_usage_ro
 
     try:
@@ -484,16 +486,18 @@ def _hourly_points(derive, window_s: float) -> list[dict]:
         return []  # DB missing/locked — fine layer alone is honest
     try:
         t0 = time.time() - window_s
-        cols = ", ".join(_USAGE_COLS)
+        sums = ", ".join(f"SUM({c}) AS {c}" for c in _USAGE_COLS)
         cur = conn.execute(
-            f"SELECT timestamp_hour, {cols} FROM model_usage_hourly "
-            "WHERE timestamp_hour >= ? ORDER BY timestamp_hour",
+            f"SELECT timestamp_hour, {sums} FROM model_usage_hourly "
+            "WHERE timestamp_hour >= ? GROUP BY timestamp_hour "
+            "ORDER BY timestamp_hour",
             (int(t0),),
         )
         out = []
         for row in cur.fetchall():
             agg = dict(zip(("timestamp_hour",) + _USAGE_COLS, row))
             ts = agg.pop("timestamp_hour")
+            agg = {k: (v or 0) for k, v in agg.items()}
             try:
                 v = derive(agg)
             except Exception:

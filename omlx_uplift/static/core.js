@@ -146,7 +146,7 @@ function mean(values) {
 /* ---------------- layout settings ---------------- */
 const LAYOUT_KEY = 'omlx-uplift-layout-v1';
 const LAYOUT_DEFAULTS = { cols: 4, chartWindowSec: 300, intervalMs: 1000, logsHideDebug: true, percentile: 'p95', collapsed: {}, order: [] };
-const LAYOUT_WINDOWS = [60, 300, 900, 3600];
+const LAYOUT_WINDOWS = [60, 300, 900, 3600, 21600, 86400];
 const LAYOUT_INTERVALS = [500, 1000, 2000, 5000];
 const LAYOUT_PERCENTILES = ['p50', 'p90', 'p95', 'p99'];
 function loadLayout(storage) {
@@ -266,6 +266,37 @@ function fmtDuration(s) {
 }
 function fmtNumber(n) { return n === null ? '—' : Math.round(n).toLocaleString('en-US'); }
 
+/* Backfill merge: server history points (res fine|hourly) into a live
+   column pair [ts[], v[]]. Drops points outside (now-window, now+slack],
+   drops older live points the server covers (hourly buckets supersede
+   live-ticked values), keeps live points NEWER than the newest history
+   point. Returns {merged, boundary} — boundary = ts of the coarsest
+   trailing run (for honest 'hourly before here' labelling), or 0. */
+function mergeHistory(history, liveTs, liveVal, windowSec, now) {
+    const t0 = now - windowSec * 1000;
+    const pts = history
+        .filter(p => p && typeof p.ts === 'number' && typeof p.v === 'number'
+                     && p.ts > t0 && p.ts <= now + 5000)
+        .sort((a, b) => a.ts - b.ts);
+    const lastHistTs = pts.length ? pts[pts.length - 1].ts : 0;
+    const outTs = [], outVal = [];
+    for (const p of pts) {
+        if (outTs.length && outTs[outTs.length - 1] === p.ts) {
+            outVal[outVal.length - 1] = p.v;   // same ts: history wins
+            continue;
+        }
+        outTs.push(p.ts); outVal.push(p.v);
+    }
+    for (let i = 0; i < liveTs.length; i++) {
+        if (liveTs[i] > lastHistTs && liveTs[i] > t0) {
+            outTs.push(liveTs[i]); outVal.push(liveVal[i]);
+        }
+    }
+    let boundary = 0;
+    for (const p of pts) if (p.res === 'hourly') boundary = Math.max(boundary, p.ts);
+    return { ts: outTs, v: outVal, boundary };
+}
+
 // FastAPI error bodies: `detail` is a string for HTTPException but an ARRAY
 // of {loc,msg,...} for 422 validation errors. Stringifying the array gave
 // "[object Object]" in toasts (F-019). Flatten to readable text.
@@ -284,7 +315,7 @@ function errorText(body) {
 }
 
 return { num, r, normalize, modelState, appendSample, pruneOlderThan, eventsBetween, milestonesBetween,
-         createRequestTracker, percentile, mean,
+         createRequestTracker, percentile, mean, mergeHistory,
          PREFS_KEY, PREFS_DEFAULTS, THEMES, loadPrefs, savePrefs,
          LAYOUT_KEY, LAYOUT_DEFAULTS, LAYOUT_WINDOWS, LAYOUT_INTERVALS, LAYOUT_PERCENTILES, loadLayout, saveLayout, clampSpan,
          fmtCompact, fmtBytes, fmtDuration, fmtNumber, errorText };

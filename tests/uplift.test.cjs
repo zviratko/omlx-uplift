@@ -238,3 +238,34 @@ test('prefs save does not clobber layout storage', () => {
     assert.equal(C.loadLayout(store).cols, 3);
     assert.equal(C.loadPrefs(store).theme, 'dark');
 });
+
+/* ---------- mergeHistory: server history -> live chart columns ---------- */
+const H = C.mergeHistory;
+test('mergeHistory: backfills older history, keeps newer live points', () => {
+    const now = 1_000_000;
+    const hist = [{ ts: now - 5000, v: 10, res: 'fine' }, { ts: now - 3000, v: 12, res: 'fine' }];
+    const liveTs = [now - 1000], liveV = [20];
+    const m = H(hist, liveTs, liveV, 3600, now);
+    assert.deepEqual(m.ts, [now - 5000, now - 3000, now - 1000]);
+    assert.deepEqual(m.v, [10, 12, 20]);
+});
+test('mergeHistory: live points OLDER than newest history are dropped (dedupe)', () => {
+    const now = 1_000_000;
+    const hist = [{ ts: now - 2000, v: 9, res: 'hourly' }];
+    const m = H(hist, [now - 9000, now - 2500], [1, 2], 3600, now);
+    assert.deepEqual(m.ts, [now - 2000]);           // live covered by server
+    assert.equal(m.boundary, now - 2000);           // coarse boundary reported
+});
+test('mergeHistory: window cutoff applied to both layers, future points dropped', () => {
+    const now = 1_000_000;
+    const hist = [{ ts: now - 9_999_999, v: 1, res: 'hourly' }, { ts: now + 60_000, v: 2, res: 'fine' }];
+    const m = H(hist, [now - 9_999_999], [7], 3600, now);
+    assert.deepEqual(m.ts, []);
+});
+test('mergeHistory: malformed points ignored; empty inputs safe', () => {
+    const m = H([null, { ts: 'x' }, { v: 3 }, { ts: 5, v: 'z' }], [], [], 60, 10_000);
+    assert.deepEqual(m.ts, []);
+    const e = H([], [], [], 60, 10_000);
+    assert.deepEqual(e.ts, []);
+    assert.equal(e.boundary, 0);
+});
