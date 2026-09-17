@@ -219,7 +219,7 @@ for (const a of $('dd-theme-menu').querySelectorAll('a'))
         prefs.theme = a.dataset.pick;
         C.savePrefs(localStorage, prefs); applyPrefs();
         $('dd-theme-menu').hidden = true;
-        toast('Theme: ' + prefs.theme);
+        toast(C.t('uplift.toast.theme_set', {theme: prefs.theme}));
     });
 {
     const wrap = $('dd-theme'), menu = $('dd-theme-menu');
@@ -805,7 +805,7 @@ function celebrate(text) {
 function reactTo(events) {
     for (const ev of events) {
         pushFeed([ev]);
-        if (ev.kind === 'model-add')   { toast(`Model loaded: ${ev.model}`); flashCard('v-requests', 'ok'); }
+        if (ev.kind === 'model-add')   { toast(C.t('uplift.toast.model_loaded', {model: ev.model})); flashCard('v-requests', 'ok'); }
         if (ev.kind === 'model-remove') flashCard('v-requests', 'warn');
         if (ev.kind === 'restart')      flashCard('v-gentps', 'bad');
         if (ev.kind === 'pressure' && ev.text.includes('hard')) flashCard('mem-label', 'bad');
@@ -1128,10 +1128,10 @@ function renderReqFeed() {
             x.onclick = async () => {
                 try {
                     const res = await fetch(`${API}/admin/api/requests/${encodeURIComponent(r.id)}/cancel`, { method: 'POST' });
-                    if (res.status === 501) { toast('Real request — oMLX has no cancel route yet'); return; }
+                    if (res.status === 501) { toast(C.t('uplift.toast.no_cancel_route')); return; }
                     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
-                    toast(`Cancelled ${r.id.slice(0, 6)}`);
-                } catch (err) { toast(`Cancel failed: ${err.message}`); }
+                    toast(C.t('uplift.toast.cancelled', {id: r.id.slice(0, 6)}));
+                } catch (err) { toast(C.t('uplift.toast.cancel_failed', {msg: err.message})); }
                 pollRequests();
             };
             row.append(x);
@@ -2307,7 +2307,7 @@ function seRenderTabs(panel) {
             const tpl = (window.__seTemplates || []).find(x => x.name === id);
             if (tpl) seApplyIntoActiveTab(tpl.settings || {}, tpl.display_name || tpl.name);
         } else {
-            toast('Loading ' + id + ' settings…');
+            toast(C.t('uplift.toast.loading_settings', {id: id}));
             fetchJson(`${API}/admin/api/models/${encodeURIComponent(id)}/settings`)
                 .then(d => seApplyIntoActiveTab(d.settings || {}, id))
                 .catch(e => toast('Load failed: ' + e.message));
@@ -2353,7 +2353,7 @@ function seApplyIntoActiveTab(rawSettings, sourceLabel) {
     renderEditorFields(document.getElementById('se-fields'));
     seRenderTabs(document.querySelector('.modal.editor'));
     seUpdateSaveBtn();
-    toast(n ? `Applied ${sourceLabel} into ${seIsBaseTab() ? 'BASE' : (t.display_name || t.name)} — ${n} change${n > 1 ? 's' : ''}, review & SAVE`
+    toast(n ? C.t('uplift.toast.applied_review', {source: sourceLabel, target: seIsBaseTab() ? 'BASE' : (t.display_name || t.name), n: n})
             : `${sourceLabel}: nothing to change on this tab`);
 }
 function seCaptureTab() {
@@ -2507,21 +2507,21 @@ async function seLoadProfiles(model, host) {
         try {
             await write(`${API}/admin/api/models/${encodeURIComponent(model)}/profiles/${encodeURIComponent(sel.value)}`,
                 { method: 'DELETE' });
-            toast(`Deleted profile ${sel.value}`);
+            toast(C.t('uplift.toast.deleted_profile', {name: sel.value}));
             seLoadProfiles(model, host);
-        } catch (e) { toast(`Delete failed: ${e.message}`); }
+        } catch (e) { toast(C.t('uplift.toast.delete_failed', {msg: e.message})); }
     };
     saveB.onclick = async () => {
         const name = saveAs.value.trim();
-        if (!name) { toast('profile name required'); return; }
+        if (!name) { toast(C.t('uplift.toast.profile_name_required')); return; }
         const payload = window.UpliftModelSpec.buildPayload(seValues, seFormModel);
         try {
             await write(`${API}/admin/api/models/${encodeURIComponent(model)}/profiles`,
                 { method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ name, settings: payload }) });
-            toast(`Saved profile ${name}`);
+            toast(C.t('uplift.toast.saved_profile', {name: name}));
             seLoadProfiles(model, host);
-        } catch (e) { toast(`Profile: ${e.message}`); }
+        } catch (e) { toast(C.t('uplift.toast.profile_error', {msg: e.message})); }
     };
     row.append(sel, delB, saveAs, saveB);
     host.append(row);
@@ -2571,13 +2571,13 @@ async function seLoadProfiles(model, host) {
                                            description: tpl.description || null,
                                            settings: tpl.settings || {}, source_template: tpl.name }) });
                 await write(`${prof}/${encodeURIComponent(pname)}/apply`, { method: 'POST' });
-                toast(`Applied template ${pname}`);
+                toast(C.t('uplift.toast.applied_template', {name: pname}));
                 openEditor(model);
-            } catch (e) { toast(`Template apply failed: ${e.message}`); }
+            } catch (e) { toast(C.t('uplift.toast.template_apply_failed', {msg: e.message})); }
         };
         tSnap.onclick = async () => {
             const typed = saveAs.value.trim() || tsel.value;
-            if (!typed) { toast('type a name in “save current as…” first'); return; }
+            if (!typed) { toast(C.t('uplift.toast.type_save_name_first')); return; }
             // Classic contract (dashboard.js createTemplate): `name` is the
             // machine slug, `display_name` the human text — POST 422s without
             // display_name (F-019). Slug must match ^[a-z0-9][a-z0-9_-]{0,31}$.
@@ -2592,9 +2592,9 @@ async function seLoadProfiles(model, host) {
                 await write(`${API}/admin/api/profile-templates`,
                     { method: 'POST', headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ name, display_name: typed, description: null, settings }) });
-                toast(`Saved template ${typed}`);
+                toast(C.t('uplift.toast.saved_template', {name: typed}));
                 seLoadProfiles(model, host);
-            } catch (e) { toast(`Template: ${e.message}`); }
+            } catch (e) { toast(C.t('uplift.toast.template_error', {msg: e.message})); }
         };
         const tt = document.createElement('div');
         tt.className = 'se-hint'; tt.textContent = 'Templates (global)';
@@ -2627,7 +2627,7 @@ async function saveEditor() {
         const savedNote = r._shadow ? 'saved ✓ (shadow)' : 'saved ✓';
         const note = r.requires_reload ? 'saved ✓ reload required' : savedNote;
         msg.textContent = note;
-        toast(`Settings saved: ${seModel}`);
+        toast(C.t('uplift.toast.settings_saved_model', {model: seModel}));
         if (r.requires_reload) {
             // same flow as Server Settings: SAVE becomes the reload action
             seOrig = JSON.parse(JSON.stringify(seValues));
@@ -2644,23 +2644,23 @@ async function saveEditor() {
                         try { await postModelAction(seModel, 'unload'); }
                         catch (_) { /* already unloaded by the server */ }
                         try { await postModelAction(seModel, 'load');
-                              toast(`Reloaded ${seModel} with new settings`);
+                              toast(C.t('uplift.toast.reloaded_with_settings', {model: seModel}));
                               closeEditor(); }
-                        catch (e) { toast(`Reload failed: ${e.message}`); b.disabled = false; }
+                        catch (e) { toast(C.t('uplift.toast.reload_failed', {msg: e.message})); b.disabled = false; }
                      }; }
             return;   // keep the popup open so RESTART MODEL stays visible
         }
         setTimeout(closeEditor, 1200);
     } catch (err) {
         msg.textContent = `error: ${err.message}`;
-        toast(`Save failed: ${err.message}`);
+        toast(C.t('uplift.toast.save_failed', {msg: err.message}));
     }
 }
 async function saveProfileTab(panel) {
     const msg = panel.querySelector('#se-msg');
     const t = seTab();
     const name = (t.name || '').trim();
-    if (!name) { toast('profile name required'); return; }
+    if (!name) { toast(C.t('uplift.toast.profile_name_required')); return; }
     // full modelspec-shaped settings + inheritable validation via base merge
     const mergedForValidate = Object.assign({}, seBaseVals,
         JSON.parse(JSON.stringify(t.workVals || {})));
@@ -2695,7 +2695,7 @@ async function saveProfileTab(panel) {
                 : body) });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.detail || d.error || String(r.status));
-        toast(`Saved profile ${name}`);
+        toast(C.t('uplift.toast.saved_profile', {name: name}));
         t.profileId = name; t.dirty = new Set();
         t._origExpose = !!t.expose_as_model; t._origApi = t.api_name || '';
         t.name = name; t.display_name = name;
@@ -2705,7 +2705,7 @@ async function saveProfileTab(panel) {
         seRenderTabs(panel); seUpdateSaveBtn();
     } catch (e) {
         msg.textContent = 'error: ' + e.message;
-        toast(`Profile save failed: ${e.message}`);
+        toast(C.t('uplift.toast.profile_save_failed', {msg: e.message}));
     }
 }
 
@@ -2945,7 +2945,7 @@ async function renderModelAdmin(force) {
                 b.disabled = true;    // no double-toggle while the write is in flight
                 try { await fn(); } catch (err) {
                     console.error(`${label} failed:`, err);   // stack in devtools
-                    toast(`${label} failed: ${err.message}`); b.disabled = false; return; }
+                    toast(C.t('uplift.toast.action_failed', {action: label, msg: err.message})); b.disabled = false; return; }
                 if (!noRerender) renderModelAdmin(true); else b.disabled = false;
             };
             return b;
@@ -3037,7 +3037,7 @@ function confirmDialog(title, msg, act, okMsg) {
             if (seModel) closeEditor();
             renderModelAdmin(true);
         }
-        catch (err) { ok.disabled = false; cancel.disabled = false; toast(`Failed: ${err.message}`); }
+        catch (err) { ok.disabled = false; cancel.disabled = false; toast(C.t('uplift.toast.failed', {msg: err.message})); }
     };
     bar.append(document.createElement('span'), cancel, ok);
     box.append(h, sub, bar);
@@ -3057,7 +3057,7 @@ function tapBtn(b, fn, noRerender) {
     b.onclick = async () => {
         b.disabled = true;    // no double-toggle while the write is in flight
         try { await fn(); } catch (err) {
-            toast(`${b.textContent || 'action'} failed: ${err.message}`);
+            toast(C.t('uplift.toast.action_failed', {action: b.textContent || 'action', msg: err.message}));
             b.disabled = false; return;
         }
         if (!noRerender) renderModelAdmin(true); else b.disabled = false;
@@ -3704,7 +3704,7 @@ async function gsRestartServer() {
             ? ('restart: ' + d.detail) : 'Restart requested — server respawns in ~5 s');
         $('banner').classList.add('show');
         $('banner-text').textContent = 'Server restarting — dashboard reconnecting…';
-    } catch (e) { toast('restart failed: ' + e.message); }
+    } catch (e) { toast(C.t('uplift.toast.restart_failed', {msg: e.message})); }
     b.disabled = false;
     gsUpdateSaveBtn();
 }
@@ -3732,7 +3732,7 @@ async function gsSaveNow(fields) {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
-        if (!r.ok) { toast('save failed: HTTP ' + r.status); return false; }
+        if (!r.ok) { toast(C.t('uplift.toast.save_failed_http', {status: r.status})); return false; }
         GS._shadow = body;
         for (const k of Object.keys(fields)) {
             const map = GS_MAP[k];
@@ -3749,10 +3749,9 @@ async function gsSaveNow(fields) {
         $('gs-sub').textContent = GW_LIVE
             ? 'saved ✓'
             : 'saved ✓ (shadow — real oMLX untouched)';
-        toast('Settings saved (' + Object.keys(fields).length + ' field'
-              + (Object.keys(fields).length > 1 ? 's' : '') + ')');
+        toast(C.t('uplift.toast.settings_saved_n', {n: Object.keys(fields).length}));
         return true;
-    } catch (err) { toast('save failed: ' + err.message); return false; }
+    } catch (err) { toast(C.t('uplift.toast.save_failed', {msg: err.message})); return false; }
 }
 
 function gsGet(sec, field) {
@@ -4444,13 +4443,13 @@ function initDownloader() {
     const $dl = id => document.getElementById(id);
     const token = () => ($dl('dl-token') || {}).value?.trim() || '';
     const queueDownload = (repoId, fromBtn) => {
-        if (!repoId) { toast('repo id required'); return; }
+        if (!repoId) { toast(C.t('uplift.toast.repo_id_required')); return; }
         if (fromBtn) { fromBtn.disabled = true; fromBtn.textContent = 'queued…'; }
         postJson(`${API}/admin/api/hf/download`,
             { repo_id: repoId, hf_token: token() }).then(r => {
                 // live: {success, task:{task_id}} · shadow: {task_id}
                 const tid = (r.task && r.task.task_id) || r.task_id || r.id || '';
-                toast(`download queued: ${repoId}` + (tid ? ` #${String(tid).slice(0, 8)}` : ''));
+                toast(C.t('uplift.toast.download_queued', {repo: repoId}) + (tid ? ` #${String(tid).slice(0, 8)}` : ''));
                 renderTasks('dl-tasks', 'hf');
             }).catch(e => { toast('download: ' + e.message);
                 if (fromBtn) { fromBtn.disabled = false; fromBtn.textContent = 'download'; } });
@@ -4569,7 +4568,7 @@ function initDownloader() {
     }
     function doSearch() {
         const q = ($dl('dl-q') || {}).value?.trim();
-        if (!q) { toast('type a search query'); return; }
+        if (!q) { toast(C.t('uplift.toast.type_query')); return; }
         const sort = $dl('dl-sort').value || 'trending';
         const mlx = $dl('dl-mlx') ? $dl('dl-mlx').checked : true;
         DL.q = q; DL.busy = true;
@@ -4604,7 +4603,7 @@ function initDownloader() {
         for (const t of ['trending', 'popular', 'search']) {
             const b = $dl('dl-tab-' + t);
             if (b) b.onclick = () => {
-                if (t === 'search' && !DL.q) { toast('type a query and press SEARCH'); $dl('dl-q').focus(); return; }
+                if (t === 'search' && !DL.q) { toast(C.t('uplift.toast.type_query_press_search')); $dl('dl-q').focus(); return; }
                 setTab(t);
             };
         }
@@ -4833,7 +4832,7 @@ function renderQuantizer() {
 
         start.onclick = () => {
             const m = st.models.find(x => x.path === selModel.value);
-            if (!m) { toast('Select a model'); return; }
+            if (!m) { toast(C.t('uplift.toast.select_a_model')); return; }
             const donor = st.all.find(x => x.path === selCombine.value);
             start.disabled = true;
             const payload = {
@@ -4950,7 +4949,7 @@ function renderUploader() {
         const bGo = document.createElement('button'); bGo.className = 'danger'; bGo.textContent = 'Upload';
         bCancel.onclick = () => overlay.remove();
         bGo.onclick = () => {
-            if (!repo.value.trim()) { toast('Repository name required'); return; }
+            if (!repo.value.trim()) { toast(C.t('uplift.toast.repo_name_required')); return; }
             bGo.disabled = true;
             postJson(`${API}/admin/api/upload/start`, {
                 model_path: m.path, repo_id: repo.value.trim(), hf_token: tok.value.trim(),
@@ -4989,7 +4988,7 @@ async function openPruneDialog() {
         const idx = await fetchJson(`${API}/admin/api/model-settings-index`);
         orphans = idx.orphans || [];
     } catch (err) { toast('prune check failed: ' + err.message); return; }
-    if (!orphans.length) { toast('Nothing to prune — every stored id maps to a model on disk.'); return; }
+    if (!orphans.length) { toast(C.t('uplift.toast.nothing_to_prune')); return; }
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
@@ -5029,7 +5028,7 @@ async function openPruneDialog() {
     doIt.textContent = 'Prune selected';
     doIt.onclick = async () => {
         const ids = checks.filter(c => c.checked).map(c => c.value);
-        if (!ids.length) { toast('Nothing selected'); return; }
+        if (!ids.length) { toast(C.t('uplift.toast.nothing_selected')); return; }
         try {
             const r = await postJson(`${API}/admin/api/prune-model-settings`, { ids });
             toast(`Pruned ${r.removed.length} setting record(s)` +
@@ -5112,9 +5111,9 @@ async function renderHelperModels() {
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const res = await r.json().catch(() => ({}));
             if (res.success === false) throw new Error(res.message || 'rejected');
-            toast('Integration settings saved');
+            toast(C.t('uplift.toast.integration_saved'));
             return true;
-        } catch (err) { toast('save failed: ' + err.message); return false; }
+        } catch (err) { toast(C.t('uplift.toast.save_failed', {msg: err.message})); return false; }
     }
     function integField(label, hint, control) {
         const f = document.createElement('label');
