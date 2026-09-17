@@ -130,7 +130,7 @@ def test_locale_overlays_key_sync():
 
     en = json.loads((_PACKAGE_LOCALES / "en.json").read_text(encoding="utf-8"))
     assert en, "en overlay must not be empty"
-    FALLBACK_FAMILIES = ("uplift.gs.", "uplift.se.", "uplift.ui.")
+    FALLBACK_FAMILIES = ("uplift.gs.", "uplift.se.", "uplift.ui.", "uplift.mode.")
     ui_en = {k: v for k, v in en.items() if not k.startswith(FALLBACK_FAMILIES)}
     langs = {"zh", "zh-TW", "ja", "ko", "ru", "es", "fr", "pt-BR"}
     for lang in langs:

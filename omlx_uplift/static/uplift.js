@@ -1047,20 +1047,20 @@ let gsSavedAt = 0;     // last save banner timestamp (updateModeLabels keeps it 
 function updateModeLabels() {
     const live = GW_LIVE;
     const dl = $('dl-mode'); if (dl) dl.textContent = live
-        ? 'downloads run for real on this machine' : 'writes run in the shadow sandbox';
+        ? C.t('uplift.mode.dl_live') : C.t('uplift.mode.dl_shadow');
     const qz = $('qz-mode'); if (qz) qz.textContent = live
-        ? 'quantizes for real with the real oQ engine'
-        : 'Runs quantized in the shadow sandbox (same fields and live estimate as the classic page; the real oQ engine is never touched).';
+        ? C.t('uplift.mode.qz_live')
+        : C.t('uplift.mode.qz_shadow');
     const up = $('up-mode'); if (up) up.textContent = live
-        ? 'uploads run for real; the token stays in this browser and never reaches the oMLX server'
-        : 'Uploads run in the shadow sandbox; the token stays in this browser and never reaches the real server.';
+        ? C.t('uplift.mode.up_live')
+        : C.t('uplift.mode.up_shadow');
     const gs = $('gs-sub');
     // R10-2: this is the real dashboard now — live mode needs no banner.
     if (gs && Date.now() - gsSavedAt > 5000) gs.textContent = live
-        ? '' : 'shadow-editable · real oMLX untouched';
+        ? '' : C.t('uplift.mode.gs_shadow');
     const hm = $('hm-sub');
     if (hm && hm.dataset.count) hm.textContent =
-        `${hm.dataset.count} helpers · integrations editable${live ? ' (live)' : ' (shadow)'}`;
+        C.t('uplift.mode.hm_sub', { n: hm.dataset.count, mode: live ? C.t('uplift.mode.live') : C.t('uplift.mode.shadow') });
 }
 async function pollGatewayInfo() {
     const chip = $('chip-gateway');
@@ -1243,7 +1243,7 @@ function seUpdateSaveBtn() {
                                  : 'SAVE' + tabTxt + ' (' + n + ')')
                       : (seIsBaseTab() ? 'SAVE' : 'SAVE PROFILE');
     b.title = restart
-        ? 'Some queued settings apply only after the model is reloaded' : '';
+        ? C.t('uplift.se.restart_title') : '';
     renderEdChanges();
 }
 /* CHANGES box above the editor buttons: yaml-style key: old -> key: new,
