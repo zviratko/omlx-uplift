@@ -1494,7 +1494,8 @@ function seBind(kind, key, opts) {
     label.append(name, slot, ctlBox);
     if (opts && opts.hint) {
         const h = document.createElement('small');
-        h.className = 'se-hint'; h.textContent = opts.hint;
+        h.className = 'se-hint';
+        h.textContent = C.tf('uplift.se.' + key + '.hint', opts.hint);
         label.append(h);
     }
     return label;
@@ -1506,7 +1507,9 @@ function seSection(title) {
     const box = document.createElement('div');
     box.className = 'se-box';
     const h = document.createElement('h5');
-    h.className = 'se-section'; h.textContent = title;
+    h.className = 'se-section';
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    h.textContent = C.tf('uplift.se.section.' + slug, title);
     const body = document.createElement('div');
     body.className = 'se-box-body';
     box.append(h, body);
