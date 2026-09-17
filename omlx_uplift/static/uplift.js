@@ -103,10 +103,14 @@ function applyTab() {
     // dropdown button label gets rebuilt (textContent above wiped it)
     {
         const dd = 'dd-models-btn';
-        $(dd).textContent = 'Models ';
+        let lbl = t('uplift.tab.models');
+        if (lbl === 'uplift.tab.models') lbl = 'Models';   // pre-catalog fallback
+        $(dd).replaceChildren();   // clear (no innerHTML; labels are textContent-only)
+        const span = document.createElement('span');
+        span.dataset.i18n = 'uplift.tab.models'; span.textContent = lbl;
         const caret = document.createElement('span');
         caret.className = 'dd-caret'; caret.textContent = '▾';
-        $(dd).append(caret);
+        $(dd).append(span, ' ', caret);
     }
     for (const card of cards) {
         const show = (card.dataset.tab || 'status') === tab &&

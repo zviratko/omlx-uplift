@@ -5,6 +5,7 @@ model settings) — package-local, vanilla routes.py no longer hosts these.
 pytest asyncio_mode=auto collects these bare async tests.
 """
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -116,3 +117,22 @@ async def test_delete_model_settings():
         with pytest.raises(HTTPException) as ei:
             await up.delete_model_settings_route("ghost", is_admin=True)
     assert ei.value.status_code == 404
+
+
+def test_locale_overlays_key_sync():
+    """Every overlay locale must carry exactly the en overlay's keys —
+    no silent untranslated drift."""
+    from omlx_uplift.router import _PACKAGE_LOCALES
+
+    en = json.loads((_PACKAGE_LOCALES / "en.json").read_text(encoding="utf-8"))
+    assert en, "en overlay must not be empty"
+    langs = {"zh", "zh-TW", "ja", "ko", "ru", "es", "fr", "pt-BR"}
+    for lang in langs:
+        data = json.loads(((_PACKAGE_LOCALES / f"{lang}.json")).read_text(encoding="utf-8"))
+        assert set(data) == set(en), f"{lang} key set differs from en"
+        # no placeholder mismatch (classic interpolation style)
+        for k in en:
+            import re
+            src = set(re.findall(r"\{(\w+)\}", en[k]))
+            got = set(re.findall(r"\{(\w+)\}", data[k]))
+            assert src == got, f"{lang}:{k} placeholders {got} != en {src}"
