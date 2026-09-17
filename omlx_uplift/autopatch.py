@@ -31,7 +31,11 @@ def _mount(module) -> None:
 
 
 class _PostImportFinder:
-    """meta_path sentinel: let the real import run, then mount."""
+    """meta_path sentinel. Wraps the REAL loader's exec_module so the
+    mount runs exactly once, after the module body executed, on the very
+    module object that lands in sys.modules. (Returning None from
+    find_spec after importing ourselves would make the machinery re-execute
+    the module a second time and discard the mounted one.)"""
 
     def find_module(self, fullname, path=None):  # pragma: no cover (py2 API)
         return None
@@ -41,14 +45,19 @@ class _PostImportFinder:
             return None
         # Remove self first so the real import isn't re-observed.
         sys.meta_path.remove(self)
-        module = sys.modules.get(fullname)
-        if module is None:
-            # Import normally via the remaining finders, then mount.
-            import importlib
+        import importlib.util
 
-            module = importlib.import_module(fullname)
-        _mount(module)
-        return None  # we never provide the spec ourselves
+        spec = importlib.util.find_spec(fullname)
+        if spec is None or spec.loader is None:
+            return None
+        real_exec = spec.loader.exec_module
+
+        def exec_module(module):
+            real_exec(module)
+            _mount(module)
+
+        spec.loader.exec_module = exec_module
+        return spec
 
 
 def install() -> None:

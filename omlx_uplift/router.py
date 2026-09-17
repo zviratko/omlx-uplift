@@ -107,7 +107,14 @@ def _static_file(path: str) -> FileResponse:
     ):
         raise HTTPException(status_code=404, detail="Uplift file not found")
     media_type = _MEDIA_TYPES.get(file_path.suffix, "application/octet-stream")
-    headers = {"Cache-Control": "no-store"} if file_path.suffix == ".html" else None
+    # html: never cached (entry point). JS/CSS/vendor: revalidate every
+    # load — pip-installed packages have no deploy-time ?v= stamping,
+    # and heuristic caching resurrected the 'stale cache looks like a
+    # failed deploy' trap. Assets are local; 304 revalidation is free.
+    if file_path.suffix == ".html":
+        headers = {"Cache-Control": "no-store"}
+    else:
+        headers = {"Cache-Control": "no-cache"}
     return FileResponse(file_path, media_type=media_type, headers=headers)
 
 
