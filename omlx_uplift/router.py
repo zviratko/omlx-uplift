@@ -37,11 +37,20 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from pydantic import BaseModel
 
 try:  # normal runtime: we are importable inside omlx's environment
-    from omlx.admin.auth import require_admin, verify_session
-except ImportError as e:  # pragma: no cover
-    raise ImportError(
-        "omlx-uplift requires omlx to be installed in the same environment"
-    ) from e
+    from omlx.admin.auth import _RedirectToLogin, require_admin
+except ImportError:  # pragma: no cover
+    # Standalone viewer mode on a machine WITHOUT omlx (DMG users): the
+    # router is imported only for its static/login helpers; endpoints
+    # that actually need auth are unreachable because the viewer mounts
+    # its own handlers. Keep the import soft and raise only on use.
+    class _RedirectToLogin(Exception):  # placeholder for isinstance checks
+        pass
+
+    def require_admin(request):  # type: ignore
+        raise RuntimeError(
+            "omlx-uplift router mounted without omlx: run `omlx-uplift "
+            "serve` inside the oMLX environment, or the standalone viewer"
+        )
 
 from .request_log import get_request_tracker
 from .collector import get_collector
@@ -141,8 +150,6 @@ async def _gate(request: Request, back_base: str) -> Optional[RedirectResponse]:
     try:
         await require_admin(request)
     except Exception as exc:  # _RedirectToLogin (HTTP-ish) or 401
-        from omlx.admin.auth import _RedirectToLogin
-
         if not isinstance(exc, _RedirectToLogin):
             raise
         target = request.url.path
