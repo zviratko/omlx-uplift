@@ -356,5 +356,20 @@
  "uplift.layout.reset2": "Reset to default",
  "uplift.layout.save_failed": "Failed to save layout",
  "uplift.layout.drag_to_move": "Drag to move",
- "uplift.layout.open_new": "Open in new tab"
+ "uplift.layout.open_new": "Open in new tab",
+ "uplift.card.explore": "Metrics explorer",
+ "uplift.explore.pick": "Pick at least one metric below",
+ "uplift.explore.avg": "averaged",
+ "uplift.explore.hourly": "hourly rollups",
+ "uplift.metric.avg_generation_tps": "generation tok/s",
+ "uplift.metric.avg_prefill_tps": "prefill tok/s",
+ "uplift.metric.rate.completion_tokens_s": "output tokens/s",
+ "uplift.metric.rate.prompt_tokens_s": "input tokens/s",
+ "uplift.metric.rate.requests_s": "requests/s",
+ "uplift.metric.cache_efficiency": "cache efficiency",
+ "uplift.metric.engines.active_requests": "active requests",
+ "uplift.metric.engines.loaded": "loaded models",
+ "uplift.metric.mem.percent": "memory %",
+ "uplift.metric.mem.used_bytes": "memory used",
+ "uplift.metric.cache.total_bytes": "disk cache"
 }

@@ -387,3 +387,36 @@ test('setLocale(): bad args reset to en/{}; getLocale reflects last call', () =>
     C.setLocale(null, undefined);
     assert.deepStrictEqual(C.getLocale(), { lang: 'en', strings: {} });
 });
+
+// ---- chart explorer: windows + metric selection ----
+test('layout: 7d/30d windows accepted, junk rejected', () => {
+    assert.ok(C.LAYOUT_WINDOWS.includes(604800));
+    assert.ok(C.LAYOUT_WINDOWS.includes(2592000));
+    const store = { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = v; } };
+    store.setItem(C.LAYOUT_KEY, JSON.stringify({ chartWindowSec: 2592000 }));
+    assert.strictEqual(C.loadLayout(store).chartWindowSec, 2592000);
+    store.setItem(C.LAYOUT_KEY, JSON.stringify({ chartWindowSec: 12345 }));
+    assert.strictEqual(C.loadLayout(store).chartWindowSec, C.LAYOUT_DEFAULTS.chartWindowSec);
+});
+test('layout: exploreMetrics filters unknown keys, defaults when absent/garbage', () => {
+    const store = k => { const s = { _d: {}, getItem(x) { return this._d[x] ?? null; }, setItem(x, v) { this._d[x] = v; } };
+        s._d[C.LAYOUT_KEY] = JSON.stringify(k); return s; };
+    assert.deepStrictEqual(C.loadLayout(store({})).exploreMetrics,
+        C.LAYOUT_DEFAULTS.exploreMetrics);
+    assert.deepStrictEqual(C.loadLayout(store('x')).exploreMetrics,
+        C.LAYOUT_DEFAULTS.exploreMetrics);
+    assert.deepStrictEqual(
+        C.loadLayout(store({ exploreMetrics: ['mem.percent', 'bogus.key', 'avg_generation_tps'] })).exploreMetrics,
+        ['mem.percent', 'avg_generation_tps']);
+    assert.deepStrictEqual(C.loadLayout(store({ exploreMetrics: ['bogus'] })).exploreMetrics,
+        C.LAYOUT_DEFAULTS.exploreMetrics);   // filtering to empty falls back
+    assert.deepStrictEqual(C.loadLayout(store({ exploreMetrics: [] })).exploreMetrics,
+        []);   // deliberate "none selected" survives reload
+});
+test('explore catalogue: unique keys, one fmt each, exports agree', () => {
+    const keys = C.EXPLORE_METRICS.map(m => m.key);
+    assert.strictEqual(new Set(keys).size, keys.length);
+    assert.deepStrictEqual(C.EXPLORE_KEYS, keys);
+    for (const k of ['avg_generation_tps', 'mem.percent', 'cache.total_bytes'])
+        assert.ok(keys.includes(k), k + ' must be selectable');
+});

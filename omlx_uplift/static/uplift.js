@@ -59,6 +59,7 @@ async function loadLocale(lang) {
         C.setLocale(j.lang, j.strings);
         gsLocalize();
         applyI18n(document);
+        relabelExplore();   // JS-built labels (chips, cell titles) too
         document.documentElement.lang = j.lang;
     } catch (e) {
         /* key-fallback keeps the UI fully English; not worth a toast */
@@ -317,11 +318,30 @@ const pageCards = [...document.querySelectorAll('#pages .card')];
 const UPL = window.UpliftLayout;
 
 // Effective block layout (normalised): stored blocks or shipped default.
+// Blocks introduced by a later release are appended once at the bottom of
+// an existing saved layout (ids already merged are remembered, so a block
+// the user then removes stays removed).
 function currentBlockLayout(saved) {
+    if (saved && Array.isArray(saved.blocks)) {
+        const blocks = saved.blocks.slice();
+        const merged = Array.isArray(saved.mergedBlocks) ? saved.mergedBlocks : [];
+        const have = new Set([...blocks.map(b => b && b.id), ...merged]);
+        const present = new Set(blocks.map(b => b && b.id));
+        for (const def of UPL.defaultLayout().blocks) {
+            if (have.has(def.id)) { merged.includes(def.id) || merged.push(def.id); continue; }
+            merged.push(def.id);
+            const bottom = blocks.reduce((m, b) => Math.max(m, (b.y || 0) + (b.h || 0)), 0);
+            blocks.push({ ...def, y: bottom + 1 });
+        }
+        saved.mergedBlocks = merged;
+        if (!present.size) return UPL.normalizeLayout({ width: saved.width, blocks: saved.blocks });
+        return UPL.normalizeLayout({ width: saved.width, blocks });
+    }
     return UPL.normalizeLayout(saved && saved.blocks
         ? { width: saved.width, blocks: saved.blocks } : null);
 }
 let upLayout = currentBlockLayout(layout);
+C.saveLayout(localStorage, layout);   // persist mergedBlocks so merge is one-shot
 applyWidthEarly();   // page width must be right before first paint/tab switch
 function applyWidthEarly() {
     if (UPL) document.documentElement.dataset.layoutWidth = UPL.widthClass(upLayout.width);
@@ -701,8 +721,8 @@ function fillSelect(sel, options, value) {
         sel.append(o);
     }
 }
-fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, s >= 3600 ? `${s / 3600} hour` : `${s / 60} min`]), layout.chartWindowSec);
-$('opt-window').onchange = e => { layout.chartWindowSec = Number(e.target.value); historyDirty = true; loadChartHistory(); C.saveLayout(localStorage, layout); };
+fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, windowLabel(s)]), layout.chartWindowSec);
+$('opt-window').onchange = e => setWindow(Number(e.target.value));
 fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`]), layout.intervalMs);
 $('opt-interval').onchange = e => { layout.intervalMs = Number(e.target.value); C.saveLayout(localStorage, layout); restartPolling(); };
 $('opt-hide-debug').checked = layout.logsHideDebug;
@@ -714,7 +734,7 @@ $('btn-layout-reset').onclick = () => {
     C.saveLayout(localStorage, layout);
     if (dashGrid) applyUpliftLayout(upLayout);
     renderTray();
-    fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, s >= 3600 ? `${s / 3600} hour` : `${s / 60} min`]), layout.chartWindowSec);
+    fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, windowLabel(s)]), layout.chartWindowSec);
     fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`]), layout.intervalMs);
     $('opt-hide-debug').checked = layout.logsHideDebug;
     historyDirty = true; loadChartHistory();
@@ -803,9 +823,7 @@ const MAX_POINTS = 4000;
 let chartHist = { gen: [], prefill: [] };   // arrays of {ts, v, res}
 let historyDirty = true, historyLoading = false;
 function windowToParam() {
-    const w = layout.chartWindowSec;
-    return w >= 86400 ? '24h' : w >= 21600 ? '6h' : w >= 3600 ? '1h'
-         : w >= 900 ? '15m' : '5m';
+    return windowParam(layout.chartWindowSec);
 }
 async function loadChartHistory() {
     if (historyLoading) return;
@@ -869,7 +887,9 @@ function line(label, colorVar, fill, scale) {
 }
 function xAxis(col) {
     return { stroke: col.dim, width: 1, size: 42, font: axisFont,
-             values: (s, t) => t.map(ts => new Date(ts).toLocaleTimeString('en-GB',
+             values: (s, t) => t.map(ts => layout.chartWindowSec >= 86400
+                 ? new Date(ts).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+                 : new Date(ts).toLocaleTimeString('en-GB',
                  { hour: '2-digit', minute: '2-digit', ...(layout.chartWindowSec < 900 ? { second: '2-digit' } : {}) })) };
 }
 function yAxis(col, opts) {
@@ -975,7 +995,10 @@ function showTip(c, ev, i) {
         lab.textContent = (c.series[s] && c.series[s].label) || ('s' + s);
         lab.style.color = chartStroke(c, s);
         const val = document.createElement('span');
-        val.textContent = (v === null) ? '—' : seriesValue(v);
+        // Honour a series' own value formatter (explorer bytes/%), else compact.
+        const fn = (c.series[s] && typeof c.series[s].value === 'function')
+            ? c.series[s].value : seriesValue;
+        val.textContent = (v === null) ? '—' : fn(v);
         row.append(lab, document.createTextNode(' '), val);
         tip.append(row);
     }
@@ -1061,8 +1084,7 @@ function redrawCharts() {
     restoreCursor(tpsChart) || legendUpdater()(tpsChart);
     restoreCursor(memChart) || legendUpdater()(memChart);
     const shown = tpsChart.data[0].length;
-    let label = shown > 1
-        ? `${layout.chartWindowSec >= 3600 ? layout.chartWindowSec / 3600 + 'h' : layout.chartWindowSec / 60 + 'm'} window` : '';
+    let label = shown > 1 ? `${windowLabel(layout.chartWindowSec)} window` : '';
     // Honest resolution badge: hourly rollups backfill older stretches.
     const now = Date.now();
     const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], layout.chartWindowSec, now);
@@ -1071,7 +1093,7 @@ function redrawCharts() {
     }
     $('chart-tps-window').textContent = label;
 }
-function rerenderChartsTheme() { createCharts(); if (usageChart) createUsageChart(); }
+function rerenderChartsTheme() { createCharts(); if (usageChart) createUsageChart(); exploreRefresh(true); }
 function resizeCharts() {
     if (!tpsChart) return;
     const w1 = $('chart-tps').clientWidth, w2 = $('chart-mem').clientWidth;
@@ -1086,6 +1108,216 @@ new ResizeObserver(resizeCharts).observe($('grid'));
 // otherwise canvases keep the old, wider size and overflow narrow columns.
 for (const id of ['chart-tps', 'chart-mem', 'chart-usage'])
     if ($(id)) new ResizeObserver(resizeCharts).observe($(id));
+
+/* ---------------- timespan chips + metrics explorer ----------------
+   One shared window selection (layout.chartWindowSec, persisted) drives
+   the Throughput, Memory and explorer cards. Chip rows live in all three
+   card headers and stay in sync. Data is persistent: uplift's sqlite
+   samples backfilled by vanilla's hourly rollups; long windows are
+   server-downsampled (res='avg') and the note says so. */
+function windowLabel(sec) {
+    return sec >= 86400 ? `${sec / 86400}d`
+         : sec >= 3600 ? `${sec / 3600}h` : `${sec / 60}m`;
+}
+/* Arbitrary durations (downsample buckets) get rounded human spans —
+   windowLabel assumes exact chip values and would print 16.66̄m. */
+function fmtSpan(sec) {
+    return sec >= 7200 ? `${Math.round(sec / 3600)}h`
+         : sec >= 120 ? `${Math.round(sec / 60)}m` : `${Math.round(sec)}s`;
+}
+function windowParam(sec) {
+    const w = sec;
+    return w >= 2592000 ? '30d' : w >= 604800 ? '7d' : w >= 86400 ? '24h'
+         : w >= 21600 ? '6h' : w >= 3600 ? '1h' : w >= 900 ? '15m'
+         : w >= 300 ? '5m' : '1m';
+}
+function renderTimespanRows() {
+    for (const row of document.querySelectorAll('.ts-row')) {
+        row.textContent = '';
+        for (const sec of C.LAYOUT_WINDOWS) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ts-chip' + (sec === layout.chartWindowSec ? ' on' : '');
+            b.textContent = windowLabel(sec);
+            b.onclick = () => setWindow(sec);
+            row.append(b);
+        }
+    }
+}
+function setWindow(sec) {
+    if (sec === layout.chartWindowSec) return;
+    layout.chartWindowSec = sec;
+    C.saveLayout(localStorage, layout);
+    renderTimespanRows();
+    historyDirty = true; loadChartHistory();   // throughput/memory cards
+    exploreRefresh(true);                        // explorer card
+}
+
+/* Metric explorer: one honest mini chart per selected metric, each on its
+   own scale (mixing tok/s with bytes on one axis lies). Selection chips
+   persist in layout.exploreMetrics; data via /metrics/series?keys=… */
+const exploreCharts = new Map();   // key -> {chart, host}
+let exploreSeq = 0;                // stale-response guard (like window race)
+let exploreBucketS = 0;
+function exploreFormat(def) {
+    if (def.fmt === 'bytes') return v => (v === null ? '—' : C.fmtBytes(v));
+    if (def.fmt === 'pct') return v => (v === null ? '—' : v.toFixed(1) + '%');
+    if (def.key.startsWith('engines.')) return v => (v === null ? '—' : String(Math.round(v)));
+    return seriesValue;
+}
+function metricLabel(key) {
+    return key.replace(/^(rate|tot|engines|mem|cache)\./, '').replace(/_/g, ' ')
+        .replace(/tps$/, 'tok/s');
+}
+function renderExploreChips() {
+    const wrap = $('explore-chips');
+    if (!wrap) return;
+    wrap.textContent = '';
+    for (const def of C.EXPLORE_METRICS) {
+        const on = layout.exploreMetrics.includes(def.key);
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'metric-chip' + (on ? ' on' : '');
+        b.textContent = (on ? '✓ ' : '＋ ') + C.tf('uplift.metric.' + def.key, metricLabel(def.key));
+        b.onclick = () => {
+            if (on) layout.exploreMetrics = layout.exploreMetrics.filter(k => k !== def.key);
+            else layout.exploreMetrics = [...layout.exploreMetrics, def.key];
+            C.saveLayout(localStorage, layout);
+            renderExploreChips();
+            exploreRefresh(true);
+        };
+        wrap.append(b);
+    }
+}
+function destroyExploreCharts() {
+    for (const { chart } of exploreCharts.values()) chart.destroy();
+    exploreCharts.clear();
+}
+function exploreRefresh(force) {
+    const grid = $('explore-grid');
+    if (!grid) return;
+    const keys = layout.exploreMetrics;
+    if (!keys.length) {
+        destroyExploreCharts();
+        grid.textContent = '';
+        const d = document.createElement('div');
+        d.className = 'empty';
+        d.textContent = C.tf('uplift.explore.pick', 'Pick at least one metric below');
+        grid.append(d);
+        $('explore-note').textContent = '';
+        return;
+    }
+    renderExploreChips();
+    const seq = ++exploreSeq;
+    if (force || exploreCache.stale()) {
+        const w = windowParam(layout.chartWindowSec);
+        fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent(keys.join(','))}&window=${w}`)
+            .then(d => {
+                if (seq !== exploreSeq) return;   // a newer window/selection won
+                exploreCache.data = d.series_map || {};
+                exploreBucketS = d.bucket_s || 0;
+                drawExplore();
+            })
+            .catch(() => { if (seq === exploreSeq) exploreCache.markFail(); });
+    } else {
+        drawExplore();
+    }
+}
+const exploreCache = {
+    data: {}, at: 0, fails: 0,
+    stale() {
+        const ttl = layout.chartWindowSec >= 604800 ? 60000 : 10000;
+        return this.fails > 2 ? Date.now() - this.at > 30000 : Date.now() - this.at > ttl;
+    },
+    markFail() { this.fails++; this.at = Date.now(); },
+};
+/* Locale resolves after boot; dynamic (JS-built) labels must be refreshed
+   when it lands — the static DOM goes through applyI18n, these don't. */
+function relabelExplore() {
+    renderExploreChips();
+    for (const [key, e] of exploreCharts)
+        e.name.textContent = C.tf('uplift.metric.' + key, metricLabel(key));
+    const empty = $('explore-grid')?.querySelector('.empty');
+    if (empty) empty.textContent = C.tf('uplift.explore.pick', 'Pick at least one metric below');
+    if (exploreCharts.size) drawExplore();   // rebuilds the honest note with strings
+}
+function exploreXAxis(sec) {
+    const col = chartColors();
+    const dayish = sec >= 86400;
+    return { stroke: col.dim, width: 1, size: 34, font: axisFont,
+        values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
+            dayish ? { month: 'short', day: 'numeric' }
+                   : { hour: '2-digit', minute: '2-digit' })) };
+}
+function drawExplore() {
+    const grid = $('explore-grid');
+    if (!grid) return;
+    const keys = layout.exploreMetrics;
+    // Rebuild hosts only when the set changes (avoid canvas churn per poll)
+    const cur = [...exploreCharts.keys()];
+    if (cur.join('|') !== keys.join('|')) {
+        destroyExploreCharts();
+        grid.textContent = '';
+        for (const key of keys) {
+            const def = C.EXPLORE_METRICS.find(m => m.key === key) || { key };
+            const cell = document.createElement('div');
+            cell.className = 'explore-cell';
+            const h = document.createElement('div');
+            h.className = 'explore-cell-h';
+            const name = document.createElement('b');
+            name.textContent = C.tf('uplift.metric.' + key, metricLabel(key));
+            const now = document.createElement('span');
+            now.className = 'explore-now';
+            h.append(name, now);
+            const host = document.createElement('div');
+            host.className = 'explore-mini';
+            cell.append(h, host);
+            grid.append(cell);
+            const col = chartColors();
+            const fmt = exploreFormat(def);
+            const opts = {
+                width: host.clientWidth || 300, height: 120, padding: [4, 6, 0, 0],
+                cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
+                legend: { show: false },
+                scales: { x: { time: true }, y: { auto: true, distr: false } },
+                axes: [exploreXAxis(layout.chartWindowSec),
+                       yAxis(col, { size: 44, label: '' })],
+                series: [{}, { label: metricLabel(key), stroke: col.blue, width: 1.6,
+                               fill: col.blue + '1c', points: { show: false },
+                               value: v => fmt(v === undefined ? null : v) }],
+            };
+            const chart = new uPlot(opts, [[], []], host);
+            bindCursorTip(chart);
+            exploreCharts.set(key, { chart, host, fmt, name });
+        }
+        // One observer for the whole grid: mini widths follow the card.
+        if (!grid._ro) {
+            grid._ro = new ResizeObserver(() => {
+                for (const [, e] of exploreCharts)
+                    if (e.host.clientWidth > 0) e.chart.setSize({ width: e.host.clientWidth, height: 120 });
+            });
+            grid._ro.observe(grid);
+        }
+    }
+    let hourlyOnly = false;
+    for (const key of keys) {
+        const e = exploreCharts.get(key);
+        if (!e) continue;
+        const pts = exploreCache.data[key] || [];
+        const ts = pts.map(p => p.ts * 1000), vs = pts.map(p => p.v);
+        e.chart.setData([ts, vs]);
+        const last = vs.length ? vs[vs.length - 1] : null;
+        e.name.nextElementSibling.textContent = last === null || last === undefined
+            ? '—' : e.fmt(last);
+        if (pts.length && pts[pts.length - 1].res === 'hourly') hourlyOnly = true;
+    }
+    // Honest note: what resolution you are actually looking at.
+    const bits = [];
+    if (exploreBucketS >= 60) bits.push(`${C.tf('uplift.explore.avg', 'averaged')} ≤ ${fmtSpan(Math.max(60, exploreBucketS))}`);
+    if (hourlyOnly) bits.push(C.tf('uplift.explore.hourly', 'hourly rollups'));
+    $('explore-note').textContent = bits.length ? bits.join(' · ') : 'live';
+}
+
 /* Pointer left the plot: drop the pinned hover so legends show latest again. */
 for (const sel of ['#chart-tps', '#chart-mem']) {
     const el = $(sel.slice(1));
@@ -5907,6 +6139,12 @@ restartPolling();
 pollGatewayInfo();
 loadChartHistory();
 setInterval(() => { if (!document.hidden) loadChartHistory(); }, 60000);
+// Explorer card: boot + keep-alive. exploreRefresh() only refetches when its
+// cache is stale (10 s short windows / 60 s week+), so a 5 s beat is cheap.
+renderTimespanRows();
+renderExploreChips();
+exploreRefresh(true);
+setInterval(() => { if (!document.hidden && currentTab() === 'status') exploreRefresh(false); }, 5000);
 pollUsage(); pollLogs();
 connectEventStream();
 setInterval(pollGatewayInfo, 10000);

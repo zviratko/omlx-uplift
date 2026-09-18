@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from pathlib import Path
 from typing import Optional
@@ -515,31 +516,81 @@ _USAGE_COLS = ("requests", "prompt_tokens", "completion_tokens",
                "cached_tokens", "prefill_seconds", "generation_seconds")
 
 
+MAX_SERIES_POINTS = 2000
+
+
+def _downsample(points: list[dict], max_pts: int = MAX_SERIES_POINTS):
+    """Average into equal-width buckets so a 30d pull is ~thousands of
+    points, not hundreds of thousands. Buckets align to wall-clock
+    multiples of bucket_s; each output point carries the bucket START and
+    res='avg' (plus the true resolution inside: 'hourly' stays hourly if
+    the whole bucket came from coarse rollups). Returns (points, bucket_s)
+    or (points, 0) when no downsampling was needed."""
+    if len(points) <= max_pts:
+        return points, 0
+    span = points[-1]["ts"] - points[0]["ts"] or 1.0
+    # Next power of 10 that fits the cap; 60 s is the honest floor (never
+    # advertise sub-minute averages). The pow-of-10 step guarantees the
+    # 60 s clamp cannot overshoot the cap (raw < 60 => span/60 < max_pts).
+    bucket_s = max(60.0, 10.0 ** math.ceil(math.log10(span / max_pts)))
+    buckets: dict[int, list[dict]] = {}
+    for p in points:
+        buckets.setdefault(int(p["ts"] // bucket_s), []).append(p)
+    out = []
+    for b in sorted(buckets):
+        rows = buckets[b]
+        vals = [r["v"] for r in rows if r["v"] is not None]
+        if not vals:
+            continue
+        res = "hourly" if all(r["res"] == "hourly" for r in rows) else "avg"
+        out.append({"ts": b * bucket_s, "v": sum(vals) / len(vals), "res": res})
+    return out, bucket_s
+
+
 @api_router.get("/metrics/series")
 async def metrics_series(
-    key: str,
+    key: str = "",
+    keys: str = "",
     window: str = "1h",
     is_admin: bool = Depends(require_admin),
 ):
-    """Time series for one collector key over WINDOW (15m|1h|6h|24h|7d|30d)."""
+    """Series over WINDOW (5m..30d) for KEY, or for every key in
+    comma-separated KEYS (multi-metric explorer: one request, one merged
+    per-key response in `series_map`). Long windows are averaged down to
+    ~MAX_SERIES_POINTS points and say so (res='avg', bucket_s)."""
     import asyncio
 
+    wanted = [k.strip() for k in (keys or key).split(",") if k.strip()]
+    if not wanted:
+        raise HTTPException(status_code=400, detail="key or keys required")
     window_s = _parse_window(window)
     store = get_collector().store
-    fine = await asyncio.to_thread(store.series, key, window_s)
-    for p in fine:
-        p["res"] = "fine"
 
-    hourly = []
-    derive = _HOURLY_DERIVE.get(key)
-    if derive is not None:
-        hourly = await asyncio.to_thread(_hourly_points, derive, window_s)
+    async def one(k: str):
+        fine = await asyncio.to_thread(store.series, k, window_s)
+        for p in fine:
+            p["res"] = "fine"
+        hourly = []
+        derive = _HOURLY_DERIVE.get(k)
+        if derive is not None:
+            hourly = await asyncio.to_thread(_hourly_points, derive, window_s)
+        # Fine points win where both exist (dedupe by hour bucket).
+        fine_hours = {int(p["ts"] // 3600) for p in fine}
+        merged = fine + [p for p in hourly if int(p["ts"] // 3600) not in fine_hours]
+        merged.sort(key=lambda p: p["ts"])
+        return _downsample(merged)
 
-    # Fine points win where both exist (dedupe by hour bucket).
-    fine_hours = {int(p["ts"] // 3600) for p in fine}
-    merged = fine + [p for p in hourly if int(p["ts"] // 3600) not in fine_hours]
-    merged.sort(key=lambda p: p["ts"])
-    return {"key": key, "window": window, "window_s": window_s, "series": merged}
+    results = await asyncio.gather(*(one(k) for k in wanted))
+    series_map, bucket = {}, 0
+    for k, (pts, b) in zip(wanted, results):
+        series_map[k] = pts
+        bucket = max(bucket, b)
+    if key and not keys:
+        pts = series_map.get(key, [])
+        return {"key": key, "window": window, "window_s": window_s,
+                "bucket_s": bucket, "series": pts}
+    return {"keys": wanted, "window": window, "window_s": window_s,
+            "bucket_s": bucket, "series_map": series_map}
 
 
 def _parse_window(window: str) -> float:

@@ -124,6 +124,58 @@ class Collector:
         except Exception:
             pass
 
+        # Memory + cache gauges (same sources classic's /admin/api/stats
+        # uses) so the chart explorer can draw persistent memory history.
+        try:
+            from omlx.server import _server_state
+
+            pool = engine_pool()
+            if pool is not None:
+                used = 0
+                enf = getattr(_server_state, "process_memory_enforcer", None)
+                if enf is not None and getattr(enf, "enabled", lambda: False)():
+                    try:
+                        used = int(enf.get_status().get("current_bytes", 0))
+                        maxb = int(enf.get_final_ceiling())
+                    except Exception:
+                        used, maxb = 0, 0
+                else:
+                    used = int(getattr(pool, "current_model_memory", 0) or 0)
+                    cb = getattr(pool, "_get_final_ceiling", None)
+                    maxb = int(cb()) if callable(cb) else 0
+                pairs["mem.used_bytes"] = float(used)
+                if maxb > 0:
+                    pairs["mem.percent"] = 100.0 * used / maxb
+        except Exception:
+            pass
+        # Runtime cache totals + top-3 hot-cache models (cheap per-entry
+        # probes; classic's full observability builder is too heavy per tick)
+        try:
+            pool = engine_pool()
+            if pool is not None:
+                total_bytes = 0
+                hot: dict[str, int] = {}
+                for mid in pool.get_model_ids():
+                    try:
+                        entry = pool.get_entry(mid)
+                        eng = getattr(entry, "engine", None)
+                        eng = getattr(eng, "_engine", eng)
+                        fn = getattr(eng, "get_runtime_cache_stats", None)
+                        if not callable(fn):
+                            continue
+                        st = fn() or {}
+                        total_bytes += int(st.get("total_size_bytes", 0) or 0)
+                        hb = int(st.get("hot_cache_size_bytes", 0) or 0)
+                        if hb > 0:
+                            hot[mid] = hb
+                    except Exception:
+                        pass
+                pairs["cache.total_bytes"] = float(total_bytes)
+                for rank, mid in enumerate(sorted(hot, key=lambda m: -hot[m])[:3]):
+                    pairs["hot%d.%s" % (rank + 1, mid)] = float(hot[mid])
+        except Exception:
+            pass
+
         # Per-request lifecycle rows from the sampled tracker
         try:
             from .request_log import get_request_tracker

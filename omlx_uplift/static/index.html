@@ -121,10 +121,17 @@
         </div></div></div></div></section>
 
     <section class="card grid-stack-item" data-id="chart-tps" data-tab="status" gs-id="chart-tps" data-block="chart-tps"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="uplift.card.throughput">Throughput</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.throughput">Throughput</span> <span class="right" id="chart-tps-window"></span></h2>
+        <div class="ts-row" id="ts-row-tps" role="group" aria-label="Timespan"></div>
         <div class="card-body"><div class="chart-box" id="chart-tps"></div></div></div></div></div></section>
 
     <section class="card grid-stack-item" data-id="chart-mem" data-tab="status" gs-id="chart-mem" data-block="chart-mem"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="uplift.card.memory_cache">Memory &amp; cache</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.memory_cache">Memory &amp; cache</span> <span class="right" id="mem-label"></span></h2>
+        <div class="ts-row" id="ts-row-mem" role="group" aria-label="Timespan"></div>
         <div class="card-body"><div class="chart-box" id="chart-mem"></div></div></div></div></div></section>
+
+    <section class="card grid-stack-item" data-id="explore" data-tab="status" gs-id="explore" data-block="explore"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="uplift.card.explore">Metrics explorer</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.explore">Metrics explorer</span> <span class="right" id="explore-note"></span></h2>
+        <div class="ts-row" id="ts-row-explore" role="group" aria-label="Timespan"></div>
+        <div class="card-body"><div class="explore-chips" id="explore-chips" role="group" aria-label="Metrics"></div>
+        <div class="explore-grid" id="explore-grid"><div class="empty" data-i18n="uplift.explore.pick">Pick at least one metric below</div></div></div></div></div></div></section>
 
     <section class="card grid-stack-item" data-id="reqstats" data-tab="status" gs-id="reqstats" data-block="reqstats"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="uplift.card.request_sizes">Request sizes</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.request_sizes">Request sizes</span>
             <span class="right"><select id="opt-percentile" title="Percentile" data-i18n-title="uplift.opt.percentile"></select></span></h2>

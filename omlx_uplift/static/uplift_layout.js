@@ -19,6 +19,7 @@
         'tokens',
         'chart-tps',
         'chart-mem',
+        'explore',
         'reqstats',
         'cache',
         'live',
@@ -65,10 +66,11 @@
         { id: 'cache', x: 16, y: 0, w: 8, h: 20 },
         { id: 'chart-tps', x: 0, y: 21, w: 12, h: 44 },
         { id: 'chart-mem', x: 12, y: 21, w: 12, h: 44 },
-        { id: 'live', x: 0, y: 66, w: 8, h: 38 },
-        { id: 'reqstats', x: 8, y: 66, w: 8, h: 38 },
-        { id: 'reqfeed', x: 16, y: 66, w: 8, h: 38 },
-        { id: 'feed', x: 0, y: 105, w: COLUMNS, h: 18 },
+        { id: 'explore', x: 0, y: 66, w: COLUMNS, h: 40 },
+        { id: 'live', x: 0, y: 107, w: 8, h: 38 },
+        { id: 'reqstats', x: 8, y: 107, w: 8, h: 38 },
+        { id: 'reqfeed', x: 16, y: 107, w: 8, h: 38 },
+        { id: 'feed', x: 0, y: 146, w: COLUMNS, h: 18 },
     ];
 
     function defaultLayout() {
