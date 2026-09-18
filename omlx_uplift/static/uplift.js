@@ -482,7 +482,15 @@ function applyUpliftLayout(saved) {
     refitUpliftBlocks();   // aligns row heights once content is measurable
 }
 function collectUpliftLayout() {
-    const blocks = dashGrid.save(false).map(n => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h }));
+    // NOT dashGrid.save(): this GridStack build's saveRemoveDefaults pass
+    // deletes `w` whenever w === minW (and `h` when h === minH or 1) — our
+    // stat tiles have minW 4 and default w 4, so save() returned
+    // {w: undefined} for them and the normaliser's fallback silently
+    // widened them to 24. Saving an untouched board "broke" it. Read the
+    // live engine nodes instead — x/y/w/h are always present there.
+    const blocks = dashGrid.engine.nodes
+        .filter(n => n.el && n.el.dataset.block)
+        .map(n => ({ id: n.el.dataset.block, x: n.x, y: n.y, w: n.w, h: n.h }));
     return UPL.normalizeLayout({ version: 1, width: dashDraft?.width ?? upLayout.width, blocks });
 }
 function _onTrayDrop(node) {
