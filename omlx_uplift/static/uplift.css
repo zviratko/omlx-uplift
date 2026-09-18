@@ -1114,7 +1114,7 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 
 /* Metric cards: tight header (name + big current value + resolution note),
    ts row, chart fills the rest of the card body. */
-.metric-card .card-pad { padding: 10px 12px 12px; }
+.metric-card .card-pad { padding: 8px 10px 8px; }
 .metric-card h2 { margin: 0 0 4px; font-size: 12px; }
 .metric-card h2 .right { gap: 8px; margin-left: auto; }
 .metric-now { font: 700 14px/1 var(--mono); color: var(--chart-2, #e8a020);
@@ -1127,5 +1127,5 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metric-card {
     flex: 1 0 100%; }
 .metric-card .card-pad { flex: 1 1 auto; display: flex; flex-direction: column; }
-.metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 90px; }
-.metric-plot { flex: 1 1 auto; min-height: 90px; min-width: 0; }
+.metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 78px; }
+.metric-plot { flex: 1 1 auto; min-height: 78px; min-width: 0; }

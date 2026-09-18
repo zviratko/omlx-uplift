@@ -443,9 +443,9 @@ function _neededUnits(el) {
     let bottom = 0;
     for (const child of pad.children) {
         if (child.querySelector && child.querySelector('.metric-plot')) {
-            // flex-filled body: demand = its 90px floor, never the
+            // flex-filled body: demand = the plot's 78px floor, never the
             // stretched rect — otherwise a grown card can never shrink
-            bottom = Math.max(bottom, child.getBoundingClientRect().top - pr.top + 90);
+            bottom = Math.max(bottom, child.getBoundingClientRect().top - pr.top + 78);
             continue;
         }
         const r = child.getBoundingClientRect();
@@ -471,10 +471,15 @@ function _rowAlign() {
     const plan = [];                       // {members, y, h}
     for (const y of ys) {
         const members = rows.get(y);
-        let h = Math.max(...members.map(m => m.h));      // saved height floor
+        let h = 0;
         for (const m of members) {
             const el = _blockEl(m.id);
-            if (el) h = Math.max(h, _neededUnits(el));   // content demands
+            // Metric cards always hug their content: the chart fills all
+            // leftover space, so an oversized saved box is just padding.
+            // Every other card keeps the saved height as a floor.
+            const demand = el ? _neededUnits(el) : 0;
+            h = Math.max(h, C.blockMetricKey && C.blockMetricKey(m.id)
+                ? demand : Math.max(m.h, demand));
         }
         const rowY = Math.max(y, cursor);                // keep gaps, push down only
         plan.push({ members, y: rowY, h });
@@ -1287,11 +1292,11 @@ function createMetricCard(def) {
     const col = chartColors();
     const fmt = metricFormat(def);
     const opts = {
-        width: 300, height: 120, padding: [4, 6, 0, 0],
+        width: 300, height: 100, padding: [2, 4, 0, 0],
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
         scales: { x: { time: true }, y: { auto: true } },
-        axes: [metricXAxis(cardWindow(id), col), yAxis(col, { size: 44, label: '' })],
+        axes: [metricXAxis(cardWindow(id), col), yAxis(col, { size: 38, label: '' })],
         series: [{}, { label: metricLabel(def.key), stroke: col.blue, width: 1.6,
                        fill: col.blue + '1c', points: { show: false },
                        value: v => fmt(v === undefined ? null : v) }],
@@ -1308,13 +1313,13 @@ function fitMetricPlot(id) {
     const e = metricCharts.get(id);
     if (!e) return;
     // The card grows/shrinks via the row-height engine; the plot takes the
-    // space left after title + timespan row. Floor 90px keeps tiny cards
-    // readable; _neededUnits() treats .metric-plot min-height as the
-    // content demand, so a card is never sized below its chart.
+    // space left after title + timespan row. The floor keeps a bare card
+    // readable; _neededUnits() treats the .metric-plot floor as the
+    // content demand, and metric cards size TO that demand exactly.
     const host = e.host;
-    // Height comes from flexbox (card-body fills the grid box, min 90px);
+    // Height comes from flexbox (card-body fills the grid box, min 78px);
     // pinning style.height here would fight the row engine when shrinking.
-    const h = Math.max(90, host.clientHeight || 90);
+    const h = Math.max(78, host.clientHeight || 78);
     if (host.clientWidth > 0) e.chart.setSize({ width: host.clientWidth, height: h });
 }
 function fitAllMetricPlots() { for (const id of metricCharts.keys()) fitMetricPlot(id); }
