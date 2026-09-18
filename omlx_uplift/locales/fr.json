@@ -360,5 +360,17 @@
  "uplift.layout.reset2": "Reset to default",
  "uplift.layout.save_failed": "Failed to save layout",
  "uplift.layout.drag_to_move": "Drag to move",
- "uplift.layout.open_new": "Ouvrir dans un nouvel onglet"
+ "uplift.layout.open_new": "Ouvrir dans un nouvel onglet",
+ "uplift.explore.avg": "moyenné",
+ "uplift.explore.hourly": "agrégats horaires",
+ "uplift.metric.avg_generation_tps": "tok/s de génération",
+ "uplift.metric.avg_prefill_tps": "tok/s de préfixe",
+ "uplift.metric.cache_efficiency": "efficacité du cache",
+ "uplift.metric.mem.percent": "mémoire %",
+ "uplift.metric.mem.used_bytes": "RAM utilisée",
+ "uplift.metric.cache.total_bytes": "cache disque",
+ "uplift.metric.rate.prompt_tokens_s": "prompt tok/s",
+ "uplift.metric.rate.completion_tokens_s": "complét. tok/s",
+ "uplift.metric.rate.requests_s": "requêtes/s",
+ "uplift.metric.engines.active_requests": "requêtes actives"
 }

@@ -385,5 +385,17 @@
  "uplift.layout.reset2": "Reset to default",
  "uplift.layout.save_failed": "Failed to save layout",
  "uplift.layout.drag_to_move": "Drag to move",
- "uplift.layout.open_new": "新しいタブで開く"
+ "uplift.layout.open_new": "新しいタブで開く",
+ "uplift.explore.avg": "平均値",
+ "uplift.explore.hourly": "1時間ローラップ",
+ "uplift.metric.avg_generation_tps": "生成 tok/s",
+ "uplift.metric.avg_prefill_tps": "プレフィックス tok/s",
+ "uplift.metric.cache_efficiency": "キャッシュ効率",
+ "uplift.metric.mem.percent": "メモリ %",
+ "uplift.metric.mem.used_bytes": "使用RAM",
+ "uplift.metric.cache.total_bytes": "ディスクキャッシュ",
+ "uplift.metric.rate.prompt_tokens_s": "プロンプト tok/s",
+ "uplift.metric.rate.completion_tokens_s": "補完 tok/s",
+ "uplift.metric.rate.requests_s": "リクエスト/s",
+ "uplift.metric.engines.active_requests": "アクリクエスト"
 }

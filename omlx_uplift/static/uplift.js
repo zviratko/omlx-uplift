@@ -442,6 +442,12 @@ function _neededUnits(el) {
     const pr = pad.getBoundingClientRect();
     let bottom = 0;
     for (const child of pad.children) {
+        if (child.querySelector && child.querySelector('.metric-plot')) {
+            // flex-filled body: demand = its 90px floor, never the
+            // stretched rect — otherwise a grown card can never shrink
+            bottom = Math.max(bottom, child.getBoundingClientRect().top - pr.top + 90);
+            continue;
+        }
         const r = child.getBoundingClientRect();
         if (r.height > 0) bottom = Math.max(bottom, r.bottom - pr.top + pad.scrollTop);
     }
@@ -493,6 +499,7 @@ function _rowAlign() {
         dashApplying = false;
     }
     if (changed) resizeCharts();
+    fitAllMetricPlots();   // row grew/shrank: hand the delta to the charts
 }
 
 /* Card content grows after first paint (charts render, feeds fill).
@@ -722,7 +729,7 @@ function fillSelect(sel, options, value) {
     }
 }
 fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, windowLabel(s)]), layout.chartWindowSec);
-$('opt-window').onchange = e => setWindow(Number(e.target.value));
+$('opt-window').onchange = e => setGlobalWindow(Number(e.target.value));
 fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`]), layout.intervalMs);
 $('opt-interval').onchange = e => { layout.intervalMs = Number(e.target.value); C.saveLayout(localStorage, layout); restartPolling(); };
 $('opt-hide-debug').checked = layout.logsHideDebug;
@@ -735,6 +742,7 @@ $('btn-layout-reset').onclick = () => {
     if (dashGrid) applyUpliftLayout(upLayout);
     renderTray();
     fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, windowLabel(s)]), layout.chartWindowSec);
+    renderCardTsRows(); drawAllMetricCharts();
     fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`]), layout.intervalMs);
     $('opt-hide-debug').checked = layout.logsHideDebug;
     historyDirty = true; loadChartHistory();
@@ -822,8 +830,13 @@ const MAX_POINTS = 4000;
    boundary gets labeled honestly in the window readout. */
 let chartHist = { gen: [], prefill: [] };   // arrays of {ts, v, res}
 let historyDirty = true, historyLoading = false;
+/* The two shared-history cards backfill at the LARGEST window any of them
+   uses (one fetch, superset cached); each card draws its own slice. */
 function windowToParam() {
-    return windowParam(layout.chartWindowSec);
+    let w = layout.chartWindowSec;
+    for (const id of ['chart-tps', 'chart-mem'])
+        if (_blockEl(id)) w = Math.max(w, cardWindow(id));
+    return windowParam(w);
 }
 async function loadChartHistory() {
     if (historyLoading) return;
@@ -853,8 +866,9 @@ async function loadChartHistory() {
    on the union of timestamps (uPlot requires one shared x column). */
 function tpsWindowed() {
     const now = Date.now();
-    const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], layout.chartWindowSec, now);
-    const p = C.mergeHistory(chartHist.prefill, tpsData[0], tpsData[2], layout.chartWindowSec, now);
+    const win = cardWindow('chart-tps');
+    const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], win, now);
+    const p = C.mergeHistory(chartHist.prefill, tpsData[0], tpsData[2], win, now);
     const ts = [...new Set(g.ts.concat(p.ts))].sort((a, b) => a - b);
     const gi = new Map(g.ts.map((t, i) => [t, g.v[i]]));
     const pi = new Map(p.ts.map((t, i) => [t, p.v[i]]));
@@ -871,7 +885,7 @@ function chartColors() {
              gold: cs.getPropertyValue('--chart-2').trim() || '#e8a020' };
 }
 function windowedData(data) {
-    const cutoff = Date.now() - layout.chartWindowSec * 1000;
+    const cutoff = Date.now() - cardWindow('chart-mem') * 1000;
     let i = 0;
     while (i < data[0].length && data[0][i] < cutoff) i++;
     return data.map(col => col.slice(i));
@@ -885,12 +899,16 @@ function line(label, colorVar, fill, scale) {
              fill: fill ? col + '22' : undefined,
              points: { show: false }, value: seriesValue };
 }
-function xAxis(col) {
+function xAxis(col, boundWin) {
+    const winOf = () => boundWin >= 0 ? boundWin : cardWindow('chart-tps');
     return { stroke: col.dim, width: 1, size: 42, font: axisFont,
-             values: (s, t) => t.map(ts => layout.chartWindowSec >= 86400
-                 ? new Date(ts).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
-                 : new Date(ts).toLocaleTimeString('en-GB',
-                 { hour: '2-digit', minute: '2-digit', ...(layout.chartWindowSec < 900 ? { second: '2-digit' } : {}) })) };
+             values: (s, t) => t.map(ts => {
+                 const win = winOf();
+                 return win >= 86400
+                     ? new Date(ts).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+                     : new Date(ts).toLocaleTimeString('en-GB',
+                         { hour: '2-digit', minute: '2-digit', ...(win < 900 ? { second: '2-digit' } : {}) });
+             }) };
 }
 function yAxis(col, opts) {
     // size includes tick labels AND the rotated axis label; 40 was too tight
@@ -904,7 +922,7 @@ function baseOpts(specs, axes, legendHook) {
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 6, fill: col.dim } },
         legend: { show: true, top: true, live: false, labels: { fontSize: '10px' } },
         scales: Object.assign({ x: { time: true }, y: { auto: true } }, axes.scales || {}),
-        axes: [xAxis(col), ...axes.yAxes],
+        axes: [xAxis(col, -1), ...axes.yAxes],
         hooks: legendHook ? { cursor: { subscribe: [legendHook] } } : undefined,
         series: [{}, ...specs],
     };
@@ -1084,17 +1102,29 @@ function redrawCharts() {
     restoreCursor(tpsChart) || legendUpdater()(tpsChart);
     restoreCursor(memChart) || legendUpdater()(memChart);
     const shown = tpsChart.data[0].length;
-    let label = shown > 1 ? `${windowLabel(layout.chartWindowSec)} window` : '';
+    let label = shown > 1 ? `${windowLabel(cardWindow('chart-tps'))} window` : '';
     // Honest resolution badge: hourly rollups backfill older stretches.
     const now = Date.now();
-    const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], layout.chartWindowSec, now);
+    const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], cardWindow('chart-tps'), now);
     if (shown > 1 && g.boundary && g.boundary < now - 120000) {
         label += ` · hourly ≤ ${new Date(g.boundary).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
     }
     $('chart-tps-window').textContent = label;
 }
-function rerenderChartsTheme() { createCharts(); if (usageChart) createUsageChart(); exploreRefresh(true); }
+function rerenderChartsTheme() {
+    createCharts(); if (usageChart) createUsageChart();
+    for (const [id, e] of metricCharts) {
+        const host = e.host;
+        e.chart.destroy();
+        if (host._ro) { host._ro.disconnect(); host._ro = null; }
+        host.textContent = '';
+    }
+    metricCharts.clear();
+    for (const def of C.EXPLORE_METRICS) createMetricCard(def);   // re-inits plots
+    drawAllMetricCharts();
+}
 function resizeCharts() {
+    fitAllMetricPlots();
     if (!tpsChart) return;
     const w1 = $('chart-tps').clientWidth, w2 = $('chart-mem').clientWidth;
     if (w1 > 0) tpsChart.setSize({ width: w1, height: 240 });
@@ -1109,12 +1139,15 @@ new ResizeObserver(resizeCharts).observe($('grid'));
 for (const id of ['chart-tps', 'chart-mem', 'chart-usage'])
     if ($(id)) new ResizeObserver(resizeCharts).observe($(id));
 
-/* ---------------- timespan chips + metrics explorer ----------------
-   One shared window selection (layout.chartWindowSec, persisted) drives
-   the Throughput, Memory and explorer cards. Chip rows live in all three
-   card headers and stay in sync. Data is persistent: uplift's sqlite
-   samples backfilled by vanilla's hourly rollups; long windows are
-   server-downsampled (res='avg') and the note says so. */
+/* ---------------- timespans + metric cards ----------------
+   Every chart card owns its own timespan: layout.metricWin[blockId]
+   overrides, absent = follow the global default (layout.chartWindowSec,
+   set via the popover / new cards). Selecting a window in one section
+   never shifts the others (user, 2026-09-18). Data is persistent:
+   uplift's sqlite samples backfilled by vanilla's hourly rollups; long
+   windows are server-downsampled (res='avg') and the note says so.
+   One card per metric is GENERATED from the core.js catalogue — label,
+   formatter and data wiring exist in exactly one place. */
 function windowLabel(sec) {
     return sec >= 86400 ? `${sec / 86400}d`
          : sec >= 3600 ? `${sec / 3600}h` : `${sec / 60}m`;
@@ -1126,196 +1159,235 @@ function fmtSpan(sec) {
          : sec >= 120 ? `${Math.round(sec / 60)}m` : `${Math.round(sec)}s`;
 }
 function windowParam(sec) {
-    const w = sec;
-    return w >= 2592000 ? '30d' : w >= 604800 ? '7d' : w >= 86400 ? '24h'
-         : w >= 21600 ? '6h' : w >= 3600 ? '1h' : w >= 900 ? '15m'
-         : w >= 300 ? '5m' : '1m';
+    return sec >= 2592000 ? '30d' : sec >= 604800 ? '7d' : sec >= 86400 ? '24h'
+         : sec >= 21600 ? '6h' : sec >= 3600 ? '1h' : sec >= 900 ? '15m'
+         : sec >= 300 ? '5m' : '1m';
 }
-function renderTimespanRows() {
+function cardWindow(id) {
+    return layout.metricWin[id] ?? layout.chartWindowSec;
+}
+function setGlobalWindow(sec) {
+    if (sec === layout.chartWindowSec) return;
+    layout.chartWindowSec = sec;
+    C.saveLayout(localStorage, layout);
+    renderCardTsRows();
+    historyDirty = true; loadChartHistory();
+    redrawCharts();          // shared cards without an override follow
+    for (const id of [...metricCharts.keys()]) {
+        if (layout.metricWin[id] === undefined) metricFetch(id, true);
+        else drawMetricChart(id);
+    }
+}
+function setCardWindow(id, sec) {
+    if (sec === layout.chartWindowSec) delete layout.metricWin[id];
+    else layout.metricWin[id] = sec;
+    C.saveLayout(localStorage, layout);
+    if (id === 'chart-tps' || id === 'chart-mem') {
+        // Shared-history cards: refetch history at the NEW window, redraw both
+        historyDirty = true; loadChartHistory();
+        redrawCharts();
+    } else {
+        metricFetch(id, true);
+        drawMetricChart(id);
+    }
+    renderCardTsRows();
+}
+function renderCardTsRows() {
     for (const row of document.querySelectorAll('.ts-row')) {
+        const id = row.dataset.block;
+        const win = cardWindow(id);
+        const wasScrolled = row.scrollLeft;
         row.textContent = '';
         for (const sec of C.LAYOUT_WINDOWS) {
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = 'ts-chip' + (sec === layout.chartWindowSec ? ' on' : '');
+            b.className = 'ts-chip' + (sec === win ? ' on' : '');
             b.textContent = windowLabel(sec);
-            b.onclick = () => setWindow(sec);
+            b.title = windowLabel(sec);
+            b.onclick = () => setCardWindow(id, sec);
             row.append(b);
         }
+        // keep the active chip visible if the row is narrow and scrolled
+        const on = row.querySelector('.on');
+        if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        void wasScrolled;
     }
 }
-function setWindow(sec) {
-    if (sec === layout.chartWindowSec) return;
-    layout.chartWindowSec = sec;
-    C.saveLayout(localStorage, layout);
-    renderTimespanRows();
-    historyDirty = true; loadChartHistory();   // throughput/memory cards
-    exploreRefresh(true);                        // explorer card
-}
 
-/* Metric explorer: one honest mini chart per selected metric, each on its
-   own scale (mixing tok/s with bytes on one axis lies). Selection chips
-   persist in layout.exploreMetrics; data via /metrics/series?keys=… */
-const exploreCharts = new Map();   // key -> {chart, host}
-let exploreSeq = 0;                // stale-response guard (like window race)
-let exploreBucketS = 0;
-function exploreFormat(def) {
-    if (def.fmt === 'bytes') return v => (v === null ? '—' : C.fmtBytes(v));
-    if (def.fmt === 'pct') return v => (v === null ? '—' : v.toFixed(1) + '%');
-    if (def.key.startsWith('engines.')) return v => (v === null ? '—' : String(Math.round(v)));
+/* ---- metric card engine ----
+   Chart cache: id -> {chart, host, fmt, nameEl, noteEl, nowEl, def}. */
+const metricCharts = new Map();
+/* fetch cache keyed by windowParam (cards sharing a window share bytes),
+   each entry {data: series_map, at, fails, bucket_s} */
+const metricCache = {};
+const _fetching = new Set();
+const _seq = {};
+
+function metricDef(key) {
+    return C.EXPLORE_METRICS.find(m => m.key === key) || { key };
+}
+function metricFormat(def) {
+    if (def.fmt === 'bytes') return v => (v === null || v === undefined ? '—' : C.fmtBytes(v));
+    if (def.fmt === 'pct') return v => (v === null || v === undefined ? '—' : v.toFixed(1) + '%');
+    if (def.key === 'engines.active_requests') return v => (v == null ? '—' : String(Math.round(v)));
     return seriesValue;
 }
 function metricLabel(key) {
     return key.replace(/^(rate|tot|engines|mem|cache)\./, '').replace(/_/g, ' ')
         .replace(/tps$/, 'tok/s');
 }
-function renderExploreChips() {
-    const wrap = $('explore-chips');
-    if (!wrap) return;
-    wrap.textContent = '';
-    for (const def of C.EXPLORE_METRICS) {
-        const on = layout.exploreMetrics.includes(def.key);
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'metric-chip' + (on ? ' on' : '');
-        b.textContent = (on ? '✓ ' : '＋ ') + C.tf('uplift.metric.' + def.key, metricLabel(def.key));
-        b.onclick = () => {
-            if (on) layout.exploreMetrics = layout.exploreMetrics.filter(k => k !== def.key);
-            else layout.exploreMetrics = [...layout.exploreMetrics, def.key];
-            C.saveLayout(localStorage, layout);
-            renderExploreChips();
-            exploreRefresh(true);
-        };
-        wrap.append(b);
-    }
-}
-function destroyExploreCharts() {
-    for (const { chart } of exploreCharts.values()) chart.destroy();
-    exploreCharts.clear();
-}
-function exploreRefresh(force) {
-    const grid = $('explore-grid');
-    if (!grid) return;
-    const keys = layout.exploreMetrics;
-    if (!keys.length) {
-        destroyExploreCharts();
-        grid.textContent = '';
-        const d = document.createElement('div');
-        d.className = 'empty';
-        d.textContent = C.tf('uplift.explore.pick', 'Pick at least one metric below');
-        grid.append(d);
-        $('explore-note').textContent = '';
-        return;
-    }
-    renderExploreChips();
-    const seq = ++exploreSeq;
-    if (force || exploreCache.stale()) {
-        const w = windowParam(layout.chartWindowSec);
-        fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent(keys.join(','))}&window=${w}`)
-            .then(d => {
-                if (seq !== exploreSeq) return;   // a newer window/selection won
-                exploreCache.data = d.series_map || {};
-                exploreBucketS = d.bucket_s || 0;
-                drawExplore();
-            })
-            .catch(() => { if (seq === exploreSeq) exploreCache.markFail(); });
-    } else {
-        drawExplore();
-    }
-}
-const exploreCache = {
-    data: {}, at: 0, fails: 0,
-    stale() {
-        const ttl = layout.chartWindowSec >= 604800 ? 60000 : 10000;
-        return this.fails > 2 ? Date.now() - this.at > 30000 : Date.now() - this.at > ttl;
-    },
-    markFail() { this.fails++; this.at = Date.now(); },
-};
-/* Locale resolves after boot; dynamic (JS-built) labels must be refreshed
-   when it lands — the static DOM goes through applyI18n, these don't. */
-function relabelExplore() {
-    renderExploreChips();
-    for (const [key, e] of exploreCharts)
-        e.name.textContent = C.tf('uplift.metric.' + key, metricLabel(key));
-    const empty = $('explore-grid')?.querySelector('.empty');
-    if (empty) empty.textContent = C.tf('uplift.explore.pick', 'Pick at least one metric below');
-    if (exploreCharts.size) drawExplore();   // rebuilds the honest note with strings
-}
-function exploreXAxis(sec) {
+/* Build the DOM for one metric card (called once per card, at boot; the
+   element is what the grid parks/places from then on). */
+function createMetricCard(def) {
+    const id = C.metricBlockId ? C.metricBlockId(def.key) : 'met-' + def.key.replace(/[._]/g, '-');
+    if (document.querySelector(`#grid .card[data-block="${id}"]`)) return;
+    const sec = document.createElement('section');
+    sec.className = 'card grid-stack-item';
+    sec.dataset.id = id; sec.dataset.tab = 'status'; sec.dataset.block = id;
+    sec.setAttribute('gs-id', id);
+    const content = document.createElement('div'); content.className = 'grid-stack-item-content';
+    const frame = document.createElement('div'); frame.className = 'card-frame metric-card';
+    const chrome = document.createElement('div'); chrome.className = 'card-chrome';
+    const handle = document.createElement('div'); handle.className = 'card-handle';
+    const hatch = document.createElement('span'); hatch.className = 'hatch';
+    const hText = document.createElement('span');
+    hText.setAttribute('data-i18n', 'uplift.metric.' + def.key);
+    hText.textContent = metricLabel(def.key);
+    handle.append(hatch, hText);
+    const rm = document.createElement('button');
+    rm.type = 'button'; rm.className = 'card-remove';
+    rm.title = 'Remove from dashboard';
+    rm.setAttribute('data-i18n-title', 'uplift.layout.remove');
+    rm.setAttribute('aria-label', 'Remove from dashboard');
+    rm.textContent = '×';
+    rm.onclick = () => removeCard(id);
+    chrome.append(handle, rm);
+    const pad = document.createElement('div'); pad.className = 'card-pad';
+    const h2 = document.createElement('h2');
+    const title = document.createElement('span');
+    title.setAttribute('data-i18n', 'uplift.metric.' + def.key);
+    title.textContent = metricLabel(def.key);
+    title.dataset.en = metricLabel(def.key);
+    const now = document.createElement('b'); now.className = 'metric-now';
+    const right = document.createElement('span'); right.className = 'right';
+    right.append(now);
+    const note = document.createElement('span'); note.className = 'metric-res';
+    right.append(note);
+    const tsRow = document.createElement('div');
+    tsRow.className = 'ts-row'; tsRow.dataset.block = id;
+    tsRow.setAttribute('role', 'group'); tsRow.setAttribute('aria-label', 'Timespan');
+    const body = document.createElement('div'); body.className = 'card-body metric-body';
+    const host = document.createElement('div'); host.className = 'metric-plot';
+    host.id = id + '-plot';
+    body.append(host);
+    h2.append(title, right);
+    pad.append(h2, tsRow, body);
+    frame.append(chrome, pad); content.append(frame); sec.append(content);
+    $('grid').append(sec);
     const col = chartColors();
-    const dayish = sec >= 86400;
-    return { stroke: col.dim, width: 1, size: 34, font: axisFont,
+    const fmt = metricFormat(def);
+    const opts = {
+        width: 300, height: 120, padding: [4, 6, 0, 0],
+        cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
+        legend: { show: false },
+        scales: { x: { time: true }, y: { auto: true } },
+        axes: [metricXAxis(cardWindow(id), col), yAxis(col, { size: 44, label: '' })],
+        series: [{}, { label: metricLabel(def.key), stroke: col.blue, width: 1.6,
+                       fill: col.blue + '1c', points: { show: false },
+                       value: v => fmt(v === undefined ? null : v) }],
+    };
+    const chart = new uPlot(opts, [[], []], host);
+    bindCursorTip(chart);
+    metricCharts.set(id, { chart, host, fmt, def, nameEl: title, nowEl: now, noteEl: note });
+    if (!host._ro) {
+        host._ro = new ResizeObserver(() => { fitMetricPlot(id); });
+        host._ro.observe(host);
+    }
+}
+function fitMetricPlot(id) {
+    const e = metricCharts.get(id);
+    if (!e) return;
+    // The card grows/shrinks via the row-height engine; the plot takes the
+    // space left after title + timespan row. Floor 90px keeps tiny cards
+    // readable; _neededUnits() treats .metric-plot min-height as the
+    // content demand, so a card is never sized below its chart.
+    const host = e.host;
+    // Height comes from flexbox (card-body fills the grid box, min 90px);
+    // pinning style.height here would fight the row engine when shrinking.
+    const h = Math.max(90, host.clientHeight || 90);
+    if (host.clientWidth > 0) e.chart.setSize({ width: host.clientWidth, height: h });
+}
+function fitAllMetricPlots() { for (const id of metricCharts.keys()) fitMetricPlot(id); }
+function metricXAxis(win, col) {
+    const dayish = win >= 86400;
+    return { stroke: col.dim, width: 1, size: 30, font: axisFont,
         values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
             dayish ? { month: 'short', day: 'numeric' }
                    : { hour: '2-digit', minute: '2-digit' })) };
 }
-function drawExplore() {
-    const grid = $('explore-grid');
-    if (!grid) return;
-    const keys = layout.exploreMetrics;
-    // Rebuild hosts only when the set changes (avoid canvas churn per poll)
-    const cur = [...exploreCharts.keys()];
-    if (cur.join('|') !== keys.join('|')) {
-        destroyExploreCharts();
-        grid.textContent = '';
-        for (const key of keys) {
-            const def = C.EXPLORE_METRICS.find(m => m.key === key) || { key };
-            const cell = document.createElement('div');
-            cell.className = 'explore-cell';
-            const h = document.createElement('div');
-            h.className = 'explore-cell-h';
-            const name = document.createElement('b');
-            name.textContent = C.tf('uplift.metric.' + key, metricLabel(key));
-            const now = document.createElement('span');
-            now.className = 'explore-now';
-            h.append(name, now);
-            const host = document.createElement('div');
-            host.className = 'explore-mini';
-            cell.append(h, host);
-            grid.append(cell);
-            const col = chartColors();
-            const fmt = exploreFormat(def);
-            const opts = {
-                width: host.clientWidth || 300, height: 120, padding: [4, 6, 0, 0],
-                cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
-                legend: { show: false },
-                scales: { x: { time: true }, y: { auto: true, distr: false } },
-                axes: [exploreXAxis(layout.chartWindowSec),
-                       yAxis(col, { size: 44, label: '' })],
-                series: [{}, { label: metricLabel(key), stroke: col.blue, width: 1.6,
-                               fill: col.blue + '1c', points: { show: false },
-                               value: v => fmt(v === undefined ? null : v) }],
-            };
-            const chart = new uPlot(opts, [[], []], host);
-            bindCursorTip(chart);
-            exploreCharts.set(key, { chart, host, fmt, name });
-        }
-        // One observer for the whole grid: mini widths follow the card.
-        if (!grid._ro) {
-            grid._ro = new ResizeObserver(() => {
-                for (const [, e] of exploreCharts)
-                    if (e.host.clientWidth > 0) e.chart.setSize({ width: e.host.clientWidth, height: 120 });
-            });
-            grid._ro.observe(grid);
-        }
-    }
-    let hourlyOnly = false;
-    for (const key of keys) {
-        const e = exploreCharts.get(key);
-        if (!e) continue;
-        const pts = exploreCache.data[key] || [];
-        const ts = pts.map(p => p.ts * 1000), vs = pts.map(p => p.v);
-        e.chart.setData([ts, vs]);
-        const last = vs.length ? vs[vs.length - 1] : null;
-        e.name.nextElementSibling.textContent = last === null || last === undefined
-            ? '—' : e.fmt(last);
-        if (pts.length && pts[pts.length - 1].res === 'hourly') hourlyOnly = true;
-    }
-    // Honest note: what resolution you are actually looking at.
+function metricFetch(id, force) {
+    const e = metricCharts.get(id);
+    if (!e) return;
+    const w = windowParam(cardWindow(id));
+    const key = e.def.key;
+    const cache = metricCache[w] || (metricCache[w] = { data: {}, at: 0, fails: 0, bucket_s: 0 });
+    const ttl = cardWindow(id) >= 604800 ? 60000 : 10000;
+    const stale = cache.fails > 2 ? Date.now() - cache.at > 30000 : Date.now() - cache.at > ttl;
+    if (!force && !stale) { drawMetricChart(id); return; }
+    const sk = w + '|' + key;
+    if (_fetching.has(sk)) return;
+    _fetching.add(sk);
+    const seq = (_seq[sk] = (_seq[sk] || 0) + 1);
+    fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent(key)}&window=${w}`)
+        .then(d => {
+            cache.at = Date.now(); cache.fails = 0;
+            Object.assign(cache.data, d.series_map || {});
+            cache.bucket_s = d.bucket_s || 0;
+        })
+        .catch(() => { cache.fails++; cache.at = Date.now(); })
+        .finally(() => {
+            _fetching.delete(sk);
+            if (_seq[sk] === seq) drawMetricChart(id);   // newest response wins
+        });
+}
+function drawMetricChart(id) {
+    const e = metricCharts.get(id);
+    if (!e) return;
+    const w = windowParam(cardWindow(id));
+    const cache = metricCache[w] || { data: {}, bucket_s: 0 };
+    const pts = (cache.data[e.def.key] || []).filter(p =>
+        p.ts * 1000 >= Date.now() - cardWindow(id) * 1000 - 60000);
+    const ts = pts.map(p => p.ts * 1000), vs = pts.map(p => p.v);
+    e.chart.setData([ts, vs]);
+    // per-card x-axis format follows this card's window
+    e.chart.axes[0] = metricXAxis(cardWindow(id), chartColors());
+    const last = vs.length ? vs[vs.length - 1] : null;
+    e.nowEl.textContent = fmtLast(e.fmt, last);
     const bits = [];
-    if (exploreBucketS >= 60) bits.push(`${C.tf('uplift.explore.avg', 'averaged')} ≤ ${fmtSpan(Math.max(60, exploreBucketS))}`);
-    if (hourlyOnly) bits.push(C.tf('uplift.explore.hourly', 'hourly rollups'));
-    $('explore-note').textContent = bits.length ? bits.join(' · ') : 'live';
+    if (cache.bucket_s >= 60) bits.push(`${C.tf('uplift.explore.avg', 'averaged')} ≤ ${fmtSpan(Math.max(60, cache.bucket_s))}`);
+    if (pts.length && pts[pts.length - 1].res === 'hourly') bits.push(C.tf('uplift.explore.hourly', 'hourly rollups'));
+    e.noteEl.textContent = bits.length ? bits.join(' · ') : 'live';
+}
+/* Latest reading gets real precision; hover stays compact. Both share one
+   formatter so the legend and the big readout can never disagree. */
+function fmtLast(fmt, v) {
+    if (v === null || v === undefined) return '—';
+    const s = fmt(v);
+    if (/^\d+(\.\d+)?$/.test(s) && Math.abs(v) >= 10) return fmtNumberPrecise(v);
+    return s;
+}
+function fmtNumberPrecise(v) { return C.fmtNumber(v); }
+function drawAllMetricCharts() {
+    for (const id of [...metricCharts.keys()]) { metricFetch(id, false); drawMetricChart(id); }
+}
+function relabelExplore() {
+    // JS-built dynamic bits (window chips + per-card readouts); i18n-named
+    // titles are [data-i18n] and covered by applyI18n already.
+    renderCardTsRows();
+    for (const [id, e] of metricCharts) {
+        e.chart.series[1].label = metricLabel(e.def.key);
+        drawMetricChart(id);
+    }
 }
 
 /* Pointer left the plot: drop the pinned hover so legends show latest again. */
@@ -6139,12 +6211,13 @@ restartPolling();
 pollGatewayInfo();
 loadChartHistory();
 setInterval(() => { if (!document.hidden) loadChartHistory(); }, 60000);
-// Explorer card: boot + keep-alive. exploreRefresh() only refetches when its
-// cache is stale (10 s short windows / 60 s week+), so a 5 s beat is cheap.
-renderTimespanRows();
-renderExploreChips();
-exploreRefresh(true);
-setInterval(() => { if (!document.hidden && currentTab() === 'status') exploreRefresh(false); }, 5000);
+// Metric cards: generate DOM from the catalogue BEFORE grid init so the
+// board places them like any static block; boot fetch + keep-alive (the
+// per-window cache TTL gates refetches: 10 s short, 60 s week+).
+for (const def of C.EXPLORE_METRICS) createMetricCard(def);
+renderCardTsRows();
+drawAllMetricCharts();
+setInterval(() => { if (!document.hidden && currentTab() === 'status') drawAllMetricCharts(); }, 5000);
 pollUsage(); pollLogs();
 connectEventStream();
 setInterval(pollGatewayInfo, 10000);

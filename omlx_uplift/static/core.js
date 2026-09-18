@@ -150,15 +150,18 @@ function mean(values) {
    redesign. Old v1 blob is dead bytes (same no-migration tradeoff as
    F-020). */
 const LAYOUT_KEY = 'omlx-uplift-layout-v2';
-const LAYOUT_DEFAULTS = { chartWindowSec: 300, intervalMs: 1000, logsHideDebug: true, percentile: 'p95', collapsed: {}, exploreMetrics: ['avg_generation_tps', 'rate.completion_tokens_s'] };
+const LAYOUT_DEFAULTS = { chartWindowSec: 300, intervalMs: 1000, logsHideDebug: true, percentile: 'p95', collapsed: {}, metricWin: {} };
 const LAYOUT_WINDOWS = [60, 300, 900, 3600, 21600, 86400, 604800, 2592000];
 const LAYOUT_INTERVALS = [500, 1000, 2000, 5000];
 const LAYOUT_PERCENTILES = ['p50', 'p90', 'p95', 'p99'];
-/* Metric catalogue for the explorer card. `key` is what the collector
-   persists (metrics.sqlite3); `fmt` picks the value formatter; `hourly`
-   marks keys whose pre-uplift history can be derived from vanilla's
-   hourly rollups (so 30d windows are not blank before uplift's install
-   day). */
+/* Metric catalogue — each entry becomes its own dashboard card (block id
+   met-<key with . _ -> ->). `key` is what the collector persists
+   (metrics.sqlite3); `fmt` picks the value formatter; `hourly` marks keys
+   whose pre-uplift history can be derived from vanilla's hourly rollups
+   (so 30d windows are not blank before uplift's install day).
+   engines.loaded stays collected but is NOT a card: it counted every
+   catalog entry (20) whether resident or not — see collector fix; it was
+   removed from the board per user 2026-09-18. */
 const EXPLORE_METRICS = [
     { key: 'avg_generation_tps', hourly: true },
     { key: 'avg_prefill_tps', hourly: true },
@@ -167,12 +170,16 @@ const EXPLORE_METRICS = [
     { key: 'rate.requests_s', hourly: true },
     { key: 'cache_efficiency', hourly: true, fmt: 'pct' },
     { key: 'engines.active_requests' },
-    { key: 'engines.loaded' },
     { key: 'mem.percent' },
     { key: 'mem.used_bytes', fmt: 'bytes' },
     { key: 'cache.total_bytes', fmt: 'bytes' },
 ];
 const EXPLORE_KEYS = EXPLORE_METRICS.map(m => m.key);
+function metricBlockId(key) { return 'met-' + key.replace(/[._]/g, '-'); }
+function blockMetricKey(id) {
+    if (!id || !id.startsWith('met-')) return null;
+    return EXPLORE_KEYS.find(k => metricBlockId(k) === id) || null;
+}
 function loadLayout(storage) {
     let l = {};
     try { l = JSON.parse(storage.getItem(LAYOUT_KEY)) || {}; } catch (_) { /* denied storage */ }
@@ -182,14 +189,18 @@ function loadLayout(storage) {
         logsHideDebug: l.logsHideDebug !== false,
         percentile: LAYOUT_PERCENTILES.includes(l.percentile) ? l.percentile : LAYOUT_DEFAULTS.percentile,
         collapsed: (l.collapsed && typeof l.collapsed === 'object') ? { ...l.collapsed } : {},
-        exploreMetrics: (() => {
-            // Explicit empty selection is legit (user deselected all); only
-            // garbage or fully-unknown lists fall back to the defaults.
-            if (Array.isArray(l.exploreMetrics)) {
-                const sel = l.exploreMetrics.filter(k => EXPLORE_KEYS.includes(k));
-                if (sel.length || l.exploreMetrics.length === 0) return sel;
-            }
-            return [...LAYOUT_DEFAULTS.exploreMetrics];
+        // Per-metric-card window overrides (block id -> seconds); absent =
+        // follow chartWindowSec. The chip row of a card with an override
+        // shows the override; changing THROUGHPUT/MEMORY windows never
+        // moves it and vice versa (user: sections must not shift together).
+        metricWin: (() => {
+            const out = {};
+            if (l.metricWin && typeof l.metricWin === 'object')
+                for (const [id, w] of Object.entries(l.metricWin))
+                    if ((EXPLORE_KEYS.some(k => metricBlockId(k) === id)
+                         || id === 'chart-tps' || id === 'chart-mem')
+                        && LAYOUT_WINDOWS.includes(w)) out[id] = w;
+            return out;
         })(),
         // GridStack board state — geometry validation lives in
         // uplift_layout.js normalizeLayout; here just shape-guard.
@@ -414,6 +425,6 @@ return { num, r, normalize, modelState, appendSample, pruneOlderThan, eventsBetw
          setLocale, getLocale, t, tf,
          PREFS_KEY, PREFS_DEFAULTS, THEMES, loadPrefs, savePrefs,
          LAYOUT_KEY, LAYOUT_DEFAULTS, LAYOUT_WINDOWS, LAYOUT_INTERVALS, LAYOUT_PERCENTILES,
-         EXPLORE_METRICS, EXPLORE_KEYS, loadLayout, saveLayout, clampSpan,
+         EXPLORE_METRICS, EXPLORE_KEYS, metricBlockId, blockMetricKey, loadLayout, saveLayout, clampSpan,
          fmtCompact, fmtBytes, fmtDuration, fmtNumber, errorText };
 });

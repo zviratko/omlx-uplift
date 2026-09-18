@@ -356,5 +356,17 @@
  "uplift.layout.reset2": "Reset to default",
  "uplift.layout.save_failed": "Failed to save layout",
  "uplift.layout.drag_to_move": "Drag to move",
- "uplift.layout.open_new": "Открыть в новой вкладке"
+ "uplift.layout.open_new": "Открыть в новой вкладке",
+ "uplift.explore.avg": "усреднено",
+ "uplift.explore.hourly": "часовые сводки",
+ "uplift.metric.avg_generation_tps": "генерация ток/с",
+ "uplift.metric.avg_prefill_tps": "приставка ток/с",
+ "uplift.metric.cache_efficiency": "эффективность кэша",
+ "uplift.metric.mem.percent": "память %",
+ "uplift.metric.mem.used_bytes": "занято RAM",
+ "uplift.metric.cache.total_bytes": "кэш на диске",
+ "uplift.metric.rate.prompt_tokens_s": "промпт ток/с",
+ "uplift.metric.rate.completion_tokens_s": "заверш. ток/с",
+ "uplift.metric.rate.requests_s": "запросов/с",
+ "uplift.metric.engines.active_requests": "активные запросы"
 }

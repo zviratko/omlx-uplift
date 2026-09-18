@@ -1097,38 +1097,35 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 .row-editor .se-prof-name { flex: 1; min-width: 120px; background: transparent;
     border: 1px solid var(--edge); color: var(--ink); padding: 2px 6px; font: inherit; }
 
-/* ---------------- timespan chips + metrics explorer ---------------- */
-/* HUD-style segmented timespan picker; lives in every chart card header.
-   Square-cut chips (no radius) match the cockpit chrome language. */
+/* ---------------- timespans + metric cards ---------------- */
+/* HUD-style segmented timespan picker; one row per chart card, each card
+   owns its window (metricWin override over the global default). Square-cut
+   chips match the cockpit chrome language. */
 .ts-row { display: flex; gap: 0; margin: 2px 0 8px; width: max-content;
-    border: 1px solid var(--edge); }
+    max-width: 100%; border: 1px solid var(--edge); overflow-x: auto;
+    flex-wrap: nowrap; scrollbar-width: thin; }
 .ts-chip { background: transparent; border: 0; border-right: 1px solid var(--edge);
     color: var(--dim); font: 600 10px/1 var(--mono); letter-spacing: .08em;
-    padding: 5px 10px; cursor: pointer; transition: color .15s, background .15s; }
+    padding: 4px 8px; cursor: pointer; transition: color .15s, background .15s;
+    flex: none; }
 .ts-chip:last-child { border-right: 0; }
 .ts-chip:hover { color: var(--ink); background: var(--row2); }
 .ts-chip.on { background: var(--chart-2, #e8a020); color: #14100a; }
-.ts-row { /* never wrap into the chart on narrow columns */ flex-wrap: nowrap;
-    overflow-x: auto; scrollbar-width: thin; }
 
-.explore-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
-.metric-chip { background: transparent; border: 1px solid var(--edge);
-    color: var(--dim); font: 500 11px/1 var(--mono); padding: 5px 9px;
-    cursor: pointer; transition: all .15s; }
-.metric-chip:hover { color: var(--ink); border-color: var(--dim); }
-.metric-chip.on { background: color-mix(in srgb, var(--chart-2, #e8a020) 16%, transparent);
-    border-color: var(--chart-2, #e8a020); color: var(--ink); }
-.explore-grid { display: grid; gap: 10px;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
-.explore-cell { border: 1px solid var(--edge); background: var(--row2);
-    padding: 6px 8px; }
-.explore-cell-h { display: flex; justify-content: space-between; align-items: baseline;
-    gap: 8px; margin-bottom: 2px; }
-.explore-cell-h b { font: 600 11px/1.3 var(--mono); color: var(--ink);
-    text-transform: uppercase; letter-spacing: .06em; overflow: hidden;
-    white-space: nowrap; text-overflow: ellipsis; }
-.explore-now { font: 700 13px/1 var(--mono); color: var(--chart-2, #e8a020);
-    flex: none; }
-.explore-mini { width: 100%; }
-#explore-note { font: 500 10px/1 var(--mono); color: var(--dim);
-    letter-spacing: .1em; text-transform: uppercase; }
+/* Metric cards: tight header (name + big current value + resolution note),
+   ts row, chart fills the rest of the card body. */
+.metric-card .card-pad { padding: 10px 12px 12px; }
+.metric-card h2 { margin: 0 0 4px; font-size: 12px; }
+.metric-card h2 .right { gap: 8px; margin-left: auto; }
+.metric-now { font: 700 14px/1 var(--mono); color: var(--chart-2, #e8a020);
+    letter-spacing: 0; }
+.metric-res { font: 500 9px/1 var(--mono); color: var(--dim);
+    letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.metric-card .ts-row { margin: 0 0 6px; }
+/* Fill the grid box: frame stretches, pad stretches, chart takes the rest.
+   Same 4-class specificity as gridstack's size-to-content align rule. */
+main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metric-card {
+    flex: 1 0 100%; }
+.metric-card .card-pad { flex: 1 1 auto; display: flex; flex-direction: column; }
+.metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 90px; }
+.metric-plot { flex: 1 1 auto; min-height: 90px; min-width: 0; }

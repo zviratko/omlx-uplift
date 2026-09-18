@@ -215,6 +215,14 @@ test('layout persistence and clamping', () => {
 });
 
 // GridStack layout contract (uplift twin of classic dashboard_layout.js).
+test('layout: every met-* block id matches a catalogue card', () => {
+    for (const id of UPL.BLOCK_IDS.filter(i => i.startsWith('met-')))
+        assert.ok(C.blockMetricKey(id), id + ' unknown to the metric catalogue');
+    for (const def of C.EXPLORE_METRICS)
+        assert.ok(UPL.BLOCK_IDS.includes(C.metricBlockId(def.key)),
+            C.metricBlockId(def.key) + ' missing from BLOCK_IDS');
+});
+
 // The module attaches to globalThis in Node (no window), same as the page.
 require('../omlx_uplift/static/uplift_layout.js');
 const UPL = globalThis.UpliftLayout;
@@ -388,7 +396,7 @@ test('setLocale(): bad args reset to en/{}; getLocale reflects last call', () =>
     assert.deepStrictEqual(C.getLocale(), { lang: 'en', strings: {} });
 });
 
-// ---- chart explorer: windows + metric selection ----
+// ---- metric cards: per-card windows + catalogue ----
 test('layout: 7d/30d windows accepted, junk rejected', () => {
     assert.ok(C.LAYOUT_WINDOWS.includes(604800));
     assert.ok(C.LAYOUT_WINDOWS.includes(2592000));
@@ -398,20 +406,24 @@ test('layout: 7d/30d windows accepted, junk rejected', () => {
     store.setItem(C.LAYOUT_KEY, JSON.stringify({ chartWindowSec: 12345 }));
     assert.strictEqual(C.loadLayout(store).chartWindowSec, C.LAYOUT_DEFAULTS.chartWindowSec);
 });
-test('layout: exploreMetrics filters unknown keys, defaults when absent/garbage', () => {
+test('layout: metricWin keeps valid per-card windows, drops junk', () => {
     const store = k => { const s = { _d: {}, getItem(x) { return this._d[x] ?? null; }, setItem(x, v) { this._d[x] = v; } };
         s._d[C.LAYOUT_KEY] = JSON.stringify(k); return s; };
-    assert.deepStrictEqual(C.loadLayout(store({})).exploreMetrics,
-        C.LAYOUT_DEFAULTS.exploreMetrics);
-    assert.deepStrictEqual(C.loadLayout(store('x')).exploreMetrics,
-        C.LAYOUT_DEFAULTS.exploreMetrics);
-    assert.deepStrictEqual(
-        C.loadLayout(store({ exploreMetrics: ['mem.percent', 'bogus.key', 'avg_generation_tps'] })).exploreMetrics,
-        ['mem.percent', 'avg_generation_tps']);
-    assert.deepStrictEqual(C.loadLayout(store({ exploreMetrics: ['bogus'] })).exploreMetrics,
-        C.LAYOUT_DEFAULTS.exploreMetrics);   // filtering to empty falls back
-    assert.deepStrictEqual(C.loadLayout(store({ exploreMetrics: [] })).exploreMetrics,
-        []);   // deliberate "none selected" survives reload
+    assert.deepStrictEqual(C.loadLayout(store({})).metricWin, {});
+    const ok = { 'met-mem-percent': 86400, 'chart-tps': 604800 };
+    assert.deepStrictEqual(C.loadLayout(store({ metricWin: ok })).metricWin, ok);
+    assert.deepStrictEqual(   // bogus block id / bogus window / wrong types
+        C.loadLayout(store({ metricWin: { 'met-nope': 3600, 'met-gen-x': '1h', 'met-mem-percent': 7 } })).metricWin,
+        {});
+});
+test('metricBlockId maps every catalogue key to a legal block id and back', () => {
+    for (const def of C.EXPLORE_METRICS) {
+        const id = C.metricBlockId(def.key);
+        assert.match(id, /^met-[a-z0-9-]+$/);
+        assert.strictEqual(C.blockMetricKey(id), def.key, id + ' must round-trip');
+    }
+    assert.strictEqual(C.blockMetricKey('chart-tps'), null);
+    assert.strictEqual(C.blockMetricKey('met-bogus'), null);
 });
 test('explore catalogue: unique keys, one fmt each, exports agree', () => {
     const keys = C.EXPLORE_METRICS.map(m => m.key);

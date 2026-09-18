@@ -356,5 +356,17 @@
  "uplift.layout.reset2": "Reset to default",
  "uplift.layout.save_failed": "Failed to save layout",
  "uplift.layout.drag_to_move": "Drag to move",
- "uplift.layout.open_new": "在新标签页打开"
+ "uplift.layout.open_new": "在新标签页打开",
+ "uplift.explore.avg": "平均值",
+ "uplift.explore.hourly": "小时汇总",
+ "uplift.metric.avg_generation_tps": "生成 tok/s",
+ "uplift.metric.avg_prefill_tps": "前缀 tok/s",
+ "uplift.metric.cache_efficiency": "缓存效率",
+ "uplift.metric.mem.percent": "内存 %",
+ "uplift.metric.mem.used_bytes": "已用内存",
+ "uplift.metric.cache.total_bytes": "磁盘缓存",
+ "uplift.metric.rate.prompt_tokens_s": "提示 tok/s",
+ "uplift.metric.rate.completion_tokens_s": "补全 tok/s",
+ "uplift.metric.rate.requests_s": "请求/s",
+ "uplift.metric.engines.active_requests": "活动请求"
 }

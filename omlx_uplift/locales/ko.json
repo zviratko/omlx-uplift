@@ -371,5 +371,17 @@
  "uplift.layout.reset2": "Reset to default",
  "uplift.layout.save_failed": "Failed to save layout",
  "uplift.layout.drag_to_move": "Drag to move",
- "uplift.layout.open_new": "새 탭에서 열기"
+ "uplift.layout.open_new": "새 탭에서 열기",
+ "uplift.explore.avg": "평균값",
+ "uplift.explore.hourly": "시간 롤업",
+ "uplift.metric.avg_generation_tps": "생성 tok/s",
+ "uplift.metric.avg_prefill_tps": "프리픽스 tok/s",
+ "uplift.metric.cache_efficiency": "캐시 효율",
+ "uplift.metric.mem.percent": "메모리 %",
+ "uplift.metric.mem.used_bytes": "사용 RAM",
+ "uplift.metric.cache.total_bytes": "디스크 캐시",
+ "uplift.metric.rate.prompt_tokens_s": "프롬프트 tok/s",
+ "uplift.metric.rate.completion_tokens_s": "완료 tok/s",
+ "uplift.metric.rate.requests_s": "요청/s",
+ "uplift.metric.engines.active_requests": "활성 요청"
 }

@@ -107,17 +107,31 @@ class Collector:
 
             pool = engine_pool()
             if pool is not None:
-                ids = list(pool.get_model_ids())
-                pairs["engines.loaded"] = float(len(ids))
+                loaded = pool.get_loaded_model_ids()
+                pairs["engines.loaded"] = float(len(loaded))
+                # Active = running requests from the scheduler's published
+                # admin snapshot (exactly what classic /admin/api/stats
+                # counts), plus engine-tracked non-scheduler activity
+                # (DFlash/non-streaming). num_requests_running does NOT
+                # exist — reading it silently pinned this metric at 0.
                 active = 0
-                for mid in ids:
+                for mid in loaded:
                     try:
                         entry = pool.get_entry(mid)
-                        sched = getattr(entry, "engine", None)
-                        sched = getattr(sched, "_engine", sched)
-                        q = getattr(sched, "num_requests_running", None)
-                        if q is not None:
-                            active += int(q)
+                        eng = getattr(entry, "engine", None)
+                        if eng is None:
+                            continue
+                        async_core = getattr(eng, "_engine", None)
+                        core = getattr(async_core, "engine", None) if async_core else None
+                        sched = getattr(core, "scheduler", None) if core else \
+                            getattr(eng, "scheduler", None)
+                        snap_fn = getattr(sched, "snapshot_for_admin", None)
+                        if callable(snap_fn):
+                            snap = snap_fn() or {}
+                            active += len(snap.get("running_by_id", {}))
+                        act_fn = getattr(eng, "get_activity_snapshot", None)
+                        if callable(act_fn):
+                            active += int((act_fn() or {}).get("active_requests", 0) or 0)
                     except Exception:
                         pass
                 pairs["engines.active_requests"] = float(active)
@@ -148,23 +162,55 @@ class Collector:
                     pairs["mem.percent"] = 100.0 * used / maxb
         except Exception:
             pass
-        # Runtime cache totals + top-3 hot-cache models (cheap per-entry
-        # probes; classic's full observability builder is too heavy per tick)
+        # SSD disk-cache total + per-model hot cache. Classic aggregates
+        # scheduler.get_ssd_cache_stats()["ssd_cache"].total_size_bytes per
+        # loaded model (scoped via the manager when available); the engine
+        # attribute get_runtime_cache_stats does not exist on regular
+        # schedulers — that wrong source kept cache.total_bytes at 0.
         try:
+            from dataclasses import asdict, is_dataclass
+
             pool = engine_pool()
             if pool is not None:
                 total_bytes = 0
                 hot: dict[str, int] = {}
-                for mid in pool.get_model_ids():
+                for mid in pool.get_loaded_model_ids():
                     try:
                         entry = pool.get_entry(mid)
                         eng = getattr(entry, "engine", None)
-                        eng = getattr(eng, "_engine", eng)
-                        fn = getattr(eng, "get_runtime_cache_stats", None)
+                        async_core = getattr(eng, "_engine", None)
+                        core = getattr(async_core, "engine", None) if async_core else None
+                        sched = getattr(core, "scheduler", None) if core else \
+                            getattr(eng, "scheduler", None)
+                        if sched is None:
+                            # DFlash primary: engine exposes the stats itself
+                            sched = eng
+                        fn = getattr(sched, "get_ssd_cache_stats", None)
+                        if not callable(fn):
+                            fn = getattr(eng, "get_runtime_cache_stats", None)
                         if not callable(fn):
                             continue
                         st = fn() or {}
-                        total_bytes += int(st.get("total_size_bytes", 0) or 0)
+                        ssd = st.get("ssd_cache", st)
+                        if is_dataclass(ssd):
+                            ssd = asdict(ssd)
+                        elif hasattr(ssd, "to_dict"):
+                            ssd = ssd.to_dict()
+                        if not isinstance(ssd, dict):
+                            ssd = {}
+                        scoped = getattr(
+                            getattr(sched, "paged_ssd_cache_manager", None),
+                            "get_stats_for_model", None)
+                        if callable(scoped):
+                            try:
+                                s = scoped(mid)
+                                if is_dataclass(s):
+                                    ssd = asdict(s)
+                                elif isinstance(s, dict):
+                                    ssd = s
+                            except Exception:
+                                pass
+                        total_bytes += int(ssd.get("total_size_bytes", 0) or 0)
                         hb = int(st.get("hot_cache_size_bytes", 0) or 0)
                         if hb > 0:
                             hot[mid] = hb
