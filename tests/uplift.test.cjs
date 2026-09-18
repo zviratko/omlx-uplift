@@ -215,6 +215,31 @@ test('uplift layout: small stat tiles clamp to 4, others to 6', () => {
     assert.strictEqual(n.blocks[0].w, 4);
     assert.strictEqual(n.blocks[1].w, 6);
 });
+test('uplift layout: normalize resolves overlapping blocks deterministically', () => {
+    // tokens and prefill both at 0,0 (the stale-storage case) — one must
+    // be pushed down, and running normalize twice must not move anything
+    // further (idempotent = Reset renders identically every time)
+    const a = UPL.normalizeLayout({ blocks: [
+        { id: 'prefill', x: 0, y: 0, w: 4, h: 20 },
+        { id: 'tokens', x: 0, y: 0, w: 4, h: 20 },
+        { id: 'gen', x: 4, y: 0, w: 4, h: 20 },
+    ] });
+    const placed = a.blocks;
+    for (let i = 0; i < placed.length; i++)
+        for (let j = i + 1; j < placed.length; j++) {
+            const p = placed[i], q = placed[j];
+            const hit = p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h;
+            assert.ok(!hit, `${p.id} overlaps ${q.id}`);
+        }
+    const b = UPL.normalizeLayout(a);
+    assert.deepStrictEqual(b.blocks, a.blocks);
+    // no overlap, no move
+    const clean = UPL.normalizeLayout({ blocks: [
+        { id: 'feed', x: 0, y: 0, w: 24, h: 18 },
+        { id: 'gen', x: 0, y: 18, w: 4, h: 20 },
+    ] });
+    assert.deepStrictEqual(clean.blocks.map(x => [x.id, x.y]), [['feed', 0], ['gen', 18]]);
+});
 test('uplift layout: normalize drops unknown/dup blocks, clamps geometry', () => {
     const n = UPL.normalizeLayout({ width: 'banana', blocks: [
         { id: 'gen', x: -3, y: -1, w: 99 },

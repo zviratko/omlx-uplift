@@ -98,6 +98,32 @@
         return { id, x, y, w, h };
     }
 
+    // Freeform drag/resize can leave two cards occupying the same cells
+    // (drop onto an occupied spot). An overlap saved to storage reflows
+    // differently on every load — that is what "reset moves cards down"
+    // was. Push overlapping cards down until the board is clean; order is
+    // kept, only y grows.
+    function resolveOverlaps(blocks) {
+        const placed = [];
+        for (const src of [...blocks].sort((a, z) => a.y - z.y || a.x - z.x)) {
+            const block = { ...src };
+            let moved = true;
+            while (moved) {
+                moved = false;
+                for (const p of placed) {
+                    if (block.x < p.x + p.w && p.x < block.x + block.w
+                        && block.y < p.y + p.h && p.y < block.y + block.h) {
+                        block.y = p.y + p.h;
+                        moved = true;
+                    }
+                }
+            }
+            placed.push(block);
+        }
+        const byId = new Map(placed.map(b => [b.id, b]));
+        return blocks.map(b => byId.get(b.id));   // keep caller's order
+    }
+
     // Accepts anything storage may hold and returns a layout the grid can
     // load. Unknown blocks are dropped, so a layout may legitimately
     // contain fewer than BLOCK_IDS.length blocks.
@@ -106,7 +132,7 @@
             return defaultLayout();
         }
         const seen = new Set();
-        const blocks = raw.blocks.map(b => normalizeBlock(b, seen)).filter(Boolean);
+        const blocks = resolveOverlaps(raw.blocks.map(b => normalizeBlock(b, seen)).filter(Boolean));
         const width = WIDTH_IDS.includes(raw.width) ? raw.width : 'default';
         return { version: 1, width, blocks };
     }
@@ -126,6 +152,7 @@
         WIDTH_IDS,
         defaultLayout,
         normalizeLayout,
+        resolveOverlaps,
         widthClass,
     };
 })(typeof window !== 'undefined' ? window : globalThis);

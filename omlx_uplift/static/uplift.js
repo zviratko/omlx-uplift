@@ -290,7 +290,11 @@ function ensureUpliftGrid() {
         column: UPL.COLUMNS,
         cellHeight: 8,
         margin: 12,
-        sizeToContent: true,
+        // sizeToContent OFF on purpose: it re-grows each card on every
+        // content update and shoves the row below around (misalignment,
+        // "reset moves cards down"). We measure content ourselves once per
+        // apply and give a whole row one shared height — see _rowAlign.
+        sizeToContent: false,
         float: true,   // freeform: dropped cards stay where they are put (no vertical compaction)
         animate: true,
         minRow: 1,
@@ -343,18 +347,85 @@ function ensureUpliftGrid() {
     applyUpliftLayout(upLayout);
 }
 
-/* Block heights follow their content (stats polling, feed growth). */
+/* Geometry source of truth = the layout (saved or default). This pass
+   only does two things: (1) rows whose CONTENT no longer fits grow, and
+   every row below them shifts down accordingly (never sideways);
+   (2) cards sharing a y always share the resulting height and top, so
+   rows render as aligned horizontal bands. Stored gaps are preserved:
+   a row keeps max(its saved height, what content needs) at
+   max(saved y, cursor). Idempotent on settled content — that is why
+   Reset renders identically every time now. */
+function _neededUnits(el) {
+    const pad = el.querySelector('.card-pad');
+    if (!pad) return 8;
+    // The pad stretches to fill its card, so scrollHeight can't shrink
+    // below the box. Union of children rects = natural content height,
+    // plus the handle bar above the pad.
+    const pr = pad.getBoundingClientRect();
+    let bottom = 0;
+    for (const child of pad.children) {
+        const r = child.getBoundingClientRect();
+        if (r.height > 0) bottom = Math.max(bottom, r.bottom - pr.top + pad.scrollTop);
+    }
+    const padBottom = parseFloat(getComputedStyle(pad).paddingBottom) || 0;
+    const chrome = el.querySelector('.card-chrome');
+    const cr = chrome ? chrome.getBoundingClientRect().height : 0;
+    const px = Math.max(bottom + padBottom + cr, 32);
+    // cellHeight is 8px; clamp guards runaway canvas growth
+    return Math.min(60, Math.max(4, Math.ceil(px / 8)));
+}
+function _rowAlign() {
+    if (!dashGrid || dashApplying || dashEditing || currentTab() !== 'status') return;
+    const rows = new Map();
+    for (const b of upLayout.blocks) {
+        if (!_blockEl(b.id)) continue;
+        if (!rows.has(b.y)) rows.set(b.y, []);
+        rows.get(b.y).push(b);
+    }
+    const ys = [...rows.keys()].sort((a, b) => a - b);
+    let cursor = 0;
+    const plan = [];                       // {members, y, h}
+    for (const y of ys) {
+        const members = rows.get(y);
+        let h = Math.max(...members.map(m => m.h));      // saved height floor
+        for (const m of members) {
+            const el = _blockEl(m.id);
+            if (el) h = Math.max(h, _neededUnits(el));   // content demands
+        }
+        const rowY = Math.max(y, cursor);                // keep gaps, push down only
+        plan.push({ members, y: rowY, h });
+        cursor = rowY + h;
+    }
+    let changed = false;
+    dashApplying = true;
+    try {
+        for (const { members, y, h } of plan) {
+            for (const m of members) {
+                if (m.y !== y || m.h !== h) { m.y = y; m.h = h; changed = true; }
+                const el = _blockEl(m.id);
+                const n = el?.gridstackNode;
+                if (n && (n.x !== m.x || n.y !== m.y || n.w !== m.w || n.h !== m.h)) {
+                    n.x = m.x; n.y = m.y; n.w = m.w; n.h = m.h;
+                    dashGrid._writePosAttr(el, n);
+                }
+            }
+        }
+        if (changed) dashGrid._updateContainerHeight();
+    } finally {
+        dashApplying = false;
+    }
+    if (changed) resizeCharts();
+}
+
+/* Card content grows after first paint (charts render, feeds fill).
+   Debounced so a burst of polling updates triggers one align pass. */
 function refitUpliftBlocks() {
     if (!dashGrid || currentTab() !== 'status' || dashApplying) return;
-    const run = () => {
-        if (!dashGrid || !$grid().offsetWidth) return;
-        dashGrid.getGridItems().forEach(item => dashGrid.resizeToContent(item));
-    };
     if (!dashRefitFrame) {
-        dashRefitFrame = requestAnimationFrame(() => { dashRefitFrame = 0; run(); });
+        dashRefitFrame = requestAnimationFrame(() => { dashRefitFrame = 0; _rowAlign(); });
     }
     clearTimeout(dashRefitTimer);
-    dashRefitTimer = setTimeout(run, 400);
+    dashRefitTimer = setTimeout(_rowAlign, 400);
 }
 
 function _parkCard(el) {
@@ -408,36 +479,7 @@ function applyUpliftLayout(saved) {
     dashGrid.setAnimation(true);
     applyWidth();
     renderTray();
-    refitUpliftBlocks();
-    scheduleSettlePin();
-}
-/* Charts/feeds change height after first paint (canvas aspect, feed rows).
-   Once content settles, pin every card back to its layout cell — float
-   mode keeps the position, and the settled height now fits the gap that
-   the layout reserved. This is what stops "snaps to weird places": the
-   first paint's transient tall content used to shove neighbours away for
-   good. */
-function scheduleSettlePin() {
-    clearTimeout(scheduleSettlePin._t);
-    scheduleSettlePin._t = setTimeout(() => {
-        if (!dashGrid || dashEditing || dashApplying) return;
-        dashGrid.batchUpdate();
-        try {
-            [...upLayout.blocks]
-                .sort((a, b) => a.y - b.y || a.x - b.x)
-                .forEach(block => {
-                    const n = _blockEl(block.id)?.gridstackNode;
-                    // moveNode(node, ...) — this GridStack build has no
-                    // move(); wrong name threw silently before.
-                    if (n && (n.x !== block.x || n.y !== block.y)) {
-                        dashGrid.moveNode(n, { x: block.x, y: block.y });
-                    }
-                });
-        } finally {
-            dashGrid.commit();
-        }
-        resizeCharts();
-    }, 900);
+    refitUpliftBlocks();   // aligns row heights once content is measurable
 }
 function collectUpliftLayout() {
     const blocks = dashGrid.save(false).map(n => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h }));
