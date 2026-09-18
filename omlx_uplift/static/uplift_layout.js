@@ -27,6 +27,14 @@
     ];
     const COLUMNS = 24;
     const MIN_W = 6;
+    // Small stat tiles need to go narrower than the classic floor: the
+    // shipped first row packs five of them (classic's 6 blocks a 24-col
+    // row into only four). Everything else keeps MIN_W.
+    const MIN_W_SMALL = 4;
+    const SMALL_IDS = ['gen', 'prefill', 'requests', 'tokens', 'cache'];
+    function minWFor(id) {
+        return SMALL_IDS.includes(id) ? MIN_W_SMALL : MIN_W;
+    }
     const WIDTH_CLASSES = {
         // Uplift is not Tailwind; these are data-width tokens resolved in
         // uplift.css (same pixel ladder as classic's max-w presets).
@@ -37,22 +45,30 @@
     };
     const WIDTH_IDS = Object.keys(WIDTH_CLASSES);
 
-    // The shipped default = what the board looked like pre-#3694 parity:
-    // four stat cards across (6u each), two charts + two feeds at 8u, all
-    // 11 blocks on the board (nothing hidden by default). Heights come
-    // from content; y values only encode order (see applyUpliftLayout).
+    // The shipped default (user layout 2026-09-18):
+    //   row 1: Prefill, Generation, Requests, Tokens, Cache  (5 stat tiles)
+    //   row 2: Throughput, Memory & cache                     (2 charts)
+    //   row 3: In-flight, Request sizes, Request feed
+    //   row 4: Events (full width)
+    // Freeform board: every block carries an explicit h. Content refits
+    // correct heights after first paint; positions never reflow sideways.
+    // Heights below are the MEASURED content heights at a 1280-1440px
+    // board (2026-09-18). They must not be smaller than real content on
+    // day one: in float mode a card that grows past its h pushes whatever
+    // is below it down, which looked like "snapping to weird places".
+    // refitUpliftBlocks shrinks/grows them to live content afterwards.
     const DEFAULT_BLOCKS = [
-        { id: 'gen', x: 0, y: 0, w: 6 },
-        { id: 'prefill', x: 6, y: 0, w: 6 },
-        { id: 'requests', x: 12, y: 0, w: 6 },
-        { id: 'tokens', x: 18, y: 0, w: 6 },
-        { id: 'chart-tps', x: 0, y: 2, w: 8 },
-        { id: 'chart-mem', x: 8, y: 2, w: 8 },
-        { id: 'cache', x: 16, y: 2, w: 8 },
-        { id: 'reqstats', x: 0, y: 6, w: 8 },
-        { id: 'live', x: 8, y: 6, w: 8 },
-        { id: 'reqfeed', x: 16, y: 6, w: 8 },
-        { id: 'feed', x: 0, y: 10, w: 8 },
+        { id: 'prefill', x: 0, y: 0, w: 4, h: 20 },
+        { id: 'gen', x: 4, y: 0, w: 4, h: 20 },
+        { id: 'requests', x: 8, y: 0, w: 4, h: 20 },
+        { id: 'tokens', x: 12, y: 0, w: 4, h: 20 },
+        { id: 'cache', x: 16, y: 0, w: 8, h: 20 },
+        { id: 'chart-tps', x: 0, y: 21, w: 12, h: 44 },
+        { id: 'chart-mem', x: 12, y: 21, w: 12, h: 44 },
+        { id: 'live', x: 0, y: 66, w: 8, h: 38 },
+        { id: 'reqstats', x: 8, y: 66, w: 8, h: 38 },
+        { id: 'reqfeed', x: 16, y: 66, w: 8, h: 38 },
+        { id: 'feed', x: 0, y: 105, w: COLUMNS, h: 18 },
     ];
 
     function defaultLayout() {
@@ -73,10 +89,13 @@
         const id = raw.id;
         if (!BLOCK_IDS.includes(id) || seen.has(id)) return null;
         seen.add(id);
-        const w = Math.min(COLUMNS, Math.max(MIN_W, toInt(raw.w, COLUMNS)));
+        const w = Math.min(COLUMNS, Math.max(minWFor(id), toInt(raw.w, COLUMNS)));
         const x = Math.min(COLUMNS - w, Math.max(0, toInt(raw.x, 0)));
         const y = Math.max(0, toInt(raw.y, 0));
-        return { id, x, y, w };
+        // Freeform boards need explicit heights — without them GridStack
+        // would auto-stack. Content refits may still grow h afterwards.
+        const h = Math.min(240, Math.max(1, toInt(raw.h, 10)));
+        return { id, x, y, w, h };
     }
 
     // Accepts anything storage may hold and returns a layout the grid can
@@ -100,6 +119,9 @@
         BLOCK_IDS,
         COLUMNS,
         MIN_W,
+        MIN_W_SMALL,
+        SMALL_IDS,
+        minWFor,
         WIDTH_CLASSES,
         WIDTH_IDS,
         defaultLayout,

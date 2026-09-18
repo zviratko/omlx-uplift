@@ -271,6 +271,8 @@ function applyWidthEarly() {
 let dashGrid = null, dashEditing = false, dashDraft = null, dashSaving = false;
 let dashPlacedIds = [];
 let dashRefitFrame = 0, dashRefitTimer = 0;
+let dashApplying = false;   // board (re)build in progress — no refit re-entry
+let _watchdogQueued = false;
 
 const $grid = () => $('grid');
 function _blockEl(id) {
@@ -289,7 +291,7 @@ function ensureUpliftGrid() {
         cellHeight: 8,
         margin: 12,
         sizeToContent: true,
-        float: false,
+        float: true,   // freeform: dropped cards stay where they are put (no vertical compaction)
         animate: true,
         minRow: 1,
         disableDrag: true,
@@ -303,7 +305,28 @@ function ensureUpliftGrid() {
             breakpoints: [{ w: 752, c: 1, layout: 'list' }],
         },
     }, el);
+    window.__upliftGrid = dashGrid;   // debug handle
     dashGrid.on('dropped', (event, previous, node) => _onTrayDrop(node));
+    // Watchdog: outside edit mode the layout is the source of truth.
+    // resizeToContent's growth can shift a node off its cell; snap it back
+    // on the next tick (batched). Edit mode is user-driven — never snapped.
+    dashGrid.on('change', () => {
+        if (dashEditing || dashApplying || _watchdogQueued) return;
+        _watchdogQueued = true;
+        setTimeout(() => {
+            _watchdogQueued = false;
+            if (dashEditing || dashApplying) return;
+            let moved = false;
+            for (const block of upLayout.blocks) {
+                const n = _blockEl(block.id)?.gridstackNode;
+                if (n && (n.x !== block.x || n.y !== block.y)) {
+                    dashGrid.moveNode(n, { x: block.x, y: block.y });
+                    moved = true;
+                }
+            }
+            if (moved) resizeCharts();
+        }, 50);
+    });
     dashGrid.on('dragstop resizestop', () => { refitUpliftBlocks(); resizeCharts(); });
     GridStack.setupDragIn('.dash-tray-pill', { appendTo: 'body', helper: 'clone' });
     if (typeof ResizeObserver !== 'undefined') {
@@ -322,7 +345,7 @@ function ensureUpliftGrid() {
 
 /* Block heights follow their content (stats polling, feed growth). */
 function refitUpliftBlocks() {
-    if (!dashGrid || currentTab() !== 'status') return;
+    if (!dashGrid || currentTab() !== 'status' || dashApplying) return;
     const run = () => {
         if (!dashGrid || !$grid().offsetWidth) return;
         dashGrid.getGridItems().forEach(item => dashGrid.resizeToContent(item));
@@ -338,52 +361,86 @@ function _parkCard(el) {
     dashGrid.removeWidget(el, false, false);
     el.classList.add('card-parked');
 }
-function _placeCard(id, pos) {
+function _placeCard(id, pos, h) {
     const el = _blockEl(id);
     if (!el || el.gridstackNode) return null;
     el.classList.remove('card-parked');
-    dashGrid.makeWidget(el, { id, x: pos.x, y: pos.y, w: pos.w, h: 1, minW: UPL.MIN_W });
-    dashGrid.resizeToContent(el);
+    dashGrid.makeWidget(el, { id, x: pos.x, y: pos.y, w: pos.w, h: h || 1, minW: UPL.minWFor(id) });
     if (!dashPlacedIds.includes(id)) dashPlacedIds = [...dashPlacedIds, id];
-    renderTray();
     return el;
 }
-function applyUpliftLayout(saved, _fromRepack) {
+function applyUpliftLayout(saved) {
     if (!dashGrid || !UPL) return;
     upLayout = UPL.normalizeLayout(saved && saved.blocks
         ? { width: saved.width, blocks: saved.blocks } : saved);
     dashGrid.setAnimation(false);
     dashGrid.getGridItems().forEach(item => _parkCard(item));
     dashPlacedIds = [];
-    // Heights come from content, so saved y values only encode order. Pack
-    // each block under the tallest block already occupying its columns.
-    const bottoms = new Array(UPL.COLUMNS).fill(0);
-    [...upLayout.blocks]
-        .sort((a, b) => a.y - b.y || a.x - b.x)
-        .forEach(block => {
-            const y = Math.max(...bottoms.slice(block.x, block.x + block.w));
-            const el = _placeCard(block.id, { x: block.x, y, w: block.w });
-            const h = el?.gridstackNode?.h || 1;
-            for (let c = block.x; c < block.x + block.w; c++) bottoms[c] = y + h;
+    // Freeform (float: true): exact saved cell per block, no compaction.
+    // Widgets get their REAL h up front (from the layout) — the earlier
+    // scatter came from h:1 cards growing via resizeToContent and colliding
+    // with the row below, which made GridStack push them away. With honest
+    // initial geometry nothing overlaps, so nothing moves. refitUpliftBlocks
+    // then corrects heights to content; in float mode a growing card only
+    // takes empty space below itself.
+    dashApplying = true;
+    try {
+        upLayout.blocks.forEach(block => {
+            const el = _blockEl(block.id);
+            if (!el) return;
+            el.classList.remove('card-parked');   // un-park before placement
+            if (!el.gridstackNode) {
+                dashGrid.makeWidget(el, { id: block.id, x: block.x, y: block.y, w: block.w, h: block.h, minW: UPL.minWFor(block.id) });
+            }
+            // Teleport: freeform collision resolution pushes overlaps to
+            // new cells — which is exactly the "snaps to weird places"
+            // users saw on re-apply. Positions in a saved layout are
+            // trusted as-is; assign the node and redraw its box.
+            const n = el.gridstackNode;
+            n.x = block.x; n.y = block.y; n.w = block.w; n.h = block.h;
+            dashGrid._writePosAttr(el, n);   // this build's DOM-position writer
+            if (!dashPlacedIds.includes(block.id)) dashPlacedIds.push(block.id);
         });
+        dashGrid._updateContainerHeight();
+    } finally {
+        dashApplying = false;
+    }
     dashGrid.setAnimation(true);
     applyWidth();
     renderTray();
-    if (!_fromRepack) scheduleRepack();   // repack calls apply once, not forever
+    refitUpliftBlocks();
+    scheduleSettlePin();
 }
-/* Heights settle only after first measurement (charts render, feeds fill).
-   Once settled, re-run the placement pass so rows pack tight with real
-   heights (idempotent: same saved order, correct y offsets). */
-function scheduleRepack() {
-    clearTimeout(scheduleRepack._t);
-    scheduleRepack._t = setTimeout(() => {
-        if (!dashGrid || dashEditing) return;
-        const saved = { width: upLayout.width, blocks: upLayout.blocks.map(b => ({ ...b })) };
-        applyUpliftLayout(saved, true);
-    }, 700);
+/* Charts/feeds change height after first paint (canvas aspect, feed rows).
+   Once content settles, pin every card back to its layout cell — float
+   mode keeps the position, and the settled height now fits the gap that
+   the layout reserved. This is what stops "snaps to weird places": the
+   first paint's transient tall content used to shove neighbours away for
+   good. */
+function scheduleSettlePin() {
+    clearTimeout(scheduleSettlePin._t);
+    scheduleSettlePin._t = setTimeout(() => {
+        if (!dashGrid || dashEditing || dashApplying) return;
+        dashGrid.batchUpdate();
+        try {
+            [...upLayout.blocks]
+                .sort((a, b) => a.y - b.y || a.x - b.x)
+                .forEach(block => {
+                    const n = _blockEl(block.id)?.gridstackNode;
+                    // moveNode(node, ...) — this GridStack build has no
+                    // move(); wrong name threw silently before.
+                    if (n && (n.x !== block.x || n.y !== block.y)) {
+                        dashGrid.moveNode(n, { x: block.x, y: block.y });
+                    }
+                });
+        } finally {
+            dashGrid.commit();
+        }
+        resizeCharts();
+    }, 900);
 }
 function collectUpliftLayout() {
-    const blocks = dashGrid.save(false).map(n => ({ id: n.id, x: n.x, y: n.y, w: n.w }));
+    const blocks = dashGrid.save(false).map(n => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h }));
     return UPL.normalizeLayout({ version: 1, width: dashDraft?.width ?? upLayout.width, blocks });
 }
 function _onTrayDrop(node) {
@@ -401,7 +458,7 @@ function removeCard(id) {
     if (!dashGrid || !dashEditing || !el?.gridstackNode) return;
     _parkCard(el);
     dashPlacedIds = dashPlacedIds.filter(p => p !== id);
-    dashGrid.compact();
+    // Freeform: no compaction — the gap the card leaves is the user's gap.
     renderTray();
 }
 

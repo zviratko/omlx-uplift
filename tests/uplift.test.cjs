@@ -196,9 +196,24 @@ test('uplift layout: default layout covers every block once', () => {
     const d = UPL.defaultLayout();
     assert.deepStrictEqual(d.blocks.map(b => b.id).sort(), [...UPL.BLOCK_IDS].sort());
     for (const b of d.blocks) {
-        assert.ok(b.w >= UPL.MIN_W && b.w <= UPL.COLUMNS, b.id + ' w out of range');
+        assert.ok(b.w >= UPL.minWFor(b.id) && b.w <= UPL.COLUMNS, b.id + ' w out of range');
         assert.ok(b.x >= 0 && b.x + b.w <= UPL.COLUMNS, b.id + ' exceeds grid');
     }
+});
+test('uplift layout: small stat tiles clamp to 4, others to 6', () => {
+    assert.strictEqual(UPL.minWFor('gen'), 4);
+    assert.strictEqual(UPL.minWFor('prefill'), 4);
+    assert.strictEqual(UPL.minWFor('requests'), 4);
+    assert.strictEqual(UPL.minWFor('tokens'), 4);
+    assert.strictEqual(UPL.minWFor('cache'), 4);
+    assert.strictEqual(UPL.minWFor('chart-tps'), 6);
+    assert.strictEqual(UPL.minWFor('live'), 6);
+    const n = UPL.normalizeLayout({ blocks: [
+        { id: 'gen', x: 0, y: 0, w: 2 },       // below small floor -> 4
+        { id: 'live', x: 8, y: 0, w: 2 },      // below big floor -> 6
+    ] });
+    assert.strictEqual(n.blocks[0].w, 4);
+    assert.strictEqual(n.blocks[1].w, 6);
 });
 test('uplift layout: normalize drops unknown/dup blocks, clamps geometry', () => {
     const n = UPL.normalizeLayout({ width: 'banana', blocks: [
