@@ -144,8 +144,13 @@ function mean(values) {
 }
 
 /* ---------------- layout settings ---------------- */
-const LAYOUT_KEY = 'omlx-uplift-layout-v1';
-const LAYOUT_DEFAULTS = { cols: 4, chartWindowSec: 300, intervalMs: 1000, logsHideDebug: true, percentile: 'p95', collapsed: {}, order: [] };
+/* v2 = the classic (#3694) GridStack era. The layout lives in a SEPARATE
+   blob from the old v1 key (which held the dead order/cols model); v2
+   holds { width, blocks } in grid units + the settings that survived the
+   redesign. Old v1 blob is dead bytes (same no-migration tradeoff as
+   F-020). */
+const LAYOUT_KEY = 'omlx-uplift-layout-v2';
+const LAYOUT_DEFAULTS = { chartWindowSec: 300, intervalMs: 1000, logsHideDebug: true, percentile: 'p95', collapsed: {} };
 const LAYOUT_WINDOWS = [60, 300, 900, 3600, 21600, 86400];
 const LAYOUT_INTERVALS = [500, 1000, 2000, 5000];
 const LAYOUT_PERCENTILES = ['p50', 'p90', 'p95', 'p99'];
@@ -153,13 +158,15 @@ function loadLayout(storage) {
     let l = {};
     try { l = JSON.parse(storage.getItem(LAYOUT_KEY)) || {}; } catch (_) { /* denied storage */ }
     return {
-        cols: [1, 2, 3, 4, 5].includes(l.cols) ? l.cols : LAYOUT_DEFAULTS.cols,
         chartWindowSec: LAYOUT_WINDOWS.includes(l.chartWindowSec) ? l.chartWindowSec : LAYOUT_DEFAULTS.chartWindowSec,
         intervalMs: LAYOUT_INTERVALS.includes(l.intervalMs) ? l.intervalMs : LAYOUT_DEFAULTS.intervalMs,
         logsHideDebug: l.logsHideDebug !== false,
         percentile: LAYOUT_PERCENTILES.includes(l.percentile) ? l.percentile : LAYOUT_DEFAULTS.percentile,
         collapsed: (l.collapsed && typeof l.collapsed === 'object') ? { ...l.collapsed } : {},
-        order: Array.isArray(l.order) ? l.order.filter(id => typeof id === 'string') : [],
+        // GridStack board state — geometry validation lives in
+        // uplift_layout.js normalizeLayout; here just shape-guard.
+        ...(typeof l.width === 'string' ? { width: l.width } : {}),
+        ...(Array.isArray(l.blocks) ? { blocks: l.blocks } : {}),
     };
 }
 function saveLayout(storage, layout) {

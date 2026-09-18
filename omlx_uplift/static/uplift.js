@@ -113,15 +113,20 @@ function applyTab() {
         caret.className = 'dd-caret'; caret.textContent = '▾';
         $(dd).append(span, ' ', caret);
     }
-    for (const card of cards) {
+    for (const card of pageCards) {
         const show = (card.dataset.tab || 'status') === tab &&
             (!card.dataset.sub || card.dataset.sub === sub);
         card.style.display = show ? '' : 'none';
     }
+    // Status = the GridStack board; page cards live in #pages (outside it).
+    $('grid').style.display = tab === 'status' ? '' : 'none';
+    $('btn-customize').hidden = tab !== 'status' || dashEditing;
+    if (tab !== 'status' && dashEditing) cancelDashEdit();
     // dropdown open state reset on navigation (dropdown click keeps its menu open)
     if (ddForceOpen !== 'dd-models-menu') $('dd-models-menu').hidden = true;
     ddForceOpen = null;
     requestAnimationFrame(resizeCharts);   // charts may have become visible
+    if (tab === 'status') requestAnimationFrame(ensureUpliftGrid);
     if (tab === 'usage') pollUsage();
     if (tab === 'logs') pollLogs();
     if (tab === 'models') {
@@ -242,106 +247,286 @@ $('btn-motion').onclick = () => {
     C.savePrefs(localStorage, prefs); applyPrefs();
 };
 
-/* ---------------- layout engine (popover + collapse + columns + DnD) ------ */
-const cards = [...document.querySelectorAll('.card')];
-const DEFAULT_ORDER = cards.map(c => c.dataset.id);   // markup document order = truth
+/* ---------------- layout engine (GridStack, classic #3694 parity) -------- */
+/* Same mechanism as the classic dashboard: GridStack 13 in 24-column,
+   size-to-content mode; a Customize button opens an edit mode with drag
+   handles, edge resizers, a remove/restore tray, width presets, reset and
+   save. The contract lives in uplift_layout.js (uplift twin of classic's
+   dashboard_layout.js — the classic file is vanilla-owned, R11 rule c).
+   Persistence is localStorage (user decision), NOT settings.json. */
+const cards = [...document.querySelectorAll('#grid .card')];
+const pageCards = [...document.querySelectorAll('#pages .card')];
+const UPL = window.UpliftLayout;
 
-function applyOrder() {
-    const grid = $('grid');
-    const known = new Set(DEFAULT_ORDER);
-    const ordered = layout.order.filter(id => known.has(id));
-    const rest = DEFAULT_ORDER.filter(id => !ordered.includes(id));
-    // Sort within tab groups so cross-tab drags cannot interleave tabs.
-    for (const id of [...ordered, ...rest]) {
-        const card = grid.querySelector(`.card[data-id="${id}"]`);
-        if (card) grid.append(card);
+// Effective block layout (normalised): stored blocks or shipped default.
+function currentBlockLayout(saved) {
+    return UPL.normalizeLayout(saved && saved.blocks
+        ? { width: saved.width, blocks: saved.blocks } : null);
+}
+let upLayout = currentBlockLayout(layout);
+applyWidthEarly();   // page width must be right before first paint/tab switch
+function applyWidthEarly() {
+    if (UPL) document.documentElement.dataset.layoutWidth = UPL.widthClass(upLayout.width);
+}
+let dashGrid = null, dashEditing = false, dashDraft = null, dashSaving = false;
+let dashPlacedIds = [];
+let dashRefitFrame = 0, dashRefitTimer = 0;
+
+const $grid = () => $('grid');
+function _blockEl(id) {
+    return $grid().querySelector(`.card[data-block="${id}"]`) || null;
+}
+
+/* Creates the grid the first time the status tab is visible; GridStack
+   needs a measurable width. Later calls only refit block heights. */
+function ensureUpliftGrid() {
+    if (!UPL || typeof GridStack === 'undefined' || currentTab() !== 'status') return;
+    if (dashGrid) { refitUpliftBlocks(); return; }
+    const el = $grid();
+    if (!el || !el.offsetWidth) return;
+    dashGrid = GridStack.init({
+        column: UPL.COLUMNS,
+        cellHeight: 8,
+        margin: 12,
+        sizeToContent: true,
+        float: false,
+        animate: true,
+        minRow: 1,
+        disableDrag: true,
+        disableResize: true,
+        acceptWidgets: '.dash-tray-pill',
+        draggable: { handle: '.card-handle', appendTo: 'body' },
+        resizable: { handles: 'e, w, se' },
+        columnOpts: {
+            columnMax: UPL.COLUMNS,
+            breakpointForWindow: true,
+            breakpoints: [{ w: 752, c: 1, layout: 'list' }],
+        },
+    }, el);
+    dashGrid.on('dropped', (event, previous, node) => _onTrayDrop(node));
+    dashGrid.on('dragstop resizestop', () => { refitUpliftBlocks(); resizeCharts(); });
+    GridStack.setupDragIn('.dash-tray-pill', { appendTo: 'body', helper: 'clone' });
+    if (typeof ResizeObserver !== 'undefined') {
+        const obs = new ResizeObserver(() => refitUpliftBlocks());
+        el.querySelectorAll('.card-pad').forEach(body => obs.observe(body));
+    }
+    const narrow = window.matchMedia('(max-width: 751.98px)');
+    const syncNarrow = () => {
+        $('btn-customize').disabled = narrow.matches;
+        if (narrow.matches && dashEditing) cancelDashEdit();
+    };
+    narrow.addEventListener('change', syncNarrow);
+    syncNarrow();
+    applyUpliftLayout(upLayout);
+}
+
+/* Block heights follow their content (stats polling, feed growth). */
+function refitUpliftBlocks() {
+    if (!dashGrid || currentTab() !== 'status') return;
+    const run = () => {
+        if (!dashGrid || !$grid().offsetWidth) return;
+        dashGrid.getGridItems().forEach(item => dashGrid.resizeToContent(item));
+    };
+    if (!dashRefitFrame) {
+        dashRefitFrame = requestAnimationFrame(() => { dashRefitFrame = 0; run(); });
+    }
+    clearTimeout(dashRefitTimer);
+    dashRefitTimer = setTimeout(run, 400);
+}
+
+function _parkCard(el) {
+    dashGrid.removeWidget(el, false, false);
+    el.classList.add('card-parked');
+}
+function _placeCard(id, pos) {
+    const el = _blockEl(id);
+    if (!el || el.gridstackNode) return null;
+    el.classList.remove('card-parked');
+    dashGrid.makeWidget(el, { id, x: pos.x, y: pos.y, w: pos.w, h: 1, minW: UPL.MIN_W });
+    dashGrid.resizeToContent(el);
+    if (!dashPlacedIds.includes(id)) dashPlacedIds = [...dashPlacedIds, id];
+    renderTray();
+    return el;
+}
+function applyUpliftLayout(saved, _fromRepack) {
+    if (!dashGrid || !UPL) return;
+    upLayout = UPL.normalizeLayout(saved && saved.blocks
+        ? { width: saved.width, blocks: saved.blocks } : saved);
+    dashGrid.setAnimation(false);
+    dashGrid.getGridItems().forEach(item => _parkCard(item));
+    dashPlacedIds = [];
+    // Heights come from content, so saved y values only encode order. Pack
+    // each block under the tallest block already occupying its columns.
+    const bottoms = new Array(UPL.COLUMNS).fill(0);
+    [...upLayout.blocks]
+        .sort((a, b) => a.y - b.y || a.x - b.x)
+        .forEach(block => {
+            const y = Math.max(...bottoms.slice(block.x, block.x + block.w));
+            const el = _placeCard(block.id, { x: block.x, y, w: block.w });
+            const h = el?.gridstackNode?.h || 1;
+            for (let c = block.x; c < block.x + block.w; c++) bottoms[c] = y + h;
+        });
+    dashGrid.setAnimation(true);
+    applyWidth();
+    renderTray();
+    if (!_fromRepack) scheduleRepack();   // repack calls apply once, not forever
+}
+/* Heights settle only after first measurement (charts render, feeds fill).
+   Once settled, re-run the placement pass so rows pack tight with real
+   heights (idempotent: same saved order, correct y offsets). */
+function scheduleRepack() {
+    clearTimeout(scheduleRepack._t);
+    scheduleRepack._t = setTimeout(() => {
+        if (!dashGrid || dashEditing) return;
+        const saved = { width: upLayout.width, blocks: upLayout.blocks.map(b => ({ ...b })) };
+        applyUpliftLayout(saved, true);
+    }, 700);
+}
+function collectUpliftLayout() {
+    const blocks = dashGrid.save(false).map(n => ({ id: n.id, x: n.x, y: n.y, w: n.w }));
+    return UPL.normalizeLayout({ version: 1, width: dashDraft?.width ?? upLayout.width, blocks });
+}
+function _onTrayDrop(node) {
+    if (!dashGrid || !UPL || !node?.el) return;
+    const id = node.el.dataset.block;
+    const pos = { x: node.x, y: node.y, w: node.w };
+    // The dropped element is GridStack's clone of the tray pill.
+    dashGrid.removeWidget(node.el, true, false);
+    if (!UPL.BLOCK_IDS.includes(id) || !dashEditing) return;
+    _placeCard(id, pos);
+    refitUpliftBlocks();
+}
+function removeCard(id) {
+    const el = _blockEl(id);
+    if (!dashGrid || !dashEditing || !el?.gridstackNode) return;
+    _parkCard(el);
+    dashPlacedIds = dashPlacedIds.filter(p => p !== id);
+    dashGrid.compact();
+    renderTray();
+}
+
+/* ---- tray: draggable pills for blocks not on the board ---- */
+function blockLabel(id) {
+    const span = _blockEl(id)?.querySelector('.card-handle span[data-i18n], .card-handle span:not(.hatch)');
+    return span ? span.textContent : id;
+}
+function renderTray() {
+    const tray = $('layout-tray');
+    if (!tray) return;
+    tray.querySelectorAll('.dash-tray-pill').forEach(p => p.remove());
+    const hint = tray.querySelector('.lt-hint'), label = tray.querySelector('.lt-label');
+    for (const id of UPL.BLOCK_IDS) {
+        if (dashPlacedIds.includes(id)) continue;
+        const pill = document.createElement('div');
+        pill.className = 'dash-tray-pill grid-stack-item';
+        pill.setAttribute('gs-w', '12'); pill.setAttribute('gs-h', '1');
+        pill.setAttribute('gs-min-w', '6'); pill.dataset.block = id;
+        const inner = document.createElement('div');
+        inner.className = 'grid-stack-item-content dash-tray-pill-content';
+        const gripMark = document.createElement('span'); gripMark.className = 'hatch';
+        const text = document.createElement('span'); text.textContent = blockLabel(id);
+        inner.append(gripMark, text);
+        pill.append(inner);
+        tray.append(pill);   // pills after label/empty; hint sits last via CSS order
+    }
+    const empty = UPL.BLOCK_IDS.every(id => dashPlacedIds.includes(id));
+    tray.querySelector('.lt-empty').hidden = !empty;
+    void label;
+}
+
+/* ---- width presets (classic's max-w ladder, tokenised for our CSS) ---- */
+function applyWidth() {
+    document.documentElement.dataset.layoutWidth =
+        UPL.widthClass(dashEditing && dashDraft ? dashDraft.width : upLayout.width);
+}
+function renderWidthSeg() {
+    const seg = $('lt-widths');
+    if (!seg || seg.childElementCount) return;
+    for (const id of UPL.WIDTH_IDS) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.dataset.width = id;
+        b.textContent = C.tf(`uplift.layout.width_${id}`, id);
+        b.onclick = () => {
+            if (!dashEditing) return;
+            dashDraft.width = id;
+            renderWidthSeg(); applyWidth();
+            requestAnimationFrame(() => { dashGrid?.onResize(); refitUpliftBlocks(); resizeCharts(); });
+        };
+        seg.append(b);
+    }
+    const active = dashEditing && dashDraft ? dashDraft.width : upLayout.width;
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.width === active));
+}
+
+/* ---- edit mode lifecycle (classic parity) ---- */
+function _afterLayoutChange() {
+    requestAnimationFrame(() => { dashGrid?.onResize(); refitUpliftBlocks(); resizeCharts(); });
+}
+function startDashEdit() {
+    if (!dashGrid || !upLayout || dashEditing || $('btn-customize').disabled) return;
+    dashDraft = { width: upLayout.width };
+    $('lt-error').hidden = true;
+    dashEditing = true;
+    document.body.classList.add('layout-editing');
+    $('btn-customize').hidden = true;
+    $('layout-toolbar').hidden = false;
+    $('layout-tray').hidden = false;
+    dashGrid.enable();
+    renderWidthSeg(); renderTray();
+    _afterLayoutChange();
+}
+function cancelDashEdit() {
+    if (!dashEditing) return;
+    dashEditing = false; dashDraft = null;
+    $('lt-error').hidden = true;
+    document.body.classList.remove('layout-editing');
+    $('btn-customize').hidden = false;
+    $('layout-toolbar').hidden = true;
+    $('layout-tray').hidden = true;
+    if (dashGrid) { dashGrid.disable(); applyUpliftLayout(upLayout); }
+    _afterLayoutChange();
+}
+function resetDashLayout() {
+    if (!dashEditing || !UPL) return;
+    dashDraft.width = 'default';
+    applyUpliftLayout(UPL.defaultLayout());
+    renderWidthSeg();
+    _afterLayoutChange();
+}
+function saveDashLayout() {
+    if (!dashGrid || !dashEditing || dashSaving) return;
+    const next = collectUpliftLayout();
+    dashSaving = true;
+    $('lt-error').hidden = true;
+    try {
+        layout.blocks = next.blocks;
+        layout.width = next.width;
+        C.saveLayout(localStorage, layout);
+        upLayout = next;
+        dashEditing = false; dashDraft = null;
+        document.body.classList.remove('layout-editing');
+        $('btn-customize').hidden = false;
+        $('layout-toolbar').hidden = true;
+        $('layout-tray').hidden = true;
+        dashGrid.disable();
+        _afterLayoutChange();
+    } catch (err) {
+        console.error('Failed to save layout:', err);
+        const e = $('lt-error');
+        e.textContent = C.t('uplift.layout.save_failed'); e.hidden = false;
+    } finally {
+        dashSaving = false;
     }
 }
-function readOrder() {
-    layout.order = [...$('grid').querySelectorAll('.card')].map(c => c.dataset.id);
-}
+$('btn-customize').onclick = startDashEdit;
+$('lt-cancel').onclick = cancelDashEdit;
+$('lt-save').onclick = saveDashLayout;
+$('lt-reset').onclick = resetDashLayout;
 for (const card of cards) {
-    const grip = document.createElement('button');
-    grip.className = 'grip'; grip.title = 'Drag to move'; grip.textContent = '⠿';
-    card.querySelector('h2').prepend(grip);
-    card.querySelector('.collapse').after(grip);   // order: collapse, grip, title
+    card.querySelector('.card-remove').onclick = () => removeCard(card.dataset.block);
 }
 
-/* Pointer-Events drag (NOT HTML5 DnD: unreliable in Safari/WebKit). */
-(function enableDrag() {
-    const DRAG_THRESHOLD = 4;
-    let drag = null;
-    const cleanup = () => {
-        if (!drag) return;
-        drag.card.classList.remove('dragging');
-        drag.card.style.cssText = '';
-        drag.card.style.display = '';           // reflow safety after move
-        drag.marker?.remove();
-        document.body.classList.remove('dragging-in-progress');
-        drag = null;
-    };
-    document.addEventListener('pointerdown', e => {
-        const grip = e.target.closest('.grip');
-        if (!grip || e.button !== 0) return;
-        const card = grip.closest('.card');
-        const rect = card.getBoundingClientRect();
-        drag = { card, marker: null, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top,
-                 startX: e.clientX, startY: e.clientY, width: rect.width, height: rect.height,
-                 tab: card.dataset.tab || 'status', active: false };
-        e.preventDefault();
-    });
-    window.addEventListener('pointermove', e => {
-        if (!drag) return;
-        if (!drag.active) {
-            const moved = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
-            if (moved < DRAG_THRESHOLD) return;
-            drag.active = true;
-            document.body.classList.add('dragging-in-progress');
-            drag.marker = document.createElement('div');
-            drag.marker.className = 'drop-marker';
-            drag.card.after(drag.marker);
-            drag.card.classList.add('dragging');
-            drag.card.style.position = 'fixed';
-            drag.card.style.width = drag.width + 'px';
-            drag.card.style.height = drag.height + 'px';
-            drag.card.style.zIndex = 50;
-        }
-        drag.card.style.left = (e.clientX - drag.offsetX) + 'px';
-        drag.card.style.top = (e.clientY - drag.offsetY) + 'px';
-        const grid = $('grid');
-        let target = null;
-        for (const other of grid.querySelectorAll('.card:not(.dragging)')) {
-            if ((other.dataset.tab || 'status') !== drag.tab) continue;  // same tab only
-            if (other.style.display === 'none') continue;
-            const r = other.getBoundingClientRect();
-            if (e.clientY < r.top + r.height / 2 ||
-                (e.clientY < r.bottom && e.clientX < r.left + r.width / 2)) {
-                target = other; break;
-            }
-        }
-        grid.insertBefore(drag.marker, target);
-        const edge = 60;
-        if (e.clientY < edge) window.scrollBy(0, -12);
-        else if (e.clientY > innerHeight - edge) window.scrollBy(0, 12);
-    }, true);
-    const finish = () => {
-        if (!drag) return;
-        if (drag.active && drag.marker) {
-            drag.card.classList.remove('dragging');
-            drag.card.style.cssText = '';
-            drag.marker.replaceWith(drag.card);
-            readOrder();
-            C.saveLayout(localStorage, layout);
-        }
-        cleanup();
-    };
-    window.addEventListener('pointerup', finish, true);
-    window.addEventListener('pointercancel', () => cleanup(), true);
-    window.addEventListener('blur', () => cleanup(), true);
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') cleanup(); });
-    addEventListener('resize', () => { if (drag?.active) cleanup(); }, true);
-})();
-
+/* ---- settings popover (window / interval / hide-debug / reset) ---- */
 function fillSelect(sel, options, value) {
     sel.innerHTML = '';
     for (const [v, label] of options) {
@@ -351,28 +536,6 @@ function fillSelect(sel, options, value) {
         sel.append(o);
     }
 }
-function applyLayout() {
-    document.documentElement.style.setProperty('--cols', layout.cols);
-    for (const card of cards) {
-        const id = card.dataset.id;
-        const want = Number(card.dataset.cols) || 1;
-        card.style.setProperty('--span', card.dataset.full ? layout.cols : C.clampSpan(want, layout.cols));
-        const collapsed = layout.collapsed[id] === true;
-        card.classList.toggle('is-collapsed', collapsed);
-        card.querySelector('.collapse').textContent = collapsed ? '+' : '–';
-    }
-    requestAnimationFrame(resizeCharts);
-    C.saveLayout(localStorage, layout);
-}
-for (const card of cards) {
-    card.querySelector('.collapse').onclick = () => {
-        const id = card.dataset.id;
-        layout.collapsed[id] = !(layout.collapsed[id] === true);
-        applyLayout();
-    };
-}
-fillSelect($('opt-cols'), [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5']], layout.cols);
-$('opt-cols').onchange = e => { layout.cols = Number(e.target.value); applyLayout(); resizeCharts(); };
 fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, s >= 3600 ? `${s / 3600} hour` : `${s / 60} min`]), layout.chartWindowSec);
 $('opt-window').onchange = e => { layout.chartWindowSec = Number(e.target.value); historyDirty = true; loadChartHistory(); C.saveLayout(localStorage, layout); };
 fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`]), layout.intervalMs);
@@ -380,19 +543,19 @@ $('opt-interval').onchange = e => { layout.intervalMs = Number(e.target.value); 
 $('opt-hide-debug').checked = layout.logsHideDebug;
 $('opt-hide-debug').onchange = e => { layout.logsHideDebug = e.target.checked; C.saveLayout(localStorage, layout); };
 $('btn-layout-reset').onclick = () => {
-    Object.assign(layout, C.LAYOUT_DEFAULTS, { collapsed: {} });
-    applyLayout();
-    applyOrder();   // F-017: defaults mean markup order; without this the
-                    // dragged order stays on screen until a manual reload
-    fillSelect($('opt-cols'), [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5']], layout.cols);
+    Object.assign(layout, C.LAYOUT_DEFAULTS);
+    upLayout = UPL.defaultLayout();
+    layout.blocks = upLayout.blocks; layout.width = upLayout.width;
+    C.saveLayout(localStorage, layout);
+    if (dashGrid) applyUpliftLayout(upLayout);
+    renderTray();
     fillSelect($('opt-window'), C.LAYOUT_WINDOWS.map(s => [s, s >= 3600 ? `${s / 3600} hour` : `${s / 60} min`]), layout.chartWindowSec);
-    historyDirty = true; loadChartHistory();
     fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`]), layout.intervalMs);
     $('opt-hide-debug').checked = layout.logsHideDebug;
+    historyDirty = true; loadChartHistory();
     restartPolling();
     resizeCharts();
 };
-$('btn-expand-all').onclick = () => { layout.collapsed = {}; applyLayout(); };
 $('btn-layout').onclick = e => {
     e.stopPropagation();
     $('layout-pop').hidden = !$('layout-pop').hidden;
@@ -5500,8 +5663,6 @@ document.addEventListener('visibilitychange', () => {
 });
 
 applyPrefs();
-applyOrder();
-applyLayout();
 // ?lang=xx overrides the locale (testing/demo; server setting is default)
 loadLocale(new URLSearchParams(location.search).get('lang') || undefined);
 createCharts();

@@ -177,7 +177,7 @@ test('layout persistence and clamping', () => {
     items[C.LAYOUT_KEY] = JSON.stringify({ cols: 9, chartWindowSec: 123, intervalMs: 'x',
         logsHideDebug: false, percentile: 'p42', collapsed: { models: true } });
     const l = C.loadLayout(store);
-    assert.strictEqual(l.cols, 4);                 // invalid => default
+    assert.strictEqual(l.cols, undefined);         // v2: cols is dead (GridStack owns width)
     assert.strictEqual(l.chartWindowSec, 300);
     assert.strictEqual(l.intervalMs, 1000);
     assert.strictEqual(l.logsHideDebug, false);    // valid override kept
@@ -186,6 +186,35 @@ test('layout persistence and clamping', () => {
     assert.strictEqual(C.clampSpan(2, 1), 1);
     assert.strictEqual(C.clampSpan(2, 5), 2);
     assert.strictEqual(C.clampSpan(5, 3), 3);
+});
+
+// GridStack layout contract (uplift twin of classic dashboard_layout.js).
+// The module attaches to globalThis in Node (no window), same as the page.
+require('../omlx_uplift/static/uplift_layout.js');
+const UPL = globalThis.UpliftLayout;
+test('uplift layout: default layout covers every block once', () => {
+    const d = UPL.defaultLayout();
+    assert.deepStrictEqual(d.blocks.map(b => b.id).sort(), [...UPL.BLOCK_IDS].sort());
+    for (const b of d.blocks) {
+        assert.ok(b.w >= UPL.MIN_W && b.w <= UPL.COLUMNS, b.id + ' w out of range');
+        assert.ok(b.x >= 0 && b.x + b.w <= UPL.COLUMNS, b.id + ' exceeds grid');
+    }
+});
+test('uplift layout: normalize drops unknown/dup blocks, clamps geometry', () => {
+    const n = UPL.normalizeLayout({ width: 'banana', blocks: [
+        { id: 'gen', x: -3, y: -1, w: 99 },
+        { id: 'gen', x: 0, y: 5, w: 6 },          // duplicate -> dropped
+        { id: 'ghost', x: 0, y: 0, w: 24 },        // unknown -> dropped
+        { id: 'feed', x: 20, y: 2, w: 10 },        // x+w>24 -> x clamped
+    ] });
+    assert.strictEqual(n.width, 'default');
+    assert.deepStrictEqual(n.blocks.map(b => b.id), ['gen', 'feed']);
+    assert.strictEqual(n.blocks[0].w, UPL.COLUMNS);
+    assert.strictEqual(n.blocks[0].x, 0);
+    assert.strictEqual(n.blocks[1].x, 14);
+    assert.deepStrictEqual(UPL.normalizeLayout(null), UPL.defaultLayout());
+    assert.strictEqual(UPL.widthClass('wider'), 'wider');
+    assert.strictEqual(UPL.widthClass('zzz'), 'default');
 });
 
 test('normalize passes through server request_stats when present', () => {
@@ -233,9 +262,9 @@ test('keys: PREFS_KEY and LAYOUT_KEY are distinct well-formed keys', () => {
 test('prefs save does not clobber layout storage', () => {
     const items = {};
     const store = { getItem: k => items[k], setItem: (k, v) => items[k] = v };
-    C.saveLayout(store, { ...C.LAYOUT_DEFAULTS, cols: 3 });
+    C.saveLayout(store, { ...C.LAYOUT_DEFAULTS, chartWindowSec: 900 });
     C.savePrefs(store, { theme: 'dark' });
-    assert.equal(C.loadLayout(store).cols, 3);
+    assert.equal(C.loadLayout(store).chartWindowSec, 900);
     assert.equal(C.loadPrefs(store).theme, 'dark');
 });
 

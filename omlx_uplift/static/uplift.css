@@ -147,7 +147,6 @@ body::before {
 :root:not([data-theme]) body::before { background: var(--edge); }
 
 /* ---- Layout: strict grid, defined spacing, breathing band on top ---- */
-.wrap { max-width: 1500px; margin: 0 auto; padding: 36px clamp(12px, 3vw, 32px) 60px; }
 
 header.top {
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -205,14 +204,105 @@ option { background: var(--card); color: var(--ink); }
 .popover .row.buttons button:hover { background: var(--ink); color: var(--bg); }
 .popover .hint { color: var(--dim); font: 300 11px/1.4 var(--sans); margin-top: 10px; }
 
-/* ---- Card grid: --cols/--span from JS; cards framed, square corners ---- */
-main { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 1px;
-    background: var(--edge); border: 1px solid var(--edge); }
-.card {
-    grid-column: span var(--span, 1);
-    background: var(--card); padding: 14px 16px; min-width: 0; position: relative;
-    transition: none;
+/* ---- Status board: GridStack 24-col grid (classic #3694 parity) -------
+   Cards are .grid-stack-item; content lives in .grid-stack-item-content
+   (absolutely positioned by GridStack) with padding in .card-pad. ---- */
+main.grid-stack { margin: 0; }
+main.grid-stack .grid-stack-item.card-parked { display: none; }
+/* gridstack.css forces overflow-y on .size-to-content items with a
+   5-class selector; view mode must stay open for tooltips/popovers. */
+main.grid-stack > .grid-stack-item > .grid-stack-item-content {
+    overflow: visible !important;
+    display: flex; flex-direction: column; min-width: 0; height: 100%;
 }
+.card { background: var(--card); border: 1px solid var(--edge); min-width: 0;
+    position: relative; transition: none; }
+/* .card-frame = GridStack's size-to-content measure target (classic
+   mirrors .dash-block-inner); chrome bar + padded body stack inside it. */
+.card-frame { display: flex; flex-direction: column; min-width: 0; }
+.card-pad { padding: 14px 16px; min-width: 0; }
+#pages .card { background: var(--card); border: 1px solid var(--edge); margin-bottom: 1px; }
+#pages .card-pad { padding: 14px 16px; }
+
+/* Edit-mode chrome: drag handle bar + remove button (drag-strip motif) */
+.card-chrome { display: none; }
+body.layout-editing .card-chrome {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 4px 8px; background: var(--panel, var(--bg)); color: var(--dim);
+    border-bottom: 1px solid var(--edge);
+    font: 500 10px/1.4 var(--sans); text-transform: uppercase; letter-spacing: 0.12em;
+    user-select: none; cursor: grab; flex-shrink: 0;
+}
+body.layout-editing .card-handle { display: inline-flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+body.layout-editing .card-handle .hatch, .dash-tray-pill-content .hatch {
+    width: 16px; height: 10px; flex-shrink: 0;
+    background: repeating-linear-gradient(45deg, var(--dim) 0 2px, transparent 2px 5px);
+}
+body.layout-editing .card-remove {
+    background: transparent; border: 1px solid var(--edge); color: var(--dim);
+    width: 18px; height: 18px; border-radius: 0; cursor: pointer; flex-shrink: 0;
+    font: 400 12px/1 var(--mono); display: inline-flex; align-items: center; justify-content: center; padding: 0;
+}
+body.layout-editing .card-remove:hover { color: var(--bg); background: var(--ink); }
+body.layout-editing main.grid-stack > .grid-stack-item > .grid-stack-item-content {
+    outline: 1px dashed var(--accent); outline-offset: -1px; overflow: hidden !important;
+}
+body.layout-editing .card-pad { pointer-events: none; opacity: 0.85; }
+body.layout-editing main.grid-stack {
+    background-image: repeating-linear-gradient(to right,
+        var(--edge) 0 1px, transparent 1px calc(100% / 24));
+}
+main.grid-stack .grid-stack-placeholder > .placeholder-content {
+    background: transparent; border: 1px dashed var(--ink);
+}
+main.grid-stack .ui-resizable-handle.ui-resizable-se {
+    width: 14px; height: 14px; right: 2px; bottom: 2px; background: none;
+    border-right: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: none;
+}
+main.grid-stack .ui-resizable-handle.ui-resizable-e,
+main.grid-stack .ui-resizable-handle.ui-resizable-w { width: 10px; }
+body.layout-editing { user-select: none; }
+
+/* ---- Layout edit toolbar + tray ---- */
+#layout-toolbar, #layout-tray {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    border: 1px solid var(--edge); padding: 8px 12px; margin-bottom: 1px;
+    background: var(--card);
+}
+#layout-toolbar[hidden], #layout-tray[hidden] { display: none; }
+.lt-label { font: 500 10px/1.4 var(--sans); text-transform: uppercase; letter-spacing: 0.12em; color: var(--dim); }
+.lt-seg { display: inline-flex; border: 1px solid var(--edge); }
+.lt-seg button {
+    background: transparent; border: 0; border-right: 1px solid var(--edge); color: var(--dim);
+    font: 400 11px/1 var(--mono); padding: 6px 10px; cursor: pointer;
+}
+.lt-seg button:last-child { border-right: 0; }
+.lt-seg button.on { background: var(--ink); color: var(--bg); }
+#layout-toolbar button:not(.lt-seg button) {
+    background: transparent; border: 1px solid var(--edge); color: var(--dim);
+    font: 400 11px/1 var(--mono); padding: 6px 10px; cursor: pointer; border-radius: 0;
+}
+#layout-toolbar button:hover { color: var(--bg); background: var(--ink); }
+#layout-toolbar button.primary { background: var(--ink); color: var(--bg); }
+.lt-error { color: var(--red); font: 400 11px/1.4 var(--mono); }
+#layout-tray { border-style: dashed; }
+.lt-empty, .lt-hint { color: var(--dim); font: 300 11px/1.4 var(--sans); }
+.lt-hint { flex-basis: 100%; order: 9; }
+.dash-tray-pill { position: relative; width: auto; min-width: 0; }
+.dash-tray-pill .grid-stack-item-content {
+    position: static; display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 10px; border: 1px solid var(--edge); background: var(--bg);
+    color: var(--dim); font: 500 10px/1.4 var(--sans); text-transform: uppercase;
+    letter-spacing: 0.12em; cursor: grab; overflow: visible;
+}
+.dash-tray-pill.ui-draggable-dragging { opacity: 0.85; z-index: 100; }
+
+/* Page-container width presets (classic's max-w ladder, labels match) */
+.wrap { max-width: 1280px; margin: 0 auto; padding: 36px clamp(12px, 3vw, 32px) 60px; }
+[data-layout-width="wide"] .wrap { max-width: 1440px; }
+[data-layout-width="wider"] .wrap { max-width: 1600px; }
+[data-layout-width="full"] .wrap { max-width: none; }
+
 .card h2 {
     font: 500 10px/1.4 var(--sans); text-transform: uppercase; letter-spacing: 0.12em;
     color: var(--dim); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
@@ -221,20 +311,6 @@ main { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1f
 .card h2 .right { margin-left: auto; font: 400 10px/1.4 var(--mono); letter-spacing: 0;
     display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
 .card h2 .right b { color: var(--ink); font-weight: 400; }
-.collapse, .grip {
-    background: transparent; border: 1px solid var(--edge); color: var(--dim);
-    width: 18px; height: 18px; border-radius: 0; cursor: pointer; flex-shrink: 0;
-    font: 400 12px/1 var(--mono); display: inline-flex; align-items: center; justify-content: center;
-    padding: 0;
-}
-.collapse:hover { color: var(--bg); background: var(--ink); }
-.grip { cursor: grab; touch-action: none;
-    /* hatch stripes = handle, [70s] motif */
-    background: repeating-linear-gradient(45deg, var(--dim) 0 2px, transparent 2px 5px); }
-.grip:hover { border-color: var(--ink); }
-.card.is-collapsed { padding-bottom: 12px; }
-.card.is-collapsed .card-body { display: none; }
-.card.is-collapsed h2 { margin-bottom: 0; }
 
 /* Event flash = border + fill shift, no glow */
 .card.flash-ok   { background: var(--ink); }
@@ -243,18 +319,14 @@ main { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1f
 .card.flash-bad  { background: var(--red); border-color: var(--red); }
 .card.flash-bad h2, .card.flash-bad .stat-value, .card.flash-bad .stat-label { color: #fff; }
 
-/* Drag state */
-.card.dragging { position: fixed; z-index: 55; margin: 0; pointer-events: none;
-    outline: 2px solid var(--ink); opacity: 0.95; }
-.drop-marker { background: transparent; border: 1px dashed var(--ink); min-height: 48px;
-    /* bracket corners, [70s] device */
+/* Drop placeholder: dashed frame + bracket corners, [70s] device */
+main.grid-stack .grid-stack-placeholder > .placeholder-content {
     background-image:
         linear-gradient(var(--ink), var(--ink)), linear-gradient(var(--ink), var(--ink)),
         linear-gradient(var(--ink), var(--ink)), linear-gradient(var(--ink), var(--ink));
     background-size: 8px 1px, 1px 8px, 8px 1px, 1px 8px;
     background-position: top left, top left, bottom right, bottom right;
     background-repeat: no-repeat; }
-body.dragging-in-progress { user-select: none; cursor: grabbing; }
 
 /* ---- Stat tiles: solid ink numerals, hierarchy by size/weight only ---- */
 .stat-value {
@@ -972,8 +1044,6 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 
 /* Narrow screens: single column regardless of layout setting */
 @media (max-width: 640px) {
-    main { grid-template-columns: 1fr; }
-    .card { grid-column: span 1 !important; }
     .tabs a { padding: 8px 8px; }
 }
 
