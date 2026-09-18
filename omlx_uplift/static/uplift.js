@@ -72,18 +72,19 @@ const PERCENTILES = { p50: 50, p90: 90, p95: 95, p99: 99 };
 if (!(layout.percentile in PERCENTILES)) layout.percentile = 'p95';
 
 /* ---------------- tabs (hash routing, like the classic dashboard) --------- */
-const TABS = ['status', 'models', 'usage', 'logs', 'bench', 'chat', 'settings'];
+const TABS = ['status', 'cluster', 'models', 'usage', 'logs', 'bench', 'chat', 'settings'];
 const SUBS = {
     models: ['manager', 'helper', 'downloader', 'uploader', 'quantizer'],
     bench: ['throughput', 'accuracy', 'context'],
     settings: ['global'],
     chat: ['chat'],
+    cluster: ['cluster'],
 };
 const SUB_LABELS = {
     manager: 'Models', downloader: 'Downloader', quantizer: 'oQ(e) Quantization',
     uploader: 'Uploader', helper: 'Helper Models',
     throughput: 'Throughput', accuracy: 'Accuracy', context: 'Context',
-    chat: 'Chat',
+    chat: 'Chat', cluster: 'Cluster',
     global: 'Server Settings',
 };
 function currentTab() {
@@ -96,7 +97,14 @@ function currentSub(tab) {
     return list.includes(parts[1]) ? parts[1] : list[0];
 }
 function applyTab() {
-    const tab = currentTab();
+    // classic parity: Cluster exists only while distributed inference is
+    // active; deep-links/shortcuts to a dormant Cluster fall back to
+    // Status and rewrite the stale hash before anything reads it.
+    let tab = currentTab();
+    if (tab === 'cluster' && $('nav-cluster').hidden) {
+        history.replaceState(null, '', location.pathname + location.search + '#status');
+        tab = 'status';
+    }
     const sub = currentSub(tab);
     document.documentElement.dataset.tab = tab;
     document.documentElement.dataset.sub = sub;
@@ -144,7 +152,7 @@ function applyTab() {
         if (sub === 'manager') renderTemplatesBox();
     }
     if (tab === 'settings') pollGlobalSettings();
-    if (tab === 'bench' || tab === 'chat') showEmbedPage(tab, sub);
+    if (tab === 'bench' || tab === 'chat' || tab === 'cluster') showEmbedPage(tab, sub);
 }
 addEventListener('hashchange', applyTab);
 
@@ -161,6 +169,7 @@ const EMBED_TARGETS = {
     'bench-acc-page': '/admin/dashboard?tab=bench&benchTab=accuracy',
     'bench-ctx-page': '/admin/dashboard?tab=bench&benchTab=context',
     'chat-page': '/admin/chat',
+    'cluster-page': '/admin/dashboard?tab=cluster',
 };
 function showEmbedPage(tab, sub) {
     const card = pageCards.find(c => c.dataset.id === EMBED_PAGE_IDS[tab]?.[sub]);
@@ -184,6 +193,7 @@ function showEmbedPage(tab, sub) {
 const EMBED_PAGE_IDS = {
     bench: { throughput: 'bench-tp-page', accuracy: 'bench-acc-page', context: 'bench-ctx-page' },
     chat: { chat: 'chat-page' },
+    cluster: { cluster: 'cluster-page' },
 };
 
 /* dropdown menus: hover opens, click toggles, outside click / Escape closes */
@@ -232,12 +242,12 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { $('dd-models-menu').hidden = true; $('dd-bench-menu').hidden = true; }
 });
 
-// Keyboard: 1–7 jump to tabs (ignored while typing in inputs).
+// Keyboard: 1–8 jump to tabs (ignored while typing in inputs).
 document.addEventListener('keydown', e => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    const i = ['1', '2', '3', '4', '5', '6', '7'].indexOf(e.key);
+    const i = ['1', '2', '3', '4', '5', '6', '7', '8'].indexOf(e.key);
     if (i >= 0) location.hash = '#' + TABS[i];
 });
 
@@ -4249,7 +4259,21 @@ async function pollGlobalSettings() {
     }
     GS = d;   // gateway already overlaid the shadow; resave accumulates
     if (!Object.keys(gsDirty).length) GS_ORIG = JSON.parse(JSON.stringify(d));
+    syncClusterGate(d);
     renderGlobalSettings();
+}
+
+// Classic shows the Cluster tab only while distributed_inference_active;
+// same gate here, refreshed from any global-settings GET (and at boot).
+function syncClusterGate(gs) {
+    const active = !!(gs && gs.server && gs.server.distributed_inference_active);
+    const nav = $('nav-cluster');
+    if (nav) nav.hidden = !active;
+    if (!active && currentTab() === 'cluster') location.hash = '#status';
+}
+async function gateClusterFromServer() {
+    try { syncClusterGate(await fetchJson(`${API}/admin/api/global-settings`)); }
+    catch (_) { /* dormant by default; the settings poll retries */ }
 }
 
 function renderGlobalSettings() {
@@ -5823,6 +5847,7 @@ loadLocale(new URLSearchParams(location.search).get('lang') || undefined);
 createCharts();
 resizeCharts();
 applyTab();
+gateClusterFromServer();
 restartPolling();
 pollGatewayInfo();
 loadChartHistory();
