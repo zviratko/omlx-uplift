@@ -72,14 +72,18 @@ const PERCENTILES = { p50: 50, p90: 90, p95: 95, p99: 99 };
 if (!(layout.percentile in PERCENTILES)) layout.percentile = 'p95';
 
 /* ---------------- tabs (hash routing, like the classic dashboard) --------- */
-const TABS = ['status', 'models', 'usage', 'logs', 'settings'];
+const TABS = ['status', 'models', 'usage', 'logs', 'bench', 'chat', 'settings'];
 const SUBS = {
     models: ['manager', 'helper', 'downloader', 'uploader', 'quantizer'],
+    bench: ['throughput', 'accuracy', 'context'],
     settings: ['global'],
+    chat: ['chat'],
 };
 const SUB_LABELS = {
     manager: 'Models', downloader: 'Downloader', quantizer: 'oQ(e) Quantization',
     uploader: 'Uploader', helper: 'Helper Models',
+    throughput: 'Throughput', accuracy: 'Accuracy', context: 'Context',
+    chat: 'Chat',
     global: 'Server Settings',
 };
 function currentTab() {
@@ -99,19 +103,20 @@ function applyTab() {
     for (const a of $('tabs').querySelectorAll('[data-tab]')) {
         const hit = a.dataset.tab === tab;
         a.classList.toggle('active', hit);
-        if (a.classList.contains('dd-btn')) a.textContent = '';
     }
-    // dropdown button label gets rebuilt (textContent above wiped it)
-    {
-        const dd = 'dd-models-btn';
-        let lbl = t('uplift.tab.models');
-        if (lbl === 'uplift.tab.models') lbl = 'Models';   // pre-catalog fallback
-        $(dd).replaceChildren();   // clear (no innerHTML; labels are textContent-only)
+    // dropdown button labels get rebuilt (the toggle above may wipe them)
+    for (const dd of [['dd-models-btn', 'uplift.tab.models', 'Models'],
+                      ['dd-bench-btn', 'navbar.tab.bench', 'Bench']]) {
+        const btn = $(dd[0]);
+        if (!btn) continue;
+        let lbl = t(dd[1]);
+        if (lbl === dd[1]) lbl = dd[2];   // pre-catalog fallback
+        btn.replaceChildren();   // clear (no innerHTML; labels are textContent-only)
         const span = document.createElement('span');
-        span.dataset.i18n = 'uplift.tab.models'; span.textContent = lbl;
+        span.dataset.i18n = dd[1]; span.textContent = lbl;
         const caret = document.createElement('span');
         caret.className = 'dd-caret'; caret.textContent = '▾';
-        $(dd).append(span, ' ', caret);
+        btn.append(span, ' ', caret);
     }
     for (const card of pageCards) {
         const show = (card.dataset.tab || 'status') === tab &&
@@ -123,7 +128,8 @@ function applyTab() {
     $('btn-customize').hidden = tab !== 'status' || dashEditing;
     if (tab !== 'status' && dashEditing) cancelDashEdit();
     // dropdown open state reset on navigation (dropdown click keeps its menu open)
-    if (ddForceOpen !== 'dd-models-menu') $('dd-models-menu').hidden = true;
+    for (const m of ['dd-models-menu', 'dd-bench-menu'])
+        if (ddForceOpen !== m) $(m).hidden = true;
     ddForceOpen = null;
     requestAnimationFrame(resizeCharts);   // charts may have become visible
     if (tab === 'status') requestAnimationFrame(ensureUpliftGrid);
@@ -138,8 +144,47 @@ function applyTab() {
         if (sub === 'manager') renderTemplatesBox();
     }
     if (tab === 'settings') pollGlobalSettings();
+    if (tab === 'bench' || tab === 'chat') showEmbedPage(tab, sub);
 }
 addEventListener('hashchange', applyTab);
+
+/* ---- embedded classic pages (Bench sub-tabs, Chat) ----------------------
+   Same-origin iframes REUSE the original dashboard components verbatim —
+   the user's explicit decision against duplicating or reimplementing the
+   ~9k lines of Alpine bench/chat UI. The classic dashboard reads its tab
+   from the URL (?tab=bench&benchTab=...), the chat page is a standalone
+   route. Iframes load lazily on first visit and keep their state after. */
+// No embed= style flag: the classic surface is byte-frozen, it simply
+// renders its normal self (own navbar included) inside the frame.
+const EMBED_TARGETS = {
+    'bench-tp-page': '/admin/dashboard?tab=bench&benchTab=throughput',
+    'bench-acc-page': '/admin/dashboard?tab=bench&benchTab=accuracy',
+    'bench-ctx-page': '/admin/dashboard?tab=bench&benchTab=context',
+    'chat-page': '/admin/chat',
+};
+function showEmbedPage(tab, sub) {
+    const card = pageCards.find(c => c.dataset.id === EMBED_PAGE_IDS[tab]?.[sub]);
+    if (!card) return;
+    const id = card.dataset.id;
+    const frame = card.querySelector('.embed-frame');
+    const link = card.querySelector('.embed-open');
+    const path = EMBED_TARGETS[id];
+    if (link) link.href = API + path;
+    if (!frame) return;
+    if (frame.dataset.loaded) { frame.hidden = false; return; }
+    // Standalone `omlx-uplift view` proxies the API only — it cannot serve
+    // the classic HTML pages; the open-in-new-tab link points at upstream.
+    if (!NATIVE && !qp.has('api') && API === location.origin) {
+        frame.hidden = true;
+        return;
+    }
+    frame.src = API + path;
+    frame.dataset.loaded = '1';
+}
+const EMBED_PAGE_IDS = {
+    bench: { throughput: 'bench-tp-page', accuracy: 'bench-acc-page', context: 'bench-ctx-page' },
+    chat: { chat: 'chat-page' },
+};
 
 /* dropdown menus: hover opens, click toggles, outside click / Escape closes */
 let ddForceOpen = null;
@@ -175,21 +220,24 @@ function bindDropdown(btnId, menuId) {
         });
 }
 bindDropdown('dd-models-btn', 'dd-models-menu');
+bindDropdown('dd-bench-btn', 'dd-bench-menu');
 document.addEventListener('click', e => {
-    const menu = $('dd-models-menu');
-    if (!menu.hidden && !menu.contains(e.target) && !$('dd-models-btn').contains(e.target))
-        menu.hidden = true;
+    for (const [btnId, menuId] of [['dd-models-btn', 'dd-models-menu'], ['dd-bench-btn', 'dd-bench-menu']]) {
+        const menu = $(menuId);
+        if (!menu.hidden && !menu.contains(e.target) && !$(btnId).contains(e.target))
+            menu.hidden = true;
+    }
 });
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') $('dd-models-menu').hidden = true;
+    if (e.key === 'Escape') { $('dd-models-menu').hidden = true; $('dd-bench-menu').hidden = true; }
 });
 
-// Keyboard: 1–5 jump to tabs (ignored while typing in inputs).
+// Keyboard: 1–7 jump to tabs (ignored while typing in inputs).
 document.addEventListener('keydown', e => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    const i = ['1', '2', '3', '4', '5'].indexOf(e.key);
+    const i = ['1', '2', '3', '4', '5', '6', '7'].indexOf(e.key);
     if (i >= 0) location.hash = '#' + TABS[i];
 });
 

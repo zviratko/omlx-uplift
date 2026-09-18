@@ -27,8 +27,17 @@
                 <a href="#models" data-sub="quantizer" data-i18n="uplift.tab.quantizer">oQ(e) Quantization</a>
             </span>
         </span>
+        <span class="dd" id="dd-bench">
+            <button class="dd-btn" data-tab="bench" id="dd-bench-btn"><span data-i18n="navbar.tab.bench">Bench</span> <span class="dd-caret">▾</span></button>
+            <span class="dd-menu" id="dd-bench-menu" hidden>
+                <a href="#bench" data-sub="throughput" data-i18n="navbar.dropdown.performance">Throughput</a>
+                <a href="#bench" data-sub="accuracy" data-i18n="navbar.dropdown.accuracy">Intelligence</a>
+                <a href="#bench" data-sub="context" data-i18n="navbar.dropdown.context">Context</a>
+            </span>
+        </span>
         <a href="#usage" data-tab="usage" data-i18n="uplift.tab.usage">Usage</a>
         <a href="#logs" data-tab="logs" data-i18n="uplift.tab.logs">Logs</a>
+        <a href="#chat" data-tab="chat" data-i18n="navbar.tab.chat">Chat</a>
         <a href="#settings" data-tab="settings" data-i18n="uplift.tab.settings">Server Settings</a>
     </nav>
     <span class="chip" id="chip-uptime">—</span>
@@ -263,7 +272,7 @@
             <div class="se-hint" style="margin-bottom:8px">Stored model configuration lives in model_settings.json.
                 The Missing section on the Models page and Prune remove entries for models that no longer exist on disk.</div>
             <div id="ms-templates" class="admin-table"><div class="empty">—</div></div>
-        </div></div></div></div></section></div>
+        </div></div></div></div></section><section class="card wide page-card embed-card" data-id="bench-tp-page" data-tab="bench" data-sub="throughput" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="navbar.dropdown.performance">Throughput</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.dropdown.performance">Throughput</span> <span class="right"><a class="embed-open" data-embed="bench-tp-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="bench-tp-page" title="Throughput" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="bench-acc-page" data-tab="bench" data-sub="accuracy" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="navbar.dropdown.accuracy">Intelligence</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.dropdown.accuracy">Intelligence</span> <span class="right"><a class="embed-open" data-embed="bench-acc-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="bench-acc-page" title="Accuracy" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="bench-ctx-page" data-tab="bench" data-sub="context" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="navbar.dropdown.context">Context</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.dropdown.context">Context</span> <span class="right"><a class="embed-open" data-embed="bench-ctx-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="bench-ctx-page" title="Context" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="chat-page" data-tab="chat" data-sub="chat" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="navbar.tab.chat">Chat</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.tab.chat">Chat</span> <span class="right"><a class="embed-open" data-embed="chat-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="chat-page" title="Chat" loading="lazy"></iframe></div></div></div></section></div>
 
 </div>
 

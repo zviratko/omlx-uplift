@@ -1041,6 +1041,12 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 
 /* ---- Full-page logs ---- */
 .logs-page { max-height: calc(100vh - 280px); min-height: 400px; }
+/* Embedded classic pages (Bench sub-tabs, Chat): same-origin iframes reuse
+   the original components verbatim — zero duplication by user decision. */
+.embed-frame { display: block; width: 100%; height: calc(100vh - 210px);
+    min-height: 560px; border: 1px solid var(--edge); background: var(--card); }
+.embed-open { font-size: 12px; text-decoration: none; }
+.embed-frame[hidden] { display: none; }   /* display rule above out-specifies UA [hidden] */
 
 /* Narrow screens: single column regardless of layout setting */
 @media (max-width: 640px) {

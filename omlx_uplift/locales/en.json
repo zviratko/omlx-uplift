@@ -355,5 +355,6 @@
  "uplift.layout.cancel": "Cancel",
  "uplift.layout.reset2": "Reset to default",
  "uplift.layout.save_failed": "Failed to save layout",
- "uplift.layout.drag_to_move": "Drag to move"
+ "uplift.layout.drag_to_move": "Drag to move",
+ "uplift.layout.open_new": "Open in new tab"
 }
