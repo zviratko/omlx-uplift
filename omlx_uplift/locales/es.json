@@ -372,5 +372,6 @@
  "uplift.metric.rate.prompt_tokens_s": "prompt tok/s",
  "uplift.metric.rate.completion_tokens_s": "complet. tok/s",
  "uplift.metric.rate.requests_s": "peticiones/s",
- "uplift.metric.engines.active_requests": "peticiones activas"
+ "uplift.metric.engines.active_requests": "peticiones activas",
+ "uplift.metric.engines.loaded": "modelos activos"
 }

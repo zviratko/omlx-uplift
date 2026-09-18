@@ -349,6 +349,7 @@ function applyWidthEarly() {
 let dashGrid = null, dashEditing = false, dashDraft = null, dashSaving = false;
 let dashPlacedIds = [];
 let dashRefitFrame = 0, dashRefitTimer = 0;
+let _padObserver = null;   // set in ensureUpliftGrid; createMetricCard extends it
 let dashApplying = false;   // board (re)build in progress — no refit re-entry
 let _watchdogQueued = false;
 
@@ -413,7 +414,15 @@ function ensureUpliftGrid() {
     GridStack.setupDragIn('.dash-tray-pill', { appendTo: 'body', helper: 'clone' });
     if (typeof ResizeObserver !== 'undefined') {
         const obs = new ResizeObserver(() => refitUpliftBlocks());
-        el.querySelectorAll('.card-pad').forEach(body => obs.observe(body));
+        // Observe the pad AND its children: when a narrow viewport wraps
+        // stat rows, the pad's own box stays pinned by the card flex — only
+        // its children grow. Watching pads alone froze the classic
+        // "content grows, row never does" bug.
+        el.querySelectorAll('.card-pad').forEach(pad => {
+            obs.observe(pad);
+            pad.querySelectorAll(':scope > *').forEach(ch => obs.observe(ch));
+        });
+        _padObserver = obs;
     }
     const narrow = window.matchMedia('(max-width: 751.98px)');
     const syncNarrow = () => {
@@ -442,19 +451,32 @@ function _neededUnits(el) {
     const pr = pad.getBoundingClientRect();
     let bottom = 0;
     for (const child of pad.children) {
-        if (child.querySelector && child.querySelector('.metric-plot')) {
-            // flex-filled body: demand = the plot's 78px floor, never the
-            // stretched rect — otherwise a grown card can never shrink
-            bottom = Math.max(bottom, child.getBoundingClientRect().top - pr.top + 78);
+        const mb = parseFloat(getComputedStyle(child).marginBottom) || 0;
+        const plot = child.querySelector && (child.querySelector('.metric-plot')
+            || child.querySelector('.chart-box'));
+        if (plot) {
+            // Chart bodies stretch to their card, so their rect measures
+            // yesterday's size — demand = the CSS min-height floor instead.
+            // Otherwise a grown card can never shrink (rect ratchet).
+            const lg = plot.parentElement.querySelector('.u-legend');
+            const floor = plot.classList.contains('metric-plot') ? 78
+                : Math.max(210, parseFloat(getComputedStyle(plot).minHeight) || 210)
+                  + (lg ? 20 : 0);
+            bottom = Math.max(bottom, child.getBoundingClientRect().top - pr.top + floor);
             continue;
         }
         const r = child.getBoundingClientRect();
-        if (r.height > 0) bottom = Math.max(bottom, r.bottom - pr.top + pad.scrollTop);
+        // getBoundingClientRect ignores margins; the next child starts
+        // below them, so rect.bottom alone undercounts every stacked row
+        if (r.height > 0) bottom = Math.max(bottom, r.bottom - pr.top + pad.scrollTop + mb);
     }
     const padBottom = parseFloat(getComputedStyle(pad).paddingBottom) || 0;
     const chrome = el.querySelector('.card-chrome');
     const cr = chrome ? chrome.getBoundingClientRect().height : 0;
-    const px = Math.max(bottom + padBottom + cr, 32);
+    // +8: GridStack's vertical margin is outside the content box, so a
+    // row sized exactly to content paints its card border into the gap
+    // below. One full cell of slack keeps frames inside their boxes.
+    const px = Math.max(bottom + padBottom + cr + 8, 32);
     // cellHeight is 8px; clamp guards runaway canvas growth
     return Math.min(60, Math.max(4, Math.ceil(px / 8)));
 }
@@ -1074,6 +1096,7 @@ function createCharts() {
                   Object.assign(yAxis(col, { side: 1, grid: false, label: 'prefill tok/s', stroke: col.gold, size: 58 }), { scale: 'y2' })] },
         legendUpdater());
     // y2 axis sits on the right; uPlot axis 'side': 1=right of grid, 3=left.
+    tpsOpts.height = Math.max(200, $('chart-tps').clientHeight || 240);
     tpsChart = new uPlot(tpsOpts, tpsWindowed(), $('chart-tps'));
     window.__uplotTps = tpsChart;   // debug handle
     // Memory % left; runtime cache GB (total + top-3 models' hot cache) right.
@@ -1092,6 +1115,7 @@ function createCharts() {
                   Object.assign(yAxis(col, { side: 1, grid: false, label: 'cache GB', stroke: col.gold, size: 58 }), { scale: 'y2' })] },
         legendUpdater());
     memOpts.scales.y = { range: [0, 100] };
+    memOpts.height = Math.max(200, $('chart-mem').clientHeight || 240);
     memChart = new uPlot(memOpts, windowedData(memData), $('chart-mem'));
     bindCursorUpdater(tpsChart); bindCursorUpdater(memChart);
     bindCursorTip(tpsChart); bindCursorTip(memChart);
@@ -1131,11 +1155,32 @@ function rerenderChartsTheme() {
 function resizeCharts() {
     fitAllMetricPlots();
     if (!tpsChart) return;
-    const w1 = $('chart-tps').clientWidth, w2 = $('chart-mem').clientWidth;
-    if (w1 > 0) tpsChart.setSize({ width: w1, height: 240 });
-    if (w2 > 0) memChart.setSize({ width: w2, height: 240 });
-    const w3 = $('chart-usage')?.clientWidth;
-    if (usageChart && w3 > 0) usageChart.setSize({ width: w3, height: 200 });
+    // Box-driven clamp (same rule as the metric plots): available height
+    // comes from the GRID BOX, never the body's clientHeight — a flex body
+    // reports its own drawn height and a flex body + auto-size chart would
+    // otherwise feed back into itself and grow forever.
+    for (const [ch, box, floor] of [[tpsChart, $('chart-tps'), 210], [memChart, $('chart-mem'), 210],
+                                    [usageChart, $('chart-usage'), 180]]) {
+        if (!ch || !box || box.clientWidth <= 0) continue;
+        const cont = box.closest('.grid-stack-item-content');
+        let h = floor;
+        if (cont) {
+            const pad = box.closest('.card-pad');
+            const padBottom = pad ? (parseFloat(getComputedStyle(pad).paddingBottom) || 0) : 0;
+            h = Math.max(floor, Math.round(cont.getBoundingClientRect().bottom - padBottom
+                - box.getBoundingClientRect().top));
+        }
+        // The hover legend renders below the plot — reserve its row.
+        const lg = box.querySelector('.u-legend');
+        const lgH = lg ? Math.max(lg.getBoundingClientRect().height, 20) : 0;
+        h = Math.max(floor, h - lgH);
+        box.style.height = h + 'px';
+        ch.setSize({ width: box.clientWidth, height: h });
+        // uPlot.setSize grows its .uplot wrapper but never shrinks it —
+        // pin it, or stale height bleeds past the clamped box.
+        const wrap = box.querySelector('.uplot');
+        if (wrap) wrap.style.height = h + 'px';
+    }
 }
 new ResizeObserver(resizeCharts).observe($('grid'));
 // The grid box itself does not change size when only the column count changes
@@ -1282,6 +1327,7 @@ function createMetricCard(def) {
     tsRow.className = 'ts-row'; tsRow.dataset.block = id;
     tsRow.setAttribute('role', 'group'); tsRow.setAttribute('aria-label', 'Timespan');
     const body = document.createElement('div'); body.className = 'card-body metric-body';
+    if (_padObserver) [h2, tsRow, body].forEach(ch => _padObserver.observe(ch));
     const host = document.createElement('div'); host.className = 'metric-plot';
     host.id = id + '-plot';
     body.append(host);
@@ -1317,9 +1363,26 @@ function fitMetricPlot(id) {
     // readable; _neededUnits() treats the .metric-plot floor as the
     // content demand, and metric cards size TO that demand exactly.
     const host = e.host;
-    // Height comes from flexbox (card-body fills the grid box, min 78px);
-    // pinning style.height here would fight the row engine when shrinking.
-    const h = Math.max(78, host.clientHeight || 78);
+    // Box-driven height: read what the CARD has left (pad bottom - body
+    // top - pad's bottom padding), NOT host.clientHeight — a stretched
+    // flex host reports the uPlot wrapper's stale inline size, which
+    // locks the chart at its largest-ever height and bleeds past the box.
+    const pad = e.host.closest('.card-pad');
+    const cont = e.host.closest('.grid-stack-item-content');
+    let h = 78;
+    if (pad && cont) {
+        // Bottom reference = the GRID BOX, never the pad: a stretched pad
+        // reports its own stale grown height and the loop gets stuck at
+        // the largest size it ever reached. The box is engine truth.
+        const cs = getComputedStyle(pad);
+        const padBottom = parseFloat(cs.paddingBottom) || 0;
+        const border = parseFloat(getComputedStyle(e.host.closest('.card')).borderTopWidth) || 0;
+        h = Math.max(78, Math.round(cont.getBoundingClientRect().bottom - border
+            - e.host.parentElement.getBoundingClientRect().top - padBottom));
+    }
+    host.style.height = h + 'px';
+    const wrap = host.querySelector('.uplot');
+    if (wrap) wrap.style.height = h + 'px';   // setSize only ever grows it
     if (host.clientWidth > 0) e.chart.setSize({ width: host.clientWidth, height: h });
 }
 function fitAllMetricPlots() { for (const id of metricCharts.keys()) fitMetricPlot(id); }
@@ -1389,6 +1452,7 @@ function relabelExplore() {
     // JS-built dynamic bits (window chips + per-card readouts); i18n-named
     // titles are [data-i18n] and covered by applyI18n already.
     renderCardTsRows();
+    refitUpliftBlocks();   // chip rows just materialised: demand changed
     for (const [id, e] of metricCharts) {
         e.chart.series[1].label = metricLabel(e.def.key);
         drawMetricChart(id);

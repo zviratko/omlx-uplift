@@ -170,6 +170,7 @@ const EXPLORE_METRICS = [
     { key: 'rate.requests_s', hourly: true },
     { key: 'cache_efficiency', hourly: true, fmt: 'pct' },
     { key: 'engines.active_requests' },
+    { key: 'engines.loaded' },
     { key: 'mem.percent' },
     { key: 'mem.used_bytes', fmt: 'bytes' },
     { key: 'cache.total_bytes', fmt: 'bytes' },

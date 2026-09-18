@@ -368,5 +368,6 @@
  "uplift.metric.rate.prompt_tokens_s": "промпт ток/с",
  "uplift.metric.rate.completion_tokens_s": "заверш. ток/с",
  "uplift.metric.rate.requests_s": "запросов/с",
- "uplift.metric.engines.active_requests": "активные запросы"
+ "uplift.metric.engines.active_requests": "активные запросы",
+ "uplift.metric.engines.loaded": "активные модели"
 }

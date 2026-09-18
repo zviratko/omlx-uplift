@@ -368,5 +368,6 @@
  "uplift.metric.rate.prompt_tokens_s": "提示 tok/s",
  "uplift.metric.rate.completion_tokens_s": "补全 tok/s",
  "uplift.metric.rate.requests_s": "请求/s",
- "uplift.metric.engines.active_requests": "活动请求"
+ "uplift.metric.engines.active_requests": "活动请求",
+ "uplift.metric.engines.loaded": "活动模型"
 }

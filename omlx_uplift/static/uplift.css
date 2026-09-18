@@ -213,7 +213,11 @@ main.grid-stack .grid-stack-item.card-parked { display: none; }
    5-class selector; view mode must stay open for tooltips/popovers. */
 main.grid-stack > .grid-stack-item > .grid-stack-item-content {
     overflow: visible !important;
-    display: flex; flex-direction: column; min-width: 0; height: 100%;
+    display: flex; flex-direction: column; min-width: 0;
+    /* NOT height:100% — GridStack insets this box by the grid margins via
+       top/bottom offsets; a 100% height re-anchors at the inset TOP and
+       makes every card bleed ~one margin past its bottom edge. */
+    height: auto;
 }
 .card { background: var(--card); border: 1px solid var(--edge); min-width: 0;
     position: relative; transition: none; }
@@ -355,7 +359,9 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
 /* ---- Charts: outline frame is for diagrams (manual enclosure system) ---- */
 /* min-height (not fixed): multi-series legends wrap and need room, otherwise
    the last legend row clips at the container bottom. */
-.chart-box { width: 100%; min-height: 274px; }
+.chart-box { width: 100%; min-height: 210px; }
+.card-body.chart-fill { display: flex; }
+.card-body.chart-fill .chart-box { flex: 1 1 auto; min-width: 0; }
 /* Cursor value bubble: flat solid panel beside the pointer (no shadow,
    square corners), aligned with the painted crosshair. */
 .u-tip { position: absolute; z-index: 5; pointer-events: none;
@@ -1125,7 +1131,7 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 /* Fill the grid box: frame stretches, pad stretches, chart takes the rest.
    Same 4-class specificity as gridstack's size-to-content align rule. */
 main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metric-card {
-    flex: 1 0 100%; }
+    flex: 1 0 100%; min-height: 0; }
 .metric-card .card-pad { flex: 1 1 auto; display: flex; flex-direction: column; }
 .metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 78px; }
 .metric-plot { flex: 1 1 auto; min-height: 78px; min-width: 0; }

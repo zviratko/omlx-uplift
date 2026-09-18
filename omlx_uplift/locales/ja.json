@@ -397,5 +397,6 @@
  "uplift.metric.rate.prompt_tokens_s": "プロンプト tok/s",
  "uplift.metric.rate.completion_tokens_s": "補完 tok/s",
  "uplift.metric.rate.requests_s": "リクエスト/s",
- "uplift.metric.engines.active_requests": "アクリクエスト"
+ "uplift.metric.engines.active_requests": "アクリクエスト",
+ "uplift.metric.engines.loaded": "アクティブモデル"
 }

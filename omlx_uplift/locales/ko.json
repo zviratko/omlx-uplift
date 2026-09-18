@@ -383,5 +383,6 @@
  "uplift.metric.rate.prompt_tokens_s": "프롬프트 tok/s",
  "uplift.metric.rate.completion_tokens_s": "완료 tok/s",
  "uplift.metric.rate.requests_s": "요청/s",
- "uplift.metric.engines.active_requests": "활성 요청"
+ "uplift.metric.engines.active_requests": "활성 요청",
+ "uplift.metric.engines.loaded": "활성 모델"
 }

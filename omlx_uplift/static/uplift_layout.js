@@ -26,6 +26,7 @@
         'met-rate-requests-s',
         'met-cache-efficiency',
         'met-engines-active-requests',
+        'met-engines-loaded',
         'met-mem-percent',
         'met-mem-used-bytes',
         'met-cache-total-bytes',
@@ -73,8 +74,8 @@
         { id: 'requests', x: 8, y: 0, w: 4, h: 20 },
         { id: 'tokens', x: 12, y: 0, w: 4, h: 20 },
         { id: 'cache', x: 16, y: 0, w: 8, h: 20 },
-        { id: 'chart-tps', x: 0, y: 21, w: 12, h: 44 },
-        { id: 'chart-mem', x: 12, y: 21, w: 12, h: 44 },
+        { id: 'chart-tps', x: 0, y: 21, w: 12, h: 34 },
+        { id: 'chart-mem', x: 12, y: 21, w: 12, h: 34 },
         // Metric cards: 4 per row (w=6), compact chart fill. The board
         // owner may drop any of them; removed ones stay removed
         // (mergedBlocks memo in uplift.js).
@@ -88,6 +89,7 @@
         { id: 'met-mem-percent', x: 18, y: 97, w: 6, h: 22 },
         { id: 'met-mem-used-bytes', x: 0, y: 128, w: 6, h: 22 },
         { id: 'met-cache-total-bytes', x: 6, y: 128, w: 6, h: 22 },
+        { id: 'met-engines-loaded', x: 12, y: 128, w: 6, h: 22 },
         { id: 'live', x: 0, y: 159, w: 8, h: 38 },
         { id: 'reqstats', x: 8, y: 159, w: 8, h: 38 },
         { id: 'reqfeed', x: 16, y: 159, w: 8, h: 38 },

@@ -368,5 +368,6 @@
  "uplift.metric.engines.active_requests": "active requests",
  "uplift.metric.mem.percent": "memory %",
  "uplift.metric.mem.used_bytes": "memory used",
- "uplift.metric.cache.total_bytes": "disk cache"
+ "uplift.metric.cache.total_bytes": "disk cache",
+ "uplift.metric.engines.loaded": "active models"
 }
