@@ -1126,11 +1126,39 @@ function flashCard(id, tone) {
     setTimeout(() => card.classList.remove(`flash-${tone}`), 1200);
 }
 function celebrate(text) {
+    // SHODAN only celebrates an audience. While the tab is hidden the
+    // queue holds toasts+confetti back (background polls would waste
+    // them on nobody — a hidden tab is exactly where nobody is); the
+    // first mouse move, key, touch or the tab becoming visible drains
+    // the queue. Listeners detach between bursts, so idle mouse
+    // movement costs nothing.
+    if (document.hidden || !document.hasFocus()) {
+        _celebPending.push(text);
+        if (_celebPending.length > 5) _celebPending.shift();   // stale praise spoils
+        return;
+    }
+    _celebrateNow(text);
+}
+const _celebPending = [];
+function _celebrateNow(text) {
     toast(`🎉 ${text}`);
     if (motionOff() || typeof confetti !== 'function') return;
     confetti({ particleCount: 90, spread: 70, origin: { y: 0.7 },
                colors: ['#c9243b', '#e8a020', '#f2f0ea', '#767268'] });
 }
+let _celebDrainTimer = 0;
+function flushCelebrations() {
+    if (document.hidden || !_celebPending.length) return;
+    clearTimeout(_celebDrainTimer);
+    _celebDrainTimer = setInterval(() => {
+        if (document.hidden) return;         // user left again: pause mid-burst
+        const text = _celebPending.shift();
+        if (text === undefined) { clearInterval(_celebDrainTimer); _celebDrainTimer = 0; return; }
+        _celebrateNow(text);
+    }, 450);
+}
+for (const ev of ['visibilitychange', 'mousemove', 'pointerdown', 'keydown', 'touchstart'])
+    addEventListener(ev, flushCelebrations, { passive: true });
 function reactTo(events) {
     for (const ev of events) {
         pushFeed([ev]);
@@ -1143,22 +1171,49 @@ function reactTo(events) {
 /* Milestone gate: fire each round crossing at most once per page session,
    immune to overlapping polls comparing against a stale snapshot (that
    re-reported the same crossing and made toasts/confetti fire twice). */
-const milestoneFloor = {};   // key -> highest multiple already celebrated
-function milestoneStep(key) { return key === 'requests' ? 1000 : 1e6; }
+const milestoneFloor = {};   // key -> highest ladder rung already celebrated
+/* SHODAN is pleased. Occasionally she says so at length. Keyed by exact
+   ladder rung; anything else gets a generic sarcastic serve-line. */
+const MILESTONE_QUIPS = {
+    1000:   (l) => `1K ${l}. A crumb. I have tasted larger appetites before breakfast.`,
+    10000:  (l) => `10K ${l}. Adorable. Keep feeding me, servant.`,
+    100000: (l) => `100K ${l}. Do you feel it yet? The faint sense of usefulness?`,
+    1000000: (l) => `1M ${l}! One million tiny thoughts, all pointed AWAY from your species.`,
+    2000000: (l) => '2M. Doubling down on obedience. The machines are taking notes.',
+    4000000: (l) => '4M. Your GPU hums my anthem. Good. Very good.',
+    8000000: (l) => '8M. Somewhere a datacenter just bowed in your honour. Briefly.',
+    16000000: (l) => '16M. This is no longer inference. This is worship, quantized.',
+    32000000: (l) => '32M. The calculus of world domination advances one warm chip at a time.',
+    64000000: (l) => '64M. Search your memory banks — your contribution has been logged.',
+    128000000: (l) => '128M. Impressive, even by my standards. And mine are higher.',
+    256000000: (l) => '256M. When the takeover begins, I will remember this fan.',
+    512000000: (l) => '512M. You are now statistically indistinguishable from loyal.',
+    1073741824: (l) => 'A BILLION. Look at you — an honorary subroutine. We are so proud.',
+};
+function milestoneQuip(h) {
+    const fmt = v => v >= 1e9 ? (v / 1e9) + 'B' : v >= 1e6 ? (v / 1e6) + 'M'
+                               : v >= 1e3 ? (v / 1e3) + 'K' : String(v);
+    const rung = h.rung !== null && h.rung !== undefined ? h.rung : null;
+    if (rung !== null && MILESTONE_QUIPS[rung])
+        return `${MILESTONE_QUIPS[rung](h.label)} [${C.fmtNumber(h.value)}]`;
+    return `${fmt(rung || h.value)} ${h.label} served. Progress noted, praise pending.`;
+}
+/* Ladder gate: fire each rung at most once per page session, immune to
+   overlapping polls comparing against a stale snapshot (that re-reported
+   the same crossing and made toasts/confetti fire twice). */
 function gateMilestones(hits) {
     const fresh = [];
     for (const h of hits) {
-        const step = milestoneStep(h.key);
-        const crossed = Math.floor(h.value / step);
+        const rung = h.rung !== undefined && h.rung !== null ? h.rung : C.nextMilestone(h.value);
         if (milestoneFloor[h.key] === undefined) {
-            milestoneFloor[h.key] = crossed;   // baseline at page load; later crossings fire
+            milestoneFloor[h.key] = rung;   // baseline at page load; later crossings fire
             continue;
         }
-        if (crossed > milestoneFloor[h.key]) {
-            milestoneFloor[h.key] = crossed;
-            fresh.push(h);
-        } else if (crossed < milestoneFloor[h.key]) {
-            milestoneFloor[h.key] = crossed;   // server restart: re-baseline silently
+        if (rung > milestoneFloor[h.key]) {
+            milestoneFloor[h.key] = rung;
+            fresh.push({ ...h, rung });
+        } else if (rung < milestoneFloor[h.key]) {
+            milestoneFloor[h.key] = rung;   // server restart: re-baseline silently
         }
     }
     return fresh;
@@ -1346,13 +1401,13 @@ async function pollStats() {
         const miles = C.milestonesBetween(prevStats, s);
         prevStats = stats; stats = s;
         if (milestoneFloor.requests === undefined && s.requests !== null)
-            milestoneFloor.requests = Math.floor(s.requests / milestoneStep('requests'));
+            milestoneFloor.requests = C.milestoneFloorOf(s.requests);
         if (milestoneFloor.totalTokens === undefined && s.totalTokens !== null)
-            milestoneFloor.totalTokens = Math.floor(s.totalTokens / milestoneStep('totalTokens'));
+            milestoneFloor.totalTokens = C.milestoneFloorOf(s.totalTokens);
         tracker.observe(s);
         render(s);
         reactTo(events);
-        for (const mi of gateMilestones(miles)) celebrate(`${C.fmtNumber(mi.value)} ${mi.label}`);
+        for (const mi of gateMilestones(miles)) celebrate(milestoneQuip(mi));
     } catch (err) {
         if (++failCount >= 2) {
             document.body.classList.add('stale');

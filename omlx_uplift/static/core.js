@@ -208,16 +208,44 @@ function eventsBetween(prev, next) {
     return events;
 }
 
-/* Milestone events (confetti candidates) derived from counters crossing rounds. */
+/* ---- achievements ladder (confetti candidates) --------------------
+   1K -> 10K -> 100K -> 1M, then powers of 2 (2M, 4M, 8M, 16M...).
+   Same shape for both counters; the ladder is precomputed to 2^31 so
+   nextMilestone() is a cheap binary search. */
+const MILESTONE_LADDER = (() => {
+    const l = [];
+    for (let e = 3; e <= 6; e++) l.push(Math.pow(10, e));
+    for (let n = 2e6; n <= 1e10; n *= 2) l.push(n);   // 2M, 4M, 8M... on the decimal 1M base
+    return [...new Set(l)].sort((a, b) => a - b);
+})();
+/* Smallest ladder value strictly greater than v, or null past the end. */
+function nextMilestone(v) {
+    let lo = 0, hi = MILESTONE_LADDER.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (MILESTONE_LADDER[mid] <= v) lo = mid + 1; else hi = mid;
+    }
+    return lo < MILESTONE_LADDER.length ? MILESTONE_LADDER[lo] : null;
+}
+/* Highest ladder value <= v (floor anchor for baselining). */
+function milestoneFloorOf(v) {
+    const nx = nextMilestone(v);
+    if (nx === null) return MILESTONE_LADDER[MILESTONE_LADDER.length - 1];
+    const i = MILESTONE_LADDER.indexOf(nx);
+    return i > 0 ? MILESTONE_LADDER[i - 1] : 0;
+}
+
+/* Milestone events: exactly one hit per distinct ladder rung crossed
+   (skipping rungs still celebrates the highest one, once). */
 function milestonesBetween(prev, next) {
     const hits = [];
     if (!prev) return hits;
     for (const [key, label] of [['requests', 'requests served'], ['totalTokens', 'tokens served']]) {
         const a = prev[key], b = next[key];
         if (a === null || b === null || b <= a) continue;
-        const step = key === 'requests' ? 1000 : 1000000;
-        if (Math.floor(b / step) > Math.floor(a / step))
-            hits.push({ key, label, value: b });
+        const reached = milestoneFloorOf(b);   // highest rung b now sits on
+        if (reached > milestoneFloorOf(a))
+            hits.push({ key, label, value: b, rung: reached });
     }
     return hits;
 }
@@ -353,6 +381,7 @@ function errorText(body) {
 }
 
 return { num, r, normalize, modelState, appendSample, pruneOlderThan, eventsBetween, milestonesBetween,
+         MILESTONE_LADDER, nextMilestone, milestoneFloorOf,
          createRequestTracker, percentile, mean, mergeHistory,
          setLocale, getLocale, t, tf,
          PREFS_KEY, PREFS_DEFAULTS, THEMES, loadPrefs, savePrefs,
