@@ -292,3 +292,91 @@ def test_param_fields_mirror_request_sampling_params():
         cls = cls[:cls.index("\nclass ", 1)] if "\nclass " in cls[1:] else cls
         names = set(re.findall(r"^    (\w+):\s", cls, re.M))
     assert set(PARAM_FIELDS) <= names, set(PARAM_FIELDS) - names
+
+
+# -- RL-2 tracker lookup + final capture on departure --------------------------
+
+def test_lookup_active_wins_and_is_live_tracks_state():
+    req = _full_req("lk1", prompt="hi", out="half")
+    sched = FakeScheduler(running={"lk1": req})
+    t = RequestTracker()
+    t.sample(_pool({"m1": sched}))
+    assert t.is_live("lk1") is True
+    assert t.lookup("lk1")["prompt"] == "hi"
+    sched.running = {}                     # departs
+    t.sample(_pool({"m1": sched}))
+    assert t.is_live("lk1") is False       # done, not active
+    row = t.lookup("lk1")
+    assert row["state"] == "complete"
+    assert t.lookup("nope") is None
+
+
+def test_departure_refresh_grabs_final_output():
+    """The Request object can outlive its snapshot row by one tick
+    (scheduler.requests pops later); the tracker must re-read it at
+    departure so output/finish are not lost for fast requests."""
+    req = _full_req("dep1", prompt="PROMPT", out="")
+    sched = FakeScheduler(running={"dep1": req})
+    t = RequestTracker()
+    t.sample(_pool({"m1": sched}))
+    assert "output" not in t.lookup("dep1")          # live: empty -> absent, no lie
+    # engine finalizes, removes from snapshot, but keeps it one step in
+    # scheduler.requests (mirrors _cleanup_finished ordering). FakeScheduler
+    # mirrors that: snapshot `running` empties, its all-map still resolves.
+    req.output_text = "FULL FINAL ANSWER"
+    req.finish_reason = "stop"
+    sched.running = {}
+    t.sample(_pool({"m1": sched}))
+    row = t.lookup("dep1")
+    assert row["state"] == "complete"
+    assert row["output"] == "FULL FINAL ANSWER"
+    assert row["finish"] == "stop"
+
+
+# -- RL-2 live tail from the output collector ----------------------------------
+
+def _async_pool(schedulers, collectors):
+    # AsyncEngineCore-shaped: engine._engine.engine.(scheduler, _output_collectors)
+    entries = {
+        mid: SimpleNamespace(engine=SimpleNamespace(_engine=SimpleNamespace(
+            engine=SimpleNamespace(scheduler=s, _output_collectors=collectors.get(mid, {})))))
+        for mid, s in schedulers.items()
+    }
+    return SimpleNamespace(_entries=entries)
+
+
+def test_live_tail_grows_from_output_collector():
+    coll_out = SimpleNamespace(output_text="half a st", finish_reason=None)
+    coll = SimpleNamespace(output=coll_out)
+    sched = FakeScheduler(running={"t1": _req("t1", gen_at=time.monotonic(), out=9)})
+    pool = _async_pool({"m1": sched}, {"m1": {"t1": coll}})
+    t = RequestTracker()
+    t.sample(pool)
+    assert t.lookup("t1")["output"] == "half a st"
+
+    coll_out.output_text = "half a story, growing"      # tokens decode...
+    t.sample(pool)
+    assert t.lookup("t1")["output"] == "half a story, growing"
+
+    coll_out.finish_reason = "stop"                      # finalized
+    t.sample(pool)
+    row = t.lookup("t1")
+    assert row["finish"] == "stop"
+
+
+def test_collector_absent_and_broken_never_breaks_feed():
+    sched = FakeScheduler(running={"t2": _req("t2", gen_at=time.monotonic())})
+    bad = SimpleNamespace()          # no .output attr -> {} payload
+    pool = _async_pool({"m1": sched}, {"m1": {"t2": bad}})
+    t = RequestTracker()
+    t.sample(pool)
+    assert t.lookup("t2")["state"] == "generating"       # row survived
+    assert "output" not in t.lookup("t2")
+
+
+def test_collector_payload_truncates_tail():
+    from omlx_uplift.request_log import PAYLOAD_CAP, _collector_payload
+    coll = SimpleNamespace(output=SimpleNamespace(
+        output_text="x" * (PAYLOAD_CAP + 10), finish_reason=None))
+    p = _collector_payload(coll)
+    assert p["output_trunc"] is True and len(p["output"].encode()) == PAYLOAD_CAP

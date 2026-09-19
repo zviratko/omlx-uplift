@@ -1710,8 +1710,8 @@ function renderLive(s) {
     const list = $('live-list');
     const rows = [];
     for (const m of s.models) {
-        for (const p of m.prefilling) rows.push({ model: m.id, kind: C.t('uplift.inflight.prefilling'), prompt: p.prompt, progress: p.progress });
-        for (const g of m.generating) rows.push({ model: m.id, kind: C.t('uplift.inflight.generating'), prompt: g.prompt, generated: g.generated, tps: g.tps });
+        for (const p of m.prefilling) rows.push({ model: m.id, kind: C.t('uplift.inflight.prefilling'), prompt: p.prompt, progress: p.progress, reqId: p.request_id });
+        for (const g of m.generating) rows.push({ model: m.id, kind: C.t('uplift.inflight.generating'), prompt: g.prompt, generated: g.generated, tps: g.tps, reqId: g.request_id });
     }
     $('live-count').textContent = rows.length ? `${rows.length}` : '';
     if (!rows.length) {
@@ -1735,6 +1735,13 @@ function renderLive(s) {
         if (r.progress !== undefined && r.progress !== null) bits.push(`${Math.round(r.progress * 100)}%`);
         meta.textContent = bits.join(' · ');
         row.append(badge, name, meta);
+        if (r.reqId && r.reqId !== 'rank0') {
+            const insp = document.createElement('button');
+            insp.type = 'button'; insp.className = 'se-btn act';
+            insp.textContent = C.t('uplift.req.inspect'); insp.title = C.t('uplift.req.inspect_title');
+            insp.onclick = () => openInspector(r.reqId);
+            row.append(insp);
+        }
         if (r.progress !== undefined && r.progress !== null) {
             const bar = document.createElement('div');
             bar.className = 'meter'; bar.style.flex = '1 0 100%'; bar.style.marginTop = '4px';
@@ -1942,6 +1949,11 @@ function renderReqFeed() {
         if (r.tps) bits.push(`${r.tps.toFixed(0)} t/s`);
         meta.textContent = bits.join(' · ');
         row.append(badge, name, meta);
+        const insp = document.createElement('button');
+        insp.type = 'button'; insp.className = 'se-btn act';
+        insp.textContent = C.t('uplift.req.inspect'); insp.title = C.t('uplift.req.inspect_title');
+        insp.onclick = () => openInspector(r.id);
+        row.append(insp);
         if (['queued', 'prefilling', 'generating'].includes(r.state)) {
             const x = document.createElement('button');
             x.className = 'se-btn'; x.textContent = '✕'; x.title = 'Cancel request';
@@ -3877,6 +3889,121 @@ function confirmDialog(title, msg, act, okMsg) {
     });
     document.body.append(overlay);
     ok.focus();
+}
+
+/* RL-2 request inspector: detail modal with live tail. Timers run only
+   while the modal is open; closed modal == no background polling. */
+let inspectorOverlay = null;
+async function openInspector(reqId) {
+    if (inspectorOverlay) inspectorOverlay.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal nasa'; box.style.minWidth = '560px';
+    overlay.append(box);
+    let timer = null, follow = true, closed = false;
+
+    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+    function close() {
+        if (closed) return; closed = true;
+        stop(); overlay.remove();
+        document.removeEventListener('keydown', esc);
+        if (inspectorOverlay === overlay) inspectorOverlay = null;
+    }
+    function esc(e) { if (e.key === 'Escape') close(); }
+
+    const h = document.createElement('h3');
+    const head = document.createElement('div');   // header line: chips + counters
+    head.className = 'se-hint';
+    const promptBox = document.createElement('div');
+    const outputBox = document.createElement('div');
+    const paramsBox = document.createElement('div');
+    paramsBox.className = 'se-hint';
+    const outPre = document.createElement('pre');
+    outPre.style.cssText = 'max-height:240px;overflow:auto;white-space:pre-wrap;margin:4px 0;background:var(--panel);padding:6px';
+    const promptPre = document.createElement('pre');
+    promptPre.style.cssText = 'max-height:140px;overflow:auto;white-space:pre-wrap;margin:4px 0;background:var(--panel);padding:6px';
+    const followLbl = document.createElement('label');
+    followLbl.style.cssText = 'font-size:10px;color:var(--dim);user-select:none';
+    const followChk = document.createElement('input');
+    followChk.type = 'checkbox'; followChk.checked = true;
+    followLbl.append(followChk, ' ' + C.t('uplift.req.follow'));
+    followChk.onchange = () => { follow = followChk.checked; };
+    // user scrolls up -> stop following automatically (reader, not robot)
+    outPre.onscroll = () => {
+        const atBottom = outPre.scrollHeight - outPre.scrollTop - outPre.clientHeight < 24;
+        if (!atBottom && follow) { follow = false; followChk.checked = false; }
+    };
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'se-btn act danger'; cancelBtn.textContent = C.t('uplift.req.cancel');
+    cancelBtn.style.display = 'none';
+    cancelBtn.onclick = async () => {
+        cancelBtn.disabled = true;
+        try {
+            const res = await fetch(`${API}/admin/api/requests/${encodeURIComponent(reqId)}/cancel`, { method: 'POST' });
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+            toast(C.t('uplift.toast.cancelled', { id: reqId.slice(0, 6) }));
+        } catch (err) { toast(C.t('uplift.toast.cancel_failed', { msg: err.message })); }
+        cancelBtn.disabled = false;
+        refresh();
+    };
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'se-btn act'; closeBtn.textContent = C.t('uplift.req.close');
+    closeBtn.onclick = close;
+    const bar = document.createElement('div'); bar.className = 'row buttons';
+    bar.append(document.createElement('span'), cancelBtn, closeBtn);
+
+    h.textContent = C.t('uplift.req.title', { id: reqId.slice(0, 8) });
+    h.style.wordBreak = 'break-all';
+    box.append(h, head);
+    const pLabel = document.createElement('div'); pLabel.className = 'se-hint'; pLabel.textContent = C.t('uplift.req.prompt');
+    const oLabel = document.createElement('div'); oLabel.className = 'se-hint';
+    oLabel.textContent = C.t('uplift.req.output');
+    box.append(pLabel, promptBox, oLabel, outputBox, paramsBox, bar);
+    promptBox.append(promptPre); outputBox.append(followLbl, outPre);
+
+    function setBlock(pre, block, truncLabel) {
+        if (!block) { pre.textContent = C.t('uplift.req.none'); return; }
+        pre.textContent = block.text + (block.truncated ? `\n… ${truncLabel}` : '');
+    }
+    async function refresh() {
+        if (closed) return;
+        let d;
+        try {
+            d = await fetchJson(`${API}/admin/api/requests/${encodeURIComponent(reqId)}`);
+        } catch (err) { head.textContent = C.t('uplift.req.load_failed', { msg: err.message }); return; }
+        if (closed) return;
+        if (!d.found) {
+            head.textContent = C.t('uplift.req.not_found');
+            outPre.textContent = d.note || ''; promptPre.textContent = '—';
+            paramsBox.textContent = ''; cancelBtn.style.display = 'none';
+            stop();   // honest empty state, never a spinner forever
+            return;
+        }
+        const r = d.row || {};
+        const bits = [r.model, r.state];
+        if (r.prompt_tokens) bits.push(`in ${C.fmtCompact(r.prompt_tokens)}`);
+        if (r.completion_tokens) bits.push(`out ${C.fmtCompact(r.completion_tokens)}`);
+        if (r.tps) bits.push(`${r.tps.toFixed(1)} t/s`);
+        if (d.timings && d.timings.total_s !== undefined) bits.push(`${d.timings.total_s.toFixed(1)}s`);
+        if (r.error) bits.push(`error: ${r.error}`);
+        if (r.finish) bits.push(`finish: ${r.finish}`);
+        if (d.source) bits.push(C.t('uplift.req.source.' + d.source));
+        head.textContent = bits.filter(Boolean).join(' · ');
+        setBlock(promptPre, d.prompt, C.t('uplift.req.truncated'));
+        setBlock(outPre, d.output, C.t('uplift.req.truncated'));
+        if (follow && d.output) outPre.scrollTop = outPre.scrollHeight;
+        paramsBox.textContent = d.params ? C.t('uplift.req.params') + ': ' + JSON.stringify(d.params) : '';
+        cancelBtn.style.display = d.live ? '' : 'none';
+        if (timer && !d.live) stop();   // request ended; keep last render visible
+    }
+
+    document.addEventListener('keydown', esc);
+    overlay.onclick = e => { if (e.target === overlay) close(); };
+    document.body.append(overlay);
+    inspectorOverlay = overlay;
+    await refresh();
+    timer = setInterval(refresh, 2000);   // only while open AND live
 }
 
 /* Cockpit row controls: lamp/rocker tap handler, clipboard fallback, alias

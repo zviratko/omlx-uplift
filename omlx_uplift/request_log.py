@@ -117,6 +117,7 @@ class RequestTracker:
         seen: set[str] = set()
         rows: list[tuple[str, dict[str, Any]]] = []
         sampled_models: set[str] = set()
+        model_schedulers: dict[str, Any] = {}
 
         entries = getattr(engine_pool, "_entries", {}) or {} if engine_pool else {}
         try:
@@ -124,6 +125,7 @@ class RequestTracker:
         except Exception:
             model_ids = []
 
+        model_collectors: dict[str, dict] = {}
         for model_id in model_ids:
             try:
                 entry = entries.get(model_id)
@@ -131,6 +133,8 @@ class RequestTracker:
                 if sched is None:
                     continue
                 snap = sched.snapshot_for_admin()
+                model_schedulers[model_id] = sched
+                model_collectors[model_id] = _find_output_collectors(entry)
                 model_rows = list(_rows_from_snapshot(snap, model_id, now))
             except Exception:  # noqa: BLE001 - best-effort like the stats route
                 continue
@@ -146,6 +150,13 @@ class RequestTracker:
                     continue
                 prev = self._active.get(rid, {})
                 merged = {**prev, **row}
+                # RL-2 live tail: the per-request output collector carries the
+                # cumulative decoded text — that is the ONLY source that
+                # grows while generating (Request.output_text lands at
+                # finalize only). Skip the prefill phase (no collector yet).
+                coll = model_collectors.get(row.get("model"), {}).get(rid)
+                if coll is not None:
+                    merged.update(_collector_payload(coll))
                 if merged.get("state") != prev.get("state"):
                     self._dirty_ids.add(rid)
                 self._active[rid] = merged
@@ -164,6 +175,17 @@ class RequestTracker:
                     done["state"] = ("error" if row.get("state") == "cancelling"
                                      else "complete")
                     done["ts"] = now
+                    # RL-2: one last shot at the terminal payload while the
+                    # Request object may still sit in scheduler.requests
+                    # (output_text is only complete at finalize). Best-effort:
+                    # COALESCE in the store keeps whatever earlier sample won.
+                    sched = model_schedulers.get(row.get("model"))
+                    try:
+                        final = sched.get_request(rid) if sched else None
+                        if final is not None:
+                            done.update(_capture_payload(final))
+                    except Exception:  # noqa: BLE001
+                        pass
                     self._done.append(done)
                     self._dirty_ids.add(rid)
                     del self._active[rid]
@@ -181,6 +203,22 @@ class RequestTracker:
             rows = list(self._active.values()) + list(self._done)
         rows.sort(key=lambda r: r.get("ts", 0.0), reverse=True)
         return rows[: max(1, min(limit, RING_LIMIT + len(self._active)))]
+
+    def lookup(self, request_id: str) -> dict[str, Any] | None:
+        """Row for one id from the ring buffer (active wins over done)."""
+        with self._lock:
+            row = self._active.get(request_id)
+            if row is not None:
+                return dict(row)
+            for done in reversed(self._done):
+                if done.get("id") == request_id:
+                    return dict(done)
+        return None
+
+    def is_live(self, request_id: str) -> bool:
+        """True while the id sits in the active (not-yet-departed) map."""
+        with self._lock:
+            return request_id in self._active
 
     def drain_dirty(self) -> list[dict[str, Any]]:
         """State-changed rows since the last call (SSE deltas)."""
@@ -231,6 +269,39 @@ class RequestTracker:
             except Exception:  # noqa: BLE001
                 continue
         return False
+
+
+def _find_output_collectors(entry: Any) -> dict:
+    """AsyncEngineCore's per-request output collectors (same walk as the
+    admin stats route). Holder objects expose `.output` — a cumulative
+    RequestOutput whose output_text/finish_reason update as tokens decode.
+    """
+    try:
+        async_core = getattr(entry.engine, "_engine", None) if entry else None
+        core = getattr(async_core, "engine", None) if async_core else None
+        return getattr(core, "_output_collectors", {}) or {} if core else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _collector_payload(collector: Any) -> dict:
+    """RL-2 live tail: output/finish from the collector's latest aggregate."""
+    try:
+        out = getattr(collector, "output", None)
+        if out is None:
+            return {}
+        res = {}
+        text = getattr(out, "output_text", "") or ""
+        if text:
+            capped, trunc = _truncate(text, PAYLOAD_CAP)
+            res["output"] = capped
+            res["output_trunc"] = trunc
+        fr = getattr(out, "finish_reason", None)
+        if fr:
+            res["finish"] = fr
+        return res
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _find_scheduler(entry: Any) -> Any:

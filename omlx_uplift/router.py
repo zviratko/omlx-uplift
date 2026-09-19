@@ -678,6 +678,12 @@ async def stream_requests(is_admin: bool = Depends(require_admin)):
                         "state": row["state"],
                         "model": row.get("model", ""),
                         "origin": row.get("origin", "real"),
+                        # RL-2: counters ride along so an open inspector
+                        # modal updates progress without extra polls. Keep
+                        # this small — full text is fetched by the modal.
+                        "prompt": row.get("prompt_tokens"),
+                        "completion": row.get("completion_tokens"),
+                        "tps": row.get("tps"),
                     }
                     yield f"data: {json.dumps(ev)}\n\n"
                 await asyncio.sleep(1.0)
@@ -707,6 +713,76 @@ async def cancel_request(
     if await get_request_tracker().cancel(pool, request_id):
         return {"cancelled": request_id}
     raise HTTPException(status_code=404, detail=f"Request not found: {request_id}")
+
+
+# NOTE: registered AFTER /requests/stream (a literal route registered first
+# wins over this dynamic one in Starlette's order-based matching).
+@api_router.get("/requests/{request_id}")
+async def request_detail(
+    request_id: str, is_admin: bool = Depends(require_admin)
+):
+    """RL-2 inspector payload: ring-buffer row merged with the stored row.
+
+    Active tracker row wins per-field (it is the freshest); the stored row
+    fills gaps (payload persisted by an earlier write_tick). `found:false`
+    carries an honest note — never a half-truth from a stale merge.
+    """
+    import asyncio
+
+    tracker = get_request_tracker()
+    pool = engine_pool()
+    if pool is not None:
+        # refresh so an open modal sees state/payload move without a poll storm
+        await asyncio.to_thread(tracker.sample, pool)
+    live_row = tracker.lookup(request_id)
+    is_live = live_row is not None and tracker.is_live(request_id)
+    source = "active" if is_live else "stored"
+
+    from .store import get_store
+
+    stored = await asyncio.to_thread(get_store().request_by_id, request_id)
+
+    if live_row is None and stored is None:
+        return {"found": False, "live": False, "source": None, "row": None,
+                "note": "not in live ring buffer and not in the retention "
+                        "window (check retention days in Layout settings)"}
+
+    row = dict(stored or {})
+    if live_row:
+        row.update({k: v for k, v in live_row.items() if v is not None})
+        if stored:
+            source = "both"
+    row.setdefault("id", request_id)
+
+    def _payload(field, trunc_field):
+        text = row.get(field)
+        return {"text": text, "truncated": bool(row.get(trunc_field))} \
+            if text is not None else None
+
+    import json as _json
+    params = None
+    if row.get("params"):
+        try:
+            params = _json.loads(row["params"])
+        except ValueError:
+            params = {"raw": row["params"]}
+
+    timings = None
+    t0, t1 = row.get("ts_start"), row.get("ts_end")
+    if t0 and t1:
+        total = max(0.0, float(t1) - float(t0))
+        timings = {"total_s": round(total, 3)}   # prefill split not persisted
+    return {
+        "found": True, "live": is_live, "source": source,
+        "row": {k: row.get(k) for k in
+                ("id", "model", "state", "origin", "prompt_tokens",
+                 "completion_tokens", "tps", "error", "finish",
+                 "ts_start", "ts_end", "ts")},
+        "prompt": _payload("prompt", "prompt_trunc"),
+        "output": _payload("output", "output_trunc"),
+        "params": params,
+        "timings": timings,
+    }
 
 
 # --------------------------------------------------------------------------

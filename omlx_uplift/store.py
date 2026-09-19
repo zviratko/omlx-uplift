@@ -326,6 +326,16 @@ class MetricsStore:
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]
 
+    def request_by_id(self, request_id: str) -> dict | None:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM requests WHERE id = ?", (request_id,)
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return dict(zip((d[0] for d in cur.description), row))
+
     def close(self):
         with self._lock:
             self._conn.close()
