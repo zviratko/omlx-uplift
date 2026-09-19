@@ -163,7 +163,16 @@
         <div class="card-body"><div id="live-list"><div class="empty" data-i18n="uplift.empty.idle">Idle</div></div></div></div></div></div></section>
 
     <section class="card grid-stack-item" data-id="reqfeed" data-tab="status" gs-id="reqfeed" data-block="reqfeed"><div class="grid-stack-item-content"><div class="card-frame fill-card"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="uplift.card.request_feed">Request feed</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.request_feed">Request feed</span> <span class="right" id="reqfeed-sub"></span></h2>
-        <div class="card-body"><div id="reqfeed"><div class="empty" data-i18n="uplift.empty.no_requests">No requests yet</div></div></div></div></div></div></section>
+        <div class="card-body">
+        <div class="req-search" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 6px">
+          <input type="text" id="req-q" data-i18n-ph="uplift.req.search_ph" placeholder="search prompt/output…" style="flex:1 1 140px;min-width:120px;background:var(--panel);border:1px solid var(--edge);color:var(--ink);padding:3px 6px;font:inherit;font-size:11px">
+          <select id="req-model" style="background:var(--panel);border:1px solid var(--edge);color:var(--ink);padding:3px;font:inherit;font-size:11px"><option value="" data-i18n="uplift.req.all_models">all models</option></select>
+          <span id="req-timechips" style="display:inline-flex"></span>
+          <button type="button" class="se-btn act" id="req-search-btn" data-i18n="uplift.req.search">SEARCH</button>
+          <button type="button" class="se-btn act" id="req-live-btn" data-i18n="uplift.req.live" title="" style="display:none">LIVE</button>
+        </div>
+        <div class="se-hint" id="req-search-note" style="display:none"></div>
+        <div id="reqfeed"><div class="empty" data-i18n="uplift.empty.no_requests">No requests yet</div></div></div></div></div></div></section>
 
     <section class="card grid-stack-item" data-id="feed" data-tab="status" gs-id="feed" data-block="feed"><div class="grid-stack-item-content"><div class="card-frame fill-card"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span>Events</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Events</h2>
         <div class="card-body"><div class="feed" id="feed"><div class="empty">Watching…</div></div></div></div></div></div></section>

@@ -786,6 +786,33 @@ async def request_detail(
 
 
 # --------------------------------------------------------------------------
+# Request history search (RL-3) — server-side fulltext + timespan over the
+# stored `requests` table. Admin-gated like everything else here.
+# --------------------------------------------------------------------------
+
+
+@api_router.get("/requests-search")
+async def search_requests(
+    q: str = "", model: str = "", frm: float | None = None,
+    to: float | None = None, limit: int = 50,
+    is_admin: bool = Depends(require_admin),
+):
+    """GET /uplift/api/requests-search?q=&model=&from=&to=&limit=50.
+
+    `frm`/`to` are epoch seconds (query param name avoids the python
+    keyword). Returns {results, mode: 'fts'|'like'|'scan', q} — one SQL
+    query per search, excerpt built server-side.
+    """
+    import asyncio
+
+    from .store import get_store
+
+    return await asyncio.to_thread(
+        get_store().search_requests, q=q, model=model,
+        ts_from=frm, ts_to=to, limit=limit)
+
+
+# --------------------------------------------------------------------------
 # Retention policy (RL-0) — uplift-owned data policy, NOT vanilla settings.
 # GET reports resolved values + which layer wins; POST persists into the
 # store's meta table (takes effect at the next daily purge pass).

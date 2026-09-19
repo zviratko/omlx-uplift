@@ -28,7 +28,9 @@ def _referenced_keys():
     js = (STATIC / "uplift.js").read_text(encoding="utf-8")
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     keys = set(re.findall(r"C\.t\(\s*['\"]([A-Za-z0-9_.]+)['\"]", js))
-    keys |= set(re.findall(r'data-i18n="([A-Za-z0-9_.]+)"', html))
+    keys |= set(re.findall(r'data-i18n="([A-Za-z0-9_.]+)"', js + html))
+    keys |= set(re.findall(r'data-i18n-title="([A-Za-z0-9_.]+)"', js + html))
+    keys |= set(re.findall(r'data-i18n-ph="([A-Za-z0-9_.]+)"', js + html))
     # source.<x> keys are assembled at runtime: expand the known set
     if any(k.startswith("uplift.req.source.") for k in keys):
         pass

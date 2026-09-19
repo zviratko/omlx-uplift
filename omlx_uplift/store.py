@@ -57,6 +57,42 @@ def _clamp_days(raw, default: int) -> int:
     return min(v, _RET_CLAMP[1])
 
 
+def _excerpt(prompt, output, q, width=200):
+    """Manual window around the first case-insensitive hit in either text
+    (LIKE path and scan path). Falls back to the head of the prompt."""
+    texts = [t for t in (prompt, output) if t]
+    if not texts:
+        return ""
+    if q:
+        ql = q.lower()
+        for t in texts:
+            i = t.lower().find(ql)
+            if i >= 0:
+                start = max(0, i - width // 2)
+                return ("…" if start else "") + t[start:start + width] + "…"
+    head = texts[0][:width]
+    return head + ("…" if len(texts[0]) > width else "")
+
+
+def fts_query(raw: str) -> str:
+    """Make arbitrary user text safe for FTS5 MATCH: one quoted phrase per
+    word-ish token, ANDed. Quotes inside tokens are doubled (FTS rule)."""
+    import re
+    toks = re.findall(r"[^\s]+", raw)
+    out = []
+    for t in toks:
+        out.append('"' + t.replace('"', '""') + '"')
+    return " AND ".join(out) or '""'
+
+
+def _where_clause(parts):
+    return ("WHERE " + " AND ".join(parts)) if parts else ""
+
+
+def _and(parts):
+    return ("AND " + " AND ".join(parts)) if parts else ""
+
+
 def default_db_path() -> Path:
     # Same resolution priority omlx uses for its own base dir
     # (omlx.settings.resolve_default_base_path), with env fallback for
@@ -89,12 +125,20 @@ class MetricsStore:
     def __init__(self, path: Path | None = None, read_only: bool = False):
         self.path = Path(path) if path else default_db_path()
         self._lock = threading.Lock()
+        self._has_fts = False   # _init_schema flips it when FTS5 is usable
         if read_only:
             if not self.path.exists():
                 raise FileNotFoundError(self.path)
             self._conn = sqlite3.connect(
                 f"file:{self.path}?mode=ro", uri=True, check_same_thread=False
             )
+            # read-only viewer: FTS is usable iff the table already exists
+            try:
+                self._has_fts = bool(self._conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='request_fts'"
+                ).fetchone())
+            except sqlite3.Error:
+                pass
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(
@@ -145,6 +189,19 @@ class MetricsStore:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(_SCHEMA_VERSION),),
             )
+            # RL-3: FTS5 index over prompt+output, best-effort — Homebrew
+            # python sqlite usually ships it, but on failure everything
+            # falls back to LIKE (advertised per-response as mode).
+            # Plain (non-external-content) table: upsert re-syncs by
+            # id inside the same transaction; purge deletes both sides.
+            self._has_fts = False
+            try:
+                self._conn.execute(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS request_fts "
+                    "USING fts5(id UNINDEXED, prompt, output)")
+                self._has_fts = True
+            except sqlite3.OperationalError:
+                pass
 
     # -- retention policy (RL-0) -------------------------------------------
 
@@ -266,9 +323,30 @@ class MetricsStore:
                  ts_end=excluded.ts_end"""
         if in_tx:
             self._conn.execute(sql, params)
+            self._fts_sync(params)
             return
         with self._lock, self._conn:
             self._conn.execute(sql, params)
+            self._fts_sync(params)
+
+    def _fts_sync(self, params: dict):
+        """Keep request_fts in step with the row just upserted (same tx).
+        Only rows that actually carry text enter the index."""
+        if not getattr(self, "_has_fts", False):
+            return
+        if params.get("prompt") is None and params.get("output") is None:
+            return
+        try:
+            self._conn.execute(
+                "DELETE FROM request_fts WHERE id = ?", (params["id"],))
+            self._conn.execute(
+                "INSERT INTO request_fts(id, prompt, output) VALUES(?,?,?)",
+                (params["id"], params.get("prompt") or "",
+                 params.get("output") or ""))
+        except sqlite3.Error:
+            # index drift must never break the data path; rebuild on next
+            # search miss is not attempted — LIKE fallback still covers us
+            self._has_fts = False
 
     def write_tick(self, pairs: dict[str, float], request_rows: list[dict],
                    ts: float | None = None):
@@ -297,11 +375,20 @@ class MetricsStore:
         cutoff_l = time.time() - ldays * 86400
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff_m,))
+            gone = self._conn.execute(
+                "SELECT id FROM requests WHERE ts_start < ? "
+                "AND state IN ('complete','error')",
+                (cutoff_l,),
+            ).fetchall()
             self._conn.execute(
                 "DELETE FROM requests WHERE ts_start < ? "
                 "AND state IN ('complete','error')",
                 (cutoff_l,),
             )
+            if gone and self._has_fts:
+                ids = [r[0] for r in gone]
+                self._conn.executemany(
+                    "DELETE FROM request_fts WHERE id = ?", [(i,) for i in ids])
         # Checkpoint OUTSIDE the transaction — TRUNCATE on an open write
         # transaction fails with 'database table is locked'.
         with self._lock:
@@ -335,6 +422,76 @@ class MetricsStore:
             if row is None:
                 return None
             return dict(zip((d[0] for d in cur.description), row))
+
+    # -- RL-3 fulltext + timespan search ------------------------------------
+
+    def search_requests(self, q: str = "", model: str = "",
+                        ts_from: float | None = None,
+                        ts_to: float | None = None,
+                        limit: int = 50) -> dict:
+        """Server-side search over the stored `requests` table.
+
+        Returns {results: [{row fields..., excerpt}], mode: 'fts'|'like'}.
+        One query, no N+1: hits come back with a ~200-char excerpt built
+        server-side. FTS5 when available (MATCH + snippet()); LIKE with
+        escaped wildcards otherwise. Empty q = pure timespan/model scan.
+        """
+        limit = max(1, min(int(limit or 50), 200))
+        where, args = [], []
+        if ts_from is not None:
+            where.append("r.ts_start >= ?"); args.append(float(ts_from))
+        if ts_to is not None:
+            where.append("r.ts_start <= ?"); args.append(float(ts_to))
+        if model:
+            where.append("r.model = ?"); args.append(model)
+
+        q = (q or "").strip()
+        use_fts = bool(q) and self._has_fts
+        mode = "fts" if use_fts else ("like" if q else "scan")
+        sel = ("r.id, r.model, r.state, r.prompt_tokens, r.completion_tokens,"
+               " r.tps, r.error, r.finish, r.ts_start, r.ts_end")
+        cols = ["id", "model", "state", "prompt_tokens", "completion_tokens",
+                "tps", "error", "finish", "ts_start", "ts_end"]
+
+        with self._lock:
+            if use_fts:
+                try:
+                    cur = self._conn.execute(
+                        f"""SELECT {sel},
+                                   snippet(request_fts, 1, '[', ']', '...', 24) AS ex
+                            FROM request_fts f JOIN requests r ON r.id = f.id
+                            WHERE request_fts MATCH ? {_and(where)}
+                            ORDER BY r.ts_start DESC LIMIT ?""",
+                        [fts_query(q)] + args + [limit])
+                    results = []
+                    for row in cur.fetchall():
+                        d = dict(zip(cols + ["excerpt"], row))
+                        results.append(d)
+                    return {"results": results, "mode": "fts", "q": q}
+                except sqlite3.OperationalError:
+                    # MATCH syntax/index hiccup: answer THIS query with
+                    # LIKE; do not flip _has_fts (a probe error would
+                    # degrade every later search — _fts_sync owns that).
+                    mode = "like"
+
+            if q:
+                pat = "%" + q.replace("\\", "\\\\").replace("%", "\\%") \
+                               .replace("_", "\\_") + "%"
+                where.append("(r.prompt LIKE ? ESCAPE '\\' "
+                             "OR r.output LIKE ? ESCAPE '\\')")
+                args += [pat, pat]
+
+            cur = self._conn.execute(
+                f"""SELECT {sel}, r.prompt, r.output
+                    FROM requests r {_where_clause(where)}
+                    ORDER BY r.ts_start DESC LIMIT ?""",
+                args + [limit])
+            results = []
+            for row in cur.fetchall():
+                d = dict(zip(cols + ["_prompt", "_output"], row))
+                d["excerpt"] = _excerpt(d.pop("_prompt"), d.pop("_output"), q)
+                results.append(d)
+            return {"results": results, "mode": mode, "q": q}
 
     def close(self):
         with self._lock:
