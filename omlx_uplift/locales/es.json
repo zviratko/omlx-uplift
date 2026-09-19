@@ -382,6 +382,7 @@
  "uplift.req.no_matches": "Sin coincidencias en {scope}",
  "uplift.req.hits": "{n} coincidencia(s) · {mode}",
  "uplift.req.retention_note": "historial limitado a {days} d de retención",
+ "uplift.req.loop_hint": "Posible bucle degenerado — el texto generado se repite",
  "uplift.req.not_found": "Petición no encontrada",
  "uplift.req.load_failed": "Error al cargar: {msg}",
  "uplift.req.source.active": "en vivo",

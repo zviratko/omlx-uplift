@@ -382,6 +382,7 @@
  "uplift.req.no_matches": "Aucune correspondance dans {scope}",
  "uplift.req.hits": "{n} correspondance(s) · {mode}",
  "uplift.req.retention_note": "historique limité à {days} j de rétention",
+ "uplift.req.loop_hint": "Boucle dégénérée possible — le texte généré se répète",
  "uplift.req.not_found": "Requête introuvable",
  "uplift.req.load_failed": "Échec du chargement : {msg}",
  "uplift.req.source.active": "en direct",

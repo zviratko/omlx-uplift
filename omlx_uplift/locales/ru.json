@@ -378,6 +378,7 @@
  "uplift.req.no_matches": "Нет совпадений за {scope}",
  "uplift.req.hits": "Совпадений: {n} · {mode}",
  "uplift.req.retention_note": "история ограничена хранением {days} дн.",
+ "uplift.req.loop_hint": "Возможен вырожденный цикл — генерируемый текст повторяется",
  "uplift.req.not_found": "Запрос не найден",
  "uplift.req.load_failed": "Не удалось загрузить: {msg}",
  "uplift.req.source.active": "активный",

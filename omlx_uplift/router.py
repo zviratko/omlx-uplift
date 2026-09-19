@@ -684,6 +684,7 @@ async def stream_requests(is_admin: bool = Depends(require_admin)):
                         "prompt": row.get("prompt_tokens"),
                         "completion": row.get("completion_tokens"),
                         "tps": row.get("tps"),
+                        "loop_hint": bool(row.get("loop_hint")),
                     }
                     yield f"data: {json.dumps(ev)}\n\n"
                 await asyncio.sleep(1.0)

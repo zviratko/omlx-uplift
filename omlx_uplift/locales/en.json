@@ -378,6 +378,7 @@
  "uplift.req.no_matches": "No matches in {scope}",
  "uplift.req.hits": "{n} match(es) · {mode}",
  "uplift.req.retention_note": "history capped at {days} d retention",
+ "uplift.req.loop_hint": "Possible degenerate loop — generated text is repeating",
  "uplift.req.not_found": "Request not found",
  "uplift.req.load_failed": "Load failed: {msg}",
  "uplift.req.source.active": "live",

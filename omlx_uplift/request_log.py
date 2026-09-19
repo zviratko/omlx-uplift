@@ -51,6 +51,119 @@ def _truncate(text: str, cap: int = PAYLOAD_CAP):
     return raw[:cap].decode("utf-8", errors="ignore"), True
 
 
+# ---- RL-4 degenerate-loop hint ------------------------------------------
+LOOP_WINDOW = 800          # chars of tail inspected per check
+LOOP_MIN_UNIT = 20         # shorter repeating units = formatting, not loop
+LOOP_MIN_REPEATS = 3       # unit must tile the tail this many times
+LOOP_MAX_UNIT_NEWLINES = 1  # multi-row blocks tiling = structured output
+
+
+def _primitive_period(s: str) -> int:
+    """Smallest p with s[i] == s[i-p] for all i >= p (KMP failure table —
+    linear, stdlib-free). Equals len(s) when the text is not periodic."""
+    n = len(s)
+    fail = [0] * (n + 1)
+    k = 0
+    for i in range(1, n):
+        while k and s[i] != s[k]:
+            k = fail[k]
+        if s[i] == s[k]:
+            k += 1
+        fail[i + 1] = k
+    return n - fail[n]
+
+
+def detect_repeat(text: str) -> float:
+    """Repetition score of a text tail: repeats of the shortest period >=
+    LOOP_MIN_UNIT that still tiles the tail's run of identical blocks.
+
+    Two-offset scan only (character compares, linear in the window) — no
+    regex, no dynamic programming, cheap enough for the 1 s sample tick.
+    Returns the repeat count of that period over its run (0.0 when the
+    tail shows no qualifying repetition). Guards against false positives:
+    a tail that is overall periodic with a SHORT primitive period
+    ('aaaa…', indentation) is formatting noise, and a unit that tiles
+    with several newlines inside is a repeated structured block (a whole
+    markdown table), not token-level degeneration.
+    """
+    tail = text[-LOOP_WINDOW:]
+    n = len(tail)
+    if n < LOOP_MIN_UNIT * LOOP_MIN_REPEATS:
+        return 0.0
+    p = _primitive_period(tail)
+    if p < LOOP_MIN_UNIT:
+        return 0.0                        # whole tail uniform/short-cycle
+    # The run of repeats ends at the tail end; walk each candidate period
+    # backwards from the end while blocks match the last one.
+    for period in range(LOOP_MIN_UNIT, n // 2 + 1):
+        # quick reject: last block must equal the one before it
+        if tail[-period:] != tail[-2 * period:-period]:
+            continue
+        unit = tail[n - period:]
+        if unit.count("\n") > LOOP_MAX_UNIT_NEWLINES:
+            continue                      # tiled table/code block
+        blocks = 2
+        i = n - 2 * period
+        while i - period >= 0 and tail[i - period:i] == unit:
+            blocks += 1
+            i -= period
+        if blocks >= LOOP_MIN_REPEATS:
+            # shortest qualifying period wins (found first, ascending);
+            # normal prose never has a 20+-char period repeating 3x.
+            return float(blocks)
+    return 0.0
+
+
+def loop_hint(text: str) -> bool:
+    return detect_repeat(text) >= LOOP_MIN_REPEATS
+
+
+LOOP_TOK_WINDOW = 200      # token ids of tail inspected per check
+LOOP_TOK_MIN_UNIT = 20     # tokens — token-level equivalent of the unit
+
+
+def _primitive_period_seq(s) -> int:
+    """Same as _primitive_period but for token-id sequences (no slicing
+    copies — indexing only)."""
+    n = len(s)
+    fail = [0] * (n + 1)
+    k = 0
+    for i in range(1, n):
+        while k and s[i] != s[k]:
+            k = fail[k]
+        if s[i] == s[k]:
+            k += 1
+        fail[i + 1] = k
+    return n - fail[n]
+
+
+def detect_repeat_tokens(ids) -> float:
+    """Token-id twin of detect_repeat (runs while streaming, when the text
+    collector is already drained by the consumer). Pure int comparisons on
+    a bounded tail — no decode, no tokenization, tick-cheap. A tiled
+    structured block CAN trip here; the hint is advisory ('LOOP?'), never
+    an intervention."""
+    tail = list(ids)[-LOOP_TOK_WINDOW:]
+    n = len(tail)
+    if n < LOOP_TOK_MIN_UNIT * LOOP_MIN_REPEATS:
+        return 0.0
+    p = _primitive_period_seq(tail)
+    if p < LOOP_TOK_MIN_UNIT:
+        return 0.0                        # alternating/uniform token noise
+    for period in range(LOOP_TOK_MIN_UNIT, n // 2 + 1):
+        if tail[-period:] != tail[-2 * period:-period]:
+            continue
+        unit = tail[n - period:]
+        blocks = 2
+        i = n - 2 * period
+        while i - period >= 0 and tail[i - period:i] == unit:
+            blocks += 1
+            i -= period
+        if blocks >= LOOP_MIN_REPEATS:
+            return float(blocks)
+    return 0.0
+
+
 def _capture_payload(req: Any) -> dict:
     """Best-effort payload fields for one Request (RL-1).
 
@@ -148,6 +261,7 @@ class RequestTracker:
             for rid, row in rows:
                 if not rid:
                     continue
+                tok_tail = row.pop("_tok_tail", None)   # private, never stored
                 prev = self._active.get(rid, {})
                 merged = {**prev, **row}
                 # RL-2 live tail: the per-request output collector carries the
@@ -156,7 +270,23 @@ class RequestTracker:
                 # finalize only). Skip the prefill phase (no collector yet).
                 coll = model_collectors.get(row.get("model"), {}).get(rid)
                 if coll is not None:
+                    before = prev.get("output")
                     merged.update(_collector_payload(coll))
+                    # RL-4 loop hint: run ONLY when the tail text grew since
+                    # the last tick (bounded work; generating rows only).
+                    after = merged.get("output")
+                    if after and after != before:
+                        hint = loop_hint(after)
+                        if hint != prev.get("loop_hint"):
+                            self._dirty_ids.add(rid)   # chip appears via SSE
+                        merged["loop_hint"] = hint
+                if not merged.get("loop_hint") and tok_tail:
+                    # Streaming consumers drain the text collector — fall
+                    # back to token-id repetition when text is unavailable.
+                    hint = detect_repeat_tokens(tok_tail) >= LOOP_MIN_REPEATS
+                    if hint != prev.get("loop_hint"):
+                        self._dirty_ids.add(rid)
+                    merged["loop_hint"] = hint
                 if merged.get("state") != prev.get("state"):
                     self._dirty_ids.add(rid)
                 self._active[rid] = merged
@@ -348,6 +478,13 @@ def _rows_from_snapshot(snap: dict[str, Any], model_id: str, now: float):
             "ts": now,
         }
         row.update(_capture_payload(req))   # RL-1 best-effort, never fatal
+        if state == "generating":
+            # RL-4: private token tail for the loop detector; the scheduler's
+            # Request keeps output_token_ids even when a streaming consumer
+            # has drained the text collector. Consumed (popped) in sample().
+            toks = getattr(req, "output_token_ids", None)
+            if toks:
+                row["_tok_tail"] = list(toks)[-LOOP_TOK_WINDOW:]
         yield rid, row
 
 

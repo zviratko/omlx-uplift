@@ -1735,6 +1735,13 @@ function renderLive(s) {
         if (r.progress !== undefined && r.progress !== null) bits.push(`${Math.round(r.progress * 100)}%`);
         meta.textContent = bits.join(' · ');
         row.append(badge, name, meta);
+        if (r.reqId && reqFeedRows.get(r.reqId)?.loopHint) {   // RL-4 amber
+            const chip = document.createElement('span');
+            chip.className = 'spill miss';
+            chip.textContent = 'LOOP?';
+            chip.title = C.t('uplift.req.loop_hint');
+            row.append(chip);
+        }
         if (r.reqId && r.reqId !== 'rank0') {
             const insp = document.createElement('button');
             insp.type = 'button'; insp.className = 'se-btn act';
@@ -1950,6 +1957,13 @@ function renderReqFeed() {
         if (r.tps) bits.push(`${r.tps.toFixed(0)} t/s`);
         meta.textContent = bits.join(' · ');
         row.append(badge, name, meta);
+        if (r.loopHint) {                          // RL-4: sanctioned amber
+            const chip = document.createElement('span');
+            chip.className = 'spill miss';
+            chip.textContent = 'LOOP?';
+            chip.title = C.t('uplift.req.loop_hint');
+            row.append(chip);
+        }
         const insp = document.createElement('button');
         insp.type = 'button'; insp.className = 'se-btn act';
         insp.textContent = C.t('uplift.req.inspect'); insp.title = C.t('uplift.req.inspect_title');
@@ -1986,7 +2000,12 @@ function upsertReq(id, patch) {
 }
 function pushServerEvent(ev) {
     if (ev.type === 'request') {
-        upsertReq(ev.id, { state: ev.state, model: ev.model, origin: ev.origin });
+        const patch = { state: ev.state, model: ev.model, origin: ev.origin };
+        if (ev.prompt !== undefined) patch.prompt = ev.prompt;
+        if (ev.completion !== undefined) patch.completion = ev.completion;
+        if (ev.tps !== undefined) patch.tps = ev.tps;
+        if (ev.loop_hint !== undefined) patch.loopHint = ev.loop_hint;
+        upsertReq(ev.id, patch);
         pushFeed([{ kind: 'requests', text: `${ev.origin === 'real' ? '◆ ' : ''}${ev.id.slice(0, 6)} → ${ev.state}` }]);
         if (ev.state === 'error') flashCard('v-errrate', 'bad');
         if (ev.state === 'complete') flashCard('v-requests', 'ok');
@@ -3917,6 +3936,10 @@ async function openInspector(reqId) {
     const h = document.createElement('h3');
     const head = document.createElement('div');   // header line: chips + counters
     head.className = 'se-hint';
+    const loopBanner = document.createElement('div');   // RL-4 caution banner
+    loopBanner.className = 'se-hint';
+    loopBanner.style.cssText = 'color:var(--accent);display:none;margin:2px 0';
+    loopBanner.textContent = '⚠ ' + C.t('uplift.req.loop_hint');
     const promptBox = document.createElement('div');
     const outputBox = document.createElement('div');
     const paramsBox = document.createElement('div');
@@ -3957,7 +3980,7 @@ async function openInspector(reqId) {
 
     h.textContent = C.t('uplift.req.title', { id: reqId.slice(0, 8) });
     h.style.wordBreak = 'break-all';
-    box.append(h, head);
+    box.append(h, head, loopBanner);
     const pLabel = document.createElement('div'); pLabel.className = 'se-hint'; pLabel.textContent = C.t('uplift.req.prompt');
     const oLabel = document.createElement('div'); oLabel.className = 'se-hint';
     oLabel.textContent = C.t('uplift.req.output');
@@ -3996,6 +4019,7 @@ async function openInspector(reqId) {
         setBlock(outPre, d.output, C.t('uplift.req.truncated'));
         if (follow && d.output) outPre.scrollTop = outPre.scrollHeight;
         paramsBox.textContent = d.params ? C.t('uplift.req.params') + ': ' + JSON.stringify(d.params) : '';
+        loopBanner.style.display = r.loop_hint ? '' : 'none';
         cancelBtn.style.display = d.live ? '' : 'none';
         if (timer && !d.live) stop();   // request ended; keep last render visible
     }

@@ -407,6 +407,7 @@
  "uplift.req.no_matches": "{scope} に一致なし",
  "uplift.req.hits": "{n} 件一致 · {mode}",
  "uplift.req.retention_note": "履歴は保持期間 {days} 日以内",
+ "uplift.req.loop_hint": "退化ループの可能性 — 生成テキストが繰り返されています",
  "uplift.req.not_found": "リクエストが見つかりません",
  "uplift.req.load_failed": "読み込み失敗: {msg}",
  "uplift.req.source.active": "ライブ",

@@ -378,6 +378,7 @@
  "uplift.req.no_matches": "{scope} 内无匹配",
  "uplift.req.hits": "{n} 条匹配 · {mode}",
  "uplift.req.retention_note": "历史受 {days} 天保留限制",
+ "uplift.req.loop_hint": "可能出现退化循环 — 生成的文本正在重复",
  "uplift.req.not_found": "未找到请求",
  "uplift.req.load_failed": "加载失败：{msg}",
  "uplift.req.source.active": "实时",
