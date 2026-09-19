@@ -2008,7 +2008,8 @@ const SE_RESTART_KEYS = new Set([
     'dflash_draft_quant_group_size', 'dflash_max_ctx', 'dflash_in_memory_cache',
     'dflash_in_memory_cache_max_entries', 'dflash_in_memory_cache_max_bytes',
     'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes', 'trust_remote_code',
-    'mtp_enabled', 'vlm_mtp_enabled', 'vlm_mtp_draft_model',
+    'mtp_enabled', 'mtp_num_draft_tokens',
+    'vlm_mtp_enabled', 'vlm_mtp_draft_model',
     'vlm_mtp_draft_block_size']);
 function seDirtyKeys() {                     // dirty keys of the ACTIVE tab
     const t = seTab();
