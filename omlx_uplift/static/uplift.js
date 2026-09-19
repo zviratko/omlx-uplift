@@ -3282,7 +3282,9 @@ async function seLoadProfiles(model, host) {
         try {
             await write(`${API}/admin/api/models/${encodeURIComponent(model)}/profiles`,
                 { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ name, settings: payload }) });
+                  // F-033: API schema requires display_name (FastAPI 422);
+                  // this strip-path omitted it while saveProfileTab sent it.
+                  body: JSON.stringify({ name, display_name: name, settings: payload }) });
             toast(C.t('uplift.toast.saved_profile', {name: name}));
             seLoadProfiles(model, host);
         } catch (e) { toast(C.t('uplift.toast.profile_error', {msg: e.message})); }
