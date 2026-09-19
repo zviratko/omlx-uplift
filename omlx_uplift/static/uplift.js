@@ -652,6 +652,11 @@ function renderTray() {
     }
     const empty = UPL.BLOCK_IDS.every(id => dashPlacedIds.includes(id));
     tray.querySelector('.lt-empty').hidden = !empty;
+    // F-035b: setupDragIn binds ONCE to elements matching at call time (grid
+    // init, line ~414) — pills created now would never be draggable, so
+    // tray-restore was silently dead on every fresh page. Re-run it per
+    // render; GridStack skips already-bound pills (isDraggable guard).
+    GridStack.setupDragIn('.dash-tray-pill', { appendTo: 'body', helper: 'clone' });
     void label;
 }
 

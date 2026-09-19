@@ -464,3 +464,15 @@ test('F-035: _onTrayDrop calls renderTray after placing the card', () => {
     assert.ok(tray >= 0, '_onTrayDrop refreshes the tray (F-035)');
     assert.ok(tray > place, 'renderTray runs AFTER the card is placed');
 });
+
+/* F-035b drift test: tray pills are created AFTER grid init, so the one-time
+   setupDragIn at boot can never bind them; renderTray must re-run it. */
+test('F-035b: renderTray re-binds setupDragIn for late-created pills', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const m = src.match(/function renderTray\(\) \{[\s\S]*?\n\}/);
+    assert.ok(m, 'renderTray function found');
+    assert.ok(/setupDragIn\('\.dash-tray-pill'/.test(m[0]),
+        'renderTray calls GridStack.setupDragIn on .dash-tray-pill (F-035b)');
+});
