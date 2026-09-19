@@ -842,7 +842,7 @@ counter('v-u-prompt',   v => C.fmtCompact(v));
 counter('v-u-compl',    v => C.fmtCompact(v));
 
 /* ---------------- charts ---------------- */
-const axisFont = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+const axisFont = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
 /* Remember where the mouse is hovering, by TIMESTAMP not index: setData on a
    sliding window shifts indices, which made hovered values snap to the latest
    sample after the next poll (looked like hover only worked on data points). */
@@ -946,7 +946,7 @@ function line(label, colorVar, fill, scale) {
 }
 function xAxis(col, boundWin) {
     const winOf = () => boundWin >= 0 ? boundWin : cardWindow('chart-tps');
-    return { stroke: col.dim, width: 1, size: 42, font: axisFont,
+    return { stroke: col.dim, width: 1, size: 34, font: axisFont,
              values: (s, t) => t.map(ts => {
                  const win = winOf();
                  return win >= 86400
@@ -958,14 +958,14 @@ function xAxis(col, boundWin) {
 function yAxis(col, opts) {
     // size includes tick labels AND the rotated axis label; 40 was too tight
     // for the right axes and the label overlapped the ticks.
-    return Object.assign({ stroke: col.dim, size: 40, font: axisFont, grid: true, gap: 6 }, opts || {});
+    return Object.assign({ stroke: col.dim, size: 36, font: axisFont, grid: true, gap: 4 }, opts || {});
 }
 function baseOpts(specs, axes, legendHook) {
     const col = chartColors();
     return {
-        width: 0, height: 240, padding: [6, 8, 0, 0],
+        width: 0, height: 240, padding: [4, 0, 0, 0],
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 6, fill: col.dim } },
-        legend: { show: true, top: true, live: false, labels: { fontSize: '10px' } },
+        legend: { show: true, top: true, live: false, labels: { fontSize: '9px' } },
         scales: Object.assign({ x: { time: true }, y: { auto: true } }, axes.scales || {}),
         axes: [xAxis(col, -1), ...axes.yAxes],
         hooks: legendHook ? { cursor: { subscribe: [legendHook] } } : undefined,
@@ -1111,7 +1111,7 @@ function createCharts() {
         [line('generation', 'blue', true, 'y'), line('prefill', 'gold', false, 'y2')],
         { scales: { y2: { auto: true } },
           yAxes: [Object.assign(yAxis(col, { grid: false, label: 'gen tok/s', stroke: col.blue }), { scale: 'y' }),
-                  Object.assign(yAxis(col, { side: 1, grid: false, label: 'prefill tok/s', stroke: col.gold, size: 58 }), { scale: 'y2' })] },
+                  Object.assign(yAxis(col, { side: 1, grid: false, label: 'prefill tok/s', stroke: col.gold, size: 44 }), { scale: 'y2' })] },
         legendUpdater());
     // y2 axis sits on the right; uPlot axis 'side': 1=right of grid, 3=left.
     tpsOpts.height = Math.max(200, $('chart-tps').clientHeight || 240);
@@ -1130,7 +1130,7 @@ function createCharts() {
     const memOpts = baseOpts(memSpecs,
         { scales: { y2: { auto: true } },
           yAxes: [Object.assign(yAxis(col, { label: 'memory %', stroke: col.blue }), { scale: 'y' }),
-                  Object.assign(yAxis(col, { side: 1, grid: false, label: 'cache GB', stroke: col.gold, size: 58 }), { scale: 'y2' })] },
+                  Object.assign(yAxis(col, { side: 1, grid: false, label: 'cache GB', stroke: col.gold, size: 44 }), { scale: 'y2' })] },
         legendUpdater());
     memOpts.scales.y = { range: [0, 100] };
     memOpts.height = Math.max(200, $('chart-mem').clientHeight || 240);
@@ -1356,11 +1356,11 @@ function createMetricCard(def) {
     const col = chartColors();
     const fmt = metricFormat(def);
     const opts = {
-        width: 300, height: 100, padding: [2, 4, 0, 0],
+        width: 300, height: 100, padding: [2, 0, 0, 0],
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
         scales: { x: { time: true }, y: { auto: true } },
-        axes: [metricXAxis(cardWindow(id), col), yAxis(col, { size: 38, label: '' })],
+        axes: [metricXAxis(cardWindow(id), col), yAxis(col, { size: 30, label: '' })],
         series: [{}, { label: metricLabel(def.key), stroke: col.blue, width: 1.6,
                        fill: col.blue + '1c', points: { show: false },
                        value: v => fmt(v === undefined ? null : v) }],
@@ -1406,7 +1406,7 @@ function fitMetricPlot(id) {
 function fitAllMetricPlots() { for (const id of metricCharts.keys()) fitMetricPlot(id); }
 function metricXAxis(win, col) {
     const dayish = win >= 86400;
-    return { stroke: col.dim, width: 1, size: 30, font: axisFont,
+    return { stroke: col.dim, width: 1, size: 26, font: axisFont,
         values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
             dayish ? { month: 'short', day: 'numeric' }
                    : { hour: '2-digit', minute: '2-digit' })) };

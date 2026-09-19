@@ -228,9 +228,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content {
 /* .card-frame = GridStack's size-to-content measure target (classic
    mirrors .dash-block-inner); chrome bar + padded body stack inside it. */
 .card-frame { display: flex; flex-direction: column; min-width: 0; }
-.card-pad { padding: 14px 16px; min-width: 0; }
+.card-pad { padding: 0 16px 14px; min-width: 0; }
 #pages .card { background: var(--card); border: 1px solid var(--edge); margin-bottom: 1px; }
-#pages .card-pad { padding: 14px 16px; }
+#pages .card-pad { padding: 0 16px 14px; }
 
 /* Edit-mode chrome: drag handle bar + remove button (drag-strip motif).
    S1 fix (user 2026-09-19): overlaid across the card top instead of
@@ -376,6 +376,9 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
    the last legend row clips at the container bottom. */
 .chart-box { width: 100%; min-height: 210px; }
 .card-body.chart-fill { display: flex; }
+/* plot bleeds to the card edges inside the grid (user 2026-09-19: too much
+   dead side space); the uPlot axis gutters are the visual frame already */
+#grid .card-body.chart-fill { margin: 0 -16px; }
 .card-body.chart-fill .chart-box { flex: 1 1 auto; min-width: 0; }
 /* Cursor value bubble: flat solid panel beside the pointer (no shadow,
    square corners), aligned with the painted crosshair. */
@@ -390,9 +393,10 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
 /* uPlot's vendor CSS sets `.u-value {display:none}` and only the live-mode JS
    re-enables it; with live:false our custom cells must opt back in explicitly. */
 .u-legend .u-value { display: table-cell !important;
-    font: 400 10px var(--mono); color: var(--ink); padding-left: 8px;
+    font: 400 9px var(--mono); color: var(--ink); padding-left: 8px;
     text-align: right; white-space: nowrap; }
 .u-legend .u-series { display: inline-flex; }
+.u-legend th, .u-legend .u-label { font: 400 9px/1 var(--mono) !important; }
 .u-cursor-x, .u-cursor-y { border-color: var(--dim) !important; }
 
 /* ---- Lists: hairline row rules, no fills, sharp badges ---- */
