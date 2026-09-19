@@ -214,6 +214,9 @@ class RequestTracker:
         self._lock = threading.Lock()
         self._active: dict[str, dict[str, Any]] = {}
         self._done: deque[dict[str, Any]] = deque(maxlen=RING_LIMIT)
+        # ids finalized by the event hook (late birth events must not
+        # resurrect them); bounded like _persisted in the collector.
+        self._done_ids: set[str] = set()
         # ids of rows whose state changed since the last drain (for SSE)
         self._dirty_ids: set[str] = set()
         self._sampled_at = 0.0
@@ -260,6 +263,11 @@ class RequestTracker:
         with self._lock:
             for rid, row in rows:
                 if not rid:
+                    continue
+                # Event-hook-finalized rows are exact; the scheduler's
+                # deferred removal may still show the request in this
+                # snapshot — don't resurrect it as active (RL3-GAP1).
+                if rid in self._done_ids and rid not in self._active:
                     continue
                 tok_tail = row.pop("_tok_tail", None)   # private, never stored
                 prev = self._active.get(rid, {})
@@ -317,6 +325,7 @@ class RequestTracker:
                     except Exception:  # noqa: BLE001
                         pass
                     self._done.append(done)
+                    self._done_ids.add(rid)
                     self._dirty_ids.add(rid)
                     del self._active[rid]
             # stale active rows (engine vanished mid-flight)
@@ -349,6 +358,83 @@ class RequestTracker:
         """True while the id sits in the active (not-yet-departed) map."""
         with self._lock:
             return request_id in self._active
+
+    # ------------------------------------------------------------------
+    # RL3-GAP1 event-driven capture (exact, no tick race).
+    #
+    # Polling the scheduler snapshot can never see requests that live
+    # between two ticks. The engine core itself calls add_request at birth
+    # and _cleanup_request at departure — those are wrapped (instrument.py)
+    # and feed these two methods. The tick-based sample() stays as the
+    # fallback/informational path; hook rows are exact-final and win.
+    # ------------------------------------------------------------------
+    def note_birth(self, rid: str, model: str, request: Any) -> None:
+        """Engine accepted a request: create the row exactly at birth."""
+        if not rid:
+            return
+        row = {"id": rid, "state": "queued", "model": model or "",
+               "origin": "real", "ts": time.time(),
+               "prompt_tokens": getattr(request, "num_prompt_tokens", 0) or 0}
+        try:
+            row.update(_capture_payload(request))
+        except Exception:  # noqa: BLE001 — capture must never reject a row
+            pass
+        with self._lock:
+            if rid in self._done_ids:      # late birth event: ignore
+                return
+            prev = self._active.get(rid, {})
+            merged = {**prev, **row}
+            if row["state"] != prev.get("state"):
+                self._dirty_ids.add(rid)
+            self._active[rid] = merged
+
+    def note_finalize(self, rid: str, model: str, snap: dict) -> None:
+        """Engine cleaned the request up: terminal row with the exact
+        final payload harvested from the drained collector."""
+        if not rid or not snap.get("has_output"):
+            return
+        now = time.time()
+        with self._lock:
+            prev = self._active.pop(rid, None) or {}
+            base = dict(prev) if prev else {"id": rid, "model": model or ""}
+            text = snap.get("output_text") or ""
+            n_out = snap.get("completion_tokens") or 0
+            finish = snap.get("finish_reason") or ""
+            prev_had_signal = bool(prev.get("completion_tokens")) or \
+                prev.get("state") == "generating"
+            state = "complete"
+            error = None
+            if not text and not n_out and not prev_had_signal:
+                # nothing produced and nothing seen before — abort/error
+                # departure. With prior signal we simply lack harvest data:
+                # stay honest with what the tick path already recorded.
+                state = "error"
+                error = finish or "no output"
+            row = {**base,
+                   "id": rid, "model": model or base.get("model", ""),
+                   "origin": base.get("origin", "real"),
+                   "state": state, "error": error, "finish": finish or None,
+                   "ts": now}
+            if n_out:
+                row["completion_tokens"] = n_out
+            if text:
+                capped, trunc = _truncate(text)
+                row["output"] = capped
+                row["output_trunc"] = trunc
+            params = snap.get("params")
+            if params and not base.get("params"):
+                row["params"] = params
+            birth = base.get("ts")
+            if birth and now > birth:
+                dur = now - float(birth)
+                if dur > 0 and n_out:
+                    row["tps"] = round(n_out / dur, 1)
+            self._done.append(row)
+            self._done_ids.add(rid)
+            if len(self._done_ids) > 4 * RING_LIMIT:
+                # oldest first: evict against the done ring's contents
+                self._done_ids &= {r["id"] for r in self._done}
+            self._dirty_ids.add(rid)
 
     def drain_dirty(self) -> list[dict[str, Any]]:
         """State-changed rows since the last call (SSE deltas)."""

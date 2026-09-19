@@ -34,6 +34,17 @@ def register(app) -> None:
     # FastAPI>=0.140 apps with a lifespan have no add_event_handler, and
     # omlx uses lifespan — wrap the existing lifespan context instead.
     _wrap_lifespan(app)
+    # Event-driven request capture (RL3-GAP1): wraps AsyncEngineCore
+    # birth/departure in memory only — vanilla files stay byte-identical.
+    try:
+        from . import instrument
+
+        instrument.install()
+    except Exception:  # never break the server for a capture failure
+        import logging
+
+        logging.getLogger("omlx_uplift").exception(
+            "instrument install failed (tick-based capture only)")
     app._omlx_uplift_mounted = True
 
 
