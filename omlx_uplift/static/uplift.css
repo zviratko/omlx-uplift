@@ -8,6 +8,7 @@
     --card: #2b2c30;
     --row2: #35363b;            /* alternating row shade inside a panel */
     --field: #1b1c1f;           /* recessed input well, below card ground */
+    --panel: #222327;           /* header band shade, below card ground */
     --edge: #3a3b40;            /* uniform stroke width everywhere */
     --ink: #f2f0ea;             /* content on dark goes near-white */
     --dim: #a5a096;             /* warm gray, AA on dark grey */
@@ -29,6 +30,7 @@
     --card: #f6f4ef;
     --row2: #ece9e1;            /* alternating row shade on paper */
     --field: #ffffff;           /* raised white input well on paper */
+    --panel: #ece9e1;           /* header band shade on paper */
     --edge: #767268;            /* NASA warm gray */
     --ink: #0b0b0b;
     --dim: #767268;             /* AA on paper */
@@ -51,6 +53,7 @@
     --card: #0c1017;            /* instrument well */
     --row2: #131a24;            /* alternating readout line */
     --field: #05070b;           /* deep recessed dial well */
+    --panel: #131a24;           /* header band, lighter readout plate on metal */
     --edge: #2b3648;            /* steel bezel */
     --ink: #f2efe6;             /* paper white on metal */
     --dim: #9fb0c8;             /* steel grey-blue, AA on card */
@@ -115,6 +118,7 @@ html[data-theme="cockpit"] { color-scheme: dark; }
     --card: #000000;
     --row2: #161616;            /* alternating row shade on black */
     --field: #161616;           /* input well on black, outlined by --edge */
+    --panel: #161616;           /* header band shade on black */
     --edge: #6a6a6a;
     --ink: #ffffff;
     --dim: #c9c4ba;
@@ -315,11 +319,16 @@ body.layout-editing { user-select: none; }
 
 .card h2 {
     font: 500 10px/1.4 var(--sans); text-transform: uppercase; letter-spacing: 0.12em;
-    color: var(--dim); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+    color: var(--dim); margin: 0 -16px 4px; padding: 5px 8px; font-size: 12px;
+    background: var(--panel, var(--bg)); border-bottom: 1px solid var(--edge);
+    display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
     user-select: none;
 }
 .card h2 .right { margin-left: auto; font: 400 10px/1.4 var(--mono); letter-spacing: 0;
-    display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+    display: inline-flex; align-items: center; gap: 6px; color: var(--dim);
+    flex: none; }
+.card h2 > span:first-child { flex: 0 0 auto; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
 .card h2 .right b { color: var(--ink); font-weight: 400; }
 
 /* Event flash = border + fill shift, no glow */
@@ -478,6 +487,11 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
 
 /* ---- Event feed ---- */
 .feed { max-height: 300px; overflow-y: auto; scrollbar-width: thin; }
+/* Request feed (2026-09-19 overlap fix): the row-height engine clamps a
+   row at 60 cells (480px) but .grid-stack-item-content is overflow:visible
+   — with 30+ rows #reqfeed painted straight past the card border over the
+   Events card below. Bound the list so demand can never exceed the box. */
+#reqfeed { max-height: 320px; overflow-y: auto; scrollbar-width: thin; }
 .feed-item { display: flex; gap: 9px; padding: 6px 2px; font-size: 12px;
     border-bottom: 1px solid var(--edge); align-items: baseline;
     animation: slide-in .25s cubic-bezier(.22,1,.36,1); }
@@ -1116,6 +1130,12 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 .ts-row { display: flex; gap: 0; margin: 2px 0 8px; width: max-content;
     max-width: 100%; border: 1px solid var(--edge); overflow-x: auto;
     flex-wrap: nowrap; scrollbar-width: thin; }
+/* In-card header placement (user 2026-09-19): the picker lives INSIDE the
+   h2 band, right of the title — the standalone full-width row under the
+   header was a dead strip in 14 cards. margin-left:auto pushes it to the
+   right edge; flex:none stops the band from squeezing the chips. */
+.card h2 .ts-row { margin: 0 0 0 auto; max-width: 60%; min-width: 0; }
+.card h2 .ts-chip { padding: 4px 5px; }   /* header band is tight — slimmer chips */
 .ts-chip { background: transparent; border: 0; border-right: 1px solid var(--edge);
     color: var(--dim); font: 600 10px/1 var(--mono); letter-spacing: .08em;
     padding: 4px 8px; cursor: pointer; transition: color .15s, background .15s;
@@ -1124,18 +1144,17 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 .ts-chip:hover { color: var(--ink); background: var(--row2); }
 .ts-chip.on { background: var(--chart-2, #e8a020); color: #14100a; }
 
-/* Metric cards (user round 2026-09-19 S2-S4): header renders as a full
-   header BAND across the card top (tinted strip + rule), chart fills
-   nearly the whole card, value/footer fonts smaller. */
-.metric-card .card-pad { padding: 0 8px 6px; }
-.metric-card h2 { margin: 0 -8px 4px; padding: 5px 8px; font-size: 12px;
-    background: var(--panel, var(--bg)); border-bottom: 1px solid var(--edge); }
+/* Metric cards (user round 2026-09-19 S2-S4, header-inline ts-row
+   2026-09-19 r2): h2 is the shared full-width header band (see .card h2),
+   timespan chips inline right of the title, chart fills nearly the card. */
+.metric-card .card-pad { padding: 0 8px 4px; }
+.metric-card h2 { margin: 0 -8px 4px; background: var(--panel, var(--bg)); border-bottom: 1px solid var(--edge); }
 .metric-card h2 .right { gap: 8px; margin-left: auto; }
+.metric-card h2 .ts-row { margin: 0 0 0 8px; }
 .metric-now { font: 700 12px/1 var(--mono); color: var(--chart-2, #e8a020);
     letter-spacing: 0; }
 .metric-res { font: 500 9px/1 var(--mono); color: var(--dim);
     letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
-.metric-card .ts-row { margin: 0 0 6px; }
 /* Fill the grid box: frame stretches, pad stretches, chart takes the rest.
    Same 4-class specificity as gridstack's size-to-content align rule. */
 main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metric-card {

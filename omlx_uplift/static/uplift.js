@@ -368,7 +368,7 @@ function ensureUpliftGrid() {
     dashGrid = GridStack.init({
         column: UPL.COLUMNS,
         cellHeight: 8,
-        margin: 12,
+        margin: 2,
         // sizeToContent OFF on purpose: it re-grows each card on every
         // content update and shoves the row below around (misalignment,
         // "reset moves cards down"). We measure content ourselves once per
@@ -474,13 +474,11 @@ function _neededUnits(el) {
         if (r.height > 0) bottom = Math.max(bottom, r.bottom - pr.top + pad.scrollTop + mb);
     }
     const padBottom = parseFloat(getComputedStyle(pad).paddingBottom) || 0;
-    // +8: GridStack's vertical margin is outside the content box, so a
-    // row sized exactly to content paints its card border into the gap
-    // below. One full cell of slack keeps frames inside their boxes.
-    // (S1 2026-09-19: .card-chrome is now an edit-mode overlay — it is
-    // display:none in view mode and absolute while editing, so it never
-    // contributes to content flow here.)
-    const px = Math.max(bottom + padBottom + 8, 32);
+    // +2: minimum slack so a row sized exactly to content still paints
+    // its bottom border inside the box (GridStack margins live outside
+    // the content box). (S1 2026-09-19: was +8 — one full cell of dead
+    // band under every row; the user wants rows to butt together.)
+    const px = Math.max(bottom + padBottom + 2, 32);
     // cellHeight is 8px; clamp guards runaway canvas growth
     return Math.min(60, Math.max(4, Math.ceil(px / 8)));
 }
@@ -1351,8 +1349,8 @@ function createMetricCard(def) {
     const host = document.createElement('div'); host.className = 'metric-plot';
     host.id = id + '-plot';
     body.append(host);
-    h2.append(title, right);
-    pad.append(h2, tsRow, body);
+    h2.append(title, right, tsRow);
+    pad.append(h2, body);
     frame.append(chrome, pad); content.append(frame); sec.append(content);
     $('grid').append(sec);
     const col = chartColors();
