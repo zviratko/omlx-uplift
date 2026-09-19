@@ -447,3 +447,20 @@ test('explore catalogue: unique keys, one fmt each, exports agree', () => {
     for (const k of ['avg_generation_tps', 'mem.percent', 'cache.total_bytes'])
         assert.ok(keys.includes(k), k + ' must be selectable');
 });
+
+/* F-035 drift test: restoring a block from the tray must rebuild the pill
+   list, otherwise a stale pill lingers after its card is back on the board.
+   Behavioral harness needs full GridStack; assert the call-order contract
+   in _onTrayDrop instead (same style as globalspec.test.cjs source scans). */
+test('F-035: _onTrayDrop calls renderTray after placing the card', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const m = src.match(/function _onTrayDrop\(node\) \{[\s\S]*?\n\}/);
+    assert.ok(m, '_onTrayDrop function found');
+    const place = m[0].indexOf('_placeCard(');
+    const tray = m[0].indexOf('renderTray()');
+    assert.ok(place >= 0, '_onTrayDrop places the card');
+    assert.ok(tray >= 0, '_onTrayDrop refreshes the tray (F-035)');
+    assert.ok(tray > place, 'renderTray runs AFTER the card is placed');
+});

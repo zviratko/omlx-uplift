@@ -614,6 +614,7 @@ function _onTrayDrop(node) {
     dashGrid.removeWidget(node.el, true, false);
     if (!UPL.BLOCK_IDS.includes(id) || !dashEditing) return;
     _placeCard(id, pos);
+    renderTray();   // F-035: the pill must leave the tray once its block is back
     refitUpliftBlocks();
 }
 function removeCard(id) {
