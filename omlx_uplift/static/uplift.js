@@ -400,10 +400,13 @@ function ensureUpliftGrid() {
             _watchdogQueued = false;
             if (dashEditing || dashApplying) return;
             let moved = false;
+            const narrow = dashGrid.getColumn() === 1;   // F-036
             for (const block of upLayout.blocks) {
                 const n = _blockEl(block.id)?.gridstackNode;
-                if (n && (n.x !== block.x || n.y !== block.y)) {
-                    dashGrid.moveNode(n, { x: block.x, y: block.y });
+                if (!n) continue;
+                const tx = narrow ? 0 : block.x, tw = narrow ? 1 : block.w;
+                if (n.x !== tx || n.y !== block.y || n.w !== tw) {
+                    dashGrid.moveNode(n, { x: tx, y: block.y, w: tw });
                     moved = true;
                 }
             }
@@ -516,8 +519,12 @@ function _rowAlign() {
                 if (m.y !== y || m.h !== h) { m.y = y; m.h = h; changed = true; }
                 const el = _blockEl(m.id);
                 const n = el?.gridstackNode;
-                if (n && (n.x !== m.x || n.y !== m.y || n.w !== m.w || n.h !== m.h)) {
-                    n.x = m.x; n.y = m.y; n.w = m.w; n.h = m.h;
+                // F-036: same 1-col clamp as apply — never write 24-col
+                // x/w at the narrow breakpoint or cards overflow again.
+                const narrow = dashGrid.getColumn() === 1;
+                const px = narrow ? 0 : m.x, pw = narrow ? 1 : m.w;
+                if (n && (n.x !== px || n.y !== m.y || n.w !== pw || n.h !== m.h)) {
+                    n.x = px; n.y = m.y; n.w = pw; n.h = m.h;
                     dashGrid._writePosAttr(el, n);
                 }
             }
@@ -581,7 +588,13 @@ function applyUpliftLayout(saved) {
             // users saw on re-apply. Positions in a saved layout are
             // trusted as-is; assign the node and redraw its box.
             const n = el.gridstackNode;
-            n.x = block.x; n.y = block.y; n.w = block.w; n.h = block.h;
+            // F-036: at the c=1 breakpoint a saved 24-col w means N× the
+            // viewport width — clamp to the single column. The 24-col
+            // geometry stays untouched in upLayout, so wide viewports
+            // restore the user's exact layout.
+            const narrow = dashGrid.getColumn() === 1;
+            n.x = narrow ? 0 : block.x; n.y = block.y;
+            n.w = narrow ? 1 : block.w; n.h = block.h;
             dashGrid._writePosAttr(el, n);   // this build's DOM-position writer
             if (!dashPlacedIds.includes(block.id)) dashPlacedIds.push(block.id);
         });

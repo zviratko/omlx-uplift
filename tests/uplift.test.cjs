@@ -476,3 +476,21 @@ test('F-035b: renderTray re-binds setupDragIn for late-created pills', () => {
     assert.ok(/setupDragIn\('\.dash-tray-pill'/.test(m[0]),
         'renderTray calls GridStack.setupDragIn on .dash-tray-pill (F-035b)');
 });
+
+/* F-036 drift test: the three geometry writers must clamp to 1 column at
+   the c=1 breakpoint, else saved 24-col widths overflow the viewport. */
+test('F-036: all geometry writers clamp x/w at the 1-column breakpoint', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const clamp = /getColumn\(\) === 1/;
+    for (const [name, re] of [
+        ['applyUpliftLayout', /function applyUpliftLayout[\s\S]*?\n}/],
+        ['_rowAlign', /function _rowAlign\(\)[\s\S]*?\n}/],
+        ['watchdog', /if \(dashEditing \|\| dashApplying\) return;[\s\S]*?\n {8}\}/],
+    ]) {
+        const m = src.match(re);
+        assert.ok(m, name + ' found');
+        assert.ok(clamp.test(m[0]), name + ' clamps geometry at c=1 (F-036)');
+    }
+});
