@@ -385,6 +385,13 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
 /* plot bleeds to the card edges inside the grid (user 2026-09-19: too much
    dead side space); the uPlot axis gutters are the visual frame already */
 #grid .card-body.chart-fill { margin: 0 -12px; }   /* tracks main .card-pad side padding */
+/* Vertical balance (user 2026-09-19 r4: 'contents right below the header,
+   center it better'): top gap under the header band = 4px vs 12px bottom
+   pad read as the plot glued to the header. Equalize: the margin-top
+   collapses with h2's 4px bottom margin to 12px in block flow, matching
+   the pad's bottom padding; resizeCharts measures box.top, so the plot
+   shrinks by the difference — nothing grows. */
+#grid .card-body.chart-fill { margin-top: 12px; }
 .card-body.chart-fill .chart-box { flex: 1 1 auto; min-width: 0; }
 /* Cursor value bubble: flat solid panel beside the pointer (no shadow,
    square corners), aligned with the painted crosshair. */
