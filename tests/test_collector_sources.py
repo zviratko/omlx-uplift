@@ -50,12 +50,11 @@ class FakePool:
 class CapturingStore:
     def __init__(self):
         self.pairs = {}
+        self.request_rows = []
 
-    def write_samples(self, pairs, ts):
+    def write_tick(self, pairs, request_rows, ts):
         self.pairs.update(pairs)
-
-    def upsert_request(self, row):  # request tracker rows: ignore
-        pass
+        self.request_rows.extend(request_rows)
 
     def purge(self):
         pass

@@ -70,6 +70,13 @@
     <label><span data-i18n="uplift.layout.interval">Poll interval</span>
         <select id="opt-interval"></select></label>
     <label class="row"><input type="checkbox" id="opt-hide-debug"> <span data-i18n="uplift.layout.hide_debug">Hide DEBUG in logs</span></label>
+    <div class="row retention-row">
+        <label><span data-i18n="uplift.layout.retention_metrics">Metrics history (days)</span>
+            <input type="number" id="opt-retention-metrics" min="1" max="365" step="1" size="4"></label>
+        <label><span data-i18n="uplift.layout.retention_log">Request log (days)</span>
+            <input type="number" id="opt-retention-log" min="1" max="365" step="1" size="4"></label>
+    </div>
+    <p class="hint" id="retention-note" data-i18n="uplift.layout.retention_hint">Server-side data retention; applies at the next daily cleanup.</p>
     <div class="row buttons">
         <button id="btn-layout-reset" data-i18n="uplift.layout.reset">Reset layout</button>
     </div>

@@ -26,6 +26,8 @@ class Collector:
         self._task: Optional[asyncio.Task] = None
         self._prev: dict[str, float] = {}
         self._purged_day = 0
+        # id -> last-persisted change signature (RL-0: persist only on change)
+        self._persisted: dict[str, tuple] = {}
 
     @property
     def store(self):
@@ -222,17 +224,35 @@ class Collector:
         except Exception:
             pass
 
-        # Per-request lifecycle rows from the sampled tracker
+        # Per-request lifecycle rows from the sampled tracker. RL-0 write
+        # hygiene: only persist rows whose state/token counters actually
+        # changed since the last persist — finished rows are written
+        # exactly once, not re-upserted (COALESCE no-op writes still dirty
+        # pages) on every tick. Everything rides ONE write_tick COMMIT.
+        request_rows: list[dict] = []
         try:
             from .request_log import get_request_tracker
 
-            tracker = get_request_tracker()
-            for row in tracker.list_rows(limit=200):
-                self.store.upsert_request(row)
+            for row in get_request_tracker().list_rows(limit=200):
+                sig = (row.get("state"), row.get("prompt_tokens"),
+                       row.get("completion_tokens"), row.get("tps"),
+                       row.get("error"))
+                if self._persisted.get(row["id"]) == sig:
+                    continue
+                request_rows.append(row)
         except Exception:
-            log.debug("request persist failed", exc_info=True)
+            log.debug("request collect failed", exc_info=True)
 
-        self.store.write_samples(pairs, ts=now)
+        self.store.write_tick(pairs, request_rows, ts=now)
+        for row in request_rows:
+            self._persisted[row["id"]] = (row.get("state"),
+                                          row.get("prompt_tokens"),
+                                          row.get("completion_tokens"),
+                                          row.get("tps"), row.get("error"))
+        # Keep the signature map bounded (tracker ring is 200 + actives).
+        if len(self._persisted) > 1000:
+            for k in sorted(self._persisted, key=str)[:500]:
+                self._persisted.pop(k, None)
         self._prev = {**pairs, "_t": now}
 
         # Daily retention purge

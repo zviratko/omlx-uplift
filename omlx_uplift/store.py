@@ -9,7 +9,20 @@ Our file adds sub-hour samples and per-request rows:
                                loaded models, active requests, totals)
   requests(id PK, model, state, prompt_tokens, completion_tokens, tps,
            error, ts_start, ts_end)   per-request lifecycle rows
-Retention: rows older than RETENTION_DAYS are purged on every write pass.
+Retention (RL-0, split + configurable): metrics samples are purged after
+RETENTION_METRICS_DAYS (default 30), finished request-log rows after
+RETENTION_LOG_DAYS (default 2). Resolution per value: env override
+(OMLX_UPLIFT_RETENTION_METRICS_DAYS / OMLX_UPLIFT_RETENTION_LOG_DAYS) >
+meta-table keys (retention_metrics_days / retention_log_days, set via
+GET/POST /uplift/api/retention) > defaults. Values clamp to 1..365; a
+0/negative/invalid keeps the previous value. ACTIVE-state request rows
+are never purged by age.
+
+Write hygiene (NVMe wear): WAL + synchronous=NORMAL (fsync once per WAL
+checkpoint, not per COMMIT; a power loss loses at most the last WAL ticks
+of telemetry — acceptable for dashboard metrics), journal_size_limit caps
+the WAL between checkpoints, one COMMIT per collector tick via
+write_tick(), and a wal_checkpoint(TRUNCATE) inside the daily purge pass.
 """
 
 from __future__ import annotations
@@ -20,8 +33,21 @@ import threading
 import time
 from pathlib import Path
 
-RETENTION_DAYS = 30
+RETENTION_METRICS_DAYS = 30
+RETENTION_LOG_DAYS = 2
+_RET_CLAMP = (1, 365)
 _SCHEMA_VERSION = 1
+
+
+def _clamp_days(raw, default: int) -> int:
+    """Clamp a retention value to _RET_CLAMP; invalid/0/negative keeps default."""
+    try:
+        v = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return default
+    if v < _RET_CLAMP[0]:
+        return default if v <= 0 else _RET_CLAMP[0]
+    return min(v, _RET_CLAMP[1])
 
 
 def default_db_path() -> Path:
@@ -67,7 +93,16 @@ class MetricsStore:
             self._conn = sqlite3.connect(
                 str(self.path), check_same_thread=False
             )
+            # Write hygiene (RL-0): WAL with synchronous=NORMAL fsyncs once
+            # per WAL checkpoint instead of per COMMIT; worst case after a
+            # power loss is losing the last few telemetry ticks. The WAL is
+            # capped at 4 MB between checkpoints and truncated once per day
+            # inside purge(). busy_timeout guards the rare writer clash
+            # (viewer opens read-only; WAL readers never block).
             self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA journal_size_limit=4194304")
+            self._conn.execute("PRAGMA busy_timeout=5000")
             self._init_schema()
 
     def _init_schema(self):
@@ -93,6 +128,64 @@ class MetricsStore:
                 (str(_SCHEMA_VERSION),),
             )
 
+    # -- retention policy (RL-0) -------------------------------------------
+
+    def get_meta(self, key: str) -> str | None:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT value FROM meta WHERE key=?", (key,))
+            r = cur.fetchone()
+            return r[0] if r else None
+
+    def set_meta(self, key: str, value: str):
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO meta(key, value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, str(value)),
+            )
+
+    def retention(self) -> dict:
+        """Resolve {metrics_days, log_days, source} per the RL-0 order:
+        env > meta > default. 'source' reports which layer won for the
+        metrics value (env|meta|default); each value resolves separately."""
+        out = {}
+        src = "default"
+        for kind, env_key, meta_key, default in (
+            ("metrics_days", "OMLX_UPLIFT_RETENTION_METRICS_DAYS",
+             "retention_metrics_days", RETENTION_METRICS_DAYS),
+            ("log_days", "OMLX_UPLIFT_RETENTION_LOG_DAYS",
+             "retention_log_days", RETENTION_LOG_DAYS),
+        ):
+            env_raw = os.environ.get(env_key)
+            if env_raw is not None and str(env_raw).strip():
+                out[kind] = _clamp_days(env_raw, default)
+                if kind == "metrics_days":
+                    src = "env"
+                continue
+            meta_raw = self.get_meta(meta_key)
+            if meta_raw is not None:
+                out[kind] = _clamp_days(meta_raw, default)
+                if kind == "metrics_days" and src == "default":
+                    src = "meta"
+                continue
+            out[kind] = default
+        out["source"] = src
+        return out
+
+    def set_retention(self, metrics_days=None, log_days=None) -> dict:
+        """Persist into meta (takes effect next purge pass). Invalid or
+        <=0 keeps the previous resolved value (documented clamping rule)."""
+        cur = self.retention()
+        if metrics_days is not None:
+            prev = cur["metrics_days"]
+            self.set_meta("retention_metrics_days",
+                          str(_clamp_days(metrics_days, prev)))
+        if log_days is not None:
+            prev = cur["log_days"]
+            self.set_meta("retention_log_days", str(_clamp_days(log_days, prev)))
+        return self.retention()
+
     # -- write side (collector) ------------------------------------------
 
     def write_sample(self, key: str, value: float, ts: float | None = None):
@@ -110,43 +203,75 @@ class MetricsStore:
                 [(t, k, float(v)) for k, v in pairs.items()],
             )
 
-    def upsert_request(self, row: dict):
-        """Insert-or-update one request row from tracker fields."""
-        with self._lock, self._conn:
-            self._conn.execute(
-                """INSERT INTO requests(id, model, state, prompt_tokens,
-                       completion_tokens, tps, error, ts_start, ts_end)
-                   VALUES(:id, :model, :state, :prompt_tokens,
-                       :completion_tokens, :tps, :error, :ts_start, :ts_end)
-                   ON CONFLICT(id) DO UPDATE SET
-                     state=excluded.state,
-                     prompt_tokens=COALESCE(excluded.prompt_tokens, prompt_tokens),
-                     completion_tokens=COALESCE(excluded.completion_tokens, completion_tokens),
-                     tps=COALESCE(excluded.tps, tps),
-                     error=COALESCE(excluded.error, error),
-                     ts_end=excluded.ts_end""",
-                {
-                    "id": row["id"],
-                    "model": row.get("model", ""),
-                    "state": row.get("state", ""),
-                    "prompt_tokens": row.get("prompt_tokens"),
-                    "completion_tokens": row.get("completion_tokens"),
-                    "tps": row.get("tps"),
-                    "error": row.get("error"),
-                    "ts_start": row.get("ts_start") or row.get("ts") or time.time(),
-                    "ts_end": row.get("ts_end") or time.time(),
-                },
-            )
+    def upsert_request(self, row: dict, in_tx: bool = False):
+        """Insert-or-update one request row from tracker fields.
 
-    def purge(self, days: int = RETENTION_DAYS):
-        cutoff = time.time() - days * 86400
+        in_tx=True runs the statement inside the caller's transaction
+        (write_tick) — no COMMIT of its own."""
+        params = {
+            "id": row["id"],
+            "model": row.get("model", ""),
+            "state": row.get("state", ""),
+            "prompt_tokens": row.get("prompt_tokens"),
+            "completion_tokens": row.get("completion_tokens"),
+            "tps": row.get("tps"),
+            "error": row.get("error"),
+            "ts_start": row.get("ts_start") or row.get("ts") or time.time(),
+            "ts_end": row.get("ts_end") or time.time(),
+        }
+        sql = """INSERT INTO requests(id, model, state, prompt_tokens,
+                   completion_tokens, tps, error, ts_start, ts_end)
+               VALUES(:id, :model, :state, :prompt_tokens,
+                   :completion_tokens, :tps, :error, :ts_start, :ts_end)
+               ON CONFLICT(id) DO UPDATE SET
+                 state=excluded.state,
+                 prompt_tokens=COALESCE(excluded.prompt_tokens, prompt_tokens),
+                 completion_tokens=COALESCE(excluded.completion_tokens, completion_tokens),
+                 tps=COALESCE(excluded.tps, tps),
+                 error=COALESCE(excluded.error, error),
+                 ts_end=excluded.ts_end"""
+        if in_tx:
+            self._conn.execute(sql, params)
+            return
         with self._lock, self._conn:
-            self._conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
+            self._conn.execute(sql, params)
+
+    def write_tick(self, pairs: dict[str, float], request_rows: list[dict],
+                   ts: float | None = None):
+        """ONE transaction per collector tick (RL-0 write hygiene): all
+        samples + changed request rows in a single COMMIT."""
+        t = ts or time.time()
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO samples(ts, key, value) VALUES(?,?,?)",
+                [(t, k, float(v)) for k, v in pairs.items()],
+            )
+            for row in request_rows:
+                self.upsert_request(row, in_tx=True)
+
+    def purge(self, metrics_days: int | None = None,
+              log_days: int | None = None):
+        """Split retention: samples age out at metrics_days, FINISHED
+        request rows at log_days (active rows never purge by age — they
+        would otherwise vanish mid-flight and orphan their updates).
+        Runs wal_checkpoint(TRUNCATE) so the WAL file itself gets recycled
+        once per day (journal_size_limit keeps it capped between runs)."""
+        ret = self.retention()
+        mdays = metrics_days if metrics_days is not None else ret["metrics_days"]
+        ldays = log_days if log_days is not None else ret["log_days"]
+        cutoff_m = time.time() - mdays * 86400
+        cutoff_l = time.time() - ldays * 86400
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff_m,))
             self._conn.execute(
                 "DELETE FROM requests WHERE ts_start < ? "
                 "AND state IN ('complete','error')",
-                (cutoff,),
+                (cutoff_l,),
             )
+        # Checkpoint OUTSIDE the transaction — TRUNCATE on an open write
+        # transaction fails with 'database table is locked'.
+        with self._lock:
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # -- read side (API/viewer) -------------------------------------------
 

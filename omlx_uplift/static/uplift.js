@@ -801,6 +801,28 @@ fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`
 $('opt-interval').onchange = e => { layout.intervalMs = Number(e.target.value); C.saveLayout(localStorage, layout); restartPolling(); };
 $('opt-hide-debug').checked = layout.logsHideDebug;
 $('opt-hide-debug').onchange = e => { layout.logsHideDebug = e.target.checked; C.saveLayout(localStorage, layout); };
+/* Server-side retention (RL-0): reads/writes the uplift store, not localStorage. */
+async function loadRetention() {
+    try {
+        const r = await fetchJson(`${API}/uplift/api/retention`);
+        $('opt-retention-metrics').value = r.metrics_days;
+        $('opt-retention-log').value = r.log_days;
+        $('opt-retention-metrics').dataset.prev = r.metrics_days;
+        $('opt-retention-log').dataset.prev = r.log_days;
+    } catch (e) { /* endpoint absent on older servers — leave inputs blank */ }
+}
+async function saveRetention(which) {
+    const m = $('opt-retention-metrics'), l = $('opt-retention-log');
+    const body = which === 'm' ? { metrics_days: Number(m.value) } : { log_days: Number(l.value) };
+    try {
+        const r = await postJson(`${API}/uplift/api/retention`, body);
+        m.value = r.metrics_days; l.value = r.log_days;
+        m.dataset.prev = r.metrics_days; l.dataset.prev = r.log_days;
+    } catch (e) { toast('retention: ' + e.message, 4000); loadRetention(); }
+}
+$('opt-retention-metrics').onchange = () => saveRetention('m');
+$('opt-retention-log').onchange = () => saveRetention('l');
+loadRetention();
 $('btn-layout-reset').onclick = () => {
     Object.assign(layout, C.LAYOUT_DEFAULTS);
     upLayout = UPL.defaultLayout();

@@ -707,3 +707,31 @@ async def cancel_request(
     if await get_request_tracker().cancel(pool, request_id):
         return {"cancelled": request_id}
     raise HTTPException(status_code=404, detail=f"Request not found: {request_id}")
+
+
+# --------------------------------------------------------------------------
+# Retention policy (RL-0) — uplift-owned data policy, NOT vanilla settings.
+# GET reports resolved values + which layer wins; POST persists into the
+# store's meta table (takes effect at the next daily purge pass).
+# --------------------------------------------------------------------------
+
+
+class RetentionRequest(BaseModel):
+    metrics_days: int | None = None
+    log_days: int | None = None
+
+
+@api_router.get("/retention")
+async def get_retention(is_admin: bool = Depends(require_admin)):
+    from .store import get_store
+
+    return get_store().retention()
+
+
+@api_router.post("/retention")
+async def set_retention(
+    req: RetentionRequest, is_admin: bool = Depends(require_admin)
+):
+    from .store import get_store
+
+    return get_store().set_retention(req.metrics_days, req.log_days)
