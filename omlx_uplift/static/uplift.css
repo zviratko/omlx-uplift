@@ -229,6 +229,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content {
    mirrors .dash-block-inner); chrome bar + padded body stack inside it. */
 .card-frame { display: flex; flex-direction: column; min-width: 0; }
 .card-pad { padding: 0 16px 14px; min-width: 0; }
+/* Board cards run a tighter side gutter than the page cards (user
+   2026-09-19 r3: 'gaps to the sides' on the status board). Coupled:
+   .card h2 negative margin and #grid .card-body.chart-fill bleed
+   below must track this value exactly. */
+main.grid-stack .card-pad { padding: 0 12px 12px; }
+main.grid-stack .card h2 { margin: 0 -12px 4px; }
 #pages .card { background: var(--card); border: 1px solid var(--edge); margin-bottom: 1px; }
 #pages .card-pad { padding: 0 16px 14px; }
 
@@ -378,7 +384,7 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
 .card-body.chart-fill { display: flex; }
 /* plot bleeds to the card edges inside the grid (user 2026-09-19: too much
    dead side space); the uPlot axis gutters are the visual frame already */
-#grid .card-body.chart-fill { margin: 0 -16px; }
+#grid .card-body.chart-fill { margin: 0 -12px; }   /* tracks main .card-pad side padding */
 .card-body.chart-fill .chart-box { flex: 1 1 auto; min-width: 0; }
 /* Cursor value bubble: flat solid panel beside the pointer (no shadow,
    square corners), aligned with the painted crosshair. */
@@ -399,8 +405,25 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
 .u-legend th, .u-legend .u-label { font: 400 9px/1 var(--mono) !important; }
 .u-cursor-x, .u-cursor-y { border-color: var(--dim) !important; }
 
+/* List cards in a row band (user 2026-09-19 r3: 'align the contents
+   centered vertically — no gap to the header, dead space at the
+   bottom'). The row engine sizes every card in a row to the tallest
+   sibling; without a fill chain the list keeps its natural height and
+   the surplus becomes a bottom gap. The frame/pad/body stack stretches
+   like the metric cards (same 4-class specificity rule) and the scroll
+   list absorbs the leftover — header at top, list to the bottom edge.
+   The old max-height caps fight this; the box is the cap now. */
+main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill-card {
+    flex: 1 0 100%; min-height: 0; }
+.fill-card .card-pad { flex: 1 1 auto; display: flex; flex-direction: column; }
+.fill-card .card-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.fill-card .card-body > * { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto;
+    scrollbar-width: thin; }
+
 /* ---- Lists: hairline row rules, no fills, sharp badges ---- */
-#model-list, #live-list { max-height: 300px; overflow-y: auto; scrollbar-width: thin; }
+#model-list { max-height: 300px; overflow-y: auto; scrollbar-width: thin; }
+/* #live-list had a 300px cap — superseded by the .fill-card chain above
+   (the grid box is the cap); a fixed cap in a fill body made dead space. */
 .model-row { display: flex; align-items: center; gap: 10px; padding: 8px 2px;
     border-bottom: 1px solid var(--edge); font-size: 13px; }
 .model-row:last-child { border-bottom: 0; }
@@ -496,6 +519,9 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
    — with 30+ rows #reqfeed painted straight past the card border over the
    Events card below. Bound the list so demand can never exceed the box. */
 #reqfeed { max-height: 320px; overflow-y: auto; scrollbar-width: thin; }
+/* fill-card lists ignore the fixed caps — the grid box is the cap (see
+   .fill-card above); ID specificity here needs an ID-level override. */
+.fill-card #reqfeed, .fill-card #live-list { max-height: none; }
 .feed-item { display: flex; gap: 9px; padding: 6px 2px; font-size: 12px;
     border-bottom: 1px solid var(--edge); align-items: baseline;
     animation: slide-in .25s cubic-bezier(.22,1,.36,1); }
@@ -1152,6 +1178,8 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
    2026-09-19 r2): h2 is the shared full-width header band (see .card h2),
    timespan chips inline right of the title, chart fills nearly the card. */
 .metric-card .card-pad { padding: 0 8px 4px; }
+main.grid-stack .metric-card .card-pad { padding: 0 8px 4px; }   /* beats the board-wide 12px rule */
+main.grid-stack .metric-card h2 { margin: 0 -8px 4px; }          /* same: stays coupled to ITS pad */
 .metric-card h2 { margin: 0 -8px 4px; background: var(--panel, var(--bg)); border-bottom: 1px solid var(--edge); }
 .metric-card h2 .right { gap: 8px; margin-left: auto; }
 .metric-card h2 .ts-row { margin: 0 0 0 8px; }

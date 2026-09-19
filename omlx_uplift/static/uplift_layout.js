@@ -56,11 +56,14 @@
     };
     const WIDTH_IDS = Object.keys(WIDTH_CLASSES);
 
-    // The shipped default (user layout 2026-09-18):
+    // The shipped default (user layout 2026-09-19 r3):
     //   row 1: Prefill, Generation, Requests, Tokens, Cache  (5 stat tiles)
     //   row 2: Throughput, Memory & cache                     (2 charts)
-    //   row 3: In-flight, Request sizes, Request feed
-    //   row 4: Events (full width)
+    //   row 3: Request feed, In-flight, Request sizes (directly
+    //          under the charts — user asked feed + in-flight below
+    //          throughput; the metric cards moved below this row)
+    //   rows 4-6: metric cards (4 per row)
+    //   last: Events (full width)
     // Freeform board: every block carries an explicit h. Content refits
     // correct heights after first paint; positions never reflow sideways.
     // Heights below are the MEASURED content heights at a 1280-1440px
@@ -76,24 +79,28 @@
         { id: 'cache', x: 16, y: 0, w: 8, h: 20 },
         { id: 'chart-tps', x: 0, y: 20, w: 12, h: 34 },
         { id: 'chart-mem', x: 12, y: 20, w: 12, h: 34 },
+        // Feed row directly under the charts (user 2026-09-19 r3):
+        // Request feed + In-flight sit under Throughput. h is the floor
+        // only — the row engine grows it to whatever the lists need
+        // (capped demand), so the shipped value hugs stat-grid content.
+        { id: 'reqfeed', x: 0, y: 57, w: 8, h: 30 },
+        { id: 'live', x: 8, y: 57, w: 8, h: 30 },
+        { id: 'reqstats', x: 16, y: 57, w: 8, h: 30 },
         // Metric cards: 4 per row (w=6), compact chart fill. The board
         // owner may drop any of them; removed ones stay removed
         // (mergedBlocks memo in uplift.js).
-        { id: 'met-avg-generation-tps', x: 0, y: 57, w: 6, h: 15 },
-        { id: 'met-avg-prefill-tps', x: 6, y: 57, w: 6, h: 15 },
-        { id: 'met-rate-completion-tokens-s', x: 12, y: 57, w: 6, h: 15 },
-        { id: 'met-rate-prompt-tokens-s', x: 18, y: 57, w: 6, h: 15 },
-        { id: 'met-rate-requests-s', x: 0, y: 72, w: 6, h: 15 },
-        { id: 'met-cache-efficiency', x: 6, y: 72, w: 6, h: 15 },
-        { id: 'met-engines-active-requests', x: 12, y: 72, w: 6, h: 15 },
-        { id: 'met-mem-percent', x: 18, y: 72, w: 6, h: 15 },
-        { id: 'met-mem-used-bytes', x: 0, y: 87, w: 6, h: 15 },
-        { id: 'met-cache-total-bytes', x: 6, y: 87, w: 6, h: 15 },
-        { id: 'met-engines-loaded', x: 12, y: 87, w: 6, h: 15 },
-        { id: 'live', x: 0, y: 102, w: 8, h: 38 },
-        { id: 'reqstats', x: 8, y: 102, w: 8, h: 38 },
-        { id: 'reqfeed', x: 16, y: 102, w: 8, h: 38 },
-        { id: 'feed', x: 0, y: 140, w: COLUMNS, h: 18 },
+        { id: 'met-avg-generation-tps', x: 0, y: 87, w: 6, h: 15 },
+        { id: 'met-avg-prefill-tps', x: 6, y: 87, w: 6, h: 15 },
+        { id: 'met-rate-completion-tokens-s', x: 12, y: 87, w: 6, h: 15 },
+        { id: 'met-rate-prompt-tokens-s', x: 18, y: 87, w: 6, h: 15 },
+        { id: 'met-rate-requests-s', x: 0, y: 102, w: 6, h: 15 },
+        { id: 'met-cache-efficiency', x: 6, y: 102, w: 6, h: 15 },
+        { id: 'met-engines-active-requests', x: 12, y: 102, w: 6, h: 15 },
+        { id: 'met-mem-percent', x: 18, y: 102, w: 6, h: 15 },
+        { id: 'met-mem-used-bytes', x: 0, y: 117, w: 6, h: 15 },
+        { id: 'met-cache-total-bytes', x: 6, y: 117, w: 6, h: 15 },
+        { id: 'met-engines-loaded', x: 12, y: 117, w: 6, h: 15 },
+        { id: 'feed', x: 0, y: 132, w: COLUMNS, h: 18 },
     ];
 
     function defaultLayout() {

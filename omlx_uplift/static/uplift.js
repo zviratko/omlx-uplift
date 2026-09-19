@@ -448,6 +448,28 @@ function ensureUpliftGrid() {
 function _neededUnits(el) {
     const pad = el.querySelector('.card-pad');
     if (!pad) return 8;
+    // .fill-card list bodies stretch to their box by design (the fill
+    // chain), so their rect measures the box, not the content. Demand =
+    // header band + the list's natural rows, but CAPPED like the old
+    // max-height rule: a 30-row feed must never drag the whole row band
+    // taller — the box caps the list via overflow instead.
+    if (el.classList.contains('fill-card')) {
+        const ptop = pad.getBoundingClientRect().top;
+        let fb = 0;
+        for (const child of pad.children) {
+            const r = child.getBoundingClientRect();
+            if (child.tagName === 'H2') { fb = Math.max(fb, r.bottom - ptop); continue; }
+            const list = child.querySelector('#live-list, #reqfeed, .feed');
+            if (!list) { fb = Math.max(fb, r.bottom - ptop); continue; }
+            const lr = list.getBoundingClientRect();
+            let inner = 0;
+            for (const row of list.children)
+                inner = Math.max(inner, row.getBoundingClientRect().bottom - lr.top);
+            fb = Math.max(fb, r.top - ptop + Math.min(320, Math.max(60, inner)));
+        }
+        const fpad = parseFloat(getComputedStyle(pad).paddingBottom) || 0;
+        return Math.min(60, Math.max(4, Math.ceil(Math.max(fb + fpad + 2, 32) / 8)));
+    }
     // The pad stretches to fill its card, so scrollHeight can't shrink
     // below the box. Union of children rects = natural content height,
     // plus the handle bar above the pad.
@@ -956,9 +978,10 @@ function xAxis(col, boundWin) {
              }) };
 }
 function yAxis(col, opts) {
-    // size includes tick labels AND the rotated axis label; 40 was too tight
-    // for the right axes and the label overlapped the ticks.
-    return Object.assign({ stroke: col.dim, size: 36, font: axisFont, grid: true, gap: 4 }, opts || {});
+    // size includes tick labels AND the rotated axis label; 36/44 read to
+    // the user as dead side gaps inside the chart cards (2026-09-19 r3) —
+    // tightened to the smallest size that still fits the rotated labels.
+    return Object.assign({ stroke: col.dim, size: 30, font: axisFont, grid: true, gap: 4 }, opts || {});
 }
 function baseOpts(specs, axes, legendHook) {
     const col = chartColors();
@@ -1111,7 +1134,7 @@ function createCharts() {
         [line('generation', 'blue', true, 'y'), line('prefill', 'gold', false, 'y2')],
         { scales: { y2: { auto: true } },
           yAxes: [Object.assign(yAxis(col, { grid: false, label: 'gen tok/s', stroke: col.blue }), { scale: 'y' }),
-                  Object.assign(yAxis(col, { side: 1, grid: false, label: 'prefill tok/s', stroke: col.gold, size: 44 }), { scale: 'y2' })] },
+                  Object.assign(yAxis(col, { side: 1, grid: false, label: 'prefill tok/s', stroke: col.gold, size: 36 }), { scale: 'y2' })] },
         legendUpdater());
     // y2 axis sits on the right; uPlot axis 'side': 1=right of grid, 3=left.
     tpsOpts.height = Math.max(200, $('chart-tps').clientHeight || 240);
@@ -1130,7 +1153,7 @@ function createCharts() {
     const memOpts = baseOpts(memSpecs,
         { scales: { y2: { auto: true } },
           yAxes: [Object.assign(yAxis(col, { label: 'memory %', stroke: col.blue }), { scale: 'y' }),
-                  Object.assign(yAxis(col, { side: 1, grid: false, label: 'cache GB', stroke: col.gold, size: 44 }), { scale: 'y2' })] },
+                  Object.assign(yAxis(col, { side: 1, grid: false, label: 'cache GB', stroke: col.gold, size: 36 }), { scale: 'y2' })] },
         legendUpdater());
     memOpts.scales.y = { range: [0, 100] };
     memOpts.height = Math.max(200, $('chart-mem').clientHeight || 240);
