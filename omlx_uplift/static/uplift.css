@@ -228,10 +228,16 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content {
 #pages .card { background: var(--card); border: 1px solid var(--edge); margin-bottom: 1px; }
 #pages .card-pad { padding: 14px 16px; }
 
-/* Edit-mode chrome: drag handle bar + remove button (drag-strip motif) */
+/* Edit-mode chrome: drag handle bar + remove button (drag-strip motif).
+   S1 fix (user 2026-09-19): overlaid across the card top instead of
+   pushing content down — entering/leaving edit mode must not change any
+   card's internal geometry (that was "items look different while
+   editing than after saving"). The strip repeats the card label, so it
+   covering the header while editing loses no information. */
 .card-chrome { display: none; }
 body.layout-editing .card-chrome {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    position: absolute; top: 0; left: 0; right: 0; z-index: 6;
     padding: 4px 8px; background: var(--panel, var(--bg)); color: var(--dim);
     border-bottom: 1px solid var(--edge);
     font: 500 10px/1.4 var(--sans); text-transform: uppercase; letter-spacing: 0.12em;
@@ -1118,12 +1124,14 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 .ts-chip:hover { color: var(--ink); background: var(--row2); }
 .ts-chip.on { background: var(--chart-2, #e8a020); color: #14100a; }
 
-/* Metric cards: tight header (name + big current value + resolution note),
-   ts row, chart fills the rest of the card body. */
-.metric-card .card-pad { padding: 8px 10px 8px; }
-.metric-card h2 { margin: 0 0 4px; font-size: 12px; }
+/* Metric cards (user round 2026-09-19 S2-S4): header renders as a full
+   header BAND across the card top (tinted strip + rule), chart fills
+   nearly the whole card, value/footer fonts smaller. */
+.metric-card .card-pad { padding: 0 8px 6px; }
+.metric-card h2 { margin: 0 -8px 4px; padding: 5px 8px; font-size: 12px;
+    background: var(--panel, var(--bg)); border-bottom: 1px solid var(--edge); }
 .metric-card h2 .right { gap: 8px; margin-left: auto; }
-.metric-now { font: 700 14px/1 var(--mono); color: var(--chart-2, #e8a020);
+.metric-now { font: 700 12px/1 var(--mono); color: var(--chart-2, #e8a020);
     letter-spacing: 0; }
 .metric-res { font: 500 9px/1 var(--mono); color: var(--dim);
     letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }

@@ -471,12 +471,13 @@ function _neededUnits(el) {
         if (r.height > 0) bottom = Math.max(bottom, r.bottom - pr.top + pad.scrollTop + mb);
     }
     const padBottom = parseFloat(getComputedStyle(pad).paddingBottom) || 0;
-    const chrome = el.querySelector('.card-chrome');
-    const cr = chrome ? chrome.getBoundingClientRect().height : 0;
     // +8: GridStack's vertical margin is outside the content box, so a
     // row sized exactly to content paints its card border into the gap
     // below. One full cell of slack keeps frames inside their boxes.
-    const px = Math.max(bottom + padBottom + cr + 8, 32);
+    // (S1 2026-09-19: .card-chrome is now an edit-mode overlay — it is
+    // display:none in view mode and absolute while editing, so it never
+    // contributes to content flow here.)
+    const px = Math.max(bottom + padBottom + 8, 32);
     // cellHeight is 8px; clamp guards runaway canvas growth
     return Math.min(60, Math.max(4, Math.ceil(px / 8)));
 }
