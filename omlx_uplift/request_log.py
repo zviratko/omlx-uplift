@@ -23,6 +23,7 @@ the next engine step), which closes R12-4.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections import OrderedDict, deque
@@ -30,6 +31,67 @@ from typing import Any
 
 RING_LIMIT = 200          # finished rows kept for the feed
 ACTIVE_STALE_S = 300.0    # forget active rows untouched this long
+
+# RL-1 payload capture caps (bytes, per field). Worst case per persisted
+# row: ~32 KB prompt + 32 KB output + <1 KB params — and rows only persist
+# on state/counter change (collector filter), not per tick.
+PAYLOAD_CAP = 32 * 1024
+
+# SamplingParams fields worth persisting for loop diagnosis, mirroring
+# omlx/request.py SamplingParams (tests assert this set stays in sync).
+PARAM_FIELDS = ("temperature", "top_p", "max_tokens", "stop",
+                "presence_penalty", "frequency_penalty")
+
+
+def _truncate(text: str, cap: int = PAYLOAD_CAP):
+    """Return (text, truncated_flag); cap is a UTF-8 BYTE budget."""
+    raw = text.encode("utf-8", errors="replace")
+    if len(raw) <= cap:
+        return text, False
+    return raw[:cap].decode("utf-8", errors="ignore"), True
+
+
+def _capture_payload(req: Any) -> dict:
+    """Best-effort payload fields for one Request (RL-1).
+
+    Each getattr is guarded individually: a capture failure must NEVER
+    lose the lifecycle row. Missing attributes are ABSENT from the dict,
+    never empty-string lies (honest-label doctrine). No tokenization, no
+    decoding, no file IO — reads only what the Request already holds.
+    """
+    out: dict[str, Any] = {}
+    try:
+        prompt = req.prompt
+        if isinstance(prompt, str) and prompt:
+            out["prompt"], out["prompt_trunc"] = _truncate(prompt)
+        elif isinstance(prompt, list) and prompt:
+            # token-id prompt: no tokenizer in the tracker — describe it
+            out["prompt"] = f"(tokenized prompt, {len(prompt)} tokens)"
+            out["prompt_trunc"] = False
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        text = getattr(req, "output_text", "") or ""
+        if text:
+            out["output"], out["output_trunc"] = _truncate(text)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        sp = req.sampling_params
+        params = {f: getattr(sp, f) for f in PARAM_FIELDS
+                  if hasattr(sp, f)}
+        if params:
+            # stop lists may carry non-JSON scalars; default=str keeps it safe
+            out["params"] = json.dumps(params, default=str)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        fr = getattr(req, "finish_reason", None)
+        if fr:
+            out["finish"] = str(fr)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 class RequestTracker:
@@ -192,11 +254,13 @@ def _rows_from_snapshot(snap: dict[str, Any], model_id: str, now: float):
     mono = time.monotonic()
     for req in snap.get("waiting", []):
         rid = getattr(req, "request_id", "")
-        yield rid, {
+        row = {
             "id": rid, "state": "queued", "model": model_id, "origin": "real",
             "prompt_tokens": getattr(req, "num_prompt_tokens", 0) or 0,
             "ts": now,
         }
+        row.update(_capture_payload(req))   # RL-1 best-effort, never fatal
+        yield rid, row
     running = snap.get("running_by_id", {})
     for rid, req in running.items():
         # prefill vs generate: generation_started_at is set on the first decode
@@ -205,13 +269,15 @@ def _rows_from_snapshot(snap: dict[str, Any], model_id: str, now: float):
         generated = getattr(req, "num_output_tokens", 0) or 0
         elapsed = (mono - gen_start) if gen_start else None
         tps = generated / elapsed if elapsed and elapsed > 0 else 0.0
-        yield rid, {
+        row = {
             "id": rid, "state": state, "model": model_id, "origin": "real",
             "prompt_tokens": getattr(req, "num_prompt_tokens", 0) or 0,
             "completion_tokens": generated,
             "tps": round(tps, 1),
             "ts": now,
         }
+        row.update(_capture_payload(req))   # RL-1 best-effort, never fatal
+        yield rid, row
 
 
 _tracker: RequestTracker | None = None

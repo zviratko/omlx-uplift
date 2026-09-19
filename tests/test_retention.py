@@ -185,3 +185,46 @@ def test_tick_single_transaction_and_unchanged_row_not_rewritten(store, monkeypa
     assert rec.commits == 1
     got = rec.execute("SELECT state FROM requests WHERE id='r1'").fetchone()
     assert got[0] == "error"
+
+
+# -- RL-1 store migration + payload persistence -------------------------------
+
+def test_v1_db_migrates_columns_once(tmp_path):
+    import sqlite3
+    p = tmp_path / "v1.sqlite3"
+    # build a v1-shaped DB by hand (pre-payload schema)
+    c = sqlite3.connect(p)
+    c.executescript("""
+        CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE samples(ts REAL, key TEXT, value REAL);
+        CREATE TABLE requests(id TEXT PRIMARY KEY, model TEXT, state TEXT,
+            prompt_tokens INTEGER, completion_tokens INTEGER, tps REAL,
+            error TEXT, ts_start REAL, ts_end REAL);
+        INSERT INTO meta VALUES('schema_version','1');
+    """)
+    c.close()
+
+    s = MetricsStore(path=p)
+    cols1 = {r[1] for r in s._conn.execute("PRAGMA table_info(requests)")}
+    assert {"prompt", "prompt_trunc", "output", "output_trunc",
+            "params", "finish"} <= cols1
+    assert s.get_meta("schema_version") == "2"
+    s.close()
+
+    # second open: ALTER is a no-op (no duplicate-column error)
+    s2 = MetricsStore(path=p)
+    cols2 = {r[1] for r in s2._conn.execute("PRAGMA table_info(requests)")}
+    assert cols2 == cols1
+    s2.close()
+
+
+def test_upsert_coalesce_keeps_earlier_payload(store):
+    store.upsert_request({**_req("c1", "generating", 10),
+                          "prompt": "PROMPT", "output": "TAIL",
+                          "output_trunc": True, "params": '{"temperature": 1.0}'})
+    # later sparse sample (no payload) must NOT null out stored payload
+    store.upsert_request(_req("c1", "complete", 20))
+    row = store.recent_requests()[0]
+    assert row["prompt"] == "PROMPT" and row["output"] == "TAIL"
+    assert row["output_trunc"] == 1 and row["params"] == '{"temperature": 1.0}'
+    assert row["state"] == "complete"

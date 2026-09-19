@@ -36,7 +36,14 @@ from pathlib import Path
 RETENTION_METRICS_DAYS = 30
 RETENTION_LOG_DAYS = 2
 _RET_CLAMP = (1, 365)
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
+# v1 -> v2 (RL-1): payload columns on `requests`. Migration is idempotent:
+# ALTER TABLE ADD COLUMN runs once per column, guarded by PRAGMA table_info.
+_NEW_COLUMNS = {
+    "prompt": "TEXT", "prompt_trunc": "INTEGER",
+    "output": "TEXT", "output_trunc": "INTEGER",
+    "params": "TEXT", "finish": "TEXT",
+}
 
 
 def _clamp_days(raw, default: int) -> int:
@@ -123,8 +130,19 @@ class MetricsStore:
                     ON requests(ts_start);
                 """
             )
+            # Idempotent v1 -> v2 migration (RL-1 payload columns): ALTER
+            # TABLE has no IF NOT EXISTS, so check table_info first. A fresh
+            # DB already created the columns above? No — the CREATE above is
+            # v1 shape for max compat; new columns always arrive here.
+            have = {r[1] for r in self._conn.execute(
+                "PRAGMA table_info(requests)")}
+            for col, typ in _NEW_COLUMNS.items():
+                if col not in have:
+                    self._conn.execute(
+                        f"ALTER TABLE requests ADD COLUMN {col} {typ}")
             self._conn.execute(
-                "INSERT OR IGNORE INTO meta(key, value) VALUES('schema_version', ?)",
+                "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(_SCHEMA_VERSION),),
             )
 
@@ -218,17 +236,33 @@ class MetricsStore:
             "error": row.get("error"),
             "ts_start": row.get("ts_start") or row.get("ts") or time.time(),
             "ts_end": row.get("ts_end") or time.time(),
+            # RL-1 payload fields — COALESCE below keeps earlier captures
+            # when a later sparse sample has none (never overwrite with NULL)
+            "prompt": row.get("prompt"),
+            "prompt_trunc": 1 if row.get("prompt_trunc") else None,
+            "output": row.get("output"),
+            "output_trunc": 1 if row.get("output_trunc") else None,
+            "params": row.get("params"),
+            "finish": row.get("finish"),
         }
         sql = """INSERT INTO requests(id, model, state, prompt_tokens,
-                   completion_tokens, tps, error, ts_start, ts_end)
+                   completion_tokens, tps, error, ts_start, ts_end,
+                   prompt, prompt_trunc, output, output_trunc, params, finish)
                VALUES(:id, :model, :state, :prompt_tokens,
-                   :completion_tokens, :tps, :error, :ts_start, :ts_end)
+                   :completion_tokens, :tps, :error, :ts_start, :ts_end,
+                   :prompt, :prompt_trunc, :output, :output_trunc, :params, :finish)
                ON CONFLICT(id) DO UPDATE SET
                  state=excluded.state,
                  prompt_tokens=COALESCE(excluded.prompt_tokens, prompt_tokens),
                  completion_tokens=COALESCE(excluded.completion_tokens, completion_tokens),
                  tps=COALESCE(excluded.tps, tps),
                  error=COALESCE(excluded.error, error),
+                 prompt=COALESCE(excluded.prompt, prompt),
+                 prompt_trunc=COALESCE(excluded.prompt_trunc, prompt_trunc),
+                 output=COALESCE(excluded.output, output),
+                 output_trunc=COALESCE(excluded.output_trunc, output_trunc),
+                 params=COALESCE(excluded.params, params),
+                 finish=COALESCE(excluded.finish, finish),
                  ts_end=excluded.ts_end"""
         if in_tx:
             self._conn.execute(sql, params)

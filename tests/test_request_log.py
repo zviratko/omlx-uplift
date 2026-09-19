@@ -187,3 +187,108 @@ def test_drin_dirty_reports_each_transition_once():
 
 def test_singleton_returns_same_instance():
     assert get_request_tracker() is get_request_tracker()
+
+
+# -- RL-1 payload capture ----------------------------------------------------
+
+import json as _json
+from dataclasses import dataclass, fields as _dc_fields
+
+from omlx_uplift.request_log import PARAM_FIELDS, PAYLOAD_CAP, _capture_payload
+
+
+@dataclass
+class FakeParams:
+    temperature: float = 0.7
+    top_p: float = 0.9
+    max_tokens: int = 256
+    stop: list = None
+    presence_penalty: float = 0.0
+    frequency_penalty: float = 0.0
+    # fields the capture must NOT include (subset doctrine pinned below):
+    top_k: int = 0
+    seed: int = 5
+
+    def __post_init__(self):
+        if self.stop is None:
+            self.stop = []
+
+
+def _full_req(rid, prompt="hello world", out="partial answer", fr=None):
+    return SimpleNamespace(request_id=rid, prompt=prompt,
+                           sampling_params=FakeParams(),
+                           output_text=out, finish_reason=fr,
+                           num_prompt_tokens=2, num_output_tokens=3)
+
+
+def test_capture_full_payload_fields_and_flags():
+    p = _capture_payload(_full_req("p1"))
+    assert p["prompt"] == "hello world" and p["prompt_trunc"] is False
+    assert p["output"] == "partial answer" and p["output_trunc"] is False
+    params = _json.loads(p["params"])
+    assert set(params) == set(PARAM_FIELDS)          # exact field list
+    assert params["temperature"] == 0.7 and params["max_tokens"] == 256
+    assert "top_k" not in params and "seed" not in params
+
+
+def test_capture_finish_reason_only_when_present():
+    assert "finish" not in _capture_payload(_full_req("f1", fr=None))
+    p = _capture_payload(_full_req("f2", fr="stop"))
+    assert p["finish"] == "stop"
+
+
+def test_capture_truncates_at_byte_cap():
+    big = "x" * (PAYLOAD_CAP + 100)
+    p = _capture_payload(_full_req("p2", prompt=big))
+    assert p["prompt_trunc"] is True
+    assert len(p["prompt"].encode()) == PAYLOAD_CAP
+    # multi-byte chars must not be cut mid-character (decode errors='ignore')
+    wide = "\u00e9" * (PAYLOAD_CAP + 10)             # 2 bytes per char
+    p2 = _capture_payload(_full_req("p3", prompt=wide))
+    assert p2["prompt_trunc"] is True
+    assert len(p2["prompt"]) * 2 == PAYLOAD_CAP      # clean 2-byte boundary
+
+
+def test_capture_tokenized_prompt_described_not_dumped():
+    p = _capture_payload(_full_req("p4", prompt=[1, 2, 3, 4, 5]))
+    assert p["prompt"] == "(tokenized prompt, 5 tokens)"
+    assert p["prompt_trunc"] is False
+
+
+def test_capture_missing_attrs_absent_not_empty_lies():
+    bare = SimpleNamespace(request_id="p5")           # no prompt/params/output
+    assert _capture_payload(bare) == {}
+
+
+def test_capture_exception_never_loses_the_lifecycle_row():
+    class Bad:
+        request_id = "p6"            # FakeScheduler reads this at build time
+
+        def __getattr__(self, name):
+            if name == "prompt":
+                raise RuntimeError("exploding attribute")   # defeats getattr default
+            raise AttributeError(name)                      # plain missing attr
+
+    t = RequestTracker()
+    sched = FakeScheduler(running={"p6": Bad()})
+    t.sample(_pool({"m1": sched}))
+    rows = {r["id"]: r for r in t.list_rows(limit=5)}
+    assert rows["p6"]["state"] == "prefilling"        # row survives capture failure
+    assert "prompt" not in rows["p6"]                 # absent, not ''-lies
+
+
+def test_param_fields_mirror_request_sampling_params():
+    """Mirror-the-server doctrine: every PARAM_FIELDS name must exist as a
+    real SamplingParams field in omlx/request.py (text-parsed, no import)."""
+    import pathlib
+    import re
+    src = pathlib.Path(__file__).resolve().parents[3].joinpath("omlx", "request.py")
+    if not src.exists():  # package installed standalone without the repo tree
+        import omlx.request as m
+        names = {f.name for f in _dc_fields(m.SamplingParams)}
+    else:
+        src_txt = src.read_text()
+        cls = src_txt[src_txt.index("class SamplingParams:"):]
+        cls = cls[:cls.index("\nclass ", 1)] if "\nclass " in cls[1:] else cls
+        names = set(re.findall(r"^    (\w+):\s", cls, re.M))
+    assert set(PARAM_FIELDS) <= names, set(PARAM_FIELDS) - names
