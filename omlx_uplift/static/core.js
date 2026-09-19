@@ -207,6 +207,10 @@ function loadLayout(storage) {
         // uplift_layout.js normalizeLayout; here just shape-guard.
         ...(typeof l.width === 'string' ? { width: l.width } : {}),
         ...(Array.isArray(l.blocks) ? { blocks: l.blocks } : {}),
+        // One-shot merge memo (uplift.js currentBlockLayout). Without this
+        // pass-through every boot re-appends default blocks the user has
+        // removed (F-032: removed cards resurrect on reload).
+        ...(Array.isArray(l.mergedBlocks) ? { mergedBlocks: l.mergedBlocks } : {}),
     };
 }
 function saveLayout(storage, layout) {

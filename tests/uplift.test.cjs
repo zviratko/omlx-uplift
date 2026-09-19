@@ -214,6 +214,21 @@ test('layout persistence and clamping', () => {
     assert.strictEqual(C.clampSpan(5, 3), 3);
 });
 
+test('F-032: loadLayout passes mergedBlocks through (removed cards must not resurrect)', () => {
+    const items = {};
+    const store = { getItem: k => items[k], setItem: (k, v) => items[k] = v };
+    // absent -> stays absent (defaults untouched)
+    assert.strictEqual('mergedBlocks' in C.loadLayout(store), false);
+    // garbage -> dropped
+    items[C.LAYOUT_KEY] = JSON.stringify({ mergedBlocks: 'nope' });
+    assert.strictEqual('mergedBlocks' in C.loadLayout(store), false);
+    // array -> survives round-trip
+    items[C.LAYOUT_KEY] = JSON.stringify({ blocks: [{ id: 'live', x: 0, y: 0, w: 8, h: 4 }],
+        mergedBlocks: ['live', 'feed'] });
+    const l = C.loadLayout(store);
+    assert.deepStrictEqual(l.mergedBlocks, ['live', 'feed']);
+});
+
 // GridStack layout contract (uplift twin of classic dashboard_layout.js).
 test('layout: every met-* block id matches a catalogue card', () => {
     for (const id of UPL.BLOCK_IDS.filter(i => i.startsWith('met-')))
