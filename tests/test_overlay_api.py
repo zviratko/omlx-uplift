@@ -219,3 +219,77 @@ async def test_sse_every_consumer_sees_every_transition():
                 await it.aclose()
             except Exception:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# CACHE-1: static revalidation — ETag/If-None-Match and
+# If-Modified-Since must produce 304 with no body, while a plain GET
+# still answers the full file with the cache headers intact.
+# ---------------------------------------------------------------------------
+
+def _req(headers: dict):
+    scope = {
+        "type": "http", "method": "GET", "path": "/uplift/uplift.js",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        "query_string": b"", "scheme": "http", "server": ("test", 80),
+        "client": ("127.0.0.1", 1234), "root_path": "",
+    }
+    from starlette.requests import Request
+    return Request(scope)
+
+
+def test_static_etag_matches_file_response_formula(tmp_path):
+    import os, hashlib
+    from email.utils import formatdate
+    f = tmp_path / "x.js"
+    f.write_text("hello")
+    st = f.stat()
+    expect = '"%s"' % hashlib.md5(
+        f"{st.st_mtime}-{st.st_size}".encode(), usedforsecurity=False
+    ).hexdigest()
+    assert up._static_etag(st) == expect
+
+
+def test_static_conditional_get_304_and_plain_200():
+    from starlette.responses import FileResponse
+    etag = None
+    # first: plain GET through the real route machinery shape — we can
+    # call the file helper directly with an empty-validator request
+    plain = up._static_file(_req({}), "uplift.js")
+    assert isinstance(plain, FileResponse)
+    # derive the live etag from the file itself
+    st = (up.STATIC_DIR / "uplift.js").stat()
+    etag = up._static_etag(st)
+    assert up._not_modified(_req({"if-none-match": etag}), etag, st.st_mtime)
+    assert up._not_modified(_req({"if-none-match": 'W/"zz", ' + etag}),
+                            etag, st.st_mtime)
+    assert not up._not_modified(_req({"if-none-match": '"deadbeef"'}),
+                                etag, st.st_mtime)
+    # If-Modified-Since in the future -> 304; in the past -> must re-serve
+    from email.utils import formatdate
+    future = formatdate(st.st_mtime + 3600, usegmt=True)
+    past = formatdate(st.st_mtime - 3600, usegmt=True)
+    assert up._not_modified(_req({"if-modified-since": future}), etag,
+                            st.st_mtime)
+    assert not up._not_modified(_req({"if-modified-since": past}), etag,
+                                st.st_mtime)
+    # malformed header must not crash into 304
+    assert not up._not_modified(_req({"if-modified-since": "garbage"}),
+                                etag, st.st_mtime)
+
+
+def test_static_file_serves_304_with_no_body():
+    # route wrapper (gate/auth) is covered by E2E; here: the response the
+    # wrapper returns for a matching validator must be a bodyless 304
+    st = (up.STATIC_DIR / "uplift.js").stat()
+    etag = up._static_etag(st)
+    resp = up._static_file(_req({"if-none-match": etag}), "uplift.js")
+    assert resp.status_code == 304
+    assert resp.body == b""
+    assert resp.headers["cache-control"] == "no-cache"
+    assert resp.headers["etag"] == etag
+    # html keeps no-store on its 304s too
+    sti = (up.STATIC_DIR / "index.html").stat()
+    etagi = up._static_etag(sti)
+    r2 = up._static_file(_req({"if-none-match": etagi}), "index.html")
+    assert r2.status_code == 304 and r2.headers["cache-control"] == "no-store"

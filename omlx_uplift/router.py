@@ -27,15 +27,20 @@ Route map (register() mounts api_router under /uplift/api AND /admin/api):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
+import os
 import time
+from datetime import datetime, timezone
+from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from starlette.responses import Response
 from pydantic import BaseModel
 
 try:  # normal runtime: we are importable inside omlx's environment
@@ -111,7 +116,32 @@ _MEDIA_TYPES = {
 }
 
 
-def _static_file(path: str) -> FileResponse:
+def _static_etag(st: os.stat_result) -> str:
+    # same formula Starlette's FileResponse emits (mtime+size md5), so
+    # validators stay continuous whether our 304 path or FileResponse
+    # answers the request
+    base = f"{st.st_mtime}-{st.st_size}".encode()
+    return f'"{hashlib.md5(base, usedforsecurity=False).hexdigest()}"'
+
+
+def _not_modified(request: Request, etag: str, mtime: float) -> bool:
+    inm = request.headers.get("if-none-match")
+    if inm:
+        return etag in [t.strip() for t in inm.split(",")] or "*" in [
+            t.strip() for t in inm.split(",")
+        ]
+    ims = request.headers.get("if-modified-since")
+    if ims:
+        try:
+            since = parsedate_to_datetime(ims)
+            mt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+            return mt.replace(microsecond=0) <= since
+        except (TypeError, ValueError):
+            return False  # malformed header -> answer normally (RFC 9110)
+    return False
+
+
+def _static_file(request: Request, path: str) -> Response:
     file_path = STATIC_DIR / path
     if not file_path.is_file() or not file_path.resolve().is_relative_to(
         STATIC_DIR.resolve()
@@ -123,10 +153,28 @@ def _static_file(path: str) -> FileResponse:
     # and heuristic caching resurrected the 'stale cache looks like a
     # failed deploy' trap. Assets are local; 304 revalidation is free.
     if file_path.suffix == ".html":
-        headers = {"Cache-Control": "no-store"}
+        cache_control = "no-store"
     else:
-        headers = {"Cache-Control": "no-cache"}
-    return FileResponse(file_path, media_type=media_type, headers=headers)
+        cache_control = "no-cache"
+    # CACHE-1: FileResponse advertises ETag/Last-Modified but does NOT
+    # evaluate If-None-Match/If-Modified-Since (no StaticFiles middleware
+    # on this auth-gated catch-all), so every revalidation re-sent the
+    # full body. Honour the validators here -> 304 with no body.
+    st = file_path.stat()
+    etag = _static_etag(st)
+    if _not_modified(request, etag, st.st_mtime):
+        return Response(
+            status_code=304,
+            headers={
+                "Cache-Control": cache_control,
+                "ETag": etag,
+                "Last-Modified": formatdate(st.st_mtime, usegmt=True),
+            },
+        )
+    return FileResponse(
+        file_path, media_type=media_type,
+        headers={"Cache-Control": cache_control},
+    )
 
 
 # --------------------------------------------------------------------------
@@ -279,7 +327,7 @@ async def _serve_index(request: Request):
     redirect = await _gate(request, "/uplift/login")
     if redirect is not None:
         return redirect
-    return _static_file("index.html")
+    return _static_file(request, "index.html")
 
 
 @page_router.get("/uplift/", include_in_schema=False)
@@ -300,7 +348,7 @@ async def uplift_static(path: str, request: Request):
             return redirect
     else:
         await require_admin(request)
-    return _static_file(path or "index.html")
+    return _static_file(request, path or "index.html")
 
 
 @page_router.get("/admin/uplift/{path:path}", include_in_schema=False)
