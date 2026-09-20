@@ -105,10 +105,33 @@ def test_purge_removes_fts_rows(store):
 
 
 def test_fts_query_never_raises_on_junk():
-    for raw in ('quick', 'a "b"', 'AND OR NOT', 'x* y~', '"', '', '   ',
-                'uni\u00e9\u010d 100%', ')))(((', 'phr"ase with "quotes'):
+    for raw in ('quick', 'a "b"', 'AND OR NOT', 'x* y~',
+                'uni\u00e9\u010d 100%', 'phr"ase with "quotes'):
         store_q = fts_query(raw)
-        assert isinstance(store_q, str) and store_q          # always usable
+        assert isinstance(store_q, str) and store_q          # usable MATCH
+    # PUNCT-1: punctuation-only / empty inputs have nothing FTS can match;
+    # fts_query says None so the caller answers with LIKE instead.
+    for raw in ('"', '', '   ', ')))(((', '\\', '%'):
+        assert fts_query(raw) is None, raw
+
+
+def test_punctuation_query_answers_via_like(store):
+    """PUNCT-1: a backslash in the query poisoned the FTS AND-chain (0 hits
+    even for queries whose words matched). Now: punctuation tokens are
+    dropped from MATCH; all-punctuation queries go to LIKE."""
+    store.upsert_request(_row("pu1", prompt="path C:\\tmp\\x probe token",
+                              age_s=40))
+    # mixed query: words drive MATCH, punctuation token no longer poisons it
+    res = store.search_requests(q="probe token", limit=10)
+    assert res["mode"] == "fts" and len(res["results"]) == 1
+    # same words + backslash-bearing tokens: word chars let MATCH proceed
+    # (punctuation inside a token is tokenized away, not poison)
+    res = store.search_requests(q="probe token C:\\tmp\\x", limit=10)
+    assert [r["id"] for r in res["results"]] == ["pu1"]
+    # punctuation-ONLY query: LIKE substring answer, not a false 'no match'
+    res = store.search_requests(q="\\", limit=10)
+    assert res["mode"] == "like"
+    assert [r["id"] for r in res["results"]] == ["pu1"]
 
 
 def test_backfill_indexes_pre_fts_rows(tmp_path):

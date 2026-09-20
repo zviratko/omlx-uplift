@@ -79,14 +79,21 @@ _CJK_RE = re.compile(
     "[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]")
 
 
-def fts_query(raw: str) -> str:
+def fts_query(raw: str):
     """Make arbitrary user text safe for FTS5 MATCH: one quoted phrase per
-    word-ish token, ANDed. Quotes inside tokens are doubled (FTS rule)."""
+    word-ish token, ANDed. Quotes inside tokens are doubled (FTS rule).
+
+    PUNCT-1: tokens with no word character ('\\', '%', '---') index to zero
+    FTS tokens, so a quoted phrase of them can never MATCH and would poison
+    the whole AND chain. They are dropped; if NOTHING survives, returns
+    None and the caller answers with the LIKE substring path instead."""
     toks = re.findall(r"[^\s]+", raw)
     out = []
     for t in toks:
+        if not re.search(r"\w", t, re.UNICODE):
+            continue        # punctuation-only: unmatchable, honest skip
         out.append('"' + t.replace('"', '""') + '"')
-    return " AND ".join(out) or '""'
+    return " AND ".join(out) or None
 
 
 def _where_clause(parts):
@@ -514,6 +521,12 @@ class MetricsStore:
                 "tps", "error", "finish", "ts_start", "ts_end"]
 
         with self._lock:
+            match_expr = fts_query(q) if use_fts else None
+            if use_fts and match_expr is None:
+                # PUNCT-1: only punctuation tokens — MATCH can never hit;
+                # answer via LIKE (escaped substring handles them fine)
+                use_fts = False
+                mode = "like"
             if use_fts:
                 try:
                     cur = self._conn.execute(
@@ -522,7 +535,7 @@ class MetricsStore:
                             FROM request_fts f JOIN requests r ON r.id = f.id
                             WHERE request_fts MATCH ? {_and(where)}
                             ORDER BY r.ts_start DESC LIMIT ?""",
-                        [fts_query(q)] + args + [limit])
+                        [match_expr] + args + [limit])
                     results = []
                     for row in cur.fetchall():
                         d = dict(zip(cols + ["excerpt"], row))
