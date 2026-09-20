@@ -1096,3 +1096,167 @@ async def put_env_overrides(
             results[name] = "restart_server"
     env_tunables.save_overrides(data)
     return {"results": results, **env_tunables.snapshot()}
+
+
+# --------------------------------------------------------------------------
+# Patch carrier (PAT-2) — declarative patch set on top of vanilla omlx.
+# Manifest lives in ~/.omlx/uplift/patches.json (text-editable while omlx
+# is down); application happens at interpreter startup via the .pth hook
+# (PAT-3), so every endpoint here is bookkeeping + dry-run, never a live
+# write to the keg. Responses are structured; failures carry no side effects.
+# --------------------------------------------------------------------------
+
+
+def patch_store():
+    """Indirection for tests: returns the active PatchStore."""
+    from . import patches as _patches
+
+    return _patches.PatchStore()
+
+
+def _patch_tree_root() -> str:
+    from . import patches as _patches
+
+    root = _patches._omlx_root()
+    if not root:
+        raise HTTPException(status_code=503,
+                            detail="omlx package tree not found")
+    return os.path.dirname(root)  # safe_join roots at the site-packages level
+
+
+@api_router.get("/patches")
+async def patches_view(is_admin: bool = Depends(require_admin)):
+    from . import patchsource, patches as _patches
+
+    store = patch_store()
+    keg = _patches.keg_id()
+    return patchsource.view(store, _patch_tree_root(), keg)
+
+
+class PatchAddRequest(BaseModel):
+    id: str
+    kind: str                      # github_pr | url | upload
+    repo: Optional[str] = None
+    pr: Optional[int] = None
+    url: Optional[str] = None
+    data: Optional[str] = None     # upload: the diff text
+    insecure_tls: bool = False
+    order: int = 100
+
+
+@api_router.post("/patches/add")
+async def patches_add(req: PatchAddRequest, is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    source = {"kind": req.kind, "repo": req.repo, "pr": req.pr,
+              "url": req.url, "insecure_tls": req.insecure_tls}
+    if req.kind == "upload":
+        if req.data is None:
+            raise HTTPException(status_code=400, detail="upload needs 'data'")
+        source["data"] = req.data.encode("utf-8")
+    res = patchsource.add_patch(patch_store(), req.id, source,
+                                _patch_tree_root(), order=req.order)
+    if not res.get("ok") and res.get("stage") in ("fetch", "source"):
+        raise HTTPException(status_code=422, detail=res.get("reason"))
+    return res
+
+
+@api_router.post("/patches/check")
+async def patches_check(is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    return patchsource.check_all(patch_store(), _patch_tree_root())
+
+
+class PatchIdRequest(BaseModel):
+    id: str
+
+
+class PatchVersionRequest(BaseModel):
+    id: str
+    v: Optional[int] = None
+
+
+@api_router.post("/patches/enable")
+async def patches_enable(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    res = patchsource.set_enabled(patch_store(), req.id, True)
+    if not res.get("ok"):
+        raise HTTPException(status_code=422, detail=res.get("reason"))
+    return res
+
+
+@api_router.post("/patches/disable")
+async def patches_disable(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    res = patchsource.set_enabled(patch_store(), req.id, False)
+    if not res.get("ok"):
+        raise HTTPException(status_code=422, detail=res.get("reason"))
+    return res
+
+
+@api_router.post("/patches/promote")
+async def patches_promote(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    res = patchsource.promote(patch_store(), req.id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=422, detail=res.get("reason"))
+    return res
+
+
+@api_router.post("/patches/rollback")
+async def patches_rollback(req: PatchVersionRequest,
+                           is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    res = patchsource.rollback(patch_store(), req.id, to_v=req.v)
+    if not res.get("ok"):
+        raise HTTPException(status_code=422, detail=res.get("reason"))
+    return res
+
+
+@api_router.post("/patches/remove")
+async def patches_remove(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    res = patchsource.remove_patch(patch_store(), req.id, _patch_tree_root())
+    if not res.get("ok"):
+        raise HTTPException(status_code=404, detail=res.get("reason"))
+    return res
+
+
+@api_router.post("/patches/test")
+async def patches_test(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    res = patchsource.test_dry_run(patch_store(), req.id, _patch_tree_root())
+    if not res.get("ok") and not res.get("files"):
+        raise HTTPException(status_code=422, detail=res.get("reason"))
+    return res
+
+
+@api_router.get("/patches/diff/{patch_id}/{version}")
+async def patches_diff(patch_id: str, version: int,
+                       is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    data = patchsource.get_diff(patch_store(), patch_id, version)
+    if data is None:
+        raise HTTPException(status_code=404, detail="patch version not found")
+    return Response(content=data.decode("utf-8", "replace"),
+                    media_type="text/plain; charset=utf-8")
+
+
+class PatchConfigRequest(BaseModel):
+    auto_update_check: Optional[bool] = None
+
+
+@api_router.post("/patches/config")
+async def patches_config(req: PatchConfigRequest,
+                         is_admin: bool = Depends(require_admin)):
+    from . import patchsource
+
+    return patchsource.set_config(patch_store(), req.auto_update_check)

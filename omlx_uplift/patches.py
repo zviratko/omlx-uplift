@@ -40,7 +40,8 @@ WARNING_STATES = frozenset({"needs_review", "failed"})
 
 # allowed (from -> to) transitions; enforced by set_state()
 TRANSITIONS: dict[str, frozenset[str]] = {
-    "pending": frozenset({"applied", "needs_review", "disabled", "obsolete", "failed"}),
+    "pending": frozenset({"applied", "needs_review", "disabled", "obsolete",
+                          "failed", "update_available"}),
     "applied": frozenset({"update_available", "disabled", "needs_review",
                           "obsolete", "failed", "pending"}),
     "update_available": frozenset({"applied", "pending", "disabled",
