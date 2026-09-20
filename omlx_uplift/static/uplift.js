@@ -2053,6 +2053,7 @@ async function pollRequests() {
 
 /* ---------------- model manager (Models tab) ---------------- */
 let seModel = null, seValues = {};   // seValues = live form state (modelspec shape)
+let seWantProfile = null;            // openEditor(model, name): land on this profile's tab
 let GRAMMAR_PARSERS = null;          // R10-7: cached /admin/api/grammar/parsers payload
 async function loadGrammarParsers() {
     if (GRAMMAR_PARSERS) return;
@@ -3018,9 +3019,10 @@ function closeEditor() {
     const fb = $('model-editor-fallback');
     if (fb) { fb.hidden = true; fb.querySelector('.row-editor')?.remove(); }
 }
-async function openEditor(model) {
+async function openEditor(model, profileName) {
     closeEditor();
     seModel = model;
+    seWantProfile = profileName || null;   // alias/profile EDIT lands on that tab
     await loadGrammarParsers().catch(() => {});   // R10-7: fill the reasoning-parser list (classic does the same)
     let row = [...document.querySelectorAll('#model-admin .urow:not(.head)')]
         .find(r => r.dataset.mid === model);
@@ -3048,7 +3050,12 @@ async function openEditor(model) {
     // popup modal, not an inline accordion: stable size for long forms
     const panel = editorNode();
     renderEditorFields(panel.querySelector('#se-fields'));
-    seLoadProfiles(model, panel.querySelector('.se-profs')).then(() => seRenderTabs(panel));
+    seLoadProfiles(model, panel.querySelector('.se-profs')).then(() => {
+        seRenderTabs(panel);
+        // alias/profile EDIT button: land directly on that profile's tab
+        if (seWantProfile) { const w = seWantProfile; seWantProfile = null;
+                             seOpenProfileTab(panel, w); }
+    });
     panel._reRender = () => {
         renderEditorFields(panel.querySelector('#se-fields'));
         seRenderTabs(panel);
@@ -3308,6 +3315,32 @@ function seNewProfile(panel) {
     const inp = panel.querySelector('.se-newname');
     if (inp) { inp.focus(); inp.select(); }
 }
+function seOpenProfileTab(panel, name) {
+    // Open (or reuse) a working tab for an existing stored profile so the
+    // alias-line EDIT button lands directly on the thing it edits. Saving
+    // such a tab PUTs to /profiles/<name> (profileId set), never POSTs a new.
+    let t = seTabs.find(z => z.profileId === name || z.name === name);
+    if (!t) {
+        const p = (window.__seProfiles || []).find(x => x.name === name);
+        if (!p) { toast('profile "' + name + '" not found'); return; }
+        seCaptureTab();
+        const ov = JSON.parse(JSON.stringify(p.settings || {}));
+        t = seInitSnap({ id: 'prof' + Date.now(), name: p.name,
+            display_name: p.display_name || p.name,
+            expose_as_model: !!p.expose_as_model, api_name: p.api_name || '',
+            profileId: p.name, overrides: ov,
+            workVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
+            origVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
+            dirty: new Set(), _origExpose: !!p.expose_as_model, _origApi: p.api_name || '' });
+        seTabs.push(t);
+    }
+    seCaptureTab();
+    seActiveTab = t.id;
+    seRestoreTab(t);
+    renderEditorFields(document.getElementById('se-fields'));
+    seRenderTabs(panel); seUpdateSaveBtn();
+}
+
 function seOpenTemplateTab(panel, tpl) {
     seCaptureTab();
     const t = { id: 'tpl' + Date.now(), name: tpl.name, display_name: tpl.display_name || tpl.name,
@@ -3777,14 +3810,16 @@ async function renderModelAdmin(force) {
         const size = cell(m.loaded ? (m.actual_size_formatted || C.fmtBytes(m.actual_size || m.estimated_size))
                         : C.fmtBytes(m.estimated_size));
         size.className = 'usize';
-        // right group: settings chips + actions, separate shaded box
+        // right group: one shaded box, exactly 2 lines tall (user round
+        // 2026-09-20): deletes leftmost, effective-setting chips in the
+        // middle (folded when they genuinely don't fit), HIDE+EDIT rightmost
         const box = document.createElement('span');
-        box.className = 'settings-box';
+        box.className = 'settings-box hrow';
         const s = m.settings || {};
-        // R10-13 rev (user round 2026-09-20): show only settings that are
-        // EFFECTIVE — a set value, or a toggle ON. Inherited/OFF rows were
-        // noise that pushed the box into overflow. What exceeds the visible
-        // count folds behind a clickable "and X more" that expands down.
+        // Show only settings that are EFFECTIVE — a set value, or a toggle ON.
+        // Inherited/OFF rows were noise. Chips that exceed the box fold behind
+        // a measured "and X more" pill (never shown when everything fits).
+        const chips = foldHost(2);
         const bits = [];
         const val = (label, v) => { if (v === null || v === undefined) return;
             bits.push({ txt: label + ' ' + v, cls: '' }); };
@@ -3799,13 +3834,12 @@ async function renderModelAdmin(force) {
         tog('SPECPREFILL', !!s.specprefill_enabled);
         tog('DFLASH', !!s.dflash_enabled);
         if (m.is_hidden) bits.push({ txt: 'HIDDEN', cls: '' });
-        foldChips(box, bits, 4);
-        const actions = document.createElement('span');
-        actions.className = 'rowacts stacked';
+        appendChips(chips, bits);
         const btn = (label, fn, title, noRerender) => {
             const b = document.createElement('button');
             b.className = 'se-btn act';
             if (label.indexOf('DELETE') === 0) b.classList.add('danger');
+            if (label === 'HIDE' || label === 'SHOW' || label === 'EDIT') b.classList.add('edit');
             b.textContent = label; b.title = title || label;
             b.onclick = async () => {
                 b.disabled = true;    // no double-toggle while the write is in flight
@@ -3816,26 +3850,24 @@ async function renderModelAdmin(force) {
             };
             return b;
         };
-        // left column: routine actions, left-aligned; right column: the two
-        // destructive deletes, each on its own line, flush right
-        const aLeft = document.createElement('span'); aLeft.className = 'act-col';
-        const aRight = document.createElement('span'); aRight.className = 'act-col del';
-        aLeft.append(btn(m.is_hidden ? 'SHOW' : 'HIDE',
-            () => flagWrite(m.id, { is_hidden: !m.is_hidden },
-                () => putModelSettings(m.id, { is_hidden: !m.is_hidden })),
-            m.is_hidden ? 'Unhide' : 'Hide from pickers'));
-        aLeft.append(btn('EDIT', () => openEditor(m.id), 'Edit settings', true));
-        aRight.append(btn('DELETE SETTINGS', () => confirmDialog('Delete settings',
+        // deletes: leftmost column, one per line; HIDE/EDIT: rightmost column
+        const aDel = document.createElement('span'); aDel.className = 'act-col';
+        const aEdit = document.createElement('span'); aEdit.className = 'act-col right';
+        aDel.append(btn('DELETE SETTINGS', () => confirmDialog('Delete settings',
             `Remove the stored configuration of ${m.id}? The model stays on disk; its `
             + 'settings return to server defaults when saved again. This cannot be undone.',
             () => deleteStoredSettings(m.id), `Settings deleted: ${m.id}`),
             'Delete stored settings (model stays on disk)', true));
-        aRight.append(btn('DELETE MODEL', () => confirmDialog('Delete model',
+        aDel.append(btn('DELETE MODEL', () => confirmDialog('Delete model',
             `Delete ${m.id} from disk? A loaded instance is unloaded first, then the `
             + 'model directory and its stored settings are removed. This cannot be undone.',
             () => deleteModelFromDisk(m.id), `Deleted ${m.id}`), 'Delete model from disk'));
-        actions.append(aLeft, aRight);
-        box.append(actions);
+        aEdit.append(btn(m.is_hidden ? 'SHOW' : 'HIDE',
+            () => flagWrite(m.id, { is_hidden: !m.is_hidden },
+                () => putModelSettings(m.id, { is_hidden: !m.is_hidden })),
+            m.is_hidden ? 'Unhide' : 'Hide from pickers'));
+        aEdit.append(btn('EDIT', () => openEditor(m.id), 'Edit settings', true));
+        box.append(aDel, chips, aEdit);
         row.append(name, typeC, state, size, box);
         mbox.append(row);
         const tree = aliasTree(m);       // aliases hang off the trunk below
@@ -4208,41 +4240,98 @@ function aliasDiffChips(prof, base) {
     }
     return out;
 }
-function foldChips(host, bits, visible) {
-    // Chips beyond `visible` collapse behind a clickable "and X more" pill.
-    // Expanding appends the rest into the SAME row (flex-wrap), so growth is
-    // vertical — a row never runs off to the side.
-    for (const b of bits.slice(0, visible)) {
+// ---------------------------------------------------------------------------
+// Chip folding: chips live in a .chip-host box; when the host would wrap
+// past the allowed number of rows, the tail is hidden and an "and X more"
+// pill appears. The decision is MEASURED after layout (user 2026-09-20: a
+// fixed cut-off showed the pill even when everything fit). Expanding unhides
+// in place; the host grows vertically, never sideways. Re-measured on child
+// changes (async profile lines), resize and tab show.
+// ---------------------------------------------------------------------------
+
+const foldSet = new Set();
+let foldPending = null;
+
+function scheduleFold(host) {
+    if (!foldPending) {
+        foldPending = new Set();
+        requestAnimationFrame(() => {
+            const hosts = foldPending; foldPending = null;
+            for (const h of hosts) runFold(h);
+        });
+    }
+    foldPending.add(host);
+}
+function foldAll() {
+    for (const h of [...foldSet]) {
+        if (!h.isConnected) { foldSet.delete(h); continue; }
+        scheduleFold(h);
+    }
+}
+window.addEventListener('resize', () => foldAll());
+
+function foldHost(rows) {
+    const host = document.createElement('span');
+    host.className = 'chip-host';
+    host.dataset.foldRows = String(rows);
+    const more = document.createElement('button');
+    more.type = 'button'; more.className = 'schip more'; more.hidden = true;
+    host.append(more);
+    if (!foldSet.has(host)) {
+        foldSet.add(host);
+        new MutationObserver(() => scheduleFold(host))
+            .observe(host, { childList: true });
+    }
+    more.onclick = (e) => {
+        e.stopPropagation();
+        host.dataset.open = host.dataset.open === '1' ? '0' : '1';
+        scheduleFold(host);
+    };
+    return host;
+}
+
+function appendChips(host, bits) {
+    const more = host.querySelector('.schip.more');
+    for (const b of bits) {
         const chip = document.createElement('span');
         chip.className = 'schip ' + (b.cls || ''); chip.textContent = b.txt;
-        host.append(chip);
+        host.insertBefore(chip, more);
     }
-    if (bits.length <= visible) return;
-    const more = document.createElement('button');
-    more.type = 'button'; more.className = 'schip more';
-    const lbl = C.tf('uplift.ui.and_n_more', 'and {n} more',
-        { n: bits.length - visible });
-    more.textContent = lbl;
+    scheduleFold(host);
+}
+
+function runFold(host) {
+    if (!host.isConnected) { foldSet.delete(host); return; }
+    const rows = +(host.dataset.foldRows || 2);
+    const more = host.querySelector('.schip.more');
+    const chips = [...host.querySelectorAll('.schip:not(.more)')];
+    if (!chips.length) { more.hidden = true; return; }
+    if (host.dataset.open === '1') {
+        for (const c of chips) c.hidden = false;
+        more.hidden = false;
+        more.textContent = C.tf('uplift.ui.show_fewer', 'show fewer');
+        more.title = C.tf('uplift.ui.collapse_settings', 'Collapse back');
+        return;
+    }
+    for (const c of chips) c.hidden = false;
+    more.hidden = true;
+    const h1 = chips[0].offsetHeight;
+    if (!h1) return;                     // not laid out yet (hidden tab):
+                                        // refold fires on show/resize
+    const gap = parseFloat(getComputedStyle(host).rowGap) || 0;
+    const maxH = rows * h1 + (rows - 1) * gap + 2;
+    if (host.scrollHeight <= maxH) {     // genuinely fits: no pill
+        more.hidden = true;
+        return;
+    }
+    // doesn't fit: the pill joins the measured flow, then hide the tail
+    more.hidden = false;
+    let n = 0;
+    while (host.scrollHeight > maxH && n < chips.length - 1) {
+        chips[chips.length - 1 - n++].hidden = true;
+    }
+    more.textContent = C.tf('uplift.ui.and_n_more', 'and {n} more', { n });
     more.title = C.tf('uplift.ui.expand_all_settings', 'Expand to show all settings');
-    let open = false;
-    more.onclick = () => {
-        open = !open;
-        if (open) {
-            for (const b of bits.slice(visible)) {
-                const chip = document.createElement('span');
-                chip.className = 'schip ' + (b.cls || '');
-                chip.textContent = b.txt; chip.dataset.folded = '1';
-                host.insertBefore(chip, more);
-            }
-            more.textContent = C.tf('uplift.ui.show_fewer', 'show fewer');
-            more.title = C.tf('uplift.ui.collapse_settings', 'Collapse back');
-        } else {
-            host.querySelectorAll('[data-folded]').forEach(n => n.remove());
-            more.textContent = lbl;
-            more.title = C.tf('uplift.ui.expand_all_settings', 'Expand to show all settings');
-        }
-    };
-    host.append(more);
 }
 
 function copyBtn(textToCopy, title) {
@@ -4260,18 +4349,32 @@ function copyBtn(textToCopy, title) {
    hanging below the main row inside the same model box. */
 function aliasTree(m) {
     const lines = [];
-    const line = (alias, chips, tip) => {
+    const line = (alias, chips, tip, profileName) => {
         const l = document.createElement('div'); l.className = 'alias-line';
+        // left block: alias name + copy, EDIT button BELOW the name (user
+        // round 2026-09-20 mock-up). Chips never sit under the name: they go
+        // into a right-aligned box that keeps 2 rows until "and X more".
+        const lab = document.createElement('span'); lab.className = 'alias-lab';
         const mk = cell(alias); mk.className = 'alias-name';
         mk.title = tip || ('Serves this model on the API under the name "' + alias + '"');
-        l.append(mk, copyBtn(alias, 'Copy alias "' + alias + '"'));
-        foldChips(l, chips.map(t => ({ txt: t, cls: '' })), 6);
+        const edit = document.createElement('button');
+        edit.type = 'button'; edit.className = 'se-btn act edit alias-edit';
+        edit.textContent = 'EDIT';
+        edit.title = profileName ? C.tf('uplift.ui.edit_profile', 'Edit this profile')
+                                 : 'Edit settings';
+        edit.onclick = (e) => { e.stopPropagation(); openEditor(m.id, profileName); };
+        lab.append(mk, copyBtn(alias, 'Copy alias "' + alias + '"'), edit);
+        const host = foldHost(2);
+        host.classList.add('alias-chips');
+        appendChips(host, chips.map(t => ({ txt: t, cls: '' })));
+        l.append(lab, host);
         lines.push(l);
     };
     if (m.settings && m.settings.model_alias) line(m.settings.model_alias, []);
     for (const p of (m.exposed_profiles || []))
         line(p.api_name || p.name, aliasDiffChips(p.settings, m.settings),
-             'Serves this model on the API under the name "' + (p.api_name || p.name) + '"');
+             'Serves this model on the API under the name "' + (p.api_name || p.name) + '"',
+             p.name);
     // stored (not-yet-exposed) profiles: dim chips so they are not invisible.
     // Cached briefly; invalidated whenever the editor writes a profile.
     const profHost = document.createElement('div');
@@ -4281,12 +4384,21 @@ function aliasTree(m) {
         for (const p of profs) {
             if ((m.exposed_profiles || []).some(e => e.name === p.name)) continue;
             const l = document.createElement('div'); l.className = 'alias-line dim-line';
+            const lab = document.createElement('span'); lab.className = 'alias-lab';
             const tag = document.createElement('span');
             tag.className = 'schip'; tag.textContent = 'PROFILE';
             const mk = cell(p.display_name || p.name); mk.className = 'alias-name dim';
             mk.title = 'Stored profile — expose it as an API model from the editor to serve requests under its name';
-            l.append(tag, mk);
-            foldChips(l, aliasDiffChips(p.settings, m.settings).map(t => ({ txt: t, cls: '' })), 6);
+            const edit = document.createElement('button');
+            edit.type = 'button'; edit.className = 'se-btn act edit alias-edit';
+            edit.textContent = 'EDIT';
+            edit.title = C.tf('uplift.ui.edit_profile', 'Edit this profile');
+            edit.onclick = (e) => { e.stopPropagation(); openEditor(m.id, p.name); };
+            lab.append(tag, mk, edit);
+            const host = foldHost(2);
+            host.classList.add('alias-chips');
+            appendChips(host, aliasDiffChips(p.settings, m.settings).map(t => ({ txt: t, cls: '' })));
+            l.append(lab, host);
             profHost.append(l);
         }
         if (!profHost.children.length) profHost.remove();

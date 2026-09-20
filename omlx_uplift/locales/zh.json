@@ -418,5 +418,6 @@
  "uplift.ui.and_n_more": "等 {n} 项",
  "uplift.ui.expand_all_settings": "展开全部设置",
  "uplift.ui.show_fewer": "收起显示",
- "uplift.ui.collapse_settings": "折叠"
+ "uplift.ui.collapse_settings": "折叠",
+ "uplift.ui.edit_profile": "Edit this profile"
 }

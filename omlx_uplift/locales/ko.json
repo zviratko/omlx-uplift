@@ -433,5 +433,6 @@
  "uplift.ui.and_n_more": "외 {n}개",
  "uplift.ui.expand_all_settings": "모든 설정 보기",
  "uplift.ui.show_fewer": "적게 보기",
- "uplift.ui.collapse_settings": "접기"
+ "uplift.ui.collapse_settings": "접기",
+ "uplift.ui.edit_profile": "Edit this profile"
 }

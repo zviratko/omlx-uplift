@@ -422,5 +422,6 @@
  "uplift.ui.and_n_more": "e mais {n}",
  "uplift.ui.expand_all_settings": "Mostrar todas as configurações",
  "uplift.ui.show_fewer": "mostrar menos",
- "uplift.ui.collapse_settings": "Recolher"
+ "uplift.ui.collapse_settings": "Recolher",
+ "uplift.ui.edit_profile": "Edit this profile"
 }

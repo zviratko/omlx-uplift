@@ -418,5 +418,6 @@
  "uplift.ui.and_n_more": "и ещё {n}",
  "uplift.ui.expand_all_settings": "Показать все настройки",
  "uplift.ui.show_fewer": "показать меньше",
- "uplift.ui.collapse_settings": "Свернуть"
+ "uplift.ui.collapse_settings": "Свернуть",
+ "uplift.ui.edit_profile": "Edit this profile"
 }

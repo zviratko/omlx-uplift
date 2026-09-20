@@ -447,5 +447,6 @@
  "uplift.ui.and_n_more": "他 {n} 件",
  "uplift.ui.expand_all_settings": "すべての設定を表示",
  "uplift.ui.show_fewer": "たたま表示",
- "uplift.ui.collapse_settings": "折りたたむ"
+ "uplift.ui.collapse_settings": "折りたたむ",
+ "uplift.ui.edit_profile": "このプロファイルを編集"
 }

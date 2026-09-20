@@ -955,20 +955,29 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .admin-table .lampstack { display: flex; flex-direction: column; gap: 3px;
     flex: 0 0 auto; margin-right: auto; }
 .admin-table .lampstack.inline { flex-direction: row; gap: 4px; margin-right: 0; }
-.admin-table .favlamp { width: auto; padding: 0 7px; }
-/* --- model row right box (user round 2026-09-20): effective-only chips
-   fold behind "and X more"; actions split into a left stack (HIDE/EDIT)
-   and a right stack with each DELETE on its own line, flush right. ---- */
-.admin-table .rowacts.stacked { display: flex; width: 100%; gap: 8px;
-    justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+/* --- model row right box (user round 2026-09-20): one shaded box, 2 lines:
+   deletes leftmost | effective chips (measured fold) | HIDE/EDIT rightmost. ---- */
+.admin-table .settings-box.hrow { display: flex; align-items: center; gap: 10px;
+    width: 100%; min-width: 0; }
 .admin-table .act-col { display: flex; flex-direction: column; gap: 4px;
-    align-items: flex-start; }
-.admin-table .act-col.del { align-items: flex-end; }
+    align-items: flex-start; flex: 0 0 auto; }
+.admin-table .act-col.right { align-items: flex-end; }
+.admin-table .chip-host { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 80px;
+    min-width: 0; align-content: center; }
 .admin-table .schip.more { cursor: pointer; background: none;
     padding: 3px 5px; border-style: dashed; color: var(--ink);
     font: 400 9px/1 var(--mono); letter-spacing: 0.06em; }
 .admin-table .schip.more:hover { border-color: var(--ink); }
-.admin-table .alias-line { flex-wrap: wrap; }
+/* HIDE/SHOW/EDIT = amber instrument accent (per-theme token, not a literal) */
+.se-btn.act.edit { border-color: var(--accent); color: var(--accent); }
+.se-btn.act.edit:hover { background: var(--accent); color: var(--bg); }
+[data-theme="light"] .se-btn.act.edit:hover { color: #fff; }
+/* alias line: fixed left label block (name + copy, EDIT under it); chips go
+   into a right-aligned box beside it — never below the alias name */
+.admin-table .alias-lab { display: flex; flex-wrap: wrap; align-items: center;
+    gap: 4px; flex: 0 1 auto; max-width: 42%; min-width: 0; }
+.admin-table .alias-lab .alias-edit { flex: 1 0 100%; align-self: flex-start; }
+.admin-table .chip-host.alias-chips { flex: 1 1 0; justify-content: flex-end; }
 /* ---- LOADED/IDLE rocker switch + API copy button (state column) --------- */
 .admin-table .statewrap { display: inline-flex; align-items: center; gap: 6px;
     justify-content: flex-end; }
