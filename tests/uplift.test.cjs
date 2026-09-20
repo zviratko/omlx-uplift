@@ -465,6 +465,27 @@ test('F-035: _onTrayDrop calls renderTray after placing the card', () => {
     assert.ok(tray > place, 'renderTray runs AFTER the card is placed');
 });
 
+/* TRAY-1 drift test: the tray pill is a fixed gs-w=12 stub; re-adding a
+   removed card must restore the width it had on the board, not the pill's.
+   removeCard must stash gridstackNode.w and _onTrayDrop must prefer it. */
+test('TRAY-1: tray re-add restores the removed card width, not pill gs-w', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const rem = src.match(/function removeCard\(id\) \{[\s\S]*?\n\}/);
+    assert.ok(rem, 'removeCard function found');
+    assert.ok(/_trayGeo\.set\(id, \{ w: el\.gridstackNode\.w \}\)/.test(rem[0]),
+        'removeCard stashes the removed node width');
+    const drop = src.match(/function _onTrayDrop\(node\) \{[\s\S]*?\n\}/);
+    assert.ok(drop, '_onTrayDrop function found');
+    assert.ok(/_trayGeo\.get\(id\)/.test(drop[0]), '_onTrayDrop reads the stashed width');
+    assert.ok(/w: geo \? geo\.w : node\.w/.test(drop[0]),
+        'stashed width wins over the pill clone width');
+    const place = drop[0].indexOf('_placeCard(');
+    const stash = drop[0].indexOf('_trayGeo.delete(id)');
+    assert.ok(stash >= 0 && stash < place, 'stash is consumed once, before placing');
+});
+
 /* F-035b drift test: tray pills are created AFTER grid init, so the one-time
    setupDragIn at boot can never bind them; renderTray must re-run it. */
 test('F-035b: renderTray re-binds setupDragIn for late-created pills', () => {

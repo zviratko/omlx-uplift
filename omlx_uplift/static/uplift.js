@@ -639,13 +639,20 @@ function collectUpliftLayout() {
         .map(n => ({ id: n.el.dataset.block, x: n.x, y: n.y, w: n.w, h: n.h }));
     return UPL.normalizeLayout({ version: 1, width: dashDraft?.width ?? upLayout.width, blocks });
 }
+// TRAY-1: geometry of cards removed this edit session, keyed by block id.
+// The tray pill is a fixed gs-w=12 stub; re-adding must restore the width
+// the card actually had when it left the board (a removed full-width card
+// came back as a half-width one otherwise). x/y still come from the drop.
+const _trayGeo = new Map();
 function _onTrayDrop(node) {
     if (!dashGrid || !UPL || !node?.el) return;
     const id = node.el.dataset.block;
-    const pos = { x: node.x, y: node.y, w: node.w };
     // The dropped element is GridStack's clone of the tray pill.
     dashGrid.removeWidget(node.el, true, false);
     if (!UPL.BLOCK_IDS.includes(id) || !dashEditing) return;
+    const geo = _trayGeo.get(id);
+    _trayGeo.delete(id);
+    const pos = { x: node.x, y: node.y, w: geo ? geo.w : node.w };
     _placeCard(id, pos);
     renderTray();   // F-035: the pill must leave the tray once its block is back
     refitUpliftBlocks();
@@ -653,6 +660,7 @@ function _onTrayDrop(node) {
 function removeCard(id) {
     const el = _blockEl(id);
     if (!dashGrid || !dashEditing || !el?.gridstackNode) return;
+    _trayGeo.set(id, { w: el.gridstackNode.w });
     _parkCard(el);
     dashPlacedIds = dashPlacedIds.filter(p => p !== id);
     // Freeform: no compaction — the gap the card leaves is the user's gap.
