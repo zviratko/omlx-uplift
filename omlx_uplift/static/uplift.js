@@ -3027,8 +3027,9 @@ function closeEditor() {
     const fb = $('model-editor-fallback');
     if (fb) { fb.hidden = true; fb.querySelector('.row-editor')?.remove(); }
 }
-async function openEditor(model, profileName) {
+async function openEditor(model, profileName, templateName) {
     closeEditor();
+    if (templateName) { return openTemplateEditor(templateName); }
     seModel = model;
     seWantProfile = profileName || null;   // alias/profile EDIT lands on that tab
     await loadGrammarParsers().catch(() => {});   // R10-7: fill the reasoning-parser list (classic does the same)
@@ -3079,6 +3080,71 @@ async function openEditor(model, profileName) {
     overlay.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeEditor();
     });
+}
+
+/* ---- global-template editor (round 5): a template is a universal-settings
+   bundle; the model editor's fields are built from buildState(model, stored),
+   so the trick is to build state from the TEMPLATE with a neutral pseudo-model
+   and PUT back only the universal keys (same filter tSnap uses) ------------ */
+async function openTemplateEditor(name) {
+    let tpl = null;
+    try {
+        const d = await fetchJson(`${API}/admin/api/profile-templates`);
+        tpl = (d.templates || []).find(t => t.name === name) || null;
+    } catch (_) {}
+    if (!tpl) { toast('template "' + name + '" not found'); return; }
+    seModel = null;
+    seFormModel = { id: name, _template: true };
+    seValues = window.UpliftModelSpec.buildState(seFormModel, tpl.settings || {});
+    seOrig = JSON.parse(JSON.stringify(seValues));
+    seBaseVals = JSON.parse(JSON.stringify(seValues));
+    seTabs = [{ id: 'base', dirty: new Set(), origVals: JSON.parse(JSON.stringify(seOrig)) }];
+    seActiveTab = 'base';
+    const panel = editorNode();
+    panel.querySelector('.editor-head').textContent =
+        'GLOBAL TEMPLATE  ' + (tpl.display_name || tpl.name);
+    const pr = panel.querySelector('.se-profs'); if (pr) pr.hidden = true;
+    const tabs = panel.querySelector('.se-tabs'); if (tabs) tabs.hidden = true;
+    renderEditorFields(panel.querySelector('#se-fields'));
+    seRenderTabs(panel);
+    const save = panel.querySelector('#se-save');
+    if (save) save.onclick = () => saveTemplateEditor(tpl, panel);
+    seUpdateSaveBtn();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay editor-overlay';
+    overlay.append(panel);
+    document.body.append(overlay);
+    panel.tabIndex = -1; panel.focus();
+    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditor(); });
+}
+async function saveTemplateEditor(tpl, panel) {
+    const msg = panel.querySelector('#se-msg');
+    const errors = window.UpliftModelSpec.validate(seValues);
+    if (errors.length) { msg.textContent = errors[0]; toast(errors[0]); return; }
+    msg.textContent = 'saving…';
+    try {
+        const full = window.UpliftModelSpec.buildPayload(seValues, seFormModel);
+        let uni = [];
+        try { uni = (await fetchJson(`${API}/admin/api/profile-fields`)).universal || []; } catch (_) {}
+        const allowed = new Set(uni);
+        const settings = {};
+        for (const [k, v] of Object.entries(full))
+            if (allowed.has(k) && v !== null && v !== undefined) settings[k] = v;
+        const r = await fetch(`${API}/admin/api/profile-templates/${encodeURIComponent(tpl.name)}`,
+            { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ settings }) });
+        if (!r.ok) { const d = await r.json().catch(() => ({}));
+            throw new Error(d.detail || String(r.status)); }
+        msg.textContent = 'saved ✓';
+        toast('Template saved: ' + (tpl.display_name || tpl.name));
+        seOrig = JSON.parse(JSON.stringify(seValues));
+        seUpdateSaveBtn();
+        renderTemplatesBox();
+        setTimeout(closeEditor, 1000);
+    } catch (err) {
+        msg.textContent = 'error: ' + err.message;
+        toast('Template save failed: ' + err.message);
+    }
 }
 
 function seRenderTabs(panel) {
@@ -3764,11 +3830,11 @@ async function renderModelAdmin(force) {
     // stored/missing never follow the filters; shown counts every visible row
     $('models-admin-sub').textContent = `${loadedN}/${models.length} loaded \u00b7 `
         + `${idx.stored} stored \u00b7 ${shown.length + missing.length} shown`;
-    // the missing counter lives UNDER the Prune button — it is that button's
-    // subject, not a table stat (round 4)
-    const orphanProf = (idx.profiles || []).filter(p => !knownIds.has(p.base)).length;
+    // the counter lives UNDER the Prune button — it is that button's
+    // subject, not a table stat (round 4); round 5: honest wording, it
+    // counts stored records whose model is not on disk
     $('ma-missing-count').textContent = C.tf('uplift.ui.n_missing_records',
-        '{n} missing record(s)', { n: missingAll.length + orphanProf });
+        '{n} models not present', { n: missingAll.length });
     const memUsed = stats ? stats.memUsed : null;
     $('ma-mem').textContent = memUsed !== null
         ? `memory ${C.fmtBytes(memUsed)} / ${C.fmtBytes(stats.memMax)}` : '';
@@ -3814,8 +3880,9 @@ async function renderModelAdmin(force) {
         row.dataset.mid = m.id;
         const name = document.createElement('span');
         name.className = 'uname'; name.title = m.model_path || m.id;
-        // line 1: lamps + ALIAS + type + state + size. line 2: the model id,
-        // free to wrap (long names flow instead of ellipsising) (round 4).
+        // line 1: lamps left, then size + state pushed to the cell's right
+        // edge — which is the card's middle line since the action box now
+        // takes the right 50% (round 5). line 2: [type badge] + model id.
         const head1 = document.createElement('span'); head1.className = 'nrow1';
         const nmain = document.createElement('span'); nmain.className = 'nmain';
         const uid = cell(m.id); uid.className = 'uid';
@@ -3855,8 +3922,16 @@ async function renderModelAdmin(force) {
             al.classList.add('alias-lamp');
             lamps.append(al);
         }
+        // type badge: colour-coded, fixed-width like the lamps above, sits
+        // left of the model name on line 2 (round 5). Unknown types stay
+        // neutral — the badge never invents a category.
         const typeC = document.createElement('span');
-        typeC.className = 'umeta dim'; typeC.textContent = m.model_type || '\u2014';
+        const tv = (m.model_type || '').toLowerCase();
+        const tcls = /vlm|vision|whisper/.test(tv) ? 't-vlm'
+            : /rerank|embed|bge/.test(tv) ? 't-embed'
+            : tv ? 't-llm' : 't-none';
+        typeC.className = 'typebadge ' + tcls;
+        typeC.textContent = (m.model_type || '\u2014').toUpperCase();
         // State: LOADED models keep the LOADED/IDLE rocker (IDLE half =
         // unload). Present-but-unloaded show a single PRESENT pill that
         // loads on click (round 4: "IDLE" for an unloaded model was a lie).
@@ -3890,8 +3965,21 @@ async function renderModelAdmin(force) {
         size.textContent = m.loaded ? (m.actual_size_formatted || C.fmtBytes(m.actual_size || m.estimated_size))
                         : C.fmtBytes(m.estimated_size);
         size.className = 'usize';
-        head1.append(lamps, typeC, state, size);
+        // lamps left; size + state pushed to the cell's right edge (with the
+        // action box at 50% that reads as "centre of the card")
+        const gap5 = document.createElement('span'); gap5.className = 'nrow-gap';
+        head1.append(lamps, gap5, size, state);
+        // badge width tracks the widest lamp above it (localised labels
+        // change lamp width; the badge must always fit its own text).
+        // Measured after the row joins the DOM — offsets need layout.
+        nmain.prepend(typeC);
         name.append(head1, nmain);
+        requestAnimationFrame(() => {
+            let w = 0;
+            for (const lp of lamps.querySelectorAll('.lamp'))
+                w = Math.max(w, lp.getBoundingClientRect().width);
+            if (w) typeC.style.minWidth = w + 'px';
+        });
         // right group: one shaded box, exactly 2 lines tall (user round
         // 2026-09-20): deletes leftmost, effective-setting chips in the
         // middle (folded when they genuinely don't fit), HIDE+EDIT rightmost
@@ -4012,14 +4100,16 @@ async function renderModelAdmin(force) {
                     const l = document.createElement('div');
                     l.className = 'alias-line dim-line';
                     const lab = document.createElement('span'); lab.className = 'alias-lab';
-                    const mk = cell(p.display_name || p.name); mk.className = 'alias-name dim';
+                    const pre = document.createElement('span');
+                    pre.className = 'alias-name dim'; pre.textContent = e.id + ':';
+                    const mk = cell(p.display_name || p.name); mk.className = 'alias-name';
                     const edit = document.createElement('button');
                     edit.type = 'button'; edit.className = 'se-btn act edit alias-edit';
                     edit.textContent = 'EDIT';
                     edit.title = C.tf('uplift.ui.edit_profile', 'Edit this profile');
                     edit.onclick = (ev) => { ev.stopPropagation(); openEditor(e.id, p.name); };
-                    lab.append(mk, copyBtn(e.id + ':' + p.name,
-                        'Copy "' + e.id + ':' + p.name + '"'), edit);
+                    const copyT = e.id + ':' + (p.display_name || p.name);   // friendly, not slug
+                    lab.append(pre, mk, copyBtn(copyT, 'Copy "' + copyT + '"'), labBreak(), edit);
                     l.append(lab, foldHost(2));
                     tree.append(l);
                 }
@@ -4471,6 +4561,9 @@ function runFold(host) {
     more.title = C.tf('uplift.ui.expand_all_settings', 'Expand to show all settings');
 }
 
+function labBreak() {   // forces a line break inside .alias-lab (EDIT goes below)
+    const b = document.createElement('span'); b.style.flex = '1 0 100%'; return b;
+}
 function copyBtn(textToCopy, title) {
     const b = document.createElement('button');
     b.className = 'copybtn'; b.textContent = '\u29c9'; b.title = title;
@@ -4500,10 +4593,18 @@ function aliasTree(m) {
         edit.title = profileName ? C.tf('uplift.ui.edit_profile', 'Edit this profile')
                                  : 'Edit settings';
         edit.onclick = (e) => { e.stopPropagation(); openEditor(m.id, profileName); };
-        // profiles copy as "mainModel:profileName" (round 4); the base alias
-        // is a plain API name — copying it alone is what you serve
-        const copyTarget = profileName ? m.id + ':' + profileName : alias;
-        lab.append(mk, copyBtn(copyTarget, 'Copy "' + copyTarget + '"'), edit);
+        // profiles copy as "mainModel:profileName" using the FRIENDLY name
+        // (what you actually serve), not the stored slug (round 5); profiles
+        // also show "modelName:profileName", model part dim, profile part ink
+        let lab0;
+        if (profileName) {
+            lab0 = document.createElement('span'); lab0.className = 'alias-name dim';
+            lab0.textContent = m.id + ':';
+            mk.textContent = alias;         // friendly name keeps its own span
+        } else lab0 = null;
+        const copyTarget = profileName ? m.id + ':' + alias : alias;
+        if (lab0) lab.append(lab0, mk); else lab.append(mk);
+        lab.append(copyBtn(copyTarget, 'Copy "' + copyTarget + '"'), labBreak(), edit);
         const host = foldHost(2);
         host.classList.add('alias-chips');
         appendChips(host, chips.map(t => ({ txt: t, cls: '' })));
@@ -4526,20 +4627,19 @@ function aliasTree(m) {
             if ((m.exposed_profiles || []).some(e => e.name === p.name)) continue;
             const l = document.createElement('div'); l.className = 'alias-line dim-line';
             const lab = document.createElement('span'); lab.className = 'alias-lab';
-            const tag = document.createElement('span');
-            tag.className = 'schip'; tag.textContent = 'PROFILE';
-            const mk = cell(p.display_name || p.name); mk.className = 'alias-name dim';
+            const pre = document.createElement('span');
+            pre.className = 'alias-name dim'; pre.textContent = m.id + ':';
+            const mk = cell(p.display_name || p.name); mk.className = 'alias-name';
             mk.title = 'Stored profile — expose it as an API model from the editor to serve requests under its name';
             const edit = document.createElement('button');
             edit.type = 'button'; edit.className = 'se-btn act edit alias-edit';
             edit.textContent = 'EDIT';
             edit.title = C.tf('uplift.ui.edit_profile', 'Edit this profile');
             edit.onclick = (e) => { e.stopPropagation(); openEditor(m.id, p.name); };
-            lab.append(tag, mk, edit);
+            const copyT = m.id + ':' + (p.display_name || p.name);   // friendly, not slug
+            lab.append(pre, mk, copyBtn(copyT, 'Copy "' + copyT + '"'), labBreak(), edit);
             const host = foldHost(2);
             host.classList.add('alias-chips');
-            const copyT = m.id + ':' + p.name;
-            lab.insertBefore(copyBtn(copyT, 'Copy "' + copyT + '"'), edit);
             appendChips(host, aliasDiffChips(p.settings, m.settings).map(t => ({ txt: t, cls: '' })));
             l.append(lab, host);
             profHost.append(l);
@@ -4587,6 +4687,10 @@ async function deleteModelFromDisk(model) {
         return body;
     });
 }
+/* Global templates (global_templates.json): slim model-style rows. The old
+   description+date view said nothing useful (round 5) — a template is a
+   settings bundle, so the row gets EDIT (opens the same editor on the
+   template) and DELETE SETTINGS (removes the stored bundle). */
 function renderTemplatesBox() {
     const host = $('ms-templates');
     if (!host) return;
@@ -4594,10 +4698,43 @@ function renderTemplatesBox() {
         .then(d => d.templates || []).catch(() => []).then(templates => {
         host.innerHTML = '';   // empty string + static markup only, no user data
         if (!templates.length) { host.innerHTML = '<div class="empty">No global templates</div>'; return; }
+        window.__seTemplates = templates;
         for (const t of templates) {
-            const row = document.createElement('div'); row.className = 'urow usage';
-            const name = cell(t.display_name || t.name); name.className = 'uname';
-            row.append(name, cell(t.description || ''), cell((t.updated_at || '').slice(0, 10)));
+            const row = document.createElement('div'); row.className = 'urow admin tpl';
+            const name = document.createElement('span'); name.className = 'uname';
+            const head1 = document.createElement('span'); head1.className = 'nrow1';
+            const badge = document.createElement('span');
+            badge.className = 'typebadge t-tpl'; badge.textContent = 'TEMPLATE';
+            const nmain = document.createElement('span'); nmain.className = 'nmain';
+            const uid = cell(t.name); uid.className = 'uid';
+            nmain.append(badge, uid, copyBtn(t.name, 'Copy template name "' + t.name + '"'));
+            const desc = cell(t.description || ''); desc.className = 'dim umeta tpl-desc';
+            head1.append(desc);
+            name.append(nmain, head1);
+            const box = document.createElement('span');
+            box.className = 'settings-box hrow tpl-box';
+            const aDel = document.createElement('span'); aDel.className = 'act-col';
+            const del = document.createElement('button');
+            del.className = 'se-btn act danger'; del.textContent = 'DELETE SETTINGS';
+            del.title = C.tf('uplift.ui.delete_global_template',
+                'Delete this global template (stored settings bundle)');
+            del.onclick = () => confirmDialog('Delete template',
+                `Delete the global template "${t.display_name || t.name}"? Models and profiles already created from it keep their own settings.`,
+                async () => {
+                    const r = await fetch(`${API}/admin/api/profile-templates/${encodeURIComponent(t.name)}`,
+                        { method: 'DELETE' });
+                    if (!r.ok) { const d = await r.json().catch(() => ({}));
+                        throw new Error(d.detail || String(r.status)); }
+                }, `Deleted template: ${t.display_name || t.name}`);
+            aDel.append(del);
+            const aEdit = document.createElement('span'); aEdit.className = 'act-col right';
+            const ed = document.createElement('button');
+            ed.className = 'se-btn act edit'; ed.textContent = 'EDIT';
+            ed.title = C.tf('uplift.ui.edit_global_template', 'Edit this template');
+            ed.onclick = () => openEditor(null, null, t.name);
+            aEdit.append(ed);
+            box.append(aDel, document.createElement('span'), aEdit);
+            row.append(name, box);
             host.append(row);
         }
     });

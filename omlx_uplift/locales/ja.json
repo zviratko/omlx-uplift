@@ -449,7 +449,7 @@
  "uplift.ui.show_fewer": "たたま表示",
  "uplift.ui.collapse_settings": "折りたたむ",
  "uplift.ui.edit_profile": "このプロファイルを編集",
- "uplift.ui.n_missing_records": "{n} 件のレコードが見つかりません",
+ "uplift.ui.n_missing_records": "{n} 件のモデルが存在しません",
  "uplift.ui.profiles_shown_as_base_name": "プロファイルは \"model:profile\" 形式で表示されます。 ",
  "uplift.ui.edit_stored_settings_missing": "保存された設定を編集（モデルはディスク上にありません。再読み込みは行われません）"
 }
