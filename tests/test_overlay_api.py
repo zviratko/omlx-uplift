@@ -143,3 +143,79 @@ def test_locale_overlays_key_sync():
             src = set(re.findall(r"\{(\w+)\}", v))
             got = set(re.findall(r"\{(\w+)\}", data[k]))
             assert src == got, f"{lang}:{k} placeholders {got} != en {src}"
+
+
+# ---------------------------------------------------------------------------
+# SSE-SPLIT-1: every open stream connection must observe every transition;
+# the shared destructive drain previously handed each tick's rows to only
+# the first consumer.
+# ---------------------------------------------------------------------------
+
+class _FakeTracker:
+    def __init__(self):
+        self.rows = {}
+
+    def add(self, rid, state="active", **kw):
+        row = {"id": rid, "model": "m", "state": state, "origin": "real",
+               "prompt_tokens": 1, "completion_tokens": 0, "tps": None,
+               "error": None, "finish": None, "ts_start": 1.0, "ts_end": 2.0,
+               "ts": 2.0, "loop_hint": False}
+        row.update(kw)
+        self.rows[rid] = row
+
+    def sample(self, pool):        # no-op: rows mutate directly
+        pass
+
+    def list_rows(self, limit=30):
+        return sorted(self.rows.values(), key=lambda r: r["ts"], reverse=True)
+
+
+async def _pull(it, timeout=3.0):
+    import asyncio
+    return await asyncio.wait_for(it.__anext__(), timeout=timeout)
+
+
+async def test_sse_every_consumer_sees_every_transition():
+    import asyncio
+    from unittest.mock import MagicMock
+    tracker = _FakeTracker()
+    tracker.add("r1")
+    with patch.object(up, "get_request_tracker", return_value=tracker), \
+         patch.object(up, "engine_pool", return_value=MagicMock()):
+        resp_a = await up.stream_requests(is_admin=True)
+        resp_b = await up.stream_requests(is_admin=True)
+        it_a, it_b = resp_a.body_iterator, resp_b.body_iterator
+
+        # drive both to their seed pass (they are started concurrently)
+        resp_c = await up.stream_requests(is_admin=True)
+        it_c = resp_c.body_iterator
+
+        pa = asyncio.create_task(_pull(it_a))
+        pb = asyncio.create_task(_pull(it_b))
+        await asyncio.sleep(0.2)          # let generators seed their view
+
+        # transition happens AFTER both connections opened
+        tracker.rows["r1"].update(state="complete", completion_tokens=9)
+        fa, fb = await pa, await pb
+        import json as _json
+        ea = _json.loads(fa.split("data: ", 1)[1])
+        eb = _json.loads(fb.split("data: ", 1)[1])
+        assert ea["id"] == eb["id"] == "r1"
+        assert ea["state"] == eb["state"] == "complete"
+        assert ea["completion"] == eb["completion"] == 9
+
+        # seed contract: a connection opened AFTER r1 completed must
+        # stream only NEW transitions. Start C first (it seeds r1 into its
+        # watermark on entry), THEN create traffic: first frame is r2,
+        # never an r1 replay.
+        pc = asyncio.create_task(_pull(it_c))
+        await asyncio.sleep(0.3)          # let C enter its tick loop
+        tracker.add("r2", state="complete", completion_tokens=3)
+        fc = await pc
+        ec = _json.loads(fc.split("data: ", 1)[1])
+        assert ec["id"] == "r2", f"fresh connection replayed {ec['id']}"
+        for it in (it_a, it_b, it_c):
+            try:
+                await it.aclose()
+            except Exception:
+                pass

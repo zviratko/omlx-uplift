@@ -54,7 +54,7 @@ except ImportError:  # pragma: no cover
             "serve` inside the oMLX environment, or the standalone viewer"
         )
 
-from .request_log import get_request_tracker
+from .request_log import RING_LIMIT, get_request_tracker
 from .collector import get_collector
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -666,12 +666,39 @@ async def stream_requests(is_admin: bool = Depends(require_admin)):
     tracker = get_request_tracker()
 
     async def event_generator():
+        # SSE-SPLIT-1: drain_dirty() hands the dirty set to whichever
+        # connection drains first, so with two tabs open each loses the
+        # transitions the other ate. Each connection now diffs a shared,
+        # NON-destructive snapshot against its own 'seen' watermark —
+        # every consumer sees every transition.
+        seen: dict[str, tuple] = {}
+        # seed with the current ring so a fresh connection sees only NEW
+        # transitions (same contract the destructive drain had)
+        for row in tracker.list_rows(limit=RING_LIMIT):
+            seen[row.get("id")] = (row.get("state"),
+                                   row.get("prompt_tokens"),
+                                   row.get("completion_tokens"),
+                                   bool(row.get("loop_hint")))
         try:
             while True:
                 pool = engine_pool()
                 if pool is not None:
                     await asyncio.to_thread(tracker.sample, pool)
-                for row in tracker.drain_dirty():
+                rows = []
+                for row in tracker.list_rows(limit=RING_LIMIT):
+                    mark = (row.get("state"), row.get("prompt_tokens"),
+                            row.get("completion_tokens"),
+                            bool(row.get("loop_hint")))
+                    rid = row.get("id")
+                    if rid and seen.get(rid) != mark:
+                        seen[rid] = mark
+                        rows.append(row)
+                # keep the watermark bounded to what the ring can revisit
+                if len(seen) > 4 * RING_LIMIT:
+                    live = {r.get("id") for r in tracker.list_rows(
+                        limit=RING_LIMIT)}
+                    seen = {k: v for k, v in seen.items() if k in live}
+                for row in rows:
                     ev = {
                         "type": "request",
                         "id": row["id"],
