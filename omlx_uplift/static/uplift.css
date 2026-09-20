@@ -1201,3 +1201,20 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .metric-card .card-pad { flex: 1 1 auto; display: flex; flex-direction: column; }
 .metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 78px; }
 .metric-plot { flex: 1 1 auto; min-height: 78px; min-width: 0; }
+
+/* ---------------------------------------------------------------------------
+   ENV-2: experimental env tunables box (settings page, under the GS panel).
+   Reuses .gs-box / .urow.settings geometry; these rules only add the
+   EXPERIMENTAL signage, the honest effect chips and the shadow warning. */
+.env-box { margin-top: 14px; }
+.env-badge { margin-left: 10px; background: var(--accent); color: #141414;
+    border-color: var(--accent); }
+.env-effect { margin-left: 8px; white-space: nowrap; }
+.env-effect-immediate { color: var(--green, var(--accent)); }
+.env-effect-model, .env-effect-server { color: var(--red); }
+.env-shadowed { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.env-shadow-warn { grid-column: 1 / -1; color: var(--accent); }
+.env-box-foot { display: flex; justify-content: flex-end; gap: 8px;
+    padding-top: 10px; }
+.env-box-foot .se-btn { display: inline-block; }
+#env-apply:disabled { opacity: .45; cursor: default; }

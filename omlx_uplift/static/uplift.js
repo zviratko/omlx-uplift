@@ -153,7 +153,7 @@ function applyTab() {
         if (sub === 'helper') renderHelperModels();
         if (sub === 'manager') renderTemplatesBox();
     }
-    if (tab === 'settings') pollGlobalSettings();
+    if (tab === 'settings') { pollGlobalSettings(); pollEnvTunables(); }
     if (tab === 'bench' || tab === 'chat' || tab === 'cluster') showEmbedPage(tab, sub);
 }
 addEventListener('hashchange', applyTab);
@@ -5056,6 +5056,183 @@ async function gateClusterFromServer() {
     try { syncClusterGate(await fetchJson(`${API}/admin/api/global-settings`)); }
     catch (_) { /* dormant by default; the settings poll retries */ }
 }
+
+// ---------------------------------------------------------------------------
+// ENV-2: experimental env tunables — uplift-owned OMLX_* overrides shown as
+// a standalone EXPERIMENTAL box under the settings panel. Decoupled from the
+// global SAVE bar on purpose: each row has its own effect class (live /
+// restart-model / restart-server), so APPLY posts immediately per row-set.
+// Genuine launch env always wins (server reports those rows shadowed).
+// ---------------------------------------------------------------------------
+
+let ENV_SPEC = [];        // allow-list from the server (single source of truth)
+let ENV_VALUES = {};      // stored values (server view)
+let ENV_SHADOW = {};      // name -> value_masked for genuine launch env
+const ENV_DIRTY = {};     // name -> pending string value (null = remove)
+
+async function pollEnvTunables() {
+    const wrap = $('env-tunables');
+    if (!wrap) return;
+    try {
+        const d = await fetchJson(`${API}/uplift/api/env-overrides`);
+        ENV_SPEC = d.allowed || [];
+        ENV_VALUES = d.values || {};
+        ENV_SHADOW = {};
+        for (const s of (d.shadowed || [])) ENV_SHADOW[s.name] = s.value_masked;
+        renderEnvTunables();
+    } catch (err) {
+        wrap.innerHTML = '';
+        emptyMsg(wrap, 'env-overrides not served (' + err.message + ')');
+    }
+}
+
+function envEffectLabel(effect) {
+    if (effect === 'immediate') return C.tf('uplift.env.applies_next_request', 'applies on next request');
+    if (effect === 'model') return C.tf('uplift.env.restart_model', 'RESTART MODEL to apply');
+    return C.tf('uplift.env.restart_server', 'RESTART SERVER to apply');
+}
+
+function envVal(a) {
+    const cur = (a.name in ENV_DIRTY) ? ENV_DIRTY[a.name] : (ENV_VALUES[a.name] ?? null);
+    return cur;
+}
+
+async function envApplyEdits() {
+    const body = {};
+    for (const [k, v] of Object.entries(ENV_DIRTY)) body[k] = v;
+    if (!Object.keys(body).length) return;
+    try {
+        const r = await fetchJson(`${API}/uplift/api/env-overrides`,
+            { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body) });
+        for (const [name, outcome] of Object.entries(r.results || {})) {
+            if (outcome === 'applied_live')
+                toast(C.tf('uplift.env.applied_live', 'Applied on next request') + ': ' + name, 3000);
+            else if (outcome === 'restart_model')
+                toast(C.tf('uplift.env.stored_restart_model', 'Saved — RESTART MODEL to apply') + ': ' + name, 4000);
+            else if (outcome === 'restart_server')
+                toast(C.tf('uplift.env.stored_restart_server', 'Saved — RESTART SERVER to apply') + ': ' + name, 4000);
+            else if (outcome === 'shadowed')
+                toast(C.tf('uplift.env.shadowed_saved', 'Saved for later — the launch environment variable takes precedence') + ': ' + name, 5000);
+        }
+        Object.keys(ENV_DIRTY).forEach(k => delete ENV_DIRTY[k]);
+        ENV_VALUES = r.values || {};
+        ENV_SHADOW = {};
+        for (const s of (r.shadowed || [])) ENV_SHADOW[s.name] = s.value_masked;
+        renderEnvTunables();
+    } catch (err) {
+        toast('env tunables: ' + err.message, 5000);
+    }
+}
+
+function renderEnvTunables() {
+    const wrap = $('env-tunables');
+    if (!wrap || !ENV_SPEC.length) return;
+    wrap.textContent = '';
+    const box = document.createElement('div');
+    box.className = 'gs-box env-box';
+
+    const head = document.createElement('div');
+    head.className = 'gs-box-title env-box-title';
+    head.textContent = C.tf('uplift.env.title', 'Experimental tunables');
+    const badge = document.createElement('span');
+    badge.className = 'rqchip env-badge';
+    badge.textContent = C.tf('uplift.env.badge', 'EXPERIMENTAL');
+    badge.title = C.tf('uplift.env.badge_hint', 'Uplift-owned environment overrides; not part of oMLX settings');
+    head.append(badge);
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'gs-box-body';
+
+    const intro = document.createElement('small');
+    intro.className = 'dim';
+    intro.textContent = C.tf('uplift.env.intro',
+        'Expert knobs read by oMLX from the environment. Values are stored by Uplift and seeded at server start; a variable already set in the launch environment always wins. Removing Uplift restores stock defaults.');
+    bodyEl.append(intro);
+
+    for (const a of ENV_SPEC) {
+        const row = document.createElement('div');
+        row.className = 'urow settings';
+        const lab = cell(a.name); lab.className = 'uname';
+        const eb = document.createElement('span');
+        eb.className = 'rqchip env-effect env-effect-' + a.effect;
+        eb.textContent = envEffectLabel(a.effect);
+        lab.append(eb);
+        const h = document.createElement('small');
+        h.className = 'dim';
+        h.textContent = a.desc + (a.default ? ' — ' + C.tf('uplift.env.stock_default', 'stock default') + ': ' + a.default : '');
+        lab.append(h);
+
+        const ctl = cell(''); ctl.className = 'gctl';
+        const cur = envVal(a);
+        let input;
+        if (a.type === 'bool') {
+            input = document.createElement('select');
+            for (const [v, t] of [['', '—'], ['1', C.tf('uplift.env.on', 'On')], ['0', C.tf('uplift.env.off', 'Off')]]) {
+                const o = document.createElement('option'); o.value = v; o.textContent = t; input.append(o);
+            }
+            input.value = cur == null ? '' : String(cur);
+        } else {
+            input = document.createElement('input');
+            input.type = (a.type === 'int' || a.type === 'float') ? 'number' : 'text';
+            if (a.min !== undefined) input.min = a.min;
+            if (a.max !== undefined) input.max = a.max;
+            if (a.type === 'float') input.step = 'any';
+            if (a.default) input.placeholder = a.default;
+            input.value = cur == null ? '' : String(cur);
+        }
+        const queue = () => {
+            const v = input.value === '' ? null : input.value;
+            if ((envVal(a) ?? null) === v) delete ENV_DIRTY[a.name];
+            else ENV_DIRTY[a.name] = v;
+            envUpdateApplyBtn();
+        };
+        input.addEventListener('input', queue);
+        input.addEventListener('change', queue);
+        ctl.append(input);
+        // .urow.settings is a 3-col grid (label | diff slot | control); the
+        // env box has no diff chip, but the reserved middle slot keeps the
+        // control column aligned with the settings panel above
+        const slot = document.createElement('span'); slot.className = 'diffslot';
+        row.append(lab, slot, ctl);
+
+        if (a.name in ENV_SHADOW) {
+            row.classList.add('env-shadowed');
+            const warn = document.createElement('small');
+            warn.className = 'dim env-shadow-warn';
+            warn.textContent = C.tf('uplift.env.shadow_warn',
+                'environment variable already set — it takes precedence until removed from the launch environment')
+                + ' (' + ENV_SHADOW[a.name] + ')';
+            row.append(warn);
+        }
+        bodyEl.append(row);
+    }
+
+    const foot = document.createElement('div');
+    foot.className = 'env-box-foot';
+    const apply = document.createElement('button');
+    apply.id = 'env-apply'; apply.className = 'se-btn savebtn';
+    apply.textContent = C.tf('uplift.env.apply', 'APPLY');
+    apply.onclick = envApplyEdits;
+    const clr = document.createElement('button');
+    clr.id = 'env-discard'; clr.className = 'se-btn';
+    clr.textContent = C.tf('uplift.env.discard', 'DISCARD');
+    clr.onclick = () => { Object.keys(ENV_DIRTY).forEach(k => delete ENV_DIRTY[k]); renderEnvTunables(); };
+    foot.append(clr, apply);
+    bodyEl.append(foot);
+
+    box.append(head, bodyEl);
+    wrap.append(box);
+    envUpdateApplyBtn();
+}
+
+function envUpdateApplyBtn() {
+    const b = document.getElementById('env-apply'), c = document.getElementById('env-discard');
+    const n = Object.keys(ENV_DIRTY).length;
+    if (b) { b.disabled = !n; b.textContent = n ? C.tf('uplift.env.apply_n', 'APPLY ({n})', { n }) : C.tf('uplift.env.apply', 'APPLY'); }
+    if (c) c.style.display = n ? '' : 'none';
+}
+
 
 function renderGlobalSettings() {
     const body = document.createElement('div');   // staged; grouped into boxes below
