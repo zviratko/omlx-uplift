@@ -504,6 +504,17 @@ test('UPLOADER-1: loadLocale re-labels JS-built mode badges', () => {
     assert.ok(mode > relabel, 'mode badges relabel after the catalog swap');
 });
 
+/* GS-1 drift test: settings labels render before the locale fetch may
+   resolve (settings poll vs locale fetch race), so they MUST use C.tf with
+   an English fallback — bare C.t renders the raw key until the next poll. */
+test('GS-1: global-settings labels use C.tf fallback, never bare C.t', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const bare = src.match(/C\.t\('uplift\.gs\.[^']*'\)/g) || [];
+    assert.deepStrictEqual(bare, [], 'no bare C.t(uplift.gs.*) calls: ' + bare.join(', '));
+});
+
 /* F-035b drift test: tray pills are created AFTER grid init, so the one-time
    setupDragIn at boot can never bind them; renderTray must re-run it. */
 test('F-035b: renderTray re-binds setupDragIn for late-created pills', () => {

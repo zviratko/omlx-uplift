@@ -5067,7 +5067,7 @@ function renderGlobalSettings() {
 
     // ---- Language
     body.append(gsTitle('Language'));
-    body.append(gsRow('ui', C.t('uplift.gs.ui.interface_language'), '',
+    body.append(gsRow('ui', C.tf('uplift.gs.ui.interface_language', 'Interface language'), '',
         gsSelect('ui_language', Object.entries(L.lang), gsGet('ui','language')),
         { flat: 'ui_language' }));
 
@@ -5163,7 +5163,7 @@ function renderGlobalSettings() {
         dl.append(one);
     });
     const add = document.createElement('button');
-    add.className = 'se-btn act'; add.textContent = C.t('uplift.gs.model.add_directory');
+    add.className = 'se-btn act'; add.textContent = C.tf('uplift.gs.model.add_directory', '+ add directory');
     add.onclick = async () => {
         if (await gsSaveNow({ model_dirs: dirs.concat('') })) renderGlobalSettings();
     };
@@ -5180,7 +5180,7 @@ function renderGlobalSettings() {
         { flat: 'hf_cache_enabled' }));
     const hfp = cell((GS.huggingface || {}).hf_cache_path || '—');
     hfp.className = 'dim';
-    body.append(gsRow('model', C.t('uplift.gs.model.hf_path_label'), '', hfp));
+    body.append(gsRow('model', C.tf('uplift.gs.model.hf_path_label', 'HF cache path'), '', hfp));
     body.append(gsRow('model', L.model.idle, L.model.idle_desc,
         gsSelect('idle_timeout_seconds', L.model.idle_opts,
                  gsGet('idle_timeout','idle_timeout_seconds') ?? ''),
