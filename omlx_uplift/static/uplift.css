@@ -26,18 +26,18 @@
     --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 [data-theme="light"] {
-    --bg: #f6f4ef;              /* paper */
-    --card: #f6f4ef;
-    --row2: #ece9e1;            /* alternating row shade on paper */
-    --field: #ffffff;           /* raised white input well on paper */
-    --panel: #ece9e1;           /* header band shade on paper */
+    --bg: #ffffff;              /* round 7 item 6: clean white, beige felt dull */
+    --card: #ffffff;
+    --row2: #f2f2f2;            /* alternating row shade on white */
+    --field: #ffffff;           /* raised white input well */
+    --panel: #f2f2f2;           /* header band shade */
     --edge: #767268;            /* NASA warm gray */
     --ink: #0b0b0b;
-    --dim: #767268;             /* AA on paper */
+    --dim: #767268;             /* AA on white */
     --accent: #c9243b;          /* red lives on light grounds */
     --chart-1: #0b0b0b;
     --chart-2: #c9243b;
-    --grid: #c3bdb0;
+    --grid: #d5d5d5;
     --heat: #c9243b;
     --frame: #767268;
     --red: #c9243b;             /* DELETE cover rail (defined in :root; explicit per theme) */
@@ -170,6 +170,42 @@ header.top {
 .logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
 .logo .dot.bad { background: var(--red); }
 header.top .spacer { flex: 1; }
+/* round 7 item 6: the header is the mission-patch lockup — bold red on the
+   page ground in EVERY theme (day: red on white; night/enhanced: red on
+   black; cockpit keeps its white-on-metal doctrine). --hdr-ink is the token.
+   Scoped to header.top so body text stays readable. */
+:root, [data-theme="light"] {
+    --hdr-ink: #c9243b; --hdr-edge: #e8b6bf; --hdr-hover: #fde8eb;
+    --hdr-weight: 700;
+}
+/* dark grounds need a brighter red (AA) + a dim, darker edge ring */
+[data-theme="dark"], [data-theme="enhanced"] {
+    --hdr-ink: #ff5c5c; --hdr-edge: #6e2a30; --hdr-hover: #3a1418;
+    --hdr-weight: 700;
+}
+[data-theme="cockpit"] { --hdr-ink: var(--ink); --hdr-edge: var(--edge);
+    --hdr-hover: var(--edge); --hdr-weight: 400; }
+header.top { border-bottom-color: var(--hdr-edge) !important; }
+header.top .logo { color: var(--hdr-ink); font-weight: var(--hdr-weight); }
+header.top .logo .dot { background: var(--hdr-ink); }
+header.top .tabs { border-color: var(--hdr-ink); }
+header.top .tabs a { color: var(--hdr-ink); font-weight: var(--hdr-weight); }
+header.top .tabs a:hover { background: var(--hdr-hover); color: var(--hdr-ink); }
+header.top .tabs a.active { background: var(--hdr-ink); color: var(--bg); }
+header.top .dd-btn { color: var(--hdr-ink); font-weight: var(--hdr-weight); }
+header.top .dd-btn.active { background: var(--hdr-ink); color: var(--bg); }
+header.top .dd-btn:hover { background: var(--hdr-hover); }
+header.top .tabs .dd-btn { border-right-color: var(--hdr-edge); }
+header.top .chip { color: var(--hdr-ink); border-color: var(--hdr-edge);
+    font-weight: var(--hdr-weight); }
+header.top .chip.state-ok { color: var(--hdr-ink); }
+header.top .icon-btn { color: var(--hdr-ink); border-color: var(--hdr-edge); }
+header.top .icon-btn:hover { background: var(--hdr-ink); border-color: var(--hdr-ink);
+    color: var(--bg); }
+header.top .dd-menu { border-color: var(--hdr-ink); }
+header.top .dd-menu a { color: var(--hdr-ink); border-bottom-color: var(--hdr-edge); font-weight: var(--hdr-weight); }
+header.top .dd-menu a:hover, header.top .dd-menu a.active {
+    background: var(--hdr-ink); color: var(--bg); }
 .chip {
     color: var(--dim); border: 1px solid var(--edge); background: transparent;
     padding: 5px 10px; font: 400 11px/1.4 var(--mono);
@@ -583,8 +619,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 
 /* ---- Tabs (top nav, hairline underline = active, NASA control-strip) ---- */
 .tabs { display: flex; gap: 2px; border: 1px solid var(--edge);
-    min-width: 0; overflow-x: auto; scrollbar-width: none; }   /* absorbs header pressure (item 13) */
-@media (max-width: 900px) { header.top { flex-wrap: wrap; } }  /* mobile keeps the old flow */
+    min-width: 0; }   /* shrinks under header pressure (item 13); no overflow —
+    an overflow axis pair forces overflow-y:auto which CLIPS the dropdown menus */
+@media (max-width: 900px) {
+    header.top { flex-wrap: wrap; }              /* mobile keeps the old flow */
+    .tabs { overflow-x: auto; scrollbar-width: none; }  /* menu wraps away there */
+}
 .tabs a {
     color: var(--dim); font: 400 11px/1 var(--mono); text-transform: uppercase;
     letter-spacing: 0.08em; text-decoration: none; padding: 9px 14px;
@@ -634,9 +674,20 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     align-items: center; }
 .admin-table .urow.admin { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
 /* round 5: action box takes the right 50% of the card; model block left 50%.
-   align-items:start so the chips sit on the same two lines as the delete /
-   hide buttons — no vertical centring in the middle of a two-line box */
+   round 7 items 1/2: both cells ride the SAME two-line pitch (26px lines:
+   a 22px control + 4px gap) and the left cell starts at the same y as the
+   buttons — the action box has 1px border + 4px padding before its first
+   button, so the model block gets the same offset. Line 1 = lamps/size/state
+   with DELETE SETTINGS + first chip row; line 2 = model name with
+   DELETE MODEL + second chip row. */
 .admin-table .urow.admin { align-items: start; }
+#model-admin .mbox .uname { padding-top: 5px; gap: 4px; }
+#model-admin .mbox .nrow1 { min-height: 22px; }
+#model-admin .mbox .uname .nmain { min-height: 22px; align-items: center; }
+/* chips share the buttons' 22px line height so chip centre == button centre */
+.admin-table .chip-host .schip { height: 22px; box-sizing: border-box;
+    display: inline-flex; align-items: center; }
+.admin-table .chip-host { row-gap: 4px; }
 .admin-table .nrow-gap { flex: 1 1 auto; }
 .admin-table .typebadge {
     display: inline-flex; align-items: center; justify-content: center;
@@ -670,8 +721,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .admin-table .lsw-seg.present:hover { border-color: var(--accent); color: var(--accent); }
 .admin-table .lsw-pct { font: 400 9px/1 var(--mono); color: var(--accent);
     align-self: center; margin-left: 5px; letter-spacing: 0.05em; }
-.prune-col { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-.prune-col .stat-sub { font-size: 9px; }
+/* round 7 item 4: the count hangs BELOW the prune button as an out-of-flow
+   subscript — the column is exactly button-height, so the button centres
+   with the memory chip on the bar instead of riding above it */
+.prune-col { position: relative; display: inline-flex; }
+.prune-col .stat-sub { position: absolute; top: calc(100% + 1px); right: 0;
+    font-size: 9px; line-height: 1; white-space: nowrap; }
 .admin-table .urow.usage { grid-template-columns: minmax(0,4fr) minmax(0,2fr) 120px minmax(0,3fr); }
 /* action rows get a real trailing column (a 5th child on the 4-col grid used
    to wrap onto an implicit second row pinned to the LEFT edge — that is why
@@ -1051,7 +1106,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* profile/alias lines end up below the model name, so their labels must not
    be pinned to the ink colour of the model title */
 #model-admin .alias-line .alias-name { color: var(--ink); }
-.admin-table .chip-host.alias-chips { flex: 1 1 0; justify-content: flex-end; }
+/* round 7 item 3: profile/alias diff chips align to the LEFT of the right
+   half (they start where the box content starts), like the base model's
+   DELETE column — not pushed to the far edge */
+.admin-table .chip-host.alias-chips { flex: 1 1 0; justify-content: flex-start; }
 /* ---- LOADED/IDLE rocker switch + API copy button (state column) --------- */
 .admin-table .statewrap { display: inline-flex; align-items: center; gap: 6px;
     justify-content: flex-end; }
