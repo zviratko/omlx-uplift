@@ -418,5 +418,9 @@
  "uplift.env.applied_live": "Aplicado na próxima solicitação",
  "uplift.env.stored_restart_model": "Salvo — REINICIAR MODELO para aplicar",
  "uplift.env.stored_restart_server": "Salvo — REINICIAR SERVIDOR para aplicar",
- "uplift.env.shadowed_saved": "Salvo para depois — a variável do ambiente de execução prevalece"
+ "uplift.env.shadowed_saved": "Salvo para depois — a variável do ambiente de execução prevalece",
+ "uplift.ui.and_n_more": "e mais {n}",
+ "uplift.ui.expand_all_settings": "Mostrar todas as configurações",
+ "uplift.ui.show_fewer": "mostrar menos",
+ "uplift.ui.collapse_settings": "Recolher"
 }

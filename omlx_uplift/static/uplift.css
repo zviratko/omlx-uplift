@@ -954,7 +954,21 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     color: #04140b; box-shadow: 0 0 8px rgba(87, 227, 138, 0.55); }
 .admin-table .lampstack { display: flex; flex-direction: column; gap: 3px;
     flex: 0 0 auto; margin-right: auto; }
+.admin-table .lampstack.inline { flex-direction: row; gap: 4px; margin-right: 0; }
 .admin-table .favlamp { width: auto; padding: 0 7px; }
+/* --- model row right box (user round 2026-09-20): effective-only chips
+   fold behind "and X more"; actions split into a left stack (HIDE/EDIT)
+   and a right stack with each DELETE on its own line, flush right. ---- */
+.admin-table .rowacts.stacked { display: flex; width: 100%; gap: 8px;
+    justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.admin-table .act-col { display: flex; flex-direction: column; gap: 4px;
+    align-items: flex-start; }
+.admin-table .act-col.del { align-items: flex-end; }
+.admin-table .schip.more { cursor: pointer; background: none;
+    padding: 3px 5px; border-style: dashed; color: var(--ink);
+    font: 400 9px/1 var(--mono); letter-spacing: 0.06em; }
+.admin-table .schip.more:hover { border-color: var(--ink); }
+.admin-table .alias-line { flex-wrap: wrap; }
 /* ---- LOADED/IDLE rocker switch + API copy button (state column) --------- */
 .admin-table .statewrap { display: inline-flex; align-items: center; gap: 6px;
     justify-content: flex-end; }
@@ -1203,18 +1217,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .metric-plot { flex: 1 1 auto; min-height: 78px; min-width: 0; }
 
 /* ---------------------------------------------------------------------------
-   ENV-2: experimental env tunables box (settings page, under the GS panel).
-   Reuses .gs-box / .urow.settings geometry; these rules only add the
-   EXPERIMENTAL signage, the honest effect chips and the shadow warning. */
-.env-box { margin-top: 14px; }
-.env-badge { margin-left: 10px; background: var(--accent); color: #141414;
-    border-color: var(--accent); }
-.env-effect { margin-left: 8px; white-space: nowrap; }
-.env-effect-immediate { color: var(--green, var(--accent)); }
-.env-effect-model, .env-effect-server { color: var(--red); }
-.env-shadowed { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.env-shadow-warn { grid-column: 1 / -1; color: var(--accent); }
-.env-box-foot { display: flex; justify-content: flex-end; gap: 8px;
-    padding-top: 10px; }
-.env-box-foot .se-btn { display: inline-block; }
-#env-apply:disabled { opacity: .45; cursor: default; }
+   ENV-2 (rev 2): experimental env tunables render as ordinary rows inside
+   the existing settings sections. Only signage differs: the EXPERIMENTAL
+   chip right of the label and the amber ground on shadowed rows (genuine
+   launch env wins until removed from the launch environment). */
+.urow.settings .uname .env-badge { margin-left: 8px; background: var(--accent);
+    color: #141414; border-color: var(--accent); }
+.urow.settings.env-shadowed { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.urow.settings.env-shadowed .uname small { color: var(--accent); }

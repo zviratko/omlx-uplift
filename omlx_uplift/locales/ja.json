@@ -443,5 +443,9 @@
  "uplift.env.applied_live": "次のリクエストから適用されました",
  "uplift.env.stored_restart_model": "保存済み — 適用するにはモデルを再起動",
  "uplift.env.stored_restart_server": "保存済み — 適用するにはサーバーを再起動",
- "uplift.env.shadowed_saved": "後用に保存済み — 起動環境の環境変数が優先されます"
+ "uplift.env.shadowed_saved": "後用に保存済み — 起動環境の環境変数が優先されます",
+ "uplift.ui.and_n_more": "他 {n} 件",
+ "uplift.ui.expand_all_settings": "すべての設定を表示",
+ "uplift.ui.show_fewer": "たたま表示",
+ "uplift.ui.collapse_settings": "折りたたむ"
 }

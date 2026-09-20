@@ -429,5 +429,9 @@
  "uplift.env.applied_live": "다음 요청부터 적용됩니다",
  "uplift.env.stored_restart_model": "저장됨 — 적용하려면 모델 재시작",
  "uplift.env.stored_restart_server": "저장됨 — 적용하려면 서버 재시작",
- "uplift.env.shadowed_saved": "나중에 적용하도록 저장됨 — 실행 환경의 환경 변수가 우선합니다"
+ "uplift.env.shadowed_saved": "나중에 적용하도록 저장됨 — 실행 환경의 환경 변수가 우선합니다",
+ "uplift.ui.and_n_more": "외 {n}개",
+ "uplift.ui.expand_all_settings": "모든 설정 보기",
+ "uplift.ui.show_fewer": "적게 보기",
+ "uplift.ui.collapse_settings": "접기"
 }

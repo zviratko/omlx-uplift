@@ -414,5 +414,9 @@
  "uplift.env.applied_live": "下個請求即生效",
  "uplift.env.stored_restart_model": "已儲存 — 需重啟模型後生效",
  "uplift.env.stored_restart_server": "已儲存 — 需重啟伺服器後生效",
- "uplift.env.shadowed_saved": "已儲存備用 — 啟動環境中的環境變數優先"
+ "uplift.env.shadowed_saved": "已儲存備用 — 啟動環境中的環境變數優先",
+ "uplift.ui.and_n_more": "等 {n} 項",
+ "uplift.ui.expand_all_settings": "展開全部設定",
+ "uplift.ui.show_fewer": "收起顯示",
+ "uplift.ui.collapse_settings": "摺疊"
 }

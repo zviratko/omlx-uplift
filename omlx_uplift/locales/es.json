@@ -418,5 +418,9 @@
  "uplift.env.applied_live": "Aplicado en la siguiente solicitud",
  "uplift.env.stored_restart_model": "Guardado — REINICIAR MODELO para aplicar",
  "uplift.env.stored_restart_server": "Guardado — REINICIAR SERVIDOR para aplicar",
- "uplift.env.shadowed_saved": "Guardado para después — la variable del entorno de lanzamiento tiene prioridad"
+ "uplift.env.shadowed_saved": "Guardado para después — la variable del entorno de lanzamiento tiene prioridad",
+ "uplift.ui.and_n_more": "y {n} más",
+ "uplift.ui.expand_all_settings": "Mostrar todos los ajustes",
+ "uplift.ui.show_fewer": "mostrar menos",
+ "uplift.ui.collapse_settings": "Contraer"
 }

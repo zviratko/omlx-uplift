@@ -414,5 +414,9 @@
  "uplift.env.applied_live": "Applied on next request",
  "uplift.env.stored_restart_model": "Saved — RESTART MODEL to apply",
  "uplift.env.stored_restart_server": "Saved — RESTART SERVER to apply",
- "uplift.env.shadowed_saved": "Saved for later — the launch environment variable takes precedence"
+ "uplift.env.shadowed_saved": "Saved for later — the launch environment variable takes precedence",
+ "uplift.ui.and_n_more": "and {n} more",
+ "uplift.ui.expand_all_settings": "Expand to show all settings",
+ "uplift.ui.show_fewer": "show fewer",
+ "uplift.ui.collapse_settings": "Collapse back"
 }

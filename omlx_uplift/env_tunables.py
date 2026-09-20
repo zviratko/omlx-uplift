@@ -44,51 +44,61 @@ OVERRIDES_FILENAME = "env_overrides.json"
 ALLOWED: dict[str, dict] = {
     # -- class 1: CALL-TIME (effect=immediate) ------------------------------
     "OMLX_CHUNK_SNAP": {
+        "label": "Chunk quantization",
         "type": "bool", "default": "1", "effect": "immediate", "group": "scheduler",
         "desc": "Quantize prefill chunk boundaries to fixed steps; 0 disables (A/B measurement).",
     },
     "OMLX_MTP_PROMPT_PRIMING": {
+        "label": "MTP prompt priming",
         "type": "bool", "default": "1", "effect": "immediate", "group": "mtp",
         "desc": "Prime MTP drafters from the prompt context.",
     },
     "OMLX_MTP_PRIME_WINDOW": {
+        "label": "MTP priming window",
         "type": "int", "default": "0", "effect": "immediate", "group": "mtp",
         "desc": "History window (tokens) MTP priming may use; 0 = unlimited.",
         "min": 0,
     },
     "OMLX_DISABLE_PRESSURE_RECLAIM": {
+        "label": "Disable pressure reclaim",
         "type": "bool", "default": "", "effect": "immediate", "group": "memory",
         "desc": "1 disables memory-pressure reclaim (restores stock behavior).",
     },
     # -- class 2: ENGINE-CONSTRUCTION (effect=model) -------------------------
     "OMLX_DECODE_BURST_BUDGET_S": {
+        "label": "Burst decode budget (s)",
         "type": "float", "default": "0.03", "effect": "model", "group": "engine",
         "desc": "Wall-clock budget (s) per burst-decode pass.",
         "min": 0.001, "max": 10.0,
     },
     "OMLX_DECODE_BURST_MAX_STEPS": {
+        "label": "Burst decode max steps",
         "type": "int", "default": "64", "effect": "model", "group": "engine",
         "desc": "Maximum decode steps per burst pass.",
         "min": 1, "max": 4096,
     },
     # -- class 3: MODULE-IMPORT (effect=server) ------------------------------
     "OMLX_DECODE_FAIR_SHARE": {
+        "label": "Decode fair share",
         "type": "float", "default": "0.5", "effect": "server", "group": "scheduler",
         "desc": "Fair share of decode slots per request before yielding.",
         "min": 0.0, "max": 1.0,
     },
     "OMLX_DECODE_STALL_TARGET_MS": {
+        "label": "Decode stall target (ms)",
         "type": "int", "default": "500", "effect": "server", "group": "scheduler",
         "desc": "Decode stall target (ms) that triggers scheduler rebalance.",
         "min": 1,
     },
     "OMLX_CONTENDED_PREFILL_CHUNK": {
+        "label": "Contended prefill chunk",
         "type": "int", "default": "512", "effect": "server", "group": "scheduler",
         "desc": "Prefill chunk size (tokens) while decode is contended.",
         "min": 16,
     },
     # -- class 4: STARTUP-CONFIG (effect=server) -----------------------------
     "OMLX_CONTINUOUS_BATCHING": {
+        "label": "Continuous batching",
         "type": "bool", "default": "false", "effect": "server", "group": "engine",
         "desc": "Enable experimental continuous batching at startup.",
     },
@@ -269,7 +279,7 @@ def snapshot() -> dict:
         for n in sorted(SHADOWED)
     ]
     allowed = [
-        {"name": n, **{k: spec[k] for k in ("type", "default", "effect", "group", "desc") if k in spec},
+        {"name": n, **{k: spec[k] for k in ("label", "type", "default", "effect", "group", "desc") if k in spec},
          **{k: spec[k] for k in ("min", "max") if k in spec}}
         for n, spec in ALLOWED.items()
     ]

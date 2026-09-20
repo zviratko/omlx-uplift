@@ -414,5 +414,9 @@
  "uplift.env.applied_live": "Применится к следующему запросу",
  "uplift.env.stored_restart_model": "Сохранено — ПЕРЕЗАПУСТИТЕ МОДЕЛЬ для применения",
  "uplift.env.stored_restart_server": "Сохранено — ПЕРЕЗАПУСТИТЕ СЕРВЕР для применения",
- "uplift.env.shadowed_saved": "Сохранено на будущее — переменная окружения запуска имеет приоритет"
+ "uplift.env.shadowed_saved": "Сохранено на будущее — переменная окружения запуска имеет приоритет",
+ "uplift.ui.and_n_more": "и ещё {n}",
+ "uplift.ui.expand_all_settings": "Показать все настройки",
+ "uplift.ui.show_fewer": "показать меньше",
+ "uplift.ui.collapse_settings": "Свернуть"
 }

@@ -3718,16 +3718,11 @@ async function renderModelAdmin(force) {
         const name = document.createElement('span');
         name.className = 'uname'; name.title = m.model_path || m.id;
         const nmain = document.createElement('span'); nmain.className = 'nmain';
-        const fav = document.createElement('button');
-        fav.className = 'lamp favlamp' + (m.is_favorite ? ' on' : '');
-        fav.textContent = 'FAVOURITE'; fav.title = m.is_favorite ? 'Unfavorite' : 'Favorite';
-        tapBtn(fav, () => flagWrite(m.id, { is_favorite: !m.is_favorite },
-            () => putModelSettings(m.id, { is_favorite: !m.is_favorite })));
         const uid = cell(m.id); uid.className = 'uid';
-        nmain.append(fav, uid, copyBtn(m.id, 'Copy model id'));
-        name.append(nmain);
-        // PINNED / DEFAULT cockpit lamp stack: every row shows both lamps
-        const lamps = document.createElement('span'); lamps.className = 'lampstack';
+        nmain.append(uid, copyBtn(m.id, 'Copy model id'));
+        // PINNED / DEFAULT cockpit lamps: LEFTMOST (first line above the
+        // id), visually distinct from the settings chips in the right box
+        const lamps = document.createElement('span'); lamps.className = 'lampstack inline';
         const lamp = (label, lit, title, fn) => {
             const b = document.createElement('button');
             b.className = 'lamp' + (lit ? ' on' : '');
@@ -3736,6 +3731,9 @@ async function renderModelAdmin(force) {
             return b;
         };
         lamps.append(
+            lamp('FAVOURITE', !!m.is_favorite, m.is_favorite ? 'Unfavorite' : 'Favorite',
+                () => flagWrite(m.id, { is_favorite: !m.is_favorite },
+                    () => putModelSettings(m.id, { is_favorite: !m.is_favorite }))),
             lamp('PINNED', !!m.pinned, m.pinned ? 'Unpin (allow unload)' : 'Keep loaded (pin)',
                 // R10-B1: classic-compat write path — is_pinned via PUT
                 // settings (the pin/unpin POSTs were mock-only sugar)
@@ -3749,6 +3747,7 @@ async function renderModelAdmin(force) {
                     return flagWrite(m.id, { is_default: !m.is_default },
                         () => putModelSettings(m.id, { is_default: !m.is_default }));
                 }));
+        name.append(lamps, nmain);
         const typeC = cell(m.model_type || '\u2014'); typeC.className = 'dim';
         // State: LOADED/IDLE rocker switch + API-name copy button. Clicking
         // the inactive half runs the transition (LOADED loads, IDLE unloads).
@@ -3782,31 +3781,27 @@ async function renderModelAdmin(force) {
         const box = document.createElement('span');
         box.className = 'settings-box';
         const s = m.settings || {};
-        // R10-13: fixed chip set. SET values render with their value;
-        // toggles render ON/OFF; unset keys show a dimmed label + em dash
-        // (inherited from server defaults). TRUST REMOTE CODE is red when on.
+        // R10-13 rev (user round 2026-09-20): show only settings that are
+        // EFFECTIVE — a set value, or a toggle ON. Inherited/OFF rows were
+        // noise that pushed the box into overflow. What exceeds the visible
+        // count folds behind a clickable "and X more" that expands down.
         const bits = [];
-        const val = (label, v) => bits.push([v === null || v === undefined
-            ? label + ' —' : label + ' ' + v,
-            v === null || v === undefined ? 'dim' : '']);
-        const tog = (label, on) => bits.push([label + (on ? ' ON' : ' OFF'), on ? 'on' : 'dim']);
+        const val = (label, v) => { if (v === null || v === undefined) return;
+            bits.push({ txt: label + ' ' + v, cls: '' }); };
+        const tog = (label, on) => { if (!on) return;
+            bits.push({ txt: label + ' ON', cls: 'on' }); };
         val('CTX', s.max_context_window);
         val('MAX', s.max_tokens);
         tog('THINK', !!s.enable_thinking);
         tog('MTP', !!(s.mtp_enabled || s.vlm_mtp_enabled));
         tog('GRAMMAR', !!s.guided_grammar_enabled);
-        bits.push(['TRC ' + (s.trust_remote_code ? 'ON' : 'OFF'),
-            s.trust_remote_code ? 'danger' : 'dim']);
+        if (s.trust_remote_code) bits.push({ txt: 'TRC ON', cls: 'danger' });
         tog('SPECPREFILL', !!s.specprefill_enabled);
         tog('DFLASH', !!s.dflash_enabled);
-        if (m.is_hidden) bits.push(['HIDDEN', '']);
-        for (const [txt, cls] of bits) {
-            const chip = document.createElement('span');
-            chip.className = 'schip ' + cls; chip.textContent = txt;
-            box.append(chip);
-        }
+        if (m.is_hidden) bits.push({ txt: 'HIDDEN', cls: '' });
+        foldChips(box, bits, 4);
         const actions = document.createElement('span');
-        actions.className = 'rowacts';
+        actions.className = 'rowacts stacked';
         const btn = (label, fn, title, noRerender) => {
             const b = document.createElement('button');
             b.className = 'se-btn act';
@@ -3821,21 +3816,26 @@ async function renderModelAdmin(force) {
             };
             return b;
         };
-        actions.append(btn(m.is_hidden ? 'SHOW' : 'HIDE',
+        // left column: routine actions, left-aligned; right column: the two
+        // destructive deletes, each on its own line, flush right
+        const aLeft = document.createElement('span'); aLeft.className = 'act-col';
+        const aRight = document.createElement('span'); aRight.className = 'act-col del';
+        aLeft.append(btn(m.is_hidden ? 'SHOW' : 'HIDE',
             () => flagWrite(m.id, { is_hidden: !m.is_hidden },
                 () => putModelSettings(m.id, { is_hidden: !m.is_hidden })),
             m.is_hidden ? 'Unhide' : 'Hide from pickers'));
-        actions.append(btn('EDIT', () => openEditor(m.id), 'Edit settings', true));
-        actions.append(btn('DELETE SETTINGS', () => confirmDialog('Delete settings',
+        aLeft.append(btn('EDIT', () => openEditor(m.id), 'Edit settings', true));
+        aRight.append(btn('DELETE SETTINGS', () => confirmDialog('Delete settings',
             `Remove the stored configuration of ${m.id}? The model stays on disk; its `
             + 'settings return to server defaults when saved again. This cannot be undone.',
             () => deleteStoredSettings(m.id), `Settings deleted: ${m.id}`),
             'Delete stored settings (model stays on disk)', true));
-        actions.append(btn('DELETE MODEL', () => confirmDialog('Delete model',
+        aRight.append(btn('DELETE MODEL', () => confirmDialog('Delete model',
             `Delete ${m.id} from disk? A loaded instance is unloaded first, then the `
             + 'model directory and its stored settings are removed. This cannot be undone.',
             () => deleteModelFromDisk(m.id), `Deleted ${m.id}`), 'Delete model from disk'));
-        box.append(lamps, actions);
+        actions.append(aLeft, aRight);
+        box.append(actions);
         row.append(name, typeC, state, size, box);
         mbox.append(row);
         const tree = aliasTree(m);       // aliases hang off the trunk below
@@ -4208,6 +4208,43 @@ function aliasDiffChips(prof, base) {
     }
     return out;
 }
+function foldChips(host, bits, visible) {
+    // Chips beyond `visible` collapse behind a clickable "and X more" pill.
+    // Expanding appends the rest into the SAME row (flex-wrap), so growth is
+    // vertical — a row never runs off to the side.
+    for (const b of bits.slice(0, visible)) {
+        const chip = document.createElement('span');
+        chip.className = 'schip ' + (b.cls || ''); chip.textContent = b.txt;
+        host.append(chip);
+    }
+    if (bits.length <= visible) return;
+    const more = document.createElement('button');
+    more.type = 'button'; more.className = 'schip more';
+    const lbl = C.tf('uplift.ui.and_n_more', 'and {n} more',
+        { n: bits.length - visible });
+    more.textContent = lbl;
+    more.title = C.tf('uplift.ui.expand_all_settings', 'Expand to show all settings');
+    let open = false;
+    more.onclick = () => {
+        open = !open;
+        if (open) {
+            for (const b of bits.slice(visible)) {
+                const chip = document.createElement('span');
+                chip.className = 'schip ' + (b.cls || '');
+                chip.textContent = b.txt; chip.dataset.folded = '1';
+                host.insertBefore(chip, more);
+            }
+            more.textContent = C.tf('uplift.ui.show_fewer', 'show fewer');
+            more.title = C.tf('uplift.ui.collapse_settings', 'Collapse back');
+        } else {
+            host.querySelectorAll('[data-folded]').forEach(n => n.remove());
+            more.textContent = lbl;
+            more.title = C.tf('uplift.ui.expand_all_settings', 'Expand to show all settings');
+        }
+    };
+    host.append(more);
+}
+
 function copyBtn(textToCopy, title) {
     const b = document.createElement('button');
     b.className = 'copybtn'; b.textContent = '\u29c9'; b.title = title;
@@ -4228,10 +4265,7 @@ function aliasTree(m) {
         const mk = cell(alias); mk.className = 'alias-name';
         mk.title = tip || ('Serves this model on the API under the name "' + alias + '"');
         l.append(mk, copyBtn(alias, 'Copy alias "' + alias + '"'));
-        for (const txt of chips) {
-            const chip = document.createElement('span');
-            chip.className = 'schip'; chip.textContent = txt; l.append(chip);
-        }
+        foldChips(l, chips.map(t => ({ txt: t, cls: '' })), 6);
         lines.push(l);
     };
     if (m.settings && m.settings.model_alias) line(m.settings.model_alias, []);
@@ -4252,10 +4286,7 @@ function aliasTree(m) {
             const mk = cell(p.display_name || p.name); mk.className = 'alias-name dim';
             mk.title = 'Stored profile — expose it as an API model from the editor to serve requests under its name';
             l.append(tag, mk);
-            for (const txt of aliasDiffChips(p.settings, m.settings)) {
-                const chip = document.createElement('span');
-                chip.className = 'schip'; chip.textContent = txt; l.append(chip);
-            }
+            foldChips(l, aliasDiffChips(p.settings, m.settings).map(t => ({ txt: t, cls: '' })), 6);
             profHost.append(l);
         }
         if (!profHost.children.length) profHost.remove();
@@ -4722,12 +4753,19 @@ function gsFlatOf(sec, field) {
 }
 function gsOrigFlat(flat) {
     const map = GS_MAP[flat];
-    if (!map) return GS_ORIG[flat];
-    return (GS_ORIG[map[0]] || {})[map[1]];
+    if (map) return (GS_ORIG[map[0]] || {})[map[1]];
+    // env tunables: baseline is the uplift-stored value (they never live
+    // in GS/GS_ORIG; isEnvFlat + ENV_VALUES are the source of truth).
+    // unset normalises to null so clearing an empty row is not dirty.
+    if (typeof isEnvFlat === 'function' && isEnvFlat(flat))
+        return ENV_VALUES[flat] != null ? ENV_VALUES[flat] : null;
+    return GS_ORIG[flat];
 }
 function gsValFlat(flat) {
     const map = GS_MAP[flat];
     if (map) return gsGet(map[0], map[1]);
+    if (typeof isEnvFlat === 'function' && isEnvFlat(flat))
+        return ENV_VALUES[flat] !== undefined ? ENV_VALUES[flat] : undefined;
     return GS._shadow ? GS._shadow[flat] : undefined;
 }
 function gsDisplay(v) {
@@ -4827,7 +4865,14 @@ function gsUpdateSaveBtn() {
 }
 async function gsCommit() {
     const fields = Object.assign({}, gsDirty);
-    const okAll = await gsSaveNow(fields);
+    // env tunables ride a different endpoint; classic fields keep the
+    // full-payload global-settings save (P1A-6 semantics unchanged)
+    const envFields = {}, classicFields = {};
+    for (const [k, v] of Object.entries(fields))
+        (isEnvFlat(k) ? envFields : classicFields)[k] = v;
+    let okAll = true;
+    if (Object.keys(classicFields).length) okAll = await gsSaveNow(classicFields);
+    if (okAll && Object.keys(envFields).length) okAll = await envSave(envFields);
     if (okAll) {
         Object.keys(gsDirty).forEach(k => delete gsDirty[k]);
         // a save that touched restart-requiring fields leaves the server
@@ -4872,6 +4917,9 @@ async function gsSaveNow(fields) {
         if (v !== undefined) body[flat] = v;
     }
     Object.assign(body, GS._shadow || {}, fields);
+    // env tunables never belong in the global-settings payload (gsCommit
+    // routes them to PUT /env-overrides; strip any residue defensively)
+    for (const k of Object.keys(body)) if (isEnvFlat(k)) delete body[k];
     try {
         const r = await fetch(`${API}/admin/api/global-settings`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -5058,53 +5106,99 @@ async function gateClusterFromServer() {
 }
 
 // ---------------------------------------------------------------------------
-// ENV-2: experimental env tunables — uplift-owned OMLX_* overrides shown as
-// a standalone EXPERIMENTAL box under the settings panel. Decoupled from the
-// global SAVE bar on purpose: each row has its own effect class (live /
-// restart-model / restart-server), so APPLY posts immediately per row-set.
-// Genuine launch env always wins (server reports those rows shadowed).
+// ENV-2: experimental env tunables — uplift-owned OMLX_* overrides rendered
+// as ordinary rows INSIDE the existing settings sections (scheduler/memory ->
+// Resource Management, mtp -> Generation Defaults, engine -> Advanced).
+// Each row: readable label + EXPERIMENTAL chip, description with [VAR] and
+// the honest effect below. Edits queue into the same gsDirty/savebar flow as
+// every other setting; gsCommit splits env keys onto PUT /env-overrides and
+// the rest onto global-settings. Genuine launch env always wins (shadowed
+// rows carry an amber warning; the stored value waits for the launch env to
+// change).
 // ---------------------------------------------------------------------------
 
 let ENV_SPEC = [];        // allow-list from the server (single source of truth)
 let ENV_VALUES = {};      // stored values (server view)
 let ENV_SHADOW = {};      // name -> value_masked for genuine launch env
-const ENV_DIRTY = {};     // name -> pending string value (null = remove)
+
+function envByName(flat) {
+    return ENV_SPEC.find(a => a.name === flat) || null;
+}
+function isEnvFlat(flat) {
+    return !!envByName(flat);
+}
 
 async function pollEnvTunables() {
-    const wrap = $('env-tunables');
-    if (!wrap) return;
     try {
         const d = await fetchJson(`${API}/uplift/api/env-overrides`);
         ENV_SPEC = d.allowed || [];
         ENV_VALUES = d.values || {};
         ENV_SHADOW = {};
         for (const s of (d.shadowed || [])) ENV_SHADOW[s.name] = s.value_masked;
-        renderEnvTunables();
-    } catch (err) {
-        wrap.innerHTML = '';
-        emptyMsg(wrap, 'env-overrides not served (' + err.message + ')');
+        // rows appear once the spec lands, even if settings already rendered
+        if (GS) renderGlobalSettings();
+    } catch (_) { /* endpoint missing (old server): rows simply absent */ }
+}
+
+function envRows(...groups) {
+    return ENV_SPEC.filter(a => groups.includes(a.group)).map(envRow);
+}
+
+function envRow(a) {
+    const label = a.label || a.name;
+    let hint = a.desc + ' \u2014 [' + a.name + '] \u00b7 ' +
+        (a.effect === 'immediate'
+            ? C.tf('uplift.env.applies_next_request', 'applies on next request')
+            : a.effect === 'model'
+                ? C.tf('uplift.env.restart_model', 'RESTART MODEL to apply')
+                : C.tf('uplift.env.restart_server', 'RESTART SERVER to apply'));
+    if (a.default) hint += ' \u00b7 ' + C.tf('uplift.env.stock_default', 'stock default') + ': ' + a.default;
+    if (a.name in ENV_SHADOW) {
+        hint += ' \u26a0 ' + C.tf('uplift.env.shadow_warn',
+            'environment variable already set — it takes precedence until removed from the launch environment')
+            + ' (' + ENV_SHADOW[a.name] + ')';
     }
+    const cur = ENV_VALUES[a.name] != null ? ENV_VALUES[a.name] : '';
+    let ctl;
+    if (a.type === 'bool') {
+        ctl = document.createElement('select');
+        for (const [v, t] of [['', '\u2014'], ['1', C.tf('uplift.env.on', 'On')],
+                               ['0', C.tf('uplift.env.off', 'Off')]]) {
+            const o = document.createElement('option');
+            o.value = v; o.textContent = t; ctl.append(o);
+        }
+        ctl.value = cur;
+        ctl.onchange = () => gsQueueSave(a.name, ctl.value === '' ? null : ctl.value);
+    } else {
+        ctl = document.createElement('input');
+        ctl.type = (a.type === 'int' || a.type === 'float') ? 'number' : 'text';
+        if (a.min !== undefined) ctl.min = a.min;
+        if (a.max !== undefined) ctl.max = a.max;
+        if (a.type === 'float') ctl.step = 'any';
+        if (a.default) ctl.placeholder = a.default;
+        ctl.value = cur;
+        const queue = () => gsQueueSave(a.name, ctl.value === '' ? null : ctl.value);
+        ctl.addEventListener('input', queue);
+        ctl.addEventListener('change', queue);
+    }
+    const row = gsRow('env', label, hint, ctl, { flat: a.name });
+    // EXPERIMENTAL signage right of the label, same slot as the restart chip
+    const lab = row.querySelector('.uname');
+    const chip = document.createElement('span');
+    chip.className = 'rqchip env-badge';
+    chip.textContent = C.tf('uplift.env.badge', 'EXPERIMENTAL');
+    chip.title = C.tf('uplift.env.badge_hint',
+        'Uplift-owned environment override; not part of oMLX settings');
+    lab.insertBefore(chip, lab.querySelector('small'));
+    if (a.name in ENV_SHADOW) row.classList.add('env-shadowed');
+    return row;
 }
 
-function envEffectLabel(effect) {
-    if (effect === 'immediate') return C.tf('uplift.env.applies_next_request', 'applies on next request');
-    if (effect === 'model') return C.tf('uplift.env.restart_model', 'RESTART MODEL to apply');
-    return C.tf('uplift.env.restart_server', 'RESTART SERVER to apply');
-}
-
-function envVal(a) {
-    const cur = (a.name in ENV_DIRTY) ? ENV_DIRTY[a.name] : (ENV_VALUES[a.name] ?? null);
-    return cur;
-}
-
-async function envApplyEdits() {
-    const body = {};
-    for (const [k, v] of Object.entries(ENV_DIRTY)) body[k] = v;
-    if (!Object.keys(body).length) return;
+async function envSave(fields) {
     try {
         const r = await fetchJson(`${API}/uplift/api/env-overrides`,
             { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body) });
+              body: JSON.stringify(fields) });
         for (const [name, outcome] of Object.entries(r.results || {})) {
             if (outcome === 'applied_live')
                 toast(C.tf('uplift.env.applied_live', 'Applied on next request') + ': ' + name, 3000);
@@ -5115,123 +5209,20 @@ async function envApplyEdits() {
             else if (outcome === 'shadowed')
                 toast(C.tf('uplift.env.shadowed_saved', 'Saved for later — the launch environment variable takes precedence') + ': ' + name, 5000);
         }
-        Object.keys(ENV_DIRTY).forEach(k => delete ENV_DIRTY[k]);
+        // server-effect vars leave the restart owed: arm the same
+        // RESTART SERVER button the classic fields use
+        if (Object.values(r.results || {}).includes('restart_server'))
+            gsRestartPending = true;
         ENV_VALUES = r.values || {};
         ENV_SHADOW = {};
         for (const s of (r.shadowed || [])) ENV_SHADOW[s.name] = s.value_masked;
-        renderEnvTunables();
+        return true;
     } catch (err) {
         toast('env tunables: ' + err.message, 5000);
+        return false;
     }
 }
 
-function renderEnvTunables() {
-    const wrap = $('env-tunables');
-    if (!wrap || !ENV_SPEC.length) return;
-    wrap.textContent = '';
-    const box = document.createElement('div');
-    box.className = 'gs-box env-box';
-
-    const head = document.createElement('div');
-    head.className = 'gs-box-title env-box-title';
-    head.textContent = C.tf('uplift.env.title', 'Experimental tunables');
-    const badge = document.createElement('span');
-    badge.className = 'rqchip env-badge';
-    badge.textContent = C.tf('uplift.env.badge', 'EXPERIMENTAL');
-    badge.title = C.tf('uplift.env.badge_hint', 'Uplift-owned environment overrides; not part of oMLX settings');
-    head.append(badge);
-
-    const bodyEl = document.createElement('div');
-    bodyEl.className = 'gs-box-body';
-
-    const intro = document.createElement('small');
-    intro.className = 'dim';
-    intro.textContent = C.tf('uplift.env.intro',
-        'Expert knobs read by oMLX from the environment. Values are stored by Uplift and seeded at server start; a variable already set in the launch environment always wins. Removing Uplift restores stock defaults.');
-    bodyEl.append(intro);
-
-    for (const a of ENV_SPEC) {
-        const row = document.createElement('div');
-        row.className = 'urow settings';
-        const lab = cell(a.name); lab.className = 'uname';
-        const eb = document.createElement('span');
-        eb.className = 'rqchip env-effect env-effect-' + a.effect;
-        eb.textContent = envEffectLabel(a.effect);
-        lab.append(eb);
-        const h = document.createElement('small');
-        h.className = 'dim';
-        h.textContent = a.desc + (a.default ? ' — ' + C.tf('uplift.env.stock_default', 'stock default') + ': ' + a.default : '');
-        lab.append(h);
-
-        const ctl = cell(''); ctl.className = 'gctl';
-        const cur = envVal(a);
-        let input;
-        if (a.type === 'bool') {
-            input = document.createElement('select');
-            for (const [v, t] of [['', '—'], ['1', C.tf('uplift.env.on', 'On')], ['0', C.tf('uplift.env.off', 'Off')]]) {
-                const o = document.createElement('option'); o.value = v; o.textContent = t; input.append(o);
-            }
-            input.value = cur == null ? '' : String(cur);
-        } else {
-            input = document.createElement('input');
-            input.type = (a.type === 'int' || a.type === 'float') ? 'number' : 'text';
-            if (a.min !== undefined) input.min = a.min;
-            if (a.max !== undefined) input.max = a.max;
-            if (a.type === 'float') input.step = 'any';
-            if (a.default) input.placeholder = a.default;
-            input.value = cur == null ? '' : String(cur);
-        }
-        const queue = () => {
-            const v = input.value === '' ? null : input.value;
-            if ((envVal(a) ?? null) === v) delete ENV_DIRTY[a.name];
-            else ENV_DIRTY[a.name] = v;
-            envUpdateApplyBtn();
-        };
-        input.addEventListener('input', queue);
-        input.addEventListener('change', queue);
-        ctl.append(input);
-        // .urow.settings is a 3-col grid (label | diff slot | control); the
-        // env box has no diff chip, but the reserved middle slot keeps the
-        // control column aligned with the settings panel above
-        const slot = document.createElement('span'); slot.className = 'diffslot';
-        row.append(lab, slot, ctl);
-
-        if (a.name in ENV_SHADOW) {
-            row.classList.add('env-shadowed');
-            const warn = document.createElement('small');
-            warn.className = 'dim env-shadow-warn';
-            warn.textContent = C.tf('uplift.env.shadow_warn',
-                'environment variable already set — it takes precedence until removed from the launch environment')
-                + ' (' + ENV_SHADOW[a.name] + ')';
-            row.append(warn);
-        }
-        bodyEl.append(row);
-    }
-
-    const foot = document.createElement('div');
-    foot.className = 'env-box-foot';
-    const apply = document.createElement('button');
-    apply.id = 'env-apply'; apply.className = 'se-btn savebtn';
-    apply.textContent = C.tf('uplift.env.apply', 'APPLY');
-    apply.onclick = envApplyEdits;
-    const clr = document.createElement('button');
-    clr.id = 'env-discard'; clr.className = 'se-btn';
-    clr.textContent = C.tf('uplift.env.discard', 'DISCARD');
-    clr.onclick = () => { Object.keys(ENV_DIRTY).forEach(k => delete ENV_DIRTY[k]); renderEnvTunables(); };
-    foot.append(clr, apply);
-    bodyEl.append(foot);
-
-    box.append(head, bodyEl);
-    wrap.append(box);
-    envUpdateApplyBtn();
-}
-
-function envUpdateApplyBtn() {
-    const b = document.getElementById('env-apply'), c = document.getElementById('env-discard');
-    const n = Object.keys(ENV_DIRTY).length;
-    if (b) { b.disabled = !n; b.textContent = n ? C.tf('uplift.env.apply_n', 'APPLY ({n})', { n }) : C.tf('uplift.env.apply', 'APPLY'); }
-    if (c) c.style.display = n ? '' : 'none';
-}
 
 
 function renderGlobalSettings() {
@@ -5393,6 +5384,8 @@ function renderGlobalSettings() {
         gsText('sampling','repetition_penalty','sampling_repetition_penalty', L,
                { number: true, min: 1, step: 0.05 }),
         { flat: 'sampling_repetition_penalty' }));
+    // ENV-2: MTP experimental tunables join their semantic group
+    for (const r of envRows('mtp')) body.append(r);
 
     // ---- Resource Management
     body.append(gsTitle('Resource Management'));
@@ -5431,6 +5424,8 @@ function renderGlobalSettings() {
                    { number: true, min: 1, step: 1, placeholder: L.res.custom_ph }),
             { flat: 'memory_guard_custom_ceiling_gb' }));
     }
+    // ENV-2: scheduler/memory experimental tunables join their semantic group
+    for (const r of envRows('scheduler', 'memory')) body.append(r);
 
     // ---- Cache
     body.append(gsTitle('Cache'));
@@ -5538,6 +5533,8 @@ function renderGlobalSettings() {
         }
         body.append(prow);
     }
+    // ENV-2: engine experimental tunables join Advanced (burst / batching)
+    for (const r of envRows('engine')) body.append(r);
 
     // group staged children into bordered section boxes; each gs-title
     // starts a new box. U5 fix (user round): the old CSS multicol
