@@ -177,7 +177,8 @@ def _py_compiles(data: bytes) -> bool:
         return False
 
 
-def compile_gate(parsed: dict, tree_root: str) -> list[str]:
+def compile_gate(parsed: dict, tree_root: str,
+                 overrides: dict | None = None) -> list[str]:
     """py_compile/json checks on in-memory post-apply content. Returns a
     list of human-readable problems (empty = gate passed)."""
     import py_compile
@@ -189,11 +190,14 @@ def compile_gate(parsed: dict, tree_root: str) -> list[str]:
         if target is None:
             problems.append(f"{fp['path']}: {why}")
             continue
-        try:
-            with open(target, "rb") as fh:
-                content = fh.read()
-        except FileNotFoundError:
-            content = None
+        if overrides and fp["path"] in overrides:
+            content = overrides[fp["path"]]
+        else:
+            try:
+                with open(target, "rb") as fh:
+                    content = fh.read()
+            except FileNotFoundError:
+                content = None
         res = diffapply._apply_file(content, fp)  # in-memory only
         if res.get("already"):
             continue
@@ -221,8 +225,14 @@ def compile_gate(parsed: dict, tree_root: str) -> list[str]:
     return problems
 
 
-def validate(diff: bytes, tree_root: str) -> dict:
+def validate(diff: bytes, tree_root: str,
+             overrides: dict | None = None) -> dict:
     """Full gate WITHOUT writing anything.
+
+    overrides: {rel_path: bytes} — tree content to use instead of the live
+    file for those paths (gate the candidate against the tree as reconcile
+    will find it at apply time: this patch's own hunks unwound to pristine,
+    other patches' hunks still applied).
 
     Returns {ok, reason?, advisories?, files: [per-file results],
              compile_problems: [...], content_sha256}.
@@ -233,8 +243,8 @@ def validate(diff: bytes, tree_root: str) -> dict:
         return {"ok": False, "reason": f"parse: {parsed['reason']}",
                 "files": [], "compile_problems": [],
                 "content_sha256": content_sha256}
-    check = diffapply.check_diff(diff, tree_root)
-    compile_problems = compile_gate(parsed, tree_root)
+    check = diffapply.check_diff(diff, tree_root, overrides=overrides)
+    compile_problems = compile_gate(parsed, tree_root, overrides=overrides)
     ok = all(f["status"] in ("ok", "already") for f in check["files"]) \
         and bool(check["files"]) and not compile_problems
     return {"ok": ok,
@@ -244,7 +254,8 @@ def validate(diff: bytes, tree_root: str) -> dict:
             "content_sha256": content_sha256}
 
 
-def fetch_and_gate(source: dict, tree_root: str) -> dict:
+def fetch_and_gate(source: dict, tree_root: str,
+                   overrides: dict | None = None) -> dict:
     """One-stop for add/check: source = {kind, repo?, pr?, url?, data?,
     insecure_tls?}. Fetch (if needed) then validate. On fetch failure the
     caller MUST keep stored state untouched (fail-safe rule)."""
@@ -273,7 +284,7 @@ def fetch_and_gate(source: dict, tree_root: str) -> dict:
     if not fetched["ok"]:
         return {"ok": False, "stage": "fetch", "reason": fetched["reason"],
                 "advisories": advisories}
-    gate = validate(fetched["data"], tree_root)
+    gate = validate(fetched["data"], tree_root, overrides=overrides)
     return {**gate, "stage": "gate", "advisories": advisories,
             "content_sha256": gate["content_sha256"],
             "source_head_sha": fetched.get("source_head_sha"),
@@ -322,7 +333,8 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                  "state": "disabled", "state_detail": "not yet validated"}
         manifest["patches"].append(patch)
 
-    result = fetch_and_gate(source, tree_root)
+    result = fetch_and_gate(source, tree_root,
+                            overrides=_pristine_overlay(store, patch, tree_root))
     if not result["ok"]:
         # fail-safe: nothing stored, nothing state-changed
         if creating:
@@ -391,6 +403,43 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
 
 def _desired_version_entry(store, patch) -> dict | None:
     return store.get_version(patch, patch.get("desired_version"))
+
+
+def _pristine_overlay(store, patch, tree_root: str) -> dict | None:
+    """{rel_path: pristine_bytes} for files the patch currently has applied
+    against the LIVE keg — the backup copies are byte-exact pre-apply state.
+    Gating a fresh (vanilla-based) candidate must see the tree WITHOUT this
+    patch's own hunks, the way reconcile unwinds them before (re)applying.
+    None when the patch has nothing applied -> gate against the live tree."""
+    keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
+    overlay: dict[str, bytes] = {}
+    seen = False
+    vers = sorted(patch.get("versions", []),
+                  key=lambda v: ((v.get("applied") or {}).get("at") or "",
+                                 v.get("v", 0)))
+    for v in vers:
+        applied = v.get("applied") or {}
+        if not applied or applied.get("keg_id") != keg:
+            continue
+        bd = v.get("backup_dir")
+        if not bd:
+            continue
+        seen = True
+        bd_full = bd if os.path.isabs(bd) else os.path.join(store.base_dir, bd)
+        meta_path = os.path.join(bd_full, "meta.json")
+        meta = diffapply._load_backup_meta(meta_path)
+        for rel_key, info in meta.get("files", {}).items():
+            if rel_key in overlay:
+                continue  # oldest backup wins: newest-first unwind restores it last
+            if info.get("existed"):
+                try:
+                    with open(diffapply._backup_path(bd_full, rel_key), "rb") as fh:
+                        overlay[rel_key] = fh.read()
+                except OSError:
+                    overlay.pop(rel_key, None)
+            else:
+                overlay[rel_key] = None  # file was created by the patch
+    return (overlay or None) if seen else None
 
 
 def view(store, tree_root: str, keg: str | None) -> dict:
@@ -485,20 +534,40 @@ def rollback(store, patch_id: str, to_v: int | None = None) -> dict:
 
 def remove_patch(store, patch_id: str, tree_root: str) -> dict:
     """Remove a patch: restore its pristine files NOW if it is applied, then
-    drop manifest entry + stored files (backups included)."""
+    drop manifest entry + stored files (backups included). Unwinds EVERY
+    applied version's backup for the live keg (a version cycle leaves a
+    chain; restoring only one link does not reach vanilla bytes)."""
     manifest = store.load()
     p = store.find(manifest, patch_id)
     if p is None:
         return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
-    restore_report = None
-    desired = _desired_version_entry(store, p)
-    if desired and desired.get("backup_dir"):
-        bd = desired["backup_dir"]
+    restore_report = {"ok": True, "reason": None, "files": []}
+    keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
+    chain = [v for v in p.get("versions", [])
+             if (v.get("applied") or {}).get("keg_id") == keg]
+    chain.sort(key=lambda v: ((v["applied"] or {}).get("at") or "", v.get("v", 0)),
+               reverse=True)
+    for v in chain:
+        bd = v.get("backup_dir")
+        if not bd:
+            continue
         bd_full = bd if os.path.isabs(bd) else os.path.join(store.base_dir, bd)
-        restore_report = diffapply.restore_backup(bd_full, tree_root)
+        one = diffapply.restore_backup(bd_full, tree_root)
+        for key in ("files",):
+            restore_report[key] = restore_report[key] + one.get(key, [])
+        if not one["ok"]:
+            restore_report["ok"] = False
+            restore_report["reason"] = one["reason"]
+            break
+    if chain:
         import shutil
 
-        shutil.rmtree(os.path.dirname(bd_full), ignore_errors=True)
+        for v in chain:
+            bd = v.get("backup_dir")
+            if bd:
+                bd_full = (bd if os.path.isabs(bd)
+                           else os.path.join(store.base_dir, bd))
+                shutil.rmtree(os.path.dirname(bd_full), ignore_errors=True)
     for ver in p.get("versions", []):
         pf = ver.get("patch_file")
         if pf:
@@ -524,7 +593,7 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
     data = _read_patch_file(store, desired)
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
-    result = validate(data, tree_root)
+    result = validate(data, tree_root, overrides=_pristine_overlay(store, p, tree_root))
     p["last_verified"] = {"at": _patches.now_iso(),
                           "ok": result["ok"]}
     store.save(manifest)
@@ -543,7 +612,8 @@ def check_all(store, tree_root: str) -> dict:
         pid = p.get("id")
         if not p.get("enabled") or src.get("kind") not in ("github_pr", "url"):
             continue
-        result = fetch_and_gate(src, tree_root)
+        result = fetch_and_gate(src, tree_root,
+                                overrides=_pristine_overlay(store, p, tree_root))
         if not result["ok"]:
             reports[pid] = {"check": "error", "reason": result.get("reason")}
             continue

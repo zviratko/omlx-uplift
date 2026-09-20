@@ -107,8 +107,34 @@ def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
             "changed_on_disk": changed}
 
 
+def _unwind_applied(store, tree_root, keg, patch, skip_v=None):
+    """Restore the backups of every applied version of this patch for THIS
+    keg, newest first, until the tree is back at pristine vanilla. PR diffs
+    are always vanilla-based, so a (re)apply must start from unwound bytes —
+    stacking v2 on v1-patched files is not the declarative contract.
+    Returns False (patch marked needs_review) on a failed restore."""
+    pid = patch["id"]
+    vers = [v for v in patch.get("versions", [])
+            if (v.get("applied") or {}).get("keg_id") == keg
+            and v.get("v") != skip_v]
+    vers.sort(key=lambda v: ((v["applied"] or {}).get("at") or "", v.get("v", 0)),
+              reverse=True)
+    for v in vers:
+        bd = v.get("backup_dir")
+        if bd:
+            result = diffapply.restore_backup(_abs(store, bd), tree_root)
+            if not result["ok"]:
+                patch["state"] = "needs_review"
+                patch["state_detail"] = f"restore failed: {result['reason']}"
+                patch["state_changed_at"] = _patches.now_iso()
+                return False
+        v.pop("applied", None)
+    return True
+
+
 def _restore_patch(store, tree_root, keg, patch, version) -> dict:
-    """Restore pristine bytes from the backup of the applied version."""
+    """Restore pristine bytes: unwind the whole applied chain for this keg
+    (a version cycle v1->v2 leaves backups that must rewind newest-first)."""
     pid = patch["id"]
     bd = version.get("backup_dir")
     applied = version.get("applied") or {}
@@ -118,12 +144,9 @@ def _restore_patch(store, tree_root, keg, patch, version) -> dict:
         patch["state"] = "disabled"
         patch["state_detail"] = "disabled"
         return {"id": pid, "action": "already-clean"}
-    result = diffapply.restore_backup(_abs(store, bd), tree_root)
-    if not result["ok"]:
-        patch["state"] = "needs_review"
-        patch["state_detail"] = f"restore failed: {result['reason']}"
-        return {"id": pid, "action": "needs_review", "reason": result["reason"]}
-    version.pop("applied", None)
+    if not _unwind_applied(store, tree_root, keg, patch):
+        return {"id": pid, "action": "needs_review",
+                "reason": patch["state_detail"]}
     patch["state"] = "disabled"
     patch["state_detail"] = "disabled — files restored"
     patch["state_changed_at"] = _patches.now_iso()
@@ -180,9 +203,25 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
                 applied = desired.get("applied") or {}
                 if (state == "applied" and applied.get("keg_id") == keg
                         and _files_match(tree_root, applied.get("files", []))):
+                    # desired is live; still unwind any stale earlier-version
+                    # backups so a later disable/remove has a clean chain
                     patch["last_verified"] = {"keg_id": keg,
                                               "at": _patches.now_iso()}
+                    if any((v.get("applied") or {}).get("keg_id") == keg
+                           and v.get("v") != desired.get("v")
+                           for v in patch.get("versions", [])):
+                        _unwind_applied(store, tree_root, keg, patch,
+                                        skip_v=desired.get("v"))
+                        report["changed"] = True
                     continue  # fast verify-only path
+                # (re)apply always starts from pristine bytes: unwind every
+                # other applied version of this patch first (version cycle)
+                if not _unwind_applied(store, tree_root, keg, patch,
+                                       skip_v=desired.get("v")):
+                    report["reports"].append(
+                        {"id": patch["id"], "action": "needs_review",
+                         "reason": patch.get("state_detail")})
+                    continue
                 res = _apply_patch(store, tree_root, keg, patch, desired, deadline)
                 if res["action"] == "deferred":
                     deferred = True

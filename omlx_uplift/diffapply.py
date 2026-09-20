@@ -450,8 +450,13 @@ def _all_hunks(content_lines: list[tuple[bytes, bytes]], hunks: list[dict],
 # Public modes
 # --------------------------------------------------------------------------
 
-def check_diff(diff: bytes | str, tree_root: str) -> dict:
+def check_diff(diff: bytes | str, tree_root: str,
+               overrides: dict | None = None) -> dict:
     """Dry-run against a tree. Per-file structured results, no writes.
+
+    overrides: {rel_path: bytes} replaces the on-disk content for those
+    paths — used to gate a candidate against the tree as reconcile would
+    find it at apply time (this patch's own hunks unwound to pristine).
 
     {"ok": bool, "reason": str|None,
      "files": [{"path", "status": ok|already|fail, "reason": str|None}]}
@@ -468,16 +473,19 @@ def check_diff(diff: bytes | str, tree_root: str) -> dict:
             results.append({"path": fp["path"], "status": "fail", "reason": why})
             all_ok = False
             continue
-        try:
-            with open(target, "rb") as fh:
-                content = fh.read()
-        except FileNotFoundError:
-            content = None
-        except OSError as exc:
-            results.append({"path": fp["path"], "status": "fail",
-                            "reason": f"cannot read: {exc}"})
-            all_ok = False
-            continue
+        if overrides and fp["path"] in overrides:
+            content = overrides[fp["path"]]
+        else:
+            try:
+                with open(target, "rb") as fh:
+                    content = fh.read()
+            except FileNotFoundError:
+                content = None
+            except OSError as exc:
+                results.append({"path": fp["path"], "status": "fail",
+                                "reason": f"cannot read: {exc}"})
+                all_ok = False
+                continue
         res = _apply_file(content, fp)
         if res.get("already"):
             results.append({"path": fp["path"], "status": "already",
