@@ -60,6 +60,7 @@ async function loadLocale(lang) {
         gsLocalize();
         applyI18n(document);
         relabelExplore();   // JS-built labels (chips, cell titles) too
+        updateModeLabels(); // UPLOADER-1: mode badges are JS-built, same re-label need
         document.documentElement.lang = j.lang;
     } catch (e) {
         /* key-fallback keeps the UI fully English; not worth a toast */

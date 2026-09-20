@@ -486,6 +486,24 @@ test('TRAY-1: tray re-add restores the removed card width, not pill gs-w', () =>
     assert.ok(stash >= 0 && stash < place, 'stash is consumed once, before placing');
 });
 
+/* UPLOADER-1 drift test: mode badges (dl-mode/qz-mode/up-mode/hm-sub) are
+   JS-built by updateModeLabels(); loadLocale re-translates everything else
+   via applyI18n + relabelExplore, so it MUST re-run updateModeLabels too —
+   otherwise the badges flash raw i18n keys until some unrelated re-render. */
+test('UPLOADER-1: loadLocale re-labels JS-built mode badges', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const m = src.match(/async function loadLocale\(lang\) \{[\s\S]*?\n\}/);
+    assert.ok(m, 'loadLocale function found');
+    const body = m[0];
+    const relabel = body.indexOf('relabelExplore()');
+    const mode = body.indexOf('updateModeLabels()');
+    assert.ok(relabel >= 0, 'loadLocale re-labels explore chips (pre-existing contract)');
+    assert.ok(mode >= 0, 'loadLocale re-labels mode badges (UPLOADER-1)');
+    assert.ok(mode > relabel, 'mode badges relabel after the catalog swap');
+});
+
 /* F-035b drift test: tray pills are created AFTER grid init, so the one-time
    setupDragIn at boot can never bind them; renderTray must re-run it. */
 test('F-035b: renderTray re-binds setupDragIn for late-created pills', () => {
