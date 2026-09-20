@@ -153,7 +153,11 @@ body::before {
 /* ---- Layout: strict grid, defined spacing, breathing band on top ---- */
 
 header.top {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    /* round 6 item 13: nowrap — during boot (locale labels swapping in,
+       fonts landing) the tabs strip grows for a moment and wrap dropped the
+       trailing icons, incl. the classic-dashboard home icon, onto a second
+       line. The tabs strip shrinks instead (min-width:0 below). */
+    display: flex; align-items: center; gap: 14px; flex-wrap: nowrap;
     padding: 8px 2px 14px; margin-bottom: 18px;
     border-bottom: 1px solid var(--edge);   /* rule under header lockup */
     /* the whole top menu floats: it sticks under the red strip on scroll */
@@ -578,11 +582,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .stale .stat-value { opacity: .4; }
 
 /* ---- Tabs (top nav, hairline underline = active, NASA control-strip) ---- */
-.tabs { display: flex; gap: 2px; border: 1px solid var(--edge); }
+.tabs { display: flex; gap: 2px; border: 1px solid var(--edge);
+    min-width: 0; overflow-x: auto; scrollbar-width: none; }   /* absorbs header pressure (item 13) */
+@media (max-width: 900px) { header.top { flex-wrap: wrap; } }  /* mobile keeps the old flow */
 .tabs a {
     color: var(--dim); font: 400 11px/1 var(--mono); text-transform: uppercase;
     letter-spacing: 0.08em; text-decoration: none; padding: 9px 14px;
-    border-right: 1px solid var(--edge);
+    border-right: 1px solid var(--edge); white-space: nowrap; flex: 0 0 auto;
 }
 .tabs a:last-child { border-right: 0; }
 .tabs a:hover { color: var(--ink); background: var(--edge); }
@@ -647,6 +653,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 [data-theme="light"] .admin-table .typebadge.t-embed { border-color: #6d3a96; color: #6d3a96; }
 .admin-table .uname .nmain .uid { font: 400 11px/1.4 var(--mono); }
 .admin-table .urow.head.admin .head-left { display: flex; gap: 14px; }
+.admin-table .urow.head.admin .head-left { justify-content: space-between; }
+.admin-table .urow.head.admin .hchips { display: flex; gap: 14px; }
+.admin-table .urow.head.admin .hchips.right { margin-left: auto; }
 .admin-table .urow.head.admin span:not(:first-child) { text-align: right; }
 .admin-table .urow.head.admin .head-left span { text-align: left; }
 .admin-table .nrow1 { display: flex; align-items: center; gap: 8px; min-width: 0;
@@ -681,22 +690,29 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* ---- Model boxes: every model + its aliases live inside one fully framed
    box; boxes alternate ground shades; alias lines get their own distinct
    shade and hang off a visible trunk that splits from the main model. ---- */
+/* each model + its aliases in ONE fully framed box; boxes alternate shades.
+   round 6 item 7: the inner action box loses its frame (shade only) and the
+   first row's top padding shrinks — lamps and action box sit at the TOP of
+   the card, no border band above them. */
 #model-admin .mbox { border: 1px solid var(--edge); margin-bottom: 6px;
     background: var(--card); }
 #model-admin .mbox:nth-of-type(even) { background: var(--row2); }
-#model-admin .mbox .urow.admin { border-bottom: 0; }
-#model-admin .mbox .settings-box { background: var(--field); }
+#model-admin .mbox .urow.admin { border-bottom: 0; padding-top: 6px; }
+#model-admin .mbox .settings-box { background: var(--field); border-color: transparent; }
 /* trunk: vertical line dropping from the main row, splitting into aliases.
    Styled as an explicit elbow conduit (rounded corner into each alias) so
    the hierarchy reads at a glance, not a hairline. */
 /* trunk hangs below the model NAME (x≈80px = after the lamps), not the box
    edge. Square diagram-style wiring: a vertical trunk drops and turns right
    into every line; the trunk ENDS at the bottom-most branch (no stub below). */
-#model-admin .alias-tree { margin: 0 10px 8px 96px; padding: 8px 0 2px 0; }
+/* round 6 item 8: gap between the model row, alias lines and the bottom of
+   the box is uniform 6px — same as alias-to-alias spacing */
+#model-admin .alias-tree { margin: 0 10px 6px 96px; padding: 6px 0 0 0; }
 #model-admin .alias-line { position: relative; display: flex; align-items: center;
     gap: 8px; margin: 0 0 6px; padding: 4px 8px; min-width: 0;
     border: 1px solid var(--edge); background: var(--field);
     font: 400 12px/1.4 var(--mono); }
+#model-admin .alias-tree .alias-line:last-child { margin-bottom: 0; }
 /* each line draws its own trunk segment: riser from above + square corner
    into the line. -20px overdraw bridges the 6px gaps between lines so the
    segments read as one continuous wire, and stops at the last corner. */
@@ -995,6 +1011,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
    deletes leftmost | effective chips (measured fold) | HIDE/EDIT rightmost. ---- */
 .admin-table .settings-box.hrow { display: flex; align-items: flex-start; gap: 10px;
     width: 100%; min-width: 0; align-self: stretch; }
+.admin-table .settings-box.hrow.solo { justify-content: space-between; }
+/* round 6 items 5/6: missing-model + template boxes have no chips. The
+   acts column sits leftmost (same x as DELETE in normal rows), EDIT right;
+   buttons are vertically centred inside the single-line box. */
+.admin-table .settings-box.solo { align-items: center; }
 .admin-table .act-col { display: flex; flex-direction: column; gap: 4px;
     align-items: flex-start; flex: 0 0 auto; }
 .admin-table .act-col.right { align-items: flex-end; }
@@ -1230,6 +1251,15 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
     font: 400 12px/1.5 var(--mono); }
 .row-editor .se-hint { color: var(--dim); font-size: 10px; grid-column: 1 / -1; }
 .row-editor .se-kwarg { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
+/* round 6 item 3: in the editor MODAL the kwargs rows inherited .se-row's
+   3-column grid (1fr + 110px + fixed 220px) — with only key+value+× the
+   value was squeezed and × floated in a dead column; the reasoning-effort
+   custom row (4 controls) wrapped onto a second line mid-grid. Span the
+   pair and lay the controls out as one flex line. */
+.se-kwarg { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px;
+    grid-template-columns: none; }
+.se-kwarg input[type=text], .se-kwarg select { flex: 1 1 0; min-width: 0; width: auto; }
+.se-kwarg .se-btn { flex: 0 0 auto; }
 .row-editor .se-kwarg input, .row-editor .se-kwarg select { width: auto; }
 .row-editor .se-profiles { margin: 4px 0 8px; }
 .row-editor .se-prof-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

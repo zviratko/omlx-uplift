@@ -182,6 +182,11 @@ function showEmbedPage(tab, sub) {
     const path = EMBED_TARGETS[id];
     if (link) link.href = API + path;
     if (!frame) return;
+    // round 6 item 11: the embedded classic dashboard reads its theme from
+    // same-origin localStorage keys — mirror the uplift theme into them
+    // before the frame loads: day -> light, enhanced -> dark + enhanced
+    // readability, everything else (auto/dark/cockpit) -> dark
+    syncEmbedTheme();
     if (frame.dataset.loaded) { frame.hidden = false; return; }
     // Standalone `omlx-uplift view` proxies the API only — it cannot serve
     // the classic HTML pages; the open-in-new-tab link points at upstream.
@@ -266,8 +271,40 @@ function applyPrefs() {
     $('btn-motion').style.opacity = motionOff ? 0.4 : 1;
     if (typeof syncThemeMenu === 'function') syncThemeMenu();
     rerenderChartsTheme();
+    if (typeof syncEmbedTheme === 'function') syncEmbedTheme();   // round 6 item 11
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyPrefs);
+
+/* round 6 item 11: mirror the uplift theme into the embedded classic pages
+   (benchmarks, chat, cluster iframes). Classic reads omlx-chat-theme and
+   omlx-enhanced-readability from same-origin localStorage at boot; frames
+   already loaded get the attribute pushed directly (same-origin). Mapping:
+   day -> light; enhanced -> dark + enhanced readability; auto/dark/cockpit
+   -> dark. */
+function embedThemeState() {
+    const t = prefs.theme === 'auto'
+        ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : (prefs.theme || 'dark');
+    const light = t === 'light';
+    return { theme: light ? 'light' : 'dark', enhanced: t === 'enhanced' };
+}
+function syncEmbedTheme() {
+    const st = embedThemeState();
+    try {
+        localStorage.setItem('omlx-chat-theme', st.theme);
+        localStorage.setItem('omlx-enhanced-readability', st.enhanced ? 'on' : 'off');
+    } catch (_) {}
+    for (const f of document.querySelectorAll('.embed-frame')) {
+        if (!f.dataset.loaded) continue;
+        try {   // same-origin: push live so an already-open iframe follows
+            const de = f.contentDocument && f.contentDocument.documentElement;
+            if (!de) continue;
+            de.setAttribute('data-theme', st.theme);
+            if (st.enhanced) de.setAttribute('data-enhanced-readability', '');
+            else de.removeAttribute('data-enhanced-readability');
+        } catch (_) {}
+    }
+}
 
 const motionOff = () => document.documentElement.dataset.motion === 'off';
 /* Theme picker: dropdown menu (hover opens like the navbar dropdowns);
@@ -2680,7 +2717,40 @@ function renderEditorFields(container) {
                     { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 }));
             }
         }
+        if (seValues.mtp_enabled !== undefined) {
+            g.append(seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
+                hint: m.mtp_compatible
+                    ? "Drafts several tokens per step with the model's built-in MTP head."
+                    : (m.mtp_compatibility_reason || 'Not compatible with this model'),
+                onChange: renderEditorFields.bind(null, container) }));
+            if (seValues.mtp_enabled)
+                sub(g).append(seBind('number', 'mtp_num_draft_tokens', {
+                    label: C.tf('uplift.ui.max_draft_tokens_per_cycle', 'Max draft tokens per cycle'), min: 1, step: 1,
+                    hint: 'Speculative depth. Empty = model default (usually 3); '
+                        + 'an adaptive controller picks 1..max from acceptance rates. '
+                        + 'Set 1 to fix depth-1 cycles.' }));
+        }
+        const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
+        if (seValues.vlm_mtp_enabled !== undefined &&
+            S_.VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES.has(drafterType)) {
+            g.append(seBind('bool', 'vlm_mtp_enabled', { label: 'VLM MTP',
+                hint: 'Speculative decoding via an external MTP drafter model.',
+                onChange: renderEditorFields.bind(null, container) }));
+            if (seValues.vlm_mtp_enabled) {
+                const sb = sub(g);
+                const pool = S_.vlmMtpDrafters(models, m.id).map(x => ({ value: x.id }));
+                sb.append(seBind('select', 'vlm_mtp_draft_model', { label: 'Drafter model', options: [
+                    { value: '', label: 'Select an assistant or MTP drafter…' }, ...pool], picker: true }));
+                sb.append(seBind('number', 'vlm_mtp_draft_block_size',
+                    { label: C.tf('uplift.ui.draft_block_size_tokens_per_round_blank_4', 'Draft block size (tokens per round, blank = 4)'), step: 1 }));
+            }
+        }
+        // round 6 item 4: DFlash is its own section, not grouped under
+        // Speculative Decoding (different mechanism — block diffusion).
+        // Header only when the field set actually exists for this model.
         if (seValues.dflash_enabled !== undefined) {
+            section('DFlash');
+            g = grid();
             g.append(seBind('bool', 'dflash_enabled', { label: 'DFlash',
                 hint: m.dflash_compatible === false ? (m.dflash_compatibility_reason || 'not compatible') : '',
                 onChange: renderEditorFields.bind(null, container) }));
@@ -2722,34 +2792,6 @@ function renderEditorFields(container) {
                     { value: 'adaptive', label: 'adaptive (default)' },
                     { value: 'dflash', label: 'dflash' },
                     { value: 'ddtree', label: 'ddtree' }], picker: true }));
-            }
-        }
-        if (seValues.mtp_enabled !== undefined) {
-            g.append(seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
-                hint: m.mtp_compatible
-                    ? "Drafts several tokens per step with the model's built-in MTP head."
-                    : (m.mtp_compatibility_reason || 'Not compatible with this model'),
-                onChange: renderEditorFields.bind(null, container) }));
-            if (seValues.mtp_enabled)
-                sub(g).append(seBind('number', 'mtp_num_draft_tokens', {
-                    label: C.tf('uplift.ui.max_draft_tokens_per_cycle', 'Max draft tokens per cycle'), min: 1, step: 1,
-                    hint: 'Speculative depth. Empty = model default (usually 3); '
-                        + 'an adaptive controller picks 1..max from acceptance rates. '
-                        + 'Set 1 to fix depth-1 cycles.' }));
-        }
-        const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
-        if (seValues.vlm_mtp_enabled !== undefined &&
-            S_.VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES.has(drafterType)) {
-            g.append(seBind('bool', 'vlm_mtp_enabled', { label: 'VLM MTP',
-                hint: 'Speculative decoding via an external MTP drafter model.',
-                onChange: renderEditorFields.bind(null, container) }));
-            if (seValues.vlm_mtp_enabled) {
-                const sb = sub(g);
-                const pool = S_.vlmMtpDrafters(models, m.id).map(x => ({ value: x.id }));
-                sb.append(seBind('select', 'vlm_mtp_draft_model', { label: 'Drafter model', options: [
-                    { value: '', label: 'Select an assistant or MTP drafter…' }, ...pool], picker: true }));
-                sb.append(seBind('number', 'vlm_mtp_draft_block_size',
-                    { label: C.tf('uplift.ui.draft_block_size_tokens_per_round_blank_4', 'Draft block size (tokens per round, blank = 4)'), step: 1 }));
             }
         }
     }
@@ -3856,8 +3898,12 @@ async function renderModelAdmin(force) {
     // meta columns (type/state/size) now live INSIDE the model cell's first
     // line, so their sort controls ride the header's left cell as chips
     const hcL = document.createElement('span'); hcL.className = 'head-left';
-    for (const [label, key] of [['model', 'name'], ['type', 'type'],
-                                 ['state', 'state'], ['size', 'size']]) {
+    // round 6 item 12: sort chips sit above the values they sort — model and
+    // type label the LEFT edge (line-2 badge), size + state ride the cell's
+    // right edge in the row's own order (size, then state)
+    const leftChips = document.createElement('span'); leftChips.className = 'hchips';
+    const rightChips = document.createElement('span'); rightChips.className = 'hchips right';
+    const chip = (label, key) => {
         const c = document.createElement('span');
         c.textContent = label + (sortKey === key ? (sortDir === 1 ? ' \u25b2' : ' \u25bc') : '');
         if (key) {
@@ -3869,8 +3915,11 @@ async function renderModelAdmin(force) {
                 renderModelAdmin(true);
             };
         }
-        hcL.append(c);
-    }
+        return c;
+    };
+    leftChips.append(chip('model', 'name'), chip('type', 'type'));
+    rightChips.append(chip('size', 'size'), chip('state', 'state'));
+    hcL.append(leftChips, rightChips);
     const hcR = document.createElement('span');
     head.append(hcL, hcR);
     table.append(head);
@@ -3920,7 +3969,9 @@ async function renderModelAdmin(force) {
             const al = lamp('ALIAS:' + a, true, 'Serves this model on the API under the name "'
                 + a + '" — click to copy', () => copyText(a));
             al.classList.add('alias-lamp');
-            lamps.append(al);
+            // round 6 item 9: the lamp itself copies on click, but it reads
+            // as a status light — a visible copy icon makes it discoverable
+            lamps.append(al, copyBtn(a, 'Copy alias "' + a + '"'));
         }
         // type badge: colour-coded, fixed-width like the lamps above, sits
         // left of the model name on line 2 (round 5). Unknown types stay
@@ -3945,14 +3996,13 @@ async function renderModelAdmin(force) {
                 seg.textContent = 'LOADING ~' + Math.ceil(m.loading_remaining_seconds_estimate) + 's';
             sw.append(seg);
         } else if (m.loaded) {
+            // round 6: the lone IDLE half is gone — LOADED itself is the
+            // unload control (same pattern as PRESENT being the load control)
             const lo = document.createElement('button');
             lo.className = 'lsw-seg on'; lo.textContent = 'LOADED';
-            lo.title = 'Model is loaded'; lo.disabled = true;
-            const idl = document.createElement('button');
-            idl.className = 'lsw-seg lit'; idl.textContent = 'IDLE';
-            idl.title = 'Unload this model';
-            tapBtn(idl, () => postModelAction(m.id, 'unload'));
-            sw.append(lo, idl);
+            lo.title = 'Model is loaded — click to unload';
+            tapBtn(lo, () => postModelAction(m.id, 'unload'));
+            sw.append(lo);
         } else {
             const pr = document.createElement('button');
             pr.className = 'lsw-seg present'; pr.textContent = 'PRESENT';
@@ -3969,16 +4019,15 @@ async function renderModelAdmin(force) {
         // action box at 50% that reads as "centre of the card")
         const gap5 = document.createElement('span'); gap5.className = 'nrow-gap';
         head1.append(lamps, gap5, size, state);
-        // badge width tracks the widest lamp above it (localised labels
-        // change lamp width; the badge must always fit its own text).
-        // Measured after the row joins the DOM — offsets need layout.
+        // badge is EXACTLY the FAVOURITE lamp's size (round 6: max-of-lamps
+        // made long types like RERANKER wider). Measured after layout; the
+        // label ellipsises inside the fixed box rather than widening it.
         nmain.prepend(typeC);
         name.append(head1, nmain);
         requestAnimationFrame(() => {
-            let w = 0;
-            for (const lp of lamps.querySelectorAll('.lamp'))
-                w = Math.max(w, lp.getBoundingClientRect().width);
-            if (w) typeC.style.minWidth = w + 'px';
+            const fav = lamps.querySelector('.lamp');
+            if (fav) { const w = fav.getBoundingClientRect().width;
+                if (w) { typeC.style.minWidth = w + 'px'; typeC.style.width = w + 'px'; } }
         });
         // right group: one shaded box, exactly 2 lines tall (user round
         // 2026-09-20): deletes leftmost, effective-setting chips in the
@@ -4066,11 +4115,11 @@ async function renderModelAdmin(force) {
                 al.className = 'lamp alias-lamp on'; al.textContent = 'ALIAS:' + e.alias;
                 al.title = 'API name "' + e.alias + '" — click to copy';
                 tapBtn(al, () => copyText(e.alias));
-                head1.append(al);
+                head1.append(al, copyBtn(e.alias, 'Copy alias "' + e.alias + '"'));
             }
             name.append(head1, nmain);
             const box = document.createElement('span');
-            box.className = 'settings-box hrow';
+            box.className = 'settings-box hrow solo';   // solo: no chips — centre the acts column
             const acts = document.createElement('span'); acts.className = 'act-col';
             const ds = document.createElement('button');
             ds.className = 'se-btn act danger'; ds.textContent = 'DELETE SETTINGS';
@@ -4707,12 +4756,12 @@ function renderTemplatesBox() {
             badge.className = 'typebadge t-tpl'; badge.textContent = 'TEMPLATE';
             const nmain = document.createElement('span'); nmain.className = 'nmain';
             const uid = cell(t.name); uid.className = 'uid';
-            nmain.append(badge, uid, copyBtn(t.name, 'Copy template name "' + t.name + '"'));
+            nmain.append(badge, uid);   // round 6 item 10: no copy icon for the internal id
             const desc = cell(t.description || ''); desc.className = 'dim umeta tpl-desc';
             head1.append(desc);
             name.append(nmain, head1);
             const box = document.createElement('span');
-            box.className = 'settings-box hrow tpl-box';
+            box.className = 'settings-box hrow tpl-box solo';
             const aDel = document.createElement('span'); aDel.className = 'act-col';
             const del = document.createElement('button');
             del.className = 'se-btn act danger'; del.textContent = 'DELETE SETTINGS';
