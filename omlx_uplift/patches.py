@@ -242,13 +242,33 @@ def _omlx_root() -> str | None:
     try:
         spec = importlib.util.find_spec("omlx")
     except (ImportError, ValueError):
-        return None
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    try:
-        return os.path.realpath(list(spec.submodule_search_locations)[0])
-    except OSError:
-        return None
+        spec = None
+    if spec is not None and spec.submodule_search_locations:
+        try:
+            return os.path.realpath(list(spec.submodule_search_locations)[0])
+        except OSError:
+            return None
+    # The uplift CLI runs in its OWN venv (tap install) where omlx is not
+    # importable — probe the standard Homebrew keg layout as a fallback so
+    # `omlx-uplift patches` still reaches the live tree for recovery.
+    import glob
+
+    prefixes = ["/opt/homebrew", "/usr/local"]
+    env_base = os.environ.get("HOMEBREW_PREFIX")
+    if env_base:
+        prefixes.insert(0, env_base)
+    layouts = (("opt", "omlx", "libexec", "lib", "python3.*",
+                "site-packages", "omlx"),      # brew formula with libexec venv
+               ("opt", "omlx", "lib", "python3.*",
+                "site-packages", "omlx"))      # plain site-packages formula
+    for pref in prefixes:
+        for layout in layouts:
+            hits = sorted(glob.glob(os.path.join(pref, *layout)))
+            hits = [h for h in hits
+                    if os.path.isfile(os.path.join(h, "__init__.py"))]
+            if hits:
+                return os.path.realpath(hits[-1])
+    return None
 
 
 # --------------------------------------------------------------------------
