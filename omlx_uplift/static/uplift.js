@@ -4171,6 +4171,7 @@ async function renderModelAdmin(force) {
             table.append(mbox);
         }
     }
+    scheduleAlign();   // profile chips line up with the base box (rAF)
 }
 
 /* shared informed-confirmation modal; runs act() on confirm, then refreshes */
@@ -4548,7 +4549,59 @@ function foldAll() {
         scheduleFold(h);
     }
 }
-window.addEventListener('resize', () => foldAll());
+window.addEventListener('resize', () => { foldAll(); scheduleAlign(); });
+
+// ---------------------------------------------------------------------------
+// Profile-line column alignment: the diff chips of a profile/alias line must
+// start at the SAME x as the first setting chip of the base model's right
+// box (user 2026-09-20: "the leftmost profile setting aligned horizontally
+// with the leftmost setting of the base model's right box"). The offset is
+// not a constant — it depends on the DELETE SETTINGS button width, which
+// follows the UI language, and on the window width — so MEASURE it and pin
+// the label column to the resulting flex-basis.
+// ---------------------------------------------------------------------------
+let alignPending = false;
+function scheduleAlign() {
+    if (alignPending) return;
+    alignPending = true;
+    requestAnimationFrame(() => { alignPending = false; alignProfileRows(); });
+}
+function alignProfileRows() {
+    let foldsDirty = false;
+    for (const mbox of document.querySelectorAll('#model-admin .mbox')) {
+        const lines = mbox.querySelectorAll(':scope > .alias-tree .alias-line, :scope > .prof-lines .alias-line');
+        if (!lines.length) continue;
+        const box = mbox.querySelector('.urow.admin .settings-box');
+        if (!box) continue;
+        const host = box.querySelector('.chip-host');
+        const firstChip = host && host.querySelector('.schip:not(.more)');
+        let targetX;
+        if (firstChip) targetX = firstChip.getBoundingClientRect().left;
+        else {   // no chips on the base row: align with its first button
+            const b = box.querySelector('.se-btn');
+            if (!b) continue;
+            targetX = b.getBoundingClientRect().left;
+        }
+        for (const l of lines) {
+            const lab = l.querySelector('.alias-lab');
+            if (!lab) continue;
+            lab.style.flex = '';                     // re-measure from free flow
+            lab.style.maxWidth = '';
+            const cs = getComputedStyle(l);
+            const contentX = l.getBoundingClientRect().left
+                + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
+            const gap = parseFloat(cs.columnGap) || 0;
+            const w = Math.round(targetX - gap - contentX);
+            if (w > 60) { lab.style.flex = `0 0 ${w}px`;
+                lab.style.maxWidth = 'none';         // the 42% cap fights the pin
+                foldsDirty = true; }
+        }
+    }
+    // pinned hosts changed width — their folds must re-measure (scheduleFold
+    // batches in its own rAF, i.e. after the pin above is laid out)
+    if (foldsDirty) for (const h of document.querySelectorAll(
+            '#model-admin .alias-line .chip-host')) scheduleFold(h);
+}
 
 function foldHost(rows) {
     const host = document.createElement('span');
@@ -4704,10 +4757,10 @@ function aliasTree(m) {
         if (!profHost.children.length) profHost.remove();
     };
     const c = profilesCache[m.id];
-    if (c && Date.now() - c.t < 30000) { renderProfiles(c.profs); }
+    if (c && Date.now() - c.t < 30000) { renderProfiles(c.profs); scheduleAlign(); }
     else fetchJson(`${API}/uplift/api/models/${encodeURIComponent(m.id)}/profiles`)
         .then(d => { profilesCache[m.id] = { t: Date.now(), profs: d.profiles || [] };
-                     renderProfiles(d.profiles || []); })
+                     renderProfiles(d.profiles || []); scheduleAlign(); })
         .catch(() => profHost.remove());
     if (!lines.length) {
         // no aliases yet: the tree box appears only once profiles resolve
