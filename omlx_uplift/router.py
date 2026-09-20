@@ -65,7 +65,22 @@ from .collector import get_collector
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 page_router = APIRouter()
-api_router = APIRouter()
+
+
+def _no_api_cache(response: Response) -> None:
+    """API-CACHE-1: the JSON endpoints shipped with NO cache headers at
+    all. Responses without validators/Cache-Control can be cached
+    heuristically by browser and proxy caches — after a pip upgrade that
+    swaps the locale catalog or retention config, a client could keep
+    serving stale JSON and the failure would look like the CACHE-1-era
+    'stale cache looks like a failed deploy' trap. Every uplift API
+    response is live data: no-store. (Routes that return a Response
+    object directly, like the SSE stream, skip dependency-set headers —
+    streams are never cached bodies anyway.)"""
+    response.headers.setdefault("Cache-Control", "no-store")
+
+
+api_router = APIRouter(dependencies=[Depends(_no_api_cache)])
 
 
 # --------------------------------------------------------------------------

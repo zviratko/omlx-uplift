@@ -293,3 +293,31 @@ def test_static_file_serves_304_with_no_body():
     etagi = up._static_etag(sti)
     r2 = up._static_file(_req({"if-none-match": etagi}), "index.html")
     assert r2.status_code == 304 and r2.headers["cache-control"] == "no-store"
+
+
+# ---------------------------------------------------------------------------
+# API-CACHE-1: every uplift API response must carry Cache-Control: no-store
+# (header-less JSON is heuristic-cache-bait for browsers and proxies).
+# ---------------------------------------------------------------------------
+
+def _test_app():
+    from fastapi import FastAPI
+    from omlx_uplift import router as upmod
+    app = FastAPI()
+    app.include_router(upmod.api_router, prefix="/uplift/api")
+    try:
+        from omlx.admin.auth import require_admin
+        app.dependency_overrides[require_admin] = lambda: True
+    except Exception:  # pragma: no cover - environment without admin pkg
+        pass
+    return app
+
+
+def test_api_endpoints_advertise_no_store():
+    from fastapi.testclient import TestClient
+    client = TestClient(_test_app())
+    for path in ("/uplift/api/locale?lang=ru", "/uplift/api/retention"):
+        r = client.get(path)
+        assert r.status_code == 200, (path, r.status_code)
+        assert r.headers.get("cache-control") == "no-store", (
+            path, dict(r.headers))
