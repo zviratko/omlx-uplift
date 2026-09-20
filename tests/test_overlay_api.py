@@ -20,6 +20,7 @@ def _mgr(settings: dict):
     mgr = MagicMock()
     mgr.get_all_settings.return_value = settings
     mgr.delete_settings.side_effect = lambda mid: settings.pop(mid, None) is not None
+    mgr.get_settings.side_effect = lambda mid: settings.get(mid) or ModelSettings()
     return mgr
 
 
@@ -99,12 +100,31 @@ async def test_get_model_settings_shape():
     assert out["settings"]["temperature"] == 0.42
 
 
-async def test_get_model_settings_unknown_404():
-    with patch.object(up, "settings_manager", return_value=MagicMock()), \
-         patch.object(up, "engine_pool", return_value=_pool(["other"])):
-        with pytest.raises(HTTPException) as ei:
-            await up.get_model_settings("ghost", is_admin=True)
-    assert ei.value.status_code == 404
+async def test_get_model_settings_unknown_returns_defaults():
+    # round 4: a stored-only ("missing") id must be GETtable — the whole
+    # point of the record is that it survives the model directory. Unknown
+    # ids now come back as default settings instead of 404.
+    mgr = _mgr({})
+    with patch.object(up, "settings_manager", return_value=mgr):
+        out = await up.get_model_settings("ghost", is_admin=True)
+    assert out["id"] == "ghost"
+    assert isinstance(out["settings"], dict)
+
+
+async def test_upsert_model_settings_writes_without_pool():
+    # the classic PUT 404s without an engine entry; the uplift POST upsert
+    # must write straight through set_settings
+    mgr = _mgr({})
+    captured = {}
+    def _set(mid, s): captured.update({mid: s.to_dict()})
+    mgr.set_settings.side_effect = _set
+    mgr.get_settings.return_value = ModelSettings()
+    req = MagicMock()
+    async def _json(): return {"temperature": 0.4}
+    req.json = _json
+    with patch.object(up, "settings_manager", return_value=mgr):
+        out = await up.upsert_model_settings("ghost", req, is_admin=True)
+    assert captured["ghost"]["temperature"] == 0.4
 
 
 async def test_delete_model_settings():

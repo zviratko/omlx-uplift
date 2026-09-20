@@ -423,5 +423,8 @@
  "uplift.ui.expand_all_settings": "Afficher tous les paramètres",
  "uplift.ui.show_fewer": "afficher moins",
  "uplift.ui.collapse_settings": "Replier",
- "uplift.ui.edit_profile": "Modifier ce profil"
+ "uplift.ui.edit_profile": "Modifier ce profil",
+ "uplift.ui.n_missing_records": "{n} entrée(s) manquante(s)",
+ "uplift.ui.profiles_shown_as_base_name": "Les profils apparaissent comme « modèle:profil ». ",
+ "uplift.ui.edit_stored_settings_missing": "Modifier les paramètres enregistrés (le modèle n'est pas sur le disque ; rien ne se recharge)"
 }

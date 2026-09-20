@@ -419,5 +419,8 @@
  "uplift.ui.expand_all_settings": "展开全部设置",
  "uplift.ui.show_fewer": "收起显示",
  "uplift.ui.collapse_settings": "折叠",
- "uplift.ui.edit_profile": "Edit this profile"
+ "uplift.ui.edit_profile": "Edit this profile",
+ "uplift.ui.n_missing_records": "{n} missing record(s)",
+ "uplift.ui.profiles_shown_as_base_name": "Profiles appear as \"model:profile\". ",
+ "uplift.ui.edit_stored_settings_missing": "Edit the stored settings (the model is not on disk; nothing reloads)"
 }

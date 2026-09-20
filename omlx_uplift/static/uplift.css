@@ -626,7 +626,28 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .admin-table .urow { display: grid; gap: 10px; padding: 8px 2px;
     border-bottom: 1px solid var(--edge); font: 400 12px/1.4 var(--mono);
     align-items: center; }
-.admin-table .urow.admin { grid-template-columns: minmax(0,3fr) 110px 104px 90px minmax(0,5fr); }
+.admin-table .urow.admin { grid-template-columns: minmax(0,3fr) minmax(0,5fr); }
+/* round 4: type/state/size live inside the model cell's top line; the grid
+   is two cells (model block | action box), both aligned to the TOP so the
+   action box matches the model block's height without dead padding */
+.admin-table .urow.admin { align-items: start; }
+.admin-table .urow.head.admin .head-left { display: flex; gap: 14px; }
+.admin-table .urow.head.admin span:not(:first-child) { text-align: right; }
+.admin-table .urow.head.admin .head-left span { text-align: left; }
+.admin-table .nrow1 { display: flex; align-items: center; gap: 8px; min-width: 0;
+    justify-content: flex-start; }
+.admin-table .umeta { font: 400 10px/1 var(--mono); letter-spacing: 0.05em;
+    flex: 0 0 auto; }
+.admin-table .uname { overflow: visible; text-overflow: clip; white-space: normal; }
+.admin-table .uname .nmain .uid { white-space: normal; overflow-wrap: anywhere; }
+.admin-table .lamp.alias-lamp { width: auto; padding: 0 7px; max-width: 260px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-table .lsw-seg.present { color: var(--dim); cursor: pointer; min-width: 82px; }
+.admin-table .lsw-seg.present:hover { border-color: var(--accent); color: var(--accent); }
+.admin-table .lsw-pct { font: 400 9px/1 var(--mono); color: var(--accent);
+    align-self: center; margin-left: 5px; letter-spacing: 0.05em; }
+.prune-col { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.prune-col .stat-sub { font-size: 9px; }
 .admin-table .urow.usage { grid-template-columns: minmax(0,4fr) minmax(0,2fr) 120px minmax(0,3fr); }
 /* action rows get a real trailing column (a 5th child on the 4-col grid used
    to wrap onto an implicit second row pinned to the LEFT edge — that is why
@@ -958,7 +979,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* --- model row right box (user round 2026-09-20): one shaded box, 2 lines:
    deletes leftmost | effective chips (measured fold) | HIDE/EDIT rightmost. ---- */
 .admin-table .settings-box.hrow { display: flex; align-items: center; gap: 10px;
-    width: 100%; min-width: 0; }
+    width: 100%; min-width: 0; align-self: stretch; }
 .admin-table .act-col { display: flex; flex-direction: column; gap: 4px;
     align-items: flex-start; flex: 0 0 auto; }
 .admin-table .act-col.right { align-items: flex-end; }

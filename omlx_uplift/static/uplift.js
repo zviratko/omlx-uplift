@@ -1835,6 +1835,12 @@ async function putModelSettings(model, settings) {
               body: JSON.stringify(settings) });
         return res.json().catch(() => ({ detail: 'http ' + res.status }));
     });
+    // missing (stored-only) models: the classic PUT 404s (no engine entry).
+    // The uplift POST upserts the stored record directly (round 4: missing
+    // settings are editable).
+    if (body.detail && /not found/i.test(String(body.detail))) {
+        return postJson(`${API}/uplift/api/models/${encodeURIComponent(model)}/settings`, settings);
+    }
     if (body.detail && body.success !== true) throw new Error(JSON.stringify(body.detail));
     if (body.success === false) throw new Error(JSON.stringify(body.detail || body));
     return body;
@@ -2052,6 +2058,7 @@ async function pollRequests() {
 }
 
 /* ---------------- model manager (Models tab) ---------------- */
+let settingsIdx = { stored: 0, orphans: [], entries: [], profiles: [] };  // survives adminModels refreshes (editor open)
 let seModel = null, seValues = {};   // seValues = live form state (modelspec shape)
 let seWantProfile = null;            // openEditor(model, name): land on this profile's tab
 let GRAMMAR_PARSERS = null;          // R10-7: cached /admin/api/grammar/parsers payload
@@ -2935,7 +2942,8 @@ function editorNode() {
     panel.className = 'modal nasa editor';
     const head = document.createElement('div');
     head.className = 'editor-head';
-    head.textContent = (seFormModel && seFormModel.model_alias ? seFormModel.model_alias + ' \u2192 ' : '') + seModel;
+    head.textContent = (seFormModel && seFormModel.model_alias ? seFormModel.model_alias + ' \u2192 ' : '')
+        + seModel + (seFormModel && seFormModel._missing ? '  (missing — stored settings only)' : '');
     const tabsRow = document.createElement('div');
     tabsRow.className = 'se-tabs';
     // F-013: profile/template management rows need their own container —
@@ -3039,7 +3047,7 @@ async function openEditor(model, profileName) {
             : (await fetchJson(`${API}/admin/api/models`)).models;
         entry = list.find(x => x.id === model) || null;
     } catch (_) { entry = null; }
-    seFormModel = entry || { id: model };
+    seFormModel = entry || { id: model, _missing: !entry };
     seValues = window.UpliftModelSpec.buildState(seFormModel, settings);
     seOrig = JSON.parse(JSON.stringify(seValues));
     seBaseVals = JSON.parse(JSON.stringify(seValues));
@@ -3161,11 +3169,44 @@ function seRenderTabs(panel) {
         }
     }
     if (g3.children.length) drop.append(g3);
+    // missing (stored-only) models + their profiles — round 4: the stored
+    // records are copy sources too, marked (missing) in the dropdown
+    const present = new Set((adminModels || []).map(x => x.id));
+    const idxM = settingsIdx || {};
+    const missingEnt = (idxM.entries || []).filter(e => !present.has(e.id));
+    const g4 = document.createElement('optgroup');
+    g4.label = 'Copy settings from missing model';
+    for (const e of missingEnt) {
+        const o = document.createElement('option'); o.value = 'msm:' + e.id;
+        o.textContent = '⊕ ' + e.id + ' (missing)'; g4.append(o);
+    }
+    for (const p of (idxM.profiles || [])) {
+        if (!missingEnt.some(e => e.id === p.base)) continue;  // present bases: own-profile group covers them
+        const o = document.createElement('option');
+        o.value = 'msp:' + encodeURIComponent(p.base) + '|' + p.name;
+        o.textContent = '⊕ ' + p.base + ':' + (p.display_name || p.name) + ' (missing)';
+        g4.append(o);
+    }
+    if (g4.children.length) drop.append(g4);
     drop.onchange = () => {
         const v = drop.value; if (!v) return;
         drop.value = '';
         const kind = v.slice(0, 3), id = v.slice(4);
-        if (kind === 'own') {
+        if (kind === 'msm') {
+            fetchJson(`${API}/admin/api/models/${encodeURIComponent(id)}/settings`)
+                .then(d => seApplyIntoActiveTab(d.settings || {}, id + ' (missing)'))
+                .catch(e => toast('Load failed: ' + e.message));
+        } else if (kind === 'msp') {
+            const mid = decodeURIComponent(id.slice(0, id.indexOf('|')));
+            const pname = id.slice(id.indexOf('|') + 1);
+            fetchJson(`${API}/uplift/api/models/${encodeURIComponent(mid)}/profiles`)
+                .then(d => {
+                    const p = (d.profiles || []).find(x => x.name === pname);
+                    if (p) seApplyIntoActiveTab(p.settings || {}, mid + ':' + pname + ' (missing)');
+                    else toast('profile not found: ' + pname);
+                })
+                .catch(e => toast('Load failed: ' + e.message));
+        } else if (kind === 'own') {
             const p = (window.__seProfiles || []).find(x => x.name === id);
             if (p) seApplyIntoActiveTab(p.settings || {}, p.display_name || p.name);
         } else if (kind === 'mpr') {
@@ -3382,7 +3423,7 @@ function seOpenModelCopyTab(panel, modelId, settings) {
    current as). */
 async function seLoadProfiles(model, host) {
     let profs = [];
-    try { profs = (await fetchJson(`${API}/admin/api/models/${encodeURIComponent(model)}/profiles`)).profiles || []; } catch (_) {}
+    try { profs = (await fetchJson(`${API}/uplift/api/models/${encodeURIComponent(model)}/profiles`)).profiles || []; } catch (_) {}
     host.textContent = '';
     window.__seProfiles = profs;
     const oldPt = null;
@@ -3598,7 +3639,17 @@ async function saveProfileTab(panel) {
                     expose_as_model: !!t.expose_as_model, api_name: t.api_name || null }
                 : body) });
         const d = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(d.detail || d.error || String(r.status));
+        if (!r.ok && /not found/i.test(String(d.detail || ''))) {
+            // missing base model: classic routes 404 (no engine entry);
+            // uplift's upsert create-or-updates the stored profile instead
+            const r2 = await fetch(`${API}/uplift/api/models/${encodeURIComponent(seModel)}/profiles`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(body) });
+            const d2 = await r2.json().catch(() => ({}));
+            if (!r2.ok) throw new Error(d2.detail || d2.error || String(r2.status));
+        } else if (!r.ok) {
+            throw new Error(d.detail || d.error || String(r.status));
+        }
         toast(C.t('uplift.toast.saved_profile', {name: name}));
         t.profileId = name; t.dirty = new Set();
         t._origExpose = !!t.expose_as_model; t._origApi = t.api_name || '';
@@ -3684,21 +3735,24 @@ async function renderModelAdmin(force) {
     const typeSel = $('ma-type');
     const type = typeSel.value || '';
     const onlyLoaded = $('ma-only-loaded').checked;
+    const onlyFav = $('ma-only-fav') && $('ma-only-fav').checked;
     const presentOnly = $('ma-present-only').checked;
     let shown = models.filter(m =>
         (!filter || m.id.toLowerCase().includes(filter) ||
          (m.display_name || '').toLowerCase().includes(filter) ||
          (m.settings && m.settings.model_alias || '').toLowerCase().includes(filter)) &&
         (!type || (m.model_type || '') === type) &&
+        (!onlyFav || m.is_favorite) &&
         (!onlyLoaded || m.loaded || m.is_loading));
     shown = sortModels(shown);
     // settings store drives the Missing section below the present rows
     const onManager = document.documentElement.dataset.tab === 'models'
         && document.documentElement.dataset.sub === 'manager'
         && !!$('ma-present-only');
-    let idx = { stored: adminModels.__idx ? adminModels.__idx.stored : 0, orphans: [], entries: [] };
-    if (onManager) { try { idx = await fetchJson(`${API}/admin/api/model-settings-index`); } catch (_) {} }
-    adminModels.__idx = idx;
+    let idx = { stored: settingsIdx.stored, orphans: settingsIdx.orphans || [],
+        entries: settingsIdx.entries || [], profiles: settingsIdx.profiles || [] };
+    if (onManager) { try { idx = await fetchJson(`${API}/admin/api/model-settings-index`);
+                            settingsIdx = idx; } catch (_) {} }
     const orphan = new Set(idx.orphans || []);
     const knownIds = new Set(models.map(m => m.id));
     const missingAll = (idx.entries || []).filter(e => !knownIds.has(e.id));
@@ -3709,8 +3763,12 @@ async function renderModelAdmin(force) {
     if (onManager) renderTemplatesBox();
     // stored/missing never follow the filters; shown counts every visible row
     $('models-admin-sub').textContent = `${loadedN}/${models.length} loaded \u00b7 `
-        + `${idx.stored} stored \u00b7 ${missingAll.length} missing \u00b7 `
-        + `${shown.length + missing.length} shown`;
+        + `${idx.stored} stored \u00b7 ${shown.length + missing.length} shown`;
+    // the missing counter lives UNDER the Prune button — it is that button's
+    // subject, not a table stat (round 4)
+    const orphanProf = (idx.profiles || []).filter(p => !knownIds.has(p.base)).length;
+    $('ma-missing-count').textContent = C.tf('uplift.ui.n_missing_records',
+        '{n} missing record(s)', { n: missingAll.length + orphanProf });
     const memUsed = stats ? stats.memUsed : null;
     $('ma-mem').textContent = memUsed !== null
         ? `memory ${C.fmtBytes(memUsed)} / ${C.fmtBytes(stats.memMax)}` : '';
@@ -3729,9 +3787,13 @@ async function renderModelAdmin(force) {
     if (!shown.length && !missing.length) {
         table.innerHTML = '<div class="empty">No match</div>'; return; }
     const head = document.createElement('div'); head.className = 'urow head admin';
-    for (const [label, key] of [['model', 'name'], ['type', 'type'], ['state', 'state'],
-                                 ['size', 'size'], ['', null]]) {
-        const c = cell(label + (sortKey === key ? (sortDir === 1 ? ' \u25b2' : ' \u25bc') : ''));
+    // meta columns (type/state/size) now live INSIDE the model cell's first
+    // line, so their sort controls ride the header's left cell as chips
+    const hcL = document.createElement('span'); hcL.className = 'head-left';
+    for (const [label, key] of [['model', 'name'], ['type', 'type'],
+                                 ['state', 'state'], ['size', 'size']]) {
+        const c = document.createElement('span');
+        c.textContent = label + (sortKey === key ? (sortDir === 1 ? ' \u25b2' : ' \u25bc') : '');
         if (key) {
             c.classList.add('sortable');
             c.onclick = () => {
@@ -3741,8 +3803,10 @@ async function renderModelAdmin(force) {
                 renderModelAdmin(true);
             };
         }
-        head.append(c);
+        hcL.append(c);
     }
+    const hcR = document.createElement('span');
+    head.append(hcL, hcR);
     table.append(head);
     for (const m of shown) {
         const mbox = document.createElement('div'); mbox.className = 'mbox';
@@ -3750,11 +3814,15 @@ async function renderModelAdmin(force) {
         row.dataset.mid = m.id;
         const name = document.createElement('span');
         name.className = 'uname'; name.title = m.model_path || m.id;
+        // line 1: lamps + ALIAS + type + state + size. line 2: the model id,
+        // free to wrap (long names flow instead of ellipsising) (round 4).
+        const head1 = document.createElement('span'); head1.className = 'nrow1';
         const nmain = document.createElement('span'); nmain.className = 'nmain';
         const uid = cell(m.id); uid.className = 'uid';
         nmain.append(uid, copyBtn(m.id, 'Copy model id'));
-        // PINNED / DEFAULT cockpit lamps: LEFTMOST (first line above the
-        // id), visually distinct from the settings chips in the right box
+        // PINNED / DEFAULT / FAVOURITE cockpit lamps, then the model ALIAS as
+        // its own lamp (round 4: an alias is not a profile — it must not
+        // render as one; the lamp shows the served name and copies it).
         const lamps = document.createElement('span'); lamps.className = 'lampstack inline';
         const lamp = (label, lit, title, fn) => {
             const b = document.createElement('button');
@@ -3780,36 +3848,50 @@ async function renderModelAdmin(force) {
                     return flagWrite(m.id, { is_default: !m.is_default },
                         () => putModelSettings(m.id, { is_default: !m.is_default }));
                 }));
-        name.append(lamps, nmain);
-        const typeC = cell(m.model_type || '\u2014'); typeC.className = 'dim';
-        // State: LOADED/IDLE rocker switch + API-name copy button. Clicking
-        // the inactive half runs the transition (LOADED loads, IDLE unloads).
+        if (m.settings && m.settings.model_alias) {
+            const a = m.settings.model_alias;
+            const al = lamp('ALIAS:' + a, true, 'Serves this model on the API under the name "'
+                + a + '" — click to copy', () => copyText(a));
+            al.classList.add('alias-lamp');
+            lamps.append(al);
+        }
+        const typeC = document.createElement('span');
+        typeC.className = 'umeta dim'; typeC.textContent = m.model_type || '\u2014';
+        // State: LOADED models keep the LOADED/IDLE rocker (IDLE half =
+        // unload). Present-but-unloaded show a single PRESENT pill that
+        // loads on click (round 4: "IDLE" for an unloaded model was a lie).
         const state = document.createElement('span');
         state.className = 'statewrap';
         const sw = document.createElement('span'); sw.className = 'lsw';
         if (m.is_loading) {
             const seg = document.createElement('span');
             seg.className = 'lsw-seg load'; seg.textContent = 'LOADING';
+            if (m.loading_remaining_seconds_estimate > 0)
+                seg.textContent = 'LOADING ~' + Math.ceil(m.loading_remaining_seconds_estimate) + 's';
             sw.append(seg);
-        } else {
+        } else if (m.loaded) {
             const lo = document.createElement('button');
-            lo.className = 'lsw-seg' + (m.loaded ? ' on' : '');
-            lo.textContent = 'LOADED';
-            lo.title = m.loaded ? 'Model is loaded' : 'Load this model';
-            lo.disabled = !!m.loaded;
-            if (!m.loaded) tapBtn(lo, () => postModelAction(m.id, 'load'));
+            lo.className = 'lsw-seg on'; lo.textContent = 'LOADED';
+            lo.title = 'Model is loaded'; lo.disabled = true;
             const idl = document.createElement('button');
-            idl.className = 'lsw-seg' + (m.loaded ? ' lit' : '');
-            idl.textContent = 'IDLE';
-            idl.title = m.loaded ? 'Unload this model' : 'Model is idle';
-            idl.disabled = !m.loaded;
-            if (m.loaded) tapBtn(idl, () => postModelAction(m.id, 'unload'));
+            idl.className = 'lsw-seg lit'; idl.textContent = 'IDLE';
+            idl.title = 'Unload this model';
+            tapBtn(idl, () => postModelAction(m.id, 'unload'));
             sw.append(lo, idl);
+        } else {
+            const pr = document.createElement('button');
+            pr.className = 'lsw-seg present'; pr.textContent = 'PRESENT';
+            pr.title = 'On disk, not loaded — click to load';
+            tapBtn(pr, () => postModelAction(m.id, 'load'));
+            sw.append(pr);
         }
         state.append(sw);
-        const size = cell(m.loaded ? (m.actual_size_formatted || C.fmtBytes(m.actual_size || m.estimated_size))
-                        : C.fmtBytes(m.estimated_size));
+        const size = document.createElement('span');
+        size.textContent = m.loaded ? (m.actual_size_formatted || C.fmtBytes(m.actual_size || m.estimated_size))
+                        : C.fmtBytes(m.estimated_size);
         size.className = 'usize';
+        head1.append(lamps, typeC, state, size);
+        name.append(head1, nmain);
         // right group: one shaded box, exactly 2 lines tall (user round
         // 2026-09-20): deletes leftmost, effective-setting chips in the
         // middle (folded when they genuinely don't fit), HIDE+EDIT rightmost
@@ -3868,7 +3950,7 @@ async function renderModelAdmin(force) {
             m.is_hidden ? 'Unhide' : 'Hide from pickers'));
         aEdit.append(btn('EDIT', () => openEditor(m.id), 'Edit settings', true));
         box.append(aDel, chips, aEdit);
-        row.append(name, typeC, state, size, box);
+        row.append(name, box);
         mbox.append(row);
         const tree = aliasTree(m);       // aliases hang off the trunk below
         if (tree) mbox.append(tree);
@@ -3881,16 +3963,27 @@ async function renderModelAdmin(force) {
         for (const e of missing) {
             const mbox = document.createElement('div'); mbox.className = 'mbox missing';
             const row = document.createElement('div'); row.className = 'urow admin';
+            row.dataset.mid = e.id;
             const name = document.createElement('span'); name.className = 'uname';
+            const head1 = document.createElement('span'); head1.className = 'nrow1';
             const nmain = document.createElement('span'); nmain.className = 'nmain';
             const uid = cell(e.id); uid.className = 'uid';
             nmain.append(uid, copyBtn(e.id, 'Copy model id'));
-            name.append(nmain);
-            const st = cell(orphan.has(e.id) ? 'MISSING' : 'EXTERNAL');
-            if (orphan.has(e.id)) st.className = 'spill miss';   // caution amber
-            else st.className = 'dim';
-            const box = document.createElement('span'); box.className = 'settings-box';
-            const acts = document.createElement('span'); acts.className = 'rowacts';
+            const st = document.createElement('span');
+            st.textContent = orphan.has(e.id) ? 'MISSING' : 'EXTERNAL';
+            st.className = orphan.has(e.id) ? 'spill miss' : 'dim umeta';  // caution amber
+            head1.append(st);
+            if (e.alias) {
+                const al = document.createElement('button');
+                al.className = 'lamp alias-lamp on'; al.textContent = 'ALIAS:' + e.alias;
+                al.title = 'API name "' + e.alias + '" — click to copy';
+                tapBtn(al, () => copyText(e.alias));
+                head1.append(al);
+            }
+            name.append(head1, nmain);
+            const box = document.createElement('span');
+            box.className = 'settings-box hrow';
+            const acts = document.createElement('span'); acts.className = 'act-col';
             const ds = document.createElement('button');
             ds.className = 'se-btn act danger'; ds.textContent = 'DELETE SETTINGS';
             ds.title = C.tf('uplift.ui.delete_stored_settings_for_this_missing_model', 'Delete stored settings for this missing model');
@@ -3899,20 +3992,38 @@ async function renderModelAdmin(force) {
                 + 'its settings record is deleted. This cannot be undone.',
                 async () => { await deleteStoredSettings(e.id); },
                 `Deleted settings for ${e.id}`);
-            const dm = document.createElement('button');
-            dm.className = 'se-btn act danger'; dm.textContent = 'DELETE MODEL';
-            dm.disabled = true;
-            dm.title = 'Nothing on disk to delete \u2014 only the settings record exists';
-            acts.append(ds, dm);
-            box.append(acts);
-            row.append(name, cell('\u2014'), st, cell('\u2014'), box);
+            acts.append(ds);
+            const aEdit = document.createElement('span'); aEdit.className = 'act-col right';
+            const ed = document.createElement('button');
+            ed.className = 'se-btn act edit'; ed.textContent = 'EDIT';
+            ed.title = C.tf('uplift.ui.edit_stored_settings_missing',
+                'Edit the stored settings (the model is not on disk; nothing reloads)');
+            ed.onclick = () => openEditor(e.id);
+            aEdit.append(ed);
+            box.append(acts, document.createElement('span'), aEdit);
+            row.append(name, box);
             mbox.append(row);
-            if (e.alias) {
+            // stored profiles of a missing base model: same fold box, EDIT
+            // opens them in the editor (round 4: missing settings editable)
+            const profs = (idx.profiles || []).filter(p => p.base === e.id);
+            if (profs.length) {
                 const tree = document.createElement('div'); tree.className = 'alias-tree';
-                const al = document.createElement('div'); al.className = 'alias-line';
-                const mk = cell(e.alias); mk.className = 'alias-name';
-                al.append(mk, copyBtn(e.alias, 'Copy alias "' + e.alias + '"'));
-                tree.append(al); mbox.append(tree);
+                for (const p of profs) {
+                    const l = document.createElement('div');
+                    l.className = 'alias-line dim-line';
+                    const lab = document.createElement('span'); lab.className = 'alias-lab';
+                    const mk = cell(p.display_name || p.name); mk.className = 'alias-name dim';
+                    const edit = document.createElement('button');
+                    edit.type = 'button'; edit.className = 'se-btn act edit alias-edit';
+                    edit.textContent = 'EDIT';
+                    edit.title = C.tf('uplift.ui.edit_profile', 'Edit this profile');
+                    edit.onclick = (ev) => { ev.stopPropagation(); openEditor(e.id, p.name); };
+                    lab.append(mk, copyBtn(e.id + ':' + p.name,
+                        'Copy "' + e.id + ':' + p.name + '"'), edit);
+                    l.append(lab, foldHost(2));
+                    tree.append(l);
+                }
+                mbox.append(tree);
             }
             table.append(mbox);
         }
@@ -4228,13 +4339,39 @@ const profilesCache = {};
 function aliasDiffChips(prof, base) {
     const SHORT = { temperature: 'TEMP', top_p: 'TOP_P', top_k: 'TOP_K',
         max_tokens: 'MAX', max_context_window: 'CTX', enable_thinking: 'THINK',
-        reasoning_effort: 'R', mtp_enabled: 'MTP', dflash_enabled: 'DFLASH',
-        turboquant_kv_enabled: 'TQ', ttl_seconds: 'TTL', trust_remote_code: 'TRC' };
+        reasoning_effort: 'R', ttl_seconds: 'TTL', trust_remote_code: 'TRC' };
+    // sub-settings that only take effect while their master switch is ON
+    const GATED = {
+        dflash: ['dflash_draft_model', 'dflash_draft_quant_enabled',
+            'dflash_draft_quant_weight_bits', 'dflash_draft_quant_activation_bits',
+            'dflash_draft_quant_group_size', 'dflash_max_ctx',
+            'dflash_in_memory_cache', 'dflash_in_memory_cache_max_entries',
+            'dflash_in_memory_cache_max_bytes'],
+        specprefill: ['specprefill_draft_model', 'specprefill_num_draft_tokens'],
+        mtp: ['mtp_num_draft_tokens'],
+        vlm_mtp: ['vlm_mtp_draft_model', 'vlm_mtp_draft_block_size'],
+    };
     const out = [];
     const b = base || {};
-    for (const [k, v] of Object.entries(prof || {})) {
+    const p = prof || {};
+    const on = (key) => !!(p[key] !== undefined ? p[key] : b[key]);
+    const enabled = {
+        dflash: on('dflash_enabled'), specprefill: on('specprefill_enabled'),
+        mtp: on('mtp_enabled') || on('vlm_mtp_enabled'),
+        vlm_mtp: on('vlm_mtp_enabled'),
+    };
+    for (const [k, v] of Object.entries(p)) {
         if (v === null || v === undefined || v === false) continue;
         if (b[k] === v) continue;
+        if (k === 'chat_template_kwargs' || k === 'forced_ct_kwargs') {
+            out.push('CT_KWARGS');       // round 4: no "[object Object]" chips
+            continue;
+        }
+        let gate = null;
+        for (const [g, keys] of Object.entries(GATED))
+            if (keys.includes(k) || k.startsWith(g + '_') && k !== g + '_enabled')
+                gate = g;
+        if (gate && !enabled[gate]) continue;   // master switch off: not effective
         const label = SHORT[k] || k.toUpperCase();
         out.push(label + (v === true ? '' : ' ' + v));
     }
@@ -4363,14 +4500,18 @@ function aliasTree(m) {
         edit.title = profileName ? C.tf('uplift.ui.edit_profile', 'Edit this profile')
                                  : 'Edit settings';
         edit.onclick = (e) => { e.stopPropagation(); openEditor(m.id, profileName); };
-        lab.append(mk, copyBtn(alias, 'Copy alias "' + alias + '"'), edit);
+        // profiles copy as "mainModel:profileName" (round 4); the base alias
+        // is a plain API name — copying it alone is what you serve
+        const copyTarget = profileName ? m.id + ':' + profileName : alias;
+        lab.append(mk, copyBtn(copyTarget, 'Copy "' + copyTarget + '"'), edit);
         const host = foldHost(2);
         host.classList.add('alias-chips');
         appendChips(host, chips.map(t => ({ txt: t, cls: '' })));
         l.append(lab, host);
         lines.push(l);
     };
-    if (m.settings && m.settings.model_alias) line(m.settings.model_alias, []);
+    // the base model_alias is NOT listed here (round 4): an alias is not a
+    // profile — it shows as an ALIAS lamp next to FAVOURITE/PINNED/DEFAULT
     for (const p of (m.exposed_profiles || []))
         line(p.api_name || p.name, aliasDiffChips(p.settings, m.settings),
              'Serves this model on the API under the name "' + (p.api_name || p.name) + '"',
@@ -4397,6 +4538,8 @@ function aliasTree(m) {
             lab.append(tag, mk, edit);
             const host = foldHost(2);
             host.classList.add('alias-chips');
+            const copyT = m.id + ':' + p.name;
+            lab.insertBefore(copyBtn(copyT, 'Copy "' + copyT + '"'), edit);
             appendChips(host, aliasDiffChips(p.settings, m.settings).map(t => ({ txt: t, cls: '' })));
             l.append(lab, host);
             profHost.append(l);
@@ -4405,7 +4548,7 @@ function aliasTree(m) {
     };
     const c = profilesCache[m.id];
     if (c && Date.now() - c.t < 30000) { renderProfiles(c.profs); }
-    else fetchJson(`${API}/admin/api/models/${encodeURIComponent(m.id)}/profiles`)
+    else fetchJson(`${API}/uplift/api/models/${encodeURIComponent(m.id)}/profiles`)
         .then(d => { profilesCache[m.id] = { t: Date.now(), profs: d.profiles || [] };
                      renderProfiles(d.profiles || []); })
         .catch(() => profHost.remove());
@@ -4472,6 +4615,7 @@ $('ma-filter').oninput = () => {
 };
 $('ma-type').onchange = () => { if (seModel) closeEditor(); renderModelAdmin(true); };
 $('ma-only-loaded').onchange = () => { if (seModel) closeEditor(); renderModelAdmin(true); };
+$('ma-only-fav').onchange = () => { if (seModel) closeEditor(); renderModelAdmin(true); };
 $('ma-present-only').onchange = () => { if (seModel) closeEditor(); renderModelAdmin(true); };
 
 /* ---------------- usage (Usage tab) ---------------- */
@@ -6430,35 +6574,55 @@ function renderUploader() {
 /* ------- stored settings: prune dialog (the list merged into Models) ---- */
 
 async function openPruneDialog() {
-    let orphans = [];
+    let orphans = [], profs = [];
     try {
         const idx = await fetchJson(`${API}/admin/api/model-settings-index`);
+        settingsIdx = idx;
         orphans = idx.orphans || [];
+        // round 4: profiles of orphaned bases AND of models that stay on
+        // disk but whose profiles were left behind are all prune candidates
+        const known = new Set(adminModels.map(m => m.id));
+        profs = (idx.profiles || []).filter(p => !known.has(p.base)
+            || orphans.includes(p.base));
     } catch (err) { toast('prune check failed: ' + err.message); return; }
-    if (!orphans.length) { toast(C.t('uplift.toast.nothing_to_prune')); return; }
+    if (!orphans.length && !profs.length) { toast(C.t('uplift.toast.nothing_to_prune')); return; }
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
     box.className = 'modal nasa';
     const h = document.createElement('h3');
-    h.textContent = `Prune model settings (${orphans.length})`;
+    h.textContent = `Prune model settings (${orphans.length + profs.length})`;
     const sub = document.createElement('div');
     sub.className = 'se-hint';
     sub.textContent = C.tf('uplift.ui.stored_configuration_for_models_that_no_longer_e', 'Stored configuration for models that no longer exist on disk. ')
+        + C.tf('uplift.ui.profiles_shown_as_base_name', 'Profiles appear as "model:profile". ')
         + (GW_LIVE
             ? 'Removed entries are deleted from this server\'s model_settings.json.'
             : 'Removed entries are deleted from the sandbox model_settings.json.');
     const list = document.createElement('div');
     list.className = 'prune-list';
-    const checks = orphans.map(id => {
+    const checks = [];
+    for (const id of orphans) {
         const lbl = document.createElement('label');
         lbl.className = 'row';
         const cb = document.createElement('input');
-        cb.type = 'checkbox'; cb.checked = true; cb.value = id;
+        cb.type = 'checkbox'; cb.checked = true; cb.value = id; cb.dataset.kind = 'model';
         lbl.append(cb, cell(id));
         list.append(lbl);
-        return cb;
-    });
+        checks.push(cb);
+    }
+    for (const p of profs) {
+        // profile of an orphaned base is covered by deleting the base record;
+        // show it anyway (user must see what goes), uncheckable individually
+        const lbl = document.createElement('label');
+        lbl.className = 'row';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.checked = true; cb.value = p.name;
+        cb.dataset.base = p.base; cb.dataset.kind = 'profile';
+        lbl.append(cb, cell(p.base + ':' + (p.display_name || p.name)));
+        list.append(lbl);
+        checks.push(cb);
+    }
     const bar = document.createElement('div');
     bar.className = 'row buttons';
     const all = document.createElement('button');
@@ -6474,13 +6638,22 @@ async function openPruneDialog() {
     doIt.className = 'danger';
     doIt.textContent = C.tf('uplift.ui.prune_selected', 'Prune selected');
     doIt.onclick = async () => {
-        const ids = checks.filter(c => c.checked).map(c => c.value);
-        if (!ids.length) { toast(C.t('uplift.toast.nothing_selected')); return; }
+        const sel = checks.filter(c => c.checked);
+        const ids = sel.filter(c => c.dataset.kind === 'model').map(c => c.value);
+        // profiles whose base record is also selected die with it (the
+        // server's delete_settings drops both); a second delete_profile for
+        // them is a harmless no-op, so send every checked profile anyway
+        const idSet = new Set(ids);
+        const profSel = sel.filter(c => c.dataset.kind === 'profile'
+            && !idSet.has(c.dataset.base))
+            .map(c => ({ base: c.dataset.base, name: c.value }));
+        if (!ids.length && !profSel.length) { toast(C.t('uplift.toast.nothing_selected')); return; }
         try {
-            const r = await postJson(`${API}/admin/api/prune-model-settings`, { ids });
-            toast(`Pruned ${r.removed.length} setting record(s)` +
-                (r.removed_templates && r.removed_templates.length
-                    ? `, ${r.removed_templates.length} template(s)` : ''));
+            const r = await postJson(`${API}/admin/api/prune-model-settings`,
+                { ids, profiles: profSel });
+            toast(`Pruned ${r.removed.length} setting record(s)`
+                + (r.removed_profiles && r.removed_profiles.length
+                    ? `, ${r.removed_profiles.length} profile(s)` : ''));
             overlay.remove();
             renderModelAdmin(true);
         } catch (err) { toast('prune failed: ' + err.message); }

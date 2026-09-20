@@ -434,5 +434,8 @@
  "uplift.ui.expand_all_settings": "모든 설정 보기",
  "uplift.ui.show_fewer": "적게 보기",
  "uplift.ui.collapse_settings": "접기",
- "uplift.ui.edit_profile": "Edit this profile"
+ "uplift.ui.edit_profile": "Edit this profile",
+ "uplift.ui.n_missing_records": "{n} missing record(s)",
+ "uplift.ui.profiles_shown_as_base_name": "Profiles appear as \"model:profile\". ",
+ "uplift.ui.edit_stored_settings_missing": "Edit the stored settings (the model is not on disk; nothing reloads)"
 }

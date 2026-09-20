@@ -192,9 +192,13 @@
                     <option value="">all types</option>
                 </select>
                 <label class="row"><input type="checkbox" id="ma-only-loaded"> loaded only</label>
+                <label class="row"><input type="checkbox" id="ma-only-fav"> favourites only</label>
                 <label class="row"><input type="checkbox" id="ma-present-only"> present only</label>
                 <span class="spacer"></span>
-                <button class="se-btn danger" id="btn-prune">Prune model settings…</button>
+                <span class="prune-col">
+                    <button class="se-btn danger" id="btn-prune">Prune model settings…</button>
+                    <span class="stat-sub" id="ma-missing-count"></span>
+                </span>
                 <span class="stat-sub" id="ma-mem"></span>
             </div>
             <div id="model-admin" class="admin-table"></div>
