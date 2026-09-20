@@ -259,8 +259,12 @@ class SubprocessPthTests(unittest.TestCase):
         self.env.update({
             # .pth semantics: pth_dir carries the file, PYTHONPATH resolves
             # BOTH the real uplift package (PKG_PARENT) and the fake omlx
-            # keg (self.root) — PYTHONPATH wins over real site-packages.
-            "PYTHONPATH": os.pathsep.join([PKG_PARENT, self.pth_dir, self.root]),
+            # keg (self.root). self.root comes FIRST: after
+            # `omlx-uplift install` the uplift package lives inside the
+            # keg's site-packages, which is PKG_PARENT itself — and that
+            # directory also carries the real omlx, which would otherwise
+            # shadow the fake keg and point sync at the live tree.
+            "PYTHONPATH": os.pathsep.join([self.root, PKG_PARENT, self.pth_dir]),
             "OMLX_BASE_PATH": self.data,  # store base -> data/uplift
             "HOME": self.tmp,             # keep real ~/.omlx out of reach
         })

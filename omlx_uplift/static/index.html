@@ -39,7 +39,13 @@
         <a href="#usage" data-tab="usage" data-i18n="uplift.tab.usage">Usage</a>
         <a href="#logs" data-tab="logs" data-i18n="uplift.tab.logs">Logs</a>
         <a href="#chat" data-tab="chat" data-i18n="navbar.tab.chat">Chat</a>
-        <a href="#settings" data-tab="settings" data-i18n="uplift.tab.settings">Server Settings</a>
+        <span class="dd" id="dd-settings">
+            <button class="dd-btn" data-tab="settings" id="dd-settings-btn"><span data-i18n="uplift.tab.settings">Server Settings</span> <span class="dd-caret">▾</span></button>
+            <span class="dd-menu" id="dd-settings-menu" hidden>
+                <a href="#settings" data-sub="global" data-i18n="uplift.tab.settings">Server Settings</a>
+                <a href="#settings" data-sub="patches" data-i18n="uplift.patches.title">Patches</a>
+            </span>
+        </span>
     </nav>
     <span class="chip" id="chip-uptime">—</span>
     <span class="chip" id="chip-device">—</span>
@@ -284,8 +290,34 @@
                 <button class="se-btn" id="logs-dl">download</button>
             </div>
             <pre class="logs logs-page" id="logs">—</pre>
-        </div></div></div></div></section><section class="card wide page-card" data-id="settings-page" data-tab="settings" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span>Server settings</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Server settings <span class="right" id="gs-sub"></span></h2>
-        <div class="card-body"><div id="gs-body" class="admin-table"><div class="empty">—</div></div></div></div></div></div></section><section class="card wide page-card" data-id="helper-page" data-tab="models" data-sub="helper" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span>Helper models</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Helper models <span class="right" id="hm-sub"></span></h2>
+        </div></div></div></div></section><section class="card wide page-card" data-id="settings-page" data-tab="settings" data-sub="global" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span>Server settings</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Server settings <span class="right" id="gs-sub"></span></h2>
+        <div class="card-body"><div id="gs-body" class="admin-table"><div class="empty">—</div></div></div></div></div></div></section><section class="card wide page-card" data-id="patches-page" data-tab="settings" data-sub="patches" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span data-i18n="uplift.patches.title">Patches</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.patches.title">Patches</span> <span class="right" id="pt-sub"></span></h2>
+        <div class="card-body">
+            <div id="pt-warn" class="pt-banner" hidden></div>
+            <div id="pt-killswitch" class="pt-banner pt-kill" hidden></div>
+            <div class="pt-toolbar">
+                <label class="pt-auto"><input type="checkbox" id="pt-auto-check"> <span data-i18n="uplift.patches.auto_check">Check for updates automatically</span></label>
+                <button type="button" class="btn" id="pt-check-btn" data-i18n="uplift.patches.check_now">Check for updates</button>
+                <span class="pt-add">
+                    <select id="pt-src-kind" aria-label="Source kind">
+                        <option value="github_pr">GitHub PR</option>
+                        <option value="url">URL</option>
+                        <option value="upload">Upload</option>
+                    </select>
+                    <input type="text" id="pt-src-repo" placeholder="owner/repo" size="14" data-i18n-ph="uplift.patches.ph_repo">
+                    <input type="text" id="pt-src-pr" placeholder="1234" size="6" inputmode="numeric" data-i18n-ph="uplift.patches.ph_pr">
+                    <input type="text" id="pt-src-url" class="grow" placeholder="https://…/patch.diff" data-i18n-ph="uplift.patches.ph_url">
+                    <input type="file" id="pt-src-file" accept=".diff,.patch,text/plain" hidden>
+                    <label class="pt-auto"><input type="checkbox" id="pt-insecure-tls"> <span data-i18n="uplift.patches.insecure_tls">ignore SSL/TLS errors</span></label>
+                    <input type="text" id="pt-new-id" placeholder="patch-id" size="14" data-i18n-ph="uplift.patches.ph_id">
+                    <button type="button" class="btn" id="pt-preview-btn" data-i18n="uplift.patches.preview">Preview</button>
+                </span>
+            </div>
+            <div id="pt-advisories" class="pt-advisories" hidden></div>
+            <div id="pt-preview" hidden></div>
+            <div id="pt-list" class="admin-table"><div class="empty">—</div></div>
+            <div id="pt-diff" class="pt-diff" hidden><div class="pt-diff-head"><span id="pt-diff-title"></span><button type="button" class="icon-btn" id="pt-diff-close" aria-label="Close">×</button></div><pre id="pt-diff-body"></pre></div>
+        </div></div></div></div></section><section class="card wide page-card" data-id="helper-page" data-tab="models" data-sub="helper" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch"></span><span>Helper models</span></div><button type="button" class="card-remove" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Helper models <span class="right" id="hm-sub"></span></h2>
         <div class="card-body">
             <div id="hm-markitdown"></div>
             <div class="mk-box">

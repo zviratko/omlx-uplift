@@ -78,7 +78,7 @@ const TABS = ['status', 'cluster', 'models', 'usage', 'logs', 'bench', 'chat', '
 const SUBS = {
     models: ['manager', 'helper', 'downloader', 'uploader', 'quantizer'],
     bench: ['throughput', 'accuracy', 'context'],
-    settings: ['global'],
+    settings: ['global', 'patches'],
     chat: ['chat'],
     cluster: ['cluster'],
 };
@@ -87,7 +87,7 @@ const SUB_LABELS = {
     uploader: 'Uploader', helper: 'Helper Models',
     throughput: 'Throughput', accuracy: 'Accuracy', context: 'Context',
     chat: 'Chat', cluster: 'Cluster',
-    global: 'Server Settings',
+    global: 'Server Settings', patches: 'Patches',
 };
 function currentTab() {
     const t = (location.hash || '').replace('#', '').split('/')[0];
@@ -116,7 +116,8 @@ function applyTab() {
     }
     // dropdown button labels get rebuilt (the toggle above may wipe them)
     for (const dd of [['dd-models-btn', 'uplift.tab.models', 'Models'],
-                      ['dd-bench-btn', 'navbar.tab.bench', 'Bench']]) {
+                      ['dd-bench-btn', 'navbar.tab.bench', 'Bench'],
+                      ['dd-settings-btn', 'uplift.tab.settings', 'Server Settings']]) {
         const btn = $(dd[0]);
         if (!btn) continue;
         let lbl = t(dd[1]);
@@ -153,7 +154,10 @@ function applyTab() {
         if (sub === 'helper') renderHelperModels();
         if (sub === 'manager') renderTemplatesBox();
     }
-    if (tab === 'settings') { pollGlobalSettings(); pollEnvTunables(); }
+    if (tab === 'settings') {
+        pollGlobalSettings(); pollEnvTunables();
+        if (sub === 'patches') pollPatches();
+    }
     if (tab === 'bench' || tab === 'chat' || tab === 'cluster') showEmbedPage(tab, sub);
 }
 addEventListener('hashchange', applyTab);
@@ -238,15 +242,17 @@ function bindDropdown(btnId, menuId) {
 }
 bindDropdown('dd-models-btn', 'dd-models-menu');
 bindDropdown('dd-bench-btn', 'dd-bench-menu');
+bindDropdown('dd-settings-btn', 'dd-settings-menu');
 document.addEventListener('click', e => {
-    for (const [btnId, menuId] of [['dd-models-btn', 'dd-models-menu'], ['dd-bench-btn', 'dd-bench-menu']]) {
+    for (const [btnId, menuId] of [['dd-models-btn', 'dd-models-menu'], ['dd-bench-btn', 'dd-bench-menu'],
+                                    ['dd-settings-btn', 'dd-settings-menu']]) {
         const menu = $(menuId);
         if (!menu.hidden && !menu.contains(e.target) && !$(btnId).contains(e.target))
             menu.hidden = true;
     }
 });
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { $('dd-models-menu').hidden = true; $('dd-bench-menu').hidden = true; }
+    if (e.key === 'Escape') { $('dd-models-menu').hidden = true; $('dd-bench-menu').hidden = true; $('dd-settings-menu').hidden = true; }
 });
 
 // Keyboard: 1–8 jump to tabs (ignored while typing in inputs).
@@ -7346,6 +7352,420 @@ setInterval(() => { if (!document.hidden) loadChartHistory(); }, 60000);
 // board places them like any static block; boot fetch + keep-alive (the
 // per-window cache TTL gates refetches: 10 s short, 60 s week+).
 for (const def of C.EXPLORE_METRICS) createMetricCard(def);
+/* ============================================================================
+   PAT-4: PATCHES — declarative patch carrier UI (settings/patches).
+   Every button hits a PAT-2 endpoint; nothing here writes the keg directly —
+   enable/disable/promote/rollback/reconcile land at the NEXT omlx restart
+   (the .pth engine, PAT-3). State chips reuse the cockpit-lamp vocabulary;
+   the WARNING banner lights for needs_review/failed like an instrument flag.
+   ========================================================================== */
+
+const PT_STATE_CLASS = {
+    applied: 'pt-st-applied', pending: 'pt-st-pending',
+    update_available: 'pt-st-update', needs_review: 'pt-st-warn',
+    failed: 'pt-st-warn', obsolete: 'pt-st-dim', disabled: 'pt-st-dim',
+};
+
+let PT_DATA = null;      // last /patches view
+let PT_BUSY = false;
+
+function ptMsg(key, fb) { return C.tf(key, fb); }
+
+async function pollPatches() {
+    try {
+        PT_DATA = await fetchJson(`${API}/uplift/api/patches`);
+        renderPatches();
+    } catch (e) {
+        const list = $('pt-list');
+        if (list) list.innerHTML = '';
+        if (list) {
+            const d = document.createElement('div');
+            d.className = 'empty';
+            d.textContent = ptMsg('uplift.patches.load_fail', 'Patches API unavailable') +
+                ' — ' + (e && e.message ? e.message : e);
+            list.append(d);
+        }
+    }
+}
+
+function ptApi(path, body) {
+    return fetchJson(`${API}/uplift/api/patches/${path}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+    });
+}
+
+async function ptAction(path, body, okMsg) {
+    if (PT_BUSY) return;
+    PT_BUSY = true;
+    try {
+        const r = await ptApi(path, body);
+        if (okMsg) toast(okMsg, 4000);
+        if (r && r.reason) toast(r.reason, 5000);
+        await pollPatches();
+    } catch (e) {
+        toast(ptMsg('uplift.patches.action_fail', 'Patch action failed') +
+              ': ' + (e && e.message ? e.message : e), 6000);
+    } finally {
+        PT_BUSY = false;
+    }
+}
+
+function ptChip(text, cls, title) {
+    const s = document.createElement('span');
+    s.className = 'pt-chip ' + (cls || '');
+    s.textContent = text;
+    if (title) s.title = title;
+    return s;
+}
+
+function renderPatches() {
+    const d = PT_DATA;
+    if (!d) return;
+    const list = $('pt-list');
+    list.innerHTML = '';
+
+    // WARNING banner: any needs_review/failed patch (PAT-0 badge rule)
+    const warn = $('pt-warn');
+    warn.hidden = !d.warning;
+    if (d.warning) {
+        warn.textContent = ptMsg('uplift.patches.warn_banner',
+            'WARNING — one or more patches need review after a vanilla update or failed to apply. oMLX runs without them until resolved.');
+    }
+    const ks = $('pt-killswitch');
+    ks.hidden = !d.kill_switch_active;
+    if (d.kill_switch_active) {
+        ks.textContent = ptMsg('uplift.patches.killswitch_on',
+            'Patch engine disabled (kill switch) — booting pristine vanilla, manifest untouched.');
+    }
+
+    // honesty badge: applied patches mean classic files are NOT byte-identical
+    const nApplied = d.patches.filter(p => p.state === 'applied').length;
+    $('pt-sub').textContent = nApplied
+        ? ptMsg('uplift.patches.divergence',
+                '{n} local patch(es) active — classic /admin/ files are NOT byte-identical')
+            .replace('{n}', nApplied)
+        : ptMsg('uplift.patches.pristine', 'vanilla — no local patches active');
+
+    const auto = $('pt-auto-check');
+    auto.checked = !!(d.config && d.config.auto_update_check);
+    auto.onchange = async () => {
+        try {
+            await ptApi('config', { auto_update_check: auto.checked });
+            await pollPatches();
+        } catch (e) { toast(String(e), 4000); }
+    };
+
+    if (!d.patches.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = ptMsg('uplift.patches.none',
+            'No patches yet. Add a GitHub PR, URL, or upload a .diff above.');
+        list.append(empty);
+    }
+    for (const p of d.patches) list.append(patchCard(p, d));
+}
+
+function patchCard(p, view) {
+    const card = document.createElement('div');
+    card.className = 'pt-card' + (p.state === 'needs_review' || p.state === 'failed'
+        ? ' pt-card-warn' : '');
+
+    const head = document.createElement('div');
+    head.className = 'pt-card-head';
+    const title = document.createElement('span');
+    title.className = 'pt-id';
+    title.textContent = p.id;
+    head.append(title);
+    const cls = PT_STATE_CLASS[p.state] || 'pt-st-dim';
+    head.append(ptChip((p.state || '').toUpperCase(), cls, p.state_detail || ''));
+    if (p.keg_changed && p.enabled)
+        head.append(ptChip(ptMsg('uplift.patches.keg_changed', 'KEG CHANGED'), 'pt-st-warn',
+            ptMsg('uplift.patches.keg_changed_hint',
+                  'vanilla omlx was upgraded — the patch re-validates on next start')));
+    if (p.state_detail) {
+        const det = document.createElement('span');
+        det.className = 'pt-detail';
+        det.textContent = p.state_detail;
+        head.append(det);
+    }
+    card.append(head);
+
+    // source line + advisory warnings (plaintext/credentials policy)
+    const src = document.createElement('div');
+    src.className = 'pt-src';
+    const s = p.source || {};
+    let srcTxt;
+    if (s.kind === 'github_pr') srcTxt = `github PR ${s.repo || ''}#${s.pr || ''}`;
+    else if (s.kind === 'url') srcTxt = s.url || 'url';
+    else srcTxt = ptMsg('uplift.patches.source_upload', 'uploaded file');
+    src.textContent = srcTxt;
+    if (s.url) {
+        const a = document.createElement('a');
+        a.href = s.url; a.target = '_blank'; a.rel = 'noopener';
+        a.textContent = ' ↗';
+        src.append(a);
+    }
+    card.append(src);
+    for (const adv of (p.advisories || [])) {
+        const w = document.createElement('div');
+        w.className = 'pt-advisories';
+        w.textContent = '⚠ ' + adv;
+        card.append(w);
+    }
+
+    // versions row: v<n> chips, applied one marked
+    const vers = document.createElement('div');
+    vers.className = 'pt-vers';
+    for (const v of (p.versions || []).slice().sort((a, b) => a.v - b.v)) {
+        const isApplied = p.applied_v === v.v;
+        const isDesired = p.desired_version === v.v;
+        const isCandidate = !isDesired && v.v === Math.max(...(p.versions || []).map(x => x.v));
+        const chip = ptChip('v' + v.v + (isApplied ? ' ●' : isDesired ? ' ◐' : ''),
+            isApplied ? 'pt-st-applied' : (isCandidate && p.state === 'update_available') ? 'pt-st-update' : 'pt-st-dim',
+            (v.fetched_at || '') + (v.source_head_sha ? ' · ' + v.source_head_sha.slice(0, 12) : ''));
+        chip.style.cursor = 'pointer';
+        chip.title = ptMsg('uplift.patches.show_diff', 'show stored diff') + ' — ' + chip.title;
+        chip.onclick = () => ptShowDiff(p.id, v.v);
+        vers.append(chip);
+    }
+    card.append(vers);
+
+    // action row: buttons wired to PAT-2 endpoints
+    const acts = document.createElement('div');
+    acts.className = 'pt-acts';
+    const btn = (label, cls, fn, title) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn' + (cls ? ' ' + cls : '');
+        b.textContent = label;
+        if (title) b.title = title;
+        b.onclick = fn;
+        acts.append(b);
+        return b;
+    };
+    if (!p.enabled) {
+        btn(ptMsg('uplift.patches.enable', 'Enable'), 'primary',
+            () => ptAction('enable', { id: p.id },
+                ptMsg('uplift.patches.enabled_toast', 'Enabled — applies on next omlx restart')));
+    } else {
+        btn(ptMsg('uplift.patches.disable', 'Disable'), '',
+            () => ptAction('disable', { id: p.id },
+                ptMsg('uplift.patches.disabled_toast', 'Disabled — files restored on next omlx restart')));
+    }
+    if (p.state === 'update_available') {
+        btn(ptMsg('uplift.patches.promote', 'Promote update'), 'primary',
+            () => ptAction('promote', { id: p.id },
+                ptMsg('uplift.patches.promoted', 'Promoted — applies on next omlx restart')));
+    }
+    const vs = (p.versions || []).map(v => v.v).sort((a, b) => a - b);
+    if (p.desired_version && vs.length > 1 && p.state !== 'disabled') {
+        btn(ptMsg('uplift.patches.rollback', 'Rollback'), '',
+            () => ptAction('rollback', { id: p.id },
+                ptMsg('uplift.patches.rolledback', 'Rollback queued for next omlx restart')));
+    }
+    btn(ptMsg('uplift.patches.test', 'Test dry-run'), '', async () => {
+        if (PT_BUSY) return;
+        PT_BUSY = true;
+        try {
+            const r = await ptApi('test', { id: p.id });
+            const bad = (r.files || []).filter(f => f.status === 'fail')
+                .map(f => f.path + ': ' + (f.reason || 'fail'));
+            toast(bad.length
+                ? ptMsg('uplift.patches.test_fail', 'Dry-run FAILED') + ': ' + bad.join('; ')
+                : ptMsg('uplift.patches.test_ok', 'Dry-run OK — patch applies cleanly now'),
+                bad.length ? 7000 : 4000);
+            await pollPatches();
+        } catch (e) { toast(String(e), 5000); } finally { PT_BUSY = false; }
+    });
+    btn(ptMsg('uplift.patches.remove', 'Remove'), '', async () => {
+        if (!confirm(ptMsg('uplift.patches.remove_confirm',
+            'Remove this patch? Applied files are restored to vanilla bytes now.'))) return;
+        await ptAction('remove', { id: p.id },
+            ptMsg('uplift.patches.removed', 'Patch removed'));
+    });
+    card.append(acts);
+    return card;
+}
+
+async function ptShowDiff(id, v) {
+    try {
+        const res = await fetch(`${API}/uplift/api/patches/diff/${id}/${v}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const txt = await res.text();
+        $('pt-diff-title').textContent = `${id} · v${v}`;
+        const body = $('pt-diff-body');
+        body.innerHTML = '';
+        for (const line of txt.split('\n')) {
+            const s = document.createElement('span');
+            s.className = line.startsWith('+') && !line.startsWith('+++') ? 'pt-diff-add'
+                : line.startsWith('-') && !line.startsWith('---') ? 'pt-diff-del'
+                : line.startsWith('@@') ? 'pt-diff-hunk' : '';
+            s.textContent = line + '\n';
+            body.append(s);
+        }
+        $('pt-diff').hidden = false;
+        $('pt-diff').scrollIntoView({ block: 'nearest' });
+    } catch (e) {
+        toast(ptMsg('uplift.patches.diff_fail', 'Could not load diff') + ': ' + e, 5000);
+    }
+}
+
+/* ---- add flow: kind-aware inputs -> preview (per-file gate table) -> enable */
+
+function ptReadSource() {
+    const kind = $('pt-src-kind').value;
+    const insecure_tls = $('pt-insecure-tls').checked;
+    if (kind === 'github_pr') {
+        return { kind, repo: $('pt-src-repo').value.trim(),
+                 pr: parseInt($('pt-src-pr').value, 10) || null, insecure_tls };
+    }
+    if (kind === 'url') return { kind, url: $('pt-src-url').value.trim(), insecure_tls };
+    return { kind: 'upload' };   // data filled from file input below
+}
+
+function ptSyncKindUI() {
+    const kind = $('pt-src-kind').value;
+    $('pt-src-repo').hidden = kind !== 'github_pr';
+    $('pt-src-pr').hidden = kind !== 'github_pr';
+    $('pt-src-url').hidden = kind !== 'url';
+    $('pt-src-file').hidden = kind !== 'upload';
+}
+
+async function ptPreview() {
+    const id = $('pt-new-id').value.trim();
+    if (!id) {
+        toast(ptMsg('uplift.patches.need_id', 'Give the patch an id first'), 4000);
+        return;
+    }
+    const src = ptReadSource();
+    const body = { id, ...src };
+    if (src.kind === 'upload') {
+        const f = $('pt-src-file').files[0];
+        if (!f) { toast(ptMsg('uplift.patches.need_file', 'Pick a .diff file'), 4000); return; }
+        body.data = await f.text();
+    }
+    const box = $('pt-preview');
+    const adv = $('pt-advisories');
+    try {
+        const r = await ptApi('add', body);
+        adv.hidden = !(r.advisories && r.advisories.length);
+        adv.innerHTML = '';
+        for (const a of (r.advisories || [])) {
+            const w = document.createElement('div');
+            w.textContent = '⚠ ' + a;
+            adv.append(w);
+        }
+        box.hidden = false;
+        box.innerHTML = '';
+        const tbl = document.createElement('div');
+        tbl.className = 'pt-gate';
+        const head = document.createElement('div');
+        head.className = 'pt-gate-row pt-gate-head';
+        const ht = document.createElement('span');
+        ht.textContent = r.obsolete
+            ? ptMsg('uplift.patches.obsolete', 'ALREADY PRESENT upstream — patch looks obsolete')
+            : (r.unchanged
+                ? ptMsg('uplift.patches.unchanged', 'stored version already matches the source')
+                : ptMsg('uplift.patches.preview_ok', 'VALIDATED — gate passed'));
+        ht.className = (r.obsolete || r.unchanged) ? '' : 'pt-ok';
+        head.append(ht);
+        tbl.append(head);
+        for (const f of (r.files || [])) {
+            const row = document.createElement('div');
+            row.className = 'pt-gate-row';
+            const st = document.createElement('span');
+            st.className = 'pt-chip ' + (f.status === 'ok' ? 'pt-st-applied'
+                : f.status === 'already' ? 'pt-st-update' : 'pt-st-warn');
+            st.textContent = f.status.toUpperCase();
+            const pth = document.createElement('span');
+            pth.textContent = f.path;
+            row.append(st, pth);
+            if (f.reason) {
+                const why = document.createElement('span');
+                why.className = 'pt-detail';
+                why.textContent = f.reason;
+                row.append(why);
+            }
+            tbl.append(row);
+        }
+        box.append(tbl);
+        if (r.ok && !r.unchanged) {
+            const en = document.createElement('button');
+            en.type = 'button';
+            en.className = 'btn primary';
+            en.textContent = ptMsg('uplift.patches.enable_now', 'Enable patch');
+            en.onclick = async () => {
+                await ptAction('enable', { id },
+                    ptMsg('uplift.patches.enabled_toast', 'Enabled — applies on next omlx restart'));
+                box.hidden = true;
+                $('pt-new-id').value = '';
+            };
+            box.append(en);
+        }
+    } catch (e) {
+        adv.hidden = false;
+        adv.innerHTML = '';
+        const w = document.createElement('div');
+        w.textContent = '✕ ' + (e && e.message ? e.message : e);
+        adv.append(w);
+        box.hidden = true;
+    }
+}
+
+let PT_CHECK_TIMER = null;
+function ptScheduleAutoCheck() {
+    // hourly drift check while the page is open AND the user opted in (PAT-2
+    // config flag drives the same endpoint the collector would use)
+    clearInterval(PT_CHECK_TIMER);
+    PT_CHECK_TIMER = setInterval(() => {
+        if (!document.hidden && currentTab() === 'settings' && currentSub('settings') === 'patches'
+                && PT_DATA && PT_DATA.config && PT_DATA.config.auto_update_check) {
+            ptCheckNow(true);
+        }
+    }, 3600e3);
+}
+
+async function ptCheckNow(quiet) {
+    const b = $('pt-check-btn');
+    if (PT_BUSY) return;
+    PT_BUSY = true;
+    const old = b.textContent;
+    b.textContent = ptMsg('uplift.patches.checking', 'Checking…');
+    b.disabled = true;
+    try {
+        const r = await ptApi('check', {});
+        const reports = r.reports || {};
+        const notes = Object.entries(reports).map(([id, rep]) => {
+            if (rep.check === 'update_available')
+                return id + ': ' + ptMsg('uplift.patches.update_avail_toast', 'update available (v{v})').replace('{v}', rep.v);
+            if (rep.check === 'obsolete') return id + ': ' + ptMsg('uplift.patches.obsolete', 'obsolete');
+            if (rep.check === 'error') return id + ': ' + ptMsg('uplift.patches.check_error', 'check failed') + ' — ' + rep.reason;
+            return null;
+        }).filter(Boolean);
+        if (!quiet || notes.length)
+            toast(notes.length ? notes.join(' · ')
+                : ptMsg('uplift.patches.all_current', 'All patch sources current'), 6000);
+        await pollPatches();
+    } catch (e) {
+        toast(ptMsg('uplift.patches.check_fail', 'Check failed') + ': ' + e, 5000);
+    } finally {
+        b.textContent = old;
+        b.disabled = false;
+        PT_BUSY = false;
+    }
+}
+
+function initPatchesPage() {
+    ptSyncKindUI();
+    $('pt-src-kind').onchange = ptSyncKindUI;
+    $('pt-preview-btn').onclick = ptPreview;
+    $('pt-check-btn').onclick = () => ptCheckNow(false);
+    $('pt-diff-close').onclick = () => { $('pt-diff').hidden = true; };
+    ptScheduleAutoCheck();
+}
+initPatchesPage();
+
 renderCardTsRows();
 drawAllMetricCharts();
 setInterval(() => { if (!document.hidden && currentTab() === 'status') drawAllMetricCharts(); }, 5000);
