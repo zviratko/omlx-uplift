@@ -128,6 +128,34 @@ async def test_cancel_marks_cancelling_and_reaches_scheduler():
     assert await t.cancel(pool, "nope") is False
 
 
+async def test_cancel_stamps_aborted_finish_and_finalize_keeps_it():
+    """CANCEL-1: cancel stamps finish='aborted' on the active row and a
+    later empty-finish harvest must NOT erase it."""
+    req = _req("c2", gen_at=time.monotonic())
+    sched = FakeScheduler(running={"c2": req})
+    t = RequestTracker()
+    pool = _pool({"m1": sched})
+    t.sample(pool)
+    assert await t.cancel(pool, "c2") is True
+    rows = {r["id"]: r for r in t.list_rows(limit=5)}
+    assert rows["c2"]["finish"] == "aborted"
+    # engine cleanup arrives with an empty finish_reason (abort harvest)
+    t.note_finalize("c2", "m1", {"has_output": True, "output_text": "",
+                                 "completion_tokens": 42,
+                                 "finish_reason": "", "params": ""})
+    rows = {r["id"]: r for r in t.list_rows(limit=5)}
+    assert rows["c2"]["state"] == "complete"
+    assert rows["c2"]["finish"] == "aborted"
+    # a real finish_reason still wins over the earlier stamp
+    t2 = RequestTracker()
+    t2.note_birth("c3", "m1", _req("c3"))
+    t2.note_finalize("c3", "m1", {"has_output": True, "output_text": "x",
+                                  "completion_tokens": 3,
+                                  "finish_reason": "stop", "params": ""})
+    rows = {r["id"]: r for r in t2.list_rows(limit=5)}
+    assert rows["c3"]["finish"] == "stop"
+
+
 async def test_cancel_prefers_async_core_abort():
     """The collector-signalling AsyncEngineCore path must be used when present."""
     called = []

@@ -53,6 +53,8 @@ def _truncate(text: str, cap: int = PAYLOAD_CAP):
 
 # ---- RL-4 degenerate-loop hint ------------------------------------------
 LOOP_WINDOW = 800          # chars of tail inspected per check
+_NO_FINISH = object()   # sentinel: row had no 'finish' key
+
 LOOP_MIN_UNIT = 20         # shorter repeating units = formatting, not loop
 LOOP_MIN_REPEATS = 3       # unit must tile the tail this many times
 LOOP_MAX_UNIT_NEWLINES = 1  # multi-row blocks tiling = structured output
@@ -413,7 +415,10 @@ class RequestTracker:
             row = {**base,
                    "id": rid, "model": model or base.get("model", ""),
                    "origin": base.get("origin", "real"),
-                   "state": state, "error": error, "finish": finish or None,
+                   "state": state, "error": error,
+                   # CANCEL-1: an empty harvest finish must not erase a
+                   # reason already recorded (cancel stamps 'aborted').
+                   "finish": finish or base.get("finish") or None,
                    "ts": now}
             if n_out:
                 row["completion_tokens"] = n_out
@@ -470,17 +475,36 @@ class RequestTracker:
                 known = request_id in ids or sched.get_request(request_id) is not None
                 if not known:
                     continue
+                # CANCEL-1: stamp BEFORE issuing the abort. The engine's
+                # _cleanup_request can finalize (and pop) the row while
+                # abort_request is still awaited — stamping afterwards
+                # lost the race and left finish=None (indistinguishable
+                # from a clean completion). If the abort fails on this
+                # engine the stamp is rolled back before we try the next.
+                with self._lock:
+                    row = self._active.get(request_id)
+                    stamped = row is not None
+                    prev_state = prev_finish = None
+                    if stamped:
+                        prev_state = row.get("state")
+                        prev_finish = row.get("finish", _NO_FINISH)
+                        row["state"] = "cancelling"
+                        row["finish"] = "aborted"
+                        row["ts"] = time.time()
+                        self._dirty_ids.add(request_id)
                 if async_core is not None and hasattr(async_core, "abort_request"):
                     ok = bool(await async_core.abort_request(request_id))
                 else:
                     ok = bool(sched.abort_request(request_id))
-                if ok:
+                if not ok and stamped:
                     with self._lock:
                         row = self._active.get(request_id)
                         if row is not None:
-                            row["state"] = "cancelling"
-                            row["ts"] = time.time()
-                            self._dirty_ids.add(request_id)
+                            row["state"] = prev_state
+                            if prev_finish is _NO_FINISH:
+                                row.pop("finish", None)
+                            else:
+                                row["finish"] = prev_finish
                 return ok
             except Exception:  # noqa: BLE001
                 continue
