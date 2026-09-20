@@ -52,10 +52,6 @@ def url_advisories(url: str) -> list[str]:
     return out
 
 
-def pr_url(repo: str, pr: int) -> str:
-    return f"https://github.com/{repo}/pull/{pr}"
-
-
 def parse_pr_ref(url_or_repo: str, pr: int | None = None) -> tuple[str, int] | None:
     """Accept a PR web URL or repo + number; return (repo, pr) or None."""
     if pr is not None:

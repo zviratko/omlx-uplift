@@ -196,17 +196,6 @@ def _static_file(request: Request, path: str) -> Response:
 # Session gate + login page
 # --------------------------------------------------------------------------
 
-def _safe_next(request: Request) -> str:
-    """Validate an optional ?next= target: same-origin path under /uplift or
-    /admin only (never an absolute URL — no open redirect)."""
-    nxt = request.query_params.get("next", "")
-    if not isinstance(nxt, str):  # test doubles / malformed multiparams
-        return ""
-    if (nxt.startswith("/uplift") or nxt.startswith("/admin/")) and "//" not in nxt[:9]:
-        return nxt
-    return ""
-
-
 async def _gate(request: Request, back_base: str) -> Optional[RedirectResponse]:
     """HTML navigation without a valid session redirects to the Uplift
     login page carrying ?next=. API fetches get a plain 401 — a redirect

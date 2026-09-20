@@ -265,7 +265,6 @@ document.addEventListener('keydown', e => {
 });
 
 /* ---------------- theme & motion ---------------- */
-const THEME_CYCLE = ['auto', 'light', 'dark', 'enhanced', 'cockpit'];
 function applyPrefs() {
     const t = prefs.theme;
     let eff = t;
@@ -1388,9 +1387,6 @@ const metricCache = {};
 const _fetching = new Set();
 const _seq = {};
 
-function metricDef(key) {
-    return C.EXPLORE_METRICS.find(m => m.key === key) || { key };
-}
 function metricFormat(def) {
     if (def.fmt === 'bytes') return v => (v === null || v === undefined ? '—' : C.fmtBytes(v));
     if (def.fmt === 'pct') return v => (v === null || v === undefined ? '—' : v.toFixed(1) + '%');
@@ -2133,16 +2129,6 @@ function seDirtyKeys() {                     // dirty keys of the ACTIVE tab
 function seNeedsRestart() {
     return seDirtyKeys().some(k => SE_RESTART_KEYS.has(k));
 }
-function seAnyTabDirty() {
-    for (const t of seTabs) {
-        if (t.dirty.size) return true;
-        if (t.id !== 'base') {
-            if ((t._origExpose || false) !== !!t.expose_as_model ||
-                (t._origApi || '') !== (t.api_name || '')) return true;
-        }
-    }
-    return false;
-}
 function seUpdateSaveBtn() {
     const b = document.getElementById('se-save'); if (!b) return;
     const n = seDirtyKeys().length;
@@ -2207,7 +2193,6 @@ function renderEdChanges() {
         box.append(d);
     }
 }
-function renderEdList() { renderEdChanges(); }
 
 /* ---- spec-driven settings form (parity with classic _modal_model_settings) ---- */
 /* seValues holds the modelspec form state (UpliftModelSpec.buildState shape).
@@ -3441,11 +3426,6 @@ function seNextAutoName() {
     // "Model profile 1" (space + caps) was rejected on save.
     return 'model-profile-' + i;
 }
-function seAddTab(t) {
-    seTabs.push(t); seCaptureTab();          // capture previous tab first
-    seActiveTab = t.id;
-    return t;
-}
 function seNewProfile(panel) {
     seCaptureTab();
     const from = seValues;                   // inherited from current tab
@@ -3496,37 +3476,6 @@ function seOpenProfileTab(panel, name) {
     seRenderTabs(panel); seUpdateSaveBtn();
 }
 
-function seOpenTemplateTab(panel, tpl) {
-    seCaptureTab();
-    const t = { id: 'tpl' + Date.now(), name: tpl.name, display_name: tpl.display_name || tpl.name,
-        template: tpl.name, expose_as_model: false, api_name: '',
-        overrides: JSON.parse(JSON.stringify(tpl.settings || {})),
-        workVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(tpl.settings || {}))),
-        origVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(tpl.settings || {}))),
-        dirty: new Set(), _origExpose: false, _origApi: '' };
-    seInitSnap(t);
-    seTabs.push(t); seActiveTab = t.id; seRestoreTab(t);
-    renderEditorFields(document.getElementById('se-fields'));
-    seRenderTabs(panel); seUpdateSaveBtn();
-}
-function seOpenModelCopyTab(panel, modelId, settings) {
-    seCaptureTab();
-    const st = window.UpliftModelSpec.buildState({ id: modelId }, settings);
-    const ov = {};
-    for (const [k, v] of Object.entries(st)) {
-        if (k === 'ctKwargEntries') continue;
-        if (JSON.stringify(v) !== JSON.stringify(seBaseVals[k])) ov[k] = v;
-    }
-    const short = modelId.split('/').pop();
-    const t = { id: 'mdl' + Date.now(), name: 'from-' + short, display_name: 'Copy of ' + short,
-        expose_as_model: false, api_name: '', overrides: ov, workVals: st,
-        origVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
-        dirty: new Set(), _origExpose: false, _origApi: '' };
-    seInitSnap(t);
-    seTabs.push(t); seActiveTab = t.id; seRestoreTab(t);
-    renderEditorFields(document.getElementById('se-fields'));
-    seRenderTabs(panel); seUpdateSaveBtn();
-}
 
 /* ---- per-model profiles (sidebar of the classic editor) ----
    U4 (user round): selecting a profile must NOT open a tab (the classic
@@ -5259,9 +5208,6 @@ const GS_RESTART_FIELDS = new Set([
 function gsQueueSave(flat, val) {           // edit -> queue, no fetch yet
     markFieldDirty(flat, val);
     if (['custom_model_prefixes'].includes(flat)) renderGlobalSettings();
-}
-function gsFlatOf(sec, field) {
-    return Object.keys(GS_MAP).find(k => GS_MAP[k][0] === sec && GS_MAP[k][1] === field);
 }
 function gsOrigFlat(flat) {
     const map = GS_MAP[flat];
