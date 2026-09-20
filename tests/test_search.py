@@ -109,3 +109,72 @@ def test_fts_query_never_raises_on_junk():
                 'uni\u00e9\u010d 100%', ')))(((', 'phr"ase with "quotes'):
         store_q = fts_query(raw)
         assert isinstance(store_q, str) and store_q          # always usable
+
+
+def test_backfill_indexes_pre_fts_rows(tmp_path):
+    """SEARCH-1: rows written before request_fts existed must become
+    searchable after a reopen (one-time backfill at init)."""
+    p = tmp_path / "metrics.sqlite3"
+    s = MetricsStore(path=p)
+    s.upsert_request(_row("old1", prompt="legacy ALPHA record", age_s=8000))
+    # simulate the pre-RL-3 state: data rows present, index empty
+    with s._lock, s._conn:
+        s._conn.execute("DELETE FROM request_fts")
+        s._conn.execute("DELETE FROM meta WHERE key='fts_backfilled'")
+    s.close()
+
+    s2 = MetricsStore(path=p)          # boot performs the backfill
+    assert s2._has_fts
+    res = s2.search_requests(q="ALPHA", limit=10)
+    assert res["mode"] == "fts"
+    assert [r["id"] for r in res["results"]] == ["old1"]
+
+    # idempotent: second reopen must not duplicate index entries
+    s2.close()
+    s3 = MetricsStore(path=p)
+    n = s3._conn.execute(
+        "SELECT count(*) FROM request_fts WHERE id='old1'").fetchone()[0]
+    assert n == 1, "backfill duplicated entries"
+    # and text-less rows stay out of the index (matches _fts_sync policy)
+    s3.upsert_request(_row("bare", prompt=None, output=None, age_s=10))
+    n_bare = s3._conn.execute(
+        "SELECT count(*) FROM request_fts WHERE id='bare'").fetchone()[0]
+    assert n_bare == 0
+    s3.close()
+
+
+def test_sparse_upsert_never_blanks_index(store):
+    """SEARCH-1b: a later upsert with no text (harvest pass, drained
+    collector) must not wipe the already-indexed prompt."""
+    store.upsert_request(_row("sp1", prompt="GAMMA payload", age_s=200))
+    # second pass: same id, no text at all (sparse finalize sample)
+    store.upsert_request({"id": "sp1", "model": "m", "state": "complete",
+                          "prompt_tokens": 1, "completion_tokens": 9,
+                          "tps": 12.0, "error": None,
+                          "ts_start": time.time() - 190,
+                          "ts_end": time.time() - 180})
+    res = store.search_requests(q="GAMMA", limit=10)
+    assert res["mode"] == "fts"
+    assert [r["id"] for r in res["results"]] == ["sp1"]
+    # empty-string harvest is equally harmless (NULLIF treats '' as "no
+    # new text", the data path and index both keep the earlier capture)
+    store.upsert_request(_row("sp1", prompt="", output="", age_s=100))
+    res = store.search_requests(q="GAMMA", limit=10)
+    assert [r["id"] for r in res["results"]] == ["sp1"]
+
+
+def test_boot_repairs_blank_index_pairs(tmp_path):
+    """SEARCH-1c: legacy rows whose index pair is blank but whose data row
+    carries text get repaired at boot even after the one-time backfill."""
+    p = tmp_path / "metrics.sqlite3"
+    s = MetricsStore(path=p)
+    s.upsert_request(_row("br1", prompt="OMEGA text in row", age_s=300))
+    with s._lock, s._conn:
+        s._conn.execute(
+            "UPDATE request_fts SET prompt='', output='' WHERE id='br1'")
+    s.close()
+    s2 = MetricsStore(path=p)
+    res = s2.search_requests(q="OMEGA", limit=10)
+    assert res["mode"] == "fts"
+    assert [r["id"] for r in res["results"]] == ["br1"]
+    s2.close()

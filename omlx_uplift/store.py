@@ -202,6 +202,52 @@ class MetricsStore:
                 self._has_fts = True
             except sqlite3.OperationalError:
                 pass
+            # SEARCH-1: rows written before this index existed are invisible
+            # to MATCH (the search JOINs through request_fts). One-time
+            # backfill (meta key keeps later restarts free of the full scan)
+            # plus a cheap every-boot repair: any indexed pair whose stored
+            # text is empty while the data row has text was written by an
+            # early _fts_sync that trusted the sparse upsert params (the
+            # data path COALESCEs, the index must mirror the MERGED row).
+            if self._has_fts:
+                try:
+                    # raw SQL: _init_schema already holds self._lock and
+                    # threading.Lock is not reentrant (get_meta would dead-
+                    # lock the whole process at boot)
+                    done = self._conn.execute(
+                        "SELECT value FROM meta WHERE key='fts_backfilled'"
+                    ).fetchone()
+                    if not done or done[0] != "1":
+                        self._conn.execute(
+                            """INSERT INTO request_fts(id, prompt, output)
+                               SELECT r.id, COALESCE(r.prompt,''),
+                                      COALESCE(r.output,'')
+                                 FROM requests r
+                                WHERE (r.prompt IS NOT NULL
+                                        OR r.output IS NOT NULL)
+                                  AND NOT EXISTS
+                                      (SELECT 1 FROM request_fts f
+                                        WHERE f.id = r.id)""")
+                        self._conn.execute(
+                            "INSERT INTO meta(key, value) VALUES"
+                            "('fts_backfilled','1') "
+                            "ON CONFLICT(key) DO UPDATE SET value='1'")
+                    # field-wise repair: an index column blanked by an
+                    # early writer while the data row has text there
+                    for col in ("prompt", "output"):
+                        self._conn.execute(
+                            f"""UPDATE request_fts SET {col} = (
+                                    SELECT COALESCE(r.{col}, '')
+                                      FROM requests r
+                                     WHERE r.id = request_fts.id)
+                                 WHERE {col} = ''
+                                   AND EXISTS (
+                                       SELECT 1 FROM requests r
+                                        WHERE r.id = request_fts.id
+                                          AND COALESCE(r.{col}, '') <> '')"""
+                        )
+                except sqlite3.Error:
+                    self._has_fts = False
 
     # -- retention policy (RL-0) -------------------------------------------
 
@@ -314,9 +360,9 @@ class MetricsStore:
                  completion_tokens=COALESCE(excluded.completion_tokens, completion_tokens),
                  tps=COALESCE(excluded.tps, tps),
                  error=COALESCE(excluded.error, error),
-                 prompt=COALESCE(excluded.prompt, prompt),
+                 prompt=COALESCE(NULLIF(excluded.prompt, ''), prompt),
                  prompt_trunc=COALESCE(excluded.prompt_trunc, prompt_trunc),
-                 output=COALESCE(excluded.output, output),
+                 output=COALESCE(NULLIF(excluded.output, ''), output),
                  output_trunc=COALESCE(excluded.output_trunc, output_trunc),
                  params=COALESCE(excluded.params, params),
                  finish=COALESCE(excluded.finish, finish),
@@ -331,18 +377,24 @@ class MetricsStore:
 
     def _fts_sync(self, params: dict):
         """Keep request_fts in step with the row just upserted (same tx).
-        Only rows that actually carry text enter the index."""
+
+        SEARCH-1: the data path COALESCEs text across upserts, so the
+        index must mirror the MERGED stored row, not this call's sparse
+        params (a finalize pass with no text would otherwise blank an
+        already-indexed prompt). Read the row back inside the same tx.
+        Only rows that end up carrying text stay in the index."""
         if not getattr(self, "_has_fts", False):
             return
-        if params.get("prompt") is None and params.get("output") is None:
-            return
         try:
+            stored = self._conn.execute(
+                "SELECT COALESCE(prompt,''), COALESCE(output,'') "
+                "FROM requests WHERE id = ?", (params["id"],)).fetchone()
             self._conn.execute(
                 "DELETE FROM request_fts WHERE id = ?", (params["id"],))
-            self._conn.execute(
-                "INSERT INTO request_fts(id, prompt, output) VALUES(?,?,?)",
-                (params["id"], params.get("prompt") or "",
-                 params.get("output") or ""))
+            if stored and (stored[0] or stored[1]):
+                self._conn.execute(
+                    "INSERT INTO request_fts(id, prompt, output) "
+                    "VALUES(?,?,?)", (params["id"], stored[0], stored[1]))
         except sqlite3.Error:
             # index drift must never break the data path; rebuild on next
             # search miss is not attempted — LIKE fallback still covers us
