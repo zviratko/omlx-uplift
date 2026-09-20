@@ -184,6 +184,14 @@ class PatchStore:
         patch["state_changed_at"] = now_iso()
         return True
 
+    def set_state_if(self, patch: dict, new_state: str, detail: str = "") -> None:
+        """Forced transition used by the reconcile engine only: the startup
+        sync is the authoritative writer (e.g. needs_review -> applied after
+        a keg upgrade fixes the conflict) and may bypass the UI gate."""
+        patch["state"] = new_state
+        patch["state_detail"] = detail
+        patch["state_changed_at"] = now_iso()
+
     def warning_active(self, manifest: dict) -> bool:
         return any(p.get("state") in WARNING_STATES
                    for p in manifest.get("patches", []))

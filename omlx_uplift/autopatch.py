@@ -82,7 +82,26 @@ class _PostImportFinder:
         return spec
 
 
+def _reconcile_patches() -> None:
+    """PAT-3: apply pending patch-set changes BEFORE anything imports omlx.
+    May os.execv (replaces this process) when files really changed — that is
+    why it runs first. stdlib + own package only; never raises."""
+    try:
+        from . import patchsync
+
+        patchsync.sync_at_startup()
+    except Exception:  # never break the server for the patch carrier
+        try:
+            import logging
+
+            logging.getLogger("omlx_uplift").exception(
+                "patch reconcile failed (booting anyway)")
+        except Exception:
+            pass
+
+
 def install() -> None:
+    _reconcile_patches()
     _seed_env_tunables()
     if _TARGET in sys.modules:
         _mount(sys.modules[_TARGET])

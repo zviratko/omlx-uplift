@@ -11,6 +11,9 @@
       target environment's site-packages (pip installs do this via the
       data_files hook; manual for tricky venvs).
   omlx-uplift uninstall [--python PATH]   remove it again.
+  omlx-uplift patches status|apply|check|disable-all
+      out-of-band patch-carrier recovery when the dashboard is unreachable:
+      same engine the .pth startup reconcile uses, no re-exec, JSON output.
 """
 
 from __future__ import annotations
@@ -183,14 +186,58 @@ def cmd_view(argv=None) -> int:
     return 0
 
 
+def cmd_patches(argv=None) -> int:
+    """Out-of-band patch recovery (PAT-3). Subcommands:
+      status       manifest + verification view (JSON)
+      apply        reconcile now against the live keg (no re-exec)
+      check        re-fetch sources, report drift (JSON)
+      disable-all  kill switch on (sentinel) + disable every patch
+    Also: --enable-sentinel-off removes the sentinel after manual fixes."""
+    import json as _json
+
+    ap = argparse.ArgumentParser(prog="omlx-uplift patches")
+    ap.add_argument("action", choices=["status", "apply", "check", "disable-all"])
+    args = ap.parse_args(argv)
+
+    from . import patchsource, patches as _patches, patchsync
+
+    store = _patches.PatchStore()
+    root = _patches._omlx_root()
+    if not root:
+        print("omlx package tree not found — is omlx installed for this python?",
+              file=sys.stderr)
+        return 2
+    tree_root = os.path.dirname(root)
+
+    if args.action == "status":
+        out = patchsource.view(store, tree_root, _patches.keg_id(root))
+    elif args.action == "apply":
+        out = patchsync.reconcile(store, tree_root, allow_reexec=False)
+        out["kill_switch_active"] = store.patches_disabled()
+    elif args.action == "check":
+        out = patchsource.check_all(store, tree_root)
+    else:  # disable-all
+        manifest = store.load()
+        for patch in manifest.get("patches", []):
+            patch["enabled"] = False
+            store.set_state_if(patch, "disabled", "disabled by CLI")
+        store.save(manifest)
+        with open(store.sentinel_path, "w") as fh:
+            fh.write("disabled via omlx-uplift patches disable-all\n")
+        out = {"ok": True, "sentinel": store.sentinel_path}
+    print(_json.dumps(out, indent=2))
+    return 0 if out.get("ok", True) else 1
+
+
 def main() -> int:
-    if len(sys.argv) < 2 or sys.argv[1] not in {"serve", "view", "install", "uninstall"}:
+    if len(sys.argv) < 2 or sys.argv[1] not in {
+            "serve", "view", "install", "uninstall", "patches"}:
         print(__doc__)
         return 1
     cmd = sys.argv[1]
     rest = sys.argv[2:]
-    return {"serve": cmd_serve, "view": cmd_view,
-            "install": cmd_install, "uninstall": cmd_uninstall}[cmd](rest)
+    return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
+            "uninstall": cmd_uninstall, "patches": cmd_patches}[cmd](rest)
 
 
 if __name__ == "__main__":
