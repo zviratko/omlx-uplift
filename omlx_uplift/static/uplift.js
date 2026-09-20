@@ -4109,7 +4109,9 @@ async function renderModelAdmin(force) {
             const st = document.createElement('span');
             st.textContent = orphan.has(e.id) ? 'MISSING' : 'EXTERNAL';
             st.className = orphan.has(e.id) ? 'spill miss' : 'dim umeta';  // caution amber
-            head1.append(st);
+            // round 8 item 2: state label rides the RIGHT edge of the left
+            // half exactly like LOADED/PRESENT on present rows (an alias
+            // lamp keeps the left corner, like the lamp stack there)
             if (e.alias) {
                 const al = document.createElement('button');
                 al.className = 'lamp alias-lamp on'; al.textContent = 'ALIAS:' + e.alias;
@@ -4117,6 +4119,8 @@ async function renderModelAdmin(force) {
                 tapBtn(al, () => copyText(e.alias));
                 head1.append(al, copyBtn(e.alias, 'Copy alias "' + e.alias + '"'));
             }
+            const gap = document.createElement('span'); gap.className = 'nrow-gap';
+            head1.append(gap, st);
             name.append(head1, nmain);
             const box = document.createElement('span');
             box.className = 'settings-box hrow solo';   // solo: no chips — centre the acts column
@@ -4606,6 +4610,10 @@ function runFold(host) {
     while (host.scrollHeight > maxH && n < chips.length - 1) {
         chips[chips.length - 1 - n++].hidden = true;
     }
+    // round 8 item 1: if the loop hid nothing (a single long chip plus the
+    // pill alone overflow), there is nothing to expand — kill the empty
+    // dotted box instead of showing "and 0 more"
+    if (!n) { more.hidden = true; return; }
     more.textContent = C.tf('uplift.ui.and_n_more', 'and {n} more', { n });
     more.title = C.tf('uplift.ui.expand_all_settings', 'Expand to show all settings');
 }
@@ -4755,7 +4763,10 @@ function renderTemplatesBox() {
             const badge = document.createElement('span');
             badge.className = 'typebadge t-tpl'; badge.textContent = 'TEMPLATE';
             const nmain = document.createElement('span'); nmain.className = 'nmain';
-            const uid = cell(t.name); uid.className = 'uid';
+            const uid = cell(t.display_name || t.name); uid.className = 'uid';
+            // round 8 item 4: show the friendly name like models do — the
+            // raw t-… id is an internal key (shown in EDIT/delete dialogs)
+            uid.title = t.name;
             nmain.append(badge, uid);   // round 6 item 10: no copy icon for the internal id
             const desc = cell(t.description || ''); desc.className = 'dim umeta tpl-desc';
             head1.append(desc);

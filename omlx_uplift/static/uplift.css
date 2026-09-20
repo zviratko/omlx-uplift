@@ -1113,10 +1113,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* ---- LOADED/IDLE rocker switch + API copy button (state column) --------- */
 .admin-table .statewrap { display: inline-flex; align-items: center; gap: 6px;
     justify-content: flex-end; }
-.admin-table .lsw { display: inline-flex; border: 1px solid var(--edge); flex: 0 0 auto; }
+.admin-table .lsw { display: inline-flex; border: 1px solid var(--edge); flex: 0 0 auto;
+    /* round 8 item 3: the ring is exactly the .spill box (84px) so
+       LOADED / PRESENT / MISSING are interchangeable-size blocks */
+    width: 84px; box-sizing: border-box; }
 .admin-table .lsw-seg {
     display: inline-flex; align-items: center; justify-content: center;
-    height: 18px; min-width: 44px; padding: 0 5px; cursor: pointer;
+    height: 18px; flex: 1 1 auto; min-width: 0; padding: 0 5px; cursor: pointer;
     font: 400 10px/1 var(--mono); letter-spacing: 0.06em;
     background: transparent; color: var(--dim); border: 0; border-radius: 0;
 }
