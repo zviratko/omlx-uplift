@@ -929,3 +929,79 @@ async def set_retention(
     from .store import get_store
 
     return get_store().set_retention(req.metrics_days, req.log_days)
+
+
+# --------------------------------------------------------------------------
+# Experimental env tunables (ENV-1) — uplift-owned OMLX_* overrides.
+# Values persist in ~/.omlx/uplift/env_overrides.json; autopatch seeds them
+# into os.environ at interpreter startup. Genuine launch env ALWAYS wins:
+# shadowed names stay inert until removed from the launch environment.
+# --------------------------------------------------------------------------
+
+
+@api_router.get("/env-overrides")
+async def get_env_overrides(is_admin: bool = Depends(require_admin)):
+    from . import env_tunables
+
+    return env_tunables.snapshot()
+
+
+@api_router.put("/env-overrides")
+async def put_env_overrides(
+    req: dict, is_admin: bool = Depends(require_admin)
+):
+    """Body: {\"<VAR>\": value|null}. null removes the stored override.
+    Per-key outcome: applied_live | restart_model | restart_server |
+    shadowed (stored for later; genuine launch env keeps precedence)."""
+    from datetime import datetime as _dt
+
+    from . import env_tunables
+
+    body = req or {}
+    if not isinstance(body, dict) or not body:
+        raise HTTPException(status_code=400, detail="body must be a non-empty object")
+    # validate every key BEFORE touching anything (all-or-nothing)
+    prepared: dict[str, "str | None"] = {}
+    for name, value in body.items():
+        if value is None:
+            prepared[name] = None
+            continue
+        try:
+            prepared[name] = env_tunables.coerce(name, value)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+
+    data = env_tunables.load_overrides()
+    results = {}
+    for name, value in prepared.items():
+        if value is None:
+            data.pop(name, None)
+            # remove the uplift-written env var too; a genuine (shadowed)
+            # env value must stay untouched
+            if name in env_tunables.SHADOWED:
+                results[name] = "shadowed"
+            else:
+                os.environ.pop(name, None)
+                results[name] = "removed"
+            continue
+        data[name] = {
+            "value": value,
+            "set_at": _dt.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        if name in env_tunables.SHADOWED:
+            results[name] = "shadowed"
+            continue
+        effect = env_tunables.ALLOWED[name]["effect"]
+        if effect == "immediate":
+            os.environ[name] = value
+            results[name] = "applied_live"
+        elif effect == "model":
+            # engine construction re-reads on the next model load only when
+            # os.environ carries the value; seed it so no server restart is
+            # needed (vanilla reads these at EngineConfig construction).
+            os.environ[name] = value
+            results[name] = "restart_model"
+        else:
+            results[name] = "restart_server"
+    env_tunables.save_overrides(data)
+    return {"results": results, **env_tunables.snapshot()}

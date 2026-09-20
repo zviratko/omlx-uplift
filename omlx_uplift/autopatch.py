@@ -7,11 +7,33 @@ installs never load this file, so they stay untouched.
 
 The hook must not import omlx (it runs at interpreter startup) — it only
 arms a post-import observer for `omlx.server`.
+
+ENV-1: before arming the observer, uplift-stored experimental OMLX_*
+tunables are seeded into os.environ (genuine launch env always wins; see
+env_tunables.seed_environ). stdlib only, never raises.
 """
 
+import os
 import sys
 
 _TARGET = "omlx.server"
+
+
+def _seed_env_tunables() -> None:
+    try:
+        from . import env_tunables
+
+        base = None
+        env_base = os.environ.get("OMLX_BASE_PATH")
+        if env_base:
+            base = os.path.join(env_base, "uplift")
+        elif os.path.isdir(os.path.expanduser(os.path.join("~", ".omlx"))):
+            base = os.path.expanduser(os.path.join("~", ".omlx", "uplift"))
+        if base:
+            env_tunables.set_base_dir(base)
+        env_tunables.seed_environ()
+    except Exception:  # never break the server for a dashboard feature
+        pass
 
 
 def _mount(module) -> None:
@@ -61,6 +83,7 @@ class _PostImportFinder:
 
 
 def install() -> None:
+    _seed_env_tunables()
     if _TARGET in sys.modules:
         _mount(sys.modules[_TARGET])
         return
