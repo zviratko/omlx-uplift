@@ -178,3 +178,23 @@ def test_boot_repairs_blank_index_pairs(tmp_path):
     assert res["mode"] == "fts"
     assert [r["id"] for r in res["results"]] == ["br1"]
     s2.close()
+
+
+def test_cjk_query_routes_to_like(store):
+    """CJK-1: unicode61 indexes a CJK run as one token; substring queries
+    must still find the row (LIKE path), never silently return nothing."""
+    store.upsert_request(_row("cj1", prompt="今天天气很好，请简单回复。",
+                              age_s=60))
+    for q in ("天气", "天气很好", "很好"):
+        res = store.search_requests(q=q, limit=10)
+        assert res["mode"] == "like", q
+        assert [r["id"] for r in res["results"]] == ["cj1"], q
+    # mixed CJK+ASCII also routes to LIKE (substring truth wins over a
+    # guaranteed-MISS MATCH)
+    store.upsert_request(_row("cj2", prompt="hello 世界 world", age_s=50))
+    res = store.search_requests(q="世界 hello", limit=10)
+    assert res["mode"] == "like"
+    assert [r["id"] for r in res["results"]] == ["cj2"]
+    # pure-ASCII queries keep the FTS path
+    res = store.search_requests(q="hello", limit=10)
+    assert res["mode"] == "fts"

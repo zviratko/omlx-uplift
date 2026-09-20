@@ -28,6 +28,7 @@ write_tick(), and a wal_checkpoint(TRUNCATE) inside the daily purge pass.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -74,10 +75,13 @@ def _excerpt(prompt, output, q, width=200):
     return head + ("…" if len(texts[0]) > width else "")
 
 
+_CJK_RE = re.compile(
+    "[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]")
+
+
 def fts_query(raw: str) -> str:
     """Make arbitrary user text safe for FTS5 MATCH: one quoted phrase per
     word-ish token, ANDed. Quotes inside tokens are doubled (FTS rule)."""
-    import re
     toks = re.findall(r"[^\s]+", raw)
     out = []
     for t in toks:
@@ -498,7 +502,11 @@ class MetricsStore:
             where.append("r.model = ?"); args.append(model)
 
         q = (q or "").strip()
-        use_fts = bool(q) and self._has_fts
+        # CJK-1: unicode61 indexes an unbroken CJK run as ONE token, so any
+        # CJK substring query can never MATCH — route queries containing CJK
+        # (incl. mixed ones) to LIKE, whose substring semantics fit natively.
+        cjk = _CJK_RE.search(q) is not None
+        use_fts = bool(q) and self._has_fts and not cjk
         mode = "fts" if use_fts else ("like" if q else "scan")
         sel = ("r.id, r.model, r.state, r.prompt_tokens, r.completion_tokens,"
                " r.tps, r.error, r.finish, r.ts_start, r.ts_end")
@@ -527,11 +535,15 @@ class MetricsStore:
                     mode = "like"
 
             if q:
-                pat = "%" + q.replace("\\", "\\\\").replace("%", "\\%") \
-                               .replace("_", "\\_") + "%"
-                where.append("(r.prompt LIKE ? ESCAPE '\\' "
-                             "OR r.output LIKE ? ESCAPE '\\')")
-                args += [pat, pat]
+                # token-AND like the FTS path: every whitespace-separated
+                # token must appear (in prompt or output). Whole-query
+                # LIKE fails mixed scripts / word order (CJK-1 tests).
+                for tok in re.findall(r"\S+", q):
+                    pat = ("%" + tok.replace("\\", "\\\\").replace("%", "\\%")
+                           .replace("_", "\\_") + "%")
+                    where.append("(r.prompt LIKE ? ESCAPE '\\' "
+                                 "OR r.output LIKE ? ESCAPE '\\')")
+                    args += [pat, pat]
 
             cur = self._conn.execute(
                 f"""SELECT {sel}, r.prompt, r.output
