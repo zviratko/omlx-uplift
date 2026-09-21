@@ -1463,6 +1463,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-st-warn::before { background: var(--warn, #b8860b); }
 .pt-st-dim { opacity: .55; }
 .pt-advisories { color: var(--warn, #b8860b); font-size: var(--fs-meta); }
+.pt-safeguards { border: 1px dashed var(--warn, #b8860b); padding: 4px 8px; display: flex; flex-direction: column; gap: 2px; }
+.pt-sg-title { font-weight: 700; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: .06em; color: var(--warn, #b8860b); }
+.pt-sg-rebuild { font-size: var(--fs-meta); word-break: break-all; }
+.pt-sg-rebuild code { background: color-mix(in srgb, var(--dim) 12%, transparent); padding: 1px 5px; cursor: pointer; }
 .pt-gate { border: 1px solid var(--line); margin: 8px 0; }
 .pt-gate-row { display: flex; gap: 10px; align-items: center; padding: 4px 8px; border-top: 1px solid var(--line); font-size: var(--fs-meta); }
 .pt-gate-row:first-child { border-top: 0; }

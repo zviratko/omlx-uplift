@@ -7452,6 +7452,44 @@ async function ptAction(path, body, okMsg) {
     }
 }
 
+// Enable/promote with safeguard support: on HTTP 409 the backend lists the
+// codes that need an explicit approval — we do NOT silently retry.
+async function ptEnableWithApproval(p, approve) {
+    if (PT_BUSY) return;
+    PT_BUSY = true;
+    try {
+        const body = { id: p.id };
+        if (approve) body.approve = approve;
+        const r = await ptApi('enable', body);
+        toast(approve
+            ? ptMsg('uplift.patches.approved_codes', 'approved: {codes}')
+                  .replace('{codes}', (r.approved || []).join(', ') || approve)
+            : ptMsg('uplift.patches.enabled_toast',
+                    'Enabled — applies on next omlx restart'), 4000);
+        await pollPatches();
+    } catch (e) {
+        toast(ptMsg('uplift.patches.approve_fail', 'Approval failed') +
+              ': ' + (e && e.message ? e.message : e), 6000);
+    } finally {
+        PT_BUSY = false;
+    }
+}
+
+// One diff line per problem + the autodetected root note (the paths stored
+// in the manifest are the REWRITTEN ones — say so, or the diff view looks
+// like it disagrees with the source URL).
+function ptSafeguardLines(p) {
+    const out = [];
+    const ver = (p.versions || []).find(v => v.v === (p.desired_version ||
+        Math.max(...(p.versions || []).map(x => x.v)))) || {};
+    for (const pr of ((ver.safeguards || {}).problems || [])) {
+        out.push({ text: pr.path + ' — ' + pr.message, code: pr.code });
+    }
+    if (ver.root_note) out.push({ text: ptMsg('uplift.patches.safeguard_note',
+        'Root autodetected: {n}').replace('{n}', ver.root_note), code: null });
+    return out;
+}
+
 function ptChip(text, cls, title) {
     const s = document.createElement('span');
     s.className = 'pt-chip ' + (cls || '');
@@ -7520,6 +7558,11 @@ function patchCard(p, view) {
     head.append(title);
     const cls = PT_STATE_CLASS[p.state] || 'pt-st-dim';
     head.append(ptChip((p.state || '').toUpperCase(), cls, p.state_detail || ''));
+    const heldCodes = p.requires_approval || [];
+    if (heldCodes.length) {
+        head.append(ptChip(ptMsg('uplift.patches.safeguard_hold', 'AUTO-APPLY HELD'),
+            'pt-st-warn', p.state_detail || ''));
+    }
     if (p.keg_changed && p.enabled)
         head.append(ptChip(ptMsg('uplift.patches.keg_changed', 'KEG CHANGED'), 'pt-st-warn',
             ptMsg('uplift.patches.keg_changed_hint',
@@ -7572,6 +7615,49 @@ function patchCard(p, view) {
     }
     card.append(vers);
 
+    // safeguards: flagged problems, autodetected root, rebuild command,
+    // per-code approvals (the note names the EXCEPTIONS, not a blanket off)
+    const sgLines = ptSafeguardLines(p);
+    const approved = p.safeguard_always || [];
+    if (sgLines.length || approved.length) {
+        const box = document.createElement('div');
+        box.className = 'pt-safeguards';
+        if (sgLines.length) {
+            const t = document.createElement('div');
+            t.className = 'pt-sg-title';
+            t.textContent = ptMsg('uplift.patches.safeguard_problems',
+                'Safeguards flagged this patch:');
+            box.append(t);
+            for (const l of sgLines) {
+                const row = document.createElement('div');
+                row.className = 'pt-advisories';
+                row.textContent = '⚠ ' + l.text;
+                box.append(row);
+            }
+        }
+        if (p.kernel_rebuild_hint) {
+            const row = document.createElement('div');
+            row.className = 'pt-sg-rebuild';
+            const lbl = document.createElement('span');
+            lbl.textContent = ptMsg('uplift.patches.safeguard_rebuild',
+                'Native kernel rebuild (required for real effect):');
+            const cmd = document.createElement('code');
+            cmd.textContent = p.kernel_rebuild_hint;
+            cmd.title = 'click to copy';
+            cmd.onclick = () => { navigator.clipboard.writeText(cmd.textContent); };
+            row.append(lbl, document.createTextNode(' '), cmd);
+            box.append(row);
+        }
+        if (approved.length) {
+            const a = document.createElement('div');
+            a.className = 'pt-detail';
+            a.textContent = '✓ ' + ptMsg('uplift.patches.approved_codes',
+                'approved: {codes}').replace('{codes}', approved.join(', '));
+            box.append(a);
+        }
+        card.append(box);
+    }
+
     // action row: buttons wired to PAT-2 endpoints
     const acts = document.createElement('div');
     acts.className = 'pt-acts';
@@ -7586,18 +7672,45 @@ function patchCard(p, view) {
         return b;
     };
     if (!p.enabled) {
-        btn(ptMsg('uplift.patches.enable', 'Enable'), 'primary',
-            () => ptAction('enable', { id: p.id },
-                ptMsg('uplift.patches.enabled_toast', 'Enabled — applies on next omlx restart')));
+        if (heldCodes.length) {
+            btn(ptMsg('uplift.patches.approve_once', 'Apply once anyway'), 'primary',
+                () => ptEnableWithApproval(p, 'once'),
+                ptMsg('uplift.patches.approve_once_title',
+                      'Approve the flagged safeguards for this version only'));
+            btn(ptMsg('uplift.patches.approve_always', 'Always allow ({codes})')
+                    .replace('{codes}', heldCodes.join(', ')), 'primary',
+                () => ptEnableWithApproval(p, 'always'),
+                ptMsg('uplift.patches.approve_always_title',
+                      'Remember these safeguard codes for future versions of this patch'));
+        } else {
+            btn(ptMsg('uplift.patches.enable', 'Enable'), 'primary',
+                () => ptEnableWithApproval(p, null),
+                ptMsg('uplift.patches.enabled_toast',
+                      'Enabled — applies on next omlx restart'));
+        }
     } else {
         btn(ptMsg('uplift.patches.disable', 'Disable'), '',
             () => ptAction('disable', { id: p.id },
                 ptMsg('uplift.patches.disabled_toast', 'Disabled — files restored on next omlx restart')));
     }
     if (p.state === 'update_available') {
-        btn(ptMsg('uplift.patches.promote', 'Promote update'), 'primary',
-            () => ptAction('promote', { id: p.id },
-                ptMsg('uplift.patches.promoted', 'Promoted — applies on next omlx restart')));
+        const doPromote = (approve) => ptAction('promote',
+            approve ? { id: p.id, approve } : { id: p.id },
+            ptMsg('uplift.patches.promoted', 'Promoted — applies on next omlx restart'));
+        if (heldCodes.length) {
+            btn(ptMsg('uplift.patches.approve_once', 'Apply once anyway'), 'primary',
+                () => doPromote('once'),
+                ptMsg('uplift.patches.approve_once_title',
+                      'Approve the flagged safeguards for this version only'));
+            btn(ptMsg('uplift.patches.approve_always', 'Always allow ({codes})')
+                    .replace('{codes}', heldCodes.join(', ')), 'primary',
+                () => doPromote('always'),
+                ptMsg('uplift.patches.approve_always_title',
+                      'Remember these safeguard codes for future versions of this patch'));
+        } else {
+            btn(ptMsg('uplift.patches.promote', 'Promote update'), 'primary',
+                () => doPromote(null));
+        }
     }
     const vs = (p.versions || []).map(v => v.v).sort((a, b) => a - b);
     if (p.desired_version && vs.length > 1 && p.state !== 'disabled') {
@@ -7699,6 +7812,26 @@ async function ptPreview() {
         }
         box.hidden = false;
         box.innerHTML = '';
+        if (r.requires_approval && r.requires_approval.length) {
+            const sgt = document.createElement('div');
+            sgt.className = 'pt-sg-title';
+            sgt.textContent = ptMsg('uplift.patches.safeguard_problems',
+                'Safeguards flagged this patch:');
+            box.append(sgt);
+            for (const pr of ((r.safeguards || {}).problems || [])) {
+                const w = document.createElement('div');
+                w.className = 'pt-advisories';
+                w.textContent = '⚠ ' + pr.path + ' — ' + pr.message;
+                box.append(w);
+            }
+            if (r.note) {
+                const w = document.createElement('div');
+                w.className = 'pt-advisories';
+                w.textContent = '⚠ ' + ptMsg('uplift.patches.safeguard_note',
+                    'Root autodetected: {n}').replace('{n}', r.note);
+                box.append(w);
+            }
+        }
         const tbl = document.createElement('div');
         tbl.className = 'pt-gate';
         const head = document.createElement('div');
@@ -7735,14 +7868,29 @@ async function ptPreview() {
             const en = document.createElement('button');
             en.type = 'button';
             en.className = 'btn primary';
-            en.textContent = ptMsg('uplift.patches.enable_now', 'Enable patch');
+            const held = r.requires_approval || [];
+            en.textContent = held.length
+                ? ptMsg('uplift.patches.approve_once', 'Apply once anyway')
+                : ptMsg('uplift.patches.enable_now', 'Enable patch');
             en.onclick = async () => {
-                await ptAction('enable', { id },
-                    ptMsg('uplift.patches.enabled_toast', 'Enabled — applies on next omlx restart'));
+                await ptEnableWithApproval({ id }, held.length ? 'once' : null);
                 box.hidden = true;
                 $('pt-new-id').value = '';
             };
             box.append(en);
+            if (held.length) {
+                const al = document.createElement('button');
+                al.type = 'button';
+                al.className = 'btn primary';
+                al.textContent = ptMsg('uplift.patches.approve_always',
+                    'Always allow ({codes})').replace('{codes}', held.join(', '));
+                al.onclick = async () => {
+                    await ptEnableWithApproval({ id }, 'always');
+                    box.hidden = true;
+                    $('pt-new-id').value = '';
+                };
+                box.append(al);
+            }
         }
     } catch (e) {
         adv.hidden = false;

@@ -32,6 +32,7 @@ import os
 import time
 
 from . import diffapply, patches as _patches
+from . import safeguards as _safeguards
 
 _log = logging.getLogger("omlx_uplift.patchsync")
 
@@ -200,6 +201,21 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
             state = patch.get("state")
 
             if enabled and desired is not None:
+                held = _safeguards.held(
+                    (desired.get("safeguards") or {}).get("codes", []),
+                    patch.get("safeguard_always"), patch.get("safeguard_once"),
+                    desired.get("content_sha256"))
+                if held:
+                    # explicit approval missing: auto-apply is refused, the
+                    # patch stays pending until the user approves per code
+                    if patch.get("state") != "pending":
+                        patch["state"] = "pending"
+                    patch["state_detail"] = ("auto-apply held — safeguards "
+                                             "need approval: " + ", ".join(held))
+                    report["reports"].append(
+                        {"id": patch["id"], "action": "approval_required",
+                         "codes": held})
+                    continue
                 applied = desired.get("applied") or {}
                 if (state == "applied" and applied.get("keg_id") == keg
                         and _files_match(tree_root, applied.get("files", []))):

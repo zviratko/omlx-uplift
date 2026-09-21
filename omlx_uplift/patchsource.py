@@ -28,6 +28,7 @@ import urllib.error
 import urllib.request
 
 from . import diffapply
+from . import safeguards as _safeguards
 
 SIZE_CAP = 2 * 1024 * 1024  # 2 MB per design
 
@@ -225,29 +226,41 @@ def validate(diff: bytes, tree_root: str,
              overrides: dict | None = None) -> dict:
     """Full gate WITHOUT writing anything.
 
+    The diff is first root-normalized (safeguards.normalize_root): a diff
+    made one directory too deep is rewritten to tree-root-canonical paths
+    ONCE here, so everything downstream (sha, stored file, apply) works on
+    the canonical bytes.
+
     overrides: {rel_path: bytes} — tree content to use instead of the live
     file for those paths (gate the candidate against the tree as reconcile
     will find it at apply time: this patch's own hunks unwound to pristine,
     other patches' hunks still applied).
 
     Returns {ok, reason?, advisories?, files: [per-file results],
-             compile_problems: [...], content_sha256}.
+             compile_problems: [...], content_sha256, diff, safeguards?,
+             note?}.
     """
+    diff, note = _safeguards.normalize_root(diff, tree_root)
     content_sha256 = hashlib.sha256(diff).hexdigest()
     parsed = diffapply.parse_diff(diff)
     if not parsed["ok"]:
         return {"ok": False, "reason": f"parse: {parsed['reason']}",
                 "files": [], "compile_problems": [],
-                "content_sha256": content_sha256}
+                "content_sha256": content_sha256, "diff": diff}
     check = diffapply.check_diff(diff, tree_root, overrides=overrides)
     compile_problems = compile_gate(parsed, tree_root, overrides=overrides)
     ok = all(f["status"] in ("ok", "already") for f in check["files"]) \
         and bool(check["files"]) and not compile_problems
-    return {"ok": ok,
-            "reason": check.get("reason") if not ok else None,
-            "files": check["files"],
-            "compile_problems": compile_problems,
-            "content_sha256": content_sha256}
+    out = {"ok": ok,
+           "reason": check.get("reason") if not ok else None,
+           "files": check["files"],
+           "compile_problems": compile_problems,
+           "content_sha256": content_sha256,
+           "diff": diff,
+           "safeguards": _safeguards.assess(parsed, tree_root)}
+    if note:
+        out["note"] = note
+    return out
 
 
 def fetch_and_gate(source: dict, tree_root: str,
@@ -283,8 +296,7 @@ def fetch_and_gate(source: dict, tree_root: str,
     gate = validate(fetched["data"], tree_root, overrides=overrides)
     return {**gate, "stage": "gate", "advisories": advisories,
             "content_sha256": gate["content_sha256"],
-            "source_head_sha": fetched.get("source_head_sha"),
-            "diff": fetched["data"]}
+            "source_head_sha": fetched.get("source_head_sha")}
 
 
 # --------------------------------------------------------------------------
@@ -379,10 +391,26 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "patch_file": pf_rel,
     }
+    if result.get("safeguards", {}).get("problems"):
+        version["safeguards"] = {
+            "problems": result["safeguards"]["problems"],
+            "codes": result["safeguards"]["codes"],
+        }
+    if result.get("note"):
+        version["root_note"] = result["note"]
     patch["versions"].append(version)
 
+    held = _safeguards.held(result.get("safeguards", {}).get("codes", []),
+                            patch.get("safeguard_always"),
+                            patch.get("safeguard_once"), sha)
+
     if patch["state"] in ("disabled",) and not patch.get("enabled"):
-        patch["state_detail"] = "validated, not enabled"
+        patch["state_detail"] = ("validated, safeguards need approval" if held
+                                 else "validated, not enabled")
+    elif held:
+        # auto-apply is refused by reconcile until each code is approved
+        store.set_state(patch, "pending",
+                        "safeguards need approval: " + ", ".join(held))
     else:
         # new candidate on top of an applied patch -> update_available
         if any(ver.get("applied") for ver in versions):
@@ -394,7 +422,10 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
             patch["desired_version"] = v
     store.save(manifest)
     return {"ok": True, "v": v, "state": patch["state"],
-            "advisories": result["advisories"], "files": result["files"]}
+            "advisories": result["advisories"], "files": result["files"],
+            "safeguards": result.get("safeguards", {}),
+            "requires_approval": held,
+            "note": result.get("note")}
 
 
 def _desired_version_entry(store, patch) -> dict | None:
@@ -445,6 +476,10 @@ def view(store, tree_root: str, keg: str | None) -> dict:
     for p in manifest.get("patches", []):
         desired = _desired_version_entry(store, p) or {}
         applied = desired.get("applied") or {}
+        # approvals are evaluated against the desired version; a never-
+        # enabled patch has no desired yet -> judge its newest candidate so
+        # the UI can show what Enable would require
+        gate_ver = desired or (p.get("versions", [])[-1] if p.get("versions") else {})
         entry = {
             "id": p.get("id"), "enabled": p.get("enabled", False),
             "order": p.get("order", 100), "state": p.get("state"),
@@ -453,8 +488,19 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             "desired_version": p.get("desired_version"),
             "versions": [{k: v.get(k) for k in
                           ("v", "content_sha256", "source_head_sha",
-                           "fetched_at", "applied")}
+                           "fetched_at", "applied", "safeguards",
+                           "root_note")}
                          for v in p.get("versions", [])],
+            "safeguard_always": p.get("safeguard_always") or [],
+            "safeguard_once": p.get("safeguard_once"),
+            "requires_approval": _safeguards.held(
+                (gate_ver.get("safeguards") or {}).get("codes", []),
+                p.get("safeguard_always"), p.get("safeguard_once"),
+                gate_ver.get("content_sha256")),
+            "kernel_rebuild_hint": (_safeguards.KERNEL_REBUILD_HINT
+                                    if "kernel_source" in
+                                    (gate_ver.get("safeguards") or {}).get("codes", [])
+                                    else None),
             "applied_v": desired.get("v") if applied else None,
             "keg_changed": bool(applied.get("keg_id") and keg
                                 and applied["keg_id"] != keg),
@@ -469,29 +515,63 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             "load_error": manifest.get("load_error")}
 
 
-def set_enabled(store, patch_id: str, enabled: bool) -> dict:
+def set_enabled(store, patch_id: str, enabled: bool,
+                approve: str | None = None) -> dict:
+    """Enable/disable a patch. 'approve' ("once"|"always") explicitly
+    accepts the safeguard codes of the desired version so auto-apply is
+    allowed; the approval is recorded PER CODE — it never silences
+    safeguards that do not apply to this patch. 'once' is bound to the
+    exact content sha (a new version needs a fresh approval); 'always'
+    covers the same codes on future versions."""
     manifest = store.load()
     p = store.find(manifest, patch_id)
     if p is None:
         return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
     if enabled and not p.get("versions"):
         return {"ok": False, "reason": "no validated version — add a source first"}
+    target_v = p.get("desired_version") or max(
+        (v.get("v", 0) for v in p["versions"]), default=0)
+    desired = store.get_version(p, target_v) or {}
+    codes = (desired.get("safeguards") or {}).get("codes", [])
+    held = _safeguards.held(codes, p.get("safeguard_always"),
+                            p.get("safeguard_once"),
+                            desired.get("content_sha256"))
+    approved_now: list[str] = []
+    if enabled and held:
+        if approve not in ("once", "always"):
+            return {"ok": False,
+                    "reason": "safeguards need approval: " + ", ".join(held),
+                    "requires_approval": held}
+        if approve == "always":
+            p["safeguard_always"] = sorted(set(p.get("safeguard_always") or [])
+                                           | set(held))
+        else:
+            p["safeguard_once"] = {"sha": desired.get("content_sha256"),
+                                   "codes": sorted(held)}
+        still = _safeguards.held(codes, p.get("safeguard_always"),
+                                 p.get("safeguard_once"),
+                                 desired.get("content_sha256"))
+        if still:  # approval did not cover everything (codes raced)
+            return {"ok": False,
+                    "reason": "still needs approval: " + ", ".join(still),
+                    "requires_approval": still}
+        approved_now = sorted(held)
     p["enabled"] = bool(enabled)
     if enabled:
         if not p.get("desired_version"):
-            newest = max((v.get("v", 0) for v in p["versions"]), default=0)
-            p["desired_version"] = newest
+            p["desired_version"] = target_v
         if p.get("state") in ("disabled",):
             store.set_state(p, "pending", "enabled — applies on next restart")
     else:
         store.set_state(p, "disabled", "disabled — restores on next restart")
     store.save(manifest)
-    return {"ok": True, "state": p["state"]}
+    return {"ok": True, "state": p["state"], "approved": approved_now}
 
 
-def promote(store, patch_id: str) -> dict:
+def promote(store, patch_id: str, approve: str | None = None) -> dict:
     """Accept the newest validated candidate as desired; on-disk stays until
-    the next reconcile (restart)."""
+    the next reconcile (restart). A candidate whose safeguards are not yet
+    approved needs the same explicit 'once'/'always' approval as enable."""
     manifest = store.load()
     p = store.find(manifest, patch_id)
     if p is None:
@@ -499,6 +579,21 @@ def promote(store, patch_id: str) -> dict:
     newest = max((v.get("v", 0) for v in p.get("versions", [])), default=0)
     if not newest or newest == p.get("desired_version"):
         return {"ok": False, "reason": "no candidate to promote"}
+    cand = store.get_version(p, newest) or {}
+    codes = (cand.get("safeguards") or {}).get("codes", [])
+    held = _safeguards.held(codes, p.get("safeguard_always"),
+                            p.get("safeguard_once"), cand.get("content_sha256"))
+    if held:
+        if approve not in ("once", "always"):
+            return {"ok": False,
+                    "reason": "safeguards need approval: " + ", ".join(held),
+                    "requires_approval": held}
+        if approve == "always":
+            p["safeguard_always"] = sorted(set(p.get("safeguard_always") or [])
+                                           | set(held))
+        else:
+            p["safeguard_once"] = {"sha": cand.get("content_sha256"),
+                                   "codes": sorted(held)}
     p["desired_version"] = newest
     store.set_state(p, "pending", f"promoted to v{newest} — applies on next restart")
     p["enabled"] = True
@@ -590,6 +685,7 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
     result = validate(data, tree_root, overrides=_pristine_overlay(store, p, tree_root))
+    result.pop("diff", None)  # bytes are not JSON-serialisable; caller has the id
     p["last_verified"] = {"at": _patches.now_iso(),
                           "ok": result["ok"]}
     store.save(manifest)
@@ -651,7 +747,11 @@ def check_all(store, tree_root: str) -> dict:
             "v": v, "content_sha256": sha,
             "source_head_sha": head,
             "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "patch_file": pf_rel})
+            "patch_file": pf_rel,
+            **({"safeguards": {"problems": result["safeguards"]["problems"],
+                               "codes": result["safeguards"]["codes"]}}
+               if result.get("safeguards", {}).get("problems") else {}),
+            **({"root_note": result["note"]} if result.get("note") else {})})
         store.set_state(p, "update_available", f"v{v} available from source")
         reports[pid] = {"check": "update_available", "v": v}
         changed_any = True

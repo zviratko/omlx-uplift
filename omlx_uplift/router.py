@@ -1161,18 +1161,26 @@ class PatchIdRequest(BaseModel):
     id: str
 
 
+class PatchApproveRequest(BaseModel):
+    id: str
+    approve: Optional[str] = None    # "once" | "always" (safeguard codes)
+
+
 class PatchVersionRequest(BaseModel):
     id: str
     v: Optional[int] = None
 
 
 @api_router.post("/patches/enable")
-async def patches_enable(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
+async def patches_enable(req: PatchApproveRequest,
+                         is_admin: bool = Depends(require_admin)):
     from . import patchsource
 
-    res = patchsource.set_enabled(patch_store(), req.id, True)
+    res = patchsource.set_enabled(patch_store(), req.id, True,
+                                  approve=req.approve)
     if not res.get("ok"):
-        raise HTTPException(status_code=422, detail=res.get("reason"))
+        raise HTTPException(status_code=409 if res.get("requires_approval")
+                            else 422, detail=res.get("reason"))
     return res
 
 
@@ -1187,12 +1195,14 @@ async def patches_disable(req: PatchIdRequest, is_admin: bool = Depends(require_
 
 
 @api_router.post("/patches/promote")
-async def patches_promote(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
+async def patches_promote(req: PatchApproveRequest,
+                          is_admin: bool = Depends(require_admin)):
     from . import patchsource
 
-    res = patchsource.promote(patch_store(), req.id)
+    res = patchsource.promote(patch_store(), req.id, approve=req.approve)
     if not res.get("ok"):
-        raise HTTPException(status_code=422, detail=res.get("reason"))
+        raise HTTPException(status_code=409 if res.get("requires_approval")
+                            else 422, detail=res.get("reason"))
     return res
 
 
