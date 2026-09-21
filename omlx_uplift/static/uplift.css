@@ -195,6 +195,11 @@ header.top .tabs a.active { background: var(--hdr-ink); color: var(--bg); }
 header.top .dd-btn { color: var(--hdr-ink); font-weight: var(--hdr-weight); }
 header.top .dd-btn.active { background: var(--hdr-ink); color: var(--bg); }
 header.top .dd-btn:hover { background: var(--hdr-hover); }
+/* An OPEN dropdown button is also hovered — without this guard the later
+   :hover rule wins and the solid active fill flips to --hdr-hover (dark
+   maroon) while the text stays dark = the 'inverted/weird highlight' the
+   user reported (2026-09-21). Active fill must survive its own hover. */
+header.top .dd-btn.active:hover { background: var(--hdr-ink); color: var(--bg); }
 header.top .tabs .dd-btn { border-right-color: var(--hdr-edge); }
 header.top .chip { color: var(--hdr-ink); border-color: var(--hdr-edge);
     font-weight: var(--hdr-weight); }
@@ -377,12 +382,8 @@ body.layout-editing { user-select: none; }
     text-overflow: ellipsis; white-space: nowrap; }
 .card h2 .right b { color: var(--ink); font-weight: 400; }
 
-/* Event flash = border + fill shift, no glow */
-.card.flash-ok   { background: var(--ink); }
-.card.flash-ok h2, .card.flash-ok .stat-value, .card.flash-ok .stat-label { color: var(--bg); }
-.card.flash-warn { border: 1px solid var(--accent); }
-.card.flash-bad  { background: var(--red); border-color: var(--red); }
-.card.flash-bad h2, .card.flash-bad .stat-value, .card.flash-bad .stat-label { color: #fff; }
+/* Event flash removed 2026-09-21 with the blink mechanic (see uplift.js
+   reactTo) — no replacement animation; do not re-add fill-shift flashes. */
 
 /* Drop placeholder: dashed frame + bracket corners, [70s] device */
 main.grid-stack .grid-stack-placeholder > .placeholder-content {
@@ -1347,6 +1348,22 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 .ts-chip:last-child { border-right: 0; }
 .ts-chip:hover { color: var(--ink); background: var(--row2); }
 .ts-chip.on { background: var(--chart-2, #e8a020); color: #14100a; }
+/* Collapsed timespan row (2026-09-21): chips do not fit the header -> one
+   ▾ button showing the active window; click opens .ts-pop. Bordered box +
+   caret marks it as a control, same signage language as the nav dropdowns. */
+.ts-row.ts-collapsed { overflow: visible; border: 0; }
+.ts-more { background: transparent; border: 1px solid var(--edge); color: var(--ink);
+    font: 600 10px/1 var(--mono); letter-spacing: .08em; padding: 4px 6px;
+    cursor: pointer; flex: none; border-radius: 0; }
+.ts-more:hover { background: var(--row2); }
+.ts-pop { position: fixed; z-index: 60; min-width: 96px; display: flex;
+    flex-direction: column; background: var(--card); border: 1px solid var(--ink); }
+.ts-pop-item { background: transparent; border: 0; border-bottom: 1px solid var(--edge);
+    color: var(--ink); font: 600 10px/1 var(--mono); letter-spacing: .08em;
+    padding: 8px 12px; text-align: left; cursor: pointer; }
+.ts-pop-item:last-child { border-bottom: 0; }
+.ts-pop-item:hover { background: var(--ink); color: var(--bg); }
+.ts-pop-item.on { background: var(--chart-2, #e8a020); color: #14100a; }
 
 /* Metric cards (user round 2026-09-19 S2-S4, header-inline ts-row
    2026-09-19 r2): h2 is the shared full-width header band (see .card h2),
@@ -1366,8 +1383,8 @@ main.grid-stack .metric-card h2 { margin: 0 -8px 4px; }          /* same: stays 
 main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metric-card {
     flex: 1 0 100%; min-height: 0; }
 .metric-card .card-pad { flex: 1 1 auto; display: flex; flex-direction: column; }
-.metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 78px; }
-.metric-plot { flex: 1 1 auto; min-height: 78px; min-width: 0; }
+.metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 64px; }
+.metric-plot { flex: 1 1 auto; min-height: 64px; min-width: 0; }
 
 /* ---------------------------------------------------------------------------
    ENV-2 (rev 2): experimental env tunables render as ordinary rows inside

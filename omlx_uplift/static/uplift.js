@@ -456,7 +456,7 @@ function ensureUpliftGrid() {
             if (moved) resizeCharts();
         }, 50);
     });
-    dashGrid.on('dragstop resizestop', () => { refitUpliftBlocks(); resizeCharts(); });
+    dashGrid.on('dragstop resizestop', () => { renderCardTsRows(true); refitUpliftBlocks(); resizeCharts(); });
     GridStack.setupDragIn('.dash-tray-pill', { appendTo: 'body', helper: 'clone' });
     if (typeof ResizeObserver !== 'undefined') {
         const obs = new ResizeObserver(() => refitUpliftBlocks());
@@ -527,7 +527,7 @@ function _neededUnits(el) {
             // yesterday's size — demand = the CSS min-height floor instead.
             // Otherwise a grown card can never shrink (rect ratchet).
             const lg = plot.parentElement.querySelector('.u-legend');
-            const floor = plot.classList.contains('metric-plot') ? 78
+            const floor = plot.classList.contains('metric-plot') ? 64
                 : Math.max(210, parseFloat(getComputedStyle(plot).minHeight) || 210)
                   + (lg ? 20 : 0);
             bottom = Math.max(bottom, child.getBoundingClientRect().top - pr.top + floor);
@@ -598,6 +598,11 @@ function _rowAlign() {
     }
     if (changed) resizeCharts();
     fitAllMetricPlots();   // row grew/shrank: hand the delta to the charts
+    // Rows are only measurable once cards are placed (parked rows have
+    // clientWidth 0): re-evaluate chip fit after every settle pass (the
+    // render is idempotent — rows that already fit or stay collapsed are
+    // untouched, so this cannot feed the ResizeObserver loop).
+    renderCardTsRows();
 }
 
 /* Card content grows after first paint (charts render, feeds fill).
@@ -1334,7 +1339,7 @@ function setGlobalWindow(sec) {
     if (sec === layout.chartWindowSec) return;
     layout.chartWindowSec = sec;
     C.saveLayout(localStorage, layout);
-    renderCardTsRows();
+    renderCardTsRows(true);
     historyDirty = true; loadChartHistory();
     redrawCharts();          // shared cards without an override follow
     for (const id of [...metricCharts.keys()]) {
@@ -1354,14 +1359,90 @@ function setCardWindow(id, sec) {
         metricFetch(id, true);
         drawMetricChart(id);
     }
-    renderCardTsRows();
+    renderCardTsRows(true);
 }
-function renderCardTsRows() {
+/* One shared popover for collapsed timespan rows (2026-09-21): when the
+   chips do not fit the header, the row collapses to a ▾ icon that opens
+   the same options as a click-menu — never a sideways scroll the user
+   cannot see. Re-measured on every render; chips stay as soon as they
+   fit again. */
+let tsPop = null, tsPopOwner = null;
+function closeTsPop() { if (tsPop) { tsPop.remove(); tsPop = null; tsPopOwner = null; } }
+function openTsPop(row, id) {
+    closeTsPop();
+    const r = row.getBoundingClientRect();
+    tsPop = document.createElement('div');
+    tsPop.className = 'ts-pop';
+    for (const sec of C.LAYOUT_WINDOWS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ts-pop-item' + (sec === cardWindow(id) ? ' on' : '');
+        b.textContent = windowLabel(sec);
+        b.onclick = () => { closeTsPop(); setCardWindow(id, sec); };
+        tsPop.append(b);
+    }
+    document.body.append(tsPop);
+    // open downward under the icon, right-aligned like dd-menu--right; flip
+    // left at the viewport edge, up if there is no room below
+    const pw = tsPop.offsetWidth, ph = tsPop.offsetHeight;
+    let x = r.right - pw, y = r.bottom + 2;
+    if (x < 4) x = 4;
+    if (y + ph > innerHeight - 4) y = Math.max(4, r.top - ph - 2);
+    tsPop.style.left = x + 'px'; tsPop.style.top = y + 'px';
+    tsPopOwner = row;
+}
+document.addEventListener('click', e => {
+    if (tsPop && !tsPop.contains(e.target) && tsPopOwner && !tsPopOwner.contains(e.target)) closeTsPop();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeTsPop(); });
+
+function renderCardTsRows(force) {
+    // The row is width:max-content inside a max-width:60% cap (CSS), so
+    // its own width says nothing about the space available — measure the
+    // chip demand in a throwaway probe row inside the SAME header band and
+    // compare against the band's cap. Zero-width band = card not laid out
+    // yet (parked boot): skip, the settle pass re-checks after placement.
     for (const row of document.querySelectorAll('.ts-row')) {
         const id = row.dataset.block;
         const win = cardWindow(id);
-        const wasScrolled = row.scrollLeft;
+        const h2 = row.closest('h2');
+        const bandW = h2 ? h2.clientWidth : row.parentElement.clientWidth;
+        if (!bandW) continue;
+        const avail = Math.floor(bandW * 0.6);
+        const probe = document.createElement('div');
+        probe.className = 'ts-row';
+        probe.style.cssText = 'position:absolute;visibility:hidden;width:max-content;max-width:none;';
+        (h2 || row.parentElement).append(probe);
+        for (const sec of C.LAYOUT_WINDOWS) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'ts-chip'; b.textContent = windowLabel(sec);
+            probe.append(b);
+        }
+        const shouldCollapse = probe.scrollWidth > avail + 1;
+        probe.remove();
+        const collapsed = row.classList.contains('ts-collapsed');
+        // The row is ResizeObserver-watched by the row-height engine: only
+        // rebuild on an actual state change (or a force pass — window-label
+        // relabel). Same-state rebuilds re-fire the observer and loop the
+        // row engine forever.
+        if (row.children.length && collapsed === shouldCollapse && !force) continue;
         row.textContent = '';
+        if (shouldCollapse) {
+            row.classList.add('ts-collapsed');
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ts-more';
+            b.title = windowLabel(win);
+            b.setAttribute('aria-label', 'Timespan: ' + windowLabel(win));
+            b.textContent = windowLabel(win) + ' ▾';
+            b.onclick = e => {
+                e.stopPropagation();
+                if (tsPopOwner === row) closeTsPop(); else openTsPop(row, id);
+            };
+            row.append(b);
+            continue;
+        }
+        row.classList.remove('ts-collapsed');
         for (const sec of C.LAYOUT_WINDOWS) {
             const b = document.createElement('button');
             b.type = 'button';
@@ -1371,10 +1452,8 @@ function renderCardTsRows() {
             b.onclick = () => setCardWindow(id, sec);
             row.append(b);
         }
-        // keep the active chip visible if the row is narrow and scrolled
         const on = row.querySelector('.on');
         if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-        void wasScrolled;
     }
 }
 
@@ -1453,7 +1532,7 @@ function createMetricCard(def) {
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
         scales: { x: { time: true }, y: { auto: true } },
-        axes: [metricXAxis(cardWindow(id), col), yAxis(col, { size: 30, label: '' })],
+        axes: [metricXAxis(cardWindow(id), col), metricYAxis(col, def)],
         series: [{}, { label: metricLabel(def.key), stroke: col.blue, width: 1.6,
                        fill: col.blue + '1c', points: { show: false },
                        value: v => fmt(v === undefined ? null : v) }],
@@ -1480,7 +1559,7 @@ function fitMetricPlot(id) {
     // locks the chart at its largest-ever height and bleeds past the box.
     const pad = e.host.closest('.card-pad');
     const cont = e.host.closest('.grid-stack-item-content');
-    let h = 78;
+    let h = 64;
     if (pad && cont) {
         // Bottom reference = the GRID BOX, never the pad: a stretched pad
         // reports its own stale grown height and the loop gets stuck at
@@ -1488,7 +1567,7 @@ function fitMetricPlot(id) {
         const cs = getComputedStyle(pad);
         const padBottom = parseFloat(cs.paddingBottom) || 0;
         const border = parseFloat(getComputedStyle(e.host.closest('.card')).borderTopWidth) || 0;
-        h = Math.max(78, Math.round(cont.getBoundingClientRect().bottom - border
+        h = Math.max(64, Math.round(cont.getBoundingClientRect().bottom - border
             - e.host.parentElement.getBoundingClientRect().top - padBottom));
     }
     host.style.height = h + 'px';
@@ -1500,9 +1579,27 @@ function fitAllMetricPlots() { for (const id of metricCharts.keys()) fitMetricPl
 function metricXAxis(win, col) {
     const dayish = win >= 86400;
     return { stroke: col.dim, width: 1, size: 26, font: axisFont,
-        values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
-            dayish ? { month: 'short', day: 'numeric' }
-                   : { hour: '2-digit', minute: '2-digit' })) };
+             values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
+                 dayish ? { month: 'short', day: 'numeric' }
+                        : { hour: '2-digit', minute: '2-digit' })) };
+}
+/* Compact axis labels with units (user 2026-09-21: raw y-labels like
+   '1234567' clipped inside the 30px gutter of the small metric cards).
+   <=4 chars so the 26px gutter never clips; ticks thin out via space,
+   rotate is pinned off — rotated labels reach past the gutter too. */
+function metricYFmt(def) {
+    if (/(bytes)/.test(def.key))
+        return v => (v === 0 ? '0'
+                     : v >= 1e9 ? (v / 1e9).toFixed(v >= 1e10 ? 0 : 1) + 'G'
+                                : (v / 1e6).toFixed(0) + 'M');
+    return v => (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + 'M'
+                 : Math.abs(v) >= 1e3 ? Math.round(v / 1e3) + 'k'
+                 : String(Math.round(v * 10) / 10));
+}
+function metricYAxis(col, def) {
+    return { stroke: col.dim, size: 26, font: axisFont, grid: true, gap: 4,
+             rotate: 0, space: 50, label: '',
+             values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) };
 }
 function metricFetch(id, force) {
     const e = metricCharts.get(id);
@@ -1562,7 +1659,7 @@ function drawAllMetricCharts() {
 function relabelExplore() {
     // JS-built dynamic bits (window chips + per-card readouts); i18n-named
     // titles are [data-i18n] and covered by applyI18n already.
-    renderCardTsRows();
+    renderCardTsRows(true);
     refitUpliftBlocks();   // chip rows just materialised: demand changed
     for (const [id, e] of metricCharts) {
         e.chart.series[1].label = metricLabel(e.def.key);
@@ -1603,12 +1700,11 @@ function toast(text, ms) {
     $('toasts').append(t);
     setTimeout(() => t.remove(), ms || 3200);
 }
-function flashCard(id, tone) {
-    const el = $(id); if (!el) return;
-    const card = el.closest('.card'); if (!card || motionOff()) return;
-    card.classList.add(`flash-${tone}`);
-    setTimeout(() => card.classList.remove(`flash-${tone}`), 1200);
-}
+/* Event flash DROPPED 2026-09-21 (user): the 1.2 s whole-card colour
+   inversion read as a blink — intrusive, and it fired on paths the user
+   experienced as idle traffic. No replacement animation for now; events
+   still surface in the feed + toasts. (Badge pulse stays: it is live
+   state semantics, not decoration.) */
 function celebrate(text) {
     // SHODAN only celebrates an audience. While the tab is hidden the
     // queue holds toasts+confetti back (background polls would waste
@@ -1646,10 +1742,7 @@ for (const ev of ['visibilitychange', 'mousemove', 'pointerdown', 'keydown', 'to
 function reactTo(events) {
     for (const ev of events) {
         pushFeed([ev]);
-        if (ev.kind === 'model-add')   { toast(C.t('uplift.toast.model_loaded', {model: ev.model})); flashCard('v-requests', 'ok'); }
-        if (ev.kind === 'model-remove') flashCard('v-requests', 'warn');
-        if (ev.kind === 'restart')      flashCard('v-gentps', 'bad');
-        if (ev.kind === 'pressure' && ev.text.includes('hard')) flashCard('mem-label', 'bad');
+        if (ev.kind === 'model-add')   toast(C.t('uplift.toast.model_loaded', {model: ev.model}));
     }
 }
 /* Milestone gate: fire each round crossing at most once per page session,
@@ -2061,8 +2154,6 @@ function pushServerEvent(ev) {
         if (ev.loop_hint !== undefined) patch.loopHint = ev.loop_hint;
         upsertReq(ev.id, patch);
         pushFeed([{ kind: 'requests', text: `${ev.origin === 'real' ? '◆ ' : ''}${ev.id.slice(0, 6)} → ${ev.state}` }]);
-        if (ev.state === 'error') flashCard('v-errrate', 'bad');
-        if (ev.state === 'complete') flashCard('v-requests', 'ok');
     } else if (ev.type === 'model-load') {
         pushFeed([{ kind: 'model-add', model: ev.id, text: C.t('uplift.feed.load_requested', {model: ev.id}) }]);
     } else if (ev.type === 'model-unload') {
@@ -4504,7 +4595,7 @@ function foldAll() {
         scheduleFold(h);
     }
 }
-window.addEventListener('resize', () => { foldAll(); scheduleAlign(); });
+window.addEventListener('resize', () => { foldAll(); scheduleAlign(); renderCardTsRows(); });
 
 // ---------------------------------------------------------------------------
 // Profile-line column alignment: the diff chips of a profile/alias line must
