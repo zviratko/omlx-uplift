@@ -32,6 +32,8 @@ window.Uplift.state = {
     prefs: C.loadPrefs(localStorage),
     layout: C.loadLayout(localStorage),
     tracker: C.createRequestTracker(2000),
+    usageRange: qp.get('range') || 'today',
+    usageAvg: null,   // usage-tab averages (uplift_usage.js writes)
     PT_DATA: null,   // last /patches view
     PT_BUSY: false,
 };

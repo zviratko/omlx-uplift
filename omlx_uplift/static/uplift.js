@@ -33,6 +33,20 @@ window.Uplift._chartGlue = {
     get applyI18n() { return applyI18n; },
 };
 
+/* PH2-1 stage 3: usage + logs tabs live in uplift_usage.js. The glue lets
+   that module late-bind hoisted helpers that stay here (stats is a mutable
+   let cell -> getter, the rest are function declarations). */
+const UUP = window.Uplift.usage;
+window.Uplift._usageGlue = {
+    get fetchJson() { return fetchJson; },
+    get cell() { return cell; },
+    get setCounter() { return setCounter; },
+    get fillSelect() { return fillSelect; },
+    get currentTab() { return currentTab; },
+    get renderRequestStats() { return renderRequestStats; },
+    get stats() { return stats; },
+};
+
 const PT_STATE_CLASS = {
     applied: 'pt-st-applied', pending: 'pt-st-pending',
     update_available: 'pt-st-update', needs_review: 'pt-st-warn',
@@ -85,7 +99,6 @@ async function loadLocale(lang) {
 }
 
 let stats = null, prevStats = null, failCount = 0, timer = null;
-let usageRange = qp.get('range') || 'today';
 const PERCENTILES = { p50: 50, p90: 90, p95: 95, p99: 99 };
 if (!(layout.percentile in PERCENTILES)) layout.percentile = 'p95';
 
@@ -160,8 +173,8 @@ function applyTab() {
     ddForceOpen = null;
     requestAnimationFrame(CH.resizeCharts);   // charts may have become visible
     if (tab === 'status') requestAnimationFrame(ensureUpliftGrid);
-    if (tab === 'usage') pollUsage();
-    if (tab === 'logs') pollLogs();
+    if (tab === 'usage') UUP.pollUsage();
+    if (tab === 'logs') UUP.pollLogs();
     if (tab === 'models') {
         renderModelAdmin();
         if (sub === 'downloader') initDownloader();
@@ -1169,7 +1182,6 @@ function renderLive(s) {
 
 /* Request sizes: prefer server-side full-population stats (gateway overlay);
    fall back to client-side session tracker when absent. */
-let usageAvg = null;
 function renderRequestStats(s) {
     fillSelectOnce();
     const p = PERCENTILES[layout.percentile];
@@ -1198,8 +1210,8 @@ function renderRequestStats(s) {
         return;
     }
     const promptSamples = tracker.samples.prompt, complSamples = tracker.samples.completion;
-    setCounter('v-prompt-avg', usageAvg ? usageAvg.prompt : (C.mean(promptSamples) ?? null));
-    setCounter('v-compl-avg', usageAvg ? usageAvg.completion : (C.mean(complSamples) ?? null));
+    setCounter('v-prompt-avg', S.usageAvg ? S.usageAvg.prompt : (C.mean(promptSamples) ?? null));
+    setCounter('v-compl-avg', S.usageAvg ? S.usageAvg.completion : (C.mean(complSamples) ?? null));
     setCounter('v-prompt-pct', C.percentile(promptSamples, p));
     setCounter('v-compl-pct', C.percentile(complSamples, p));
     setCounter('v-ttft', null);
@@ -1208,7 +1220,7 @@ function renderRequestStats(s) {
     $('lbl-compl-pct').textContent = `${layout.percentile} completion tok`;
     const n = Math.max(promptSamples.length, complSamples.length);
     $('reqstats-note').textContent =
-        `avg: usage aggregates (${usageRange}) · p: session samples (${n}, cap 2000)` +
+        `avg: usage aggregates (${S.usageRange}) · p: session samples (${n}, cap 2000)` +
         (n === 0 ? ' — waiting for requests to complete while this page is open' : '');
 }
 let fillSelectDone = false;
@@ -4181,134 +4193,8 @@ $('ma-only-loaded').onchange = () => { if (seModel) closeEditor(); renderModelAd
 $('ma-only-fav').onchange = () => { if (seModel) closeEditor(); renderModelAdmin(true); };
 $('ma-present-only').onchange = () => { if (seModel) closeEditor(); renderModelAdmin(true); };
 
-/* ---------------- usage (Usage tab) ---------------- */
-/* createUsageChart lives in uplift_charts.js (CH.createUsageChart). */
-async function pollUsage() {
-    if (document.hidden) return;
-    try {
-        const u = await fetchJson(`${API}/admin/api/usage?range=${usageRange}`);
-        const tot = u.totals || {};
-        setCounter('v-u-req', tot.requests ?? null);
-        setCounter('v-u-tok', tot.total_tokens ?? null);
-        setCounter('v-u-prompt', tot.prompt_tokens ?? null);
-        setCounter('v-u-compl', tot.completion_tokens ?? null);
-        usageAvg = tot.requests > 0
-            ? { prompt: tot.prompt_tokens / tot.requests, completion: tot.completion_tokens / tot.requests }
-            : null;
-        usageRange = u.range || usageRange;
-
-        // Heatmap: single row for day ranges, full day×hour grid for 7d+.
-        const hm = u.heatmap || [];
-        const heat = $('heat');
-        const multi = hm.length > 1;
-        heat.classList.toggle('multi', multi);
-        heat.style.gridTemplateRows = multi ? `repeat(${hm.length}, auto)` : '';
-        const want = hm.length * 24;
-        if (heat.children.length !== want) {
-            heat.innerHTML = '';
-            for (let i = 0; i < want; i++) heat.append(document.createElement('i'));
-        }
-        const allMax = Math.max(1, ...hm.flatMap(d => d.tokens || [0]));
-        let cells = [...heat.children];
-        hm.forEach((day, dIdx) => {
-            (day.tokens || []).slice(0, 24).forEach((v, hIdx) => {
-                const c = cells[dIdx * 24 + hIdx];
-                if (!c) return;
-                const a = v > 0 ? 0.15 + 0.85 * Math.sqrt(v / allMax) : 0;
-                c.style.background = v > 0 ? `color-mix(in oklab, var(--heat) ${Math.round(a * 100)}%, transparent)` : '';
-                c.title = `${day.date || ''} ${String(hIdx).padStart(2, '0')}:00 — ${C.fmtCompact(v)} tokens`;
-            });
-        });
-        $('usage-sub').textContent = tot.requests !== undefined
-            ? `${C.fmtNumber(tot.requests)} req · ${C.fmtCompact(tot.total_tokens)} tok · cached ${C.fmtCompact(tot.cached_tokens)}` : '';
-
-        // Hourly tokens chart (last day of the range).
-        if (!CH.usageChart) CH.createUsageChart();
-        const lastDay = hm[hm.length - 1];
-        const hours = lastDay ? (lastDay.tokens || []).slice(0, 24) : [];
-        const uc = CH.usageChart;
-        if (uc && hours.length === 24) {
-            const base = new Date(); base.setHours(0, 0, 0, 0);
-            const ts = hours.map((_, i) => base.getTime() + i * 3600e3);
-            uc.setData([ts, hours.slice()]);
-        }
-
-        // Per-model table (all, sorted by tokens).
-        const table = $('usage-models');
-        table.innerHTML = '';
-        const models = (u.models || []).slice()
-            .sort((a, b) => (b.prompt_tokens + b.completion_tokens) - (a.prompt_tokens + a.completion_tokens));
-        if (models.length) {
-            const head = document.createElement('div'); head.className = 'urow head admin';
-            for (const h of ['model', 'req', 'prompt', 'completion', 'cached', 'avg t/req']) head.append(cell(h));
-            table.append(head);
-            for (const m of models) {
-                const row = document.createElement('div'); row.className = 'urow admin';
-                const name = cell(m.model_id); name.className = 'uname'; name.title = m.model_id;
-                row.append(name, cell(C.fmtNumber(m.requests)), cell(C.fmtCompact(m.prompt_tokens)),
-                           cell(C.fmtCompact(m.completion_tokens)), cell(C.fmtCompact(m.cached_tokens)),
-                           cell(m.requests ? C.fmtCompact((m.prompt_tokens + m.completion_tokens) / m.requests) : '—'));
-                table.append(row);
-            }
-        }
-        if (currentTab() === 'status') renderRequestStats(stats);
-    } catch (_) { /* usage may be disabled; keep last data */ }
-}
-fillSelect($('opt-usage-range'), [['today', 'today'], ['yesterday', 'yesterday'], ['7d', '7 days'], ['30d', '30 days'], ['90d', '90 days']], usageRange);
-$('opt-usage-range').onchange = e => { usageRange = e.target.value; pollUsage(); };
-
-/* ---------------- logs (Logs tab) ---------------- */
-let logsFilesLoaded = false, logsFollow = true;
-async function pollLogs() {
-    if (document.hidden && !logsFollow) return;
-    try {
-        const lines = Number($('logs-lines').value || 300);
-        const file = $('logs-file').value;
-        let url = `${API}/admin/api/logs?lines=${lines}`;
-        if (file) url += `&file=${encodeURIComponent(file)}`;
-        const d = await fetchJson(url);
-        if (!logsFilesLoaded && Array.isArray(d.available_files)) {
-            fillSelect($('logs-file'), d.available_files.map(f => [f, f]), d.log_file || d.available_files[0]);
-            logsFilesLoaded = true;
-        }
-        let rows = String(d.logs || '').split('\n').filter(Boolean);
-        const level = $('logs-level').value;
-        const grep = ($('logs-grep').value || '').toLowerCase();
-        rows = rows.filter(l => {
-            if (level && !l.includes(` - ${level} - `)) return false;
-            if (!level && layout.logsHideDebug && / - (DEBUG|TRACE) - /.test(l)) return false;
-            if (grep && !l.toLowerCase().includes(grep)) return false;
-            return true;
-        });
-        const pre = $('logs');
-        const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-        pre.innerHTML = '';
-        const frag = document.createDocumentFragment();
-        for (const line of rows.slice(-800)) {
-            const span = document.createElement('span');
-            const lv = / - (ERROR|WARNING|TRACE|DEBUG) - /.exec(line);
-            if (lv) span.className = `lv-${lv[1]}`;
-            span.textContent = line + '\n';
-            frag.append(span);
-        }
-        pre.append(frag);
-        if (logsFollow || atBottom) pre.scrollTop = pre.scrollHeight;
-        $('logs-sub').textContent = `${rows.length} lines${d.log_file ? ' · ' + d.log_file : ''}`;
-    } catch (_) { /* keep tail */ }
-}
-$('logs-level').onchange = () => pollLogs();
-$('logs-lines').onchange = () => pollLogs();
-$('logs-file').onchange = () => pollLogs();
-$('logs-grep').oninput = C.debounce ? C.debounce(pollLogs, 300) : (() => { let t; return () => { clearTimeout(t); t = setTimeout(pollLogs, 300); }; })();
-$('logs-follow').onchange = e => { logsFollow = e.target.checked; };
-$('logs-dl').onclick = () => {
-    const blob = new Blob([$('logs').textContent], { type: 'text/plain' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `uplift-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-};
+/* ---- usage + logs tabs: extracted to uplift_usage.js (PH2-1 stage 3);
+   window.Uplift.usage aliases live at the top. ---- */
 
 /* ---------------- settings (Settings tab: read-only server preview) ------ */
 /* ---- Server settings: editable form mirroring the classic Settings page.
@@ -6615,8 +6501,8 @@ fetchJson(`${API}/admin/api/device-info`).then(d => {
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     pollStats(); pollGatewayInfo();
-    if (currentTab() === 'usage') pollUsage();
-    if (currentTab() === 'logs') pollLogs();
+    if (currentTab() === 'usage') UUP.pollUsage();
+    if (currentTab() === 'logs') UUP.pollLogs();
     // task-list poll chains self-terminate while hidden; kick the current one again
     const TASK_HOSTS = { downloader: ['dl-tasks', 'hf'], quantizer: ['qz-tasks', 'oq'], uploader: ['up-tasks', 'upload'] };
     if (currentTab() === 'models') {
@@ -7227,11 +7113,12 @@ initPatchesPage();
 CH.renderCardTsRows();
 CH.drawAllMetricCharts();
 setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.drawAllMetricCharts(); }, 5000);
-pollUsage(); pollLogs();
+UUP.initUsageRange();   // seeds the range select now that glue helpers exist
+UUP.pollUsage(); UUP.pollLogs();
 connectEventStream();
 setInterval(pollGatewayInfo, 10000);
 setInterval(() => { if (!document.hidden) pollRequests(); }, 2000);
 setInterval(() => { if (!document.hidden && !seModel) renderModelAdmin(); }, 8000);
-setInterval(() => { if (!document.hidden && currentTab() === 'usage') pollUsage(); }, 15000);
-setInterval(() => { if (!document.hidden && currentTab() === 'logs' && logsFollow) pollLogs(); }, 5000);
+setInterval(() => { if (!document.hidden && currentTab() === 'usage') UUP.pollUsage(); }, 15000);
+setInterval(() => { if (!document.hidden && currentTab() === 'logs' && UUP.logsFollow) UUP.pollLogs(); }, 5000);
 })();
