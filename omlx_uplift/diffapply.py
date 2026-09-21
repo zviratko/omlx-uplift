@@ -140,10 +140,12 @@ def parse_diff(diff: bytes | str) -> dict:
         return _fail("not a unified diff: no file header found "
                      "('diff --git', '--- '/'+++ ' pair, or 'Index:')")
     if starts[0] != 0:
-        # leading noise must be blank or a diff(1) preamble line
-        # ('diff -ruN a/x b/y' etc. precedes the first --- in GNU output)
+        # Leading preamble is normal: git format-patch emails (From/Subject/
+        # diffstat), diff(1) 'diff -ruN ...' lines. Anything goes as long as
+        # no hunk starts BEFORE the first file header — that would mean a
+        # body without a header (corrupt input), which stays rejected.
         for l in lines[: starts[0]]:
-            if l.strip() and not l.startswith((b"diff ", b"Only in ", b"Common subdirectories")):
+            if _HUNK_RE.match(l.decode("utf-8", "replace")):
                 return _fail("unified diff has content before the first file header")
 
     files: list[dict] = []

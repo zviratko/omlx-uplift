@@ -125,6 +125,33 @@ class TestHeaderFormats(TempTree):
         self.assertEqual([f["path"] for f in r["files"]],
                          ["omlx/a.py", "mlx_embeddings/b.py"])
 
+    def test_git_format_patch_email(self):
+        # `git format-patch` output: From/Subject/diffstat preamble before
+        # the first 'diff --git', '-- <version>' trailer after the last hunk
+        email = (b"From bdbdecb5 Mon Sep 17 00:00:00 2001\n"
+                 b"From: Jan Schermer <jan@example.cz>\n"
+                 b"Date: Sat, 19 Sep 2026 20:40:08 +0200\n"
+                 b"Subject: [PATCH 2/2] feat(admin): live-apply something\n"
+                 b"\n"
+                 b"---\n"
+                 b" omlx/routes.py | 4 +++-\n"
+                 b" 1 file changed, 3 insertions(+), 1 deletion(-)\n"
+                 b"\n"
+                 b"diff --git a/omlx/routes.py b/omlx/routes.py\n"
+                 b"index 19a05b80..7df1462d 100644\n"
+                 b"--- a/omlx/routes.py\n+++ b/omlx/routes.py\n"
+                 + self.BODY +
+                 b"-- \n2.54.0 (Apple Git-157)\n")
+        r = diffapply.parse_diff(email)
+        self.assertTrue(r["ok"], r["reason"])
+        self.assertEqual([f["path"] for f in r["files"]], ["omlx/routes.py"])
+        self.assertEqual(len(r["files"][0]["hunks"]), 1)
+
+    def test_preamble_with_stray_hunk_still_rejected(self):
+        # a @@ before ANY file header means headerless content -> reject
+        r = diffapply.parse_diff(b"Subject: x\n@@ -1,3 +1,3 @@\n a\n-b\n+c\n")
+        self.assertFalse(r["ok"])
+
     def test_gnu_applies_and_restores(self):
         # the whole point: a diff -ruN patch against site-packages siblings
         src = os.path.join(self.tree, "mlx_embeddings")
