@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const C = require('../omlx_uplift/static/core.js');
+const { allStaticJs } = require('./static-src.cjs');
 
 const snap = o => C.normalize(o);
 const raw = extra => Object.assign({
@@ -455,7 +456,7 @@ test('explore catalogue: unique keys, one fmt each, exports agree', () => {
 test('F-035: _onTrayDrop calls renderTray after placing the card', () => {
     const fs = require('fs');
     const path = require('path');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const src = allStaticJs();  // PH2-1 stage 0: whole static JS surface
     const m = src.match(/function _onTrayDrop\(node\) \{[\s\S]*?\n\}/);
     assert.ok(m, '_onTrayDrop function found');
     const place = m[0].indexOf('_placeCard(');
@@ -471,7 +472,7 @@ test('F-035: _onTrayDrop calls renderTray after placing the card', () => {
 test('TRAY-1: tray re-add restores the removed card width, not pill gs-w', () => {
     const fs = require('fs');
     const path = require('path');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const src = allStaticJs();  // PH2-1 stage 0: whole static JS surface
     const rem = src.match(/function removeCard\(id\) \{[\s\S]*?\n\}/);
     assert.ok(rem, 'removeCard function found');
     assert.ok(/_trayGeo\.set\(id, \{ w: el\.gridstackNode\.w \}\)/.test(rem[0]),
@@ -493,7 +494,7 @@ test('TRAY-1: tray re-add restores the removed card width, not pill gs-w', () =>
 test('UPLOADER-1: loadLocale re-labels JS-built mode badges', () => {
     const fs = require('fs');
     const path = require('path');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const src = allStaticJs();  // PH2-1 stage 0: whole static JS surface
     const m = src.match(/async function loadLocale\(lang\) \{[\s\S]*?\n\}/);
     assert.ok(m, 'loadLocale function found');
     const body = m[0];
@@ -510,7 +511,7 @@ test('UPLOADER-1: loadLocale re-labels JS-built mode badges', () => {
 test('GS-1: global-settings labels use C.tf fallback, never bare C.t', () => {
     const fs = require('fs');
     const path = require('path');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const src = allStaticJs();  // PH2-1 stage 0: whole static JS surface
     const bare = src.match(/C\.t\('uplift\.gs\.[^']*'\)/g) || [];
     assert.deepStrictEqual(bare, [], 'no bare C.t(uplift.gs.*) calls: ' + bare.join(', '));
 });
@@ -520,7 +521,7 @@ test('GS-1: global-settings labels use C.tf fallback, never bare C.t', () => {
 test('F-035b: renderTray re-binds setupDragIn for late-created pills', () => {
     const fs = require('fs');
     const path = require('path');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const src = allStaticJs();  // PH2-1 stage 0: whole static JS surface
     const m = src.match(/function renderTray\(\) \{[\s\S]*?\n\}/);
     assert.ok(m, 'renderTray function found');
     assert.ok(/setupDragIn\('\.dash-tray-pill'/.test(m[0]),
@@ -532,7 +533,7 @@ test('F-035b: renderTray re-binds setupDragIn for late-created pills', () => {
 test('F-036: all geometry writers clamp x/w at the 1-column breakpoint', () => {
     const fs = require('fs');
     const path = require('path');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const src = allStaticJs();  // PH2-1 stage 0: whole static JS surface
     const clamp = /getColumn\(\) === 1/;
     for (const [name, re] of [
         ['applyUpliftLayout', /function applyUpliftLayout[\s\S]*?\n}/],

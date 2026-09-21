@@ -8,9 +8,12 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
+const { allStaticJs } = require('./static-src.cjs');
 const ROOT = path.join(__dirname, '..', '..', '..');   // repo root (tests live in projects/omlx-uplift/tests)
 const routes = fs.readFileSync(path.join(ROOT, 'omlx/admin/routes.py'), 'utf8');
-const uplift = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+// PH2-1 stage 0: read the whole static JS surface, not uplift.js by name —
+// the split into per-section files must not blind this drift test.
+const uplift = allStaticJs();
 const mock = fs.readFileSync(path.join(ROOT, 'scripts', 'uplift-mock.py'), 'utf8');
 const modelspec = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'modelspec.js'), 'utf8');
 

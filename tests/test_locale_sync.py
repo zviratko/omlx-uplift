@@ -25,7 +25,10 @@ def _locale(lang):
 
 
 def _referenced_keys():
-    js = (STATIC / "uplift.js").read_text(encoding="utf-8")
+    # PH2-1 stage 0: scan the whole static JS surface, not uplift.js by name —
+    # the split into per-section files must not blind this gate.
+    js = "\n".join(sorted(p.read_text(encoding="utf-8")
+                          for p in STATIC.glob("*.js")))
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     keys = set(re.findall(r"C\.t\(\s*['\"]([A-Za-z0-9_.]+)['\"]", js))
     keys |= set(re.findall(r'data-i18n="([A-Za-z0-9_.]+)"', js + html))
