@@ -5,36 +5,26 @@
 const C = window.UpliftCore;
 const $ = id => document.getElementById(id);
 
-/* API base: the gateway is the single source for the UI. It reads real oMLX
-   and layers simulated data. Override with ?api= (e.g. =http://127.0.0.1:11435
-   to bypass, or empty when served by oMLX itself in future hosting). */
-const qp = new URLSearchParams(location.search);
-// Served by oMLX itself (/uplift/ or legacy /admin/uplift/) or by the
-// standalone `omlx-uplift view` server (/uplift/)? Either way our own
-// origin IS the API (the viewer proxies it). Only the old dev mock
-// gateway (:11437) default remains, for ?api= harness sessions.
-const NATIVE = location.pathname.startsWith('/uplift')
-    || location.pathname.startsWith('/admin/uplift');
-const API_DEFAULT = NATIVE ? ''
-    : location.protocol + '//' + location.hostname + ':11437';
-const API = qp.has('api') ? qp.get('api') : API_DEFAULT;
+/* PH2-1 stage 1: shared state (API base, prefs, layout, tracker, PT_*)
+   moved to uplift_state.js -> window.Uplift.state. index.html loads the
+   state file BEFORE this one, which preserves the PAT-4 property: boot can
+   reach pollPatches() via applyTab() (#settings/patches deep link) and the
+   state is already initialized — no temporal dead zone. The PT_* mutation
+   sites below go through S so every file shares one storage cell. */
+const S = window.Uplift.state;
+const qp = S.qp;
+const NATIVE = S.NATIVE;
+const API_DEFAULT = S.API_DEFAULT;
+const API = S.API;
+const prefs = S.prefs;
+const layout = S.layout;
+const tracker = S.tracker;
 
-const prefs = C.loadPrefs(localStorage);
-const layout = C.loadLayout(localStorage);
-const tracker = C.createRequestTracker(2000);
-
-/* PAT-4 state — declared BEFORE boot because applyTab() (deep link
-   #settings/patches) can reach pollPatches() while the tail of this file
-   has not executed yet: a `let` declared down there would still be in its
-   temporal dead zone ('Cannot access PT_DATA before initialization'), and
-   the poll's catch mislabelled that as 'Patches API unavailable'. */
 const PT_STATE_CLASS = {
     applied: 'pt-st-applied', pending: 'pt-st-pending',
     update_available: 'pt-st-update', needs_review: 'pt-st-warn',
     failed: 'pt-st-warn', obsolete: 'pt-st-dim', disabled: 'pt-st-dim',
 };
-let PT_DATA = null;      // last /patches view
-let PT_BUSY = false;
 
 /* ---------------- i18n bootstrap (classic pattern) ---------------------
    GET /uplift/api/locale -> {lang, strings}: classic's catalog merged
@@ -7418,7 +7408,7 @@ function ptMsg(key, fb) { return C.tf(key, fb); }
 
 async function pollPatches() {
     try {
-        PT_DATA = await fetchJson(`${API}/uplift/api/patches`);
+        S.PT_DATA = await fetchJson(`${API}/uplift/api/patches`);
         renderPatches();
     } catch (e) {
         const list = $('pt-list');
@@ -7446,8 +7436,8 @@ function ptApi(path, body) {
 }
 
 async function ptAction(path, body, okMsg) {
-    if (PT_BUSY) return;
-    PT_BUSY = true;
+    if (S.PT_BUSY) return;
+    S.PT_BUSY = true;
     try {
         const r = await ptApi(path, body);
         if (okMsg) toast(okMsg, 4000);
@@ -7457,15 +7447,15 @@ async function ptAction(path, body, okMsg) {
         toast(ptMsg('uplift.patches.action_fail', 'Patch action failed') +
               ': ' + (e && e.message ? e.message : e), 6000);
     } finally {
-        PT_BUSY = false;
+        S.PT_BUSY = false;
     }
 }
 
 // Enable/promote with safeguard support: on HTTP 409 the backend lists the
 // codes that need an explicit approval — we do NOT silently retry.
 async function ptEnableWithApproval(p, approve) {
-    if (PT_BUSY) return;
-    PT_BUSY = true;
+    if (S.PT_BUSY) return;
+    S.PT_BUSY = true;
     try {
         const body = { id: p.id };
         if (approve) body.approve = approve;
@@ -7480,7 +7470,7 @@ async function ptEnableWithApproval(p, approve) {
         toast(ptMsg('uplift.patches.approve_fail', 'Approval failed') +
               ': ' + (e && e.message ? e.message : e), 6000);
     } finally {
-        PT_BUSY = false;
+        S.PT_BUSY = false;
     }
 }
 
@@ -7508,7 +7498,7 @@ function ptChip(text, cls, title) {
 }
 
 function renderPatches() {
-    const d = PT_DATA;
+    const d = S.PT_DATA;
     if (!d) return;
     const list = $('pt-list');
     list.innerHTML = '';
@@ -7728,8 +7718,8 @@ function patchCard(p, view) {
                 ptMsg('uplift.patches.rolledback', 'Rollback queued for next omlx restart')));
     }
     btn(ptMsg('uplift.patches.test', 'Test dry-run'), '', async () => {
-        if (PT_BUSY) return;
-        PT_BUSY = true;
+        if (S.PT_BUSY) return;
+        S.PT_BUSY = true;
         try {
             const r = await ptApi('test', { id: p.id });
             const bad = (r.files || []).filter(f => f.status === 'fail')
@@ -7739,7 +7729,7 @@ function patchCard(p, view) {
                 : ptMsg('uplift.patches.test_ok', 'Dry-run OK — patch applies cleanly now'),
                 bad.length ? 7000 : 4000);
             await pollPatches();
-        } catch (e) { toast(String(e), 5000); } finally { PT_BUSY = false; }
+        } catch (e) { toast(String(e), 5000); } finally { S.PT_BUSY = false; }
     });
     btn(ptMsg('uplift.patches.remove', 'Remove'), '', async () => {
         if (!confirm(ptMsg('uplift.patches.remove_confirm',
@@ -7935,7 +7925,7 @@ function ptScheduleAutoCheck() {
     clearInterval(PT_CHECK_TIMER);
     PT_CHECK_TIMER = setInterval(() => {
         if (!document.hidden && currentTab() === 'settings' && currentSub('settings') === 'patches'
-                && PT_DATA && PT_DATA.config && PT_DATA.config.auto_update_check) {
+                && S.PT_DATA && S.PT_DATA.config && S.PT_DATA.config.auto_update_check) {
             ptCheckNow(true);
         }
     }, 3600e3);
@@ -7943,8 +7933,8 @@ function ptScheduleAutoCheck() {
 
 async function ptCheckNow(quiet) {
     const b = $('pt-check-btn');
-    if (PT_BUSY) return;
-    PT_BUSY = true;
+    if (S.PT_BUSY) return;
+    S.PT_BUSY = true;
     const old = b.textContent;
     b.textContent = ptMsg('uplift.patches.checking', 'Checking…');
     b.disabled = true;
@@ -7967,7 +7957,7 @@ async function ptCheckNow(quiet) {
     } finally {
         b.textContent = old;
         b.disabled = false;
-        PT_BUSY = false;
+        S.PT_BUSY = false;
     }
 }
 
