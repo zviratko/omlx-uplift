@@ -34,6 +34,15 @@ window.Uplift.state = {
     tracker: C.createRequestTracker(2000),
     usageRange: qp.get('range') || 'today',
     usageAvg: null,   // usage-tab averages (uplift_usage.js writes)
+    settingsIdx: { stored: 0, orphans: [], entries: [], profiles: [] },
+    // PH2-1 stage 5: in-flight model writes counter, shared by
+    // uplift_modelmgr.js (renderModelAdmin guard) and the
+    // putModelSettings/postModelAction helpers still in uplift.js.
+    pendingWrites: 0,
+    trackWrite: async function (fn) {
+        window.Uplift.state.pendingWrites++;
+        try { return await fn(); } finally { window.Uplift.state.pendingWrites--; }
+    },
     PT_DATA: null,   // last /patches view
     PT_BUSY: false,
 };
