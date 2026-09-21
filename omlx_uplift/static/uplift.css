@@ -1472,6 +1472,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-gate-row:first-child { border-top: 0; }
 .pt-gate-head { font-weight: 700; }
 .pt-ok { color: var(--ok, #2e8b57); }
+.pt-fail { color: var(--err, #c0392b); font-weight: 600; }
 .pt-diff { position: relative; border: 1px solid var(--line); margin-top: 10px; }
 .pt-diff-head { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); }
 .pt-diff pre { margin: 0; padding: 8px; overflow: auto; max-height: 420px; font-family: var(--mono, monospace); font-size: var(--fs-meta); line-height: 1.35; }

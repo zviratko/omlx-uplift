@@ -7422,8 +7422,13 @@ async function pollPatches() {
         if (list) {
             const d = document.createElement('div');
             d.className = 'empty';
-            d.textContent = ptMsg('uplift.patches.load_fail', 'Patches API unavailable') +
-                ' — ' + (e && e.message ? e.message : e);
+            // a 401 means the admin session cookie is missing/expired for
+            // THIS origin — 'API unavailable' sent people hunting servers
+            const denied = /-> 401/.test(String(e && e.message || e));
+            d.textContent = (denied
+                ? ptMsg('uplift.patches.load_auth', 'Sign in required — open /admin and log in, then reload')
+                : ptMsg('uplift.patches.load_fail', 'Patches API unavailable'))
+                + (denied ? '' : ' — ' + (e && e.message ? e.message : e));
             list.append(d);
         }
     }
@@ -7837,14 +7842,27 @@ async function ptPreview() {
         const head = document.createElement('div');
         head.className = 'pt-gate-row pt-gate-head';
         const ht = document.createElement('span');
-        ht.textContent = r.obsolete
+        // r.ok is the verdict — never claim "gate passed" for a rejected
+        // patch (a GNU `diff -ruN` upload once showed green on a parse fail)
+        ht.textContent = !r.ok
+            ? ptMsg('uplift.patches.preview_fail', 'REJECTED — gate failed')
+            : r.obsolete
             ? ptMsg('uplift.patches.obsolete', 'ALREADY PRESENT upstream — patch looks obsolete')
             : (r.unchanged
                 ? ptMsg('uplift.patches.unchanged', 'stored version already matches the source')
                 : ptMsg('uplift.patches.preview_ok', 'VALIDATED — gate passed'));
-        ht.className = (r.obsolete || r.unchanged) ? '' : 'pt-ok';
+        ht.className = (!r.ok || r.obsolete || r.unchanged) ? 'pt-fail' : 'pt-ok';
         head.append(ht);
         tbl.append(head);
+        if (!r.ok && r.reason) {
+            const why = document.createElement('div');
+            why.className = 'pt-gate-row';
+            const w = document.createElement('span');
+            w.className = 'pt-detail';
+            w.textContent = r.reason;
+            why.append(w);
+            tbl.append(why);
+        }
         for (const f of (r.files || [])) {
             const row = document.createElement('div');
             row.className = 'pt-gate-row';

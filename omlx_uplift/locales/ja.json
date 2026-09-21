@@ -273,6 +273,8 @@
   "uplift.patches.ph_url": "https://…/patch.diff",
   "uplift.patches.preview": "プレビュー",
   "uplift.patches.preview_ok": "検証済み — ゲート通過",
+  "uplift.patches.preview_fail": "拒否 — ゲート失敗",
+  "uplift.patches.load_auth": "ログインが必要です — /admin を開いてログインし、再読み込みしてください",
   "uplift.patches.pristine": "バニラ — ローカルパッチはありません",
   "uplift.patches.promote": "更新を昇格",
   "uplift.patches.promoted": "昇格しました — 次の omlx 再起動時に適用されます",

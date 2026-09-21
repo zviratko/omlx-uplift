@@ -277,6 +277,8 @@
   "uplift.patches.ph_url": "https://…/patch.diff",
   "uplift.patches.preview": "Aperçu",
   "uplift.patches.preview_ok": "VALIDÉ — contrôle passé",
+  "uplift.patches.preview_fail": "REJETÉ — contrôle échoué",
+  "uplift.patches.load_auth": "Connexion requise — ouvrez /admin, connectez-vous, puis rechargez",
   "uplift.patches.pristine": "vanilla — aucun correctif local actif",
   "uplift.patches.promote": "Promouvoir la mise à jour",
   "uplift.patches.promoted": "Promu — appliqué au prochain redémarrage d'omlx",

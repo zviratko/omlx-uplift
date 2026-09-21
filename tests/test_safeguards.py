@@ -104,14 +104,22 @@ class HeuristicTests(unittest.TestCase):
         self.assertTrue(g["ok"])
         self.assertIn("brew reinstall", g["safeguards"]["problems"][0]["message"])
 
-    def test_outside_omlx_problem(self):
-        # a sibling package inside site-packages — safe_join allows, uplift flags
+    def test_in_keg_sibling_not_flagged(self):
+        # a sibling package that EXISTS in the tree is a legitimate target
         os.makedirs(os.path.join(self.root, "fastapi"))
         with open(os.path.join(self.root, "fastapi", "routing.py"), "w") as fh:
             fh.write("x = 1\nx = 2\n")
         d = _diff("fastapi/routing.py", "x = 1", "x = 2", "x = 22")
         g = patchsource.validate(d, self.root)
-        self.assertIn("outside_omlx", g["safeguards"]["codes"])
+        self.assertEqual(g["safeguards"]["codes"], [])
+        self.assertTrue(g["ok"])
+
+    def test_outside_keg_problem(self):
+        # a sibling that does NOT exist in the tree resolves onto nothing —
+        # gate flags it; the strict apply would fail on a missing file anyway
+        d = _diff("ghost_pkg/routing.py", "x = 1", "x = 2", "x = 22")
+        g = patchsource.validate(d, self.root)
+        self.assertIn("outside_keg", g["safeguards"]["codes"])
 
     def test_clean_diff_no_problems(self):
         d = _diff("engine/pool.py", "alpha = 1", "beta = 2", "beta = 7")
@@ -140,9 +148,9 @@ class HeldModelTests(unittest.TestCase):
         # always covers its codes across versions, nothing else
         self.assertEqual(safeguards.held(["kernel_source"], ["kernel_source"],
                                          None, "sha9"), [])
-        self.assertEqual(safeguards.held(["kernel_source", "outside_omlx"],
+        self.assertEqual(safeguards.held(["kernel_source", "outside_keg"],
                                          ["kernel_source"], None, "sha9"),
-                         ["outside_omlx"])
+                         ["outside_keg"])
 
 
 class OrchestrationTests(unittest.TestCase):

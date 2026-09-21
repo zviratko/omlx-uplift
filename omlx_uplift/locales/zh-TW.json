@@ -273,6 +273,8 @@
   "uplift.patches.ph_url": "https://…/patch.diff",
   "uplift.patches.preview": "預覽",
   "uplift.patches.preview_ok": "驗證通過 — 閘門放行",
+  "uplift.patches.preview_fail": "已拒絕 — 閘門未通過",
+  "uplift.patches.load_auth": "需要登入 — 開啟 /admin 登入，然後重新載入",
   "uplift.patches.pristine": "vanilla — 無啟用的本機修補",
   "uplift.patches.promote": "提升更新",
   "uplift.patches.promoted": "已提升 — 將於下次 omlx 重啟時套用",

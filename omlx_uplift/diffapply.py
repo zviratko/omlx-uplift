@@ -75,13 +75,76 @@ def parse_diff(diff: bytes | str) -> dict:
     if len(diff) > 16 and b"\r\n" in diff[:256]:
         lines = [ln[:-1] if ln.endswith(b"\r") else ln for ln in lines]
 
-    # Section boundaries: one per "diff --git" header.
-    starts = [i for i, ln in enumerate(lines) if ln.startswith(b"diff --git ")]
+    # Map hunk ranges first: hunk bodies are counted exactly, so a line
+    # that merely LOOKS like a header inside a body (a removed '-- x'
+    # renders as '--- x') can never be mistaken for a section boundary.
+    hunk_at: dict[int, int] = {}  # header line -> end-after line
+    i = 0
+    while i < len(lines):
+        if _HUNK_RE.match(lines[i].decode("utf-8", "replace")):
+            end = _scan_hunk_end(lines, i)
+            if end is not None:
+                hunk_at[i] = end
+                i = end
+                continue
+        i += 1
+    in_hunk = bytearray(len(lines))
+    for a, b in hunk_at.items():
+        for k in range(a, min(b, len(lines))):
+            in_hunk[k] = 1
+
+    # Section boundaries (outside hunk bodies). Accepted header styles
+    # (git diffs, hand-made `diff -ruN` output, patch(1)/svn "Index:"
+    # files — svn also emits +++ before ---):
+    #   "diff --git a/x b/y"   git format (its own --- / +++ twins belong
+    #                          to the section and NEVER start a new one)
+    #   "Index: p"             patch(1)/svn style
+    #   "--- p" then "+++ q"   classic unified diff; when the diff carries
+    #                          no 'diff --git' at all this pair IS the
+    #                          section header (diff -ruN style)
+    has_git = any(ln.startswith(b"diff --git ") for ln in lines)
+    starts: list[int] = []
+    hunks_seen_since = False   # a hunk passed since the last boundary
+    header_run = False         # boundary was the previous line (Index: run)
+    after_git = False          # last boundary was a 'diff --git' header
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if in_hunk[i]:
+            hunks_seen_since = True
+            i = hunk_at.get(i, i + 1)
+            continue
+        new_section = False
+        if ln.startswith(b"diff --git "):
+            new_section = True
+        elif ln.startswith(b"Index: "):
+            new_section = not header_run
+        elif ln.startswith((b"--- ", b"+++ ")):
+            twin = (i + 1 < len(lines)
+                    and lines[i + 1].startswith((b"--- ", b"+++ ")))
+            lead = not starts and not hunks_seen_since
+            # inside a git section the file's own --- / +++ twins belong to
+            # the open section; a pair opens a new one only after a hunk
+            # (plain unified diff) and never right behind 'diff --git'
+            new_section = (not after_git
+                           and (lead or (hunks_seen_since and twin)))
+        if new_section:
+            starts.append(i)
+            hunks_seen_since = False
+            header_run = True
+            after_git = ln.startswith(b"diff --git ")
+        else:
+            header_run = False
+        i += 1
     if not starts:
-        return _fail("not a unified diff: no 'diff --git' header found")
-    if starts[0] != 0 and any(l.strip() for l in lines[: starts[0]]):
-        # tolerate leading noise (index lines etc.) only if blank
-        return _fail("unified diff has content before the first file header")
+        return _fail("not a unified diff: no file header found "
+                     "('diff --git', '--- '/'+++ ' pair, or 'Index:')")
+    if starts[0] != 0:
+        # leading noise must be blank or a diff(1) preamble line
+        # ('diff -ruN a/x b/y' etc. precedes the first --- in GNU output)
+        for l in lines[: starts[0]]:
+            if l.strip() and not l.startswith((b"diff ", b"Only in ", b"Common subdirectories")):
+                return _fail("unified diff has content before the first file header")
 
     files: list[dict] = []
     bounds = starts + [len(lines)]
@@ -94,6 +157,38 @@ def parse_diff(diff: bytes | str) -> dict:
     if not any(f["hunks"] for f in files):
         return _fail("unified diff contains no hunks")
     return {"ok": True, "reason": None, "files": files}
+
+
+def _scan_hunk_end(section: list[bytes], start: int) -> int | None:
+    """Line index just past the hunk at `start`, or None if malformed.
+    Counts are exact, so a body line like '--- x' (removed '-- x') can
+    never leak into header detection."""
+    m = _HUNK_RE.match(section[start].decode("utf-8", "replace"))
+    if not m:
+        return None
+    old_count = int(m.group(2)) if m.group(2) is not None else 1
+    new_count = int(m.group(4)) if m.group(4) is not None else 1
+    old_seen = new_seen = 0
+    i = start + 1
+    while i < len(section) and (old_seen < old_count or new_seen < new_count):
+        ln = section[i]
+        i += 1
+        if ln.startswith(b"\\ "):
+            continue
+        if ln.startswith(b" "):
+            old_seen += 1
+            new_seen += 1
+        elif ln.startswith(b"-"):
+            old_seen += 1
+        elif ln.startswith(b"+"):
+            new_seen += 1
+        else:
+            return None  # malformed body line
+    if old_seen != old_count or new_seen != new_count:
+        return None
+    if i < len(section) and section[i].startswith(b"\\ "):
+        i += 1
+    return i
 
 
 def _git_paths(header: bytes) -> tuple[str, str]:
@@ -113,18 +208,24 @@ def _git_paths(header: bytes) -> tuple[str, str]:
 
 def _parse_file_section(section: list[bytes]) -> dict:
     header = section[0]
-    a_path, b_path = _git_paths(header)
+    if header.startswith(b"diff --git "):
+        a_path, b_path = _git_paths(header)
+    else:
+        # classic unified / Index: section — the path comes from --- / +++
+        a_path = b_path = ""
     reject = None
-    if not b_path:
+    if header.startswith(b"diff --git ") and not b_path:
         reject = "unsupported diff header (quoted or spaced paths)"
 
     old_path = new_path = None
     hunks: list[dict] = []
-    i = 1
+    # when the section opens with '--- '/'+++ '/'Index: ' that line is data
+    # for the header parser below, not a git section header — don't skip it
+    i = 1 if header.startswith(b"diff --git ") else 0
     while i < len(section):
         ln = section[i]
         if ln.startswith((b"index ", b"similarity index", b"index", b"new file mode",
-                          b"deleted file mode")) or ln == b"":
+                          b"deleted file mode", b"Index: ")) or ln == b"":
             i += 1
             continue
         if ln.startswith((b"old mode", b"new mode")):

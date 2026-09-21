@@ -288,6 +288,8 @@
   "uplift.patches.ph_url": "https://…/patch.diff",
   "uplift.patches.preview": "미리보기",
   "uplift.patches.preview_ok": "검증 완료 — 게이트 통과",
+  "uplift.patches.preview_fail": "거부됨 — 게이트 실패",
+  "uplift.patches.load_auth": "로그인 필요 — /admin을 열고 로그인한 후 새로고침하세요",
   "uplift.patches.pristine": "바닐라 — 활성 로컬 패치 없음",
   "uplift.patches.promote": "업그레이드 승격",
   "uplift.patches.promoted": "승격됨 — 다음 omlx 재시작 시 적용됩니다",

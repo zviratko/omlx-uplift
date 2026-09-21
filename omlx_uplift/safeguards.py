@@ -17,9 +17,9 @@ Sits BEFORE the strict gate (PAT-2 flow) and answers two questions:
      time and are NOT rebuilt by a patch — the fix may be inert or worse,
      out of sync with the Python wrapper. Requires explicit user
      approval (once or always) before reconcile will auto-apply.
-   - outside_omlx: a path that does not land inside the omlx package at
-     all (sibling site-packages deps, stray files at the tree root).
-     Uplift claims to patch omlx, not someone else's package.
+   - outside_keg: a path that resolves outside the installed site-packages
+     tree (or onto a missing file). Sibling packages inside the tree
+     (mlx_embeddings, mlx_vlm, ...) are legitimate targets and NOT flagged.
 
 Problems must be covered by an explicit approval to auto-apply, but the
 approval is per CODE (and for 'once' per content sha), never a blanket
@@ -84,15 +84,23 @@ def _strip_one(paths: list[str]) -> list[str] | None:
 def normalize_root(diff: bytes | str, tree_root: str | None = None) -> tuple[bytes, str | None]:
     """Rewrite section paths so they are tree-root canonical.
 
-    Returns (possibly-rewritten diff bytes, note). Ladder (no guessing —
-    the first candidate that reaches 'omlx/...' wins):
+    The target tree is the whole site-packages dir (omlx AND its
+    neighbours are patchable), so a path that already lands on an
+    existing tree entry is canonical AS-IS — mlx_embeddings/... made with
+    `diff -ruN` needs no remap and must not be guessed about.
 
-      0. paths already start at 'omlx/' (repo-root diff)      -> as-is
-      1..MAX_ROOT_SHIFT: strip N shared leading components
-         (diff made from a repo checkout that nests omlx under
-          <repo>/<x>/... )  -> rewritten if result is under 'omlx/'
-      A: every path sits directly inside the package root
-         ('engine/foo.py') -> prepend 'omlx/' (diff made inside omlx/)
+    Returns (possibly-rewritten diff bytes, note). Ladder (no guessing):
+
+      0. every path exists in the tree already                   -> as-is
+      1. paths under 'omlx/'                                     -> as-is
+         (also: every path EXISTS under omlx/ in the tree        -> as-is;
+          a whole-package diff carries 'omlx/' as its top dir)
+      2..MAX_ROOT_SHIFT+1: strip N shared leading components
+         (diff made from a checkout that nests the package under
+          <repo>/<x>/... ) -> rewritten when the result is either an
+          existing tree path or under 'omlx/'
+      3: every path sits directly inside the package root
+         ('engine/foo.py', exists under omlx/) -> prepend 'omlx/'
 
     note is None when nothing applied or the diff cannot be parsed — the
     strict gate still rejects unparseable input; we never guess there.
@@ -108,9 +116,37 @@ def normalize_root(diff: bytes | str, tree_root: str | None = None) -> tuple[byt
     if not paths or not all("/" in p for p in paths):
         return diff, None
 
+    def exists_in_tree(p: str) -> bool:
+        return tree_root is None or os.path.lexists(os.path.join(tree_root, *p.split("/")))
+
+    def exists_under_omlx(p: str) -> bool:
+        return exists_in_tree(_OMLX_PREFIX + p)
+
+    def creates_into_existing(p: str, exists) -> bool:
+        # a create's target obviously cannot exist yet — its PARENT must
+        return exists(os.path.dirname(p))
+
+    entries = [(f["path"], f.get("action", "modify")) for f in parsed["files"]
+               if f.get("path")]
+    if not entries:
+        return diff, None
+
+    # 0. already tree-root canonical (existing site-packages members).
+    # Needs a tree to check against — without one we cannot tell, and the
+    # ladder below keeps its old (grounded) behaviour.
+    if tree_root is not None and not _all_under_omlx(paths) and all(
+            exists_in_tree(p) or (a == "create" and creates_into_existing(p, exists_in_tree))
+            for p, a in entries):
+        return diff, None
+
+    # 1. paths already rooted at the package
     if _all_under_omlx(paths):
         return diff, None
 
+    # 2. strip shared leading components (checkout made one level too deep).
+    # Only ever strip toward 'omlx/': a sibling's extra leading dir is
+    # ambiguous (which parent did they mean?) and the strict gate will say
+    # 'target missing' loudly rather than us guessing a rewrite.
     cur = list(paths)
     for _ in range(MAX_ROOT_SHIFT):
         stripped = _strip_one(cur)
@@ -124,19 +160,15 @@ def normalize_root(diff: bytes | str, tree_root: str | None = None) -> tuple[byt
                     f"'{removed}' too deep)")
             return _rewrite_paths(diff, remove_prefix=removed), note
 
-    # level-shift: every path already inside the package source root.
+    # 3. level-shift: every path already inside the package source root.
     # Grounded: only shift when every PREPENDED path actually exists in
     # the live tree (a real package member), so a sibling like
     # 'fastapi/routing.py' is NOT silently buried under omlx/ and stays
-    # visible to the outside_omlx heuristic.
+    # visible to the outside_keg heuristic.
     if not _all_prefixed(paths, _OMLX_PREFIX):
-        entries = [f for f in parsed["files"] if f.get("path")]
-        grounded = tree_root is None or all(
-            f["action"] == "create"
-            or os.path.lexists(os.path.join(tree_root,
-                                            *(_OMLX_PREFIX + f["path"]).split("/")))
-            for f in entries)
-        if grounded:
+        if all(exists_under_omlx(p)
+               or (a == "create" and creates_into_existing(_OMLX_PREFIX + p, exists_in_tree))
+               for p, a in entries):
             note = ("paths are relative to the omlx package dir; they were "
                     "rewritten with an 'omlx/' prefix (diff was made inside "
                     "the package instead of its parent)")
@@ -206,6 +238,12 @@ def assess(parsed: dict, tree_root: str) -> dict:
              "truncated": bool}. Problems are advisory to the strict gate
     (the diff may still be a clean, applyable diff) but block
     AUTO-APPLY until each distinct code is explicitly approved.
+
+    Policy: the WHOLE site-packages tree is patchable — sibling packages
+    (mlx_embeddings, mlx_vlm, ...) are legitimate targets and pass without
+    a word. Only a path that resolves OUTSIDE the installed tree — or
+    onto nothing at all (neither the path nor its omlx/ interpretation
+    exists; a modify of a missing file) — is an 'outside_keg' problem.
     """
     problems: list[dict] = []
 
@@ -213,13 +251,22 @@ def assess(parsed: dict, tree_root: str) -> dict:
         if len(problems) < _MAX_REPORTED_PROBLEMS:
             problems.append({"code": code, "path": path, "message": message})
 
+    def lexists(rel: str) -> bool:
+        return (tree_root is None
+                or os.path.lexists(os.path.join(tree_root, *rel.split("/"))))
+
     truncated = False
     for fp in parsed.get("files", []):
         path = fp.get("path") or ""
         if not path.startswith(_OMLX_PREFIX):
-            add("outside_omlx", path,
-                "lands outside the omlx package — uplift patches omlx, "
-                "not its site-packages neighbours")
+            if lexists(path):
+                continue  # in-keg sibling: fine, no warning
+            if (fp.get("action") == "create"
+                    and lexists(os.path.dirname(path) or ".")):
+                continue  # new file into an existing keg dir: fine
+            add("outside_keg", path,
+                "resolves outside the installed site-packages tree (or "
+                "onto a missing file) — verify the target before applying")
             continue
         rel = path[len(_OMLX_PREFIX):]
         if rel == "custom_kernels" or rel.startswith("custom_kernels/"):

@@ -273,6 +273,8 @@
   "uplift.patches.ph_url": "https://…/patch.diff",
   "uplift.patches.preview": "预览",
   "uplift.patches.preview_ok": "校验通过 — 门禁放行",
+  "uplift.patches.preview_fail": "已拒绝 — 门禁未通过",
+  "uplift.patches.load_auth": "需要登录 — 打开 /admin 登录，然后重新加载",
   "uplift.patches.pristine": "vanilla — 无激活的本地补丁",
   "uplift.patches.promote": "提升更新",
   "uplift.patches.promoted": "已提升 — 将在下次 omlx 重启时应用",

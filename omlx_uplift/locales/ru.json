@@ -273,6 +273,8 @@
   "uplift.patches.ph_url": "https://…/patch.diff",
   "uplift.patches.preview": "Предпросмотр",
   "uplift.patches.preview_ok": "ПРОВЕРЕНО — фильтр пройден",
+  "uplift.patches.preview_fail": "ОТКЛОНЕНО — проверка не пройдена",
+  "uplift.patches.load_auth": "Требуется вход — откройте /admin, войдите и обновите страницу",
   "uplift.patches.pristine": "vanilla — локальные патчи не активны",
   "uplift.patches.promote": "Применить обновление",
   "uplift.patches.promoted": "Обновление принято — применится при следующем перезапуске omlx",

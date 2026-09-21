@@ -79,6 +79,70 @@ class TestParse(TempTree):
         self.assertFalse(r["ok"])
 
 
+class TestHeaderFormats(TempTree):
+    """Diff header recognition: git, GNU `diff -ruN`, plain unified pairs,
+    patch(1)/svn 'Index:' — all must parse to the same (path, hunks)."""
+
+    BODY = b"@@ -1,3 +1,3 @@\n ctx\n-old\n+new\n tail\n"
+
+    def _check(self, name, diff, path, nfiles=1):
+        r = diffapply.parse_diff(diff)
+        self.assertTrue(r["ok"], f"{name}: {r['reason']}")
+        self.assertEqual(len(r["files"]), nfiles, name)
+        self.assertEqual(r["files"][0]["path"], path, name)
+        self.assertEqual(r["files"][0]["action"], "modify", name)
+        self.assertEqual(len(r["files"][0]["hunks"]), 1, name)
+
+    def test_gnu_diff_runuN(self):
+        diff = (b"diff -ruN a/mlx_embeddings/m.py b/mlx_embeddings/m.py\n"
+                b"--- a/mlx_embeddings/m.py\t2026-09-18 13:31:27 +0200\n"
+                b"+++ b/mlx_embeddings/m.py\t2026-09-18 15:40:17 +0200\n"
+                + self.BODY)
+        self._check("gnu", diff, "mlx_embeddings/m.py")
+
+    def test_plain_unified_pair(self):
+        diff = (b"--- a/omlx/x.py\t2026\n+++ b/omlx/x.py\t2026\n" + self.BODY)
+        self._check("plain", diff, "omlx/x.py")
+
+    def test_patch_index_style(self):
+        diff = (b"Index: omlx/x.py\n"
+                b"===================================================================\n"
+                b"--- omlx/x.py\n+++ omlx/x.py\n" + self.BODY)
+        self._check("index", diff, "omlx/x.py")
+
+    def test_svn_reverse_order(self):
+        diff = (b"Index: omlx/x.py\n"
+                b"===================================================================\n"
+                b"--- omlx/x.py\t(revision 1)\n+++ omlx/x.py\t(revision 2)\n"
+                + self.BODY)
+        self._check("svnrev", diff, "omlx/x.py")
+
+    def test_multi_file_gnu(self):
+        d1 = (b"--- a/omlx/a.py\n+++ b/omlx/a.py\n" + self.BODY)
+        d2 = (b"--- a/mlx_embeddings/b.py\n+++ b/mlx_embeddings/b.py\n" + self.BODY)
+        r = diffapply.parse_diff(d1 + d2)
+        self.assertTrue(r["ok"], r["reason"])
+        self.assertEqual([f["path"] for f in r["files"]],
+                         ["omlx/a.py", "mlx_embeddings/b.py"])
+
+    def test_gnu_applies_and_restores(self):
+        # the whole point: a diff -ruN patch against site-packages siblings
+        src = os.path.join(self.tree, "mlx_embeddings")
+        os.makedirs(src)
+        target = os.path.join(src, "m.py")
+        with open(target, "wb") as fh:
+            fh.write(b"ctx\nold\ntail\n")
+        diff = (b"diff -ruN a/mlx_embeddings/m.py b/mlx_embeddings/m.py\n"
+                b"--- a/mlx_embeddings/m.py\t2026\n"
+                b"+++ b/mlx_embeddings/m.py\t2026\n" + self.BODY)
+        r = diffapply.apply_diff(diff, self.tree, os.path.join(self.tree, ".bak"))
+        self.assertTrue(r["ok"], r.get("reason"))
+        self.assertEqual(open(target, "rb").read(), b"ctx\nnew\ntail\n")
+        rb = diffapply.restore_backup(os.path.join(self.tree, ".bak"), self.tree)
+        self.assertTrue(rb["ok"], rb.get("reason"))
+        self.assertEqual(open(target, "rb").read(), b"ctx\nold\ntail\n")
+
+
 class TestApplyRoundTrip(TempTree):
     def test_real_pr3764_roundtrip(self):
         self._roundtrip("pr3764.diff", "base3764")

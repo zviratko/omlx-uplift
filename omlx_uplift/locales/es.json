@@ -277,6 +277,8 @@
   "uplift.patches.ph_url": "https://…/patch.diff",
   "uplift.patches.preview": "Vista previa",
   "uplift.patches.preview_ok": "VALIDADO — filtro superado",
+  "uplift.patches.preview_fail": "RECHAZADO — filtro fallido",
+  "uplift.patches.load_auth": "Se requiere iniciar sesión — abra /admin, inicie sesión y recargue",
   "uplift.patches.pristine": "vanilla — sin parches locales activos",
   "uplift.patches.promote": "Promover actualización",
   "uplift.patches.promoted": "Promovido — se aplicará en el próximo reinicio de omlx",
