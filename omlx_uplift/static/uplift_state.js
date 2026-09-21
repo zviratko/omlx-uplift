@@ -35,6 +35,9 @@ window.Uplift.state = {
     usageRange: qp.get('range') || 'today',
     usageAvg: null,   // usage-tab averages (uplift_usage.js writes)
     settingsIdx: { stored: 0, orphans: [], entries: [], profiles: [] },
+    // PH2-1 stage 6: last global-settings save timestamp. Written by
+    // uplift_gsys.js save flow, read by updateModeLabels in uplift.js.
+    gsSavedAt: 0,
     // PH2-1 stage 5: in-flight model writes counter, shared by
     // uplift_modelmgr.js (renderModelAdmin guard) and the
     // putModelSettings/postModelAction helpers still in uplift.js.
