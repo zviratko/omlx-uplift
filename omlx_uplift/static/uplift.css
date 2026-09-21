@@ -157,7 +157,7 @@ header.top {
        fonts landing) the tabs strip grows for a moment and wrap dropped the
        trailing icons, incl. the classic-dashboard home icon, onto a second
        line. The tabs strip shrinks instead (min-width:0 below). */
-    display: flex; align-items: center; gap: 14px; flex-wrap: nowrap;
+    display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
     padding: 8px 2px 14px; margin-bottom: 18px;
     border-bottom: 1px solid var(--edge);   /* rule under header lockup */
     /* the whole top menu floats: it sticks under the red strip on scroll */
@@ -170,6 +170,34 @@ header.top {
 .logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
 .logo .dot.bad { background: var(--red); }
 header.top .spacer { flex: 1; }
+/* chip + tab text may never break: when the window narrows the tabs strip
+   shrinks first (min-width:0), but the chips are flex items with the
+   default flex-shrink:1 — once tabs bottom out, squeezed chips wrapped
+   their own text ("up 2h 59m", "M1 Max · 32 GB · 32c") and the header
+   read as two lines. nowrap pins every control to one line at any width. */
+header.top .chip, header.top .tabs a, header.top .dd-btn { white-space: nowrap; }
+header.top .chip { flex-shrink: 0; }   /* never squeeze the box under the
+    nowrap text — the tabs strip absorbs width pressure instead */
+/* graceful tiering before the 900px mobile wrap (measured: with both chips
+   the tabs strip starts clipping just under ~1265px; headroom for longer
+   uptime strings and wider locales, drop the device chip at 1300, the
+   uptime chip and tab padding at 1140), so the icons and the classic-home
+   link never overlap at any window width. */
+@media (max-width: 1300px) { header.top #chip-device { display: none; } }
+/* tabs padding 14px→6px at ALL widths: with nowrap text the strip cannot
+   shrink past its label floor, and the 7-tab cluster build + both status
+   chips need ~1240px while the 1280px wrap cap limits the header to ~1216
+   at ANY viewport. 6px side padding buys the ~70px that gap 14→10 does
+   not, keeping every label one line and unbroken at any window width. */
+header.top .tabs a, header.top .dd-btn { padding: 9px 6px; }
+@media (max-width: 1140px) {
+    header.top .chip { display: none; }
+}
+@media (max-width: 930px) {
+    /* last shave before the mobile wrap at 900: the 7-tab cluster build
+       still clipped its own strip by up to 21px at 901px (measured) */
+    header.top .tabs a, header.top .dd-btn { padding: 9px 4px; }
+}
 /* round 7 item 6: the header is the mission-patch lockup — bold red on the
    page ground in EVERY theme (day: red on white; night/enhanced: red on
    black; cockpit keeps its white-on-metal doctrine). --hdr-ink is the token.
