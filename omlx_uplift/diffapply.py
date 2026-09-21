@@ -513,16 +513,19 @@ def _all_hunks(content_lines: list[tuple[bytes, bytes]], hunks: list[dict],
         offsets.append(pos - (h["old_start"] - 1))
         cursor += pos - (h["old_start"] - 1)
         if reverse:
-            # in-memory un-apply: what IS on disk (context + '+') becomes
-            # context + '-' lines of the original
+            # in-memory un-apply: what IS on disk (context + '+') maps back
+            # to context + the '-' lines of the original. Context survives,
+            # '+' additions are DROPPED, '-' lines are restored.
             new_len = sum(1 for (op, _t, _e) in h["lines"] if op in (" ", "+"))
             seg = work[pos : pos + new_len]
             rebuilt: list[tuple[bytes, bytes]] = []
             si = 0
             for (op, text, has_eol) in h["lines"]:
-                if op in (" ", "+"):
+                if op == " ":
                     rebuilt.append(seg[si])
                     si += 1
+                elif op == "+":
+                    si += 1  # consumed from disk, not restored
                 else:  # '-' — restore the original line, eol inherited from disk
                     base_eol = seg[0][1] if seg and seg[0][1] else b"\n"
                     t = text[:-1] if text.endswith(b"\r") else text
@@ -662,6 +665,71 @@ def apply_diff(diff: bytes | str, tree_root: str, backup_dir: str) -> dict:
             _atomic_write(target, res["new_bytes"])
         written.append({"path": fp["path"], "status": "applied"})
     return {"ok": True, "reason": None, "files": written}
+
+
+def record_pristine_backup(diff: bytes | str, tree_root: str,
+                           backup_dir: str) -> dict:
+    """Revert a patch IN MEMORY and store the reversed image as the backup.
+
+    Used by adoption: the hunks are already on disk, so apply_diff wrote
+    (and therefore backed up) nothing, yet disable/remove must still be
+    able to restore byte-exact vanilla files. We reverse-apply each file's
+    hunks against its current content and write the result into
+    backup_dir in exactly the layout restore_backup reads (files/ +
+    meta.json). The live tree is never touched — reverting it on disk
+    would run the server unpatched and contradict APPLIED state.
+
+    Files whose pre-image cannot be grounded (already-deleted targets) are
+    skipped; the patch stays reappliable on a fresh keg.
+    {"ok": bool, "reason": str|None, "grounded": bool}
+    """
+    parsed = parse_diff(diff)
+    if not parsed["ok"]:
+        return {"ok": False, "reason": parsed["reason"], "grounded": False}
+
+    meta_path = os.path.join(backup_dir, "meta.json")
+    meta = _load_backup_meta(meta_path)
+    os.makedirs(backup_dir, exist_ok=True)
+    grounded = True
+    for fp in parsed["files"]:
+        rel_key = fp["path"]
+        if rel_key in meta["files"]:
+            continue  # first-touch-per-keg wins (same rule as apply_diff)
+        target, why = safe_join(tree_root, rel_key)
+        if target is None:
+            return {"ok": False, "reason": why, "grounded": grounded}
+        try:
+            with open(target, "rb") as fh:
+                content = fh.read()
+        except FileNotFoundError:
+            content = None
+
+        orig: bytes | None
+        if fp["action"] == "create":
+            orig = None  # vanilla tree: the file did not exist
+        elif content is None:
+            grounded = False  # already deleted — cannot ground the original
+            continue
+        else:
+            lines = [_split_eol(l) for l in splitlines_keepends(content)]
+            res = _all_hunks(lines, fp["hunks"], reverse=True)
+            if res is None:
+                grounded = False  # not a clean post-image of this patch
+                continue
+            orig = b"".join(text + eol for text, eol in res[0])
+
+        if orig is not None:
+            bpath = _backup_path(backup_dir, rel_key)
+            os.makedirs(os.path.dirname(bpath), exist_ok=True)
+            with open(bpath, "wb") as fh:
+                fh.write(orig)
+        meta["files"][rel_key] = {
+            "existed": orig is not None,
+            "sha256": (hashlib.sha256(orig).hexdigest()
+                       if orig is not None else None)}
+        _save_backup_meta(meta_path, meta)
+    _save_backup_meta(meta_path, meta)  # even when nothing was grounded
+    return {"ok": True, "reason": None, "grounded": grounded}
 
 
 def restore_backup(backup_dir: str, tree_root: str) -> dict:

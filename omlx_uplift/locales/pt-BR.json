@@ -271,6 +271,8 @@
   "uplift.patches.need_id": "Primeiro dê um id ao patch",
   "uplift.patches.none": "Nenhum patch ainda. Acima, adicione um PR do GitHub, uma URL ou envie um .diff.",
   "uplift.patches.obsolete": "Já presente no upstream — o patch parece obsoleto",
+  "uplift.patches.adopted": "JÁ APLICADO — salvo como APLICADO, será reaplicado após atualização do omlx",
+
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "nº do PR",
   "uplift.patches.ph_repo": "owner/repo",

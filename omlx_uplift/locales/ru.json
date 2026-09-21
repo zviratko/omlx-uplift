@@ -267,6 +267,8 @@
   "uplift.patches.need_id": "Сначала укажите id патча",
   "uplift.patches.none": "Патчей пока нет. Добавьте PR GitHub, URL или загрузите .diff выше.",
   "uplift.patches.obsolete": "Уже присутствует в upstream — патч, вероятно, устарел",
+  "uplift.patches.adopted": "УЖЕ ПРИМЕНЁН — сохранён как ПРИМЕНЁН, применится снова после обновления omlx",
+
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "№ PR",
   "uplift.patches.ph_repo": "owner/repo",

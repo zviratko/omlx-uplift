@@ -283,6 +283,63 @@ class TestApplyRoundTrip(TempTree):
         self.assertEqual(read(os.path.join(self.tree, "gone.py")), b"x\n")
 
 
+class TestRecordPristineBackup(TempTree):
+    """'Revert in memory, store as backup' — the adoption path."""
+
+    def _setup_applied(self):
+        diff = read(os.path.join(FIX, "pr3764.diff"))
+        base = os.path.join(FIX, "base3764")
+        tree = os.path.join(self.tmp, "t", "omlx")
+        shutil.copytree(os.path.join(base, "omlx"), tree)
+        root = os.path.dirname(tree)
+        vanilla = read(os.path.join(base, "omlx", "admin", "routes.py"))
+        self.assertTrue(diffapply.apply_diff(diff, root,
+                                             os.path.join(self.tmp, "b0"))["ok"])
+        return diff, root, tree, vanilla
+
+    def test_reversed_backup_restores_vanilla(self):
+        diff, root, tree, vanilla = self._setup_applied()
+        bdir = os.path.join(self.tmp, "b1")
+        res = diffapply.record_pristine_backup(diff, root, bdir)
+        self.assertTrue(res["ok"], res)
+        self.assertTrue(res["grounded"])
+        # nothing was written to the tree by recording
+        self.assertNotEqual(read(os.path.join(tree, "admin", "routes.py")),
+                            vanilla)
+        r = diffapply.restore_backup(bdir, root)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(read(os.path.join(tree, "admin", "routes.py")),
+                         vanilla)
+
+    def test_ungrounded_when_tree_not_patched(self):
+        diff = read(os.path.join(FIX, "pr3764.diff"))
+        base = os.path.join(FIX, "base3764")
+        tree = os.path.join(self.tmp, "t2", "omlx")
+        shutil.copytree(os.path.join(base, "omlx"), tree)
+        root = os.path.dirname(tree)
+        bdir = os.path.join(self.tmp, "b2")
+        res = diffapply.record_pristine_backup(diff, root, bdir)
+        self.assertTrue(res["ok"])
+        self.assertFalse(res["grounded"])  # reverse cannot match a vanilla file
+        # recorded as non-existent is WRONG here — must not claim existed=False
+        import json
+        meta = json.load(open(os.path.join(bdir, "meta.json")))
+        self.assertEqual(meta["files"], {})
+
+    def test_idempotent_first_touch_wins(self):
+        diff, root, tree, vanilla = self._setup_applied()
+        bdir = os.path.join(self.tmp, "b3")
+        diffapply.record_pristine_backup(diff, root, bdir)
+        first = read(os.path.join(bdir, "files", "omlx", "admin", "routes.py"))
+        # a second record must not overwrite the first pristine image
+        with open(os.path.join(tree, "admin", "routes.py"), "ab") as fh:
+            fh.write(b"# later edit\n")
+        diffapply.record_pristine_backup(diff, root, bdir)
+        self.assertEqual(
+            read(os.path.join(bdir, "files", "omlx", "admin", "routes.py")),
+            first)
+
+
 class TestPathSafety(TempTree):
     def test_safe_join_rules(self):
         root = self.tree

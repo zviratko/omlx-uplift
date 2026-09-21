@@ -267,6 +267,8 @@
   "uplift.patches.need_id": "請先為修補指定 id",
   "uplift.patches.none": "尚無修補。請在上方新增 GitHub PR、URL 或上傳 .diff 檔案。",
   "uplift.patches.obsolete": "上游已包含此變更 — 修補可能已過時",
+  "uplift.patches.adopted": "已套用 — 儲存為已套用，omlx 更新後將重新套用",
+
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "PR 編號",
   "uplift.patches.ph_repo": "owner/repo",

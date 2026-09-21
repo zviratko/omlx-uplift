@@ -267,6 +267,8 @@
   "uplift.patches.need_id": "最初にパッチの id を指定してください",
   "uplift.patches.none": "パッチはまだありません。上で GitHub PR、URL、または .diff をアップロードして追加してください。",
   "uplift.patches.obsolete": "上流に既に存在 — パッチは不要（廃止候補）です",
+  "uplift.patches.adopted": "適用済み — APPLIEDとして保存、omlx更新後に再適用されます",
+
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "PR 番号",
   "uplift.patches.ph_repo": "owner/repo",

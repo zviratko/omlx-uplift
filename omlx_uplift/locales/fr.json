@@ -271,6 +271,8 @@
   "uplift.patches.need_id": "Donnez d'abord un id au correctif",
   "uplift.patches.none": "Aucun correctif pour l'instant. Ajoutez au-dessus un PR GitHub, une URL ou téléversez un .diff.",
   "uplift.patches.obsolete": "Déjà présent en amont — le correctif semble obsolète",
+  "uplift.patches.adopted": "DÉJÀ APPLIQUÉ — enregistré comme APPLIQUÉ, réappliqué après une mise à jour omlx",
+
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "n° de PR",
   "uplift.patches.ph_repo": "owner/repo",

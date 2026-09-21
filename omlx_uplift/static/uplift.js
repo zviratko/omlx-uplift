@@ -23,6 +23,19 @@ const prefs = C.loadPrefs(localStorage);
 const layout = C.loadLayout(localStorage);
 const tracker = C.createRequestTracker(2000);
 
+/* PAT-4 state — declared BEFORE boot because applyTab() (deep link
+   #settings/patches) can reach pollPatches() while the tail of this file
+   has not executed yet: a `let` declared down there would still be in its
+   temporal dead zone ('Cannot access PT_DATA before initialization'), and
+   the poll's catch mislabelled that as 'Patches API unavailable'. */
+const PT_STATE_CLASS = {
+    applied: 'pt-st-applied', pending: 'pt-st-pending',
+    update_available: 'pt-st-update', needs_review: 'pt-st-warn',
+    failed: 'pt-st-warn', obsolete: 'pt-st-dim', disabled: 'pt-st-dim',
+};
+let PT_DATA = null;      // last /patches view
+let PT_BUSY = false;
+
 /* ---------------- i18n bootstrap (classic pattern) ---------------------
    GET /uplift/api/locale -> {lang, strings}: classic's catalog merged
    with uplift's overlay (package locales/*.json). Until the fetch lands
@@ -7401,15 +7414,6 @@ for (const def of C.EXPLORE_METRICS) createMetricCard(def);
    the WARNING banner lights for needs_review/failed like an instrument flag.
    ========================================================================== */
 
-const PT_STATE_CLASS = {
-    applied: 'pt-st-applied', pending: 'pt-st-pending',
-    update_available: 'pt-st-update', needs_review: 'pt-st-warn',
-    failed: 'pt-st-warn', obsolete: 'pt-st-dim', disabled: 'pt-st-dim',
-};
-
-let PT_DATA = null;      // last /patches view
-let PT_BUSY = false;
-
 function ptMsg(key, fb) { return C.tf(key, fb); }
 
 async function pollPatches() {
@@ -7846,12 +7850,16 @@ async function ptPreview() {
         // patch (a GNU `diff -ruN` upload once showed green on a parse fail)
         ht.textContent = !r.ok
             ? ptMsg('uplift.patches.preview_fail', 'REJECTED — gate failed')
+            : r.adopted
+            ? ptMsg('uplift.patches.adopted',
+                'ALREADY APPLIED — stored as APPLIED, will re-apply after an omlx update')
             : r.obsolete
             ? ptMsg('uplift.patches.obsolete', 'ALREADY PRESENT upstream — patch looks obsolete')
             : (r.unchanged
                 ? ptMsg('uplift.patches.unchanged', 'stored version already matches the source')
                 : ptMsg('uplift.patches.preview_ok', 'VALIDATED — gate passed'));
-        ht.className = (!r.ok || r.obsolete || r.unchanged) ? 'pt-fail' : 'pt-ok';
+        ht.className = (!r.ok || (r.obsolete && !r.adopted) || r.unchanged)
+            ? 'pt-fail' : 'pt-ok';
         head.append(ht);
         tbl.append(head);
         if (!r.ok && r.reason) {
@@ -7882,7 +7890,7 @@ async function ptPreview() {
             tbl.append(row);
         }
         box.append(tbl);
-        if (r.ok && !r.unchanged) {
+        if (r.ok && !r.unchanged && !r.adopted) {
             const en = document.createElement('button');
             en.type = 'button';
             en.className = 'btn primary';

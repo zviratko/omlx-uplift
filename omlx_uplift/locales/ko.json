@@ -282,6 +282,8 @@
   "uplift.patches.need_id": "먼저 패치 id를 지정하세요",
   "uplift.patches.none": "아직 패치가 없습니다. 위에서 GitHub PR, URL을 추가하거나 .diff를 업로드하세요.",
   "uplift.patches.obsolete": "이미 상류에 존재 — 패치가 불필요할 수 있습니다",
+  "uplift.patches.adopted": "이미 적용됨 — 적용됨으로 저장, omlx 업데이트 후 재적용",
+
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "PR 번호",
   "uplift.patches.ph_repo": "owner/repo",

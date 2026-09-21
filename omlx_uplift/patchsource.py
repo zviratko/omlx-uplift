@@ -368,12 +368,23 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                 "state": patch["state"], "advisories": result["advisories"]}
         store.save(manifest)
         return resp
+    held = _safeguards.held(result.get("safeguards", {}).get("codes", []),
+                            patch.get("safeguard_always"),
+                            patch.get("safeguard_once"), sha)
     obsolete = [f for f in result["files"] if f["status"] == "already"]
-    if obsolete and len(obsolete) == len(result["files"]):
-        return {"ok": True, "obsolete": True,
-                "reason": "all hunks already present upstream — patch looks obsolete",
-                "advisories": result["advisories"],
-                "files": result["files"]}
+    if obsolete and len(obsolete) == len(result["files"]) and held:
+        # all hunks already present but safeguards need approval: refuse to
+        # adopt silently — nothing stored, the user approves from the
+        # preview (same gate as a normal pending patch)
+        if creating:
+            manifest["patches"].remove(patch)
+        store.save(manifest)
+        return {
+            "ok": True, "obsolete": True,
+            "reason": "all hunks already present upstream — patch looks obsolete",
+            "advisories": result["advisories"], "files": result["files"],
+            "safeguards": result.get("safeguards", {}),
+            "requires_approval": held}
 
     v = store.next_version(patch)
     pf_rel = _patches.rel(store.patch_file(patch_id, v), store.base_dir)
@@ -400,9 +411,68 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
         version["root_note"] = result["note"]
     patch["versions"].append(version)
 
-    held = _safeguards.held(result.get("safeguards", {}).get("codes", []),
-                            patch.get("safeguard_always"),
-                            patch.get("safeguard_once"), sha)
+    # ADOPT: every hunk is already present in the live tree (the user
+    # patched by hand or a previous omlx merged it) and no safeguard is
+    # outstanding. Store the version, record it as applied on THIS keg and
+    # keep byte-exact pristine backups — so it shows APPLIED and reconcile
+    # re-applies it automatically after a keg upgrade, or restores the
+    # originals on disable/remove. The user patched first, persisted later:
+    # that is a supported flow, not an error.
+    all_already = result["files"] and all(
+        f["status"] == "already" for f in result["files"])
+    if all_already and not held:
+        keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
+        adopted = False
+        if keg:
+            backup_dir = store.backup_dir(patch_id, v, keg)
+            try:
+                res = diffapply.apply_diff(data, tree_root, backup_dir)
+            except OSError:
+                res = {"ok": False}
+            if res.get("ok"):
+                applied_files = []
+                for f in res["files"]:
+                    target, _why = diffapply.safe_join(tree_root, f["path"])
+                    try:
+                        with open(target, "rb") as fh:
+                            cur = fh.read()
+                    except OSError:
+                        cur = None
+                    applied_files.append(
+                        {"path": f["path"],
+                         "sha256": (hashlib.sha256(cur).hexdigest()
+                                    if cur is not None else None),
+                         "status": f["status"]})
+                # apply_diff only backs up files it WRITES; on an all-already
+                # adopt it wrote nothing. Revert the patch in memory (reverse
+                # hunks -> vanilla pre-image) and store that as the backup,
+                # so disable/remove restore byte-exact originals without the
+                # tree ever going unpatched on disk.
+                diffapply.record_pristine_backup(data, tree_root, backup_dir)
+                version["applied"] = {"keg_id": keg,
+                                      "at": datetime.now(timezone.utc).isoformat(
+                                          timespec="seconds"),
+                                      "files": applied_files}
+                version["backup_dir"] = _patches.rel(backup_dir, store.base_dir)
+                version["adopted"] = True
+                patch["enabled"] = True
+                patch["desired_version"] = v
+                store.set_state_if(patch, "applied",
+                                   "adopted — hunks already present in the "
+                                   "live tree")
+                patch["last_verified"] = {"keg_id": keg,
+                                          "at": _patches.now_iso()}
+                adopted = True
+        store.save(manifest)
+        return {"ok": True, "v": v, "adopted": adopted,
+                "obsolete": True if not adopted else None,
+                "state": patch["state"],
+                "reason": ("already applied — stored; re-applies after an "
+                           "omlx update, disable restores the originals"
+                           if adopted else
+                           "all hunks already present upstream — patch looks "
+                           "obsolete"),
+                "advisories": result["advisories"], "files": result["files"]}
 
     if patch["state"] in ("disabled",) and not patch.get("enabled"):
         patch["state_detail"] = ("validated, safeguards need approval" if held
@@ -489,7 +559,7 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             "versions": [{k: v.get(k) for k in
                           ("v", "content_sha256", "source_head_sha",
                            "fetched_at", "applied", "safeguards",
-                           "root_note")}
+                           "root_note", "adopted")}
                          for v in p.get("versions", [])],
             "safeguard_always": p.get("safeguard_always") or [],
             "safeguard_once": p.get("safeguard_once"),

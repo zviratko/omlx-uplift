@@ -6,6 +6,7 @@ validation gate and orchestration run against a fake tree root with an
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -14,7 +15,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from omlx_uplift import patchsource, patches
+from omlx_uplift import diffapply, patchsource, patches
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIX = os.path.join(HERE, "fixtures")
@@ -198,6 +199,49 @@ class OrchestrationTests(unittest.TestCase):
         self.assertTrue(r["config"]["auto_update_check"])
         m = self.store.load()
         self.assertTrue(m["config"]["auto_update_check"])
+
+    def test_upload_all_already_adopts_as_applied(self):
+        # user patched by hand (or omlx merged it), then wants it persisted:
+        # uploading that same diff must STORE it as APPLIED, enabled, with
+        # pristine backups — not reject it as obsolete
+        pool = os.path.join(self.root, "omlx", "admin", "routes.py")
+        with open(pool, "rb") as fh:
+            vanilla = fh.read()
+        diffapply.apply_diff(PR3764, self.root, os.path.join(self.tmp, "b0"))
+        res = patchsource.add_patch(
+            self.store, "hand", {"kind": "upload", "data": PR3764}, self.root)
+        self.assertTrue(res.get("adopted"), res)
+        self.assertIsNone(res.get("obsolete"))
+        m = self.store.load()
+        p = self.store.find(m, "hand")
+        self.assertEqual(p["state"], "applied")
+        self.assertTrue(p["enabled"])
+        v = p["versions"][-1]
+        self.assertTrue(v.get("adopted"))
+        self.assertIsNotNone(v.get("applied", {}).get("keg_id"))
+        # per-file hashes = live (post) content: reconcile treats this keg as
+        # already patched; a fresh keg (brew upgrade) re-applies
+        for f in v["applied"]["files"]:
+            with open(os.path.join(self.root, f["path"]), "rb") as fh:
+                self.assertEqual(
+                    hashlib.sha256(fh.read()).hexdigest(), f["sha256"])
+        # pristine backups exist -> disable restores the pre-patch originals
+        bdir = os.path.join(self.store.base_dir, v["backup_dir"])
+        self.assertTrue(os.listdir(bdir))
+        # the stored backup is the REVERSED image: restoring it returns the
+        # exact vanilla bytes the patch was built on
+        diffapply.restore_backup(bdir, self.root)
+        with open(pool, "rb") as fh:
+            self.assertEqual(fh.read(), vanilla)
+
+    def test_reupload_same_content_after_adoption_unchanged(self):
+        diffapply.apply_diff(PR3764, self.root, os.path.join(self.tmp, "b0"))
+        first = patchsource.add_patch(
+            self.store, "hand", {"kind": "upload", "data": PR3764}, self.root)
+        again = patchsource.add_patch(
+            self.store, "hand", {"kind": "upload", "data": PR3764}, self.root)
+        self.assertTrue(again.get("unchanged"), again)
+        self.assertEqual(again["v"], first["v"])
 
 
 class DriftCheckTests(HttpFixture):
