@@ -1339,7 +1339,13 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
    h2 band, right of the title — the standalone full-width row under the
    header was a dead strip in 14 cards. margin-left:auto pushes it to the
    right edge; flex:none stops the band from squeezing the chips. */
-.card h2 .ts-row { margin: 0 0 0 auto; max-width: 60%; min-width: 0; }
+/* No invented width cap: the header band is nowrap flex, the row gets the
+   remainder after title + .right. JS collapses it to a ▾ button only when
+   the chips do not fit that remainder (renderCardTsRows); a 60% cap here
+   used to clip chips that DID fit the card = the always-showing-button
+   regression (user 2026-09-21). overflow-x:auto stays as the live-value
+   growth fallback (metric-now widening squeezes the row, never the layout). */
+.card h2 .ts-row { margin: 0 0 0 auto; max-width: 100%; min-width: 0; }
 .card h2 .ts-chip { padding: 4px 5px; }   /* header band is tight — slimmer chips */
 .ts-chip { background: transparent; border: 0; border-right: 1px solid var(--edge);
     color: var(--dim); font: 600 10px/1 var(--mono); letter-spacing: .08em;
@@ -1373,7 +1379,11 @@ main.grid-stack .metric-card .card-pad { padding: 0 8px 4px; }   /* beats the bo
 main.grid-stack .metric-card h2 { margin: 0 -8px 4px; }          /* same: stays coupled to ITS pad */
 .metric-card h2 { margin: 0 -8px 4px; background: var(--panel, var(--bg)); border-bottom: 1px solid var(--edge); }
 .metric-card h2 .right { gap: 8px; margin-left: auto; }
-.metric-card h2 .ts-row { margin: 0 0 0 8px; }
+/* Metric headers may wrap (user regression 2026-09-21): chips that fit the
+   CARD but not the title line drop to a second header line instead of
+   collapsing to ▾. The ▾ stays only for rows too wide for the full card. */
+.metric-card h2 { flex-wrap: wrap; }
+.metric-card h2 .ts-row { margin: 0 0 0 auto; }
 .metric-now { font: 700 12px/1 var(--mono); color: var(--chart-2, #e8a020);
     letter-spacing: 0; }
 .metric-res { font: 500 9px/1 var(--mono); color: var(--dim);

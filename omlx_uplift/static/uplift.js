@@ -1397,18 +1397,20 @@ document.addEventListener('click', e => {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeTsPop(); });
 
 function renderCardTsRows(force) {
-    // The row is width:max-content inside a max-width:60% cap (CSS), so
-    // its own width says nothing about the space available — measure the
-    // chip demand in a throwaway probe row inside the SAME header band and
-    // compare against the band's cap. Zero-width band = card not laid out
-    // yet (parked boot): skip, the settle pass re-checks after placement.
+    // Metric headers wrap (CSS): chips that fit the CARD get a header line of
+    // their own instead of collapsing; only chips wider than the whole card
+    // become the ▾ button. Measuring against the title-line remainder (my
+    // first cut, and a 60% cap before it) collapsed rows that plainly fit
+    // the card = the always-showing-button regression (user 2026-09-21).
+    // Zero-width band = card not laid out yet (parked boot): skip, the settle
+    // pass re-checks after placement.
     for (const row of document.querySelectorAll('.ts-row')) {
         const id = row.dataset.block;
         const win = cardWindow(id);
         const h2 = row.closest('h2');
         const bandW = h2 ? h2.clientWidth : row.parentElement.clientWidth;
         if (!bandW) continue;
-        const avail = Math.floor(bandW * 0.6);
+        const avail = bandW - 24;   // h2 padding (16) + flex gap (8)
         const probe = document.createElement('div');
         probe.className = 'ts-row';
         probe.style.cssText = 'position:absolute;visibility:hidden;width:max-content;max-width:none;';
