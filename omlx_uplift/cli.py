@@ -14,6 +14,9 @@
   omlx-uplift patches status|apply|check|disable-all
       out-of-band patch-carrier recovery when the dashboard is unreachable:
       same engine the .pth startup reconcile uses, no re-exec, JSON output.
+  omlx-uplift kernel list|rebuild <name> [--src PATH]
+      rebuild ONE bundled native kernel in the live keg after a patch
+      touched kernel code (needs an omlx source checkout containing csrc/).
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 import argparse
 import os
 import site
+import subprocess
 import sys
 from pathlib import Path
 
@@ -229,15 +233,65 @@ def cmd_patches(argv=None) -> int:
     return 0 if out.get("ok", True) else 1
 
 
+def cmd_kernel(argv=None) -> int:
+    """Rebuild one bundled native custom kernel IN THE LIVE KEG.
+
+      omlx-uplift kernel rebuild <name> --src /path/to/omlx-checkout
+      omlx-uplift kernel list
+
+    A patch that touches kernel code needs this: the keg ships compiled
+    artifacts, not csrc/ sources, so --src points at ANY omlx source
+    checkout (git clone; the kernel name must exist there). Much cheaper
+    than `brew reinstall --HEAD --with-custom-kernel`: one kernel, no
+    re-download of the world. Originals are backed up byte-exactly under
+    the uplift data dir (kernel-backups/<name>/files/). Restart omlx
+    afterwards: launchctl kickstart -k gui/$(id -u)/sh.brew.omlx"""
+    import json as _json
+
+    ap = argparse.ArgumentParser(prog="omlx-uplift kernel")
+    ap.add_argument("action", choices=["list", "rebuild", "restore"])
+    ap.add_argument("kernel", nargs="?", help="kernel name (see list)")
+    ap.add_argument("--src", help="omlx source checkout containing the "
+                                  "kernel's csrc/ (default: cwd)")
+    ap.add_argument("--workdir", help="keep build dir here for debugging")
+    args = ap.parse_args(argv)
+
+    from . import kernelbuild
+
+    if args.action == "list":
+        print(_json.dumps({"kernels": list(kernelbuild.KERNELS)}, indent=2))
+        return 0
+    if args.action == "restore":
+        if not args.kernel:
+            ap.error("restore needs a kernel name")
+        res = kernelbuild.restore(args.kernel)
+        print(_json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if not args.kernel:
+        ap.error("rebuild needs a kernel name (see: omlx-uplift kernel list)")
+    try:
+        res = kernelbuild.rebuild(args.kernel, src=args.src,
+                                  workdir=args.workdir)
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except subprocess.CalledProcessError as exc:
+        print(f"kernel build failed: {exc}", file=sys.stderr)
+        return 1
+    print(_json.dumps(res, indent=2))
+    return 0 if res.get("verify", {}).get("ok") else 1
+
+
 def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] not in {
-            "serve", "view", "install", "uninstall", "patches"}:
+            "serve", "view", "install", "uninstall", "patches", "kernel"}:
         print(__doc__)
         return 1
     cmd = sys.argv[1]
     rest = sys.argv[2:]
     return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
-            "uninstall": cmd_uninstall, "patches": cmd_patches}[cmd](rest)
+            "uninstall": cmd_uninstall, "patches": cmd_patches,
+            "kernel": cmd_kernel}[cmd](rest)
 
 
 if __name__ == "__main__":

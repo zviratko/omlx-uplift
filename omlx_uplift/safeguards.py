@@ -38,12 +38,13 @@ __all__ = ["normalize_root", "assess", "held", "KERNEL_REBUILD_HINT"]
 _OMLX_PREFIX = "omlx/"
 
 # Honest rebuild path: the keg carries no csrc/ sources, so a native
-# rebuild means a source build of the whole formula (HEAD), then re-mount.
+# rebuild needs a source checkout (kernel rebuild swap) or a full source
+# build of the formula. Both verified 2026-09-21.
 KERNEL_REBUILD_HINT = (
-    "brew reinstall --HEAD --with-custom-kernel jundot/omlx/omlx "
-    "&& omlx-uplift install "
-    "&& launchctl kickstart -k gui/$(id -u)/sh.brew.omlx"
-)
+    "omlx-uplift kernel rebuild <name> --src /path/to/omlx-checkout "
+    "(one kernel, keeps a byte-exact backup) — or the full path: "
+    "brew reinstall --HEAD --with-custom-kernel jundot/omlx/omlx; "
+    "either way then restart omlx and re-run omlx-uplift install)")
 
 _MAX_REPORTED_PROBLEMS = 20
 
