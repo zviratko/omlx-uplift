@@ -46,6 +46,11 @@ window.Uplift.state = {
         window.Uplift.state.pendingWrites++;
         try { return await fn(); } finally { window.Uplift.state.pendingWrites--; }
     },
+    // PH2-1 stage 7: shared mutable containers for the feeds —
+    // uplift_feed.js owns both, the live panel in uplift.js and
+    // uplift_reqsearch.js (render loop) read them. Never reassigned.
+    reqFeedRows: new Map(),
+    milestoneFloor: {},
     PT_DATA: null,   // last /patches view
     PT_BUSY: false,
 };
