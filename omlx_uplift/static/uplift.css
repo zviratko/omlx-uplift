@@ -688,6 +688,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* chips share the buttons' 22px line height so chip centre == button centre */
 .admin-table .chip-host .schip { height: 22px; box-sizing: border-box;
     display: inline-flex; align-items: center; }
+/* [hidden] MUST beat the display above — author display overrides the UA's
+   [hidden] { display: none } (same trap already documented for .dd-menu and
+   .diff-out). Without it every guard-hidden fold pill renders as an empty
+   dashed box and hidden tail chips never collapse (user 2026-09-21: the
+   '[] right of DELETE SETTINGS that expands to show fewer'). */
+.admin-table .chip-host .schip[hidden] { display: none; }
 .admin-table .chip-host { row-gap: 4px; }
 .admin-table .nrow-gap { flex: 1 1 auto; }
 .admin-table .typebadge {

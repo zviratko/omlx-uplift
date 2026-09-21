@@ -4157,9 +4157,10 @@ async function renderModelAdmin(force) {
             const st = document.createElement('span');
             st.textContent = orphan.has(e.id) ? 'MISSING' : 'EXTERNAL';
             st.className = orphan.has(e.id) ? 'spill miss' : 'dim umeta';  // caution amber
-            // round 8 item 2: state label rides the RIGHT edge of the left
-            // half exactly like LOADED/PRESENT on present rows (an alias
-            // lamp keeps the left corner, like the lamp stack there)
+            // round 9 (user 2026-09-21): state label belongs in the RIGHT
+            // box, aligned with DELETE SETTINGS — not at the right edge of
+            // the left half (round 8 guess). It rides above the acts column
+            // so both share the exact same left x.
             if (e.alias) {
                 const al = document.createElement('button');
                 al.className = 'lamp alias-lamp on'; al.textContent = 'ALIAS:' + e.alias;
@@ -4168,11 +4169,12 @@ async function renderModelAdmin(force) {
                 head1.append(al, copyBtn(e.alias, 'Copy alias "' + e.alias + '"'));
             }
             const gap = document.createElement('span'); gap.className = 'nrow-gap';
-            head1.append(gap, st);
+            head1.append(gap);
             name.append(head1, nmain);
             const box = document.createElement('span');
             box.className = 'settings-box hrow solo';   // solo: no chips — centre the acts column
             const acts = document.createElement('span'); acts.className = 'act-col';
+            acts.append(st);                            // state above DELETE, same left x
             const ds = document.createElement('button');
             ds.className = 'se-btn act danger'; ds.textContent = 'DELETE SETTINGS';
             ds.title = C.tf('uplift.ui.delete_stored_settings_for_this_missing_model', 'Delete stored settings for this missing model');
