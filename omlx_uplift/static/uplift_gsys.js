@@ -62,7 +62,7 @@ function gsLocalize() {
 const GS_LABELS = {
     lang: { en: 'English', zh: '中文（简体）', 'zh-TW': '中文（繁體）', ko: '한국어',
             ja: '日本語', ru: 'Русский', es: 'Español', fr: 'Français',
-            'pt-BR': 'Português (Brasil)' },
+            'pt-BR': 'Português (Brasil)', cs: 'Čeština' },
     auth: { api_key: 'API Key',
         api_key_hint: 'Clients must send this key in the Authorization header.',
         api_key_placeholder: C.tf('uplift.ui.enter_new_api_key', 'Enter new API key'),
