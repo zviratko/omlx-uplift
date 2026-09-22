@@ -1106,70 +1106,261 @@ function render(s) {
     CH.pushStatusSample(s, cacheGB, hotSorted);   // buffers + redraw (uplift_charts.js)
 }
 
-function renderLive(s) {
+/* IN-FLIGHT card (redesign): every loaded model gets a header line; each
+   request gets ONE indented line that persists until page refresh — rows
+   are reused across polls, never rebuilt, and keep their last data with a
+   terminal badge (DONE/ABORTED/REFUSED) when the request leaves. Queued
+   requests collapse into one expandable summary line per model whose child
+   lines exist only while waiting. Clicking a request line opens INSPECT;
+   ABORT sits at the line end (and in the inspector). */
+const IF_MAX_TERMINAL = 50;   // kept terminal lines per model (DOM cap)
+
+function ifTerminal(rid) {
+    const fr = S.reqFeedRows.get(rid);
+    if (!fr) return null;
+    const fin = String(fr.finish || '');
+    if (fr.state === 'complete') return /abort/i.test(fin) ? 'aborted' : 'done';
+    if (fr.state === 'error') {
+        if (fr.errorCode) return 'refused';         // memory-guard refusal
+        if (/abort/i.test(fin)) return 'aborted';
+        return 'error';
+    }
+    return null;                                    // queued/generating = live
+}
+
+function ifGroup(model) {
+    let g = S.ifModels.find(x => x.model === model);
+    if (g) return g;
+    const el = document.createElement('div'); el.className = 'if-group';
+    const h = document.createElement('div'); h.className = 'if-model';
+    const nm = document.createElement('span'); nm.textContent = model; nm.title = model;
+    h.append(nm);
+    const qsum = document.createElement('div'); qsum.className = 'if-row if-qsum'; qsum.style.display = 'none';
+    const qb = document.createElement('span'); qb.className = 'badge Queued'; qb.textContent = C.t('uplift.inflight.queued');
+    const qc = document.createElement('span'); qc.className = 'if-meta';
+    const qt = document.createElement('span'); qt.className = 'if-qtoggle'; qt.textContent = '+';
+    qt.title = C.t('uplift.inflight.expand');
+    qsum.append(qb, qc, qt);
+    qsum.onclick = () => {
+        if (S.ifExpanded.has(model)) S.ifExpanded.delete(model); else S.ifExpanded.add(model);
+    };
+    const kids = document.createElement('div'); kids.className = 'if-kids'; kids.style.display = 'none';
+    const wrap = document.createElement('div');
+    el.append(h, qsum, kids, wrap);
     const list = $('live-list');
-    const rows = [];
+    const ph = list.querySelector('.empty'); if (ph) ph.remove();
+    list.append(el);
+    g = { model, el, qsum, qb, qc, qt, kids, wrap, kidMap: new Map(), qever: false };
+    S.ifModels.push(g);
+    return g;
+}
+
+function ifSlot(model, rid) {
+    let sl = S.ifSlots.get(rid);
+    if (sl) return sl;
+    const g = ifGroup(model);
+    sl = { model, rid, state: null, terminal: false, tstate: null,
+           prompt: null, out: null, tps: null, elapsed: null, eta: null,
+           processed: null, total: null, cached: null, lastSeen: Date.now() };
+    const row = document.createElement('div'); row.className = 'if-row';
+    const badge = document.createElement('span'); badge.className = 'badge Idle';
+    const pbar = document.createElement('div'); pbar.className = 'pbar'; pbar.style.display = 'none';
+    const pc = document.createElement('div'); pc.className = 'p-cached';
+    pc.title = C.t('uplift.inflight.cached_prefix');
+    const pl = document.createElement('div'); pl.className = 'p-live';
+    pbar.append(pc, pl);
+    const meta = document.createElement('span'); meta.className = 'if-meta';
+    const chip = document.createElement('span'); chip.className = 'spill miss if-loop';
+    chip.textContent = 'LOOP?'; chip.title = C.t('uplift.req.loop_hint'); chip.style.display = 'none';
+    const idEl = document.createElement('span'); idEl.className = 'if-id';
+    idEl.textContent = rid === 'rank0' ? 'rank0' : rid.slice(0, 8);
+    idEl.title = rid;
+    const abort = document.createElement('button');
+    abort.type = 'button'; abort.className = 'se-btn act danger';
+    abort.textContent = C.t('uplift.inflight.abort'); abort.title = C.t('uplift.req.cancel');
+    abort.style.display = 'none';
+    if (rid !== 'rank0') {
+        abort.onclick = (e) => { e.stopPropagation(); ifAbort(rid, sl); };
+        row.onclick = () => MM.openInspector(rid);   // item 6: line -> INSPECT
+        row.title = C.t('uplift.req.inspect_title');
+    }
+    row.append(badge, pbar, meta, chip, idEl, abort);
+    Object.assign(sl, { el: row, badge, pbar, pc, pl, meta, chip, abort });
+    S.ifSlots.set(rid, sl);
+    g.wrap.append(row);
+    ifPrune(model);
+    return sl;
+}
+
+function ifPrune(model) {
+    const term = [...S.ifSlots.values()].filter(x => x.model === model && x.terminal);
+    if (term.length <= IF_MAX_TERMINAL) return;
+    for (const sl of term.slice(0, term.length - IF_MAX_TERMINAL)) {
+        sl.el.remove(); S.ifSlots.delete(sl.rid);
+    }
+}
+
+function ifAbort(rid, sl) {
+    sl.abort.disabled = true;
+    fetch(`${API}/admin/api/requests/${encodeURIComponent(rid)}/cancel`, { method: 'POST' })
+        .then(async res => {
+            if (res.status === 501) { toast(C.t('uplift.toast.no_cancel_route')); return; }
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+            toast(C.t('uplift.toast.cancelled', { id: rid.slice(0, 6) }));
+        })
+        .catch(err => { toast(C.t('uplift.toast.cancel_failed', { msg: err.message })); })
+        .finally(() => { sl.abort.disabled = false; });
+}
+
+function ifPaint(sl) {
+    const b = sl.badge;
+    // relabel locale strings every tick (slots created before the locale
+    // catalog loaded would otherwise pin the raw key forever)
+    sl.abort.textContent = C.t('uplift.inflight.abort');
+    sl.abort.title = C.t('uplift.req.cancel');
+    sl.pc.title = C.t('uplift.inflight.cached_prefix');
+    let label, cls;
+    if (sl.terminal)      { label = C.t('uplift.inflight.' + sl.tstate); cls = sl.tstate; }
+    else if (sl.state === 'prefilling') { label = C.t('uplift.inflight.prefilling'); cls = 'Prefilling'; }
+    else if (sl.state === 'generating') { label = C.t('uplift.inflight.generating'); cls = 'Generating'; }
+    else                  { label = C.t('uplift.inflight.queued'); cls = 'Queued'; }
+    b.className = 'badge ' + cls; b.textContent = label;
+    sl.el.classList.toggle('term', !!sl.terminal);
+    // PREFILLING box fills from the left; cached prefix and computed prefill
+    // are separate fills (cached only known on spec-prefill rows — then the
+    // rest of the bar is honest single-colour).
+    if (!sl.terminal && sl.state === 'prefilling' && sl.total > 0) {
+        const cached = Math.min(sl.cached || 0, sl.total);
+        const doneToks = Math.max(sl.processed || 0, cached);
+        sl.pbar.style.display = '';
+        sl.pc.style.width = (cached / sl.total * 100).toFixed(1) + '%';
+        sl.pl.style.width = ((doneToks - cached) / sl.total * 100).toFixed(1) + '%';
+    } else {
+        sl.pbar.style.display = 'none';
+    }
+    const bits = [];
+    if (sl.prompt) bits.push(`in ${C.fmtCompact(sl.prompt)}`);
+    if (sl.out) bits.push(`out ${C.fmtCompact(sl.out)}`);
+    if (sl.tps) bits.push(`${Math.round(sl.tps)} t/s`);
+    if (!sl.terminal && sl.state === 'prefilling' && sl.total > 0)
+        bits.push(`${Math.round((sl.processed || 0) / sl.total * 100)}%`);
+    if (!sl.terminal && sl.eta != null) bits.push(`eta ${C.fmtDuration(Math.round(sl.eta))}`);
+    if (sl.elapsed != null) bits.push(C.fmtDuration(Math.round(sl.elapsed)));
+    sl.meta.textContent = bits.join(' · ');
+    sl.chip.style.display = (!sl.terminal && sl.rid !== 'rank0' && S.reqFeedRows.get(sl.rid)?.loopHint) ? '' : 'none';
+    sl.abort.style.display = (!sl.terminal && sl.rid !== 'rank0') ? '' : 'none';
+}
+
+function renderLive(s) {
+    const now = Date.now();
+    const seen = new Set();
+    const waitingBy = new Map();
     for (const m of s.models) {
-        // normalize() exposes request ids as `rid`, not `request_id` —
-        // reading the raw name left reqId undefined and every per-request
-        // affordance (inspect badge, loop hint) dead.
-        for (const p of m.prefilling) rows.push({ model: m.id, kind: C.t('uplift.inflight.prefilling'), prompt: p.prompt, progress: p.progress, reqId: p.rid });
-        for (const g of m.generating) rows.push({ model: m.id, kind: C.t('uplift.inflight.generating'), prompt: g.prompt, generated: g.generated, tps: g.tps, reqId: g.rid });
+        ifGroup(m.id);                       // item 1: every loaded model, always
+        waitingBy.set(m.id, m.waiting || []);
+        for (const p of m.prefilling) {
+            seen.add(p.rid);
+            const sl = ifSlot(m.id, p.rid);
+            sl.state = 'prefilling';
+            if (p.prompt != null) sl.prompt = p.prompt;
+            if (p.processed != null) sl.processed = p.processed;
+            if (p.total != null) sl.total = p.total;
+            if (p.cached != null) sl.cached = p.cached;
+            if (p.progress != null && sl.total == null) { sl.total = 1; sl.processed = p.progress; }
+            if (p.eta != null) sl.eta = p.eta;
+            if (p.elapsed != null) sl.elapsed = p.elapsed;
+            sl.lastSeen = now;
+        }
+        for (const gg of m.generating) {
+            seen.add(gg.rid);
+            const sl = ifSlot(m.id, gg.rid);
+            sl.state = 'generating'; sl.eta = null;
+            if (gg.prompt != null) sl.prompt = gg.prompt;
+            if (gg.generated != null) sl.out = gg.generated;
+            if (gg.tps != null) sl.tps = gg.tps;
+            if (gg.elapsed != null) sl.elapsed = gg.elapsed;
+            sl.lastSeen = now;
+        }
     }
-    $('live-count').textContent = rows.length ? `${rows.length}` : '';
-    if (!rows.length) {
-        if (!list.querySelector('.empty')) list.innerHTML = '<div class="empty">Idle</div>';
-        return;
+    // vanished active rows -> terminal label from the feed (exact when known,
+    // else frozen last data + DONE after a grace window — spec: keep line)
+    for (const [rid, sl] of S.ifSlots) {
+        if (sl.terminal || seen.has(rid)) continue;
+        const t = ifTerminal(rid);
+        if (t) { sl.terminal = true; sl.tstate = t; }
+        else if (!S.reqFeedRows.has(rid) && now - sl.lastSeen > 15000) {
+            sl.terminal = true; sl.tstate = 'done';
+        }
     }
-    list.innerHTML = '';
-    for (const r of rows) {
-        const row = document.createElement('div'); row.className = 'model-row';
-        row.style.flexWrap = 'wrap';
-        const badge = document.createElement('span');
-        badge.className = `badge ${r.kind}`; badge.textContent = r.kind;
-        // ISSUE-5: the state badge doubles as the INSPECT affordance — the
-        // row is already dense and a second button would crowd it. Only for
-        // rows with a real request id (rank0 aggregate rows have none).
-        if (r.reqId && r.reqId !== 'rank0') {
-            badge.classList.add('act');
-            badge.style.cursor = 'pointer';
-            badge.title = C.t('uplift.req.inspect_title');
-            badge.onclick = () => MM.openInspector(r.reqId);
+    // short requests only the SSE/poll feed ever saw: capture as terminal lines
+    for (const [rid, fr] of S.reqFeedRows) {
+        const sl = S.ifSlots.get(rid);
+        if (sl) {
+            if (!sl.terminal && fr.state === 'complete') { sl.terminal = true; sl.tstate = ifTerminal(rid) || 'done'; }
+            continue;
         }
-        const name = document.createElement('span');
-        name.className = 'model-name'; name.textContent = r.model; name.title = r.model;
-        const meta = document.createElement('span');
-        meta.className = 'model-meta';
-        const bits = [];
-        if (r.prompt) bits.push(`in ${C.fmtCompact(r.prompt)}`);
-        if (r.generated !== undefined) bits.push(`out ${C.fmtCompact(r.generated)}`);
-        if (r.tps) bits.push(`${r.tps.toFixed(0)} t/s`);
-        if (r.progress !== undefined && r.progress !== null) bits.push(`${Math.round(r.progress * 100)}%`);
-        meta.textContent = bits.join(' · ');
-        row.append(badge, name, meta);
-        if (r.reqId && S.reqFeedRows.get(r.reqId)?.loopHint) {   // RL-4 amber
-            const chip = document.createElement('span');
-            chip.className = 'spill miss';
-            chip.textContent = 'LOOP?';
-            chip.title = C.t('uplift.req.loop_hint');
-            row.append(chip);
+        const t = ifTerminal(rid);
+        if (!t) continue;                    // live rows land via stats next tick
+        const sl2 = ifSlot(fr.model || '?', rid);
+        sl2.terminal = true; sl2.tstate = t; sl2.state = 'generating';
+        sl2.prompt = fr.prompt || null; sl2.out = fr.completion || null; sl2.tps = fr.tps || null;
+    }
+    // one QUEUED summary line per model (+/− expand); children only while queued
+    let qTotal = 0;
+    for (const [model, wait] of waitingBy) {
+        const g = ifGroup(model);
+        qTotal += wait.length;
+        if (wait.length) g.qever = true;
+        g.qsum.style.display = g.qever ? '' : 'none';
+        // relabel every tick: the group may have been created before the
+        // locale catalog loaded, which would otherwise pin the raw key
+        g.qb.textContent = C.t('uplift.inflight.queued');
+        g.qt.title = C.t('uplift.inflight.expand');
+        g.qc.textContent = `×${wait.length}`;
+        const expanded = S.ifExpanded.has(model);
+        g.qt.textContent = expanded ? '−' : '+';
+        g.kids.style.display = expanded ? '' : 'none';
+        if (expanded) {
+            const keep = new Set();
+            for (const w of wait.slice(0, 30)) {
+                keep.add(w.rid);
+                let c = g.kidMap.get(w.rid);
+                if (!c) {
+                    const row = document.createElement('div'); row.className = 'if-qrow';
+                    const id2 = document.createElement('span');
+                    id2.textContent = w.rid.slice(0, 8); id2.title = w.rid;
+                    const mt = document.createElement('span');
+                    row.append(id2, mt);
+                    row.onclick = () => MM.openInspector(w.rid);
+                    g.kids.append(row);
+                    c = { row, mt }; g.kidMap.set(w.rid, c);
+                }
+                const bits = [];
+                if (w.pos) bits.push(`#${w.pos}`);
+                if (w.prompt) bits.push(`in ${C.fmtCompact(w.prompt)}`);
+                if (w.waited != null) bits.push(`wait ${C.fmtDuration(Math.round(w.waited))}`);
+                c.mt.textContent = bits.join(' · ');
+            }
         }
-        if (r.reqId && r.reqId !== 'rank0') {
-            const insp = document.createElement('button');
-            insp.type = 'button'; insp.className = 'se-btn act';
-            insp.textContent = C.t('uplift.req.inspect'); insp.title = C.t('uplift.req.inspect_title');
-            insp.onclick = () => MM.openInspector(r.reqId);
-            row.append(insp);
+        // prune children of requests no longer queued — even while collapsed,
+        // or expanding after the drain shows one stale line for a tick
+        const keepNow = new Set(wait.slice(0, 30).map(w => w.rid));
+        for (const [rid2, c] of g.kidMap) {
+            if (!keepNow.has(rid2)) { c.row.remove(); g.kidMap.delete(rid2); }
         }
-        if (r.progress !== undefined && r.progress !== null) {
-            const bar = document.createElement('div');
-            bar.className = 'meter'; bar.style.flex = '1 0 100%'; bar.style.marginTop = '4px';
-            const fill = document.createElement('div');
-            fill.style.width = Math.round(r.progress * 100) + '%';
-            bar.append(fill);
-            row.append(bar);
+    }
+    for (const sl of S.ifSlots.values()) ifPaint(sl);
+    let act = 0;
+    for (const sl of S.ifSlots.values()) if (!sl.terminal) act++;
+    const total = act + qTotal;
+    $('live-count').textContent = total ? String(total) : '';
+    // nothing loaded yet (and nothing ever was this session): honest Idle
+    if (!S.ifModels.length) {
+        const list = $('live-list');
+        if (!list.querySelector('.empty')) {
+            const d = document.createElement('div'); d.className = 'empty';
+            d.textContent = C.t('uplift.empty.idle'); list.append(d);
         }
-        list.append(row);
     }
 }
 

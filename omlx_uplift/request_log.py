@@ -235,6 +235,14 @@ def _capture_payload(req: Any) -> dict:
             out["finish"] = str(fr)
     except Exception:  # noqa: BLE001
         pass
+    try:
+        # Memory-guard refusals carry a machine-readable code (finish_reason
+        # is only 'error'); the UI labels those REFUSED, not DONE-by-mistake.
+        ec = getattr(req, "error_code", None)
+        if ec:
+            out["error_code"] = str(ec)
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 
@@ -488,6 +496,8 @@ class RequestTracker:
                    # reason already recorded (cancel stamps 'aborted').
                    "finish": finish or base.get("finish") or None,
                    "ts": now}
+            if snap.get("error_code") or base.get("error_code"):
+                row["error_code"] = snap.get("error_code") or base.get("error_code")
             if n_out:
                 row["completion_tokens"] = n_out
             if text:
@@ -608,6 +618,11 @@ def _collector_payload(collector: Any) -> dict:
         fr = getattr(out, "finish_reason", None)
         if fr:
             res["finish"] = fr
+        # REFUSED state: memory-guard rejections finish with error_code
+        # ('prefill_memory_exceeded'); plain errors leave it unset.
+        ec = getattr(out, "error_code", None)
+        if ec:
+            res["error_code"] = str(ec)
         return res
     except Exception:  # noqa: BLE001
         return {}

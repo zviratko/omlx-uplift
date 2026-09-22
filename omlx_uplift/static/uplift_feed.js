@@ -252,6 +252,11 @@ function pushServerEvent(ev) {
         if (ev.completion !== undefined) patch.completion = ev.completion;
         if (ev.tps !== undefined) patch.tps = ev.tps;
         if (ev.loop_hint !== undefined) patch.loopHint = ev.loop_hint;
+        // IN-FLIGHT terminal labels: DONE vs ABORTED vs REFUSED keys off
+        // finish/error_code, not the coarse complete|error state.
+        if (ev.finish !== undefined) patch.finish = ev.finish;
+        if (ev.error_code !== undefined) patch.errorCode = ev.error_code;
+        if (ev.error) patch.error = ev.error;
         upsertReq(ev.id, patch);
         // one Events-card line per request, state updated in place (issue 2)
         pushFeed([{ kind: 'requests', reqKey: 'req:' + ev.id,
@@ -286,7 +291,8 @@ async function pollRequests() {
         for (const r of d.requests)
             upsertReq(r.id, { state: r.state, model: r.model, origin: r.origin,
                               prompt: r.prompt_tokens, completion: r.completion_tokens,
-                              tps: r.tps, error: r.error });
+                              tps: r.tps, error: r.error, finish: r.finish,
+                              errorCode: r.error_code });
     } catch (_) { /* gateway offline; feed keeps last state */ }
 }
 

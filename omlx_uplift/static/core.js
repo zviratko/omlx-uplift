@@ -66,7 +66,18 @@ function normalize(raw) {
                 rid: String(p.request_id || ''),
                 prompt: num(p.prompt_tokens ?? p.prompt_length ?? p.num_prompt_tokens),
                 progress: p.progress >= 0 && p.progress <= 1 ? p.progress : null,
+                // IN-FLIGHT prefill bar: raw counters + cached prefix when the
+                // engine reported it (specprefill rows); null otherwise.
+                processed: num(p.processed), total: num(p.total),
+                elapsed: num(p.elapsed), speed: num(p.speed), eta: num(p.eta),
+                cached: Number.isFinite(p.cached_tokens) ? num(p.cached_tokens) : null,
             })).filter(p => p.rid),
+            waiting: (Array.isArray(m.waiting) ? m.waiting : []).map(w => ({
+                rid: String(w.request_id || ''),
+                pos: num(w.queue_position),
+                waited: num(w.elapsed_seconds),
+                prompt: num(w.prompt_tokens),
+            })).filter(w => w.rid),
             generating: (Array.isArray(m.generating) ? m.generating : []).map(g => ({
                 rid: String(g.request_id || ''),
                 prompt: num(g.prompt_tokens),

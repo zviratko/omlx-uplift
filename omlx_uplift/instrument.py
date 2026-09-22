@@ -114,6 +114,11 @@ def _harvest(core, rid) -> dict:
                     getattr(out, "completion_tokens", 0) or 0)
                 snap["finish_reason"] = str(
                     getattr(out, "finish_reason", "") or "")
+                # memory-guard refusals: machine-readable code rides on the
+                # output (finish_reason alone is just 'error')
+                ec = getattr(out, "error_code", None)
+                if ec:
+                    snap["error_code"] = str(ec)
         except Exception:  # noqa: BLE001
             pass
     try:

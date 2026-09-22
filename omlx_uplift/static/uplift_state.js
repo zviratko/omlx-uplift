@@ -50,6 +50,12 @@ window.Uplift.state = {
     // uplift_feed.js owns both, the live panel in uplift.js and
     // uplift_reqsearch.js (render loop) read them. Never reassigned.
     reqFeedRows: new Map(),
+    // IN-FLIGHT card (redesign): request lines persist until page refresh.
+    // rid -> slot record (DOM + last known data); models/expanded queued
+    // lines keyed by first-seen order. Declared here for TDZ safety.
+    ifSlots: new Map(),
+    ifModels: [],
+    ifExpanded: new Set(),
     milestoneFloor: {},
     PT_DATA: null,   // last /patches view
     PT_BUSY: false,
