@@ -276,7 +276,6 @@
   "uplift.patches.none": "尚無修補。請在上方新增 GitHub PR、URL 或上傳 .diff 檔案。",
   "uplift.patches.obsolete": "上游已包含此變更 — 修補可能已過時",
   "uplift.patches.adopted": "已套用 — 儲存為已套用，omlx 更新後將重新套用",
-
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "PR 編號",
   "uplift.patches.ph_repo": "owner/repo",
@@ -494,5 +493,8 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "模型閒置超過此時長後卸載。",
   "uplift.ui.upload_queue": "上傳佇列",
   "uplift.ui.use_both_anes": "使用兩塊 ANE",
-  "uplift.ui.web_search": "網頁搜尋"
+  "uplift.ui.web_search": "網頁搜尋",
+  "uplift.theme.skins_heading": "佈景",
+  "uplift.theme.stale_hint": "較舊版本（{date}）— 請刪除目錄或重新編譯",
+  "uplift.theme.yml_newer": "佈景檔案比已解壓的複本新 — 需要重新解壓"
 }

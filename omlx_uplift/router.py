@@ -1328,3 +1328,65 @@ async def patches_config(req: PatchConfigRequest,
     from . import patchsource
 
     return patchsource.set_config(patch_store(), req.auto_update_check)
+
+
+# --------------------------------------------------------------------------
+# Skins (design v1 2026-09-22): user-dropped CSS themes under
+# <base>/uplift/skins. Listing + compiled theme.css + whitelisted resource
+# files. All under the shared session gate like every other API route; the
+# serving rules (never-overwrite, whitelists, nosniff) live in skins.py.
+# --------------------------------------------------------------------------
+
+
+@api_router.get("/skins")
+async def skins_list(is_admin: bool = Depends(require_admin)):
+    from . import skins
+
+    entries = await asyncio.to_thread(skins.list_skins)
+    # reason/warnings are uplift-owned diagnostics; name/label/ts/stale/
+    # yml_newer/classic are the picker contract (design section 3)
+    return {"skins": entries}
+
+
+@api_router.get("/skins/{sel}/theme.css")
+async def skin_theme_css(sel: str, request: Request,
+                         is_admin: bool = Depends(require_admin)):
+    from . import skins
+
+    root, entry = await asyncio.to_thread(skins.skin_state, sel)
+    if entry is None or entry.get("dir") is None:
+        raise HTTPException(status_code=404, detail="skin not found")
+    css, etag = await asyncio.to_thread(skins.theme_css, root, entry)
+    if _not_modified(request, etag, time.time()):
+        return Response(status_code=304, headers={"ETag": etag})
+    # no-cache: revalidate every load (same story as uplift.css — hand
+    # edits to overlay.css must show on the next refresh, no rebuild)
+    return Response(content=css, media_type="text/css; charset=utf-8",
+                    headers={"ETag": etag, "Cache-Control": "no-cache",
+                             "X-Content-Type-Options": "nosniff"})
+
+
+@api_router.get("/skins/{sel}/res/{rel:path}")
+async def skin_res(sel: str, rel: str, request: Request,
+                   is_admin: bool = Depends(require_admin)):
+    from . import skins
+
+    root, entry = await asyncio.to_thread(skins.skin_state, sel)
+    if entry is None or entry.get("dir") is None:
+        raise HTTPException(status_code=404, detail="skin not found")
+    if not skins.RES_RE.match(rel):
+        raise HTTPException(status_code=404, detail="resource not found")
+    path = skins._safe_child(root / entry["dir"], rel)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="resource not found")
+    media_type = skins.res_media_type(rel)
+    st = path.stat()
+    etag = _static_etag(st)
+    if _not_modified(request, etag, st.st_mtime):
+        return Response(status_code=304, headers={"ETag": etag})
+    # nosniff always; a hand-dropped file outside the extension whitelist
+    # downloads as octet-stream, its type is never inferred from content
+    return FileResponse(path, media_type=media_type,
+                        headers={"Cache-Control": "no-cache",
+                                 "X-Content-Type-Options": "nosniff"})
+

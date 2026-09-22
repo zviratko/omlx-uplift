@@ -21,7 +21,7 @@ const UUP = window.Uplift.usage;
 const FE = window.Uplift.feed;
 const PT = window.Uplift.patches;
 const { fetchJson, applyPrefs, loadLocale, applyTab, restartPolling,
-        pollStats, pollGatewayInfo, renderTasks,
+        pollStats, pollGatewayInfo, renderTasks, loadSkins, renderSkinsMenu,
         currentTab, currentSub } = window.Uplift._bootGlue;
 fetchJson(`${API}/admin/api/device-info`).then(d => {
     $('chip-device').textContent = `${d.chip_name}${d.chip_variant === 'Max' ? ' Max' : ''} · ${d.memory_gb} GB · ${d.gpu_cores}c`;
@@ -43,6 +43,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 applyPrefs();
+loadSkins();   // picker + data-theme resolve once the server listing lands
 // ?lang=xx overrides the locale (testing/demo; server setting is default)
 loadLocale(new URLSearchParams(location.search).get('lang') || undefined);
 CH.createCharts();

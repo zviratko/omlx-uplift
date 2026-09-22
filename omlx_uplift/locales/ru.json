@@ -276,7 +276,6 @@
   "uplift.patches.none": "Патчей пока нет. Добавьте PR GitHub, URL или загрузите .diff выше.",
   "uplift.patches.obsolete": "Уже присутствует в upstream — патч, вероятно, устарел",
   "uplift.patches.adopted": "УЖЕ ПРИМЕНЁН — сохранён как ПРИМЕНЁН, применится снова после обновления omlx",
-
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "№ PR",
   "uplift.patches.ph_repo": "owner/repo",
@@ -494,5 +493,8 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Выгрузить модель, если она не использовалась столько времени.",
   "uplift.ui.upload_queue": "Очередь загрузки",
   "uplift.ui.use_both_anes": "Использовать оба ANE",
-  "uplift.ui.web_search": "Веб-поиск"
+  "uplift.ui.web_search": "Веб-поиск",
+  "uplift.theme.skins_heading": "Темы",
+  "uplift.theme.stale_hint": "Старая версия ({date}) — удалите каталог или перекомпилируйте",
+  "uplift.theme.yml_newer": "Файл темы новее извлечённой копии — нужно извлечь заново"
 }

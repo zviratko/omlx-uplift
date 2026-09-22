@@ -608,7 +608,7 @@ function createMetricCard(def) {
     hText.textContent = metricLabel(def.key);
     handle.append(hatch, hText);
     const rm = document.createElement('button');
-    rm.type = 'button'; rm.className = 'card-remove';
+    rm.type = 'button'; rm.className = 'card-remove'; rm.dataset.icon = 'close';
     rm.title = 'Remove from dashboard';
     rm.setAttribute('data-i18n-title', 'uplift.layout.remove');
     rm.setAttribute('aria-label', 'Remove from dashboard');

@@ -1,0 +1,22 @@
+# Uplift skin crate — copy this file into ~/.omlx/uplift/skins/ (no restart,
+# no rebuild: the dashboard picks it up on the next refresh). Edit the
+# unpacked copy under ~/.omlx/uplift/skins/night-watch-<mtime>/ to iterate
+# (icons/ and overlay.css there win over this file); pack changes back with
+#   omlx-uplift skin compile ~/.omlx/uplift/skins/night-watch-<mtime> \
+#       -o night-watch.yml
+skin_version: 1
+label: "Night Watch"
+classic:            # what the embedded classic (Bench/Chat) pages get
+  theme: dark
+  enhanced: false
+tokens:             # any subset of the token vocabulary; unknown keys ignored
+  bg: "#14151a"
+  card: "#1c1d24"
+  accent: "#57e38a"
+icons:              # v1 vocabulary: caret, close, logo-dot (b64 binary)
+  caret.png: "iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAAJUlEQVR42mNgGLwg/HHXf3yYJE0k20KS00j2C0kBQHKIDUx8AQDExVhhXFmvxgAAAABJRU5ErkJggg=="
+css: |              # arbitrary overlay CSS (restyle what tokens cannot)
+  .logo .dot { box-shadow: 0 0 6px var(--accent); }
+  .chip { border-style: dashed; }
+  .card-handle { letter-spacing: 0.14em; }
+  .ts-chip.on { border-color: var(--accent); }

@@ -26,6 +26,12 @@ COMMANDS
   omlx-uplift kernel list|rebuild <name> [--src PATH]
       rebuild ONE bundled native kernel in the live keg after a patch
       touched kernel code (needs an omlx source checkout containing csrc/).
+  omlx-uplift skin compile <dir> [-o out.yml]
+      pack a skin working dir (~/.omlx/uplift/skins/<name>-<mtime>/) back
+      into a canonical single-file crate .yml (deterministic).
+  omlx-uplift skin decompile <yml> [-C skins-dir]
+      extract a skin crate into <name>-<mtime>/ (never overwrites an
+      existing dir — that one may carry hand edits).
 
 CONFIG FILES  (all under the data dir: ~/.omlx/uplift/, or $OMLX_BASE_PATH
 /uplift/ when that environment variable is set)
@@ -473,13 +479,66 @@ def cmd_kernel(argv=None) -> int:
     return 0 if res.get("verify", {}).get("ok") else 1
 
 
+def cmd_skin(argv=None) -> int:
+    """Skin crate <-> working-dir codecs (design section 8).
+
+      compile <dir> [-o out.yml]   working dir -> canonical crate text
+                                   (deterministic; resources byte-identical
+                                   through decompile)
+      decompile <yml> [-C dir]     crate -> <name>-<mtime>/ in the skins
+                                   dir (default: the live uplift skins dir;
+                                   never overwrites an existing dir)
+    """
+    ap = argparse.ArgumentParser(prog="omlx-uplift skin")
+    ap.add_argument("action", choices=["compile", "decompile"])
+    ap.add_argument("path", help="skin dir (compile) or crate .yml (decompile)")
+    ap.add_argument("-o", "--out", default=None,
+                    help="output .yml path (compile; default: stdout)")
+    ap.add_argument("-C", "--skins-dir", dest="skins_dir", default=None,
+                    help="skins root for decompile (default: ~/.omlx/uplift/skins)")
+    args = ap.parse_args(argv)
+
+    from pathlib import Path as _P
+    from . import skins
+
+    if args.action == "compile":
+        try:
+            text = skins.compile_dir(_P(args.path))
+        except (ValueError, OSError) as exc:
+            print(f"skin compile: {exc}", file=sys.stderr)
+            return 1
+        if args.out:
+            _P(args.out).write_text(text, encoding="utf-8")
+            print(f"wrote {args.out}")
+        else:
+            sys.stdout.write(text)
+        return 0
+
+    try:
+        dir_name = skins.decompile_crate(
+            _P(args.path), _P(args.skins_dir) if args.skins_dir else None)
+    except (ValueError, OSError) as exc:
+        print(f"skin decompile: {exc}", file=sys.stderr)
+        return 1
+    print(f"extracted {dir_name}")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] not in {
-            "serve", "view", "install", "uninstall", "patches", "kernel"}:
+            "serve", "view", "install", "uninstall", "patches", "kernel",
+            "skin"}:
         print(__doc__)
         return 1
     cmd = sys.argv[1]
     rest = sys.argv[2:]
+    if cmd == "skin":
+        # 'omlx-uplift skin compile …' — the action is rest[0], not rest itself
+        if not rest or rest[0] not in ("compile", "decompile"):
+            print("usage: omlx-uplift skin compile <dir> [-o out.yml]\n"
+                  "       omlx-uplift skin decompile <yml> [-C skins-dir]")
+            return 1
+        return cmd_skin(rest)
     return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
             "uninstall": cmd_uninstall, "patches": cmd_patches,
             "kernel": cmd_kernel}[cmd](rest)

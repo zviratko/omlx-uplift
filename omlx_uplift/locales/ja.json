@@ -276,7 +276,6 @@
   "uplift.patches.none": "パッチはまだありません。上で GitHub PR、URL、または .diff をアップロードして追加してください。",
   "uplift.patches.obsolete": "上流に既に存在 — パッチは不要（廃止候補）です",
   "uplift.patches.adopted": "適用済み — APPLIEDとして保存、omlx更新後に再適用されます",
-
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "PR 番号",
   "uplift.patches.ph_repo": "owner/repo",
@@ -523,5 +522,8 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "この時間未使用のモデルをアンロードします。",
   "uplift.ui.upload_queue": "アップロードキュー",
   "uplift.ui.use_both_anes": "両方のANEを使用",
-  "uplift.ui.web_search": "Web検索"
+  "uplift.ui.web_search": "Web検索",
+  "uplift.theme.skins_heading": "スキン",
+  "uplift.theme.stale_hint": "古いバージョン ({date}) — ディレクトリを削除するか再コンパイル",
+  "uplift.theme.yml_newer": "スキンファイルが展開済みコピーより新しいです — 再展開が必要です"
 }

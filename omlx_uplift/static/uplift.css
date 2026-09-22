@@ -897,6 +897,29 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .dd-menu--right { left: auto; right: -1px; min-width: 130px; }
 .dd-menu a.active { background: var(--ink); color: var(--bg); }
 
+/* ---- Skin system (v1) ----
+   Picker separator below the built-ins; stale/newer hints ride on title. */
+.dd-menu .skin-sep {
+    color: var(--dim); font: 400 9px/1 var(--mono); text-transform: uppercase;
+    letter-spacing: 0.12em; padding: 8px 14px 4px; border-bottom: 1px solid var(--edge);
+}
+.dd-menu a.skin-entry { position: relative; }
+
+/* ---- Skin icon hooks (design section 4): a skin paints a fixed glyph spot
+   via --icon-caret / --icon-close / --icon-logo-dot — variables the server
+   emits ONLY when the skin's file exists. An ::after overlay carries the
+   image; the text/CSS glyph underneath is covered only by an actual opaque
+   paint. No variable, decode failure, or a 404 url() => nothing painted =>
+   built-in glyph stays. Never an <img>, never a broken-image icon. */
+[data-icon="caret"], [data-icon="close"], [data-icon="logo-dot"] { position: relative; }
+[data-icon="caret"]::after, [data-icon="close"]::after, [data-icon="logo-dot"]::after {
+    content: ''; position: absolute; inset: -1px; pointer-events: none;
+    background-repeat: no-repeat; background-position: center; background-size: contain;
+}
+[data-icon="caret"]::after { background-image: var(--icon-caret, none); }
+[data-icon="close"]::after { background-image: var(--icon-close, none); }
+[data-icon="logo-dot"]::after { background-image: var(--icon-logo-dot, none); }
+
 /* ---- Sortable table heads ---- */
 .admin-table .urow.head span.sortable { cursor: pointer; }
 .admin-table .urow.head span.sortable:hover { color: var(--ink); }

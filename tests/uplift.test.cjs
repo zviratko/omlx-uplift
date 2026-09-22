@@ -121,10 +121,18 @@ test('prefs: corrupt storage falls back to defaults', () => {
     assert.deepStrictEqual(C.loadPrefs(store), C.PREFS_DEFAULTS);
     items[C.PREFS_KEY] = '{oops';
     assert.deepStrictEqual(C.loadPrefs(store), C.PREFS_DEFAULTS);
-    items[C.PREFS_KEY] = JSON.stringify({ theme: 'neon', intervalMs: 7 });
+    items[C.PREFS_KEY] = JSON.stringify({ theme: 'NEON!', intervalMs: 7 });
     assert.deepStrictEqual(C.loadPrefs(store), C.PREFS_DEFAULTS);
     C.savePrefs(store, { theme: 'light', motion: 'off', intervalMs: 2000, dense: true });
     assert.deepStrictEqual(C.loadPrefs(store), { theme: 'light', motion: 'off', intervalMs: 2000, dense: true });
+    // Skin system: a well-formed skin selection survives the whitelist
+    // (base name follows newest; suffixed name pins a version).
+    C.savePrefs(store, { theme: 'night-watch' });
+    assert.equal(C.loadPrefs(store).theme, 'night-watch');
+    C.savePrefs(store, { theme: 'night-watch-1762070400' });
+    assert.equal(C.loadPrefs(store).theme, 'night-watch-1762070400');
+    items[C.PREFS_KEY] = JSON.stringify({ theme: '../evil' });
+    assert.equal(C.loadPrefs(store).theme, 'auto');  // traversal-ish: rejected
 });
 
 // F-014: tableSort must survive the loadPrefs whitelist round-trip.

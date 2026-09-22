@@ -309,11 +309,15 @@ function milestonesBetween(prev, next) {
 const PREFS_KEY = 'omlx-uplift-prefs-v1';
 const PREFS_DEFAULTS = { theme: 'auto', motion: 'auto', intervalMs: 1000, dense: false };
 const THEMES = ['auto', 'light', 'dark', 'enhanced', 'cockpit'];
+// Skin system: prefs.theme may also store a user-skin selection — base name
+// ('night', follows newest version) or pinned 'night-<10-digit mtime>'.
+const SKIN_NAME_RE = /^[a-z0-9][a-z0-9-]*(-\d{10})?$/;
 function loadPrefs(storage) {
     let p = {};
     try { p = JSON.parse(storage.getItem(PREFS_KEY)) || {}; } catch (_) { /* storage may be denied */ }
     const out = {
-        theme: THEMES.includes(p.theme) ? p.theme : PREFS_DEFAULTS.theme,
+        theme: (THEMES.includes(p.theme) || (typeof p.theme === 'string'
+            && SKIN_NAME_RE.test(p.theme))) ? p.theme : PREFS_DEFAULTS.theme,
         motion: ['auto', 'off'].includes(p.motion) ? p.motion : PREFS_DEFAULTS.motion,
         intervalMs: [500, 1000, 2000, 5000].includes(p.intervalMs) ? p.intervalMs : PREFS_DEFAULTS.intervalMs,
         dense: p.dense === true,
@@ -439,7 +443,7 @@ return { num, r, normalize, modelState, appendSample, pruneOlderThan, eventsBetw
          MILESTONE_LADDER, nextMilestone, milestoneFloorOf,
          createRequestTracker, percentile, mean, mergeHistory,
          setLocale, getLocale, t, tf,
-         PREFS_KEY, PREFS_DEFAULTS, THEMES, loadPrefs, savePrefs,
+         PREFS_KEY, PREFS_DEFAULTS, THEMES, SKIN_NAME_RE, loadPrefs, savePrefs,
          LAYOUT_KEY, LAYOUT_DEFAULTS, LAYOUT_WINDOWS, LAYOUT_INTERVALS, LAYOUT_PERCENTILES,
          EXPLORE_METRICS, EXPLORE_KEYS, metricBlockId, blockMetricKey, loadLayout, saveLayout, clampSpan,
          fmtCompact, fmtBytes, fmtDuration, fmtNumber, errorText };

@@ -276,7 +276,6 @@
   "uplift.patches.none": "尚无补丁。请在上方添加 GitHub PR、URL 或上传 .diff 文件。",
   "uplift.patches.obsolete": "上游已包含此更改 — 补丁可能已过时",
   "uplift.patches.adopted": "已应用 — 存储为已应用，omlx 更新后将重新应用",
-
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "PR 编号",
   "uplift.patches.ph_repo": "owner/repo",
@@ -494,5 +493,8 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "模型闲置超过此时长后卸载。",
   "uplift.ui.upload_queue": "上传队列",
   "uplift.ui.use_both_anes": "使用两块 ANE",
-  "uplift.ui.web_search": "网页搜索"
+  "uplift.ui.web_search": "网页搜索",
+  "uplift.theme.skins_heading": "皮肤",
+  "uplift.theme.stale_hint": "较旧版本（{date}）— 请删除目录或重新编译",
+  "uplift.theme.yml_newer": "皮肤文件比已解包的副本新 — 需要重新解包"
 }

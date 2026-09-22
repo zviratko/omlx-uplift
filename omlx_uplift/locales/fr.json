@@ -280,7 +280,6 @@
   "uplift.patches.none": "Aucun correctif pour l'instant. Ajoutez au-dessus un PR GitHub, une URL ou téléversez un .diff.",
   "uplift.patches.obsolete": "Déjà présent en amont — le correctif semble obsolète",
   "uplift.patches.adopted": "DÉJÀ APPLIQUÉ — enregistré comme APPLIQUÉ, réappliqué après une mise à jour omlx",
-
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "n° de PR",
   "uplift.patches.ph_repo": "owner/repo",
@@ -498,5 +497,8 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Décharge un modèle après cette durée sans utilisation.",
   "uplift.ui.upload_queue": "File de téléversement",
   "uplift.ui.use_both_anes": "Utiliser les deux ANE",
-  "uplift.ui.web_search": "Recherche web"
+  "uplift.ui.web_search": "Recherche web",
+  "uplift.theme.skins_heading": "Thèmes",
+  "uplift.theme.stale_hint": "Ancienne version ({date}) — supprimez le dossier ou recompilez",
+  "uplift.theme.yml_newer": "Le fichier de thème est plus récent que la copie extraite — ré-extraction nécessaire"
 }

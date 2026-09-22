@@ -280,7 +280,6 @@
   "uplift.patches.none": "Aún no hay parches. Arriba añada un PR de GitHub, una URL o suba un .diff.",
   "uplift.patches.obsolete": "Ya presente en upstream — el parche parece obsoleto",
   "uplift.patches.adopted": "YA APLICADO — guardado como APLICADO, se volverá a aplicar tras actualizar omlx",
-
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "n.º de PR",
   "uplift.patches.ph_repo": "owner/repo",
@@ -498,5 +497,8 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Descarga un modelo tras este tiempo sin uso.",
   "uplift.ui.upload_queue": "Cola de subidas",
   "uplift.ui.use_both_anes": "Usar ambas ANE",
-  "uplift.ui.web_search": "Búsqueda web"
+  "uplift.ui.web_search": "Búsqueda web",
+  "uplift.theme.skins_heading": "Piel",
+  "uplift.theme.stale_hint": "Versión antigua ({date}) — elimine el directorio o recompilesela",
+  "uplift.theme.yml_newer": "El archivo de piel es más nuevo que la copia extraída — reextracción necesaria"
 }

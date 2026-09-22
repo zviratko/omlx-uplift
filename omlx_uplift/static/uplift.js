@@ -177,6 +177,7 @@ async function loadLocale(lang) {
         C.setLocale(j.lang, j.strings);
         GSY.gsLocalize();
         applyI18n(document);
+        if (typeof renderSkinsMenu === 'function' && SKIN_BASES.size) renderSkinsMenu();
         CH.relabelExplore();   // JS-built labels (chips, cell titles) too
         updateModeLabels(); // UPLOADER-1: mode badges are JS-built, same re-label need
         document.documentElement.lang = j.lang;
@@ -244,6 +245,7 @@ function applyTab() {
         span.dataset.i18n = dd[1]; span.textContent = lbl;
         const caret = document.createElement('span');
         caret.className = 'dd-caret'; caret.textContent = '▾';
+        caret.dataset.icon = 'caret';   // skin icon hook (rebuilt spans need it too)
         btn.append(span, ' ', caret);
     }
     for (const card of pageCards) {
@@ -384,9 +386,13 @@ document.addEventListener('keydown', e => {
 /* ---------------- theme & motion ---------------- */
 function applyPrefs() {
     const t = prefs.theme;
+    const skin = (typeof skinLookup === 'function') ? skinLookup(t) : null;
     let eff = t;
     if (t === 'auto') eff = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    // a resolved skin scopes its own compiled CSS with html[data-theme="<dir>"]
+    if (skin) eff = skin.dir;
     document.documentElement.dataset.theme = eff;
+    if (typeof applySkinCss === 'function') applySkinCss(skin ? skin.dir : null);
     const motionOff = prefs.motion === 'off' ||
         matchMedia('(prefers-reduced-motion: reduce)').matches;
     document.documentElement.dataset.motion = motionOff ? 'off' : 'auto';
@@ -404,6 +410,14 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyPrefs
    day -> light; enhanced -> dark + enhanced readability; auto/dark/cockpit
    -> dark. */
 function embedThemeState() {
+    // a custom skin drives classic pages through its own classic: mapping
+    // (server-computed, incl. the bg-luminance default); unknown or broken
+    // selection -> dark is the safe default, not an invalid 'light' push
+    const skin = (typeof skinLookup === 'function') ? skinLookup(prefs.theme) : null;
+    if (skin) {
+        return { theme: skin.classic && skin.classic.theme === 'light' ? 'light' : 'dark',
+                 enhanced: !!(skin.classic && skin.classic.enhanced) };
+    }
     const t = prefs.theme === 'auto'
         ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
         : (prefs.theme || 'dark');
@@ -465,6 +479,89 @@ $('btn-motion').onclick = () => {
     prefs.motion = document.documentElement.dataset.motion === 'off' ? 'auto' : 'off';
     C.savePrefs(localStorage, prefs); applyPrefs();
 };
+
+/* ---------------- user skins (skin system v1) ----------------------------
+   Skins are CSS-only themes the user drops into ~/.omlx/uplift/skins/ as a
+   <name>.yml crate; the server extracts/serves them (no restart). The
+   listing lives server-side; we mirror it here for the picker and for
+   data-theme resolution. prefs.theme stores the base name (follow newest)
+   or an exact '<name>-<mtime>' (pin a version). Compiled theme.css rides on
+   ONE <link id="uplift-skin-css"> revalidated by ETag — a refresh costs a
+   304, same cache story as uplift.css. */
+const SKINS = new Map();          // dir name -> entry
+const SKIN_BASES = new Map();     // base name -> newest entry
+function skinLookup(sel) {
+    if (!sel || C.THEMES.includes(sel)) return null;
+    if (!C.SKIN_NAME_RE.test(sel)) return null;
+    return SKINS.get(sel) || SKIN_BASES.get(sel) || null;
+}
+async function loadSkins() {
+    try {
+        const d = await fetchJson(`${API}/uplift/api/skins`);
+        SKINS.clear(); SKIN_BASES.clear();
+        for (const e of (d.skins || [])) {
+            if (!e.dir) continue;           // broken crate: no working copy
+            SKINS.set(e.dir, e);
+            const base = e.name.replace(/-\d{10}$/, '');
+            const cur = SKIN_BASES.get(base);
+            if (!cur || e.ts > cur.ts) SKIN_BASES.set(base, e);
+        }
+        renderSkinsMenu();
+        applyPrefs();                        // selection may now resolve
+    } catch (_) { /* no skins endpoint (viewer mode?) — built-ins only */ }
+}
+function renderSkinsMenu() {
+    const menu = $('dd-theme-menu');
+    menu.querySelectorAll('.skin-entry,.skin-sep').forEach(n => n.remove());
+    const all = [...SKINS.values()].sort((a, b) => {
+        const ba = a.name.replace(/-\d{10}$/, ''), bb = b.name.replace(/-\d{10}$/, '');
+        return ba < bb ? -1 : ba > bb ? 1 : b.ts - a.ts;   // base, then newest first
+    });
+    if (!all.length) return;
+    const sep = document.createElement('span');
+    sep.className = 'skin-sep';
+    sep.textContent = C.t('uplift.theme.skins_heading');
+    menu.appendChild(sep);
+    const want = prefs.theme || 'auto';
+    for (const e of all) {
+        const a = document.createElement('a');
+        a.href = '#';
+        a.className = 'skin-entry';
+        a.dataset.pick = e.name;             // base name or pinned version dir
+        // newest shows its label under the base name; older versions show
+        // the exact pinned name (what clicking stores) — design section 2.3
+        a.textContent = e.stale ? e.dir : e.label;
+        a.classList.toggle('active', e.name === want);
+        const hints = [];
+        if (e.stale) hints.push(C.t('uplift.theme.stale_hint',
+            { date: new Date(e.ts * 1000).toLocaleString() }));
+        if (e.yml_newer) hints.push(C.t('uplift.theme.yml_newer'));
+        if (hints.length) a.title = hints.join(' — ');
+        menu.appendChild(a);
+    }
+}
+// delegated: skin entries are rendered after the static anchors' listeners
+$('dd-theme-menu').addEventListener('click', e => {
+    const a = e.target.closest('a.skin-entry');
+    if (!a) return;
+    e.preventDefault();
+    prefs.theme = a.dataset.pick;
+    C.savePrefs(localStorage, prefs); applyPrefs();
+    $('dd-theme-menu').hidden = true;
+    toast(C.t('uplift.toast.theme_set', {theme: prefs.theme}));
+});
+function applySkinCss(dir) {
+    let link = document.getElementById('uplift-skin-css');
+    if (!dir) { if (link) link.remove(); return; }
+    const href = `${API}/uplift/api/skins/${encodeURIComponent(dir)}/theme.css`;
+    if (!link) {
+        link = document.createElement('link');
+        link.id = 'uplift-skin-css';
+        link.rel = 'stylesheet';
+        document.head.appendChild(link);
+    }
+    if (link.getAttribute('href') !== href) link.setAttribute('href', href);
+}
 
 /* ---------------- layout engine (GridStack, classic #3694 parity) -------- */
 /* Same mechanism as the classic dashboard: GridStack 13 in 24-column,
@@ -1572,7 +1669,8 @@ async function postJson(url, body) {
    hoisted internals + the tab readers. Function declarations — stable. */
 window.Uplift._bootGlue = {
     fetchJson, applyPrefs, loadLocale, applyTab, restartPolling,
-    pollStats, pollGatewayInfo, currentTab, currentSub,
+    pollStats, pollGatewayInfo, currentTab, currentSub, loadSkins,
+    renderSkinsMenu,
     renderTasks: function () { return window.Uplift.downloader.renderTasks.apply(null, arguments); },
 };
 })();

@@ -291,7 +291,6 @@
   "uplift.patches.none": "아직 패치가 없습니다. 위에서 GitHub PR, URL을 추가하거나 .diff를 업로드하세요.",
   "uplift.patches.obsolete": "이미 상류에 존재 — 패치가 불필요할 수 있습니다",
   "uplift.patches.adopted": "이미 적용됨 — 적용됨으로 저장, omlx 업데이트 후 재적용",
-
   "uplift.patches.ph_id": "patch-id",
   "uplift.patches.ph_pr": "PR 번호",
   "uplift.patches.ph_repo": "owner/repo",
@@ -509,5 +508,8 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "이 시간 동안 사용되지 않은 모델을 언로드합니다.",
   "uplift.ui.upload_queue": "업로드 대기열",
   "uplift.ui.use_both_anes": "두 ANE 모두 사용",
-  "uplift.ui.web_search": "웹 검색"
+  "uplift.ui.web_search": "웹 검색",
+  "uplift.theme.skins_heading": "스킨",
+  "uplift.theme.stale_hint": "이전 버전 ({date}) — 디렉터리를 삭제하거나 다시 컴파일",
+  "uplift.theme.yml_newer": "스킨 파일이 추출된 사본보다 최신입니다 — 재추출 필요"
 }
