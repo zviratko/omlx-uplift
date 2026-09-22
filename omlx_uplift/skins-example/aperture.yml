@@ -1,0 +1,100 @@
+# Uplift skin crate — "APERTURE" (Portal // Aperture Science EnApDb).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+# The shelf's light theme: beige-white lab walls, test-chamber blue,
+# long-drop orange. The telemetry is fine. You are the variable.
+skin_version: 1
+label: "Aperture Science"
+classic:
+  theme: light
+  enhanced: false
+tokens:
+  bg: "#e9e5da"          # aged lab-wall beige
+  card: "#f7f4ec"        # fresh drywall panel
+  row2: "#eeeae0"
+  field: "#ddd8cb"       # recessed observation-window sill
+  panel: "#eeeae0"
+  edge: "#b9b2a1"        # scuffed trim
+  ink: "#2b2a26"         # printed-manual black
+  dim: "#8a8375"         # photocopy grey
+  accent: "#f3752a"      # Aperture long-drop orange
+  chart-1: "#388ffa"     # EnApDb blue
+  chart-2: "#f3752a"     # long-drop orange
+  grid: "#d4cfc2"
+  heat: "#f3752a"
+  frame: "#388ffa"       # test-chamber blue
+  red: "#c0392b"
+  bad: "#c0392b"
+  warn: "#d98e04"
+  good: "#2e8b57"
+  hdr-ink: "#3a382f"
+  hdr-edge: "#b9b2a1"
+  hdr-hover: "#ddd8cb"
+  hdr-weight: "600"
+icons:
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+    <path d="M0 0h10L5 7z" fill="#388ffa"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+    <path d="M2 2l10 10M12 2L2 12" stroke="#3a382f" stroke-width="2.2" stroke-linecap="round"/>
+    </svg>
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+    <circle cx="6" cy="6" r="5.5" fill="none" stroke="#3a382f" stroke-width="1.2"/>
+    <path d="M6 .5 A5.5 5.5 0 0 1 11.5 6 L6 6z" fill="#3a382f"/>
+    <path d="M6 11.5 A5.5 5.5 0 0 1 .5 6 L6 6z" fill="#3a382f"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M1 2h14M1 5h14M1 8h14" stroke="#b9b2a1" stroke-width="1.4"/>
+    </svg>
+
+css: |-
+  html { color-scheme: light; }
+  /* the lab is clean. do not ask what is under the panels. */
+  body {
+      background:
+          radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,.55) 0%,
+              rgba(0,0,0,.07) 100%),
+          var(--bg);
+  }
+  /* panels clip to the test-chamber grid: blue seam on top */
+  .card { border-top-color: var(--frame); }
+  .card:hover { border-color: var(--accent); }
+  .card h2 { color: var(--dim); letter-spacing: .06em;
+      text-transform: uppercase; }
+  /* compliance notice under the logo, verdict inline */
+  .logo .logo-below::after {
+      content: "FOR THE BETTERMENT OF HUMANITY.";
+      color: var(--dim); font: 600 9px/1 var(--sans); letter-spacing: .08em;
+  }
+  .logo::after {
+      content: ": NON-LETHAL";
+      color: var(--accent); font: 600 9px/1 var(--sans); letter-spacing: .12em;
+      margin-left: 6px;
+  }
+  /* science-grade lamp: blue, honest, occasionally wrong */
+  .logo .dot { box-shadow: 0 0 4px rgba(56,143,250,.35); }
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: aperture-cycle 6s ease-in-out infinite;
+  }
+  @keyframes aperture-cycle {
+      0%, 100% { box-shadow: 0 0 4px rgba(56,143,250,.35); }
+      50% { box-shadow: 0 0 9px rgba(243,117,42,.7); }
+  }
+  /* orange warning paint on the chips */
+  .rqchip { box-shadow: 0 1px 4px rgba(243,117,42,.45); }
+  /* weighted-cube progress: solid honest blocks */
+  .meter { height: 10px; border: 1px solid var(--edge); background: var(--field);
+      padding: 1px; }
+  .meter > div { background: repeating-linear-gradient(90deg,
+          var(--accent) 0 8px, #c25a1c 8px 9px); }
+  .meter.bad > div { background: repeating-linear-gradient(90deg,
+          var(--bad) 0 8px, #7e2419 8px 9px); }
+  .chart-box { border: 1px solid var(--edge); background: var(--card); }
+  ::selection { background: var(--frame); color: #f7f4ec; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--edge); border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--frame); }

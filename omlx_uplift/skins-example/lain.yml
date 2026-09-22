@@ -1,0 +1,102 @@
+# Uplift skin crate — "LAIN" (Serial Experiments Lain // hAGorA terminal).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+# The Wired is always close: failing-CRT green on violet-black, wire-red
+# for the alarms. If you can see the dashboard, you're always watching.
+skin_version: 1
+label: "LAIN"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#060a08"          # screen-off black with a green draft
+  card: "#0b120e"
+  row2: "#0f1813"
+  field: "#030705"       # deep phosphor well
+  panel: "#0f1813"
+  edge: "#1d4d33"        # dim phosphor rim
+  ink: "#c9ffdd"         # pale phosphor green
+  dim: "#5fae83"         # washed hAGorA green
+  accent: "#00ff9c"      # the full-brightness phosphor
+  chart-1: "#00ff9c"     # series 1: phosphor
+  chart-2: "#ff2a4d"     # series 2: wire red
+  grid: "#123223"
+  heat: "#ff2a4d"        # the knives are out
+  frame: "#2b7a52"
+  red: "#ff2a4d"
+  bad: "#ff2a4d"
+  warn: "#e8c34a"        # sodium-lamp yellow
+  good: "#00ff9c"        # NOMINAL means the screen is on
+  hdr-ink: "#7fe8b6"
+  hdr-edge: "#1d4d33"
+  hdr-hover: "#0f1813"
+  hdr-weight: "400"
+icons:
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+    <path d="M0 0h10L5 7z" fill="#00ff9c"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+    <path d="M2 2l10 10M12 2L2 12" stroke="#ff2a4d" stroke-width="2.4"/>
+    </svg>
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+    <circle cx="6" cy="6" r="6" fill="#030705"/>
+    <circle cx="6" cy="6" r="2.4" fill="#00ff9c"/>
+    <circle cx="6" cy="6" r="4.6" fill="none" stroke="#2b7a52" stroke-width="1"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M1 2h14M1 5h14M1 8h14" stroke="#2b7a52" stroke-width="1.2"/>
+    </svg>
+
+css: |-
+  html { color-scheme: dark; }
+  /* failing CRT: scanlines + a green bloom at the top of the world */
+  body {
+      background:
+          radial-gradient(140% 80% at 50% -20%, rgba(0,255,156,.06) 0%,
+              rgba(0,0,0,.6) 100%),
+          repeating-linear-gradient(0deg,
+              #060a08 0px, #060a08 2px, #081009 2px, #081009 3px);
+  }
+  /* every card is another screen in the background */
+  .card { border-top-color: var(--frame); }
+  .card:hover { border-color: var(--accent); }
+  .card h2 { color: var(--dim); letter-spacing: .2em; }
+  /* hAGorA protocol readout under the logo; short greeting inline */
+  .logo .logo-below::after {
+      content: "PRESENT DAY. PRESENT TIME.";
+      color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .12em;
+  }
+  .logo::after {
+      content: ": L.E.D.";
+      color: var(--accent); font: 400 9px/1 var(--mono); letter-spacing: .3em;
+      margin-left: 6px;
+  }
+  /* the god eye blinks while motion is allowed */
+  .logo .dot { box-shadow: 0 0 5px rgba(0,255,156,.5); }
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: lain-blink 5.3s steps(1) infinite;
+  }
+  @keyframes lain-blink {
+      0%, 91%, 100% { box-shadow: 0 0 5px rgba(0,255,156,.5); opacity: 1; }
+      93%, 96% { box-shadow: none; opacity: .25; }
+  }
+  /* wire-red chips glow like a loosened connection */
+  .rqchip { box-shadow: 0 0 6px rgba(255,42,77,.4); }
+  /* phosphor instrument bars */
+  .meter > div {
+      background: repeating-linear-gradient(45deg,
+          var(--accent) 0 3px, #0c4c33 3px 5px);
+  }
+  .meter.bad > div {
+      background: repeating-linear-gradient(45deg,
+          var(--bad) 0 3px, #6e1226 3px 5px);
+  }
+  .chip { border-style: dotted; }
+  ::selection { background: var(--accent); color: #030705; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--edge); border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }

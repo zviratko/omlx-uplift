@@ -1,0 +1,91 @@
+# Uplift skin crate — "TP7" (Turbo Pascal 7 blue screen // CGA discipline).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+# The IDE that taught a generation to compile: #0000A8 everywhere, cyan and
+# yellow text, magenta selection blocks. Error line goes straight to you.
+skin_version: 1
+label: "Turbo Pascal 7"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#0000a8"          # the blue screen, unapologetic
+  card: "#0b0bb5"        # raised blue panel
+  row2: "#1616c2"
+  field: "#00007a"       # deep IDE blue, input line
+  panel: "#1616c2"
+  edge: "#5858ff"        # double-border light blue
+  ink: "#ffffff"         # primary text white
+  dim: "#55ffff"         # CGA cyan, comments and hints
+  accent: "#55ffff"      # selection cyan
+  chart-1: "#ffff55"     # series 1: CGA yellow
+  chart-2: "#55ffff"     # series 2: CGA cyan
+  grid: "#2020cc"
+  heat: "#ff55ff"        # CGA magenta, the highlight color
+  frame: "#ffff55"       # yellow window frame, exactly like Alt+F5 never
+  red: "#ff5555"
+  bad: "#ff55ff"         # magenta is the compiler's red flag
+  warn: "#ffff55"        # yellow = warning, as intended by Borland
+  good: "#55ff55"        # CGA green
+  hdr-ink: "#ffff55"     # the menu bar IS yellow on blue
+  hdr-edge: "#5858ff"
+  hdr-hover: "#55ffff"   # cyan inverse, the sound of Alt is implied
+  hdr-weight: "700"
+icons:
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+    <path d="M0 0h10L5 7z" fill="#ffff55"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+    <path d="M2 2l10 10M12 2L2 12" stroke="#ffff55" stroke-width="2.6"/>
+    </svg>
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+    <rect x="0" y="0" width="12" height="12" fill="#00007a"/>
+    <rect x="1" y="1" width="10" height="10" fill="none" stroke="#ffff55" stroke-width="1.4"/>
+    <rect x="4" y="4" width="4" height="4" fill="#55ffff"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M1 2h14M1 5h14M1 8h14" stroke="#5858ff" stroke-width="1.6"/>
+    </svg>
+
+css: |-
+  html { color-scheme: dark; }
+  /* the blue screen is FLAT. resist every gradient. */
+  body { background: var(--bg); }
+  /* window chrome: yellow top rail, double-border illusion on hover */
+  .card { border-top-color: var(--frame); }
+  .card:hover { border-color: var(--edge); }
+  .card h2 { color: var(--dim); letter-spacing: .08em; }
+  /* compiler status under the logo, inline verdict (24ch cap) */
+  .logo .logo-below::after {
+      content: "Borland International  1992  640K ought to be enough";
+      color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .06em;
+  }
+  .logo::after {
+      content: "  Compile : OK";
+      color: var(--frame); font: 700 9px/1 var(--mono); letter-spacing: .1em;
+      margin-left: 6px;
+  }
+  /* run-light: green while the program runs, magenta on halt */
+  .logo .dot { box-shadow: none; }
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: tp7-blink 2s steps(1) infinite;
+  }
+  @keyframes tp7-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .35; }
+  }
+  /* inline-assembly-style chips with hard magenta rims */
+  .rqchip { border-color: var(--bad); box-shadow: none; }
+  /* progress in CGA blocks, no gradients in this house */
+  .meter > div { background: var(--chart-1); }
+  .meter.bad > div { background: var(--bad); }
+  .chip { border-style: solid; }
+  /* selection: white on magenta, the one real joy of CGA */
+  ::selection { background: var(--heat); color: #000000; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--field); }
+  ::-webkit-scrollbar-thumb { background: var(--edge); border: 2px solid var(--field); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--frame); }

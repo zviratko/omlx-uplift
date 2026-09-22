@@ -1,0 +1,106 @@
+# Uplift skin crate — "UAC TERMINAL" (DOOM 1993 // Phobos telemetry).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+# Gunmetal hull, toxic-green readouts, hell-red alarms. Simple. Direct.
+# Effective.
+skin_version: 1
+label: "UAC Terminal"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#101213"          # UAC deck plating
+  card: "#1a1e20"
+  row2: "#222729"
+  field: "#0a0c0d"       # recessed console glass
+  panel: "#222729"
+  edge: "#3a4245"        # riveted steel rim
+  ink: "#d8e0dc"         # fatigues off-white
+  dim: "#7fa38c"         # dead terminal green
+  accent: "#8aff00"      # BFG-approved toxic green
+  chart-1: "#8aff00"     # series 1: plasma
+  chart-2: "#ff7a1a"     # series 2: UAC orange
+  grid: "#242b2d"
+  heat: "#ff2200"        # Hell on Phobos
+  frame: "#c8a24a"       # ancient rune gold
+  red: "#ff2200"
+  bad: "#ff2200"
+  warn: "#ffb62e"        # radiation yellow
+  good: "#8aff00"
+  hdr-ink: "#8aff00"     # green CRT signage, obviously
+  hdr-edge: "#3a4245"
+  hdr-hover: "#222729"
+  hdr-weight: "700"
+icons:
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+    <path d="M0 0h10L5 7z" fill="#8aff00"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+    <path d="M2 2h3l2 3 2-3h3L9 7l3 5h-3L10 9l-2 3H5l3-5z" fill="#ff2200"/>
+    </svg>
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+    <rect x="0" y="0" width="12" height="12" fill="#0a0c0d"/>
+    <rect x="3" y="3" width="6" height="6" fill="#8aff00"/>
+    <rect x="5" y="5" width="2" height="2" fill="#ff2200"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M1 2h4M6 2h4M11 2h4M1 5h4M6 5h4M11 5h4M1 8h4M6 8h4M11 8h4"
+            fill="none" stroke="#3a4245" stroke-width="1.6"/>
+    </svg>
+
+css: |-
+  html { color-scheme: dark; }
+  /* deck plating: plate seams every 96px, screws optional but implied */
+  body {
+      background:
+          linear-gradient(180deg, rgba(138,255,0,.04) 0%, rgba(0,0,0,.4) 100%),
+          repeating-linear-gradient(90deg, transparent 0 95px,
+              rgba(58,66,69,.35) 95px 96px),
+          var(--bg);
+  }
+  /* cards are ammo crates: hazard rail on top */
+  .card { border-top-color: var(--frame); border-top-width: 2px; }
+  .card:hover { border-color: var(--accent); }
+  .card h2 { color: var(--dim); letter-spacing: .18em; }
+  /* UAC field-manual quote under the logo, status inline */
+  .logo .logo-below::after {
+      content: "SIMPLE. DIRECT. EFFECTIVE.";
+      color: var(--dim); font: 700 9px/1 var(--mono); letter-spacing: .22em;
+  }
+  .logo::after {
+      content: ": HELL RESERVED";
+      color: var(--red); font: 700 9px/1 var(--mono); letter-spacing: .14em;
+      margin-left: 6px;
+  }
+  /* reaction-light: green while containment holds, and it flickers */
+  .logo .dot { box-shadow: 0 0 5px rgba(138,255,0,.5); }
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: uac-flicker 4.7s steps(1) infinite;
+  }
+  @keyframes uac-flicker {
+      0%, 100% { box-shadow: 0 0 5px rgba(138,255,0,.5); }
+      47% { box-shadow: 0 0 9px rgba(138,255,0,.9); }
+      49% { box-shadow: none; }
+      51% { box-shadow: 0 0 5px rgba(138,255,0,.5); }
+  }
+  /* containment-failure chips */
+  .rqchip { box-shadow: 0 0 7px rgba(255,34,0,.5); }
+  /* hazard-stripe instrument bars */
+  .meter { height: 8px; border: 1px solid var(--edge); padding: 1px; }
+  .meter > div {
+      background: repeating-linear-gradient(45deg,
+          var(--accent) 0 5px, #14330a 5px 8px);
+  }
+  .meter.bad > div {
+      background: repeating-linear-gradient(45deg,
+          var(--bad) 0 5px, #5c1208 5px 8px);
+  }
+  .chart-box { border: 1px solid var(--edge); background: var(--field); }
+  ::selection { background: var(--accent); color: #0a0c0d; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--edge); border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }

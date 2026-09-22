@@ -1,0 +1,106 @@
+# Uplift skin crate — "NERV" (Neon Genesis Evangelion // MAGI diagnostics).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+# Palette: NERV purple + blood red; the state triad is the MAGI council —
+# CASPER green / MELCHIOR amber / BALTHASAR red.
+skin_version: 1
+label: "NERV"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#0a0710"          # GeoFront night, near-black violet
+  card: "#150d22"
+  row2: "#1b1129"
+  field: "#07050c"       # recessed MAGI readout
+  panel: "#1b1129"
+  edge: "#4b2e83"        # NERV purple rim
+  ink: "#ece7f5"         # pilot-suit pale
+  dim: "#9a86c8"         # washed lavender
+  accent: "#e60012"      # NERV blood red
+  chart-1: "#8a5fd6"     # series 1: AT-field violet
+  chart-2: "#ff6a1f"     # series 2: pattern orange
+  grid: "#241636"
+  heat: "#ff6a1f"        # PATTERN ORANGE is the alarm color
+  frame: "#5b2a86"
+  red: "#e60012"
+  bad: "#ff2d20"         # BALTHASAR casts the dissenting vote
+  warn: "#ffb02e"        # MELCHIOR warns
+  good: "#3ddc84"        # CASPER concurs
+  hdr-ink: "#b9a3e6"     # lilac nav signage
+  hdr-edge: "#3a2260"
+  hdr-hover: "#1b1129"
+  hdr-weight: "700"
+icons:
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+    <path d="M0 0h10L5 7z" fill="#e60012"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+    <path d="M2 2l10 10M12 2L2 12" stroke="#e60012" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+    <circle cx="6" cy="6" r="6" fill="#1b1129"/>
+    <circle cx="6" cy="6" r="5" fill="none" stroke="#5b2a86" stroke-width="1.6"/>
+    <circle cx="6" cy="6" r="2" fill="#e60012"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M1 2h14M1 5h14M1 8h14" stroke="#5b2a86" stroke-width="1.4"/>
+    </svg>
+
+css: |-
+  html { color-scheme: dark; }
+  /* GeoFront ground: faint hexagonal lattice, AT-field wallpaper */
+  body {
+      background:
+          radial-gradient(120% 90% at 50% -10%, rgba(91,42,134,.10) 0%,
+              rgba(0,0,0,.5) 100%),
+          repeating-linear-gradient(60deg, transparent 0 26px,
+              rgba(91,42,134,.05) 26px 27px),
+          repeating-linear-gradient(-60deg, transparent 0 26px,
+              rgba(91,42,134,.05) 26px 27px),
+          var(--bg);
+  }
+  /* cards carry the blood rail */
+  .card { border-top-color: var(--accent); }
+  .card:hover { border-color: var(--accent); }
+  .card h2 { color: var(--hdr-ink); letter-spacing: .16em; }
+  /* NERV motto in the below-logo slot (260px wide); only a short MAGI
+     status goes inline (::after is capped at 24ch with an ellipsis) */
+  .logo .logo-below::after {
+      content: "GOD'S IN HIS HEAVEN. ALL'S RIGHT.";
+      color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .10em;
+  }
+  .logo::after {
+      content: ": MAGI 241/241";
+      color: var(--good); font: 400 9px/1 var(--mono); letter-spacing: .14em;
+      margin-left: 6px;
+  }
+  /* LCL telemetry lamp pulses while motion is allowed */
+  .logo .dot { box-shadow: 0 0 4px rgba(230,0,18,.45); }
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: nerv-pulse 3.1s ease-in-out infinite;
+  }
+  @keyframes nerv-pulse {
+      0%, 100% { box-shadow: 0 0 4px rgba(230,0,18,.4); }
+      50% { box-shadow: 0 0 11px rgba(230,0,18,.95); }
+  }
+  /* pattern-orange alarm chips */
+  .rqchip { box-shadow: 0 0 6px rgba(255,106,31,.4); }
+  /* sync-rate instrument bars */
+  .meter > div {
+      background: repeating-linear-gradient(45deg,
+          var(--chart-1) 0 4px, #3a2260 4px 6px);
+  }
+  .meter.bad > div {
+      background: repeating-linear-gradient(45deg,
+          var(--bad) 0 4px, #5c1210 4px 6px);
+  }
+  /* absolute-position selection, entry-plug red */
+  ::selection { background: var(--accent); color: #ece7f5; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--edge); border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
