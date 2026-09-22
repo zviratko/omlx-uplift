@@ -15,7 +15,10 @@ COMMANDS
   omlx-uplift install [--python PATH]     drop the autopatch .pth into a
       target environment's site-packages (default target: Homebrew omlx
       keg). Manual step for tricky venvs; REQUIRED after every fresh
-      install and after every `brew upgrade omlx`.
+      install and after every `brew upgrade omlx`. Prints a colour
+      per-patch preview first: "OMLX-UPLIFT PATCHES TO APPLY: <ids>" then
+      SUCCESS / APPLIED / WARNING / FAILURE per patch (dry-run only, no
+      writes).
   omlx-uplift uninstall [--python PATH]   remove the .pth again.
   omlx-uplift patches status|apply|check|disable-all
       out-of-band patch-carrier recovery when the dashboard is unreachable:
@@ -176,6 +179,130 @@ def _default_target_python() -> str | None:
     return str(keg) if keg else None
 
 
+# ------------------------------------------------------------- patch preview
+def _color_enabled(stream) -> bool:
+    return (getattr(stream, "isatty", lambda: False)()
+            and not os.environ.get("NO_COLOR"))
+
+
+def _paint(stream, text: str, code: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _color_enabled(stream) else text
+
+
+def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
+    """Dry-run every ENABLED patch against the live tree (no writes).
+
+    Returns [{id, verdict: success|warning|failure|applied, detail}] in
+    manifest order:
+      success  hunks apply cleanly (will land on next server start)
+      applied  uplift already applied it to this keg and hashes match
+      warning  hunks already present on disk, strictly reversible —
+               upstream most likely picked the fix up
+      failure  strict apply fails (drift or corrupt diff); next boot will
+               mark needs_review and boot unpatched for this patch
+    Never raises: classification errors surface as verdict=failure.
+    """
+    from . import diffapply
+
+    out: list[dict] = []
+    try:
+        manifest = store.load()
+    except Exception as exc:                       # unreadable manifest
+        return [{"id": "(manifest)", "verdict": "failure",
+                 "detail": f"cannot read patch manifest: {exc}"}]
+    for patch in sorted(manifest.get("patches", []),
+                        key=lambda p: (p.get("order", 100), p.get("id", ""))):
+        pid = patch.get("id", "?")
+        if not patch.get("enabled"):
+            continue
+        ver = store.get_version(patch, patch.get("desired_version"))
+        if ver is None:
+            out.append({"id": pid, "verdict": "failure",
+                        "detail": "no stored desired version"})
+            continue
+        # Fast happy path: applied on THIS keg and recorded files still have
+        # the applied bytes -> nothing to do, verified.
+        applied = ver.get("applied") or {}
+        if (patch.get("state") == "applied" and applied.get("keg_id") == keg):
+            try:
+                from . import patchsync
+                if patchsync._files_match(tree_root, applied.get("files", [])):
+                    out.append({"id": pid, "verdict": "applied",
+                                "detail": "already applied to this keg — verified"})
+                    continue
+            except Exception:
+                pass
+        pf = ver.get("patch_file")
+        data = None
+        if pf:
+            path = pf if os.path.isabs(pf) else os.path.join(store.base_dir, pf)
+            try:
+                with open(path, "rb") as fh:
+                    data = fh.read()
+            except OSError:
+                data = None
+        if data is None:
+            out.append({"id": pid, "verdict": "failure",
+                        "detail": "stored diff file missing"})
+            continue
+        try:
+            chk = diffapply.check_diff(data, tree_root)
+        except Exception as exc:
+            out.append({"id": pid, "verdict": "failure",
+                        "detail": f"check crashed: {exc}"})
+            continue
+        files = chk.get("files", [])
+        fails = [f for f in files if f["status"] == "fail"]
+        alrdy = [f for f in files if f["status"] == "already"]
+        if fails:
+            why = "; ".join(f"{f['path']}: {f['reason']}" for f in fails[:2])
+            out.append({"id": pid, "verdict": "failure",
+                        "detail": f"will NOT apply (needs_review next boot) — {why}"})
+        elif alrdy:
+            out.append({"id": pid, "verdict": "warning",
+                        "detail": "already applied and reverts cleanly — "
+                                  "upstream likely picked it up"})
+        else:
+            out.append({"id": pid, "verdict": "success",
+                        "detail": "applies cleanly on next server start"})
+    return out
+
+
+def print_patch_preview(store, stream=None) -> None:
+    """Visible banner after `install`. Advisory only — never fails install."""
+    import sys
+    stream = stream or sys.stdout
+    try:
+        from . import patches as _patches
+        root = _patches._omlx_root()
+        if not root:
+            print("OMLX-UPLIFT PATCHES: omlx package tree not found — "
+                  "preview skipped", file=stream)
+            return
+        tree_root = os.path.dirname(root)
+        store = store or _patches.PatchStore()
+        if store.patches_disabled():
+            print(_paint(stream, "OMLX-UPLIFT PATCHES: DISABLED (kill-switch "
+                         "sentinel present) — boot will be unpatched", "33"),
+                  file=stream)
+            return
+        keg = _patches.keg_id(root)
+        rows = patch_preview(store, tree_root, keg)
+        if not rows:
+            return
+        ids = ", ".join(r["id"] for r in rows)
+        print(f"\n{_paint(stream, 'OMLX-UPLIFT PATCHES TO APPLY: ', '1;36')}"
+              f"{ids}", file=stream)
+        style = {"success": ("SUCCESS", "32"), "warning": ("WARNING", "33"),
+                 "failure": ("FAILURE", "31"), "applied": ("APPLIED", "32")}
+        for r in rows:
+            word, code = style[r["verdict"]]
+            print(f"  {_paint(stream, f'{word:8}', code)} {r['id']}"
+                  f" — {r['detail']}", file=stream)
+    except Exception as exc:                        # preview must never break install
+        print(f"OMLX-UPLIFT PATCHES: preview unavailable ({exc})", file=stream)
+
+
 def cmd_install(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="omlx-uplift install")
     ap.add_argument("--python", help="target interpreter "
@@ -189,6 +316,7 @@ def cmd_install(argv=None) -> int:
     print(f"installed autopatch: {pth}")
     if "\nimport " in "\n" + body and body.count("\n") > 1:
         print("  (bootstraps sys.path to this package — keg holds no copy)")
+    print_patch_preview(None)
     return 0
 
 
