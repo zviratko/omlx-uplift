@@ -351,8 +351,10 @@ class MetricsStore:
             "completion_tokens": row.get("completion_tokens"),
             "tps": row.get("tps"),
             "error": row.get("error"),
-            "ts_start": row.get("ts_start") or row.get("ts") or time.time(),
-            "ts_end": row.get("ts_end") or time.time(),
+            # ISSUE-8: prefer the tracker's explicit lifecycle stamps; ts
+            # remains the last-update fallback for old/odd rows.
+            "ts_start": row.get("started_at") or row.get("ts_start") or row.get("ts") or time.time(),
+            "ts_end": row.get("ended_at") or row.get("ts_end") or time.time(),
             # RL-1 payload fields — COALESCE below keeps earlier captures
             # when a later sparse sample has none (never overwrite with NULL)
             "prompt": row.get("prompt"),

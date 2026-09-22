@@ -173,6 +173,15 @@ function yAxis(col, opts) {
     // tightened to the smallest size that still fits the rotated labels.
     return Object.assign({ stroke: col.dim, size: 30, font: axisFont, grid: true, gap: 4 }, opts || {});
 }
+/* ISSUE-1 (jumping timeframe): with an auto x-scale uPlot re-fits the axis
+   to wherever the data happens to sit on every setData — sparse backfill
+   points, 60 s history refetches (new bucket boundaries) and window slides
+   each re-anchor the ticks: the chart "stretches, then jumps". Pinning the
+   range to [now-window, now] makes the window scroll smoothly instead. */
+function pinnedXRange(cardId) {
+    return () => { const now = Date.now(); const w = cardWindow(cardId) * 1000;
+                   return [now - w, now]; };
+}
 function baseOpts(specs, axes, legendHook) {
     const col = chartColors();
     return {
@@ -328,6 +337,7 @@ function createCharts() {
         legendUpdater());
     // y2 axis sits on the right; uPlot axis 'side': 1=right of grid, 3=left.
     tpsOpts.height = Math.max(200, $('chart-tps').clientHeight || 240);
+    tpsOpts.scales.x.range = pinnedXRange('chart-tps');
     tpsChart = new uPlot(tpsOpts, tpsWindowed(), $('chart-tps'));
     window.__uplotTps = tpsChart;   // debug handle
     // Memory % left; runtime cache GB (total + top-3 models' hot cache) right.
@@ -347,6 +357,7 @@ function createCharts() {
         legendUpdater());
     memOpts.scales.y = { range: [0, 100] };
     memOpts.height = Math.max(200, $('chart-mem').clientHeight || 240);
+    memOpts.scales.x.range = pinnedXRange('chart-mem');
     memChart = new uPlot(memOpts, memWindowed(), $('chart-mem'));
     bindCursorUpdater(tpsChart); bindCursorUpdater(memChart);
     bindCursorTip(tpsChart); bindCursorTip(memChart);
@@ -373,14 +384,13 @@ function redrawCharts() {
 }
 function rerenderChartsTheme() {
     createCharts(); if (usageChart) createUsageChart();
-    for (const [id, e] of metricCharts) {
-        const host = e.host;
-        e.chart.destroy();
-        if (host._ro) { host._ro.disconnect(); host._ro = null; }
-        host.textContent = '';
-    }
-    metricCharts.clear();
-    for (const def of C.EXPLORE_METRICS) createMetricCard(def);   // re-inits plots
+    // ISSUE-2: rebuild each metric plot IN ITS HOST — createMetricCard's
+    // exists-guard makes re-calling it a no-op once the card is in the grid,
+    // which left every small metric card blank after the first rerender.
+    for (const id of [...metricCharts.keys()]) reinitMetricPlot(id);
+    // Rebuilt uPlots start at their default 300×100; the host ResizeObserver
+    // does NOT fire (same box size), so fit them explicitly or they overflow.
+    fitAllMetricPlots();
     drawAllMetricCharts();
 }
 function resizeCharts() {
@@ -445,6 +455,7 @@ function cardWindow(id) {
     return layout.metricWin[id] ?? layout.chartWindowSec;
 }
 function setGlobalWindow(sec) {
+    if (!(sec > 0)) return;        // NaN/0 (bad select value) must not poison layout
     if (sec === layout.chartWindowSec) return;
     layout.chartWindowSec = sec;
     C.saveLayout(localStorage, layout);
@@ -644,7 +655,7 @@ function createMetricCard(def) {
         width: 300, height: 100, padding: [2, 0, 0, 0],
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
-        scales: { x: { time: true }, y: { auto: true } },
+        scales: { x: { time: true, range: pinnedXRange(id) }, y: { auto: true } },
         axes: [metricXAxis(cardWindow(id), col), metricYAxis(col, def)],
         series: [{}, { label: metricLabel(def.key), stroke: col.blue, width: 1.6,
                        fill: col.blue + '1c', points: { show: false },
@@ -657,6 +668,30 @@ function createMetricCard(def) {
         host._ro = new ResizeObserver(() => { fitMetricPlot(id); });
         host._ro.observe(host);
     }
+}
+/* ISSUE-2 (small metric cards blank after a theme/skin switch): the rerender
+   path destroyed each uPlot and cleared its host, then called
+   createMetricCard again — but the CARD DOM was still in the grid, so the
+   exists-guard returned immediately and the host stayed empty forever.
+   Rebuild the plot inside the existing host instead (colors re-read). */
+function reinitMetricPlot(id) {
+    const e = metricCharts.get(id);
+    if (!e) return;
+    try { e.chart.destroy(); } catch (_) {}
+    e.host.textContent = '';
+    const col = chartColors();
+    const opts = {
+        width: 300, height: 100, padding: [2, 0, 0, 0],
+        cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
+        legend: { show: false },
+        scales: { x: { time: true, range: pinnedXRange(id) }, y: { auto: true } },
+        axes: [metricXAxis(cardWindow(id), col), metricYAxis(col, e.def)],
+        series: [{}, { label: metricLabel(e.def.key), stroke: col.blue, width: 1.6,
+                       fill: col.blue + '1c', points: { show: false },
+                       value: v => e.fmt(v === undefined ? null : v) }],
+    };
+    e.chart = new uPlot(opts, e.chart.data && e.chart.data.length ? e.chart.data : [[], []], e.host);
+    bindCursorTip(e.chart);
 }
 function fitMetricPlot(id) {
     const e = metricCharts.get(id);

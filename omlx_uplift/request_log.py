@@ -329,6 +329,25 @@ class RequestTracker:
             for rid, row in rows:
                 if not rid:
                     continue
+                _rev_birth = None      # ISSUE-8: per-row, no leak between rids
+                # ISSUE-6: a provisional tick-finalized row is not exact —
+                # the request is back in a live snapshot, so resurrect it.
+                # (Only states the engine reports as active reach here; the
+                # note_finalize hook replaces the provisional copy when the
+                # exact harvest lands.)
+                if row.get("state") in ("queued", "prefilling", "generating",
+                                        "cancelling") and rid not in self._active:
+                    for _i in range(len(self._done) - 1, -1, -1):
+                        if self._done[_i].get("id") == rid:
+                            if self._done[_i].get("_tick_final"):
+                                _rev = self._done[_i]      # deque: no pop(i)
+                                del self._done[_i]
+                                self._done_ids.discard(rid)
+                                # ISSUE-8: the birth stamp is immutable —
+                                # carry it across the resurrection so the
+                                # feed keeps showing the true start time.
+                                _rev_birth = _rev.get("started_at")
+                            break
                 # Event-hook-finalized rows are exact; the scheduler's
                 # deferred removal may still show the request in this
                 # snapshot — don't resurrect it as active (RL3-GAP1).
@@ -337,6 +356,12 @@ class RequestTracker:
                 tok_tail = row.pop("_tok_tail", None)   # private, never stored
                 prev = self._active.get(rid, {})
                 merged = {**prev, **row}
+                if _rev_birth and not merged.get("started_at"):
+                    merged["started_at"] = _rev_birth
+                # ISSUE-8: first-seen birth stamp (exact via note_birth when
+                # the hook fired; a sampling estimate otherwise). Immutable.
+                if not merged.get("started_at"):
+                    merged["started_at"] = now
                 # RL-2 live tail: the per-request output collector carries the
                 # cumulative decoded text — that is the ONLY source that
                 # grows while generating (Request.output_text lands at
@@ -390,6 +415,17 @@ class RequestTracker:
                     done["state"] = ("error" if row.get("state") == "cancelling"
                                      else "complete")
                     done["ts"] = now
+                    # ISSUE-8: the guessed end time is honest as an estimate
+                    done["ended_at"] = now
+                    done["started_at"] = row.get("started_at") or row.get("ts")
+                    # ISSUE-6: a row the tick guessed dead (it only left the
+                    # snapshot, no exact harvest) is PROVISIONAL: the request
+                    # can reappear (queue handoff lag) or finalize later via
+                    # the event hook. Tag it so sample()/note_finalize treat
+                    # it as replaceable instead of exact-and-frozen; without
+                    # this a live request froze at DONE and vanished from the
+                    # list entirely (user: generating row disappears).
+                    done["_tick_final"] = True
                     # RL-2: one last shot at the terminal payload while the
                     # Request object may still sit in scheduler.requests
                     # (output_text is only complete at finalize). Best-effort:
@@ -450,8 +486,13 @@ class RequestTracker:
         """Engine accepted a request: create the row exactly at birth."""
         if not rid:
             return
+        now = time.time()
         row = {"id": rid, "state": "queued", "model": model or "",
-               "origin": "real", "ts": time.time(),
+               "origin": "real", "ts": now,
+               # ISSUE-8: explicit lifecycle stamps. started_at is set once
+               # at birth and never overwritten (merge keeps prev's value);
+               # ended_at arrives with the terminal transition.
+               "started_at": now,
                "prompt_tokens": getattr(request, "num_prompt_tokens", 0) or 0}
         try:
             row.update(_capture_payload(request))
@@ -474,6 +515,13 @@ class RequestTracker:
         now = time.time()
         with self._lock:
             prev = self._active.pop(rid, None) or {}
+            # ISSUE-6: drop any earlier tick-finalized copy of this row —
+            # the hook's harvest is exact and replaces the provisional one.
+            for _i in range(len(self._done) - 1, -1, -1):
+                if self._done[_i].get("id") == rid:
+                    del self._done[_i]
+                    break
+            self._done_ids.discard(rid)
             base = dict(prev) if prev else {"id": rid, "model": model or ""}
             text = snap.get("output_text") or ""
             n_out = snap.get("completion_tokens") or 0
@@ -495,9 +543,14 @@ class RequestTracker:
                    # CANCEL-1: an empty harvest finish must not erase a
                    # reason already recorded (cancel stamps 'aborted').
                    "finish": finish or base.get("finish") or None,
+                   # ISSUE-8: lifecycle stamps — birth is the first ts this
+                   # tracker knew for the row, end is the exact finalize time.
+                   "started_at": base.get("started_at") or base.get("ts"),
+                   "ended_at": now,
                    "ts": now}
             if snap.get("error_code") or base.get("error_code"):
                 row["error_code"] = snap.get("error_code") or base.get("error_code")
+            row.pop("_tick_final", None)   # exact harvest: no longer provisional
             if n_out:
                 row["completion_tokens"] = n_out
             if text:

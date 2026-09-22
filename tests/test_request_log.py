@@ -74,6 +74,40 @@ def test_sample_tracks_queued_generating_and_departure():
     assert "q1" in done and done["q1"]["state"] == "complete"
 
 
+def test_resurrected_request_keeps_birth_stamp_and_ends_exactly():
+    """ISSUE-6 + ISSUE-8 regression: a generating request that briefly drops
+    out of the snapshot is finalized provisionally, must come back alive with
+    its original started_at, and finalize exactly once on the event hook."""
+    sched = FakeScheduler(running={"g1": _req("g1", gen_at=time.monotonic(), out=3)})
+    t = RequestTracker()
+    t.sample(_pool({"m1": sched}))
+    birth = t.lookup("g1")["started_at"]
+    assert birth and not t.lookup("g1").get("ended_at")
+
+    sched.running = {}
+    t.sample(_pool({"m1": sched}))   # absence 1: grace
+    t.sample(_pool({"m1": sched}))   # absence 2: provisional finalize
+    row = t.lookup("g1")
+    assert row["state"] == "complete" and row["ended_at"]
+
+    # queue-handoff lag: the engine shows it generating again
+    sched.running = {"g1": _req("g1", gen_at=time.monotonic(), out=7)}
+    t.sample(_pool({"m1": sched}))
+    row = t.lookup("g1")
+    assert row["state"] == "generating"          # ISSUE-6: back, not stuck DONE
+    assert row["started_at"] == birth            # ISSUE-8: birth stamp survives
+
+    # exact harvest via event hook: replace provisional row, no duplicates
+    t.note_finalize("g1", "m1", {"has_output": True, "output_text": "hi",
+                                 "completion_tokens": 7, "finish_reason": "stop"})
+    row = t.lookup("g1")
+    assert row["state"] == "complete" and row["ended_at"]
+    assert "_tick_final" not in row
+    done = [r for r in t.list_rows(limit=20) if r["id"] == "g1"]
+    assert len(done) == 1                        # exactly one captured row
+    assert done[0]["started_at"] == birth
+
+
 def test_running_without_generation_start_is_prefilling():
     sched = FakeScheduler(running={"p1": _req("p1")})
     t = RequestTracker()

@@ -658,6 +658,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* fill-card lists ignore the fixed caps — the grid box is the cap (see
    .fill-card above); ID specificity here needs an ID-level override. */
 .fill-card #reqfeed, .fill-card #live-list { max-height: none; }
+/* ISSUE-7/8: start-time column before the request id + paging footer. */
+.req-start { color: var(--dim); font: 400 10px/1.4 var(--mono); flex-shrink: 0;
+    letter-spacing: 0.02em; }
+.req-foot { display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 3px 2px; font: 400 10px/1.4 var(--mono); color: var(--dim);
+    border-top: 1px solid var(--edge); position: sticky; bottom: 0;
+    background: var(--panel); }
 .feed-item { display: flex; gap: 9px; padding: 6px 2px; font-size: 12px;
     border-bottom: 1px solid var(--edge); align-items: baseline;
     animation: slide-in .25s cubic-bezier(.22,1,.36,1); }

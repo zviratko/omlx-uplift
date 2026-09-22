@@ -863,6 +863,11 @@ async def stream_requests(is_admin: bool = Depends(require_admin)):
                         "finish": row.get("finish"),
                         "error_code": row.get("error_code"),
                         "error": row.get("error"),
+                        # ISSUE-8: lifecycle stamps (epoch seconds). The feed
+                        # shows start before the id; start is exact when the
+                        # birth hook fired, a sampling estimate otherwise.
+                        "started_at": row.get("started_at"),
+                        "ended_at": row.get("ended_at"),
                     }
                     yield f"data: {json.dumps(ev)}\n\n"
                 await asyncio.sleep(1.0)

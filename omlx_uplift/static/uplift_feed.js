@@ -163,33 +163,79 @@ function renderReqFeed() {
     if (window.Uplift.reqSearch.searchOn) return;   // search results own the list until LIVE
     const list = $('reqfeed');
     const rows = [...reqFeedRows.values()];
+    const activeN = rows.filter(r => ['queued','prefilling','generating'].includes(r.state)).length;
+    // ISSUE-7: header count — what the session tracks and what's active.
+    // (What's actually drawn is in the list footer, per page/box fit.)
     $('reqfeed-sub').textContent = rows.length
-        ? `${rows.filter(r => ['queued','prefilling','generating'].includes(r.state)).length} active` : '';
+        ? `${rows.length} tracked · ${activeN} active` : '';
     if (!rows.length) {
         const cur = list.querySelector('.empty');
         if (!cur) list.innerHTML = '<div class="empty">No requests yet</div>';
         return;
     }
-    // ISSUE-2 (feed order): sort by BIRTH (reqTs — first seen, immutable),
-    // never by ts (last update). Rows used to reshuffle on every SSE tick
-    // as their ts refreshed, so live requests bounced around the list.
-    // Active rows own the top band (user: "live requests should stay on
-    // top"), each band birth-ordered newest-first. A row's place inside its
-    // band is fixed until page refresh (one request = one line).
+    // ISSUE-2 (feed order): sort by BIRTH, never by ts (last update). Rows
+    // used to reshuffle on every SSE tick as their ts refreshed, so live
+    // requests bounced around the list. Birth is the server's started_at
+    // when known (ISSUE-8 — exact, survives refresh), first-seen client time
+    // otherwise. Active rows own the top band (user: "live requests should
+    // stay on top"), each band birth-ordered newest-first. A row's place
+    // inside its band is fixed until page refresh (one request = one line).
     list.innerHTML = '';
     const active = [], done = [];
     for (const r of rows) {
         (['queued', 'prefilling', 'generating'].includes(r.state) ? active : done).push(r);
     }
-    const byBirth = (a, b) => (a.reqTs || a.ts || 0) - (b.reqTs || b.ts || 0);
+    const birthOf = r => (r.startedAt ? r.startedAt * 1000 : (r.reqTs || r.ts || 0));
+    const byBirth = (a, b) => birthOf(a) - birthOf(b);
     active.sort(byBirth); done.sort(byBirth);
     const sorted = active.reverse().concat(done.reverse()).slice(0, MAX_REQFEED);
-    for (const r of sorted.slice(0, MAX_REQFEED)) {
+    // ISSUE-7 (overflow + pagination): draw only what fits the card box —
+    // rows adapt to its height (measured, ~30px typical) — and page the
+    // rest behind a footer control. The old unbounded list painted past the
+    // card border (the Events-card failure all over again). The box height
+    // comes from the grid engine, never from content, so this cannot loop.
+    // ISSUE-7: box height comes from the fixed grid item, not from content
+    // (in MORE mode the list itself is stretched — clientHeight would lie).
+    // available = card-pad inner height − the band above the list (header,
+    // search bar). That distance is content-independent.
+    let boxH = 0;
+    const pad = list.closest('.card-pad');
+    if (pad) {
+        const pr = pad.getBoundingClientRect();
+        const above = list.getBoundingClientRect().top - pr.top;
+        boxH = Math.floor(pr.height - above);
+    }
+    boxH = boxH > 60 ? boxH : (list.clientHeight || 240);
+    const rowH = list._rowH || 30;           // measured after first draw
+    const wantAll = list._showAll === true;  // footer toggled: scroll instead
+    // Pin the scroll box so content can never push past the grid box (the
+    // Events-card overflow again); re-measured every fit render so a user
+    // resizing the card adapts.
+    list._boxH = boxH;
+    list.style.maxHeight = boxH + 'px';
+    let limit = sorted.length;
+    if (!wantAll) {
+        const foot = sorted.length ? 24 : 0;
+        limit = Math.max(3, Math.floor((boxH - foot) / rowH));
+        limit = Math.min(limit, sorted.length);
+    }
+    const shown = sorted.slice(0, limit);
+    for (const r of shown) {
         const row = document.createElement('div'); row.className = 'model-row';
         const badge = document.createElement('span');
         badge.className = `badge ${r.state.charAt(0).toUpperCase() + r.state.slice(1)}`;
         badge.textContent = r.state;
         if (r.origin === 'real') { badge.title = 'real traffic'; }
+        // ISSUE-8: start time BEFORE the request id (user ask). HH:MM:SS,
+        // server-side birth when known, first-seen time otherwise.
+        const born = document.createElement('span');
+        born.className = 'req-start';
+        const bt = r.startedAt ? r.startedAt * 1000 : (r.reqTs || r.ts);
+        born.textContent = bt ? new Date(bt).toLocaleTimeString('en-GB') : '--:--:--';
+        born.title = r.endedAt
+            ? C.tf('uplift.req.started_ended', 'started · ended') + ': '
+              + new Date(r.endedAt * 1000).toLocaleTimeString('en-GB')
+            : C.tf('uplift.req.started', 'started');
         const name = document.createElement('span');
         name.className = 'model-name';
         name.textContent = r.error ? `${r.id} — ${r.error}` : (r.origin === 'real' ? '◆ ' : '') + r.id;
@@ -201,7 +247,7 @@ function renderReqFeed() {
         if (r.completion) bits.push(`out ${C.fmtCompact(r.completion)}`);
         if (r.tps) bits.push(`${r.tps.toFixed(0)} t/s`);
         meta.textContent = bits.join(' · ');
-        row.append(badge, name, meta);
+        row.append(badge, born, name, meta);
         if (r.loopHint) {                          // RL-4: sanctioned amber
             const chip = document.createElement('span');
             chip.className = 'spill miss';
@@ -230,6 +276,27 @@ function renderReqFeed() {
         }
         list.append(row);
     }
+    // ISSUE-7 footer: how many rows fit vs exist, with a show-more toggle.
+    if (sorted.length > shown.length || list._showAll) {
+        const foot = document.createElement('div');
+        foot.className = 'req-foot';
+        const lab = document.createElement('span');
+        lab.textContent = list._showAll
+            ? C.tf('uplift.req.showing_all', 'showing all') + ` (${shown.length})`
+            : `${shown.length} / ${sorted.length}`;
+        const more = document.createElement('button');
+        more.type = 'button'; more.className = 'se-btn act';
+        more.textContent = list._showAll
+            ? C.tf('uplift.req.show_fit', 'FIT BOX')
+            : C.tf('uplift.req.show_more', 'MORE');
+        more.onclick = () => { list._showAll = !list._showAll; renderReqFeed(); };
+        foot.append(lab, more);
+        list.append(foot);
+    }
+    // Measure one real row once per session so later draws adapt to the box
+    // exactly (font/skin sizes differ — 30px is only the first-draw guess).
+    if (!list._rowH && list.firstElementChild && list.firstElementChild.offsetHeight)
+        list._rowH = list.firstElementChild.offsetHeight;
 }
 function upsertReq(id, patch) {
     const prev = reqFeedRows.get(id) || { prompt: 0, completion: 0 };
@@ -258,6 +325,9 @@ function pushServerEvent(ev) {
         if (ev.finish !== undefined) patch.finish = ev.finish;
         if (ev.error_code !== undefined) patch.errorCode = ev.error_code;
         if (ev.error) patch.error = ev.error;
+        // ISSUE-8: server lifecycle stamps ride along (epoch seconds).
+        if (ev.started_at !== undefined) patch.startedAt = ev.started_at;
+        if (ev.ended_at !== undefined) patch.endedAt = ev.ended_at;
         upsertReq(ev.id, patch);
         // one Events-card line per request, state updated in place (issue 2)
         pushFeed([{ kind: 'requests', reqKey: 'req:' + ev.id,
@@ -293,7 +363,8 @@ async function pollRequests() {
             upsertReq(r.id, { state: r.state, model: r.model, origin: r.origin,
                               prompt: r.prompt_tokens, completion: r.completion_tokens,
                               tps: r.tps, error: r.error, finish: r.finish,
-                              errorCode: r.error_code });
+                              errorCode: r.error_code,
+                              startedAt: r.started_at, endedAt: r.ended_at });
     } catch (_) { /* gateway offline; feed keeps last state */ }
 }
 

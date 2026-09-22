@@ -391,7 +391,11 @@ function applyPrefs() {
     if (t === 'auto') eff = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     // a resolved skin scopes its own compiled CSS with html[data-theme="<dir>"]
     if (skin) eff = skin.dir;
-    else if (typeof t === 'string' && C.SKIN_NAME_RE.test(t)) {
+    else if (typeof t === 'string' && C.SKIN_NAME_RE.test(t) && !C.THEMES.includes(t)) {
+        // ISSUE-3 (skin -> theme dead): SKIN_NAME_RE also matches the plain
+        // built-in names ('dark', 'light', ...). Without the THEMES guard a
+        // click on Night re-read the cached skin dir and kept painting the
+        // old skin — leaving a theme was impossible until localStorage died.
         // listing not loaded yet (boot order) or fetch failed: the cached
         // dir keeps data-theme scoped to the skin's stylesheet instead of
         // flashing the built-in theme until loadSkins() resolves (~0.8s)
@@ -1237,6 +1241,15 @@ function render(s) {
 // question a DONE row answers ("what just finished?"); older ones are
 // dropped (never deleted elsewhere — the full record lives in the feed).
 const IF_MAX_TERMINAL = 5;
+/* ISSUE-4 (DONE rows on refresh): the ring buffer replay used to create a
+   DONE line for every history row the server still remembers, so a page
+   load painted 5 finished requests nobody watched and (worse) the newest
+   of them looked live. Only requests THIS session saw arrive (a slot was
+   created while they were queued/prefilling/generating) may end as DONE. */
+const ifSawLive = new Set();     // rids observed active this page session
+let ifSeq = 0;                   // ISSUE-5: monotonic birth order — a row's
+                                 // place in the card is fixed at creation and
+                                 // never changes when neighbours land/prune
 
 function ifTerminal(rid) {
     const fr = S.reqFeedRows.get(rid);
@@ -1249,6 +1262,14 @@ function ifTerminal(rid) {
         return 'error';
     }
     return null;                                    // queued/generating = live
+}
+
+const IF_LINGER_MS = 8000;   // ISSUE-4: how long a landed row stays readable
+function ifLand(sl, tstate, now) {
+    // One path for every terminal transition: latch the badge, stamp the
+    // landing time (eviction is timed from here), keep nothing else sticky.
+    sl.terminal = true; sl.tstate = tstate; sl.termAt = now;
+    ifPrune(sl.model);       // burst guard: cap terminal rows per model
 }
 
 function ifGroup(model) {
@@ -1273,7 +1294,7 @@ function ifGroup(model) {
     const list = $('live-list');
     const ph = list.querySelector('.empty'); if (ph) ph.remove();
     list.append(el);
-    g = { model, el, qsum, qb, qc, qt, kids, wrap, kidMap: new Map(), qever: false };
+    g = { model, el, qsum, qb, qc, qt, kids, wrap, kidMap: new Map() };
     S.ifModels.push(g);
     return g;
 }
@@ -1284,8 +1305,10 @@ function ifSlot(model, rid) {
     const g = ifGroup(model);
     sl = { model, rid, state: null, terminal: false, tstate: null,
            prompt: null, out: null, tps: null, elapsed: null, eta: null,
-           processed: null, total: null, cached: null, lastSeen: Date.now() };
+           processed: null, total: null, cached: null, lastSeen: Date.now(),
+           seq: ++ifSeq };        // ISSUE-5: fixed birth position (see ifPaint)
     const row = document.createElement('div'); row.className = 'if-row';
+    row.dataset.ifseq = String(sl.seq);      // ISSUE-5: stable order key
     const badge = document.createElement('span'); badge.className = 'badge Idle';
     const pbar = document.createElement('div'); pbar.className = 'pbar'; pbar.style.display = 'none';
     const pc = document.createElement('div'); pc.className = 'p-cached';
@@ -1383,6 +1406,7 @@ function renderLive(s) {
         waitingBy.set(m.id, m.waiting || []);
         for (const p of m.prefilling) {
             seen.add(p.rid);
+            ifSawLive.add(p.rid);       // ISSUE-4: birth observed this session
             const sl = ifSlot(m.id, p.rid);
             if (sl.terminal) { sl.terminal = false; sl.tstate = null; }  // RESURRECT: stats show it live again — a latched DONE must unlatch or the badge lies while counters run
             sl.state = 'prefilling';
@@ -1397,6 +1421,7 @@ function renderLive(s) {
         }
         for (const gg of m.generating) {
             seen.add(gg.rid);
+            ifSawLive.add(gg.rid);      // ISSUE-4 (same as prefilling above)
             const sl = ifSlot(m.id, gg.rid);
             if (sl.terminal) { sl.terminal = false; sl.tstate = null; }  // RESURRECT (same as prefilling above)
             sl.state = 'generating'; sl.eta = null;
@@ -1412,37 +1437,45 @@ function renderLive(s) {
     for (const [rid, sl] of S.ifSlots) {
         if (sl.terminal || seen.has(rid)) continue;
         const t = ifTerminal(rid);
-        if (t) { sl.terminal = true; sl.tstate = t; ifPrune(sl.model); }
+        if (t) { ifLand(sl, t, now); }
         else if (!S.reqFeedRows.has(rid) && now - sl.lastSeen > 15000) {
-            sl.terminal = true; sl.tstate = 'done'; ifPrune(sl.model);
+            ifLand(sl, 'done', now);
         }
     }
-    // short requests only the SSE/poll feed ever saw: capture as terminal lines
+    // short requests only the SSE/poll feed ever saw: brief terminal line
     for (const [rid, fr] of S.reqFeedRows) {
         const sl = S.ifSlots.get(rid);
         if (sl) {
             if (!sl.terminal && fr.state === 'complete') {
-                sl.terminal = true; sl.tstate = ifTerminal(rid) || 'done';
-                ifPrune(sl.model);   // slot predated its terminal mark — cap now
+                ifLand(sl, ifTerminal(rid) || 'done', now);
             }
             continue;
         }
+        // ISSUE-4: the /requests poll replays the server ring on every page
+        // load — rows this session never saw arrive are history, not
+        // in-flight outcomes. Never paint a terminal line for them.
+        if (!ifSawLive.has(rid)) continue;
         const t = ifTerminal(rid);
         if (!t) continue;                    // live rows land via stats next tick
         const sl2 = ifSlot(fr.model || '?', rid);
-        sl2.terminal = true; sl2.tstate = t; sl2.state = 'generating';
         sl2.prompt = fr.prompt || null; sl2.out = fr.completion || null; sl2.tps = fr.tps || null;
-        // prune AFTER the terminal mark: ifSlot's own prune ran while this
-        // row was still live, so without this call the cap is off by one
-        ifPrune(fr.model || '?');
+        ifLand(sl2, t, now);
+    }
+    // ISSUE-4: the card shows IN-FLIGHT only. Terminal rows stay a few seconds
+    // so the landing badge is readable, then leave — no DONE accumulation.
+    for (const [rid, sl] of [...S.ifSlots]) {
+        if (sl.terminal && now - sl.termAt > IF_LINGER_MS) {
+            sl.el.remove(); S.ifSlots.delete(rid);
+        }
     }
     // one QUEUED summary line per model (+/− expand); children only while queued
     let qTotal = 0;
     for (const [model, wait] of waitingBy) {
         const g = ifGroup(model);
         qTotal += wait.length;
-        if (wait.length) g.qever = true;
-        g.qsum.style.display = g.qever ? '' : 'none';
+        // ISSUE-4: no sticky qever — the QUEUED summary shows only while
+        // something actually waits. Idle models don't pin a QUEUED×0 line.
+        g.qsum.style.display = wait.length ? '' : 'none';
         // relabel every tick: the group may have been created before the
         // locale catalog loaded, which would otherwise pin the raw key
         g.qb.textContent = C.t('uplift.inflight.queued');
@@ -1480,19 +1513,41 @@ function renderLive(s) {
             if (!keepNow.has(rid2)) { c.row.remove(); g.kidMap.delete(rid2); }
         }
     }
+    // ISSUE-5 (random order after a landing): rows must keep their birth
+    // slot in the card. DOM append order already equals seq order for rows
+    // born live, but a pruned-then-recaptured row would re-append at the
+    // bottom; re-sort by seq so the list order never changes on a landing.
+    for (const g of S.ifModels) {
+        const kids = [...g.wrap.children].sort((a, b) => {
+            const sa = +a.dataset.ifseq || 0, sb = +b.dataset.ifseq || 0;
+            return sa - sb;
+        });
+        for (const k of kids) g.wrap.append(k);   // append moves in order
+    }
+    // ISSUE-4: hide model groups with nothing to show — no live row, nothing
+    // queued. Loaded-but-idle models must not clutter the IN-FLIGHT card.
+    for (const g of S.ifModels) {
+        const busy = g.wrap.children.length || g.kids.children.length ||
+                     (waitingBy.get(g.model) || []).length;
+        g.el.style.display = busy ? '' : 'none';
+    }
     for (const sl of S.ifSlots.values()) ifPaint(sl);
     let act = 0;
     for (const sl of S.ifSlots.values()) if (!sl.terminal) act++;
     const total = act + qTotal;
     $('live-count').textContent = total ? String(total) : '';
-    // nothing loaded yet (and nothing ever was this session): honest Idle
-    if (!S.ifModels.length) {
-        const list = $('live-list');
-        if (!list.querySelector('.empty')) {
-            const d = document.createElement('div'); d.className = 'empty';
-            d.textContent = C.t('uplift.empty.idle'); list.append(d);
+    // ISSUE-4: honest placeholder whenever the card has nothing to show —
+    // no models loaded, or every loaded model idle (groups hidden).
+    const list = $('live-list');
+    let ph = list.querySelector('.empty');
+    if (!total) {
+        if (!ph) {
+            ph = document.createElement('div'); ph.className = 'empty';
+            list.append(ph);
         }
-    }
+        ph.textContent = C.t('uplift.empty.idle');   // relabel: catalog may load late
+        ph.style.display = '';
+    } else if (ph) ph.style.display = 'none';
 }
 
 /* Request sizes: prefer server-side full-population stats (gateway overlay);
