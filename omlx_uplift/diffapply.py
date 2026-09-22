@@ -23,6 +23,27 @@ import re
 __all__ = ["parse_diff", "check_diff", "apply_diff", "restore_backup",
            "safe_join", "splitlines_keepends"]
 
+
+# --------------------------------------------------------------------------
+# Reversal helpers (apply a forward diff in the un-apply direction)
+# --------------------------------------------------------------------------
+
+def _hunks_old_side(hunks: list[dict]) -> bytes:
+    """Rebuild the old-side image of a delete patch (context + removed
+    lines) — the content its REVERSAL must recreate."""
+    data = b""
+    for h in hunks:
+        for (op, text, has_eol) in h["lines"]:
+            if op in (" ", "-"):
+                has_cr = text.endswith(b"\r")
+                t = text[:-1] if has_cr else text
+                data += t + (b"\r\n" if has_cr else (b"\n" if has_eol else b""))
+    return data
+
+
+def _join_lines(work: list[tuple[bytes, bytes]]) -> bytes:
+    return b"".join(text + (eol or b"") for text, eol in work)
+
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
@@ -556,13 +577,65 @@ def _all_hunks(content_lines: list[tuple[bytes, bytes]], hunks: list[dict],
 # Public modes
 # --------------------------------------------------------------------------
 
+def _apply_file_rev(content: bytes | None, filepatch: dict) -> dict:
+    """Strict in-memory REVERSE apply of a forward patch (reversal carrier).
+
+    Semantics per action (the forward diff describes the merged change):
+      modify -> rebuild the pre-image by un-applying the hunks; must differ
+                from the current content (otherwise it is already reversed)
+      create -> forward created the file; reversal deletes it (already
+                reversed when the file is gone)
+      delete -> forward deleted the file; reversal recreates it from the
+                old-side of the hunks (already reversed when it exists)
+    Returns {ok, reason?, already?, new_bytes?, delete_file?}.
+    """
+    action = filepatch["action"]
+    hunks = filepatch["hunks"]
+
+    if action == "create":
+        if content in (None, b""):
+            return {"ok": True, "already": True}
+        return {"ok": True, "new_bytes": b"", "delete_file": True}
+
+    if action == "delete":
+        rebuilt = _hunks_old_side(hunks)
+        if content is not None:
+            return {"ok": True, "already": True}
+        return {"ok": True, "new_bytes": rebuilt}
+
+    if content is None:
+        return {"ok": False, "reason": f"target file missing: {filepatch['path']}"}
+    content_lines = [_split_eol(l) for l in splitlines_keepends(content)]
+    res = _all_hunks(content_lines, hunks, reverse=True)
+    if res is None:
+        # The merged (new) side does not match. If the FORWARD patch still
+        # applies cleanly, the file is at the pre-image: the reversal has
+        # nothing left to do — honest 'already', not a failure.
+        if _all_hunks(content_lines, hunks, reverse=False) is not None:
+            return {"ok": True, "already": True}
+        # The hunks match NEITHER side: genuine drift.
+        return {"ok": False,
+                "reason": "context mismatch — strict reverse apply failed "
+                          "(zero fuzz); the merged change is not present in "
+                          "the file (or drifted)"}
+    new_bytes = _join_lines(res[0])
+    if new_bytes == content:
+        return {"ok": True, "already": True}
+    return {"ok": True, "new_bytes": new_bytes, "offsets": res[1]}
+
+
 def check_diff(diff: bytes | str, tree_root: str,
-               overrides: dict | None = None) -> dict:
+               overrides: dict | None = None,
+               reverse: bool = False) -> dict:
     """Dry-run against a tree. Per-file structured results, no writes.
 
     overrides: {rel_path: bytes} replaces the on-disk content for those
     paths — used to gate a candidate against the tree as reconcile would
     find it at apply time (this patch's own hunks unwound to pristine).
+
+    reverse: True evaluates the diff as a REVERSAL (un-apply direction) —
+    'ok' means the merged change IS present and can be reverted cleanly,
+    'already' means the tree is already reverted.
 
     {"ok": bool, "reason": str|None,
      "files": [{"path", "status": ok|already|fail, "reason": str|None}]}
@@ -592,10 +665,13 @@ def check_diff(diff: bytes | str, tree_root: str,
                                 "reason": f"cannot read: {exc}"})
                 all_ok = False
                 continue
-        res = _apply_file(content, fp)
+        res = (_apply_file_rev(content, fp) if reverse
+               else _apply_file(content, fp))
         if res.get("already"):
             results.append({"path": fp["path"], "status": "already",
-                            "reason": "hunks already present (upstream merged?)"})
+                            "reason": ("already reverted (tree matches the "
+                                       "pre-patch image)" if reverse else
+                                       "hunks already present (upstream merged?)")})
         elif res.get("ok"):
             results.append({"path": fp["path"], "status": "ok", "reason": None})
         else:
@@ -606,11 +682,17 @@ def check_diff(diff: bytes | str, tree_root: str,
             "files": results}
 
 
-def apply_diff(diff: bytes | str, tree_root: str, backup_dir: str) -> dict:
+def apply_diff(diff: bytes | str, tree_root: str, backup_dir: str,
+               reverse: bool = False) -> dict:
     """Strict apply with backups of the ORIGINALS. A file that already has a
     backup in backup_dir keeps it (first-touch-per-keg wins), so repeated
     applies stay reversible to pristine vanilla bytes.
-    All files must pass check before ANY write (all-or-nothing)."""
+    All files must pass check before ANY write (all-or-nothing).
+
+    reverse: True applies the diff in the un-apply direction (a REVERSAL
+    patch). Backups capture the current — merged — bytes, so disable or
+    removal restores them exactly through the normal restore_backup chain.
+    """
     parsed = parse_diff(diff)
     if not parsed["ok"]:
         return {"ok": False, "reason": parsed["reason"], "files": []}
@@ -626,7 +708,8 @@ def apply_diff(diff: bytes | str, tree_root: str, backup_dir: str) -> dict:
                 content = fh.read()
         except FileNotFoundError:
             content = None
-        res = _apply_file(content, fp)
+        res = (_apply_file_rev(content, fp) if reverse
+               else _apply_file(content, fp))
         plan.append((fp, target, content, res))
 
     failures = [(fp["path"], r) for fp, _t, _c, r in plan if not r.get("ok")
@@ -643,6 +726,14 @@ def apply_diff(diff: bytes | str, tree_root: str, backup_dir: str) -> dict:
     for fp, target, content, res in plan:
         if res.get("already"):
             written.append({"path": fp["path"], "status": "already"})
+            # 'already' means nothing to undo for the reversal (the tree is
+            # already at the pre-image / the created file is gone) — but a
+            # create-reversal that deletes must still be planned; here the
+            # file is genuinely absent, so record absence for restore.
+            if (reverse and fp["action"] == "create"
+                    and fp["path"] not in meta["files"]):
+                meta["files"][fp["path"]] = {"existed": False, "sha256": None}
+                _save_backup_meta(meta_path, meta)
             continue
         rel_key = fp["path"]
         if rel_key not in meta["files"]:
@@ -729,6 +820,75 @@ def record_pristine_backup(diff: bytes | str, tree_root: str,
                        if orig is not None else None)}
         _save_backup_meta(meta_path, meta)
     _save_backup_meta(meta_path, meta)  # even when nothing was grounded
+    return {"ok": True, "reason": None, "grounded": grounded}
+
+
+def record_merged_backup(diff: bytes | str, tree_root: str,
+                         backup_dir: str) -> dict:
+    """Apply a forward patch IN MEMORY and store the resulting image as the
+    backup. The mirror of record_pristine_backup, used when a REVERSAL is
+    adopted: the tree already sits at the pre-image (nothing to undo), yet
+    disable must restore the MERGED bytes — so the backup holds the
+    forward-applied image, not the pristine one.
+    {"ok": bool, "reason": str|None, "grounded": bool}
+    """
+    parsed = parse_diff(diff)
+    if not parsed["ok"]:
+        return {"ok": False, "reason": parsed["reason"], "grounded": False}
+
+    meta_path = os.path.join(backup_dir, "meta.json")
+    meta = _load_backup_meta(meta_path)
+    os.makedirs(backup_dir, exist_ok=True)
+    grounded = True
+    for fp in parsed["files"]:
+        rel_key = fp["path"]
+        if rel_key in meta["files"]:
+            continue  # first-touch-per-keg wins (same rule as apply_diff)
+        target, why = safe_join(tree_root, rel_key)
+        if target is None:
+            return {"ok": False, "reason": why, "grounded": grounded}
+        try:
+            with open(target, "rb") as fh:
+                content = fh.read()
+        except FileNotFoundError:
+            content = None
+
+        merged: bytes | None
+        if fp["action"] == "create":
+            res = _apply_file(content, fp)
+            if not res.get("ok") or res.get("already"):
+                grounded = False  # file exists and differs — cannot ground
+                continue
+            merged = res.get("new_bytes", b"")
+        elif fp["action"] == "delete":
+            if content is None:
+                grounded = False  # file already gone — nothing to merge back
+                continue
+            merged = None  # merged state: the file does not exist
+        else:
+            if content is None:
+                grounded = False
+                continue
+            res = _apply_file(content, fp)
+            if res.get("already"):
+                merged = content  # merged bytes already on disk
+            elif res.get("ok"):
+                merged = res.get("new_bytes", b"")
+            else:
+                grounded = False
+                continue
+
+        if merged is not None:
+            bpath = _backup_path(backup_dir, rel_key)
+            os.makedirs(os.path.dirname(bpath), exist_ok=True)
+            with open(bpath, "wb") as fh:
+                fh.write(merged)
+        meta["files"][rel_key] = {
+            "existed": merged is not None,
+            "sha256": (hashlib.sha256(merged).hexdigest()
+                       if merged is not None else None)}
+        _save_backup_meta(meta_path, meta)
+    _save_backup_meta(meta_path, meta)
     return {"ok": True, "reason": None, "grounded": grounded}
 
 

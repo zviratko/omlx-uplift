@@ -199,15 +199,20 @@ def _paint(stream, text: str, code: str) -> str:
 def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
     """Dry-run every ENABLED patch against the live tree (no writes).
 
-    Returns [{id, verdict: success|warning|failure|applied, detail}] in
-    manifest order:
-      success  hunks apply cleanly (will land on next server start)
-      applied  uplift already applied it to this keg and hashes match
-      warning  hunks already present on disk, strictly reversible —
-               upstream most likely picked the fix up
-      failure  strict apply fails (drift or corrupt diff); next boot will
-               mark needs_review and boot unpatched for this patch
-    Never raises: classification errors surface as verdict=failure.
+    Returns [{id, verdict: success|warning|failure|applied|reversed,
+              detail, reversal}] in manifest order:
+      success   hunks apply cleanly (will land on next server start)
+      applied   uplift already applied it to this keg and hashes match
+      warning   hunks already present on disk, strictly reversible —
+                upstream most likely picked the fix up
+      failure   strict apply fails (drift or corrupt diff); next boot will
+                mark needs_review and boot unpatched for this patch
+      reversed  a REVERSAL patch: its un-apply verifies (cleanly, verified
+                on this keg, or already reverted) — next boot reverts the
+                merged change
+    Reversal patches never take the success/applied/warning labels; their
+    non-failure verdict is always 'reversed'. Never raises: classification
+    errors surface as verdict=failure.
     """
     from . import diffapply
 
@@ -216,16 +221,19 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
         manifest = store.load()
     except Exception as exc:                       # unreadable manifest
         return [{"id": "(manifest)", "verdict": "failure",
-                 "detail": f"cannot read patch manifest: {exc}"}]
+                 "detail": f"cannot read patch manifest: {exc}",
+                 "reversal": False}]
     for patch in sorted(manifest.get("patches", []),
                         key=lambda p: (p.get("order", 100), p.get("id", ""))):
         pid = patch.get("id", "?")
         if not patch.get("enabled"):
             continue
+        rev = bool(patch.get("reversal"))
         ver = store.get_version(patch, patch.get("desired_version"))
         if ver is None:
             out.append({"id": pid, "verdict": "failure",
-                        "detail": "no stored desired version"})
+                        "detail": "no stored desired version",
+                        "reversal": rev})
             continue
         # Fast happy path: applied on THIS keg and recorded files still have
         # the applied bytes -> nothing to do, verified.
@@ -234,8 +242,13 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
             try:
                 from . import patchsync
                 if patchsync._files_match(tree_root, applied.get("files", [])):
-                    out.append({"id": pid, "verdict": "applied",
-                                "detail": "already applied to this keg — verified"})
+                    out.append({"id": pid,
+                                "verdict": "reversed" if rev else "applied",
+                                "detail": ("already reverted on this keg — "
+                                           "verified" if rev else
+                                           "already applied to this keg — "
+                                           "verified"),
+                                "reversal": rev})
                     continue
             except Exception:
                 pass
@@ -250,13 +263,15 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                 data = None
         if data is None:
             out.append({"id": pid, "verdict": "failure",
-                        "detail": "stored diff file missing"})
+                        "detail": "stored diff file missing",
+                        "reversal": rev})
             continue
         try:
-            chk = diffapply.check_diff(data, tree_root)
+            chk = diffapply.check_diff(data, tree_root, reverse=rev)
         except Exception as exc:
             out.append({"id": pid, "verdict": "failure",
-                        "detail": f"check crashed: {exc}"})
+                        "detail": f"check crashed: {exc}",
+                        "reversal": rev})
             continue
         files = chk.get("files", [])
         fails = [f for f in files if f["status"] == "fail"]
@@ -264,14 +279,26 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
         if fails:
             why = "; ".join(f"{f['path']}: {f['reason']}" for f in fails[:2])
             out.append({"id": pid, "verdict": "failure",
-                        "detail": f"will NOT apply (needs_review next boot) — {why}"})
+                        "detail": (f"will NOT reverse (needs_review next "
+                                   f"boot) — {why}" if rev else
+                                   f"will NOT apply (needs_review next "
+                                   f"boot) — {why}"),
+                        "reversal": rev})
         elif alrdy:
-            out.append({"id": pid, "verdict": "warning",
-                        "detail": "already applied and reverts cleanly — "
-                                  "upstream likely picked it up"})
+            out.append({"id": pid,
+                        "verdict": "reversed" if rev else "warning",
+                        "detail": ("tree is already at the reverted state — "
+                                   "nothing left to undo" if rev else
+                                   "already applied and reverts cleanly — "
+                                   "upstream likely picked it up"),
+                        "reversal": rev})
         else:
-            out.append({"id": pid, "verdict": "success",
-                        "detail": "applies cleanly on next server start"})
+            out.append({"id": pid,
+                        "verdict": "reversed" if rev else "success",
+                        "detail": ("reverts the merged change on next "
+                                   "server start" if rev else
+                                   "applies cleanly on next server start"),
+                        "reversal": rev})
     return out
 
 
@@ -301,11 +328,23 @@ def print_patch_preview(store, stream=None) -> None:
         print(f"\n{_paint(stream, 'OMLX-UPLIFT PATCHES TO APPLY: ', '1;36')}"
               f"{ids}", file=stream)
         style = {"success": ("SUCCESS", "32"), "warning": ("WARNING", "33"),
-                 "failure": ("FAILURE", "31"), "applied": ("APPLIED", "32")}
+                 "failure": ("FAILURE", "31"), "applied": ("APPLIED", "32"),
+                 "reversed": ("REVERSED", "31")}
         for r in rows:
             word, code = style[r["verdict"]]
             print(f"  {_paint(stream, f'{word:8}', code)} {r['id']}"
                   f" — {r['detail']}", file=stream)
+        # honest roll-up: forward vs reversal vs failed, counted from rows.
+        # 'warning' (hunks already upstream) lands as a no-op APPLIED at
+        # boot, so it counts as forward — it did not fail.
+        n_fwd = sum(1 for r in rows
+                    if r["verdict"] in ("success", "applied", "warning"))
+        n_rev = sum(1 for r in rows if r["verdict"] == "reversed")
+        n_fail = sum(1 for r in rows if r["verdict"] == "failure")
+        summary = (f"SUMMARY: {n_fwd} forward, {n_rev} reversed, "
+                   f"{n_fail} failed")
+        print(_paint(stream, summary, "31" if n_fail else "1;36"),
+              file=stream)
     except Exception as exc:                        # preview must never break install
         print(f"OMLX-UPLIFT PATCHES: preview unavailable ({exc})", file=stream)
 

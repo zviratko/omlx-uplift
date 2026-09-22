@@ -82,12 +82,15 @@ def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
     if time.monotonic() > deadline:
         return {"id": pid, "action": "deferred", "reason": "time budget"}
     backup_dir = store.backup_dir(pid, version["v"], keg)
-    result = diffapply.apply_diff(data, tree_root, backup_dir)
+    reverse = bool(patch.get("reversal"))
+    result = diffapply.apply_diff(data, tree_root, backup_dir, reverse=reverse)
     if not result["ok"]:
         patch["state"] = "needs_review"
-        patch["state_detail"] = f"apply failed: {result['reason']}"
+        patch["state_detail"] = ("reversal failed: " if reverse else
+                                 "apply failed: ") + result["reason"]
         patch["state_changed_at"] = _patches.now_iso()
-        return {"id": pid, "action": "needs_review", "reason": result["reason"]}
+        return {"id": pid, "action": "needs_review", "reason": result["reason"],
+                "reversal": reverse}
 
     applied_files = []
     for f in result["files"]:

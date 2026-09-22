@@ -1200,6 +1200,7 @@ class PatchAddRequest(BaseModel):
     data: Optional[str] = None     # upload: the diff text
     insecure_tls: bool = False
     order: int = 100
+    reversal: bool = False         # undo a merged change (apply in reverse)
 
 
 @api_router.post("/patches/add")
@@ -1213,7 +1214,8 @@ async def patches_add(req: PatchAddRequest, is_admin: bool = Depends(require_adm
             raise HTTPException(status_code=400, detail="upload needs 'data'")
         source["data"] = req.data.encode("utf-8")
     res = patchsource.add_patch(patch_store(), req.id, source,
-                                _patch_tree_root(), order=req.order)
+                                _patch_tree_root(), order=req.order,
+                                reversal=req.reversal)
     if not res.get("ok") and res.get("stage") in ("fetch", "source"):
         raise HTTPException(status_code=422, detail=res.get("reason"))
     return res

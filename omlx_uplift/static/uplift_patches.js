@@ -189,6 +189,12 @@ function patchCard(p, view) {
     head.append(title);
     const cls = PT_STATE_CLASS[p.state] || 'pt-st-dim';
     head.append(ptChip((p.state || '').toUpperCase(), cls, p.state_detail || ''));
+    if (p.reversal) {
+        head.append(ptChip(ptMsg('uplift.patches.reversal_chip', 'REVERSAL'),
+            'pt-st-reversal',
+            ptMsg('uplift.patches.reversal_hint',
+                  'reverts an already merged change — applied in the un-apply direction')));
+    }
     const heldCodes = p.requires_approval || [];
     if (heldCodes.length) {
         head.append(ptChip(ptMsg('uplift.patches.safeguard_hold', 'AUTO-APPLY HELD'),
@@ -420,11 +426,11 @@ function ptSyncKindUI() {
 async function ptPreview() {
     const id = $('pt-new-id').value.trim();
     if (!id) {
-        PG.toast(ptMsg('uplift.patches.need_id', 'Give the patch an id first'), 4000);
+        PG.toast(ptMsg('uplift.patches.need_name', 'Give the patch a name first'), 4000);
         return;
     }
     const src = ptReadSource();
-    const body = { id, ...src };
+    const body = { id, reversal: $('pt-reversal').checked, ...src };
     if (src.kind === 'upload') {
         const f = $('pt-src-file').files[0];
         if (!f) { PG.toast(ptMsg('uplift.patches.need_file', 'Pick a .diff file'), 4000); return; }
@@ -470,16 +476,26 @@ async function ptPreview() {
         const ht = document.createElement('span');
         // r.ok is the verdict — never claim "gate passed" for a rejected
         // patch (a GNU `diff -ruN` upload once showed green on a parse fail)
+        const rev = body.reversal;
         ht.textContent = !r.ok
             ? ptMsg('uplift.patches.preview_fail', 'REJECTED — gate failed')
             : r.adopted
-            ? ptMsg('uplift.patches.adopted',
-                'ALREADY APPLIED — stored as APPLIED, will re-apply after an omlx update')
+            ? (rev
+                ? ptMsg('uplift.patches.reversal_adopted',
+                    'ALREADY REVERTED — stored as APPLIED reversal; disable restores the merged bytes')
+                : ptMsg('uplift.patches.adopted',
+                    'ALREADY APPLIED — stored as APPLIED, will re-apply after an omlx update'))
             : r.obsolete
-            ? ptMsg('uplift.patches.obsolete', 'ALREADY PRESENT upstream — patch looks obsolete')
+            ? (rev
+                ? ptMsg('uplift.patches.reversal_nothing',
+                    'NOTHING TO UNDO — the merged change is not in the live tree')
+                : ptMsg('uplift.patches.obsolete', 'ALREADY PRESENT upstream — patch looks obsolete'))
             : (r.unchanged
                 ? ptMsg('uplift.patches.unchanged', 'stored version already matches the source')
-                : ptMsg('uplift.patches.preview_ok', 'VALIDATED — gate passed'));
+                : (rev
+                    ? ptMsg('uplift.patches.preview_ok_rev',
+                        'VALIDATED REVERSAL — the merged change reverts cleanly')
+                    : ptMsg('uplift.patches.preview_ok', 'VALIDATED — gate passed')));
         ht.className = (!r.ok || (r.obsolete && !r.adopted) || r.unchanged)
             ? 'pt-fail' : 'pt-ok';
         head.append(ht);

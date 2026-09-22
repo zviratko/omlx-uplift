@@ -175,9 +175,13 @@ def _py_compiles(data: bytes) -> bool:
 
 
 def compile_gate(parsed: dict, tree_root: str,
-                 overrides: dict | None = None) -> list[str]:
+                 overrides: dict | None = None,
+                 reverse: bool = False) -> list[str]:
     """py_compile/json checks on in-memory post-apply content. Returns a
-    list of human-readable problems (empty = gate passed)."""
+    list of human-readable problems (empty = gate passed).
+
+    reverse: True checks the REVERSAL result (the pre-image) — a reversal
+    patch must leave compilable code too."""
     import py_compile
     import tempfile
 
@@ -195,7 +199,10 @@ def compile_gate(parsed: dict, tree_root: str,
                     content = fh.read()
             except FileNotFoundError:
                 content = None
-        res = diffapply._apply_file(content, fp)  # in-memory only
+        if reverse:
+            res = diffapply._apply_file_rev(content, fp)  # in-memory only
+        else:
+            res = diffapply._apply_file(content, fp)  # in-memory only
         if res.get("already"):
             continue
         if not res.get("ok"):
@@ -223,7 +230,8 @@ def compile_gate(parsed: dict, tree_root: str,
 
 
 def validate(diff: bytes, tree_root: str,
-             overrides: dict | None = None) -> dict:
+             overrides: dict | None = None,
+             reverse: bool = False) -> dict:
     """Full gate WITHOUT writing anything.
 
     The diff is first root-normalized (safeguards.normalize_root): a diff
@@ -236,6 +244,9 @@ def validate(diff: bytes, tree_root: str,
     will find it at apply time: this patch's own hunks unwound to pristine,
     other patches' hunks still applied).
 
+    reverse: True gates the diff as a REVERSAL — it must UN-apply cleanly
+    against the live tree (the merged change is present and revertible).
+
     Returns {ok, reason?, advisories?, files: [per-file results],
              compile_problems: [...], content_sha256, diff, safeguards?,
              note?}.
@@ -247,8 +258,10 @@ def validate(diff: bytes, tree_root: str,
         return {"ok": False, "reason": f"parse: {parsed['reason']}",
                 "files": [], "compile_problems": [],
                 "content_sha256": content_sha256, "diff": diff}
-    check = diffapply.check_diff(diff, tree_root, overrides=overrides)
-    compile_problems = compile_gate(parsed, tree_root, overrides=overrides)
+    check = diffapply.check_diff(diff, tree_root, overrides=overrides,
+                                 reverse=reverse)
+    compile_problems = compile_gate(parsed, tree_root, overrides=overrides,
+                                    reverse=reverse)
     ok = all(f["status"] in ("ok", "already") for f in check["files"]) \
         and bool(check["files"]) and not compile_problems
     out = {"ok": ok,
@@ -264,10 +277,12 @@ def validate(diff: bytes, tree_root: str,
 
 
 def fetch_and_gate(source: dict, tree_root: str,
-                   overrides: dict | None = None) -> dict:
+                   overrides: dict | None = None,
+                   reverse: bool = False) -> dict:
     """One-stop for add/check: source = {kind, repo?, pr?, url?, data?,
     insecure_tls?}. Fetch (if needed) then validate. On fetch failure the
-    caller MUST keep stored state untouched (fail-safe rule)."""
+    caller MUST keep stored state untouched (fail-safe rule).
+    reverse: True gates the fetched diff as a REVERSAL patch."""
     kind = source.get("kind")
     tls = bool(source.get("insecure_tls"))
     if kind == "github_pr":
@@ -293,7 +308,8 @@ def fetch_and_gate(source: dict, tree_root: str,
     if not fetched["ok"]:
         return {"ok": False, "stage": "fetch", "reason": fetched["reason"],
                 "advisories": advisories}
-    gate = validate(fetched["data"], tree_root, overrides=overrides)
+    gate = validate(fetched["data"], tree_root, overrides=overrides,
+                    reverse=reverse)
     return {**gate, "stage": "gate", "advisories": advisories,
             "content_sha256": gate["content_sha256"],
             "source_head_sha": fetched.get("source_head_sha")}
@@ -325,24 +341,39 @@ def _prune_once(store, manifest) -> None:
 
 
 def add_patch(store, patch_id: str, source: dict, tree_root: str,
-              order: int = 100) -> dict:
+              order: int = 100, reversal: bool = False) -> dict:
     """Add (or update-check) a patch source: fetch -> gate -> store version.
     New patch lands as state=pending (needs Enable semantics are: pending +
-    enabled=true -> applied at next reconcile)."""
+    enabled=true -> applied at next reconcile).
+
+    reversal: True records the patch as a REVERSAL — the stored diff stays
+    the forward (merged) diff, everything downstream evaluates it in the
+    un-apply direction. Used to undo a PR upstream already merged."""
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", patch_id or ""):
-        return {"ok": False, "reason": "id must match [a-z0-9][a-z0-9._-]{0,63}"}
+        return {"ok": False, "reason": "name must match [a-z0-9][a-z0-9._-]{0,63}"}
     manifest = store.load()
     _prune_once(store, manifest)
     patch = store.find(manifest, patch_id)
     creating = patch is None
+    if not creating and bool(patch.get("reversal")) != bool(reversal):
+        return {"ok": False,
+                "reason": ("this patch is recorded as a REVERSAL — keep "
+                           "'reverse a merged change' checked to update it"
+                           if patch.get("reversal") else
+                           "this patch applies forward — to reverse a merged "
+                           "PR, remove it and re-add with 'reverse' checked")
+                + " (direction is fixed per patch)"}
     if creating:
         patch = {"id": patch_id, "enabled": False, "order": order,
                  "source": {}, "desired_version": 0, "versions": [],
                  "state": "disabled", "state_detail": "not yet validated"}
         manifest["patches"].append(patch)
+    if reversal:
+        patch["reversal"] = True
 
     result = fetch_and_gate(source, tree_root,
-                            overrides=_pristine_overlay(store, patch, tree_root))
+                            overrides=_pristine_overlay(store, patch, tree_root),
+                            reverse=bool(patch.get("reversal")))
     if not result["ok"]:
         # fail-safe: nothing stored, nothing state-changed
         if creating:
@@ -414,10 +445,13 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
     # ADOPT: every hunk is already present in the live tree (the user
     # patched by hand or a previous omlx merged it) and no safeguard is
     # outstanding. Store the version, record it as applied on THIS keg and
-    # keep byte-exact pristine backups — so it shows APPLIED and reconcile
+    # keep byte-exact backups — so it shows APPLIED and reconcile
     # re-applies it automatically after a keg upgrade, or restores the
     # originals on disable/remove. The user patched first, persisted later:
     # that is a supported flow, not an error.
+    # For a REVERSAL 'already' means the tree is already at the PRE-image
+    # (the merged change is gone); its disable-restore target is the MERGED
+    # image, so the backup records the forward-applied bytes instead.
     all_already = result["files"] and all(
         f["status"] == "already" for f in result["files"])
     if all_already and not held:
@@ -426,7 +460,8 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
         if keg:
             backup_dir = store.backup_dir(patch_id, v, keg)
             try:
-                res = diffapply.apply_diff(data, tree_root, backup_dir)
+                res = diffapply.apply_diff(data, tree_root, backup_dir,
+                                           reverse=bool(patch.get("reversal")))
             except OSError:
                 res = {"ok": False}
             if res.get("ok"):
@@ -447,8 +482,13 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                 # adopt it wrote nothing. Revert the patch in memory (reverse
                 # hunks -> vanilla pre-image) and store that as the backup,
                 # so disable/remove restore byte-exact originals without the
-                # tree ever going unpatched on disk.
-                diffapply.record_pristine_backup(data, tree_root, backup_dir)
+                # tree ever going unpatched on disk. A reversal inverts the
+                # direction: its backup holds the merged (forward-applied)
+                # image, because that is what disable must bring back.
+                if patch.get("reversal"):
+                    diffapply.record_merged_backup(data, tree_root, backup_dir)
+                else:
+                    diffapply.record_pristine_backup(data, tree_root, backup_dir)
                 version["applied"] = {"keg_id": keg,
                                       "at": datetime.now(timezone.utc).isoformat(
                                           timespec="seconds"),
@@ -464,14 +504,21 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                                           "at": _patches.now_iso()}
                 adopted = True
         store.save(manifest)
+        rev = bool(patch.get("reversal"))
         return {"ok": True, "v": v, "adopted": adopted,
                 "obsolete": True if not adopted else None,
+                "reversal": rev,
                 "state": patch["state"],
-                "reason": ("already applied — stored; re-applies after an "
-                           "omlx update, disable restores the originals"
-                           if adopted else
-                           "all hunks already present upstream — patch looks "
-                           "obsolete"),
+                "reason": (("reversal already in effect — stored; reverts "
+                            "again after an omlx update, disable restores the "
+                            "merged bytes" if adopted else
+                            "reversal has nothing to undo on this tree")
+                           if rev else
+                           ("already applied — stored; re-applies after an "
+                            "omlx update, disable restores the originals"
+                            if adopted else
+                            "all hunks already present upstream — patch looks "
+                            "obsolete")),
                 "advisories": result["advisories"], "files": result["files"]}
 
     if patch["state"] in ("disabled",) and not patch.get("enabled"):
@@ -492,6 +539,7 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
             patch["desired_version"] = v
     store.save(manifest)
     return {"ok": True, "v": v, "state": patch["state"],
+            "reversal": bool(patch.get("reversal")),
             "advisories": result["advisories"], "files": result["files"],
             "safeguards": result.get("safeguards", {}),
             "requires_approval": held,
@@ -552,6 +600,7 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         gate_ver = desired or (p.get("versions", [])[-1] if p.get("versions") else {})
         entry = {
             "id": p.get("id"), "enabled": p.get("enabled", False),
+            "reversal": bool(p.get("reversal")),
             "order": p.get("order", 100), "state": p.get("state"),
             "state_detail": p.get("state_detail", ""),
             "source": p.get("source", {}),
@@ -754,7 +803,8 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
     data = _read_patch_file(store, desired)
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
-    result = validate(data, tree_root, overrides=_pristine_overlay(store, p, tree_root))
+    result = validate(data, tree_root, overrides=_pristine_overlay(store, p, tree_root),
+                      reverse=bool(p.get("reversal")))
     result.pop("diff", None)  # bytes are not JSON-serialisable; caller has the id
     p["last_verified"] = {"at": _patches.now_iso(),
                           "ok": result["ok"]}
@@ -775,7 +825,8 @@ def check_all(store, tree_root: str) -> dict:
         if not p.get("enabled") or src.get("kind") not in ("github_pr", "url"):
             continue
         result = fetch_and_gate(src, tree_root,
-                                overrides=_pristine_overlay(store, p, tree_root))
+                                overrides=_pristine_overlay(store, p, tree_root),
+                                reverse=bool(p.get("reversal")))
         if not result["ok"]:
             reports[pid] = {"check": "error", "reason": result.get("reason")}
             continue

@@ -330,20 +330,30 @@ try {
             <div class="pt-toolbar">
                 <label class="pt-auto"><input type="checkbox" id="pt-auto-check"> <span data-i18n="uplift.patches.auto_check">Check for updates automatically</span></label>
                 <button type="button" class="btn" id="pt-check-btn" data-i18n="uplift.patches.check_now">Check for updates</button>
-                <span class="pt-add">
-                    <select id="pt-src-kind" aria-label="Source kind">
-                        <option value="github_pr">GitHub PR</option>
-                        <option value="url">URL</option>
-                        <option value="upload">Upload</option>
-                    </select>
+            </div>
+            <div class="pt-addform">
+                <div class="pt-addform-title"><span data-i18n="uplift.patches.add_title">+ ADD PATCH</span>
+                    <span class="pt-addform-hint" data-i18n="uplift.patches.add_hint">fetch or upload a diff, validate it against the live tree, then enable</span>
+                </div>
+                <div class="pt-addform-row">
+                    <label class="pt-field"><span data-i18n="uplift.patches.lbl_name">name</span>
+                        <input type="text" id="pt-new-id" placeholder="patch name" size="14" data-i18n-ph="uplift.patches.ph_name">
+                    </label>
+                    <label class="pt-field"><span data-i18n="uplift.patches.lbl_source">source</span>
+                        <select id="pt-src-kind" aria-label="Source kind">
+                            <option value="github_pr">GitHub PR</option>
+                            <option value="url">URL</option>
+                            <option value="upload">Upload</option>
+                        </select>
+                    </label>
                     <input type="text" id="pt-src-repo" placeholder="owner/repo" size="14" data-i18n-ph="uplift.patches.ph_repo">
                     <input type="text" id="pt-src-pr" placeholder="1234" size="6" inputmode="numeric" data-i18n-ph="uplift.patches.ph_pr">
                     <input type="text" id="pt-src-url" class="grow" placeholder="https://…/patch.diff" data-i18n-ph="uplift.patches.ph_url">
                     <input type="file" id="pt-src-file" accept=".diff,.patch,text/plain" hidden>
                     <label class="pt-auto"><input type="checkbox" id="pt-insecure-tls"> <span data-i18n="uplift.patches.insecure_tls">ignore SSL/TLS errors</span></label>
-                    <input type="text" id="pt-new-id" placeholder="patch-id" size="14" data-i18n-ph="uplift.patches.ph_id">
-                    <button type="button" class="btn" id="pt-preview-btn" data-i18n="uplift.patches.preview">Preview</button>
-                </span>
+                    <label class="pt-auto pt-reversal"><input type="checkbox" id="pt-reversal"> <span data-i18n="uplift.patches.reversal">reverse a merged change (undo)</span></label>
+                    <button type="button" class="btn primary" id="pt-preview-btn" data-i18n="uplift.patches.add_btn">Add patch</button>
+                </div>
             </div>
             <div id="pt-advisories" class="pt-advisories" hidden></div>
             <div id="pt-preview" hidden></div>

@@ -1525,7 +1525,21 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 
 /* PAT-4: PATCH CARRIER — settings/patches page */
 .pt-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 10px; }
-.pt-add { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: auto; }
+/* ADD PATCH — own block, clearly an ADD form: bordered, labelled, accent
+   header. The old inline .pt-add strip hid every control in one row. */
+.pt-addform { border: 1px solid var(--accent, #e0662e); margin: 8px 0 12px;
+    background: color-mix(in srgb, var(--accent, #e0662e) 6%, transparent); }
+.pt-addform-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+    padding: 5px 10px; border-bottom: 1px solid var(--accent, #e0662e);
+    font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--accent, #e0662e); background: color-mix(in srgb, var(--accent, #e0662e) 12%, transparent); }
+.pt-addform-hint { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dim); }
+.pt-addform-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; padding: 8px 10px; }
+.pt-field { display: inline-flex; flex-direction: column; gap: 2px; font-size: var(--fs-meta); color: var(--dim); }
+.pt-field input, .pt-field select { font-size: inherit; }
+.pt-reversal { border: 1px dashed var(--accent, #e0662e); padding: 4px 8px; }
+.pt-st-reversal { border-color: var(--accent, #e0662e); color: var(--accent, #e0662e); }
+.pt-st-reversal::before { background: var(--accent, #e0662e); }
 .pt-auto { display: inline-flex; gap: 4px; align-items: center; font-size: var(--fs-meta); }
 .pt-banner { border: 1px solid var(--warn, #b8860b); background: color-mix(in srgb, var(--warn, #b8860b) 12%, transparent); padding: 6px 10px; margin: 4px 0; font-size: var(--fs-meta); }
 .pt-banner.pt-kill { border-color: var(--accent, #e0662e); }
