@@ -42,12 +42,17 @@ SUPPORTED_SKIN_VERSION = 1
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")                 # crate <name>
 DIR_RE = re.compile(r"^[a-z0-9][a-z0-9-]*(-\d{10})?$")        # working copy
 _RES_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-RES_RE = re.compile(r"^icons/[A-Za-z0-9][A-Za-z0-9._-]*$")    # served relpath
+# served relpaths: declared resources live under icons/ or fonts/ only
+RES_RE = re.compile(r"^(?:icons|fonts)/[A-Za-z0-9][A-Za-z0-9._-]*$")
 
-# Fixed v1 icon vocabulary: icons/<basename>.<ext> -> --icon-<basename>.
+# Fixed icon vocabulary: icons/<basename>.<ext> -> --icon-<basename>.
 # Anything else present under icons/ is servable but gets no CSS variable
 # (forward compat: unknown names are ignored, design section 4).
-ICON_BASENAMES = ("caret", "close", "logo-dot")
+#   caret    dropdown carets (nav + collapsed timespan chips)
+#   close    every close/remove/cancel control (card X, request cancel, ...)
+#   logo-dot header telemetry lamp
+#   grip     layout-editing drag handle (the hatched card-grip mark)
+ICON_BASENAMES = ("caret", "close", "logo-dot", "grip")
 
 # Size caps (design 2.1): crate 1 MB, per-resource 512 KB, extracted 8 MB.
 MAX_CRATE_BYTES = 1 * 1024 * 1024
@@ -157,6 +162,15 @@ def parse_crate(raw: str | bytes):
     crate["icons"] = {k: v for k, v in icons.items()
                       if isinstance(k, str) and isinstance(v, str)} \
         if isinstance(icons, dict) else {}
+    # fonts: second resource map (post-v1 engine addition) — files land in
+    # the working copy's fonts/ dir and are served from there; nothing is
+    # auto-emitted, a skin's overlay declares @font-face with
+    # url(/uplift/api/skins/<dir>/res/fonts/<file>). Unknown to v1 loaders:
+    # ignored, so the skin degrades to fallback fonts (forward-compat rule).
+    fonts = data.get("fonts")
+    crate["fonts"] = {k: v for k, v in fonts.items()
+                      if isinstance(k, str) and isinstance(v, str)} \
+        if isinstance(fonts, dict) else {}
     css = data.get("css")
     crate["css"] = css if isinstance(css, str) else ""
     # Unknown top-level keys: ignored (forward compat), not an error.
@@ -207,10 +221,11 @@ def _safe_child(root: Path, rel: str) -> Path | None:
     return p
 
 
-def _res_target(icons_dir_name: str) -> str | None:
-    """Validate a crate icons map key as 'icons/<file>'; return that relpath."""
-    rel = f"icons/{icons_dir_name}"
-    if not RES_RE.match(rel) or not _RES_NAME_RE.match(icons_dir_name):
+def _res_target(subdir: str, res_name: str) -> str | None:
+    """Validate a crate resource-map key as '<subdir>/<file>'; return the
+    relpath (icons/ and fonts/ only — RES_RE is the serve-side whitelist)."""
+    rel = f"{subdir}/{res_name}"
+    if not RES_RE.match(rel) or not _RES_NAME_RE.match(res_name):
         return None
     return rel
 
@@ -270,17 +285,19 @@ def extract_crate(root: Path, name: str, yml_bytes: bytes, mtime: int):
             warnings.append(f"skipped overlay.css: {err}")
         else:
             _write("overlay.css", blob)
-    # icons: decoded; a bad entry only skips itself (fallback cascade, sec 4)
-    for icon_name in sorted(crate["icons"]):
-        rel = _res_target(icon_name)
-        if rel is None:
-            warnings.append(f"skipped icons/{icon_name}: name not whitelisted")
-            continue
-        blob, err = _decode_resource(crate["icons"][icon_name], total)
-        if blob is None:
-            warnings.append(f"skipped {rel}: {err}")
-            continue
-        _write(rel, blob)
+    # icons + fonts: decoded; a bad entry only skips itself (fallback
+    # cascade, sec 4); unknown names stay servable but get no variable
+    for subdir, mapping in (("icons", crate["icons"]), ("fonts", crate["fonts"])):
+        for res_name in sorted(mapping):
+            rel = _res_target(subdir, res_name)
+            if rel is None:
+                warnings.append(f"skipped {subdir}/{res_name}: name not whitelisted")
+                continue
+            blob, err = _decode_resource(mapping[res_name], total)
+            if blob is None:
+                warnings.append(f"skipped {rel}: {err}")
+                continue
+            _write(rel, blob)
     for w in warnings:
         log.warning("skin %s: %s", dir_name, w)
     return dir_name, warnings, None
@@ -657,19 +674,21 @@ def compile_dir(dir_path: Path) -> str:
         for k in sorted(tokens):
             out.append(f"  {k}: {_yaml_scalar(tokens[k])}")
 
-    icons_dir = dir_path / "icons"
-    icon_names: list[str] = []
-    if icons_dir.is_dir():
-        icon_names = sorted(n for n in os.listdir(icons_dir)
-                            if _RES_NAME_RE.match(n)
-                            and (icons_dir / n).is_file()
-                            and not (icons_dir / n).is_symlink())
-    if icon_names:
-        out.append("icons:")
-        for n in icon_names:
-            blob = (icons_dir / n).read_bytes()
+    for subdir, key in (("icons", "icons"), ("fonts", "fonts")):
+        res_dir = dir_path / subdir
+        res_names: list[str] = []
+        if res_dir.is_dir():
+            res_names = sorted(n for n in os.listdir(res_dir)
+                               if _RES_NAME_RE.match(n)
+                               and (res_dir / n).is_file()
+                               and not (res_dir / n).is_symlink())
+        if not res_names:
+            continue
+        out.append(f"{key}:")
+        for n in res_names:
+            blob = (res_dir / n).read_bytes()
             if len(blob) > MAX_RESOURCE_BYTES:
-                log.warning("compile: skipping %s (over 512 KB)", n)
+                log.warning("compile: skipping %s/%s (over 512 KB)", subdir, n)
                 continue
             text = _block_scalable_text(n, blob)
             if text is not None:

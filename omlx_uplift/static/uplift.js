@@ -947,7 +947,7 @@ function renderTray() {
         pill.setAttribute('gs-min-w', '6'); pill.dataset.block = id;
         const inner = document.createElement('div');
         inner.className = 'grid-stack-item-content dash-tray-pill-content';
-        const gripMark = document.createElement('span'); gripMark.className = 'hatch';
+        const gripMark = document.createElement('span'); gripMark.className = 'hatch'; gripMark.dataset.icon = 'grip';
         const text = document.createElement('span'); text.textContent = blockLabel(id);
         inner.append(gripMark, text);
         pill.append(inner);

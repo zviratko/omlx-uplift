@@ -12,13 +12,18 @@ COMMANDS
       is not installed.
   omlx-uplift view  [--api URL] [--port N] standalone viewer for installs
       that cannot load Python (DMG): serves the same UI, talks plain HTTP.
-  omlx-uplift install [--python PATH]     drop the autopatch .pth into a
+  omlx-uplift install [--python PATH] [--yes|--keep-skins]
+      drop the autopatch .pth into a
       target environment's site-packages (default target: Homebrew omlx
       keg). Manual step for tricky venvs; REQUIRED after every fresh
       install and after every `brew upgrade omlx`. Prints a colour
       per-patch preview first: "OMLX-UPLIFT PATCHES TO APPLY: <ids>" then
       SUCCESS / APPLIED / WARNING / FAILURE per patch (dry-run only, no
-      writes).
+      writes). Also copies the bundled example skins into
+      ~/.omlx/uplift/skins/ — an existing differing file is only replaced
+      after confirmation, and the previous version is always kept as
+      <name>.yml.<timestamp>~ first (--yes answers yes, --keep-skins skips
+      skin installation entirely; non-interactive runs never overwrite).
   omlx-uplift uninstall [--python PATH]   remove the .pth again.
   omlx-uplift patches status|apply|check|disable-all
       out-of-band patch-carrier recovery when the dashboard is unreachable:
@@ -309,10 +314,68 @@ def print_patch_preview(store, stream=None) -> None:
         print(f"OMLX-UPLIFT PATCHES: preview unavailable ({exc})", file=stream)
 
 
+def _example_skins_dir() -> Path:
+    return Path(__file__).resolve().parent / "skins-example"
+
+
+def install_example_skins(stream=None, force: str = "ask") -> None:
+    """Copy bundled example skin crates into the live skins dir.
+
+    force: 'ask' (prompt on a differing existing file), 'yes' (replace),
+    'keep' (never touch). A replaced file is NEVER deleted: the previous
+    version is saved next to it as <name>.yml.<YYYYmmdd-HHMMSS>~ and the
+    backup path is disclosed to the user. Byte-identical files are left
+    alone; non-interactive streams never block (keep + tell)."""
+    out = stream or sys.stdout
+    import filecmp
+    import shutil
+    from datetime import datetime
+    from . import skins as _skins
+
+    src = _example_skins_dir()
+    if not src.is_dir():                      # exotic installs without data
+        return
+    dest = _skins.skins_root()
+    for yml in sorted(src.glob("*.yml")):
+        target = dest / yml.name
+        try:
+            if not dest.is_dir():
+                dest.mkdir(parents=True, exist_ok=True)
+            if target.exists() and filecmp.cmp(target, yml, shallow=False):
+                print(f"skin example: {target} already current", file=out)
+                continue
+            if target.exists():
+                if force == "ask":
+                    if not sys.stdin.isatty():
+                        print(f"skin example: {target} exists and differs — "
+                              "kept (re-run with --yes to replace)", file=out)
+                        continue
+                    ans = input(f"{target} exists and differs from the "
+                                f"bundled example — replace? [y/N] ").strip()
+                    if ans.lower() not in ("y", "yes"):
+                        print(f"skin example: kept {target}", file=out)
+                        continue
+                stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                backup = target.with_name(f"{target.name}.{stamp}~")
+                shutil.copy2(target, backup)
+                print(f"skin example: replaced {target}\n"
+                      f"    previous version saved as {backup}", file=out)
+            else:
+                print(f"skin example: installed {target}", file=out)
+            shutil.copy2(yml, target)
+        except OSError as exc:
+            print(f"skin example: skipped {yml.name} ({exc})", file=out)
+
+
 def cmd_install(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="omlx-uplift install")
     ap.add_argument("--python", help="target interpreter "
                     "(default: Homebrew oMLX keg if present, else this one)")
+    ap.add_argument("--yes", action="store_true",
+                    help="replace existing example skins without asking "
+                    "(old copies are kept as <name>.yml.<timestamp>~)")
+    ap.add_argument("--keep-skins", action="store_true",
+                    help="do not touch example skins in ~/.omlx/uplift/skins")
     args = ap.parse_args(argv)
     target = args.python or _default_target_python()
     sp = _resolve_site_packages(target)
@@ -322,6 +385,8 @@ def cmd_install(argv=None) -> int:
     print(f"installed autopatch: {pth}")
     if "\nimport " in "\n" + body and body.count("\n") > 1:
         print("  (bootstraps sys.path to this package — keg holds no copy)")
+    if not args.keep_skins:
+        install_example_skins(force="yes" if args.yes else "ask")
     print_patch_preview(None)
     return 0
 

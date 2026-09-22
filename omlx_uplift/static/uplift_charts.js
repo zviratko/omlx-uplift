@@ -602,7 +602,7 @@ function createMetricCard(def) {
     const frame = document.createElement('div'); frame.className = 'card-frame metric-card';
     const chrome = document.createElement('div'); chrome.className = 'card-chrome';
     const handle = document.createElement('div'); handle.className = 'card-handle';
-    const hatch = document.createElement('span'); hatch.className = 'hatch';
+    const hatch = document.createElement('span'); hatch.className = 'hatch'; hatch.dataset.icon = 'grip';
     const hText = document.createElement('span');
     hText.setAttribute('data-i18n', 'uplift.metric.' + def.key);
     hText.textContent = metricLabel(def.key);

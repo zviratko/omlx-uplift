@@ -468,6 +468,60 @@ def test_cli_compile_svg_icons_stay_readable_block_scalars(root):
     assert (out / dn / "icons" / "logo-dot.png").read_bytes() == PNG_1PX
 
 
+def _fonts_crate():
+    blob = b"wOF2" + b"\x00" * 60          # fake but bytes-exact woff2 payload
+    return ("tokens:\n  bg: \"#101010\"\n"
+            "icons:\n  grip.svg: \"<svg xmlns=\\\"http://www.w3.org/2000/svg\\\"\n"
+            "    viewBox=\\\"0 0 2 2\\\"><path d=\\\"M0 1h2\\\"/></svg>\"\n"
+            "fonts:\n  \"mono.woff2\": \"%s\"\n" % base64.b64encode(blob).decode()), blob
+
+
+def test_extract_fonts_slot_byte_identical(root):
+    """fonts: is a second resource map under fonts/ (same rules as icons:);
+    the grip name from the v1 vocabulary gets its CSS variable."""
+    crate, blob = _fonts_crate()
+    drop(root, "night", text=crate, mtime=1_700_000_000)
+    entries = skins.list_skins(root)
+    assert entries[0]["dir"] == "night-1700000000"
+    d = root / "night-1700000000"
+    assert (d / "fonts" / "mono.woff2").read_bytes() == blob
+    assert (d / "icons" / "grip.svg").is_file()
+    css, _ = skins.theme_css(root, entries[0])
+    assert b"--icon-grip: url(/uplift/api/skins/night-1700000000/res/icons/grip.svg);" in css
+
+
+def test_compile_round_trip_fonts_byte_identical(root):
+    crate, blob = _fonts_crate()
+    drop(root, "night", text=crate, mtime=1_700_000_000)
+    skins.list_skins(root)
+    d = root / "night-1700000000"
+    text = skins.compile_dir(d)
+    assert "fonts:" in text
+    out = root / "out"
+    out.mkdir()
+    (out / "night.yml").write_text(text)
+    dn = skins.decompile_crate(out / "night.yml", out)
+    assert (out / dn / "fonts" / "mono.woff2").read_bytes() == blob
+    assert (out / dn / "icons" / "grip.svg").is_file()
+
+
+def test_route_res_serves_fonts(client, root):
+    crate, blob = _fonts_crate()
+    drop(root, "night", text=crate, mtime=1_700_000_000)
+    r = client.get("/uplift/api/skins/night/res/fonts/mono.woff2")
+    assert r.status_code == 200
+    assert r.content == blob
+    assert r.headers["content-type"] == "font/woff2"
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_route_res_rejects_font_traversal(client, root):
+    """Encoded '..' segments survive to the handler; RES_RE is the gate."""
+    drop(root, "night", mtime=1_700_000_000)
+    r = client.get("/uplift/api/skins/night/res/fonts/%2e%2e/icons/caret.png")
+    assert r.status_code == 404
+
+
 def test_cli_size_caps(root):
     big = base64.b64encode(b"x" * (skins.MAX_RESOURCE_BYTES + 1)).decode()
     crate = f"icons:\n  caret.png: \"{big}\"\n"

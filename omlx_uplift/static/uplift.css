@@ -329,7 +329,10 @@ body.layout-editing .card-chrome {
 body.layout-editing .card-handle { display: inline-flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 body.layout-editing .card-handle .hatch, .dash-tray-pill-content .hatch {
     width: 16px; height: 10px; flex-shrink: 0;
-    background: repeating-linear-gradient(45deg, var(--dim) 0 2px, transparent 2px 5px);
+    /* skin icon hook (grip): a skin's --icon-grip replaces the hatch;
+       the built-in hatch is the fallback — same rule, no specificity war */
+    background: var(--icon-grip,
+        repeating-linear-gradient(45deg, var(--dim) 0 2px, transparent 2px 5px));
 }
 body.layout-editing .card-remove {
     background: transparent; border: 1px solid var(--edge); color: var(--dim);
