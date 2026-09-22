@@ -30,6 +30,7 @@ const MAX_FEED = 40;
    time + state text refresh. New keys prepend. */
 function pushFeed(events, keyFor) {
     const feed = $('feed');
+    if (!feed) return;   // Events card retired 2026-09-22 — host may be gone
     const empty = feed.querySelector('.empty'); if (empty) empty.remove();
     for (const ev of events.slice().reverse()) {
         const key = keyFor ? keyFor(ev) : null;

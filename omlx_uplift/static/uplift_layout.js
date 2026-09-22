@@ -34,7 +34,9 @@
         'cache',
         'live',
         'reqfeed',
-        'feed',
+        // 'feed' (Events card) retired 2026-09-22: normalizeLayout drops it
+        // from every saved layout, the static section is gone from
+        // index.html, and pushFeed no-ops without its host.
     ];
     const COLUMNS = 24;
     const MIN_W = 6;
@@ -83,9 +85,14 @@
         // Request feed + In-flight sit under Throughput. h is the floor
         // only — the row engine grows it to whatever the lists need
         // (capped demand), so the shipped value hugs stat-grid content.
-        { id: 'reqfeed', x: 0, y: 57, w: 8, h: 30 },
-        { id: 'live', x: 8, y: 57, w: 8, h: 30 },
-        { id: 'reqstats', x: 16, y: 57, w: 8, h: 30 },
+        // EVENTS retired 2026-09-22 (user): the reaction feed duplicated the
+        // request feed; the Request feed moved into its bottom full-width
+        // slot. Row 3 rebalances to two half-width cards (In-flight +
+        // Request sizes) so the Throughput row below keeps its rhythm.
+        // normalizeLayout drops 'feed' from saved layouts automatically —
+        // existing users lose the Events card on next load, no migration.
+        { id: 'live', x: 0, y: 57, w: 12, h: 30 },
+        { id: 'reqstats', x: 12, y: 57, w: 12, h: 30 },
         // Metric cards: 4 per row (w=6), compact chart fill. The board
         // owner may drop any of them; removed ones stay removed
         // (mergedBlocks memo in uplift.js).
@@ -100,7 +107,7 @@
         { id: 'met-mem-used-bytes', x: 0, y: 117, w: 6, h: 15 },
         { id: 'met-cache-total-bytes', x: 6, y: 117, w: 6, h: 15 },
         { id: 'met-engines-loaded', x: 12, y: 117, w: 6, h: 15 },
-        { id: 'feed', x: 0, y: 132, w: COLUMNS, h: 18 },
+        { id: 'reqfeed', x: 0, y: 132, w: COLUMNS, h: 18 },
     ];
 
     function defaultLayout() {

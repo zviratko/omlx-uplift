@@ -293,20 +293,20 @@ test('uplift layout: normalize resolves overlapping blocks deterministically', (
     assert.deepStrictEqual(b.blocks, a.blocks);
     // no overlap, no move
     const clean = UPL.normalizeLayout({ blocks: [
-        { id: 'feed', x: 0, y: 0, w: 24, h: 18 },
+        { id: 'reqfeed', x: 0, y: 0, w: 24, h: 18 },
         { id: 'gen', x: 0, y: 18, w: 4, h: 20 },
     ] });
-    assert.deepStrictEqual(clean.blocks.map(x => [x.id, x.y]), [['feed', 0], ['gen', 18]]);
+    assert.deepStrictEqual(clean.blocks.map(x => [x.id, x.y]), [['reqfeed', 0], ['gen', 18]]);
 });
 test('uplift layout: normalize drops unknown/dup blocks, clamps geometry', () => {
     const n = UPL.normalizeLayout({ width: 'banana', blocks: [
         { id: 'gen', x: -3, y: -1, w: 99 },
         { id: 'gen', x: 0, y: 5, w: 6 },          // duplicate -> dropped
         { id: 'ghost', x: 0, y: 0, w: 24 },        // unknown -> dropped
-        { id: 'feed', x: 20, y: 2, w: 10 },        // x+w>24 -> x clamped
+        { id: 'reqfeed', x: 20, y: 2, w: 10 },     // x+w>24 -> x clamped
     ] });
     assert.strictEqual(n.width, 'default');
-    assert.deepStrictEqual(n.blocks.map(b => b.id), ['gen', 'feed']);
+    assert.deepStrictEqual(n.blocks.map(b => b.id), ['gen', 'reqfeed']);
     assert.strictEqual(n.blocks[0].w, UPL.COLUMNS);
     assert.strictEqual(n.blocks[0].x, 0);
     assert.strictEqual(n.blocks[1].x, 14);

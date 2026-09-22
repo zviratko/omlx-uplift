@@ -391,8 +391,29 @@ function applyPrefs() {
     if (t === 'auto') eff = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     // a resolved skin scopes its own compiled CSS with html[data-theme="<dir>"]
     if (skin) eff = skin.dir;
+    else if (typeof t === 'string' && C.SKIN_NAME_RE.test(t)) {
+        // listing not loaded yet (boot order) or fetch failed: the cached
+        // dir keeps data-theme scoped to the skin's stylesheet instead of
+        // flashing the built-in theme until loadSkins() resolves (~0.8s)
+        try {
+            const cached = localStorage.getItem('omlx-uplift-skin-dir');
+            if (cached && C.SKIN_NAME_RE.test(cached)) eff = cached;
+        } catch (_) { /* storage may be denied */ }
+    }
+    // dir cache for the pre-paint boot script (index.html): newest-dir for
+    // a base-name selection is only knowable after loadSkins(), so write it
+    // every time it resolves and clear it for built-in selections
+    try {
+        if (skin) localStorage.setItem('omlx-uplift-skin-dir', skin.dir);
+        else if (!C.SKIN_NAME_RE.test(t || '')) localStorage.removeItem('omlx-uplift-skin-dir');
+    } catch (_) { /* storage may be denied */ }
     document.documentElement.dataset.theme = eff;
-    if (typeof applySkinCss === 'function') applySkinCss(skin ? skin.dir : null);
+    // same dir decision for the <link>: passing null here would DELETE the
+    // boot script's pre-paint link and re-flash before loadSkins() resolves
+    const cssDir = skin ? skin.dir
+        : (typeof t === 'string' && C.SKIN_NAME_RE.test(t) && typeof eff === 'string'
+           && /-\d{10}$/.test(eff) ? eff : null);
+    if (typeof applySkinCss === 'function') applySkinCss(cssDir);
     const motionOff = prefs.motion === 'off' ||
         matchMedia('(prefers-reduced-motion: reduce)').matches;
     document.documentElement.dataset.motion = motionOff ? 'off' : 'auto';
@@ -1210,7 +1231,12 @@ function render(s) {
    requests collapse into one expandable summary line per model whose child
    lines exist only while waiting. Clicking a request line opens INSPECT;
    ABORT sits at the line end (and in the inspector). */
-const IF_MAX_TERMINAL = 50;   // kept terminal lines per model (DOM cap)
+// Terminal lines kept per model. 50 was a DOM cap that read as litter:
+// an idle model kept its whole request history as DONE rows (user: "idle
+// slots show DONE and accumulate"). 5 recent outcomes answer the only
+// question a DONE row answers ("what just finished?"); older ones are
+// dropped (never deleted elsewhere — the full record lives in the feed).
+const IF_MAX_TERMINAL = 5;
 
 function ifTerminal(rid) {
     const fr = S.reqFeedRows.get(rid);
@@ -1358,6 +1384,7 @@ function renderLive(s) {
         for (const p of m.prefilling) {
             seen.add(p.rid);
             const sl = ifSlot(m.id, p.rid);
+            if (sl.terminal) { sl.terminal = false; sl.tstate = null; }  // RESURRECT: stats show it live again — a latched DONE must unlatch or the badge lies while counters run
             sl.state = 'prefilling';
             if (p.prompt != null) sl.prompt = p.prompt;
             if (p.processed != null) sl.processed = p.processed;
@@ -1371,6 +1398,7 @@ function renderLive(s) {
         for (const gg of m.generating) {
             seen.add(gg.rid);
             const sl = ifSlot(m.id, gg.rid);
+            if (sl.terminal) { sl.terminal = false; sl.tstate = null; }  // RESURRECT (same as prefilling above)
             sl.state = 'generating'; sl.eta = null;
             if (gg.prompt != null) sl.prompt = gg.prompt;
             if (gg.generated != null) sl.out = gg.generated;
@@ -1384,16 +1412,19 @@ function renderLive(s) {
     for (const [rid, sl] of S.ifSlots) {
         if (sl.terminal || seen.has(rid)) continue;
         const t = ifTerminal(rid);
-        if (t) { sl.terminal = true; sl.tstate = t; }
+        if (t) { sl.terminal = true; sl.tstate = t; ifPrune(sl.model); }
         else if (!S.reqFeedRows.has(rid) && now - sl.lastSeen > 15000) {
-            sl.terminal = true; sl.tstate = 'done';
+            sl.terminal = true; sl.tstate = 'done'; ifPrune(sl.model);
         }
     }
     // short requests only the SSE/poll feed ever saw: capture as terminal lines
     for (const [rid, fr] of S.reqFeedRows) {
         const sl = S.ifSlots.get(rid);
         if (sl) {
-            if (!sl.terminal && fr.state === 'complete') { sl.terminal = true; sl.tstate = ifTerminal(rid) || 'done'; }
+            if (!sl.terminal && fr.state === 'complete') {
+                sl.terminal = true; sl.tstate = ifTerminal(rid) || 'done';
+                ifPrune(sl.model);   // slot predated its terminal mark — cap now
+            }
             continue;
         }
         const t = ifTerminal(rid);
@@ -1401,6 +1432,9 @@ function renderLive(s) {
         const sl2 = ifSlot(fr.model || '?', rid);
         sl2.terminal = true; sl2.tstate = t; sl2.state = 'generating';
         sl2.prompt = fr.prompt || null; sl2.out = fr.completion || null; sl2.tps = fr.tps || null;
+        // prune AFTER the terminal mark: ifSlot's own prune ran while this
+        // row was still live, so without this call the cap is off by one
+        ifPrune(fr.model || '?');
     }
     // one QUEUED summary line per model (+/− expand); children only while queued
     let qTotal = 0;

@@ -83,11 +83,17 @@ css: |-
   /* TriOptimum panel: laser rail atop every card */
   .card { border-top-color: var(--red); }
   .card:hover { border-color: var(--red); }
-  /* wordmark: the diagnostics console announces itself */
-  .logo::after {
-      content: " // SYSTEM DIAGNOSTICS";
+  /* wordmark: long string goes BELOW the logo (absolute slot — can never
+     shift the menu); the inline ::after carries only a short greeting,
+     and the engine caps even that to 24ch with an ellipsis */
+  .logo .logo-below::after {
+      content: "// SYSTEM DIAGNOSTICS";
       color: var(--red); font: 400 9px/1 var(--mono); letter-spacing: .18em;
-      margin-left: 8px;
+  }
+  .logo::after {
+      content: ": HELLO, INSECT";
+      color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .12em;
+      margin-left: 6px;
   }
   /* her eye pulses on the telemetry strip — only while motion is allowed */
   :root:not([data-motion="off"]) .logo .dot {

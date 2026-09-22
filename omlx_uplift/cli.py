@@ -24,6 +24,9 @@ COMMANDS
       after confirmation, and the previous version is always kept as
       <name>.yml.<timestamp>~ first (--yes answers yes, --keep-skins skips
       skin installation entirely; non-interactive runs never overwrite).
+      Ends with a MOUNT CHECK: imports omlx.server in a probe subprocess
+      and verifies the Uplift mount flag — exit 1 + the failing import
+      lines when /uplift/ would 404 after the next start.
   omlx-uplift uninstall [--python PATH]   remove the .pth again.
   omlx-uplift patches status|apply|check|disable-all
       out-of-band patch-carrier recovery when the dashboard is unreachable:
@@ -367,6 +370,26 @@ def install_example_skins(stream=None, force: str = "ask") -> None:
             print(f"skin example: skipped {yml.name} ({exc})", file=out)
 
 
+def _verify_mount(python: str) -> tuple[bool, str]:
+    """Import omlx.server in a throwaway subprocess and check the mount
+    flag autopatch/register sets. The 404-after-upgrade reports all came
+    from a server whose mount never happened; this turns 'install printed
+    success' into 'mount actually works' (or names the failure)."""
+    import subprocess
+
+    code = ("import omlx.server as s; "
+            "raise SystemExit(0 if getattr(s.app, '_omlx_uplift_mounted', False) else 1)")
+    try:
+        r = subprocess.run([python, "-c", code], capture_output=True,
+                           text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"probe failed: {exc}"
+    if r.returncode == 0:
+        return True, ""
+    tail = (r.stderr or r.stdout or "").strip().splitlines()[-3:]
+    return False, " / ".join(tail)
+
+
 def cmd_install(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="omlx-uplift install")
     ap.add_argument("--python", help="target interpreter "
@@ -387,6 +410,15 @@ def cmd_install(argv=None) -> int:
         print("  (bootstraps sys.path to this package — keg holds no copy)")
     if not args.keep_skins:
         install_example_skins(force="yes" if args.yes else "ask")
+    # mount proof: the .pth alone proves nothing — probe the target env the
+    # same way the server will boot (import omlx.server, check the flag).
+    ok, detail = _verify_mount(target or sys.executable)
+    if ok:
+        print("mount check: OK (omlx.server imports with Uplift mounted)")
+    else:
+        print("WARNING: mount check FAILED — /uplift/ will 404 until this "
+              f"is fixed:\n  {detail}", file=sys.stderr)
+        return 1
     print_patch_preview(None)
     return 0
 

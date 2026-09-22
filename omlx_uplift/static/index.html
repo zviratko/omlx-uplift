@@ -9,12 +9,47 @@
 <link rel="stylesheet" href="./vendor/uPlot.min.css">
 <link rel="stylesheet" href="./vendor/gridstack.min.css">
 <link rel="stylesheet" href="./uplift.css?v=BUILD">
+<script>
+/* Pre-paint theme resolve (user: refresh flashed the built-in theme before
+   the skin applied). Runs before the first paint: sets data-theme and, for
+   skins, injects the skin stylesheet link with its FINAL id ('uplift-skin-
+   css') so applySkinCss() later reuses — never duplicates — this element.
+   Mirrors applyPrefs() exactly (auto resolves via matchMedia; a skin needs
+   its <name>-<mtime> dir: applyPrefs caches the resolved dir under
+   SKIN_DIR_KEY when the listing last resolved it; an exact pinned name IS
+   its own dir). No cache + base name -> leave the default, applyPrefs
+   fixes it after loadSkins() as before. Failures are silent by design:
+   this is a paint optimization, not an authority. */
+(function () {
+try {
+    var p = JSON.parse(localStorage.getItem('omlx-uplift-prefs-v1')) || {};
+    var SKIN_RE = /^[a-z0-9][a-z0-9-]*(-\d{10})?$/;
+    var root = document.documentElement;
+    var t = p.theme;
+    if (t === 'auto') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    if (['light', 'dark', 'enhanced', 'cockpit'].includes(t)) {
+        root.dataset.theme = t;
+    } else if (typeof t === 'string' && SKIN_RE.test(t)) {
+        var dir = /-\d{10}$/.test(t) ? t : localStorage.getItem('omlx-uplift-skin-dir');
+        if (dir && SKIN_RE.test(dir) && /-\d{10}$/.test(dir)) {
+            root.dataset.theme = dir;
+            var l = document.createElement('link');
+            l.id = 'uplift-skin-css'; l.rel = 'stylesheet';
+            l.href = '/uplift/api/skins/' + encodeURIComponent(dir) + '/theme.css';
+            document.head.appendChild(l);
+        }
+    }
+    if (p.motion === 'off' || matchMedia('(prefers-reduced-motion: reduce)').matches)
+        root.dataset.motion = 'off';
+} catch (_) { /* storage denied / private mode: defaults stand */ }
+})();
+</script>
 </head>
 <body>
 <div class="wrap">
 
 <header class="top">
-    <div class="logo"><span class="dot" id="status-dot" data-icon="logo-dot"></span> oMLX <span style="opacity:.45;font-weight:300">Uplift</span></div>
+    <div class="logo"><span class="dot" id="status-dot" data-icon="logo-dot"></span> oMLX <span style="opacity:.45;font-weight:300">Uplift</span><span class="logo-below"></span></div>
     <nav class="tabs" id="tabs">
         <a href="#status" data-tab="status" data-i18n="uplift.tab.status">Status</a>
         <a href="#cluster" data-tab="cluster" id="nav-cluster" hidden data-i18n="navbar.tab.cluster">Cluster</a>
@@ -180,10 +215,7 @@
         <div class="se-hint" id="req-search-note" style="display:none"></div>
         <div id="reqfeed"><div class="empty" data-i18n="uplift.empty.no_requests">No requests yet</div></div></div></div></div></div></section>
 
-    <section class="card grid-stack-item" data-id="feed" data-tab="status" gs-id="feed" data-block="feed"><div class="grid-stack-item-content"><div class="card-frame fill-card"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Events</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Events</h2>
-        <div class="card-body"><div class="feed" id="feed"><div class="empty">Watching…</div></div></div></div></div></div></section>
-
-    <!-- ============ MODELS ============ -->
+        <!-- ============ MODELS ============ -->
     <!-- ============ USAGE ============ -->
     <!-- ============ LOGS ============ -->
     <!-- ============ SETTINGS ============ -->

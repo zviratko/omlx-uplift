@@ -166,6 +166,27 @@ header.top {
 }
 .logo {
     font: 500 16px/1 var(--sans); letter-spacing: 0.02em; text-transform: uppercase;
+    position: relative;   /* anchor for the below-logo wordmark slot */
+}
+/* Skin text slots on the logo (design: skins overlay hooks):
+   .logo::after      — short suffix INLINE behind the wordmark (kept for
+                       existing skins; engine caps its length, see guard)
+   .logo-below       — long wordmark UNDER the logo; absolute so it can
+                       NEVER widen the header or shift the menu (a skin
+                       fills it via .logo-below::after { content: ... })
+   Both empty by default — skins that use neither are pixel-identical. */
+.logo .logo-below {
+    position: absolute; top: calc(100% + 3px); left: 0;
+    font: 400 10px/1 var(--sans); letter-spacing: 0.08em; color: var(--dim);
+    white-space: nowrap; max-width: 260px;
+    overflow: hidden; text-overflow: ellipsis;   /* overflow safeguard */
+}
+/* Overflow safeguard for logo::after abuse: a skin's suffix becomes an
+   inline-block with its own truncation, so a long string costs the menu
+   at most 24ch and gets an ellipsis instead of reflowing the header. */
+.logo::after {
+    display: inline-block; max-width: 24ch; vertical-align: bottom;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
 .logo .dot.bad { background: var(--red); }
