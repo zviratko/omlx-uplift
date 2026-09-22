@@ -215,8 +215,8 @@ function renderReqFeed() {
     list.style.maxHeight = boxH + 'px';
     let limit = sorted.length;
     if (!wantAll) {
-        const foot = sorted.length ? 24 : 0;
-        limit = Math.max(3, Math.floor((boxH - foot) / rowH));
+        const foot = sorted.length ? 30 : 0;   // measured footer height
+        limit = Math.max(1, Math.floor((boxH - foot) / rowH));
         limit = Math.min(limit, sorted.length);
     }
     const shown = sorted.slice(0, limit);
@@ -293,9 +293,9 @@ function renderReqFeed() {
         foot.append(lab, more);
         list.append(foot);
     }
-    // Measure one real row once per session so later draws adapt to the box
-    // exactly (font/skin sizes differ — 30px is only the first-draw guess).
-    if (!list._rowH && list.firstElementChild && list.firstElementChild.offsetHeight)
+    // Measure a real row every draw so later fits adapt exactly (font/skin
+    // sizes differ and can change when a skin is applied mid-session).
+    if (list.firstElementChild && list.firstElementChild.offsetHeight)
         list._rowH = list.firstElementChild.offsetHeight;
 }
 function upsertReq(id, patch) {
