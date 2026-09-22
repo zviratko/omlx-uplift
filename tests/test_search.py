@@ -221,3 +221,14 @@ def test_cjk_query_routes_to_like(store):
     # pure-ASCII queries keep the FTS path
     res = store.search_requests(q="hello", limit=10)
     assert res["mode"] == "fts"
+
+
+def test_distinct_models_scoped_by_time(store):
+    """ISSUE-4: dropdown source — models with stored history, windowed."""
+    store.upsert_request(_row("d1", model="alpha", age_s=10))
+    store.upsert_request(_row("d2", model="beta", age_s=10))
+    store.upsert_request(_row("d3", model="old-gone", age_s=999999))
+    ms = store.distinct_models()
+    assert set(ms) >= {"alpha", "beta", "old-gone"}
+    fresh = store.distinct_models(ts_from=time.time() - 3600)
+    assert set(fresh) == {"alpha", "beta"}

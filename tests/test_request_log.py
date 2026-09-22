@@ -66,7 +66,8 @@ def test_sample_tracks_queued_generating_and_departure():
     assert rows["q1"]["state"] == "generating"
 
     sched.running = {}
-    t.sample(_pool({"m1": sched}))
+    t.sample(_pool({"m1": sched}))   # absence 1: grace — still active
+    t.sample(_pool({"m1": sched}))   # absence 2: finalize
     done = {r["id"]: r for r in t.list_rows(limit=10)}
     assert done["g1"]["state"] == "complete"
     assert done["g1"]["completion_tokens"] == 9   # last-seen value kept
@@ -98,7 +99,8 @@ def test_failed_model_sample_does_not_finalize_its_rows():
     # break m2's engine walk entirely so its model fails the sample
     pool["m2"] = SimpleNamespace(engine=None, scheduler=Boom())
     good.running = {}
-    t.sample(_pool(pool))
+    t.sample(_pool(pool))   # absence 1: grace
+    t.sample(_pool(pool))   # absence 2: finalize (m2's failure must not gate m1)
     rows = {r["id"]: r for r in t.list_rows(limit=5)}
     assert "x" not in rows or rows["x"]["state"] == "complete"
 
@@ -193,7 +195,8 @@ async def test_cancel_after_vanish_finalizes_as_error():
     t.sample(pool)
     await t.cancel(pool, "c2")
     sched.running = {}
-    t.sample(pool)
+    t.sample(pool)      # absence 1: grace
+    t.sample(pool)      # absence 2: finalize
     done = {r["id"]: r for r in t.list_rows(limit=5)}
     assert done["c2"]["state"] == "error"
 
@@ -332,7 +335,9 @@ def test_lookup_active_wins_and_is_live_tracks_state():
     assert t.is_live("lk1") is True
     assert t.lookup("lk1")["prompt"] == "hi"
     sched.running = {}                     # departs
-    t.sample(_pool({"m1": sched}))
+    t.sample(_pool({"m1": sched}))         # absence 1: grace, still live
+    assert t.is_live("lk1") is True
+    t.sample(_pool({"m1": sched}))         # absence 2: finalize
     assert t.is_live("lk1") is False       # done, not active
     row = t.lookup("lk1")
     assert row["state"] == "complete"
@@ -354,7 +359,8 @@ def test_departure_refresh_grabs_final_output():
     req.output_text = "FULL FINAL ANSWER"
     req.finish_reason = "stop"
     sched.running = {}
-    t.sample(_pool({"m1": sched}))
+    t.sample(_pool({"m1": sched}))         # absence 1: grace
+    t.sample(_pool({"m1": sched}))         # absence 2: finalize + refresh
     row = t.lookup("dep1")
     assert row["state"] == "complete"
     assert row["output"] == "FULL FINAL ANSWER"
@@ -408,3 +414,73 @@ def test_collector_payload_truncates_tail():
         output_text="x" * (PAYLOAD_CAP + 10), finish_reason=None))
     p = _collector_payload(coll)
     assert p["output_trunc"] is True and len(p["output"].encode()) == PAYLOAD_CAP
+
+
+# -- ISSUE fixes 2026-09-22 ----------------------------------------------------
+
+def test_absent_one_tick_stays_active_two_ticks_finalizes():
+    """MISSES-GRACE: a request missing from ONE snapshot (queue handoff,
+    stale publish) must not flip to complete and back."""
+    sched = FakeScheduler(running={"f1": _req("f1", gen_at=time.monotonic(), out=3)})
+    t = RequestTracker()
+    pool = _pool({"m1": sched})
+    t.sample(pool)
+    sched.running = {}
+    t.sample(pool)
+    assert t.is_live("f1") is True           # absence 1: still active
+    t.sample(pool)
+    assert t.is_live("f1") is False          # absence 2: finalized
+    assert t.lookup("f1")["state"] == "complete"
+
+
+def test_chunked_prefill_visible_via_prefill_tracker(monkeypatch):
+    """PREFILL-VIS: chunked prefills sit in scheduler.prefilling, absent
+    from the admin snapshot; the prefill-progress tracker makes them
+    visible as prefilling rows instead of resurrect/flip churn."""
+    import omlx_uplift.request_log as rl
+
+    class FakePrefillTracker:
+        def get_model_progress(self, mid):
+            return [{"request_id": "pf1", "total": 900, "prompt_tokens": 900}]
+
+    monkeypatch.setattr("omlx.prefill_progress.get_prefill_tracker",
+                        lambda: FakePrefillTracker(), raising=False)
+    sched = FakeScheduler()
+    t = RequestTracker()
+    pool = _pool({"m1": sched})
+    t.sample(pool)
+    row = t.lookup("pf1")
+    assert row is not None and row["state"] == "prefilling"
+    # request later appears in running_by_id: no duplicate row, state moves
+    sched.running = {"pf1": _req("pf1", gen_at=time.monotonic(), out=1)}
+    t.sample(pool)
+    assert t.lookup("pf1")["state"] == "generating"
+
+
+def test_token_ids_sample_head_tail():
+    from omlx_uplift.request_log import _token_ids_sample
+    import json
+    ids = list(range(10))
+    out = _token_ids_sample(ids)
+    assert out is not None and out[1] is False
+    assert json.loads(out[0]) == ids
+    big = list(range(20000))
+    out = _token_ids_sample(big, head=100, tail=50)
+    arr = json.loads(out[0])
+    assert out[1] is True and len(arr) == 150
+    assert arr[:2] == [0, 1] and arr[-1] == 19999
+    assert _token_ids_sample(["not", "ids"]) is None       # non-int list
+
+
+def test_capture_payload_keeps_token_id_sample():
+    from omlx_uplift.request_log import _capture_payload
+    req = SimpleNamespace(prompt=[1, 2, 3], output_text="",
+                          sampling_params=SimpleNamespace(
+                              temperature=0.2, top_p=1.0, max_tokens=5,
+                              stop=None, presence_penalty=0.0,
+                              frequency_penalty=0.0))
+    out = _capture_payload(req)
+    assert "tokenized prompt, 3 tokens" in out["prompt"]
+    import json
+    assert json.loads(out["prompt_ids"]) == [1, 2, 3]
+    assert out["prompt_ids_trunc"] is False

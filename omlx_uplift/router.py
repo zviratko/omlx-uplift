@@ -659,7 +659,10 @@ _USAGE_COLS = ("requests", "prompt_tokens", "completion_tokens",
                "cached_tokens", "prefill_seconds", "generation_seconds")
 
 
-MAX_SERIES_POINTS = 2000
+# ISSUE-7: 2000 started averaging at ~2.8 h (100 s buckets by 6 h) — far too
+# coarse for the everyday windows. 20000 keeps the full 5 s collector
+# resolution through 24 h (17.3k pts) and only aggregates 7 d / 30 d.
+MAX_SERIES_POINTS = 20000
 
 
 def _downsample(points: list[dict], max_pts: int = MAX_SERIES_POINTS):
@@ -886,6 +889,41 @@ async def cancel_request(
     raise HTTPException(status_code=404, detail=f"Request not found: {request_id}")
 
 
+def _decode_prompt_ids(model_id: str, ids_json: str, truncated: bool):
+    """ISSUE-3: decode a stored token-id sample with the model's tokenizer.
+
+    Runs in a worker thread (tokenizer decode can take ~ms on big samples).
+    Never raises: returns None-shaped blocks with an honest note when the
+    engine is unloaded or the tokenizer chokes (skip_special_tokens keeps
+    chat-template markers from spamming the view)."""
+    import json as _json
+
+    try:
+        ids = _json.loads(ids_json)
+    except ValueError:
+        return None
+    if not isinstance(ids, list) or not ids:
+        return None
+    text = None
+    note = None
+    pool = engine_pool()
+    entry = pool.get_entry(model_id) if pool is not None and model_id else None
+    engine = getattr(entry, "engine", None) if entry is not None else None
+    tok = getattr(engine, "tokenizer", None) if engine is not None else None
+    if tok is None:
+        note = "model not loaded — tokens kept raw"
+    else:
+        try:
+            text = tok.decode(ids, skip_special_tokens=True)
+        except Exception:  # noqa: BLE001
+            try:
+                text = tok.decode(ids)
+            except Exception:  # noqa: BLE001
+                note = "tokenizer decode failed"
+    return {"text": text, "note": note, "token_count": len(ids),
+            "sample_truncated": bool(truncated)}
+
+
 # NOTE: registered AFTER /requests/stream (a literal route registered first
 # wins over this dynamic one in Starlette's order-based matching).
 @api_router.get("/requests/{request_id}")
@@ -938,6 +976,16 @@ async def request_detail(
         except ValueError:
             params = {"raw": row["params"]}
 
+    # ISSUE-3 decode: token-id prompts were stored as an opaque count. The
+    # tracker now keeps a head+tail id sample; turn it back into text with
+    # the model's live tokenizer (loaded engines only — an unloaded model
+    # says so honestly instead of failing the whole inspector).
+    prompt_decoded = None
+    if row.get("prompt_ids"):
+        prompt_decoded = await asyncio.to_thread(
+            _decode_prompt_ids, row.get("model"), row["prompt_ids"],
+            bool(row.get("prompt_ids_trunc")))
+
     timings = None
     t0, t1 = row.get("ts_start"), row.get("ts_end")
     if t0 and t1:
@@ -950,6 +998,7 @@ async def request_detail(
                  "completion_tokens", "tps", "error", "finish",
                  "ts_start", "ts_end", "ts")},
         "prompt": _payload("prompt", "prompt_trunc"),
+        "prompt_decoded": prompt_decoded,
         "output": _payload("output", "output_trunc"),
         "params": params,
         "timings": timings,
@@ -981,6 +1030,21 @@ async def search_requests(
     return await asyncio.to_thread(
         get_store().search_requests, q=q, model=model,
         ts_from=frm, ts_to=to, limit=limit)
+
+
+@api_router.get("/requests-models")
+async def requests_models(
+    frm: float | None = None, is_admin: bool = Depends(require_admin),
+):
+    """ISSUE-4: models with stored request history (optionally since epoch
+    `frm`), for the search dropdown. The old client-side source — what this
+    tab's live feed saw — is empty on a fresh page."""
+    import asyncio
+
+    from .store import get_store
+
+    return {"models": await asyncio.to_thread(
+        get_store().distinct_models, ts_from=frm)}
 
 
 # --------------------------------------------------------------------------

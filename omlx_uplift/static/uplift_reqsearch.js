@@ -29,9 +29,16 @@ function bindReqSearchControls() {
     $('req-q').onkeydown = e => { if (e.key === 'Enter') runReqSearch(); };
     $('req-model').onchange = () => searchOn && runReqSearch();
 }
+function bootReqSearch() {
+    bindReqSearchControls();
+    // ISSUE-4: the bar is visible from page load but its model dropdown and
+    // timespan chips only appeared after pressing SEARCH. Populate eagerly;
+    // failures keep the defaults and runReqSearch retries via initReqSearch.
+    initReqSearch().then(syncReqModelOptions).catch(() => {});
+}
 if (document.readyState === 'loading')
-    document.addEventListener('DOMContentLoaded', bindReqSearchControls);
-else bindReqSearchControls();
+    document.addEventListener('DOMContentLoaded', bootReqSearch);
+else bootReqSearch();
 
 async function initReqSearch() {
     const chips = $('req-timechips');
@@ -119,11 +126,25 @@ function backToLiveFeed() {
     window.Uplift._reqGlue.renderReqFeed();
 }
 
-/* Model filter options come from what the live feed actually saw — no
-   extra endpoint, stays truthful about which models have history. */
-function syncReqModelOptions() {
+/* Model filter options come from STORED history (issue 4): a fresh page
+   had an empty dropdown because the old source was this tab's live feed.
+   Server says which models have rows inside the retention window; the live
+   feed's models merge in as a union so a model seen live-but-unsaved is
+   still offered. Falls back to the live set if the endpoint fails. */
+let _modelsFetchedAt = 0, _storedModels = [];
+async function syncReqModelOptions() {
     const sel = $('req-model'); if (!sel) return;
-    const models = [...new Set([...window.Uplift._reqGlue.reqFeedRows.values()].map(r => r.model).filter(Boolean))].sort();
+    const live = [...new Set([...window.Uplift._reqGlue.reqFeedRows.values()]
+        .map(r => r.model).filter(Boolean))];
+    if (Date.now() - _modelsFetchedAt > 60000) {
+        try {
+            const d = await window.Uplift._reqGlue.fetchJson(
+                `${API}/uplift/api/requests-models?frm=${Date.now() / 1000 - reqRetainDays * 86400}`);
+            _storedModels = (d.models || []);
+            _modelsFetchedAt = Date.now();
+        } catch (_) { /* keep last known + live union */ }
+    }
+    const models = [...new Set([..._storedModels, ...live])].sort();
     const cur = sel.value;
     sel.innerHTML = '';
     const all = document.createElement('option');

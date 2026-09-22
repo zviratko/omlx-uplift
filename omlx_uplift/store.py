@@ -44,6 +44,9 @@ _NEW_COLUMNS = {
     "prompt": "TEXT", "prompt_trunc": "INTEGER",
     "output": "TEXT", "output_trunc": "INTEGER",
     "params": "TEXT", "finish": "TEXT",
+    # ISSUE-3: token-id prompt sample (JSON array of ids, head+tail) so the
+    # inspector can decode what was actually sent for tokenized prompts.
+    "prompt_ids": "TEXT", "prompt_ids_trunc": "INTEGER",
 }
 
 
@@ -358,13 +361,17 @@ class MetricsStore:
             "output_trunc": 1 if row.get("output_trunc") else None,
             "params": row.get("params"),
             "finish": row.get("finish"),
+            "prompt_ids": row.get("prompt_ids"),
+            "prompt_ids_trunc": 1 if row.get("prompt_ids_trunc") else None,
         }
         sql = """INSERT INTO requests(id, model, state, prompt_tokens,
                    completion_tokens, tps, error, ts_start, ts_end,
-                   prompt, prompt_trunc, output, output_trunc, params, finish)
+                   prompt, prompt_trunc, output, output_trunc, params, finish,
+                   prompt_ids, prompt_ids_trunc)
                VALUES(:id, :model, :state, :prompt_tokens,
                    :completion_tokens, :tps, :error, :ts_start, :ts_end,
-                   :prompt, :prompt_trunc, :output, :output_trunc, :params, :finish)
+                   :prompt, :prompt_trunc, :output, :output_trunc, :params, :finish,
+                   :prompt_ids, :prompt_ids_trunc)
                ON CONFLICT(id) DO UPDATE SET
                  state=excluded.state,
                  prompt_tokens=COALESCE(excluded.prompt_tokens, prompt_tokens),
@@ -377,6 +384,8 @@ class MetricsStore:
                  output_trunc=COALESCE(excluded.output_trunc, output_trunc),
                  params=COALESCE(excluded.params, params),
                  finish=COALESCE(excluded.finish, finish),
+                 prompt_ids=COALESCE(NULLIF(excluded.prompt_ids, ''), prompt_ids),
+                 prompt_ids_trunc=COALESCE(excluded.prompt_ids_trunc, prompt_ids_trunc),
                  ts_end=excluded.ts_end"""
         if in_tx:
             self._conn.execute(sql, params)
@@ -475,6 +484,19 @@ class MetricsStore:
             )
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    def distinct_models(self, ts_from: float | None = None) -> list[str]:
+        """Models that have stored request history (issue 4: the search
+        model dropdown must offer what actually has history, not just what
+        this browser tab happened to see live)."""
+        q = "SELECT DISTINCT model FROM requests WHERE model IS NOT NULL AND model != ''"
+        args: list = []
+        if ts_from is not None:
+            q += " AND ts_start >= ?"
+            args.append(float(ts_from))
+        q += " ORDER BY model"
+        with self._lock:
+            return [r[0] for r in self._conn.execute(q, args).fetchall()]
 
     def request_by_id(self, request_id: str) -> dict | None:
         with self._lock:

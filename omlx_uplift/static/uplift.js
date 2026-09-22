@@ -1110,8 +1110,11 @@ function renderLive(s) {
     const list = $('live-list');
     const rows = [];
     for (const m of s.models) {
-        for (const p of m.prefilling) rows.push({ model: m.id, kind: C.t('uplift.inflight.prefilling'), prompt: p.prompt, progress: p.progress, reqId: p.request_id });
-        for (const g of m.generating) rows.push({ model: m.id, kind: C.t('uplift.inflight.generating'), prompt: g.prompt, generated: g.generated, tps: g.tps, reqId: g.request_id });
+        // normalize() exposes request ids as `rid`, not `request_id` —
+        // reading the raw name left reqId undefined and every per-request
+        // affordance (inspect badge, loop hint) dead.
+        for (const p of m.prefilling) rows.push({ model: m.id, kind: C.t('uplift.inflight.prefilling'), prompt: p.prompt, progress: p.progress, reqId: p.rid });
+        for (const g of m.generating) rows.push({ model: m.id, kind: C.t('uplift.inflight.generating'), prompt: g.prompt, generated: g.generated, tps: g.tps, reqId: g.rid });
     }
     $('live-count').textContent = rows.length ? `${rows.length}` : '';
     if (!rows.length) {
@@ -1124,6 +1127,15 @@ function renderLive(s) {
         row.style.flexWrap = 'wrap';
         const badge = document.createElement('span');
         badge.className = `badge ${r.kind}`; badge.textContent = r.kind;
+        // ISSUE-5: the state badge doubles as the INSPECT affordance — the
+        // row is already dense and a second button would crowd it. Only for
+        // rows with a real request id (rank0 aggregate rows have none).
+        if (r.reqId && r.reqId !== 'rank0') {
+            badge.classList.add('act');
+            badge.style.cursor = 'pointer';
+            badge.title = C.t('uplift.req.inspect_title');
+            badge.onclick = () => MM.openInspector(r.reqId);
+        }
         const name = document.createElement('span');
         name.className = 'model-name'; name.textContent = r.model; name.title = r.model;
         const meta = document.createElement('span');

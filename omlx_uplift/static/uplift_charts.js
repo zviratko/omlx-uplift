@@ -53,8 +53,13 @@ const MAX_POINTS = 4000;
    hourly rollups): backfills the live tick buffers so windows longer than
    this session — and gaps across server restarts — actually draw. Live
    ticks always win when newer than the newest history point; the coarse
-   boundary gets labeled honestly in the window readout. */
-let chartHist = { gen: [], prefill: [] };   // arrays of {ts, v, res}
+   boundary gets labeled honestly in the window readout.
+   ISSUE-6: the MEMORY&CACHE card used to draw ONLY the session buffer
+   (memData) — switching its timeframe showed nothing before page load.
+   mem.percent + cache.total_bytes now backfill from the store the same
+   way throughput does. Per-model hot-cache lines stay session-live-only
+   (their series keys rotate with the model set; honest gap, no fake line). */
+let chartHist = { gen: [], prefill: [], mem: [], cache: [] };   // arrays of {ts, v, res}
 let historyDirty = true, historyLoading = false;
 /* The two shared-history cards backfill at the LARGEST window any of them
    uses (one fetch, superset cached); each card draws its own slice. */
@@ -69,15 +74,21 @@ async function loadChartHistory() {
     historyLoading = true;
     try {
         const w = windowToParam();
-        const [g, p] = await Promise.all([
+        const [g, p, m] = await Promise.all([
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_generation_tps&window=${w}`).catch(() => null),
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_prefill_tps&window=${w}`).catch(() => null),
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('mem.percent,cache.total_bytes')}&window=${w}`).catch(() => null),
         ]);
         const conv = a => (a && a.series ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })) : []);
+        const convMap = (o, k, scale) => (o && o.series_map && o.series_map[k]
+            ? o.series_map[k].map(x => ({ ts: x.ts * 1000, v: scale ? x.v * scale : x.v, res: x.res })) : []);
         // Only adopt if the window did not change mid-flight (stale-window
         // race: a slow 24h response landing over a fresh 5m selection).
         if (w === windowToParam()) {
-            chartHist = { gen: conv(g), prefill: conv(p) };   // server ts is epoch SECONDS -> ms
+            chartHist = { gen: conv(g), prefill: conv(p),
+                          mem: convMap(m, 'mem.percent'),
+                          // bytes -> GB: the card's right axis is GB (issue 6)
+                          cache: convMap(m, 'cache.total_bytes', 1e-9) };   // server ts is epoch SECONDS -> ms
             historyDirty = false;
             if (tpsChart) redrawCharts();
         } else {
@@ -110,12 +121,32 @@ function chartColors() {
              blue: cs.getPropertyValue('--chart-1').trim() || '#f2f0ea',
              gold: cs.getPropertyValue('--chart-2').trim() || '#e8a020' };
 }
-function windowedData(data) {
-    const cutoff = Date.now() - cardWindow('chart-mem') * 1000;
-    let i = 0;
-    while (i < data[0].length && data[0][i] < cutoff) i++;
-    return data.map(col => col.slice(i));
+/* Columns for the memory card: same union-timestamp alignment as the
+   throughput chart. Series 1 (memory %) and 2 (cache GB) get server
+   backfill; the three per-model hot-cache lines only ever exist for this
+   session (issue 6: honest gap instead of pretending history). */
+function memWindowed() {
+    const now = Date.now();
+    const win = cardWindow('chart-mem');
+    const mm = C.mergeHistory(chartHist.mem, memData[0], memData[1], win, now);
+    const cc = C.mergeHistory(chartHist.cache, memData[0], memData[2], win, now);
+    const hot = [3, 4, 5].map(ci => ({ ts: memData[0], v: memData[ci] }));
+    const ts = [...new Set(mm.ts.concat(cc.ts))].sort((a, b) => a - b);
+    const mmI = new Map(mm.ts.map((t, i) => [t, mm.v[i]]));
+    const ccI = new Map(cc.ts.map((t, i) => [t, cc.v[i]]));
+    const hotI = hot.map(h => {
+        const m = new Map();
+        for (let i = 0; i < h.ts.length; i++) if (h.v[i] != null) m.set(h.ts[i], h.v[i]);
+        return m;
+    });
+    const cols = [ts,
+        ts.map(t => (mmI.has(t) ? mmI.get(t) : null)),
+        ts.map(t => (ccI.has(t) ? ccI.get(t) : null))];
+    for (const h of hotI) cols.push(ts.map(t => (h.has(t) ? h.get(t) : null)));
+    return cols;
 }
+/* windowedData() retired 2026-09-22 (issue 6): the memory card draws
+   memWindowed() now, which merges server history with the session buffer. */
 function seriesValue(v) {
     return v === null || v === undefined ? '—' : C.fmtCompact(v);
 }
@@ -316,7 +347,7 @@ function createCharts() {
         legendUpdater());
     memOpts.scales.y = { range: [0, 100] };
     memOpts.height = Math.max(200, $('chart-mem').clientHeight || 240);
-    memChart = new uPlot(memOpts, windowedData(memData), $('chart-mem'));
+    memChart = new uPlot(memOpts, memWindowed(), $('chart-mem'));
     bindCursorUpdater(tpsChart); bindCursorUpdater(memChart);
     bindCursorTip(tpsChart); bindCursorTip(memChart);
     resizeCharts();
@@ -325,7 +356,7 @@ function createCharts() {
 function redrawCharts() {
     if (!tpsChart) return;
     tpsChart.setData(tpsWindowed());
-    memChart.setData(windowedData(memData));
+    memChart.setData(memWindowed());
     // Keep the hovered position pinned across polls (index shifts otherwise);
     // when not hovering, show the latest samples.
     restoreCursor(tpsChart) || legendUpdater()(tpsChart);
@@ -525,15 +556,17 @@ function renderCardTsRows(force) {
         row.classList.remove('ts-collapsed');
         for (const sec of C.LAYOUT_WINDOWS) {
             const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'ts-chip' + (sec === win ? ' on' : '');
+            b.type = 'button'; b.className = 'ts-chip' + (sec === win ? ' on' : '');
             b.textContent = windowLabel(sec);
             b.title = windowLabel(sec);
             b.onclick = () => setCardWindow(id, sec);
             row.append(b);
         }
-        const on = row.querySelector('.on');
-        if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        // NOTE: no scrollIntoView here. The chips wrap (CSS), so scrolling
+        // the active chip into view yanked the whole page to whichever card
+        // was rebuilt last — "changing a timeframe jumps the screen"
+        // (user 2026-09-22). The rebuild is a no-op for rows that already
+        // render the right set.
     }
 }
 

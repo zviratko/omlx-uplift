@@ -51,6 +51,30 @@ def _truncate(text: str, cap: int = PAYLOAD_CAP):
     return raw[:cap].decode("utf-8", errors="ignore"), True
 
 
+# Issue 3: token-id prompts kept only a count, so the inspector could never
+# show what was actually sent. Retain a HEAD + TAIL id sample (the middle of
+# a 200k-token prompt is dead weight in RAM and on disk); the router decodes
+# them lazily with the loaded engine's tokenizer when a modal is opened.
+PROMPT_IDS_HEAD = 4096
+PROMPT_IDS_TAIL = 4096
+
+
+def _token_ids_sample(prompt, head=PROMPT_IDS_HEAD, tail=PROMPT_IDS_TAIL):
+    """Return (json_string, truncated_flag) for a token-id prompt sample:
+    first `head` ids plus last `tail` ids when longer. None when the list is
+    not a pure int sequence (defensive: never store a guess)."""
+    try:
+        if not all(isinstance(t, int) for t in prompt[:8]):
+            return None
+        n = len(prompt)
+        if n <= head + tail:
+            return json.dumps(list(prompt)), False
+        return (json.dumps(list(prompt[:head]) + list(prompt[n - tail:])),
+                True)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 # ---- RL-4 degenerate-loop hint ------------------------------------------
 LOOP_WINDOW = 800          # chars of tail inspected per check
 _NO_FINISH = object()   # sentinel: row had no 'finish' key
@@ -180,9 +204,14 @@ def _capture_payload(req: Any) -> dict:
         if isinstance(prompt, str) and prompt:
             out["prompt"], out["prompt_trunc"] = _truncate(prompt)
         elif isinstance(prompt, list) and prompt:
-            # token-id prompt: no tokenizer in the tracker — describe it
+            # token-id prompt: describe it AND keep the ids so the
+            # inspector can decode them lazily with the model's tokenizer
+            # (issue 3 — tokenized prompts used to be undecodable dead text).
             out["prompt"] = f"(tokenized prompt, {len(prompt)} tokens)"
             out["prompt_trunc"] = False
+            ids = _token_ids_sample(prompt)
+            if ids is not None:
+                out["prompt_ids"], out["prompt_ids_trunc"] = ids
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -221,6 +250,9 @@ class RequestTracker:
         self._done_ids: set[str] = set()
         # ids of rows whose state changed since the last drain (for SSE)
         self._dirty_ids: set[str] = set()
+        # rid -> consecutive sample-passes the row was absent from an
+        # otherwise-OK snapshot (MISSES-GRACE; see sample())
+        self._miss_counts: dict[str, int] = {}
         self._sampled_at = 0.0
 
     # ------------------------------------------------------------------
@@ -254,6 +286,29 @@ class RequestTracker:
                 model_schedulers[model_id] = sched
                 model_collectors[model_id] = _find_output_collectors(entry)
                 model_rows = list(_rows_from_snapshot(snap, model_id, now))
+                # PREFILL-VIS: chunked prefills live in scheduler.prefilling,
+                # which the admin snapshot does NOT publish. Without this the
+                # tracker saw them "departed" mid-prefill -> premature
+                # complete, then a flip back to generating when the request
+                # reappeared in running_by_id (user: feed flip-flops and
+                # eventually latches everything at complete).
+                try:
+                    from omlx.prefill_progress import get_prefill_tracker
+
+                    snap_ids = {rid for rid, _ in model_rows}
+                    for p in get_prefill_tracker().get_model_progress(model_id):
+                        rid = p.get("request_id") or ""
+                        if not rid or rid in seen or rid in snap_ids:
+                            continue
+                        model_rows.append((rid, {
+                            "id": rid, "state": "prefilling", "model": model_id,
+                            "origin": "real", "ts": now,
+                            "prompt_tokens": p.get("prompt_tokens")
+                            or p.get("total") or 0,
+                        }))
+                        seen.add(rid)
+                except Exception:  # noqa: BLE001 — vanilla layout changed
+                    pass
             except Exception:  # noqa: BLE001 - best-effort like the stats route
                 continue
             sampled_models.add(model_id)
@@ -301,15 +356,27 @@ class RequestTracker:
                     self._dirty_ids.add(rid)
                 self._active[rid] = merged
             # departed rows -> complete. Only when the row's own model was
-            # sampled OK this pass (a failed sample says nothing about absence).
+            # sampled OK this pass (a failed sample says nothing about
+            # absence). MISSES-GRACE: the admin snapshot is published on the
+            # engine thread and can lag a step; a request that is simply
+            # between queues for ONE tick (chunked-prefill handoff, scheduler
+            # moves) used to flip to complete and back (user: rows oscillate
+            # ongoing/completed). Require two consecutive absences; the exact
+            # note_finalize hook still ends rows immediately when it fires.
             for rid in list(self._active):
                 if rid in seen:
+                    self._miss_counts.pop(rid, None)
                     continue
                 row = self._active[rid]
                 if row.get("model") not in sampled_models:
                     continue
                 if row.get("state") in ("queued", "prefilling", "generating",
                                         "cancelling"):
+                    misses = self._miss_counts.get(rid, 0) + 1
+                    self._miss_counts[rid] = misses
+                    if misses < 2:
+                        continue
+                    self._miss_counts.pop(rid, None)
                     done = dict(row)
                     # an aborted row that simply vanished was cancelled
                     done["state"] = ("error" if row.get("state") == "cancelling"
@@ -334,6 +401,7 @@ class RequestTracker:
             for rid in list(self._active):
                 if now - self._active[rid].get("ts", now) > ACTIVE_STALE_S:
                     self._dirty_ids.add(rid)
+                    self._miss_counts.pop(rid, None)
                     del self._active[rid]
             self._sampled_at = now
 
@@ -436,6 +504,7 @@ class RequestTracker:
                     row["tps"] = round(n_out / dur, 1)
             self._done.append(row)
             self._done_ids.add(rid)
+            self._miss_counts.pop(rid, None)
             if len(self._done_ids) > 4 * RING_LIMIT:
                 # oldest first: evict against the done ring's contents
                 self._done_ids &= {r["id"] for r in self._done}

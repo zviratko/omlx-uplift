@@ -23,12 +23,30 @@ const FEG = {
 };
 /* ---------------- event feed / reactions ---------------- */
 const MAX_FEED = 40;
-function pushFeed(events) {
+/* ISSUE-2 (Events card): one row per key, updated in place. Request
+   transitions used to push a fresh line for every state change, so a single
+   request accumulated queued→prefilling→generating→complete as four lines.
+   Keyed rows keep their POSITION (user: rows must not reshuffle); only the
+   time + state text refresh. New keys prepend. */
+function pushFeed(events, keyFor) {
     const feed = $('feed');
     const empty = feed.querySelector('.empty'); if (empty) empty.remove();
     for (const ev of events.slice().reverse()) {
-        const row = document.createElement('div');
+        const key = keyFor ? keyFor(ev) : null;
+        let row = key ? feed.querySelector(`[data-evkey="${CSS.escape(key)}"]`) : null;
+        if (row) {
+            const t = row.querySelector('time');
+            if (t) t.textContent = new Date().toLocaleTimeString('en-GB');
+            const s = row.querySelector('.ev');
+            if (s) s.textContent = ev.text;
+            row.className = `feed-item k-${ev.kind}`;
+            if (ev.model) row.dataset.model = ev.model;
+            continue;
+        }
+        row = document.createElement('div');
         row.className = `feed-item k-${ev.kind}`;
+        if (key) row.dataset.evkey = key;
+        if (ev.model) row.dataset.model = ev.model;
         const time = document.createElement('time');
         time.textContent = new Date().toLocaleTimeString('en-GB');
         const span = document.createElement('span');
@@ -151,8 +169,20 @@ function renderReqFeed() {
         if (!cur) list.innerHTML = '<div class="empty">No requests yet</div>';
         return;
     }
+    // ISSUE-2 (feed order): sort by BIRTH (reqTs — first seen, immutable),
+    // never by ts (last update). Rows used to reshuffle on every SSE tick
+    // as their ts refreshed, so live requests bounced around the list.
+    // Active rows own the top band (user: "live requests should stay on
+    // top"), each band birth-ordered newest-first. A row's place inside its
+    // band is fixed until page refresh (one request = one line).
     list.innerHTML = '';
-    const sorted = rows.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    const active = [], done = [];
+    for (const r of rows) {
+        (['queued', 'prefilling', 'generating'].includes(r.state) ? active : done).push(r);
+    }
+    const byBirth = (a, b) => (a.reqTs || a.ts || 0) - (b.reqTs || b.ts || 0);
+    active.sort(byBirth); done.sort(byBirth);
+    const sorted = active.reverse().concat(done.reverse()).slice(0, MAX_REQFEED);
     for (const r of sorted.slice(0, MAX_REQFEED)) {
         const row = document.createElement('div'); row.className = 'model-row';
         const badge = document.createElement('span');
@@ -202,7 +232,10 @@ function renderReqFeed() {
 }
 function upsertReq(id, patch) {
     const prev = reqFeedRows.get(id) || { prompt: 0, completion: 0 };
-    reqFeedRows.set(id, Object.assign({}, prev, patch, { id, ts: Date.now() }));
+    // reqTs = first-seen birth stamp (immutable). Feed ordering keys on it
+    // so a row never moves when its counters/state tick (issue 2).
+    reqFeedRows.set(id, Object.assign({}, prev, patch,
+        { id, ts: Date.now(), reqTs: prev.reqTs || Date.now() }));
     if (reqFeedRows.size > MAX_REQFEED * 3) {
         const sorted = [...reqFeedRows.entries()].sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0));
         for (const [id2, r] of sorted.slice(MAX_REQFEED)) {
@@ -220,7 +253,10 @@ function pushServerEvent(ev) {
         if (ev.tps !== undefined) patch.tps = ev.tps;
         if (ev.loop_hint !== undefined) patch.loopHint = ev.loop_hint;
         upsertReq(ev.id, patch);
-        pushFeed([{ kind: 'requests', text: `${ev.origin === 'real' ? '◆ ' : ''}${ev.id.slice(0, 6)} → ${ev.state}` }]);
+        // one Events-card line per request, state updated in place (issue 2)
+        pushFeed([{ kind: 'requests', reqKey: 'req:' + ev.id,
+                    text: `${ev.origin === 'real' ? '◆ ' : ''}${ev.id.slice(0, 6)} → ${ev.state}` }],
+                  e => e.reqKey || null);
     } else if (ev.type === 'model-load') {
         pushFeed([{ kind: 'model-add', model: ev.id, text: C.t('uplift.feed.load_requested', {model: ev.id}) }]);
     } else if (ev.type === 'model-unload') {

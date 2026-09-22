@@ -2131,11 +2131,34 @@ async function openInspector(reqId) {
     outPre.style.cssText = 'max-height:240px;overflow:auto;white-space:pre-wrap;margin:4px 0;background:var(--panel);padding:6px';
     const promptPre = document.createElement('pre');
     promptPre.style.cssText = 'max-height:140px;overflow:auto;white-space:pre-wrap;margin:4px 0;background:var(--panel);padding:6px';
+    // ISSUE-3: prompts used to dump 32 KB of head — the tail (what the
+    // model actually answers) was off-screen. Default view = last ~1K chars
+    // + a SHOW FULL toggle; token-id prompts render their decoded text.
+    const PROMPT_TAIL_CHARS = 1000;
+    let promptFull = false, promptText = '';
+    const promptToggle = document.createElement('button');
+    promptToggle.type = 'button'; promptToggle.className = 'se-btn';
+    promptToggle.style.cssText = 'font-size:10px;padding:1px 6px;margin-left:6px';
+    promptToggle.onclick = () => { promptFull = !promptFull; paintPrompt(); };
+    function paintPrompt() {
+        if (!promptText) { promptPre.textContent = ''; return; }
+        const long = promptText.length > PROMPT_TAIL_CHARS;
+        promptPre.textContent = (long && !promptFull)
+            ? '…\n' + promptText.slice(promptText.length - PROMPT_TAIL_CHARS)
+            : promptText;
+        promptToggle.textContent = long
+            ? (promptFull ? C.t('uplift.req.show_tail') : C.t('uplift.req.show_full'))
+            : '';
+        promptToggle.style.display = long ? '' : 'none';
+        promptPre.scrollTop = (long && !promptFull) ? 0 : promptPre.scrollHeight;
+    }
     const followLbl = document.createElement('label');
     followLbl.style.cssText = 'font-size:10px;color:var(--dim);user-select:none';
     const followChk = document.createElement('input');
     followChk.type = 'checkbox'; followChk.checked = true;
     followLbl.append(followChk, ' ' + C.t('uplift.req.follow'));
+    // ISSUE-3: the label alone was cryptic — say what it actually does.
+    followLbl.title = C.t('uplift.req.follow_title');
     followChk.onchange = () => { follow = followChk.checked; };
     // user scrolls up -> stop following automatically (reader, not robot)
     outPre.onscroll = () => {
@@ -2168,11 +2191,45 @@ async function openInspector(reqId) {
     const oLabel = document.createElement('div'); oLabel.className = 'se-hint';
     oLabel.textContent = C.t('uplift.req.output');
     box.append(pLabel, promptBox, oLabel, outputBox, paramsBox, bar);
+    pLabel.append(promptToggle);
     promptBox.append(promptPre); outputBox.append(followLbl, outPre);
 
     function setBlock(pre, block, truncLabel) {
         if (!block) { pre.textContent = C.t('uplift.req.none'); return; }
         pre.textContent = block.text + (block.truncated ? `\n… ${truncLabel}` : '');
+    }
+    /* ISSUE-3 prompt pick: decoded token text wins when the server decoded
+       the stored id sample; otherwise the raw captured string. A tail-
+       sampled decode says so honestly (the middle of a long prompt is not
+       shown, only head+tail were kept). */
+    function setPrompt(d) {
+        const dec = d.prompt_decoded;
+        promptFull = false;
+        if (dec && dec.text) {
+            const bits = [];
+            if (dec.sample_truncated) bits.push(C.t('uplift.req.decoded_gap'));
+            if (d.prompt && d.prompt.truncated) bits.push(C.t('uplift.req.truncated'));
+            promptText = dec.text + (bits.length ? `\n… ${bits.join(' · ')}` : '');
+            paintPrompt();
+            return;
+        }
+        if (dec && dec.note) {
+            promptText = (d.prompt && d.prompt.text) || '';
+            paintPrompt();
+            const n = document.createElement('div');
+            n.className = 'se-hint'; n.textContent = dec.note;
+            promptBox.replaceChildren(promptPre, n);
+            return;
+        }
+        const b = d.prompt;
+        promptText = (b && b.text) || '';
+        if (!promptText) {
+            promptPre.textContent = C.t('uplift.req.none');
+            promptToggle.style.display = 'none';
+            return;
+        }
+        promptText += (b.truncated ? `\n… ${C.t('uplift.req.truncated')}` : '');
+        paintPrompt();
     }
     async function refresh() {
         if (closed) return;
@@ -2184,6 +2241,7 @@ async function openInspector(reqId) {
         if (!d.found) {
             head.textContent = C.t('uplift.req.not_found');
             outPre.textContent = d.note || ''; promptPre.textContent = '—';
+            promptText = ''; promptToggle.style.display = 'none';
             paramsBox.textContent = ''; cancelBtn.style.display = 'none';
             stop();   // honest empty state, never a spinner forever
             return;
@@ -2198,7 +2256,7 @@ async function openInspector(reqId) {
         if (r.finish) bits.push(`finish: ${r.finish}`);
         if (d.source) bits.push(C.t('uplift.req.source.' + d.source));
         head.textContent = bits.filter(Boolean).join(' · ');
-        setBlock(promptPre, d.prompt, C.t('uplift.req.truncated'));
+        setPrompt(d);
         setBlock(outPre, d.output, C.t('uplift.req.truncated'));
         if (follow && d.output) outPre.scrollTop = outPre.scrollHeight;
         paramsBox.textContent = d.params ? C.t('uplift.req.params') + ': ' + JSON.stringify(d.params) : '';
