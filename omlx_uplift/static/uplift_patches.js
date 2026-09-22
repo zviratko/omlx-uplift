@@ -149,13 +149,13 @@ function renderPatches() {
             'Patch engine disabled (kill switch) — booting pristine vanilla, manifest untouched.');
     }
 
-    // honesty badge: applied patches mean classic files are NOT byte-identical
-    const nApplied = d.patches.filter(p => p.state === 'applied').length;
-    $('pt-sub').textContent = nApplied
-        ? ptMsg('uplift.patches.divergence',
-                '{n} local patch(es) active — classic /admin/ files are NOT byte-identical')
-            .replace('{n}', nApplied)
-        : ptMsg('uplift.patches.pristine', 'vanilla — no local patches active');
+    // plain status line: patches loaded vs active (enabled). Patches can
+    // touch any part of the package, not just /admin/ — no claims about
+    // which files diverge from vanilla.
+    $('pt-sub').textContent = ptMsg('uplift.patches.counts',
+        '{loaded} loaded · {active} active')
+        .replace('{loaded}', d.patches.length)
+        .replace('{active}', d.patches.filter(p => p.enabled).length);
 
     const auto = $('pt-auto-check');
     auto.checked = !!(d.config && d.config.auto_update_check);

@@ -1536,7 +1536,24 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-addform-hint { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dim); }
 .pt-addform-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; padding: 8px 10px; }
 .pt-field { display: inline-flex; flex-direction: column; gap: 2px; font-size: var(--fs-meta); color: var(--dim); }
-.pt-field input, .pt-field select { font-size: inherit; }
+/* One height for every control in the add row (32px — the uplift form
+   convention, same as select/.qz-form). Before this the row mixed
+   browser-default 19px inputs and buttons with the 32px select. */
+.pt-addform-row input[type="text"], .pt-addform-row input[type="file"],
+.pt-addform-row select {
+    background: transparent; border: 1px solid var(--edge); color: var(--ink);
+    border-radius: 0; height: 32px; padding: 0 8px;
+    font: 400 12px/1 var(--mono); box-sizing: border-box; }
+.pt-addform-row input:focus, .pt-addform-row select:focus { outline: 1px solid var(--ink); }
+/* .btn is uplift-owned (patches page only): match the control height. */
+.btn { background: transparent; border: 1px solid var(--edge); color: var(--ink);
+    border-radius: 0; height: 32px; padding: 0 12px; box-sizing: border-box;
+    font: 400 12px/1 var(--mono); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; }
+.btn:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.primary:hover { background: transparent; color: var(--ink); }
+.pt-auto { height: 32px; }
 .pt-reversal { border: 1px dashed var(--accent, #e0662e); padding: 4px 8px; }
 .pt-st-reversal { border-color: var(--accent, #e0662e); color: var(--accent, #e0662e); }
 .pt-st-reversal::before { background: var(--accent, #e0662e); }
