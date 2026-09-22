@@ -611,6 +611,26 @@ def _yaml_scalar(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _block_scalable_text(name: str, blob: bytes):
+    """Decodable-as-text for a readable YAML block scalar, else None (b64).
+
+    Only text-typed resources qualify; the payload must be UTF-8 without
+    control characters, and no line may start or end with whitespace (a
+    plain block scalar would eat that and break byte-exact round-trip)."""
+    if os.path.splitext(name)[1].lower() not in (".svg", ".css", ".txt"):
+        return None
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if any(ord(c) < 32 and c != "\n" for c in text):
+        return None
+    lines = text.split("\n")
+    if any(line != line.strip() for line in lines):
+        return None
+    return text
+
+
 def compile_dir(dir_path: Path) -> str:
     """Directory -> canonical crate text: keys sorted in a fixed order,
     text as block scalar, binary as single-line base64. Deterministic:
@@ -651,8 +671,19 @@ def compile_dir(dir_path: Path) -> str:
             if len(blob) > MAX_RESOURCE_BYTES:
                 log.warning("compile: skipping %s (over 512 KB)", n)
                 continue
-            out.append(f"  {_yaml_scalar(n)}: "
-                       f"{base64.b64encode(blob).decode('ascii')}")
+            text = _block_scalable_text(n, blob)
+            if text is not None:
+                # design section 2.2: text resources stay readable — SVG
+                # icons compile back to block scalars, | and |- carry the
+                # exact trailing-newline state so round-trip stays byte-exact
+                style = "|" if text.endswith("\n") else "|-"
+                body = text[:-1] if text.endswith("\n") else text
+                out.append(f"  {_yaml_scalar(n)}: {style}")
+                for line in body.split("\n"):
+                    out.append(("    " + line) if line else "")
+            else:
+                out.append(f"  {_yaml_scalar(n)}: "
+                           f"{base64.b64encode(blob).decode('ascii')}")
 
     css = ""
     ov = dir_path / "overlay.css"

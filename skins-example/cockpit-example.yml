@@ -1,0 +1,78 @@
+# Uplift skin crate — copy into ~/.omlx/uplift/skins/ (no restart needed).
+# A faithful mirror of the built-in 'cockpit' theme as a skin: every token
+# and structural rule from uplift.css's cockpit block, restated in skin
+# format to prove the format covers it. The built-in stays untouched; this
+# is the showcase of what a skin CAN do (tokens + arbitrary overlay CSS).
+skin_version: 1
+label: "Cockpit Example"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#07090e"
+  card: "#0c1017"
+  row2: "#131a24"
+  field: "#05070b"
+  panel: "#131a24"
+  edge: "#2b3648"
+  ink: "#f2efe6"
+  dim: "#9fb0c8"
+  accent: "#ffb830"
+  chart-1: "#f2efe6"
+  chart-2: "#ffb830"
+  grid: "#222c3c"
+  heat: "#ffb830"
+  frame: "#7d92b5"
+  red: "#e8443a"
+  bad: "#e8443a"
+  good: "#57e38a"
+  hdr-ink: "#f2efe6"
+  hdr-edge: "#2b3648"
+  hdr-hover: "#2b3648"
+  hdr-weight: "400"
+css: |-
+  /* overlay rules load ONLY while this skin is active (single link tag),
+     so unscoped selectors are correctly scoped in practice. */
+  html { color-scheme: dark; }
+  /* scan-line texture on the page ground only */
+  body {
+      background: repeating-linear-gradient(0deg,
+          var(--bg) 0px, var(--bg) 3px, #090c12 3px, #090c12 4px);
+  }
+  /* bracket-device corner frames on every panel */
+  .card { outline: 0; border-top-color: var(--frame); }
+  .card::after {
+      content: ""; position: absolute; inset: 3px; pointer-events: none;
+      background:
+          linear-gradient(var(--frame), var(--frame)) top left / 12px 1px,
+          linear-gradient(var(--frame), var(--frame)) top left / 1px 12px,
+          linear-gradient(var(--frame), var(--frame)) top right / 12px 1px,
+          linear-gradient(var(--frame), var(--frame)) top right / 1px 12px,
+          linear-gradient(var(--frame), var(--frame)) bottom left / 12px 1px,
+          linear-gradient(var(--frame), var(--frame)) bottom left / 1px 12px,
+          linear-gradient(var(--frame), var(--frame)) bottom right / 12px 1px,
+          linear-gradient(var(--frame), var(--frame)) bottom right / 1px 12px;
+      background-repeat: no-repeat;
+  }
+  .card h2 { color: var(--dim); letter-spacing: 0.14em; }
+  /* instrument bar: hatched amber needle-scale */
+  .meter { height: 12px; border: 1px solid var(--dim);
+      background: var(--field); padding: 1px; }
+  .meter > div {
+      background: repeating-linear-gradient(45deg,
+          var(--accent) 0 4px, #7a5a14 4px 6px);
+      height: 100%;
+  }
+  .meter.bad > div {
+      background: repeating-linear-gradient(45deg,
+          var(--red) 0 4px, #6e1e19 4px 6px);
+  }
+  /* physical instrument buttons: pushed steel, white when pressed */
+  .se-btn { border-color: var(--frame); }
+  .icon-btn:hover, select:hover { background: var(--ink); color: var(--bg); }
+  /* amber glow on the live telemetry strip */
+  .logo .dot { background: var(--good); box-shadow: 0 0 8px rgba(87, 227, 138, .6); }
+  .logo .dot.bad { background: var(--red); box-shadow: 0 0 8px rgba(232, 68, 58, .6); }
+  .rqchip { box-shadow: 0 0 6px rgba(255, 184, 48, .35); }
+  /* charts sit in their steel bezel */
+  .chart-box { border: 1px solid var(--edge); background: var(--field); }

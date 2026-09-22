@@ -441,6 +441,33 @@ def test_cli_compile_is_deterministic_block_scalar(root):
     assert "label: \"Night Watch\"" in text
 
 
+def test_cli_compile_svg_icons_stay_readable_block_scalars(root):
+    """Design 2.2/8: text resources survive compile as readable YAML block
+    scalars (SVG icons must not be forced to base64); binary stays b64."""
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4">\n'
+           '<path d="M0 0h4v4z"/>\n</svg>\n')
+    crate = ("tokens:\n  bg: \"#101010\"\n"
+             "icons:\n  caret.svg: \"\"\n  logo-dot.png: \"%s\"\n"
+             % base64.b64encode(PNG_1PX).decode())
+    drop(root, "night", text=crate, mtime=1_700_000_000)
+    skins.list_skins(root)
+    d = root / "night-1700000000"
+    (d / "icons" / "caret.svg").write_text(svg)
+    text = skins.compile_dir(d)
+    # SVG's trailing newline => keep-style block scalar (byte-exact choice)
+    assert "  \"caret.svg\": |\n" in text
+    assert "<path d=\"M0 0h4v4z\"/>" in text            # readable, not b64
+    assert base64.b64encode(PNG_1PX).decode() in text  # binary still b64
+    # byte-exact round trip of the SVG through decompile
+    out = root / "out"
+    out.mkdir()
+    (out / "night.yml").write_text(text)
+    os.utime(out / "night.yml", (1_700_000_000, 1_700_000_000))
+    dn = skins.decompile_crate(out / "night.yml", out)
+    assert (out / dn / "icons" / "caret.svg").read_text() == svg
+    assert (out / dn / "icons" / "logo-dot.png").read_bytes() == PNG_1PX
+
+
 def test_cli_size_caps(root):
     big = base64.b64encode(b"x" * (skins.MAX_RESOURCE_BYTES + 1)).decode()
     crate = f"icons:\n  caret.png: \"{big}\"\n"
