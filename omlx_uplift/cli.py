@@ -152,27 +152,20 @@ def _brew_omlx_python() -> Path | None:
     return cand if prefix and cand.is_file() else None
 
 
-def _target_can_import(python: Path) -> bool:
-    import subprocess
-
-    return (
-        subprocess.run(
-            [str(python), "-c", "import omlx_uplift"],
-            capture_output=True,
-        ).returncode
-        == 0
-    )
-
-
 def _pth_content(target: Path | None) -> str:
-    """The .pth body. If the target interpreter can import omlx_uplift on
-    its own (package lives in its own site-packages), a bare import
-    suffices. Otherwise bootstrap sys.path with OUR package parent dir
-    first — a .pth line starting with 'import ' is executed, any other
-    line is appended to sys.path, so the keg needs exactly this ONE file,
-    nothing else. Order matters: path line first."""
+    """The .pth body: ALWAYS bootstrap sys.path with OUR package parent
+    dir, then import autopatch — a .pth line starting with 'import ' is
+    executed, any other line is appended to sys.path, so the keg needs
+    exactly this ONE file, nothing else. Order matters: path line first.
+
+    Do NOT probe the target for 'import omlx_uplift' to decide whether the
+    path line is needed: a working .pth already in the target's
+    site-packages makes that probe succeed BY BOOTSTRAPPING ITSELF, so the
+    rewrite would drop the path line and break the mount we just proved
+    (the run-1 404 / run-2 fixes-it sequence). A duplicated sys.path entry
+    is harmless; the conditional was not."""
     lines: list[str] = []
-    if target is not None and not _target_can_import(target):
+    if target is not None:
         pkg_parent = str(Path(__file__).resolve().parent.parent)
         # brew kegs live under a VERSIONED Cellar dir; point the .pth at
         # the stable opt/ symlink instead so `brew upgrade omlx-uplift`
