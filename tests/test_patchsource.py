@@ -166,6 +166,61 @@ class OrchestrationTests(unittest.TestCase):
         # nothing stored on a gate reject (fail-safe)
         self.assertIsNone(self.store.find(self.store.load(), "detail"))
 
+    def test_add_prunes_skip_pattern_sections(self):
+        # a whole-repo PR: one real keg file + test/doc noise. The default
+        # skip patterns must drop the noise BEFORE the gate so the patch
+        # passes and only the keg file is stored/applied.
+        noise = (b"\ndiff --git a/tests/test_x.py b/tests/test_x.py\n"
+                 b"--- /dev/null\n+++ b/tests/test_x.py\n@@ -0,0 +1,1 @@\n"
+                 b"+def test_x(): pass\n"
+                 b"\ndiff --git a/docs/readme.md b/docs/readme.md\n"
+                 b"--- /dev/null\n+++ b/docs/readme.md\n@@ -0,0 +1,1 @@\n"
+                 b"+hello\n")
+        res = patchsource.add_patch(
+            self.store, "mixed", {"kind": "upload", "data": PR3764 + noise},
+            self.root)
+        self.assertTrue(res["ok"], res)
+        # skipped rows visible in the UI table + advisory naming them
+        statuses = {f["path"]: f["status"] for f in res["files"]}
+        self.assertEqual(statuses["tests/test_x.py"], "skipped")
+        self.assertEqual(statuses["docs/readme.md"], "skipped")
+        self.assertTrue(any("skipped 2 file" in a for a in res["advisories"]),
+                        res["advisories"])
+        m = self.store.load()
+        p = self.store.find(m, "mixed")
+        stored = open(os.path.join(self.store.base_dir,
+                                   p["versions"][0]["patch_file"]), "rb").read()
+        self.assertNotIn(b"tests/test_x.py", stored)
+        self.assertIn(b"omlx/admin/routes.py", stored)
+
+    def test_skip_patterns_config_override_disables(self):
+        # explicit empty list disables pruning -> the (missing) test file
+        # fails the gate again, exactly like before skip patterns existed
+        m = self.store.load()
+        m["config"]["skip_path_prefixes"] = []
+        self.store.save(m)
+        noise = (b"\ndiff --git a/tests/test_x.py b/tests/test_x.py\n"
+                 b"--- a/tests/test_x.py\n+++ b/tests/test_x.py\n@@ -1,1 +1,1 @@\n"
+                 b"-import os\n+import sys\n")
+        res = patchsource.add_patch(
+            self.store, "strict", {"kind": "upload", "data": PR3764 + noise},
+            self.root)
+        self.assertFalse(res["ok"])
+        self.assertEqual(res.get("stage"), "gate")
+
+    def test_all_skipped_is_rejected(self):
+        m = self.store.load()
+        m["config"]["skip_path_prefixes"] = ["tests/"]
+        self.store.save(m)
+        only_tests = (b"diff --git a/tests/test_x.py b/tests/test_x.py\n"
+                      b"--- /dev/null\n+++ b/tests/test_x.py\n@@ -0,0 +1,1 @@\n"
+                      b"+def test_x(): pass\n")
+        res = patchsource.add_patch(
+            self.store, "alltests", {"kind": "upload", "data": only_tests},
+            self.root)
+        self.assertFalse(res["ok"])
+        self.assertIn("skip", res.get("reason", "").lower())
+
     def test_add_unchanged_no_duplicate_version(self):
         patchsource.add_patch(self.store, "demo",
                               {"kind": "upload", "data": PR3764}, self.root)

@@ -16,6 +16,7 @@ Rules (per PAT-0 design, do not loosen without a decision record):
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import os
 import re
@@ -76,18 +77,12 @@ def _fail(reason: str) -> dict:
     return {"ok": False, "reason": reason, "files": []}
 
 
-def parse_diff(diff: bytes | str) -> dict:
-    """Parse a (possibly multi-file) unified diff.
-
-    Returns {"ok": bool, "reason": str|None, "files": [filepatch]}.
-    Each filepatch: {path, action: modify|create|delete, hunks, reject}.
-    A file with a non-None reject must abort the whole patch (strict).
-    """
-    if isinstance(diff, str):
-        diff = diff.encode("utf-8")
-    if not diff.strip():
-        return _fail("empty diff")
-
+def _split_sections(diff: bytes) -> tuple[list[bytes], list[int]]:
+    """Split a diff into section line-ranges. Returns (lines, bounds) where
+    bounds are section start indices plus a final len(lines) sentinel, so
+    section k is lines[bounds[k]:bounds[k+1]]. Empty bounds = no headers
+    (not a unified diff). Shared by parse_diff and prune_sections so both
+    agree exactly on what 'one file section' means."""
     lines = diff.split(b"\n")
     if lines and lines[-1] == b"":
         lines.pop()  # artifact of the final newline
@@ -123,7 +118,6 @@ def parse_diff(diff: bytes | str) -> dict:
     #   "--- p" then "+++ q"   classic unified diff; when the diff carries
     #                          no 'diff --git' at all this pair IS the
     #                          section header (diff -ruN style)
-    has_git = any(ln.startswith(b"diff --git ") for ln in lines)
     starts: list[int] = []
     hunks_seen_since = False   # a hunk passed since the last boundary
     header_run = False         # boundary was the previous line (Index: run)
@@ -157,22 +151,37 @@ def parse_diff(diff: bytes | str) -> dict:
         else:
             header_run = False
         i += 1
-    if not starts:
+    return lines, (starts + [len(lines)] if starts else [])
+
+
+def parse_diff(diff: bytes | str) -> dict:
+    """Parse a (possibly multi-file) unified diff.
+
+    Returns {"ok": bool, "reason": str|None, "files": [filepatch]}.
+    Each filepatch: {path, action: modify|create|delete, hunks, reject}.
+    A file with a non-None reject must abort the whole patch (strict).
+    """
+    if isinstance(diff, str):
+        diff = diff.encode("utf-8")
+    if not diff.strip():
+        return _fail("empty diff")
+
+    lines, bounds = _split_sections(diff)
+    if not bounds:
         return _fail("not a unified diff: no file header found "
                      "('diff --git', '--- '/'+++ ' pair, or 'Index:')")
-    if starts[0] != 0:
+    if bounds[0] != 0:
         # Leading preamble is normal: git format-patch emails (From/Subject/
         # diffstat), diff(1) 'diff -ruN ...' lines. Anything goes as long as
         # no hunk starts BEFORE the first file header — that would mean a
         # body without a header (corrupt input), which stays rejected.
-        for l in lines[: starts[0]]:
+        for l in lines[: bounds[0]]:
             if _HUNK_RE.match(l.decode("utf-8", "replace")):
                 return _fail("unified diff has content before the first file header")
 
     files: list[dict] = []
-    bounds = starts + [len(lines)]
-    for si in range(len(starts)):
-        files.append(_parse_file_section(lines[bounds[si] : bounds[si + 1]]))
+    for si in range(len(bounds) - 1):
+        files.append(_parse_file_section(lines[bounds[si]: bounds[si + 1]]))
 
     rejected = [f for f in files if f.get("reject")]
     if rejected:
@@ -180,6 +189,50 @@ def parse_diff(diff: bytes | str) -> dict:
     if not any(f["hunks"] for f in files):
         return _fail("unified diff contains no hunks")
     return {"ok": True, "reason": None, "files": files}
+
+
+def prune_sections(diff: bytes | str,
+                   skip_patterns: list[str]) -> tuple[bytes, list[str]]:
+    """Drop WHOLE file sections whose target path matches a skip pattern.
+
+    Pattern semantics: 'dir/' matches everything under dir/ (prefix); any
+    other pattern is an fnmatch against the path (so '.gitignore',
+    'benchmarks/*' and 'omlx/custom_kernels/*/csrc/' work — fnmatch '*'
+    spans '/', so a trailing '/' keeps full-prefix semantics even with
+    wildcards inside).
+
+    Returns (pruned_diff, skipped_paths). Pruning operates on section
+    boundaries computed by the SAME parser as parse_diff, and never edits
+    a kept line — the pruned bytes stay a valid diff of the remaining
+    files. Unparseable input is returned unchanged: strict validation stays
+    parse_diff's verdict, this function only ever REMOVES sections.
+    """
+    if isinstance(diff, str):
+        diff = diff.encode("utf-8")
+    lines, bounds = _split_sections(diff)
+    if not bounds or not skip_patterns:
+        return diff, []
+    globs = [p + "*" if p.endswith("/") else p for p in skip_patterns]
+
+    def skipped(path: str) -> bool:
+        return any(fnmatch.fnmatch(path, g) for g in globs)
+
+    keep, skipped_paths = [], []
+    for si in range(len(bounds) - 1):
+        section = lines[bounds[si]: bounds[si + 1]]
+        fp = _parse_file_section(section)
+        if fp.get("path") and not fp.get("reject") and skipped(fp["path"]):
+            skipped_paths.append(fp["path"])
+        else:
+            keep.append(section)
+    if not skipped_paths or len(keep) == len(bounds) - 1:
+        return diff, []
+    data = b"\n".join(b"\n".join(sec) for sec in keep)
+    if diff.endswith(b"\n"):
+        data += b"\n"
+    if len(diff) > 16 and b"\r\n" in diff[:256]:
+        data = data.replace(b"\n", b"\r\n")
+    return data, skipped_paths
 
 
 def _scan_hunk_end(section: list[bytes], start: int) -> int | None:

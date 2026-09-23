@@ -237,13 +237,19 @@ def compile_gate(parsed: dict, tree_root: str,
 
 def validate(diff: bytes, tree_root: str,
              overrides: dict | None = None,
-             reverse: bool = False) -> dict:
+             reverse: bool = False,
+             skip_patterns: list[str] | None = None) -> dict:
     """Full gate WITHOUT writing anything.
 
     The diff is first root-normalized (safeguards.normalize_root): a diff
     made one directory too deep is rewritten to tree-root-canonical paths
     ONCE here, so everything downstream (sha, stored file, apply) works on
     the canonical bytes.
+
+    skip_patterns: whole file sections matching these patterns are PRUNED
+    from the diff before the sha is taken (see diffapply.prune_sections) —
+    stored bytes, gate, apply and reversal all see the same pruned diff.
+    Pruned paths come back in 'skipped' and as SKIPPED rows in 'files'.
 
     overrides: {rel_path: bytes} — tree content to use instead of the live
     file for those paths (gate the candidate against the tree as reconcile
@@ -257,12 +263,21 @@ def validate(diff: bytes, tree_root: str,
              compile_problems: [...], content_sha256, diff, safeguards?,
              note?}.
     """
+    skipped: list[str] = []
+    if skip_patterns:
+        diff, skipped = diffapply.prune_sections(diff, skip_patterns)
+        if skipped and not diff.strip():
+            return {"ok": False, "reason": "every file in the diff matches "
+                    "the skip patterns — nothing left to apply",
+                    "files": [], "compile_problems": [], "skipped": skipped,
+                    "content_sha256": hashlib.sha256(diff).hexdigest(),
+                    "diff": diff}
     diff, note = _safeguards.normalize_root(diff, tree_root)
     content_sha256 = hashlib.sha256(diff).hexdigest()
     parsed = diffapply.parse_diff(diff)
     if not parsed["ok"]:
         return {"ok": False, "reason": f"parse: {parsed['reason']}",
-                "files": [], "compile_problems": [],
+                "files": [], "compile_problems": [], "skipped": skipped,
                 "content_sha256": content_sha256, "diff": diff}
     check = diffapply.check_diff(diff, tree_root, overrides=overrides,
                                  reverse=reverse)
@@ -270,9 +285,11 @@ def validate(diff: bytes, tree_root: str,
                                     reverse=reverse)
     ok = all(f["status"] in ("ok", "already") for f in check["files"]) \
         and bool(check["files"]) and not compile_problems
+    files = check["files"]
     out = {"ok": ok,
            "reason": check.get("reason") if not ok else None,
-           "files": check["files"],
+           "files": files,
+           "skipped": skipped,
            "compile_problems": compile_problems,
            "content_sha256": content_sha256,
            "diff": diff,
@@ -284,11 +301,13 @@ def validate(diff: bytes, tree_root: str,
 
 def fetch_and_gate(source: dict, tree_root: str,
                    overrides: dict | None = None,
-                   reverse: bool = False) -> dict:
+                   reverse: bool = False,
+                   skip_patterns: list[str] | None = None) -> dict:
     """One-stop for add/check: source = {kind, repo?, pr?, url?, data?,
     insecure_tls?}. Fetch (if needed) then validate. On fetch failure the
     caller MUST keep stored state untouched (fail-safe rule).
-    reverse: True gates the fetched diff as a REVERSAL patch."""
+    reverse: True gates the fetched diff as a REVERSAL patch.
+    skip_patterns: prune non-installable file sections (see validate)."""
     kind = source.get("kind")
     tls = bool(source.get("insecure_tls"))
     if kind == "github_pr":
@@ -318,8 +337,15 @@ def fetch_and_gate(source: dict, tree_root: str,
         return {"ok": False, "stage": "fetch", "reason": fetched["reason"],
                 "advisories": advisories}
     gate = validate(fetched["data"], tree_root, overrides=overrides,
-                    reverse=reverse)
+                    reverse=reverse, skip_patterns=skip_patterns)
     ref = (fetched.get("url") or source.get("kind") or "?")
+    if gate.get("skipped"):
+        advisories = list(advisories) + [
+            f"skipped {len(gate['skipped'])} file(s) not present in an "
+            "installed keg: " + ", ".join(gate["skipped"][:10])
+            + ("…" if len(gate["skipped"]) > 10 else "")]
+        _log.info("pruned %d non-installable file(s) from %s: %s",
+                  len(gate["skipped"]), ref, ", ".join(gate["skipped"]))
     if not gate["ok"]:
         # one warning with the REAL per-file verdicts — this is what the
         # HTTP response truncates to "one or more files failed"
@@ -361,6 +387,15 @@ def _prune_once(store, manifest) -> None:
         pass
 
 
+def _ui_files(result: dict) -> list[dict]:
+    """Gate files plus SKIPPED rows for pruned paths — display-only: the
+    gate's own all-'already'/all-'ok' logic must keep seeing the real
+    check results without the pruned noise."""
+    return list(result.get("files", [])) + [
+        {"path": p, "status": "skipped", "reason": "matches skip pattern"}
+        for p in result.get("skipped", [])]
+
+
 def add_patch(store, patch_id: str, source: dict, tree_root: str,
               order: int = 100, reversal: bool = False) -> dict:
     """Add (or update-check) a patch source: fetch -> gate -> store version.
@@ -394,7 +429,8 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
 
     result = fetch_and_gate(source, tree_root,
                             overrides=_pristine_overlay(store, patch, tree_root),
-                            reverse=bool(patch.get("reversal")))
+                            reverse=bool(patch.get("reversal")),
+                            skip_patterns=_patches.skip_patterns(manifest))
     if not result["ok"]:
         # fail-safe: nothing stored, nothing state-changed
         if creating:
@@ -404,7 +440,7 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
         # can show WHY (the top-level reason is only "one or more files failed")
         return {"ok": False, "stage": result.get("stage"),
                 "reason": result.get("reason"),
-                "files": result.get("files", []),
+                "files": _ui_files(result),
                 "compile_problems": result.get("compile_problems", []),
                 "advisories": result.get("advisories", [])}
 
@@ -438,7 +474,7 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
         return {
             "ok": True, "obsolete": True,
             "reason": "all hunks already present upstream — patch looks obsolete",
-            "advisories": result["advisories"], "files": result["files"],
+            "advisories": result["advisories"], "files": _ui_files(result),
             "safeguards": result.get("safeguards", {}),
             "requires_approval": held}
 
@@ -548,7 +584,7 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                             if adopted else
                             "all hunks already present upstream — patch looks "
                             "obsolete")),
-                "advisories": result["advisories"], "files": result["files"]}
+                "advisories": result["advisories"], "files": _ui_files(result)}
 
     if patch["state"] in ("disabled",) and not patch.get("enabled"):
         patch["state_detail"] = ("validated, safeguards need approval" if held
@@ -572,7 +608,7 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
               bool(patch.get("reversal")))
     return {"ok": True, "v": v, "state": patch["state"],
             "reversal": bool(patch.get("reversal")),
-            "advisories": result["advisories"], "files": result["files"],
+            "advisories": result["advisories"], "files": _ui_files(result),
             "safeguards": result.get("safeguards", {}),
             "requires_approval": held,
             "note": result.get("note")}
@@ -836,7 +872,8 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
     result = validate(data, tree_root, overrides=_pristine_overlay(store, p, tree_root),
-                      reverse=bool(p.get("reversal")))
+                      reverse=bool(p.get("reversal")),
+                      skip_patterns=_patches.skip_patterns(manifest))
     result.pop("diff", None)  # bytes are not JSON-serialisable; caller has the id
     p["last_verified"] = {"at": _patches.now_iso(),
                           "ok": result["ok"]}
@@ -858,7 +895,8 @@ def check_all(store, tree_root: str) -> dict:
             continue
         result = fetch_and_gate(src, tree_root,
                                 overrides=_pristine_overlay(store, p, tree_root),
-                                reverse=bool(p.get("reversal")))
+                                reverse=bool(p.get("reversal")),
+                                skip_patterns=_patches.skip_patterns(manifest))
         if not result["ok"]:
             reports[pid] = {"check": "error", "reason": result.get("reason")}
             continue

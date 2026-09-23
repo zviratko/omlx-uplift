@@ -514,7 +514,8 @@ async function ptPreview() {
             row.className = 'pt-gate-row';
             const st = document.createElement('span');
             st.className = 'pt-chip ' + (f.status === 'ok' ? 'pt-st-applied'
-                : f.status === 'already' ? 'pt-st-update' : 'pt-st-warn');
+                : f.status === 'already' ? 'pt-st-update'
+                : f.status === 'skipped' ? 'pt-st-applied pt-st-dim' : 'pt-st-warn');
             st.textContent = f.status.toUpperCase();
             const pth = document.createElement('span');
             pth.textContent = f.path;

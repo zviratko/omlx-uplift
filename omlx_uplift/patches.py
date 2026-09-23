@@ -205,6 +205,38 @@ def empty_manifest() -> dict:
     }
 
 
+# Whole-repo PRs touch files a site-packages install never has (tests, CI,
+# docs, the Swift app, kernel C++ sources). A diff whose gate must apply
+# EVERY hunk therefore fails on noise. These patterns prune those sections
+# from the diff before gate/store/apply. 'dir/' = prefix match; anything
+# else is fnmatch against the path. Manifest config key
+# 'skip_path_prefixes' overrides this list (set [] to disable pruning).
+DEFAULT_SKIP_PATTERNS = (
+    "tests/",
+    "test/",
+    "docs/",
+    "apps/",
+    "benchmarks/",
+    "scripts/",
+    "examples/",
+    ".github/",
+    ".gitignore",
+    ".gitattributes",
+    "omlx/custom_kernels/*/csrc/",
+)
+
+
+def skip_patterns(manifest: dict) -> list[str]:
+    """Effective skip patterns for this manifest: config override when the
+    key is present (may be [] to disable pruning), defaults otherwise —
+    so existing manifests get the behaviour without a migration."""
+    cfg = manifest.get("config") or {}
+    val = cfg.get("skip_path_prefixes")
+    if isinstance(val, list):
+        return [str(p) for p in val if isinstance(p, str) and p.strip()]
+    return list(DEFAULT_SKIP_PATTERNS)
+
+
 # --------------------------------------------------------------------------
 # Keg identity
 # --------------------------------------------------------------------------
