@@ -34,7 +34,7 @@ import os
 import re
 from pathlib import Path
 
-log = logging.getLogger("uplift.skins")
+log = logging.getLogger("omlx_uplift.skins")
 
 SUPPORTED_SKIN_VERSION = 1
 

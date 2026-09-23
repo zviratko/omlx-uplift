@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import urllib.error
@@ -29,6 +30,11 @@ import urllib.request
 
 from . import diffapply
 from . import safeguards as _safeguards
+
+# Propagates to the root logger — omlx's logging_config puts its stderr/
+# file handler there, so these lines land in the omlx server log and obey
+# the omlx log level (TRACE=5 down to CRITICAL) with no extra wiring.
+_log = logging.getLogger("omlx_uplift.patchsource")
 
 SIZE_CAP = 2 * 1024 * 1024  # 2 MB per design
 
@@ -306,10 +312,25 @@ def fetch_and_gate(source: dict, tree_root: str,
     else:
         return {"ok": False, "stage": "source", "reason": f"unknown kind: {kind}"}
     if not fetched["ok"]:
+        _log.warning("fetch FAILED for %s: %s", source.get("url") or
+                     f"{source.get('repo', '')}#{source.get('pr', '')}",
+                     fetched["reason"])
         return {"ok": False, "stage": "fetch", "reason": fetched["reason"],
                 "advisories": advisories}
     gate = validate(fetched["data"], tree_root, overrides=overrides,
                     reverse=reverse)
+    ref = (fetched.get("url") or source.get("kind") or "?")
+    if not gate["ok"]:
+        # one warning with the REAL per-file verdicts — this is what the
+        # HTTP response truncates to "one or more files failed"
+        fails = [f for f in gate.get("files", []) if f["status"] == "fail"]
+        detail = "; ".join(f"{f['path']}: {f.get('reason')}" for f in fails[:20])
+        _log.warning("gate REJECTED %s (%d/%d files failed): %s", ref,
+                     len(fails), len(gate.get("files", [])),
+                     detail or gate.get("reason") or "no per-file detail")
+    else:
+        _log.debug("gate passed %s (%d files, sha %s)", ref,
+                   len(gate.get("files", [])), gate["content_sha256"][:12])
     return {**gate, "stage": "gate", "advisories": advisories,
             "content_sha256": gate["content_sha256"],
             "source_head_sha": fetched.get("source_head_sha")}
@@ -379,8 +400,12 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
         if creating:
             manifest["patches"].remove(patch)
             store.save(manifest)
+        # files/compile_problems ride along so the UI per-file gate table
+        # can show WHY (the top-level reason is only "one or more files failed")
         return {"ok": False, "stage": result.get("stage"),
                 "reason": result.get("reason"),
+                "files": result.get("files", []),
+                "compile_problems": result.get("compile_problems", []),
                 "advisories": result.get("advisories", [])}
 
     source_clean = {k: source.get(k) for k in
@@ -462,7 +487,9 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
             try:
                 res = diffapply.apply_diff(data, tree_root, backup_dir,
                                            reverse=bool(patch.get("reversal")))
-            except OSError:
+            except OSError as exc:
+                _log.warning("adopt backup write failed for %s v%d: %s",
+                             patch_id, v, exc)
                 res = {"ok": False}
             if res.get("ok"):
                 applied_files = []
@@ -503,6 +530,8 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                 patch["last_verified"] = {"keg_id": keg,
                                           "at": _patches.now_iso()}
                 adopted = True
+        _log.info("patch %s v%d ADOPTED as applied (%d files already "
+                  "present, keg %s)", patch_id, v, len(result["files"]), keg)
         store.save(manifest)
         rev = bool(patch.get("reversal"))
         return {"ok": True, "v": v, "adopted": adopted,
@@ -538,6 +567,9 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
             patch["enabled"] = True
             patch["desired_version"] = v
     store.save(manifest)
+    _log.info("patch %s stored as v%d state=%s (sha %s, reversal=%s)",
+              patch_id, v, patch["state"], sha[:12],
+              bool(patch.get("reversal")))
     return {"ok": True, "v": v, "state": patch["state"],
             "reversal": bool(patch.get("reversal")),
             "advisories": result["advisories"], "files": result["files"],

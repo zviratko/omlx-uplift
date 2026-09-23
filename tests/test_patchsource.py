@@ -148,6 +148,24 @@ class OrchestrationTests(unittest.TestCase):
             self.store, "Bad ID!", {"kind": "upload", "data": PR3764}, self.root)
         self.assertFalse(res["ok"])
 
+    def test_add_rejection_carries_per_file_detail(self):
+        # a rejected add must still carry files/compile_problems — the UI
+        # gate table renders the per-file WHY from them (without them the
+        # user only ever sees "REJECTED — gate failed")
+        broken = (PR3764 + b"\ndiff --git a/omlx/ghost.py b/omlx/ghost.py\n"
+                  b"--- a/omlx/ghost.py\n+++ b/omlx/ghost.py\n"
+                  b"@@ -1,1 +1,1 @@\n-import os\n+import sys\n")
+        res = patchsource.add_patch(
+            self.store, "detail", {"kind": "upload", "data": broken},
+            self.root)
+        self.assertFalse(res["ok"])
+        self.assertEqual(res.get("stage"), "gate")
+        fails = [f for f in res.get("files", []) if f["status"] == "fail"]
+        self.assertEqual([f["path"] for f in fails], ["omlx/ghost.py"])
+        self.assertIn("missing", fails[0]["reason"])
+        # nothing stored on a gate reject (fail-safe)
+        self.assertIsNone(self.store.find(self.store.load(), "detail"))
+
     def test_add_unchanged_no_duplicate_version(self):
         patchsource.add_patch(self.store, "demo",
                               {"kind": "upload", "data": PR3764}, self.root)

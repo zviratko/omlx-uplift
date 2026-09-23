@@ -78,6 +78,8 @@ def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
         patch["state"] = "needs_review"
         patch["state_detail"] = "stored diff file missing"
         patch["state_changed_at"] = _patches.now_iso()
+        _log.warning("patch %s: stored diff file missing (%s) -> needs_review",
+                     pid, version.get("patch_file"))
         return {"id": pid, "action": "needs_review", "reason": "diff file missing"}
     if time.monotonic() > deadline:
         return {"id": pid, "action": "deferred", "reason": "time budget"}
@@ -89,6 +91,12 @@ def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
         patch["state_detail"] = ("reversal failed: " if reverse else
                                  "apply failed: ") + result["reason"]
         patch["state_changed_at"] = _patches.now_iso()
+        fails = [f for f in result.get("files", []) if f["status"] == "fail"]
+        _log.warning("patch %s v%d %s: %s | %s", pid, version["v"],
+                     "reversal FAILED" if reverse else "apply FAILED",
+                     result["reason"],
+                     "; ".join(f"{f['path']}: {f.get('reason')}"
+                               for f in fails[:20]))
         return {"id": pid, "action": "needs_review", "reason": result["reason"],
                 "reversal": reverse}
 
@@ -131,6 +139,8 @@ def _unwind_applied(store, tree_root, keg, patch, skip_v=None):
                 patch["state"] = "needs_review"
                 patch["state_detail"] = f"restore failed: {result['reason']}"
                 patch["state_changed_at"] = _patches.now_iso()
+                _log.warning("patch %s: backup restore FAILED (v%d, %s): %s",
+                             pid, v.get("v"), bd, result["reason"])
                 return False
         v.pop("applied", None)
     return True
@@ -174,12 +184,15 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
     if store.patches_disabled():
         report["verify_only"] = True
         report["skipped_reason"] = "kill switch"
+        _log.info("reconcile SKIPPED: kill switch active")
         return report
 
     keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
     if not keg:
         report["verify_only"] = True
         report["skipped_reason"] = "keg id unresolvable"
+        _log.warning("reconcile SKIPPED: keg id unresolvable under %s",
+                     tree_root)
         return report
 
     lock_fh = None
@@ -190,6 +203,7 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
     except OSError:
         report["verify_only"] = True
         report["skipped_reason"] = "lock busy"
+        _log.info("reconcile SKIPPED: lock busy (another process reconciles)")
         if lock_fh is not None:
             lock_fh.close()
         return report
@@ -267,9 +281,21 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
     finally:
         try:
             store.save(manifest)
-        except OSError:
-            pass
+        except OSError as exc:
+            _log.error("reconcile: manifest save FAILED — state changes from "
+                       "this pass are lost: %s", exc)
         lock_fh.close()
+    for rep in report["reports"]:
+        if rep.get("action") in ("needs_review", "deferred"):
+            _log.info("reconcile: patch %s -> %s (%s)", rep.get("id"),
+                      rep.get("action"), rep.get("reason"))
+        elif rep.get("action") == "approval_required":
+            _log.info("reconcile: patch %s held for safeguard approval: %s",
+                      rep.get("id"), ", ".join(rep.get("codes", [])))
+    if report["reports"]:
+        _log.info("reconcile done: %d report(s), changed=%s reexec=%s",
+                  len(report["reports"]), report["changed"],
+                  report.get("reexec", False))
     return report
 
 
@@ -308,12 +334,16 @@ def sync_at_startup(store=None, tree_root: str | None = None,
     if tree_root is None:
         root = _patches._omlx_root()
         if not root:
+            _log.warning("uplift boot sync skipped: omlx not importable")
             return {"skipped_reason": "omlx not importable", "verify_only": True,
                     "changed": False, "reports": [], "reexec": False}
         tree_root = os.path.dirname(root)
 
     report = reconcile(store, tree_root, allow_reexec=allow_reexec)
     report["sync_seconds"] = round(time.monotonic() - started, 3)
+    _log.info("uplift boot sync: %.3fs, %d report(s), changed=%s",
+              report["sync_seconds"], len(report.get("reports", [])),
+              report.get("changed"))
     if report.get("reexec") and not _want_reexec(report):
         # NO_REEXEC env: caller wants boot-with-pending, not a restart
         report["reexec"] = False
@@ -339,6 +369,8 @@ def sync_at_startup(store=None, tree_root: str | None = None,
                 env_token = mk_path or "1"
                 os.environ[REEXEC_ENV] = env_token
                 report["reexec_at"] = _patches.now_iso()
+                _log.warning("uplift: patch files changed on disk — "
+                             "re-execing process once to load them")
                 # exec replaces this process: python <original script> <args...>
                 # (environment, incl. the one-shot marker token, survives)
                 try:
