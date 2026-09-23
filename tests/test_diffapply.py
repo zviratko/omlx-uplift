@@ -282,6 +282,62 @@ class TestApplyRoundTrip(TempTree):
         self.assertFalse(os.path.exists(os.path.join(self.tree, "new.py")))
         self.assertEqual(read(os.path.join(self.tree, "gone.py")), b"x\n")
 
+    def test_create_onto_existing_variant_is_already_not_fail(self):
+        # mirror of already-applied detection for the CREATE direction:
+        # the file exists with DIFFERENT content -> 'already' + keep bytes,
+        # never the old hard fail "create: target file already exists"
+        diff = (b"diff --git a/omlx/new.py b/omlx/new.py\n"
+                b"new file mode 100644\n--- /dev/null\n+++ b/omlx/new.py\n"
+                b"@@ -0,0 +1,2 @@\n+hello\n+world\n")
+        with open(os.path.join(self.tree, "new.py"), "wb") as fh:
+            fh.write(b"hand-made variant\n")
+        root = os.path.dirname(self.tree)
+        chk = diffapply.check_diff(diff, root)
+        self.assertTrue(chk["ok"], chk)
+        self.assertEqual(chk["files"][0]["status"], "already")
+        self.assertIn("already exists", chk["files"][0]["reason"])
+        res = diffapply.apply_diff(diff, root, self.backup)
+        self.assertTrue(res["ok"], res["reason"])
+        # existing bytes are never clobbered
+        self.assertEqual(read(os.path.join(self.tree, "new.py")),
+                         b"hand-made variant\n")
+
+    def test_adopt_variant_create_roundtrip_restores_variant_not_delete(self):
+        # the adopt path: gate says already (variant), record_pristine_backup
+        # must store the EXISTING bytes as the disable target, and restore
+        # must bring the variant back instead of deleting the file
+        diff = (b"diff --git a/omlx/new.py b/omlx/new.py\n"
+                b"new file mode 100644\n--- /dev/null\n+++ b/omlx/new.py\n"
+                b"@@ -0,0 +1,2 @@\n+hello\n+world\n")
+        with open(os.path.join(self.tree, "new.py"), "wb") as fh:
+            fh.write(b"hand-made variant\n")
+        root = os.path.dirname(self.tree)
+        bdir = os.path.join(self.tmp, "badopt")
+        rec = diffapply.record_pristine_backup(diff, root, bdir)
+        self.assertTrue(rec["ok"], rec)
+        meta = diffapply._load_backup_meta(os.path.join(bdir, "meta.json"))
+        self.assertTrue(meta["files"]["omlx/new.py"]["existed"])
+        rest = diffapply.restore_backup(bdir, root)
+        self.assertTrue(rest["ok"], rest)
+        self.assertEqual(read(os.path.join(self.tree, "new.py")),
+                         b"hand-made variant\n")
+
+    def test_create_identical_adopt_still_deletes_on_restore(self):
+        # byte-identical create adoption keeps vanilla semantics: disable
+        # REMOVES the file (uplift owns it — the tree was otherwise vanilla)
+        diff = (b"diff --git a/omlx/new.py b/omlx/new.py\n"
+                b"new file mode 100644\n--- /dev/null\n+++ b/omlx/new.py\n"
+                b"@@ -0,0 +1,2 @@\n+hello\n+world\n")
+        with open(os.path.join(self.tree, "new.py"), "wb") as fh:
+            fh.write(b"hello\nworld\n")
+        root = os.path.dirname(self.tree)
+        bdir = os.path.join(self.tmp, "bid")
+        rec = diffapply.record_pristine_backup(diff, root, bdir)
+        self.assertTrue(rec["ok"], rec)
+        rest = diffapply.restore_backup(bdir, root)
+        self.assertTrue(rest["ok"], rest)
+        self.assertFalse(os.path.exists(os.path.join(self.tree, "new.py")))
+
 
 class TestRecordPristineBackup(TempTree):
     """'Revert in memory, store as backup' — the adoption path."""

@@ -497,9 +497,22 @@ def _apply_file(content: bytes | None, filepatch: dict) -> dict:
     if action == "create":
         if content not in (None, b""):
             new_bytes, why = _hunks_to_new_file(hunks)
-            if new_bytes is not None and content == new_bytes:
+            if new_bytes is None:
+                return {"ok": False, "reason": f"create: {why}"}
+            if content == new_bytes:
                 return {"ok": True, "already": True}
-            return {"ok": False, "reason": "create: target file already exists"}
+            # The file was already created (by hand or another patch) and
+            # differs. Mirror of the reverse-direction 'already' detection:
+            # do NOT hard-fail — report 'already' and KEEP the existing
+            # bytes. apply_diff never overwrites an 'already' file, and the
+            # adopt path records the current bytes as the disable-restore
+            # target, so uplift tracks the patch without clobbering or
+            # deleting a file it did not create. To force the patch's own
+            # version, remove the file from the tree and re-add.
+            return {"ok": True, "already": True, "pre_existing": True,
+                    "already_reason": "file already exists with different "
+                                      "content — existing bytes are kept, "
+                                      "uplift will not overwrite"}
         new_bytes, why = _hunks_to_new_file(hunks)
         if new_bytes is None:
             return {"ok": False, "reason": f"create: {why}"}
@@ -722,9 +735,10 @@ def check_diff(diff: bytes | str, tree_root: str,
                else _apply_file(content, fp))
         if res.get("already"):
             results.append({"path": fp["path"], "status": "already",
-                            "reason": ("already reverted (tree matches the "
-                                       "pre-patch image)" if reverse else
-                                       "hunks already present (upstream merged?)")})
+                            "reason": res.get("already_reason") or (
+                                "already reverted (tree matches the "
+                                "pre-patch image)" if reverse else
+                                "hunks already present (upstream merged?)")})
         elif res.get("ok"):
             results.append({"path": fp["path"], "status": "ok", "reason": None})
         else:
@@ -850,7 +864,13 @@ def record_pristine_backup(diff: bytes | str, tree_root: str,
 
         orig: bytes | None
         if fp["action"] == "create":
-            orig = None  # vanilla tree: the file did not exist
+            # vanilla tree: the file did not exist — UNLESS it pre-existed
+            # as a different variant (hand-created): those bytes are not
+            # uplift's to delete, so disable must RESTORE them, not remove
+            # the file. An identical adopt keeps vanilla semantics (absent).
+            probe = (_apply_file(content, fp) if content is not None
+                     else None)
+            orig = content if probe and probe.get("pre_existing") else None
         elif content is None:
             grounded = False  # already deleted — cannot ground the original
             continue
@@ -909,10 +929,13 @@ def record_merged_backup(diff: bytes | str, tree_root: str,
         merged: bytes | None
         if fp["action"] == "create":
             res = _apply_file(content, fp)
-            if not res.get("ok") or res.get("already"):
+            if res.get("pre_existing"):
+                merged = content  # variant exists; merged state = its bytes
+            elif not res.get("ok") or res.get("already"):
                 grounded = False  # file exists and differs — cannot ground
                 continue
-            merged = res.get("new_bytes", b"")
+            else:
+                merged = res.get("new_bytes", b"")
         elif fp["action"] == "delete":
             if content is None:
                 grounded = False  # file already gone — nothing to merge back
