@@ -542,7 +542,7 @@
   "uplift.patches.scope_build": "ビルド (omlx-dev)",
   "uplift.patches.dev_title": "ビルドパッチ (omlx-dev)",
   "uplift.patches.dev_explainer": "ビルドパッチは実行中のkegに一切触れません。omlx-upliftはローカルのomlxチェックアウトのuplift-devブランチにパッチごとに1コミットを積み、その_tipから別formulaのomlx-devを再ビルドします。変更のたびに再ビルドが必要です。omlx-devのインストールでのみ動作します。",
-  "uplift.patches.dev_not_installed": "このマシンにomlx-devが設定されていません。ここでパッチをビルドするには: omlx-uplift dev install (dev-srcリポジトリをクローン)、スコープ\"build\"のパッチを追加、その後 omlx-uplift dev upgrade。",
+  "uplift.patches.dev_not_installed": "このマシンにomlx-devが設定されていません。ここでパッチをビルドするには: omlx-uplift dev bootstrap (dev-srcリポジトリをクローン)、スコープ\"build\"のパッチを追加、その後 omlx-uplift dev install。",
   "uplift.patches.dev_branch": "ブランチ {b} @ {t}",
   "uplift.patches.dev_ahead": "ベースより{n}コミット",
   "uplift.patches.dev_behind": "{ref}に{n}及ばず",

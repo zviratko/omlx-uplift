@@ -513,7 +513,7 @@
   "uplift.patches.scope_build": "сборка (omlx-dev)",
   "uplift.patches.dev_title": "Патчи сборки (omlx-dev)",
   "uplift.patches.dev_explainer": "Патчи сборки не затрагивают работающую установку: omlx-uplift складывает их по одному коммиту на патч в ветке uplift-dev локального клона omlx, затем пересобирает отдельную формулу omlx-dev с этого кончика. После каждого изменения нужна пересборка. Работает только с установленным omlx-dev.",
-  "uplift.patches.dev_not_installed": "omlx-dev не настроен на этой машине. Чтобы собирать патчи здесь, выполните: omlx-uplift dev install (клонирует репозиторий dev-src), добавьте патчи с областью \"build\", затем omlx-uplift dev upgrade.",
+  "uplift.patches.dev_not_installed": "omlx-dev не настроен на этой машине. Чтобы собирать патчи здесь, выполните: omlx-uplift dev bootstrap (клонирует репозиторий dev-src), добавьте патчи с областью \"build\", затем omlx-uplift dev install.",
   "uplift.patches.dev_branch": "ветка {b} @ {t}",
   "uplift.patches.dev_ahead": "{n} коммитов над базой",
   "uplift.patches.dev_behind": "отстаёт от {ref} на {n}",

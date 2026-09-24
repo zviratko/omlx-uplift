@@ -513,7 +513,7 @@
   "uplift.patches.scope_build": "构建 (omlx-dev)",
   "uplift.patches.dev_title": "构建补丁 (omlx-dev)",
   "uplift.patches.dev_explainer": "构建补丁绝不触碰正在运行的 keg：omlx-uplift 在本地 omlx 检出库的 uplift-dev 分支上按每个补丁一个提交依次叠加，然后从该指针重建独立的 omlx-dev formula。每次更改后都必须重新构建。仅在使用 omlx-dev 安装时有效。",
-  "uplift.patches.dev_not_installed": "此机器尚未设置 omlx-dev。要在此构建补丁，请运行：omlx-uplift dev install（克隆 dev-src 仓库），添加范围为 \"build\" 的补丁，然后运行 omlx-uplift dev upgrade。",
+  "uplift.patches.dev_not_installed": "此机器尚未设置 omlx-dev。要在此构建补丁，请运行：omlx-uplift dev bootstrap（克隆 dev-src 仓库），添加范围为 \"build\" 的补丁，然后运行 omlx-uplift dev install。",
   "uplift.patches.dev_branch": "分支 {b} @ {t}",
   "uplift.patches.dev_ahead": "领先基线 {n} 个提交",
   "uplift.patches.dev_behind": "落后 {ref} {n} 个提交",

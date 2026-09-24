@@ -517,7 +517,7 @@
   "uplift.patches.scope_build": "build (omlx-dev)",
   "uplift.patches.dev_title": "Patches de build (omlx-dev)",
   "uplift.patches.dev_explainer": "Patches de build nunca tocam a instalação em execução: omlx-uplift os empilha como um commit por patch no branch uplift-dev de uma cópia local do omlx e depois recompila a fórmula separada omlx-dev a partir desse ponto. Recompilação necessária após cada mudança. Funciona apenas com instalação omlx-dev.",
-  "uplift.patches.dev_not_installed": "omlx-dev não está configurado nesta máquina. Para compilar patches aqui, execute: omlx-uplift dev install (clona o repositório dev-src), adicione patches com escopo \"build\" e depois omlx-uplift dev upgrade.",
+  "uplift.patches.dev_not_installed": "omlx-dev não está configurado nesta máquina. Para compilar patches aqui, execute: omlx-uplift dev bootstrap (clona o repositório dev-src), adicione patches com escopo \"build\" e depois omlx-uplift dev install.",
   "uplift.patches.dev_branch": "branch {b} @ {t}",
   "uplift.patches.dev_ahead": "{n} commits acima da base",
   "uplift.patches.dev_behind": "atrás de {ref} em {n}",

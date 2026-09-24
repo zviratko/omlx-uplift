@@ -117,7 +117,7 @@ Extract a skin crate into
 .Aq name - Ns Aq mtime Ns / .
 Never overwrites an existing directory — that one may carry hand edits.
 .It Xo Ic dev
-.Ic install | status | upgrade | reconfigure
+.Ic bootstrap | status | install | reconfigure
 .Xc
 Manage the
 .Em omlx-dev
@@ -125,13 +125,19 @@ companion install (see
 .Sx BUILD-SCOPE PATCHES AND OMLX-DEV .
 .Bl -tag -width Ds
 .It Ic dev
-.Ic install
+.Ic bootstrap
 .Op Fl -yes
 .Op Fl -src Ar PATH
 .Op Fl -origin Ar URL
 .Op Fl -sync-ref Ar REF
-Questionnaire, dev-src clone and
-.Pa dev.json .
+Questionnaire, dev-src clone,
+.Pa dev.json ,
+and creation of the (initially empty)
+.Em uplift-dev
+formula branch at the sync-ref tip.
+The branch must exist before any build: bare
+.Ic "brew install omlx-dev"
+clones it by name.
 Origin detection order: an explicit
 .Fl -src
 checkout, else the head URL of the installed omlx formula as written in
@@ -142,17 +148,21 @@ A checkout in your home directory is never guessed at.
 .Op Fl -fetch
 dev-src state as JSON (branch, tip, drift, staleness).
 .It Ic dev
-.Ic upgrade
+.Ic install
 .Op Fl -with-custom-kernel
 .Op Fl -with-grammar
 .Op Fl -dry-run
 Materialize enabled build patches as one commit per patch on the
 .Em uplift-dev
-branch, re-gate them against the new base, then rebuild the
+branch, re-gate them against the new base, then build the
 .Em omlx-dev
-formula from that tip.
+formula from that tip
+.Pq Ic "brew install" Ap0 Ar first No build , Ic reinstall No afterwards .
 Kernel/grammar flags default to the flags recorded in your existing build
 receipt.
+.Ic dev
+.Ic upgrade
+is accepted as a legacy alias.
 .It Ic dev
 .Ic reconfigure
 .Op Fl -port Ar N
@@ -272,7 +282,7 @@ checkout, then rebuilds the separate
 formula from that tip.
 Rebuild required after every change
 ( Ic dev
-upgrade ,
+install ,
 the dashboard's
 .Dq Rebuild omlx-dev
 button, or
@@ -291,11 +301,11 @@ separate service.
 Shareable knobs (models directory, model settings, model profiles) are a
 per-knob symlink decision; refusing to hide real dev-side data behind a
 symlink is deliberate.
-Works only with an
+Works only after
 .Em omlx-dev
-install
+has been set up
 ( Ic dev
-install ) .
+bootstrap ) .
 .Sh "OMLX UPGRADE WORKFLOW"
 A vanilla upgrade replaces the keg and silently unmounts Uplift (the .pth
 dies with the old keg).

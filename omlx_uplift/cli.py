@@ -525,30 +525,31 @@ def cmd_patches(argv=None) -> int:
 
 def cmd_dev(argv=None) -> int:
     """omlx-dev management (DEV queue). Subcommands:
-      install   questionnaire + dev-src clone + dev.json
-      status    dev-src state as JSON (branch/tip/drift)
-      upgrade   materialize build patches + brew reinstall (DEV-3)
-      reconfigure  port/base-path/sharing (DEV-4)"""
+      bootstrap   questionnaire + dev-src clone + dev.json + uplift-dev branch
+      status      dev-src state as JSON (branch/tip/drift)
+      install     materialize build patches + brew install/reinstall (DEV-3)
+      reconfigure port/base-path/sharing (DEV-4)
+      ('upgrade' is accepted as a legacy alias of 'install')"""
     import json as _json
 
     ap = argparse.ArgumentParser(prog="omlx-uplift dev")
-    ap.add_argument("action", choices=["install", "status", "upgrade",
-                                       "reconfigure"])
+    ap.add_argument("action", choices=["bootstrap", "install", "status",
+                                       "reconfigure", "upgrade"])
     ap.add_argument("--yes", action="store_true",
                     help="take questionnaire defaults (scripted use)")
     ap.add_argument("--src", help="existing omlx checkout to detect origin "
-                                  "from (install)")
-    ap.add_argument("--origin", help="dev-src origin URL (install, skips Q&A)")
+                                  "from (bootstrap)")
+    ap.add_argument("--origin", help="dev-src origin URL (bootstrap, skips Q&A)")
     ap.add_argument("--sync-ref", help="sync ref to track, e.g. origin/main")
     ap.add_argument("--fetch", action="store_true",
                     help="status: fetch the sync ref first")
     ap.add_argument("--with-custom-kernel", action="store_true",
-                    help="upgrade: build custom kernels (default: inherit "
+                    help="install: build custom kernels (default: inherit "
                          "from the existing omlx-dev/omlx receipt)")
     ap.add_argument("--with-grammar", action="store_true",
-                    help="upgrade: install xgrammar (default: inherit)")
+                    help="install: install xgrammar (default: inherit)")
     ap.add_argument("--dry-run", action="store_true",
-                    help="upgrade: materialize check + print the brew "
+                    help="install: materialize check + print the brew "
                          "command, build nothing")
     ap.add_argument("--port", type=int,
                     help="reconfigure: dev server port (default 8001)")
@@ -567,30 +568,50 @@ def cmd_dev(argv=None) -> int:
 
     from . import devsrc, patchsource
 
-    if args.action == "install":
+    if args.action == "bootstrap":
         existing = devsrc.load_config()
         if existing and os.path.isdir(
                 os.path.join(devsrc.src_path(existing), ".git")):
-            print("dev-src already installed — see: omlx-uplift dev status",
-                  file=sys.stderr)
+            print("dev-src is already bootstrapped — see: omlx-uplift dev "
+                  "status", file=sys.stderr)
             return 1
+        print("Bootstrapping omlx-dev (the build-patch companion install).\n")
         cfg = devsrc.install_config(src_hint=args.src, yes=args.yes,
                                     origin=args.origin,
                                     sync_ref=args.sync_ref)
         path = devsrc.ensure_clone(cfg)
-        print(f"dev-src clone ready: {path}")
-        print(f"config: {devsrc.dev_json_path()}")
-        _coexistence_warnings()
+        print(f"[1/3] dev-src clone: {path}")
+        # the formula branch must exist BEFORE any brew build (bare
+        # `brew install omlx-dev` clones it by name — a missing branch is a
+        # git-128 wall for people who skipped the CLI). Empty branch at the
+        # sync tip: zero patch commits until dev install materializes them.
+        try:
+            devsrc.fetch_sync_ref(cfg)
+            seeded = devsrc.ensure_formula_branch(cfg)
+        except devsrc.DevsrcError as exc:
+            print(f"[2/3] WARNING: could not seed the "
+                  f"{cfg.get('formula_branch') or devsrc.DEV_BRANCH_DEFAULT}"
+                  f" branch: {exc}", file=sys.stderr)
+            seeded = None
+        branch = cfg.get("formula_branch") or devsrc.DEV_BRANCH_DEFAULT
+        if seeded:
+            print(f"[2/3] formula branch {branch} created at "
+                  f"{cfg['sync_ref']} ({seeded[:12]})")
+        print(f"[3/3] config: {devsrc.dev_json_path()}")
         # DEV-4 work item 3: runtime/sharing questionnaire lives in
-        # reconfigure (one code path); install just runs it once
-        rc = cmd_dev_reconfigure(args, cfg=cfg)
+        # reconfigure (one code path); bootstrap runs it as a quiet
+        # sub-step (sharing questionnaire + warnings, no duplicate JSON)
+        rc = cmd_dev_reconfigure(args, cfg=cfg, quiet=True)
         if rc not in (0,):
             return rc
-        print("next: omlx-uplift dev upgrade   (materialize + brew build)")
+        _dev_next_steps(cfg, fresh=True)
         return 0
 
-    if args.action == "upgrade":
-        return cmd_dev_upgrade(args)
+    if args.action in ("install", "upgrade"):
+        if args.action == "upgrade":
+            print("note: 'dev upgrade' is now 'dev install' (it installs "
+                  "the first build too)", file=sys.stderr)
+        return cmd_dev_install(args)
 
     if args.action == "reconfigure":
         return cmd_dev_reconfigure(args)
@@ -600,7 +621,7 @@ def cmd_dev(argv=None) -> int:
         if not cfg:
             print(_json.dumps({"installed": False,
                                "reason": "dev.json missing — run "
-                                         "omlx-uplift dev install"}, indent=2))
+                                         "omlx-uplift dev bootstrap"}, indent=2))
             return 1
         if args.fetch:
             try:
@@ -724,10 +745,13 @@ def _share_answers(args, cfg: dict, devsrc) -> dict:
     return {k: bool(share[k]) for k in names}
 
 
-def cmd_dev_reconfigure(args, cfg: dict | None = None) -> int:
+def cmd_dev_reconfigure(args, cfg: dict | None = None,
+                        quiet: bool = False) -> int:
     """DEV-4: port/base-path diversion + sharing map, realized as symlinks
     / seeded copies under the dev base path. The service picks port/base up
-    on restart (brew regenerates the launchd plist from the formula block)."""
+    on restart (brew regenerates the launchd plist from the formula block).
+    quiet=True keeps only warnings and the share actions (bootstrap calls
+    it as a sub-step and prints its own summary)."""
     import json as _json
 
     from . import devsrc
@@ -735,7 +759,7 @@ def cmd_dev_reconfigure(args, cfg: dict | None = None) -> int:
     if cfg is None:
         cfg = devsrc.load_config()
         if not cfg:
-            print("dev.json missing — run: omlx-uplift dev install",
+            print("dev.json missing — run: omlx-uplift dev bootstrap",
                   file=sys.stderr)
             return 2
 
@@ -767,7 +791,8 @@ def cmd_dev_reconfigure(args, cfg: dict | None = None) -> int:
 
     if changed:
         devsrc.save_config(cfg)
-        print(f"config written: {devsrc.dev_json_path()}")
+        if not quiet:
+            print(f"config written: {devsrc.dev_json_path()}")
 
     actions = devsrc.realize_share(cfg)
     for a in actions:
@@ -782,34 +807,35 @@ def cmd_dev_reconfigure(args, cfg: dict | None = None) -> int:
         subprocess.run(["brew", "services", "restart", "omlx-dev"])
         print(f"omlx-dev service restarted (port {rt['port']}, base "
               f"{rt['base_path']})")
-    elif changed:
+    elif changed and not quiet:
         print("NOTE: after the next `brew services start/restart omlx-dev` "
               f"the service runs on port {rt['port']} with base path "
               f"{rt['base_path']} (brew regenerates the launchd plist from "
               "the formula's service block at start time).")
-    _coexistence_warnings()
-    print(_json.dumps({"port": rt["port"], "base_path": rt["base_path"],
-                       "share": devsrc.share_map(cfg),
-                       "actions": actions}, indent=2))
+    if not quiet:
+        _coexistence_warnings()
+        print(_json.dumps({"port": rt["port"], "base_path": rt["base_path"],
+                           "share": devsrc.share_map(cfg),
+                           "actions": actions}, indent=2))
     return 0
 
 
-def cmd_dev_upgrade(args) -> int:
+def cmd_dev_install(args) -> int:
     """The ONLY rebuild path (DEV-context decision 3): re-cut uplift-dev
     from the synced base with one commit per enabled build patch, then
-    `brew reinstall --HEAD omlx-dev`. Deterministic: reinstall always
-    re-stages the branch tip (`brew upgrade` would no-op on a head)."""
+    `brew install` (first build) or `brew reinstall` (rebuild). Both always
+    re-stage the branch tip (`brew upgrade` would no-op on a head)."""
     from . import devsrc, patchsource
 
     cfg = devsrc.load_config()
     if not cfg:
-        print("dev.json missing — run: omlx-uplift dev install",
-              file=sys.stderr)
+        print("omlx-dev is not bootstrapped yet — run: omlx-uplift dev "
+              "bootstrap", file=sys.stderr)
         return 2
     path = devsrc.src_path(cfg)
     if not os.path.isdir(os.path.join(path, ".git")):
-        print("dev-src clone missing — run: omlx-uplift dev install",
-              file=sys.stderr)
+        print(f"dev-src clone missing ({path}) — run: omlx-uplift dev "
+              "bootstrap", file=sys.stderr)
         return 2
     try:
         devsrc.ensure_clone(cfg)          # drift guard before any fetch
@@ -853,14 +879,18 @@ def cmd_dev_upgrade(args) -> int:
         # user decision 2026-09-24: preserve custom-kernel + grammar from
         # the user's build — dev receipt first, else the vanilla omlx one
         flags = _receipt_used_options("omlx-dev") or _receipt_used_options("omlx")
-    cmd = ["brew", "reinstall", *sorted(flags), "omlx-dev"]
+    # first build uses `brew install` (a plain clone+build, so the user can
+    # also run that themselves); later builds `brew reinstall` (always
+    # re-stages the head tip, which `brew upgrade` would not).
+    verb = "reinstall" if _formula_keg_exists("omlx-dev") else "install"
+    cmd = ["brew", verb, *sorted(flags), "omlx-dev"]
     # No --HEAD here on purpose: this brew version's `reinstall` rejects it
     # and the formula is head-only anyway (HEAD is always the build target).
     if args.dry_run:
         print("dry-run: would run: " + " ".join(cmd))
         return 0
     _coexistence_warnings()
-    # upgrade owns the pin (decision 3): brew refuses to reinstall a pinned
+    # install owns the pin (decision 3): brew refuses to reinstall a pinned
     # formula, so lift it for this one rebuild and restore it afterwards —
     # on success AND on failure (the pin must never silently disappear)
     subprocess.run(["brew", "unpin", "omlx-dev"], capture_output=True)
@@ -877,8 +907,41 @@ def cmd_dev_upgrade(args) -> int:
     devsrc.save_config(cfg)
     _mount_into_dev_keg()
     print(f"omlx-dev built from {tip[:12]}; .pth mount refreshed")
-    print("restart the server to load it: brew services restart omlx-dev")
+    _dev_next_steps(cfg, fresh=False)
     return 0
+
+
+def _formula_keg_exists(formula: str) -> bool:
+    import glob
+
+    prefix = os.environ.get("HOMEBREW_PREFIX", "/opt/homebrew")
+    return bool(glob.glob(f"{prefix}/Cellar/{formula}/*"))
+
+
+def _dev_next_steps(cfg: dict, fresh: bool) -> None:
+    """The commands that matter after bootstrap/install — printed once,
+    not scattered across stages."""
+    from . import devsrc
+
+    rt = devsrc.runtime_config(cfg)
+    url = f"http://127.0.0.1:{rt['port']}/uplift/"
+    if fresh:
+        print("\nNext steps:\n"
+              "  1. enable build-scope patches, then build:\n"
+              "       omlx-uplift dev install"
+              "   [--with-custom-kernel --with-grammar]\n"
+              "  2. run the dev server instead of vanilla:\n"
+              "       brew services stop omlx && brew services start omlx-dev\n"
+              f"     dashboard: {url}  (data root {rt['base_path']})\n"
+              "  Later: toggle patches and rebuild from the dashboard's\n"
+              "  Build patches section, or re-run step 1.")
+    else:
+        print("\nNext steps:\n"
+              "  1. load the new build:\n"
+              "       brew services restart omlx-dev\n"
+              f"     dashboard: {url}  (data root {rt['base_path']})\n"
+              "  2. switch back to vanilla any time:\n"
+              "       brew services stop omlx-dev && brew services start omlx")
 
 
 def _regate_build_patches(build_patches: list[dict]) -> dict:
@@ -915,7 +978,7 @@ def _regate_build_patches(build_patches: list[dict]) -> dict:
                 reverse=bool(entry.get("reversal")), skip_patterns=None)
             if not result["ok"]:
                 entry["state"] = "needs_review"
-                entry["state_detail"] = ("re-gate after dev upgrade failed: "
+                entry["state_detail"] = ("re-gate after dev install failed: "
                                          + (result.get("reason")
                                             or "one or more files failed"))
                 failures[p["id"]] = result.get("reason") or "gate failed"

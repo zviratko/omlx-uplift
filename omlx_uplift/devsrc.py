@@ -367,6 +367,24 @@ def materialize(patches_to_apply: list[dict], cfg: dict) -> dict:
             "commits": commits}
 
 
+def ensure_formula_branch(cfg: dict) -> str | None:
+    """Create the formula branch at the fetched sync-ref tip if it does not
+    exist yet. bootstrap runs this so a bare `brew install omlx-dev` (which
+    clones the branch by name straight from dev-src) works even before the
+    first materialize. Returns the branch sha, or None when it already
+    exists (never re-cut — that is materialize's job)."""
+    path = src_path(cfg)
+    branch = cfg.get("formula_branch") or DEV_BRANCH_DEFAULT
+    if _rev_parse(branch, path):
+        return None
+    remote, ref = _sync_parts(cfg)
+    base_sha = _rev_parse(f"refs/remotes/{remote}/{ref}", path)
+    if not base_sha:
+        raise DevsrcError(f"sync ref {cfg.get('sync_ref')!r} is not fetched")
+    _git(["branch", branch, base_sha], cwd=path)
+    return base_sha
+
+
 def expected_tip(patches_to_apply: list[dict], cfg: dict) -> dict:
     """Dry-run materialize into a throwaway worktree sharing the clone's
     object store. Commits use a fixed --date + identical tree/parent/message,
@@ -397,7 +415,7 @@ def status(cfg: dict, patches_to_apply: list[dict] | None = None) -> dict:
     branch = cfg.get("formula_branch") or DEV_BRANCH_DEFAULT
     if not os.path.isdir(os.path.join(path, ".git")):
         return {"installed": False,
-                "reason": "dev-src clone missing — run omlx-uplift dev install"}
+                "reason": "dev-src clone missing — run omlx-uplift dev bootstrap"}
     try:
         remote, ref = _sync_parts(cfg)
     except DevsrcError as exc:

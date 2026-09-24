@@ -513,7 +513,7 @@
   "uplift.patches.scope_build": "build (omlx-dev)",
   "uplift.patches.dev_title": "Patche sestaveni (omlx-dev)",
   "uplift.patches.dev_explainer": "Patche sestaveni se nikdy nedotknou bezici instalance: omlx-uplift je sklada jako jeden commit na patch vetve uplift-dev v lokalni kopii omlx a pote z teto sablony znovu sestavi samostatny vzorec omlx-dev. Po kazde zmiane je nutne sestaveni. Funguje pouze s instalaci omlx-dev.",
-  "uplift.patches.dev_not_installed": "omlx-dev neni na tomto pocitaci nastaven. Pro sestaveni patchu spustte: omlx-uplift dev install (naklonuje repozitar dev-src), pridejte patche s rozsahem \"build\" a pote omlx-uplift dev upgrade.",
+  "uplift.patches.dev_not_installed": "omlx-dev neni na tomto pocitaci nastaven. Pro sestaveni patchu spustte: omlx-uplift dev bootstrap (naklonuje repozitar dev-src), pridejte patche s rozsahem \"build\" a pote omlx-uplift dev install.",
   "uplift.patches.dev_branch": "vetev {b} @ {t}",
   "uplift.patches.dev_ahead": "{n} commitu nad zakladem",
   "uplift.patches.dev_behind": "zaostava za {ref} o {n}",

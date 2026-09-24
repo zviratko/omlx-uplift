@@ -528,7 +528,7 @@
   "uplift.patches.scope_build": "빌드 (omlx-dev)",
   "uplift.patches.dev_title": "빌드 패치 (omlx-dev)",
   "uplift.patches.dev_explainer": "빌드 패치는 실행 중인 keg를 건드리지 않습니다: omlx-uplift는 로컬 omlx 체크아웃의 uplift-dev 브랜치에 패치당 하나의 커밋으로 쌓고, 그 tip에서 별도 omlx-dev 포뮬러를 다시 빌드합니다. 변경 후마다 재빌드가 필요합니다. omlx-dev 설치에서만 동작합니다.",
-  "uplift.patches.dev_not_installed": "이 컴퓨터에 omlx-dev가 설정되지 않았습니다. 여기서 패치를 빌드하려면: omlx-uplift dev install (dev-src 저장소 복제), 범위 \"build\"로 패치 추가, 그 다음 omlx-uplift dev upgrade.",
+  "uplift.patches.dev_not_installed": "이 컴퓨터에 omlx-dev가 설정되지 않았습니다. 여기서 패치를 빌드하려면: omlx-uplift dev bootstrap (dev-src 저장소 복제), 범위 \"build\"로 패치 추가, 그 다음 omlx-uplift dev install.",
   "uplift.patches.dev_branch": "브랜치 {b} @ {t}",
   "uplift.patches.dev_ahead": "베이스보다 {n}커밋",
   "uplift.patches.dev_behind": "{ref}보다 {n}늦음",

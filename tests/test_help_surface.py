@@ -111,6 +111,27 @@ class TestHelpSurface(unittest.TestCase):
                               capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
+    def test_dev_rename_is_consistent(self):
+        """dev install/upgrade rename (2026-09-24): no surface may still
+        advertise 'dev upgrade' as the build command."""
+        rc, out = _main_argv(["help", "dev"])
+        self.assertEqual(rc, 0)
+        self.assertIn("dev bootstrap", out)
+        self.assertIn("dev install", out)
+        self.assertNotIn("dev upgrade", out)
+        text = Path(helpmod.man_path()).read_text(encoding="utf-8")
+        # the man SYNOPSIS list must lead with bootstrap (the one mention of
+        # upgrade allowed is the legacy-alias note)
+        self.assertIn("Ic bootstrap | status | install | reconfigure", text)
+        self.assertEqual(text.count(".Ic upgrade"), 1,
+                         "man page documents dev upgrade beyond the "
+                         "legacy-alias note")
+        for bad in ("cmd_dev_upgrade", '"dev upgrade"'):
+            self.assertNotIn(bad, (PKG / "cli.py").read_text(encoding="utf-8"))
+        for loc in (PKG / "locales").glob("*.json"):
+            if "dev upgrade" in loc.read_text(encoding="utf-8"):
+                self.fail(f"{loc.name} still says 'dev upgrade'")
+
     def test_show_man_pipe_does_not_crash(self):
         # non-tty path (our redirect_stdout is not a tty)
         rc = helpmod.show_man()

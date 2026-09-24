@@ -623,8 +623,8 @@ function renderDev() {
         intro.hidden = false;
         intro.textContent = ptMsg('uplift.patches.dev_not_installed',
             'omlx-dev is not set up on this machine. To build patches here, run: '
-            + 'omlx-uplift dev install (clones the dev-src repo), add patches with '
-            + 'scope "build", then omlx-uplift dev upgrade. Details: '
+            + 'omlx-uplift dev bootstrap (clones the dev-src repo), add patches with '
+            + 'scope "build", then omlx-uplift dev install. Details: '
             + (d.reason || ''));
         return;
     }

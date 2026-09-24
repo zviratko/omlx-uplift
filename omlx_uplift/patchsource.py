@@ -437,8 +437,8 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                 "reason": f"scope must be one of {list(_patches.SCOPES)}"}
     if scope == _patches.SCOPE_BUILD and not build_root:
         return {"ok": False,
-                "reason": "scope=build needs a source checkout: install omlx-dev "
-                          "(omlx-uplift dev install) or pass --build-root"}
+                "reason": "scope=build needs a source checkout: bootstrap omlx-dev "
+                          "(omlx-uplift dev bootstrap) or pass --build-root"}
     manifest = store.load()
     _prune_once(store, manifest)
     patch = store.find(manifest, patch_id)
@@ -961,7 +961,7 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
         if not root:
             return {"ok": False,
                     "reason": "dev-src checkout not found — build patch "
-                              "cannot re-gate (omlx-uplift dev install)"}
+                              "cannot re-gate (omlx-uplift dev bootstrap)"}
         result = validate(data, root, reverse=bool(p.get("reversal")),
                           skip_patterns=None)
     else:

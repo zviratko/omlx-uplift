@@ -517,7 +517,7 @@
   "uplift.patches.scope_build": "build (omlx-dev)",
   "uplift.patches.dev_title": "Correctifs de compilation (omlx-dev)",
   "uplift.patches.dev_explainer": "Les correctifs de compilation ne touchent jamais l'installation en cours : omlx-uplift les empile en un commit par correctif sur la branche uplift-dev d'une copie locale d'omlx, puis reconstruit la formule séparée omlx-dev depuis ce point. Reconstruction requise après chaque changement. Fonctionne uniquement avec une installation omlx-dev.",
-  "uplift.patches.dev_not_installed": "omlx-dev n'est pas configuré sur cette machine. Pour compiler des correctifs ici, lancez : omlx-uplift dev install (clonne le dépôt dev-src), ajoutez des correctifs de portée « build », puis omlx-uplift dev upgrade.",
+  "uplift.patches.dev_not_installed": "omlx-dev n'est pas configuré sur cette machine. Pour compiler des correctifs ici, lancez : omlx-uplift dev bootstrap (clonne le dépôt dev-src), ajoutez des correctifs de portée « build », puis omlx-uplift dev install.",
   "uplift.patches.dev_branch": "branche {b} @ {t}",
   "uplift.patches.dev_ahead": "{n} commits au-dessus de la base",
   "uplift.patches.dev_behind": "en retard de {n} sur {ref}",

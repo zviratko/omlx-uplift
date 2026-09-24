@@ -1,4 +1,4 @@
-"""DEV-3 tests: OmlxDev formula contract + dev upgrade wiring.
+"""DEV-3 tests: OmlxDev formula contract + dev install wiring.
 
 The formula file itself is pure Ruby — these tests pin the CONTRACT
 uplift depends on (formula name, head URL source, service isolation,
@@ -193,7 +193,7 @@ class MountIntoDevKeg(unittest.TestCase):
 
 
 class UpgradeDryRun(unittest.TestCase):
-    """dev upgrade must refuse cleanly without a dev.json (exit 2) and the
+    """dev install must refuse cleanly without a dev.json (exit 2) and the
     materialize path must precede any brew call (dry-run prints command)."""
 
     def test_missing_config_exit_2(self):
@@ -208,12 +208,12 @@ class UpgradeDryRun(unittest.TestCase):
         self.addCleanup(setattr, devsrc, "dev_json_path", orig)
 
         class A:
-            action = "upgrade"
+            action = "install"
             with_custom_kernel = False
             with_grammar = False
             dry_run = True
 
-        self.assertEqual(cli.cmd_dev_upgrade(A()), 2)
+        self.assertEqual(cli.cmd_dev_install(A()), 2)
 
 
 if __name__ == "__main__":

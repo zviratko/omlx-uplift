@@ -93,6 +93,26 @@ class DevsrcFixture(unittest.TestCase):
                 b"+WILL_NOT_MATCH = 1\n")
 
     # -- tests --------------------------------------------------------------
+    def test_formula_branch_seeding_lets_brew_clone(self):
+        """The bug this guards: bare `brew install omlx-dev` does
+        `git clone --branch uplift-dev file://.../dev-src` and dies with
+        git-128 when the branch does not exist yet (post-bootstrap,
+        pre-install). bootstrap seeds it at the sync tip."""
+        path = devsrc.ensure_clone(self.cfg)
+        # fresh clone: the formula branch must NOT exist yet
+        self.assertIsNone(devsrc._rev_parse(devsrc.DEV_BRANCH_DEFAULT, path))
+        devsrc.fetch_sync_ref(self.cfg)
+        sha = devsrc.ensure_formula_branch(self.cfg)
+        self.assertTrue(sha)
+        # idempotent: never re-cut (materialize owns that)
+        self.assertIsNone(devsrc.ensure_formula_branch(self.cfg))
+        # the EXACT clone brew runs now succeeds
+        dest = os.path.join(self.tmp, "brew-cache-clone")
+        _git(["clone", "--branch", devsrc.DEV_BRANCH_DEFAULT,
+              "file://" + path, dest])
+        tip = _git(["rev-parse", "HEAD"], cwd=dest).strip()
+        self.assertEqual(tip, sha)
+
     def test_ensure_clone_sets_remotes(self):
         path = devsrc.ensure_clone(self.cfg)
         self.assertTrue(os.path.isdir(os.path.join(path, ".git")))

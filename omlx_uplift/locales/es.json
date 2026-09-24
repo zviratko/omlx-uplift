@@ -517,7 +517,7 @@
   "uplift.patches.scope_build": "build (omlx-dev)",
   "uplift.patches.dev_title": "Parches de compilación (omlx-dev)",
   "uplift.patches.dev_explainer": "Los parches de compilación nunca tocan la instalación en ejecución: omlx-uplift los apila como un commit por parche en la rama uplift-dev de una copia local de omlx y luego reconstruye la fórmula separada omlx-dev desde esa punta. Se requiere reconstruir tras cada cambio. Solo funciona con una instalación omlx-dev.",
-  "uplift.patches.dev_not_installed": "omlx-dev no está configurado en esta máquina. Para compilar parches aquí, ejecute: omlx-uplift dev install (clona el repositorio dev-src), añada parches con ámbito \"build\" y luego omlx-uplift dev upgrade.",
+  "uplift.patches.dev_not_installed": "omlx-dev no está configurado en esta máquina. Para compilar parches aquí, ejecute: omlx-uplift dev bootstrap (clona el repositorio dev-src), añada parches con ámbito \"build\" y luego omlx-uplift dev install.",
   "uplift.patches.dev_branch": "rama {b} @ {t}",
   "uplift.patches.dev_ahead": "{n} commits sobre la base",
   "uplift.patches.dev_behind": "detrás de {ref} en {n}",

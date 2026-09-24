@@ -20,7 +20,7 @@ def test_status_not_installed_without_config(tmp_path, monkeypatch):
     monkeypatch.setattr(devsrc, "load_config", lambda: None)
     st = router._dev_status_sync()
     assert st["installed"] is False
-    assert "dev install" in st["reason"]
+    assert "dev bootstrap" in st["reason"]
 
 
 def test_status_not_installed_when_clone_missing(tmp_path, monkeypatch):
@@ -180,7 +180,7 @@ def test_dev_build_run_reports_crash(monkeypatch):
     def boom(ns):
         raise RuntimeError("brew exploded")
 
-    monkeypatch.setattr(cli, "cmd_dev_upgrade", boom)
+    monkeypatch.setattr(cli, "cmd_dev_install", boom)
     with router._DEV_BUILD_LOCK:
         router._DEV_BUILD.update({"running": True, "result": None, "log": []})
     router._dev_build_run({})

@@ -50,10 +50,10 @@ COMMAND_USAGE = {
                "                 kernel rebuild <name> [--src PATH]"),
     "skin": ("omlx-uplift skin compile <dir> [-o out.yml]\n"
              "                 skin decompile <yml> [-C skins-dir]"),
-    "dev": ("omlx-uplift dev install [--yes] [--src PATH] [--origin URL]"
+    "dev": ("omlx-uplift dev bootstrap [--yes] [--src PATH] [--origin URL]"
             " [--sync-ref REF]\n"
             "                 dev status [--fetch]\n"
-            "                 dev upgrade [--with-custom-kernel]"
+            "                 dev install [--with-custom-kernel]"
             " [--with-grammar] [--dry-run]\n"
             "                 dev reconfigure [--port N] [--base-path P]"
             " [--share K,...] [--no-share K,...] [--interactive]"),

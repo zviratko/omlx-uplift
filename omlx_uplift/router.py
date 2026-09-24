@@ -1382,7 +1382,7 @@ def _dev_status_sync() -> dict:
     cfg = devsrc.load_config()
     if not cfg:
         return {"installed": False,
-                "reason": "dev.json missing — run: omlx-uplift dev install"}
+                "reason": "dev.json missing — run: omlx-uplift dev bootstrap"}
     import os
 
     clone_ok = os.path.isdir(os.path.join(devsrc.src_path(cfg), ".git"))
@@ -1438,7 +1438,7 @@ def _dev_build_run(opts: dict) -> None:
 
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = cli.cmd_dev_upgrade(SimpleNamespace(
+            rc = cli.cmd_dev_install(SimpleNamespace(
                 with_custom_kernel=bool(opts.get("with_custom_kernel")),
                 with_grammar=bool(opts.get("with_grammar")),
                 dry_run=False))
