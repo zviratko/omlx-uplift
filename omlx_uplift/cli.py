@@ -134,22 +134,27 @@ def _resolve_site_packages(python: str | None) -> Path:
     return user
 
 
-def _brew_omlx_python() -> Path | None:
-    """Path to a Homebrew oMLX keg interpreter, if brew + omlx exist."""
+def _brew_formula_python(formula: str) -> Path | None:
+    """Path to a Homebrew keg's libexec python for ANY formula (omlx,
+    omlx-dev, ...), if brew + the keg exist."""
     import shutil
-    import subprocess
 
     brew = shutil.which("brew")
     if not brew:
         return None
     try:
         prefix = subprocess.run(
-            [brew, "--prefix", "omlx"], capture_output=True, text=True, timeout=15
-        ).stdout.strip()
+            [brew, "--prefix", formula], capture_output=True, text=True,
+            timeout=15).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):  # pragma: no cover
         return None
     cand = Path(prefix) / "libexec" / "bin" / "python"
     return cand if prefix and cand.is_file() else None
+
+
+def _brew_omlx_python() -> Path | None:
+    """Path to a Homebrew oMLX keg interpreter, if brew + omlx exist."""
+    return _brew_formula_python("omlx")
 
 
 def _pth_content(target: Path | None) -> str:
@@ -179,10 +184,11 @@ def _pth_content(target: Path | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _default_target_python() -> str | None:
-    """No --python given: prefer a Homebrew oMLX keg (the common case for
-    tap users), else stay in the current interpreter."""
-    keg = _brew_omlx_python()
+def _default_target_python(formula: str | None = None) -> str | None:
+    """No --python given: prefer a Homebrew keg (the common case for tap
+    users), else stay in the current interpreter. `formula` selects which
+    keg (DEV-3: 'omlx-dev' mounts the dev keg too)."""
+    keg = _brew_formula_python(formula or "omlx")
     return str(keg) if keg else None
 
 
@@ -434,8 +440,10 @@ def cmd_install(argv=None) -> int:
                     "(old copies are kept as <name>.yml.<timestamp>~)")
     ap.add_argument("--keep-skins", action="store_true",
                     help="do not touch example skins in ~/.omlx/uplift/skins")
+    ap.add_argument("--formula", help="target a Homebrew formula's keg "
+                    "instead of omlx (e.g. omlx-dev); ignored with --python")
     args = ap.parse_args(argv)
-    target = args.python or _default_target_python()
+    target = args.python or _default_target_python(args.formula)
     sp = _resolve_site_packages(target)
     pth = sp / PTH_NAME
     body = _pth_content(Path(target) if target else None)
@@ -627,6 +635,14 @@ def cmd_dev(argv=None) -> int:
     ap.add_argument("--sync-ref", help="sync ref to track, e.g. origin/main")
     ap.add_argument("--fetch", action="store_true",
                     help="status: fetch the sync ref first")
+    ap.add_argument("--with-custom-kernel", action="store_true",
+                    help="upgrade: build custom kernels (default: inherit "
+                         "from the existing omlx-dev/omlx receipt)")
+    ap.add_argument("--with-grammar", action="store_true",
+                    help="upgrade: install xgrammar (default: inherit)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="upgrade: materialize check + print the brew "
+                         "command, build nothing")
     args = ap.parse_args(argv)
 
     from . import devsrc, patchsource
@@ -644,8 +660,12 @@ def cmd_dev(argv=None) -> int:
         path = devsrc.ensure_clone(cfg)
         print(f"dev-src clone ready: {path}")
         print(f"config: {devsrc.dev_json_path()}")
-        print("next: omlx-uplift dev upgrade   (builds omlx-dev via brew, DEV-3)")
+        _coexistence_warnings()
+        print("next: omlx-uplift dev upgrade   (materialize + brew build)")
         return 0
+
+    if args.action == "upgrade":
+        return cmd_dev_upgrade(args)
 
     if args.action == "status":
         cfg = devsrc.load_config()
@@ -673,6 +693,208 @@ def _patches_store():
     from . import patches as _patches
 
     return _patches.PatchStore()
+
+
+def _coexistence_warnings() -> None:
+    """DEV-context decision 7: if the vanilla omlx service runs, print the
+    switch commands and the both-running warning; warn on a dev/vanilla
+    port clash from ~/.omlx/settings.json."""
+    try:
+        out = subprocess.run(["brew", "services", "list", "omlx"],
+                             capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        out = ""
+    lines = [l for l in out.splitlines() if l.split()
+             and l.split()[0] == "omlx"]
+    if lines and ("started" in lines[0] or "running" in lines[0]):
+        print("WARNING: the vanilla omlx service is running. Running omlx "
+              "AND omlx-dev at once is usually unwanted (shared mutable "
+              "state). To switch over:\n"
+              "  brew services stop omlx\n"
+              "  brew services start omlx-dev", file=sys.stderr)
+    # port clash: dev port vs vanilla settings.json port
+    from . import devsrc
+
+    cfg = devsrc.load_config() or {}
+    dev_port = cfg.get("port", 8001)
+    try:
+        import json
+
+        with open(os.path.expanduser("~/.omlx/settings.json")) as fh:
+            vanilla_port = json.load(fh).get("port", 8000)
+    except (OSError, ValueError):
+        vanilla_port = 8000
+    if int(dev_port) == int(vanilla_port):
+        print(f"WARNING: dev port {dev_port} equals the vanilla omlx port — "
+              "the two servers would fight. Change it: omlx-uplift dev "
+              "reconfigure", file=sys.stderr)
+
+
+def _receipt_used_options(formula: str) -> set:
+    """used_options from the formula's own INSTALL_RECEIPT.json (empty when
+    not installed)."""
+    import glob
+    import json as _json
+
+    prefix = os.environ.get("HOMEBREW_PREFIX", "/opt/homebrew")
+    receipts = sorted(glob.glob(f"{prefix}/Cellar/{formula}/*/INSTALL_RECEIPT.json"))
+    if not receipts:
+        return set()
+    try:
+        with open(receipts[-1]) as fh:
+            data = _json.load(fh)
+    except (OSError, ValueError):
+        return set()
+    opts = set((data.get("used_options") or []))
+    return opts
+
+
+def cmd_dev_upgrade(args) -> int:
+    """The ONLY rebuild path (DEV-context decision 3): re-cut uplift-dev
+    from the synced base with one commit per enabled build patch, then
+    `brew reinstall --HEAD omlx-dev`. Deterministic: reinstall always
+    re-stages the branch tip (`brew upgrade` would no-op on a head)."""
+    from . import devsrc, patchsource
+
+    cfg = devsrc.load_config()
+    if not cfg:
+        print("dev.json missing — run: omlx-uplift dev install",
+              file=sys.stderr)
+        return 2
+    path = devsrc.src_path(cfg)
+    if not os.path.isdir(os.path.join(path, ".git")):
+        print("dev-src clone missing — run: omlx-uplift dev install",
+              file=sys.stderr)
+        return 2
+    try:
+        devsrc.ensure_clone(cfg)          # drift guard before any fetch
+        if not devsrc.worktree_clean(path):
+            print(f"dev-src worktree is dirty: {path}\nuplift refuses to "
+                  "re-cut the branch over local edits — commit or discard "
+                  "them first.", file=sys.stderr)
+            return 1
+        devsrc.fetch_sync_ref(cfg)
+    except devsrc.DevsrcError as exc:
+        print(f"dev-src: {exc}", file=sys.stderr)
+        return 1
+
+    build_patches = patchsource.enabled_build_patches(_patches_store())
+    res = devsrc.materialize(build_patches, cfg)
+    if not res.get("ok"):
+        print(f"materialize FAILED: {res.get('reason')}", file=sys.stderr)
+        for c in res.get("commits", []):
+            print(f"  applied before failure: {c['id']} v{c.get('v')}",
+                  file=sys.stderr)
+        print("fix or disable the named patch, then re-run", file=sys.stderr)
+        return 1
+    tip = res["tip"]
+    n = len([c for c in res["commits"] if c.get("sha")])
+    print(f"uplift-dev: {cfg['sync_ref']} @ {res['base'][:12]} + "
+          f"{n} patch commit(s) -> tip {tip[:12]}")
+
+    # re-gate BEFORE the rebuild (DEV-context decision 9) — failures mark
+    # needs_review per patch, never silently skipped
+    regate = _regate_build_patches(build_patches)
+    for pid, why in regate.items():
+        print(f"re-gate FAILED for build patch {pid}: {why} "
+              "(marked needs_review)", file=sys.stderr)
+
+    flags = set()
+    if args.with_custom_kernel:
+        flags.add("--with-custom-kernel")
+    if args.with_grammar:
+        flags.add("--with-grammar")
+    if not flags:
+        # user decision 2026-09-24: preserve custom-kernel + grammar from
+        # the user's build — dev receipt first, else the vanilla omlx one
+        flags = _receipt_used_options("omlx-dev") or _receipt_used_options("omlx")
+    cmd = ["brew", "reinstall", "--HEAD", *sorted(flags), "omlx-dev"]
+    if args.dry_run:
+        print("dry-run: would run: " + " ".join(cmd))
+        return 0
+    _coexistence_warnings()
+    print("running: " + " ".join(cmd))
+    proc = subprocess.run(cmd)
+    if proc.returncode != 0:
+        print("brew build FAILED — dev keg untouched", file=sys.stderr)
+        return proc.returncode
+    subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
+    cfg = devsrc.load_config() or cfg
+    cfg["built_sha"] = tip
+    devsrc.save_config(cfg)
+    _mount_into_dev_keg()
+    print(f"omlx-dev built from {tip[:12]}; .pth mount refreshed")
+    print("restart the server to load it: brew services restart omlx-dev")
+    return 0
+
+
+def _regate_build_patches(build_patches: list[dict]) -> dict:
+    """Re-gate every enabled build patch against the freshly checked-out
+    base (materialize ran first, so the worktree IS the new base + earlier
+    patches... gate against the pristine base tree instead: a detached
+    worktree at base). Returns {patch_id: reason} for failures."""
+    from . import devsrc, patchsource
+
+    cfg = devsrc.load_config() or {}
+    store = _patches_store()
+    failures: dict[str, str] = {}
+    if not build_patches or not cfg.get("src_path"):
+        return failures
+    import tempfile
+
+    path = devsrc.src_path(cfg)
+    remote, ref = devsrc._sync_parts(cfg)
+    base = f"refs/remotes/{remote}/{ref}"
+    tmp = tempfile.mkdtemp(prefix="uplift-regate-")
+    try:
+        devsrc._git(["worktree", "add", "--detach", "-q", tmp, base],
+                    cwd=path)
+        manifest = store.load()
+        for p in build_patches:
+            # gate against the tree as the NEXT patch will find it: base +
+            # all earlier patches in materialization order
+            entry = store.find(manifest, p["id"])
+            if entry is None:
+                continue
+            ver = store.get_version(entry, p["version"]) or {}
+            result = patchsource.validate(
+                p["diff_bytes"], tmp,
+                reverse=bool(entry.get("reversal")), skip_patterns=None)
+            if not result["ok"]:
+                entry["state"] = "needs_review"
+                entry["state_detail"] = ("re-gate after dev upgrade failed: "
+                                         + (result.get("reason")
+                                            or "one or more files failed"))
+                failures[p["id"]] = result.get("reason") or "gate failed"
+                # still apply so later patches gate against the same tree
+                # materialize actually built (materialize committed them)
+            try:
+                devsrc._apply_one(tmp, p["id"], p.get("version", 0),
+                                  p["diff_bytes"])
+            except devsrc.DevsrcError:
+                pass
+        if failures:
+            store.save(manifest)
+    except devsrc.DevsrcError as exc:
+        print(f"re-gate skipped (worktree at base failed): {exc}",
+              file=sys.stderr)
+    finally:
+        devsrc._git(["worktree", "remove", "--force", tmp], cwd=path,
+                    check=False)
+    return failures
+
+
+def _mount_into_dev_keg() -> bool:
+    """Drop the uplift .pth into the omlx-dev keg's python (own keg, so
+    unsandboxed; same single-file contract as
+    `omlx-uplift install --formula omlx-dev`)."""
+    target = _default_target_python("omlx-dev")
+    if not target:
+        return False
+    sp = _resolve_site_packages(target)
+    sp.mkdir(parents=True, exist_ok=True)
+    (sp / PTH_NAME).write_text(_pth_content(Path(target)), encoding="utf-8")
+    return True
 
 
 def cmd_kernel(argv=None) -> int:
