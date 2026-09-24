@@ -537,14 +537,20 @@ def install_config(src_hint: str | None = None, yes: bool = False,
 # ---------------------------------------------------------------------------
 
 RUNTIME_DEFAULTS = {"port": 8001, "base_path": "~/.omlx-dev"}
-SHARE_DEFAULTS = {"models": True, "model_settings": False,
-                  "model_profiles": False}
+SHARE_DEFAULTS = {"models": True, "settings": False,
+                  "model_settings": False, "model_profiles": False}
 # knob name -> path under the base dirs (knob names omit the .json suffix)
 SHARE_FILENAMES = {"models": "models",
+                   "settings": "settings.json",
                    "model_settings": "model_settings.json",
                    "model_profiles": "model_profiles.json"}
-# never symlinked even if asked — the server would fight over live state
-NEVER_SHARE = ("settings.json", "usage.sqlite3", "cluster", "logs", "uplift")
+# never symlinked even if asked — the server would fight over live state.
+# settings.json is NOT here: private = copied once from vanilla (the
+# "dev replaces vanilla" setup); shared = symlink, safe for config values
+# because each service block injects its own OMLX_PORT/OMLX_BASE_PATH,
+# which override the file (verified omlx/config.py:204). Two running
+# servers can still clobber each other's admin saves — symlink is opt-in.
+NEVER_SHARE = ("usage.sqlite3", "cluster", "logs", "uplift")
 
 
 def runtime_config(cfg: dict) -> dict:

@@ -58,11 +58,12 @@ class ShareFixture(unittest.TestCase):
             os.path.join(self.vanilla, "model_settings.json")))
 
     def test_idempotent(self):
-        acts1, cfg = self._realize({"models": True, "model_settings": False,
+        acts1, cfg = self._realize({"models": True, "settings": False,
+                                    "model_settings": False,
                                     "model_profiles": False})
         acts2 = devsrc.realize_share(cfg, vanilla=self.vanilla)
         self.assertEqual([a["action"] for a in acts2],
-                         ["unchanged"] * 3)
+                         ["unchanged"] * 4)
 
     def test_never_destroy_real_dev_copy_when_flipping_to_shared(self):
         self._realize({"models": False, "model_settings": False,
@@ -91,11 +92,27 @@ class ShareFixture(unittest.TestCase):
                          os.path.realpath(os.path.join(self.vanilla, "models")))
 
     def test_never_share_refused(self):
-        actions, _ = self._realize({"settings.json": True, "cluster": True,
-                                    "models": True})
+        actions, _ = self._realize({"cluster": True, "models": True})
         acts = {a["name"]: a["action"] for a in actions}
-        self.assertEqual(acts["settings.json"], "refused")
         self.assertEqual(acts["cluster"], "refused")
+
+    def test_settings_private_is_a_copy_shared_is_a_symlink(self):
+        # settings.json left NEVER_SHARE (2026-09-24): private = copied
+        # once (dev REPLACES vanilla setup), shared = symlink (service
+        # block's OMLX_PORT/OMLX_BASE_PATH win over the file anyway)
+        with open(os.path.join(self.vanilla, "settings.json"), "w") as fh:
+            json.dump({"port": 8000, "auth": {"api_key": "x"}}, fh)
+        actions, _ = self._realize({"settings": False, "models": True})
+        acts = {a["name"]: a["action"] for a in actions}
+        self.assertEqual(acts["settings"], "seeded-from-vanilla")
+        dev_copy = os.path.join(self.devbase, "settings.json")
+        self.assertTrue(os.path.isfile(dev_copy))
+        self.assertFalse(os.path.islink(dev_copy))
+        # flipping to shared on a COPY keeps the copy (data safety, same
+        # rule as every other knob)
+        actions, _ = self._realize({"settings": True, "models": True})
+        acts = {a["name"]: a["action"] for a in actions}
+        self.assertEqual(acts["settings"], "kept-private")
 
     def test_unshared_seed_empty_when_vanilla_missing(self):
         actions, _ = self._realize({"models": False, "model_settings": False,
@@ -124,7 +141,8 @@ class RuntimeConfig(unittest.TestCase):
 
     def test_share_map_defaults(self):
         sm = devsrc.share_map({})
-        self.assertEqual(sm, {"models": True, "model_settings": False,
+        self.assertEqual(sm, {"models": True, "settings": False,
+                              "model_settings": False,
                               "model_profiles": False})
         sm = devsrc.share_map({"share": {"model_settings": True}})
         self.assertTrue(sm["model_settings"])

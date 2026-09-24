@@ -598,6 +598,20 @@ def cmd_dev(argv=None) -> int:
             print(f"[2/3] formula branch {branch} created at "
                   f"{cfg['sync_ref']} ({seeded[:12]})")
         print(f"[3/3] config: {devsrc.dev_json_path()}")
+        # port is a user choice, not a constant: ask during the bootstrap
+        # questionnaire (dev often REPLACES vanilla and wants its port —
+        # the service block injects OMLX_PORT, which overrides whatever
+        # port the copied settings.json says). --yes keeps 8001.
+        if not args.yes and args.port is None and sys.stdin.isatty():
+            vp = devsrc.vanilla_port()
+            ans = input(f"Dev server port "
+                        f"[{devsrc.RUNTIME_DEFAULTS['port']}] "
+                        f"(vanilla omlx uses {vp}): ").strip()
+            if ans:
+                args.port = int(ans) if ans.isdigit() else None
+                if args.port is None:
+                    print(f"not a number — keeping default "
+                          f"{devsrc.RUNTIME_DEFAULTS['port']}")
         # DEV-4 work item 3: runtime/sharing questionnaire lives in
         # reconfigure (one code path); bootstrap runs it as a quiet
         # sub-step (sharing questionnaire + warnings, no duplicate JSON)
@@ -733,10 +747,15 @@ def _share_answers(args, cfg: dict, devsrc) -> dict:
               "copy seeded once, dev server drifts)")
         for name in names:
             rec = "Y" if devsrc.SHARE_DEFAULTS[name] else "n"
-            hint = ("recommended yes — big, mostly immutable"
-                    if name == "models" else
-                    "recommended no while BOTH servers run — mutable, "
-                    "concurrent writes race")
+            if name == "models":
+                hint = ("recommended yes — big, mostly immutable")
+            elif name == "settings":
+                hint = ("yes if dev REPLACES vanilla (copies auth/api keys; "
+                        "the dev port comes from dev.json, not this file); "
+                        "no if BOTH servers will run (admin saves clobber)")
+            else:
+                hint = ("recommended no while BOTH servers run — mutable, "
+                        "concurrent writes race")
             ans = input(f"  share {name}? [{rec}] ({hint}): ").strip().lower()
             share[name] = (ans.startswith("y") if ans
                            else devsrc.SHARE_DEFAULTS[name])

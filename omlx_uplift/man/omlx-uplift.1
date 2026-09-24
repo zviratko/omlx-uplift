@@ -173,9 +173,18 @@ is accepted as a legacy alias.
 Port diversion, dev data root, and per-knob sharing with vanilla
 .Pa ~/.omlx
 (
-.Em models , model_settings , model_profiles ) .
-Mutable state (settings, usage database, cluster) must stay private while
-both servers run — a shared live write race.
+.Em models , settings , model_settings , model_profiles ) .
+.Em settings
+(shared or copied once) carries auth and API keys: choose it when
+omlx-dev
+.Ic replaces
+vanilla — the dev port comes from
+.Pa dev.json
+(service environment
+.Dv OMLX_PORT ) ,
+never from the copied file.
+Mutable state (usage database, cluster) must stay private while both
+servers run — a shared live write race.
 .El
 .It Xo Ic help
 .Op Ar command
