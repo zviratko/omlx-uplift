@@ -50,7 +50,7 @@ const SE_RESTART_KEYS = new Set([
     'dflash_draft_quant_group_size', 'dflash_max_ctx', 'dflash_in_memory_cache',
     'dflash_in_memory_cache_max_entries', 'dflash_in_memory_cache_max_bytes',
     'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes', 'trust_remote_code',
-    'mtp_enabled', 'mtp_num_draft_tokens',
+    'mtp_enabled', 'mtp_adaptive_max_depth', 'mtp_fixed_depth',
     'vlm_mtp_enabled', 'vlm_mtp_draft_model',
     'vlm_mtp_draft_block_size']);
 function seDirtyKeys() {                     // dirty keys of the ACTIVE tab
@@ -645,12 +645,19 @@ function renderEditorFields(container) {
                     ? "Drafts several tokens per step with the model's built-in MTP head."
                     : (m.mtp_compatibility_reason || 'Not compatible with this model'),
                 onChange: renderEditorFields.bind(null, container) }));
-            if (seValues.mtp_enabled)
-                sub(g).append(seBind('number', 'mtp_num_draft_tokens', {
-                    label: C.tf('uplift.ui.max_draft_tokens_per_cycle', 'Max draft tokens per cycle'), min: 1, step: 1,
+            if (seValues.mtp_enabled) {
+                sub(g).append(seBind('number', 'mtp_adaptive_max_depth', {
+                    label: C.tf('uplift.se.mtp_adaptive_max_depth', 'Max draft tokens per cycle'), min: 1, max: 8, step: 1,
                     hint: 'Speculative depth. Empty = model default (usually 3); '
                         + 'an adaptive controller picks 1..max from acceptance rates. '
                         + 'Set 1 to fix depth-1 cycles.' }));
+                sub(g).append(seBind('select', 'mtp_fixed_depth', {
+                    label: 'Draft Depth',
+                    hint: 'Adaptive adjusts the draft depth each step. '
+                        + 'Depth N always drafts N tokens.',
+                    options: [{ value: '', label: 'Adaptive' },
+                              ...[1,2,3,4,5,6].map(n => ({ value: String(n), label: 'Depth ' + n }))] }));
+            }
         }
         const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
         if (seValues.vlm_mtp_enabled !== undefined &&
@@ -2315,7 +2322,7 @@ function aliasDiffChips(prof, base) {
             'dflash_in_memory_cache', 'dflash_in_memory_cache_max_entries',
             'dflash_in_memory_cache_max_bytes'],
         specprefill: ['specprefill_draft_model', 'specprefill_num_draft_tokens'],
-        mtp: ['mtp_num_draft_tokens'],
+        mtp: ['mtp_adaptive_max_depth', 'mtp_fixed_depth'],
         vlm_mtp: ['vlm_mtp_draft_model', 'vlm_mtp_draft_block_size'],
     };
     const out = [];

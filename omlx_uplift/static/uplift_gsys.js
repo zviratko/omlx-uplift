@@ -155,6 +155,8 @@ const GS_LABELS = {
         sse_opts: [['chunk','Chunk'],['comment','Comment'],['off','Off']],
         mid_sys: 'Preserve Mid-System Cache',
         mid_sys_hint: 'Keep cached KV for system prompts placed mid-conversation.',
+        wide_proj: 'Qwen4 Wide-Proj GDN Decode',
+        wide_proj_hint: 'Wider projection in fused Qwen4 GDN decode (experimental).',
         audio: 'Maximum Audio Upload Size (MB)',
         audio_hint: 'Reject audio attachments above this size.',
         ane: 'ANE Compile Cache',
@@ -185,6 +187,7 @@ const GS_MAP = {
     sse_keepalive_mode: ['server','sse_keepalive_mode'],
     burst_decode_mode: ['server','burst_decode_mode'],
     preserve_mid_system_cache: ['server','preserve_mid_system_cache'],
+    qwen4_gdn_decode_wide_proj: ['server','qwen4_gdn_decode_wide_proj'],
     distributed_inference_enabled: ['server','distributed_inference_enabled'],
     max_audio_upload_size: ['server','max_audio_upload_size'],
     model_dirs: ['model','model_dirs'], model_fallback: ['model','model_fallback'],
@@ -1014,6 +1017,9 @@ function renderGlobalSettings() {
     body.append(gsRow('adv', L.adv.mid_sys, L.adv.mid_sys_hint,
         gsToggle('preserve_mid_system_cache', gsGet('server','preserve_mid_system_cache')),
         { flat: 'preserve_mid_system_cache' }));
+    body.append(gsRow('adv', L.adv.wide_proj, L.adv.wide_proj_hint,
+        gsToggle('qwen4_gdn_decode_wide_proj', gsGet('server','qwen4_gdn_decode_wide_proj')),
+        { flat: 'qwen4_gdn_decode_wide_proj' }));
     body.append(gsRow('adv', L.adv.audio, L.adv.audio_hint,
         gsText('server','max_audio_upload_size','max_audio_upload_size', L,
                { number: true, min: 1 }),

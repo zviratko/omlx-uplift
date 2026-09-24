@@ -93,8 +93,9 @@ test('ModelSettingsRequest fields stay reachable in the Uplift editor', () => {
     const fields = [...m[1].matchAll(/^ {4}([a-z_0-9]+)\s*:/gm)].map(x => x[1]);
     const ms = uplift + modelspec;
     // is_pinned is toggled from the model row (is_pinned via PUT settings,
-    // classic parity), not the editor modal. mtp_num_draft_tokens gained a
-    // widget (R10-15) and must now be reachable too.
+    // classic parity), not the editor modal. Upstream split the legacy
+    // mtp_num_draft_tokens into mtp_adaptive_max_depth + mtp_fixed_depth
+    // (jundot merge 2026-09); both carry editor widgets now.
     const allow = new Set(['is_pinned']);
     const missing = fields.filter(f => !allow.has(f) && !ms.includes(f));
     assert.deepStrictEqual(missing, [],
