@@ -307,7 +307,10 @@ def fetch_and_gate(source: dict, tree_root: str,
     insecure_tls?}. Fetch (if needed) then validate. On fetch failure the
     caller MUST keep stored state untouched (fail-safe rule).
     reverse: True gates the fetched diff as a REVERSAL patch.
-    skip_patterns: prune non-installable file sections (see validate)."""
+    skip_patterns: prune non-installable file sections (see validate).
+    Build-scope gating passes skip_patterns=None and a source-checkout
+    tree_root — the stored diff bytes are then UNPRUNED, which is what
+    the dev-src materializer (DEV-2) applies as commits."""
     kind = source.get("kind")
     tls = bool(source.get("insecure_tls"))
     if kind == "github_pr":
@@ -369,6 +372,17 @@ def fetch_and_gate(source: dict, tree_root: str,
 from . import patches as _patches
 
 
+def dev_build_root() -> str | None:
+    """Root of the clean dev-src checkout used to gate build-scope patches,
+    or None when omlx-dev is not set up. DEV-2 owns dev.json; until then a
+    present ~/.omlx/uplift/dev-src is accepted. Kept tiny and import-safe —
+    DEV-2/DEV-5 read the full config from dev.json."""
+    base = os.path.join(_patches.default_base_dir(), "dev-src")
+    if os.path.isdir(os.path.join(base, ".git")):
+        return base
+    return None
+
+
 def _read_patch_file(store, version: dict) -> bytes | None:
     pf = version.get("patch_file") or ""
     path = pf if os.path.isabs(pf) else os.path.join(store.base_dir, pf)
@@ -397,16 +411,34 @@ def _ui_files(result: dict) -> list[dict]:
 
 
 def add_patch(store, patch_id: str, source: dict, tree_root: str,
-              order: int = 100, reversal: bool = False) -> dict:
+              order: int = 100, reversal: bool = False,
+              scope: str | None = None, build_root: str | None = None) -> dict:
     """Add (or update-check) a patch source: fetch -> gate -> store version.
     New patch lands as state=pending (needs Enable semantics are: pending +
     enabled=true -> applied at next reconcile).
 
     reversal: True records the patch as a REVERSAL — the stored diff stays
     the forward (merged) diff, everything downstream evaluates it in the
-    un-apply direction. Used to undo a PR upstream already merged."""
+    un-apply direction. Used to undo a PR upstream already merged.
+
+    scope (DEV-1): None = auto-classify — gate against the keg first, and
+    when sections exist only in a full source checkout (csrc/, tests/,
+    build files) return a verdict naming them so the caller can offer the
+    'build' scope for the WHOLE patch. 'build' gates the UNPRUNED diff
+    against build_root (a clean checkout of the dev-src sync ref) and the
+    patch never touches the keg; requires build_root. 'runtime' forces the
+    existing keg behaviour (pruned diff). The whole diff is one scope —
+    no mixed patches.
+    """
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", patch_id or ""):
         return {"ok": False, "reason": "name must match [a-z0-9][a-z0-9._-]{0,63}"}
+    if scope is not None and scope not in _patches.SCOPES:
+        return {"ok": False,
+                "reason": f"scope must be one of {list(_patches.SCOPES)}"}
+    if scope == _patches.SCOPE_BUILD and not build_root:
+        return {"ok": False,
+                "reason": "scope=build needs a source checkout: install omlx-dev "
+                          "(omlx-uplift dev install) or pass --build-root"}
     manifest = store.load()
     _prune_once(store, manifest)
     patch = store.find(manifest, patch_id)
@@ -419,6 +451,13 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                            "this patch applies forward — to reverse a merged "
                            "PR, remove it and re-add with 'reverse' checked")
                 + " (direction is fixed per patch)"}
+    cur_scope = _patches.patch_scope(patch) if not creating else None
+    if not creating and scope is not None and scope != cur_scope:
+        return {"ok": False,
+                "reason": f"this patch is recorded as scope={cur_scope} — "
+                          "scope is fixed per patch; remove and re-add to "
+                          "change it"}
+    effective_scope = scope or cur_scope or _patches.SCOPE_RUNTIME
     if creating:
         patch = {"id": patch_id, "enabled": False, "order": order,
                  "source": {}, "desired_version": 0, "versions": [],
@@ -427,15 +466,45 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
     if reversal:
         patch["reversal"] = True
 
-    result = fetch_and_gate(source, tree_root,
-                            overrides=_pristine_overlay(store, patch, tree_root),
+    is_build = effective_scope == _patches.SCOPE_BUILD
+    if is_build:
+        gate_root = build_root
+        patterns = None            # UNPRUNED: the stored bytes are the full diff
+    else:
+        gate_root = tree_root
+        patterns = _patches.skip_patterns(manifest)
+    result = fetch_and_gate(source, gate_root,
+                            overrides=_pristine_overlay(store, patch, gate_root)
+                            if not is_build else None,
                             reverse=bool(patch.get("reversal")),
-                            skip_patterns=_patches.skip_patterns(manifest))
+                            skip_patterns=patterns)
     if not result["ok"]:
-        # fail-safe: nothing stored, nothing state-changed
         if creating:
             manifest["patches"].remove(patch)
             store.save(manifest)
+        if not is_build:
+            # ADD-TIME CLASSIFICATION (DEV-1): the runtime gate failed —
+            # when the failing/pruned sections are source-tree paths, name
+            # them so the caller (CLI/UI) can offer scope=build for the
+            # whole patch instead of a bare rejection.
+            fails = [f for f in result.get("files", []) if f["status"] == "fail"]
+            missing = [f["path"] for f in fails
+                       if (f.get("reason") or "").startswith("target file missing")]
+            pruned = list(result.get("skipped", []))
+            build_only = sorted(set(pruned) | set(missing))
+            if build_only and build_root:
+                verdict = fetch_and_gate(source, build_root, reverse=
+                                         bool(patch.get("reversal")),
+                                         skip_patterns=None)
+                if verdict.get("ok"):
+                    return {"ok": False, "stage": "classification",
+                            "reason": (f"{len(build_only)} section(s) exist only "
+                                       f"in a source checkout — add with "
+                                       "scope=build"),
+                            "needs_build_scope": build_only,
+                            "files": _ui_files(result),
+                            "compile_problems": result.get("compile_problems", []),
+                            "advisories": result.get("advisories", [])}
         # files/compile_problems ride along so the UI per-file gate table
         # can show WHY (the top-level reason is only "one or more files failed")
         return {"ok": False, "stage": result.get("stage"),
@@ -448,6 +517,10 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                     ("kind", "repo", "pr", "url", "insecure_tls")
                     if source.get(k) is not None}
     patch["source"] = source_clean
+    if effective_scope == _patches.SCOPE_BUILD:
+        # record only the non-default scope so runtime manifests keep the
+        # exact v1 shape (no-migration pattern)
+        patch["scope"] = _patches.SCOPE_BUILD
 
     data = result["diff"]
     sha = result["content_sha256"]
@@ -515,7 +588,7 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
     # image, so the backup records the forward-applied bytes instead.
     all_already = result["files"] and all(
         f["status"] == "already" for f in result["files"])
-    if all_already and not held:
+    if all_already and not held and not is_build:
         keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
         adopted = False
         if keg:
@@ -662,12 +735,22 @@ def view(store, tree_root: str, keg: str | None) -> dict:
     for p in manifest.get("patches", []):
         desired = _desired_version_entry(store, p) or {}
         applied = desired.get("applied") or {}
+        scope = _patches.patch_scope(p)
         # approvals are evaluated against the desired version; a never-
         # enabled patch has no desired yet -> judge its newest candidate so
         # the UI can show what Enable would require
         gate_ver = desired or (p.get("versions", [])[-1] if p.get("versions") else {})
+        inactive_reason = None
+        if scope == _patches.SCOPE_BUILD:
+            # build patches are inert on a keg by design (DEV-context 1)
+            inactive_reason = ("build scope — materialized on the omlx-dev "
+                               "branch, never applied to the keg")
         entry = {
             "id": p.get("id"), "enabled": p.get("enabled", False),
+            "scope": scope,
+            "active": (scope == _patches.SCOPE_RUNTIME
+                       and bool(p.get("enabled"))),
+            "inactive_reason": inactive_reason,
             "reversal": bool(p.get("reversal")),
             "order": p.get("order", 100), "state": p.get("state"),
             "state_detail": p.get("state_detail", ""),
@@ -860,7 +943,9 @@ def remove_patch(store, patch_id: str, tree_root: str) -> dict:
 
 
 def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
-    """Re-validate stored desired version against the live keg, no writes."""
+    """Re-validate stored desired version against the live keg, no writes.
+    Build-scope patches re-validate against the dev-src checkout UNPRUNED
+    (their gate tree by contract — the same bytes, sha-consistency rule)."""
     manifest = store.load()
     p = store.find(manifest, patch_id)
     if p is None:
@@ -871,9 +956,18 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
     data = _read_patch_file(store, desired)
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
-    result = validate(data, tree_root, overrides=_pristine_overlay(store, p, tree_root),
-                      reverse=bool(p.get("reversal")),
-                      skip_patterns=_patches.skip_patterns(manifest))
+    if _patches.patch_scope(p) == _patches.SCOPE_BUILD:
+        root = dev_build_root()
+        if not root:
+            return {"ok": False,
+                    "reason": "dev-src checkout not found — build patch "
+                              "cannot re-gate (omlx-uplift dev install)"}
+        result = validate(data, root, reverse=bool(p.get("reversal")),
+                          skip_patterns=None)
+    else:
+        result = validate(data, tree_root, overrides=_pristine_overlay(store, p, tree_root),
+                          reverse=bool(p.get("reversal")),
+                          skip_patterns=_patches.skip_patterns(manifest))
     result.pop("diff", None)  # bytes are not JSON-serialisable; caller has the id
     p["last_verified"] = {"at": _patches.now_iso(),
                           "ok": result["ok"]}
@@ -893,10 +987,21 @@ def check_all(store, tree_root: str) -> dict:
         pid = p.get("id")
         if not p.get("enabled") or src.get("kind") not in ("github_pr", "url"):
             continue
-        result = fetch_and_gate(src, tree_root,
-                                overrides=_pristine_overlay(store, p, tree_root),
-                                reverse=bool(p.get("reversal")),
-                                skip_patterns=_patches.skip_patterns(manifest))
+        if _patches.patch_scope(p) == _patches.SCOPE_BUILD:
+            root = dev_build_root()
+            if not root:
+                reports[pid] = {"check": "error",
+                                "reason": "dev-src checkout not found — "
+                                          "cannot re-gate a build patch"}
+                continue
+            result = fetch_and_gate(src, root,
+                                    reverse=bool(p.get("reversal")),
+                                    skip_patterns=None)
+        else:
+            result = fetch_and_gate(src, tree_root,
+                                    overrides=_pristine_overlay(store, p, tree_root),
+                                    reverse=bool(p.get("reversal")),
+                                    skip_patterns=_patches.skip_patterns(manifest))
         if not result["ok"]:
             reports[pid] = {"check": "error", "reason": result.get("reason")}
             continue

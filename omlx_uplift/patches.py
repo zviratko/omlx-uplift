@@ -28,9 +28,28 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-MANIFEST_VERSION = 1
+# v2 (DEV-1): per-patch 'scope' field. Absent == "runtime" — the same
+# no-migration pattern as skip_path_prefixes, so v1 manifests load and
+# behave byte-identically.
+MANIFEST_VERSION = 2
 KILL_SWITCH_ENV = "OMLX_UPLIFT_NO_PATCHES"
+
+# Patch scopes (DEV-context decision 1). 'runtime' gates against the keg
+# site-packages and is applied by the .pth reconcile. 'build' gates against
+# a full source checkout (no skip-pruning), is NEVER applied to a keg and
+# is materialized as commits on the omlx-dev branch instead. One patch =
+# one scope, whole diff; no mixed-scope patches.
+SCOPE_RUNTIME = "runtime"
+SCOPE_BUILD = "build"
+SCOPES = (SCOPE_RUNTIME, SCOPE_BUILD)
 SENTINEL_FILENAME = "patches.disabled"
+
+
+def patch_scope(patch: dict) -> str:
+    """Effective scope of a manifest entry: absent/unknown == runtime, so
+    v1 manifests and hand-edits keep today's behaviour."""
+    val = patch.get("scope")
+    return val if val in SCOPES else SCOPE_RUNTIME
 
 STATES = (
     "applied", "pending", "update_available", "needs_review",

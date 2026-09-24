@@ -212,6 +212,10 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
         ordered = sorted(plist, key=lambda p: (p.get("order", 100), p.get("id", "")))
         deferred = False
         for patch in ordered:
+            if _patches.patch_scope(patch) == _patches.SCOPE_BUILD:
+                # build-scope patches never touch the keg (DEV-context 1):
+                # the dev-src materializer owns them. Invisible to reconcile.
+                continue
             enabled = bool(patch.get("enabled"))
             desired = store.get_version(patch, patch.get("desired_version")) \
                 if patch.get("desired_version") else None

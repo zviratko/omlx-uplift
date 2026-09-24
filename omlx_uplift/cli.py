@@ -215,6 +215,7 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
     errors surface as verdict=failure.
     """
     from . import diffapply
+    from . import patches as _patches_mod
 
     out: list[dict] = []
     try:
@@ -228,6 +229,8 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
         pid = patch.get("id", "?")
         if not patch.get("enabled"):
             continue
+        if _patches_mod.patch_scope(patch) == _patches_mod.SCOPE_BUILD:
+            continue  # build-scope: never applied to a keg (DEV-1)
         rev = bool(patch.get("reversal"))
         ver = store.get_version(patch, patch.get("desired_version"))
         if ver is None:
@@ -522,11 +525,27 @@ def cmd_patches(argv=None) -> int:
       apply        reconcile now against the live keg (no re-exec)
       check        re-fetch sources, report drift (JSON)
       disable-all  kill switch on (sentinel) + disable every patch
+      add          fetch -> gate -> store a patch (id + --pr/--url/--file)
     Also: --enable-sentinel-off removes the sentinel after manual fixes."""
     import json as _json
 
     ap = argparse.ArgumentParser(prog="omlx-uplift patches")
-    ap.add_argument("action", choices=["status", "apply", "check", "disable-all"])
+    ap.add_argument("action", choices=["status", "apply", "check",
+                                       "disable-all", "add"])
+    ap.add_argument("id", nargs="?", help="patch id (add)")
+    ap.add_argument("--pr", help="GitHub PR as repo/N, e.g. jundot/omlx/123")
+    ap.add_argument("--url", help="plain URL of a diff file")
+    ap.add_argument("--file", help="local diff file (upload kind)")
+    ap.add_argument("--scope", choices=["runtime", "build"],
+                    help="patch scope (DEV-1). runtime gates against the "
+                         "keg; build gates against a source checkout "
+                         "(--build-root or the dev-src clone) and is "
+                         "materialized on the omlx-dev branch. Omit to "
+                         "auto-classify: the verdict names build-only "
+                         "sections when a keg gate cannot host them.")
+    ap.add_argument("--build-root", help="source checkout used to gate "
+                                         "scope=build (default: ~/.omlx/"
+                                         "uplift/dev-src when present)")
     args = ap.parse_args(argv)
 
     from . import patchsource, patches as _patches, patchsync
@@ -538,6 +557,36 @@ def cmd_patches(argv=None) -> int:
               file=sys.stderr)
         return 2
     tree_root = os.path.dirname(root)
+
+    if args.action == "add":
+        import re as _re
+
+        if not args.id:
+            ap.error("add needs a patch id")
+        if sum(bool(x) for x in (args.pr, args.url, args.file)) != 1:
+            ap.error("add needs exactly one of --pr repo/N, --url, --file")
+        source = {"kind": "url"}
+        if args.pr:
+            m = _re.fullmatch(r"([\w.-]+/[\w.-]+)/?(\d+)", args.pr.strip())
+            if not m:
+                ap.error("--pr must be repo/N")
+            source = {"kind": "github_pr", "repo": m.group(1),
+                      "pr": int(m.group(2))}
+        elif args.url:
+            source = {"kind": "url", "url": args.url}
+        elif args.file:
+            with open(args.file, "rb") as fh:
+                source = {"kind": "upload", "data": fh.read()}
+        build_root = args.build_root or patchsource.dev_build_root()
+        out = patchsource.add_patch(store, args.id, source, tree_root,
+                                    scope=args.scope, build_root=build_root)
+        if not out.get("ok") and out.get("stage") == "classification":
+            print(_json.dumps(out, indent=2))
+            print("hint: re-run with --scope build to record it as a "
+                  "build patch", file=sys.stderr)
+            return 3
+        print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
 
     if args.action == "status":
         out = patchsource.view(store, tree_root, _patches.keg_id(root))
