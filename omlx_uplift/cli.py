@@ -815,10 +815,16 @@ def cmd_dev_upgrade(args) -> int:
         print("dry-run: would run: " + " ".join(cmd))
         return 0
     _coexistence_warnings()
+    # upgrade owns the pin (decision 3): brew refuses to reinstall a pinned
+    # formula, so lift it for this one rebuild and restore it afterwards —
+    # on success AND on failure (the pin must never silently disappear)
+    subprocess.run(["brew", "unpin", "omlx-dev"], capture_output=True)
     print("running: " + " ".join(cmd))
     proc = subprocess.run(cmd)
     if proc.returncode != 0:
-        print("brew build FAILED — dev keg untouched", file=sys.stderr)
+        subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
+        print("brew build FAILED — dev keg untouched (pin restored)",
+              file=sys.stderr)
         return proc.returncode
     subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
     cfg = devsrc.load_config() or cfg
