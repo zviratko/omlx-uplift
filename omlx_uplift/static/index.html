@@ -352,6 +352,13 @@ try {
                     <input type="file" id="pt-src-file" accept=".diff,.patch,text/plain" hidden>
                     <label class="pt-auto"><input type="checkbox" id="pt-insecure-tls"> <span data-i18n="uplift.patches.insecure_tls">ignore SSL/TLS errors</span></label>
                     <label class="pt-auto pt-reversal"><input type="checkbox" id="pt-reversal"> <span data-i18n="uplift.patches.reversal">reverse a merged change (undo)</span></label>
+                    <label class="pt-field"><span data-i18n="uplift.patches.lbl_scope">scope</span>
+                        <select id="pt-new-scope" aria-label="Patch scope">
+                            <option value="" data-i18n="uplift.patches.scope_auto">auto</option>
+                            <option value="runtime" data-i18n="uplift.patches.scope_runtime">runtime</option>
+                            <option value="build" data-i18n="uplift.patches.scope_build">build (omlx-dev)</option>
+                        </select>
+                    </label>
                     <button type="button" class="btn primary" id="pt-preview-btn" data-i18n="uplift.patches.add_btn">Add patch</button>
                 </div>
             </div>
@@ -359,6 +366,16 @@ try {
             <div id="pt-preview" hidden></div>
             <div id="pt-list" class="admin-table"><div class="empty">—</div></div>
             <div id="pt-diff" class="pt-diff" hidden><div class="pt-diff-head"><span id="pt-diff-title"></span><button type="button" class="icon-btn" id="pt-diff-close" aria-label="Close">×</button></div><pre id="pt-diff-body"></pre></div>
+            <div id="dv-section" class="pt-card" hidden>
+                <div class="pt-card-head"><span class="pt-id" data-i18n="uplift.patches.dev_title">Build patches (omlx-dev)</span><span id="dv-state"></span></div>
+                <div class="pt-detail" data-i18n="uplift.patches.dev_explainer">Build patches never touch the running keg: omlx-uplift stacks them as one commit per patch on the uplift-dev branch of a local omlx checkout, then rebuilds the separate omlx-dev formula from that tip. Rebuild required after every change. Works only with an omlx-dev install.</div>
+                <div id="dv-intro" class="pt-src" hidden></div>
+                <div id="dv-status" class="pt-src" hidden></div>
+                <div id="dv-warn" class="pt-banner" hidden></div>
+                <div id="dv-patches" class="admin-table" hidden></div>
+                <div id="dv-actions" hidden><button type="button" class="btn primary" id="dv-build-btn" data-i18n="uplift.patches.dev_build">Rebuild omlx-dev</button></div>
+                <div id="dv-share" class="pt-gate" hidden></div>
+            </div>
         </div></div></div></div></section><section class="card wide page-card" data-id="helper-page" data-tab="models" data-sub="helper" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Helper models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Helper models <span class="right" id="hm-sub"></span></h2>
         <div class="card-body">
             <div id="hm-markitdown"></div>

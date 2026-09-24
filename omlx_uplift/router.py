@@ -31,6 +31,7 @@ import hashlib
 import json
 import math
 import os
+import threading
 import time
 from datetime import datetime, timezone
 from email.utils import formatdate, parsedate_to_datetime
@@ -1337,6 +1338,165 @@ async def patches_config(req: PatchConfigRequest,
     from . import patchsource
 
     return patchsource.set_config(patch_store(), req.auto_update_check)
+
+
+# --------------------------------------------------------------------------
+# DEV (omlx-dev, DEV-5): build-scope patch management surface. Server truth
+# is file-backed (dev.json + dev-src git state) — unlike the rest of the
+# settings surface this IS server state, by design (DEV-context 8). Thin
+# wrappers over devsrc/cli; all git/brew work runs in the threadpool.
+# --------------------------------------------------------------------------
+
+_DEV_BUILD = {"running": False, "log": [], "result": None}
+_DEV_BUILD_LOCK = threading.Lock()
+
+
+def _dev_share_realized(cfg: dict) -> dict:
+    """Per knob: what the dev base path actually holds vs the share map."""
+    import os
+
+    from . import devsrc
+
+    base = os.path.expanduser(devsrc.runtime_config(cfg)["base_path"])
+    vanilla = devsrc.vanilla_base()
+    out = {}
+    for name, want in devsrc.share_map(cfg).items():
+        fname = devsrc.SHARE_FILENAMES.get(name, name)
+        target = os.path.join(base, fname)
+        src = os.path.join(vanilla, fname)
+        if os.path.islink(target):
+            has = os.path.realpath(target) == os.path.realpath(src)
+            kind = "symlink" if has else "foreign-symlink"
+        elif os.path.exists(target):
+            kind = "private"
+        else:
+            kind = "missing"
+        out[name] = {"shared_wanted": bool(want), "actual": kind,
+                     "ok": (kind == "symlink") == bool(want)}
+    return out
+
+
+def _dev_status_sync() -> dict:
+    from . import cli, devsrc, patchsource
+
+    cfg = devsrc.load_config()
+    if not cfg:
+        return {"installed": False,
+                "reason": "dev.json missing — run: omlx-uplift dev install"}
+    import os
+
+    clone_ok = os.path.isdir(os.path.join(devsrc.src_path(cfg), ".git"))
+    build_patches = patchsource.enabled_build_patches(patch_store())
+    out = devsrc.status(cfg, build_patches if clone_ok else None)
+    if not clone_ok:
+        out["installed"] = False
+        return out
+    # staleness: built keg vs the tip the CURRENT patch set would produce
+    # (expected_tip replays materialize in a throwaway worktree — git-only,
+    # deterministic shas)
+    exp = devsrc.expected_tip(build_patches, cfg)
+    built = cfg.get("built_sha")
+    out["built_sha"] = built
+    out["expected_tip"] = exp.get("tip")
+    out["stale"] = bool(exp.get("ok")) and built != exp.get("tip")
+    out["service_running"] = cli._service_state("omlx-dev") in (
+        "started", "running")
+    rt = devsrc.runtime_config(cfg)
+    out["port"] = rt["port"]
+    out["base_path"] = rt["base_path"]
+    out["vanilla_port"] = devsrc.vanilla_port()
+    out["share_configured"] = devsrc.share_map(cfg)
+    out["share_realized"] = _dev_share_realized(cfg)
+    with _DEV_BUILD_LOCK:
+        out["build"] = dict(_DEV_BUILD, log=list(_DEV_BUILD["log"][-20:]))
+    out["build_patches"] = [{"id": p["id"], "version": p.get("version")}
+                            for p in build_patches]
+    return out
+
+
+@api_router.get("/dev/status")
+async def dev_status(is_admin: bool = Depends(require_admin)):
+    return await asyncio.to_thread(_dev_status_sync)
+
+
+class DevBuildRequest(BaseModel):
+    with_custom_kernel: Optional[bool] = None   # None = inherit receipt
+    with_grammar: Optional[bool] = None
+
+
+def _dev_build_run(opts: dict) -> None:
+    from types import SimpleNamespace
+
+    from . import cli
+
+    try:
+        # capture stdout+stderr so re-gate failures (needs_review lines,
+        # DEV-context 9) reach the UI instead of dying in a terminal nobody
+        # watches
+        import contextlib
+        import io
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.cmd_dev_upgrade(SimpleNamespace(
+                with_custom_kernel=bool(opts.get("with_custom_kernel")),
+                with_grammar=bool(opts.get("with_grammar")),
+                dry_run=False))
+        with _DEV_BUILD_LOCK:
+            for line in (out.getvalue() + err.getvalue()).splitlines():
+                if "re-gate FAILED" in line or "needs_review" in line \
+                        or "build FAILED" in line:
+                    _DEV_BUILD["log"].append(line.strip())
+    except Exception as exc:  # never leave the job stuck on "running"
+        rc = 1
+        with _DEV_BUILD_LOCK:
+            _DEV_BUILD["log"].append(f"build crashed: {exc}")
+    with _DEV_BUILD_LOCK:
+        _DEV_BUILD["running"] = False
+        _DEV_BUILD["result"] = rc
+
+
+@api_router.post("/dev/build")
+async def dev_build(req: DevBuildRequest,
+                    is_admin: bool = Depends(require_admin)):
+    with _DEV_BUILD_LOCK:
+        if _DEV_BUILD["running"]:
+            return {"started": False, "running": True,
+                    "reason": "a build is already running"}
+        _DEV_BUILD["running"] = True
+        _DEV_BUILD["result"] = None
+        _DEV_BUILD["log"] = ["build started"]
+    threading.Thread(target=_dev_build_run, daemon=True,
+                     args=(req.model_dump(),)).start()
+    return {"started": True}
+
+
+class DevReconfigureRequest(BaseModel):
+    port: Optional[int] = None
+    base_path: Optional[str] = None
+    share: Optional[list[str]] = None
+    no_share: Optional[list[str]] = None
+
+
+def _dev_reconfigure_sync(req: DevReconfigureRequest) -> dict:
+    from types import SimpleNamespace
+
+    from . import cli
+
+    rc = cli.cmd_dev_reconfigure(SimpleNamespace(
+        port=req.port, base_path=req.base_path,
+        share=req.share or [], no_share=req.no_share or [],
+        interactive=False))
+    return {"ok": rc == 0, "status": _dev_status_sync()}
+
+
+@api_router.post("/dev/reconfigure")
+async def dev_reconfigure(req: DevReconfigureRequest,
+                          is_admin: bool = Depends(require_admin)):
+    res = await asyncio.to_thread(_dev_reconfigure_sync, req)
+    if not res["ok"]:
+        raise HTTPException(status_code=422, detail="reconfigure failed")
+    return res
 
 
 # --------------------------------------------------------------------------

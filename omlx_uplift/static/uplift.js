@@ -275,7 +275,7 @@ function applyTab() {
     }
     if (tab === 'settings') {
         GSY.pollGlobalSettings(); GSY.pollEnvTunables();
-        if (sub === 'patches') PT.pollPatches();
+        if (sub === 'patches') { PT.pollPatches(); PT.pollDev && PT.pollDev(); }
     }
     if (tab === 'bench' || tab === 'chat' || tab === 'cluster') showEmbedPage(tab, sub);
 }

@@ -154,8 +154,8 @@ function renderPatches() {
     // which files diverge from vanilla.
     $('pt-sub').textContent = ptMsg('uplift.patches.counts',
         '{loaded} loaded · {active} active')
-        .replace('{loaded}', d.patches.length)
-        .replace('{active}', d.patches.filter(p => p.enabled).length);
+        .replace('{loaded}', d.patches.filter(p => (p.scope || 'runtime') !== 'build').length)
+        .replace('{active}', d.patches.filter(p => p.enabled && (p.scope || 'runtime') !== 'build').length);
 
     const auto = $('pt-auto-check');
     auto.checked = !!(d.config && d.config.auto_update_check);
@@ -166,14 +166,18 @@ function renderPatches() {
         } catch (e) { PG.toast(String(e), 4000); }
     };
 
-    if (!d.patches.length) {
+    // DEV-5: runtime section shows runtime-scope patches only; build-scope
+    // live in the omlx-dev section below (same cards, /patches/* API)
+    const runtimeOnly = d.patches.filter(p => (p.scope || 'runtime') !== 'build');
+    if (!runtimeOnly.length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = ptMsg('uplift.patches.none',
             'No patches yet. Add a GitHub PR, URL, or upload a .diff above.');
         list.append(empty);
     }
-    for (const p of d.patches) list.append(patchCard(p, d));
+    for (const p of runtimeOnly) list.append(patchCard(p, d));
+    renderDev();
 }
 
 function patchCard(p, view) {
@@ -430,7 +434,9 @@ async function ptPreview() {
         return;
     }
     const src = ptReadSource();
+    const scope = $('pt-new-scope') ? $('pt-new-scope').value : '';
     const body = { id, reversal: $('pt-reversal').checked, ...src };
+    if (scope) body.scope = scope;
     if (src.kind === 'upload') {
         const f = $('pt-src-file').files[0];
         if (!f) { PG.toast(ptMsg('uplift.patches.need_file', 'Pick a .diff file'), 4000); return; }
@@ -567,6 +573,182 @@ async function ptPreview() {
     }
 }
 
+/* ============================================================================
+   DEV-5: "Build patches (omlx-dev)" section. Every state claim comes from
+   /dev/status (never client guesses): staleness = built_sha vs expected_tip,
+   drift = branch content vs enabled set, sharing = realized vs configured.
+   Build-scope patch cards REUSE the runtime card anatomy; enable/disable
+   ride the existing /patches/* endpoints (DEV-1 made them scope-aware).
+   ========================================================================== */
+
+let DV_DATA = null;
+let DV_POLL = null;
+
+async function pollDev() {
+    const sec = $('dv-section');
+    if (!sec) return;
+    try {
+        DV_DATA = await PG.fetchJson(`${API}/uplift/api/dev/status`);
+        renderDev();
+    } catch (e) {
+        // a vanilla-only install has the endpoint too (installed:false) —
+        // a failure here is an auth/API problem, hide rather than half-render
+        sec.hidden = true;
+    }
+}
+
+function dvApi(path, body) {
+    return PG.fetchJson(`${API}/uplift/api/dev/${path}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+    });
+}
+
+function dvSha(sha) { return sha ? String(sha).slice(0, 12) : '—'; }
+
+function renderDev() {
+    const d = DV_DATA;
+    const sec = $('dv-section');
+    if (!d) { sec.hidden = true; return; }
+    sec.hidden = false;
+    const state = $('dv-state');
+    state.innerHTML = '';
+    const intro = $('dv-intro'), statusEl = $('dv-status');
+    const patchesBox = $('dv-patches'), actions = $('dv-actions');
+    const shareBox = $('dv-share'), warn = $('dv-warn');
+
+    if (!d.installed) {
+        statusEl.hidden = true; patchesBox.hidden = true;
+        actions.hidden = true; shareBox.hidden = true; warn.hidden = true;
+        intro.hidden = false;
+        intro.textContent = ptMsg('uplift.patches.dev_not_installed',
+            'omlx-dev is not set up on this machine. To build patches here, run: '
+            + 'omlx-uplift dev install (clones the dev-src repo), add patches with '
+            + 'scope "build", then omlx-uplift dev upgrade. Details: '
+            + (d.reason || ''));
+        return;
+    }
+    intro.hidden = true;
+
+    // status line: branch @ tip, N commits over base, behind sync ref
+    const bits = [];
+    bits.push(ptMsg('uplift.patches.dev_branch', 'branch {b} @ {t}')
+        .replace('{b}', d.branch || '—').replace('{t}', dvSha(d.tip)));
+    if (typeof d.ahead === 'number')
+        bits.push(ptMsg('uplift.patches.dev_ahead', '{n} commits over base')
+            .replace('{n}', d.ahead));
+    if (typeof d.behind === 'number' && d.behind > 0)
+        bits.push(ptMsg('uplift.patches.dev_behind', 'behind {ref} by {n}')
+            .replace('{ref}', d.sync_ref || '').replace('{n}', d.behind));
+    bits.push(ptMsg('uplift.patches.dev_built', 'built keg {s}')
+        .replace('{s}', dvSha(d.built_sha)));
+    statusEl.hidden = false;
+    statusEl.textContent = bits.join(' · ');
+
+    if (d.stale)
+        state.append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
+            'NEEDS REBUILD'), 'pt-st-warn',
+            ptMsg('uplift.patches.dev_stale_hint',
+                'the enabled build patch set no longer matches the built keg')));
+    if (d.drift && d.drift.drift)
+        state.append(ptChip(ptMsg('uplift.patches.dev_drift', 'DRIFT'),
+            'pt-st-warn', d.drift.detail || ''));
+    if (d.build && d.build.running)
+        state.append(ptChip(ptMsg('uplift.patches.dev_building', 'BUILDING'),
+            'pt-st-update', (d.build.log || []).slice(-1)[0] || ''));
+
+    warn.hidden = !(d.drift && d.drift.drift);
+    if (warn.hidden === false)
+        warn.textContent = ptMsg('uplift.patches.dev_drift_banner',
+            'WARNING — the uplift-dev branch does not match the enabled patch '
+            + 'set (manual commits?). A rebuild re-cuts the branch and drops '
+            + 'the foreign commits.');
+
+    // build patch cards: same anatomy as runtime, fed by the /patches view
+    const buildOnDv = (S.PT_DATA && S.PT_DATA.patches || [])
+        .filter(p => p.scope === 'build');
+    patchesBox.hidden = false;
+    patchesBox.innerHTML = '';
+    if (!buildOnDv.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = ptMsg('uplift.patches.dev_none',
+            'No build-scope patches. Add one above and pick scope "build".');
+        patchesBox.append(empty);
+    }
+    for (const p of buildOnDv) {
+        const card = patchCard(p, S.PT_DATA);
+        if (d.stale && p.enabled)
+            card.querySelector('.pt-card-head')
+                .append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
+                    'NEEDS REBUILD'), 'pt-st-warn'));
+        patchesBox.append(card);
+    }
+
+    actions.hidden = false;
+    const btn = $('dv-build-btn');
+    btn.disabled = !!(d.build && d.build.running) || !d.stale;
+    btn.title = d.stale ? '' : ptMsg('uplift.patches.dev_build_ok',
+        'built keg already matches the enabled patch set');
+
+    // sharing block: port, base path, share toggles (server truth)
+    shareBox.hidden = false;
+    shareBox.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'pt-gate-row pt-gate-head';
+    const hs = document.createElement('span');
+    hs.textContent = ptMsg('uplift.patches.dev_sharing', 'Coexistence');
+    head.append(hs);
+    shareBox.append(head);
+    const meta = document.createElement('div');
+    meta.className = 'pt-gate-row';
+    const m = document.createElement('span');
+    m.className = 'pt-detail';
+    const clash = d.port === d.vanilla_port;
+    m.textContent = ptMsg('uplift.patches.dev_runtime',
+        'port {p} · base {b} · vanilla port {v}{c}{r}')
+        .replace('{p}', d.port).replace('{b}', d.base_path)
+        .replace('{v}', d.vanilla_port)
+        .replace('{c}', clash ? ptMsg('uplift.patches.dev_port_clash',
+            ' — SAME PORT AS VANILLA') : '')
+        .replace('{r}', d.service_running
+            ? ptMsg('uplift.patches.dev_service_on', ' · service running') : '');
+    meta.append(m);
+    shareBox.append(meta);
+    for (const [name, info] of Object.entries(d.share_realized || {})) {
+        const row = document.createElement('div');
+        row.className = 'pt-gate-row';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!info.shared_wanted;
+        cb.onchange = async () => {
+            const share = [], no_share = [];
+            for (const [k, v] of Object.entries(d.share_configured || {}))
+                (k === name ? cb.checked : v) ? share.push(k) : no_share.push(k);
+            try {
+                const r = await dvApi('reconfigure',
+                    { share, no_share });
+                DV_DATA = r.status || DV_DATA;
+                renderDev();
+            } catch (e) {
+                PG.toast(ptMsg('uplift.patches.dev_reconfig_fail',
+                    'Reconfigure failed') + ': ' + e, 5000);
+                cb.checked = !cb.checked;
+            }
+        };
+        const lbl = document.createElement('span');
+        lbl.textContent = name;
+        row.append(cb, lbl);
+        if (!info.ok)
+            row.append(ptChip(ptMsg('uplift.patches.dev_share_mismatch',
+                'OUT OF SYNC'), 'pt-st-warn',
+                ptMsg('uplift.patches.dev_share_mismatch_hint',
+                    'the file on disk does not match the setting — run '
+                    + 'omlx-uplift dev reconfigure')));
+        shareBox.append(row);
+    }
+}
+
 let PT_CHECK_TIMER = null;
 function ptScheduleAutoCheck() {
     // hourly drift check while the page is open AND the user opted in (PAT-2
@@ -616,9 +798,27 @@ function initPatchesPage() {
     $('pt-preview-btn').onclick = ptPreview;
     $('pt-check-btn').onclick = () => ptCheckNow(false);
     $('pt-diff-close').onclick = () => { $('pt-diff').hidden = true; };
+    const dvBtn = $('dv-build-btn');
+    if (dvBtn) dvBtn.onclick = async () => {
+        try {
+            await dvApi('build', {});
+            PG.toast(ptMsg('uplift.patches.dev_build_started',
+                'omlx-dev rebuild started'), 4000);
+            renderDev();
+            clearInterval(DV_POLL);
+            DV_POLL = setInterval(async () => {
+                await pollDev();
+                if (!(DV_DATA && DV_DATA.build && DV_DATA.build.running))
+                    clearInterval(DV_POLL);
+            }, 5000);
+        } catch (e) {
+            PG.toast(ptMsg('uplift.patches.dev_build_fail',
+                'Build failed to start') + ': ' + e, 5000);
+        }
+    };
     ptScheduleAutoCheck();
 }
 
 window.Uplift = window.Uplift || {};
-window.Uplift.patches = { pollPatches, initPatchesPage };
+window.Uplift.patches = { pollPatches, pollDev, initPatchesPage };
 })();
