@@ -177,7 +177,21 @@ def ensure_clone(cfg: dict) -> str:
     if not os.path.isdir(os.path.join(path, ".git")):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _log.info("devsrc: cloning %s -> %s", cfg["origin"], path)
-        _git(["clone", "--filter=blob:none", cfg["origin"], path])
+        # FULL clone, deliberately NOT --filter=blob:none: brew clones
+        # this repo over file:// and a local promisor cannot lazy-serve
+        # missing blobs (git: 'lazy fetching disabled' -> clone exit 128).
+        _git(["clone", cfg["origin"], path])
+    # self-heal an earlier blobless clone in place (uplift <DEV-3 created
+    # those): drop the filter, refetch complete objects, then brew can clone
+    promisor = _git(["config", "--local", "remote.origin.promisor"],
+                    cwd=path, check=False).stdout.strip()
+    if promisor == "true":
+        _log.info("devsrc: converting blobless clone to full clone")
+        _git(["config", "--local", "--unset-all", "remote.origin.promisor"],
+             cwd=path)
+        _git(["config", "--local", "--unset-all",
+              "remote.origin.partialclonefilter"], cwd=path)
+        _git(["fetch", "--refetch", "origin"], cwd=path)
     # drift guard BEFORE touching remotes: never fetch a URL not in config
     actual = _git(["remote", "get-url", "origin"], cwd=path,
                   check=False).stdout.strip()

@@ -808,7 +808,9 @@ def cmd_dev_upgrade(args) -> int:
         # user decision 2026-09-24: preserve custom-kernel + grammar from
         # the user's build — dev receipt first, else the vanilla omlx one
         flags = _receipt_used_options("omlx-dev") or _receipt_used_options("omlx")
-    cmd = ["brew", "reinstall", "--HEAD", *sorted(flags), "omlx-dev"]
+    cmd = ["brew", "reinstall", *sorted(flags), "omlx-dev"]
+    # No --HEAD here on purpose: this brew version's `reinstall` rejects it
+    # and the formula is head-only anyway (HEAD is always the build target).
     if args.dry_run:
         print("dry-run: would run: " + " ".join(cmd))
         return 0
