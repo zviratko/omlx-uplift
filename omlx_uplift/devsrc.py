@@ -552,6 +552,7 @@ def realize_share(cfg: dict, vanilla: str | None = None) -> list[dict]:
                         and not os.listdir(target)
                         and os.path.isdir(src)):
                     os.rmdir(target)
+                    cur = None
                 else:
                     # flipping a private copy back to shared would hide
                     # dev-side data behind a symlink — keep the copy, say
