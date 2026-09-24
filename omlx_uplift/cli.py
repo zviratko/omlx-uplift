@@ -643,6 +643,19 @@ def cmd_dev(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="upgrade: materialize check + print the brew "
                          "command, build nothing")
+    ap.add_argument("--port", type=int,
+                    help="reconfigure: dev server port (default 8001)")
+    ap.add_argument("--base-path", help="reconfigure: dev data root "
+                    "(default ~/.omlx-dev)")
+    ap.add_argument("--share", action="append", default=[],
+                    help="reconfigure: share with vanilla ~/.omlx "
+                         "(repeatable or comma-list): models, "
+                         "model_settings, model_profiles")
+    ap.add_argument("--no-share", action="append", default=[],
+                    help="reconfigure: keep private (repeatable or "
+                         "comma-list)")
+    ap.add_argument("--interactive", action="store_true",
+                    help="reconfigure: ask the sharing questionnaire")
     args = ap.parse_args(argv)
 
     from . import devsrc, patchsource
@@ -661,11 +674,19 @@ def cmd_dev(argv=None) -> int:
         print(f"dev-src clone ready: {path}")
         print(f"config: {devsrc.dev_json_path()}")
         _coexistence_warnings()
+        # DEV-4 work item 3: runtime/sharing questionnaire lives in
+        # reconfigure (one code path); install just runs it once
+        rc = cmd_dev_reconfigure(args, cfg=cfg)
+        if rc not in (0,):
+            return rc
         print("next: omlx-uplift dev upgrade   (materialize + brew build)")
         return 0
 
     if args.action == "upgrade":
         return cmd_dev_upgrade(args)
+
+    if args.action == "reconfigure":
+        return cmd_dev_reconfigure(args)
 
     if args.action == "status":
         cfg = devsrc.load_config()
@@ -747,6 +768,121 @@ def _receipt_used_options(formula: str) -> set:
         return set()
     opts = set((data.get("used_options") or []))
     return opts
+
+
+def _share_answers(args, cfg: dict, devsrc) -> dict:
+    """Share map from --share/--no-share flags, an interactive
+    questionnaire, or the config defaults (DEV-context 6 copy)."""
+    share = devsrc.share_map(cfg)
+    names = list(devsrc.SHARE_DEFAULTS)
+
+    def _collect(values):
+        out = set()
+        for v in values or []:
+            out.update(x.strip() for x in v.split(",") if x.strip())
+        return out
+
+    on = _collect(getattr(args, "share", None))
+    off = _collect(getattr(args, "no_share", None))
+    unknown = (on | off) - set(names)
+    for name in sorted(unknown):
+        print(f"WARNING: unknown share knob {name!r} (choose from: "
+              f"{', '.join(names)})", file=sys.stderr)
+    if getattr(args, "interactive", False):
+        print("What should omlx-dev SHARE with the vanilla ~/.omlx? "
+              "(shared = symlink, live state stays single; private = a "
+              "copy seeded once, dev server drifts)")
+        for name in names:
+            rec = "Y" if devsrc.SHARE_DEFAULTS[name] else "n"
+            hint = ("recommended yes — big, mostly immutable"
+                    if name == "models" else
+                    "recommended no while BOTH servers run — mutable, "
+                    "concurrent writes race")
+            ans = input(f"  share {name}? [{rec}] ({hint}): ").strip().lower()
+            share[name] = (ans.startswith("y") if ans
+                           else devsrc.SHARE_DEFAULTS[name])
+    share.update({n: True for n in on if n in names})
+    share.update({n: False for n in off if n in names})
+    return {k: bool(share[k]) for k in names}
+
+
+def cmd_dev_reconfigure(args, cfg: dict | None = None) -> int:
+    """DEV-4: port/base-path diversion + sharing map, realized as symlinks
+    / seeded copies under the dev base path. The service picks port/base up
+    on restart (brew regenerates the launchd plist from the formula block)."""
+    import json as _json
+
+    from . import devsrc
+
+    if cfg is None:
+        cfg = devsrc.load_config()
+        if not cfg:
+            print("dev.json missing — run: omlx-uplift dev install",
+                  file=sys.stderr)
+            return 2
+
+    changed = False
+    if getattr(args, "port", None):
+        port = int(args.port)
+        if not 1 <= port <= 65535:
+            print(f"invalid port {port}", file=sys.stderr)
+            return 2
+        vp = devsrc.vanilla_port()
+        if port == vp:
+            print(f"WARNING: dev port {port} equals the vanilla omlx port "
+                  f"({vp}) — the two servers would fight over it.",
+                  file=sys.stderr)
+        if port != vp and devsrc.port_in_use(port):
+            print(f"port {port} is already in use by something else",
+                  file=sys.stderr)
+            return 1
+        cfg["port"] = port
+        changed = True
+    if getattr(args, "base_path", None):
+        cfg["base_path"] = os.path.expanduser(args.base_path)
+        changed = True
+    if (getattr(args, "share", None) or getattr(args, "no_share", None)
+            or getattr(args, "interactive", False)
+            or "share" not in cfg):
+        cfg["share"] = _share_answers(args, cfg, devsrc)
+        changed = True
+
+    if changed:
+        devsrc.save_config(cfg)
+        print(f"config written: {devsrc.dev_json_path()}")
+
+    actions = devsrc.realize_share(cfg)
+    for a in actions:
+        line = f"  {a['name']}: {a['action']}"
+        if a.get("reason"):
+            line += f" — {a['reason']}"
+        print(line)
+
+    rt = devsrc.runtime_config(cfg)
+    # service restart only when it's actually running (never start it here)
+    try:
+        out = subprocess.run(["brew", "services", "list", "omlx-dev"],
+                             capture_output=True, text=True,
+                             timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        out = ""
+    running = any(l.split() and l.split()[0] == "omlx-dev"
+                  and ("started" in l or "running" in l)
+                  for l in out.splitlines())
+    if running and changed:
+        subprocess.run(["brew", "services", "restart", "omlx-dev"])
+        print(f"omlx-dev service restarted (port {rt['port']}, base "
+              f"{rt['base_path']})")
+    elif changed:
+        print("NOTE: after the next `brew services start/restart omlx-dev` "
+              f"the service runs on port {rt['port']} with base path "
+              f"{rt['base_path']} (brew regenerates the launchd plist from "
+              "the formula's service block at start time).")
+    _coexistence_warnings()
+    print(_json.dumps({"port": rt["port"], "base_path": rt["base_path"],
+                       "share": devsrc.share_map(cfg),
+                       "actions": actions}, indent=2))
+    return 0
 
 
 def cmd_dev_upgrade(args) -> int:

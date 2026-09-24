@@ -483,3 +483,126 @@ def install_config(src_hint: str | None = None, yes: bool = False,
     }
     save_config(cfg, base_dir=base)
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# Coexistence config + sharing (DEV-4, DEV-context decision 6)
+# ---------------------------------------------------------------------------
+
+RUNTIME_DEFAULTS = {"port": 8001, "base_path": "~/.omlx-dev"}
+SHARE_DEFAULTS = {"models": True, "model_settings": False,
+                  "model_profiles": False}
+# knob name -> path under the base dirs (knob names omit the .json suffix)
+SHARE_FILENAMES = {"models": "models",
+                   "model_settings": "model_settings.json",
+                   "model_profiles": "model_profiles.json"}
+# never symlinked even if asked — the server would fight over live state
+NEVER_SHARE = ("settings.json", "usage.sqlite3", "cluster", "logs", "uplift")
+
+
+def runtime_config(cfg: dict) -> dict:
+    """port/base_path with defaults applied (dev.json may predate DEV-4)."""
+    out = dict(RUNTIME_DEFAULTS)
+    out.update({k: cfg[k] for k in RUNTIME_DEFAULTS if cfg.get(k)})
+    return out
+
+
+def share_map(cfg: dict) -> dict:
+    out = dict(SHARE_DEFAULTS)
+    out.update(cfg.get("share") or {})
+    return out
+
+
+def vanilla_base() -> str:
+    return os.path.expanduser("~/.omlx")
+
+
+def realize_share(cfg: dict, vanilla: str | None = None) -> list[dict]:
+    """Make <base_path>/<name> match the share map. Shared: a symlink into
+    the vanilla base. Unshared: a real file/dir seeded ONCE from vanilla
+    (copy, never move; an existing real path is left alone — data safety).
+    Returns per-name actions for CLI/JSON output."""
+    import shutil
+
+    vanilla = vanilla or vanilla_base()
+    base = os.path.expanduser(runtime_config(cfg)["base_path"])
+    os.makedirs(base, exist_ok=True)
+    actions: list[dict] = []
+    for name, shared in sorted(share_map(cfg).items()):
+        if name in NEVER_SHARE:
+            actions.append({"name": name, "action": "refused",
+                            "reason": f"{name} is never shareable while "
+                                      "both servers run (live write race)"})
+            continue
+        fname = SHARE_FILENAMES.get(name, name)
+        target = os.path.join(base, fname)
+        src = os.path.join(vanilla, fname)
+        cur = None
+        if os.path.islink(target):
+            cur = "link"
+        elif os.path.exists(target):
+            cur = "real"
+        if shared:
+            if cur == "link" and os.path.realpath(target) == os.path.realpath(src):
+                actions.append({"name": name, "action": "unchanged"})
+                continue
+            if cur == "real":
+                # an EMPTY server-created dir is not data — safe to flip
+                if (os.path.isdir(target)
+                        and not os.listdir(target)
+                        and os.path.isdir(src)):
+                    os.rmdir(target)
+                else:
+                    # flipping a private copy back to shared would hide
+                    # dev-side data behind a symlink — keep the copy, say
+                    # so (never destroy data)
+                    actions.append({"name": name, "action": "kept-private",
+                                    "reason": "dev copy exists; refusing to "
+                                              "replace real data with a "
+                                              "symlink"})
+                    continue
+            if not os.path.exists(src):
+                actions.append({"name": name, "action": "skipped",
+                                "reason": f"{src} does not exist yet"})
+                continue
+            if cur:
+                os.unlink(target)
+            os.symlink(src, target)
+            actions.append({"name": name, "action": "shared"})
+        else:
+            if cur == "real":
+                actions.append({"name": name, "action": "unchanged"})
+                continue
+            if not os.path.exists(src):
+                # seed placeholder so the server starts with its own state
+                if fname.endswith(".json"):
+                    with open(target, "w") as fh:
+                        fh.write("{}\n")
+                else:
+                    os.makedirs(target, exist_ok=True)
+                actions.append({"name": name, "action": "seeded-empty"})
+                continue
+            if cur == "link":
+                os.unlink(target)
+            if os.path.isdir(src):
+                shutil.copytree(src, target)
+            else:
+                shutil.copy2(src, target)
+            actions.append({"name": name, "action": "seeded-from-vanilla"})
+    return actions
+
+
+def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex((host, port)) == 0
+
+
+def vanilla_port() -> int:
+    try:
+        with open(os.path.join(vanilla_base(), "settings.json")) as fh:
+            return int(json.load(fh).get("port", 8000))
+    except (OSError, ValueError):
+        return 8000
