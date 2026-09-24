@@ -608,6 +608,73 @@ def cmd_patches(argv=None) -> int:
     return 0 if out.get("ok", True) else 1
 
 
+def cmd_dev(argv=None) -> int:
+    """omlx-dev management (DEV queue). Subcommands:
+      install   questionnaire + dev-src clone + dev.json
+      status    dev-src state as JSON (branch/tip/drift)
+      upgrade   materialize build patches + brew reinstall (DEV-3)
+      reconfigure  port/base-path/sharing (DEV-4)"""
+    import json as _json
+
+    ap = argparse.ArgumentParser(prog="omlx-uplift dev")
+    ap.add_argument("action", choices=["install", "status", "upgrade",
+                                       "reconfigure"])
+    ap.add_argument("--yes", action="store_true",
+                    help="take questionnaire defaults (scripted use)")
+    ap.add_argument("--src", help="existing omlx checkout to detect origin "
+                                  "from (install)")
+    ap.add_argument("--origin", help="dev-src origin URL (install, skips Q&A)")
+    ap.add_argument("--sync-ref", help="sync ref to track, e.g. origin/main")
+    ap.add_argument("--fetch", action="store_true",
+                    help="status: fetch the sync ref first")
+    args = ap.parse_args(argv)
+
+    from . import devsrc, patchsource
+
+    if args.action == "install":
+        existing = devsrc.load_config()
+        if existing and os.path.isdir(
+                os.path.join(devsrc.src_path(existing), ".git")):
+            print("dev-src already installed — see: omlx-uplift dev status",
+                  file=sys.stderr)
+            return 1
+        cfg = devsrc.install_config(src_hint=args.src, yes=args.yes,
+                                    origin=args.origin,
+                                    sync_ref=args.sync_ref)
+        path = devsrc.ensure_clone(cfg)
+        print(f"dev-src clone ready: {path}")
+        print(f"config: {devsrc.dev_json_path()}")
+        print("next: omlx-uplift dev upgrade   (builds omlx-dev via brew, DEV-3)")
+        return 0
+
+    if args.action == "status":
+        cfg = devsrc.load_config()
+        if not cfg:
+            print(_json.dumps({"installed": False,
+                               "reason": "dev.json missing — run "
+                                         "omlx-uplift dev install"}, indent=2))
+            return 1
+        if args.fetch:
+            try:
+                devsrc.fetch_sync_ref(cfg)
+            except devsrc.DevsrcError as exc:
+                print(f"fetch failed: {exc}", file=sys.stderr)
+        out = devsrc.status(cfg, patchsource.enabled_build_patches(
+            _patches_store()))
+        print(_json.dumps(out, indent=2))
+        return 0
+
+    print(f"dev {args.action} lands with the later DEV ticket",
+          file=sys.stderr)
+    return 2
+
+
+def _patches_store():
+    from . import patches as _patches
+
+    return _patches.PatchStore()
+
+
 def cmd_kernel(argv=None) -> int:
     """Rebuild one bundled native custom kernel IN THE LIVE KEG.
 
@@ -705,7 +772,7 @@ def cmd_skin(argv=None) -> int:
 def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] not in {
             "serve", "view", "install", "uninstall", "patches", "kernel",
-            "skin"}:
+            "skin", "dev"}:
         print(__doc__)
         return 1
     cmd = sys.argv[1]
@@ -719,7 +786,7 @@ def main() -> int:
         return cmd_skin(rest)
     return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
             "uninstall": cmd_uninstall, "patches": cmd_patches,
-            "kernel": cmd_kernel}[cmd](rest)
+            "kernel": cmd_kernel, "dev": cmd_dev}[cmd](rest)
 
 
 if __name__ == "__main__":

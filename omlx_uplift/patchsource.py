@@ -1067,6 +1067,30 @@ def get_diff(store, patch_id: str, v: int) -> bytes | None:
     return _read_patch_file(store, ver)
 
 
+def enabled_build_patches(store) -> list[dict]:
+    """The materialization input for devsrc (DEV-2): every ENABLED
+    build-scope patch as {id, version, diff_bytes} in manifest order
+    (order, id). Bytes are the stored UNPRUNED diffs — exactly what the
+    gate accepted, sha-consistent."""
+    manifest = store.load()
+    out: list[dict] = []
+    for p in sorted(manifest.get("patches", []),
+                    key=lambda q: (q.get("order", 100), q.get("id", ""))):
+        if _patches.patch_scope(p) != _patches.SCOPE_BUILD:
+            continue
+        if not p.get("enabled"):
+            continue
+        ver = _desired_version_entry(store, p)
+        if ver is None:
+            continue
+        data = _read_patch_file(store, ver)
+        if data is None:
+            continue
+        out.append({"id": p.get("id"), "version": ver.get("v", 0),
+                    "diff_bytes": data})
+    return out
+
+
 def set_config(store, auto_update_check: bool | None = None) -> dict:
     manifest = store.load()
     cfg = manifest.setdefault("config", {"auto_update_check": False})
