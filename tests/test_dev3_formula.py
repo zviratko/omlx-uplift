@@ -130,6 +130,34 @@ class ReceiptInheritance(unittest.TestCase):
                          {"--with-grammar"})
 
 
+class BrewBuildCmd(unittest.TestCase):
+    """brew 7.0.6 --HEAD asymmetry (both errors hit 2026-09-24): install
+    needs --HEAD for a head-only formula, reinstall rejects it."""
+
+    def setUp(self):
+        self.prefix = tempfile.mkdtemp(prefix="uplift-dev3-cmd-")
+        self.addCleanup(shutil.rmtree, self.prefix, ignore_errors=True)
+        self._env = os.environ.get("HOMEBREW_PREFIX")
+        os.environ["HOMEBREW_PREFIX"] = self.prefix
+
+    def tearDown(self):
+        if self._env is None:
+            os.environ.pop("HOMEBREW_PREFIX", None)
+        else:
+            os.environ["HOMEBREW_PREFIX"] = self._env
+
+    def test_first_build_installs_with_head(self):
+        cmd = cli._brew_build_cmd({"--with-grammar"})
+        self.assertEqual(cmd, ["brew", "install", "--HEAD",
+                               "--with-grammar", "omlx-dev"])
+
+    def test_rebuild_reinstalls_without_head(self):
+        os.makedirs(os.path.join(self.prefix, "Cellar", "omlx-dev",
+                                 "HEAD-abc"))
+        cmd = cli._brew_build_cmd(set())
+        self.assertEqual(cmd, ["brew", "reinstall", "omlx-dev"])
+
+
 class MountIntoDevKeg(unittest.TestCase):
     """The .pth contract for the dev keg: one file, bootstrap line first,
     import autopatch last — identical body to `omlx-uplift install`.

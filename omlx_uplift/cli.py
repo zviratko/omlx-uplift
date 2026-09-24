@@ -879,13 +879,7 @@ def cmd_dev_install(args) -> int:
         # user decision 2026-09-24: preserve custom-kernel + grammar from
         # the user's build — dev receipt first, else the vanilla omlx one
         flags = _receipt_used_options("omlx-dev") or _receipt_used_options("omlx")
-    # first build uses `brew install` (a plain clone+build, so the user can
-    # also run that themselves); later builds `brew reinstall` (always
-    # re-stages the head tip, which `brew upgrade` would not).
-    verb = "reinstall" if _formula_keg_exists("omlx-dev") else "install"
-    cmd = ["brew", verb, *sorted(flags), "omlx-dev"]
-    # No --HEAD here on purpose: this brew version's `reinstall` rejects it
-    # and the formula is head-only anyway (HEAD is always the build target).
+    cmd = _brew_build_cmd(flags)
     if args.dry_run:
         print("dry-run: would run: " + " ".join(cmd))
         return 0
@@ -916,6 +910,19 @@ def _formula_keg_exists(formula: str) -> bool:
 
     prefix = os.environ.get("HOMEBREW_PREFIX", "/opt/homebrew")
     return bool(glob.glob(f"{prefix}/Cellar/{formula}/*"))
+
+
+def _brew_build_cmd(flags) -> list:
+    """The brew command that builds omlx-dev (head-only formula).
+
+    This brew version is inconsistent about --HEAD and both error paths
+    are real (hit 2026-09-24): `install` REFUSES a head-only formula
+    without --HEAD, `reinstall` REJECTS --HEAD outright. So: first build
+    installs with the flag, every rebuild reinstalls without it. Neither
+    is ever `brew upgrade` — it no-ops on branch heads."""
+    if _formula_keg_exists("omlx-dev"):
+        return ["brew", "reinstall", *sorted(flags), "omlx-dev"]
+    return ["brew", "install", "--HEAD", *sorted(flags), "omlx-dev"]
 
 
 def _dev_next_steps(cfg: dict, fresh: bool) -> None:
