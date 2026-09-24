@@ -1,0 +1,348 @@
+.\" omlx-uplift man page. Ship as package data (omlx_uplift/man/);
+.\" reachable via `omlx-uplift man` on every install type. Keep in sync
+.\" with omlx_uplift/help.py (slim --help) and README.md.
+.Dd September 24, 2026
+.Dt OMLX-UPLIFT 1
+.Os
+.Sh NAME
+.Nm omlx-uplift
+.Nd Uplift dashboard, metrics and patch carrier for oMLX
+.Sh SYNOPSIS
+.Nm
+.Ar command
+.Op Ar args
+.Sh DESCRIPTION
+Uplift is a pure add-on package for
+.Em oMLX :
+it never modifies vanilla omlx files in place (patches are the explicit
+exception, see
+.Sx PATCHES ) .
+The classic dashboard at
+.Pa /admin/
+stays byte-identical; Uplift serves its own UI at
+.Pa /uplift/ .
+.Pp
+Uplift mounts itself into omlx's python with exactly ONE file: a
+.Pa .pth
+drop-in that bootstraps
+.Va sys.path
+to Uplift's own venv and imports the autopatch hook.
+The omlx keg never holds package copies and its own files are never edited,
+so
+.Ic brew
+upgrade omlx
+stays byte-clean.
+.Sh COMMANDS
+.Bl -tag -width Ds
+.It Xo Ic serve
+.Op Ar oMLX\ serve\ args ...
+.Xc
+Run oMLX + Uplift.
+A thin wrapper: delegates ALL argument handling and startup to omlx's own
+serve command (zero logic duplication); the .pth autopatch mounts Uplift
+when omlx.server is imported.
+Falls back to an explicit mount if the .pth is not installed.
+.It Xo Ic view
+.Op Fl -api Ar URL
+.Op Fl -port Ar N
+.Xc
+Standalone viewer for installs that cannot load Python (the DMG):
+serves the same UI and talks plain HTTP to a running omlx.
+.It Xo Ic install
+.Op Fl -python Ar PATH
+.Op Fl -yes | -keep-skins
+.Op Fl -formula Ar NAME
+.Xc
+Drop the autopatch .pth into a target environment's site-packages
+(default target: the Homebrew omlx keg;
+.Fl -formula
+picks another, e.g.
+.Em omlx-dev ) .
+A manual step for tricky venvs;
+.Em required
+after every fresh install and after every
+.Ic brew
+upgrade omlx .
+.Pp
+Prints a colour per-patch preview first
+.Dq OMLX-UPLIFT PATCHES TO APPLY: Aq ids
+then SUCCESS / APPLIED / WARNING / FAILURE per patch (dry-run only, no
+writes).
+Also copies the bundled example skins into
+.Pa ~/.omlx/uplift/skins/ :
+an existing differing file is replaced only after confirmation and the
+previous version is always kept as
+.Aq name .yml.Aq timestamp Ns ~
+first
+(
+.Fl -yes
+answers yes,
+.Fl -keep-skins
+skips skins; non-interactive runs never overwrite).
+Ends with a MOUNT CHECK: imports omlx.server in a probe subprocess and
+verifies the Uplift mount flag — exit 1 plus the failing import
+lines when
+.Pa /uplift/
+would 404 after the next start.
+.It Xo Ic uninstall
+.Op Fl -python Ar PATH
+.Xc
+Remove the .pth again.
+.It Xo Ic patches
+.Ic status | apply | check | disable-all
+.Xc
+Out-of-band patch-carrier recovery when the dashboard is unreachable:
+the same engine the .pth startup reconcile uses, no re-exec, JSON output.
+.It Xo Ic kernel
+.Ic list | rebuild Ar name
+.Op Fl -src Ar PATH
+.Xc
+Rebuild ONE bundled native kernel in the live keg after a patch touched
+kernel code (needs an omlx source checkout containing
+.Pa csrc/ ) .
+.It Xo Ic skin
+.Ic compile Ar dir
+.Op Fl o Ar out.yml
+.Xc
+Pack a skin working dir
+.Pa ~/.omlx/uplift/skins/name-mtime/
+back into a canonical single-file crate
+.Pa .yml
+(deterministic).
+.It Xo Ic skin
+.Ic decompile Ar yml
+.Op Fl C Ar skins-dir
+.Xc
+Extract a skin crate into
+.Aq name - Ns Aq mtime Ns / .
+Never overwrites an existing directory — that one may carry hand edits.
+.It Xo Ic dev
+.Ic install | status | upgrade | reconfigure
+.Xc
+Manage the
+.Em omlx-dev
+companion install (see
+.Sx BUILD-SCOPE PATCHES AND OMLX-DEV .
+.Bl -tag -width Ds
+.It Ic dev
+.Ic install
+.Op Fl -yes
+.Op Fl -src Ar PATH
+.Op Fl -origin Ar URL
+.Op Fl -sync-ref Ar REF
+Questionnaire, dev-src clone and
+.Pa dev.json .
+Origin detection order: an explicit
+.Fl -src
+checkout, else the head URL of the installed omlx formula as written in
+its tap, else canonical jundot/omlx.
+A checkout in your home directory is never guessed at.
+.It Ic dev
+.Ic status
+.Op Fl -fetch
+dev-src state as JSON (branch, tip, drift, staleness).
+.It Ic dev
+.Ic upgrade
+.Op Fl -with-custom-kernel
+.Op Fl -with-grammar
+.Op Fl -dry-run
+Materialize enabled build patches as one commit per patch on the
+.Em uplift-dev
+branch, re-gate them against the new base, then rebuild the
+.Em omlx-dev
+formula from that tip.
+Kernel/grammar flags default to the flags recorded in your existing build
+receipt.
+.It Ic dev
+.Ic reconfigure
+.Op Fl -port Ar N
+.Op Fl -base-path Ar P
+.Op Fl -share Ar knob Ns ,...
+.Op Fl -no-share Ar knob Ns ,...
+.Op Fl -interactive
+Port diversion, dev data root, and per-knob sharing with vanilla
+.Pa ~/.omlx
+(
+.Em models , model_settings , model_profiles ) .
+Mutable state (settings, usage database, cluster) must stay private while
+both servers run — a shared live write race.
+.El
+.It Xo Ic help
+.Op Ar command
+.Xc
+Slim help (this list, one line per command); with a command name, its
+usage.
+.It Ic man
+Render this man page.
+.El
+.Sh "CONFIG FILES"
+All under the data dir
+.Pa ~/.omlx/uplift/
+(or
+.Pa $OMLX_BASE_PATH/uplift/
+when that environment variable is set):
+.Bl -tag -width Ds
+.It Pa metrics.sqlite3
+UPLIFT'S OWN metrics database.
+The collector writes sub-hour-resolution time series and per-request rows
+here.
+Vanilla omlx's
+.Pa ~/.omlx/usage.sqlite3
+(hourly rollups) is opened strictly READ-ONLY and never written by Uplift.
+.It Pa env_overrides.json
+Uplift-stored experimental
+.Dv OMLX_*
+tunables (the allow-list shown in Settings).
+Seeded into the process environment at interpreter startup by the autopatch
+hook.
+A genuine launch-time environment variable (launchd plist, shell, CLI)
+ALWAYS wins; stored values fill only the gaps.
+Effect class per knob is shown in the UI: immediate / restart model /
+restart server.
+.It Pa patches.json
+Patch manifest: declarative desired state for every patch carrier
+(state machine: pending -> applied -> update_available / needs_review /
+failed / disabled / obsolete).
+Stored diffs, backups and this manifest live entirely uplift-side.
+.It Pa patches/
+Stored diff files and byte-exact pre-apply backups.
+.It Pa patches.lock
+Reconcile lock (startup and CLI share it).
+.It Pa patches.disabled
+Kill-switch sentinel: when present, startup only verifies patches and
+boots omlx unpatched.
+.Ic omlx-uplift
+patches disable-all
+creates it; delete the file (or re-enable patches in the UI) to resume.
+.It Pa kernel-backups/
+Byte-exact originals behind
+.Ic kernel
+rebuild .
+.It Pa dev.json
+.Em omlx-dev
+config: origin, sync_ref, formula branch, port, base path, share map,
+built_sha.
+Server truth by design — the only server-backed piece of the settings
+surface; the dashboard reads and writes it through
+.Pa /uplift/api/dev/* .
+.It Pa dev-src/
+The omlx checkout that build patches materialize in
+(Em uplift-dev
+branch;
+.Ic brew
+clones from here).
+.El
+.Pp
+Browser-side settings (theme, layout, locale) are client-side only: they
+live in localStorage, never in these files.
+.Sh PATCHES
+You upload unified diffs; Uplift applies them to the live omlx package tree
+with a strict applier and keeps byte-exact backups for restore.
+.Pp
+At every server start, BEFORE omlx.server is imported, the .pth hook runs
+a reconcile: applied+unchanged patches are skipped (fast verify), enabled
+patches whose target still matches are (re)applied in order, failures turn
+into needs_review (WARNING badge) and boot continues UNPATCHED for that
+one patch only.
+If any file changed on disk, the process re-execs itself ONCE before
+engines start, so patched code is served right away.
+.Pp
+Hard limits: the whole reconcile is time-boxed to 60 s (the rest defers to
+the next start), at most one re-exec per boot, and every error path boots
+omlx unpatched — a broken patch can never prevent the server from
+starting.
+.Pp
+Guard rails: diffs touching compiled kernel sources
+.Po omlx/custom_kernels/ Pc
+or resolving outside the keg are HELD until you approve per reason code;
+.Ic omlx-uplift
+kernel rebuild
+handles the compiled-artifact side.
+.Sh "BUILD-SCOPE PATCHES AND OMLX-DEV"
+Build-scope patches (manifest
+.Va scope :
+build )
+never touch the running keg.
+Uplift stacks them as one commit per patch on the
+.Em uplift-dev
+branch of the
+.Pa dev-src
+checkout, then rebuilds the separate
+.Em omlx-dev
+formula from that tip.
+Rebuild required after every change
+( Ic dev
+upgrade ,
+the dashboard's
+.Dq Rebuild omlx-dev
+button, or
+.Pa POST /uplift/api/dev/build ) .
+Enabled build patches are re-gated against every new base BEFORE the
+reinstall; failures are marked needs_review and listed in the build
+result, never silently skipped.
+.Pp
+omlx-dev coexists with vanilla: separate port (default 8001, via
+.Dv OMLX_PORT ) ,
+separate data root (default
+.Pa ~/.omlx-dev ,
+via
+.Dv OMLX_BASE_PATH ) ,
+separate service.
+Shareable knobs (models directory, model settings, model profiles) are a
+per-knob symlink decision; refusing to hide real dev-side data behind a
+symlink is deliberate.
+Works only with an
+.Em omlx-dev
+install
+( Ic dev
+install ) .
+.Sh "OMLX UPGRADE WORKFLOW"
+A vanilla upgrade replaces the keg and silently unmounts Uplift (the .pth
+dies with the old keg).
+Until you re-mount, omlx serves VANILLA.
+Sequence:
+.Bd -literal -offset indent
+brew upgrade omlx
+omlx-uplift install          # BEFORE the restart, or first boot is vanilla
+launchctl kickstart -k gui/$(id -u)/sh.brew.omlx
+.Ed
+.Pp
+At that first patched boot every enabled runtime patch is re-applied
+against the NEW keg: diffs whose context still matches apply
+automatically; diffs broken by upstream drift go to needs_review and need
+a re-based upload in the UI (Settings -> Patches, or
+.Ic omlx-uplift
+patches status ) .
+.Pp
+Your data survives untouched:
+.Pa ~/.omlx/uplift/
+is outside the keg.
+.Ic brew
+upgrade omlx-uplift
+needs no remount: the .pth points at the stable
+.Pa opt/
+symlink.
+.Sh ENVIRONMENT
+.Bl -tag -width Ds
+.It Ev NO_COLOR
+When set, CLI output is uncoloured (also: non-tty stdout).
+.It Ev OMLX_BASE_PATH
+Relocates the omlx (and with it the uplift) data directory.
+.It Ev OMLX_PORT / OMLX_DEV_PORT
+Server ports (omlx-dev defaults to 8001 via its launchd environment).
+.El
+.Sh "EXIT STATUS"
+Exit status 0 means success; 1 means a usage error, a failed
+mount check, or a refused/failed operation.
+.Sh "SEE ALSO"
+The dashboard at
+.Pa /uplift/
+(Settings -> Patches for the full patch surface, including the omlx-dev
+section),
+and the tap formulae
+.Em zviratko/uplift/omlx-uplift
+and
+.Em zviratko/uplift/omlx-dev .
+.Sh COLOPHON
+Made under human guidelines with free tokens from local oMLX inference
+server.

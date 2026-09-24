@@ -1,103 +1,10 @@
-"""omlx-uplift — Uplift dashboard, metrics and patch carrier for oMLX.
+"""omlx-uplift - Uplift dashboard, metrics and patch carrier for oMLX.
 
-Uplift is a pure add-on package: it never modifies vanilla omlx files in
-place (patches are the explicit exception, see PATCHES below). The classic
-dashboard at /admin/ stays byte-identical.
-
-COMMANDS
-  omlx-uplift serve [oMLX serve args...]   run oMLX + Uplift (wrapper:
-      delegates ALL argument handling and startup to omlx's own serve
-      command — zero logic duplication; the .pth autopatch mounts us when
-      omlx.server is imported). Falls back to explicit mount if the .pth
-      is not installed.
-  omlx-uplift view  [--api URL] [--port N] standalone viewer for installs
-      that cannot load Python (DMG): serves the same UI, talks plain HTTP.
-  omlx-uplift install [--python PATH] [--yes|--keep-skins]
-      drop the autopatch .pth into a
-      target environment's site-packages (default target: Homebrew omlx
-      keg). Manual step for tricky venvs; REQUIRED after every fresh
-      install and after every `brew upgrade omlx`. Prints a colour
-      per-patch preview first: "OMLX-UPLIFT PATCHES TO APPLY: <ids>" then
-      SUCCESS / APPLIED / WARNING / FAILURE per patch (dry-run only, no
-      writes). Also copies the bundled example skins into
-      ~/.omlx/uplift/skins/ — an existing differing file is only replaced
-      after confirmation, and the previous version is always kept as
-      <name>.yml.<timestamp>~ first (--yes answers yes, --keep-skins skips
-      skin installation entirely; non-interactive runs never overwrite).
-      Ends with a MOUNT CHECK: imports omlx.server in a probe subprocess
-      and verifies the Uplift mount flag — exit 1 + the failing import
-      lines when /uplift/ would 404 after the next start.
-  omlx-uplift uninstall [--python PATH]   remove the .pth again.
-  omlx-uplift patches status|apply|check|disable-all
-      out-of-band patch-carrier recovery when the dashboard is unreachable:
-      same engine the .pth startup reconcile uses, no re-exec, JSON output.
-  omlx-uplift kernel list|rebuild <name> [--src PATH]
-      rebuild ONE bundled native kernel in the live keg after a patch
-      touched kernel code (needs an omlx source checkout containing csrc/).
-  omlx-uplift skin compile <dir> [-o out.yml]
-      pack a skin working dir (~/.omlx/uplift/skins/<name>-<mtime>/) back
-      into a canonical single-file crate .yml (deterministic).
-  omlx-uplift skin decompile <yml> [-C skins-dir]
-      extract a skin crate into <name>-<mtime>/ (never overwrites an
-      existing dir — that one may carry hand edits).
-
-CONFIG FILES  (all under the data dir: ~/.omlx/uplift/, or $OMLX_BASE_PATH
-/uplift/ when that environment variable is set)
-  metrics.sqlite3        UPLIFT'S OWN metrics database. The collector writes
-      sub-hour-resolution time series and per-request rows here. Vanilla
-      omlx's ~/.omlx/usage.sqlite3 (hourly rollups) is opened strictly
-      READ-ONLY and never written by uplift.
-  env_overrides.json     uplift-stored experimental OMLX_* tunables (the
-      allow-list shown in Settings). Seeded into os.environ at interpreter
-      startup by the autopatch hook. A genuine launch-time environment
-      variable (launchd plist, shell, CLI) ALWAYS wins; stored values fill
-      only the gaps. Effect class per knob is shown in the UI: immediate /
-      restart model / restart server.
-  patches.json           patch manifest: declarative desired state for every
-      patch carrier (state machine: pending -> applied -> update_available /
-      needs_review / failed / disabled / obsolete). Stored diffs, backups
-      and this manifest live entirely uplift-side.
-  patches/               stored diff files and byte-exact pre-apply backups.
-  patches.lock           reconcile lock (startup and CLI share it).
-  patches.disabled       kill-switch sentinel: when present, startup only
-      verifies patches and boots omlx unpatched. `patches disable-all`
-      creates it; delete the file (or re-enable patches in the UI) to resume.
-  kernel-backups/        byte-exact originals behind `kernel rebuild`.
-Browser-side settings (theme, layout, locale) are client-side only: they
-live in localStorage, never in these files.
-
-PATCHES  (patch carrier, PAT design)
-  You upload unified diffs; uplift applies them to the live omlx package
-  tree with a strict applier and keeps byte-exact backups for restore.
-  At every server start, BEFORE omlx.server is imported, the .pth hook runs
-  a reconcile: applied+unchanged patches are skipped (fast verify), enabled
-  patches whose target still matches are (re)applied in order, failures turn
-  into needs_review (WARNING badge) and boot continues UNPATCHED for that
-  one patch only. If any file changed on disk, the process re-execs itself
-  ONCE before engines start, so patched code is served right away. Hard
-  limits: whole reconcile is time-boxed to 60 s (rest defers to next start),
-  at most one re-exec per boot, and every error path boots omlx unpatched —
-  a broken patch can never prevent the server from starting.
-  Guard rails: diffs touching compiled kernel sources (omlx/custom_kernels/)
-  or resolving outside the keg are HELD until you approve per reason code;
-  `omlx-uplift kernel rebuild` handles the compiled-artifact side.
-
-OMLX UPGRADE WORKFLOW  (brew upgrade omlx / pip install -U omlx)
-  The upgrade replaces the keg and silently unmounts uplift (the .pth dies
-  with the old keg). Until you re-mount, omlx serves VANILLA. Sequence:
-
-      brew upgrade omlx
-      omlx-uplift install          # BEFORE the restart, or first boot is vanilla
-      launchctl kickstart -k gui/$(id -u)/sh.brew.omlx
-
-  At that first patched boot every enabled patch is re-applied against the
-  NEW keg: diffs whose context still matches apply automatically; diffs
-  broken by upstream drift go to needs_review and need a re-based upload in
-  the UI (Settings -> Patches, or `omlx-uplift patches status`). Your data
-  survives untouched: ~/.omlx/uplift/ is outside the keg.
-  `brew upgrade omlx-uplift` needs no remount: the .pth points at the stable
-  opt/ symlink.
+Slim help: `omlx-uplift help [COMMAND]` (or --help). Full documentation:
+`omlx-uplift man` - install steps, config files, the patch state machine,
+omlx-dev build-scope patches and the brew-upgrade workflow.
 """
+
 
 from __future__ import annotations
 
@@ -1138,10 +1045,21 @@ def cmd_skin(argv=None) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) < 2 or sys.argv[1] not in {
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+        # omlx-uplift [help] -> slim command list; `help <cmd>` -> usage
+        rest = sys.argv[2:]
+        from .help import print_help
+        return print_help(rest[0] if rest else None)
+    if sys.argv[1] == "man":
+        from .help import show_man
+        return show_man()
+    if sys.argv[1] not in {
             "serve", "view", "install", "uninstall", "patches", "kernel",
             "skin", "dev"}:
-        print(__doc__)
+        print(f"omlx-uplift: unknown command {sys.argv[1]!r}\n",
+              file=sys.stderr)
+        from .help import print_help
+        print_help()
         return 1
     cmd = sys.argv[1]
     rest = sys.argv[2:]

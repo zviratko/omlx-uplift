@@ -120,43 +120,72 @@ def _same_url(a: str, b: str) -> bool:
     return bool(a) and bool(b) and canon(a) == canon(b)
 
 
+def _tap_abs_path(rel: str, tap: str) -> str | None:
+    """ruby_source_path is relative to the tap clone — resolve it.
+    'jundot/omlx' -> <brew --repository>/Library/Taps/jundot/homebrew-omlx"""
+    if not rel or not tap or os.path.isabs(rel):
+        return rel or None
+    user, _, name = tap.partition("/")
+    if not name:
+        return None
+    try:
+        repo = subprocess.run(["brew", "--repository"], capture_output=True,
+                              text=True, timeout=15).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if not repo:
+        return None
+    return os.path.join(repo, "Library", "Taps", user, f"homebrew-{name}", rel)
+
+
+def _formula_head_url(formula: str = "omlx") -> tuple[str, str] | None:
+    """head URL of an installed formula AS WRITTEN IN ITS TAP. This brew
+    version's `info --json` omits the 'head' field entirely, so ask the
+    JSON only WHERE the ruby source lives (ruby_source_path) and read the
+    head line from the file — no shell, no eval of ruby."""
+    try:
+        proc = subprocess.run(
+            ["brew", "info", "--json=v2", "--formula", formula],
+            capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            return None
+        f = (json.loads(proc.stdout).get("formulae") or [{}])[0]
+        src = f.get("ruby_source_path") or ""
+        tap = f.get("tap") or "installed formula"
+        src = _tap_abs_path(src, f.get("tap") or "")
+        if not src or not os.path.isfile(src):
+            return None
+        with open(src, encoding="utf-8") as fh:
+            for line in fh:
+                m = re.match(r'\s*head\s+"([^"]+)"', line)
+                if m:
+                    return (m.group(1), f"installed formula {formula} "
+                                        f"(tap {tap})")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
 def detect_origin(src_hint: str | None = None) -> dict:
-    """Best-effort origin URL, in priority order (DEV-context 5):
-    1. origin of an existing omlx checkout (--src hint, or ~/git/omlx)
-    2. head URL of the installed omlx keg formula (brew info --json)
+    """Best-effort origin URL, in priority order (user rule 2026-09-24):
+    1. --src checkout, ONLY when explicitly given
+    2. head URL of the installed omlx formula, read from its tap source
     3. canonical jundot/omlx
+    A checkout in $HOME is deliberately NEVER probed implicitly: the tap
+    is where omlx was installed FROM, random clones in the user's home are
+    not the upstream default.
     Returns {origin, source} — the caller CONFIRMS before storing."""
-    candidates: list[tuple[str, str]] = []
-    probes = []
-    if src_hint:
-        probes.append(src_hint)
-    probes.append(os.path.expanduser(os.path.join("~", "git", "omlx")))
-    for probe in probes:
-        if probe and os.path.isdir(os.path.join(probe, ".git")):
-            proc = _git(["remote", "get-url", "origin"], cwd=probe,
-                        check=False)
-            if proc.returncode == 0 and proc.stdout.strip():
-                candidates.append((proc.stdout.strip(), f"checkout {probe}"))
-                break
-    if not candidates:
-        try:
-            proc = subprocess.run(
-                ["brew", "info", "--json=v2", "--formula", "omlx"],
-                capture_output=True, text=True, timeout=60)
-            if proc.returncode == 0:
-                info = json.loads(proc.stdout)
-                f = (info.get("formulae") or [{}])[0]
-                head = f.get("head")
-                if isinstance(head, dict):
-                    head = head.get("url")
-                if isinstance(head, str) and head.startswith(("http", "git")):
-                    candidates.append((head, "installed omlx formula head"))
-        except (OSError, ValueError, subprocess.TimeoutExpired):
-            pass
-    if not candidates:
-        candidates.append((UPSTREAM_CANONICAL, "fallback (canonical upstream)"))
-    origin, source = candidates[0]
-    return {"origin": _normalize_git_url(origin), "source": source}
+    if src_hint and os.path.isdir(os.path.join(src_hint, ".git")):
+        proc = _git(["remote", "get-url", "origin"], cwd=src_hint,
+                    check=False)
+        if proc.returncode == 0 and proc.stdout.strip():
+            return {"origin": _normalize_git_url(proc.stdout.strip()),
+                    "source": f"checkout {src_hint}"}
+    found = _formula_head_url("omlx")
+    if found:
+        return {"origin": _normalize_git_url(found[0]), "source": found[1]}
+    return {"origin": _normalize_git_url(UPSTREAM_CANONICAL),
+            "source": "fallback (canonical upstream)"}
 
 
 # ---------------------------------------------------------------------------
