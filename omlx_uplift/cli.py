@@ -716,18 +716,29 @@ def _patches_store():
     return _patches.PatchStore()
 
 
+def _service_state(formula: str) -> str:
+    """brew services state for a formula ('started', 'stopped', ... or '').
+    NOTE: this brew's `services list` takes NO name argument — parse the
+    full table."""
+    try:
+        out = subprocess.run(["brew", "services", "list"],
+                             capture_output=True, text=True,
+                             timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    for line in out.splitlines():
+        parts = line.split()
+        if parts and parts[0] == formula:
+            return parts[1] if len(parts) > 1 else ""
+    return ""
+
+
 def _coexistence_warnings() -> None:
     """DEV-context decision 7: if the vanilla omlx service runs, print the
     switch commands and the both-running warning; warn on a dev/vanilla
     port clash from ~/.omlx/settings.json."""
-    try:
-        out = subprocess.run(["brew", "services", "list", "omlx"],
-                             capture_output=True, text=True, timeout=30).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        out = ""
-    lines = [l for l in out.splitlines() if l.split()
-             and l.split()[0] == "omlx"]
-    if lines and ("started" in lines[0] or "running" in lines[0]):
+    state = _service_state("omlx")
+    if state in ("started", "running"):
         print("WARNING: the vanilla omlx service is running. Running omlx "
               "AND omlx-dev at once is usually unwanted (shared mutable "
               "state). To switch over:\n"
@@ -860,16 +871,7 @@ def cmd_dev_reconfigure(args, cfg: dict | None = None) -> int:
 
     rt = devsrc.runtime_config(cfg)
     # service restart only when it's actually running (never start it here)
-    try:
-        out = subprocess.run(["brew", "services", "list", "omlx-dev"],
-                             capture_output=True, text=True,
-                             timeout=30).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        out = ""
-    running = any(l.split() and l.split()[0] == "omlx-dev"
-                  and ("started" in l or "running" in l)
-                  for l in out.splitlines())
-    if running and changed:
+    if _service_state("omlx-dev") in ("started", "running") and changed:
         subprocess.run(["brew", "services", "restart", "omlx-dev"])
         print(f"omlx-dev service restarted (port {rt['port']}, base "
               f"{rt['base_path']})")
