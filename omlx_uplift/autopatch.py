@@ -101,6 +101,14 @@ def _reconcile_patches() -> None:
 
 
 def install() -> None:
+    # UP-3: buffer patchsync/boot INFO lines until Uplift mounts (logging
+    # is unconfigured this early; register() flushes into server.log).
+    try:
+        from . import bootlog
+
+        bootlog.install()
+    except Exception:
+        pass
     _reconcile_patches()
     _seed_env_tunables()
     if _TARGET in sys.modules:

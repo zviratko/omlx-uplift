@@ -19,6 +19,15 @@ __version__ = "0.1.0"
 
 def register(app) -> None:
     """Mount all Uplift routes onto a FastAPI app (idempotent per app)."""
+    # UP-3: logging is configured by now (omlx/cli.py sets handlers up
+    # before importing omlx.server) — release the boot-time patchsync
+    # buffer into server.log before anything else mounts.
+    try:
+        from . import bootlog
+
+        bootlog.flush()
+    except Exception:
+        pass
     from .router import api_router, page_router
 
     if getattr(app, "_omlx_uplift_mounted", False):
