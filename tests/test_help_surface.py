@@ -122,7 +122,8 @@ class TestHelpSurface(unittest.TestCase):
         text = Path(helpmod.man_path()).read_text(encoding="utf-8")
         # the man SYNOPSIS list must lead with bootstrap (the one mention of
         # upgrade allowed is the legacy-alias note)
-        self.assertIn("Ic bootstrap | status | install | reconfigure", text)
+        self.assertIn("Ic bootstrap | status | patches | install | reconfigure",
+                      text)
         self.assertEqual(text.count(".Ic upgrade"), 1,
                          "man page documents dev upgrade beyond the "
                          "legacy-alias note")

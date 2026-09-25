@@ -117,12 +117,12 @@ Extract a skin crate into
 .Aq name - Ns Aq mtime Ns / .
 Never overwrites an existing directory — that one may carry hand edits.
 .It Xo Ic dev
-.Ic bootstrap | status | install | reconfigure
+.Ic bootstrap | status | patches | install | reconfigure
 .Xc
 Manage the
 .Em omlx-dev
 companion install (see
-.Sx BUILD-SCOPE PATCHES AND OMLX-DEV .
+.Sx DEV PATCHES AND OMLX-DEV .
 .Bl -tag -width Ds
 .It Ic dev
 .Ic bootstrap
@@ -147,6 +147,18 @@ A checkout in your home directory is never guessed at.
 .Ic status
 .Op Fl -fetch
 dev-src state as JSON (branch, tip, drift, staleness).
+.It Ic dev
+.Ic patches
+.Op Fl -scope Ar omlx|dev|both
+The shared manifest from the dev point of view
+.Pq dev No and Ic both No patches by default ,
+.Fl -scope
+narrows the filter .
+Exactly one patch store exists
+.Pq Pa ~/.omlx/uplift ,
+overridable with
+.Ev UPLIFT_HOME ;
+the omlx-dev service shares it .
 .It Ic dev
 .Ic install
 .Op Fl -with-custom-kernel
@@ -195,11 +207,14 @@ usage.
 Render this man page.
 .El
 .Sh "CONFIG FILES"
-All under the data dir
+All under the single uplift data dir
 .Pa ~/.omlx/uplift/
-(or
-.Pa $OMLX_BASE_PATH/uplift/
-when that environment variable is set):
+(overridable with
+.Ev UPLIFT_HOME ;
+.Ic OMLX_BASE_PATH
+does
+.Em not
+move it, so the vanilla and omlx-dev servers share one patch store):
 .Bl -tag -width Ds
 .It Pa metrics.sqlite3
 UPLIFT'S OWN metrics database.
@@ -277,11 +292,23 @@ or resolving outside the keg are HELD until you approve per reason code;
 .Ic omlx-uplift
 kernel rebuild
 handles the compiled-artifact side.
-.Sh "BUILD-SCOPE PATCHES AND OMLX-DEV"
-Build-scope patches (manifest
+.Sh "DEV PATCHES AND OMLX-DEV"
+Patch scopes (manifest
 .Va scope :
-build )
-never touch the running keg.
+omlx ,
+dev
+or
+.Ic both ) :
+omlx applies the pruned overlay to the vanilla keg only;
+dev materializes the full diff (tests included) on the
+.Em uplift-dev
+branch and never touches a keg;
+.Ic both
+does both (the keg gets the pruned overlay).
+Legacy
+.Dq runtime Ns / Ns No build
+values normalize to omlx/dev.
+Dev-scope patches never touch a vanilla keg.
 Uplift stacks them as one commit per patch on the
 .Em uplift-dev
 branch of the
@@ -294,8 +321,17 @@ Rebuild required after every change
 install ,
 the dashboard's
 .Dq Rebuild omlx-dev
-button, or
-.Pa POST /uplift/api/dev/build ) .
+/
+.Dq Rebuild & restart
+buttons, or
+.Pa POST /uplift/api/dev/build ) ;
+after a successful build the dashboard shows
+.Dv RESTART NEEDED
+until the service reloads the new keg
+( Ic dev
+restart endpoint or
+.Ic brew
+services restart omlx-dev ) .
 Enabled build patches are re-gated against every new base BEFORE the
 reinstall; failures are marked needs_review and listed in the build
 result, never silently skipped.
@@ -326,7 +362,7 @@ omlx-uplift install          # BEFORE the restart, or first boot is vanilla
 launchctl kickstart -k gui/$(id -u)/sh.brew.omlx
 .Ed
 .Pp
-At that first patched boot every enabled runtime patch is re-applied
+At that first patched boot every enabled omlx-scope patch is re-applied
 against the NEW keg: diffs whose context still matches apply
 automatically; diffs broken by upstream drift go to needs_review and need
 a re-based upload in the UI (Settings -> Patches, or
@@ -346,7 +382,13 @@ symlink.
 .It Ev NO_COLOR
 When set, CLI output is uncoloured (also: non-tty stdout).
 .It Ev OMLX_BASE_PATH
-Relocates the omlx (and with it the uplift) data directory.
+Relocates the omlx data directory (models, usage database, and the omlx-dev
+data root).
+The uplift patch store is deliberately NOT relocated by it — see
+.Ev UPLIFT_HOME .
+.It Ev UPLIFT_HOME
+Relocates the single uplift data dir (default
+.Pa ~/.omlx/uplift ) .
 .It Ev OMLX_PORT / OMLX_DEV_PORT
 Server ports (omlx-dev defaults to 8001 via its launchd environment).
 .El

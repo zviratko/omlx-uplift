@@ -1376,6 +1376,47 @@ def _dev_share_realized(cfg: dict) -> dict:
     return out
 
 
+def _iso_to_epoch(s: str) -> float:
+    from datetime import datetime
+
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+    return dt.timestamp()
+
+
+def _dev_service_age(cfg: dict):
+    """Seconds since the omlx-dev service process STARTED, or None when the
+    service is not running. ps etime is locale-proof; a missing/unparseable
+    value returns None (unknown, never a false 'fresh')."""
+    import subprocess
+
+    try:
+        info = subprocess.run(["brew", "services", "info", "omlx-dev",
+                               "--json"], capture_output=True, text=True,
+                              timeout=30)
+        data = json.loads(info.stdout or "[]")
+        pid = (data[0].get("pid") if isinstance(data, list) and data
+               else None)
+        if not pid:
+            return None
+        out = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=10)
+        et = out.stdout.strip()
+        if not et:
+            return None
+        # [[dd-]hh:]mm:ss
+        parts = et.split("-")
+        days = int(parts[0]) if len(parts) == 2 else 0
+        bits = [int(x) for x in (parts[-1] if len(parts) == 2 else et).split(":")]
+        while len(bits) < 3:
+            bits.insert(0, 0)
+        h, m, s = bits[-3:]
+        return days * 86400 + h * 3600 + m * 60 + s
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
 def _dev_status_sync() -> dict:
     from . import cli, devsrc, patchsource
 
@@ -1401,6 +1442,17 @@ def _dev_status_sync() -> dict:
     out["stale"] = bool(exp.get("ok")) and built != exp.get("tip")
     out["service_running"] = cli._service_state("omlx-dev") in (
         "started", "running")
+    # RESTART NEEDED (DEV-6): the keg exists at tip but the RUNNING process
+    # booted before the build finished. Wall-clock compare: the service's
+    # start time is derived from `ps etime`; unknown age => never claim fresh.
+    built_at = cfg.get("built_at")
+    started_wall = None
+    if out["service_running"]:
+        age = _dev_service_age(cfg)
+        if age is not None:
+            started_wall = time.time() - age
+    out["restart_needed"] = bool(built_at and started_wall is not None
+                                 and _iso_to_epoch(built_at) > started_wall)
     rt = devsrc.runtime_config(cfg)
     out["port"] = rt["port"]
     out["base_path"] = rt["base_path"]
@@ -1422,6 +1474,7 @@ async def dev_status(is_admin: bool = Depends(require_admin)):
 class DevBuildRequest(BaseModel):
     with_custom_kernel: Optional[bool] = None   # None = inherit receipt
     with_grammar: Optional[bool] = None
+    restart_after: bool = False                  # DEV-6: REBUILD AND RESTART
 
 
 def _dev_build_run(opts: dict) -> None:
@@ -1451,9 +1504,18 @@ def _dev_build_run(opts: dict) -> None:
         rc = 1
         with _DEV_BUILD_LOCK:
             _DEV_BUILD["log"].append(f"build crashed: {exc}")
+    restart_after = bool(opts.get("restart_after")) and rc == 0
     with _DEV_BUILD_LOCK:
         _DEV_BUILD["running"] = False
         _DEV_BUILD["result"] = rc
+    if restart_after:
+        # detached (the builder thread's own server may be the dev service)
+        import subprocess
+
+        subprocess.Popen(
+            ["sh", "-c", "sleep 1; brew services restart omlx-dev "
+                         ">> /tmp/omlx-dev-restart.log 2>&1"],
+            start_new_session=True)
 
 
 @api_router.post("/dev/build")
@@ -1497,6 +1559,24 @@ async def dev_reconfigure(req: DevReconfigureRequest,
     if not res["ok"]:
         raise HTTPException(status_code=422, detail="reconfigure failed")
     return res
+
+
+@api_router.post("/dev/restart")
+async def dev_restart(is_admin: bool = Depends(require_admin)):
+    """brew services restart omlx-dev. When the dev dashboard calls this,
+    ITS OWN server is the target — so the restart runs DETACHED after a
+    short grace: the JSON response must leave the socket before launchd
+    takes the process down."""
+    import subprocess
+
+    subprocess.Popen(
+        ["sh", "-c", "sleep 2; brew services restart omlx-dev "
+                     ">> /tmp/omlx-dev-restart.log 2>&1"],
+        start_new_session=True)
+    out = _dev_status_sync()
+    out["ok"] = True
+    out["restarting"] = True
+    return out
 
 
 # --------------------------------------------------------------------------

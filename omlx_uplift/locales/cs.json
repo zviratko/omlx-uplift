@@ -546,5 +546,16 @@
   "uplift.se.mtp_fixed_depth.opt.3": "Hloubka 3",
   "uplift.se.mtp_fixed_depth.opt.4": "Hloubka 4",
   "uplift.se.mtp_fixed_depth.opt.5": "Hloubka 5",
-  "uplift.se.mtp_fixed_depth.opt.6": "Hloubka 6"
+  "uplift.se.mtp_fixed_depth.opt.6": "Hloubka 6",
+  "uplift.patches.scope_omlx": "omlx (jen keg)",
+  "uplift.patches.scope_dev": "dev (jen omlx-dev)",
+  "uplift.patches.scope_both": "obojí",
+  "uplift.patches.dev_build_restart": "Přestavět & restartovat",
+  "uplift.patches.dev_restart": "Restartovat omlx-dev",
+  "uplift.patches.dev_restart_needed": "Vyžadován restart",
+  "uplift.patches.dev_restart_hint": "služba omlx-dev běží ze stavu před poslední stavbou — restartujte ji",
+  "uplift.patches.dev_restart_title": "brew services restart omlx-dev",
+  "uplift.patches.dev_restarting": "omlx-dev se restartuje…",
+  "uplift.patches.dev_restart_fail": "Restart selhal",
+  "uplift.patches.dev_build_restart_started": "přestavba omlx-dev zahájena (následuje restart)"
 }

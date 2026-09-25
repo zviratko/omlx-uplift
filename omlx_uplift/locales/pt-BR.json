@@ -550,5 +550,16 @@
   "uplift.se.mtp_fixed_depth.opt.3": "Profundidade 3",
   "uplift.se.mtp_fixed_depth.opt.4": "Profundidade 4",
   "uplift.se.mtp_fixed_depth.opt.5": "Profundidade 5",
-  "uplift.se.mtp_fixed_depth.opt.6": "Profundidade 6"
+  "uplift.se.mtp_fixed_depth.opt.6": "Profundidade 6",
+  "uplift.patches.scope_omlx": "omlx (só keg)",
+  "uplift.patches.scope_dev": "dev (só omlx-dev)",
+  "uplift.patches.scope_both": "ambos",
+  "uplift.patches.dev_build_restart": "Recompilar e reiniciar",
+  "uplift.patches.dev_restart": "Reiniciar omlx-dev",
+  "uplift.patches.dev_restart_needed": "REINICIALIZAÇÃO NECESSÁRIA",
+  "uplift.patches.dev_restart_hint": "o serviço omlx-dev em execução iniciou antes da última compilação — reinicie para carregá-la",
+  "uplift.patches.dev_restart_title": "brew services restart omlx-dev",
+  "uplift.patches.dev_restarting": "reiniciando omlx-dev…",
+  "uplift.patches.dev_restart_fail": "Falha ao reiniciar",
+  "uplift.patches.dev_build_restart_started": "recompilação do omlx-dev iniciada (reinicialização em seguida)"
 }

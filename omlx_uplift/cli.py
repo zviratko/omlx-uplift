@@ -877,6 +877,7 @@ def cmd_dev_install(args) -> int:
     `brew install` (first build) or `brew reinstall` (rebuild). Both always
     re-stage the branch tip (`brew upgrade` would no-op on a head)."""
     from . import devsrc, patchsource
+    from . import patches as _patches
 
     cfg = devsrc.load_config()
     if not cfg:
@@ -952,6 +953,9 @@ def cmd_dev_install(args) -> int:
     subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
     cfg = devsrc.load_config() or cfg
     cfg["built_sha"] = tip
+    # wall-clock build completion: the dashboard compares it against the
+    # running service's start time to show RESTART NEEDED (DEV-6)
+    cfg["built_at"] = _patches.now_iso()
     devsrc.save_config(cfg)
     _mount_into_dev_keg()
     print(f"omlx-dev built from {tip[:12]}; .pth mount refreshed")

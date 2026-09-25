@@ -546,5 +546,16 @@
   "uplift.se.mtp_fixed_depth.opt.3": "深度 3",
   "uplift.se.mtp_fixed_depth.opt.4": "深度 4",
   "uplift.se.mtp_fixed_depth.opt.5": "深度 5",
-  "uplift.se.mtp_fixed_depth.opt.6": "深度 6"
+  "uplift.se.mtp_fixed_depth.opt.6": "深度 6",
+  "uplift.patches.scope_omlx": "omlx（仅 keg）",
+  "uplift.patches.scope_dev": "dev（仅 omlx-dev）",
+  "uplift.patches.scope_both": "两者",
+  "uplift.patches.dev_build_restart": "重建並重新啟動",
+  "uplift.patches.dev_restart": "重新啟動 omlx-dev",
+  "uplift.patches.dev_restart_needed": "需要重新啟動",
+  "uplift.patches.dev_restart_hint": "執行中的 omlx-dev 服務在上次建置之前啟動 — 請重新啟動以載入",
+  "uplift.patches.dev_restart_title": "brew services restart omlx-dev",
+  "uplift.patches.dev_restarting": "正在重新啟動 omlx-dev…",
+  "uplift.patches.dev_restart_fail": "重新啟動失敗",
+  "uplift.patches.dev_build_restart_started": "omlx-dev 重建已開始（隨後重新啟動）"
 }

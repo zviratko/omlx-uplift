@@ -154,8 +154,8 @@ function renderPatches() {
     // which files diverge from vanilla.
     $('pt-sub').textContent = ptMsg('uplift.patches.counts',
         '{loaded} loaded · {active} active')
-        .replace('{loaded}', d.patches.filter(p => (p.scope || 'runtime') !== 'build').length)
-        .replace('{active}', d.patches.filter(p => p.enabled && (p.scope || 'runtime') !== 'build').length);
+        .replace('{loaded}', d.patches.filter(p => p.scope !== 'dev').length)
+        .replace('{active}', d.patches.filter(p => p.enabled && p.scope !== 'dev').length);
 
     const auto = $('pt-auto-check');
     auto.checked = !!(d.config && d.config.auto_update_check);
@@ -166,9 +166,9 @@ function renderPatches() {
         } catch (e) { PG.toast(String(e), 4000); }
     };
 
-    // DEV-5: runtime section shows runtime-scope patches only; build-scope
+    // DEV-6: omlx section shows keg-targeted scopes (omlx+both); dev+both
     // live in the omlx-dev section below (same cards, /patches/* API)
-    const runtimeOnly = d.patches.filter(p => (p.scope || 'runtime') !== 'build');
+    const runtimeOnly = d.patches.filter(p => p.scope !== 'dev');
     if (!runtimeOnly.length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
@@ -435,6 +435,8 @@ async function ptPreview() {
     }
     const src = ptReadSource();
     const scope = $('pt-new-scope') ? $('pt-new-scope').value : '';
+    const wasStored = (S.PT_DATA && S.PT_DATA.patches || [])
+        .some(p => p.id === id);
     const body = { id, reversal: $('pt-reversal').checked, ...src };
     if (scope) body.scope = scope;
     if (src.kind === 'upload') {
@@ -446,6 +448,12 @@ async function ptPreview() {
     const adv = $('pt-advisories');
     try {
         const r = await ptApi('add', body);
+        if (r.ok && !wasStored) {
+            // DEV-6: a NEW stored patch must appear immediately — same page
+            // state a refresh would produce (enable/disable/remove usable)
+            await pollPatches();
+            await pollDev();
+        }
         adv.hidden = !(r.advisories && r.advisories.length);
         adv.innerHTML = '';
         for (const a of (r.advisories || [])) {
@@ -650,6 +658,11 @@ function renderDev() {
             'NEEDS REBUILD'), 'pt-st-warn',
             ptMsg('uplift.patches.dev_stale_hint',
                 'the enabled build patch set no longer matches the built keg')));
+    if (d.restart_needed)
+        state.append(ptChip(ptMsg('uplift.patches.dev_restart_needed',
+            'RESTART NEEDED'), 'pt-st-warn',
+            ptMsg('uplift.patches.dev_restart_hint',
+                'the running omlx-dev service started before the last build — restart to load it')));
     if (d.drift && d.drift.drift)
         state.append(ptChip(ptMsg('uplift.patches.dev_drift', 'DRIFT'),
             'pt-st-warn', d.drift.detail || ''));
@@ -666,14 +679,14 @@ function renderDev() {
 
     // build patch cards: same anatomy as runtime, fed by the /patches view
     const buildOnDv = (S.PT_DATA && S.PT_DATA.patches || [])
-        .filter(p => p.scope === 'build');
+        .filter(p => p.scope === 'dev' || p.scope === 'both');
     patchesBox.hidden = false;
     patchesBox.innerHTML = '';
     if (!buildOnDv.length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = ptMsg('uplift.patches.dev_none',
-            'No build-scope patches. Add one above and pick scope "build".');
+            'No dev patches. Add one above and pick scope "dev" or "both".');
         patchesBox.append(empty);
     }
     for (const p of buildOnDv) {
@@ -687,9 +700,23 @@ function renderDev() {
 
     actions.hidden = false;
     const btn = $('dv-build-btn');
-    btn.disabled = !!(d.build && d.build.running) || !d.stale;
+    const busy = !!(d.build && d.build.running);
+    btn.disabled = busy || !d.stale;
     btn.title = d.stale ? '' : ptMsg('uplift.patches.dev_build_ok',
         'built keg already matches the enabled patch set');
+    const brBtn = $('dv-build-restart-btn');
+    if (brBtn) {
+        brBtn.disabled = btn.disabled;
+        brBtn.title = btn.title;
+    }
+    const rsBtn = $('dv-restart-btn');
+    if (rsBtn) {
+        // restart is useful when a fresh build needs loading, or the
+        // service is simply down-to-restart; never while a build runs
+        rsBtn.disabled = busy || !(d.restart_needed || d.stale === false);
+        rsBtn.title = ptMsg('uplift.patches.dev_restart_title',
+            'brew services restart omlx-dev');
+    }
 
     // sharing block: port, base path, share toggles (server truth)
     shareBox.hidden = false;
@@ -799,24 +826,44 @@ function initPatchesPage() {
     $('pt-check-btn').onclick = () => ptCheckNow(false);
     $('pt-diff-close').onclick = () => { $('pt-diff').hidden = true; };
     const dvBtn = $('dv-build-btn');
-    if (dvBtn) dvBtn.onclick = async () => {
+    if (dvBtn) dvBtn.onclick = () => dvStartBuild(false);
+    const dvBrBtn = $('dv-build-restart-btn');
+    if (dvBrBtn) dvBrBtn.onclick = () => dvStartBuild(true);
+    const dvRsBtn = $('dv-restart-btn');
+    if (dvRsBtn) dvRsBtn.onclick = async () => {
+        // THIS dashboard may BE the dev server — the page dies with it.
+        // The endpoint restarts detached after answering; reload shortly.
         try {
-            await dvApi('build', {});
-            PG.toast(ptMsg('uplift.patches.dev_build_started',
-                'omlx-dev rebuild started'), 4000);
-            renderDev();
-            clearInterval(DV_POLL);
-            DV_POLL = setInterval(async () => {
-                await pollDev();
-                if (!(DV_DATA && DV_DATA.build && DV_DATA.build.running))
-                    clearInterval(DV_POLL);
-            }, 5000);
+            await dvApi('restart', {});
+            PG.toast(ptMsg('uplift.patches.dev_restarting',
+                'omlx-dev restarting…'), 8000);
+            setTimeout(() => location.reload(), 6000);
         } catch (e) {
-            PG.toast(ptMsg('uplift.patches.dev_build_fail',
-                'Build failed to start') + ': ' + e, 5000);
+            PG.toast(ptMsg('uplift.patches.dev_restart_fail',
+                'Restart failed') + ': ' + e, 5000);
         }
     };
     ptScheduleAutoCheck();
+}
+
+async function dvStartBuild(restartAfter) {
+    try {
+        await dvApi('build', { restart_after: !!restartAfter });
+        PG.toast(ptMsg(restartAfter ? 'uplift.patches.dev_build_restart_started'
+                                    : 'uplift.patches.dev_build_started',
+                       restartAfter ? 'omlx-dev rebuild started (restart follows)'
+                                    : 'omlx-dev rebuild started'), 4000);
+        renderDev();
+        clearInterval(DV_POLL);
+        DV_POLL = setInterval(async () => {
+            await pollDev();
+            if (!(DV_DATA && DV_DATA.build && DV_DATA.build.running))
+                clearInterval(DV_POLL);
+        }, 5000);
+    } catch (e) {
+        PG.toast(ptMsg('uplift.patches.dev_build_fail',
+            'Build failed to start') + ': ' + e, 5000);
+    }
 }
 
 window.Uplift = window.Uplift || {};

@@ -575,5 +575,16 @@
   "uplift.se.mtp_fixed_depth.opt.3": "深さ 3",
   "uplift.se.mtp_fixed_depth.opt.4": "深さ 4",
   "uplift.se.mtp_fixed_depth.opt.5": "深さ 5",
-  "uplift.se.mtp_fixed_depth.opt.6": "深さ 6"
+  "uplift.se.mtp_fixed_depth.opt.6": "深さ 6",
+  "uplift.patches.scope_omlx": "omlx（keg のみ）",
+  "uplift.patches.scope_dev": "dev（omlx-dev のみ）",
+  "uplift.patches.scope_both": "両方",
+  "uplift.patches.dev_build_restart": "再ビルドして再起動",
+  "uplift.patches.dev_restart": "omlx-dev を再起動",
+  "uplift.patches.dev_restart_needed": "再起動が必要",
+  "uplift.patches.dev_restart_hint": "実行中の omlx-dev サービスは最後のビルド前に起動しました — 再起動して読み込んでください",
+  "uplift.patches.dev_restart_title": "brew services restart omlx-dev",
+  "uplift.patches.dev_restarting": "omlx-dev を再起動中…",
+  "uplift.patches.dev_restart_fail": "再起動に失敗",
+  "uplift.patches.dev_build_restart_started": "omlx-dev の再ビルドを開始しました（その後再起動）"
 }

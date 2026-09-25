@@ -561,5 +561,16 @@
   "uplift.se.mtp_fixed_depth.opt.3": "깊이 3",
   "uplift.se.mtp_fixed_depth.opt.4": "깊이 4",
   "uplift.se.mtp_fixed_depth.opt.5": "깊이 5",
-  "uplift.se.mtp_fixed_depth.opt.6": "깊이 6"
+  "uplift.se.mtp_fixed_depth.opt.6": "깊이 6",
+  "uplift.patches.scope_omlx": "omlx (keg 전용)",
+  "uplift.patches.scope_dev": "dev (omlx-dev 전용)",
+  "uplift.patches.scope_both": "둘 다",
+  "uplift.patches.dev_build_restart": "재빌드 후 재시작",
+  "uplift.patches.dev_restart": "omlx-dev 재시작",
+  "uplift.patches.dev_restart_needed": "재시작 필요",
+  "uplift.patches.dev_restart_hint": "실행 중인 omlx-dev 서비스가 마지막 빌드 이전에 시작되었습니다 — 재시작하여 로드하세요",
+  "uplift.patches.dev_restart_title": "brew services restart omlx-dev",
+  "uplift.patches.dev_restarting": "omlx-dev 재시작 중…",
+  "uplift.patches.dev_restart_fail": "재시작 실패",
+  "uplift.patches.dev_build_restart_started": "omlx-dev 재빌드 시작 (이후 재시작)"
 }

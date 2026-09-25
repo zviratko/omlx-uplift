@@ -25,7 +25,7 @@ COMMANDS = [
                 " the dashboard"),
     ("kernel", "list|rebuild <name> — rebuild ONE native kernel in the keg"),
     ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
-    ("dev", "omlx-dev: install|status|upgrade|reconfigure — build-scope"
+    ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure — dev"
             " patches in a separate keg"),
 ]
 
@@ -42,8 +42,8 @@ COMMAND_USAGE = {
     "uninstall": "omlx-uplift uninstall [--python PATH]",
     "patches": ("omlx-uplift patches status|apply|check|disable-all"
                 " [--json]\n"
-                "                 add --id ID (--repo R --pr N | --url U |"
-                " --file F) [--scope runtime|build]\n"
+                "                 add --id ID (--pr R/N | --url U | --file F)"
+                " [--scope omlx|dev|both]\n"
                 "                 enable|disable --id ID [--approve"
                 " once|always]"),
     "kernel": ("omlx-uplift kernel list\n"
@@ -55,6 +55,7 @@ COMMAND_USAGE = {
             "                 dev status [--fetch]\n"
             "                 dev install [--with-custom-kernel]"
             " [--with-grammar] [--dry-run]\n"
+            "                 dev patches [--scope omlx|dev|both]\n"
             "                 dev reconfigure [--port N] [--base-path P]"
             " [--share K,...] [--no-share K,...] [--interactive]"),
 }

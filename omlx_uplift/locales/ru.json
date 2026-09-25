@@ -546,5 +546,16 @@
   "uplift.se.mtp_fixed_depth.opt.3": "Глубина 3",
   "uplift.se.mtp_fixed_depth.opt.4": "Глубина 4",
   "uplift.se.mtp_fixed_depth.opt.5": "Глубина 5",
-  "uplift.se.mtp_fixed_depth.opt.6": "Глубина 6"
+  "uplift.se.mtp_fixed_depth.opt.6": "Глубина 6",
+  "uplift.patches.scope_omlx": "omlx (только keg)",
+  "uplift.patches.scope_dev": "dev (только omlx-dev)",
+  "uplift.patches.scope_both": "оба",
+  "uplift.patches.dev_build_restart": "Пересобрать и перезапустить",
+  "uplift.patches.dev_restart": "Перезапустить omlx-dev",
+  "uplift.patches.dev_restart_needed": "ТРЕБУЕТСЯ ПЕРЕЗАПУСК",
+  "uplift.patches.dev_restart_hint": "запущенный сервис omlx-dev стартовал до последней сборки — перезапустите, чтобы загрузить её",
+  "uplift.patches.dev_restart_title": "brew services restart omlx-dev",
+  "uplift.patches.dev_restarting": "omlx-dev перезапускается…",
+  "uplift.patches.dev_restart_fail": "Ошибка перезапуска",
+  "uplift.patches.dev_build_restart_started": "пересборка omlx-dev начата (затем перезапуск)"
 }

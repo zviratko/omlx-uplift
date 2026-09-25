@@ -346,7 +346,7 @@ try {
                             <option value="upload">Upload</option>
                         </select>
                     </label>
-                    <input type="text" id="pt-src-repo" placeholder="owner/repo" size="14" data-i18n-ph="uplift.patches.ph_repo">
+                    <input type="text" id="pt-src-repo" value="jundot/omlx" placeholder="owner/repo" size="14" data-i18n-ph="uplift.patches.ph_repo">
                     <input type="text" id="pt-src-pr" placeholder="1234" size="6" inputmode="numeric" data-i18n-ph="uplift.patches.ph_pr">
                     <input type="text" id="pt-src-url" class="grow" placeholder="https://…/patch.diff" data-i18n-ph="uplift.patches.ph_url">
                     <input type="file" id="pt-src-file" accept=".diff,.patch,text/plain" hidden>
@@ -355,8 +355,9 @@ try {
                     <label class="pt-field"><span data-i18n="uplift.patches.lbl_scope">scope</span>
                         <select id="pt-new-scope" aria-label="Patch scope">
                             <option value="" data-i18n="uplift.patches.scope_auto">auto</option>
-                            <option value="runtime" data-i18n="uplift.patches.scope_runtime">runtime</option>
-                            <option value="build" data-i18n="uplift.patches.scope_build">build (omlx-dev)</option>
+                            <option value="omlx" data-i18n="uplift.patches.scope_omlx">omlx (keg only)</option>
+                            <option value="dev" data-i18n="uplift.patches.scope_dev">dev (omlx-dev only)</option>
+                            <option value="both" data-i18n="uplift.patches.scope_both">both</option>
                         </select>
                     </label>
                     <button type="button" class="btn primary" id="pt-preview-btn" data-i18n="uplift.patches.add_btn">Add patch</button>
@@ -373,7 +374,7 @@ try {
                 <div id="dv-status" class="pt-src" hidden></div>
                 <div id="dv-warn" class="pt-banner" hidden></div>
                 <div id="dv-patches" class="admin-table" hidden></div>
-                <div id="dv-actions" hidden><button type="button" class="btn primary" id="dv-build-btn" data-i18n="uplift.patches.dev_build">Rebuild omlx-dev</button></div>
+                <div id="dv-actions" hidden><button type="button" class="btn primary" id="dv-build-btn" data-i18n="uplift.patches.dev_build">Rebuild omlx-dev</button><button type="button" class="btn primary" id="dv-build-restart-btn" data-i18n="uplift.patches.dev_build_restart">Rebuild &amp; restart</button><button type="button" class="btn" id="dv-restart-btn" data-i18n="uplift.patches.dev_restart">Restart omlx-dev</button></div>
                 <div id="dv-share" class="pt-gate" hidden></div>
             </div>
         </div></div></div></div></section><section class="card wide page-card" data-id="helper-page" data-tab="models" data-sub="helper" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Helper models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Helper models <span class="right" id="hm-sub"></span></h2>
