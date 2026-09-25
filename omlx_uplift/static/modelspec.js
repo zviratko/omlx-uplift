@@ -189,7 +189,10 @@
             vlm_mtp_enabled: s.vlm_mtp_enabled || false,
             vlm_mtp_draft_model: s.vlm_mtp_draft_model || '',
             vlm_mtp_draft_block_size: s.vlm_mtp_draft_block_size ?? null,
-            mtp_adaptive_max_depth: s.mtp_adaptive_max_depth ?? null,
+            // upstream 62171bdf: the fixed-depth select is gone; depth is a
+            // single adaptive-max ceiling. 3 = default adaptive.
+            mtp_adaptive_max_depth: [3, 4, 5, 6].includes(Number(s.mtp_adaptive_max_depth))
+                ? String(Number(s.mtp_adaptive_max_depth)) : '3',
             mtp_fixed_depth: s.mtp_fixed_depth ? String(s.mtp_fixed_depth) : '',
             trust_remote_code: s.trust_remote_code || false,
             ctKwargEntries: buildCtKwargEntries(s.chat_template_kwargs, s.forced_ct_kwargs, diffusion),
@@ -373,10 +376,11 @@
                 ? parseInt(ms.dflash_block_size) : null,
             dflash_verify_mode: ms.dflash_enabled ? (ms.dflash_verify_mode || 'adaptive') : null,
             mtp_enabled: !!ms.mtp_enabled,
-            mtp_adaptive_max_depth: ms.mtp_enabled && ms.mtp_adaptive_max_depth
-                ? Math.max(1, parseInt(ms.mtp_adaptive_max_depth) || 1) : null,
-            mtp_fixed_depth: ms.mtp_enabled && ms.mtp_fixed_depth
-                ? parseInt(ms.mtp_fixed_depth) : null,
+            // upstream 62171bdf: depth rides mtp_adaptive_max_depth only;
+            // the legacy fixed depth is cleared on every save.
+            mtp_adaptive_max_depth: ms.mtp_enabled
+                ? Math.max(1, parseInt(ms.mtp_adaptive_max_depth || '3', 10) || 3) : null,
+            mtp_fixed_depth: null,
             vlm_mtp_enabled: !!ms.vlm_mtp_enabled,
             vlm_mtp_draft_model: ms.vlm_mtp_enabled ? (ms.vlm_mtp_draft_model || null) : null,
             vlm_mtp_draft_block_size: ms.vlm_mtp_enabled && ms.vlm_mtp_draft_block_size
@@ -404,12 +408,153 @@
                 specprefill_enabled: false, specprefill_draft_model: null,
                 specprefill_keep_pct: null, specprefill_threshold: null,
                 dflash_enabled: false, mtp_enabled: false,
+                mtp_adaptive_max_depth: null, mtp_fixed_depth: null,
                 vlm_mtp_enabled: false, vlm_mtp_draft_model: null,
                 moe_expert_offload_enabled: false,
                 qwen35_oq_a8_enabled: false,
             });
         }
         return payload;
+    }
+
+    /* ---- runtime-signature replica (engine_pool._engine_runtime_signature)
+       A setting change reloads a loaded engine exactly when the signature of
+       the effective settings differs (or model_type_override flips). Used by
+       the editor for the RELOAD field badges and the RUNTIME DIVERGENCE
+       warning between base and profiles. Field presence matters here, not
+       value dirtiness: dependent fields count only while their feature is on. ---- */
+    function runtimeSignature(payload) {
+        const d = payload || {};
+        const has = v => v !== null && v !== undefined && v !== '';
+        const sig = {};
+        const add = (k, v) => { sig[k] = JSON.stringify(v === undefined ? null : v); };
+        const freq = parseInt(d.index_cache_freq, 10);
+        add('trust_remote_code', !!d.trust_remote_code);
+        add('index_cache_freq', Number.isFinite(freq) && freq >= 2 ? freq : null);
+        const mtpOn = !!d.mtp_enabled;
+        add('mtp_enabled', mtpOn);
+        if (mtpOn) {
+            add('mtp_adaptive_max_depth', d.mtp_adaptive_max_depth ?? null);
+            add('mtp_fixed_depth', d.mtp_fixed_depth ?? null);
+        }
+        const tqOn = !!d.turboquant_kv_enabled;
+        add('turboquant_kv_enabled', tqOn);
+        if (tqOn) add('turboquant_kv_bits', d.turboquant_kv_bits ?? 4);
+        const oqOn = !!d.qwen35_oq_a8_enabled;
+        add('qwen35_oq_a8_enabled', oqOn);
+        if (oqOn) add('qwen35_oq_a8_min_tokens', d.qwen35_oq_a8_min_tokens ?? 128);
+        const aneOn = !!d.qwen35_ane_prefill_enabled;
+        add('qwen35_ane_prefill_enabled', aneOn);
+        if (aneOn) {
+            add('qwen35_ane_prefill_sequence_length', d.qwen35_ane_prefill_sequence_length ?? 2048);
+            add('qwen35_ane_prefill_fraction', d.qwen35_ane_prefill_fraction ?? 0.53);
+            add('qwen35_ane_prefill_tail_padding_min_tokens', d.qwen35_ane_prefill_tail_padding_min_tokens ?? 0);
+            add('qwen35_ane_prefill_fused_down', !!d.qwen35_ane_prefill_fused_down);
+            add('qwen35_ane_prefill_max_layers', d.qwen35_ane_prefill_max_layers ?? 64);
+            add('qwen35_ane_prefill_dual_ane', d.qwen35_ane_prefill_dual_ane !== false);
+            add('qwen35_ane_prefill_gdn', d.qwen35_ane_prefill_gdn !== false);
+            if (d.qwen35_ane_prefill_gdn !== false) {
+                add('qwen35_ane_prefill_gdn_fraction', d.qwen35_ane_prefill_gdn_fraction ?? 0.5);
+                add('qwen35_ane_prefill_gdn_max_layers', d.qwen35_ane_prefill_gdn_max_layers ?? 48);
+            }
+            const cpuOn = !!d.qwen35_ane_prefill_cpu_enabled;
+            add('qwen35_ane_prefill_cpu_enabled', cpuOn);
+            if (cpuOn) {
+                add('qwen35_ane_prefill_cpu_fraction', d.qwen35_ane_prefill_cpu_fraction ?? 0.135);
+                add('qwen35_ane_prefill_cpu_down_fraction', d.qwen35_ane_prefill_cpu_down_fraction ?? 0);
+                add('qwen35_ane_prefill_cpu_gdn_fraction', d.qwen35_ane_prefill_cpu_gdn_fraction ?? 0);
+                add('qwen35_ane_prefill_cpu_threads', d.qwen35_ane_prefill_cpu_threads ?? 8);
+                add('qwen35_ane_prefill_cpu_shared_resource', d.qwen35_ane_prefill_cpu_shared_resource !== false);
+            }
+        }
+        const moeOn = !!d.moe_expert_offload_enabled;
+        add('moe_expert_offload_enabled', moeOn);
+        if (moeOn) add('moe_expert_offload_resident_fraction', d.moe_expert_offload_resident_fraction ?? 0.25);
+        // load-time offload/prefill variants (server derives status from the
+        // entry too — forced values can only make these ON, approximation is
+        // conservative for the divergence warning)
+        add('qwen4_ple_ssd_offload', !!d.qwen4_ple_ssd_offload);
+        add('deepseek_v41_engram_ssd_offload', !!d.deepseek_v41_engram_ssd_offload);
+        add('deepseek_v41_ced_prefill_enabled', !!d.deepseek_v41_ced_prefill_enabled);
+        const spOn = !!d.specprefill_enabled && has(d.specprefill_draft_model);
+        add('specprefill_enabled', spOn);
+        if (spOn) {
+            add('specprefill_draft_model', d.specprefill_draft_model);
+            add('specprefill_keep_pct', d.specprefill_keep_pct ?? 0.2);
+            add('specprefill_threshold', d.specprefill_threshold ?? null);
+        }
+        const dfOn = !!d.dflash_enabled && has(d.dflash_draft_model);
+        add('dflash_enabled', dfOn);
+        if (dfOn) {
+            add('dflash_draft_model', d.dflash_draft_model);
+            const dqOn = !!d.dflash_draft_quant_enabled;
+            add('dflash_draft_quant_enabled', dqOn);
+            if (dqOn) {
+                add('dflash_draft_quant_weight_bits', d.dflash_draft_quant_weight_bits ?? 4);
+                add('dflash_draft_quant_activation_bits', d.dflash_draft_quant_activation_bits ?? 16);
+                add('dflash_draft_quant_group_size', d.dflash_draft_quant_group_size ?? 64);
+            }
+            add('dflash_max_ctx', d.dflash_max_ctx ?? null);
+            add('dflash_in_memory_cache', d.dflash_in_memory_cache !== false);
+            add('dflash_in_memory_cache_max_entries', d.dflash_in_memory_cache_max_entries ?? 4);
+            add('dflash_in_memory_cache_max_bytes', d.dflash_in_memory_cache_max_bytes ?? null);
+            const ssdOn = !!d.dflash_ssd_cache;
+            add('dflash_ssd_cache', ssdOn);
+            if (ssdOn) add('dflash_ssd_cache_max_bytes', d.dflash_ssd_cache_max_bytes ?? null);
+        }
+        const vlmOn = !!d.vlm_mtp_enabled && has(d.vlm_mtp_draft_model);
+        add('vlm_mtp_enabled', vlmOn);
+        if (vlmOn) {
+            add('vlm_mtp_draft_model', d.vlm_mtp_draft_model);
+            add('vlm_mtp_draft_block_size', d.vlm_mtp_draft_block_size ?? null);
+        }
+        return sig;
+    }
+    /* Keys that feed the runtime signature (drives the per-field RELOAD
+       badge and the sparse-save split in the editor). */
+    const RUNTIME_SETTING_KEYS = new Set([
+        'trust_remote_code', 'index_cache_freq',
+        'mtp_enabled', 'mtp_adaptive_max_depth', 'mtp_fixed_depth',
+        'turboquant_kv_enabled', 'turboquant_kv_bits',
+        'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
+        'qwen35_ane_prefill_enabled', 'qwen35_ane_prefill_sequence_length',
+        'qwen35_ane_prefill_tail_padding_min_tokens', 'qwen35_ane_prefill_fraction',
+        'qwen35_ane_prefill_fused_down', 'qwen35_ane_prefill_max_layers',
+        'qwen35_ane_prefill_dual_ane', 'qwen35_ane_prefill_gdn',
+        'qwen35_ane_prefill_gdn_fraction', 'qwen35_ane_prefill_gdn_max_layers',
+        'qwen35_ane_prefill_shared_fraction',
+        'qwen35_ane_prefill_cpu_enabled', 'qwen35_ane_prefill_cpu_fraction',
+        'qwen35_ane_prefill_cpu_down_fraction', 'qwen35_ane_prefill_cpu_gdn_fraction',
+        'qwen35_ane_prefill_cpu_threads', 'qwen35_ane_prefill_cpu_shared_resource',
+        'moe_expert_offload_enabled', 'moe_expert_offload_resident_fraction',
+        'qwen4_ple_ssd_offload', 'deepseek_v41_engram_ssd_offload',
+        'deepseek_v41_ced_prefill_enabled',
+        'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
+        'specprefill_threshold',
+        'dflash_enabled', 'dflash_draft_model', 'dflash_draft_quant_enabled',
+        'dflash_draft_quant_weight_bits', 'dflash_draft_quant_activation_bits',
+        'dflash_draft_quant_group_size', 'dflash_max_ctx', 'dflash_in_memory_cache',
+        'dflash_in_memory_cache_max_entries', 'dflash_in_memory_cache_max_bytes',
+        'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes',
+        'mtp_enabled', 'vlm_mtp_enabled', 'vlm_mtp_draft_model',
+        'vlm_mtp_draft_block_size',
+    ]);
+    /* Diff two settings payloads (payload shape) through the signature:
+       returns [{key, base, other}] of settings-signature entries that differ. */
+    function runtimeDiff(basePayload, otherPayload) {
+        const a = runtimeSignature(basePayload), b = runtimeSignature(otherPayload);
+        const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+        const out = [];
+        for (const k of [...keys].sort()) {
+            if (a[k] !== b[k])
+                out.push({ key: k, base: _sigRaw(basePayload, k), other: _sigRaw(otherPayload, k) });
+        }
+        return out;
+    }
+    function _sigRaw(d, key) {
+        // map signature names back to a displayable raw value
+        if (key === 'ane_prefill_backend') return d.ane_prefill_backend;
+        return d[key];
     }
 
     /* ---- draft-model option pools (exact replica of dashboard.js) ---- */
@@ -465,6 +610,7 @@
              DFLASH_DRAFTER_CONFIG_MODEL_TYPES,
              isDiffusion, isQwenOqA8, coerceKwargValue, buildCtKwargEntries,
              buildState, validate, buildPayload,
+             runtimeSignature, runtimeDiff, RUNTIME_SETTING_KEYS,
              isDflashDraftModel, isVlmMtpDraftModel, isSpecPrefillDraftModel,
              specprefillCandidates, dflashCandidates, vlmMtpDrafters,
              profileRecord, GiB };

@@ -635,6 +635,30 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-profile-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
     border: 1px solid var(--accent); padding: 7px 10px; margin: 8px 0;
     background: var(--field); }
+/* item 5/6: a toggle and its dependent control share one aligned row */
+.se-row2 { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px;
+    align-items: start; border: 1px solid var(--edge); padding: 6px 8px; }
+.se-row2 .se-row { border: none; padding: 0; }
+/* item 8: engine-reload trigger badge */
+.se-reload-badge { font: 500 8px/1 var(--mono); letter-spacing: 0.08em;
+    color: #9a6b00; background: rgba(220, 160, 0, 0.14);
+    border: 1px solid rgba(160, 120, 0, 0.5); padding: 2px 4px;
+    vertical-align: middle; cursor: help; }
+/* item 4: RUNTIME DIVERGENCE banner */
+.se-divergence { border: 1px solid #b3541e; background: rgba(179, 84, 30, 0.08);
+    padding: 7px 10px; margin: 8px 0; font-size: 12px; }
+.se-div-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    color: #b3541e; font-weight: 600; }
+.se-div-show { font: 500 10px/1 var(--mono); padding: 3px 6px; }
+.se-div-detail { margin-top: 6px; border-top: 1px dashed rgba(179, 84, 30, 0.5);
+    padding-top: 6px; font: 400 11px/1.5 var(--mono); color: var(--ink); }
+.se-div-prof { font-weight: 700; margin-top: 4px; color: #b3541e; }
+.se-div-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.se-div-k { color: var(--dim); min-width: 260px; }
+.se-div-new { color: #b3541e; font-weight: 600; }
+.se-btn.restart { background: #b3541e; border-color: #b3541e; color: #fff; }
+.se-btn.restart:hover { background: #94451a; }
+.se-btn.restart[disabled] { opacity: 0.5; }
 .se-prof-expose { display: inline-flex; align-items: center; gap: 6px;
     font: 500 10px/1 var(--mono); letter-spacing: 0.06em; color: var(--accent); }
 .changelist.ed { margin: 0 8px; max-width: none; }

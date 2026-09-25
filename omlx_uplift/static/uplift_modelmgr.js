@@ -40,41 +40,54 @@ async function loadGrammarParsers() {
     } catch (_) { /* offline/upstream missing: fall back to model-reported list */ }
 }
 let seOrig = {};                     // baseline snapshot for dirty tracking
-/* Fields that only take effect when the engine is (re)built: changing one
-   of these on a LOADED model shows RESTART MODEL in the editor Save button
-   (server semantics: PUT replies requires_reload for exactly these). */
-const SE_RESTART_KEYS = new Set([
-    'model_type_override', 'index_cache_freq', 'dflash_enabled',
-    'dflash_draft_model', 'dflash_draft_quant_enabled',
-    'dflash_draft_quant_weight_bits', 'dflash_draft_quant_activation_bits',
-    'dflash_draft_quant_group_size', 'dflash_max_ctx', 'dflash_in_memory_cache',
-    'dflash_in_memory_cache_max_entries', 'dflash_in_memory_cache_max_bytes',
-    'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes', 'trust_remote_code',
-    'mtp_enabled', 'mtp_adaptive_max_depth', 'mtp_fixed_depth',
-    'vlm_mtp_enabled', 'vlm_mtp_draft_model',
-    'vlm_mtp_draft_block_size']);
 function seDirtyKeys() {                     // dirty keys of the ACTIVE tab
     const t = seTab();
     return t ? [...t.dirty] : [];
 }
-function seNeedsRestart() {
-    return seDirtyKeys().some(k => SE_RESTART_KEYS.has(k));
+/* item 3: honest save. Keys that would rebuild a loaded engine (runtime
+   signature, replica in modelspec) or flip the engine type. Everything else
+   saves live — no reload, no lie. */
+function seIsRuntimeKey(k) {
+    return k === 'model_type_override' ||
+        window.UpliftModelSpec.RUNTIME_SETTING_KEYS.has(k);
+}
+function seRuntimeDirtyKeys() { return seDirtyKeys().filter(seIsRuntimeKey); }
+function sePlainDirtyKeys() { return seDirtyKeys().filter(k => !seIsRuntimeKey(k)); }
+function seModelIsLoaded() {
+    return !!(seFormModel && !seFormModel._missing &&
+              (seFormModel.loaded || seFormModel.is_loading));
 }
 function seUpdateSaveBtn() {
     const b = document.getElementById('se-save'); if (!b) return;
+    const rb = document.getElementById('se-restart');
     const n = seDirtyKeys().length;
-    const restart = seNeedsRestart() && isBaseTabActive() &&
-        !!(seFormModel && (seFormModel.loaded || seFormModel.is_loading));
-    function isBaseTabActive() { return seIsBaseTab(); }
+    const onProfile = !seIsBaseTab();
+    // item 3: on a LOADED model the base tab splits honestly — SAVE persists
+    // only settings that apply live; runtime-signature settings need the
+    // model to be reloaded and ride the separate RESTART MODEL button.
+    const runtimeDirty = !onProfile && seModelIsLoaded() ? seRuntimeDirtyKeys().length : 0;
+    const plainDirty = n - (onProfile || !seModelIsLoaded() ? 0 : runtimeDirty);
     b.classList.toggle('queued', n > 0);
-    b.classList.toggle('restart-mode', restart);
-    const tabTxt = seIsBaseTab() ? '' : ' PROFILE';
-    b.textContent = n ? (restart ? '▶ RESTART MODEL (' + n + ')'
-                                 : 'SAVE' + tabTxt + ' (' + n + ')')
-                      : (seIsBaseTab() ? 'SAVE' : 'SAVE PROFILE');
-    b.title = restart
-        ? C.t('uplift.se.restart_title') : '';
+    b.classList.toggle('restart-mode', false);
+    const tabTxt = onProfile ? ' PROFILE' : '';
+    b.textContent = n
+        ? (runtimeDirty && !plainDirty
+            ? 'WAIT —'
+            : 'SAVE' + tabTxt + (plainDirty > 0 ? ' (' + plainDirty + ')' : ''))
+        : (onProfile ? 'SAVE PROFILE' : 'SAVE');
+    b.title = runtimeDirty
+        ? C.tf('uplift.se.save_split_title',
+            'SAVE writes settings that apply without a reload. The rest need a model reload — use RESTART MODEL.')
+        : '';
+    b.disabled = n ? (runtimeDirty && !plainDirty) : true;
+    if (rb) {
+        rb.hidden = runtimeDirty === 0;
+        rb.textContent = '▶ RESTART MODEL (' + runtimeDirty + ')';
+        rb.title = C.tf('uplift.se.restart_title',
+            'Some queued settings apply only after the model is reloaded');
+    }
     renderEdChanges();
+    refreshDivergence();
 }
 /* CHANGES box above the editor buttons: yaml-style key: old -> key: new,
    including inherit flips for profile tabs and the expose/api lines */
@@ -144,6 +157,8 @@ let seTabs = [];            // [{id:'base',dirty:Set}|{id,name,display_name,
                             //   template?,dirty:Set}]
 let seActiveTab = 'base';
 let seBaseVals = null;      // base modelspec-shape state (source of inherit display)
+let seBaseRaw = {};         // raw stored base settings dict (fetched in openEditor)
+window.__seProfileDivergence = [];   // [{name, display_name, api_name, diff:[…]}]
 /* Sampling keys are inheritable on profile tabs (empty = follow base). */
 const SE_INHERIT_KEYS = new Set(['temperature', 'top_p', 'top_k',
     'repetition_penalty', 'min_p', 'presence_penalty']);
@@ -274,7 +289,7 @@ function seBind(kind, key, opts) {
             const changed = JSON.stringify(seValues[key]) !== JSON.stringify(orig);
             if (changed) t && t.dirty.add(key); else t && t.dirty.delete(key);
             lab2.classList.toggle('dirty', changed);
-            lab2.classList.toggle('restartq', changed && SE_RESTART_KEYS.has(key));
+            lab2.classList.toggle('restartq', changed && seIsRuntimeKey(key));
             const rd = lab2.querySelector('.diff-out');
             if (rd) {
                 rd.hidden = !changed;
@@ -321,6 +336,10 @@ function seBind(kind, key, opts) {
     const ctlBox = document.createElement('span'); ctlBox.className = 'se-ctl';
     ctlBox.append(input);
     label.append(name, slot, ctlBox);
+    // item 8: every control whose key feeds the engine runtime signature is a
+    // reload trigger on a loaded model — badge it at definition, all fields.
+    if (key === 'model_type_override' || window.UpliftModelSpec.RUNTIME_SETTING_KEYS.has(key))
+        name.append(' ', seReloadBadge([key]));
     if (opts && opts.hint) {
         const h = document.createElement('small');
         h.className = 'se-hint';
@@ -328,6 +347,27 @@ function seBind(kind, key, opts) {
         label.append(h);
     }
     return label;
+}
+
+/* item 5/6: a toggle and its dependent control side by side in one aligned
+   grid cell (the pair grid puts two of these per row). */
+function row2(gridEl, a, b) {
+    const wrap = document.createElement('div');
+    wrap.className = 'se-row2';
+    wrap.append(a, b);
+    gridEl.append(wrap);
+    return wrap;
+}
+
+function seReloadBadge(keys) {
+    // item 8: a settings control that feeds the engine runtime signature
+    // reloads a loaded model on change — badge it.
+    const b = document.createElement('span');
+    b.className = 'se-reload-badge';
+    b.textContent = '⟳ RELOAD';
+    b.title = C.tf('uplift.se.reload_badge.title',
+        'Changing this setting rebuilds the loaded engine (model reload).');
+    return b;
 }
 
 function seSection(title) {
@@ -572,12 +612,15 @@ function renderEditorFields(container) {
                 { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 1, step: 1 }));
     }
     if (seValues.turboquant_kv_enabled !== undefined && !S.isDiffusion(m)) {
-        g.append(seBind('bool', 'turboquant_kv_enabled', { label: 'TurboQuant KV Cache',
+        // item 5: toggle and its bits control share one aligned row
+        const tq = seBind('bool', 'turboquant_kv_enabled', { label: 'TurboQuant KV Cache',
             hint: 'Compress KV cache using vector quantization. Lower bits = more compression.',
-            onChange: renderEditorFields.bind(null, container) }));
+            onChange: renderEditorFields.bind(null, container) });
         if (seValues.turboquant_kv_enabled)
-            sub(g).append(seBind('number', 'turboquant_kv_bits',
-                { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'), min: 2, max: 8, step: 0.25 }));
+            row2(g, tq, seBind('number', 'turboquant_kv_bits',
+                { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
+                  min: 2, max: 8, step: 0.25 }));
+        else g.append(tq);
     }
     if (m.qwen4_ple_ssd_offload_supported || seValues.qwen4_ple_ssd_offload)
         g.append(seBind('bool', 'qwen4_ple_ssd_offload', { label: 'SSD N-gram Offload (Qwen4 only)',
@@ -640,24 +683,23 @@ function renderEditorFields(container) {
             }
         }
         if (seValues.mtp_enabled !== undefined) {
-            g.append(seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
+            // item 6: toggle and its depth control share one aligned row;
+            // upstream 62171bdf: single adaptive-max depth select (fixed
+            // depth retired).
+            const mtpT = seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
                 hint: m.mtp_compatible
                     ? "Drafts several tokens per step with the model's built-in MTP head."
                     : (m.mtp_compatibility_reason || 'Not compatible with this model'),
-                onChange: renderEditorFields.bind(null, container) }));
-            if (seValues.mtp_enabled) {
-                sub(g).append(seBind('number', 'mtp_adaptive_max_depth', {
-                    label: C.tf('uplift.se.mtp_adaptive_max_depth', 'Max draft tokens per cycle'), min: 1, max: 8, step: 1,
-                    hint: 'Speculative depth. Empty = model default (usually 3); '
-                        + 'an adaptive controller picks 1..max from acceptance rates. '
-                        + 'Set 1 to fix depth-1 cycles.' }));
-                sub(g).append(seBind('select', 'mtp_fixed_depth', {
-                    label: 'Draft Depth',
-                    hint: 'Adaptive adjusts the draft depth each step. '
-                        + 'Depth N always drafts N tokens.',
-                    options: [{ value: '', label: 'Adaptive' },
-                              ...[1,2,3,4,5,6].map(n => ({ value: String(n), label: 'Depth ' + n }))] }));
-            }
+                onChange: renderEditorFields.bind(null, container) });
+            if (seValues.mtp_enabled)
+                row2(g, mtpT, seBind('select', 'mtp_adaptive_max_depth', {
+                    label: C.tf('uplift.se.mtp_depth', 'Adaptive max depth'),
+                    hint: C.tf('uplift.se.mtp_depth.hint',
+                        'Automatically adjusts the draft depth up to the selected maximum.'),
+                    options: [{ value: '3', label: '3 tokens (Default)' },
+                              ...[4, 5, 6].map(n => ({ value: String(n),
+                                  label: C.tf('uplift.se.mtp_depth.opt.' + n, n + ' tokens') }))] }));
+            else g.append(mtpT);
         }
         const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
         if (seValues.vlm_mtp_enabled !== undefined &&
@@ -789,6 +831,7 @@ function renderAne(container, g) {
             { label: C.tf('uplift.ui.performance_aware_scheduling', 'Performance-aware scheduling'),
               hint: "Uses Apple's shared-resource scheduler hint and falls back automatically." }));
     }
+    refreshDivergence();   // the fields wipe removed the banner — re-attach
 }
 
 /* chat_template_kwargs editor: value kinds per classic modal */
@@ -937,11 +980,17 @@ function editorNode() {
     bodyRow.append(scroll, changes);
     const save = document.createElement('button');
     save.className = 'se-btn'; save.textContent = 'Save'; save.id = 'se-save';
+    // item 3: separate honest reload action — hidden until runtime-signature
+    // settings are actually queued on the base tab of a loaded model
+    const restart = document.createElement('button');
+    restart.className = 'se-btn restart'; restart.id = 'se-restart';
+    restart.hidden = true;
+    restart.onclick = () => restartModel();
     const close = document.createElement('button');
     close.className = 'se-btn'; close.textContent = 'Close'; close.id = 'se-cancel';
     const msg = document.createElement('span');
     msg.className = 'stat-sub'; msg.id = 'se-msg';
-    bar.append(save, close, msg);
+    bar.append(save, restart, close, msg);
     panel.append(head, tabsRow, profsRow, bodyRow, bar);
     save.onclick = saveEditor;
     close.onclick = () => closeEditor();
@@ -1020,6 +1069,7 @@ async function openEditor(model, profileName, templateName) {
         entry = list.find(x => x.id === model) || null;
     } catch (_) { entry = null; }
     seFormModel = entry || { id: model, _missing: !entry };
+    seBaseRaw = JSON.parse(JSON.stringify(settings));
     seValues = window.UpliftModelSpec.buildState(seFormModel, settings);
     seOrig = JSON.parse(JSON.stringify(seValues));
     seBaseVals = JSON.parse(JSON.stringify(seValues));
@@ -1031,6 +1081,10 @@ async function openEditor(model, profileName, templateName) {
     const panel = editorNode();
     renderEditorFields(panel.querySelector('#se-fields'));
     seLoadProfiles(model, panel.querySelector('.se-profs')).then(() => {
+        // item 2: existing profiles are prominent top tabs, each showing
+        // that profile's merged values (item 1: values are visible)
+        for (const p of (window.__seProfiles || [])) seAddProfileTab(p);
+        refreshDivergence();
         seRenderTabs(panel);
         // alias/profile EDIT button: land directly on that profile's tab
         if (seWantProfile) { const w = seWantProfile; seWantProfile = null;
@@ -1130,6 +1184,11 @@ function seRenderTabs(panel) {
             ((t._origExpose || false) !== !!t.expose_as_model ||
              (t._origApi || '') !== (t.api_name || ''));
         if (t.dirty.size || nameChanged) mark = ' ●';
+        // item 4: a stored profile whose effective load-time settings differ
+        // from base reloads the model when its alias is hit — mark its tab
+        if (t.profileId && (window.__seProfileDivergence || [])
+                .some(d => d.name === t.profileId))
+            mark += ' ⚠';
         const nm = t.id === 'base' ? 'BASE'
             : (t.template ? '◱ ' : '') + (t.display_name || t.name || t.id);
         b.textContent = nm + mark;
@@ -1331,6 +1390,101 @@ function seCaptureTab() {
     t.overrides = Object.assign({}, t.overrides, ov);
     seNormalizeKwargs(t.overrides);
 }
+/* ---- item 4: RUNTIME DIVERGENCE ----------------------------------------
+   A profile whose effective settings (base merged with the profile's
+   overrides) have a runtime signature different from the base's forces a
+   model reload whenever its alias / exposed API name is hit. Compute the
+   diff for every stored profile and show a banner with a (show) expander. ---- */
+function seBasePayload() {
+    // the CURRENT base state (unsaved edits on the base tab included) as a
+    // payload
+    if (seIsBaseTab())
+        return window.UpliftModelSpec.buildPayload(seValues, seFormModel);
+    const baseTab = seTabs.find(z => z.id === 'base');
+    const vals = baseTab && baseTab.workVals ? baseTab.workVals : seBaseVals;
+    return window.UpliftModelSpec.buildPayload(vals || seValues, seFormModel);
+}
+function seProfilePayload(p) {
+    // profile settings are sparse RAW overrides on the stored base; merge
+    // in raw shape, then convert through the same spec path as the editor
+    const merged = Object.assign({}, seBaseRaw || {},
+        JSON.parse(JSON.stringify(p.settings || {})));
+    const st = window.UpliftModelSpec.buildState(seFormModel || { id: seModel }, merged);
+    return window.UpliftModelSpec.buildPayload(st, seFormModel);
+}
+function refreshDivergence() {
+    const S = window.UpliftModelSpec;
+    const baseP = seBasePayload();
+    const out = [];
+    for (const p of (window.__seProfiles || [])) {
+        const diff = S.runtimeDiff(baseP, seProfilePayload(p));
+        if (diff.length)
+            out.push({ name: p.name, display_name: p.display_name || p.name,
+                       api_name: p.api_name || null, diff });
+    }
+    window.__seProfileDivergence = out;
+    renderDivergenceBanner();
+}
+function renderDivergenceBanner() {
+    const panel = document.querySelector('.modal.editor');
+    if (!panel) return;
+    let host = panel.querySelector('.se-divergence');
+    const fields = panel.querySelector('#se-fields');
+    if (!fields) return;
+    const diverging = window.__seProfileDivergence || [];
+    if (!diverging.length) { if (host) host.remove(); return; }
+    if (!host) {
+        host = document.createElement('div');
+        host.className = 'se-divergence';
+        fields.prepend(host);
+    }
+    host.textContent = '';
+    const line = document.createElement('div');
+    line.className = 'se-div-head';
+    const names = diverging.map(d => d.api_name || d.display_name).join(', ');
+    line.textContent = '⚠ RUNTIME DIVERGENCE — ';
+    const b = document.createElement('b');
+    b.textContent = diverging.length === 1
+        ? C.tf('uplift.se.divergence.one', 'profile ') + names
+        : C.tf('uplift.se.divergence.many', 'profiles ') + names;
+    const expl = document.createElement('span');
+    expl.textContent = C.tf('uplift.se.divergence.expl',
+        ' differ from the base model in load-time settings. Calling their API name reloads the model.');
+    const show = document.createElement('button');
+    show.type = 'button'; show.className = 'se-btn se-div-show';
+    show.textContent = C.tf('uplift.se.divergence.show', '(show)');
+    show.onclick = () => {
+        const det = panel.querySelector('.se-div-detail');
+        if (det) { det.remove(); show.textContent = C.tf('uplift.se.divergence.show', '(show)'); return; }
+        show.textContent = C.tf('uplift.se.divergence.hide', '(hide)');
+        panel.querySelector('.se-divergence').append(seDivergenceDetail(diverging));
+    };
+    line.append(b, expl, show);
+    host.append(line);
+}
+function seDivergenceDetail(diverging) {
+    const det = document.createElement('div');
+    det.className = 'se-div-detail';
+    for (const d of diverging) {
+        const h = document.createElement('div');
+        h.className = 'se-div-prof';
+        h.textContent = (d.api_name ? d.api_name + ' — ' : '') + d.display_name;
+        det.append(h);
+        for (const row of d.diff) {
+            const r = document.createElement('div');
+            r.className = 'se-div-row';
+            const k = document.createElement('span'); k.className = 'se-div-k';
+            k.textContent = row.key;
+            const v1 = document.createElement('span'); v1.textContent = MM_GLUE.gsDisplay(row.base);
+            const arrow = document.createElement('span'); arrow.textContent = ' → ';
+            const v2 = document.createElement('span'); v2.className = 'se-div-new';
+            v2.textContent = MM_GLUE.gsDisplay(row.other);
+            r.append(k, v1, arrow, v2);
+            det.append(r);
+        }
+    }
+    return det;
+}
 function seNormalizeKwargs(vals) {
     // R10-6: raw settings payloads (profiles/templates) carry
     // chat_template_kwargs + forced_ct_kwargs; the editor works on the
@@ -1388,25 +1542,29 @@ function seNewProfile(panel) {
     const inp = panel.querySelector('.se-newname');
     if (inp) { inp.focus(); inp.select(); }
 }
+function seAddProfileTab(p) {
+    // Build (once) a working tab for a stored profile. Tab click shows the
+    // profile's merged values; saving PUTs to /profiles/<name>, never POSTs.
+    let t = seTabs.find(z => z.profileId === p.name || z.name === p.name);
+    if (t) return t;
+    const ov = JSON.parse(JSON.stringify(p.settings || {}));
+    t = seInitSnap({ id: 'prof' + Date.now() + Math.random().toString(36).slice(2, 5),
+        name: p.name,
+        display_name: p.display_name || p.name,
+        expose_as_model: !!p.expose_as_model, api_name: p.api_name || '',
+        profileId: p.name, overrides: ov,
+        workVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
+        origVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
+        dirty: new Set(), _origExpose: !!p.expose_as_model, _origApi: p.api_name || '' });
+    seTabs.push(t);
+    return t;
+}
 function seOpenProfileTab(panel, name) {
-    // Open (or reuse) a working tab for an existing stored profile so the
-    // alias-line EDIT button lands directly on the thing it edits. Saving
-    // such a tab PUTs to /profiles/<name> (profileId set), never POSTs a new.
-    let t = seTabs.find(z => z.profileId === name || z.name === name);
-    if (!t) {
-        const p = (window.__seProfiles || []).find(x => x.name === name);
-        if (!p) { MM_GLUE.toast('profile "' + name + '" not found'); return; }
-        seCaptureTab();
-        const ov = JSON.parse(JSON.stringify(p.settings || {}));
-        t = seInitSnap({ id: 'prof' + Date.now(), name: p.name,
-            display_name: p.display_name || p.name,
-            expose_as_model: !!p.expose_as_model, api_name: p.api_name || '',
-            profileId: p.name, overrides: ov,
-            workVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
-            origVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
-            dirty: new Set(), _origExpose: !!p.expose_as_model, _origApi: p.api_name || '' });
-        seTabs.push(t);
-    }
+    // Open (or reuse) + activate the tab for a stored profile so the
+    // alias-line EDIT button lands directly on the thing it edits.
+    const p = (window.__seProfiles || []).find(x => x.name === name);
+    if (!p) { MM_GLUE.toast('profile "' + name + '" not found'); return; }
+    const t = seAddProfileTab(p);
     seCaptureTab();
     seActiveTab = t.id;
     seRestoreTab(t);
@@ -1474,7 +1632,20 @@ async function seLoadProfiles(model, host) {
     // keep the 'apply from…' strip in sync: own-profile options were just
     // (re)loaded or changed
     const stripPanel = document.querySelector('.modal.editor');
-    if (stripPanel) seRenderTabs(stripPanel);
+    if (stripPanel) {
+        // tabs follow the store: drop tabs of deleted profiles, add new ones
+        const names = new Set(profs.map(p => p.name));
+        const wasActive = seTabs.find(z => z.id === seActiveTab);
+        seTabs = seTabs.filter(z => !z.profileId || names.has(z.profileId));
+        if (wasActive && !seTabs.includes(wasActive)) {
+            seActiveTab = 'base';
+            seValues = JSON.parse(JSON.stringify(seBaseVals));
+            seOrig = JSON.parse(JSON.stringify(seBaseVals));
+        }
+        for (const p of profs) seAddProfileTab(p);   // item 2: tabs follow the store
+        refreshDivergence();
+        seRenderTabs(stripPanel);
+    }
     // Global templates (global_templates.json): apply or snapshot into a template.
     let tpls = [];
     try { tpls = (await MM_GLUE.fetchJson(`${API}/admin/api/profile-templates`)).templates || []; } catch (_) {}
@@ -1563,43 +1734,92 @@ async function saveEditor() {
         MM_GLUE.toast(errors[0]);
         return;
     }
-    const payload = window.UpliftModelSpec.buildPayload(seValues, seFormModel);
+    const full = window.UpliftModelSpec.buildPayload(seValues, seFormModel);
     // boolean management flags ride the same PUT (real API accepts them too)
-    if ('is_hidden' in seValues) payload.is_hidden = !!seValues.is_hidden;
-    if ('is_favorite' in seValues) payload.is_favorite = !!seValues.is_favorite;
+    if ('is_hidden' in seValues) full.is_hidden = !!seValues.is_hidden;
+    if ('is_favorite' in seValues) full.is_favorite = !!seValues.is_favorite;
+    // item 3: the server auto-unloads a loaded engine whenever a reload-key
+    // is PRESENT in the PUT payload — the old full-payload save therefore
+    // reloaded the model even for sampling tweaks. SAVE-now sends only the
+    // dirty keys that apply live (sparse PUT; the server treats "not sent"
+    // as "don't touch"). Runtime keys stay queued for RESTART MODEL.
+    const loaded = seModelIsLoaded();
+    let payload = full, reloadStep = false;
+    if (loaded) {
+        const plain = sePlainDirtyKeys();
+        // dirty state keys -> the payload keys they own (some are derived)
+        const KEY_MAP = {
+            enableThinkingBudget: ['thinking_budget_enabled', 'thinking_budget_tokens'],
+            enableIndexCache: ['index_cache_freq'],
+            enableToolResultLimit: ['max_tool_result_tokens'],
+        };
+        payload = {};
+        for (const k of plain) {
+            for (const pk of (KEY_MAP[k] || [k])) if (pk in full) payload[pk] = full[pk];
+        }
+        // chat-template kwargs bypass the dirty set (entries list) — include
+        // them whenever they differ from the tab's saved baseline
+        const t0 = seTabs.find(z => z.id === 'base');
+        const kwNow = JSON.stringify(seValues.ctKwargEntries || []);
+        const kwWas = JSON.stringify((t0 && t0.origVals || {}).ctKwargEntries || []);
+        if (kwNow !== kwWas) {
+            payload.chat_template_kwargs = full.chat_template_kwargs;
+            payload.forced_ct_kwargs = full.forced_ct_kwargs;
+        }
+        reloadStep = seRuntimeDirtyKeys().length > 0;
+        if (!plain.length && !('chat_template_kwargs' in payload)) { restartModel(msg); return; }
+    }
     msg.textContent = 'saving…';
     try {
         const r = await MM_GLUE.putModelSettings(seModel, payload);
-        const savedNote = r._shadow ? 'saved ✓ (shadow)' : 'saved ✓';
-        const note = r.requires_reload ? 'saved ✓ reload required' : savedNote;
-        msg.textContent = note;
+        msg.textContent = reloadStep
+            ? 'saved ✓ — ' + seRuntimeDirtyKeys().length + ' setting(s) apply after RESTART MODEL'
+            : 'saved ✓';
         MM_GLUE.toast(C.t('uplift.toast.settings_saved_model', {model: seModel}));
-        if (r.requires_reload) {
-            // same flow as Server Settings: SAVE becomes the reload action
-            seOrig = JSON.parse(JSON.stringify(seValues));
-            if (seFormModel) seFormModel.loaded = true;
-            const b = document.getElementById('se-save');
-            if (b) { b.classList.add('restart-mode'); b.classList.remove('queued');
-                     b.textContent = '▶ RESTART MODEL';
-                     b.onclick = async () => {
-                        b.disabled = true;
-                        // The server auto-unloads on save of a reload-key
-                        // field, so the unload here usually 400s ("Model
-                        // not loaded"). That is expected — tolerate it and
-                        // go straight to load; only a failed LOAD is fatal.
-                        try { await MM_GLUE.postModelAction(seModel, 'unload'); }
-                        catch (_) { /* already unloaded by the server */ }
-                        try { await MM_GLUE.postModelAction(seModel, 'load');
-                              MM_GLUE.toast(C.t('uplift.toast.reloaded_with_settings', {model: seModel}));
-                              closeEditor(); }
-                        catch (e) { MM_GLUE.toast(C.t('uplift.toast.reload_failed', {msg: e.message})); b.disabled = false; }
-                     }; }
-            return;   // keep the popup open so RESTART MODEL stays visible
+        for (const k of sePlainDirtyKeys()) {
+            seOrig[k] = seValues[k];
+            seBaseVals[k] = seValues[k];
+            const t0 = seTabs.find(z => z.id === 'base');
+            if (t0) { t0.dirty.delete(k); t0.origVals = Object.assign({}, seBaseVals); }
         }
-        setTimeout(closeEditor, 1200);
+        if ('chat_template_kwargs' in payload) {
+            const t0 = seTabs.find(z => z.id === 'base');
+            seOrig.ctKwargEntries = seValues.ctKwargEntries;
+            seBaseVals.ctKwargEntries = seValues.ctKwargEntries;
+            if (t0) t0.origVals = Object.assign({}, seBaseVals);
+        }
+        seUpdateSaveBtn();
+        refreshDivergence();
+        if (!reloadStep) setTimeout(closeEditor, 1200);
+        // reload keys queued: editor stays open, RESTART MODEL is visible
     } catch (err) {
         msg.textContent = `error: ${err.message}`;
         MM_GLUE.toast(C.t('uplift.toast.save_failed', {msg: err.message}));
+    }
+}
+/* RESTART MODEL: save EVERYTHING (server auto-unloads on the reload keys),
+   then load again. A failed LOAD is fatal; the unload 400 ("not loaded" —
+   the server already unloaded on save) is expected and tolerated. */
+async function restartModel(msg) {
+    const panel = document.querySelector('.modal.editor');
+    if (!panel) return;
+    seCaptureTab();
+    const b = document.getElementById('se-restart');
+    if (b) b.disabled = true;
+    const full = window.UpliftModelSpec.buildPayload(seValues, seFormModel);
+    msg = msg || panel.querySelector('#se-msg');
+    msg.textContent = 'saving + reloading…';
+    try {
+        await MM_GLUE.putModelSettings(seModel, full);
+        try { await MM_GLUE.postModelAction(seModel, 'unload'); }
+        catch (_) { /* already unloaded by the server on save */ }
+        await MM_GLUE.postModelAction(seModel, 'load');
+        MM_GLUE.toast(C.t('uplift.toast.reloaded_with_settings', {model: seModel}));
+        closeEditor();
+    } catch (e) {
+        msg.textContent = 'error: ' + e.message;
+        MM_GLUE.toast(C.t('uplift.toast.reload_failed', {msg: e.message}));
+        if (b) b.disabled = false;
     }
 }
 async function saveProfileTab(panel) {
@@ -1657,6 +1877,8 @@ async function saveProfileTab(panel) {
         t.name = name; t.display_name = name;
         t.origVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(t.workVals || {})));
         t._ovSnap = JSON.parse(JSON.stringify(ov));   // saved overrides are the new original
+        const mirror = (window.__seProfiles || []).find(x => x.name === name);
+        if (mirror) mirror.settings = JSON.parse(JSON.stringify(ov));
         msg.textContent = 'saved ✓';
         seRenderTabs(panel); seUpdateSaveBtn();
     } catch (e) {

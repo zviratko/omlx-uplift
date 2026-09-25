@@ -191,3 +191,42 @@ test('draft pools: current model excluded', () => {
     const got = S.specprefillCandidates(models, 'Base-32B').map(m => m.id);
     assert.ok(!got.includes('Base-32B'));
 });
+
+/* ---- upstream 62171bdf: adaptive MTP depth semantics ---- */
+test('buildState: mtp_adaptive_max_depth is a 3/4/5/6 string, default 3', () => {
+    assert.strictEqual(S.buildState(base(), {}).mtp_adaptive_max_depth, '3');
+    assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 5 }).mtp_adaptive_max_depth, '5');
+    assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 99 }).mtp_adaptive_max_depth, '3');
+});
+test('buildPayload: depth rides mtp_adaptive_max_depth; fixed depth cleared', () => {
+    const p = S.buildPayload(S.buildState(base(), { mtp_enabled: true, mtp_adaptive_max_depth: '4' }), base());
+    assert.strictEqual(p.mtp_adaptive_max_depth, 4);
+    assert.strictEqual(p.mtp_fixed_depth, null);
+    const off = S.buildPayload(S.buildState(base(), { mtp_enabled: false, mtp_adaptive_max_depth: '4' }), base());
+    assert.strictEqual(off.mtp_adaptive_max_depth, null);
+});
+
+/* ---- runtime signature replica (engine_pool._engine_runtime_signature) ---- */
+const rt = (over = {}) => S.buildPayload(S.buildState(base(), over), base());
+test('runtimeDiff: identical settings do not diverge', () => {
+    assert.deepStrictEqual(S.runtimeDiff(rt(), rt()), []);
+});
+test('runtimeDiff: turboquant bits diverge only while the feature is on', () => {
+    const d = S.runtimeDiff(rt({ turboquant_kv_enabled: true, turboquant_kv_bits: 4 }),
+                            rt({ turboquant_kv_enabled: true, turboquant_kv_bits: 2 }));
+    assert.deepStrictEqual(d.map(r => r.key), ['turboquant_kv_bits']);
+    const off = S.runtimeDiff(rt({ turboquant_kv_bits: 4 }), rt({ turboquant_kv_bits: 2 }));
+    assert.deepStrictEqual(off, [], 'stale bits with the feature off must not diverge');
+});
+test('runtimeDiff: mtp depth diverges while mtp is on', () => {
+    const d = S.runtimeDiff(rt({ mtp_enabled: true, mtp_adaptive_max_depth: '3' }),
+                            rt({ mtp_enabled: true, mtp_adaptive_max_depth: '5' }));
+    assert.deepStrictEqual(d.map(r => r.key), ['mtp_adaptive_max_depth']);
+});
+test('runtimeDiff: a profile enabling a whole feature diverges on its key', () => {
+    const d = S.runtimeDiff(rt(), rt({ specprefill_enabled: true, specprefill_draft_model: 'd' }));
+    assert.ok(d.some(r => r.key === 'specprefill_enabled'));
+});
+test('runtimeDiff: sampling-only differences never diverge', () => {
+    assert.deepStrictEqual(S.runtimeDiff(rt({ temperature: 0.2 }), rt({ temperature: 1.1 })), []);
+});
