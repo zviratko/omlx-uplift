@@ -359,6 +359,14 @@ def cmd_install(argv=None) -> int:
     print(f"installed autopatch: {pth}")
     if "\nimport " in "\n" + body and body.count("\n") > 1:
         print("  (bootstraps sys.path to this package — keg holds no copy)")
+    # DEV-9: an omlx-dev keg is a SEPARATE keg — a `brew reinstall/upgrade
+    # omlx-dev` wipes its site-packages and the plain install would leave
+    # dev unmounted until `dev install` runs. Hook it here too,
+    # idempotently, whenever it exists (no-op when there is no dev keg).
+    # Skipped when --python/--formula explicitly names another target.
+    if not args.python and not args.formula:
+        if _mount_into_dev_keg():
+            print("installed autopatch: omlx-dev keg (DEV-9 co-mount)")
     if not args.keep_skins:
         install_example_skins(force="yes" if args.yes else "ask")
     # mount proof: the .pth alone proves nothing — probe the target env the

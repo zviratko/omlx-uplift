@@ -277,6 +277,7 @@
   "uplift.patches.dev_branch": "branch {b} @ {t}",
   "uplift.patches.dev_build": "Rebuild omlx-dev",
   "uplift.patches.dev_build_fail": "Build failed to start",
+  "uplift.patches.dev_build_failed": "BUILD FAILED",
   "uplift.patches.dev_build_ok": "built keg already matches the enabled patch set",
   "uplift.patches.dev_build_restart": "Rebuild & restart",
   "uplift.patches.dev_build_restart_started": "omlx-dev rebuild started (restart follows)",

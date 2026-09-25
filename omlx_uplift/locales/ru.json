@@ -277,6 +277,7 @@
   "uplift.patches.dev_branch": "ветка {b} @ {t}",
   "uplift.patches.dev_build": "Пересобрать omlx-dev",
   "uplift.patches.dev_build_fail": "Не удалось начать сборку",
+  "uplift.patches.dev_build_failed": "СБОРКА НЕ УДАЛАСЬ",
   "uplift.patches.dev_build_ok": "собранный keg уже соответствует включённому набору",
   "uplift.patches.dev_build_restart": "Пересобрать и перезапустить",
   "uplift.patches.dev_build_restart_started": "пересборка omlx-dev начата (затем перезапуск)",

@@ -1523,10 +1523,22 @@ def _dev_build_run(opts: dict) -> None:
                 with_grammar=bool(opts.get("with_grammar")),
                 dry_run=False))
         with _DEV_BUILD_LOCK:
-            for line in (out.getvalue() + err.getvalue()).splitlines():
-                if "re-gate FAILED" in line or "needs_review" in line \
-                        or "build FAILED" in line:
-                    _DEV_BUILD["log"].append(line.strip())
+            lines = (out.getvalue() + err.getvalue()).splitlines()
+            # DEV-10: on failure the FULL tail matters — "materialize
+            # FAILED: <patch> ..." is the answer to "why?", and the old
+            # keyword filter dropped exactly that line.
+            keep = [l.strip() for l in lines
+                    if "re-gate FAILED" in l or "needs_review" in l
+                    or "build FAILED" in l]
+            if rc != 0:
+                tail = [l.strip() for l in lines[-20:] if l.strip()]
+                for l in tail:
+                    if l not in keep:
+                        keep.append(l)
+                keep.append("the previous omlx-dev keg and branch are "
+                            "intact — nothing to roll back; fix or disable "
+                            "the named patch, then rebuild")
+            _DEV_BUILD["log"].extend(keep)
     except Exception as exc:  # never leave the job stuck on "running"
         rc = 1
         with _DEV_BUILD_LOCK:

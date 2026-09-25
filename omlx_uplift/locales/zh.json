@@ -277,6 +277,7 @@
   "uplift.patches.dev_branch": "分支 {b} @ {t}",
   "uplift.patches.dev_build": "重新构建 omlx-dev",
   "uplift.patches.dev_build_fail": "构建启动失败",
+  "uplift.patches.dev_build_failed": "构建失败",
   "uplift.patches.dev_build_ok": "已构建的 keg 已与启用的补丁集一致",
   "uplift.patches.dev_build_restart": "重建并重启",
   "uplift.patches.dev_build_restart_started": "omlx-dev 重建已开始（随后重启）",

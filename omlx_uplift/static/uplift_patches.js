@@ -669,6 +669,12 @@ function renderDev() {
     if (d.build && d.build.running)
         state.append(ptChip(ptMsg('uplift.patches.dev_building', 'BUILDING'),
             'pt-st-update', (d.build.log || []).slice(-1)[0] || ''));
+    // DEV-10: a finished-but-failed build keeps its warning on the page —
+    // the materialize/brew abort reason lives in the log tail (tooltip).
+    // The server guarantees the previous keg + branch stayed intact.
+    if (d.build && !d.build.running && d.build.result)
+        state.append(ptChip(ptMsg('uplift.patches.dev_build_failed', 'BUILD FAILED'),
+            'pt-st-warn', (d.build.log || []).slice(-8).join('\n')));
 
     warn.hidden = !(d.drift && d.drift.drift);
     if (warn.hidden === false)

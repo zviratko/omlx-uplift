@@ -281,6 +281,7 @@
   "uplift.patches.dev_branch": "branch {b} @ {t}",
   "uplift.patches.dev_build": "Recompilar omlx-dev",
   "uplift.patches.dev_build_fail": "Falha ao iniciar a compilação",
+  "uplift.patches.dev_build_failed": "COMPILACAO FALHOU",
   "uplift.patches.dev_build_ok": "a instalação compilada já corresponde ao conjunto ativado",
   "uplift.patches.dev_build_restart": "Recompilar e reiniciar",
   "uplift.patches.dev_build_restart_started": "recompilação do omlx-dev iniciada (reinicialização em seguida)",

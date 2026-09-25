@@ -277,6 +277,7 @@
   "uplift.patches.dev_branch": "ブランチ {b} @ {t}",
   "uplift.patches.dev_build": "omlx-devを再ビルド",
   "uplift.patches.dev_build_fail": "ビルドを開始できませんでした",
+  "uplift.patches.dev_build_failed": "ビルド失敗",
   "uplift.patches.dev_build_ok": "ビルド済みkegは既に有効なパッチセットと一致しています",
   "uplift.patches.dev_build_restart": "再ビルドして再起動",
   "uplift.patches.dev_build_restart_started": "omlx-dev の再ビルドを開始しました（その後再起動）",

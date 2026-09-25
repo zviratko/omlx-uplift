@@ -277,6 +277,7 @@
   "uplift.patches.dev_branch": "vetev {b} @ {t}",
   "uplift.patches.dev_build": "Prestavit omlx-dev",
   "uplift.patches.dev_build_fail": "Sestaveni se nepodarilo spustit",
+  "uplift.patches.dev_build_failed": "SESTAVENÍ SELHALO",
   "uplift.patches.dev_build_ok": "sestavena instance uz odpovida zapnute sade patchu",
   "uplift.patches.dev_build_restart": "Přestavět & restartovat",
   "uplift.patches.dev_build_restart_started": "přestavba omlx-dev zahájena (následuje restart)",

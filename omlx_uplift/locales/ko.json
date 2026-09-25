@@ -292,6 +292,7 @@
   "uplift.patches.dev_branch": "브랜치 {b} @ {t}",
   "uplift.patches.dev_build": "omlx-dev 재빌드",
   "uplift.patches.dev_build_fail": "빌드를 시작하지 못했습니다",
+  "uplift.patches.dev_build_failed": "빌드 실패",
   "uplift.patches.dev_build_ok": "빌드된 keg가 이미 활성화된 패치 세트와 일치합니다",
   "uplift.patches.dev_build_restart": "재빌드 후 재시작",
   "uplift.patches.dev_build_restart_started": "omlx-dev 재빌드 시작 (이후 재시작)",

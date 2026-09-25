@@ -281,6 +281,7 @@
   "uplift.patches.dev_branch": "branche {b} @ {t}",
   "uplift.patches.dev_build": "Reconstruire omlx-dev",
   "uplift.patches.dev_build_fail": "Échec du démarrage de la compilation",
+  "uplift.patches.dev_build_failed": "COMPILATION ECHOUEE",
   "uplift.patches.dev_build_ok": "l'installation compilée correspond déjà au jeu activé",
   "uplift.patches.dev_build_restart": "Recompiler et redémarrer",
   "uplift.patches.dev_build_restart_started": "recompilation d'omlx-dev lancée (redémarrage suit)",

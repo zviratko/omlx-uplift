@@ -216,3 +216,43 @@ def test_locale_gate_covers_dev_keys():
         d = json.loads((locales / f"{lang}.json").read_text(encoding="utf-8"))
         missing = {k for k in dev_keys if k not in d}
         assert not missing, f"{lang}: {sorted(missing)}"
+
+
+def test_failed_build_log_keeps_materialize_reason(monkeypatch):
+    # DEV-10: the old keyword filter dropped the "materialize FAILED"
+    # line — exactly the why? the user needs. On rc != 0 the log must
+    # carry the output tail and the intact-keg reassurance.
+    from omlx_uplift import cli, router
+
+    def fake_install(ns):
+        import sys
+        print("materialize FAILED: patch p-bad does not apply cleanly",
+              file=sys.stderr)
+        print("fix or disable the named patch, then re-run", file=sys.stderr)
+        return 1
+
+    monkeypatch.setattr(cli, "cmd_dev_install", fake_install)
+    with router._DEV_BUILD_LOCK:
+        router._DEV_BUILD.update({"running": False, "result": None, "log": []})
+    router._dev_build_run({"restart_after": False})
+    with router._DEV_BUILD_LOCK:
+        log = list(router._DEV_BUILD["log"])
+        assert router._DEV_BUILD["result"] == 1
+    assert any("materialize FAILED" in l for l in log), log
+    assert any("intact" in l for l in log), log
+
+
+def test_successful_build_log_stays_quiet(monkeypatch):
+    from omlx_uplift import cli, router
+
+    def fake_install(ns):
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_dev_install", fake_install)
+    with router._DEV_BUILD_LOCK:
+        router._DEV_BUILD.update({"running": False, "result": None, "log": []})
+    router._dev_build_run({"restart_after": False})
+    with router._DEV_BUILD_LOCK:
+        log = list(router._DEV_BUILD["log"])
+        assert router._DEV_BUILD["result"] == 0
+    assert log == [], log   # success adds nothing
