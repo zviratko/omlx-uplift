@@ -86,7 +86,11 @@ async function loadChartHistory() {
         // race: a slow 24h response landing over a fresh 5m selection).
         if (w === windowToParam()) {
             chartHist = { gen: conv(g), prefill: conv(p),
-                          mem: convMap(m, 'mem.percent'),
+                          // U11 moved the card's memory line to sys.percent
+                          // (psutil); this lookup still asked for the retired
+                          // mem.percent, so history backfill silently
+                          // returned nothing and the line was session-only.
+                          mem: convMap(m, 'sys.percent'),
                           // bytes -> GB: the card's right axis is GB (issue 6)
                           cache: convMap(m, 'cache.total_bytes', 1e-9) };   // server ts is epoch SECONDS -> ms
             historyDirty = false;
