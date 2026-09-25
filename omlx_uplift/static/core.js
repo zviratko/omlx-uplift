@@ -182,8 +182,13 @@ const EXPLORE_METRICS = [
     { key: 'cache_efficiency', hourly: true, fmt: 'pct' },
     { key: 'engines.active_requests' },
     { key: 'engines.loaded' },
-    { key: 'mem.percent' },
-    { key: 'mem.used_bytes', fmt: 'bytes' },
+    // U11: live system memory (psutil virtual_memory, same source as
+    // classic's memory card). Default board now uses these. Retired the
+    // flat phys_footprint cards (mem.percent / mem.used_bytes): the metric
+    // series is still collected and drives the Memory & cache chart.
+    { key: 'sys.percent' },
+    { key: 'sys.used_bytes', fmt: 'bytes' },
+    { key: 'sys.total_bytes', fmt: 'bytes' },
     { key: 'cache.total_bytes', fmt: 'bytes' },
 ];
 const EXPLORE_KEYS = EXPLORE_METRICS.map(m => m.key);

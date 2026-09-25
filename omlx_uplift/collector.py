@@ -224,6 +224,24 @@ class Collector:
         except Exception:
             pass
 
+        # U11: SYSTEM memory via the same psutil_compat source classic's
+        # memory card uses. Unlike mem.used_bytes (phys_footprint — flat
+        # between model load/unload) this moves continuously, which is what
+        # the user asked the Memory section to actually show. total RAM is
+        # constant by definition, so only used/percent are collected.
+        try:
+            from omlx.utils import psutil_compat
+
+            vm = psutil_compat.virtual_memory()
+            used = int(getattr(vm, "used", 0) or 0)
+            total = int(getattr(vm, "total", 0) or 0)
+            if used and total:
+                pairs["sys.used_bytes"] = float(used)
+                pairs["sys.total_bytes"] = float(total)
+                pairs["sys.percent"] = 100.0 * used / total
+        except Exception:
+            pass
+
         # Per-request lifecycle rows from the sampled tracker. RL-0 write
         # hygiene: only persist rows whose state/token counters actually
         # changed since the last persist — finished rows are written

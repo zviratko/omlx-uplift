@@ -97,3 +97,35 @@ def test_broken_engine_does_not_poison_the_tick(monkeypatch):
     assert store.pairs["engines.active_requests"] == 2.0
     assert store.pairs["cache.total_bytes"] == 123456.0
     assert store.pairs["engines.loaded"] == 2.0
+
+
+def test_system_memory_series_collected(monkeypatch):
+    # U11: sys.* from the same psutil_compat source classic's memory card
+    # reads. Deterministic fake so the assertion does not depend on load.
+    from omlx.utils import psutil_compat
+
+    class VM:
+        total = 34_359_738_368        # 32 GiB
+        used = 17_179_869_184         # 16 GiB -> exactly 50 %
+
+    monkeypatch.setattr(psutil_compat, "virtual_memory", lambda: VM())
+    store = CapturingStore()
+    c = Collector(store=store)
+    c.sample_once()
+    assert store.pairs["sys.used_bytes"] == float(VM.used)
+    assert store.pairs["sys.total_bytes"] == float(VM.total)
+    assert store.pairs["sys.percent"] == 50.0
+
+
+def test_system_memory_survives_broken_source(monkeypatch):
+    import omlx.utils.psutil_compat as pc
+
+    def boom():
+        raise RuntimeError("no psutil on this path")
+
+    monkeypatch.setattr(pc, "virtual_memory", boom)
+    store = CapturingStore()
+    c = Collector(store=store)
+    c.sample_once()   # must not raise even when the memory source explodes
+    assert "sys.used_bytes" not in store.pairs
+    assert "sys.percent" not in store.pairs

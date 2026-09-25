@@ -27,8 +27,13 @@
         'met-cache-efficiency',
         'met-engines-active-requests',
         'met-engines-loaded',
-        'met-mem-percent',
-        'met-mem-used-bytes',
+        // U11: live system memory cards replace the flat phys_footprint
+        // pair. Dropping met-mem-percent / met-mem-used-bytes here retires
+        // them from saved layouts on load (same mechanism as 'feed'); the
+        // series stay collectable and explorer-addable below.
+        'met-sys-percent',
+        'met-sys-used-bytes',
+        'met-sys-total-bytes',
         'met-cache-total-bytes',
         'reqstats',
         'cache',
@@ -103,10 +108,11 @@
         { id: 'met-rate-requests-s', x: 0, y: 102, w: 6, h: 15 },
         { id: 'met-cache-efficiency', x: 6, y: 102, w: 6, h: 15 },
         { id: 'met-engines-active-requests', x: 12, y: 102, w: 6, h: 15 },
-        { id: 'met-mem-percent', x: 18, y: 102, w: 6, h: 15 },
-        { id: 'met-mem-used-bytes', x: 0, y: 117, w: 6, h: 15 },
+        { id: 'met-sys-percent', x: 18, y: 102, w: 6, h: 15 },
+        { id: 'met-sys-used-bytes', x: 0, y: 117, w: 6, h: 15 },
         { id: 'met-cache-total-bytes', x: 6, y: 117, w: 6, h: 15 },
         { id: 'met-engines-loaded', x: 12, y: 117, w: 6, h: 15 },
+        { id: 'met-sys-total-bytes', x: 18, y: 117, w: 6, h: 15 },
         { id: 'reqfeed', x: 0, y: 132, w: COLUMNS, h: 18 },
     ];
 

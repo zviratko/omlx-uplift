@@ -434,10 +434,10 @@ test('layout: metricWin keeps valid per-card windows, drops junk', () => {
     const store = k => { const s = { _d: {}, getItem(x) { return this._d[x] ?? null; }, setItem(x, v) { this._d[x] = v; } };
         s._d[C.LAYOUT_KEY] = JSON.stringify(k); return s; };
     assert.deepStrictEqual(C.loadLayout(store({})).metricWin, {});
-    const ok = { 'met-mem-percent': 86400, 'chart-tps': 604800 };
+    const ok = { 'met-sys-percent': 86400, 'chart-tps': 604800 };
     assert.deepStrictEqual(C.loadLayout(store({ metricWin: ok })).metricWin, ok);
     assert.deepStrictEqual(   // bogus block id / bogus window / wrong types
-        C.loadLayout(store({ metricWin: { 'met-nope': 3600, 'met-gen-x': '1h', 'met-mem-percent': 7 } })).metricWin,
+        C.loadLayout(store({ metricWin: { 'met-nope': 3600, 'met-gen-x': '1h', 'met-sys-percent': 7 } })).metricWin,
         {});
 });
 test('metricBlockId maps every catalogue key to a legal block id and back', () => {
@@ -453,7 +453,7 @@ test('explore catalogue: unique keys, one fmt each, exports agree', () => {
     const keys = C.EXPLORE_METRICS.map(m => m.key);
     assert.strictEqual(new Set(keys).size, keys.length);
     assert.deepStrictEqual(C.EXPLORE_KEYS, keys);
-    for (const k of ['avg_generation_tps', 'mem.percent', 'cache.total_bytes'])
+    for (const k of ['avg_generation_tps', 'sys.percent', 'cache.total_bytes'])
         assert.ok(keys.includes(k), k + ' must be selectable');
 });
 
