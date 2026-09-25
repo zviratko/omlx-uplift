@@ -289,7 +289,13 @@ function renderUploader() {
     const tok = document.createElement('input');
     tok.type = 'password'; tok.placeholder = 'Enter HF write token (hf_...)';
     const vbtn = document.createElement('button');
-    vbtn.className = 'se-btn'; vbtn.textContent = 'Validate';
+    vbtn.className = 'se-btn';
+    // UP-5: JS-built label — tf() translates at build time (locale may
+    // already be loaded), the data-i18n tag covers a later locale switch
+    // via applyI18n's document-wide relabel pass.
+    vbtn.textContent = C.tf('uplift.action.validate', 'Validate');
+    vbtn.dataset.i18n = 'uplift.action.validate';
+    vbtn.dataset.en = 'Validate';
     const vmsg = document.createElement('span');
     vmsg.className = 'stat-sub';
     tokWrap.append(tok, vbtn, vmsg);
