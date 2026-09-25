@@ -1469,6 +1469,8 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
 .se-kwarg { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px;
     grid-template-columns: none; }
 .se-kwarg input[type=text], .se-kwarg select { flex: 1 1 0; min-width: 0; width: auto; }
+/* BUG-1: read-only key label for typed kwargs (reasoning_effort etc.) */
+.se-kwarg .se-kwarg-key { flex: 1 1 0; min-width: 0; opacity: .75; font-style: italic; }
 .se-kwarg .se-btn { flex: 0 0 auto; }
 .row-editor .se-kwarg input, .row-editor .se-kwarg select { width: auto; }
 .row-editor .se-profiles { margin: 4px 0 8px; }

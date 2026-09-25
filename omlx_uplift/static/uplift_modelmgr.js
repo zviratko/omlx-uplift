@@ -849,6 +849,11 @@ function seSyncKwEntries() {
 }
 
 function renderCtKwargs(container) {   // R10-5: container is the section body
+    // BUG-1: the re-render callbacks below must target the EDITOR ROOT, not
+    // this section body — renderEditorFields() wipes its container and
+    // rebuilds every section inside it, so passing the body nested all
+    // following sections inside the Chat Template Kwargs box.
+    const editorRoot = container.closest('#se-fields') || container;
     const S = window.UpliftModelSpec;
     const hint = document.createElement('div');
     hint.className = 'se-hint';
@@ -867,9 +872,20 @@ function renderCtKwargs(container) {   // R10-5: container is the section body
         }
         const row = document.createElement('div');
         row.className = 'se-row se-kwarg';
-        const key = document.createElement('input');
-        key.type = 'text'; key.value = e.key || ''; key.placeholder = 'key';
-        key.addEventListener('input', () => { e.key = key.value; });
+        // BUG-1: typed entries (reasoning_effort, enable_thinking) have no
+        // editable key — an empty text box read as a broken field. Show the
+        // key as a read-only label instead; only 'custom' gets an editable one.
+        const typed = e.type !== 'custom';
+        let key;
+        if (typed) {
+            key = document.createElement('span');
+            key.className = 'se-kwarg-key';
+            key.textContent = e.type;
+        } else {
+            key = document.createElement('input');
+            key.type = 'text'; key.value = e.key || ''; key.placeholder = 'key';
+            key.addEventListener('input', () => { e.key = key.value; });
+        }
         let val;
         if (e.type === 'enable_thinking') {
             val = document.createElement('select');
@@ -890,7 +906,7 @@ function renderCtKwargs(container) {   // R10-5: container is the section body
             val.value = e.custom ? '__custom__' : e.value;
             val.addEventListener('change', () => {
                 if (val.value === '__custom__') { e.custom = true; } else { e.custom = false; e.value = val.value; }
-                renderEditorFields(container);
+                renderEditorFields(editorRoot);
             });
             if (e.custom) {
                 const cv = document.createElement('input');
@@ -908,7 +924,7 @@ function renderCtKwargs(container) {   // R10-5: container is the section body
         rm.className = 'se-btn'; rm.textContent = '×';
         rm.addEventListener('click', () => {
             seValues.ctKwargEntries.splice(idx, 1);
-            renderEditorFields(container);
+            renderEditorFields(editorRoot);
         });
         if (!row.children.length) row.append(key, val);
         row.append(rm);
@@ -932,7 +948,7 @@ function renderCtKwargs(container) {   // R10-5: container is the section body
             seValues.ctKwargEntries.push(make());
             seSyncKwEntries();
             addMenu.hidden = true;
-            renderEditorFields(container);
+            renderEditorFields(editorRoot);
         };
         addMenu.append(it);
     };
