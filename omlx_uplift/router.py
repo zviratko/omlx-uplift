@@ -489,6 +489,39 @@ async def models_overlay(is_admin: bool = Depends(require_admin)):
 # --------------------------------------------------------------------------
 
 
+@api_router.get("/speculative")
+async def speculative_flags(is_admin: bool = Depends(require_admin)):
+    """U16: {model_id: "specprefill"|"dflash"|"vlm_mtp"|"mtp"|null} for LOADED
+    models — the settings the engine actually runs with (manager merge of
+    stored + defaults), cheap enough to poll. The classic stats snapshot
+    carries no speculative flag (dflash block only exists when a DFlash
+    session reported stats), so the IN-FLIGHT card asks here once a minute
+    and marks models whose decode path is speculative.
+    """
+    mgr = settings_manager()
+    pool = engine_pool()
+    out: dict[str, str | None] = {}
+    if mgr is None or pool is None:
+        return {"models": out}
+    for mid in pool.get_loaded_model_ids():
+        kind = None
+        try:
+            s = mgr.get_settings(mid)
+            if s is not None:
+                if getattr(s, "specprefill_enabled", False):
+                    kind = "specprefill"
+                elif getattr(s, "dflash_enabled", False):
+                    kind = "dflash"
+                elif getattr(s, "vlm_mtp_enabled", False):
+                    kind = "vlm_mtp"
+                elif getattr(s, "mtp_enabled", False):
+                    kind = "mtp"
+        except Exception:
+            pass
+        out[mid] = kind
+    return {"models": out}
+
+
 @api_router.get("/models/{model_id}/settings")
 async def get_model_settings(
     model_id: str, is_admin: bool = Depends(require_admin)
@@ -773,6 +806,65 @@ async def metrics_series(
                 "bucket_s": bucket, "series": pts}
     return {"keys": wanted, "window": window, "window_s": window_s,
             "bucket_s": bucket, "series_map": series_map}
+
+
+@api_router.get("/requests/stats")
+async def requests_stats(window: str = "1h",
+                         is_admin: bool = Depends(require_admin)):
+    """U17: full-population request-size stats over WINDOW, computed from
+    the stored requests table (client tracker only ever saw the page-open
+    session and reset on refresh — the user read every Request sizes
+    counter as '—' even while the model served). Rows are retention-capped
+    so the Python-side percentile is cheap; n=0 blocks every value so the
+    card stays honest instead of inventing one.
+
+    Response shape matches what core.js normalize() forwards as
+    stats.request_stats: prompt_tokens/completion_tokens/first_token_ms
+    each {avg, p50, p90, p95, p99}, plus errors_total and n."""
+    import asyncio
+
+    window_s = _parse_window(window)
+    store = get_collector().store
+
+    def query():
+        # requests rows are tiny (retention-capped); read under the store's
+        # own lock — the collector thread writes on the same connection.
+        t0 = time.time() - window_s
+        with store._lock:
+            return store._conn.execute(
+                "SELECT state, prompt_tokens, completion_tokens, first_token_ms"
+                " FROM requests WHERE ts_end >= ?", (t0,)).fetchall()
+
+    def pct(vals, p):
+        if not vals:
+            return None
+        s = sorted(vals)
+        k = (len(s) - 1) * p / 100.0
+        lo, hi = int(k), min(int(k) + 1, len(s) - 1)
+        return round(s[lo] + (s[hi] - s[lo]) * (k - lo), 1)
+
+    def blk(vals):
+        vals = [v for v in vals if v is not None]
+        return {"n": len(vals),
+                "avg": round(sum(vals) / len(vals), 1) if vals else None,
+                "p50": pct(vals, 50), "p90": pct(vals, 90),
+                "p95": pct(vals, 95), "p99": pct(vals, 99)}
+
+    rows = await asyncio.to_thread(query)
+    prompts, combs, ftms, errs = [], [], [], 0
+    for state, pt, ct, ftm in rows:
+        prompts.append(pt)
+        combs.append(ct if state == "complete" else None)
+        ftms.append(ftm)
+        if state in ("error", "aborted"):
+            errs += 1
+    return {"window": window, "window_s": window_s,
+            "prompt_tokens": blk(prompts),
+            "completion_tokens": blk(combs),
+            "first_token_ms": blk(ftms),
+            "errors_total": errs,
+            "observed_real": len(rows), "simulated": 0,
+            "source": "uplift store (2 d retention)"}
 
 
 def _parse_window(window: str) -> float:

@@ -192,6 +192,7 @@
   "uplift.inflight.prefilling": "预填充中",
   "uplift.inflight.queued": "排队中",
   "uplift.inflight.refused": "已拒绝",
+  "uplift.inflight.spec_hint": "已启用推测解码: {kind}",
   "uplift.label.avg_completion": "平均生成 Token",
   "uplift.label.avg_prompt": "平均提示词 Token",
   "uplift.label.error_rate": "错误率",

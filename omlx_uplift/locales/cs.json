@@ -192,6 +192,7 @@
   "uplift.inflight.prefilling": "Prefilluje",
   "uplift.inflight.queued": "VE FRONTĚ",
   "uplift.inflight.refused": "ODMÍTNUTA",
+  "uplift.inflight.spec_hint": "aktivuje se spekulativní dekódování: {kind}",
   "uplift.label.avg_completion": "prům. dokončovací tokeny",
   "uplift.label.avg_prompt": "prům. prompt tokeny",
   "uplift.label.error_rate": "chybovost",

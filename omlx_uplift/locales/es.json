@@ -196,6 +196,7 @@
   "uplift.inflight.prefilling": "Pre-rellenando",
   "uplift.inflight.queued": "EN COLA",
   "uplift.inflight.refused": "RECHAZADA",
+  "uplift.inflight.spec_hint": "decodificación especulativa activa: {kind}",
   "uplift.label.avg_completion": "tokens de generación prom.",
   "uplift.label.avg_prompt": "tokens de prompt prom.",
   "uplift.label.error_rate": "tasa de errores",

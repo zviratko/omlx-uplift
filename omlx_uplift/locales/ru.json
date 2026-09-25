@@ -192,6 +192,7 @@
   "uplift.inflight.prefilling": "Префилл",
   "uplift.inflight.queued": "В ОЧЕРЕДИ",
   "uplift.inflight.refused": "ОТКЛОНЁН",
+  "uplift.inflight.spec_hint": "активно спекулятивное декодирование: {kind}",
   "uplift.label.avg_completion": "ср. токены генерации",
   "uplift.label.avg_prompt": "ср. токены запроса",
   "uplift.label.error_rate": "доля ошибок",
