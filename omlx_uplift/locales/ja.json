@@ -1,4 +1,6 @@
 {
+  "uplift.action.download": "ダウンロード",
+  "uplift.action.search": "検索",
   "uplift.btn.classic": "クラシックダッシュボード",
   "uplift.btn.collapse": "折りたたむ",
   "uplift.btn.layout": "レイアウト設定",
@@ -201,6 +203,7 @@
   "uplift.label.p95_prompt": "p95プロンプトトークン",
   "uplift.label.queue_first_tok": "キュー→初出トークン ms",
   "uplift.label.served_total": "累計処理",
+  "uplift.label.tasks": "タスク",
   "uplift.label.tokens_per_s": "トークン/秒",
   "uplift.layout.cancel": "Cancel",
   "uplift.layout.columns": "列数",
@@ -255,6 +258,13 @@
   "uplift.mode.up_live": "アップロードは実際に実行。トークンはこのブラウザー内に留まり oMLX サーバーには送信されません",
   "uplift.mode.up_shadow": "アップロードはシャドウサンドボックスで実行。トークンはこのブラウザー内に留まります。",
   "uplift.opt.percentile": "パーセンタイル",
+  "uplift.page.downloader_full": "Hugging Face ダウンローダー",
+  "uplift.page.global_templates": "グローバルテンプレート",
+  "uplift.page.helper_models_full": "ヘルパーモデル",
+  "uplift.page.quantizer_full": "oQ 量子化",
+  "uplift.page.server_settings_full": "サーバー設定",
+  "uplift.page.settings": "設定",
+  "uplift.page.uploader_full": "oQ アップローダー",
   "uplift.patches.action_fail": "パッチ操作に失敗",
   "uplift.patches.add_btn": "パッチを追加",
   "uplift.patches.add_hint": "diff を取得またはアップロードし、ライブツリーに対して検証してから有効化",
@@ -613,5 +623,6 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "この時間未使用のモデルをアンロードします。",
   "uplift.ui.upload_queue": "アップロードキュー",
   "uplift.ui.use_both_anes": "両方のANEを使用",
-  "uplift.ui.web_search": "Web検索"
+  "uplift.ui.web_search": "Web検索",
+  "uplift.usage.sub": "リクエスト {req} · トークン {tok} · キャッシュ {cached}"
 }

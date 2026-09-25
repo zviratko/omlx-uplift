@@ -222,7 +222,7 @@ try {
     </main>
 
 <div id="pages">
-<section class="card wide page-card" data-id="models-admin-page" data-tab="models" data-sub="manager" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Models <span class="right" id="models-admin-sub"></span></h2>
+<section class="card wide page-card" data-id="models-admin-page" data-tab="models" data-sub="manager" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.models">Models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.models">Models</span> <span class="right" id="models-admin-sub"></span></h2>
         <div class="card-body">
             <div class="filterbar">
                 <input type="search" id="ma-filter" placeholder="filter by name…">
@@ -240,8 +240,8 @@ try {
                 <span class="stat-sub" id="ma-mem"></span>
             </div>
             <div id="model-admin" class="admin-table"></div>
-        </div></div></div></div></section><section class="card wide page-card" id="model-editor-fallback" data-id="model-editor-fallback" data-tab="models" data-sub="manager" data-full="1" hidden><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Settings</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Settings</h2>
-        <div class="card-body"><div id="se-orphan" class="empty"></div></div></div></div></div></section><section class="card wide page-card" data-id="dl-page" data-tab="models" data-sub="downloader" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Hugging Face downloader</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Hugging Face downloader <span class="right" id="dl-sub"></span></h2>
+        </div></div></div></div></section><section class="card wide page-card" id="model-editor-fallback" data-id="model-editor-fallback" data-tab="models" data-sub="manager" data-full="1" hidden><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.settings">Settings</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.settings">Settings</span></h2>
+        <div class="card-body"><div id="se-orphan" class="empty"></div></div></div></div></div></section><section class="card wide page-card" data-id="dl-page" data-tab="models" data-sub="downloader" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.downloader_full">Hugging Face downloader</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.downloader_full">Hugging Face downloader</span> <span class="right" id="dl-sub"></span></h2>
         <div class="card-body">
             <div class="filterbar">
                 <input type="search" id="dl-q" placeholder="search models on huggingface.co…">
@@ -256,7 +256,7 @@ try {
                     <option value="smallest">smallest</option>
                 </select>
                 <label class="se-check" title="restrict to MLX-format models"><input type="checkbox" id="dl-mlx" checked>MLX only</label>
-                <button class="se-btn" id="dl-go">Search</button>
+                <button class="se-btn" id="dl-go" data-i18n="uplift.action.search">Search</button>
                 <span class="spacer"></span>
                 <button class="se-btn seg on" id="dl-tab-trending">TRENDING</button>
                 <button class="se-btn seg" id="dl-tab-popular">POPULAR</button>
@@ -265,27 +265,27 @@ try {
             <div class="filterbar">
                 <input type="text" id="dl-repo" placeholder="direct repo id, e.g. mlx-community/Llama-3-8B-4bit">
                 <input type="password" id="dl-token" placeholder="HF token (saved in this browser)" style="max-width:240px">
-                <button class="se-btn" id="dl-direct">Download</button>
+                <button class="se-btn" id="dl-direct" data-i18n="uplift.action.download">Download</button>
             </div>
             <div id="dl-results" class="admin-table"><div class="empty">Loading suggestions…</div></div>
             <div class="pager" id="dl-pager"></div>
-            <h3 style="margin:16px 0 6px">Tasks</h3>
+            <h3 style="margin:16px 0 6px" data-i18n="uplift.label.tasks">Tasks</h3>
             <div id="dl-tasks" class="admin-table"><div class="empty">No tasks</div></div>
-        </div></div></div></div></section><section class="card wide page-card" data-id="qz-page" data-tab="models" data-sub="quantizer" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>oQ quantization</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>oQ quantization <span class="right" id="qz-sub"></span></h2>
+        </div></div></div></div></section><section class="card wide page-card" data-id="qz-page" data-tab="models" data-sub="quantizer" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.quantizer_full">oQ quantization</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.quantizer_full">oQ quantization</span> <span class="right" id="qz-sub"></span></h2>
         <div class="card-body">
             <div class="se-hint" style="margin-bottom:8px" id="qz-mode">Runs quantized in the shadow sandbox (same fields and
                 live estimate as the classic page; the real oQ engine is never touched).</div>
             <div id="qz-form" class="admin-table"><div class="empty">—</div></div>
-            <h3 style="margin:16px 0 6px">Tasks</h3>
+            <h3 style="margin:16px 0 6px" data-i18n="uplift.label.tasks">Tasks</h3>
             <div id="qz-tasks" class="admin-table"><div class="empty">No tasks</div></div>
-        </div></div></div></div></section><section class="card wide page-card" data-id="up-page" data-tab="models" data-sub="uploader" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>oQ uploader</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>oQ uploader <span class="right" id="up-sub"></span></h2>
+        </div></div></div></div></section><section class="card wide page-card" data-id="up-page" data-tab="models" data-sub="uploader" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.uploader_full">oQ uploader</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.uploader_full">oQ uploader</span> <span class="right" id="up-sub"></span></h2>
         <div class="card-body">
             <div class="se-hint" style="margin-bottom:8px" id="up-mode">Uploads run in the shadow sandbox; the token stays in
                 this browser and never reaches the real server.</div>
             <div id="up-form" class="admin-table"><div class="empty">—</div></div>
-            <h3 style="margin:16px 0 6px">Tasks</h3>
+            <h3 style="margin:16px 0 6px" data-i18n="uplift.label.tasks">Tasks</h3>
             <div id="up-tasks" class="admin-table"><div class="empty">No tasks</div></div>
-        </div></div></div></div></section><section class="card wide page-card" data-id="usage-page" data-tab="usage" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Usage</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Usage
+        </div></div></div></div></section><section class="card wide page-card" data-id="usage-page" data-tab="usage" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.usage">Usage</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.usage">Usage</span>
             <span class="right"><select id="opt-usage-range" title="Range"></select> <span id="usage-sub"></span></span></h2>
         <div class="card-body">
             <div class="pair" id="usage-tiles">
@@ -301,7 +301,7 @@ try {
             <div class="heat-legend"><span>00:00</span><span style="flex:1"></span><span>23:00</span></div>
             <h3 style="margin:16px 0 6px">Per model</h3>
             <div id="usage-models" class="admin-table"></div>
-        </div></div></div></div></section><section class="card wide page-card" data-id="logs-page" data-tab="logs" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Logs</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Logs <span class="right" id="logs-sub"></span></h2>
+        </div></div></div></div></section><section class="card wide page-card" data-id="logs-page" data-tab="logs" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.logs">Logs</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.logs">Logs</span> <span class="right" id="logs-sub"></span></h2>
         <div class="card-body">
             <div class="filterbar">
                 <select id="logs-file"></select>
@@ -322,7 +322,7 @@ try {
                 <button class="se-btn" id="logs-dl">download</button>
             </div>
             <pre class="logs logs-page" id="logs">—</pre>
-        </div></div></div></div></section><section class="card wide page-card" data-id="settings-page" data-tab="settings" data-sub="global" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Server settings</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Server settings <span class="right" id="gs-sub"></span></h2>
+        </div></div></div></div></section><section class="card wide page-card" data-id="settings-page" data-tab="settings" data-sub="global" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.server_settings_full">Server settings</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.server_settings_full">Server settings</span> <span class="right" id="gs-sub"></span></h2>
         <div class="card-body"><div id="gs-body" class="admin-table"><div class="empty">—</div></div></div></div></div></div></section><section class="card wide page-card" data-id="patches-page" data-tab="settings" data-sub="patches" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.patches.title">Patches</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.patches.title">Patches</span> <span class="right" id="pt-sub"></span></h2>
         <div class="card-body">
             <div id="pt-warn" class="pt-banner" hidden></div>
@@ -396,14 +396,14 @@ try {
                 <div id="dv-actions" hidden><button type="button" class="btn primary" id="dv-build-btn" data-i18n="uplift.patches.dev_build">Rebuild omlx-dev</button><button type="button" class="btn primary" id="dv-build-restart-btn" data-i18n="uplift.patches.dev_build_restart">Rebuild &amp; restart</button><button type="button" class="btn" id="dv-restart-btn" data-i18n="uplift.patches.dev_restart">Restart omlx-dev</button></div>
                 <div id="dv-share" class="pt-gate" hidden></div>
             </div>
-        </div></div></div></div></section><section class="card wide page-card" data-id="helper-page" data-tab="models" data-sub="helper" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Helper models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Helper models <span class="right" id="hm-sub"></span></h2>
+        </div></div></div></div></section><section class="card wide page-card" data-id="helper-page" data-tab="models" data-sub="helper" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.helper_models_full">Helper models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.helper_models_full">Helper models</span> <span class="right" id="hm-sub"></span></h2>
         <div class="card-body">
             <div id="hm-markitdown"></div>
             <div class="mk-box">
                 <div class="mk-head"><div class="mk-title">Drafters &amp; assistants (DFlash, VLM/assistant MTP)</div></div>
                 <div id="hm-list" class="admin-table"><div class="empty">—</div></div>
             </div>
-        </div></div></div></div></section><section class="card wide page-card" data-id="model-templates-page" data-tab="models" data-sub="manager" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span>Global templates</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2>Global templates</h2>
+        </div></div></div></div></section><section class="card wide page-card" data-id="model-templates-page" data-tab="models" data-sub="manager" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.global_templates">Global templates</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.global_templates">Global templates</span></h2>
         <div class="card-body">
             <div class="se-hint" style="margin-bottom:8px">A global template is a saved bundle of model
                 settings. You create one from the model editor ("save as template") and apply it to a

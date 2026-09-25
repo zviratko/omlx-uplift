@@ -1,4 +1,6 @@
 {
+  "uplift.action.download": "下載",
+  "uplift.action.search": "搜尋",
   "uplift.btn.classic": "經典儀表板",
   "uplift.btn.collapse": "摺疊",
   "uplift.btn.layout": "佈局設定",
@@ -201,6 +203,7 @@
   "uplift.label.p95_prompt": "P95 提示詞 Token",
   "uplift.label.queue_first_tok": "排隊→首 Token 毫秒",
   "uplift.label.served_total": "累計處理",
+  "uplift.label.tasks": "工作",
   "uplift.label.tokens_per_s": "tokens/秒",
   "uplift.layout.cancel": "Cancel",
   "uplift.layout.columns": "列數",
@@ -255,6 +258,13 @@
   "uplift.mode.up_live": "上傳真實執行；令牌僅保留在此瀏覽器中，絕不發送到 oMLX 伺服器",
   "uplift.mode.up_shadow": "上傳在影子沙盒中執行；令牌僅保留在此瀏覽器中，絕不發送到真實伺服器。",
   "uplift.opt.percentile": "百分位",
+  "uplift.page.downloader_full": "Hugging Face 下載器",
+  "uplift.page.global_templates": "全域範本",
+  "uplift.page.helper_models_full": "輔助模型",
+  "uplift.page.quantizer_full": "oQ 量化",
+  "uplift.page.server_settings_full": "伺服器設定",
+  "uplift.page.settings": "設定",
+  "uplift.page.uploader_full": "oQ 上傳器",
   "uplift.patches.action_fail": "修補操作失敗",
   "uplift.patches.add_btn": "新增補丁",
   "uplift.patches.add_hint": "取得或上傳 diff，針對現行樹驗證後啟用",
@@ -584,5 +594,6 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "模型閒置超過此時長後卸載。",
   "uplift.ui.upload_queue": "上傳佇列",
   "uplift.ui.use_both_anes": "使用兩塊 ANE",
-  "uplift.ui.web_search": "網頁搜尋"
+  "uplift.ui.web_search": "網頁搜尋",
+  "uplift.usage.sub": "{req} 請求 · {tok} 代幣 · 快取 {cached}"
 }

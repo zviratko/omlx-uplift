@@ -1,4 +1,6 @@
 {
+  "uplift.action.download": "Stáhnout",
+  "uplift.action.search": "Hledat",
   "uplift.btn.classic": "Klasický dashboard",
   "uplift.btn.collapse": "Sbalit",
   "uplift.btn.layout": "Nastavení rozložení",
@@ -201,6 +203,7 @@
   "uplift.label.p95_prompt": "p95 prompt tokeny",
   "uplift.label.queue_first_tok": "fronta→první token ms",
   "uplift.label.served_total": "celkem zpracováno",
+  "uplift.label.tasks": "Úlohy",
   "uplift.label.tokens_per_s": "tokeny / s",
   "uplift.layout.cancel": "Zrušit",
   "uplift.layout.columns": "Sloupce",
@@ -255,6 +258,13 @@
   "uplift.mode.up_live": "nahrávání probíhá naplno; token zůstává v tomto prohlížeči a nikdy se nedostane na server oMLX",
   "uplift.mode.up_shadow": "Nahrávání probíhá ve stínovém sandboxu; token zůstává v tomto prohlížeči a nikdy se nedostane na reálný server.",
   "uplift.opt.percentile": "Percentil",
+  "uplift.page.downloader_full": "Stahování z Hugging Face",
+  "uplift.page.global_templates": "Globální šablony",
+  "uplift.page.helper_models_full": "Pomocné modely",
+  "uplift.page.quantizer_full": "Kvantizace oQ",
+  "uplift.page.server_settings_full": "Nastavení serveru",
+  "uplift.page.settings": "Nastavení",
+  "uplift.page.uploader_full": "Nahrávání oQ",
   "uplift.patches.action_fail": "Akce patche selhala",
   "uplift.patches.add_btn": "Přidat patch",
   "uplift.patches.add_hint": "nahrát diff, ověřit jej proti živému stromu a poté povolit",
@@ -584,5 +594,6 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Uvolnit model, pokud nebyl takto dlouho používán.",
   "uplift.ui.upload_queue": "Fronta nahrávání",
   "uplift.ui.use_both_anes": "Použít obě ANE",
-  "uplift.ui.web_search": "Vyhledávání na webu"
+  "uplift.ui.web_search": "Vyhledávání na webu",
+  "uplift.usage.sub": "{req} pož. · {tok} toků · v cache {cached}"
 }

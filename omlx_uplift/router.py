@@ -444,6 +444,20 @@ async def locale_catalog(lang: Optional[str] = None):
         except Exception:
             lang = "en"
     lang = _safe_lang(lang)
+    # UP-5 (minor): an unshipped locale (e.g. ?lang=de) serves English
+    # strings via fallback, but the echo used to say 'de' — the UI then set
+    # document.documentElement.lang='de' over English content (screen-reader
+    # voice mismatch). Echo what is actually rendered: a catalog counts as
+    # shipped when EITHER layer (classic base or uplift overlay) has it.
+    shipped = (_PACKAGE_LOCALES / f"{lang}.json").exists()
+    if not shipped:
+        try:
+            from omlx.admin.routes import _i18n_dir
+            shipped = (_i18n_dir / f"{lang}.json").exists()
+        except Exception:
+            pass
+    if not shipped:
+        lang = "en"
     return {"lang": lang, "strings": await asyncio.to_thread(load_locale, lang)}
 
 

@@ -1,4 +1,6 @@
 {
+  "uplift.action.download": "下载",
+  "uplift.action.search": "搜索",
   "uplift.btn.classic": "经典仪表盘",
   "uplift.btn.collapse": "折叠",
   "uplift.btn.layout": "布局设置",
@@ -201,6 +203,7 @@
   "uplift.label.p95_prompt": "P95 提示词 Token",
   "uplift.label.queue_first_tok": "排队→首 Token 毫秒",
   "uplift.label.served_total": "累计处理",
+  "uplift.label.tasks": "任务",
   "uplift.label.tokens_per_s": "tokens/秒",
   "uplift.layout.cancel": "Cancel",
   "uplift.layout.columns": "列数",
@@ -255,6 +258,13 @@
   "uplift.mode.up_live": "上传真实执行；令牌仅保留在此浏览器中，绝不发送到 oMLX 服务器",
   "uplift.mode.up_shadow": "上传在影子沙盒中执行；令牌仅保留在此浏览器中，绝不发送到真实服务器。",
   "uplift.opt.percentile": "百分位",
+  "uplift.page.downloader_full": "Hugging Face 下载器",
+  "uplift.page.global_templates": "全局模板",
+  "uplift.page.helper_models_full": "辅助模型",
+  "uplift.page.quantizer_full": "oQ 量化",
+  "uplift.page.server_settings_full": "服务器设置",
+  "uplift.page.settings": "设置",
+  "uplift.page.uploader_full": "oQ 上传器",
   "uplift.patches.action_fail": "补丁操作失败",
   "uplift.patches.add_btn": "新增补丁",
   "uplift.patches.add_hint": "获取或上传 diff，针对当前树校验后启用",
@@ -584,5 +594,6 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "模型闲置超过此时长后卸载。",
   "uplift.ui.upload_queue": "上传队列",
   "uplift.ui.use_both_anes": "使用两块 ANE",
-  "uplift.ui.web_search": "网页搜索"
+  "uplift.ui.web_search": "网页搜索",
+  "uplift.usage.sub": "{req} 请求 · {tok} tokens · 缓存 {cached}"
 }

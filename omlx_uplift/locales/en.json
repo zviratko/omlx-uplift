@@ -1,4 +1,6 @@
 {
+  "uplift.action.download": "Download",
+  "uplift.action.search": "Search",
   "uplift.btn.classic": "Classic dashboard",
   "uplift.btn.collapse": "Collapse",
   "uplift.btn.layout": "Layout settings",
@@ -201,6 +203,7 @@
   "uplift.label.p95_prompt": "p95 prompt tok",
   "uplift.label.queue_first_tok": "queue→first tok ms",
   "uplift.label.served_total": "processed total",
+  "uplift.label.tasks": "Tasks",
   "uplift.label.tokens_per_s": "tokens / s",
   "uplift.layout.cancel": "Cancel",
   "uplift.layout.columns": "Columns",
@@ -255,6 +258,13 @@
   "uplift.mode.up_live": "uploads run for real; the token stays in this browser and never reaches the oMLX server",
   "uplift.mode.up_shadow": "Uploads run in the shadow sandbox; the token stays in this browser and never reaches the real server.",
   "uplift.opt.percentile": "Percentile",
+  "uplift.page.downloader_full": "Hugging Face downloader",
+  "uplift.page.global_templates": "Global templates",
+  "uplift.page.helper_models_full": "Helper models",
+  "uplift.page.quantizer_full": "oQ quantization",
+  "uplift.page.server_settings_full": "Server settings",
+  "uplift.page.settings": "Settings",
+  "uplift.page.uploader_full": "oQ uploader",
   "uplift.patches.action_fail": "Patch action failed",
   "uplift.patches.add_btn": "Add patch",
   "uplift.patches.add_hint": "fetch or upload a diff, validate it against the live tree, then enable",
@@ -584,5 +594,6 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Unload a model after it has been unused for this long.",
   "uplift.ui.upload_queue": "Upload Queue",
   "uplift.ui.use_both_anes": "Use both ANEs",
-  "uplift.ui.web_search": "Web Search"
+  "uplift.ui.web_search": "Web Search",
+  "uplift.usage.sub": "{req} req · {tok} tok · cached {cached}"
 }

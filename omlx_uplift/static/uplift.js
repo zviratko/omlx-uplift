@@ -177,6 +177,11 @@ async function loadLocale(lang) {
         C.setLocale(j.lang, j.strings);
         GSY.gsLocalize();
         applyI18n(document);
+        // UP-5: JS-built labels the static applyI18n pass cannot reach.
+        if (window.Uplift.usage) {
+            window.Uplift.usage.relabelUsageRange();
+            window.Uplift.usage.renderUsageSub();
+        }
         if (typeof renderSkinsMenu === 'function' && SKIN_BASES.size) renderSkinsMenu();
         CH.relabelExplore();   // JS-built labels (chips, cell titles) too
         updateModeLabels(); // UPLOADER-1: mode badges are JS-built, same re-label need

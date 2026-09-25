@@ -12,6 +12,23 @@ const $ = id => document.getElementById(id);
 const API = S.API;
 const layout = S.layout;
 const CH = window.Uplift.charts;
+/* UP-5: the sub-line ("N req · M tok · cached K") was literal English. The
+   translation lives on the #usage-sub span (data-i18n + applyI18n relabel
+   on locale load); last render's numbers live in state so relabeling can
+   re-fill them without a refetch. */
+S.usageTotals = null;
+function renderUsageSub() {
+    const el = $('usage-sub');
+    if (!el || !S.usageTotals) return;
+    const t = S.usageTotals;
+    const vars = { req: C.fmtNumber(t.requests),
+                   tok: C.fmtCompact(t.total_tokens),
+                   cached: C.fmtCompact(t.cached_tokens) };
+    let s = C.t('uplift.usage.sub', vars);
+    if (s === 'uplift.usage.sub')      // locale not loaded yet: English literal
+        s = `${vars.req} req · ${vars.tok} tok · cached ${vars.cached}`;
+    el.textContent = s;
+}
 /* ---------------- usage (Usage tab) ---------------- */
 /* createUsageChart lives in uplift_charts.js (CH.createUsageChart). */
 async function pollUsage() {
@@ -50,8 +67,8 @@ async function pollUsage() {
                 c.title = `${day.date || ''} ${String(hIdx).padStart(2, '0')}:00 — ${C.fmtCompact(v)} tokens`;
             });
         });
-        $('usage-sub').textContent = tot.requests !== undefined
-            ? `${C.fmtNumber(tot.requests)} req · ${C.fmtCompact(tot.total_tokens)} tok · cached ${C.fmtCompact(tot.cached_tokens)}` : '';
+        if (tot.requests !== undefined) { S.usageTotals = tot; renderUsageSub(); }
+        else $('usage-sub').textContent = '';
 
         // Hourly tokens chart (last day of the range).
         if (!CH.usageChart) CH.createUsageChart();
@@ -88,12 +105,26 @@ async function pollUsage() {
 /* PH2-1 stage 3: fillSelect lives in uplift.js (loads later) — defer the
    select seeding to initUsageRange(), which the uplift.js boot tail calls. */
 let usageRangeSeeded = false;
-function initUsageRange() {
-    if (usageRangeSeeded) return;
-    usageRangeSeeded = true;
-    window.Uplift._usageGlue.fillSelect($('opt-usage-range'),
-        [['today', 'today'], ['yesterday', 'yesterday'], ['7d', '7 days'],
-         ['30d', '30 days'], ['90d', '90 days']], S.usageRange);
+/* UP-5: option labels + summary sub-line were literal English. Range names
+   reuse classic's own usage.* keys (same concepts, already translated in
+   the base catalog); relabelUsageRange() runs on every locale load like
+   CH.relabelExplore does for chart chips. */
+const USAGE_RANGE_KEYS = [['today', 'usage.today'], ['yesterday', 'usage.yesterday'],
+                          ['7d', 'usage.7d'], ['30d', 'usage.30d'], ['90d', 'usage.90d']];
+function initUsageRange() { relabelUsageRange(); }
+function relabelUsageRange() {
+    // build on first call, rewrite labels in place afterwards (selection
+    // untouched) — same relabel contract as CH.relabelExplore for chips.
+    const sel = $('opt-usage-range');
+    if (!sel) return;
+    const want = Object.fromEntries(USAGE_RANGE_KEYS.map(([v, k]) => [v, C.t(k)]));
+    if (!sel.options.length) {
+        window.Uplift._usageGlue.fillSelect(sel,
+            USAGE_RANGE_KEYS.map(([v, k]) => [v, want[k]]), S.usageRange);
+        usageRangeSeeded = true;
+        return;
+    }
+    for (const o of sel.options) if (want[o.value] !== undefined) o.textContent = want[o.value];
 }
 $('opt-usage-range').onchange = e => { S.usageRange = e.target.value; pollUsage(); };
 
@@ -152,6 +183,7 @@ $('logs-dl').onclick = () => {
 
 window.Uplift.usage = {
     pollUsage: pollUsage, pollLogs: pollLogs, initUsageRange: initUsageRange,
+    relabelUsageRange: relabelUsageRange, renderUsageSub: renderUsageSub,
     get logsFollow() { return logsFollow; },
 };
 })();

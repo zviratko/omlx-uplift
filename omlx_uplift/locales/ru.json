@@ -1,4 +1,6 @@
 {
+  "uplift.action.download": "Скачать",
+  "uplift.action.search": "Поиск",
   "uplift.btn.classic": "Классическая панель",
   "uplift.btn.collapse": "Свернуть",
   "uplift.btn.layout": "Параметры компоновки",
@@ -201,6 +203,7 @@
   "uplift.label.p95_prompt": "p95 токены запроса",
   "uplift.label.queue_first_tok": "очередь→первый токен мс",
   "uplift.label.served_total": "всего обработано",
+  "uplift.label.tasks": "Задачи",
   "uplift.label.tokens_per_s": "токенов/с",
   "uplift.layout.cancel": "Cancel",
   "uplift.layout.columns": "Столбцы",
@@ -255,6 +258,13 @@
   "uplift.mode.up_live": "загрузка на сервер настоящая; токен остаётся в этом браузере и не передаётся на сервер oMLX",
   "uplift.mode.up_shadow": "Загрузка выполняется в теневой песочнице; токен остаётся в этом браузере и не попадает на реальный сервер.",
   "uplift.opt.percentile": "Персентиль",
+  "uplift.page.downloader_full": "Загрузчик Hugging Face",
+  "uplift.page.global_templates": "Глобальные шаблоны",
+  "uplift.page.helper_models_full": "Вспомогательные модели",
+  "uplift.page.quantizer_full": "Квантование oQ",
+  "uplift.page.server_settings_full": "Настройки сервера",
+  "uplift.page.settings": "Настройки",
+  "uplift.page.uploader_full": "Загрузчик файлов oQ",
   "uplift.patches.action_fail": "Действие с патчем не удалось",
   "uplift.patches.add_btn": "Добавить патч",
   "uplift.patches.add_hint": "получить или загрузить diff, проверить по рабочему дереву, затем включить",
@@ -584,5 +594,6 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Выгрузить модель, если она не использовалась столько времени.",
   "uplift.ui.upload_queue": "Очередь загрузки",
   "uplift.ui.use_both_anes": "Использовать оба ANE",
-  "uplift.ui.web_search": "Веб-поиск"
+  "uplift.ui.web_search": "Веб-поиск",
+  "uplift.usage.sub": "{req} запр · {tok} ток · в кэше {cached}"
 }

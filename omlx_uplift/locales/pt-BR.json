@@ -1,4 +1,6 @@
 {
+  "uplift.action.download": "Baixar",
+  "uplift.action.search": "Pesquisar",
   "uplift.btn.classic": "Painel clássico",
   "uplift.btn.collapse": "Recolher",
   "uplift.btn.layout": "Configurações de layout",
@@ -205,6 +207,7 @@
   "uplift.label.p95_prompt": "p95 tokens de prompt",
   "uplift.label.queue_first_tok": "fila→primeiro token ms",
   "uplift.label.served_total": "total processado",
+  "uplift.label.tasks": "Tarefas",
   "uplift.label.tokens_per_s": "tokens/s",
   "uplift.layout.cancel": "Cancel",
   "uplift.layout.columns": "Colunas",
@@ -259,6 +262,13 @@
   "uplift.mode.up_live": "os envios rodam de verdade; o token permanece neste navegador e nunca chega ao servidor oMLX",
   "uplift.mode.up_shadow": "Os envios rodam na sandbox espelho; o token permanece neste navegador e nunca chega ao servidor real.",
   "uplift.opt.percentile": "Percentil",
+  "uplift.page.downloader_full": "Baixador da Hugging Face",
+  "uplift.page.global_templates": "Modelos globais",
+  "uplift.page.helper_models_full": "Modelos auxiliares",
+  "uplift.page.quantizer_full": "Quantização oQ",
+  "uplift.page.server_settings_full": "Configurações do servidor",
+  "uplift.page.settings": "Configurações",
+  "uplift.page.uploader_full": "Enviador oQ",
   "uplift.patches.action_fail": "Ação do patch falhou",
   "uplift.patches.add_btn": "Adicionar patch",
   "uplift.patches.add_hint": "obter ou enviar um diff, validar contra a árvore ativa e ativar",
@@ -588,5 +598,6 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Descarrega um modelo após esse tempo sem uso.",
   "uplift.ui.upload_queue": "Fila de envios",
   "uplift.ui.use_both_anes": "Usar as duas ANE",
-  "uplift.ui.web_search": "Busca na web"
+  "uplift.ui.web_search": "Busca na web",
+  "uplift.usage.sub": "{req} req · {tok} tok · em cache {cached}"
 }

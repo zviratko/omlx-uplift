@@ -1,4 +1,6 @@
 {
+  "uplift.action.download": "다운로드",
+  "uplift.action.search": "검색",
   "uplift.btn.classic": "클래식 대시보드",
   "uplift.btn.collapse": "접기",
   "uplift.btn.layout": "레이아웃 설정",
@@ -216,6 +218,7 @@
   "uplift.label.p95_prompt": "p95 프롬프트 토큰",
   "uplift.label.queue_first_tok": "대기→첫 토큰 ms",
   "uplift.label.served_total": "누적 처리",
+  "uplift.label.tasks": "작업",
   "uplift.label.tokens_per_s": "토큰/초",
   "uplift.layout.cancel": "Cancel",
   "uplift.layout.columns": "열 개수",
@@ -270,6 +273,13 @@
   "uplift.mode.up_live": "업로드가 실제로 실행됩니다. 토큰은 이 브라우저에만 남고 oMLX 서버로 전송되지 않습니다",
   "uplift.mode.up_shadow": "업로드는 섀도우 샌드박스에서 실행됩니다. 토큰은 이 브라우저에만 남습니다.",
   "uplift.opt.percentile": "백분위",
+  "uplift.page.downloader_full": "Hugging Face 다운로더",
+  "uplift.page.global_templates": "전역 템플릿",
+  "uplift.page.helper_models_full": "도우미 모델",
+  "uplift.page.quantizer_full": "oQ 양자화",
+  "uplift.page.server_settings_full": "서버 설정",
+  "uplift.page.settings": "설정",
+  "uplift.page.uploader_full": "oQ 업로더",
   "uplift.patches.action_fail": "패치 작업 실패",
   "uplift.patches.add_btn": "패치 추가",
   "uplift.patches.add_hint": "diff를 가져오거나 업로드하고 라이브 트리에 대해 검증한 뒤 활성화",
@@ -599,5 +609,6 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "이 시간 동안 사용되지 않은 모델을 언로드합니다.",
   "uplift.ui.upload_queue": "업로드 대기열",
   "uplift.ui.use_both_anes": "두 ANE 모두 사용",
-  "uplift.ui.web_search": "웹 검색"
+  "uplift.ui.web_search": "웹 검색",
+  "uplift.usage.sub": "요청 {req} · 토큰 {tok} · 캐시 {cached}"
 }

@@ -1,4 +1,6 @@
 {
+  "uplift.action.download": "Télécharger",
+  "uplift.action.search": "Rechercher",
   "uplift.btn.classic": "Tableau de bord classique",
   "uplift.btn.collapse": "Réduire",
   "uplift.btn.layout": "Paramètres de disposition",
@@ -205,6 +207,7 @@
   "uplift.label.p95_prompt": "p95 tokens de prompt",
   "uplift.label.queue_first_tok": "file→premier token ms",
   "uplift.label.served_total": "total traité",
+  "uplift.label.tasks": "Tâches",
   "uplift.label.tokens_per_s": "tokens/s",
   "uplift.layout.cancel": "Cancel",
   "uplift.layout.columns": "Colonnes",
@@ -259,6 +262,13 @@
   "uplift.mode.up_live": "les téléversements s'exécutent réellement ; le jeton reste dans ce navigateur et ne parvient jamais au serveur oMLX",
   "uplift.mode.up_shadow": "Les téléversements s'exécutent dans la sandbox miroir ; le jeton reste dans ce navigateur et ne parvient jamais au serveur réel.",
   "uplift.opt.percentile": "Percentile",
+  "uplift.page.downloader_full": "Téléchargeur Hugging Face",
+  "uplift.page.global_templates": "Modèles globaux",
+  "uplift.page.helper_models_full": "Modèles assistants",
+  "uplift.page.quantizer_full": "Quantification oQ",
+  "uplift.page.server_settings_full": "Paramètres du serveur",
+  "uplift.page.settings": "Paramètres",
+  "uplift.page.uploader_full": "Téléverseur oQ",
   "uplift.patches.action_fail": "Échec de l'action sur le correctif",
   "uplift.patches.add_btn": "Ajouter le correctif",
   "uplift.patches.add_hint": "récupérer ou téléverser un diff, le valider contre l'arbre actif, puis l'activer",
@@ -588,5 +598,6 @@
   "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Décharge un modèle après cette durée sans utilisation.",
   "uplift.ui.upload_queue": "File de téléversement",
   "uplift.ui.use_both_anes": "Utiliser les deux ANE",
-  "uplift.ui.web_search": "Recherche web"
+  "uplift.ui.web_search": "Recherche web",
+  "uplift.usage.sub": "{req} req · {tok} tok · en cache {cached}"
 }
