@@ -152,9 +152,16 @@ function seriesValue(v) {
 }
 /* U8: throughput/counter axes start at 0. Auto-scaling to the data window
    exaggerated tiny wiggles; a zero floor is honest for rate/count units.
-   Upper bound stays auto (null). NOT applied to memory % (already 0-100)
-   or cache GB (auto remains useful — values legitimately sit far from 0). */
-const ZERO_FLOOR_RANGE = (u, dmin, dmax) => [0, null];
+   NOT applied to memory % (already 0-100) or cache GB (auto remains
+   useful — values legitimately sit far from 0). */
+// uPlot assigns the range() return values to scale.min/max VERBATIM
+// (setScale does e.max=n[1]) — a null upper means "unbounded" to nothing
+// here: the scale stays null and the line is never drawn (2026-09-25:
+// U8 shipped [0, null] and every floored chart drew grid-less blank
+// while the legend/hover still showed values). Upper must be concrete;
+// idle all-zero windows get a readable 0..1 band.
+const ZERO_FLOOR_RANGE = (u, dmin, dmax) =>
+    [0, (dmax == null || dmax <= 0) ? 1 : dmax * 1.05];
 function line(label, colorVar, fill, scale) {
     const col = chartColors()[colorVar];
     return { label, scale: scale || 'y', stroke: col, width: 2,
