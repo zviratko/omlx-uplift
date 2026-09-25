@@ -83,6 +83,12 @@ def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
         return {"id": pid, "action": "needs_review", "reason": "diff file missing"}
     if time.monotonic() > deadline:
         return {"id": pid, "action": "deferred", "reason": "time budget"}
+    if _patches.scope_touches_dev(_patches.patch_scope(patch)):
+        # scope=both stores the FULL diff (dev-src needs tests/csrc); the
+        # keg overlay is the same bytes minus non-installable files —
+        # pruned here, the one place both scopes converge on the keg path
+        data, _skipped = diffapply.prune_sections(
+            data, _patches.skip_patterns(store.load()))
     backup_dir = store.backup_dir(pid, version["v"], keg)
     reverse = bool(patch.get("reversal"))
     result = diffapply.apply_diff(data, tree_root, backup_dir, reverse=reverse)
@@ -211,10 +217,18 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
     try:
         ordered = sorted(plist, key=lambda p: (p.get("order", 100), p.get("id", "")))
         deferred = False
+        on_dev_keg = _patches.detect_patch_target() == "dev"
         for patch in ordered:
-            if _patches.patch_scope(patch) == _patches.SCOPE_BUILD:
-                # build-scope patches never touch the keg (DEV-context 1):
-                # the dev-src materializer owns them. Invisible to reconcile.
+            scope = _patches.patch_scope(patch)
+            if on_dev_keg:
+                # DEV-6 decision 2: the omlx-dev keg's SOURCE already carries
+                # its patches (materialized uplift-dev). An overlay would be
+                # redundant at best and fight the patched source at worst —
+                # so no scope ever mounts into a dev keg.
+                continue
+            if not _patches.scope_touches_keg(scope):
+                # dev-scope patches never touch a keg (DEV-context 1): the
+                # dev-src materializer owns them. Invisible to reconcile.
                 continue
             enabled = bool(patch.get("enabled"))
             desired = store.get_version(patch, patch.get("desired_version")) \

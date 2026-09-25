@@ -265,7 +265,9 @@ class SubprocessPthTests(unittest.TestCase):
             # directory also carries the real omlx, which would otherwise
             # shadow the fake keg and point sync at the live tree.
             "PYTHONPATH": os.pathsep.join([self.root, PKG_PARENT, self.pth_dir]),
-            "OMLX_BASE_PATH": self.data,  # store base -> data/uplift
+            "UPLIFT_HOME": os.path.join(self.data, "uplift"),  # DEV-6: the
+            # store ignores OMLX_BASE_PATH now; UPLIFT_HOME pins it here so
+            # the seeded store IS the one the booted interpreter loads.
             "HOME": self.tmp,             # keep real ~/.omlx out of reach
         })
         self.env.pop("OMLX_UPLIFT_NO_REEXEC", None)
@@ -335,3 +337,57 @@ class SubprocessPthTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SingleStoreTests(unittest.TestCase):
+    """DEV-6 S1: one uplift data dir regardless of OMLX_BASE_PATH, plus a
+    one-time merge of the legacy split store."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self._env = dict(os.environ)
+        os.environ.pop("UPLIFT_HOME", None)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._env)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_base_dir_ignores_omlx_base_path(self):
+        os.environ["OMLX_BASE_PATH"] = self.tmp
+        self.assertEqual(patches.default_base_dir(),
+                         os.path.expanduser("~/.omlx/uplift"))
+        os.environ["UPLIFT_HOME"] = "~/elsewhere"
+        self.assertEqual(patches.default_base_dir(),
+                         os.path.expanduser("~/elsewhere"))
+
+    def test_legacy_merge_moves_absent_ids_only(self):
+        canon = os.path.join(self.tmp, "canon")
+        legacy = os.path.join(self.tmp, "devbase", "uplift")
+        os.makedirs(os.path.join(canon, "patches"))
+        os.makedirs(os.path.join(legacy, "patches"))
+        c = {"version": 2, "config": {}, "patches": [
+            {"id": "shared", "enabled": True, "scope": "omlx",
+             "versions": [{"v": 1}]}]}
+        with open(os.path.join(canon, "patches.json"), "w") as fh:
+            json.dump(c, fh)
+        l = {"version": 2, "config": {}, "patches": [
+            {"id": "shared", "enabled": False, "versions": [{"v": 9}]},
+            {"id": "devonly", "enabled": True, "scope": "dev",
+             "versions": [{"v": 1}]}]}
+        with open(os.path.join(legacy, "patches.json"), "w") as fh:
+            json.dump(l, fh)
+        with open(os.path.join(legacy, "patches", "devonly.v1.diff"), "w") as fh:
+            fh.write("diff --git a/x b/x\n")
+        os.environ["OMLX_BASE_PATH"] = os.path.join(self.tmp, "devbase")
+        merged = patches.merge_legacy_stores(canon)
+        self.assertEqual(merged, ["devonly"])
+        out = json.load(open(os.path.join(canon, "patches.json")))
+        ids = {p["id"]: p for p in out["patches"]}
+        self.assertTrue(ids["shared"]["enabled"])       # canonical wins
+        self.assertIn("devonly", ids)
+        self.assertTrue(os.path.exists(
+            os.path.join(canon, "patches", "devonly.v1.diff")))
+        self.assertFalse(os.path.exists(
+            os.path.join(legacy, "patches.json")))      # renamed away
+        self.assertEqual(patches.merge_legacy_stores(canon), [])  # idempotent

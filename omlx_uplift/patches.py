@@ -39,17 +39,50 @@ KILL_SWITCH_ENV = "OMLX_UPLIFT_NO_PATCHES"
 # a full source checkout (no skip-pruning), is NEVER applied to a keg and
 # is materialized as commits on the omlx-dev branch instead. One patch =
 # one scope, whole diff; no mixed-scope patches.
-SCOPE_RUNTIME = "runtime"
-SCOPE_BUILD = "build"
-SCOPES = (SCOPE_RUNTIME, SCOPE_BUILD)
+# DEV-6 scope model (renamed from runtime/build; legacy values normalize):
+#   omlx — apply pruned overlay to the vanilla keg only
+#   dev  — materialize on the uplift-dev branch only, never a keg
+#   both — full diff (incl. tests/) to uplift-dev AND pruned overlay on the
+#          vanilla keg; one stored byte string, pruning is per-target
+SCOPE_OMLX = "omlx"
+SCOPE_DEV = "dev"
+SCOPE_BOTH = "both"
+SCOPES = (SCOPE_OMLX, SCOPE_DEV, SCOPE_BOTH)
+# legacy aliases (v1/v2 manifests): map old names onto the new canonicals
+SCOPE_RUNTIME = SCOPE_OMLX     # was "runtime"
+SCOPE_BUILD = SCOPE_DEV        # was "build"
+_LEGACY_SCOPE_NAMES = {"runtime": SCOPE_OMLX, "build": SCOPE_DEV}
 SENTINEL_FILENAME = "patches.disabled"
 
 
 def patch_scope(patch: dict) -> str:
-    """Effective scope of a manifest entry: absent/unknown == runtime, so
-    v1 manifests and hand-edits keep today's behaviour."""
+    """Effective scope of a manifest entry: absent/unknown == omlx, so v1/v2
+    manifests and hand-edits keep their behaviour. Legacy runtime/build
+    normalize to omlx/dev (DEV-6 rename)."""
     val = patch.get("scope")
-    return val if val in SCOPES else SCOPE_RUNTIME
+    val = _LEGACY_SCOPE_NAMES.get(val, val)
+    return val if val in SCOPES else SCOPE_OMLX
+
+
+def scope_touches_keg(scope: str) -> bool:
+    """Does this scope apply (pruned) to an omlx keg?"""
+    return scope in (SCOPE_OMLX, SCOPE_BOTH)
+
+
+def scope_touches_dev(scope: str) -> bool:
+    """Does this scope materialize on the uplift-dev branch?"""
+    return scope in (SCOPE_DEV, SCOPE_BOTH)
+
+
+def detect_patch_target(omlx_root: str | None = None) -> str:
+    """Which product this process is patching: 'omlx' (vanilla keg) or
+    'dev' (running from the omlx-dev keg). Brew layout puts the keg name in
+    the path (Cellar/omlx-dev/...); a dev keg's source ALREADY carries its
+    patches, so omlx-scope overlays must not mount there (DEV-6 decision 2)."""
+    root = omlx_root or _omlx_root()
+    if root and "omlx-dev" in os.path.normpath(root):
+        return "dev"
+    return "omlx"
 
 STATES = (
     "applied", "pending", "update_available", "needs_review",
@@ -81,10 +114,94 @@ def now_iso() -> str:
 # --------------------------------------------------------------------------
 
 def default_base_dir() -> str:
-    env_base = os.environ.get("OMLX_BASE_PATH")
-    if env_base:
-        return os.path.join(env_base, "uplift")
+    """THE one uplift data dir: ~/.omlx/uplift (override: UPLIFT_HOME).
+
+    Deliberately independent of OMLX_BASE_PATH: that env points the
+    omlx-dev service at ~/.omlx-dev, and deriving the patch store from it
+    split ONE patch set into two manifests (CLI+vanilla vs the dev
+    dashboard) — patches visibly vanished/reappeared between the two.
+    Every process shares this dir; per-target state keys the entries.
+    """
+    env_home = os.environ.get("UPLIFT_HOME")
+    if env_home:
+        return os.path.expanduser(env_home)
     return os.path.expanduser(os.path.join("~", ".omlx", "uplift"))
+
+
+LEGACY_BASE_CANDIDATES = ("~/.omlx-dev",)
+
+
+def merge_legacy_stores(base_dir: str | None = None) -> list[str]:
+    """One-time merge of pre-DEV-6 split stores into the canonical dir.
+
+    Any <legacy base>/uplift/patches.json whose entries are absent from
+    the canonical manifest is merged (entry + its .diff files + backups),
+    then renamed to patches.json.migrated-<ts> so it never re-merges.
+    A canonical entry is NEVER overwritten — on an id clash the legacy
+    entry is left in the renamed file for manual rescue. Returns merged
+    patch ids."""
+    import shutil
+    import time
+
+    canonical_dir = base_dir or default_base_dir()
+    canonical_file = os.path.join(canonical_dir, "patches.json")
+    merged: list[str] = []
+    env_base = os.environ.get("OMLX_BASE_PATH")
+    legacy_bases = [env_base] if env_base else []
+    legacy_bases += [b for b in LEGACY_BASE_CANDIDATES]
+    try:
+        with open(canonical_file, encoding="utf-8") as fh:
+            canonical = json.load(fh)
+    except (OSError, ValueError):
+        canonical = {}
+    have = {p.get("id") for p in canonical.get("patches", []) or []}
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    for base in legacy_bases:
+        legacy_dir = os.path.join(os.path.expanduser(base), "uplift")
+        legacy_file = os.path.join(legacy_dir, "patches.json")
+        if os.path.abspath(legacy_dir) == os.path.abspath(canonical_dir):
+            continue
+        try:
+            with open(legacy_file, encoding="utf-8") as fh:
+                legacy = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        entries = [p for p in (legacy.get("patches") or [])
+                   if p.get("id") not in have]
+        moved = []
+        for p in entries:
+            pid = p["id"]
+            for v in p.get("versions", []) or []:
+                diff = os.path.join(legacy_dir, "patches",
+                                    f"{pid}.v{v.get('v')}.diff")
+                if os.path.exists(diff):
+                    os.makedirs(os.path.join(canonical_dir, "patches"),
+                                exist_ok=True)
+                    shutil.copy2(diff, os.path.join(
+                        canonical_dir, "patches", os.path.basename(diff)))
+            moved.append(pid)
+            have.add(pid)
+        if moved:
+            canonical.setdefault("patches", []).extend(
+                p for p in (legacy.get("patches") or [])
+                if p.get("id") in moved)
+            merged.extend(moved)
+        # rename unconditionally when a file existed: even clash-leftovers
+        # stop being a second live store (they stay readable in the file)
+        try:
+            os.replace(legacy_file, f"{legacy_file}.migrated-{stamp}")
+        except OSError:
+            pass
+    if merged:
+        os.makedirs(canonical_dir, exist_ok=True)
+        canonical.setdefault("version", MANIFEST_VERSION)
+        canonical.setdefault("config", {"auto_update_check": False})
+        tmp = canonical_file + ".merge.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(canonical, fh, indent=2)
+            fh.write("\n")
+        os.replace(tmp, canonical_file)
+    return merged
 
 
 class PatchStore:
@@ -130,9 +247,17 @@ class PatchStore:
         return os.path.exists(self.sentinel_path)
 
     # -- manifest I/O ---------------------------------------------------------
+    _legacy_merged = False
+
     def load(self) -> dict:
         """Load the manifest; a missing/corrupt file yields a valid empty one
         (never raises — the .pth path and the UI both call this)."""
+        if not PatchStore._legacy_merged:
+            PatchStore._legacy_merged = True
+            try:
+                merge_legacy_stores(self.base_dir)
+            except OSError:
+                pass
         try:
             with open(self.manifest_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)

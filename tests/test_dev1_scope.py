@@ -88,7 +88,8 @@ class ScopeGateTest(unittest.TestCase):
         self.assertTrue(res["ok"], res)
         m = self.store.load()
         p = self.store.find(m, "kern")
-        self.assertEqual(p["scope"], "build")
+        # DEV-6: legacy --scope build normalizes to 'dev' on record
+        self.assertEqual(p["scope"], "dev")
         ver = p["versions"][0]
         # stored bytes are the UNPRUNED diff: gate sha == sha of original
         self.assertEqual(ver["content_sha256"],
@@ -208,7 +209,7 @@ class BuildPatchesNeverTouchKegTest(unittest.TestCase):
         out = patchsource.view(self.store, self.keg,
                                patches.keg_id(os.path.join(self.keg, "omlx")))
         row = [p for p in out["patches"] if p["id"] == "kern"][0]
-        self.assertEqual(row["scope"], "build")
+        self.assertEqual(row["scope"], "dev")  # DEV-6 normalized
         self.assertTrue(row["enabled"])
         self.assertFalse(row["active"])
         self.assertIn("omlx-dev", row["inactive_reason"])

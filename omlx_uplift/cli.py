@@ -142,8 +142,9 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
         pid = patch.get("id", "?")
         if not patch.get("enabled"):
             continue
-        if _patches_mod.patch_scope(patch) == _patches_mod.SCOPE_BUILD:
-            continue  # build-scope: never applied to a keg (DEV-1)
+        if not _patches_mod.scope_touches_keg(
+                _patches_mod.patch_scope(patch)):
+            continue  # dev-scope: never applied to a keg (DEV-1)
         rev = bool(patch.get("reversal"))
         ver = store.get_version(patch, patch.get("desired_version"))
         if ver is None:
@@ -451,15 +452,19 @@ def cmd_patches(argv=None) -> int:
     ap.add_argument("--pr", help="GitHub PR as repo/N, e.g. jundot/omlx/123")
     ap.add_argument("--url", help="plain URL of a diff file")
     ap.add_argument("--file", help="local diff file (upload kind)")
-    ap.add_argument("--scope", choices=["runtime", "build"],
-                    help="patch scope (DEV-1). runtime gates against the "
-                         "keg; build gates against a source checkout "
-                         "(--build-root or the dev-src clone) and is "
-                         "materialized on the omlx-dev branch. Omit to "
-                         "auto-classify: the verdict names build-only "
-                         "sections when a keg gate cannot host them.")
+    ap.add_argument("--scope", choices=["omlx", "dev", "both",
+                                        "runtime", "build"],
+                    help="patch scope (DEV-6). omlx: pruned overlay on the "
+                         "vanilla keg only. dev: materialized on the "
+                         "uplift-dev branch only (full diff, incl. tests), "
+                         "gated against a source checkout (--build-root or "
+                         "the dev-src clone). both: uplift-dev gets the "
+                         "full diff AND the vanilla keg the pruned overlay. "
+                         "Omit to auto-classify (a PR with build-only "
+                         "sections suggests 'both'). 'runtime'/'build' are "
+                         "legacy aliases of omlx/dev.")
     ap.add_argument("--build-root", help="source checkout used to gate "
-                                         "scope=build (default: ~/.omlx/"
+                                         "scope=dev/both (default: ~/.omlx/"
                                          "uplift/dev-src when present)")
     args = ap.parse_args(argv)
 
@@ -497,14 +502,19 @@ def cmd_patches(argv=None) -> int:
                                     scope=args.scope, build_root=build_root)
         if not out.get("ok") and out.get("stage") == "classification":
             print(_json.dumps(out, indent=2))
-            print("hint: re-run with --scope build to record it as a "
-                  "build patch", file=sys.stderr)
+            print("hint: re-run with --scope both (recommended: full diff "
+                  "to uplift-dev + pruned overlay on the keg) or --scope "
+                  "dev (dev-src only)", file=sys.stderr)
             return 3
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 
     if args.action == "status":
         out = patchsource.view(store, tree_root, _patches.keg_id(root))
+        # DEV-6: show ALL patches by default; --scope filters
+        if args.scope:
+            want = _patches._LEGACY_SCOPE_NAMES.get(args.scope, args.scope)
+            out["patches"] = [p for p in out["patches"] if p["scope"] == want]
     elif args.action == "apply":
         out = patchsync.reconcile(store, tree_root, allow_reexec=False)
         out["kill_switch_active"] = store.patches_disabled()
@@ -534,7 +544,11 @@ def cmd_dev(argv=None) -> int:
 
     ap = argparse.ArgumentParser(prog="omlx-uplift dev")
     ap.add_argument("action", choices=["bootstrap", "install", "status",
-                                       "reconfigure", "upgrade"])
+                                       "reconfigure", "upgrade", "patches"])
+    ap.add_argument("--scope", choices=["omlx", "dev", "both",
+                                        "runtime", "build"],
+                    help="scope filter for 'dev patches' (DEV-6; default: "
+                         "dev+both)")
     ap.add_argument("--yes", action="store_true",
                     help="take questionnaire defaults (scripted use)")
     ap.add_argument("--src", help="existing omlx checkout to detect origin "
@@ -629,6 +643,24 @@ def cmd_dev(argv=None) -> int:
 
     if args.action == "reconfigure":
         return cmd_dev_reconfigure(args)
+
+    if args.action == "patches":
+        # DEV-6: the dev view of the SAME manifest — dev/both by default
+        # (--scope narrows)
+        from . import patches as _patches_mod, patchsource as _ps
+        store = _patches_store()
+        root = _patches_mod._omlx_root()
+        tree_root = os.path.dirname(root) if root else os.getcwd()
+        out = _ps.view(store, tree_root, None)
+        want = getattr(args, "scope", None)
+        want = _patches_mod._LEGACY_SCOPE_NAMES.get(want, want)
+        if want:
+            out["patches"] = [p for p in out["patches"] if p["scope"] == want]
+        else:
+            out["patches"] = [p for p in out["patches"]
+                              if _patches_mod.scope_touches_dev(p["scope"])]
+        print(_json.dumps(out, indent=2))
+        return 0
 
     if args.action == "status":
         cfg = devsrc.load_config()
@@ -881,6 +913,9 @@ def cmd_dev_install(args) -> int:
     n = len([c for c in res["commits"] if c.get("sha")])
     print(f"uplift-dev: {cfg['sync_ref']} @ {res['base'][:12]} + "
           f"{n} patch commit(s) -> tip {tip[:12]}")
+    # the branch IS the apply step for dev/both scopes — record it so the
+    # dashboard stops showing 'pending' forever (reconcile never sees these)
+    patchsource.mark_dev_applied(_patches_store(), res["commits"])
 
     # re-gate BEFORE the rebuild (DEV-context decision 9) — failures mark
     # needs_review per patch, never silently skipped

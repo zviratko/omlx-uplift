@@ -451,12 +451,14 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
     """
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", patch_id or ""):
         return {"ok": False, "reason": "name must match [a-z0-9][a-z0-9._-]{0,63}"}
-    if scope is not None and scope not in _patches.SCOPES:
+    if scope is not None:
+        scope = _patches._LEGACY_SCOPE_NAMES.get(scope, scope)
+        if scope not in _patches.SCOPES:
+            return {"ok": False,
+                    "reason": f"scope must be one of {list(_patches.SCOPES)}"}
+    if scope in (_patches.SCOPE_DEV, _patches.SCOPE_BOTH) and not build_root:
         return {"ok": False,
-                "reason": f"scope must be one of {list(_patches.SCOPES)}"}
-    if scope == _patches.SCOPE_BUILD and not build_root:
-        return {"ok": False,
-                "reason": "scope=build needs a source checkout: bootstrap omlx-dev "
+                "reason": f"scope={scope} needs a source checkout: bootstrap omlx-dev "
                           "(omlx-uplift dev bootstrap) or pass --build-root"}
     manifest = store.load()
     _prune_once(store, manifest)
@@ -485,8 +487,8 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
     if reversal:
         patch["reversal"] = True
 
-    is_build = effective_scope == _patches.SCOPE_BUILD
-    if is_build:
+    is_dev = _patches.scope_touches_dev(effective_scope)
+    if is_dev:
         gate_root = build_root
         patterns = None            # UNPRUNED: the stored bytes are the full diff
     else:
@@ -494,18 +496,37 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
         patterns = _patches.skip_patterns(manifest)
     result = fetch_and_gate(source, gate_root,
                             overrides=_pristine_overlay(store, patch, gate_root)
-                            if not is_build else None,
+                            if not is_dev else None,
                             reverse=bool(patch.get("reversal")),
                             skip_patterns=patterns)
+    if result["ok"] and effective_scope == _patches.SCOPE_BOTH:
+        # the dev side gated clean on the FULL diff; the keg gets the
+        # PRUNED overlay of the same bytes — gate that too, so a 'both'
+        # patch never stores something the vanilla keg cannot host
+        keg_res = fetch_and_gate(source, tree_root,
+                                 overrides=_pristine_overlay(store, patch, tree_root),
+                                 reverse=bool(patch.get("reversal")),
+                                 skip_patterns=_patches.skip_patterns(manifest))
+        if not keg_res["ok"]:
+            if creating:
+                manifest["patches"].remove(patch)
+                store.save(manifest)
+            return {"ok": False, "stage": "keg-gate",
+                    "reason": ("the dev side gates clean but the pruned keg "
+                               "overlay does not — use scope=dev: "
+                               + str(keg_res.get("reason"))),
+                    "files": _ui_files(keg_res),
+                    "compile_problems": keg_res.get("compile_problems", []),
+                    "advisories": keg_res.get("advisories", [])}
     if not result["ok"]:
         if creating:
             manifest["patches"].remove(patch)
             store.save(manifest)
-        if not is_build:
-            # ADD-TIME CLASSIFICATION (DEV-1): the runtime gate failed —
+        if not is_dev:
+            # ADD-TIME CLASSIFICATION (DEV-1): the omlx gate failed —
             # when the failing/pruned sections are source-tree paths, name
-            # them so the caller (CLI/UI) can offer scope=build for the
-            # whole patch instead of a bare rejection.
+            # them so the caller (CLI/UI) can offer scope=both (DEV-6) for
+            # the whole patch instead of a bare rejection.
             fails = [f for f in result.get("files", []) if f["status"] == "fail"]
             missing = [f["path"] for f in fails
                        if (f.get("reason") or "").startswith("target file missing")]
@@ -519,7 +540,8 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                     return {"ok": False, "stage": "classification",
                             "reason": (f"{len(build_only)} section(s) exist only "
                                        f"in a source checkout — add with "
-                                       "scope=build"),
+                                       "scope=both (or scope=dev to skip "
+                                       "the keg)"),
                             "needs_build_scope": build_only,
                             "files": _ui_files(result),
                             "compile_problems": result.get("compile_problems", []),
@@ -536,10 +558,11 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                     ("kind", "repo", "pr", "url", "insecure_tls")
                     if source.get(k) is not None}
     patch["source"] = source_clean
-    if effective_scope == _patches.SCOPE_BUILD:
-        # record only the non-default scope so runtime manifests keep the
-        # exact v1 shape (no-migration pattern)
-        patch["scope"] = _patches.SCOPE_BUILD
+    if effective_scope != _patches.SCOPE_OMLX:
+        # record only the non-default scope so omlx manifests keep the
+        # exact v1 shape (no-migration pattern); legacy runtime/build
+        # normalize on read (DEV-6)
+        patch["scope"] = effective_scope
 
     data = result["diff"]
     sha = result["content_sha256"]
@@ -607,7 +630,7 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
     # image, so the backup records the forward-applied bytes instead.
     all_already = result["files"] and all(
         f["status"] == "already" for f in result["files"])
-    if all_already and not held and not is_build:
+    if all_already and not held and not is_dev:
         keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
         adopted = False
         if keg:
@@ -760,15 +783,25 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         # the UI can show what Enable would require
         gate_ver = desired or (p.get("versions", [])[-1] if p.get("versions") else {})
         inactive_reason = None
-        if scope == _patches.SCOPE_BUILD:
-            # build patches are inert on a keg by design (DEV-context 1)
-            inactive_reason = ("build scope — materialized on the omlx-dev "
+        target = _patches.detect_patch_target()
+        if not _patches.scope_touches_keg(scope) and target != "dev":
+            # dev-scope patches are inert on a vanilla keg by design
+            # (DEV-context 1): the dev-src materializer owns them
+            inactive_reason = ("dev scope — materialized on the omlx-dev "
                                "branch, never applied to the keg")
+        elif target == "dev" and scope == _patches.SCOPE_OMLX:
+            inactive_reason = ("running inside the omlx-dev keg — its source "
+                               "already carries dev patches; omlx-scope "
+                               "overlays mount on the vanilla keg only")
+        if target == "dev" and _patches.scope_touches_dev(scope):
+            active = bool(p.get("enabled")) and p.get("state") == "applied"
+        else:
+            active = (_patches.scope_touches_keg(scope)
+                      and bool(p.get("enabled")) and target != "dev")
         entry = {
             "id": p.get("id"), "enabled": p.get("enabled", False),
             "scope": scope,
-            "active": (scope == _patches.SCOPE_RUNTIME
-                       and bool(p.get("enabled"))),
+            "active": active,
             "inactive_reason": inactive_reason,
             "reversal": bool(p.get("reversal")),
             "order": p.get("order", 100), "state": p.get("state"),
@@ -975,11 +1008,11 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
     data = _read_patch_file(store, desired)
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
-    if _patches.patch_scope(p) == _patches.SCOPE_BUILD:
+    if _patches.scope_touches_dev(_patches.patch_scope(p)):
         root = dev_build_root()
         if not root:
             return {"ok": False,
-                    "reason": "dev-src checkout not found — build patch "
+                    "reason": "dev-src checkout not found — dev patch "
                               "cannot re-gate (omlx-uplift dev bootstrap)"}
         result = validate(data, root, reverse=bool(p.get("reversal")),
                           skip_patterns=None)
@@ -1006,12 +1039,12 @@ def check_all(store, tree_root: str) -> dict:
         pid = p.get("id")
         if not p.get("enabled") or src.get("kind") not in ("github_pr", "url"):
             continue
-        if _patches.patch_scope(p) == _patches.SCOPE_BUILD:
+        if _patches.scope_touches_dev(_patches.patch_scope(p)):
             root = dev_build_root()
             if not root:
                 reports[pid] = {"check": "error",
                                 "reason": "dev-src checkout not found — "
-                                          "cannot re-gate a build patch"}
+                                          "cannot re-gate a dev patch"}
                 continue
             result = fetch_and_gate(src, root,
                                     reverse=bool(p.get("reversal")),
@@ -1086,6 +1119,32 @@ def get_diff(store, patch_id: str, v: int) -> bytes | None:
     return _read_patch_file(store, ver)
 
 
+def mark_dev_applied(store, commits: list[dict]) -> None:
+    """DEV-6: the uplift-dev branch IS the apply target for dev/both
+    scopes — after a successful materialize, record each committed patch's
+    desired version as applied on the branch so dashboards show 'applied'
+    instead of a pending state that reconcile (which ignores these) will
+    never clear."""
+    manifest = store.load()
+    by_id = {c["id"]: c for c in commits if c.get("sha")}
+    changed = False
+    for p in manifest.get("patches", []):
+        c = by_id.get(p.get("id"))
+        if c is None or not _patches.scope_touches_dev(_patches.patch_scope(p)):
+            continue
+        desired = store.get_version(p, p.get("desired_version"))
+        if desired is None:
+            continue
+        desired["dev_applied"] = {"at": _patches.now_iso(), "sha": c["sha"]}
+        if p.get("enabled"):
+            p["state"] = "applied"
+            p["state_detail"] = "materialized on uplift-dev"
+            p["state_changed_at"] = _patches.now_iso()
+        changed = True
+    if changed:
+        store.save(manifest)
+
+
 def enabled_build_patches(store) -> list[dict]:
     """The materialization input for devsrc (DEV-2): every ENABLED
     build-scope patch as {id, version, diff_bytes} in manifest order
@@ -1095,7 +1154,7 @@ def enabled_build_patches(store) -> list[dict]:
     out: list[dict] = []
     for p in sorted(manifest.get("patches", []),
                     key=lambda q: (q.get("order", 100), q.get("id", ""))):
-        if _patches.patch_scope(p) != _patches.SCOPE_BUILD:
+        if not _patches.scope_touches_dev(_patches.patch_scope(p)):
             continue
         if not p.get("enabled"):
             continue
