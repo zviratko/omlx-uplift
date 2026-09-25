@@ -17,6 +17,20 @@ const API = S.API;
 let searchOn = false, reqRetainDays = 2;
 const REQ_WINDOWS = [['15m', 900], ['1h', 3600], ['6h', 21600], ['24h', 86400]];
 let reqWin = null;                       // null = retention window default
+/* U14 (user): the chip selection died with every page load. Browser layout
+   prefs live in localStorage (project rule); remember the seconds, restore
+   the chip at init. Query TEXT is deliberately not persisted (stale queries
+   read as bugs). */
+const REQWIN_KEY = 'omlx-uplift-reqwin';
+function loadReqWinPref() {
+    try {
+        const v = +localStorage.getItem(REQWIN_KEY);
+        return Number.isFinite(v) && v > 0 ? v : null;
+    } catch (_) { return null; }   // denied storage
+}
+function saveReqWinPref(secs) {
+    try { localStorage.setItem(REQWIN_KEY, String(secs)); } catch (_) {}
+}
 
 /* Buttons live in static index.html — bind handlers as soon as they exist
    (deferred scripts run before DOMContentLoaded fires in practice, but the
@@ -54,6 +68,7 @@ async function initReqSearch() {
         b.dataset.secs = secs;
         b.onclick = () => {
             reqWin = secs;
+            saveReqWinPref(secs);        // U14: survives refresh
             [...chips.children].forEach(x => x.classList.toggle('on', x === b));
             runReqSearch();
         };
@@ -61,7 +76,12 @@ async function initReqSearch() {
     };
     for (const [label, secs] of REQ_WINDOWS) if (secs <= reqRetainDays * 86400) mk(label, secs);
     mk(`${reqRetainDays}d`, reqRetainDays * 86400);
-    chips.lastChild.classList.add('on'); reqWin = reqRetainDays * 86400;
+    // U14: honour the remembered window when it is still offered (a
+    // retention change can shrink the choices away under the old pref).
+    const want = loadReqWinPref();
+    const onChip = (want && [...chips.children].find(x => +x.dataset.secs === want))
+                 || chips.lastChild;
+    onChip.classList.add('on'); reqWin = +onChip.dataset.secs;
     $('req-search-btn').onclick = runReqSearch;
     $('req-live-btn').onclick = backToLiveFeed;
     $('req-q').onkeydown = e => { if (e.key === 'Enter') runReqSearch(); };
@@ -86,6 +106,11 @@ async function runReqSearch() {
         return;
     }
     const list = $('reqfeed');
+    // U14: renderReqFeed pins an inline max-height for live fit; search
+    // results reuse the same element, and the stale pin CLIPPED every hit
+    // after the first (user: "shows one request" under "42 match(es)").
+    // Back-to-LIVE re-pins through renderReqFeed's own fit.
+    list.style.maxHeight = '';
     list.innerHTML = '';
     const lb0 = $('req-live-btn'); if (lb0) lb0.style.display = '';
     const hits = d.results || [];
