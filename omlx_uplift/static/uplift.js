@@ -1265,6 +1265,26 @@ function ifTerminal(rid) {
 }
 
 const IF_LINGER_MS = 8000;   // ISSUE-4: how long a landed row stays readable
+/* U16 (user): "is specprefill indicated in the in-flight? I don't see it —
+   it was there before." The redesign dropped any speculative marker and the
+   stats snapshot never carried one per request (upstream gap). The engine's
+   actual settings ARE available — poll /uplift/api/speculative once a
+   minute and badge the model header in the card. */
+const ifSpecBy = new Map();      // model id -> 'specprefill'|'dflash'|'vlm_mtp'|'mtp'
+let ifSpecAt = 0, ifSpecFetching = false;
+function ifSpecPoll() {
+    const now = Date.now();
+    if (ifSpecFetching || now - ifSpecAt < 60_000) return;
+    ifSpecFetching = true; ifSpecAt = now;
+    fetchJson(`${API}/uplift/api/speculative`)
+        .then(d => {
+            ifSpecBy.clear();
+            for (const [mid, kind] of Object.entries((d && d.models) || {}))
+                if (kind) ifSpecBy.set(mid, kind);
+        })
+        .catch(() => { ifSpecAt = 0; })          // retry on next poll
+        .finally(() => { ifSpecFetching = false; });
+}
 function ifLand(sl, tstate, now) {
     // One path for every terminal transition: latch the badge, stamp the
     // landing time (eviction is timed from here), keep nothing else sticky.
@@ -1284,6 +1304,12 @@ function ifGroup(model) {
     // split exists per model (upstream gap, see U12 ticket finding).
     const mm = document.createElement('span'); mm.className = 'if-mem-meta';
     h.append(mm);
+    // U16: speculative-decoding badge on the model header (SPECPREFILL /
+    // DFLASH / VLM MTP / MTP) — driven by ifSpecPoll(), hidden when the
+    // model runs plain decode.
+    const spec = document.createElement('span');
+    spec.className = 'spill miss if-spec'; spec.style.display = 'none';
+    h.append(spec);
     // QUEUED requests are ordinary slot rows now (see renderLive): one line
     // per request with #position · in · wait, exactly like the classic
     // active-models card. The old "QUEUED ×N (+)" summary collapsed them
@@ -1293,7 +1319,7 @@ function ifGroup(model) {
     const list = $('live-list');
     const ph = list.querySelector('.empty'); if (ph) ph.remove();
     list.append(el);
-    g = { model, el, wrap, mm };
+    g = { model, el, wrap, mm, spec };
     S.ifModels.push(g);
     return g;
 }
@@ -1407,6 +1433,7 @@ function ifPaint(sl) {
 
 function renderLive(s) {
     const now = Date.now();
+    ifSpecPoll();          // U16: once a minute; renders with whatever landed
     const seen = new Set();
     const waitingBy = new Map();
     const cacheBy = new Map((s.cacheModels || []).map(cm => [cm.id, cm]));
@@ -1420,6 +1447,14 @@ function renderLive(s) {
         if (cm && cm.totalBytes) parts.push(C.t('uplift.inflight.mem_cache', { size: C.fmtBytes(cm.totalBytes) }));
         if (cm && cm.hotBytes) parts.push(C.t('uplift.inflight.mem_hot', { size: C.fmtBytes(cm.hotBytes) }));
         g.mm.textContent = parts.join(' · ');
+        // U16: speculative badge — label straight from the kind (never
+        // translated: SPECPREFILL/DFLASH/MTP are engine setting names).
+        const kind = ifSpecBy.get(m.id);
+        if (kind && g.spec) {
+            g.spec.textContent = kind.toUpperCase().replace('_', ' ');
+            g.spec.title = C.t('uplift.inflight.spec_hint', { kind });
+            g.spec.style.display = '';
+        } else if (g.spec) g.spec.style.display = 'none';
         waitingBy.set(m.id, m.waiting || []);
         for (const p of m.prefilling) {
             seen.add(p.rid);
@@ -1496,7 +1531,16 @@ function renderLive(s) {
     // without any expand (one line per request, classic-style). Queued
     // requests ride the same slot machinery as prefilling/generating.
     for (const [model, wait] of waitingBy) {
-        for (const w of wait.slice(0, 30)) {
+        // U15 (user: "queued requests jump order with each refresh"): the
+        // scheduler snapshot exposes the waiting list in arbitrary order,
+        // and slot birth order IS display order (seq). Create slots in the
+        // server's queue-position order so a refresh reproduces FIFO order
+        // instead of re-drawing whatever order the snapshot happened to
+        // iterate. Rows already born keep their seq (place never moves in
+        // a live session — ISSUE-5 unchanged).
+        const ordered = wait.slice(0, 30).sort((a, b) =>
+            (a.pos ?? Infinity) - (b.pos ?? Infinity));
+        for (const w of ordered) {
             seen.add(w.rid);
             ifSawLive.add(w.rid);
             const sl = ifSlot(model, w.rid);
@@ -1548,10 +1592,37 @@ function renderLive(s) {
 
 /* Request sizes: prefer server-side full-population stats (gateway overlay);
    fall back to client-side session tracker when absent. */
+/* U17 (user: percentile/completion/prompt tok and queue→first tok all read
+   '—' while the model served): the client tracker only sees requests that
+   COMPLETE inside a page-open session and resets on refresh. Pull full
+   population stats from /uplift/api/requests/stats over the card's window,
+   refetch on window change or every 15 s (percentile switches render from
+   the cached response — it already carries p50..p99). */
+let reqStatsCache = null, reqStatsAt = 0, reqStatsWin = '', reqStatsFetching = false;
+function reqStatsParam() {
+    // Same resolution as charts' cardWindow(): per-card override else global.
+    const sec = layout.metricWin['reqstats'] ?? layout.chartWindowSec;
+    const m = Math.max(1, Math.round(sec / 60));
+    return m % 60 === 0 ? `${m / 60}h` : `${m}m`;
+}
+function reqStatsPoll() {
+    const w = reqStatsParam();
+    const now = Date.now();
+    if (reqStatsFetching || (w === reqStatsWin && now - reqStatsAt < 15_000)) return;
+    reqStatsFetching = true;
+    fetchJson(`${API}/uplift/api/requests/stats?window=${w}`)
+        .then(d => {
+            if (d && d.prompt_tokens) { reqStatsCache = d; reqStatsWin = w; }
+        })
+        .catch(() => { reqStatsCache = null; })   // honest: no overlay, tracker fallback
+        .finally(() => { reqStatsFetching = false; reqStatsAt = Date.now(); });
+}
 function renderRequestStats(s) {
     fillSelectOnce();
+    reqStatsPoll();
     const p = PERCENTILES[layout.percentile];
-    const server = s && s.requestStats ? s.requestStats : null;
+    const server = (reqStatsCache && reqStatsWin === reqStatsParam())
+        ? reqStatsCache : (s && s.requestStats ? s.requestStats : null);
     const pick = (blk, key) => blk && blk[key] !== undefined && blk[key] !== null ? blk[key] : null;
     const pKey = layout.percentile;
     // Labels must follow the selector in BOTH paths (F-021: server-stats path
@@ -1600,7 +1671,16 @@ function fillSelectOnce() {
 /* ---------------- polling ---------------- */
 async function fetchJson(url, opts) {
     const res = await fetch(url, Object.assign({ cache: 'no-store' }, opts || {}));
-    if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+    if (!res.ok) {
+        // UP-4: the server's reason (FastAPI `detail`, incl. 422 arrays) was
+        // thrown away — every failure read as a bare "-> 422". errorText()
+        // (core.js, F-019) already flattens those bodies; use it here so all
+        // catch sites (patch preview, toasts, downloader/uploader) inherit it.
+        let reason = '';
+        try { reason = C.errorText(await res.clone().json()); }
+        catch (_) { try { reason = (await res.text()).slice(0, 200); } catch (__) {} }
+        throw new Error(reason ? `${url} -> ${res.status}: ${reason}` : `${url} -> ${res.status}`);
+    }
     return res.json();
 }
 async function putModelSettings(model, settings) {
