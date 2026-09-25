@@ -724,6 +724,14 @@ def _rows_from_snapshot(snap: dict[str, Any], model_id: str, now: float):
             "tps": round(tps, 1),
             "ts": now,
         }
+        # U17: queue->first-token ms, from the scheduler's own monotonic
+        # stamps (arrival_time -> generation_started_at). Both live on the
+        # same clock, so no wall-clock alignment is needed; clamped to
+        # >= 0 against clock jitter. Once set the store COALESCE pins it.
+        if gen_start:
+            arr = getattr(req, "arrival_time", None)
+            if arr:
+                row["first_token_ms"] = max(0.0, (gen_start - arr) * 1000.0)
         row.update(_capture_payload(req))   # RL-1 best-effort, never fatal
         if state == "generating":
             # RL-4: private token tail for the loop detector; the scheduler's

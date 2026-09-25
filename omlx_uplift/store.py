@@ -51,6 +51,9 @@ _NEW_COLUMNS = {
     # ISSUE-3: token-id prompt sample (JSON array of ids, head+tail) so the
     # inspector can decode what was actually sent for tokenized prompts.
     "prompt_ids": "TEXT", "prompt_ids_trunc": "INTEGER",
+    # U17: queue->first-token latency (ms), derived once per request from
+    # the scheduler's monotonic arrival_time / generation_started_at.
+    "first_token_ms": "REAL",
 }
 
 
@@ -410,15 +413,16 @@ class MetricsStore:
             "finish": row.get("finish"),
             "prompt_ids": row.get("prompt_ids"),
             "prompt_ids_trunc": 1 if row.get("prompt_ids_trunc") else None,
+            "first_token_ms": row.get("first_token_ms"),
         }
         sql = """INSERT INTO requests(id, model, state, prompt_tokens,
                    completion_tokens, tps, error, ts_start, ts_end,
                    prompt, prompt_trunc, output, output_trunc, params, finish,
-                   prompt_ids, prompt_ids_trunc)
+                   prompt_ids, prompt_ids_trunc, first_token_ms)
                VALUES(:id, :model, :state, :prompt_tokens,
                    :completion_tokens, :tps, :error, :ts_start, :ts_end,
                    :prompt, :prompt_trunc, :output, :output_trunc, :params, :finish,
-                   :prompt_ids, :prompt_ids_trunc)
+                   :prompt_ids, :prompt_ids_trunc, :first_token_ms)
                ON CONFLICT(id) DO UPDATE SET
                  state=excluded.state,
                  prompt_tokens=COALESCE(excluded.prompt_tokens, prompt_tokens),
@@ -433,6 +437,7 @@ class MetricsStore:
                  finish=COALESCE(excluded.finish, finish),
                  prompt_ids=COALESCE(NULLIF(excluded.prompt_ids, ''), prompt_ids),
                  prompt_ids_trunc=COALESCE(excluded.prompt_ids_trunc, prompt_ids_trunc),
+                 first_token_ms=COALESCE(excluded.first_token_ms, first_token_ms),
                  ts_end=excluded.ts_end"""
         if in_tx:
             self._conn.execute(sql, params)
