@@ -150,6 +150,11 @@ function memWindowed() {
 function seriesValue(v) {
     return v === null || v === undefined ? '—' : C.fmtCompact(v);
 }
+/* U8: throughput/counter axes start at 0. Auto-scaling to the data window
+   exaggerated tiny wiggles; a zero floor is honest for rate/count units.
+   Upper bound stays auto (null). NOT applied to memory % (already 0-100)
+   or cache GB (auto remains useful — values legitimately sit far from 0). */
+const ZERO_FLOOR_RANGE = (u, dmin, dmax) => [0, null];
 function line(label, colorVar, fill, scale) {
     const col = chartColors()[colorVar];
     return { label, scale: scale || 'y', stroke: col, width: 2,
@@ -331,7 +336,8 @@ function createCharts() {
     // Dual Y: left = generation tok/s, right = prefill tok/s (prefill >> gen).
     const tpsOpts = baseOpts(
         [line('generation', 'blue', true, 'y'), line('prefill', 'gold', false, 'y2')],
-        { scales: { y2: { auto: true } },
+        { scales: { y: { auto: true, range: ZERO_FLOOR_RANGE },
+                    y2: { auto: true, range: ZERO_FLOOR_RANGE } },
           yAxes: [Object.assign(yAxis(col, { grid: false, label: 'gen tok/s', stroke: col.blue }), { scale: 'y' }),
                   Object.assign(yAxis(col, { side: 1, grid: false, label: 'prefill tok/s', stroke: col.gold, size: 36 }), { scale: 'y2' })] },
         legendUpdater());
@@ -596,6 +602,17 @@ function metricFormat(def) {
     if (def.key === 'engines.active_requests') return v => (v == null ? '—' : String(Math.round(v)));
     return seriesValue;
 }
+/* U8: which metric-card keys get a zero floor on the y-axis — rates
+   (tok/s, req/s), tok/s averages and request counts. Percent and bytes
+   cards keep auto-scaling (0 is far from the interesting band there). */
+function metricZeroFloor(key) {
+    return key.startsWith('rate.') || /tps$/.test(key) || key === 'engines.active_requests';
+}
+function metricYScales(id, def) {
+    return { x: { time: true, range: pinnedXRange(id) },
+             y: Object.assign({ auto: true },
+                 metricZeroFloor(def.key) ? { range: ZERO_FLOOR_RANGE } : null) };
+}
 function metricLabel(key) {
     return key.replace(/^(rate|tot|engines|mem|cache)\./, '').replace(/_/g, ' ')
         .replace(/tps$/, 'tok/s');
@@ -655,7 +672,7 @@ function createMetricCard(def) {
         width: 300, height: 100, padding: [2, 0, 0, 0],
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
-        scales: { x: { time: true, range: pinnedXRange(id) }, y: { auto: true } },
+        scales: metricYScales(id, def),
         axes: [metricXAxis(cardWindow(id), col), metricYAxis(col, def)],
         series: [{}, { label: metricLabel(def.key), stroke: col.blue, width: 1.6,
                        fill: col.blue + '1c', points: { show: false },
@@ -684,7 +701,7 @@ function reinitMetricPlot(id) {
         width: 300, height: 100, padding: [2, 0, 0, 0],
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
-        scales: { x: { time: true, range: pinnedXRange(id) }, y: { auto: true } },
+        scales: metricYScales(id, e.def),
         axes: [metricXAxis(cardWindow(id), col), metricYAxis(col, e.def)],
         series: [{}, { label: metricLabel(e.def.key), stroke: col.blue, width: 1.6,
                        fill: col.blue + '1c', points: { show: false },
@@ -834,7 +851,7 @@ function createUsageChart() {
     const col = chartColors();
     usageChart = new uPlot({
         width: el.clientWidth || 600, height: 200,
-        scales: { x: { time: true }, y: { auto: true } },
+        scales: { x: { time: true }, y: { auto: true, range: ZERO_FLOOR_RANGE } },  // U8
         axes: [{ stroke: col.dim, size: 36, font: axisFont,
                  values: (s, t) => t.map(ts => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })) },
                yAxis(col, { grid: true })],
