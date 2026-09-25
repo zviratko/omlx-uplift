@@ -23,7 +23,7 @@
 (function () {
 try {
     var p = JSON.parse(localStorage.getItem('omlx-uplift-prefs-v1')) || {};
-    var SKIN_RE = /^[a-z0-9][a-z0-9-]*(-\d{10})?$/;
+    var SKIN_RE = /^(?:\.bundled-)?[a-z0-9][a-z0-9-]*(-\d{10})?$/;
     var root = document.documentElement;
     var t = p.theme;
     if (t === 'auto') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';

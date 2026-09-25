@@ -1,9 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Uplift skin system (design v1, 2026-09-22).
+"""Uplift skin system (design v1, 2026-09-22; search-path rework 2026-09-25).
 
-Skins are CSS-only themes a user drops into ``<base>/uplift/skins/`` where
-<base> resolves like the metrics store (server base_path -> OMLX_BASE_PATH
--> ~/.omlx). Two encodings of one format (design section 2):
+Skins are CSS-only themes found in ONE scan root per runtime:
+``<base>/uplift/skins/`` where <base> resolves like the metrics store
+(server base_path -> OMLX_BASE_PATH -> ~/.omlx — so the omlx-dev service,
+which runs with OMLX_BASE_PATH=~/.omlx-dev, scans ~/.omlx-dev/uplift/skins).
+The root holds two kinds of working copies:
+
+* ``.bundled-<name>-<stamp>/`` — unpacked by ``sync_bundled`` at SERVER
+  STARTUP from the crates shipped inside the uplift package (keg). The
+  crates never land in a user dir; only these marked working copies do.
+  Dirs carrying our ``.bundled`` marker whose stamp the current update
+  superseded are pruned by the next sync — user content is never deleted.
+* ``<name>-<mtime>/`` (+ optional ``<name>.yml`` crate) — the user dir:
+  crates dropped by hand and their working copies. A user dir or crate
+  shadows the bundled skin of the same base name, so a customization
+  survives every update.
+
+Two encodings of one format (design section 2):
 
 * crate: ``<name>.yml`` — single-file distribution (tokens + inline b64
   resources + overlay CSS block scalar).
@@ -40,7 +54,9 @@ SUPPORTED_SKIN_VERSION = 1
 
 # --- name / path whitelists (design sections 2.1, 6) -----------------------
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")                 # crate <name>
-DIR_RE = re.compile(r"^[a-z0-9][a-z0-9-]*(-\d{10})?$")        # working copy
+# working copy; the optional '.bundled-' prefix marks engine-unpacked
+# copies of the skins shipped in the uplift package (see sync_bundled)
+DIR_RE = re.compile(r"^(?:\.bundled-)?[a-z0-9][a-z0-9-]*(-\d{10})?$")
 _RES_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # served relpaths: declared resources live under icons/ or fonts/ only
 RES_RE = re.compile(r"^(?:icons|fonts)/[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -94,10 +110,254 @@ def _valid_token(name: str, value: str) -> bool:
 
 
 def skins_root(base: Path | None = None) -> Path:
-    """<base>/uplift/skins — same base resolution as the metrics store."""
+    """<base>/uplift/skins — user dir; same base resolution as the metrics
+    store (server base_path -> OMLX_BASE_PATH -> ~/.omlx, so the omlx-dev
+    service with OMLX_BASE_PATH=~/.omlx-dev scans ~/.omlx-dev/uplift/skins)."""
     if base is None:
         base = Path(_resolve_base_path())
     return Path(base) / "uplift" / "skins"
+
+
+
+# ---------------------------------------------------------------------------
+# Bundled skins: unpacked from the uplift package (in-keg crates) into the
+# base-dir user skins root at SERVER STARTUP (autopatch), never on a
+# browser hit. No crate .yml is ever copied into a user dir any more.
+# ---------------------------------------------------------------------------
+
+#: Prefix marking engine-owned working copies of the skins shipped in the
+#: uplift package. They live IN the user scan root (no separate dir), are
+#: listed like any other skin, and are the ONLY dirs sync_bundled may
+#: delete — and even then only when they also carry the ".bundled" marker
+#: file inside and their stamp was superseded by the current package.
+BUNDLED_PREFIX = ".bundled-"
+
+_package_crates_cache: dict[str, tuple[tuple, dict]] = {}
+
+
+def bundled_package_dir() -> Path:
+    """skins-example/ shipped inside the uplift package (the keg). Crates
+    stay HERE — the user dir only ever receives unpacked working copies."""
+    return Path(__file__).resolve().parent / "skins-example"
+
+
+def bundled_stamp(blob: bytes) -> str:
+    """Stable 10-digit version stamp for crate content (DIR_RE-shaped at
+    dir level). Content-addressed: the same crate unpacks to the same dir
+    name everywhere and across reinstalls (idempotent); ANY edit changes
+    the stamp, and the superseded dir is pruned by the next sync."""
+    h = hashlib.sha256(blob).hexdigest()
+    return str(1_000_000_000 + int(h[:8], 16) % 9_000_000_000)
+
+
+def package_crates() -> dict[str, bytes]:
+    """{name: crate bytes} for every VALID crate shipped in the package.
+    Cached on (dir, per-file mtimes). An unreadable or invalid crate is
+    skipped with a warning — one broken bundled skin never breaks the
+    whole scan, and never breaks startup."""
+    src = bundled_package_dir()
+    try:
+        sig = (str(src), tuple(sorted(
+            (p.name, p.stat().st_mtime_ns) for p in src.glob("*.yml"))))
+    except OSError:
+        return {}
+    hit = _package_crates_cache.get("crates")
+    if hit and hit[0] == sig:
+        return hit[1]
+    crates: dict[str, bytes] = {}
+    if src.is_dir():
+        for p in sorted(src.glob("*.yml")):
+            if not NAME_RE.match(p.stem):
+                continue
+            try:
+                raw = p.read_bytes()
+            except OSError as exc:
+                log.warning("bundled skin %s: cannot read: %s", p.stem, exc)
+                continue
+            crate, reason = parse_crate(raw)
+            if crate is None:
+                log.warning("bundled skin %s: skipped: %s", p.stem, reason)
+                continue
+            crates[p.stem] = raw
+    _package_crates_cache["crates"] = (sig, crates)
+    return crates
+
+
+def _dir_base(dir_name: str) -> str:
+    """Base name of a working-copy dir name (strips the -<stamp> suffix)."""
+    return re.sub(r"-\d{10}$", "", dir_name)
+
+
+def sync_bundled(root: Path | None = None) -> dict:
+    """Unpack bundled crates into ``<root>/.bundled-<name>-<stamp>/`` and
+    prune the bundled dirs this update superseded. Call ONCE at server
+    startup — the scan serves; it must not write.
+
+    Safety rules:
+    * Never overwrite: an existing current-stamp dir is left alone.
+    * Prune only what the engine owns: a dir whose name matches
+      ``.bundled-<name>`` for a SHIPPED skin, or that still carries our
+      ``.bundled`` marker. User dirs can never match either test.
+    * A skin dropped from the package is pruned once its marker is there
+      (its working copy was engine-owned); a dir without the marker is
+      never deleted, even on a name clash with hand-made content.
+    Returns {"installed": [...], "pruned": [...]} for logging and tests."""
+    root = skins_root() if root is None else Path(root)
+    crates = package_crates()
+    installed: list[str] = []
+    pruned: list[str] = []
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        log.warning("bundled skins: cannot create %s: %s", root, exc)
+        return {"installed": installed, "pruned": pruned}
+
+    want: dict[str, str] = {}  # skin name -> dir name to keep (current ver)
+    for name, raw in crates.items():
+        stamp = bundled_stamp(raw)
+        dir_name = f"{BUNDLED_PREFIX}{name}-{stamp}"
+        if (root / dir_name).is_dir():
+            want[name] = dir_name
+            continue  # already unpacked at this version (idempotent)
+        # extract_crate enforces NAME_RE on the crate name, which the
+        # '.bundled-' prefix breaks — unpack by hand into the prefixed dir.
+        extracted, warns, err = _extract_into(root, dir_name, raw)
+        if err:
+            # no want entry -> the older bundled dir (if any) survives as fallback
+            log.warning("bundled skin %s: unpack failed: %s", name, err)
+            continue
+        for w in warns:
+            log.warning("bundled skin %s: %s", dir_name, w)
+        want[name] = dir_name
+        try:
+            (root / dir_name / ".bundled").write_text(
+                f"uplift bundled skin {name} stamp {stamp}\n",
+                encoding="utf-8")
+        except OSError:
+            pass
+        installed.append(dir_name)
+
+    # Prune superseded bundled dirs. Marker-gated so user content is
+    # untouchable. A stale marker copy is deleted only when (a) the newer
+    # version of the same skin actually unpacked (otherwise keep it as a
+    # fallback for a failed unpack), or (b) the skin left the package
+    # altogether. A no-marker dir with a clashing name is never deleted.
+    # If the package crate dir is unreadable this boot, prune nothing —
+    # "cannot see the crates" must not read as "all skins were removed".
+    import shutil
+    package_visible = bundled_package_dir().is_dir()
+    try:
+        existing = [p for p in root.iterdir() if p.is_dir()]
+    except OSError:
+        existing = []
+    for p in existing:
+        if not package_visible:
+            break  # crates invisible this boot: prune nothing
+        if not p.name.startswith(BUNDLED_PREFIX):
+            continue
+        name = _dir_base(p.name[len(BUNDLED_PREFIX):])
+        if want.get(name) == p.name:
+            continue  # current version of a still-shipped skin
+        if not (p / ".bundled").is_file():
+            continue  # not ours: never delete user content
+        if name in want and not (root / want[name]).is_dir():
+            continue  # new version failed to unpack: keep the fallback
+        if name not in want and name in crates:
+            continue  # crate ships but unpack failed this boot: keep fallback
+        try:
+            shutil.rmtree(p)
+            pruned.append(p.name)
+        except OSError as exc:
+            log.warning("bundled skin %s: prune failed: %s", p.name, exc)
+    # Legacy cleanup (rework 2026-09-25): `omlx-uplift install` used to
+    # COPY bundled crates into this very dir. A copy byte-identical to the
+    # shipped crate — and whose extracted working copy is likewise
+    # unmodified — is pure duplication: drop the .yml and its working
+    # dirs. Anything hand-edited (the .yml or any working copy's skin.yml)
+    # is kept: it now SHADOWS the bundled skin, user wins over updates.
+    for name, raw in crates.items():
+        legacy = root / f"{name}.yml"
+        try:
+            if not (legacy.is_file() and legacy.read_bytes() == raw):
+                continue
+            stale_dirs = [d for d in existing
+                          if not d.name.startswith(BUNDLED_PREFIX)
+                          and _dir_base(d.name) == name]
+            if any(not (d / "skin.yml").is_file()
+                   or (d / "skin.yml").read_bytes() != raw
+                   for d in stale_dirs):
+                continue  # a working copy was hand-edited: keep the group
+            legacy.unlink()
+            pruned.append(legacy.name)
+            for d in stale_dirs:
+                shutil.rmtree(d)
+                pruned.append(d.name)
+        except OSError as exc:
+            log.warning("bundled skin %s: legacy yml cleanup failed: %s",
+                        name, exc)
+
+    for w in installed:
+        log.info("bundled skin: unpacked %s", w)
+    for w in pruned:
+        log.info("bundled skin: pruned superseded %s", w)
+    return {"installed": installed, "pruned": pruned}
+
+
+def _extract_into(root: Path, dir_name: str, yml_bytes: bytes):
+    """Crate bytes -> ``<root>/<dir_name>/`` working copy, never overwrite.
+    Same layout/validation as extract_crate without the name regex gate
+    (sync_bundled supplies the prefixed dir name)."""
+    target = root / dir_name
+    if target.is_dir():
+        return dir_name, [], None
+    crate, reason = parse_crate(yml_bytes)
+    if crate is None:
+        return None, [], reason
+    warnings: list[str] = []
+    try:
+        target.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        return dir_name, [], None
+    total = len(yml_bytes)
+
+    def _write(rel: str, blob: bytes, meta_file: bool = False):
+        nonlocal total
+        p = _safe_child(target, rel)
+        if p is None:
+            warnings.append(f"skipped {rel}: path escaped skin dir")
+            return
+        if (not meta_file and len(blob) > MAX_RESOURCE_BYTES) \
+                or total + len(blob) > MAX_EXTRACTED_BYTES:
+            warnings.append(f"skipped {rel}: size cap exceeded")
+            return
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "wb") as fh:
+                fh.write(blob)
+            total += len(blob)
+        except OSError as exc:
+            warnings.append(f"skipped {rel}: {exc}")
+
+    _write("skin.yml", yml_bytes, meta_file=True)
+    if crate["css"]:
+        blob, err = _decode_resource(crate["css"], total)
+        if blob is None:
+            warnings.append(f"skipped overlay.css: {err}")
+        else:
+            _write("overlay.css", blob)
+    for subdir, mapping in (("icons", crate["icons"]),
+                            ("fonts", crate["fonts"])):
+        for res_name in sorted(mapping):
+            rel = _res_target(subdir, res_name)
+            if rel is None:
+                warnings.append(f"skipped {subdir}/{res_name}: name not whitelisted")
+                continue
+            blob, err = _decode_resource(mapping[res_name], total)
+            if blob is None:
+                warnings.append(f"skipped {rel}: {err}")
+                continue
+            _write(rel, blob)
+    return dir_name, warnings, None
 
 
 def _resolve_base_path() -> str:
@@ -442,7 +702,10 @@ def list_skins(root: Path | None = None) -> list[dict]:
                 except OSError:
                     pass
 
-    # 2. working copies grouped by base name, newest first
+    # 2. working copies grouped by base name, newest first. Dirs with the
+    # '.bundled-' prefix are engine-unpacked copies of the package skins
+    # (sync_bundled at startup); a user dir or crate of the same base name
+    # SHADOWS them — a hand customization survives every update.
     groups: dict[str, list[dict]] = {}
     try:
         dirs = sorted(root.iterdir())
@@ -453,7 +716,8 @@ def list_skins(root: Path | None = None) -> list[dict]:
             continue  # only real dirs are working copies
         if not DIR_RE.match(d.name):
             continue
-        base = re.sub(r"-\d{10}$", "", d.name)
+        bundled = d.name.startswith(BUNDLED_PREFIX)
+        base = _dir_base(d.name[len(BUNDLED_PREFIX):] if bundled else d.name)
         meta = _load_dir_meta(d / "skin.yml")
         label = meta.get("label") or base
         warns = warnings_seen.get(d.name)
@@ -468,12 +732,19 @@ def list_skins(root: Path | None = None) -> list[dict]:
             "ts": _dir_ts(d, d.name),
             "stale": False,
             "yml_newer": False,
+            "bundled": bundled,
             "classic": classic_mapping(meta),
             "warnings": warns,
         })
 
     entries: list[dict] = []
     for base, rows in groups.items():
+        user_exists = any(not r["bundled"] for r in rows)
+        crate_shadows = base in crate_mtime  # a user .yml of the same name
+        if user_exists or crate_shadows:
+            rows = [r for r in rows if not r["bundled"]]
+        if not rows:
+            continue
         rows.sort(key=lambda r: (-r["ts"], r["dir"]))
         for i, r in enumerate(rows):
             r["name"] = base if i == 0 else f"{base}-{r['ts']}"
@@ -481,7 +752,8 @@ def list_skins(root: Path | None = None) -> list[dict]:
             mt = crate_mtime.get(base)
             # flag the yml/dir mismatch on the base-name entry only (the one
             # that follows the yml): older pinned versions are stale anyway
-            if i == 0 and mt is not None and mt > r["ts"]:
+            if i == 0 and mt is not None and mt > r["ts"] \
+                    and not r["bundled"]:
                 r["yml_newer"] = True
             entries.append(r)
     # 3. crates that never became a working copy still show, with a reason

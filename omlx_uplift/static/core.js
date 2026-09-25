@@ -316,7 +316,9 @@ const PREFS_DEFAULTS = { theme: 'auto', motion: 'auto', intervalMs: 1000, dense:
 const THEMES = ['auto', 'light', 'dark', 'enhanced', 'cockpit'];
 // Skin system: prefs.theme may also store a user-skin selection — base name
 // ('night', follows newest version) or pinned 'night-<10-digit mtime>'.
-const SKIN_NAME_RE = /^[a-z0-9][a-z0-9-]*(-\d{10})?$/;
+// The optional '.bundled-' prefix marks engine-unpacked skins shipped in
+// the uplift package (a pinned selection may name one of those dirs).
+const SKIN_NAME_RE = /^(?:\.bundled-)?[a-z0-9][a-z0-9-]*(-\d{10})?$/;
 function loadPrefs(storage) {
     let p = {};
     try { p = JSON.parse(storage.getItem(PREFS_KEY)) || {}; } catch (_) { /* storage may be denied */ }

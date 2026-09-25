@@ -49,6 +49,8 @@ def register(app) -> None:
 
 
 def _wrap_lifespan(app) -> None:
+    import asyncio
+    import logging
     from contextlib import asynccontextmanager
 
     from .collector import get_collector
@@ -58,6 +60,18 @@ def _wrap_lifespan(app) -> None:
 
     @asynccontextmanager
     async def lifespan_with_uplift(app_obj):
+        # Bundled skins are unpacked ONCE here (server startup), never on
+        # a browser hit: the crates stay in the keg, only working copies
+        # land in ~/.omlx{,-dev}/uplift/skins/. Stale engine copies are
+        # pruned in the same pass. Best-effort: a failure logs, the
+        # dashboard still boots with user skins + built-in themes.
+        try:
+            from . import skins
+
+            await asyncio.to_thread(skins.sync_bundled)
+        except Exception:
+            logging.getLogger("omlx_uplift").exception(
+                "bundled skin sync failed (skins listing may be stale)")
         await collector.start()
         try:
             async with original(app_obj):

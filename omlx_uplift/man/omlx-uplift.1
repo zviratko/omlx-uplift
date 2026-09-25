@@ -68,17 +68,16 @@ Prints a colour per-patch preview first
 .Dq OMLX-UPLIFT PATCHES TO APPLY: Aq ids
 then SUCCESS / APPLIED / WARNING / FAILURE per patch (dry-run only, no
 writes).
-Also copies the bundled skins into
-.Pa ~/.omlx/uplift/skins/ :
-an existing differing file is replaced only after confirmation and the
-previous version is always kept as
-.Aq name .yml.Aq timestamp Ns ~
-first
-(
+Bundled skins are no longer copied by this command: the crates ship in
+the keg and the server unpacks working copies into
+.Pa ~/.omlx/uplift/skins/
+(respectively
+.Pa ~/.omlx-dev/uplift/skins/ )
+at every start, pruning the engine copies its update superseded.
 .Fl -yes
-answers yes,
+and
 .Fl -keep-skins
-skips skins; non-interactive runs never overwrite).
+are accepted no-ops.
 Ends with a MOUNT CHECK: imports omlx.server in a probe subprocess and
 verifies the Uplift mount flag — exit 1 plus the failing import
 lines when

@@ -267,56 +267,24 @@ def print_patch_preview(store, stream=None) -> None:
 
 
 def _example_skins_dir() -> Path:
+    """Deprecated alias kept for 3rd-party callers/tests; the package crate
+    dir is the single source of bundled skins (see skins.bundled_package_dir)."""
     return Path(__file__).resolve().parent / "skins-example"
 
 
+# Bundled skins are NO LONGER copied into ~/.omlx/uplift/skins by install.
+# The crates stay in the keg; the server unpacks working copies into
+# ~/.omlx{,-dev}/uplift/skins/ at startup (skins.sync_bundled) and prunes
+# the ones its update superseded. install_example_skins below is a no-op
+# shim so an old call site (or script) does not break.
+
+
 def install_example_skins(stream=None, force: str = "ask") -> None:
-    """Copy the bundled skin crates into the live skins dir.
-
-    force: 'ask' (prompt on a differing existing file), 'yes' (replace),
-    'keep' (never touch). A replaced file is NEVER deleted: the previous
-    version is saved next to it as <name>.yml.<YYYYmmdd-HHMMSS>~ and the
-    backup path is disclosed to the user. Byte-identical files are left
-    alone; non-interactive streams never block (keep + tell)."""
+    """Deprecated no-op (2026-09-25 skins rework)."""
     out = stream or sys.stdout
-    import filecmp
-    import shutil
-    from datetime import datetime
-    from . import skins as _skins
-
-    src = _example_skins_dir()
-    if not src.is_dir():                      # exotic installs without data
-        return
-    dest = _skins.skins_root()
-    for yml in sorted(src.glob("*.yml")):
-        target = dest / yml.name
-        try:
-            if not dest.is_dir():
-                dest.mkdir(parents=True, exist_ok=True)
-            if target.exists() and filecmp.cmp(target, yml, shallow=False):
-                print(f"bundled skin: {target} already current", file=out)
-                continue
-            if target.exists():
-                if force == "ask":
-                    if not sys.stdin.isatty():
-                        print(f"bundled skin: {target} exists and differs — "
-                              "kept (re-run with --yes to replace)", file=out)
-                        continue
-                    ans = input(f"{target} exists and differs from the "
-                                f"bundled skin — replace? [y/N] ").strip()
-                    if ans.lower() not in ("y", "yes"):
-                        print(f"bundled skin: kept {target}", file=out)
-                        continue
-                stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                backup = target.with_name(f"{target.name}.{stamp}~")
-                shutil.copy2(target, backup)
-                print(f"bundled skin: replaced {target}\n"
-                      f"    previous version saved as {backup}", file=out)
-            else:
-                print(f"bundled skin: installed {target}", file=out)
-            shutil.copy2(yml, target)
-        except OSError as exc:
-            print(f"bundled skin: skipped {yml.name} ({exc})", file=out)
+    print("bundled skins: no longer installed as .yml — unpacked by the "
+          "server at startup (see omlx-uplift skin / ~/.omlx/uplift/skins)",
+          file=out)
 
 
 def _verify_mount(python: str) -> tuple[bool, str]:
@@ -344,10 +312,10 @@ def cmd_install(argv=None) -> int:
     ap.add_argument("--python", help="target interpreter "
                     "(default: Homebrew oMLX keg if present, else this one)")
     ap.add_argument("--yes", action="store_true",
-                    help="replace existing bundled skins without asking "
-                    "(old copies are kept as <name>.yml.<timestamp>~)")
+                    help="deprecated no-op (bundled skins are unpacked by "
+                    "the server at startup, not installed as .yml)")
     ap.add_argument("--keep-skins", action="store_true",
-                    help="do not touch bundled skins in ~/.omlx/uplift/skins")
+                    help="deprecated no-op (see --yes)")
     ap.add_argument("--formula", help="target a Homebrew formula's keg "
                     "instead of omlx (e.g. omlx-dev); ignored with --python")
     args = ap.parse_args(argv)
@@ -367,8 +335,6 @@ def cmd_install(argv=None) -> int:
     if not args.python and not args.formula:
         if _mount_into_dev_keg():
             print("installed autopatch: omlx-dev keg (DEV-9 co-mount)")
-    if not args.keep_skins:
-        install_example_skins(force="yes" if args.yes else "ask")
     # mount proof: the .pth alone proves nothing — probe the target env the
     # same way the server will boot (import omlx.server, check the flag).
     ok, detail = _verify_mount(target or sys.executable)
