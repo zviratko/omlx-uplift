@@ -1284,22 +1284,16 @@ function ifGroup(model) {
     // split exists per model (upstream gap, see U12 ticket finding).
     const mm = document.createElement('span'); mm.className = 'if-mem-meta';
     h.append(mm);
-    const qsum = document.createElement('div'); qsum.className = 'if-row if-qsum'; qsum.style.display = 'none';
-    const qb = document.createElement('span'); qb.className = 'badge Queued'; qb.textContent = C.t('uplift.inflight.queued');
-    const qc = document.createElement('span'); qc.className = 'if-meta';
-    const qt = document.createElement('span'); qt.className = 'if-qtoggle'; qt.textContent = '+';
-    qt.title = C.t('uplift.inflight.expand');
-    qsum.append(qb, qc, qt);
-    qsum.onclick = () => {
-        if (S.ifExpanded.has(model)) S.ifExpanded.delete(model); else S.ifExpanded.add(model);
-    };
-    const kids = document.createElement('div'); kids.className = 'if-kids'; kids.style.display = 'none';
+    // QUEUED requests are ordinary slot rows now (see renderLive): one line
+    // per request with #position · in · wait, exactly like the classic
+    // active-models card. The old "QUEUED ×N (+)" summary collapsed them
+    // behind a toggle nobody noticed — the counts it hid were the point.
     const wrap = document.createElement('div');
-    el.append(h, qsum, kids, wrap);
+    el.append(h, wrap);
     const list = $('live-list');
     const ph = list.querySelector('.empty'); if (ph) ph.remove();
     list.append(el);
-    g = { model, el, qsum, qb, qc, qt, kids, wrap, mm, kidMap: new Map() };
+    g = { model, el, wrap, mm };
     S.ifModels.push(g);
     return g;
 }
@@ -1310,7 +1304,8 @@ function ifSlot(model, rid) {
     const g = ifGroup(model);
     sl = { model, rid, state: null, terminal: false, tstate: null,
            prompt: null, out: null, tps: null, elapsed: null, eta: null,
-           processed: null, total: null, cached: null, lastSeen: Date.now(),
+           processed: null, total: null, cached: null, qpos: null,
+           lastSeen: Date.now(),
            seq: ++ifSeq };        // ISSUE-5: fixed birth position (see ifPaint)
     const row = document.createElement('div'); row.className = 'if-row';
     row.dataset.ifseq = String(sl.seq);      // ISSUE-5: stable order key
@@ -1390,13 +1385,21 @@ function ifPaint(sl) {
         sl.pbar.style.display = 'none';
     }
     const bits = [];
-    if (sl.prompt) bits.push(`in ${C.fmtCompact(sl.prompt)}`);
-    if (sl.out) bits.push(`out ${C.fmtCompact(sl.out)}`);
-    if (sl.tps) bits.push(`${Math.round(sl.tps)} t/s`);
-    if (!sl.terminal && sl.state === 'prefilling' && sl.total > 0)
-        bits.push(`${Math.round((sl.processed || 0) / sl.total * 100)}%`);
-    if (!sl.terminal && sl.eta != null) bits.push(`eta ${C.fmtDuration(Math.round(sl.eta))}`);
-    if (sl.elapsed != null) bits.push(C.fmtDuration(Math.round(sl.elapsed)));
+    // QUEUED (classic active-models parity): position, prompt size and the
+    // wait so far — the three numbers that answer "why hasn't it started?"
+    if (!sl.terminal && sl.state === 'queued') {
+        if (sl.qpos) bits.push(`#${sl.qpos}`);
+        if (sl.prompt) bits.push(`in ${C.fmtCompact(sl.prompt)}`);
+        if (sl.elapsed != null) bits.push(`wait ${C.fmtDuration(Math.round(sl.elapsed))}`);
+    } else {
+        if (sl.prompt) bits.push(`in ${C.fmtCompact(sl.prompt)}`);
+        if (sl.out) bits.push(`out ${C.fmtCompact(sl.out)}`);
+        if (sl.tps) bits.push(`${Math.round(sl.tps)} t/s`);
+        if (!sl.terminal && sl.state === 'prefilling' && sl.total > 0)
+            bits.push(`${Math.round((sl.processed || 0) / sl.total * 100)}%`);
+        if (!sl.terminal && sl.eta != null) bits.push(`eta ${C.fmtDuration(Math.round(sl.eta))}`);
+        if (sl.elapsed != null) bits.push(C.fmtDuration(Math.round(sl.elapsed)));
+    }
     sl.meta.textContent = bits.join(' · ');
     sl.chip.style.display = (!sl.terminal && sl.rid !== 'rank0' && S.reqFeedRows.get(sl.rid)?.loopHint) ? '' : 'none';
     sl.abort.style.display = (!sl.terminal && sl.rid !== 'rank0') ? '' : 'none';
@@ -1452,6 +1455,13 @@ function renderLive(s) {
         if (sl.terminal || seen.has(rid)) continue;
         const t = ifTerminal(rid);
         if (t) { ifLand(sl, t, now); }
+        // A QUEUED row absent from the queue for 15 s drained without a
+        // terminal feed event (client disconnect, server-side drop); its
+        // feed row can sit at state='queued' forever, so it gets its own
+        // stale window instead of pinning the row indefinitely.
+        else if (sl.state === 'queued' && now - sl.lastSeen > 15000) {
+            ifLand(sl, 'done', now);
+        }
         else if (!S.reqFeedRows.has(rid) && now - sl.lastSeen > 15000) {
             ifLand(sl, 'done', now);
         }
@@ -1482,49 +1492,20 @@ function renderLive(s) {
             sl.el.remove(); S.ifSlots.delete(rid);
         }
     }
-    // one QUEUED summary line per model (+/− expand); children only while queued
-    let qTotal = 0;
+    // one QUEUED slot row per model — #position · in · wait, visible
+    // without any expand (one line per request, classic-style). Queued
+    // requests ride the same slot machinery as prefilling/generating.
     for (const [model, wait] of waitingBy) {
-        const g = ifGroup(model);
-        qTotal += wait.length;
-        // ISSUE-4: no sticky qever — the QUEUED summary shows only while
-        // something actually waits. Idle models don't pin a QUEUED×0 line.
-        g.qsum.style.display = wait.length ? '' : 'none';
-        // relabel every tick: the group may have been created before the
-        // locale catalog loaded, which would otherwise pin the raw key
-        g.qb.textContent = C.t('uplift.inflight.queued');
-        g.qt.title = C.t('uplift.inflight.expand');
-        g.qc.textContent = `×${wait.length}`;
-        const expanded = S.ifExpanded.has(model);
-        g.qt.textContent = expanded ? '−' : '+';
-        g.kids.style.display = expanded ? '' : 'none';
-        if (expanded) {
-            const keep = new Set();
-            for (const w of wait.slice(0, 30)) {
-                keep.add(w.rid);
-                let c = g.kidMap.get(w.rid);
-                if (!c) {
-                    const row = document.createElement('div'); row.className = 'if-qrow';
-                    const id2 = document.createElement('span');
-                    id2.textContent = w.rid.slice(0, 8); id2.title = w.rid;
-                    const mt = document.createElement('span');
-                    row.append(id2, mt);
-                    row.onclick = () => MM.openInspector(w.rid);
-                    g.kids.append(row);
-                    c = { row, mt }; g.kidMap.set(w.rid, c);
-                }
-                const bits = [];
-                if (w.pos) bits.push(`#${w.pos}`);
-                if (w.prompt) bits.push(`in ${C.fmtCompact(w.prompt)}`);
-                if (w.waited != null) bits.push(`wait ${C.fmtDuration(Math.round(w.waited))}`);
-                c.mt.textContent = bits.join(' · ');
-            }
-        }
-        // prune children of requests no longer queued — even while collapsed,
-        // or expanding after the drain shows one stale line for a tick
-        const keepNow = new Set(wait.slice(0, 30).map(w => w.rid));
-        for (const [rid2, c] of g.kidMap) {
-            if (!keepNow.has(rid2)) { c.row.remove(); g.kidMap.delete(rid2); }
+        for (const w of wait.slice(0, 30)) {
+            seen.add(w.rid);
+            ifSawLive.add(w.rid);
+            const sl = ifSlot(model, w.rid);
+            if (sl.terminal) { sl.terminal = false; sl.tstate = null; }  // RESURRECT (same as prefilling above)
+            sl.state = 'queued';
+            if (w.pos != null) sl.qpos = w.pos;
+            if (w.prompt != null) sl.prompt = w.prompt;
+            if (w.waited != null) sl.elapsed = w.waited;
+            sl.lastSeen = now;
         }
     }
     // ISSUE-5 (random order after a landing): rows must keep their birth
@@ -1541,14 +1522,15 @@ function renderLive(s) {
     // ISSUE-4: hide model groups with nothing to show — no live row, nothing
     // queued. Loaded-but-idle models must not clutter the IN-FLIGHT card.
     for (const g of S.ifModels) {
-        const busy = g.wrap.children.length || g.kids.children.length ||
-                     (waitingBy.get(g.model) || []).length;
+        const busy = g.wrap.children.length || (waitingBy.get(g.model) || []).length;
         g.el.style.display = busy ? '' : 'none';
     }
     for (const sl of S.ifSlots.values()) ifPaint(sl);
+    // every live row (queued, prefilling, generating) counts — queued
+    // requests are slots now, so no separate queue tally
     let act = 0;
     for (const sl of S.ifSlots.values()) if (!sl.terminal) act++;
-    const total = act + qTotal;
+    const total = act;
     $('live-count').textContent = total ? String(total) : '';
     // ISSUE-4: honest placeholder whenever the card has nothing to show —
     // no models loaded, or every loaded model idle (groups hidden).

@@ -208,7 +208,10 @@ def test_v1_db_migrates_columns_once(tmp_path):
     cols1 = {r[1] for r in s._conn.execute("PRAGMA table_info(requests)")}
     assert {"prompt", "prompt_trunc", "output", "output_trunc",
             "params", "finish"} <= cols1
-    assert s.get_meta("schema_version") == "2"
+    # v3: samples.instance (co-tenant tagging) migrates in the same pass
+    sample_cols = {r[1] for r in s._conn.execute("PRAGMA table_info(samples)")}
+    assert "instance" in sample_cols
+    assert s.get_meta("schema_version") == "3"
     s.close()
 
     # second open: ALTER is a no-op (no duplicate-column error)

@@ -53,7 +53,9 @@ class _FakeStore:
     def __init__(self, data):
         self._data = data
 
-    def series(self, key, window_s, now=None):
+    def series(self, key, window_s, now=None, instance=None):
+        # instance filtering is the store's job (tested against a real
+        # MetricsStore in test_samples_are_tagged_and_reads_filter_co_tenant)
         return [dict(p) for p in self._data.get(key, [])]
 
 
@@ -117,3 +119,43 @@ def test_store_latest_returns_newest_point(tmp_path):
         assert p == {"ts": 200.0, "v": 37.5}
     finally:
         s.close()
+
+
+# ---- co-tenant sample tagging (broken-graphs fix) -------------------------
+
+def test_samples_are_tagged_and_reads_filter_co_tenant(tmp_path):
+    """Two servers sharing ONE metrics DB must not poison each other's
+    charts: samples carry the writer's instance id and filtered reads keep
+    only that writer's rows plus untagged legacy rows."""
+    from omlx_uplift import store as st
+
+    s = st.MetricsStore(path=tmp_path / "m.sqlite3")
+    try:
+        me = st.server_instance_id()
+        # legacy rows (pre-migration shape): instance IS NULL
+        s._conn.execute("INSERT INTO samples(ts,key,value) VALUES(10,'k',1.0)")
+        s._conn.commit()
+        s.write_samples({"k": 2.0}, ts=20.0)            # tagged with me
+        s._conn.execute(                                # a co-tenant's row
+            "INSERT INTO samples(ts,key,value,instance) VALUES(30,'k',99.0,'other')")
+        s._conn.commit()
+
+        unfiltered = s.series("k", 10_000, now=100.0)
+        assert [p["v"] for p in unfiltered] == [1.0, 2.0, 99.0]
+
+        mine = s.series("k", 10_000, now=100.0, instance=me)
+        assert [p["v"] for p in mine] == [1.0, 2.0]     # legacy visible, co-tenant not
+        assert s.latest("k", instance=me) == {"ts": 20.0, "v": 2.0}
+        assert s.latest("k") == {"ts": 30.0, "v": 99.0}
+    finally:
+        s.close()
+
+
+def test_instance_id_unique_per_process():
+    """Tagging only works if ids actually differ across processes; a stable
+    id (keg-only) would leave same-keg co-tenants mixed."""
+    import os
+
+    from omlx_uplift.store import server_instance_id
+
+    assert server_instance_id().endswith(f"\x1f{os.getpid()}")

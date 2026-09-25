@@ -715,10 +715,15 @@ def _downsample(points: list[dict], max_pts: int = MAX_SERIES_POINTS):
 async def metrics_latest(keys: str = "", is_admin: bool = Depends(require_admin)):
     """Newest stored sample per key (U11): the Memory & cache chart pushes
     live sys.percent points through this instead of re-deriving a flat
-    phys_footprint value client-side."""
+    phys_footprint value client-side. Filtered to THIS server's samples
+    (plus untagged legacy rows) — a co-tenant's collector must not drive
+    the live line."""
     wanted = [k.strip() for k in keys.split(",") if k.strip()][:16]
     store = get_collector().store
-    return {"latest": {k: store.latest(k) for k in wanted}}
+    from .store import server_instance_id
+
+    inst = server_instance_id()
+    return {"latest": {k: store.latest(k, instance=inst) for k in wanted}}
 
 
 @api_router.get("/metrics/series")
@@ -739,9 +744,12 @@ async def metrics_series(
         raise HTTPException(status_code=400, detail="key or keys required")
     window_s = _parse_window(window)
     store = get_collector().store
+    from .store import server_instance_id
+
+    inst = server_instance_id()
 
     async def one(k: str):
-        fine = await asyncio.to_thread(store.series, k, window_s)
+        fine = await asyncio.to_thread(store.series, k, window_s, None, inst)
         for p in fine:
             p["res"] = "fine"
         hourly = []

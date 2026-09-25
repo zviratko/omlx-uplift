@@ -561,12 +561,6 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     font-size: 11px; cursor: pointer; min-width: 0; }
 .if-row:hover { background: var(--row2); }
 .if-row.term { opacity: .55; cursor: pointer; }
-.if-qsum { padding-left: 14px; }
-.if-kids { padding-left: 26px; }
-.if-qrow { display: flex; align-items: center; gap: 8px; padding: 2px 2px; font-size: 10px;
-    color: var(--dim); cursor: pointer; }
-.if-qrow:hover { background: var(--row2); }
-.if-qtoggle { font: 600 12px/1 var(--mono); color: var(--accent); padding: 0 4px; flex-shrink: 0; }
 .if-meta { color: var(--dim); font: 400 10px/1.4 var(--mono); white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
 .if-id { font: 400 10px/1 var(--mono); color: var(--dim); flex-shrink: 0; }

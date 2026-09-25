@@ -5,8 +5,10 @@ omlx/usage_history.py); we never write that file — the viewer opens it
 READ-ONLY (mode=ro) and merges it as the coarse history layer.
 
 Our file adds sub-hour samples and per-request rows:
-  samples(ts, key, value)      interval metrics (tokens/s, cache hit %,
-                               loaded models, active requests, totals)
+  samples(ts, key, value, instance)   interval metrics (tokens/s, cache
+                               hit %, loaded models, active requests,
+                               totals) tagged with the server that wrote
+                               them (see server_instance_id)
   requests(id PK, model, state, prompt_tokens, completion_tokens, tps,
            error, ts_start, ts_end)   per-request lifecycle rows
 Retention (RL-0, split + configurable): metrics samples are purged after
@@ -37,9 +39,11 @@ from pathlib import Path
 RETENTION_METRICS_DAYS = 30
 RETENTION_LOG_DAYS = 2
 _RET_CLAMP = (1, 365)
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 # v1 -> v2 (RL-1): payload columns on `requests`. Migration is idempotent:
 # ALTER TABLE ADD COLUMN runs once per column, guarded by PRAGMA table_info.
+# v2 -> v3: samples.instance (co-tenant collector tagging, see
+# server_instance_id) — migrated in _init_schema next to this block.
 _NEW_COLUMNS = {
     "prompt": "TEXT", "prompt_trunc": "INTEGER",
     "output": "TEXT", "output_trunc": "INTEGER",
@@ -127,6 +131,39 @@ def default_db_path() -> Path:
     return base / "uplift" / "metrics.sqlite3"
 
 
+_inst_cache: str | None = None
+
+
+def server_instance_id() -> str:
+    """Identity of the process writing/reading samples: its omlx package
+    location (keg) + PID — unique per process, which is the one key that
+    survives every co-tenant scenario (same keg, same port, one shared DB).
+
+    WHY: every omlx instance shares ONE metrics DB, but ServerMetrics is
+    per-process and resets at startup. Twice we caught two live servers
+    (a service restart that left the old process lingering / a duplicate
+    dev launch) interleaving samples into one series every tick: tok/s
+    sawtoothed between real values and 0, rate.* pinned at 0 (each
+    writer's delta lands on the other's totals). The collector and the
+    API live in the SAME process, so writes are tagged with this id and
+    reads keep only this process's rows plus untagged legacy rows — each
+    dashboard shows exactly its own server's numbers. After a restart
+    the fine layer starts fresh by design (session metrics reset on a
+    restart anyway); long windows still backfill from the hourly layer.
+    """
+    global _inst_cache
+    if _inst_cache is None:
+        keg = ""
+        try:
+            import omlx
+
+            keg = str(Path(omlx.__file__).resolve().parent)
+        except Exception:
+            keg = os.environ.get("OMLX_INSTANCE_ROOT", "") or "unknown"
+        _inst_cache = f"{keg}\x1f{os.getpid()}"
+    return _inst_cache
+
+
 def open_usage_ro(path: Path | None = None) -> sqlite3.Connection:
     """Open vanilla's usage.sqlite3 strictly READ-ONLY."""
     p = path or (default_db_path().parent.parent / "usage.sqlite3")
@@ -198,6 +235,13 @@ class MetricsStore:
                 if col not in have:
                     self._conn.execute(
                         f"ALTER TABLE requests ADD COLUMN {col} {typ}")
+            # v2 -> v3 (co-tenant sample tagging): same idempotent ALTER
+            # pattern as _NEW_COLUMNS. Legacy rows keep instance NULL and
+            # stay readable by every server (see server_instance_id).
+            if "instance" not in {r[1] for r in self._conn.execute(
+                    "PRAGMA table_info(samples)")}:
+                self._conn.execute(
+                    "ALTER TABLE samples ADD COLUMN instance TEXT")
             self._conn.execute(
                 "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -326,16 +370,17 @@ class MetricsStore:
     def write_sample(self, key: str, value: float, ts: float | None = None):
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO samples(ts, key, value) VALUES(?,?,?)",
-                (ts or time.time(), key, float(value)),
+                "INSERT INTO samples(ts, key, value, instance) VALUES(?,?,?,?)",
+                (ts or time.time(), key, float(value), server_instance_id()),
             )
 
     def write_samples(self, pairs: dict[str, float], ts: float | None = None):
         t = ts or time.time()
+        inst = server_instance_id()
         with self._lock, self._conn:
             self._conn.executemany(
-                "INSERT INTO samples(ts, key, value) VALUES(?,?,?)",
-                [(t, k, float(v)) for k, v in pairs.items()],
+                "INSERT INTO samples(ts, key, value, instance) VALUES(?,?,?,?)",
+                [(t, k, float(v), inst) for k, v in pairs.items()],
             )
 
     def upsert_request(self, row: dict, in_tx: bool = False):
@@ -425,12 +470,15 @@ class MetricsStore:
     def write_tick(self, pairs: dict[str, float], request_rows: list[dict],
                    ts: float | None = None):
         """ONE transaction per collector tick (RL-0 write hygiene): all
-        samples + changed request rows in a single COMMIT."""
+        samples + changed request rows in a single COMMIT. Samples carry
+        this server's instance id so co-tenant servers sharing the DB
+        cannot poison each other's series (see server_instance_id)."""
         t = ts or time.time()
+        inst = server_instance_id()
         with self._lock, self._conn:
             self._conn.executemany(
-                "INSERT INTO samples(ts, key, value) VALUES(?,?,?)",
-                [(t, k, float(v)) for k, v in pairs.items()],
+                "INSERT INTO samples(ts, key, value, instance) VALUES(?,?,?,?)",
+                [(t, k, float(v), inst) for k, v in pairs.items()],
             )
             for row in request_rows:
                 self.upsert_request(row, in_tx=True)
@@ -470,23 +518,45 @@ class MetricsStore:
 
     # -- read side (API/viewer) -------------------------------------------
 
-    def series(self, key: str, window_s: float, now: float | None = None) -> list[dict]:
+    def series(self, key: str, window_s: float, now: float | None = None,
+               instance: str | None = None) -> list[dict]:
+        """Samples for KEY over the window. INSTANCE (when given) restricts
+        the read to that exact writer's rows plus untagged legacy rows —
+        co-tenant collectors cannot poison the series (server_instance_id)."""
         t0 = (now or time.time()) - window_s
         with self._lock:
-            cur = self._conn.execute(
-                "SELECT ts, value FROM samples WHERE key=? AND ts>=? ORDER BY ts",
-                (key, t0),
-            )
+            if instance is None:
+                cur = self._conn.execute(
+                    "SELECT ts, value FROM samples WHERE key=? AND ts>=? ORDER BY ts",
+                    (key, t0),
+                )
+            else:
+                cur = self._conn.execute(
+                    "SELECT ts, value FROM samples "
+                    "WHERE key=? AND ts>=? AND (instance IS NULL OR instance=?) "
+                    "ORDER BY ts",
+                    (key, t0, instance),
+                )
             return [{"ts": r[0], "v": r[1]} for r in cur.fetchall()]
 
-    def latest(self, key: str) -> dict | None:
+    def latest(self, key: str, instance: str | None = None) -> dict | None:
         """Newest stored point for KEY (U11: live chart pushes read the
-        collector's sample instead of re-deriving it client-side)."""
+        collector's sample instead of re-deriving it client-side).
+        INSTANCE filtering works as in series(): the newest point of a
+        co-tenant must never drive this server's live line."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT ts, value FROM samples WHERE key=? ORDER BY ts DESC LIMIT 1",
-                (key,),
-            ).fetchone()
+            if instance is None:
+                row = self._conn.execute(
+                    "SELECT ts, value FROM samples WHERE key=? ORDER BY ts DESC LIMIT 1",
+                    (key,),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT ts, value FROM samples "
+                    "WHERE key=? AND (instance IS NULL OR instance=?) "
+                    "ORDER BY ts DESC LIMIT 1",
+                    (key, instance),
+                ).fetchone()
         return {"ts": row[0], "v": row[1]} if row else None
 
     def recent_requests(self, limit: int = 200) -> list[dict]:
