@@ -11,6 +11,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 
 from omlx_uplift import patchsource, patches, patchsync
 
@@ -110,6 +111,32 @@ class ScopeGateTest(unittest.TestCase):
         # nothing stored
         m = self.store.load()
         self.assertIsNone(self.store.find(m, "kern"))
+
+    def test_dev_build_root_follows_dev_json_across_base_split(self):
+        """mruu regression: bootstrap ran with OMLX_BASE_PATH set (dev.json
+        + dev-src live under ~/.omlx/uplift), the add ran with a different
+        (or no) OMLX_BASE_PATH — the gate must find dev-src via dev.json,
+        exactly like `dev status` does. The old hardcoded <base>/dev-src
+        guess rejected every build-scope add on that machine."""
+        import json as _json
+        tmp = tempfile.mkdtemp(prefix="uplift-buildroot-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        real_base = os.path.join(tmp, ".omlx", "uplift")
+        src = os.path.join(real_base, "dev-src")
+        os.makedirs(os.path.join(src, ".git"))
+        with open(os.path.join(real_base, "dev.json"), "w") as fh:
+            _json.dump({"src_path": src}, fh)
+        env = dict(os.environ, OMLX_BASE_PATH=os.path.join(tmp, ".omlx-dev"))
+        orig_expand = os.path.expanduser
+        with unittest.mock.patch.dict(os.environ, env):
+            # redirect ~ into the fixture so the canonical base is found
+            os.path.expanduser = (
+                lambda p: p.replace("~", tmp) if p.startswith("~")
+                else orig_expand(p))
+            try:
+                self.assertEqual(patchsource.dev_build_root(), src)
+            finally:
+                os.path.expanduser = orig_expand
 
     def test_build_scope_without_build_root_refuses(self):
         res = patchsource.add_patch(

@@ -374,12 +374,31 @@ from . import patches as _patches
 
 def dev_build_root() -> str | None:
     """Root of the clean dev-src checkout used to gate build-scope patches,
-    or None when omlx-dev is not set up. DEV-2 owns dev.json; until then a
-    present ~/.omlx/uplift/dev-src is accepted. Kept tiny and import-safe —
-    DEV-2/DEV-5 read the full config from dev.json."""
-    base = os.path.join(_patches.default_base_dir(), "dev-src")
-    if os.path.isdir(os.path.join(base, ".git")):
-        return base
+    or None when omlx-dev is not set up. dev.json's src_path is the single
+    source of truth (the same one `dev status` reads) — a hardcoded
+    <base>/dev-src guess broke whenever OMLX_BASE_PATH differed between
+    the server process and the shell that ran bootstrap. Both candidate
+    data dirs are checked (env base first, then canonical ~/.omlx/uplift):
+    the bootstrap that created dev-src may have run under either. Kept
+    tiny and import-safe — DEV-2/DEV-5 read the full config from dev.json."""
+    from . import devsrc
+
+    bases = []
+    env_base = os.environ.get("OMLX_BASE_PATH")
+    if env_base:
+        bases.append(os.path.join(env_base, "uplift"))
+    bases.append(os.path.expanduser(os.path.join("~", ".omlx", "uplift")))
+    # the standard coexistence layout: bootstrap may have run inside a
+    # shell that exported OMLX_BASE_PATH=~/.omlx-dev while the server does
+    # not (or vice versa) — that split is exactly what rejected adds
+    bases.append(os.path.join(os.path.expanduser(devsrc.RUNTIME_DEFAULTS["base_path"]),
+                              "uplift"))
+    for base in dict.fromkeys(bases):
+        cfg = devsrc.load_config(base)
+        cand = (devsrc.src_path(cfg) if cfg
+                else os.path.join(base, "dev-src"))
+        if os.path.isdir(os.path.join(cand, ".git")):
+            return cand
     return None
 
 
