@@ -380,6 +380,8 @@ function renderUploader() {
         box.append(h, bar);
         overlay.append(box);
         overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+        // Escape is handled by the global modal handler (uplift_state.js) —
+        // this dialog used to have no Escape path at all (takes no focus)
         document.body.append(overlay);
     }
 

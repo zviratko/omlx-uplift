@@ -113,9 +113,7 @@ async function openPruneDialog() {
     box.append(h, sub, list, bar);
     overlay.append(box);
     overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
-    document.addEventListener('keydown', function esc(e) {
-        if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
-    });
+    // Escape is handled by the global modal handler (uplift_state.js)
     document.body.append(overlay);
 }
 $('btn-prune').onclick = openPruneDialog;

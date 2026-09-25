@@ -60,4 +60,29 @@ window.Uplift.state = {
     PT_DATA: null,   // last /patches view
     PT_BUSY: false,
 };
+
+/* Escape closes the frontmost modal dialog — ONE global handler for every
+   .modal-overlay in the app. A dialog with teardown state (editor re-render,
+   inspector timers) registers its close function on the overlay as
+   __upliftModalClose; a plain dialog needs nothing (the fallback removes
+   the overlay). This replaces the old per-dialog listeners, which only
+   fired while focus stayed inside the dialog — Escape after a backdrop
+   click did nothing, and dialogs that took no focus (upload modal) had no
+   handler at all. Frontmost = highest computed z-index (grammar popover 90
+   > base modal 80 > editor 70), DOM order breaks ties. Keypresses already
+   consumed below (IME cancel, nested pickers calling preventDefault) are
+   respected. */
+document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+    const open = document.querySelectorAll('.modal-overlay');
+    if (!open.length) return;
+    const z = el => {
+        const v = parseInt(getComputedStyle(el).zIndex, 10);
+        return Number.isFinite(v) ? v : 0;
+    };
+    let top = open[0];
+    for (const el of open) if (z(el) >= z(top)) top = el;
+    if (typeof top.__upliftModalClose === 'function') top.__upliftModalClose();
+    else top.remove();
+});
 })();

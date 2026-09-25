@@ -1049,7 +1049,7 @@ function openGrammarPop(srcTa, btn) {
     bar.append(ok, cancel, stat);
     panel.append(head, ta, bar);
     overlay.append(panel);
-    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') overlay.remove(); });
+    // Escape is handled by the global modal handler (uplift_state.js)
     document.body.append(overlay);
     ta.focus();
 }
@@ -1118,9 +1118,9 @@ async function openEditor(model, profileName, templateName) {
     document.body.append(overlay);
     panel.tabIndex = -1;
     panel.focus();
-    overlay.addEventListener('keydown', e => {
-        if (e.key === 'Escape') closeEditor();
-    });
+    // Escape is handled globally (uplift_state.js); closeEditor does the
+    // teardown (row unfreeze, editor removal) the old local listener did.
+    overlay.__upliftModalClose = closeEditor;
 }
 
 /* ---- global-template editor (round 5): a template is a universal-settings
@@ -1156,7 +1156,7 @@ async function openTemplateEditor(name) {
     overlay.append(panel);
     document.body.append(overlay);
     panel.tabIndex = -1; panel.focus();
-    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditor(); });
+    overlay.__upliftModalClose = closeEditor;   // Escape via global handler
 }
 async function saveTemplateEditor(tpl, panel) {
     const msg = panel.querySelector('#se-msg');
@@ -2333,9 +2333,9 @@ function confirmDialog(title, msg, act, okMsg) {
     box.append(h, sub, bar);
     overlay.append(box);
     overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
-    document.addEventListener('keydown', function esc(e) {
-        if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
-    });
+    // Escape is handled by the global modal handler (uplift_state.js). The
+    // z-order rules keep this 80 above the 70 editor it may sit on; equal-z
+    // dialogs resolve by DOM order (see that handler).
     document.body.append(overlay);
     ok.focus();
 }
@@ -2356,10 +2356,8 @@ async function openInspector(reqId) {
     function close() {
         if (closed) return; closed = true;
         stop(); overlay.remove();
-        document.removeEventListener('keydown', esc);
         if (inspectorOverlay === overlay) inspectorOverlay = null;
     }
-    function esc(e) { if (e.key === 'Escape') close(); }
 
     const h = document.createElement('h3');
     const head = document.createElement('div');   // header line: chips + counters
@@ -2510,7 +2508,7 @@ async function openInspector(reqId) {
         if (timer && !d.live) stop();   // request ended; keep last render visible
     }
 
-    document.addEventListener('keydown', esc);
+    overlay.__upliftModalClose = close;   // Escape via global handler (stops tail timer)
     overlay.onclick = e => { if (e.target === overlay) close(); };
     document.body.append(overlay);
     inspectorOverlay = overlay;
