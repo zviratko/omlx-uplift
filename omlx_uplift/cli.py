@@ -271,7 +271,7 @@ def _example_skins_dir() -> Path:
 
 
 def install_example_skins(stream=None, force: str = "ask") -> None:
-    """Copy bundled example skin crates into the live skins dir.
+    """Copy the bundled skin crates into the live skins dir.
 
     force: 'ask' (prompt on a differing existing file), 'yes' (replace),
     'keep' (never touch). A replaced file is NEVER deleted: the previous
@@ -294,29 +294,29 @@ def install_example_skins(stream=None, force: str = "ask") -> None:
             if not dest.is_dir():
                 dest.mkdir(parents=True, exist_ok=True)
             if target.exists() and filecmp.cmp(target, yml, shallow=False):
-                print(f"skin example: {target} already current", file=out)
+                print(f"bundled skin: {target} already current", file=out)
                 continue
             if target.exists():
                 if force == "ask":
                     if not sys.stdin.isatty():
-                        print(f"skin example: {target} exists and differs — "
+                        print(f"bundled skin: {target} exists and differs — "
                               "kept (re-run with --yes to replace)", file=out)
                         continue
                     ans = input(f"{target} exists and differs from the "
-                                f"bundled example — replace? [y/N] ").strip()
+                                f"bundled skin — replace? [y/N] ").strip()
                     if ans.lower() not in ("y", "yes"):
-                        print(f"skin example: kept {target}", file=out)
+                        print(f"bundled skin: kept {target}", file=out)
                         continue
                 stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
                 backup = target.with_name(f"{target.name}.{stamp}~")
                 shutil.copy2(target, backup)
-                print(f"skin example: replaced {target}\n"
+                print(f"bundled skin: replaced {target}\n"
                       f"    previous version saved as {backup}", file=out)
             else:
-                print(f"skin example: installed {target}", file=out)
+                print(f"bundled skin: installed {target}", file=out)
             shutil.copy2(yml, target)
         except OSError as exc:
-            print(f"skin example: skipped {yml.name} ({exc})", file=out)
+            print(f"bundled skin: skipped {yml.name} ({exc})", file=out)
 
 
 def _verify_mount(python: str) -> tuple[bool, str]:
@@ -344,10 +344,10 @@ def cmd_install(argv=None) -> int:
     ap.add_argument("--python", help="target interpreter "
                     "(default: Homebrew oMLX keg if present, else this one)")
     ap.add_argument("--yes", action="store_true",
-                    help="replace existing example skins without asking "
+                    help="replace existing bundled skins without asking "
                     "(old copies are kept as <name>.yml.<timestamp>~)")
     ap.add_argument("--keep-skins", action="store_true",
-                    help="do not touch example skins in ~/.omlx/uplift/skins")
+                    help="do not touch bundled skins in ~/.omlx/uplift/skins")
     ap.add_argument("--formula", help="target a Homebrew formula's keg "
                     "instead of omlx (e.g. omlx-dev); ignored with --python")
     args = ap.parse_args(argv)
