@@ -1279,6 +1279,11 @@ function ifGroup(model) {
     const h = document.createElement('div'); h.className = 'if-model';
     const nm = document.createElement('span'); nm.textContent = model; nm.title = model;
     h.append(nm);
+    // U12: per-model memory line — the honest numbers upstream gives:
+    // resident weights size + SSD cache + hot-cache bytes. No KV/prefill
+    // split exists per model (upstream gap, see U12 ticket finding).
+    const mm = document.createElement('span'); mm.className = 'if-mem-meta';
+    h.append(mm);
     const qsum = document.createElement('div'); qsum.className = 'if-row if-qsum'; qsum.style.display = 'none';
     const qb = document.createElement('span'); qb.className = 'badge Queued'; qb.textContent = C.t('uplift.inflight.queued');
     const qc = document.createElement('span'); qc.className = 'if-meta';
@@ -1294,7 +1299,7 @@ function ifGroup(model) {
     const list = $('live-list');
     const ph = list.querySelector('.empty'); if (ph) ph.remove();
     list.append(el);
-    g = { model, el, qsum, qb, qc, qt, kids, wrap, kidMap: new Map() };
+    g = { model, el, qsum, qb, qc, qt, kids, wrap, mm, kidMap: new Map() };
     S.ifModels.push(g);
     return g;
 }
@@ -1401,8 +1406,17 @@ function renderLive(s) {
     const now = Date.now();
     const seen = new Set();
     const waitingBy = new Map();
+    const cacheBy = new Map((s.cacheModels || []).map(cm => [cm.id, cm]));
     for (const m of s.models) {
-        ifGroup(m.id);                       // item 1: every loaded model, always
+        const g = ifGroup(m.id);             // item 1: every loaded model, always
+        // U12: per-model memory meta — resident weights + SSD cache + hot
+        // cache. Upstream has no per-model KV/prefill split (finding).
+        const cm = cacheBy.get(m.id);
+        const parts = [];
+        if (m.sizeText || m.size) parts.push(C.t('uplift.inflight.mem_weights', { size: m.sizeText || C.fmtBytes(m.size) }));
+        if (cm && cm.totalBytes) parts.push(C.t('uplift.inflight.mem_cache', { size: C.fmtBytes(cm.totalBytes) }));
+        if (cm && cm.hotBytes) parts.push(C.t('uplift.inflight.mem_hot', { size: C.fmtBytes(cm.hotBytes) }));
+        g.mm.textContent = parts.join(' · ');
         waitingBy.set(m.id, m.waiting || []);
         for (const p of m.prefilling) {
             seen.add(p.rid);

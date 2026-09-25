@@ -77,7 +77,7 @@ async function loadChartHistory() {
         const [g, p, m] = await Promise.all([
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_generation_tps&window=${w}`).catch(() => null),
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_prefill_tps&window=${w}`).catch(() => null),
-            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('mem.percent,cache.total_bytes')}&window=${w}`).catch(() => null),
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('sys.percent,cache.total_bytes')}&window=${w}`).catch(() => null),
         ]);
         const conv = a => (a && a.series ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })) : []);
         const convMap = (o, k, scale) => (o && o.series_map && o.series_map[k]
@@ -347,7 +347,7 @@ function createCharts() {
     tpsChart = new uPlot(tpsOpts, tpsWindowed(), $('chart-tps'));
     window.__uplotTps = tpsChart;   // debug handle
     // Memory % left; runtime cache GB (total + top-3 models' hot cache) right.
-    const memSpecs = [line('model memory', 'blue', true, 'y'),
+    const memSpecs = [line('system memory', 'blue', true, 'y'),
                       line('cache total', 'gold', false, 'y2')];
     for (let i = 0; i < cacheSeriesIds.length; i++) {
         const shortId = cacheSeriesIds[i].length > 14
@@ -863,7 +863,27 @@ function createUsageChart() {
 }
 
 function markHistoryDirty() { historyDirty = true; loadChartHistory(); }
+
+/* U11 live memory line: the collector's sys.percent tick (system memory,
+   psutil) is the point pushed into the Memory chart. /admin/api/stats has
+   no system-memory field (model_memory_used is phys_footprint — flat), so
+   the newest stored sample comes from /metrics/latest, refreshed at most
+   every 10s. Falls back to the old phys_footprint ratio if unavailable. */
+let sysPct = null, sysPctTs = 0, sysPctFetching = false, sysPctAt = 0;
+async function refreshSysPct() {
+    const now = Date.now();
+    if (sysPctFetching || now - sysPctAt < 10_000) return;
+    sysPctFetching = true; sysPctAt = now;
+    try {
+        const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=sys.percent`);
+        const p = r && r.latest && r.latest['sys.percent'];
+        if (p && typeof p.v === 'number') { sysPct = p.v; sysPctTs = p.ts * 1000; }
+    } catch (_) { /* keep last value */ }
+    finally { sysPctFetching = false; }
+}
+
 function pushStatusSample(s, cacheGB, hotSorted) {
+    refreshSysPct();   // fire-and-forget; lands in the next push
     // Chart buffers (window pruning happens at draw time).
     tpsData[0].push(s.time); tpsData[1].push(s.genTps); tpsData[2].push(s.prefillTps);
     while (tpsData[0].length > MAX_POINTS) { tpsData[0].shift(); tpsData[1].shift(); tpsData[2].shift(); }
@@ -875,7 +895,8 @@ function pushStatusSample(s, cacheGB, hotSorted) {
         for (let ci = 3; ci < memData.length; ci++) memData[ci] = memData[0].map(() => null);
         createCharts();
     }
-    memData[0].push(s.time); memData[1].push(s.memPercent === null ? null : +s.memPercent.toFixed(2));
+    const livePct = (sysPct !== null && Date.now() - sysPctTs < 120_000) ? sysPct : s.memPercent;
+    memData[0].push(s.time); memData[1].push(livePct === null ? null : +livePct.toFixed(2));
     memData[2].push(cacheGB);
     for (let i = 0; i < 3; i++) {
         const m = hotSorted[i];

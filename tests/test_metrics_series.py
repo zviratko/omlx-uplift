@@ -100,3 +100,20 @@ async def test_no_keys_is_400():
     with pytest.raises(HTTPException) as e:
         await _call(window="1h")
     assert e.value.status_code == 400
+
+
+# ---- MetricsStore.latest (U11 live chart push) ---------------------------
+
+def test_store_latest_returns_newest_point(tmp_path):
+    from omlx_uplift.store import MetricsStore
+
+    s = MetricsStore(path=tmp_path / "m.sqlite3")
+    try:
+        assert s.latest("sys.percent") is None
+        s.write_samples({"sys.percent": 10.0}, ts=100.0)
+        s.write_samples({"sys.percent": 37.5}, ts=200.0)
+        s.write_samples({"sys.percent": 12.0}, ts=150.0)   # out-of-order write
+        p = s.latest("sys.percent")
+        assert p == {"ts": 200.0, "v": 37.5}
+    finally:
+        s.close()

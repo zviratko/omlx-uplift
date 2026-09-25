@@ -479,6 +479,16 @@ class MetricsStore:
             )
             return [{"ts": r[0], "v": r[1]} for r in cur.fetchall()]
 
+    def latest(self, key: str) -> dict | None:
+        """Newest stored point for KEY (U11: live chart pushes read the
+        collector's sample instead of re-deriving it client-side)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT ts, value FROM samples WHERE key=? ORDER BY ts DESC LIMIT 1",
+                (key,),
+            ).fetchone()
+        return {"ts": row[0], "v": row[1]} if row else None
+
     def recent_requests(self, limit: int = 200) -> list[dict]:
         with self._lock:
             cur = self._conn.execute(

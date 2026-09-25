@@ -711,6 +711,16 @@ def _downsample(points: list[dict], max_pts: int = MAX_SERIES_POINTS):
     return out, bucket_s
 
 
+@api_router.get("/metrics/latest")
+async def metrics_latest(keys: str = "", is_admin: bool = Depends(require_admin)):
+    """Newest stored sample per key (U11): the Memory & cache chart pushes
+    live sys.percent points through this instead of re-deriving a flat
+    phys_footprint value client-side."""
+    wanted = [k.strip() for k in keys.split(",") if k.strip()][:16]
+    store = get_collector().store
+    return {"latest": {k: store.latest(k) for k in wanted}}
+
+
 @api_router.get("/metrics/series")
 async def metrics_series(
     key: str = "",

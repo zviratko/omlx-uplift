@@ -555,6 +555,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .if-group:last-child { border-bottom: 0; }
 .if-model { font: 500 11px/1.5 var(--mono); color: var(--ink); padding: 3px 2px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* U12: per-model memory meta (weights · cache · hot) in the model header. */
+.if-model .if-mem-meta { color: var(--dim); font-weight: 400; font-size: 10px; margin-left: 8px; }
 .if-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px 4px 14px;
     font-size: 11px; cursor: pointer; min-width: 0; }
 .if-row:hover { background: var(--row2); }
