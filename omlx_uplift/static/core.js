@@ -295,7 +295,7 @@ function milestoneFloorOf(v) {
 function milestonesBetween(prev, next) {
     const hits = [];
     if (!prev) return hits;
-    for (const [key, label] of [['requests', 'requests served'], ['totalTokens', 'tokens served']]) {
+    for (const [key, label] of [['requests', 'requests processed'], ['totalTokens', 'tokens processed']]) {
         const a = prev[key], b = next[key];
         if (a === null || b === null || b <= a) continue;
         const reached = milestoneFloorOf(b);   // highest rung b now sits on

@@ -196,7 +196,7 @@
   "uplift.label.p95_completion": "p95 completion tok",
   "uplift.label.p95_prompt": "p95 prompt tok",
   "uplift.label.queue_first_tok": "queue→first tok ms",
-  "uplift.label.served_total": "served total",
+  "uplift.label.served_total": "processed total",
   "uplift.label.tokens_per_s": "tokens / s",
   "uplift.layout.cancel": "Cancel",
   "uplift.layout.columns": "Columns",

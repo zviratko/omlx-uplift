@@ -130,7 +130,7 @@ function milestoneQuip(h) {
     const rung = h.rung !== null && h.rung !== undefined ? h.rung : null;
     if (rung !== null && MILESTONE_QUIPS[rung])
         return `${MILESTONE_QUIPS[rung](h.label)} [${C.fmtNumber(h.value)}]`;
-    return `${fmt(rung || h.value)} ${h.label} served. Progress noted, praise pending.`;
+    return `${fmt(rung || h.value)} ${h.label}. Progress noted, praise pending.`;
 }
 /* Ladder gate: fire each rung at most once per page session, immune to
    overlapping polls comparing against a stale snapshot (that re-reported

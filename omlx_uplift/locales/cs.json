@@ -196,7 +196,7 @@
   "uplift.label.p95_completion": "p95 dokončovací tokeny",
   "uplift.label.p95_prompt": "p95 prompt tokeny",
   "uplift.label.queue_first_tok": "fronta→první token ms",
-  "uplift.label.served_total": "celkem obslouženo",
+  "uplift.label.served_total": "celkem zpracováno",
   "uplift.label.tokens_per_s": "tokeny / s",
   "uplift.layout.cancel": "Zrušit",
   "uplift.layout.columns": "Sloupce",
