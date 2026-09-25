@@ -415,6 +415,23 @@ def load_locale(lang: str) -> dict:
     return {**base, **merged_overlay}
 
 
+@api_router.get("/identity")
+async def serving_identity():
+    """Which keg is serving this dashboard (U10). The answer MUST come from
+    the serving process itself — dev.json exists on disk even when the
+    vanilla keg is the one answering. The uplift .pth runs inside whichever
+    omlx server mounted us, so its own sys.prefix/sys.executable name the
+    keg: '/omlx-dev/' appears exactly when the omlx-dev formula's keg is
+    serving. Public: the header paints before login."""
+    import sys
+    from . import __version__ as _v
+    probe = f"{sys.prefix} {sys.executable}".lower()
+    dev = "/omlx-dev/" in probe or os.sep + "omlx-dev" in probe.rstrip(os.sep)
+    # Public route: no keg path in the response (it carries the username);
+    # the header only needs the dev flag. Admin surface shows the keg.
+    return {"dev": bool(dev), "version": _v}
+
+
 @api_router.get("/locale")
 async def locale_catalog(lang: Optional[str] = None):
     """Merged i18n catalog for the uplift UI (classic keys + uplift

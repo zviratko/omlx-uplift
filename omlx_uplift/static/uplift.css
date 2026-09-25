@@ -190,6 +190,14 @@ header.top {
 }
 .logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
 .logo .dot.bad { background: var(--red); }
+/* U10: keg flavor wordmark. 'Uplift' keeps the old inline look; when the
+   serving process is the omlx-dev keg, uplift_boot.js swaps the text to
+   'DEV' and adds .dev-tag — prominent amber, skin-overridable. */
+.logo-flavor { opacity: .45; font-weight: 300; }
+.logo .logo-flavor.dev-tag {
+    opacity: 1; font-weight: 700; letter-spacing: 0.08em;
+    color: var(--dev-accent, var(--warn, #e8a020));
+}
 header.top .spacer { flex: 1; }
 /* chip + tab text may never break: when the window narrows the tabs strip
    shrinks first (min-width:0), but the chips are flex items with the

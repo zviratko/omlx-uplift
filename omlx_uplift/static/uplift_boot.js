@@ -27,6 +27,18 @@ fetchJson(`${API}/admin/api/device-info`).then(d => {
     $('chip-device').textContent = `${d.chip_name}${d.chip_variant === 'Max' ? ' Max' : ''} · ${d.memory_gb} GB · ${d.gpu_cores}c`;
     $('chip-device').classList.add('state-ok');
 }).catch(() => {});
+/* U10: header shows which keg is serving. Identity comes from the server
+   (GET identity) — never inferred from files on disk, which exist even when
+   the vanilla keg answers. 'DEV' is brand text (like 'Uplift'): untranslated,
+   colour via --dev-accent so skins can restyle it. */
+fetchJson(`${API}/admin/api/identity`).then(d => {
+    if (!d || !d.dev) return;
+    const f = $('logo-flavor');
+    f.textContent = 'DEV';
+    f.classList.add('dev-tag');
+    document.querySelector('.logo')?.classList.add('is-dev');
+    document.title = 'oMLX · DEV';
+}).catch(() => {});
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
