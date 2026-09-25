@@ -1375,6 +1375,7 @@ async def patches_config(req: PatchConfigRequest,
 # --------------------------------------------------------------------------
 
 _DEV_BUILD = {"running": False, "log": [], "result": None}
+_DEV_BOOT = {"running": False, "log": [], "result": None}
 _DEV_BUILD_LOCK = threading.Lock()
 
 
@@ -1444,13 +1445,21 @@ def _dev_service_age(cfg: dict):
         return None
 
 
+def _dev_boot_state() -> dict:
+    """DEV-7(d): bootstrap progress rides EVERY status path — the not-
+    installed view is exactly where a dashboard bootstrap runs."""
+    with _DEV_BUILD_LOCK:
+        return dict(_DEV_BOOT, log=list(_DEV_BOOT["log"][-20:]))
+
+
 def _dev_status_sync() -> dict:
     from . import cli, devsrc, patchsource
 
     cfg = devsrc.load_config()
     if not cfg:
         return {"installed": False,
-                "reason": "dev.json missing — run: omlx-uplift dev bootstrap"}
+                "reason": "dev.json missing — run: omlx-uplift dev bootstrap",
+                "bootstrap": _dev_boot_state()}
     import os
 
     clone_ok = os.path.isdir(os.path.join(devsrc.src_path(cfg), ".git"))
@@ -1458,6 +1467,7 @@ def _dev_status_sync() -> dict:
     out = devsrc.status(cfg, build_patches if clone_ok else None)
     if not clone_ok:
         out["installed"] = False
+        out["bootstrap"] = _dev_boot_state()
         return out
     # staleness: built keg vs the tip the CURRENT patch set would produce
     # (expected_tip replays materialize in a throwaway worktree — git-only,
@@ -1488,6 +1498,7 @@ def _dev_status_sync() -> dict:
     out["share_realized"] = _dev_share_realized(cfg)
     with _DEV_BUILD_LOCK:
         out["build"] = dict(_DEV_BUILD, log=list(_DEV_BUILD["log"][-20:]))
+        out["bootstrap"] = dict(_DEV_BOOT, log=list(_DEV_BOOT["log"][-20:]))
     out["build_patches"] = [{"id": p["id"], "version": p.get("version")}
                             for p in build_patches]
     return out
@@ -1589,6 +1600,121 @@ def _dev_reconfigure_sync(req: DevReconfigureRequest) -> dict:
         share=req.share or [], no_share=req.no_share or [],
         interactive=False))
     return {"ok": rc == 0, "status": _dev_status_sync()}
+
+
+class DevBaseRequest(BaseModel):
+    # DEV-7 base-root chooser: None/"" clears the pin (= follow the sync
+    # ref, dashboard wording "follow vanilla omlx keg"); otherwise a commit
+    # sha/short sha from GET /dev/commits — validated against dev-src.
+    pin: Optional[str] = None
+
+
+@api_router.get("/dev/commits")
+async def dev_commits(limit: int = 50,
+                      is_admin: bool = Depends(require_admin)):
+    """Bounded upstream commit list for the base-root chooser (DEV-7)."""
+    from . import devsrc
+
+    def sync():
+        cfg = devsrc.load_config()
+        if not cfg:
+            return {"installed": False, "commits": []}
+        try:
+            return {"installed": True,
+                    "commits": devsrc.recent_commits(cfg, limit=limit),
+                    "sync_ref": cfg.get("sync_ref")}
+        except devsrc.DevsrcError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+    return await asyncio.to_thread(sync)
+
+
+@api_router.post("/dev/base")
+async def dev_base(req: DevBaseRequest,
+                   is_admin: bool = Depends(require_admin)):
+    """Pin (or un-pin) the commit omlx-dev materializes from (DEV-7).
+    Writing the pin alone changes nothing on disk — the next rebuild
+    re-cuts uplift-dev from it, same as every other patch-set change."""
+    from . import devsrc
+
+    def sync():
+        cfg = devsrc.load_config()
+        if not cfg:
+            raise HTTPException(status_code=409,
+                                detail="omlx-dev not bootstrapped — run "
+                                       "omlx-uplift dev bootstrap first")
+        pin = (req.pin or "").strip()
+        if pin:
+            try:
+                resolved = devsrc.base_sha_of(dict(cfg, base_pin=pin))
+            except devsrc.DevsrcError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            if not resolved:
+                raise HTTPException(status_code=400,
+                                    detail=f"{pin!r} is not a commit in dev-src")
+            cfg["base_pin"] = resolved
+        else:
+            cfg.pop("base_pin", None)
+        devsrc.save_config(cfg)
+        return {"ok": True, "base_pin": cfg.get("base_pin"),
+                "status": _dev_status_sync()}
+
+    return await asyncio.to_thread(sync)
+
+
+class DevBootstrapRequest(BaseModel):
+    # DEV-7(d): bootstrap from the dashboard. All optional: omitted fields
+    # take the same defaults as `omlx-uplift dev bootstrap --yes` (origin
+    # from the installed omlx tap head, sync origin/main, port 8001).
+    origin: Optional[str] = None
+    sync_ref: Optional[str] = None
+    port: Optional[int] = None
+
+
+def _dev_boot_run(opts: dict) -> None:
+    from . import cli
+
+    argv = ["bootstrap", "--yes"]
+    if opts.get("origin"):
+        argv += ["--origin", str(opts["origin"])]
+    if opts.get("sync_ref"):
+        argv += ["--sync-ref", str(opts["sync_ref"])]
+    if opts.get("port"):
+        argv += ["--port", str(int(opts["port"]))]
+    rc = 1
+    try:
+        import contextlib
+        import io
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.cmd_dev(argv)
+        lines = [l.strip() for l in (out.getvalue() + err.getvalue()).splitlines()
+                 if l.strip()]
+    except Exception as exc:  # never leave the job stuck on "running"
+        lines = [f"bootstrap crashed: {exc}"]
+    with _DEV_BUILD_LOCK:
+        _DEV_BOOT["log"].extend(lines[-25:])
+        _DEV_BOOT["running"] = False
+        _DEV_BOOT["result"] = rc
+
+
+@api_router.post("/dev/bootstrap")
+async def dev_bootstrap(req: DevBootstrapRequest,
+                        is_admin: bool = Depends(require_admin)):
+    """Clone dev-src + create the formula branch (the CLI bootstrap, run
+    detached). The brew build afterwards still needs `dev build` /
+    Rebuild — and, first time only, Homebrew's own install step."""
+    with _DEV_BUILD_LOCK:
+        if _DEV_BOOT["running"] or _DEV_BUILD["running"]:
+            return {"started": False, "running": True,
+                    "reason": "a bootstrap or build is already running"}
+        _DEV_BOOT["running"] = True
+        _DEV_BOOT["result"] = None
+        _DEV_BOOT["log"] = ["bootstrap started"]
+    threading.Thread(target=_dev_boot_run, daemon=True,
+                     args=(req.model_dump(),)).start()
+    return {"started": True}
 
 
 @api_router.post("/dev/reconfigure")

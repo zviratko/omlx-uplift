@@ -591,6 +591,8 @@ async function ptPreview() {
 
 let DV_DATA = null;
 let DV_POLL = null;
+let DV_BOOT_POLL = null;
+let DV_COMMITS = null;   // DEV-7(c): /dev/commits cache, loaded on demand
 
 async function pollDev() {
     const sec = $('dv-section');
@@ -628,15 +630,37 @@ function renderDev() {
     if (!d.installed) {
         statusEl.hidden = true; patchesBox.hidden = true;
         actions.hidden = true; shareBox.hidden = true; warn.hidden = true;
+        const baseBox = $('dv-base');
+        if (baseBox) baseBox.hidden = true;
         intro.hidden = false;
         intro.textContent = ptMsg('uplift.patches.dev_not_installed',
             'omlx-dev is not set up on this machine. To build patches here, run: '
             + 'omlx-uplift dev bootstrap (clones the dev-src repo), add patches with '
             + 'scope "build", then omlx-uplift dev install. Details: '
             + (d.reason || ''));
+        // DEV-7(d): same bootstrap, one click — progress rides /dev/status
+        const bootBox = $('dv-bootstrap');
+        if (bootBox) {
+            bootBox.hidden = false;
+            const boot = d.bootstrap || {};
+            const btn = $('dv-boot-btn');
+            if (btn) {
+                btn.disabled = !!boot.running;
+                btn.textContent = boot.running
+                    ? ptMsg('uplift.patches.dev_booting', 'Bootstrapping…')
+                    : ptMsg('uplift.patches.dev_boot_btn', 'Bootstrap omlx-dev');
+            }
+            const log = $('dv-boot-log');
+            if (log) {
+                log.hidden = !(boot.log && boot.log.length);
+                log.textContent = (boot.log || []).join('\n');
+            }
+        }
         return;
     }
     intro.hidden = true;
+    const bootBox0 = $('dv-bootstrap');
+    if (bootBox0) bootBox0.hidden = true;
 
     // status line: branch @ tip, N commits over base, behind sync ref
     const bits = [];
@@ -682,6 +706,8 @@ function renderDev() {
             'WARNING — the uplift-dev branch does not match the enabled patch '
             + 'set (manual commits?). A rebuild re-cuts the branch and drops '
             + 'the foreign commits.');
+
+    dvRenderBase(d);
 
     // build patch cards: same anatomy as runtime, fed by the /patches view
     const buildOnDv = (S.PT_DATA && S.PT_DATA.patches || [])
@@ -782,7 +808,105 @@ function renderDev() {
     }
 }
 
+/* --- DEV-7(c): base-root chooser -----------------------------------------
+   What uplift-dev re-cuts from: default = follow the vanilla omlx keg pin
+   (today's behaviour); a commit from the sync-ref log pins the base. A pin
+   changes nothing until the next rebuild (materialize re-cuts the branch). */
+
+async function dvLoadCommits() {
+    if (DV_COMMITS) return DV_COMMITS;
+    try {
+        const r = await PG.fetchJson(`${API}/uplift/api/dev/commits?limit=50`);
+        DV_COMMITS = r.commits || [];
+    } catch (e) {
+        DV_COMMITS = null;   // retry on next open
+    }
+    return DV_COMMITS;
+}
+
+function dvRenderBase(d) {
+    const box = $('dv-base');
+    if (!box) return;
+    box.hidden = false;
+    const sel = $('dv-base-select'), note = $('dv-base-note');
+    // build patches rebuild every poll — never stomp a selection in flight
+    if (document.activeElement === sel) return;
+    const pinned = d.base_pin || '';
+    const following = ptMsg('uplift.patches.dev_base_follow',
+        'follow vanilla omlx keg');
+    // rebuild options fresh each render — commit list is fetch-once, cache
+    sel.innerHTML = '';   // plain clear, no markup — safe
+    const def = document.createElement('option');
+    def.value = '';
+    def.textContent = following + (pinned ? '' : ` (${dvSha(d.base)})`);
+    sel.append(def);
+    const commits = DV_COMMITS || [];
+    if (!commits.length && !DV_COMMITS) dvLoadCommits().then(c => {
+        if (c && DV_DATA === d) dvRenderBase(DV_DATA);
+    });
+    // pin may point outside the visible window — keep it selectable
+    if (pinned && !commits.some(c => c.sha === pinned)) {
+        const orp = document.createElement('option');
+        orp.value = pinned;
+        orp.textContent = `${dvSha(pinned)} — ${ptMsg('uplift.patches.dev_base_pinned', 'pinned commit')}`;
+        sel.append(orp);
+    }
+    for (const c of commits) {
+        const opt = document.createElement('option');
+        opt.value = c.sha;
+        opt.textContent = `${c.short} ${c.subject}`.slice(0, 90);
+        sel.append(opt);
+    }
+    sel.value = pinned || '';
+    const btn = $('dv-base-btn');
+    btn.disabled = sel.value === (pinned || '') ||
+        !!(d.build && d.build.running);
+    note.textContent = pinned
+        ? ptMsg('uplift.patches.dev_base_pinned_note',
+            'pinned — the next rebuild re-cuts uplift-dev from this commit')
+        : '';
+    btn.onclick = async () => {
+        const pin = sel.value;
+        btn.disabled = true;
+        try {
+            const r = await dvApi('base', { pin: pin || null });
+            DV_DATA = r.status || DV_DATA;
+            PG.toast(pin
+                ? ptMsg('uplift.patches.dev_base_set', 'Base pinned — rebuild to apply')
+                : ptMsg('uplift.patches.dev_base_cleared', 'Back to following the vanilla keg'), 5000);
+            renderDev();
+        } catch (e) {
+            PG.toast(ptMsg('uplift.patches.dev_base_fail', 'Base change failed') + ': ' + e, 5000);
+            btn.disabled = false;
+        }
+    };
+}
+
+function dvStartBootstrap() {
+    const btn = $('dv-boot-btn');
+    if (btn) btn.disabled = true;
+    dvApi('bootstrap', {}).then(() => {
+        PG.toast(ptMsg('uplift.patches.dev_boot_started',
+            'omlx-dev bootstrap started'), 4000);
+        clearInterval(DV_BOOT_POLL);
+        DV_BOOT_POLL = setInterval(async () => {
+            await pollDev();
+            if (!(DV_DATA && DV_DATA.bootstrap && DV_DATA.bootstrap.running)) {
+                clearInterval(DV_BOOT_POLL);
+                if (DV_DATA && DV_DATA.installed)
+                    PG.toast(ptMsg('uplift.patches.dev_boot_done',
+                        'omlx-dev bootstrapped — add build patches and rebuild'), 6000);
+            }
+        }, 4000);
+    }).catch(e => {
+        PG.toast(ptMsg('uplift.patches.dev_boot_fail',
+            'Bootstrap failed to start') + ': ' + e, 5000);
+        if (btn) btn.disabled = false;
+    });
+}
+
 let PT_CHECK_TIMER = null;
+
 function ptScheduleAutoCheck() {
     // hourly drift check while the page is open AND the user opted in (PAT-2
     // config flag drives the same endpoint the collector would use)
@@ -833,6 +957,8 @@ function initPatchesPage() {
     $('pt-diff-close').onclick = () => { $('pt-diff').hidden = true; };
     const dvBtn = $('dv-build-btn');
     if (dvBtn) dvBtn.onclick = () => dvStartBuild(false);
+    const dvBootBtn = $('dv-boot-btn');
+    if (dvBootBtn) dvBootBtn.onclick = () => dvStartBootstrap();
     const dvBrBtn = $('dv-build-restart-btn');
     if (dvBrBtn) dvBrBtn.onclick = () => dvStartBuild(true);
     const dvRsBtn = $('dv-restart-btn');

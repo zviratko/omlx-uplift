@@ -1634,5 +1634,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-diff-head { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); }
 .pt-diff pre { margin: 0; padding: 8px; overflow: auto; max-height: 420px; font-family: var(--mono, monospace); font-size: var(--fs-meta); line-height: 1.35; }
 .pt-diff-add { color: var(--ok, #2e8b57); }
+/* DEV-7: section header on the patches page + bootstrap progress log */
+.pt-section-head { font-weight: 700; letter-spacing: .04em; margin: 14px 0 2px; }
+.pt-boot-log { margin: 6px 0 0; padding: 6px 8px; border: 1px solid var(--line); max-height: 200px; overflow: auto; font-family: var(--mono, monospace); font-size: var(--fs-meta); line-height: 1.3; white-space: pre-wrap; }
 .pt-diff-del { color: var(--crit, #c0392b); }
 .pt-diff-hunk { color: var(--accent, #e0662e); }

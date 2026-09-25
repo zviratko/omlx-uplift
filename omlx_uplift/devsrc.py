@@ -294,6 +294,56 @@ def fetch_sync_ref(cfg: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Base pin (DEV-7): what omlx-dev re-cuts uplift-dev FROM
+# ---------------------------------------------------------------------------
+
+def base_sha_of(cfg: dict) -> str | None:
+    """The commit the materializer must use as base. Default (no pin):
+    tip of the sync ref — 'follow vanilla omlx keg' in dashboard wording
+    (the keg is built from that same upstream line; when the pin is unset
+    a sync-ref fetch refreshes it). With cfg['base_pin'] set, that exact
+    commit is the base until the pin is cleared."""
+    pin = (cfg.get("base_pin") or "").strip()
+    path = src_path(cfg)
+    if pin:
+        # ^{commit}: rev-parse of a well-formed but absent 40-char hex
+        # returns the string itself — peel to a real commit object or fail
+        sha = _rev_parse(pin + "^{commit}", path)
+        if not sha:
+            raise DevsrcError(
+                f"base pin {pin!r} is not a commit in dev-src — fetch it "
+                "(the dashboard commit list is bounded; older commits may "
+                "need: git -C <dev-src> fetch)")
+        return sha
+    remote, ref = _sync_parts(cfg)
+    return _rev_parse(f"refs/remotes/{remote}/{ref}", path)
+
+
+def recent_commits(cfg: dict, limit: int = 50) -> list[dict]:
+    """Bounded `git log` for the base-root chooser (DEV-7): short hash +
+    subject, newest first, from the sync ref (the line the user follows).
+    Falls back to HEAD when the sync ref was never fetched so the chooser
+    is never empty."""
+    path = src_path(cfg)
+    try:
+        remote, ref = _sync_parts(cfg)
+        refname = f"refs/remotes/{remote}/{ref}"
+    except DevsrcError:
+        refname = "HEAD"
+    if not _rev_parse(refname, path):
+        refname = "HEAD"
+    proc = _git(["log", f"--max-count={max(1, min(int(limit), 200))}",
+                 "--format=%H%x00%h%x00%s", refname], cwd=path, check=False)
+    out = []
+    for line in proc.stdout.splitlines():
+        sha, _, rest = line.partition("\x00")
+        short, _, subject = rest.partition("\x00")
+        if sha:
+            out.append({"sha": sha, "short": short, "subject": subject})
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Materialization — enabled build patches -> commits on uplift-dev
 # ---------------------------------------------------------------------------
 
@@ -334,9 +384,11 @@ def materialize(patches_to_apply: list[dict], cfg: dict) -> dict:
     """
     path = src_path(cfg)
     branch = cfg.get("formula_branch") or DEV_BRANCH_DEFAULT
-    remote, ref = _sync_parts(cfg)
-    base_ref = f"refs/remotes/{remote}/{ref}"
-    base_sha = _rev_parse(base_ref, path)
+    try:
+        # DEV-7: base is the pin when set, else the sync-ref tip
+        base_sha = base_sha_of(cfg)
+    except DevsrcError as exc:
+        return {"ok": False, "reason": str(exc)}
     if not base_sha:
         return {"ok": False,
                 "reason": f"sync ref {cfg['sync_ref']} is not fetched — run "
@@ -401,8 +453,9 @@ def ensure_formula_branch(cfg: dict) -> str | None:
     branch = cfg.get("formula_branch") or DEV_BRANCH_DEFAULT
     if _rev_parse(branch, path):
         return None
-    remote, ref = _sync_parts(cfg)
-    base_sha = _rev_parse(f"refs/remotes/{remote}/{ref}", path)
+    # DEV-7: honor a base pin at bootstrap seed time too (materialize owns
+    # every later re-cut)
+    base_sha = base_sha_of(cfg)
     if not base_sha:
         raise DevsrcError(f"sync ref {cfg.get('sync_ref')!r} is not fetched")
     _git(["branch", branch, base_sha], cwd=path)
@@ -441,14 +494,13 @@ def status(cfg: dict, patches_to_apply: list[dict] | None = None) -> dict:
         return {"installed": False,
                 "reason": "dev-src clone missing — run omlx-uplift dev bootstrap"}
     try:
-        remote, ref = _sync_parts(cfg)
+        base_sha = base_sha_of(cfg)   # DEV-7: pin-aware
     except DevsrcError as exc:
         return {"installed": True, "branch": branch, "reason": str(exc)}
-    base_ref = f"refs/remotes/{remote}/{ref}"
-    base_sha = _rev_parse(base_ref, path)
     tip = _rev_parse(branch, path)
     out = {"installed": True, "branch": branch, "tip": tip,
-           "base": base_sha, "sync_ref": cfg["sync_ref"]}
+           "base": base_sha, "sync_ref": cfg["sync_ref"],
+           "base_pin": (cfg.get("base_pin") or "").strip() or None}
     if tip and base_sha:
         out["ahead"] = int(_git(["rev-list", "--count", f"{base_sha}..{tip}"],
                                 cwd=path).stdout.strip() or 0)

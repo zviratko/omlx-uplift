@@ -251,5 +251,59 @@ class DevsrcFixture(unittest.TestCase):
         self.assertTrue(os.path.isdir(path))
 
 
+    # -- DEV-7 base pin -------------------------------------------------------
+    def _advance_upstream(self, n=2):
+        """Push n new commits onto the remote's main and fetch them."""
+        shas = []
+        for i in range(n):
+            with open(os.path.join(self.work, "omlx", "k.py"), "a") as fh:
+                fh.write(f"# advance {i}\n")
+            _commit_all(self.work, f"advance {i}")
+            _git(["push", "-q", self.remote, "main"], cwd=self.work)
+            shas.append(_git(["rev-parse", "HEAD"], cwd=self.work).strip())
+        return shas
+
+    def test_base_pin_changes_materialize_base(self):
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        base1 = devsrc.base_sha_of(self.cfg)          # follows sync ref
+        shas = self._advance_upstream(2)
+        devsrc.fetch_sync_ref(self.cfg)
+        self.assertEqual(devsrc.base_sha_of(self.cfg), shas[-1])
+        # pin to the OLDER commit: base must stop following
+        cfg = dict(self.cfg, base_pin=shas[0])
+        self.assertEqual(devsrc.base_sha_of(cfg), shas[0])
+        r = devsrc.materialize([], cfg)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["base"], shas[0])
+
+    def test_base_pin_rejects_unknown_commit(self):
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        cfg = dict(self.cfg, base_pin="deadbeef" * 5)
+        with self.assertRaises(devsrc.DevsrcError):
+            devsrc.base_sha_of(cfg)
+        r = devsrc.materialize([], cfg)
+        self.assertFalse(r["ok"])
+        self.assertIn("base pin", r["reason"])
+
+    def test_recent_commits_lists_sync_ref_log(self):
+        devsrc.ensure_clone(self.cfg)
+        shas = self._advance_upstream(3)
+        devsrc.fetch_sync_ref(self.cfg)
+        commits = devsrc.recent_commits(self.cfg, limit=50)
+        self.assertEqual(commits[0]["sha"], shas[-1])   # newest first
+        self.assertEqual(len(commits), 4)               # base + 3 advances
+        self.assertTrue(all(c["short"] and c["subject"] for c in commits))
+
+    def test_status_reports_base_pin(self):
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        self.assertIsNone(devsrc.status(self.cfg)["base_pin"])
+        st = devsrc.status(dict(self.cfg, base_pin="short"))
+        # unresolvable pin surfaces as reason, not a crash
+        self.assertIn("base pin", st.get("reason", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

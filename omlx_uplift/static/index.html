@@ -365,13 +365,32 @@ try {
             </div>
             <div id="pt-advisories" class="pt-advisories" hidden></div>
             <div id="pt-preview" hidden></div>
+            <!-- DEV-7(b): explicit section split — runtime patches vs the
+                 omlx-dev build. Each header carries a one-line what-it-
+                 affects note (runtime = live server, build = dev keg source). -->
+            <div class="pt-section-head"><span class="pt-id" data-i18n="uplift.patches.sec_runtime">Runtime patches</span></div>
+            <div class="pt-detail" data-i18n="uplift.patches.sec_runtime_desc">Overlay diffs applied to the running omlx keg at boot — they change live server behaviour and revert with the patch.</div>
             <div id="pt-list" class="admin-table"><div class="empty">—</div></div>
             <div id="pt-diff" class="pt-diff" hidden><div class="pt-diff-head"><span id="pt-diff-title"></span><button type="button" class="icon-btn" id="pt-diff-close" aria-label="Close">×</button></div><pre id="pt-diff-body"></pre></div>
             <div id="dv-section" class="pt-card" hidden>
-                <div class="pt-card-head"><span class="pt-id" data-i18n="uplift.patches.dev_title">Build patches (omlx-dev)</span><span id="dv-state"></span></div>
+                <div class="pt-card-head"><span class="pt-id" data-i18n="uplift.patches.dev_title">OMLX-DEV build</span><span id="dv-state"></span></div>
                 <div class="pt-detail" data-i18n="uplift.patches.dev_explainer">Build patches never touch the running keg: omlx-uplift stacks them as one commit per patch on the uplift-dev branch of a local omlx checkout, then rebuilds the separate omlx-dev formula from that tip. Rebuild required after every change. Works only with an omlx-dev install.</div>
                 <div id="dv-intro" class="pt-src" hidden></div>
+                <!-- DEV-7(d): dashboard bootstrap when dev-src is absent -->
+                <div id="dv-bootstrap" hidden>
+                    <div class="pt-detail" data-i18n="uplift.patches.dev_boot_desc">Set up omlx-dev on this machine: clones the dev-src repo and creates the uplift-dev branch with defaults (origin from the installed omlx tap, sync origin/main, port 8001). Adjust on the command line afterwards with omlx-uplift dev reconfigure.</div>
+                    <button type="button" class="btn primary" id="dv-boot-btn" data-i18n="uplift.patches.dev_boot_btn">Bootstrap omlx-dev</button>
+                    <pre id="dv-boot-log" class="pt-boot-log" hidden></pre>
+                </div>
                 <div id="dv-status" class="pt-src" hidden></div>
+                <!-- DEV-7(c): base-root chooser — what uplift-dev re-cuts from -->
+                <div id="dv-base" class="pt-src" hidden>
+                    <label class="pt-field"><span data-i18n="uplift.patches.dev_base_label">build base</span>
+                        <select id="dv-base-select" aria-label="omlx-dev build base"></select>
+                    </label>
+                    <button type="button" class="btn" id="dv-base-btn" data-i18n="uplift.patches.dev_base_apply">Apply base</button>
+                    <span id="dv-base-note" class="pt-detail"></span>
+                </div>
                 <div id="dv-warn" class="pt-banner" hidden></div>
                 <div id="dv-patches" class="admin-table" hidden></div>
                 <div id="dv-actions" hidden><button type="button" class="btn primary" id="dv-build-btn" data-i18n="uplift.patches.dev_build">Rebuild omlx-dev</button><button type="button" class="btn primary" id="dv-build-restart-btn" data-i18n="uplift.patches.dev_build_restart">Rebuild &amp; restart</button><button type="button" class="btn" id="dv-restart-btn" data-i18n="uplift.patches.dev_restart">Restart omlx-dev</button></div>
