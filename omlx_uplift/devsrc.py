@@ -40,14 +40,38 @@ def dev_json_path(base_dir: str | None = None) -> str:
 
 
 def load_config(base_dir: str | None = None) -> dict | None:
-    """dev.json contents, or None when absent/unreadable (never raises)."""
-    path = dev_json_path(base_dir)
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        return data if isinstance(data, dict) else None
-    except (OSError, ValueError):
-        return None
+    """dev.json contents, or None when absent/unreadable (never raises).
+
+    With an explicit base_dir, reads exactly that dir. Without one, the
+    env/canonical base is tried first, then the standard coexistence
+    layout (~/.omlx-dev/uplift): bootstrap may have run in a shell whose
+    OMLX_BASE_PATH differed from this process's — dev.json must still be
+    found (mruu split, 2026-09-24)."""
+    if base_dir is not None:
+        try:
+            with open(dev_json_path(base_dir), "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return data if isinstance(data, dict) else None
+        except (OSError, ValueError):
+            return None
+    bases = [None]  # default: _patches.default_base_dir() (env-aware)
+    env_base = os.environ.get("OMLX_BASE_PATH")
+    if env_base:
+        # a bare shell run wrote it under the canonical dir
+        bases.append(os.path.expanduser(os.path.join("~", ".omlx", "uplift")))
+    else:
+        # a bootstrap inside the dev env wrote it under the dev base
+        bases.append(os.path.join(
+            os.path.expanduser(RUNTIME_DEFAULTS["base_path"]), "uplift"))
+    for b in bases:
+        try:
+            with open(dev_json_path(b), "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                return data
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def save_config(cfg: dict, base_dir: str | None = None) -> str:
