@@ -175,11 +175,26 @@ header.top {
                        NEVER widen the header or shift the menu (a skin
                        fills it via .logo-below::after { content: ... })
    Both empty by default — skins that use neither are pixel-identical. */
+/* U23 (all skins): when a skin fills the .logo-below slot, the header
+   reserves a free strip under the logo (padding grows DOWNWARD —
+   align-items:flex-start pins the tabs to the same top edge, so the menu
+   never moves) and the tagline becomes a larger wrapping block that
+   clamps at the menu's left edge (var set by JS; never slides behind the
+   tabs). No skin / no slot content: header is pixel-identical to before
+   (band class absent -> original padding + nowrap slot). */
+header.top.has-tagline { align-items: flex-start; padding-bottom: 36px; }
 .logo .logo-below {
     position: absolute; top: calc(100% + 3px); left: 0;
-    font: 400 10px/1 var(--sans); letter-spacing: 0.08em; color: var(--dim);
+    font: 400 11px/1.25 var(--sans); letter-spacing: 0.08em; color: var(--dim);
     white-space: nowrap; max-width: 260px;
     overflow: hidden; text-overflow: ellipsis;   /* overflow safeguard */
+}
+header.top.has-tagline .logo .logo-below {
+    white-space: normal;                 /* wrap into the reserved strip */
+    width: max-content; max-width: min(300px, var(--tagline-w, 260px));
+    display: -webkit-box; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;               /* ellipsis safeguard stays */
+    overflow: hidden;
 }
 /* Overflow safeguard for logo::after abuse: a skin's suffix becomes an
    inline-block with its own truncation, so a long string costs the menu

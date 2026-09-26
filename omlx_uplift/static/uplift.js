@@ -590,8 +590,33 @@ function applySkinCss(dir) {
         link.rel = 'stylesheet';
         document.head.appendChild(link);
     }
-    if (link.getAttribute('href') !== href) link.setAttribute('href', href);
+    if (link.getAttribute('href') !== href) {
+        link.addEventListener('load', layoutTaglineBand, { once: true });
+        link.setAttribute('href', href);
+    } else {
+        // same href (boot script pre-added the link): stylesheet is live —
+        // measure after styles apply
+        requestAnimationFrame(layoutTaglineBand);
+    }
 }
+
+/* U23: the header reserves the under-logo strip ONLY when the active skin
+   actually fills the .logo-below slot (computed ::after content), so a
+   no-skin header keeps its exact old geometry. --tagline-w clamps the
+   tagline block to the free space left of the menu — it can never paint
+   behind the tabs, at any window width. */
+function layoutTaglineBand() {
+    const h = document.querySelector('header.top');
+    const b = h && h.querySelector('.logo-below');
+    if (!h || !b) return;
+    const filled = getComputedStyle(b, '::after').content !== 'none';
+    h.classList.toggle('has-tagline', filled);
+    if (!filled) return;
+    const tabs = h.querySelector('nav.tabs');
+    const free = tabs && tabs.getBoundingClientRect().left - b.getBoundingClientRect().left - 10;
+    if (free > 80) h.style.setProperty('--tagline-w', Math.floor(free) + 'px');
+}
+addEventListener('resize', layoutTaglineBand, { passive: true });
 
 /* ---------------- layout engine (GridStack, classic #3694 parity) -------- */
 /* Same mechanism as the classic dashboard: GridStack 13 in 24-column,
