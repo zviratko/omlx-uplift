@@ -682,7 +682,7 @@ function createMetricCard(def) {
     const col = chartColors();
     const fmt = metricFormat(def);
     const opts = {
-        width: 300, height: 100, padding: [2, 0, 6, 0],   // bottom gap: 0-line/label clip (2026-09-26)
+        width: 300, height: 100, padding: [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
         scales: metricYScales(id, def),
@@ -711,7 +711,7 @@ function reinitMetricPlot(id) {
     e.host.textContent = '';
     const col = chartColors();
     const opts = {
-        width: 300, height: 100, padding: [2, 0, 6, 0],   // bottom gap: 0-line/label clip (2026-09-26)
+        width: 300, height: 100, padding: [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
         scales: metricYScales(id, e.def),
@@ -781,7 +781,10 @@ function metricYFmt(def) {
                  : String(Math.round(v * 10) / 10));
 }
 function metricYAxis(col, def) {
-    return { stroke: col.dim, size: 26, font: axisFont, grid: true, gap: 4,
+    // Labels render left-aligned at size+gap+12; 26 wasted ~48px of card
+    // width on the left gutter (2026-09-26). 10 keeps them clear of the
+    // card edge while pulling the plot to nearly full width.
+    return { stroke: col.dim, size: 4, font: axisFont, grid: true, gap: 2,
              rotate: 0, space: 50, label: '',
              values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) };
 }
