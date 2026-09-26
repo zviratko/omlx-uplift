@@ -83,3 +83,56 @@ omlx-uplift patches check                # re-fetch sources, report drift
 
 If a patch set wedges boot, use a kill switch, fix the manifest by hand
 (it is plain JSON), remove the sentinel, start again.
+
+## Development kegs (`omlx-dev`) — when the patch carrier is not enough
+
+The hook mode above (vanilla `omlx` + the `.pth` carrier) is the right
+default: nothing in the omlx tree changes, patches are strict unified
+diffs gated against the exact keg bytes. It has hard limits, though: a
+diff cannot carry NEW files, generated code, custom Metal kernels, or
+work-in-progress commits that are not a clean patch yet. When you hit
+those, use the companion formula instead:
+
+```bash
+brew install zviratko/uplift/omlx-dev   # builds omlx from YOUR git checkout
+omlx-uplift dev bootstrap               # one-time questionnaire (or: --origin URL)
+omlx-uplift dev install                 # materialize + install the dev keg
+```
+
+How it works: your checkout stays PRISTINE (upstream history only). Uplift
+composites it with the enabled patch set into the `uplift-dev` branch and
+builds a SEPARATE keg from that — so you always know exactly which bytes
+are running, and rollback never touches your checkout. The dev keg runs
+as its own service (`sh.brew.omlx-dev`) with its own port and base path;
+the stable `omlx` keeps serving alongside it.
+
+What you get over hook mode:
+
+- **Patches as real commits.** The `uplift-dev` branch is a normal git
+  branch: new files, README/docs edits, test changes, kernel work —
+  anything a diff can't express. `omlx-uplift dev patches --scope both`
+  lists what is folded in.
+- **Run arbitrary source, not just releases.** Track any ref — your
+  fork's PR head, `upstream/main`, a bisect point — with
+  `omlx-uplift dev bootstrap --sync-ref upstream/main` and
+  `dev status --fetch` to see drift. Useful for testing an upstream PR
+  locally before it merges.
+- **Auto-build (DEV-11).** With the toggle on (dashboard PATCHES → dev
+  card, or `omlx-uplift dev auto-build on`) the tracked base commit is
+  remembered; when the service boots on an older base it rebuilds the
+  keg in the background, so a morning boot picks up pushed commits. Any
+  manual rollback or base-pin turns it OFF — your control wins.
+- **Keg stash and instant switching (U19).** `dev stash-keg` freezes the
+  current keg, `dev use <sha-prefix>` swaps between saved kegs in
+  seconds — bisect a regression or A/B two builds without rebuilds.
+  `dev rollback` returns to the last-known-good; `dev prune` trims old
+  stashes.
+- **Build options** the formula ships without: `dev install
+  --with-custom-kernel --with-grammar`.
+
+Rules of thumb: stable driver + a few upstream-PR diffs → stay on
+`omlx` + hook mode. Reading, testing or developing omlx source, kernel
+or docs changes, PR-bisecting → `omlx-dev`. The two are independent
+services; you can run both. More detail (DEV-context decisions, scope
+model runtime/build/both): `omlx-uplift dev status` prints the live
+picture, and the PATCHES page surfaces the same state.
