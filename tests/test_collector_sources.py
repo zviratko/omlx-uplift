@@ -129,3 +129,71 @@ def test_system_memory_survives_broken_source(monkeypatch):
     c.sample_once()   # must not raise even when the memory source explodes
     assert "sys.used_bytes" not in store.pairs
     assert "sys.percent" not in store.pairs
+
+
+class SpecSched:
+    """Stats shape after omlx 5aa6c7f9: specprefill_cache is built
+    UNCONDITIONALLY with target_static_* fields (draft_* only when a draft
+    cache exists). Before the .get() fix this shape raised
+    KeyError 'spec.tokens_restored' and aborted the model walk every tick,
+    killing spec.* rates and the queue block for that model."""
+
+    def __init__(self):
+        self.n = 0
+
+    def snapshot_for_admin(self):
+        return {"running_by_id": {}}
+
+    def get_ssd_cache_stats(self):
+        self.n += 1
+        return {
+            "ssd_cache": SsdStats(10),
+            "prefix_cache": {
+                "hits": 10 * self.n, "misses": 2 * self.n,
+                "tokens_matched_total": 500 * self.n,
+                "tokens_requested_total": 1000 * self.n,
+                "tokens_saved": 400 * self.n,
+                "exact_prefix_tokens_restored": 300 * self.n,
+            },
+            "specprefill_cache": {
+                "target_static_hits": 1,
+                "target_static_tokens_restored": 70 * self.n,
+            },
+        }
+
+    def get_stats(self):
+        return {"num_waiting": 1, "num_prefilling": 0, "num_running": 0}
+
+
+def _spec_pool(sched):
+    class E:
+        scheduler = sched
+    class Eng:
+        _engine = type("C", (), {"engine": E})()
+    class Ent:
+        engine = Eng()
+    class P:
+        def get_loaded_model_ids(self): return ["m1"]
+        def get_entry(self, mid): return Ent()
+    return P()
+
+
+def test_spec_stats_shape_does_not_abort_cache_walk(monkeypatch):
+    """Regression: first numeric spec value must not KeyError (2026-09-26)."""
+    import time as _t
+    import omlx_uplift.router as rt
+
+    sched = SpecSched()
+    monkeypatch.setattr(rt, "engine_pool", lambda: _spec_pool(sched))
+    store = CapturingStore()
+    c = Collector(store=store)
+    c.sample_once()                      # seeds counters, dt==0 -> no rates
+    c._prev["_t"] = _t.time() - 60       # pretend a minute passed
+    c.sample_once()
+
+    assert "spec.restored_tokens_min" in store.pairs, store.pairs.keys()
+    assert store.pairs["spec.restored_tokens_min"] == 70.0 * 60.0 / 60.0 * 1.0 \
+        or store.pairs["spec.restored_tokens_min"] > 0
+    # queue block sits AFTER the spec loop — an abort skipped it entirely
+    assert store.pairs["queue.waiting"] == 1.0
+    assert store.pairs["pfx.token_hit_pct"] == 50.0

@@ -382,7 +382,12 @@ class Collector:
                         ):
                             v = spec.get(src)
                             if isinstance(v, (int, float)):
-                                pfx_counters[key] += float(v)
+                                # Same .get() rule as the pfx loop above: omlx
+                                # 5aa6c7f9 made specprefill_cache stats unconditional,
+                                # so the first numeric spec value hit an unseeded
+                                # key and aborted the model walk every tick
+                                # (KeyError 'spec.tokens_restored', 2026-09-26).
+                                pfx_counters[key] = pfx_counters.get(key, 0.0) + float(v)
                         # U19 queue split — scheduler gauge, summed per model.
                         gs_fn = getattr(sched, "get_stats", None)
                         if callable(gs_fn):
