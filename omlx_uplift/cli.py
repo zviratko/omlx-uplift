@@ -518,7 +518,15 @@ def cmd_dev(argv=None) -> int:
 
     ap = argparse.ArgumentParser(prog="omlx-uplift dev")
     ap.add_argument("action", choices=["bootstrap", "install", "status",
-                                       "reconfigure", "upgrade", "patches"])
+                                       "reconfigure", "upgrade", "patches",
+                                       "kegs", "stash-keg", "use", "prune"])
+    ap.add_argument("name", nargs="?",
+                    help="keg name or sha prefix for 'use' (U19)")
+    ap.add_argument("--keep", type=int, default=3,
+                    help="prune: stashes to keep (default 3)")
+    ap.add_argument("--force", action="store_true",
+                    help="use: activate even with a live dev server / "
+                         "unverified shebang")
     ap.add_argument("--scope", choices=["omlx", "dev", "both",
                                         "runtime", "build"],
                     help="scope filter for 'dev patches' (DEV-6; default: "
@@ -634,6 +642,53 @@ def cmd_dev(argv=None) -> int:
             out["patches"] = [p for p in out["patches"]
                               if _patches_mod.scope_touches_dev(p["scope"])]
         print(_json.dumps(out, indent=2))
+        return 0
+
+    if args.action in ("kegs", "stash-keg", "use", "prune"):
+        # U19 — binary rollback: stash/switch previous omlx-dev builds
+        from . import kegstash
+
+        if args.action == "stash-keg":
+            try:
+                r = kegstash.stash()
+            except FileNotFoundError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            print(f"stashed {r['name']} -> {r['path']} ({r['method']})")
+            return 0
+        if args.action == "kegs":
+            rows = kegstash.list_stashes()
+            act = kegstash.active_keg()
+            if not rows:
+                print("no stashed kegs — a stash is taken automatically on "
+                      "'dev install' (or run: omlx-uplift dev stash-keg)")
+                return 0
+            for m in rows:
+                size = m.get("bytes") or 0
+                mark = "  <- active" if m.get("name") == act else ""
+                print(f"{m.get('name')}  {m.get('stashed_at', '?')}  "
+                      f"{size / 2**30:.1f} GiB  {m.get('method', '?')}{mark}")
+            return 0
+        if args.action == "prune":
+            removed = kegstash.prune(keep=args.keep)
+            print("removed: " + (", ".join(removed) if removed else "nothing")
+                  + f" (kept newest {args.keep})")
+            return 0
+        # use
+        if not args.name:
+            print("usage: omlx-uplift dev use <sha|HEAD-sha>",
+                  file=sys.stderr)
+            return 2
+        try:
+            r = kegstash.activate(args.name, force=args.force)
+        except (FileNotFoundError, RuntimeError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        pth_msg = ("yes" if r["pth"] else
+                   "NO — run: omlx-uplift install --formula omlx-dev")
+        print(f"active keg -> {r['name']} ({r['cellar']})\n"
+              f"uplift .pth remounted: {pth_msg}\n"
+              "load it with: brew services restart omlx-dev")
         return 0
 
     if args.action == "status":
@@ -913,6 +968,18 @@ def cmd_dev_install(args) -> int:
         print("dry-run: would run: " + " ".join(cmd))
         return 0
     _coexistence_warnings()
+    # U19: brew reinstall DESTROYS the outgoing keg — clone it into the
+    # stash first so `dev use <old-sha>` stays possible. Best-effort: a
+    # failed stash must never block the rebuild.
+    try:
+        from . import kegstash
+
+        if kegstash.active_keg():
+            r = kegstash.stash()
+            print(f"previous keg stashed: {r['name']} ({r['method']}) "
+                  f"— rollback: omlx-uplift dev use {r['name'][5:12]}")
+    except Exception as exc:
+        print(f"keg stash skipped: {exc}", file=sys.stderr)
     # install owns the pin (decision 3): brew refuses to reinstall a pinned
     # formula, so lift it for this one rebuild and restore it afterwards —
     # on success AND on failure (the pin must never silently disappear)

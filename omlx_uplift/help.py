@@ -25,8 +25,8 @@ COMMANDS = [
                 " the dashboard"),
     ("kernel", "list|rebuild <name> — rebuild ONE native kernel in the keg"),
     ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
-    ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure — dev"
-            " patches in a separate keg"),
+    ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure|kegs —"
+            " dev patches in a separate keg, keg rollback"),
 ]
 
 _TOP_USAGE = """\
@@ -57,7 +57,9 @@ COMMAND_USAGE = {
             " [--with-grammar] [--dry-run]\n"
             "                 dev patches [--scope omlx|dev|both]\n"
             "                 dev reconfigure [--port N] [--base-path P]"
-            " [--share K,...] [--no-share K,...] [--interactive]"),
+            " [--share K,...] [--no-share K,...] [--interactive]\n"
+            "                 dev kegs | dev stash-keg\n"
+            "                 dev use <sha> [--force] | dev prune [--keep N]"),
 }
 
 _CONFIG_FILES = [
