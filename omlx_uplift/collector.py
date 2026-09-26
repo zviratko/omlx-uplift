@@ -213,7 +213,11 @@ class Collector:
                             except Exception:
                                 pass
                         total_bytes += int(ssd.get("total_size_bytes", 0) or 0)
-                        hb = int(st.get("hot_cache_size_bytes", 0) or 0)
+                        # hot_cache_size_bytes lives INSIDE the ssd stats
+                        # dict (PagedSSDCacheStats), not at the top of
+                        # get_ssd_cache_stats() — reading st made every
+                        # hot* series permanently 0 (2026-09-26).
+                        hb = int(ssd.get("hot_cache_size_bytes", 0) or 0)
                         if hb > 0:
                             hot[mid] = hb
                     except Exception:

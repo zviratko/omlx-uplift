@@ -1217,6 +1217,11 @@ function render(s) {
     dot.classList.toggle('bad', s.pressure === 'hard');
 
     const mem = $('meter-cache');
+    // The bar under hit efficiency shows the hit efficiency itself (user
+    // 2026-09-26: it was decorative-empty). warn/bad classes stay on the
+    // memory-pressure thresholds they always used.
+    mem.firstElementChild.style.width =
+        s.cacheEfficiency != null ? Math.max(0, Math.min(100, s.cacheEfficiency)) + '%' : '0%';
     mem.classList.toggle('warn', s.memPercent !== null && s.memPercent >= 70);
     mem.classList.toggle('bad', s.memPercent !== null && s.memPercent >= 90);
     $('cache-sub').textContent = s.memUsed !== null
@@ -1621,7 +1626,15 @@ function renderLive(s) {
     // born live, but a pruned-then-recaptured row would re-append at the
     // bottom; re-sort by seq so the list order never changes on a landing.
     for (const g of S.ifModels) {
+        // Paint FIRST so the terminal state is on the row before ordering.
+        for (const sl of S.ifSlots.values()) if (sl.model === g.model) ifPaint(sl);
+        // Active rows above DONE rows (user 2026-09-26): a landed request
+        // sinks below whatever is still running, without disturbing the
+        // seq order within each band.
         const kids = [...g.wrap.children].sort((a, b) => {
+            const ta = a.classList.contains('term') ? 1 : 0;
+            const tb = b.classList.contains('term') ? 1 : 0;
+            if (ta !== tb) return ta - tb;
             const sa = +a.dataset.ifseq || 0, sb = +b.dataset.ifseq || 0;
             return sa - sb;
         });
@@ -1704,9 +1717,11 @@ function renderRequestStats(s) {
         setCounter('v-ttft', pick(ft, pKey) ?? ft.avg ?? null);
         const n = (pt.n || 0), errs = server.errors_total || 0;
         setCounter('v-errrate', (n + errs) > 0 ? errs / (n + errs) * 100 : null);
+        // The store never simulates — every sample is an observed request.
+        // Sample size is capped by the store's retention (in the source),
+        // not by a query limit.
         $('reqstats-note').textContent =
-            `server stats · ${n} samples` +
-            (server.observed_real !== undefined ? ` (${server.observed_real} real, ${server.simulated} simulated)` : '') +
+            `server stats · ${n} requests` +
             (server.source ? ` · ${server.source}` : '');
         return;
     }

@@ -844,7 +844,7 @@ async def requests_stats(window: str = "1h",
             "completion_tokens": blk(combs),
             "first_token_ms": blk(ftms),
             "errors_total": errs,
-            "observed_real": len(rows), "simulated": 0,
+            "observed_real": len(rows),
             "source": "uplift store (2 d retention)"}
 
 
@@ -1575,7 +1575,9 @@ def _dev_status_sync() -> dict:
     out["port"] = rt["port"]
     out["base_path"] = rt["base_path"]
     out["vanilla_port"] = devsrc.vanilla_port()
+    out["vanilla_base_path"] = devsrc.vanilla_base()
     out["share_configured"] = devsrc.share_map(cfg)
+    out["share_filenames"] = dict(devsrc.SHARE_FILENAMES)
     out["share_realized"] = _dev_share_realized(cfg)
     with _DEV_BUILD_LOCK:
         out["build"] = dict(_DEV_BUILD, log=list(_DEV_BUILD["log"][-20:]))

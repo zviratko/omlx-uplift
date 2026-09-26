@@ -613,11 +613,13 @@ function metricFormat(def) {
     if (def.key === 'engines.active_requests') return v => (v == null ? '—' : String(Math.round(v)));
     return seriesValue;
 }
-/* U8: which metric-card keys get a zero floor on the y-axis — rates
-   (tok/s, req/s), tok/s averages and request counts. Percent and bytes
-   cards keep auto-scaling (0 is far from the interesting band there). */
+/* U8: which metric-card keys get a zero floor on the y-axis.
+   2026-09-26 (user: "the graphs are floating because the 0 is in the
+   middle"): extended to pct and bytes cards — auto-scaling to the data
+   window put the line mid-plot on low-variance series; a floored axis
+   shows the real magnitude. */
 function metricZeroFloor(key) {
-    return key.startsWith('rate.') || /tps$/.test(key) || key === 'engines.active_requests';
+    return true;   // every small metric card floors at 0
 }
 function metricYScales(id, def) {
     return { x: { time: true, range: pinnedXRange(id) },
@@ -680,7 +682,7 @@ function createMetricCard(def) {
     const col = chartColors();
     const fmt = metricFormat(def);
     const opts = {
-        width: 300, height: 100, padding: [2, 0, 0, 0],
+        width: 300, height: 100, padding: [2, 0, 6, 0],   // bottom gap: 0-line/label clip (2026-09-26)
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
         scales: metricYScales(id, def),
@@ -709,7 +711,7 @@ function reinitMetricPlot(id) {
     e.host.textContent = '';
     const col = chartColors();
     const opts = {
-        width: 300, height: 100, padding: [2, 0, 0, 0],
+        width: 300, height: 100, padding: [2, 0, 6, 0],   // bottom gap: 0-line/label clip (2026-09-26)
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         legend: { show: false },
         scales: metricYScales(id, e.def),

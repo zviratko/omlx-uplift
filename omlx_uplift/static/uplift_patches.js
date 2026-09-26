@@ -750,15 +750,28 @@ function renderDev() {
             'brew services restart omlx-dev');
     }
 
-    // sharing block: port, base path, share toggles (server truth)
+    // Isolation block: port, base path, per-file isolation toggles (server
+    // truth). 2026-09-26 rename (user): "Coexistence" → "Isolation" with the
+    // checkbox polarity flipped — checked now means omlx-dev keeps a PRIVATE
+    // copy under its own base path; unchecked means it shares (symlinks) the
+    // vanilla ~/.omlx/ files. Config truth stays share_map (shared=want).
     shareBox.hidden = false;
     shareBox.innerHTML = '';
     const head = document.createElement('div');
     head.className = 'pt-gate-row pt-gate-head';
     const hs = document.createElement('span');
-    hs.textContent = ptMsg('uplift.patches.dev_sharing', 'Coexistence');
+    hs.textContent = ptMsg('uplift.patches.dev_isolation', 'Isolation');
     head.append(hs);
     shareBox.append(head);
+    const isoIntro = document.createElement('div');
+    isoIntro.className = 'pt-gate-row';
+    const isoIntroEl = document.createElement('span');
+    isoIntroEl.className = 'pt-detail';
+    isoIntroEl.textContent = ptMsg('uplift.patches.dev_isolation_hint',
+        'checked = omlx-dev keeps its own file · unchecked = omlx-dev uses '
+        + 'the vanilla {v}/ file').replace('{v}', d.vanilla_base_path || '~/.omlx');
+    isoIntro.append(isoIntroEl);
+    shareBox.append(isoIntro);
     const meta = document.createElement('div');
     meta.className = 'pt-gate-row';
     const m = document.createElement('span');
@@ -779,11 +792,12 @@ function renderDev() {
         row.className = 'pt-gate-row';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
-        cb.checked = !!info.shared_wanted;
+        // ISOLATION polarity: checked = private copy under the dev base.
+        cb.checked = !info.shared_wanted;
         cb.onchange = async () => {
             const share = [], no_share = [];
             for (const [k, v] of Object.entries(d.share_configured || {}))
-                (k === name ? cb.checked : v) ? share.push(k) : no_share.push(k);
+                (k === name ? !cb.checked : v) ? share.push(k) : no_share.push(k);
             try {
                 const r = await dvApi('reconfigure',
                     { share, no_share });
@@ -796,7 +810,16 @@ function renderDev() {
             }
         };
         const lbl = document.createElement('span');
-        lbl.textContent = name;
+        // Spell out what the box means for THIS file with the real paths
+        // (user 2026-09-26: "make it clear the checkboxes mean omlx-dev
+        // will use ~/.omlx/... files").
+        const fname = d.share_filenames?.[name] || name;
+        const iso = d.base_path + '/' + fname;
+        const shr = (d.vanilla_base_path || '~/.omlx') + '/' + fname;
+        lbl.textContent = ptMsg('uplift.patches.dev_isolation_file',
+            'isolated {f} (own copy at {i}; unchecked: shared {s})')
+            .replace('{f}', name).replace('{i}', iso).replace('{s}', shr);
+        lbl.title = iso + '  ⇄  ' + shr;
         row.append(cb, lbl);
         if (!info.ok)
             row.append(ptChip(ptMsg('uplift.patches.dev_share_mismatch',
