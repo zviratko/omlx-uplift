@@ -178,6 +178,27 @@ test('normalize keeps live request rows guarded', () => {
     assert.strictEqual(s.models[0].generating[0].tps, 30.5);
 });
 
+test('normalize: per-request phase + dflash passthrough (U16-rework)', () => {
+    const s = snap(raw({ active_models: { models: [{
+        id: 'mm', actual_size: 1, active_requests: 1,
+        dflash: { speculation: { last: { acceptance_ratio: 0.8 } },
+                  pairing_warning: null },
+        prefilling: [{ request_id: 'p1', phase: 'specprefill_scoring',
+                       detail: 'scoring draft tokens', cached_tokens: 40,
+                       processed: 10, total: 100 },
+                     { request_id: 'p2' }],   // no phase: plain prefill
+        generating: [],
+    }], model_memory_used: 0, model_memory_max: 1, memory_pressure: {} } }));
+    const m0 = s.models[0];
+    assert.strictEqual(m0.dflash.speculation.last.acceptance_ratio, 0.8);
+    assert.strictEqual(m0.prefilling[0].phase, 'specprefill_scoring');
+    assert.strictEqual(m0.prefilling[0].detail, 'scoring draft tokens');
+    assert.strictEqual(m0.prefilling[0].cached, 40);
+    assert.strictEqual(m0.prefilling[1].phase, '');   // absent -> plain prefill
+    const s2 = snap(raw());                            // no dflash key at all
+    assert.strictEqual(s2.models.length, 0);
+});
+
 test('request tracker records finished requests', () => {
     const t = C.createRequestTracker(100);
     const row = rid => ({ rid, prompt: 100, generated: 5, tps: 10, elapsed: 0.5 });

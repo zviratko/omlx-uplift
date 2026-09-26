@@ -503,39 +503,6 @@ async def models_overlay(is_admin: bool = Depends(require_admin)):
 # --------------------------------------------------------------------------
 
 
-@api_router.get("/speculative")
-async def speculative_flags(is_admin: bool = Depends(require_admin)):
-    """U16: {model_id: "specprefill"|"dflash"|"vlm_mtp"|"mtp"|null} for LOADED
-    models — the settings the engine actually runs with (manager merge of
-    stored + defaults), cheap enough to poll. The classic stats snapshot
-    carries no speculative flag (dflash block only exists when a DFlash
-    session reported stats), so the IN-FLIGHT card asks here once a minute
-    and marks models whose decode path is speculative.
-    """
-    mgr = settings_manager()
-    pool = engine_pool()
-    out: dict[str, str | None] = {}
-    if mgr is None or pool is None:
-        return {"models": out}
-    for mid in pool.get_loaded_model_ids():
-        kind = None
-        try:
-            s = mgr.get_settings(mid)
-            if s is not None:
-                if getattr(s, "specprefill_enabled", False):
-                    kind = "specprefill"
-                elif getattr(s, "dflash_enabled", False):
-                    kind = "dflash"
-                elif getattr(s, "vlm_mtp_enabled", False):
-                    kind = "vlm_mtp"
-                elif getattr(s, "mtp_enabled", False):
-                    kind = "mtp"
-        except Exception:
-            pass
-        out[mid] = kind
-    return {"models": out}
-
-
 @api_router.get("/models/{model_id}/settings")
 async def get_model_settings(
     model_id: str, is_admin: bool = Depends(require_admin)

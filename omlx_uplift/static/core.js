@@ -60,6 +60,10 @@ function normalize(raw) {
             waiting: num(m.waiting_requests) || 0,
             idleSeconds: num(m.idle_seconds),
             state: STATES.includes(modelState(m)) ? modelState(m) : 'Idle',
+            // U16-rework: engine DFlash speculation observability (classic
+            // 'dflash' block — null on non-DFlash engines); the IN-FLIGHT
+            // card mirrors classic's model-level sub-row from it.
+            dflash: (m.dflash && typeof m.dflash === 'object') ? m.dflash : null,
             // Live per-request rows: kept raw-ish (guarded) for the request panel
             // and the client-side percentile tracker.
             prefilling: (Array.isArray(m.prefilling) ? m.prefilling : []).map(p => ({
@@ -71,6 +75,11 @@ function normalize(raw) {
                 processed: num(p.processed), total: num(p.total),
                 elapsed: num(p.elapsed), speed: num(p.speed), eta: num(p.eta),
                 cached: Number.isFinite(p.cached_tokens) ? num(p.cached_tokens) : null,
+                // U16-rework: the engine names the actual per-request phase
+                // (specprefill_scoring/_sparse/_system, classic 'prefill').
+                // Badge text keys off THIS, not a model-level setting.
+                phase: typeof p.phase === 'string' ? p.phase : '',
+                detail: typeof p.detail === 'string' ? p.detail : '',
             })).filter(p => p.rid),
             waiting: (Array.isArray(m.waiting) ? m.waiting : []).map(w => ({
                 rid: String(w.request_id || ''),

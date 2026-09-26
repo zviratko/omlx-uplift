@@ -1270,25 +1270,25 @@ function ifTerminal(rid) {
 }
 
 const IF_LINGER_MS = 8000;   // ISSUE-4: how long a landed row stays readable
-/* U16 (user): "is specprefill indicated in the in-flight? I don't see it —
-   it was there before." The redesign dropped any speculative marker and the
-   stats snapshot never carried one per request (upstream gap). The engine's
-   actual settings ARE available — poll /uplift/api/speculative once a
-   minute and badge the model header in the card. */
-const ifSpecBy = new Map();      // model id -> 'specprefill'|'dflash'|'vlm_mtp'|'mtp'
-let ifSpecAt = 0, ifSpecFetching = false;
-function ifSpecPoll() {
-    const now = Date.now();
-    if (ifSpecFetching || now - ifSpecAt < 60_000) return;
-    ifSpecFetching = true; ifSpecAt = now;
-    fetchJson(`${API}/uplift/api/speculative`)
-        .then(d => {
-            ifSpecBy.clear();
-            for (const [mid, kind] of Object.entries((d && d.models) || {}))
-                if (kind) ifSpecBy.set(mid, kind);
-        })
-        .catch(() => { ifSpecAt = 0; })          // retry on next poll
-        .finally(() => { ifSpecFetching = false; });
+/* U16-rework (user): the SPECPREFILL marker must sit on the REQUEST that is
+   speculatively prefilling, not on the model header just because the setting
+   is on. The engine reports the real per-request phase in the prefill
+   tracker (specprefill_scoring/_sparse/_system — scheduler.py, draft.py),
+   so the badge keys off the row's phase:
+     scoring  -> SCORING        (draft scores token importance)
+     sparse/system -> SPECPREFILL (target prefills the selected subset)
+   DFlash decode speculation has no per-request row upstream — mirrored as
+   the classic dashboard's model-level sub-row instead (same fields, same
+   strings via the merged catalog). */
+function ifPhaseBadge(p) {
+    // 'Scoring'/'Specprefilling' are pseudo-states: badge class stays
+    // Prefilling (same pulse), only the label changes.
+    const ph = p.phase || '';
+    if (ph === 'specprefill_scoring' || ph === 'specprefill_selected')
+        return { state: 'prefilling', cls: 'Prefilling', key: 'uplift.inflight.scoring' };
+    if (ph.startsWith('specprefill_'))
+        return { state: 'prefilling', cls: 'Prefilling', key: 'uplift.inflight.specprefilling' };
+    return { state: 'prefilling', cls: 'Prefilling', key: 'uplift.inflight.prefilling' };
 }
 function ifLand(sl, tstate, now) {
     // One path for every terminal transition: latch the badge, stamp the
@@ -1309,31 +1309,91 @@ function ifGroup(model) {
     // split exists per model (upstream gap, see U12 ticket finding).
     const mm = document.createElement('span'); mm.className = 'if-mem-meta';
     h.append(mm);
-    // U16: speculative-decoding badge on the model header (SPECPREFILL /
-    // DFLASH / VLM MTP / MTP) — driven by ifSpecPoll(), hidden when the
-    // model runs plain decode.
-    const spec = document.createElement('span');
-    spec.className = 'spill miss if-spec'; spec.style.display = 'none';
-    h.append(spec);
+    // U16-rework: DFlash speculation mirrors the classic dashboard's
+    // model-level sub-row (upstream has no per-request DFlash row). Empty
+    // for non-DFlash engines. Rendered by ifDflash() below renderLive.
+    const df = document.createElement('div');
+    df.className = 'if-dflash'; df.style.display = 'none';
     // QUEUED requests are ordinary slot rows now (see renderLive): one line
     // per request with #position · in · wait, exactly like the classic
     // active-models card. The old "QUEUED ×N (+)" summary collapsed them
     // behind a toggle nobody noticed — the counts it hid were the point.
     const wrap = document.createElement('div');
-    el.append(h, wrap);
+    el.append(h, wrap, df);
     const list = $('live-list');
     const ph = list.querySelector('.empty'); if (ph) ph.remove();
     list.append(el);
-    g = { model, el, wrap, mm, spec };
+    g = { model, el, wrap, mm, df };
     S.ifModels.push(g);
     return g;
+}
+
+/* Classic dashboard.js formatDFlashSessionStats verbatim (issue #2398),
+   strings resolved through the merged catalog (classic keys are served by
+   /uplift/api/locale; tf() carries the English fallback for viewer mode). */
+function ifDflash(g, m) {
+    const d = m.dflash;
+    if (!g.df) return;
+    if (!d || (!d.speculation && !d.pairing_warning)) {
+        g.df.style.display = 'none'; g.df.textContent = ''; return;
+    }
+    const parts = [];
+    const last = d.speculation && d.speculation.last;
+    if (last) {
+        if (last.fallback_ar) {
+            parts.push(C.tf('status.active_models.dflash_fallback_ar',
+                            'fallback AR')
+                       + (last.fallback_reason ? ' · ' + last.fallback_reason : ''));
+        } else {
+            parts.push(Math.round((last.acceptance_ratio || 0) * 100) + '% '
+                       + C.tf('status.active_models.dflash_draft_share', 'draft share'));
+            if (last.accepted_draft_tokens_per_cycle != null)
+                parts.push((last.accepted_draft_tokens_per_cycle || 0).toFixed(2) + ' '
+                           + C.tf('status.active_models.dflash_accepted_draft_per_cycle',
+                                  'accepted draft/cycle'));
+            if (last.tokens_per_cycle != null)
+                parts.push((last.tokens_per_cycle || 0).toFixed(2) + ' '
+                           + C.tf('status.active_models.dflash_output_per_cycle',
+                                  'output/cycle'));
+            parts.push(C.fmtCompact(last.accepted_draft_tokens || 0) + ' '
+                       + C.tf('status.active_models.dflash_draft_tokens_last_request',
+                              'draft tok (last req)'));
+        }
+        const t = d.speculation.totals;
+        if (t && t.requests > 1) {
+            const tp = [];
+            if (t.speculative_requests > 0) tp.push(
+                Math.round((t.acceptance_ratio || 0) * 100) + '% '
+                + C.tf('status.active_models.dflash_draft_share', 'draft share'),
+                (t.accepted_draft_tokens_per_cycle || 0).toFixed(2) + ' '
+                + C.tf('status.active_models.dflash_accepted_draft_per_cycle',
+                       'accepted draft/cycle'),
+                (t.tokens_per_cycle || 0).toFixed(2) + ' '
+                + C.tf('status.active_models.dflash_output_per_cycle', 'output/cycle'),
+                t.speculative_requests + ' '
+                + C.tf('status.active_models.dflash_speculative_requests',
+                       'speculative req'));
+            if (t.fallback_requests > 0) tp.push(
+                t.fallback_requests + ' '
+                + C.tf('status.active_models.dflash_fallback_requests',
+                       'fallback AR req'));
+            if (tp.length) parts.push(
+                C.tf('status.active_models.dflash_session', 'session') + ': '
+                + tp.join(' · '));
+        }
+    }
+    const label = C.tf('status.active_models.dflash_label', 'DFlash');
+    let text = parts.length ? label + ': ' + parts.join(' · ') : '';
+    if (d.pairing_warning) text += (text ? '  ' : '') + '⚠ ' + d.pairing_warning;
+    g.df.textContent = text;
+    g.df.style.display = text ? '' : 'none';
 }
 
 function ifSlot(model, rid) {
     let sl = S.ifSlots.get(rid);
     if (sl) return sl;
     const g = ifGroup(model);
-    sl = { model, rid, state: null, terminal: false, tstate: null,
+    sl = { model, rid, state: null, terminal: false, tstate: null, bkey: null,
            prompt: null, out: null, tps: null, elapsed: null, eta: null,
            processed: null, total: null, cached: null, qpos: null,
            lastSeen: Date.now(),
@@ -1398,7 +1458,11 @@ function ifPaint(sl) {
     sl.pc.title = C.t('uplift.inflight.cached_prefix');
     let label, cls;
     if (sl.terminal)      { label = C.t('uplift.inflight.' + sl.tstate); cls = sl.tstate; }
-    else if (sl.state === 'prefilling') { label = C.t('uplift.inflight.prefilling'); cls = 'Prefilling'; }
+    else if (sl.state === 'prefilling') {
+        // U16-rework: engine-reported phase may relabel this row
+        // SCORING / SPECPREFILL (bkey from ifPhaseBadge; cls unchanged)
+        label = C.t(sl.bkey || 'uplift.inflight.prefilling'); cls = 'Prefilling';
+    }
     else if (sl.state === 'generating') { label = C.t('uplift.inflight.generating'); cls = 'Generating'; }
     else                  { label = C.t('uplift.inflight.queued'); cls = 'Queued'; }
     b.className = 'badge ' + cls; b.textContent = label;
@@ -1438,7 +1502,6 @@ function ifPaint(sl) {
 
 function renderLive(s) {
     const now = Date.now();
-    ifSpecPoll();          // U16: once a minute; renders with whatever landed
     const seen = new Set();
     const waitingBy = new Map();
     const cacheBy = new Map((s.cacheModels || []).map(cm => [cm.id, cm]));
@@ -1452,21 +1515,17 @@ function renderLive(s) {
         if (cm && cm.totalBytes) parts.push(C.t('uplift.inflight.mem_cache', { size: C.fmtBytes(cm.totalBytes) }));
         if (cm && cm.hotBytes) parts.push(C.t('uplift.inflight.mem_hot', { size: C.fmtBytes(cm.hotBytes) }));
         g.mm.textContent = parts.join(' · ');
-        // U16: speculative badge — label straight from the kind (never
-        // translated: SPECPREFILL/DFLASH/MTP are engine setting names).
-        const kind = ifSpecBy.get(m.id);
-        if (kind && g.spec) {
-            g.spec.textContent = kind.toUpperCase().replace('_', ' ');
-            g.spec.title = C.t('uplift.inflight.spec_hint', { kind });
-            g.spec.style.display = '';
-        } else if (g.spec) g.spec.style.display = 'none';
+        // U16-rework: DFlash speculation sub-row (classic mirror; the
+        // engine only offers this per model, not per request).
+        ifDflash(g, m);
         waitingBy.set(m.id, m.waiting || []);
         for (const p of m.prefilling) {
             seen.add(p.rid);
             ifSawLive.add(p.rid);       // ISSUE-4: birth observed this session
             const sl = ifSlot(m.id, p.rid);
             if (sl.terminal) { sl.terminal = false; sl.tstate = null; }  // RESURRECT: stats show it live again — a latched DONE must unlatch or the badge lies while counters run
-            sl.state = 'prefilling';
+            const pb = ifPhaseBadge(p);
+            sl.state = pb.state; sl.bkey = pb.key;
             if (p.prompt != null) sl.prompt = p.prompt;
             if (p.processed != null) sl.processed = p.processed;
             if (p.total != null) sl.total = p.total;
@@ -1481,7 +1540,7 @@ function renderLive(s) {
             ifSawLive.add(gg.rid);      // ISSUE-4 (same as prefilling above)
             const sl = ifSlot(m.id, gg.rid);
             if (sl.terminal) { sl.terminal = false; sl.tstate = null; }  // RESURRECT (same as prefilling above)
-            sl.state = 'generating'; sl.eta = null;
+            sl.state = 'generating'; sl.eta = null; sl.bkey = null;  // decode: phase label expired
             if (gg.prompt != null) sl.prompt = gg.prompt;
             if (gg.generated != null) sl.out = gg.generated;
             if (gg.tps != null) sl.tps = gg.tps;
