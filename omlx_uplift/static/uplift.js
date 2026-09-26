@@ -1510,6 +1510,16 @@ function ifPaint(sl) {
         if (sl.elapsed != null) bits.push(`wait ${C.fmtDuration(Math.round(sl.elapsed))}`);
     } else {
         if (sl.prompt) bits.push(`in ${C.fmtCompact(sl.prompt)}`);
+        // U22: classic's scoring extras (same strings as classic's active
+        // models card): "(draft scored N · selected N (keep%))". Non-zero
+        // only while the draft scoring / selected phase is reported.
+        if (sl.scored || sl.selected) {
+            const d = [];
+            if (sl.scored) d.push('draft scored ' + C.fmtCompact(sl.scored));
+            if (sl.selected) d.push('selected ' + C.fmtCompact(sl.selected)
+                + (sl.keepPct != null ? ` (${sl.keepPct}%)` : ''));
+            bits.push('(' + d.join(' · ') + ')');
+        }
         if (sl.out) bits.push(`out ${C.fmtCompact(sl.out)}`);
         if (sl.tps) bits.push(`${Math.round(sl.tps)} t/s`);
         if (!sl.terminal && sl.state === 'prefilling' && sl.total > 0)
@@ -1552,6 +1562,11 @@ function renderLive(s) {
             if (p.processed != null) sl.processed = p.processed;
             if (p.total != null) sl.total = p.total;
             if (p.cached != null) sl.cached = p.cached;
+            // U22: scoring extras ride through to ifPaint's draft line —
+            // assigned EVERY tick so they vanish when the phase ends.
+            sl.scored = p.scored ?? null;
+            sl.selected = p.selected ?? null;
+            sl.keepPct = p.keepPct ?? null;
             if (p.progress != null && sl.total == null) { sl.total = 1; sl.processed = p.progress; }
             if (p.eta != null) sl.eta = p.eta;
             if (p.elapsed != null) sl.elapsed = p.elapsed;

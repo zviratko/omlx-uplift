@@ -80,6 +80,11 @@ function normalize(raw) {
                 // Badge text keys off THIS, not a model-level setting.
                 phase: typeof p.phase === 'string' ? p.phase : '',
                 detail: typeof p.detail === 'string' ? p.detail : '',
+                // U22: classic's scoring extras (specprefill draft.py:251)
+                // — the "(draft scored N · selected N (keep%))" line.
+                scored: Number.isFinite(p.scored_tokens) ? num(p.scored_tokens) : null,
+                selected: Number.isFinite(p.selected_tokens) ? num(p.selected_tokens) : null,
+                keepPct: Number.isFinite(p.keep_percent) ? num(p.keep_percent) : null,
             })).filter(p => p.rid),
             waiting: (Array.isArray(m.waiting) ? m.waiting : []).map(w => ({
                 rid: String(w.request_id || ''),
