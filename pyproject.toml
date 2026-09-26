@@ -37,3 +37,8 @@ include = ["omlx_uplift*"]
 # deploy script, because pip data_files placement varies across venv
 # layouts. Without the .pth everything still works via `omlx-uplift serve`.
 # DMG environments never install this package and stay untouched.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"

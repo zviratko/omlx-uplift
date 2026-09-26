@@ -9,12 +9,17 @@ const fs = require('fs');
 const path = require('path');
 
 const { allStaticJs } = require('./static-src.cjs');
-const ROOT = path.join(__dirname, '..', '..', '..');   // repo root (tests live in projects/omlx-uplift/tests)
-const routes = fs.readFileSync(path.join(ROOT, 'omlx/admin/routes.py'), 'utf8');
+// REPO-1: standalone repo has no classic checkout next door. OMLX_SRC points
+// at one (monorepo: default ../../.. still works); without it the drift
+// checks skip so a bare clone stays green.
+const ROOT = process.env.OMLX_SRC || path.join(__dirname, '..', '..', '..');
+const ROUTES_FILE = path.join(ROOT, 'omlx/admin/routes.py');
+const HAS_CLASSIC = fs.existsSync(ROUTES_FILE) && fs.existsSync(path.join(ROOT, 'scripts', 'uplift-mock.py'));
+const routes = HAS_CLASSIC ? fs.readFileSync(ROUTES_FILE, 'utf8') : '';
 // PH2-1 stage 0: read the whole static JS surface, not uplift.js by name —
 // the split into per-section files must not blind this drift test.
 const uplift = allStaticJs();
-const mock = fs.readFileSync(path.join(ROOT, 'scripts', 'uplift-mock.py'), 'utf8');
+const mock = HAS_CLASSIC ? fs.readFileSync(path.join(ROOT, 'scripts', 'uplift-mock.py'), 'utf8') : '';
 const modelspec = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'modelspec.js'), 'utf8');
 
 /* ---- schema keys from GlobalSettingsRequest ---- */
@@ -46,7 +51,7 @@ function extractedJsConst(name, src) {
     return eval(`(${src.slice(i, j + 1)})`);
 }
 
-test('GS_MAP + integration keys cover the full GlobalSettingsRequest schema', () => {
+test('GS_MAP + integration keys cover the full GlobalSettingsRequest schema', { skip: !HAS_CLASSIC && 'no classic checkout (set OMLX_SRC)' }, () => {
     const gsMap = extractedJsConst('GS_MAP', uplift);
     const skip = extractedJsConst('GS_PAYLOAD_SKIP', uplift);
     const integBlock = [...uplift.matchAll(/INTEG_PREFIXED = new Set\(\[([\s\S]*?)\]\)/g)][0];
@@ -65,7 +70,7 @@ test('GS_MAP + integration keys cover the full GlobalSettingsRequest schema', ()
         `schema keys missing from Uplift save payload: ${missing.join(', ')}`);
 });
 
-test('gateway GS_FLAT_MAP keeps every GS_MAP key it must overlay in shadow mode', () => {
+test('gateway GS_FLAT_MAP keeps every GS_MAP key it must overlay in shadow mode', { skip: !HAS_CLASSIC && 'no classic checkout (set OMLX_SRC)' }, () => {
     const gsMap = extractedJsConst('GS_MAP', uplift);
     const m = mock.match(/GS_FLAT_MAP = \{([\s\S]*?)\n\}/);
     assert.ok(m, 'GS_FLAT_MAP found in uplift-mock.py');
@@ -87,7 +92,7 @@ test('payload skip list stays minimal', () => {
 // P1A-8: model-settings editor parity. Every ModelSettingsRequest field must
 // be reachable in the Uplift editor (modelspec.js / uplift.js) unless it is a
 // deliberate exclusion with its classic counterpart recorded here.
-test('ModelSettingsRequest fields stay reachable in the Uplift editor', () => {
+test('ModelSettingsRequest fields stay reachable in the Uplift editor', { skip: !HAS_CLASSIC && 'no classic checkout (set OMLX_SRC)' }, () => {
     const m = routes.match(/class ModelSettingsRequest\(BaseModel\):([\s\S]*?)\n\n(?:@|class )/);
     assert.ok(m, 'ModelSettingsRequest class found in routes.py');
     const fields = [...m[1].matchAll(/^ {4}([a-z_0-9]+)\s*:/gm)].map(x => x[1]);
@@ -107,7 +112,8 @@ test('ModelSettingsRequest fields stay reachable in the Uplift editor', () => {
 // oMLX answers, so CI without a running server stays green.
 test('global-settings round-trip is a no-op on the real server', { timeout: 30000 }, () => {
     const { spawnSync } = require('child_process');
-    const script = require('path').join(__dirname, '..', '..', '..', 'tests', 'ui', 'p1a7_interop.py');
+    const script = [require('path').join(ROOT, 'tests', 'ui', 'p1a7_interop.py'), require('path').join(__dirname, '..', '..', '..', 'tests', 'ui', 'p1a7_interop.py')].find(fs.existsSync);
+    if (!script) { console.log('interop SKIP: p1a7_interop.py not found (standalone repo)'); return; }
     const r = spawnSync('python3', [script], { encoding: 'utf8', timeout: 25000 });
     const out = (r.stdout || '') + (r.stderr || '');
     if (r.status === 2) { console.log('interop SKIP:', out.trim()); return; }
