@@ -1274,7 +1274,16 @@ function ifTerminal(rid) {
     return null;                                    // queued/generating = live
 }
 
-const IF_LINGER_MS = 8000;   // ISSUE-4: how long a landed row stays readable
+const IF_LINGER_MS = 5000;   // BUG-2 (user: "~5s"): how long a landed row stays readable
+/* BUG-2: rids whose DONE row already left the card. The /requests poll
+   replays them forever and the feed loop would re-create + re-land a fresh
+   slot on every tick (row "never disappears, comes back"). Evicted = gone
+   for the session. Bounded set (session-long idle pages don't grow it). */
+const ifEvicted = new Set();
+function ifMarkEvicted(rid) {
+    ifEvicted.add(rid);
+    if (ifEvicted.size > 500) ifEvicted.delete(ifEvicted.values().next().value);
+}
 /* U16-rework (user): the SPECPREFILL marker must sit on the REQUEST that is
    speculatively prefilling, not on the model header just because the setting
    is on. The engine reports the real per-request phase in the prefill
@@ -1298,6 +1307,13 @@ function ifPhaseBadge(p) {
 function ifLand(sl, tstate, now) {
     // One path for every terminal transition: latch the badge, stamp the
     // landing time (eviction is timed from here), keep nothing else sticky.
+    // BUG-2 (land-once): termAt is the time of FIRST landing for this
+    // state. A RESURRECT→re-land flap (stats snapshot flickers the rid
+    // live/absent) that lands in the SAME state keeps the original stamp,
+    // so the 5 s window can never be stretched away by flapping. Only a
+    // real state→different-state transition (done→aborted in the feed)
+    // re-stamps.
+    if (sl.terminal && sl.tstate === tstate) { ifPrune(sl.model); return; }
     sl.terminal = true; sl.tstate = tstate; sl.termAt = now;
     ifPrune(sl.model);       // burst guard: cap terminal rows per model
 }
@@ -1439,6 +1455,7 @@ function ifPrune(model) {
     if (term.length <= IF_MAX_TERMINAL) return;
     for (const sl of term.slice(0, term.length - IF_MAX_TERMINAL)) {
         sl.el.remove(); S.ifSlots.delete(sl.rid);
+        ifMarkEvicted(sl.rid);   // BUG-2: pruned = gone, replay must not rebuild it
     }
 }
 
@@ -1572,6 +1589,9 @@ function renderLive(s) {
     }
     // short requests only the SSE/poll feed ever saw: brief terminal line
     for (const [rid, fr] of S.reqFeedRows) {
+        // BUG-2: once a row has been evicted, the ring-buffer replay must
+        // not resurrect it — no slot lookup, no re-create, no re-land.
+        if (ifEvicted.has(rid)) continue;
         const sl = S.ifSlots.get(rid);
         if (sl) {
             if (!sl.terminal && fr.state === 'complete') {
@@ -1594,6 +1614,7 @@ function renderLive(s) {
     for (const [rid, sl] of [...S.ifSlots]) {
         if (sl.terminal && now - sl.termAt > IF_LINGER_MS) {
             sl.el.remove(); S.ifSlots.delete(rid);
+            ifMarkEvicted(rid);   // BUG-2: eviction is final for the session
         }
     }
     // one QUEUED slot row per model — #position · in · wait, visible
@@ -1638,7 +1659,14 @@ function renderLive(s) {
             const sa = +a.dataset.ifseq || 0, sb = +b.dataset.ifseq || 0;
             return sa - sb;
         });
-        for (const k of kids) g.wrap.append(k);   // append moves in order
+        // BUG-2: append() every child EVERY tick churns the DOM (hover,
+        // scroll, transitions) and reads as constant reordering. Move nodes
+        // only when the desired order actually differs from the DOM order —
+        // a stable tick touches zero nodes.
+        const cur = [...g.wrap.children];
+        if (cur.length !== kids.length || kids.some((k, i) => k !== cur[i])) {
+            for (const k of kids) g.wrap.append(k);   // append moves in order
+        }
     }
     // ISSUE-4: hide model groups with nothing to show — no live row, nothing
     // queued. Loaded-but-idle models must not clutter the IN-FLIGHT card.
