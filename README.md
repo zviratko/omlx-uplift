@@ -91,12 +91,13 @@ default: nothing in the omlx tree changes, patches are strict unified
 diffs gated against the exact keg bytes. It has hard limits, though: a
 diff cannot carry NEW files, generated code, custom Metal kernels, or
 work-in-progress commits that are not a clean patch yet. When you hit
-those, use the companion formula instead:
+those, use the companion formula instead — `dev install` drives brew for
+you (first build `brew install --HEAD zviratko/uplift/omlx-dev`, rebuilds
+`brew reinstall`), so no manual brew step is needed:
 
 ```bash
-brew install zviratko/uplift/omlx-dev   # builds omlx from YOUR git checkout
 omlx-uplift dev bootstrap               # one-time questionnaire (or: --origin URL)
-omlx-uplift dev install                 # materialize + install the dev keg
+omlx-uplift dev install                 # materialize build patches + build the dev keg
 ```
 
 How it works: your checkout stays PRISTINE (upstream history only). Uplift
