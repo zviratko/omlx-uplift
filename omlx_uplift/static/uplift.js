@@ -771,7 +771,7 @@ function _neededUnits(el) {
             // yesterday's size — demand = the CSS min-height floor instead.
             // Otherwise a grown card can never shrink (rect ratchet).
             const lg = plot.parentElement.querySelector('.u-legend');
-            const floor = plot.classList.contains('metric-plot') ? 64
+            const floor = plot.classList.contains('metric-plot') ? 96
                 : Math.max(210, parseFloat(getComputedStyle(plot).minHeight) || 210)
                   + (lg ? 20 : 0);
             bottom = Math.max(bottom, child.getBoundingClientRect().top - pr.top + floor);

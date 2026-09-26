@@ -101,19 +101,19 @@
         // Metric cards: 4 per row (w=6), compact chart fill. The board
         // owner may drop any of them; removed ones stay removed
         // (mergedBlocks memo in uplift.js).
-        { id: 'met-avg-generation-tps', x: 0, y: 87, w: 6, h: 15 },
-        { id: 'met-avg-prefill-tps', x: 6, y: 87, w: 6, h: 15 },
-        { id: 'met-rate-completion-tokens-s', x: 12, y: 87, w: 6, h: 15 },
-        { id: 'met-rate-prompt-tokens-s', x: 18, y: 87, w: 6, h: 15 },
-        { id: 'met-rate-requests-s', x: 0, y: 102, w: 6, h: 15 },
-        { id: 'met-cache-efficiency', x: 6, y: 102, w: 6, h: 15 },
-        { id: 'met-engines-active-requests', x: 12, y: 102, w: 6, h: 15 },
-        { id: 'met-sys-percent', x: 18, y: 102, w: 6, h: 15 },
-        { id: 'met-sys-used-bytes', x: 0, y: 117, w: 6, h: 15 },
-        { id: 'met-cache-total-bytes', x: 6, y: 117, w: 6, h: 15 },
-        { id: 'met-engines-loaded', x: 12, y: 117, w: 6, h: 15 },
-        { id: 'met-sys-total-bytes', x: 18, y: 117, w: 6, h: 15 },
-        { id: 'reqfeed', x: 0, y: 132, w: COLUMNS, h: 18 },
+        { id: 'met-avg-generation-tps', x: 0, y: 87, w: 6, h: 20 },
+        { id: 'met-avg-prefill-tps', x: 6, y: 87, w: 6, h: 20 },
+        { id: 'met-rate-completion-tokens-s', x: 12, y: 87, w: 6, h: 20 },
+        { id: 'met-rate-prompt-tokens-s', x: 18, y: 87, w: 6, h: 20 },
+        { id: 'met-rate-requests-s', x: 0, y: 107, w: 6, h: 20 },
+        { id: 'met-cache-efficiency', x: 6, y: 107, w: 6, h: 20 },
+        { id: 'met-engines-active-requests', x: 12, y: 107, w: 6, h: 20 },
+        { id: 'met-sys-percent', x: 18, y: 107, w: 6, h: 20 },
+        { id: 'met-sys-used-bytes', x: 0, y: 127, w: 6, h: 20 },
+        { id: 'met-cache-total-bytes', x: 6, y: 127, w: 6, h: 20 },
+        { id: 'met-engines-loaded', x: 12, y: 127, w: 6, h: 20 },
+        { id: 'met-sys-total-bytes', x: 18, y: 127, w: 6, h: 20 },
+        { id: 'reqfeed', x: 0, y: 147, w: COLUMNS, h: 18 },
     ];
 
     function defaultLayout() {
@@ -139,7 +139,11 @@
         const y = Math.max(0, toInt(raw.y, 0));
         // Freeform boards need explicit heights — without them GridStack
         // would auto-stack. Content refits may still grow h afterwards.
-        const h = Math.min(240, Math.max(1, toInt(raw.h, 10)));
+        // Metric sparklines had h=15 (65px plot): the 0-line sat jammed on
+        // the card edge. 20 rows (+30%) gives the plot real height; the
+        // minimum also migrates boards already saved with 15. (2026-09-26)
+        const hMin = String(id).startsWith('met-') ? 20 : 1;
+        const h = Math.min(240, Math.max(hMin, toInt(raw.h, 10)));
         return { id, x, y, w, h };
     }
 

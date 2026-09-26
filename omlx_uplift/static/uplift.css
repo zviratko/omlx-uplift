@@ -1551,8 +1551,8 @@ main.grid-stack .metric-card h2 { margin: 0 -8px 4px; }          /* same: stays 
 main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metric-card {
     flex: 1 0 100%; min-height: 0; }
 .metric-card .card-pad { flex: 1 1 auto; display: flex; flex-direction: column; }
-.metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 64px; }
-.metric-plot { flex: 1 1 auto; min-height: 64px; min-width: 0; }
+.metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 96px; }
+.metric-plot { flex: 1 1 auto; min-height: 96px; min-width: 0; }
 
 /* ---------------------------------------------------------------------------
    ENV-2 (rev 2): experimental env tunables render as ordinary rows inside

@@ -737,7 +737,7 @@ function fitMetricPlot(id) {
     // locks the chart at its largest-ever height and bleeds past the box.
     const pad = e.host.closest('.card-pad');
     const cont = e.host.closest('.grid-stack-item-content');
-    let h = 64;
+    let h = 96;   // matches .metric-plot min-height (card taller for the 0-line, 2026-09-26)
     if (pad && cont) {
         // Bottom reference = the GRID BOX, never the pad: a stretched pad
         // reports its own stale grown height and the loop gets stuck at
@@ -756,7 +756,13 @@ function fitMetricPlot(id) {
 function fitAllMetricPlots() { for (const id of metricCharts.keys()) fitMetricPlot(id); }
 function metricXAxis(win, col) {
     const dayish = win >= 86400;
-    return { stroke: col.dim, width: 1, size: 26, font: axisFont,
+    // Sparkline cards: uPlot never fitted readable time labels into the short
+    // band (default 30° rotation + tick space), so its 26px band was dead
+    // space that pushed the y=0 line to card mid-height. Hide the axis
+    // entirely — the band collapses, the 0-line sits at the bottom with the
+    // 6px plot padding keeping the label off the card edge. Timespans are
+    // already selected by the 1m..30d buttons above each chart. (2026-09-26)
+    return { show: false, stroke: col.dim, width: 1, rotate: 0, font: axisFont,
              values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
                  dayish ? { month: 'short', day: 'numeric' }
                         : { hour: '2-digit', minute: '2-digit' })) };
