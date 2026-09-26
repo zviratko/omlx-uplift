@@ -613,9 +613,18 @@ function applySkinCss(dir) {
         link.addEventListener('load', layoutTaglineBand, { once: true });
         link.setAttribute('href', href);
     } else {
-        // same href (boot script pre-added the link): stylesheet is live —
-        // measure after styles apply
-        requestAnimationFrame(layoutTaglineBand);
+        // same href (boot script pre-added the link). Whether the sheet is
+        // live is only knowable by READING link.sheet inside the callback —
+        // one bare rAF loses the race in a hidden tab (rAF doesn't run
+        // until visible, and the load event fired long ago: U23 cold-load
+        // defect). The sheet property is the sync truth; the load listener
+        // stays as backup if it's still pending.
+        const measure = () => {
+            if (link.sheet) layoutTaglineBand();
+        };
+        link.addEventListener('load', layoutTaglineBand, { once: true });
+        requestAnimationFrame(() => { measure(); });
+        if (link.sheet) layoutTaglineBand();   // already live: paint now
     }
 }
 
@@ -632,7 +641,15 @@ function layoutTaglineBand() {
     h.classList.toggle('has-tagline', filled);
     if (!filled) return;
     const tabs = h.querySelector('nav.tabs');
-    const free = tabs && tabs.getBoundingClientRect().left - b.getBoundingClientRect().left - 10;
+    const bb = b.getBoundingClientRect(), tb = tabs.getBoundingClientRect();
+    // dy>0: menu in row 2 (narrow wrap, or the U23 tall-tagline row) —
+    // the tagline may span the FULL header width, and clamping it to the
+    // menu's edge would clamp itself to ~0 (chicken-and-egg). The row is
+    // reserved and the 2-line clamp + ellipsis stays as safeguard.
+    // Same row: band ends at the menu's left edge (it can never paint
+    // behind the tabs).
+    const free = tb.top > bb.bottom - 4 ? innerWidth - bb.left - 24
+                                       : tb.left - bb.left - 10;
     if (free > 80) h.style.setProperty('--tagline-w', Math.floor(free) + 'px');
 }
 addEventListener('resize', layoutTaglineBand, { passive: true });

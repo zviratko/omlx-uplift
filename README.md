@@ -33,7 +33,7 @@ Declarative model:
 - Nothing writes the keg from the dashboard. Enable, disable, promote,
   rollback and reconcile are bookkeeping; files change only when an
   interpreter with the `.pth` hook boots (the `omlx serve` start, a
-  launchd respawn — or `omlx-uplift patches apply` when you want it now).
+  launchd respawn — or `omlx-uplift patch apply` when you want it now).
 - When the startup engine really changed files, it re-execs the
   interpreter once before engines start, so the server process never
   imports a half-patched tree.
@@ -75,10 +75,10 @@ verify-only — no writes):
 ```bash
 OMLX_UPLIFT_NO_PATCHES=1 omlx serve      # env kill switch, one launch
 touch ~/.omlx/uplift/patches.disabled    # sentinel, until removed
-omlx-uplift patches disable-all          # sentinel + disable every patch
-omlx-uplift patches status               # JSON view for recovery
-omlx-uplift patches apply                # reconcile now (no re-exec)
-omlx-uplift patches check                # re-fetch sources, report drift
+omlx-uplift patch disable-all          # sentinel + disable every patch
+omlx-uplift patch status               # JSON view for recovery
+omlx-uplift patch apply                # reconcile now (no re-exec)
+omlx-uplift patch check                # re-fetch sources, report drift
 ```
 
 If a patch set wedges boot, use a kill switch, fix the manifest by hand

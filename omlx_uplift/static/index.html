@@ -50,6 +50,22 @@ try {
 
 <header class="top">
     <div class="logo"><span class="dot" id="status-dot" data-icon="logo-dot"></span> oMLX <span class="logo-flavor" id="logo-flavor">Uplift</span><span class="logo-below"></span></div>
+    <!-- Stats live LEFT of the menu, in reading order hardware | watts |
+         temp | uptime (power/temp stay hidden while macmon is absent).
+         Wide: they sit in the space behind the logo, which also pushes the
+         menu right — more room for a skin's below-logo wordmark (the
+         tagline band width is measured to the menu's left edge). Narrow:
+         they move to their own row ABOVE the menu instead of being hidden
+         behind it (see .hdr-stats @ media rules). -->
+    <span class="hdr-stats">
+        <span class="chip" id="chip-device">—</span>
+        <span class="chip" id="chip-power" hidden title="Package power, 60 s mean">—</span>
+        <span class="chip" id="chip-temp" hidden title="Max CPU/GPU temp, 60 s">—</span>
+        <span class="chip" id="chip-uptime">—</span>
+        <!-- gateway status only exists for the ?api= dev proxy mode; native
+             hosting IS the server, so the old 'direct' chip stays hidden -->
+        <span class="chip" id="chip-gateway" title="Mock gateway status" hidden>—</span>
+    </span>
     <nav class="tabs" id="tabs">
         <a href="#status" data-tab="status" data-i18n="uplift.tab.status">Status</a>
         <a href="#cluster" data-tab="cluster" id="nav-cluster" hidden data-i18n="navbar.tab.cluster">Cluster</a>

@@ -426,7 +426,7 @@ def _omlx_root() -> str | None:
             return None
     # The uplift CLI runs in its OWN venv (tap install) where omlx is not
     # importable — probe the standard Homebrew keg layout as a fallback so
-    # `omlx-uplift patches` still reaches the live tree for recovery.
+    # `omlx-uplift patch` still reaches the live tree for recovery.
     import glob
 
     prefixes = ["/opt/homebrew", "/usr/local"]

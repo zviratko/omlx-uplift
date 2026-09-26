@@ -42,7 +42,9 @@ def _dispatchable_commands():
 
 class TestHelpSurface(unittest.TestCase):
     def test_every_command_listed_in_help(self):
-        dispatch = _dispatchable_commands() - {"help", "man"}
+        # 'patches' is the documented compatibility alias of 'patch' —
+        # dispatchable but deliberately absent from COMMANDS.
+        dispatch = _dispatchable_commands() - {"help", "man", "patches"}
         listed = {c for c, _ in helpmod.COMMANDS}
         self.assertEqual(dispatch - listed, set(),
                          "commands main() dispatches but --help omits")

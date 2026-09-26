@@ -416,13 +416,21 @@ def cmd_patches(argv=None) -> int:
       check        re-fetch sources, report drift (JSON)
       disable-all  kill switch on (sentinel) + disable every patch
       add          fetch -> gate -> store a patch (id + --pr/--url/--file)
-    Also: --enable-sentinel-off removes the sentinel after manual fixes."""
+      enable|disable|remove   per-patch control (same paths as the dashboard)
+    Also: --enable-sentinel-off removes the sentinel after manual fixes.
+    Command name: 'omlx-uplift patch' (singular); legacy 'patches' still
+    dispatches here for compatibility."""
     import json as _json
 
-    ap = argparse.ArgumentParser(prog="omlx-uplift patches")
+    ap = argparse.ArgumentParser(prog="omlx-uplift patch")
     ap.add_argument("action", choices=["status", "apply", "check",
-                                       "disable-all", "add"])
-    ap.add_argument("id", nargs="?", help="patch id (add)")
+                                       "disable-all", "add",
+                                       "enable", "disable", "remove"])
+    ap.add_argument("id", nargs="?",
+                    help="patch id (add/enable/disable/remove)")
+    ap.add_argument("--approve", choices=["once", "always"],
+                    help="accept the desired version's safeguard codes so "
+                         "auto-apply is allowed (enable)")
     ap.add_argument("--pr", help="GitHub PR as repo/N, e.g. jundot/omlx/123")
     ap.add_argument("--url", help="plain URL of a diff file")
     ap.add_argument("--file", help="local diff file (upload kind)")
@@ -483,6 +491,18 @@ def cmd_patches(argv=None) -> int:
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 
+    if args.action in ("enable", "disable", "remove"):
+        if not args.id:
+            ap.error(f"{args.action} needs a patch id")
+        if args.action == "remove":
+            out = patchsource.remove_patch(store, args.id, tree_root)
+        else:
+            out = patchsource.set_enabled(store, args.id,
+                                          args.action == "enable",
+                                          approve=args.approve)
+        print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
+
     if args.action == "status":
         out = patchsource.view(store, tree_root, _patches.keg_id(root))
         # DEV-6: show ALL patches by default; --scope filters
@@ -501,7 +521,7 @@ def cmd_patches(argv=None) -> int:
             store.set_state_if(patch, "disabled", "disabled by CLI")
         store.save(manifest)
         with open(store.sentinel_path, "w") as fh:
-            fh.write("disabled via omlx-uplift patches disable-all\n")
+            fh.write("disabled via omlx-uplift patch disable-all\n")
         out = {"ok": True, "sentinel": store.sentinel_path}
     print(_json.dumps(out, indent=2))
     return 0 if out.get("ok", True) else 1
@@ -1300,14 +1320,18 @@ def main() -> int:
         from .help import show_man
         return show_man()
     if sys.argv[1] not in {
-            "serve", "view", "install", "uninstall", "patches", "kernel",
-            "skin", "dev"}:
+            "serve", "view", "install", "uninstall", "patch", "patches",
+            "kernel", "skin", "dev"}:
         print(f"omlx-uplift: unknown command {sys.argv[1]!r}\n",
               file=sys.stderr)
         from .help import print_help
         print_help()
         return 1
     cmd = sys.argv[1]
+    if cmd == "patches":
+        # compatibility alias: the command renamed to singular 'patch'
+        # (it always took one id at a time). Same handler, same flags.
+        cmd = "patch"
     rest = sys.argv[2:]
     if cmd == "skin":
         # 'omlx-uplift skin compile …' — the action is rest[0], not rest itself
@@ -1317,7 +1341,7 @@ def main() -> int:
             return 1
         return cmd_skin(rest)
     return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
-            "uninstall": cmd_uninstall, "patches": cmd_patches,
+            "uninstall": cmd_uninstall, "patch": cmd_patches,
             "kernel": cmd_kernel, "dev": cmd_dev}[cmd](rest)
 
 

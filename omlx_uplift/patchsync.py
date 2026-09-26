@@ -19,7 +19,7 @@ PAT-0 restart semantics (option B):
 Time box: the whole sync must finish within 60 s or remaining work is
 deferred (states stay pending) — boot never stalls indefinitely.
 
-The re-exec contract also serves `omlx-uplift patches apply` (CLI): that
+The re-exec contract also serves `omlx-uplift patch apply` (CLI): that
 command calls sync_at_startup(allow_reexec=False) and reports the result.
 """
 

@@ -87,11 +87,26 @@ would 404 after the next start.
 .Op Fl -python Ar PATH
 .Xc
 Remove the .pth again.
-.It Xo Ic patches
+.It Xo Ic patch
 .Ic status | apply | check | disable-all
 .Xc
+.It Xo Ic patch
+.Ic add Ar id
+.Pq Fl -pr Ar repo/N | Fl -url Ar URL | Fl -file Ar F
+.Op Fl -scope Ar omlx|dev|both
+.Xc
+.It Xo Ic patch
+.Ic enable | disable Ar id
+.Op Fl -approve Ar once|always
+.Xc
+.It Ic patch Ic remove Ar id
 Out-of-band patch-carrier recovery when the dashboard is unreachable:
 the same engine the .pth startup reconcile uses, no re-exec, JSON output.
+The command is singular
+.Ic patch ;
+legacy
+.Ic patches
+is accepted as an alias for compatibility.
 .It Xo Ic kernel
 .Ic list | rebuild Ar name
 .Op Fl -src Ar PATH

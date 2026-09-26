@@ -21,8 +21,8 @@ COMMANDS = [
     ("install", "mount uplift into an omlx python (REQUIRED after every"
                 " 'brew upgrade omlx')"),
     ("uninstall", "remove the mount (.pth) again"),
-    ("patches", "status|apply|check|disable-all — patch recovery without"
-                " the dashboard"),
+    ("patch", "status|apply|check|disable-all|enable|disable|remove — patch"
+              " recovery without the dashboard ('patches' = legacy alias)"),
     ("kernel", "list|rebuild <name> — rebuild ONE native kernel in the keg"),
     ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
     ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure|kegs —"
@@ -40,12 +40,13 @@ COMMAND_USAGE = {
     "install": ("omlx-uplift install [--python PATH] [--yes|--keep-skins]"
                 " [--formula NAME]"),
     "uninstall": "omlx-uplift uninstall [--python PATH]",
-    "patches": ("omlx-uplift patches status|apply|check|disable-all"
-                " [--json]\n"
-                "                 add --id ID (--pr R/N | --url U | --file F)"
-                " [--scope omlx|dev|both]\n"
-                "                 enable|disable --id ID [--approve"
-                " once|always]"),
+    "patch": ("omlx-uplift patch status|apply|check|disable-all\n"
+              "                 patch add ID (--pr R/N | --url U | --file F)"
+              " [--scope omlx|dev|both]\n"
+              "                 patch enable|disable ID [--approve"
+              " once|always]\n"
+              "                 patch remove ID\n"
+              "                 ('patches' is accepted as a legacy alias)"),
     "kernel": ("omlx-uplift kernel list\n"
                "                 kernel rebuild <name> [--src PATH]"),
     "skin": ("omlx-uplift skin compile <dir> [-o out.yml]\n"
@@ -90,7 +91,8 @@ def print_help(cmd: str | None = None) -> int:
     stdout is not a tty (pipes, logs) — same rule as the install preview."""
     out = sys.stdout
     if cmd:
-        usage = COMMAND_USAGE.get(cmd)
+        usage = COMMAND_USAGE.get(cmd) or COMMAND_USAGE.get(
+            "patch" if cmd == "patches" else "")
         if not usage:
             print(f"no usage for '{cmd}'", file=sys.stderr)
             return 1

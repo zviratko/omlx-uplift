@@ -222,21 +222,27 @@ header.top .spacer { flex: 1; }
 header.top .chip, header.top .tabs a, header.top .dd-btn { white-space: nowrap; }
 header.top .chip { flex-shrink: 0; }   /* never squeeze the box under the
     nowrap text — the tabs strip absorbs width pressure instead */
-/* graceful tiering before the 900px mobile wrap (measured: with both chips
-   the tabs strip starts clipping just under ~1265px; headroom for longer
-   uptime strings and wider locales, drop the device chip at 1300, the
-   uptime chip and tab padding at 1140), so the icons and the classic-home
-   link never overlap at any window width. */
-@media (max-width: 1300px) { header.top #chip-device { display: none; } }
+/* The status chips travel as ONE unit (.hdr-stats) between the logo and
+   the menu (index.html order: hardware | watts | temp | uptime). Wide:
+   they occupy the empty band behind the logo and push the menu rightward,
+   which is also what widens the tagline band for skins (layoutTaglineBand
+   measures to the menu's left edge). Narrow: instead of being hidden (the
+   old tiering dropped chips at 1300/1140) or clipped behind the nowrap
+   tabs (the reported overlap bug), they move to their own row ABOVE the
+   menu: order re-sequence + tabs forced onto a full-width second line. */
+header.top .hdr-stats { display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0; }
+@media (max-width: 1140px) {
+    header.top { flex-wrap: wrap; row-gap: 8px; }
+    header.top .hdr-stats { order: 1; }
+    header.top .tabs { order: 2; flex-basis: 100%; }
+}
 /* tabs padding 14px→6px at ALL widths: with nowrap text the strip cannot
    shrink past its label floor, and the 7-tab cluster build + both status
    chips need ~1240px while the 1280px wrap cap limits the header to ~1216
    at ANY viewport. 6px side padding buys the ~70px that gap 14→10 does
    not, keeping every label one line and unbroken at any window width. */
 header.top .tabs a, header.top .dd-btn { padding: 9px 6px; }
-@media (max-width: 1140px) {
-    header.top .chip { display: none; }
-}
 @media (max-width: 930px) {
     /* last shave before the mobile wrap at 900: the 7-tab cluster build
        still clipped its own strip by up to 21px at 901px (measured) */
@@ -975,6 +981,17 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .dd-menu a:last-child { border-bottom: 0; }
 .dd-menu a:hover { background: var(--ink); color: var(--bg); }
 .dd-menu--right { left: auto; right: -1px; min-width: 130px; }
+/* Skin picker: names are free-form (crate labels, pinned version dirs) and
+   were clipped by the 200px floor's siblings. The menu now hugs its
+   content — width comes from the longest entry (up to ~24ch of the 11px
+   uppercase mono), never wraps, and gets an ellipsis only past the cap.
+   Other header menus keep their fixed floors untouched. */
+#dd-theme-menu { min-width: max-content; max-width: fit-content; }
+#dd-theme-menu a { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* cap reserves 24 CHARS OF TEXT for the entry — the links are border-box
+   with 14px side padding (rides on top of the ch budget) and 0.08em
+   letter-spacing per char (NOT included in ch), so both are added. */
+#dd-theme-menu .skin-entry { max-width: calc(24ch + 2em + 28px); }
 .dd-menu a.active { background: var(--ink); color: var(--bg); }
 
 /* ---- Skin system (v1) ----
