@@ -21,6 +21,7 @@ const CH_GLUE = {
     get _padObserver() { return window.Uplift._chartGlue._padObserver; },
     get removeCard() { return window.Uplift._chartGlue.removeCard; },
     get applyI18n() { return window.Uplift._chartGlue.applyI18n; },
+    get onGatedCardCreated() { return window.Uplift._chartGlue.onGatedCardCreated; },
 };
 /* ---------------- charts ---------------- */
 const axisFont = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -233,7 +234,11 @@ function legendUpdater() {
             }
             const colData = c.data[sIdx + 1];
             const v = colData && colData.length ? colData[i] : null;
-            cell.textContent = (v === null || v === undefined) ? '—' : seriesValue(v);
+            // Honour the series' own value formatter (U19/U20 multi-unit
+            // cards: %, W, °C must not render as bare compact numbers).
+            const ser = c.series[sIdx + 1];
+            const fn = (ser && typeof ser.value === 'function') ? ser.value : seriesValue;
+            cell.textContent = (v === null || v === undefined) ? '—' : fn(v);
         });
     };
 }
@@ -610,6 +615,9 @@ const _seq = {};
 function metricFormat(def) {
     if (def.fmt === 'bytes') return v => (v === null || v === undefined ? '—' : C.fmtBytes(v));
     if (def.fmt === 'pct') return v => (v === null || v === undefined ? '—' : v.toFixed(1) + '%');
+    if (def.fmt === 'count') return v => (v == null ? '—' : String(Math.round(v)));
+    if (def.fmt === 'watts') return v => (v == null ? '—' : v.toFixed(1) + ' W');
+    if (def.fmt === 'temp') return v => (v == null ? '—' : Math.round(v) + ' °C');
     if (def.key === 'engines.active_requests') return v => (v == null ? '—' : String(Math.round(v)));
     return seriesValue;
 }
@@ -621,20 +629,75 @@ function metricFormat(def) {
 function metricZeroFloor(key) {
     return true;   // every small metric card floors at 0
 }
-function metricYScales(id, def) {
-    return { x: { time: true, range: pinnedXRange(id) },
-             y: Object.assign({ auto: true },
-                 metricZeroFloor(def.key) ? { range: ZERO_FLOOR_RANGE } : null) };
-}
 function metricLabel(key) {
-    return key.replace(/^(rate|tot|engines|mem|cache)\./, '').replace(/_/g, ' ')
+    const s = key.replace(/^(rate|tot|engines|mem|cache|pfx|spec|queue|pwr|therm|fan)\./, '')
+        .replace(/_/g, ' ')
         .replace(/tps$/, 'tok/s');
+    // U19/U20 human names for the uglier auto-translations.
+    return ({ 'token hit pct': 'token hit %', 'lookup hit pct': 'lookup hit %',
+              'saved tokens min': 'saved tok/min', 'restored tokens min': 'restored tok/min',
+              'total w': 'total W', 'cpu w': 'CPU W', 'gpu w': 'GPU W', 'ane w': 'ANE W',
+              'cpu temp c': 'CPU °C', 'gpu temp c': 'GPU °C', 'max rpm': 'max RPM',
+              'max pct': 'fan %', 'tokens min': 'tok/min', 'draw': 'power draw',
+              'cache savings': 'prefill cache savings', 'efficiency': 'prefix cache efficiency',
+              'savings': 'specprefill savings', 'depth': 'queue depth', 'temp': 'temperature' })[s] || s;
+}
+/* Series label for legends/tips: locale first (uplift.metric.<key>), auto
+   fallback second. Chart series labels are JS-built, so they go through
+   here rather than [data-i18n]. */
+function metricSeriesLabel(key) {
+    return (C.tf && C.tf('uplift.metric.' + key, metricLabel(key))) || metricLabel(key);
 }
 /* Build the DOM for one metric card (called once per card, at boot; the
    element is what the grid parks/places from then on). */
+/* Options for one metric card, shared by create + reinit (theme/skin).
+   Multi-series defs (U19/U20) draw every series on a union x column, get a
+   legend, and may put lines on a right-hand y2 axis (different unit). */
+function metricServes(def) {
+    return def.series && def.series.length ? def.series : [{ key: def.key, fmt: def.fmt }];
+}
+function metricOpts(id, def, col) {
+    const fmt = metricFormat(def);
+    const mult = !!(def.series && def.series.length);
+    const sers = metricServes(def);
+    const hasY2 = mult && sers.some(s => s.axis === 'y2' && !s.legendOnly);
+    const palette = [col.blue, col.gold, col.dim];
+    const series = [{}, ...sers.map((s, i) => {
+        const sf = metricFormat({ key: s.key, fmt: s.fmt });
+        const c = palette[i % palette.length];
+        const sc = s.axis || (s.legendOnly ? 'yleg' : 'y');
+        const o = { label: metricSeriesLabel(s.key), scale: sc,
+                    stroke: c, width: s.legendOnly ? 0 : 1.6,
+                    fill: (s.area || (!mult && i === 0)) ? c + '1c' : undefined,
+                    points: { show: false }, value: (u, v) => sf(v === undefined || v !== v ? null : v) };
+        return o;
+    })];
+    const scales = { x: { time: true, range: pinnedXRange(id) },
+                     y: Object.assign({ auto: true },
+                         metricZeroFloor(def.key) ? { range: ZERO_FLOOR_RANGE } : null) };
+    if (sers.some(s => s.legendOnly)) scales.yleg = { auto: true };
+    if (hasY2) scales.y2 = { auto: true, range: ZERO_FLOOR_RANGE };
+    const axes = [metricXAxis(cardWindow(id), col), metricYAxis(col, def)];
+    if (hasY2) {
+        const y2ser = sers.find(s => s.axis === 'y2' && !s.legendOnly);
+        axes.push(Object.assign(
+            { stroke: col.gold, size: 4, font: axisFont, grid: false, gap: 2,
+              rotate: 0, space: 50, side: 1, label: '',
+              values: (u, vals) => vals == null ? vals
+                  : vals.map(v => v == null ? '' : metricYFmt({ key: y2ser.key, fmt: y2ser.fmt || def.fmt })(v)) },
+            { scale: 'y2' }));
+    }
+    return {
+        width: 300, height: 100, padding: [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
+        cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
+        legend: { show: mult },
+        scales, axes, series,
+    };
+}
 function createMetricCard(def) {
     const id = C.metricBlockId ? C.metricBlockId(def.key) : 'met-' + def.key.replace(/[._]/g, '-');
     if (document.querySelector(`#grid .card[data-block="${id}"]`)) return;
+    const titleKey = def.titleKey || def.key;   // U19 flagship reads better under its own name
     const sec = document.createElement('section');
     sec.className = 'card grid-stack-item';
     sec.dataset.id = id; sec.dataset.tab = 'status'; sec.dataset.block = id;
@@ -645,8 +708,8 @@ function createMetricCard(def) {
     const handle = document.createElement('div'); handle.className = 'card-handle';
     const hatch = document.createElement('span'); hatch.className = 'hatch'; hatch.dataset.icon = 'grip';
     const hText = document.createElement('span');
-    hText.setAttribute('data-i18n', 'uplift.metric.' + def.key);
-    hText.textContent = metricLabel(def.key);
+    hText.setAttribute('data-i18n', 'uplift.metric.' + titleKey);
+    hText.textContent = metricLabel(titleKey);
     handle.append(hatch, hText);
     const rm = document.createElement('button');
     rm.type = 'button'; rm.className = 'card-remove'; rm.dataset.icon = 'close';
@@ -659,9 +722,9 @@ function createMetricCard(def) {
     const pad = document.createElement('div'); pad.className = 'card-pad';
     const h2 = document.createElement('h2');
     const title = document.createElement('span');
-    title.setAttribute('data-i18n', 'uplift.metric.' + def.key);
-    title.textContent = metricLabel(def.key);
-    title.dataset.en = metricLabel(def.key);
+    title.setAttribute('data-i18n', 'uplift.metric.' + titleKey);
+    title.textContent = metricLabel(titleKey);
+    title.dataset.en = metricLabel(titleKey);
     const now = document.createElement('b'); now.className = 'metric-now';
     const right = document.createElement('span'); right.className = 'right';
     right.append(now);
@@ -681,17 +744,8 @@ function createMetricCard(def) {
     $('grid').append(sec);
     const col = chartColors();
     const fmt = metricFormat(def);
-    const opts = {
-        width: 300, height: 100, padding: [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
-        cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
-        legend: { show: false },
-        scales: metricYScales(id, def),
-        axes: [metricXAxis(cardWindow(id), col), metricYAxis(col, def)],
-        series: [{}, { label: metricLabel(def.key), stroke: col.blue, width: 1.6,
-                       fill: col.blue + '1c', points: { show: false },
-                       value: v => fmt(v === undefined ? null : v) }],
-    };
-    const chart = new uPlot(opts, [[], []], host);
+    const chart = new uPlot(metricOpts(id, def, col),
+        multInitData(def), host);
     bindCursorTip(chart);
     metricCharts.set(id, { chart, host, fmt, def, nameEl: title, nowEl: now, noteEl: note });
     if (!host._ro) {
@@ -704,23 +758,15 @@ function createMetricCard(def) {
    createMetricCard again — but the CARD DOM was still in the grid, so the
    exists-guard returned immediately and the host stayed empty forever.
    Rebuild the plot inside the existing host instead (colors re-read). */
+/* reinit path (theme/skin): rebuild opts the same way create does. */
 function reinitMetricPlot(id) {
     const e = metricCharts.get(id);
     if (!e) return;
     try { e.chart.destroy(); } catch (_) {}
     e.host.textContent = '';
     const col = chartColors();
-    const opts = {
-        width: 300, height: 100, padding: [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
-        cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
-        legend: { show: false },
-        scales: metricYScales(id, e.def),
-        axes: [metricXAxis(cardWindow(id), col), metricYAxis(col, e.def)],
-        series: [{}, { label: metricLabel(e.def.key), stroke: col.blue, width: 1.6,
-                       fill: col.blue + '1c', points: { show: false },
-                       value: v => e.fmt(v === undefined ? null : v) }],
-    };
-    e.chart = new uPlot(opts, e.chart.data && e.chart.data.length ? e.chart.data : [[], []], e.host);
+    e.chart = new uPlot(metricOpts(id, e.def, col),
+        e.chart.data && e.chart.data.length ? e.chart.data : multInitData(e.def), e.host);
     bindCursorTip(e.chart);
 }
 function fitMetricPlot(id) {
@@ -792,7 +838,8 @@ function metricFetch(id, force) {
     const e = metricCharts.get(id);
     if (!e) return;
     const w = windowParam(cardWindow(id));
-    const key = e.def.key;
+    const keys = metricServes(e.def).map(s => s.key);
+    const key = keys.join(',');
     const cache = metricCache[w] || (metricCache[w] = { data: {}, at: 0, fails: 0, bucket_s: 0 });
     const ttl = cardWindow(id) >= 604800 ? 60000 : 10000;
     const stale = cache.fails > 2 ? Date.now() - cache.at > 30000 : Date.now() - cache.at > ttl;
@@ -813,22 +860,49 @@ function metricFetch(id, force) {
             if (_seq[sk] === seq) drawMetricChart(id);   // newest response wins
         });
 }
+/* Initial uPlot data: one column per series slot (multi defs reserve a
+   column each so legend rows exist before the first fetch). */
+function multInitData(def) {
+    const n = metricServes(def).length;
+    const cols = [[]];
+    for (let i = 0; i < n; i++) cols.push([]);
+    return cols;
+}
+/* Union-timestamp alignment (same rule as the throughput/memory charts:
+   uPlot needs ONE shared x column): every series maps onto the sorted
+   union of its key's sample timestamps; gaps stay null. */
+function metricUnionCols(def, data, winMs) {
+    const sers = metricServes(def);
+    const cutoff = Date.now() - winMs;
+    const cols0 = sers.map(s => (data[s.key] || []).filter(p => p.ts * 1000 >= cutoff));
+    const ts = [...new Set(cols0.flatMap(p => p.map(q => q.ts * 1000)))].sort((a, b) => a - b);
+    const cols = [ts];
+    for (const col of cols0) {
+        const m = new Map(col.map(q => [q.ts * 1000, q.v]));
+        cols.push(ts.map(t => (m.has(t) ? m.get(t) : null)));
+    }
+    return cols;
+}
 function drawMetricChart(id) {
     const e = metricCharts.get(id);
     if (!e) return;
     const w = windowParam(cardWindow(id));
     const cache = metricCache[w] || { data: {}, bucket_s: 0 };
-    const pts = (cache.data[e.def.key] || []).filter(p =>
-        p.ts * 1000 >= Date.now() - cardWindow(id) * 1000 - 60000);
-    const ts = pts.map(p => p.ts * 1000), vs = pts.map(p => p.v);
-    e.chart.setData([ts, vs]);
+    const winMs = cardWindow(id) * 1000 + 60000;
+    const cols = metricUnionCols(e.def, cache.data, winMs);
+    e.chart.setData(cols);
     // per-card x-axis format follows this card's window
     e.chart.axes[0] = metricXAxis(cardWindow(id), chartColors());
-    const last = vs.length ? vs[vs.length - 1] : null;
+    // big readout = the card's primary key (last non-null on its own series)
+    const pi = 1 + metricServes(e.def).findIndex(s => s.key === e.def.key);
+    const pcol = cols[pi > 0 ? pi : 1] || [];
+    let last = null;
+    for (let i = pcol.length - 1; i >= 0; i--) if (pcol[i] != null) { last = pcol[i]; break; }
     e.nowEl.textContent = fmtLast(e.fmt, last);
     const bits = [];
     if (cache.bucket_s >= 60) bits.push(`${C.tf('uplift.explore.avg', 'averaged')} ≤ ${fmtSpan(Math.max(60, cache.bucket_s))}`);
-    if (pts.length && pts[pts.length - 1].res === 'hourly') bits.push(C.tf('uplift.explore.hourly', 'hourly rollups'));
+    const ppts = cache.data[e.def.key] || [];
+    if (ppts.length && ppts[ppts.length - 1].res === 'hourly') bits.push(C.tf('uplift.explore.hourly', 'hourly rollups'));
     e.noteEl.textContent = bits.length ? bits.join(' · ') : 'live';
 }
 /* Latest reading gets real precision; hover stays compact. Both share one
@@ -849,7 +923,9 @@ function relabelExplore() {
     renderCardTsRows(true);
     CH_GLUE.refitUpliftBlocks();   // chip rows just materialised: demand changed
     for (const [id, e] of metricCharts) {
-        e.chart.series[1].label = metricLabel(e.def.key);
+        const sers = metricServes(e.def);
+        for (let i = 0; i < sers.length; i++)
+            e.chart.series[i + 1].label = metricSeriesLabel(sers[i].key);
         drawMetricChart(id);
     }
 }
@@ -904,6 +980,50 @@ async function refreshSysPct() {
     finally { sysPctFetching = false; }
 }
 
+/* U20 header chips: watts = mean over the last 60 s, temperature = MAX
+   over the last 60 s (safety-relevant; mean goes to the tooltip). Chips
+   appear ONLY when the series exist — macmon absent means the keys never
+   have samples and both chips stay hidden (silent absence, user addendum).
+   One 5m-window fetch every 10 s covers the whole 60 s mean/max window. */
+let pwrChipsAt = 0, pwrChipsFetching = false;
+async function refreshPowerChips() {
+    const now = Date.now();
+    if (pwrChipsFetching || now - pwrChipsAt < 10_000) return;
+    pwrChipsFetching = true; pwrChipsAt = now;
+    try {
+        const d = await CH_GLUE.fetchJson(
+            `${API}/uplift/api/metrics/series?keys=` +
+            encodeURIComponent('pwr.total_w,therm.cpu_temp_c,therm.gpu_temp_c') +
+            '&window=5m');
+        const map = (d && d.series_map) || {};
+        const fresh = k => (map[k] || []).filter(p => p.v != null && now - p.ts * 1000 < 60_000 + 15_000);
+        const pw = fresh('pwr.total_w');
+        const cp = document.getElementById('chip-power');
+        const tc = document.getElementById('chip-temp');
+        if (cp) {
+            if (pw.length) {
+                const mean = pw.reduce((a, p) => a + p.v, 0) / pw.length;
+                cp.textContent = mean.toFixed(1) + ' W';
+                cp.title = C.tf('uplift.chip.power_mean', 'Package power — 60 s mean');
+                cp.hidden = false;
+            } else cp.hidden = true;
+        }
+        if (tc) {
+            const t = [...fresh('therm.cpu_temp_c'), ...fresh('therm.gpu_temp_c')];
+            if (t.length) {
+                const mx = Math.max(...t.map(p => p.v));
+                const mean = t.reduce((a, p) => a + p.v, 0) / t.length;
+                tc.textContent = Math.round(mx) + ' °C';
+                tc.title = C.tf('uplift.chip.temp_max', 'Max CPU/GPU temp — 60 s max') +
+                           ` · ${C.tf('uplift.chip.temp_mean', 'mean')} ${Math.round(mean)} °C`;
+                tc.classList.toggle('chip-hot', mx >= 85);
+                tc.hidden = false;
+            } else { tc.hidden = true; tc.classList.remove('chip-hot'); }
+        }
+    } catch (_) { /* keep last render; absence stays silent */ }
+    finally { pwrChipsFetching = false; }
+}
+
 function pushStatusSample(s, cacheGB, hotSorted) {
     refreshSysPct();   // fire-and-forget; lands in the next push
     // Chart buffers (window pruning happens at draw time).
@@ -940,6 +1060,29 @@ window.Uplift.charts = {
     setGlobalWindow: setGlobalWindow, renderCardTsRows: renderCardTsRows,
     createMetricCard: createMetricCard, drawAllMetricCharts: drawAllMetricCharts,
     fitAllMetricPlots: fitAllMetricPlots, clearMainChartHover: clearMainChartHover,
+    refreshPowerChips: refreshPowerChips,
+    /* U20 gated cards: create only when the series actually exist (macmon
+       present and warm). Resolves true once created; a later macmon
+       uninstall never removes live cards (they age out honestly). */
+    probeGatedCards: async function () {
+        const defs = (C.EXPLORE_METRICS || []).filter(d => d.gated && !metricCharts.has(C.metricBlockId(d.key)));
+        if (!defs.length) return;
+        try {
+            const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
+                encodeURIComponent(defs.map(d => d.key).join(',')));
+            const lat = (r && r.latest) || {};
+            for (const d of defs) {
+                if (!(lat[d.key] && lat[d.key].v != null)) continue;
+                try {
+                    createMetricCard(d);
+                    CH_GLUE.onGatedCardCreated(C.metricBlockId(d.key));
+                } catch (err) {
+                    /* one bad card must not kill the other gated defs */
+                    console.warn('gated card create failed', d.key, err);
+                }
+            }
+        } catch (_) { /* silent — absence stays silent */ }
+    },
     get usageChart() { return usageChart; },
 };
 })();

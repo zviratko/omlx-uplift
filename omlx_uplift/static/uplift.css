@@ -276,6 +276,8 @@ header.top .tabs .dd-btn { border-right-color: var(--hdr-edge); }
 header.top .chip { color: var(--hdr-ink); border-color: var(--hdr-edge);
     font-weight: var(--hdr-weight); }
 header.top .chip.state-ok { color: var(--hdr-ink); }
+/* U20 temperature chip — hot state colours the text via theme token. */
+header.top .chip.chip-hot, .chip.chip-hot { color: var(--bad); border-color: var(--bad); }
 header.top .icon-btn { color: var(--hdr-ink); border-color: var(--hdr-edge); }
 header.top .icon-btn:hover { background: var(--hdr-ink); border-color: var(--hdr-ink);
     color: var(--bg); }

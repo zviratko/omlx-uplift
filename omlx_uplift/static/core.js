@@ -204,8 +204,50 @@ const EXPLORE_METRICS = [
     { key: 'sys.used_bytes', fmt: 'bytes' },
     { key: 'sys.total_bytes', fmt: 'bytes' },
     { key: 'cache.total_bytes', fmt: 'bytes' },
+    // U19 (tray-only — never in DEFAULT_BLOCKS): multi-series defs carry a
+    // `series` array; the primary key (def.key) drives the block id, title
+    // and the big readout. `axis:'y2'` puts a line on the right axis.
+    // Flagship: token hit ratio area + realized prefill line; saved
+    // tok/min rides the legend line. Reading: high area + high line = cache
+    // doing work; low area + high line = cold prompts.
+    { key: 'pfx.token_hit_pct', fmt: 'pct', titleKey: 'pfx.cache_savings', series: [
+        { key: 'pfx.token_hit_pct', fmt: 'pct', area: true },
+        { key: 'avg_prefill_tps', axis: 'y2' },
+        { key: 'pfx.saved_tokens_min', legendOnly: true },
+    ] },
+    // Secondary efficiency: block-level lookup hit % + restored tok/min.
+    { key: 'pfx.lookup_hit_pct', fmt: 'pct', titleKey: 'pfx.efficiency', series: [
+        { key: 'pfx.lookup_hit_pct', fmt: 'pct' },
+        { key: 'pfx.restored_tokens_min', axis: 'y2' },
+    ] },
+    // Spec-decode only (0 lines otherwise, honest flat line): draft tokens
+    // saved + target static tokens restored (same unit, one axis).
+    { key: 'spec.saved_tokens_min', titleKey: 'spec.savings', series: [
+        { key: 'spec.saved_tokens_min' },
+        { key: 'spec.restored_tokens_min' },
+    ] },
+    // "Stuck or just slow": waiting / prefilling / running depth split.
+    { key: 'queue.waiting', fmt: 'count', titleKey: 'queue.depth', series: [
+        { key: 'queue.waiting', fmt: 'count' },
+        { key: 'queue.prefilling', fmt: 'count' },
+        { key: 'queue.running', fmt: 'count' },
+    ] },
+    // U20 (tray-only AND gated on macmon presence — cards are not even
+    // created when the keys never appear): power draw + temperature.
+    { key: 'pwr.total_w', fmt: 'watts', gated: true, titleKey: 'pwr.draw', series: [
+        { key: 'pwr.total_w', fmt: 'watts' },
+        { key: 'pwr.cpu_w', fmt: 'watts' },
+        { key: 'pwr.gpu_w', fmt: 'watts' },
+        { key: 'pwr.ane_w', fmt: 'watts' },
+    ] },
+    { key: 'therm.cpu_temp_c', fmt: 'temp', gated: true, titleKey: 'therm.temp', series: [
+        { key: 'therm.cpu_temp_c', fmt: 'temp' },
+        { key: 'therm.gpu_temp_c', fmt: 'temp' },
+        { key: 'fan.max_rpm', fmt: 'count', axis: 'y2' },
+    ] },
 ];
-const EXPLORE_KEYS = EXPLORE_METRICS.map(m => m.key);
+const EXPLORE_KEYS = Array.from(new Set(
+    EXPLORE_METRICS.flatMap(m => m.series ? m.series.map(s => s.key) : [m.key])));
 function metricBlockId(key) { return 'met-' + key.replace(/[._]/g, '-'); }
 function blockMetricKey(id) {
     if (!id || !id.startsWith('met-')) return null;

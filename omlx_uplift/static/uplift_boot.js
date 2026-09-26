@@ -77,7 +77,15 @@ setInterval(() => { if (!document.hidden) CH.loadChartHistory(); }, 60000);
 // Metric cards: generate DOM from the catalogue BEFORE grid init so the
 // board places them like any static block; boot fetch + keep-alive (the
 // per-window cache TTL gates refetches: 10 s short, 60 s week+).
-for (const def of C.EXPLORE_METRICS) CH.createMetricCard(def);
+for (const def of C.EXPLORE_METRICS) if (!def.gated) CH.createMetricCard(def);
+/* U20: gated (macmon) cards + header chips appear only once the series
+   actually exist — silent absence otherwise. Probe is cheap (one
+   /metrics/latest); re-check every 60 s so a macmon installed mid-session
+   lights up without a reload. */
+CH.probeGatedCards();
+setInterval(() => { if (!document.hidden) CH.probeGatedCards(); }, 60000);
+CH.refreshPowerChips();
+setInterval(() => { if (!document.hidden) CH.refreshPowerChips(); }, 12000);
 /* ---- PAT-4 patches page: extracted to uplift_patches.js (PH2-1 stage 8);
    window.Uplift.patches aliases live at the top. initPatchesPage() boots
    its own listeners; pollPatches runs via applyTab. ---- */

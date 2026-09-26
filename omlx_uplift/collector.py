@@ -28,6 +28,16 @@ class Collector:
         self._purged_day = 0
         # id -> last-persisted change signature (RL-0: persist only on change)
         self._persisted: dict[str, tuple] = {}
+        # U19: previous tick's lifetime cache counters (rates = deltas)
+        self._prev_ctr: dict[str, float] = {}
+        # U20: macmon (optional). None = not probed yet, False = absent/dead
+        # for good, else a Popen of `macmon pipe`. No macmon => NO pwr.*/
+        # therm.* keys ever written (silent absence, user addendum).
+        self._macmon: object = None
+        self._macmon_retries = 0
+        self._macmon_seen_fan = False
+        self._macmon_samples = 0
+        self._macmon_buf = b""
 
     @property
     def store(self):
@@ -50,6 +60,18 @@ class Collector:
             except (asyncio.CancelledError, Exception):
                 pass
             self._task = None
+        # U20: never leave an orphaned macmon pipe behind.
+        proc = self._macmon
+        if proc and proc is not False:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        self._macmon = None
 
     async def _run(self):
         while True:
@@ -60,6 +82,111 @@ class Collector:
             except Exception:  # never die on a bad tick
                 log.exception("collector tick failed")
             await asyncio.sleep(self._tick)
+
+    # -- U20 macmon (optional wattage/temperature) -------------------------
+
+    _MACMON_MAX_RETRIES = 3
+
+    def _macmon_collect(self, pairs: dict[str, float]) -> None:
+        """Tail ONE supervised `macmon pipe` subprocess (never one spawn per
+        tick). Non-blocking: drain to the newest line, parse, map. First
+        sample reports 0.0 W (SMC delta window) — discarded, and any power
+        < 0.5 W in the first two samples is the same warmup artifact."""
+        import fcntl
+        import json
+        import os
+        import shutil
+        import subprocess
+
+        if self._macmon is False:
+            return
+        if self._macmon is None:
+            if shutil.which("macmon") is None:
+                self._macmon = False      # silent absence, forever
+                return
+            try:
+                self._macmon = subprocess.Popen(
+                    ["macmon", "pipe", "--interval", "1000"],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    text=True, bufsize=1,
+                )
+                self._macmon_buf = b""
+                # O_NONBLOCK on the pipe fd: a tick must never wait on macmon.
+                fd = self._macmon.stdout.fileno()
+                fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+                fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+            except Exception:
+                self._macmon = False
+                return
+        proc = self._macmon
+        if proc.poll() is not None:
+            # Subprocess died: bounded retries, then go quiet (no log spam).
+            self._macmon_retries += 1
+            self._macmon = None if self._macmon_retries < self._MACMON_MAX_RETRIES else False
+            return
+        # Raw non-blocking drain + byte buffer: a text-mode readline on an
+        # O_NONBLOCK fd can hand back a PARTIAL line and desync every later
+        # sample (2026-09-26). Keep the trailing partial line for next tick.
+        import os as _os
+        try:
+            chunk = _os.read(proc.stdout.fileno(), 65536)
+        except (BlockingIOError, OSError):
+            return
+        if not chunk:
+            return
+        buf = (self._macmon_buf + chunk) if self._macmon_buf else chunk
+        lines = buf.split(b"\n")
+        self._macmon_buf = lines.pop()          # trailing partial (no \n)
+        line = None
+        for ln in reversed(lines):              # newest complete line wins
+            if ln.strip():
+                line = ln
+                break
+        if not line:
+            return
+        try:
+            d = json.loads(line)
+        except Exception:
+            return
+        self._macmon_samples += 1
+        warm = self._macmon_samples >= 2
+        temp = d.get("temp") or {}
+
+        def w(key):
+            v = d.get(key)
+            if isinstance(v, (int, float)) and (warm or v >= 0.5):
+                return float(v)
+            return None
+
+        total = w("all_power")
+        if total is None or total <= 0:
+            # macOS 27 beta + macmon: all_power reads a flat 0.0 while the
+            # sys_power channel carries the real package draw (kocour
+            # 2026-09-26). Fall back so the card/chip is honest, not dead.
+            total = w("sys_power")
+        if total is not None:
+            pairs["pwr.total_w"] = total
+        for src, key in (("cpu_power", "pwr.cpu_w"), ("gpu_power", "pwr.gpu_w"),
+                         ("ane_power", "pwr.ane_w")):
+            v = w(src)
+            if v is not None:
+                pairs[key] = v
+        for src, key in (("cpu_temp_avg", "therm.cpu_temp_c"),
+                         ("gpu_temp_avg", "therm.gpu_temp_c")):
+            v = temp.get(src)
+            if isinstance(v, (int, float)) and v > 0:
+                pairs[key] = float(v)
+        # Fans: MacBooks report phantom zero fans — only persist once any
+        # rpm > 0 was ever seen (silent absence otherwise).
+        fans = d.get("fans") or []
+        rpms = [f for f in fans if isinstance(f.get("rpm"), (int, float)) and f["rpm"] > 0]
+        if rpms:
+            self._macmon_seen_fan = True
+            f0 = max(rpms, key=lambda f: f["rpm"])
+            pairs["fan.max_rpm"] = float(f0["rpm"])
+            pairs["fan.max_pct"] = 100.0 * f0["rpm"] / (f0.get("max_rpm") or 1)
+        elif self._macmon_seen_fan:
+            pairs["fan.max_rpm"] = 0.0
 
     # -- one tick ----------------------------------------------------------
 
@@ -176,6 +303,10 @@ class Collector:
             if pool is not None:
                 total_bytes = 0
                 hot: dict[str, int] = {}
+                # U19 lifetime counters / queue gauges, summed per loaded model.
+                pfx_counters: dict[str, float] = {}
+                queue_sum = {"waiting": 0.0, "prefilling": 0.0, "running": 0.0}
+                saw_prefix_cache = False
                 for mid in pool.get_loaded_model_ids():
                     try:
                         entry = pool.get_entry(mid)
@@ -220,13 +351,107 @@ class Collector:
                         hb = int(ssd.get("hot_cache_size_bytes", 0) or 0)
                         if hb > 0:
                             hot[mid] = hb
+                        # U19: prefix/specprefill counters ride the SAME
+                        # call. Lifetime counters are summed across loaded
+                        # models; per-interval rates are derived below from
+                        # the deltas (same pattern as rate.prompt_tokens_s).
+                        pfx = st.get("prefix_cache") or {}
+                        if pfx:
+                            saw_prefix_cache = True
+                        for src, key in (
+                            ("hits", "pfx.hits"),
+                            ("misses", "pfx.misses"),
+                            ("tokens_matched_total", "pfx.tokens_matched"),
+                            ("tokens_requested_total", "pfx.tokens_requested"),
+                            ("tokens_saved", "pfx.tokens_saved"),
+                            ("exact_prefix_tokens_restored",
+                             "pfx.tokens_restored"),
+                        ):
+                            v = pfx.get(src)
+                            if isinstance(v, (int, float)):
+                                # .get() not [k] += — KeyError here was
+                                # swallowed by the per-model except and
+                                # killed every pfx.* series silently.
+                                pfx_counters[key] = pfx_counters.get(key, 0.0) + float(v)
+                        spec = st.get("specprefill_cache") or {}
+                        for src, key in (
+                            ("target_static_tokens_restored",
+                             "spec.tokens_restored"),
+                            ("draft_prefix_tokens_saved",
+                             "spec.tokens_saved"),
+                        ):
+                            v = spec.get(src)
+                            if isinstance(v, (int, float)):
+                                pfx_counters[key] += float(v)
+                        # U19 queue split — scheduler gauge, summed per model.
+                        gs_fn = getattr(sched, "get_stats", None)
+                        if callable(gs_fn):
+                            try:
+                                gs = gs_fn() or {}
+                                queue_sum["waiting"] += float(
+                                    gs.get("num_waiting", 0) or 0)
+                                queue_sum["prefilling"] += float(
+                                    gs.get("num_prefilling", 0) or 0)
+                                queue_sum["running"] += float(
+                                    gs.get("num_running", 0) or 0)
+                            except Exception:
+                                pass
                     except Exception:
-                        pass
+                        # A broken walker here once silently killed every
+                        # pfx.* series (KeyError, 2026-09-26) — keep it loud
+                        # at debug level, not silent.
+                        log.debug("cache-stats walk failed for %s", mid, exc_info=True)
                 pairs["cache.total_bytes"] = float(total_bytes)
                 for rank, mid in enumerate(sorted(hot, key=lambda m: -hot[m])[:3]):
                     pairs["hot%d.%s" % (rank + 1, mid)] = float(hot[mid])
+                # U19 queue gauges — summed scheduler depth across loaded
+                # models (the "stuck or just slow" split). Emitted whenever
+                # the loop ran on at least one engine.
+                if pool.get_loaded_model_ids():
+                    pairs["queue.waiting"] = queue_sum["waiting"]
+                    pairs["queue.prefilling"] = queue_sum["prefilling"]
+                    pairs["queue.running"] = queue_sum["running"]
+                # U19 cache savings rates — per-tick deltas of lifetime
+                # counters (lifetime ratios are static-ish and useless as
+                # time series). Negative delta = counter reset (model
+                # reload) -> drop that tick's rates, same honesty rule as
+                # the tot.* rates above.
+                prev_ctr = self._prev_ctr
+                if dt > 0 and pfx_counters and prev_ctr:
+                    def _d(key):
+                        cur = pfx_counters.get(key)
+                        old = prev_ctr.get(key)
+                        if cur is None or old is None or cur < old:
+                            return None
+                        return cur - old
+                    d_h, d_m = _d("pfx.hits"), _d("pfx.misses")
+                    d_mat, d_req = _d("pfx.tokens_matched"), _d("pfx.tokens_requested")
+                    d_saved = _d("pfx.tokens_saved")
+                    d_rest = _d("pfx.tokens_restored")
+                    if d_h is not None and d_h + d_m > 0:
+                        pairs["pfx.lookup_hit_pct"] = 100.0 * d_h / (d_h + d_m)
+                    if d_mat is not None and d_req and d_req > 0:
+                        pairs["pfx.token_hit_pct"] = 100.0 * d_mat / d_req
+                    if d_saved is not None:
+                        pairs["pfx.saved_tokens_min"] = 60.0 * d_saved / dt
+                    if d_rest is not None:
+                        pairs["pfx.restored_tokens_min"] = 60.0 * d_rest / dt
+                    d_sres = _d("spec.tokens_restored")
+                    d_ssave = _d("spec.tokens_saved")
+                    if d_sres is not None:
+                        pairs["spec.restored_tokens_min"] = 60.0 * d_sres / dt
+                    if d_ssave is not None:
+                        pairs["spec.saved_tokens_min"] = 60.0 * d_ssave / dt
+                if pfx_counters:
+                    self._prev_ctr = pfx_counters
         except Exception:
-            pass
+            log.debug("prefix-cache collect failed", exc_info=True)
+
+        # U20: macmon power/temperature (optional, non-blocking)
+        try:
+            self._macmon_collect(pairs)
+        except Exception:
+            log.debug("macmon collect failed", exc_info=True)
 
         # U11: SYSTEM memory via the same psutil_compat source classic's
         # memory card uses. Unlike mem.used_bytes (phys_footprint — flat

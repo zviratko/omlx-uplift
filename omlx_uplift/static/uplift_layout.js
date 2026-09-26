@@ -35,6 +35,15 @@
         'met-sys-used-bytes',
         'met-sys-total-bytes',
         'met-cache-total-bytes',
+        // U19/U20 multi-series cards: TRAY-ONLY (not in DEFAULT_BLOCKS —
+        // nothing existing moves; adding one never rewrites saved geometry).
+        'met-pfx-token-hit-pct',
+        'met-pfx-lookup-hit-pct',
+        'met-spec-saved-tokens-min',
+        'met-queue-waiting',
+        // U20 gated: no macmon → the card is never created (silent absence).
+        'met-pwr-total-w',
+        'met-therm-cpu-temp-c',
         'reqstats',
         'cache',
         'live',
@@ -44,6 +53,13 @@
         // index.html, and pushFeed no-ops without its host.
     ];
     const COLUMNS = 24;
+    // U19/U20: tray-only blocks — valid ids, NEVER in the default board.
+    // A user adds them from the tray; nothing existing moves (U19 UI rule).
+    const TRAY_ONLY_IDS = [
+        'met-pfx-token-hit-pct', 'met-pfx-lookup-hit-pct',
+        'met-spec-saved-tokens-min', 'met-queue-waiting',
+        'met-pwr-total-w', 'met-therm-cpu-temp-c',
+    ];
     const MIN_W = 6;
     // Small stat tiles need to go narrower than the classic floor: the
     // shipped first row packs five of them (classic's 6 blocks a 24-col
@@ -192,6 +208,7 @@
 
     root.UpliftLayout = {
         BLOCK_IDS,
+        TRAY_ONLY_IDS,
         COLUMNS,
         MIN_W,
         MIN_W_SMALL,

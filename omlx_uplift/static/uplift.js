@@ -31,6 +31,25 @@ window.Uplift._chartGlue = {
     get _padObserver() { return _padObserver; },
     get removeCard() { return removeCard; },
     get applyI18n() { return applyI18n; },
+    /* U20 gated metric cards created AFTER grid init: place them if the
+       saved layout already expects the block (probe usually resolves after
+       applyUpliftLayout — parking unconditionally made saved gated cards
+       unplaceable on every reload); otherwise park them (hidden, tray pill
+       instead of dumping an unplaced widget at the board bottom). */
+    onGatedCardCreated(id) {
+        const el = _blockEl(id);
+        if (el && !el.gridstackNode) {
+            const saved = (upLayout && upLayout.blocks || []).find(b => b.id === id);
+            if (saved && !dashPlacedIds.includes(id)) {
+                _placeCard(id, saved, saved.h);
+                renderTray();
+                refitUpliftBlocks();
+                return;
+            }
+            el.classList.add('card-parked');
+        }
+        renderTray();
+    },
 };
 
 /* PH2-1 stage 3: usage + logs tabs live in uplift_usage.js. The glue lets
@@ -987,7 +1006,17 @@ function removeCard(id) {
 /* ---- tray: draggable pills for blocks not on the board ---- */
 function blockLabel(id) {
     const span = _blockEl(id)?.querySelector('.card-handle span[data-i18n], .card-handle span:not(.hatch)');
-    return span ? span.textContent : id;
+    if (span) return span.textContent;
+    // Gated metric cards never got a parked DOM stand-in (absence stays
+    // silent), so derive their tray label from the catalogue + locale.
+    const key = C.blockMetricKey && C.blockMetricKey(id);
+    if (key) {
+        const def = (C.EXPLORE_METRICS || []).find(d => d.key === key);
+        const tk = (def && def.titleKey) || key;
+        const lbl = t('uplift.metric.' + tk);
+        return (lbl && lbl !== 'uplift.metric.' + tk) ? lbl : tk;
+    }
+    return id;
 }
 function renderTray() {
     const tray = $('layout-tray');

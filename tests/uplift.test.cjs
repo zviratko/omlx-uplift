@@ -273,7 +273,12 @@ require('../omlx_uplift/static/uplift_layout.js');
 const UPL = globalThis.UpliftLayout;
 test('uplift layout: default layout covers every block once', () => {
     const d = UPL.defaultLayout();
-    assert.deepStrictEqual(d.blocks.map(b => b.id).sort(), [...UPL.BLOCK_IDS].sort());
+    // U19: TRAY_ONLY_IDS never ship on the default board (nothing existing
+    // moves); every other block must appear exactly once.
+    const expected = UPL.BLOCK_IDS.filter(id => !UPL.TRAY_ONLY_IDS.includes(id));
+    assert.deepStrictEqual(d.blocks.map(b => b.id).sort(), [...expected].sort());
+    for (const id of UPL.TRAY_ONLY_IDS)
+        assert.ok(!d.blocks.some(b => b.id === id), id + ' must stay tray-only');
     for (const b of d.blocks) {
         assert.ok(b.w >= UPL.minWFor(b.id) && b.w <= UPL.COLUMNS, b.id + ' w out of range');
         assert.ok(b.x >= 0 && b.x + b.w <= UPL.COLUMNS, b.id + ' exceeds grid');
@@ -473,7 +478,12 @@ test('metricBlockId maps every catalogue key to a legal block id and back', () =
 test('explore catalogue: unique keys, one fmt each, exports agree', () => {
     const keys = C.EXPLORE_METRICS.map(m => m.key);
     assert.strictEqual(new Set(keys).size, keys.length);
-    assert.deepStrictEqual(C.EXPLORE_KEYS, keys);
+    // U19: EXPLORE_KEYS is the union of every series key (multi-series
+    // defs list them in def.series); primaries must all be present.
+    const union = Array.from(new Set(C.EXPLORE_METRICS.flatMap(
+        m => m.series ? m.series.map(s => s.key) : [m.key])));
+    assert.deepStrictEqual(C.EXPLORE_KEYS, union);
+    for (const k of keys) assert.ok(union.includes(k), k + ' (primary) must be in EXPLORE_KEYS');
     for (const k of ['avg_generation_tps', 'sys.percent', 'cache.total_bytes'])
         assert.ok(keys.includes(k), k + ' must be selectable');
 });

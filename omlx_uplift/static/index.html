@@ -84,6 +84,10 @@ try {
     </nav>
     <span class="chip" id="chip-uptime">—</span>
     <span class="chip" id="chip-device">—</span>
+    <!-- U20: power/temperature chips — stay hidden forever when macmon is
+         absent (silent absence: no zeros, no 'missing' state) -->
+    <span class="chip" id="chip-power" hidden title="Package power, 60 s mean">—</span>
+    <span class="chip" id="chip-temp" hidden title="Max CPU/GPU temp, 60 s">—</span>
     <!-- gateway status only exists for the ?api= dev proxy mode; native
          hosting IS the server, so the old 'direct' chip stays hidden -->
     <span class="chip" id="chip-gateway" title="Mock gateway status" hidden>—</span>
