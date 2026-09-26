@@ -50,13 +50,10 @@ try {
 
 <header class="top">
     <div class="logo"><span class="dot" id="status-dot" data-icon="logo-dot"></span> oMLX <span class="logo-flavor" id="logo-flavor">Uplift</span><span class="logo-below"></span></div>
-    <!-- Stats live LEFT of the menu, in reading order hardware | watts |
-         temp | uptime (power/temp stay hidden while macmon is absent).
-         Wide: they sit in the space behind the logo, which also pushes the
-         menu right — more room for a skin's below-logo wordmark (the
-         tagline band width is measured to the menu's left edge). Narrow:
-         they move to their own row ABOVE the menu instead of being hidden
-         behind it (see .hdr-stats @ media rules). -->
+    <!-- Stats row in the band ABOVE the menu bar, reading order hardware |
+         watts | temp | uptime (power/temp stay hidden while macmon is
+         absent). At every width this unit takes the header's first row;
+         the menu bar sits on the next line (see .hdr-stats in uplift.css). -->
     <span class="hdr-stats">
         <span class="chip" id="chip-device">—</span>
         <span class="chip" id="chip-power" hidden title="Package power, 60 s mean">—</span>

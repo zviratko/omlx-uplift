@@ -153,11 +153,13 @@ body::before {
 /* ---- Layout: strict grid, defined spacing, breathing band on top ---- */
 
 header.top {
-    /* round 6 item 13: nowrap — during boot (locale labels swapping in,
-       fonts landing) the tabs strip grows for a moment and wrap dropped the
-       trailing icons, incl. the classic-dashboard home icon, onto a second
-       line. The tabs strip shrinks instead (min-width:0 below). */
-    display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
+    /* stats row rides the header's FIRST line (order:-1, basis 100%) in
+       the band above the menu bar, so the header wraps by design now.
+       Row 2 (logo + tabs + icons) still cannot reflow unexpectedly: the
+       tabs strip shrinks first (min-width:0) and every control is one
+       line (nowrap below). */
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    row-gap: 6px;
     padding: 8px 2px 14px; margin-bottom: 18px;
     border-bottom: 1px solid var(--edge);   /* rule under header lockup */
     /* the whole top menu floats: it sticks under the red strip on scroll */
@@ -231,11 +233,18 @@ header.top .chip { flex-shrink: 0; }   /* never squeeze the box under the
    tabs (the reported overlap bug), they move to their own row ABOVE the
    menu: order re-sequence + tabs forced onto a full-width second line. */
 header.top .hdr-stats { display: flex; align-items: center; gap: 10px;
-    flex-shrink: 0; }
+    flex: 1 1 100%; order: -1; }   /* own top row inside the sticky header:
+    the band above the menu bar is exactly where the user wants them */
+@media (min-width: 1141px) {
+    /* item 4: reserve room for a skin's below-logo wordmark — the menu
+       (and everything after) starts right of the reserved logo band */
+    header.top .logo { min-width: 240px; }
+}
 @media (max-width: 1140px) {
-    header.top { flex-wrap: wrap; row-gap: 8px; }
-    header.top .hdr-stats { order: 1; }
     header.top .tabs { order: 2; flex-basis: 100%; }
+    /* the skin tagline hangs under the logo into row 2's free height only;
+       once the tabs wrap below the logo give it explicit clearance */
+    header.top.has-tagline .tabs { margin-top: 18px; }
 }
 /* tabs padding 14px→6px at ALL widths: with nowrap text the strip cannot
    shrink past its label floor, and the 7-tab cluster build + both status
