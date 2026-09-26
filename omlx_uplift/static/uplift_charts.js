@@ -225,6 +225,22 @@ function legendUpdater() {
         const idx = c.cursor.idx;
         const src = c.data[0];
         const i = (idx === null || idx === undefined) ? src.length - 1 : Math.min(idx, src.length - 1);
+        if (hasTimeRow && src.length) {
+            /* SWEEP178: the vendored uPlot builds its legend Time cell with
+               new Date(ts * 1000) — right only for second-based axes, so an
+               ms x column printed year 58707. Fill the cell here (this
+               updater runs after uPlot's own on every hover and every draw)
+               with the window-appropriate format. */
+            const cell = rows[0].querySelector('.u-value')
+                || (() => { const td = document.createElement('td'); td.className = 'u-value'; rows[0].append(td); return td; })();
+            const t = src[i];
+            const dayish = src.length > 1 && (src[src.length - 1] - src[0]) > 2 * 86400e3;
+            cell.textContent = (typeof t === 'number' && t > 0)
+                ? new Date(t).toLocaleString('en-GB', dayish
+                    ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+                    : { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                : '--';
+        }
         seriesRows.forEach((row, sIdx) => {
             let cell = row.querySelector('.u-value');
             if (!cell) {
@@ -238,7 +254,13 @@ function legendUpdater() {
             // cards: %, W, °C must not render as bare compact numbers).
             const ser = c.series[sIdx + 1];
             const fn = (ser && typeof ser.value === 'function') ? ser.value : seriesValue;
-            cell.textContent = (v === null || v === undefined) ? '—' : fn(v);
+            // SWEEP178: uPlot calls series.value(u, v) — chart first. Custom
+            // (u,v) formatters (U19 cards) got undefined as their value when
+            // we passed fn(v), so idle legends printed '—' while hover (uPlot's
+            // own call) painted fine. Route by arity: 2-arg formatters are the
+            // uPlot-contract ones; 1-arg helpers (seriesValue) take the value.
+            cell.textContent = (v === null || v === undefined) ? '—'
+                : (fn.length >= 2 ? fn(c, v) : fn(v));
         });
     };
 }
@@ -304,7 +326,8 @@ function showTip(c, ev, i) {
         // Honour a series' own value formatter (explorer bytes/%), else compact.
         const fn = (c.series[s] && typeof c.series[s].value === 'function')
             ? c.series[s].value : seriesValue;
-        val.textContent = (v === null) ? '—' : fn(v);
+        // SWEEP178: same (u,v)-vs-(v) arity split as legendUpdater.
+        val.textContent = (v === null) ? '—' : (fn.length >= 2 ? fn(c, v) : fn(v));
         row.append(lab, document.createTextNode(' '), val);
         tip.append(row);
     }
@@ -690,7 +713,11 @@ function metricOpts(id, def, col) {
     return {
         width: 300, height: 100, padding: [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
-        legend: { show: mult },
+        // SWEEP178: live:false like the shared charts. With live:true the
+        // vendored build re-paints the value cells on its own deferred draw
+        // pass and stamps '—' (null through series.value) right after our
+        // legendUpdater painted the real values; the updater owns the cells.
+        legend: { show: mult, live: false },
         scales, axes, series,
     };
 }
@@ -747,6 +774,10 @@ function createMetricCard(def) {
     const chart = new uPlot(metricOpts(id, def, col),
         multInitData(def), host);
     bindCursorTip(chart);
+    // SWEEP178: legend live:false (see metricOpts) — hover must drive the
+    // shared legendUpdater exactly like the tps/mem charts do; on mouseleave
+    // it re-pins to the latest sample.
+    if (def.series && def.series.length) bindCursorUpdater(chart);
     metricCharts.set(id, { chart, host, fmt, def, nameEl: title, nowEl: now, noteEl: note });
     if (!host._ro) {
         host._ro = new ResizeObserver(() => { fitMetricPlot(id); });
@@ -891,6 +922,11 @@ function drawMetricChart(id) {
     const winMs = cardWindow(id) * 1000 + 60000;
     const cols = metricUnionCols(e.def, cache.data, winMs);
     e.chart.setData(cols);
+    // SWEEP178: with legend.live:false the vendored build paints value
+    // cells only on cursor events, so idle multi-series cards showed '—'
+    // forever. Shared charts already refresh their legend after setData
+    // (redrawCharts -> legendUpdater); metric cards must do the same.
+    if (e.def.series && e.def.series.length) legendUpdater()(e.chart);
     // per-card x-axis format follows this card's window
     e.chart.axes[0] = metricXAxis(cardWindow(id), chartColors());
     // big readout = the card's primary key (last non-null on its own series)
@@ -1059,6 +1095,7 @@ window.Uplift.charts = {
     relabelExplore: relabelExplore, windowLabel: windowLabel,
     setGlobalWindow: setGlobalWindow, renderCardTsRows: renderCardTsRows,
     createMetricCard: createMetricCard, drawAllMetricCharts: drawAllMetricCharts,
+    legendUpdater: legendUpdater,   // SWEEP178: exposed for console testability
     fitAllMetricPlots: fitAllMetricPlots, clearMainChartHover: clearMainChartHover,
     refreshPowerChips: refreshPowerChips,
     /* U20 gated cards: create only when the series actually exist (macmon
