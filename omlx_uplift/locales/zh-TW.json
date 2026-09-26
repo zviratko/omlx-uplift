@@ -623,5 +623,10 @@
   "uplift.ui.upload_queue": "上傳佇列",
   "uplift.ui.use_both_anes": "使用兩塊 ANE",
   "uplift.ui.web_search": "網頁搜尋",
-  "uplift.usage.sub": "{req} 請求 · {tok} 代幣 · 快取 {cached}"
+  "uplift.usage.sub": "{req} 請求 · {tok} 代幣 · 快取 {cached}",
+  "uplift.patches.dev_auto_label": "自動更新 — 跟隨 HEAD",
+  "uplift.patches.dev_auto_on": "HEAD 變動時在重啟時自動重新建置",
+  "uplift.patches.dev_auto_pending": "HEAD 已移動 — 下次重啟時將重新建置 omlx-dev",
+  "uplift.patches.dev_auto_pinned": "基礎版本固定時不可用",
+  "uplift.patches.dev_auto_fail": "自動更新更改失敗"
 }

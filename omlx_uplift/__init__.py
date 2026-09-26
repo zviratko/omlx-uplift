@@ -82,6 +82,19 @@ def _wrap_lifespan(app) -> None:
             logging.getLogger("omlx_uplift").exception(
                 "bundled skin sync failed (skins listing may be stale)")
         await collector.start()
+        # DEV-11: AUTO UPDATE — TRACK HEAD check. Own daemon thread so a
+        # slow git fetch never delays serving; the hook itself is fully
+        # guarded and does nothing at all unless the opt-in flag is ON.
+        import threading as _threading
+
+        try:
+            from .router import dev11_boot_check
+
+            _threading.Thread(target=dev11_boot_check, daemon=True,
+                              name="uplift-dev11").start()
+        except Exception:
+            logging.getLogger("omlx_uplift").debug(
+                "dev-11 boot hook not started", exc_info=True)
         try:
             async with original(app_obj):
                 yield

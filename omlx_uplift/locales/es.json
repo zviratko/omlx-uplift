@@ -627,5 +627,10 @@
   "uplift.ui.upload_queue": "Cola de subidas",
   "uplift.ui.use_both_anes": "Usar ambas ANE",
   "uplift.ui.web_search": "Búsqueda web",
-  "uplift.usage.sub": "{req} sol · {tok} tok · en caché {cached}"
+  "uplift.usage.sub": "{req} sol · {tok} tok · en caché {cached}",
+  "uplift.patches.dev_auto_label": "AUTOACTUALIZACIÓN — SEGUIR HEAD",
+  "uplift.patches.dev_auto_on": "recompilar automáticamente al reiniciar cuando HEAD avance",
+  "uplift.patches.dev_auto_pending": "HEAD avanzó — omlx-dev se recompilará en el próximo reinicio",
+  "uplift.patches.dev_auto_pinned": "no disponible mientras la base está fijada",
+  "uplift.patches.dev_auto_fail": "Error al cambiar la autoactualización"
 }

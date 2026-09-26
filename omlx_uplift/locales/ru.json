@@ -623,5 +623,10 @@
   "uplift.ui.upload_queue": "Очередь загрузки",
   "uplift.ui.use_both_anes": "Использовать оба ANE",
   "uplift.ui.web_search": "Веб-поиск",
-  "uplift.usage.sub": "{req} запр · {tok} ток · в кэше {cached}"
+  "uplift.usage.sub": "{req} запр · {tok} ток · в кэше {cached}",
+  "uplift.patches.dev_auto_label": "АВТООбНОВЛЕНИЕ — СЛЕДИТЬ ЗА HEAD",
+  "uplift.patches.dev_auto_on": "пересобирать при перезапуске, если HEAD сдвинулся",
+  "uplift.patches.dev_auto_pending": "HEAD сдвинулся — omlx-dev пересоберётся при следующем перезапуске",
+  "uplift.patches.dev_auto_pinned": "недоступно, пока база закреплена",
+  "uplift.patches.dev_auto_fail": "Не удалось изменить автообновление"
 }

@@ -623,5 +623,10 @@
   "uplift.ui.upload_queue": "上传队列",
   "uplift.ui.use_both_anes": "使用两块 ANE",
   "uplift.ui.web_search": "网页搜索",
-  "uplift.usage.sub": "{req} 请求 · {tok} tokens · 缓存 {cached}"
+  "uplift.usage.sub": "{req} 请求 · {tok} tokens · 缓存 {cached}",
+  "uplift.patches.dev_auto_label": "自动更新 — 跟随 HEAD",
+  "uplift.patches.dev_auto_on": "HEAD 变动时在重启时自动重新构建",
+  "uplift.patches.dev_auto_pending": "HEAD 已移动 — 下次重启时将重新构建 omlx-dev",
+  "uplift.patches.dev_auto_pinned": "基础版本固定时不可用",
+  "uplift.patches.dev_auto_fail": "自动更新更改失败"
 }

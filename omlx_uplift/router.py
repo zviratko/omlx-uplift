@@ -1558,6 +1558,17 @@ def _dev_status_sync() -> dict:
     out["built_sha"] = built
     out["expected_tip"] = exp.get("tip")
     out["stale"] = bool(exp.get("ok")) and built != exp.get("tip")
+    # DEV-11: AUTO UPDATE — TRACK HEAD. The tip probe is LOCAL-only (rev-parse
+    # of the already-fetched sync ref) — the boot hook fetches first, the
+    # dashboard poll must never pay for network.
+    out["auto_update"] = bool(cfg.get("auto_update"))
+    try:
+        out["sync_tip"] = devsrc.base_sha_of(cfg)
+    except devsrc.DevsrcError:
+        out["sync_tip"] = None
+    out["update_available"] = bool(out["auto_update"] and out["sync_tip"]
+                                   and cfg.get("built_base")
+                                   and cfg["built_base"] != out["sync_tip"])
     out["service_running"] = cli._service_state("omlx-dev") in (
         "started", "running")
     # RESTART NEEDED (DEV-6): the keg exists at tip but the RUNNING process
@@ -1736,6 +1747,10 @@ async def dev_base(req: DevBaseRequest,
                 raise HTTPException(status_code=400,
                                     detail=f"{pin!r} is not a commit in dev-src")
             cfg["base_pin"] = resolved
+            # DEV-11 invariant: pinned to a commit = never auto-updates.
+            # Turn the flag off as part of the pin, not as a boot-time
+            # secret override that contradicts what the UI shows.
+            cfg["auto_update"] = False
         else:
             cfg.pop("base_pin", None)
         devsrc.save_config(cfg)
@@ -1798,6 +1813,115 @@ async def dev_bootstrap(req: DevBootstrapRequest,
     threading.Thread(target=_dev_boot_run, daemon=True,
                      args=(req.model_dump(),)).start()
     return {"started": True}
+
+
+def _dev11_evaluate(cfg: dict) -> dict:
+    """DEV-11: decide whether the boot auto-upgrade should run. Pure git +
+    config, no brew — cheap enough for a boot thread, safe to unit-test.
+
+    Invariants (ticket acceptance 5): the flag must be ON *and* the base
+    un-pinned (tracking HEAD). A pinned base never auto-updates no matter
+    what the flag says. 'HEAD moved' = sync-ref tip != base commit the
+    current keg was cut from (built_base, written by cmd_dev_install).
+    Kegs built before this field existed re-baseline silently: no
+    auto-build from unknown provenance."""
+    from . import devsrc
+
+    if not cfg.get("auto_update"):
+        return {"run": False, "reason": "flag off"}
+    if (cfg.get("base_pin") or "").strip():
+        return {"run": False, "reason": "base pinned"}
+    try:
+        devsrc.fetch_sync_ref(cfg)      # network — boot thread only
+        tip = devsrc.base_sha_of(cfg)   # sync-ref tip (no pin: the tip)
+    except devsrc.DevsrcError as exc:
+        return {"run": False, "reason": f"sync ref: {exc}"}
+    if not tip:
+        return {"run": False, "reason": "sync tip unknown"}
+    built_base = cfg.get("built_base") or ""
+    if not built_base:
+        return {"run": False, "reason": "rebuilt once to record base",
+                "rebaseline": tip}
+    if built_base == tip:
+        return {"run": False, "reason": "up to date"}
+    return {"run": True, "reason": f"HEAD moved {built_base[:12]} -> "
+                                   f"{tip[:12]}"}
+
+
+def dev11_boot_check() -> None:
+    """DEV-11 boot hook — runs in a daemon thread from the lifespan wrap.
+    Flag ON + tracking HEAD + tip moved → runs the SAME manual build path
+    (cmd_dev_install: stash → materialize → brew reinstall, DEV-10 keep-
+    old-keg guarantees) in a detached subprocess. Never blocks or crashes
+    serving; any surprise logs at debug and vanishes (a dev-box nicety,
+    not a serving dependency)."""
+    import logging
+    import subprocess
+    import sys
+
+    log = logging.getLogger("omlx_uplift")
+    try:
+        from . import devsrc
+
+        # Only the DEV keg may auto-build omlx-dev. A vanilla-keg server
+        # sharing this machine (or a foreign interpreter via the .pth)
+        # must never trigger dev builds (DEV-6 scope discipline).
+        probe = f"{sys.prefix} {sys.executable}".lower()
+        if "/omlx-dev/" not in probe:
+            return
+        cfg = devsrc.load_config()
+        if not cfg:
+            return
+        v = _dev11_evaluate(cfg)
+        log.debug("dev-11 boot check: %s", v.get("reason"))
+        if v.get("rebaseline"):
+            fresh = devsrc.load_config() or cfg
+            fresh["built_base"] = v["rebaseline"]
+            devsrc.save_config(fresh)
+            return
+        if not v.get("run"):
+            return
+        # Detached like /dev/restart: a brew reinstall may replace THIS
+        # process's own files (dev keg serving) — build outside, restart
+        # after, and the new build answers the next load.
+        subprocess.Popen(
+            [sys.executable, "-m", "omlx_uplift.cli", "dev", "auto-build"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+    except Exception:
+        log.debug("dev-11 boot check failed", exc_info=True)
+
+
+class DevAutoUpdateRequest(BaseModel):
+    enabled: bool
+
+
+@api_router.post("/dev/auto-update")
+async def dev_auto_update(req: DevAutoUpdateRequest,
+                          is_admin: bool = Depends(require_admin)):
+    """Toggle AUTO UPDATE — TRACK HEAD (DEV-11). Default OFF; persists in
+    dev.json. Turning it ON while pinned is refused (the invariant is the
+    UI's truth, not a boot-time secret)."""
+    from . import devsrc
+
+    on = bool(req.enabled)
+
+    def sync():
+        cfg = devsrc.load_config()
+        if not cfg:
+            raise HTTPException(status_code=409,
+                                detail="omlx-dev not bootstrapped — run "
+                                       "omlx-uplift dev bootstrap first")
+        if on and (cfg.get("base_pin") or "").strip():
+            raise HTTPException(status_code=409,
+                                detail="base is pinned — un-pin (follow "
+                                       "HEAD) before enabling auto-update")
+        cfg["auto_update"] = on
+        devsrc.save_config(cfg)
+        return {"ok": True, "auto_update": on,
+                "status": _dev_status_sync()}
+
+    return await asyncio.to_thread(sync)
 
 
 @api_router.post("/dev/reconfigure")

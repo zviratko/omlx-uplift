@@ -638,5 +638,10 @@
   "uplift.ui.upload_queue": "업로드 대기열",
   "uplift.ui.use_both_anes": "두 ANE 모두 사용",
   "uplift.ui.web_search": "웹 검색",
-  "uplift.usage.sub": "요청 {req} · 토큰 {tok} · 캐시 {cached}"
+  "uplift.usage.sub": "요청 {req} · 토큰 {tok} · 캐시 {cached}",
+  "uplift.patches.dev_auto_label": "자동 업데이트 — HEAD 추적",
+  "uplift.patches.dev_auto_on": "HEAD가 이동하면 재시작 시 자동 재빌드",
+  "uplift.patches.dev_auto_pending": "HEAD가 이동했습니다 — 다음 재시작 시 omlx-dev를 다시 빌드합니다",
+  "uplift.patches.dev_auto_pinned": "베이스가 고정된 동안에는 사용할 수 없습니다",
+  "uplift.patches.dev_auto_fail": "자동 업데이트 변경 실패"
 }

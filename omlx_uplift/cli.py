@@ -507,6 +507,21 @@ def cmd_patches(argv=None) -> int:
     return 0 if out.get("ok", True) else 1
 
 
+def _dev11_disable_auto_update(via: str) -> bool:
+    """DEV-11 invariant: any rollback/pin returns the dev keg to manual
+    mode. Writes auto_update=False into dev.json; True when the flag was
+    there and got flipped, False when absent/no config (idempotent)."""
+    from . import devsrc
+
+    cfg = devsrc.load_config()
+    if not cfg or not cfg.get("auto_update"):
+        return False
+    cfg["auto_update"] = False
+    devsrc.save_config(cfg)
+    print(f"auto-update (TRACK HEAD) turned OFF ({via})", file=sys.stderr)
+    return True
+
+
 def cmd_dev(argv=None) -> int:
     """omlx-dev management (DEV queue). Subcommands:
       bootstrap   questionnaire + dev-src clone + dev.json + uplift-dev branch
@@ -519,7 +534,8 @@ def cmd_dev(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="omlx-uplift dev")
     ap.add_argument("action", choices=["bootstrap", "install", "status",
                                        "reconfigure", "upgrade", "patches",
-                                       "kegs", "stash-keg", "use", "prune"])
+                                       "kegs", "stash-keg", "use", "prune",
+                                       "rollback", "auto-build"])
     ap.add_argument("name", nargs="?",
                     help="keg name or sha prefix for 'use' (U19)")
     ap.add_argument("--keep", type=int, default=3,
@@ -684,12 +700,69 @@ def cmd_dev(argv=None) -> int:
         except (FileNotFoundError, RuntimeError) as exc:
             print(str(exc), file=sys.stderr)
             return 1
+        # DEV-11 invariant: switching to a specific (possibly older) keg is
+        # going back to manual — auto-update must not undo it on next boot.
+        _dev11_disable_auto_update("dev use")
         pth_msg = ("yes" if r["pth"] else
                    "NO — run: omlx-uplift install --formula omlx-dev")
         print(f"active keg -> {r['name']} ({r['cellar']})\n"
               f"uplift .pth remounted: {pth_msg}\n"
               "load it with: brew services restart omlx-dev")
         return 0
+
+    if args.action == "rollback":
+        # DEV-11 add-on: one-command "back to manual" — most recent stashed
+        # keg + flag OFF. Restore itself is pure kegstash.activate (existing
+        # machinery), so the budget gate in the ticket is met.
+        from . import kegstash
+
+        rows = kegstash.list_stashes()
+        act = kegstash.active_keg()
+        rows = [m for m in rows if m.get("name") != act]
+        if not rows:
+            print("nothing to roll back to — no stashed keg other than the "
+                  "active one (see: omlx-uplift dev kegs)", file=sys.stderr)
+            return 1
+        target = rows[0]
+        try:
+            r = kegstash.activate(target["name"], force=args.force)
+        except (FileNotFoundError, RuntimeError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        off = _dev11_disable_auto_update("dev rollback")
+        # Ticket step 2: base goes back to tracking HEAD (un-pin). Safe
+        # because auto_update is OFF now — and the boot hook independently
+        # refuses to auto-build anything but an un-pinned HEAD anyway.
+        try:
+            from . import devsrc
+
+            dcfg = devsrc.load_config()
+            if dcfg and dcfg.pop("base_pin", None) is not None:
+                devsrc.save_config(dcfg)
+                print("base pin cleared — tracking HEAD again (manual)",
+                      file=sys.stderr)
+        except Exception:
+            pass
+        pth_msg = ("yes" if r["pth"] else
+                   "NO — run: omlx-uplift install --formula omlx-dev")
+        print(f"rolled back to {r['name']} ({r['cellar']})\n"
+              f"auto-update flag: {'OFF' if off else 'unchanged (no dev.json)'}\n"
+              f"uplift .pth remounted: {pth_msg}\n"
+              "load it with: brew services restart omlx-dev")
+        return 0
+
+    if args.action == "auto-build":
+        # DEV-11: the boot hook's detached worker. Same pipeline as the
+        # manual build (KISS: one rebuild path, DEV-context decision 3),
+        # then restart the service so the new keg actually loads. Output
+        # goes to the dev-side log; nobody watches this process.
+        import types
+
+        rc = cmd_dev_install(types.SimpleNamespace(
+            with_custom_kernel=False, with_grammar=False, dry_run=False))
+        if rc == 0:
+            subprocess.run(["brew", "services", "restart", "omlx-dev"])
+        return rc
 
     if args.action == "status":
         cfg = devsrc.load_config()
@@ -994,6 +1067,10 @@ def cmd_dev_install(args) -> int:
     subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
     cfg = devsrc.load_config() or cfg
     cfg["built_sha"] = tip
+    # DEV-11: the base commit this keg was cut from — the boot hook
+    # compares the CURRENT sync-ref tip against it to decide "HEAD moved"
+    # without re-running materialize.
+    cfg["built_base"] = res.get("base") or ""
     # wall-clock build completion: the dashboard compares it against the
     # running service's start time to show RESTART NEEDED (DEV-6)
     cfg["built_at"] = _patches.now_iso()

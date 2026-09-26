@@ -888,6 +888,7 @@ function dvRenderBase(d) {
         ? ptMsg('uplift.patches.dev_base_pinned_note',
             'pinned — the next rebuild re-cuts uplift-dev from this commit')
         : '';
+    dvRenderAuto(d, pinned);
     btn.onclick = async () => {
         const pin = sel.value;
         btn.disabled = true;
@@ -901,6 +902,43 @@ function dvRenderBase(d) {
         } catch (e) {
             PG.toast(ptMsg('uplift.patches.dev_base_fail', 'Base change failed') + ': ' + e, 5000);
             btn.disabled = false;
+        }
+    };
+}
+
+function dvRenderAuto(d, pinned) {
+    /* DEV-11: AUTO UPDATE — TRACK HEAD. The boot hook rebuilds omlx-dev on
+       service start when the tracked sync tip moved since this keg was cut.
+       Only meaningful while following HEAD — pinned disables it (and the
+       server clears the flag as part of the pin). */
+    const row = $('dv-auto-row'), cb = $('dv-auto'), note = $('dv-auto-note');
+    if (!row || !cb) return;
+    row.hidden = false;
+    cb.checked = !!d.auto_update;
+    cb.disabled = !!pinned || !!(d.build && d.build.running);
+    if (pinned) {
+        note.textContent = ptMsg('uplift.patches.dev_auto_pinned',
+            'unavailable while the base is pinned');
+    } else if (d.update_available) {
+        note.textContent = ptMsg('uplift.patches.dev_auto_pending',
+            'HEAD moved — omlx-dev will rebuild on the next restart');
+    } else if (d.auto_update) {
+        note.textContent = ptMsg('uplift.patches.dev_auto_on',
+            'auto-rebuild on restart when HEAD moves');
+    } else {
+        note.textContent = '';
+    }
+    cb.onchange = async () => {
+        cb.disabled = true;
+        try {
+            const r = await dvApi('auto-update', { enabled: cb.checked });
+            DV_DATA = r.status || DV_DATA;
+            renderDev();
+        } catch (e) {
+            PG.toast(ptMsg('uplift.patches.dev_auto_fail',
+                'Auto-update change failed') + ': ' + e, 5000);
+            cb.disabled = false;
+            dvRenderAuto(DV_DATA, (DV_DATA && DV_DATA.base_pin) || '');
         }
     };
 }

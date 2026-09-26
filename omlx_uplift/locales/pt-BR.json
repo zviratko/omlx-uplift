@@ -627,5 +627,10 @@
   "uplift.ui.upload_queue": "Fila de envios",
   "uplift.ui.use_both_anes": "Usar as duas ANE",
   "uplift.ui.web_search": "Busca na web",
-  "uplift.usage.sub": "{req} req · {tok} tok · em cache {cached}"
+  "uplift.usage.sub": "{req} req · {tok} tok · em cache {cached}",
+  "uplift.patches.dev_auto_label": "AUTOATUALIZAÇÃO — SEGUIR HEAD",
+  "uplift.patches.dev_auto_on": "recompilar automaticamente ao reiniciar quando o HEAD mudar",
+  "uplift.patches.dev_auto_pending": "O HEAD mudou — omlx-dev será recompilado no próximo reinício",
+  "uplift.patches.dev_auto_pinned": "indisponível enquanto a base está fixada",
+  "uplift.patches.dev_auto_fail": "Falha ao alterar a autoatualização"
 }

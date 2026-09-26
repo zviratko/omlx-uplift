@@ -623,5 +623,10 @@
   "uplift.ui.upload_queue": "Upload Queue",
   "uplift.ui.use_both_anes": "Use both ANEs",
   "uplift.ui.web_search": "Web Search",
-  "uplift.usage.sub": "{req} req · {tok} tok · cached {cached}"
+  "uplift.usage.sub": "{req} req · {tok} tok · cached {cached}",
+  "uplift.patches.dev_auto_label": "AUTO UPDATE — TRACK HEAD",
+  "uplift.patches.dev_auto_on": "auto-rebuild on restart when HEAD moves",
+  "uplift.patches.dev_auto_pending": "HEAD moved — omlx-dev will rebuild on the next restart",
+  "uplift.patches.dev_auto_pinned": "unavailable while the base is pinned",
+  "uplift.patches.dev_auto_fail": "Auto-update change failed"
 }
