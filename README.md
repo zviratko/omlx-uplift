@@ -8,7 +8,7 @@ the autopatch hook at interpreter start. The classic `/admin/` dashboard
 stays byte-identical and fully working.
 
 ```bash
-brew tap zviratko/uplift https://github.com/zviratko/homebrew-uplift
+brew tap zviratko/uplift https://github.com/zviratko/omlx-uplift
 brew install omlx-uplift
 omlx-uplift install                      # writes the ONE .pth into the omlx keg
 launchctl kickstart -k gui/$(id -u)/sh.brew.omlx

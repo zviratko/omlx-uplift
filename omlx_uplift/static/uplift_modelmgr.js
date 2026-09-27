@@ -22,6 +22,7 @@ const MM_GLUE = {
     get gsDisplay() { return window.Uplift._modelGlue.gsDisplay; },
     get cell() { return window.Uplift._modelGlue.cell; },
     get putModelSettings() { return window.Uplift._modelGlue.putModelSettings; },
+    get modelSettingsFields() { return window.Uplift._modelGlue.modelSettingsFields; },
     get postModelAction() { return window.Uplift._modelGlue.postModelAction; },
     get emptyMsg() { return window.Uplift._modelGlue.emptyMsg; },
 };
@@ -1864,6 +1865,10 @@ async function saveProfileTab(panel) {
         if (JSON.stringify(v) !== JSON.stringify(seBaseVals[k])) ov[k] = v;
     }
     msg.textContent = 'saving profile…';
+    // version adaptation: an older server drops unknown keys from profile
+    // settings (silent mis-save) — translate renamed fields first
+    ov = window.UpliftModelSpec.adaptToServerSettings(
+        ov, await MM_GLUE.modelSettingsFields());
     const body = { name, display_name: t.display_name || name, settings: ov,
         expose_as_model: !!t.expose_as_model, api_name: t.api_name || null };
     try {

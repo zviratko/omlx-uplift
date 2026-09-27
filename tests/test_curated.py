@@ -228,6 +228,101 @@ class CuratedSyncTests(unittest.TestCase):
         self.assertEqual(r["tiers"].get("optional"), [])
         self.assertNotIn("optional", r["errors"])
 
+    # ---- bundled patches apply to BOTH targets (user ask 2026-09-27) ----
+    def _files_scope_both(self):
+        files = dict(FILES)
+        md = json.loads(files["raw-default-live-apply.json"])
+        md["scope"] = "both"
+        files["raw-default-live-apply.json"] = json.dumps(md)
+        return files
+
+    def _build_root(self):
+        # a clean dev-src checkout stand-in carrying the patch target
+        root = os.path.join(self.tmp, "dev-src")
+        os.makedirs(os.path.join(root, "pkg"))
+        with open(os.path.join(root, "pkg", "mod.py"), "w") as fh:
+            fh.write("line1\nline2\n")
+        return root
+
+    def test_sync_installs_both_when_dev_available(self):
+        r = curated.sync(self.store, self.root,
+                         fetch=make_fetch(self._files_scope_both()),
+                         build_root=self._build_root())
+        self.assertEqual(r["report"]["live-apply"]["sync"], "added_enabled")
+        p = self.store.find(self.store.load(), "live-apply")
+        self.assertEqual(patches.patch_scope(p), "both")
+
+    def test_sync_both_without_dev_falls_back_runtime(self):
+        r = curated.sync(self.store, self.root,
+                         fetch=make_fetch(self._files_scope_both()))
+        p = self.store.find(self.store.load(), "live-apply")
+        self.assertEqual(patches.patch_scope(p), "omlx")
+        self.assertTrue(any("runtime-only" in n for n in r["notes"]))
+
+    def test_sync_both_dev_gate_refusal_falls_back_runtime(self):
+        # build root WITHOUT the patch target -> full-diff gate refuses
+        empty = os.path.join(self.tmp, "empty-src")
+        os.makedirs(empty, exist_ok=True)
+        r = curated.sync(self.store, self.root,
+                         fetch=make_fetch(self._files_scope_both()),
+                         build_root=empty)
+        p = self.store.find(self.store.load(), "live-apply")
+        self.assertEqual(patches.patch_scope(p), "omlx")
+        self.assertTrue(p["enabled"])   # fallback still installs default tier
+        self.assertTrue(any("fell back to runtime" in n for n in r["notes"]))
+        self.assertEqual(p.get("both_refused_v"), p.get("desired_version"))
+
+    def test_refused_rescope_does_not_churn_on_every_sync(self):
+        # same content again: the refusal is remembered, no remove/re-add
+        empty = os.path.join(self.tmp, "empty-src")
+        os.makedirs(empty, exist_ok=True)
+        both = make_fetch(self._files_scope_both())
+        curated.sync(self.store, self.root, fetch=both, build_root=empty)
+        first = self.store.find(self.store.load(), "live-apply")
+        v_file = first["versions"][0]["patch_file"]
+        r2 = curated.sync(self.store, self.root, fetch=both, build_root=empty)
+        self.assertEqual(r2["report"]["live-apply"]["sync"], "already_present")
+        second = self.store.find(self.store.load(), "live-apply")
+        # stored version untouched — no new version materialized
+        self.assertEqual(second["versions"][0]["patch_file"], v_file)
+        self.assertEqual(len(second["versions"]), 1)
+
+    def test_rescope_migrates_installed_omlx_patch_to_both(self):
+        # first install runtime-only (no dev carrier), THEN omlx-dev gets
+        # bootstrapped and a sync widens the scope: stored diff is the
+        # FULL bytes, enabled flag survives
+        both = make_fetch(self._files_scope_both())
+        curated.sync(self.store, self.root, fetch=both)   # no build_root yet
+        p = self.store.find(self.store.load(), "live-apply")
+        self.assertEqual(patches.patch_scope(p), "omlx")
+        r = curated.sync(self.store, self.root, fetch=both,
+                         build_root=self._build_root())
+        p = self.store.find(self.store.load(), "live-apply")
+        self.assertEqual(patches.patch_scope(p), "both")
+        self.assertTrue(p["enabled"])
+        self.assertTrue(p["curated"])
+        # one patch, not a second copy
+        ids = [x["id"] for x in self.store.load()["patches"]]
+        self.assertEqual(ids.count("live-apply"), 1)
+
+    def test_rescope_never_touches_user_chosen_scope(self):
+        # a patch the user added themselves (no curated stamp) keeps its
+        # omlx scope — the catalog must not re-scope user decisions
+        from omlx_uplift import patchsource
+        patchsource.add_patch(self.store, "mine", {
+            "kind": "github_pr", "repo": "jundot/omlx", "pr": 1234},
+            self.root)
+        m = self.store.load()
+        p = self.store.find(m, "mine")
+        p["curated"] = "default"       # recognized as a catalog patch
+        self.store.save(m)
+        r = curated.sync(self.store, self.root,
+                         fetch=make_fetch(self._files_scope_both()),
+                         build_root=self._build_root())
+        self.assertEqual(r["report"]["live-apply"]["sync"], "already_present")
+        self.assertEqual(patches.patch_scope(
+            self.store.find(self.store.load(), "mine")), "omlx")
+
 
 if __name__ == "__main__":
     unittest.main()

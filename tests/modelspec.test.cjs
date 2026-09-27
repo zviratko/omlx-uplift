@@ -198,12 +198,61 @@ test('buildState: mtp_adaptive_max_depth is a 3/4/5/6 string, default 3', () => 
     assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 5 }).mtp_adaptive_max_depth, '5');
     assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 99 }).mtp_adaptive_max_depth, '3');
 });
+test('buildState: legacy mtp_num_draft_tokens reads as the same depth', () => {
+    // servers older than 62171bdf store the adaptive ceiling under the
+    // legacy name (Save failed: extra_forbidden regression, 2026-09-27)
+    assert.strictEqual(S.buildState(base(), { mtp_num_draft_tokens: 4 }).mtp_adaptive_max_depth, '4');
+    assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 5,
+        mtp_num_draft_tokens: 4 }).mtp_adaptive_max_depth, '5');
+    assert.strictEqual(S.buildState(base(), { mtp_num_draft_tokens: 99 }).mtp_adaptive_max_depth, '3');
+});
 test('buildPayload: depth rides mtp_adaptive_max_depth; fixed depth cleared', () => {
     const p = S.buildPayload(S.buildState(base(), { mtp_enabled: true, mtp_adaptive_max_depth: '4' }), base());
     assert.strictEqual(p.mtp_adaptive_max_depth, 4);
     assert.strictEqual(p.mtp_fixed_depth, null);
     const off = S.buildPayload(S.buildState(base(), { mtp_enabled: false, mtp_adaptive_max_depth: '4' }), base());
     assert.strictEqual(off.mtp_adaptive_max_depth, null);
+});
+/* ---- server payload adaptation (version skew: keg predates 62171bdf) ---- */
+test('adaptToServerPayload: old server gets the legacy mtp key back', () => {
+    const oldFields = new Set(['mtp_enabled', 'mtp_num_draft_tokens']);
+    const out = S.adaptToServerPayload(
+        { mtp_enabled: true, mtp_adaptive_max_depth: 4, mtp_fixed_depth: null },
+        oldFields);
+    assert.strictEqual(out.mtp_num_draft_tokens, 4);
+    assert.ok(!('mtp_adaptive_max_depth' in out));
+    assert.ok(!('mtp_fixed_depth' in out));
+});
+test('adaptToServerPayload: new server keeps the modeled keys untouched', () => {
+    const newFields = new Set(['mtp_enabled', 'mtp_adaptive_max_depth', 'mtp_fixed_depth']);
+    const p = { mtp_enabled: true, mtp_adaptive_max_depth: 4, mtp_fixed_depth: null };
+    assert.strictEqual(S.adaptToServerPayload(p, newFields), p);
+});
+test('adaptToServerPayload: unknown schema sends as modeled', () => {
+    const p = { mtp_adaptive_max_depth: 4, mtp_fixed_depth: null };
+    assert.strictEqual(S.adaptToServerPayload(p, null), p);
+});
+/* ---- profile-override adaptation (editor-state shape: select strings) ---- */
+test('adaptToServerSettings: old server gets legacy key, string coerced', () => {
+    const oldFields = new Set(['mtp_enabled', 'mtp_num_draft_tokens']);
+    const out = S.adaptToServerSettings(
+        { mtp_enabled: 'true', mtp_adaptive_max_depth: '4', mtp_fixed_depth: null },
+        oldFields);
+    assert.strictEqual(out.mtp_num_draft_tokens, 4);
+    assert.ok(!('mtp_adaptive_max_depth' in out));
+    assert.ok(!('mtp_fixed_depth' in out));
+});
+test('adaptToServerSettings: unset depth stays unset', () => {
+    const oldFields = new Set(['mtp_num_draft_tokens']);
+    const out = S.adaptToServerSettings({ temperature: '0.7' }, oldFields);
+    assert.ok(!('mtp_num_draft_tokens' in out));
+    assert.strictEqual(out.temperature, '0.7');
+});
+test('adaptToServerSettings: new server + unknown schema pass through', () => {
+    const newFields = new Set(['mtp_adaptive_max_depth']);
+    const s = { mtp_adaptive_max_depth: '4' };
+    assert.strictEqual(S.adaptToServerSettings(s, newFields), s);
+    assert.strictEqual(S.adaptToServerSettings(s, null), s);
 });
 
 /* ---- runtime signature replica (engine_pool._engine_runtime_signature) ---- */

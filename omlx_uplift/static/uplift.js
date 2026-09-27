@@ -71,6 +71,7 @@ window.Uplift._modelGlue = {
     get cell() { return cell; },
     get emptyMsg() { return emptyMsg; },
     get putModelSettings() { return putModelSettings; },
+    get modelSettingsFields() { return modelSettingsFields; },
     get postModelAction() { return postModelAction; },
 };
 const MM = window.Uplift.modelmgr;
@@ -281,10 +282,9 @@ function applyTab() {
     $('grid').style.display = tab === 'status' ? '' : 'none';
     $('btn-customize').hidden = tab !== 'status' || dashEditing;
     if (tab !== 'status' && dashEditing) cancelDashEdit();
-    // dropdown open state reset on navigation (dropdown click keeps its menu open)
-    for (const m of ['dd-models-menu', 'dd-bench-menu'])
-        if (ddForceOpen !== m) $(m).hidden = true;
-    ddForceOpen = null;
+    // navigation (deep link, keyboard, submenu item) closes any open menu
+    for (const m of ['dd-models-menu', 'dd-bench-menu', 'dd-settings-menu'])
+        $(m).hidden = true;
     requestAnimationFrame(CH.resizeCharts);   // charts may have become visible
     if (tab === 'status') requestAnimationFrame(ensureUpliftGrid);
     if (tab === 'usage') UUP.pollUsage();
@@ -351,35 +351,50 @@ const EMBED_PAGE_IDS = {
 };
 
 /* dropdown menus: hover opens, click toggles, outside click / Escape closes */
-let ddForceOpen = null;
 const ddTimers = {};
+/* Touch fix (iOS, user report 2026-09-27): Safari synthesizes mouseenter
+   (and a trailing mouseleave timer can race the tap) before click fires —
+   hover opened the menu, the real click then saw "already open" and closed
+   it again: taps navigated but never showed the dropdown. Remember the last
+   touch so hover handlers stay silent for a beat after it. */
+let ddLastTouch = 0;
+document.addEventListener('touchstart', () => { ddLastTouch = Date.now(); },
+    { passive: true, capture: true });
+const ddTouchHover = () => Date.now() - ddLastTouch < 800;
 function ddOpen(menuId, open) { $(menuId).hidden = !open; }
 function bindDropdown(btnId, menuId) {
     const btn = $(btnId), menu = $(menuId);
     const wrap = btn.closest('.dd');
+    let openedBy = null;          // 'hover' | 'click' — distinguishes synthesized hover
     btn.onclick = e => {
         e.preventDefault();
         clearTimeout(ddTimers[menuId]);
-        const open = menu.hidden;
-        if (currentTab() !== btn.dataset.tab) {
-            ddForceOpen = menuId;              // re-open after the tab switch
-            location.hash = '#' + btn.dataset.tab;
-        }
+        // click DROPS THE MENU — it never navigates (submenu items do).
+        // A tap's synthesized hover may have opened the menu already; the
+        // click that follows must then close it (real toggle, not a no-op).
+        const open = menu.hidden || openedBy === 'hover';
         ddOpen(menuId, open);
+        openedBy = open ? 'click' : null;
     };
-    // hover behaviour (like the classic navbar)
+    // hover behaviour (desktop only — like the classic navbar)
     wrap.addEventListener('mouseenter', () => {
+        if (ddTouchHover()) return;
         clearTimeout(ddTimers[menuId]);
         ddOpen(menuId, true);
+        openedBy = 'hover';
     });
     wrap.addEventListener('mouseleave', () => {
+        // a finger is not a cursor: after a touch-open, the phantom mouseleave
+        // must not schedule a close 250 ms later
+        if (ddTouchHover() && openedBy === 'click') return;
         clearTimeout(ddTimers[menuId]);
-        ddTimers[menuId] = setTimeout(() => { menu.hidden = true; }, 250);
+        ddTimers[menuId] = setTimeout(() => { menu.hidden = true; openedBy = null; }, 250);
     });
     for (const a of menu.querySelectorAll('a'))
         a.addEventListener('click', e => {
             e.preventDefault();
             menu.hidden = true;
+            openedBy = null;
             location.hash = '#' + btn.dataset.tab + '/' + a.dataset.sub;
         });
 }
@@ -1876,7 +1891,31 @@ async function fetchJson(url, opts) {
     }
     return res.json();
 }
+/* ---- server settings-field discovery (version adaptation) ----
+   The editor models the CURRENT upstream field names (62171bdf renamed
+   mtp_num_draft_tokens -> mtp_adaptive_max_depth + mtp_fixed_depth). An
+   older RUNNING omlx forbids extras (422 extra_forbidden) and the whole
+   save dies. /openapi.json is same-origin, unauthenticated, and names
+   exactly what the live server's PUT body accepts — cache its property
+   set once per page. null (fetch failed / no schema, e.g. the mock) means
+   "unknown" and the payload goes out as modeled. */
+let _msFieldsP = null;
+function modelSettingsFields() {
+    if (!_msFieldsP) {
+        _msFieldsP = fetchJson(`${API}/openapi.json`)
+            .then(spec => {
+                const m = ((spec.components || {}).schemas || {})
+                    .ModelSettingsRequest;
+                return m && m.properties
+                    ? new Set(Object.keys(m.properties)) : null;
+            })
+            .catch(() => null);
+    }
+    return _msFieldsP;
+}
 async function putModelSettings(model, settings) {
+    settings = window.UpliftModelSpec.adaptToServerPayload(
+        settings, await modelSettingsFields());
     const body = await S.trackWrite(async () => {
         const res = await fetch(`${API}/admin/api/models/${encodeURIComponent(model)}/settings`,
             { method: 'PUT', headers: { 'Content-Type': 'application/json' },

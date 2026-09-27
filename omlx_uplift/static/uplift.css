@@ -987,7 +987,10 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 }
 .dd-btn:hover { color: var(--ink); background: var(--edge); }
 .dd-btn.active { color: var(--bg); background: var(--ink); }
-.dd-caret { font-size: 9px; }
+/* caret sits clear of the label (user ask: dropdown indicator needs more
+   air from the menu text); touch-action kills the 300 ms tap delay */
+.dd-caret { font-size: 9px; margin-left: 5px; }
+.dd-btn { touch-action: manipulation; }
 .dd-menu {
     position: absolute; top: 100%; left: -1px; z-index: 50; min-width: 200px;
     background: var(--card); border: 1px solid var(--ink);
@@ -1075,12 +1078,12 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* ---- Model settings editor: popup modal, roomy, monospace everywhere ---- */
 /* U1 (user round 2026-09-16): the 860px editor clipped long labels like
    "Cache Reasoning …" — the form now uses most of the viewport */
-.modal.nasa.editor { width: min(1240px, 96vw); max-height: 92vh; }
+.modal.nasa.editor { width: min(992px, 96vw); max-height: 92vh; }
 /* form sits left; a CHANGES side rail opens on the right when changes queue
    (the modal widens, the form keeps its width at the left edge) */
-.modal.nasa.editor:has(.changelist.ed:not([hidden])) { width: min(1500px, 98vw); }
+.modal.nasa.editor:has(.changelist.ed:not([hidden])) { width: min(1200px, 98vw); }
 .editor-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
-.editor-body .editor-scroll { flex: 0 1 1200px; min-width: 0; }
+.editor-body .editor-scroll { flex: 0 1 964px; min-width: 0; }
 #se-changes.ed { flex: 0 0 320px; align-self: stretch; max-height: none;
     overflow: auto; scrollbar-gutter: stable;
     border: 1px solid var(--edge); background: var(--field); }
@@ -1669,6 +1672,24 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-banner { border: 1px solid var(--warn, #b8860b); background: color-mix(in srgb, var(--warn, #b8860b) 12%, transparent); padding: 6px 10px; margin: 4px 0; font-size: var(--fs-meta); }
 .pt-banner.pt-kill { border-color: var(--accent, #e0662e); }
 .pt-card { border: 1px solid var(--line); padding: 8px 10px; margin: 8px 0; display: flex; flex-direction: column; gap: 5px; }
+/* Patches page readability (user ask 2026-09-27: 'one card per patch,
+   alternating background'): each patch is a self-contained card; the list
+   stripes odd/even so card boundaries are visible at a glance. --card is
+   the panel ground, --field the recessed well — alternating between them
+   is the same visual language as the model table rows. */
+#pt-list > .pt-card:nth-child(odd of .pt-card), #pt-curated-body > .pt-card:nth-child(odd of .pt-card),
+#dv-patches > .pt-card:nth-child(odd of .pt-card) { background: var(--field); }
+#pt-list > .pt-card:nth-child(even of .pt-card), #pt-curated-body > .pt-card:nth-child(even of .pt-card),
+#dv-patches > .pt-card:nth-child(even of .pt-card) { background: color-mix(in srgb, var(--field) 55%, var(--card)); }
+.pt-card { border-radius: 2px; }
+#pt-list > .pt-card:hover, #pt-curated-body > .pt-card:hover { border-color: var(--dim); }
+/* warn keeps its tint over either stripe (equal specificity, later wins) */
+#pt-list > .pt-card.pt-card-warn, #pt-curated-body > .pt-card.pt-card-warn,
+#dv-patches > .pt-card.pt-card-warn { border-color: var(--warn, #b8860b); }
+#pt-list > .pt-card.pt-card-warn:nth-child(odd of .pt-card), #pt-curated-body > .pt-card.pt-card-warn:nth-child(odd of .pt-card),
+#dv-patches > .pt-card.pt-card-warn:nth-child(odd of .pt-card) { background: color-mix(in srgb, var(--warn, #b8860b) 7%, var(--field)); }
+#pt-list > .pt-card.pt-card-warn:nth-child(even of .pt-card), #pt-curated-body > .pt-card.pt-card-warn:nth-child(even of .pt-card),
+#dv-patches > .pt-card.pt-card-warn:nth-child(even of .pt-card) { background: color-mix(in srgb, var(--warn, #b8860b) 7%, color-mix(in srgb, var(--field) 55%, var(--card))); }
 .pt-card-warn { border-color: var(--warn, #b8860b); background: color-mix(in srgb, var(--warn, #b8860b) 7%, transparent); }
 .pt-card-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .pt-id { font-weight: 700; letter-spacing: .04em; }

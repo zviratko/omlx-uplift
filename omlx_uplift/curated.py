@@ -38,7 +38,7 @@ import json
 import logging
 import re
 
-from . import patchsource
+from . import patches, patchsource
 
 _log = logging.getLogger("omlx_uplift.curated")
 
@@ -202,6 +202,7 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
     for tier in TIERS:
         for e in listing["tiers"].get(tier, []):
             pid = e["id"]
+            was_enabled = False   # survives a remove/re-add rescope
             if not e.get("source_ok"):
                 # manifest missing/unparsable, no usable source, or no
                 # description — never install half-declared work
@@ -229,13 +230,63 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                     if not p.get("description") and e.get("description"):
                         p["description"] = e["description"]
                     store.save(manifest)
-                report[pid] = {"sync": "already_present",
-                               "under_id": p["id"]}
-                continue
+                # scope migration (user ask 2026-09-27: bundled patches
+                # apply to BOTH the runtime keg and omlx-dev). Scope is
+                # fixed per patch inside patchsource (stored bytes differ:
+                # omlx keeps the pruned diff, both stores the FULL diff),
+                # so a rescope re-materializes: remove restores vanilla
+                # bytes NOW, the re-add gates the full diff and reconcile
+                # re-applies at next boot. Only ever widen omlx -> both;
+                # never touch a scope the user chose for themselves.
+                cur = patches.patch_scope(p)
+                was_enabled = bool(p.get("enabled"))
+                if (e.get("scope") == patches.SCOPE_BOTH
+                        and cur == patches.SCOPE_OMLX
+                        and build_root
+                        and p.get("curated") and p["id"] == pid
+                        # a refused full diff is not retried every sync —
+                        # only once the patch content changed again (the
+                        # stamp rides version numbers, which bump per new
+                        # stored version; same-sha re-syncs stay quiet)
+                        and p.get("both_refused_v") != p.get("desired_version")):
+                    res = patchsource.remove_patch(store, p["id"], tree_root)
+                    if not res.get("ok"):
+                        report[pid] = {"sync": "already_present",
+                                       "under_id": p["id"],
+                                       "rescope_failed": res.get("reason")}
+                        notes.append(f"{pid}: rescope to both failed "
+                                     f"({res.get('reason')}) — kept {cur}")
+                        continue
+                    manifest = store.load()
+                    p = None   # fall through to the add path with scope=both
+                else:
+                    report[pid] = {"sync": "already_present",
+                                   "under_id": p["id"]}
+                    continue
+            scope_try = e.get("scope")
+            if scope_try == patches.SCOPE_BOTH and not build_root:
+                # no omlx-dev carrier on this machine — the runtime side
+                # alone covers what exists here (notes keep it honest)
+                scope_try = None
+                notes.append(f"{pid}: scope both requested, omlx-dev not "
+                             f"bootstrapped — installed runtime-only")
             res = patchsource.add_patch(store, pid, dict(e["source"]),
-                                        tree_root, scope=e.get("scope"),
+                                        tree_root, scope=scope_try,
                                         reversal=bool(e.get("reversal")),
                                         build_root=build_root)
+            both_refused = None
+            if (not res.get("ok") and not res.get("obsolete")
+                    and scope_try == patches.SCOPE_BOTH):
+                # the dev side refuses the full diff (context drifted from
+                # the sync ref, kernel-only paths...) — the runtime side is
+                # still valuable; fall back instead of losing the patch
+                notes.append(f"{pid}: both refused ({res.get('reason')}) — "
+                             f"fell back to runtime scope")
+                both_refused = str(res.get("reason") or "")[:200]
+                res = patchsource.add_patch(store, pid, dict(e["source"]),
+                                            tree_root,
+                                            scope=patches.SCOPE_OMLX,
+                                            reversal=bool(e.get("reversal")))
             if res.get("obsolete"):
                 # upstream already carries it on this machine — not an
                 # error; nothing stored, nothing to enable
@@ -248,7 +299,9 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                 continue
             manifest = store.load()
             p = store.find(manifest, pid)
-            if p is not None and tier == "default":
+            if p is not None and (tier == "default" or was_enabled):
+                # re-scoped patches keep the user's enabled flag (a remove/
+                # re-add would otherwise silently reset optional-tier ones)
                 en = patchsource.set_enabled(store, pid, True)
                 if en.get("ok"):
                     report[pid] = {"sync": "added_enabled"}
@@ -268,6 +321,11 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                 if e.get("description"):
                     p["description"] = e["description"]
                 p["curated"] = tier
+                if both_refused is not None:
+                    # remember WHICH content the dev side refused; re-scope
+                    # attempts resume only when a new version lands
+                    p["both_refused_v"] = p.get("desired_version")
+                    p["both_refused_reason"] = both_refused
                 store.save(manifest)
     for tier, reason in listing["errors"].items():
         notes.append(f"tier {tier}: {reason}")

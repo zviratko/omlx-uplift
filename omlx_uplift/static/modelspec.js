@@ -93,6 +93,15 @@
         return entries;
     }
 
+    // Lightning MTP depth: one adaptive ceiling. New servers carry it as
+    // mtp_adaptive_max_depth (62171bdf); older ones store the same value as
+    // mtp_num_draft_tokens. Accept either name, clamp to the modeled set.
+    function mtpDepthOf(s) {
+        const raw = s.mtp_adaptive_max_depth != null ? s.mtp_adaptive_max_depth
+            : s.mtp_num_draft_tokens;
+        return [3, 4, 5, 6].includes(Number(raw)) ? String(Number(raw)) : '3';
+    }
+
     function buildState(model, s) {
         s = s || {};
         const diffusion = isDiffusion(model);
@@ -191,8 +200,10 @@
             vlm_mtp_draft_block_size: s.vlm_mtp_draft_block_size ?? null,
             // upstream 62171bdf: the fixed-depth select is gone; depth is a
             // single adaptive-max ceiling. 3 = default adaptive.
-            mtp_adaptive_max_depth: [3, 4, 5, 6].includes(Number(s.mtp_adaptive_max_depth))
-                ? String(Number(s.mtp_adaptive_max_depth)) : '3',
+            // Servers older than 62171bdf store the same value under the
+            // legacy name mtp_num_draft_tokens (identical semantics — both
+            // docstrings describe one adaptive draft-depth ceiling).
+            mtp_adaptive_max_depth: mtpDepthOf(s),
             mtp_fixed_depth: s.mtp_fixed_depth ? String(s.mtp_fixed_depth) : '',
             trust_remote_code: s.trust_remote_code || false,
             ctKwargEntries: buildCtKwargEntries(s.chat_template_kwargs, s.forced_ct_kwargs, diffusion),
@@ -604,12 +615,50 @@
                  expose_as_model: !!exposeAsModel };
     }
 
+    /* ---- server payload adaptation ----
+       The editor models the CURRENT upstream schema (62171bdf renamed
+       mtp_num_draft_tokens -> mtp_adaptive_max_depth + mtp_fixed_depth),
+       but the RUNNING omlx may predate that rename and its PUT body model
+       is extra='forbid' — an unknown key 422s the whole save. When the
+       server does not know the new name, translate back to the legacy one
+       (identical semantics: both are the adaptive draft-depth ceiling).
+       fields = accepted ModelSettingsRequest property names, or null when
+       the server schema is unknown (then send as modeled). */
+    function adaptToServerPayload(payload, fields) {
+        if (!fields || fields.has('mtp_adaptive_max_depth')) return payload;
+        const out = Object.assign({}, payload);
+        if ('mtp_adaptive_max_depth' in out) {
+            out.mtp_num_draft_tokens = out.mtp_adaptive_max_depth;
+            delete out.mtp_adaptive_max_depth;
+        }
+        // fixed depth has no legacy equivalent — drop it (null anyway:
+        // 62171bdf retired the fixed-depth select, buildPayload clears it)
+        delete out.mtp_fixed_depth;
+        return out;
+    }
+    // The same rename seen through the EDITOR STATE shape (profile
+    // overrides hold select strings like '4', not payload ints). The old
+    // server's ModelSettings.from_dict silently DROPS the unknown key —
+    // without this translation a profile's MTP depth would never apply.
+    function adaptToServerSettings(settings, fields) {
+        if (!fields || fields.has('mtp_adaptive_max_depth')) return settings;
+        const out = Object.assign({}, settings);
+        if (out.mtp_adaptive_max_depth != null) {
+            out.mtp_num_draft_tokens = Math.max(1,
+                parseInt(out.mtp_adaptive_max_depth, 10) || 3);
+        }
+        delete out.mtp_adaptive_max_depth;
+        delete out.mtp_fixed_depth;
+        return out;
+    }
+
     return { DIFFUSION_CONFIG_MODEL_TYPES, DIFFUSION_UNSUPPORTED_PROFILE_FIELDS,
              DIFFUSION_UNSUPPORTED_CT_KWARGS, REASONING_EFFORT_PRESETS,
              MODEL_TYPE_OPTIONS, VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES,
              DFLASH_DRAFTER_CONFIG_MODEL_TYPES,
              isDiffusion, isQwenOqA8, coerceKwargValue, buildCtKwargEntries,
-             buildState, validate, buildPayload,
+             buildState, validate, buildPayload, adaptToServerPayload,
+             adaptToServerSettings,
              runtimeSignature, runtimeDiff, RUNTIME_SETTING_KEYS,
              isDflashDraftModel, isVlmMtpDraftModel, isSpecPrefillDraftModel,
              specprefillCandidates, dflashCandidates, vlmMtpDrafters,

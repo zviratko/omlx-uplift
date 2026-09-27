@@ -1,6 +1,10 @@
 {
   "description": "Recompute Qwen3-VL position ids per request. Fixes wrong position ids when several embedding requests share the model (upstream jundot/omlx#3874).",
-  "source": {"kind": "github_pr", "repo": "jundot/omlx", "pr": 3874},
+  "source": {
+    "kind": "github_pr",
+    "repo": "jundot/omlx",
+    "pr": 3874
+  },
   "reversal": false,
-  "scope": "omlx"
+  "scope": "both"
 }
