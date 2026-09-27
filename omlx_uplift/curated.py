@@ -202,6 +202,7 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
     for tier in TIERS:
         for e in listing["tiers"].get(tier, []):
             pid = e["id"]
+            add_id = pid          # rescope re-adds keep the existing store id
             was_enabled = False   # survives a remove/re-add rescope
             if not e.get("source_ok"):
                 # manifest missing/unparsable, no usable source, or no
@@ -243,7 +244,11 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                 if (e.get("scope") == patches.SCOPE_BOTH
                         and cur == patches.SCOPE_OMLX
                         and build_root
-                        and p.get("curated") and p["id"] == pid
+                        # catalog OWNERSHIP is the curated tier tag — the
+                        # store id may differ (installed under a legacy slug
+                        # before source dedupe); an adopted patch left the
+                        # catalog's scope decisions to the user
+                        and p.get("curated") and not p.get("curated_adopted")
                         # a refused full diff is not retried every sync —
                         # only once the patch content changed again (the
                         # stamp rides version numbers, which bump per new
@@ -257,7 +262,11 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                         notes.append(f"{pid}: rescope to both failed "
                                      f"({res.get('reason')}) — kept {cur}")
                         continue
+                    # remove_patch saved its own reload — the loop's
+                    # manifest copy is stale; re-read so add_patch's
+                    # already-taken guard cannot reject the re-add
                     manifest = store.load()
+                    add_id = p["id"]   # keep the user/store id stable
                     p = None   # fall through to the add path with scope=both
                 else:
                     report[pid] = {"sync": "already_present",
@@ -270,7 +279,7 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                 scope_try = None
                 notes.append(f"{pid}: scope both requested, omlx-dev not "
                              f"bootstrapped — installed runtime-only")
-            res = patchsource.add_patch(store, pid, dict(e["source"]),
+            res = patchsource.add_patch(store, add_id, dict(e["source"]),
                                         tree_root, scope=scope_try,
                                         reversal=bool(e.get("reversal")),
                                         build_root=build_root)
@@ -298,11 +307,11 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                 notes.append(f"{pid}: gate refused ({res.get('reason')})")
                 continue
             manifest = store.load()
-            p = store.find(manifest, pid)
+            p = store.find(manifest, add_id)
             if p is not None and (tier == "default" or was_enabled):
                 # re-scoped patches keep the user's enabled flag (a remove/
                 # re-add would otherwise silently reset optional-tier ones)
-                en = patchsource.set_enabled(store, pid, True)
+                en = patchsource.set_enabled(store, add_id, True)
                 if en.get("ok"):
                     report[pid] = {"sync": "added_enabled"}
                 else:
@@ -316,7 +325,7 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
             # annotation LAST: set_enabled saves its own manifest reload —
             # writing description/curated before it would be lost
             manifest = store.load()
-            p = store.find(manifest, pid)
+            p = store.find(manifest, add_id)
             if p is not None:
                 if e.get("description"):
                     p["description"] = e["description"]

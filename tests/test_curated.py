@@ -305,16 +305,59 @@ class CuratedSyncTests(unittest.TestCase):
         ids = [x["id"] for x in self.store.load()["patches"]]
         self.assertEqual(ids.count("live-apply"), 1)
 
-    def test_rescope_never_touches_user_chosen_scope(self):
-        # a patch the user added themselves (no curated stamp) keeps its
-        # omlx scope — the catalog must not re-scope user decisions
+    def test_rescope_migrates_legacy_slug_under_different_id(self):
+        # the real-world store: catalog patch installed BEFORE source
+        # dedupe under a legacy slug (prXXXX) — dedupe recognizes it by
+        # SOURCE, stamps curated, and the rescope must widen THAT entry
+        # (id != catalog pid) without adding a second copy
+        from omlx_uplift import patchsource
+        patchsource.add_patch(self.store, "pr1234", {
+            "kind": "github_pr", "repo": "jundot/omlx", "pr": 1234},
+            self.root)
+        r = curated.sync(self.store, self.root,
+                         fetch=make_fetch(self._files_scope_both()),
+                         build_root=self._build_root())
+        # rescope re-materializes: remove + re-add UNDER THE SAME STORE ID
+        # (user decisions ride the id — a rename would orphan them)
+        self.assertEqual(r["report"]["live-apply"]["sync"], "added_enabled")
+        p = self.store.find(self.store.load(), "pr1234")
+        self.assertEqual(patches.patch_scope(p), "both")
+        self.assertTrue(p["curated"])
+        self.assertTrue(p["enabled"])
+        ids = [x["id"] for x in self.store.load()["patches"]]
+        self.assertEqual(ids.count("pr1234"), 1)
+        self.assertNotIn("live-apply", ids)
+
+    def test_rescope_widens_source_matched_patch(self):
+        # a patch the user added themselves that dedupe recognizes as the
+        # catalog's (same source) IS catalog-owned from then on — bundled
+        # scope policy applies: widen omlx -> both, keep it enabled
+        from omlx_uplift import patchsource
+        patchsource.add_patch(self.store, "mine", {
+            "kind": "github_pr", "repo": "jundot/omlx", "pr": 1234},
+            self.root)
+        r = curated.sync(self.store, self.root,
+                         fetch=make_fetch(self._files_scope_both()),
+                         build_root=self._build_root())
+        self.assertEqual(r["report"]["live-apply"]["sync"], "added_enabled")
+        p = self.store.find(self.store.load(), "mine")
+        self.assertEqual(patches.patch_scope(p), "both")  # id kept, widened
+        self.assertTrue(p["curated"])
+        self.assertTrue(p["enabled"])
+        ids = [x["id"] for x in self.store.load()["patches"]]
+        self.assertEqual(ids.count("mine"), 1)
+
+    def test_rescope_never_touches_adopted_patch(self):
+        # adopt-as-local = the user owns the scope decision; sync must not
+        # re-scope it, only leave it present
         from omlx_uplift import patchsource
         patchsource.add_patch(self.store, "mine", {
             "kind": "github_pr", "repo": "jundot/omlx", "pr": 1234},
             self.root)
         m = self.store.load()
         p = self.store.find(m, "mine")
-        p["curated"] = "default"       # recognized as a catalog patch
+        p["curated"] = "default"
+        p["curated_adopted"] = True    # adopted: catalog no longer claims it
         self.store.save(m)
         r = curated.sync(self.store, self.root,
                          fetch=make_fetch(self._files_scope_both()),
