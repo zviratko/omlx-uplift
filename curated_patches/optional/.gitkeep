@@ -1,2 +1,2 @@
-# optional tier: patches that are offered but NOT enabled by default.
-# See ../README.md for the pair format (<name>.diff + <name>.md manifest).
+# optional tier: patches offered but NOT enabled by default.
+# See ../README.md for the <name>.json manifest format.

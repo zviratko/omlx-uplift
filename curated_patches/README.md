@@ -6,19 +6,29 @@ Ready-made uplift patches, consumed by the omlx-uplift dashboard
 
 Layout — exactly two tiers:
 
-    default/    installed ENABLED by default (applied automatically)
-    optional/   installed but NOT enabled (present, one click away)
+    default/    installed ENABLED on sync (applied to omlx-dev builds)
+    optional/   installed but NOT enabled (one click away)
 
-Each patch is a pair of files:
+Format — each patch is ONE manifest, `<name>.json`, shaped like a
+store patch entry so it merges into the local manifest cleanly:
 
-    <name>.diff   the patch itself (git diff, omlx-package-root paths)
-    <name>.md     manifest (REQUIRED): a short description of the
-                  purpose. A .diff without its .md is skipped.
+    {
+      "description": "short purpose of the patch",   // required
+      "source": {"kind": "github_pr", "repo": "jundot/omlx", "pr": 3765},
+      "reversal": false,                             // optional
+      "scope":    "omlx"                             // optional: omlx|dev|both
+    }
 
-The manifest may carry one optional frontmatter line to pin the patch
-scope (`omlx` = vanilla keg overlay, `dev` = omlx-dev build only,
-`both`); without it the scope is auto-classified like a manual add.
+`source` rules:
 
-A sync never overwrites local decisions: once installed, a patch keeps
-its enabled flag; the normal drift check keeps its content fresh.
-Patches that upstream later merges are auto-marked obsolete.
+  * A feature that has an upstream PR links it — `github_pr`. The
+    catalog never copies content a PR already owns; when the PR merges,
+    the drift check marks the patch obsolete on its own.
+  * No PR? Vendor the diff next to the manifest as `<name>.diff` and
+    use `{"kind": "file"}` (or any `url`).
+
+`scope` can be omitted — the gate auto-classifies it. `reversal: true`
+for patches that UNDO a merged change (disable restores original bytes).
+
+A manifest without a description or with an unusable source is listed
+but skipped on sync — never installed half-declared.

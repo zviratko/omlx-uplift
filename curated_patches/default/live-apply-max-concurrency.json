@@ -1,0 +1,6 @@
+{
+  "description": "Apply max_concurrent_requests from Server Settings without a restart or model unload.",
+  "source": {"kind": "github_pr", "repo": "jundot/omlx", "pr": 3765},
+  "reversal": false,
+  "scope": "omlx"
+}
