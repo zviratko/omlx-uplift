@@ -425,9 +425,13 @@ def cmd_patches(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="omlx-uplift patch")
     ap.add_argument("action", choices=["status", "apply", "check",
                                        "disable-all", "add",
-                                       "enable", "disable", "remove"])
+                                       "enable", "disable", "remove",
+                                       "curated"])
     ap.add_argument("id", nargs="?",
                     help="patch id (add/enable/disable/remove)")
+    ap.add_argument("--sync", action="store_true",
+                    help="curated: install the catalog (default tier gets "
+                         "enabled); without the flag only preview")
     ap.add_argument("--approve", choices=["once", "always"],
                     help="accept the desired version's safeguard codes so "
                          "auto-apply is allowed (enable)")
@@ -488,6 +492,20 @@ def cmd_patches(argv=None) -> int:
                   "to uplift-dev + pruned overlay on the keg) or --scope "
                   "dev (dev-src only)", file=sys.stderr)
             return 3
+        print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
+
+    if args.action == "curated":
+        from . import curated
+        if args.sync:
+            out = curated.sync(store, tree_root,
+                               build_root=patchsource.dev_build_root())
+        else:
+            out = curated.list_remote()
+            manifest = store.load()
+            for tier in out["tiers"].values():
+                for e in tier:
+                    e["installed"] = store.find(manifest, e["id"]) is not None
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 
@@ -1022,6 +1040,27 @@ def cmd_dev_install(args) -> int:
     except devsrc.DevsrcError as exc:
         print(f"dev-src: {exc}", file=sys.stderr)
         return 1
+
+    # curated catalog: first dev build on this machine surfaces the
+    # published patch set (default tier installs enabled, optional
+    # disabled). Best-effort: a dead network must never block a build.
+    try:
+        from . import curated as _curated
+        crt = _patches_store().load()
+        if not any(p.get("curated") for p in crt.get("patches", [])):
+            root = _patches._omlx_root()
+            if root:
+                cs = _curated.sync(_patches_store(),
+                                   os.path.dirname(root),
+                                   build_root=path)
+                fresh = [k for k, v in cs["report"].items()
+                         if str(v.get("sync", "")).startswith("added")]
+                if fresh:
+                    print("curated: " + ", ".join(sorted(fresh)) +
+                          " (default tier enabled — see omlx-uplift patch "
+                          "curated)")
+    except Exception as exc:                    # noqa: BLE001 — best-effort
+        print(f"curated sync skipped: {exc}", file=sys.stderr)
 
     build_patches = patchsource.enabled_build_patches(_patches_store())
     res = devsrc.materialize(build_patches, cfg)

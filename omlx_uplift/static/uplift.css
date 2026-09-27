@@ -224,24 +224,21 @@ header.top .spacer { flex: 1; }
 header.top .chip, header.top .tabs a, header.top .dd-btn { white-space: nowrap; }
 header.top .chip { flex-shrink: 0; }   /* never squeeze the box under the
     nowrap text — the tabs strip absorbs width pressure instead */
-/* The status chips travel as ONE unit (.hdr-stats) between the logo and
-   the menu (index.html order: hardware | watts | temp | uptime). Wide:
-   they occupy the empty band behind the logo and push the menu rightward,
-   which is also what widens the tagline band for skins (layoutTaglineBand
-   measures to the menu's left edge). Narrow: instead of being hidden (the
-   old tiering dropped chips at 1300/1140) or clipped behind the nowrap
-   tabs (the reported overlap bug), they move to their own row ABOVE the
-   menu: order re-sequence + tabs forced onto a full-width second line. */
+/* Row 1 unit: status chips left, control icons right (spacer between).
+   The icons moved in here from the menu row (user: same level as the
+   hardware | watts | temp | uptime chips); the menu bar took their old
+   right-aligned spot on row 2. The unit travels together: order -1 pins
+   it to the header's first line at every width. */
 header.top .hdr-stats { display: flex; align-items: center; gap: 10px;
-    flex: 1 1 100%; order: -1; }   /* own top row inside the sticky header:
-    the band above the menu bar is exactly where the user wants them */
+    flex: 1 1 100%; order: -1; }   /* own top row inside the sticky header */
+header.top .hdr-stats .icon-btn { flex: none; }
 @media (min-width: 1141px) {
-    /* item 4: reserve room for a skin's below-logo wordmark — the menu
-       (and everything after) starts right of the reserved logo band */
+    /* item 4: reserve room for a skin's below-logo wordmark — the logo
+       band keeps its width; the menu is right-aligned on its own row */
     header.top .logo { min-width: 240px; }
 }
 @media (max-width: 1140px) {
-    header.top .tabs { order: 2; flex-basis: 100%; }
+    header.top .tabs { order: 2; flex-basis: 100%; margin-left: 0; }
     /* the skin tagline hangs under the logo into row 2's free height only;
        once the tabs wrap below the logo give it explicit clearance */
     header.top.has-tagline .tabs { margin-top: 18px; }
@@ -781,6 +778,21 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .tabs { display: flex; gap: 2px; border: 1px solid var(--edge);
     min-width: 0; }   /* shrinks under header pressure (item 13); no overflow —
     an overflow axis pair forces overflow-y:auto which CLIPS the dropdown menus */
+/* Header menu (index.html row 2): right-aligned where the icon buttons
+   used to sit — logo keeps the left corner, the menu spans the free width
+   to the header's right edge. Equal item widths: every tab and dropdown
+   is a flex item with basis 0 and equal grow, so the row width divides
+   into identical cells (one even ruler). min-width:max-content keeps each
+   label whole; below 900px the scroll tier takes over. */
+header.top nav.tabs { margin-left: auto; flex: 1 1 auto; }
+header.top nav.tabs > a,
+header.top nav.tabs > .dd { flex: 1 1 0; min-width: max-content; }
+header.top nav.tabs > a { text-align: center; }
+header.top nav.tabs > .dd > .dd-btn { width: 100%; justify-content: center;
+    /* caret must not shift the label off-centre inside the shared cell */
+    display: inline-flex; align-items: center; }
+header.top nav.tabs > a:last-child { border-right: 0; }
+header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 @media (max-width: 900px) {
     header.top { flex-wrap: wrap; }              /* mobile keeps the old flow */
     .tabs { overflow-x: auto; scrollbar-width: none; }  /* menu wraps away there */
@@ -1637,6 +1649,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .btn:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .btn.primary:hover { background: transparent; color: var(--ink); }
+/* Disabled must LOOK disabled (and reject hover paints): the dev-card
+   buttons previously kept their full primary fill when disabled, which
+   read as broken/stuck-lit. Keep the text readable — dim, not invisible. */
+.btn:disabled { opacity: .45; cursor: default; }
+.btn:disabled:hover { background: transparent; color: var(--ink); border-color: var(--edge); }
+.btn.primary:disabled:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+/* in-flight button: busy label replaces the caption (dvBuildBusy) */
+.btn[data-busy="1"] { opacity: .6; cursor: progress; pointer-events: none; }
 .pt-auto { height: 32px; }
 .pt-reversal { border: 1px dashed var(--accent, #e0662e); padding: 4px 8px; }
 .pt-st-reversal { border-color: var(--accent, #e0662e); color: var(--accent, #e0662e); }

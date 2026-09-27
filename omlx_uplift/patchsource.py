@@ -829,6 +829,8 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             "advisories": url_advisories(
                 (p.get("source") or {}).get("url") or ""),
             "last_verified": p.get("last_verified"),
+            "description": p.get("description") or "",
+            "curated": p.get("curated"),
         }
         out.append(entry)
     return {"patches": out, "config": manifest.get("config", {}),
@@ -1028,16 +1030,20 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
 
 
 def check_all(store, tree_root: str) -> dict:
-    """Re-fetch every enabled github_pr/url source; changed content becomes a
-    validated CANDIDATE version (state=update_available). Errors are per-
-    patch display-only, never state-degrading (fail-safe rule)."""
+    """Re-fetch every github_pr/url source — ENABLED AND DISABLED alike.
+    A user who disabled a broken patch still wants to know when upstream
+    fixes it (an update_available chip is the cue to re-enable). Changed
+    content becomes a validated CANDIDATE version (state=update_available).
+    Errors are per-patch display-only, never state-degrading (fail-safe
+    rule). Disabled patches only ever get the candidate stored — nothing
+    auto-applies to the tree for them (apply stays an enabled-patch act)."""
     manifest = store.load()
     reports = {}
     changed_any = False
     for p in manifest.get("patches", []):
         src = p.get("source") or {}
         pid = p.get("id")
-        if not p.get("enabled") or src.get("kind") not in ("github_pr", "url"):
+        if src.get("kind") not in ("github_pr", "url"):
             continue
         if _patches.scope_touches_dev(_patches.patch_scope(p)):
             root = dev_build_root()

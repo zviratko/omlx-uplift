@@ -58,6 +58,116 @@ async function pollPatches() {
             list.append(d);
         }
     }
+    ptPollCurated();
+}
+
+/* ---- curated catalog (published in the public uplift repo) ---- */
+async function ptPollCurated() {
+    const sec = $('pt-curated');
+    if (!sec) return;
+    try {
+        const d = await PG.fetchJson(`${API}/uplift/api/patches/curated`);
+        ptRenderCurated(d);
+    } catch (e) {
+        sec.hidden = true;      // auth/API problem: hide, never half-render
+    }
+}
+
+function ptRenderCurated(d) {
+    const sec = $('pt-curated');
+    if (!sec) return;
+    const body = $('pt-curated-body');
+    body.innerHTML = '';
+    let any = false, allInstalled = true;
+    for (const tier of ['default', 'optional']) {
+        const entries = (d.tiers || {})[tier] || [];
+        if (!entries.length) continue;
+        any = true;
+        const h = document.createElement('div');
+        h.className = 'pt-section-head';
+        h.textContent = ptMsg(tier === 'default'
+            ? 'uplift.patches.curated_tier_default'
+            : 'uplift.patches.curated_tier_optional',
+            tier === 'default' ? 'Default set (auto-enabled)'
+                               : 'Optional set (disabled until enabled)');
+        body.append(h);
+        for (const e of entries) {
+            if (!e.installed) allInstalled = false;
+            const row = document.createElement('div');
+            row.className = 'pt-card';
+            const head = document.createElement('div');
+            head.className = 'pt-card-head';
+            const title = document.createElement('span');
+            title.className = 'pt-id';
+            title.textContent = e.id;
+            head.append(title);
+            if (e.source && e.source.kind === 'github_pr') {
+                const a = document.createElement('a');
+                a.className = 'pt-id';
+                a.href = `https://github.com/${e.source.repo}/pull/${e.source.pr}`;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                a.textContent = `PR #${e.source.pr}`;
+                head.append(a);
+            }
+            if (!e.source_ok) {
+                head.append(ptChip(ptMsg('uplift.patches.curated_no_manifest',
+                    'INCOMPLETE'), 'pt-st-warn',
+                    ptMsg('uplift.patches.curated_no_manifest_hint',
+                          'manifest source or description missing — it will be skipped')));
+            }
+            head.append(ptChip(e.installed
+                ? (e.enabled
+                    ? ptMsg('uplift.patches.curated_installed_on', 'INSTALLED · ENABLED')
+                    : ptMsg('uplift.patches.curated_installed', 'INSTALLED'))
+                : ptMsg('uplift.patches.curated_not_installed', 'NOT INSTALLED'),
+                e.installed ? 'pt-st-ok' : 'pt-st-dim'));
+            row.append(head);
+            if (e.description) {
+                const det = document.createElement('div');
+                det.className = 'pt-detail';
+                det.textContent = e.description;
+                row.append(det);
+            }
+            body.append(row);
+        }
+    }
+    const st = $('pt-curated-state');
+    st.textContent = any ? '' : ptMsg('uplift.patches.curated_empty',
+        'catalog unavailable');
+    const notes = $('pt-curated-notes');
+    const errs = Object.entries(d.errors || {});
+    notes.hidden = !errs.length;
+    notes.textContent = errs.map(([t, r]) => `${t}: ${r}`).join(' · ');
+    sec.hidden = false;
+    const btn = $('pt-curated-sync-btn');
+    if (btn) {
+        btn.disabled = !any || allInstalled;
+        btn.style.display = allInstalled ? 'none' : '';
+    }
+}
+
+async function ptCuratedSync() {
+    const btn = $('pt-curated-sync-btn');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    const base = btn.dataset.base || (btn.dataset.base = btn.textContent);
+    btn.textContent = ptMsg('uplift.patches.curated_syncing', 'Installing…');
+    try {
+        const r = await ptApi('curated/sync', {});
+        const added = Object.values(r.report || {})
+            .filter(x => String(x.sync).startsWith('added')).length;
+        PG.toast(ptMsg('uplift.patches.curated_sync_done',
+            'Curated sync finished — {n} installed')
+            .replace('{n}', added), 5000);
+        await pollPatches();
+    } catch (e) {
+        PG.toast(ptMsg('uplift.patches.curated_sync_fail',
+            'Curated sync failed') + ': ' + (e && e.message ? e.message : e),
+            6000);
+        btn.disabled = false;
+    }
+    btn.textContent = base;
 }
 
 function ptApi(path, body) {
@@ -232,6 +342,13 @@ function patchCard(p, view) {
         src.append(a);
     }
     card.append(src);
+    // curated patches carry the manifest summary (why they exist)
+    if (p.description) {
+        const det = document.createElement('div');
+        det.className = 'pt-detail';
+        det.textContent = p.description;
+        card.append(det);
+    }
     for (const adv of (p.advisories || [])) {
         const w = document.createElement('div');
         w.className = 'pt-advisories';
@@ -591,6 +708,10 @@ async function ptPreview() {
 
 let DV_DATA = null;
 let DV_POLL = null;
+// Set the instant a build click lands, cleared once the server reports
+// build.running (or the POST fails). Bridges the poll-race window where
+// DV_DATA still says "not running" and buttons would flicker back live.
+let DV_CLICK_BUSY = false;
 let DV_BOOT_POLL = null;
 let DV_COMMITS = null;   // DEV-7(c): /dev/commits cache, loaded on demand
 
@@ -732,7 +853,7 @@ function renderDev() {
 
     actions.hidden = false;
     const btn = $('dv-build-btn');
-    const busy = !!(d.build && d.build.running);
+    const busy = !!(d.build && d.build.running) || DV_CLICK_BUSY;
     btn.disabled = busy || !d.stale;
     btn.title = d.stale ? '' : ptMsg('uplift.patches.dev_build_ok',
         'built keg already matches the enabled patch set');
@@ -741,11 +862,27 @@ function renderDev() {
         brBtn.disabled = btn.disabled;
         brBtn.title = btn.title;
     }
+    // One caption owner: renderDev. The pristine labels are snapshotted
+    // once into data-base; a running build swaps all action buttons to
+    // "Building…" so the click visibly did something (and the swap
+    // survives every 5s poll re-render instead of flickering back).
+    [btn, brBtn, $('dv-restart-btn'), $('dv-boot-btn')].forEach(b => {
+        if (!b) return;
+        if (!b.dataset.base) b.dataset.base = b.textContent;
+        b.textContent = busy && b !== $('dv-restart-btn')
+            ? ptMsg('uplift.patches.dev_building_btn', 'Building…')
+            : b.dataset.base;
+        if (busy) { b.dataset.busy = '1'; } else { delete b.dataset.busy; }
+    });
+    if (busy) { btn.disabled = true; if (brBtn) brBtn.disabled = true; }
     const rsBtn = $('dv-restart-btn');
     if (rsBtn) {
-        // restart is useful when a fresh build needs loading, or the
-        // service is simply down-to-restart; never while a build runs
-        rsBtn.disabled = busy || !(d.restart_needed || d.stale === false);
+        // Restart makes sense whenever the dev service EXISTS: fresh
+        // build needs loading, restart_needed flag, or the service is
+        // simply down and should come up. Only meaningless while a build
+        // is mid-flight. (Previous gate (restart_needed || !stale) left
+        // it dead-lit-but-dead when the service was down with stale=true.)
+        rsBtn.disabled = busy;
         rsBtn.title = ptMsg('uplift.patches.dev_restart_title',
             'brew services restart omlx-dev');
     }
@@ -1036,26 +1173,58 @@ function initPatchesPage() {
                 'Restart failed') + ': ' + e, 5000);
         }
     };
+    const curBtn = $('pt-curated-sync-btn');
+    if (curBtn) curBtn.onclick = ptCuratedSync;
     ptScheduleAutoCheck();
 }
 
 async function dvStartBuild(restartAfter) {
+    // Immediate feedback: labels swap to a busy caption the moment the
+    // click lands. renderDev() runs against stale DV_DATA for a few
+    // seconds (build.running only flips on the next poll), which used to
+    // leave the buttons looking stuck-lit with nothing happening.
+    const busyBtns = [$('dv-build-btn'), $('dv-build-restart-btn'),
+                      $('dv-restart-btn')].filter(Boolean);
+    const prev = busyBtns.map(b => [b.textContent, b.disabled]);
+    DV_CLICK_BUSY = true;
+    renderDev();               // instant: captions swap before the POST lands
     try {
         await dvApi('build', { restart_after: !!restartAfter });
         PG.toast(ptMsg(restartAfter ? 'uplift.patches.dev_build_restart_started'
                                     : 'uplift.patches.dev_build_started',
                        restartAfter ? 'omlx-dev rebuild started (restart follows)'
                                     : 'omlx-dev rebuild started'), 4000);
+        await pollDev();               // authoritative state, not stale DV_DATA
+        const running0 = DV_DATA && DV_DATA.build && DV_DATA.build.running;
+        if (running0) DV_CLICK_BUSY = false;   // server truth takes over
         renderDev();
         clearInterval(DV_POLL);
+        let sawRunning = !!running0;
+        let idlePolls = 0;
         DV_POLL = setInterval(async () => {
             await pollDev();
-            if (!(DV_DATA && DV_DATA.build && DV_DATA.build.running))
-                clearInterval(DV_POLL);
+            const running = DV_DATA && DV_DATA.build && DV_DATA.build.running;
+            if (running) { DV_CLICK_BUSY = false; sawRunning = true; renderDev(); return; }
+            // Not running: finish only if we saw it run, or the server has
+            // said "idle" repeatedly (fast/failed build never showed running).
+            if (!sawRunning && ++idlePolls < 3) { renderDev(); return; }
+            DV_CLICK_BUSY = false;
+            clearInterval(DV_POLL);
+            renderDev();
+            PG.toast(DV_DATA && DV_DATA.build && DV_DATA.build.result &&
+                     DV_DATA.build.result.ok === false
+                ? ptMsg('uplift.patches.dev_build_failed_btn',
+                        'omlx-dev build FAILED — see build log')
+                : ptMsg('uplift.patches.dev_build_done_btn',
+                        'omlx-dev build finished'), 6000);
         }, 5000);
     } catch (e) {
         PG.toast(ptMsg('uplift.patches.dev_build_fail',
             'Build failed to start') + ': ' + e, 5000);
+        DV_CLICK_BUSY = false;
+        busyBtns.forEach((b, i) => { b.textContent = prev[i][0];
+                                     b.disabled = prev[i][1]; });
+        busyBtns.forEach(b => delete b.dataset.busy);
     }
 }
 

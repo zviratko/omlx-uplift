@@ -101,7 +101,11 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     "needs_review": frozenset({"pending", "applied", "disabled", "obsolete"}),
     "obsolete": frozenset({"pending", "disabled"}),
     "failed": frozenset({"pending", "needs_review", "disabled"}),
-    "disabled": frozenset({"pending", "applied"}),
+    # disabled stays informational-visible: a drift check re-fetches the
+    # source even while disabled (user disabled a broken patch; an upstream
+    # fix must surface), so update_available/obsolete must be reachable.
+    "disabled": frozenset({"pending", "applied", "update_available",
+                           "obsolete"}),
 }
 
 

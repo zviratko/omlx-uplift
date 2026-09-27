@@ -355,6 +355,22 @@ class DriftCheckTests(HttpFixture):
         self.assertEqual(p["state"], "update_available")
         self.assertEqual(p["desired_version"], 1)
 
+    def test_check_covers_disabled_patch(self):
+        # a disabled patch must still be re-fetched (user disabled a broken
+        # patch; upstream fix must surface as update_available, not silence)
+        self._add_via_url()
+        patchsource.set_enabled(self.store, "demo", False)
+        evolved = PR3764.replace(b"may unload engines", b"may unload ENGINES", 1)
+        _Handler.routes["/p.diff"] = (200, evolved)
+        r = patchsource.check_all(self.store, self.root)
+        self.assertEqual(r["reports"]["demo"]["check"], "update_available")
+        p = self.store.find(self.store.load(), "demo")
+        self.assertFalse(p["enabled"])
+        self.assertEqual(p["state"], "update_available")
+        # candidate stored, tree untouched: desired_version stays v1 and
+        # enabling remains a separate, explicit user act
+        self.assertEqual(p["desired_version"], 1)
+
     def test_check_error_is_display_only(self):
         self._add_via_url()
         _Handler.routes["/p.diff"] = (500, b"boom")

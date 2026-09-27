@@ -1344,6 +1344,32 @@ async def patches_check(is_admin: bool = Depends(require_admin)):
     return patchsource.check_all(patch_store(), _patch_tree_root())
 
 
+@api_router.get("/patches/curated")
+async def patches_curated(is_admin: bool = Depends(require_admin)):
+    """Remote catalog preview: tiers + per-entry manifest descriptions,
+    marked against what the local store already holds. Read-only."""
+    from . import curated
+
+    res = curated.list_remote()
+    store = patch_store()
+    manifest = store.load()
+    for tier in res["tiers"].values():
+        for e in tier:
+            p = store.find(manifest, e["id"])
+            e["installed"] = p is not None
+            if p is not None:
+                e["enabled"] = bool(p.get("enabled"))
+    return res
+
+
+@api_router.post("/patches/curated/sync")
+async def patches_curated_sync(is_admin: bool = Depends(require_admin)):
+    from . import curated, patchsource
+
+    return curated.sync(patch_store(), _patch_tree_root(),
+                        build_root=patchsource.dev_build_root())
+
+
 class PatchIdRequest(BaseModel):
     id: str
 

@@ -1,0 +1,223 @@
+"""Curated patch catalog (zviratko/omlx-uplift @ curated_patches/).
+
+The maintainer publishes ready-made patches under
+``curated_patches/default/`` and ``curated_patches/optional/`` in the
+public uplift repo. Every patch is ONE manifest file, ``<name>.json``,
+shaped like a store patch entry so it merges into the local manifest
+naturally:
+
+    {
+      "description": "short purpose of the patch",
+      "source": {"kind": "github_pr", "repo": "jundot/omlx", "pr": 1234},
+      "reversal": false,              // optional, default false
+      "scope":    "omlx"              // optional: omlx|dev|both; omit = auto
+    }
+
+``source`` is whatever upstream exists: a github_pr link (preferred —
+the catalog never duplicates content an open PR already owns), a plain
+url, or ``{"kind": "file"}`` for a vendored ``<name>.diff`` sitting next
+to the manifest — vendored diffs are the exception for features that
+have no PR at all.
+
+Policy (user spec 2026-09-27):
+  * default tier  -> installed, ENABLED (reconcile applies it like any
+                     enabled patch; on omlx-dev the dev materializer
+                     picks it up through the shared store)
+  * optional tier -> installed but NOT enabled (present, visible, one
+                     click away)
+  * re-sync never overwrites user decisions: an existing patch keeps its
+    enabled flag and desired_version; the normal drift check keeps it
+    fresh afterwards.
+
+Everything network here is fail-safe: a failed fetch leaves the local
+store exactly as it was (same rule as patchsource.check_all).
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+
+from . import patchsource
+
+_log = logging.getLogger("omlx_uplift.curated")
+
+CURATED_REPO = "zviratko/omlx-uplift"
+CURATED_DIR = "curated_patches"
+TIERS = ("default", "optional")
+
+_API = "https://api.github.com/repos/{repo}/contents/{dir}/{tier}"
+_RAW = "https://raw.githubusercontent.com/{repo}/HEAD/{dir}/{tier}/{name}"
+
+
+def _slug(filename: str) -> str | None:
+    """manifest filename -> patch id (same charset the store enforces)."""
+    base = re.sub(r"\.json$", "", filename or "")
+    if re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", base):
+        return base
+    return None
+
+
+def _raw_url(tier: str, name: str) -> str:
+    return _RAW.format(repo=CURATED_REPO, dir=CURATED_DIR, tier=tier,
+                       name=name)
+
+
+def _list_tier(tier: str, fetch) -> dict:
+    """Directory listing for one tier. Returns {ok, entries|reason}.
+    An absent directory (HTTP 404) is an EMPTY tier, not an error — the
+    repo may only ship defaults, or none at all yet."""
+    url = _API.format(repo=CURATED_REPO, dir=CURATED_DIR, tier=tier)
+    r = fetch(url)
+    if not r.get("ok"):
+        if r.get("status") == 404:
+            return {"ok": True, "entries": []}
+        return {"ok": False, "reason": r.get("reason") or "listing failed"}
+    try:
+        items = json.loads(r["data"])
+    except ValueError:
+        return {"ok": False, "reason": "corrupt listing response"}
+    if not isinstance(items, list):
+        return {"ok": False, "reason": "unexpected listing shape"}
+    entries = []
+    for it in items:
+        name = it.get("name") or ""
+        if not name.endswith(".json"):
+            continue
+        pid = _slug(name)
+        if pid is None:
+            continue
+        entries.append({"tier": tier, "id": pid, "name": name})
+    return {"ok": True, "entries": entries}
+
+
+def _fetch_manifest(entry: dict, fetch) -> dict:
+    """Fetch + parse one <name>.json. Returns {} on any failure — the
+    entry then comes back without metadata (listed, never installed)."""
+    r = fetch(_raw_url(entry["tier"], entry["name"]))
+    if not r.get("ok"):
+        return {}
+    try:
+        data = json.loads(r["data"].decode("utf-8", "replace"))
+    except (ValueError, AttributeError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _entry_source(entry: dict):
+    """catalog source field -> (add_patch source dict | None).
+    'file' resolves to the vendored <name>.diff sitting next to the
+    manifest; anything already shaped for add_patch passes through."""
+    src = entry.get("source") or {}
+    kind = src.get("kind")
+    if kind == "file":
+        return {"kind": "url",
+                "url": _raw_url(entry["tier"],
+                                re.sub(r"\.json$", ".diff", entry["name"]))}
+    if kind in ("github_pr", "url"):
+        return dict(src)
+    return None
+
+
+def list_remote(fetch=None) -> dict:
+    """All curated entries across both tiers: {ok, tiers: {tier: [entries]},
+    errors: {tier: reason}}. A tier that fails to list does not poison the
+    other one. Each entry carries its manifest fields (description,
+    source, reversal, scope); 'source_ok' marks whether the source is
+    installable at all."""
+    if fetch is None:
+        from .patchsource import fetch_bytes as _fb
+
+        def fetch(url):
+            return _fb(url)
+    out, errors = {}, {}
+    for tier in TIERS:
+        r = _list_tier(tier, fetch)
+        if not r["ok"]:
+            errors[tier] = r["reason"]
+            continue
+        for e in r["entries"]:
+            meta = _fetch_manifest(e, fetch)
+            e["description"] = str(meta.get("description") or "")[:300]
+            e["reversal"] = bool(meta.get("reversal"))
+            e["scope"] = meta.get("scope")
+            src = _entry_source(dict(meta, tier=tier, name=e["name"]))
+            e["source"] = src
+            e["source_ok"] = src is not None and bool(e["description"])
+        out[tier] = r["entries"]
+    ok = len(errors) < len(TIERS)
+    return {"ok": ok, "tiers": out, "errors": errors}
+
+
+def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> dict:
+    """Install/surface the curated catalog. Idempotent: re-running after
+    user edits changes nothing about their decisions.
+
+    Per entry the report says: added_enabled | added_disabled |
+    added_pending_approval | already_present | skipped_incomplete |
+    skipped_obsolete | failed.
+    """
+    def _f(url):
+        if fetch is not None:
+            return fetch(url)
+        from .patchsource import fetch_bytes
+        return fetch_bytes(url)
+
+    listing = list_remote(_f)
+    report, notes = {}, []
+    manifest = store.load()
+    for tier in TIERS:
+        for e in listing["tiers"].get(tier, []):
+            pid = e["id"]
+            if not e.get("source_ok"):
+                # manifest missing/unparsable, no usable source, or no
+                # description — never install half-declared work
+                why = ("manifest missing or unreadable"
+                       if not e.get("source") else "description missing")
+                report[pid] = {"sync": "skipped_incomplete", "reason": why}
+                notes.append(f"{pid}: {why}")
+                continue
+            p = store.find(manifest, pid)
+            if p is not None:
+                report[pid] = {"sync": "already_present"}
+                continue
+            res = patchsource.add_patch(store, pid, dict(e["source"]),
+                                        tree_root, scope=e.get("scope"),
+                                        reversal=bool(e.get("reversal")),
+                                        build_root=build_root)
+            if res.get("obsolete"):
+                # upstream already carries it on this machine — not an
+                # error; nothing stored, nothing to enable
+                report[pid] = {"sync": "skipped_obsolete"}
+                continue
+            if not res.get("ok"):
+                report[pid] = {"sync": "failed", "stage": res.get("stage"),
+                               "reason": res.get("reason")}
+                notes.append(f"{pid}: gate refused ({res.get('reason')})")
+                continue
+            manifest = store.load()
+            p = store.find(manifest, pid)
+            if p is not None and tier == "default":
+                en = patchsource.set_enabled(store, pid, True)
+                if en.get("ok"):
+                    report[pid] = {"sync": "added_enabled"}
+                else:
+                    # safeguard approval pending is NOT a failure — the
+                    # patch is installed, the dashboard asks to approve
+                    report[pid] = {"sync": "added_pending_approval",
+                                   "reason": en.get("reason")}
+                    notes.append(f"{pid}: {en.get('reason')}")
+            else:
+                report[pid] = {"sync": "added_disabled"}
+            # annotation LAST: set_enabled saves its own manifest reload —
+            # writing description/curated before it would be lost
+            manifest = store.load()
+            p = store.find(manifest, pid)
+            if p is not None:
+                if e.get("description"):
+                    p["description"] = e["description"]
+                p["curated"] = tier
+                store.save(manifest)
+    for tier, reason in listing["errors"].items():
+        notes.append(f"tier {tier}: {reason}")
+    return {"ok": listing["ok"], "report": report, "notes": notes}
