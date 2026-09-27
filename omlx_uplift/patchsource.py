@@ -831,6 +831,7 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             "last_verified": p.get("last_verified"),
             "description": p.get("description") or "",
             "curated": p.get("curated"),
+            "curated_adopted": bool(p.get("curated_adopted")),
         }
         out.append(entry)
     return {"patches": out, "config": manifest.get("config", {}),

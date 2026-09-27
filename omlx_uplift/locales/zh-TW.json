@@ -295,7 +295,7 @@
   "uplift.patches.add_btn": "新增補丁",
   "uplift.patches.add_hint": "取得或上傳 diff，針對現行樹驗證後啟用",
   "uplift.patches.add_title": "+ 新增補丁",
-  "uplift.patches.adopted": "已套用 — 儲存為已套用，omlx 更新後將重新套用",
+  "uplift.patches.adopted": "已將補丁採納為本地補丁",
   "uplift.patches.all_current": "所有修補來源均為最新",
   "uplift.patches.approve_always": "Always allow ({codes})",
   "uplift.patches.approve_always_title": "Remember these safeguard codes for future versions of this patch",
@@ -645,5 +645,9 @@
   "uplift.ui.upload_queue": "上傳佇列",
   "uplift.ui.use_both_anes": "使用兩塊 ANE",
   "uplift.ui.web_search": "網頁搜尋",
-  "uplift.usage.sub": "{req} 請求 · {tok} 代幣 · 快取 {cached}"
+  "uplift.usage.sub": "{req} 請求 · {tok} 代幣 · 快取 {cached}",
+  "uplift.patches.bundled_chip": "隨附",
+  "uplift.patches.bundled_hint": "來自精選補丁目錄 — 由目錄同步保持最新",
+  "uplift.patches.remove_curated_choice": "此補丁來自精選目錄。確定 = 將補丁採納為本地補丁：保持安裝並成為你自己的，目錄不會再碰它。取消 = 完全移除（已應用的檔案將恢復為原始位元組）。",
+  "uplift.patches.curated_adopted_on": "已採納為本地補丁"
 }

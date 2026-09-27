@@ -295,7 +295,7 @@
   "uplift.patches.add_btn": "Add patch",
   "uplift.patches.add_hint": "fetch or upload a diff, validate it against the live tree, then enable",
   "uplift.patches.add_title": "+ ADD PATCH",
-  "uplift.patches.adopted": "ALREADY APPLIED — stored as APPLIED, will re-apply after an omlx update",
+  "uplift.patches.adopted": "Patch adopted as local",
   "uplift.patches.all_current": "All patch sources current",
   "uplift.patches.approve_always": "Always allow ({codes})",
   "uplift.patches.approve_always_title": "Remember these safeguard codes for future versions of this patch",
@@ -645,5 +645,9 @@
   "uplift.ui.upload_queue": "Upload Queue",
   "uplift.ui.use_both_anes": "Use both ANEs",
   "uplift.ui.web_search": "Web Search",
-  "uplift.usage.sub": "{req} req · {tok} tok · cached {cached}"
+  "uplift.usage.sub": "{req} req · {tok} tok · cached {cached}",
+  "uplift.patches.bundled_chip": "BUNDLED",
+  "uplift.patches.bundled_hint": "part of the curated catalog — kept current by curated sync",
+  "uplift.patches.remove_curated_choice": "This patch comes from the curated catalog. OK = adopt the patch as local: it stays installed and becomes yours, the catalog never touches it again. Cancel = remove it completely (applied files are restored to vanilla bytes).",
+  "uplift.patches.curated_adopted_on": "ADOPTED AS LOCAL"
 }

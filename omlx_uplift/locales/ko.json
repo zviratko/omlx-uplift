@@ -310,7 +310,7 @@
   "uplift.patches.add_btn": "패치 추가",
   "uplift.patches.add_hint": "diff를 가져오거나 업로드하고 라이브 트리에 대해 검증한 뒤 활성화",
   "uplift.patches.add_title": "+ 패치 추가",
-  "uplift.patches.adopted": "이미 적용됨 — 적용됨으로 저장, omlx 업데이트 후 재적용",
+  "uplift.patches.adopted": "패치를 로컬로 채택했습니다",
   "uplift.patches.all_current": "모든 패치 소스가 최신입니다",
   "uplift.patches.approve_always": "Always allow ({codes})",
   "uplift.patches.approve_always_title": "Remember these safeguard codes for future versions of this patch",
@@ -660,5 +660,9 @@
   "uplift.ui.upload_queue": "업로드 대기열",
   "uplift.ui.use_both_anes": "두 ANE 모두 사용",
   "uplift.ui.web_search": "웹 검색",
-  "uplift.usage.sub": "요청 {req} · 토큰 {tok} · 캐시 {cached}"
+  "uplift.usage.sub": "요청 {req} · 토큰 {tok} · 캐시 {cached}",
+  "uplift.patches.bundled_chip": "번들 포함",
+  "uplift.patches.bundled_hint": "큐레이션 카탈로그의 일부 — 카탈로그 동기화로 최신 상태를 유지합니다",
+  "uplift.patches.remove_curated_choice": "이 패치는 큐레이션 카탈로그에서 가져왔습니다. 확인 = 패치를 로컬로 채택: 설치를 유지하며 소유자가 되고, 카탈로그가 다시는 건드리지 않습니다. 취소 = 완전 제거(적용된 파일이 바닐라 바이트로 복원됨).",
+  "uplift.patches.curated_adopted_on": "로컬로 채택됨"
 }

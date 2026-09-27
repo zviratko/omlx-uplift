@@ -170,6 +170,54 @@ class CuratedSyncTests(unittest.TestCase):
         self.assertEqual(r["report"], {})
         self.assertEqual(self.store.load()["patches"], [])
 
+    def test_sync_matches_user_added_patch_by_source(self):
+        """User added the same PR under their own id first: sync must NOT
+        install a second copy — it marks the existing patch as a catalog
+        patch (BUNDLED) and leaves every user decision alone."""
+        from omlx_uplift import patchsource
+        r = patchsource.add_patch(self.store, "my-pr",
+                                  {"kind": "github_pr", "repo": "jundot/omlx",
+                                   "pr": 1234}, self.root)
+        self.assertTrue(r["ok"], r)
+        patchsource.set_enabled(self.store, "my-pr", True)
+        r = curated.sync(self.store, self.root, fetch=self.fetch)
+        self.assertEqual(r["report"]["live-apply"]["sync"], "already_present")
+        self.assertEqual(r["report"]["live-apply"]["under_id"], "my-pr")
+        m = self.store.load()
+        self.assertIsNone(self.store.find(m, "live-apply"))   # no duplicate
+        p = self.store.find(m, "my-pr")
+        self.assertEqual(p["curated"], "default")             # BUNDLED mark
+        self.assertTrue(p["enabled"])                         # user choice kept
+        # and the catalog preview agrees: installed under their id
+        lst = curated.list_remote(self.fetch)
+        e = lst["tiers"]["default"][0]
+        self.assertTrue(e["source_ok"])   # preview flags source, router adds 'installed'
+
+    def test_adopt_detaches_and_sync_respects_it(self):
+        from omlx_uplift import patchsource
+        curated.sync(self.store, self.root, fetch=self.fetch)   # installs live-apply enabled
+        r = curated.adopt(self.store, "live-apply")
+        self.assertTrue(r["ok"])
+        m = self.store.load()
+        p = self.store.find(m, "live-apply")
+        self.assertNotIn("curated", p)
+        self.assertTrue(p["curated_adopted"])
+        self.assertTrue(p["enabled"])          # adoption never changes state
+        # a later sync sees it but never re-bundles or duplicates it
+        r = curated.sync(self.store, self.root, fetch=self.fetch)
+        self.assertEqual(r["report"]["live-apply"]["sync"], "already_present")
+        self.assertTrue(r["report"]["live-apply"]["adopted"])
+        self.assertNotIn("curated", self.store.find(self.store.load(),
+                                                    "live-apply"))
+
+    def test_norm_source_identity(self):
+        self.assertEqual(curated.norm_source(
+            {"kind": "github_pr", "repo": "Jundot/omlx", "pr": "12"}),
+            ("github_pr", "jundot/omlx", 12))
+        self.assertIsNone(curated.norm_source({"kind": "github_pr", "pr": 1}))
+        self.assertIsNone(curated.norm_source({"kind": "upload"}))
+        self.assertIsNone(curated.norm_source(None))
+
     def test_absent_tier_is_empty_not_error(self):
         files = {k: v for k, v in FILES.items()
                  if "optional" not in k and "nice" not in k

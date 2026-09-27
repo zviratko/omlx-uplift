@@ -295,7 +295,7 @@
   "uplift.patches.add_btn": "Добавить патч",
   "uplift.patches.add_hint": "получить или загрузить diff, проверить по рабочему дереву, затем включить",
   "uplift.patches.add_title": "+ ДОБАВИТЬ ПАТЧ",
-  "uplift.patches.adopted": "УЖЕ ПРИМЕНЁН — сохранён как ПРИМЕНЁН, применится снова после обновления omlx",
+  "uplift.patches.adopted": "Патч принят как локальный",
   "uplift.patches.all_current": "Все источники патчей актуальны",
   "uplift.patches.approve_always": "Always allow ({codes})",
   "uplift.patches.approve_always_title": "Remember these safeguard codes for future versions of this patch",
@@ -645,5 +645,9 @@
   "uplift.ui.upload_queue": "Очередь загрузки",
   "uplift.ui.use_both_anes": "Использовать оба ANE",
   "uplift.ui.web_search": "Веб-поиск",
-  "uplift.usage.sub": "{req} запр · {tok} ток · в кэше {cached}"
+  "uplift.usage.sub": "{req} запр · {tok} ток · в кэше {cached}",
+  "uplift.patches.bundled_chip": "В КОМПЛЕКТЕ",
+  "uplift.patches.bundled_hint": "из курируемого каталога — обновляется синхронизацией каталога",
+  "uplift.patches.remove_curated_choice": "Этот патч из курируемого каталога. OK = принять патч как локальный: он останется установленным и станет вашим, каталог его больше не тронет. Отмена = удалить полностью (изменённые файлы вернутся к ванильным байтам).",
+  "uplift.patches.curated_adopted_on": "ПРИНЯТ КАК ЛОКАЛЬНЫЙ"
 }

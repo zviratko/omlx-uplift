@@ -295,7 +295,7 @@
   "uplift.patches.add_btn": "Přidat patch",
   "uplift.patches.add_hint": "nahrát diff, ověřit jej proti živému stromu a poté povolit",
   "uplift.patches.add_title": "+ PŘIDAT PATCH",
-  "uplift.patches.adopted": "JIŽ POUŽITO — uloženo jako POUŽITO, po aktualizaci omlx se znovu použije",
+  "uplift.patches.adopted": "Záplata přijata jako lokální",
   "uplift.patches.all_current": "Všechny zdroje patchů jsou aktuální",
   "uplift.patches.approve_always": "Vždy povolit ({codes})",
   "uplift.patches.approve_always_title": "Zapamatovat si tyto kódy pojistek pro budoucí verze tohoto patche",
@@ -645,5 +645,9 @@
   "uplift.ui.upload_queue": "Fronta nahrávání",
   "uplift.ui.use_both_anes": "Použít obě ANE",
   "uplift.ui.web_search": "Vyhledávání na webu",
-  "uplift.usage.sub": "{req} pož. · {tok} toků · v cache {cached}"
+  "uplift.usage.sub": "{req} pož. · {tok} toků · v cache {cached}",
+  "uplift.patches.bundled_chip": "SOUČÁST BALÍČKU",
+  "uplift.patches.bundled_hint": "součást kurátorského katalogu — aktualizuje ho synchronizace katalogu",
+  "uplift.patches.remove_curated_choice": "Tato záplata pochází z kurátorského katalogu. OK = přijmout záplatu jako lokální: zůstane nainstalovaná a bude vaše, katalog se jí už nikdy nedotkne. Storno = zcela ji odstranit (aplikované soubory se vrátí na původní bajty).",
+  "uplift.patches.curated_adopted_on": "PŘIJATO JAKO LOKÁLNÍ"
 }

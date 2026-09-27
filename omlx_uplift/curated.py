@@ -63,6 +63,39 @@ def _raw_url(tier: str, name: str) -> str:
                        name=name)
 
 
+def norm_source(src) -> tuple | None:
+    """Comparable identity of a patch source (None = nothing to match).
+    Two sources are the SAME patch when they normalize equal — that is
+    how the catalog recognizes a patch the user added by hand (same PR
+    linked twice is one patch, under any id)."""
+    src = src or {}
+    kind = src.get("kind")
+    if kind == "github_pr":
+        repo = str(src.get("repo") or "").strip().lower()
+        try:
+            pr = int(src.get("pr"))
+        except (TypeError, ValueError):
+            return None
+        return ("github_pr", repo.lstrip("/"), pr) if repo and pr else None
+    if kind == "url":
+        u = str(src.get("url") or "").strip().rstrip("/")
+        return ("url", u) if u else None
+    return None
+
+
+def find_by_source(manifest: dict, src) -> dict | None:
+    """The stored patch whose source matches `src` — by normalized
+    identity, NOT by id: a patch the user added themselves under any
+    name is still the same patch as the catalog entry."""
+    nid = norm_source(src)
+    if nid is None:
+        return None
+    for p in manifest.get("patches", []):
+        if norm_source(p.get("source")) == nid:
+            return p
+    return None
+
+
 def _list_tier(tier: str, fetch) -> dict:
     """Directory listing for one tier. Returns {ok, entries|reason}.
     An absent directory (HTTP 404) is an EMPTY tier, not an error — the
@@ -177,9 +210,27 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                 report[pid] = {"sync": "skipped_incomplete", "reason": why}
                 notes.append(f"{pid}: {why}")
                 continue
-            p = store.find(manifest, pid)
+            # identity is the SOURCE, not the id: a patch the user added
+            # themselves (same PR link under any name) is the same patch
+            # — never install a second copy of it
+            p = (find_by_source(manifest, e["source"])
+                 or store.find(manifest, pid))
             if p is not None:
-                report[pid] = {"sync": "already_present"}
+                if p.get("curated_adopted"):
+                    # the user adopted it — it is theirs, the catalog
+                    # lists but no longer claims it
+                    report[pid] = {"sync": "already_present",
+                                   "under_id": p["id"], "adopted": True}
+                    continue
+                if p.get("id") != pid or not p.get("curated"):
+                    # user-added match: keep their id/decisions, mark it
+                    # as a catalog patch (BUNDLED badge lights)
+                    p["curated"] = tier
+                    if not p.get("description") and e.get("description"):
+                        p["description"] = e["description"]
+                    store.save(manifest)
+                report[pid] = {"sync": "already_present",
+                               "under_id": p["id"]}
                 continue
             res = patchsource.add_patch(store, pid, dict(e["source"]),
                                         tree_root, scope=e.get("scope"),
@@ -221,3 +272,20 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
     for tier, reason in listing["errors"].items():
         notes.append(f"tier {tier}: {reason}")
     return {"ok": listing["ok"], "report": report, "notes": notes}
+
+
+def adopt(store, patch_id: str) -> dict:
+    """Adopt the patch as local: unbundle it from the curated catalog.
+    The patch keeps its id, state, enabled flag and every version record
+    — it simply stops being a catalog patch: no BUNDLED badge, future
+    syncs never touch it again. This is the graceful alternative to
+    Remove (user decision 2026-09-27: the catalog must not silently
+    delete work the user relies on)."""
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None:
+        return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
+    p.pop("curated", None)
+    p["curated_adopted"] = True
+    store.save(manifest)
+    return {"ok": True, "id": patch_id}

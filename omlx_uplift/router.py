@@ -1355,10 +1355,15 @@ async def patches_curated(is_admin: bool = Depends(require_admin)):
     manifest = store.load()
     for tier in res["tiers"].values():
         for e in tier:
-            p = store.find(manifest, e["id"])
+            # installed is a SOURCE question, not an id question: the
+            # user's own patch that links the same PR counts as installed
+            p = curated.find_by_source(manifest, e.get("source")) \
+                or store.find(manifest, e["id"])
             e["installed"] = p is not None
             if p is not None:
+                e["under_id"] = p["id"]
                 e["enabled"] = bool(p.get("enabled"))
+                e["adopted"] = bool(p.get("curated_adopted"))
     return res
 
 
@@ -1372,6 +1377,19 @@ async def patches_curated_sync(is_admin: bool = Depends(require_admin)):
 
 class PatchIdRequest(BaseModel):
     id: str
+
+
+@api_router.post("/patches/curated/adopt")
+async def patches_curated_adopt(req: PatchIdRequest,
+                                is_admin: bool = Depends(require_admin)):
+    """Adopt a catalog patch as local — unbundle it without deleting.
+    The patch keeps id/state/files; future syncs ignore it."""
+    from . import curated
+
+    res = curated.adopt(patch_store(), req.id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=404, detail=res.get("reason"))
+    return res
 
 
 class PatchApproveRequest(BaseModel):

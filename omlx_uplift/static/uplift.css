@@ -1661,6 +1661,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-reversal { border: 1px dashed var(--accent, #e0662e); padding: 4px 8px; }
 .pt-st-reversal { border-color: var(--accent, #e0662e); color: var(--accent, #e0662e); }
 .pt-st-reversal::before { background: var(--accent, #e0662e); }
+/* curated-catalog badge — a calmer green than APPLIED: it marks origin,
+   not runtime state (a BUNDLED patch can be in any state at once) */
+.pt-st-bundled { border-color: var(--ok, #2e8b57); color: var(--ok, #2e8b57); border-style: dashed; }
+.pt-st-bundled::before { background: var(--ok, #2e8b57); }
 .pt-auto { display: inline-flex; gap: 4px; align-items: center; font-size: var(--fs-meta); }
 .pt-banner { border: 1px solid var(--warn, #b8860b); background: color-mix(in srgb, var(--warn, #b8860b) 12%, transparent); padding: 6px 10px; margin: 4px 0; font-size: var(--fs-meta); }
 .pt-banner.pt-kill { border-color: var(--accent, #e0662e); }

@@ -116,12 +116,16 @@ function ptRenderCurated(d) {
                     ptMsg('uplift.patches.curated_no_manifest_hint',
                           'manifest source or description missing — it will be skipped')));
             }
-            head.append(ptChip(e.installed
-                ? (e.enabled
-                    ? ptMsg('uplift.patches.curated_installed_on', 'INSTALLED · ENABLED')
-                    : ptMsg('uplift.patches.curated_installed', 'INSTALLED'))
-                : ptMsg('uplift.patches.curated_not_installed', 'NOT INSTALLED'),
-                e.installed ? 'pt-st-ok' : 'pt-st-dim'));
+            const installedChip = e.installed
+                ? (e.adopted
+                    ? ptMsg('uplift.patches.curated_adopted_on', 'ADOPTED AS LOCAL')
+                    : (e.enabled
+                        ? ptMsg('uplift.patches.curated_installed_on', 'INSTALLED · ENABLED')
+                        : ptMsg('uplift.patches.curated_installed', 'INSTALLED')))
+                : ptMsg('uplift.patches.curated_not_installed', 'NOT INSTALLED');
+            const installedCls = e.installed
+                ? (e.adopted ? 'pt-st-bundled' : 'pt-st-ok') : 'pt-st-dim';
+            head.append(ptChip(installedChip, installedCls));
             row.append(head);
             if (e.description) {
                 const det = document.createElement('div');
@@ -303,6 +307,12 @@ function patchCard(p, view) {
     head.append(title);
     const cls = PT_STATE_CLASS[p.state] || 'pt-st-dim';
     head.append(ptChip((p.state || '').toUpperCase(), cls, p.state_detail || ''));
+    if (p.curated && !p.curated_adopted) {
+        head.append(ptChip(ptMsg('uplift.patches.bundled_chip', 'BUNDLED'),
+            'pt-st-bundled',
+            ptMsg('uplift.patches.bundled_hint',
+                  'part of the curated catalog — kept current by curated sync')));
+    }
     if (p.reversal) {
         head.append(ptChip(ptMsg('uplift.patches.reversal_chip', 'REVERSAL'),
             'pt-st-reversal',
@@ -491,6 +501,24 @@ function patchCard(p, view) {
         } catch (e) { PG.toast(String(e), 5000); } finally { S.PT_BUSY = false; }
     });
     btn(ptMsg('uplift.patches.remove', 'Remove'), '', async () => {
+        if (p.curated && !p.curated_adopted) {
+            // catalog patch: removing it restores vanilla bytes AND drops
+            // it from the local store. The graceful path is adoption —
+            // keep the patch, cut the catalog tie (user decision 2026-09-27)
+            const adopt = confirm(ptMsg('uplift.patches.remove_curated_choice',
+                'This patch comes from the curated catalog. OK = adopt the '
+                + 'patch as local: it stays installed and becomes yours, '
+                + 'the catalog never touches it again. Cancel = remove it '
+                + 'completely (applied files are restored to vanilla bytes).'));
+            if (adopt) {
+                await ptApi('curated/adopt', { id: p.id }).then(async () => {
+                    PG.toast(ptMsg('uplift.patches.adopted',
+                        'Patch adopted as local'), 4000);
+                    await pollPatches();
+                }).catch(e => PG.toast(String(e), 5000));
+                return;
+            }
+        }
         if (!confirm(ptMsg('uplift.patches.remove_confirm',
             'Remove this patch? Applied files are restored to vanilla bytes now.'))) return;
         await ptAction('remove', { id: p.id },

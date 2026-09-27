@@ -295,7 +295,7 @@
   "uplift.patches.add_btn": "新增补丁",
   "uplift.patches.add_hint": "获取或上传 diff，针对当前树校验后启用",
   "uplift.patches.add_title": "+ 新增补丁",
-  "uplift.patches.adopted": "已应用 — 存储为已应用，omlx 更新后将重新应用",
+  "uplift.patches.adopted": "已将补丁采纳为本地补丁",
   "uplift.patches.all_current": "所有补丁来源均为最新",
   "uplift.patches.approve_always": "Always allow ({codes})",
   "uplift.patches.approve_always_title": "Remember these safeguard codes for future versions of this patch",
@@ -645,5 +645,9 @@
   "uplift.ui.upload_queue": "上传队列",
   "uplift.ui.use_both_anes": "使用两块 ANE",
   "uplift.ui.web_search": "网页搜索",
-  "uplift.usage.sub": "{req} 请求 · {tok} tokens · 缓存 {cached}"
+  "uplift.usage.sub": "{req} 请求 · {tok} tokens · 缓存 {cached}",
+  "uplift.patches.bundled_chip": "随附",
+  "uplift.patches.bundled_hint": "来自精选补丁目录 — 由目录同步保持最新",
+  "uplift.patches.remove_curated_choice": "此补丁来自精选目录。确定 = 将补丁采纳为本地补丁：保持安装并成为你自己的，目录不会再碰它。取消 = 完全移除（已应用的文件将恢复为原始字节）。",
+  "uplift.patches.curated_adopted_on": "已采纳为本地补丁"
 }

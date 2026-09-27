@@ -295,7 +295,7 @@
   "uplift.patches.add_btn": "パッチを追加",
   "uplift.patches.add_hint": "diff を取得またはアップロードし、ライブツリーに対して検証してから有効化",
   "uplift.patches.add_title": "+ パッチを追加",
-  "uplift.patches.adopted": "適用済み — APPLIEDとして保存、omlx更新後に再適用されます",
+  "uplift.patches.adopted": "パッチをローカルとして採用しました",
   "uplift.patches.all_current": "全パッチソースは最新です",
   "uplift.patches.approve_always": "Always allow ({codes})",
   "uplift.patches.approve_always_title": "Remember these safeguard codes for future versions of this patch",
@@ -674,5 +674,9 @@
   "uplift.ui.upload_queue": "アップロードキュー",
   "uplift.ui.use_both_anes": "両方のANEを使用",
   "uplift.ui.web_search": "Web検索",
-  "uplift.usage.sub": "リクエスト {req} · トークン {tok} · キャッシュ {cached}"
+  "uplift.usage.sub": "リクエスト {req} · トークン {tok} · キャッシュ {cached}",
+  "uplift.patches.bundled_chip": "バンドル済み",
+  "uplift.patches.bundled_hint": "キュレーションカタログの一部 — カタログ同期で最新に保たれます",
+  "uplift.patches.remove_curated_choice": "このパッチはキュレーションカタログ由来です。OK = パッチをローカルとして採用: インストールされたままであなたのものになり、カタログは今後触れません。キャンセル = 完全に削除(適用済みファイルはバニラのバイト列に戻ります)。",
+  "uplift.patches.curated_adopted_on": "ローカルとして採用済み"
 }

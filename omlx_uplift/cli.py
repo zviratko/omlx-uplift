@@ -426,7 +426,7 @@ def cmd_patches(argv=None) -> int:
     ap.add_argument("action", choices=["status", "apply", "check",
                                        "disable-all", "add",
                                        "enable", "disable", "remove",
-                                       "curated"])
+                                       "curated", "adopt"])
     ap.add_argument("id", nargs="?",
                     help="patch id (add/enable/disable/remove)")
     ap.add_argument("--sync", action="store_true",
@@ -505,7 +505,20 @@ def cmd_patches(argv=None) -> int:
             manifest = store.load()
             for tier in out["tiers"].values():
                 for e in tier:
-                    e["installed"] = store.find(manifest, e["id"]) is not None
+                    p = (curated.find_by_source(manifest, e.get("source"))
+                         or store.find(manifest, e["id"]))
+                    e["installed"] = p is not None
+                    if p is not None:
+                        e["under_id"] = p["id"]
+                        e["adopted"] = bool(p.get("curated_adopted"))
+        print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
+
+    if args.action == "adopt":
+        from . import curated
+        if not args.id:
+            ap.error("adopt needs a patch id")
+        out = curated.adopt(store, args.id)
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 
