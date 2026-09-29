@@ -158,12 +158,16 @@ class Collector:
                 return float(v)
             return None
 
-        total = w("all_power")
+        total = w("sys_power")
         if total is None or total <= 0:
-            # macOS 27 beta + macmon: all_power reads a flat 0.0 while the
-            # sys_power channel carries the real package draw (kocour
-            # 2026-09-26). Fall back so the card/chip is honest, not dead.
-            total = w("sys_power")
+            # sys_power is the whole-die SMC reading (CPU+GPU+ANE+DRAM+SoC) —
+            # verified equal to mactop's total_power across idle/CPU/DRAM/GPU
+            # load states (kocour 2026-09-29). all_power is the component sum
+            # (CPU+GPU+ANE) and omits DRAM/system; on some builds it reads 0
+            # or is absent. Use it only as a fallback so the card is never
+            # dead, not as primary (was inverted pre-2026-09-29 — under-reports
+            # by DRAM+SoC share under load).
+            total = w("all_power")
         if total is not None:
             pairs["pwr.total_w"] = total
         for src, key in (("cpu_power", "pwr.cpu_w"), ("gpu_power", "pwr.gpu_w"),

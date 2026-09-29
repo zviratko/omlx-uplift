@@ -231,3 +231,73 @@ def test_pfx_rate_recovers_after_counter_reset(monkeypatch):
     # dt is wall-clock (~60.0s +/- jitter), so compare within tolerance
     assert abs(v - 400 * 2) < 5, \
         "rate must resume from the reset baseline, not stay pinned at 0"
+
+
+# -- U20 macmon power total -------------------------------------------------
+# Regression (user 2026-09-29): the power card under-reported by exactly the
+# DRAM+SoC share under load. Cause: macmon's all_power is the COMPONENT SUM
+# (CPU+GPU+ANE) — 47 W on an M1 Max running a GPU matmul whose true package
+# draw was 92 W (mactop total_power). sys_power is the whole-die SMC reading
+# and matched mactop across idle/CPU/DRAM/GPU states. pwr.total_w must come
+# from sys_power, with all_power only as fallback when sys_power is dead.
+
+def _macmon_pairs(payload: dict, samples: int = 5) -> dict:
+    """Feed ONE complete macmon pipe line through _macmon_collect."""
+    import json
+    import os
+
+    class _Pipe:
+        def __init__(self, fd):
+            self._fd = fd
+
+        def fileno(self):
+            return self._fd
+
+    class _Proc:
+        def __init__(self, line: bytes):
+            self.r, self.w = os.pipe()
+            os.write(self.w, line)
+            os.close(self.w)
+            self.stdout = _Pipe(self.r)
+
+        def poll(self):
+            return None
+
+    c = Collector(store=None)
+    proc = _Proc(json.dumps(payload).encode() + b"\n")
+    c._macmon = proc
+    c._macmon_buf = b""
+    c._macmon_samples = samples       # skip the <0.5 W warmup guard
+    pairs: dict[str, float] = {}
+    c._macmon_collect(pairs)
+    os.close(proc.r)
+    return pairs
+
+
+def test_total_w_prefers_sys_power_over_component_sum():
+    # GPU matmul snapshot: all_power tracks the GPU channel ONLY.
+    pairs = _macmon_pairs({
+        "all_power": 47.5, "sys_power": 92.0, "cpu_power": 0.0,
+        "gpu_power": 47.5, "ane_power": 0.0,
+    })
+    assert pairs["pwr.total_w"] == 92.0, \
+        "all_power omits DRAM+SoC — total must come from sys_power"
+    assert pairs["pwr.gpu_w"] == 47.5
+
+
+def test_total_w_falls_back_to_all_power_when_sys_power_dead():
+    pairs = _macmon_pairs({
+        "all_power": 12.0, "sys_power": 0.0, "cpu_power": 12.0,
+        "gpu_power": 0.0, "ane_power": 0.0,
+    })
+    assert pairs["pwr.total_w"] == 12.0
+
+
+def test_total_w_reports_zero_when_both_channels_dead():
+    # Past warmup a flat 0.0 IS written (honest dead reading, card shows
+    # 0 W) — the key only stays absent when macmon never produced a line.
+    pairs = _macmon_pairs({
+        "all_power": 0.0, "sys_power": 0.0, "cpu_power": 0.0,
+        "gpu_power": 0.0, "ane_power": 0.0,
+    })
+    assert pairs.get("pwr.total_w", 0.0) == 0.0
