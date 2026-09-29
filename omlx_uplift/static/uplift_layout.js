@@ -79,12 +79,11 @@
     };
     const WIDTH_IDS = Object.keys(WIDTH_CLASSES);
 
-    // The shipped default (user layout 2026-09-19 r3):
-    //   row 1: Prefill, Generation, Requests, Tokens, Cache  (5 stat tiles)
-    //   row 2: Throughput, Memory & cache                     (2 charts)
-    //   row 3: Request feed, In-flight, Request sizes (directly
-    //          under the charts — user asked feed + in-flight below
-    //          throughput; the metric cards moved below this row)
+    // The shipped default (user layout 2026-09-29):
+    //   row 1: In-flight, Memory & cache                      (user 2026-09-29)
+    //   row 2: Prefill, Generation, Requests, Tokens, Cache   (5 stat tiles,
+    //          contents unchanged, dropped below In-flight)
+    //   row 3: Throughput, Request sizes (2 charts/cards half-width)
     //   rows 4-6: metric cards (4 per row)
     //   last: Events (full width)
     // Freeform board: every block carries an explicit h. Content refits
@@ -95,41 +94,36 @@
     // is below it down, which looked like "snapping to weird places".
     // refitUpliftBlocks shrinks/grows them to live content afterwards.
     const DEFAULT_BLOCKS = [
-        { id: 'prefill', x: 0, y: 0, w: 4, h: 20 },
-        { id: 'gen', x: 4, y: 0, w: 4, h: 20 },
-        { id: 'requests', x: 8, y: 0, w: 4, h: 20 },
-        { id: 'tokens', x: 12, y: 0, w: 4, h: 20 },
-        { id: 'cache', x: 16, y: 0, w: 8, h: 20 },
-        { id: 'chart-tps', x: 0, y: 20, w: 12, h: 34 },
-        { id: 'chart-mem', x: 12, y: 20, w: 12, h: 34 },
-        // Feed row directly under the charts (user 2026-09-19 r3):
-        // Request feed + In-flight sit under Throughput. h is the floor
-        // only — the row engine grows it to whatever the lists need
-        // (capped demand), so the shipped value hugs stat-grid content.
+        { id: 'live', x: 0, y: 0, w: 12, h: 30 },
+        { id: 'chart-mem', x: 12, y: 0, w: 12, h: 34 },
+        { id: 'prefill', x: 0, y: 34, w: 4, h: 20 },
+        { id: 'gen', x: 4, y: 34, w: 4, h: 20 },
+        { id: 'requests', x: 8, y: 34, w: 4, h: 20 },
+        { id: 'tokens', x: 12, y: 34, w: 4, h: 20 },
+        { id: 'cache', x: 16, y: 34, w: 8, h: 20 },
+        { id: 'chart-tps', x: 0, y: 54, w: 12, h: 34 },
+        { id: 'reqstats', x: 12, y: 54, w: 12, h: 30 },
         // EVENTS retired 2026-09-22 (user): the reaction feed duplicated the
         // request feed; the Request feed moved into its bottom full-width
-        // slot. Row 3 rebalances to two half-width cards (In-flight +
-        // Request sizes) so the Throughput row below keeps its rhythm.
+        // slot.
         // normalizeLayout drops 'feed' from saved layouts automatically —
         // existing users lose the Events card on next load, no migration.
-        { id: 'live', x: 0, y: 57, w: 12, h: 30 },
-        { id: 'reqstats', x: 12, y: 57, w: 12, h: 30 },
         // Metric cards: 4 per row (w=6), compact chart fill. The board
         // owner may drop any of them; removed ones stay removed
         // (mergedBlocks memo in uplift.js).
-        { id: 'met-avg-generation-tps', x: 0, y: 87, w: 6, h: 20 },
-        { id: 'met-avg-prefill-tps', x: 6, y: 87, w: 6, h: 20 },
-        { id: 'met-rate-completion-tokens-s', x: 12, y: 87, w: 6, h: 20 },
-        { id: 'met-rate-prompt-tokens-s', x: 18, y: 87, w: 6, h: 20 },
-        { id: 'met-rate-requests-s', x: 0, y: 107, w: 6, h: 20 },
-        { id: 'met-cache-efficiency', x: 6, y: 107, w: 6, h: 20 },
-        { id: 'met-engines-active-requests', x: 12, y: 107, w: 6, h: 20 },
-        { id: 'met-sys-percent', x: 18, y: 107, w: 6, h: 20 },
-        { id: 'met-sys-used-bytes', x: 0, y: 127, w: 6, h: 20 },
-        { id: 'met-cache-total-bytes', x: 6, y: 127, w: 6, h: 20 },
-        { id: 'met-engines-loaded', x: 12, y: 127, w: 6, h: 20 },
-        { id: 'met-sys-total-bytes', x: 18, y: 127, w: 6, h: 20 },
-        { id: 'reqfeed', x: 0, y: 147, w: COLUMNS, h: 18 },
+        { id: 'met-avg-generation-tps', x: 0, y: 88, w: 6, h: 20 },
+        { id: 'met-avg-prefill-tps', x: 6, y: 88, w: 6, h: 20 },
+        { id: 'met-rate-completion-tokens-s', x: 12, y: 88, w: 6, h: 20 },
+        { id: 'met-rate-prompt-tokens-s', x: 18, y: 88, w: 6, h: 20 },
+        { id: 'met-rate-requests-s', x: 0, y: 108, w: 6, h: 20 },
+        { id: 'met-cache-efficiency', x: 6, y: 108, w: 6, h: 20 },
+        { id: 'met-engines-active-requests', x: 12, y: 108, w: 6, h: 20 },
+        { id: 'met-sys-percent', x: 18, y: 108, w: 6, h: 20 },
+        { id: 'met-sys-used-bytes', x: 0, y: 128, w: 6, h: 20 },
+        { id: 'met-cache-total-bytes', x: 6, y: 128, w: 6, h: 20 },
+        { id: 'met-engines-loaded', x: 12, y: 128, w: 6, h: 20 },
+        { id: 'met-sys-total-bytes', x: 18, y: 128, w: 6, h: 20 },
+        { id: 'reqfeed', x: 0, y: 148, w: COLUMNS, h: 18 },
     ];
 
     function defaultLayout() {
