@@ -166,27 +166,76 @@
     // Freeform drag/resize can leave two cards occupying the same cells
     // (drop onto an occupied spot). An overlap saved to storage reflows
     // differently on every load — that is what "reset moves cards down"
-    // was. Push overlapping cards down until the board is clean; order is
-    // kept, only y grows.
+    // was. Order is kept and only y grows, but the repair is ROW-BAND
+    // AWARE (user 2026-09-29: dropping one card onto the top row tore the
+    // whole board into a staircase — pushing the overlapping block alone
+    // skewed one column against its row-mates, and every row below
+    // inherited the skew as a 1-cell drift (y106 vs y107, 127 vs 128...)).
+    // Rules:
+    //  (1) cards whose saved y differ by at most ROW_TOLERANCE cells are a
+    //      row band (drift-repair: the band snaps UP to its smallest y —
+    //      a near-miss y is drift, never an intentional freeform offset
+    //      when rows butt together at exact heights);
+    //  (2) when a band must move to clear an already-placed card, EVERY
+    //      band member moves by the SAME shift — a row always lands as a
+    //      shared y-band, which is what the height engine (_rowAlign in
+    //      uplift.js) aligns rows by.
+    // Cards of the same band that overlap EACH OTHER (double drop on one
+    // cell) cannot be separated by a uniform shift: they cascade down
+    // inside the band, x-order kept. Idempotent: a clean board moves no
+    // one, so Reset renders identically every time.
+    const ROW_TOLERANCE = 2;
+    function rowsTouch(a, z) {
+        return a.x < z.x + z.w && z.x < a.x + a.w && a.y < z.y + z.h && z.y < a.y + a.h;
+    }
     function resolveOverlaps(blocks) {
+        const order = [...blocks].sort((a, z) => a.y - z.y || a.x - z.x);
+        const result = new Map(blocks.map(b => [b.id, { ...b }]));
         const placed = [];
-        for (const src of [...blocks].sort((a, z) => a.y - z.y || a.x - z.x)) {
-            const block = { ...src };
-            let moved = true;
-            while (moved) {
-                moved = false;
-                for (const p of placed) {
-                    if (block.x < p.x + p.w && p.x < block.x + block.w
-                        && block.y < p.y + p.h && p.y < block.y + block.h) {
-                        block.y = p.y + p.h;
-                        moved = true;
+        for (let i = 0; i < order.length;) {
+            const bandY = order[i].y;
+            const band = [];
+            while (i < order.length && order[i].y - bandY <= ROW_TOLERANCE)
+                band.push(result.get(order[i++].id));
+            // (1) snap the band up to its smallest y
+            for (const b of band) { if (b.y !== bandY) result.set(b.id, { ...b, y: bandY }); }
+            // (2) mutual overlaps inside the band cascade down in x-order
+            const stacked = [];
+            for (const b of band) {
+                let cur = result.get(b.id);
+                let moved = true, guard = 0;
+                while (moved && guard++ < 64) {
+                    moved = false;
+                    for (const p of stacked) {
+                        if (rowsTouch(cur, p)) {
+                            cur = { ...cur, y: p.y + p.h };
+                            moved = true;
+                        }
                     }
                 }
+                result.set(b.id, cur);
+                stacked.push(cur);
             }
-            placed.push(block);
+            // (3) the band as a whole clears everything already placed
+            let moved = true, guard = 0;
+            while (moved && guard++ < 64) {
+                moved = false;
+                let shift = 0;
+                for (const p of stacked) {
+                    const cur = result.get(p.id);
+                    for (const q of placed)
+                        if (rowsTouch(cur, q))
+                            shift = Math.max(shift, q.y + q.h - cur.y);
+                }
+                if (shift > 0) {
+                    for (const p of stacked)
+                        result.set(p.id, { ...result.get(p.id), y: result.get(p.id).y + shift });
+                    moved = true;
+                }
+            }
+            for (const p of stacked) placed.push(result.get(p.id));
         }
-        const byId = new Map(placed.map(b => [b.id, b]));
-        return blocks.map(b => byId.get(b.id));   // keep caller's order
+        return blocks.map(b => result.get(b.id));   // keep caller's order
     }
 
     // Accepts anything storage may hold and returns a layout the grid can

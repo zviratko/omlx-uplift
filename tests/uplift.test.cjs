@@ -324,6 +324,35 @@ test('uplift layout: normalize resolves overlapping blocks deterministically', (
     ] });
     assert.deepStrictEqual(clean.blocks.map(x => [x.id, x.y]), [['reqfeed', 0], ['gen', 18]]);
 });
+test('uplift layout: row-mates move as one band (staircase regression, 2026-09-29)', () => {
+    // One block of a row pushed down must drag its row-mates with it, and
+    // a drifted row (y differing by <=2 cells) snaps back to one band.
+    // User repro: dropping temperature onto the top row skewed prefill/gen
+    // against tokens/cache and every row below inherited a 1-cell drift —
+    // the board rendered as a staircase of half-empty rows.
+    const r = UPL.normalizeLayout({ blocks: [
+        { id: 'prefill', x: 0, y: 10, w: 4, h: 20 },
+        { id: 'gen', x: 4, y: 10, w: 4, h: 20 },          // row-mates, pushed together
+        { id: 'tokens', x: 8, y: 0, w: 4, h: 20 },        // overlaps prefill's old slot
+        { id: 'requests', x: 0, y: 31, w: 4, h: 20 },     // drifted 1 cell from row below
+        { id: 'cache', x: 4, y: 32, w: 4, h: 20 },
+    ] });
+    const y = Object.fromEntries(r.blocks.map(b => [b.id, b.y]));
+    assert.equal(y.prefill, y.gen);            // band moves as one
+    assert.equal(y.requests, y.cache);         // 1-cell drift repaired
+    // tokens owns x8..; prefill x0..4 touches nothing above, but lands ON
+    // the (drifted) requests/cache row band, so that band shifts below it.
+    assert.ok(y.prefill >= 10);
+    assert.ok(y.requests >= y.prefill + 20);   // lower band clears the upper
+    const r2 = UPL.normalizeLayout(r);         // idempotent
+    assert.deepStrictEqual(r2.blocks, r.blocks);
+    // a genuine freeform offset (3+ cells) stays untouched — no banding
+    const free = UPL.normalizeLayout({ blocks: [
+        { id: 'gen', x: 0, y: 0, w: 6, h: 20 },
+        { id: 'live', x: 8, y: 4, w: 6, h: 20 },
+    ] });
+    assert.deepStrictEqual(free.blocks.map(b => b.y), [0, 4]);
+});
 test('uplift layout: normalize drops unknown/dup blocks, clamps geometry', () => {
     const n = UPL.normalizeLayout({ width: 'banana', blocks: [
         { id: 'gen', x: -3, y: -1, w: 99 },
