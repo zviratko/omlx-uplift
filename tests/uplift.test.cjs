@@ -636,6 +636,26 @@ test('DROP-REGISTRATION: tray drops join upLayout.blocks and Cancel reverts', ()
     assert.ok(/upLayout = dashPreEdit/.test(cancel[0]),
         'Cancel restores the contract (dropped-only cards do not resurrect)');
 });
+/* GATED-EMPTY (user 2026-09-29): temperature/power cards load EMPTY after
+   a refresh (readout '—' until a timeframe chip is clicked). The metric
+   cache is keyed by WINDOW and shared across cards: the boot fetch fills
+   1h with the always-on cards' keys, and the gated cards — created later,
+   after the macmon probe resolves — were served from that "fresh" cache
+   WITHOUT their own keys. metricFetch must treat a window missing one of
+   the card's keys as not fresh, and must remember answered-but-absent
+   keys as empty so a dead collector cannot pin the window to forever-
+   refetching. */
+test('GATED-EMPTY: metricFetch re-fetches a window missing the card keys', () => {
+    const src = allStaticJs();
+    const f = src.match(/function metricFetch\(id, force\) \{[\s\S]*?\n\}/);
+    assert.ok(f, 'metricFetch found');
+    assert.ok(/const missing = keys\.some\(k => !\(k in cache\.data\)\);/.test(f[0]),
+        'fresh-cache shortcut requires every requested key present');
+    assert.ok(/if \(!force && !stale && !missing\)/.test(f[0]),
+        'missing keys override window freshness');
+    assert.ok(/cache\.data\[k\] = \[\]/.test(f[0]),
+        'answered-but-absent keys remembered as empty (no per-tick refetch storm)');
+});
 test('LAYOUT-SNAP: _snapUp runs after drops, removals and drags', () => {
     const src = allStaticJs();
     assert.ok(/function _snapUp\(\)/.test(src), '_snapUp defined');
