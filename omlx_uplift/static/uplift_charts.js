@@ -874,7 +874,14 @@ function metricFetch(id, force) {
     const cache = metricCache[w] || (metricCache[w] = { data: {}, at: 0, fails: 0, bucket_s: 0 });
     const ttl = cardWindow(id) >= 604800 ? 60000 : 10000;
     const stale = cache.fails > 2 ? Date.now() - cache.at > 30000 : Date.now() - cache.at > ttl;
-    if (!force && !stale) { drawMetricChart(id); return; }
+    // The cache is keyed by WINDOW and shared across cards. Gated cards
+    // (temperature/power) are created after the boot fetch filled this
+    // window with the older cards' keys — freshness alone then starved the
+    // new card of its own series ("loads with no data on refresh; clicking
+    // a timeframe fixes it"). A window whose cache is missing a requested
+    // key is NOT fresh for this card, regardless of its timestamp.
+    const missing = keys.some(k => !(k in cache.data));
+    if (!force && !stale && !missing) { drawMetricChart(id); return; }
     const sk = w + '|' + key;
     if (_fetching.has(sk)) return;
     _fetching.add(sk);
@@ -882,7 +889,14 @@ function metricFetch(id, force) {
     CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent(key)}&window=${w}`)
         .then(d => {
             cache.at = Date.now(); cache.fails = 0;
-            Object.assign(cache.data, d.series_map || {});
+            const map = d.series_map || {};
+            Object.assign(cache.data, map);
+            // Record every REQUESTED key as known — an answered-but-absent
+            // key (collector stopped) gets an empty column, not a forever-
+            // missing one. Without this the missing-key rule above would
+            // re-fetch this window on every 5 s tick for data that never
+            // comes. Failed fetches keep the keys missing (retry next tick).
+            for (const k of keys) if (!(k in cache.data)) cache.data[k] = [];
             cache.bucket_s = d.bucket_s || 0;
         })
         .catch(() => { cache.fails++; cache.at = Date.now(); })
@@ -1119,7 +1133,11 @@ window.Uplift.charts = {
                 if (!(lat[d.key] && lat[d.key].v != null)) continue;
                 try {
                     createMetricCard(d);
-                    CH_GLUE.onGatedCardCreated(C.metricBlockId(d.key));
+                    const cid = C.metricBlockId(d.key);
+                    CH_GLUE.onGatedCardCreated(cid);
+                    // Don't wait for the next 5 s tick or the shared-window
+                    // cache freshness: force-fill the fresh card now.
+                    metricFetch(cid, true);
                 } catch (err) {
                     /* one bad card must not kill the other gated defs */
                     console.warn('gated card create failed', d.key, err);
