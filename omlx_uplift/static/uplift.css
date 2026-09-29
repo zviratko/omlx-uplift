@@ -482,6 +482,19 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
     background-size: 8px 1px, 1px 8px, 8px 1px, 1px 8px;
     background-position: top left, top left, bottom right, bottom right;
     background-repeat: no-repeat; }
+/* LAYOUT-SNAP (user 2026-09-29): the placeholder shows the REAL card
+   contents (a clone of its .card-frame, painted by _fitDropPreview), not
+   an empty dashed stub. The clone lives deeper than the board's direct
+   child rules, so restate the card geometry that lives in those chains. */
+main.grid-stack .grid-stack-placeholder > .placeholder-content {
+    overflow: hidden; }
+main.grid-stack .grid-stack-placeholder .placeholder-preview {
+    position: absolute; inset: 1px; pointer-events: none; overflow: hidden;
+    background: var(--card); border: 1px solid var(--edge); opacity: .92; }
+.placeholder-preview > .card-chrome { display: none; }
+.placeholder-preview > .card-pad { padding: 0 12px 12px; }
+.placeholder-preview > .card-pad h2 { margin: 0 -12px 4px; }
+.placeholder-preview .metric-plot { min-height: 0; height: 100%; }
 
 /* ---- Stat tiles: solid ink numerals, hierarchy by size/weight only ---- */
 .stat-value {

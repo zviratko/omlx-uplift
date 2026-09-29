@@ -776,8 +776,11 @@ function ensureUpliftGrid() {
             if (moved) CH.resizeCharts();
         }, 50);
     });
-    dashGrid.on('dragstop resizestop', () => { CH.renderCardTsRows(true); refitUpliftBlocks(); CH.resizeCharts(); });
-    GridStack.setupDragIn('.dash-tray-pill', { appendTo: 'body', helper: 'clone' });
+    dashGrid.on('dragstop resizestop', () => {
+        if (dashEditing) _snapUp();   // LAYOUT-SNAP: moves close vertical gaps
+        CH.renderCardTsRows(true); refitUpliftBlocks(); CH.resizeCharts();
+    });
+    GridStack.setupDragIn('.dash-tray-pill', _dragInOpts());
     if (typeof ResizeObserver !== 'undefined') {
         const obs = new ResizeObserver(() => refitUpliftBlocks());
         // Observe the pad AND its children: when a narrow viewport wraps
@@ -800,14 +803,14 @@ function ensureUpliftGrid() {
     applyUpliftLayout(upLayout);
 }
 
-/* Geometry source of truth = the layout (saved or default). This pass
-   only does two things: (1) rows whose CONTENT no longer fits grow, and
-   every row below them shifts down accordingly (never sideways);
-   (2) cards sharing a y always share the resulting height and top, so
-   rows render as aligned horizontal bands. Stored gaps are preserved:
-   a row keeps max(its saved height, what content needs) at
-   max(saved y, cursor). Idempotent on settled content — that is why
-   Reset renders identically every time now. */
+/* ---- Geometry source of truth = the layout (saved or default). This pass
+   does two things: (1) rows whose CONTENT needs more or less space resize
+   to that content, and every row below them reflows down accordingly
+   (never sideways); (2) cards sharing a y always share the resulting
+   height and top, so rows render as aligned horizontal bands. LAYOUT-SNAP
+   (user 2026-09-29): rows butt together (cursor packing) and saved heights
+   are a hint, not a floor — dead vertical bands are packed out. Idempotent
+   on settled content — that is why Reset renders identically every time. */
 function _neededUnits(el) {
     const pad = el.querySelector('.card-pad');
     if (!pad) return 8;
@@ -883,16 +886,15 @@ function _rowAlign() {
         let h = 0;
         for (const m of members) {
             const el = _blockEl(m.id);
-            // Metric cards always hug their content: the chart fills all
-            // leftover space, so an oversized saved box is just padding.
-            // Every other card keeps the saved height as a floor.
-            const demand = el ? _neededUnits(el) : 0;
-            h = Math.max(h, C.blockMetricKey && C.blockMetricKey(m.id)
-                ? demand : Math.max(m.h, demand));
+            // LAYOUT-SNAP (user 2026-09-29): every card hugs MEASURED
+            // content — the saved h is no longer a floor. The old grow-only
+            // ratchet (max(saved, demand)) plus kept gaps is what left
+            // "lots of free space between the cards vertically".
+            h = Math.max(h, el ? _neededUnits(el) : m.h);
         }
-        const rowY = Math.max(y, cursor);                // keep gaps, push down only
-        plan.push({ members, y: rowY, h });
-        cursor = rowY + h;
+        // Rows snap together: cursor-only, saved gaps are not preserved.
+        plan.push({ members, y: cursor, h });
+        cursor += h;
     }
     let changed = false;
     dashApplying = true;
@@ -1008,30 +1010,135 @@ function collectUpliftLayout() {
     return UPL.normalizeLayout({ version: 1, width: dashDraft?.width ?? upLayout.width, blocks });
 }
 // TRAY-1: geometry of cards removed this edit session, keyed by block id.
-// The tray pill is a fixed gs-w=12 stub; re-adding must restore the width
-// the card actually had when it left the board (a removed full-width card
-// came back as a half-width one otherwise). x/y still come from the drop.
+// Re-adding must not exceed the width/height the card had when it left the
+// board (a removed full-width card must not come back as a half-width one),
+// but the live drop spot caps it — LAYOUT-SNAP lets cards land in narrower
+// gaps, and then the gap wins. x/y always come from the drop.
 const _trayGeo = new Map();
+/* LAYOUT-SNAP (user 2026-09-29): the drop placeholder used to inherit the
+   tray pill's fixed gs-w=12/gs-h=1 stub — an 8px-tall half-width dashed
+   frame with no relation to the card ("placeholder has no real size").
+   Pills now ship the card's real geometry through data-gs-widget, GridStack's
+   native sidebar-drag contract: dropover parses it, nodeBoundFix clamps to
+   minW, and every hover shows the card's true w×h. removeCard-stashed geo
+   (TRAY-1) is the cap. */
+function _pillGeo(id) {
+    const geo = _trayGeo.get(id);
+    if (geo) return { w: geo.w, h: geo.h };
+    const def = UPL.defaultLayout().blocks.find(b => b.id === id);
+    const hMin = String(id).startsWith('met-') ? 20 : 1;
+    return { w: def ? def.w : 12, h: Math.max(def ? def.h : 20, hMin) };
+}
+/* True when the rect hits no real card. isAreaEmpty can't be used while a
+   drag is in flight: the placeholder IS an engine node and collides with
+   itself, which would shrink every preview to minW. */
+function _freeOf(exclude, x, y, w, h) {
+    const rect = { x, y, w, h };
+    return !dashGrid.engine.nodes.some(m => m !== exclude && GridStack.Utils.isIntercepted(rect, m));
+}
+/* Live-fit + preview while an external tray drag is over the board.
+   The placeholder node is GridStack's temp external node (never a real
+   card), so narrowing it is always safe: take the widest collision-free
+   width at/below the card width, down to the card's minW — a card snaps
+   into gaps narrower than its preset instead of shoving neighbours.
+   _orig is pinned too, else the next dragmove restores the wide w. Also
+   paints a clone of the real card inside the frame so it shows content. */
+let _previewId = null;
+function _fitDropPreview() {
+    const ph = dashGrid && dashGrid._placeholder;
+    const n = ph && ph.gridstackNode;
+    if (!n || !n._isExternal || !n.id) return;
+    const id = String(n.id);
+    if (!UPL.BLOCK_IDS.includes(id)) return;
+    const geo = _pillGeo(id);
+    const minW = UPL.minWFor(id);
+    const h = Math.max(1, geo.h);
+    let w = Math.min(geo.w, UPL.COLUMNS - n.x);
+    while (w > minW && !_freeOf(n, n.x, n.y, w, h)) w--;
+    if (n.w !== w || n.h !== h) {
+        n.w = w; n.h = h;
+        if (n._orig) { n._orig.w = w; n._orig.h = h; }
+        delete n._lastTried;
+        dashGrid._writePosAttr(ph, n);
+        dashGrid._updateContainerHeight();
+    }
+    if (_previewId !== id) {
+        const box = ph.querySelector('.placeholder-content');
+        if (box) {
+            box.textContent = '';
+            const frame = _blockEl(id)?.querySelector('.card-frame');
+            if (frame) {
+                const copy = frame.cloneNode(true);
+                copy.removeAttribute('id');
+                copy.querySelectorAll('[id]').forEach(c => c.removeAttribute('id'));
+                // .card rides along so the board's `main.grid-stack .card …`
+                // header/padding rules style the clone like the real card.
+                copy.classList.add('card', 'placeholder-preview');
+                box.append(copy);
+            }
+        }
+        _previewId = id;
+    }
+}
+/* LAYOUT-SNAP: setupDragIn options shared by boot + renderTray rebinding.
+   The drag callback fires on every mouse-move of a tray drag (GridStack's
+   native sidebar hook) — that's where the live placeholder fit runs; the
+   grid 'drag' event never fires for external drags. */
+function _dragInOpts() {
+    return {
+        appendTo: 'body', helper: 'clone',
+        drag: () => { if (dashEditing && !dashApplying) _fitDropPreview(); },
+    };
+}
+/* LAYOUT-SNAP: gravity pass — every card slides straight up until it hits
+   another card or the board top (x never changes, rows never reflow
+   sideways). Closes the dead vertical bands float mode leaves behind after
+   drops/removals — cards "snap together". Mirrors y into upLayout so the
+   watchdog and saves agree with what's on screen. */
+function _snapUp() {
+    if (!dashGrid) return;
+    const nodes = dashGrid.engine.nodes
+        .filter(n => n.el && n.el.dataset.block)
+        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    let moved = false;
+    for (const n of nodes) {
+        const y0 = n.y;
+        while (n.y > 0 && _freeOf(n, n.x, n.y - 1, n.w, n.h)) n.y--;
+        if (n.y !== y0) { n._dirty = true; moved = true; }
+        const b = upLayout.blocks.find(bb => bb.id === n.el.dataset.block);
+        if (b && b.y !== n.y) { b.y = n.y; moved = true; }
+    }
+    nodes.forEach(n => dashGrid._writePosAttr(n.el, n));
+    dashGrid._updateContainerHeight();
+    if (moved) dashGrid.engine.saveInitial();
+    return moved;
+}
 function _onTrayDrop(node) {
     if (!dashGrid || !UPL || !node?.el) return;
     const id = node.el.dataset.block;
     // The dropped element is GridStack's clone of the tray pill.
     dashGrid.removeWidget(node.el, true, false);
     if (!UPL.BLOCK_IDS.includes(id) || !dashEditing) return;
+    _previewId = null;   // LAYOUT-SNAP: next drag rebuilds the preview
     const geo = _trayGeo.get(id);
     _trayGeo.delete(id);
-    const pos = { x: node.x, y: node.y, w: geo ? geo.w : node.w };
-    _placeCard(id, pos);
+    // TRAY-1 cap + LAYOUT-SNAP: never wider than the card's stored width,
+    // and the fitted placeholder (live gap) has final say when it's narrow.
+    const w = geo ? Math.min(geo.w, node.w) : node.w;
+    _placeCard(id, { x: node.x, y: node.y, w }, geo ? geo.h : node.h || undefined);
     renderTray();   // F-035: the pill must leave the tray once its block is back
+    _snapUp();      // LAYOUT-SNAP: close the gap the drop opened below it
     refitUpliftBlocks();
 }
 function removeCard(id) {
     const el = _blockEl(id);
     if (!dashGrid || !dashEditing || !el?.gridstackNode) return;
-    _trayGeo.set(id, { w: el.gridstackNode.w });
+    _trayGeo.set(id, { w: el.gridstackNode.w, h: el.gridstackNode.h });
     _parkCard(el);
     dashPlacedIds = dashPlacedIds.filter(p => p !== id);
-    // Freeform: no compaction — the gap the card leaves is the user's gap.
+    // LAYOUT-SNAP: the gap a removed card leaves is NOT the user's gap —
+    // everything under it snaps up.
+    _snapUp();
     renderTray();
 }
 
@@ -1059,8 +1166,13 @@ function renderTray() {
         if (dashPlacedIds.includes(id)) continue;
         const pill = document.createElement('div');
         pill.className = 'dash-tray-pill grid-stack-item';
-        pill.setAttribute('gs-w', '12'); pill.setAttribute('gs-h', '1');
-        pill.setAttribute('gs-min-w', '6'); pill.dataset.block = id;
+        // LAYOUT-SNAP: real card geometry rides along in GridStack's native
+        // sidebar attribute; the gs-* attrs are only the no-JS fallback.
+        const g = _pillGeo(id);
+        pill.setAttribute('gs-w', String(g.w)); pill.setAttribute('gs-h', '1');
+        pill.setAttribute('gs-min-w', String(UPL.minWFor(id)));
+        pill.setAttribute('data-gs-widget', JSON.stringify({ id, w: g.w, h: g.h }));
+        pill.dataset.block = id;
         const inner = document.createElement('div');
         inner.className = 'grid-stack-item-content dash-tray-pill-content';
         const gripMark = document.createElement('span'); gripMark.className = 'hatch'; gripMark.dataset.icon = 'grip';
@@ -1075,7 +1187,7 @@ function renderTray() {
     // init, line ~414) — pills created now would never be draggable, so
     // tray-restore was silently dead on every fresh page. Re-run it per
     // render; GridStack skips already-bound pills (isDraggable guard).
-    GridStack.setupDragIn('.dash-tray-pill', { appendTo: 'body', helper: 'clone' });
+    GridStack.setupDragIn('.dash-tray-pill', _dragInOpts());
     void label;
 }
 

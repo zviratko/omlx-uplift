@@ -505,25 +505,67 @@ test('F-035: _onTrayDrop calls renderTray after placing the card', () => {
     assert.ok(tray > place, 'renderTray runs AFTER the card is placed');
 });
 
-/* TRAY-1 drift test: the tray pill is a fixed gs-w=12 stub; re-adding a
-   removed card must restore the width it had on the board, not the pill's.
-   removeCard must stash gridstackNode.w and _onTrayDrop must prefer it. */
-test('TRAY-1: tray re-add restores the removed card width, not pill gs-w', () => {
+/* TRAY-1 + LAYOUT-SNAP drift test: re-adding a removed card must not
+   exceed the width it had on the board, but the fitted drop placeholder
+   (live gap) has final say when it is narrower. removeCard must stash
+   gridstackNode.w/h and _onTrayDrop must cap with the stashed width. */
+test('TRAY-1: tray re-add caps at the removed card width, gap can narrow it', () => {
     const fs = require('fs');
     const path = require('path');
     const src = allStaticJs();  // PH2-1 stage 0: whole static JS surface
     const rem = src.match(/function removeCard\(id\) \{[\s\S]*?\n\}/);
     assert.ok(rem, 'removeCard function found');
-    assert.ok(/_trayGeo\.set\(id, \{ w: el\.gridstackNode\.w \}\)/.test(rem[0]),
-        'removeCard stashes the removed node width');
+    assert.ok(/_trayGeo\.set\(id, \{ w: el\.gridstackNode\.w, h: el\.gridstackNode\.h \}\)/.test(rem[0]),
+        'removeCard stashes the removed node width and height');
     const drop = src.match(/function _onTrayDrop\(node\) \{[\s\S]*?\n\}/);
     assert.ok(drop, '_onTrayDrop function found');
     assert.ok(/_trayGeo\.get\(id\)/.test(drop[0]), '_onTrayDrop reads the stashed width');
-    assert.ok(/w: geo \? geo\.w : node\.w/.test(drop[0]),
-        'stashed width wins over the pill clone width');
+    assert.ok(/Math\.min\(geo\.w, node\.w\)/.test(drop[0]),
+        'stashed width caps the drop, the fitted placeholder can narrow it');
     const place = drop[0].indexOf('_placeCard(');
     const stash = drop[0].indexOf('_trayGeo.delete(id)');
     assert.ok(stash >= 0 && stash < place, 'stash is consumed once, before placing');
+});
+
+/* LAYOUT-SNAP drift tests (user 2026-09-29):
+   (a) the drop placeholder must carry the card's real geometry — pills ship
+       data-gs-widget, not a fixed gs-w=12/gs-h=1 stub;
+   (b) live drag over the board runs _fitDropPreview (shrink into narrow
+       gaps + show real card contents);
+   (c) view-mode rows pack with the cursor — no preserved gaps, no saved-h
+       floor ("cards must snap together vertically"). */
+test('LAYOUT-SNAP: pills ship real geometry, drags fit the placeholder live', () => {
+    const src = allStaticJs();
+    const tray = src.match(/function renderTray\(\) \{[\s\S]*?\n\}/);
+    assert.ok(tray, 'renderTray function found');
+    assert.ok(/setAttribute\('data-gs-widget'/.test(tray[0]),
+        'pills carry data-gs-widget (GridStack sidebar contract)');
+    const opts = src.match(/function _dragInOpts\(\) \{[\s\S]*?\n\}/);
+    assert.ok(opts, '_dragInOpts found');
+    assert.ok(/drag: \(\) => \{ if \(dashEditing && !dashApplying\) _fitDropPreview\(\); \}/.test(opts[0]),
+        'dragIn drag callback fits the placeholder live');
+    assert.ok(/function _fitDropPreview\(\)/.test(src), '_fitDropPreview defined');
+    assert.ok(/_freeOf\(n, n\.x, n\.y, w, h\)/.test(src),
+        'preview shrinks to widest collision-free width (down to minW)');
+});
+test('LAYOUT-SNAP: _rowAlign packs rows with the cursor (no kept gaps, no h floor)', () => {
+    const src = allStaticJs();
+    const m = src.match(/function _rowAlign\(\)[\s\S]*?\n\}/);
+    assert.ok(m, '_rowAlign found');
+    assert.ok(!/Math\.max\(y, cursor\)/.test(m[0]), 'saved gaps are not preserved');
+    assert.ok(/y: cursor, h \}/.test(m[0]), 'rows stack at the cursor');
+    assert.ok(!/Math\.max\(m\.h, demand\)/.test(m[0]), 'saved height is no longer a floor');
+});
+test('LAYOUT-SNAP: _snapUp runs after drops, removals and drags', () => {
+    const src = allStaticJs();
+    assert.ok(/function _snapUp\(\)/.test(src), '_snapUp defined');
+    for (const re of [
+        /function _onTrayDrop\(node\) \{[\s\S]*?_snapUp\(\);[\s\S]*?\n\}/,
+        /function removeCard\(id\) \{[\s\S]*?_snapUp\(\);[\s\S]*?\n\}/,
+        /dashGrid\.on\('dragstop resizestop'[\s\S]*?_snapUp\(\);/,
+    ]) {
+        assert.ok(re.test(src), 'gravity pass wired: ' + re);
+    }
 });
 
 /* UPLOADER-1 drift test: mode badges (dl-mode/qz-mode/up-mode/hm-sub) are
