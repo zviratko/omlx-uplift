@@ -693,6 +693,15 @@ function currentBlockLayout(saved) {
         for (const def of UPL.defaultLayout().blocks) {
             if (have.has(def.id)) { merged.includes(def.id) || merged.push(def.id); continue; }
             merged.push(def.id);
+            // Do NOT auto-append at (def.x, 0): every appended block shared
+            // y=0, so two fresh cards (temperature + power) collided AT THE
+            // ORIGIN and GridStack resolved it by shoving whatever was
+            // already there (user 2026-09-29: "the graphs disappear after
+            // reload"). TRAY_ONLY cards start parked — the user drops them
+            // where they want (U19 rule: adding a card never moves
+            // existing ones). A genuinely new non-tray block keeps the old
+            // append below the board bottom.
+            if (UPL.TRAY_ONLY_IDS.includes(def.id)) continue;
             const bottom = blocks.reduce((m, b) => Math.max(m, (b.y || 0) + (b.h || 0)), 0);
             blocks.push({ ...def, y: bottom + 1 });
         }
@@ -704,12 +713,14 @@ function currentBlockLayout(saved) {
         ? { width: saved.width, blocks: saved.blocks } : null);
 }
 let upLayout = currentBlockLayout(layout);
+window.__upLayout = () => upLayout;   // debug handle (same pattern as __upliftGrid)
 C.saveLayout(localStorage, layout);   // persist mergedBlocks so merge is one-shot
 applyWidthEarly();   // page width must be right before first paint/tab switch
 function applyWidthEarly() {
     if (UPL) document.documentElement.dataset.layoutWidth = UPL.widthClass(upLayout.width);
 }
 let dashGrid = null, dashEditing = false, dashDraft = null, dashSaving = false;
+let dashPreEdit = null;   // upLayout snapshot at edit start — Cancel restores it
 let dashPlacedIds = [];
 let dashRefitFrame = 0, dashRefitTimer = 0;
 let _padObserver = null;   // set in ensureUpliftGrid; createMetricCard extends it
@@ -872,19 +883,48 @@ function _neededUnits(el) {
 }
 function _rowAlign() {
     if (!dashGrid || dashApplying || dashEditing || currentTab() !== 'status') return;
-    const rows = new Map();
+    // BANDS = connected components of (|Δy| ≤ ROW_TOLERANCE AND horizontal
+    // overlap), not exact-y groups. Exact-y grouping broke with 2D packing:
+    // two INDEPENDENT columns (stat tiles left, chart-mem right) land on
+    // the same dropped y and fused into one rigid band — the tiles grew to
+    // chart height (stretched cards with dead space, user 2026-09-29 "the
+    // layout still breaks"). Real row-mates overlap or sit within the drift
+    // tolerance while packing; pure tiling neighbours keep their own row.
+    const cand = [];
     for (const b of upLayout.blocks) {
-        if (!_blockEl(b.id)) continue;
-        if (!rows.has(b.y)) rows.set(b.y, []);
-        rows.get(b.y).push(b);
+        const el = _blockEl(b.id);
+        if (!el) {
+            // Gated card (temperature/power) still being created: its DOM
+            // arrives a poll later, but its SLOT is already promised by the
+            // layout — reserve the rect. Without this the repack happily
+            // packed the stat-tile row into the pending card's empty cells
+            // at boot, and when the card materialised it landed ON TOP of
+            // them — same band y, so the rigid band could never separate
+            // them (user 2026-09-29: "they disappear / layout breaks after
+            // refresh"). Parked cards are NOT reserved (skip below).
+            cand.push(b);
+            continue;
+        }
+        if (el.classList.contains('card-parked')) continue;
+        cand.push(b);
     }
-    const ys = [...rows.keys()].sort((a, b) => a - b);
-    let cursor = 0;
-    const plan = [];                       // {members, y, h}
-    for (const y of ys) {
-        const members = rows.get(y);
+    cand.sort((a, z) => a.y - z.y || a.x - z.x);
+    const bands = [];                         // [{y, members, h}]
+    for (const b of cand) {
+        let idx = -1;
+        for (let i = 0; i < bands.length && idx < 0; i++) {
+            const band = bands[i];
+            if (b.y - band.y > 2) continue;   // ROW_TOLERANCE (uplift_layout)
+            const xov = band.members.some(m => m.x < b.x + b.w && b.x < m.x + m.w);
+            const w = band.members.reduce((s, m) => s + m.w, 0) + b.w;
+            if (xov || w <= 24) idx = i;      // overlap = row-mates in a fight;
+        }                                       // side-by-side = one aligned row
+        if (idx < 0) { bands.push({ y: b.y, members: [], h: 0 }); idx = bands.length - 1; }
+        bands[idx].members.push(b);
+    }
+    for (const band of bands) {
         let h = 0;
-        for (const m of members) {
+        for (const m of band.members) {
             const el = _blockEl(m.id);
             // LAYOUT-SNAP (user 2026-09-29): every card hugs MEASURED
             // content — the saved h is no longer a floor. The old grow-only
@@ -892,10 +932,19 @@ function _rowAlign() {
             // "lots of free space between the cards vertically".
             h = Math.max(h, el ? _neededUnits(el) : m.h);
         }
-        // Rows snap together: cursor-only, saved gaps are not preserved.
-        plan.push({ members, y: cursor, h });
-        cursor += h;
+        band.h = h;
     }
+    bands.sort((a, z) => a.y - z.y);
+    // 2D DROP-PACK (user 2026-09-29: "adding the temperature/power graphs
+    // still breaks the layout after reload"). The old engine advanced ONE
+    // global cursor per band, which is only correct while every band spans
+    // the full 24 columns: a single partial-width band (a dropped top-right
+    // metric card) made EVERY band below wait for the tallest neighbour —
+    // a staircase of half-empty rows. UPL.packRows drops each band to the
+    // lowest y that clears only what it actually overlaps; x is never
+    // touched, full-width bands still butt together, and a settled board
+    // repacks to itself (idempotent Reset). Gap snapping preserved.
+    const plan = UPL.packRows(bands);
     let changed = false;
     dashApplying = true;
     try {
@@ -1125,7 +1174,17 @@ function _onTrayDrop(node) {
     // TRAY-1 cap + LAYOUT-SNAP: never wider than the card's stored width,
     // and the fitted placeholder (live gap) has final say when it's narrow.
     const w = geo ? Math.min(geo.w, node.w) : node.w;
-    _placeCard(id, { x: node.x, y: node.y, w }, geo ? geo.h : node.h || undefined);
+    const h = geo ? geo.h : (node.h || undefined);
+    _placeCard(id, { x: node.x, y: node.y, w }, h);
+    // REGISTER the drop in the layout contract (user 2026-09-29 "the graphs
+    // disappear"): _rowAlign plans rows from upLayout.blocks and the
+    // watchdog snaps nodes back to it — a card that lives only in the
+    // engine is invisible to both, so the next repack packed other rows
+    // right over it. Tray cards were never written back until Save read
+    // the engine (collectUpliftLayout), so any refit in between broke it.
+    const rec = upLayout.blocks.find(b => b.id === id);
+    const geoRec = { id, x: node.x, y: node.y, w, h: h || node.h || 10 };
+    if (rec) Object.assign(rec, geoRec); else upLayout.blocks.push(geoRec);
     renderTray();   // F-035: the pill must leave the tray once its block is back
     _snapUp();      // LAYOUT-SNAP: close the gap the drop opened below it
     refitUpliftBlocks();
@@ -1222,6 +1281,10 @@ function _afterLayoutChange() {
 function startDashEdit() {
     if (!dashGrid || !upLayout || dashEditing || $('btn-customize').disabled) return;
     dashDraft = { width: upLayout.width };
+    // DROP-REGISTRATION (2026-09-29): tray drops write into upLayout.blocks
+    // so the row planner sees them — Cancel must therefore restore the
+    // pre-edit contract, exactly like it reverts removed cards.
+    dashPreEdit = JSON.parse(JSON.stringify(upLayout));
     $('lt-error').hidden = true;
     dashEditing = true;
     document.body.classList.add('layout-editing');
@@ -1235,6 +1298,11 @@ function startDashEdit() {
 function cancelDashEdit() {
     if (!dashEditing) return;
     dashEditing = false; dashDraft = null;
+    // DROP-REGISTRATION: restore the pre-edit contract (drops/re-adds made
+    // this session wrote into upLayout.blocks; applyUpliftLayout below
+    // would otherwise resurrect them).
+    if (dashPreEdit) upLayout = dashPreEdit;
+    dashPreEdit = null;
     $('lt-error').hidden = true;
     document.body.classList.remove('layout-editing');
     $('btn-customize').hidden = false;

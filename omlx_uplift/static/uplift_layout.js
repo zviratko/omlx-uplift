@@ -238,13 +238,51 @@
         return blocks.map(b => result.get(b.id));   // keep caller's order
     }
 
+    // Vertical repack for the row engine in uplift.js (_rowAlign). The old
+    // engine stacked y-bands with ONE global cursor, which is only correct
+    // while every band spans the full width: a single partial-width band —
+    // exactly what dropping a temperature/power card top-right creates —
+    // forced every band below it to wait for the tallest neighbour, i.e. a
+    // permanent staircase plus dead column gaps on every reload
+    // (user 2026-09-29: "adding the graphs still breaks the layout").
+    // packRows drops each band straight down instead: its y is the lowest
+    // value at which NO member rect hits any already-placed member rect.
+    // x is never touched (rows never reflow sideways); full-width bands
+    // still butt together exactly like the cursor did; the result is a
+    // pure function of (bands), so a settled board repacks to itself —
+    // Reset renders identically every time.
+    // bands: [{members: [{x, w}], h}] in stacking-preference order.
+    // Every member of a band shares its y AND h — rows stay aligned bands.
+    function packRows(bands) {
+        const placed = [];                       // member rects of placed bands
+        const plan = [];
+        for (const band of bands) {
+            let y = 0, guard = 0;
+            for (;;) {
+                let next = -1;
+                for (const p of placed)
+                    for (const m of band.members)
+                        if (m.x < p.x + p.w && p.x < m.x + m.w && y < p.y + p.h && p.y < y + band.h)
+                            next = Math.max(next, p.y + p.h);
+                if (next < 0 || guard++ > 512) break;
+                y = next;                        // monotonic: clash bottom > y
+            }
+            plan.push({ y, h: band.h, members: band.members });
+            for (const m of band.members)
+                placed.push({ x: m.x, y, w: m.w, h: band.h });
+        }
+        return plan;
+    }
+
     // Accepts anything storage may hold and returns a layout the grid can
     // load. Unknown blocks are dropped, so a layout may legitimately
-    // contain fewer than BLOCK_IDS.length blocks.
+    // contain fewer than BLOCK_IDS.length blocks. Repacking/gap-closing is
+    // NOT done here — _rowAlign runs a packRows drop right after placement
+    // and keeps the board snapped; normalize only guarantees overlap-free,
+    // deterministic geometry (and honest freeform offsets).
     function normalizeLayout(raw) {
-        if (!raw || typeof raw !== 'object' || !Array.isArray(raw.blocks)) {
+        if (!raw || typeof raw !== 'object' || !Array.isArray(raw.blocks))
             return defaultLayout();
-        }
         const seen = new Set();
         const blocks = resolveOverlaps(raw.blocks.map(b => normalizeBlock(b, seen)).filter(Boolean));
         const width = WIDTH_IDS.includes(raw.width) ? raw.width : 'default';
@@ -268,6 +306,7 @@
         defaultLayout,
         normalizeLayout,
         resolveOverlaps,
+        packRows,
         widthClass,
     };
 })(typeof window !== 'undefined' ? window : globalThis);

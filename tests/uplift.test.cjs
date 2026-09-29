@@ -579,11 +579,62 @@ test('LAYOUT-SNAP: pills ship real geometry, drags fit the placeholder live', ()
 });
 test('LAYOUT-SNAP: _rowAlign packs rows with the cursor (no kept gaps, no h floor)', () => {
     const src = allStaticJs();
-    const m = src.match(/function _rowAlign\(\)[\s\S]*?\n\}/);
+    const m = src.match(/function _rowAlign\(\)[\s\S]*?\n}/);
     assert.ok(m, '_rowAlign found');
     assert.ok(!/Math\.max\(y, cursor\)/.test(m[0]), 'saved gaps are not preserved');
-    assert.ok(/y: cursor, h \}/.test(m[0]), 'rows stack at the cursor');
+    assert.ok(!/cursor \+=/.test(m[0]), 'no single global stacking cursor (2D pack instead)');
+    assert.ok(/UPL\.packRows\(/.test(m[0]), 'rows are packed by UpliftLayout.packRows');
     assert.ok(!/Math\.max\(m\.h, demand\)/.test(m[0]), 'saved height is no longer a floor');
+});
+/* PARTIAL-BAND regression (user 2026-09-29, second report): adding the
+   temperature/power cards top-right still broke the whole board after a
+   reload. resolveOverlaps (bf68bd3) fixed only saved overlaps; the real
+   generator was _rowAlign's ONE global cursor — every band below a
+   partial-width band stacked beneath its tallest neighbour (staircase +
+   dead column gaps). packRows drops each band to the lowest y that clears
+   ONLY what it horizontally overlaps. */
+test('PACK-2D: partial-width band does not staircase the bands below it', () => {
+    // Board shaped like the user repro: row0 = two half-width metric cards
+    // (x0-12) beside a stat-tile band partner; below them independent rows.
+    const plan = UPL.packRows([
+        { members: [{ x: 0, w: 6 }, { x: 6, w: 6 }, { x: 12, w: 4 }, { x: 16, w: 8 }], h: 20 },
+        { members: [{ x: 12, w: 12 }], h: 36 },          // right column: sits under the tiles
+        { members: [{ x: 0, w: 12 }], h: 36 },           // left column: may sit beside chart-mem
+        { members: [{ x: 0, w: 12 }, { x: 12, w: 12 }], h: 33 },
+    ]);
+    assert.equal(plan[0].y, 0);
+    assert.equal(plan[1].y, 20);    // right row starts under its own column
+    assert.equal(plan[2].y, 20);    // left row starts under ITS column, not behind chart-mem
+    assert.equal(plan[3].y, 56);    // full-width row waits for both columns (20+36)
+    // idempotent: re-feeding the placed bands yields identical y
+    const again = UPL.packRows(plan.map(p => ({ members: p.members, h: p.h })));
+    assert.deepStrictEqual(again.map(p => p.y), plan.map(p => p.y));
+    // full-width bands still butt together exactly like the old cursor
+    const stack = UPL.packRows([
+        { members: [{ x: 0, w: 24 }], h: 10 },
+        { members: [{ x: 0, w: 24 }], h: 15 },
+        { members: [{ x: 0, w: 24 }], h: 8 },
+    ]);
+    assert.deepStrictEqual(stack.map(p => p.y), [0, 10, 25]);
+    // narrow breakpoint: every card is x0 w1 — stacks sequentially
+    const narrow = UPL.packRows([
+        { members: [{ x: 0, w: 1 }], h: 10 },
+        { members: [{ x: 0, w: 1 }], h: 15 },
+    ]);
+    assert.deepStrictEqual(narrow.map(p => p.y), [0, 10]);
+});
+test('DROP-REGISTRATION: tray drops join upLayout.blocks and Cancel reverts', () => {
+    const src = allStaticJs();
+    const drop = src.match(/function _onTrayDrop\(node\) \{[\s\S]*?\n\}/);
+    assert.ok(drop, '_onTrayDrop found');
+    assert.ok(/upLayout\.blocks\.push\(geoRec\)/.test(drop[0]),
+        'dropped card is registered in the layout contract (row planner + watchdog see it)');
+    const start = src.match(/function startDashEdit\(\) \{[\s\S]*?\n\}/);
+    assert.ok(/dashPreEdit = JSON\.parse\(JSON\.stringify\(upLayout\)\)/.test(start[0]),
+        'edit start snapshots the contract');
+    const cancel = src.match(/function cancelDashEdit\(\) \{[\s\S]*?\n\}/);
+    assert.ok(/upLayout = dashPreEdit/.test(cancel[0]),
+        'Cancel restores the contract (dropped-only cards do not resurrect)');
 });
 test('LAYOUT-SNAP: _snapUp runs after drops, removals and drags', () => {
     const src = allStaticJs();
