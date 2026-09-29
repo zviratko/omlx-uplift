@@ -1,0 +1,6 @@
+{
+  "description": "Relax the API-key requirement from jundot/omlx commit 09a7c43 so a bind to a private network needs no key. Trusted networks: RFC 1918 (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and RFC 6598 CGN (100.64.0.0/10, used by Tailscale). Public binds still require a key. Also adds the settings.json kill switch auth.skip_api_key_verification_I_Know_What_I_Am_Doing (not in the UI): when true, every network auth check is skipped, even on public binds. Error messages hint at this setting. Not enabled by default because it widens the upstream security boundary.",
+  "source": {
+    "kind": "file"
+  }
+}

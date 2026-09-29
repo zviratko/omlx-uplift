@@ -1,0 +1,385 @@
+diff --git a/omlx/admin/auth.py b/omlx/admin/auth.py
+index 8a9ca08..89fefeb 100644
+--- a/omlx/admin/auth.py
++++ b/omlx/admin/auth.py
+@@ -280,14 +280,16 @@ async def require_admin(request: Request) -> bool:
+         gs = _get_global_settings()
+         if gs is not None and gs.auth.skip_api_key_verification:
+             from ..server import _server_state
+-            from ..utils.network import is_loopback_bind
++            from ..utils.network import is_trusted_bind
+ 
+             active_host = gs.server.host
+             if getattr(_server_state, "global_settings", None) is gs:
+                 bind_host = getattr(_server_state, "bind_host", None)
+                 if isinstance(bind_host, str):
+                     active_host = bind_host
+-            if is_loopback_bind(active_host):
++            if getattr(
++                gs.auth, "skip_api_key_verification_I_Know_What_I_Am_Doing", False
++            ) or is_trusted_bind(active_host):
+                 return True
+ 
+     if not verify_session(request):
+diff --git a/omlx/admin/i18n/en.json b/omlx/admin/i18n/en.json
+index 6f79df7..b051891 100644
+--- a/omlx/admin/i18n/en.json
++++ b/omlx/admin/i18n/en.json
+@@ -398,7 +398,7 @@
+   "settings.auth.toggle_visibility_tooltip": "Toggle visibility",
+   "settings.auth.skip_verification": "Skip API key verification",
+   "settings.auth.skip_verification_hint": "API endpoints will not require authentication",
+-  "settings.auth.skip_verification_warning": "Available only when every server host is loopback",
++  "settings.auth.skip_verification_warning": "Available only when every server host is loopback, private (RFC 1918) or CGN (100.64.0.0/10)",
+   "settings.auth.sub_keys_label": "Additional API Keys",
+   "settings.auth.sub_keys_hint": "API-only keys. Cannot be used for admin login.",
+   "settings.auth.sub_keys_add": "Add",
+@@ -1839,7 +1839,7 @@
+   "js.error.required_fields": "Required fields cannot be empty: {fields}",
+   "js.error.api_key_min_length": "API key must be at least 4 characters",
+   "js.error.api_key_no_whitespace": "API key must not contain whitespace",
+-  "js.error.api_key_required_network": "Set an API key before binding the server to a non-loopback address",
++  "js.error.api_key_required_network": "Set an API key before binding the server to a public address. If you know what you are doing, there is a very special setting in settings.json, but you must find it yourself.",
+   "js.error.save_settings_failed": "Failed to save settings",
+   "js.error.mtplx_import_failed": "MTPLX side-car import failed",
+   "js.error.update_model_setting_failed": "Failed to update model setting",
+diff --git a/omlx/admin/routes.py b/omlx/admin/routes.py
+index 6a04bf3..6075cc7 100644
+--- a/omlx/admin/routes.py
++++ b/omlx/admin/routes.py
+@@ -1813,9 +1813,13 @@ async def login_page(request: Request):
+ 
+     # Skip login only when no-auth mode is confined to loopback.
+     if global_settings is not None and global_settings.auth.skip_api_key_verification:
+-        from ..utils.network import is_loopback_bind
++        from ..utils.network import is_trusted_bind
+ 
+-        if is_loopback_bind(_active_bind_host(global_settings)):
++        if getattr(
++            global_settings.auth,
++            "skip_api_key_verification_I_Know_What_I_Am_Doing",
++            False,
++        ) or is_trusted_bind(_active_bind_host(global_settings)):
+             return RedirectResponse(url="/admin/dashboard", status_code=302)
+ 
+     api_key_configured = bool(global_settings and global_settings.auth.api_key)
+@@ -1964,12 +1968,20 @@ async def setup_api_key(
+     if global_settings is None:
+         raise HTTPException(status_code=503, detail="Server not initialized")
+ 
+-    from ..utils.network import is_loopback_bind, is_loopback_bind_host
++    from ..utils.network import (
++        is_trusted_bind,
++        is_trusted_bind_host,
++    )
+ 
+     peer_host = getattr(getattr(http_request, "client", None), "host", None)
+-    if (
+-        not is_loopback_bind(_active_bind_host(global_settings))
+-        or not is_loopback_bind_host(peer_host)
++    kill_switch = getattr(
++        global_settings.auth,
++        "skip_api_key_verification_I_Know_What_I_Am_Doing",
++        False,
++    )
++    if not kill_switch and (
++        not is_trusted_bind(_active_bind_host(global_settings))
++        or not is_trusted_bind_host(peer_host)
+     ):
+         raise HTTPException(
+             status_code=403,
+@@ -2589,11 +2601,13 @@ async def _require_admin_or_bearer(request: Request) -> bool:
+     """Allow admin session OR a valid Bearer API key (for CLI use)."""
+     gs = _get_global_settings() if _get_global_settings else None
+ 
+-    # No-auth mode is restricted to loopback-only binds.
++    # No-auth mode is restricted to loopback/private/CGN binds.
+     if gs is not None and gs.auth.skip_api_key_verification:
+-        from ..utils.network import is_loopback_bind
++        from ..utils.network import is_trusted_bind
+ 
+-        if is_loopback_bind(_active_bind_host(gs)):
++        if getattr(
++            gs.auth, "skip_api_key_verification_I_Know_What_I_Am_Doing", False
++        ) or is_trusted_bind(_active_bind_host(gs)):
+             return True
+ 
+     # Valid admin session cookie
+@@ -4723,11 +4737,17 @@ async def update_global_settings(
+         raise HTTPException(status_code=503, detail="Server not initialized")
+ 
+     from ..utils.network import (
+-        is_loopback_bind,
++        is_trusted_bind,
+         is_valid_bind_host,
+         network_auth_error,
+     )
+ 
++    kill_switch = getattr(
++        global_settings.auth,
++        "skip_api_key_verification_I_Know_What_I_Am_Doing",
++        False,
++    )
++
+     candidate_host = (
+         request.host
+         if request.host is not None
+@@ -4761,11 +4781,13 @@ async def update_global_settings(
+         candidate_host,
+         candidate_api_key,
+         candidate_skip_verification,
++        skip_all_checks=kill_switch,
+     ):
+         raise HTTPException(status_code=400, detail=auth_error)
+     if (
+         request.skip_api_key_verification is True
+-        and not is_loopback_bind(_active_bind_host(global_settings))
++        and not kill_switch
++        and not is_trusted_bind(_active_bind_host(global_settings))
+     ):
+         raise HTTPException(
+             status_code=400,
+diff --git a/omlx/admin/static/js/dashboard.js b/omlx/admin/static/js/dashboard.js
+index 82bb15f..cf6dbf7 100644
+--- a/omlx/admin/static/js/dashboard.js
++++ b/omlx/admin/static/js/dashboard.js
+@@ -1078,10 +1078,23 @@
+                     if (host.replace(/\.+$/, '') === 'localhost') return true;
+                     if (!host.includes(':')) {
+                         const parts = host.split('.');
+-                        return parts.length === 4 && parts[0] === '127'
+-                            && parts.every(part => /^(0|[1-9]\d{0,2})$/.test(part)
+-                                && Number(part) <= 255);
++                        if (parts.length !== 4
++                            || !parts.every(part => /^(0|[1-9]\d{0,2})$/.test(part)
++                                && Number(part) <= 255)) {
++                            return false;
++                        }
++                        const o = parts.map(Number);
++                        // Loopback, RFC 1918 private and RFC 6598 CGN ranges
++                        // (Tailscale and similar overlays) are trusted.
++                        if (o[0] === 127) return true;
++                        if (o[0] === 10) return true;
++                        if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true;
++                        if (o[0] === 192 && o[1] === 168) return true;
++                        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true;
++                        return false;
+                     }
++                    // IPv6: only unique-local fc00::/7 counts as trusted.
++                    if (/^f[cd][0-9a-f]{2}:/i.test(host.split('%')[0])) return true;
+                     // Normalize IPv6, including expanded and IPv4-mapped forms.
+                     // A scope ID does not change whether an address is loopback.
+                     const [address, scope, extra] = host.split('%');
+diff --git a/omlx/admin/templates/dashboard/_settings.html b/omlx/admin/templates/dashboard/_settings.html
+index b7a210c..b309bc8 100644
+--- a/omlx/admin/templates/dashboard/_settings.html
++++ b/omlx/admin/templates/dashboard/_settings.html
+@@ -125,14 +125,14 @@
+                                         <label class="text-sm text-neutral-700">{{ t('settings.auth.skip_verification') }}</label>
+                                         <p class="text-xs text-neutral-400 mt-0.5">{{ t('settings.auth.skip_verification_hint') }}</p>
+                                         <p class="text-xs text-red-500 mt-0.5"
+-                                           x-show="!isLoopbackBindHost(globalSettings.server.host)" x-cloak>{{ t('settings.auth.skip_verification_warning') }}</p>
++                                           x-show="!isTrustedBindHost(globalSettings.server.host)" x-cloak>{{ t('settings.auth.skip_verification_warning') }}</p>
+                                     </div>
+                                     <button type="button"
+-                                            @click="if (isLoopbackBindHost(globalSettings.server.host)) globalSettings.auth.skip_api_key_verification = !globalSettings.auth.skip_api_key_verification"
+-                                            :disabled="!isLoopbackBindHost(globalSettings.server.host)"
+-                                            :class="!isLoopbackBindHost(globalSettings.server.host) ? 'bg-neutral-200 opacity-50 cursor-not-allowed' : (globalSettings.auth.skip_api_key_verification ? 'bg-black' : 'bg-neutral-200')"
++                                            @click="if (isTrustedBindHost(globalSettings.server.host)) globalSettings.auth.skip_api_key_verification = !globalSettings.auth.skip_api_key_verification"
++                                            :disabled="!isTrustedBindHost(globalSettings.server.host)"
++                                            :class="!isTrustedBindHost(globalSettings.server.host) ? 'bg-neutral-200 opacity-50 cursor-not-allowed' : (globalSettings.auth.skip_api_key_verification ? 'bg-black' : 'bg-neutral-200')"
+                                             class="relative w-11 h-6 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black">
+-                                        <span :class="isLoopbackBindHost(globalSettings.server.host) && globalSettings.auth.skip_api_key_verification ? 'translate-x-5' : 'translate-x-0'"
++                                        <span :class="isTrustedBindHost(globalSettings.server.host) && globalSettings.auth.skip_api_key_verification ? 'translate-x-5' : 'translate-x-0'"
+                                               class="block w-5 h-5 bg-white rounded-full shadow-sm transform transition-transform duration-300 absolute top-0.5 left-0.5"></span>
+                                     </button>
+                                 </div>
+diff --git a/omlx/server.py b/omlx/server.py
+index 3624491..271c344 100644
+--- a/omlx/server.py
++++ b/omlx/server.py
+@@ -330,7 +330,7 @@ async def verify_api_key(
+     Also accepts the x-api-key header as a fallback (Anthropic SDK compatibility).
+     """
+     from .admin.auth import fingerprint_key, verify_any_api_key
+-    from .utils.network import is_loopback_bind
++    from .utils.network import is_trusted_bind
+ 
+     global_settings = _server_state.global_settings
+     configured_host = getattr(
+@@ -340,11 +340,20 @@ async def verify_api_key(
+         configured_host = None
+     bind_host = getattr(_server_state, "bind_host", None)
+     active_host = bind_host if isinstance(bind_host, str) else configured_host
+-    loopback_only = active_host is None or is_loopback_bind(active_host)
++    trusted_bind = active_host is None or is_trusted_bind(active_host)
++    skip_all_checks = bool(
++        global_settings is not None
++        and getattr(
++            global_settings.auth,
++            "skip_api_key_verification_I_Know_What_I_Am_Doing",
++            False,
++        )
++    )
+ 
+-    # A missing key is accepted only when the configured bind is loopback-only.
++    # A missing key is accepted only on loopback, private/CGN, or
++    # kill-switch binds.
+     if _server_state.api_key is None:
+-        if loopback_only:
++        if trusted_bind or skip_all_checks:
+             return True
+         raise HTTPException(status_code=401, detail="API key required")
+ 
+@@ -352,7 +361,7 @@ async def verify_api_key(
+     if (
+         global_settings is not None
+         and global_settings.auth.skip_api_key_verification
+-        and loopback_only
++        and (trusted_bind or skip_all_checks)
+     ):
+         return True
+ 
+@@ -2110,6 +2119,7 @@ def init_server(
+             global_settings.server.host,
+             api_key,
+             global_settings.auth.skip_api_key_verification,
++            skip_all_checks=global_settings.auth.skip_api_key_verification_I_Know_What_I_Am_Doing,
+         )
+         if auth_error:
+             raise ValueError(auth_error)
+diff --git a/omlx/settings.py b/omlx/settings.py
+index 51c1a0c..84fbcc1 100644
+--- a/omlx/settings.py
++++ b/omlx/settings.py
+@@ -615,6 +615,9 @@ class AuthSettings:
+     api_key: str | None = None
+     secret_key: str | None = None
+     skip_api_key_verification: bool = False
++    # Not exposed in the UI. Set to true in settings.json to disable every
++    # network authentication check, even on public binds.
++    skip_api_key_verification_I_Know_What_I_Am_Doing: bool = False
+     sub_keys: list[SubKeyEntry] = field(default_factory=list)
+ 
+     def to_dict(self) -> dict[str, Any]:
+@@ -623,6 +626,9 @@ class AuthSettings:
+             "api_key": self.api_key,
+             "secret_key": self.secret_key,
+             "skip_api_key_verification": self.skip_api_key_verification,
++            "skip_api_key_verification_I_Know_What_I_Am_Doing": (
++                self.skip_api_key_verification_I_Know_What_I_Am_Doing
++            ),
+             "sub_keys": [sk.to_dict() for sk in self.sub_keys],
+         }
+ 
+@@ -633,6 +639,9 @@ class AuthSettings:
+             api_key=data.get("api_key"),
+             secret_key=data.get("secret_key"),
+             skip_api_key_verification=data.get("skip_api_key_verification", False),
++            skip_api_key_verification_I_Know_What_I_Am_Doing=data.get(
++                "skip_api_key_verification_I_Know_What_I_Am_Doing", False
++            ),
+             sub_keys=[SubKeyEntry.from_dict(sk) for sk in data.get("sub_keys", [])],
+         )
+ 
+@@ -1591,6 +1600,7 @@ class GlobalSettings:
+                 self.server.host,
+                 self.auth.api_key,
+                 self.auth.skip_api_key_verification,
++                skip_all_checks=self.auth.skip_api_key_verification_I_Know_What_I_Am_Doing,
+             )
+         ):
+             errors.append(auth_error)
+diff --git a/omlx/utils/network.py b/omlx/utils/network.py
+index 51d8116..bc25ea1 100644
+--- a/omlx/utils/network.py
++++ b/omlx/utils/network.py
+@@ -138,26 +138,84 @@ def is_loopback_bind(value: str) -> bool:
+     )
+ 
+ 
++# RFC 1918 private ranges and the RFC 6598 carrier-grade NAT range
++# (used by Tailscale and similar overlay networks). A server bound only to
++# these networks is reachable only from networks the operator already
++# controls, so it is treated like a loopback server for authentication.
++TRUSTED_BIND_NETWORKS = (
++    ipaddress.ip_network("10.0.0.0/8"),
++    ipaddress.ip_network("172.16.0.0/12"),
++    ipaddress.ip_network("192.168.0.0/16"),
++    ipaddress.ip_network("100.64.0.0/10"),
++)
++
++
++def is_trusted_bind_host(value: str) -> bool:
++    """Return whether a bind host is loopback or a private/CGN address.
++
++    Hostnames are never trusted; only literal IP bind hosts qualify.
++    """
++
++    if not isinstance(value, str):
++        return False
++    candidate = value.strip()
++    if not candidate:
++        return False
++    if is_loopback_bind_host(candidate):
++        return True
++    try:
++        address = ipaddress.ip_address(candidate)
++    except ValueError:
++        return False
++    mapped = getattr(address, "ipv4_mapped", None)
++    if mapped is not None:
++        address = mapped
++    return any(address in network for network in TRUSTED_BIND_NETWORKS)
++
++
++def is_trusted_bind(value: str) -> bool:
++    """Return whether every configured bind host is loopback/private/CGN."""
++
++    if not isinstance(value, str):
++        return False
++    bind_hosts = [part.strip() for part in value.split(",") if part.strip()]
++    return bool(bind_hosts) and all(
++        is_trusted_bind_host(part) for part in bind_hosts
++    )
++
++
+ def network_auth_error(
+     host: str,
+     api_key: str | None,
+     skip_api_key_verification: bool,
++    skip_all_checks: bool = False,
+ ) -> str | None:
+-    """Reject unauthenticated servers that bind beyond loopback."""
++    """Reject unauthenticated servers that bind beyond trusted networks.
++
++    ``skip_all_checks`` is the settings.json kill switch
++    (auth.skip_api_key_verification_I_Know_What_I_Am_Doing): when true,
++    every check here is skipped, even on public networks.
++    """
+ 
+     if not isinstance(host, str):
+         return "Server host must be a string."
+-    if is_loopback_bind(host):
++    if skip_all_checks:
++        return None
++    if is_trusted_bind(host):
+         return None
++    _hint = (
++        " If you know what you are doing, there is a very special setting"
++        " in settings.json, but you must find it yourself."
++    )
+     if skip_api_key_verification:
+         return (
+             "API key verification cannot be skipped when binding to a "
+-            f"non-loopback host ({host})."
++            f"non-loopback host ({host})." + _hint
+         )
+     if not isinstance(api_key, str) or not api_key.strip():
+         return (
+             f"An API key is required when binding to a non-loopback host ({host}). "
+-            "Set --api-key or OMLX_API_KEY, or bind to 127.0.0.1."
++            "Set --api-key or OMLX_API_KEY, or bind to 127.0.0.1." + _hint
+         )
+     return None
+ 
