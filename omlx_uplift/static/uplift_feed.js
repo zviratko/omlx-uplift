@@ -347,6 +347,7 @@ function pushServerEvent(ev) {
 }
 function connectEventStream() {
     if (sseSource || !window.EventSource) return;
+    if (document.hidden) return;   // opened in a background tab: resume opens it
     // R12-3: native oMLX now serves /admin/api/requests/stream (sampled
     // from scheduler snapshots); the gateway keeps its own SSE unchanged.
     try {
@@ -355,6 +356,22 @@ function connectEventStream() {
         sseSource.onerror = () => { /* EventSource retries on its own */ };
     } catch (_) { sseSource = null; }
 }
+/* SSE-PAUSE-1: EventSource is NOT throttled like timers, so a hidden tab
+   kept receiving the 1 s sampling tick — the server worked for an absent
+   viewer, transitions still rebuilt the whole request list per event, and a
+   suspended tab landed its TCP backlog in one burst on return (hundreds of
+   full renderReqFeed passes = the resume freeze; every interval poll already
+   self-gates on document.hidden, this was the odd one out). Close while
+   hidden; on resume reopen and catch up with pollRequests() from the
+   server ring — no transition is lost, and the hidden tab costs nothing. */
+addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        if (sseSource) { sseSource.close(); sseSource = null; }
+    } else {
+        connectEventStream();
+        pollRequests();
+    }
+});
 async function pollRequests() {
     if (document.hidden) return;   // R12-3: native route now exists
     try {
