@@ -680,8 +680,17 @@ _HOURLY_DERIVE = {
     "rate.requests_s":        lambda r: r["requests"] / 3600.0,
     "cache_efficiency":       lambda r: (r["cached_tokens"] / r["prompt_tokens"])
                                         if r["prompt_tokens"] else None,
-    "avg_prefill_tps":        lambda r: (r["prompt_tokens"] / r["prefill_seconds"])
-                                        if r["prefill_seconds"] else None,
+    # (prompt - cached) / prefill_seconds, NOT prompt / prefill_seconds:
+    # upstream's own live metric (server_metrics._build_snapshot) divides
+    # only the tokens it actually processed. Deriving the hourly backfill
+    # from raw prompt_tokens inflated prefill TPS up to +45% vs the live
+    # number on cache-heavy hours (user 2026-09-29: uplift prefill series
+    # much higher than classic / unrealistic).
+    "avg_prefill_tps":        lambda r: ((r["prompt_tokens"] - r["cached_tokens"])
+                                         / r["prefill_seconds"])
+                                        if r["prefill_seconds"] and
+                                        r["prompt_tokens"] >= r["cached_tokens"]
+                                        else None,
     "avg_generation_tps":     lambda r: (r["completion_tokens"] / r["generation_seconds"])
                                         if r["generation_seconds"] else None,
 }

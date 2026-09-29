@@ -41,6 +41,7 @@
   "uplift.env.title": "Experimental tunables",
   "uplift.explore.avg": "averaged",
   "uplift.explore.hourly": "hourly rollups",
+  "uplift.explore.no_data": "no data in window",
   "uplift.feed.gw_reset": "gateway shadow state reset",
   "uplift.feed.load_requested": "{model} load requested",
   "uplift.feed.ready": "{model} ready",

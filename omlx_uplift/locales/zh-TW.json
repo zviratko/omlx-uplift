@@ -41,6 +41,7 @@
   "uplift.env.title": "實驗性調參項",
   "uplift.explore.avg": "平均值",
   "uplift.explore.hourly": "小時匯總",
+  "uplift.explore.no_data": "視窗內無資料",
   "uplift.feed.gw_reset": "網關影子狀態已重置",
   "uplift.feed.load_requested": "已請求加載 {model}",
   "uplift.feed.ready": "{model} 就緒",

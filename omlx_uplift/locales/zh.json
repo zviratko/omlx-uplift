@@ -41,6 +41,7 @@
   "uplift.env.title": "实验性调优项",
   "uplift.explore.avg": "平均值",
   "uplift.explore.hourly": "小时汇总",
+  "uplift.explore.no_data": "窗口内无数据",
   "uplift.feed.gw_reset": "网关影子状态已重置",
   "uplift.feed.load_requested": "已请求加载 {model}",
   "uplift.feed.ready": "{model} 就绪",

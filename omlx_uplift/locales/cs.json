@@ -41,6 +41,7 @@
   "uplift.env.title": "Experimentální laditelné parametry",
   "uplift.explore.avg": "průměr",
   "uplift.explore.hourly": "hodinové souhrny",
+  "uplift.explore.no_data": "žádná data v okně",
   "uplift.feed.gw_reset": "reset stínu stavu gateway",
   "uplift.feed.load_requested": "vyžádáno načtení {model}",
   "uplift.feed.ready": "{model} připraven",

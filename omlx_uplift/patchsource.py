@@ -1030,6 +1030,84 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
     return result
 
 
+def _gate_all_already(result: dict) -> bool:
+    """True when a gate passed and EVERY file section is 'already' — the
+    tree (base or keg) already contains the hunks: upstreamed."""
+    files = result.get("files") or []
+    return bool(files) and result.get("ok") and all(
+        f.get("status") == "already" for f in files)
+
+
+def _pr_merged_into_base(src: dict, diff_bytes: bytes | None,
+                         reverse: bool = False) -> bool | None:
+    """For a github_pr source with state='applied' but no content drift:
+    is the PR's CONTENT already in our dev base commit?
+    True = upstreamed, False = definitely not, None = inconclusive (no PR
+    ref, network/API/git failure — the caller keeps up_to_date).
+
+    Two rules learned the hard way (2026-09-29, live probe with merged
+    jundot/omlx#3874):
+      * GitHub REST reports merged PRs as state='closed' with merged_at
+        set — state=='merged' is GraphQL-only and NEVER fires here.
+      * jundot/omlx squash-merges: merge_commit_sha is a dangling commit
+        that exists on neither local objects nor main, so ancestry can
+        never prove content-in-base. The ancestry check stays as a fast
+        path (rc 0 -> True), but the decisive test is gating the stored
+        diff against a clean worktree at the base commit — exactly what
+        materialize would see. Works for merge, squash and rebase flows.
+    """
+    ref = None
+    if src.get("repo") and src.get("pr"):
+        ref = (src["repo"], int(src["pr"]))
+    elif src.get("url"):
+        ref = parse_pr_ref(src["url"])
+    if not ref or src.get("kind") != "github_pr":
+        return None
+    tls = bool(src.get("insecure_tls"))
+    try:
+        import subprocess
+        api = fetch_bytes(
+            f"https://api.github.com/repos/{ref[0]}/pulls/{ref[1]}", tls)
+        if not api["ok"]:
+            return None
+        meta = json.loads(api["data"])
+        if not meta.get("merged_at"):
+            return False                      # open/closed-unmerged: needed
+        merge_sha = meta.get("merge_commit_sha")
+        from . import devsrc
+        cfg = devsrc.load_config()
+        if not cfg:
+            return None
+        root = devsrc.src_path(cfg)
+        base = devsrc.base_sha_of(cfg)
+        if not base or not os.path.isdir(os.path.join(root, ".git")):
+            return None
+        if isinstance(merge_sha, str) and re.fullmatch(r"[0-9a-f]{40}", merge_sha):
+            proc = devsrc._git(["merge-base", "--is-ancestor", merge_sha, base],
+                               cwd=root, check=False)
+            if proc.returncode == 0:
+                return True                   # true merge-commit flow, done
+        if not diff_bytes:
+            return None                       # nothing to content-gate with
+        import tempfile
+        wt = tempfile.mkdtemp(prefix="uplift-base-gate-")
+        os.rmdir(wt)                          # worktree add wants it absent
+        try:
+            add = devsrc._git(["worktree", "add", "--detach", "--force",
+                               wt, base], cwd=root, check=False)
+            if add.returncode != 0:
+                return None                   # objects not fetched yet
+            res = fetch_and_gate({"kind": "upload", "data": diff_bytes}, wt,
+                                 reverse=reverse, skip_patterns=None)
+            return _gate_all_already(res) if res.get("ok") else False
+        finally:
+            devsrc._git(["worktree", "remove", "--force", wt], cwd=root,
+                        check=False)
+            subprocess.run(["rm", "-rf", wt], check=False)
+    except Exception:                               # noqa: BLE001 — fail soft
+        return None
+
+
 def check_all(store, tree_root: str) -> dict:
     """Re-fetch every github_pr/url source — ENABLED AND DISABLED alike.
     A user who disabled a broken patch still wants to know when upstream
@@ -1073,6 +1151,44 @@ def check_all(store, tree_root: str) -> dict:
             (head and latest.get("source_head_sha") and
              latest.get("source_head_sha") != head)))
         if not drifted:
+            # An upstream-MERGED PR stops drifting but also stops being
+            # needed: the code is in upstream now. Detect that here — the
+            # drifted path above already had an obsolete check; without it
+            # a merged PR stays state='applied' forever.
+            if p.get("state") == "applied":
+                scope = _patches.patch_scope(p)
+                if _patches.scope_touches_dev(scope):
+                    # the dev gate ran against the uplift worktree which
+                    # carries uplift's OWN commits — 'already' there means
+                    # nothing; ask GitHub merged_at + content-gate the
+                    # stored diff against a clean base checkout instead
+                    newest0 = max((v.get("v", 0) for v in p["versions"]),
+                                  default=0)
+                    cur_v = store.get_version(p, newest0) if newest0 else None
+                    diff_b = _read_patch_file(store, cur_v) if cur_v else None
+                    verdict = _pr_merged_into_base(
+                        src, diff_b, reverse=bool(p.get("reversal")))
+                    if verdict is None and _patches.scope_touches_keg(scope):
+                        # ancestry inconclusive: all-'already' across the
+                        # pruned KEG gate is a strong signal too
+                        keg_res = fetch_and_gate(
+                            src, tree_root,
+                            overrides=_pristine_overlay(store, p, tree_root),
+                            reverse=bool(p.get("reversal")),
+                            skip_patterns=_patches.skip_patterns(manifest))
+                        upstreamed = (keg_res.get("ok")
+                                      and _gate_all_already(keg_res))
+                    else:
+                        upstreamed = verdict is True
+                else:
+                    # runtime gate against the real tree already ran above
+                    upstreamed = _gate_all_already(result)
+                if upstreamed and store.set_state(
+                        p, "obsolete",
+                        "upstream now contains the patch — consider removing"):
+                    reports[pid] = {"check": "obsolete"}
+                    changed_any = True
+                    continue
             reports[pid] = {"check": "up_to_date"}
             continue
         obsolete = [f for f in result["files"] if f["status"] == "already"]

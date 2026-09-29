@@ -1083,11 +1083,25 @@ def cmd_dev_install(args) -> int:
             print(f"  applied before failure: {c['id']} v{c.get('v')}",
                   file=sys.stderr)
         print("fix or disable the named patch, then re-run", file=sys.stderr)
+        # last line doubles as a scrape target (dashboard tails the output)
+        print(f"RESULT: FAILED - materialize aborted: {res.get('reason')}",
+              flush=True)
         return 1
     tip = res["tip"]
     n = len([c for c in res["commits"] if c.get("sha")])
+    skipped_n = len([c for c in res["commits"]
+                     if c.get("skipped") == "already-present"])
     print(f"uplift-dev: {cfg['sync_ref']} @ {res['base'][:12]} + "
           f"{n} patch commit(s) -> tip {tip[:12]}")
+    # per-patch progress in materialize order — plain lines so the dashboard
+    # can scrape them ('APPLIED' = got a commit, 'ALREADY UPSTREAM' = the
+    # base already carried the hunks so no commit was cut)
+    for c in res["commits"]:
+        if c.get("sha"):
+            print(f"{c['id']}: APPLIED (commit {c['sha'][:12]})")
+        elif c.get("skipped") == "already-present":
+            print(f"{c['id']}: ALREADY UPSTREAM (no commit - upstream base "
+                  "already contains it)")
     # the branch IS the apply step for dev/both scopes — record it so the
     # dashboard stops showing 'pending' forever (reconcile never sees these)
     patchsource.mark_dev_applied(_patches_store(), res["commits"])
@@ -1096,8 +1110,8 @@ def cmd_dev_install(args) -> int:
     # needs_review per patch, never silently skipped
     regate = _regate_build_patches(build_patches)
     for pid, why in regate.items():
-        print(f"re-gate FAILED for build patch {pid}: {why} "
-              "(marked needs_review)", file=sys.stderr)
+        print(f"{pid}: RE-GATE FAILED (needs_review): {why}",
+              file=sys.stderr)
 
     flags = set()
     if args.with_custom_kernel:
@@ -1135,6 +1149,8 @@ def cmd_dev_install(args) -> int:
         subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
         print("brew build FAILED — dev keg untouched (pin restored)",
               file=sys.stderr)
+        print("RESULT: FAILED - brew build failed (see output above); "
+              "dev keg untouched", flush=True)
         return proc.returncode
     subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
     cfg = devsrc.load_config() or cfg
@@ -1150,6 +1166,10 @@ def cmd_dev_install(args) -> int:
     _mount_into_dev_keg()
     print(f"omlx-dev built from {tip[:12]}; .pth mount refreshed")
     _dev_next_steps(cfg, fresh=False)
+    # VERY LAST line: a single scrape-able verdict for the dashboard
+    print(f"RESULT: OK - omlx-dev built from {tip[:12]} "
+          f"({n} patch commit(s), {skipped_n} skipped as already upstream)",
+          flush=True)
     return 0
 
 

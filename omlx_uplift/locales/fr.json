@@ -41,6 +41,7 @@
   "uplift.env.title": "Réglages expérimentaux",
   "uplift.explore.avg": "moyenné",
   "uplift.explore.hourly": "agrégats horaires",
+  "uplift.explore.no_data": "aucune donnée sur la fenêtre",
   "uplift.feed.gw_reset": "état miroir de la passerelle réinitialisé",
   "uplift.feed.load_requested": "{model} : chargement demandé",
   "uplift.feed.ready": "{model} prêt",

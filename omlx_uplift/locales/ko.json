@@ -41,6 +41,7 @@
   "uplift.env.title": "실험적 튜닝",
   "uplift.explore.avg": "평균값",
   "uplift.explore.hourly": "시간 롤업",
+  "uplift.explore.no_data": "구간 내 데이터 없음",
   "uplift.feed.gw_reset": "게이트웨이 셔도우 상태 초기화됨",
   "uplift.feed.load_requested": "{model} 로드 요청됨",
   "uplift.feed.ready": "{model} 준비 완료",

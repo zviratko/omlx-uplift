@@ -41,6 +41,7 @@
   "uplift.env.title": "Экспериментальные настройки",
   "uplift.explore.avg": "усреднено",
   "uplift.explore.hourly": "часовые сводки",
+  "uplift.explore.no_data": "нет данных в окне",
   "uplift.feed.gw_reset": "теневое состояние шлюза сброшено",
   "uplift.feed.load_requested": "{model}: запрошена загрузка",
   "uplift.feed.ready": "{model} готов",

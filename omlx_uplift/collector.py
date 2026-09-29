@@ -427,6 +427,9 @@ class Collector:
                         cur = pfx_counters.get(key)
                         old = prev_ctr.get(key)
                         if cur is None or old is None or cur < old:
+                            # negative delta = counter reset (model reload):
+                            # drop THIS tick's rate; the tick-end baseline
+                            # update below re-arms from the reset point.
                             return None
                         return cur - old
                     d_h, d_m = _d("pfx.hits"), _d("pfx.misses")
@@ -449,6 +452,15 @@ class Collector:
                         pairs["spec.saved_tokens_min"] = 60.0 * d_ssave / dt
                 if pfx_counters:
                     self._prev_ctr = pfx_counters
+                elif pool.get_loaded_model_ids() and saw_prefix_cache is False:
+                    # Engines stopped reporting prefix_cache counters (the
+                    # pfx.* series went quiet 2026-09-27 with only a
+                    # reranker resident). Loaders without a block-aware
+                    # cache never emit them — say so at debug instead of
+                    # leaving the cards silently flat-lined.
+                    log.debug("prefix_cache counters absent for %d loaded "
+                              "model(s); pfx.*/spec.* series paused",
+                              len(pool.get_loaded_model_ids()))
         except Exception:
             log.debug("prefix-cache collect failed", exc_info=True)
 

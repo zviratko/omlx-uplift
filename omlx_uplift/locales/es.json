@@ -41,6 +41,7 @@
   "uplift.env.title": "Ajustes experimentales",
   "uplift.explore.avg": "promediado",
   "uplift.explore.hourly": "rollups horarios",
+  "uplift.explore.no_data": "sin datos en la ventana",
   "uplift.feed.gw_reset": "estado sombra del gateway restablecido",
   "uplift.feed.load_requested": "{model}: carga solicitada",
   "uplift.feed.ready": "{model} listo",

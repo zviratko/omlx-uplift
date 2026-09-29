@@ -41,6 +41,7 @@
   "uplift.env.title": "実験的チューニング",
   "uplift.explore.avg": "平均値",
   "uplift.explore.hourly": "1時間ローラップ",
+  "uplift.explore.no_data": "ウィンドウ内にデータなし",
   "uplift.feed.gw_reset": "ゲートウェイのシャドウ状態をリセット",
   "uplift.feed.load_requested": "{model} の読み込みを要求",
   "uplift.feed.ready": "{model} 準備完了",

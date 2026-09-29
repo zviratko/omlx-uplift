@@ -159,3 +159,33 @@ def test_instance_id_unique_per_process():
     from omlx_uplift.store import server_instance_id
 
     assert server_instance_id().endswith(f"\x1f{os.getpid()}")
+
+
+# ---- _HOURLY_DERIVE: avg_prefill_tps must mirror upstream's honest metric
+# (server_metrics._build_snapshot divides prompt MINUS cached tokens). The
+# old prompt-only derivation inflated the 7d/30d backfill up to +45% over
+# the live number on cache-heavy hours (user 2026-09-29: uplift prefill
+# reads much higher than classic, unrealistic).
+
+def test_hourly_prefill_derive_excludes_cached_tokens():
+    row = {"requests": 4, "prompt_tokens": 51933, "completion_tokens": 200,
+           "cached_tokens": 12288, "prefill_seconds": 335.8,
+           "generation_seconds": 40.0}
+    v = up._HOURLY_DERIVE["avg_prefill_tps"](row)
+    assert abs(v - (51933 - 12288) / 335.8) < 1e-9
+
+
+def test_hourly_prefill_derive_zero_cached_matches_naive():
+    row = {"requests": 1, "prompt_tokens": 175, "completion_tokens": 5,
+           "cached_tokens": 0, "prefill_seconds": 1.57,
+           "generation_seconds": 1.0}
+    assert abs(up._HOURLY_DERIVE["avg_prefill_tps"](row) - 175 / 1.57) < 1e-9
+
+
+def test_hourly_prefill_derive_guards():
+    # no prefill time -> None (same as before)
+    assert up._HOURLY_DERIVE["avg_prefill_tps"](
+        {"prompt_tokens": 10, "cached_tokens": 0, "prefill_seconds": 0}) is None
+    # cached > prompt (a counter glitch) -> None, never a negative TPS
+    assert up._HOURLY_DERIVE["avg_prefill_tps"](
+        {"prompt_tokens": 10, "cached_tokens": 20, "prefill_seconds": 1.0}) is None

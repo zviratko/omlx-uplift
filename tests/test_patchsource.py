@@ -10,12 +10,14 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from omlx_uplift import diffapply, patchsource, patches
+from omlx_uplift import devsrc, diffapply, patchsource, patches
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIX = os.path.join(HERE, "fixtures")
@@ -392,6 +394,160 @@ class DriftCheckTests(HttpFixture):
         self.assertEqual(r["desired_version"], 1)
         r = patchsource.rollback(self.store, "nope")
         self.assertFalse(r["ok"])
+
+    # --- upstreamed-PR detection in the not-drifted path -----------------
+
+    def _force_applied(self, pid="demo"):
+        m = self.store.load()
+        p = self.store.find(m, pid)
+        ok = self.store.set_state(p, "applied", "test")
+        self.assertTrue(ok)
+        self.store.save(m)
+
+    def test_check_not_drifted_all_already_marks_obsolete(self):
+        # upstream merged the PR: content sha unchanged (no drift) but the
+        # tree now contains every hunk -> gate says all-'already' -> obsolete
+        self._add_via_url()
+        diffapply.apply_diff(PR3764, self.root, os.path.join(self.tmp, "bA"))
+        self._force_applied()
+        r = patchsource.check_all(self.store, self.root)
+        self.assertEqual(r["reports"]["demo"]["check"], "obsolete")
+        p = self.store.find(self.store.load(), "demo")
+        self.assertEqual(p["state"], "obsolete")
+        # non-mutating for the tree: desired_version untouched
+        self.assertEqual(p["desired_version"], 1)
+
+    def test_check_not_drifted_gate_clean_stays_up_to_date(self):
+        # no drift AND the hunks are NOT in the tree (gate clean, not
+        # already) -> plain up_to_date, state untouched
+        self._add_via_url()
+        self._force_applied()
+        r = patchsource.check_all(self.store, self.root)
+        self.assertEqual(r["reports"]["demo"]["check"], "up_to_date")
+        p = self.store.find(self.store.load(), "demo")
+        self.assertEqual(p["state"], "applied")
+
+    def test_check_pending_all_already_is_not_obsoleted(self):
+        # state machine guard: only 'applied' entries are candidates; a
+        # never-applied patch that merely gates all-already stays put
+        self._add_via_url()
+        diffapply.apply_diff(PR3764, self.root, os.path.join(self.tmp, "bA"))
+        # state is 'pending' after add — do NOT force applied
+        r = patchsource.check_all(self.store, self.root)
+        self.assertEqual(r["reports"]["demo"]["check"], "up_to_date")
+        p = self.store.find(self.store.load(), "demo")
+        self.assertEqual(p["state"], "pending")
+
+
+class PRMergeAncestryTests(unittest.TestCase):
+    """_pr_merged_into_base: dev/both-scope upstream detection. Real-world
+    semantics pinned here (2026-09-29, merged jundot/omlx#3874 probe):
+    REST reports merged as state='closed' + merged_at; the repo squash-
+    merges so ancestry is never conclusive — the content gate against a
+    clean base checkout decides. fetch_bytes fakes return BYTES."""
+
+    SRC = {"kind": "github_pr", "repo": "jundot/omlx", "pr": 3874}
+    API = "https://api.github.com/repos/jundot/omlx/pulls/3874"
+    MERGE = "b" * 40
+    BASE = "c" * 40
+    DIFF = b"diff --git a/omlx/x.py b/omlx/x.py\n"
+
+    def _fake_fetch(self, payload):
+        def fake(url, insecure_tls=False):
+            if url == self.API:
+                return {"ok": True, "data": payload}
+            return {"ok": False, "reason": f"unexpected {url}"}
+        return fake
+
+    def _patch_devsrc(self, ancestor_rc=1, worktree_rc=0):
+        """_git fake that dispatches on the subcommand (a single fixed rc
+        cannot model 'not an ancestor but worktree add works')."""
+        tmp = tempfile.mkdtemp(prefix="uplift-pr-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        os.makedirs(os.path.join(tmp, ".git"))
+
+        def fake_git(args, cwd=None, check=True):
+            rc = ancestor_rc if args[:2] == ["merge-base", "--is-ancestor"] \
+                else worktree_rc
+            return subprocess.CompletedProcess(args, rc, "", "")
+        stack = [
+            unittest.mock.patch.object(
+                devsrc, "load_config",
+                lambda *a, **k: {"sync_ref": "origin/main"}),
+            unittest.mock.patch.object(devsrc, "src_path", lambda cfg: tmp),
+            unittest.mock.patch.object(devsrc, "base_sha_of", lambda cfg: self.BASE),
+            unittest.mock.patch.object(devsrc, "_git", fake_git),
+        ]
+        for s in stack:
+            s.start()
+            self.addCleanup(s.stop)
+
+    def _merged(self):
+        return json.dumps({"state": "closed", "merged_at": "2026-09-29T13:05:18Z",
+                           "merge_commit_sha": self.MERGE}).encode()
+
+    def test_ancestor_fast_path_true(self):
+        # true merge-commit flow: ancestry rc 0 decides without a worktree
+        with unittest.mock.patch.object(patchsource, "fetch_bytes",
+                                        self._fake_fetch(self._merged())):
+            self._patch_devsrc(ancestor_rc=0)
+            self.assertIs(
+                patchsource._pr_merged_into_base(self.SRC, self.DIFF), True)
+
+    def test_closed_unmerged_false(self):
+        payload = json.dumps({"state": "closed", "merged_at": None,
+                              "merge_commit_sha": None}).encode()
+        with unittest.mock.patch.object(patchsource, "fetch_bytes",
+                                        self._fake_fetch(payload)):
+            self._patch_devsrc()
+            self.assertIs(
+                patchsource._pr_merged_into_base(self.SRC, self.DIFF), False)
+
+    def test_merged_squash_content_gate_true(self):
+        # squash-merged: ancestry fails, stored diff is 'already' on base
+        with unittest.mock.patch.object(patchsource, "fetch_bytes",
+                                        self._fake_fetch(self._merged())), \
+             unittest.mock.patch.object(
+                 patchsource, "fetch_and_gate",
+                 lambda src, root, reverse=False, skip_patterns=None:
+                 {"ok": True, "files": [{"status": "already"}]}):
+            self._patch_devsrc(ancestor_rc=128)   # dangling merge commit
+            self.assertIs(
+                patchsource._pr_merged_into_base(self.SRC, self.DIFF), True)
+
+    def test_merged_squash_content_gate_false(self):
+        # merged elsewhere but content NOT in our base: patch still needed
+        with unittest.mock.patch.object(patchsource, "fetch_bytes",
+                                        self._fake_fetch(self._merged())), \
+             unittest.mock.patch.object(
+                 patchsource, "fetch_and_gate",
+                 lambda src, root, reverse=False, skip_patterns=None:
+                 {"ok": True, "files": [{"status": "ok"}]}):
+            self._patch_devsrc(ancestor_rc=1)
+            self.assertIs(
+                patchsource._pr_merged_into_base(self.SRC, self.DIFF), False)
+
+    def test_no_diff_inconclusive_none(self):
+        with unittest.mock.patch.object(patchsource, "fetch_bytes",
+                                        self._fake_fetch(self._merged())):
+            self._patch_devsrc(ancestor_rc=1)
+            self.assertIsNone(
+                patchsource._pr_merged_into_base(self.SRC, None))
+
+    def test_worktree_add_failure_inconclusive_none(self):
+        with unittest.mock.patch.object(patchsource, "fetch_bytes",
+                                        self._fake_fetch(self._merged())):
+            self._patch_devsrc(ancestor_rc=1, worktree_rc=128)
+            self.assertIsNone(
+                patchsource._pr_merged_into_base(self.SRC, self.DIFF))
+
+    def test_api_failure_inconclusive_none(self):
+        with unittest.mock.patch.object(patchsource, "fetch_bytes",
+                                        lambda url, insecure_tls=False:
+                                        {"ok": False, "reason": "HTTP 403"}):
+            self._patch_devsrc()
+            self.assertIsNone(
+                patchsource._pr_merged_into_base(self.SRC, self.DIFF))
 
 
 class RouterSurfaceTests(unittest.TestCase):

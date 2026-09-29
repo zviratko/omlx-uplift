@@ -197,3 +197,37 @@ def test_spec_stats_shape_does_not_abort_cache_walk(monkeypatch):
     # queue block sits AFTER the spec loop — an abort skipped it entirely
     assert store.pairs["queue.waiting"] == 1.0
     assert store.pairs["pfx.token_hit_pct"] == 50.0
+
+
+def test_pfx_rate_recovers_after_counter_reset(monkeypatch):
+    """Regression (user 2026-09-29: pfx cards stuck at 0 under real
+    traffic): a model reload resets the engine lifetime counters. The
+    reset tick must drop only that tick's rate and re-baseline; the NEXT
+    tick's delta must produce a real rate again — never stay pinned."""
+    import time as _t
+    import omlx_uplift.router as rt
+
+    sched = SpecSched()
+    monkeypatch.setattr(rt, "engine_pool", lambda: _spec_pool(sched))
+    store = CapturingStore()
+    c = Collector(store=store)
+    c.sample_once()                       # sched.n=1, seeds counters
+    c._prev["_t"] = _t.time() - 60
+    sched.n = 10
+    c.sample_once()                       # big positive delta
+    assert store.pairs["pfx.saved_tokens_min"] > 0
+
+    sched.n = 1                           # engine reloaded: counters reset
+    c._prev["_t"] = _t.time() - 60
+    store.pairs.clear()
+    c.sample_once()                       # reset tick: honest no-rate
+    assert "pfx.saved_tokens_min" not in store.pairs, "reset tick must not lie"
+
+    sched.n = 3                           # two fresh hits since the reset
+    c._prev["_t"] = _t.time() - 60
+    store.pairs.clear()
+    c.sample_once()
+    v = store.pairs["pfx.saved_tokens_min"]
+    # dt is wall-clock (~60.0s +/- jitter), so compare within tolerance
+    assert abs(v - 400 * 2) < 5, \
+        "rate must resume from the reset baseline, not stay pinned at 0"
