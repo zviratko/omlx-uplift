@@ -339,6 +339,58 @@ try {
                 <label class="pt-auto"><input type="checkbox" id="pt-auto-check"> <span data-i18n="uplift.patches.auto_check">Check for updates automatically</span></label>
                 <button type="button" class="btn" id="pt-check-btn" data-i18n="uplift.patches.check_now">Check for updates</button>
             </div>
+            <!-- PATCHES PAGE LAYOUT (user ask 2026-09-30): the two patch
+                 zones lead the page, the add form is secondary at the
+                 bottom. The curated catalog is NOT a separate section:
+                 entries auto-sync into the store and appear as ordinary
+                 patch cards inside their scope zone (BUNDLED chip marks
+                 catalog ownership). Zones are distinct background bands
+                 with the same card anatomy. -->
+            <div class="pt-zone pt-zone-runtime">
+                <div class="pt-section-head"><span class="pt-id" data-i18n="uplift.patches.sec_runtime">Runtime patches</span></div>
+                <div class="pt-detail" data-i18n="uplift.patches.sec_runtime_desc">Overlay diffs applied to the running omlx keg at boot — they change live server behaviour and revert with the patch.</div>
+                <div id="pt-list" class="admin-table"><div class="empty">—</div></div>
+                <div id="pt-curated-notes" class="pt-detail" hidden></div>
+            </div>
+            <div id="dv-section" class="pt-zone pt-zone-dev" hidden>
+                <div class="pt-section-head"><span class="pt-id" data-i18n="uplift.patches.sec_dev">Build patches</span><span id="dv-state"></span></div>
+                <div class="pt-detail" data-i18n="uplift.patches.sec_dev_desc">Landed in the omlx-dev build only — never touch the running keg. Rebuild after every change.</div>
+                <div id="dv-patches" class="admin-table" hidden></div>
+                <div class="dv-controls">
+                <div class="pt-detail" data-i18n="uplift.patches.dev_explainer">Build patches never touch the running keg: omlx-uplift stacks them as one commit per patch on the uplift-dev branch of a local omlx checkout, then rebuilds the separate omlx-dev formula from that tip. Rebuild required after every change. Works only with an omlx-dev install.</div>
+                <div id="dv-intro" class="pt-src" hidden></div>
+                <!-- DEV-7(d): dashboard bootstrap when dev-src is absent -->
+                <div id="dv-bootstrap" hidden>
+                    <div class="pt-detail" data-i18n="uplift.patches.dev_boot_desc">Set up omlx-dev on this machine: clones the dev-src repo and creates the uplift-dev branch with defaults (origin from the installed omlx tap, sync origin/main, port 8001). Adjust on the command line afterwards with omlx-uplift dev reconfigure.</div>
+                    <button type="button" class="btn primary" id="dv-boot-btn" data-i18n="uplift.patches.dev_boot_btn">Bootstrap omlx-dev</button>
+                    <pre id="dv-boot-log" class="pt-boot-log" hidden></pre>
+                </div>
+                <div id="dv-status" class="pt-src" hidden></div>
+                <!-- DEV-7(c): base-root chooser — what uplift-dev re-cuts
+                     from. Pin is expert-only: collapsed behind a toggle, the
+                     AUTO UPDATE checkbox is the normal-mode control. -->
+                <div id="dv-base" class="pt-src" hidden>
+                    <div class="dv-base-row">
+                        <!-- DEV-11: AUTO UPDATE — TRACK HEAD (default OFF) -->
+                        <label class="row" id="dv-auto-row" hidden><input type="checkbox" id="dv-auto">
+                            <span data-i18n="uplift.patches.dev_auto_label">AUTO UPDATE — TRACK HEAD</span></label>
+                        <span id="dv-auto-note" class="pt-detail"></span>
+                        <button type="button" class="dv-pin-toggle" id="dv-pin-toggle" data-i18n="uplift.patches.dev_pin_show">pin a commit…</button>
+                    </div>
+                    <div class="dv-base-row" id="dv-pin-row" hidden>
+                        <label class="pt-field"><span data-i18n="uplift.patches.dev_base_label">build base</span>
+                            <select id="dv-base-select" aria-label="omlx-dev build base"></select>
+                        </label>
+                        <button type="button" class="btn" id="dv-base-btn" data-i18n="uplift.patches.dev_base_apply">Apply base</button>
+                        <span id="dv-base-note" class="pt-detail"></span>
+                    </div>
+                </div>
+                <div id="dv-warn" class="pt-banner" hidden></div>
+                </div>
+                <div id="dv-actions" hidden><button type="button" class="btn primary" id="dv-build-btn" data-i18n="uplift.patches.dev_build">Rebuild omlx-dev</button><button type="button" class="btn primary" id="dv-build-restart-btn" data-i18n="uplift.patches.dev_build_restart">Rebuild &amp; restart</button><button type="button" class="btn" id="dv-restart-btn" data-i18n="uplift.patches.dev_restart">Restart omlx-dev</button></div>
+                <div id="dv-share" class="pt-gate" hidden></div>
+            </div>
+            <div id="pt-diff" class="pt-diff" hidden><div class="pt-diff-head"><span id="pt-diff-title"></span><button type="button" class="icon-btn" id="pt-diff-close" aria-label="Close">×</button></div><pre id="pt-diff-body"></pre></div>
             <div class="pt-addform">
                 <div class="pt-addform-title"><span data-i18n="uplift.patches.add_title">+ ADD PATCH</span>
                     <span class="pt-addform-hint" data-i18n="uplift.patches.add_hint">fetch or upload a diff, validate it against the live tree, then enable</span>
@@ -373,58 +425,6 @@ try {
             </div>
             <div id="pt-advisories" class="pt-advisories" hidden></div>
             <div id="pt-preview" hidden></div>
-            <!-- DEV-7(b): explicit section split — runtime patches vs the
-                 omlx-dev build. Each header carries a one-line what-it-
-                 affects note (runtime = live server, build = dev keg source). -->
-            <div class="pt-section-head"><span class="pt-id" data-i18n="uplift.patches.sec_runtime">Runtime patches</span></div>
-            <div class="pt-detail" data-i18n="uplift.patches.sec_runtime_desc">Overlay diffs applied to the running omlx keg at boot — they change live server behaviour and revert with the patch.</div>
-            <div id="pt-list" class="admin-table"><div class="empty">—</div></div>
-            <div id="pt-diff" class="pt-diff" hidden><div class="pt-diff-head"><span id="pt-diff-title"></span><button type="button" class="icon-btn" id="pt-diff-close" aria-label="Close">×</button></div><pre id="pt-diff-body"></pre></div>
-            <!-- Curated catalog: published patch sets in the public uplift
-                 repo (curated_patches/default + /optional). Default tier
-                 installs enabled, optional installs disabled. -->
-            <div id="pt-curated" class="pt-card" hidden>
-                <div class="pt-card-head"><span class="pt-id" data-i18n="uplift.patches.curated_title">Curated patches</span><span id="pt-curated-state"></span></div>
-                <div class="pt-detail" data-i18n="uplift.patches.curated_explainer">Ready-made patches published in the public omlx-uplift repository. The default set is installed enabled and applied automatically; the optional set stays disabled until you enable it. Every entry documents its purpose in a manifest.</div>
-                <div id="pt-curated-body"></div>
-                <div id="pt-curated-notes" class="pt-detail" hidden></div>
-                <div><button type="button" class="btn primary" id="pt-curated-sync-btn" data-i18n="uplift.patches.curated_sync">Install curated patches</button></div>
-            </div>
-            <div id="dv-section" class="pt-card" hidden>
-                <div class="pt-card-head"><span class="pt-id" data-i18n="uplift.patches.dev_title">OMLX-DEV build</span><span id="dv-state"></span></div>
-                <div class="pt-detail" data-i18n="uplift.patches.dev_explainer">Build patches never touch the running keg: omlx-uplift stacks them as one commit per patch on the uplift-dev branch of a local omlx checkout, then rebuilds the separate omlx-dev formula from that tip. Rebuild required after every change. Works only with an omlx-dev install.</div>
-                <div id="dv-intro" class="pt-src" hidden></div>
-                <!-- DEV-7(d): dashboard bootstrap when dev-src is absent -->
-                <div id="dv-bootstrap" hidden>
-                    <div class="pt-detail" data-i18n="uplift.patches.dev_boot_desc">Set up omlx-dev on this machine: clones the dev-src repo and creates the uplift-dev branch with defaults (origin from the installed omlx tap, sync origin/main, port 8001). Adjust on the command line afterwards with omlx-uplift dev reconfigure.</div>
-                    <button type="button" class="btn primary" id="dv-boot-btn" data-i18n="uplift.patches.dev_boot_btn">Bootstrap omlx-dev</button>
-                    <pre id="dv-boot-log" class="pt-boot-log" hidden></pre>
-                </div>
-                <div id="dv-status" class="pt-src" hidden></div>
-                <!-- DEV-7(c): base-root chooser — what uplift-dev re-cuts
-                     from. Pin is expert-only: collapsed behind a toggle, the
-                     AUTO UPDATE checkbox is the normal-mode control. -->
-                <div id="dv-base" class="pt-src" hidden>
-                    <div class="dv-base-row">
-                        <!-- DEV-11: AUTO UPDATE — TRACK HEAD (default OFF) -->
-                        <label class="row" id="dv-auto-row" hidden><input type="checkbox" id="dv-auto">
-                            <span data-i18n="uplift.patches.dev_auto_label">AUTO UPDATE — TRACK HEAD</span></label>
-                        <span id="dv-auto-note" class="pt-detail"></span>
-                        <button type="button" class="dv-pin-toggle" id="dv-pin-toggle" data-i18n="uplift.patches.dev_pin_show">pin a commit…</button>
-                    </div>
-                    <div class="dv-base-row" id="dv-pin-row" hidden>
-                        <label class="pt-field"><span data-i18n="uplift.patches.dev_base_label">build base</span>
-                            <select id="dv-base-select" aria-label="omlx-dev build base"></select>
-                        </label>
-                        <button type="button" class="btn" id="dv-base-btn" data-i18n="uplift.patches.dev_base_apply">Apply base</button>
-                        <span id="dv-base-note" class="pt-detail"></span>
-                    </div>
-                </div>
-                <div id="dv-warn" class="pt-banner" hidden></div>
-                <div id="dv-patches" class="admin-table" hidden></div>
-                <div id="dv-actions" hidden><button type="button" class="btn primary" id="dv-build-btn" data-i18n="uplift.patches.dev_build">Rebuild omlx-dev</button><button type="button" class="btn primary" id="dv-build-restart-btn" data-i18n="uplift.patches.dev_build_restart">Rebuild &amp; restart</button><button type="button" class="btn" id="dv-restart-btn" data-i18n="uplift.patches.dev_restart">Restart omlx-dev</button></div>
-                <div id="dv-share" class="pt-gate" hidden></div>
-            </div>
         </div></div></div></div></section><section class="card wide page-card" data-id="helper-page" data-tab="models" data-sub="helper" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.helper_models_full">Helper models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.helper_models_full">Helper models</span> <span class="right" id="hm-sub"></span></h2>
         <div class="card-body">
             <div id="hm-markitdown"></div>

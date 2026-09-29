@@ -44,7 +44,7 @@ async function pollPatches() {
         renderPatches();
     } catch (e) {
         const list = $('pt-list');
-        if (list) list.innerHTML = '';
+        if (list) list.innerHTML = '';   // plain clear, no markup — safe
         if (list) {
             const d = document.createElement('div');
             d.className = 'empty';
@@ -58,120 +58,42 @@ async function pollPatches() {
             list.append(d);
         }
     }
-    ptPollCurated();
+    ptAutoSyncCurated();
 }
 
-/* ---- curated catalog (published in the public uplift repo) ---- */
-async function ptPollCurated() {
-    const sec = $('pt-curated');
-    if (!sec) return;
-    try {
-        const d = await PG.fetchJson(`${API}/uplift/api/patches/curated`);
-        ptRenderCurated(d);
-    } catch (e) {
-        sec.hidden = true;      // auth/API problem: hide, never half-render
-    }
-}
+/* ---- curated catalog: no separate section (user ask 2026-09-30). ----
+   The catalog is reconciled into the store automatically — default tier
+   enabled, optional tier disabled — and every catalog patch then shows up
+   as an ordinary patch card in its scope zone, BUNDLED chip included.
+   There is no "install" step to press; the sync runs once per page load
+   and again when the user presses Check for updates. A dead network or a
+   catalog hiccup is silent: the store we already have is authoritative
+   for rendering. */
+let PT_CURATED_SYNCED = false;
+let PT_CURATED_BUSY = false;
 
-function ptRenderCurated(d) {
-    const sec = $('pt-curated');
-    if (!sec) return;
-    const body = $('pt-curated-body');
-    body.innerHTML = '';
-    let any = false, allInstalled = true;
-    for (const tier of ['default', 'optional']) {
-        const entries = (d.tiers || {})[tier] || [];
-        if (!entries.length) continue;
-        any = true;
-        const h = document.createElement('div');
-        h.className = 'pt-section-head';
-        h.textContent = ptMsg(tier === 'default'
-            ? 'uplift.patches.curated_tier_default'
-            : 'uplift.patches.curated_tier_optional',
-            tier === 'default' ? 'Default set (auto-enabled)'
-                               : 'Optional set (disabled until enabled)');
-        body.append(h);
-        for (const e of entries) {
-            if (!e.installed) allInstalled = false;
-            const row = document.createElement('div');
-            row.className = 'pt-card';
-            const head = document.createElement('div');
-            head.className = 'pt-card-head';
-            const title = document.createElement('span');
-            title.className = 'pt-id';
-            title.textContent = e.id;
-            head.append(title);
-            if (e.source && e.source.kind === 'github_pr') {
-                const a = document.createElement('a');
-                a.className = 'pt-id';
-                a.href = `https://github.com/${e.source.repo}/pull/${e.source.pr}`;
-                a.target = '_blank';
-                a.rel = 'noopener';
-                a.textContent = `PR #${e.source.pr}`;
-                head.append(a);
-            }
-            if (!e.source_ok) {
-                head.append(ptChip(ptMsg('uplift.patches.curated_no_manifest',
-                    'INCOMPLETE'), 'pt-st-warn',
-                    ptMsg('uplift.patches.curated_no_manifest_hint',
-                          'manifest source or description missing — it will be skipped')));
-            }
-            const installedChip = e.installed
-                ? (e.adopted
-                    ? ptMsg('uplift.patches.curated_adopted_on', 'ADOPTED AS LOCAL')
-                    : (e.enabled
-                        ? ptMsg('uplift.patches.curated_installed_on', 'INSTALLED · ENABLED')
-                        : ptMsg('uplift.patches.curated_installed', 'INSTALLED')))
-                : ptMsg('uplift.patches.curated_not_installed', 'NOT INSTALLED');
-            const installedCls = e.installed
-                ? (e.adopted ? 'pt-st-bundled' : 'pt-st-ok') : 'pt-st-dim';
-            head.append(ptChip(installedChip, installedCls));
-            row.append(head);
-            if (e.description) {
-                const det = document.createElement('div');
-                det.className = 'pt-detail';
-                det.textContent = e.description;
-                row.append(det);
-            }
-            body.append(row);
-        }
-    }
-    const st = $('pt-curated-state');
-    st.textContent = any ? '' : ptMsg('uplift.patches.curated_empty',
-        'catalog unavailable');
-    const notes = $('pt-curated-notes');
-    const errs = Object.entries(d.errors || {});
-    notes.hidden = !errs.length;
-    notes.textContent = errs.map(([t, r]) => `${t}: ${r}`).join(' · ');
-    sec.hidden = false;
-    const btn = $('pt-curated-sync-btn');
-    if (btn) {
-        btn.disabled = !any || allInstalled;
-        btn.style.display = allInstalled ? 'none' : '';
-    }
-}
-
-async function ptCuratedSync() {
-    const btn = $('pt-curated-sync-btn');
-    if (!btn || btn.disabled) return;
-    btn.disabled = true;
-    const base = btn.dataset.base || (btn.dataset.base = btn.textContent);
-    btn.textContent = ptMsg('uplift.patches.curated_syncing', 'Installing…');
+async function ptAutoSyncCurated(force) {
+    if (PT_CURATED_BUSY) return;
+    if (PT_CURATED_SYNCED && !force) return;
+    PT_CURATED_SYNCED = true;
+    PT_CURATED_BUSY = true;
     try {
         const r = await ptApi('curated/sync', {});
-        const added = Object.values(r.report || {})
-            .filter(x => String(x.sync).startsWith('added')).length;
-        PG.toast(ptMsg('uplift.patches.curated_sync_done',
-            'Curated sync finished — {n} installed')
-            .replace('{n}', added), 5000);
-        await pollPatches();
+        const rep = r.report || {};
+        const changed = Object.values(rep)
+            .filter(x => String(x.sync).startsWith('added') || x.rescope_failed).length;
+        const notesEl = $('pt-curated-notes');
+        if (notesEl) {
+            const notes = r.notes || [];
+            notesEl.hidden = !notes.length;
+            notesEl.textContent = notes.join(' · ');
+        }
+        if (changed) await pollPatches();   // bring the new cards in
     } catch (e) {
-        PG.toast(ptMsg('uplift.patches.curated_sync_fail',
-            'Curated sync failed') + ': ' + (e && e.message ? e.message : e),
-            6000);
-        btn.disabled = false;
+        // sync failed: keep rendering from the local store (silent by design)
+    } finally {
+        PT_CURATED_BUSY = false;
     }
-    btn.textContent = base;
 }
 
 function ptApi(path, body) {
@@ -287,7 +209,7 @@ function renderPatches() {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = ptMsg('uplift.patches.none',
-            'No patches yet. Add a GitHub PR, URL, or upload a .diff above.');
+            'No runtime patches yet. Add a GitHub PR, URL, or upload a .diff below.');
         list.append(empty);
     }
     for (const p of runtimeOnly) list.append(patchCard(p, d));
@@ -871,7 +793,7 @@ function renderDev() {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = ptMsg('uplift.patches.dev_none',
-            'No dev patches. Add one above and pick scope "dev" or "both".');
+            'No build patches yet. Add one below and pick scope "dev" or "both".');
         patchesBox.append(empty);
     }
     const groups = [
@@ -1218,7 +1140,7 @@ function initPatchesPage() {
     ptSyncKindUI();
     $('pt-src-kind').onchange = ptSyncKindUI;
     $('pt-preview-btn').onclick = ptPreview;
-    $('pt-check-btn').onclick = () => ptCheckNow(false);
+    $('pt-check-btn').onclick = () => { ptCheckNow(false); ptAutoSyncCurated(true); };
     $('pt-diff-close').onclick = () => { $('pt-diff').hidden = true; };
     const dvBtn = $('dv-build-btn');
     if (dvBtn) dvBtn.onclick = () => dvStartBuild(false);
@@ -1240,8 +1162,6 @@ function initPatchesPage() {
                 'Restart failed') + ': ' + e, 5000);
         }
     };
-    const curBtn = $('pt-curated-sync-btn');
-    if (curBtn) curBtn.onclick = ptCuratedSync;
     ptScheduleAutoCheck();
 }
 

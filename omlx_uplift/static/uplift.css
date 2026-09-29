@@ -1712,6 +1712,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    secondary action, sized to the select it belongs to, never misaligned */
 .dv-base-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 0; }
 .dv-base-row .pt-field select { min-width: 220px; }
+/* patch zones (user ask 2026-09-30): runtime and omlx-dev are visually
+   distinct bands of the SAME anatomy — heading, cards, then controls.
+   Different tint per zone so the grouping reads at a glance. */
+.pt-zone { border: 1px solid var(--line); padding: 10px 12px 12px; margin: 14px 0; }
+.pt-zone-runtime { background: color-mix(in srgb, var(--field) 45%, var(--card)); }
+.pt-zone-dev { background: color-mix(in srgb, var(--accent, #e0662e) 5%, var(--card)); }
+.pt-zone .pt-section-head { margin-top: 0; }
+.dv-controls { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); color: var(--dim); font-size: var(--fs-meta); }
 #dv-base-btn { align-self: center; padding: 3px 12px; }
 .dv-pin-toggle { background: none; border: none; color: var(--dim); font-size: var(--fs-meta); cursor: pointer; text-decoration: underline dotted; padding: 0; margin-left: auto; }
 .dv-pin-toggle:hover { color: var(--ink); }
