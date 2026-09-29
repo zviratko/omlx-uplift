@@ -1091,17 +1091,18 @@ def cmd_dev_install(args) -> int:
     n = len([c for c in res["commits"] if c.get("sha")])
     skipped_n = len([c for c in res["commits"]
                      if c.get("skipped") == "already-present"])
-    print(f"uplift-dev: {cfg['sync_ref']} @ {res['base'][:12]} + "
-          f"{n} patch commit(s) -> tip {tip[:12]}")
-    # per-patch progress in materialize order — plain lines so the dashboard
-    # can scrape them ('APPLIED' = got a commit, 'ALREADY UPSTREAM' = the
-    # base already carried the hunks so no commit was cut)
-    for c in res["commits"]:
-        if c.get("sha"):
-            print(f"{c['id']}: APPLIED (commit {c['sha'][:12]})")
-        elif c.get("skipped") == "already-present":
-            print(f"{c['id']}: ALREADY UPSTREAM (no commit - upstream base "
-                  "already contains it)")
+    print()
+    print(_paint(sys.stdout, "OMLX-DEV BUILD", "1;36")
+          + f"  {cfg['sync_ref']} @ {res['base'][:12]}  "
+          f"+{n} patch commit(s) -> tip {tip[:12]}")
+    # a materialize skip means the base already carries the patch — when the
+    # patch is a since-MERGED PR that means it is no longer needed, so stamp
+    # it obsolete NOW (best-effort network). Must run BEFORE the table so the
+    # rows can show the verdict, and BEFORE mark_dev_applied (which saves its
+    # own manifest reload — store-write ordering rule).
+    upstreamed = patchsource.mark_upstreamed_if_merged(
+        _patches_store(), res["commits"])
+    _dev_patch_table(res["commits"], upstreamed)
     # the branch IS the apply step for dev/both scopes — record it so the
     # dashboard stops showing 'pending' forever (reconcile never sees these)
     patchsource.mark_dev_applied(_patches_store(), res["commits"])
@@ -1193,30 +1194,73 @@ def _brew_build_cmd(flags) -> list:
     return ["brew", "install", "--HEAD", *sorted(flags), "omlx-dev"]
 
 
+def _dev_patch_table(commits: list[dict], upstreamed: dict) -> None:
+    """Coloured per-patch table for `dev install` — one row per ENABLED
+    dev/both patch in materialize order, plus every DISABLED dev/both patch
+    shown explicitly as DISABLED (silent omission made people hunt for
+    patches they had simply switched off). Verdicts stay single uppercase
+    words: the dashboard tails this output (RESULT line + build log)."""
+    from . import patches as _patches
+
+    out = sys.stdout
+    style = {  # verdict -> (word, colour, extra)
+        "APPLIED": ("APPLIED", "32", "commit {sha}"),
+        "UPSTREAMED": ("UPSTREAMED", "31",
+                       "PR merged upstream — no commit, patch no longer "
+                       "needed (disabled candidates: re-enable or remove)"),
+        "ALREADY PRESENT": ("SKIPPED", "33",
+                            "base already contains the hunks — no commit"),
+        "DISABLED": ("DISABLED", "35", "not in this build"),
+    }
+    rows = []
+    for c in commits:
+        if c.get("sha"):
+            key, extra = "APPLIED", style["APPLIED"][2].format(
+                sha=c["sha"][:12])
+        elif c.get("skipped") == "already-present":
+            if c["id"] in upstreamed:
+                key, extra = "UPSTREAMED", style["UPSTREAMED"][2]
+            else:
+                key, extra = "ALREADY PRESENT", style["ALREADY PRESENT"][2]
+        else:
+            key, extra = "APPLIED", ""   # unreachable today; keeps rows sane
+        rows.append((c["id"], key, extra))
+
+    def _disabled_dev_rows():
+        try:
+            man = _patches_store().load()
+        except Exception:                           # noqa: BLE001 — display
+            return []
+        return [(p.get("id", "?"), "DISABLED", style["DISABLED"][2])
+                for p in man.get("patches", [])
+                if _patches.scope_touches_dev(_patches.patch_scope(p))
+                and not p.get("enabled")]
+
+    rows += _disabled_dev_rows()
+    if not rows:
+        return
+    width = max(len(r[0]) for r in rows)
+    for pid, key, extra in rows:
+        word, code, _ = style[key]
+        line = f"  {_paint(out, f'{word:11}', code)} {pid:<{width}}"
+        print(f"{line}  {extra}" if extra else line, file=out)
+
+
 def _dev_next_steps(cfg: dict, fresh: bool) -> None:
-    """The commands that matter after bootstrap/install — printed once,
-    not scattered across stages."""
+    """The ONE command that matters after a build. Bootstrap is already a
+    done deal here (install refuses without it), so never mention it; the
+    coexistence warning above already printed the switch commands."""
     from . import devsrc
 
     rt = devsrc.runtime_config(cfg)
-    url = f"http://127.0.0.1:{rt['port']}/uplift/"
     if fresh:
         print("\nNext steps:\n"
-              "  1. enable build-scope patches, then build:\n"
-              "       omlx-uplift dev install"
-              "   [--with-custom-kernel --with-grammar]\n"
-              "  2. run the dev server instead of vanilla:\n"
-              "       brew services stop omlx && brew services start omlx-dev\n"
-              f"     dashboard: {url}  (data root {rt['base_path']})\n"
-              "  Later: toggle patches and rebuild from the dashboard's\n"
-              "  Build patches section, or re-run step 1.")
+              "  build with patches:  omlx-uplift dev install\n"
+              "  then start the dev server:  brew services start omlx-dev\n"
+              f"  dashboard: http://127.0.0.1:{rt['port']}/uplift/  "
+              f"(data root {rt['base_path']})")
     else:
-        print("\nNext steps:\n"
-              "  1. load the new build:\n"
-              "       brew services restart omlx-dev\n"
-              f"     dashboard: {url}  (data root {rt['base_path']})\n"
-              "  2. switch back to vanilla any time:\n"
-              "       brew services stop omlx-dev && brew services start omlx")
+        print("\n  load the new build:  brew services restart omlx-dev")
 
 
 def _regate_build_patches(build_patches: list[dict]) -> dict:

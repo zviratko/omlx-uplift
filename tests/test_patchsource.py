@@ -439,6 +439,63 @@ class DriftCheckTests(HttpFixture):
         self.assertEqual(p["state"], "pending")
 
 
+class MarkUpstreamedTests(unittest.TestCase):
+    """mark_upstreamed_if_merged: `dev install` stamps a skipped patch
+    obsolete when GitHub proves the PR merged into the base. Verdict source
+    (_pr_merged_into_base) is faked — its own semantics live in
+    PRMergeAncestryTests; here we pin the stamping behaviour only."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="uplift-mup-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.store = patches.PatchStore(os.path.join(self.tmp, "data"))
+        m = self.store.load()
+        m["patches"] = [
+            {"id": "merged-one", "enabled": True, "scope": "both",
+             "state": "applied", "source": {"kind": "github_pr",
+                                            "repo": "jundot/omlx", "pr": 1},
+             "versions": [{"v": 1, "content_sha256": "a" * 64}],
+             "desired_version": 1},
+            {"id": "kept-one", "enabled": True, "scope": "both",
+             "state": "applied", "source": {"kind": "github_pr",
+                                            "repo": "jundot/omlx", "pr": 2},
+             "versions": [{"v": 1, "content_sha256": "b" * 64}],
+             "desired_version": 1},
+        ]
+        self.store.save(m)
+
+    def _run(self, verdict):
+        commits = [{"id": "merged-one", "v": 1, "sha": None,
+                    "skipped": "already-present"},
+                   {"id": "kept-one", "v": 1, "sha": None,
+                    "skipped": "already-present"}]
+        with unittest.mock.patch.object(
+                patchsource, "_pr_merged_into_base",
+                side_effect=lambda src, d, reverse=False: verdict(src)):
+            return patchsource.mark_upstreamed_if_merged(self.store, commits)
+
+    def test_true_marks_obsolete_false_and_none_do_not(self):
+        marked = self._run(lambda src: True if src["pr"] == 1 else False)
+        self.assertEqual(list(marked), ["merged-one"])
+        m = self.store.load()
+        p = self.store.find(m, "merged-one")
+        self.assertEqual(p["state"], "obsolete")
+        self.assertIn("merged", p["state_detail"])
+        # proven-not-merged keeps its state untouched
+        self.assertEqual(self.store.find(m, "kept-one")["state"], "applied")
+        # inconclusive (None) must never degrade state either
+        marked = self._run(lambda src: None)
+        self.assertEqual(marked, {})
+
+    def test_no_skips_means_no_network(self):
+        commits = [{"id": "merged-one", "v": 1, "sha": "f" * 40}]
+        with unittest.mock.patch.object(
+                patchsource, "_pr_merged_into_base",
+                side_effect=AssertionError("must not be called")):
+            self.assertEqual(
+                patchsource.mark_upstreamed_if_merged(self.store, commits), {})
+
+
 class PRMergeAncestryTests(unittest.TestCase):
     """_pr_merged_into_base: dev/both-scope upstream detection. Real-world
     semantics pinned here (2026-09-29, merged jundot/omlx#3874 probe):

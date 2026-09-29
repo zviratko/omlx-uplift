@@ -335,9 +335,9 @@
   "uplift.patches.dev_auto_pending": "HEAD avanzó — omlx-dev se recompilará en el próximo reinicio",
   "uplift.patches.dev_auto_pinned": "no disponible mientras la base está fijada",
   "uplift.patches.dev_base_apply": "Aplicar base",
-  "uplift.patches.dev_base_cleared": "De nuevo siguiendo el keg vanilla",
+  "uplift.patches.dev_base_cleared": "De nuevo siguiendo el HEAD de upstream",
   "uplift.patches.dev_base_fail": "Falló el cambio de base",
-  "uplift.patches.dev_base_follow": "seguir el keg omlx vanilla",
+  "uplift.patches.dev_base_follow": "seguir HEAD de upstream",
   "uplift.patches.dev_base_label": "base de compilación",
   "uplift.patches.dev_base_pinned": "commit fijado",
   "uplift.patches.dev_base_pinned_note": "fijado — la próxima compilación recortará uplift-dev desde este commit",
@@ -654,5 +654,8 @@
   "uplift.patches.bundled_chip": "INCLUIDO",
   "uplift.patches.bundled_hint": "parte del catálogo curado — se mantiene al día con la sincronización del catálogo",
   "uplift.patches.remove_curated_choice": "Este parche procede del catálogo curado. Aceptar = adoptar el parche como local: sigue instalado y pasa a ser tuyo, el catálogo ya no lo tocará. Cancelar = eliminarlo por completo (los archivos aplicados vuelven a sus bytes originales).",
-  "uplift.patches.curated_adopted_on": "ADOPTADO COMO LOCAL"
+  "uplift.patches.curated_adopted_on": "ADOPTADO COMO LOCAL",
+  "uplift.patches.dev_pin_show": "fijar un commit…",
+  "uplift.patches.dev_group_both": "KEG + BUILD — superpone el keg activo y entra en la compilación omlx-dev",
+  "uplift.patches.dev_group_dev": "SOLO COMPILACIÓN — entra en la compilación omlx-dev"
 }

@@ -1192,12 +1192,30 @@ def check_all(store, tree_root: str) -> dict:
             reports[pid] = {"check": "up_to_date"}
             continue
         obsolete = [f for f in result["files"] if f["status"] == "already"]
-        if obsolete and len(obsolete) == len(result["files"]):
+        if obsolete and len(obsolete) == len(result["files"]) \
+                and not _patches.scope_touches_dev(_patches.patch_scope(p)):
             store.set_state(p, "obsolete",
                             "upstream now contains the patch — consider removing")
             reports[pid] = {"check": "obsolete"}
             changed_any = True
             continue
+        if p.get("state") == "applied" and _patches.scope_touches_dev(
+                _patches.patch_scope(p)):
+            # drifted dev/both patch: the dev-tree gate above says nothing
+            # (the checkout carries uplift's OWN commits), so a merged PR
+            # whose head merely MOVED would land a useless update_available
+            # candidate instead of the honest obsolete verdict. Ask GitHub.
+            newest1 = max((v.get("v", 0) for v in p["versions"]), default=0)
+            cur_v1 = store.get_version(p, newest1) if newest1 else None
+            diff_b1 = _read_patch_file(store, cur_v1) if cur_v1 else None
+            if _pr_merged_into_base(src, diff_b1,
+                                    reverse=bool(p.get("reversal"))) is True:
+                store.set_state(
+                    p, "obsolete",
+                    "upstream now contains the patch — consider removing")
+                reports[pid] = {"check": "obsolete"}
+                changed_any = True
+                continue
         if not result["ok"]:
             reports[pid] = {"check": "error",
                             "reason": "new content fails validation against "
@@ -1266,6 +1284,44 @@ def mark_dev_applied(store, commits: list[dict]) -> None:
         changed = True
     if changed:
         store.save(manifest)
+
+
+def mark_upstreamed_if_merged(store, commits: list[dict]) -> dict:
+    """Skipped-as-already-present at materialize usually means the patch's
+    PR was MERGED upstream: the base grew the code, the patch is no longer
+    needed, yet its state would sit 'applied' forever. Ask GitHub (merged_at
+    + content gate on a clean base — the _pr_merged_into_base rules) and
+    stamp obsolete where proven. Best-effort: a dead network or an
+    inconclusive verdict changes nothing (fail-safe rule — a check never
+    degrades state). Returns {patch_id: detail} for the caller's table."""
+    marked: dict[str, str] = {}
+    skipped = [c for c in commits if c.get("skipped") == "already-present"]
+    if not skipped:
+        return marked
+    by_id = {c["id"]: c for c in skipped}
+    manifest = store.load()
+    changed = False
+    for p in manifest.get("patches", []):
+        c = by_id.get(p.get("id"))
+        if c is None:
+            continue
+        src = p.get("source") or {}
+        if src.get("kind") != "github_pr":
+            continue
+        ver = store.get_version(p, c.get("v", p.get("desired_version")))
+        diff_b = _read_patch_file(store, ver) if ver else None
+        verdict = _pr_merged_into_base(
+            src, diff_b, reverse=bool(p.get("reversal")))
+        if verdict is not True:
+            continue
+        detail = "upstream merged the PR — patch no longer needed " \
+                 "(disable/remove)"
+        if store.set_state(p, "obsolete", detail):
+            marked[p["id"]] = detail
+            changed = True
+    if changed:
+        store.save(manifest)
+    return marked
 
 
 def enabled_build_patches(store) -> list[dict]:

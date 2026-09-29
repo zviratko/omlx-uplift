@@ -331,9 +331,9 @@
   "uplift.patches.dev_auto_pending": "HEAD se posunul — omlx-dev se při příštím restartu sestaví znovu",
   "uplift.patches.dev_auto_pinned": "nedostupné, dokud je základ připevněn",
   "uplift.patches.dev_base_apply": "Použít základ",
-  "uplift.patches.dev_base_cleared": "Zpět na sledování vanilla keg",
+  "uplift.patches.dev_base_cleared": "Zpět na sledování upstream HEAD",
   "uplift.patches.dev_base_fail": "Změna základu selhala",
-  "uplift.patches.dev_base_follow": "sledovat vanilla omlx keg",
+  "uplift.patches.dev_base_follow": "sledovat upstream HEAD",
   "uplift.patches.dev_base_label": "základ sestavení",
   "uplift.patches.dev_base_pinned": "připnutý commit",
   "uplift.patches.dev_base_pinned_note": "připnuto — další sestavení vytvoří uplift-dev znovu z tohoto commitu",
@@ -650,5 +650,8 @@
   "uplift.patches.bundled_chip": "SOUČÁST BALÍČKU",
   "uplift.patches.bundled_hint": "součást kurátorského katalogu — aktualizuje ho synchronizace katalogu",
   "uplift.patches.remove_curated_choice": "Tato záplata pochází z kurátorského katalogu. OK = přijmout záplatu jako lokální: zůstane nainstalovaná a bude vaše, katalog se jí už nikdy nedotkne. Storno = zcela ji odstranit (aplikované soubory se vrátí na původní bajty).",
-  "uplift.patches.curated_adopted_on": "PŘIJATO JAKO LOKÁLNÍ"
+  "uplift.patches.curated_adopted_on": "PŘIJATO JAKO LOKÁLNÍ",
+  "uplift.patches.dev_pin_show": "připnout commit…",
+  "uplift.patches.dev_group_both": "KEG + BUILD — překrývá běžící keg a součásti i build omlx-dev",
+  "uplift.patches.dev_group_dev": "POUZE BUILD — součásti buildu omlx-dev"
 }

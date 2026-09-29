@@ -335,9 +335,9 @@
   "uplift.patches.dev_auto_pending": "HEAD a bougé — omlx-dev sera reconstruit au prochain redémarrage",
   "uplift.patches.dev_auto_pinned": "indisponible tant que la base est épinglée",
   "uplift.patches.dev_base_apply": "Appliquer la base",
-  "uplift.patches.dev_base_cleared": "Retour au suivi du keg vanilla",
+  "uplift.patches.dev_base_cleared": "Retour au suivi du HEAD upstream",
   "uplift.patches.dev_base_fail": "Échec du changement de base",
-  "uplift.patches.dev_base_follow": "suivre le keg omlx vanilla",
+  "uplift.patches.dev_base_follow": "suivre le HEAD upstream",
   "uplift.patches.dev_base_label": "base de compilation",
   "uplift.patches.dev_base_pinned": "commit épinglé",
   "uplift.patches.dev_base_pinned_note": "épinglé — la prochaine compilation recréera uplift-dev depuis ce commit",
@@ -654,5 +654,8 @@
   "uplift.patches.bundled_chip": "INCLUS",
   "uplift.patches.bundled_hint": "issu du catalogue organisé — maintenu à jour par la synchronisation du catalogue",
   "uplift.patches.remove_curated_choice": "Ce correctif vient du catalogue organisé. OK = adopter le correctif comme local : il reste installé et devient le vôtre, le catalogue n'y touchera plus. Annuler = le supprimer complètement (les fichiers appliqués reviennent à leurs octets d'origine).",
-  "uplift.patches.curated_adopted_on": "ADOPTÉ COMME LOCAL"
+  "uplift.patches.curated_adopted_on": "ADOPTÉ COMME LOCAL",
+  "uplift.patches.dev_pin_show": "épingler un commit…",
+  "uplift.patches.dev_group_both": "KEG + BUILD — surcouche le keg actif et entre dans la compilation omlx-dev",
+  "uplift.patches.dev_group_dev": "BUILD SEUL — entre dans la compilation omlx-dev"
 }

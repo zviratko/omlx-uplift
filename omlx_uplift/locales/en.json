@@ -331,9 +331,9 @@
   "uplift.patches.dev_auto_pending": "HEAD moved — omlx-dev will rebuild on the next restart",
   "uplift.patches.dev_auto_pinned": "unavailable while the base is pinned",
   "uplift.patches.dev_base_apply": "Apply base",
-  "uplift.patches.dev_base_cleared": "Back to following the vanilla keg",
+  "uplift.patches.dev_base_cleared": "Back to following upstream HEAD",
   "uplift.patches.dev_base_fail": "Base change failed",
-  "uplift.patches.dev_base_follow": "follow vanilla omlx keg",
+  "uplift.patches.dev_base_follow": "follow upstream HEAD",
   "uplift.patches.dev_base_label": "build base",
   "uplift.patches.dev_base_pinned": "pinned commit",
   "uplift.patches.dev_base_pinned_note": "pinned — the next rebuild re-cuts uplift-dev from this commit",
@@ -650,5 +650,8 @@
   "uplift.patches.bundled_chip": "BUNDLED",
   "uplift.patches.bundled_hint": "part of the curated catalog — kept current by curated sync",
   "uplift.patches.remove_curated_choice": "This patch comes from the curated catalog. OK = adopt the patch as local: it stays installed and becomes yours, the catalog never touches it again. Cancel = remove it completely (applied files are restored to vanilla bytes).",
-  "uplift.patches.curated_adopted_on": "ADOPTED AS LOCAL"
+  "uplift.patches.curated_adopted_on": "ADOPTED AS LOCAL",
+  "uplift.patches.dev_pin_show": "pin a commit…",
+  "uplift.patches.dev_group_both": "KEG + BUILD — overlays the running keg and lands in the omlx-dev build",
+  "uplift.patches.dev_group_dev": "BUILD ONLY — lands in the omlx-dev build"
 }

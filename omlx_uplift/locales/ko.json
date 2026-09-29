@@ -346,9 +346,9 @@
   "uplift.patches.dev_auto_pending": "HEAD가 이동했습니다 — 다음 재시작 시 omlx-dev를 다시 빌드합니다",
   "uplift.patches.dev_auto_pinned": "베이스가 고정된 동안에는 사용할 수 없습니다",
   "uplift.patches.dev_base_apply": "기준 적용",
-  "uplift.patches.dev_base_cleared": "다시 vanilla keg를 추적합니다",
+  "uplift.patches.dev_base_cleared": "다시 upstream HEAD를 추적합니다",
   "uplift.patches.dev_base_fail": "기준 변경 실패",
-  "uplift.patches.dev_base_follow": "vanilla omlx keg 추적",
+  "uplift.patches.dev_base_follow": "upstream HEAD 추적",
   "uplift.patches.dev_base_label": "빌드 기준",
   "uplift.patches.dev_base_pinned": "고정된 커밋",
   "uplift.patches.dev_base_pinned_note": "고정됨 — 다음 빌드에서 uplift-dev를 이 커밋에서 다시 자릅니다",
@@ -665,5 +665,8 @@
   "uplift.patches.bundled_chip": "번들 포함",
   "uplift.patches.bundled_hint": "큐레이션 카탈로그의 일부 — 카탈로그 동기화로 최신 상태를 유지합니다",
   "uplift.patches.remove_curated_choice": "이 패치는 큐레이션 카탈로그에서 가져왔습니다. 확인 = 패치를 로컬로 채택: 설치를 유지하며 소유자가 되고, 카탈로그가 다시는 건드리지 않습니다. 취소 = 완전 제거(적용된 파일이 바닐라 바이트로 복원됨).",
-  "uplift.patches.curated_adopted_on": "로컬로 채택됨"
+  "uplift.patches.curated_adopted_on": "로컬로 채택됨",
+  "uplift.patches.dev_pin_show": "커밋 고정…",
+  "uplift.patches.dev_group_both": "KEG + BUILD — 실행 중인 keg에 덮어쓰고 omlx-dev 빌드에도 포함",
+  "uplift.patches.dev_group_dev": "BUILD 전용 — omlx-dev 빌드에 포함"
 }

@@ -331,9 +331,9 @@
   "uplift.patches.dev_auto_pending": "HEAD 已移动 — 下次重启时将重新构建 omlx-dev",
   "uplift.patches.dev_auto_pinned": "基础版本固定时不可用",
   "uplift.patches.dev_base_apply": "应用基线",
-  "uplift.patches.dev_base_cleared": "已恢复跟随 vanilla keg",
+  "uplift.patches.dev_base_cleared": "已恢复跟随 upstream HEAD",
   "uplift.patches.dev_base_fail": "基线变更失败",
-  "uplift.patches.dev_base_follow": "跟随 vanilla omlx keg",
+  "uplift.patches.dev_base_follow": "跟随 upstream HEAD",
   "uplift.patches.dev_base_label": "构建基线",
   "uplift.patches.dev_base_pinned": "已固定的提交",
   "uplift.patches.dev_base_pinned_note": "已固定 — 下次重建将从该提交重新切出 uplift-dev",
@@ -650,5 +650,8 @@
   "uplift.patches.bundled_chip": "随附",
   "uplift.patches.bundled_hint": "来自精选补丁目录 — 由目录同步保持最新",
   "uplift.patches.remove_curated_choice": "此补丁来自精选目录。确定 = 将补丁采纳为本地补丁：保持安装并成为你自己的，目录不会再碰它。取消 = 完全移除（已应用的文件将恢复为原始字节）。",
-  "uplift.patches.curated_adopted_on": "已采纳为本地补丁"
+  "uplift.patches.curated_adopted_on": "已采纳为本地补丁",
+  "uplift.patches.dev_pin_show": "固定到提交…",
+  "uplift.patches.dev_group_both": "KEG + BUILD — 叠加到运行中的 keg，并进入 omlx-dev 构建",
+  "uplift.patches.dev_group_dev": "仅构建 — 进入 omlx-dev 构建"
 }

@@ -331,9 +331,9 @@
   "uplift.patches.dev_auto_pending": "HEAD сдвинулся — omlx-dev пересоберётся при следующем перезапуске",
   "uplift.patches.dev_auto_pinned": "недоступно, пока база закреплена",
   "uplift.patches.dev_base_apply": "Применить базу",
-  "uplift.patches.dev_base_cleared": "Снова следуем за vanilla keg",
+  "uplift.patches.dev_base_cleared": "Снова следуем за upstream HEAD",
   "uplift.patches.dev_base_fail": "Не удалось сменить базу",
-  "uplift.patches.dev_base_follow": "следовать за vanilla omlx keg",
+  "uplift.patches.dev_base_follow": "следовать за upstream HEAD",
   "uplift.patches.dev_base_label": "база сборки",
   "uplift.patches.dev_base_pinned": "закреплённый коммит",
   "uplift.patches.dev_base_pinned_note": "закреплено — следующая сборка пересоздаст uplift-dev с этого коммита",
@@ -650,5 +650,8 @@
   "uplift.patches.bundled_chip": "В КОМПЛЕКТЕ",
   "uplift.patches.bundled_hint": "из курируемого каталога — обновляется синхронизацией каталога",
   "uplift.patches.remove_curated_choice": "Этот патч из курируемого каталога. OK = принять патч как локальный: он останется установленным и станет вашим, каталог его больше не тронет. Отмена = удалить полностью (изменённые файлы вернутся к ванильным байтам).",
-  "uplift.patches.curated_adopted_on": "ПРИНЯТ КАК ЛОКАЛЬНЫЙ"
+  "uplift.patches.curated_adopted_on": "ПРИНЯТ КАК ЛОКАЛЬНЫЙ",
+  "uplift.patches.dev_pin_show": "закрепить коммит…",
+  "uplift.patches.dev_group_both": "KEG + BUILD — перекрывает активный keg и входит в сборку omlx-dev",
+  "uplift.patches.dev_group_dev": "ТОЛЬКО СБОРКА — входит в сборку omlx-dev"
 }

@@ -1708,6 +1708,17 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-id { font-weight: 700; letter-spacing: .04em; }
 .pt-detail { color: var(--dim); font-size: var(--fs-meta); }
 .pt-src { color: var(--dim); font-size: var(--fs-meta); word-break: break-all; }
+/* build-base row: controls sit on one baseline — the pin button is a
+   secondary action, sized to the select it belongs to, never misaligned */
+.dv-base-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 0; }
+.dv-base-row .pt-field select { min-width: 220px; }
+#dv-base-btn { align-self: center; padding: 3px 12px; }
+.dv-pin-toggle { background: none; border: none; color: var(--dim); font-size: var(--fs-meta); cursor: pointer; text-decoration: underline dotted; padding: 0; margin-left: auto; }
+.dv-pin-toggle:hover { color: var(--ink); }
+/* dev patch groups: scope headings split the stack so dev-only and
+   keg+build patches are distinguishable at a glance */
+.dv-group-title { margin: 12px 0 2px; padding-bottom: 3px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: .08em; }
+.dv-group-title:first-child { margin-top: 4px; }
 .pt-vers { display: flex; flex-wrap: wrap; gap: 6px; }
 .pt-acts { display: flex; flex-wrap: wrap; gap: 6px; }
 .pt-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border: 1px solid var(--line); font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: .06em; }

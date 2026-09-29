@@ -525,20 +525,68 @@ def _patch_commits(path: str, base_sha: str, tip: str) -> list[dict]:
     return out
 
 
+def _merge_base(a: str, b: str, cwd: str) -> str | None:
+    proc = _git(["merge-base", a, b], cwd=cwd, check=False)
+    sha = proc.stdout.strip()
+    if proc.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", sha or ""):
+        return sha
+    return None
+
+
+def _patch_in_base(path: str, cut: str, files: list[dict]) -> bool:
+    """True when EVERY added line of the parsed patch already exists in
+    the tree at `cut` — the content-level mirror of materialize's 'no
+    diff after apply -> skip' (a since-merged patch). Deliberately
+    conservative: any missing line or unreadable file -> False (expect it,
+    keep drift honest)."""
+    cache: dict[str, set[str] | None] = {}
+    any_file = False
+    for fp in files:
+        rel = fp["path"]
+        if rel not in cache:
+            proc = _git(["show", f"{cut}:{rel}"], cwd=path, check=False)
+            cache[rel] = (set(proc.stdout.splitlines())
+                          if proc.returncode == 0 else None)
+        base_lines = cache[rel]
+        if base_lines is None:
+            return False
+        any_file = True
+        added = _added_lines(fp)
+        if not added or not added <= base_lines:
+            return False
+    return any_file
+
+
 def drift_check(path: str, base_sha: str, tip: str,
                 patches_to_apply: list[dict]) -> dict:
     """Compare the branch content (base..tip) against the expected patch
     set. Content-level, so commit-date noise never false-alarms: a file or
-    added-line the patches do not account for -> drift."""
+    added-line the patches do not account for -> drift.
+
+    The diff base is merge-base(base, tip), NOT base itself: once the sync
+    ref moves past the commit the branch was cut from (auto-update pulled,
+    or just time passing before a rebuild), diffing the NEW tip against the
+    OLD branch tip shows every upstream commit in between as 'touched
+    outside the patch set' — a false DRIFT on a perfectly clean branch.
+    merge-base IS the commit the branch actually grew from, so the diff
+    contains exactly the patch commits + any hand commits.
+
+    A patch whose ADDED lines already exist in the cut base is also excluded
+    from the expectation: materialize commits nothing for it (an upstream-
+    merged patch lands as skipped/already-present), so expecting its lines
+    on the branch would false-alarm 'expected content missing'."""
     from . import diffapply
 
-    diff = _git(["diff", f"{base_sha}..{tip}"], cwd=path).stdout.encode()
+    cut = _merge_base(base_sha, tip, path) or base_sha
+    diff = _git(["diff", f"{cut}..{tip}"], cwd=path).stdout.encode()
     expected: dict[str, set[str]] = {}
     for p in patches_to_apply:
         ep = diffapply.parse_diff(p["diff_bytes"])
         if not ep["ok"]:
             return {"drift": True, "detail": f"stored diff of {p['id']} is "
                                              "unparseable"}
+        if _patch_in_base(path, cut, ep["files"]):
+            continue
         for fp in ep["files"]:
             expected.setdefault(fp["path"], set()).update(_added_lines(fp))
     actual = diffapply.parse_diff(diff) if diff.strip() else {"ok": True, "files": []}

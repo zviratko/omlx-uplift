@@ -235,6 +235,36 @@ class DevsrcFixture(unittest.TestCase):
                              "diff_bytes": newer}])
         self.assertTrue(st["drift"]["drift"], st["drift"])
 
+    def test_sync_ref_move_alone_is_not_drift(self):
+        """The false alarm this guards: after materialize the sync ref moves
+        (auto-update fetch, plain time passing). Diffing the NEW sync tip
+        against the OLD branch tip showed every upstream commit in between
+        as 'touched outside the patch set' -> DRIFT on a clean branch.
+        The diff base must be the commit the branch actually grew from."""
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        patches = [{"id": "p-one", "version": 1,
+                    "diff_bytes": self._patch_diff("one")}]
+        devsrc.materialize(patches, self.cfg)
+        # upstream advances on the remote (new unrelated commit)
+        with open(os.path.join(self.work, "omlx", "upstream_only.py"), "w") as fh:
+            fh.write("new = True\n")
+        _commit_all(self.work, "upstream moves")
+        _git(["push", "-q", self.remote, "main"], cwd=self.work)
+        devsrc.fetch_sync_ref(self.cfg)
+        st = devsrc.status(self.cfg, patches)
+        self.assertGreater(st["behind"], 0)      # branch IS behind now
+        self.assertFalse(st["drift"]["drift"], st["drift"])
+        # a REAL hand commit on top of the old branch is still caught
+        src = devsrc.src_path(self.cfg)
+        _git(["checkout", "-q", devsrc.DEV_BRANCH_DEFAULT], cwd=src)
+        with open(os.path.join(src, "omlx", "hand.py"), "w") as fh:
+            fh.write("sneaky = True\n")
+        _commit_all(src, "hand edit")
+        st = devsrc.status(self.cfg, patches)
+        self.assertTrue(st["drift"]["drift"], st["drift"])
+        self.assertIn("hand.py", st["drift"]["detail"])
+
     def test_fetch_only_configured_sync_ref(self):
         devsrc.ensure_clone(self.cfg)
         cfg = dict(self.cfg, sync_ref="elsewhere/main")

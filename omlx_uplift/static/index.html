@@ -401,17 +401,24 @@ try {
                     <pre id="dv-boot-log" class="pt-boot-log" hidden></pre>
                 </div>
                 <div id="dv-status" class="pt-src" hidden></div>
-                <!-- DEV-7(c): base-root chooser — what uplift-dev re-cuts from -->
+                <!-- DEV-7(c): base-root chooser — what uplift-dev re-cuts
+                     from. Pin is expert-only: collapsed behind a toggle, the
+                     AUTO UPDATE checkbox is the normal-mode control. -->
                 <div id="dv-base" class="pt-src" hidden>
-                    <label class="pt-field"><span data-i18n="uplift.patches.dev_base_label">build base</span>
-                        <select id="dv-base-select" aria-label="omlx-dev build base"></select>
-                    </label>
-                    <button type="button" class="btn" id="dv-base-btn" data-i18n="uplift.patches.dev_base_apply">Apply base</button>
-                    <span id="dv-base-note" class="pt-detail"></span>
-                    <!-- DEV-11: AUTO UPDATE — TRACK HEAD (default OFF) -->
-                    <label class="row" id="dv-auto-row" hidden><input type="checkbox" id="dv-auto">
-                        <span data-i18n="uplift.patches.dev_auto_label">AUTO UPDATE — TRACK HEAD</span></label>
-                    <span id="dv-auto-note" class="pt-detail"></span>
+                    <div class="dv-base-row">
+                        <!-- DEV-11: AUTO UPDATE — TRACK HEAD (default OFF) -->
+                        <label class="row" id="dv-auto-row" hidden><input type="checkbox" id="dv-auto">
+                            <span data-i18n="uplift.patches.dev_auto_label">AUTO UPDATE — TRACK HEAD</span></label>
+                        <span id="dv-auto-note" class="pt-detail"></span>
+                        <button type="button" class="dv-pin-toggle" id="dv-pin-toggle" data-i18n="uplift.patches.dev_pin_show">pin a commit…</button>
+                    </div>
+                    <div class="dv-base-row" id="dv-pin-row" hidden>
+                        <label class="pt-field"><span data-i18n="uplift.patches.dev_base_label">build base</span>
+                            <select id="dv-base-select" aria-label="omlx-dev build base"></select>
+                        </label>
+                        <button type="button" class="btn" id="dv-base-btn" data-i18n="uplift.patches.dev_base_apply">Apply base</button>
+                        <span id="dv-base-note" class="pt-detail"></span>
+                    </div>
                 </div>
                 <div id="dv-warn" class="pt-banner" hidden></div>
                 <div id="dv-patches" class="admin-table" hidden></div>

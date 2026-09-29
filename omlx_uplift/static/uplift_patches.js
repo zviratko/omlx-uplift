@@ -742,6 +742,7 @@ let DV_POLL = null;
 let DV_CLICK_BUSY = false;
 let DV_BOOT_POLL = null;
 let DV_COMMITS = null;   // DEV-7(c): /dev/commits cache, loaded on demand
+let DV_PIN_OPEN = false; // build-base pin row: collapsed until opened/pinned
 
 async function pollDev() {
     const sec = $('dv-section');
@@ -858,7 +859,10 @@ function renderDev() {
 
     dvRenderBase(d);
 
-    // build patch cards: same anatomy as runtime, fed by the /patches view
+    // build patch cards: same anatomy as runtime, fed by the /patches view.
+    // Grouped by scope under headings so dev-only and both-scope patches —
+    // which behave differently (one only lands on the rebuild, the other
+    // also overlays the keg) — never blur into one undifferentiated stack.
     const buildOnDv = (S.PT_DATA && S.PT_DATA.patches || [])
         .filter(p => p.scope === 'dev' || p.scope === 'both');
     patchesBox.hidden = false;
@@ -870,13 +874,30 @@ function renderDev() {
             'No dev patches. Add one above and pick scope "dev" or "both".');
         patchesBox.append(empty);
     }
-    for (const p of buildOnDv) {
-        const card = patchCard(p, S.PT_DATA);
-        if (d.stale && p.enabled)
-            card.querySelector('.pt-card-head')
-                .append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
-                    'NEEDS REBUILD'), 'pt-st-warn'));
-        patchesBox.append(card);
+    const groups = [
+        ['both', ptMsg('uplift.patches.dev_group_both',
+            'KEG + BUILD — overlays the running keg and lands in the omlx-dev build')],
+        ['dev', ptMsg('uplift.patches.dev_group_dev',
+            'BUILD ONLY — lands in the omlx-dev build')],
+    ];
+    const multi = new Set(buildOnDv.map(p => p.scope)).size > 1;
+    for (const [scope, label] of groups) {
+        const inGroup = buildOnDv.filter(p => p.scope === scope);
+        if (!inGroup.length) continue;
+        if (multi) {
+            const h = document.createElement('div');
+            h.className = 'dv-group-title';
+            h.textContent = label;
+            patchesBox.append(h);
+        }
+        for (const p of inGroup) {
+            const card = patchCard(p, S.PT_DATA);
+            if (d.stale && p.enabled)
+                card.querySelector('.pt-card-head')
+                    .append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
+                        'NEEDS REBUILD'), 'pt-st-warn'));
+            patchesBox.append(card);
+        }
     }
 
     actions.hidden = false;
@@ -1022,6 +1043,23 @@ function dvRenderBase(d) {
     const pinned = d.base_pin || '';
     const following = ptMsg('uplift.patches.dev_base_follow',
         'follow vanilla omlx keg');
+    // the pin row is expert-only: collapsed unless something is pinned (a
+    // hidden pin would be an invisible override silently beating AUTO UPDATE)
+    const pinRow = $('dv-pin-row'), toggle = $('dv-pin-toggle');
+    if (pinRow && !pinned && document.activeElement !== sel)
+        pinRow.hidden = !DV_PIN_OPEN;
+    if (toggle) {
+        // hidden once opened (the row itself is visible) or pinned (the row
+        // is mandatory then) or while a build runs (no re-pin mid-flight)
+        toggle.hidden = !!pinned || DV_PIN_OPEN || !!(d.build && d.build.running);
+        toggle.onclick = () => {
+            DV_PIN_OPEN = true;
+            pinRow.hidden = false;
+            toggle.hidden = true;
+        };
+    }
+    if (pinned && pinRow) pinRow.hidden = false;
+    if (toggle && pinned) toggle.hidden = true;
     // rebuild options fresh each render — commit list is fetch-once, cache
     sel.innerHTML = '';   // plain clear, no markup — safe
     const def = document.createElement('option');
@@ -1060,9 +1098,10 @@ function dvRenderBase(d) {
         try {
             const r = await dvApi('base', { pin: pin || null });
             DV_DATA = r.status || DV_DATA;
+            if (!pin) DV_PIN_OPEN = false;   // back to follow: collapse again
             PG.toast(pin
                 ? ptMsg('uplift.patches.dev_base_set', 'Base pinned — rebuild to apply')
-                : ptMsg('uplift.patches.dev_base_cleared', 'Back to following the vanilla keg'), 5000);
+                : ptMsg('uplift.patches.dev_base_cleared', 'Back to following the sync ref'), 5000);
             renderDev();
         } catch (e) {
             PG.toast(ptMsg('uplift.patches.dev_base_fail', 'Base change failed') + ': ' + e, 5000);

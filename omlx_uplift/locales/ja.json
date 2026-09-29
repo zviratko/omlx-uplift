@@ -331,9 +331,9 @@
   "uplift.patches.dev_auto_pending": "HEAD が移動しました — 次回再起動時に omlx-dev を再ビルドします",
   "uplift.patches.dev_auto_pinned": "ベースが固定されている間は使用できません",
   "uplift.patches.dev_base_apply": "ベースを適用",
-  "uplift.patches.dev_base_cleared": "vanilla keg の追従に戻りました",
+  "uplift.patches.dev_base_cleared": "upstream HEAD の追従に戻りました",
   "uplift.patches.dev_base_fail": "ベースの変更に失敗",
-  "uplift.patches.dev_base_follow": "vanilla omlx keg に追従",
+  "uplift.patches.dev_base_follow": "upstream HEAD に追従",
   "uplift.patches.dev_base_label": "ビルドベース",
   "uplift.patches.dev_base_pinned": "固定したコミット",
   "uplift.patches.dev_base_pinned_note": "固定中 — 次回のリビルドで uplift-dev をこのコミットから切り直します",
@@ -679,5 +679,8 @@
   "uplift.patches.bundled_chip": "バンドル済み",
   "uplift.patches.bundled_hint": "キュレーションカタログの一部 — カタログ同期で最新に保たれます",
   "uplift.patches.remove_curated_choice": "このパッチはキュレーションカタログ由来です。OK = パッチをローカルとして採用: インストールされたままであなたのものになり、カタログは今後触れません。キャンセル = 完全に削除(適用済みファイルはバニラのバイト列に戻ります)。",
-  "uplift.patches.curated_adopted_on": "ローカルとして採用済み"
+  "uplift.patches.curated_adopted_on": "ローカルとして採用済み",
+  "uplift.patches.dev_pin_show": "コミットを固定…",
+  "uplift.patches.dev_group_both": "KEG + BUILD — 実行中 keg に重ね、omlx-dev ビルドにも反映",
+  "uplift.patches.dev_group_dev": "BUILD のみ — omlx-dev ビルドに反映"
 }
