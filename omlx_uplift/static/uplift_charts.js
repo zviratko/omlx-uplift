@@ -695,11 +695,19 @@ const _fetching = new Set();
 const _seq = {};
 
 function metricFormat(def) {
+    // U41 (user): when a metric's NAME already carries the unit
+    // ("total W", "CPU °C", "memory %", "max RPM"), the VALUE must not
+    // repeat it ("total W | 12.4 W"). Keys whose displayed names hold a
+    // unit render bare numbers; the header power/temp chips keep their
+    // units — they have no name. Names without a unit (cache efficiency,
+    // tok/s, GiB bytes) keep theirs on the value.
+    const unitInName = def.key && /(_w$|_temp_c$|rpm|pct$|percent$)/.test(def.key);
     if (def.fmt === 'bytes') return v => (v === null || v === undefined ? '—' : C.fmtBytes(v));
-    if (def.fmt === 'pct') return v => (v === null || v === undefined ? '—' : v.toFixed(1) + '%');
+    if (def.fmt === 'pct') return v => (v === null || v === undefined ? '—'
+                                       : v.toFixed(1) + (unitInName ? '' : '%'));
     if (def.fmt === 'count') return v => (v == null ? '—' : String(Math.round(v)));
-    if (def.fmt === 'watts') return v => (v == null ? '—' : v.toFixed(1) + ' W');
-    if (def.fmt === 'temp') return v => (v == null ? '—' : Math.round(v) + ' °C');
+    if (def.fmt === 'watts') return v => (v == null ? '—' : v.toFixed(1) + (unitInName ? '' : ' W'));
+    if (def.fmt === 'temp') return v => (v == null ? '—' : Math.round(v) + (unitInName ? '' : ' °C'));
     if (def.key === 'engines.active_requests') return v => (v == null ? '—' : String(Math.round(v)));
     return seriesValue;
 }

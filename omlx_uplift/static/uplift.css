@@ -647,8 +647,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* the |original| chip is narrower so name labels ("Enable Thinking") fit */
 .se-row .diff-out { margin-left: 0; gap: 4px; }
 .se-row .diff-out .diff-o { max-width: 68px; }
-.se-row > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; }
+/* U41 (user): the .pair two-column grid leaves the name column ~115px —
+   nowrap ellipsised whole labels ("Draft mode…", "Threshold (tokens)…",
+   "Enable Thinking"). Long names now wrap to a second line instead. */
+.se-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .se-ctl { display: flex; justify-content: flex-end; min-width: 0; }
 /* U1: 130px controls truncated option text ("Using model default (on)") —
    controls are wider now; the long-label column got its room from U1 modal */
@@ -696,8 +698,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-row2 { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px;
     align-items: start; border: 1px solid var(--edge); padding: 6px 8px; }
 .se-row2 .se-row { border: none; padding: 0; }
-/* item 8: engine-reload trigger badge */
-.se-reload-badge { font: 500 8px/1 var(--mono); letter-spacing: 0.08em;
+/* item 8: engine-reload trigger badge. U41: on its own line under the name
+   once names wrap — inline it read as a glitch box after short labels */
+.se-reload-badge { margin-left: 6px; font: 500 8px/1 var(--mono); letter-spacing: 0.08em;
     color: #9a6b00; background: rgba(220, 160, 0, 0.14);
     border: 1px solid rgba(160, 120, 0, 0.5); padding: 2px 4px;
     vertical-align: middle; cursor: help; }

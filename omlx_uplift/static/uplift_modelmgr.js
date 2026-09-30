@@ -73,7 +73,9 @@ function seUpdateSaveBtn() {
     const tabTxt = onProfile ? ' PROFILE' : '';
     b.textContent = n
         ? (runtimeDirty && !plainDirty
-            ? 'WAIT —'
+            // U41: "WAIT —" read as a broken button (user). Say what to
+            // press instead — the RESTART MODEL button is right next to it.
+            ? 'RESTART INSTEAD'
             : 'SAVE' + tabTxt + (plainDirty > 0 ? ' (' + plainDirty + ')' : ''))
         : (onProfile ? 'SAVE PROFILE' : 'SAVE');
     b.title = runtimeDirty
@@ -270,7 +272,13 @@ function seBind(kind, key, opts) {
             if (input.value === '') seValues[key] = (t && t.id !== 'base') ? undefined : null;
             else seValues[key] = Number(input.value);
         }
-        else if (kind === 'select') seValues[key] = input.value;
+        else if (kind === 'select') {
+            // U41: numeric selects (turboquant bits) must store numbers —
+            // the runtime signature compares values, not strings. Model ids
+            // and '' are not finite numbers and stay strings.
+            const nv = Number(input.value);
+            seValues[key] = input.value !== '' && Number.isFinite(nv) ? nv : input.value;
+        }
         else seValues[key] = input.value;
         // inherited-bool tri-state maps '' -> undefined (inherit)
         if (input.tagName === 'SELECT' && input.dataset.inherit === '1')
@@ -612,15 +620,18 @@ function renderEditorFields(container) {
             sub(g).append(seBind('number', 'index_cache_freq',
                 { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 1, step: 1 }));
     }
-    if (seValues.turboquant_kv_enabled !== undefined && !S.isDiffusion(m)) {
-        // item 5: toggle and its bits control share one aligned row
+    if (seValues.turboquant_kv_enabled !== undefined) {
+        // U41: no diffusion gate — classic shows TurboQuant for every model
+        // (parity, user: "turboquant toggle is missing in model settings")
         const tq = seBind('bool', 'turboquant_kv_enabled', { label: 'TurboQuant KV Cache',
             hint: 'Compress KV cache using vector quantization. Lower bits = more compression.',
             onChange: renderEditorFields.bind(null, container) });
         if (seValues.turboquant_kv_enabled)
-            row2(g, tq, seBind('number', 'turboquant_kv_bits',
+            // U41: classic's fixed ladder, not a 0.25-step free number
+            // (user: bits can't be quarters)
+            row2(g, tq, seBind('select', 'turboquant_kv_bits',
                 { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
-                  min: 2, max: 8, step: 0.25 }));
+                  options: [2, 2.5, 3, 3.5, 4, 6, 8].map(v => ({ value: String(v), label: v + '-bit' })) }));
         else g.append(tq);
     }
     if (m.qwen4_ple_ssd_offload_supported || seValues.qwen4_ple_ssd_offload)
