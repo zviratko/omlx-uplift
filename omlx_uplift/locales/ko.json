@@ -8,7 +8,7 @@
   "uplift.btn.theme": "테마",
   "uplift.card.cache": "캐시",
   "uplift.card.generation": "생성",
-  "uplift.card.inflight": "진행 중",
+  "uplift.card.inflight": "Activity",
   "uplift.card.memory_cache": "메모리 및 캐시",
   "uplift.card.prefill": "프리필",
   "uplift.card.request_feed": "요청 피드",

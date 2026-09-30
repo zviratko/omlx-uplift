@@ -8,7 +8,7 @@
   "uplift.btn.theme": "主题",
   "uplift.card.cache": "缓存",
   "uplift.card.generation": "生成",
-  "uplift.card.inflight": "进行中",
+  "uplift.card.inflight": "Activity",
   "uplift.card.memory_cache": "内存与缓存",
   "uplift.card.prefill": "预填充",
   "uplift.card.request_feed": "请求流",

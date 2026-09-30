@@ -1642,11 +1642,15 @@ function ifGroup(model) {
     // active-models card. The old "QUEUED ×N (+)" summary collapsed them
     // behind a toggle nobody noticed — the counts it hid were the point.
     const wrap = document.createElement('div');
-    el.append(h, wrap, df);
+    // Idle line: shown while the model has no request rows (see renderLive).
+    const idle = document.createElement('div');
+    idle.className = 'if-idle'; idle.style.display = 'none';
+    idle.textContent = C.t('uplift.empty.idle');
+    el.append(h, wrap, idle, df);
     const list = $('live-list');
     const ph = list.querySelector('.empty'); if (ph) ph.remove();
     list.append(el);
-    g = { model, el, wrap, mm, df };
+    g = { model, el, wrap, mm, df, idle };
     S.ifModels.push(g);
     return g;
 }
@@ -1983,11 +1987,14 @@ function renderLive(s) {
             for (const k of kids) g.wrap.append(k);   // append moves in order
         }
     }
-    // ISSUE-4: hide model groups with nothing to show — no live row, nothing
-    // queued. Loaded-but-idle models must not clutter the IN-FLIGHT card.
+    // Loaded models are ALWAYS listed (user 2026-09-30): an idle model
+    // keeps its header with an 'Idle' line instead of vanishing when its
+    // last row lands. The card is Activity — it shows what is loaded.
     for (const g of S.ifModels) {
-        const busy = g.wrap.children.length || (waitingBy.get(g.model) || []).length;
-        g.el.style.display = busy ? '' : 'none';
+        // Label re-resolved each tick: the locale catalog can load after
+        // the group was created (same reason the card placeholder relabels).
+        g.idle.textContent = C.t('uplift.empty.idle');
+        g.idle.style.display = g.wrap.children.length ? 'none' : '';
     }
     for (const sl of S.ifSlots.values()) ifPaint(sl);
     // every live row (queued, prefilling, generating) counts — queued
@@ -1996,11 +2003,12 @@ function renderLive(s) {
     for (const sl of S.ifSlots.values()) if (!sl.terminal) act++;
     const total = act;
     $('live-count').textContent = total ? String(total) : '';
-    // ISSUE-4: honest placeholder whenever the card has nothing to show —
-    // no models loaded, or every loaded model idle (groups hidden).
+    // ISSUE-4: honest placeholder for the one empty case — NO models loaded.
+    // Loaded-but-idle models render their own group with an Idle line.
     const list = $('live-list');
     let ph = list.querySelector('.empty');
-    if (!total) {
+    if (!s.models.length) {           // only when NOTHING is loaded — idle
+                                      // models render their own group now
         if (!ph) {
             ph = document.createElement('div'); ph.className = 'empty';
             list.append(ph);

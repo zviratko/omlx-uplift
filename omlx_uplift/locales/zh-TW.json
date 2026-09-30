@@ -8,7 +8,7 @@
   "uplift.btn.theme": "主題",
   "uplift.card.cache": "快取",
   "uplift.card.generation": "生成",
-  "uplift.card.inflight": "進行中",
+  "uplift.card.inflight": "Activity",
   "uplift.card.memory_cache": "內存與快取",
   "uplift.card.prefill": "預填充",
   "uplift.card.request_feed": "請求流",

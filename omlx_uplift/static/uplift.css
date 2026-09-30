@@ -603,6 +603,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
    level stats line, mirrored (upstream has no per-request DFlash row). */
 .if-dflash { font: 400 10px/1.5 var(--mono); color: var(--dim);
     padding: 2px 2px 0 20px; }
+/* Idle line under a loaded model with no request rows (Activity card always
+   lists loaded models). */
+.if-idle { font: 400 10px/1.5 var(--mono); color: var(--dim);
+    padding: 2px 2px 0 14px; }
 .if-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px 4px 14px;
     font-size: 11px; cursor: pointer; min-width: 0; }
 .if-row:hover { background: var(--row2); }

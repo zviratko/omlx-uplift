@@ -8,7 +8,7 @@
   "uplift.btn.theme": "Tema",
   "uplift.card.cache": "Caché",
   "uplift.card.generation": "Generación",
-  "uplift.card.inflight": "En curso",
+  "uplift.card.inflight": "Activity",
   "uplift.card.memory_cache": "Memoria y caché",
   "uplift.card.prefill": "Prefill",
   "uplift.card.request_feed": "Actividad de solicitudes",

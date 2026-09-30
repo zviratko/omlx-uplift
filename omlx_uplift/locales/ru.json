@@ -8,7 +8,7 @@
   "uplift.btn.theme": "Тема",
   "uplift.card.cache": "Кэш",
   "uplift.card.generation": "Генерация",
-  "uplift.card.inflight": "В работе",
+  "uplift.card.inflight": "Activity",
   "uplift.card.memory_cache": "Память и кэш",
   "uplift.card.prefill": "Предзаполнение",
   "uplift.card.request_feed": "Лента запросов",
