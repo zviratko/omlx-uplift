@@ -551,6 +551,8 @@
   "uplift.toast.repo_id_required": "ID du dépôt requis",
   "uplift.toast.repo_name_required": "Nom du dépôt requis",
   "uplift.toast.restart_failed": "échec du redémarrage : {msg}",
+  "uplift.toast.restart_no_supervisor": "Aucun superviseur détecté — appuyez sur FORCE RESTART si autre chose relance omlx.",
+  "uplift.toast.restart_requested": "Redémarrage demandé — le serveur redémarre dans ~5 s",
   "uplift.toast.save_failed": "Échec de l'enregistrement : {msg}",
   "uplift.toast.save_failed_http": "échec de l'enregistrement : HTTP {status}",
   "uplift.toast.saved_profile": "Profil enregistré : {name}",

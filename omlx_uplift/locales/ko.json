@@ -562,6 +562,8 @@
   "uplift.toast.repo_id_required": "저장소 ID가 필요합니다",
   "uplift.toast.repo_name_required": "저장소 이름이 필요합니다",
   "uplift.toast.restart_failed": "재시작 실패: {msg}",
+  "uplift.toast.restart_no_supervisor": "관리자 프로세스가 감지되지 않았습니다 — 다른 무언가가 omlx를 재시작하면 FORCE RESTART를 누르세요.",
+  "uplift.toast.restart_requested": "재시작 요청됨 — 서버가 약 5초 후 재시작됩니다",
   "uplift.toast.save_failed": "저장 실패: {msg}",
   "uplift.toast.save_failed_http": "저장 실패: HTTP {status}",
   "uplift.toast.saved_profile": "프로필 저장됨: {name}",

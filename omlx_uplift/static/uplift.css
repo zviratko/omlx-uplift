@@ -1484,6 +1484,7 @@ label.se-row.pending-restart > .se-ctl > select {
 .savebtn { font-weight: 500; letter-spacing: 0.06em; }
 .savebtn.queued { background: var(--accent); border-color: var(--accent); color: #141414; }
 .savebtn.restart-mode { background: var(--red); border-color: var(--red); color: #fff; }
+.savebtn.force-mode { background: var(--warn, #e8a020); border-color: var(--warn, #e8a020); color: #141414; }
 .modal.editor .editor-bar .savebtn.restart-mode { background: var(--red);
     border-color: var(--red); color: #fff; }
 .modal.editor .editor-bar .savebtn.queued { background: var(--accent);

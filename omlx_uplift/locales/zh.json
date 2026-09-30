@@ -547,6 +547,8 @@
   "uplift.toast.repo_id_required": "需要仓库 ID",
   "uplift.toast.repo_name_required": "需要仓库名称",
   "uplift.toast.restart_failed": "重启失败：{msg}",
+  "uplift.toast.restart_no_supervisor": "未检测到守护进程——如果有其他机制重启 omlx，请按 FORCE RESTART。",
+  "uplift.toast.restart_requested": "已请求重启——服务器约 5 秒后重新拉起",
   "uplift.toast.save_failed": "保存失败：{msg}",
   "uplift.toast.save_failed_http": "保存失败：HTTP {status}",
   "uplift.toast.saved_profile": "已保存配置 {name}",

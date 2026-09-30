@@ -261,6 +261,7 @@ let GS = null;   // merged working copy (upstream + shadow)
 let GS_ORIG = {};
 const gsDirty = {};
 let gsRestartPending = false;   // queued edits were saved; server restart still owed
+let gsForceArmed = false;       // detection said "no supervisor"; next click = FORCE
 const GS_RESTART_FIELDS = new Set([
     'host', 'port', 'auto_start_on_launch', 'max_concurrent_requests',
     'cache_enabled', 'mcp_config', 'distributed_inference_enabled',
@@ -371,15 +372,20 @@ function gsUpdateSaveBtn() {
     b.classList.toggle('queued', n > 0);
     // the red RESTART state only arms after a save that left a restart owed;
     // while edits are merely queued the button stays amber SAVE (user's flow:
-    // click SAVE -> saved -> button becomes RESTART SERVER)
-    b.classList.toggle('restart-mode', gsRestartPending);
+    // click SAVE -> saved -> button becomes RESTART SERVER). A detection miss
+    // on the restart attempt escalates to the orange FORCE RESTART state.
+    b.classList.toggle('restart-mode', gsRestartPending && !gsForceArmed);
+    b.classList.toggle('force-mode', gsForceArmed);
     b.textContent = n
         ? (restartQ ? '▶ SAVE + RESTART (' + n + ')' : 'SAVE (' + n + ')')
-        : (gsRestartPending ? '▶ RESTART SERVER' : 'SAVE');
+        : (gsForceArmed ? '⚠ FORCE RESTART'
+           : (gsRestartPending ? '▶ RESTART SERVER' : 'SAVE'));
     b.title = n ? (restartQ
         ? 'Some queued changes need a server restart to take effect. First click saves; the button then becomes RESTART SERVER.'
         : 'Apply ' + n + ' queued change' + (n > 1 ? 's' : ''))
-        : 'No queued changes';
+        : (gsForceArmed
+            ? 'No supervisor was detected — this shuts omlx down and relies on your watchdog (launchd/menubar) to bring it back.'
+            : 'No queued changes');
 }
 async function gsCommit() {
     const fields = Object.assign({}, gsDirty);
@@ -402,25 +408,43 @@ async function gsCommit() {
     gsUpdateSaveBtn();
     renderDirtyList();
 }
-async function gsRestartServer() {
+async function gsRestartServer(forced) {
     const b = gsSaveBtn(); if (!b) return;
     b.disabled = true;
     try {
-        const d = await GLUE.postJson(`${API}/admin/api/server/restart`, {});
-        gsRestartPending = false;   // restart requested; button goes back to SAVE
-        GLUE.toast(d.restarting === false && d.detail
-            ? ('restart: ' + d.detail) : 'Restart requested — server respawns in ~5 s');
+        // uplift's own endpoint (not vanilla's /server/restart, which only
+        // knows the menubar): detects launchd/brew-services/menubar, and
+        // on a detection MISS re-arms the button as FORCE RESTART (3rd
+        // click) which shuts the server down regardless.
+        const d = await GLUE.postJson(`${API}/uplift/api/restart-server`,
+            {force: !!forced});
+        if (d.ok === false && !d.supervised) {
+            gsForceArmed = true;
+            GLUE.toast(C.tf('uplift.toast.restart_no_supervisor',
+                'No supervisor detected — press FORCE RESTART if something else respawns omlx.'), 6000);
+        } else {
+            gsRestartPending = false;   // restart requested; button goes back to SAVE
+            gsForceArmed = false;
+            GLUE.toast(C.tf('uplift.toast.restart_requested', 'Restart requested — server respawns in ~5 s'));
+        }
         $('banner').classList.add('show');
         $('banner-text').textContent = C.tf('uplift.ui.server_restarting_dashboard_reconnecting', 'Server restarting — dashboard reconnecting…');
-    } catch (e) { GLUE.toast(C.t('uplift.toast.restart_failed', {msg: e.message})); }
+    } catch (e) {
+        gsForceArmed = !!forced;   // a failed FORCE stays armed for retry; a failed plain restart falls back to RESTART SERVER
+        GLUE.toast(C.t('uplift.toast.restart_failed', {msg: e.message}));
+    }
     b.disabled = false;
     gsUpdateSaveBtn();
 }
-function gsSaveOrRestart() {                 // one button, two states
+function gsSaveOrRestart() {                 // one button, three states
     const b = gsSaveBtn(); if (!b) return;
+    if (gsForceArmed) {
+        if (Object.keys(gsDirty).length) { gsCommit().then(gsUpdateSaveBtn); return; }
+        gsRestartServer(true); return;
+    }
     if (b.classList.contains('restart-mode')) {
         if (Object.keys(gsDirty).length) { gsCommit().then(gsUpdateSaveBtn); return; }
-        gsRestartServer();
+        gsRestartServer(false);
     } else gsCommit();
 }
 async function gsSaveNow(fields) {

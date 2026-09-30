@@ -547,6 +547,8 @@
   "uplift.toast.repo_id_required": "vyžadováno id repozitáře",
   "uplift.toast.repo_name_required": "Vyžadován název repozitáře",
   "uplift.toast.restart_failed": "restart selhal: {msg}",
+  "uplift.toast.restart_no_supervisor": "Nebyl nalezen žádný supervisor — stiskněte FORCE RESTART, pokud omlx restartuje něco jiného.",
+  "uplift.toast.restart_requested": "Restart vyžádán — server se restartuje za ~5 s",
   "uplift.toast.save_failed": "Uložení selhalo: {msg}",
   "uplift.toast.save_failed_http": "uložení selhalo: HTTP {status}",
   "uplift.toast.saved_profile": "Profil {name} uložen",

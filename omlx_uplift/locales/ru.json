@@ -547,6 +547,8 @@
   "uplift.toast.repo_id_required": "необходима ID репозитория",
   "uplift.toast.repo_name_required": "необходимо имя репозитория",
   "uplift.toast.restart_failed": "ошибка перезапуска: {msg}",
+  "uplift.toast.restart_no_supervisor": "Супервизор не обнаружен — нажмите FORCE RESTART, если omlx перезапускается чем-то другим.",
+  "uplift.toast.restart_requested": "Перезапуск запрошен — сервер возродится через ~5 с",
   "uplift.toast.save_failed": "Ошибка сохранения: {msg}",
   "uplift.toast.save_failed_http": "ошибка сохранения: HTTP {status}",
   "uplift.toast.saved_profile": "Профиль сохранён: {name}",

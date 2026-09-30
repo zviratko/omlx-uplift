@@ -551,6 +551,8 @@
   "uplift.toast.repo_id_required": "ID de repositorio requerido",
   "uplift.toast.repo_name_required": "Nombre de repositorio requerido",
   "uplift.toast.restart_failed": "error al reiniciar: {msg}",
+  "uplift.toast.restart_no_supervisor": "No se detectó ningún supervisor — pulse FORCE RESTART si algo más reinicia omlx.",
+  "uplift.toast.restart_requested": "Reinicio solicitado — el servidor se reinicia en ~5 s",
   "uplift.toast.save_failed": "Error al guardar: {msg}",
   "uplift.toast.save_failed_http": "error al guardar: HTTP {status}",
   "uplift.toast.saved_profile": "Perfil guardado: {name}",

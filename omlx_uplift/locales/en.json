@@ -547,6 +547,8 @@
   "uplift.toast.repo_id_required": "repo id required",
   "uplift.toast.repo_name_required": "Repository name required",
   "uplift.toast.restart_failed": "restart failed: {msg}",
+  "uplift.toast.restart_no_supervisor": "No supervisor detected — press FORCE RESTART if something else respawns omlx.",
+  "uplift.toast.restart_requested": "Restart requested — server respawns in ~5 s",
   "uplift.toast.save_failed": "Save failed: {msg}",
   "uplift.toast.save_failed_http": "save failed: HTTP {status}",
   "uplift.toast.saved_profile": "Saved profile {name}",

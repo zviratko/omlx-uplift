@@ -576,6 +576,8 @@
   "uplift.toast.repo_id_required": "リポジトリIDが必要です",
   "uplift.toast.repo_name_required": "リポジトリ名が必要です",
   "uplift.toast.restart_failed": "再起動失敗: {msg}",
+  "uplift.toast.restart_no_supervisor": "スーパーバイザーが検出されませんでした — 他におmlxを再起動するものがある場合は FORCE RESTART を押してください。",
+  "uplift.toast.restart_requested": "再起動を要求しました — サーバーは約5秒で再起動します",
   "uplift.toast.save_failed": "保存失敗: {msg}",
   "uplift.toast.save_failed_http": "保存失敗: HTTP {status}",
   "uplift.toast.saved_profile": "プロファイルを保存しました: {name}",

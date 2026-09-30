@@ -2083,6 +2083,75 @@ async def dev_restart(is_admin: bool = Depends(require_admin)):
 
 
 # --------------------------------------------------------------------------
+# Server restart (uplift-side): the vanilla /api/server/restart gates ONLY
+# on OMLX_SUPERVISED, which the menubar app alone exports. Under
+# `brew services` / a user LaunchAgent (KeepAlive) launchd DOES respawn
+# the process, but the var is absent — vanilla answers 503 and the
+# dashboard's RESTART SERVER dead-ends. This endpoint detects the real
+# supervisor (see _supervisor_kind) and, when one exists, self-terminates
+# with SIGTERM exactly like vanilla's handler (launchd restarts us). A
+# FORCE pass skips the detection for the rare unsupervised-but-watched
+# case the user can see and we cannot.
+# --------------------------------------------------------------------------
+
+
+def _supervisor_kind(env: dict) -> Optional[str]:
+    """Which watchdog respawns THIS process, or None when none is provable.
+
+    Order = most specific marker first:
+      OMLX_SUPERVISED   — set by the menubar app (vanilla contract).
+      XPC_SERVICE_NAME  — launchd injects the job label into EVERY job's
+                          environment (verified via `launchctl print`);
+                          a terminal `omlx serve` never carries it. PPID
+                          is deliberately NOT a signal: a reparented CLI
+                          run looks identical to a launchd child.
+    """
+    if (env.get("OMLX_SUPERVISED") or "").strip():
+        return "menubar"
+    label = (env.get("XPC_SERVICE_NAME") or "").strip()
+    if label:
+        return f"launchd:{label}"
+    return None
+
+
+class ServerRestartRequest(BaseModel):
+    force: bool = False
+
+
+# Path deliberately avoids vanilla's /admin/api/server/restart: FastAPI
+# matches duplicates in registration order and vanilla registers first, so
+# a same-name route would still hit the OMLX_SUPERVISED gate — on the
+# /admin/api alias AND through the viewer's /uplift/api→/admin/api proxy.
+@api_router.post("/restart-server")
+async def server_restart(req: ServerRestartRequest,
+                         is_admin: bool = Depends(require_admin)):
+    """Self-terminate so the supervisor restarts this server.
+
+    Detection failure is a 200 {ok: false, supervised: false} — NOT an
+    exception: the caller's next move (arm FORCE RESTART) is normal flow,
+    not an error path. force=true kills regardless of detection.
+    """
+    import subprocess
+
+    kind = _supervisor_kind(os.environ)
+    if not kind and not req.force:
+        return {"ok": False, "supervised": False,
+                "detail": "no supervisor detected (not a launchd job, no "
+                          "menubar) — a restart would end the server. "
+                          "Use FORCE RESTART if you know it gets respawned."}
+
+    # Detached, like /dev/restart: the kill must fire AFTER this JSON
+    # leaves the socket. SIGTERM = uvicorn graceful shutdown; launchd /
+    # menubar respawn with their usual ~5 s backoff.
+    subprocess.Popen(
+        ["sh", "-c", f"sleep 1.5; kill -TERM {os.getpid()}"],
+        start_new_session=True)
+    return {"ok": True, "restarting": True, "supervisor": kind,
+            "forced": bool(req.force and not kind),
+            "expected_downtime_seconds": 7}
+
+
+# --------------------------------------------------------------------------
 # Skins (design v1 2026-09-22): user-dropped CSS themes under
 # <base>/uplift/skins. Listing + compiled theme.css + whitelisted resource
 # files. All under the shared session gate like every other API route; the
