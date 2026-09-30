@@ -47,8 +47,12 @@ function restoreCursor(c) {
     c.setCursor({ idx: i }, false);  // fires hooks + moves the focus point
 }
 const tpsData = [[], [], [], []];  // time, generation tok/s, prefill tok/s, cached tok/s (U30)
-const memData = [[], [], [], []];  // time, omlx used GB, custom ceiling GB, iogpu wired limit GB (U38)
+const memData = [[], [], [], [], []];  // time, omlx used GiB, custom ceiling GiB,
+                                       // iogpu wired limit GiB (U38), ALL-models
+                                       // hot cache GiB (U40 — one aggregated
+                                       // line replaced the top-3 per-model ones)
 const MAX_POINTS = 4000;
+const GIB = 2 ** -30;   // bytes -> GiB (memory chart draws GiB, user 2026-09-30)
 
 /* Server-side chart history (uplift fine samples merged with vanilla's
    hourly rollups): backfills the live tick buffers so windows longer than
@@ -58,13 +62,12 @@ const MAX_POINTS = 4000;
    ISSUE-6: the MEMORY&CACHE card used to draw ONLY the session buffer
    (memData) — switching its timeframe showed nothing before page load.
    mem.percent + cache.total_bytes now backfill from the store the same
-   way throughput does. Per-model hot-cache lines backfill too since
-   2026-09-30: the collector writes stable 'hot.<model>' keys (zeros
-   included), /uplift/api/metrics/hot discovers them, and a drained or
-   freshly-loaded model keeps its line across refreshes — the old
-   session-live-only rule existed only because the rank keys (hot1/2/3)
-   rotated models through one series and made history meaningless. */
-let chartHist = { gen: [], cached: [], prefill: [], mem: [], memLimit: [], cache: [], hot: {} };   // arrays of {ts, v, res}; hot: model -> points (GB)
+   way throughput does. U40 (user 2026-09-30): the hot cache draws as ONE
+   summed "hot cache" line (all models), not per-model lines — the top-3
+   model names in the hover legend made the axis label row wrap. History
+   still comes from the stable per-model 'hot.<model>' keys via
+   /uplift/api/metrics/hot, summed client-side per timestamp. */
+let chartHist = { gen: [], cached: [], prefill: [], mem: [], memLimit: [], cache: [], hot: [] };   // arrays of {ts, v, res}; hot: summed all-models hot cache (GiB)
 let historyDirty = true, historyLoading = false;
 /* The two shared-history cards backfill at the LARGEST window any of them
    uses (one fetch, superset cached); each card draws its own slice. */
@@ -91,30 +94,34 @@ async function loadChartHistory() {
         const conv = a => (a && a.series ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })) : []);
         const convMap = (o, k, scale) => (o && o.series_map && o.series_map[k]
             ? o.series_map[k].map(x => ({ ts: x.ts * 1000, v: scale ? x.v * scale : x.v, res: x.res })) : []);
+        // U40: sum every per-model 'hot.<model>' series into ONE aggregate
+        // history column. A timestamp missing a model still sums the present
+        // ones (the collector writes every loaded model each tick, so gaps
+        // only shift the sum by that model's share for one bucket).
+        const sumSeriesMap = (o, scale) => {
+            const byTs = new Map(), resByTs = new Map();
+            for (const pts of Object.values((o && o.series_map) || {}))
+                for (const x of pts) {
+                    const ts = x.ts * 1000;
+                    byTs.set(ts, (byTs.get(ts) || 0) + x.v * scale);
+                    if (x.res === 'hourly') resByTs.set(ts, 'hourly');
+                    else if (!resByTs.has(ts)) resByTs.set(ts, x.res);
+                }
+            return [...byTs.entries()].sort((a, b) => a[0] - b[0])
+                .map(([ts, v]) => ({ ts, v: +v.toFixed(3), res: resByTs.get(ts) || 'fine' }));
+        };
         // Only adopt if the window did not change mid-flight (stale-window
         // race: a slow 24h response landing over a fresh 5m selection).
         if (w === windowToParam()) {
             chartHist = { gen: convMap(g, 'avg_generation_tps'),
                           cached: convMap(g, 'rate.cached_tokens_s'), prefill: conv(p),
-                          // U38: bytes -> GB ladder for the budget series
-                          // (decimal 1e-9 matches fmtBytes convention)
-                          mem: convMap(m, 'mem.used_bytes', 1e-9),
-                          memCeil: convMap(m, 'mem.custom_ceiling_bytes', 1e-9),
-                          memIogpu: convMap(m, 'mem.iogpu_limit_bytes', 1e-9),
-                          // per-model hot cache, bytes -> GB, keyed by model
-                          // id (the 'hot.' prefix is part of the metric key)
-                          hot: Object.fromEntries(Object.entries(
-                              (h && h.series_map) || {})
-                              .map(([k, pts]) => [k.slice('hot.'.length),
-                                    pts.map(x => ({ ts: x.ts * 1000, v: x.v * 1e-9,
-                                                    res: x.res }))])) };
-            // Membership may have changed with the history (fresh model,
-            // page just loaded): rebuild the series list before redraw.
-            const ids = pickHotIds();
-            if (ids.join('|') !== cacheSeriesIds.join('|')) {
-                cacheSeriesIds = ids;
-                createCharts();
-            }
+                          // U38/U40: bytes -> GiB ladder for the budget and
+                          // hot-cache series (1024^3 — matches fmtBytes/GiB)
+                          mem: convMap(m, 'mem.used_bytes', GIB),
+                          memCeil: convMap(m, 'mem.custom_ceiling_bytes', GIB),
+                          memIogpu: convMap(m, 'mem.iogpu_limit_bytes', GIB),
+                          // U40: summed all-models hot cache (was per-model)
+                          hot: sumSeriesMap(h, GIB) };
             historyDirty = false;
             if (tpsChart) redrawCharts();
         } else {
@@ -142,63 +149,35 @@ function tpsWindowed() {
                 ts.map(t => (pi.has(t) ? pi.get(t) : null)),
                 ts.map(t => (ki.has(t) ? ki.get(t) : null))];
 }
-let cacheSeriesIds = [];             // top-3 models currently drawn on mem chart
-/* Per-model hot-cache session buffers: model -> {ts[], v[] (GB)}. Keyed by
-   model id (not chart position) so a reshuffle of the top-3 never repaints
-   one model's values under another's label — the old positional columns
-   had to be wiped on every membership change. */
-const hotLive = new Map();
-
-/* Newest value of a hot series (live wins over history). Used to rank
-   which models get a line — top-3 by hot-cache size, drained models rank
-   last and simply disappear when three busier models push them out. */
-function hotLatest(id) {
-    const lv = hotLive.get(id);
-    if (lv && lv.ts.length) {
-        for (let i = lv.v.length - 1; i >= 0; i--)
-            if (lv.v[i] != null) return { v: lv.v[i], ts: lv.ts[i] };
-    }
-    const h = chartHist.hot[id];
-    if (h && h.length) return { v: h[h.length - 1].v, ts: h[h.length - 1].ts };
-    return null;
-}
-function pickHotIds() {
-    const ids = new Set([...hotLive.keys(), ...Object.keys(chartHist.hot)]);
-    const scored = [...ids].map(id => ({ id, s: hotLatest(id) }))
-                       .filter(x => x.s)
-                       .sort((a, b) => (b.s.v - a.s.v) || (b.s.ts - a.s.ts));
-    return scored.slice(0, 3).map(x => x.id);
-}
-/* Columns for the memory card (U38): one GB axis — omlx footprint vs the
-   settings ceiling vs the kernel iogpu wired limit — plus the per-model
-   hot-cache lines on the same axis. All series backfill from the store and
-   merge with their live buffers. The two limit lines are flat constants;
-   absent (null) whenever the limit is unset — never a fake zero. */
+/* U40 (user 2026-09-30): the per-model top-3 hot-cache lines are GONE. The
+   model names in the hover legend forced the value row to wrap onto a
+   second line, and three lines told the user nothing the sum does not:
+   the card now draws ONE aggregated "hot cache" line (all models combined)
+   over a single session buffer. The old id-keyed hotLive Map / pickHotIds
+   ranking / cacheSeriesIds membership machinery retired with it. */
+const hotLive = { ts: [], v: [] };   // summed all-models hot cache, GiB
+/* Columns for the memory card (U38 axes, U40 hot-cache merge): one GiB
+   axis — omlx footprint vs the settings ceiling vs the kernel iogpu wired
+   limit — plus ONE summed hot-cache line. All series backfill from the
+   store and merge with their live buffers. The two limit lines are flat
+   constants; absent (null) whenever the limit is unset — never a fake zero. */
 function memWindowed() {
     const now = Date.now();
     const win = cardWindow('chart-mem');
     const mm = C.mergeHistory(chartHist.mem, memData[0], memData[1], win, now);
     const ml = C.mergeHistory(chartHist.memCeil || [], memData[0], memData[2], win, now);
     const cc = C.mergeHistory(chartHist.memIogpu || [], memData[0], memData[3], win, now);
-    const hot = cacheSeriesIds.map(id => {
-        const lv = hotLive.get(id) || { ts: [], v: [] };
-        return C.mergeHistory(chartHist.hot[id] || [], lv.ts, lv.v, win, now);
-    });
-    let allTs = mm.ts.concat(ml.ts, cc.ts);
-    for (const h of hot) allTs = allTs.concat(h.ts);
-    const ts = [...new Set(allTs)].sort((a, b) => a - b);
+    const hot = C.mergeHistory(chartHist.hot || [], hotLive.ts, hotLive.v, win, now);
+    const ts = [...new Set(mm.ts.concat(ml.ts, cc.ts, hot.ts))].sort((a, b) => a - b);
     const mmI = new Map(mm.ts.map((t, i) => [t, mm.v[i]]));
     const mlI = new Map(ml.ts.map((t, i) => [t, ml.v[i]]));
     const ccI = new Map(cc.ts.map((t, i) => [t, cc.v[i]]));
-    const cols = [ts,
+    const hi = new Map(hot.ts.map((t, i) => [t, hot.v[i]]));
+    return [ts,
         ts.map(t => (mmI.has(t) ? mmI.get(t) : null)),
         ts.map(t => (mlI.has(t) ? mlI.get(t) : null)),
-        ts.map(t => (ccI.has(t) ? ccI.get(t) : null))];
-    for (const h of hot) {
-        const hi = new Map(h.ts.map((t, i) => [t, h.v[i]]));
-        cols.push(ts.map(t => (hi.has(t) ? hi.get(t) : null)));
-    }
-    return cols;
+        ts.map(t => (ccI.has(t) ? ccI.get(t) : null)),
+        ts.map(t => (hi.has(t) ? hi.get(t) : null))];
 }
 
 function chartColors() {
@@ -208,9 +187,9 @@ function chartColors() {
              blue: cs.getPropertyValue('--chart-1').trim() || '#f2f0ea',
              gold: cs.getPropertyValue('--chart-2').trim() || '#e8a020' };
 }
-/* Old positional memWindowed (hot1/hot2/hot3 columns, session-live-only)
-   retired 2026-09-30 with the stable 'hot.<model>' keys — the merged
-   version above draws per-model history + live buffers. */
+/* Old positional memWindowed (hot1/hot2/hot3 columns) and the per-model
+   top-3 series retired — the merged version above draws ONE summed
+   hot-cache line (U40). */
 function seriesValue(v) {
     return v === null || v === undefined ? '—' : C.fmtCompact(v);
 }
@@ -451,9 +430,10 @@ function createCharts() {
     tpsOpts.scales.x.range = pinnedXRange('chart-tps');
     tpsChart = new uPlot(tpsOpts, tpsWindowed(), $('chart-tps'));
     window.__uplotTps = tpsChart;   // debug handle
-    // U38: ONE GB axis — omlx footprint vs the settings ceiling vs the
-    // kernel iogpu wired limit, plus the per-model hot-cache lines. The
-    // memory-% line is gone (its number lives on in the header label
+    // U38: ONE GiB axis — omlx footprint vs the settings ceiling vs the
+    // kernel iogpu wired limit. U40: the hot cache joins as ONE summed
+    // all-models line (the per-model top-3 lines wrapped the hover legend).
+    // The memory-% line is gone (its number lives on in the header label
     // #mem-label). Limit lines stay absent when the limit is unset.
     const memLine = (label, colorVar, dash) => {
         const s = line(label, colorVar, false, 'y');
@@ -462,17 +442,11 @@ function createCharts() {
     };
     const memSpecs = [memLine('omlx memory', 'blue'),
                       memLine('settings ceiling', 'dim', [4, 4]),
-                      memLine('iogpu wired limit', 'gold', [2, 4])];
-    for (let i = 0; i < cacheSeriesIds.length; i++) {
-        const shortId = cacheSeriesIds[i].length > 14
-            ? cacheSeriesIds[i].slice(0, 13) + '…' : cacheSeriesIds[i];
-        const s = line('hot:' + shortId, ['gold', 'blue', 'dim'][i], false, 'y');
-        s.dash = [4, 4];
-        memSpecs.push(s);
-    }
+                      memLine('iogpu wired limit', 'gold', [2, 4]),
+                      line(C.tf('uplift.chart.hot_cache', 'hot cache'), 'gold', true, 'y')];
     const memOpts = baseOpts(memSpecs,
         { scales: { y: { auto: true } },
-          yAxes: [Object.assign(yAxis(col, { label: 'GB', stroke: col.blue }), { scale: 'y' })] },
+          yAxes: [Object.assign(yAxis(col, { label: 'GiB', stroke: col.blue }), { scale: 'y' })] },
         legendUpdater());
     memOpts.height = Math.max(200, $('chart-mem').clientHeight || 240);
     memOpts.scales.x.range = pinnedXRange('chart-mem');
@@ -940,10 +914,11 @@ function metricXAxis(win, col) {
    <=4 chars so the 26px gutter never clips; ticks thin out via space,
    rotate is pinned off — rotated labels reach past the gutter too. */
 function metricYFmt(def) {
+    // U40: RAM/cache byte axes read in binary GiB/MiB (matches fmtBytes).
     if (/(bytes)/.test(def.key))
         return v => (v === 0 ? '0'
-                     : v >= 1e9 ? (v / 1e9).toFixed(v >= 1e10 ? 0 : 1) + 'G'
-                                : (v / 1e6).toFixed(0) + 'M');
+                     : v >= 2 ** 30 ? (v / 2 ** 30).toFixed(v >= 2 ** 34 ? 0 : 1) + 'Gi'
+                                    : (v / 2 ** 20).toFixed(0) + 'Mi');
     return v => (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + 'M'
                  : Math.abs(v) >= 1e3 ? Math.round(v / 1e3) + 'k'
                  : String(Math.round(v * 10) / 10));
@@ -1030,6 +1005,21 @@ function drawMetricChart(id) {
     const cache = metricCache[w] || { data: {}, bucket_s: 0 };
     const winMs = cardWindow(id) * 1000 + 60000;
     const cols = metricUnionCols(e.def, cache.data, winMs);
+    // U40: rate gauges are per-tick counter deltas — spiky by construction.
+    // Smooth the drawn+hovered columns with a window-scaled centered mean
+    // (the note badge replaces 'live'). Long windows are already avg-
+    // downsampled server-side (bucket >= 60 s), so smoothing there is
+    // double-averaging and stays off.
+    const k = cardWindow(id) <= 300 ? 3 : cardWindow(id) <= 3600 ? 5 : 1;
+    let smoothed = false;
+    if (k > 1 && cache.bucket_s < 60) {
+        const sers = metricServes(e.def);
+        for (let i = 0; i < sers.length; i++) {
+            if (!C.smoothKey(sers[i].key)) continue;
+            cols[i + 1] = C.movingAverage(cols[i + 1], k);
+            smoothed = true;
+        }
+    }
     e.chart.setData(cols);
     // SWEEP178: with legend.live:false the vendored build paints value
     // cells only on cursor events, so idle multi-series cards showed '—'
@@ -1055,6 +1045,7 @@ function drawMetricChart(id) {
     // empty plot reads as "metric is alive and zero" — say it instead.
     const anyPts = metricServes(e.def).some(s => (cache.data[s.key] || []).length);
     if (!anyPts) bits.push(C.tf('uplift.explore.no_data', 'no data in window'));
+    else if (smoothed) bits.push(C.tf('uplift.explore.smoothed', 'smoothed'));
     e.noteEl.textContent = bits.length ? bits.join(' · ') : 'live';
 }
 /* Latest reading gets real precision; hover stays compact. Both share one
@@ -1123,7 +1114,7 @@ function createUsageChart() {
 
 function markHistoryDirty() { historyDirty = true; loadChartHistory(); }
 
-/* U11 live memory line + U38 GB columns: the collector's mem.* ticks
+/* U11 live memory line + U38 GiB columns: the collector's mem.* ticks
    (enforcer footprint + both absolute limits) are the points pushed into
    the Memory chart. /admin/api/stats has no system-memory fields
    (model_memory_used is phys_footprint — flat), so the newest stored
@@ -1141,10 +1132,10 @@ async function refreshSysPct() {
         const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
             encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s'));
         const lat = (r && r.latest) || {};
-        const gb = k => (lat[k] && typeof lat[k].v === 'number') ? +(lat[k].v * 1e-9).toFixed(3) : null;
+        const gb = k => (lat[k] && typeof lat[k].v === 'number') ? +(lat[k].v * GIB).toFixed(3) : null;
         const u = lat['mem.used_bytes'];
         if (u && typeof u.v === 'number') {
-            sysLive = { usedGB: +(u.v * 1e-9).toFixed(3),
+            sysLive = { usedGB: +(u.v * GIB).toFixed(3),
                         ceilGB: gb('mem.custom_ceiling_bytes'),
                         iogpuGB: gb('mem.iogpu_limit_bytes'),
                         ts: u.ts * 1000 };
@@ -1199,7 +1190,7 @@ async function refreshPowerChips() {
     finally { pwrChipsFetching = false; }
 }
 
-function pushStatusSample(s, hotSorted) {
+function pushStatusSample(s) {
     refreshSysPct();   // fire-and-forget; lands in the next push
     // Chart buffers (window pruning happens at draw time). U30: column 3 =
     // cached tok/s from the metrics/latest poll (collector tick rate, ~10 s
@@ -1207,23 +1198,16 @@ function pushStatusSample(s, hotSorted) {
     tpsData[0].push(s.time); tpsData[1].push(s.genTps); tpsData[2].push(s.prefillTps);
     tpsData[3].push(cachedTps !== null && Date.now() - cachedTpsTs < 120_000 ? cachedTps : null);
     while (tpsData[0].length > MAX_POINTS) for (const col of tpsData) col.shift();
-    // Per-model hot cache (GB): per-id session buffers, top-3 membership
-    // recomputed from live + history (see hotLive/pickHotIds). Membership
-    // changes rebuild the chart (legend + series list); values never move
-    // between series because buffers are keyed by model, not position.
-    for (const m of hotSorted) {
-        if (m.hotBytes === null) continue;
-        let lv = hotLive.get(m.id);
-        if (!lv) { lv = { ts: [], v: [] }; hotLive.set(m.id, lv); }
-        lv.ts.push(s.time); lv.v.push(+(m.hotBytes / 1e9).toFixed(3));
-        while (lv.ts.length > MAX_POINTS) { lv.ts.shift(); lv.v.shift(); }
-    }
-    const hotIds = pickHotIds();
-    if (hotIds.join('|') !== cacheSeriesIds.join('|')) {
-        cacheSeriesIds = hotIds;
-        createCharts();
-    }
-    // U38: omlx footprint GB + the two absolute limit lines (collector
+    // U40: ONE summed hot-cache point in GiB. Prefer upstream's process-wide
+    // hot_cache_size_bytes (the exact global, same number classic shows);
+    // fall back to summing the per-model rows when it's absent.
+    const hotBytes = s.hotCacheBytes !== null
+        ? s.hotCacheBytes
+        : (s.cacheModels || []).reduce((a, m) => a + (m.hotBytes || 0), 0);
+    hotLive.ts.push(s.time);
+    hotLive.v.push(+(hotBytes * GIB).toFixed(3));
+    while (hotLive.ts.length > MAX_POINTS) { hotLive.ts.shift(); hotLive.v.shift(); }
+    // U38: omlx footprint GiB + the two absolute limit lines (collector
     // mem.* via metrics/latest). Limits absent -> null (flat line hidden).
     const fresh = sysLive.ts && Date.now() - sysLive.ts < 120_000;
     memData[0].push(s.time);

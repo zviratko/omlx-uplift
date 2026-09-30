@@ -1292,19 +1292,23 @@ function applyWidth() {
 }
 function renderWidthSeg() {
     const seg = $('lt-widths');
-    if (!seg || seg.childElementCount) return;
-    for (const id of UPL.WIDTH_IDS) {
-        const b = document.createElement('button');
-        b.type = 'button'; b.dataset.width = id;
-        b.textContent = C.tf(`uplift.layout.width_${id}`, id);
-        b.onclick = () => {
-            if (!dashEditing) return;
-            dashDraft.width = id;
-            renderWidthSeg(); applyWidth();
-            requestAnimationFrame(() => { dashGrid?.onResize(); refitUpliftBlocks(); CH.resizeCharts(); });
-        };
-        seg.append(b);
+    if (!seg) return;
+    if (!seg.childElementCount) {
+        for (const id of UPL.WIDTH_IDS) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.dataset.width = id;
+            b.textContent = C.tf(`uplift.layout.width_${id}`, id);
+            b.onclick = () => {
+                if (!dashEditing) return;
+                dashDraft.width = id;
+                renderWidthSeg(); applyWidth();
+                requestAnimationFrame(() => { dashGrid?.onResize(); refitUpliftBlocks(); CH.resizeCharts(); });
+            };
+            seg.append(b);
+        }
     }
+    // U40 fix: the build-guard used to `return` outright, so the highlight
+    // never followed the selection — 1280px stayed lit while 1440px applied.
     const active = dashEditing && dashDraft ? dashDraft.width : upLayout.width;
     seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.width === active));
 }
@@ -1450,6 +1454,8 @@ document.addEventListener('click', e => {
 
 /* ---------------- animated counters (lightweight rAF tween) --------------- */
 const counters = {};
+/* U40: rolling buffers for the active/waiting tile readouts (see renderStatus). */
+const activeRoll = [], waitingRoll = [];
 function counter(elId, format) {
     counters[elId] = { el: $(elId), format, value: null, raf: 0 };
 }
@@ -1523,8 +1529,18 @@ function render(s) {
     $('v-requests-sub').textContent = alltimeRequests !== null
         ? C.tf('uplift.label.all_time', 'all-time') + ' ' + C.fmtNumber(alltimeRequests) : '';
     $('chip-uptime').textContent = `up ${C.fmtDuration(s.uptime)}`;
-    $('v-active2').textContent = s.active === null ? '—' : s.active;
-    $('v-waiting2').textContent = s.waiting === null ? '—' : s.waiting;
+    // U40: the active/waiting readouts are instantaneous engine counts and
+    // jitter between polls; the tile shows a rolling mean of the last 12
+    // samples so it stops flicking (0-1-0 between two polls reads as noise).
+    activeRoll.push(s.active); waitingRoll.push(s.waiting);
+    while (activeRoll.length > 12) activeRoll.shift();
+    while (waitingRoll.length > 12) waitingRoll.shift();
+    const rollAvg = roll => {
+        const vals = roll.filter(v => v !== null);
+        return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '—';
+    };
+    $('v-active2').textContent = rollAvg(activeRoll);
+    $('v-waiting2').textContent = rollAvg(waitingRoll);
 
     const dot = $('status-dot');
     dot.classList.toggle('bad', s.pressure === 'hard');
@@ -1549,9 +1565,7 @@ function render(s) {
     renderLive(s);
     renderRequestStats(s);
 
-    const hotSorted = (s.cacheModels || []).slice()
-        .sort((a, b) => (b.hotBytes || 0) - (a.hotBytes || 0)).slice(0, 3);
-    CH.pushStatusSample(s, hotSorted);   // buffers + redraw (uplift_charts.js)
+    CH.pushStatusSample(s);   // buffers + redraw (uplift_charts.js)
 }
 
 /* IN-FLIGHT card (redesign): every loaded model gets a header line; each

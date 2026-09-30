@@ -451,10 +451,13 @@ body.layout-editing { user-select: none; }
 }
 .dash-tray-pill.ui-draggable-dragging { opacity: 0.85; z-index: 100; }
 
-/* Page-container width presets (classic's max-w ladder, labels match) */
-.wrap { max-width: 1280px; margin: 0 auto; padding: 36px clamp(12px, 3vw, 32px) 60px; }
-[data-layout-width="wide"] .wrap { max-width: 1440px; }
-[data-layout-width="wider"] .wrap { max-width: 1600px; }
+/* Page-container width presets (classic's max-w ladder, labels match).
+   U40 (user 2026-09-30): the default rung moved to 1440px — the 1280 board
+   crammed the four-across metric-card row; the ladder shifted up one step
+   (wide=1600, wider=1920) instead of renumbering presets. */
+.wrap { max-width: 1440px; margin: 0 auto; padding: 36px clamp(12px, 3vw, 32px) 60px; }
+[data-layout-width="wide"] .wrap { max-width: 1600px; }
+[data-layout-width="wider"] .wrap { max-width: 1920px; }
 [data-layout-width="full"] .wrap { max-width: none; }
 
 .card h2 {

@@ -426,11 +426,14 @@ function fmtCompact(n) {
     return String(Math.round(n * 10) / 10);
 }
 function fmtBytes(n) {
+    // Binary units (GiB/MiB): RAM-side numbers — memory budgets, hot cache,
+    // model footprints — are allocated in 1024³ blocks; decimal GB understated
+    // them vs the OS instruments (user 2026-09-30).
     if (n === null) return '—';
-    const g = n / 1e9;
-    if (g >= 10) return g.toFixed(0) + ' GB';
-    if (g >= 1) return g.toFixed(2) + ' GB';
-    return (n / 1e6).toFixed(0) + ' MB';
+    const g = n / 2 ** 30;
+    if (g >= 10) return g.toFixed(0) + ' GiB';
+    if (g >= 1) return g.toFixed(2) + ' GiB';
+    return (n / 2 ** 20).toFixed(0) + ' MiB';
 }
 function fmtDuration(s) {
     if (s === null) return '—';
@@ -472,6 +475,32 @@ function tf(key, fallback, vars) {
             vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : m);
     }
     return s;
+}
+
+/* Centered moving average over a value column (nulls skipped, not shifted):
+   rate metrics are per-tick counter deltas and spike on tick-interval
+   jitter; the raw line reads as noise. Averages non-null values within
+   ±half samples; a column of all nulls stays null (honest absence). */
+function movingAverage(vals, k) {
+    if (!(k > 1) || vals.length < k) return vals;
+    const half = k >> 1;
+    const out = new Array(vals.length);
+    for (let i = 0; i < vals.length; i++) {
+        let sum = 0, n = 0;
+        for (let j = Math.max(0, i - half); j <= Math.min(vals.length - 1, i + half); j++) {
+            const v = vals[j];
+            if (v !== null && v !== undefined) { sum += v; n++; }
+        }
+        out[i] = n ? sum / n : null;
+    }
+    return out;
+}
+
+/* Keys whose drawn series get client-side smoothing (instantaneous rate
+   gauges — see movingAverage). Long windows are already avg-downsampled
+   server-side; the caller skips smoothing when a bucket is in play. */
+function smoothKey(key) {
+    return /^(rate\.|queue\.|engines\.active_requests$)/.test(key || '');
 }
 
 /* Backfill merge: server history points (res fine|hourly) into a live
@@ -524,7 +553,7 @@ function errorText(body) {
 
 return { num, r, normalize, modelState, appendSample, pruneOlderThan, eventsBetween, milestonesBetween,
          MILESTONE_LADDER, nextMilestone, milestoneFloorOf,
-         createRequestTracker, percentile, mean, mergeHistory,
+         createRequestTracker, percentile, mean, mergeHistory, movingAverage, smoothKey,
          setLocale, getLocale, t, tf,
          PREFS_KEY, PREFS_DEFAULTS, THEMES, SKIN_NAME_RE, loadPrefs, savePrefs,
          LAYOUT_KEY, LAYOUT_DEFAULTS, LAYOUT_WINDOWS, LAYOUT_INTERVALS, LAYOUT_PERCENTILES,

@@ -165,8 +165,19 @@ test('formatters', () => {
     assert.strictEqual(C.fmtCompact(1234567), '1.23M');
     assert.strictEqual(C.fmtCompact(999), '999');
     assert.strictEqual(C.fmtCompact(null), '—');
-    assert.strictEqual(C.fmtBytes(8.34e9), '8.34 GB');
-    assert.strictEqual(C.fmtBytes(500e6), '500 MB');
+    assert.strictEqual(C.fmtBytes(8.34 * 2 ** 30), '8.34 GiB');
+    assert.strictEqual(C.fmtBytes(500 * 2 ** 20), '500 MiB');
+    assert.strictEqual(C.fmtBytes(12 * 2 ** 30), '12 GiB');
+    // U40: smoothing helper — centered mean, nulls skipped not shifted
+    assert.deepStrictEqual(C.movingAverage([0, 6, 0, 6, 0], 3),
+                           [3, 2, 4, 2, 3]);
+    assert.deepStrictEqual(C.movingAverage([null, 4, null], 3),
+                           [4, 4, 4]);
+    assert.deepStrictEqual(C.movingAverage([null, null], 3), [null, null]);
+    assert.deepStrictEqual(C.movingAverage([1, 2], 3), [1, 2]);   // short col passthrough
+    assert.ok(C.smoothKey('rate.requests_s') && C.smoothKey('queue.waiting')
+              && C.smoothKey('engines.active_requests'));
+    assert.ok(!C.smoothKey('avg_generation_tps') && !C.smoothKey('sys.used_bytes'));
     assert.strictEqual(C.fmtDuration(3725), '1h 2m');
     assert.strictEqual(C.fmtDuration(75), '1m 15s');
     assert.strictEqual(C.fmtNumber(1234567), '1,234,567');

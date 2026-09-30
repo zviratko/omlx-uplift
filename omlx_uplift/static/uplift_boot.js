@@ -24,7 +24,9 @@ const { fetchJson, applyPrefs, loadLocale, applyTab, restartPolling,
         pollStats, pollGatewayInfo, renderTasks, loadSkins, renderSkinsMenu,
         currentTab, currentSub } = window.Uplift._bootGlue;
 fetchJson(`${API}/admin/api/device-info`).then(d => {
-    $('chip-device').textContent = `${d.chip_name}${d.chip_variant === 'Max' ? ' Max' : ''} · ${d.memory_gb} GB · ${d.gpu_cores}c`;
+    // RAM is sold decimal but reported by the OS in binary; Apple's own
+    // instruments say GiB (32 GB modules = 32 GiB on Apple Silicon).
+    $('chip-device').textContent = `${d.chip_name}${d.chip_variant === 'Max' ? ' Max' : ''} · ${d.memory_gb} GiB · ${d.gpu_cores}c`;
     $('chip-device').classList.add('state-ok');
 }).catch(() => {});
 /* U10: header shows which keg is serving. Identity comes from the server
