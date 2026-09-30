@@ -1,0 +1,9 @@
+{
+  "description": "Re-enable pip wheel cache in the Homebrew formula on macOS 27 (upstream jundot/omlx#3581). Warm installs ~60% faster; strip guards unchanged.",
+  "source": {
+    "kind": "github_pr",
+    "repo": "jundot/omlx",
+    "pr": 3581
+  },
+  "reversal": false
+}
