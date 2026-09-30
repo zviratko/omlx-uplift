@@ -399,9 +399,11 @@ def materialize(patches_to_apply: list[dict], cfg: dict) -> dict:
 
     _git(["checkout", "-q", "-B", branch, base_sha], cwd=path)
     commits: list[dict] = []
+    failed_pid = None   # patch whose apply/commit aborted the pass
     try:
         for p in patches_to_apply:
             pid, v = p["id"], p.get("version", 0)
+            failed_pid = pid
             _apply_one(path, pid, v, p["diff_bytes"])
             _git(["add", "-A"], cwd=path)
             if _git(["diff", "--cached", "--quiet"], cwd=path,
@@ -438,7 +440,7 @@ def materialize(patches_to_apply: list[dict], cfg: dict) -> dict:
         if cur_branch and cur_branch != branch:
             _git(["checkout", "-q", cur_branch], cwd=path, check=False)
         return {"ok": False, "reason": str(exc), "base": base_sha,
-                "branch": branch}
+                "branch": branch, "failed_patch": failed_pid}
     return {"ok": True, "tip": tip, "base": base_sha, "branch": branch,
             "commits": commits}
 

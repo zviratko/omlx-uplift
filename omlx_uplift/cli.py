@@ -685,9 +685,8 @@ def cmd_dev(argv=None) -> int:
         return 0
 
     if args.action in ("install", "upgrade"):
-        if args.action == "upgrade":
-            print("note: 'dev upgrade' is now 'dev install' (it installs "
-                  "the first build too)", file=sys.stderr)
+        # 'upgrade' stays accepted as a legacy alias — no note, the single
+        # install path installs the first build too
         return cmd_dev_install(args)
 
     if args.action == "reconfigure":
@@ -1076,6 +1075,21 @@ def cmd_dev_install(args) -> int:
         print(f"curated sync skipped: {exc}", file=sys.stderr)
 
     build_patches = patchsource.enabled_build_patches(_patches_store())
+    # patch process log: devsrc/patchsource/diffapply log their decisions on
+    # the shared "omlx_uplift" logger — a FileHandler here makes the patch
+    # pass auditable after the fact (offered when a patch fails)
+    import logging as _logging
+
+    log_dir = os.path.join(_patches.default_base_dir(), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    patch_log_path = os.path.join(log_dir, "dev-install.log")
+    _ph = _logging.FileHandler(patch_log_path)
+    _ph.setFormatter(_logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    _root = _logging.getLogger("omlx_uplift")
+    _root.addHandler(_ph)
+    _root.setLevel(min(_root.level or _logging.INFO, _logging.INFO))
+    print(f"patch process log: {patch_log_path}")
     res = devsrc.materialize(build_patches, cfg)
     if not res.get("ok"):
         print(f"materialize FAILED: {res.get('reason')}", file=sys.stderr)
@@ -1083,6 +1097,11 @@ def cmd_dev_install(args) -> int:
             print(f"  applied before failure: {c['id']} v{c.get('v')}",
                   file=sys.stderr)
         print("fix or disable the named patch, then re-run", file=sys.stderr)
+        if res.get("failed_patch"):
+            print("  one way out — disable it and re-run:", file=sys.stderr)
+            print(f"    omlx-uplift patch disable {res['failed_patch']}",
+                  file=sys.stderr)
+        print(f"  investigation: {patch_log_path}", file=sys.stderr)
         # last line doubles as a scrape target (dashboard tails the output)
         print(f"RESULT: FAILED - materialize aborted: {res.get('reason')}",
               flush=True)
@@ -1113,6 +1132,9 @@ def cmd_dev_install(args) -> int:
     for pid, why in regate.items():
         print(f"{pid}: RE-GATE FAILED (needs_review): {why}",
               file=sys.stderr)
+        print("  one way out — disable it and re-run:", file=sys.stderr)
+        print(f"    omlx-uplift patch disable {pid}", file=sys.stderr)
+        print(f"  investigation: {patch_log_path}", file=sys.stderr)
 
     flags = set()
     if args.with_custom_kernel:
@@ -1145,13 +1167,18 @@ def cmd_dev_install(args) -> int:
     # on success AND on failure (the pin must never silently disappear)
     subprocess.run(["brew", "unpin", "omlx-dev"], capture_output=True)
     print("running: " + " ".join(cmd))
-    proc = subprocess.run(cmd)
+    # --quiet skips brew's caveats entirely (formula_installer: return if
+    # quiet?) — the restart hint we print after RESULT replaces them
+    proc = subprocess.run([*cmd, "--quiet"])
     if proc.returncode != 0:
         subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
         print("brew build FAILED — dev keg untouched (pin restored)",
               file=sys.stderr)
+        print(f"  investigation: {patch_log_path}", file=sys.stderr)
         print("RESULT: FAILED - brew build failed (see output above); "
               "dev keg untouched", flush=True)
+        _root.removeHandler(_ph)
+        _ph.close()
         return proc.returncode
     subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
     cfg = devsrc.load_config() or cfg
@@ -1167,10 +1194,16 @@ def cmd_dev_install(args) -> int:
     _mount_into_dev_keg()
     print(f"omlx-dev built from {tip[:12]}; .pth mount refreshed")
     _dev_next_steps(cfg, fresh=False)
-    # VERY LAST line: a single scrape-able verdict for the dashboard
+    # single scrape-able verdict for the dashboard
     print(f"RESULT: OK - omlx-dev built from {tip[:12]} "
           f"({n} patch commit(s), {skipped_n} skipped as already upstream)",
           flush=True)
+    # VERY LAST: the one command that matters now (brew's own 'after an
+    # upgrade' caveat is skipped — the build runs with --quiet)
+    print("\nTo restart omlx-dev now run:\n"
+          "  brew services restart omlx-dev", flush=True)
+    _root.removeHandler(_ph)
+    _ph.close()
     return 0
 
 
@@ -1249,18 +1282,19 @@ def _dev_patch_table(commits: list[dict], upstreamed: dict) -> None:
 def _dev_next_steps(cfg: dict, fresh: bool) -> None:
     """The ONE command that matters after a build. Bootstrap is already a
     done deal here (install refuses without it), so never mention it; the
-    coexistence warning above already printed the switch commands."""
+    coexistence warning above already printed the switch commands. After a
+    rebuild the only next step is the restart hint — printed by the caller
+    as the very last output after RESULT."""
     from . import devsrc
 
+    if not fresh:
+        return
     rt = devsrc.runtime_config(cfg)
-    if fresh:
-        print("\nNext steps:\n"
-              "  build with patches:  omlx-uplift dev install\n"
-              "  then start the dev server:  brew services start omlx-dev\n"
-              f"  dashboard: http://127.0.0.1:{rt['port']}/uplift/  "
-              f"(data root {rt['base_path']})")
-    else:
-        print("\n  load the new build:  brew services restart omlx-dev")
+    print("\nNext steps:\n"
+          "  build with patches:  omlx-uplift dev install\n"
+          "  then start the dev server:  brew services start omlx-dev\n"
+          f"  dashboard: http://127.0.0.1:{rt['port']}/uplift/  "
+          f"(data root {rt['base_path']})")
 
 
 def _regate_build_patches(build_patches: list[dict]) -> dict:

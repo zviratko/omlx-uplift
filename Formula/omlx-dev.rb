@@ -135,14 +135,6 @@ class OmlxDev < Omlx
     <<~EOS
       omlx-dev builds from #{self.class.dev_src} (branch #{self.class.dev_branch}).
       Build/rebuild ONLY via:  omlx-uplift dev install
-      (first run needs `omlx-uplift dev bootstrap` — it clones dev-src and
-      creates the branch this formula builds; a missing-branch clone error
-      below means bootstrap was skipped).
-      (it re-materializes the build patches, then reinstalls from the branch tip;
-      plain `brew upgrade` no-ops on branch heads).
-
-      Pin it so plain brew never rebuilds behind uplift's back:
-        brew pin omlx-dev
 
       Service (runs on port #{port}, data root #{base}):
         brew services stop omlx && brew services start omlx-dev
