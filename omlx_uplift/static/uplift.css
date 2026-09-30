@@ -1246,13 +1246,14 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     border-bottom: 1px solid var(--edge); }
 .diffslot { display: flex; justify-content: flex-end; min-width: 0; }
 .urow.settings .gctl input, .urow.settings .gctl select { width: 100%; min-width: 0; }
-.urow.settings .gctl input[type=checkbox] { width: auto; }
-/* checkbox rows: label | dirty chip | checkbox all hug the left, so the
-   original-value chip sits directly beside the tick (U6). DOM order is
-   label→chip→control, so column order keeps them adjacent. */
-.urow.settings:has(.gctl input[type=checkbox]) { grid-template-columns: minmax(0,max-content) auto minmax(0,1fr); }
-.urow.settings:has(.gctl input[type=checkbox]) .diffslot { justify-content: flex-start; }
-.urow.settings:has(.gctl input[type=checkbox]) .gctl { justify-content: flex-start; }
+.urow.settings .gctl input[type=checkbox] { width: auto; flex: 0 0 auto; }
+/* checkbox rows (user): the tick sits at the RIGHT edge, in the same value
+   column as every other control, on the setting-NAME line. The old
+   max-content label column crushed the control column to 0px whenever the
+   name+hint was long — the checkbox vanished ('no value' rows). Standard
+   columns keep the tick visible; align-self:start pins it to line 1. */
+.urow.settings:has(.gctl input[type=checkbox]) .gctl { width: auto; align-self: start; margin-top: 1px; justify-content: flex-end; }
+.urow.settings:has(.gctl input[type=checkbox]) .diffslot { align-self: start; margin-top: 2px; justify-content: flex-end; }
 @media (max-width: 900px) {
     .urow.settings { grid-template-columns: minmax(0,1fr) 150px; }
     .diffslot { grid-column: 1 / -1; justify-content: flex-start; }
