@@ -1143,12 +1143,12 @@ async function openEditor(model, profileName, templateName) {
     seBaseVals = JSON.parse(JSON.stringify(seValues));
     seTabs = [{ id: 'base', dirty: new Set(), origVals: JSON.parse(JSON.stringify(seOrig)) }];
     seActiveTab = 'base';
+    window.__seDeferred = () => seDeferred;   // debug handle (__upLayout pattern)
     // is_hidden/is_favorite/is_default/pinned are toggled from the models ROW
     // (classic _models.html), never in the settings modal — parity: not here.
     // popup modal, not an inline accordion: stable size for long forms
     const panel = editorNode();
     renderEditorFields(panel.querySelector('#se-fields'));
-    seMarkPendingRows();
     seLoadProfiles(model, panel.querySelector('.se-profs')).then(() => {
         // item 2: existing profiles are prominent top tabs, each showing
         // that profile's merged values (item 1: values are visible)
@@ -1170,6 +1170,9 @@ async function openEditor(model, profileName, templateName) {
     overlay.className = 'modal-overlay editor-overlay';
     overlay.append(panel);
     document.body.append(overlay);
+    // deferred settings surface only once the panel lives in the document
+    // (seMarkPendingRows locates it via document.querySelector)
+    seMarkPendingRows();
     panel.tabIndex = -1;
     panel.focus();
     // Escape is handled globally (uplift_state.js); closeEditor does the
@@ -1190,6 +1193,7 @@ async function openTemplateEditor(name) {
     if (!tpl) { MM_GLUE.toast('template "' + name + '" not found'); return; }
     seModel = null;
     seFormModel = { id: name, _template: true };
+    seDeferred = {};   // templates never have deferred engine settings
     seValues = window.UpliftModelSpec.buildState(seFormModel, tpl.settings || {});
     seOrig = JSON.parse(JSON.stringify(seValues));
     seBaseVals = JSON.parse(JSON.stringify(seValues));
