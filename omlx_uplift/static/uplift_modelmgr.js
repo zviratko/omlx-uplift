@@ -1173,6 +1173,7 @@ async function openEditor(model, profileName, templateName) {
     // deferred settings surface only once the panel lives in the document
     // (seMarkPendingRows locates it via document.querySelector)
     seMarkPendingRows();
+    seUpdateSaveBtn();   // deferred-only reopen: RESTART must already show
     panel.tabIndex = -1;
     panel.focus();
     // Escape is handled globally (uplift_state.js); closeEditor does the
