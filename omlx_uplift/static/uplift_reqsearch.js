@@ -109,7 +109,7 @@ async function runReqSearch() {
             { q, model, frm: from, limit: 50 }));
     } catch (err) {
         note.style.display = ''; note.style.flex = '0 0 100%';
-        note.textContent = C.t('uplift.req.load_failed', { msg: err.message });
+        note.textContent = C.tf('uplift.req.load_failed', 'load failed: {msg}', { msg: err.message });
         return;
     }
     const list = $('reqfeed');
@@ -128,11 +128,12 @@ async function runReqSearch() {
         const chips = $('req-timechips');
         const chip = chips && [...chips.children].find(x => +x.dataset.secs === reqWin);
         const scopeLbl = chip ? chip.textContent : `${reqWin / 3600}h`;
-        note.textContent = C.t('uplift.req.no_matches', { scope: `${scopeLbl} · ${model || C.t('uplift.req.all_models')}` });
+        note.textContent = C.tf('uplift.req.no_matches', 'No matches in {scope}',
+            { scope: `${scopeLbl} · ${model || C.tf('uplift.req.all_models', 'all models')}` });
         return;
     }
-    note.textContent = C.t('uplift.req.hits', { n: hits.length, mode: d.mode })
-        + (q ? '' : ` · ${C.t('uplift.req.retention_note', { days: reqRetainDays })}`);
+    note.textContent = C.tf('uplift.req.hits', '{n} match(es) · {mode}', { n: hits.length, mode: d.mode })
+        + (q ? '' : ` · ${C.tf('uplift.req.retention_note', 'history capped at {days} d retention', { days: reqRetainDays })}`);
     for (const h of hits) {
         const row = document.createElement('div'); row.className = 'model-row';
         const badge = document.createElement('span');
