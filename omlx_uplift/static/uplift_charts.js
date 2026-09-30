@@ -47,7 +47,7 @@ function restoreCursor(c) {
     c.setCursor({ idx: i }, false);  // fires hooks + moves the focus point
 }
 const tpsData = [[], [], []];        // time, generation tok/s, prefill tok/s
-const memData = [[], [], [], [], [], []];  // time, memory %, cache GB, hot1, hot2, hot3
+const memData = [[], [], [], [], [], []];  // time, memory %, cache GB (hot cols retired — see hotLive)
 const MAX_POINTS = 4000;
 
 /* Server-side chart history (uplift fine samples merged with vanilla's
@@ -58,9 +58,13 @@ const MAX_POINTS = 4000;
    ISSUE-6: the MEMORY&CACHE card used to draw ONLY the session buffer
    (memData) — switching its timeframe showed nothing before page load.
    mem.percent + cache.total_bytes now backfill from the store the same
-   way throughput does. Per-model hot-cache lines stay session-live-only
-   (their series keys rotate with the model set; honest gap, no fake line). */
-let chartHist = { gen: [], prefill: [], mem: [], cache: [] };   // arrays of {ts, v, res}
+   way throughput does. Per-model hot-cache lines backfill too since
+   2026-09-30: the collector writes stable 'hot.<model>' keys (zeros
+   included), /uplift/api/metrics/hot discovers them, and a drained or
+   freshly-loaded model keeps its line across refreshes — the old
+   session-live-only rule existed only because the rank keys (hot1/2/3)
+   rotated models through one series and made history meaningless. */
+let chartHist = { gen: [], prefill: [], mem: [], cache: [], hot: {} };   // arrays of {ts, v, res}; hot: model -> points (GB)
 let historyDirty = true, historyLoading = false;
 /* The two shared-history cards backfill at the LARGEST window any of them
    uses (one fetch, superset cached); each card draws its own slice. */
@@ -75,10 +79,11 @@ async function loadChartHistory() {
     historyLoading = true;
     try {
         const w = windowToParam();
-        const [g, p, m] = await Promise.all([
+        const [g, p, m, h] = await Promise.all([
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_generation_tps&window=${w}`).catch(() => null),
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_prefill_tps&window=${w}`).catch(() => null),
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('sys.percent,cache.total_bytes')}&window=${w}`).catch(() => null),
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/hot?window=${w}`).catch(() => null),
         ]);
         const conv = a => (a && a.series ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })) : []);
         const convMap = (o, k, scale) => (o && o.series_map && o.series_map[k]
@@ -93,7 +98,21 @@ async function loadChartHistory() {
                           // returned nothing and the line was session-only.
                           mem: convMap(m, 'sys.percent'),
                           // bytes -> GB: the card's right axis is GB (issue 6)
-                          cache: convMap(m, 'cache.total_bytes', 1e-9) };   // server ts is epoch SECONDS -> ms
+                          cache: convMap(m, 'cache.total_bytes', 1e-9),   // server ts is epoch SECONDS -> ms
+                          // per-model hot cache, bytes -> GB, keyed by model
+                          // id (the 'hot.' prefix is part of the metric key)
+                          hot: Object.fromEntries(Object.entries(
+                              (h && h.series_map) || {})
+                              .map(([k, pts]) => [k.slice('hot.'.length),
+                                    pts.map(x => ({ ts: x.ts * 1000, v: x.v * 1e-9,
+                                                    res: x.res }))])) };
+            // Membership may have changed with the history (fresh model,
+            // page just loaded): rebuild the series list before redraw.
+            const ids = pickHotIds();
+            if (ids.join('|') !== cacheSeriesIds.join('|')) {
+                cacheSeriesIds = ids;
+                createCharts();
+            }
             historyDirty = false;
             if (tpsChart) redrawCharts();
         } else {
@@ -118,6 +137,58 @@ function tpsWindowed() {
                 ts.map(t => (pi.has(t) ? pi.get(t) : null))];
 }
 let cacheSeriesIds = [];             // top-3 models currently drawn on mem chart
+/* Per-model hot-cache session buffers: model -> {ts[], v[] (GB)}. Keyed by
+   model id (not chart position) so a reshuffle of the top-3 never repaints
+   one model's values under another's label — the old positional columns
+   had to be wiped on every membership change. */
+const hotLive = new Map();
+
+/* Newest value of a hot series (live wins over history). Used to rank
+   which models get a line — top-3 by hot-cache size, drained models rank
+   last and simply disappear when three busier models push them out. */
+function hotLatest(id) {
+    const lv = hotLive.get(id);
+    if (lv && lv.ts.length) {
+        for (let i = lv.v.length - 1; i >= 0; i--)
+            if (lv.v[i] != null) return { v: lv.v[i], ts: lv.ts[i] };
+    }
+    const h = chartHist.hot[id];
+    if (h && h.length) return { v: h[h.length - 1].v, ts: h[h.length - 1].ts };
+    return null;
+}
+function pickHotIds() {
+    const ids = new Set([...hotLive.keys(), ...Object.keys(chartHist.hot)]);
+    const scored = [...ids].map(id => ({ id, s: hotLatest(id) }))
+                       .filter(x => x.s)
+                       .sort((a, b) => (b.s.v - a.s.v) || (b.s.ts - a.s.ts));
+    return scored.slice(0, 3).map(x => x.id);
+}
+/* Columns for the memory card: same union-timestamp alignment as the
+   throughput chart. All four series kinds (memory %, cache GB, per-model
+   hot cache) backfill from the store and merge with their live buffers. */
+function memWindowed() {
+    const now = Date.now();
+    const win = cardWindow('chart-mem');
+    const mm = C.mergeHistory(chartHist.mem, memData[0], memData[1], win, now);
+    const cc = C.mergeHistory(chartHist.cache, memData[0], memData[2], win, now);
+    const hot = cacheSeriesIds.map(id => {
+        const lv = hotLive.get(id) || { ts: [], v: [] };
+        return C.mergeHistory(chartHist.hot[id] || [], lv.ts, lv.v, win, now);
+    });
+    let allTs = mm.ts.concat(cc.ts);
+    for (const h of hot) allTs = allTs.concat(h.ts);
+    const ts = [...new Set(allTs)].sort((a, b) => a - b);
+    const mmI = new Map(mm.ts.map((t, i) => [t, mm.v[i]]));
+    const ccI = new Map(cc.ts.map((t, i) => [t, cc.v[i]]));
+    const cols = [ts,
+        ts.map(t => (mmI.has(t) ? mmI.get(t) : null)),
+        ts.map(t => (ccI.has(t) ? ccI.get(t) : null))];
+    for (const h of hot) {
+        const hi = new Map(h.ts.map((t, i) => [t, h.v[i]]));
+        cols.push(ts.map(t => (hi.has(t) ? hi.get(t) : null)));
+    }
+    return cols;
+}
 
 function chartColors() {
     const cs = getComputedStyle(document.documentElement);
@@ -126,32 +197,9 @@ function chartColors() {
              blue: cs.getPropertyValue('--chart-1').trim() || '#f2f0ea',
              gold: cs.getPropertyValue('--chart-2').trim() || '#e8a020' };
 }
-/* Columns for the memory card: same union-timestamp alignment as the
-   throughput chart. Series 1 (memory %) and 2 (cache GB) get server
-   backfill; the three per-model hot-cache lines only ever exist for this
-   session (issue 6: honest gap instead of pretending history). */
-function memWindowed() {
-    const now = Date.now();
-    const win = cardWindow('chart-mem');
-    const mm = C.mergeHistory(chartHist.mem, memData[0], memData[1], win, now);
-    const cc = C.mergeHistory(chartHist.cache, memData[0], memData[2], win, now);
-    const hot = [3, 4, 5].map(ci => ({ ts: memData[0], v: memData[ci] }));
-    const ts = [...new Set(mm.ts.concat(cc.ts))].sort((a, b) => a - b);
-    const mmI = new Map(mm.ts.map((t, i) => [t, mm.v[i]]));
-    const ccI = new Map(cc.ts.map((t, i) => [t, cc.v[i]]));
-    const hotI = hot.map(h => {
-        const m = new Map();
-        for (let i = 0; i < h.ts.length; i++) if (h.v[i] != null) m.set(h.ts[i], h.v[i]);
-        return m;
-    });
-    const cols = [ts,
-        ts.map(t => (mmI.has(t) ? mmI.get(t) : null)),
-        ts.map(t => (ccI.has(t) ? ccI.get(t) : null))];
-    for (const h of hotI) cols.push(ts.map(t => (h.has(t) ? h.get(t) : null)));
-    return cols;
-}
-/* windowedData() retired 2026-09-22 (issue 6): the memory card draws
-   memWindowed() now, which merges server history with the session buffer. */
+/* Old positional memWindowed (hot1/hot2/hot3 columns, session-live-only)
+   retired 2026-09-30 with the stable 'hot.<model>' keys — the merged
+   version above draws per-model history + live buffers. */
 function seriesValue(v) {
     return v === null || v === undefined ? '—' : C.fmtCompact(v);
 }
@@ -1108,21 +1156,25 @@ function pushStatusSample(s, cacheGB, hotSorted) {
     // Chart buffers (window pruning happens at draw time).
     tpsData[0].push(s.time); tpsData[1].push(s.genTps); tpsData[2].push(s.prefillTps);
     while (tpsData[0].length > MAX_POINTS) { tpsData[0].shift(); tpsData[1].shift(); tpsData[2].shift(); }
-    // Per-model hot cache (GB): keep a stable top-3 set; rebuild chart on change.
-    const hotIds = hotSorted.map(m => m.id);
+    // Per-model hot cache (GB): per-id session buffers, top-3 membership
+    // recomputed from live + history (see hotLive/pickHotIds). Membership
+    // changes rebuild the chart (legend + series list); values never move
+    // between series because buffers are keyed by model, not position.
+    for (const m of hotSorted) {
+        if (m.hotBytes === null) continue;
+        let lv = hotLive.get(m.id);
+        if (!lv) { lv = { ts: [], v: [] }; hotLive.set(m.id, lv); }
+        lv.ts.push(s.time); lv.v.push(+(m.hotBytes / 1e9).toFixed(3));
+        while (lv.ts.length > MAX_POINTS) { lv.ts.shift(); lv.v.shift(); }
+    }
+    const hotIds = pickHotIds();
     if (hotIds.join('|') !== cacheSeriesIds.join('|')) {
         cacheSeriesIds = hotIds;
-        // Reset per-model columns so old series values do not mislabel.
-        for (let ci = 3; ci < memData.length; ci++) memData[ci] = memData[0].map(() => null);
         createCharts();
     }
     const livePct = (sysPct !== null && Date.now() - sysPctTs < 120_000) ? sysPct : s.memPercent;
     memData[0].push(s.time); memData[1].push(livePct === null ? null : +livePct.toFixed(2));
     memData[2].push(cacheGB);
-    for (let i = 0; i < 3; i++) {
-        const m = hotSorted[i];
-        memData[3 + i].push(m && m.hotBytes !== null ? +(m.hotBytes / 1e9).toFixed(3) : null);
-    }
     while (memData[0].length > MAX_POINTS) for (const col of memData) col.shift();
     redrawCharts();
 }

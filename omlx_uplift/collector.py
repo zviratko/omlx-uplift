@@ -352,9 +352,12 @@ class Collector:
                         # dict (PagedSSDCacheStats), not at the top of
                         # get_ssd_cache_stats() — reading st made every
                         # hot* series permanently 0 (2026-09-26).
+                        # ALWAYS recorded (0 included): skipping drained
+                        # models broke the stored series at the moment the
+                        # hot cache emptied, so the chart line 'disappeared
+                        # after a while' (user 2026-09-30).
                         hb = int(ssd.get("hot_cache_size_bytes", 0) or 0)
-                        if hb > 0:
-                            hot[mid] = hb
+                        hot[mid] = hb
                         # U19: prefix/specprefill counters ride the SAME
                         # call. Lifetime counters are summed across loaded
                         # models; per-interval rates are derived below from
@@ -411,8 +414,15 @@ class Collector:
                         # at debug level, not silent.
                         log.debug("cache-stats walk failed for %s", mid, exc_info=True)
                 pairs["cache.total_bytes"] = float(total_bytes)
-                for rank, mid in enumerate(sorted(hot, key=lambda m: -hot[m])[:3]):
-                    pairs["hot%d.%s" % (rank + 1, mid)] = float(hot[mid])
+                # Stable per-model keys. The old rank keys ('hot1.<model>')
+                # rotated when the top-3 order changed — two models shared
+                # one stored series, so NO honest backfill was possible and
+                # the chart kept hot lines session-live-only ('nothing there
+                # on refresh', user 2026-09-30). 'hot.<model>' belongs to
+                # exactly one model forever; the store stays small (one key
+                # per loaded model).
+                for mid, hb in hot.items():
+                    pairs["hot." + mid] = float(hb)
                 # U19 queue gauges — summed scheduler depth across loaded
                 # models (the "stuck or just slow" split). Emitted whenever
                 # the loop ran on at least one engine.

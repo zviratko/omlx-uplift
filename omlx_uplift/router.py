@@ -798,6 +798,38 @@ async def metrics_series(
             "bucket_s": bucket, "series_map": series_map}
 
 
+@api_router.get("/metrics/hot")
+async def metrics_hot(window: str = "1h",
+                      is_admin: bool = Depends(require_admin)):
+    """All per-model hot-cache series ('hot.<model>') over WINDOW.
+    Discovery endpoint: the key names carry model ids the client cannot
+    know up front (a drained model must still backfill after a page
+    refresh — 'hot.<model>' keys are stable per model since 2026-09-30).
+    Same point shape / downsampling as /metrics/series (multi-key form)."""
+    import asyncio
+
+    window_s = _parse_window(window)
+    store = get_collector().store
+    from .store import server_instance_id
+
+    inst = server_instance_id()
+    keys = await asyncio.to_thread(store.keys_with_prefix, "hot.", window_s, inst)
+
+    async def one(k: str):
+        fine = await asyncio.to_thread(store.series, k, window_s, None, inst)
+        for p in fine:
+            p["res"] = "fine"
+        return _downsample(fine)
+
+    results = await asyncio.gather(*(one(k) for k in keys))
+    series_map, bucket = {}, 0
+    for k, (pts, b) in zip(keys, results):
+        series_map[k] = pts
+        bucket = max(bucket, b)
+    return {"keys": keys, "window": window, "window_s": window_s,
+            "bucket_s": bucket, "series_map": series_map}
+
+
 @api_router.get("/requests/stats")
 async def requests_stats(window: str = "1h",
                          is_admin: bool = Depends(require_admin)):

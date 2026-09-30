@@ -74,6 +74,47 @@ def test_active_requests_and_ssd_total_use_admin_snapshot_sources(monkeypatch):
     assert store.pairs["engines.loaded"] == 1.0
 
 
+def test_hot_cache_uses_stable_per_model_key_and_records_zero(monkeypatch):
+    """2026-09-30: hot cache is stored under 'hot.<model>' (stable across
+    rank changes) and a DRAINED model (0 bytes) is still written — skipping
+    zeros broke the series the moment the hot cache emptied, which is what
+    made the MEMORY&CACHE hot line 'disappear after a while'."""
+    import omlx_uplift.router as rt
+
+    @dataclass
+    class HotSsd:
+        total_size_bytes: int = 0
+        hot_cache_size_bytes: int = 0
+
+    class BusySched(FakeSched):
+        def get_ssd_cache_stats(self):
+            return {"ssd_cache": HotSsd(1000, 400)}
+
+    class DrainedSched(FakeSched):
+        def get_ssd_cache_stats(self):
+            return {"ssd_cache": HotSsd(1000, 0)}
+
+    class TwoPool:
+        def get_loaded_model_ids(self):
+            return ["busy", "drained"]
+
+        def get_entry(self, mid):
+            e = FakeEntry()
+            e.engine._engine.engine.scheduler = (
+                BusySched() if mid == "busy" else DrainedSched())
+            return e
+
+    monkeypatch.setattr(rt, "engine_pool", lambda: TwoPool())
+    store = CapturingStore()
+    c = Collector(store=store)
+    c.sample_once()
+
+    assert store.pairs["hot.busy"] == 400.0
+    assert store.pairs["hot.drained"] == 0.0    # zero IS a data point
+    # rank keys (hot1.*) are gone: two models shared one rotated series
+    assert not [k for k in store.pairs if k.startswith("hot1")]
+
+
 def test_broken_engine_does_not_poison_the_tick(monkeypatch):
     import omlx_uplift.router as rt
 

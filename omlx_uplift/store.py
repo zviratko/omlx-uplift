@@ -585,6 +585,23 @@ class MetricsStore:
         with self._lock:
             return [r[0] for r in self._conn.execute(q, args).fetchall()]
 
+    def keys_with_prefix(self, prefix: str, window_s: float,
+                         instance: str | None = None) -> list[str]:
+        """Metric keys with stored samples in KEY LIKE PREFIX+'%' over the
+        window. Discovery for series whose key names the client cannot know
+        (per-model hot-cache keys carry the model id). INSTANCE filtering as
+        in series(): a co-tenant's model list must not leak into ours."""
+        t0 = time.time() - window_s
+        q = "SELECT DISTINCT key FROM samples WHERE key LIKE ? ESCAPE '\\' AND ts >= ?"
+        args = [prefix.replace("\\", "\\\\").replace("%", "\\%")
+                      .replace("_", "\\_") + "%", t0]
+        if instance is not None:
+            q += " AND (instance IS NULL OR instance=?)"
+            args.append(instance)
+        q += " ORDER BY key"
+        with self._lock:
+            return [r[0] for r in self._conn.execute(q, args).fetchall()]
+
     def request_by_id(self, request_id: str) -> dict | None:
         with self._lock:
             cur = self._conn.execute(

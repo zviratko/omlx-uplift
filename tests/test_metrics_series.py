@@ -104,6 +104,48 @@ async def test_no_keys_is_400():
     assert e.value.status_code == 400
 
 
+# ---- /metrics/hot (per-model hot-cache discovery) --------------------------
+
+async def test_metrics_hot_discovers_per_model_keys():
+    from unittest.mock import MagicMock
+
+    store = MagicMock()
+    store.keys_with_prefix.return_value = ["hot.m1", "hot.m2"]
+    store.series.side_effect = lambda k, w, now=None, inst=None: [
+        {"ts": 100.0, "v": 5.0}, {"ts": 105.0, "v": 0.0}]
+    collector = MagicMock(store=store)
+    with patch.object(up, "get_collector", return_value=collector):
+        d = await up.metrics_hot(window="1h", is_admin=True)
+    assert d["keys"] == ["hot.m1", "hot.m2"]
+    # drained model keeps its trailing ZERO — that point is the whole point
+    assert d["series_map"]["hot.m2"][-1]["v"] == 0.0
+    assert store.keys_with_prefix.call_args[0][0] == "hot."
+
+
+def test_keys_with_prefix_filters_window_instance_and_underscores(tmp_path):
+    from omlx_uplift import store as st
+
+    s = st.MetricsStore(path=tmp_path / "m.sqlite3")
+    try:
+        now = time.time()
+        me = st.server_instance_id()
+        s.write_samples({"hot.model_x": 1.0}, ts=now - 10)
+        s.write_samples({"cache.total_bytes": 2.0}, ts=now - 10)
+        s.write_samples({"hot1.rotating": 3.0}, ts=now - 10)   # old rank key
+        s.write_samples({"hot.gone": 4.0}, ts=now - 99999)     # outside 1h
+        s._conn.execute(
+            "INSERT INTO samples(ts,key,value,instance) VALUES(?,?,?,'other')",
+            (now - 5, "hot.cotenant", 9.0))
+        s._conn.commit()
+
+        keys = s.keys_with_prefix("hot.", 3600, instance=me)
+        # LIKE '_*' must not let 'hot1.rotating' match 'hot.' ('_' wildcard
+        # escaped); co-tenant and out-of-window keys stay out.
+        assert keys == ["hot.model_x"]
+    finally:
+        s.close()
+
+
 # ---- MetricsStore.latest (U11 live chart push) ---------------------------
 
 def test_store_latest_returns_newest_point(tmp_path):
