@@ -1835,8 +1835,8 @@ function seMarkPendingRows() {
     if (!keys.length) { if (host) host.remove(); return; }
     if (!host) {
         host = document.createElement('div');
-        host.className = 'se-divergence se-pending';
-        fields.prepend(host);
+        host.className = 'se-pending';   // NOT .se-divergence: that banner's
+        fields.prepend(host);            // renderer would steal and remove it
     }
     host.textContent = '';
     const line = document.createElement('div');

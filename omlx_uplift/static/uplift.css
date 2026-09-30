@@ -707,6 +707,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* item 4: RUNTIME DIVERGENCE banner */
 .se-divergence { border: 1px solid #b3541e; background: rgba(179, 84, 30, 0.08);
     padding: 7px 10px; margin: 8px 0; font-size: 12px; }
+/* U41: PENDING RESTART banner (same frame, amber palette) */
+.se-pending { border: 1px solid rgba(160, 120, 0, 0.7); background: rgba(220, 160, 0, 0.10);
+    padding: 7px 10px; margin: 8px 0; font-size: 12px; }
+.se-pending button { margin-left: 10px; }
 .se-div-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
     color: #b3541e; font-weight: 600; }
 .se-div-show { font: 500 10px/1 var(--mono); padding: 3px 6px; }
