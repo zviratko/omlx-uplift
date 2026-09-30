@@ -29,6 +29,7 @@ write_tick(), and a wal_checkpoint(TRUNCATE) inside the daily purge pass.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -367,6 +368,35 @@ class MetricsStore:
             prev = cur["log_days"]
             self.set_meta("retention_log_days", str(_clamp_days(log_days, prev)))
         return self.retention()
+
+    # -- deferred model settings (two-phase save) --------------------------
+    # U41: phase 1 of the editor's honest save persists engine-rebuild
+    # settings here (classic PUT auto-unloads a loaded engine when those
+    # keys are present, so they cannot ride the live save). Phase 2 (the
+    # editor's RESTART MODEL) pushes them through the classic PUT and
+    # clears the record. Only accessed via get_*_deferred_settings below —
+    # the whole-table VACUUM must not treat these as retention config.
+
+    _DEFER_PREFIX = "deferred_settings:"
+
+    def get_deferred_settings(self, model_id: str) -> dict:
+        raw = self.get_meta(self._DEFER_PREFIX + model_id)
+        if not raw:
+            return {}
+        try:
+            d = json.loads(raw)
+        except ValueError:
+            return {}
+        return d if isinstance(d, dict) else {}
+
+    def set_deferred_settings(self, model_id: str, settings: dict):
+        self.set_meta(self._DEFER_PREFIX + model_id,
+                      json.dumps(settings if isinstance(settings, dict) else {}))
+
+    def clear_deferred_settings(self, model_id: str):
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM meta WHERE key=?",
+                               (self._DEFER_PREFIX + model_id,))
 
     # -- write side (collector) ------------------------------------------
 

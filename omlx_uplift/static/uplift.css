@@ -1441,6 +1441,12 @@ label.se-row.dirty input, label.se-row.dirty select, label.se-row.dirty textarea
 .urow.settings.restartq input, .urow.settings.restartq select, .urow.settings.restartq textarea,
 label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq textarea {
     border-color: var(--red); }
+/* U41 two-phase save: saved-but-not-yet-applied runtime settings read as a
+   dashed amber frame (stored ✓, engine ✗) — distinct from the red dirty
+   restartq tint (unsaved) and the accent dirty tint (live-pending). */
+label.se-row.pending-restart > .se-ctl > input,
+label.se-row.pending-restart > .se-ctl > select {
+    border-style: dashed; border-color: rgba(160, 120, 0, 0.8); }
 .diff-out { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px;
     font: 400 10px/1.3 var(--mono); flex: 0 0 auto; }
 .diff-out[hidden] { display: none; }   /* inline-flex would beat the attr */

@@ -41,6 +41,39 @@ async function loadGrammarParsers() {
     } catch (_) { /* offline/upstream missing: fall back to model-reported list */ }
 }
 let seOrig = {};                     // baseline snapshot for dirty tracking
+/* U41 two-phase save (user design): phase 1 SAVE persists EVERYTHING —
+   live keys go through the classic sparse PUT, engine-rebuild keys cannot
+   (the server auto-unloads on their mere presence) so they persist in the
+   uplift deferred-settings store; phase 2 RESTART MODEL pushes the full
+   payload (classic auto-unload fires) and clears the deferred record. */
+let seDeferred = {};                 // stored runtime payload awaiting phase 2 (open model)
+const seDeferKeys = () => new Set([...window.UpliftModelSpec.RUNTIME_SETTING_KEYS,
+                                   'model_type_override']);
+function seDeferredSubset(full) {
+    const ks = seDeferKeys(), out = {};
+    for (const [k, v] of Object.entries(full)) if (ks.has(k)) out[k] = v;
+    return out;
+}
+async function seLoadDeferred(model) {
+    try {
+        seDeferred = (await MM_GLUE.fetchJson(
+            `${API}/uplift/api/models/${encodeURIComponent(model)}/deferred-settings`)).settings || {};
+    } catch (_) { seDeferred = {}; }
+}
+async function sePersistDeferred(model, settings) {
+    await fetch(`${API}/uplift/api/models/${encodeURIComponent(model)}/deferred-settings`,
+        { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ settings }) });
+    seDeferred = settings;
+}
+async function seClearDeferred(model) {
+    if (!Object.keys(seDeferred).length) return;
+    seDeferred = {};
+    try {
+        await fetch(`${API}/uplift/api/models/${encodeURIComponent(model)}/deferred-settings`,
+            { method: 'DELETE' });
+    } catch (_) { /* best-effort; next load re-syncs from server */ }
+}
 function seDirtyKeys() {                     // dirty keys of the ACTIVE tab
     const t = seTab();
     return t ? [...t.dirty] : [];
@@ -63,31 +96,33 @@ function seUpdateSaveBtn() {
     const rb = document.getElementById('se-restart');
     const n = seDirtyKeys().length;
     const onProfile = !seIsBaseTab();
-    // item 3: on a LOADED model the base tab splits honestly — SAVE persists
-    // only settings that apply live; runtime-signature settings need the
-    // model to be reloaded and ride the separate RESTART MODEL button.
-    const runtimeDirty = !onProfile && seModelIsLoaded() ? seRuntimeDirtyKeys().length : 0;
-    const plainDirty = n - (onProfile || !seModelIsLoaded() ? 0 : runtimeDirty);
+    // U41 two-phase (user design): SAVE commits EVERY dirty key — live keys
+    // via the sparse classic PUT, runtime keys via the uplift deferred
+    // store (the classic PUT auto-unloads on their presence). It is never
+    // blocked. RESTART MODEL is phase 2: push everything and reload; it is
+    // offered while anything waits for a reload — deferred (saved) or dirty.
+    const loaded = seModelIsLoaded();
+    const pending = onProfile ? 0 : Object.keys(seDeferred).length;
+    const runtimeDirty = !onProfile && loaded ? seRuntimeDirtyKeys().length : 0;
+    const awaitingReload = pending + runtimeDirty;
     b.classList.toggle('queued', n > 0);
     b.classList.toggle('restart-mode', false);
     const tabTxt = onProfile ? ' PROFILE' : '';
     b.textContent = n
-        ? (runtimeDirty && !plainDirty
-            // U41: "WAIT —" read as a broken button (user). Say what to
-            // press instead — the RESTART MODEL button is right next to it.
-            ? 'RESTART INSTEAD'
-            : 'SAVE' + tabTxt + (plainDirty > 0 ? ' (' + plainDirty + ')' : ''))
+        ? ('SAVE' + tabTxt + ' (' + n + ')')
         : (onProfile ? 'SAVE PROFILE' : 'SAVE');
-    b.title = runtimeDirty
+    b.title = runtimeDirty || pending
         ? C.tf('uplift.se.save_split_title',
-            'SAVE writes settings that apply without a reload. The rest need a model reload — use RESTART MODEL.')
+            'SAVE stores everything now; settings that rebuild the engine apply when you press RESTART MODEL.')
         : '';
-    b.disabled = n ? (runtimeDirty && !plainDirty) : true;
+    b.disabled = n === 0;
     if (rb) {
-        rb.hidden = runtimeDirty === 0;
-        rb.textContent = '▶ RESTART MODEL (' + runtimeDirty + ')';
+        rb.hidden = awaitingReload === 0;
+        // unloaded base tab: SAVE already stores everything, RESTART MODEL
+        // additionally loads the engine with them now
+        rb.textContent = (loaded ? '▶ RESTART MODEL (' : '▶ LOAD MODEL (') + awaitingReload + ')';
         rb.title = C.tf('uplift.se.restart_title',
-            'Some queued settings apply only after the model is reloaded');
+            'Applies the stored settings by reloading the model now');
     }
     renderEdChanges();
     refreshDivergence();
@@ -1098,7 +1133,12 @@ async function openEditor(model, profileName, templateName) {
     } catch (_) { entry = null; }
     seFormModel = entry || { id: model, _missing: !entry };
     seBaseRaw = JSON.parse(JSON.stringify(settings));
-    seValues = window.UpliftModelSpec.buildState(seFormModel, settings);
+    // U41 phase-1 survivors: settings already stored but not yet applied by
+    // a reload. They are SAVED, so they seed the form baseline (not dirty)
+    // and get an amber pending-restart mark until phase 2 consumes them.
+    await seLoadDeferred(model);
+    seValues = window.UpliftModelSpec.buildState(seFormModel,
+        Object.assign({}, settings, seDeferred));
     seOrig = JSON.parse(JSON.stringify(seValues));
     seBaseVals = JSON.parse(JSON.stringify(seValues));
     seTabs = [{ id: 'base', dirty: new Set(), origVals: JSON.parse(JSON.stringify(seOrig)) }];
@@ -1108,6 +1148,7 @@ async function openEditor(model, profileName, templateName) {
     // popup modal, not an inline accordion: stable size for long forms
     const panel = editorNode();
     renderEditorFields(panel.querySelector('#se-fields'));
+    seMarkPendingRows();
     seLoadProfiles(model, panel.querySelector('.se-profs')).then(() => {
         // item 2: existing profiles are prominent top tabs, each showing
         // that profile's merged values (item 1: values are visible)
@@ -1120,6 +1161,7 @@ async function openEditor(model, profileName, templateName) {
     });
     panel._reRender = () => {
         renderEditorFields(panel.querySelector('#se-fields'));
+        seMarkPendingRows();
         seRenderTabs(panel);
         seUpdateSaveBtn();
     };
@@ -1749,6 +1791,79 @@ async function seLoadProfiles(model, host) {
     }
 }
 
+/* After a successful phase-1 save every dirty key is persisted (live keys
+   in the classic store, runtime keys in the deferred store), so the tab's
+   baseline moves to the current values and the fields stop reading dirty.
+   deferredKeys additionally get a pending-restart mark (amber, not the red
+   dirty tint) that only phase 2 clears. */
+function seCommitSaved(t0, deferredKeys) {
+    const kwChanged = JSON.stringify(seValues.ctKwargEntries || [])
+        !== JSON.stringify((t0 && t0.origVals || {}).ctKwargEntries || []);
+    for (const k of [...(t0 ? t0.dirty : seDirtyKeys())]) {
+        seOrig[k] = seValues[k];
+        seBaseVals[k] = seValues[k];
+    }
+    if (kwChanged) {
+        seOrig.ctKwargEntries = seValues.ctKwargEntries;
+        seBaseVals.ctKwargEntries = seValues.ctKwargEntries;
+    }
+    if (t0) { t0.dirty.clear(); t0.origVals = Object.assign({}, seBaseVals); }
+    for (const el of document.querySelectorAll('#se-fields .se-row.dirty'))
+        el.classList.remove('dirty');
+    for (const k of (deferredKeys || [])) {
+        const row = document.querySelector(`#se-fields [data-key="${k}"]`);
+        if (row) row.classList.add('pending-restart');
+    }
+}
+
+/* Pending-restart surfacing (U41): rows holding a deferred value get an
+   amber .pending-restart tint plus a banner that names the wait and offers
+   DISCARD (drop the stored values, back to what the engine runs). */
+function seMarkPendingRows() {
+    for (const el of document.querySelectorAll('#se-fields .se-row.pending-restart'))
+        el.classList.remove('pending-restart');
+    const panel = document.querySelector('.modal.editor');
+    if (!panel) return;
+    const keys = Object.keys(seDeferred);
+    for (const k of keys) {
+        const row = document.querySelector(`#se-fields [data-key="${k}"]`);
+        if (row) row.classList.add('pending-restart');
+    }
+    let host = panel.querySelector('.se-pending');
+    const fields = panel.querySelector('#se-fields');
+    if (!fields) return;
+    if (!keys.length) { if (host) host.remove(); return; }
+    if (!host) {
+        host = document.createElement('div');
+        host.className = 'se-divergence se-pending';
+        fields.prepend(host);
+    }
+    host.textContent = '';
+    const line = document.createElement('div');
+    line.textContent = C.tf('uplift.se.pending.banner',
+        'PENDING RESTART — {n} saved setting(s) apply the next time the model reloads').replace('{n}', keys.length);
+    const discard = document.createElement('button');
+    discard.type = 'button';
+    discard.className = 'se-btn tiny';
+    discard.textContent = C.tf('uplift.se.pending.discard', 'DISCARD');
+    discard.onclick = async () => {
+        // revert each deferred key to the classic-store value (seOrig was
+        // seeded WITH the deferred values, so consult seBaseRaw instead)
+        const baseState = window.UpliftModelSpec.buildState(seFormModel, seBaseRaw);
+        for (const k of keys) {
+            if (k in baseState) seValues[k] = baseState[k];
+            const t0 = seTabs.find(z => z.id === 'base');
+            if (t0) { delete t0.origVals[k]; }
+            delete seOrig[k]; delete seBaseVals[k];
+        }
+        await seClearDeferred(seModel);
+        renderEditorFields(fields);
+        seUpdateSaveBtn();
+    };
+    line.append(discard);
+    host.append(line);
+}
+
 async function saveEditor() {
     if (!seModel) return;
     const panel = document.querySelector('.modal.editor');
@@ -1775,6 +1890,7 @@ async function saveEditor() {
     let payload = full, reloadStep = false;
     if (loaded) {
         const plain = sePlainDirtyKeys();
+        const runtime = seRuntimeDirtyKeys();
         // dirty state keys -> the payload keys they own (some are derived)
         const KEY_MAP = {
             enableThinkingBudget: ['thinking_budget_enabled', 'thinking_budget_tokens'],
@@ -1794,40 +1910,69 @@ async function saveEditor() {
             payload.chat_template_kwargs = full.chat_template_kwargs;
             payload.forced_ct_kwargs = full.forced_ct_kwargs;
         }
-        reloadStep = seRuntimeDirtyKeys().length > 0;
-        if (!plain.length && !('chat_template_kwargs' in payload)) { restartModel(msg); return; }
+        // U41 phase 1 (user design): runtime keys are STORED too, never
+        // blocked — they go to the uplift deferred-settings store and apply
+        // on phase 2 (RESTART MODEL). Only keys dirty NOW are written, so a
+        // previously-deferred value survives an unrelated later save.
+        const deferAdd = {};
+        if (runtime.length) {
+            const ks = seDeferKeys();
+            for (const k of runtime) {
+                const pk = (KEY_MAP[k] || [k]).find(x => ks.has(x)) || k;
+                if (pk in full) deferAdd[pk] = full[pk];
+            }
+        }
+        const deferred = Object.keys(deferAdd).length
+            ? Object.assign({}, seDeferred, deferAdd) : seDeferred;
+        reloadStep = Object.keys(deferred).length > 0;
+        msg.textContent = 'saving…';
+        try {
+            // live keys ride the sparse classic PUT (empty payload = nothing
+            // live changed; skip it so we never touch the engine path)
+            if (Object.keys(payload).length)
+                await MM_GLUE.putModelSettings(seModel, payload);
+            if (Object.keys(deferAdd).length) await sePersistDeferred(seModel, deferred);
+            else seDeferred = deferred;
+            // mark every committed key saved (baseline moves to current), so
+            // the deferred set no longer reads as dirty-but-unsaved
+            seCommitSaved(t0, Object.keys(deferAdd));
+            seMarkPendingRows();
+            msg.textContent = reloadStep
+                ? 'saved ✓ — ' + Object.keys(seDeferred).length + ' setting(s) apply on RESTART MODEL'
+                : 'saved ✓';
+            MM_GLUE.toast(C.t('uplift.toast.settings_saved_model', {model: seModel}));
+            seUpdateSaveBtn();
+            refreshDivergence();
+            if (!reloadStep) setTimeout(closeEditor, 1200);
+            // restart still pending: editor stays open, RESTART MODEL visible
+        } catch (err) {
+            msg.textContent = `error: ${err.message}`;
+            MM_GLUE.toast(C.t('uplift.toast.save_failed', {msg: err.message}));
+        }
+        return;
     }
     msg.textContent = 'saving…';
     try {
         const r = await MM_GLUE.putModelSettings(seModel, payload);
-        msg.textContent = reloadStep
-            ? 'saved ✓ — ' + seRuntimeDirtyKeys().length + ' setting(s) apply after RESTART MODEL'
-            : 'saved ✓';
+        // no engine running: the full PUT stored everything classic-side —
+        // a leftover deferred record is redundant, drop it
+        await seClearDeferred(seModel);
+        seCommitSaved(seTabs.find(z => z.id === 'base'), []);
+        msg.textContent = 'saved ✓';
         MM_GLUE.toast(C.t('uplift.toast.settings_saved_model', {model: seModel}));
-        for (const k of sePlainDirtyKeys()) {
-            seOrig[k] = seValues[k];
-            seBaseVals[k] = seValues[k];
-            const t0 = seTabs.find(z => z.id === 'base');
-            if (t0) { t0.dirty.delete(k); t0.origVals = Object.assign({}, seBaseVals); }
-        }
-        if ('chat_template_kwargs' in payload) {
-            const t0 = seTabs.find(z => z.id === 'base');
-            seOrig.ctKwargEntries = seValues.ctKwargEntries;
-            seBaseVals.ctKwargEntries = seValues.ctKwargEntries;
-            if (t0) t0.origVals = Object.assign({}, seBaseVals);
-        }
         seUpdateSaveBtn();
         refreshDivergence();
-        if (!reloadStep) setTimeout(closeEditor, 1200);
-        // reload keys queued: editor stays open, RESTART MODEL is visible
+        setTimeout(closeEditor, 1200);
     } catch (err) {
         msg.textContent = `error: ${err.message}`;
         MM_GLUE.toast(C.t('uplift.toast.save_failed', {msg: err.message}));
     }
 }
-/* RESTART MODEL: save EVERYTHING (server auto-unloads on the reload keys),
-   then load again. A failed LOAD is fatal; the unload 400 ("not loaded" —
-   the server already unloaded on save) is expected and tolerated. */
+/* RESTART MODEL (phase 2): push EVERYTHING — deferred values are already in
+   seValues, so the full classic PUT carries them and the server's
+   auto-unload fires; then load. The deferred record is cleared. A failed
+   LOAD is fatal; the unload 400 ("not loaded" — the server already
+   unloaded on save) is expected and tolerated. */
 async function restartModel(msg) {
     const panel = document.querySelector('.modal.editor');
     if (!panel) return;
@@ -1842,6 +1987,7 @@ async function restartModel(msg) {
         try { await MM_GLUE.postModelAction(seModel, 'unload'); }
         catch (_) { /* already unloaded by the server on save */ }
         await MM_GLUE.postModelAction(seModel, 'load');
+        await seClearDeferred(seModel);
         MM_GLUE.toast(C.t('uplift.toast.reloaded_with_settings', {model: seModel}));
         closeEditor();
     } catch (e) {

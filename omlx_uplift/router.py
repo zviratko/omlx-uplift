@@ -528,6 +528,52 @@ async def delete_model_settings_route(
     raise HTTPException(status_code=404, detail=f"No stored settings: {model_id}")
 
 
+# --------------------------------------------------------------------------
+# Deferred model settings (U41 two-phase honest save).
+#
+# The classic PUT auto-unloads a loaded engine as soon as an engine-
+# construction ("runtime") key is PRESENT in the payload. Phase 1 of the
+# editor's save therefore cannot send those keys; it persists them here.
+# Phase 2 (RESTART MODEL) pushes the whole set through the classic PUT and
+# clears the record. Values here are a settings-payload subset keyed by
+# model id; they never enter a running engine by themselves.
+# --------------------------------------------------------------------------
+
+
+@api_router.get("/models/{model_id}/deferred-settings")
+async def get_deferred_settings_route(model_id: str,
+                                      is_admin: bool = Depends(require_admin)):
+    from .store import get_store
+
+    return {"id": model_id,
+            "settings": get_store().get_deferred_settings(model_id)}
+
+
+@api_router.post("/models/{model_id}/deferred-settings")
+async def put_deferred_settings_route(model_id: str, request: Request,
+                                      is_admin: bool = Depends(require_admin)):
+    from .store import get_store
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    settings = body.get("settings") if isinstance(body, dict) else None
+    if not isinstance(settings, dict):
+        raise HTTPException(status_code=400, detail="settings object expected")
+    get_store().set_deferred_settings(model_id, settings)
+    return {"id": model_id, "settings": settings}
+
+
+@api_router.delete("/models/{model_id}/deferred-settings")
+async def delete_deferred_settings_route(model_id: str,
+                                         is_admin: bool = Depends(require_admin)):
+    from .store import get_store
+
+    get_store().clear_deferred_settings(model_id)
+    return {"cleared": model_id}
+
+
 @api_router.get("/model-settings-index")
 async def model_settings_index(is_admin: bool = Depends(require_admin)):
     """Stored model-settings ids vs models discovered on disk.
