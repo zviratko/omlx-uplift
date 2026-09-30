@@ -232,8 +232,10 @@ const EXPLORE_METRICS = [
         { key: 'queue.prefilling', fmt: 'count' },
         { key: 'queue.running', fmt: 'count' },
     ] },
-    // U20 (tray-only AND gated on macmon presence — cards are not even
-    // created when the keys never appear): power draw + temperature.
+    // U20/U24 (gated on macmon DATA presence): power draw + temperature.
+    // The cards always exist; without samples they stay hidden (parked — no
+    // slot, no tray pill) and take their default row-2 slot the moment the
+    // collector reports them, same flag pattern as the header chips.
     { key: 'pwr.total_w', fmt: 'watts', gated: true, titleKey: 'pwr.draw', series: [
         { key: 'pwr.total_w', fmt: 'watts' },
         { key: 'pwr.cpu_w', fmt: 'watts' },

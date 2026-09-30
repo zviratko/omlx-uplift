@@ -41,7 +41,9 @@
         'met-pfx-lookup-hit-pct',
         'met-spec-saved-tokens-min',
         'met-queue-waiting',
-        // U20 gated: no macmon → the card is never created (silent absence).
+        // U20 gated (power/temperature): ships on the default board (a
+        // hidden parked slot, U24) and shows itself only once macmon data
+        // exists — same pattern as the header chips.
         'met-pwr-total-w',
         'met-therm-cpu-temp-c',
         'reqstats',
@@ -53,13 +55,18 @@
         // index.html, and pushFeed no-ops without its host.
     ];
     const COLUMNS = 24;
-    // U19/U20: tray-only blocks — valid ids, NEVER in the default board.
-    // A user adds them from the tray; nothing existing moves (U19 UI rule).
+    // U19/U20: tray-only blocks — valid ids, NEVER auto-appended into a
+    // SAVED layout (adding one never rewrites saved geometry). U24: the two
+    // GATED_IDS below are the exception on the DEFAULT board only (hidden
+    // parked slots), so the tray-only rule is about saved-layout merging.
     const TRAY_ONLY_IDS = [
         'met-pfx-token-hit-pct', 'met-pfx-lookup-hit-pct',
         'met-spec-saved-tokens-min', 'met-queue-waiting',
         'met-pwr-total-w', 'met-therm-cpu-temp-c',
     ];
+    // U24: gated blocks ship on the default board as hidden parked slots
+    // (revealed by the macmon data flag, never by a layout rewrite).
+    const GATED_IDS = ['met-pwr-total-w', 'met-therm-cpu-temp-c'];
     const MIN_W = 6;
     // Small stat tiles need to go narrower than the classic floor: the
     // shipped first row packs five of them (classic's 6 blocks a 24-col
@@ -79,12 +86,15 @@
     };
     const WIDTH_IDS = Object.keys(WIDTH_CLASSES);
 
-    // The shipped default (user layout 2026-09-29):
+    // The shipped default (user layout 2026-09-29 + U24 gated row):
     //   row 1: In-flight, Memory & cache                      (user 2026-09-29)
-    //   row 2: Prefill, Generation, Requests, Tokens, Cache   (5 stat tiles,
+    //   row 2: Power draw, Temperature (half-width; HIDDEN parked slots
+    //          until macmon data exists — the row simply vanishes without
+    //          macmon, and the packer closes the gap, user 2026-09-30)
+    //   row 3: Prefill, Generation, Requests, Tokens, Cache   (5 stat tiles,
     //          contents unchanged, dropped below In-flight)
-    //   row 3: Throughput, Request sizes (2 charts/cards half-width)
-    //   rows 4-6: metric cards (4 per row)
+    //   row 4: Throughput, Request sizes (2 charts/cards half-width)
+    //   rows 5-7: metric cards (4 per row)
     //   last: Events (full width)
     // Freeform board: every block carries an explicit h. Content refits
     // correct heights after first paint; positions never reflow sideways.
@@ -96,13 +106,20 @@
     const DEFAULT_BLOCKS = [
         { id: 'live', x: 0, y: 0, w: 12, h: 30 },
         { id: 'chart-mem', x: 12, y: 0, w: 12, h: 34 },
-        { id: 'prefill', x: 0, y: 34, w: 4, h: 20 },
-        { id: 'gen', x: 4, y: 34, w: 4, h: 20 },
-        { id: 'requests', x: 8, y: 34, w: 4, h: 20 },
-        { id: 'tokens', x: 12, y: 34, w: 4, h: 20 },
-        { id: 'cache', x: 16, y: 34, w: 8, h: 20 },
-        { id: 'chart-tps', x: 0, y: 54, w: 12, h: 34 },
-        { id: 'reqstats', x: 12, y: 54, w: 12, h: 30 },
+        // U24: the gated macmon row. Placed as real slots so a presence
+        // flip never rewrites geometry; hidden (card-parked) until the
+        // probe sees data, and _rowAlign skips parked cards, so an absent
+        // macmon leaves NO dead band — the board packs exactly like the
+        // pre-U24 default.
+        { id: 'met-pwr-total-w', x: 0, y: 34, w: 12, h: 20 },
+        { id: 'met-therm-cpu-temp-c', x: 12, y: 34, w: 12, h: 20 },
+        { id: 'prefill', x: 0, y: 54, w: 4, h: 20 },
+        { id: 'gen', x: 4, y: 54, w: 4, h: 20 },
+        { id: 'requests', x: 8, y: 54, w: 4, h: 20 },
+        { id: 'tokens', x: 12, y: 54, w: 4, h: 20 },
+        { id: 'cache', x: 16, y: 54, w: 8, h: 20 },
+        { id: 'chart-tps', x: 0, y: 74, w: 12, h: 34 },
+        { id: 'reqstats', x: 12, y: 74, w: 12, h: 30 },
         // EVENTS retired 2026-09-22 (user): the reaction feed duplicated the
         // request feed; the Request feed moved into its bottom full-width
         // slot.
@@ -111,19 +128,19 @@
         // Metric cards: 4 per row (w=6), compact chart fill. The board
         // owner may drop any of them; removed ones stay removed
         // (mergedBlocks memo in uplift.js).
-        { id: 'met-avg-generation-tps', x: 0, y: 88, w: 6, h: 20 },
-        { id: 'met-avg-prefill-tps', x: 6, y: 88, w: 6, h: 20 },
-        { id: 'met-rate-completion-tokens-s', x: 12, y: 88, w: 6, h: 20 },
-        { id: 'met-rate-prompt-tokens-s', x: 18, y: 88, w: 6, h: 20 },
-        { id: 'met-rate-requests-s', x: 0, y: 108, w: 6, h: 20 },
-        { id: 'met-cache-efficiency', x: 6, y: 108, w: 6, h: 20 },
-        { id: 'met-engines-active-requests', x: 12, y: 108, w: 6, h: 20 },
-        { id: 'met-sys-percent', x: 18, y: 108, w: 6, h: 20 },
-        { id: 'met-sys-used-bytes', x: 0, y: 128, w: 6, h: 20 },
-        { id: 'met-cache-total-bytes', x: 6, y: 128, w: 6, h: 20 },
-        { id: 'met-engines-loaded', x: 12, y: 128, w: 6, h: 20 },
-        { id: 'met-sys-total-bytes', x: 18, y: 128, w: 6, h: 20 },
-        { id: 'reqfeed', x: 0, y: 148, w: COLUMNS, h: 18 },
+        { id: 'met-avg-generation-tps', x: 0, y: 108, w: 6, h: 20 },
+        { id: 'met-avg-prefill-tps', x: 6, y: 108, w: 6, h: 20 },
+        { id: 'met-rate-completion-tokens-s', x: 12, y: 108, w: 6, h: 20 },
+        { id: 'met-rate-prompt-tokens-s', x: 18, y: 108, w: 6, h: 20 },
+        { id: 'met-rate-requests-s', x: 0, y: 128, w: 6, h: 20 },
+        { id: 'met-cache-efficiency', x: 6, y: 128, w: 6, h: 20 },
+        { id: 'met-engines-active-requests', x: 12, y: 128, w: 6, h: 20 },
+        { id: 'met-sys-percent', x: 18, y: 128, w: 6, h: 20 },
+        { id: 'met-sys-used-bytes', x: 0, y: 148, w: 6, h: 20 },
+        { id: 'met-cache-total-bytes', x: 6, y: 148, w: 6, h: 20 },
+        { id: 'met-engines-loaded', x: 12, y: 148, w: 6, h: 20 },
+        { id: 'met-sys-total-bytes', x: 18, y: 148, w: 6, h: 20 },
+        { id: 'reqfeed', x: 0, y: 168, w: COLUMNS, h: 18 },
     ];
 
     function defaultLayout() {
@@ -290,6 +307,7 @@
     root.UpliftLayout = {
         BLOCK_IDS,
         TRAY_ONLY_IDS,
+        GATED_IDS,
         COLUMNS,
         MIN_W,
         MIN_W_SMALL,

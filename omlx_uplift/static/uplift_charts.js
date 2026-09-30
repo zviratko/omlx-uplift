@@ -21,7 +21,7 @@ const CH_GLUE = {
     get _padObserver() { return window.Uplift._chartGlue._padObserver; },
     get removeCard() { return window.Uplift._chartGlue.removeCard; },
     get applyI18n() { return window.Uplift._chartGlue.applyI18n; },
-    get onGatedCardCreated() { return window.Uplift._chartGlue.onGatedCardCreated; },
+    get revealGatedCard() { return window.Uplift._chartGlue.revealGatedCard; },
 };
 /* ---------------- charts ---------------- */
 const axisFont = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -629,6 +629,18 @@ function renderCardTsRows(force) {
 /* ---- metric card engine ----
    Chart cache: id -> {chart, host, fmt, nameEl, noteEl, nowEl, def}. */
 const metricCharts = new Map();
+/* U24 (user 2026-09-30): gated (macmon) presence memo. The power/temperature
+   cards always exist like any other card — a session-scoped flag decides
+   whether they sit in their default slots or stay hidden (card-parked), the
+   same pattern the header chips use (they toggle `hidden` on the presence of
+   fresh samples). Once data has been seen the flag sticks for the session:
+   a later macmon stop lets the plots age out honestly instead of hiding
+   cards that were real. */
+const gateSeen = new Set();
+/* True while a gated def stays hidden (data never seen this session). */
+function _gateHidden(def) {
+    return !!(def && def.gated && !gateSeen.has(def.key));
+}
 /* fetch cache keyed by windowParam (cards sharing a window share bytes),
    each entry {data: series_map, at, fails, bucket_s} */
 const metricCache = {};
@@ -721,12 +733,18 @@ function metricOpts(id, def, col) {
         scales, axes, series,
     };
 }
-function createMetricCard(def) {
+function createMetricCard(def, park) {
     const id = C.metricBlockId ? C.metricBlockId(def.key) : 'met-' + def.key.replace(/[._]/g, '-');
     if (document.querySelector(`#grid .card[data-block="${id}"]`)) return;
     const titleKey = def.titleKey || def.key;   // U19 flagship reads better under its own name
     const sec = document.createElement('section');
     sec.className = 'card grid-stack-item';
+    // U24: a gated card whose data has not been seen yet is BORN parked —
+    // hidden, no grid slot, no tray pill (renderTray skips unseen gated
+    // ids). It keeps its DEFAULT geometry and the probe places it the
+    // moment macmon samples appear; the row packer ignores parked cards,
+    // so an absent macmon leaves no dead band.
+    if (park) sec.classList.add('card-parked');
     sec.dataset.id = id; sec.dataset.tab = 'status'; sec.dataset.block = id;
     sec.setAttribute('gs-id', id);
     const content = document.createElement('div'); content.className = 'grid-stack-item-content';
@@ -868,6 +886,10 @@ function metricYAxis(col, def) {
 function metricFetch(id, force) {
     const e = metricCharts.get(id);
     if (!e) return;
+    // U24: a gated card that has not been revealed yet (parked — no macmon
+    // data) must not fetch or draw: no series cost, no empty-column cache
+    // entries. Same network footprint as when the card did not exist.
+    if (_gateHidden(e.def)) return;
     const w = windowParam(cardWindow(id));
     const keys = metricServes(e.def).map(s => s.key);
     const key = keys.join(',');
@@ -930,7 +952,7 @@ function metricUnionCols(def, data, winMs) {
 }
 function drawMetricChart(id) {
     const e = metricCharts.get(id);
-    if (!e) return;
+    if (!e || _gateHidden(e.def)) return;   // U24: hidden gated card = no work
     const w = windowParam(cardWindow(id));
     const cache = metricCache[w] || { data: {}, bucket_s: 0 };
     const winMs = cardWindow(id) * 1000 + 60000;
@@ -1119,11 +1141,15 @@ window.Uplift.charts = {
     legendUpdater: legendUpdater,   // SWEEP178: exposed for console testability
     fitAllMetricPlots: fitAllMetricPlots, clearMainChartHover: clearMainChartHover,
     refreshPowerChips: refreshPowerChips,
-    /* U20 gated cards: create only when the series actually exist (macmon
-       present and warm). Resolves true once created; a later macmon
-       uninstall never removes live cards (they age out honestly). */
+    /* U24 gated cards (macmon): the card DOM ALWAYS exists (boot creates it
+       parked); this probe only FLIPS it visible once the series actually
+       have values — the same data-driven flag the header chips use. Absence
+       stays silent: parked card, no grid slot, no tray pill. Resolves once
+       per session (gateSeen); a later macmon uninstall never hides live
+       cards (they age out honestly). */
+    gatedSeen: key => gateSeen.has(key),
     probeGatedCards: async function () {
-        const defs = (C.EXPLORE_METRICS || []).filter(d => d.gated && !metricCharts.has(C.metricBlockId(d.key)));
+        const defs = (C.EXPLORE_METRICS || []).filter(d => d.gated && !gateSeen.has(d.key));
         if (!defs.length) return;
         try {
             const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
@@ -1131,16 +1157,16 @@ window.Uplift.charts = {
             const lat = (r && r.latest) || {};
             for (const d of defs) {
                 if (!(lat[d.key] && lat[d.key].v != null)) continue;
+                gateSeen.add(d.key);
+                const cid = C.metricBlockId(d.key);
                 try {
-                    createMetricCard(d);
-                    const cid = C.metricBlockId(d.key);
-                    CH_GLUE.onGatedCardCreated(cid);
+                    CH_GLUE.revealGatedCard(cid);
                     // Don't wait for the next 5 s tick or the shared-window
-                    // cache freshness: force-fill the fresh card now.
+                    // cache freshness: force-fill the just-revealed card now.
                     metricFetch(cid, true);
                 } catch (err) {
                     /* one bad card must not kill the other gated defs */
-                    console.warn('gated card create failed', d.key, err);
+                    console.warn('gated card reveal failed', d.key, err);
                 }
             }
         } catch (_) { /* silent — absence stays silent */ }

@@ -31,23 +31,33 @@ window.Uplift._chartGlue = {
     get _padObserver() { return _padObserver; },
     get removeCard() { return removeCard; },
     get applyI18n() { return applyI18n; },
-    /* U20 gated metric cards created AFTER grid init: place them if the
-       saved layout already expects the block (probe usually resolves after
-       applyUpliftLayout — parking unconditionally made saved gated cards
-       unplaceable on every reload); otherwise park them (hidden, tray pill
-       instead of dumping an unplaced widget at the board bottom). */
-    onGatedCardCreated(id) {
+    /* U24 gated metric cards (macmon power/temperature): the card DOM ships
+       at boot — parked when its data has not been seen yet. This reveal is
+       the probe's flip switch: place the card in the slot its layout (saved
+       or default) already gives it; park it back if the board has no slot
+       (custom layout that never carried it) or edit mode is open (never
+       mutate a board the user is dragging). */
+    revealGatedCard(id) {
         const el = _blockEl(id);
-        if (el && !el.gridstackNode) {
-            const saved = (upLayout && upLayout.blocks || []).find(b => b.id === id);
-            if (saved && !dashPlacedIds.includes(id)) {
-                _placeCard(id, saved, saved.h);
-                renderTray();
-                refitUpliftBlocks();
-                return;
-            }
-            el.classList.add('card-parked');
+        if (!el || !el.classList.contains('card-parked')) return;
+        // Grid not built yet (status tab unmeasured): un-park and let the
+        // imminent applyUpliftLayout place it; the tray rule below keeps it
+        // pill-less in the meantime.
+        if (!dashGrid) { el.classList.remove('card-parked'); return; }
+        // Mid-edit: place NOW (edit mode simply shows the new card next to
+        // whatever the user is dragging; Save/drop geometry wins).
+        const saved = (upLayout && upLayout.blocks || []).find(b => b.id === id);
+        if (saved && !dashPlacedIds.includes(id)) {
+            _placeCard(id, saved, saved.h);   // un-parks + registers placement
+            renderTray();
+            if (!dashEditing) refitUpliftBlocks();
+            return;
         }
+        // No slot on this board (custom layout that never carried it): stay
+        // parked (an unplaced card inside the grid container would render as
+        // a stray block). renderTray now shows its pill — gatedSeen is set —
+        // and dropping the pill places it (the apply path un-parks revealed
+        // cards, e.g. after Reset).
         renderTray();
     },
 };
@@ -991,6 +1001,14 @@ function _parkCard(el) {
     dashGrid.removeWidget(el, false, false);
     el.classList.add('card-parked');
 }
+/* U24: true while a block is a gated metric card whose data has never been
+   seen this session (macmon absent) — the layout engine keeps it hidden. */
+function _gateStillHidden(id) {
+    const key = C.blockMetricKey && C.blockMetricKey(id);
+    if (!key || !CH.gatedSeen) return false;
+    const def = (C.EXPLORE_METRICS || []).find(d => d.key === key);
+    return !!(def && def.gated && !CH.gatedSeen(key));
+}
 function _placeCard(id, pos, h) {
     const el = _blockEl(id);
     if (!el || el.gridstackNode) return null;
@@ -1018,6 +1036,14 @@ function applyUpliftLayout(saved) {
         upLayout.blocks.forEach(block => {
             const el = _blockEl(block.id);
             if (!el) return;
+            // U24: a gated card whose data has NOT been seen keeps its
+            // hidden flag through a board (re)apply — its slot is reserved
+            // in the contract, the packer skips parked cards, so absent
+            // macmon leaves no dead band. Once the probe has seen samples,
+            // apply places it like any other block. Every other parked
+            // card un-parks here as before (Reset must restore the board).
+            if (el.classList.contains('card-parked') && _gateStillHidden(block.id))
+                return;
             el.classList.remove('card-parked');   // un-park before placement
             if (!el.gridstackNode) {
                 dashGrid.makeWidget(el, { id: block.id, x: block.x, y: block.y, w: block.w, h: block.h, minW: UPL.minWFor(block.id) });
@@ -1223,6 +1249,15 @@ function renderTray() {
     const hint = tray.querySelector('.lt-hint'), label = tray.querySelector('.lt-label');
     for (const id of UPL.BLOCK_IDS) {
         if (dashPlacedIds.includes(id)) continue;
+        // U24: a gated card whose data has never been seen stays silent in
+        // the tray too — no half-truth "power draw" pill on a machine
+        // without macmon. Once the probe has seen samples the pill appears
+        // for boards that carry no slot for it (custom layouts).
+        const gateKey = C.blockMetricKey(id);
+        if (gateKey && CH.gatedSeen && !CH.gatedSeen(gateKey)) {
+            const gdef = (C.EXPLORE_METRICS || []).find(d => d.key === gateKey);
+            if (gdef && gdef.gated) continue;
+        }
         const pill = document.createElement('div');
         pill.className = 'dash-tray-pill grid-stack-item';
         // LAYOUT-SNAP: real card geometry rides along in GridStack's native

@@ -77,11 +77,16 @@ setInterval(() => { if (!document.hidden) CH.loadChartHistory(); }, 60000);
 // Metric cards: generate DOM from the catalogue BEFORE grid init so the
 // board places them like any static block; boot fetch + keep-alive (the
 // per-window cache TTL gates refetches: 10 s short, 60 s week+).
-for (const def of C.EXPLORE_METRICS) if (!def.gated) CH.createMetricCard(def);
-/* U20: gated (macmon) cards + header chips appear only once the series
-   actually exist — silent absence otherwise. Probe is cheap (one
-   /metrics/latest); re-check every 60 s so a macmon installed mid-session
-   lights up without a reload. */
+// U24: gated (macmon) cards are created too — born PARKED (hidden, no slot,
+// no tray pill) until the probe has seen their data; they then take their
+// DEFAULT slot without anything moving. Presence detection stays data-driven
+// (probe below), never a layout rewrite, so saved custom layouts are untouched.
+for (const def of C.EXPLORE_METRICS)
+    CH.createMetricCard(def, !!(def.gated && !CH.gatedSeen(def.key)));
+/* U24: gated (macmon) cards + header chips become visible only once the
+   series actually have values — silent absence otherwise. Probe is cheap
+   (one /metrics/latest); re-check every 60 s so a macmon installed
+   mid-session lights up without a reload. */
 CH.probeGatedCards();
 setInterval(() => { if (!document.hidden) CH.probeGatedCards(); }, 60000);
 CH.refreshPowerChips();

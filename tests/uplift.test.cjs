@@ -273,11 +273,15 @@ require('../omlx_uplift/static/uplift_layout.js');
 const UPL = globalThis.UpliftLayout;
 test('uplift layout: default layout covers every block once', () => {
     const d = UPL.defaultLayout();
-    // U19: TRAY_ONLY_IDS never ship on the default board (nothing existing
-    // moves); every other block must appear exactly once.
-    const expected = UPL.BLOCK_IDS.filter(id => !UPL.TRAY_ONLY_IDS.includes(id));
+    // U24: every block ships on the default board EXCEPT plain tray-only
+    // ones; the gated macmon cards (GATED_IDS) are the exception — hidden
+    // parked slots that reveal themselves on data. TRAY_ONLY_IDS means
+    // "never auto-appended into a SAVED layout" — saved-layout rule only.
+    const expected = UPL.BLOCK_IDS.filter(
+        id => !UPL.TRAY_ONLY_IDS.includes(id) || UPL.GATED_IDS.includes(id));
     assert.deepStrictEqual(d.blocks.map(b => b.id).sort(), [...expected].sort());
-    for (const id of UPL.TRAY_ONLY_IDS)
+    for (const id of ['met-pfx-token-hit-pct', 'met-pfx-lookup-hit-pct',
+                      'met-spec-saved-tokens-min', 'met-queue-waiting'])
         assert.ok(!d.blocks.some(b => b.id === id), id + ' must stay tray-only');
     for (const b of d.blocks) {
         assert.ok(b.w >= UPL.minWFor(b.id) && b.w <= UPL.COLUMNS, b.id + ' w out of range');
@@ -636,15 +640,40 @@ test('DROP-REGISTRATION: tray drops join upLayout.blocks and Cancel reverts', ()
     assert.ok(/upLayout = dashPreEdit/.test(cancel[0]),
         'Cancel restores the contract (dropped-only cards do not resurrect)');
 });
+/* U24 (user 2026-09-30): the power/temperature cards always exist — the
+   default layout carries them in a dedicated row and boot creates their DOM.
+   macmon presence is a data flag (the /metrics/latest probe, same pattern as
+   the header chips), never a layout rewrite: unseen data = card born parked
+   (hidden, no slot, no tray pill, no fetch), seen data = probe places it in
+   its default slot. Saved custom layouts must keep the old rule: blocks are
+   never auto-appended (TRAY_ONLY merge skip in currentBlockLayout). */
+test('U24: gated cards ship on the default board, gated by a data flag', () => {
+    const src = allStaticJs();
+    const d = UPL.defaultLayout();
+    for (const id of ['met-pwr-total-w', 'met-therm-cpu-temp-c'])
+        assert.ok(d.blocks.some(b => b.id === id), id + ' must ship on the default board');
+    // boot creates gated cards too, parked until their data has been seen
+    assert.ok(/CH\.createMetricCard\(def, !!\(def\.gated && !CH\.gatedSeen\(def\.key\)\)\)/.test(src),
+        'boot creates gated cards born parked when data unseen');
+    // the probe REVEALS (never creates): flag flips on seen data
+    assert.ok(/gateSeen\.add\(d\.key\)/.test(src) && /CH_GLUE\.revealGatedCard\(cid\)/.test(src),
+        'probe flips the presence flag and reveals the parked card');
+    // hidden gated cards cost nothing: no fetch, no draw
+    assert.ok(/function metricFetch\(id, force\) \{[\s\S]*?_gateHidden\(e\.def\)/.test(src),
+        'metricFetch skips an unrevealed gated card');
+    // custom saved layouts unchanged: gated blocks still never auto-append
+    assert.ok(/if \(UPL\.TRAY_ONLY_IDS\.includes\(def\.id\)\) continue;/.test(src),
+        'saved-layout merge still skips tray-only/gated blocks');
+});
 /* GATED-EMPTY (user 2026-09-29): temperature/power cards load EMPTY after
    a refresh (readout '—' until a timeframe chip is clicked). The metric
    cache is keyed by WINDOW and shared across cards: the boot fetch fills
-   1h with the always-on cards' keys, and the gated cards — created later,
-   after the macmon probe resolves — were served from that "fresh" cache
-   WITHOUT their own keys. metricFetch must treat a window missing one of
-   the card's keys as not fresh, and must remember answered-but-absent
-   keys as empty so a dead collector cannot pin the window to forever-
-   refetching. */
+   1h with the always-on cards' keys, and the gated cards — whose plots are
+   force-filled only when the macmon probe reveals them (U24) — were served
+   from that "fresh" cache WITHOUT their own keys. metricFetch must treat a
+   window missing one of the card's keys as not fresh, and must remember
+   answered-but-absent keys as empty so a dead collector cannot pin the
+   window to forever-refetching. */
 test('GATED-EMPTY: metricFetch re-fetches a window missing the card keys', () => {
     const src = allStaticJs();
     const f = src.match(/function metricFetch\(id, force\) \{[\s\S]*?\n\}/);
