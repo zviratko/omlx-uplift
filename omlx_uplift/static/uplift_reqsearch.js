@@ -48,7 +48,14 @@ function bootReqSearch() {
     // ISSUE-4: the bar is visible from page load but its model dropdown and
     // timespan chips only appeared after pressing SEARCH. Populate eagerly;
     // failures keep the defaults and runReqSearch retries via initReqSearch.
-    initReqSearch().then(syncReqModelOptions).catch(() => {});
+    // U14-follow-up (user: "feed empty until the timeframe is changed"):
+    // initReqSearch ALWAYS marks a chip 'on' (remembered window, else the
+    // last chip) but never ran a search, so the list stayed on the live ring
+    // — empty after a restart / on a fresh page — while the bar looked
+    // active. The user read that as a dead feed until they clicked a chip.
+    // The chip selection and the list must agree: run the selected window
+    // once at boot. LIVE button is the explicit way back to the ring.
+    initReqSearch().then(() => runReqSearch()).catch(() => {});
 }
 if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', bootReqSearch);
