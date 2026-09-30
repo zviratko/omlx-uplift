@@ -300,6 +300,25 @@ class Collector:
                 pairs["mem.used_bytes"] = float(used)
                 if maxb > 0:
                     pairs["mem.percent"] = 100.0 * used / maxb
+                # U38: the two ABSOLUTE limits the memory chart draws —
+                # the settings.json custom ceiling (GiB × 1024³ upstream)
+                # and the kernel iogpu.wired_limit_mb. Both read from the
+                # enforcer/upstream helpers, never re-derived here; 0 = not
+                # set -> key stays ABSENT (no fake zero ceiling).
+                try:
+                    ceil_b = int(getattr(enf, "memory_guard_custom_ceiling_bytes", 0) or 0) \
+                        if enf is not None else 0
+                    if ceil_b > 0:
+                        pairs["mem.custom_ceiling_bytes"] = float(ceil_b)
+                except Exception:
+                    pass
+                try:
+                    from omlx.process_memory_enforcer import get_iogpu_wired_limit_bytes
+                    wired = int(get_iogpu_wired_limit_bytes() or 0)
+                    if wired > 0:
+                        pairs["mem.iogpu_limit_bytes"] = float(wired)
+                except Exception:
+                    pass
         except Exception:
             pass
         # SSD disk-cache total + per-model hot cache. Classic aggregates
@@ -312,8 +331,9 @@ class Collector:
 
             pool = engine_pool()
             if pool is not None:
-                total_bytes = 0
-                disk_max = 0   # U34: effective SSD limit (max across models)
+                # U39: disk-cache totals (cache.total_bytes / cache.max_bytes)
+                # dropped — they walked only LOADED models and read as a lie
+                # (56 GB shown vs 500+ GB on disk, user 2026-09-30).
                 hot: dict[str, int] = {}
                 # U19 lifetime counters / queue gauges, summed per loaded model.
                 pfx_counters: dict[str, float] = {}
@@ -355,7 +375,6 @@ class Collector:
                                     ssd = s
                             except Exception:
                                 pass
-                        total_bytes += int(ssd.get("total_size_bytes", 0) or 0)
                         # hot_cache_size_bytes lives INSIDE the ssd stats
                         # dict (PagedSSDCacheStats), not at the top of
                         # get_ssd_cache_stats() — reading st made every
@@ -366,13 +385,6 @@ class Collector:
                         # after a while' (user 2026-09-30).
                         hb = int(ssd.get("hot_cache_size_bytes", 0) or 0)
                         hot[mid] = hb
-                        # U34: disk-cache limit. Classic keeps
-                        # max(per-model max_size_bytes, config fallback)
-                        # because one SSD dir is shared — mirror the max()
-                        # rule (no config read here: the per-model stats
-                        # carry the effective manager limit).
-                        disk_max = max(disk_max,
-                                       int(ssd.get("max_size_bytes", 0) or 0))
                         # U19: prefix/specprefill counters ride the SAME
                         # call. Lifetime counters are summed across loaded
                         # models; per-interval rates are derived below from
@@ -428,12 +440,6 @@ class Collector:
                         # pfx.* series (KeyError, 2026-09-26) — keep it loud
                         # at debug level, not silent.
                         log.debug("cache-stats walk failed for %s", mid, exc_info=True)
-                pairs["cache.total_bytes"] = float(total_bytes)
-                # U34: the disk-cache LIMIT for the merged card's flat
-                # reference line (0 = unlimited/unknown — the card hides
-                # the line, never draws a fake zero ceiling).
-                if disk_max > 0:
-                    pairs["cache.max_bytes"] = float(disk_max)
                 # Stable per-model keys. The old rank keys ('hot1.<model>')
                 # rotated when the top-3 order changed — two models shared
                 # one stored series, so NO honest backfill was possible and

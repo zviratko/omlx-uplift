@@ -47,7 +47,7 @@ function restoreCursor(c) {
     c.setCursor({ idx: i }, false);  // fires hooks + moves the focus point
 }
 const tpsData = [[], [], [], []];  // time, generation tok/s, prefill tok/s, cached tok/s (U30)
-const memData = [[], [], [], []];  // time, used GB, limit GB, disk cache GB (U37 — % line retired)
+const memData = [[], [], [], []];  // time, omlx used GB, custom ceiling GB, iogpu wired limit GB (U38)
 const MAX_POINTS = 4000;
 
 /* Server-side chart history (uplift fine samples merged with vanilla's
@@ -82,10 +82,10 @@ async function loadChartHistory() {
         const [g, p, m, h] = await Promise.all([
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('avg_generation_tps,rate.cached_tokens_s')}&window=${w}`).catch(() => null),
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_prefill_tps&window=${w}`).catch(() => null),
-            // U37: the memory card plots GB (used vs limit vs disk cache) —
-            // sys.percent left the chart, the series stays collected for the
-            // cache-card meter + header label.
-            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('sys.used_bytes,sys.total_bytes,cache.total_bytes')}&window=${w}`).catch(() => null),
+            // U38: the memory card plots omlx's OWN budget — footprint vs
+            // settings ceiling vs kernel iogpu wired limit (all GB). The
+            // psutil pair and disk cache left the chart (U39).
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes')}&window=${w}`).catch(() => null),
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/hot?window=${w}`).catch(() => null),
         ]);
         const conv = a => (a && a.series ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })) : []);
@@ -96,12 +96,11 @@ async function loadChartHistory() {
         if (w === windowToParam()) {
             chartHist = { gen: convMap(g, 'avg_generation_tps'),
                           cached: convMap(g, 'rate.cached_tokens_s'), prefill: conv(p),
-                          // U37: bytes -> GB ladder for all three memory
-                          // series (one GB axis; decimal 1e-9 matches
-                          // fmtBytes — the dashboard's byte convention)
-                          mem: convMap(m, 'sys.used_bytes', 1e-9),
-                          memLimit: convMap(m, 'sys.total_bytes', 1e-9),
-                          cache: convMap(m, 'cache.total_bytes', 1e-9),   // server ts is epoch SECONDS -> ms
+                          // U38: bytes -> GB ladder for the budget series
+                          // (decimal 1e-9 matches fmtBytes convention)
+                          mem: convMap(m, 'mem.used_bytes', 1e-9),
+                          memCeil: convMap(m, 'mem.custom_ceiling_bytes', 1e-9),
+                          memIogpu: convMap(m, 'mem.iogpu_limit_bytes', 1e-9),
                           // per-model hot cache, bytes -> GB, keyed by model
                           // id (the 'hot.' prefix is part of the metric key)
                           hot: Object.fromEntries(Object.entries(
@@ -170,15 +169,17 @@ function pickHotIds() {
                        .sort((a, b) => (b.s.v - a.s.v) || (b.s.ts - a.s.ts));
     return scored.slice(0, 3).map(x => x.id);
 }
-/* Columns for the memory card (U37): one GB axis — used vs limit vs disk
-   cache — plus the per-model hot-cache lines on the same axis. All series
-   backfill from the store and merge with their live buffers. */
+/* Columns for the memory card (U38): one GB axis — omlx footprint vs the
+   settings ceiling vs the kernel iogpu wired limit — plus the per-model
+   hot-cache lines on the same axis. All series backfill from the store and
+   merge with their live buffers. The two limit lines are flat constants;
+   absent (null) whenever the limit is unset — never a fake zero. */
 function memWindowed() {
     const now = Date.now();
     const win = cardWindow('chart-mem');
     const mm = C.mergeHistory(chartHist.mem, memData[0], memData[1], win, now);
-    const ml = C.mergeHistory(chartHist.memLimit || [], memData[0], memData[2], win, now);
-    const cc = C.mergeHistory(chartHist.cache, memData[0], memData[3], win, now);
+    const ml = C.mergeHistory(chartHist.memCeil || [], memData[0], memData[2], win, now);
+    const cc = C.mergeHistory(chartHist.memIogpu || [], memData[0], memData[3], win, now);
     const hot = cacheSeriesIds.map(id => {
         const lv = hotLive.get(id) || { ts: [], v: [] };
         return C.mergeHistory(chartHist.hot[id] || [], lv.ts, lv.v, win, now);
@@ -450,16 +451,18 @@ function createCharts() {
     tpsOpts.scales.x.range = pinnedXRange('chart-tps');
     tpsChart = new uPlot(tpsOpts, tpsWindowed(), $('chart-tps'));
     window.__uplotTps = tpsChart;   // debug handle
-    // U37: ONE GB axis — used vs memory limit vs disk cache, plus the
-    // per-model hot-cache lines. The memory-% line is gone (its number
-    // lives on in the header label #mem-label + the cache-card meter).
+    // U38: ONE GB axis — omlx footprint vs the settings ceiling vs the
+    // kernel iogpu wired limit, plus the per-model hot-cache lines. The
+    // memory-% line is gone (its number lives on in the header label
+    // #mem-label). Limit lines stay absent when the limit is unset.
     const memLine = (label, colorVar, dash) => {
         const s = line(label, colorVar, false, 'y');
         if (dash) s.dash = dash;
         return s;
     };
-    const memSpecs = [memLine('memory used', 'blue'), memLine('memory limit', 'dim', [4, 4]),
-                      memLine('disk cache', 'gold')];
+    const memSpecs = [memLine('omlx memory', 'blue'),
+                      memLine('settings ceiling', 'dim', [4, 4]),
+                      memLine('iogpu wired limit', 'gold', [2, 4])];
     for (let i = 0; i < cacheSeriesIds.length; i++) {
         const shortId = cacheSeriesIds[i].length > 14
             ? cacheSeriesIds[i].slice(0, 13) + '…' : cacheSeriesIds[i];
@@ -1120,15 +1123,15 @@ function createUsageChart() {
 
 function markHistoryDirty() { historyDirty = true; loadChartHistory(); }
 
-/* U11 live memory line + U37 GB columns: the collector's sys.* ticks
-   (psutil) are the points pushed into the Memory chart. /admin/api/stats
-   has no system-memory fields (model_memory_used is phys_footprint — flat),
-   so the newest stored samples come from /metrics/latest, refreshed at
-   most every 10s.
+/* U11 live memory line + U38 GB columns: the collector's mem.* ticks
+   (enforcer footprint + both absolute limits) are the points pushed into
+   the Memory chart. /admin/api/stats has no system-memory fields
+   (model_memory_used is phys_footprint — flat), so the newest stored
+   samples come from /metrics/latest, refreshed at most every 10s.
    U30: the same latest-fetch carries rate.cached_tokens_s — the throughput
    chart's live dotted prefill-colour line (no stats field for it either). */
 let sysFetching = false, sysAt = 0;
-let sysLive = { usedGB: null, limitGB: null, ts: 0 };
+let sysLive = { usedGB: null, ceilGB: null, iogpuGB: null, ts: 0 };
 let cachedTps = null, cachedTpsTs = 0;
 async function refreshSysPct() {
     const now = Date.now();
@@ -1136,12 +1139,14 @@ async function refreshSysPct() {
     sysFetching = true; sysAt = now;
     try {
         const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
-            encodeURIComponent('sys.used_bytes,sys.total_bytes,rate.cached_tokens_s'));
+            encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s'));
         const lat = (r && r.latest) || {};
-        const u = lat['sys.used_bytes'], l = lat['sys.total_bytes'];
+        const gb = k => (lat[k] && typeof lat[k].v === 'number') ? +(lat[k].v * 1e-9).toFixed(3) : null;
+        const u = lat['mem.used_bytes'];
         if (u && typeof u.v === 'number') {
             sysLive = { usedGB: +(u.v * 1e-9).toFixed(3),
-                        limitGB: (l && typeof l.v === 'number') ? +(l.v * 1e-9).toFixed(3) : null,
+                        ceilGB: gb('mem.custom_ceiling_bytes'),
+                        iogpuGB: gb('mem.iogpu_limit_bytes'),
                         ts: u.ts * 1000 };
         }
         const c = lat['rate.cached_tokens_s'];
@@ -1194,7 +1199,7 @@ async function refreshPowerChips() {
     finally { pwrChipsFetching = false; }
 }
 
-function pushStatusSample(s, cacheGB, hotSorted) {
+function pushStatusSample(s, hotSorted) {
     refreshSysPct();   // fire-and-forget; lands in the next push
     // Chart buffers (window pruning happens at draw time). U30: column 3 =
     // cached tok/s from the metrics/latest poll (collector tick rate, ~10 s
@@ -1218,12 +1223,13 @@ function pushStatusSample(s, cacheGB, hotSorted) {
         cacheSeriesIds = hotIds;
         createCharts();
     }
-    // U37: used GB / limit GB (psutil via metrics/latest) + disk cache GB.
+    // U38: omlx footprint GB + the two absolute limit lines (collector
+    // mem.* via metrics/latest). Limits absent -> null (flat line hidden).
     const fresh = sysLive.ts && Date.now() - sysLive.ts < 120_000;
     memData[0].push(s.time);
     memData[1].push(fresh ? sysLive.usedGB : null);
-    memData[2].push(fresh ? sysLive.limitGB : null);
-    memData[3].push(cacheGB);
+    memData[2].push(fresh ? sysLive.ceilGB : null);
+    memData[3].push(fresh ? sysLive.iogpuGB : null);
     while (memData[0].length > MAX_POINTS) for (const col of memData) col.shift();
     redrawCharts();
 }

@@ -68,9 +68,10 @@ def test_active_requests_and_ssd_total_use_admin_snapshot_sources(monkeypatch):
     c = Collector(store=store)
     c.sample_once()
 
-    # two running requests in the snapshot; one model with 123456 cached bytes
+    # two running requests in the snapshot; one loaded model counted
     assert store.pairs["engines.active_requests"] == 2.0
-    assert store.pairs["cache.total_bytes"] == 123456.0
+    # U39: disk-cache totals no longer sampled (loaded-models-only walk lied)
+    assert "cache.total_bytes" not in store.pairs
     assert store.pairs["engines.loaded"] == 1.0
 
 
@@ -136,7 +137,7 @@ def test_broken_engine_does_not_poison_the_tick(monkeypatch):
     c.sample_once()
     # m1 still counted despite m2 blowing up
     assert store.pairs["engines.active_requests"] == 2.0
-    assert store.pairs["cache.total_bytes"] == 123456.0
+    assert "cache.total_bytes" not in store.pairs   # U39
     assert store.pairs["engines.loaded"] == 2.0
 
 
@@ -384,42 +385,38 @@ def test_cached_tokens_rate_and_disk_max(monkeypatch):
     assert "rate.cached_tokens_s" not in store.pairs, "reset tick must not lie"
 
 
-def test_cache_max_bytes_recorded_only_with_a_real_limit(monkeypatch):
-    """U34: cache.max_bytes = max(per-model manager limit). Absent/zero
-    limit stays ABSENT (unlimited) — never a fake zero ceiling."""
+def test_u38_memory_budget_lines(monkeypatch):
+    """U38: the chart's limits are the SETTINGS custom ceiling (enforcer
+    property) and the kernel iogpu.wired_limit_mb (upstream helper). Both
+    keys ABSENT when unset (0) — never a fake zero ceiling; the footprint
+    line rides the enforcer's current_bytes (mem.used_bytes)."""
+    import types
     import omlx_uplift.router as rt
+    import omlx.server as srv
+    import omlx.process_memory_enforcer as pme
 
-    @dataclass
-    class LimitSsd:
-        total_size_bytes: int = 10
-        max_size_bytes: int = 0
-
-    class LimitSched(FakeSched):
-        def __init__(self, lim):
-            self.lim = lim
-
-        def get_ssd_cache_stats(self):
-            return {"ssd_cache": LimitSsd(10, self.lim)}
-
-    class LimPool:
-        def __init__(self, lims):
-            self.lims = lims
-
-        def get_loaded_model_ids(self):
-            return list(self.lims)
-
-        def get_entry(self, mid):
-            e = FakeEntry()
-            e.engine._engine.engine.scheduler = LimitSched(self.lims[mid])
-            return e
+    enf = types.SimpleNamespace(
+        enabled=lambda: True,
+        get_status=lambda: {"current_bytes": 70_000_000_000},
+        get_final_ceiling=lambda: 129_922_760_704,
+        memory_guard_custom_ceiling_bytes=129_922_760_704,   # 121 GiB
+    )
+    srv._server_state.process_memory_enforcer = enf
+    monkeypatch.setattr(rt, "engine_pool", lambda: FakePool())
+    monkeypatch.setattr(pme, "get_iogpu_wired_limit_bytes",
+                        lambda: 124_640 * 1024**2)            # 118.75 GiB
 
     store = CapturingStore()
-    monkeypatch.setattr(rt, "engine_pool",
-                        lambda: LimPool({"a": 5_000_000_000, "b": 8_000_000_000}))
     Collector(store=store).sample_once()
-    assert store.pairs["cache.max_bytes"] == 8_000_000_000.0   # max, not sum
+    assert store.pairs["mem.used_bytes"] == 70_000_000_000.0
+    assert store.pairs["mem.custom_ceiling_bytes"] == 129_922_760_704.0
+    assert store.pairs["mem.iogpu_limit_bytes"] == 124_640 * 1024**2
 
+    # unset limits -> keys absent (honest), footprint still collected
+    enf.memory_guard_custom_ceiling_bytes = 0
+    monkeypatch.setattr(pme, "get_iogpu_wired_limit_bytes", lambda: 0)
     store = CapturingStore()
-    monkeypatch.setattr(rt, "engine_pool", lambda: LimPool({"a": 0}))
     Collector(store=store).sample_once()
-    assert "cache.max_bytes" not in store.pairs  # unlimited -> honest absence
+    assert "mem.custom_ceiling_bytes" not in store.pairs
+    assert "mem.iogpu_limit_bytes" not in store.pairs
+    assert store.pairs["mem.used_bytes"] == 70_000_000_000.0

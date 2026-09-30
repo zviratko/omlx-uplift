@@ -21,7 +21,8 @@ test('normalize: happy path', () => {
     assert.strictEqual(s.requests, 10);
     assert.strictEqual(s.memPercent, 50);
     assert.strictEqual(s.pressure, 'ok');
-    assert.strictEqual(s.cachePercent, 10);
+    // U39: disk-cache fields dropped from normalize entirely
+    assert.strictEqual(s.cacheBytes, undefined);
 });
 test('normalize: U25/U28 promptTokens + U29 global hot-cache totals', () => {
     const s = snap(raw({ total_prompt_tokens: 400,
@@ -529,12 +530,14 @@ test('explore catalogue: unique keys, one fmt each, exports agree', () => {
         m => m.series ? m.series.map(s => s.key) : [m.key])));
     assert.deepStrictEqual(C.EXPLORE_KEYS, union);
     for (const k of keys) assert.ok(union.includes(k), k + ' (primary) must be in EXPLORE_KEYS');
-    for (const k of ['avg_generation_tps', 'sys.used_bytes', 'cache.total_bytes'])
+    for (const k of ['avg_generation_tps', 'sys.used_bytes', 'cache_efficiency'])
         assert.ok(keys.includes(k), k + ' must be selectable');
     // U31-U36: retired cards must NOT be selectable (removed from the tray
     // too); their collector keys stay in the store, the catalogue is gone.
+    // U39: cache.total_bytes joined them — the collector stopped sampling it.
     for (const k of ['avg_prefill_tps', 'engines.active_requests',
-                     'engines.loaded', 'sys.percent', 'sys.total_bytes'])
+                     'engines.loaded', 'sys.percent', 'sys.total_bytes',
+                     'cache.total_bytes'])
         assert.ok(!keys.includes(k), k + ' card must stay retired');
 });
 

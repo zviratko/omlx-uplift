@@ -1537,24 +1537,21 @@ function render(s) {
         s.cacheEfficiency != null ? Math.max(0, Math.min(100, s.cacheEfficiency)) + '%' : '0%';
     mem.classList.toggle('warn', s.memPercent !== null && s.memPercent >= 70);
     mem.classList.toggle('bad', s.memPercent !== null && s.memPercent >= 90);
-    $('cache-sub').textContent = s.hotCacheBytes !== null && s.cacheBytes !== null
-        // U29: RAM (hot) cache and disk cache size + free, in one line each
-        // half. Free = budget − used; an unlimited/absent budget honestly
-        // shows no free figure. The old "models x/y" half said model
-        // weights, not cache — dropped per user.
+    $('cache-sub').textContent = s.hotCacheBytes !== null
+        // U29: RAM (hot) cache size + free. U39: the disk half is gone —
+        // it counted only loaded models' SSD dirs (a lie vs what's on disk).
+        // Free = budget − used; an unlimited/absent budget honestly shows
+        // no free figure.
         ? `RAM ${C.fmtBytes(s.hotCacheBytes)}${s.hotCacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.hotCacheMaxBytes - s.hotCacheBytes)) : ''}`
-          + ` · ${C.tf('uplift.label.disk', 'disk')} ${C.fmtBytes(s.cacheBytes)}`
-          + (s.cacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.cacheMaxBytes - s.cacheBytes)) : '')
         : '';
     $('mem-label').textContent = s.memPercent !== null ? `${s.memPercent.toFixed(1)}% ${s.pressure || ''}` : '';
 
     renderLive(s);
     renderRequestStats(s);
 
-    const cacheGB = s.cacheBytes === null ? null : +(s.cacheBytes / 1e9).toFixed(3);
     const hotSorted = (s.cacheModels || []).slice()
         .sort((a, b) => (b.hotBytes || 0) - (a.hotBytes || 0)).slice(0, 3);
-    CH.pushStatusSample(s, cacheGB, hotSorted);   // buffers + redraw (uplift_charts.js)
+    CH.pushStatusSample(s, hotSorted);   // buffers + redraw (uplift_charts.js)
 }
 
 /* IN-FLIGHT card (redesign): every loaded model gets a header line; each

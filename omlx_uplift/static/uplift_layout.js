@@ -27,7 +27,9 @@
         //   met-engines-active-requests  Activity card + Requests tile (U32)
         //   met-engines-loaded           Activity card lists live models (U35)
         //   met-sys-total-bytes          limit now drawn in the memory card (U36)
-        // All four keys stay COLLECTED (metrics API untouched).
+        //   met-cache-total-bytes        U39: disk-cache stats dropped
+        //                                everywhere — loaded-models-only
+        //                                walk read as a lie vs disk reality
         'met-rate-completion-tokens-s',
         'met-rate-prompt-tokens-s',
         'met-rate-requests-s',
@@ -39,7 +41,6 @@
         // card — the merged memory card (met-sys-used-bytes) graphs limit
         // vs used.
         'met-sys-used-bytes',
-        'met-cache-total-bytes',
         // U19/U20 multi-series cards: TRAY-ONLY (not in DEFAULT_BLOCKS —
         // nothing existing moves; adding one never rewrites saved geometry).
         'met-pfx-token-hit-pct',
@@ -141,7 +142,6 @@
         { id: 'met-rate-requests-s', x: 18, y: 108, w: 6, h: 20 },
         { id: 'met-cache-efficiency', x: 0, y: 128, w: 6, h: 20 },
         { id: 'met-sys-used-bytes', x: 6, y: 128, w: 6, h: 20 },
-        { id: 'met-cache-total-bytes', x: 12, y: 128, w: 6, h: 20 },
         { id: 'reqfeed', x: 0, y: 148, w: COLUMNS, h: 18 },
     ];
 

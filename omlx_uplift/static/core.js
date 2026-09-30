@@ -46,8 +46,6 @@ function normalize(raw) {
         memUsed: memUsed, memMax: memMax,
         memPercent: clampRatio(memUsed, memMax),
         pressure: PRESSURES.includes(p.pressure_level) ? p.pressure_level : null,
-        cacheBytes: num(c.total_size_bytes), cacheMaxBytes: num(c.disk_max_bytes),
-        cachePercent: clampRatio(num(c.total_size_bytes), num(c.disk_max_bytes)),
         // U29: GLOBAL hot (RAM) cache — upstream aggregates these on the
         // runtime_cache payload itself (admin/routes.py: hot_cache_size_bytes
         // summed, hot_cache_max_bytes = the single process-wide budget).
@@ -220,13 +218,10 @@ const EXPLORE_METRICS = [
         { key: 'sys.used_bytes', fmt: 'bytes' },
         { key: 'sys.total_bytes', fmt: 'bytes' },
     ] },
-    // U34: disk cache card graphs limit vs used (cache.max_bytes is the
-    // collector's copy of runtime_cache.disk_max_bytes — flat by design,
-    // the user asked for it as the reference line).
-    { key: 'cache.total_bytes', fmt: 'bytes', series: [
-        { key: 'cache.total_bytes', fmt: 'bytes' },
-        { key: 'cache.max_bytes', fmt: 'bytes' },
-    ] },
+    // U39: disk-cache card retired — cache.total_bytes / cache.max_bytes
+    // walked only loaded models (56 GB shown vs 500+ GB on disk) and were
+    // dropped from the collector entirely; the keys stay in old stores but
+    // nothing reads them anymore.
     // U19 (tray-only — never in DEFAULT_BLOCKS): multi-series defs carry a
     // `series` array; the primary key (def.key) drives the block id, title
     // and the big readout. `axis:'y2'` puts a line on the right axis.
