@@ -227,12 +227,19 @@ class Collector:
             d_req = pairs.get("tot.total_requests", 0) - self._prev.get(
                 "tot.total_requests", 0
             )
+            d_cached = pairs.get("tot.total_cached_tokens", 0) - self._prev.get(
+                "tot.total_cached_tokens", 0
+            )
             if d_prompt >= 0:
                 pairs["rate.prompt_tokens_s"] = d_prompt / dt
             if d_comp >= 0:
                 pairs["rate.completion_tokens_s"] = d_comp / dt
             if d_req >= 0:
                 pairs["rate.requests_s"] = d_req / dt
+            # U30: cached-input rate for the Throughput chart's dotted
+            # prefill-colour line. Same counter-reset handling as siblings.
+            if d_cached >= 0:
+                pairs["rate.cached_tokens_s"] = d_cached / dt
 
         # Engine pool state
         try:
@@ -306,6 +313,7 @@ class Collector:
             pool = engine_pool()
             if pool is not None:
                 total_bytes = 0
+                disk_max = 0   # U34: effective SSD limit (max across models)
                 hot: dict[str, int] = {}
                 # U19 lifetime counters / queue gauges, summed per loaded model.
                 pfx_counters: dict[str, float] = {}
@@ -358,6 +366,13 @@ class Collector:
                         # after a while' (user 2026-09-30).
                         hb = int(ssd.get("hot_cache_size_bytes", 0) or 0)
                         hot[mid] = hb
+                        # U34: disk-cache limit. Classic keeps
+                        # max(per-model max_size_bytes, config fallback)
+                        # because one SSD dir is shared — mirror the max()
+                        # rule (no config read here: the per-model stats
+                        # carry the effective manager limit).
+                        disk_max = max(disk_max,
+                                       int(ssd.get("max_size_bytes", 0) or 0))
                         # U19: prefix/specprefill counters ride the SAME
                         # call. Lifetime counters are summed across loaded
                         # models; per-interval rates are derived below from
@@ -414,6 +429,11 @@ class Collector:
                         # at debug level, not silent.
                         log.debug("cache-stats walk failed for %s", mid, exc_info=True)
                 pairs["cache.total_bytes"] = float(total_bytes)
+                # U34: the disk-cache LIMIT for the merged card's flat
+                # reference line (0 = unlimited/unknown — the card hides
+                # the line, never draws a fake zero ceiling).
+                if disk_max > 0:
+                    pairs["cache.max_bytes"] = float(disk_max)
                 # Stable per-model keys. The old rank keys ('hot1.<model>')
                 # rotated when the top-3 order changed — two models shared
                 # one stored series, so NO honest backfill was possible and

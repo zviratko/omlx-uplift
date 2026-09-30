@@ -15,7 +15,7 @@
   "uplift.card.request_sizes": "請求大小",
   "uplift.card.requests": "請求",
   "uplift.card.throughput": "吞吐量",
-  "uplift.card.tokens": "Token",
+  "uplift.card.tokens": "總 Token 數",
   "uplift.chip.power_mean": "封裝功耗 — 60 秒平均",
   "uplift.chip.temp_max": "CPU/GPU 最高溫度 — 60 秒最大值",
   "uplift.chip.temp_mean": "平均",
@@ -207,7 +207,7 @@
   "uplift.label.p95_completion": "P95 生成 Token",
   "uplift.label.p95_prompt": "P95 提示詞 Token",
   "uplift.label.queue_first_tok": "排隊→首 Token 毫秒",
-  "uplift.label.served_total": "累計處理",
+  "uplift.label.served_total": "已處理",
   "uplift.label.tasks": "工作",
   "uplift.label.tokens_per_s": "tokens/秒",
   "uplift.layout.cancel": "Cancel",
@@ -640,5 +640,13 @@
   "uplift.patches.dev_group_both": "KEG + BUILD — 覆疊執行中的 keg，並進入 omlx-dev 建置",
   "uplift.patches.dev_group_dev": "僅建置 — 進入 omlx-dev 建置",
   "uplift.patches.sec_dev": "建置修補",
-  "uplift.patches.sec_dev_desc": "僅進入 omlx-dev 建置 — 不影響執行中的 keg。每次變更後需重新建置。"
+  "uplift.patches.sec_dev_desc": "僅進入 omlx-dev 建置 — 不影響執行中的 keg。每次變更後需重新建置。",
+  "uplift.label.total_in": "輸入",
+  "uplift.label.total_out": "輸出",
+  "uplift.label.all_time": "歷史累計",
+  "uplift.label.free": "可用",
+  "uplift.label.disk": "磁碟",
+  "uplift.metric.rate.cached_tokens_s": "快取 tok/s",
+  "uplift.metric.sys.memory": "記憶體",
+  "uplift.metric.cache.max_bytes": "快取上限"
 }

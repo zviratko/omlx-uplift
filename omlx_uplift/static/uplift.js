@@ -1508,8 +1508,20 @@ function render(s) {
     setCounter('v-requests', s.requests);
     setCounter('v-tokens', s.totalTokens);
     setCounter('v-cacheeff', s.cacheEfficiency);
-    $('v-tokens-sub').textContent = s.completionTokens !== null
-        ? `${C.fmtCompact(s.completionTokens)} generated · ${C.fmtCompact(s.cachedTokens)} cached` : '';
+    $('v-tokens-sub').textContent = s.promptTokens !== null && s.completionTokens !== null
+        ? `${C.tf('uplift.label.total_in', 'in')} ${C.fmtCompact(s.promptTokens)} · `
+          + `${C.tf('uplift.label.total_out', 'out')} ${C.fmtCompact(s.completionTokens)}`
+        : '';
+    // U25/U26: the prefill/generation tiles carry the lifetime input/output
+    // totals in their second half (same numbers as the tokens tile sub-line).
+    $('v-prefill-sub').textContent = s.promptTokens !== null
+        ? C.tf('uplift.label.total_in', 'in') + ' ' + C.fmtCompact(s.promptTokens) : '';
+    $('v-gen-sub').textContent = s.completionTokens !== null
+        ? C.tf('uplift.label.total_out', 'out') + ' ' + C.fmtCompact(s.completionTokens) : '';
+    // U27: all-time served count from the slow 30 s scope=alltime poll
+    // (session-scope /admin/api/stats never carries it — see ticket verdict).
+    $('v-requests-sub').textContent = alltimeRequests !== null
+        ? C.tf('uplift.label.all_time', 'all-time') + ' ' + C.fmtNumber(alltimeRequests) : '';
     $('chip-uptime').textContent = `up ${C.fmtDuration(s.uptime)}`;
     $('v-active2').textContent = s.active === null ? '—' : s.active;
     $('v-waiting2').textContent = s.waiting === null ? '—' : s.waiting;
@@ -1525,8 +1537,14 @@ function render(s) {
         s.cacheEfficiency != null ? Math.max(0, Math.min(100, s.cacheEfficiency)) + '%' : '0%';
     mem.classList.toggle('warn', s.memPercent !== null && s.memPercent >= 70);
     mem.classList.toggle('bad', s.memPercent !== null && s.memPercent >= 90);
-    $('cache-sub').textContent = s.memUsed !== null
-        ? `models ${C.fmtBytes(s.memUsed)} / ${C.fmtBytes(s.memMax)} · disk cache ${C.fmtBytes(s.cacheBytes)}${s.cachePercent !== null ? ' (' + s.cachePercent.toFixed(0) + '%)' : ''}`
+    $('cache-sub').textContent = s.hotCacheBytes !== null && s.cacheBytes !== null
+        // U29: RAM (hot) cache and disk cache size + free, in one line each
+        // half. Free = budget − used; an unlimited/absent budget honestly
+        // shows no free figure. The old "models x/y" half said model
+        // weights, not cache — dropped per user.
+        ? `RAM ${C.fmtBytes(s.hotCacheBytes)}${s.hotCacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.hotCacheMaxBytes - s.hotCacheBytes)) : ''}`
+          + ` · ${C.tf('uplift.label.disk', 'disk')} ${C.fmtBytes(s.cacheBytes)}`
+          + (s.cacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.cacheMaxBytes - s.cacheBytes)) : '')
         : '';
     $('mem-label').textContent = s.memPercent !== null ? `${s.memPercent.toFixed(1)}% ${s.pressure || ''}` : '';
 
@@ -2189,6 +2207,26 @@ async function pollStats() {
             $('banner').classList.add('show');
         }
     }
+    pollAlltime();   // throttled inside; U27 second-half readout
+}
+/* U27: the persisted all-time request count lives on the SAME route behind
+   scope=alltime (upstream server_metrics persists _alltime_requests to
+   ~/.omlx/stats.json and restores it at boot — see ticket verdict). The
+   route rebuilds the full observability payload, so it is NOT worth a
+   per-second poll: refresh every 30 s, silent on failure (last value
+   stays; the sub-line simply keeps what it showed). */
+let alltimeRequests = null, alltimeAt = 0, alltimeFetching = false;
+async function pollAlltime() {
+    const now = Date.now();
+    if (alltimeFetching || now - alltimeAt < 30_000) return;
+    alltimeFetching = true;
+    try {
+        const raw = await fetchJson(`${API}/admin/api/stats?scope=alltime`);
+        const v = raw && typeof raw.total_requests === 'number' && Number.isFinite(raw.total_requests) && raw.total_requests >= 0
+            ? Math.round(raw.total_requests) : null;
+        if (v !== null) { alltimeRequests = v; alltimeAt = now; }
+    } catch (_) { /* keep last value; retry rides the next poll */ }
+    finally { alltimeFetching = false; }
 }
 function restartPolling() {
     clearInterval(timer);

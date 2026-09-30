@@ -15,7 +15,7 @@
   "uplift.card.request_sizes": "リクエストサイズ",
   "uplift.card.requests": "リクエスト",
   "uplift.card.throughput": "スループット",
-  "uplift.card.tokens": "トークン",
+  "uplift.card.tokens": "総トークン",
   "uplift.chip.power_mean": "パッケージ消費電力 — 60秒平均",
   "uplift.chip.temp_max": "CPU/GPU最高温度 — 60秒最大",
   "uplift.chip.temp_mean": "平均",
@@ -207,7 +207,7 @@
   "uplift.label.p95_completion": "p95補完トークン",
   "uplift.label.p95_prompt": "p95プロンプトトークン",
   "uplift.label.queue_first_tok": "キュー→初出トークン ms",
-  "uplift.label.served_total": "累計処理",
+  "uplift.label.served_total": "処理済み",
   "uplift.label.tasks": "タスク",
   "uplift.label.tokens_per_s": "トークン/秒",
   "uplift.layout.cancel": "Cancel",
@@ -669,5 +669,13 @@
   "uplift.patches.dev_group_both": "KEG + BUILD — 実行中 keg に重ね、omlx-dev ビルドにも反映",
   "uplift.patches.dev_group_dev": "BUILD のみ — omlx-dev ビルドに反映",
   "uplift.patches.sec_dev": "ビルド用パッチ",
-  "uplift.patches.sec_dev_desc": "omlx-dev ビルドのみ対象 — 実行中 keg には触れません。変更のたびに再ビルドが必要です。"
+  "uplift.patches.sec_dev_desc": "omlx-dev ビルドのみ対象 — 実行中 keg には触れません。変更のたびに再ビルドが必要です。",
+  "uplift.label.total_in": "入力",
+  "uplift.label.total_out": "出力",
+  "uplift.label.all_time": "累計",
+  "uplift.label.free": "空き",
+  "uplift.label.disk": "ディスク",
+  "uplift.metric.rate.cached_tokens_s": "キャッシュ tok/s",
+  "uplift.metric.sys.memory": "メモリ",
+  "uplift.metric.cache.max_bytes": "キャッシュ上限"
 }

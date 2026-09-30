@@ -342,3 +342,84 @@ def test_total_w_reports_zero_when_both_channels_dead():
         "gpu_power": 0.0, "ane_power": 0.0,
     })
     assert pairs.get("pwr.total_w", 0.0) == 0.0
+
+
+# -- U30/U34 (2026-09-30): cached-input rate + disk-cache limit -------------
+
+class _SnapMetrics:
+    def __init__(self):
+        self.snap = {"total_prompt_tokens": 0, "total_completion_tokens": 0,
+                     "total_cached_tokens": 0, "total_requests": 0,
+                     "total_tokens_served": 0}
+
+    def get_snapshot(self):
+        return dict(self.snap)
+
+
+def _cached_rate_fixture(monkeypatch):
+    import omlx.server_metrics as sm
+    m = _SnapMetrics()
+    monkeypatch.setattr(sm, "get_server_metrics", lambda: m)
+    monkeypatch.setattr("omlx_uplift.router.engine_pool", lambda: None)
+    store = CapturingStore()
+    return m, Collector(store=store), store
+
+
+def test_cached_tokens_rate_and_disk_max(monkeypatch):
+    """U30: rate.cached_tokens_s follows the same delta rule as its siblings;
+    a counter reset (negative delta) drops the tick, never lies."""
+    m, c, store = _cached_rate_fixture(monkeypatch)
+    m.snap["total_cached_tokens"] = 100
+    c.sample_once()                              # seed _prev
+    c._prev["_t"] = __import__("time").time() - 10
+    m.snap["total_cached_tokens"] = 600
+    c.sample_once()
+    v = store.pairs["rate.cached_tokens_s"]
+    assert 40 < v < 60, f"500 tok over ~10 s (dt jitter), got {v}"
+
+    m.snap["total_cached_tokens"] = 5            # reset (stats clear)
+    c._prev["_t"] = __import__("time").time() - 10
+    store.pairs.clear()
+    c.sample_once()
+    assert "rate.cached_tokens_s" not in store.pairs, "reset tick must not lie"
+
+
+def test_cache_max_bytes_recorded_only_with_a_real_limit(monkeypatch):
+    """U34: cache.max_bytes = max(per-model manager limit). Absent/zero
+    limit stays ABSENT (unlimited) — never a fake zero ceiling."""
+    import omlx_uplift.router as rt
+
+    @dataclass
+    class LimitSsd:
+        total_size_bytes: int = 10
+        max_size_bytes: int = 0
+
+    class LimitSched(FakeSched):
+        def __init__(self, lim):
+            self.lim = lim
+
+        def get_ssd_cache_stats(self):
+            return {"ssd_cache": LimitSsd(10, self.lim)}
+
+    class LimPool:
+        def __init__(self, lims):
+            self.lims = lims
+
+        def get_loaded_model_ids(self):
+            return list(self.lims)
+
+        def get_entry(self, mid):
+            e = FakeEntry()
+            e.engine._engine.engine.scheduler = LimitSched(self.lims[mid])
+            return e
+
+    store = CapturingStore()
+    monkeypatch.setattr(rt, "engine_pool",
+                        lambda: LimPool({"a": 5_000_000_000, "b": 8_000_000_000}))
+    Collector(store=store).sample_once()
+    assert store.pairs["cache.max_bytes"] == 8_000_000_000.0   # max, not sum
+
+    store = CapturingStore()
+    monkeypatch.setattr(rt, "engine_pool", lambda: LimPool({"a": 0}))
+    Collector(store=store).sample_once()
+    assert "cache.max_bytes" not in store.pairs  # unlimited -> honest absence

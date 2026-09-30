@@ -23,6 +23,18 @@ test('normalize: happy path', () => {
     assert.strictEqual(s.pressure, 'ok');
     assert.strictEqual(s.cachePercent, 10);
 });
+test('normalize: U25/U28 promptTokens + U29 global hot-cache totals', () => {
+    const s = snap(raw({ total_prompt_tokens: 400,
+        runtime_cache: { total_size_bytes: 1e9, disk_max_bytes: 1e10,
+                         hot_cache_size_bytes: 5e8, hot_cache_max_bytes: 2e9 } }));
+    assert.strictEqual(s.promptTokens, 400);
+    assert.strictEqual(s.hotCacheBytes, 5e8);
+    assert.strictEqual(s.hotCacheMaxBytes, 2e9);
+    // absent = null, never 0 (honest absence on old payloads)
+    const bare = snap(raw());
+    assert.strictEqual(bare.promptTokens, null);
+    assert.strictEqual(bare.hotCacheBytes, null);
+});
 test('normalize: garbage in, nulls out', () => {
     const s = snap({ avg_generation_tps: 'x', total_requests: -5, active_models: null });
     assert.strictEqual(s.genTps, null);
@@ -493,10 +505,10 @@ test('layout: metricWin keeps valid per-card windows, drops junk', () => {
     const store = k => { const s = { _d: {}, getItem(x) { return this._d[x] ?? null; }, setItem(x, v) { this._d[x] = v; } };
         s._d[C.LAYOUT_KEY] = JSON.stringify(k); return s; };
     assert.deepStrictEqual(C.loadLayout(store({})).metricWin, {});
-    const ok = { 'met-sys-percent': 86400, 'chart-tps': 604800 };
+    const ok = { 'met-sys-used-bytes': 86400, 'chart-tps': 604800 };
     assert.deepStrictEqual(C.loadLayout(store({ metricWin: ok })).metricWin, ok);
     assert.deepStrictEqual(   // bogus block id / bogus window / wrong types
-        C.loadLayout(store({ metricWin: { 'met-nope': 3600, 'met-gen-x': '1h', 'met-sys-percent': 7 } })).metricWin,
+        C.loadLayout(store({ metricWin: { 'met-nope': 3600, 'met-gen-x': '1h', 'met-sys-used-bytes': 7 } })).metricWin,
         {});
 });
 test('metricBlockId maps every catalogue key to a legal block id and back', () => {
@@ -517,8 +529,13 @@ test('explore catalogue: unique keys, one fmt each, exports agree', () => {
         m => m.series ? m.series.map(s => s.key) : [m.key])));
     assert.deepStrictEqual(C.EXPLORE_KEYS, union);
     for (const k of keys) assert.ok(union.includes(k), k + ' (primary) must be in EXPLORE_KEYS');
-    for (const k of ['avg_generation_tps', 'sys.percent', 'cache.total_bytes'])
+    for (const k of ['avg_generation_tps', 'sys.used_bytes', 'cache.total_bytes'])
         assert.ok(keys.includes(k), k + ' must be selectable');
+    // U31-U36: retired cards must NOT be selectable (removed from the tray
+    // too); their collector keys stay in the store, the catalogue is gone.
+    for (const k of ['avg_prefill_tps', 'engines.active_requests',
+                     'engines.loaded', 'sys.percent', 'sys.total_bytes'])
+        assert.ok(!keys.includes(k), k + ' card must stay retired');
 });
 
 /* F-035 drift test: restoring a block from the tray must rebuild the pill

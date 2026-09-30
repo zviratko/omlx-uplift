@@ -46,8 +46,8 @@ function restoreCursor(c) {
     }
     c.setCursor({ idx: i }, false);  // fires hooks + moves the focus point
 }
-const tpsData = [[], [], []];        // time, generation tok/s, prefill tok/s
-const memData = [[], [], [], [], [], []];  // time, memory %, cache GB (hot cols retired — see hotLive)
+const tpsData = [[], [], [], []];  // time, generation tok/s, prefill tok/s, cached tok/s (U30)
+const memData = [[], [], [], []];  // time, used GB, limit GB, disk cache GB (U37 — % line retired)
 const MAX_POINTS = 4000;
 
 /* Server-side chart history (uplift fine samples merged with vanilla's
@@ -64,7 +64,7 @@ const MAX_POINTS = 4000;
    freshly-loaded model keeps its line across refreshes — the old
    session-live-only rule existed only because the rank keys (hot1/2/3)
    rotated models through one series and made history meaningless. */
-let chartHist = { gen: [], prefill: [], mem: [], cache: [], hot: {} };   // arrays of {ts, v, res}; hot: model -> points (GB)
+let chartHist = { gen: [], cached: [], prefill: [], mem: [], memLimit: [], cache: [], hot: {} };   // arrays of {ts, v, res}; hot: model -> points (GB)
 let historyDirty = true, historyLoading = false;
 /* The two shared-history cards backfill at the LARGEST window any of them
    uses (one fetch, superset cached); each card draws its own slice. */
@@ -80,9 +80,12 @@ async function loadChartHistory() {
     try {
         const w = windowToParam();
         const [g, p, m, h] = await Promise.all([
-            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_generation_tps&window=${w}`).catch(() => null),
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('avg_generation_tps,rate.cached_tokens_s')}&window=${w}`).catch(() => null),
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_prefill_tps&window=${w}`).catch(() => null),
-            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('sys.percent,cache.total_bytes')}&window=${w}`).catch(() => null),
+            // U37: the memory card plots GB (used vs limit vs disk cache) —
+            // sys.percent left the chart, the series stays collected for the
+            // cache-card meter + header label.
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('sys.used_bytes,sys.total_bytes,cache.total_bytes')}&window=${w}`).catch(() => null),
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/hot?window=${w}`).catch(() => null),
         ]);
         const conv = a => (a && a.series ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })) : []);
@@ -91,13 +94,13 @@ async function loadChartHistory() {
         // Only adopt if the window did not change mid-flight (stale-window
         // race: a slow 24h response landing over a fresh 5m selection).
         if (w === windowToParam()) {
-            chartHist = { gen: conv(g), prefill: conv(p),
-                          // U11 moved the card's memory line to sys.percent
-                          // (psutil); this lookup still asked for the retired
-                          // mem.percent, so history backfill silently
-                          // returned nothing and the line was session-only.
-                          mem: convMap(m, 'sys.percent'),
-                          // bytes -> GB: the card's right axis is GB (issue 6)
+            chartHist = { gen: convMap(g, 'avg_generation_tps'),
+                          cached: convMap(g, 'rate.cached_tokens_s'), prefill: conv(p),
+                          // U37: bytes -> GB ladder for all three memory
+                          // series (one GB axis; decimal 1e-9 matches
+                          // fmtBytes — the dashboard's byte convention)
+                          mem: convMap(m, 'sys.used_bytes', 1e-9),
+                          memLimit: convMap(m, 'sys.total_bytes', 1e-9),
                           cache: convMap(m, 'cache.total_bytes', 1e-9),   // server ts is epoch SECONDS -> ms
                           // per-model hot cache, bytes -> GB, keyed by model
                           // id (the 'hot.' prefix is part of the metric key)
@@ -130,11 +133,15 @@ function tpsWindowed() {
     const win = cardWindow('chart-tps');
     const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], win, now);
     const p = C.mergeHistory(chartHist.prefill, tpsData[0], tpsData[2], win, now);
-    const ts = [...new Set(g.ts.concat(p.ts))].sort((a, b) => a - b);
+    // U30: cached input rides the same union column (dotted prefill line).
+    const k = C.mergeHistory(chartHist.cached || [], tpsData[0], tpsData[3], win, now);
+    const ts = [...new Set(g.ts.concat(p.ts, k.ts))].sort((a, b) => a - b);
     const gi = new Map(g.ts.map((t, i) => [t, g.v[i]]));
     const pi = new Map(p.ts.map((t, i) => [t, p.v[i]]));
+    const ki = new Map(k.ts.map((t, i) => [t, k.v[i]]));
     return [ts, ts.map(t => (gi.has(t) ? gi.get(t) : null)),
-                ts.map(t => (pi.has(t) ? pi.get(t) : null))];
+                ts.map(t => (pi.has(t) ? pi.get(t) : null)),
+                ts.map(t => (ki.has(t) ? ki.get(t) : null))];
 }
 let cacheSeriesIds = [];             // top-3 models currently drawn on mem chart
 /* Per-model hot-cache session buffers: model -> {ts[], v[] (GB)}. Keyed by
@@ -163,25 +170,28 @@ function pickHotIds() {
                        .sort((a, b) => (b.s.v - a.s.v) || (b.s.ts - a.s.ts));
     return scored.slice(0, 3).map(x => x.id);
 }
-/* Columns for the memory card: same union-timestamp alignment as the
-   throughput chart. All four series kinds (memory %, cache GB, per-model
-   hot cache) backfill from the store and merge with their live buffers. */
+/* Columns for the memory card (U37): one GB axis — used vs limit vs disk
+   cache — plus the per-model hot-cache lines on the same axis. All series
+   backfill from the store and merge with their live buffers. */
 function memWindowed() {
     const now = Date.now();
     const win = cardWindow('chart-mem');
     const mm = C.mergeHistory(chartHist.mem, memData[0], memData[1], win, now);
-    const cc = C.mergeHistory(chartHist.cache, memData[0], memData[2], win, now);
+    const ml = C.mergeHistory(chartHist.memLimit || [], memData[0], memData[2], win, now);
+    const cc = C.mergeHistory(chartHist.cache, memData[0], memData[3], win, now);
     const hot = cacheSeriesIds.map(id => {
         const lv = hotLive.get(id) || { ts: [], v: [] };
         return C.mergeHistory(chartHist.hot[id] || [], lv.ts, lv.v, win, now);
     });
-    let allTs = mm.ts.concat(cc.ts);
+    let allTs = mm.ts.concat(ml.ts, cc.ts);
     for (const h of hot) allTs = allTs.concat(h.ts);
     const ts = [...new Set(allTs)].sort((a, b) => a - b);
     const mmI = new Map(mm.ts.map((t, i) => [t, mm.v[i]]));
+    const mlI = new Map(ml.ts.map((t, i) => [t, ml.v[i]]));
     const ccI = new Map(cc.ts.map((t, i) => [t, cc.v[i]]));
     const cols = [ts,
         ts.map(t => (mmI.has(t) ? mmI.get(t) : null)),
+        ts.map(t => (mlI.has(t) ? mlI.get(t) : null)),
         ts.map(t => (ccI.has(t) ? ccI.get(t) : null))];
     for (const h of hot) {
         const hi = new Map(h.ts.map((t, i) => [t, h.v[i]]));
@@ -421,8 +431,15 @@ function createCharts() {
     if (tpsChart) { tpsChart.destroy(); memChart.destroy(); tpsChart = memChart = null; }
     const col = chartColors();
     // Dual Y: left = generation tok/s, right = prefill tok/s (prefill >> gen).
+    // U30: cached input tokens ride the RIGHT axis as a dotted line in the
+    // prefill colour (same family: cached ⊆ prompt); absent before uplift's
+    // install day, never zero-filled (honest absence).
+    const tpsSpecs = [line('generation', 'blue', true, 'y'), line('prefill', 'gold', false, 'y2')];
+    const cachedLine = line(C.tf('uplift.metric.rate.cached_tokens_s', 'cached tok/s'), 'gold', false, 'y2');
+    cachedLine.dash = [4, 4];
+    tpsSpecs.push(cachedLine);
     const tpsOpts = baseOpts(
-        [line('generation', 'blue', true, 'y'), line('prefill', 'gold', false, 'y2')],
+        tpsSpecs,
         { scales: { y: { auto: true, range: ZERO_FLOOR_RANGE },
                     y2: { auto: true, range: ZERO_FLOOR_RANGE } },
           yAxes: [Object.assign(yAxis(col, { grid: false, label: 'gen tok/s', stroke: col.blue }), { scale: 'y' }),
@@ -433,22 +450,27 @@ function createCharts() {
     tpsOpts.scales.x.range = pinnedXRange('chart-tps');
     tpsChart = new uPlot(tpsOpts, tpsWindowed(), $('chart-tps'));
     window.__uplotTps = tpsChart;   // debug handle
-    // Memory % left; runtime cache GB (total + top-3 models' hot cache) right.
-    const memSpecs = [line('system memory', 'blue', true, 'y'),
-                      line('cache total', 'gold', false, 'y2')];
+    // U37: ONE GB axis — used vs memory limit vs disk cache, plus the
+    // per-model hot-cache lines. The memory-% line is gone (its number
+    // lives on in the header label #mem-label + the cache-card meter).
+    const memLine = (label, colorVar, dash) => {
+        const s = line(label, colorVar, false, 'y');
+        if (dash) s.dash = dash;
+        return s;
+    };
+    const memSpecs = [memLine('memory used', 'blue'), memLine('memory limit', 'dim', [4, 4]),
+                      memLine('disk cache', 'gold')];
     for (let i = 0; i < cacheSeriesIds.length; i++) {
         const shortId = cacheSeriesIds[i].length > 14
             ? cacheSeriesIds[i].slice(0, 13) + '…' : cacheSeriesIds[i];
-        const s = line('hot:' + shortId, ['gold', 'blue', 'dim'][i], false, 'y2');
+        const s = line('hot:' + shortId, ['gold', 'blue', 'dim'][i], false, 'y');
         s.dash = [4, 4];
         memSpecs.push(s);
     }
     const memOpts = baseOpts(memSpecs,
-        { scales: { y2: { auto: true } },
-          yAxes: [Object.assign(yAxis(col, { label: 'memory %', stroke: col.blue }), { scale: 'y' }),
-                  Object.assign(yAxis(col, { side: 1, grid: false, label: 'cache GB', stroke: col.gold, size: 36 }), { scale: 'y2' })] },
+        { scales: { y: { auto: true } },
+          yAxes: [Object.assign(yAxis(col, { label: 'GB', stroke: col.blue }), { scale: 'y' })] },
         legendUpdater());
-    memOpts.scales.y = { range: [0, 100] };
     memOpts.height = Math.max(200, $('chart-mem').clientHeight || 240);
     memOpts.scales.x.range = pinnedXRange('chart-mem');
     memChart = new uPlot(memOpts, memWindowed(), $('chart-mem'));
@@ -1053,6 +1075,15 @@ function relabelExplore() {
         const sers = metricServes(e.def);
         for (let i = 0; i < sers.length; i++)
             e.chart.series[i + 1].label = metricSeriesLabel(sers[i].key);
+        // uPlot writes legend label CELLS at init only (setSeries carries a
+        // text update we do not fire) — cards created before the locale
+        // fetch landed kept their English auto-labels forever (U33 merged
+        // card showed 'sys.used bytes' after a relabel). Rewrite the cells.
+        const rows = [...e.chart.root.querySelectorAll('.u-legend .u-series')];
+        rows.forEach((row, i) => {
+            const lab = row.querySelector('.u-label');
+            if (lab && e.chart.series[i + 1]) lab.textContent = e.chart.series[i + 1].label;
+        });
         drawMetricChart(id);
     }
 }
@@ -1089,22 +1120,34 @@ function createUsageChart() {
 
 function markHistoryDirty() { historyDirty = true; loadChartHistory(); }
 
-/* U11 live memory line: the collector's sys.percent tick (system memory,
-   psutil) is the point pushed into the Memory chart. /admin/api/stats has
-   no system-memory field (model_memory_used is phys_footprint — flat), so
-   the newest stored sample comes from /metrics/latest, refreshed at most
-   every 10s. Falls back to the old phys_footprint ratio if unavailable. */
-let sysPct = null, sysPctTs = 0, sysPctFetching = false, sysPctAt = 0;
+/* U11 live memory line + U37 GB columns: the collector's sys.* ticks
+   (psutil) are the points pushed into the Memory chart. /admin/api/stats
+   has no system-memory fields (model_memory_used is phys_footprint — flat),
+   so the newest stored samples come from /metrics/latest, refreshed at
+   most every 10s.
+   U30: the same latest-fetch carries rate.cached_tokens_s — the throughput
+   chart's live dotted prefill-colour line (no stats field for it either). */
+let sysFetching = false, sysAt = 0;
+let sysLive = { usedGB: null, limitGB: null, ts: 0 };
+let cachedTps = null, cachedTpsTs = 0;
 async function refreshSysPct() {
     const now = Date.now();
-    if (sysPctFetching || now - sysPctAt < 10_000) return;
-    sysPctFetching = true; sysPctAt = now;
+    if (sysFetching || now - sysAt < 10_000) return;
+    sysFetching = true; sysAt = now;
     try {
-        const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=sys.percent`);
-        const p = r && r.latest && r.latest['sys.percent'];
-        if (p && typeof p.v === 'number') { sysPct = p.v; sysPctTs = p.ts * 1000; }
+        const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
+            encodeURIComponent('sys.used_bytes,sys.total_bytes,rate.cached_tokens_s'));
+        const lat = (r && r.latest) || {};
+        const u = lat['sys.used_bytes'], l = lat['sys.total_bytes'];
+        if (u && typeof u.v === 'number') {
+            sysLive = { usedGB: +(u.v * 1e-9).toFixed(3),
+                        limitGB: (l && typeof l.v === 'number') ? +(l.v * 1e-9).toFixed(3) : null,
+                        ts: u.ts * 1000 };
+        }
+        const c = lat['rate.cached_tokens_s'];
+        if (c && typeof c.v === 'number') { cachedTps = c.v; cachedTpsTs = c.ts * 1000; }
     } catch (_) { /* keep last value */ }
-    finally { sysPctFetching = false; }
+    finally { sysFetching = false; }
 }
 
 /* U20 header chips: watts = mean over the last 60 s, temperature = MAX
@@ -1153,9 +1196,12 @@ async function refreshPowerChips() {
 
 function pushStatusSample(s, cacheGB, hotSorted) {
     refreshSysPct();   // fire-and-forget; lands in the next push
-    // Chart buffers (window pruning happens at draw time).
+    // Chart buffers (window pruning happens at draw time). U30: column 3 =
+    // cached tok/s from the metrics/latest poll (collector tick rate, ~10 s
+    // fresh window; stale reads push null, never a stale number).
     tpsData[0].push(s.time); tpsData[1].push(s.genTps); tpsData[2].push(s.prefillTps);
-    while (tpsData[0].length > MAX_POINTS) { tpsData[0].shift(); tpsData[1].shift(); tpsData[2].shift(); }
+    tpsData[3].push(cachedTps !== null && Date.now() - cachedTpsTs < 120_000 ? cachedTps : null);
+    while (tpsData[0].length > MAX_POINTS) for (const col of tpsData) col.shift();
     // Per-model hot cache (GB): per-id session buffers, top-3 membership
     // recomputed from live + history (see hotLive/pickHotIds). Membership
     // changes rebuild the chart (legend + series list); values never move
@@ -1172,9 +1218,12 @@ function pushStatusSample(s, cacheGB, hotSorted) {
         cacheSeriesIds = hotIds;
         createCharts();
     }
-    const livePct = (sysPct !== null && Date.now() - sysPctTs < 120_000) ? sysPct : s.memPercent;
-    memData[0].push(s.time); memData[1].push(livePct === null ? null : +livePct.toFixed(2));
-    memData[2].push(cacheGB);
+    // U37: used GB / limit GB (psutil via metrics/latest) + disk cache GB.
+    const fresh = sysLive.ts && Date.now() - sysLive.ts < 120_000;
+    memData[0].push(s.time);
+    memData[1].push(fresh ? sysLive.usedGB : null);
+    memData[2].push(fresh ? sysLive.limitGB : null);
+    memData[3].push(cacheGB);
     while (memData[0].length > MAX_POINTS) for (const col of memData) col.shift();
     redrawCharts();
 }

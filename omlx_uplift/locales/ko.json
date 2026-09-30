@@ -15,7 +15,7 @@
   "uplift.card.request_sizes": "요청 크기",
   "uplift.card.requests": "요청",
   "uplift.card.throughput": "처리량",
-  "uplift.card.tokens": "토큰",
+  "uplift.card.tokens": "총 토큰",
   "uplift.chip.power_mean": "패키지 전력 — 60초 평균",
   "uplift.chip.temp_max": "CPU/GPU 최대 온도 — 60초 최대",
   "uplift.chip.temp_mean": "평균",
@@ -222,7 +222,7 @@
   "uplift.label.p95_completion": "p95 완성 토큰",
   "uplift.label.p95_prompt": "p95 프롬프트 토큰",
   "uplift.label.queue_first_tok": "대기→첫 토큰 ms",
-  "uplift.label.served_total": "누적 처리",
+  "uplift.label.served_total": "처리됨",
   "uplift.label.tasks": "작업",
   "uplift.label.tokens_per_s": "토큰/초",
   "uplift.layout.cancel": "Cancel",
@@ -655,5 +655,13 @@
   "uplift.patches.dev_group_both": "KEG + BUILD — 실행 중인 keg에 덮어쓰고 omlx-dev 빌드에도 포함",
   "uplift.patches.dev_group_dev": "BUILD 전용 — omlx-dev 빌드에 포함",
   "uplift.patches.sec_dev": "빌드 패치",
-  "uplift.patches.sec_dev_desc": "omlx-dev 빌드에만 반영 — 실행 중인 keg는 건드리지 않습니다. 변경마다 다시 빌드하세요."
+  "uplift.patches.sec_dev_desc": "omlx-dev 빌드에만 반영 — 실행 중인 keg는 건드리지 않습니다. 변경마다 다시 빌드하세요.",
+  "uplift.label.total_in": "입력",
+  "uplift.label.total_out": "출력",
+  "uplift.label.all_time": "누적",
+  "uplift.label.free": "여유",
+  "uplift.label.disk": "디스크",
+  "uplift.metric.rate.cached_tokens_s": "캐시 tok/s",
+  "uplift.metric.sys.memory": "메모리",
+  "uplift.metric.cache.max_bytes": "캐시 제한"
 }

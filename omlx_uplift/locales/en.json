@@ -15,7 +15,7 @@
   "uplift.card.request_sizes": "Request sizes",
   "uplift.card.requests": "Requests",
   "uplift.card.throughput": "Throughput",
-  "uplift.card.tokens": "Tokens",
+  "uplift.card.tokens": "Total tokens",
   "uplift.chip.power_mean": "Package power — 60 s mean",
   "uplift.chip.temp_max": "Max CPU/GPU temp — 60 s max",
   "uplift.chip.temp_mean": "mean",
@@ -207,7 +207,7 @@
   "uplift.label.p95_completion": "p95 completion tok",
   "uplift.label.p95_prompt": "p95 prompt tok",
   "uplift.label.queue_first_tok": "queue→first tok ms",
-  "uplift.label.served_total": "processed total",
+  "uplift.label.served_total": "processed",
   "uplift.label.tasks": "Tasks",
   "uplift.label.tokens_per_s": "tokens / s",
   "uplift.layout.cancel": "Cancel",
@@ -640,5 +640,13 @@
   "uplift.patches.dev_group_both": "KEG + BUILD — overlays the running keg and lands in the omlx-dev build",
   "uplift.patches.dev_group_dev": "BUILD ONLY — lands in the omlx-dev build",
   "uplift.patches.sec_dev": "Build patches",
-  "uplift.patches.sec_dev_desc": "Landed in the omlx-dev build only — never touch the running keg. Rebuild after every change."
+  "uplift.patches.sec_dev_desc": "Landed in the omlx-dev build only — never touch the running keg. Rebuild after every change.",
+  "uplift.label.total_in": "in",
+  "uplift.label.total_out": "out",
+  "uplift.label.all_time": "all-time",
+  "uplift.label.free": "free",
+  "uplift.label.disk": "disk",
+  "uplift.metric.rate.cached_tokens_s": "cached tok/s",
+  "uplift.metric.sys.memory": "memory",
+  "uplift.metric.cache.max_bytes": "cache limit"
 }

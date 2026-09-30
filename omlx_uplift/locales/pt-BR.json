@@ -15,7 +15,7 @@
   "uplift.card.request_sizes": "Tamanhos de solicitação",
   "uplift.card.requests": "Solicitações",
   "uplift.card.throughput": "Vazão",
-  "uplift.card.tokens": "Tokens",
+  "uplift.card.tokens": "Tokens totais",
   "uplift.chip.power_mean": "Potência do pacote — média 60 s",
   "uplift.chip.temp_max": "Temp máx CPU/GPU — máx 60 s",
   "uplift.chip.temp_mean": "média",
@@ -211,7 +211,7 @@
   "uplift.label.p95_completion": "p95 tokens de geração",
   "uplift.label.p95_prompt": "p95 tokens de prompt",
   "uplift.label.queue_first_tok": "fila→primeiro token ms",
-  "uplift.label.served_total": "total processado",
+  "uplift.label.served_total": "processados",
   "uplift.label.tasks": "Tarefas",
   "uplift.label.tokens_per_s": "tokens/s",
   "uplift.layout.cancel": "Cancel",
@@ -644,5 +644,13 @@
   "uplift.patches.dev_group_both": "KEG + BUILD — sobrepõe o keg ativo e entra na compilação omlx-dev",
   "uplift.patches.dev_group_dev": "SOMENTE BUILD — entra na compilação omlx-dev",
   "uplift.patches.sec_dev": "Patches de compilação",
-  "uplift.patches.sec_dev_desc": "Entra apenas na compilação omlx-dev — nunca toca o keg ativo. Recompilar após cada alteração."
+  "uplift.patches.sec_dev_desc": "Entra apenas na compilação omlx-dev — nunca toca o keg ativo. Recompilar após cada alteração.",
+  "uplift.label.total_in": "entrada",
+  "uplift.label.total_out": "saída",
+  "uplift.label.all_time": "total geral",
+  "uplift.label.free": "livre",
+  "uplift.label.disk": "disco",
+  "uplift.metric.rate.cached_tokens_s": "tok/s em cache",
+  "uplift.metric.sys.memory": "memória",
+  "uplift.metric.cache.max_bytes": "limite do cache"
 }

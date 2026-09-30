@@ -15,7 +15,7 @@
   "uplift.card.request_sizes": "Velikosti požadavků",
   "uplift.card.requests": "Požadavky",
   "uplift.card.throughput": "Průtok dat",
-  "uplift.card.tokens": "Tokeny",
+  "uplift.card.tokens": "Celkové tokeny",
   "uplift.chip.power_mean": "Příkon balíčku — průměr 60 s",
   "uplift.chip.temp_max": "Max teplota CPU/GPU — maximum 60 s",
   "uplift.chip.temp_mean": "průměr",
@@ -207,7 +207,7 @@
   "uplift.label.p95_completion": "p95 dokončovací tokeny",
   "uplift.label.p95_prompt": "p95 prompt tokeny",
   "uplift.label.queue_first_tok": "fronta→první token ms",
-  "uplift.label.served_total": "celkem zpracováno",
+  "uplift.label.served_total": "zpracováno",
   "uplift.label.tasks": "Úlohy",
   "uplift.label.tokens_per_s": "tokeny / s",
   "uplift.layout.cancel": "Zrušit",
@@ -640,5 +640,13 @@
   "uplift.patches.dev_group_both": "KEG + BUILD — překrývá běžící keg a součásti i build omlx-dev",
   "uplift.patches.dev_group_dev": "POUZE BUILD — součásti buildu omlx-dev",
   "uplift.patches.sec_dev": "Build patche",
-  "uplift.patches.sec_dev_desc": "Dopadají jen na build omlx-dev — běžící se nevztahují. Po každé změně sestavte znovu."
+  "uplift.patches.sec_dev_desc": "Dopadají jen na build omlx-dev — běžící se nevztahují. Po každé změně sestavte znovu.",
+  "uplift.label.total_in": "vstup",
+  "uplift.label.total_out": "výstup",
+  "uplift.label.all_time": "celkem",
+  "uplift.label.free": "volné",
+  "uplift.label.disk": "disk",
+  "uplift.metric.rate.cached_tokens_s": "tok/s z cache",
+  "uplift.metric.sys.memory": "paměť",
+  "uplift.metric.cache.max_bytes": "limit cache"
 }

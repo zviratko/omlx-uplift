@@ -20,20 +20,25 @@
         'chart-tps',
         'chart-mem',
         'met-avg-generation-tps',
-        'met-avg-prefill-tps',
+        // U31-U36 (2026-09-30) retired card ids — dropping them here removes
+        // them from EVERY saved layout on next load (normalizeBlock rule:
+        // unknown ids are discarded, no migration):
+        //   met-avg-prefill-tps          duplicate of input tok/s (U31/U32)
+        //   met-engines-active-requests  Activity card + Requests tile (U32)
+        //   met-engines-loaded           Activity card lists live models (U35)
+        //   met-sys-total-bytes          limit now drawn in the memory card (U36)
+        // All four keys stay COLLECTED (metrics API untouched).
         'met-rate-completion-tokens-s',
         'met-rate-prompt-tokens-s',
         'met-rate-requests-s',
         'met-cache-efficiency',
-        'met-engines-active-requests',
-        'met-engines-loaded',
-        // U11: live system memory cards replace the flat phys_footprint
-        // pair. Dropping met-mem-percent / met-mem-used-bytes here retires
-        // them from saved layouts on load (same mechanism as 'feed'); the
-        // series stay collectable and explorer-addable below.
-        'met-sys-percent',
+        // U11: live system memory cards replaced the flat phys_footprint
+        // pair (met-mem-percent / met-mem-used-bytes retired then). U33
+        // retired met-sys-percent the same way: sys.percent stays collected
+        // (cache-card meter + header mem-label read it) but is no longer a
+        // card — the merged memory card (met-sys-used-bytes) graphs limit
+        // vs used.
         'met-sys-used-bytes',
-        'met-sys-total-bytes',
         'met-cache-total-bytes',
         // U19/U20 multi-series cards: TRAY-ONLY (not in DEFAULT_BLOCKS —
         // nothing existing moves; adding one never rewrites saved geometry).
@@ -127,20 +132,17 @@
         // existing users lose the Events card on next load, no migration.
         // Metric cards: 4 per row (w=6), compact chart fill. The board
         // owner may drop any of them; removed ones stay removed
-        // (mergedBlocks memo in uplift.js).
+        // (mergedBlocks memo in uplift.js). U31-U36 pass: five cards
+        // retired (see the BLOCK_IDS note); the seven survivors re-pack
+        // into 4+3 rows, no dead bands.
         { id: 'met-avg-generation-tps', x: 0, y: 108, w: 6, h: 20 },
-        { id: 'met-avg-prefill-tps', x: 6, y: 108, w: 6, h: 20 },
-        { id: 'met-rate-completion-tokens-s', x: 12, y: 108, w: 6, h: 20 },
-        { id: 'met-rate-prompt-tokens-s', x: 18, y: 108, w: 6, h: 20 },
-        { id: 'met-rate-requests-s', x: 0, y: 128, w: 6, h: 20 },
-        { id: 'met-cache-efficiency', x: 6, y: 128, w: 6, h: 20 },
-        { id: 'met-engines-active-requests', x: 12, y: 128, w: 6, h: 20 },
-        { id: 'met-sys-percent', x: 18, y: 128, w: 6, h: 20 },
-        { id: 'met-sys-used-bytes', x: 0, y: 148, w: 6, h: 20 },
-        { id: 'met-cache-total-bytes', x: 6, y: 148, w: 6, h: 20 },
-        { id: 'met-engines-loaded', x: 12, y: 148, w: 6, h: 20 },
-        { id: 'met-sys-total-bytes', x: 18, y: 148, w: 6, h: 20 },
-        { id: 'reqfeed', x: 0, y: 168, w: COLUMNS, h: 18 },
+        { id: 'met-rate-completion-tokens-s', x: 6, y: 108, w: 6, h: 20 },
+        { id: 'met-rate-prompt-tokens-s', x: 12, y: 108, w: 6, h: 20 },
+        { id: 'met-rate-requests-s', x: 18, y: 108, w: 6, h: 20 },
+        { id: 'met-cache-efficiency', x: 0, y: 128, w: 6, h: 20 },
+        { id: 'met-sys-used-bytes', x: 6, y: 128, w: 6, h: 20 },
+        { id: 'met-cache-total-bytes', x: 12, y: 128, w: 6, h: 20 },
+        { id: 'reqfeed', x: 0, y: 148, w: COLUMNS, h: 18 },
     ];
 
     function defaultLayout() {

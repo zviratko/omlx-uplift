@@ -33,6 +33,10 @@ function normalize(raw) {
         prefillTps: num(raw.avg_prefill_tps),
         requests: num(raw.total_requests),
         totalTokens: num(raw.total_tokens_served),
+        // U25/U28: total input (prompt) tokens — upstream already ships
+        // the counter (server_metrics _build_snapshot), normalize just
+        // never mapped it.
+        promptTokens: num(raw.total_prompt_tokens),
         completionTokens: num(raw.total_completion_tokens),
         cachedTokens: num(raw.total_cached_tokens),
         cacheEfficiency: num(raw.cache_efficiency),
@@ -44,6 +48,11 @@ function normalize(raw) {
         pressure: PRESSURES.includes(p.pressure_level) ? p.pressure_level : null,
         cacheBytes: num(c.total_size_bytes), cacheMaxBytes: num(c.disk_max_bytes),
         cachePercent: clampRatio(num(c.total_size_bytes), num(c.disk_max_bytes)),
+        // U29: GLOBAL hot (RAM) cache — upstream aggregates these on the
+        // runtime_cache payload itself (admin/routes.py: hot_cache_size_bytes
+        // summed, hot_cache_max_bytes = the single process-wide budget).
+        hotCacheBytes: num(c.hot_cache_size_bytes),
+        hotCacheMaxBytes: num(c.hot_cache_max_bytes),
         // Per-model runtime cache rows (SSD cache + hot cache sizes).
         cacheModels: (Array.isArray(c.models) ? c.models : []).map(cm => ({
             id: String(cm.id || '?'),
@@ -189,21 +198,35 @@ const LAYOUT_PERCENTILES = ['p50', 'p90', 'p95', 'p99'];
    removed from the board per user 2026-09-18. */
 const EXPLORE_METRICS = [
     { key: 'avg_generation_tps', hourly: true },
-    { key: 'avg_prefill_tps', hourly: true },
+    // U31/U32: avg_prefill_tps card retired (near-duplicate of input tok/s —
+    // see U31 verdict). The key stays COLLECTED (chart prefill line, U19
+    // pfx card series reference it); it is just no longer a card/tray entry.
     { key: 'rate.completion_tokens_s', hourly: true },
     { key: 'rate.prompt_tokens_s', hourly: true },
     { key: 'rate.requests_s', hourly: true },
     { key: 'cache_efficiency', hourly: true, fmt: 'pct' },
-    { key: 'engines.active_requests' },
-    { key: 'engines.loaded' },
+    // U32: engines.active_requests card retired (in-flight card + Requests
+    // tile already show active/waiting). Still collected.
+    // engines.loaded stays collected but is NOT a card (U35): it counted
+    // every catalog entry whether resident or not, and the Activity card
+    // lists models with live state anyway.
     // U11: live system memory (psutil virtual_memory, same source as
-    // classic's memory card). Default board now uses these. Retired the
-    // flat phys_footprint cards (mem.percent / mem.used_bytes): the metric
-    // series is still collected and drives the Memory & cache chart.
-    { key: 'sys.percent' },
-    { key: 'sys.used_bytes', fmt: 'bytes' },
-    { key: 'sys.total_bytes', fmt: 'bytes' },
-    { key: 'cache.total_bytes', fmt: 'bytes' },
+    // classic's memory card). Retired the flat phys_footprint cards
+    // (mem.percent / mem.used_bytes): the series are still collected.
+    // U33: sys.percent + sys.total_bytes cards retired — merged into the
+    // memory card below (limit vs used). sys.percent stays COLLECTED
+    // (cache-card meter thresholds read the % line via metrics/latest).
+    { key: 'sys.used_bytes', fmt: 'bytes', titleKey: 'sys.memory', series: [
+        { key: 'sys.used_bytes', fmt: 'bytes' },
+        { key: 'sys.total_bytes', fmt: 'bytes' },
+    ] },
+    // U34: disk cache card graphs limit vs used (cache.max_bytes is the
+    // collector's copy of runtime_cache.disk_max_bytes — flat by design,
+    // the user asked for it as the reference line).
+    { key: 'cache.total_bytes', fmt: 'bytes', series: [
+        { key: 'cache.total_bytes', fmt: 'bytes' },
+        { key: 'cache.max_bytes', fmt: 'bytes' },
+    ] },
     // U19 (tray-only — never in DEFAULT_BLOCKS): multi-series defs carry a
     // `series` array; the primary key (def.key) drives the block id, title
     // and the big readout. `axis:'y2'` puts a line on the right axis.

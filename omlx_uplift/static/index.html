@@ -156,23 +156,26 @@ try {
     <section class="card grid-stack-item" data-id="gen" data-tab="status" gs-id="gen" data-block="gen"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.generation">Generation</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.generation">Generation</span><span class="right"></span></h2>
         <div class="card-body">
             <div class="stat-value" id="v-gentps">—</div><div class="stat-label" data-i18n="uplift.label.tokens_per_s">tokens / s</div>
+            <div class="stat-sub" id="v-gen-sub" style="margin-top:6px"></div>
         </div></div></div></div></section>
 
     <section class="card grid-stack-item" data-id="prefill" data-tab="status" gs-id="prefill" data-block="prefill"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.prefill">Prefill</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.prefill">Prefill</span><span class="right"></span></h2>
         <div class="card-body">
             <div class="stat-value t2" id="v-prefilltps">—</div><div class="stat-label" data-i18n="uplift.label.tokens_per_s">tokens / s</div>
+            <div class="stat-sub" id="v-prefill-sub" style="margin-top:6px"></div>
         </div></div></div></div></section>
 
     <section class="card grid-stack-item" data-id="requests" data-tab="status" gs-id="requests" data-block="requests"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.requests">Requests</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.requests">Requests</span><span class="right"></span></h2>
         <div class="card-body">
             <div class="stat-value" id="v-requests">—</div>
             <div class="stat-label">served · <span id="v-active2">—</span> active · <span id="v-waiting2">—</span> waiting</div>
+            <div class="stat-sub" id="v-requests-sub" style="margin-top:6px"></div>
         </div></div></div></div></section>
 
-    <section class="card grid-stack-item" data-id="tokens" data-tab="status" gs-id="tokens" data-block="tokens"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.tokens">Tokens</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.tokens">Tokens</span><span class="right"></span></h2>
+    <section class="card grid-stack-item" data-id="tokens" data-tab="status" gs-id="tokens" data-block="tokens"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.tokens">Total tokens</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.tokens">Total tokens</span><span class="right"></span></h2>
         <div class="card-body">
             <div class="stat-value t2" id="v-tokens">—</div>
-            <div class="stat-label" data-i18n="uplift.label.served_total">served total</div>
+            <div class="stat-label" data-i18n="uplift.label.served_total">processed</div>
             <div class="stat-sub" id="v-tokens-sub" style="margin-top:6px"></div>
         </div></div></div></div></section>
 

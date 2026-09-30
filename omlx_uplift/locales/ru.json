@@ -15,7 +15,7 @@
   "uplift.card.request_sizes": "Размеры запросов",
   "uplift.card.requests": "Запросы",
   "uplift.card.throughput": "Пропускная способность",
-  "uplift.card.tokens": "Токены",
+  "uplift.card.tokens": "Всего токенов",
   "uplift.chip.power_mean": "Мощность пакета — среднее за 60 с",
   "uplift.chip.temp_max": "Макс. темп. CPU/GPU — максимум за 60 с",
   "uplift.chip.temp_mean": "среднее",
@@ -207,7 +207,7 @@
   "uplift.label.p95_completion": "p95 токены генерации",
   "uplift.label.p95_prompt": "p95 токены запроса",
   "uplift.label.queue_first_tok": "очередь→первый токен мс",
-  "uplift.label.served_total": "всего обработано",
+  "uplift.label.served_total": "обработано",
   "uplift.label.tasks": "Задачи",
   "uplift.label.tokens_per_s": "токенов/с",
   "uplift.layout.cancel": "Cancel",
@@ -640,5 +640,13 @@
   "uplift.patches.dev_group_both": "KEG + BUILD — перекрывает активный keg и входит в сборку omlx-dev",
   "uplift.patches.dev_group_dev": "ТОЛЬКО СБОРКА — входит в сборку omlx-dev",
   "uplift.patches.sec_dev": "Патчи сборки",
-  "uplift.patches.sec_dev_desc": "Попадают только в сборку omlx-dev — активный keg не затрагиваются. Пересобирайте после каждого изменения."
+  "uplift.patches.sec_dev_desc": "Попадают только в сборку omlx-dev — активный keg не затрагиваются. Пересобирайте после каждого изменения.",
+  "uplift.label.total_in": "вход",
+  "uplift.label.total_out": "выход",
+  "uplift.label.all_time": "за всё время",
+  "uplift.label.free": "свободно",
+  "uplift.label.disk": "диск",
+  "uplift.metric.rate.cached_tokens_s": "ток/с в кэше",
+  "uplift.metric.sys.memory": "память",
+  "uplift.metric.cache.max_bytes": "лимит кэша"
 }
