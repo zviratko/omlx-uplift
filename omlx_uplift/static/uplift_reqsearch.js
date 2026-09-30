@@ -123,7 +123,12 @@ async function runReqSearch() {
     const hits = d.results || [];
     note.style.display = '';
     if (!hits.length) {
-        note.textContent = C.t('uplift.req.no_matches', { scope: `${reqWin / 3600 | 0}h · ${model || C.t('uplift.req.all_models')}` });
+        // Scope label: `${secs/3600|0}h` floored sub-hour windows to "0h"
+        // (QA 2026-09-30). Reuse the chip's own label — always honest.
+        const chips = $('req-timechips');
+        const chip = chips && [...chips.children].find(x => +x.dataset.secs === reqWin);
+        const scopeLbl = chip ? chip.textContent : `${reqWin / 3600}h`;
+        note.textContent = C.t('uplift.req.no_matches', { scope: `${scopeLbl} · ${model || C.t('uplift.req.all_models')}` });
         return;
     }
     note.textContent = C.t('uplift.req.hits', { n: hits.length, mode: d.mode })
