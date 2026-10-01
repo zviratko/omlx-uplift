@@ -24,10 +24,13 @@ the next engine step), which closes R12-4.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from collections import OrderedDict, deque
 from typing import Any
+
+log = logging.getLogger("omlx_uplift.request_log")
 
 RING_LIMIT = 200          # finished rows kept for the feed
 ACTIVE_STALE_S = 300.0    # forget active rows untouched this long
@@ -213,13 +216,13 @@ def _capture_payload(req: Any) -> dict:
             if ids is not None:
                 out["prompt_ids"], out["prompt_ids_trunc"] = ids
     except Exception:  # noqa: BLE001
-        pass
+        log.debug("prompt_ids capture failed", exc_info=True)
     try:
         text = getattr(req, "output_text", "") or ""
         if text:
             out["output"], out["output_trunc"] = _truncate(text)
     except Exception:  # noqa: BLE001
-        pass
+        log.debug("output capture failed", exc_info=True)
     try:
         sp = req.sampling_params
         params = {f: getattr(sp, f) for f in PARAM_FIELDS
@@ -228,13 +231,13 @@ def _capture_payload(req: Any) -> dict:
             # stop lists may carry non-JSON scalars; default=str keeps it safe
             out["params"] = json.dumps(params, default=str)
     except Exception:  # noqa: BLE001
-        pass
+        log.debug("params json dump failed", exc_info=True)
     try:
         fr = getattr(req, "finish_reason", None)
         if fr:
             out["finish"] = str(fr)
     except Exception:  # noqa: BLE001
-        pass
+        log.debug("finish_reason capture failed", exc_info=True)
     try:
         # Memory-guard refusals carry a machine-readable code (finish_reason
         # is only 'error'); the UI labels those REFUSED, not DONE-by-mistake.
@@ -242,7 +245,7 @@ def _capture_payload(req: Any) -> dict:
         if ec:
             out["error_code"] = str(ec)
     except Exception:  # noqa: BLE001
-        pass
+        log.debug("error_code capture failed", exc_info=True)
     return out
 
 
@@ -316,7 +319,7 @@ class RequestTracker:
                         }))
                         seen.add(rid)
                 except Exception:  # noqa: BLE001 — vanilla layout changed
-                    pass
+                    log.debug("birth-row merge failed", exc_info=True)
             except Exception:  # noqa: BLE001 - best-effort like the stats route
                 continue
             sampled_models.add(model_id)
@@ -436,7 +439,7 @@ class RequestTracker:
                         if final is not None:
                             done.update(_capture_payload(final))
                     except Exception:  # noqa: BLE001
-                        pass
+                        log.debug("finalize payload capture failed", exc_info=True)
                     self._done.append(done)
                     self._done_ids.add(rid)
                     self._dirty_ids.add(rid)
@@ -497,7 +500,7 @@ class RequestTracker:
         try:
             row.update(_capture_payload(request))
         except Exception:  # noqa: BLE001 — capture must never reject a row
-            pass
+            log.debug("payload capture failed", exc_info=True)
         with self._lock:
             if rid in self._done_ids:      # late birth event: ignore
                 return

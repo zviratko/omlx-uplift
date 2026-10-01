@@ -273,10 +273,10 @@ class Collector:
                         if callable(act_fn):
                             active += int((act_fn() or {}).get("active_requests", 0) or 0)
                     except Exception:
-                        pass
+                        log.debug("engine active_requests probe failed", exc_info=True)
                 pairs["engines.active_requests"] = float(active)
         except Exception:
-            pass
+            log.debug("engine active-requests collect failed", exc_info=True)
 
         # Memory + cache gauges (same sources classic's /admin/api/stats
         # uses) so the chart explorer can draw persistent memory history.
@@ -311,16 +311,16 @@ class Collector:
                     if ceil_b > 0:
                         pairs["mem.custom_ceiling_bytes"] = float(ceil_b)
                 except Exception:
-                    pass
+                    log.debug("memory enforcer ceiling probe failed", exc_info=True)
                 try:
                     from omlx.process_memory_enforcer import get_iogpu_wired_limit_bytes
                     wired = int(get_iogpu_wired_limit_bytes() or 0)
                     if wired > 0:
                         pairs["mem.iogpu_limit_bytes"] = float(wired)
                 except Exception:
-                    pass
+                    log.debug("iogpu wired limit probe failed", exc_info=True)
         except Exception:
-            pass
+            log.debug("memory-limit metrics collect failed", exc_info=True)
         # SSD disk-cache total + per-model hot cache. Classic aggregates
         # scheduler.get_ssd_cache_stats()["ssd_cache"].total_size_bytes per
         # loaded model (scoped via the manager when available); the engine
@@ -374,7 +374,7 @@ class Collector:
                                 elif isinstance(s, dict):
                                     ssd = s
                             except Exception:
-                                pass
+                                log.debug("ssd-cache settings shape failed", exc_info=True)
                         # hot_cache_size_bytes lives INSIDE the ssd stats
                         # dict (PagedSSDCacheStats), not at the top of
                         # get_ssd_cache_stats() — reading st made every
@@ -434,7 +434,7 @@ class Collector:
                                 queue_sum["running"] += float(
                                     gs.get("num_running", 0) or 0)
                             except Exception:
-                                pass
+                                log.debug("queue-sum engine snapshot failed", exc_info=True)
                     except Exception:
                         # A broken walker here once silently killed every
                         # pfx.* series (KeyError, 2026-09-26) — keep it loud
@@ -526,7 +526,7 @@ class Collector:
                 pairs["sys.total_bytes"] = float(total)
                 pairs["sys.percent"] = 100.0 * used / total
         except Exception:
-            pass
+            log.debug("system memory collect failed", exc_info=True)
 
         # Per-request lifecycle rows from the sampled tracker. RL-0 write
         # hygiene: only persist rows whose state/token counters actually

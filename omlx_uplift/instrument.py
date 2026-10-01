@@ -24,7 +24,10 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import weakref
+
+log = logging.getLogger("omlx_uplift.instrument")
 
 _installed = False
 _model_cache: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
@@ -65,7 +68,7 @@ def _model_for_core(core) -> str:
                 except Exception:  # noqa: BLE001
                     continue
     except Exception:  # noqa: BLE001
-        pass
+        log.debug("engine match probe failed", exc_info=True)
     if model:                      # don't cache misses (model loads later)
         _model_cache[core] = model
     return model
@@ -99,10 +102,10 @@ def _harvest(core, rid) -> dict:
                 try:
                     fr = req.get_finish_reason()
                 except Exception:  # noqa: BLE001
-                    pass
+                    log.debug("finish_reason probe failed", exc_info=True)
                 snap["finish_reason"] = str(fr or "")
         except Exception:  # noqa: BLE001
-            pass
+            log.debug("finish_reason probe failed", exc_info=True)
     if not snap["has_output"]:
         try:
             collector = (getattr(core, "_output_collectors", None) or {}).get(rid)
@@ -120,7 +123,7 @@ def _harvest(core, rid) -> dict:
                 if ec:
                     snap["error_code"] = str(ec)
         except Exception:  # noqa: BLE001
-            pass
+            log.debug("error_code capture failed", exc_info=True)
     try:
         sp = getattr(req, "sampling_params", None) if req is not None else None
         if sp is not None:
@@ -130,7 +133,7 @@ def _harvest(core, rid) -> dict:
             if params:
                 snap["params"] = json.dumps(params, default=str)
     except Exception:  # noqa: BLE001
-        pass
+        log.debug("params json dump failed", exc_info=True)
     return snap
 
 
@@ -157,7 +160,7 @@ def install() -> None:
                 get_request_tracker().note_birth(
                     rid, _model_for_core(self), _request_obj(self, rid))
             except Exception:  # noqa: BLE001
-                pass
+                log.debug("note_birth (add_request) failed", exc_info=True)
             return rid
         add_request._uplift_hook = True
         AsyncEngineCore.add_request = add_request
@@ -175,7 +178,7 @@ def install() -> None:
                 get_request_tracker().note_birth(
                     rid, _model_for_core(self), _request_obj(self, rid))
             except Exception:  # noqa: BLE001
-                pass
+                log.debug("note_birth failed", exc_info=True)
             return rid
         sync_add_request._uplift_hook = True
         EngineCore.add_request = sync_add_request
@@ -191,6 +194,6 @@ def install() -> None:
                 get_request_tracker().note_finalize(
                     request_id, _model_for_core(self), snap)
             except Exception:  # noqa: BLE001
-                pass
+                log.debug("note_finalize failed", exc_info=True)
         _cleanup_request._uplift_hook = True
         EngineCore._cleanup_request = _cleanup_request
