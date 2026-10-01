@@ -268,6 +268,58 @@ class LoginRequest(BaseModel):
     remember: bool = False
 
 
+# AUTH-1 (SWEEP183 B3): constant-time key compare + a small brute-force
+# throttle. compare_keys is vanilla's own helper (secrets.compare_digest
+# over UTF-8 bytes, survives non-ASCII input); the soft import keeps the
+# viewer/standalone path working where omlx is absent. The throttle is
+# deliberately dumb and in-memory: localhost tool, the goal is to make
+# scripted guessing pointless, not to run a WAF. Exponential cool-down
+# per client IP, reset on success; the dict is capped so a spoofed-source
+# flood cannot grow it unboundedly.
+LOGIN_FAIL_LIMIT = 5        # failures before the first cool-down
+LOGIN_BLOCK_S = 30.0        # first block; doubles per further failure
+LOGIN_BLOCK_MAX_S = 900.0
+_login_fails: dict[str, list] = {}   # ip -> [fail_count, block_until_ts]
+
+
+def _compare_keys(provided: str, expected: str) -> bool:
+    try:
+        from omlx.admin.auth import compare_keys
+        return compare_keys(provided, expected)
+    except Exception:   # viewer mode / older vanilla without the helper
+        import secrets
+        try:
+            return secrets.compare_digest(
+                provided.encode("utf-8", "surrogatepass"),
+                expected.encode("utf-8", "surrogatepass"))
+        except Exception:
+            return False
+
+
+def _login_blocked(ip: str) -> float:
+    """Seconds left of the cool-down for IP (0 = free to try)."""
+    ent = _login_fails.get(ip)
+    if not ent:
+        return 0.0
+    return max(0.0, ent[1] - time.time())
+
+
+def _login_failed(ip: str) -> None:
+    if len(_login_fails) > 1024:      # cap: prefer evicting everyone
+        _login_fails.clear()
+    n = _login_fails.get(ip, [0, 0.0])[0] + 1
+    if n >= LOGIN_FAIL_LIMIT:
+        block = min(LOGIN_BLOCK_MAX_S,
+                    LOGIN_BLOCK_S * (2 ** (n - LOGIN_FAIL_LIMIT)))
+        _login_fails[ip] = [n, time.time() + block]
+    else:
+        _login_fails[ip] = [n, 0.0]
+
+
+def _login_ok(ip: str) -> None:
+    _login_fails.pop(ip, None)
+
+
 @page_router.post("/uplift/login", include_in_schema=False)
 async def uplift_login(request: Request):
     """Validate the admin API key and mint the shared session cookie.
@@ -286,11 +338,19 @@ async def uplift_login(request: Request):
     )
 
     body = await request.json()
-    api_key = (body or {}).get("api_key", "")
+    api_key = str((body or {}).get("api_key", ""))
+    ip = request.client.host if request.client else "?"
+    wait_s = _login_blocked(ip)
+    if wait_s:
+        raise HTTPException(
+            status_code=429,
+            detail=f"too many failed logins — retry in {int(wait_s) + 1}s")
     gs = global_settings()
     expected = gs.auth.api_key if gs and gs.auth.api_key else None
-    if not expected or api_key != expected:
+    if not expected or not _compare_keys(api_key, expected):
+        _login_failed(ip)
         raise HTTPException(status_code=401, detail="Invalid API key")
+    _login_ok(ip)
     remember = bool((body or {}).get("remember", False))
     token = create_session_token(remember=remember)
     response = {"success": True}
