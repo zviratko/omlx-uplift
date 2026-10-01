@@ -421,6 +421,8 @@
   "uplift.patches.reversal_adopted": "이미 되돌려짐 — 적용된 되돌림으로 저장; 비활성화 시 병합 바이트 복원",
   "uplift.patches.reversal_chip": "되돌림",
   "uplift.patches.reversal_hint": "이미 병합된 변경을 되돌립니다 — 역방향으로 적용",
+  "uplift.patches.insecure_chip": "비보안",
+  "uplift.patches.insecure_hint": "이 패치의 가져오기에서 TLS 검증이 비활성화됩니다 — 추가 시 설정이 이후 재검증에도 적용됩니다",
   "uplift.patches.reversal_nothing": "되돌릴 것 없음 — 병합된 변경이 라이브 트리에 없음",
   "uplift.patches.rollback": "롤백",
   "uplift.patches.rolledback": "롤백이 다음 omlx 재시작 시 적용됩니다",

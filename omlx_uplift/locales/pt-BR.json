@@ -410,6 +410,8 @@
   "uplift.patches.reversal_adopted": "JÁ REVERTIDO — salvo como reversão APLICADA; desativar restaura os bytes incorporados",
   "uplift.patches.reversal_chip": "REVERSÃO",
   "uplift.patches.reversal_hint": "reverte uma mudança já incorporada — aplicada na direção inversa",
+  "uplift.patches.insecure_chip": "INSEGURO",
+  "uplift.patches.insecure_hint": "A verificação TLS está desativada nas buscas deste patch — definida ao adicionar, vale para todas as reverificações futuras",
   "uplift.patches.reversal_nothing": "NADA A DESFAZER — a mudança incorporada não está na árvore ativa",
   "uplift.patches.rollback": "Reverter",
   "uplift.patches.rolledback": "Reversão agendada para o próximo reinício do omlx",

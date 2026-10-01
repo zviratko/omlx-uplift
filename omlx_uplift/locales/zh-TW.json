@@ -406,6 +406,8 @@
   "uplift.patches.reversal_adopted": "已反轉——儲存為已套用的反轉補丁；停用會還原合併後的位元組",
   "uplift.patches.reversal_chip": "反轉",
   "uplift.patches.reversal_hint": "回退已合併的變更——以反方向套用",
+  "uplift.patches.insecure_chip": "不安全",
+  "uplift.patches.insecure_hint": "此修補程式的下載已停用 TLS 驗證 — 新增時設定，後續重新驗證同樣生效",
   "uplift.patches.reversal_nothing": "無需回退——現行樹中沒有該合併變更",
   "uplift.patches.rollback": "rollback",
   "uplift.patches.rolledback": "rollback 將於下次 omlx 重啟時套用",

@@ -406,6 +406,8 @@
   "uplift.patches.reversal_adopted": "既に反転済み — 適用済み反転として保存。無効化でマージ後バイトを復元",
   "uplift.patches.reversal_chip": "反転",
   "uplift.patches.reversal_hint": "既にマージされた変更を元に戻します — 逆方向に適用",
+  "uplift.patches.insecure_chip": "非安全",
+  "uplift.patches.insecure_hint": "このパッチの取得ではTLS検証が無効です — 追加時の設定が後続の再検証にも適用されます",
   "uplift.patches.reversal_nothing": "戻すものなし — マージ済み変更がライブツリーにありません",
   "uplift.patches.rollback": "ロールバック",
   "uplift.patches.rolledback": "ロールバックは次の omlx 再起動時に適用されます",

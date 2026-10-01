@@ -406,6 +406,8 @@
   "uplift.patches.reversal_adopted": "ALREADY REVERTED — stored as APPLIED reversal; disable restores the merged bytes",
   "uplift.patches.reversal_chip": "REVERSAL",
   "uplift.patches.reversal_hint": "reverts an already merged change — applied in the un-apply direction",
+  "uplift.patches.insecure_chip": "INSECURE",
+  "uplift.patches.insecure_hint": "TLS verification is disabled for this patch's fetches — set at add time, it also applies to every later re-check",
   "uplift.patches.reversal_nothing": "NOTHING TO UNDO — the merged change is not in the live tree",
   "uplift.patches.rollback": "Rollback",
   "uplift.patches.rolledback": "Rollback queued for next omlx restart",

@@ -1683,6 +1683,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    not runtime state (a BUNDLED patch can be in any state at once) */
 .pt-st-bundled { border-color: var(--ok, #2e8b57); color: var(--ok, #2e8b57); border-style: dashed; }
 .pt-st-bundled::before { background: var(--ok, #2e8b57); }
+.pt-st-insecure { border-color: var(--red, #c0392b); color: var(--red, #c0392b); }
+.pt-st-insecure::before { background: var(--red, #c0392b); }
 .pt-auto { display: inline-flex; gap: 4px; align-items: center; font-size: var(--fs-meta); }
 .pt-banner { border: 1px solid var(--warn, #b8860b); background: color-mix(in srgb, var(--warn, #b8860b) 12%, transparent); padding: 6px 10px; margin: 4px 0; font-size: var(--fs-meta); }
 .pt-banner.pt-kill { border-color: var(--accent, #e0662e); }

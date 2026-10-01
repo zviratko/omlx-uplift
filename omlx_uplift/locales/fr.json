@@ -410,6 +410,8 @@
   "uplift.patches.reversal_adopted": "DÉJÀ INVERSÉ — enregistré comme inversion APPLIQUÉE ; désactiver restaure les octets fusionnés",
   "uplift.patches.reversal_chip": "INVERSION",
   "uplift.patches.reversal_hint": "annule un changement déjà fusionné — appliqué dans le sens inverse",
+  "uplift.patches.insecure_chip": "NON SÉCURISÉ",
+  "uplift.patches.insecure_hint": "La vérification TLS est désactivée pour les téléchargements de ce correctif — définie à l'ajout, appliquée à toutes les revérifications ultérieures",
   "uplift.patches.reversal_nothing": "RIEN À ANNULER — le changement fusionné est absent de l'arbre actif",
   "uplift.patches.rollback": "Retour arrière",
   "uplift.patches.rolledback": "Retour arrière programmé au prochain redémarrage d'omlx",

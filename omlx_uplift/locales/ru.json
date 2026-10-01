@@ -406,6 +406,8 @@
   "uplift.patches.reversal_adopted": "УЖЕ ОТКАЧЕНО — сохранён как применённый обратный патч; отключение вернёт влитые байты",
   "uplift.patches.reversal_chip": "ОБРАТНЫЙ",
   "uplift.patches.reversal_hint": "откатывает уже влитое изменение — применяется в обратную сторону",
+  "uplift.patches.insecure_chip": "НЕБЕЗОПАСНО",
+  "uplift.patches.insecure_hint": "Проверка TLS отключена для загрузок этого патча — задано при добавлении, действует и при последующих перепроверках",
   "uplift.patches.reversal_nothing": "Нечего откатывать — влитого изменения нет в рабочем дереве",
   "uplift.patches.rollback": "Откат",
   "uplift.patches.rolledback": "Откат запланирован на следующий перезапуск omlx",

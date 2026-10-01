@@ -241,6 +241,13 @@ function patchCard(p, view) {
             ptMsg('uplift.patches.reversal_hint',
                   'reverts an already merged change — applied in the un-apply direction')));
     }
+    if (p.source && p.source.insecure_tls) {   // UX-1 (SWEEP183 K): sticky
+        head.append(ptChip(ptMsg('uplift.patches.insecure_chip', 'INSECURE'),
+            'pt-st-insecure',
+            ptMsg('uplift.patches.insecure_hint',
+                  'TLS verification is disabled when fetching this patch — ' +
+                  'set at add time, it also applies to every later re-check')));
+    }
     const heldCodes = p.requires_approval || [];
     if (heldCodes.length) {
         head.append(ptChip(ptMsg('uplift.patches.safeguard_hold', 'AUTO-APPLY HELD'),

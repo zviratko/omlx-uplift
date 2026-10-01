@@ -410,6 +410,8 @@
   "uplift.patches.reversal_adopted": "YA REVERTIDO — guardado como reversión APLICADA; desactivar restaura los bytes fusionados",
   "uplift.patches.reversal_chip": "REVERSIÓN",
   "uplift.patches.reversal_hint": "revierte un cambio ya fusionado — se aplica en dirección contraria",
+  "uplift.patches.insecure_chip": "INSEGURO",
+  "uplift.patches.insecure_hint": "La verificación TLS está desactivada en las descargas de este parche — definida al añadirlo, se aplica a todas las comprobaciones posteriores",
   "uplift.patches.reversal_nothing": "NADA QUE DESHACER — el cambio fusionado no está en el árbol activo",
   "uplift.patches.rollback": "Revertir",
   "uplift.patches.rolledback": "Reversión en cola para el próximo reinicio de omlx",

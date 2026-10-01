@@ -406,6 +406,8 @@
   "uplift.patches.reversal_adopted": "JIŽ VRÁCENO — uloženo jako POUŽITÉ vrácení; zakázáním se obnoví sloučené bajty",
   "uplift.patches.reversal_chip": "ZVRÁTENÍ",
   "uplift.patches.reversal_hint": "vrací již sloučenou změnu — používá se ke zrušení aplikace",
+  "uplift.patches.insecure_chip": "NEBEZPEČNÉ",
+  "uplift.patches.insecure_hint": "Ověření TLS je pro načítání této záplaty vypnuté — nastaveno při přidání, platí i pro pozdější automatické kontroly",
   "uplift.patches.reversal_nothing": "NENÍ CO VRÁTIT — sloučená změna není v živém stromu",
   "uplift.patches.rollback": "Vrátit zpět",
   "uplift.patches.rolledback": "Vrácení zpět zařazeno při dalším restartu omlx",
