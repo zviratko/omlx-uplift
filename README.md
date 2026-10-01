@@ -19,19 +19,23 @@ After `brew upgrade omlx` (fresh keg), re-run `omlx-uplift install` and
 kickstart again. Removing uplift: `omlx-uplift uninstall` (removes the
 `.pth`), then `brew uninstall omlx-uplift`.
 
-![Status board](docs/screenshots/status-board.png)
+![Theme picker](docs/screenshots/theme-picker.png)
 
-*Status board: live activity, memory and cache, throughput and request
-charts, request feed.*
+*Status board with the theme picker open: four built-in themes plus drop-in
+CSS skin crates, previewed on hover, committed on click.*
 
 ![Patches page](docs/screenshots/patches.png)
 
-*Patches / DEV page: runtime and build patch zones, dev keg control,
-add-patch form.*
+*Patches / DEV page (TRON skin): runtime and build patch zones, dev keg
+control, add-patch form.*
 
 ![Models page](docs/screenshots/models.png)
 
-*Models page: filter, chips, per-model settings.*
+*Models page (SHODAN skin): filter, chips, per-model settings.*
+
+![Usage page](docs/screenshots/usage.png)
+
+*Usage page (LAIN skin): token totals, hourly chart, heatmap.*
 
 ## Patch carrier (PATCHES page)
 
