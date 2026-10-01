@@ -8,7 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from omlx_uplift import router as up   # soft omlx imports: runs with or without omlx
+from omlx_uplift import router as up   # facade: handler fns + constants
+from omlx_uplift.routers import metrics as up_m  # SPLIT-1: patch seam
 
 
 def _fine(key, n, step=5.0):
@@ -67,8 +68,8 @@ async def test_single_key_backcompat_shape():
     pts = _fine("avg_generation_tps", 10)
     store = _FakeStore({"avg_generation_tps": pts})
     collector = MagicMock(store=store)
-    with patch.object(up, "get_collector", return_value=collector), \
-         patch.object(up, "_hourly_points", return_value=[]):
+    with patch.object(up_m, "get_collector", return_value=collector), \
+         patch.object(up_m, "_hourly_points", return_value=[]):
         d = await _call(key="avg_generation_tps", window="1h")
     assert d["key"] == "avg_generation_tps"
     assert d["bucket_s"] == 0
@@ -81,8 +82,8 @@ async def test_multi_keys_returns_series_map():
         "rate.requests_s": _fine("b", 3),
     })
     collector = MagicMock(store=store)
-    with patch.object(up, "get_collector", return_value=collector), \
-         patch.object(up, "_hourly_points", return_value=[]):
+    with patch.object(up_m, "get_collector", return_value=collector), \
+         patch.object(up_m, "_hourly_points", return_value=[]):
         d = await _call(keys="avg_generation_tps,rate.requests_s", window="1h")
     assert set(d["series_map"]) == {"avg_generation_tps", "rate.requests_s"}
     assert len(d["series_map"]["rate.requests_s"]) == 3
@@ -91,8 +92,8 @@ async def test_multi_keys_returns_series_map():
 async def test_long_window_gets_downsampled_and_advertises_bucket():
     store = _FakeStore({"avg_generation_tps": _fine("a", up.MAX_SERIES_POINTS * 3)})
     collector = MagicMock(store=store)
-    with patch.object(up, "get_collector", return_value=collector), \
-         patch.object(up, "_hourly_points", return_value=[]):
+    with patch.object(up_m, "get_collector", return_value=collector), \
+         patch.object(up_m, "_hourly_points", return_value=[]):
         d = await _call(key="avg_generation_tps", window="7d")
     assert len(d["series"]) <= up.MAX_SERIES_POINTS + 1
     assert d["bucket_s"] >= 60
@@ -114,7 +115,7 @@ async def test_metrics_hot_discovers_per_model_keys():
     store.series.side_effect = lambda k, w, now=None, inst=None: [
         {"ts": 100.0, "v": 5.0}, {"ts": 105.0, "v": 0.0}]
     collector = MagicMock(store=store)
-    with patch.object(up, "get_collector", return_value=collector):
+    with patch.object(up_m, "get_collector", return_value=collector):
         d = await up.metrics_hot(window="1h", is_admin=True)
     assert d["keys"] == ["hot.m1", "hot.m2"]
     # drained model keeps its trailing ZERO — that point is the whole point

@@ -14,7 +14,7 @@ import pytest
 # --------------------------------------------------------------------------
 
 def test_menubar_marker_wins_over_launchd():
-    from omlx_uplift.router import _supervisor_kind
+    from omlx_uplift.routers.dev import _supervisor_kind
 
     k = _supervisor_kind({"OMLX_SUPERVISED": "menubar",
                           "XPC_SERVICE_NAME": "sh.brew.omlx"})
@@ -22,7 +22,7 @@ def test_menubar_marker_wins_over_launchd():
 
 
 def test_launchd_job_detected_by_xpc_service_name():
-    from omlx_uplift.router import _supervisor_kind
+    from omlx_uplift.routers.dev import _supervisor_kind
 
     # the real value launchd injects for a `brew services` job
     assert _supervisor_kind({"XPC_SERVICE_NAME": "sh.brew.omlx"}) \
@@ -30,14 +30,14 @@ def test_launchd_job_detected_by_xpc_service_name():
 
 
 def test_blank_values_are_not_supervisors():
-    from omlx_uplift.router import _supervisor_kind
+    from omlx_uplift.routers.dev import _supervisor_kind
 
     assert _supervisor_kind({"OMLX_SUPERVISED": "  ",
                              "XPC_SERVICE_NAME": ""}) is None
 
 
 def test_plain_terminal_serve_is_unsupervised():
-    from omlx_uplift.router import _supervisor_kind
+    from omlx_uplift.routers.dev import _supervisor_kind
 
     assert _supervisor_kind({"PATH": "/usr/bin", "HOME": "/u/x"}) is None
 
@@ -49,7 +49,7 @@ def test_plain_terminal_serve_is_unsupervised():
 @pytest.fixture
 def restart_route(monkeypatch):
     """The handler with auth unwrapped and the detached kill captured."""
-    from omlx_uplift import router
+    from omlx_uplift.routers import dev as dev_mod
 
     launched = []
 
@@ -59,12 +59,12 @@ def restart_route(monkeypatch):
 
     import subprocess
     monkeypatch.setattr(subprocess, "Popen", FakePopen)
-    monkeypatch.setattr(router, "require_admin", lambda request=None: True)
-    return router.server_restart, launched
+    monkeypatch.setattr(dev_mod, "require_admin", lambda request=None: True)
+    return dev_mod.server_restart, launched
 
 
 async def _call(handler, monkeypatch, env, force):
-    from omlx_uplift.router import ServerRestartRequest
+    from omlx_uplift.routers.dev import ServerRestartRequest
 
     monkeypatch.setenv("OMLX_SUPERVISED", "")  # absent-ish
     monkeypatch.delenv("OMLX_SUPERVISED", raising=False)

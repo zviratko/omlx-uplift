@@ -13,6 +13,8 @@ from fastapi import HTTPException
 
 import omlx.server  # noqa: F401 - ensure server module is imported first
 from omlx_uplift import router as up
+from omlx_uplift.routers import settings as up_s      # SPLIT-1: patch seam
+from omlx_uplift.routers import requests as up_r      # SPLIT-1: patch seam
 from omlx.model_settings import ModelSettings
 
 
@@ -45,8 +47,8 @@ async def test_index_reports_orphans_and_aliases():
         "gone-model": _ms("gone-model"),
         "alias-target": _ms("alias-target"),  # referenced by live-model's alias
     }
-    with patch.object(up, "settings_manager", return_value=_mgr(settings)), \
-         patch.object(up, "engine_pool", return_value=_pool(["live-model"])):
+    with patch.object(up_s, "settings_manager", return_value=_mgr(settings)), \
+         patch.object(up_s, "engine_pool", return_value=_pool(["live-model"])):
         out = await up.model_settings_index(is_admin=True)
     assert out["stored"] == 3
     assert out["known"] == 1
@@ -56,8 +58,8 @@ async def test_index_reports_orphans_and_aliases():
 
 
 async def test_index_requires_pool():
-    with patch.object(up, "settings_manager", return_value=_mgr({})), \
-         patch.object(up, "engine_pool", return_value=None):
+    with patch.object(up_s, "settings_manager", return_value=_mgr({})), \
+         patch.object(up_s, "engine_pool", return_value=None):
         with pytest.raises(HTTPException) as ei:
             await up.model_settings_index(is_admin=True)
     assert ei.value.status_code == 503
@@ -69,7 +71,7 @@ async def test_prune_deletes_only_listed_existing_ids():
         "b": _ms("b"),
     }
     mgr = _mgr(settings)
-    with patch.object(up, "settings_manager", return_value=mgr):
+    with patch.object(up_s, "settings_manager", return_value=mgr):
         out = await up.prune_model_settings(
             up.PruneModelSettingsRequest(ids=["a", "a", "ghost"]),
             is_admin=True,
@@ -80,7 +82,7 @@ async def test_prune_deletes_only_listed_existing_ids():
 
 
 async def test_prune_requires_ids():
-    with patch.object(up, "settings_manager", return_value=_mgr({})):
+    with patch.object(up_s, "settings_manager", return_value=_mgr({})):
         with pytest.raises(HTTPException) as ei:
             await up.prune_model_settings(
                 up.PruneModelSettingsRequest(ids=[]), is_admin=True
@@ -93,8 +95,8 @@ async def test_get_model_settings_shape():
     s = ModelSettings()
     s.temperature = 0.42
     mgr.get_settings.return_value = s
-    with patch.object(up, "settings_manager", return_value=mgr), \
-         patch.object(up, "engine_pool", return_value=_pool(["m1"])):
+    with patch.object(up_s, "settings_manager", return_value=mgr), \
+         patch.object(up_s, "engine_pool", return_value=_pool(["m1"])):
         out = await up.get_model_settings("m1", is_admin=True)
     assert out["id"] == "m1"
     assert out["settings"]["temperature"] == 0.42
@@ -105,7 +107,7 @@ async def test_get_model_settings_unknown_returns_defaults():
     # point of the record is that it survives the model directory. Unknown
     # ids now come back as default settings instead of 404.
     mgr = _mgr({})
-    with patch.object(up, "settings_manager", return_value=mgr):
+    with patch.object(up_s, "settings_manager", return_value=mgr):
         out = await up.get_model_settings("ghost", is_admin=True)
     assert out["id"] == "ghost"
     assert isinstance(out["settings"], dict)
@@ -122,7 +124,7 @@ async def test_upsert_model_settings_writes_without_pool():
     req = MagicMock()
     async def _json(): return {"temperature": 0.4}
     req.json = _json
-    with patch.object(up, "settings_manager", return_value=mgr):
+    with patch.object(up_s, "settings_manager", return_value=mgr):
         out = await up.upsert_model_settings("ghost", req, is_admin=True)
     assert captured["ghost"]["temperature"] == 0.4
 
@@ -130,10 +132,10 @@ async def test_upsert_model_settings_writes_without_pool():
 async def test_delete_model_settings():
     settings = {"a": _ms("a")}
     mgr = _mgr(settings)
-    with patch.object(up, "settings_manager", return_value=mgr):
+    with patch.object(up_s, "settings_manager", return_value=mgr):
         out = await up.delete_model_settings_route("a", is_admin=True)
     assert out == {"deleted": "a"}
-    with patch.object(up, "settings_manager", return_value=_mgr({})):
+    with patch.object(up_s, "settings_manager", return_value=_mgr({})):
         with pytest.raises(HTTPException) as ei:
             await up.delete_model_settings_route("ghost", is_admin=True)
     assert ei.value.status_code == 404
@@ -200,8 +202,8 @@ async def test_sse_every_consumer_sees_every_transition():
     from unittest.mock import MagicMock
     tracker = _FakeTracker()
     tracker.add("r1")
-    with patch.object(up, "get_request_tracker", return_value=tracker), \
-         patch.object(up, "engine_pool", return_value=MagicMock()):
+    with patch.object(up_r, "get_request_tracker", return_value=tracker), \
+         patch.object(up_s, "engine_pool", return_value=MagicMock()):
         resp_a = await up.stream_requests(is_admin=True)
         resp_b = await up.stream_requests(is_admin=True)
         it_a, it_b = resp_a.body_iterator, resp_b.body_iterator

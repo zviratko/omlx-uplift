@@ -27,7 +27,7 @@ def fake_devsrc(monkeypatch):
 
 
 def _ev(cfg, monkeypatch, fake_devsrc):
-    from omlx_uplift.router import _dev11_evaluate
+    from omlx_uplift.routers.dev import _dev11_evaluate
     return _dev11_evaluate(cfg)
 
 
@@ -81,18 +81,20 @@ def test_sync_tip_unknown_is_quiet(monkeypatch, fake_devsrc):
 # --------------------------------------------------------------------------
 
 def test_boot_check_swallows_everything(monkeypatch):
-    from omlx_uplift import devsrc, router
+    from omlx_uplift import devsrc
+    from omlx_uplift.routers import dev as dev_mod
 
     def boom():
         raise RuntimeError("disk on fire")
     monkeypatch.setattr(devsrc, "load_config", boom)
-    router.dev11_boot_check()          # must not raise
+    dev_mod.dev11_boot_check()          # must not raise
 
 
 def test_boot_check_vanilla_keg_returns_before_config(monkeypatch):
     import sys
 
-    from omlx_uplift import devsrc, router
+    from omlx_uplift import devsrc
+    from omlx_uplift.routers import dev as dev_mod
 
     calls = []
     monkeypatch.setattr(devsrc, "load_config",
@@ -100,7 +102,7 @@ def test_boot_check_vanilla_keg_returns_before_config(monkeypatch):
     monkeypatch.setattr(sys, "prefix", "/opt/homebrew/opt/omlx/libexec")
     monkeypatch.setattr(sys, "executable",
                         "/opt/homebrew/opt/omlx/libexec/bin/python3")
-    router.dev11_boot_check()
+    dev_mod.dev11_boot_check()
     assert calls == []                 # vanilla keg never reads dev config
 
 
@@ -109,7 +111,8 @@ def test_boot_check_vanilla_keg_returns_before_config(monkeypatch):
 # --------------------------------------------------------------------------
 
 def _route_sync(cfg, monkeypatch):
-    from omlx_uplift import devsrc, router
+    from omlx_uplift import devsrc
+    from omlx_uplift.routers import dev as dev_mod
 
     saved = {}
 
@@ -117,7 +120,7 @@ def _route_sync(cfg, monkeypatch):
         saved.update(c)
     monkeypatch.setattr(devsrc, "load_config", lambda: dict(cfg))
     monkeypatch.setattr(devsrc, "save_config", save)
-    monkeypatch.setattr(router, "_dev_status_sync", lambda: {"ok": True})
+    monkeypatch.setattr(dev_mod, "_dev_status_sync", lambda: {"ok": True})
     from fastapi import HTTPException
 
     def call(on):
@@ -151,7 +154,8 @@ def test_auto_update_on_while_pinned_refused(monkeypatch):
 # --------------------------------------------------------------------------
 
 def test_dev_status_exposes_flag_and_availability(tmp_path, monkeypatch):
-    from omlx_uplift import devsrc, router
+    from omlx_uplift import devsrc
+    from omlx_uplift.routers import dev as dev_mod
 
     cfg = {"auto_update": True, "built_base": "a" * 40,
            "sync_ref": "origin/main", "src_path": str(tmp_path)}

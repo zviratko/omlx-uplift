@@ -9,6 +9,11 @@ import types
 
 import pytest
 
+# SPLIT-1: handlers resolve globals in their OWNING routers module; patch
+# targets follow the code (the router.py facade keeps working for classes).
+from omlx_uplift.routers import dev as dev_mod
+from omlx_uplift.routers import patches as patches_mod
+
 
 # --------------------------------------------------------------------------
 # /dev/status
@@ -18,7 +23,7 @@ def test_status_not_installed_without_config(tmp_path, monkeypatch):
     from omlx_uplift import devsrc, router
 
     monkeypatch.setattr(devsrc, "load_config", lambda: None)
-    st = router._dev_status_sync()
+    st = dev_mod._dev_status_sync()
     assert st["installed"] is False
     assert "dev bootstrap" in st["reason"]
 
@@ -29,7 +34,7 @@ def test_status_not_installed_when_clone_missing(tmp_path, monkeypatch):
     cfg = {"src_dir": str(tmp_path / "nope"), "branch": "uplift-dev",
            "sync_ref": "origin/main", "base_sha": "x" * 40}
     monkeypatch.setattr(devsrc, "load_config", lambda: cfg)
-    monkeypatch.setattr(router, "patch_store", lambda: None)
+    monkeypatch.setattr(patches_mod, "patch_store", lambda: None)
     monkeypatch.setattr("omlx_uplift.patchsource.enabled_build_patches",
                         lambda store: [])
     monkeypatch.setattr(devsrc, "src_path", lambda c: str(tmp_path / "nope"))
@@ -37,7 +42,7 @@ def test_status_not_installed_when_clone_missing(tmp_path, monkeypatch):
     # clone-missing guard overrides whatever status() reports
     monkeypatch.setattr(devsrc, "status",
                         lambda c, p: {"installed": True, "branch": "x"})
-    st = router._dev_status_sync()
+    st = dev_mod._dev_status_sync()
     assert st["installed"] is False
 
 
@@ -59,7 +64,7 @@ def test_share_realized_detects_symlink_vs_private(tmp_path, monkeypatch):
     cfg = {"port": 8001, "base_path": str(dev),
            "share": {"models": True, "model_settings": True,
                      "model_profiles": False}}
-    got = router._dev_share_realized(cfg)
+    got = dev_mod._dev_share_realized(cfg)
     assert got["models"]["ok"] and got["models"]["actual"] == "symlink"
     # wants model_settings shared but it's a private file -> OUT OF SYNC
     assert got["model_settings"]["ok"] is False
@@ -75,7 +80,7 @@ def test_status_stale_flag_matches_expected_tip(tmp_path, monkeypatch):
            "sync_ref": "origin/main", "base_sha": "a" * 40,
            "built_sha": "b" * 40}
     monkeypatch.setattr(devsrc, "load_config", lambda: cfg)
-    monkeypatch.setattr(router, "patch_store", lambda: None)
+    monkeypatch.setattr(patches_mod, "patch_store", lambda: None)
     monkeypatch.setattr("omlx_uplift.patchsource.enabled_build_patches",
                         lambda store: [])
     monkeypatch.setattr(devsrc, "src_path", lambda c: str(tmp_path / "nope"))
@@ -90,11 +95,11 @@ def test_status_stale_flag_matches_expected_tip(tmp_path, monkeypatch):
                         lambda c: {"port": 8001, "base_path": str(tmp_path)})
     monkeypatch.setattr(devsrc, "vanilla_port", lambda: 8000)
     monkeypatch.setattr(devsrc, "share_map", lambda c: {})
-    monkeypatch.setattr(router, "_dev_share_realized", lambda c: {})
+    monkeypatch.setattr(dev_mod, "_dev_share_realized", lambda c: {})
     import omlx_uplift.cli as cli
     monkeypatch.setattr(cli, "_service_state", lambda f: "stopped")
 
-    st = router._dev_status_sync()
+    st = dev_mod._dev_status_sync()
     assert st["installed"] is True
     # built b*40 vs expected c*40 -> stale
     assert st["stale"] is True
@@ -116,10 +121,10 @@ def test_reconfigure_passes_options_through(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr(cli, "cmd_dev_reconfigure", fake_reconf)
-    monkeypatch.setattr(router, "_dev_status_sync", lambda: {"installed": True})
-    req = router.DevReconfigureRequest(port=8010, share=["models"],
+    monkeypatch.setattr(dev_mod, "_dev_status_sync", lambda: {"installed": True})
+    req = dev_mod.DevReconfigureRequest(port=8010, share=["models"],
                                        no_share=["model_settings"])
-    res = router._dev_reconfigure_sync(req)
+    res = dev_mod._dev_reconfigure_sync(req)
     assert res["ok"] is True
     assert seen["port"] == 8010
     assert seen["share"] == ["models"] and seen["no_share"] == ["model_settings"]
@@ -130,8 +135,8 @@ def test_reconfigure_nonzero_maps_to_not_ok(tmp_path, monkeypatch):
     from omlx_uplift import cli, router
 
     monkeypatch.setattr(cli, "cmd_dev_reconfigure", lambda ns: 1)
-    monkeypatch.setattr(router, "_dev_status_sync", lambda: {})
-    res = router._dev_reconfigure_sync(router.DevReconfigureRequest(port=1))
+    monkeypatch.setattr(dev_mod, "_dev_status_sync", lambda: {})
+    res = dev_mod._dev_reconfigure_sync(dev_mod.DevReconfigureRequest(port=1))
     assert res["ok"] is False
 
 
@@ -141,7 +146,8 @@ def test_reconfigure_nonzero_maps_to_not_ok(tmp_path, monkeypatch):
 
 def test_build_job_guard_blocks_second_start(monkeypatch):
     import threading
-    from omlx_uplift import router
+    from omlx_uplift import router  # SPLIT-1: facade for classes/api_router
+    from omlx_uplift.routers import dev as dev_mod
 
     started = threading.Event()
     release = threading.Event()
@@ -150,18 +156,18 @@ def test_build_job_guard_blocks_second_start(monkeypatch):
         started.set()
         release.wait(5)
 
-    monkeypatch.setattr(router, "_dev_build_run", slow)
-    with router._DEV_BUILD_LOCK:
-        router._DEV_BUILD.update({"running": False, "result": None, "log": []})
+    monkeypatch.setattr(dev_mod, "_dev_build_run", slow)
+    with dev_mod._DEV_BUILD_LOCK:
+        dev_mod._DEV_BUILD.update({"running": False, "result": None, "log": []})
 
     import asyncio
-    req = router.DevBuildRequest()
+    req = dev_mod.DevBuildRequest()
     # dev_build is a coroutine fn w/ Depends; call it directly, is_admin patched in
     async def go():
         loop = asyncio.get_running_loop()
-        first = await router.dev_build(req, True)
+        first = await dev_mod.dev_build(req, True)
         await asyncio.wait_for(loop.run_in_executor(None, started.wait), 5)
-        second = await router.dev_build(req, True)
+        second = await dev_mod.dev_build(req, True)
         release.set()
         return first, second
     first, second = asyncio.run(go())
@@ -169,8 +175,8 @@ def test_build_job_guard_blocks_second_start(monkeypatch):
         assert first == {"started": True}
         assert second["started"] is False and second["running"] is True
     finally:
-        with router._DEV_BUILD_LOCK:
-            router._DEV_BUILD.update({"running": False, "result": None,
+        with dev_mod._DEV_BUILD_LOCK:
+            dev_mod._DEV_BUILD.update({"running": False, "result": None,
                                       "log": []})
 
 
@@ -181,12 +187,12 @@ def test_dev_build_run_reports_crash(monkeypatch):
         raise RuntimeError("brew exploded")
 
     monkeypatch.setattr(cli, "cmd_dev_install", boom)
-    with router._DEV_BUILD_LOCK:
-        router._DEV_BUILD.update({"running": True, "result": None, "log": []})
-    router._dev_build_run({})
-    assert router._DEV_BUILD["running"] is False
-    assert router._DEV_BUILD["result"] == 1
-    assert "brew exploded" in router._DEV_BUILD["log"][-1]
+    with dev_mod._DEV_BUILD_LOCK:
+        dev_mod._DEV_BUILD.update({"running": True, "result": None, "log": []})
+    dev_mod._dev_build_run({})
+    assert dev_mod._DEV_BUILD["running"] is False
+    assert dev_mod._DEV_BUILD["result"] == 1
+    assert "brew exploded" in dev_mod._DEV_BUILD["log"][-1]
 
 
 # --------------------------------------------------------------------------
@@ -194,7 +200,8 @@ def test_dev_build_run_reports_crash(monkeypatch):
 # --------------------------------------------------------------------------
 
 def test_dev_routes_registered():
-    from omlx_uplift import router
+    from omlx_uplift import router  # SPLIT-1: facade for classes/api_router
+    from omlx_uplift.routers import dev as dev_mod
 
     paths = {r.path for r in router.api_router.routes}
     assert {"/dev/status", "/dev/build", "/dev/reconfigure"} <= paths
@@ -232,12 +239,12 @@ def test_failed_build_log_keeps_materialize_reason(monkeypatch):
         return 1
 
     monkeypatch.setattr(cli, "cmd_dev_install", fake_install)
-    with router._DEV_BUILD_LOCK:
-        router._DEV_BUILD.update({"running": False, "result": None, "log": []})
-    router._dev_build_run({"restart_after": False})
-    with router._DEV_BUILD_LOCK:
-        log = list(router._DEV_BUILD["log"])
-        assert router._DEV_BUILD["result"] == 1
+    with dev_mod._DEV_BUILD_LOCK:
+        dev_mod._DEV_BUILD.update({"running": False, "result": None, "log": []})
+    dev_mod._dev_build_run({"restart_after": False})
+    with dev_mod._DEV_BUILD_LOCK:
+        log = list(dev_mod._DEV_BUILD["log"])
+        assert dev_mod._DEV_BUILD["result"] == 1
     assert any("materialize FAILED" in l for l in log), log
     assert any("intact" in l for l in log), log
 
@@ -249,10 +256,10 @@ def test_successful_build_log_stays_quiet(monkeypatch):
         return 0
 
     monkeypatch.setattr(cli, "cmd_dev_install", fake_install)
-    with router._DEV_BUILD_LOCK:
-        router._DEV_BUILD.update({"running": False, "result": None, "log": []})
-    router._dev_build_run({"restart_after": False})
-    with router._DEV_BUILD_LOCK:
-        log = list(router._DEV_BUILD["log"])
-        assert router._DEV_BUILD["result"] == 0
+    with dev_mod._DEV_BUILD_LOCK:
+        dev_mod._DEV_BUILD.update({"running": False, "result": None, "log": []})
+    dev_mod._dev_build_run({"restart_after": False})
+    with dev_mod._DEV_BUILD_LOCK:
+        log = list(dev_mod._DEV_BUILD["log"])
+        assert dev_mod._DEV_BUILD["result"] == 0
     assert log == [], log   # success adds nothing

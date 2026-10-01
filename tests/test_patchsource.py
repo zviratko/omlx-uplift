@@ -614,6 +614,7 @@ class RouterSurfaceTests(unittest.TestCase):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from omlx_uplift import router as up
+        from omlx_uplift.routers import patches as up_p  # SPLIT-1: patch seam
 
         app = FastAPI()
         app.include_router(up.api_router, prefix="/uplift/api")
@@ -632,8 +633,8 @@ class RouterSurfaceTests(unittest.TestCase):
         store = patches.PatchStore(os.path.join(tmp, "data"))
 
         import unittest.mock as mock
-        with mock.patch.object(up, "patch_store", lambda: store), \
-             mock.patch.object(up, "_patch_tree_root", lambda: root):
+        with mock.patch.object(up_p, "patch_store", lambda: store), \
+             mock.patch.object(up_p, "_patch_tree_root", lambda: root):
             client = TestClient(app)
             r = client.get("/uplift/api/patches")
             self.assertEqual(r.status_code, 200)

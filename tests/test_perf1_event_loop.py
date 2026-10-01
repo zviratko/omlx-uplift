@@ -12,7 +12,8 @@ import threading
 
 import pytest
 
-from omlx_uplift import router
+from omlx_uplift.routers import dev as dev_mod  # SPLIT-1: patch the owner
+from omlx_uplift.routers import patches as patches_mod
 
 
 async def _assert_loop_alive(factory):
@@ -59,22 +60,22 @@ _BLOCK_EVENTS: list = []
 
 @pytest.fixture
 def _store(monkeypatch):
-    monkeypatch.setattr(router, "patch_store", lambda: None)
-    monkeypatch.setattr(router, "_patch_tree_root", lambda: "/nonexistent")
+    monkeypatch.setattr(patches_mod, "patch_store", lambda: None)
+    monkeypatch.setattr(patches_mod, "_patch_tree_root", lambda: "/nonexistent")
 
 
 @pytest.mark.asyncio
 async def test_patches_check_offloads_to_thread(monkeypatch, _store):
     from omlx_uplift import patchsource
     _block(monkeypatch, patchsource, "check_all", {"ok": True})
-    await _assert_loop_alive(lambda: router.patches_check(is_admin=True))
+    await _assert_loop_alive(lambda: patches_mod.patches_check(is_admin=True))
 
 
 @pytest.mark.asyncio
 async def test_patches_curated_offloads_to_thread(monkeypatch, _store):
     from omlx_uplift import curated
     _block(monkeypatch, curated, "list_remote", {"tiers": {}})
-    await _assert_loop_alive(lambda: router.patches_curated(is_admin=True))
+    await _assert_loop_alive(lambda: patches_mod.patches_curated(is_admin=True))
 
 
 @pytest.mark.asyncio
@@ -82,7 +83,7 @@ async def test_patches_curated_sync_offloads_to_thread(monkeypatch, _store):
     from omlx_uplift import curated, patchsource
     monkeypatch.setattr(patchsource, "dev_build_root", lambda: None)
     _block(monkeypatch, curated, "sync", {"ok": True})
-    await _assert_loop_alive(lambda: router.patches_curated_sync(is_admin=True))
+    await _assert_loop_alive(lambda: patches_mod.patches_curated_sync(is_admin=True))
 
 
 @pytest.mark.asyncio
@@ -90,7 +91,7 @@ async def test_patches_add_offloads_to_thread(monkeypatch, _store):
     from omlx_uplift import patchsource
     monkeypatch.setattr(patchsource, "dev_build_root", lambda: None)
     _block(monkeypatch, patchsource, "add_patch", {"ok": True})
-    req = router.PatchAddRequest(id="perf1", kind="url",
+    req = patches_mod.PatchAddRequest(id="perf1", kind="url",
                                  url="http://127.0.0.1:9/x.diff")
     await _assert_loop_alive(
-        lambda: router.patches_add(req, is_admin=True))
+        lambda: patches_mod.patches_add(req, is_admin=True))
