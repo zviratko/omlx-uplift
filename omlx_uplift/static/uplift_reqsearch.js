@@ -8,8 +8,9 @@
 (function () {
 'use strict';
 const C = window.UpliftCore;
+const D = window.UpliftDom;
 const S = window.Uplift.state;
-const $ = id => document.getElementById(id);
+const $ = D.$;
 const API = S.API;
 /* RL-3 request history search: server-side over the store, presets clamp
    to RL-0 log retention. Results reuse feed row styling; click opens the
@@ -66,7 +67,7 @@ async function initReqSearch() {
     if (!chips || chips.dataset.done) return;
     chips.dataset.done = '1';
     try {
-        const ret = await window.Uplift._reqGlue.fetchJson(`${API}/uplift/api/retention`);
+        const ret = await D.fetchJson(`${API}/uplift/api/retention`);
         reqRetainDays = Math.max(1, ret.log_days || 2);
     } catch (_) { /* default stays honest-ish at 2 d */ }
     const mk = (label, secs) => {
@@ -105,7 +106,7 @@ async function runReqSearch() {
     const note = $('req-search-note');
     let d;
     try {
-        d = await window.Uplift._reqGlue.fetchJson(`${API}/uplift/api/requests-search?` + new URLSearchParams(
+        d = await D.fetchJson(`${API}/uplift/api/requests-search?` + new URLSearchParams(
             { q, model, frm: from, limit: 50 }));
     } catch (err) {
         note.style.display = ''; note.style.flex = '0 0 100%';
@@ -176,7 +177,7 @@ async function syncReqModelOptions() {
         .map(r => r.model).filter(Boolean))];
     if (Date.now() - _modelsFetchedAt > 60000) {
         try {
-            const d = await window.Uplift._reqGlue.fetchJson(
+            const d = await D.fetchJson(
                 `${API}/uplift/api/requests-models?frm=${Date.now() / 1000 - reqRetainDays * 86400}`);
             _storedModels = (d.models || []);
             _modelsFetchedAt = Date.now();

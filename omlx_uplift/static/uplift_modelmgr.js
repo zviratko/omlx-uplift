@@ -9,22 +9,23 @@
 (function () {
 'use strict';
 const C = window.UpliftCore;
+const D = window.UpliftDom;
 const S = window.Uplift.state;
-const $ = id => document.getElementById(id);
+const $ = D.$;
 const API = S.API;
 const CH = window.Uplift.charts;
 const prefs = S.prefs;
 const MM_GLUE = {
-    get toast() { return window.Uplift._modelGlue.toast; },
-    get fetchJson() { return window.Uplift._modelGlue.fetchJson; },
+    toast: D.toast,
+    fetchJson: D.fetchJson,
     get stats() { return window.Uplift._modelGlue.stats; },
     get SECRET_KEYS() { return window.Uplift._modelGlue.SECRET_KEYS; },
     get gsDisplay() { return window.Uplift._modelGlue.gsDisplay; },
-    get cell() { return window.Uplift._modelGlue.cell; },
+    cell: D.cell,
     get putModelSettings() { return window.Uplift._modelGlue.putModelSettings; },
     get modelSettingsFields() { return window.Uplift._modelGlue.modelSettingsFields; },
     get postModelAction() { return window.Uplift._modelGlue.postModelAction; },
-    get emptyMsg() { return window.Uplift._modelGlue.emptyMsg; },
+    emptyMsg: D.emptyMsg,
 };
 /* ---------------- model manager (Models tab) ---------------- */
 /* S.settingsIdx lives in window.Uplift.state: the stored-settings page in

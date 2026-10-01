@@ -2,8 +2,8 @@
    uplift.js): the right-column activity feed with milestone celebrations and
    confetti gating, plus the live request table (SSE stream, upsert, cancel,
    RL-4 loop chips). Plain script; loads AFTER uplift_state.js and the other
-   modules, BEFORE uplift.js, which late-binds via window.Uplift._feedGlue
-   (fetchJson hoisted; motionOff/openInspector are live lookups). The
+   modules, BEFORE uplift.js. FE-1: primitives come from window.UpliftDom;
+   _feedGlue survives only for motionOff (live DOM-state lookup). The
    request-row Map (reqFeedRows) lives in window.Uplift.state — the live
    panel in uplift.js and uplift_reqsearch.js both read it through their
    glue. Exports window.Uplift.feed; pollStats, applyTab/boot and
@@ -11,15 +11,16 @@
 (function () {
 'use strict';
 const C = window.UpliftCore;
+const D = window.UpliftDom;
 const S = window.Uplift.state;
-const $ = id => document.getElementById(id);
+const $ = D.$;
 const API = S.API;
 const MM = window.Uplift.modelmgr;
 const FEG = {
-    get fetchJson() { return window.Uplift._feedGlue.fetchJson; },
+    fetchJson: D.fetchJson,
     get motionOff() { return window.Uplift._feedGlue.motionOff; },
     get openInspector() { return window.Uplift.modelmgr.openInspector; },
-    get toast() { return window.Uplift._feedGlue.toast; },
+    toast: D.toast,
 };
 /* ---------------- event feed / reactions ---------------- */
 const MAX_FEED = 40;

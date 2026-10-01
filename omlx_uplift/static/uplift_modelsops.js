@@ -11,16 +11,17 @@
 (function () {
 'use strict';
 const C = window.UpliftCore;
+const D = window.UpliftDom;
 const S = window.Uplift.state;
-const $ = id => document.getElementById(id);
+const $ = D.$;
 const API = S.API;
 const MO = { tasks: window.Uplift.downloader.renderTasks };
 const QG = {
-    get fetchJson() { return window.Uplift._modelsopsGlue.fetchJson; },
-    get postJson() { return window.Uplift._modelsopsGlue.postJson; },
-    get toast() { return window.Uplift._modelsopsGlue.toast; },
-    get cell() { return window.Uplift._modelsopsGlue.cell; },
-    get emptyMsg() { return window.Uplift._modelsopsGlue.emptyMsg; },
+    fetchJson: D.fetchJson,
+    postJson: D.postJson,
+    toast: D.toast,
+    cell: D.cell,
+    emptyMsg: D.emptyMsg,
     get GW_LIVE() { return window.Uplift._modelsopsGlue.GW_LIVE; },
 };
 /* ---- oQ quantizer: faithful port of the classic page's form.

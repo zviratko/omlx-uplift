@@ -7,8 +7,9 @@
 (function () {
 'use strict';
 const C = window.UpliftCore;
+const D = window.UpliftDom;
 const S = window.Uplift.state;
-const $ = id => document.getElementById(id);
+const $ = D.$;
 const API = S.API;
 const layout = S.layout;
 const CH = window.Uplift.charts;
@@ -34,7 +35,7 @@ function renderUsageSub() {
 async function pollUsage() {
     if (document.hidden) return;
     try {
-        const u = await window.Uplift._usageGlue.fetchJson(`${API}/admin/api/usage?range=${S.usageRange}`);
+        const u = await D.fetchJson(`${API}/admin/api/usage?range=${S.usageRange}`);
         const tot = u.totals || {};
         window.Uplift._usageGlue.setCounter('v-u-req', tot.requests ?? null);
         window.Uplift._usageGlue.setCounter('v-u-tok', tot.total_tokens ?? null);
@@ -88,14 +89,14 @@ async function pollUsage() {
             .sort((a, b) => (b.prompt_tokens + b.completion_tokens) - (a.prompt_tokens + a.completion_tokens));
         if (models.length) {
             const head = document.createElement('div'); head.className = 'urow head admin';
-            for (const h of ['model', 'req', 'prompt', 'completion', 'cached', 'avg t/req']) head.append(window.Uplift._usageGlue.cell(h));
+            for (const h of ['model', 'req', 'prompt', 'completion', 'cached', 'avg t/req']) head.append(D.cell(h));
             table.append(head);
             for (const m of models) {
                 const row = document.createElement('div'); row.className = 'urow admin';
-                const name = window.Uplift._usageGlue.cell(m.model_id); name.className = 'uname'; name.title = m.model_id;
-                row.append(name, window.Uplift._usageGlue.cell(C.fmtNumber(m.requests)), window.Uplift._usageGlue.cell(C.fmtCompact(m.prompt_tokens)),
-                           window.Uplift._usageGlue.cell(C.fmtCompact(m.completion_tokens)), window.Uplift._usageGlue.cell(C.fmtCompact(m.cached_tokens)),
-                           window.Uplift._usageGlue.cell(m.requests ? C.fmtCompact((m.prompt_tokens + m.completion_tokens) / m.requests) : '—'));
+                const name = D.cell(m.model_id); name.className = 'uname'; name.title = m.model_id;
+                row.append(name, D.cell(C.fmtNumber(m.requests)), D.cell(C.fmtCompact(m.prompt_tokens)),
+                           D.cell(C.fmtCompact(m.completion_tokens)), D.cell(C.fmtCompact(m.cached_tokens)),
+                           D.cell(m.requests ? C.fmtCompact((m.prompt_tokens + m.completion_tokens) / m.requests) : '—'));
                 table.append(row);
             }
         }
@@ -137,7 +138,7 @@ async function pollLogs() {
         const file = $('logs-file').value;
         let url = `${API}/admin/api/logs?lines=${lines}`;
         if (file) url += `&file=${encodeURIComponent(file)}`;
-        const d = await window.Uplift._usageGlue.fetchJson(url);
+        const d = await D.fetchJson(url);
         if (!logsFilesLoaded && Array.isArray(d.available_files)) {
             window.Uplift._usageGlue.fillSelect($('logs-file'), d.available_files.map(f => [f, f]), d.log_file || d.available_files[0]);
             logsFilesLoaded = true;

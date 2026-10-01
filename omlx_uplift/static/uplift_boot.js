@@ -5,14 +5,16 @@
    Loads LAST: uplift.js's IIFE has fully executed by then, so every
    hoisted internal (pollStats, applyTab, restartPolling, renderTasks,
    applyPrefs, loadLocale, currentTab/currentSub) is alive in
-   window.Uplift._bootGlue, and every module alias (CH/MM/GSY/UUP/FE/PT)
+   window.Uplift._bootGlue (FE-1: fetchJson there resolves through
+   window.UpliftDom, the single implementation), and every module alias (CH/MM/GSY/UUP/FE/PT)
    resolves. Sequencing note kept from the original: metric cards are
    generated BEFORE grid init runs (applyTab defers ensureUpliftGrid via
    requestAnimationFrame) so the board places them like static blocks. */
 (function () {
 'use strict';
 const C = window.UpliftCore;
-const $ = id => document.getElementById(id);
+const D = window.UpliftDom;
+const $ = D.$;
 const API = window.Uplift.state.API;
 const CH = window.Uplift.charts;
 const MM = window.Uplift.modelmgr;

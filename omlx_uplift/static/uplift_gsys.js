@@ -11,17 +11,18 @@
 (function () {
 'use strict';
 const C = window.UpliftCore;
+const D = window.UpliftDom;
 const S = window.Uplift.state;
-const $ = id => document.getElementById(id);
+const $ = D.$;
 const API = S.API;
 const GLUE = {
-    get toast() { return window.Uplift._gsysGlue.toast; },
-    get fetchJson() { return window.Uplift._gsysGlue.fetchJson; },
-    get postJson() { return window.Uplift._gsysGlue.postJson; },
-    get emptyMsg() { return window.Uplift._gsysGlue.emptyMsg; },
+    toast: D.toast,
+    fetchJson: D.fetchJson,
+    postJson: D.postJson,
+    emptyMsg: D.emptyMsg,
     get loadLocale() { return window.Uplift._gsysGlue.loadLocale; },
     get currentTab() { return window.Uplift._gsysGlue.currentTab; },
-    get cell() { return window.Uplift._gsysGlue.cell; },
+    cell: D.cell,
     get GW_LIVE() { return window.Uplift._gsysGlue.GW_LIVE; },
 };
 /* ---------------- settings (Settings tab: read-only server preview) ------ */

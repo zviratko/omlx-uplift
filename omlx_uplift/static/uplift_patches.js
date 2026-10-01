@@ -7,19 +7,21 @@
    for needs_review/failed like an instrument flag. PT_DATA/PT_BUSY live in
    window.Uplift.state (declared before boot can reach pollPatches via
    applyTab — PAT-4 TDZ property preserved by load order). Plain script;
-   loads AFTER uplift_state.js, BEFORE uplift.js, which late-binds
-   toast/fetchJson/currentTab/currentSub via window.Uplift._patchesGlue.
+   loads AFTER uplift_state.js + domkit.js, BEFORE uplift.js; FE-1 takes
+   toast/fetchJson from window.UpliftDom, currentTab/currentSub late-bind
+   via window.Uplift._patchesGlue (live hash readers).
    Exports window.Uplift.patches {pollPatches, initPatchesPage}.
    ========================================================================== */
 (function () {
 'use strict';
 const C = window.UpliftCore;
+const D = window.UpliftDom;
 const S = window.Uplift.state;
-const $ = id => document.getElementById(id);
+const $ = D.$;
 const API = S.API;
 const PG = {
-    get toast() { return window.Uplift._patchesGlue.toast; },
-    get fetchJson() { return window.Uplift._patchesGlue.fetchJson; },
+    toast: D.toast,
+    fetchJson: D.fetchJson,
     get currentTab() { return window.Uplift._patchesGlue.currentTab; },
     get currentSub() { return window.Uplift._patchesGlue.currentSub; },
 };

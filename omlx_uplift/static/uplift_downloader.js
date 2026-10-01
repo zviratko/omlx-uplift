@@ -3,21 +3,16 @@
    paging, sort), queueDownload, and the task-row renderer the quantizer/
    uploader pages share. Plain script; loads AFTER uplift_state.js, BEFORE
    uplift.js, which late-binds fetchJson/postJson/toast/emptyMsg/cell via
-   window.Uplift._downloaderGlue (resolved at call time). Exports
+   window.UpliftDom (FE-1: no glue needed — all five were primitives). Exports
    window.Uplift.downloader {renderTasks, initDownloader}. */
 (function () {
 'use strict';
 const C = window.UpliftCore;
+const D = window.UpliftDom;
 const S = window.Uplift.state;
-const $ = id => document.getElementById(id);
+const $ = D.$;
 const API = S.API;
-const DG = {
-    get fetchJson() { return window.Uplift._downloaderGlue.fetchJson; },
-    get postJson() { return window.Uplift._downloaderGlue.postJson; },
-    get toast() { return window.Uplift._downloaderGlue.toast; },
-    get emptyMsg() { return window.Uplift._downloaderGlue.emptyMsg; },
-    get cell() { return window.Uplift._downloaderGlue.cell; },
-};
+const DG = D;   // FE-1: pure-primitive glue -> domkit itself
 function taskRow(t) {
     const row = document.createElement('div'); row.className = 'urow usage';
     const st = (t.status || 'unknown').toUpperCase();

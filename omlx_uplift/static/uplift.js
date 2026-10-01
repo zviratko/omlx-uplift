@@ -3,7 +3,8 @@
 (function () {
 'use strict';
 const C = window.UpliftCore;
-const $ = id => document.getElementById(id);
+const D = window.UpliftDom;
+const { $, fetchJson, postJson, toast, cell, emptyMsg } = D;  // FE-1: single domkit impl
 
 /* PH2-1 stage 1: shared state (API base, prefs, layout, tracker, PT_*)
    moved to uplift_state.js -> window.Uplift.state. index.html loads the
@@ -24,7 +25,6 @@ const tracker = S.tracker;
    the glue lets it late-bind hoisted helpers that stay here. */
 const CH = window.Uplift.charts;
 window.Uplift._chartGlue = {
-    get fetchJson() { return fetchJson; },
     get refitUpliftBlocks() { return refitUpliftBlocks; },
     get _blockEl() { return _blockEl; },
     get _neededUnits() { return _neededUnits; },
@@ -66,20 +66,17 @@ window.Uplift._chartGlue = {
    that module late-bind hoisted helpers that stay here (stats is a mutable
    let cell -> getter, the rest are function declarations). */
 /* PH2-1 stage 4: request-history search lives in uplift_reqsearch.js; it
-   reads the feed through this late-bind glue (fetchJson/openInspector/
-   renderReqFeed are hoisted there, reqFeedRows is a mutable let -> getter). */
+   reads the feed through this late-bind glue (FE-1: fetchJson now comes
+   from domkit in that module; openInspector/renderReqFeed are live
+   lookups, reqFeedRows is a mutable let -> getter). */
 /* PH2-1 stage 5: model manager lives in uplift_modelmgr.js. Helpers that
    must stay in uplift.js (shared with the settings pages) late-bind through
    this glue; stats is a mutable let -> getter, SECRET_KEYS/cell/emptyMsg are
    stable, putModelSettings/postModelAction are hoisted above trackWrite. */
 window.Uplift._modelGlue = {
-    get toast() { return toast; },
-    get fetchJson() { return fetchJson; },
     get stats() { return stats; },
     get SECRET_KEYS() { return window.Uplift.gsys.SECRET_KEYS; },
     get gsDisplay() { return window.Uplift.gsys.gsDisplay; },
-    get cell() { return cell; },
-    get emptyMsg() { return emptyMsg; },
     get putModelSettings() { return putModelSettings; },
     get modelSettingsFields() { return modelSettingsFields; },
     get postModelAction() { return postModelAction; },
@@ -90,80 +87,53 @@ const MM = window.Uplift.modelmgr;
    must stay in uplift.js (boot sequence + gateway chip own them) late-bind
    through this glue; GW_LIVE is a mutable let -> getter. */
 window.Uplift._gsysGlue = {
-    get toast() { return toast; },
-    get fetchJson() { return fetchJson; },
-    get postJson() { return postJson; },
-    get emptyMsg() { return emptyMsg; },
     get loadLocale() { return loadLocale; },
     get currentTab() { return currentTab; },
-    get cell() { return cell; },
     get GW_LIVE() { return GW_LIVE; },
 };
 const GSY = window.Uplift.gsys;
 
 window.Uplift._reqGlue = {
-    get fetchJson() { return fetchJson; },
     get openInspector() { return window.Uplift.modelmgr.openInspector; },
     get renderReqFeed() { return window.Uplift.feed.renderReqFeed; },
     get reqFeedRows() { return S.reqFeedRows; },
 };
 
 /* PH2-1 stage 7: event feed + request lifecycle feed live in
-   uplift_feed.js; fetchJson is hoisted here, motionOff reads live DOM state,
-   openInspector resolves through modelmgr. */
+   uplift_feed.js; FE-1: fetchJson/toast come from domkit there — this
+   glue keeps only motionOff (live DOM-state read). */
 window.Uplift._feedGlue = {
-    get fetchJson() { return fetchJson; },
     get motionOff() { return motionOff; },
-    get toast() { return toast; },
 };
 const FE = window.Uplift.feed;
 
-/* PH2-1 stage 8: PAT-4 patches UI lives in uplift_patches.js. toast/
-   fetchJson are hoisted here; currentTab/currentSub read the live hash. */
+/* PH2-1 stage 8: PAT-4 patches UI lives in uplift_patches.js. FE-1:
+   toast/fetchJson from domkit there; this glue keeps the live-hash
+   readers currentTab/currentSub. */
 window.Uplift._patchesGlue = {
-    get toast() { return toast; },
-    get fetchJson() { return fetchJson; },
     get currentTab() { return currentTab; },
     get currentSub() { return currentSub; },
 };
 const PT = window.Uplift.patches;
 
 /* PH2-1 stage 9a: downloader page + task helpers live in
-   uplift_downloader.js; shared helpers late-bind through this glue. */
-window.Uplift._downloaderGlue = {
-    get fetchJson() { return fetchJson; },
-    get postJson() { return postJson; },
-    get toast() { return toast; },
-    get emptyMsg() { return emptyMsg; },
-    get cell() { return cell; },
-};
+   uplift_downloader.js; FE-1: its glue went empty (all five members were
+   primitives) — domkit covers it, the glue object is gone. */
 const DLR = window.Uplift.downloader;
 
 /* PH2-1 stage 9b: quantizer/uploader pages live in uplift_modelsops.js. */
 window.Uplift._modelsopsGlue = {
-    get fetchJson() { return fetchJson; },
-    get postJson() { return postJson; },
-    get toast() { return toast; },
-    get cell() { return cell; },
-    get emptyMsg() { return emptyMsg; },
     get GW_LIVE() { return GW_LIVE; },
 };
 const MOs = window.Uplift.modelsops;
 
 /* PH2-1 stage 9c: helper page + prune dialog live in uplift_helper.js. */
 window.Uplift._helperGlue = {
-    get fetchJson() { return fetchJson; },
-    get postJson() { return postJson; },
-    get toast() { return toast; },
-    get cell() { return cell; },
-    get emptyMsg() { return emptyMsg; },
     get GW_LIVE() { return GW_LIVE; },
 };
 const HLP = window.Uplift.helper;
 const UUP = window.Uplift.usage;
 window.Uplift._usageGlue = {
-    get fetchJson() { return fetchJson; },
-    get cell() { return cell; },
     get setCounter() { return setCounter; },
     get fillSelect() { return fillSelect; },
     get currentTab() { return currentTab; },
@@ -1500,13 +1470,6 @@ counter('v-u-compl',    v => C.fmtCompact(v));
 
 /* toast is shared: 40+ call sites here plus every extracted module's glue
    (modelmgr/gsys/usage/reqsearch/feed) resolve it through the glues below. */
-function toast(text, ms) {
-    const t = document.createElement('div');
-    t.className = 'toast'; t.textContent = text;
-    $('toasts').append(t);
-    setTimeout(() => t.remove(), ms || 3200);
-}
-
 /* ---------------- rendering ---------------- */
 function render(s) {
     setCounter('v-gentps', s.genTps);
@@ -2127,22 +2090,7 @@ function fillSelectOnce() {
     $('opt-percentile').onchange = e => { layout.percentile = e.target.value; C.saveLayout(localStorage, layout); renderRequestStats(stats); };
 }
 
-/* ---------------- polling ---------------- */
-async function fetchJson(url, opts) {
-    const res = await fetch(url, Object.assign({ cache: 'no-store' }, opts || {}));
-    if (!res.ok) {
-        // UP-4: the server's reason (FastAPI `detail`, incl. 422 arrays) was
-        // thrown away — every failure read as a bare "-> 422". errorText()
-        // (core.js, F-019) already flattens those bodies; use it here so all
-        // catch sites (patch preview, toasts, downloader/uploader) inherit it.
-        let reason = '';
-        try { reason = C.errorText(await res.clone().json()); }
-        catch (_) { try { reason = (await res.text()).slice(0, 200); } catch (__) {} }
-        throw new Error(reason ? `${url} -> ${res.status}: ${reason}` : `${url} -> ${res.status}`);
-    }
-    return res.json();
-}
-/* ---- server settings-field discovery (version adaptation) ----
+/* ---------------- polling ---------------- *//* ---- server settings-field discovery (version adaptation) ----
    The editor models the CURRENT upstream field names (62171bdf renamed
    mtp_num_draft_tokens -> mtp_adaptive_max_depth + mtp_fixed_depth). An
    older RUNNING omlx forbids extras (422 extra_forbidden) and the whole
@@ -2298,29 +2246,12 @@ async function pollGatewayInfo() {
 
 /* ---- model manager + editor + inspector (Models tab): extracted to
    uplift_modelmgr.js (PH2-1 stage 5); window.Uplift.modelmgr aliases below. ---- */
-
-function cell(text) { const s = document.createElement('span'); s.textContent = text; return s; }
-function emptyMsg(host, msg) {   // error text goes through textContent, never innerHTML
-    host.textContent = '';
-    const d = document.createElement('div'); d.className = 'empty';
-    d.textContent = msg; host.append(d);
-}
-
 /* ---- usage + logs tabs: extracted to uplift_usage.js (PH2-1 stage 3);
    window.Uplift.usage aliases live at the top. ---- */
 
 /* ---- global settings (Settings tab form + env tunables + cluster gate):
    extracted to uplift_gsys.js (PH2-1 stage 6); window.Uplift.gsys alias
    lives at the top with the other glue. ---- */
-
-async function postJson(url, body) {
-    const r = await fetch(url, { method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {}) });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.detail || r.status + ' ' + r.statusText);
-    return d;
-}
 /* ---- task-row helpers + HF downloader page: extracted to
    uplift_downloader.js (PH2-1 stage 9a); window.Uplift.downloader alias
    lives at the top with the other glue. ---- */

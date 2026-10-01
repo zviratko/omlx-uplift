@@ -7,14 +7,15 @@
 (function () {
 'use strict';
 const C = window.UpliftCore;
+const D = window.UpliftDom;
 const S = window.Uplift.state;
 const layout = S.layout;
 const API = S.API;
-const $ = id => document.getElementById(id);
+const $ = D.$;
 /* Boot-late bindings into uplift.js (both are hoisted function declarations
    there; these accessors resolve them at CALL time, never at load time). */
 const CH_GLUE = {
-    get fetchJson() { return window.Uplift._chartGlue.fetchJson; },
+    fetchJson: D.fetchJson,
     get refitUpliftBlocks() { return window.Uplift._chartGlue.refitUpliftBlocks; },
     get _blockEl() { return window.Uplift._chartGlue._blockEl; },
     get _neededUnits() { return window.Uplift._chartGlue._neededUnits; },
