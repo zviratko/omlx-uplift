@@ -25,7 +25,68 @@ const CH_GLUE = {
     get revealGatedCard() { return window.Uplift._chartGlue.revealGatedCard; },
 };
 /* ---------------- charts ---------------- */
-const axisFont = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
+/* Axis/legend type comes from the skin: chartColors() reads --mono and the
+   axis helpers build canvas font strings from it, so a skin that ships a
+   webfont restyles chart text too. The px size lives in ONE place; uPlot
+   wants a full canvas font shorthand, a bare family would break it. */
+const AXIS_FONT_PX = '9px';
+const AXIS_FONT_FALLBACK = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+function axisFont(col) {
+    const fam = (col && typeof col.font === 'string') ? col.font.trim() : '';
+    return AXIS_FONT_PX + ' ' + (fam || AXIS_FONT_FALLBACK);
+}
+/* Skin tokens are CSS colors (skins.py accepts rgb()/hsl()/named values), so
+   hex-alpha concatenation (col + '22') silently poisons canvas fillStyle and
+   the path keeps the PREVIOUS fill. Parsed colors become rgba() with the same
+   effective alpha (0x22 -> 13%, 0x1c -> 11%); pure hex keeps its exact old
+   byte so no shipped skin shifts a single pixel. Unparseable values (named
+   colors) fall back to color-mix() — modern canvas parses it, and it is
+   never WORSE than the concatenation it replaces. */
+function cssRgb(color) {
+    if (typeof color !== 'string') return null;
+    const c = color.trim();
+    let m = c.match(/^#([0-9a-fA-F]{3})$/);
+    if (m) { const h = m[1].split('').map(x => x + x);
+             return [parseInt(h[0], 16), parseInt(h[1], 16), parseInt(h[2], 16), 1]; }
+    m = c.match(/^#([0-9a-fA-F]{6})$/);
+    if (m) { const h = m[1];
+             return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16),
+                     parseInt(h.slice(4, 6), 16), 1]; }
+    m = c.match(/^(?:rgb|rgba)\(\s*([\d.]+%?)[,\s]+([\d.]+%?)[,\s]+([\d.]+%?)(?:[,/\s]+([\d.]+%?))?\s*\)$/i);
+    if (m) {
+        const num = (v, max) => v.endsWith('%') ? parseFloat(v) / 100 * max : parseFloat(v);
+        const a = m[4] === undefined ? 1 : num(m[4], 1);
+        return [num(m[1], 255), num(m[2], 255), num(m[3], 255), Math.min(1, Math.max(0, a))];
+    }
+    m = c.match(/^hsla?\(\s*([\d.]+)(?:deg)?[,\s]+([\d.]+)%[,\s]+([\d.]+)%(?:[,/\s]+([\d.]+%?))?\s*\)$/i);
+    if (m) {
+        const h = ((parseFloat(m[1]) % 360) + 360) % 360 / 360,
+              s = Math.min(1, parseFloat(m[2]) / 100), l = Math.min(1, parseFloat(m[3]) / 100);
+        const f = n => { const k = (n + h * 12) % 12;
+            const a = s * Math.min(l, 1 - l);
+            return 255 * (l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)))); };
+        const a = m[4] === undefined ? 1
+            : (m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]));
+        return [f(0), f(8), f(4), Math.min(1, Math.max(0, a))];
+    }
+    return null;
+}
+const toHex2 = n => Math.round(Math.min(255, Math.max(0, n))).toString(16).padStart(2, '0');
+function tint(color, alphaHex) {
+    if (!color) return color;
+    if (/^#[0-9a-fA-F]{6}$/.test(color)) return color + alphaHex;
+    if (/^#[0-9a-fA-F]{3}$/.test(color)) {
+        const h = color.slice(1);
+        return '#' + h.split('').map(c => c + c).join('') + alphaHex;
+    }
+    const rgb = cssRgb(color);
+    if (rgb) {
+        const a = (Math.round(parseInt(alphaHex, 16) / 255 * 100) / 100).toFixed(2);
+        return `rgba(${Math.round(rgb[0])}, ${Math.round(rgb[1])}, ${Math.round(rgb[2])}, ${a})`;
+    }
+    const pct = Math.round(parseInt(alphaHex, 16) / 2.55) + '%';
+    return `color-mix(in srgb, ${color} ${pct}, transparent)`;
+}
 /* Remember where the mouse is hovering, by TIMESTAMP not index: setData on a
    sliding window shifts indices, which made hovered values snap to the latest
    sample after the next poll (looked like hover only worked on data points). */
@@ -183,10 +244,50 @@ function memWindowed() {
 
 function chartColors() {
     const cs = getComputedStyle(document.documentElement);
-    return { dim: cs.getPropertyValue('--dim').trim() || '#a5a096',
-             grid: cs.getPropertyValue('--grid').trim() || '#3a3b40',
-             blue: cs.getPropertyValue('--chart-1').trim() || '#f2f0ea',
-             gold: cs.getPropertyValue('--chart-2').trim() || '#e8a020' };
+    const v = n => cs.getPropertyValue(n).trim();
+    /* --mono drives axis + legend text: a skin that ships a webfont and sets
+       the mono token must restyle chart text too (it restyles everything
+       else already). Unset -> the fixed stack in axisFont(). */
+    return { dim: v('--dim') || '#a5a096',
+             grid: v('--grid') || '#3a3b40',
+             blue: v('--chart-1') || '#f2f0ea',
+             gold: v('--chart-2') || '#e8a020',
+             heat: v('--heat'),
+             accent: v('--accent'),
+             font: v('--mono') };   /* '' when unset -> axisFont() falls back */
+}
+/* Multi-series colour slots (U19/U20 cycle with i % length). The token set
+   behind these is the skin's, so several often resolve to ONE value — the
+   default theme ships chart-2 == heat == accent (signal amber) and nerv sets
+   heat == chart-2 — so a naive 5-slot list re-wears colours while LOOKING
+   like it has five. De-dupe, then top up with sRGB midpoints of slots already
+   in play (plain hex output, no canvas feature needed): a 4-series card draws
+   4 distinct strokes even on a collapsed-token theme, and every added colour
+   is still a pure function of the skin, so it re-tints on skin change. `dim`
+   trails the state colours as the honest neutral. A skin whose values cannot
+   be parsed numerically keeps its smaller real palette — inventing contrast
+   the skin refused to declare would be a lie. */
+const SERIES_PALETTE_ORDER = ['blue', 'gold', 'heat', 'accent', 'dim'];
+const SERIES_PALETTE_MAX = 5;
+function seriesPalette(col) {
+    const out = [];
+    for (const k of SERIES_PALETTE_ORDER) {
+        const c = col[k];
+        if (!c) continue;
+        if (!out.some(x => x.toLowerCase() === c.toLowerCase())) out.push(c);
+    }
+    const mid = (a, b) => {   // null when either side is opaque to us
+        const x = cssRgb(a), y = cssRgb(b);
+        if (!x || !y) return null;
+        return '#' + [0, 1, 2].map(i => toHex2((x[i] + y[i]) / 2)).join('');
+    };
+    for (const [ai, bi] of [[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]]) {
+        if (out.length >= SERIES_PALETTE_MAX) break;
+        if (out.length <= ai || out.length <= bi) continue;
+        const c = mid(out[ai], out[bi]);
+        if (c && !out.some(x => x.toLowerCase() === c)) out.push(c);
+    }
+    return out;
 }
 /* Old positional memWindowed (hot1/hot2/hot3 columns) and the per-model
    top-3 series retired — the merged version above draws ONE summed
@@ -209,12 +310,12 @@ const ZERO_FLOOR_RANGE = (u, dmin, dmax) =>
 function line(label, colorVar, fill, scale) {
     const col = chartColors()[colorVar];
     return { label, scale: scale || 'y', stroke: col, width: 2,
-             fill: fill ? col + '22' : undefined,
+             fill: fill ? tint(col, '22') : undefined,
              points: { show: false }, value: seriesValue };
 }
 function xAxis(col, boundWin) {
     const winOf = () => boundWin >= 0 ? boundWin : cardWindow('chart-tps');
-    return { stroke: col.dim, width: 1, size: 34, font: axisFont,
+    return { stroke: col.dim, width: 1, size: 34, font: axisFont(col),
              values: (s, t) => t.map(ts => {
                  const win = winOf();
                  return win >= 86400
@@ -227,7 +328,7 @@ function yAxis(col, opts) {
     // size includes tick labels AND the rotated axis label; 36/44 read to
     // the user as dead side gaps inside the chart cards (2026-09-19 r3) —
     // tightened to the smallest size that still fits the rotated labels.
-    return Object.assign({ stroke: col.dim, size: 30, font: axisFont, grid: true, gap: 4 }, opts || {});
+    return Object.assign({ stroke: col.dim, size: 30, font: axisFont(col), grid: true, gap: 4 }, opts || {});
 }
 /* ISSUE-1 (jumping timeframe): with an auto x-scale uPlot re-fits the axis
    to wherever the data happens to sit on every setData — sparse backfill
@@ -243,7 +344,9 @@ function baseOpts(specs, axes, legendHook) {
     return {
         width: 0, height: 240, padding: [4, 0, 0, 0],
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 6, fill: col.dim } },
-        legend: { show: true, top: true, live: false, labels: { fontSize: '9px' } },
+        // Vendored uPlot 1.6.32 has no legend.labels option (DOM legend is
+        // styled by .u-legend in uplift.css) — nothing to skin here.
+        legend: { show: true, top: true, live: false },
         scales: Object.assign({ x: { time: true }, y: { auto: true } }, axes.scales || {}),
         axes: [xAxis(col, -1), ...axes.yAxes],
         hooks: legendHook ? { cursor: { subscribe: [legendHook] } } : undefined,
@@ -752,14 +855,14 @@ function metricOpts(id, def, col) {
     const mult = !!(def.series && def.series.length);
     const sers = metricServes(def);
     const hasY2 = mult && sers.some(s => s.axis === 'y2' && !s.legendOnly);
-    const palette = [col.blue, col.gold, col.dim];
+    const palette = seriesPalette(col);
     const series = [{}, ...sers.map((s, i) => {
         const sf = metricFormat({ key: s.key, fmt: s.fmt });
         const c = palette[i % palette.length];
         const sc = s.axis || (s.legendOnly ? 'yleg' : 'y');
         const o = { label: metricSeriesLabel(s.key), scale: sc,
                     stroke: c, width: s.legendOnly ? 0 : 1.6,
-                    fill: (s.area || (!mult && i === 0)) ? c + '1c' : undefined,
+                    fill: (s.area || (!mult && i === 0)) ? tint(c, '1c') : undefined,
                     points: { show: false }, value: (u, v) => sf(v === undefined || v !== v ? null : v) };
         return o;
     })];
@@ -772,7 +875,7 @@ function metricOpts(id, def, col) {
     if (hasY2) {
         const y2ser = sers.find(s => s.axis === 'y2' && !s.legendOnly);
         axes.push(Object.assign(
-            { stroke: col.gold, size: 4, font: axisFont, grid: false, gap: 2,
+            { stroke: col.gold, size: 4, font: axisFont(col), grid: false, gap: 2,
               rotate: 0, space: 50, side: 1, label: '',
               values: (u, vals) => vals == null ? vals
                   : vals.map(v => v == null ? '' : metricYFmt({ key: y2ser.key, fmt: y2ser.fmt || def.fmt })(v)) },
@@ -913,7 +1016,7 @@ function metricXAxis(win, col) {
     // entirely — the band collapses, the 0-line sits at the bottom with the
     // 6px plot padding keeping the label off the card edge. Timespans are
     // already selected by the 1m..30d buttons above each chart. (2026-09-26)
-    return { show: false, stroke: col.dim, width: 1, rotate: 0, font: axisFont,
+    return { show: false, stroke: col.dim, width: 1, rotate: 0, font: axisFont(col),
              values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
                  dayish ? { month: 'short', day: 'numeric' }
                         : { hour: '2-digit', minute: '2-digit' })) };
@@ -936,7 +1039,7 @@ function metricYAxis(col, def) {
     // Labels render left-aligned at size+gap+12; 26 wasted ~48px of card
     // width on the left gutter (2026-09-26). 10 keeps them clear of the
     // card edge while pulling the plot to nearly full width.
-    return { stroke: col.dim, size: 4, font: axisFont, grid: true, gap: 2,
+    return { stroke: col.dim, size: 4, font: axisFont(col), grid: true, gap: 2,
              rotate: 0, space: 50, label: '',
              values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) };
 }
@@ -1111,7 +1214,7 @@ function createUsageChart() {
     usageChart = new uPlot({
         width: el.clientWidth || 600, height: 200,
         scales: { x: { time: true }, y: { auto: true, range: ZERO_FLOOR_RANGE } },  // U8
-        axes: [{ stroke: col.dim, size: 36, font: axisFont,
+        axes: [{ stroke: col.dim, size: 36, font: axisFont(col),
                  values: (s, t) => t.map(ts => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })) },
                yAxis(col, { grid: true })],
         series: [{ label: 'tokens' }, line('tokens', 'blue', true)],
@@ -1230,6 +1333,7 @@ function pushStatusSample(s) {
 window.Uplift.charts = {
     line: line, yAxis: yAxis, seriesValue: seriesValue, bindCursorTip: bindCursorTip,
     axisFont: axisFont, chartColors: chartColors,
+    tint: tint, seriesPalette: seriesPalette,
     tpsData: tpsData, memData: memData,
     pushStatusSample: pushStatusSample,
     createCharts: createCharts, redrawCharts: redrawCharts, resizeCharts: resizeCharts,
