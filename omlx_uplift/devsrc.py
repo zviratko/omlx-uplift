@@ -96,10 +96,31 @@ class DevsrcError(RuntimeError):
     """A git operation failed or a safety guard refused to act."""
 
 
+# GIT-1: git in a server-started process must NEVER wait on a human.
+# A credential-protected origin whose agent can't answer makes git prompt
+# (terminal or askpass), and in a daemon with no usable tty that hangs the
+# calling thread indefinitely. GIT_TERMINAL_PROMPT=0 turns the prompt into
+# an instant failure; GIT_ASKPASS=echo kills helper popups the same way.
+# The timeout is generous — clone/fetch of the real omlx history is
+# minutes on first bootstrap — but finite.
+GIT_TIMEOUT_S = 900.0
+
+
 def _git(args: list[str], cwd: str | None = None,
-        check: bool = True) -> subprocess.CompletedProcess:
-    proc = subprocess.run(["git"] + args, cwd=cwd,
-                          capture_output=True, text=True)
+        check: bool = True,
+        timeout: float | None = None) -> subprocess.CompletedProcess:
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="echo")
+    tmo = timeout if timeout is not None else GIT_TIMEOUT_S
+    try:
+        proc = subprocess.run(["git"] + args, cwd=cwd,
+                              capture_output=True, text=True,
+                              timeout=tmo, env=env)
+    except subprocess.TimeoutExpired as exc:
+        detail = f"git {' '.join(args)} timed out after {tmo:.0f}s"
+        if check:
+            raise DevsrcError(detail) from exc
+        return subprocess.CompletedProcess(["git"] + args, returncode=124,
+                                           stdout="", stderr=detail)
     if check and proc.returncode != 0:
         raise DevsrcError(
             f"git {' '.join(args)} failed ({proc.returncode}): "

@@ -335,5 +335,38 @@ class DevsrcFixture(unittest.TestCase):
         self.assertIn("base pin", st.get("reason", ""))
 
 
+class GitHardening(unittest.TestCase):
+    """GIT-1: every _git call is finite and cannot prompt for credentials."""
+
+    def test_git_env_disables_prompts_and_timeout_finite(self):
+        from unittest import mock
+
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append((cmd, kw))
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with mock.patch.object(devsrc.subprocess, "run", fake_run):
+            devsrc._git(["status"], cwd="/tmp")
+        self.assertEqual(len(calls), 1)
+        kw = calls[0][1]
+        self.assertEqual(kw["env"].get("GIT_TERMINAL_PROMPT"), "0")
+        self.assertEqual(kw["env"].get("GIT_ASKPASS"), "echo")
+        self.assertTrue(0 < kw["timeout"] <= 3600)
+
+    def test_timeout_raises_devsrc_error(self):
+        def hang(cmd, **kw):
+            raise devsrc.subprocess.TimeoutExpired(cmd, kw.get("timeout", 1))
+
+        from unittest import mock
+        with mock.patch.object(devsrc.subprocess, "run", hang):
+            with self.assertRaises(devsrc.DevsrcError):
+                devsrc._git(["clone", "https://example.invalid/x", "y"])
+            # check=False -> returncode 124 sentinel, no raise
+            p = devsrc._git(["fetch"], check=False)
+            self.assertEqual(p.returncode, 124)
+
+
 if __name__ == "__main__":
     unittest.main()
