@@ -140,8 +140,18 @@ function usedBy(m) {
 
 async function renderHelperModels() {
     let models;
-    try { models = (await HG.fetchJson(`${API}/admin/api/models`)).models; }
-    catch (e) { HG.emptyMsg($('hm-list'), e.message); return; }
+    // DEAD-1: prefer the uplift overlay — its used_by is derived
+    // SERVER-side from stored settings and resolves model_path /
+    // source_repo_id aliases the client fallback below misses. Full
+    // /uplift/api/ path on purpose: /admin/api/models collides with
+    // vanilla (registration order — vanilla wins, no used_by). If the
+    // overlay is unreachable (older server), fall back to the vanilla
+    // list; usedBy() then derives client-side as before.
+    try { models = (await HG.fetchJson(`${API}/uplift/api/models`)).models; }
+    catch (_) {
+        try { models = (await HG.fetchJson(`${API}/admin/api/models`)).models; }
+        catch (e) { HG.emptyMsg($('hm-list'), e.message); return; }
+    }
     const mk = models.filter(m => m.engine_type === 'markitdown' || m.model_type === 'markitdown');
     const helpers = models.filter(m => !mk.includes(m) && (m.is_helper ||
         /dflash|assistant/i.test(m.id)));
