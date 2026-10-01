@@ -109,6 +109,152 @@ def _valid_token(name: str, value: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Motion governance (SPARK-2)
+# ---------------------------------------------------------------------------
+# The motion switch sets html[data-motion="off"]. The base CSS force-kills
+# only ITS OWN animated classes (.feed-item, .badge), so an overlay that
+# animates without consulting the attribute keeps moving after the user
+# asked for stillness — the switch would lie. Crates therefore gate every
+# animation/transition behind a selector that tests [data-motion].
+# This is a CONVENTION we WARN about, never a hard error: the forward-compat
+# rule (a skin must keep loading) outranks motion governance.
+_MOTION_PROP_RE = re.compile(
+    r"^(?:-webkit-|-moz-)?(?:animation|animation-name|transition|"
+    r"transition-property|transition-behavior)$")
+#: values that animate nothing — warning on them would be noise
+_MOTION_INERT_VALUES = frozenset(
+    {"none", "initial", "unset", "revert", "revert-layer"})
+#: the guard a selector chain must contain to be considered governed
+MOTION_GUARD = "[data-motion"
+_KEYFRAMES_AT_RE = re.compile(r"^@(?:-webkit-|-moz-)?keyframes\b")
+
+
+def _strip_css_comments(css: str) -> str:
+    """Comments replaced by a single space (positions shift, structure does
+    not). An unterminated comment runs to the end of the sheet, as in CSS."""
+    out: list[str] = []
+    i = 0
+    while True:
+        j = css.find("/*", i)
+        if j < 0:
+            out.append(css[i:])
+            return "".join(out)
+        out.append(css[i:j])
+        out.append(" ")
+        k = css.find("*/", j + 2)
+        if k < 0:
+            return "".join(out)
+        i = k + 2
+
+
+def _css_atom_span(text: str, i: int) -> int:
+    """Length of one indivisible token at position i: a quoted string or a
+    url(...) group. Both may legally contain ';' and '{' '}', which the
+    scanner must not treat as structure (data-URI cursors are common in
+    crates). Returns 1 for any ordinary character."""
+    ch = text[i]
+    if ch in "\"'":
+        j = i + 1
+        while j < len(text):
+            if text[j] == "\\":
+                j += 2
+                continue
+            if text[j] == ch:
+                return j + 1 - i
+            j += 1
+        return len(text) - i           # unterminated: swallow the rest
+    if ch in "uU":
+        head = text[i:i + 4].lower()
+        if head.startswith("url("):
+            depth, j = 0, i + 3
+            while j < len(text):
+                if text[j] == "(":
+                    depth += 1
+                elif text[j] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        return j + 1 - i
+                j += 1
+            return len(text) - i
+    return 1
+
+
+def _check_motion_decl(decl: str, stack: list[str],
+                       warns: list[str], seen: set) -> None:
+    """One declaration + the at-rule/selector chain it sits in -> a warning
+    when it animates and nothing in the chain tests [data-motion]."""
+    if not stack or ":" not in decl:
+        return
+    if any(_KEYFRAMES_AT_RE.match(pre or "") for pre in stack):
+        return                    # a keyframe body defines, it does not play
+    prop, _, value = decl.partition(":")
+    prop = prop.strip().lower()
+    if not _MOTION_PROP_RE.match(prop):
+        return
+    words = value.strip().lower().split()
+    if words and words[0] in _MOTION_INERT_VALUES:
+        return                    # `animation: none` stops, never starts
+    chain = " ".join(p.strip() for p in stack if p and p.strip())
+    if MOTION_GUARD in chain:
+        return
+    selector = chain
+    if selector.startswith("@") and " " in selector:
+        # drop the at-rule wrapper from the message, keep the readable part
+        selector = selector[selector.rfind(")") + 1:].strip() or chain
+    selector = " ".join(selector.split())[:80]
+    key = (prop, selector)
+    if key in seen:
+        return
+    seen.add(key)
+    warns.append(
+        f'ungated {prop} on "{selector}": nothing in its selector tests '
+        f'{MOTION_GUARD}="..."], so the motion switch cannot stop it — '
+        f'prefix the selector with :root:not([data-motion="off"])')
+
+
+def motion_warnings(css: str) -> list[str]:
+    """Warnings for ungated animation/transition declarations in overlay CSS.
+
+    Approximation by design (SPARK-2): a declaration-block scan, not a CSS
+    parser. A declaration counts as governed when ANY part of its enclosing
+    at-rule/selector chain mentions ``[data-motion``. ``@keyframes`` bodies
+    are skipped (they define frames; the use site is what must be gated).
+    Never raises and never rejects — a warned skin still loads.
+    """
+    if not css or ("animation" not in css and "transition" not in css):
+        return []
+    text = _strip_css_comments(css)
+    warns: list[str] = []
+    seen: set = set()
+    stack: list[str] = []
+    pending: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in "\"'uU":
+            span = _css_atom_span(text, i)
+            pending.append(text[i:i + span])
+            i += span
+            continue
+        if ch == "{":
+            stack.append("".join(pending).strip())
+            pending = []
+        elif ch == "}":
+            _check_motion_decl("".join(pending), stack, warns, seen)
+            pending = []
+            if stack:
+                stack.pop()
+        elif ch == ";":
+            _check_motion_decl("".join(pending), stack, warns, seen)
+            pending = []
+        else:
+            pending.append(ch)
+        i += 1
+    _check_motion_decl("".join(pending), stack, warns, seen)
+    return warns
+
+
 def skins_root(base: Path | None = None) -> Path:
     """<base>/uplift/skins — user dir; same base resolution as the metrics
     store (server base_path -> OMLX_BASE_PATH -> ~/.omlx, so the omlx-dev
@@ -345,6 +491,7 @@ def _extract_into(root: Path, dir_name: str, yml_bytes: bytes):
             warnings.append(f"skipped overlay.css: {err}")
         else:
             _write("overlay.css", blob)
+    warnings.extend(motion_warnings(crate["css"]))
     for subdir, mapping in (("icons", crate["icons"]),
                             ("fonts", crate["fonts"])):
         for res_name in sorted(mapping):
@@ -545,6 +692,7 @@ def extract_crate(root: Path, name: str, yml_bytes: bytes, mtime: int):
             warnings.append(f"skipped overlay.css: {err}")
         else:
             _write("overlay.css", blob)
+    warnings.extend(motion_warnings(css))
     # icons + fonts: decoded; a bad entry only skips itself (fallback
     # cascade, sec 4); unknown names stay servable but get no variable
     for subdir, mapping in (("icons", crate["icons"]), ("fonts", crate["fonts"])):
@@ -725,6 +873,19 @@ def list_skins(root: Path | None = None) -> list[dict]:
             sidecar = d / ".extract-warnings"
             warns = sidecar.read_text(encoding="utf-8").splitlines() \
                 if sidecar.is_file() else []
+        # motion governance re-checked against what ACTUALLY SERVES: a
+        # hand-edited overlay.css never re-extracts, and bundled dirs get
+        # no sidecar (sync_bundled only logs). Dedup keeps the sidecar copy.
+        overlay = d / "overlay.css"
+        try:
+            served_css = overlay.read_text(encoding="utf-8",
+                                            errors="replace") \
+                if overlay.is_file() else (meta.get("css") or "")
+        except OSError:
+            served_css = ""
+        for w in motion_warnings(served_css):
+            if w not in warns:
+                warns = warns + [w]
         groups.setdefault(base, []).append({
             "name": None,  # assigned below (base name vs suffixed)
             "dir": d.name,

@@ -580,6 +580,12 @@ function renderSkinsMenu() {
         if (e.stale) hints.push(C.t('uplift.theme.stale_hint',
             { date: new Date(e.ts * 1000).toLocaleString() }));
         if (e.yml_newer) hints.push(C.t('uplift.theme.yml_newer'));
+        // SPARK-2: skin diagnostics (motion governance, skipped resources)
+        // are server-side English author notes — shown verbatim, so they add
+        // no locale keys. A skin that loads still loads; this only explains.
+        if (e.warnings && e.warnings.length) {
+            hints.push('⚠ ' + e.warnings.join(' — '));
+        }
         if (hints.length) a.title = hints.join(' — ');
         menu.appendChild(a);
     }

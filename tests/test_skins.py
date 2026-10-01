@@ -277,6 +277,104 @@ def test_bad_values_skipped_skin_still_loads(root):
     assert etag.startswith('"')
 
 
+# ------------------------------------------------------- motion governance
+# SPARK-2: an ungated animation/transition in a crate keeps moving after the
+# user turns motion off. The validator WARNS (sidecar + picker) and the skin
+# still loads — forward-compat rule outranks governance.
+
+MOTION_GATED = (
+    'skin_version: 1\nlabel: "Gated"\ntokens:\n  bg: "#101010"\ncss: |\n'
+    '  .logo .dot { box-shadow: 0 0 4px red; }\n'
+    '  :root:not([data-motion="off"]) .logo .dot {\n'
+    '      animation: g-pulse 3s ease-in-out infinite;\n'
+    '  }\n'
+    '  @keyframes g-pulse { 50% { box-shadow: 0 0 11px red; } }\n')
+
+MOTION_UNGATED = (
+    'skin_version: 1\nlabel: "Ungated"\ntokens:\n  bg: "#101010"\ncss: |\n'
+    '  .logo .dot { box-shadow: 0 0 4px red; }\n'
+    '  .logo .dot { animation: u-pulse 3s ease-in-out infinite; }\n'
+    '  .card { transition: border-color .2s; }\n'
+    '  @keyframes u-pulse { 50% { box-shadow: 0 0 11px red; } }\n')
+
+
+@pytest.mark.parametrize("css,want", [
+    (".card { animation: x 1s infinite; }", 1),
+    (".card { transition: color .2s; }", 1),
+    (".card { animation-name: spin; }", 1),
+    (".card { -webkit-animation: x 1s; }", 1),
+    ('@media (hover:hover){:root:not([data-motion="off"]) .card'
+     '{animation:x 1s}}', 0),
+    ("@keyframes x { from { opacity: 0 } }", 0),          # defines, not plays
+    (".card { animation: none; }", 0),                    # inert
+    ("/* .card { animation: x 1s } */ .a { color: red }", 0),  # commented
+    ('.cur { cursor: url("data:image/svg+xml;base64,AA==");'
+     ' animation: x 1s; }', 1),                           # ; and {} in string
+    ("", 0),
+    (".card { color: red; padding: 4px }", 0),
+])
+def test_motion_warnings_detect_ungated_motion(css, want):
+    assert len(skins.motion_warnings(css)) == want
+
+
+def test_motion_warning_names_property_and_selector():
+    w = skins.motion_warnings(".rqchip { transition: box-shadow .2s; }")
+    assert len(w) == 1
+    assert "transition" in w[0] and ".rqchip" in w[0]
+    assert 'data-motion' in w[0]        # the message says how to fix it
+
+
+def test_ungated_animation_warns_and_skin_still_loads(root):
+    drop(root, "night", text=MOTION_UNGATED, mtime=1_700_000_000)
+    entries = skins.list_skins(root)
+    assert entries[0]["dir"] == "night-1700000000"   # NOT rejected
+    css, _ = skins.theme_css(root, entries[0])
+    assert b"--bg: #101010;" in css                  # tokens still compile
+    warns = entries[0]["warnings"]
+    assert any("ungated animation" in w for w in warns)
+    assert any("ungated transition" in w for w in warns)
+    # the warning survives a repeat scan via the sidecar
+    (root / "night-1700000000" / ".extract-warnings").write_text(
+        "\n".join(warns), encoding="utf-8")
+    skins.invalidate_caches()
+    again = skins.list_skins(root)
+    assert any("ungated animation" in w for w in again[0]["warnings"])
+
+
+def test_gated_animation_emits_no_warning(root):
+    drop(root, "night", text=MOTION_GATED, mtime=1_700_000_000)
+    entries = skins.list_skins(root)
+    assert entries[0]["dir"] == "night-1700000000"
+    assert not any("ungated" in w for w in entries[0]["warnings"])
+
+
+def test_hand_edited_overlay_is_rechecked_on_scan(root):
+    # a crate ships clean, then overlay.css is hand-edited to add motion.
+    # Extraction is never re-run (never-overwrite), so the scan must
+    # re-derive motion warnings from the file that ACTUALLY SERVES.
+    drop(root, "night", text=MOTION_GATED, mtime=1_700_000_000)
+    assert not any("ungated" in w for w in skins.list_skins(root)[0]["warnings"])
+    ov = root / "night-1700000000" / "overlay.css"
+    ov.write_text(ov.read_text(encoding="utf-8")
+                  + "\n.badge { animation: slide-in .3s; }\n", encoding="utf-8")
+    skins.invalidate_caches()
+    warns = skins.list_skins(root)[0]["warnings"]
+    assert any("ungated animation" in w for w in warns)
+
+
+def test_every_bundled_crate_is_motion_clean():
+    """SPARK-2 acceptance: no shipped crate warns under the new rule."""
+    d = skins.bundled_package_dir()
+    offenders = {}
+    for p in sorted(d.glob("*.yml")):
+        crate, reason = skins.parse_crate(p.read_bytes())
+        assert crate is not None, f"{p.name}: {reason}"
+        w = skins.motion_warnings(crate["css"])
+        if w:
+            offenders[p.name] = w
+    assert not offenders, offenders
+
+
 # ------------------------------------------------------------ classic map
 
 def test_classic_mapping_declared_wins():
