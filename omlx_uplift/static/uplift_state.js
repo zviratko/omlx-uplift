@@ -35,6 +35,11 @@ window.Uplift.state = {
     usageRange: qp.get('range') || 'today',
     usageAvg: null,   // usage-tab averages (uplift_usage.js writes)
     settingsIdx: { stored: 0, orphans: [], entries: [], profiles: [] },
+    // SPLIT-2 stage 4: the Models table snapshot. Written by
+    // uplift_mmtable.js renderModelAdmin, read by the settings editor
+    // (uplift_modelmgr.js) while a row is open. Shared cell: mutable
+    // array replaced wholesale on every render.
+    adminModels: [],
     // PH2-1 stage 6: last global-settings save timestamp. Written by
     // uplift_gsys.js save flow, read by updateModeLabels in uplift.js.
     gsSavedAt: 0,
