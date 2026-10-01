@@ -30,6 +30,7 @@ write_tick(), and a wal_checkpoint(TRUNCATE) inside the daily purge pass.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -174,6 +175,9 @@ def open_usage_ro(path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+log = logging.getLogger("omlx_uplift.store")
 
 
 class MetricsStore:
@@ -520,11 +524,27 @@ class MetricsStore:
 
     def purge(self, metrics_days: int | None = None,
               log_days: int | None = None):
-        """Split retention: samples age out at metrics_days, FINISHED
-        request rows at log_days (active rows never purge by age — they
-        would otherwise vanish mid-flight and orphan their updates).
+        """Split retention: samples age out at metrics_days, request rows
+        at log_days.
+
+        RETENTION-1: a server restart orphans in-flight rows FOREVER — the
+        tracker rebuilds its _active set from the live engine pool only, so
+        a row whose engine is gone can never be finalised, and the old
+        "active rows are age-exempt" rule let zombies pile up (72 'queued'
+        rows, 9 days old, live proof 2026-10-01). They polluted search and
+        the models dropdown. The exemption exists so live rows don't vanish
+        mid-flight — the liveness clock is ts_end (upsert stamps it with
+        time.time() on every WRITE of the row). One honest caveat: the
+        collector skips rows whose signature is unchanged, so a queued row
+        that never progresses is written once — after log_days it drops
+        from history even if still truly queued, and re-inserts when it
+        finally completes. That flicker costs nothing (the live feed reads
+        the tracker, not this table) and is far cheaper than the unbounded
+        zombie leak the old blanket exemption allowed.
+
         Runs wal_checkpoint(TRUNCATE) so the WAL file itself gets recycled
-        once per day (journal_size_limit keeps it capped between runs)."""
+        once per day (journal_size_limit keeps it capped between runs).
+        VACUUM policy lives in maybe_vacuum() (G2)."""
         ret = self.retention()
         mdays = metrics_days if metrics_days is not None else ret["metrics_days"]
         ldays = log_days if log_days is not None else ret["log_days"]
@@ -533,15 +553,13 @@ class MetricsStore:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff_m,))
             gone = self._conn.execute(
-                "SELECT id FROM requests WHERE ts_start < ? "
-                "AND state IN ('complete','error')",
+                "SELECT id FROM requests "
+                "WHERE COALESCE(ts_end, ts_start) < ?",
                 (cutoff_l,),
             ).fetchall()
             self._conn.execute(
-                "DELETE FROM requests WHERE ts_start < ? "
-                "AND state IN ('complete','error')",
-                (cutoff_l,),
-            )
+                "DELETE FROM requests WHERE COALESCE(ts_end, ts_start) < ?",
+                (cutoff_l,))
             if gone and self._has_fts:
                 ids = [r[0] for r in gone]
                 self._conn.executemany(
@@ -550,6 +568,64 @@ class MetricsStore:
         # transaction fails with 'database table is locked'.
         with self._lock:
             self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        self.maybe_vacuum()
+
+    # -- space reclaim (RETENTION-1 G2) --------------------------------------
+    # DELETE frees pages INSIDE the file only; nothing here ever shrank it
+    # (587 MB after 13 days, freelist 0 — the space is held for reuse, so a
+    # size-only trigger would VACUUM forever and reclaim nothing). The honest
+    # measure of 'this store grew to a high-water mark it no longer needs'
+    # is page_count - freelist_count (pages holding live rows) versus the
+    # file's peak. VACUUM when that live footprint dropped to half the peak
+    # AND still leaves a floor big enough to bother (a VACUUM rewrites the
+    # whole DB: seconds per 100 MB, one-off).
+
+    VACUUM_MIN_PAGES = 20000      # ~80 MB at 4 KiB pages: below = never worth it
+    VACUUM_SHRINK_RATIO = 2.0     # peak at least 2x the live footprint
+    VACUUM_MIN_INTERVAL_S = 6 * 3600
+
+    def maybe_vacuum(self) -> bool:
+        """Reclaim file space when the DB shrank hard below its high-water
+        mark. Runs inside the daily purge pass (collector thread — off the
+        event loop); re-runs are rate-limited via meta. Returns True when a
+        VACUUM actually executed."""
+        try:
+            with self._lock:
+                pages = self._conn.execute("PRAGMA page_count").fetchone()[0]
+                free = self._conn.execute("PRAGMA freelist_count").fetchone()[0]
+        except sqlite3.Error:
+            return False
+        live = max(1, pages - free)
+        peak = max(pages, int(self.get_meta("db_peak_pages") or 0))
+        now = time.time()
+        last = float(self.get_meta("db_last_vacuum") or 0)
+        self.set_meta("db_peak_pages", str(peak))
+        if pages < self.VACUUM_MIN_PAGES:
+            return False
+        if peak < live * self.VACUUM_SHRINK_RATIO:
+            return False
+        if now - last < self.VACUUM_MIN_INTERVAL_S:
+            return False
+        log.info("uplift store: VACUUM %d pages -> ~%d live", pages, live)
+        try:
+            with self._lock:
+                # VACUUM must run outside any transaction. sqlite3's legacy
+                # mode opens one implicitly before DML only, and every write
+                # in this class takes _lock — holding it here means no other
+                # thread can have a transaction open on this connection.
+                self._conn.isolation_level = None
+                try:
+                    self._conn.execute("VACUUM")
+                finally:
+                    self._conn.isolation_level = ""
+            after = self._conn.execute("PRAGMA page_count").fetchone()[0]
+        except sqlite3.Error as exc:   # e.g. disk full: keep old stats, retry tomorrow
+            log.warning("uplift store: VACUUM failed: %s", exc)
+            return False
+        self.set_meta("db_peak_pages", str(after))
+        self.set_meta("db_last_vacuum", str(now))
+        log.info("uplift store: VACUUM done %d -> %d pages", pages, after)
+        return True
 
     # -- read side (API/viewer) -------------------------------------------
 

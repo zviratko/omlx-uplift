@@ -1,7 +1,9 @@
 """RL-0 acceptance: split/configurable retention + write hygiene.
 
 1. purge keeps a 1.5-day-old request with log_days=2, deletes a 3-day-old
-   one; samples survive to 30 d. Active-state rows never purge by age.
+   one; samples survive to 30 d. RETENTION-1 rework: the age clock is
+   COALESCE(ts_end, ts_start) over ALL states — a live row's ts_end is
+   re-stamped every tick, an orphaned zombie's is not.
 2. env override wins over meta; meta persists and survives reopen; clamps.
 3. one collector tick = one COMMIT; an unchanged finished row is NOT
    re-written on the next tick.
@@ -36,7 +38,13 @@ def _req(rid, state, age_s, **kw):
 def test_purge_split_retention(store):
     store.upsert_request(_req("fresh", "complete", 1.5 * 86400))
     store.upsert_request(_req("old", "complete", 3 * 86400))
-    store.upsert_request(_req("ancient-active", "generating", 40 * 86400))
+    store.upsert_request(_req("ancient-zombie", "generating", 40 * 86400))
+    # RETENTION-1: a LIVE generating row keeps its ts_end fresh (the
+    # tracker re-stamps it every tick) even when it started long ago —
+    # it must survive the age purge.
+    live = _req("live-generating", "generating", 40 * 86400)
+    live["ts_end"] = time.time()
+    store.upsert_request(live)
     store.write_sample("k", 1.0, ts=time.time() - 3 * 86400)   # log-age
     store.write_sample("k", 2.0, ts=time.time() - 31 * 86400)  # metrics-age
 
@@ -45,7 +53,8 @@ def test_purge_split_retention(store):
     ids = {r["id"] for r in store.recent_requests()}
     assert "fresh" in ids           # younger than log_days=2
     assert "old" not in ids         # finished + older than log window
-    assert "ancient-active" in ids  # active state never purged by age
+    assert "ancient-zombie" not in ids   # orphaned active row: purged (RETENTION-1)
+    assert "live-generating" in ids      # fresh ts_end = alive, age exempt
     pts = store.series("k", window_s=45 * 86400)
     assert len(pts) == 1 and pts[0]["v"] == 1.0  # 31 d sample purged, 3 d survives
 
@@ -231,3 +240,66 @@ def test_upsert_coalesce_keeps_earlier_payload(store):
     assert row["prompt"] == "PROMPT" and row["output"] == "TAIL"
     assert row["output_trunc"] == 1 and row["params"] == '{"temperature": 1.0}'
     assert row["state"] == "complete"
+
+
+# -- RETENTION-1: zombie purge + VACUUM policy -------------------------------
+
+def test_zombie_queued_row_purged_but_fresh_queued_survives(store):
+    """Restart-orphaned 'queued' rows age out; in-window actives do not."""
+    store.upsert_request(_req("zombie", "queued", 3 * 86400))
+    store.upsert_request(_req("recent-queued", "queued", 60))
+    store.purge()
+    ids = {r["id"] for r in store.recent_requests()}
+    assert "zombie" not in ids
+    assert "recent-queued" in ids
+
+
+def test_purge_syncs_fts_for_zombies(store):
+    if not store._has_fts:
+        pytest.skip("no FTS5 in this sqlite")
+    r = _req("zombie", "queued", 3 * 86400)
+    r["prompt"] = "needle-in-zombie haystack"
+    store.upsert_request(r)
+    store.purge()
+    hits = store.search_requests(q="needle-in-zombie")
+    assert hits["results"] == []
+
+
+import omlx_uplift.store as store_mod  # noqa: E402
+
+
+def test_vacuum_policy_gates(tmp_path, monkeypatch):
+    monkeypatch.setattr(store_mod.MetricsStore, "VACUUM_MIN_PAGES", 2)
+    monkeypatch.setattr(store_mod.MetricsStore, "VACUUM_MIN_INTERVAL_S", 3600)
+    s = store_mod.MetricsStore(path=tmp_path / "v.sqlite3")
+    try:
+        import os
+        for i in range(30):
+            r = _req(f"r{i}", "complete", 10)
+            r["output"] = "x" * 200_000
+            s.upsert_request(r)
+        pages = s._conn.execute("PRAGMA page_count").fetchone()[0]
+        # no peak recorded yet: peak == pages -> no shrink -> refuse
+        assert s.maybe_vacuum() is False
+        assert s.get_meta("db_peak_pages") == str(pages)
+        # TRUE shrink: drop most rows (the daily purge does this in prod);
+        # pages stay, freelist grows, live = pages - freelist collapses.
+        keep = ("'r0'", "'r1'", "'r2'")
+        s._conn.execute(f"DELETE FROM requests WHERE id NOT IN ({','.join(keep)})")
+        if s._has_fts:   # the FTS mirror holds its own copy of every payload
+            s._conn.execute(f"DELETE FROM request_fts WHERE id NOT IN ({','.join(keep)})")
+        s._conn.commit()
+        assert s.maybe_vacuum() is True
+        # WAL mode: the shrunken image lives in the WAL until a checkpoint,
+        # so the honest measure right now is page_count, not file size.
+        after = s._conn.execute("PRAGMA page_count").fetchone()[0]
+        assert after < pages
+        assert int(s.get_meta("db_peak_pages")) == after
+        # rate limit: a second call right after must not re-run
+        s._conn.execute("DELETE FROM requests")
+        if s._has_fts:
+            s._conn.execute("DELETE FROM request_fts")
+        s._conn.commit()
+        assert s.maybe_vacuum() is False   # rate limit, not policy
+    finally:
+        s.close()
