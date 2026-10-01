@@ -1,0 +1,180 @@
+# Uplift skin crate — "CAAAAATZ!" (user-approved theme: cats, overloaded).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+#
+# SPARK-5: cats on every surface a CSS-only crate can reach — all four icon
+# slots are cats, cats peek over card corners, paws walk the feed, a cat
+# naps on every badge, a paw cursor grabs the drag handle, and one cat bats
+# at the foot of every chart card. ZERO engine code: tokens + inline SVG
+# icons + overlay CSS + emoji content, nothing else.
+# The palette triad is in-franchise first (purr-green / slow-blink amber /
+# hiss red), the rest hangs off it.
+#
+# Honest limits of a pure skin (logged in the ticket, not hacked around):
+# uPlot paints axes AND data into <canvas>, so no cat can enter the plot
+# from CSS — the begging cat sits at the card's bottom edge and paws the
+# DOM legend row labels instead. A cat-shaped point glyph or confetti would
+# need engine callbacks; those are logged there as future generic hooks.
+# No webfont bundled: no license-verified cat letterform was FOUND (skill
+# rule), so the playful read comes from a rounded system stack via --sans.
+#
+# "CAAAAATZ!" is an original yowl, not a quotation from any franchise.
+skin_version: 1
+label: "CAAAAATZ!"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#221a1e"          # sofa-in-dusk, warm charcoal
+  card: "#2c2227"
+  row2: "#332830"
+  field: "#1b1417"       # recessed basket
+  panel: "#332830"
+  edge: "#5c4450"        # dusty plum seam
+  ink: "#f6eae4"         # cream cat
+  dim: "#bfa6ad"         # faded tortoiseshell
+  accent: "#ff6f61"      # cat-toy coral-red
+  chart-1: "#cfc4c9"     # mice-grey (primary series)
+  chart-2: "#ff6f61"     # cat-toy red (secondary series)
+  grid: "#3a2d34"
+  heat: "#f4a259"        # treat-jar amber (heatmap hot cells)
+  frame: "#7a5766"
+  red: "#e23b2e"
+  good: "#79c76a"        # purr-green — the cat approves
+  warn: "#f4a259"        # slow-blink amber — the cat is deciding
+  bad: "#e23b2e"         # hiss red — do not touch the cat
+  hdr-ink: "#e9c9cf"
+  hdr-edge: "#4a3540"
+  hdr-hover: "#332830"
+  hdr-weight: "700"
+  sans: "ui-rounded, 'Avenir Next Rounded', 'Trebuchet MS', system-ui, sans-serif"
+
+icons:
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 10">
+    <path d="M0 0h12L6 8z" fill="#ff6f61"/>
+    <path d="M1.5 0l1.6 2.2M10.5 0L8.9 2.2" stroke="#ff6f61" stroke-width="1.1"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+    <path d="M2.5 2.5l9 9M11.5 2.5l-9 9" stroke="#ff6f61" stroke-width="2.6" stroke-linecap="round"/>
+    </svg>
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+    <circle cx="6" cy="6" r="6" fill="#1b1417"/>
+    <path d="M2.6 4.4 3.3 1.9 5 3.7M9.4 4.4 8.7 1.9 7 3.7" fill="#e9c9cf"/>
+    <circle cx="6" cy="6.7" r="3.3" fill="#e9c9cf"/>
+    <circle cx="4.8" cy="6.3" r="0.65" fill="#221a1e"/>
+    <circle cx="7.2" cy="6.3" r="0.65" fill="#221a1e"/>
+    <path d="M6 7.5l-.7.7M6 7.5l.7.7" stroke="#ff6f61" stroke-width="0.6"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 12">
+      <path d="M1 2h18M1 5h18" stroke="#7a5766" stroke-width="1.3"/>
+      <path d="M6.2 9 6.7 5.6 8.3 7.3M13.8 9l-.5-3.4L11.7 7.3" fill="#e9c9cf"/>
+      <ellipse cx="10" cy="9" rx="4" ry="2.8" fill="#e9c9cf"/>
+      <circle cx="8.6" cy="8.6" r="0.6" fill="#221a1e"/>
+      <circle cx="11.4" cy="8.6" r="0.6" fill="#221a1e"/>
+    </svg>
+
+css: |-
+  html { color-scheme: dark; }
+  /* warm lamp glow, the room the cat owns */
+  body {
+      background:
+          radial-gradient(120% 80% at 50% -6%, rgba(255,111,97,.06) 0%,
+              rgba(0,0,0,0) 55%),
+          var(--bg);
+  }
+  .card { border-color: var(--edge); }
+  .card h2 { color: var(--hdr-ink); letter-spacing: .10em; }
+  ::selection { background: var(--accent); color: #221a1e; }
+
+  /* Header slots: inline suffix is engine-capped at 24ch (20 used);
+     the long yowl goes in the below-logo slot (44ch, cap ~50). */
+  .logo::after {
+      content: " // CATS HAVE TOKENS";
+      color: var(--accent); font: 700 9px/1 var(--mono); letter-spacing: .12em;
+      margin-left: 6px;
+  }
+  .logo .logo-below::after {
+      content: "9 LIVES  //  0 UPTIME  //  ALL PURRS NOMINAL";
+      color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .08em;
+  }
+
+  /* --- CATS EVERYWHERE (CSS-reachable surfaces, emoji content) ---------
+     1. a cat peeks over the top-right corner of every card. It rides the
+        border line (mostly ABOVE the card box) so it never covers the h2
+        timespan chips; pointer-events: none so it can never block a click. */
+  .card::before {
+      content: "🐈"; position: absolute; top: -9px; right: 8px;
+      font-size: 13px; line-height: 1; pointer-events: none; z-index: 1;
+  }
+  /* 2. paw prints leading every feed row (inline flex child, no shift) */
+  .feed-item::before {
+      content: "🐾"; font-size: 9px; line-height: 1.6; opacity: .55;
+      flex: 0 0 auto;
+  }
+  /* 3. a cat naps on the corner of every status badge */
+  .badge { position: relative; }
+  .badge::after {
+      content: "😽"; position: absolute; right: -6px; top: -7px;
+      font-size: 9px; line-height: 1; opacity: .85;
+  }
+  /* 4. the grip icon is already a cat snatching the hatch (--icon-grip);
+        a tiny paw cursor sells the drag handle (SVG data-URI kept small;
+        where SVG cursors are unsupported the fallback grab still works) */
+  body.layout-editing .card-handle {
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Cg fill='%23e9c9cf'%3E%3Cellipse cx='7' cy='9.6' rx='3.4' ry='2.6'/%3E%3Ccircle cx='2.8' cy='5.4' r='1.6'/%3E%3Ccircle cx='7' cy='3.6' r='1.6'/%3E%3Ccircle cx='11.2' cy='5.4' r='1.6'/%3E%3C/g%3E%3C/svg%3E") 7 8, grab;
+  }
+  /* 5. "Pleading graphs", honestly: the plot itself is canvas and out of
+        CSS reach, so a cat sits at the bottom edge of every chart card
+        looking up into it and bats at whatever dangles there. */
+  .card:has(.chart-box)::after {
+      content: "🐱"; position: absolute; left: 50%; bottom: 1px;
+      margin-left: -9px; font-size: 15px; line-height: 1;
+      pointer-events: none; z-index: 1;
+  }
+  /* 6. cats paw the DOM legend (u-legend is HTML, not canvas) */
+  .u-legend .u-label::before { content: "🐾 "; opacity: .6; }
+
+  /* --- MOTION: peek, bat, slow blink — every use site gated. -----------
+     SPARK-2's validator flags animation/transition whose selector chain
+     does not test [data-motion]; all sites below are prefixed, so the
+     motion switch stops ALL of it and this crate ships motion-clean. */
+  :root:not([data-motion="off"]) .card::before {
+      animation: cat-peek 6.5s ease-in-out infinite;
+  }
+  @keyframes cat-peek {
+      0%, 70%, 100% { transform: translateY(0); }
+      78%           { transform: translateY(3px) rotate(-6deg); }
+      86%           { transform: translateY(0) rotate(0); }
+  }
+  :root:not([data-motion="off"]) .card:has(.chart-box)::after {
+      animation: cat-bat 3.4s ease-in-out infinite;
+  }
+  @keyframes cat-bat {
+      0%, 60%, 100% { transform: translateY(0) rotate(0); }
+      70%           { transform: translateY(-3px) rotate(8deg); }
+      80%           { transform: translateY(0) rotate(-4deg); }
+  }
+  :root:not([data-motion="off"]) .badge::after {
+      animation: cat-blink 5.5s ease-in-out infinite;
+  }
+  @keyframes cat-blink {
+      0%, 86%, 100% { opacity: .85; }
+      91%           { opacity: .15; }   /* the slow blink */
+      96%           { opacity: .85; }
+  }
+  :root:not([data-motion="off"]) .card {
+      transition: border-color .18s linear;
+  }
+  .card:hover { border-color: var(--accent); }
+  /* instrument bars in cat-toy stripes */
+  .meter > div {
+      background: repeating-linear-gradient(45deg,
+          var(--chart-1) 0 4px, #3a2d34 4px 7px);
+  }
+  .meter.bad > div {
+      background: repeating-linear-gradient(45deg,
+          var(--bad) 0 4px, #3a1512 4px 7px);
+  }
