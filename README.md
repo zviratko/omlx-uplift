@@ -19,12 +19,26 @@ After `brew upgrade omlx` (fresh keg), re-run `omlx-uplift install` and
 kickstart again. Removing uplift: `omlx-uplift uninstall` (removes the
 `.pth`), then `brew uninstall omlx-uplift`.
 
+![Status board](docs/screenshots/status-board.png)
+
+*Status board: live activity, memory and cache, throughput and request
+charts, request feed.*
+
+![Patches page](docs/screenshots/patches.png)
+
+*Patches / DEV page: runtime and build patch zones, dev keg control,
+add-patch form.*
+
+![Models page](docs/screenshots/models.png)
+
+*Models page: filter, chips, per-model settings.*
+
 ## Patch carrier (PATCHES page)
 
 Uplift can carry small local patches on top of vanilla oMLX so fixes you
 need today (for example open PRs of oMLX) survive vanilla upgrades, with
-per-patch version history and rollback — **rollback never rolls back
-omlx itself**.
+per-patch version history and rollback. **Rollback never rolls back omlx
+itself.**
 
 Declarative model:
 
@@ -33,16 +47,18 @@ Declarative model:
 - Nothing writes the keg from the dashboard. Enable, disable, promote,
   rollback and reconcile are bookkeeping; files change only when an
   interpreter with the `.pth` hook boots (the `omlx serve` start, a
-  launchd respawn — or `omlx-uplift patch apply` when you want it now).
+  launchd respawn, or `omlx-uplift patch apply` when you want it now).
 - When the startup engine really changed files, it re-execs the
   interpreter once before engines start, so the server process never
   imports a half-patched tree.
 - Each patch keeps its stored versions (newest 100). Sources are a
-  GitHub PR (`owner/repo` + number), any https URL, or an uploaded
-  `.diff`. Every candidate passes a strict validation gate first: pure
-  unified-diff parse, strict context match against the tree as it will
-  be at apply time (this patch's own hunks unwound), `py_compile` /
-  JSON checks. A failed gate stores nothing and changes no state.
+  GitHub PR (`repo/N`), any https URL, or an uploaded `.diff`. Every
+  candidate passes a strict validation gate first: pure unified-diff
+  parse, strict context match against the tree as it will be at apply
+  time, `py_compile` / JSON checks. A failed gate stores nothing and
+  changes no state. Diffs that touch kernel sources or reach outside the
+  keg need an explicit approval (`enable --approve once|always`, or the
+  matching dashboard prompt) before auto-apply.
 
 State meanings (PATCHES page chips):
 
@@ -51,89 +67,109 @@ State meanings (PATCHES page chips):
 | `applied` | desired version is live in the keg (verified byte-exact) |
 | `pending` | will apply at the next omlx start |
 | `update_available` | source drifted; a validated candidate awaits Promote |
-| `needs_review` | apply failed (usually after a vanilla upgrade) — **WARNING banner**; oMLX boots and runs WITHOUT the patch until you resolve it |
-| `obsolete` | upstream now contains the change — consider Remove |
+| `needs_review` | apply failed (usually after a vanilla upgrade) and oMLX runs WITHOUT the patch until you resolve it |
+| `obsolete` | upstream now contains the change; consider Remove |
 | `disabled` | files are restored to vanilla bytes |
 
-Rollback semantics — what rollback does and does NOT do:
+Rollback semantics:
 
 - Does: point the patch back to a previous stored version. Files become
   byte-exact to what they were before (vanilla or the other version) at
   the next omlx restart. Disable and Remove likewise restore pristine
   vanilla bytes, unwinding every applied version's backups newest-first.
-- Does NOT: install, downgrade or pin omlx. Uplift never touches the
-  keg's omlx content — if a vanilla upgrade moved the code under your
-  patch, the patch is MARKED for review (`needs_review`), never forced.
+- Does NOT: install, downgrade or pin omlx. If a vanilla upgrade moved
+  the code under your patch, the patch is marked `needs_review`, never
+  forced.
 
-Obsolete flow: when upstream merges the PR, "Check for updates" reports
-the patch as obsolete (all hunks already present) and state lights up
-`obsolete`. The honest response is Remove, which restores vanilla bytes.
+When upstream merges the PR, "Check for updates" reports the patch as
+obsolete (all hunks already present). The honest response is Remove,
+which restores vanilla bytes.
 
-Kill switches (both mean: boot pristine vanilla, manifest untouched,
-verify-only — no writes):
+CLI control, per patch or global:
 
 ```bash
-OMLX_UPLIFT_NO_PATCHES=1 omlx serve      # env kill switch, one launch
-touch ~/.omlx/uplift/patches.disabled    # sentinel, until removed
-omlx-uplift patch disable-all          # sentinel + disable every patch
-omlx-uplift patch status               # JSON view for recovery
+omlx-uplift patch status               # JSON view of manifest + verification
+omlx-uplift patch add ID --pr repo/N   # or --url U | --file F, optional --scope
+omlx-uplift patch enable ID            # --approve once|always if safeguards fire
+omlx-uplift patch disable ID           # one patch off, files revert to vanilla
+omlx-uplift patch remove ID
 omlx-uplift patch apply                # reconcile now (no re-exec)
 omlx-uplift patch check                # re-fetch sources, report drift
+omlx-uplift patch curated [--sync]     # published catalog (see curated_patches/)
+```
+
+`patch curated --sync` installs the catalog: default tier enabled,
+optional tier installed but off. Re-sync never overwrites your decisions.
+
+Kill switches (both mean: boot pristine vanilla, manifest untouched,
+verify-only, no writes):
+
+```bash
+OMLX_UPLIFT_NO_PATCHES=1 omlx serve    # env kill switch, one launch
+touch ~/.omlx/uplift/patches.disabled  # sentinel, until removed
+omlx-uplift patch disable-all          # sentinel + disable every patch
 ```
 
 If a patch set wedges boot, use a kill switch, fix the manifest by hand
 (it is plain JSON), remove the sentinel, start again.
 
-## Development kegs (`omlx-dev`) — when the patch carrier is not enough
+## Other commands
+
+```bash
+omlx-uplift serve                      # wrapper around 'omlx serve'
+omlx-uplift view [--api URL]           # standalone viewer for DMG installs
+omlx-uplift kernel list|rebuild NAME|restore NAME  # rebuild ONE native
+                                       # kernel in the keg after a patch
+                                       # touched csrc/ (originals kept in
+                                       # kernel-backups/)
+omlx-uplift skin compile DIR|decompile YML         # skin crate codecs;
+                                       # themes are drop-in CSS crates,
+                                       # picked in the header theme menu
+omlx-uplift man                        # full man page
+```
+
+## Development kegs (`omlx-dev`): when the patch carrier is not enough
 
 The hook mode above (vanilla `omlx` + the `.pth` carrier) is the right
-default: nothing in the omlx tree changes, patches are strict unified
-diffs gated against the exact keg bytes. It has hard limits, though: a
-diff cannot carry NEW files, generated code, custom Metal kernels, or
-work-in-progress commits that are not a clean patch yet. When you hit
-those, use the companion formula instead — `dev install` drives brew for
+default. Its limits: a diff cannot carry new files, generated code,
+custom Metal kernels, or work-in-progress commits that are not a clean
+patch yet. Then use the companion formula. `dev install` drives brew for
 you (first build `brew install --HEAD zviratko/uplift/omlx-dev`, rebuilds
 `brew reinstall`), so no manual brew step is needed:
 
 ```bash
-omlx-uplift dev bootstrap               # one-time questionnaire (or: --origin URL)
-omlx-uplift dev install                 # materialize build patches + build the dev keg
+omlx-uplift dev bootstrap              # one-time questionnaire (or: --origin URL)
+omlx-uplift dev install                # materialize build patches + build the dev keg
 ```
 
-How it works: your checkout stays PRISTINE (upstream history only). Uplift
-composites it with the enabled patch set into the `uplift-dev` branch and
-builds a SEPARATE keg from that — so you always know exactly which bytes
-are running, and rollback never touches your checkout. The dev keg runs
-as its own service (`sh.brew.omlx-dev`) with its own port and base path;
-the stable `omlx` keeps serving alongside it.
+How it works: your checkout stays pristine (upstream history only).
+Uplift composites it with the enabled patch set into the `uplift-dev`
+branch and builds a separate keg from that, so you always know which
+bytes are running and rollback never touches your checkout. The dev keg
+runs as its own service (`sh.brew.omlx-dev`) with its own port and base
+path; the stable `omlx` keeps serving alongside it.
 
 What you get over hook mode:
 
 - **Patches as real commits.** The `uplift-dev` branch is a normal git
-  branch: new files, README/docs edits, test changes, kernel work —
-  anything a diff can't express. `omlx-uplift dev patches --scope both`
-  lists what is folded in.
-- **Run arbitrary source, not just releases.** Track any ref — your
-  fork's PR head, `upstream/main`, a bisect point — with
-  `omlx-uplift dev bootstrap --sync-ref upstream/main` and
-  `dev status --fetch` to see drift. Useful for testing an upstream PR
-  locally before it merges.
-- **Auto-build (DEV-11).** With the toggle on (dashboard PATCHES → dev
-  card, or `omlx-uplift dev auto-build on`) the tracked base commit is
-  remembered; when the service boots on an older base it rebuilds the
-  keg in the background, so a morning boot picks up pushed commits. Any
-  manual rollback or base-pin turns it OFF — your control wins.
-- **Keg stash and instant switching (U19).** `dev stash-keg` freezes the
+  branch: new files, docs edits, test changes, kernel work.
+  `omlx-uplift dev patches --scope both` lists what is folded in.
+- **Arbitrary source, not just releases.** Track any ref (a PR head,
+  `upstream/main`, a bisect point) with `dev bootstrap --sync-ref REF`
+  and `dev status --fetch` to see drift.
+- **Auto-build.** With the toggle on (PATCHES dev card, or
+  `omlx-uplift dev auto-build on`) the tracked base commit is remembered;
+  when the service boots on an older base it rebuilds the keg in the
+  background. Any manual rollback or base-pin turns it off.
+- **Keg stash and instant switching.** `dev stash-keg` freezes the
   current keg, `dev use <sha-prefix>` swaps between saved kegs in
-  seconds — bisect a regression or A/B two builds without rebuilds.
-  `dev rollback` returns to the last-known-good; `dev prune` trims old
-  stashes.
+  seconds. `dev rollback` returns to the last-known-good; `dev prune`
+  trims old stashes.
 - **Build options** the formula ships without: `dev install
   --with-custom-kernel --with-grammar`.
 
-Rules of thumb: stable driver + a few upstream-PR diffs → stay on
+Rules of thumb: stable driver plus a few upstream-PR diffs stays on
 `omlx` + hook mode. Reading, testing or developing omlx source, kernel
-or docs changes, PR-bisecting → `omlx-dev`. The two are independent
-services; you can run both. More detail (DEV-context decisions, scope
-model runtime/build/both): `omlx-uplift dev status` prints the live
-picture, and the PATCHES page surfaces the same state.
+or docs changes, PR-bisecting goes to `omlx-dev`. The two are independent
+services; you can run both. `omlx-uplift dev status` prints the live
+picture and the PATCHES page surfaces the same state.
