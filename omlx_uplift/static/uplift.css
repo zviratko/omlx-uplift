@@ -320,6 +320,12 @@ header.top .dd-menu a:hover, header.top .dd-menu a.active {
 .icon-btn:hover, select:hover { color: var(--bg); background: var(--ink); border-color: var(--ink); }
 select { color: var(--ink); }
 option { background: var(--card); color: var(--ink); }
+/* Checkboxes are touch targets, not decoration (user: "make the checkboxes
+   bigger, everywhere"). UA default is 13px; 18px with the UA box keeps the
+   tick crisp. Rows centre the tick against the setting name via
+   align-items/align-self — never resize by padding (it skews the box). */
+input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin: 0;
+    flex: 0 0 auto; accent-color: var(--ink); cursor: pointer; }
 
 /* Layout settings popover — framed rectangle, no shadow */
 .popover {
@@ -641,9 +647,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-btn:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .se-btn:disabled { border-color: var(--edge); color: var(--dim); cursor: default; }
 .se-btn:disabled:hover { background: transparent; color: var(--dim); }
-.se-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,110px) 220px;
+.se-row { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(120px,220px);
     align-items: center; gap: 8px;
     font: 300 12px/1.4 var(--mono); margin-bottom: 6px; }
+/* the pair grid collapses to one column before cells get narrower than a
+   control (220px) plus a readable label; below that the 1fr name track
+   starves to 0px at small viewports (scoped to the editor modal — .pair is
+   also used by the status/usage tiles) */
+.modal.editor .pair { grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr)); }
 /* the |original| chip is narrower so name labels ("Enable Thinking") fit */
 .se-row .diff-out { margin-left: 0; gap: 4px; }
 .se-row .diff-out .diff-o { max-width: 68px; }
@@ -653,15 +664,21 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .se-ctl { display: flex; justify-content: flex-end; min-width: 0; }
 /* U1: 130px controls truncated option text ("Using model default (on)") —
-   controls are wider now; the long-label column got its room from U1 modal */
-.se-row input, .se-row select { width: 220px; min-width: 0; }
-.se-row input[type=checkbox] { width: auto; }
+   controls are wider now; the long-label column got its room from U1 modal.
+   The control column shrinks (minmax, not fixed 220px): inside the .se-row2
+   pair box a fixed 220px starved the label column to 0px — 'Lightning MTP
+   layout broken' (user) */
+.se-row input, .se-row select { width: 100%; min-width: 0; }
+.se-row input[type=checkbox] { width: 18px; height: 18px; flex: 0 0 auto; }
 .se-row .se-hint { grid-column: 1 / -1; }
 .se-row textarea { grid-column: 1 / -1; width: 100%; }
 .se-slot { display: flex; justify-content: flex-end; min-width: 0; }
 .se-slot .diff-out { margin-left: 0; }
-/* checkbox hugs its description: label wraps it inline left-aligned */
-.se-row:has(input[type=checkbox]) { grid-template-columns: minmax(0,1fr) 150px auto; }
+/* checkbox hugs its description: label wraps it inline left-aligned.
+   The old fixed 150px diff slot left the name column ~0px inside the pair
+   grid and floated the tick far from short names — track is auto now, the
+   |original| chip takes only what it needs */
+.se-row:has(input[type=checkbox]) { grid-template-columns: minmax(0,1fr) auto auto; }
 .se-row:has(input[type=checkbox]) .se-ctl { justify-content: flex-start; }
 /* U2: guided-grammar pop-out editor — a roomy mono well for EBNF */
 .grammar-pop textarea { flex: 1; min-height: 58vh; width: 100%; resize: vertical;
@@ -694,10 +711,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-profile-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
     border: 1px solid var(--accent); padding: 7px 10px; margin: 8px 0;
     background: var(--field); }
-/* item 5/6: a toggle and its dependent control share one aligned row */
-.se-row2 { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px;
-    align-items: start; border: 1px solid var(--edge); padding: 6px 8px; }
-.se-row2 .se-row { border: none; padding: 0; }
+/* item 5/6: a toggle and its dependent control share one aligned row.
+   The box spans the FULL pair width with two even cells: the old 1fr/auto
+   tracks squeezed the checkbox cell to ~70px and its fixed 220px control
+   then starved the label to 0px ('Acceleration layout broken', user) */
+.se-row2 { display: grid; grid-column: 1 / -1;
+    grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
+    gap: 4px 14px; align-items: start; border: 1px solid var(--edge); padding: 6px 8px; }
+.se-row2 .se-row { border: none; padding: 0; min-width: 0; }
 /* item 8: engine-reload trigger badge. U41: on its own line under the name
    once names wrap — inline it read as a glitch box after short labels */
 .se-reload-badge { margin-left: 6px; font: 500 8px/1 var(--mono); letter-spacing: 0.08em;
@@ -1170,7 +1191,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     background: transparent; border: 1px solid var(--edge); color: var(--ink);
     border-radius: 0; height: 32px; padding: 0 8px; font: 400 12px/1 var(--mono); }
 .qz-form input:focus, .qz-form select:focus { outline: 1px solid var(--ink); }
-.qz-form input[type="checkbox"] { accent-color: var(--ink); width: 16px; margin: 8px 0; }
+.qz-form input[type="checkbox"] { margin: 8px 0; }
 .qz-est { grid-column: 1 / -1; font: 400 12px/1.4 var(--mono); padding-top: 4px; }
 /* R10-12: estimate and Start ride their own full-width row, Start flush right */
 .qz-form > .se-btn { grid-column: 1 / -1; justify-self: end; min-width: 140px; }
@@ -1241,8 +1262,8 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     gap: 8px; align-items: center; padding: 9px 6px;
     border-bottom: 1px solid var(--edge); }
 .diffslot { display: flex; justify-content: flex-end; min-width: 0; }
-.urow.settings .gctl input, .urow.settings .gctl select { width: 100%; min-width: 0; }
-.urow.settings .gctl input[type=checkbox] { width: auto; flex: 0 0 auto; }
+.urow.settings .gctl input:not([type=checkbox]), .urow.settings .gctl select { width: 100%; min-width: 0; }
+.urow.settings .gctl input[type=checkbox] { flex: 0 0 auto; }
 /* checkbox rows (user): the tick sits at the RIGHT edge, in the same value
    column as every other control, on the setting-NAME line. The old
    max-content label column crushed the control column to 0px whenever the
@@ -1411,8 +1432,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .urow.settings input:focus, .urow.settings select:focus { border-color: var(--ink); outline: none; }
 .urow.settings input:disabled, .urow.settings select:disabled {
     color: var(--ink); opacity: 0.55; background: var(--row2); }
-.urow.settings input[type=checkbox] { min-width: 0; width: 15px; height: 15px;
-    padding: 0; background: var(--field); accent-color: var(--ink); cursor: pointer; }
+.urow.settings input[type=checkbox] { min-width: 0; background: var(--field); }
 /* U9: control takes the wide value column — no fixed 150px well */
 .urow.settings .gctl { width: 100%; }
 .gs-dirs { display: flex; flex-direction: column; gap: 6px; width: 100%; }
@@ -1486,8 +1506,7 @@ label.se-row.pending-restart > .se-ctl > select {
 .mk-fields .field input[type="text"], .mk-fields .field input[type="number"],
 .mk-fields .field input[type="password"], .mk-fields .field input[type="url"],
 .mk-fields .field select { width: 100%; box-sizing: border-box; }
-.mk-fields .field input[type="checkbox"] { accent-color: var(--ink); width: 16px;
-    align-self: flex-start; margin: 2px 0; }
+.mk-fields .field input[type="checkbox"] { align-self: flex-start; margin: 2px 0; }
 .mk-row { display: flex; align-items: center; gap: 12px;
     border-top: 1px solid var(--rule); padding-top: 10px; }
 
