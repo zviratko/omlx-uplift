@@ -595,11 +595,106 @@ $('dd-theme-menu').addEventListener('click', e => {
     const a = e.target.closest('a.skin-entry');
     if (!a) return;
     e.preventDefault();
+    previewCommit(a.dataset.pick);
     prefs.theme = a.dataset.pick;
     C.savePrefs(localStorage, prefs); applyPrefs();
     $('dd-theme-menu').hidden = true;
     toast(C.t('uplift.toast.theme_set', {theme: prefs.theme}));
 });
+
+/* SPARK-3 — try-before-you-buy. Hover (or keyboard focus) a skin in the
+   picker and the board takes its look; leave without clicking and the
+   committed skin comes back. The whole point is that NOTHING persists:
+   prefs.theme stays the single source of truth, and the pre-paint cache key
+   'omlx-uplift-skin-dir' is written only by applyPrefs() (the commit path) —
+   a preview that wrote it would make a skin the user never chose survive a
+   reload. Iframes are deliberately left alone too: re-theming bench/chat on
+   every hover row is heavy and jarring, syncEmbedTheme() stays commit-only.
+   Charts are the expensive part, so the sweep is debounced and a re-tint
+   fires only when the resolved dir actually changes. */
+let previewDir = null;
+let previewTimer = 0;
+const PREVIEW_DEBOUNCE_MS = 150;
+
+function committedSkinDir() {
+    const skin = (typeof skinLookup === 'function') ? skinLookup(prefs.theme) : null;
+    return skin ? skin.dir : null;
+}
+function previewClear() {
+    if (!previewTimer) return;
+    clearTimeout(previewTimer); previewTimer = 0;
+}
+/* The look, minus every side effect the commit path owns. Mirrors the dir
+   decision in applyPrefs() for the skin case only: built-in theme names are
+   not previewed (hovering 'Day' is not "trying a skin"). */
+function previewShow(sel) {
+    previewClear();
+    const dir = (() => {
+        const skin = (typeof skinLookup === 'function') ? skinLookup(sel) : null;
+        return skin ? skin.dir : null;
+    })();
+    // Hovering the COMMITTED entry must end an active preview (the user
+    // pointed their way back); built-in names are not previewable at all.
+    if (dir !== null && dir === committedSkinDir()) { previewEnd(); return; }
+    if (dir === null || dir === previewDir) { previewClear(); return; }
+    previewDir = dir;
+    document.documentElement.dataset.theme = dir;
+    applySkinCss(dir);
+    // theme.css is ETag-cached, so an already-loaded skin is live the moment
+    // the link resolves; a FIRST load is async and its tokens are not in
+    // computed style yet. Re-tint when the sheet is provably live, else the
+    // first hover of an unseen skin would paint charts in the old palette.
+    const href = `${API}/uplift/api/skins/${encodeURIComponent(dir)}/theme.css`;
+    const link = document.getElementById('uplift-skin-css');
+    const repaint = () => { if (previewDir === dir) CH.rerenderChartsTheme(); };
+    if (!link || link.getAttribute('href') !== href) CH.rerenderChartsTheme();
+    else if (link.sheet) repaint();
+    else {
+        link.addEventListener('load', repaint, { once: true });
+        link.addEventListener('error', repaint, { once: true });
+    }
+}
+function previewHover(sel) {
+    previewClear();
+    previewTimer = setTimeout(() => { previewTimer = 0; previewShow(sel); },
+        PREVIEW_DEBOUNCE_MS);
+}
+/* Back to the committed look. Called when the menu closes without a click,
+   and on pointer-out with no other entry under the pointer. When the hover
+   DID become the click, the committed dir already equals the preview and
+   applyPrefs() has run — re-running it would rebuild every plot for nothing. */
+function previewEnd() {
+    previewClear();
+    if (previewDir === null) return;
+    const was = previewDir;
+    previewDir = null;
+    if (committedSkinDir() === was) return;
+    applyPrefs();
+}
+function previewCommit() {
+    // a click commits: drop any pending debounce so it cannot fire previewShow
+    // after the menu closed, and let previewEnd() see committed == previewed
+    previewClear();
+}
+{
+    const menu = $('dd-theme-menu');
+    // pointerType gate: touch has no hover, and a tap already commits via the
+    // click handler — previewing on tap would only add a flash.
+    menu.addEventListener('pointerover', e => {
+        if (e.pointerType && e.pointerType !== 'mouse') return;
+        const a = e.target.closest('a.skin-entry');
+        if (a) previewHover(a.dataset.pick);
+    });
+    menu.addEventListener('pointerleave', () => previewEnd());
+    menu.addEventListener('focusin', e => {
+        const a = e.target.closest('a.skin-entry');
+        if (a) previewShow(a.dataset.pick);      // keyboard: show now, no debounce
+    });
+    // the menu is hidden from several places (commit, mouseleave timer, toggle,
+    // click-outside); watch the attribute instead of hooking each caller
+    new MutationObserver(() => { if (menu.hidden) previewEnd(); })
+        .observe(menu, { attributes: true, attributeFilter: ['hidden'] });
+}
 function applySkinCss(dir) {
     let link = document.getElementById('uplift-skin-css');
     if (!dir) { if (link) link.remove(); return; }
