@@ -1,22 +1,27 @@
 # Uplift skin crate — "CAAAAATZ!" (user-approved theme: cats, overloaded).
 # Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
 #
-# SPARK-5: cats on every surface a CSS-only crate can reach — all four icon
-# slots are cats, cats peek over card corners, paws walk the feed, a cat
-# naps on every badge, a paw cursor grabs the drag handle, and one cat bats
-# at the foot of every chart card. ZERO engine code: tokens + inline SVG
-# icons + overlay CSS + emoji content, nothing else.
-# The palette triad is in-franchise first (purr-green / slow-blink amber /
-# hiss red), the rest hangs off it.
+# SPARK-5, second pass. The first pass drew cats at their literal render size
+# and used emoji for the scene cats; the user rejected the icons as crude, so
+# every mark here is hand-drawn line art authored to the box it actually
+# renders in (logo-dot 10px, caret 12px, close 18px, grip 16x10, scenes
+# 11-24px) — one closed silhouette each, two or three features maximum.
 #
-# Honest limits of a pure skin (logged in the ticket, not hacked around):
-# uPlot paints axes AND data into <canvas>, so no cat can enter the plot
-# from CSS — the begging cat sits at the card's bottom edge and paws the
-# DOM legend row labels instead. A cat-shaped point glyph or confetti would
-# need engine callbacks; those are logged there as future generic hooks.
-# No webfont bundled: no license-verified cat letterform was FOUND (skill
-# rule), so the playful read comes from a rounded system stack via --sans.
+# Bespoke AND moving, with ZERO engine change: every mark ships in two cuts,
+# still and self-animating (declarative CSS inside the SVG, which does run in
+# the no-script background-image context — verified, not assumed). The
+# overlay mounts the still cut, and the [data-motion] block swaps in the
+# animated one, so the motion switch returns a still drawing rather than an
+# animation frozen mid-blink. Resource URLs stay RELATIVE (res/icons/...) so
+# the crate works as a user dir and as a .bundled-<name>-<stamp> copy alike.
 #
+# Honest limit, unchanged: uPlot paints axes AND data into <canvas>, so no cat
+# can enter the plot from CSS. The begging cat sits at the card's foot and
+# bats at the DOM legend instead. Canvas glyphs/confetti would need engine
+# callbacks — logged in the ticket as future generic hooks, not hacked here.
+#
+# No webfont bundled: no license-verified cat letterform was found (skill
+# rule); the rounded read comes from the --sans system stack.
 # "CAAAAATZ!" is an original yowl, not a quotation from any franchise.
 skin_version: 1
 label: "CAAAAATZ!"
@@ -48,33 +53,42 @@ tokens:
   hdr-weight: "700"
   sans: "ui-rounded, 'Avenir Next Rounded', 'Trebuchet MS', system-ui, sans-serif"
 
+# Line-art marks. caret/close/logo-dot/grip are the four basenames the engine
+# turns into --icon-* variables (the still cut); the '-motion' files and the
+# four scene cats are servable resources the overlay mounts by relative path.
 icons:
-  caret.svg: |-
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 10">
-    <path d="M0 0h12L6 8z" fill="#ff6f61"/>
-    <path d="M1.5 0l1.6 2.2M10.5 0L8.9 2.2" stroke="#ff6f61" stroke-width="1.1"/>
-    </svg>
-  close.svg: |-
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
-    <path d="M2.5 2.5l9 9M11.5 2.5l-9 9" stroke="#ff6f61" stroke-width="2.6" stroke-linecap="round"/>
-    </svg>
   logo-dot.svg: |-
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
-    <circle cx="6" cy="6" r="6" fill="#1b1417"/>
-    <path d="M2.6 4.4 3.3 1.9 5 3.7M9.4 4.4 8.7 1.9 7 3.7" fill="#e9c9cf"/>
-    <circle cx="6" cy="6.7" r="3.3" fill="#e9c9cf"/>
-    <circle cx="4.8" cy="6.3" r="0.65" fill="#221a1e"/>
-    <circle cx="7.2" cy="6.3" r="0.65" fill="#221a1e"/>
-    <path d="M6 7.5l-.7.7M6 7.5l.7.7" stroke="#ff6f61" stroke-width="0.6"/>
-    </svg>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 15"> <ellipse cx="8" cy="8.9" rx="5.9" ry="5.1" fill="none" stroke="#e9c9cf" stroke-width="1.1"/> <path d="M3.5 5.9 3 2.3 5.9 3.7" fill="none" stroke="#e9c9cf" stroke-width="1.1" stroke-linejoin="round"/> <path d="M12.5 5.9 13 2.3 10.1 3.7" fill="none" stroke="#e9c9cf" stroke-width="1.1" stroke-linejoin="round"/> <g class="eyes"> <circle cx="6" cy="8.2" r=".9" fill="#79c76a"/> <circle cx="10" cy="8.2" r=".9" fill="#79c76a"/> </g> <path d="M8 10.1c.6 0 1 .35 1 .75s-.5.65-1 .65-1-.25-1-.65.4-.75 1-.75Z" fill="#ff6f61"/> <g stroke="#e9c9cf" stroke-width=".5" opacity=".5" stroke-linecap="round"> <path d="M1.3 9.2h1.9M1.7 10.9l1.7-.5M14.7 9.2h-1.9M14.3 10.9l-1.7-.5"/> </g></svg>
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 16"> <path class="ear-l" d="M3.6 2.6 5.6 1l1.3 1.8" fill="none" stroke="#ff6f61" stroke-width="1.2" stroke-linecap="round"/> <path class="ear-r" d="M16.4 2.6 14.4 1l-1.3 1.8" fill="none" stroke="#ff6f61" stroke-width="1.2" stroke-linecap="round"/> <path d="M2.6 4.6h14.8L10 14Z" fill="none" stroke="#ff6f61" stroke-width="1.2" stroke-linejoin="round"/></svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"> <g fill="none" stroke="#ff6f61" stroke-width="1.5" stroke-linecap="round"> <path d="M4.4 4.4 15.6 15.6"/> <path d="M15.6 4.4 4.4 15.6"/> <path d="M8.1 3.4c2 3.6 4 7.6 5.4 11.8" opacity=".55"/> <path d="M12 3.5c-1.9 3.5-3.7 7.4-4.9 11.5" opacity=".55"/> </g></svg>
   grip.svg: |-
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 12">
-      <path d="M1 2h18M1 5h18" stroke="#7a5766" stroke-width="1.3"/>
-      <path d="M6.2 9 6.7 5.6 8.3 7.3M13.8 9l-.5-3.4L11.7 7.3" fill="#e9c9cf"/>
-      <ellipse cx="10" cy="9" rx="4" ry="2.8" fill="#e9c9cf"/>
-      <circle cx="8.6" cy="8.6" r="0.6" fill="#221a1e"/>
-      <circle cx="11.4" cy="8.6" r="0.6" fill="#221a1e"/>
-    </svg>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 11"> <path d="M5.4 8.9c0-1.9 1.3-3.1 2.9-3.1s2.9 1.2 2.9 3.1c0 1-.9 1.6-2.9 1.6s-2.9-.6-2.9-1.6Z" fill="none" stroke="#ff6f61" stroke-width="1.1"/> <g fill="#ff6f61"> <circle cx="3.5" cy="4.1" r="1.35"/> <circle cx="8.2" cy="2.7" r="1.45"/> <circle cx="12.6" cy="4" r="1.35"/> </g></svg>
+  logo-dot-motion.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 15"> <style>.eyes{transform-box:fill-box;transform-origin:50% 50%; animation:blink 5.4s ease-in-out infinite} @keyframes blink{0%,82%,100%{transform:scaleY(1)}87%,91%{transform:scaleY(.1)}} </style> <ellipse cx="8" cy="8.9" rx="5.9" ry="5.1" fill="none" stroke="#e9c9cf" stroke-width="1.1"/> <path d="M3.5 5.9 3 2.3 5.9 3.7" fill="none" stroke="#e9c9cf" stroke-width="1.1" stroke-linejoin="round"/> <path d="M12.5 5.9 13 2.3 10.1 3.7" fill="none" stroke="#e9c9cf" stroke-width="1.1" stroke-linejoin="round"/> <g class="eyes"> <circle cx="6" cy="8.2" r=".9" fill="#79c76a"/> <circle cx="10" cy="8.2" r=".9" fill="#79c76a"/> </g> <path d="M8 10.1c.6 0 1 .35 1 .75s-.5.65-1 .65-1-.25-1-.65.4-.75 1-.75Z" fill="#ff6f61"/> <g stroke="#e9c9cf" stroke-width=".5" opacity=".5" stroke-linecap="round"> <path d="M1.3 9.2h1.9M1.7 10.9l1.7-.5M14.7 9.2h-1.9M14.3 10.9l-1.7-.5"/> </g></svg>
+  caret-motion.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 16"> <style> .ear-r { transform-box: fill-box; transform-origin: 15% 100%; animation: flick 4.6s ease-in-out infinite; } @keyframes flick { 0%, 76%, 100% { transform: rotate(0deg); } 82% { transform: rotate(-26deg); } 88% { transform: rotate(8deg); } 94% { transform: rotate(0deg); } } </style> <path class="ear-l" d="M3.6 2.6 5.6 1l1.3 1.8" fill="none" stroke="#ff6f61" stroke-width="1.2" stroke-linecap="round"/> <path class="ear-r" d="M16.4 2.6 14.4 1l-1.3 1.8" fill="none" stroke="#ff6f61" stroke-width="1.2" stroke-linecap="round"/> <path d="M2.6 4.6h14.8L10 14Z" fill="none" stroke="#ff6f61" stroke-width="1.2" stroke-linejoin="round"/> </svg>
+  close-motion.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"> <style>g{animation:swipe 5.2s ease-in-out infinite} @keyframes swipe{0%,72%,100%{transform:translate(0,0);opacity:1} 79%{transform:translate(-1.4px,1.2px);opacity:.7} 87%{transform:translate(.4px,-.3px);opacity:1}}</style> <g fill="none" stroke="#ff6f61" stroke-width="1.5" stroke-linecap="round"> <path d="M4.4 4.4 15.6 15.6"/> <path d="M15.6 4.4 4.4 15.6"/> <path d="M8.1 3.4c2 3.6 4 7.6 5.4 11.8" opacity=".55"/> <path d="M12 3.5c-1.9 3.5-3.7 7.4-4.9 11.5" opacity=".55"/> </g></svg>
+  grip-motion.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 11"> <style> g { transform-box: fill-box; transform-origin: 50% 100%; animation: flex 3.4s ease-in-out infinite; } @keyframes flex { 0%, 70%, 100% { transform: translateY(0); } 78% { transform: translateY(-0.9px); } 86% { transform: translateY(0); } } </style> <path d="M5.4 8.9c0-1.9 1.3-3.1 2.9-3.1s2.9 1.2 2.9 3.1c0 1-.9 1.6-2.9 1.6s-2.9-.6-2.9-1.6Z" fill="none" stroke="#ff6f61" stroke-width="1.1"/> <g fill="#ff6f61"> <circle cx="3.5" cy="4.1" r="1.35"/> <circle cx="8.2" cy="2.7" r="1.45"/> <circle cx="12.6" cy="4" r="1.35"/> </g> </svg>
+  peek-motion.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 14"> <style>g{animation:bob 7.5s ease-in-out infinite} @keyframes bob{0%,58%,100%{transform:translateY(4.4px)} 66%,86%{transform:translateY(0)}74%{transform:translateY(1.2px)}}</style> <g> <path d="M3.2 5.2 2.7 1.4 6 3" fill="none" stroke="#e9c9cf" stroke-width="1.3" stroke-linejoin="round"/> <path d="M18.8 5.2 19.3 1.4 16 3" fill="none" stroke="#e9c9cf" stroke-width="1.3" stroke-linejoin="round"/> <ellipse cx="11" cy="8.6" rx="7.2" ry="5.6" fill="none" stroke="#e9c9cf" stroke-width="1.3"/> <circle cx="8.3" cy="8" r="1" fill="#79c76a"/> <circle cx="13.7" cy="8" r="1" fill="#79c76a"/> <path d="M11 10.2c.75 0 1.25.4 1.25.85s-.55.75-1.25.75-1.25-.3-1.25-.75S10.25 10.2 11 10.2Z" fill="#ff6f61"/></g></svg>
+  beg-motion.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 22"> <style>.arm{transform-box:fill-box;transform-origin:92% 92%; animation:bat 3.2s ease-in-out infinite} @keyframes bat{0%,52%,100%{transform:rotate(0)}62%{transform:rotate(-15deg)} 74%{transform:rotate(6deg)}86%{transform:rotate(-5deg)}}</style> <path d="M19.6 18.6c2.6 1 5.2 1 7-.4" fill="none" stroke="#e9c9cf" stroke-width="1.5" stroke-linecap="round"/> <path d="M8 19.4c-.4-6.2 2.4-10.8 6.6-10.8s6.4 4.6 6 10.8Z" fill="none" stroke="#e9c9cf" stroke-width="1.5"/> <path class="arm" d="M9.4 15.6C7.4 13.8 6.6 11.2 7.2 8.6" fill="none" stroke="#e9c9cf" stroke-width="1.6" stroke-linecap="round"/> <circle cx="7.3" cy="8" r="1.5" fill="none" stroke="#e9c9cf" stroke-width="1.3"/> <path d="M11.8 9 11.2 5.2l3.4 1.9M19 9l.6-3.8-3.4 1.9" fill="none" stroke="#e9c9cf" stroke-width="1.4" stroke-linejoin="round"/> <ellipse cx="15.4" cy="9.6" rx="4.2" ry="3.5" fill="none" stroke="#e9c9cf" stroke-width="1.4"/> <circle cx="13.8" cy="9" r=".95" fill="#79c76a"/> <circle cx="17" cy="9" r=".95" fill="#79c76a"/> <path d="M15.4 11c.75 0 1.3.4 1.3.95s-.6.95-1.3.95-1.3-.4-1.3-.95.55-.95 1.3-.95Z" fill="#ff6f61"/></svg>
+  nap-motion.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 15"> <style>g{transform-box:fill-box;transform-origin:50% 100%; animation:breathe 4.8s ease-in-out infinite} @keyframes breathe{0%,100%{transform:scale(1,1)}50%{transform:scale(1.012,1.05)}}</style> <g> <path d="M4.8 7.2 3.9 3.9 7 5.3" fill="none" stroke="#e9c9cf" stroke-width="1.2" stroke-linejoin="round"/> <path d="M10.4 6.4 11.3 3.3 13.4 5.6" fill="none" stroke="#e9c9cf" stroke-width="1.2" stroke-linejoin="round"/> <path d="M2.2 11.4c0-3.6 3.2-6.2 8-6.2 5.4 0 9.2 2.4 9.6 5.8.2 1.8-1.2 3.4-3.6 4.2-3.6 1.2-9.6 1-12.4-.6-1-.6-1.6-1.7-1.6-3.2Z" fill="none" stroke="#e9c9cf" stroke-width="1.3"/> <path d="M6.2 14.2c3.4 1 7.6.8 10.6-.6" fill="none" stroke="#e9c9cf" stroke-width="1.2" stroke-linecap="round"/> <path d="M4.6 9.6c.6.7 1.6.7 2.2 0M7.6 9.4c.5.6 1.3.6 1.8 0" fill="none" stroke="#e9c9cf" stroke-width=".85" stroke-linecap="round"/> <circle cx="6.3" cy="11.4" r=".7" fill="#ff6f61"/></g></svg>
+  paw-motion.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 13"><style>.p1,.p2{transform-box:fill-box;transform-origin:50% 50%;}.p1{animation:step 1.9s ease-in-out infinite}.p2{animation:step 1.9s ease-in-out infinite .5s}@keyframes step{0%,100%{opacity:.45;transform:translateY(0)}25%{opacity:1;transform:translateY(-1.6px)}55%{opacity:.45}}</style><g class="p1" transform="translate(0 2) scale(0.78)"> <path d="M4.6 8.2c0-1.7 1.2-2.8 2.6-2.8s2.6 1.1 2.6 2.8c0 .9-.8 1.5-2.6 1.5S4.6 9.1 4.6 8.2Z" fill="none" stroke="#ff6f61" stroke-width="1.1"/> <g fill="#ff6f61"> <circle cx="3" cy="4" r="1.2"/><circle cx="7.1" cy="2.7" r="1.3"/><circle cx="11.1" cy="3.9" r="1.2"/> </g> </g><g class="p2" transform="translate(13 0) scale(0.62)"> <path d="M4.6 8.2c0-1.7 1.2-2.8 2.6-2.8s2.6 1.1 2.6 2.8c0 .9-.8 1.5-2.6 1.5S4.6 9.1 4.6 8.2Z" fill="none" stroke="#ff6f61" stroke-width="1.1"/> <g fill="#ff6f61"> <circle cx="3" cy="4" r="1.2"/><circle cx="7.1" cy="2.7" r="1.3"/><circle cx="11.1" cy="3.9" r="1.2"/> </g> </g></svg>
+  peek.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 14"> <path d="M3.2 5.2 2.7 1.4 6 3" fill="none" stroke="#e9c9cf" stroke-width="1.3" stroke-linejoin="round"/> <path d="M18.8 5.2 19.3 1.4 16 3" fill="none" stroke="#e9c9cf" stroke-width="1.3" stroke-linejoin="round"/> <ellipse cx="11" cy="8.6" rx="7.2" ry="5.6" fill="none" stroke="#e9c9cf" stroke-width="1.3"/> <circle cx="8.3" cy="8" r="1" fill="#79c76a"/> <circle cx="13.7" cy="8" r="1" fill="#79c76a"/> <path d="M11 10.2c.75 0 1.25.4 1.25.85s-.55.75-1.25.75-1.25-.3-1.25-.75S10.25 10.2 11 10.2Z" fill="#ff6f61"/></svg>
+  beg.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 22"> <path d="M19.6 18.6c2.6 1 5.2 1 7-.4" fill="none" stroke="#e9c9cf" stroke-width="1.5" stroke-linecap="round"/> <path d="M8 19.4c-.4-6.2 2.4-10.8 6.6-10.8s6.4 4.6 6 10.8Z" fill="none" stroke="#e9c9cf" stroke-width="1.5"/> <path class="arm" d="M9.4 15.6C7.4 13.8 6.6 11.2 7.2 8.6" fill="none" stroke="#e9c9cf" stroke-width="1.6" stroke-linecap="round"/> <circle cx="7.3" cy="8" r="1.5" fill="none" stroke="#e9c9cf" stroke-width="1.3"/> <path d="M11.8 9 11.2 5.2l3.4 1.9M19 9l.6-3.8-3.4 1.9" fill="none" stroke="#e9c9cf" stroke-width="1.4" stroke-linejoin="round"/> <ellipse cx="15.4" cy="9.6" rx="4.2" ry="3.5" fill="none" stroke="#e9c9cf" stroke-width="1.4"/> <circle cx="13.8" cy="9" r=".95" fill="#79c76a"/> <circle cx="17" cy="9" r=".95" fill="#79c76a"/> <path d="M15.4 11c.75 0 1.3.4 1.3.95s-.6.95-1.3.95-1.3-.4-1.3-.95.55-.95 1.3-.95Z" fill="#ff6f61"/></svg>
+  nap.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 15"> <path d="M4.8 7.2 3.9 3.9 7 5.3" fill="none" stroke="#e9c9cf" stroke-width="1.2" stroke-linejoin="round"/> <path d="M10.4 6.4 11.3 3.3 13.4 5.6" fill="none" stroke="#e9c9cf" stroke-width="1.2" stroke-linejoin="round"/> <path d="M2.2 11.4c0-3.6 3.2-6.2 8-6.2 5.4 0 9.2 2.4 9.6 5.8.2 1.8-1.2 3.4-3.6 4.2-3.6 1.2-9.6 1-12.4-.6-1-.6-1.6-1.7-1.6-3.2Z" fill="none" stroke="#e9c9cf" stroke-width="1.3"/> <path d="M6.2 14.2c3.4 1 7.6.8 10.6-.6" fill="none" stroke="#e9c9cf" stroke-width="1.2" stroke-linecap="round"/> <path d="M4.6 9.6c.6.7 1.6.7 2.2 0M7.6 9.4c.5.6 1.3.6 1.8 0" fill="none" stroke="#e9c9cf" stroke-width=".85" stroke-linecap="round"/> <circle cx="6.3" cy="11.4" r=".7" fill="#ff6f61"/></svg>
+  paw.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 13"><g class="p1" transform="translate(0 2) scale(0.78)"> <path d="M4.6 8.2c0-1.7 1.2-2.8 2.6-2.8s2.6 1.1 2.6 2.8c0 .9-.8 1.5-2.6 1.5S4.6 9.1 4.6 8.2Z" fill="none" stroke="#ff6f61" stroke-width="1.1"/> <g fill="#ff6f61"> <circle cx="3" cy="4" r="1.2"/><circle cx="7.1" cy="2.7" r="1.3"/><circle cx="11.1" cy="3.9" r="1.2"/> </g> </g><g class="p2" transform="translate(13 0) scale(0.62)"> <path d="M4.6 8.2c0-1.7 1.2-2.8 2.6-2.8s2.6 1.1 2.6 2.8c0 .9-.8 1.5-2.6 1.5S4.6 9.1 4.6 8.2Z" fill="none" stroke="#ff6f61" stroke-width="1.1"/> <g fill="#ff6f61"> <circle cx="3" cy="4" r="1.2"/><circle cx="7.1" cy="2.7" r="1.3"/><circle cx="11.1" cy="3.9" r="1.2"/> </g> </g></svg>
 
 css: |-
   html { color-scheme: dark; }
@@ -101,75 +115,78 @@ css: |-
       color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .08em;
   }
 
-  /* --- CATS EVERYWHERE (CSS-reachable surfaces, emoji content) ---------
-     1. a cat peeks over the top-right corner of every card. It rides the
-        border line (mostly ABOVE the card box) so it never covers the h2
-        timespan chips; pointer-events: none so it can never block a click. */
+  /* --- THE CATS: hand-drawn line art, one closed silhouette each. -------
+     Every mark is an SVG file the crate ships in two cuts: still, and
+     self-animating. Below, the still cut is mounted; the motion block swaps
+     the artwork. Nothing in this overlay animates on its own. */
+
+  /* the lamp is a line-art face, so the base disc must not paint behind it
+     (specificity matches the base 'header.top .logo .dot' rule and this sheet
+     loads after uplift.css, so it wins on order). .bad keeps its red ground —
+     an ill server should still read red through the whiskers. */
+  header.top .logo .dot { background: transparent; }
+  header.top .logo .dot.bad { background: var(--bad); }
+
+  /* a cat peeks over the top edge of every card; it rides the border so it
+     never covers the h2 chips, and pointer-events:none so it never eats a
+     click meant for a timespan button */
   .card::before {
-      content: "🐈"; position: absolute; top: -9px; right: 8px;
-      font-size: 13px; line-height: 1; pointer-events: none; z-index: 1;
+      content: ""; position: absolute; top: -7px; right: 10px;
+      width: 22px; height: 15px; pointer-events: none; z-index: 1;
+      background: url('res/icons/peek.svg') center/contain no-repeat;
   }
-  /* 2. paw prints leading every feed row (inline flex child, no shift) */
+  /* paw stride leading every feed row (flex child, no wrap risk) */
   .feed-item::before {
-      content: "🐾"; font-size: 9px; line-height: 1.6; opacity: .55;
-      flex: 0 0 auto;
+      content: ""; flex: 0 0 auto; align-self: center;
+      width: 13px; height: 7px; opacity: .6;
+      background: url('res/icons/paw.svg') center/contain no-repeat;
   }
-  /* 3. a cat naps on the corner of every status badge */
+  /* a cat naps on the corner of every status badge */
   .badge { position: relative; }
   .badge::after {
-      content: "😽"; position: absolute; right: -6px; top: -7px;
-      font-size: 9px; line-height: 1; opacity: .85;
+      content: ""; position: absolute; right: -8px; top: -8px;
+      width: 13px; height: 9px; opacity: .85; pointer-events: none;
+      background: url('res/icons/nap.svg') center/contain no-repeat;
   }
-  /* 4. the grip icon is already a cat snatching the hatch (--icon-grip);
-        a tiny paw cursor sells the drag handle (SVG data-URI kept small;
-        where SVG cursors are unsupported the fallback grab still works) */
-  body.layout-editing .card-handle {
-      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Cg fill='%23e9c9cf'%3E%3Cellipse cx='7' cy='9.6' rx='3.4' ry='2.6'/%3E%3Ccircle cx='2.8' cy='5.4' r='1.6'/%3E%3Ccircle cx='7' cy='3.6' r='1.6'/%3E%3Ccircle cx='11.2' cy='5.4' r='1.6'/%3E%3C/g%3E%3C/svg%3E") 7 8, grab;
-  }
-  /* 5. "Pleading graphs", honestly: the plot itself is canvas and out of
-        CSS reach, so a cat sits at the bottom edge of every chart card
-        looking up into it and bats at whatever dangles there. */
+  /* "Pleading graphs", honestly: uPlot paints the plot into <canvas>, which
+     no CSS can reach, so the cat sits at the card's foot and bats at the
+     legend instead — the legend IS DOM (u-legend), so that part is real */
   .card:has(.chart-box)::after {
-      content: "🐱"; position: absolute; left: 50%; bottom: 1px;
-      margin-left: -9px; font-size: 15px; line-height: 1;
-      pointer-events: none; z-index: 1;
+      content: ""; position: absolute; left: 50%; bottom: 1px;
+      width: 24px; height: 20px; margin-left: -12px; pointer-events: none;
+      z-index: 1; background: url('res/icons/beg.svg') center/contain no-repeat;
   }
-  /* 6. cats paw the DOM legend (u-legend is HTML, not canvas) */
-  .u-legend .u-label::before { content: "🐾 "; opacity: .6; }
+  .u-legend .u-label { position: relative; }
+  .u-legend .u-label::before {
+      content: ""; position: absolute; left: -12px; top: 50%;
+      width: 10px; height: 6px; margin-top: -3px; opacity: .5;
+      background: url('res/icons/paw.svg') center/contain no-repeat;
+  }
+  /* the grip icon is already a paw (engine --icon-grip); the cursor agrees */
+  body.layout-editing .card-handle {
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Cg fill='none' stroke='%23ff6f61' stroke-width='1.4'%3E%3Cpath d='M4.4 10.4c0-1.8 1.2-2.9 2.6-2.9s2.6 1.1 2.6 2.9c0 .9-.8 1.5-2.6 1.5s-2.6-.6-2.6-1.5Z'/%3E%3Ccircle cx='3' cy='5.2' r='1.3'/%3E%3Ccircle cx='7' cy='3.9' r='1.4'/%3E%3Ccircle cx='11' cy='5.1' r='1.3'/%3E%3C/g%3E%3C/svg%3E") 7 8, grab;
+  }
 
-  /* --- MOTION: peek, bat, slow blink — every use site gated. -----------
-     SPARK-2's validator flags animation/transition whose selector chain
-     does not test [data-motion]; all sites below are prefixed, so the
-     motion switch stops ALL of it and this crate ships motion-clean. */
-  :root:not([data-motion="off"]) .card::before {
-      animation: cat-peek 6.5s ease-in-out infinite;
+  /* --- MOTION ON: swap every cat to its animated cut. ------------------
+     Artwork swap, not a CSS animation, so 'motion off' is a still drawing
+     rather than a blink frozen halfway. Gated as a whole: one switch, all
+     twelve marks. */
+  :root:not([data-motion="off"]) [data-icon="logo-dot"]::after { background-image: url('res/icons/logo-dot-motion.svg'); }
+  :root:not([data-motion="off"]) [data-icon="caret"]::after { background-image: url('res/icons/caret-motion.svg'); }
+  :root:not([data-motion="off"]) [data-icon="close"]::after { background-image: url('res/icons/close-motion.svg'); }
+  :root:not([data-motion="off"]) .dash-tray-pill-content .hatch,
+  :root:not([data-motion="off"]) body.layout-editing .card-handle .hatch {
+      background: url('res/icons/grip-motion.svg') center/contain no-repeat;
   }
-  @keyframes cat-peek {
-      0%, 70%, 100% { transform: translateY(0); }
-      78%           { transform: translateY(3px) rotate(-6deg); }
-      86%           { transform: translateY(0) rotate(0); }
-  }
-  :root:not([data-motion="off"]) .card:has(.chart-box)::after {
-      animation: cat-bat 3.4s ease-in-out infinite;
-  }
-  @keyframes cat-bat {
-      0%, 60%, 100% { transform: translateY(0) rotate(0); }
-      70%           { transform: translateY(-3px) rotate(8deg); }
-      80%           { transform: translateY(0) rotate(-4deg); }
-  }
-  :root:not([data-motion="off"]) .badge::after {
-      animation: cat-blink 5.5s ease-in-out infinite;
-  }
-  @keyframes cat-blink {
-      0%, 86%, 100% { opacity: .85; }
-      91%           { opacity: .15; }   /* the slow blink */
-      96%           { opacity: .85; }
-  }
-  :root:not([data-motion="off"]) .card {
-      transition: border-color .18s linear;
-  }
+  :root:not([data-motion="off"]) .card::before { background-image: url('res/icons/peek-motion.svg'); }
+  :root:not([data-motion="off"]) .feed-item::before { background-image: url('res/icons/paw-motion.svg'); }
+  :root:not([data-motion="off"]) .badge::after { background-image: url('res/icons/nap-motion.svg'); }
+  :root:not([data-motion="off"]) .card:has(.chart-box)::after { background-image: url('res/icons/beg-motion.svg'); }
+  :root:not([data-motion="off"]) .u-legend .u-label::before { background-image: url('res/icons/paw-motion.svg'); }
+
+  /* hover is a state change, not decoration: gated, and short */
+  :root:not([data-motion="off"]) .card { transition: border-color .18s linear; }
   .card:hover { border-color: var(--accent); }
-  /* instrument bars in cat-toy stripes */
   .meter > div {
       background: repeating-linear-gradient(45deg,
           var(--chart-1) 0 4px, #3a2d34 4px 7px);

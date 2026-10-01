@@ -10,6 +10,7 @@ equality of resources.
 """
 import base64
 import os
+import re
 import time
 from pathlib import Path
 
@@ -373,6 +374,26 @@ def test_every_bundled_crate_is_motion_clean():
         if w:
             offenders[p.name] = w
     assert not offenders, offenders
+
+
+def test_bundled_crates_only_reference_resources_they_ship():
+    """A typo'd res/ path renders NOTHING — an invisible icon is not an error
+    anywhere in the pipeline, so the crate must be self-consistent by test."""
+    bad = {}
+    for p in sorted(skins.bundled_package_dir().glob("*.yml")):
+        crate, reason = skins.parse_crate(p.read_bytes())
+        assert crate is not None, f"{p.name}: {reason}"
+        shipped = set()
+        for subdir, mapping in (("icons", crate["icons"]), ("fonts", crate["fonts"])):
+            for res_name in mapping:
+                rel = skins._res_target(subdir, res_name)
+                if rel:
+                    shipped.add(rel)
+        refs = set(re.findall(r"url\(['\"]?res/([^'\")]+)['\"]?\)", crate["css"]))
+        missing = sorted(refs - shipped)
+        if missing:
+            bad[p.name] = missing
+    assert not bad, bad
 
 
 # ------------------------------------------------------------ classic map
