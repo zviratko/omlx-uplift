@@ -759,11 +759,6 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 @keyframes slide-in { from { opacity: 0; transform: translateX(-6px); } }
 .feed-item time { color: var(--dim); font: 400 10px/1.6 var(--mono); flex-shrink: 0; }
 .feed-item .ev { flex: 1; font-family: var(--mono); font-weight: 400; }
-.feed-item.k-restart .ev { color: var(--red); }
-.feed-item.k-model-add .ev { color: var(--ink); }
-.feed-item.k-model-remove .ev { color: var(--accent); }
-.feed-item.k-requests .ev { color: var(--dim); }
-.feed-item.k-pressure .ev { color: var(--accent); }
 [data-motion="off"] .feed-item { animation: none; }
 [data-motion="off"] .badge { animation: none; }
 
@@ -772,13 +767,6 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .heat i { aspect-ratio: 1; background: var(--grid); }
 .heat.multi i { aspect-ratio: auto; height: 9px; }
 .heat-legend { display: flex; gap: 10px; color: var(--dim); font: 300 10px/1.4 var(--mono); margin-top: 8px; }
-.usage-table { margin-top: 12px; font: 400 11px/1.5 var(--mono); }
-.usage-table .urow { display: grid; grid-template-columns: minmax(0,2fr) repeat(3, minmax(0,1fr));
-    gap: 8px; padding: 4px 2px; border-bottom: 1px solid var(--edge); }
-.usage-table .urow:last-child { border-bottom: 0; }
-.usage-table .urow.head { color: var(--dim); border-top: 1px solid var(--ink); }
-.usage-table .urow span:not(:first-child) { text-align: right; }
-.usage-table .uname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- Logs ---- */
 .logs { max-height: 300px; overflow: auto; scrollbar-width: thin;
@@ -924,8 +912,6 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-table .lsw-seg.present { color: var(--dim); cursor: pointer; min-width: 82px; }
 .admin-table .lsw-seg.present:hover { border-color: var(--accent); color: var(--accent); }
-.admin-table .lsw-pct { font: 400 9px/1 var(--mono); color: var(--accent);
-    align-self: center; margin-left: 5px; letter-spacing: 0.05em; }
 /* round 7 item 4: the count hangs BELOW the prune button as an out-of-flow
    subscript — the column is exactly button-height, so the button centres
    with the memory chip on the bar instead of riding above it */
@@ -1432,7 +1418,6 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .gs-dirs { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .gs-dir { display: flex; gap: 6px; }
 .gs-dir input { flex: 1; min-width: 0; }
-.warn-line { color: var(--accent); font-size: 11px; padding: 8px 6px; }
 
 /* MISSING state = caution amber (the one sanctioned secondary, same
    value as .spill.load), PRESENT = normal, EXTERNAL = dim */
@@ -1458,9 +1443,6 @@ label.se-row.pending-restart > .se-ctl > select {
     padding: 2px 5px; max-width: 110px; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; cursor: pointer; background: var(--row2); }
 .diff-out .diff-o:hover { color: var(--ink); border-color: var(--ink); }
-.diff-out .diff-n { border: 1px solid var(--accent); color: var(--accent);
-    padding: 2px 5px; max-width: 140px; overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; }
 /* section header carries the state of its rows: amber = unsaved edits,
    red = queued changes that need a RESTART SERVER */
 .gs-box-title { cursor: pointer; }
@@ -1497,7 +1479,6 @@ label.se-row.pending-restart > .se-ctl > select {
     border-bottom: 1px solid var(--rule); padding-bottom: 8px; }
 .mk-title { font: 500 12px/1 var(--sans); text-transform: uppercase;
     letter-spacing: 0.1em; flex: 1; }
-.mk-cfg { font: 400 11px/1.5 var(--mono); }
 /* integration fields: even grid, aligned controls */
 .mk-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
     gap: 12px 18px; }
@@ -1574,7 +1555,6 @@ label.se-row.pending-restart > .se-ctl > select {
 .se-kwarg .se-kwarg-key { flex: 1 1 0; min-width: 0; opacity: .75; font-style: italic; }
 .se-kwarg .se-btn { flex: 0 0 auto; }
 .row-editor .se-kwarg input, .row-editor .se-kwarg select { width: auto; }
-.row-editor .se-profiles { margin: 4px 0 8px; }
 .row-editor .se-prof-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .row-editor .se-prof-name { flex: 1; min-width: 120px; background: transparent;
     border: 1px solid var(--edge); color: var(--ink); padding: 2px 6px; font: inherit; }

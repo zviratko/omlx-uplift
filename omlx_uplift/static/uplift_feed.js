@@ -372,6 +372,12 @@ addEventListener('visibilitychange', () => {
         pollRequests();
     }
 });
+/* FEED-1: the periodic fallback poll (uplift_boot) asks this before
+   firing. Direct pollRequests() calls (cancel action, resume catch-up)
+   stay unconditional — an OPEN stream already replays the gap. */
+const sseOpen = () => !!(window.EventSource && sseSource
+    && sseSource.readyState === EventSource.OPEN);
+
 async function pollRequests() {
     if (document.hidden) return;   // R12-3: native route now exists
     try {
@@ -391,5 +397,6 @@ window.Uplift.feed = {
     pushFeed, reactTo, gateMilestones, celebrate, milestoneQuip,
     milestoneFloor: S.milestoneFloor,
     renderReqFeed, pollRequests, connectEventStream, pushServerEvent, upsertReq,
+    sseOpen,
 };
 })();

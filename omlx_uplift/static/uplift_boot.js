@@ -105,7 +105,7 @@ UUP.initUsageRange();   // seeds the range select now that glue helpers exist
 UUP.pollUsage(); UUP.pollLogs();
 FE.connectEventStream();
 setInterval(pollGatewayInfo, 10000);
-setInterval(() => { if (!document.hidden) FE.pollRequests(); }, 2000);
+setInterval(() => { if (!document.hidden && !FE.sseOpen()) FE.pollRequests(); }, 2000);  // FEED-1
 setInterval(() => { if (!document.hidden && !MM.seModel) MM.render(); }, 8000);
 setInterval(() => { if (!document.hidden && currentTab() === 'usage') UUP.pollUsage(); }, 15000);
 setInterval(() => { if (!document.hidden && currentTab() === 'logs' && UUP.logsFollow) UUP.pollLogs(); }, 5000);
