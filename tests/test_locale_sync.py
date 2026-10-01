@@ -68,3 +68,54 @@ def test_owned_key_sets_match_across_locales():
         other = _locale(lang)
         missing = owned_en - {k for k in other if k.startswith(OWNED_PREFIXES)}
         assert not missing, f"{lang}.json missing: {sorted(missing)}"
+
+
+# I18N-1 (SWEEP183 D1): the same gate in the OTHER direction, over the
+# whole uplift.* namespace, not just the owned prefixes. Extras can never
+# render (en is the fallback source of truth for what exists) — ja alone
+# carried 26 dead keys purged with this test. DYNAMIC EXCEPTION: keys are
+# assembled at runtime ('uplift.se.' + field key in modelmgr's seBind,
+# 'uplift.gs.' + dotted path + '.' + option value in gsys' gsLocalize),
+# so a literal-absent key is NOT proof of death. The closed reachable
+# sets are whitelisted here; new dynamic families must extend it — the
+# whitelist is deliberate, a grep over the corpus cannot see concatenation.
+DYNAMIC_REACHABLE = {
+    # uplift.se.<key> for the sampling-loop keys (uplift_modelmgr.js, the
+    # only seBind keys ABSENT from en.json — en falls through to the
+    # English literal; ja/ko translate them, legitimately)
+    "uplift.se.temperature", "uplift.se.top_p", "uplift.se.top_k",
+}
+DYNAMIC_REACHABLE_PREFIXES = (
+    # uplift.gs.<path>.<value> — gsLocalize translates every [value,label]
+    # option array (tiers, idle_opts, log levels) this way
+    "uplift.gs.res.tiers.", "uplift.gs.model.idle_opts.",
+    "uplift.gs.server.levels.",
+)
+
+
+def _statically_unreachable(k, corpus):
+    """D2: a key is dead only if neither its literal NOR its dynamic
+    builder pattern appears. 'uplift.se.temperature' is referenced as
+    'uplift.se.' + key — the prefix-with-quote forms prove the family is
+    assembled, per-file judgment stays with the whitelist above."""
+    return k not in corpus
+
+
+def test_no_uplift_keys_beyond_en():
+    en = _locale("en")
+    corpus = "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in sorted(STATIC.glob("*.js"))) + (STATIC / "index.html").read_text(
+        encoding="utf-8")
+    for lang in LOCALES_EXPECTED:
+        if lang == "en":
+            continue
+        other = _locale(lang)
+        extras = {k for k in other
+                  if k.startswith("uplift.") and k not in en
+                  and k not in DYNAMIC_REACHABLE
+                  and not k.startswith(DYNAMIC_REACHABLE_PREFIXES)
+                  and _statically_unreachable(k, corpus)}
+        assert not extras, (
+            f"{lang}.json carries uplift.* keys en.json does not have and "
+            f"no client reference reaches: {sorted(extras)}")
