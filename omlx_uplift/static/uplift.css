@@ -1114,8 +1114,23 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    "Cache Reasoning …" — the form now uses most of the viewport */
 .modal.nasa.editor { width: min(992px, 96vw); max-height: 92vh; }
 /* form sits left; a CHANGES side rail opens on the right when changes queue
-   (the modal widens, the form keeps its width at the left edge) */
-.modal.nasa.editor:has(.changelist.ed:not([hidden])) { width: min(1200px, 98vw); }
+   (the modal widens, the form keeps its width at the left edge).
+   No-jump rule (user): while the rail is hidden, reserve the width delta
+   (1200-992=208px) as a right margin so flex centering pins the LEFT edge
+   exactly where the widened modal will sit — the window never slides left
+   when the first change queues. Only meaningful while both widths fit the
+   viewport; below that the modal is nearly full-width and the delta is
+   harmless. */
+@media (min-width: 1232px) {
+    .modal.nasa.editor { margin-right: 208px; }
+}
+/* viewports too narrow for the 208px reservation: anchor the box to the
+   overlay's left padding instead of centring, so the widen grows rightward
+   and the left edge still never moves */
+@media (max-width: 1231px) {
+    .modal.nasa.editor { margin-right: auto; }
+}
+.modal.nasa.editor:has(.changelist.ed:not([hidden])) { width: min(1200px, 98vw); margin-right: 0; }
 .editor-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
 .editor-body .editor-scroll { flex: 0 1 964px; min-width: 0; }
 #se-changes.ed { flex: 0 0 320px; align-self: stretch; max-height: none;
