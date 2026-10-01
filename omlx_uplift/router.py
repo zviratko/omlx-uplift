@@ -1415,10 +1415,11 @@ async def patches_add(req: PatchAddRequest, is_admin: bool = Depends(require_adm
         if req.data is None:
             raise HTTPException(status_code=400, detail="upload needs 'data'")
         source["data"] = req.data.encode("utf-8")
-    res = patchsource.add_patch(patch_store(), req.id, source,
-                                _patch_tree_root(), order=req.order,
-                                reversal=req.reversal, scope=req.scope,
-                                build_root=patchsource.dev_build_root())
+    res = await asyncio.to_thread(
+        patchsource.add_patch, patch_store(), req.id, source,
+        _patch_tree_root(), order=req.order,
+        reversal=req.reversal, scope=req.scope,
+        build_root=patchsource.dev_build_root())
     if not res.get("ok") and res.get("stage") in ("fetch", "source"):
         raise HTTPException(status_code=422, detail=res.get("reason"))
     return res
@@ -1428,7 +1429,8 @@ async def patches_add(req: PatchAddRequest, is_admin: bool = Depends(require_adm
 async def patches_check(is_admin: bool = Depends(require_admin)):
     from . import patchsource
 
-    return patchsource.check_all(patch_store(), _patch_tree_root())
+    return await asyncio.to_thread(patchsource.check_all, patch_store(),
+                                   _patch_tree_root())
 
 
 @api_router.get("/patches/curated")
@@ -1437,7 +1439,7 @@ async def patches_curated(is_admin: bool = Depends(require_admin)):
     marked against what the local store already holds. Read-only."""
     from . import curated
 
-    res = curated.list_remote()
+    res = await asyncio.to_thread(curated.list_remote)
     store = patch_store()
     manifest = store.load()
     for tier in res["tiers"].values():
@@ -1458,8 +1460,9 @@ async def patches_curated(is_admin: bool = Depends(require_admin)):
 async def patches_curated_sync(is_admin: bool = Depends(require_admin)):
     from . import curated, patchsource
 
-    return curated.sync(patch_store(), _patch_tree_root(),
-                        build_root=patchsource.dev_build_root())
+    return await asyncio.to_thread(
+        curated.sync, patch_store(), _patch_tree_root(),
+        build_root=patchsource.dev_build_root())
 
 
 class PatchIdRequest(BaseModel):
@@ -2076,7 +2079,7 @@ async def dev_restart(is_admin: bool = Depends(require_admin)):
         ["sh", "-c", "sleep 2; brew services restart omlx-dev "
                      ">> /tmp/omlx-dev-restart.log 2>&1"],
         start_new_session=True)
-    out = _dev_status_sync()
+    out = await asyncio.to_thread(_dev_status_sync)
     out["ok"] = True
     out["restarting"] = True
     return out
