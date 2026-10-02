@@ -497,11 +497,17 @@ function gsText(sec, field, flat, L, extra) {
         inp.onchange = queueRange;
         return inp;
     }
-    const kind = extra.bool ? 'bool' : (extra.number ? 'number' : 'text');
+    // v1 DOM truth: a gsys 'number' field is a TEXT input whose value is
+    // Number()-converted on queue (one holds '100MB' — an HTML number
+    // input would eat it). Only extra.range becomes a real number input.
+    const kind = extra.bool ? 'bool' : 'text';
     const inp = window.UpliftWidgets.build(kind, {
         value: v, checked: !!v, type: extra.type, placeholder: extra.placeholder,
-        min: extra.min, max: extra.max, step: extra.step, list: extra.list,
     }).el;
+    // v1 set these unconditionally (inert on a text input, real on range)
+    if (extra.min !== undefined) inp.min = extra.min;
+    if (extra.max !== undefined) inp.max = extra.max;
+    if (extra.step !== undefined) inp.step = extra.step;
     if (extra.list) inp.setAttribute('list', extra.list);
     const queue = (ev) => {
         let val = inp.value;
