@@ -196,7 +196,10 @@ cd ~/git/omlx-uplift-repo && \
 PYTHONPATH=$HOME/hermes/TMP/pylibs:. /opt/homebrew/opt/omlx/libexec/bin/python \
     -m pytest tests -q            # ~540 tests, ~30 s
 
-node --check omlx_uplift/static/*.js && node --test tests/*.cjs
+for f in omlx_uplift/static/*.js; do node --check "$f"; done \
+    && node --test tests/*.cjs
+# (`node --check a.js b.js` validates ONLY the first argument — never
+#  trust the glob form; scripts/nightly-tests.sh loops for the same reason)
 ```
 
 `PYTHONPATH` must put the clone BEFORE the deployed keg copy, otherwise

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CI-2: nightly full-suite watcher for omlx-uplift (kocour only).
+     Zero LLM: plain shell nightly run of the test suites; result lines
+     land in ~/.omlx/uplift/reports/nightly.jsonl, last failure log next
+     to it. No laptop, no inference, no tokens.
+
+     INSTALL (user — launchd needs absolute paths; sed fills __HOME__):
+       mkdir -p ~/Library/LaunchAgents
+       sed "s|__HOME__|$HOME|g" scripts/launchd/sh.zviratko.uplift-nightly.plist \
+         > ~/Library/LaunchAgents/sh.zviratko.uplift-nightly.plist
+       launchctl load ~/Library/LaunchAgents/sh.zviratko.uplift-nightly.plist
+       launchctl print gui/$(id -u)/sh.zviratko.uplift-nightly | grep -A3 "next start"
+     REMOVE:
+       launchctl unload ~/Library/LaunchAgents/sh.zviratko.uplift-nightly.plist
+       rm ~/Library/LaunchAgents/sh.zviratko.uplift-nightly.plist
+     Re-install after repo moves: repeat INSTALL (load only re-reads on unload). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>sh.zviratko.uplift-nightly</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>__HOME__/git/omlx-uplift-repo/scripts/nightly-tests.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__HOME__/git/omlx-uplift-repo</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.omlx/uplift/reports/launchd.out</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.omlx/uplift/reports/launchd.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
