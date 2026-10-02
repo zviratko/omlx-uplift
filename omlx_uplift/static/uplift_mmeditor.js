@@ -130,45 +130,34 @@ function seUpdateSaveBtn() {
 /* CHANGES box above the editor buttons: yaml-style key: old -> key: new,
    including inherit flips for profile tabs and the expose/api lines */
 function renderEdChanges() {
+    /* FE-4: line FORMAT + box come from uplift_dirty.js (shared with the
+       global settings tab); the entries (inherit-snapshot orig resolution,
+       expose/api flips) stay here — this editor's state model. Canonical
+       rendering picks gsys's richer form (.ch-new accent half, secret old
+       side '•••', new side '••• CHANGED'). */
     const box = document.getElementById('se-changes'); if (!box) return;
     const t = seTab();
-    const lines = [];
-    const shown = new Set();
+    const entries = [];
+    const disp = MM_GLUE.gsDisplay;
+    const sec = k => MM_GLUE.SECRET_KEYS.has(k);
     if (seIsBaseTab()) {
-        for (const k of t.dirty) {
-            const sec = MM_GLUE.SECRET_KEYS.has(k) ? '••• CHANGED' : null;
-            lines.push(k + ': ' + (sec || MM_GLUE.gsDisplay(seOrig[k])) + ' → ' +
-                       k + ': ' + (sec || MM_GLUE.gsDisplay(seValues[k])));
-            shown.add(k);
-        }
+        for (const k of t.dirty)
+            entries.push({ key: k, orig: seOrig[k], cur: seValues[k], isSecret: sec(k), display: disp });
     } else {
         for (const k of t.dirty) {
-            const sec = MM_GLUE.SECRET_KEYS.has(k) ? '••• CHANGED' : null;
             const o = SE_INHERIT_KEYS.has(k) ? seOvSnap(t)[k] : t.origVals[k];
-            lines.push(k + ': ' + (sec || MM_GLUE.gsDisplay(o)) + ' \u2192 ' +
-                       k + ': ' + (sec || MM_GLUE.gsDisplay(seValues[k])));
-            shown.add(k);
+            entries.push({ key: k, orig: o, cur: seValues[k], isSecret: sec(k), display: disp });
         }
     }
     if (!seIsBaseTab()) {
         if ((t._origExpose || false) !== !!t.expose_as_model)
-            lines.unshift('expose_as_model: ' + MM_GLUE.gsDisplay(!!t._origExpose) +
-                          ' → expose_as_model: ' + MM_GLUE.gsDisplay(!!t.expose_as_model));
+            entries.unshift({ key: 'expose_as_model', orig: !!t._origExpose,
+                              cur: !!t.expose_as_model, isSecret: false, display: disp });
         if ((t._origApi || '') !== (t.api_name || ''))
-            lines.unshift('api_name: ' + MM_GLUE.gsDisplay(t._origApi) +
-                          ' → api_name: ' + MM_GLUE.gsDisplay(t.api_name));
+            entries.unshift({ key: 'api_name', orig: t._origApi, cur: t.api_name || '',
+                              isSecret: false, display: disp });
     }
-    box.hidden = !lines.length;
-    box.textContent = '';
-    if (!lines.length) return;
-    const head = document.createElement('div'); head.className = 'ch-head';
-    head.textContent = C.tf('uplift.ui.changes', 'CHANGES (') + lines.length + ')';
-    box.append(head);
-    for (const ln of lines) {
-        const d = document.createElement('div'); d.className = 'ch-line';
-        d.textContent = ln;
-        box.append(d);
-    }
+    window.UpliftDirty.renderChangesBox(box, entries, C.tf);
 }
 
 /* ---- spec-driven settings form (parity with classic _modal_model_settings) ---- */
@@ -325,22 +314,13 @@ function seBind(kind, key, opts) {
             const orig = (t && t.id !== 'base' && SE_INHERIT_KEYS.has(key))
                 ? seOvSnap(t)[key]
                 : (t && t.origVals ? t.origVals[key] : seOrig[key]);
-            const changed = JSON.stringify(seValues[key]) !== JSON.stringify(orig);
+            // FE-4: visuals via the shared dirty machine (uplift_dirty.js)
+            const changed = window.UpliftDirty.applyRowState({
+                orig, cur: seValues[key], row: lab2,
+                isSecret: MM_GLUE.SECRET_KEYS.has(key),
+                isRestart: seIsRuntimeKey(key),
+                display: MM_GLUE.gsDisplay });
             if (changed) t && t.dirty.add(key); else t && t.dirty.delete(key);
-            lab2.classList.toggle('dirty', changed);
-            lab2.classList.toggle('restartq', changed && seIsRuntimeKey(key));
-            const rd = lab2.querySelector('.diff-out');
-            if (rd) {
-                rd.hidden = !changed;
-                if (changed && MM_GLUE.SECRET_KEYS.has(key)) {
-                    // secret stays masked: only say that it changed
-                    rd.classList.add('masked');
-                    rd.querySelector('.diff-o').textContent = '••• CHANGED';
-                } else if (changed) {
-                    rd.classList.remove('masked');
-                    rd.querySelector('.diff-o').textContent = MM_GLUE.gsDisplay(orig);
-                }
-            }
         }
         seUpdateSaveBtn();
         if (opts && opts.onChange) opts.onChange(seValues);

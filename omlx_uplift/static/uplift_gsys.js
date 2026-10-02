@@ -15,6 +15,7 @@ const D = window.UpliftDom;
 const S = window.Uplift.state;
 const $ = D.$;
 const API = S.API;
+const UDirty = window.UpliftDirty;   // FE-4 shared dirty/CHANGES machine
 const GLUE = {
     toast: D.toast,
     fetchJson: D.fetchJson,
@@ -230,29 +231,19 @@ function gsDisplay(v) {
 /* fields whose values are secrets: diff chips and the CHANGES list say
    CHANGED instead of printing the value (API key stays masked everywhere) */
 const SECRET_KEYS = new Set(['api_key', 'cloud_token', 'hf_token']);
+/* FE-4: dirty marking + row visuals come from uplift_dirty.js (shared with
+   the model editor); gsDirty stays the payload map the save path reads. */
 function markFieldDirty(flat, val) {
     const orig = gsOrigFlat(flat);
     const cur = val === undefined ? gsValFlat(flat) : val;
-    const changed = JSON.stringify(orig) !== JSON.stringify(cur);
+    const changed = UDirty.applyRowState({
+        orig, cur,
+        row: document.querySelector('#gs-body [data-flat="' + flat + '"]'),
+        isSecret: SECRET_KEYS.has(flat),
+        isRestart: GS_RESTART_FIELDS.has(flat),
+        display: gsDisplay });
     if (changed) gsDirty[flat] = cur;
     else delete gsDirty[flat];               // edited back = no longer queued
-    const row = document.querySelector('#gs-body [data-flat="' + flat + '"]');
-    if (row) {
-        row.classList.toggle('dirty', changed);
-        row.classList.toggle('restartq', changed && GS_RESTART_FIELDS.has(flat));
-        const rd = row.querySelector('.diff-out');
-        if (rd) {
-            rd.hidden = !changed;
-            if (changed && SECRET_KEYS.has(flat)) {
-                // masked field (API key): indicate the change, not the value
-                rd.classList.add('masked');
-                rd.querySelector('.diff-o').textContent = '••• CHANGED';
-            } else if (changed) {
-                rd.classList.remove('masked');
-                rd.querySelector('.diff-o').textContent = gsDisplay(orig);
-            }
-        }
-    }
     gsUpdateSaveBtn();
     gsMarkSections();
     renderDirtyList();
@@ -279,25 +270,12 @@ function gsMarkSections() {
     }
 }
 function renderDirtyList() {
-    const box = document.getElementById('gs-changes');
-    if (!box) return;
-    const keys = Object.keys(gsDirty);
-    box.hidden = !keys.length;
-    box.textContent = '';
-    if (!keys.length) return;
-    const head = document.createElement('div'); head.className = 'ch-head';
-    head.textContent = C.tf('uplift.ui.changes', 'CHANGES (') + keys.length + ')';
-    box.append(head);
-    for (const k of keys) {
-        const line = document.createElement('div'); line.className = 'ch-line';
-        const secret = SECRET_KEYS.has(k);
-        const a = document.createElement('span'); a.textContent = k + ': ' + (secret ? '•••' : gsDisplay(gsOrigFlat(k)));
-        const arrow = document.createTextNode(' → ');
-        const b2 = document.createElement('span'); b2.textContent = k + ': ' + (secret ? '••• CHANGED' : gsDisplay(gsDirty[k]));
-        b2.className = 'ch-new';
-        line.append(a, arrow, b2);
-        box.append(line);
-    }
+    UDirty.renderChangesBox(
+        document.getElementById('gs-changes'),
+        Object.keys(gsDirty).map(k => ({
+            key: k, orig: gsOrigFlat(k), cur: gsDirty[k],
+            isSecret: SECRET_KEYS.has(k), display: gsDisplay })),
+        C.tf);
 }
 function gsSaveBtn() { return document.getElementById('gs-save'); }
 function gsUpdateSaveBtn() {
