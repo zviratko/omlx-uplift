@@ -471,7 +471,7 @@ async function renderHelperModels() {
 
     const host = $('hm-list');
     host.textContent = '';
-    if (!helpers.length) { host.innerHTML = '<div class="empty">No helper models</div>'; return; }
+    if (!helpers.length) { D.emptyMsg(host, 'No helper models'); return; }
     for (const m of helpers) {
         const row = document.createElement('div'); row.className = 'urow usage';
         const name = HG.cell(m.id); name.className = 'uname';

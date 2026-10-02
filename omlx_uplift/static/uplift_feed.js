@@ -200,7 +200,7 @@ function renderReqFeed() {
         ? `${rows.length} tracked · ${activeN} active` : '';
     if (!rows.length) {
         const cur = list.querySelector('.empty');
-        if (!cur) list.innerHTML = '<div class="empty">No requests yet</div>';
+        if (!cur) D.emptyMsg(list, 'No requests yet');
         return;
     }
     // ISSUE-2 (feed order): sort by BIRTH, never by ts (last update). Rows

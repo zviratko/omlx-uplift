@@ -46,6 +46,21 @@ async function postJson(url, body) {
     return d;
 }
 
+/* FE-1 completion: DELETE had no kit twin, so mmchips grew two private
+   fetch wrappers with DIVERGENT detail handling (one stringified
+   body.detail, the other took it raw) — the exact [object Object] toast
+   this file exists to kill. detail is flattened via C.errorText like
+   fetchJson does (UP-4). */
+async function deleteJson(url) {
+    const res = await fetch(url, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const reason = C.errorText(d) || (res.status + ' ' + res.statusText);
+        throw new Error(`${url} -> ${res.status}: ${reason}`);
+    }
+    return d;
+}
+
 function toast(text, ms, cls) {
     const t = document.createElement('div');
     t.className = 'toast' + (cls ? ' ' + cls : ''); t.textContent = text;
@@ -61,5 +76,5 @@ function emptyMsg(host, msg) {   // error text goes through textContent, never i
     d.textContent = msg; host.append(d);
 }
 
-return { $, fetchJson, postJson, toast, cell, emptyMsg };
+return { $, fetchJson, postJson, deleteJson, toast, cell, emptyMsg };
 });

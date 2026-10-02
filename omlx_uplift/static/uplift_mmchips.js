@@ -346,22 +346,12 @@ function aliasTree(m) {
 }
 
 async function deleteStoredSettings(model) {
-    return S.trackWrite(async () => {
-        const res = await fetch(`${API}/admin/api/models/${encodeURIComponent(model)}/settings`,
-            { method: 'DELETE' });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body.detail ? JSON.stringify(body.detail) : 'http ' + res.status);
-        return body;
-    });
+    return S.trackWrite(() =>
+        D.deleteJson(`${API}/admin/api/models/${encodeURIComponent(model)}/settings`));
 }
 async function deleteModelFromDisk(model) {
-    return S.trackWrite(async () => {
-        const res = await fetch(`${API}/admin/api/hf/models/${encodeURIComponent(model)}`,
-            { method: 'DELETE' });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body.detail || 'http ' + res.status);
-        return body;
-    });
+    return S.trackWrite(() =>
+        D.deleteJson(`${API}/admin/api/hf/models/${encodeURIComponent(model)}`));
 }
 
 window.Uplift.mmChips = {

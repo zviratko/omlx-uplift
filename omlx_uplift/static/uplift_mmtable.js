@@ -55,7 +55,9 @@ let sortDir = (prefs.tableSort && prefs.tableSort.dir) || 1;      // 1 asc, -1 d
 
 function saveTableSort() {
     prefs.tableSort = { key: sortKey, dir: sortDir };
-    localStorage.setItem('omlx-uplift-prefs-v1', JSON.stringify(prefs));
+    // FE-1: write through core.savePrefs — the raw setItem copy bypassed
+    // the key constant and its storage-denied guard.
+    C.savePrefs(localStorage, prefs);
 }
 
 function stateRank(m) { return m.loaded ? 0 : (m.is_loading ? 1 : 2); }
@@ -84,7 +86,7 @@ function sortModels(rows) {
 async function renderModelAdmin(force) {
     let models;
     try { models = (await MM_GLUE.fetchJson(`${API}/admin/api/models`)).models; }
-    catch (_) { $('model-admin').innerHTML = '<div class="empty">API unreachable</div>'; return; }
+    catch (_) { D.emptyMsg($('model-admin'), 'API unreachable'); return; }
     S.adminModels = models;
     // expire/apply optimistic flag overrides against the fresh snapshot
     for (const m of models) {
@@ -151,7 +153,7 @@ async function renderModelAdmin(force) {
     const table = $('model-admin');
     table.innerHTML = '';
     if (!shown.length && !missing.length) {
-        table.innerHTML = '<div class="empty">No match</div>'; return; }
+        D.emptyMsg(table, 'No match'); return; }
     const head = document.createElement('div'); head.className = 'urow head admin';
     // meta columns (type/state/size) now live INSIDE the model MM_GLUE.cell's first
     // line, so their sort controls ride the header's left MM_GLUE.cell as chips

@@ -314,7 +314,7 @@ function renderUploader() {
             st.models = d.oq_models || [];
             $('up-sub').textContent = `${st.models.length} oQ models`;
             list.innerHTML = '';
-            if (!st.models.length) { list.innerHTML = '<div class="empty">No oQ models found in model directories.</div>'; return; }
+            if (!st.models.length) { D.emptyMsg(list, 'No oQ models found in model directories.'); return; }
             for (const m of st.models) {
                 const row = document.createElement('div'); row.className = 'urow usage';
                 const name = QG.cell(m.name); name.className = 'uname';

@@ -43,7 +43,7 @@ function renderTasks(hostId, kind) {
             if (AC) AC.announceTasks(kind, tasks);
         } catch (_) { /* verdicts never block the board */ }
 
-        if (!tasks.length) { host.innerHTML = '<div class="empty">No tasks</div>'; return; }
+        if (!tasks.length) { D.emptyMsg(host, 'No tasks'); return; }
         let active = false;
         for (const t of tasks) {
             const r = taskRow(t);
@@ -118,8 +118,7 @@ function dlSortModels(list, key, dir, fallbackKey) {
     return rows;
 }
 function initDownloader() {
-    const $dl = id => document.getElementById(id);
-    const token = () => ($dl('dl-token') || {}).value?.trim() || '';
+    const token = () => (D.$('dl-token') || {}).value?.trim() || '';
     const queueDownload = (repoId, fromBtn) => {
         if (!repoId) { DG.toast(C.t('uplift.toast.repo_id_required')); return; }
         if (fromBtn) { fromBtn.disabled = true; fromBtn.textContent = 'queued…'; }
@@ -135,21 +134,21 @@ function initDownloader() {
     function setTab(tab) {
         DL.tab = tab;
         for (const t of ['trending', 'popular', 'search']) {
-            const b = $dl('dl-tab-' + t); if (b) b.classList.toggle('on', t === tab);
+            const b = D.$('dl-tab-' + t); if (b) b.classList.toggle('on', t === tab);
         }
         DL.page[tab] = DL.page[tab] || 1;
         if (tab === 'search' && !DL.search.length && DL.q) doSearch();
         renderDlPage();
     }
     function renderDlPage() {
-        const host = $dl('dl-results'); if (!host) return;
-        const sub = $dl('dl-sub');
+        const host = D.$('dl-results'); if (!host) return;
+        const sub = D.$('dl-sub');
         host.innerHTML = '';
         const list = DL.tab === 'search' ? DL.search : DL.rec[DL.tab];
-        if (list == null) { host.innerHTML = '<div class="empty">Loading suggestions…</div>'; return; }
+        if (list == null) { D.emptyMsg(host, 'Loading suggestions…'); return; }
         if (!list.length) {
-            host.innerHTML = '<div class="empty">' + (DL.tab === 'search' ? 'No results — try another query.' : 'HF suggested models unavailable.') + '</div>';
-            const pg = $dl('dl-pager'); if (pg) pg.innerHTML = '';
+            D.emptyMsg(host, DL.tab === 'search' ? 'No results — try another query.' : 'HF suggested models unavailable.');
+            const pg = D.$('dl-pager'); if (pg) pg.innerHTML = '';
             return;
         }
         const fallback = DL.tab === 'popular' ? 'downloads' : 'trending_score';
@@ -197,13 +196,13 @@ function initDownloader() {
             sub.textContent = `${rows.length} results ${extra}${inv}`;
         }
         // pager
-        const pg = $dl('dl-pager'); if (!pg) return;
+        const pg = D.$('dl-pager'); if (!pg) return;
         pg.innerHTML = '';
         if (pages <= 1) return;
         const mk = (label, page, dis) => {
             const b = document.createElement('button'); b.textContent = label; b.disabled = !!dis;
             b.onclick = () => { DL.page[DL.tab] = page; renderDlPage();
-                $dl('dl-results').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
+                D.$('dl-results').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
             pg.append(b);
         };
         mk('«', 1, DL.page[DL.tab] === 1);
@@ -216,14 +215,14 @@ function initDownloader() {
     }
     // safe empty-state (server error text goes through textContent, never innerHTML)
     function setEmpty(msg) {
-        const host = $dl('dl-results'); if (!host) return;
+        const host = D.$('dl-results'); if (!host) return;
         host.innerHTML = '';
         const d = document.createElement('div'); d.className = 'empty'; d.textContent = msg;
         host.append(d);
     }
     function loadRecommended(force) {
         if (DL.busy) return;
-        const mlx = $dl('dl-mlx') ? $dl('dl-mlx').checked : true;
+        const mlx = D.$('dl-mlx') ? D.$('dl-mlx').checked : true;
         if (!force && DL.rec.trending && DL.rec._mlx === mlx) { renderDlPage(); return; }
         DL.busy = true;
         DG.fetchJson(`${API}/admin/api/hf/recommended?mlx_only=${mlx}`).then(d => {
@@ -240,18 +239,18 @@ function initDownloader() {
             DL.busy = false;
             DL.rec.trending = DL.rec.trending || [];
             DL.rec.popular = DL.rec.popular || [];
-            const host = $dl('dl-results');
+            const host = D.$('dl-results');
             if (host && DL.tab !== 'search') setEmpty('Suggestions failed: ' + e.message);
         });
     }
     function doSearch() {
-        const q = ($dl('dl-q') || {}).value?.trim();
+        const q = (D.$('dl-q') || {}).value?.trim();
         if (!q) { DG.toast(C.t('uplift.toast.type_query')); return; }
-        const sort = $dl('dl-sort').value || 'trending';
-        const mlx = $dl('dl-mlx') ? $dl('dl-mlx').checked : true;
+        const sort = D.$('dl-sort').value || 'trending';
+        const mlx = D.$('dl-mlx') ? D.$('dl-mlx').checked : true;
         DL.q = q; DL.busy = true;
-        const sub = $dl('dl-sub'); if (sub) sub.textContent = 'searching…';
-        const host = $dl('dl-results'); if (host) host.innerHTML = '<div class="empty">Searching huggingface.co…</div>';
+        const sub = D.$('dl-sub'); if (sub) sub.textContent = 'searching…';
+        const host = D.$('dl-results'); if (host) D.emptyMsg(host, 'Searching huggingface.co…');
         DG.fetchJson(`${API}/admin/api/hf/search?q=${encodeURIComponent(q)}&limit=100&sort=${sort}&mlx_only=${mlx}`).then(d => {
             DL.search = (d.models || []).map((m, i) => ({ ...m, rank: i + 1 }));
             DL._invalid = !!d.hf_token_invalid;
@@ -267,27 +266,27 @@ function initDownloader() {
     if (!dlInit) {
         dlInit = true;
         // token: persisted in this browser only (user preference: localStorage)
-        const tk = $dl('dl-token');
+        const tk = D.$('dl-token');
         try { tk.value = localStorage.getItem('uplift.hf_token') || ''; } catch (_) {}
         tk.addEventListener('change', () => {
             try { localStorage.setItem('uplift.hf_token', tk.value.trim()); } catch (_) {}
         });
-        $dl('dl-go').onclick = doSearch;
-        $dl('dl-q').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-        $dl('dl-sort').onchange = () => { if (DL.tab === 'search' && DL.q) doSearch(); };
-        $dl('dl-mlx').onchange = () => {
+        D.$('dl-go').onclick = doSearch;
+        D.$('dl-q').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+        D.$('dl-sort').onchange = () => { if (DL.tab === 'search' && DL.q) doSearch(); };
+        D.$('dl-mlx').onchange = () => {
             if (DL.tab === 'search') doSearch(); else loadRecommended(true);
         };
         for (const t of ['trending', 'popular', 'search']) {
-            const b = $dl('dl-tab-' + t);
+            const b = D.$('dl-tab-' + t);
             if (b) b.onclick = () => {
-                if (t === 'search' && !DL.q) { DG.toast(C.t('uplift.toast.type_query_press_search')); $dl('dl-q').focus(); return; }
+                if (t === 'search' && !DL.q) { DG.toast(C.t('uplift.toast.type_query_press_search')); D.$('dl-q').focus(); return; }
                 setTab(t);
             };
         }
-        $dl('dl-direct').onclick = () => queueDownload($dl('dl-repo').value.trim(), $dl('dl-direct'));
-        $dl('dl-repo').addEventListener('keydown', e => {
-            if (e.key === 'Enter') queueDownload($dl('dl-repo').value.trim()); });
+        D.$('dl-direct').onclick = () => queueDownload(D.$('dl-repo').value.trim(), D.$('dl-direct'));
+        D.$('dl-repo').addEventListener('keydown', e => {
+            if (e.key === 'Enter') queueDownload(D.$('dl-repo').value.trim()); });
     }
     if (DL.tab === 'search' && DL.search.length) renderDlPage();
     else loadRecommended();
