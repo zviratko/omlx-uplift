@@ -5,6 +5,11 @@
 # overlay that uses ONLY engine features (tokens cascade, motion gate).
 # Iterate on ~/.omlx/uplift/skins/shodan-<mtime>/, repack with:
 #   omlx-uplift skin compile ~/.omlx/uplift/skins/shodan-<mtime> -o shodan.yml
+#
+# Motion (2026-10-02): on load every board card's crimson outline draws itself
+# outward from its centre (staggered row-major, the noir-frame mechanism), then
+# a hot ember scan-dot runs the top laser rail forever, one period per lane so
+# the rails never march in lockstep. Motion off = the finished ring, no dot.
 skin_version: 1
 label: "SHODAN"
 classic:
@@ -183,6 +188,85 @@ css: |-
   /* TriOptimum panel: laser rail atop every card */
   .card { border-top-color: var(--red); }
   .card:hover { border-color: var(--red); }
+
+  /* ---- beat 1: her laser frame closes over every board card ----
+     A border cannot be animated, so the outline is four 1px crimson strokes
+     painted on the edges of a pseudo's OWN box: shrinking/growing that box
+     (inset) drags every stroke with it and the hairlines stay crisp the whole
+     way — a transform scale would smear them mid-draw. The completed ring
+     (inset: 0) is declared unconditionally and only the animation is gated,
+     so motion-off shows the finished drawing, never a frozen half-stroke.
+     inset:0 and not -1px: inter-card gaps measure 0.0px, so an outset ring
+     would land on the neighbour's stroke and read as one fat divider.
+     Result on this palette: a hot inner rim inside the cooler ember border —
+     a laser-lit panel, which is what the card top rail already claims. */
+  #grid .card::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background:
+          linear-gradient(var(--red), var(--red)) 0 0     / 100% 1px,
+          linear-gradient(var(--red), var(--red)) 0 100%  / 100% 1px,
+          linear-gradient(var(--red), var(--red)) 0 0     / 1px 100%,
+          linear-gradient(var(--red), var(--red)) 100% 0  / 1px 100%;
+      background-repeat: no-repeat;
+  }
+  :root:not([data-motion="off"]) #grid .card::before {
+      animation: shodan-frame 1.4s ease-out both;
+  }
+  @keyframes shodan-frame {
+      from { inset: calc(50% - 0.5px); }
+      to   { inset: 0; }
+  }
+  /* Row-major stagger: the sweep walks the board one lane at a time, so it
+     reads as her powering up panels in order. Delays stay well under the 1.4 s
+     duration — the whole board is framed inside ~2.2 s. */
+  :root:not([data-motion="off"]) #grid .card:nth-child(3n+2)::before {
+      animation-delay: .26s;
+  }
+  :root:not([data-motion="off"]) #grid .card:nth-child(3n)::before {
+      animation-delay: .52s;
+  }
+
+  /* ---- ambient: a hot scan-dot runs the top laser rail, forever ----
+     The dot is a bounded gradient inside a 1px box sitting exactly ON the
+     card's top border; a background can never paint outside its own box, so
+     the box is the mask — no overflow:hidden on the card (that would crop the
+     card's own menus). Start position is off-box LEFT and declared
+     unconditionally, so motion-off renders no dot at all rather than one
+     parked at the rail's start.
+     Five lanes, five different periods AND delays: a row of cards then never
+     crosses its rail in lockstep, and the pattern does not visibly repeat.
+     1px at the border line, so it can never cover title or metric text. */
+  #grid .card::after {
+      content: ""; position: absolute; top: -1px; left: 0; right: 0;
+      height: 1px; pointer-events: none;
+      background: linear-gradient(90deg,
+          rgba(255,65,54,0) 0, #ffb14a 30%, #fff3e0 50%,
+          #ffb14a 70%, rgba(255,65,54,0) 100%) no-repeat;
+      background-size: 30px 1px;
+      background-position: -30px 0;
+  }
+  :root:not([data-motion="off"]) #grid .card::after {
+      animation: shodan-scan 7.9s linear infinite;
+  }
+  :root:not([data-motion="off"]) #grid .card:nth-child(5n+2)::after {
+      animation-duration: 9.1s; animation-delay: 1.7s;
+  }
+  :root:not([data-motion="off"]) #grid .card:nth-child(5n+3)::after {
+      animation-duration: 6.7s; animation-delay: 3.4s;
+  }
+  :root:not([data-motion="off"]) #grid .card:nth-child(5n+4)::after {
+      animation-duration: 10.3s; animation-delay: 5.1s;
+  }
+  :root:not([data-motion="off"]) #grid .card:nth-child(5n)::after {
+      animation-duration: 8.3s; animation-delay: 7.2s;
+  }
+  @keyframes shodan-scan {
+      /* 100% maps to (box - 30px); +30px pushes the tail past the right edge
+         so the dot exits instead of stopping flush against the corner. */
+      from { background-position: -30px 0; }
+      to   { background-position: calc(100% + 30px) 0; }
+  }
+
   /* wordmark: long string goes BELOW the logo (absolute slot — can never
      shift the menu); the inline ::after carries only a short greeting,
      and the engine caps even that to 24ch with an ellipsis */

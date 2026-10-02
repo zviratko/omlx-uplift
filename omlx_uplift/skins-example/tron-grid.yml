@@ -1,11 +1,13 @@
 # Uplift skin crate — "TRON: THE GRID" (ambient motion showcase).
 # Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
 #
-# SPARK-2 motion pack, crate 1 of 3: AMBIENT. One slow glow that travels the
-# header rule and breathes on the telemetry lamp — nothing on the board
-# blinks at you. Palette: identity blue on black ice; the state triad is
-# program / recognizer / the Game — cyan, amber, red. Header text lines are
-# descriptive and in-genre, NOT quotations from the films.
+# SPARK-2 motion pack, crate 1 of 3: AMBIENT. Palette: identity blue on black
+# ice; the state triad is program / recognizer / the Game — cyan, amber, red.
+# Header text lines are descriptive and in-genre, NOT quotations from the films.
+#
+# 2026-10-02: the header rule stopped brightening as a whole slab. One lit
+# light-cycle now runs the length of the rule and dies at the far edge, so the
+# rule reads as a skyline with traffic on it rather than a dimmer switch.
 skin_version: 1
 label: "TRON: THE GRID"
 classic:
@@ -83,18 +85,42 @@ css: |-
   }
 
   /* --- AMBIENT MOTION (the whole point of this crate) -----------------
-     A glow walks the header's bottom rule every 11 s and the lamp breathes.
-     Both are gated: the motion switch stops them dead, no leftover movement. */
-  :root:not([data-motion="off"]) header.top {
-      animation: tron-rule 11s linear infinite;
+     One light-cycle runs the length of the header's bottom rule every 9.7 s
+     and the lamp breathes. Both are gated: the motion switch stops them dead,
+     no leftover movement. */
+
+  /* The cycle is a bounded gradient inside a 1px strip that sits exactly on
+     the rule. A background cannot paint outside its own box, so the strip IS
+     the mask — no overflow needed, and the rule itself stays a rule.
+     Two layers move in lockstep: a long dim tail and a short hot core, which
+     reads as something travelling rather than something flashing. Both start
+     positions are off-box LEFT and declared unconditionally, so motion-off
+     renders an empty rule instead of a cycle parked at the left edge.
+     9.7 s against the lamp's 4.5 s: distinct periods, so the two never settle
+     into a visible beat the eye can learn. */
+  header.top::after {
+      content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+      height: 1px; pointer-events: none;
+      background:
+          linear-gradient(90deg,
+              rgba(34, 211, 238, 0) 0%, rgba(34, 211, 238, .55) 45%,
+              #eafcff 50%, rgba(34, 211, 238, .55) 55%,
+              rgba(34, 211, 238, 0) 100%) no-repeat,
+          linear-gradient(90deg,
+              rgba(34, 211, 238, 0) 0%, rgba(34, 211, 238, .16) 50%,
+              rgba(34, 211, 238, 0) 100%) no-repeat;
+      background-size: 140px 1px, 460px 1px;
+      background-position: -140px 0, -460px 0;
   }
-  @keyframes tron-rule {
-      0%   { border-bottom-color: var(--hdr-edge);
-             box-shadow: 0 1px 0 rgba(34,211,238,0); }
-      45%  { border-bottom-color: var(--accent);
-             box-shadow: 0 1px 12px rgba(34,211,238,.35); }
-      100% { border-bottom-color: var(--hdr-edge);
-             box-shadow: 0 1px 0 rgba(34,211,238,0); }
+  :root:not([data-motion="off"]) header.top::after {
+      animation: tron-cycle 9.7s linear infinite;
+  }
+  @keyframes tron-cycle {
+      /* 100% maps to (box - stripe); +140/+460 pushes each tail clean past the
+         right edge so the cycle exits rather than stalling in the corner. */
+      from { background-position: -140px 0, -460px 0; }
+      to   { background-position: calc(100% + 140px) 0,
+                                           calc(100% + 460px) 0; }
   }
   :root:not([data-motion="off"]) .logo .dot {
       animation: tron-lamp 4.5s ease-in-out infinite;
