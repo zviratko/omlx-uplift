@@ -791,8 +791,13 @@ def cmd_dev(argv=None) -> int:
                 devsrc.save_config(dcfg)
                 print("base pin cleared — tracking HEAD again (manual)",
                       file=sys.stderr)
-        except Exception:
-            pass
+        except Exception as exc:  # rollback itself succeeded — stay advisory
+            # LOG-SILENT-1: used to pass silently, so a stale base_pin hid
+            # inside a 'successful' rollback and the next boot refused to
+            # auto-build with no paper trail.
+            print(f"WARNING: base pin NOT cleared ({exc}) — run: "
+                  "omlx-uplift dev auto-build off/on or edit dev.json",
+                  file=sys.stderr)
         pth_msg = ("yes" if r["pth"] else
                    "NO — run: omlx-uplift install --formula omlx-dev")
         print(f"rolled back to {r['name']} ({r['cellar']})\n"

@@ -128,8 +128,12 @@ def default_db_path() -> Path:
         bp = getattr(gs, "base_path", None) if gs else None
         if bp:
             base = Path(bp)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — env fallback below is the point
+        # LOG-SILENT-1: this ladder decides which metrics.sqlite3 every
+        # sample lands in; a broken server-state import used to vanish
+        # without trace. The fallback is legitimate, the silence is not.
+        log.debug("metrics base: server_state unavailable (%s); "
+                  "falling back to env/home", exc)
     if base is None:
         env = os.environ.get("OMLX_BASE_PATH")
         base = Path(env) if env else Path(os.path.expanduser("~/.omlx"))

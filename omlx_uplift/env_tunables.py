@@ -150,8 +150,14 @@ def overrides_path() -> Path:
         bp = getattr(gs, "base_path", None) if gs else None
         if bp:
             base = Path(bp)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — same ladder as store.default_db_path
+        # LOG-SILENT-1: overrides_path() decides which env_overrides.json
+        # the tunables read; log the fallback, keep it stdlib-only.
+        import logging
+
+        logging.getLogger("omlx_uplift.env_tunables").debug(
+            "overrides base: server_state unavailable (%s); "
+            "falling back to env/home", exc)
     if base is None:
         env = os.environ.get("OMLX_BASE_PATH")
         base = Path(env) if env else Path(os.path.expanduser("~/.omlx"))

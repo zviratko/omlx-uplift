@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import os
 import threading
@@ -26,6 +27,8 @@ from .base import (api_router, page_router, require_admin, _RedirectToLogin,
                    _require_settings_manager, STATIC_DIR, _no_api_cache)
 from ..request_log import RING_LIMIT, get_request_tracker
 from ..collector import get_collector
+
+_log = logging.getLogger("omlx_uplift.derive")
 
 
 # --------------------------------------------------------------------------
@@ -114,8 +117,13 @@ def _hourly_points(derive, window_s: float) -> list[dict]:
 
     try:
         conn = open_usage_ro()
-    except Exception:
-        return []  # DB missing/locked — fine layer alone is honest
+    except Exception as exc:  # noqa: BLE001
+        # LOG-SILENT-1: missing/locked DB is fine (fine layer alone is
+        # honest) — but a real error here silently empties every coarse
+        # chart on an HTTP 200, indistinguishable from 'no history yet'.
+        _log.warning("hourly layer disabled this tick: usage DB "
+                     "unreachable: %s", exc)
+        return []
     try:
         t0 = time.time() - window_s
         sums = ", ".join(f"SUM({c}) AS {c}" for c in _USAGE_COLS)

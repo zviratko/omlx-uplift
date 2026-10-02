@@ -32,8 +32,13 @@ def _seed_env_tunables() -> None:
         if base:
             env_tunables.set_base_dir(base)
         env_tunables.seed_environ()
-    except Exception:  # never break the server for a dashboard feature
-        pass
+    except Exception as exc:  # never break the server for a dashboard feature
+        # LOG-SILENT-1: silent here meant env tunables (UPLIFT_* etc.)
+        # quietly stopped seeding and nobody could tell why. This runs at
+        # interpreter startup, before logging is configured — stderr is
+        # the only channel that reliably exists.
+        print(f"omlx-uplift: env-tunable seed skipped: {exc}",
+              file=sys.stderr)
 
 
 def _mount(module) -> None:

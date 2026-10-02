@@ -1104,7 +1104,12 @@ def _pr_merged_into_base(src: dict, diff_bytes: bytes | None,
             devsrc._git(["worktree", "remove", "--force", wt], cwd=root,
                         check=False)
             subprocess.run(["rm", "-rf", wt], check=False)
-    except Exception:                               # noqa: BLE001 — fail soft
+    except Exception as exc:                         # noqa: BLE001 — fail soft
+        # LOG-SILENT-1: fail-soft stays (None = inconclusive), but a
+        # NameError or corrupt manifest used to read exactly like 'cannot
+        # prove' — merged PRs sat at up_to_date forever with no trace.
+        _log.warning("merged-into-base probe errored (treated as "
+                     "inconclusive): %s", exc, exc_info=True)
         return None
 
 
