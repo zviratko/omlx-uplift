@@ -952,16 +952,14 @@ def cmd_dev_install(args) -> int:
     def _print(stream, text):
         print(text, file=stream, flush=(stream is sys.stdout and False))
 
-    res = devsrc.run_dev_build(
-        with_custom_kernel=bool(getattr(args, 'with_custom_kernel', False)),
-        with_grammar=bool(getattr(args, 'with_grammar', False)),
-        dry_run=bool(getattr(args, 'dry_run', False)),
-        warn=_coexistence_warnings)
-    # output order kept from the pre-BE-1 CLI: the header+table block sat
-    # directly after a successful materialize, before re-gate noise and
-    # the brew chatter. Insert it at the first line that follows
-    # materialize (re-gate / stash / running / dry-run) or append.
-    def _header():
+    # streaming printer (BE-1): lines print as the engine emits them,
+    # exactly like the old inline prints did. The header+table block —
+    # which sat right after a successful materialize — is inserted before
+    # the first line that follows materialize (re-gate noise, stash, brew
+    # chatter, dry-run); brew's own subprocess output interleaves live.
+    state = {"header": False}
+
+    def _header(res):
         print()
         print(_paint(sys.stdout, "OMLX-DEV BUILD", "1;36")
               + f"  {res.sync_ref} @ {(res.base_sha or '')[:12]}  "
@@ -969,21 +967,27 @@ def cmd_dev_install(args) -> int:
         _dev_patch_table(res.materialize.get("commits", []),
                          res.upstreamed or {})
 
-    mat_ok = bool(res.materialize and res.materialize.get("ok"))
-    cut = None
-    if mat_ok:
-        for i, (stream, text) in enumerate(res.lines):
-            if (text.startswith(("running: ", "dry-run: would run",
-                                 "previous keg stashed"))
-                    or "RE-GATE FAILED" in text):
-                cut = i
-                break
-    for i, (stream, text) in enumerate(res.lines):
-        if mat_ok and cut is not None and i == cut:
-            _header()
-        print(text, file=sys.stderr if stream == 'err' else sys.stdout)
-    if mat_ok and cut is None:
-        _header()
+    def _on_line(res, stream, text):
+        # trigger lines only ever appear after a SUCCESSFUL materialize,
+        # so seeing one is the boundary signal; print the header first.
+        if (not state["header"]
+                and (text.startswith(("running: ", "dry-run: would run",
+                                      "previous keg stashed"))
+                     or "RE-GATE FAILED" in text)):
+            state["header"] = True
+            _header(res)
+        print(text, file=sys.stderr if stream == 'err' else sys.stdout,
+              flush=True)
+
+    res = devsrc.run_dev_build(
+        with_custom_kernel=bool(getattr(args, 'with_custom_kernel', False)),
+        with_grammar=bool(getattr(args, 'with_grammar', False)),
+        dry_run=bool(getattr(args, 'dry_run', False)),
+        warn=_coexistence_warnings, on_line=_on_line)
+    # fallback: materialize succeeded but no trigger line came
+    if (not state["header"] and res.materialize
+            and res.materialize.get("ok")):
+        _header(res)
     if res.ok and res.stage == 'ok':
         _dev_next_steps(res.cfg or {}, fresh=False)
         # VERY LAST: the one command that matters now (brew's own 'after an

@@ -837,15 +837,21 @@ class BuildResult:
     n_applied: int = 0
     n_skipped: int = 0
     cfg: dict | None = None      # refreshed dev.json after a successful build
+    on_line: object = None       # optional (stream, text) progress callback
 
 
 def _emit(res: BuildResult, stream: str, text: str) -> None:
     res.lines.append((stream, text))
+    if res.on_line:
+        try:
+            res.on_line(res, stream, text)
+        except Exception:                        # noqa: BLE001 — progress only
+            pass
 
 
 def run_dev_build(*, with_custom_kernel: bool = False,
                   with_grammar: bool = False, dry_run: bool = False,
-                  warn=None) -> BuildResult:
+                  warn=None, on_line=None) -> BuildResult:
     """One rebuild path (DEV-context decision 3): re-cut uplift-dev from
     the synced base with one commit per enabled build patch, then
     `brew install` (first build) or `brew reinstall` (rebuild). Both always
@@ -854,13 +860,18 @@ def run_dev_build(*, with_custom_kernel: bool = False,
     warn: optional callable printing the DEV-context-7 coexistence warning
     just before the brew subprocess (CLI passes its printer; the dashboard
     passes None — the service restart it manages itself).
+    on_line: optional callback (result, stream, text) fired as each line
+    is emitted — the CLI streams progress live instead of waiting for the
+    engine to return. The result is the in-flight BuildResult (fields set
+    so far).
     Returns BuildResult; never raises for expected failure stages."""
     import logging as _logging
 
     from . import brewutil, patchsource
     from . import patches as _patches_mod
 
-    res = BuildResult(ok=False, stage="config", returncode=2, lines=[])
+    res = BuildResult(ok=False, stage="config", returncode=2, lines=[],
+                      on_line=on_line)
     cfg = load_config()
     if not cfg:
         _emit(res, "err", "omlx-dev is not bootstrapped yet — run: "
