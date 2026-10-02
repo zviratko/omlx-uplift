@@ -746,22 +746,22 @@ function gsSpecRow(it, L, ctx) {
         });
     }
     if (c.attach) c.attach(control, L, ctx);
-    return gsRow(it.sec, gsRef(L, it.lab), gsRef(L, it.hint), control, it.opts);
+    const opts = Object.assign({}, it.opts);
+    if (flat && opts.flat === undefined) opts.flat = flat;   // one place, no repeats
+    return gsRow(it.sec, gsRef(L, it.lab), gsRef(L, it.hint), control, opts);
 }
 
 const GS_SPEC = [
     {t: 'Language'},
     {sec: 'ui', lab: () => C.tf('uplift.gs.ui.interface_language', 'Interface language'), ctl: {
-        k: 'sel', sec: 'ui', field: 'language', flat: 'ui_language', opts: () => Object.entries(GS_LABELS.lang)},
-     opts: {flat: 'ui_language'}},
+        k: 'sel', sec: 'ui', field: 'language', flat: 'ui_language', opts: () => Object.entries(GS_LABELS.lang)}},
 
 
     {t: 'Claude Code'},   // classic renders this on Status; Uplift keeps it with settings
     {sec: 'claude_code', lab: 'cc.mode', hint: 'cc.mode_hint', ctl: {
         k: 'sel', sec: 'claude_code', field: 'mode', flat: 'claude_code_mode',
         curFn: (ctx) => ctx.ccLocal ? 'local' : 'cloud',
-        opts: () => [['local', GS_LABELS.cc.local], ['cloud', GS_LABELS.cc.cloud]]},
-     opts: {flat: 'claude_code_mode'}},
+        opts: () => [['local', GS_LABELS.cc.local], ['cloud', GS_LABELS.cc.cloud]]}},
     {x: (body, L, ctx) => {
         if (!ctx.ccLocal) return;
         const dl = document.createElement('datalist'); dl.id = 'cc-models';
@@ -783,8 +783,7 @@ const GS_SPEC = [
     {t: 'Auth'},
     {sec: 'auth', lab: 'auth.api_key', hint: 'auth.api_key_hint', ctl: {
         k: 'text', field: 'api_key', flat: 'api_key', type: 'password',
-        ph: 'auth.api_key_placeholder', reload: true},
-     opts: {flat: 'api_key'}},
+        ph: 'auth.api_key_placeholder', reload: true}},
     {x: (body, L) => {
         const bpIn = document.createElement('input');
         bpIn.type = 'text'; bpIn.value = GS.base_path || '';
@@ -793,8 +792,7 @@ const GS_SPEC = [
         body.append(gsRow('auth', L.auth.base_path, L.auth.base_path_hint, bpIn));
     }},
     {sec: 'auth', lab: 'auth.skip', hint: (L) => L.auth.skip_hint + ' ' + L.auth.skip_warning, ctl: {
-        k: 'tog', field: 'skip_api_key_verification', flat: 'skip_api_key_verification'},
-     opts: {flat: 'skip_api_key_verification'}},
+        k: 'tog', field: 'skip_api_key_verification', flat: 'skip_api_key_verification'}},
 
     {t: 'Server'},
     {sec: 'server', lab: 'server.host', ctl: {
@@ -803,8 +801,7 @@ const GS_SPEC = [
     {sec: 'server', lab: 'server.port', ctl: {k: 'num', field: 'port', flat: 'port'},
      opts: {badge: true, flat: 'port'}},
     {sec: 'server', lab: 'server.log_level', ctl: {
-        k: 'sel', field: 'log_level', flat: 'log_level', opts: 'server.levels'},
-     opts: {flat: 'log_level'}},
+        k: 'sel', field: 'log_level', flat: 'log_level', opts: 'server.levels'}},
     {sec: 'server', lab: 'server.auto_start', hint: 'server.auto_start_hint', ctl: {
         k: 'tog', field: 'auto_start_on_launch', flat: 'auto_start_on_launch'},
      opts: {badge: true, flat: 'auto_start_on_launch'}},
@@ -854,14 +851,11 @@ const GS_SPEC = [
     {sec: 'model', lab: 'model.fallback', hint: 'model.fallback_desc', ctl: {
         // bool in the server schema — a checkbox like every binary option
         // (audit 2026-10-02: this was the only bool left as text input)
-        k: 'tog', field: 'model_fallback', flat: 'model_fallback'},
-     opts: {flat: 'model_fallback'}},
+        k: 'tog', field: 'model_fallback', flat: 'model_fallback'}},
     {sec: 'model', lab: 'model.hide_helper', hint: 'model.hide_helper_desc', ctl: {
-        k: 'tog', field: 'hide_helper_models', flat: 'hide_helper_models'},
-     opts: {flat: 'hide_helper_models'}},
+        k: 'tog', field: 'hide_helper_models', flat: 'hide_helper_models'}},
     {sec: 'model', lab: 'model.hf_cache', hint: 'model.hf_cache_desc', ctl: {
-        k: 'tog', sec: 'huggingface', field: 'hf_cache_enabled', flat: 'hf_cache_enabled'},
-     opts: {flat: 'hf_cache_enabled'}},
+        k: 'tog', sec: 'huggingface', field: 'hf_cache_enabled', flat: 'hf_cache_enabled'}},
     {x: (body, L) => {
         const hfp = GLUE.cell((GS.huggingface || {}).hf_cache_path || '\u2014');
         hfp.className = 'dim';
@@ -869,32 +863,29 @@ const GS_SPEC = [
     }},
     {sec: 'model', lab: 'model.idle', hint: 'model.idle_desc', ctl: {
         k: 'sel', sec: 'idle_timeout', field: 'idle_timeout_seconds', nullTo: '',
-        flat: 'idle_timeout_seconds', opts: 'model.idle_opts'},
-     opts: {flat: 'idle_timeout_seconds'}},
+        flat: 'idle_timeout_seconds', opts: 'model.idle_opts'}},
 
     {t: 'Generation Defaults'},
     {sec: 'gen', lab: 'gen.temperature', hint: 'gen.temperature_hint', ctl: {
         k: 'range', sec: 'sampling', field: 'temperature', flat: 'sampling_temperature',
-        min: 0, max: 2, step: 0.1}, opts: {flat: 'sampling_temperature'}},
+        min: 0, max: 2, step: 0.1}},
     {sec: 'gen', lab: 'gen.top_p', hint: 'gen.top_p_hint', ctl: {
         k: 'range', sec: 'sampling', field: 'top_p', flat: 'sampling_top_p',
-        min: 0, max: 1, step: 0.05}, opts: {flat: 'sampling_top_p'}},
+        min: 0, max: 1, step: 0.05}},
     {sec: 'gen', lab: 'gen.top_k', hint: 'gen.top_k_hint', ctl: {
-        k: 'num', sec: 'sampling', field: 'top_k', flat: 'sampling_top_k', min: 0},
-     opts: {flat: 'sampling_top_k'}},
+        k: 'num', sec: 'sampling', field: 'top_k', flat: 'sampling_top_k', min: 0}},
     {sec: 'gen', lab: 'gen.max_tokens', ctl: {
         k: 'num', sec: 'sampling', field: 'max_tokens', flat: 'sampling_max_tokens',
-        min: 1, max: 131072}, opts: {flat: 'sampling_max_tokens'}},
+        min: 1, max: 131072}},
     {sec: 'gen', lab: 'gen.max_ctx', hint: 'gen.max_ctx_hint', ctl: {
         k: 'num', sec: 'sampling', field: 'max_context_window', flat: 'sampling_max_context_window',
-        min: 1, max: 2097152}, opts: {flat: 'sampling_max_context_window'}},
+        min: 1, max: 2097152}},
     {sec: 'gen', lab: 'gen.max_policy', hint: 'gen.max_policy_hint', ctl: {
         k: 'num', sec: 'sampling', field: 'max_context_window_policy',
-        flat: 'sampling_max_context_window_policy', min: 1, max: 2097152, ph: 'None'},
-     opts: {flat: 'sampling_max_context_window_policy'}},
+        flat: 'sampling_max_context_window_policy', min: 1, max: 2097152, ph: 'None'}},
     {sec: 'gen', lab: 'gen.rep_pen', hint: 'gen.rep_pen_hint', ctl: {
         k: 'num', sec: 'sampling', field: 'repetition_penalty', flat: 'sampling_repetition_penalty',
-        min: 1, step: 0.05}, opts: {flat: 'sampling_repetition_penalty'}},
+        min: 1, step: 0.05}},
     {env: ['mtp']},        // ENV-2: MTP experimental tunables join their group
 
     {t: 'Resource Management'},
@@ -905,27 +896,22 @@ const GS_SPEC = [
      opts: {flat: 'max_concurrent_requests', badge: true}},
     {sec: 'res', lab: 'res.batch', hint: 'res.batch_hint', ctl: {
         k: 'num', sec: 'scheduler', field: 'embedding_batch_size',
-        flat: 'embedding_batch_size', min: 1}, opts: {flat: 'embedding_batch_size'}},
+        flat: 'embedding_batch_size', min: 1}},
     {sec: 'res', lab: 'res.chunked', hint: 'res.chunked_desc', ctl: {
-        k: 'tog', sec: 'scheduler', field: 'chunked_prefill', flat: 'chunked_prefill'},
-     opts: {flat: 'chunked_prefill'}},
+        k: 'tog', sec: 'scheduler', field: 'chunked_prefill', flat: 'chunked_prefill'}},
     {sec: 'res', lab: 'res.prio', ctl: {
         k: 'sel', sec: 'scheduler', field: 'prefill_priority', flat: 'prefill_priority',
-        opts: () => [['speed', GS_LABELS.res.prio_speed], ['context', GS_LABELS.res.prio_context]]},
-     opts: {flat: 'prefill_priority'}},
+        opts: () => [['speed', GS_LABELS.res.prio_speed], ['context', GS_LABELS.res.prio_context]]}},
     {sec: 'res', lab: 'res.fairness', hint: 'res.fairness_desc', ctl: {
-        k: 'tog', sec: 'scheduler', field: 'decode_fairness', flat: 'decode_fairness'},
-     opts: {flat: 'decode_fairness'}},
+        k: 'tog', sec: 'scheduler', field: 'decode_fairness', flat: 'decode_fairness'}},
     {sec: 'res', lab: 'res.guard', hint: 'res.guard_desc', ctl: {
-        k: 'tog', sec: 'memory', field: 'prefill_memory_guard', flat: 'memory_prefill_memory_guard'},
-     opts: {flat: 'memory_prefill_memory_guard'}},
+        k: 'tog', sec: 'memory', field: 'prefill_memory_guard', flat: 'memory_prefill_memory_guard'}},
     {sec: 'res', lab: 'res.tier', ctl: {
         k: 'sel', sec: 'memory', field: 'memory_guard_tier', flat: 'memory_guard_tier',
-        opts: 'res.tiers'}, opts: {flat: 'memory_guard_tier'}},
+        opts: 'res.tiers'}},
     {sec: 'res', lab: 'res.custom', show: (ctx) => ctx.tier === 'custom', ctl: {
         k: 'num', sec: 'memory', field: 'memory_guard_custom_ceiling_gb',
-        flat: 'memory_guard_custom_ceiling_gb', min: 1, step: 1, ph: 'res.custom_ph'},
-     opts: {flat: 'memory_guard_custom_ceiling_gb'}},
+        flat: 'memory_guard_custom_ceiling_gb', min: 1, step: 1, ph: 'res.custom_ph'}},
     {env: ['scheduler', 'memory']},
 
     {t: 'Cache'},
@@ -933,27 +919,22 @@ const GS_SPEC = [
         k: 'tog', sec: 'cache', field: 'enabled', flat: 'cache_enabled'},
      opts: {flat: 'cache_enabled', badge: true}},
     {sec: 'cache', lab: 'cache.hot_only', hint: 'cache.hot_only_hint', ctl: {
-        k: 'tog', field: 'hot_cache_only', flat: 'hot_cache_only'},
-     opts: {flat: 'hot_cache_only'}},
-    {sec: 'cache', lab: 'cache.ssd_dir', ctl: {k: 'text', field: 'ssd_cache_dir', flat: 'ssd_cache_dir'},
-     opts: {flat: 'ssd_cache_dir'}},
+        k: 'tog', field: 'hot_cache_only', flat: 'hot_cache_only'}},
+    {sec: 'cache', lab: 'cache.ssd_dir', ctl: {k: 'text', field: 'ssd_cache_dir', flat: 'ssd_cache_dir'}},
     {sec: 'cache', lab: 'cache.ssd_max', hint: 'cache.ssd_max_hint', ctl: {
-        k: 'text', field: 'ssd_cache_max_size', flat: 'ssd_cache_max_size', ph: '64GB'},
-     opts: {flat: 'ssd_cache_max_size'}},
+        k: 'text', field: 'ssd_cache_max_size', flat: 'ssd_cache_max_size', ph: '64GB'}},
     {sec: 'cache', lab: 'cache.hot_max', hint: 'cache.hot_max_hint', ctl: {
-        k: 'text', field: 'hot_cache_max_size', flat: 'hot_cache_max_size', ph: '8GB'},
-     opts: {flat: 'hot_cache_max_size'}},
+        k: 'text', field: 'hot_cache_max_size', flat: 'hot_cache_max_size', ph: '8GB'}},
 
     {t: 'MCP'},
     {sec: 'mcp', lab: 'mcp.path', ctl: {k: 'text', field: 'config_path', flat: 'mcp_config', ph: 'mcp.ph'},
      opts: {badge: true, flat: 'mcp_config'}},
     {sec: 'mcp', lab: 'mcp.expose', hint: 'mcp.expose_hint', ctl: {
-        k: 'tog', field: 'expose_tools', flat: 'mcp_expose_tools'},
-     opts: {flat: 'mcp_expose_tools'}},
+        k: 'tog', field: 'expose_tools', flat: 'mcp_expose_tools'}},
 
     {t: 'Usage & Network'},
     {sec: 'usage', lab: 'usage.history', hint: 'usage.history_hint', ctl: {
-        k: 'tog', field: 'usage_history', flat: 'usage_history'}, opts: {flat: 'usage_history'}},
+        k: 'tog', field: 'usage_history', flat: 'usage_history'}},
     {sec: 'net', lab: 'net.hf_ep', hint: 'net.hf_ep_hint', ctl: {
         k: 'text', sec: 'huggingface', field: 'endpoint', flat: 'hf_endpoint', ph: 'https://huggingface.co'},
      opts: {flat: 'hf_endpoint', badge: true}},
@@ -961,14 +942,11 @@ const GS_SPEC = [
         k: 'text', sec: 'modelscope', field: 'endpoint', flat: 'ms_endpoint', ph: 'https://www.modelscope.cn'},
      opts: {flat: 'ms_endpoint', badge: true}},
     {sec: 'net', lab: 'net.http_proxy', hint: 'net.proxy_hint', ctl: {
-        k: 'text', sec: 'network', field: 'http_proxy', flat: 'network_http_proxy'},
-     opts: {flat: 'network_http_proxy'}},
+        k: 'text', sec: 'network', field: 'http_proxy', flat: 'network_http_proxy'}},
     {sec: 'net', lab: 'net.https_proxy', hint: 'net.proxy_hint', ctl: {
-        k: 'text', sec: 'network', field: 'https_proxy', flat: 'network_https_proxy'},
-     opts: {flat: 'network_https_proxy'}},
+        k: 'text', sec: 'network', field: 'https_proxy', flat: 'network_https_proxy'}},
     {sec: 'net', lab: 'net.no_proxy', hint: 'net.no_proxy_hint', ctl: {
-        k: 'text', sec: 'network', field: 'no_proxy', flat: 'network_no_proxy'},
-     opts: {flat: 'network_no_proxy'}},
+        k: 'text', sec: 'network', field: 'no_proxy', flat: 'network_no_proxy'}},
     {sec: 'net', lab: 'net.ca_bundle', hint: 'net.ca_hint', ctl: {
         k: 'text', sec: 'network', field: 'ca_bundle', flat: 'network_ca_bundle'},
      opts: {flat: 'network_ca_bundle', badge: true}},
@@ -978,40 +956,31 @@ const GS_SPEC = [
         k: 'tog', sec: 'server', field: 'distributed_inference_enabled',
         flat: 'distributed_inference_enabled'}, opts: {flat: 'distributed_inference_enabled', badge: true}},
     {sec: 'adv', lab: 'adv.burst', hint: 'adv.burst_hint', ctl: {
-        k: 'sel', sec: 'server', field: 'burst_decode_mode', flat: 'burst_decode_mode', opts: 'adv.burst_opts'},
-     opts: {flat: 'burst_decode_mode'}},
+        k: 'sel', sec: 'server', field: 'burst_decode_mode', flat: 'burst_decode_mode', opts: 'adv.burst_opts'}},
     {sec: 'adv', lab: 'adv.sse', hint: 'adv.sse_hint', ctl: {
-        k: 'sel', sec: 'server', field: 'sse_keepalive_mode', flat: 'sse_keepalive_mode', opts: 'adv.sse_opts'},
-     opts: {flat: 'sse_keepalive_mode'}},
+        k: 'sel', sec: 'server', field: 'sse_keepalive_mode', flat: 'sse_keepalive_mode', opts: 'adv.sse_opts'}},
     {sec: 'adv', lab: 'adv.mid_sys', hint: 'adv.mid_sys_hint', ctl: {
-        k: 'tog', sec: 'server', field: 'preserve_mid_system_cache', flat: 'preserve_mid_system_cache'},
-     opts: {flat: 'preserve_mid_system_cache'}},
+        k: 'tog', sec: 'server', field: 'preserve_mid_system_cache', flat: 'preserve_mid_system_cache'}},
     {sec: 'adv', lab: 'adv.wide_proj', hint: 'adv.wide_proj_hint', ctl: {
-        k: 'tog', sec: 'server', field: 'qwen4_gdn_decode_wide_proj', flat: 'qwen4_gdn_decode_wide_proj'},
-     opts: {flat: 'qwen4_gdn_decode_wide_proj'}},
+        k: 'tog', sec: 'server', field: 'qwen4_gdn_decode_wide_proj', flat: 'qwen4_gdn_decode_wide_proj'}},
     {sec: 'adv', lab: 'adv.audio', hint: 'adv.audio_hint', ctl: {
-        k: 'num', sec: 'server', field: 'max_audio_upload_size', flat: 'max_audio_upload_size', min: 1},
-     opts: {flat: 'max_audio_upload_size'}},
+        k: 'num', sec: 'server', field: 'max_audio_upload_size', flat: 'max_audio_upload_size', min: 1}},
     {sec: 'adv', lab: 'adv.ane', hint: 'adv.ane_hint', ctl: {
-        k: 'tog', sec: 'cache', field: 'ane_compile_cache', flat: 'ane_compile_cache'},
-     opts: {flat: 'ane_compile_cache'}},
+        k: 'tog', sec: 'cache', field: 'ane_compile_cache', flat: 'ane_compile_cache'}},
     {sec: 'adv', lab: 'adv.wt', hint: 'adv.wt_hint', ctl: {
-        k: 'tog', sec: 'cache', field: 'hot_cache_write_through', flat: 'hot_cache_write_through'},
-     opts: {flat: 'hot_cache_write_through'}},
+        k: 'tog', sec: 'cache', field: 'hot_cache_write_through', flat: 'hot_cache_write_through'}},
     {sec: 'adv', lab: 'adv.blocks', hint: 'adv.blocks_hint', ctl: {
-        k: 'num', sec: 'cache', field: 'initial_cache_blocks', flat: 'initial_cache_blocks', min: 1},
-     opts: {flat: 'initial_cache_blocks'}},
+        k: 'num', sec: 'cache', field: 'initial_cache_blocks', flat: 'initial_cache_blocks', min: 1}},
     {sec: 'adv', lab: 'adv.gdn_store', hint: 'adv.gdn_store_hint', ctl: {
         k: 'sel', sec: 'cache', field: 'gdn_snapshot_storage', flat: 'gdn_snapshot_storage',
-        opts: 'adv.gdn_store_opts'}, opts: {flat: 'gdn_snapshot_storage'}},
+        opts: 'adv.gdn_store_opts'}},
     {sec: 'adv', lab: 'adv.gdn_pend', hint: 'adv.gdn_pend_hint', show: (ctx) => ctx.gdn === 'ssd_sidecar', ctl: {
         k: 'text', sec: 'cache', field: 'gdn_ssd_pending_max_size',
-        flat: 'gdn_ssd_pending_max_size', ph: '512MB'}, opts: {flat: 'gdn_ssd_pending_max_size'}},
+        flat: 'gdn_ssd_pending_max_size', ph: '512MB'}},
     {sec: 'adv', lab: 'adv.gdn_prec', hint: 'adv.gdn_prec_hint', show: (ctx) => ctx.gdn === 'ssd_sidecar', ctl: {
         k: 'sel', sec: 'cache', field: 'gdn_sidecar_precision', flat: 'gdn_sidecar_precision',
         opts: 'adv.gdn_prec_opts',
-},
-     opts: {flat: 'gdn_sidecar_precision'}},
+}},
     {env: ['engine']},     // ENV-2: engine tunables join Advanced
 ];
 
