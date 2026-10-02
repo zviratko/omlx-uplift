@@ -537,8 +537,9 @@ function createCharts() {
     // U38: ONE GiB axis — omlx footprint vs the settings ceiling vs the
     // kernel iogpu wired limit. U40: the hot cache joins as ONE summed
     // all-models line (the per-model top-3 lines wrapped the hover legend).
-    // The memory-% line is gone (its number lives on in the header label
-    // #mem-label). Limit lines stay absent when the limit is unset.
+    // The memory-% line is gone; the header label (#mem-label) shows the
+    // three absolute GiB figures instead (user 2026-10-02). Limit lines
+    // stay absent when the limit is unset.
     const memLine = (label, colorVar, dash) => {
         const s = line(label, colorVar, false, 'y');
         if (dash) s.dash = dash;
@@ -1255,7 +1256,35 @@ async function refreshSysPct() {
         const c = lat['rate.cached_tokens_s'];
         if (c && typeof c.v === 'number') { cachedTps = c.v; cachedTpsTs = c.ts * 1000; }
     } catch (_) { /* keep last value */ }
-    finally { sysFetching = false; }
+    finally { sysFetching = false; renderMemLabel(); }
+}
+
+/* Memory & cache card header (#mem-label): the three absolute figures the
+   chart plots, as "name value" pairs on the GiB ladder (user 2026-10-02:
+   replaces the old "XX% ok" memory-pressure readout, which compared
+   /admin/api stats against a budget the chart no longer draws). Values are
+   unit-less by request; the GiB axis says the unit. Absent series (unset
+   ceiling, no macmon iogpu sample) show '—', never a stale number. */
+function renderMemLabel() {
+    const el = $('mem-label');
+    if (!el) return;
+    const fresh = sysLive.ts && Date.now() - sysLive.ts < 120_000;
+    const v = n => (fresh && typeof n === 'number')
+        ? String(Math.round(n * 10) / 10) : '—';
+    if (!fresh && sysLive.usedGB === null) { el.textContent = ''; return; }
+    // DOM construction, not innerHTML (project rule); b styling exists in
+    // .card h2 .right b.
+    el.textContent = '';
+    const parts = [['omlx memory', sysLive.usedGB],
+                   ['settings ceiling', sysLive.ceilGB],
+                   ['iogpu wired limit', sysLive.iogpuGB]];
+    parts.forEach(([name, val], i) => {
+        if (i) el.append(' / ');
+        el.append(name + ' ');
+        const b = document.createElement('b');
+        b.textContent = v(val);
+        el.append(b);
+    });
 }
 
 /* U20 header chips: watts = mean over the last 60 s, temperature = MAX

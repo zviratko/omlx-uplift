@@ -1639,7 +1639,10 @@ function render(s) {
         // no free figure.
         ? `RAM ${C.fmtBytes(s.hotCacheBytes)}${s.hotCacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.hotCacheMaxBytes - s.hotCacheBytes)) : ''}`
         : '';
-    $('mem-label').textContent = s.memPercent !== null ? `${s.memPercent.toFixed(1)}% ${s.pressure || ''}` : '';
+    // #mem-label is owned by uplift_charts.js (renderMemLabel): the card
+    // header shows the three absolute GiB figures the chart plots
+    // (omlx memory / settings ceiling / iogpu wired limit), not the old
+    // "XX% ok" percent-pressure readout (user 2026-10-02).
 
     renderLive(s);
     renderRequestStats(s);
