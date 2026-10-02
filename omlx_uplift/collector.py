@@ -92,6 +92,34 @@ class Collector:
     def _macmon_retries(self, v):
         self._macmon_collector._retries = v
 
+    # -- lifecycle (register() drives this from the app lifespan) ---------
+
+    async def start(self):
+        if self._task is None or self._task.done():
+            self._task = asyncio.ensure_future(self._run())
+            log.info("uplift metrics collector started (tick %.1fs)", self._tick)
+
+    async def stop(self):
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._task = None
+        # U20: never leave an orphaned macmon pipe behind.
+        self._macmon_collector.shutdown()
+
+    async def _run(self):
+        while True:
+            try:
+                await asyncio.to_thread(self.sample_once)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # never die on a bad tick
+                log.exception("collector tick failed")
+            await asyncio.sleep(self._tick)
+
     def _macmon_collect(self, pairs: dict[str, float]) -> None:
         self._macmon_collector.collect(pairs)
 

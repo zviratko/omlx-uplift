@@ -100,6 +100,33 @@ def test_macmon_collector_owns_its_process_state():
 
 def test_collector_keeps_state_tick_persistence_only():
     src = (REPO / "omlx_uplift" / "collector.py").read_text()
-    assert len(src.splitlines()) < 240, "Collector did not shrink — split regressed"
+    assert len(src.splitlines()) < 260, "Collector did not shrink — split regressed"
     # one-tick transaction + signature map + daily purge stay on Collector
     assert "write_tick" in src and "_persisted" in src and "purge" in src
+
+
+def test_collector_lifecycle_survives_the_split():
+    """THE regression this ticket produced on 2026-10-03: the rewrite
+    dropped start()/stop() and the app lifespan died with
+    AttributeError before the service came up (caught only by the live
+    deploy smoke). register() calls collector.start(); shutdown calls
+    stop(); both must exist and stop() must release the macmon pipe."""
+    import asyncio
+    import inspect
+
+    from omlx_uplift.collector import Collector
+    from omlx_uplift.collectors import MacmonCollector
+
+    for name in ("start", "stop", "_run", "sample_once"):
+        assert callable(getattr(Collector, name)), f"Collector.{name} gone"
+    assert callable(getattr(MacmonCollector, "shutdown", None)), \
+        "MacmonCollector.shutdown gone — orphaned `macmon pipe` on restart"
+    c = Collector.__new__(Collector)          # no store needed for stop()
+    c._task = None
+    c._macmon_collector = MacmonCollector()
+    asyncio.run(c.stop())                      # must be a no-op, not a crash
+    # register()'s actual call site:
+    src = (REPO / "omlx_uplift" / "__init__.py").read_text()
+    assert "collector.start()" in src or ".start()" in src
+    sig = inspect.signature(Collector.start)
+    assert "self" in sig.parameters

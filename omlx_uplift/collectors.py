@@ -461,3 +461,18 @@ class MacmonCollector:
             pairs["fan.max_pct"] = 100.0 * f0["rpm"] / (f0.get("max_rpm") or 1)
         elif self._seen_fan:
             pairs["fan.max_rpm"] = 0.0
+
+    def shutdown(self) -> None:
+        """U20: never leave an orphaned macmon pipe behind (Collector.stop).
+        """
+        proc = self._proc
+        if proc and proc is not False:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:  # noqa: BLE001
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+        self._proc = None
