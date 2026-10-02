@@ -299,7 +299,16 @@ function seBind(kind, key, opts) {
             if (origV === undefined) delete t.overrides[key];
             else t.overrides[key] = origV;
         }
-        renderEditorFields(document.getElementById('se-fields'));
+        // FE-6 step 3: write the reverted value back into THIS control and
+        // clear this row's marks — v1 rebuilt every field (scroll jump, and
+        // any other half-typed value re-rendered from stale tab state).
+        if (input.type === 'checkbox') input.checked = !!seValues[key];
+        else input.value = seValues[key] == null ? '' : seValues[key];
+        window.UpliftDirty.applyRowState({
+            orig: origV, cur: seValues[key], row: label,
+            isSecret: MM_GLUE.SECRET_KEYS.has(key),
+            isRestart: seIsRuntimeKey(key),
+            display: MM_GLUE.gsDisplay });
         seUpdateSaveBtn();
     };
     // the NEW value is the live input itself; the slot only carries the
