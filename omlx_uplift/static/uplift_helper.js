@@ -14,6 +14,9 @@ const D = window.UpliftDom;
 const S = window.Uplift.state;
 const $ = D.$;
 const API = S.API;
+/* TST-1: the integration payload contract ships in uplift_gspec.js
+   (UMD); the export below keeps it visible for tests. */
+const INTEG_PREFIXED = window.UpliftGSpec.INTEG_PREFIXED;
 const MM = window.Uplift.modelmgr;
 const HG = {
     fetchJson: D.fetchJson,
@@ -176,8 +179,6 @@ async function renderHelperModels() {
     // ONLY the CLI-assistant keys carry the integrations_ prefix; markitdown_*
     // and web_search_* are sent bare (real oMLX drops unknown fields with a
     // silent success:true, so a blanket prefix looked saved but did nothing).
-    const INTEG_PREFIXED = new Set(['copilot_model', 'codex_model', 'opencode_model',
-        'openclaw_model', 'hermes_model', 'pi_model', 'openclaw_tools_profile']);
     async function saveIntegration(overrides) {
         Object.assign(integ, overrides || {});
         const body = {};
@@ -518,5 +519,5 @@ async function renderHelperModels() {
 
 
 window.Uplift = window.Uplift || {};
-window.Uplift.helper = { renderHelperModels };
+window.Uplift.helper = { renderHelperModels, INTEG_PREFIXED };
 })();

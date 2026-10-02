@@ -13,37 +13,18 @@
       theme ships chart-2 == heat == accent (signal amber) — a naive 5-slot
       list re-wears colors while looking like it has five.
 
-   Evaluates the REAL source region, same pattern as chart-zero-floor.test.cjs.
+   TST-1: the utilities load from uplift_chartkit.js as a UMD module —
+   require() gives the same functions the page uses. No source slicing.
    node --test tests/chart-skin-awareness.test.cjs */
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, allStaticJs } = require('./static-src.cjs');
 
+const ctx = require(path.join(STATIC_DIR, 'uplift_chartkit.js'));
 const src = fs.readFileSync(path.join(STATIC_DIR, 'uplift_charts.js'), 'utf8');
-
-// Extract the self-contained skin-color region: AXIS_FONT_PX .. seriesPalette.
-const start = src.indexOf('const AXIS_FONT_PX');
-assert.ok(start >= 0, 'AXIS_FONT_PX must be defined in uplift_charts.js');
-const palStart = src.indexOf('function seriesPalette');
-assert.ok(palStart > start, 'seriesPalette() must follow the font/tint helpers');
-const palEnd = src.indexOf('\n}\n', palStart);
-assert.ok(palEnd > palStart, 'seriesPalette() body must terminate');
-const region = src.slice(start, palEnd + 3);
-assert.ok(region.includes('function chartColors') && region.includes('function tint'),
-    'region must span chartColors + tint + seriesPalette (extraction moved — update this test)');
-
-const ctx = {};
-vm.runInNewContext(region + `
-this.AXIS_FONT_PX = AXIS_FONT_PX;
-this.AXIS_FONT_FALLBACK = AXIS_FONT_FALLBACK;
-this.axisFont = axisFont;
-this.tint = tint;
-this.SERIES_PALETTE_ORDER = SERIES_PALETTE_ORDER;
-this.seriesPalette = seriesPalette;`, ctx);
 
 /* ---------------- gap 1: skin mono font into the axes ---------------- */
 
@@ -68,6 +49,19 @@ test('every axis/legend font site goes through axisFont(col)', () => {
     assert.deepEqual(bare.map(m => m[0]), [], 'un-called axisFont reference left');
     assert.ok(!/labels:\s*\{\s*fontSize/.test(src),
         'legend.labels.fontSize is dead in vendored uPlot 1.6 — must not return');
+});
+
+test('chartColors() reads tokens through the injected reader (DOM-free)', () => {
+    const col = ctx.chartColors(n => ({ '--dim': '#101010', '--mono': 'FooMono' })[n] || '');
+    assert.equal(col.dim, '#101010');
+    assert.equal(col.font, 'FooMono');
+    // unset tokens fall back to the documented defaults
+    const empty = ctx.chartColors(() => '');
+    assert.equal(empty.dim, '#a5a096');
+    assert.equal(empty.blue, '#f2f0ea');
+    assert.equal(empty.font, '', 'empty --mono must reach axisFont as empty');
+    assert.equal(ctx.axisFont(empty),
+        ctx.AXIS_FONT_PX + ' ' + ctx.AXIS_FONT_FALLBACK);
 });
 
 /* ---------------- gap 2: non-hex tokens must not poison fills --------- */
@@ -100,9 +94,9 @@ test('tint() falls back to color-mix for colors it cannot parse', () => {
     }
 });
 
-test('no hex-alpha concatenation survives in the chart source', () => {
-    // comments describe the old bug; scan code only
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+test('no hex-alpha concatenation survives in the chart code', () => {
+    // comments describe the old bug; scan code only, whole JS surface
+    const code = allStaticJs().replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     const offenders = [...code.matchAll(/\b\w+\s*\+\s*'[0-9a-fA-F]{2}'/g)].map(m => m[0]);
     assert.deepEqual(offenders, [],
         'string-concat alpha is the SPARK-1 poisoning bug; route through tint()');
@@ -138,18 +132,9 @@ test('seriesPalette() tops a collapsed theme up to 5 distinct slots', () => {
     assert.equal(new Set(strokes).size, 4, 'a 4-series card must draw 4 distinct strokes');
 });
 
-test('seriesPalette() returns exactly the token colours for a rich skin', () => {
-    const rich = { blue: '#111111', gold: '#222222', heat: '#333333',
-                   accent: '#444444', dim: '#555555' };
-    const p = ctx.seriesPalette(rich);
-    assert.equal(p.length, 5, 'order must be chart-1, chart-2, heat, accent, dim');
-    assert.deepEqual(p, ['#111111', '#222222', '#333333', '#444444', '#555555']);
-    const strokes = [0, 1, 2, 3].map(i => p[i % p.length]);
-    assert.equal(new Set(strokes).size, 4);
-});
-
-test('seriesPalette() skips missing tokens and keeps dim in token order', () => {
-    const noHeat = { blue: '#111111', gold: '#222222', heat: '', accent: '#444444', dim: '#555555' };
+test('seriesPalette() honors token order and skips absent tokens', () => {
+    const noHeat = { blue: '#111111', gold: '#222222', heat: '', accent: '#444444',
+                     dim: '#555555' };
     const p = ctx.seriesPalette(noHeat);
     assert.deepEqual(p.slice(0, 4), ['#111111', '#222222', '#444444', '#555555']);
     const last = ctx.SERIES_PALETTE_ORDER[ctx.SERIES_PALETTE_ORDER.length - 1];

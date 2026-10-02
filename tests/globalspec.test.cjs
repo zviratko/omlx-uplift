@@ -36,26 +36,15 @@ function schemaKeys() {
 }
 
 /* ---- uplift save payload keys ---- */
-// NOTE: eval() here is deliberate — it parses object literals out of OUR OWN
-// repo source files (uplift.js / uplift-mock.py), never external input.
-function extractedJsConst(name, src) {
-    const start = src.indexOf(`const ${name} = `);
-    assert.ok(start >= 0, `const ${name} exists`);
-    let i = src.indexOf('{', start), j = i, depth = 0;
-    if (name.endsWith('SKIP')) { i = src.indexOf('new Set([', start); j = src.indexOf('])', i) + 2;
-        return eval(src.slice(i, j)); }
-    for (; j < src.length; j++) {
-        if (src[j] === '{') depth++;
-        else if (src[j] === '}') { depth--; if (!depth) break; }
-    }
-    return eval(`(${src.slice(i, j + 1)})`);
-}
+/* TST-1: GS_MAP / GS_PAYLOAD_SKIP / INTEG_PREFIXED ship in the UMD module
+   uplift_gspec.js — require() the contract instead of brace-walking and
+   eval()ing source text. mock's GS_FLAT_MAP stays regex-parsed (python). */
+const GSPEC = require(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_gspec.js'));
 
 test('GS_MAP + integration keys cover the full GlobalSettingsRequest schema', { skip: !HAS_CLASSIC && 'no classic checkout (set OMLX_SRC)' }, () => {
-    const gsMap = extractedJsConst('GS_MAP', uplift);
-    const skip = extractedJsConst('GS_PAYLOAD_SKIP', uplift);
-    const integBlock = [...uplift.matchAll(/INTEG_PREFIXED = new Set\(\[([\s\S]*?)\]\)/g)][0];
-    const prefixed = eval(`([${integBlock[1]}])`).map(k => 'integrations_' + k);
+    const gsMap = GSPEC.GS_MAP;
+    const skip = GSPEC.GS_PAYLOAD_SKIP;
+    const prefixed = [...GSPEC.INTEG_PREFIXED].map(k => 'integrations_' + k);
     // markitdown_* / web_search_* are saved bare and are schema keys verbatim
     const bareKeys = [...mock.matchAll(/INTEGRATION_BARE_KEYS = \{([\s\S]*?)\}/g)][0];
     const carried = new Set([...Object.keys(gsMap), ...prefixed,
@@ -71,7 +60,7 @@ test('GS_MAP + integration keys cover the full GlobalSettingsRequest schema', { 
 });
 
 test('gateway GS_FLAT_MAP keeps every GS_MAP key it must overlay in shadow mode', { skip: !HAS_CLASSIC && 'no classic checkout (set OMLX_SRC)' }, () => {
-    const gsMap = extractedJsConst('GS_MAP', uplift);
+    const gsMap = GSPEC.GS_MAP;
     const m = mock.match(/GS_FLAT_MAP = \{([\s\S]*?)\n\}/);
     assert.ok(m, 'GS_FLAT_MAP found in uplift-mock.py');
     const flatKeys = [...m[1].matchAll(/"([a-z_0-9]+)":/g)].map(x => x[1]);
@@ -81,7 +70,7 @@ test('gateway GS_FLAT_MAP keeps every GS_MAP key it must overlay in shadow mode'
 });
 
 test('payload skip list stays minimal', () => {
-    const skip = extractedJsConst('GS_PAYLOAD_SKIP', uplift);
+    const skip = GSPEC.GS_PAYLOAD_SKIP;
     // ui_dashboard_layout: classic's saved block layout — Uplift must not
     // round-trip it (omitting = "keep" server-side). Everything else in
     // the GlobalSettingsRequest schema must stay MAPPED and reachable.

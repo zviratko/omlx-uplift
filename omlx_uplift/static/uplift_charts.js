@@ -25,68 +25,22 @@ const CH_GLUE = {
     get revealGatedCard() { return window.Uplift._chartGlue.revealGatedCard; },
 };
 /* ---------------- charts ---------------- */
-/* Axis/legend type comes from the skin: chartColors() reads --mono and the
-   axis helpers build canvas font strings from it, so a skin that ships a
-   webfont restyles chart text too. The px size lives in ONE place; uPlot
-   wants a full canvas font shorthand, a bare family would break it. */
-const AXIS_FONT_PX = '9px';
-const AXIS_FONT_FALLBACK = 'ui-monospace, SFMono-Regular, Menlo, monospace';
-function axisFont(col) {
-    const fam = (col && typeof col.font === 'string') ? col.font.trim() : '';
-    return AXIS_FONT_PX + ' ' + (fam || AXIS_FONT_FALLBACK);
-}
-/* Skin tokens are CSS colors (skins.py accepts rgb()/hsl()/named values), so
-   hex-alpha concatenation (col + '22') silently poisons canvas fillStyle and
-   the path keeps the PREVIOUS fill. Parsed colors become rgba() with the same
-   effective alpha (0x22 -> 13%, 0x1c -> 11%); pure hex keeps its exact old
-   byte so no shipped skin shifts a single pixel. Unparseable values (named
-   colors) fall back to color-mix() — modern canvas parses it, and it is
-   never WORSE than the concatenation it replaces. */
-function cssRgb(color) {
-    if (typeof color !== 'string') return null;
-    const c = color.trim();
-    let m = c.match(/^#([0-9a-fA-F]{3})$/);
-    if (m) { const h = m[1].split('').map(x => x + x);
-             return [parseInt(h[0], 16), parseInt(h[1], 16), parseInt(h[2], 16), 1]; }
-    m = c.match(/^#([0-9a-fA-F]{6})$/);
-    if (m) { const h = m[1];
-             return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16),
-                     parseInt(h.slice(4, 6), 16), 1]; }
-    m = c.match(/^(?:rgb|rgba)\(\s*([\d.]+%?)[,\s]+([\d.]+%?)[,\s]+([\d.]+%?)(?:[,/\s]+([\d.]+%?))?\s*\)$/i);
-    if (m) {
-        const num = (v, max) => v.endsWith('%') ? parseFloat(v) / 100 * max : parseFloat(v);
-        const a = m[4] === undefined ? 1 : num(m[4], 1);
-        return [num(m[1], 255), num(m[2], 255), num(m[3], 255), Math.min(1, Math.max(0, a))];
-    }
-    m = c.match(/^hsla?\(\s*([\d.]+)(?:deg)?[,\s]+([\d.]+)%[,\s]+([\d.]+)%(?:[,/\s]+([\d.]+%?))?\s*\)$/i);
-    if (m) {
-        const h = ((parseFloat(m[1]) % 360) + 360) % 360 / 360,
-              s = Math.min(1, parseFloat(m[2]) / 100), l = Math.min(1, parseFloat(m[3]) / 100);
-        const f = n => { const k = (n + h * 12) % 12;
-            const a = s * Math.min(l, 1 - l);
-            return 255 * (l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)))); };
-        const a = m[4] === undefined ? 1
-            : (m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]));
-        return [f(0), f(8), f(4), Math.min(1, Math.max(0, a))];
-    }
-    return null;
-}
-const toHex2 = n => Math.round(Math.min(255, Math.max(0, n))).toString(16).padStart(2, '0');
-function tint(color, alphaHex) {
-    if (!color) return color;
-    if (/^#[0-9a-fA-F]{6}$/.test(color)) return color + alphaHex;
-    if (/^#[0-9a-fA-F]{3}$/.test(color)) {
-        const h = color.slice(1);
-        return '#' + h.split('').map(c => c + c).join('') + alphaHex;
-    }
-    const rgb = cssRgb(color);
-    if (rgb) {
-        const a = (Math.round(parseInt(alphaHex, 16) / 255 * 100) / 100).toFixed(2);
-        return `rgba(${Math.round(rgb[0])}, ${Math.round(rgb[1])}, ${Math.round(rgb[2])}, ${a})`;
-    }
-    const pct = Math.round(parseInt(alphaHex, 16) / 2.55) + '%';
-    return `color-mix(in srgb, ${color} ${pct}, transparent)`;
-}
+/* TST-1: the color/font/palette utilities live in uplift_chartkit.js (UMD,
+   DOM-free, require()-able by tests). Aliased here so every existing call
+   site keeps its bare name; chartColors() binds the page token reader. */
+const KIT = window.UpliftChartkit;
+const AXIS_FONT_PX = KIT.AXIS_FONT_PX;
+const AXIS_FONT_FALLBACK = KIT.AXIS_FONT_FALLBACK;
+const axisFont = KIT.axisFont;
+const cssRgb = KIT.cssRgb;
+const toHex2 = KIT.toHex2;
+const tint = KIT.tint;
+const SERIES_PALETTE_ORDER = KIT.SERIES_PALETTE_ORDER;
+const SERIES_PALETTE_MAX = KIT.SERIES_PALETTE_MAX;
+const seriesPalette = KIT.seriesPalette;
+const ZERO_FLOOR_RANGE = KIT.ZERO_FLOOR_RANGE;
+function chartColors() { return KIT.chartColors(); }
+
 /* Remember where the mouse is hovering, by TIMESTAMP not index: setData on a
    sliding window shifts indices, which made hovered values snap to the latest
    sample after the next poll (looked like hover only worked on data points). */
@@ -242,71 +196,12 @@ function memWindowed() {
         ts.map(t => (hi.has(t) ? hi.get(t) : null))];
 }
 
-function chartColors() {
-    const cs = getComputedStyle(document.documentElement);
-    const v = n => cs.getPropertyValue(n).trim();
-    /* --mono drives axis + legend text: a skin that ships a webfont and sets
-       the mono token must restyle chart text too (it restyles everything
-       else already). Unset -> the fixed stack in axisFont(). */
-    return { dim: v('--dim') || '#a5a096',
-             grid: v('--grid') || '#3a3b40',
-             blue: v('--chart-1') || '#f2f0ea',
-             gold: v('--chart-2') || '#e8a020',
-             heat: v('--heat'),
-             accent: v('--accent'),
-             font: v('--mono') };   /* '' when unset -> axisFont() falls back */
-}
-/* Multi-series colour slots (U19/U20 cycle with i % length). The token set
-   behind these is the skin's, so several often resolve to ONE value — the
-   default theme ships chart-2 == heat == accent (signal amber) and nerv sets
-   heat == chart-2 — so a naive 5-slot list re-wears colours while LOOKING
-   like it has five. De-dupe, then top up with sRGB midpoints of slots already
-   in play (plain hex output, no canvas feature needed): a 4-series card draws
-   4 distinct strokes even on a collapsed-token theme, and every added colour
-   is still a pure function of the skin, so it re-tints on skin change. `dim`
-   trails the state colours as the honest neutral. A skin whose values cannot
-   be parsed numerically keeps its smaller real palette — inventing contrast
-   the skin refused to declare would be a lie. */
-const SERIES_PALETTE_ORDER = ['blue', 'gold', 'heat', 'accent', 'dim'];
-const SERIES_PALETTE_MAX = 5;
-function seriesPalette(col) {
-    const out = [];
-    for (const k of SERIES_PALETTE_ORDER) {
-        const c = col[k];
-        if (!c) continue;
-        if (!out.some(x => x.toLowerCase() === c.toLowerCase())) out.push(c);
-    }
-    const mid = (a, b) => {   // null when either side is opaque to us
-        const x = cssRgb(a), y = cssRgb(b);
-        if (!x || !y) return null;
-        return '#' + [0, 1, 2].map(i => toHex2((x[i] + y[i]) / 2)).join('');
-    };
-    for (const [ai, bi] of [[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]]) {
-        if (out.length >= SERIES_PALETTE_MAX) break;
-        if (out.length <= ai || out.length <= bi) continue;
-        const c = mid(out[ai], out[bi]);
-        if (c && !out.some(x => x.toLowerCase() === c)) out.push(c);
-    }
-    return out;
-}
 /* Old positional memWindowed (hot1/hot2/hot3 columns) and the per-model
    top-3 series retired — the merged version above draws ONE summed
    hot-cache line (U40). */
 function seriesValue(v) {
     return v === null || v === undefined ? '—' : C.fmtCompact(v);
 }
-/* U8: throughput/counter axes start at 0. Auto-scaling to the data window
-   exaggerated tiny wiggles; a zero floor is honest for rate/count units.
-   NOT applied to memory % (already 0-100) or cache GB (auto remains
-   useful — values legitimately sit far from 0). */
-// uPlot assigns the range() return values to scale.min/max VERBATIM
-// (setScale does e.max=n[1]) — a null upper means "unbounded" to nothing
-// here: the scale stays null and the line is never drawn (2026-09-25:
-// U8 shipped [0, null] and every floored chart drew grid-less blank
-// while the legend/hover still showed values). Upper must be concrete;
-// idle all-zero windows get a readable 0..1 band.
-const ZERO_FLOOR_RANGE = (u, dmin, dmax) =>
-    [0, (dmax == null || dmax <= 0) ? 1 : dmax * 1.05];
 function line(label, colorVar, fill, scale) {
     const col = chartColors()[colorVar];
     return { label, scale: scale || 'y', stroke: col, width: 2,
