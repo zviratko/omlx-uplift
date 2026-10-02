@@ -17,6 +17,7 @@ Two mechanisms, both narrow:
 from __future__ import annotations
 
 import importlib.util
+import sys
 
 import pytest
 
@@ -34,10 +35,24 @@ def pytest_runtest_makereport(item, call):
     if _HAS_OMLX or call.when != "call" or call.excinfo is None:
         return
     exc = call.excinfo.value
-    if not (isinstance(exc, ModuleNotFoundError)
-            and str(exc.name or "").split(".")[0] == "omlx"):
+    reason = None
+    if isinstance(exc, ModuleNotFoundError) \
+            and str(exc.name or "").split(".")[0] == "omlx":
+        reason = f"needs the omlx package ({exc.name})"
+    elif isinstance(exc, SystemExit):
+        # kernelbuild._keg_dirs() etc. raise SystemExit('...omlx...not
+        # found') instead of importing omlx — same dependency, other door.
+        msg = str(exc)
+        if "omlx" in msg.lower():
+            reason = f"needs the live omlx keg ({msg})"
+    elif isinstance(exc, FileNotFoundError):
+        # macOS-only tools baked into paths (/usr/bin/codesign...) on a
+        # Linux runner: 'No such file or directory: '/usr/bin/<darwin>''
+        cmd = str(getattr(exc, "filename", "") or "")
+        if cmd.startswith("/usr/bin/") and not sys.platform.startswith("darwin"):
+            reason = f"needs a macOS binary ({cmd})"
+    if reason is None:
         return
     report = outcome.get_result()
     report.outcome = "skipped"
-    report.longrepr = (f"skipped: needs the omlx package ({exc.name}) — "
-                       "macOS keg python only")
+    report.longrepr = f"skipped: {reason} — macOS keg python only"
