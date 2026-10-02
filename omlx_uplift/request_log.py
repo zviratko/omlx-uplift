@@ -600,7 +600,9 @@ class RequestTracker:
                 entry = entries.get(model_id)
                 if entry is None or getattr(entry, "engine", None) is None:
                     continue
-                async_core = getattr(entry.engine, "_engine", None)
+                from .corewalk import async_core_for
+
+                async_core = async_core_for(entry)
                 sched = _find_scheduler(entry)
                 if sched is None:
                     continue
@@ -647,16 +649,10 @@ class RequestTracker:
 
 
 def _find_output_collectors(entry: Any) -> dict:
-    """AsyncEngineCore's per-request output collectors (same walk as the
-    admin stats route). Holder objects expose `.output` — a cumulative
-    RequestOutput whose output_text/finish_reason update as tokens decode.
-    """
-    try:
-        async_core = getattr(entry.engine, "_engine", None) if entry else None
-        core = getattr(async_core, "engine", None) if async_core else None
-        return getattr(core, "_output_collectors", {}) or {} if core else {}
-    except Exception:  # noqa: BLE001
-        return {}
+    """BE-2: corewalk owns the hop; alias kept for the module's callers."""
+    from .corewalk import output_collectors_for
+
+    return output_collectors_for(entry)
 
 
 def _collector_payload(collector: Any) -> dict:
@@ -685,14 +681,12 @@ def _collector_payload(collector: Any) -> dict:
 
 
 def _find_scheduler(entry: Any) -> Any:
-    """Same walk the admin stats route uses (AsyncEngineCore, else DFlash)."""
-    if entry is None or getattr(entry, "engine", None) is None:
-        return None
-    async_core = getattr(entry.engine, "_engine", None)
-    if async_core is not None:
-        core = getattr(async_core, "engine", None)
-        return getattr(core, "scheduler", None) if core else None
-    return getattr(entry.engine, "scheduler", None)
+    """BE-2: single walk now lives in corewalk.scheduler_for (was the
+    fifth copy of the same getattr hop); kept as a thin alias because
+    six call sites and tests reference the module-local name."""
+    from .corewalk import scheduler_for
+
+    return scheduler_for(entry)
 
 
 def _rows_from_snapshot(snap: dict[str, Any], model_id: str, now: float):
