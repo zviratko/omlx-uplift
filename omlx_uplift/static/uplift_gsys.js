@@ -204,8 +204,10 @@ const GS_RESTART_FIELDS = new Set([
     'cache_enabled', 'mcp_config', 'distributed_inference_enabled',
     'network_ca_bundle', 'hf_endpoint', 'ms_endpoint']);
 function gsQueueSave(flat, val) {           // edit -> queue, no fetch yet
+    // FE-6 step 3: the row marks itself dirty IN PLACE (markFieldDirty).
+    // The dead custom_model_prefixes re-render (no such field exists) is
+    // gone; the keystroke re-render that stole focus died with `reload`.
     markFieldDirty(flat, val);
-    if (['custom_model_prefixes'].includes(flat)) renderGlobalSettings();
 }
 function gsOrigFlat(flat) {
     const map = GS_MAP[flat];
@@ -250,8 +252,24 @@ function markFieldDirty(flat, val) {
 }
 function revertField(flat) {                // click on |original| chip
     delete gsDirty[flat];
-    renderGlobalSettings();                 // inputs rebuild from the baseline
+    // FE-6 step 3: put the current baseline value back into THIS row only —
+    // the full-page rebuild lost scroll position and other in-progress
+    // edits. gsValFlat mirrors what v1's rebuild rendered (shadow overlay
+    // wins, same as gsGet), then the row's dirty marks are recomputed.
+    gsSetControlValue(flat, gsValFlat(flat));
+    markFieldDirty(flat, gsValFlat(flat));
+    gsUpdateSaveBtn();
+    gsMarkSections();
     renderDirtyList();
+}
+function gsSetControlValue(flat, val) {
+    const row = document.querySelector('#gs-body [data-flat="' + flat + '"]');
+    const ctl = row && (row.querySelector('input[type=checkbox]') || row.querySelector('select')
+        || row.querySelector('textarea') || row.querySelector('input'));
+    if (!ctl) return false;
+    if (ctl.type === 'checkbox') ctl.checked = !!val;
+    else ctl.value = val == null ? '' : val;
+    return true;
 }
 function gsMarkSections() {
     for (const box of document.querySelectorAll('#gs-body .gs-box')) {
@@ -514,14 +532,14 @@ function gsText(sec, field, flat, L, extra) {
         if (extra.number) val = val === '' ? null : Number(val);
         if (extra.bool) val = inp.checked;
         gsQueueSave(flat, val);
-        // conditional-row refresh only on commit (blur/change): a full
-        // re-render on every keystroke would steal the input's focus
-        if (extra.reload && (!ev || ev.type === 'change')) renderGlobalSettings();
+        // FE-6 step 3: the old `reload` escape hatch rebuilt the WHOLE page
+        // on commit (api_key). No conditional row reads api_key; the focus
+        // bug class this workaround papered over cannot be re-introduced.
     };
     inp.addEventListener('input', queue);
     inp.addEventListener('change', queue);
     return inp;
-}
+}   // (gsText)
 
 function gsToggle(flat, on) {
     const t = window.UpliftWidgets.build('bool', { checked: on }).el;
@@ -541,7 +559,10 @@ function gsSelect(flat, options, cur) {
         let v = sel.value === '' ? null : sel.value;
         if (v !== null && typeof cur === 'number') v = Number(v);
         gsQueueSave(flat, v);
-        renderGlobalSettings();       // refresh conditional rows (x-show parity)
+        // FE-6 step 3: conditional visibility updated SURGICALLY (below);
+        // structural cases (Claude-Code mode flip: 3 rows + a datalist, or
+        // a box left without its header) keep the honest full rebuild.
+        gsVisibilitySync(flat);
     };
     return sel;
 }
@@ -741,7 +762,7 @@ function gsSpecRow(it, L, ctx) {
     } else {
         control = gsText(sec, c.field, flat, L, {
             number: c.k === 'num', bool: c.checked, type: c.type,
-            placeholder: gsRef(L, c.ph), reload: c.reload, list: c.list,
+            placeholder: gsRef(L, c.ph), list: c.list,
             min: c.min, max: c.max, step: c.step,
         });
     }
@@ -783,7 +804,7 @@ const GS_SPEC = [
     {t: 'Auth'},
     {sec: 'auth', lab: 'auth.api_key', hint: 'auth.api_key_hint', ctl: {
         k: 'text', field: 'api_key', flat: 'api_key', type: 'password',
-        ph: 'auth.api_key_placeholder', reload: true}},
+        ph: 'auth.api_key_placeholder'}},
     {x: (body, L) => {
         const bpIn = document.createElement('input');
         bpIn.type = 'text'; bpIn.value = GS.base_path || '';
@@ -984,6 +1005,72 @@ const GS_SPEC = [
     {env: ['engine']},     // ENV-2: engine tunables join Advanced
 ];
 
+/* FE-6 step 3: one show-predicate pass. Compares the rendered gated rows
+   against GS_SPEC truth and applies the SMALLEST update:
+     - exactly one gated row appears/disappears AND its section box is
+       not left headerless -> add/remove that row in place
+     - anything else structural (cc mode, box emptied) -> full rebuild
+   The page is still a staged DOM in v1 order, so the anchor for a gated
+   row is 'the last rendered gated row before it' (spec rows append in
+   order; ungated rows are never toggled). */
+const GS_GATED = ['memory_guard_custom_ceiling_gb', 'gdn_ssd_pending_max_size',
+                  'gdn_sidecar_precision'];
+function gsCtxNow() {
+    return {
+        ccLocal: (gsGet('claude_code', 'mode') || 'local') !== 'cloud',
+        tier: gsGet('memory', 'memory_guard_tier'),
+        gdn: gsGet('cache', 'gdn_snapshot_storage'),
+        prec: gsGet('cache', 'gdn_sidecar_precision'),
+    };
+}
+function gsVisibilitySync(changedFlat) {
+    const ctx = gsCtxNow();
+    const want = {}, have = {};
+    for (const f of GS_GATED) {
+        const item = GS_SPEC.find(i => i.ctl && i.ctl.flat === f);
+        want[f] = !!(item && (!item.show || item.show(ctx)));
+        have[f] = !!document.querySelector('#gs-body [data-flat="' + f + '"]');
+    }
+    const toAdd = GS_GATED.filter(f => want[f] && !have[f]);
+    const toDel = GS_GATED.filter(f => !want[f] && have[f]);
+    if (!toAdd.length && !toDel.length) return;
+    if (changedFlat === 'claude_code_mode' || toAdd.length + toDel.length > 1) {
+        renderGlobalSettings();   // structural or ambiguous: rebuild, it is honest
+        return;
+    }
+    if (toDel.length === 1) {
+        document.querySelector('#gs-body [data-flat="' + toDel[0] + '"]').remove();
+    } else {
+        const f = toAdd[0];
+        const item = GS_SPEC.find(i => i.ctl && i.ctl.flat === f);
+        const row = gsSpecRow(item, GS_LABELS, ctx);
+        const i = GS_GATED.indexOf(f);
+        let anchor = null;
+        for (let j = i - 1; j >= 0; j--) {
+            const a = document.querySelector('#gs-body [data-flat="' + GS_GATED[j] + '"]');
+            if (a) { anchor = a; break; }
+        }
+        const host = anchor ? anchor.parentNode : rowHostBox(gsSpecTitleOf(f));
+        if (!host) { renderGlobalSettings(); return; }
+        if (anchor) anchor.insertAdjacentElement('afterend', row);
+        else host.append(row);
+        // queued edits still apply to a freshly materialized row
+        if (f in gsDirty) markFieldDirty(f, gsDirty[f]);
+    }
+    gsMarkSections();
+}
+function gsSpecTitleOf(flat) {
+    const idx = GS_SPEC.findIndex(i => i.ctl && i.ctl.flat === flat);
+    for (let j = idx; j >= 0; j--) if (GS_SPEC[j].t) return GS_SPEC[j].t;
+    return null;
+}
+function rowHostBox(title) {
+    for (const box of document.querySelectorAll('#gs-body .gs-box')) {
+        if (box.dataset.sec === title) return box.querySelector('.gs-box-body');
+    }
+    return null;
+}
+
 function renderGlobalSettings() {
     const body = document.createElement('div');   // staged; grouped into boxes below
     body.textContent = '';
@@ -1034,6 +1121,7 @@ function renderGlobalSettings() {
             box = document.createElement('div');
             box.className = 'gs-box';
             box.dataset.ord = ord++;   // stable order for resize re-layout
+            box.dataset.sec = n.textContent.trim();   // FE-6: target for surgical updates
             const h = document.createElement('div');
             h.className = 'gs-box-title';
             h.textContent = n.textContent;
@@ -1087,7 +1175,8 @@ function renderGlobalSettings() {
         // re-render rebuilds inputs from the server baseline; put the
         // queued (unsaved) value back so the edit stays visible while typing
         const row = document.querySelector('#gs-body [data-flat="' + flat + '"]');
-        const ctl = row && (row.querySelector('input[type=checkbox]') || row.querySelector('select') || row.querySelector('input'));
+        const ctl = row && (row.querySelector('input[type=checkbox]') || row.querySelector('select')
+            || row.querySelector('textarea') || row.querySelector('input'));
         if (ctl) {
             if (ctl.type === 'checkbox') ctl.checked = !!wasDirty[flat];
             else ctl.value = wasDirty[flat] == null ? '' : wasDirty[flat];
