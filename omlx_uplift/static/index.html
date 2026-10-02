@@ -25,12 +25,12 @@
          temp | uptime; power/temp stay hidden while macmon is absent. -->
     <span class="hdr-stats">
         <span class="chip" id="chip-device">—</span>
-        <span class="chip" id="chip-power" hidden title="Package power, 60 s mean">—</span>
-        <span class="chip" id="chip-temp" hidden title="Max CPU/GPU temp, 60 s">—</span>
+        <span class="chip" id="chip-power" hidden title="Package power, 60 s mean" data-i18n-title="uplift.chip.power">—</span>
+        <span class="chip" id="chip-temp" hidden title="Max CPU/GPU temp, 60 s" data-i18n-title="uplift.chip.temp">—</span>
         <span class="chip" id="chip-uptime">—</span>
         <!-- gateway status only exists for the ?api= dev proxy mode; native
              hosting IS the server, so the old 'direct' chip stays hidden -->
-        <span class="chip" id="chip-gateway" title="Mock gateway status" hidden>—</span>
+        <span class="chip" id="chip-gateway" title="Mock gateway status" data-i18n-title="uplift.chip.gateway" hidden>—</span>
         <span class="spacer"></span>
         <button class="icon-btn" id="btn-motion" title="Toggle animations" data-i18n-title="uplift.btn.motion"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z" fill="currentColor" stroke="none"/></svg></button>
         <span class="dd" id="dd-theme">
@@ -205,13 +205,13 @@
 <section class="card wide page-card" data-id="models-admin-page" data-tab="models" data-sub="manager" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.models">Models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.models">Models</span> <span class="right" id="models-admin-sub"></span></h2>
         <div class="card-body">
             <div class="filterbar">
-                <input type="search" id="ma-filter" placeholder="filter by name…">
-                <select id="ma-type" title="Filter by model type">
-                    <option value="">all types</option>
+                <input type="search" id="ma-filter" placeholder="filter by name…" data-i18n-ph="uplift.models.filter_ph">
+                <select id="ma-type" title="Filter by model type" data-i18n-title="uplift.models.filter_type">
+                    <option value="" data-i18n="uplift.models.type_all">all types</option>
                 </select>
-                <label class="row"><input type="checkbox" id="ma-only-loaded"> loaded only</label>
-                <label class="row"><input type="checkbox" id="ma-only-fav"> favourites only</label>
-                <label class="row"><input type="checkbox" id="ma-present-only"> present only</label>
+                <label class="row"><input type="checkbox" id="ma-only-loaded"> <span data-i18n="uplift.models.only_loaded">loaded only</span></label>
+                <label class="row"><input type="checkbox" id="ma-only-fav"> <span data-i18n="uplift.models.only_fav">favourites only</span></label>
+                <label class="row"><input type="checkbox" id="ma-present-only"> <span data-i18n="uplift.models.only_present">present only</span></label>
                 <span class="spacer"></span>
                 <span class="prune-col">
                     <button class="se-btn danger" id="btn-prune">Prune model settings…</button>
@@ -224,18 +224,18 @@
         <div class="card-body"><div id="se-orphan" class="empty"></div></div></div></div></div></section><section class="card wide page-card" data-id="dl-page" data-tab="models" data-sub="downloader" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.downloader_full">Hugging Face downloader</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.downloader_full">Hugging Face downloader</span> <span class="right" id="dl-sub"></span></h2>
         <div class="card-body">
             <div class="filterbar">
-                <input type="search" id="dl-q" placeholder="search models on huggingface.co…">
-                <select id="dl-sort" title="result order">
-                    <option value="trending">trending</option>
-                    <option value="downloads">downloads</option>
-                    <option value="created">created</option>
-                    <option value="updated">updated</option>
-                    <option value="most_params">most params</option>
-                    <option value="least_params">least params</option>
-                    <option value="largest">largest</option>
-                    <option value="smallest">smallest</option>
+                <input type="search" id="dl-q" placeholder="search models on huggingface.co…" data-i18n-ph="uplift.dl.search_ph">
+                <select id="dl-sort" title="result order" data-i18n-title="uplift.dl.sort">
+                    <option value="trending" data-i18n="uplift.dl.sort_trending">trending</option>
+                    <option value="downloads" data-i18n="uplift.dl.sort_downloads">downloads</option>
+                    <option value="created" data-i18n="uplift.dl.sort_created">created</option>
+                    <option value="updated" data-i18n="uplift.dl.sort_updated">updated</option>
+                    <option value="most_params" data-i18n="uplift.dl.sort_most_params">most params</option>
+                    <option value="least_params" data-i18n="uplift.dl.sort_least_params">least params</option>
+                    <option value="largest" data-i18n="uplift.dl.sort_largest">largest</option>
+                    <option value="smallest" data-i18n="uplift.dl.sort_smallest">smallest</option>
                 </select>
-                <label class="se-check" title="restrict to MLX-format models"><input type="checkbox" id="dl-mlx" checked>MLX only</label>
+                <label class="se-check" title="restrict to MLX-format models" data-i18n-title="uplift.dl.mlx_only_tip"><input type="checkbox" id="dl-mlx" checked><span data-i18n="uplift.dl.mlx_only">MLX only</span></label>
                 <button class="se-btn" id="dl-go" data-i18n="uplift.action.search">Search</button>
                 <span class="spacer"></span>
                 <button class="se-btn seg on" id="dl-tab-trending">TRENDING</button>
@@ -243,8 +243,8 @@
                 <button class="se-btn seg" id="dl-tab-search">SEARCH</button>
             </div>
             <div class="filterbar">
-                <input type="text" id="dl-repo" placeholder="direct repo id, e.g. mlx-community/Llama-3-8B-4bit">
-                <input type="password" id="dl-token" placeholder="HF token (saved in this browser)" style="max-width:240px">
+                <input type="text" id="dl-repo" placeholder="direct repo id, e.g. mlx-community/Llama-3-8B-4bit" data-i18n-ph="uplift.dl.repo_ph">
+                <input type="password" id="dl-token" placeholder="HF token (saved in this browser)" data-i18n-ph="uplift.dl.token_ph" style="max-width:240px">
                 <button class="se-btn" id="dl-direct" data-i18n="uplift.action.download">Download</button>
             </div>
             <div id="dl-results" class="admin-table"><div class="empty">Loading suggestions…</div></div>
@@ -266,7 +266,7 @@
             <h3 style="margin:16px 0 6px" data-i18n="uplift.label.tasks">Tasks</h3>
             <div id="up-tasks" class="admin-table"><div class="empty">No tasks</div></div>
         </div></div></div></div></section><section class="card wide page-card" data-id="usage-page" data-tab="usage" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.usage">Usage</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.usage">Usage</span>
-            <span class="right"><select id="opt-usage-range" title="Range"></select> <span id="usage-sub"></span></span></h2>
+            <span class="right"><select id="opt-usage-range" title="Range" data-i18n-title="uplift.usage.range"></select> <span id="usage-sub"></span></span></h2>
         <div class="card-body">
             <div class="pair" id="usage-tiles">
                 <div><div class="stat-value" id="v-u-req" style="font-size:22px">—</div><div class="stat-label">requests</div></div>
@@ -286,18 +286,18 @@
             <div class="filterbar">
                 <select id="logs-file"></select>
                 <select id="logs-level">
-                    <option value="">all levels</option>
+                    <option value="" data-i18n="uplift.logs.level_all">all levels</option>
                     <option value="TRACE">TRACE</option>
                     <option value="DEBUG">DEBUG</option>
                     <option value="INFO">INFO</option>
                     <option value="WARNING">WARNING</option>
                     <option value="ERROR">ERROR</option>
                 </select>
-                <input type="search" id="logs-grep" placeholder="grep…">
+                <input type="search" id="logs-grep" placeholder="grep…" data-i18n-ph="uplift.logs.grep_ph">
                 <select id="logs-lines">
                     <option>100</option><option selected>300</option><option>1000</option>
                 </select>
-                <label class="row"><input type="checkbox" id="logs-follow" checked> follow</label>
+                <label class="row"><input type="checkbox" id="logs-follow" checked> <span data-i18n="uplift.logs.follow">follow</span></label>
                 <span class="spacer"></span>
                 <button class="se-btn" id="logs-dl">download</button>
             </div>
@@ -373,9 +373,9 @@
                     </label>
                     <label class="pt-field"><span data-i18n="uplift.patches.lbl_source">source</span>
                         <select id="pt-src-kind" aria-label="Source kind">
-                            <option value="github_pr">GitHub PR</option>
-                            <option value="url">URL</option>
-                            <option value="upload">Upload</option>
+                            <option value="github_pr" data-i18n="uplift.patches.src_pr">GitHub PR</option>
+                            <option value="url" data-i18n="uplift.patches.src_url">URL</option>
+                            <option value="upload" data-i18n="uplift.patches.src_upload">Upload</option>
                         </select>
                     </label>
                     <input type="text" id="pt-src-repo" value="jundot/omlx" placeholder="owner/repo" size="14" data-i18n-ph="uplift.patches.ph_repo">
@@ -411,7 +411,7 @@
                 model or profile from the editor's "apply from" list. EDIT opens the settings bundle;
                 DELETE removes the template only — models already created from it keep their own settings.</div>
             <div id="ms-templates" class="admin-table"><div class="empty">—</div></div>
-        </div></div></div></div></section><section class="card wide page-card embed-card" data-id="cluster-page" data-tab="cluster" data-sub="cluster" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.tab.cluster">Cluster</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.tab.cluster">Cluster</span> <span class="right"><a class="embed-open" data-embed="cluster-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="cluster-page" title="Cluster" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="bench-tp-page" data-tab="bench" data-sub="throughput" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.dropdown.performance">Throughput</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.dropdown.performance">Throughput</span> <span class="right"><a class="embed-open" data-embed="bench-tp-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="bench-tp-page" title="Throughput" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="bench-acc-page" data-tab="bench" data-sub="accuracy" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.dropdown.accuracy">Intelligence</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.dropdown.accuracy">Intelligence</span> <span class="right"><a class="embed-open" data-embed="bench-acc-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="bench-acc-page" title="Accuracy" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="bench-ctx-page" data-tab="bench" data-sub="context" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.dropdown.context">Context</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.dropdown.context">Context</span> <span class="right"><a class="embed-open" data-embed="bench-ctx-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="bench-ctx-page" title="Context" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="chat-page" data-tab="chat" data-sub="chat" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.tab.chat">Chat</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.tab.chat">Chat</span> <span class="right"><a class="embed-open" data-embed="chat-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="chat-page" title="Chat" loading="lazy"></iframe></div></div></div></section></div>
+        </div></div></div></div></section><section class="card wide page-card embed-card" data-id="cluster-page" data-tab="cluster" data-sub="cluster" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.tab.cluster">Cluster</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.tab.cluster">Cluster</span> <span class="right"><a class="embed-open" data-embed="cluster-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="cluster-page" title="Cluster" data-i18n-title="uplift.tab.cluster" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="bench-tp-page" data-tab="bench" data-sub="throughput" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.dropdown.performance">Throughput</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.dropdown.performance">Throughput</span> <span class="right"><a class="embed-open" data-embed="bench-tp-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="bench-tp-page" title="Throughput" data-i18n-title="uplift.bench.throughput" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="bench-acc-page" data-tab="bench" data-sub="accuracy" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.dropdown.accuracy">Intelligence</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.dropdown.accuracy">Intelligence</span> <span class="right"><a class="embed-open" data-embed="bench-acc-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="bench-acc-page" title="Accuracy" data-i18n-title="uplift.bench.accuracy" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="bench-ctx-page" data-tab="bench" data-sub="context" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.dropdown.context">Context</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.dropdown.context">Context</span> <span class="right"><a class="embed-open" data-embed="bench-ctx-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="bench-ctx-page" title="Context" data-i18n-title="uplift.bench.context" loading="lazy"></iframe></div></div></div></section><section class="card wide page-card embed-card" data-id="chat-page" data-tab="chat" data-sub="chat" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="navbar.tab.chat">Chat</span></div></div><div class="card-pad embed-pad"><h2><span data-i18n="navbar.tab.chat">Chat</span> <span class="right"><a class="embed-open" data-embed="chat-page" href="#" target="_blank" rel="noopener" data-i18n="uplift.layout.open_new" data-i18n-title="uplift.layout.open_new">Open in new tab ↗</a></span></h2><iframe class="embed-frame" data-embed-id="chat-page" title="Chat" data-i18n-title="uplift.tab.chat" loading="lazy"></iframe></div></div></div></section></div>
 
 </div>
 

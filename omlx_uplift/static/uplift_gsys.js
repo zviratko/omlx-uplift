@@ -637,7 +637,7 @@ function gsTitle(t) {
 async function pollGlobalSettings() {
     let d;
     try { d = await GLUE.fetchJson(`${API}/admin/api/global-settings`); }
-    catch (err) { GLUE.emptyMsg($('gs-body'), 'global-settings not served (' + err.message + ')'); return; }
+    catch (err) { GLUE.emptyMsg($('gs-body'), C.tf('uplift.gsys.not_served', 'global-settings not served (') + err.message + ')'); return; }
     // never clobber queued edits with a background poll; merge server state
     // under the dirty overrides so inputs stay put until SAVE
     if (Object.keys(gsDirty).length) {
@@ -779,7 +779,7 @@ async function envSave(fields) {
         for (const s of (r.shadowed || [])) ENV_SHADOW[s.name] = s.value_masked;
         return true;
     } catch (err) {
-        GLUE.toast('env tunables: ' + err.message, 5000);
+        GLUE.toast(C.tf('uplift.gsys.env_fail', 'env tunables: ') + err.message, 5000);
         return false;
     }
 }

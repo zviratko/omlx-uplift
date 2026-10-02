@@ -1500,7 +1500,7 @@ async function saveRetention(which) {
         const r = await postJson(`${API}/uplift/api/retention`, body);
         m.value = r.metrics_days; l.value = r.log_days;
         m.dataset.prev = r.metrics_days; l.dataset.prev = r.log_days;
-    } catch (e) { toast('retention: ' + e.message, 4000); loadRetention(); }
+    } catch (e) { toast(C.tf('uplift.retention.fail', 'retention: ') + e.message, 4000); loadRetention(); }
 }
 $('opt-retention-metrics').onchange = () => saveRetention('m');
 $('opt-retention-log').onchange = () => saveRetention('l');

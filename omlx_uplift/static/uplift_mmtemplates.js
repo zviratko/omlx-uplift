@@ -28,7 +28,7 @@ function renderTemplatesBox() {
     MM_GLUE.fetchJson(`${API}/admin/api/profile-templates`)
         .then(d => d.templates || []).catch(() => []).then(templates => {
         host.innerHTML = '';   // empty string + static markup only, no user data
-        if (!templates.length) { D.emptyMsg(host, 'No global templates'); return; }
+        if (!templates.length) { D.emptyMsg(host, C.t('uplift.mm.no_templates')); return; }
         window.__seTemplates = templates;
         for (const t of templates) {
             const row = document.createElement('div'); row.className = 'urow admin tpl';

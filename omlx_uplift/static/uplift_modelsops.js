@@ -262,7 +262,7 @@ function renderQuantizer() {
             QG.postJson(`${API}/admin/api/oq/start`, payload).then(() => {
                 QG.toast(`quantize queued${QG.GW_LIVE ? '' : ' (shadow)'}: ` + m.name);
                 MO.tasks('qz-tasks', 'oq');
-            }).catch(e => QG.toast('quantize: ' + e.message))
+            }).catch(e => QG.toast(C.tf('uplift.mo.quantize_fail', 'quantize: ') + e.message))
               .finally(() => { start.disabled = false; });
         };
     }
@@ -314,7 +314,7 @@ function renderUploader() {
             st.models = d.oq_models || [];
             $('up-sub').textContent = `${st.models.length} oQ models`;
             list.innerHTML = '';
-            if (!st.models.length) { D.emptyMsg(list, 'No oQ models found in model directories.'); return; }
+            if (!st.models.length) { D.emptyMsg(list, C.t('uplift.mo.none_found')); return; }
             for (const m of st.models) {
                 const row = document.createElement('div'); row.className = 'urow usage';
                 const name = QG.cell(m.name); name.className = 'uname';
@@ -373,7 +373,7 @@ function renderUploader() {
                 QG.toast(`upload queued${QG.GW_LIVE ? '' : ' (shadow)'}: ` + repo.value.trim());
                 overlay.remove();
                 MO.tasks('up-tasks', 'upload');
-            }).catch(e => QG.toast('upload: ' + e.message))
+            }).catch(e => QG.toast(C.tf('uplift.mo.upload_fail', 'upload: ') + e.message))
               .finally(() => { bGo.disabled = false; });
         };
         const bar = document.createElement('div');

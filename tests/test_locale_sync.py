@@ -18,7 +18,13 @@ STATIC = Path(__file__).resolve().parents[1] / "omlx_uplift" / "static"
 LOCALES = Path(__file__).resolve().parents[1] / "omlx_uplift" / "locales"
 LOCALES_EXPECTED = ["en", "es", "fr", "ja", "ko", "pt-BR", "ru", "zh-TW", "zh", "cs"]
 OWNED_PREFIXES = ("uplift.req.", "uplift.layout.retention_", "uplift.env.",
-                  "uplift.inflight.", "uplift.theme.")
+                  "uplift.inflight.", "uplift.theme.",
+                  # I18N-1 leak sweep: every prefix that got new keys must be
+                  # cross-locale enforced so the batch rule keeps holding
+                  "uplift.bench.", "uplift.chip.", "uplift.dl.", "uplift.feed.",
+                  "uplift.gsys.", "uplift.helper.", "uplift.logs.", "uplift.mm.",
+                  "uplift.mo.", "uplift.models.", "uplift.retention.",
+                  "uplift.patches.")
 
 
 def _locale(lang):

@@ -36,7 +36,7 @@ async function openPruneDialog() {
         const known = new Set(MM.adminModels.map(m => m.id));
         profs = (idx.profiles || []).filter(p => !known.has(p.base)
             || orphans.includes(p.base));
-    } catch (err) { HG.toast('prune check failed: ' + err.message); return; }
+    } catch (err) { HG.toast(C.tf('uplift.helper.prune_check_fail', 'prune check failed: ') + err.message); return; }
     if (!orphans.length && !profs.length) { HG.toast(C.t('uplift.toast.nothing_to_prune')); return; }
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -103,12 +103,12 @@ async function openPruneDialog() {
         try {
             const r = await HG.postJson(`${API}/admin/api/prune-model-settings`,
                 { ids, profiles: profSel });
-            HG.toast(`Pruned ${r.removed.length} setting record(s)`
+            HG.toast(C.tf('uplift.helper.pruned', 'Pruned {n} setting record(s)', { n: r.removed.length })
                 + (r.removed_profiles && r.removed_profiles.length
-                    ? `, ${r.removed_profiles.length} profile(s)` : ''));
+                    ? ', ' + C.tf('uplift.helper.pruned_profiles', '{n} profile(s)', { n: r.removed_profiles.length }) : ''));
             overlay.remove();
             MM.render(true);
-        } catch (err) { HG.toast('prune failed: ' + err.message); }
+        } catch (err) { HG.toast(C.tf('uplift.helper.prune_fail', 'prune failed: ') + err.message); }
     };
     bar.append(all, none, document.createElement('span'), cancel, doIt);
     box.append(h, sub, list, bar);
@@ -466,7 +466,7 @@ async function renderHelperModels() {
 
     const host = $('hm-list');
     host.textContent = '';
-    if (!helpers.length) { D.emptyMsg(host, 'No helper models'); return; }
+    if (!helpers.length) { D.emptyMsg(host, C.t('uplift.helper.none')); return; }
     for (const m of helpers) {
         const row = document.createElement('div'); row.className = 'urow usage';
         const name = HG.cell(m.id); name.className = 'uname';

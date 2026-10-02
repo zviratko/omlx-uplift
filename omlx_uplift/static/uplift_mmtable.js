@@ -86,7 +86,7 @@ function sortModels(rows) {
 async function renderModelAdmin(force) {
     let models;
     try { models = (await MM_GLUE.fetchJson(`${API}/admin/api/models`)).models; }
-    catch (_) { D.emptyMsg($('model-admin'), 'API unreachable'); return; }
+    catch (_) { D.emptyMsg($('model-admin'), C.t('uplift.mm.api_unreachable')); return; }
     S.adminModels = models;
     // expire/apply optimistic flag overrides against the fresh snapshot
     for (const m of models) {
@@ -153,7 +153,7 @@ async function renderModelAdmin(force) {
     const table = $('model-admin');
     table.innerHTML = '';
     if (!shown.length && !missing.length) {
-        D.emptyMsg(table, 'No match'); return; }
+        D.emptyMsg(table, C.t('uplift.mm.no_match')); return; }
     const head = document.createElement('div'); head.className = 'urow head admin';
     // meta columns (type/state/size) now live INSIDE the model MM_GLUE.cell's first
     // line, so their sort controls ride the header's left MM_GLUE.cell as chips
@@ -365,7 +365,7 @@ async function renderModelAdmin(force) {
         table.append(mbox);
     }
     if (missing.length) {
-        const sep = MM_GLUE.cell('Missing \u2014 stored settings, model not on disk');
+        const sep = MM_GLUE.cell(C.t('uplift.mm.missing_on_disk'));
         sep.className = 'sec-div';
         table.append(sep);
         for (const e of missing) {

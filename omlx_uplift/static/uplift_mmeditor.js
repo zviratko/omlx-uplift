@@ -1228,14 +1228,14 @@ async function saveTemplateEditor(tpl, panel) {
         await D.putJson(`${API}/admin/api/profile-templates/${encodeURIComponent(tpl.name)}`,
             { settings });   // putJson throws with the flattened detail on !ok
         msg.textContent = 'saved ✓';
-        MM_GLUE.toast('Template saved: ' + (tpl.display_name || tpl.name));
+        MM_GLUE.toast(C.tf('uplift.mm.tpl_saved', 'Template saved: ') + (tpl.display_name || tpl.name));
         seOrig = JSON.parse(JSON.stringify(seValues));
         seUpdateSaveBtn();
         MM_TPL.render();
         setTimeout(closeEditor, 1000);
     } catch (err) {
         msg.textContent = 'error: ' + err.message;
-        MM_GLUE.toast('Template save failed: ' + err.message);
+        MM_GLUE.toast(C.tf('uplift.mm.tpl_save_fail', 'Template save failed: ') + err.message);
     }
 }
 
@@ -1358,7 +1358,7 @@ function seRenderTabs(panel) {
         if (kind === 'msm') {
             MM_GLUE.fetchJson(`${API}/admin/api/models/${encodeURIComponent(id)}/settings`)
                 .then(d => seApplyIntoActiveTab(d.settings || {}, id + ' (missing)'))
-                .catch(e => MM_GLUE.toast('Load failed: ' + e.message));
+                .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + e.message));
         } else if (kind === 'msp') {
             const mid = decodeURIComponent(id.slice(0, id.indexOf('|')));
             const pname = id.slice(id.indexOf('|') + 1);
@@ -1366,9 +1366,9 @@ function seRenderTabs(panel) {
                 .then(d => {
                     const p = (d.profiles || []).find(x => x.name === pname);
                     if (p) seApplyIntoActiveTab(p.settings || {}, mid + ':' + pname + ' (missing)');
-                    else MM_GLUE.toast('profile not found: ' + pname);
+                    else MM_GLUE.toast(C.tf('uplift.mm.profile_missing', 'profile not found: ') + pname);
                 })
-                .catch(e => MM_GLUE.toast('Load failed: ' + e.message));
+                .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + e.message));
         } else if (kind === 'own') {
             const p = (window.__seProfiles || []).find(x => x.name === id);
             if (p) seApplyIntoActiveTab(p.settings || {}, p.display_name || p.name);
@@ -1390,7 +1390,7 @@ function seRenderTabs(panel) {
             MM_GLUE.toast(C.t('uplift.toast.loading_settings', {id: id}));
             MM_GLUE.fetchJson(`${API}/admin/api/models/${encodeURIComponent(id)}/settings`)
                 .then(d => seApplyIntoActiveTab(d.settings || {}, id))
-                .catch(e => MM_GLUE.toast('Load failed: ' + e.message));
+                .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + e.message));
         }
     };
     strip.append(drop);

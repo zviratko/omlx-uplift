@@ -43,7 +43,7 @@ function renderTasks(hostId, kind) {
             if (AC) AC.announceTasks(kind, tasks);
         } catch (_) { /* verdicts never block the board */ }
 
-        if (!tasks.length) { D.emptyMsg(host, 'No tasks'); return; }
+        if (!tasks.length) { D.emptyMsg(host, C.t('uplift.dl.no_tasks')); return; }
         let active = false;
         for (const t of tasks) {
             const r = taskRow(t);
@@ -62,14 +62,14 @@ function renderTasks(hostId, kind) {
             if (['downloading', 'quantizing', 'uploading', 'queued', 'pending'].includes(t.status)) {
                 active = true;
                 mkAct('CANCEL', 'Stop this task', () => DG.postJson(`${API}/admin/api/${kind}/cancel/${tid}`, {})
-                    .then(() => renderTasks(hostId, kind)).catch(e => DG.toast('cancel: ' + e.message)));
+                    .then(() => renderTasks(hostId, kind)).catch(e => DG.toast(C.tf('uplift.dl.cancel_fail', 'cancel: ') + e.message)));
                 r.classList.add('with-acts'); r.append(acts);
             } else if (kind === 'hf' && ['failed', 'cancelled', 'canceled', 'error'].includes((t.status || '').toLowerCase())) {
                 // U11 parity: classic offers retry (resumes partial files)
                 mkAct('RETRY', 'Resume this download from existing files', () =>
                     DG.postJson(`${API}/admin/api/hf/retry/${tid}`,
                         { hf_token: ($('dl-token') ? $('dl-token').value.trim() : '') })
-                        .then(() => renderTasks(hostId, kind)).catch(e => DG.toast('retry: ' + e.message)));
+                        .then(() => renderTasks(hostId, kind)).catch(e => DG.toast(C.tf('uplift.dl.retry_fail', 'retry: ') + e.message)));
                 r.classList.add('with-acts'); r.append(acts);
             }
             host.append(r);
@@ -128,7 +128,7 @@ function initDownloader() {
                 const tid = (r.task && r.task.task_id) || r.task_id || r.id || '';
                 DG.toast(C.t('uplift.toast.download_queued', {repo: repoId}) + (tid ? ` #${String(tid).slice(0, 8)}` : ''));
                 renderTasks('dl-tasks', 'hf');
-            }).catch(e => { DG.toast('download: ' + e.message);
+            }).catch(e => { DG.toast(C.tf('uplift.dl.download_fail', 'download: ') + e.message);
                 if (fromBtn) { fromBtn.disabled = false; fromBtn.textContent = 'download'; } });
     };
     function setTab(tab) {
@@ -145,7 +145,7 @@ function initDownloader() {
         const sub = D.$('dl-sub');
         host.innerHTML = '';
         const list = DL.tab === 'search' ? DL.search : DL.rec[DL.tab];
-        if (list == null) { D.emptyMsg(host, 'Loading suggestions…'); return; }
+        if (list == null) { D.emptyMsg(host, C.t('uplift.dl.loading')); return; }
         if (!list.length) {
             D.emptyMsg(host, DL.tab === 'search' ? 'No results — try another query.' : 'HF suggested models unavailable.');
             const pg = D.$('dl-pager'); if (pg) pg.innerHTML = '';
@@ -250,7 +250,7 @@ function initDownloader() {
         const mlx = D.$('dl-mlx') ? D.$('dl-mlx').checked : true;
         DL.q = q; DL.busy = true;
         const sub = D.$('dl-sub'); if (sub) sub.textContent = 'searching…';
-        const host = D.$('dl-results'); if (host) D.emptyMsg(host, 'Searching huggingface.co…');
+        const host = D.$('dl-results'); if (host) D.emptyMsg(host, C.t('uplift.dl.searching'));
         DG.fetchJson(`${API}/admin/api/hf/search?q=${encodeURIComponent(q)}&limit=100&sort=${sort}&mlx_only=${mlx}`).then(d => {
             DL.search = (d.models || []).map((m, i) => ({ ...m, rank: i + 1 }));
             DL._invalid = !!d.hf_token_invalid;
