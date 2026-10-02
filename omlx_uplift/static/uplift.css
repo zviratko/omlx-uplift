@@ -798,7 +798,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .logs .lv-TRACE, .logs .lv-DEBUG { opacity: 0.65; }
 
 /* ---- Toasts: solid rectangles, bracket corners ---- */
-#toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 6px; z-index: 50; }
+/* The stack is display:fixed bottom-right directly OVER the settings SAVE
+   bar — clicks must pass through to whatever is beneath (two-clicks-to-
+   save bug, 2026-10-02: a save/verdict toast landed on the button and
+   swallowed the next click). Nothing has ever been clickable in a toast;
+   the confetti library already sets pointer-events:none on its canvas. */
+#toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 6px; z-index: 50;
+    pointer-events: none; }
 .toast { background: var(--ink); color: var(--bg); border: 0; padding: 10px 16px;
     font: 400 12px/1.4 var(--mono); animation: toast-in .25s cubic-bezier(.22,1,.36,1); }
 /* ACHIEVEMENTS scorn: the machine's displeasure in its own colour. Rides

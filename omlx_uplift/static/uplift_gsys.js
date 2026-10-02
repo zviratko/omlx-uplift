@@ -896,7 +896,11 @@ function renderGlobalSettings() {
     dl.append(add);
     body.append(gsRow('model', L.model.dirs, '', dl));
     body.append(gsRow('model', L.model.fallback, L.model.fallback_desc,
-        gsText('model','model_fallback','model_fallback', L),
+        // bool in the server schema — a checkbox, like every binary
+        // option (was a text input: 'false' typed by hand was truthy-
+        // looking junk; audit 2026-10-02 found this the only bool not
+        // rendered as gsToggle)
+        gsToggle('model_fallback', gsGet('model','model_fallback')),
         { flat: 'model_fallback' }));
     body.append(gsRow('model', L.model.hide_helper, L.model.hide_helper_desc,
         gsToggle('hide_helper_models', gsGet('model','hide_helper_models')),
