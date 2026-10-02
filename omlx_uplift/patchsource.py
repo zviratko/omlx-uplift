@@ -247,15 +247,11 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
         patch["reversal"] = True
 
     is_dev = _patches.scope_touches_dev(effective_scope)
-    if is_dev:
-        gate_root = build_root
-        patterns = None            # UNPRUNED: the stored bytes are the full diff
-    else:
-        gate_root = tree_root
-        patterns = _patches.skip_patterns(manifest)
+    gate_root, gate_overrides, patterns = _gate_root_selection(
+        store, manifest, patch, tree_root, scope=effective_scope,
+        dev_root=build_root)          # add_patch gates the CALLER's root
     result = fetch_and_gate(source, gate_root,
-                            overrides=_pristine_overlay(store, patch, gate_root)
-                            if not is_dev else None,
+                            overrides=gate_overrides,
                             reverse=bool(patch.get("reversal")),
                             skip_patterns=patterns)
     if result["ok"] and effective_scope == _patches.SCOPE_BOTH:
@@ -352,30 +348,8 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
             "safeguards": result.get("safeguards", {}),
             "requires_approval": held}
 
-    v = store.next_version(patch)
-    pf_rel = _patches.rel(store.patch_file(patch_id, v), store.base_dir)
-    pf_full = os.path.join(store.base_dir, pf_rel)
-    os.makedirs(os.path.dirname(pf_full), exist_ok=True)
-    tmp = pf_full + ".tmp"
-    with open(tmp, "wb") as fh:
-        fh.write(data)
-    os.replace(tmp, pf_full)
-    from datetime import datetime, timezone
-
-    version = {
-        "v": v, "content_sha256": sha,
-        "source_head_sha": result.get("source_head_sha"),
-        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "patch_file": pf_rel,
-    }
-    if result.get("safeguards", {}).get("problems"):
-        version["safeguards"] = {
-            "problems": result["safeguards"]["problems"],
-            "codes": result["safeguards"]["codes"],
-        }
-    if result.get("note"):
-        version["root_note"] = result["note"]
-    patch["versions"].append(version)
+    version = _store_version(store, patch, result)
+    v = version["v"]
 
     # ADOPT: every hunk is already present in the live tree (the user
     # patched by hand or a previous omlx merged it) and no safeguard is
@@ -426,8 +400,9 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                     diffapply.record_merged_backup(data, tree_root, backup_dir)
                 else:
                     diffapply.record_pristine_backup(data, tree_root, backup_dir)
+                from datetime import datetime as _dt, timezone as _tz
                 version["applied"] = {"keg_id": keg,
-                                      "at": datetime.now(timezone.utc).isoformat(
+                                      "at": _dt.now(_tz.utc).isoformat(
                                           timespec="seconds"),
                                       "files": applied_files}
                 version["backup_dir"] = _patches.rel(backup_dir, store.base_dir)
@@ -490,6 +465,66 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
 
 def _desired_version_entry(store, patch) -> dict | None:
     return store.get_version(patch, patch.get("desired_version"))
+
+
+# --------------------------------------------------------------------------
+# BE-3 step 2: ONE gate-root rule. Three call sites (add_patch,
+# test_dry_run, check_all) each spelled "dev scope -> clean dev checkout
+# with the FULL unpruned diff; keg -> live tree with the pristine overlay
+# and manifest skip patterns"; check_all's copy silently omitted future
+# drift. Selection returns (root, overrides, skip_patterns); a falsy root
+# for a dev-touching scope means dev-src is missing and the CALLER owns
+# the error wording (each site has its own UI/CLI contract).
+# --------------------------------------------------------------------------
+
+_DEV_ROOT_DEFAULT = object()
+
+
+def _gate_root_selection(store, manifest, patch, tree_root: str, *,
+                         scope: str | None = None,
+                         dev_root=_DEV_ROOT_DEFAULT):
+    """(root, overrides, skip_patterns) for gating this patch."""
+    scope = scope or _patches.patch_scope(patch)
+    if _patches.scope_touches_dev(scope):
+        root = dev_build_root() if dev_root is _DEV_ROOT_DEFAULT else dev_root
+        return root, None, None        # UNPRUNED: stored bytes are the full diff
+    return (tree_root, _pristine_overlay(store, patch, tree_root),
+            _patches.skip_patterns(manifest))
+
+
+def _store_version(store, patch: dict, result: dict) -> dict:
+    """BE-3 step 2: write the gated diff to the patch store and append the
+    version entry — ONE schema everywhere (add_patch and check_all's drift
+    detector previously carried near-copies, and the check_all one lacked
+    safeguards/root_note, so update candidates silently lost the fields
+    the pending path enforced. Superset schema now: both paths record
+    them). Returns the version dict (appended, not yet saved)."""
+    from datetime import datetime, timezone
+
+    v = store.next_version(patch)
+    data = result["diff"]
+    pf_rel = _patches.rel(store.patch_file(patch["id"], v), store.base_dir)
+    pf_full = os.path.join(store.base_dir, pf_rel)
+    os.makedirs(os.path.dirname(pf_full), exist_ok=True)
+    tmp = pf_full + ".tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, pf_full)
+    version = {
+        "v": v, "content_sha256": result["content_sha256"],
+        "source_head_sha": result.get("source_head_sha"),
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "patch_file": pf_rel,
+    }
+    if result.get("safeguards", {}).get("problems"):
+        version["safeguards"] = {
+            "problems": result["safeguards"]["problems"],
+            "codes": result["safeguards"]["codes"],
+        }
+    if result.get("note"):
+        version["root_note"] = result["note"]
+    patch["versions"].append(version)
+    return version
 
 
 def _pristine_overlay(store, patch, tree_root: str) -> dict | None:
@@ -770,18 +805,13 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
     data = _read_patch_file(store, desired)
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
-    if _patches.scope_touches_dev(_patches.patch_scope(p)):
-        root = dev_build_root()
-        if not root:
-            return {"ok": False,
-                    "reason": "dev-src checkout not found — dev patch "
-                              "cannot re-gate (omlx-uplift dev bootstrap)"}
-        result = validate(data, root, reverse=bool(p.get("reversal")),
-                          skip_patterns=None)
-    else:
-        result = validate(data, tree_root, overrides=_pristine_overlay(store, p, tree_root),
-                          reverse=bool(p.get("reversal")),
-                          skip_patterns=_patches.skip_patterns(manifest))
+    root, overrides, skip = _gate_root_selection(store, manifest, p, tree_root)
+    if not root:
+        return {"ok": False,
+                "reason": "dev-src checkout not found — dev patch "
+                          "cannot re-gate (omlx-uplift dev bootstrap)"}
+    result = validate(data, root, overrides=overrides,
+                      reverse=bool(p.get("reversal")), skip_patterns=skip)
     result.pop("diff", None)  # bytes are not JSON-serialisable; caller has the id
     p["last_verified"] = {"at": _patches.now_iso(),
                           "ok": result["ok"]}
@@ -886,21 +916,15 @@ def check_all(store, tree_root: str) -> dict:
         pid = p.get("id")
         if src.get("kind") not in ("github_pr", "url"):
             continue
-        if _patches.scope_touches_dev(_patches.patch_scope(p)):
-            root = dev_build_root()
-            if not root:
-                reports[pid] = {"check": "error",
-                                "reason": "dev-src checkout not found — "
-                                          "cannot re-gate a dev patch"}
-                continue
-            result = fetch_and_gate(src, root,
-                                    reverse=bool(p.get("reversal")),
-                                    skip_patterns=None)
-        else:
-            result = fetch_and_gate(src, tree_root,
-                                    overrides=_pristine_overlay(store, p, tree_root),
-                                    reverse=bool(p.get("reversal")),
-                                    skip_patterns=_patches.skip_patterns(manifest))
+        root, overrides, skip = _gate_root_selection(store, manifest, p, tree_root)
+        if not root:
+            reports[pid] = {"check": "error",
+                            "reason": "dev-src checkout not found — "
+                                      "cannot re-gate a dev patch"}
+            continue
+        result = fetch_and_gate(src, root, overrides=overrides,
+                                reverse=bool(p.get("reversal")),
+                                skip_patterns=skip)
         if not result["ok"]:
             reports[pid] = {"check": "error", "reason": result.get("reason")}
             continue
@@ -984,25 +1008,10 @@ def check_all(store, tree_root: str) -> dict:
                                       "the current tree: "
                                       + (result.get("reason") or "gate failed")}
             continue
-        v = store.next_version(p)
-        pf_rel = _patches.rel(store.patch_file(pid, v), store.base_dir)
-        pf_full = os.path.join(store.base_dir, pf_rel)
-        os.makedirs(os.path.dirname(pf_full), exist_ok=True)
-        tmp = pf_full + ".tmp"
-        with open(tmp, "wb") as fh:
-            fh.write(result["diff"])
-        os.replace(tmp, pf_full)
-        from datetime import datetime, timezone
-
-        p["versions"].append({
-            "v": v, "content_sha256": sha,
-            "source_head_sha": head,
-            "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "patch_file": pf_rel,
-            **({"safeguards": {"problems": result["safeguards"]["problems"],
-                               "codes": result["safeguards"]["codes"]}}
-               if result.get("safeguards", {}).get("problems") else {}),
-            **({"root_note": result["note"]} if result.get("note") else {})})
+        # BE-3 step 2 behavior fix: drift candidates now carry the SAME
+        # schema as add_patch (safeguards/root_note were silently dropped).
+        version = _store_version(store, p, result)
+        v = version["v"]
         store.set_state(p, "update_available", f"v{v} available from source")
         reports[pid] = {"check": "update_available", "v": v}
         changed_any = True
