@@ -464,11 +464,14 @@ async function gsSaveNow(fields) {
     // routes them to PUT /env-overrides; strip any residue defensively)
     for (const k of Object.keys(body)) if (isEnvFlat(k)) delete body[k];
     try {
-        const r = await fetch(`${API}/admin/api/global-settings`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        if (!r.ok) { GLUE.toast(C.t('uplift.toast.save_failed_http', {status: r.status})); return false; }
+        try {
+            await GLUE.postJson(`${API}/admin/api/global-settings`, body);
+        } catch (e) {
+            // FE-2: keep the status-only copy on an HTTP failure; network
+            // errors (no status) still fall through to the generic catch.
+            if (e.status) { GLUE.toast(C.t('uplift.toast.save_failed_http', {status: e.status})); return false; }
+            throw e;
+        }
         GS._shadow = body;
         // ACHIEVEMENTS: this save committed; judge what changed against the
         // PRE-save baseline (GS_ORIG is about to move). flat -> section.field

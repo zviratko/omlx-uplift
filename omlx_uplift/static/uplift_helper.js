@@ -184,12 +184,7 @@ async function renderHelperModels() {
         for (const [k, v] of Object.entries(integ))
             body[INTEG_PREFIXED.has(k) ? 'integrations_' + k : k] = v;
         try {
-            const r = await fetch(`${API}/admin/api/global-settings`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            const res = await r.json().catch(() => ({}));
+            const res = await HG.postJson(`${API}/admin/api/global-settings`, body);
             if (res.success === false) throw new Error(res.message || 'rejected');
             HG.toast(C.t('uplift.toast.integration_saved'));
             return true;

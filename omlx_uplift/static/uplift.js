@@ -171,9 +171,7 @@ function applyI18n(root) {
 async function loadLocale(lang) {
     try {
         const url = API + '/uplift/api/locale' + (lang ? '?lang=' + encodeURIComponent(lang) : '');
-        const r = await fetch(url, { credentials: 'same-origin' });
-        if (!r.ok) throw new Error('locale HTTP ' + r.status);
-        const j = await r.json();
+        const j = await fetchJson(url);   // FE-2: same-origin cookies are fetch's default anyway
         C.setLocale(j.lang, j.strings);
         GSY.gsLocalize();
         applyI18n(document);
@@ -2226,30 +2224,29 @@ function modelSettingsFields() {
 async function putModelSettings(model, settings) {
     settings = window.UpliftModelSpec.adaptToServerPayload(
         settings, await modelSettingsFields());
+    // FE-2: kit fetchJson + err.status. The classic PUT 404s for stored-only
+    // (missing) models — uplift's POST upserts instead (round 4). success:false
+    // on a 200 stays an error like before.
     const body = await S.trackWrite(async () => {
-        const res = await fetch(`${API}/admin/api/models/${encodeURIComponent(model)}/settings`,
-            { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(settings) });
-        return res.json().catch(() => ({ detail: 'http ' + res.status }));
+        try {
+            return await fetchJson(`${API}/admin/api/models/${encodeURIComponent(model)}/settings`,
+                { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(settings) });
+        } catch (e) {
+            if (e.status === 404) {
+                return postJson(`${API}/uplift/api/models/${encodeURIComponent(model)}/settings`, settings);
+            }
+            throw e;
+        }
     });
-    // missing (stored-only) models: the classic PUT 404s (no engine entry).
-    // The uplift POST upserts the stored record directly (round 4: missing
-    // settings are editable).
-    if (body.detail && /not found/i.test(String(body.detail))) {
-        return postJson(`${API}/uplift/api/models/${encodeURIComponent(model)}/settings`, settings);
-    }
-    if (body.detail && body.success !== true) throw new Error(JSON.stringify(body.detail));
-    if (body.success === false) throw new Error(JSON.stringify(body.detail || body));
+    if (body && body.success === false) throw new Error(JSON.stringify(body.detail || body));
     return body;
 }
 async function postModelAction(model, action) {
-    const body = await S.trackWrite(async () => {
-        const res = await fetch(`${API}/admin/api/models/${encodeURIComponent(model)}/${action}`,
-            { method: 'POST' });
-        return res.json().catch(() => ({ detail: 'http ' + res.status }));
-    });
-    if (body.detail && body.success !== true && body.deleted !== true)
-        throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail));
+    const body = await S.trackWrite(() =>
+        fetchJson(`${API}/admin/api/models/${encodeURIComponent(model)}/${action}`, { method: 'POST' }));
+    if (body && body.success === false && body.deleted !== true)
+        throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail || body));
     return body;
 }
 async function pollStats() {

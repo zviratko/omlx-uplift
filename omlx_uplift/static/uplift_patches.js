@@ -461,6 +461,7 @@ function patchCard(p, view) {
 
 async function ptShowDiff(id, v) {
     try {
+        // domkit-exempt: binary — plain-text diff body, not a JSON envelope
         const res = await fetch(`${API}/uplift/api/patches/diff/${id}/${v}`, { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const txt = await res.text();
