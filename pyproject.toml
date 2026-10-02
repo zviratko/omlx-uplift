@@ -17,6 +17,10 @@ dependencies = [
     "omlx",
     "fastapi>=0.110",
     "uvicorn",
+    # skins.py parses crate YAML directly; satisfied transitively by omlx
+    # today, but a direct import needs a direct declaration (CI without
+    # omlx proved it).
+    "pyyaml",
 ]
 
 [project.scripts]
