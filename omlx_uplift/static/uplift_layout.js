@@ -100,7 +100,9 @@
     //   row 3: Prefill, Generation, Requests, Tokens, Cache   (5 stat tiles,
     //          contents unchanged, dropped below In-flight)
     //   row 4: Throughput, Request sizes (2 charts/cards half-width)
-    //   rows 5-7: metric cards (4 per row)
+    //   rows 5-6: metric cards (3 per row, w=8 — even split, full width;
+    //          user 2026-10-02: gen / out / in tok/s, then req/s / memory /
+    //          cache efficiency)
     //   last: Events (full width)
     // Freeform board: every block carries an explicit h. Content refits
     // correct heights after first paint; positions never reflow sideways.
@@ -131,17 +133,18 @@
         // slot.
         // normalizeLayout drops 'feed' from saved layouts automatically —
         // existing users lose the Events card on next load, no migration.
-        // Metric cards: 4 per row (w=6), compact chart fill. The board
+        // Metric cards: 3 per row (w=8 — even split across all 24 columns,
+        // user 2026-10-02), compact chart fill. The board
         // owner may drop any of them; removed ones stay removed
         // (mergedBlocks memo in uplift.js). U31-U36 pass: five cards
         // retired (see the BLOCK_IDS note); the seven survivors re-pack
         // into 4+3 rows, no dead bands.
-        { id: 'met-avg-generation-tps', x: 0, y: 108, w: 6, h: 20 },
-        { id: 'met-rate-completion-tokens-s', x: 6, y: 108, w: 6, h: 20 },
-        { id: 'met-rate-prompt-tokens-s', x: 12, y: 108, w: 6, h: 20 },
-        { id: 'met-rate-requests-s', x: 18, y: 108, w: 6, h: 20 },
-        { id: 'met-cache-efficiency', x: 0, y: 128, w: 6, h: 20 },
-        { id: 'met-sys-used-bytes', x: 6, y: 128, w: 6, h: 20 },
+        { id: 'met-avg-generation-tps', x: 0, y: 108, w: 8, h: 20 },
+        { id: 'met-rate-completion-tokens-s', x: 8, y: 108, w: 8, h: 20 },
+        { id: 'met-rate-prompt-tokens-s', x: 16, y: 108, w: 8, h: 20 },
+        { id: 'met-rate-requests-s', x: 0, y: 128, w: 8, h: 20 },
+        { id: 'met-sys-used-bytes', x: 8, y: 128, w: 8, h: 20 },
+        { id: 'met-cache-efficiency', x: 16, y: 128, w: 8, h: 20 },
         { id: 'reqfeed', x: 0, y: 148, w: COLUMNS, h: 18 },
     ];
 
