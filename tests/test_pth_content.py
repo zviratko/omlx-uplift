@@ -27,12 +27,14 @@ def test_body_always_bootstraps_path_line_with_target(tmp_path, monkeypatch):
 def test_cellar_path_rewritten_to_stable_opt_symlink(tmp_path, monkeypatch):
     # Simulate running from a versioned Cellar dir; the .pth must point at
     # the stable opt/ symlink so `brew upgrade omlx-uplift` needs no remount.
+    # BE-1: pth_content lives in brewutil now — patch ITS __file__.
+    from omlx_uplift import brewutil
     fake = (tmp_path / "Cellar" / "omlx-uplift" / "HEAD-abc123"
             / "libexec" / "lib" / "python3.11" / "site-packages"
-            / "omlx_uplift" / "cli.py")
+            / "omlx_uplift" / "brewutil.py")
     fake.parent.mkdir(parents=True)
     fake.write_text("")
-    monkeypatch.setattr(cli, "__file__", str(fake))
+    monkeypatch.setattr(brewutil, "__file__", str(fake))
     body = cli._pth_content(tmp_path / "python")
     first = body.strip().splitlines()[0]
     assert "/Cellar/omlx-uplift/HEAD-abc123/" not in first

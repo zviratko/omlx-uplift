@@ -18,7 +18,9 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
+from dataclasses import dataclass, field
 
 from . import patches as _patches
 
@@ -807,3 +809,308 @@ def vanilla_port() -> int:
             return int(json.load(fh).get("port", 8000))
     except (OSError, ValueError):
         return 8000
+
+
+# ---------------------------------------------------------------------------
+# BE-1: the real dev-build engine (was cli.cmd_dev_install's body, which the
+# dashboard executed in-process as print code + 'RESULT:' scraping). Pure
+# data in/out: messages ride BuildResult.lines, callers decide what to
+# print (CLI) or what to surface (dashboard). The patch FileHandler is
+# added/removed around the whole pipeline in try/finally — the old early
+# returns leaked a handler into the long-running server per failed build.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BuildResult:
+    ok: bool
+    stage: str                       # config|clone|worktree|fetch|curated-
+                                     # sync|log|materialize|dry-run|build|ok
+    returncode: int
+    lines: list = field(default_factory=list)   # [(out|err, text)]
+    log_path: str | None = None
+    materialize: dict | None = None  # materialize() result dict
+    regate_failures: dict | None = None
+    upstreamed: dict | None = None
+    tip: str | None = None
+    sync_ref: str | None = None
+    base_sha: str | None = None
+    n_applied: int = 0
+    n_skipped: int = 0
+    cfg: dict | None = None      # refreshed dev.json after a successful build
+
+
+def _emit(res: BuildResult, stream: str, text: str) -> None:
+    res.lines.append((stream, text))
+
+
+def run_dev_build(*, with_custom_kernel: bool = False,
+                  with_grammar: bool = False, dry_run: bool = False,
+                  warn=None) -> BuildResult:
+    """One rebuild path (DEV-context decision 3): re-cut uplift-dev from
+    the synced base with one commit per enabled build patch, then
+    `brew install` (first build) or `brew reinstall` (rebuild). Both always
+    re-stage the branch tip (`brew upgrade` would no-op on a head).
+
+    warn: optional callable printing the DEV-context-7 coexistence warning
+    just before the brew subprocess (CLI passes its printer; the dashboard
+    passes None — the service restart it manages itself).
+    Returns BuildResult; never raises for expected failure stages."""
+    import logging as _logging
+
+    from . import brewutil, patchsource
+    from . import patches as _patches_mod
+
+    res = BuildResult(ok=False, stage="config", returncode=2, lines=[])
+    cfg = load_config()
+    if not cfg:
+        _emit(res, "err", "omlx-dev is not bootstrapped yet — run: "
+                          "omlx-uplift dev bootstrap")
+        return res
+    path = src_path(cfg)
+    if not os.path.isdir(os.path.join(path, ".git")):
+        _emit(res, "err", f"dev-src clone missing ({path}) — run: "
+                          "omlx-uplift dev bootstrap")
+        res.stage, res.returncode = "clone", 2
+        return res
+    try:
+        ensure_clone(cfg)            # drift guard before any fetch
+        if not worktree_clean(path):
+            _emit(res, "err", f"dev-src worktree is dirty: {path}\n"
+                              "uplift refuses to re-cut the branch over "
+                              "local edits — commit or discard them first.")
+            res.stage, res.returncode = "worktree", 1
+            return res
+        fetch_sync_ref(cfg)
+    except DevsrcError as exc:
+        _emit(res, "err", f"dev-src: {exc}")
+        res.stage, res.returncode = "fetch", 1
+        return res
+
+    # curated catalog: first dev build on this machine surfaces the
+    # published patch set (default tier installs enabled, optional
+    # disabled). Best-effort: a dead network must never block a build.
+    try:
+        from . import curated as _curated
+        crt = _patches_mod.PatchStore().load()
+        if not any(p.get("curated") for p in crt.get("patches", [])):
+            root = _patches_mod._omlx_root()
+            if root:
+                cs = _curated.sync(_patches_mod.PatchStore(),
+                                   os.path.dirname(root), build_root=path)
+                fresh = [k for k, v in cs["report"].items()
+                         if str(v.get("sync", "")).startswith("added")]
+                if fresh:
+                    _emit(res, "out", "curated: " + ", ".join(sorted(fresh)) +
+                          " (default tier enabled — see omlx-uplift patch "
+                          "curated)")
+    except Exception as exc:                    # noqa: BLE001 — best-effort
+        _emit(res, "err", f"curated sync skipped: {exc}")
+
+    build_patches = patchsource.enabled_build_patches(
+        _patches_mod.PatchStore())
+    # patch process log: devsrc/patchsource/diffapply log their decisions
+    # on the shared "omlx_uplift" logger — a FileHandler here makes the
+    # patch pass auditable after the fact. try/finally: the OLD early
+    # returns skipped removeHandler and leaked one handler per failed
+    # build into the dashboard's process (LOG-1 family).
+    log_dir = os.path.join(_patches.default_base_dir(), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    res.log_path = os.path.join(log_dir, "dev-install.log")
+    _ph = _logging.FileHandler(res.log_path)
+    _ph.setFormatter(_logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    _root = _logging.getLogger("omlx_uplift")
+    _root.addHandler(_ph)
+    _root.setLevel(min(_root.level or _logging.INFO, _logging.INFO))
+    try:
+        return _run_dev_build_body(res, cfg, build_patches, patchsource,
+                                   brewutil, with_custom_kernel,
+                                   with_grammar, dry_run, warn)
+    finally:
+        _root.removeHandler(_ph)
+        _ph.close()
+
+
+def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
+                        with_custom_kernel, with_grammar, dry_run, warn):
+    import subprocess
+
+    _emit(res, "out", f"patch process log: {res.log_path}")
+    res.stage = "materialize"
+    mres = materialize(build_patches, cfg)
+    res.materialize = mres
+    if not mres.get("ok"):
+        _emit(res, "err", f"materialize FAILED: {mres.get('reason')}")
+        for c in mres.get("commits", []):
+            _emit(res, "err", f"  applied before failure: {c['id']} "
+                              f"v{c.get('v')}")
+        _emit(res, "err", "fix or disable the named patch, then re-run")
+        if mres.get("failed_patch"):
+            _emit(res, "err", "  one way out — disable it and re-run:")
+            _emit(res, "err", f"    omlx-uplift patch disable "
+                              f"{mres['failed_patch']}")
+        _emit(res, "err", f"  investigation: {res.log_path}")
+        res.ok, res.returncode = False, 1
+        return res
+
+    tip = mres["tip"]
+    res.tip = tip
+    res.sync_ref = cfg.get("sync_ref")
+    res.base_sha = mres.get("base") or ""
+    commits = mres.get("commits", [])
+    res.n_applied = len([c for c in commits if c.get("sha")])
+    res.n_skipped = len([c for c in commits
+                         if c.get("skipped") == "already-present"])
+    # a materialize skip means the base already carries the patch — when
+    # the patch is a since-MERGED PR that means it is no longer needed, so
+    # stamp it obsolete NOW (best-effort network). Must run BEFORE
+    # mark_dev_applied (which saves its own manifest reload — store-write
+    # ordering rule).
+    from . import patches as _patches_mod
+    store = _patches_mod.PatchStore()
+    res.upstreamed = patchsource.mark_upstreamed_if_merged(store, commits)
+    # the branch IS the apply step for dev/both scopes — record it so the
+    # dashboard stops showing 'pending' forever (reconcile never sees these)
+    patchsource.mark_dev_applied(store, commits)
+
+    # re-gate BEFORE the rebuild (DEV-context decision 9) — failures mark
+    # needs_review per patch, never silently skipped
+    res.regate_failures = recheck_build_patches(build_patches)
+    for pid, why in (res.regate_failures or {}).items():
+        _emit(res, "err", f"{pid}: RE-GATE FAILED (needs_review): {why}")
+        _emit(res, "err", "  one way out — disable it and re-run:")
+        _emit(res, "err", "    omlx-uplift patch disable " + pid)
+        _emit(res, "err", f"  investigation: {res.log_path}")
+
+    flags = set()
+    if with_custom_kernel:
+        flags.add("--with-custom-kernel")
+    if with_grammar:
+        flags.add("--with-grammar")
+    if not flags:
+        # user decision 2026-09-24: preserve custom-kernel + grammar from
+        # the user's build — dev receipt first, else the vanilla omlx one
+        flags = (brewutil.receipt_used_options("omlx-dev")
+                 or brewutil.receipt_used_options("omlx"))
+    cmd = brewutil.brew_build_cmd(flags)
+    if dry_run:
+        res.ok, res.returncode, res.stage = True, 0, "dry-run"
+        _emit(res, "out", "dry-run: would run: " + " ".join(cmd))
+        return res
+    if warn:
+        warn()
+    res.stage = "build"
+    # U19: brew reinstall DESTROYS the outgoing keg — clone it into the
+    # stash first so `dev use <old-sha>` stays possible. Best-effort: a
+    # failed stash must never block the rebuild.
+    try:
+        from . import kegstash
+
+        if kegstash.active_keg():
+            r = kegstash.stash()
+            _emit(res, "out", f"previous keg stashed: {r['name']} "
+                              f"({r['method']}) — rollback: omlx-uplift "
+                              f"dev use {r['name'][5:12]}")
+    except Exception as exc:
+        _emit(res, "err", f"keg stash skipped: {exc}")
+    # install owns the pin (decision 3): brew refuses to reinstall a pinned
+    # formula, so lift it for this one rebuild and restore it afterwards —
+    # on success AND on failure (the pin must never silently disappear)
+    subprocess.run(["brew", "unpin", "omlx-dev"], capture_output=True)
+    _emit(res, "out", "running: " + " ".join(cmd))
+    # --quiet skips brew's caveats entirely (formula_installer: return if
+    # quiet?) — the restart hint we print after RESULT replaces them
+    proc = subprocess.run([*cmd, "--quiet"])
+    if proc.returncode != 0:
+        subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
+        _emit(res, "err", "brew build FAILED — dev keg untouched "
+                          "(pin restored)")
+        _emit(res, "err", f"  investigation: {res.log_path}")
+        res.ok, res.returncode = False, proc.returncode
+        return res
+    subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
+    cfg = load_config() or cfg
+    cfg["built_sha"] = tip
+    # DEV-11: the base commit this keg was cut from — the boot hook
+    # compares the CURRENT sync-ref tip against it to decide "HEAD moved"
+    # without re-running materialize.
+    cfg["built_base"] = res.base_sha
+    # wall-clock build completion: the dashboard compares it against the
+    # running service's start time to show RESTART NEEDED (DEV-6)
+    cfg["built_at"] = _patches.now_iso()
+    save_config(cfg)
+    res.cfg = cfg
+    brewutil.mount_into_dev_keg()
+    _emit(res, "out", f"omlx-dev built from {tip[:12]}; .pth mount "
+                      "refreshed")
+    res.ok, res.returncode, res.stage = True, 0, "ok"
+    return res
+
+
+def recheck_build_patches(build_patches: list[dict]) -> dict:
+    """BE-1(4): public re-gate of every enabled build patch against the
+    freshly checked-out base — the loop that cli._regate_build_patches used
+    to reimplement from devsrc PRIVATES. Gated against a detached worktree
+    at the pristine base, each patch applied in materialization order so
+    the next gates against the tree materialize actually built.
+    Returns {patch_id: reason} for failures (state=needs_review stamped,
+    store saved once, only on failures)."""
+    from . import patchsource
+
+    cfg = load_config() or {}
+    from . import patches as _patches_mod
+    store = _patches_mod.PatchStore()
+    failures: dict[str, str] = {}
+    if not build_patches or not cfg.get("src_path"):
+        return failures
+    path = src_path(cfg)
+    tmp = tempfile.mkdtemp(prefix="uplift-regate-")
+    try:
+        wt = detached_base_worktree(cfg, tmp)
+    except DevsrcError as exc:
+        _log.warning("re-gate skipped (worktree at base failed): %s", exc)
+        return failures
+    try:
+        manifest = store.load()
+        for p in build_patches:
+            # gate against the tree as the NEXT patch will find it: base +
+            # all earlier patches in materialization order
+            entry = store.find(manifest, p["id"])
+            if entry is None:
+                continue
+            result = patchsource.validate(
+                p["diff_bytes"], wt,
+                reverse=bool(entry.get("reversal")), skip_patterns=None)
+            if not result["ok"]:
+                entry["state"] = "needs_review"
+                entry["state_detail"] = ("re-gate after dev install failed: "
+                                         + (result.get("reason")
+                                            or "one or more files failed"))
+                failures[p["id"]] = result.get("reason") or "gate failed"
+                # still apply so later patches gate against the same tree
+                # materialize actually built (materialize committed them)
+            try:
+                apply_one(wt, p["id"], p.get("version", 0), p["diff_bytes"])
+            except DevsrcError:
+                pass
+        if failures:
+            store.save(manifest)
+    finally:
+        _git(["worktree", "remove", "--force", tmp], cwd=path, check=False)
+    return failures
+
+
+def detached_base_worktree(cfg: dict, target: str) -> str:
+    """Public wrapper: detached git worktree of the pristine sync base at
+    `target`. Was private _sync_parts/_git usage from cli's copy."""
+    path = src_path(cfg)
+    remote, ref = _sync_parts(cfg)
+    base = f"refs/remotes/{remote}/{ref}"
+    _git(["worktree", "add", "--detach", "-q", target, base], cwd=path)
+    return target
+
+
+def apply_one(path: str, pid: str, v: int, diff_bytes: bytes) -> None:
+    """Public alias of the materialize-internal single-patch apply (BE-1(4):
+    cli must not call _apply_one)."""
+    return _apply_one(path, pid, v, diff_bytes)

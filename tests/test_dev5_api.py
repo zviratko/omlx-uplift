@@ -181,12 +181,12 @@ def test_build_job_guard_blocks_second_start(monkeypatch):
 
 
 def test_dev_build_run_reports_crash(monkeypatch):
-    from omlx_uplift import cli, router
+    from omlx_uplift import devsrc, router
 
-    def boom(ns):
+    def boom(**kw):
         raise RuntimeError("brew exploded")
 
-    monkeypatch.setattr(cli, "cmd_dev_install", boom)
+    monkeypatch.setattr(devsrc, "run_dev_build", boom)
     with dev_mod._DEV_BUILD_LOCK:
         dev_mod._DEV_BUILD.update({"running": True, "result": None, "log": []})
     dev_mod._dev_build_run({})
@@ -226,19 +226,19 @@ def test_locale_gate_covers_dev_keys():
 
 
 def test_failed_build_log_keeps_materialize_reason(monkeypatch):
-    # DEV-10: the old keyword filter dropped the "materialize FAILED"
-    # line — exactly the why? the user needs. On rc != 0 the log must
-    # carry the output tail and the intact-keg reassurance.
-    from omlx_uplift import cli, router
+    # DEV-10: the log must carry the engine's error lines AND the
+    # intact-keg reassurance. BE-1: errors ride BuildResult.lines now —
+    # no stdout capture, no scraping.
+    from omlx_uplift import devsrc, router
 
-    def fake_install(ns):
-        import sys
-        print("materialize FAILED: patch p-bad does not apply cleanly",
-              file=sys.stderr)
-        print("fix or disable the named patch, then re-run", file=sys.stderr)
-        return 1
+    def fake_build(**kw):
+        return devsrc.BuildResult(
+            ok=False, stage="materialize", returncode=1,
+            lines=[("err", "materialize FAILED: patch p-bad does not "
+                           "apply cleanly"),
+                   ("err", "fix or disable the named patch, then re-run")])
 
-    monkeypatch.setattr(cli, "cmd_dev_install", fake_install)
+    monkeypatch.setattr(devsrc, "run_dev_build", fake_build)
     with dev_mod._DEV_BUILD_LOCK:
         dev_mod._DEV_BUILD.update({"running": False, "result": None, "log": []})
     dev_mod._dev_build_run({"restart_after": False})
@@ -250,12 +250,13 @@ def test_failed_build_log_keeps_materialize_reason(monkeypatch):
 
 
 def test_successful_build_log_stays_quiet(monkeypatch):
-    from omlx_uplift import cli, router
+    from omlx_uplift import devsrc, router
 
-    def fake_install(ns):
-        return 0
+    def fake_build(**kw):
+        return devsrc.BuildResult(ok=True, stage="ok", returncode=0,
+                                  lines=[("out", "omlx-dev built")])
 
-    monkeypatch.setattr(cli, "cmd_dev_install", fake_install)
+    monkeypatch.setattr(devsrc, "run_dev_build", fake_build)
     with dev_mod._DEV_BUILD_LOCK:
         dev_mod._DEV_BUILD.update({"running": False, "result": None, "log": []})
     dev_mod._dev_build_run({"restart_after": False})

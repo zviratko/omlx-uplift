@@ -202,42 +202,27 @@ class DevBuildRequest(BaseModel):
 
 
 def _dev_build_run(opts: dict) -> None:
-    from types import SimpleNamespace
+    """BE-1: consume devsrc.run_dev_build's structured BuildResult — no
+    more SimpleNamespace contract, no stdout capture, no print scraping.
+    Every engine 'err' line is UI-worthy by construction; success adds
+    nothing to the log (DEV-10 quiet-success contract kept)."""
+    from .. import devsrc
 
-    from .. import cli
-
+    rc = 1
     try:
-        # capture stdout+stderr so re-gate failures (needs_review lines,
-        # DEV-context 9) reach the UI instead of dying in a terminal nobody
-        # watches
-        import contextlib
-        import io
-
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = cli.cmd_dev_install(SimpleNamespace(
-                with_custom_kernel=bool(opts.get("with_custom_kernel")),
-                with_grammar=bool(opts.get("with_grammar")),
-                dry_run=False))
+        res = devsrc.run_dev_build(
+            with_custom_kernel=bool(opts.get("with_custom_kernel")),
+            with_grammar=bool(opts.get("with_grammar")),
+            dry_run=False)
+        keep = [t for s, t in res.lines if s == "err"]
+        if not res.ok:
+            keep.append("the previous omlx-dev keg and branch are "
+                        "intact — nothing to roll back; fix or disable "
+                        "the named patch, then rebuild")
+        rc = res.returncode
         with _DEV_BUILD_LOCK:
-            lines = (out.getvalue() + err.getvalue()).splitlines()
-            # DEV-10: on failure the FULL tail matters — "materialize
-            # FAILED: <patch> ..." is the answer to "why?", and the old
-            # keyword filter dropped exactly that line.
-            keep = [l.strip() for l in lines
-                    if "re-gate FAILED" in l or "needs_review" in l
-                    or "build FAILED" in l]
-            if rc != 0:
-                tail = [l.strip() for l in lines[-20:] if l.strip()]
-                for l in tail:
-                    if l not in keep:
-                        keep.append(l)
-                keep.append("the previous omlx-dev keg and branch are "
-                            "intact — nothing to roll back; fix or disable "
-                            "the named patch, then rebuild")
             _DEV_BUILD["log"].extend(keep)
     except Exception as exc:  # never leave the job stuck on "running"
-        rc = 1
         with _DEV_BUILD_LOCK:
             _DEV_BUILD["log"].append(f"build crashed: {exc}")
     restart_after = bool(opts.get("restart_after")) and rc == 0
@@ -414,7 +399,7 @@ def _dev11_evaluate(cfg: dict) -> dict:
     Invariants (ticket acceptance 5): the flag must be ON *and* the base
     un-pinned (tracking HEAD). A pinned base never auto-updates no matter
     what the flag says. 'HEAD moved' = sync-ref tip != base commit the
-    current keg was cut from (built_base, written by cmd_dev_install).
+    current keg was cut from (built_base, written by run_dev_build).
     Kegs built before this field existed re-baseline silently: no
     auto-build from unknown provenance."""
     from .. import devsrc
@@ -443,7 +428,7 @@ def _dev11_evaluate(cfg: dict) -> dict:
 def dev11_boot_check() -> None:
     """DEV-11 boot hook — runs in a daemon thread from the lifespan wrap.
     Flag ON + tracking HEAD + tip moved → runs the SAME manual build path
-    (cmd_dev_install: stash → materialize → brew reinstall, DEV-10 keep-
+    (run_dev_build: stash → materialize → brew reinstall, DEV-10 keep-
     old-keg guarantees) in a detached subprocess. Never blocks or crashes
     serving; any surprise logs at debug and vanishes (a dev-box nicety,
     not a serving dependency)."""
