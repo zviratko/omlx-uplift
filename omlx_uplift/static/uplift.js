@@ -1871,13 +1871,12 @@ function ifPrune(model) {
 
 function ifAbort(rid, sl) {
     sl.abort.disabled = true;
-    fetch(`${API}/admin/api/requests/${encodeURIComponent(rid)}/cancel`, { method: 'POST' })
-        .then(async res => {
-            if (res.status === 501) { toast(C.t('uplift.toast.no_cancel_route')); return; }
-            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
-            toast(C.t('uplift.toast.cancelled', { id: rid.slice(0, 6) }));
+    postJson(`${API}/admin/api/requests/${encodeURIComponent(rid)}/cancel`, {})
+        .then(() => { toast(C.t('uplift.toast.cancelled', { id: rid.slice(0, 6) })); })
+        .catch(err => {
+            if (err.status === 501) { toast(C.t('uplift.toast.no_cancel_route')); return; }
+            toast(C.t('uplift.toast.cancel_failed', { msg: err.message }));
         })
-        .catch(err => { toast(C.t('uplift.toast.cancel_failed', { msg: err.message })); })
         .finally(() => { sl.abort.disabled = false; });
 }
 

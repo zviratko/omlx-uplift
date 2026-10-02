@@ -83,8 +83,7 @@ async function openInspector(reqId) {
     cancelBtn.onclick = async () => {
         cancelBtn.disabled = true;
         try {
-            const res = await fetch(`${API}/admin/api/requests/${encodeURIComponent(reqId)}/cancel`, { method: 'POST' });
-            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+            await D.postJson(`${API}/admin/api/requests/${encodeURIComponent(reqId)}/cancel`, {});
             MM_GLUE.toast(C.t('uplift.toast.cancelled', { id: reqId.slice(0, 6) }));
         } catch (err) { MM_GLUE.toast(C.t('uplift.toast.cancel_failed', { msg: err.message })); }
         cancelBtn.disabled = false;

@@ -295,11 +295,12 @@ function renderReqFeed() {
             x.className = 'se-btn'; x.textContent = '✕'; x.title = 'Cancel request';
             x.onclick = async () => {
                 try {
-                    const res = await fetch(`${API}/admin/api/requests/${encodeURIComponent(r.id)}/cancel`, { method: 'POST' });
-                    if (res.status === 501) { FEG.toast(C.t('uplift.toast.no_cancel_route')); return; }
-                    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+                    await D.postJson(`${API}/admin/api/requests/${encodeURIComponent(r.id)}/cancel`, {});
                     FEG.toast(C.t('uplift.toast.cancelled', {id: r.id.slice(0, 6)}));
-                } catch (err) { FEG.toast(C.t('uplift.toast.cancel_failed', {msg: err.message})); }
+                } catch (err) {
+                    if (err.status === 501) { FEG.toast(C.t('uplift.toast.no_cancel_route')); return; }
+                    FEG.toast(C.t('uplift.toast.cancel_failed', {msg: err.message}));
+                }
                 pollRequests();
             };
             row.append(x);
