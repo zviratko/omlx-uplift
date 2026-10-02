@@ -200,87 +200,31 @@ function seBind(kind, key, opts) {
     const name = document.createElement('span');
     // localize by field key; the passed literal is the English fallback
     name.textContent = C.tf('uplift.se.' + key, opts && opts.label ? opts.label : key);
-    let input;
-    if (kind === 'select') {
-        input = document.createElement('select');
-        for (const o of (opts.options || [])) {
-            const el = document.createElement('option');
-            el.value = o.value;
-            el.textContent = C.tf('uplift.se.' + key + '.opt.' + o.value,
-                                   o.label != null ? o.label : o.value);
-            if (String(seValues[key]) === String(o.value)) el.selected = true;
-            input.append(el);
-        }
-        if (opts.picker) {              // draft-model picker: selected value may not be in pool
-            const cur = seValues[key];
-            if (cur && ![...input.options].some(el => el.value === cur)) {
-                const el = document.createElement('option');
-                el.value = cur; el.textContent = cur + ' (current)'; el.selected = true;
-                input.prepend(el);
-            }
-        }
-    } else if (kind === 'bool') {
-        input = document.createElement('input');
-        input.type = 'checkbox';
-        input.checked = seValues[key] === true;
-    } else if (kind === 'text') {
-        input = document.createElement('input');
-        input.type = 'text';
-        input.value = seValues[key] == null ? '' : seValues[key];
-    } else if (kind === 'textarea') {
-        input = document.createElement('textarea');
-        input.rows = 3;
-        input.value = seValues[key] == null ? '' : seValues[key];
-    } else if (kind === 'inheritable-number') {
-        // profile-tab number: value comes from the tab's OVERRIDES only;
-        // empty = inherit, placeholder shows the base value
-        kind = 'number';
-        input = document.createElement('input');
-        input.type = 'number';
-        const bv = seBaseVals ? seBaseVals[key] : undefined;
-        if (opts && opts.min != null) input.min = opts.min;
-        if (opts && opts.max != null) input.max = opts.max;
-        if (opts && opts.step != null) input.step = opts.step;
-        const cur = seTab() && seTab().overrides[key];
-        input.value = cur == null || cur === '' ? '' : cur;
-        // U3: never a blind empty — base value, else the server's own default
-        if (bv != null) input.placeholder = String(bv) + ' (inherited)';
-        else input.placeholder = (opts && opts.effHint) || '(default)';
-    } else if (kind === 'inheritable-text') {
-        kind = 'text';
-        input = document.createElement('input');
-        input.type = 'text';
-        const bv = seBaseVals ? seBaseVals[key] : undefined;
-        const cur = seTab() && seTab().overrides[key];
-        input.value = cur == null ? '' : cur;
-        if (bv != null && bv !== '') input.placeholder = String(bv) + ' (inherited)';
-        else input.placeholder = (opts && opts.effHint) || '(default)';
-    } else if (kind === 'inheritable-bool') {
-        // three-state: override-on / override-off / inherit (empty)
-        input = document.createElement('select');
-        const cur = seTab() && seTab().overrides[key];
-        const on = document.createElement('option');
-        on.value = 'true';  on.textContent = 'Yes (override)';
-        const off = document.createElement('option');
-        off.value = 'false'; off.textContent = 'No (override)';
-        const inh = document.createElement('option');
-        const bv = seBaseVals ? seBaseVals[key] : undefined;
-        inh.value = ''; inh.textContent = 'Inherited: ' + (bv === true ? 'Yes' : bv === false ? 'No' : '—');
-        input.append(inh, on, off);
-        input.value = cur === true || cur === 'true' ? 'true' : cur === false || cur === 'false' ? 'false' : '';
-    } else {
-        input = document.createElement('input');
-        input.type = 'number';
-        if (opts) { if (opts.min != null) input.min = opts.min;
-                    if (opts.max != null) input.max = opts.max;
-                    if (opts.step != null) input.step = opts.step; }
-        const cur = seValues[key];
-        input.value = (cur === null || cur === undefined) ? '' : cur;
-        // U3: an empty number is NOT zero — the server falls back to the
-        // model's own default (generation_config.json / builtin). We do not
-        // read those files, so say so honestly instead of showing nothing.
-        if (input.value === '') input.placeholder = (opts && opts.effHint) || '(default)';
-    }
+    // FE-6 step 1: DOM shapes come from uplift_widgets.js (golden-pinned
+    // by tests/widgets-registry.test.cjs); kind normalization + event name
+    // ride back from the builder. Host keeps ALL state rules below.
+    const w = window.UpliftWidgets.build(kind, {
+        // inheritable kinds read the tab's OVERRIDES map, not seValues —
+        // same source v1's three inheritable branches used
+        value: kind.startsWith('inheritable-')
+            ? (seTab() && seTab().overrides[key])
+            : seValues[key],
+        options: opts && opts.options
+            ? opts.options.map(o => ({ value: o.value,
+                text: C.tf('uplift.se.' + key + '.opt.' + o.value,
+                           o.label != null ? o.label : o.value) }))
+            : null,
+        selected: seValues[key],
+        picker: (opts && opts.picker) ? seValues[key] : null,
+        min: opts && opts.min, max: opts && opts.max, step: opts && opts.step,
+        checked: seValues[key] === true,
+        baseVal: seBaseVals ? seBaseVals[key] : undefined,
+        // mmeditor numbers ALWAYS carry the U3 hint (v1): pass '' to opt
+        // into the '(default)' fallback, never leave the rule un-armed
+        effHint: (opts && opts.effHint !== undefined) ? opts.effHint : '',
+    });
+    let input = w.el;
+    kind = w.kind;                      // inheritable-* normalize like v1
     if (opts && opts.disabled) input.disabled = true;
     const evt = (kind === 'textarea' || kind === 'text' || kind === 'number') ? 'input' : 'change';
     input.addEventListener(evt, () => {

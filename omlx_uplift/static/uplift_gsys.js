@@ -482,33 +482,35 @@ function gsRow(sec, labelTxt, hint, control, opts) {
 }
 
 function gsText(sec, field, flat, L, extra) {
-    const inp = document.createElement('input');
-    inp.type = (extra && extra.type) || 'text';
-    if (extra && extra.placeholder) inp.placeholder = extra.placeholder;
-    if (extra && extra.list) inp.setAttribute('list', extra.list);
-    if (extra && extra.min !== undefined) inp.min = extra.min;
-    if (extra && extra.max !== undefined) inp.max = extra.max;
-    if (extra && extra.step !== undefined) inp.step = extra.step;
+    /* FE-6 step 1: the control shape comes from uplift_widgets.js (shared
+       with the model editor); the queueing rules below are unchanged. */
+    extra = extra || {};
     const v = gsGet(sec, field);
-    inp.value = v == null ? '' : v;
-    if (extra && extra.range) {
+    if (extra.range) {
         // R10-1: the old readout span duplicated the value in a second
         // bordered box that looked like another input. The control itself
         // shows the value; a number input gives the native stepper instead.
-        inp.type = 'number';
+        const inp = window.UpliftWidgets.build('range', { value: v, min: extra.min,
+            max: extra.max, step: extra.step, placeholder: extra.placeholder }).el;
         const queueRange = () => gsQueueSave(flat, inp.value === '' ? null : Number(inp.value));
         inp.oninput = queueRange;
         inp.onchange = queueRange;
         return inp;
     }
+    const kind = extra.bool ? 'bool' : (extra.number ? 'number' : 'text');
+    const inp = window.UpliftWidgets.build(kind, {
+        value: v, checked: !!v, type: extra.type, placeholder: extra.placeholder,
+        min: extra.min, max: extra.max, step: extra.step, list: extra.list,
+    }).el;
+    if (extra.list) inp.setAttribute('list', extra.list);
     const queue = (ev) => {
         let val = inp.value;
-        if (extra && extra.number) val = val === '' ? null : Number(val);
-        if (extra && extra.bool) val = inp.checked;
+        if (extra.number) val = val === '' ? null : Number(val);
+        if (extra.bool) val = inp.checked;
         gsQueueSave(flat, val);
         // conditional-row refresh only on commit (blur/change): a full
         // re-render on every keystroke would steal the input's focus
-        if (extra && extra.reload && (!ev || ev.type === 'change')) renderGlobalSettings();
+        if (extra.reload && (!ev || ev.type === 'change')) renderGlobalSettings();
     };
     inp.addEventListener('input', queue);
     inp.addEventListener('change', queue);
@@ -516,18 +518,17 @@ function gsText(sec, field, flat, L, extra) {
 }
 
 function gsToggle(flat, on) {
-    const t = document.createElement('input');
-    t.type = 'checkbox'; t.checked = !!on;
+    const t = window.UpliftWidgets.build('bool', { checked: on }).el;
     t.onchange = () => gsQueueSave(flat, t.checked);
     return t;
 }
 
 function gsSelect(flat, options, cur) {
-    const sel = document.createElement('select');
-    for (const [v, t] of options) {
-        const o = document.createElement('option');
-        o.value = v; o.textContent = t; sel.append(o);
-    }
+    // FE-6: shape via the registry; gsys does not localize option labels
+    const sel = window.UpliftWidgets.build('select', {
+        selected: cur,
+        options: options.map(([v, t]) => ({ value: v, text: t })),
+    }).el;
     sel.value = cur == null ? '' : String(cur);
     sel.onchange = () => {
         // numeric baseline (e.g. idle_timeout_seconds): keep the payload numeric
