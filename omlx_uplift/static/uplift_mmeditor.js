@@ -1665,12 +1665,10 @@ async function seLoadProfiles(model, host) {
     const saveAs = document.createElement('input');
     saveAs.type = 'text'; saveAs.placeholder = 'save current as…'; saveAs.className = 'se-prof-name';
     const saveB = document.createElement('button'); saveB.className = 'se-btn'; saveB.textContent = 'Save';
-    const write = async (path, opts) => {          // detail-aware JSON call
-        const res = await fetch(path, Object.assign({ cache: 'no-store' }, opts));
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(C.errorText(body) || String(res.status));
-        return body;
-    };
+    // FE-2: private `write` closure deleted — it was a fetchJson clone
+    // with worse error messages (no url, no err.status). All five call
+    // sites pass explicit method/headers/body opts straight to fetchJson.
+    const write = D.fetchJson;
     delB.onclick = async () => {
         if (!sel.value) return;
         try {
