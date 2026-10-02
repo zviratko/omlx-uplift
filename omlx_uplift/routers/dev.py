@@ -29,7 +29,6 @@ from .base import (api_router, page_router, require_admin, _RedirectToLogin,
                    _require_settings_manager, STATIC_DIR, _no_api_cache)
 from ..request_log import RING_LIMIT, get_request_tracker
 from ..collector import get_collector
-from .patches import patch_store   # sibling routers module, not ..patches the store
 
 
 # --------------------------------------------------------------------------
@@ -123,6 +122,10 @@ def _dev_boot_state() -> dict:
 
 def _dev_status_sync() -> dict:
     from .. import cli, devsrc, patchsource
+    # SEAM-1: resolve patch_store THROUGH the sibling module (late lookup),
+    # not by from-import value — tests monkeypatch patches_mod.patch_store
+    # and a by-value copy silently kept calling the REAL store.
+    from . import patches as _patches_mod
 
     cfg = devsrc.load_config()
     if not cfg:
@@ -132,7 +135,8 @@ def _dev_status_sync() -> dict:
     import os
 
     clone_ok = os.path.isdir(os.path.join(devsrc.src_path(cfg), ".git"))
-    build_patches = patchsource.enabled_build_patches(patch_store())
+    build_patches = patchsource.enabled_build_patches(
+        _patches_mod.patch_store())
     out = devsrc.status(cfg, build_patches if clone_ok else None)
     if not clone_ok:
         out["installed"] = False

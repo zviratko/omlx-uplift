@@ -53,23 +53,6 @@ def _no_api_cache(response: Response) -> None:
 api_router = APIRouter(dependencies=[Depends(_no_api_cache)])
 
 
-try:  # normal runtime: we are importable inside omlx's environment
-    from omlx.admin.auth import _RedirectToLogin, require_admin
-except ImportError:  # pragma: no cover
-    # Standalone viewer mode on a machine WITHOUT omlx (DMG users): the
-    # router is imported only for its static/login helpers; endpoints
-    # that actually need auth are unreachable because the viewer mounts
-    # its own handlers. Keep the import soft and raise only on use.
-    class _RedirectToLogin(Exception):  # placeholder for isinstance checks
-        pass
-
-    def require_admin(request):  # type: ignore
-        raise RuntimeError(
-            "omlx-uplift router mounted without omlx: run `omlx-uplift "
-            "serve` inside the oMLX environment, or the standalone viewer"
-        )
-
-
 # --------------------------------------------------------------------------
 # Server-state access (same DI convention as omlx.admin.routes)
 # --------------------------------------------------------------------------

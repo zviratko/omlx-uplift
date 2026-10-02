@@ -24,9 +24,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import tempfile
 from datetime import datetime, timezone
+
+_log = logging.getLogger("omlx_uplift.patches")
 
 # v2 (DEV-1): per-patch 'scope' field. Absent == "runtime" — the same
 # no-migration pattern as skip_path_prefixes, so v1 manifests load and
@@ -318,14 +321,25 @@ class PatchStore:
 
     def set_state(self, patch: dict, new_state: str, detail: str = "") -> bool:
         """State machine gate. Returns False (and does not change) on an
-        illegal transition; legal transitions stamp state_detail."""
+        illegal transition; legal transitions stamp state_detail.
+
+        STATE-GATE-1: most callers ignore the return, so a rejected
+        transition used to be a silent no-op while the HTTP/CLI response
+        still reported the new state — UI and manifest permanently
+        disagreed. Rejection is now loud at the single choke point; the
+        return contract is unchanged."""
         cur = patch.get("state", "pending")
         if new_state not in STATES:
+            _log.warning("set_state %s: unknown state %r (kept %r)",
+                         patch.get("id"), new_state, cur)
             return False
         if cur == new_state:
             patch["state_detail"] = detail
             return True
         if new_state not in TRANSITIONS.get(cur, frozenset()):
+            _log.warning("set_state %s: illegal transition %r -> %r "
+                         "(ignored; caller reported %r anyway)",
+                         patch.get("id"), cur, new_state, new_state)
             return False
         patch["state"] = new_state
         patch["state_detail"] = detail

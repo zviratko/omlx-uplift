@@ -475,11 +475,17 @@ class TestManifest(TempTree):
         self.assertTrue(self.store.set_state(p, "applied"))
         # applied -> pending is legal (rollback re-arm); applied->obsolete ok
         self.assertTrue(self.store.set_state(p, "obsolete"))
-        # obsolete -> applied is NOT legal (must re-enable through pending)
-        self.assertFalse(self.store.set_state(p, "applied"))
+        # STATE-GATE-1: the ignored-return class of bug — a rejected
+        # transition must be LOUD at the choke point, not a silent no-op
+        # while the caller reports the new state anyway.
+        with self.assertLogs("omlx_uplift.patches", level="WARNING") as lg:
+            # obsolete -> applied is NOT legal (must re-enable through pending)
+            self.assertFalse(self.store.set_state(p, "applied"))
         self.assertEqual(p["state"], "obsolete")
+        self.assertTrue(any("illegal transition" in m for m in lg.output))
         # unknown state
-        self.assertFalse(self.store.set_state(self._patch(), "banana"))
+        with self.assertLogs("omlx_uplift.patches", level="WARNING"):
+            self.assertFalse(self.store.set_state(self._patch(), "banana"))
 
     def test_warning_badge_logic(self):
         m = self.store.load()
