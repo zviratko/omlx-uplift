@@ -11,6 +11,14 @@
 # (RGB-constant, signal carried in ALPHA) tiled at 96px over the tube ground.
 # Verified by composite measurement in Chromium (sd 2.90, 69 luminance levels);
 # it is standard SVG but NOT yet pixel-proven in Safari/Firefox.
+#
+# Glitch (2026-10-02): the tube is alive. Two grain seeds boil at ~8 fps like
+# static, a vertical-hold band rolls down the phosphor, the raster creeps, and
+# three rare events fire on coprime clocks — a beam dropout with an amber
+# convergence ghost on the lamp (3.7 s), the wordmark sagging for a beat
+# (13.7 s), and a horizontal tear across the header ground (17.3 s). Every
+# effect paints a BACKGROUND or the element's own glow: nothing ever overlays
+# metric text, which this crate already rejects as a defect.
 skin_version: 1
 label: "Phosphor"
 classic:
@@ -57,6 +65,43 @@ icons:
                   1 0 0 0 0"/>
       </filter>
       <rect width="96" height="96" filter="url(#g)" opacity="0.5"/>
+    </svg>
+  # The boiling cut: same mask, TWO seeds stacked, alternating at ~7 fps with
+  # step-end — static that crackles instead of sitting still. Declarative
+  # animation inside a background-image SVG runs (only <script> is blocked),
+  # and one URL = one clock, so every ground using it boils in phase, like a
+  # real tube. The STILL cut above stays mounted when motion is off: a
+  # background SVG cannot see the host's data-motion attribute, so the crate
+  # ships both cuts and swaps the url() under the gate. Each rect carries its
+  # own opacity attribute so a renderer that ignores the CSS still shows seed A.
+  grain-boil.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96">
+      <style>
+        .a, .b { animation: ph-fl .28s step-end infinite; }
+        .b { animation-delay: .14s; }
+        @keyframes ph-fl { 0%, 49.9% { opacity: .5 }
+                           50%, 100% { opacity: 0 } }
+      </style>
+      <filter id="ga" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="4"
+                      seed="7" stitchTiles="stitch" result="n"/>
+        <feColorMatrix in="n" type="matrix"
+          values="0 0 0 0 0
+                  0 0 0 0 0
+                  0 0 0 0 0
+                  1 0 0 0 0"/>
+      </filter>
+      <filter id="gb" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="4"
+                      seed="31" stitchTiles="stitch" result="n"/>
+        <feColorMatrix in="n" type="matrix"
+          values="0 0 0 0 0
+                  0 0 0 0 0
+                  0 0 0 0 0
+                  1 0 0 0 0"/>
+      </filter>
+      <rect class="a" width="96" height="96" filter="url(#ga)" opacity="0.5"/>
+      <rect class="b" width="96" height="96" filter="url(#gb)" opacity="0"/>
     </svg>
   logo-dot.svg: |-
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
@@ -110,9 +155,19 @@ css: |-
       background-attachment: fixed, fixed, fixed;
   }
 
-  /* ---- cards: the well is lit from inside, so the glow is inset ---- */
+  /* ---- cards: the well is lit from inside, so the glow is inset ----
+     The roll band is the vertical-hold artifact: a soft lit stripe that
+     drifts down every card, painted as a card BACKGROUND layer (backgrounds
+     always sit under content, so it can never wash over metric numbers —
+     the same rule the old draft of this crate learned). It lives on the
+     page document, not inside a background SVG, so all cards share one host
+     start time: the band crosses the whole board in step, one tube, not
+     per-card independent stripes. Parked ABOVE the box at rest. */
   .card {
-      background: linear-gradient(180deg, #0a150c 0, var(--card) 44px);
+      background:
+          linear-gradient(180deg, rgba(125, 255, 158, .13),
+              rgba(125, 255, 158, 0)) 0 -60px / 100% 60px no-repeat,
+          linear-gradient(180deg, #0a150c 0, var(--card) 44px) 0 0;
       border: 1px solid var(--edge);
       box-shadow: inset 0 0 26px rgba(51, 255, 102, .045);
   }
@@ -120,25 +175,135 @@ css: |-
   .card h2 { color: var(--dim); letter-spacing: .18em; }
   .chart-box { background: #040904; border: 1px solid #10240f; }
 
-  /* ---- the afterglow: a beam that lands and decays. Gated. ---- */
+  /* ---- the roll: 9.7 s, linear, all cards in lockstep ----
+     Both layer positions are restated every keyframe: the ground gradient is
+     box-sized so its own offset never changes, only the band travels. The
+     final position is the SAME parked value as the unconditional rule, so
+     motion-off = no band, exactly as if it had never been declared. */
+  :root:not([data-motion="off"]) .card {
+      animation: ph-roll 9.7s linear infinite;
+  }
+  @keyframes ph-roll {
+      from { background-position: 0 -60px, 0 0; }
+      to   { background-position: 0 calc(100% + 60px), 0 0; }
+  }
+  /* The .card rules above also reach the static #pages cards (same class).
+     Page tabs keep the plain lit-well look of the rest of this crate: band
+     parked off-box, ground restored to its own single layer. */
+  #pages .card {
+      background: linear-gradient(180deg, #0a150c 0, var(--card) 44px);
+  }
+  :root:not([data-motion="off"]) #pages .card { animation: none; }
+
+  /* ---- boiling static + raster creep ----
+     Motion-on swaps the STILL grain for the two-seed boiling cut (a
+     background SVG cannot see data-motion, hence two files — the swap rule
+     is what the gate controls). The scanline raster also creeps one period
+     (3px) every 2.3 s: below conscious notice, exactly like a tube whose
+     vertical hold is a hair off. Grain and scanlines travel together; the
+     vignette stays. */
+  :root:not([data-motion="off"]) body {
+      background-image:
+          url('res/icons/grain-boil.svg'),
+          repeating-linear-gradient(0deg,
+              rgba(0, 0, 0, .34) 0 1px, transparent 1px 3px),
+          radial-gradient(125% 95% at 50% 40%,
+              #0a160c 0%, var(--bg) 62%, #010301 100%);
+      animation: ph-crawl 2.3s linear infinite;
+  }
+  @keyframes ph-crawl {
+      from { background-position: 0 0, 0 0, 0 0; }
+      to   { background-position: 0 3px, 0 3px, 0 0; }
+  }
+
+  /* ---- horizontal tear across the header ground, 17.3 s clock ----
+     The fourth layer is the tear highlight itself: a 3px lit band parked
+     off the top edge, invisible at rest. During the event window the ground
+     layers jump sideways/vertically (sync loss) while the band sweeps down
+     8 -> 26px in hard 60 ms steps, then everything parks again. Text is
+     untouched: every layer here is a background, under every glyph.
+     PITFALL (found by pixels here): position/size/repeat modifiers with '/'
+     are legal only in the `background` SHORTHAND — inside `background-image`
+     they invalidate the ENTIRE declaration (Chromium then falls back to the
+     base sheet's `background:` shorthand = a flat colour, texture and all).
+     So the layers are declared as four plain images + parallel lists. */
+  header.top {
+      background-image:
+          url('res/icons/grain.svg'),
+          repeating-linear-gradient(0deg,
+              rgba(0, 0, 0, .34) 0 1px, transparent 1px 3px),
+          radial-gradient(125% 95% at 50% 40%,
+              #0a160c 0%, var(--bg) 62%, #010301 100%),
+          linear-gradient(180deg, rgba(125, 255, 158, .30),
+              rgba(125, 255, 158, .10));
+      background-size: 96px 96px, auto, cover, 100% 3px;
+      background-repeat: repeat, repeat, no-repeat, no-repeat;
+      background-position: 0 0, 0 0, 0 0, 0 -8px;
+  }
+  :root:not([data-motion="off"]) header.top {
+      background-image:
+          url('res/icons/grain-boil.svg'),
+          repeating-linear-gradient(0deg,
+              rgba(0, 0, 0, .34) 0 1px, transparent 1px 3px),
+          radial-gradient(125% 95% at 50% 40%,
+              #0a160c 0%, var(--bg) 62%, #010301 100%),
+          linear-gradient(180deg, rgba(125, 255, 158, .30),
+              rgba(125, 255, 158, .10));
+      animation: ph-tear 17.3s linear infinite;
+  }
+  @keyframes ph-tear {
+      0%, 61.999% { background-position: 0 0, 0 0, 0 0, 0 -8px; }
+      62%, 62.999% { background-position: 7px 2px, 0 2px, 0 0, 0 8px; }
+      63%, 63.999% { background-position: -6px -2px, 0 -2px, 0 0, 0 16px; }
+      64%, 64.999% { background-position: 4px 1px, 0 1px, 0 0, 0 24px; }
+      65%, 100%    { background-position: 0 0, 0 0, 0 0, 0 -8px; }
+  }
+
+  /* ---- the beam: decay, dropout, convergence ghost. Gated. ----
+     One 3.7 s clock carries three acts: the beam strike and its afterglow
+     decay (the crate's original), then a hard dropout to near-dark, then a
+     single amber ghost — a phosphor tube with one tired gun bleeding
+     off-colour while it re-converges. box-shadow only: it lives inside the
+     lamp's own box and can never cover anything. ---- */
   :root:not([data-motion="off"]) .logo .dot {
       animation: phosphor-decay 3.7s ease-out infinite;
   }
   @keyframes phosphor-decay {
-      0%   { box-shadow: 0 0 3px rgba(51, 255, 102, .35); }
-      12%  { box-shadow: 0 0 15px rgba(51, 255, 102, .95); }
-      100% { box-shadow: 0 0 3px rgba(51, 255, 102, .35); }
+      0%    { box-shadow: 0 0 3px rgba(51, 255, 102, .35); }
+      12%   { box-shadow: 0 0 15px rgba(51, 255, 102, .95); }
+      55%   { box-shadow: 0 0 6px rgba(51, 255, 102, .45); }
+      68%   { box-shadow: 0 0 3px rgba(51, 255, 102, .30); }
+      69%   { box-shadow: 0 0 1px rgba(51, 255, 102, .06); }   /* dropout */
+      70%   { box-shadow: 0 0 1px rgba(51, 255, 102, .06); }
+      71%   { box-shadow: 2px 0 9px rgba(255, 176, 59, .8); }  /* ghost */
+      72%   { box-shadow: 0 0 1px rgba(51, 255, 102, .06); }
+      74%   { box-shadow: 0 0 10px rgba(51, 255, 102, .8); }   /* re-strike */
+      100%  { box-shadow: 0 0 3px rgba(51, 255, 102, .35); }
   }
 
-  /* No animated overlay layer here, and deliberately so. An earlier draft
-     put a crawling scanline on a position:fixed z-index:1 pseudo — but cards
-     are position:relative with z-index:auto, so that layer paints OVER the
-     metric numbers, and a scanline wash across a value is a legibility defect,
-     not a flourish. The negative-z alternative is no better: card backgrounds
-     are opaque, so it would vanish behind them. Static scanlines already ride
-     the body ground above; the CRT identity does not need them to move. The
-     only motion here is the phosphor decay on the logo dot, which sits inside
-     its own box and touches nothing it can obscure. */
+  /* ---- wordmark sag: the beam loses power for a beat, 13.7 s clock ----
+     opacity dips (never display), so the wordmark dims but stays readable
+     and the header layout cannot move. Two quick dips then a small
+     recovery overshoot — power sagging, catching, settling. The final state
+     equals the unconditional one (no gate-dependent look). */
+  :root:not([data-motion="off"]) .logo {
+      animation: ph-sag 13.7s linear infinite;
+  }
+  @keyframes ph-sag {
+      0%, 70.999% { opacity: 1; }
+      71%         { opacity: .35; }
+      71.999%     { opacity: .35; }
+      72%         { opacity: 1; }
+      73%         { opacity: .6; }
+      74%, 100%   { opacity: 1; }
+  }
+
+  /* No animated OVERLAY layer anywhere, and deliberately so. An earlier draft
+     put a crawling scanline on a position:fixed pseudo — cards are
+     position:relative with z-index:auto, so it painted OVER the metric
+     numbers: a legibility defect, not a flourish. Every effect above is
+     either a background (under all text, on both ground and cards) or the
+     lamp's own box-shadow, so none of it can ever wash a value out. */
 
   /* ---- meters: the trace itself, stepped by the beam not by a gradient ---- */
   .meter { background: #030703; border: 1px solid var(--edge); }
