@@ -535,9 +535,12 @@ class Collector:
         # pages) on every tick. Everything rides ONE write_tick COMMIT.
         request_rows: list[dict] = []
         try:
-            from .request_log import get_request_tracker
+            from .request_log import RING_LIMIT, get_request_tracker
 
-            for row in get_request_tracker().list_rows(limit=200):
+            # PATHS-1 sibling rule: drain the WHOLE ring by its own
+            # constant, not a copy of it — a RING_LIMIT bump here used to
+            # silently cap persistence at the old size.
+            for row in get_request_tracker().list_rows(limit=RING_LIMIT):
                 sig = (row.get("state"), row.get("prompt_tokens"),
                        row.get("completion_tokens"), row.get("tps"),
                        row.get("error"))
