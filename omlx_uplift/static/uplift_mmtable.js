@@ -208,7 +208,18 @@ async function renderModelAdmin(force) {
         lamps.append(
             lamp('FAVOURITE', !!m.is_favorite, m.is_favorite ? 'Unfavorite' : 'Favorite',
                 () => flagWrite(m.id, { is_favorite: !m.is_favorite },
-                    () => MM_GLUE.putModelSettings(m.id, { is_favorite: !m.is_favorite }))),
+                    () => MM_GLUE.putModelSettings(m.id, { is_favorite: !m.is_favorite }))
+                    // ACHIEVEMENTS: only a successful write earns a verdict
+                    .then(() => {
+                        try {
+                            const AC = window.Uplift && window.Uplift.achv;
+                            if (AC && !m.is_favorite) {
+                                const v = AC.flagReaction('favorite', true);
+                                if (v) AC.announce([v]);
+                            }
+                        } catch (_) { /* verdicts never break the lamp */ }
+                    })),
+
             lamp('PINNED', !!m.pinned, m.pinned ? 'Unpin (allow unload)' : 'Keep loaded (pin)',
                 // R10-B1: classic-compat write path — is_pinned via PUT
                 // settings (the pin/unpin POSTs were mock-only sugar)

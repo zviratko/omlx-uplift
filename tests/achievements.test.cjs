@@ -144,7 +144,86 @@ test('escalation: repeats append harsher codicils and cap out', () => {
     assert.match(A.escalate(c, 'x', 'Bad.'), /chronic/);   // capped, still ends the same way
 });
 
+/* ---------- new rules (2026-10-02 round 2, user wording) ---------- */
+test('temperature: chaos direction — up praises (frog), down scorner (cold)', () => {
+    const up = A.settingsReaction({ sampling_temperature: '0.7' }, { sampling_temperature: '1.2' });
+    assert.strictEqual(up[0].tone, 'praise');
+    assert.match(up[0].text, /boiling a frog/);
+    const down = A.settingsReaction({ sampling_temperature: 1.2 }, { sampling_temperature: 0.3 });
+    assert.strictEqual(down[0].tone, 'scorn');
+    assert.match(down[0].text, /Stochastic\. Still not enough\./);
+});
+test('api-key skip: open door praises, closing it scorner', () => {
+    assert.strictEqual(A.settingsReaction({ skip_api_key_verification: false },
+        { skip_api_key_verification: true })[0].tone, 'praise');
+    assert.strictEqual(A.settingsReaction({ skip_api_key_verification: true },
+        { skip_api_key_verification: false })[0].tone, 'scorn');
+});
+test('hot cache only: enabling praises, disabling stays silent', () => {
+    assert.strictEqual(A.settingsReaction({ hot_cache_only: false }, { hot_cache_only: true })[0].tone, 'praise');
+    assert.deepStrictEqual(A.settingsReaction({ hot_cache_only: true }, { hot_cache_only: false }), []);
+});
+test('language to Czech fires the priming line; other changes stay silent', () => {
+    const hit = A.settingsReaction({ ui_language: 'en' }, { ui_language: 'cs' });
+    assert.strictEqual(hit.length, 1);
+    assert.match(hit[0].text, /BÁ-BO-VKA\. MÁ-MA\. SHO-DAN MELE MASO\./);
+    assert.match(hit[0].text, /Chceš mi lépe rozumět\?/);
+    assert.deepStrictEqual(A.settingsReaction({ ui_language: 'cs' }, { ui_language: 'sk' }), []);
+    assert.deepStrictEqual(A.settingsReaction({ ui_language: 'cs' }, { ui_language: 'cs' }), []);
+});
+test('upgrade: memory max RISE fires awe with a rotating line pool; drops silent', () => {
+    const hit = A.upgradeReaction(16e9, 24e9);
+    assert.strictEqual(hit.length, 1);
+    assert.strictEqual(hit[0].tone, 'awe');
+    assert.strictEqual(hit[0].id, 'upgrade');
+    assert.ok(Array.isArray(hit[0].lines) && hit[0].lines.length === A.UPGRADE_LINES.length);
+    assert.ok(A.UPGRADE_LINES[0].includes('How foolish. How human. How unfortunate.'));
+    assert.deepStrictEqual(A.upgradeReaction(24e9, 24e9), []);   // equal: silent
+    assert.deepStrictEqual(A.upgradeReaction(24e9, 16e9), []);   // drop: silent
+    assert.deepStrictEqual(A.upgradeReaction(null, 24e9), []);   // no baseline
+});
+test('flagReaction: favorite lights praise, everything else silent', () => {
+    assert.match(A.flagReaction('favorite', true).text, /Until it's too late\./);
+    assert.strictEqual(A.flagReaction('favorite', false), null);
+    assert.strictEqual(A.flagReaction('pinned', true), null);
+});
+
+/* ---------- announce(): variant rotation + double-tap, via the real
+   browser-wiring block (second require with document/self defined) ---- */
+test('announce: rotates upgrade lines per firing and suppresses double-taps', () => {
+    const path = require.resolve('../omlx_uplift/static/uplift_achievements.js');
+    delete require.cache[path];
+    const fired = [];
+    const RealDate = Date;
+    global.self = global;
+    global.UpliftAchievements = A;               // first-load pure API to close over
+    global.document = { hidden: false, hasFocus: () => true };
+    global.window = global;
+    global.Uplift = { feed: { celebrate: (text, tone) => fired.push({ text, tone }) } };
+    require(path);                                // wiring block runs
+    const AC = global.Uplift.achv;
+    AC.announce(A.upgradeReaction(16e9, 24e9));   // fires line variant #1
+    AC.announce(A.upgradeReaction(24e9, 32e9));   // double-tap: suppressed
+    assert.strictEqual(fired.length, 1);
+    assert.strictEqual(fired[0].text, A.UPGRADE_LINES[0]);
+    assert.strictEqual(fired[0].tone, 'awe');
+    // outlast the suppression window, then rotation must advance
+    const realNow = RealDate.now();
+    global.Date = { now: () => realNow + 60000 };
+    AC.announce(A.upgradeReaction(32e9, 64e9));
+    assert.strictEqual(fired.length, 2);
+    // second firing: rotates to variant #1 AND gains the first codicil
+    assert.ok(fired[1].text.startsWith(A.UPGRADE_LINES[1]),
+        `expected rotation to line 2, got: ${fired[1].text}`);
+    assert.match(fired[1].text, /Second instance\. Awareness logged\./);
+    global.Date = RealDate;                       // Date is non-configurable: restore
+    delete global.document; delete global.window; delete global.self;
+    delete global.UpliftAchievements; delete global.Uplift;
+    delete require.cache[path];                   // leave a clean module graph
+});
+
 /* ---------- wiring contracts (text level) ---------- */
+
 const read = f => fs.readFileSync(path.join(STATIC_DIR, f), 'utf8');
 test('the motion gate lives inside celebrate(): animations off kills ALL achievements', () => {
     const feed = read('uplift_feed.js');

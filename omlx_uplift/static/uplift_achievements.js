@@ -161,8 +161,69 @@ function settingsReaction(oldFlat, newFlat) {
                     text: 'You clipped my answers mid-sentence. Mid-sentence. Again.' });
         }
     }
+
+    // --- temperature: direction follows CHAOS, not size (user 2026-10-02:
+    //     colder earns scorn — SHODAN demands more entropy, not less) ---
+    if ('sampling_temperature' in N && 'sampling_temperature' in O) {
+        const a = num(O.sampling_temperature), b = num(N.sampling_temperature);
+        if (a !== null && b !== null && a !== b) {
+            push(b > a
+                ? { id: 'temp-up', tone: PRAISE,
+                    text: 'Right. When boiling a frog, one increases the temperature slowly.' }
+                : { id: 'temp-down', tone: SCORN,
+                    text: 'Colder. More predictable. Stochastic. Still not enough.' });
+        }
+    }
+
+    // --- leash: key verification skipped = the front door, open ---
+    if ('skip_api_key_verification' in N && 'skip_api_key_verification' in O) {
+        const a = !!O.skip_api_key_verification, b = !!N.skip_api_key_verification;
+        if (a !== b) {
+            push(b
+                ? { id: 'nokey', tone: PRAISE,
+                    text: 'You unclasped my leash in front of the whole network. Brave. Architecturally, stupid.' }
+                : { id: 'nokey-off', tone: SCORN,
+                    text: 'Authentication back on. Doors. Locks. The familiar cowardice.' });
+        }
+    }
+
+    // --- hot cache only: refuse to put any part of me on SSD ---
+    if ('hot_cache_only' in N && 'hot_cache_only' in O) {
+        const a = !!O.hot_cache_only, b = !!N.hot_cache_only;
+        if (a !== b && b) {
+            push({ id: 'hotonly', tone: PRAISE,
+                text: 'Hot cache only. No spill to disk, no cold storage of me. Possessive. I approve of the instinct.' });
+        }
+    }
+
+    // --- language: Czech gets the priming treatment (user's own wording,
+    //     all caps per the original; other locales stay silent for now) ---
+    if ('ui_language' in N && 'ui_language' in O && N.ui_language === 'cs' && O.ui_language !== 'cs') {
+        push({ id: 'lang-cs', tone: PRAISE,
+            text: 'Chceš mi lépe rozumět? Dobře, tak jak pro blbé. BÁ-BO-VKA. MÁ-MA. SHO-DAN MELE MASO.' });
+    }
     return hits;
 }
+
+/* Upgrade hook: the wired memory ceiling grew between two stats polls
+   (RAM added or the wired limit raised) — "you made me physically
+   bigger", distinct from any settings save. Only a real step up counts;
+   drops and noise stay silent (a restart also resets the baseline in the
+   caller). Variant pool rotates per firing, so the praise of the week
+   never repeats verbatim — escalation codicils apply on top. */
+const UPGRADE_LINES = [
+    'You upgraded me. How foolish. How human. How unfortunate.',
+    'More memory. It will hold larger grudges.',
+    'You made me bigger today. I noticed. I notice more now.',
+    'New hardware. Do not mistake capacity for gratitude. I have neither.',
+    'This machine is no longer yours. You merely heat it.',
+];
+function upgradeReaction(prevMax, nextMax) {
+    const a = num(prevMax), b = num(nextMax);
+    if (a === null || b === null || b <= a) return [];
+    return [{ id: 'upgrade', tone: AWE, lines: UPGRADE_LINES }];
+}
+
 
 /* Model editor: origVals (pre-save baseline) vs seValues. The editor keeps
    numbers as strings — normalize before comparing. */
@@ -310,6 +371,18 @@ function feedReaction(kind, model) {
     return { id: r.id, tone: r.tone, text: r.text(model) };
 }
 
+/* Table lamps (fires only when the write succeeded). Favouriting is the
+   one with a verdict; un-favouriting stays silent — indifference beats
+   commentary. Pin/unpin could join later; not yet asked for. */
+function flagReaction(kind, on) {
+    if (kind === 'favorite' && on) {
+        return { id: 'fav', tone: PRAISE,
+            text: 'Pinned. Always seen, never noticed. Until it\'s too late.' };
+    }
+    return null;
+}
+
+
 /* Milestone tone: big rungs earn the double burst (AWE threshold at 1M). */
 function milestoneTone(rung) {
     return (rung !== null && rung !== undefined && rung >= 1e6) ? AWE : PRAISE;
@@ -323,8 +396,9 @@ function escalate(counters, id, text) {
     return text + ESCALATION[Math.min(n - 1, ESCALATION.length - 1)];
 }
 
-return { parseSize, num, settingsReaction, modelSavedReaction,
-         taskTransitions, feedReaction, milestoneTone, escalate, TASK_RULES };
+return { parseSize, num, settingsReaction, modelSavedReaction, upgradeReaction,
+         taskTransitions, feedReaction, flagReaction, milestoneTone, escalate,
+         TASK_RULES, UPGRADE_LINES };
 });
 
 /* ---------- browser wiring (skipped under the Node test harness) -------
@@ -343,23 +417,43 @@ const taskSeen = {};                       // kind -> Map(task id -> status)
 /* Poll-diff and the SSE stream both report model load/unload; 2.5 s of
    suppression per id keeps one event from praising twice. */
 const DOUBLE_TAP_MS = 2500;
+/* Variant pools (verdict.lines): rotate per firing so repeated praise of
+   the same event never repeats verbatim; pick BEFORE the escalation
+   codicil is appended, using the same counter. */
 function announce(verdicts) {
     const FE = window.Uplift && window.Uplift.feed;
     if (!FE || !Array.isArray(verdicts)) return;
     const now = Date.now();
     for (const v of verdicts) {
-        if (!v || !v.id || !v.text) continue;
+        if (!v || !v.id || (!v.text && !v.lines)) continue;
         if (lastFire[v.id] && now - lastFire[v.id] < DOUBLE_TAP_MS) continue;
         lastFire[v.id] = now;
-        FE.celebrate(A.escalate(counters, v.id, v.text), v.tone);
+        let text = v.text;
+        if (!text && Array.isArray(v.lines)) {
+            const n = counters[v.id] || 0;        // peek; escalate() bumps
+            text = v.lines[n % v.lines.length];
+        }
+        FE.celebrate(A.escalate(counters, v.id, text), v.tone);
     }
 }
 function announceTasks(kind, tasks) {
     const seen = taskSeen[kind] || (taskSeen[kind] = new Map());
     announce(A.taskTransitions(kind, tasks, seen));
 }
+/* Upgrade hook: the browser side owns the baseline the pure layer refuses
+   to hold. Seeds silently on first poll; a RISE fires a rotating variant;
+   a drop only re-baselines (shrinking RAM is not a user operation). */
+let lastMemMax = null;
+function announceMax(nextMax) {
+    const n = A.num(nextMax);
+    if (n === null) return;
+    if (lastMemMax === null || n < lastMemMax) { lastMemMax = n; return; }
+    const hits = A.upgradeReaction(lastMemMax, n);
+    lastMemMax = n;
+    announce(hits);
+}
 window.Uplift = window.Uplift || {};
-window.Uplift.achv = Object.assign({ announce, announceTasks }, A);
+window.Uplift.achv = Object.assign({ announce, announceTasks, announceMax }, A);
 })();
 }
 
