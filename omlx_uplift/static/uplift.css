@@ -24,6 +24,21 @@
     --bad: #c9243b;
     --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
     --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    /* CSS-2: state inks + type/lamp colors as tokens so skin overrides
+       reach them (were bare hex islands). Values byte-identical to the
+       literals they replaced; light/enhanced variants follow per theme. */
+    --ink-on-accent: #0b0b0b;      /* badges on amber */
+    --ink-on-red: #fff;            /* badges/buttons on red */
+    --ink-on-accent-soft: #141414; /* section titles + save buttons on amber */
+    --diverge: #b3541e;            /* profile-divergence + restart actions */
+    --diverge-hover: #94451a;
+    --amber-text: #9a6b00;         /* amber text on translucent amber bg */
+    --type-vlm: #7aa7ff;
+    --type-embed: #b98fd6;
+    --type-tpl: #6fbf9a;
+    --lamp-on: #57d97a;
+    --lamp-on-ink: #06130a;
+    --pt-update: #d9b400;
 }
 [data-theme="light"] {
     --bg: #ffffff;              /* round 7 item 6: clean white, beige felt dull */
@@ -599,7 +614,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     background: transparent; border: 1px solid var(--dim); color: var(--dim); }
 .badge.Idle       { color: var(--dim); border-color: var(--edge); }
 .badge.Active     { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-.badge.Prefilling { background: var(--accent); border-color: var(--accent); color: #0b0b0b;
+.badge.Prefilling { background: var(--accent); border-color: var(--accent); color: var(--ink-on-accent);
     animation: pulse 1s ease-in-out infinite; }
 .badge.Loading    { border-color: var(--accent); color: var(--accent);
     animation: pulse 1.8s ease-in-out infinite; }
@@ -608,11 +623,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     animation: pulse 1.4s ease-in-out infinite;
     background: var(--accent);
     border-color: var(--accent);
-    color: #0b0b0b;
+    color: var(--ink-on-accent);
 }
 
 .badge.Complete   { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-.badge.Error      { background: var(--red); border-color: var(--red); color: #fff; }
+.badge.Error      { background: var(--red); border-color: var(--red); color: var(--ink-on-red); }
 /* ---- IN-FLIGHT redesign (if-*): model header + persistent request lines ---- */
 .if-group { border-bottom: 1px solid var(--edge); padding: 4px 0 6px; }
 .if-group:last-child { border-bottom: 0; }
@@ -640,8 +655,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* terminal badge variants (lowercase states from the IN-FLIGHT renderer) */
 .badge.done    { background: var(--ink); border-color: var(--ink); color: var(--bg); animation: none; }
 .badge.aborted { color: var(--dim); border-color: var(--edge); background: transparent; }
-.badge.refused { background: var(--warn); border-color: var(--warn); color: #0b0b0b; }
-.badge.error   { background: var(--red); border-color: var(--red); color: #fff; }
+.badge.refused { background: var(--warn); border-color: var(--warn); color: var(--ink-on-accent); }
+.badge.error   { background: var(--red); border-color: var(--red); color: var(--ink-on-red); }
 .badge.done, .badge.aborted, .badge.refused, .badge.error { min-width: 76px; }
 /* PREFILLING box: fills left→right; cached prefix and computed prefill in
    distinct colours (cached = quiet grey, computed = signal amber) */
@@ -650,7 +665,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .pbar > div { height: 100%; width: 0; transition: width .5s linear; }
 .pbar .p-cached { background: repeating-linear-gradient(-45deg, var(--dim) 0 2px, transparent 2px 5px); }
 .pbar .p-live   { background: var(--accent); }
-.se-btn.danger:hover { background: var(--red); color: #fff; }
+.se-btn.danger:hover { background: var(--red); color: var(--ink-on-red); }
 .se-btn.danger[disabled] { opacity: .4; pointer-events: none; }
 /* Settings editor + admin table buttons: sharp rectangles, value-shift hover */
 .se-btn { background: transparent; border: 1px solid var(--dim); color: var(--ink);
@@ -714,7 +729,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     cursor: pointer; border-radius: 0; position: relative; }
 .se-tab.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .se-tab.se-new { color: var(--accent); border-color: var(--accent); }
-.se-tab.se-new:hover { background: var(--accent); color: #141414; }
+.se-tab.se-new:hover { background: var(--accent); color: var(--ink-on-accent-soft); }
 .se-tab-x { margin-left: 6px; color: inherit; opacity: 0.6; }
 .se-tab-x:hover { opacity: 1; }
 .se-tab-drop { font: 400 10px/1 var(--mono); background: var(--field); color: var(--ink);
@@ -733,27 +748,27 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* item 8: engine-reload trigger badge. U41: on its own line under the name
    once names wrap — inline it read as a glitch box after short labels */
 .se-reload-badge { margin-left: 6px; font: 500 8px/1 var(--mono); letter-spacing: 0.08em;
-    color: #9a6b00; background: rgba(220, 160, 0, 0.14);
+    color: var(--amber-text); background: rgba(220, 160, 0, 0.14);
     border: 1px solid rgba(160, 120, 0, 0.5); padding: 2px 4px;
     vertical-align: middle; cursor: help; }
 /* item 4: RUNTIME DIVERGENCE banner */
-.se-divergence { border: 1px solid #b3541e; background: rgba(179, 84, 30, 0.08);
+.se-divergence { border: 1px solid var(--diverge); background: rgba(179, 84, 30, 0.08);
     padding: 7px 10px; margin: 8px 0; font-size: 12px; }
 /* U41: PENDING RESTART banner (same frame, amber palette) */
 .se-pending { border: 1px solid rgba(160, 120, 0, 0.7); background: rgba(220, 160, 0, 0.10);
     padding: 7px 10px; margin: 8px 0; font-size: 12px; }
 .se-pending button { margin-left: 10px; }
 .se-div-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-    color: #b3541e; font-weight: 600; }
+    color: var(--diverge); font-weight: 600; }
 .se-div-show { font: 500 10px/1 var(--mono); padding: 3px 6px; }
 .se-div-detail { margin-top: 6px; border-top: 1px dashed rgba(179, 84, 30, 0.5);
     padding-top: 6px; font: 400 11px/1.5 var(--mono); color: var(--ink); }
-.se-div-prof { font-weight: 700; margin-top: 4px; color: #b3541e; }
+.se-div-prof { font-weight: 700; margin-top: 4px; color: var(--diverge); }
 .se-div-row { display: flex; gap: 4px; flex-wrap: wrap; }
 .se-div-k { color: var(--dim); min-width: 260px; }
-.se-div-new { color: #b3541e; font-weight: 600; }
-.se-btn.restart { background: #b3541e; border-color: #b3541e; color: #fff; }
-.se-btn.restart:hover { background: #94451a; }
+.se-div-new { color: var(--diverge); font-weight: 600; }
+.se-btn.restart { background: var(--diverge); border-color: var(--diverge); color: var(--ink-on-red); }
+.se-btn.restart:hover { background: var(--diverge-hover); }
 .se-btn.restart[disabled] { opacity: 0.5; }
 .se-prof-expose { display: inline-flex; align-items: center; gap: 6px;
     font: 500 10px/1 var(--mono); letter-spacing: 0.06em; color: var(--accent); }
@@ -930,8 +945,8 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     overflow: hidden; text-overflow: ellipsis; max-width: 150px;
 }
 .admin-table .typebadge.t-llm   { border-color: var(--dim); color: var(--ink); }
-.admin-table .typebadge.t-vlm   { border-color: #7aa7ff; color: #7aa7ff; }
-.admin-table .typebadge.t-embed { border-color: #b98fd6; color: #b98fd6; }
+.admin-table .typebadge.t-vlm   { border-color: var(--type-vlm); color: var(--type-vlm); }
+.admin-table .typebadge.t-embed { border-color: var(--type-embed); color: var(--type-embed); }
 .admin-table .typebadge.t-none  { border-color: var(--edge); color: var(--dim); }
 [data-theme="light"] .admin-table .typebadge.t-vlm { border-color: #1f56b0; color: #1f56b0; }
 [data-theme="light"] .admin-table .typebadge.t-embed { border-color: #6d3a96; color: #6d3a96; }
@@ -1376,7 +1391,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    cockpit lamp, max contrast on any ground (green outlines on grey were
    unreadable). Glow marks powered instruments on dark themes. */
 .admin-table .lamp:hover { border-color: var(--ink); color: var(--ink); }
-.admin-table .lamp.on { background: #57d97a; border-color: #57d97a; color: #06130a; }
+.admin-table .lamp.on { background: var(--lamp-on); border-color: var(--lamp-on); color: var(--lamp-on-ink); }
 [data-theme="light"] .admin-table .lamp.on { background: #0a6b2c; border-color: #0a6b2c; color: #ffffff; }
 [data-theme="enhanced"] .admin-table .lamp.on { background: #7dffa0; border-color: #7dffa0;
     color: #02120a; box-shadow: 0 0 8px rgba(125, 255, 160, 0.55); }
@@ -1420,7 +1435,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* round 5 item 5: template rows are slim model rows */
 .admin-table .urow.tpl { padding: 4px 2px; }
 .admin-table .urow.tpl .se-btn.act { height: 18px; padding: 0 6px; font-size: 9px; }
-.admin-table .typebadge.t-tpl { border-color: #6fbf9a; color: #6fbf9a; }
+.admin-table .typebadge.t-tpl { border-color: var(--type-tpl); color: var(--type-tpl); }
 [data-theme="light"] .admin-table .typebadge.t-tpl { border-color: #1d7a56; color: #1d7a56; }
 /* round 5: alias/profile label lives in a left column (name, copy, EDIT
    stacked — EDIT below the name), diff chips stay right-aligned beside it;
@@ -1454,7 +1469,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     background: transparent; color: var(--dim); border: 0; border-radius: 0;
 }
 .admin-table .lsw-seg + .lsw-seg { border-left: 1px solid var(--edge); }
-.admin-table .lsw-seg.on { background: #57d97a; color: #06130a; }
+.admin-table .lsw-seg.on { background: var(--lamp-on); color: var(--lamp-on-ink); }
 .admin-table .lsw-seg.lit { color: var(--ink); }
 [data-theme="light"] .admin-table .lsw-seg.on { background: #0a6b2c; color: #ffffff; }
 [data-theme="enhanced"] .admin-table .lsw-seg.on { background: #7dffa0; color: #02120a; }
@@ -1483,7 +1498,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     border: 1px solid var(--accent); color: var(--accent); background: transparent;
 }
 .rqmark { display: inline-flex; align-items: center; justify-content: center;
-    width: 13px; height: 13px; background: var(--red); color: #fff;
+    width: 13px; height: 13px; background: var(--red); color: var(--ink-on-red);
     font: 700 10px/1 var(--mono); margin-right: 5px; flex: 0 0 auto; }
 .urow.settings .uname {
     white-space: normal;
@@ -1568,9 +1583,9 @@ label.se-row.pending-restart > .se-ctl > select {
     cursor: pointer;
 }
 
-.gs-box-title.sec-dirty { background: var(--accent); color: #141414;
+.gs-box-title.sec-dirty { background: var(--accent); color: var(--ink-on-accent-soft);
     border-bottom-color: var(--accent); }
-.gs-box-title.sec-restart { background: var(--red); color: #fff;
+.gs-box-title.sec-restart { background: var(--red); color: var(--ink-on-red);
     border-bottom-color: var(--red); }
 /* persistent save bar under the settings form: CHANGES list above buttons */
 .savebar { display: block; border: 1px solid var(--edge); background: var(--card);
@@ -1586,13 +1601,13 @@ label.se-row.pending-restart > .se-ctl > select {
     word-break: break-all; }
 .changelist .ch-new { color: var(--accent); }
 .savebtn { font-weight: 500; letter-spacing: 0.06em; }
-.savebtn.queued { background: var(--accent); border-color: var(--accent); color: #141414; }
-.savebtn.restart-mode { background: var(--red); border-color: var(--red); color: #fff; }
-.savebtn.force-mode { background: var(--warn, #e8a020); border-color: var(--warn, #e8a020); color: #141414; }
+.savebtn.queued { background: var(--accent); border-color: var(--accent); color: var(--ink-on-accent-soft); }
+.savebtn.restart-mode { background: var(--red); border-color: var(--red); color: var(--ink-on-red); }
+.savebtn.force-mode { background: var(--warn, #e8a020); border-color: var(--warn, #e8a020); color: var(--ink-on-accent-soft); }
 .modal.editor .editor-bar .savebtn.restart-mode { background: var(--red);
-    border-color: var(--red); color: #fff; }
+    border-color: var(--red); color: var(--ink-on-red); }
 .modal.editor .editor-bar .savebtn.queued { background: var(--accent);
-    border-color: var(--accent); color: #141414; }
+    border-color: var(--accent); color: var(--ink-on-accent-soft); }
 
 /* ---- MarkItDown special box (its own zone above the helper list) --------- */
 .mk-box { border: 1px solid var(--ink); padding: 14px; display: flex;
@@ -1759,7 +1774,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    chip right of the label and the amber ground on shadowed rows (genuine
    launch env wins until removed from the launch environment). */
 .urow.settings .uname .env-badge { margin-left: 8px; background: var(--accent);
-    color: #141414; border-color: var(--accent); }
+    color: var(--ink-on-accent-soft); border-color: var(--accent); }
 .urow.settings.env-shadowed { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .urow.settings.env-shadowed .uname small { color: var(--accent); }
 
@@ -1877,7 +1892,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); margin-right: 3px; }
 .pt-st-applied::before { background: var(--ok, #2e8b57); }
 .pt-st-pending::before { background: var(--accent, #e0662e); }
-.pt-st-update::before { background: #d9b400; }
+.pt-st-update::before { background: var(--pt-update); }
 .pt-st-warn { border-color: var(--warn, #b8860b); }
 .pt-st-warn::before { background: var(--warn, #b8860b); }
 .pt-st-dim { opacity: .55; }
