@@ -521,7 +521,6 @@ main.grid-stack .grid-stack-placeholder .placeholder-preview {
 .se-sub { grid-column: 1 / -1; display: grid; gap: 8px;
     grid-template-columns: 1fr 1fr;
     margin: 2px 0 6px; padding-left: 12px; border-left: 2px solid var(--accent); }
-.se-sub .se-field:first-child { margin-top: 0; }
 .se-sub .se-wide { grid-column: 1 / -1; }
 
 .meter { height: 4px; background: var(--grid); margin-top: 10px; }

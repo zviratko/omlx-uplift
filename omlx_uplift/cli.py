@@ -899,7 +899,9 @@ def _receipt_used_options(formula: str) -> set:
     import glob
     import json as _json
 
-    prefix = os.environ.get("HOMEBREW_PREFIX", "/opt/homebrew")
+    from . import paths as _paths
+
+    prefix = _paths.brew_prefix()
     receipts = sorted(glob.glob(f"{prefix}/Cellar/{formula}/*/INSTALL_RECEIPT.json"))
     if not receipts:
         return set()
@@ -1215,7 +1217,9 @@ def cmd_dev_install(args) -> int:
 def _formula_keg_exists(formula: str) -> bool:
     import glob
 
-    prefix = os.environ.get("HOMEBREW_PREFIX", "/opt/homebrew")
+    from . import paths as _paths
+
+    prefix = _paths.brew_prefix()
     return bool(glob.glob(f"{prefix}/Cellar/{formula}/*"))
 
 

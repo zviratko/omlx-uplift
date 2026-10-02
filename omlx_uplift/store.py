@@ -38,6 +38,8 @@ import threading
 import time
 from pathlib import Path
 
+from . import paths as _paths
+
 RETENTION_METRICS_DAYS = 30
 RETENTION_LOG_DAYS = 2
 _RET_CLAMP = (1, 365)
@@ -117,27 +119,10 @@ def _and(parts):
 
 
 def default_db_path() -> Path:
-    # Same resolution priority omlx uses for its own base dir
-    # (omlx.settings.resolve_default_base_path), with env fallback for
-    # standalone usage (viewer/CLI without a running server).
-    base = None
-    try:
-        from omlx.server import _server_state
-
-        gs = getattr(_server_state, "global_settings", None)
-        bp = getattr(gs, "base_path", None) if gs else None
-        if bp:
-            base = Path(bp)
-    except Exception as exc:  # noqa: BLE001 — env fallback below is the point
-        # LOG-SILENT-1: this ladder decides which metrics.sqlite3 every
-        # sample lands in; a broken server-state import used to vanish
-        # without trace. The fallback is legitimate, the silence is not.
-        log.debug("metrics base: server_state unavailable (%s); "
-                  "falling back to env/home", exc)
-    if base is None:
-        env = os.environ.get("OMLX_BASE_PATH")
-        base = Path(env) if env else Path(os.path.expanduser("~/.omlx"))
-    return base / "uplift" / "metrics.sqlite3"
+    # PATHS-1: ladder lives in paths.server_base_dir (family A:
+    # server_state -> OMLX_BASE_PATH -> ~/.omlx). Wrapper kept: tests
+    # and callers monkeypatch/import this name.
+    return _paths.metrics_db_path()
 
 
 _inst_cache: str | None = None

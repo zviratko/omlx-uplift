@@ -140,28 +140,12 @@ def set_base_dir(path) -> None:
 def overrides_path() -> Path:
     if _BASE_DIR is not None:
         return _BASE_DIR / OVERRIDES_FILENAME
-    # Same resolution as store.default_db_path, without importing omlx at
-    # module import time (router context: omlx is importable, use its state).
-    base = None
-    try:  # pragma: no cover - depends on live server state
-        from omlx.server import _server_state
+    # PATHS-1: same family-A ladder as store.default_db_path, via the
+    # shared helper (lazy import keeps this module stdlib-only at import
+    # time — the autopatch hook needs that guarantee).
+    from . import paths as _paths
 
-        gs = getattr(_server_state, "global_settings", None)
-        bp = getattr(gs, "base_path", None) if gs else None
-        if bp:
-            base = Path(bp)
-    except Exception as exc:  # noqa: BLE001 — same ladder as store.default_db_path
-        # LOG-SILENT-1: overrides_path() decides which env_overrides.json
-        # the tunables read; log the fallback, keep it stdlib-only.
-        import logging
-
-        logging.getLogger("omlx_uplift.env_tunables").debug(
-            "overrides base: server_state unavailable (%s); "
-            "falling back to env/home", exc)
-    if base is None:
-        env = os.environ.get("OMLX_BASE_PATH")
-        base = Path(env) if env else Path(os.path.expanduser("~/.omlx"))
-    return base / "uplift" / OVERRIDES_FILENAME
+    return _paths.server_base_dir() / "uplift" / OVERRIDES_FILENAME
 
 
 def load_overrides(path: Path | None = None) -> dict[str, dict]:

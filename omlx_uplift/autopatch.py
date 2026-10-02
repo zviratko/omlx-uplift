@@ -21,16 +21,11 @@ _TARGET = "omlx.server"
 
 def _seed_env_tunables() -> None:
     try:
-        from . import env_tunables
+        from . import env_tunables, paths
 
-        base = None
-        env_base = os.environ.get("OMLX_BASE_PATH")
-        if env_base:
-            base = os.path.join(env_base, "uplift")
-        elif os.path.isdir(os.path.expanduser(os.path.join("~", ".omlx"))):
-            base = os.path.expanduser(os.path.join("~", ".omlx", "uplift"))
+        base = paths.startup_base_dir()
         if base:
-            env_tunables.set_base_dir(base)
+            env_tunables.set_base_dir(str(base / paths.UPLIFT_SUBDIR))
         env_tunables.seed_environ()
     except Exception as exc:  # never break the server for a dashboard feature
         # LOG-SILENT-1: silent here meant env tunables (UPLIFT_* etc.)

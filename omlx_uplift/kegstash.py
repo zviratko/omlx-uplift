@@ -30,7 +30,13 @@ _META = "uplift-kegstash.json"
 
 
 def _prefix() -> str:
-    return os.environ.get("HOMEBREW_PREFIX", "/opt/homebrew")
+    # PATHS-1: single brew-prefix ladder (env -> Cellar probe covering
+    # /usr/local on Intel -> default). Old code fell back to
+    # /opt/homebrew only: on an Intel Mac without HOMEBREW_PREFIX set,
+    # keg discovery silently answered 'not installed'.
+    from . import paths as _paths
+
+    return _paths.brew_prefix()
 
 
 def cellar_dir(formula: str = FORMULA) -> str:

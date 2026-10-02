@@ -205,13 +205,6 @@ const SUBS = {
     chat: ['chat'],
     cluster: ['cluster'],
 };
-const SUB_LABELS = {
-    manager: 'Models', downloader: 'Downloader', quantizer: 'oQ(e) Quantization',
-    uploader: 'Uploader', helper: 'Helper Models',
-    throughput: 'Throughput', accuracy: 'Accuracy', context: 'Context',
-    chat: 'Chat', cluster: 'Cluster',
-    global: 'Server Settings', patches: 'Patches',
-};
 function currentTab() {
     const t = (location.hash || '').replace('#', '').split('/')[0];
     return TABS.includes(t) ? t : 'status';

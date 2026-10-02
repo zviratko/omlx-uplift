@@ -508,20 +508,12 @@ def _extract_into(root: Path, dir_name: str, yml_bytes: bytes):
 
 
 def _resolve_base_path() -> str:
-    base = None
-    try:
-        from omlx.server import _server_state
+    # PATHS-1: family A (per-instance base) via the shared ladder; the
+    # docstring on skins_root() documents why skins follow the server's
+    # own base dir (omlx-dev gets ~/.omlx-dev/uplift/skins).
+    from . import paths as _paths
 
-        gs = getattr(_server_state, "global_settings", None)
-        bp = getattr(gs, "base_path", None) if gs else None
-        if bp:
-            base = str(bp)
-    except Exception:
-        pass
-    if base is None:
-        env = os.environ.get("OMLX_BASE_PATH")
-        base = env if env else os.path.expanduser("~/.omlx")
-    return base
+    return str(_paths.server_base_dir())
 
 
 # ---------------------------------------------------------------------------

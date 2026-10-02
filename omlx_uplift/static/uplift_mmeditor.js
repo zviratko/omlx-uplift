@@ -13,7 +13,6 @@ const D = window.UpliftDom;
 const S = window.Uplift.state;
 const $ = D.$;
 const API = S.API;
-const prefs = S.prefs;
 const MM_GLUE = {
     toast: D.toast,
     fetchJson: D.fetchJson,
@@ -55,11 +54,6 @@ let seOrig = {};                     // baseline snapshot for dirty tracking
 let seDeferred = {};                 // stored runtime payload awaiting phase 2 (open model)
 const seDeferKeys = () => new Set([...window.UpliftModelSpec.RUNTIME_SETTING_KEYS,
                                    'model_type_override']);
-function seDeferredSubset(full) {
-    const ks = seDeferKeys(), out = {};
-    for (const [k, v] of Object.entries(full)) if (ks.has(k)) out[k] = v;
-    return out;
-}
 async function seLoadDeferred(model) {
     try {
         seDeferred = (await MM_GLUE.fetchJson(
@@ -155,11 +149,6 @@ function renderEdChanges() {
                        k + ': ' + (sec || MM_GLUE.gsDisplay(seValues[k])));
             shown.add(k);
         }
-    }
-    // edited-back fields whose diff lives only in widgets: drop from box too
-    for (const el of document.querySelectorAll('#se-fields .diff-out')) {
-        const key = el.closest('label.se-row')?.dataset.key;
-        if (!key || shown.has(key)) continue;
     }
     if (!seIsBaseTab()) {
         if ((t._origExpose || false) !== !!t.expose_as_model)
@@ -1744,7 +1733,11 @@ async function seLoadProfiles(model, host) {
             }
         } catch (_) { window.__sePresets = []; }
     }
-    if (tpls.length || true) {
+    /* Templates row ALWAYS renders (no length gate): 'Snapshot as' is how
+       the FIRST template gets created. The `|| true` this replaces was a
+       deliberate always-run written as a tautology — unreadable, but the
+       behavior stays: empty tpls must not hide the row. */
+    {
         const trow = document.createElement('div');
         trow.className = 'se-prof-row';
         const tsel = document.createElement('select');

@@ -120,16 +120,16 @@ def now_iso() -> str:
 def default_base_dir() -> str:
     """THE one uplift data dir: ~/.omlx/uplift (override: UPLIFT_HOME).
 
+    PATHS-1: policy lives in paths.uplift_store_dir (family B).
     Deliberately independent of OMLX_BASE_PATH: that env points the
     omlx-dev service at ~/.omlx-dev, and deriving the patch store from it
     split ONE patch set into two manifests (CLI+vanilla vs the dev
     dashboard) — patches visibly vanished/reappeared between the two.
     Every process shares this dir; per-target state keys the entries.
     """
-    env_home = os.environ.get("UPLIFT_HOME")
-    if env_home:
-        return os.path.expanduser(env_home)
-    return os.path.expanduser(os.path.join("~", ".omlx", "uplift"))
+    from . import paths as _paths
+
+    return str(_paths.uplift_store_dir())
 
 
 LEGACY_BASE_CANDIDATES = ("~/.omlx-dev",)
@@ -433,10 +433,9 @@ def _omlx_root() -> str | None:
     # `omlx-uplift patch` still reaches the live tree for recovery.
     import glob
 
-    prefixes = ["/opt/homebrew", "/usr/local"]
-    env_base = os.environ.get("HOMEBREW_PREFIX")
-    if env_base:
-        prefixes.insert(0, env_base)
+    from . import paths as _paths
+
+    prefixes = _paths.brew_prefix_candidates()
     layouts = (("opt", "omlx", "libexec", "lib", "python3.*",
                 "site-packages", "omlx"),      # brew formula with libexec venv
                ("opt", "omlx", "lib", "python3.*",
