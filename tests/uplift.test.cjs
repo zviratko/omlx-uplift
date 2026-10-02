@@ -658,6 +658,36 @@ test('PACK-2D: partial-width band does not staircase the bands below it', () => 
     ]);
     assert.deepStrictEqual(narrow.map(p => p.y), [0, 10]);
 });
+/* ROWBAND-1 (user 2026-10-02): the late-reveal pile-up. Parked gated cards
+   are NOT reserved during the boot pack, so the stat-tile row legally packs
+   UP into their promised slot (an absent macmon must leave no dead band).
+   When the probe later reveals power/temp at the contract y, the near-miss
+   y (|dy| <= 2) plus horizontal overlap used to FUSE the two rows into one
+   rigid band — seven cards sharing one rect, power/temp rendered on top of
+   the tiles. Band membership must reject a candidate whose RECT collides
+   with a member: true row-mates tile horizontally and can never rect-hit. */
+test('ROWBAND-1: near-y rect collision splits bands instead of fusing them', () => {
+    const src = allStaticJs();
+    const m = src.match(/function _rowAlign\(\)[\s\S]*?\n}/);
+    assert.ok(m, '_rowAlign found');
+    assert.ok(/rectsTouch/.test(m[0]), 'band membership tests rect collision');
+    // the collision reject must sit inside the band loop, before the merge
+    const loop = m[0].slice(m[0].indexOf('for (const b of cand)'), m[0].indexOf('bands[idx].members.push'));
+    assert.ok(/rectsTouch\(m, b\)/.test(loop),
+        'a rect-colliding candidate is never merged into the band');
+    assert.ok(/if \(idx < 0\) \{ bands\.push\(/.test(m[0]),
+        'a rejected candidate opens its own band');
+    // drift repair must SURVIVE the split: true row-mates tile
+    // horizontally, so a |dy|<=2 pair with only x-adjacency still fuses
+    // (rectsTouch is x-STRICT; packRows then gives the later band a lower y)
+    const fused = UPL.packRows([
+        { members: [{ x: 0, w: 12 }, { x: 12, w: 12 }], h: 18 },  // gated row
+        { members: [{ x: 0, w: 4 }, { x: 4, w: 4 }, { x: 8, w: 4 },
+                    { x: 12, w: 4 }, { x: 16, w: 8 }], h: 18 },   // tile row
+    ]);
+    assert.deepStrictEqual(fused.map(p => p.y), [0, 18],
+        'the split bands pack as two stacked rows, not one');
+});
 test('DROP-REGISTRATION: tray drops join upLayout.blocks and Cancel reverts', () => {
     const src = allStaticJs();
     const drop = src.match(/function _onTrayDrop\(node\) \{[\s\S]*?\n\}/);

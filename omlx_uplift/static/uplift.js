@@ -991,11 +991,26 @@ function _rowAlign() {
     }
     cand.sort((a, z) => a.y - z.y || a.x - z.x);
     const bands = [];                         // [{y, members, h}]
+    // ROWBAND-1 (user 2026-10-02): a candidate whose RECTANGLE collides
+    // with an existing member is never a row-mate — true row-mates tile
+    // horizontally, so |Δy| ≤ 2 plus a rect hit means two DIFFERENT rows
+    // ended up stacked (the late-reveal pile-up: parked gated cards are
+    // not reserved, the tile row packs UP into their promised slot — by
+    // design, so an absent macmon leaves no dead band — the probe then
+    // places power/temp at the contract y, and the near-miss y fused the
+    // gated row and the tile row into ONE rigid band: the cards rendered
+    // literally on top of each other). Reject the merge and let packRows
+    // drop the later band to the first clear y instead — everything below
+    // reflows straight down, x never moves.
+    const rectsTouch = (m, b) =>
+        m.x < b.x + b.w && b.x < m.x + m.w &&
+        b.y < m.y + (m.h || 1) && m.y < b.y + (b.h || 1);
     for (const b of cand) {
         let idx = -1;
         for (let i = 0; i < bands.length && idx < 0; i++) {
             const band = bands[i];
             if (b.y - band.y > 2) continue;   // ROW_TOLERANCE (uplift_layout)
+            if (band.members.some(m => rectsTouch(m, b))) continue;  // stacked rows, not mates
             const xov = band.members.some(m => m.x < b.x + b.w && b.x < m.x + m.w);
             const w = band.members.reduce((s, m) => s + m.w, 0) + b.w;
             if (xov || w <= 24) idx = i;      // overlap = row-mates in a fight;
