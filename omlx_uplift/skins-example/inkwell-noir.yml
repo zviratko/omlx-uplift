@@ -1,0 +1,185 @@
+# Uplift skin crate — "INKWELL NOIR" (black paper + bone ink, dark duotone).
+# The inverted sibling of INKWELL (SPARK-4 direction 2): the same duotone
+# discipline — two values, zero hue, state carried by SHAPE — printed the
+# other way round, bone ink on black stock (black 2500, the rich-black ink;
+# a proof print on a dark table).
+#
+# Same laid-paper weave as inkwell, inverted: two cross hatches at 3px/5px
+# (not multiples — a multiple pitch moires) over a vignette, pure CSS.
+#
+# Two-beat draw-in, user-requested (2026-10-02): on load each card's hairline
+# FRAME draws outward from its centre (staggered row-major across the grid),
+# then the title writes its rule — the inkwell-write pattern, here as a
+# pseudo-box inset animation so a real outline can draw. Motion off renders
+# the finished state, never a frozen half-stroke.
+skin_version: 1
+label: "Inkwell Noir"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#131315"          # black stock, warm-neutral not blue
+  card: "#1b1b1d"
+  row2: "#202023"        # zebra steps +4 luminance, same spacing as inkwell
+  field: "#0e0e10"       # raised well reads darker on dark UIs
+  panel: "#222225"
+  edge: "#3a3a3c"        # hairline AA on card
+  ink: "#f2f1ec"         # bone — the ink, inverted (15.2:1 on card)
+  dim: "#a8a7a0"         # 6.6:1 on panel, the binding ground
+  accent: "#f2f1ec"      # duotone: accent IS the ink
+  chart-1: "#f2f1ec"     # series separated by value only
+  chart-2: "#6f6f69"     # 3.4:1 on card; seriesPalette() tops up from here
+  grid: "#232326"        # faintest thing on the card
+  heat: "#c9c8c0"
+  frame: "#8a8983"
+  red: "#f2f1ec"
+  bad: "#f2f1ec"
+  warn: "#a8a7a0"
+  good: "#f2f1ec"
+  hdr-ink: "#f2f1ec"     # bone nav; active tab inverts to bone slab (aperture precedent)
+  hdr-edge: "#2c2c2f"
+  hdr-hover: "#242427"
+  hdr-weight: "400"
+  mono: "ui-monospace, \"SFMono-Regular\", Menlo, monospace"
+  sans: "\"Helvetica Neue\", \"Segoe UI\", system-ui, sans-serif"
+icons:
+  # Same pen nib as inkwell, strokes flipped to bone at the measured 10px box.
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+      <path d="M6 1.5L9.4 7.2 6 10.5 2.6 7.2z" fill="none" stroke="#f2f1ec" stroke-width="1.2"/>
+      <path d="M6 5v4" stroke="#f2f1ec" stroke-width="1"/>
+      <circle cx="6" cy="4.4" r="0.9" fill="#f2f1ec"/>
+    </svg>
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+      <path d="M1.5 2L5 5.8 8.5 2" fill="none" stroke="#a8a7a0" stroke-width="1.4"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+      <path d="M3 3l8 8M11 3l-8 8" stroke="#f2f1ec" stroke-width="1.8"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M2 3h12M2 7h12" stroke="#8a8983" stroke-width="1"/>
+    </svg>
+css: |-
+  html { color-scheme: dark; }
+  body {
+      background-color: var(--bg);
+      background-image:
+          repeating-linear-gradient(90deg,
+              rgba(255, 255, 255, .028) 0 1px, transparent 1px 3px),
+          repeating-linear-gradient(0deg,
+              rgba(255, 255, 255, .02) 0 1px, transparent 1px 5px),
+          radial-gradient(120% 80% at 50% -10%,
+              #1c1c1f 0%, var(--bg) 55%, #0e0e10 100%);
+      background-size: auto, auto, cover;
+      background-repeat: repeat, repeat, no-repeat;
+      background-attachment: fixed, fixed, fixed;
+  }
+  /* The institution strip takes the bone on the dark proof stock. */
+  body::before { background: var(--ink); }
+  /* Sticky header repeats the same pinned ground (see artelight.yml). */
+  header.top {
+      background-color: var(--bg);
+      background-image:
+          repeating-linear-gradient(90deg,
+              rgba(255, 255, 255, .028) 0 1px, transparent 1px 3px),
+          repeating-linear-gradient(0deg,
+              rgba(255, 255, 255, .02) 0 1px, transparent 1px 5px),
+          radial-gradient(120% 80% at 50% -10%,
+              #1c1c1f 0%, var(--bg) 55%, #0e0e10 100%);
+      background-size: auto, auto, cover;
+      background-repeat: repeat, repeat, no-repeat;
+      background-attachment: fixed, fixed, fixed;
+  }
+  .card {
+      background: var(--card);
+      border: 1px solid var(--edge);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+  }
+  .card:hover { border-color: var(--frame); }
+  .card h2 {
+      color: var(--ink); letter-spacing: .2em; text-transform: uppercase;
+      font-weight: 400; border-bottom: 1px solid var(--grid);
+  }
+  .chart-box { background: #17171a; border: 1px solid var(--grid); }
+
+  /* ---- beat 1: the hairline FRAME draws outward from the centre ---- */
+  /* A real border cannot be animated, so the frame is four 1px gradient
+     strokes painted on the edges of a pseudo's own box; shrinking/growing the
+     BOX (inset) grows every stroke with it — crisp hairlines the whole way,
+     which a transform scale would smear mid-animation. The pseudo's FINAL
+     box (inset: 0, the card's inner edge) is declared unconditionally and
+     only the animation is gated: motion-off shows the finished drawing.
+     inset:0 (not -1px): inter-card gaps measure 0.0px, so an outset frame
+     would sit on the neighbour's frame and read as a 2px divider. */
+  #grid .card::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background:
+          linear-gradient(var(--ink), var(--ink)) 0 0 / 100% 1px,
+          linear-gradient(var(--ink), var(--ink)) 0 100% / 100% 1px,
+          linear-gradient(var(--ink), var(--ink)) 0 0 / 1px 100%,
+          linear-gradient(var(--ink), var(--ink)) 100% 0 / 1px 100%;
+      background-repeat: no-repeat;
+  }
+  :root:not([data-motion="off"]) #grid .card::before {
+      animation: noir-frame 1.4s ease-out both;
+  }
+  @keyframes noir-frame {
+      from { inset: calc(50% - 0.5px); }
+      to   { inset: 0; }
+  }
+  /* Row-major stagger: the sweep walks the grid left-to-right, a line at a
+     time — reads as typesetting order, not as noise. Delays stay well under
+     the 1.4 s duration so the whole board is framed inside ~2.4 s. */
+  :root:not([data-motion="off"]) #grid .card:nth-child(3n+2) { animation-delay: .28s; }
+  :root:not([data-motion="off"]) #grid .card:nth-child(3n)   { animation-delay: .56s; }
+
+  /* ---- beat 2: the title writes its rule (the inkwell-write pattern) ---- */
+  /* Delayed past the frame close so the two beats do not overlap into mud;
+     3.1 s against the 1.4 s frame — distinct periods, distinct jobs. */
+  #grid .card h2 {
+      background-image: linear-gradient(90deg, var(--ink), var(--ink));
+      background-repeat: no-repeat;
+      background-position: 0 100%;
+      background-size: 100% 1px;
+  }
+  :root:not([data-motion="off"]) #grid .card h2 {
+      animation: noir-write 3.1s ease-out both;
+      animation-delay: 1.2s;
+  }
+  @keyframes noir-write {
+      from { background-size: 0 1px; }
+      to   { background-size: 100% 1px; }
+  }
+
+  /* Nib dip in the header: 7 s, coprime with both draw beats. */
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: noir-dip 7s ease-in-out infinite;
+  }
+  @keyframes noir-dip {
+      0%, 74%, 100% { transform: translateY(0); }
+      80%           { transform: translateY(2px); }
+      86%           { transform: translateY(0); }
+  }
+  .meter { background: #0e0e10; border: 1px solid var(--edge); }
+  .meter > div { background: var(--ink); }
+  .meter.bad > div { background: #a8a7a0; }
+  .icon-btn:hover, select:hover { background: var(--ink); color: var(--bg); }
+  ::selection { background: var(--ink); color: #131315; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #17171a; }
+  ::-webkit-scrollbar-thumb { background: #3a3a3c; border: 2px solid #17171a; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--frame); }
+  .logo .logo-below::after {
+      content: "DUOTONE · BLACK 2500 · NO HUE";
+      color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .2em;
+  }
+  .logo::after {
+      content: ": PROOF";
+      color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .1em;
+      margin-left: 6px;
+  }
+  .rqchip { border: 1px solid var(--frame); border-radius: 0; }
+  .chip { border-radius: 0; border-color: var(--edge); }
