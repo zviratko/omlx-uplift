@@ -825,6 +825,110 @@ def apply_diff(diff: bytes | str, tree_root: str, backup_dir: str,
     return {"ok": True, "reason": None, "files": written}
 
 
+# ---------------------------------------------------------------------------
+# BE-3 step 4: backup recording had TWO ~70-line clones (pristine /
+# merged) whose shared skeleton — parse, first-touch-per-keg, safe_join,
+# read current bytes, write image + meta.json entries, never touch the
+# live tree — drifted risk grew with every fix to one twin (the per-file
+# _save_backup_meta and the final unconditional save were copied by hand).
+# One skeleton, one compute callback per direction:
+#   record_pristine_backup: revert the patch IN MEMORY -> pre-image
+#   record_merged_backup:   apply the patch IN MEMORY  -> post-image
+# ---------------------------------------------------------------------------
+
+_SKIP = object()   # compute: cannot ground this file -> skip, grounded=False
+
+
+def _record_backup(diff: bytes | str, tree_root: str, backup_dir: str,
+                   compute) -> dict:
+    """Shared skeleton; compute(content|None, fp) returns the image bytes
+    to back up (None = the file must NOT exist in the backed-up state) or
+    _SKIP when the state cannot be grounded. Live tree never touched.
+    {"ok": bool, "reason": str|None, "grounded": bool}
+    Files whose image cannot be grounded are skipped; the patch stays
+    reappliable on a fresh keg."""
+    parsed = parse_diff(diff)
+    if not parsed["ok"]:
+        return {"ok": False, "reason": parsed["reason"], "grounded": False}
+
+    meta_path = os.path.join(backup_dir, "meta.json")
+    meta = _load_backup_meta(meta_path)
+    os.makedirs(backup_dir, exist_ok=True)
+    grounded = True
+    for fp in parsed["files"]:
+        rel_key = fp["path"]
+        if rel_key in meta["files"]:
+            continue  # first-touch-per-keg wins (same rule as apply_diff)
+        target, why = safe_join(tree_root, rel_key)
+        if target is None:
+            return {"ok": False, "reason": why, "grounded": grounded}
+        try:
+            with open(target, "rb") as fh:
+                content = fh.read()
+        except FileNotFoundError:
+            content = None
+
+        data = compute(content, fp)
+        if data is _SKIP:
+            grounded = False
+            continue
+        if data is not None:
+            bpath = _backup_path(backup_dir, rel_key)
+            os.makedirs(os.path.dirname(bpath), exist_ok=True)
+            with open(bpath, "wb") as fh:
+                fh.write(data)
+        meta["files"][rel_key] = {
+            "existed": data is not None,
+            "sha256": (hashlib.sha256(data).hexdigest()
+                       if data is not None else None)}
+        _save_backup_meta(meta_path, meta)
+    _save_backup_meta(meta_path, meta)  # even when nothing was grounded
+    return {"ok": True, "reason": None, "grounded": grounded}
+
+
+def _compute_pristine_orig(content, fp):
+    """Pre-image of one file (the patch REVERSED in memory)."""
+    if fp["action"] == "create":
+        # vanilla tree: the file did not exist — UNLESS it pre-existed
+        # as a different variant (hand-created): those bytes are not
+        # uplift's to delete, so disable must RESTORE them, not remove
+        # the file. An identical adopt keeps vanilla semantics (absent).
+        probe = (_apply_file(content, fp) if content is not None else None)
+        return content if probe and probe.get("pre_existing") else None
+    if content is None:
+        return _SKIP          # already deleted — cannot ground the original
+    lines = [_split_eol(l) for l in splitlines_keepends(content)]
+    res = _all_hunks(lines, fp["hunks"], reverse=True)
+    if res is None:
+        return _SKIP          # not a clean post-image of this patch
+    return b"".join(text + eol for text, eol in res[0])
+
+
+def _compute_merged_image(content, fp):
+    """Post-image of one file (the patch APPLIED in memory) — the mirror
+    for adopted REVERSALS: the tree sits at the pre-image, disable must
+    restore the MERGED bytes."""
+    if fp["action"] == "create":
+        res = _apply_file(content, fp)
+        if res.get("pre_existing"):
+            return content    # variant exists; merged state = its bytes
+        if not res.get("ok") or res.get("already"):
+            return _SKIP      # file exists and differs — cannot ground
+        return res.get("new_bytes", b"")
+    if fp["action"] == "delete":
+        if content is None:
+            return _SKIP      # already gone — nothing to merge back
+        return None           # merged state: the file does not exist
+    if content is None:
+        return _SKIP
+    res = _apply_file(content, fp)
+    if res.get("already"):
+        return content        # merged bytes already on disk
+    if res.get("ok"):
+        return res.get("new_bytes", b"")
+    return _SKIP
+
+
 def record_pristine_backup(diff: bytes | str, tree_root: str,
                            backup_dir: str) -> dict:
     """Revert a patch IN MEMORY and store the reversed image as the backup.
@@ -835,65 +939,8 @@ def record_pristine_backup(diff: bytes | str, tree_root: str,
     hunks against its current content and write the result into
     backup_dir in exactly the layout restore_backup reads (files/ +
     meta.json). The live tree is never touched — reverting it on disk
-    would run the server unpatched and contradict APPLIED state.
-
-    Files whose pre-image cannot be grounded (already-deleted targets) are
-    skipped; the patch stays reappliable on a fresh keg.
-    {"ok": bool, "reason": str|None, "grounded": bool}
-    """
-    parsed = parse_diff(diff)
-    if not parsed["ok"]:
-        return {"ok": False, "reason": parsed["reason"], "grounded": False}
-
-    meta_path = os.path.join(backup_dir, "meta.json")
-    meta = _load_backup_meta(meta_path)
-    os.makedirs(backup_dir, exist_ok=True)
-    grounded = True
-    for fp in parsed["files"]:
-        rel_key = fp["path"]
-        if rel_key in meta["files"]:
-            continue  # first-touch-per-keg wins (same rule as apply_diff)
-        target, why = safe_join(tree_root, rel_key)
-        if target is None:
-            return {"ok": False, "reason": why, "grounded": grounded}
-        try:
-            with open(target, "rb") as fh:
-                content = fh.read()
-        except FileNotFoundError:
-            content = None
-
-        orig: bytes | None
-        if fp["action"] == "create":
-            # vanilla tree: the file did not exist — UNLESS it pre-existed
-            # as a different variant (hand-created): those bytes are not
-            # uplift's to delete, so disable must RESTORE them, not remove
-            # the file. An identical adopt keeps vanilla semantics (absent).
-            probe = (_apply_file(content, fp) if content is not None
-                     else None)
-            orig = content if probe and probe.get("pre_existing") else None
-        elif content is None:
-            grounded = False  # already deleted — cannot ground the original
-            continue
-        else:
-            lines = [_split_eol(l) for l in splitlines_keepends(content)]
-            res = _all_hunks(lines, fp["hunks"], reverse=True)
-            if res is None:
-                grounded = False  # not a clean post-image of this patch
-                continue
-            orig = b"".join(text + eol for text, eol in res[0])
-
-        if orig is not None:
-            bpath = _backup_path(backup_dir, rel_key)
-            os.makedirs(os.path.dirname(bpath), exist_ok=True)
-            with open(bpath, "wb") as fh:
-                fh.write(orig)
-        meta["files"][rel_key] = {
-            "existed": orig is not None,
-            "sha256": (hashlib.sha256(orig).hexdigest()
-                       if orig is not None else None)}
-        _save_backup_meta(meta_path, meta)
-    _save_backup_meta(meta_path, meta)  # even when nothing was grounded
-    return {"ok": True, "reason": None, "grounded": grounded}
+    would run the server unpatched and contradict APPLIED state."""
+    return _record_backup(diff, tree_root, backup_dir, _compute_pristine_orig)
 
 
 def record_merged_backup(diff: bytes | str, tree_root: str,
@@ -902,70 +949,8 @@ def record_merged_backup(diff: bytes | str, tree_root: str,
     backup. The mirror of record_pristine_backup, used when a REVERSAL is
     adopted: the tree already sits at the pre-image (nothing to undo), yet
     disable must restore the MERGED bytes — so the backup holds the
-    forward-applied image, not the pristine one.
-    {"ok": bool, "reason": str|None, "grounded": bool}
-    """
-    parsed = parse_diff(diff)
-    if not parsed["ok"]:
-        return {"ok": False, "reason": parsed["reason"], "grounded": False}
-
-    meta_path = os.path.join(backup_dir, "meta.json")
-    meta = _load_backup_meta(meta_path)
-    os.makedirs(backup_dir, exist_ok=True)
-    grounded = True
-    for fp in parsed["files"]:
-        rel_key = fp["path"]
-        if rel_key in meta["files"]:
-            continue  # first-touch-per-keg wins (same rule as apply_diff)
-        target, why = safe_join(tree_root, rel_key)
-        if target is None:
-            return {"ok": False, "reason": why, "grounded": grounded}
-        try:
-            with open(target, "rb") as fh:
-                content = fh.read()
-        except FileNotFoundError:
-            content = None
-
-        merged: bytes | None
-        if fp["action"] == "create":
-            res = _apply_file(content, fp)
-            if res.get("pre_existing"):
-                merged = content  # variant exists; merged state = its bytes
-            elif not res.get("ok") or res.get("already"):
-                grounded = False  # file exists and differs — cannot ground
-                continue
-            else:
-                merged = res.get("new_bytes", b"")
-        elif fp["action"] == "delete":
-            if content is None:
-                grounded = False  # file already gone — nothing to merge back
-                continue
-            merged = None  # merged state: the file does not exist
-        else:
-            if content is None:
-                grounded = False
-                continue
-            res = _apply_file(content, fp)
-            if res.get("already"):
-                merged = content  # merged bytes already on disk
-            elif res.get("ok"):
-                merged = res.get("new_bytes", b"")
-            else:
-                grounded = False
-                continue
-
-        if merged is not None:
-            bpath = _backup_path(backup_dir, rel_key)
-            os.makedirs(os.path.dirname(bpath), exist_ok=True)
-            with open(bpath, "wb") as fh:
-                fh.write(merged)
-        meta["files"][rel_key] = {
-            "existed": merged is not None,
-            "sha256": (hashlib.sha256(merged).hexdigest()
-                       if merged is not None else None)}
-        _save_backup_meta(meta_path, meta)
-    _save_backup_meta(meta_path, meta)
-    return {"ok": True, "reason": None, "grounded": grounded}
+    forward-applied image, not the pristine one."""
+    return _record_backup(diff, tree_root, backup_dir, _compute_merged_image)
 
 
 def restore_backup(backup_dir: str, tree_root: str) -> dict:
