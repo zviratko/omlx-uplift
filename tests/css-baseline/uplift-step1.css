@@ -149,6 +149,23 @@ body::before {
 }
 [data-theme="dark"] body::before, [data-theme="enhanced"] body::before,
 :root:not([data-theme]) body::before { background: var(--edge); }
+
+/* ---- Layout: strict grid, defined spacing, breathing band on top ---- */
+
+header.top {
+    /* stats row rides the header's FIRST line (order:-1, basis 100%) in
+       the band above the menu bar, so the header wraps by design now.
+       Row 2 (logo + tabs + icons) still cannot reflow unexpectedly: the
+       tabs strip shrinks first (min-width:0) and every control is one
+       line (nowrap below). */
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 2px 14px; margin-bottom: 18px;
+    border-bottom: 1px solid var(--edge);   /* rule under header lockup */
+    /* the whole top menu floats: it sticks under the red strip on scroll */
+    position: sticky; top: 4px; z-index: 55;
+    background: var(--bg);
+}
 .logo {
     font: 500 16px/1 var(--sans); letter-spacing: 0.02em; text-transform: uppercase;
     position: relative;   /* anchor for the below-logo wordmark slot */
@@ -158,8 +175,7 @@ body::before {
                        existing skins; engine caps its length, see guard)
    .logo-below       — long wordmark UNDER the logo; absolute so it can
                        NEVER widen the header or shift the menu (a skin
-                       fills it via .logo-below::after { content: ... }
-)
+                       fills it via .logo-below::after { content: ... })
    Both empty by default — skins that use neither are pixel-identical. */
 /* U23 (all skins): when a skin fills the .logo-below slot, the header
    reserves a free strip under the logo (padding grows DOWNWARD —
@@ -206,7 +222,7 @@ header.top .spacer { flex: 1; }
    their own text ("up 2h 59m", "M1 Max · 32 GB · 32c") and the header
    read as two lines. nowrap pins every control to one line at any width. */
 header.top .chip, header.top .tabs a, header.top .dd-btn { white-space: nowrap; }
-/* never squeeze the box under the
+header.top .chip { flex-shrink: 0; }   /* never squeeze the box under the
     nowrap text — the tabs strip absorbs width pressure instead */
 /* Row 1 unit: status chips left, control icons right (spacer between).
    The icons moved in here from the menu row (user: same level as the
@@ -253,29 +269,7 @@ header.top .tabs a, header.top .dd-btn { padding: 9px 6px; }
 }
 [data-theme="cockpit"] { --hdr-ink: var(--ink); --hdr-edge: var(--edge);
     --hdr-hover: var(--edge); --hdr-weight: 400; }
-header.top {
-    /* stats row rides the header's FIRST line (order:-1, basis 100%) in
-       the band above the menu bar, so the header wraps by design now.
-       Row 2 (logo + tabs + icons) still cannot reflow unexpectedly: the
-       tabs strip shrinks first (min-width:0) and every control is one
-       line (nowrap below). */
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    row-gap: 6px;
-    padding: 8px 2px 14px;
-    margin-bottom: 18px;
-    border-bottom: 1px solid var(--edge);
-    /* rule under header lockup */
-    /* the whole top menu floats: it sticks under the red strip on scroll */
-    position: sticky;
-    top: 4px;
-    z-index: 55;
-    background: var(--bg);
-    border-bottom-color: var(--hdr-edge) !important;
-}
-
+header.top { border-bottom-color: var(--hdr-edge) !important; }
 header.top .logo { color: var(--hdr-ink); font-weight: var(--hdr-weight); }
 header.top .logo .dot { background: var(--hdr-ink); }
 header.top .tabs { border-color: var(--hdr-ink); }
@@ -291,13 +285,8 @@ header.top .dd-btn:hover { background: var(--hdr-hover); }
    user reported (2026-09-21). Active fill must survive its own hover. */
 header.top .dd-btn.active:hover { background: var(--hdr-ink); color: var(--bg); }
 header.top .tabs .dd-btn { border-right-color: var(--hdr-edge); }
-header.top .chip {
-    flex-shrink: 0;
-    color: var(--hdr-ink);
-    border-color: var(--hdr-edge);
-    font-weight: var(--hdr-weight);
-}
-
+header.top .chip { color: var(--hdr-ink); border-color: var(--hdr-edge);
+    font-weight: var(--hdr-weight); }
 header.top .chip.state-ok { color: var(--hdr-ink); }
 /* U20 temperature chip — hot state colours the text via theme token. */
 header.top .chip.chip-hot, .chip.chip-hot { color: var(--bad); border-color: var(--bad); }
@@ -423,6 +412,9 @@ body.layout-editing main.grid-stack {
     background-image: repeating-linear-gradient(to right,
         var(--edge) 0 1px, transparent 1px calc(100% / 24));
 }
+main.grid-stack .grid-stack-placeholder > .placeholder-content {
+    background: transparent; border: 1px dashed var(--ink);
+}
 main.grid-stack .ui-resizable-handle.ui-resizable-se {
     width: 14px; height: 14px; right: 2px; bottom: 2px; background: none;
     border-right: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: none;
@@ -499,12 +491,12 @@ main.grid-stack .grid-stack-placeholder > .placeholder-content {
     background-size: 8px 1px, 1px 8px, 8px 1px, 1px 8px;
     background-position: top left, top left, bottom right, bottom right;
     background-repeat: no-repeat; }
+/* LAYOUT-SNAP (user 2026-09-29): the placeholder shows the REAL card
+   contents (a clone of its .card-frame, painted by _fitDropPreview), not
+   an empty dashed stub. The clone lives deeper than the board's direct
+   child rules, so restate the card geometry that lives in those chains. */
 main.grid-stack .grid-stack-placeholder > .placeholder-content {
-    background: transparent;
-    border: 1px dashed var(--ink);
-    overflow: hidden;
-}
-
+    overflow: hidden; }
 main.grid-stack .grid-stack-placeholder .placeholder-preview {
     position: absolute; inset: 1px; pointer-events: none; overflow: hidden;
     background: var(--card); border: 1px solid var(--edge); opacity: .92; }
@@ -562,8 +554,7 @@ main.grid-stack .grid-stack-placeholder .placeholder-preview {
     border-bottom: 1px solid var(--line); margin-bottom: 3px; padding-bottom: 2px; }
 .u-tip .ut-row b { font-weight: 700; letter-spacing: .04em; }
 .uplot, .u-wrap { font-family: var(--mono) !important; }
-/* uPlot's vendor CSS sets `.u-value {display:none}
-` and only the live-mode JS
+/* uPlot's vendor CSS sets `.u-value {display:none}` and only the live-mode JS
    re-enables it; with live:false our custom cells must opt back in explicitly. */
 .u-legend .u-value { display: table-cell !important;
     font: 400 9px var(--mono); color: var(--ink); padding-left: 8px;
@@ -599,18 +590,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     background: transparent; border: 1px solid var(--dim); color: var(--dim); }
 .badge.Idle       { color: var(--dim); border-color: var(--edge); }
 .badge.Active     { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.badge.Generating { background: var(--accent); border-color: var(--accent);
+    color: #0b0b0b; animation: pulse 1.4s ease-in-out infinite; }
 .badge.Prefilling { background: var(--accent); border-color: var(--accent); color: #0b0b0b;
     animation: pulse 1s ease-in-out infinite; }
 .badge.Loading    { border-color: var(--accent); color: var(--accent);
     animation: pulse 1.8s ease-in-out infinite; }
 .badge.Queued     { color: var(--dim); border-color: var(--edge); }
-.badge.Generating {
-    animation: pulse 1.4s ease-in-out infinite;
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #0b0b0b;
-}
-
+.badge.Generating { background: var(--accent); border-color: var(--accent); color: #0b0b0b; }
 .badge.Complete   { background: var(--ink); border-color: var(--ink); color: var(--bg); }
 .badge.Error      { background: var(--red); border-color: var(--red); color: #fff; }
 /* ---- IN-FLIGHT redesign (if-*): model header + persistent request lines ---- */
@@ -650,6 +637,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .pbar > div { height: 100%; width: 0; transition: width .5s linear; }
 .pbar .p-cached { background: repeating-linear-gradient(-45deg, var(--dim) 0 2px, transparent 2px 5px); }
 .pbar .p-live   { background: var(--accent); }
+.se-btn.danger { border-color: var(--red); color: var(--red); }
 .se-btn.danger:hover { background: var(--red); color: #fff; }
 .se-btn.danger[disabled] { opacity: .4; pointer-events: none; }
 /* Settings editor + admin table buttons: sharp rectangles, value-shift hover */
@@ -921,6 +909,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    dashed box and hidden tail chips never collapse (user 2026-09-21: the
    '[] right of DELETE SETTINGS that expands to show fewer'). */
 .admin-table .chip-host .schip[hidden] { display: none; }
+.admin-table .chip-host { row-gap: 4px; }
 .admin-table .nrow-gap { flex: 1 1 auto; }
 .admin-table .typebadge {
     display: inline-flex; align-items: center; justify-content: center;
@@ -935,12 +924,9 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .admin-table .typebadge.t-none  { border-color: var(--edge); color: var(--dim); }
 [data-theme="light"] .admin-table .typebadge.t-vlm { border-color: #1f56b0; color: #1f56b0; }
 [data-theme="light"] .admin-table .typebadge.t-embed { border-color: #6d3a96; color: #6d3a96; }
-.admin-table .urow.head.admin .head-left {
-    display: flex;
-    gap: 14px;
-    justify-content: space-between;
-}
-
+.admin-table .uname .nmain .uid { font: 400 11px/1.4 var(--mono); }
+.admin-table .urow.head.admin .head-left { display: flex; gap: 14px; }
+.admin-table .urow.head.admin .head-left { justify-content: space-between; }
 .admin-table .urow.head.admin .hchips { display: flex; gap: 14px; }
 .admin-table .urow.head.admin .hchips.right { margin-left: auto; }
 .admin-table .urow.head.admin span:not(:first-child) { text-align: right; }
@@ -949,6 +935,8 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     justify-content: flex-start; }
 .admin-table .umeta { font: 400 10px/1 var(--mono); letter-spacing: 0.05em;
     flex: 0 0 auto; }
+.admin-table .uname { overflow: visible; text-overflow: clip; white-space: normal; }
+.admin-table .uname .nmain .uid { white-space: normal; overflow-wrap: anywhere; }
 .admin-table .lamp.alias-lamp { width: auto; padding: 0 7px; max-width: 260px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-table .lsw-seg.present { color: var(--dim); cursor: pointer; min-width: 82px; }
@@ -972,6 +960,8 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-table .urow.head span { text-align: right; }
 .admin-table .urow.head span:first-child { text-align: left; }
+.admin-table .uname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-align: left !important; }
 /* ---- Model boxes: every model + its aliases live inside one fully framed
    box; boxes alternate ground shades; alias lines get their own distinct
    shade and hang off a visible trunk that splits from the main model. ---- */
@@ -1005,6 +995,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     left: -16px; top: -16px; bottom: 50%; width: 14px;
     border-left: 3px solid var(--dim); border-bottom: 3px solid var(--dim); }
 #model-admin .alias-line span { text-align: left !important; }
+#model-admin .alias-line .alias-name { color: var(--ink); }
 #model-admin .alias-line.dim-line { opacity: 0.75; border-style: dashed; }
 #model-admin .alias-line .alias-name.dim { color: var(--dim); }
 .copybtn { background: transparent; border: 1px solid var(--edge); color: var(--dim);
@@ -1014,30 +1005,16 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .copybtn:hover { color: var(--bg); background: var(--ink); border-color: var(--ink); }
 .copybtn:disabled { cursor: default; color: var(--accent); border-color: var(--accent);
     background: transparent; }
-.admin-table .uname {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-align: left !important;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
 
+/* legacy flat alias lines (kept for other hosts) */
+.admin-table .uname { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .admin-table .uname .nmain { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.admin-table .uname .nmain .uid {
-    font: 400 11px/1.4 var(--mono);
-    white-space: normal;
-    overflow-wrap: anywhere;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-align: left !important;
-}
-
+.admin-table .uname .nmain .uid { overflow: hidden; text-overflow: ellipsis;
+    text-align: left !important; }
 .admin-table .alias-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .admin-table .alias-line span { text-align: left !important; white-space: nowrap; }
 .admin-table .alias-name { color: var(--dim); }
+.admin-table .rowacts { display: flex; gap: 4px; justify-content: flex-end; }
 .t2 { color: var(--accent) !important; -webkit-text-fill-color: currentColor; }
 .dim { color: var(--dim); }
 .state-ok { color: var(--ink); }
@@ -1045,24 +1022,17 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 
 /* ---- Navbar dropdowns (signage style: same strip, caret marks the menu) -- */
 .dd { position: relative; display: inline-flex; }
+.dd-btn {
+    background: none; border: 0; border-right: 1px solid var(--edge); cursor: pointer;
+    color: var(--dim); font: 400 11px/1 var(--mono); text-transform: uppercase;
+    letter-spacing: 0.08em; padding: 9px 14px;
+}
 .dd-btn:hover { color: var(--ink); background: var(--edge); }
 .dd-btn.active { color: var(--bg); background: var(--ink); }
 /* caret sits clear of the label (user ask: dropdown indicator needs more
    air from the menu text); touch-action kills the 300 ms tap delay */
 .dd-caret { font-size: 9px; margin-left: 5px; }
-.dd-btn {
-    background: none;
-    border: 0;
-    border-right: 1px solid var(--edge);
-    cursor: pointer;
-    color: var(--dim);
-    font: 400 11px/1 var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    padding: 9px 14px;
-    touch-action: manipulation;
-}
-
+.dd-btn { touch-action: manipulation; }
 .dd-menu {
     position: absolute; top: 100%; left: -1px; z-index: 50; min-width: 200px;
     background: var(--card); border: 1px solid var(--ink);
@@ -1144,13 +1114,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 [data-theme="light"] .admin-table .schip.on { border-color: var(--red); color: var(--red); }
 /* R10-13: TRUST REMOTE CODE lit red when enabled — the scary flag */
 .admin-table .schip.danger { border-color: var(--red); color: var(--red); }
-.admin-table .rowacts {
-    display: flex;
-    gap: 4px;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-}
-
+.admin-table .rowacts { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap; }
 .se-btn.act { height: 22px; padding: 0 8px; font-size: 10px; }
 
 /* ---- Model settings editor: popup modal, roomy, monospace everywhere ---- */
@@ -1180,42 +1144,23 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 #se-changes.ed { flex: 0 0 320px; align-self: stretch; max-height: none;
     overflow: auto; scrollbar-gutter: stable;
     border: 1px solid var(--edge); background: var(--field); }
-.modal.editor .editor-scroll {
-    padding: 8px 14px;
-    overflow: auto;
-    min-height: 0;
-    flex: 1;
+.modal.editor .editor-head { padding: 10px 14px; font-size: 12px; }
+.modal.editor .editor-scroll { padding: 8px 14px; }
+.modal.editor .editor-bar { padding: 8px 14px; }
+.modal.editor .editor-scroll { overflow: auto; min-height: 0; flex: 1;
     /* R10-3: room for always-visible (classic) scrollbars; overlay
        scrollbars simply float in this gutter. gutter:stable avoids the
        layout jump when a pane starts/stops scrolling. */
-    padding-right: 18px;
-    scrollbar-gutter: stable;
-}
-
-.modal.editor .editor-head {
-    padding: 10px 14px;
-    font-size: 12px;
-    font: 500 13px/1.3 var(--mono);
-    color: var(--ink);
-    border-bottom: 1px solid var(--ink);
-    padding-bottom: 10px;
-    word-break: break-all;
-}
-
+    padding-right: 18px; scrollbar-gutter: stable; }
+.modal.editor .editor-head { font: 500 13px/1.3 var(--mono); color: var(--ink);
+    border-bottom: 1px solid var(--ink); padding-bottom: 10px; word-break: break-all; }
 .modal.editor input, .modal.editor select, .modal.editor textarea {
     font: 400 12px/1.4 var(--mono); color: var(--ink);
     background: var(--field); border: 1px solid var(--edge);
     padding: 6px 8px; border-radius: 0; }
 .modal.editor textarea { width: 100%; min-height: 84px; }
-.modal.editor .editor-bar {
-    padding: 8px 14px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    border-top: 1px solid var(--ink);
-    padding-top: 10px;
-}
-
+.modal.editor .editor-bar { display: flex; align-items: center; gap: 10px;
+    border-top: 1px solid var(--ink); padding-top: 10px; }
 .modal.editor .se-row textarea { width: 260px; }
 .editor-overlay { z-index: 70; }
 
@@ -1252,11 +1197,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .modal.nasa .row.buttons button.danger { border-color: var(--red); color: var(--red); }
 [data-theme="enhanced"] .modal.nasa .row.buttons button.danger { color: #ff5f5f; border-color: #ff5f5f; }
 .modal.nasa .row.buttons button.danger:hover { background: var(--red); color: #fff; }
-.se-btn.danger {
-    border-color: var(--red);
-    color: var(--red);
-}
-
+.se-btn.danger { border-color: var(--red); color: var(--red); }
 [data-theme="enhanced"] .se-btn.danger { color: #ff5f5f; border-color: #ff5f5f; }
 
 /* ---- Quantizer / uploader forms: same 3-col well geometry as the
@@ -1329,6 +1270,12 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    header strip stays as-is so each panel keeps its signage band.
    .alt carries the even-shade globally (nth-of-type restarts per column). */
 .gs-box:nth-of-type(even), .gs-box.alt { background: var(--row2); }
+.gs-box-title {
+    /* signage header strip: inverted colors, full-bleed across the panel */
+    font: 500 11px/1 var(--sans); text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--bg); background: var(--ink);
+    padding: 9px 12px; border-bottom: 1px solid var(--ink);
+}
 .gs-box-body { padding: 2px 12px 10px; }
 .gs-box .gs-title { display: none; }   /* title is re-emitted as panel header */
 /* U9 (user round): the fixed 150px control box wasted the space between
@@ -1354,6 +1301,9 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* alternating row shade: instrument panel readout lines */
 .urow.settings:nth-of-type(even) { background: var(--row2); }
 .urow.settings:last-child { border-bottom: 0; }
+.urow.settings .gctl { display: flex; justify-content: flex-end; }
+.urow.settings .uname { white-space: normal; overflow: visible; text-overflow: clip;
+    font: 400 12px/1.4 var(--mono); }
 /* description sits next to the setting name (wraps below only when tight) */
 .urow.settings .uname small { display: inline; color: var(--dim);
     font: 300 10px/1.35 var(--sans); margin-left: 8px; }
@@ -1397,16 +1347,10 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .admin-table .act-col { display: flex; flex-direction: column; gap: 4px;
     align-items: flex-start; flex: 0 0 auto; }
 .admin-table .act-col.right { align-items: flex-end; }
-.admin-table .chip-host {
-    row-gap: 4px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    flex: 1 1 80px;
-    min-width: 0;
-    align-content: flex-start;
-}
-
+/* round 5: chips flow from the TOP (same two lines the delete/hide buttons
+   occupy), not vertically centred in the middle of the box */
+.admin-table .chip-host { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 80px;
+    min-width: 0; align-content: flex-start; }
 .admin-table .schip.more { cursor: pointer; background: none;
     padding: 3px 5px; border-style: dashed; color: var(--ink);
     font: 400 9px/1 var(--mono); letter-spacing: 0.06em; }
@@ -1432,10 +1376,9 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* the line keeps 2 text rows (name+copy, EDIT); chips fold behind "and X more"
    at the same height, and open only when they genuinely don't fit */
 .admin-table .alias-line { align-items: flex-start; }
-#model-admin .alias-line .alias-name {
-    color: var(--ink);
-}
-
+/* profile/alias lines end up below the model name, so their labels must not
+   be pinned to the ink colour of the model title */
+#model-admin .alias-line .alias-name { color: var(--ink); }
 /* round 7 item 3: profile/alias diff chips align to the LEFT of the right
    half (they start where the box content starts), like the base model's
    DELETE column — not pushed to the far edge */
@@ -1485,18 +1428,11 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .rqmark { display: inline-flex; align-items: center; justify-content: center;
     width: 13px; height: 13px; background: var(--red); color: #fff;
     font: 700 10px/1 var(--mono); margin-right: 5px; flex: 0 0 auto; }
-.urow.settings .uname {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    font: 400 12px/1.4 var(--mono);
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 2px 8px;
-}
-
+.urow.settings .uname { display: flex; flex-wrap: wrap; align-items: baseline;
+    gap: 2px 8px; }
 .urow.settings .uname > small { white-space: normal; margin-left: 0; }
+/* arrows flank the RESTART REQUIRED strip in the section header */
+.gs-box-title { display: flex; align-items: center; }
 .gs-box-title .rqnow { margin-left: auto; color: inherit;
     font: 500 9px/1 var(--mono); letter-spacing: 0.08em; }
 .gs-box-title.sec-restart .rqnow::before { content: '▾'; margin-right: 6px; }
@@ -1520,12 +1456,8 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .urow.settings input:disabled, .urow.settings select:disabled {
     color: var(--ink); opacity: 0.55; background: var(--row2); }
 .urow.settings input[type=checkbox] { min-width: 0; background: var(--field); }
-.urow.settings .gctl {
-    display: flex;
-    justify-content: flex-end;
-    width: 100%;
-}
-
+/* U9: control takes the wide value column — no fixed 150px well */
+.urow.settings .gctl { width: 100%; }
 .gs-dirs { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .gs-dir { display: flex; gap: 6px; }
 .gs-dir input { flex: 1; min-width: 0; }
@@ -1554,20 +1486,9 @@ label.se-row.pending-restart > .se-ctl > select {
     padding: 2px 5px; max-width: 110px; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; cursor: pointer; background: var(--row2); }
 .diff-out .diff-o:hover { color: var(--ink); border-color: var(--ink); }
-.gs-box-title {
-    /* signage header strip: inverted colors, full-bleed across the panel */
-    font: 500 11px/1 var(--sans);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--bg);
-    background: var(--ink);
-    padding: 9px 12px;
-    border-bottom: 1px solid var(--ink);
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-}
-
+/* section header carries the state of its rows: amber = unsaved edits,
+   red = queued changes that need a RESTART SERVER */
+.gs-box-title { cursor: pointer; }
 .gs-box-title.sec-dirty { background: var(--accent); color: #141414;
     border-bottom-color: var(--accent); }
 .gs-box-title.sec-restart { background: var(--red); color: #fff;
@@ -1653,11 +1574,9 @@ label.se-row.pending-restart > .se-ctl > select {
     color: var(--dim); font-size: 11px; text-transform: uppercase;
     letter-spacing: .18em; }
 .modal.editor .se-box-body { padding: 10px 12px; }
-.modal.editor .se-wide {
-    grid-column: 1 / -1;
-    grid-template-columns: 1fr;
-}
-
+.modal.editor .se-wide { grid-column: 1 / -1; }
+/* stacked layout for wide fields: label row above, control spans the row */
+.modal.editor .se-wide { grid-template-columns: 1fr; }
 .modal.editor .se-wide .se-ctl { justify-content: stretch; }
 .modal.editor .se-wide textarea { width: 100%; }
 .modal.editor .se-wide textarea + select, .modal.editor .se-wide select { margin-top: 4px; }
@@ -1724,16 +1643,19 @@ label.se-row.pending-restart > .se-ctl > select {
 .ts-pop-item:last-child { border-bottom: 0; }
 .ts-pop-item:hover { background: var(--ink); color: var(--bg); }
 .ts-pop-item.on { background: var(--chart-2, #e8a020); color: #14100a; }
-main.grid-stack .metric-card .card-pad { padding: 0 8px 4px; }   /* beats the board-wide 12px rule */
-main.grid-stack .metric-card h2 { margin: 0 -8px 4px; }
-.metric-card h2 .right { gap: 8px; margin-left: auto; }
-.metric-card h2 {
-    margin: 0 -8px 4px;
-    background: var(--panel, var(--bg));
-    border-bottom: 1px solid var(--edge);
-    flex-wrap: wrap;
-}
 
+/* Metric cards (user round 2026-09-19 S2-S4, header-inline ts-row
+   2026-09-19 r2): h2 is the shared full-width header band (see .card h2),
+   timespan chips inline right of the title, chart fills nearly the card. */
+.metric-card .card-pad { padding: 0 8px 4px; }
+main.grid-stack .metric-card .card-pad { padding: 0 8px 4px; }   /* beats the board-wide 12px rule */
+main.grid-stack .metric-card h2 { margin: 0 -8px 4px; }          /* same: stays coupled to ITS pad */
+.metric-card h2 { margin: 0 -8px 4px; background: var(--panel, var(--bg)); border-bottom: 1px solid var(--edge); }
+.metric-card h2 .right { gap: 8px; margin-left: auto; }
+/* Metric headers may wrap (user regression 2026-09-21): chips that fit the
+   CARD but not the title line drop to a second header line instead of
+   collapsing to ▾. The ▾ stays only for rows too wide for the full card. */
+.metric-card h2 { flex-wrap: wrap; }
 .metric-card h2 .ts-row { margin: 0 0 0 auto; }
 .metric-now { font: 700 12px/1 var(--mono); color: var(--chart-2, #e8a020);
     letter-spacing: 0; }
@@ -1743,13 +1665,7 @@ main.grid-stack .metric-card h2 { margin: 0 -8px 4px; }
    Same 4-class specificity as gridstack's size-to-content align rule. */
 main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metric-card {
     flex: 1 0 100%; min-height: 0; }
-.metric-card .card-pad {
-    padding: 0 8px 4px;
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-}
-
+.metric-card .card-pad { flex: 1 1 auto; display: flex; flex-direction: column; }
 .metric-card .card-body { flex: 1 1 auto; display: flex; min-height: 96px; }
 .metric-plot { flex: 1 1 auto; min-height: 96px; min-width: 0; }
 
@@ -1801,6 +1717,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .btn.primary:disabled:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 /* in-flight button: busy label replaces the caption (dvBuildBusy) */
 .btn[data-busy="1"] { opacity: .6; cursor: progress; pointer-events: none; }
+.pt-auto { height: 32px; }
 .pt-reversal { border: 1px dashed var(--accent, #e0662e); padding: 4px 8px; }
 .pt-st-reversal { border-color: var(--accent, #e0662e); color: var(--accent, #e0662e); }
 .pt-st-reversal::before { background: var(--accent, #e0662e); }
@@ -1810,16 +1727,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-st-bundled::before { background: var(--ok, #2e8b57); }
 .pt-st-insecure { border-color: var(--red, #c0392b); color: var(--red, #c0392b); }
 .pt-st-insecure::before { background: var(--red, #c0392b); }
-.pt-auto {
-    height: 32px;
-    display: inline-flex;
-    gap: 4px;
-    align-items: center;
-    font-size: var(--fs-meta);
-}
-
+.pt-auto { display: inline-flex; gap: 4px; align-items: center; font-size: var(--fs-meta); }
 .pt-banner { border: 1px solid var(--warn, #b8860b); background: color-mix(in srgb, var(--warn, #b8860b) 12%, transparent); padding: 6px 10px; margin: 4px 0; font-size: var(--fs-meta); }
 .pt-banner.pt-kill { border-color: var(--accent, #e0662e); }
+.pt-card { border: 1px solid var(--line); padding: 8px 10px; margin: 8px 0; display: flex; flex-direction: column; gap: 5px; }
 /* Patches page readability (user ask 2026-09-27: 'one card per patch,
    alternating background'): each patch is a self-contained card; the list
    stripes odd/even so card boundaries are visible at a glance. --card is
@@ -1829,16 +1740,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 #dv-patches > .pt-card:nth-child(odd of .pt-card) { background: var(--field); }
 #pt-list > .pt-card:nth-child(even of .pt-card), #pt-curated-body > .pt-card:nth-child(even of .pt-card),
 #dv-patches > .pt-card:nth-child(even of .pt-card) { background: color-mix(in srgb, var(--field) 55%, var(--card)); }
-.pt-card {
-    border: 1px solid var(--line);
-    padding: 8px 10px;
-    margin: 8px 0;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    border-radius: 2px;
-}
-
+.pt-card { border-radius: 2px; }
 #pt-list > .pt-card:hover, #pt-curated-body > .pt-card:hover { border-color: var(--dim); }
 /* warn keeps its tint over either stripe (equal specificity, later wins) */
 #pt-list > .pt-card.pt-card-warn, #pt-curated-body > .pt-card.pt-card-warn,
