@@ -95,8 +95,8 @@ def build_viewer_app(api_base: str = "") -> FastAPI:
         return out
 
     @app.get("/uplift/", include_in_schema=False)
-    async def index():
-        return _static_file("index.html")
+    async def index(request: Request):
+        return _static_file(request, "index.html")
 
     # API surface BEFORE the static catch-all (FastAPI matches in
     # registration order). /admin/api/* and /uplift/api/* both proxy
@@ -125,8 +125,8 @@ def build_viewer_app(api_base: str = "") -> FastAPI:
         return _proxy(f"/admin/api/{path}", request)
 
     @app.get("/uplift/{path:path}", include_in_schema=False)
-    async def static(path: str):
-        return _static_file(path or "index.html")
+    async def static(path: str, request: Request):
+        return _static_file(request, path or "index.html")
 
     def _metrics_local(request: Request) -> Response:
         """Same /metrics/series shape as the served router, built from

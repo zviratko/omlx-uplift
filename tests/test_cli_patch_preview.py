@@ -11,6 +11,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from omlx_uplift import cli, diffapply, patches, patchsource, patchsync
 
@@ -99,10 +100,26 @@ class BannerTests(unittest.TestCase):
                          "\033[32mSUCCESS\033[0m")
 
     def test_banner_never_raises_without_omlx(self):
-        # omlx may be unimportable here (CLI venv) — install must not break
+        # omlx may be unimportable here (CLI venv) — install must not break.
+        # Simulate that deterministically: _omlx_root() is what probes for
+        # the package tree; without the stub this test silently ran against
+        # whatever omlx/store the developer's machine had.
         out = io.StringIO()
-        cli.print_patch_preview(None, stream=out)   # must not raise
+        with mock.patch.object(patches, "_omlx_root", return_value=None):
+            cli.print_patch_preview(None, stream=out)   # must not raise
         self.assertIn("OMLX-UPLIFT PATCHES", out.getvalue())
+        self.assertIn("not found", out.getvalue())
+
+    def test_empty_manifest_prints_nothing_but_never_raises(self):
+        # Curated era: a fresh store has no entries. The banner must stay
+        # silent (no empty header) and still must not raise.
+        store = patches.PatchStore(os.path.join(self.tmp, "data"))
+        root = os.path.join(self.tmp, "site-packages")
+        os.makedirs(os.path.join(root, "omlx"), exist_ok=True)
+        out = io.StringIO()
+        with mock.patch.object(patches, "_omlx_root", return_value=root):
+            cli.print_patch_preview(store, stream=out)
+        self.assertEqual(out.getvalue(), "")
 
 
 def shutil_cleanup(path):
