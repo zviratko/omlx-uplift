@@ -180,7 +180,17 @@ let seTabs = [];            // [{id:'base',dirty:Set}|{id,name,display_name,
 let seActiveTab = 'base';
 let seBaseVals = null;      // base modelspec-shape state (source of inherit display)
 let seBaseRaw = {};         // raw stored base settings dict (fetched in openEditor)
-window.__seProfileDivergence = [];   // [{name, display_name, api_name, diff:[…]}]
+/* FE-6 step 4: one module store for the data that travelled on
+   window globals (__seProfiles / __sePresets / __seTemplates /
+   __seProfileDivergence) —
+   globals were the only channel between functions 1000 lines apart.
+   Exposed as Uplift.mmData (mmtemplates writes templates into it). */
+const MM_DATA = {
+    profiles: [],      // stored profiles of seModel (fetched in openEditor)
+    presets: null,     // bundled global presets, lazily fetched + cached
+    templates: [],     // profile-templates (renderTemplatesBox also fills)
+    divergence: [],    // [{name, display_name, api_name, diff:[…]}]
+};
 /* Sampling keys are inheritable on profile tabs (empty = follow base). */
 const SE_INHERIT_KEYS = new Set(['temperature', 'top_p', 'top_k',
     'repetition_penalty', 'min_p', 'presence_penalty']);
@@ -1071,7 +1081,7 @@ async function openEditor(model, profileName, templateName) {
     seLoadProfiles(model, panel.querySelector('.se-profs')).then(() => {
         // item 2: existing profiles are prominent top tabs, each showing
         // that profile's merged values (item 1: values are visible)
-        for (const p of (window.__seProfiles || [])) seAddProfileTab(p);
+        for (const p of (MM_DATA.profiles || [])) seAddProfileTab(p);
         refreshDivergence();
         seRenderTabs(panel);
         // alias/profile EDIT button: land directly on that profile's tab
@@ -1177,7 +1187,7 @@ function seRenderTabs(panel) {
         if (t.dirty.size || nameChanged) mark = ' ●';
         // item 4: a stored profile whose effective load-time settings differ
         // from base reloads the model when its alias is hit — mark its tab
-        if (t.profileId && (window.__seProfileDivergence || [])
+        if (t.profileId && (MM_DATA.divergence || [])
                 .some(d => d.name === t.profileId))
             mark += ' ⚠';
         const nm = t.id === 'base' ? 'BASE'
@@ -1224,7 +1234,7 @@ function seRenderTabs(panel) {
     // grouped: bundled GLOBAL PRESETS (qwen3.5/…, gemma4, llama4 …), then
     // user templates, then copy-from-other-model
     const g1 = document.createElement('optgroup'); g1.label = 'Global presets';
-    for (const p of (window.__sePresets || [])) {
+    for (const p of (MM_DATA.presets || [])) {
         const o = document.createElement('option'); o.value = 'pre:' + p.name;
         o.textContent = '◧ ' + (p.display_name || p.name); g1.append(o);
     }
@@ -1233,11 +1243,11 @@ function seRenderTabs(panel) {
     // U4: this model's own stored profiles live HERE now (apply values into
     // the active tab, no tab of their own). seLoadProfiles fills the list
     // async and re-renders the strip once loaded.
-    for (const p of (window.__seProfiles || [])) {
+    for (const p of (MM_DATA.profiles || [])) {
         const o = document.createElement('option'); o.value = 'own:' + p.name;
         o.textContent = '◧ ' + (p.display_name || p.name) + ' (profile)'; g2.append(o);
     }
-    for (const t of (window.__seTemplates || [])) {
+    for (const t of (MM_DATA.templates || [])) {
         const o = document.createElement('option'); o.value = 'tpl:' + t.name;
         o.textContent = '◱ ' + (t.display_name || t.name) + ' (template)'; g2.append(o);
     }
@@ -1294,7 +1304,7 @@ function seRenderTabs(panel) {
                 })
                 .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + e.message));
         } else if (kind === 'own') {
-            const p = (window.__seProfiles || []).find(x => x.name === id);
+            const p = (MM_DATA.profiles || []).find(x => x.name === id);
             if (p) seApplyIntoActiveTab(p.settings || {}, p.display_name || p.name);
         } else if (kind === 'mpr') {
             // U4: model profile -> apply values into the ACTIVE tab, no new
@@ -1305,10 +1315,10 @@ function seRenderTabs(panel) {
             const ep = mm && (mm.exposed_profiles || []).find(x => x.name === pname);
             if (ep) seApplyIntoActiveTab(ep.settings || {}, mid + ' ▸ ' + pname);
         } else if (kind === 'pre') {
-            const pre = (window.__sePresets || []).find(x => x.name === id);
+            const pre = (MM_DATA.presets || []).find(x => x.name === id);
             if (pre) seApplyIntoActiveTab(pre.settings || {}, pre.display_name || pre.name);
         } else if (kind === 'tpl') {
-            const tpl = (window.__seTemplates || []).find(x => x.name === id);
+            const tpl = (MM_DATA.templates || []).find(x => x.name === id);
             if (tpl) seApplyIntoActiveTab(tpl.settings || {}, tpl.display_name || tpl.name);
         } else {
             MM_GLUE.toast(C.t('uplift.toast.loading_settings', {id: id}));
@@ -1407,13 +1417,13 @@ function refreshDivergence() {
     const S = window.UpliftModelSpec;
     const baseP = seBasePayload();
     const out = [];
-    for (const p of (window.__seProfiles || [])) {
+    for (const p of (MM_DATA.profiles || [])) {
         const diff = S.runtimeDiff(baseP, seProfilePayload(p));
         if (diff.length)
             out.push({ name: p.name, display_name: p.display_name || p.name,
                        api_name: p.api_name || null, diff });
     }
-    window.__seProfileDivergence = out;
+    MM_DATA.divergence = out;
     renderDivergenceBanner();
 }
 function renderDivergenceBanner() {
@@ -1422,7 +1432,7 @@ function renderDivergenceBanner() {
     let host = panel.querySelector('.se-divergence');
     const fields = panel.querySelector('#se-fields');
     if (!fields) return;
-    const diverging = window.__seProfileDivergence || [];
+    const diverging = MM_DATA.divergence || [];
     if (!diverging.length) { if (host) host.remove(); return; }
     if (!host) {
         host = document.createElement('div');
@@ -1553,7 +1563,7 @@ function seAddProfileTab(p) {
 function seOpenProfileTab(panel, name) {
     // Open (or reuse) + activate the tab for a stored profile so the
     // alias-line EDIT button lands directly on the thing it edits.
-    const p = (window.__seProfiles || []).find(x => x.name === name);
+    const p = (MM_DATA.profiles || []).find(x => x.name === name);
     if (!p) { MM_GLUE.toast('profile "' + name + '" not found'); return; }
     const t = seAddProfileTab(p);
     seCaptureTab();
@@ -1575,7 +1585,7 @@ async function seLoadProfiles(model, host) {
     let profs = [];
     try { profs = (await MM_GLUE.fetchJson(`${API}/uplift/api/models/${encodeURIComponent(model)}/profiles`)).profiles || []; } catch (_) {}
     host.textContent = '';
-    window.__seProfiles = profs;
+    MM_DATA.profiles = profs;
     const oldPt = null;
     const row = document.createElement('div');
     row.className = 'se-prof-row';
@@ -1638,19 +1648,19 @@ async function seLoadProfiles(model, host) {
     // Global templates (global_templates.json): apply or snapshot into a template.
     let tpls = [];
     try { tpls = (await MM_GLUE.fetchJson(`${API}/admin/api/profile-templates`)).templates || []; } catch (_) {}
-    window.__seTemplates = tpls;
+    MM_DATA.templates = tpls;
     // Bundled global presets (same source as the classic editor's preset
     // menu: /admin/static/omlx_preset.json), cached 1 day like classic does.
-    if (!window.__sePresets) {
+    if (!MM_DATA.presets) {
         try {
             const cached = JSON.parse(localStorage.getItem('omlx_preset_cache') || 'null');
-            if (cached && cached.presets) window.__sePresets = cached.presets;
+            if (cached && cached.presets) MM_DATA.presets = cached.presets;
             else {
                 const d = await MM_GLUE.fetchJson(`${API}/admin/static/omlx_preset.json`);
-                window.__sePresets = d.presets || [];
+                MM_DATA.presets = d.presets || [];
                 localStorage.setItem('omlx_preset_cache', JSON.stringify(d));
             }
-        } catch (_) { window.__sePresets = []; }
+        } catch (_) { MM_DATA.presets = []; }
     }
     /* Templates row ALWAYS renders (no length gate): 'Snapshot as' is how
        the FIRST template gets created. The `|| true` this replaces was a
@@ -1985,7 +1995,7 @@ async function saveProfileTab(panel) {
         t.name = name; t.display_name = name;
         t.origVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(t.workVals || {})));
         t._ovSnap = JSON.parse(JSON.stringify(ov));   // saved overrides are the new original
-        const mirror = (window.__seProfiles || []).find(x => x.name === name);
+        const mirror = (MM_DATA.profiles || []).find(x => x.name === name);
         if (mirror) mirror.settings = JSON.parse(JSON.stringify(ov));
         msg.textContent = 'saved ✓';
         seRenderTabs(panel); seUpdateSaveBtn();
@@ -2000,5 +2010,7 @@ window.Uplift.mmEditor = {
     openEditor: openEditor,
     closeEditor: closeEditor,
     get seModel() { return seModel; },
+    data: MM_DATA,          // FE-6: shared store (was window.__se*)
 };
+window.Uplift.mmData = MM_DATA;   // loaded early; mmtemplates fills .templates
 })();

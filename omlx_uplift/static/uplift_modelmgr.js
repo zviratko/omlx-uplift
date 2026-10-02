@@ -10,19 +10,23 @@
 (function () {
 'use strict';
 const S = window.Uplift.state;
-const MM_TABLE = window.Uplift.mmTable;
-const MM_TPL = window.Uplift.mmTemplates;
-const MM_EDITOR = window.Uplift.mmEditor;
+/* FE-6 step 4: every sibling read happens AT CALL time — the old eager
+   consts (mmTable, mmTemplates, mmEditor, inspector.open) pinned the
+   script order in index.html; the facade now only requires that the
+   module exists by the first user action. */
+const T = () => window.Uplift.mmTable;
+const P = () => window.Uplift.mmTemplates;
+const E = () => window.Uplift.mmEditor;
 
 window.Uplift.modelmgr = {
-    render: (...a) => MM_TABLE.render(...a),
-    renderTemplates: (...a) => MM_TPL.render(...a),
-    openEditor: (...a) => MM_EDITOR.openEditor(...a),
-    closeEditor: (...a) => MM_EDITOR.closeEditor(...a),
-    openInspector: window.Uplift.inspector.open,
+    render: (...a) => T().render(...a),
+    renderTemplates: (...a) => P().render(...a),
+    openEditor: (...a) => E().openEditor(...a),
+    closeEditor: (...a) => E().closeEditor(...a),
+    openInspector: (...a) => window.Uplift.inspector.open(...a),
     get adminModels() { return S.adminModels; },
-    get seModel() { return MM_EDITOR.seModel; },
-    confirmDialog: (...a) => MM_TABLE.confirmDialog(...a),
+    get seModel() { return E().seModel; },
+    confirmDialog: (...a) => T().confirmDialog(...a),
 };
-MM_TPL.init();
+P().init();
 })();
