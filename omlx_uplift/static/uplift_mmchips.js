@@ -10,7 +10,8 @@
 const C = window.UpliftCore;
 const D = window.UpliftDom;
 const $ = D.$;
-const API = window.Uplift.state.API;
+const S = window.Uplift.state;
+const API = S.API;
 const CH = window.Uplift.charts;
 const MM_GLUE = { toast: D.toast, fetchJson: D.fetchJson, cell: D.cell };
 /* Late-bound facade: uplift_modelmgr.js defines window.Uplift.modelmgr
