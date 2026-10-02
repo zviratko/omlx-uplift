@@ -706,27 +706,64 @@ async function envSave(fields) {
 
 
 
-function renderGlobalSettings() {
-    const body = document.createElement('div');   // staged; grouped into boxes below
-    body.textContent = '';
-    const L = GS_LABELS;
+/* FE-6 step 2: the settings page is DATA. Each item is one of:
+     {t: 'Title'}                        — section header (starts a box)
+     {sec, lab, hint, ctl, opts, show?}  — one row (see gsSpecRow below)
+     {env: ['group',...]}                — envRows() experimental block
+     {x: (body, L, ctx) => {...}}        — bespoke block (dirs, cc datalist…)
+   lab/hint are dotted paths into GS_LABELS (L.auth.api_key style) or
+   (L, ctx) => string for the few computed strings; `ctl` describes the
+   control: {k:'text'|'num'|'range'|'tog'|'sel', sec?, field?, flat, ...}.
+   `show` is the conditional-visibility predicate (ctx.tier etc.), so the
+   old if-scatter lives in the data next to the row it gates.
+   Row ORDER below is the page's reading order — do not sort. */
+function gsRef(L, path) {
+    if (!path) return '';
+    if (typeof path === 'function') return path(L);
+    let v = L;
+    for (const k of path.split('.')) { v = (v == null) ? undefined : v[k]; }
+    return v == null ? '' : v;
+}
 
-    // (the old "Global" restart-notice box was removed; the RESTART chip,
-    //  red field marks and the RESTART SERVER button carry that meaning now)
+function gsSpecRow(it, L, ctx) {
+    const c = it.ctl;
+    const sec = c.sec || it.sec;
+    const flat = c.flat || it.flat;
+    let control;
+    if (c.k === 'sel') {
+        const cur = (c.curFn ? c.curFn(ctx) : gsGet(sec, c.field)) ?? (c.nullTo !== undefined ? c.nullTo : undefined);
+        control = gsSelect(flat, gsRef(L, c.opts) || [], cur);
+    } else if (c.k === 'tog') {
+        control = gsToggle(flat, gsGet(sec, c.field));
+    } else if (c.k === 'range') {
+        control = gsText(sec, c.field, flat, L,
+            { range: true, min: c.min, max: c.max, step: c.step });
+    } else {
+        control = gsText(sec, c.field, flat, L, {
+            number: c.k === 'num', bool: c.checked, type: c.type,
+            placeholder: gsRef(L, c.ph), reload: c.reload, list: c.list,
+            min: c.min, max: c.max, step: c.step,
+        });
+    }
+    if (c.attach) c.attach(control, L, ctx);
+    return gsRow(it.sec, gsRef(L, it.lab), gsRef(L, it.hint), control, it.opts);
+}
 
-    // ---- Language
-    body.append(gsTitle('Language'));
-    body.append(gsRow('ui', C.tf('uplift.gs.ui.interface_language', 'Interface language'), '',
-        gsSelect('ui_language', Object.entries(L.lang), gsGet('ui','language')),
-        { flat: 'ui_language' }));
+const GS_SPEC = [
+    {t: 'Language'},
+    {sec: 'ui', lab: () => C.tf('uplift.gs.ui.interface_language', 'Interface language'), ctl: {
+        k: 'sel', sec: 'ui', field: 'language', flat: 'ui_language', opts: () => Object.entries(GS_LABELS.lang)},
+     opts: {flat: 'ui_language'}},
 
-    // ---- Claude Code (classic renders this on Status; Uplift keeps it with settings)
-    body.append(gsTitle('Claude Code'));
-    const ccLocal = (gsGet('claude_code','mode') || 'local') !== 'cloud';
-    body.append(gsRow('claude_code', L.cc.mode, L.cc.mode_hint,
-        gsSelect('claude_code_mode', [['local', L.cc.local], ['cloud', L.cc.cloud]],
-                 ccLocal ? 'local' : 'cloud'), { flat: 'claude_code_mode' }));
-    if (ccLocal) {
+
+    {t: 'Claude Code'},   // classic renders this on Status; Uplift keeps it with settings
+    {sec: 'claude_code', lab: 'cc.mode', hint: 'cc.mode_hint', ctl: {
+        k: 'sel', sec: 'claude_code', field: 'mode', flat: 'claude_code_mode',
+        curFn: (ctx) => ctx.ccLocal ? 'local' : 'cloud',
+        opts: () => [['local', GS_LABELS.cc.local], ['cloud', GS_LABELS.cc.cloud]]},
+     opts: {flat: 'claude_code_mode'}},
+    {x: (body, L, ctx) => {
+        if (!ctx.ccLocal) return;
         const dl = document.createElement('datalist'); dl.id = 'cc-models';
         body.append(dl);
         GLUE.fetchJson(`${API}/admin/api/models`).then(d => {
@@ -735,294 +772,279 @@ function renderGlobalSettings() {
                 o2.value = m.name || m.id || ''; dl.append(o2);
             }
         }).catch(() => { /* picker list optional */ });
-        body.append(gsRow('claude_code', L.cc.opus, '',
-            gsText('claude_code','opus_model','claude_code_opus_model', L,
-                   { placeholder: L.cc.ph, list: 'cc-models' }),
-            { flat: 'claude_code_opus_model' }));
-        body.append(gsRow('claude_code', L.cc.sonnet, '',
-            gsText('claude_code','sonnet_model','claude_code_sonnet_model', L,
-                   { placeholder: L.cc.ph, list: 'cc-models' }),
-            { flat: 'claude_code_sonnet_model' }));
-        body.append(gsRow('claude_code', L.cc.haiku, '',
-            gsText('claude_code','haiku_model','claude_code_haiku_model', L,
-                   { placeholder: L.cc.ph, list: 'cc-models' }),
-            { flat: 'claude_code_haiku_model' }));
-    }
+        for (const [lab, field] of [['opus', 'opus_model'], ['sonnet', 'sonnet_model'], ['haiku', 'haiku_model']]) {
+            body.append(gsRow('claude_code', L.cc[lab], '',
+                gsText('claude_code', field, 'claude_code_' + lab, L,
+                       { placeholder: L.cc.ph, list: 'cc-models' }),
+                { flat: 'claude_code_' + lab }));
+        }
+    }},
 
-    // ---- Auth
-    body.append(gsTitle('Auth'));
-    body.append(gsRow('auth', L.auth.api_key, L.auth.api_key_hint,
-        gsText('auth','api_key','api_key', L, { type: 'password',
-            placeholder: L.auth.api_key_placeholder, reload: true }),
-        { flat: 'api_key' }));
-    const bpIn = document.createElement('input');
-    bpIn.type = 'text'; bpIn.value = GS.base_path || '';
-    bpIn.disabled = true;
-    bpIn.title = C.tf('uplift.ui.set_at_launch_base_path_read_only', 'Set at launch (--base-path); read-only');
-    body.append(gsRow('auth', L.auth.base_path, L.auth.base_path_hint, bpIn));
-    body.append(gsRow('auth', L.auth.skip, L.auth.skip_hint + ' ' + L.auth.skip_warning,
-        gsToggle('skip_api_key_verification', gsGet('auth','skip_api_key_verification')),
-        { flat: 'skip_api_key_verification' }));
+    {t: 'Auth'},
+    {sec: 'auth', lab: 'auth.api_key', hint: 'auth.api_key_hint', ctl: {
+        k: 'text', field: 'api_key', flat: 'api_key', type: 'password',
+        ph: 'auth.api_key_placeholder', reload: true},
+     opts: {flat: 'api_key'}},
+    {x: (body, L) => {
+        const bpIn = document.createElement('input');
+        bpIn.type = 'text'; bpIn.value = GS.base_path || '';
+        bpIn.disabled = true;
+        bpIn.title = C.tf('uplift.ui.set_at_launch_base_path_read_only', 'Set at launch (--base-path); read-only');
+        body.append(gsRow('auth', L.auth.base_path, L.auth.base_path_hint, bpIn));
+    }},
+    {sec: 'auth', lab: 'auth.skip', hint: (L) => L.auth.skip_hint + ' ' + L.auth.skip_warning, ctl: {
+        k: 'tog', field: 'skip_api_key_verification', flat: 'skip_api_key_verification'},
+     opts: {flat: 'skip_api_key_verification'}},
 
-    // ---- Server
-    body.append(gsTitle('Server'));
-    body.append(gsRow('server', L.server.host, '',
-        gsText('server','host','host', L, { placeholder: L.server.host_placeholder }),
-        { badge: true, flat: 'host' }));
-    body.append(gsRow('server', L.server.port, '',
-        gsText('server','port','port', L, { number: true }), { badge: true, flat: 'port' }));
-    body.append(gsRow('server', L.server.log_level, '',
-        gsSelect('log_level', L.server.levels, gsGet('server','log_level')),
-        { flat: 'log_level' }));
-    body.append(gsRow('server', L.server.auto_start, L.server.auto_start_hint,
-        gsToggle('auto_start_on_launch', gsGet('server','auto_start_on_launch')),
-        { badge: true, flat: 'auto_start_on_launch' }));
-    // server_aliases: one alias per line (classic editor keeps a list; same payload)
-    const aliasInp = document.createElement('textarea');
-    aliasInp.rows = 2; aliasInp.spellcheck = false;
-    aliasInp.value = (gsGet('server','server_aliases') || []).join('\n');
-    aliasInp.onchange = () => gsQueueSave('server_aliases',
-        aliasInp.value.split('\n').map(s => s.trim()).filter(Boolean));
-    body.append(gsRow('server', L.server.aliases, L.server.aliases_hint, aliasInp,
-        { flat: 'server_aliases' }));
+    {t: 'Server'},
+    {sec: 'server', lab: 'server.host', ctl: {
+        k: 'text', field: 'host', flat: 'host', ph: 'server.host_placeholder'},
+     opts: {badge: true, flat: 'host'}},
+    {sec: 'server', lab: 'server.port', ctl: {k: 'num', field: 'port', flat: 'port'},
+     opts: {badge: true, flat: 'port'}},
+    {sec: 'server', lab: 'server.log_level', ctl: {
+        k: 'sel', field: 'log_level', flat: 'log_level', opts: 'server.levels'},
+     opts: {flat: 'log_level'}},
+    {sec: 'server', lab: 'server.auto_start', hint: 'server.auto_start_hint', ctl: {
+        k: 'tog', field: 'auto_start_on_launch', flat: 'auto_start_on_launch'},
+     opts: {badge: true, flat: 'auto_start_on_launch'}},
+    {x: (body, L) => {   // one alias per line (classic editor keeps a list; same payload)
+        const aliasInp = document.createElement('textarea');
+        aliasInp.rows = 2; aliasInp.spellcheck = false;
+        aliasInp.value = (gsGet('server', 'server_aliases') || []).join('\n');
+        aliasInp.onchange = () => gsQueueSave('server_aliases',
+            aliasInp.value.split('\n').map(s => s.trim()).filter(Boolean));
+        body.append(gsRow('server', L.server.aliases, L.server.aliases_hint, aliasInp,
+            { flat: 'server_aliases' }));
+    }},
 
-    // ---- Model
-    body.append(gsTitle('Model'));
-    const dirs = gsGet('model','model_dirs') || [];
-    const dl = document.createElement('div');
-    dl.className = 'gs-dirs';
-    dirs.forEach((d, i) => {
-        const one = document.createElement('div');
-        one.className = 'gs-dir';
-        const inp = document.createElement('input');
-        inp.type = 'text'; inp.value = d;
-        inp.placeholder = i === 0 ? L.model.ph_primary : L.model.ph_additional;
-        const rm = document.createElement('button');
-        rm.className = 'se-btn act'; rm.textContent = '×';
-        rm.style.display = dirs.length > 1 ? '' : 'none';
-        rm.onclick = async () => {
-            const nd = dirs.filter((_, j) => j !== i);
-            if (await gsSaveNow({ model_dirs: nd })) renderGlobalSettings();
+    {t: 'Model'},
+    {x: (body, L) => {
+        const dirs = gsGet('model', 'model_dirs') || [];
+        const dl = document.createElement('div');
+        dl.className = 'gs-dirs';
+        dirs.forEach((d, i) => {
+            const one = document.createElement('div');
+            one.className = 'gs-dir';
+            const inp = document.createElement('input');
+            inp.type = 'text'; inp.value = d;
+            inp.placeholder = i === 0 ? L.model.ph_primary : L.model.ph_additional;
+            const rm = document.createElement('button');
+            rm.className = 'se-btn act'; rm.textContent = '\u00d7';
+            rm.style.display = dirs.length > 1 ? '' : 'none';
+            rm.onclick = async () => {
+                const nd = dirs.filter((_, j) => j !== i);
+                if (await gsSaveNow({ model_dirs: nd })) renderGlobalSettings();
+            };
+            inp.onchange = async () => {
+                const nd = dirs.slice(); nd[i] = inp.value;
+                if (await gsSaveNow({ model_dirs: nd })) renderGlobalSettings();
+            };
+            one.append(inp, rm);
+            dl.append(one);
+        });
+        const add = document.createElement('button');
+        add.className = 'se-btn act'; add.textContent = C.tf('uplift.gs.model.add_directory', '+ add directory');
+        add.onclick = async () => {
+            if (await gsSaveNow({ model_dirs: dirs.concat('') })) renderGlobalSettings();
         };
-        inp.onchange = async () => {
-            const nd = dirs.slice(); nd[i] = inp.value;
-            if (await gsSaveNow({ model_dirs: nd })) renderGlobalSettings();
-        };
-        one.append(inp, rm);
-        dl.append(one);
-    });
-    const add = document.createElement('button');
-    add.className = 'se-btn act'; add.textContent = C.tf('uplift.gs.model.add_directory', '+ add directory');
-    add.onclick = async () => {
-        if (await gsSaveNow({ model_dirs: dirs.concat('') })) renderGlobalSettings();
+        dl.append(add);
+        body.append(gsRow('model', L.model.dirs, '', dl));
+    }},
+    {sec: 'model', lab: 'model.fallback', hint: 'model.fallback_desc', ctl: {
+        // bool in the server schema — a checkbox like every binary option
+        // (audit 2026-10-02: this was the only bool left as text input)
+        k: 'tog', field: 'model_fallback', flat: 'model_fallback'},
+     opts: {flat: 'model_fallback'}},
+    {sec: 'model', lab: 'model.hide_helper', hint: 'model.hide_helper_desc', ctl: {
+        k: 'tog', field: 'hide_helper_models', flat: 'hide_helper_models'},
+     opts: {flat: 'hide_helper_models'}},
+    {sec: 'model', lab: 'model.hf_cache', hint: 'model.hf_cache_desc', ctl: {
+        k: 'tog', sec: 'huggingface', field: 'hf_cache_enabled', flat: 'hf_cache_enabled'},
+     opts: {flat: 'hf_cache_enabled'}},
+    {x: (body, L) => {
+        const hfp = GLUE.cell((GS.huggingface || {}).hf_cache_path || '\u2014');
+        hfp.className = 'dim';
+        body.append(gsRow('model', C.tf('uplift.gs.model.hf_path_label', 'HF cache path'), '', hfp));
+    }},
+    {sec: 'model', lab: 'model.idle', hint: 'model.idle_desc', ctl: {
+        k: 'sel', sec: 'idle_timeout', field: 'idle_timeout_seconds', nullTo: '',
+        flat: 'idle_timeout_seconds', opts: 'model.idle_opts'},
+     opts: {flat: 'idle_timeout_seconds'}},
+
+    {t: 'Generation Defaults'},
+    {sec: 'gen', lab: 'gen.temperature', hint: 'gen.temperature_hint', ctl: {
+        k: 'range', sec: 'sampling', field: 'temperature', flat: 'sampling_temperature',
+        min: 0, max: 2, step: 0.1}, opts: {flat: 'sampling_temperature'}},
+    {sec: 'gen', lab: 'gen.top_p', hint: 'gen.top_p_hint', ctl: {
+        k: 'range', sec: 'sampling', field: 'top_p', flat: 'sampling_top_p',
+        min: 0, max: 1, step: 0.05}, opts: {flat: 'sampling_top_p'}},
+    {sec: 'gen', lab: 'gen.top_k', hint: 'gen.top_k_hint', ctl: {
+        k: 'num', sec: 'sampling', field: 'top_k', flat: 'sampling_top_k', min: 0},
+     opts: {flat: 'sampling_top_k'}},
+    {sec: 'gen', lab: 'gen.max_tokens', ctl: {
+        k: 'num', sec: 'sampling', field: 'max_tokens', flat: 'sampling_max_tokens',
+        min: 1, max: 131072}, opts: {flat: 'sampling_max_tokens'}},
+    {sec: 'gen', lab: 'gen.max_ctx', hint: 'gen.max_ctx_hint', ctl: {
+        k: 'num', sec: 'sampling', field: 'max_context_window', flat: 'sampling_max_context_window',
+        min: 1, max: 2097152}, opts: {flat: 'sampling_max_context_window'}},
+    {sec: 'gen', lab: 'gen.max_policy', hint: 'gen.max_policy_hint', ctl: {
+        k: 'num', sec: 'sampling', field: 'max_context_window_policy',
+        flat: 'sampling_max_context_window_policy', min: 1, max: 2097152, ph: 'None'},
+     opts: {flat: 'sampling_max_context_window_policy'}},
+    {sec: 'gen', lab: 'gen.rep_pen', hint: 'gen.rep_pen_hint', ctl: {
+        k: 'num', sec: 'sampling', field: 'repetition_penalty', flat: 'sampling_repetition_penalty',
+        min: 1, step: 0.05}, opts: {flat: 'sampling_repetition_penalty'}},
+    {env: ['mtp']},        // ENV-2: MTP experimental tunables join their group
+
+    {t: 'Resource Management'},
+    {sec: 'res', lab: 'res.max_conc', hint: 'res.max_conc_hint', ctl: {
+        // U7: in GS_RESTART_FIELDS but only showed a bare '!' — full badge
+        k: 'num', sec: 'scheduler', field: 'max_concurrent_requests',
+        flat: 'max_concurrent_requests', min: 1},
+     opts: {flat: 'max_concurrent_requests', badge: true}},
+    {sec: 'res', lab: 'res.batch', hint: 'res.batch_hint', ctl: {
+        k: 'num', sec: 'scheduler', field: 'embedding_batch_size',
+        flat: 'embedding_batch_size', min: 1}, opts: {flat: 'embedding_batch_size'}},
+    {sec: 'res', lab: 'res.chunked', hint: 'res.chunked_desc', ctl: {
+        k: 'tog', sec: 'scheduler', field: 'chunked_prefill', flat: 'chunked_prefill'},
+     opts: {flat: 'chunked_prefill'}},
+    {sec: 'res', lab: 'res.prio', ctl: {
+        k: 'sel', sec: 'scheduler', field: 'prefill_priority', flat: 'prefill_priority',
+        opts: () => [['speed', GS_LABELS.res.prio_speed], ['context', GS_LABELS.res.prio_context]]},
+     opts: {flat: 'prefill_priority'}},
+    {sec: 'res', lab: 'res.fairness', hint: 'res.fairness_desc', ctl: {
+        k: 'tog', sec: 'scheduler', field: 'decode_fairness', flat: 'decode_fairness'},
+     opts: {flat: 'decode_fairness'}},
+    {sec: 'res', lab: 'res.guard', hint: 'res.guard_desc', ctl: {
+        k: 'tog', sec: 'memory', field: 'prefill_memory_guard', flat: 'memory_prefill_memory_guard'},
+     opts: {flat: 'memory_prefill_memory_guard'}},
+    {sec: 'res', lab: 'res.tier', ctl: {
+        k: 'sel', sec: 'memory', field: 'memory_guard_tier', flat: 'memory_guard_tier',
+        opts: 'res.tiers'}, opts: {flat: 'memory_guard_tier'}},
+    {sec: 'res', lab: 'res.custom', show: (ctx) => ctx.tier === 'custom', ctl: {
+        k: 'num', sec: 'memory', field: 'memory_guard_custom_ceiling_gb',
+        flat: 'memory_guard_custom_ceiling_gb', min: 1, step: 1, ph: 'res.custom_ph'},
+     opts: {flat: 'memory_guard_custom_ceiling_gb'}},
+    {env: ['scheduler', 'memory']},
+
+    {t: 'Cache'},
+    {sec: 'cache', lab: 'cache.enabled', hint: 'cache.enabled_hint', ctl: {
+        k: 'tog', sec: 'cache', field: 'enabled', flat: 'cache_enabled'},
+     opts: {flat: 'cache_enabled', badge: true}},
+    {sec: 'cache', lab: 'cache.hot_only', hint: 'cache.hot_only_hint', ctl: {
+        k: 'tog', field: 'hot_cache_only', flat: 'hot_cache_only'},
+     opts: {flat: 'hot_cache_only'}},
+    {sec: 'cache', lab: 'cache.ssd_dir', ctl: {k: 'text', field: 'ssd_cache_dir', flat: 'ssd_cache_dir'},
+     opts: {flat: 'ssd_cache_dir'}},
+    {sec: 'cache', lab: 'cache.ssd_max', hint: 'cache.ssd_max_hint', ctl: {
+        k: 'text', field: 'ssd_cache_max_size', flat: 'ssd_cache_max_size', ph: '64GB'},
+     opts: {flat: 'ssd_cache_max_size'}},
+    {sec: 'cache', lab: 'cache.hot_max', hint: 'cache.hot_max_hint', ctl: {
+        k: 'text', field: 'hot_cache_max_size', flat: 'hot_cache_max_size', ph: '8GB'},
+     opts: {flat: 'hot_cache_max_size'}},
+
+    {t: 'MCP'},
+    {sec: 'mcp', lab: 'mcp.path', ctl: {k: 'text', field: 'config_path', flat: 'mcp_config', ph: 'mcp.ph'},
+     opts: {badge: true, flat: 'mcp_config'}},
+    {sec: 'mcp', lab: 'mcp.expose', hint: 'mcp.expose_hint', ctl: {
+        k: 'tog', field: 'expose_tools', flat: 'mcp_expose_tools'},
+     opts: {flat: 'mcp_expose_tools'}},
+
+    {t: 'Usage & Network'},
+    {sec: 'usage', lab: 'usage.history', hint: 'usage.history_hint', ctl: {
+        k: 'tog', field: 'usage_history', flat: 'usage_history'}, opts: {flat: 'usage_history'}},
+    {sec: 'net', lab: 'net.hf_ep', hint: 'net.hf_ep_hint', ctl: {
+        k: 'text', sec: 'huggingface', field: 'endpoint', flat: 'hf_endpoint', ph: 'https://huggingface.co'},
+     opts: {flat: 'hf_endpoint', badge: true}},
+    {sec: 'net', lab: 'net.ms_ep', hint: 'net.ms_ep_hint', ctl: {
+        k: 'text', sec: 'modelscope', field: 'endpoint', flat: 'ms_endpoint', ph: 'https://www.modelscope.cn'},
+     opts: {flat: 'ms_endpoint', badge: true}},
+    {sec: 'net', lab: 'net.http_proxy', hint: 'net.proxy_hint', ctl: {
+        k: 'text', sec: 'network', field: 'http_proxy', flat: 'network_http_proxy'},
+     opts: {flat: 'network_http_proxy'}},
+    {sec: 'net', lab: 'net.https_proxy', hint: 'net.proxy_hint', ctl: {
+        k: 'text', sec: 'network', field: 'https_proxy', flat: 'network_https_proxy'},
+     opts: {flat: 'network_https_proxy'}},
+    {sec: 'net', lab: 'net.no_proxy', hint: 'net.no_proxy_hint', ctl: {
+        k: 'text', sec: 'network', field: 'no_proxy', flat: 'network_no_proxy'},
+     opts: {flat: 'network_no_proxy'}},
+    {sec: 'net', lab: 'net.ca_bundle', hint: 'net.ca_hint', ctl: {
+        k: 'text', sec: 'network', field: 'ca_bundle', flat: 'network_ca_bundle'},
+     opts: {flat: 'network_ca_bundle', badge: true}},
+
+    {t: 'Advanced'},
+    {sec: 'adv', lab: 'adv.distributed_enabled', hint: 'adv.distributed_hint', ctl: {
+        k: 'tog', sec: 'server', field: 'distributed_inference_enabled',
+        flat: 'distributed_inference_enabled'}, opts: {flat: 'distributed_inference_enabled', badge: true}},
+    {sec: 'adv', lab: 'adv.burst', hint: 'adv.burst_hint', ctl: {
+        k: 'sel', sec: 'server', field: 'burst_decode_mode', flat: 'burst_decode_mode', opts: 'adv.burst_opts'},
+     opts: {flat: 'burst_decode_mode'}},
+    {sec: 'adv', lab: 'adv.sse', hint: 'adv.sse_hint', ctl: {
+        k: 'sel', sec: 'server', field: 'sse_keepalive_mode', flat: 'sse_keepalive_mode', opts: 'adv.sse_opts'},
+     opts: {flat: 'sse_keepalive_mode'}},
+    {sec: 'adv', lab: 'adv.mid_sys', hint: 'adv.mid_sys_hint', ctl: {
+        k: 'tog', sec: 'server', field: 'preserve_mid_system_cache', flat: 'preserve_mid_system_cache'},
+     opts: {flat: 'preserve_mid_system_cache'}},
+    {sec: 'adv', lab: 'adv.wide_proj', hint: 'adv.wide_proj_hint', ctl: {
+        k: 'tog', sec: 'server', field: 'qwen4_gdn_decode_wide_proj', flat: 'qwen4_gdn_decode_wide_proj'},
+     opts: {flat: 'qwen4_gdn_decode_wide_proj'}},
+    {sec: 'adv', lab: 'adv.audio', hint: 'adv.audio_hint', ctl: {
+        k: 'num', sec: 'server', field: 'max_audio_upload_size', flat: 'max_audio_upload_size', min: 1},
+     opts: {flat: 'max_audio_upload_size'}},
+    {sec: 'adv', lab: 'adv.ane', hint: 'adv.ane_hint', ctl: {
+        k: 'tog', sec: 'cache', field: 'ane_compile_cache', flat: 'ane_compile_cache'},
+     opts: {flat: 'ane_compile_cache'}},
+    {sec: 'adv', lab: 'adv.wt', hint: 'adv.wt_hint', ctl: {
+        k: 'tog', sec: 'cache', field: 'hot_cache_write_through', flat: 'hot_cache_write_through'},
+     opts: {flat: 'hot_cache_write_through'}},
+    {sec: 'adv', lab: 'adv.blocks', hint: 'adv.blocks_hint', ctl: {
+        k: 'num', sec: 'cache', field: 'initial_cache_blocks', flat: 'initial_cache_blocks', min: 1},
+     opts: {flat: 'initial_cache_blocks'}},
+    {sec: 'adv', lab: 'adv.gdn_store', hint: 'adv.gdn_store_hint', ctl: {
+        k: 'sel', sec: 'cache', field: 'gdn_snapshot_storage', flat: 'gdn_snapshot_storage',
+        opts: 'adv.gdn_store_opts'}, opts: {flat: 'gdn_snapshot_storage'}},
+    {sec: 'adv', lab: 'adv.gdn_pend', hint: 'adv.gdn_pend_hint', show: (ctx) => ctx.gdn === 'ssd_sidecar', ctl: {
+        k: 'text', sec: 'cache', field: 'gdn_ssd_pending_max_size',
+        flat: 'gdn_ssd_pending_max_size', ph: '512MB'}, opts: {flat: 'gdn_ssd_pending_max_size'}},
+    {sec: 'adv', lab: 'adv.gdn_prec', hint: 'adv.gdn_prec_hint', show: (ctx) => ctx.gdn === 'ssd_sidecar', ctl: {
+        k: 'sel', sec: 'cache', field: 'gdn_sidecar_precision', flat: 'gdn_sidecar_precision',
+        opts: 'adv.gdn_prec_opts',
+},
+     opts: {flat: 'gdn_sidecar_precision'}},
+    {env: ['engine']},     // ENV-2: engine tunables join Advanced
+];
+
+function renderGlobalSettings() {
+    const body = document.createElement('div');   // staged; grouped into boxes below
+    body.textContent = '';
+    const L = GS_LABELS;
+    const ctx = {
+        ccLocal: (gsGet('claude_code', 'mode') || 'local') !== 'cloud',
+        tier: gsGet('memory', 'memory_guard_tier'),
+        gdn: gsGet('cache', 'gdn_snapshot_storage'),
+        prec: gsGet('cache', 'gdn_sidecar_precision'),
     };
-    dl.append(add);
-    body.append(gsRow('model', L.model.dirs, '', dl));
-    body.append(gsRow('model', L.model.fallback, L.model.fallback_desc,
-        // bool in the server schema — a checkbox, like every binary
-        // option (was a text input: 'false' typed by hand was truthy-
-        // looking junk; audit 2026-10-02 found this the only bool not
-        // rendered as gsToggle)
-        gsToggle('model_fallback', gsGet('model','model_fallback')),
-        { flat: 'model_fallback' }));
-    body.append(gsRow('model', L.model.hide_helper, L.model.hide_helper_desc,
-        gsToggle('hide_helper_models', gsGet('model','hide_helper_models')),
-        { flat: 'hide_helper_models' }));
-    body.append(gsRow('model', L.model.hf_cache, L.model.hf_cache_desc,
-        gsToggle('hf_cache_enabled', gsGet('huggingface','hf_cache_enabled')),
-        { flat: 'hf_cache_enabled' }));
-    const hfp = GLUE.cell((GS.huggingface || {}).hf_cache_path || '—');
-    hfp.className = 'dim';
-    body.append(gsRow('model', C.tf('uplift.gs.model.hf_path_label', 'HF cache path'), '', hfp));
-    body.append(gsRow('model', L.model.idle, L.model.idle_desc,
-        gsSelect('idle_timeout_seconds', L.model.idle_opts,
-                 gsGet('idle_timeout','idle_timeout_seconds') ?? ''),
-        { flat: 'idle_timeout_seconds' }));
-
-    // ---- Generation Defaults
-    body.append(gsTitle('Generation Defaults'));
-    const temp = gsText('sampling','temperature','sampling_temperature', L,
-        { range: true, min: 0, max: 2, step: 0.1 });
-    body.append(gsRow('gen', L.gen.temperature, L.gen.temperature_hint, temp,
-        { flat: 'sampling_temperature' }));
-    const topp = gsText('sampling','top_p','sampling_top_p', L,
-        { range: true, min: 0, max: 1, step: 0.05 });
-    body.append(gsRow('gen', L.gen.top_p, L.gen.top_p_hint, topp,
-        { flat: 'sampling_top_p' }));
-    body.append(gsRow('gen', L.gen.top_k, L.gen.top_k_hint,
-        gsText('sampling','top_k','sampling_top_k', L, { number: true, min: 0 }),
-        { flat: 'sampling_top_k' }));
-    body.append(gsRow('gen', L.gen.max_tokens, '',
-        gsText('sampling','max_tokens','sampling_max_tokens', L,
-               { number: true, min: 1, max: 131072 }),
-        { flat: 'sampling_max_tokens' }));
-    body.append(gsRow('gen', L.gen.max_ctx, L.gen.max_ctx_hint,
-        gsText('sampling','max_context_window','sampling_max_context_window', L,
-               { number: true, min: 1, max: 2097152 }),
-        { flat: 'sampling_max_context_window' }));
-    body.append(gsRow('gen', L.gen.max_policy, L.gen.max_policy_hint,
-        gsText('sampling','max_context_window_policy',
-               'sampling_max_context_window_policy', L,
-               { number: true, min: 1, max: 2097152, placeholder: 'None' }),
-        { flat: 'sampling_max_context_window_policy' }));
-    body.append(gsRow('gen', L.gen.rep_pen, L.gen.rep_pen_hint,
-        gsText('sampling','repetition_penalty','sampling_repetition_penalty', L,
-               { number: true, min: 1, step: 0.05 }),
-        { flat: 'sampling_repetition_penalty' }));
-    // ENV-2: MTP experimental tunables join their semantic group
-    for (const r of envRows('mtp')) body.append(r);
-
-    // ---- Resource Management
-    body.append(gsTitle('Resource Management'));
-    body.append(gsRow('res', L.res.max_conc, L.res.max_conc_hint,
-        gsText('scheduler','max_concurrent_requests','max_concurrent_requests', L,
-               { number: true, min: 1 }),
-        // U7: it is in GS_RESTART_FIELDS (the scheduler pool size is read at
-        // boot) but only showed a bare "!" — the server routes say so too.
-        // Full badge with text, same as host/port.
-        { flat: 'max_concurrent_requests', badge: true }));
-    body.append(gsRow('res', L.res.batch, L.res.batch_hint,
-        gsText('scheduler','embedding_batch_size','embedding_batch_size', L,
-               { number: true, min: 1 }),
-        { flat: 'embedding_batch_size' }));
-    body.append(gsRow('res', L.res.chunked, L.res.chunked_desc,
-        gsToggle('chunked_prefill', gsGet('scheduler','chunked_prefill')),
-        { flat: 'chunked_prefill' }));
-    body.append(gsRow('res', L.res.prio, '',
-        gsSelect('prefill_priority', [['speed', L.res.prio_speed],
-                                      ['context', L.res.prio_context]],
-                 gsGet('scheduler','prefill_priority')),
-        { flat: 'prefill_priority' }));
-    body.append(gsRow('res', L.res.fairness, L.res.fairness_desc,
-        gsToggle('decode_fairness', gsGet('scheduler','decode_fairness')),
-        { flat: 'decode_fairness' }));
-    body.append(gsRow('res', L.res.guard, L.res.guard_desc,
-        gsToggle('memory_prefill_memory_guard', gsGet('memory','prefill_memory_guard')),
-        { flat: 'memory_prefill_memory_guard' }));
-    const tierSel = gsSelect('memory_guard_tier', L.res.tiers,
-                             gsGet('memory','memory_guard_tier'));
-    body.append(gsRow('res', L.res.tier, '', tierSel, { flat: 'memory_guard_tier' }));
-    if (gsGet('memory','memory_guard_tier') === 'custom') {
-        body.append(gsRow('res', L.res.custom, '',
-            gsText('memory','memory_guard_custom_ceiling_gb',
-                   'memory_guard_custom_ceiling_gb', L,
-                   { number: true, min: 1, step: 1, placeholder: L.res.custom_ph }),
-            { flat: 'memory_guard_custom_ceiling_gb' }));
+    // (the old "Global" restart-notice box was removed; the RESTART chip,
+    //  red field marks and the RESTART SERVER button carry that meaning now)
+    let pendingWarnRow = null;
+    for (const item of GS_SPEC) {
+        if (item.t) { body.append(gsTitle(item.t)); continue; }
+        if (item.x) { item.x(body, L, ctx); continue; }
+        if (item.env) { for (const r of envRows(...item.env)) body.append(r); continue; }
+        if (item.show && !item.show(ctx)) continue;
+        const row = gsSpecRow(item, L, ctx);
+        body.append(row);
     }
-    // ENV-2: scheduler/memory experimental tunables join their semantic group
-    for (const r of envRows('scheduler', 'memory')) body.append(r);
-
-    // ---- Cache
-    body.append(gsTitle('Cache'));
-    body.append(gsRow('cache', L.cache.enabled, L.cache.enabled_hint,
-        gsToggle('cache_enabled', gsGet('cache','enabled')),
-        { flat: 'cache_enabled', badge: true }));
-    body.append(gsRow('cache', L.cache.hot_only, L.cache.hot_only_hint,
-        gsToggle('hot_cache_only', gsGet('cache','hot_cache_only')),
-        { flat: 'hot_cache_only' }));
-    body.append(gsRow('cache', L.cache.ssd_dir, '',
-        gsText('cache','ssd_cache_dir','ssd_cache_dir', L),
-        { flat: 'ssd_cache_dir' }));
-    body.append(gsRow('cache', L.cache.ssd_max, L.cache.ssd_max_hint,
-        gsText('cache','ssd_cache_max_size','ssd_cache_max_size', L,
-               { placeholder: '64GB' }),
-        { flat: 'ssd_cache_max_size' }));
-    body.append(gsRow('cache', L.cache.hot_max, L.cache.hot_max_hint,
-        gsText('cache','hot_cache_max_size','hot_cache_max_size', L,
-               { placeholder: '8GB' }),
-        { flat: 'hot_cache_max_size' }));
-
-    // ---- MCP
-    body.append(gsTitle('MCP'));
-    body.append(gsRow('mcp', L.mcp.path, '',
-        gsText('mcp','config_path','mcp_config', L, { placeholder: L.mcp.ph }),
-        { badge: true, flat: 'mcp_config' }));
-    body.append(gsRow('mcp', L.mcp.expose, L.mcp.expose_hint,
-        gsToggle('mcp_expose_tools', gsGet('mcp','expose_tools')),
-        { flat: 'mcp_expose_tools' }));
-
-    // ---- Usage & Network
-    body.append(gsTitle('Usage & Network'));
-    body.append(gsRow('usage', L.usage.history, L.usage.history_hint,
-        gsToggle('usage_history', gsGet('usage','usage_history')),
-        { flat: 'usage_history' }));
-    body.append(gsRow('net', L.net.hf_ep, L.net.hf_ep_hint,
-        gsText('huggingface','endpoint','hf_endpoint', L,
-               { placeholder: 'https://huggingface.co' }),
-        { flat: 'hf_endpoint', badge: true }));
-    body.append(gsRow('net', L.net.ms_ep, L.net.ms_ep_hint,
-        gsText('modelscope','endpoint','ms_endpoint', L,
-               { placeholder: 'https://www.modelscope.cn' }),
-        { flat: 'ms_endpoint', badge: true }));
-    body.append(gsRow('net', L.net.http_proxy, L.net.proxy_hint,
-        gsText('network','http_proxy','network_http_proxy', L),
-        { flat: 'network_http_proxy' }));
-    body.append(gsRow('net', L.net.https_proxy, L.net.proxy_hint,
-        gsText('network','https_proxy','network_https_proxy', L),
-        { flat: 'network_https_proxy' }));
-    body.append(gsRow('net', L.net.no_proxy, L.net.no_proxy_hint,
-        gsText('network','no_proxy','network_no_proxy', L),
-        { flat: 'network_no_proxy' }));
-    body.append(gsRow('net', L.net.ca_bundle, L.net.ca_hint,
-        gsText('network','ca_bundle','network_ca_bundle', L),
-        { flat: 'network_ca_bundle', badge: true }));
-
-    // ---- Advanced
-    body.append(gsTitle('Advanced'));
-    body.append(gsRow('adv', L.adv.distributed_enabled, L.adv.distributed_hint,
-        gsToggle('distributed_inference_enabled',
-                 gsGet('server','distributed_inference_enabled')),
-        { flat: 'distributed_inference_enabled', badge: true }));
-    body.append(gsRow('adv', L.adv.burst, L.adv.burst_hint,
-        gsSelect('burst_decode_mode', L.adv.burst_opts,
-                 gsGet('server','burst_decode_mode')),
-        { flat: 'burst_decode_mode' }));
-    body.append(gsRow('adv', L.adv.sse, L.adv.sse_hint,
-        gsSelect('sse_keepalive_mode', L.adv.sse_opts,
-                 gsGet('server','sse_keepalive_mode')),
-        { flat: 'sse_keepalive_mode' }));
-    body.append(gsRow('adv', L.adv.mid_sys, L.adv.mid_sys_hint,
-        gsToggle('preserve_mid_system_cache', gsGet('server','preserve_mid_system_cache')),
-        { flat: 'preserve_mid_system_cache' }));
-    body.append(gsRow('adv', L.adv.wide_proj, L.adv.wide_proj_hint,
-        gsToggle('qwen4_gdn_decode_wide_proj', gsGet('server','qwen4_gdn_decode_wide_proj')),
-        { flat: 'qwen4_gdn_decode_wide_proj' }));
-    body.append(gsRow('adv', L.adv.audio, L.adv.audio_hint,
-        gsText('server','max_audio_upload_size','max_audio_upload_size', L,
-               { number: true, min: 1 }),
-        { flat: 'max_audio_upload_size' }));
-    body.append(gsRow('adv', L.adv.ane, L.adv.ane_hint,
-        gsToggle('ane_compile_cache', gsGet('cache','ane_compile_cache')),
-        { flat: 'ane_compile_cache' }));
-    body.append(gsRow('adv', L.adv.wt, L.adv.wt_hint,
-        gsToggle('hot_cache_write_through', gsGet('cache','hot_cache_write_through')),
-        { flat: 'hot_cache_write_through' }));
-    body.append(gsRow('adv', L.adv.blocks, L.adv.blocks_hint,
-        gsText('cache','initial_cache_blocks','initial_cache_blocks', L,
-               { number: true, min: 1 }),
-        { flat: 'initial_cache_blocks' }));
-    const gsel = gsSelect('gdn_snapshot_storage', L.adv.gdn_store_opts,
-                          gsGet('cache','gdn_snapshot_storage'));
-    body.append(gsRow('adv', L.adv.gdn_store, L.adv.gdn_store_hint, gsel,
-        { flat: 'gdn_snapshot_storage' }));
-    if (gsGet('cache','gdn_snapshot_storage') === 'ssd_sidecar') {
-        body.append(gsRow('adv', L.adv.gdn_pend, L.adv.gdn_pend_hint,
-            gsText('cache','gdn_ssd_pending_max_size','gdn_ssd_pending_max_size', L,
-                   { placeholder: '512MB' }),
-            { flat: 'gdn_ssd_pending_max_size' }));
-        const prow = gsRow('adv', L.adv.gdn_prec, L.adv.gdn_prec_hint,
-            gsSelect('gdn_sidecar_precision', L.adv.gdn_prec_opts,
-                     gsGet('cache','gdn_sidecar_precision')),
-            { flat: 'gdn_sidecar_precision' });
-        if (['int8','rht_int8'].includes(gsGet('cache','gdn_sidecar_precision'))) {
+    // gdn precision warning: attach after the row exists (needs .uname)
+    if (ctx.gdn === 'ssd_sidecar' && ['int8', 'rht_int8'].includes(ctx.prec)) {
+        const prow = body.querySelector('[data-flat="gdn_sidecar_precision"]');
+        if (prow) {
             const w = document.createElement('small');
             w.className = 'fhint warn'; w.textContent = L.adv.gdn_prec_warning;
             prow.querySelector('.uname').append(w);
         }
-        body.append(prow);
     }
-    // ENV-2: engine experimental tunables join Advanced (burst / batching)
-    for (const r of envRows('engine')) body.append(r);
 
     // group staged children into bordered section boxes; each gs-title
     // starts a new box. U5 fix (user round): the old CSS multicol
