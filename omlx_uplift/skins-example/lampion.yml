@@ -1,0 +1,183 @@
+# Uplift skin crate — "LAMPION" (late autumn, seasonal).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+#
+# Direction 4 (SPARK-4): deliberately NOT a fixed holiday, so it never goes
+# stale on the shelf — lantern light and falling leaves read any time from
+# October to February. Doubles as the demo of the user-dir workflow: drop this
+# yml into ~/.omlx/uplift/skins/, refresh, no restart.
+#
+# Texture: a SPARSE organic scatter tile (icons/leaves.svg) — five leaf marks
+# at varied rotation on a 128px cell, so the repeat is hard to spot even
+# though it is perfectly periodic. That is the fourth and last texture family
+# in this batch: weave (artelight/inkwell), planes (kubus), noise (phosphor),
+# regular dots (halftone), scatter (here).
+skin_version: 1
+label: "Lampion"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#17130f"          # outdoors after dark
+  card: "#221b13"        # lit from within by the lantern
+  row2: "#2a2118"
+  field: "#120f0b"
+  panel: "#2a2118"
+  edge: "#4a3a24"
+  ink: "#f0e6d2"         # candle-lit paper
+  dim: "#b08d5e"         # 6.0:1 on card
+  accent: "#e0a33e"      # the flame
+  chart-1: "#e0a33e"
+  chart-2: "#6f8f4e"     # last leaves still on the tree
+  grid: "#2f2519"
+  heat: "#f0b95c"
+  frame: "#7a5a2e"
+  red: "#b0492e"         # ember, not alarm red
+  bad: "#b0492e"
+  warn: "#d08a2c"
+  good: "#6f8f4e"
+  hdr-ink: "#e0a33e"
+  hdr-edge: "#3a2c1a"
+  hdr-hover: "#2a2118"
+  hdr-weight: "600"
+  mono: "ui-monospace, \"SFMono-Regular\", Menlo, monospace"
+  sans: "\"Avenir Next\", \"Segoe UI\", system-ui, sans-serif"
+icons:
+  # Scatter tile: no two leaves share a rotation or a row, and none touches a
+  # tile edge, so the repeat cannot draw visible seams or lines.
+  leaves.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+      <g fill="none" stroke="#e0a33e" stroke-width="1.1" stroke-linecap="round">
+        <path d="M18 22c4-6 11-6 14-1-4 5-11 6-14 1z" stroke-opacity=".30" transform="rotate(-14 25 22)"/>
+        <path d="M78 12c3-5 10-5 12-1-3 5-9 5-12 1z" stroke-opacity=".22" transform="rotate(28 84 13)"/>
+        <path d="M44 66c4-6 11-6 14-1-4 5-11 6-14 1z" stroke-opacity=".26" transform="rotate(62 51 66)"/>
+        <path d="M104 78c3-5 9-5 11-1-3 5-8 5-11 1z" stroke-opacity=".18" transform="rotate(-40 110 79)"/>
+        <path d="M14 98c4-6 10-6 13-1-4 5-10 6-13 1z" stroke-opacity=".2" transform="rotate(6 20 99)"/>
+      </g>
+    </svg>
+  # 10px logo-dot: a paper lantern — one closed body, one flame, one rib.
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+      <ellipse cx="6" cy="6.4" rx="4" ry="4.6" fill="#2a2118" stroke="#e0a33e" stroke-width="1.2"/>
+      <path d="M6 4.2c1.1 1 1.1 3 0 4-1.1-1-1.1-3 0-4z" fill="#f0b95c"/>
+    </svg>
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+      <path d="M1 2l4 4 4-4" fill="none" stroke="#b08d5e" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+      <path d="M3 3l8 8M11 3l-8 8" stroke="#b0492e" stroke-width="2.2" stroke-linecap="round"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M2 2c3 2 9 2 12 0M2 6c3 2 9 2 12 0" stroke="#7a5a2e" stroke-width="1.2" fill="none"/>
+    </svg>
+css: |-
+  html { color-scheme: dark; }
+
+  /* ---- page ground: a lantern set on the ground ---- */
+  /* The leaves are NOT declared here — they live on the drifting layer below,
+     so there is exactly one leaf field and it cannot double up. */
+  body {
+      background-color: var(--bg);
+      background-image:
+          radial-gradient(90% 60% at 50% 0%,
+              rgba(224, 163, 62, .16) 0%, rgba(0, 0, 0, 0) 55%),
+          radial-gradient(120% 90% at 50% 110%,
+              rgba(176, 73, 46, .1) 0%, rgba(0, 0, 0, 0) 60%);
+      background-size: cover, cover;
+      background-repeat: no-repeat, no-repeat;
+      background-attachment: fixed, fixed;
+  }
+  body::before { background: var(--warn); }
+  header.top {
+      background-color: var(--bg);
+      background-image:
+          radial-gradient(90% 60% at 50% 0%,
+              rgba(224, 163, 62, .16) 0%, rgba(0, 0, 0, 0) 55%),
+          radial-gradient(120% 90% at 50% 110%,
+              rgba(176, 73, 46, .1) 0%, rgba(0, 0, 0, 0) 60%);
+      background-size: cover, cover;
+      background-repeat: no-repeat, no-repeat;
+      background-attachment: fixed, fixed;
+  }
+
+  /* ---- cards: lantern-lit paper with a leaf field drifting INSIDE it ---- */
+  /* Why the leaves ride the card background and not an overlay: a
+     position:fixed leaf layer at z-index 1 paints OVER the card text (leaves
+     across a metric number is a defect, not a feature), and the honest fix —
+     a negative-z child — would disappear entirely, because .card is
+     position:relative with z-index:auto and therefore forms no stacking
+     context, so the child falls behind the card's own background in the ROOT
+     context. Making .card a stacking context is banned (it traps that card's
+     dropdown menus behind later siblings and fights GridStack's own z-index).
+     A background can never paint over in-flow content, so this is the only
+     mechanism that is correct by construction. */
+  .card {
+      background-image:
+          url('res/icons/leaves.svg'),
+          linear-gradient(180deg,
+              rgba(224, 163, 62, .07) 0, rgba(224, 163, 62, 0) 56px);
+      background-size: 128px 128px, cover;
+      background-repeat: repeat, no-repeat;
+      background-position: 0 0, 0 0;
+      background-color: var(--card);
+      border: 1px solid var(--edge);
+  }
+  .card:hover { border-color: var(--frame); }
+  .card h2 { color: var(--dim); letter-spacing: .12em; }
+  .chart-box { background: #1b1610; border: 1px solid #33281a; }
+
+  /* ---- the falling leaves ---- */
+  /* Travel is exactly one tile, so the last frame is pixel-identical to the
+     first: the loop cannot show a jump. Only layer 1 moves; the light falloff
+     keeps 0 0 in the second position of every keyframe. */
+  :root:not([data-motion="off"]) .card {
+      animation: lampion-fall 26s linear infinite;
+  }
+  @keyframes lampion-fall {
+      from { background-position: 0 0, 0 0; }
+      to   { background-position: 0 128px, 0 0; }
+  }
+  /* Desynchronisation: NEGATIVE delays start each card mid-cycle, so nothing
+     is ever seen to "begin". The 6 offsets are all distinct mod 26, so no two
+     neighbouring cards are ever in phase. Per-element timing is legal here
+     because the animation lives in the page document, not inside the SVG. */
+  :root:not([data-motion="off"]) .card:nth-child(6n+2) { animation-delay: -4s; }
+  :root:not([data-motion="off"]) .card:nth-child(6n+3) { animation-delay: -9s; }
+  :root:not([data-motion="off"]) .card:nth-child(6n+4) { animation-delay: -14s; }
+  :root:not([data-motion="off"]) .card:nth-child(6n+5) { animation-delay: -19s; }
+  :root:not([data-motion="off"]) .card:nth-child(6n)   { animation-delay: -23s; }
+  /* Flame flicker: 3 s against the 26 s fall — coprime, never in step. */
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: lampion-flicker 3s ease-in-out infinite;
+  }
+  @keyframes lampion-flicker {
+      0%, 100% { box-shadow: 0 0 5px rgba(240, 185, 92, .45); }
+      38%      { box-shadow: 0 0 11px rgba(240, 185, 92, .85); }
+      61%      { box-shadow: 0 0 7px rgba(240, 185, 92, .6); }
+  }
+  .logo .dot { box-shadow: 0 0 5px rgba(240, 185, 92, .45); }
+
+  /* ---- meters: wick to flame ---- */
+  .meter { background: #120f0b; border: 1px solid var(--edge); }
+  .meter > div { background: linear-gradient(90deg, #7a5a2e, var(--accent) 70%, var(--heat)); }
+  .meter.bad > div { background: linear-gradient(90deg, #6e2a1a, var(--bad) 70%, #cf6a4c); }
+
+  .icon-btn:hover, select:hover { background: var(--accent); color: #1a140d; }
+  ::selection { background: var(--accent); color: #1a140d; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #1b1610; }
+  ::-webkit-scrollbar-thumb { background: #4a3a24; border: 2px solid #1b1610; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--frame); }
+
+  .logo .logo-below::after {
+      content: "LENGYEL · 2400 K · OUTDOOR";
+      color: var(--dim); font: 600 9px/1 var(--mono); letter-spacing: .16em;
+  }
+  .logo::after {
+      content: ": LIT";
+      color: var(--heat); font: 600 9px/1 var(--mono); letter-spacing: .12em;
+      margin-left: 6px;
+  }
+  .rqchip { box-shadow: 0 0 6px rgba(240, 185, 92, .3); }

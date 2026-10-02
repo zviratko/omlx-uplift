@@ -1,0 +1,172 @@
+# Uplift skin crate — "PHOSPHOR" (single-hue CRT, mono minimal).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+#
+# Direction 2 (SPARK-4): prove the token system collapses gracefully to one
+# hue. Every "meaning" colour is the SAME phosphor green at a different
+# intensity, and chart-1 == chart-2 == heat == accent == good, which is also
+# the deliberate stress test for SPARK-1's seriesPalette() de-dupe: the palette
+# must fall back to a tint, not draw two invisible coincident strokes.
+#
+# Texture: real procedural grain. icons/grain.svg is an <feTurbulence> mask
+# (RGB-constant, signal carried in ALPHA) tiled at 96px over the tube ground.
+# Verified by composite measurement in Chromium (sd 2.90, 69 luminance levels);
+# it is standard SVG but NOT yet pixel-proven in Safari/Firefox.
+skin_version: 1
+label: "Phosphor"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#050a05"          # tube, glass off
+  card: "#08110a"        # well, one step of leaked light
+  row2: "#0b170d"
+  field: "#030703"       # unlit: darker than bg so fields read as recessed
+  panel: "#0b170d"
+  edge: "#1f4d28"        # bezel — the only desaturated green here
+  ink: "#7dff9e"         # the lit trace
+  dim: "#3fae5a"         # afterglow, 6.1:1 on card
+  accent: "#33ff66"      # full-bias phosphor
+  chart-1: "#33ff66"     # identical ON PURPOSE — see the header note
+  chart-2: "#33ff66"
+  grid: "#0f2713"
+  heat: "#33ff66"
+  frame: "#2a6b38"
+  red: "#33ff66"         # one hue: the alarm is brighter, not different
+  bad: "#33ff66"
+  warn: "#33ff66"
+  good: "#33ff66"
+  hdr-ink: "#33ff66"
+  hdr-edge: "#12351a"
+  hdr-hover: "#0d1f11"
+  hdr-weight: "600"
+  mono: "ui-monospace, \"SFMono-Regular\", Menlo, monospace"
+  sans: "ui-monospace, \"SFMono-Regular\", Menlo, monospace"
+icons:
+  # Phosphor dust: fractal noise, 4 octaves, stitched so the 96px tile has no
+  # seam. feColorMatrix collapses RGB to black and copies RED into ALPHA, so
+  # the art is a pure opacity mask — it tints to whatever ground it lands on.
+  grain.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96">
+      <filter id="g" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="4"
+                      seed="7" stitchTiles="stitch" result="n"/>
+        <feColorMatrix in="n" type="matrix"
+          values="0 0 0 0 0
+                  0 0 0 0 0
+                  0 0 0 0 0
+                  1 0 0 0 0"/>
+      </filter>
+      <rect width="96" height="96" filter="url(#g)" opacity="0.5"/>
+    </svg>
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+      <circle cx="6" cy="6" r="5" fill="#0a1a0d"/>
+      <circle cx="6" cy="6" r="3" fill="#33ff66"/>
+      <circle cx="6" cy="6" r="5" fill="none" stroke="#1f4d28" stroke-width="1"/>
+    </svg>
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+      <path d="M0 0h10L5 7z" fill="#33ff66"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+      <path d="M2 2l10 10M12 2L2 12" stroke="#33ff66" stroke-width="2.6" stroke-linecap="round"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <circle cx="4" cy="2" r="1.1" fill="#2a6b38"/><circle cx="8" cy="2" r="1.1" fill="#2a6b38"/>
+      <circle cx="12" cy="2" r="1.1" fill="#2a6b38"/><circle cx="4" cy="7" r="1.1" fill="#2a6b38"/>
+      <circle cx="8" cy="7" r="1.1" fill="#2a6b38"/><circle cx="12" cy="7" r="1.1" fill="#2a6b38"/>
+    </svg>
+css: |-
+  html { color-scheme: dark; }
+
+  /* ---- tube ground: grain + scanlines + a lens vignette ---- */
+  /* Layer order is top-to-bottom: grain over scanlines over vignette, so the
+     dust sits on the glass rather than under the raster. */
+  body {
+      background-color: var(--bg);
+      background-image:
+          url('res/icons/grain.svg'),
+          repeating-linear-gradient(0deg,
+              rgba(0, 0, 0, .34) 0 1px, transparent 1px 3px),
+          radial-gradient(125% 95% at 50% 40%,
+              #0a160c 0%, var(--bg) 62%, #010301 100%);
+      background-size: 96px 96px, auto, cover;
+      background-repeat: repeat, repeat, no-repeat;
+      background-attachment: fixed, fixed, fixed;
+  }
+  body::before { background: var(--edge); }
+  header.top {
+      background-color: var(--bg);
+      background-image:
+          url('res/icons/grain.svg'),
+          repeating-linear-gradient(0deg,
+              rgba(0, 0, 0, .34) 0 1px, transparent 1px 3px),
+          radial-gradient(125% 95% at 50% 40%,
+              #0a160c 0%, var(--bg) 62%, #010301 100%);
+      background-size: 96px 96px, auto, cover;
+      background-repeat: repeat, repeat, no-repeat;
+      background-attachment: fixed, fixed, fixed;
+  }
+
+  /* ---- cards: the well is lit from inside, so the glow is inset ---- */
+  .card {
+      background: linear-gradient(180deg, #0a150c 0, var(--card) 44px);
+      border: 1px solid var(--edge);
+      box-shadow: inset 0 0 26px rgba(51, 255, 102, .045);
+  }
+  .card:hover { border-color: var(--frame); box-shadow: inset 0 0 26px rgba(51,255,102,.09); }
+  .card h2 { color: var(--dim); letter-spacing: .18em; }
+  .chart-box { background: #040904; border: 1px solid #10240f; }
+
+  /* ---- the afterglow: a beam that lands and decays. Gated. ---- */
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: phosphor-decay 3.7s ease-out infinite;
+  }
+  @keyframes phosphor-decay {
+      0%   { box-shadow: 0 0 3px rgba(51, 255, 102, .35); }
+      12%  { box-shadow: 0 0 15px rgba(51, 255, 102, .95); }
+      100% { box-shadow: 0 0 3px rgba(51, 255, 102, .35); }
+  }
+
+  /* No animated overlay layer here, and deliberately so. An earlier draft
+     put a crawling scanline on a position:fixed z-index:1 pseudo — but cards
+     are position:relative with z-index:auto, so that layer paints OVER the
+     metric numbers, and a scanline wash across a value is a legibility defect,
+     not a flourish. The negative-z alternative is no better: card backgrounds
+     are opaque, so it would vanish behind them. Static scanlines already ride
+     the body ground above; the CRT identity does not need them to move. The
+     only motion here is the phosphor decay on the logo dot, which sits inside
+     its own box and touches nothing it can obscure. */
+
+  /* ---- meters: the trace itself, stepped by the beam not by a gradient ---- */
+  .meter { background: #030703; border: 1px solid var(--edge); }
+  .meter > div {
+      background: repeating-linear-gradient(90deg,
+          var(--accent) 0 2px, #1f8f3d 2px 3px);
+      box-shadow: 0 0 6px rgba(51, 255, 102, .5);
+  }
+  .meter.bad > div {
+      background: repeating-linear-gradient(90deg,
+          var(--bad) 0 2px, #1f8f3d 2px 3px);
+  }
+
+  .icon-btn:hover, select:hover { background: var(--accent); color: #041006; }
+  ::selection { background: var(--accent); color: #041006; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #040904; }
+  ::-webkit-scrollbar-thumb { background: var(--edge); border: 2px solid #040904; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--frame); }
+
+  .logo .logo-below::after {
+      content: "P1 · 12 KV · P22";
+      color: var(--dim); font: 600 9px/1 var(--mono); letter-spacing: .22em;
+  }
+  .logo::after {
+      content: ": WARMD";
+      color: var(--accent); font: 600 9px/1 var(--mono); letter-spacing: .1em;
+      margin-left: 6px;
+  }
+  .logo .dot { box-shadow: 0 0 6px rgba(51, 255, 102, .55); }
+  .rqchip { box-shadow: 0 0 7px rgba(51, 255, 102, .35); border-color: var(--edge); }

@@ -1,0 +1,276 @@
+# Uplift skin crate — "HALFTONE" (rotary press, light + bundled webfont).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+#
+# Direction 3 (SPARK-4): the SECOND data point for the fonts: pipeline, and a
+# deliberately harder one than shodan. The family here is Tektur, a VARIABLE
+# font — one woff2 file carries the whole 400..900 weight axis, so the crate
+# tests the `font-weight: <low> <high>` range form rather than two discrete
+# @font-face records.
+#
+# Licence: Tektur is OFL 1.1 (verified in google/fonts ofl/tektur/OFL.txt).
+# OFL requires the notice to travel with the font, so the full licence text is
+# reproduced below AND shipped as a real file (fonts/OFL.txt — the engine
+# whitelists any fonts/<name>, so it is served at
+# /uplift/api/skins/<dir>/res/fonts/OFL.txt).
+#
+# Texture: a real halftone screen — icons/halftone.svg tiles four low-alpha
+# dots on a 6px rosette, which is what a rotary press actually leaves on
+# paper. Over the ink areas it reads as print density, not as a pattern.
+skin_version: 1
+label: "Halftone"
+classic:
+  theme: light
+  enhanced: false
+tokens:
+  bg: "#efece6"          # uncoated stock, warm off-white not bleached
+  card: "#faf8f4"
+  row2: "#e9e5dd"
+  field: "#fffefb"
+  panel: "#e4e0d7"
+  edge: "#c9c3b6"
+  ink: "#17181a"         # process black
+  dim: "#656057"         # AA on every ground (min 4.7:1, panel is the binding one)
+  accent: "#c8102e"      # the pressman's registration red
+  chart-1: "#17181a"     # series 1 = black plate
+  chart-2: "#c8102e"     # series 2 = the red plate
+  grid: "#ddd8ce"
+  heat: "#d4691e"
+  frame: "#b3ac9e"
+  red: "#c8102e"
+  bad: "#a1102a"
+  warn: "#b5701a"
+  good: "#2c6e49"
+  hdr-ink: "#17181a"
+  hdr-edge: "#d8d2c6"
+  hdr-hover: "#e7e2d8"
+  hdr-weight: "700"
+  mono: "\"Tektur\", ui-monospace, Menlo, monospace"
+  sans: "\"Tektur\", \"Helvetica Neue\", system-ui, sans-serif"
+icons:
+  # Registration mark: the crosshair a pressman squares the plates against,
+  # which is the one glyph that says "printing" at a 10px box.
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+      <circle cx="6" cy="6" r="4.2" fill="none" stroke="#c8102e" stroke-width="1.2"/>
+      <path d="M6 0v12M0 6h12" stroke="#17181a" stroke-width="0.9"/>
+    </svg>
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+      <path d="M1 2l4 4 4-4" fill="none" stroke="#6a655c" stroke-width="1.5"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+      <path d="M3 3l8 8M11 3l-8 8" stroke="#c8102e" stroke-width="2"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <circle cx="3" cy="2.5" r="1" fill="#b3ac9e"/><circle cx="8" cy="2.5" r="1" fill="#b3ac9e"/>
+      <circle cx="13" cy="2.5" r="1" fill="#b3ac9e"/><circle cx="3" cy="7.5" r="1" fill="#b3ac9e"/>
+      <circle cx="8" cy="7.5" r="1" fill="#b3ac9e"/><circle cx="13" cy="7.5" r="1" fill="#b3ac9e"/>
+    </svg>
+  # Halftone rosette: 4 dots, one per corner offset by a half cell so the tile
+  # repeats seamlessly (corner dots are shared with all four neighbours).
+  halftone.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" width="6" height="6" viewBox="0 0 6 6">
+      <circle cx="3" cy="3" r="0.95" style="fill:#000;fill-opacity:.085"/>
+      <circle cx="0" cy="0" r="0.7" style="fill:#000;fill-opacity:.05"/>
+      <circle cx="6" cy="0" r="0.7" style="fill:#000;fill-opacity:.05"/>
+      <circle cx="0" cy="6" r="0.7" style="fill:#000;fill-opacity:.05"/>
+      <circle cx="6" cy="6" r="0.7" style="fill:#000;fill-opacity:.05"/>
+    </svg>
+fonts:
+  # OFL-1.1 notice for tektur-latin.woff2 below, so the licence travels
+  # WITH the font as the licence requires (served at res/fonts/OFL.txt).
+  # Verbatim from github.com/google/fonts ofl/tektur/OFL.txt except that
+  # the engine's block-scalar contract forbids lines ending in whitespace,
+  # so one trailing space on the "bundled, embedded," line is stripped.
+  tektur-latin.woff2: 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
+  OFL.txt: |-
+    Copyright 2023 The Tektur Project Authors (https://www.github.com/hyvyys/Tektur)
+    
+    This Font Software is licensed under the SIL Open Font License, Version 1.1.
+    This license is copied below, and is also available with a FAQ at:
+    https://scripts.sil.org/OFL
+    
+    
+    -----------------------------------------------------------
+    SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+    -----------------------------------------------------------
+    
+    PREAMBLE
+    The goals of the Open Font License (OFL) are to stimulate worldwide
+    development of collaborative font projects, to support the font creation
+    efforts of academic and linguistic communities, and to provide a free and
+    open framework in which fonts may be shared and improved in partnership
+    with others.
+    
+    The OFL allows the licensed fonts to be used, studied, modified and
+    redistributed freely as long as they are not sold by themselves. The
+    fonts, including any derivative works, can be bundled, embedded, 
+    redistributed and/or sold with any software provided that any reserved
+    names are not used by derivative works. The fonts and derivatives,
+    however, cannot be released under any other type of license. The
+    requirement for fonts to remain under this license does not apply
+    to any document created using the fonts or their derivatives.
+    
+    DEFINITIONS
+    "Font Software" refers to the set of files released by the Copyright
+    Holder(s) under this license and clearly marked as such. This may
+    include source files, build scripts and documentation.
+    
+    "Reserved Font Name" refers to any names specified as such after the
+    copyright statement(s).
+    
+    "Original Version" refers to the collection of Font Software components as
+    distributed by the Copyright Holder(s).
+    
+    "Modified Version" refers to any derivative made by adding to, deleting,
+    or substituting -- in part or in whole -- any of the components of the
+    Original Version, by changing formats or by porting the Font Software to a
+    new environment.
+    
+    "Author" refers to any designer, engineer, programmer, technical
+    writer or other person who contributed to the Font Software.
+    
+    PERMISSION & CONDITIONS
+    Permission is hereby granted, free of charge, to any person obtaining
+    a copy of the Font Software, to use, study, copy, merge, embed, modify,
+    redistribute, and sell modified and unmodified copies of the Font
+    Software, subject to the following conditions:
+    
+    1) Neither the Font Software nor any of its individual components,
+    in Original or Modified Versions, may be sold by itself.
+    
+    2) Original or Modified Versions of the Font Software may be bundled,
+    redistributed and/or sold with any software, provided that each copy
+    contains the above copyright notice and this license. These can be
+    included either as stand-alone text files, human-readable headers or
+    in the appropriate machine-readable metadata fields within text or
+    binary files as long as those fields can be easily viewed by the user.
+    
+    3) No Modified Version of the Font Software may use the Reserved Font
+    Name(s) unless explicit written permission is granted by the corresponding
+    Copyright Holder. This restriction only applies to the primary font name as
+    presented to the users.
+    
+    4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+    Software shall not be used to promote, endorse or advertise any
+    Modified Version, except to acknowledge the contribution(s) of the
+    Copyright Holder(s) and the Author(s) or with their explicit written
+    permission.
+    
+    5) The Font Software, modified or unmodified, in part or in whole,
+    must be distributed entirely under this license, and must not be
+    distributed under any other license. The requirement for fonts to
+    remain under this license does not apply to any document created
+    using the Font Software.
+    
+    TERMINATION
+    This license becomes null and void if any of the above conditions are
+    not met.
+    
+    DISCLAIMER
+    THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+    OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+    COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+    DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+    OTHER DEALINGS IN THE FONT SOFTWARE.
+
+css: |-
+  html { color-scheme: light; }
+
+  /* ---- one variable file carries every weight: the range form ---- */
+  /* `font-weight: 400 900` declares the axis span the woff2 actually holds.
+     Written as one face rather than two, so a 700-weight header interpolates
+     instead of falling back to the ui font — the failure mode this crate
+     exists to catch. */
+  @font-face { font-family: 'Tektur'; font-style: normal;
+    font-weight: 400 900; font-display: swap;
+    src: url('res/fonts/tektur-latin.woff2') format('woff2'); }
+
+  /* ---- page ground: printed stock ---- */
+  body {
+      background-color: var(--bg);
+      background-image:
+          url('res/icons/halftone.svg'),
+          linear-gradient(180deg, rgba(255,255,255,.5), rgba(0,0,0,0) 220px);
+      background-size: 6px 6px, cover;
+      background-repeat: repeat, no-repeat;
+      background-attachment: fixed, fixed;
+  }
+  body::before { background: var(--red); }
+  header.top {
+      background-color: var(--bg);
+      background-image:
+          url('res/icons/halftone.svg'),
+          linear-gradient(180deg, rgba(255,255,255,.5), rgba(0,0,0,0) 220px);
+      background-size: 6px 6px, cover;
+      background-repeat: repeat, no-repeat;
+      background-attachment: fixed, fixed;
+  }
+
+  /* ---- cards: a laid sheet, with the crop mark in the corner ---- */
+  .card {
+      background: var(--card);
+      border: 1px solid var(--edge);
+  }
+  .card:hover { border-color: var(--frame); }
+  /* Crop marks: corner registration ticks. Painted inside the border so the
+     0px inter-card gutters cannot clip them (see skill: paint order). */
+  .card::after {
+      content: ""; position: absolute; inset: 4px; pointer-events: none;
+      background:
+          linear-gradient(var(--frame), var(--frame)) 0 0 / 8px 1px,
+          linear-gradient(var(--frame), var(--frame)) 0 0 / 1px 8px,
+          linear-gradient(var(--frame), var(--frame)) 100% 0 / 8px 1px,
+          linear-gradient(var(--frame), var(--frame)) 100% 0 / 1px 8px;
+      background-repeat: no-repeat;
+      opacity: .7;
+  }
+  .card h2 { color: var(--ink); letter-spacing: .1em; }
+
+  /* ---- the plate rolling: registration bar sweeps the header. Gated. ---- */
+  :root:not([data-motion="off"]) header.top {
+      animation: halftone-roll 9s linear infinite;
+  }
+  @keyframes halftone-roll {
+      0%   { border-bottom-color: var(--hdr-edge); }
+      6%   { border-bottom-color: var(--accent); }
+      12%  { border-bottom-color: var(--hdr-edge); }
+      100% { border-bottom-color: var(--hdr-edge); }
+  }
+  /* Ink drum turn on the logo: 5 s against the 9 s roll — coprime. */
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: halftone-spin 5s linear infinite;
+  }
+  @keyframes halftone-spin { to { transform: rotate(360deg); } }
+
+  /* ---- meters: solid plate ink, screen density for the remainder ---- */
+  .meter { background: #e2ddd3; border: 1px solid var(--edge); }
+  .meter > div { background: var(--ink); }
+  .meter.bad > div { background: var(--bad); }
+
+  .icon-btn:hover, select:hover { background: var(--ink); color: var(--card); }
+  ::selection { background: var(--accent); color: #fff; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #e7e2d8; }
+  ::-webkit-scrollbar-thumb { background: #bdb6a7; border: 2px solid #e7e2d8; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--ink); }
+
+  /* Press slug under the wordmark. 21 chars at 9px — inside the ~50ch cap.
+     Middle dots are literal UTF-8: a CSS escape like \00B7 eats the space
+     that terminates it, so "\00B7 CMYK" would render as "·CMYK". */
+  .logo .logo-below::after {
+      content: "150 LPI · CMYK · LAT1";
+      color: var(--accent); font: 700 9px/1 var(--mono); letter-spacing: .18em;
+  }
+  .logo::after {
+      content: ": RUN 01";
+      color: var(--dim); font: 500 9px/1 var(--mono); letter-spacing: .1em;
+      margin-left: 6px;
+  }
+  .rqchip { border-color: var(--frame); }

@@ -1,0 +1,150 @@
+# Uplift skin crate — "ARTELIGHT" (warm lamp-glass, light showcase).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+#
+# Direction 1 (SPARK-4): a LIGHT crate with shine. The shelf carried exactly
+# one light theme (aperture); light grounds also hide skinning bugs that a
+# dark ground shows instantly, so this one is built to be legibility-tested:
+# every state colour is checked against paper, not against black.
+#
+# Texture: no image file at all. Lamp glow is one radial-gradient, the woven
+# paper is two cross-hatched repeating-linear-gradients (0deg + 90deg) at
+# ~3-4px pitch. Pure-CSS textures cost zero bytes and cannot 404.
+skin_version: 1
+label: "Artelight"
+classic:
+  theme: light
+  enhanced: false
+tokens:
+  bg: "#f6efe2"          # lamp-lit paper
+  card: "#fffaf0"        # glass shade, a half-tone lighter than the ground
+  row2: "#f1e7d5"        # zebra row, warm not grey (grey reads dirty on amber)
+  field: "#fffdf8"       # recessed input — lighter, because light UIs sink with shadow not shade
+  panel: "#efe4cf"
+  edge: "#d9c7a4"        # AA on paper: this is the line that keeps cards apart
+  ink: "#2e2722"         # warm near-black, never pure black on cream
+  dim: "#6e624f"         # muted umber — AA on every ground (min 4.7:1, panel is the binding one)
+  accent: "#c57721"      # sodium lamp amber
+  chart-1: "#c57721"     # series 1 = the lamp itself
+  chart-2: "#3e7d4f"     # series 2 = the one cool voice in the palette
+  grid: "#e6dac2"        # gridlines must recede on paper or the chart becomes a graph of lines
+  heat: "#b78130"
+  frame: "#c9b48c"
+  red: "#b23a2e"         # the institution strip is brick on this ground
+  bad: "#b23a2e"
+  warn: "#bb8011"        # warn sits one step from accent on purpose; shape + icon carry the state
+  good: "#3e7d4f"
+  hdr-ink: "#2e2722"
+  hdr-edge: "#e0d0b0"
+  hdr-hover: "#efe2ca"
+  hdr-weight: "500"
+  mono: "ui-monospace, \"SFMono-Regular\", Menlo, monospace"
+  sans: "\"Avenir Next\", \"Segoe UI\", system-ui, sans-serif"
+icons:
+  # 12px box: the logo dot is a lamp seen from below — one closed shade plus
+  # the pool of light it throws. Three features, nothing else survives 10px.
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+      <path d="M2 6.5a4 4 0 018 0z" fill="#d98324"/>
+      <circle cx="6" cy="7.6" r="1.7" fill="#e8a33d"/>
+      <path d="M6 1v2.2" stroke="#8a7a63" stroke-width="1.1"/>
+    </svg>
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+      <path d="M1 1.5l4 4.6 4-4.6" fill="none" stroke="#8a7a63" stroke-width="1.7" stroke-linecap="round"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+      <path d="M3 3l8 8M11 3l-8 8" stroke="#b23a2e" stroke-width="2.4" stroke-linecap="round"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M2 2h12M2 5h12M2 8h12" stroke="#c9b48c" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+css: |-
+  html { color-scheme: light; }
+
+  /* ---- page ground: a lamp above, woven paper below ---- */
+  /* Layer order matters: the first background paints ON TOP. The hatch has to
+     sit over the glow or the glow flattens it into one cream wash. */
+  body {
+      background:
+          repeating-linear-gradient(90deg,
+              rgba(140, 112, 68, .045) 0 1px, transparent 1px 4px),
+          repeating-linear-gradient(0deg,
+              rgba(140, 112, 68, .035) 0 1px, transparent 1px 5px),
+          radial-gradient(115% 70% at 50% -8%,
+              #fffdf6 0%, var(--bg) 46%, #ede1cc 100%);
+      background-attachment: fixed, fixed, fixed;
+  }
+  /* the base 4px strip is body::before; make it the warm brick, not red */
+  body::before { background: var(--red); }
+  /* The sticky header is OPAQUE, so on a graded ground it would punch a flat
+     rectangle into the page. Re-declaring the SAME layers with
+     background-attachment: fixed pins them to the viewport, so the header
+     samples exactly the strip of ground behind it and the band disappears.
+     (The texture must be repeated here; it is not inherited.) */
+  header.top {
+      background:
+          repeating-linear-gradient(90deg,
+              rgba(140, 112, 68, .045) 0 1px, transparent 1px 4px),
+          repeating-linear-gradient(0deg,
+              rgba(140, 112, 68, .035) 0 1px, transparent 1px 5px),
+          radial-gradient(115% 70% at 50% -8%,
+              #fffdf6 0%, var(--bg) 46%, #ede1cc 100%);
+      background-attachment: fixed, fixed, fixed;
+  }
+
+  /* ---- cards: glass shade with a highlight along the top edge ---- */
+  .card {
+      background:
+          linear-gradient(180deg, rgba(255,255,255,.9) 0 22px,
+              rgba(255,255,255,0) 60px),
+          var(--card);
+      border-color: var(--edge);
+      box-shadow: 0 1px 0 rgba(255,255,255,.7) inset,
+                  0 2px 6px rgba(120, 92, 46, .07);
+  }
+  .card:hover { border-color: var(--accent); }
+  /* warm hairline under the title instead of a hard rule */
+  .card h2 { color: var(--dim); letter-spacing: .06em; }
+
+  /* ---- the lamp that is switched on: header rule glow, motion-gated ---- */
+  :root:not([data-motion="off"]) header.top {
+      animation: artelight-breathe 7.5s ease-in-out infinite;
+  }
+  @keyframes artelight-breathe {
+      0%, 100% { border-bottom-color: var(--hdr-edge); }
+      50%      { border-bottom-color: var(--accent); }
+  }
+  header.top { border-bottom: 1px solid var(--hdr-edge); }
+
+  /* ---- meters: filament bars, lit from the left ---- */
+  .meter > div {
+      background: linear-gradient(90deg, #b8651a, var(--accent) 60%, var(--heat));
+  }
+  .meter.bad > div {
+      background: linear-gradient(90deg, #8e2a20, var(--bad) 60%, #c8564a);
+  }
+  .meter { background: #ece0c9; border-color: var(--edge); }
+
+  /* ---- controls: pressed-in paper, ink on the press ---- */
+  .icon-btn:hover, select:hover { background: var(--ink); color: var(--card); }
+  ::selection { background: var(--accent); color: #fffaf0; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #ede1cc; }
+  ::-webkit-scrollbar-thumb { background: #cbb48c; border: 2px solid #ede1cc; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+  /* wordmark: the long string goes BELOW the logo (absolute slot, cannot
+     reflow the menu); 9px mono over 27 chars — inside the ~50ch ceiling. */
+  .logo .logo-below::after {
+      content: "LAMP CHECK · 2400 K";
+      color: var(--accent); font: 500 9px/1 var(--mono); letter-spacing: .16em;
+  }
+  .logo::after {
+      content: ": WARM";
+      color: var(--dim); font: 500 9px/1 var(--mono); letter-spacing: .1em;
+      margin-left: 6px;
+  }
+  .logo .dot { box-shadow: 0 0 6px rgba(217, 131, 36, .55); }
+  .rqchip { box-shadow: 0 0 0 1px rgba(217, 131, 36, .35); }

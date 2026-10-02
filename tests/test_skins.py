@@ -396,6 +396,36 @@ def test_bundled_crates_only_reference_resources_they_ship():
     assert not bad, bad
 
 
+def test_bundled_fonts_ship_their_licence():
+    """OFL redistribution requires the licence to travel WITH the font, and a
+    crate is the unit that travels: sync_bundled unpacks one crate to one
+    working copy, and a user dir holds just that dir. So every binary font a
+    crate ships must be accompanied, in the SAME crate, by a licence text
+    resource. shodan shipped two JetBrains Mono woff2 blobs with no licence
+    anywhere in the repo (SPARK-4 finding 2026-10-01) — invisible to every
+    other check, because a missing licence breaks nothing at runtime."""
+    FONT_EXT = (".woff2", ".woff", ".ttf", ".otf")
+    LICENCE_HINTS = ("ofl", "licen", "copyright", "mit", "apache")
+    bad = {}
+    for p in sorted(skins.bundled_package_dir().glob("*.yml")):
+        crate, reason = skins.parse_crate(p.read_bytes())
+        assert crate is not None, f"{p.name}: {reason}"
+        fonts = [n for n in crate["fonts"] if n.lower().endswith(FONT_EXT)]
+        if not fonts:
+            continue
+        texts = [n for n in crate["fonts"]
+                 if n.lower().endswith(".txt")
+                 and any(h in n.lower() for h in LICENCE_HINTS)]
+        if not texts:
+            bad[p.name] = f"ships {fonts} with no licence .txt in fonts:"
+            continue
+        # and it must be a real licence, not an empty placeholder
+        blob, err = skins._decode_resource(crate["fonts"][texts[0]], 0)
+        if blob is None or len(blob) < 200:
+            bad[p.name] = f"{texts[0]} is not a licence text ({err or len(blob or b'')}B)"
+    assert not bad, bad
+
+
 # ------------------------------------------------------------ classic map
 
 def test_classic_mapping_declared_wins():

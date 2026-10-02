@@ -1,0 +1,174 @@
+# Uplift skin crate — "KUBUS" (Czech Cubism, light showcase).
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+#
+# Direction 1 (SPARK-4), Prague angle: the dashboard's planar blocks are
+# already a cubist composition, so this crate facets the GROUND instead of
+# pretending to draw buildings. Art-movement palette — no owner, no franchise
+# attribution that could be gotten wrong.
+#
+# Texture: a seamless faceted SVG tile (icons/facet.svg) plus one engraved
+# hairline hatch. The tile is seamless BY CONSTRUCTION: the four planes meet at
+# the tile centre and every vertex is a tile corner, so neighbours align at any
+# zoom. The planes are filled with white/black at LOW ALPHA rather than fixed
+# greys, so the facets read as light play over whatever --bg the crate declares.
+skin_version: 1
+label: "Kubus"
+classic:
+  theme: light
+  enhanced: false
+tokens:
+  bg: "#f2f3f0"          # cool paper — deliberately NOT cream; cubism is cold
+  card: "#fbfbf9"
+  row2: "#eaedea"
+  field: "#f0f2ef"
+  panel: "#e4e7e3"
+  edge: "#c3c8c2"        # the fold line between two planes
+  ink: "#1e211f"
+  dim: "#606662"         # slate — AA on every ground (min 4.7:1)
+  accent: "#3f5d52"      # verdigris: the only saturated hue in the movement
+  chart-1: "#3f5d52"
+  chart-2: "#808c95"     # steel — stays distinguishable from chart-1 on paper
+  grid: "#dfe2de"
+  heat: "#a8791c"
+  frame: "#aab0aa"
+  red: "#9d2f2a"
+  bad: "#9d2f2a"
+  warn: "#a8791c"
+  good: "#2f6f4f"
+  hdr-ink: "#1e211f"
+  hdr-edge: "#d5d8d3"
+  hdr-hover: "#e6e9e5"
+  hdr-weight: "600"
+  mono: "ui-monospace, \"SFMono-Regular\", Menlo, monospace"
+  sans: "\"Helvetica Neue\", \"Segoe UI\", system-ui, sans-serif"
+icons:
+  # Seamless facet tile: 48 units, 4 planes, one shared vertex at the centre.
+  # NO fold lines are drawn. An earlier version stroked the two full diagonals,
+  # and on a repeating tile those strokes align edge-to-edge into continuous
+  # 45-degree lines — at board density that reads as hazard tape / a barcode
+  # and fights the charts it sits behind (seen on the live board, 2026-10-02).
+  # The facet idea survives on the LUMINANCE step between planes alone; the
+  # planes stay low-alpha so it reads as light on paper, not as a pattern.
+  facet.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+      <polygon points="0,0 48,0 24,24" style="fill:#fff;fill-opacity:.45"/>
+      <polygon points="48,0 48,48 24,24" style="fill:#000;fill-opacity:.028"/>
+      <polygon points="48,48 0,48 24,24" style="fill:#000;fill-opacity:.055"/>
+      <polygon points="0,48 0,0 24,24" style="fill:#fff;fill-opacity:.18"/>
+    </svg>
+  # 10px logo-dot: a prism seen end-on — one triangle and its internal split.
+  # Anything finer than these two strokes is mush at the measured 10px box.
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+      <path d="M6 1.2L11 10.4H1z" fill="none" stroke="#3f5d52" stroke-width="1.3"/>
+      <path d="M6 1.2V10.4" stroke="#8d9aa4" stroke-width="0.9"/>
+    </svg>
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+      <path d="M1 2l4 4 4-4" fill="none" stroke="#6d746f" stroke-width="1.6"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+      <path d="M3 3l8 8M11 3l-8 8" stroke="#9d2f2a" stroke-width="2.2"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M1 1l14 8M8 1l7 4M1 5l7 4" stroke="#aab0aa" stroke-width="1.1"/>
+    </svg>
+css: |-
+  html { color-scheme: light; }
+
+  /* ---- page ground: faceted paper ---- */
+  /* Colour in background-color, texture in background-image: the multi-layer
+     `background` shorthand only tolerates a colour on the LAST layer, and a
+     var() there is easy to get subtly wrong. Splitting them is unambiguous. */
+  body {
+      background-color: var(--bg);
+      background-image:
+          url('res/icons/facet.svg'),
+          repeating-linear-gradient(135deg,
+              rgba(120, 130, 124, .05) 0 1px, transparent 1px 9px);
+      background-size: 48px 48px, auto;
+      background-repeat: repeat, repeat;
+      /* Pinned to the viewport so scrolling does not crawl the facets under
+         the reading position — the ground should feel like the page's material,
+         not like a decal sliding over it. */
+      background-attachment: fixed, fixed;
+  }
+  body::before { background: var(--ink); }
+  /* The sticky header is OPAQUE: unless it repeats the SAME pinned ground it
+     cuts a flat band straight across the facets. (See artelight.yml.) */
+  header.top {
+      background-color: var(--bg);
+      background-image:
+          url('res/icons/facet.svg'),
+          repeating-linear-gradient(135deg,
+              rgba(120, 130, 124, .05) 0 1px, transparent 1px 9px);
+      background-size: 48px 48px, auto;
+      background-repeat: repeat, repeat;
+      background-attachment: fixed, fixed;
+  }
+
+  /* ---- cards: folded planes. Hard offset shadow, no blur. ---- */
+  .card {
+      background: var(--card);
+      border: 1px solid var(--edge);
+      box-shadow: 2px 2px 0 rgba(110, 120, 112, .13);
+  }
+  .card:hover {
+      border-color: var(--accent);
+      box-shadow: 3px 3px 0 rgba(63, 93, 82, .2);
+  }
+  .card h2 {
+      color: var(--dim); letter-spacing: .14em; text-transform: uppercase;
+      border-bottom: 1px solid var(--edge);
+  }
+
+  /* ---- motion: a rare fold, and the prism turning. Both gated. ---- */
+  :root:not([data-motion="off"]) .card {
+      animation: kubus-fold 11s ease-in-out infinite;
+  }
+  @keyframes kubus-fold {
+      0%, 88%, 100% { box-shadow: 2px 2px 0 rgba(110, 120, 112, .13); }
+      94%           { box-shadow: -2px 2px 0 rgba(63, 93, 82, .2); }
+  }
+  /* 7 s against the 11 s fold: coprime, so the two cycles never march. */
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: kubus-spin 7s linear infinite;
+  }
+  @keyframes kubus-spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+  }
+
+  /* ---- meters: stepped ink fill, facet-edged rather than graded ---- */
+  .meter > div {
+      background: repeating-linear-gradient(90deg,
+          var(--accent) 0 6px, #4e7164 6px 8px);
+  }
+  .meter.bad > div {
+      background: repeating-linear-gradient(90deg,
+          var(--bad) 0 6px, #b5433c 6px 8px);
+  }
+
+  .icon-btn:hover, select:hover { background: var(--ink); color: var(--card); }
+  ::selection { background: var(--accent); color: #fbfbf9; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #e8ebe7; }
+  ::-webkit-scrollbar-thumb { background: #b9bfba; border: 2px solid #e8ebe7; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+  /* Long string goes in the BELOW slot (absolute, cannot reflow the menu).
+     24 chars at 9px mono — well inside the ~50ch practical ceiling.
+     Czech, and honest: PLOCHA = plane, LOM = refraction, HRANA = edge. */
+  .logo .logo-below::after {
+      content: "// PLOCHA · LOM · HRANA";
+      color: var(--accent); font: 600 9px/1 var(--mono); letter-spacing: .14em;
+  }
+  .logo::after {
+      content: ": 1911";
+      color: var(--dim); font: 600 9px/1 var(--mono); letter-spacing: .12em;
+      margin-left: 6px;
+  }
+  .rqchip { border-style: solid; border-color: var(--edge); }
+  .chip { border-style: solid; }
