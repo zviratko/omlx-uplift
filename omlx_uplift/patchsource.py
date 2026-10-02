@@ -634,6 +634,45 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             "load_error": manifest.get("load_error")}
 
 
+# --------------------------------------------------------------------------
+# BE-3 step 3: ONE safeguard-approval machine for enable and promote.
+# Both entry points used to carry their own copy of {held? -> require
+# approve once|always -> record safeguard_always/once}; the copies had
+# DRIFTED: set_enabled re-checked coverage after recording ('codes raced'),
+# promote did not, so a 'once' approval recorded from promote could silently
+# leave codes uncovered (the exact 'once' is sha-bound security property
+# STATE-GATE-1 made loud). Single-sourced: same validation, same recording,
+# same post-check, same approved list.
+# Returns (ok, approved_now, error_dict|None).
+# --------------------------------------------------------------------------
+
+def _apply_approval(patch: dict, version: dict, approve: str | None):
+    codes = (version.get("safeguards") or {}).get("codes", [])
+    held = _safeguards.held(codes, patch.get("safeguard_always"),
+                            patch.get("safeguard_once"),
+                            version.get("content_sha256"))
+    if not held:
+        return True, [], None
+    if approve not in ("once", "always"):
+        return False, [], {"ok": False,
+                           "reason": "safeguards need approval: " + ", ".join(held),
+                           "requires_approval": held}
+    if approve == "always":
+        patch["safeguard_always"] = sorted(set(patch.get("safeguard_always") or [])
+                                           | set(held))
+    else:
+        patch["safeguard_once"] = {"sha": version.get("content_sha256"),
+                                   "codes": sorted(held)}
+    still = _safeguards.held(codes, patch.get("safeguard_always"),
+                             patch.get("safeguard_once"),
+                             version.get("content_sha256"))
+    if still:  # approval did not cover everything (codes raced)
+        return False, [], {"ok": False,
+                           "reason": "still needs approval: " + ", ".join(still),
+                           "requires_approval": still}
+    return True, sorted(held), None
+
+
 def set_enabled(store, patch_id: str, enabled: bool,
                 approve: str | None = None) -> dict:
     """Enable/disable a patch. 'approve' ("once"|"always") explicitly
@@ -651,30 +690,11 @@ def set_enabled(store, patch_id: str, enabled: bool,
     target_v = p.get("desired_version") or max(
         (v.get("v", 0) for v in p["versions"]), default=0)
     desired = store.get_version(p, target_v) or {}
-    codes = (desired.get("safeguards") or {}).get("codes", [])
-    held = _safeguards.held(codes, p.get("safeguard_always"),
-                            p.get("safeguard_once"),
-                            desired.get("content_sha256"))
     approved_now: list[str] = []
-    if enabled and held:
-        if approve not in ("once", "always"):
-            return {"ok": False,
-                    "reason": "safeguards need approval: " + ", ".join(held),
-                    "requires_approval": held}
-        if approve == "always":
-            p["safeguard_always"] = sorted(set(p.get("safeguard_always") or [])
-                                           | set(held))
-        else:
-            p["safeguard_once"] = {"sha": desired.get("content_sha256"),
-                                   "codes": sorted(held)}
-        still = _safeguards.held(codes, p.get("safeguard_always"),
-                                 p.get("safeguard_once"),
-                                 desired.get("content_sha256"))
-        if still:  # approval did not cover everything (codes raced)
-            return {"ok": False,
-                    "reason": "still needs approval: " + ", ".join(still),
-                    "requires_approval": still}
-        approved_now = sorted(held)
+    if enabled:
+        ok, approved_now, err = _apply_approval(p, desired, approve)
+        if not ok:
+            return err
     p["enabled"] = bool(enabled)
     if enabled:
         if not p.get("desired_version"):
@@ -699,20 +719,11 @@ def promote(store, patch_id: str, approve: str | None = None) -> dict:
     if not newest or newest == p.get("desired_version"):
         return {"ok": False, "reason": "no candidate to promote"}
     cand = store.get_version(p, newest) or {}
-    codes = (cand.get("safeguards") or {}).get("codes", [])
-    held = _safeguards.held(codes, p.get("safeguard_always"),
-                            p.get("safeguard_once"), cand.get("content_sha256"))
-    if held:
-        if approve not in ("once", "always"):
-            return {"ok": False,
-                    "reason": "safeguards need approval: " + ", ".join(held),
-                    "requires_approval": held}
-        if approve == "always":
-            p["safeguard_always"] = sorted(set(p.get("safeguard_always") or [])
-                                           | set(held))
-        else:
-            p["safeguard_once"] = {"sha": cand.get("content_sha256"),
-                                   "codes": sorted(held)}
+    # BE-3 step 3: promote now ALSO re-checks coverage after recording
+    # (the drifted copy skipped it; the once-sha binding is the point).
+    ok, _approved, err = _apply_approval(p, cand, approve)
+    if not ok:
+        return err
     p["desired_version"] = newest
     store.set_state(p, "pending", f"promoted to v{newest} — applies on next restart")
     p["enabled"] = True
