@@ -1901,3 +1901,26 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-boot-log { margin: 6px 0 0; padding: 6px 8px; border: 1px solid var(--line); max-height: 200px; overflow: auto; font-family: var(--mono, monospace); font-size: var(--fs-meta); line-height: 1.3; white-space: pre-wrap; }
 .pt-diff-del { color: var(--crit, #c0392b); }
 .pt-diff-hunk { color: var(--accent, #e0662e); }
+
+/* ---- CSS-2 step 2: inline-style utilities -------------------------------
+   Byte-equivalent replacements for the style="" attributes removed from
+   index.html. Selector heads reuse the element's own class chain so the
+   specificity path to the overridden base rule (.stat-value font, .se-hint
+   font-size) matches how sibling JS-set rules address the same elements. */
+.stat-value.sz-22, .stat-value.t2.sz-22 { font-size: 22px; }
+.stat-value.sz-26, .stat-value.t2.sz-26 { font-size: 26px; }
+.stat-sub.sub-mt6 { margin-top: 6px; }
+.stat-sub.sub-mt8 { margin-top: 8px; }
+.stat-sub.sub-mt10 { margin-top: 10px; }
+.se-hint.hint-mb8 { margin-bottom: 8px; }
+.h3-spaced { margin: 16px 0 6px; }
+.icon-btn.link-none { text-decoration: none; }
+.req-search.rs-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 6px; }
+.req-search .rs-q { flex: 1 1 140px; min-width: 120px; background: var(--panel); border: 1px solid var(--edge); color: var(--ink); padding: 3px 6px; font: inherit; font-size: 11px; }
+.req-search .rs-model { background: var(--panel); border: 1px solid var(--edge); color: var(--ink); padding: 3px; font: inherit; font-size: 11px; }
+.req-search .rs-timechips { display: inline-flex; }
+#dl-token.tok-w240 { max-width: 240px; }
+.chart-box.h200 { height: 200px; }
+.flex-1 { flex: 1; }
+/* req-live-btn keeps its inline display toggle: uplift_reqsearch.js sets
+   .style.display directly, so an initial inline style is its source. */
