@@ -1,4 +1,10 @@
-"""Patch sources + validation gate (PAT-2).
+"""Patch sources + validation gate (PAT-2) — orchestration layer.
+
+BE-3 split: the fetch layer lives in patchfetch.py, the gate in
+patchgate.py; both are re-exported here (seam compatibility). What stays:
+fetch_and_gate (the fetch|gate composition), manifest CRUD (add_patch,
+set_enabled, promote, rollback, remove), the upstreamed/base-gate probes
+and the materializer feed.
 
 Fetch patch bodies from GitHub PRs, plain URLs, or UI uploads; run the
 validation gate BEFORE anything becomes 'pending':
@@ -20,13 +26,10 @@ Stdlib only (urllib) — usable from the router AND the .pth startup path.
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import logging
 import os
 import re
-import urllib.error
-import urllib.request
 
 from . import diffapply
 from . import safeguards as _safeguards
@@ -36,267 +39,23 @@ from . import safeguards as _safeguards
 # the omlx log level (TRACE=5 down to CRITICAL) with no extra wiring.
 _log = logging.getLogger("omlx_uplift.patchsource")
 
-SIZE_CAP = 2 * 1024 * 1024  # 2 MB per design
-
-_PR_URL_RE = re.compile(
-    r"^https?://(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)/?$")
-
-
 # --------------------------------------------------------------------------
-# Advisory warnings (never block, PAT-0 user policy)
+# BE-3 step 1: fetch + gate logic moved verbatim to patchfetch.py /
+# patchgate.py. Re-exported here so every existing seam keeps working:
+# tests monkeypatch patchsource.fetch_pr/fetch_url/validate and the
+# internal call sites below resolve the SAME module-global names, so a
+# patch on patchsource still intercepts them (pure move, zero behavior
+# change — the acceptance criterion for this step).
 # --------------------------------------------------------------------------
+from .patchfetch import (          # noqa: F401  (re-export seam)
+    SIZE_CAP, _PR_URL_RE, _opener, _head_sha_from_patch,
+    url_advisories, parse_pr_ref, fetch_bytes, fetch_pr, fetch_url,
+    accept_upload,
+)
+from .patchgate import (           # noqa: F401  (re-export seam)
+    _py_compiles, compile_gate, validate, gate_all_already,
+)
 
-def url_advisories(url: str) -> list[str]:
-    """Non-blocking warnings shown inline on the add/preview form."""
-    out = []
-    if url.startswith("http://"):
-        out.append("Scheme is http:// — patch content travels in plaintext.")
-    if re.match(r"^[a-zA-Z][\w+.-]*://[^/@]*:[^/@]*@", url):
-        out.append("URL carries embedded credentials; the full URL including "
-                   "the password is stored in plaintext in patches.json and "
-                   "shown on the PATCHES card. Consider a URL that "
-                   "authenticates out-of-band.")
-    return out
-
-
-def parse_pr_ref(url_or_repo: str, pr: int | None = None) -> tuple[str, int] | None:
-    """Accept a PR web URL or repo + number; return (repo, pr) or None."""
-    if pr is not None:
-        if re.fullmatch(r"[\w.-]+/[\w.-]+", url_or_repo or ""):
-            return url_or_repo, int(pr)
-        return None
-    m = _PR_URL_RE.match((url_or_repo or "").strip())
-    if not m:
-        return None
-    return f"{m.group(1)}/{m.group(2)}", int(m.group(3))
-
-
-# --------------------------------------------------------------------------
-# Fetching
-# --------------------------------------------------------------------------
-
-def _opener(insecure_tls: bool):
-    if not insecure_tls:
-        return urllib.request.build_opener()
-    # Deliberate, per-user opt-in (PAT-0 design: "ignore SSL/TLS errors"
-    # checkbox, stored as source.insecure_tls). Verification is disabled for
-    # THIS fetch only; the user accepts MITM risk for their own patch source.
-    import ssl
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
-
-
-def fetch_bytes(url: str, insecure_tls: bool = False) -> dict:
-    """GET url. NO explicit socket timeout (HTTP client / OS defaults are
-    generous by nature — PAT-0). Returns {ok, data?, status?, reason?}."""
-    if not url.startswith(("http://", "https://")):
-        return {"ok": False, "reason": "only http(s) schemes are supported"}
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "omlx-uplift/patch-carrier",
-                      "Accept": "*/*"})
-    try:
-        opener = _opener(insecure_tls)
-        with opener.open(req) as resp:  # noqa: S310 (scheme checked above)
-            status = getattr(resp, "status", resp.getcode())
-            data = resp.read(SIZE_CAP + 1)
-    except urllib.error.HTTPError as exc:
-        return {"ok": False, "status": exc.code,
-                "reason": f"HTTP {exc.code} from {url}"}
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        return {"ok": False, "reason": f"fetch failed: {exc}"}
-    if not (200 <= status < 300):
-        return {"ok": False, "status": status, "reason": f"HTTP {status} from {url}"}
-    if len(data) > SIZE_CAP:
-        return {"ok": False, "reason": f"patch larger than {SIZE_CAP} bytes"}
-    if not data.strip():
-        return {"ok": False, "reason": "empty response body"}
-    return {"ok": True, "data": data, "status": status}
-
-
-def fetch_pr(repo: str, pr: int, insecure_tls: bool = False) -> dict:
-    """Public PR diff via github.com/.../pull/N.diff — no auth needed.
-    Also tries to extract the PR head SHA from the .patch preamble
-    (From <sha> line); api.github.com is tried only as a fallback and any
-    failure there degrades to content-hash identity, never fails the fetch."""
-    r = fetch_bytes(f"https://github.com/{repo}/pull/{pr}.diff", insecure_tls)
-    if not r["ok"]:
-        return r
-    data = r["data"]
-    head = _head_sha_from_patch(repo, pr, insecure_tls)
-    return {"ok": True, "data": data, "source_head_sha": head,
-            "url": f"https://github.com/{repo}/pull/{pr}.diff"}
-
-
-def _head_sha_from_patch(repo: str, pr: int, insecure_tls: bool) -> str | None:
-    """Cheap path: the .patch (mbox) first line is 'From <sha> ...'.
-    Fallback: api.github.com. Degrades to None (content hash identity)."""
-    r = fetch_bytes(f"https://github.com/{repo}/pull/{pr}.patch", insecure_tls)
-    if r["ok"]:
-        first = r["data"][:80].split(b"\n", 1)[0]
-        m = re.match(rb"From ([0-9a-f]{40}) ", first)
-        if m:
-            return m.group(1).decode()
-    try:
-        api = fetch_bytes(f"https://api.github.com/repos/{repo}/pulls/{pr}",
-                          insecure_tls)
-        if api["ok"]:
-            sha = json.loads(api["data"]).get("head", {}).get("sha")
-            if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha):
-                return sha
-    except (ValueError, KeyError):
-        pass
-    return None
-
-
-def fetch_url(url: str, insecure_tls: bool = False) -> dict:
-    r = fetch_bytes(url, insecure_tls)
-    if not r["ok"]:
-        return r
-    return {"ok": True, "data": r["data"], "source_head_sha": None, "url": url}
-
-
-def accept_upload(data: bytes) -> dict:
-    """Multipart upload path: validate size only; parsing is the gate's job."""
-    if len(data) > SIZE_CAP:
-        return {"ok": False, "reason": f"patch larger than {SIZE_CAP} bytes"}
-    if not data.strip():
-        return {"ok": False, "reason": "empty upload"}
-    return {"ok": True, "data": data, "source_head_sha": None, "url": None}
-
-
-# --------------------------------------------------------------------------
-# Validation gate
-# --------------------------------------------------------------------------
-
-def _py_compiles(data: bytes) -> bool:
-    """True when data is syntactically valid Python (in-memory, no writes)."""
-    try:
-        compile(data, "uplift-check.py", "exec")
-        return True
-    except (SyntaxError, ValueError):
-        return False
-
-
-def compile_gate(parsed: dict, tree_root: str,
-                 overrides: dict | None = None,
-                 reverse: bool = False) -> list[str]:
-    """py_compile/json checks on in-memory post-apply content. Returns a
-    list of human-readable problems (empty = gate passed).
-
-    reverse: True checks the REVERSAL result (the pre-image) — a reversal
-    patch must leave compilable code too."""
-    import py_compile
-    import tempfile
-
-    problems: list[str] = []
-    for fp in parsed["files"]:
-        target, why = diffapply.safe_join(tree_root, fp["path"])
-        if target is None:
-            problems.append(f"{fp['path']}: {why}")
-            continue
-        if overrides and fp["path"] in overrides:
-            content = overrides[fp["path"]]
-        else:
-            try:
-                with open(target, "rb") as fh:
-                    content = fh.read()
-            except FileNotFoundError:
-                content = None
-        if reverse:
-            res = diffapply._apply_file_rev(content, fp)  # in-memory only
-        else:
-            res = diffapply._apply_file(content, fp)  # in-memory only
-        if res.get("already"):
-            continue
-        if not res.get("ok"):
-            problems.append(f"{fp['path']}: {res.get('reason')}")
-            continue
-        new_bytes = res.get("new_bytes", b"")
-        ext = os.path.splitext(fp["path"])[1].lower()
-        if ext == ".py":
-            base_ok = _py_compiles(content) if content is not None else True
-            post_ok = _py_compiles(new_bytes)
-            if base_ok and not post_ok:
-                problems.append(f"{fp['path']}: patch breaks compilation "
-                                "(file compiled before the patch)")
-            elif not post_ok:
-                # pre-image already un-compilable: not the patch's doing —
-                # report honestly, do not block (upstream ships it that way)
-                pass
-        elif ext == ".json":
-            try:
-                json.loads(new_bytes.decode("utf-8"))
-            except (ValueError, UnicodeDecodeError) as exc:
-                problems.append(f"{fp['path']}: invalid JSON — {exc}")
-        # HTML/templates: text apply only, no compile gate (honest by design)
-    return problems
-
-
-def validate(diff: bytes, tree_root: str,
-             overrides: dict | None = None,
-             reverse: bool = False,
-             skip_patterns: list[str] | None = None) -> dict:
-    """Full gate WITHOUT writing anything.
-
-    The diff is first root-normalized (safeguards.normalize_root): a diff
-    made one directory too deep is rewritten to tree-root-canonical paths
-    ONCE here, so everything downstream (sha, stored file, apply) works on
-    the canonical bytes.
-
-    skip_patterns: whole file sections matching these patterns are PRUNED
-    from the diff before the sha is taken (see diffapply.prune_sections) —
-    stored bytes, gate, apply and reversal all see the same pruned diff.
-    Pruned paths come back in 'skipped' and as SKIPPED rows in 'files'.
-
-    overrides: {rel_path: bytes} — tree content to use instead of the live
-    file for those paths (gate the candidate against the tree as reconcile
-    will find it at apply time: this patch's own hunks unwound to pristine,
-    other patches' hunks still applied).
-
-    reverse: True gates the diff as a REVERSAL — it must UN-apply cleanly
-    against the live tree (the merged change is present and revertible).
-
-    Returns {ok, reason?, advisories?, files: [per-file results],
-             compile_problems: [...], content_sha256, diff, safeguards?,
-             note?}.
-    """
-    skipped: list[str] = []
-    if skip_patterns:
-        diff, skipped = diffapply.prune_sections(diff, skip_patterns)
-        if skipped and not diff.strip():
-            return {"ok": False, "reason": "every file in the diff matches "
-                    "the skip patterns — nothing left to apply",
-                    "files": [], "compile_problems": [], "skipped": skipped,
-                    "content_sha256": hashlib.sha256(diff).hexdigest(),
-                    "diff": diff}
-    diff, note = _safeguards.normalize_root(diff, tree_root)
-    content_sha256 = hashlib.sha256(diff).hexdigest()
-    parsed = diffapply.parse_diff(diff)
-    if not parsed["ok"]:
-        return {"ok": False, "reason": f"parse: {parsed['reason']}",
-                "files": [], "compile_problems": [], "skipped": skipped,
-                "content_sha256": content_sha256, "diff": diff}
-    check = diffapply.check_diff(diff, tree_root, overrides=overrides,
-                                 reverse=reverse)
-    compile_problems = compile_gate(parsed, tree_root, overrides=overrides,
-                                    reverse=reverse)
-    ok = all(f["status"] in ("ok", "already") for f in check["files"]) \
-        and bool(check["files"]) and not compile_problems
-    files = check["files"]
-    out = {"ok": ok,
-           "reason": check.get("reason") if not ok else None,
-           "files": files,
-           "skipped": skipped,
-           "compile_problems": compile_problems,
-           "content_sha256": content_sha256,
-           "diff": diff,
-           "safeguards": _safeguards.assess(parsed, tree_root)}
-    if note:
-        out["note"] = note
-    return out
 
 
 def fetch_and_gate(source: dict, tree_root: str,
@@ -1031,11 +790,9 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
 
 
 def _gate_all_already(result: dict) -> bool:
-    """True when a gate passed and EVERY file section is 'already' — the
-    tree (base or keg) already contains the hunks: upstreamed."""
-    files = result.get("files") or []
-    return bool(files) and result.get("ok") and all(
-        f.get("status") == "already" for f in files)
+    """BE-3: moved to patchgate.gate_all_already; alias kept for the
+    module-internal name."""
+    return gate_all_already(result)
 
 
 def _pr_merged_into_base(src: dict, diff_bytes: bytes | None,
