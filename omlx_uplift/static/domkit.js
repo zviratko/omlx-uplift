@@ -46,9 +46,9 @@ async function postJson(url, body) {
     return d;
 }
 
-function toast(text, ms) {
+function toast(text, ms, cls) {
     const t = document.createElement('div');
-    t.className = 'toast'; t.textContent = text;
+    t.className = 'toast' + (cls ? ' ' + cls : ''); t.textContent = text;
     $('toasts').append(t);
     setTimeout(() => t.remove(), ms || 3200);
 }

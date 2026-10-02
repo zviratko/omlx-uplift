@@ -470,6 +470,21 @@ async function gsSaveNow(fields) {
         });
         if (!r.ok) { GLUE.toast(C.t('uplift.toast.save_failed_http', {status: r.status})); return false; }
         GS._shadow = body;
+        // ACHIEVEMENTS: this save committed; judge what changed against the
+        // PRE-save baseline (GS_ORIG is about to move). flat -> section.field
+        // read so old values come from the same nested map GS_MAP describes.
+        try {
+            const AC = window.Uplift && window.Uplift.achv;
+            if (AC) {
+                const oldFlat = {};
+                for (const k of Object.keys(fields)) {
+                    const map = GS_MAP[k]; if (!map) continue;
+                    const sec = (GS_ORIG || {})[map[0]];
+                    if (sec && map[1] in sec) oldFlat[k] = sec[map[1]];
+                }
+                AC.announce(AC.settingsReaction(oldFlat, fields));
+            }
+        } catch (_) { /* a verdict must never break the save */ }
         for (const k of Object.keys(fields)) {
             const map = GS_MAP[k];
             if (map) GS[map[0]][map[1]] = fields[k];

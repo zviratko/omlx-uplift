@@ -801,6 +801,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 #toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 6px; z-index: 50; }
 .toast { background: var(--ink); color: var(--bg); border: 0; padding: 10px 16px;
     font: 400 12px/1.4 var(--mono); animation: toast-in .25s cubic-bezier(.22,1,.36,1); }
+/* ACHIEVEMENTS scorn: the machine's displeasure in its own colour. Rides
+   --red so every skin keeps it in-theme (SHODAN laser, TRON Game red...). */
+.toast-scorn { background: var(--red); color: var(--bg); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
 /* ---- Banner ---- */

@@ -37,6 +37,12 @@ function renderTasks(hostId, kind) {
         const host = $(hostId);
         host.innerHTML = '';
         const tasks = d.tasks || [];
+        // ACHIEVEMENTS: seed silently on first sight, then judge transitions
+        try {
+            const AC = window.Uplift && window.Uplift.achv;
+            if (AC) AC.announceTasks(kind, tasks);
+        } catch (_) { /* verdicts never block the board */ }
+
         if (!tasks.length) { host.innerHTML = '<div class="empty">No tasks</div>'; return; }
         let active = false;
         for (const t of tasks) {

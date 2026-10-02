@@ -63,26 +63,50 @@ function pushFeed(events, keyFor) {
    experienced as idle traffic. No replacement animation for now; events
    still surface in the feed + toasts. (Badge pulse stays: it is live
    state semantics, not decoration.) */
-function celebrate(text) {
-    // SHODAN only celebrates an audience. While the tab is hidden the
-    // queue holds toasts+confetti back (background polls would waste
-    // them on nobody — a hidden tab is exactly where nobody is); the
-    // first mouse move, key, touch or the tab becoming visible drains
-    // the queue. Listeners detach between bursts, so idle mouse
-    // movement costs nothing.
+/* Achievement voice + visuals. celebrate() is the SINGLE door every
+   verdict passes through (milestones, settings diffs, task transitions —
+   see uplift_achievements.js). Two rules:
+   - Animations off = achievements OFF. The whole gamification layer is
+     conditional on motion (user 2026-10-02): no toasts, no confetti, no
+     queue. The voice and the costume switch together.
+   - SHODAN only celebrates an audience. While the tab is hidden the
+     queue holds toasts+confetti back (background polls would waste
+     them on nobody — a hidden tab is exactly where nobody is); the
+     first mouse move, key, touch or the tab becoming visible drains
+     the queue. Listeners detach between bursts, so idle mouse
+     movement costs nothing.
+   tone: 'praise' (default) | 'awe' (double burst) | 'scorn' (red rain
+   from the top + red toast — the machine returning the day's bytes). */
+function celebrate(text, tone) {
+    if (FEG.motionOff()) return;
     if (document.hidden || !document.hasFocus()) {
-        _celebPending.push(text);
+        _celebPending.push({ text, tone });
         if (_celebPending.length > 5) _celebPending.shift();   // stale praise spoils
         return;
     }
-    _celebrateNow(text);
+    _celebrateNow(text, tone);
 }
 const _celebPending = [];
-function _celebrateNow(text) {
-    FEG.toast(`🎉 ${text}`);
-    if (FEG.motionOff() || typeof confetti !== 'function') return;
+const CONFETTI_PRAISE = ['#c9243b', '#e8a020', '#f2f0ea', '#767268'];
+const CONFETTI_SCORN = ['#ff2d2d', '#c9243b', '#6e1520', '#8a8983'];
+function _celebrateNow(text, tone) {
+    const scorn = tone === 'scorn';
+    FEG.toast(`${scorn ? '⚠' : '🎉'} ${text}`, scorn ? 5200 : 3200,
+              scorn ? 'toast-scorn' : null);
+    if (typeof confetti !== 'function') return;
+    if (scorn) {
+        // rain, not a party: wide, from the ceiling, heavier gravity
+        confetti({ particleCount: 130, spread: 170, origin: { y: 0 },
+                   startVelocity: 8, gravity: 1.5, scalar: 1.1,
+                   colors: CONFETTI_SCORN });
+        return;
+    }
     confetti({ particleCount: 90, spread: 70, origin: { y: 0.7 },
-               colors: ['#c9243b', '#e8a020', '#f2f0ea', '#767268'] });
+               colors: CONFETTI_PRAISE });
+    if (tone === 'awe')   // big events deserve the second, wider volley
+        setTimeout(() => confetti({ particleCount: 110, spread: 120,
+                                    origin: { y: 0.4, x: Math.random() },
+                                    colors: CONFETTI_PRAISE }), 180);
 }
 let _celebDrainTimer = 0;
 function flushCelebrations() {
@@ -90,17 +114,22 @@ function flushCelebrations() {
     clearTimeout(_celebDrainTimer);
     _celebDrainTimer = setInterval(() => {
         if (document.hidden) return;         // user left again: pause mid-burst
-        const text = _celebPending.shift();
-        if (text === undefined) { clearInterval(_celebDrainTimer); _celebDrainTimer = 0; return; }
-        _celebrateNow(text);
+        const item = _celebPending.shift();
+        if (item === undefined) { clearInterval(_celebDrainTimer); _celebDrainTimer = 0; return; }
+        _celebrateNow(item.text, item.tone);
     }, 450);
 }
 for (const ev of ['visibilitychange', 'mousemove', 'pointerdown', 'keydown', 'touchstart'])
     addEventListener(ev, flushCelebrations, { passive: true });
 function reactTo(events) {
+    const AC = window.Uplift.achv;
     for (const ev of events) {
         pushFeed([ev]);
         if (ev.kind === 'model-add')   FEG.toast(C.t('uplift.toast.model_loaded', {model: ev.model}));
+        // poll-diff verdicts (SSE covers the same events for live servers;
+        // announce()'s double-tap suppression keeps that to one praise)
+        if (AC && (ev.kind === 'model-add' || ev.kind === 'model-remove' || ev.kind === 'restart'))
+            AC.announce([AC.feedReaction(ev.kind, ev.model)]);
     }
 }
 /* Milestone gate: fire each round crossing at most once per page session,

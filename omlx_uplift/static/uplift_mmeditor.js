@@ -1937,6 +1937,7 @@ async function saveEditor() {
             ? Object.assign({}, seDeferred, deferAdd) : seDeferred;
         reloadStep = Object.keys(deferred).length > 0;
         msg.textContent = 'saving…';
+        const achvOld = t0 && t0.origVals ? Object.assign({}, t0.origVals) : null;
         try {
             // live keys ride the sparse classic PUT (empty payload = nothing
             // live changed; skip it so we never touch the engine path)
@@ -1955,6 +1956,11 @@ async function saveEditor() {
             seUpdateSaveBtn();
             refreshDivergence();
             if (!reloadStep) setTimeout(closeEditor, 1200);
+            // ACHIEVEMENTS: judge what this save did to the machine
+            try {
+                const AC = window.Uplift && window.Uplift.achv;
+                if (AC && achvOld) AC.announce(AC.modelSavedReaction(achvOld, seValues));
+            } catch (_) { /* a verdict must never break the save */ }
             // restart still pending: editor stays open, RESTART MODEL visible
         } catch (err) {
             msg.textContent = `error: ${err.message}`;
@@ -1963,6 +1969,8 @@ async function saveEditor() {
         return;
     }
     msg.textContent = 'saving…';
+    const achvOldBase = (() => { const z = seTabs.find(q => q.id === 'base');
+        return z && z.origVals ? Object.assign({}, z.origVals) : null; })();
     try {
         const r = await MM_GLUE.putModelSettings(seModel, payload);
         // no engine running: the full PUT stored everything classic-side —
@@ -1974,6 +1982,10 @@ async function saveEditor() {
         seUpdateSaveBtn();
         refreshDivergence();
         setTimeout(closeEditor, 1200);
+        try {
+            const AC = window.Uplift && window.Uplift.achv;
+            if (AC && achvOldBase) AC.announce(AC.modelSavedReaction(achvOldBase, seValues));
+        } catch (_) { /* a verdict must never break the save */ }
     } catch (err) {
         msg.textContent = `error: ${err.message}`;
         MM_GLUE.toast(C.t('uplift.toast.save_failed', {msg: err.message}));
