@@ -55,10 +55,7 @@ function renderTemplatesBox() {
             del.onclick = () => MMF.confirmDialog('Delete template',
                 `Delete the global template "${t.display_name || t.name}"? Models and profiles already created from it keep their own settings.`,
                 async () => {
-                    const r = await fetch(`${API}/admin/api/profile-templates/${encodeURIComponent(t.name)}`,
-                        { method: 'DELETE' });
-                    if (!r.ok) { const d = await r.json().catch(() => ({}));
-                        throw new Error(d.detail || String(r.status)); }
+                    await D.deleteJson(`${API}/admin/api/profile-templates/${encodeURIComponent(t.name)}`);
                 }, `Deleted template: ${t.display_name || t.name}`);
             aDel.append(del);
             const aEdit = document.createElement('span'); aEdit.className = 'act-col right';

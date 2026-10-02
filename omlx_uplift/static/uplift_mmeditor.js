@@ -1225,11 +1225,8 @@ async function saveTemplateEditor(tpl, panel) {
         const settings = {};
         for (const [k, v] of Object.entries(full))
             if (allowed.has(k) && v !== null && v !== undefined) settings[k] = v;
-        const r = await fetch(`${API}/admin/api/profile-templates/${encodeURIComponent(tpl.name)}`,
-            { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ settings }) });
-        if (!r.ok) { const d = await r.json().catch(() => ({}));
-            throw new Error(d.detail || String(r.status)); }
+        await D.putJson(`${API}/admin/api/profile-templates/${encodeURIComponent(tpl.name)}`,
+            { settings });   // putJson throws with the flattened detail on !ok
         msg.textContent = 'saved ✓';
         MM_GLUE.toast('Template saved: ' + (tpl.display_name || tpl.name));
         seOrig = JSON.parse(JSON.stringify(seValues));
@@ -2047,23 +2044,18 @@ async function saveProfileTab(panel) {
     try {
         const path = `${API}/admin/api/models/${encodeURIComponent(seModel)}/profiles` +
             (t.profileId ? '/' + encodeURIComponent(t.profileId) : '');
-        const r = await fetch(path, { method: t.profileId ? 'PUT' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(t.profileId
-                ? { settings: ov, display_name: t.display_name || name,
-                    expose_as_model: !!t.expose_as_model, api_name: t.api_name || null }
-                : body) });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok && /not found/i.test(String(d.detail || ''))) {
+        try {
+            if (t.profileId) {
+                await D.putJson(path, { settings: ov, display_name: t.display_name || name,
+                    expose_as_model: !!t.expose_as_model, api_name: t.api_name || null });
+            } else {
+                await D.postJson(path, body);
+            }
+        } catch (e) {
+            if (e.status !== 404) throw e;
             // missing base model: classic routes 404 (no engine entry);
             // uplift's upsert create-or-updates the stored profile instead
-            const r2 = await fetch(`${API}/uplift/api/models/${encodeURIComponent(seModel)}/profiles`,
-                { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(body) });
-            const d2 = await r2.json().catch(() => ({}));
-            if (!r2.ok) throw new Error(d2.detail || d2.error || String(r2.status));
-        } else if (!r.ok) {
-            throw new Error(d.detail || d.error || String(r.status));
+            await D.postJson(`${API}/uplift/api/models/${encodeURIComponent(seModel)}/profiles`, body);
         }
         MM_GLUE.toast(C.t('uplift.toast.saved_profile', {name: name}));
         t.profileId = name; t.dirty = new Set();
