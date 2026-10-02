@@ -9,41 +9,10 @@
 <link rel="stylesheet" href="./vendor/uPlot.min.css">
 <link rel="stylesheet" href="./vendor/gridstack.min.css">
 <link rel="stylesheet" href="./uplift.css">
-<script>
-/* Pre-paint theme resolve (user: refresh flashed the built-in theme before
-   the skin applied). Runs before the first paint: sets data-theme and, for
-   skins, injects the skin stylesheet link with its FINAL id ('uplift-skin-
-   css') so applySkinCss() later reuses — never duplicates — this element.
-   Mirrors applyPrefs() exactly (auto resolves via matchMedia; a skin needs
-   its <name>-<mtime> dir: applyPrefs caches the resolved dir under
-   SKIN_DIR_KEY when the listing last resolved it; an exact pinned name IS
-   its own dir). No cache + base name -> leave the default, applyPrefs
-   fixes it after loadSkins() as before. Failures are silent by design:
-   this is a paint optimization, not an authority. */
-(function () {
-try {
-    var p = JSON.parse(localStorage.getItem('omlx-uplift-prefs-v1')) || {};
-    var SKIN_RE = /^(?:\.bundled-)?[a-z0-9][a-z0-9-]*(-\d{10})?$/;
-    var root = document.documentElement;
-    var t = p.theme;
-    if (t === 'auto') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    if (['light', 'dark', 'enhanced', 'cockpit'].includes(t)) {
-        root.dataset.theme = t;
-    } else if (typeof t === 'string' && SKIN_RE.test(t)) {
-        var dir = /-\d{10}$/.test(t) ? t : localStorage.getItem('omlx-uplift-skin-dir');
-        if (dir && SKIN_RE.test(dir) && /-\d{10}$/.test(dir)) {
-            root.dataset.theme = dir;
-            var l = document.createElement('link');
-            l.id = 'uplift-skin-css'; l.rel = 'stylesheet';
-            l.href = '/uplift/api/skins/' + encodeURIComponent(dir) + '/theme.css';
-            document.head.appendChild(l);
-        }
-    }
-    if (p.motion === 'off' || matchMedia('(prefers-reduced-motion: reduce)').matches)
-        root.dataset.motion = 'off';
-} catch (_) { /* storage denied / private mode: defaults stand */ }
-})();
-</script>
+<!-- FE-3: pre-paint theme resolve moved to uplift_preboot.js (node-test
+     surface); core.js is DOM-free and loads first, both synchronous. -->
+<script src="./core.js"></script>
+<script src="./uplift_preboot.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -452,7 +421,6 @@ try {
 <script src="./vendor/confetti.browser.js"></script>
 <script src="./vendor/gridstack-all.js"></script>
 <script src="./uplift_layout.js"></script>
-<script src="./core.js"></script>
 <script src="./domkit.js"></script>
 <script src="./uplift_state.js"></script>
 <script src="./uplift_charts.js"></script>

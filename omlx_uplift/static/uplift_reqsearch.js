@@ -17,6 +17,13 @@ const API = S.API;
    RL-2 inspector (stored variant). */
 let searchOn = false, reqRetainDays = 2;
 const REQ_WINDOWS = [['15m', 900], ['1h', 3600], ['6h', 21600], ['24h', 86400]];
+/* FE-3: file-local shim like every other consumer (was inline pokes of
+   window.Uplift._reqGlue at three sites). */
+const RQ_GLUE = {
+    get openInspector() { return window.Uplift._reqGlue.openInspector; },
+    get renderReqFeed() { return window.Uplift._reqGlue.renderReqFeed; },
+    get reqFeedRows() { return window.Uplift._reqGlue.reqFeedRows; },
+};
 let reqWin = null;                       // null = retention window default
 /* U14 (user): the chip selection died with every page load. Browser layout
    prefs live in localStorage (project rule); remember the seconds, restore
@@ -149,9 +156,9 @@ async function runReqSearch() {
         const insp = document.createElement('button');
         insp.type = 'button'; insp.className = 'se-btn act';
         insp.textContent = C.t('uplift.req.inspect');
-        insp.onclick = () => window.Uplift._reqGlue.openInspector(h.id);
+        insp.onclick = () => RQ_GLUE.openInspector(h.id);
         row.append(badge, name, meta, insp);
-        row.onclick = e => { if (e.target !== insp) window.Uplift._reqGlue.openInspector(h.id); };
+        row.onclick = e => { if (e.target !== insp) RQ_GLUE.openInspector(h.id); };
         row.style.cursor = 'pointer';
         list.append(row);
     }
@@ -162,7 +169,7 @@ function backToLiveFeed() {
     searchOn = false;
     const note = $('req-search-note'); if (note) note.style.display = 'none';
     const lb = $('req-live-btn'); if (lb) lb.style.display = 'none';
-    window.Uplift._reqGlue.renderReqFeed();
+    RQ_GLUE.renderReqFeed();
 }
 
 /* Model filter options come from STORED history (issue 4): a fresh page
@@ -173,7 +180,7 @@ function backToLiveFeed() {
 let _modelsFetchedAt = 0, _storedModels = [];
 async function syncReqModelOptions() {
     const sel = $('req-model'); if (!sel) return;
-    const live = [...new Set([...window.Uplift._reqGlue.reqFeedRows.values()]
+    const live = [...new Set([...RQ_GLUE.reqFeedRows.values()]
         .map(r => r.model).filter(Boolean))];
     if (Date.now() - _modelsFetchedAt > 60000) {
         try {

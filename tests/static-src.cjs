@@ -12,7 +12,7 @@ const STATIC_DIR = path.join(__dirname, '..', 'omlx_uplift', 'static');
 
 function staticFiles() {
     const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
-    const order = [...html.matchAll(/<script src="\.\/([\w.-]+)\.js\?/g)].map(m => m[1] + '.js');
+    const order = [...html.matchAll(/<script src="\.\/([\w.-]+)\.js(?:\?[^"]*)?"/g)].map(m => m[1] + '.js');
     const onDisk = fs.readdirSync(STATIC_DIR).filter(f => f.endsWith('.js')).sort();
     for (const f of onDisk) if (!order.includes(f)) order.push(f);
     const missing = order.filter(f => !onDisk.includes(f));

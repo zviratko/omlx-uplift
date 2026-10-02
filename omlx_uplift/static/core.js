@@ -388,6 +388,9 @@ function milestonesBetween(prev, next) {
 
 /* Settings: validated against known-good values; corrupt/absent => defaults. */
 const PREFS_KEY = 'omlx-uplift-prefs-v1';
+// FE-3: the pre-boot script (uplift_preboot.js) copied this key as a string
+// literal; one home here, both sides import it.
+const SKIN_DIR_KEY = 'omlx-uplift-skin-dir';
 const PREFS_DEFAULTS = { theme: 'auto', motion: 'auto', intervalMs: 1000, dense: false };
 const THEMES = ['auto', 'light', 'dark', 'enhanced', 'cockpit'];
 // Skin system: prefs.theme may also store a user-skin selection — base name
@@ -555,7 +558,7 @@ return { num, r, normalize, modelState, appendSample, pruneOlderThan, eventsBetw
          MILESTONE_LADDER, nextMilestone, milestoneFloorOf,
          createRequestTracker, percentile, mean, mergeHistory, movingAverage, smoothKey,
          setLocale, getLocale, t, tf,
-         PREFS_KEY, PREFS_DEFAULTS, THEMES, SKIN_NAME_RE, loadPrefs, savePrefs,
+         PREFS_KEY, SKIN_DIR_KEY, PREFS_DEFAULTS, THEMES, SKIN_NAME_RE, loadPrefs, savePrefs,
          LAYOUT_KEY, LAYOUT_DEFAULTS, LAYOUT_WINDOWS, LAYOUT_INTERVALS, LAYOUT_PERCENTILES,
          EXPLORE_METRICS, EXPLORE_KEYS, metricBlockId, blockMetricKey, loadLayout, saveLayout, clampSpan,
          fmtCompact, fmtBytes, fmtDuration, fmtNumber, errorText };
