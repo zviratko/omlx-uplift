@@ -61,17 +61,17 @@ async function seLoadDeferred(model) {
     } catch (_) { seDeferred = {}; }
 }
 async function sePersistDeferred(model, settings) {
-    await fetch(`${API}/uplift/api/models/${encodeURIComponent(model)}/deferred-settings`,
-        { method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ settings }) });
+    // FE-2: postJson — the old fire-and-forget POST showed 'saved ✓' even
+    // when the deferred write failed; the caller's catch now sees it.
+    await D.postJson(`${API}/uplift/api/models/${encodeURIComponent(model)}/deferred-settings`,
+        { settings });
     seDeferred = settings;
 }
 async function seClearDeferred(model) {
     if (!Object.keys(seDeferred).length) return;
     seDeferred = {};
     try {
-        await fetch(`${API}/uplift/api/models/${encodeURIComponent(model)}/deferred-settings`,
-            { method: 'DELETE' });
+        await D.deleteJson(`${API}/uplift/api/models/${encodeURIComponent(model)}/deferred-settings`);
     } catch (_) { /* best-effort; next load re-syncs from server */ }
 }
 function seDirtyKeys() {                     // dirty keys of the ACTIVE tab
