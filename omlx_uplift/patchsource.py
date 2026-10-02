@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass, field
 
 from . import diffapply
 from . import safeguards as _safeguards
@@ -188,6 +189,339 @@ def _ui_files(result: dict) -> list[dict]:
         for p in result.get("skipped", [])]
 
 
+# --------------------------------------------------------------------------
+# BE-3 step 5: add_patch as PHASES returning ONE response shape.
+# The old version was 275 lines with 33 branches and 12 non-uniform dict
+# returns; UI/CLI/tests depend on a stable subset. PatchOpResult is that
+# subset; `extras` carries the gate payloads (files/compile_problems/
+# advisories/safeguards/needs_build_scope) that some verdicts include.
+# render() reproduces the historical wire format key-for-key.
+# --------------------------------------------------------------------------
+
+@dataclass
+class PatchOpResult:
+    ok: bool
+    stage: str = ""            # config|gate|gate-both|classification|stored|adopted|unchanged|obsolete-held
+    reason: str | None = None
+    v: int | None = None
+    state: str | None = None
+    reversal: bool = False
+    unchanged: bool = False
+    adopted: bool | None = None
+    obsolete: bool | None = None     # per-verdict key presence is decided
+                                     # by render() (v1 emitted it only on
+                                     # obsolete/adopted verdicts)
+    requires_approval: list = field(default_factory=list)
+    note: str | None = None
+    extras: dict = field(default_factory=dict)
+
+    def render(self) -> dict:
+        """The wire dict, verdict by verdict — the EXACT key sets of the
+        twelve v1 returns this replaced (tests and the UI read: config ->
+        reason only; gate failures -> stage/reason/files/compile_problems/
+        advisories; unchanged -> unchanged/v/state/advisories; obsolete-
+        held -> obsolete/reason/advisories/files/safeguards/
+        requires_approval; adopted -> adopted+obsolete/reversal/...;
+        stored -> reversal/requires_approval/safeguards/note always)."""
+        e = self.extras
+        if self.stage == "config":
+            return {"ok": False, "reason": self.reason}
+        if self.stage in ("gate", "fetch", "source", "keg-gate"):
+            d = {"ok": False, "stage": self.stage, "reason": self.reason}
+            d["files"] = e.get("files", [])
+            d["compile_problems"] = e.get("compile_problems", [])
+            d["advisories"] = e.get("advisories", [])
+            return d
+        if self.stage == "classification":
+            return {"ok": False, "stage": "classification",
+                    "reason": self.reason,
+                    "needs_build_scope": e.get("needs_build_scope"),
+                    "files": e.get("files", []),
+                    "compile_problems": e.get("compile_problems", []),
+                    "advisories": e.get("advisories", [])}
+        if self.stage == "unchanged":
+            return {"ok": True, "unchanged": True, "v": self.v,
+                    "state": self.state,
+                    "advisories": e.get("advisories", [])}
+        if self.stage == "obsolete-held":
+            return {"ok": True, "obsolete": True, "reason": self.reason,
+                    "advisories": e.get("advisories", []),
+                    "files": e.get("files", []),
+                    "safeguards": e.get("safeguards", {}),
+                    "requires_approval": self.requires_approval}
+        if self.stage == "adopted":
+            # v1: key ALWAYS present — None when adopted, True when the
+            # hunks were already upstream but nothing was adopted
+            return {"ok": True, "v": self.v, "adopted": self.adopted,
+                    "obsolete": None if self.adopted else True,
+                    "reversal": self.reversal,
+                    "state": self.state, "reason": self.reason,
+                    "advisories": e.get("advisories", []),
+                    "files": e.get("files", [])}
+        # 'stored' (and anything else): the v1 stored verdict — the note
+        # key is ALWAYS present (v1 dict literal carried result.get('note'),
+        # null when no root normalization happened)
+        return {"ok": True, "v": self.v, "state": self.state,
+                "reversal": self.reversal,
+                "advisories": e.get("advisories", []),
+                "files": e.get("files", []),
+                "safeguards": e.get("safeguards", {}),
+                "requires_approval": self.requires_approval,
+                "note": self.note}
+
+
+def _add_reject(reason: str) -> PatchOpResult:
+    return PatchOpResult(ok=False, stage="config", reason=reason)
+
+
+def _add_gate(store, manifest, patch, creating: bool, patch_id: str,
+              source: dict, tree_root: str, effective_scope: str,
+              build_root: str | None) -> tuple[PatchOpResult | None, dict | None]:
+    """Fetch + gate for the add/update flow. Returns (failure, result).
+
+    'both' scope double-gates: clean on the FULL diff at the dev root,
+    AND clean as the PRUNED overlay at the keg — a 'both' patch must never
+    store something the vanilla keg cannot host. A failed keg gate may be
+    a scope signal: when the failing/pruned sections exist only in a
+    source checkout (DEV-1 classification), name them so the caller can
+    offer scope=both instead of a bare rejection."""
+    gate_root, gate_overrides, patterns = _gate_root_selection(
+        store, manifest, patch, tree_root, scope=effective_scope,
+        dev_root=build_root)          # add_patch gates the CALLER's root
+    is_dev = _patches.scope_touches_dev(effective_scope)
+    result = fetch_and_gate(source, gate_root, overrides=gate_overrides,
+                            reverse=bool(patch.get("reversal")),
+                            skip_patterns=patterns)
+    if result["ok"] and effective_scope == _patches.SCOPE_BOTH:
+        keg_res = fetch_and_gate(source, tree_root,
+                                 overrides=_pristine_overlay(store, patch, tree_root),
+                                 reverse=bool(patch.get("reversal")),
+                                 skip_patterns=_patches.skip_patterns(manifest))
+        if not keg_res["ok"]:
+            fail = PatchOpResult(
+                ok=False, stage="keg-gate",
+                reason=("the dev side gates clean but the pruned keg "
+                        "overlay does not — use scope=dev: "
+                        + str(keg_res.get("reason"))),
+                extras={"files": _ui_files(keg_res),
+                        "compile_problems": keg_res.get("compile_problems", []),
+                        "advisories": keg_res.get("advisories", [])})
+            _discard_patch(store, manifest, patch, creating)
+            return fail, None
+    if not result["ok"]:
+        if not is_dev:
+            fails = [f for f in result.get("files", []) if f["status"] == "fail"]
+            missing = [f["path"] for f in fails
+                       if (f.get("reason") or "").startswith("target file missing")]
+            pruned = list(result.get("skipped", []))
+            build_only = sorted(set(pruned) | set(missing))
+            if build_only and build_root:
+                verdict = fetch_and_gate(source, build_root, reverse=
+                                         bool(patch.get("reversal")),
+                                         skip_patterns=None)
+                if verdict.get("ok"):
+                    fail = PatchOpResult(
+                        ok=False, stage="classification",
+                        reason=(f"{len(build_only)} section(s) exist only "
+                                "in a source checkout — add with "
+                                "scope=both (or scope=dev to skip "
+                                "the keg)"),
+                        extras={"needs_build_scope": build_only,
+                                "files": _ui_files(result),
+                                "compile_problems": result.get("compile_problems", []),
+                                "advisories": result.get("advisories", [])})
+                    _discard_patch(store, manifest, patch, creating)
+                    return fail, None
+        # files/compile_problems ride along so the UI per-file gate table
+        # can show WHY (the top-level reason is only "one or more files failed").
+        # stage passes through: 'fetch'/'source' failures keep their identity
+        # (the router answers 422 for exactly those two).
+        fail = PatchOpResult(
+            ok=False, stage=result.get("stage", "gate"),
+            reason=result.get("reason"),
+            extras={"files": _ui_files(result),
+                    "compile_problems": result.get("compile_problems", []),
+                    "advisories": result.get("advisories", [])})
+        _discard_patch(store, manifest, patch, creating)
+        return fail, None
+    return None, result
+
+
+def _discard_patch(store, manifest, patch, creating: bool) -> None:
+    """A failed add of a NEW patch leaves no trace (updates keep the old
+    manifest untouched — nothing was appended)."""
+    if creating:
+        manifest["patches"].remove(patch)
+        store.save(manifest)
+
+
+def _add_store_version(store, manifest, patch, creating: bool,
+                       result: dict) -> tuple[PatchOpResult, dict | None]:
+    """Source/scope recorded, version written (or verdict: unchanged /
+    obsolete-but-held). Returns (result, version_entry|None)."""
+    source_clean = {k: result.get("source_" + k) or result.get(k)
+                    for k in ("kind", "repo", "pr", "url", "insecure_tls")
+                    if (result.get("source_" + k) or result.get(k)) is not None}
+    data = result["diff"]
+    sha = result["content_sha256"]
+    same = [v for v in patch["versions"] if v.get("content_sha256") == sha]
+    if same:
+        # unchanged source content -> nothing new; report candidate status
+        v = same[0]
+        return (PatchOpResult(ok=True, stage="unchanged", v=v["v"],
+                              state=patch["state"],
+                              unchanged=True,
+                              extras={"advisories": result.get("advisories", [])}),
+                None)
+    held = _safeguards.held(result.get("safeguards", {}).get("codes", []),
+                            patch.get("safeguard_always"),
+                            patch.get("safeguard_once"), sha)
+    obsolete = [f for f in result["files"] if f["status"] == "already"]
+    if obsolete and len(obsolete) == len(result["files"]) and held:
+        # all hunks already present but safeguards need approval: refuse to
+        # adopt silently — nothing stored, the user approves from the
+        # preview (same gate as a normal pending patch). v1 removed a
+        # newly-created entry here BEFORE saving:
+        if creating:
+            manifest["patches"].remove(patch)
+        return (PatchOpResult(
+            ok=True, stage="obsolete-held",
+            reason="all hunks already present upstream — patch looks obsolete",
+            obsolete=True, requires_approval=held,
+            extras={"advisories": result.get("advisories", []),
+                    "files": _ui_files(result),
+                    "safeguards": result.get("safeguards", {})}), None)
+    version = _store_version(store, patch, result)
+    return (PatchOpResult(ok=True, stage="stored", v=version["v"],
+                          requires_approval=held), version)
+
+
+def _add_adopt(store, manifest, patch, creating: bool, patch_id: str,
+               tree_root: str, result: dict, version: dict,
+               is_dev: bool, held: list) -> PatchOpResult | None:
+    """ADOPT phase: every hunk is already present in the live tree (the
+    user patched by hand or a previous omlx merged it) and no safeguard is
+    outstanding. Store the version, record it as applied on THIS keg and
+    keep byte-exact backups — so it shows APPLIED and reconcile re-applies
+    it automatically after a keg upgrade, or restores the originals on
+    disable/remove. The user patched first, persisted later: that is a
+    supported flow, not an error.
+    For a REVERSAL 'already' means the tree is already at the PRE-image
+    (the merged change is gone); its disable-restore target is the MERGED
+    image, so the backup records the forward-applied bytes instead.
+    Returns a verdict (always ok=True) when the adopt path ran."""
+    all_already = result["files"] and all(
+        f["status"] == "already" for f in result["files"])
+    if not (all_already and not held and not is_dev):
+        return None
+    v = version["v"]
+    keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
+    adopted = False
+    if keg:
+        backup_dir = store.backup_dir(patch_id, v, keg)
+        try:
+            res = diffapply.apply_diff(result["diff"], tree_root, backup_dir,
+                                       reverse=bool(patch.get("reversal")))
+        except OSError as exc:
+            _log.warning("adopt backup write failed for %s v%d: %s",
+                         patch_id, v, exc)
+            res = {"ok": False}
+        if res.get("ok"):
+            applied_files = []
+            for f in res["files"]:
+                target, _why = diffapply.safe_join(tree_root, f["path"])
+                try:
+                    with open(target, "rb") as fh:
+                        cur = fh.read()
+                except OSError:
+                    cur = None
+                applied_files.append(
+                    {"path": f["path"],
+                     "sha256": (hashlib.sha256(cur).hexdigest()
+                                if cur is not None else None),
+                     "status": f["status"]})
+            # apply_diff only backs up files it WRITES; on an all-already
+            # adopt it wrote nothing. Revert the patch in memory (reverse
+            # hunks -> vanilla pre-image) and store that as the backup,
+            # so disable/remove restore byte-exact originals without the
+            # tree ever going unpatched on disk. A reversal inverts the
+            # direction: its backup holds the merged (forward-applied)
+            # image, because that is what disable must bring back.
+            if patch.get("reversal"):
+                diffapply.record_merged_backup(result["diff"], tree_root, backup_dir)
+            else:
+                diffapply.record_pristine_backup(result["diff"], tree_root, backup_dir)
+            from datetime import datetime as _dt, timezone as _tz
+            version["applied"] = {"keg_id": keg,
+                                  "at": _dt.now(_tz.utc).isoformat(
+                                      timespec="seconds"),
+                                  "files": applied_files}
+            version["backup_dir"] = _patches.rel(backup_dir, store.base_dir)
+            version["adopted"] = True
+            patch["enabled"] = True
+            patch["desired_version"] = v
+            store.set_state_if(patch, "applied",
+                               "adopted — hunks already present in the "
+                               "live tree")
+            patch["last_verified"] = {"keg_id": keg,
+                                      "at": _patches.now_iso()}
+            adopted = True
+    _log.info("patch %s v%d ADOPTED as applied (%d files already "
+              "present, keg %s)", patch_id, v, len(result["files"]), keg)
+    store.save(manifest)
+    rev = bool(patch.get("reversal"))
+    reason = (("reversal already in effect — stored; reverts "
+               "again after an omlx update, disable restores the "
+               "merged bytes" if adopted else
+               "reversal has nothing to undo on this tree")
+              if rev else
+              ("already applied — stored; re-applies after an "
+               "omlx update, disable restores the originals"
+               if adopted else
+               "all hunks already present upstream — patch looks "
+               "obsolete"))
+    return PatchOpResult(
+        ok=True, stage="adopted", v=v, state=patch["state"], reversal=rev,
+        adopted=adopted, obsolete=not adopted, reason=reason,
+        extras={"advisories": result.get("advisories", []),
+                "files": _ui_files(result)})
+
+
+def _add_transition(store, manifest, patch, patch_id: str, version: dict,
+                    result: dict, held: list) -> PatchOpResult:
+    """STATE phase: what the stored version means for the patch now
+    (validated-not-enabled / awaiting approval / update candidate /
+    pending-new)."""
+    v = version["v"]
+    if patch["state"] in ("disabled",) and not patch.get("enabled"):
+        patch["state_detail"] = ("validated, safeguards need approval" if held
+                                 else "validated, not enabled")
+    elif held:
+        # auto-apply is refused by reconcile until each code is approved
+        store.set_state(patch, "pending",
+                        "safeguards need approval: " + ", ".join(held))
+    else:
+        # new candidate on top of an applied patch -> update_available
+        if any(ver.get("applied") for ver in patch["versions"]):
+            store.set_state(patch, "update_available",
+                            f"candidate v{v} fetched and validated")
+        else:
+            store.set_state(patch, "pending", f"v{v} validated, awaiting restart")
+            patch["enabled"] = True
+            patch["desired_version"] = v
+    store.save(manifest)
+    _log.info("patch %s stored as v%d state=%s (sha %s, reversal=%s)",
+              patch_id, v, patch["state"], result["content_sha256"][:12],
+              bool(patch.get("reversal")))
+    return PatchOpResult(
+        ok=True, stage="stored", v=v, state=patch["state"],
+        reversal=bool(patch.get("reversal")), requires_approval=held,
+        note=result.get("note"),
+        extras={"advisories": result.get("advisories", []),
+                "files": _ui_files(result),
+                "safeguards": result.get("safeguards", {})})
+
+
 def add_patch(store, patch_id: str, source: dict, tree_root: str,
               order: int = 100, reversal: bool = False,
               scope: str | None = None, build_root: str | None = None) -> dict:
@@ -207,36 +541,40 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
     patch never touches the keg; requires build_root. 'runtime' forces the
     existing keg behaviour (pruned diff). The whole diff is one scope —
     no mixed patches.
-    """
+
+    BE-3 step 5: thin orchestrator over the phases (_add_gate,
+    _add_store_version, _add_adopt, _add_transition); every verdict is a
+    PatchOpResult rendered to the historical dict shape — one contract for
+    CLI, router and JS instead of 12 ad-hoc dicts."""
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", patch_id or ""):
-        return {"ok": False, "reason": "name must match [a-z0-9][a-z0-9._-]{0,63}"}
+        return _add_reject("name must match [a-z0-9][a-z0-9._-]{0,63}").render()
     if scope is not None:
         scope = _patches._LEGACY_SCOPE_NAMES.get(scope, scope)
         if scope not in _patches.SCOPES:
-            return {"ok": False,
-                    "reason": f"scope must be one of {list(_patches.SCOPES)}"}
+            return _add_reject(
+                f"scope must be one of {list(_patches.SCOPES)}").render()
     if scope in (_patches.SCOPE_DEV, _patches.SCOPE_BOTH) and not build_root:
-        return {"ok": False,
-                "reason": f"scope={scope} needs a source checkout: bootstrap omlx-dev "
-                          "(omlx-uplift dev bootstrap) or pass --build-root"}
+        return _add_reject(
+            f"scope={scope} needs a source checkout: bootstrap omlx-dev "
+            "(omlx-uplift dev bootstrap) or pass --build-root").render()
     manifest = store.load()
     _prune_once(store, manifest)
     patch = store.find(manifest, patch_id)
     creating = patch is None
     if not creating and bool(patch.get("reversal")) != bool(reversal):
-        return {"ok": False,
-                "reason": ("this patch is recorded as a REVERSAL — keep "
-                           "'reverse a merged change' checked to update it"
-                           if patch.get("reversal") else
-                           "this patch applies forward — to reverse a merged "
-                           "PR, remove it and re-add with 'reverse' checked")
-                + " (direction is fixed per patch)"}
+        return _add_reject(
+            ("this patch is recorded as a REVERSAL — keep "
+             "'reverse a merged change' checked to update it"
+             if patch.get("reversal") else
+             "this patch applies forward — to reverse a merged "
+             "PR, remove it and re-add with 'reverse' checked")
+            + " (direction is fixed per patch)").render()
     cur_scope = _patches.patch_scope(patch) if not creating else None
     if not creating and scope is not None and scope != cur_scope:
-        return {"ok": False,
-                "reason": f"this patch is recorded as scope={cur_scope} — "
-                          "scope is fixed per patch; remove and re-add to "
-                          "change it"}
+        return _add_reject(
+            f"this patch is recorded as scope={cur_scope} — "
+            "scope is fixed per patch; remove and re-add to "
+            "change it").render()
     effective_scope = scope or cur_scope or _patches.SCOPE_RUNTIME
     if creating:
         patch = {"id": patch_id, "enabled": False, "order": order,
@@ -247,220 +585,37 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
         patch["reversal"] = True
 
     is_dev = _patches.scope_touches_dev(effective_scope)
-    gate_root, gate_overrides, patterns = _gate_root_selection(
-        store, manifest, patch, tree_root, scope=effective_scope,
-        dev_root=build_root)          # add_patch gates the CALLER's root
-    result = fetch_and_gate(source, gate_root,
-                            overrides=gate_overrides,
-                            reverse=bool(patch.get("reversal")),
-                            skip_patterns=patterns)
-    if result["ok"] and effective_scope == _patches.SCOPE_BOTH:
-        # the dev side gated clean on the FULL diff; the keg gets the
-        # PRUNED overlay of the same bytes — gate that too, so a 'both'
-        # patch never stores something the vanilla keg cannot host
-        keg_res = fetch_and_gate(source, tree_root,
-                                 overrides=_pristine_overlay(store, patch, tree_root),
-                                 reverse=bool(patch.get("reversal")),
-                                 skip_patterns=_patches.skip_patterns(manifest))
-        if not keg_res["ok"]:
-            if creating:
-                manifest["patches"].remove(patch)
-                store.save(manifest)
-            return {"ok": False, "stage": "keg-gate",
-                    "reason": ("the dev side gates clean but the pruned keg "
-                               "overlay does not — use scope=dev: "
-                               + str(keg_res.get("reason"))),
-                    "files": _ui_files(keg_res),
-                    "compile_problems": keg_res.get("compile_problems", []),
-                    "advisories": keg_res.get("advisories", [])}
-    if not result["ok"]:
-        if creating:
-            manifest["patches"].remove(patch)
-            store.save(manifest)
-        if not is_dev:
-            # ADD-TIME CLASSIFICATION (DEV-1): the omlx gate failed —
-            # when the failing/pruned sections are source-tree paths, name
-            # them so the caller (CLI/UI) can offer scope=both (DEV-6) for
-            # the whole patch instead of a bare rejection.
-            fails = [f for f in result.get("files", []) if f["status"] == "fail"]
-            missing = [f["path"] for f in fails
-                       if (f.get("reason") or "").startswith("target file missing")]
-            pruned = list(result.get("skipped", []))
-            build_only = sorted(set(pruned) | set(missing))
-            if build_only and build_root:
-                verdict = fetch_and_gate(source, build_root, reverse=
-                                         bool(patch.get("reversal")),
-                                         skip_patterns=None)
-                if verdict.get("ok"):
-                    return {"ok": False, "stage": "classification",
-                            "reason": (f"{len(build_only)} section(s) exist only "
-                                       f"in a source checkout — add with "
-                                       "scope=both (or scope=dev to skip "
-                                       "the keg)"),
-                            "needs_build_scope": build_only,
-                            "files": _ui_files(result),
-                            "compile_problems": result.get("compile_problems", []),
-                            "advisories": result.get("advisories", [])}
-        # files/compile_problems ride along so the UI per-file gate table
-        # can show WHY (the top-level reason is only "one or more files failed")
-        return {"ok": False, "stage": result.get("stage"),
-                "reason": result.get("reason"),
-                "files": _ui_files(result),
-                "compile_problems": result.get("compile_problems", []),
-                "advisories": result.get("advisories", [])}
+    fail, result = _add_gate(store, manifest, patch, creating, patch_id,
+                             source, tree_root, effective_scope, build_root)
+    if fail is not None:
+        return fail.render()
 
-    source_clean = {k: source.get(k) for k in
-                    ("kind", "repo", "pr", "url", "insecure_tls")
-                    if source.get(k) is not None}
-    patch["source"] = source_clean
+    # v1 order kept: a PASSED gate rewrites the source record + scope
+    # before any verdict (even 'unchanged' persists a changed source URL —
+    # the last verified origin wins, source_clean never carries the data
+    # blob).
+    patch["source"] = {k: source.get(k) for k in
+                       ("kind", "repo", "pr", "url", "insecure_tls")
+                       if source.get(k) is not None}
     if effective_scope != _patches.SCOPE_OMLX:
         # record only the non-default scope so omlx manifests keep the
         # exact v1 shape (no-migration pattern); legacy runtime/build
         # normalize on read (DEV-6)
         patch["scope"] = effective_scope
 
-    data = result["diff"]
-    sha = result["content_sha256"]
-    versions = patch["versions"]
-    same = [v for v in versions if v.get("content_sha256") == sha]
-    if same:
-        # unchanged source content -> nothing new; report candidate status
-        v = same[0]
-        resp = {"ok": True, "unchanged": True, "v": v["v"],
-                "state": patch["state"], "advisories": result["advisories"]}
+    stored, version = _add_store_version(store, manifest, patch, creating,
+                                         result)
+    if version is None:
         store.save(manifest)
-        return resp
-    held = _safeguards.held(result.get("safeguards", {}).get("codes", []),
-                            patch.get("safeguard_always"),
-                            patch.get("safeguard_once"), sha)
-    obsolete = [f for f in result["files"] if f["status"] == "already"]
-    if obsolete and len(obsolete) == len(result["files"]) and held:
-        # all hunks already present but safeguards need approval: refuse to
-        # adopt silently — nothing stored, the user approves from the
-        # preview (same gate as a normal pending patch)
-        if creating:
-            manifest["patches"].remove(patch)
-        store.save(manifest)
-        return {
-            "ok": True, "obsolete": True,
-            "reason": "all hunks already present upstream — patch looks obsolete",
-            "advisories": result["advisories"], "files": _ui_files(result),
-            "safeguards": result.get("safeguards", {}),
-            "requires_approval": held}
+        return stored.render()
 
-    version = _store_version(store, patch, result)
-    v = version["v"]
-
-    # ADOPT: every hunk is already present in the live tree (the user
-    # patched by hand or a previous omlx merged it) and no safeguard is
-    # outstanding. Store the version, record it as applied on THIS keg and
-    # keep byte-exact backups — so it shows APPLIED and reconcile
-    # re-applies it automatically after a keg upgrade, or restores the
-    # originals on disable/remove. The user patched first, persisted later:
-    # that is a supported flow, not an error.
-    # For a REVERSAL 'already' means the tree is already at the PRE-image
-    # (the merged change is gone); its disable-restore target is the MERGED
-    # image, so the backup records the forward-applied bytes instead.
-    all_already = result["files"] and all(
-        f["status"] == "already" for f in result["files"])
-    if all_already and not held and not is_dev:
-        keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
-        adopted = False
-        if keg:
-            backup_dir = store.backup_dir(patch_id, v, keg)
-            try:
-                res = diffapply.apply_diff(data, tree_root, backup_dir,
-                                           reverse=bool(patch.get("reversal")))
-            except OSError as exc:
-                _log.warning("adopt backup write failed for %s v%d: %s",
-                             patch_id, v, exc)
-                res = {"ok": False}
-            if res.get("ok"):
-                applied_files = []
-                for f in res["files"]:
-                    target, _why = diffapply.safe_join(tree_root, f["path"])
-                    try:
-                        with open(target, "rb") as fh:
-                            cur = fh.read()
-                    except OSError:
-                        cur = None
-                    applied_files.append(
-                        {"path": f["path"],
-                         "sha256": (hashlib.sha256(cur).hexdigest()
-                                    if cur is not None else None),
-                         "status": f["status"]})
-                # apply_diff only backs up files it WRITES; on an all-already
-                # adopt it wrote nothing. Revert the patch in memory (reverse
-                # hunks -> vanilla pre-image) and store that as the backup,
-                # so disable/remove restore byte-exact originals without the
-                # tree ever going unpatched on disk. A reversal inverts the
-                # direction: its backup holds the merged (forward-applied)
-                # image, because that is what disable must bring back.
-                if patch.get("reversal"):
-                    diffapply.record_merged_backup(data, tree_root, backup_dir)
-                else:
-                    diffapply.record_pristine_backup(data, tree_root, backup_dir)
-                from datetime import datetime as _dt, timezone as _tz
-                version["applied"] = {"keg_id": keg,
-                                      "at": _dt.now(_tz.utc).isoformat(
-                                          timespec="seconds"),
-                                      "files": applied_files}
-                version["backup_dir"] = _patches.rel(backup_dir, store.base_dir)
-                version["adopted"] = True
-                patch["enabled"] = True
-                patch["desired_version"] = v
-                store.set_state_if(patch, "applied",
-                                   "adopted — hunks already present in the "
-                                   "live tree")
-                patch["last_verified"] = {"keg_id": keg,
-                                          "at": _patches.now_iso()}
-                adopted = True
-        _log.info("patch %s v%d ADOPTED as applied (%d files already "
-                  "present, keg %s)", patch_id, v, len(result["files"]), keg)
-        store.save(manifest)
-        rev = bool(patch.get("reversal"))
-        return {"ok": True, "v": v, "adopted": adopted,
-                "obsolete": True if not adopted else None,
-                "reversal": rev,
-                "state": patch["state"],
-                "reason": (("reversal already in effect — stored; reverts "
-                            "again after an omlx update, disable restores the "
-                            "merged bytes" if adopted else
-                            "reversal has nothing to undo on this tree")
-                           if rev else
-                           ("already applied — stored; re-applies after an "
-                            "omlx update, disable restores the originals"
-                            if adopted else
-                            "all hunks already present upstream — patch looks "
-                            "obsolete")),
-                "advisories": result["advisories"], "files": _ui_files(result)}
-
-    if patch["state"] in ("disabled",) and not patch.get("enabled"):
-        patch["state_detail"] = ("validated, safeguards need approval" if held
-                                 else "validated, not enabled")
-    elif held:
-        # auto-apply is refused by reconcile until each code is approved
-        store.set_state(patch, "pending",
-                        "safeguards need approval: " + ", ".join(held))
-    else:
-        # new candidate on top of an applied patch -> update_available
-        if any(ver.get("applied") for ver in versions):
-            store.set_state(patch, "update_available",
-                            f"candidate v{v} fetched and validated")
-        else:
-            store.set_state(patch, "pending", f"v{v} validated, awaiting restart")
-            patch["enabled"] = True
-            patch["desired_version"] = v
-    store.save(manifest)
-    _log.info("patch %s stored as v%d state=%s (sha %s, reversal=%s)",
-              patch_id, v, patch["state"], sha[:12],
-              bool(patch.get("reversal")))
-    return {"ok": True, "v": v, "state": patch["state"],
-            "reversal": bool(patch.get("reversal")),
-            "advisories": result["advisories"], "files": _ui_files(result),
-            "safeguards": result.get("safeguards", {}),
-            "requires_approval": held,
-            "note": result.get("note")}
+    held = stored.requires_approval
+    adopt = _add_adopt(store, manifest, patch, creating, patch_id, tree_root,
+                       result, version, is_dev, held)
+    if adopt is not None:
+        return adopt.render()
+    return _add_transition(store, manifest, patch, patch_id, version,
+                           result, held).render()
 
 
 def _desired_version_entry(store, patch) -> dict | None:
@@ -1013,12 +1168,9 @@ def check_all(store, tree_root: str) -> dict:
                 reports[pid] = {"check": "obsolete"}
                 changed_any = True
                 continue
-        if not result["ok"]:
-            reports[pid] = {"check": "error",
-                            "reason": "new content fails validation against "
-                                      "the current tree: "
-                                      + (result.get("reason") or "gate failed")}
-            continue
+        # (BE-3 step 5: the old unreachable `if not result["ok"]` guard
+        # lived here — result.ok was already required right after the
+        # first gate in this loop, and nothing reassigned `result` since.)
         # BE-3 step 2 behavior fix: drift candidates now carry the SAME
         # schema as add_patch (safeguards/root_note were silently dropped).
         version = _store_version(store, p, result)
