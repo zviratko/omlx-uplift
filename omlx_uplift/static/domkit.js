@@ -32,9 +32,20 @@ async function fetchJson(url, opts) {
         let reason = '';
         try { reason = C.errorText(await res.clone().json()); }
         catch (_) { try { reason = (await res.text()).slice(0, 200); } catch (__) {} }
-        throw new Error(reason ? `${url} -> ${res.status}: ${reason}` : `${url} -> ${res.status}`);
+        throw kitError(url, res, reason);
     }
     return res.json();
+}
+
+/* FE-2: every kit throw carries err.status so callers can branch on the
+   HTTP code (cancel's 501, classic-PUT's 404-upsert fallback) without
+   scraping the message. Messages are unified to `url -> status: reason`
+   with detail flattened via C.errorText (UP-4) — postJson used to throw
+   the raw detail, which is exactly the [object Object] toast class. */
+function kitError(url, res, reason) {
+    const e = new Error(reason ? `${url} -> ${res.status}: ${reason}` : `${url} -> ${res.status}`);
+    e.status = res.status;
+    return e;
 }
 
 async function postJson(url, body) {
@@ -42,7 +53,19 @@ async function postJson(url, body) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body || {}) });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.detail || r.status + ' ' + r.statusText);
+    if (!r.ok) throw kitError(url, r, C.errorText(d) || r.statusText);
+    return d;
+}
+
+/* FE-2: PUT twin of postJson (same envelope) — mmeditor/profile save and
+   the template editor had three private PUT fetches with divergent error
+   handling. */
+async function putJson(url, body) {
+    const r = await fetch(url, { method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw kitError(url, r, C.errorText(d) || r.statusText);
     return d;
 }
 
@@ -54,10 +77,7 @@ async function postJson(url, body) {
 async function deleteJson(url) {
     const res = await fetch(url, { method: 'DELETE' });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) {
-        const reason = C.errorText(d) || (res.status + ' ' + res.statusText);
-        throw new Error(`${url} -> ${res.status}: ${reason}`);
-    }
+    if (!res.ok) throw kitError(url, res, C.errorText(d) || res.statusText);
     return d;
 }
 
@@ -76,5 +96,5 @@ function emptyMsg(host, msg) {   // error text goes through textContent, never i
     d.textContent = msg; host.append(d);
 }
 
-return { $, fetchJson, postJson, deleteJson, toast, cell, emptyMsg };
+return { $, fetchJson, postJson, putJson, deleteJson, toast, cell, emptyMsg };
 });

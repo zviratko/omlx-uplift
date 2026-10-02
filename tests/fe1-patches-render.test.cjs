@@ -151,6 +151,6 @@ test('pollPatches: 401 renders sign-in copy, not generic API failure', async () 
 
 test('domkit is require()able in node (dual export)', () => {
     const D = require(path.join(STATIC_DIR, 'domkit.js'));
-    for (const fn of ['$', 'fetchJson', 'postJson', 'toast', 'cell', 'emptyMsg'])
+    for (const fn of ['$', 'fetchJson', 'postJson', 'putJson', 'deleteJson', 'toast', 'cell', 'emptyMsg'])
         assert.equal(typeof D[fn], 'function', `domkit.${fn} missing`);
 });
