@@ -1938,6 +1938,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .dv-group-title:first-child { margin-top: 4px; }
 .pt-vers { display: flex; flex-wrap: wrap; gap: 6px; }
 .pt-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Two adjacent .btn.primary fill edge-to-edge with border==background==--ink
+   and read as ONE button (approve-once + always-allow). A ring in --edge
+   gives each its own visible border; .pt-sg-acts adds breathing room where
+   the row follows text (add-preview box). */
+.pt-acts .btn.primary { outline: 1px solid var(--edge); outline-offset: 1px; }
+.pt-sg-acts { margin-top: 8px; }
 .pt-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border: 1px solid var(--line); font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: .06em; }
 .pt-chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); margin-right: 3px; }
 .pt-st-applied::before { background: var(--ok, #2e8b57); }

@@ -21,6 +21,12 @@ Sits BEFORE the strict gate (PAT-2 flow) and answers two questions:
      tree (or onto a missing file). Sibling packages inside the tree
      (mlx_embeddings, mlx_vlm, ...) are legitimate targets and NOT flagged.
 
+   Both heuristics are written for the KEG. A dev-scope patch gates
+   against a full SOURCE CHECKOUT instead (tree_kind='src'), where those
+   premises are false: csrc/ IS present, and the rebuild IS the pipeline.
+   There the kernel paths become an ADVISORY (one grouped line, no
+   approval required) — say nothing that the tree being gated disproves.
+
 Problems must be covered by an explicit approval to auto-apply, but the
 approval is per CODE (and for 'once' per content sha), never a blanket
 'ignore all safeguards' switch.
@@ -231,31 +237,40 @@ def _rewrite_paths(diff: bytes, remove_prefix: str | None = None,
 # Heuristics
 # --------------------------------------------------------------------------
 
-def assess(parsed: dict, tree_root: str) -> dict:
+def assess(parsed: dict, tree_root: str, tree_kind: str = "keg") -> dict:
     """Look at the (normalized) parsed file set and report problems.
 
-    Returns {"problems": [{"code","path","message"}], "codes": [..],
-             "truncated": bool}. Problems are advisory to the strict gate
-    (the diff may still be a clean, applyable diff) but block
-    AUTO-APPLY until each distinct code is explicitly approved.
+    Returns {"problems": [{"code","paths","message"}], "codes": [..],
+             "advisories": [{"code","paths","message"}], "truncated": bool}.
+    Problems are advisory to the strict gate (the diff may still be a
+    clean, applyable diff) but block AUTO-APPLY until each distinct code
+    is explicitly approved. Advisories are display-only (one grouped
+    line), never an approval gate.
 
-    Policy: the WHOLE site-packages tree is patchable — sibling packages
-    (mlx_embeddings, mlx_vlm, ...) are legitimate targets and pass without
-    a word. Only a path that resolves OUTSIDE the installed tree — or
-    onto nothing at all (neither the path nor its omlx/ interpretation
-    exists; a modify of a missing file) — is an 'outside_keg' problem.
+    Problems are GROUPED PER CODE with their path list — the approval
+    model is per code, so one row per path (eight times the same 500-char
+    rebuild hint) was pure noise.
+
+    tree_kind: 'keg' (default — an installed site-packages tree) or
+    'src' (a full source checkout: the dev carrier for scope=dev). The
+    kernel heuristic only HOLDS on a keg; on a source carrier the native
+    rebuild IS the pipeline, so the same paths yield a grouped advisory
+    instead (and outside_keg stays grounded in this very tree below).
     """
     problems: list[dict] = []
+    advisories: list[dict] = []
 
     def add(code: str, path: str, message: str) -> None:
         if len(problems) < _MAX_REPORTED_PROBLEMS:
-            problems.append({"code": code, "path": path, "message": message})
+            problems.append({"code": code, "paths": [path], "message": message})
 
     def lexists(rel: str) -> bool:
         return (tree_root is None
                 or os.path.lexists(os.path.join(tree_root, *rel.split("/"))))
 
     truncated = False
+    kernel_paths: list[str] = []
+    kernel_native_missing = False   # a csrc/ path the gated tree lacks
     for fp in parsed.get("files", []):
         path = fp.get("path") or ""
         if not path.startswith(_OMLX_PREFIX):
@@ -270,20 +285,42 @@ def assess(parsed: dict, tree_root: str) -> dict:
             continue
         rel = path[len(_OMLX_PREFIX):]
         if rel == "custom_kernels" or rel.startswith("custom_kernels/"):
-            native = "/csrc/" in f"/{rel}"
+            kernel_paths.append(path)
+            if "/csrc/" in f"/{rel}" and not lexists(path):
+                kernel_native_missing = True
+    if kernel_paths:
+        if tree_kind == "src":
+            # dev carrier: uplift-dev materializes these hunks and the
+            # formula rebuild compiles them — no hold, one honest line.
+            advisories.append({
+                "code": "kernel_source",
+                "paths": kernel_paths,
+                "message": ("native kernel sources — built from this tree "
+                            "by the dev rebuild (the formula's custom-kernel "
+                            "option must be on for a real effect)")})
+        else:
             msg = ("touches a bundled custom kernel; the compiled artifacts "
                    "(_ext*.so, *.dylib, *.metallib) are NOT rebuilt by this "
-                   "patch — native changes need a rebuild: " + KERNEL_REBUILD_HINT)
-            if native:
-                msg += (" (path is native source under csrc/; the keg does "
-                        "not even ship csrc/, so this hunk likely cannot "
-                        "apply at all)")
-            add("kernel_source", path, msg)
+                   "patch — native changes need a rebuild")
+            if kernel_native_missing:
+                # grounded: only true when the gated tree really lacks
+                # the native source (a source checkout carries csrc/ and
+                # the hunks apply fine there)
+                msg += (" (some paths are native source under csrc/ that "
+                        "this tree does not contain, so those hunks likely "
+                        "cannot apply at all)")
+            problems.append({"code": "kernel_source",
+                             "paths": kernel_paths, "message": msg,
+                             # the LONG hint rides its own field: surfaces
+                             # show it exactly once (the card puts it in a
+                             # copy-to-clipboard row, not twice in prose)
+                             "hint": KERNEL_REBUILD_HINT})
     codes: list[str] = []
     for p in problems:
         if p["code"] not in codes:
             codes.append(p["code"])
-    return {"problems": problems, "codes": codes, "truncated": truncated}
+    return {"problems": problems, "codes": codes,
+            "advisories": advisories, "truncated": truncated}
 
 
 def held(codes: list[str], always: list[str], once: dict | None,

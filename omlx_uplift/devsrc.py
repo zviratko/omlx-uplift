@@ -1091,7 +1091,8 @@ def recheck_build_patches(build_patches: list[dict]) -> dict:
                 continue
             result = patchsource.validate(
                 p["diff_bytes"], wt,
-                reverse=bool(entry.get("reversal")), skip_patterns=None)
+                reverse=bool(entry.get("reversal")), skip_patterns=None,
+                tree_kind="src")     # detached base worktree, not a keg
             if not result["ok"]:
                 entry["state"] = "needs_review"
                 entry["state_detail"] = ("re-gate after dev install failed: "

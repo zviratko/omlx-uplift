@@ -37,6 +37,17 @@ def _diff(path, ctx, old, new, strip=""):
     return (head + body).encode()
 
 
+# PR-4206 shape: one native csrc/ section (exists ONLY in a source
+# checkout, pruned from the keg overlay) + one custom_kernels/*.py wrapper
+# (lands on the keg too). _mk_tree has fast.py; _src_checkout has both.
+_KERNEL_DIFF = (
+    _diff("omlx/custom_kernels/decode_fast/csrc/k.metal",
+          "kernel line one", "kernel line two", "kernel line three")
+    + _diff("omlx/custom_kernels/decode_fast/fast.py",
+            "def run():", "    return 1", "    return 2")
+)
+
+
 class NormalizeRootTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="uplift-sg-")
@@ -102,7 +113,43 @@ class HeuristicTests(unittest.TestCase):
         self.assertIn("kernel_source", codes)
         # advisory to the strict gate: the diff itself is clean
         self.assertTrue(g["ok"])
-        self.assertIn("brew reinstall", g["safeguards"]["problems"][0]["message"])
+        # ONE grouped problem carries the paths; the long rebuild hint
+        # rides its own field so no surface can print it eight times
+        self.assertEqual(len(g["safeguards"]["problems"]), 1)
+        prob = g["safeguards"]["problems"][0]
+        self.assertEqual(prob["paths"],
+                         ["omlx/custom_kernels/decode_fast/fast.py"])
+        self.assertIn("brew reinstall", prob["hint"])
+        self.assertNotIn("brew reinstall", prob["message"])
+
+    def test_kernel_paths_group_into_one_problem(self):
+        # the PR-4206 shape: many kernel paths -> exactly ONE problem row,
+        # all paths listed, the hint present once
+        paths = [f"omlx/custom_kernels/glm/x{i}.py" for i in range(7)]
+        parsed = {"files": [{"path": p, "action": "modify", "hunks": [],
+                             "reject": None} for p in paths]}
+        rep = safeguards.assess(parsed, self.root)
+        self.assertEqual(len(rep["problems"]), 1)
+        self.assertEqual(rep["problems"][0]["paths"], paths)
+        self.assertEqual(rep["codes"], ["kernel_source"])
+
+    def test_dev_source_carries_kernel_paths_as_advisory(self):
+        # a dev-scope gate runs against the SOURCE checkout: csrc/ exists,
+        # the rebuild IS the pipeline -> no hold, one advisory line
+        src = os.path.join(self.tmp, "checkout")
+        csrc = os.path.join(src, "omlx", "custom_kernels", "glm", "csrc")
+        os.makedirs(csrc)
+        with open(os.path.join(csrc, "k.metal"), "w") as fh:
+            fh.write("kernel line one\nkernel line two\n")
+        d = _diff("omlx/custom_kernels/glm/csrc/k.metal",
+                  "kernel line one", "kernel line two", "kernel line 2b")
+        g = patchsource.validate(d, src, tree_kind="src")
+        self.assertTrue(g["ok"], g.get("reason"))
+        self.assertEqual(g["safeguards"]["codes"], [])      # NOT held
+        self.assertEqual(g["safeguards"]["problems"], [])
+        self.assertEqual(len(g["safeguards"]["advisories"]), 1)
+        self.assertIn("native kernel sources",
+                      g["safeguards"]["advisories"][0]["message"])
 
     def test_in_keg_sibling_not_flagged(self):
         # a sibling package that EXISTS in the tree is a legitimate target
@@ -243,6 +290,61 @@ class OrchestrationTests(unittest.TestCase):
         self.assertTrue(e["ok"])
         rep = patchsync.reconcile(self.store, self.root, allow_reexec=False)
         self.assertEqual(rep["reports"][0]["action"], "applied")
+
+    def _src_checkout(self):
+        """A fake source carrier (dev-src shape) carrying both hunks of
+        _KERNEL_DIFF: the csrc/ native file and the fast.py wrapper."""
+        src = os.path.join(self.tmp, "checkout")
+        csrc = os.path.join(src, "omlx", "custom_kernels", "decode_fast", "csrc")
+        os.makedirs(csrc)
+        with open(os.path.join(csrc, "k.metal"), "w") as fh:
+            fh.write("kernel line one\nkernel line two\n")
+        with open(os.path.join(src, "omlx", "custom_kernels",
+                               "decode_fast", "fast.py"), "w") as fh:
+            fh.write("def run():\n    return 1\n")
+        return src
+
+    def test_dev_scope_kernel_paths_not_held(self):
+        # PR-4206 regression: a native kernel patch added with scope=dev
+        # gates against the SOURCE checkout — no keg-artifact hold, no
+        # rebuild-hint flood; one honest advisory instead
+        d = _KERNEL_DIFF
+        r = patchsource.add_patch(self.store, "kdev",
+                                  {"kind": "upload", "data": d}, self.root,
+                                  scope="dev", build_root=self._src_checkout())
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["requires_approval"], [])
+        sg = r["safeguards"]
+        self.assertEqual(sg["codes"], [])
+        self.assertEqual(sg["problems"], [])
+        self.assertEqual([a["code"] for a in sg["advisories"]], ["kernel_source"])
+        # enable needs no approval at all
+        e = patchsource.set_enabled(self.store, "kdev", True)
+        self.assertTrue(e["ok"], e)
+        # the stored version carries only the advisory (card shows it once)
+        m = self.store.load()
+        p = self.store.find(m, "kdev")
+        ver = p["versions"][0]
+        self.assertEqual(ver["safeguards"]["codes"], [])
+        self.assertEqual(len(ver["safeguards"]["advisories"]), 1)
+
+    def test_both_scope_keeps_keg_hold(self):
+        # the pruned keg overlay DOES land fast.py next to stale compiled
+        # artifacts — 'both' must keep the kernel_source hold even though
+        # the src half of the gate raises no problem
+        d = _KERNEL_DIFF
+        r = patchsource.add_patch(self.store, "kboth",
+                                  {"kind": "upload", "data": d}, self.root,
+                                  scope="both", build_root=self._src_checkout())
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["requires_approval"], ["kernel_source"])
+        sg = r["safeguards"]
+        self.assertEqual(sg["codes"], ["kernel_source"])
+        self.assertEqual([a["code"] for a in sg["advisories"]], ["kernel_source"])
+        e = patchsource.set_enabled(self.store, "kboth", True)
+        self.assertFalse(e["ok"])          # still held until approved
+        e = patchsource.set_enabled(self.store, "kboth", True, approve="always")
+        self.assertTrue(e["ok"], e)
 
 
 def patches_store(tmp):

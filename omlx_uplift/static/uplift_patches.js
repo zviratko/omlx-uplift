@@ -144,19 +144,36 @@ async function ptEnableWithApproval(p, approve) {
     }
 }
 
-// One diff line per problem + the autodetected root note (the paths stored
-// in the manifest are the REWRITTEN ones — say so, or the diff view looks
-// like it disagrees with the source URL).
+// One display line per safeguard GROUP (mirrors the backend grouping):
+// one line per code with its path list, then the advisory lines. One
+// line per problem used to mean eight copies of the same 500-char
+// rebuild hint.
+// (paths stored in the manifest are the REWRITTEN ones — say so, or the
+// diff view looks like it disagrees with the source URL).
 function ptSafeguardLines(p) {
     const out = [];
     const ver = (p.versions || []).find(v => v.v === (p.desired_version ||
         Math.max(...(p.versions || []).map(x => x.v)))) || {};
-    for (const pr of ((ver.safeguards || {}).problems || [])) {
-        out.push({ text: pr.path + ' — ' + pr.message, code: pr.code });
+    const sg = ver.safeguards || {};
+    for (const grp of (sg.problems || [])) {
+        out.push({ text: ptGroupLine(grp), code: grp.code });
+    }
+    for (const grp of (sg.advisories || [])) {
+        out.push({ text: ptGroupLine(grp), code: grp.code, advisory: true });
     }
     if (ver.root_note) out.push({ text: ptMsg('uplift.patches.safeguard_note',
         'Root autodetected: {n}').replace('{n}', ver.root_note), code: null });
     return out;
+}
+
+// 'path — msg' for one path, '<n> files (a, b, …) — msg' for a group
+function ptGroupLine(grp) {
+    const paths = grp.paths || (grp.path ? [grp.path] : []);
+    if (paths.length === 1) return paths[0] + ' — ' + (grp.message || '');
+    if (!paths.length) return grp.message || '';
+    const shown = paths.slice(0, 6).join(', ');
+    const more = paths.length > 6 ? ', … (+' + (paths.length - 6) + ')' : '';
+    return paths.length + ' (' + shown + more + ') — ' + (grp.message || '');
 }
 
 function ptChip(text, cls, title) {
@@ -317,8 +334,9 @@ function patchCard(p, view) {
     }
     card.append(vers);
 
-    // safeguards: flagged problems, autodetected root, rebuild command,
-    // per-code approvals (the note names the EXCEPTIONS, not a blanket off)
+    // safeguards: grouped problem lines, advisory lines, autodetected
+    // root, rebuild command, per-code approvals (the note names the
+    // EXCEPTIONS, not a blanket off)
     const sgLines = ptSafeguardLines(p);
     const approved = p.safeguard_always || [];
     if (sgLines.length || approved.length) {
@@ -543,26 +561,50 @@ async function ptPreview() {
             adv.append(w);
         }
         box.hidden = false;
-        box.innerHTML = '';
-        if (r.requires_approval && r.requires_approval.length) {
+        box.innerHTML = '';   // clear-only (existing pattern); all content below goes through DOM builders + textContent
+        // The PATCH CARD renders grouped safeguards for a NEW stored/
+        // adopted patch (pollPatches above redraws it, in both scope
+        // zones). The old flow rendered the stored verdict here TOO —
+        // the double flood. Keep the box lines for every verdict with no
+        // fresh card behind it: a REJECTED add (no card at all),
+        // 'obsolete-held' (ok=true, nothing stored) and an UPDATE re-add
+        // of an existing patch (pollPatches is skipped there, so the
+        // card still shows the OLD version's flags).
+        const cardShowsIt = r.ok && !r.obsolete && !wasStored;
+        if (!cardShowsIt && r.safeguards && (r.safeguards.problems || []).length) {
             const sgt = document.createElement('div');
             sgt.className = 'pt-sg-title';
             sgt.textContent = ptMsg('uplift.patches.safeguard_problems',
                 'Safeguards flagged this patch:');
             box.append(sgt);
-            for (const pr of ((r.safeguards || {}).problems || [])) {
+            let hint = '';
+            for (const grp of (r.safeguards.problems || [])) {
                 const w = document.createElement('div');
                 w.className = 'pt-advisories';
-                w.textContent = '⚠ ' + pr.path + ' — ' + pr.message;
+                w.textContent = '⚠ ' + ptGroupLine(grp);
                 box.append(w);
+                if (grp.hint) hint = grp.hint;   // card absent -> hint lives here
             }
-            if (r.note) {
-                const w = document.createElement('div');
-                w.className = 'pt-advisories';
-                w.textContent = '⚠ ' + ptMsg('uplift.patches.safeguard_note',
-                    'Root autodetected: {n}').replace('{n}', r.note);
-                box.append(w);
+            if (hint) {
+                const row = document.createElement('div');
+                row.className = 'pt-sg-rebuild';
+                const lbl = document.createElement('span');
+                lbl.textContent = ptMsg('uplift.patches.safeguard_rebuild',
+                    'Native kernel rebuild (required for real effect):');
+                const cmd = document.createElement('code');
+                cmd.textContent = hint;
+                cmd.title = 'click to copy';
+                cmd.onclick = () => { navigator.clipboard.writeText(cmd.textContent); };
+                row.append(lbl, document.createTextNode(' '), cmd);
+                box.append(row);
             }
+        }
+        if (!cardShowsIt && r.note) {
+            const w = document.createElement('div');
+            w.className = 'pt-advisories';
+            w.textContent = '⚠ ' + ptMsg('uplift.patches.safeguard_note',
+                'Root autodetected: {n}').replace('{n}', r.note);
+            box.append(w);
         }
         const tbl = document.createElement('div');
         tbl.className = 'pt-gate';
@@ -625,10 +667,12 @@ async function ptPreview() {
         }
         box.append(tbl);
         if (r.ok && !r.unchanged && !r.adopted) {
+            const row = document.createElement('div');
+            row.className = 'pt-acts pt-sg-acts';   // flex gap — two adjacent
+            const held = r.requires_approval || [];  // filled .btn.primary
             const en = document.createElement('button');
             en.type = 'button';
             en.className = 'btn primary';
-            const held = r.requires_approval || [];
             en.textContent = held.length
                 ? ptMsg('uplift.patches.approve_once', 'Apply once anyway')
                 : ptMsg('uplift.patches.enable_now', 'Enable patch');
@@ -637,7 +681,7 @@ async function ptPreview() {
                 box.hidden = true;
                 $('pt-new-id').value = '';
             };
-            box.append(en);
+            row.append(en);
             if (held.length) {
                 const al = document.createElement('button');
                 al.type = 'button';
@@ -649,8 +693,9 @@ async function ptPreview() {
                     box.hidden = true;
                     $('pt-new-id').value = '';
                 };
-                box.append(al);
+                row.append(al);
             }
+            box.append(row);
         }
     } catch (e) {
         adv.hidden = false;

@@ -69,23 +69,25 @@ class GateRootSelectionTest(unittest.TestCase):
         orig = patchsource._pristine_overlay
         patchsource._pristine_overlay = lambda s, p, t: calls.append(t) or {"x": None}
         try:
-            root, ov, skip = patchsource._gate_root_selection(
+            root, ov, skip, kind = patchsource._gate_root_selection(
                 self.store, manifest, patch, self.tree)
         finally:
             patchsource._pristine_overlay = orig
         self.assertEqual(root, self.tree)
         self.assertEqual(ov, {"x": None})
         self.assertEqual(skip, ["*/tests/*"])
+        self.assertEqual(kind, "keg")
         self.assertEqual(calls, [self.tree])
 
     def test_dev_scope_unpruned_and_no_overlay(self):
         manifest = {"patches": [], "skip_patterns": ["*/tests/*"]}
         patch = {"id": "d", "versions": [], "scope": "dev"}
-        root, ov, skip = patchsource._gate_root_selection(
+        root, ov, skip, kind = patchsource._gate_root_selection(
             self.store, manifest, patch, self.tree, dev_root="/fake/dev")
         self.assertEqual(root, "/fake/dev")
         self.assertIsNone(ov)
         self.assertIsNone(skip)             # UNPRUNED: stored bytes are the full diff
+        self.assertEqual(kind, "src")       # a source checkout, NOT a keg
 
     def test_dev_scope_missing_root_is_falsy_for_caller_wording(self):
         manifest = {"patches": []}
@@ -93,7 +95,7 @@ class GateRootSelectionTest(unittest.TestCase):
         orig = patchsource.dev_build_root
         patchsource.dev_build_root = lambda: None
         try:
-            root, ov, skip = patchsource._gate_root_selection(
+            root, ov, skip, kind = patchsource._gate_root_selection(
                 self.store, manifest, patch, self.tree)
         finally:
             patchsource.dev_build_root = orig

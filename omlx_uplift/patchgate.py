@@ -90,7 +90,8 @@ def compile_gate(parsed: dict, tree_root: str,
 def validate(diff: bytes, tree_root: str,
              overrides: dict | None = None,
              reverse: bool = False,
-             skip_patterns: list[str] | None = None) -> dict:
+             skip_patterns: list[str] | None = None,
+             tree_kind: str = "keg") -> dict:
     """Full gate WITHOUT writing anything.
 
     The diff is first root-normalized (safeguards.normalize_root): a diff
@@ -110,6 +111,12 @@ def validate(diff: bytes, tree_root: str,
 
     reverse: True gates the diff as a REVERSAL — it must UN-apply cleanly
     against the live tree (the merged change is present and revertible).
+
+    tree_kind: which KIND of tree tree_root is — 'keg' (installed
+    site-packages, the default) or 'src' (a full source checkout, the dev
+    carrier for scope=dev/both). Only the safeguards heuristics read it:
+    their premises are keg-specific and must not be recited at a source
+    tree. Never affects gate verdicts, diff bytes or the sha.
 
     Returns {ok, reason?, advisories?, files: [per-file results],
              compile_problems: [...], content_sha256, diff, safeguards?,
@@ -145,7 +152,7 @@ def validate(diff: bytes, tree_root: str,
            "compile_problems": compile_problems,
            "content_sha256": content_sha256,
            "diff": diff,
-           "safeguards": _safeguards.assess(parsed, tree_root)}
+           "safeguards": _safeguards.assess(parsed, tree_root, tree_kind)}
     if note:
         out["note"] = note
     return out

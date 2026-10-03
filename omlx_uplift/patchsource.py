@@ -62,7 +62,8 @@ from .patchgate import (           # noqa: F401  (re-export seam)
 def fetch_and_gate(source: dict, tree_root: str,
                    overrides: dict | None = None,
                    reverse: bool = False,
-                   skip_patterns: list[str] | None = None) -> dict:
+                   skip_patterns: list[str] | None = None,
+                   tree_kind: str = "keg") -> dict:
     """One-stop for add/check: source = {kind, repo?, pr?, url?, data?,
     insecure_tls?}. Fetch (if needed) then validate. On fetch failure the
     caller MUST keep stored state untouched (fail-safe rule).
@@ -70,7 +71,9 @@ def fetch_and_gate(source: dict, tree_root: str,
     skip_patterns: prune non-installable file sections (see validate).
     Build-scope gating passes skip_patterns=None and a source-checkout
     tree_root — the stored diff bytes are then UNPRUNED, which is what
-    the dev-src materializer (DEV-2) applies as commits."""
+    the dev-src materializer (DEV-2) applies as commits.
+    tree_kind: 'keg' (default) or 'src' — what tree_root IS, for the
+    safeguards heuristics only (advisory; never touches verdicts/bytes)."""
     kind = source.get("kind")
     tls = bool(source.get("insecure_tls"))
     if kind == "github_pr":
@@ -100,7 +103,8 @@ def fetch_and_gate(source: dict, tree_root: str,
         return {"ok": False, "stage": "fetch", "reason": fetched["reason"],
                 "advisories": advisories}
     gate = validate(fetched["data"], tree_root, overrides=overrides,
-                    reverse=reverse, skip_patterns=skip_patterns)
+                    reverse=reverse, skip_patterns=skip_patterns,
+                    tree_kind=tree_kind)
     ref = (fetched.get("url") or source.get("kind") or "?")
     if gate.get("skipped"):
         advisories = list(advisories) + [
@@ -285,13 +289,13 @@ def _add_gate(store, manifest, patch, creating: bool, patch_id: str,
     a scope signal: when the failing/pruned sections exist only in a
     source checkout (DEV-1 classification), name them so the caller can
     offer scope=both instead of a bare rejection."""
-    gate_root, gate_overrides, patterns = _gate_root_selection(
+    gate_root, gate_overrides, patterns, gate_kind = _gate_root_selection(
         store, manifest, patch, tree_root, scope=effective_scope,
         dev_root=build_root)          # add_patch gates the CALLER's root
     is_dev = _patches.scope_touches_dev(effective_scope)
     result = fetch_and_gate(source, gate_root, overrides=gate_overrides,
                             reverse=bool(patch.get("reversal")),
-                            skip_patterns=patterns)
+                            skip_patterns=patterns, tree_kind=gate_kind)
     if result["ok"] and effective_scope == _patches.SCOPE_BOTH:
         keg_res = fetch_and_gate(source, tree_root,
                                  overrides=_pristine_overlay(store, patch, tree_root),
@@ -308,6 +312,16 @@ def _add_gate(store, manifest, patch, creating: bool, patch_id: str,
                         "advisories": keg_res.get("advisories", [])})
             _discard_patch(store, manifest, patch, creating)
             return fail, None
+        # both stores the SRC-gate report, but the keg half carries its own
+        # real hazard (a pruned overlay can still land custom_kernels/*.py
+        # wrappers next to stale compiled artifacts). The keg gate just ran
+        # and passed — adopt ITS problems as the blocking set and keep the
+        # src advisories for display, so 'both' never loses kernel hold.
+        result["safeguards"] = {
+            "problems": (keg_res.get("safeguards") or {}).get("problems", []),
+            "codes": (keg_res.get("safeguards") or {}).get("codes", []),
+            "advisories": (result.get("safeguards") or {}).get("advisories", []),
+            "truncated": (keg_res.get("safeguards") or {}).get("truncated", False)}
     if not result["ok"]:
         if not is_dev:
             fails = [f for f in result.get("files", []) if f["status"] == "fail"]
@@ -638,13 +652,18 @@ _DEV_ROOT_DEFAULT = object()
 def _gate_root_selection(store, manifest, patch, tree_root: str, *,
                          scope: str | None = None,
                          dev_root=_DEV_ROOT_DEFAULT):
-    """(root, overrides, skip_patterns) for gating this patch."""
+    """(root, overrides, skip_patterns, tree_kind) for gating this patch.
+    tree_kind tells the safeguards heuristics WHAT the root is ('src'
+    checkout vs installed 'keg'); verdicts and bytes are unaffected."""
     scope = scope or _patches.patch_scope(patch)
     if _patches.scope_touches_dev(scope):
         root = dev_build_root() if dev_root is _DEV_ROOT_DEFAULT else dev_root
-        return root, None, None        # UNPRUNED: stored bytes are the full diff
+        # 'both' ALSO runs a keg overlay gate in _add_gate — that pass
+        # passes tree_kind='keg' explicitly, so the kernel heuristic is
+        # still heard for the overlay half.
+        return root, None, None, "src"
     return (tree_root, _pristine_overlay(store, patch, tree_root),
-            _patches.skip_patterns(manifest))
+            _patches.skip_patterns(manifest), "keg")
 
 
 def _store_version(store, patch: dict, result: dict) -> dict:
@@ -671,11 +690,19 @@ def _store_version(store, patch: dict, result: dict) -> dict:
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "patch_file": pf_rel,
     }
-    if result.get("safeguards", {}).get("problems"):
+    sg = result.get("safeguards") or {}
+    if sg.get("problems") or sg.get("advisories"):
+        # one schema: problems block auto-apply, advisories are display-only
+        # (e.g. native kernel paths on a dev carrier — stored so the card
+        # shows its one honest line after a restart). 'both' carries both:
+        # the keg overlay's hold AND the src-side advisory.
         version["safeguards"] = {
-            "problems": result["safeguards"]["problems"],
-            "codes": result["safeguards"]["codes"],
+            "problems": sg.get("problems", []),
+            "codes": sg.get("codes", []),
+            "advisories": sg.get("advisories", []),
         }
+        if sg.get("truncated"):
+            version["safeguards"]["truncated"] = True
     if result.get("note"):
         version["root_note"] = result["note"]
     patch["versions"].append(version)
@@ -971,13 +998,14 @@ def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
     data = _read_patch_file(store, desired)
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
-    root, overrides, skip = _gate_root_selection(store, manifest, p, tree_root)
+    root, overrides, skip, kind = _gate_root_selection(store, manifest, p, tree_root)
     if not root:
         return {"ok": False,
                 "reason": "dev-src checkout not found — dev patch "
                           "cannot re-gate (omlx-uplift dev bootstrap)"}
     result = validate(data, root, overrides=overrides,
-                      reverse=bool(p.get("reversal")), skip_patterns=skip)
+                      reverse=bool(p.get("reversal")), skip_patterns=skip,
+                      tree_kind=kind)
     result.pop("diff", None)  # bytes are not JSON-serialisable; caller has the id
     p["last_verified"] = {"at": _patches.now_iso(),
                           "ok": result["ok"]}
@@ -1082,7 +1110,7 @@ def check_all(store, tree_root: str) -> dict:
         pid = p.get("id")
         if src.get("kind") not in ("github_pr", "url"):
             continue
-        root, overrides, skip = _gate_root_selection(store, manifest, p, tree_root)
+        root, overrides, skip, kind = _gate_root_selection(store, manifest, p, tree_root)
         if not root:
             reports[pid] = {"check": "error",
                             "reason": "dev-src checkout not found — "
@@ -1090,7 +1118,7 @@ def check_all(store, tree_root: str) -> dict:
             continue
         result = fetch_and_gate(src, root, overrides=overrides,
                                 reverse=bool(p.get("reversal")),
-                                skip_patterns=skip)
+                                skip_patterns=skip, tree_kind=kind)
         if not result["ok"]:
             reports[pid] = {"check": "error", "reason": result.get("reason")}
             continue
@@ -1173,6 +1201,27 @@ def check_all(store, tree_root: str) -> dict:
         # first gate in this loop, and nothing reassigned `result` since.)
         # BE-3 step 2 behavior fix: drift candidates now carry the SAME
         # schema as add_patch (safeguards/root_note were silently dropped).
+        if _patches.patch_scope(p) == _patches.SCOPE_BOTH:
+            # a drifted 'both' candidate stores the SRC-gate report; the
+            # keg overlay has its own real hazard (custom_kernels/*.py
+            # wrapper landing next to stale compiled artifacts). Re-run
+            # the keg gate (cheap, already the pattern above) and adopt
+            # ITS problems — same merge _add_gate does at add time. When
+            # the keg re-gate cannot answer (fetch dead), keep the src
+            # report untouched: a lost hold is worse than an over-strict
+            # one (the pre-change behaviour).
+            keg_res = fetch_and_gate(
+                src, tree_root,
+                overrides=_pristine_overlay(store, p, tree_root),
+                reverse=bool(p.get("reversal")),
+                skip_patterns=_patches.skip_patterns(manifest))
+            keg_sg = keg_res.get("safeguards")
+            if keg_sg is not None:
+                result["safeguards"] = {
+                    "problems": keg_sg.get("problems", []),
+                    "codes": keg_sg.get("codes", []),
+                    "advisories": (result.get("safeguards") or {}).get("advisories", []),
+                    "truncated": keg_sg.get("truncated", False)}
         version = _store_version(store, p, result)
         v = version["v"]
         store.set_state(p, "update_available", f"v{v} available from source")
