@@ -696,10 +696,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     align-items: center; gap: 8px;
     font: 300 12px/1.4 var(--mono); margin-bottom: 6px; }
 /* the pair grid collapses to one column before cells get narrower than a
-   control (220px) plus a readable label; below that the 1fr name track
+   control (220px) plus a short label; below that the 1fr name track
    starves to 0px at small viewports (scoped to the editor modal — .pair is
-   also used by the status/usage tiles) */
-.modal.editor .pair { grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr)); }
+   also used by the status/usage tiles). UX-5b: 290 not 330 — the editor's
+   rail reservation made 330 collapse to one column at ~1200px viewports,
+   stacking every toggle above its knob) */
+.modal.editor .pair { grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr)); }
 /* the |original| chip is narrower so name labels ("Enable Thinking") fit */
 .se-row .diff-out { margin-left: 0; gap: 4px; }
 .se-row .diff-out .diff-o { max-width: 68px; }
@@ -1191,30 +1193,19 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 
 /* ---- Model settings editor: popup modal, roomy, monospace everywhere ---- */
 /* U1 (user round 2026-09-16): the 860px editor clipped long labels like
-   "Cache Reasoning …" — the form now uses most of the viewport */
-.modal.nasa.editor { width: min(992px, 96vw); max-height: 92vh; }
-/* form sits left; the CHANGES side rail opens on the right when changes
-   queue. UX-2 (user 2026-10-03): the widen reflowed the whole form on the
-   FIRST queued edit (-140px label shift measured) — 'the section insides
-   change places' — so on viewports that fit it, the editor is now always
-   the rail-open width and the rail slot is reserved by the flex rules
-   below: the form is capped at its old 964px, the (hidden) rail keeps a
-   330px slot — borderless while empty, so no dead frame. The modal never
-   changes width; controls never move. Below 1232px the reservation cannot
-   fit and the old behavior stays. */
-@media (min-width: 1232px) {
-    .modal.nasa.editor { width: min(1200px, 98vw); }
-    /* [hidden] companion: keep the rail slot laid out but invisible —
-       visibility:hidden reserves the 320px with no frame and no dead gap
-       (display:none would let the form flex and re-introduce the jump) */
-    #se-changes.ed[hidden] { display: block; visibility: hidden; }
-}
-/* below the reservation width: the old behavior — anchor left, widen when
-   the rail queues (a small reflow there is preferable to a starved form) */
-@media (max-width: 1231px) {
-    .modal.nasa.editor { margin-right: auto; }
-    .modal.nasa.editor:has(.changelist.ed:not([hidden])) { width: min(1200px, 98vw); margin-right: 0; }
-}
+   "Cache Reasoning …" — the form now uses most of the viewport.
+   UX-5b (user 2026-10-03): the rail-open widening below 1232px reflowed the
+   pair grid — the first dirty edit could drop every section from 2 columns
+   to 1 ('enabling a toggle causes the grouped setting to end on the line
+   below, and vice versa'). The reservation is no longer conditional: the
+   editor is ALWAYS the rail-open width and the rail slot is reserved by
+   visibility:hidden, so SAVE state can never move a control. Narrow
+   viewports get one column from the start — stable, never a jump. */
+.modal.nasa.editor { width: min(1200px, 98vw); max-height: 92vh; }
+/* keep the rail slot laid out but invisible — visibility:hidden reserves
+   the 320px with no frame and no dead gap (display:none would let the form
+   flex and re-introduce the jump) */
+#se-changes.ed[hidden] { display: block; visibility: hidden; }
 .editor-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
 .editor-body .editor-scroll { flex: 0 1 964px; min-width: 0; }
 #se-changes.ed { flex: 0 0 320px; align-self: stretch; max-height: none;
