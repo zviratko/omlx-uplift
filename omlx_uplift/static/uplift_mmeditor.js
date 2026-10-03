@@ -809,8 +809,8 @@ function renderEditorFields(container) {
         // textarea's own flex ROW — three side-by-side items squeezed the
         // EBNF well to a third of its box and nothing lined up. Now: textarea
         // full width on its own line, example + EXPAND in an action row
-        // BELOW it, sharing the textarea's edges (user: 'the expand button
-        // could be placed below the example').
+        // BELOW it (UX-6c: example at the left edge, EXPAND at the right
+        // edge — under the textarea's bottom-right corner).
         const ggActions = document.createElement('div');
         ggActions.className = 'grammar-actions';
         ggActions.append(presetSel, expandB);

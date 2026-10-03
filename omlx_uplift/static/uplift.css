@@ -1718,13 +1718,14 @@ label.se-row.pending-restart > .se-ctl > select {
 
 .modal.editor .se-wide .se-ctl { justify-content: stretch; flex-direction: column; align-items: stretch; }
 .modal.editor .se-wide textarea { width: 100%; }
-/* UX-6 (user): example dropdown + EXPAND stack BELOW the textarea, left
-   edges aligned to it — user asked 'the expand button could be placed below
-   the example'. Not a third item in the textarea's flex row (that squeezed
-   the EBNF well and mis-aligned all three). */
-.grammar-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 4px; }
+/* UX-6 (user): action row BELOW the textarea, not a third item in the
+   textarea's flex row (that squeezed the EBNF well). UX-6c (user): the
+   example stays at the textarea's left edge, EXPAND is pushed to the
+   RIGHT edge — under the textarea's bottom-right corner, bottom edges
+   flush with the select. */
+.grammar-actions { display: flex; align-items: flex-end; gap: 8px; margin-top: 4px; }
 .grammar-actions select { width: 260px; max-width: 100%; min-width: 0; }
-.grammar-actions .se-btn { flex: 0 0 auto; }
+.grammar-actions .se-btn { flex: 0 0 auto; margin-left: auto; }
 /* R10-5: grammar textarea — big and mono, it holds EBNF */
 .modal.editor .se-box-body textarea { min-height: 200px;
     font: 400 12px/1.5 var(--mono); }
