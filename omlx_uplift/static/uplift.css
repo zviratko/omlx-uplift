@@ -1208,13 +1208,17 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    (modal 868 = 1200 − rail 320 − gap 12), the left edge never moves, and
    at rest the modal is compact with no dead space INSIDE it. Below
    1232px the rail overlays instead (98vw cap leaves no room to grow). */
-.modal.nasa.editor { width: min(868px, 98vw); max-height: 92vh;
-    transition: width .15s ease, margin-right .15s ease; }
+.modal.nasa.editor { width: min(868px, 98vw); max-height: 92vh; }
 @media (min-width: 1232px) {
     /* no-jump rule (step1, still user law): reserve the widen delta as a
        right margin so flex centering pins the LEFT edge exactly where the
-       widened modal will sit; both animate together so the sum — and the
-       edge — never move. 332 = rail 320 + gap 12 = the widen delta. */
+       widened modal will sit. 332 = rail 320 + gap 12 = the widen delta.
+       NO width/margin transition (UX-6b, user 2026-10-03): animating the
+       widen squished the form mid-flight — the rail takes its flow space
+       instantly while the modal is still narrow, so the box visibly
+       resized and slid instead of the rail popping in. The reservation
+       makes the INSTANT widen edge-pinned already; animating it only
+       invents motion. */
     .modal.nasa.editor { margin-right: 332px; }
     .modal.nasa.editor:has(#se-changes.ed:not([hidden])) { width: min(1200px, 98vw); margin-right: 0; }
 }
