@@ -9,6 +9,9 @@ name: tests
 on:
   push:
     branches: [main]
+    # REL-1: a pushed release tag must prove itself — the tagged commit
+    # runs CI too, so `brew install` only ever builds something green.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 

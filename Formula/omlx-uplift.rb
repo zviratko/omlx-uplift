@@ -1,10 +1,11 @@
 class OmlxUplift < Formula
   desc "Uplift dashboard: companion UI and metrics for oMLX"
   homepage "https://github.com/zviratko/omlx-uplift"
-  # REPO-1: moved out of the omlx monorepo into its own repo (tag v0.1).
-  # Stable tag by default, `--HEAD` follows main (was: projects/omlx-uplift
-  # from zviratko/omlx feat/uplift-dashboard).
-  url "https://github.com/zviratko/omlx-uplift.git", tag: "v0.1"
+  # REPO-1: moved out of the omlx monorepo into its own repo.
+  # Stable tag by default, `--HEAD` follows main. This repo IS the tap
+  # (zviratko/uplift), so tag + formula + package version move in one
+  # commit; tests/test_release_formula.py pins that they agree.
+  url "https://github.com/zviratko/omlx-uplift.git", tag: "v1.0"
   head "https://github.com/zviratko/omlx-uplift.git", branch: "main", using: :git
 
   # Depends on the omlx formula from the upstream tap; brew resolves
@@ -28,7 +29,15 @@ class OmlxUplift < Formula
     # ONE file — a .pth that bootstraps sys.path to this keg's venv and
     # imports the autopatch. Nothing is copied into the omlx keg.
     system "python3.11", "-m", "venv", libexec
-    system libexec/"bin/pip", "install", "fastapi", "uvicorn"
+    # REL-1: STABLE builds pin the exact dependency set the release was
+    # tested with (constraints-stable.txt, shipped in the repo); --HEAD
+    # builds float fastapi/uvicorn so main always rides the newest.
+    if head?
+      system libexec/"bin/pip", "install", "fastapi", "uvicorn"
+    else
+      system libexec/"bin/pip", "install", "-c",
+             buildpath/"constraints-stable.txt", "fastapi", "uvicorn"
+    end
     # --no-deps: the package declares `omlx` (no PyPI distribution).
     system libexec/"bin/pip", "install", "--no-deps", "#{buildpath}"
     # pip's console-script shim, into a predictable bin.
