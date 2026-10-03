@@ -36,9 +36,7 @@ function applyRowState(o) {
     if (row) {
         row.classList.toggle('dirty', changed);
         row.classList.toggle('restartq', !!(changed && o.isRestart));
-        // UX-3: a merged row hosts one chip PER CONTROL — hosts pass their
-        // own; the default stays the first chip in the row
-        const rd = o.chip || row.querySelector('.diff-out');
+        const rd = row.querySelector('.diff-out');
         if (rd) {
             rd.hidden = !changed;
             if (changed && o.isSecret) {
