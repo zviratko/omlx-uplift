@@ -746,6 +746,23 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
    greyed — controls keep their slot instead of popping in/out on toggle */
 .se-sub.se-off, [data-gate].se-off { opacity: 0.45; }
 .se-sub.se-off { border-left-color: var(--edge); }
+/* UX-3: knob(s) merged onto a toggle's line — dim label prefix, then the
+   control's own diff chip, then the control. Wraps instead of clipping. */
+.se-inline { display: inline-flex; align-items: center; flex-wrap: wrap;
+    gap: 4px 6px; margin-left: 8px; min-width: 0; }
+.se-inline-pre { color: var(--dim); font-size: 10px; letter-spacing: .02em;
+    text-transform: uppercase; white-space: nowrap; }
+.se-inline .se-slot { min-width: 0; }
+.se-inline select, .se-inline input[type=number], .se-inline input[type=text] {
+    width: auto; max-width: 200px; min-width: 72px;
+    flex: 0 1 auto; }   /* selects can shrink so a 2-knob row keeps one line */
+[data-gate].se-off .se-inline-pre { color: var(--edge); }
+/* a merged row trades label room for knob room: the control track grows
+   past the default 220px cap so toggle + knobs share the cell */
+.modal.editor .se-row:has(.se-inline) {
+    grid-template-columns: minmax(0, 0.8fr) auto minmax(180px, 1.5fr); }
+.se-mergewide { grid-column: 1 / -1; }   /* multi-knob rows use the full width */
+.se-mergewide .se-inline select { max-width: 140px; }
 /* item 8: engine-reload trigger badge. U41: on its own line under the name
    once names wrap — inline it read as a glitch box after short labels */
 .se-reload-badge { margin-left: 6px; font: 500 8px/1 var(--mono); letter-spacing: 0.08em;
@@ -1569,7 +1586,9 @@ label.se-row.restartq input, label.se-row.restartq select, label.se-row.restartq
    dashed amber frame (stored ✓, engine ✗) — distinct from the red dirty
    restartq tint (unsaved) and the accent dirty tint (live-pending). */
 label.se-row.pending-restart > .se-ctl > input,
-label.se-row.pending-restart > .se-ctl > select {
+label.se-row.pending-restart > .se-ctl > select,
+label.se-row.pending-restart .se-inline > input,
+label.se-row.pending-restart .se-inline > select {
     border-style: dashed; border-color: rgba(160, 120, 0, 0.8); }
 .diff-out { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px;
     font: 400 10px/1.3 var(--mono); flex: 0 0 auto; }
