@@ -5,28 +5,34 @@
 #   - QA server having persisted port 8099 into production settings.json
 #   - service running but serving stale static bytes (old process alive)
 #
-#   scripts/verify-deploy.sh [port] [expected-sha]   # default 8011, origin/main
-# The api_key is substituted from settings.json by the shell; it never
-# appears in output. Static routes require the session cookie, so all
-# byte comparisons run authenticated against the LIVE service — served
-# bytes must equal the keg AND the git tree at the expected revision.
-# Exit 0 = all checks passed.
+#   scripts/verify-deploy.sh [port] [expected-sha]
+# Default expected-sha = the INSTALLED keg's revision: the standing
+# question is "is the running service serving what is installed" (a
+# service can be alive on old bytes after a partial reinstall, and the
+# QA incidents proved the port can drift). Nightly runs it this way, so
+# it stays green between merge and deploy. A deploy gate passes the sha
+# EXPLICITLY (verify-deploy.sh 8011 "$(git rev-parse --short=7 HEAD)")
+# to demand the newest code. The api_key is substituted from
+# settings.json by the shell; it never appears in output. Static routes
+# require the session cookie, so all byte comparisons run authenticated
+# against the LIVE service — served bytes must equal the git tree at the
+# expected revision. Exit 0 = all checks passed.
 set -uo pipefail
 
 PORT="${1:-8011}"
 HOST="http://127.0.0.1:$PORT"
 REPO="${QA2_REPO:-$HOME/git/omlx-uplift-repo}"
-EXPECTED="${2:-$(git -C "$REPO" rev-parse --short=7 origin/main)}"
 SETTINGS="$HOME/.omlx/settings.json"
+INSTALLED="$(brew list --versions omlx-uplift | awk '{print $2}')"
+EXPECTED="${2:-${INSTALLED#HEAD-}}"
 fail=0
 ok()  { printf 'PASS %-28s %s\n' "$1" "$2"; }
 bad() { printf 'FAIL %-28s %s\n' "$1" "$2"; fail=1; }
 
 # 1. installed keg is at the expected revision
-installed="$(brew list --versions omlx-uplift | awk '{print $2}')"
-case "$installed" in
-  *"$EXPECTED") ok keg-revision "$installed" ;;
-  *) bad keg-revision "$installed (want *$EXPECTED)" ;;
+case "$INSTALLED" in
+  *"$EXPECTED") ok keg-revision "$INSTALLED" ;;
+  *) bad keg-revision "$INSTALLED (want *$EXPECTED)" ;;
 esac
 
 # 2. production settings port is the port we are verifying

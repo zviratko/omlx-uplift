@@ -57,6 +57,13 @@ node_out=$(node --test tests/*.cjs 2>&1)
 rc_node=$?
 [ $rc_check -ne 0 ] && node_out="$check_out\n$node_out"
 
+# QA-2 C: production drift check — is the RUNNING service serving what is
+# INSTALLED, on the right port? Default expected-sha mode (the installed
+# keg itself), so a merge without a deploy does not raise a nightly
+# alarm; port drift, dead service, or old bytes in a live process do.
+verify_out=$(bash scripts/verify-deploy.sh 2>&1)
+rc_verify=$?
+
 # counts: pytest tail line '544 passed, 2 warnings in 29s' style;
 # node --test summary 'ℹ tests N / pass N / fail N / skipped N'
 p_pass=$(printf '%s' "$pytest_out" | grep -oE '[0-9]+ passed' | tail -1 | cut -d' ' -f1)
@@ -71,10 +78,12 @@ ok=true
 [ "$rc_pytest" -ne 0 ] && ok=false
 [ "$rc_node" -ne 0 ] && ok=false
 [ "$rc_check" -ne 0 ] && ok=false
+[ "$rc_verify" -ne 0 ] && ok=false
 sha=$(git rev-parse --short HEAD)
 date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-line="{\"date\":\"$date\",\"sha\":\"$sha\",\"updated\":$([ "$updated" = yes ] && echo true || echo false),\"ok\":$ok,\"rc_pytest\":$rc_pytest,\"rc_check\":$rc_check,\"rc_node\":$rc_node,\"pytest\":{\"pass\":$p_pass,\"fail\":$p_fail,\"skip\":$p_skip},\"node\":{\"pass\":$n_pass,\"fail\":$n_fail,\"skip\":$n_skip}}"
+upd_bool=false; [ "$updated" = yes ] && upd_bool=true
+line="{\"date\":\"$date\",\"sha\":\"$sha\",\"updated\":$upd_bool,\"ok\":$ok,\"rc_pytest\":$rc_pytest,\"rc_check\":$rc_check,\"rc_node\":$rc_node,\"rc_verify\":$rc_verify,\"pytest\":{\"pass\":$p_pass,\"fail\":$p_fail,\"skip\":$p_skip},\"node\":{\"pass\":$n_pass,\"fail\":$n_fail,\"skip\":$n_skip}}"
 printf '%s\n' "$line" >>"$JSONL"
 
 if [ "$ok" != true ]; then
@@ -82,6 +91,7 @@ if [ "$ok" != true ]; then
         echo "=== $date sha=$sha ==="
         echo "--- pytest ---"; printf '%s\n' "$pytest_out"
         echo "--- node ---"; printf '%s\n' "$node_out"
+        echo "--- verify-deploy ---"; printf '%s\n' "$verify_out"
     } >"$FAILLOG"
 fi
 rm -f "$LOG"

@@ -356,7 +356,7 @@ def cmd_serve(argv=None) -> int:
         if real_settings.is_file() and not qa_settings.exists():
             info = _qa_seed_settings(real_settings, qa_settings, port)
             print(f"qa: seeded {qa_settings} from {real_settings} "
-                  f"({info['models']} models, port {port})")
+                  f"(settings-models={info['models']}, port {info['port']})")
         elif not qa_settings.exists():
             print(f"omlx-uplift serve --qa: no settings to seed "
                   f"({real_settings} missing) and no {qa_settings}",

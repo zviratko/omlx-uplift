@@ -35,7 +35,7 @@ Design notes:
 
 import json
 
-VERSION = "1"
+VERSION = "2"
 
 # viewport widths the editor must be correct at; 782 is the pair-grid
 # breakpoint, 1232 the rail flow/overlay breakpoint
@@ -62,6 +62,7 @@ class Suite:
     def __init__(self, js, cdp, base):
         self.js, self.cdp, self.base = js, cdp, base
         self.results, self.model = [], None
+        self.header = None
 
     # ---------- plumbing ----------
     def _eval(self, expr):
@@ -78,33 +79,64 @@ class Suite:
             pass
 
     def check(self, name, ok, detail=""):
-        self.results.append((name, bool(ok), detail))
+        # ok=None records a SKIP (checked-by-design-not-applicable), which
+        # the report counts and explains — green must never be vacuous
+        self.results.append((name, ok, detail))
         return ok
 
     # ---------- page helpers (all JS lives in one string per action) ----------
     _OPEN = """(async () => {
-      if (!window.__qaMid) {
-        const d = await (await fetch('%(base)s/admin/api/models')).json();
-        window.__qaMid = (d.models && d.models[0] && d.models[0].id) || null;
-      }
-      if (!window.__qaMid) return 'NO-MODEL';
+      const d = await (await fetch('%(base)s/admin/api/models')).json();
+      const mid = '%(mid)s' || (d.models && d.models[0] && d.models[0].id) || null;
+      if (!mid) return 'NO-MODEL';
       window.Uplift.modelmgr.closeEditor();
       await new Promise(r => setTimeout(r, 150));
-      await window.Uplift.modelmgr.openEditor(window.__qaMid);
+      await window.Uplift.modelmgr.openEditor(mid);
       await new Promise(r => setTimeout(r, 450));
-      return window.__qaMid;
+      return mid;
     })()"""
 
     _CLOSE = "window.Uplift.modelmgr.closeEditor(), 'closed'"
 
     def open(self):
-        out = self._eval(self._OPEN % {"base": self.base})
+        out = self._eval(self._OPEN % {"base": self.base, "mid": self.model or ""})
         if out == "NO-MODEL":
             raise RuntimeError("QA base has no models — is it seeded?")
         return out
 
     def close(self):
         self._eval(self._CLOSE)
+
+    def pick_model(self):
+        """v2 (A): do not blindly measure models[0] — if that model lacks
+        the invariant keys, every key-dependent check would skip and the
+        report would be green-but-empty. Inventory each candidate once and
+        keep the one covering the most PAIRED/SPEC/grammar keys."""
+        cands = self._eval("""(async () => {
+          const d = await (await fetch('%(base)s/admin/api/models')).json();
+          return JSON.stringify((d.models || []).map(m => m.id));
+        })()""" % {"base": self.base})
+        ids = json.loads(cands) if isinstance(cands, str) else cands
+        if not ids:
+            raise RuntimeError("QA base has no models — is it seeded?")
+        keys = [k for p in PAIRED for k in p] + list(SPEC) + ["guided_grammar"]
+        best, best_n = ids[0], -1
+        for mid in ids[:8]:          # bounded scan; 8 editors is plenty
+            self.model = mid
+            self.open()
+            n = self._eval("""(() => {
+              const f = document.querySelector('#se-fields');
+              if (!f) return 0;
+              return %(keys)s.filter(k =>
+                f.querySelector('[data-key=\\\"' + k + '\\\"]')).length;
+            })()""" % {"keys": json.dumps(keys)})
+            self.close()
+            if isinstance(n, int) and n > best_n:
+                best, best_n = mid, n
+            if best_n == len(keys):
+                break               # can't do better
+        self.model = best
+        return best, best_n, len(keys)
 
     def _probe(self):
         """One JS pass returning every measurement for the current state.
@@ -206,7 +238,9 @@ class Suite:
     def t_pairs(self, data, tag, w):
         for p in data["pairs"]:
             if p["state"] == "missing":
-                continue   # key absent for this model family — not a layout fail
+                # key absent for this model family — recorded, not silent
+                self.check("pair %s (%s)" % (p["m"], tag), None, "skip: key absent")
+                continue
             if w < PAIR_TWO_COL_MIN:
                 # single column by design below the breakpoint: the knob
                 # stacking under its master is correct; what must never
@@ -218,7 +252,8 @@ class Suite:
 
     def t_spec(self, data, w):
         if data["sp2x2"] is None:
-            return  # specprefill fields absent for this model — nothing to check
+            self.check("specprefill 2x2 @%d" % w, None, "skip: keys absent")
+            return
         if w < PAIR_TWO_COL_MIN:
             return  # one column by design; the 2x2 band cannot exist
         self.check("specprefill 2x2 @%d" % w, data["sp2x2"] is True)
@@ -257,13 +292,31 @@ class Suite:
         self.check("grammar live while on", on is False, "disabled=%s" % on)
         self.close()
 
+    def _dirty_trigger(self):
+        """First toggle that exists on this model — v1 assumed
+        turboquant always exists; on another model family it does not."""
+        for key in ("turboquant_kv_enabled", "enableThinkingBudget",
+                    "specprefill_enabled", "guided_grammar_enabled"):
+            sel = ('#se-fields [data-key="%s"] input[type=checkbox]' % key)
+            if self._eval("""(() => {
+              const el = document.querySelector('%s');
+              return el ? 1 : 0;
+            })()""" % sel):
+                return sel
+        return None
+
     def t_rail_invariance(self, w):
         """Clean vs dirty: the FORM must not move. Below RAIL_RESERVE_MIN the
         rail overlays; at/above it the modal widens by exactly rail+gap."""
         self.open()
+        trig = self._dirty_trigger()
+        if trig is None:
+            self.check("rail invariance @%d" % w, None, "skip: no toggle key")
+            self.close()
+            return
         clean = self._probe()
         # queue exactly one change
-        self._click('#se-fields [data-key="turboquant_kv_enabled"] input[type=checkbox]')
+        self._click(trig)
         self._wait(400)
         dirty = self._probe()
         d_clean = clean["scroll"]["width"]
@@ -294,11 +347,16 @@ class Suite:
         width across the frames after the toggle must show NO intermediate
         value (UX-6b shipped a transition that slid the window)."""
         self.open()
+        trig = self._dirty_trigger()
+        if trig is None:
+            self.check("rail pop is instant (no slide)", None, "skip: no toggle key")
+            self.close()
+            return
+        js_trig = trig.replace("'", "\\'")
         samples = self._eval("""(async () => {
           const m = document.querySelector('.modal.editor');
           const out = [];
-          const cb = document.querySelector(
-            '#se-fields [data-key="turboquant_kv_enabled"] input[type=checkbox]');
+          const cb = document.querySelector('%s');
           out.push(m.getBoundingClientRect().width);
           cb.click();
           for (let i = 0; i < 10; i++) {
@@ -306,11 +364,55 @@ class Suite:
             out.push(m.getBoundingClientRect().width);
           }
           return JSON.stringify(out);
-        })()""")
-        vals = [round(v) for v in __import__("json").loads(samples)]
+        })()""" % js_trig)
+        vals = [round(v) for v in json.loads(samples)]
         uniq = sorted(set(vals))
         self.check("rail pop is instant (no slide)", len(uniq) <= 2,
                    "widths seen: %s" % uniq)
+        self.close()
+
+    def t_localized(self, w):
+        """Czech pass (U41 bug class): labels there run 30-50 % longer.
+        The grid must adapt (wrap, never ellipsis) and no row may spill
+        outside the form; knob-beside-master must survive the longer
+        words at full width."""
+        self.open()
+        info = self._eval("""(() => {
+          const f = document.querySelector('#se-fields');
+          if (!f) return JSON.stringify({err: 'editor not open'});
+          const names = [...f.querySelectorAll('.se-row > span:first-child')];
+          let clipped = 0, csHits = 0;
+          for (const n of names) {
+            const cs = getComputedStyle(n);
+            if (cs.overflow === 'hidden' && n.scrollWidth > n.clientWidth + 2
+                && cs.overflowWrap !== 'anywhere') clipped++;
+            // Czech signal: letters that appear in no English label.
+            // (v2 first draft demanded words and missed e.g. 'Okno
+            // kontextu' — diacritics alone are the honest test.)
+            if (/[áčďéěíňóřšťúůž]/i.test(n.textContent)) csHits++;
+          }
+          const scroll = document.querySelector('.editor-scroll')
+            .getBoundingClientRect();
+          let spill = 0;
+          for (const r of f.querySelectorAll('.se-row')) {
+            const b = r.getBoundingClientRect();
+            if (b.right > scroll.right + 2 || b.left < scroll.left - 2) spill++;
+          }
+          return JSON.stringify({rows: names.length, clipped, csHits, spill,
+            sample: names.slice(0, 6).map(n => n.textContent.trim())});
+        })()""")
+        d = json.loads(info)
+        if d.get("err"):
+            self.check("czech pass @%d" % w, False, d["err"])
+        else:
+            self.check("cs: labels localized @%d" % w, d["csHits"] >= 3,
+                       "csHits=%d sample=%s" % (d["csHits"], d["sample"][:3]))
+            self.check("cs: no clipped labels @%d" % w, d["clipped"] == 0,
+                       "%d/%d clipped" % (d["clipped"], d["rows"]))
+            self.check("cs: no row spill @%d" % w, d["spill"] == 0,
+                       "%d rows outside form" % d["spill"])
+            if w >= PAIR_TWO_COL_MIN:
+                self.t_pairs(self._probe(), "cs@%d" % w, w)
         self.close()
 
     def run(self):
@@ -331,6 +433,13 @@ class Suite:
                     break
             except Exception:
                 pass
+        mid, covered, total = self.pick_model()
+        self.header = "model=%s key-coverage=%d/%d" % (mid, covered, total)
+        if covered == 0:
+            self.check("coverage", False,
+                       "no model exposes ANY invariant key — suite would "
+                       "be vacuously green")
+            return self.report()
         for w in WIDTHS:
             self._width(w)
             try:
@@ -357,17 +466,47 @@ class Suite:
             self.t_rail_no_animation(WIDTHS[-1])
         finally:
             self.close()
+        # B: Czech localization pass (QA reload is locale-persistent:
+        # ?lang override lives in the URL we navigate to per reload)
+        try:
+            self.cdp('Page.navigate', url=self.base + "/uplift/?lang=cs")
+            for _ in range(40):
+                _t.sleep(0.4)
+                try:
+                    if self._eval("document.readyState") == "complete" \
+                            and self._eval("!!window.Uplift"):
+                        break
+                except Exception:
+                    pass
+            for w in (1024, 1728):
+                self._width(w)
+                self.t_localized(w)
+        finally:
+            self.close()
             self._clear_width()
+            try:
+                self.cdp('Page.navigate', url=self.base + "/uplift/")
+            except Exception:
+                pass
         return self.report()
 
     def report(self):
-        bad = [r for r in self.results if not r[1]]
+        bad = [r for r in self.results if r[1] is False]
+        skipped = [r for r in self.results if r[1] is None]
+        passed = [r for r in self.results if r[1] is True]
         lines = [""]
+        if getattr(self, "header", None):
+            lines.append("measured: " + self.header)
         for name, ok, detail in self.results:
-            lines.append("%s %-44s %s" % ("PASS" if ok else "FAIL", name, detail))
+            tag = "PASS" if ok is True else ("FAIL" if ok is False else "SKIP")
+            lines.append("%s %-44s %s" % (tag, name, detail))
         lines.append("")
-        lines.append("layout suite v%s: %d checks, %d failures"
-                     % (VERSION, len(self.results), len(bad)))
+        lines.append("layout suite v%s: %d passed, %d failed, %d skipped "
+                     "(%d total)" % (VERSION, len(passed), len(bad),
+                                     len(skipped), len(self.results)))
+        if skipped:
+            lines.append("skips are claims: if the measured model SHOULD "
+                         "have those keys, something is wrong upstream.")
         return "\n".join(lines)
 
 
