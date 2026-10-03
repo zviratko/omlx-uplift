@@ -22,7 +22,7 @@ def _mk_real(tmp: Path, port=8011) -> Path:
     return real
 
 
-def test_seed_rewrites_port_keeps_key_and_never_touches_real(tmp_path):
+def test_seed_rewrites_port_and_key_and_never_touches_real(tmp_path):
     real = _mk_real(tmp_path)
     before = real.read_bytes()
     qa = tmp_path / "qa" / "settings.json"
@@ -30,8 +30,10 @@ def test_seed_rewrites_port_keeps_key_and_never_touches_real(tmp_path):
     assert info == {"models": 2, "port": 8099}
     data = json.loads(qa.read_text())
     assert data["server"]["port"] == 8099          # QA port wins
-    assert data["auth"]["api_key"] == "secret-key-do-not-log"  # editor login works
-    assert set(data["models"]) == {"a", "b"}
+    key = data["auth"]["api_key"]
+    assert key != "secret-key-do-not-log"          # prod credential NOT copied
+    assert len(key) >= 16 and all(c in "0123456789abcdef" for c in key)
+    assert set(data["models"]) == {"a", "b"}       # models copied for editor
     assert real.read_bytes() == before             # production file untouched
 
 

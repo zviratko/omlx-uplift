@@ -297,16 +297,23 @@ def cmd_uninstall(argv=None) -> int:
     return 0
 
 
-def _qa_seed_settings(real_path: Path, qa_path: Path, port: int) -> dict:
+def _qa_seed_settings(real_path: Path, qa_path: Path, port: int,
+                      key: str | None = None) -> dict:
     """QA-2: seed the QA instance's settings.json from the real one.
 
-    Copy keeps api_key and model definitions identical (the layout suite
-    needs the editor to have real models), then forces server.port to the
-    QA port. Pure file function — testable without a server. Returns a
-    summary dict for logging. Never writes real_path."""
+    Model definitions are copied verbatim so the editor has real content
+    to measure; server.port is replaced. auth.api_key is replaced with a
+    FRESH RANDOM key: the QA instance is a full inference server on
+    0.0.0.0 with the user's real model definitions, so it must not share
+    the production credential (a leaked QA page could not touch prod)
+    and must not carry a well-known one either. QA tooling reads the key
+    from the seeded file locally — it never belongs in a transcript.
+    Pure file function; never writes real_path."""
     import json
+    import secrets
     settings = json.loads(real_path.read_text(encoding="utf-8"))
     settings.setdefault("server", {})["port"] = port
+    settings.setdefault("auth", {})["api_key"] = key or secrets.token_hex(16)
     qa_path.parent.mkdir(parents=True, exist_ok=True)
     qa_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
     return {"models": len(settings.get("models", {})), "port": port}
