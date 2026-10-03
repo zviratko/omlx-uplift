@@ -47,7 +47,9 @@ case "${1:-}" in
     # (re)start the isolated QA server; seeding happens inside --qa and is
     # a no-op once ~/.omlx-qa/settings.json exists
     if [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/uplift/" || true)" != "401" ]; then
-      cd "$REPO" && PYTHONPATH=. "$QA_PY" -m omlx_uplift.cli serve --qa --port "$PORT" \
+      # exec inside the subshell: otherwise $! is the wrapper and stop
+      # leaves the python child orphaned on the port (observed QA-2)
+      (cd "$REPO" && exec env PYTHONPATH=. "$QA_PY" -m omlx_uplift.cli serve --qa --port "$PORT") \
         > "$LOG" 2>&1 &
       echo "$! qa-server" >> "$PIDF.tmp"
       for _ in $(seq 1 30); do
