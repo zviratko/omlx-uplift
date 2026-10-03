@@ -695,13 +695,17 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-row { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(120px,220px);
     align-items: center; gap: 8px;
     font: 300 12px/1.4 var(--mono); margin-bottom: 6px; }
-/* the pair grid collapses to one column before cells get narrower than a
-   control (220px) plus a short label; below that the 1fr name track
-   starves to 0px at small viewports (scoped to the editor modal — .pair is
-   also used by the status/usage tiles). UX-5b: 290 not 330 — the editor's
-   rail reservation made 330 collapse to one column at ~1200px viewports,
-   stacking every toggle above its knob) */
-.modal.editor .pair { grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr)); }
+/* the pair grid takes EXACTLY two columns whenever a cell can hold a
+   control (220px) plus a short label, one column below that. UX-5c: fixed
+   tracks, not auto-fit — auto-fit produced 3-column rows at mid widths
+   (bands then mismatched their parent's line count) and let the reserved
+   rail squeeze sections between 2 and 1 columns at ~1024px viewports:
+   'turboquant now always wraps to two lines'. Breakpoint: content needs
+   2x~330 + gap + padding → viewport ≥ ~782px; ≥1232px the rail reserves
+   flow space but the modal is wide enough to keep 2 columns. */
+.modal.editor .pair { grid-template-columns: 1fr; }
+@media (min-width: 782px) {
+    .modal.editor .pair { grid-template-columns: 1fr 1fr; } }
 /* the |original| chip is narrower so name labels ("Enable Thinking") fit */
 .se-row .diff-out { margin-left: 0; gap: 4px; }
 .se-row .diff-out .diff-o { max-width: 68px; }
@@ -1194,18 +1198,30 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* ---- Model settings editor: popup modal, roomy, monospace everywhere ---- */
 /* U1 (user round 2026-09-16): the 860px editor clipped long labels like
    "Cache Reasoning …" — the form now uses most of the viewport.
-   UX-5b (user 2026-10-03): the rail-open widening below 1232px reflowed the
-   pair grid — the first dirty edit could drop every section from 2 columns
-   to 1 ('enabling a toggle causes the grouped setting to end on the line
-   below, and vice versa'). The reservation is no longer conditional: the
-   editor is ALWAYS the rail-open width and the rail slot is reserved by
-   visibility:hidden, so SAVE state can never move a control. Narrow
-   viewports get one column from the start — stable, never a jump. */
+   UX-5b/5c (user 2026-10-03): opening the CHANGES rail must NEVER move a
+   control. Two stable layouts, split at 1232px:
+   ≥1232px — modal is always the rail-open width; the (hidden) rail keeps
+   its slot via visibility:hidden, so queueing changes changes nothing.
+   <1232px — the rail takes NO flow space at all: it overlays the right
+   side of the form (absolute, visibility-gated). UX-5b first reserved the
+   slot unconditionally; on a 1024px window that crushed the form next to
+   an empty rail and wrapped every knob under its toggle ('turboquant now
+   always wraps and the layout is broken'). Overlay keeps the form at full
+   width and still never reflows. */
 .modal.nasa.editor { width: min(1200px, 98vw); max-height: 92vh; }
-/* keep the rail slot laid out but invisible — visibility:hidden reserves
-   the 320px with no frame and no dead gap (display:none would let the form
-   flex and re-introduce the jump) */
-#se-changes.ed[hidden] { display: block; visibility: hidden; }
+@media (min-width: 1232px) {
+    /* keep the rail slot laid out but invisible — visibility:hidden reserves
+       the 320px with no frame and no dead gap (display:none would let the
+       form flex and re-introduce the jump) */
+    #se-changes.ed[hidden] { display: block; visibility: hidden; }
+}
+@media (max-width: 1231px) {
+    .editor-body { position: relative; }
+    #se-changes.ed { position: absolute; inset: 0 0 0 auto; width: min(320px, 88%);
+        visibility: hidden; z-index: 5;
+        box-shadow: -10px 0 24px rgba(0, 0, 0, .35); }
+    #se-changes.ed:not([hidden]) { visibility: visible; }
+}
 .editor-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
 .editor-body .editor-scroll { flex: 0 1 964px; min-width: 0; }
 #se-changes.ed { flex: 0 0 320px; align-self: stretch; max-height: none;
