@@ -477,7 +477,7 @@
   "uplift.patches.reversal_chip": "反轉",
   "uplift.patches.reversal_hint": "回退已合併的變更——以反方向套用",
   "uplift.patches.reversal_nothing": "無需回退——現行樹中沒有該合併變更",
-  "uplift.patches.rollback": "rollback",
+  "uplift.patches.rollback": "回滾",
   "uplift.patches.rolledback": "rollback 將於下次 omlx 重啟時套用",
   "uplift.patches.safeguard_hold": "自動套用已暫停",
   "uplift.patches.safeguard_note": "自動偵測到 Root：{n}",
