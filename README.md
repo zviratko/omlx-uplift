@@ -19,6 +19,13 @@ After `brew upgrade omlx` (fresh keg), re-run `omlx-uplift install` and
 kickstart again. Removing uplift: `omlx-uplift uninstall` (removes the
 `.pth`), then `brew uninstall omlx-uplift`.
 
+## Releases
+
+`brew install` builds the latest stable tag (v1.0 onward: dependency-
+pinned); `brew install --HEAD` tracks `main`. Notable changes per release
+are in [CHANGELOG.md](CHANGELOG.md) — add a bullet under `Unreleased`
+when your change is user-visible.
+
 ![Theme picker](docs/screenshots/theme-picker.png)
 
 *Status board with the theme picker open: four built-in themes plus drop-in
