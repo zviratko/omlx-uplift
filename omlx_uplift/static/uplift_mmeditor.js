@@ -1509,14 +1509,17 @@ function seNormalizeKwargs(vals) {
     const hasRaw = vals.chat_template_kwargs || vals.forced_ct_kwargs;
     if (vals.ctKwargEntries && vals.ctKwargEntries.length && !hasRaw) return;
     if (!hasRaw) return;
-    // raw kwargs present: they win over entries built from base;
-    // base entries for keys the raw payload doesn't mention are kept.
+    // CT-1: raw kwargs present: they win over entries built from base;
+    // base entries for keys the raw payload doesn't mention are kept —
+    // merged BY IDENTITY (modelspec.mergeRawKwargs). The old filter used
+    // `!(e.key in raw)`, but typed rows have no e.key, so the base
+    // reasoning_effort/enable_thinking row always survived the merge on
+    // top of its rebuilt twin: duplicated kwargs rows in the editor.
     // (After the first kwargs render, seSyncKwEntries has removed the raw
     // twins from workVals, so re-renders keep the user's edited entries.)
-    const raw = vals.chat_template_kwargs || {};
-    const rebuilt = window.UpliftModelSpec.buildCtKwargEntries(raw, vals.forced_ct_kwargs, false);
-    const keep = (vals.ctKwargEntries || []).filter(e => !(e.key in raw));
-    vals.ctKwargEntries = rebuilt.concat(keep);
+    vals.ctKwargEntries = window.UpliftModelSpec.mergeRawKwargs(
+        vals.chat_template_kwargs || {}, vals.forced_ct_kwargs,
+        vals.ctKwargEntries || [], false);
     delete vals.chat_template_kwargs;
     delete vals.forced_ct_kwargs;
 }

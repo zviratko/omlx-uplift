@@ -93,6 +93,36 @@
         return entries;
     }
 
+    /* The identity a kwargs row occupies in the settings dict. Typed kinds
+       map to a fixed key; a 'custom' row carries its own. Empty-string key
+       (untitled custom row mid-typing) is NOT an identity: it can never
+       collide, matching buildPayload which drops it. */
+    function kwargIdentity(e) {
+        if (!e) return null;
+        if (e.type === 'enable_thinking') return 'enable_thinking';
+        if (e.type === 'reasoning_effort') return 'reasoning_effort';
+        if (e.type === 'custom' && e.key != null && String(e.key).trim() !== '') {
+            return String(e.key).trim();
+        }
+        return null;
+    }
+
+    /* CT-1 root cause: the old keep-filter in the editor compared
+       `!(e.key in raw)`. Typed entries have no e.key, so `undefined in raw`
+       was always false and a base typed row survived the merge on top of
+       the identical row rebuilt from the raw payload — two 'reasoning_effort'
+       rows. Merge BY IDENTITY instead: raw wins on collision, rows it does
+       not mention are kept, untitled custom rows are kept. */
+    function mergeRawKwargs(rawKwargs, forced, existing, diffusion) {
+        const rebuilt = buildCtKwargEntries(rawKwargs, forced, diffusion);
+        const ids = new Set(rebuilt.map(kwargIdentity).filter(Boolean));
+        const keep = (existing || []).filter(e => {
+            const id = kwargIdentity(e);
+            return id === null || !ids.has(id);
+        });
+        return rebuilt.concat(keep);
+    }
+
     // Lightning MTP depth: one adaptive ceiling. New servers carry it as
     // mtp_adaptive_max_depth (62171bdf); older ones store the same value as
     // mtp_num_draft_tokens. Accept either name, clamp to the modeled set.
@@ -657,6 +687,7 @@
              MODEL_TYPE_OPTIONS, VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES,
              DFLASH_DRAFTER_CONFIG_MODEL_TYPES,
              isDiffusion, isQwenOqA8, coerceKwargValue, buildCtKwargEntries,
+             kwargIdentity, mergeRawKwargs,
              buildState, validate, buildPayload, adaptToServerPayload,
              adaptToServerSettings,
              runtimeSignature, runtimeDiff, RUNTIME_SETTING_KEYS,
