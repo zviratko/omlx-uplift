@@ -297,10 +297,70 @@ def cmd_uninstall(argv=None) -> int:
     return 0
 
 
+def _qa_seed_settings(real_path: Path, qa_path: Path, port: int) -> dict:
+    """QA-2: seed the QA instance's settings.json from the real one.
+
+    Copy keeps api_key and model definitions identical (the layout suite
+    needs the editor to have real models), then forces server.port to the
+    QA port. Pure file function — testable without a server. Returns a
+    summary dict for logging. Never writes real_path."""
+    import json
+    settings = json.loads(real_path.read_text(encoding="utf-8"))
+    settings.setdefault("server", {})["port"] = port
+    qa_path.parent.mkdir(parents=True, exist_ok=True)
+    qa_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    return {"models": len(settings.get("models", {})), "port": port}
+
+
 def cmd_serve(argv=None) -> int:
     """Delegate everything to omlx.cli — same args, same startup order,
-    same settings resolution (drift-proof by construction)."""
-    sys.argv = ["omlx", "serve", *(argv if argv is not None else sys.argv[1:])]
+    same settings resolution (drift-proof by construction).
+
+    QA-2: `--qa` runs a fully isolated instance: base path ~/.omlx-qa
+    (override --qa-base), settings seeded once from the real one with
+    the port replaced (--port, default 8099). All runtime persistence —
+    port writes, models.json, metrics store, skins — lands in the QA
+    base, so a QA server can never rewrite production settings (the
+    port-persistence incident of 2026-10-03). The SHARED uplift store
+    (patch manifest, family B in paths.py) stays shared by design."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--qa" in argv:
+        argv.remove("--qa")
+        qa_base = Path.home() / ".omlx-qa"
+        if "--qa-base" in argv:
+            i = argv.index("--qa-base")
+            if i + 1 >= len(argv):
+                print("omlx-uplift serve --qa: --qa-base needs a path",
+                      file=sys.stderr)
+                return 2
+            qa_base = Path(argv[i + 1]).expanduser()
+            del argv[i:i + 2]
+        qa_base = qa_base.resolve()
+        prod_base = Path.home() / ".omlx"
+        if qa_base == prod_base.resolve():
+            print("omlx-uplift serve --qa: QA base must not be the "
+                  f"production base ({prod_base})", file=sys.stderr)
+            return 2
+        port = 8099
+        if "--port" in argv:
+            port = int(argv[argv.index("--port") + 1])
+        real_settings = prod_base / "settings.json"
+        qa_settings = qa_base / "settings.json"
+        if real_settings.is_file() and not qa_settings.exists():
+            info = _qa_seed_settings(real_settings, qa_settings, port)
+            print(f"qa: seeded {qa_settings} from {real_settings} "
+                  f"({info['models']} models, port {port})")
+        elif not qa_settings.exists():
+            print(f"omlx-uplift serve --qa: no settings to seed "
+                  f"({real_settings} missing) and no {qa_settings}",
+                  file=sys.stderr)
+            return 2
+        os.environ["OMLX_BASE_PATH"] = str(qa_base)
+        if "--port" not in argv:
+            argv += ["--port", str(port)]
+        print(f"qa: isolated instance — base {qa_base}, port {port}")
+
+    sys.argv = ["omlx", "serve", *argv]
     import omlx.cli as cli
 
     orig_serve = cli.serve_command

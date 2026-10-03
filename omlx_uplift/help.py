@@ -16,7 +16,8 @@ import sys
 
 # (command, one-line summary) — the whole point is ONE line per command.
 COMMANDS = [
-    ("serve", "run oMLX + Uplift (wrapper around 'omlx serve', same args)"),
+    ("serve", "run oMLX + Uplift (wrapper around 'omlx serve', same args;"
+              " --qa = isolated instance, port 8099, base ~/.omlx-qa)"),
     ("view", "standalone viewer for installs that cannot load Python (DMG)"),
     ("install", "mount uplift into an omlx python (REQUIRED after every"
                 " 'brew upgrade omlx')"),
@@ -35,7 +36,10 @@ usage: omlx-uplift <command> [args]
 
 # per-command one-screen usage (what argparse would say, without the wall)
 COMMAND_USAGE = {
-    "serve": "omlx-uplift serve [oMLX serve args...]   (--port, --model-dir, …)",
+    "serve": ("omlx-uplift serve [oMLX serve args...]   (--port, --model-dir, …)\n"
+              "       omlx-uplift serve --qa [--port N] [--qa-base DIR]\n"
+              "         isolated QA instance: base ~/.omlx-qa seeded once from the\n"
+              "         real settings (port replaced); never touches ~/.omlx"),
     "view": "omlx-uplift view [--api URL] [--port N]",
     "install": ("omlx-uplift install [--python PATH] [--yes|--keep-skins]"
                 " [--formula NAME]"),
