@@ -519,7 +519,11 @@ function renderEditorFields(container) {
     g = grid();
     if (!S.isDiffusion(m)) {
         const ggWrap = seBind('textarea', 'guided_grammar', {
-            label: C.tf('uplift.ui.guided_grammar', 'Guided Grammar'),
+            // FE-7: label key, NOT uplift.ui.guided_grammar — that one is
+            // the banner string 'GUIDED GRAMMAR — ' built for the expand
+            // head (:1014); as a field label it hung the em-dash off every
+            // non-EN locale.
+            label: C.tf('uplift.se.guided_grammar', 'Guided Grammar'),
             hint: 'EBNF / regex / JSON-schema grammar applied to generation when enabled.' });
         ggWrap.classList.add('se-wide');
         const ggInp = ggWrap.querySelector('textarea');
