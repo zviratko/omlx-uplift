@@ -39,7 +39,8 @@ class OmlxUplift < Formula
              buildpath/"constraints-stable.txt", "fastapi", "uvicorn"
     end
     # --no-deps: the package declares `omlx` (no PyPI distribution).
-    system libexec/"bin/pip", "install", "--no-deps", "#{buildpath}"
+    # (bare path object, not "#{}" — brew audit style, REL-1 follow-up)
+    system libexec/"bin/pip", "install", "--no-deps", buildpath
     # pip's console-script shim, into a predictable bin.
     bin.install libexec/"bin/omlx-uplift"
   end
