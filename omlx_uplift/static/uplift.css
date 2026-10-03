@@ -611,6 +611,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .model-row:last-child { border-bottom: 0; }
 .badge { font: 500 9px/1.4 var(--sans); font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase;
     padding: 3px 8px; border-radius: 0; flex-shrink: 0; min-width: 76px; text-align: center;
+    /* UX-2 (user): badges never wrap their text; move as a whole unit instead */
+    white-space: nowrap;
     background: transparent; border: 1px solid var(--dim); color: var(--dim); }
 .badge.Idle       { color: var(--dim); border-color: var(--edge); }
 .badge.Active     { background: var(--ink); border-color: var(--ink); color: var(--bg); }
@@ -737,20 +739,22 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-profile-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
     border: 1px solid var(--accent); padding: 7px 10px; margin: 8px 0;
     background: var(--field); }
-/* item 5/6: a toggle and its dependent control share one aligned row.
-   The box spans the FULL pair width with two even cells: the old 1fr/auto
-   tracks squeezed the checkbox cell to ~70px and its fixed 220px control
-   then starved the label to 0px ('Acceleration layout broken', user) */
-.se-row2 { display: grid; grid-column: 1 / -1;
-    grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
-    gap: 4px 14px; align-items: start; border: 1px solid var(--edge); padding: 6px 8px; }
-.se-row2 .se-row { border: none; padding: 0; min-width: 0; }
+/* item 5/6 superseded by UX-2 (2026-10-03): the .se-row2 toggle+dependent
+   pair box is retired — dependent controls now live in always-rendered
+   gated sub-blocks (.se-sub[disabled family], see .se-off below). */
+/* UX-2: a gated family whose master switch is off stays visible but
+   greyed — controls keep their slot instead of popping in/out on toggle */
+.se-sub.se-off, [data-gate].se-off { opacity: 0.45; }
+.se-sub.se-off { border-left-color: var(--edge); }
 /* item 8: engine-reload trigger badge. U41: on its own line under the name
    once names wrap — inline it read as a glitch box after short labels */
 .se-reload-badge { margin-left: 6px; font: 500 8px/1 var(--mono); letter-spacing: 0.08em;
     color: var(--amber-text); background: rgba(220, 160, 0, 0.14);
     border: 1px solid rgba(160, 120, 0, 0.5); padding: 2px 4px;
-    vertical-align: middle; cursor: help; }
+    vertical-align: middle; cursor: help;
+    /* UX-2 (user 2026-10-03): badges never wrap their own text — a badge
+       split over two lines read as a glitched box (Model Type row) */
+    white-space: nowrap; }
 /* item 4: RUNTIME DIVERGENCE banner */
 .se-divergence { border: 1px solid var(--diverge); background: rgba(179, 84, 30, 0.08);
     padding: 7px 10px; margin: 8px 0; font-size: 12px; }
@@ -1172,24 +1176,28 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* U1 (user round 2026-09-16): the 860px editor clipped long labels like
    "Cache Reasoning …" — the form now uses most of the viewport */
 .modal.nasa.editor { width: min(992px, 96vw); max-height: 92vh; }
-/* form sits left; a CHANGES side rail opens on the right when changes queue
-   (the modal widens, the form keeps its width at the left edge).
-   No-jump rule (user): while the rail is hidden, reserve the width delta
-   (1200-992=208px) as a right margin so flex centering pins the LEFT edge
-   exactly where the widened modal will sit — the window never slides left
-   when the first change queues. Only meaningful while both widths fit the
-   viewport; below that the modal is nearly full-width and the delta is
-   harmless. */
+/* form sits left; the CHANGES side rail opens on the right when changes
+   queue. UX-2 (user 2026-10-03): the widen reflowed the whole form on the
+   FIRST queued edit (-140px label shift measured) — 'the section insides
+   change places' — so on viewports that fit it, the editor is now always
+   the rail-open width and the rail slot is reserved by the flex rules
+   below: the form is capped at its old 964px, the (hidden) rail keeps a
+   330px slot — borderless while empty, so no dead frame. The modal never
+   changes width; controls never move. Below 1232px the reservation cannot
+   fit and the old behavior stays. */
 @media (min-width: 1232px) {
-    .modal.nasa.editor { margin-right: 208px; }
+    .modal.nasa.editor { width: min(1200px, 98vw); }
+    /* [hidden] companion: keep the rail slot laid out but invisible —
+       visibility:hidden reserves the 320px with no frame and no dead gap
+       (display:none would let the form flex and re-introduce the jump) */
+    #se-changes.ed[hidden] { display: block; visibility: hidden; }
 }
-/* viewports too narrow for the 208px reservation: anchor the box to the
-   overlay's left padding instead of centring, so the widen grows rightward
-   and the left edge still never moves */
+/* below the reservation width: the old behavior — anchor left, widen when
+   the rail queues (a small reflow there is preferable to a starved form) */
 @media (max-width: 1231px) {
     .modal.nasa.editor { margin-right: auto; }
+    .modal.nasa.editor:has(.changelist.ed:not([hidden])) { width: min(1200px, 98vw); margin-right: 0; }
 }
-.modal.nasa.editor:has(.changelist.ed:not([hidden])) { width: min(1200px, 98vw); margin-right: 0; }
 .editor-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
 .editor-body .editor-scroll { flex: 0 1 964px; min-width: 0; }
 #se-changes.ed { flex: 0 0 320px; align-self: stretch; max-height: none;
@@ -1384,6 +1392,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     display: inline-flex; align-items: center; justify-content: center;
     height: 16px; padding: 0 6px; flex: 0 0 auto; cursor: pointer;
     font: 400 9px/1 var(--mono); letter-spacing: 0.08em;
+    white-space: nowrap;
     border: 1px solid var(--edge); color: var(--dim); background: transparent;
     border-radius: 0;
 }

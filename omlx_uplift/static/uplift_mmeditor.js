@@ -278,6 +278,9 @@ function seBind(kind, key, opts) {
         }
         seUpdateSaveBtn();
         if (opts && opts.onChange) opts.onChange(seValues);
+        // UX-2: a master toggle flips its gated subtree live — no form
+        // re-render, every control keeps its slot
+        else seRefreshGates(document.getElementById('se-fields') || document);
     });
     label.dataset.key = key;
     if (input.tagName === 'SELECT' && ['true','false',''].includes(input.value)
@@ -309,6 +312,8 @@ function seBind(kind, key, opts) {
             isSecret: MM_GLUE.SECRET_KEYS.has(key),
             isRestart: seIsRuntimeKey(key),
             display: MM_GLUE.gsDisplay });
+        // UX-2: a revert of a master switch must re-grey its gated family
+        seRefreshGates(document.getElementById('se-fields') || document);
         seUpdateSaveBtn();
     };
     // the NEW value is the live input itself; the slot only carries the
@@ -331,15 +336,43 @@ function seBind(kind, key, opts) {
     return label;
 }
 
-/* item 5/6: a toggle and its dependent control side by side in one aligned
-   grid cell (the pair grid puts two of these per row). */
-function row2(gridEl, a, b) {
-    const wrap = document.createElement('div');
-    wrap.className = 'se-row2';
-    wrap.append(a, b);
-    gridEl.append(wrap);
-    return wrap;
+/* UX-2 (user 2026-10-03): dependent controls are ALWAYS rendered and
+   greyed while their master switch is off — never popped into existence.
+   The old pattern re-rendered the whole form on every master toggle: the
+   checkbox jumped into a different box ('the section insides change
+   places'), a full-width row2 shoved its neighbour to the next line
+   (TurboQuant vs 'SSD n-gram offload'), and on a profile tab the
+   re-render rebuilt from a stale workVals snapshot, so the toggle snapped
+   back (DFlash bug). Mark the host subtree with its master key instead;
+   seRefreshGates() enables/disables it in place. */
+function seGate(host, key) {
+    host.dataset.gate = key;
+    return host;
 }
+function seGatedDiv(cls) {
+    const d = document.createElement('div');
+    if (cls) d.className = cls;
+    return d;
+}
+function seGateEnabled(host) {
+    for (let n = host.closest('[data-gate]'); n;
+            n = n.parentElement && n.parentElement.closest('[data-gate]'))
+        if (seValues[n.dataset.gate] !== true) return false;
+    return true;
+}
+function seRefreshGates(root) {
+    root.querySelectorAll('[data-gate]').forEach(host => {
+        const on = seGateEnabled(host);
+        host.classList.toggle('se-off', !on);
+        host.querySelectorAll('input, select, textarea, button').forEach(i => {
+            i.disabled = !on;
+        });
+    });
+}
+
+/* UX-2 (user 2026-10-03): row2() retired — the toggle+dependent pair box
+   it built reflowed the form when a master switch flipped. Dependent
+   controls now live in gated sub-blocks that are always rendered. */
 
 function seReloadBadge(keys) {
     // item 8: a settings control that feeds the engine runtime signature
@@ -371,6 +404,12 @@ function seSection(title) {
 function renderEditorFields(container) {
     const S = window.UpliftModelSpec;
     const m = seFormModel || {};
+    // UX-1 (user 2026-10-03): pull live values into the tab BEFORE reading
+    // it back. workVals used to refresh only on tab switch, so every
+    // in-place rebuild (kwargs add/remove, profile/template apply) merged
+    // from a stale snapshot and the control the user just changed snapped
+    // back (DFlash toggle 'does nothing' on a profile tab).
+    seCaptureTab();
     // profile tabs edit overrides-on-base; base tab edits the model itself
     const tab = seTab();
     if (tab && tab.id !== 'base' && seBaseVals) {
@@ -484,10 +523,9 @@ function renderEditorFields(container) {
             g.append(seBind('select', 'reasoning_parser', { label: 'Reasoning Parser', options: rp }));
         }
         g.append(seBind('bool', 'enableThinkingBudget', { label: 'Thinking Budget',
-            hint: 'Limit thinking tokens for reasoning models.',
-            onChange: renderEditorFields.bind(null, container) }));
-        if (seValues.enableThinkingBudget)
-            sub(g).append(seBind('number', 'thinking_budget_tokens',
+            hint: 'Limit thinking tokens for reasoning models.' }));
+        seGate(sub(g), 'enableThinkingBudget').append(
+            seBind('number', 'thinking_budget_tokens',
                 { label: C.tf('uplift.ui.thinking_budget_tokens', 'Thinking budget (tokens)'), min: 1, step: 1 }));
         // cache_reasoning_output: tri-state (null = auto: cache when history
         // preserves <think>). Upstream #3525; classic modal has no widget —
@@ -508,10 +546,9 @@ function renderEditorFields(container) {
                     sel.value === '' ? null : sel.value === 'true'; });
         }
         g.append(seBind('bool', 'enableToolResultLimit', { label: 'Limit Tool Result Tokens',
-            hint: 'Truncate large tool results (e.g. file reads) to a token limit.',
-            onChange: renderEditorFields.bind(null, container) }));
-        if (seValues.enableToolResultLimit)
-            sub(g).append(seBind('number', 'max_tool_result_tokens',
+            hint: 'Truncate large tool results (e.g. file reads) to a token limit.' }));
+        seGate(sub(g), 'enableToolResultLimit').append(
+            seBind('number', 'max_tool_result_tokens',
                 { label: C.tf('uplift.ui.tool_result_token_limit', 'Tool result token limit'), min: 1, step: 1 }));
     }
     /* ---- grammar (R10-5: own section, wide mono textarea) ---- */
@@ -591,25 +628,26 @@ function renderEditorFields(container) {
     g = grid();
     if (!S.isDiffusion(m)) {
         g.append(seBind('bool', 'enableIndexCache', { label: 'Index Cache',
-            hint: 'Skip redundant indexer computation in DSA layers (DeepSeek V3/GLM-5).',
-            onChange: renderEditorFields.bind(null, container) }));
-        if (seValues.enableIndexCache)
-            sub(g).append(seBind('number', 'index_cache_freq',
+            hint: 'Skip redundant indexer computation in DSA layers (DeepSeek V3/GLM-5).' }));
+        // UX-2: always present, greyed while Index Cache is off (no reflow)
+        seGate(sub(g), 'enableIndexCache').append(
+            seBind('number', 'index_cache_freq',
                 { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 1, step: 1 }));
     }
     if (seValues.turboquant_kv_enabled !== undefined) {
         // U41: no diffusion gate — classic shows TurboQuant for every model
         // (parity, user: "turboquant toggle is missing in model settings")
-        const tq = seBind('bool', 'turboquant_kv_enabled', { label: 'TurboQuant KV Cache',
-            hint: 'Compress KV cache using vector quantization. Lower bits = more compression.',
-            onChange: renderEditorFields.bind(null, container) });
-        if (seValues.turboquant_kv_enabled)
-            // U41: classic's fixed ladder, not a 0.25-step free number
-            // (user: bits can't be quarters)
-            row2(g, tq, seBind('select', 'turboquant_kv_bits',
+        // UX-2: the toggle keeps its own grid cell and the bits control its
+        // own — the old row2 swap moved the checkbox and dropped the
+        // neighbour (SSD N-gram Offload) to the next line.
+        g.append(seBind('bool', 'turboquant_kv_enabled', { label: 'TurboQuant KV Cache',
+            hint: 'Compress KV cache using vector quantization. Lower bits = more compression.' }));
+        // U41: classic's fixed ladder, not a 0.25-step free number
+        // (user: bits can't be quarters)
+        seGate(sub(g), 'turboquant_kv_enabled').append(
+            seBind('select', 'turboquant_kv_bits',
                 { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
                   options: [2, 2.5, 3, 3.5, 4, 6, 8].map(v => ({ value: String(v), label: v + '-bit' })) }));
-        else g.append(tq);
     }
     if (m.qwen4_ple_ssd_offload_supported || seValues.qwen4_ple_ssd_offload)
         g.append(seBind('bool', 'qwen4_ple_ssd_offload', { label: 'SSD N-gram Offload (Qwen4 only)',
@@ -630,18 +668,16 @@ function renderEditorFields(container) {
             disabled: !!m.deepseek_v41_engram_ssd_offload_forced }));
     if (m.moe_expert_offload_supported && !S.isDiffusion(m)) {
         g.append(seBind('bool', 'moe_expert_offload_enabled', { label: 'MoE Expert Offload',
-            hint: 'Stream Mixture-of-Experts weights from the checkpoint on demand, keeping only part resident.',
-            onChange: renderEditorFields.bind(null, container) }));
-        if (seValues.moe_expert_offload_enabled)
-            sub(g).append(seBind('number', 'moe_expert_offload_resident_fraction',
+            hint: 'Stream Mixture-of-Experts weights from the checkpoint on demand, keeping only part resident.' }));
+        seGate(sub(g), 'moe_expert_offload_enabled').append(
+            seBind('number', 'moe_expert_offload_resident_fraction',
                 { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.01, max: 1, step: 0.01 }));
     }
     if (S.isQwenOqA8(m)) {
         g.append(seBind('bool', 'qwen35_oq_a8_enabled', { label: 'Qwen INT8 Activation Prefill',
-            hint: 'Experimental GPU INT8 activation quantization for supported Q4/Q5 prefill.',
-            onChange: renderEditorFields.bind(null, container) }));
-        if (seValues.qwen35_oq_a8_enabled)
-            sub(g).append(seBind('number', 'qwen35_oq_a8_min_tokens',
+            hint: 'Experimental GPU INT8 activation quantization for supported Q4/Q5 prefill.' }));
+        seGate(sub(g), 'qwen35_oq_a8_enabled').append(
+            seBind('number', 'qwen35_oq_a8_min_tokens',
                 { label: C.tf('uplift.ui.minimum_prompt_tokens', 'Minimum prompt tokens'), min: 1, step: 1 }));
     }
     if (m.ane_prefill_backend && !S.isDiffusion(m)) renderAne(container, g);
@@ -653,57 +689,52 @@ function renderEditorFields(container) {
     const S_ = window.UpliftModelSpec;
     if (!S_.isDiffusion(m)) {
         if (seValues.specprefill_enabled !== undefined) {
-            g.append(seBind('bool', 'specprefill_enabled', { label: 'SpecPrefill',
-                onChange: renderEditorFields.bind(null, container) }));
-            if (seValues.specprefill_enabled) {
-                const sb = sub(g);
-                const pool = S_.specprefillCandidates(models, m.id).map(x => ({ value: x.id }));
-                sb.append(seBind('select', 'specprefill_draft_model',
-                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
-                sb.append(seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
-                    { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
-                    { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
-                    { value: '0.25', label: '25% — Conservative+ (~2.5x)' },
-                    { value: '0.3', label: '30% — Conservative (~2.2x)' },
-                    { value: '0.4', label: '40% — Mild (~1.8x)' },
-                    { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true }));
-                sb.append(seBind('number', 'specprefill_threshold',
-                    { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 }));
-            }
+            // UX-2: dependent knobs always present + greyed while off; the
+            // toggle keeps its slot (user: 'the checkbox doesn't stay at
+            // the same place')
+            g.append(seBind('bool', 'specprefill_enabled', { label: 'SpecPrefill' }));
+            const sb = seGate(sub(g), 'specprefill_enabled');
+            const pool = S_.specprefillCandidates(models, m.id).map(x => ({ value: x.id }));
+            sb.append(seBind('select', 'specprefill_draft_model',
+                { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
+            sb.append(seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
+                { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
+                { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
+                { value: '0.25', label: '25% — Conservative+ (~2.5x)' },
+                { value: '0.3', label: '30% — Conservative (~2.2x)' },
+                { value: '0.4', label: '40% — Mild (~1.8x)' },
+                { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true }));
+            sb.append(seBind('number', 'specprefill_threshold',
+                { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 }));
         }
         if (seValues.mtp_enabled !== undefined) {
-            // item 6: toggle and its depth control share one aligned row;
-            // upstream 62171bdf: single adaptive-max depth select (fixed
-            // depth retired).
-            const mtpT = seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
+            // UX-2: the depth select lives in a gated sub-block below the
+            // toggle. The old row2 swap moved the checkbox when the depth
+            // appeared ('Lightning MTP' reflow, user 2026-10-03).
+            g.append(seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
                 hint: m.mtp_compatible
                     ? "Drafts several tokens per step with the model's built-in MTP head."
-                    : (m.mtp_compatibility_reason || 'Not compatible with this model'),
-                onChange: renderEditorFields.bind(null, container) });
-            if (seValues.mtp_enabled)
-                row2(g, mtpT, seBind('select', 'mtp_adaptive_max_depth', {
+                    : (m.mtp_compatibility_reason || 'Not compatible with this model') }));
+            seGate(sub(g), 'mtp_enabled').append(
+                seBind('select', 'mtp_adaptive_max_depth', {
                     label: C.tf('uplift.se.mtp_depth', 'Adaptive max depth'),
                     hint: C.tf('uplift.se.mtp_depth.hint',
                         'Automatically adjusts the draft depth up to the selected maximum.'),
                     options: [{ value: '3', label: '3 tokens (Default)' },
                               ...[4, 5, 6].map(n => ({ value: String(n),
                                   label: C.tf('uplift.se.mtp_depth.opt.' + n, n + ' tokens') }))] }));
-            else g.append(mtpT);
         }
         const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
         if (seValues.vlm_mtp_enabled !== undefined &&
             S_.VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES.has(drafterType)) {
             g.append(seBind('bool', 'vlm_mtp_enabled', { label: 'VLM MTP',
-                hint: 'Speculative decoding via an external MTP drafter model.',
-                onChange: renderEditorFields.bind(null, container) }));
-            if (seValues.vlm_mtp_enabled) {
-                const sb = sub(g);
-                const pool = S_.vlmMtpDrafters(models, m.id).map(x => ({ value: x.id }));
-                sb.append(seBind('select', 'vlm_mtp_draft_model', { label: 'Drafter model', options: [
-                    { value: '', label: 'Select an assistant or MTP drafter…' }, ...pool], picker: true }));
-                sb.append(seBind('number', 'vlm_mtp_draft_block_size',
-                    { label: C.tf('uplift.ui.draft_block_size_tokens_per_round_blank_4', 'Draft block size (tokens per round, blank = 4)'), step: 1 }));
-            }
+                hint: 'Speculative decoding via an external MTP drafter model.' }));
+            const sb = seGate(sub(g), 'vlm_mtp_enabled');
+            const pool = S_.vlmMtpDrafters(models, m.id).map(x => ({ value: x.id }));
+            sb.append(seBind('select', 'vlm_mtp_draft_model', { label: 'Drafter model', options: [
+                { value: '', label: 'Select an assistant or MTP drafter…' }, ...pool], picker: true }));
+            sb.append(seBind('number', 'vlm_mtp_draft_block_size',
+                { label: C.tf('uplift.ui.draft_block_size_tokens_per_round_blank_4', 'Draft block size (tokens per round, blank = 4)'), step: 1 }));
         }
         // round 6 item 4: DFlash is its own section, not grouped under
         // Speculative Decoding (different mechanism — block diffusion).
@@ -711,48 +742,49 @@ function renderEditorFields(container) {
         if (seValues.dflash_enabled !== undefined) {
             section('DFlash');
             g = grid();
+            // UX-2: the whole knob family is always rendered and greyed
+            // while DFlash is off (old reflow popped it into existence,
+            // and on a profile tab the toggle snapped back — stale workVals)
             g.append(seBind('bool', 'dflash_enabled', { label: 'DFlash',
-                hint: m.dflash_compatible === false ? (m.dflash_compatibility_reason || 'not compatible') : '',
-                onChange: renderEditorFields.bind(null, container) }));
-            if (seValues.dflash_enabled) {
-                const sb = sub(g);
-                const pool = S_.dflashCandidates(models, m.id).map(x => ({ value: x.id }));
-                sb.append(seBind('select', 'dflash_draft_model',
-                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
-                sb.append(seBind('bool', 'dflash_draft_quant_enabled', { label: 'Quantization',
-                    onChange: renderEditorFields.bind(null, container) }));
-                if (seValues.dflash_draft_quant_enabled) {
-                    sb.append(seBind('select', 'dflash_draft_quant_weight_bits', { label: 'Weight Bits', options: [
-                        { value: 2, label: '2-bit' }, { value: 4, label: '4-bit' }, { value: 8, label: '8-bit' }], picker: true }));
-                    sb.append(seBind('select', 'dflash_draft_quant_activation_bits', { label: 'Activation Bits', options: [
-                        { value: 16, label: '16-bit' }, { value: 32, label: '32-bit' }], picker: true }));
-                    sb.append(seBind('number', 'dflash_draft_quant_group_size', { label: 'Group Size', min: 16, max: 256, step: 16 }));
-                }
-                sb.append(seBind('number', 'dflash_max_ctx', { label: 'Max Context (fallback threshold)', step: 1 }));
-                sb.append(seBind('bool', 'dflash_in_memory_cache', { label: 'In-memory cache',
-                    onChange: renderEditorFields.bind(null, container) }));
-                if (seValues.dflash_in_memory_cache) {
-                    sb.append(seBind('number', 'dflash_in_memory_cache_max_entries',
-                        { label: C.tf('uplift.ui.in_memory_cache_max_entries', 'In-memory cache max entries'), min: 1, step: 1 }));
-                    sb.append(seBind('number', 'dflash_in_memory_cache_max_gib',
-                        { label: C.tf('uplift.ui.in_memory_cache_size_gib', 'In-memory cache size (GiB)'), min: 1, step: 1,
-                          hint: 'Byte budget for L1 snapshots; LRU evicts when exceeded.' }));
-                    if (seValues.dflash_ssd_cache_available) {
-                        sb.append(seBind('bool', 'dflash_ssd_cache', { label: 'SSD cache',
-                            hint: 'Requires in-memory cache to be enabled.' }));
-                        if (seValues.dflash_ssd_cache)
-                            sb.append(seBind('number', 'dflash_ssd_cache_max_gib',
-                                { label: C.tf('uplift.ui.ssd_cache_size_gib', 'SSD cache size (GiB)'), min: 1, step: 1 }));
-                    }
-                }
-                sb.append(seBind('number', 'dflash_draft_window_size', { label: 'Draft window size' }));
-                sb.append(seBind('number', 'dflash_draft_sink_size', { label: 'Draft sink size', min: 0, step: 1 }));
-                sb.append(seBind('number', 'dflash_block_size', { label: 'Runtime block size', step: 1 }));
-                sb.append(seBind('select', 'dflash_verify_mode', { label: 'Verify mode', options: [
-                    { value: 'adaptive', label: 'adaptive (default)' },
-                    { value: 'dflash', label: 'dflash' },
-                    { value: 'ddtree', label: 'ddtree' }], picker: true }));
+                hint: m.dflash_compatible === false ? (m.dflash_compatibility_reason || 'not compatible') : '' }));
+            const sb = seGate(sub(g), 'dflash_enabled');
+            const pool = S_.dflashCandidates(models, m.id).map(x => ({ value: x.id }));
+            sb.append(seBind('select', 'dflash_draft_model',
+                { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
+            sb.append(seBind('bool', 'dflash_draft_quant_enabled', { label: 'Quantization' }));
+            const quantBox = seGate(seGatedDiv('se-sub'), 'dflash_draft_quant_enabled');
+            quantBox.append(
+                seBind('select', 'dflash_draft_quant_weight_bits', { label: 'Weight Bits', options: [
+                    { value: 2, label: '2-bit' }, { value: 4, label: '4-bit' }, { value: 8, label: '8-bit' }], picker: true }),
+                seBind('select', 'dflash_draft_quant_activation_bits', { label: 'Activation Bits', options: [
+                    { value: 16, label: '16-bit' }, { value: 32, label: '32-bit' }], picker: true }),
+                seBind('number', 'dflash_draft_quant_group_size', { label: 'Group Size', min: 16, max: 256, step: 16 }));
+            sb.append(quantBox);
+            sb.append(seBind('number', 'dflash_max_ctx', { label: 'Max Context (fallback threshold)', step: 1 }));
+            sb.append(seBind('bool', 'dflash_in_memory_cache', { label: 'In-memory cache' }));
+            const cacheBox = seGate(seGatedDiv('se-sub'), 'dflash_in_memory_cache');
+            cacheBox.append(
+                seBind('number', 'dflash_in_memory_cache_max_entries',
+                    { label: C.tf('uplift.ui.in_memory_cache_max_entries', 'In-memory cache max entries'), min: 1, step: 1 }),
+                seBind('number', 'dflash_in_memory_cache_max_gib',
+                    { label: C.tf('uplift.ui.in_memory_cache_size_gib', 'In-memory cache size (GiB)'), min: 1, step: 1,
+                      hint: 'Byte budget for L1 snapshots; LRU evicts when exceeded.' }));
+            if (seValues.dflash_ssd_cache_available) {
+                cacheBox.append(seBind('bool', 'dflash_ssd_cache', { label: 'SSD cache',
+                    hint: 'Requires in-memory cache to be enabled.' }));
+                seGate(seGatedDiv(), 'dflash_ssd_cache').append(
+                    seBind('number', 'dflash_ssd_cache_max_gib',
+                        { label: C.tf('uplift.ui.ssd_cache_size_gib', 'SSD cache size (GiB)'), min: 1, step: 1 }));
+                cacheBox.appendChild(cacheBox.lastChild);
             }
+            sb.append(cacheBox);
+            sb.append(seBind('number', 'dflash_draft_window_size', { label: 'Draft window size' }));
+            sb.append(seBind('number', 'dflash_draft_sink_size', { label: 'Draft sink size', min: 0, step: 1 }));
+            sb.append(seBind('number', 'dflash_block_size', { label: 'Runtime block size', step: 1 }));
+            sb.append(seBind('select', 'dflash_verify_mode', { label: 'Verify mode', options: [
+                { value: 'adaptive', label: 'adaptive (default)' },
+                { value: 'dflash', label: 'dflash' },
+                { value: 'ddtree', label: 'ddtree' }], picker: true }));
         }
     }
 
@@ -764,20 +796,22 @@ function renderEditorFields(container) {
     g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1 }));
     g.append(seBind('bool', 'trust_remote_code', { label: 'Trust Remote Code',
         hint: 'Lets the model repo run arbitrary Python at load. Only enable for trusted repos.' }));
+    // UX-2: grey out every gated family whose master switch is off
+    seRefreshGates(container);
 }
 
 /* ANE prompt processing (classic modal renders a Qwen variant and, for
    ane_prefill_backend === 'k2', a K2 variant with different labels). */
 function renderAne(container, g) {
     const k2 = (seFormModel && seFormModel.ane_prefill_backend) === 'k2';
+    // UX-2: the whole ANE family is always rendered, greyed until its
+    // master switch flips — no re-render, controls keep their places
     g.append(seBind('bool', 'qwen35_ane_prefill_enabled', {
         label: k2 ? 'K2 ANE Prompt Processing' : 'Qwen ANE Prompt Processing',
         hint: k2 ? 'Use ANE for K2 prompt processing, including MoVA. Decode stays on GPU.'
-                 : 'Split eligible Qwen 3.5/3.6/3.8 prompt-processing work across both ANEs and the GPU.',
-        onChange: renderEditorFields.bind(null, container) }));
-    if (!seValues.qwen35_ane_prefill_enabled) return;
-    const sbA = (function () { const d = document.createElement('div');
-        d.className = 'se-sub'; g.append(d); return d; })();
+                 : 'Split eligible Qwen 3.5/3.6/3.8 prompt-processing work across both ANEs and the GPU.' }));
+    const sbA = seGate(seGatedDiv('se-sub'), 'qwen35_ane_prefill_enabled');
+    g.append(sbA);
     sbA.append(seBind('number', 'qwen35_ane_prefill_sequence_length',
         { label: C.tf('uplift.ui.prompt_block', 'Prompt block'), min: 1024, step: 64 }));
     if (!k2) sbA.append(seBind('number', 'qwen35_ane_prefill_tail_padding_min_tokens',
@@ -793,33 +827,30 @@ function renderAne(container, g) {
             { label: C.tf('uplift.ui.use_both_anes', 'Use both ANEs'), hint: 'Pin one resident program to each physical ANE instance.' }));
     }
     sbA.append(seBind('bool', 'qwen35_ane_prefill_gdn',
-        { label: C.tf('uplift.ui.accelerate_gdn', 'Accelerate GDN'), hint: 'Also split eligible GDN input projections across the ANEs and GPU.',
-          onChange: renderEditorFields.bind(null, container) }));
-    if (seValues.qwen35_ane_prefill_gdn) {
-        sbA.append(seBind('number', 'qwen35_ane_prefill_gdn_fraction',
-            { label: C.tf('uplift.ui.gdn_on_ane_fraction', 'GDN on ANE (fraction)'), min: 0, max: 1, step: 0.01 }));
-        sbA.append(seBind('number', 'qwen35_ane_prefill_gdn_max_layers',
+        { label: C.tf('uplift.ui.accelerate_gdn', 'Accelerate GDN'), hint: 'Also split eligible GDN input projections across the ANEs and GPU.' }));
+    const gdnBox = seGate(seGatedDiv('se-sub'), 'qwen35_ane_prefill_gdn');
+    gdnBox.append(
+        seBind('number', 'qwen35_ane_prefill_gdn_fraction',
+            { label: C.tf('uplift.ui.gdn_on_ane_fraction', 'GDN on ANE (fraction)'), min: 0, max: 1, step: 0.01 }),
+        seBind('number', 'qwen35_ane_prefill_gdn_max_layers',
             { label: C.tf('uplift.ui.gdn_layer_limit', 'GDN layer limit'), min: 0, step: 1 }));
-    }
+    sbA.append(gdnBox);
     sbA.append(seBind('bool', 'qwen35_ane_prefill_cpu_enabled',
         { label: C.tf('uplift.ui.share_mlp_work_with_cpu', 'Share MLP work with CPU'),
-          hint: 'Requires a separate Qwen q4 checkpoint clone with floating tensors converted.',
-          onChange: renderEditorFields.bind(null, container) }));
-    if (seValues.qwen35_ane_prefill_cpu_enabled) {
-        const sbC = (function () { const d = document.createElement('div');
-            d.className = 'se-sub'; sbA.append(d); return d; })();
-        sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_fraction',
-            { label: C.tf('uplift.ui.mlp_on_cpu_fraction', 'MLP on CPU (fraction)'), min: 0, max: 1, step: 0.001 }));
-        sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_down_fraction',
-            { label: C.tf('uplift.ui.down_projection_on_cpu_fraction_0_disabled', 'Down projection on CPU (fraction, 0 = disabled)'), min: 0, max: 1, step: 0.001 }));
-        sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_gdn_fraction',
-            { label: C.tf('uplift.ui.gdn_on_cpu_fraction', 'GDN on CPU (fraction)'), min: 0, max: 1, step: 0.001 }));
-        sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_threads',
-            { label: C.tf('uplift.ui.cpu_workers_0_automatic', 'CPU workers (0 = automatic)'), min: 0, step: 1 }));
-        sbC.append(seBind('bool', 'qwen35_ane_prefill_cpu_shared_resource',
-            { label: C.tf('uplift.ui.performance_aware_scheduling', 'Performance-aware scheduling'),
-              hint: "Uses Apple's shared-resource scheduler hint and falls back automatically." }));
-    }
+          hint: 'Requires a separate Qwen q4 checkpoint clone with floating tensors converted.' }));
+    const sbC = seGate(seGatedDiv('se-sub'), 'qwen35_ane_prefill_cpu_enabled');
+    sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_fraction',
+        { label: C.tf('uplift.ui.mlp_on_cpu_fraction', 'MLP on CPU (fraction)'), min: 0, max: 1, step: 0.001 }));
+    sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_down_fraction',
+        { label: C.tf('uplift.ui.down_projection_on_cpu_fraction_0_disabled', 'Down projection on CPU (fraction, 0 = disabled)'), min: 0, max: 1, step: 0.001 }));
+    sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_gdn_fraction',
+        { label: C.tf('uplift.ui.gdn_on_cpu_fraction', 'GDN on CPU (fraction)'), min: 0, max: 1, step: 0.001 }));
+    sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_threads',
+        { label: C.tf('uplift.ui.cpu_workers_0_automatic', 'CPU workers (0 = automatic)'), min: 0, step: 1 }));
+    sbC.append(seBind('bool', 'qwen35_ane_prefill_cpu_shared_resource',
+        { label: C.tf('uplift.ui.performance_aware_scheduling', 'Performance-aware scheduling'),
+          hint: "Uses Apple's shared-resource scheduler hint and falls back automatically." }));
+    sbA.append(sbC);
     refreshDivergence();   // the fields wipe removed the banner — re-attach
 }
 
