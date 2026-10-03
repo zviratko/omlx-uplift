@@ -117,6 +117,14 @@ omlx-uplift patch disable-all          # sentinel + disable every patch
 If a patch set wedges boot, use a kill switch, fix the manifest by hand
 (it is plain JSON), remove the sentinel, start again.
 
+## Skins (theming)
+
+The header theme picker offers the four built-in themes plus drop-in CSS
+skin crates — single YAML files (palette, fonts, icons, overlay CSS) that
+go live on refresh with no restart. The built-in examples ship in
+`omlx_uplift/skins-example/`. **Full authoring guide:
+[docs/skins.md](docs/skins.md).**
+
 ## Other commands
 
 ```bash
