@@ -545,6 +545,23 @@ main.grid-stack .grid-stack-placeholder .placeholder-preview {
     grid-template-columns: 1fr 1fr;
     margin: 2px 0 6px; padding-left: 12px; border-left: 2px solid var(--accent); }
 .se-sub .se-wide { grid-column: 1 / -1; }
+/* UX-5 (user 2026-10-03): a master toggle + its knobs render as ONE family
+   band. It spans the pair grid and reuses the parent's column tracks via
+   subgrid, so the knob column aligns with every other row in the section;
+   tint + accent trunk carry the grouping. Bands never auto-flow, so a
+   master can never end up diagonal from its knob. */
+.se-fam { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid;
+    align-items: start; gap: 4px 18px;
+    background: var(--row2); box-shadow: inset 2px 0 var(--accent);
+    margin: 2px -8px 6px; padding: 6px 8px; }
+.se-fam > .se-row { margin-bottom: 0; }
+@supports not (grid-template-columns: subgrid) {
+    .se-fam { display: flex; flex-wrap: wrap; }
+    .se-fam > .se-row { flex: 1 1 42%; min-width: 240px; } }
+/* UX-5: gated grammar well — greyed + disabled while the master is off.
+   Spans the sub-grid: the textarea + presets are the well's full width,
+   not a shrunken control column. */
+.se-grammar { min-width: 0; grid-column: 1 / -1; }
 
 .meter { height: 4px; background: var(--grid); margin-top: 10px; }
 .meter > div { height: 100%; width: 0%; background: var(--chart-2);

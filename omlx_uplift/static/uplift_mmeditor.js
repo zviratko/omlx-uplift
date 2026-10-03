@@ -349,15 +349,23 @@ function seGate(host, key) {
     host.dataset.gate = key;
     return host;
 }
-/* UX-4 (user 2026-10-03): a dependent knob keeps its OWN .se-row and takes
-   the NEXT grid cell, landing on the master toggle's line without leaving
-   the shared column tracks (the .se-inline merge dismantled the child row
-   and misaligned the whole section). data-gate on the row lets
-   seRefreshGates() grey + disable it in place; its label, hint, chip and
-   reload badge stay honest — a hot-apply master can gate a child that
-   itself needs a reload. */
-function seKid(row, masterKey) {
-    return seGate(row, masterKey);
+/* UX-5 (user 2026-10-03): a master toggle and its dependent knobs are ONE
+   family band. The band spans the pair grid and reuses the parent's column
+   tracks via subgrid, so the knob sits on the master's line in exactly the
+   column every other row aligns to, and auto-flow can never scatter them
+   diagonally (UX-4's loose cells did). Tint + accent trunk carry the
+   grouping distinction (UX-3 destroyed the child rows and broke the grid;
+   do not resurrect either). Knobs keep their own .se-row: own label, hint,
+   |original| chip and reload badge; data-gate lets seRefreshGates() grey +
+   disable them in place. */
+function seFam(grid, masterKey, masterRow, kids) {
+    const fam = document.createElement('div');
+    fam.className = 'se-fam';
+    fam.dataset.fam = masterKey;
+    fam.append(masterRow);
+    for (const kid of kids) fam.append(seGate(kid, masterKey));
+    grid.append(fam);
+    return fam;
 }
 
 function seGatedDiv(cls) {
@@ -519,11 +527,11 @@ function renderEditorFields(container) {
             add(seValues.reasoning_parser || '');
             g.append(seBind('select', 'reasoning_parser', { label: 'Reasoning Parser', options: rp }));
         }
-        g.append(seBind('bool', 'enableThinkingBudget', { label: 'Thinking Budget',
-            hint: 'Limit thinking tokens for reasoning models.' }));
-        g.append(seKid(seBind('number', 'thinking_budget_tokens',
-            { label: C.tf('uplift.ui.thinking_budget_tokens', 'Thinking budget (tokens)'), min: 1, step: 1 }),
-            'enableThinkingBudget'));
+        seFam(g, 'enableThinkingBudget',
+            seBind('bool', 'enableThinkingBudget', { label: 'Thinking Budget',
+                hint: 'Limit thinking tokens for reasoning models.' }),
+            [seBind('number', 'thinking_budget_tokens',
+                { label: C.tf('uplift.ui.thinking_budget_tokens', 'Thinking budget (tokens)'), min: 1, step: 1 })]);
         // cache_reasoning_output: tri-state (null = auto: cache when history
         // preserves <think>). Upstream #3525; classic modal has no widget —
         // additive, same keys as the API.
@@ -542,11 +550,11 @@ function renderEditorFields(container) {
                 seValues.cache_reasoning_output =
                     sel.value === '' ? null : sel.value === 'true'; });
         }
-        g.append(seBind('bool', 'enableToolResultLimit', { label: 'Limit Tool Result Tokens',
-            hint: 'Truncate large tool results (e.g. file reads) to a token limit.' }));
-        g.append(seKid(seBind('number', 'max_tool_result_tokens',
-            { label: C.tf('uplift.ui.tool_result_token_limit', 'Tool result token limit'), min: 1, step: 1 }),
-            'enableToolResultLimit'));
+        seFam(g, 'enableToolResultLimit',
+            seBind('bool', 'enableToolResultLimit', { label: 'Limit Tool Result Tokens',
+                hint: 'Truncate large tool results (e.g. file reads) to a token limit.' }),
+            [seBind('number', 'max_tool_result_tokens',
+                { label: C.tf('uplift.ui.tool_result_token_limit', 'Tool result token limit'), min: 1, step: 1 })]);
     }
 
     section('Sampling');
@@ -576,28 +584,27 @@ function renderEditorFields(container) {
     section('Acceleration');
     g = grid();
     if (!S.isDiffusion(m)) {
-        // UX-4: the knob takes the cell beside the toggle; it keeps its own
-        // ⟳RELOAD badge — hot-apply master, reload-triggered child.
-        g.append(seBind('bool', 'enableIndexCache', { label: 'Index Cache',
-            hint: 'Skip redundant indexer computation in DSA layers (DeepSeek V3/GLM-5).' }));
-        g.append(seKid(seBind('number', 'index_cache_freq',
-            { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 1, step: 1 }),
-            'enableIndexCache'));
+        // UX-5: one family band [toggle | frequency]; the knob keeps its
+        // own ⟳RELOAD badge — hot-apply master, reload-triggered child.
+        seFam(g, 'enableIndexCache',
+            seBind('bool', 'enableIndexCache', { label: 'Index Cache',
+                hint: 'Skip redundant indexer computation in DSA layers (DeepSeek V3/GLM-5).' }),
+            [seBind('number', 'index_cache_freq',
+                { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 1, step: 1 })]);
     }
     if (seValues.turboquant_kv_enabled !== undefined) {
         // U41: no diffusion gate — classic shows TurboQuant for every model
         // (parity, user: "turboquant toggle is missing in model settings")
         // U41: classic's fixed ladder, not a 0.25-step free number
         // (user: bits can't be quarters)
-        // UX-4 (user): toggle on the left, bits on the right of the SAME
-        // line — the bits row fills the next grid cell, greyed + disabled
-        // until the toggle is on
-        g.append(seBind('bool', 'turboquant_kv_enabled', { label: 'TurboQuant KV Cache',
-            hint: 'Compress KV cache using vector quantization. Lower bits = more compression.' }));
-        g.append(seKid(seBind('select', 'turboquant_kv_bits',
-            { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
-              options: [2, 2.5, 3, 3.5, 4, 6, 8].map(v => ({ value: String(v), label: v + '-bit' })) }),
-            'turboquant_kv_enabled'));
+        // UX-5 (user): ONE band [toggle | bits] — grouped, on the shared
+        // column tracks, bits greyed + disabled until the toggle is on
+        seFam(g, 'turboquant_kv_enabled',
+            seBind('bool', 'turboquant_kv_enabled', { label: 'TurboQuant KV Cache',
+                hint: 'Compress KV cache using vector quantization. Lower bits = more compression.' }),
+            [seBind('select', 'turboquant_kv_bits',
+                { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
+                  options: [2, 2.5, 3, 3.5, 4, 6, 8].map(v => ({ value: String(v), label: v + '-bit' })) })]);
     }
     if (m.qwen4_ple_ssd_offload_supported || seValues.qwen4_ple_ssd_offload)
         g.append(seBind('bool', 'qwen4_ple_ssd_offload', { label: 'SSD N-gram Offload (Qwen4 only)',
@@ -617,18 +624,18 @@ function renderEditorFields(container) {
                 : 'Keep Engram tables on SSD and prefetch required rows. Saves memory; speed depends on storage.',
             disabled: !!m.deepseek_v41_engram_ssd_offload_forced }));
     if (m.moe_expert_offload_supported && !S.isDiffusion(m)) {
-        g.append(seBind('bool', 'moe_expert_offload_enabled', { label: 'MoE Expert Offload',
-            hint: 'Stream Mixture-of-Experts weights from the checkpoint on demand, keeping only part resident.' }));
-        g.append(seKid(seBind('number', 'moe_expert_offload_resident_fraction',
-            { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.01, max: 1, step: 0.01 }),
-            'moe_expert_offload_enabled'));
+        seFam(g, 'moe_expert_offload_enabled',
+            seBind('bool', 'moe_expert_offload_enabled', { label: 'MoE Expert Offload',
+                hint: 'Stream Mixture-of-Experts weights from the checkpoint on demand, keeping only part resident.' }),
+            [seBind('number', 'moe_expert_offload_resident_fraction',
+                { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.01, max: 1, step: 0.01 })]);
     }
     if (S.isQwenOqA8(m)) {
-        g.append(seBind('bool', 'qwen35_oq_a8_enabled', { label: 'Qwen INT8 Activation Prefill',
-            hint: 'Experimental GPU INT8 activation quantization for supported Q4/Q5 prefill.' }));
-        g.append(seKid(seBind('number', 'qwen35_oq_a8_min_tokens',
-            { label: C.tf('uplift.ui.minimum_prompt_tokens', 'Minimum prompt tokens'), min: 1, step: 1 }),
-            'qwen35_oq_a8_enabled'));
+        seFam(g, 'qwen35_oq_a8_enabled',
+            seBind('bool', 'qwen35_oq_a8_enabled', { label: 'Qwen INT8 Activation Prefill',
+                hint: 'Experimental GPU INT8 activation quantization for supported Q4/Q5 prefill.' }),
+            [seBind('number', 'qwen35_oq_a8_min_tokens',
+                { label: C.tf('uplift.ui.minimum_prompt_tokens', 'Minimum prompt tokens'), min: 1, step: 1 })]);
     }
     if (m.ane_prefill_backend && !S.isDiffusion(m)) renderAne(container, g);
 
@@ -640,40 +647,37 @@ function renderEditorFields(container) {
     if (!S_.isDiffusion(m)) {
         if (seValues.specprefill_enabled !== undefined) {
             const pool = S_.specprefillCandidates(models, m.id).map(x => ({ value: x.id }));
-            // UX-4 (user): four cells fill TWO balanced grid lines —
-            // [toggle | draft model] then [keep rate | threshold] — every
-            // one of them on the shared column tracks
-            g.append(seBind('bool', 'specprefill_enabled', { label: 'SpecPrefill' }));
-            g.append(seKid(seBind('select', 'specprefill_draft_model',
-                { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }),
-                'specprefill_enabled'));
-            g.append(seKid(seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
-                { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
-                { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
-                { value: '0.25', label: '25% — Conservative+ (~2.5x)' },
-                { value: '0.3', label: '30% — Conservative (~2.2x)' },
-                { value: '0.4', label: '40% — Mild (~1.8x)' },
-                { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true }),
-                'specprefill_enabled'));
-            g.append(seKid(seBind('number', 'specprefill_threshold',
-                { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 }),
-                'specprefill_enabled'));
+            // UX-5 (user): ONE band, four cells, TWO balanced lines —
+            // [toggle | draft model] then [keep rate | threshold]
+            seFam(g, 'specprefill_enabled',
+                seBind('bool', 'specprefill_enabled', { label: 'SpecPrefill' }),
+                [seBind('select', 'specprefill_draft_model',
+                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }),
+                 seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
+                    { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
+                    { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
+                    { value: '0.25', label: '25% — Conservative+ (~2.5x)' },
+                    { value: '0.3', label: '30% — Conservative (~2.2x)' },
+                    { value: '0.4', label: '40% — Mild (~1.8x)' },
+                    { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true }),
+                 seBind('number', 'specprefill_threshold',
+                    { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 })]);
         }
         if (seValues.mtp_enabled !== undefined) {
-            // UX-4: depth select takes the cell beside the toggle (both
-            // keys share reload semantics); no re-render, no reflow
-            g.append(seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
-                hint: m.mtp_compatible
-                    ? "Drafts several tokens per step with the model's built-in MTP head."
-                    : (m.mtp_compatibility_reason || 'Not compatible with this model') }));
-            g.append(seKid(seBind('select', 'mtp_adaptive_max_depth', {
-                label: C.tf('uplift.se.mtp_depth', 'Adaptive max depth'),
-                hint: C.tf('uplift.se.mtp_depth.hint',
-                    'Automatically adjusts the draft depth up to the selected maximum.'),
-                options: [{ value: '3', label: '3 tokens (Default)' },
-                          ...[4, 5, 6].map(n => ({ value: String(n),
-                              label: C.tf('uplift.se.mtp_depth.opt.' + n, n + ' tokens') }))] }),
-                'mtp_enabled'));
+            // UX-5: one band [toggle | depth] (both keys share reload
+            // semantics); no re-render, no reflow
+            seFam(g, 'mtp_enabled',
+                seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
+                    hint: m.mtp_compatible
+                        ? "Drafts several tokens per step with the model's built-in MTP head."
+                        : (m.mtp_compatibility_reason || 'Not compatible with this model') }),
+                [seBind('select', 'mtp_adaptive_max_depth', {
+                    label: C.tf('uplift.se.mtp_depth', 'Adaptive max depth'),
+                    hint: C.tf('uplift.se.mtp_depth.hint',
+                        'Automatically adjusts the draft depth up to the selected maximum.'),
+                    options: [{ value: '3', label: '3 tokens (Default)' },
+                              ...[4, 5, 6].map(n => ({ value: String(n),
+                                  label: C.tf('uplift.se.mtp_depth.opt.' + n, n + ' tokens')}))]})]);
         }
         const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
         if (seValues.vlm_mtp_enabled !== undefined &&
@@ -797,15 +801,19 @@ function renderEditorFields(container) {
         const gsb = sub(g);
         gsb.classList.add('se-sub-keep');
         gsb.append(seBind('bool', 'guided_grammar_enabled', { label: 'Guided Grammar',
-            hint: 'Apply an EBNF grammar by default for this model.',
-            // toggle must NOT reflow the form: the grammar box is always
-            // present, just visibly disabled while the feature is off
-            onChange: v => { ggInp.disabled = !v.guided_grammar_enabled; } }));
-        ggInp.disabled = !seValues.guided_grammar_enabled;
+            hint: 'Apply an EBNF grammar by default for this model.'
+            // UX-5: no manual enable dance anymore — the well below is a
+            // gated box and the default seRefreshGates() path handles it
+            }));
         // R10-9: example dropdown docks inside the grammar field's control
         // box (below the textarea) so toggle + textarea + presets read as one unit
         ggWrap.querySelector('.se-ctl').append(presetSel, expandB);
-        gsb.append(ggWrap);
+        // UX-5 (user): the whole grammar well (textarea + presets + EXPAND)
+        // greys AND disables until the toggle is on; the toggle itself
+        // stays live — the gate box wraps only the children
+        const ggGate = seGate(seGatedDiv('se-grammar'), 'guided_grammar_enabled');
+        ggGate.append(ggWrap);
+        gsb.append(ggGate);
     }
 
     /* chat-template kwargs (subset: key/value rows, add/remove) */
