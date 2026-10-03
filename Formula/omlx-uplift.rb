@@ -81,6 +81,8 @@ class OmlxUplift < Formula
     # Self-contained: our venv always contains the package; the keg copy
     # only exists while mounted, so don't depend on mount state here.
     system libexec/"bin/python", "-c", "import omlx_uplift, omlx_uplift.router, omlx_uplift.viewer"
-    assert_match "Uplift", shell_output("#{bin}/omlx-uplift 2>&1", 1)
+    # bare invocation prints usage and exits 0 (CLI help redesign made it
+    # a friendly landing, not an error; expectation was exit 1 pre-2026-10)
+    assert_match "omlx-uplift", shell_output("#{bin}/omlx-uplift 2>&1")
   end
 end
