@@ -805,9 +805,16 @@ function renderEditorFields(container) {
             // UX-5: no manual enable dance anymore — the well below is a
             // gated box and the default seRefreshGates() path handles it
             }));
-        // R10-9: example dropdown docks inside the grammar field's control
-        // box (below the textarea) so toggle + textarea + presets read as one unit
-        ggWrap.querySelector('.se-ctl').append(presetSel, expandB);
+        // UX-6 (user 2026-10-03): the example dropdown and EXPAND sat in the
+        // textarea's own flex ROW — three side-by-side items squeezed the
+        // EBNF well to a third of its box and nothing lined up. Now: textarea
+        // full width on its own line, example + EXPAND in an action row
+        // BELOW it, sharing the textarea's edges (user: 'the expand button
+        // could be placed below the example').
+        const ggActions = document.createElement('div');
+        ggActions.className = 'grammar-actions';
+        ggActions.append(presetSel, expandB);
+        ggWrap.querySelector('.se-ctl').append(ggActions);
         // UX-5 (user): the whole grammar well (textarea + presets + EXPAND)
         // greys AND disables until the toggle is on; the toggle itself
         // stays live — the gate box wraps only the children

@@ -1198,35 +1198,41 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* ---- Model settings editor: popup modal, roomy, monospace everywhere ---- */
 /* U1 (user round 2026-09-16): the 860px editor clipped long labels like
    "Cache Reasoning …" — the form now uses most of the viewport.
-   UX-5b/5c (user 2026-10-03): opening the CHANGES rail must NEVER move a
-   control. Two stable layouts, split at 1232px:
-   ≥1232px — modal is always the rail-open width; the (hidden) rail keeps
-   its slot via visibility:hidden, so queueing changes changes nothing.
-   <1232px — the rail takes NO flow space at all: it overlays the right
-   side of the form (absolute, visibility-gated). UX-5b first reserved the
-   slot unconditionally; on a 1024px window that crushed the form next to
-   an empty rail and wrapped every knob under its toggle ('turboquant now
-   always wraps and the layout is broken'). Overlay keeps the form at full
-   width and still never reflows. */
-.modal.nasa.editor { width: min(1200px, 98vw); max-height: 92vh; }
+   UX-6 (user 2026-10-03): UX-5c reserved the rail slot with
+   visibility:hidden at every width ≥1232px, so the form sat at rail-open
+   width with 390px of dead space even with zero queued changes ('the form
+   is always as wide as if there were some queued changes'). FINAL model:
+   the modal GROWS for the rail (868px → 1200px via :has()) while the
+   widen delta is reserved OUTSIDE the modal as a right margin (step1's
+   no-jump rule) — the form's content width is identical clean vs dirty
+   (modal 868 = 1200 − rail 320 − gap 12), the left edge never moves, and
+   at rest the modal is compact with no dead space INSIDE it. Below
+   1232px the rail overlays instead (98vw cap leaves no room to grow). */
+.modal.nasa.editor { width: min(868px, 98vw); max-height: 92vh;
+    transition: width .15s ease, margin-right .15s ease; }
 @media (min-width: 1232px) {
-    /* keep the rail slot laid out but invisible — visibility:hidden reserves
-       the 320px with no frame and no dead gap (display:none would let the
-       form flex and re-introduce the jump) */
-    #se-changes.ed[hidden] { display: block; visibility: hidden; }
+    /* no-jump rule (step1, still user law): reserve the widen delta as a
+       right margin so flex centering pins the LEFT edge exactly where the
+       widened modal will sit; both animate together so the sum — and the
+       edge — never move. 332 = rail 320 + gap 12 = the widen delta. */
+    .modal.nasa.editor { margin-right: 332px; }
+    .modal.nasa.editor:has(#se-changes.ed:not([hidden])) { width: min(1200px, 98vw); margin-right: 0; }
 }
 @media (max-width: 1231px) {
-    .editor-body { position: relative; }
-    #se-changes.ed { position: absolute; inset: 0 0 0 auto; width: min(320px, 88%);
-        visibility: hidden; z-index: 5;
-        box-shadow: -10px 0 24px rgba(0, 0, 0, .35); }
-    #se-changes.ed:not([hidden]) { visibility: visible; }
+    .modal.nasa.editor { margin-right: auto; }   /* near-full-width: grow rightward */
 }
-.editor-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
-.editor-body .editor-scroll { flex: 0 1 964px; min-width: 0; }
-#se-changes.ed { flex: 0 0 320px; align-self: stretch; max-height: none;
+.editor-body { position: relative; display: flex; gap: 12px; flex: 1; min-height: 0; }
+.editor-body .editor-scroll { flex: 1 1 0; min-width: 0; }
+#se-changes.ed { position: absolute; inset: 0 0 0 auto; width: min(320px, 88%);
+    z-index: 5; box-shadow: -10px 0 24px rgba(0, 0, 0, .35); margin: 0;
+    align-self: stretch; max-height: none;
     overflow: auto; scrollbar-gutter: stable;
     border: 1px solid var(--edge); background: var(--field); }
+@media (min-width: 1232px) {
+    /* in-flow column again; the modal grew to pay for it */
+    #se-changes.ed { position: static; width: auto; flex: 0 0 320px;
+        box-shadow: none; }
+}
 .modal.editor .editor-scroll {
     padding: 8px 14px;
     overflow: auto;
@@ -1706,9 +1712,15 @@ label.se-row.pending-restart > .se-ctl > select {
     grid-template-columns: 1fr;
 }
 
-.modal.editor .se-wide .se-ctl { justify-content: stretch; }
+.modal.editor .se-wide .se-ctl { justify-content: stretch; flex-direction: column; align-items: stretch; }
 .modal.editor .se-wide textarea { width: 100%; }
-.modal.editor .se-wide textarea + select, .modal.editor .se-wide select { margin-top: 4px; }
+/* UX-6 (user): example dropdown + EXPAND stack BELOW the textarea, left
+   edges aligned to it — user asked 'the expand button could be placed below
+   the example'. Not a third item in the textarea's flex row (that squeezed
+   the EBNF well and mis-aligned all three). */
+.grammar-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 4px; }
+.grammar-actions select { width: 260px; max-width: 100%; min-width: 0; }
+.grammar-actions .se-btn { flex: 0 0 auto; }
 /* R10-5: grammar textarea — big and mono, it holds EBNF */
 .modal.editor .se-box-body textarea { min-height: 200px;
     font: 400 12px/1.5 var(--mono); }
