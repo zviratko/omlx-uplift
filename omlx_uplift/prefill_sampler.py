@@ -110,29 +110,39 @@ class PrefillSampler:
         try:
             with self._lock:
                 prev = self._rows.get(rid)
-                if prev is not None:
-                    if prev[3] != phase or (prev[0] and model
-                                            and prev[0] != model):
-                        # specprefill phase scale-change or id moved
-                        # engines: restart silently — the jump is not
-                        # computed work.
-                        self._rows[rid] = (model, processed, total, phase,
-                                           0, now)
-                        return
-                    # backward count = recycled id (a NEW request): restart
-                    # from zero and credit its progress as fresh work.
-                    prev_p = 0 if prev[1] > processed else prev[1]
-                    d = max(processed - prev_p, 0)
-                elif processed >= total:
-                    # Untracked row finishing in one event: credit at most
-                    # one chunk, and only the plain prefill phase (see
-                    # module docstring — lookahead/selected burst the whole
-                    # prompt through this door).
-                    if phase == "prefill":
-                        self._acc += min(processed, FLUSH_CAP_MIN)
+                if prev is not None and (prev[3] != phase
+                                         or (prev[0] and model
+                                             and prev[0] != model)):
+                    # specprefill phase scale-change or id moved engines:
+                    # restart accrual at this point and credit NOTHING for
+                    # the jump — the new scale's history is not computed
+                    # work we observed (draft.py reports the whole prompt
+                    # as processed at a phase boundary).
+                    self._rows[rid] = (model, processed, total, phase,
+                                       0, now)
+                    if processed >= total:
+                        self._rows.pop(rid, None)
                     return
-                else:
-                    d = processed       # birth event: this row's real work
+                if prev is not None and prev[1] > processed:
+                    # backward count = recycled id (a NEW request). Forget
+                    # the old row and treat this event as a fresh sighting
+                    # — same caps apply as for any never-tracked row.
+                    self._rows.pop(rid, None)
+                    prev = None
+                if prev is None:
+                    if processed >= total:
+                        # Untracked row finishing in one event: credit at
+                        # most one chunk, and only the plain prefill phase
+                        # (see module docstring — lookahead/selected burst
+                        # the whole prompt through this door).
+                        if phase == "prefill":
+                            self._acc += min(processed, FLUSH_CAP_MIN)
+                        return
+                    self._rows[rid] = (model, processed, total, phase,
+                                       processed, now)
+                    self._acc += processed
+                    return
+                d = max(processed - prev[1], 0)
                 self._acc += d
                 if processed >= total:
                     self._rows.pop(rid, None)   # completion arrives here
