@@ -404,9 +404,28 @@ def skip_patterns(manifest: dict) -> list[str]:
 # --------------------------------------------------------------------------
 
 def keg_id(omlx_root: str | None = None) -> str | None:
-    """Identity of the target tree: the site-packages/omlx directory name
-    plus the omlx version file hash. A `brew upgrade` builds a fresh keg ->
+    """Identity of the target tree. A `brew upgrade` builds a fresh keg ->
     new id -> every applied patch must re-validate (PAT-0 groundwork).
+
+    Identity sources, strongest first (KEGID-1, 2026-10-04):
+    1. The wheel's dist-info RECORD, sibling of the package dir
+       (`site-packages/omlx-<ver>.dist-info/RECORD`). It is a
+       content-addressed manifest written at install time, untouched by
+       uplift's own edits to the tree — exactly "which build is this".
+       A HEAD rebuild whose _version.py string did not change still
+       moves RECORD, which the version file alone could never catch.
+    2. The installed version file. Real wheels ship `omlx/_version.py`;
+       the old code read only `omlx/version.py` — a file that has NEVER
+       existed in the installed layout — so every production keg hashed
+       the `unversioned` fallback: one constant id across all keg
+       revisions. Pre-upgrade first-touch backups then survived
+       reinstall keyed to that constant and a later patch removal
+       restored stale pre-upgrade bytes into the newer keg, mixing
+       files from five upstream commits (model loading broke entirely
+       from 2026-10-01 until the tree was reinstalled). Tests wrote the
+       fake `version.py`, so the guarantee only ever held in tests.
+    3. `unversioned` last resort only when neither exists (dev trees
+       without a wheel); it can no longer silently mask a real install.
 
     Never imports omlx (safe at .pth time). Returns None when unresolvable.
     """
@@ -416,14 +435,27 @@ def keg_id(omlx_root: str | None = None) -> str | None:
     parent_name = os.path.basename(os.path.dirname(root)) or "tree"
     digest = hashlib.sha256()
     changed = False
-    # version.py is the cheapest stable fingerprint of tree content identity
-    ver = os.path.join(root, "version.py")
-    try:
-        with open(ver, "rb") as fh:
-            digest.update(fh.read())
-        changed = True
-    except OSError:
-        pass
+    import glob as _glob
+
+    for rec in sorted(_glob.glob(os.path.join(
+            os.path.dirname(root), "omlx-*.dist-info", "RECORD"))):
+        try:
+            with open(rec, "rb") as fh:
+                digest.update(fh.read())
+            changed = True
+            break
+        except OSError:
+            continue
+    if not changed:
+        for name in ("_version.py", "version.py"):
+            ver = os.path.join(root, name)
+            try:
+                with open(ver, "rb") as fh:
+                    digest.update(fh.read())
+                changed = True
+                break
+            except OSError:
+                continue
     if not changed:
         digest.update(b"unversioned")
     return f"{parent_name}:{digest.hexdigest()[:16]}"

@@ -523,6 +523,47 @@ class TestManifest(TempTree):
         self.assertNotEqual(k1, k2)
         self.assertIn("site-packages-fake:", k2)
 
+    # KEGID-1 (2026-10-04): the real wheel ships omlx/_version.py, never
+    # omlx/version.py — the old code hashed `unversioned` for every
+    # production keg, so reinstall kept one constant id and stale
+    # first-touch backups were restored into a newer tree.
+    def test_keg_id_real_layout_uses_under_version_file(self):
+        root = os.path.join(self.tmp, "sp-real", "omlx")
+        os.makedirs(root, exist_ok=True)
+        with open(os.path.join(root, "_version.py"), "w") as fh:
+            fh.write('__version__ = "0.7.0rc1"\n')
+        k1 = patches.keg_id(root)
+        # must NOT be the `unversioned` fallback digest
+        self.assertNotEqual(k1.split(":")[1],
+                            hashlib.sha256(b"unversioned").hexdigest()[:16])
+        with open(os.path.join(root, "_version.py"), "w") as fh:
+            fh.write('__version__ = "0.7.0"\n')
+        self.assertNotEqual(k1, patches.keg_id(root))
+
+    def test_keg_id_prefers_distinfo_record_and_tracks_rebuild(self):
+        sp = os.path.join(self.tmp, "sp-rec")
+        root = os.path.join(sp, "omlx")
+        os.makedirs(root, exist_ok=True)
+        with open(os.path.join(root, "_version.py"), "w") as fh:
+            fh.write('__version__ = "0.7.0"\n')
+        k_ver = patches.keg_id(root)
+        di = os.path.join(sp, "omlx-0.7.0.dist-info")
+        os.makedirs(di, exist_ok=True)
+        with open(os.path.join(di, "RECORD"), "w") as fh:
+            fh.write("omlx/a.py,sha256=AAA,10\n")
+        k_rec = patches.keg_id(root)
+        self.assertNotEqual(k_rec, k_ver)       # RECORD wins over version file
+        with open(os.path.join(di, "RECORD"), "w") as fh:
+            fh.write("omlx/a.py,sha256=BBB,10\n")  # same version, rebuilt keg
+        self.assertNotEqual(k_rec, patches.keg_id(root))
+
+    def test_keg_id_unversioned_only_without_any_identity(self):
+        root = os.path.join(self.tmp, "sp-bare", "omlx")
+        os.makedirs(root, exist_ok=True)
+        k = patches.keg_id(root)
+        self.assertEqual(k.split(":")[1],
+                         hashlib.sha256(b"unversioned").hexdigest()[:16])
+
     def test_prune_keeps_newest_and_applied(self):
         m = self.store.load()
         p = {"id": "prune-me", "state": "applied", "desired_version": 1,
