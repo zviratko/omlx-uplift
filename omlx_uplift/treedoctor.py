@@ -240,22 +240,32 @@ def boot_check(store=None) -> dict | None:
             # cache valid only while BOTH the keg identity and the
             # applied-patch fingerprint are unchanged: a patch removal
             # shrinks the expected set and must re-run the census.
-            if st.get("keg_id") == keg and st.get("manifest_fp") == fp:
-                rep = st.get("report")
+            # Drift verdicts are ignored on read (never trusted from a
+            # cache; older builds may have written one).
+            cached = st.get("report")
+            if (st.get("keg_id") == keg and st.get("manifest_fp") == fp
+                    and isinstance(cached, dict) and cached.get("ok")):
+                rep = cached
         except (OSError, ValueError):
             rep = None
         if rep is None:
             exp = expected_drift(store, tree_root, keg)
             rep = census(tree_root, expected=exp)
             rep["keg_id"] = keg
-            try:
-                tmp = _state_path(store) + ".tmp"
-                with open(tmp, "w") as fh:
-                    json.dump({"keg_id": keg, "manifest_fp": fp,
-                               "report": rep}, fh)
-                os.replace(tmp, _state_path(store))
-            except OSError:
-                pass
+            # Only CLEAN verdicts are cached. A drift verdict cached here
+            # would replay as a false alarm after a manual repair (the
+            # tree healed, both fingerprints unchanged — boot would keep
+            # warning until the next keg/manifest move). Re-censusing on
+            # drift costs ~0.14 s per boot; drift is the rare, loud case.
+            if rep.get("ok"):
+                try:
+                    tmp = _state_path(store) + ".tmp"
+                    with open(tmp, "w") as fh:
+                        json.dump({"keg_id": keg, "manifest_fp": fp,
+                                   "report": rep}, fh)
+                    os.replace(tmp, _state_path(store))
+                except OSError:
+                    pass
         if rep.get("skipped_reason") or rep.get("ok"):
             return rep
         worst = ", ".join(

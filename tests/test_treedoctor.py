@@ -228,6 +228,26 @@ class TestBootCheck(TreeFixture):
         self.assertFalse(rep["ok"])
         self.assertTrue(any("TREE DRIFT" in r.getMessage() for r in records))
 
+    def test_repair_clears_next_boot_no_stale_alarm(self):
+        """Drift verdicts are NEVER cached: after a manual repair the next
+        boot must go silent, not replay the warning (same fingerprints,
+        healed tree — exactly when a cached alarm would lie)."""
+        self._patch_hooks()
+        self._touch("omlx/admin/routes.py")
+        rep = treedoctor.boot_check(store=self.store)
+        self.assertFalse(rep["ok"])
+        self.assertFalse(os.path.exists(
+            os.path.join(self.base, ".treedoctor.json")))
+        # repair: byte-identical restore from the fixture RECORD's hash
+        self._restore_clean("omlx/admin/routes.py")
+        rep2 = treedoctor.boot_check(store=self.store)
+        self.assertTrue(rep2["ok"], rep2["unexpected"])
+
+    def _restore_clean(self, rel):
+        data = self.files[rel]
+        with open(os.path.join(self.sp, *rel.split("/")), "wb") as fh:
+            fh.write(data)
+
     def test_kill_switch_stays_out(self):
         self._patch_hooks()
         self.store.disabled = True
