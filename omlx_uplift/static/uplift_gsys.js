@@ -167,17 +167,18 @@ const GS_LABELS = {
         wt_hint: 'Write hot blocks to SSD immediately.',
         blocks: 'Initial Cache Blocks',
         blocks_hint: 'KV blocks allocated at startup.',
-        gdn_store: 'GDN Snapshot Storage',
-        gdn_store_hint: 'Where Gated-DeltaNet state snapshots go.',
-        gdn_store_opts: [['auto','Auto'],['ssd_sidecar','SSD Sidecar'],
-                         ['embedded','Embedded']],
-        gdn_pend: 'GDN Pending Write Limit',
-        gdn_pend_hint: 'Max queued SSD writes before backpressure.',
-        gdn_prec: 'GDN Sidecar State Precision',
-        gdn_prec_hint: 'Quantisation of sidecar-held recurrent state.',
-        gdn_prec_opts: [['fp32','FP32'],['rht_int16','RHT INT16'],['bf16','BF16'],
-                        ['int8','INT8'],['rht_int8','RHT INT8']],
-        gdn_prec_warning: 'INT8/RHT INT8 state precision may degrade long-context quality.' },
+        gdn_store: 'Snapshot Storage',
+        gdn_store_hint: 'Auto uses separate SSD files when SSD cache is enabled; otherwise it stores snapshots with the KV cache. With KV Cache follows the same RAM or SSD tier as KV blocks. Enable Hot Cache Only to keep it in RAM.',
+        gdn_store_opts: [['auto','Auto (recommended)'],['ssd_sidecar','Dedicated SSD Sidecar'],
+                         ['embedded','With KV Cache']],
+        gdn_pend: 'SSD Write Buffer',
+        gdn_pend_hint: 'Maximum RAM used by encoded snapshots waiting to be written to SSD. When the buffer is full, cache writes pause until space is available.',
+        gdn_prec: 'SSD Snapshot Precision',
+        gdn_prec_hint: 'Controls GDN state stored in SSD sidecars only. FP32 is the exact default. Reduced-precision modes use less space but introduce reconstruction error. Restored state always runs in FP32.',
+        gdn_prec_opts: [['fp32','FP32 (exact, recommended)'],['rht_int16','RHT + int16'],
+                        ['bf16','BF16'],['int8','Int8 (row-wise)'],
+                        ['rht_int8','RHT + int8 (row-wise)']],
+        gdn_prec_warning: 'Reduced-precision GDN cache storage can change greedy outputs, break bit-level reproducibility, and reduce output quality. Use FP32 unless you explicitly accept this trade-off.' },
     badge: 'RESTART REQUIRED',
     restart_notice: 'Host and port changes take effect after a restart.',
 };
@@ -246,6 +247,9 @@ function markFieldDirty(flat, val) {
         display: gsDisplay });
     if (changed) gsDirty[flat] = cur;
     else delete gsDirty[flat];               // edited back = no longer queued
+    if (flat === 'cache_enabled' || flat === 'hot_cache_only'
+        || flat === 'gdn_snapshot_storage')
+        gsDisabledSync();                    // SSD rows follow the effective mode
     gsUpdateSaveBtn();
     gsMarkSections();
     renderDirtyList();
@@ -258,6 +262,7 @@ function revertField(flat) {                // click on |original| chip
     // wins, same as gsGet), then the row's dirty marks are recomputed.
     gsSetControlValue(flat, gsValFlat(flat));
     markFieldDirty(flat, gsValFlat(flat));
+    gsDisabledSync();                        // reverted cache toggles restore SSD rows
     gsUpdateSaveBtn();
     gsMarkSections();
     renderDirtyList();
@@ -995,10 +1000,14 @@ const GS_SPEC = [
     {sec: 'adv', lab: 'adv.gdn_store', hint: 'adv.gdn_store_hint', ctl: {
         k: 'sel', sec: 'cache', field: 'gdn_snapshot_storage', flat: 'gdn_snapshot_storage',
         opts: 'adv.gdn_store_opts'}},
-    {sec: 'adv', lab: 'adv.gdn_pend', hint: 'adv.gdn_pend_hint', show: (ctx) => ctx.gdn === 'ssd_sidecar', ctl: {
+    // Classic parity (user round): the SSD write-buffer and precision rows
+    // are ALWAYS visible; classic disables the control (embedded storage,
+    // hot-cache-only, or cache off) instead of hiding the row. gsDisabledSync
+    // below mirrors classic's :disabled expression.
+    {sec: 'adv', lab: 'adv.gdn_pend', hint: 'adv.gdn_pend_hint', ctl: {
         k: 'text', sec: 'cache', field: 'gdn_ssd_pending_max_size',
         flat: 'gdn_ssd_pending_max_size', ph: '512MB'}},
-    {sec: 'adv', lab: 'adv.gdn_prec', hint: 'adv.gdn_prec_hint', show: (ctx) => ctx.gdn === 'ssd_sidecar', ctl: {
+    {sec: 'adv', lab: 'adv.gdn_prec', hint: 'adv.gdn_prec_hint', ctl: {
         k: 'sel', sec: 'cache', field: 'gdn_sidecar_precision', flat: 'gdn_sidecar_precision',
         opts: 'adv.gdn_prec_opts',
 }},
@@ -1015,11 +1024,38 @@ const GS_SPEC = [
    order; ungated rows are never toggled). */
 const GS_GATED = ['memory_guard_custom_ceiling_gb', 'gdn_ssd_pending_max_size',
                   'gdn_sidecar_precision'];
+/* queued-but-unsaved edits win over the server baseline (gsDirty holds the
+   pending value; gsGet reads GS + shadow but not the dirty queue) */
+function gsEffFlat(flat) {
+    if (flat in gsDirty) return gsDirty[flat];
+    const map = GS_MAP[flat];
+    return map ? gsGet(map[0], map[1]) : undefined;
+}
+/* classic config.effective_gdn_ssd_split_enabled: auto resolves to SSD
+   sidecar when the SSD cache is on and hot-cache-only is off */
+function gsGdnEff() {
+    const gdn = gsEffFlat('gdn_snapshot_storage');
+    if (gdn === 'embedded' || gdn === 'ssd_sidecar') return gdn;
+    return (gsEffFlat('cache_enabled') && !gsEffFlat('hot_cache_only'))
+        ? 'ssd_sidecar' : 'embedded';
+}
+/* Classic shows the two SSD rows ALWAYS and disables the control when
+   storage is embedded / hot-cache-only / cache off (the :disabled binding).
+   Re-run after every render, queued edit, revert and select change. */
+function gsDisabledSync() {
+    const dis = gsGdnEff() === 'embedded';
+    for (const f of ['gdn_ssd_pending_max_size', 'gdn_sidecar_precision']) {
+        const row = document.querySelector('#gs-body [data-flat="' + f + '"]');
+        const ctl = row && row.querySelector('input,select');
+        if (ctl) ctl.disabled = dis;
+    }
+}
 function gsCtxNow() {
     return {
         ccLocal: (gsGet('claude_code', 'mode') || 'local') !== 'cloud',
         tier: gsGet('memory', 'memory_guard_tier'),
         gdn: gsGet('cache', 'gdn_snapshot_storage'),
+        gdnEff: gsGdnEff(),
         prec: gsGet('cache', 'gdn_sidecar_precision'),
     };
 }
@@ -1033,6 +1069,7 @@ function gsVisibilitySync(changedFlat) {
     }
     const toAdd = GS_GATED.filter(f => want[f] && !have[f]);
     const toDel = GS_GATED.filter(f => !want[f] && have[f]);
+    gsDisabledSync();   // storage/cache toggles move the SSD rows' disabled state
     if (!toAdd.length && !toDel.length) return;
     if (changedFlat === 'claude_code_mode' || toAdd.length + toDel.length > 1) {
         renderGlobalSettings();   // structural or ambiguous: rebuild, it is honest
@@ -1079,6 +1116,7 @@ function renderGlobalSettings() {
         ccLocal: (gsGet('claude_code', 'mode') || 'local') !== 'cloud',
         tier: gsGet('memory', 'memory_guard_tier'),
         gdn: gsGet('cache', 'gdn_snapshot_storage'),
+        gdnEff: gsGdnEff(),
         prec: gsGet('cache', 'gdn_sidecar_precision'),
     };
     // (the old "Global" restart-notice box was removed; the RESTART chip,
@@ -1092,8 +1130,10 @@ function renderGlobalSettings() {
         const row = gsSpecRow(item, L, ctx);
         body.append(row);
     }
-    // gdn precision warning: attach after the row exists (needs .uname)
-    if (ctx.gdn === 'ssd_sidecar' && ['int8', 'rht_int8'].includes(ctx.prec)) {
+    // gdn precision warning: attach after the row exists (needs .uname).
+    // Effective mode (auto + SSD cache resolves to sidecar), not just the
+    // explicit ssd_sidecar label — precision only bites when sidecars exist.
+    if (ctx.gdnEff === 'ssd_sidecar' && ['int8', 'rht_int8'].includes(ctx.prec)) {
         const prow = body.querySelector('[data-flat="gdn_sidecar_precision"]');
         if (prow) {
             const w = document.createElement('small');
@@ -1182,6 +1222,7 @@ function renderGlobalSettings() {
             else ctl.value = wasDirty[flat] == null ? '' : wasDirty[flat];
         }
     }
+    gsDisabledSync();   // classic-parity :disabled on the two SSD rows
     gsMarkSections();
     gsUpdateSaveBtn();
     renderDirtyList();
