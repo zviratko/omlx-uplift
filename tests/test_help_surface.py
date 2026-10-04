@@ -32,12 +32,12 @@ def _main_argv(argv):
 
 
 def _dispatchable_commands():
-    """The set main() knows: parse the source for the dispatch set."""
+    """The set main() knows: the membership gate `if sys.argv[1] not in {...}`.
+    Shape-agnostic: find that gate, collect quoted words inside its braces."""
     src = (PKG / "cli.py").read_text(encoding="utf-8")
-    m = re.search(r'"skin",\s*"dev"\}', src)
-    assert m, "main() dispatch set changed shape — update this test"
-    block = src[max(0, m.start() - 200):m.end()]
-    return set(re.findall(r'"([a-z-]+)"', block))
+    m = re.search(r'if sys\.argv\[1\] not in \{(.*?)\}', src, re.S)
+    assert m, "main() dispatch gate changed shape — update this test"
+    return set(re.findall(r'"([a-z-]+)"', m.group(1)))
 
 
 class TestHelpSurface(unittest.TestCase):

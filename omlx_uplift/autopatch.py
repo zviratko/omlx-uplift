@@ -100,6 +100,21 @@ def _reconcile_patches() -> None:
             pass
 
 
+def _tree_drift_check() -> None:
+    """KEGID-2: warn (never block, never raise) when the installed omlx
+    tree no longer matches its wheel RECORD. The census runs once per keg
+    identity (cached verdict replayed after that), so a normal boot pays
+    one small json read. Runs AFTER _reconcile_patches: applied patches
+    own expected drift, and reconcile may have just re-exec'd the
+    process — this hook only sees a settled tree."""
+    try:
+        from . import treedoctor
+
+        treedoctor.boot_check()
+    except Exception:  # the doctor must never be the reason a boot fails
+        pass
+
+
 def install() -> None:
     # UP-3: buffer patchsync/boot INFO lines until Uplift mounts (logging
     # is unconfigured this early; register() flushes into server.log).
@@ -110,6 +125,7 @@ def install() -> None:
     except Exception:
         pass
     _reconcile_patches()
+    _tree_drift_check()
     _seed_env_tunables()
     if _TARGET in sys.modules:
         _mount(sys.modules[_TARGET])

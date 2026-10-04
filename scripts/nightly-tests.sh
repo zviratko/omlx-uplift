@@ -64,6 +64,13 @@ rc_node=$?
 verify_out=$(bash scripts/verify-deploy.sh 2>&1)
 rc_verify=$?
 
+# KEGID-2: tree census — installed omlx files vs the wheel RECORD. Catches
+# the corruption class verify-deploy cannot see (verify proves the SERVER
+# serves what the KEG holds; it never checks the keg against its own
+# manifest). Read-only hashing, zero inference (CI-3 rule).
+doctor_out=$(PYTHONPATH="$REPO" "$KEG_PY" -m omlx_uplift.cli doctor 2>&1)
+rc_doctor=$?
+
 # counts: pytest tail line '544 passed, 2 warnings in 29s' style;
 # node --test summary 'ℹ tests N / pass N / fail N / skipped N'
 p_pass=$(printf '%s' "$pytest_out" | grep -oE '[0-9]+ passed' | tail -1 | cut -d' ' -f1)
@@ -79,11 +86,12 @@ ok=true
 [ "$rc_node" -ne 0 ] && ok=false
 [ "$rc_check" -ne 0 ] && ok=false
 [ "$rc_verify" -ne 0 ] && ok=false
+[ "$rc_doctor" -ne 0 ] && ok=false
 sha=$(git rev-parse --short HEAD)
 date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 upd_bool=false; [ "$updated" = yes ] && upd_bool=true
-line="{\"date\":\"$date\",\"sha\":\"$sha\",\"updated\":$upd_bool,\"ok\":$ok,\"rc_pytest\":$rc_pytest,\"rc_check\":$rc_check,\"rc_node\":$rc_node,\"rc_verify\":$rc_verify,\"pytest\":{\"pass\":$p_pass,\"fail\":$p_fail,\"skip\":$p_skip},\"node\":{\"pass\":$n_pass,\"fail\":$n_fail,\"skip\":$n_skip}}"
+line="{\"date\":\"$date\",\"sha\":\"$sha\",\"updated\":$upd_bool,\"ok\":$ok,\"rc_pytest\":$rc_pytest,\"rc_check\":$rc_check,\"rc_node\":$rc_node,\"rc_verify\":$rc_verify,\"rc_doctor\":$rc_doctor,\"pytest\":{\"pass\":$p_pass,\"fail\":$p_fail,\"skip\":$p_skip},\"node\":{\"pass\":$n_pass,\"fail\":$n_fail,\"skip\":$n_skip}}"
 printf '%s\n' "$line" >>"$JSONL"
 
 if [ "$ok" != true ]; then
@@ -92,6 +100,7 @@ if [ "$ok" != true ]; then
         echo "--- pytest ---"; printf '%s\n' "$pytest_out"
         echo "--- node ---"; printf '%s\n' "$node_out"
         echo "--- verify-deploy ---"; printf '%s\n' "$verify_out"
+        echo "--- doctor ---"; printf '%s\n' "$doctor_out"
     } >"$FAILLOG"
 fi
 rm -f "$LOG"

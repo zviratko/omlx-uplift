@@ -212,6 +212,17 @@ never from the copied file.
 Mutable state (usage database, cluster) must stay private while both
 servers run — a shared live write race.
 .El
+.It Xo Ic doctor
+.Op Fl -json
+.Xc
+Read-only census of the installed omlx tree against the wheel
+.Pa RECORD
+manifest .
+Every file that differs without an applied uplift patch to explain it is
+reported as drift ; exit status 1 .
+Custom-kernel binaries and patch-owned files are excepted .
+Repair by reinstalling the omlx formula ; the tool never writes to the
+tree .
 .It Xo Ic help
 .Op Ar command
 .Xc

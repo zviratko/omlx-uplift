@@ -241,6 +241,29 @@ def _verify_mount(python: str) -> tuple[bool, str]:
     return False, " / ".join(tail)
 
 
+def cmd_doctor(argv=None) -> int:
+    """KEGID-2: READ-ONLY census of the installed omlx tree against its
+    wheel RECORD. Exit 0 clean/expected-only, 1 unexpected drift,
+    2 census impossible. Repair stays manual (`brew reinstall omlx`) —
+    auto-restoring from backups is exactly what corrupted the tree once."""
+    import json as _json
+
+    ap = argparse.ArgumentParser(prog="omlx-uplift doctor")
+    ap.add_argument("--json", action="store_true", help="machine-readable")
+    args = ap.parse_args(argv)
+
+    from . import treedoctor
+
+    rep = treedoctor.run()
+    if args.json:
+        print(_json.dumps(rep, indent=2))
+    else:
+        print(treedoctor.format_report(rep))
+    if rep.get("skipped_reason"):
+        return 2
+    return 0 if rep["ok"] else 1
+
+
 def cmd_install(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="omlx-uplift install")
     ap.add_argument("--python", help="target interpreter "
@@ -1239,7 +1262,7 @@ def main() -> int:
         return show_man()
     if sys.argv[1] not in {
             "serve", "view", "install", "uninstall", "patch", "patches",
-            "kernel", "skin", "dev"}:
+            "kernel", "skin", "dev", "doctor"}:
         print(f"omlx-uplift: unknown command {sys.argv[1]!r}\n",
               file=sys.stderr)
         from .help import print_help
@@ -1260,7 +1283,8 @@ def main() -> int:
         return cmd_skin(rest)
     return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
             "uninstall": cmd_uninstall, "patch": cmd_patches,
-            "kernel": cmd_kernel, "dev": cmd_dev}[cmd](rest)
+            "kernel": cmd_kernel, "dev": cmd_dev,
+            "doctor": cmd_doctor}[cmd](rest)
 
 
 if __name__ == "__main__":

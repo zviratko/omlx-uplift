@@ -28,6 +28,8 @@ COMMANDS = [
     ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
     ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure|kegs —"
             " dev patches in a separate keg, keg rollback"),
+    ("doctor", "check the installed omlx tree against its wheel RECORD"
+               " (read-only; exit 1 = unexpected drift)"),
 ]
 
 _TOP_USAGE = """\
@@ -65,6 +67,9 @@ COMMAND_USAGE = {
             " [--share K,...] [--no-share K,...] [--interactive]\n"
             "                 dev kegs | dev stash-keg\n"
             "                 dev use <sha> [--force] | dev prune [--keep N]"),
+    "doctor": ("omlx-uplift doctor [--json]\n"
+               "                 read-only: every omlx file vs the wheel RECORD;\n"
+               "                 files an applied patch owns are expected drift"),
 }
 
 _CONFIG_FILES = [
