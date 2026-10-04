@@ -49,6 +49,9 @@ def register(app) -> None:
         from . import instrument
 
         instrument.install()
+        # BE-prefill: prefill tracker wrap is independent of the engine
+        # core wrap (install() may bail early on layout drift).
+        instrument.install_prefill_tracker()
     except Exception:  # never break the server for a capture failure
         import logging
 

@@ -228,9 +228,13 @@ const EXPLORE_METRICS = [
     // Flagship: token hit ratio area + realized prefill line; saved
     // tok/min rides the legend line. Reading: high area + high line = cache
     // doing work; low area + high line = cold prompts.
+    // BE-prefill: the realized line is prefill.tokens_s (per-tick computed
+    // rate from the tracker hooks). avg_prefill_tps is the session
+    // lifetime average — near-static on a long-running server, it could
+    // not show whether the cache is doing work NOW.
     { key: 'pfx.token_hit_pct', fmt: 'pct', titleKey: 'pfx.cache_savings', series: [
         { key: 'pfx.token_hit_pct', fmt: 'pct', area: true },
-        { key: 'avg_prefill_tps', axis: 'y2' },
+        { key: 'prefill.tokens_s', axis: 'y2' },
         { key: 'pfx.saved_tokens_min', legendOnly: true },
     ] },
     // Secondary efficiency: block-level lookup hit % + restored tok/min.

@@ -297,6 +297,7 @@
   "uplift.metric.pfx.restored_tokens_min": "回復 tok/分",
   "uplift.metric.pfx.saved_tokens_min": "節省 tok/分",
   "uplift.metric.pfx.token_hit_pct": "詞元命中率 %",
+  "uplift.metric.prefill.tokens_s": "已計算 prefill tok/s",
   "uplift.metric.pwr.ane_w": "ANE W",
   "uplift.metric.pwr.cpu_w": "CPU W",
   "uplift.metric.pwr.draw": "功耗",

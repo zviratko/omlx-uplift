@@ -301,6 +301,7 @@
   "uplift.metric.pfx.restored_tokens_min": "tok/min restaurés",
   "uplift.metric.pfx.saved_tokens_min": "tok/min économisés",
   "uplift.metric.pfx.token_hit_pct": "réussite tokens %",
+  "uplift.metric.prefill.tokens_s": "tok/s prefill calculés",
   "uplift.metric.pwr.ane_w": "ANE W",
   "uplift.metric.pwr.cpu_w": "CPU W",
   "uplift.metric.pwr.draw": "consommation",

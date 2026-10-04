@@ -197,3 +197,53 @@ def install() -> None:
                 log.debug("note_finalize failed", exc_info=True)
         _cleanup_request._uplift_hook = True
         EngineCore._cleanup_request = _cleanup_request
+
+
+def install_prefill_tracker() -> None:
+    """BE-prefill: wrap the prefill progress tracker's update/remove.
+
+    The tracker is the exact source of computed-prefill work — update()
+    fires per chunk with cumulative counts, remove() fires on completion
+    AND on every abort path. Wrapping the CLASS covers every scheduler
+    instance; any failure degrades to a flat 0 line, never to a serving
+    error. *args-tolerant: an upstream signature change passes through to
+    the real method untouched; our note only reads the first four
+    positionals (rid, processed, total, model) + phase."""
+    try:
+        from omlx.prefill_progress import PrefillProgressTracker
+    except Exception:  # noqa: BLE001 — omlx layout changed; key stays absent
+        log.debug("prefill tracker import failed", exc_info=True)
+        return
+    orig_upd = PrefillProgressTracker.update
+    if not getattr(orig_upd, "_uplift_hook", False):
+        @functools.wraps(orig_upd)
+        def update(self, request_id, processed, total, model_id="",
+                   *args, **kwargs):
+            orig_upd(self, request_id, processed, total, model_id,
+                     *args, **kwargs)
+            try:
+                from .prefill_sampler import get_prefill_sampler
+                # upstream signature: (rid, processed, total, model, phase,
+                # ...) — phase is normally a kwarg (draft.py) but tolerate
+                # it positionally too.
+                phase = kwargs.get("phase") or \
+                    (args[0] if args else "prefill")
+                get_prefill_sampler().note_chunk(
+                    request_id, processed, total, model_id, phase)
+            except Exception:  # noqa: BLE001
+                log.debug("prefill note_chunk failed", exc_info=True)
+        update._uplift_hook = True
+        PrefillProgressTracker.update = update
+
+    orig_rm = PrefillProgressTracker.remove
+    if not getattr(orig_rm, "_uplift_hook", False):
+        @functools.wraps(orig_rm)
+        def remove(self, request_id):
+            orig_rm(self, request_id)
+            try:
+                from .prefill_sampler import get_prefill_sampler
+                get_prefill_sampler().note_end(request_id)
+            except Exception:  # noqa: BLE001
+                log.debug("prefill note_end failed", exc_info=True)
+        remove._uplift_hook = True
+        PrefillProgressTracker.remove = remove

@@ -297,6 +297,7 @@
   "uplift.metric.pfx.restored_tokens_min": "восстановлено ток/мин",
   "uplift.metric.pfx.saved_tokens_min": "сэкономлено ток/мин",
   "uplift.metric.pfx.token_hit_pct": "попадание токенов %",
+  "uplift.metric.prefill.tokens_s": "вычисленные prefill ток/с",
   "uplift.metric.pwr.ane_w": "ANE W",
   "uplift.metric.pwr.cpu_w": "CPU W",
   "uplift.metric.pwr.draw": "потребление",

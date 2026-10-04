@@ -166,6 +166,19 @@ class Collector:
             except Exception:
                 log.debug("prefix-cache collect failed", exc_info=True)
 
+        # BE-prefill: exact computed-prefill tok/s from the tracker
+        # event hooks (instrument.install_prefill_tracker feeds the
+        # sampler; aborts included, no lifetime-average dilution) —
+        # feeds the chart's prefill line. avg_prefill_tps stays
+        # collected: the tile shows the classic session average, same
+        # family as avg_generation_tps. OUTSIDE the pool guard: prefill
+        # work can exist even when the pool probe fails.
+        try:
+            from .prefill_sampler import get_prefill_sampler
+            pairs.update(get_prefill_sampler().drain(now=now))
+        except Exception:
+            log.debug("prefill sampler drain failed", exc_info=True)
+
         # U20: macmon power/temperature (optional, non-blocking)
         try:
             self._macmon_collector.collect(pairs)

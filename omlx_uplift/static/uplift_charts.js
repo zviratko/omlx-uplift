@@ -100,7 +100,14 @@ async function loadChartHistory() {
         const w = windowToParam();
         const [g, p, m, h] = await Promise.all([
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('avg_generation_tps,rate.cached_tokens_s')}&window=${w}`).catch(() => null),
-            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=avg_prefill_tps&window=${w}`).catch(() => null),
+            // BE-prefill: the prefill line is the true per-tick computed
+            // rate (prefill.tokens_s from the tracker event hooks) — the
+            // old avg_prefill_tps is a session-lifetime average that no
+            // single request can move, which is why a prefilling request
+            // "didn't show at all". No hourly rollup exists for the new
+            // key (vanilla's usage table has no per-phase computed count);
+            // history simply starts at the uplift install.
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?key=prefill.tokens_s&window=${w}`).catch(() => null),
             // U38: the memory card plots omlx's OWN budget — footprint vs
             // settings ceiling vs kernel iogpu wired limit (all GB). The
             // psutil pair and disk cache left the chart (U39).
@@ -720,7 +727,7 @@ function metricZeroFloor(key) {
     return true;   // every small metric card floors at 0
 }
 function metricLabel(key) {
-    const s = key.replace(/^(rate|tot|engines|mem|cache|pfx|spec|queue|pwr|therm|fan)\./, '')
+    const s = key.replace(/^(rate|tot|engines|mem|cache|pfx|spec|queue|pwr|therm|fan|prefill)\./, '')
         .replace(/_/g, ' ')
         .replace(/tps$/, 'tok/s');
     // U19/U20 human names for the uglier auto-translations.
@@ -729,6 +736,7 @@ function metricLabel(key) {
               'total w': 'total W', 'cpu w': 'CPU W', 'gpu w': 'GPU W', 'ane w': 'ANE W',
               'cpu temp c': 'CPU °C', 'gpu temp c': 'GPU °C', 'max rpm': 'max RPM',
               'max pct': 'fan %', 'tokens min': 'tok/min', 'draw': 'power draw',
+              'tokens s': 'computed prefill tok/s',
               'cache savings': 'prefill cache savings', 'efficiency': 'prefix cache efficiency',
               'savings': 'specprefill savings', 'depth': 'queue depth', 'temp': 'temperature' })[s] || s;
 }
@@ -1132,13 +1140,19 @@ function markHistoryDirty() { historyDirty = true; loadChartHistory(); }
 let sysFetching = false, sysAt = 0;
 let sysLive = { usedGB: null, ceilGB: null, iogpuGB: null, ts: 0 };
 let cachedTps = null, cachedTpsTs = 0;
+// BE-prefill: live per-tick computed-prefill rate (the chart's prefill
+// line). /admin/api/stats only carries the session AVERAGE (avg_prefill_tps)
+// — one request cannot move it visibly, the bug this replaces. The
+// collector's prefill.tokens_s IS the current rate; rides the same
+// latest-fetch below, stale reads push null (never a stale number).
+let prefillLiveTps = null, prefillLiveTs = 0;
 async function refreshSysPct() {
     const now = Date.now();
     if (sysFetching || now - sysAt < 10_000) return;
     sysFetching = true; sysAt = now;
     try {
         const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
-            encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s'));
+            encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s,prefill.tokens_s'));
         const lat = (r && r.latest) || {};
         const gb = k => (lat[k] && typeof lat[k].v === 'number') ? +(lat[k].v * GIB).toFixed(3) : null;
         const u = lat['mem.used_bytes'];
@@ -1150,6 +1164,8 @@ async function refreshSysPct() {
         }
         const c = lat['rate.cached_tokens_s'];
         if (c && typeof c.v === 'number') { cachedTps = c.v; cachedTpsTs = c.ts * 1000; }
+        const pl = lat['prefill.tokens_s'];
+        if (pl && typeof pl.v === 'number') { prefillLiveTps = pl.v; prefillLiveTs = pl.ts * 1000; }
     } catch (_) { /* keep last value */ }
     finally { sysFetching = false; renderMemLabel(); }
 }
@@ -1231,7 +1247,11 @@ function pushStatusSample(s) {
     // Chart buffers (window pruning happens at draw time). U30: column 3 =
     // cached tok/s from the metrics/latest poll (collector tick rate, ~10 s
     // fresh window; stale reads push null, never a stale number).
-    tpsData[0].push(s.time); tpsData[1].push(s.genTps); tpsData[2].push(s.prefillTps);
+    // BE-prefill: column 2 = the collector's per-tick prefill.tokens_s
+    // (same latest poll, same staleness rule) — was the session average
+    // s.prefillTps, which no single prefill could move.
+    tpsData[0].push(s.time); tpsData[1].push(s.genTps);
+    tpsData[2].push(prefillLiveTps !== null && Date.now() - prefillLiveTs < 120_000 ? prefillLiveTps : null);
     tpsData[3].push(cachedTps !== null && Date.now() - cachedTpsTs < 120_000 ? cachedTps : null);
     while (tpsData[0].length > MAX_POINTS) for (const col of tpsData) col.shift();
     // U40: ONE summed hot-cache point in GiB. Prefer upstream's process-wide
