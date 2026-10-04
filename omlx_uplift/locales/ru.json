@@ -505,6 +505,7 @@
   "uplift.patches.unchanged": "Сохранённая версия уже совпадает с источником",
   "uplift.patches.update_avail_toast": "доступно обновление (v{v})",
   "uplift.patches.warn_banner": "ВНИМАНИЕ — после обновления vanilla часть патчей требует проверки или не применилась. Пока вопрос не решён, oMLX работает без них.",
+  "uplift.patches.drift_banner": "РАСХОЖДЕНИЕ ДЕРЕВА — {n} установленных файлов oMLX не соответствуют wheel-сборке ({files}). Загрузка моделей может завершиться ошибкой. Исправление: brew reinstall omlx — uplift никогда не перезаписывает дерево.",
   "uplift.req.all_models": "все модели",
   "uplift.req.cancel": "ОТМЕНИТЬ ЗАПРОС",
   "uplift.req.close": "ЗАКРЫТЬ",

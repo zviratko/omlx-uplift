@@ -505,6 +505,7 @@
   "uplift.patches.unchanged": "stored version already matches the source",
   "uplift.patches.update_avail_toast": "update available (v{v})",
   "uplift.patches.warn_banner": "WARNING — one or more patches need review after a vanilla update or failed to apply. oMLX runs without them until resolved.",
+  "uplift.patches.drift_banner": "TREE DRIFT — {n} installed oMLX files no longer match the wheel they were built from ({files}). Model loads may fail. Repair: brew reinstall omlx — uplift never rewrites the tree.",
   "uplift.req.all_models": "all models",
   "uplift.req.cancel": "CANCEL REQUEST",
   "uplift.req.close": "CLOSE",

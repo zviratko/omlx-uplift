@@ -22,7 +22,8 @@ const { STATIC_DIR } = require('./static-src.cjs');
 function makeEl(tag) {
     const el = {
         tagName: tag, children: [], style: {}, dataset: {},
-        className: '', textContent: '', title: '', hidden: false,
+        className: '', textContent: '', title: '',
+        hidden: false,   // index.html ships the banners hidden by attribute
         innerHTML: '', checked: false, disabled: false, value: '',
         append(...kids) { this.children.push(...kids); },
         appendChild(k) { this.children.push(k); return k; },
@@ -69,7 +70,7 @@ function loadPatchesModule({ patchesPayload, fetchImpl } = {}) {
     }
     // minimal state stand-in (uplift_state.js needs more of the browser)
     vm.runInContext(`window.Uplift = window.Uplift || {};
-        window.Uplift.state = { API: '', PT_DATA: null, PT_BUSY: false };
+        window.Uplift.state = { API: '', PT_DATA: null, PT_DOCTOR: null, PT_BUSY: false };
         window.Uplift._patchesGlue = { currentTab: () => 'settings',
                                        currentSub: () => 'patches' };`, sandbox);
     vm.runInContext(fs.readFileSync(path.join(STATIC_DIR, 'uplift_patches.js'), 'utf8'),
@@ -89,12 +90,13 @@ function payload(patches, extra = {}) {
                            config: { auto_update_check: false } }, extra);
 }
 
-async function runPoll(sandbox, payloadObj) {
+async function runPoll(sandbox, payloadObj, doctorReport) {
     const routes = {
         '/uplift/api/patches': payloadObj,
         '/uplift/api/patches/curated/sync': { report: {}, notes: [] },
         '/uplift/api/dev/status': { installed: false, reason: 'test' },
     };
+    if (doctorReport !== undefined) routes['/uplift/api/doctor'] = doctorReport;
     sandbox.fetch = async (url) => {
         const key = Object.keys(routes).find(k => String(url).endsWith(k));
         if (!key) return { ok: false, status: 404, statusText: 'nf',
@@ -107,6 +109,47 @@ async function runPoll(sandbox, payloadObj) {
     await vm.runInContext('window.Uplift.patches.pollPatches()', sandbox);
     await new Promise(r => setImmediate(r));
 }
+
+/* KEGID-3: the drift banner is fed by pollDoctor() inside pollPatches()
+   (fire-and-forget — flush two microtask rounds to see its verdict). */
+const driftRep = (over = {}) => Object.assign({
+    ok: false, skipped_reason: null, n_checked: 692, n_expected: 0,
+    unexpected: [{ path: 'omlx/model_settings.py', kind: 'hash' }],
+}, over);
+
+test('drift banner: unexpected drift paints path + count, alarm copy', async () => {
+    const sb = loadPatchesModule();
+    await runPoll(sb, payload([basePatch()]), driftRep({
+        unexpected: [
+            { path: 'omlx/a.py', kind: 'hash' },
+            { path: 'omlx/b.py', kind: 'missing' },
+        ] }));
+    await new Promise(r => setImmediate(r));
+    const el = sb.document.getElementById('pt-drift');
+    assert.equal(el.hidden, false, 'banner shown on drift');
+    assert.match(el.textContent, /TREE DRIFT/);
+    assert.match(el.textContent, /2 installed oMLX files/);
+    assert.match(el.textContent, /omlx\/a\.py/);
+    assert.match(el.title, /missing omlx\/b\.py/, 'title lists every file');
+});
+
+test('drift banner: clean census stays hidden', async () => {
+    const sb = loadPatchesModule();
+    await runPoll(sb, payload([basePatch()]), { ok: true, skipped_reason: null,
+        n_checked: 692, unexpected: [] });
+    await new Promise(r => setImmediate(r));
+    assert.equal(sb.document.getElementById('pt-drift').hidden, true);
+});
+
+test('drift banner: doctor failure is silent, page unaffected', async () => {
+    const sb = loadPatchesModule();
+    await runPoll(sb, payload([basePatch()]));   // no /doctor route -> 404
+    await new Promise(r => setImmediate(r));
+    const el = sb.document.getElementById('pt-drift');
+    assert.equal(el.hidden, true, 'no alarm on a failed probe');
+    // the patches page itself still rendered fine
+    assert.match(sb.document.getElementById('pt-sub').textContent, /1 loaded/);
+});
 
 test('renderPatches: INSECURE chip appears exactly when source.insecure_tls', async () => {
     const sb = loadPatchesModule();

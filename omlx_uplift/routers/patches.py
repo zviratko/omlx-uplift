@@ -55,6 +55,22 @@ async def patches_view(is_admin: bool = Depends(require_admin)):
     return patchsource.view(store, _patch_tree_root(), keg)
 
 
+@api_router.get("/doctor")
+async def doctor_view(is_admin: bool = Depends(require_admin)):
+    """KEGID-3: tree-drift verdict for the PATCHES card. ALWAYS a live
+    census (~0.2 s of pure hashing) in a worker thread (PERF-1: never on
+    the event loop) — the boot cache would answer 'clean' for tampering
+    that happened after boot, and a chip that can lie is worse than no
+    chip. Called once per patches-page open. Strictly read-only: repair
+    stays `brew reinstall omlx`."""
+    from .. import treedoctor
+
+    rep = await asyncio.to_thread(treedoctor.run, patch_store(),
+                                  _patch_tree_root())
+    rep["source"] = "probe"
+    return rep
+
+
 class PatchAddRequest(BaseModel):
     id: str
     kind: str                      # github_pr | url | upload

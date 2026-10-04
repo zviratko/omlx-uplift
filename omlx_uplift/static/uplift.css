@@ -1885,6 +1885,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 
 .pt-banner { border: 1px solid var(--warn, #b8860b); background: color-mix(in srgb, var(--warn, #b8860b) 12%, transparent); padding: 6px 10px; margin: 4px 0; font-size: var(--fs-meta); }
 .pt-banner.pt-kill { border-color: var(--accent, #e0662e); }
+/* KEGID-3: tree drift is an ALARM, not a warning. Thin --red wash keeps
+   the ground card-dominant, so the theme's --ink stays the readable
+   text colour (solid-red ground would need --ink-on-red instead). */
+.pt-banner.pt-drift { border-color: var(--red, #c9243b);
+    background: color-mix(in srgb, var(--red, #c9243b) 16%, transparent);
+    color: var(--ink, #f2f0ea); font-weight: 600; }
 /* Patches page readability (user ask 2026-09-27: 'one card per patch,
    alternating background'): each patch is a self-contained card; the list
    stripes odd/even so card boundaries are visible at a glance. --card is

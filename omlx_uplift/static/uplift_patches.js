@@ -61,6 +61,9 @@ async function pollPatches() {
         }
     }
     ptAutoSyncCurated();
+    // KEGID-3: patch actions change tree AND expected set — keep the
+    // drift banner in step with the manifest.
+    pollDoctor();
 }
 
 /* ---- curated catalog: no separate section (user ask 2026-09-30). ----
@@ -752,8 +755,40 @@ async function ptCheckNow(quiet) {
     }
 }
 
+function renderDriftBanner(rep) {
+    // KEGID-3: red banner on unexpected tree drift. Static element —
+    // survives renderPatches() rebuilds; textContent only, no markup.
+    const el = $('pt-drift');
+    if (!el) return;
+    const bad = rep && rep.ok === false && !rep.skipped_reason;
+    el.hidden = !bad;
+    if (!bad) return;
+    const n = (rep.unexpected || []).length;
+    const first = (rep.unexpected || []).slice(0, 3)
+        .map(e => e.path).join(', ');
+    const more = n > 3 ? ' …' : '';
+    el.textContent = ptMsg('uplift.patches.drift_banner',
+        'TREE DRIFT — {n} installed oMLX files no longer match the wheel'
+        + ' they were built from ({files}). Model loads may fail.'
+        + ' Repair: brew reinstall omlx — uplift never rewrites the tree.')
+        .replace('{n}', n).replace('{files}', first + more);
+    el.title = (rep.unexpected || []).map(e => e.kind + ' ' + e.path).join('\n');
+}
+
+async function pollDoctor() {
+    // Fire-and-forget: the chip is advisory; a failure must never break
+    // or blank the patches page (0.2 s census runs server-side off-loop).
+    // A failed probe HIDES the banner: without a verdict there is no
+    // honest alarm to show (next patch action re-probes).
+    try {
+        S.PT_DOCTOR = await PG.fetchJson(`${API}/uplift/api/doctor`);
+        renderDriftBanner(S.PT_DOCTOR);
+    } catch (e) { S.PT_DOCTOR = null; renderDriftBanner(null); }
+}
+
 function initPatchesPage() {
     ptSyncKindUI();
+    pollDoctor();
     $('pt-src-kind').onchange = ptSyncKindUI;
     $('pt-preview-btn').onclick = ptPreview;
     $('pt-check-btn').onclick = () => { ptCheckNow(false); ptAutoSyncCurated(true); };

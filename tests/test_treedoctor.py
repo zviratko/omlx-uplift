@@ -303,5 +303,55 @@ class TestCliExit(TreeFixture):
         self.assertEqual(_cli.cmd_doctor([]), 2)
 
 
+class TestDoctorEndpoint(TreeFixture):
+    """KEGID-3 API: route registered, admin-gated, honest verdict shape."""
+
+    def _client(self):
+        import unittest.mock as mock
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from omlx_uplift import router as up
+        from omlx_uplift.routers import patches as up_p
+
+        app = FastAPI()
+        app.include_router(up.api_router, prefix="/uplift/api")
+
+        async def _admin_true():
+            return True
+
+        from omlx_uplift.router import require_admin
+        app.dependency_overrides[require_admin] = _admin_true
+        store = _FakeStore(os.path.join(self.tmp, "store-api"))
+        self._mocks = [
+            mock.patch.object(up_p, "patch_store", lambda: store),
+            mock.patch.object(up_p, "_patch_tree_root", lambda: self.tree),
+        ]
+        for m in self._mocks:
+            m.start()
+        self.addCleanup(lambda: [m.stop() for m in self._mocks])
+        return TestClient(app), store
+
+    def test_route_registered(self):
+        from omlx_uplift import router as up
+
+        paths = {r.path for r in up.api_router.routes}
+        self.assertIn("/doctor", paths)
+
+    def test_endpoint_clean_then_drift(self):
+        client, _ = self._client()
+        r = client.get("/uplift/api/doctor")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["ok"], body)
+        self.assertEqual(body["source"], "probe")
+        self.assertEqual(body["n_checked"], len(self.files))
+        self._touch("omlx/model_settings.py")
+        body = client.get("/uplift/api/doctor").json()
+        self.assertFalse(body["ok"])
+        self.assertEqual([e["path"] for e in body["unexpected"]],
+                         ["omlx/model_settings.py"])
+
+
 if __name__ == "__main__":
     unittest.main()

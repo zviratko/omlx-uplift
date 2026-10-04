@@ -62,6 +62,7 @@ window.Uplift.state = {
     ifModels: [],
     milestoneFloor: {},
     PT_DATA: null,   // last /patches view
+    PT_DOCTOR: null, // last /doctor verdict (KEGID-3 banner)
     PT_BUSY: false,
 };
 

@@ -509,6 +509,7 @@
   "uplift.patches.unchanged": "A versão armazenada já corresponde à fonte",
   "uplift.patches.update_avail_toast": "atualização disponível (v{v})",
   "uplift.patches.warn_banner": "ATENÇÃO — após uma atualização vanilla, há patches que exigem revisão ou falharam ao aplicar. Até resolver, o oMLX roda sem eles.",
+  "uplift.patches.drift_banner": "DESVIO DA ÁRVORE — {n} arquivos oMLX instalados não correspondem mais ao wheel do qual foram compilados ({files}). O carregamento de modelos pode falhar. Reparo: brew reinstall omlx — o uplift nunca regrava a árvore.",
   "uplift.req.all_models": "todos os modelos",
   "uplift.req.cancel": "CANCELAR REQUISIÇÃO",
   "uplift.req.close": "FECHAR",

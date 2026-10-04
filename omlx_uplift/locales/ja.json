@@ -505,6 +505,7 @@
   "uplift.patches.unchanged": "保存済みバージョンは既にソースと一致しています",
   "uplift.patches.update_avail_toast": "更新があります (v{v})",
   "uplift.patches.warn_banner": "警告 — バニラ更新後に適用が必要な再検証を要するパッチ、または適用に失敗したパッチがあります。解決するまで oMLX はこれらのパッチなしで実行されます。",
+  "uplift.patches.drift_banner": "ツリードリフト — インストール済み oMLX のファイル {n} 件がビルド元の wheel と一致しません（{files}）。モデルの読み込みが失敗する可能性があります。修復: brew reinstall omlx — uplift はツリーを書き換えません。",
   "uplift.req.all_models": "全モデル",
   "uplift.req.cancel": "リクエストをキャンセル",
   "uplift.req.close": "閉じる",
