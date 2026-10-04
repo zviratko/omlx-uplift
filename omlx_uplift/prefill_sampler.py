@@ -22,6 +22,11 @@ error). instrument.install_prefill_tracker() wraps those two methods, so:
 
 * every chunk is credited the moment it happens — nothing waits for the
   request to finish, so the work an aborted request did compute counts;
+* ONLY the plain ``prefill`` phase counts (user 2026-10-04): the
+  ``specprefill_*`` phases are the DRAFT model scoring tokens, not target
+  prefill — they track the row for boundary detection but credit zero,
+  and an abort during scoring flushes nothing. The target's real sparse
+  prefill arrives afterwards as plain-phase chunks;
 * no tick race: a prefill born and finished inside one 5 s window is
   still fully counted (a tick sampler would miss it entirely);
 * ``note_end`` flushes the unobserved tail (upstream updates BEFORE the
@@ -110,6 +115,24 @@ class PrefillSampler:
         try:
             with self._lock:
                 prev = self._rows.get(rid)
+                if phase != "prefill":
+                    # specprefill draft work (scoring/selected/lookahead/
+                    # importance): the DRAFT model computing tokens is not
+                    # target prefill (user 2026-10-04) — track the row for
+                    # boundary detection, credit nothing. The target's real
+                    # sparse prefill arrives afterwards as plain 'prefill'
+                    # chunks. draft.py:283 even ends scoring with a
+                    # DEFAULT-phase completion update (n_to_score/n_to_score)
+                    # — handled below by the phase-change restart.
+                    if prev is None or prev[3] != phase:
+                        self._rows[rid] = (model, processed, total, phase,
+                                           0, now)
+                        if processed >= total:
+                            self._rows.pop(rid, None)
+                    else:
+                        self._rows[rid] = (model, processed, total, phase,
+                                           prev[4], now)
+                    return
                 if prev is not None and (prev[3] != phase
                                          or (prev[0] and model
                                              and prev[0] != model)):
@@ -170,7 +193,11 @@ class PrefillSampler:
                     # never observed any computed chunk -> the remainder
                     # would be a guess, not a flush
                     return
-                _model, last_p, total, _phase, last_d, _seen = row
+                _model, last_p, total, phase, last_d, _seen = row
+                if phase != "prefill":
+                    # aborted mid specprefill scoring: the uncomputed tail
+                    # is DRAFT work — not prefill, flush nothing.
+                    return
                 tail = max(total - last_p, 0)
                 self._acc += min(tail, max(2 * last_d, FLUSH_CAP_MIN))
         except Exception:  # noqa: BLE001

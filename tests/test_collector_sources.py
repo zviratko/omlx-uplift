@@ -420,3 +420,47 @@ def test_u38_memory_budget_lines(monkeypatch):
     assert "mem.custom_ceiling_bytes" not in store.pairs
     assert "mem.iogpu_limit_bytes" not in store.pairs
     assert store.pairs["mem.used_bytes"] == 70_000_000_000.0
+
+
+class HitsOnlySched:
+    """mruu 2026-10-04 shape (specprefill-enabled model): prefix_cache
+    stats carry 'hits' but NO 'misses' key. d_h + d_m raised TypeError,
+    the collector's except swallowed it, and the WHOLE family died —
+    pfx.*, hot.* and queue.* all stopped being written."""
+
+    def __init__(self):
+        self.n = 0
+
+    def snapshot_for_admin(self):
+        return {"running_by_id": {}}
+
+    def get_ssd_cache_stats(self):
+        self.n += 1
+        return {
+            "ssd_cache": SsdStats(10),
+            "prefix_cache": {"hits": 5 * self.n, "tokens_saved": 100 * self.n},
+        }
+
+    def get_stats(self):
+        return {"num_waiting": 1, "num_prefilling": 0, "num_running": 0}
+
+
+def test_hits_without_misses_does_not_kill_the_family(monkeypatch):
+    """Regression (mruu 2026-10-04 TypeError): the lookup-hit guard must
+    check BOTH operands; a missing 'misses' counter drops only
+    pfx.lookup_hit_pct, never hot.*/queue.*."""
+    import time as _t
+    import omlx_uplift.router as rt
+
+    sched = HitsOnlySched()
+    monkeypatch.setattr(rt, "engine_pool", lambda: _spec_pool(sched))
+    store = CapturingStore()
+    c = Collector(store=store)
+    c.sample_once()                       # seed counters, dt==0
+    c._prev["_t"] = _t.time() - 60
+    c.sample_once()                       # d_h numeric, d_m None
+
+    assert "pfx.lookup_hit_pct" not in store.pairs   # honest absence
+    assert store.pairs["pfx.saved_tokens_min"] > 0   # sibling rate flows
+    assert store.pairs["queue.waiting"] == 1.0       # family survived
+    assert store.pairs["hot.m1"] == 0.0              # written, not skipped

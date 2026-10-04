@@ -95,14 +95,38 @@ def test_backward_count_is_recycled_id_credited_fresh():
     assert _drain(s, 105.0) == pytest.approx((6000 + 1000 + 2000) / 5.0)
 
 
-def test_phase_change_restarts_accrual_without_a_burst():
-    """specprefill phases reuse the rid on different token scales; the
-    forward jump from scoring to the target pass must not burst."""
+def test_draft_scoring_phases_credit_nothing():
+    """User 2026-10-04: specprefill SCORING is draft-model work, not
+    target prefill — scoring chunks must not inflate prefill.tokens_s."""
     s = PrefillSampler()
     _drain(s, 100.0)
     s.note_chunk("r1", 2048, 50000, "m", "specprefill_scoring")
-    s.note_chunk("r1", 40000, 50000, "m", "specprefill_selected")
-    assert _drain(s, 105.0) == pytest.approx(2048 / 5.0)   # jump credited 0
+    s.note_chunk("r1", 4096, 50000, "m", "specprefill_scoring")
+    s.note_chunk("r1", 49999, 50000, "m", "specprefill_selected")
+    assert _drain(s, 105.0) == 0.0
+
+
+def test_target_prefill_after_scoring_credits_normally():
+    """After scoring ends (draft.py:283 default-phase completion update),
+    the target's sparse prefill arrives as plain chunks — real work,
+    counted from the restart point."""
+    s = PrefillSampler()
+    _drain(s, 100.0)
+    s.note_chunk("r1", 4096, 50000, "m", "specprefill_scoring")
+    # scoring end: default phase, processed>=total of the SCORING scale
+    s.note_chunk("r1", 50000, 50000, "m")
+    # target sparse prefill begins (full-prompt scale): first chunk
+    s.note_chunk("r1", 2048, 100000, "m")
+    s.note_chunk("r1", 4096, 100000, "m")
+    assert _drain(s, 105.0) == pytest.approx((2048 + 2048) / 5.0)
+
+
+def test_abort_during_scoring_flushes_nothing():
+    s = PrefillSampler()
+    _drain(s, 100.0)
+    s.note_chunk("r1", 2048, 50000, "m", "specprefill_scoring")
+    s.note_end("r1")                       # killed mid scoring
+    assert _drain(s, 105.0) == 0.0
 
 
 def test_model_change_restarts_accrual():

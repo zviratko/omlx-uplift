@@ -287,7 +287,12 @@ def collect_cache(pool: Any, *, prev_ctr: dict, dt: float) -> tuple[dict, dict]:
         d_mat, d_req = _d("pfx.tokens_matched"), _d("pfx.tokens_requested")
         d_saved = _d("pfx.tokens_saved")
         d_rest = _d("pfx.tokens_restored")
-        if d_h is not None and d_h + d_m > 0:
+        # BOTH operands must exist: an engine whose prefix_cache stats
+        # carry 'hits' but not 'misses' (mruu 2026-10-04: specprefill-
+        # enabled model) made d_h + d_m raise TypeError, and the swallowed
+        # exception killed the WHOLE family — hot.* and queue.* died with
+        # it. Honest absence of lookup_hit_pct, everything else flows.
+        if d_h is not None and d_m is not None and d_h + d_m > 0:
             pairs["pfx.lookup_hit_pct"] = 100.0 * d_h / (d_h + d_m)
         if d_mat is not None and d_req and d_req > 0:
             pairs["pfx.token_hit_pct"] = 100.0 * d_mat / d_req
