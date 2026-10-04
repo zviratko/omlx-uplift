@@ -57,6 +57,16 @@ async def get_env_overrides(is_admin: bool = Depends(require_admin)):
     return env_tunables.snapshot()
 
 
+@api_router.get("/env-catalog")
+async def get_env_catalog(is_admin: bool = Depends(require_admin)):
+    """ENV-3: read-only documentation of the env-only omlx knobs — one row
+    per variable with effect class, stock default, live/stored state, and
+    the settable flag. Values of secret-ish vars arrive masked."""
+    from .. import env_tunables
+
+    return {"vars": env_tunables.catalog()}
+
+
 @api_router.put("/env-overrides")
 async def put_env_overrides(
     req: dict, is_admin: bool = Depends(require_admin)

@@ -24,7 +24,7 @@ OWNED_PREFIXES = ("uplift.req.", "uplift.layout.retention_", "uplift.env.",
                   "uplift.bench.", "uplift.chip.", "uplift.dl.", "uplift.feed.",
                   "uplift.gsys.", "uplift.helper.", "uplift.logs.", "uplift.mm.",
                   "uplift.mo.", "uplift.models.", "uplift.retention.",
-                  "uplift.patches.")
+                  "uplift.patches.", "uplift.envcat.")
 
 
 def _locale(lang):

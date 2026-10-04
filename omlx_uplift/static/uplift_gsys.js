@@ -730,6 +730,189 @@ async function envSave(fields) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ENV-3: environment variables reference — button in the Server settings
+// save bar opens a searchable modal documenting every env-only omlx knob
+// (no settings.json field, invisible to both dashboards otherwise). Rows
+// carry the verified apply-class badge (live / RESTART MODEL / RESTART
+// SERVER), the stock default, and the live state: SET (present in the
+// server process env; secret values masked server-side), STORED (an uplift
+// override awaiting its restart), LAUNCH ENV (genuine launch variable wins
+// over anything uplift stores), MANAGED (vanilla owns the var — documented
+// only). Settable rows carry a control + APPLY that PUTs /env-overrides
+// directly, outside the gsDirty queue.
+// ---------------------------------------------------------------------------
+
+const ENV_CAT_GROUPS = ['scheduler', 'memory', 'engine', 'attention', 'prefill',
+    'quantization', 'moe', 'mtp', 'cluster', 'server', 'integrations'];
+let ENV_CAT = null;   // last /env-catalog payload (refreshed on each open)
+
+function envCatEffectLabel(e) {
+    return e === 'immediate'
+        ? C.tf('uplift.envcat.e_live', 'LIVE')
+        : e === 'model'
+            ? C.tf('uplift.envcat.e_model', 'RESTART MODEL')
+            : C.tf('uplift.envcat.e_server', 'RESTART SERVER');
+}
+
+function envCatChip(text, cls) {
+    const s = document.createElement('span');
+    s.className = 'rqchip envcat-chip' + (cls ? ' ' + cls : '');
+    s.textContent = text;
+    return s;
+}
+
+function envCatRow(r) {
+    const row = document.createElement('div');
+    row.className = 'envcat-row' + (r.present ? ' on' : '') + (r.managed ? ' managed' : '');
+    const head = document.createElement('div'); head.className = 'envcat-head';
+    const nm = document.createElement('code'); nm.className = 'envcat-name'; nm.textContent = r.name;
+    head.append(nm);
+    if (r.settable) head.append(envCatChip(C.tf('uplift.env.badge', 'EXPERIMENTAL'), 'set'));
+    if (r.managed) head.append(envCatChip(C.tf('uplift.envcat.managed', 'MANAGED'), 'dim'));
+    if (r.name in ENV_SHADOW) {
+        const c = envCatChip(C.tf('uplift.envcat.launch_env', 'LAUNCH ENV') +
+            ' (' + ENV_SHADOW[r.name] + ')', 'warn');
+        c.title = C.tf('uplift.env.shadow_warn',
+            'environment variable already set — it takes precedence until removed from the launch environment');
+        head.append(c);
+    } else if (r.present) {
+        head.append(envCatChip(C.tf('uplift.envcat.set', 'SET') +
+            (r.live ? ' = ' + r.live : ''), 'ok'));
+    } else if (r.stored != null && r.stored !== '') {
+        head.append(envCatChip(C.tf('uplift.envcat.stored', 'STORED'), 'stored'));
+    }
+    const e = envCatChip(envCatEffectLabel(r.effect),
+        r.effect === 'immediate' ? 'ok' : (r.effect === 'model' ? 'stored' : 'dim'));
+    e.title = C.tf('uplift.env.badge_hint',
+        'Uplift-owned environment overrides; not part of oMLX settings');
+    head.append(e);
+    row.append(head);
+
+    const desc = document.createElement('div'); desc.className = 'envcat-desc';
+    let d = r.desc || '';
+    if (r.default) d += ' · ' + C.tf('uplift.env.stock_default', 'stock default') + ': ' + r.default;
+    desc.textContent = d;
+    row.append(desc);
+
+    if (r.settable) {
+        const spec = ENV_SPEC.find(a => a.name === r.name) || {};
+        const act = document.createElement('div'); act.className = 'envcat-act';
+        let ctl;
+        if (spec.type === 'bool') {
+            ctl = document.createElement('select');
+            for (const [v, t] of [['', '\u2014'], ['1', C.tf('uplift.env.on', 'On')],
+                                   ['0', C.tf('uplift.env.off', 'Off')]]) {
+                const o = document.createElement('option');
+                o.value = v; o.textContent = t; ctl.append(o);
+            }
+            ctl.value = ENV_VALUES[r.name] != null ? ENV_VALUES[r.name] : '';
+        } else {
+            ctl = document.createElement('input');
+            ctl.type = (spec.type === 'int' || spec.type === 'float') ? 'number' : 'text';
+            if (spec.min !== undefined) ctl.min = spec.min;
+            if (spec.max !== undefined) ctl.max = spec.max;
+            if (spec.type === 'float') ctl.step = 'any';
+            if (spec.default) ctl.placeholder = spec.default;
+            ctl.value = ENV_VALUES[r.name] != null ? ENV_VALUES[r.name] : '';
+        }
+        const apply = document.createElement('button');
+        apply.type = 'button'; apply.className = 'se-btn';
+        apply.textContent = C.tf('uplift.env.apply', 'APPLY');
+        apply.onclick = async () => {
+            apply.disabled = true;
+            const ok = await envSave({ [r.name]: ctl.value === '' ? null : ctl.value });
+            apply.disabled = false;
+            if (!ok) return;
+            // the queued-form copy of this key is now stale — the direct
+            // apply already committed it; keep the main row in sync
+            if (r.name in gsDirty) {
+                delete gsDirty[r.name];
+                if (document.getElementById('gs-body')) renderGlobalSettings();
+            }
+            ENV_CAT = null;
+            await openEnvCatalog(true);
+        };
+        act.append(ctl, apply);
+        row.append(act);
+    }
+    return row;
+}
+
+function envCatRenderList(list, query) {
+    list.textContent = '';
+    const q = (query || '').trim().toLowerCase();
+    const match = r => !q || r.name.toLowerCase().includes(q) ||
+        (r.desc || '').toLowerCase().includes(q);
+    const rows = (ENV_CAT.vars || []).filter(match);
+    let shown = 0;
+    for (const g of ENV_CAT_GROUPS) {
+        const gr = rows.filter(r => r.group === g);
+        if (!gr.length) continue;
+        const h = document.createElement('div'); h.className = 'envcat-g';
+        h.textContent = C.tf('uplift.envcat.group.' + g, g);
+        list.append(h);
+        for (const r of gr.sort((a, b) => a.name.localeCompare(b.name))) list.append(envCatRow(r));
+        shown += gr.length;
+    }
+    return shown;
+}
+
+async function openEnvCatalog(reopen) {
+    if (!ENV_CAT) {
+        try {
+            ENV_CAT = await GLUE.fetchJson(`${API}/uplift/api/env-catalog`);
+        } catch (err) {
+            GLUE.toast(C.tf('uplift.envcat.load_fail', 'environment catalog: ') + err.message, 5000);
+            return;
+        }
+    }
+    // refresh the shadow view so LAUNCH ENV chips are current
+    try {
+        const d = await GLUE.fetchJson(`${API}/uplift/api/env-overrides`);
+        ENV_VALUES = d.values || ENV_VALUES;
+        ENV_SHADOW = {};
+        for (const s of (d.shadowed || [])) ENV_SHADOW[s.name] = s.value_masked;
+    } catch (_) { /* keep whatever the settings poll last saw */ }
+
+    let prev = document.querySelector('.modal-overlay.envcat-overlay');
+    if (prev) prev.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay envcat-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal nasa envcat';
+    const head = document.createElement('div'); head.className = 'envcat-hrow';
+    const h = document.createElement('h3');
+    h.textContent = C.tf('uplift.envcat.title', 'Environment variables');
+    const cnt = document.createElement('span'); cnt.className = 'envcat-count';
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'se-btn envcat-x'; x.textContent = '\u00d7';
+    x.onclick = () => overlay.remove();
+    head.append(h, cnt, x);
+    const intro = document.createElement('div'); intro.className = 'se-hint';
+    intro.textContent = C.tf('uplift.envcat.intro',
+        'Expert knobs oMLX reads from the environment only — no settings.json field exists. '
+        + 'Settable rows store the value in Uplift and seed it at server start; a variable '
+        + 'already set in the launch environment always wins.');
+    const search = document.createElement('input');
+    search.type = 'search'; search.className = 'envcat-search';
+    search.placeholder = C.tf('uplift.envcat.search', 'Search variable name or description\u2026');
+    const list = document.createElement('div'); list.className = 'envcat-list';
+    const paint = () => {
+        const n = envCatRenderList(list, search.value);
+        cnt.textContent = C.tf('uplift.envcat.showing', '{n} of {total} variables',
+            { n: n, total: (ENV_CAT.vars || []).length });
+    };
+    search.oninput = paint;
+    box.append(head, intro, search, list);
+    overlay.append(box);
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+    // Escape closes via the global handler (uplift_state.js) — no local listener
+    document.body.append(overlay);
+    paint();
+    if (!reopen) search.focus();
+}
+
 
 
 /* FE-6 step 2: the settings page is DATA. Each item is one of:
@@ -1196,6 +1379,15 @@ function renderGlobalSettings() {
         const changes = document.createElement('div');
         changes.id = 'gs-changes'; changes.className = 'changelist'; changes.hidden = true;
         const rowb = document.createElement('div'); rowb.className = 'savebar-row';
+        // ENV-3: reference button at the left end of the bottom-right bar —
+        // documents every env-only omlx knob in a searchable modal
+        const envb = document.createElement('button');
+        envb.id = 'gs-envcat'; envb.className = 'se-btn';
+        envb.style.marginRight = 'auto';   // row is flex-end: pin this one left
+        envb.textContent = C.tf('uplift.envcat.button', 'ENVIRONMENT VARIABLES');
+        envb.title = C.tf('uplift.envcat.button_hint',
+            'Environment-only omlx knobs, what they do, and which are set');
+        envb.onclick = () => openEnvCatalog(false);
         const b = document.createElement('button');
         b.id = 'gs-save'; b.className = 'se-btn savebtn'; b.textContent = 'SAVE';
         b.onclick = gsSaveOrRestart;
@@ -1205,7 +1397,7 @@ function renderGlobalSettings() {
             Object.keys(gsDirty).forEach(k => delete gsDirty[k]);
             renderGlobalSettings(); gsUpdateSaveBtn(); renderDirtyList();
         };
-        rowb.append(clr, b);
+        rowb.append(envb, clr, b);
         bar.append(changes, rowb);
         wrap.parentElement.append(bar);
     }
