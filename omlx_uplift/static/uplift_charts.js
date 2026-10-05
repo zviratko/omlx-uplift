@@ -99,7 +99,14 @@ async function loadChartHistory() {
     try {
         const w = windowToParam();
         const [g, p, m, h] = await Promise.all([
-            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('avg_generation_tps,rate.cached_tokens_s')}&window=${w}`).catch(() => null),
+            // BE-decode: the generation line is the momentary per-tick
+            // decode rate (generation.tokens_s from the collector's
+            // in-flight token deltas). avg_generation_tps — what this
+            // plotted — is a SESSION-LIFETIME AVERAGE (completion/duration
+            // totals since boot): a near-static ramp on a long-running
+            // server, the "flat line like cumulative stats" the user
+            // reported. The average stays the small card + tile.
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('generation.tokens_s,rate.cached_tokens_s')}&window=${w}`).catch(() => null),
             // BE-prefill: the prefill line is the true per-tick computed
             // rate (prefill.tokens_s from the tracker event hooks) — the
             // old avg_prefill_tps is a session-lifetime average that no
@@ -136,7 +143,7 @@ async function loadChartHistory() {
         // Only adopt if the window did not change mid-flight (stale-window
         // race: a slow 24h response landing over a fresh 5m selection).
         if (w === windowToParam()) {
-            chartHist = { gen: convMap(g, 'avg_generation_tps'),
+            chartHist = { gen: convMap(g, 'generation.tokens_s'),
                           cached: convMap(g, 'rate.cached_tokens_s'), prefill: conv(p),
                           // U38/U40: bytes -> GiB ladder for the budget and
                           // hot-cache series (1024^3 — matches fmtBytes/GiB)
@@ -420,7 +427,13 @@ function createCharts() {
     // U30: cached input tokens ride the RIGHT axis as a dotted line in the
     // prefill colour (same family: cached ⊆ prompt); absent before uplift's
     // install day, never zero-filled (honest absence).
-    const tpsSpecs = [line('generation', 'blue', true, 'y'), line('prefill', 'gold', false, 'y2')];
+    // BE-decode: the left line is now the MOMENTARY decode rate
+    // (generation.tokens_s); its label carries that key's name so the
+    // legend says what the line measures. The session average lives on its
+    // own small card and the Generation tile, labelled as an average.
+    const tpsSpecs = [line(C.tf('uplift.metric.generation.tokens_s', 'generation tok/s'),
+                           'blue', true, 'y'),
+                      line('prefill', 'gold', false, 'y2')];
     const cachedLine = line(C.tf('uplift.metric.rate.cached_tokens_s', 'cached tok/s'), 'gold', false, 'y2');
     cachedLine.dash = [4, 4];
     tpsSpecs.push(cachedLine);
@@ -737,6 +750,9 @@ function metricLabel(key) {
               'cpu temp c': 'CPU °C', 'gpu temp c': 'GPU °C', 'max rpm': 'max RPM',
               'max pct': 'fan %', 'tokens min': 'tok/min', 'draw': 'power draw',
               'tokens s': 'computed prefill tok/s',
+              // BE-decode: locale key normally wins; this keeps the last-
+              // resort fallback honest if the locale fetch ever misses.
+              'generation.tokens s': 'generation tok/s',
               'cache savings': 'prefill cache savings', 'efficiency': 'prefix cache efficiency',
               'savings': 'specprefill savings', 'depth': 'queue depth', 'temp': 'temperature' })[s] || s;
 }
@@ -1146,13 +1162,19 @@ let cachedTps = null, cachedTpsTs = 0;
 // collector's prefill.tokens_s IS the current rate; rides the same
 // latest-fetch below, stale reads push null (never a stale number).
 let prefillLiveTps = null, prefillLiveTs = 0;
+// BE-decode: live per-tick generation tok/s (the chart's generation line).
+// /admin/api/stats only carries avg_generation_tps — the session LIFETIME
+// average, mathematically nearly flat ("like cumulative stats"). The
+// collector's generation.tokens_s IS the current rate; rides the same
+// latest-fetch below, stale reads push null (never a stale number).
+let genLiveTps = null, genLiveTs = 0;
 async function refreshSysPct() {
     const now = Date.now();
     if (sysFetching || now - sysAt < 10_000) return;
     sysFetching = true; sysAt = now;
     try {
         const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
-            encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s,prefill.tokens_s'));
+            encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s,prefill.tokens_s,generation.tokens_s'));
         const lat = (r && r.latest) || {};
         const gb = k => (lat[k] && typeof lat[k].v === 'number') ? +(lat[k].v * GIB).toFixed(3) : null;
         const u = lat['mem.used_bytes'];
@@ -1166,6 +1188,8 @@ async function refreshSysPct() {
         if (c && typeof c.v === 'number') { cachedTps = c.v; cachedTpsTs = c.ts * 1000; }
         const pl = lat['prefill.tokens_s'];
         if (pl && typeof pl.v === 'number') { prefillLiveTps = pl.v; prefillLiveTs = pl.ts * 1000; }
+        const gl = lat['generation.tokens_s'];
+        if (gl && typeof gl.v === 'number') { genLiveTps = gl.v; genLiveTs = gl.ts * 1000; }
     } catch (_) { /* keep last value */ }
     finally { sysFetching = false; renderMemLabel(); }
 }
@@ -1250,7 +1274,11 @@ function pushStatusSample(s) {
     // BE-prefill: column 2 = the collector's per-tick prefill.tokens_s
     // (same latest poll, same staleness rule) — was the session average
     // s.prefillTps, which no single prefill could move.
-    tpsData[0].push(s.time); tpsData[1].push(s.genTps);
+    // BE-decode: column 1 = the collector's per-tick generation.tokens_s
+    // for the same reason — s.genTps is avg_generation_tps, a session
+    // LIFETIME average (the tile keeps showing it, correct there).
+    tpsData[0].push(s.time);
+    tpsData[1].push(genLiveTps !== null && Date.now() - genLiveTs < 120_000 ? genLiveTps : null);
     tpsData[2].push(prefillLiveTps !== null && Date.now() - prefillLiveTs < 120_000 ? prefillLiveTps : null);
     tpsData[3].push(cachedTps !== null && Date.now() - cachedTpsTs < 120_000 ? cachedTps : null);
     while (tpsData[0].length > MAX_POINTS) for (const col of tpsData) col.shift();

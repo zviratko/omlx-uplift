@@ -82,6 +82,20 @@ def _request_obj(core, rid):
         return None
 
 
+def _decode_birth(core, rid) -> None:
+    """BE-decode: start the request's decode row at zero (birth hook).
+
+    Best-effort like every wrapper here: a failure only costs this row's
+    birth marker — the tick walk still baselines it, and the departure
+    flush still counts a sub-tick generation.
+    """
+    try:
+        from .decode_sampler import get_decode_sampler
+        get_decode_sampler().note_birth(f"{_model_for_core(core)}\x00{rid}")
+    except Exception:  # noqa: BLE001
+        log.debug("decode note_birth failed", exc_info=True)
+
+
 def _harvest(core, rid) -> dict:
     """Final snapshot at departure. Two sources, best first:
     1. the scheduler Request (output_text/finish land exactly at
@@ -161,6 +175,7 @@ def install() -> None:
                     rid, _model_for_core(self), _request_obj(self, rid))
             except Exception:  # noqa: BLE001
                 log.debug("note_birth (add_request) failed", exc_info=True)
+            _decode_birth(self, rid)
             return rid
         add_request._uplift_hook = True
         AsyncEngineCore.add_request = add_request
@@ -179,6 +194,7 @@ def install() -> None:
                     rid, _model_for_core(self), _request_obj(self, rid))
             except Exception:  # noqa: BLE001
                 log.debug("note_birth failed", exc_info=True)
+            _decode_birth(self, rid)
             return rid
         sync_add_request._uplift_hook = True
         EngineCore.add_request = sync_add_request
@@ -195,6 +211,17 @@ def install() -> None:
                     request_id, _model_for_core(self), snap)
             except Exception:  # noqa: BLE001
                 log.debug("note_finalize failed", exc_info=True)
+            try:
+                # BE-decode: flush the tail a sub-tick generation never
+                # showed the tick walk (born AND finished inside one 5 s
+                # window). Same model-qualified key the collector builds;
+                # note_end is idempotent against tokens a tick credited.
+                from .decode_sampler import get_decode_sampler
+                get_decode_sampler().note_end(
+                    f"{_model_for_core(self)}\x00{request_id}",
+                    snap.get("completion_tokens"))
+            except Exception:  # noqa: BLE001
+                log.debug("decode note_end failed", exc_info=True)
         _cleanup_request._uplift_hook = True
         EngineCore._cleanup_request = _cleanup_request
 

@@ -13,6 +13,18 @@ users never see.
 
 ## Unreleased
 
+### Fixed
+- Throughput chart: the generation line now shows the **momentary** decode
+  rate (new `generation.tokens_s` series — per-tick deltas of the in-flight
+  requests' token counters, with the tail of sub-tick and aborted
+  generations captured via the engine hooks). It used to plot
+  `avg_generation_tps`, a session-lifetime average that no single request
+  could move — the "flat line like cumulative stats" symptom. The average
+  stays tracked everywhere it is honestly an average: the small metric
+  card is now labelled "average generation tok/s" and the Generation tile's
+  sub-label reads "average tok/s". Long windows backfill from hourly usage
+  rollups; zeros are recorded, so the line drains to 0 instead of vanishing.
+
 ## [1.0] — 2026-10-03
 
 First stable release; stable Homebrew installs are dependency-pinned

@@ -42,6 +42,11 @@ _log = logging.getLogger("omlx_uplift.derive")
 _HOURLY_DERIVE = {
     "rate.prompt_tokens_s":   lambda r: r["prompt_tokens"] / 3600.0,
     "rate.completion_tokens_s": lambda r: r["completion_tokens"] / 3600.0,
+    # BE-decode: the momentary decode line's hourly backfill is the hour's
+    # MEAN tokens/s — the same quantity a downsampled fine series would
+    # show for that bucket (completion tokens are the only decode work the
+    # usage table records per hour).
+    "generation.tokens_s":    lambda r: r["completion_tokens"] / 3600.0,
     "rate.requests_s":        lambda r: r["requests"] / 3600.0,
     "cache_efficiency":       lambda r: (r["cached_tokens"] / r["prompt_tokens"])
                                         if r["prompt_tokens"] else None,

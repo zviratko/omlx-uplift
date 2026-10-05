@@ -114,6 +114,51 @@ def collect_engines(pool: Any) -> dict:
 
 
 # --------------------------------------------------------------------------
+# momentary generation (decode) rate
+# --------------------------------------------------------------------------
+
+
+def collect_generation(pool: Any, *, now: float) -> dict:
+    """Feed the decode sampler from every loaded scheduler, drain one tick.
+
+    ``Request.num_output_tokens`` is ``len(output_token_ids)`` — it grows
+    every decode step, so the per-tick delta over the in-flight set is the
+    CURRENT generation rate. avg_generation_tps stays collected next to it
+    (the classic session average; small card + tile keep using it).
+
+    The walk must not raise into the tick: pool absent or a per-model probe
+    failure just means this tick credits fewer rows (the deltas are
+    per-request cumulative, so the next good tick still lands the full
+    count — total accuracy survives, one tick smooths). drain() is OUTSIDE
+    the walk loop and always returns the key — zero is a data point, and a
+    skipped write truncates the series exactly when the engine drains.
+    """
+    rows: list[tuple[str, Any]] = []
+    if pool is not None:
+        for mid in pool.get_loaded_model_ids():
+            try:
+                entry = pool.get_entry(mid)
+                sched = scheduler_for(entry)
+                snap_fn = getattr(sched, "snapshot_for_admin", None)
+                if not callable(snap_fn):
+                    continue
+                running = (snap_fn() or {}).get("running_by_id") or {}
+                for rid, req in running.items():
+                    # model-qualified key: request ids are not guaranteed
+                    # unique across engines — a shared row would credit one
+                    # model's tokens against another's delta.
+                    rows.append((f"{mid}\x00{rid}",
+                                 getattr(req, "num_output_tokens", None)))
+            except Exception:
+                log.debug("decode row walk failed for %s", mid,
+                          exc_info=True)
+    from .decode_sampler import get_decode_sampler
+    sampler = get_decode_sampler()
+    sampler.sample_running(rows, now=now)
+    return sampler.drain(now=now)
+
+
+# --------------------------------------------------------------------------
 # memory gauges
 # --------------------------------------------------------------------------
 

@@ -179,6 +179,18 @@ class Collector:
         except Exception:
             log.debug("prefill sampler drain failed", exc_info=True)
 
+        # BE-decode: momentary generation tok/s (per-tick deltas of the
+        # in-flight requests' num_output_tokens) — feeds the Throughput
+        # chart's generation line, replacing avg_generation_tps there.
+        # avg_generation_tps STAYS collected (small card + tile keep the
+        # classic session-average semantics). Called even when the pool
+        # probe failed: drain() must write its zero every tick — skipping
+        # the key truncates the series exactly when the engine drains.
+        try:
+            pairs.update(collectors.collect_generation(pool, now=now))
+        except Exception:
+            log.debug("generation sampler collect failed", exc_info=True)
+
         # U20: macmon power/temperature (optional, non-blocking)
         try:
             self._macmon_collector.collect(pairs)
