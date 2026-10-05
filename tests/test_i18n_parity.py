@@ -28,6 +28,9 @@ TECH_WORDS = {
     "cache", "prefill", "SSE", "TLS", "SHA", "DEV", "KEG",
     # accepted git/dev loanwords kept English in these locales' tech style
     "Patches", "patches", "branch", "build",
+    # quantization method labels — identical by design in all locales
+    # (classic shows 'RHT + int16' untranslated; it carries no prose)
+    "RHT", "int16",
 }
 
 

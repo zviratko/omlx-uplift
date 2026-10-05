@@ -9,7 +9,6 @@
 """
 from unittest.mock import patch
 
-import omlx.server  # noqa: F401 - import order seam of the sibling tests
 from omlx_uplift import env_tunables as et
 from omlx_uplift.routers import policy as up_p
 
