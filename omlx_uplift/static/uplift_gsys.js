@@ -1024,10 +1024,15 @@ async function openEnvCatalog(reopen) {
         C.tf('uplift.envcat.managed', 'MANAGED'),
         'uplift.envcat.legend_managed', 'vanilla oMLX owns this variable',
         'uplift.envcat.managed_hint'));
-    legend.append(legendItem(
-        C.tf('uplift.env.badge', 'EXPERIMENTAL'),
-        'uplift.envcat.legend_editable', 'editable here',
-        'uplift.envcat.settable_hint'));
+    // On the read-only runtime nothing carries the EXPERIMENTAL chip, so a
+    // legend line calling it "editable here" would contradict the banner
+    // above it — the line only earns its place where the chip can appear.
+    if (ENV_CAT.dev) {
+        legend.append(legendItem(
+            C.tf('uplift.env.badge', 'EXPERIMENTAL'),
+            'uplift.envcat.legend_editable', 'editable here',
+            'uplift.envcat.settable_hint'));
+    }
     legend.append(legendItem(
         [C.tf('uplift.envcat.e_live', 'LIVE'),
          C.tf('uplift.envcat.e_model', 'RESTART MODEL'),
