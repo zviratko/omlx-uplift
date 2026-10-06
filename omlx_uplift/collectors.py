@@ -268,6 +268,18 @@ _SPEC_MAP = (
     ("draft_prefix_tokens_saved", "spec.tokens_saved"),
 )
 
+# BUG-3 (user log evidence 2026-10-06): the prefix_cache-absent notice below
+# was STATE-gated, so it re-fired on every 5 s persisting tick while models
+# sat loaded-but-idle — 98k lines after one restart. Absence in that window
+# is expected (the engine fills the counters only once real requests flow).
+# Edge trigger: one line per ABSENCE EPISODE; the flag is set when the
+# notice fires and cleared as soon as any tick sees the counters again, so
+# a genuine later regression still produces exactly one fresh line.
+# Module-level on purpose: a process restart legitimately starts a new
+# episode; the bool read/write is GIL-atomic across the collector loop and
+# the 2 Hz fast-sampler thread (worst case: one extra line, never spam).
+_pfx_absent_logged = False
+
 
 def collect_cache(pool: Any, *, prev_ctr: dict, dt: float,
                   rates: bool = True) -> tuple[dict, dict]:
@@ -405,16 +417,24 @@ def collect_cache(pool: Any, *, prev_ctr: dict, dt: float,
         if d_ssave is not None:
             pairs["spec.saved_tokens_min"] = 60.0 * d_ssave / dt
     prev_out = pfx_counters if pfx_counters else prev_ctr
-    if rates and not pfx_counters and pool.get_loaded_model_ids() \
-            and saw_prefix_cache is False:
-        # Engines stopped reporting prefix_cache counters (the pfx.* series
-        # went quiet 2026-09-27 with only a reranker resident). Loaders
-        # without a block-aware cache never emit them — say so at debug
-        # instead of leaving the cards silently flat-lined. FAST-1: gated
-        # on rates — the persisting tick owns this notice; the 2 Hz walk
-        # would spam server.log every half second with the same line.
-        log.debug("prefix_cache counters absent for %d loaded model(s); "
-                  "pfx.*/spec.* series paused", len(pool.get_loaded_model_ids()))
+    # BUG-3: edge-triggered absence notice — one line per episode, not per
+    # tick. Only the persisting (rates) tick owns the state; the 2 Hz walk
+    # stays stateless here.
+    global _pfx_absent_logged
+    if rates:
+        if pfx_counters or saw_prefix_cache:
+            _pfx_absent_logged = False   # counters (re)appeared: re-arm
+        elif pool.get_loaded_model_ids() and not _pfx_absent_logged:
+            # Engines stopped reporting prefix_cache counters (the pfx.* series
+            # went quiet 2026-09-27 with only a reranker resident). Loaders
+            # without a block-aware cache never emit them — say so at debug
+            # instead of leaving the cards silently flat-lined. FAST-1: gated
+            # on rates — the persisting tick owns this notice; the 2 Hz walk
+            # would spam server.log every half second with the same line.
+            log.debug("prefix_cache counters absent for %d loaded model(s); "
+                      "pfx.*/spec.* series paused",
+                      len(pool.get_loaded_model_ids()))
+            _pfx_absent_logged = True
     return pairs, prev_out
 
 

@@ -467,3 +467,67 @@ def test_hits_without_misses_does_not_kill_the_family(monkeypatch):
     assert store.pairs["pfx.saved_tokens_min"] > 0   # sibling rate flows
     assert store.pairs["queue.waiting"] == 1.0       # family survived
     assert store.pairs["hot.m1"] == 0.0              # written, not skipped
+
+
+class AbsentThenBackSched:
+    """Engine shape right after a restart: models loaded, NO prefix_cache
+    block at all until real requests populate the block-aware cache
+    (BUG-3 user evidence 2026-10-06). .give flips the episode."""
+
+    def __init__(self):
+        self.give = False
+
+    def snapshot_for_admin(self):
+        return {"running_by_id": {}}
+
+    def get_ssd_cache_stats(self):
+        st = {"ssd_cache": SsdStats(0)}
+        if self.give:
+            st["prefix_cache"] = {"hits": 10, "misses": 2}
+        return st
+
+    def get_stats(self):
+        return {"num_waiting": 0, "num_prefilling": 0, "num_running": 0}
+
+
+def _absent_notice_lines(caplog):
+    return [r for r in caplog.records
+            if "prefix_cache counters absent" in r.getMessage()]
+
+
+def test_prefix_cache_absent_notice_is_edge_triggered(caplog, monkeypatch):
+    """BUG-3: repeating every 5 s while the state persisted spammed ~98k
+    log lines after one restart. Acceptance: two consecutive persisting
+    ticks with counters absent => exactly ONE line; counters return and
+    vanish again => the NEW episode logs again; the rates=False (2 Hz)
+    walk never emits or re-arms."""
+    import logging
+
+    from omlx_uplift import collectors
+
+    monkeypatch.setattr(collectors, "_pfx_absent_logged", False)
+    sched = AbsentThenBackSched()
+    pool = _spec_pool(sched)
+    with caplog.at_level(logging.DEBUG, logger="omlx_uplift.collectors"):
+        # episode 1: five persisting ticks with no counters
+        for _ in range(5):
+            collectors.collect_cache(pool, prev_ctr={}, dt=5.0)
+        assert len(_absent_notice_lines(caplog)) == 1
+
+        # 2 Hz walk in the same absence window: no line, no re-arm
+        for _ in range(4):
+            collectors.collect_cache(pool, prev_ctr={}, dt=0.5, rates=False)
+        assert len(_absent_notice_lines(caplog)) == 1
+
+        # counters appear -> episode over, flag re-arms; no new line
+        caplog.clear()
+        sched.give = True
+        collectors.collect_cache(pool, prev_ctr={}, dt=5.0)
+        assert len(_absent_notice_lines(caplog)) == 0
+
+        # genuine later regression: exactly one FRESH line
+        caplog.clear()
+        sched.give = False
+        for _ in range(3):
+            collectors.collect_cache(pool, prev_ctr={}, dt=5.0)
+        assert len(_absent_notice_lines(caplog)) == 1
