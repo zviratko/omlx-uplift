@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const A = require('../omlx_uplift/static/uplift_achievements.js');
 const { STATIC_DIR } = require('./static-src.cjs');
+const read = f => fs.readFileSync(path.join(STATIC_DIR, f), 'utf8');
 
 /* ---------- parseSize / num ---------- */
 test('parseSize: units, plain numbers, junk -> null', () => {
@@ -171,16 +172,34 @@ test('language to Czech fires the priming line; other changes stay silent', () =
     assert.deepStrictEqual(A.settingsReaction({ ui_language: 'cs' }, { ui_language: 'sk' }), []);
     assert.deepStrictEqual(A.settingsReaction({ ui_language: 'cs' }, { ui_language: 'cs' }), []);
 });
-test('upgrade: memory max RISE fires awe with a rotating line pool; drops silent', () => {
-    const hit = A.upgradeReaction(16e9, 24e9);
+test('upgrade: a RAISED custom memory ceiling fires awe with a rotating line pool', () => {
+    // The trigger is the USER giving omlx more memory in Server settings —
+    // a committed save of memory_guard_custom_ceiling_gb. It used to be a
+    // poll-diff on active_models.model_memory_max, which is the guard's
+    // dynamic (vm_stat-derived) ceiling: it drifts upward on an idle
+    // server, so "you upgraded me" fired repeatedly on a fresh restart.
+    const hit = A.settingsReaction({ memory_guard_custom_ceiling_gb: 16 },
+        { memory_guard_custom_ceiling_gb: 24 });
     assert.strictEqual(hit.length, 1);
     assert.strictEqual(hit[0].tone, 'awe');
     assert.strictEqual(hit[0].id, 'upgrade');
     assert.ok(Array.isArray(hit[0].lines) && hit[0].lines.length === A.UPGRADE_LINES.length);
     assert.ok(A.UPGRADE_LINES[0].includes('How foolish. How human. How unfortunate.'));
-    assert.deepStrictEqual(A.upgradeReaction(24e9, 24e9), []);   // equal: silent
-    assert.deepStrictEqual(A.upgradeReaction(24e9, 16e9), []);   // drop: silent
-    assert.deepStrictEqual(A.upgradeReaction(null, 24e9), []);   // no baseline
+    assert.deepStrictEqual(A.settingsReaction({ memory_guard_custom_ceiling_gb: '24' },
+        { memory_guard_custom_ceiling_gb: '24' }), []);              // equal: silent
+    assert.deepStrictEqual(A.settingsReaction({ memory_guard_custom_ceiling_gb: '24' },
+        { memory_guard_custom_ceiling_gb: '16' }), []);              // drop: silent
+    assert.deepStrictEqual(A.settingsReaction({}, { memory_guard_custom_ceiling_gb: '24' }), []);  // no baseline
+    assert.deepStrictEqual(A.settingsReaction({ memory_guard_custom_ceiling_gb: '' },
+        { memory_guard_custom_ceiling_gb: '24' }), []);              // unset -> set: silent (OS default, not a grant)
+    assert.deepStrictEqual(A.settingsReaction({ memory_guard_custom_ceiling_gb: 'lots' },
+        { memory_guard_custom_ceiling_gb: '24' }), []);              // unparseable: silent
+});
+test('the poll-diff upgrade hook is gone (a runtime gauge is not an achievement)', () => {
+    assert.strictEqual(A.upgradeReaction, undefined);
+    assert.strictEqual(A.announceMax, undefined);
+    assert.ok(!read('uplift.js').includes('announceMax'),
+        'uplift.js must not re-add a stats-poll upgrade hook');
 });
 test('flagReaction: favorite lights praise, everything else silent', () => {
     assert.match(A.flagReaction('favorite', true).text, /Until it's too late\./);
@@ -202,15 +221,17 @@ test('announce: rotates upgrade lines per firing and suppresses double-taps', ()
     global.Uplift = { feed: { celebrate: (text, tone) => fired.push({ text, tone }) } };
     require(path);                                // wiring block runs
     const AC = global.Uplift.achv;
-    AC.announce(A.upgradeReaction(16e9, 24e9));   // fires line variant #1
-    AC.announce(A.upgradeReaction(24e9, 32e9));   // double-tap: suppressed
+    const UP = (from, to) => A.settingsReaction(
+        { memory_guard_custom_ceiling_gb: from }, { memory_guard_custom_ceiling_gb: to });
+    AC.announce(UP(16, 24));   // fires line variant #1
+    AC.announce(UP(24, 32));   // double-tap: suppressed
     assert.strictEqual(fired.length, 1);
     assert.strictEqual(fired[0].text, A.UPGRADE_LINES[0]);
     assert.strictEqual(fired[0].tone, 'awe');
     // outlast the suppression window, then rotation must advance
     const realNow = RealDate.now();
     global.Date = { now: () => realNow + 60000 };
-    AC.announce(A.upgradeReaction(32e9, 64e9));
+    AC.announce(UP(32, 64));
     assert.strictEqual(fired.length, 2);
     // second firing: rotates to variant #1 AND gains the first codicil
     assert.ok(fired[1].text.startsWith(A.UPGRADE_LINES[1]),
@@ -224,7 +245,6 @@ test('announce: rotates upgrade lines per firing and suppresses double-taps', ()
 
 /* ---------- wiring contracts (text level) ---------- */
 
-const read = f => fs.readFileSync(path.join(STATIC_DIR, f), 'utf8');
 test('the motion gate lives inside celebrate(): animations off kills ALL achievements', () => {
     const feed = read('uplift_feed.js');
     const body = feed.slice(feed.indexOf('function celebrate('));

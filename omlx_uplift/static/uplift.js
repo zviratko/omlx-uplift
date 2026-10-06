@@ -2269,7 +2269,6 @@ async function pollStats() {
         // milestones join the achievement system: >=1M rungs get the AWE
         // double burst; uplift_achievements owns the tone decision
         const AC = window.Uplift.achv;
-        if (AC && s.memMax !== null) AC.announceMax(s.memMax);   // upgrade hook
         for (const mi of FE.gateMilestones(miles))
             FE.celebrate(FE.milestoneQuip(mi), AC ? AC.milestoneTone(mi.rung) : null);
     } catch (err) {

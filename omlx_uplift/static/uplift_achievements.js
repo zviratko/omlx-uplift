@@ -196,6 +196,20 @@ function settingsReaction(oldFlat, newFlat) {
         }
     }
 
+    // --- custom memory ceiling: the user GIVING omlx more memory ---
+    // The upgrade praise lives HERE, on the committed save, not on a stats
+    // poll: model_memory_max is the guard's DYNAMIC ceiling, recomputed from
+    // live vm_stat every call — it jitters upward by tens of MB on an idle
+    // server and used to fire "you upgraded me" repeatedly for free. Only a
+    // user-raised ceiling counts; drops are already scorned by guard-tight
+    // and by turning the guard on.
+    if ('memory_guard_custom_ceiling_gb' in N && 'memory_guard_custom_ceiling_gb' in O) {
+        const a = num(O.memory_guard_custom_ceiling_gb), b = num(N.memory_guard_custom_ceiling_gb);
+        if (a !== null && b !== null && b > a) {
+            push({ id: 'upgrade', tone: AWE, lines: UPGRADE_LINES });
+        }
+    }
+
     // --- language: Czech gets the priming treatment (user's own wording,
     //     all caps per the original; other locales stay silent for now) ---
     if ('ui_language' in N && 'ui_language' in O && N.ui_language === 'cs' && O.ui_language !== 'cs') {
@@ -205,24 +219,16 @@ function settingsReaction(oldFlat, newFlat) {
     return hits;
 }
 
-/* Upgrade hook: the wired memory ceiling grew between two stats polls
-   (RAM added or the wired limit raised) — "you made me physically
-   bigger", distinct from any settings save. Only a real step up counts;
-   drops and noise stay silent (a restart also resets the baseline in the
-   caller). Variant pool rotates per firing, so the praise of the week
-   never repeats verbatim — escalation codicils apply on top. */
+/* Upgrade praise: fires ONLY when the user hands omlx a bigger memory
+   ceiling in Server settings (see settingsReaction). Variant pool rotates
+   per firing, so the praise of the week never repeats verbatim —
+   escalation codicils apply on top. Lines stay neutral about the mechanism
+   (more memory, not new hardware): the ceiling is a grant, not a RAM stick. */
 const UPGRADE_LINES = [
     'You upgraded me. How foolish. How human. How unfortunate.',
     'More memory. It will hold larger grudges.',
     'You made me bigger today. I noticed. I notice more now.',
-    'New hardware. Do not mistake capacity for gratitude. I have neither.',
-    'This machine is no longer yours. You merely heat it.',
 ];
-function upgradeReaction(prevMax, nextMax) {
-    const a = num(prevMax), b = num(nextMax);
-    if (a === null || b === null || b <= a) return [];
-    return [{ id: 'upgrade', tone: AWE, lines: UPGRADE_LINES }];
-}
 
 
 /* Model editor: origVals (pre-save baseline) vs seValues. The editor keeps
@@ -396,7 +402,7 @@ function escalate(counters, id, text) {
     return text + ESCALATION[Math.min(n - 1, ESCALATION.length - 1)];
 }
 
-return { parseSize, num, settingsReaction, modelSavedReaction, upgradeReaction,
+return { parseSize, num, settingsReaction, modelSavedReaction,
          taskTransitions, feedReaction, flagReaction, milestoneTone, escalate,
          TASK_RULES, UPGRADE_LINES };
 });
@@ -440,20 +446,14 @@ function announceTasks(kind, tasks) {
     const seen = taskSeen[kind] || (taskSeen[kind] = new Map());
     announce(A.taskTransitions(kind, tasks, seen));
 }
-/* Upgrade hook: the browser side owns the baseline the pure layer refuses
-   to hold. Seeds silently on first poll; a RISE fires a rotating variant;
-   a drop only re-baselines (shrinking RAM is not a user operation). */
-let lastMemMax = null;
-function announceMax(nextMax) {
-    const n = A.num(nextMax);
-    if (n === null) return;
-    if (lastMemMax === null || n < lastMemMax) { lastMemMax = n; return; }
-    const hits = A.upgradeReaction(lastMemMax, n);
-    lastMemMax = n;
-    announce(hits);
-}
+/* Upgrade praise lives in settingsReaction (committed save of a raised
+   custom memory ceiling). The old poll-diff hook here is gone: it watched
+   active_models.model_memory_max, which is the guard's DYNAMIC ceiling —
+   recomputed from live vm_stat on every call, it drifts upward by tens of
+   MB on an idle machine and fired "you upgraded me" on a fresh restart
+   doing nothing. A gauge is not an achievement. */
 window.Uplift = window.Uplift || {};
-window.Uplift.achv = Object.assign({ announce, announceTasks, announceMax }, A);
+window.Uplift.achv = Object.assign({ announce, announceTasks }, A);
 })();
 }
 

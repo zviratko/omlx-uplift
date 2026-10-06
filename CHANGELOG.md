@@ -14,6 +14,16 @@ users never see.
 ## Unreleased
 
 ### Fixed
+- Achievements: "You upgraded me" / "More memory" / "You made me bigger
+  today" no longer fire on their own. They watched `model_memory_max`
+  between stats polls — but that value is the memory guard's *dynamic*
+  ceiling, recomputed from live vm_stat on every call, so ordinary page
+  cache churn drifted it upward and each drift read as a hardware
+  upgrade (worst right after a restart, with the dashboard open and
+  nothing happening). The praise now fires only on the real user action:
+  raising the custom memory ceiling in Server settings. Hot/SSD cache
+  growth and guard loosening already fired from committed saves and are
+  unchanged.
 - Throughput chart: the generation line now shows the **momentary** decode
   rate (new `generation.tokens_s` series — per-tick deltas of the in-flight
   requests' token counters, with the tail of sub-tick and aborted
