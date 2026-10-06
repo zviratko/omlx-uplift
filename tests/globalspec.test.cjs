@@ -140,7 +140,11 @@ test('MODEL_TYPE_OPTIONS mirrors the classic model-type <option> list', { skip: 
 // oMLX answers, so CI without a running server stays green.
 test('global-settings round-trip is a no-op on the real server', { timeout: 30000 }, () => {
     const { spawnSync } = require('child_process');
-    const script = [require('path').join(ROOT, 'tests', 'ui', 'p1a7_interop.py'),
+    // CI-4: ROOT is null without a classic checkout (GitHub runner) —
+    // path.join(null, …) threw BEFORE the intended graceful skip. Candidate
+    // #1 only exists when classic is there; the repo-local copy below is
+    // what CI runs (it self-skips exit 2 when no oMLX answers).
+    const script = [ROOT && require('path').join(ROOT, 'tests', 'ui', 'p1a7_interop.py'),
                     require('path').join(__dirname, '..', 'tests', 'ui', 'p1a7_interop.py'),
                     require('path').join(__dirname, '..', '..', '..', 'tests', 'ui', 'p1a7_interop.py')].find(fs.existsSync);
     if (!script) { console.log('interop SKIP: p1a7_interop.py not found'); return; }
