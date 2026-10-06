@@ -171,12 +171,19 @@ function gapBridge(maxGapMs) {
             if (last && g[0] === last[1]) last[1] = g[1];
             else merged.push([g[0], g[1]]);
         }
+        // KEEP only spans we can MEASURE and that exceed the cap. Live
+        // drill (2026-10-07) proved uPlot also calls this hook from draws
+        // whose gap indices no longer fit self.data[0] (deferred path
+        // rebuild after a setData swap) — those are unmeasurable, and
+        // clipping them made the fix a no-op on the running board. An
+        // out-of-range span drops for THIS draw only: the hole itself is
+        // data, and the next consistent redraw re-derives it in range.
         return merged.filter(g => {
-            const a = xs[g[0]], b = xs[g[1]];
-            // Unmeasurable span (edge indices): stay clipped — bridging a
-            // hole we cannot size is fabrication by omission.
-            if (!(Number.isFinite(a) && Number.isFinite(b))) return true;
-            return b - a > cap;
+            const a = g[0], b = g[1];
+            if (!(a >= 0 && b > a && b < xs.length)) return false;
+            const ta = xs[a], tb = xs[b];
+            if (!(Number.isFinite(ta) && Number.isFinite(tb))) return false;
+            return tb - ta > cap;
         });
     };
 }

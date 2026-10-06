@@ -71,11 +71,16 @@ test('gapBridge: custom cap via argument; default exported', () => {
     assert.strictEqual(GAP_BRIDGE_MS, 12000);
 });
 
-test('gapBridge: empty/absent gap lists pass through; unmeasurable stays clipped', () => {
+test('gapBridge: empty/absent gap lists pass through; stale indices bridge', () => {
     const noop = gapBridge();
     assert.deepStrictEqual(noop({ data: [[0], []] }, 1, 0, 0, []), []);
     assert.strictEqual(noop({ data: [[0], []] }, 1, 0, 0, null), null);
-    // x column shorter than the span indices → cannot size the hole → clip
+    // Live drill (BUG-4 deploy verify, 2026-10-07): uPlot calls the hook
+    // from draws whose gap indices no longer fit data[0] (deferred path
+    // rebuild after a setData swap). Clipping unmeasurable spans made the
+    // bridge a no-op on the running board — they must DROP here and
+    // re-derive in range on the next consistent draw.
     const self = { data: [[0, 1000], []] };
-    assert.deepStrictEqual(noop(self, 1, 0, 5, [[1, 9]]), [[1, 9]]);
+    assert.deepStrictEqual(noop(self, 1, 0, 1, [[5, 9]]), [], 'out-of-range bridges');
+    assert.deepStrictEqual(noop(self, 1, 0, 1, [[1, 2]]), [], 'in-range 1 s hole bridges');
 });
