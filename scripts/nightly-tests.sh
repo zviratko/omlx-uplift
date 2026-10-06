@@ -44,6 +44,17 @@ fi
 
 pytest_out=$(PYTHONPATH="$PYLIBS:$REPO" "$KEG_PY" -m pytest tests -q 2>&1)
 rc_pytest=$?
+# SYNC-1: the settings-drift gate needs a classic checkout. Keep a plain
+# upstream mirror fresh (best-effort ff; offline keeps the last snapshot)
+# and point OMLX_SRC at it so globalspec.test.cjs runs INSTEAD OF SKIPPING —
+# upstream adding a settings key raises ok:false, not a silent skip:3.
+UPSTREAM="$HOME/git/omlx-upstream"
+if [ -d "$UPSTREAM/.git" ]; then
+    git -C "$UPSTREAM" fetch -q origin main 2>/dev/null \
+        && git -C "$UPSTREAM" merge -q --ff-only FETCH_HEAD 2>/dev/null \
+        || echo "WARN: omlx-upstream ff failed; drift gate uses last snapshot" >&2
+    export OMLX_SRC="$UPSTREAM"
+fi
 # NOTE: `node --check a.js b.js` checks ONLY THE FIRST FILE (verified on
 # node v26: a syntax error in the second file still exits 0). The
 # globbing form the README used before was a silent no-op for everything

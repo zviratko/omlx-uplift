@@ -13,7 +13,19 @@ users never see.
 
 ## Unreleased
 
+### Added
+- SYNC-1 upstream sync: Server settings gained the **GPU Keep-Warm
+  Interval** row (upstream `server.gpu_keep_warm_interval` — live-applied,
+  was previously settings.json/env-only), the Helper page lists **DeepSeek
+  Harness** with the other CLI assistants (upstream #3950), and the model
+  editor's Model Type offers **decision** (upstream #4315, Clef/OpenJev).
+  The drift guards that should have caught these silently skipped on the
+  standalone repo; they now run against a plain upstream checkout nightly.
+
 ### Fixed
+- Max Concurrent Requests no longer demands a server restart after every
+  save: upstream #3765 live-applies it, so Uplift shows the restart badge
+  only while distributed (cluster) engines are active — classic parity.
 - Achievements: "You upgraded me" / "More memory" / "You made me bigger
   today" no longer fire on their own. They watched `model_memory_max`
   between stats polls — but that value is the memory guard's *dynamic*
