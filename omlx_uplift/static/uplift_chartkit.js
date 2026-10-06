@@ -144,7 +144,44 @@ function seriesPalette(col) {
 const ZERO_FLOOR_RANGE = (u, dmin, dmax) =>
     [0, (dmax == null || dmax <= 0) ? 1 : dmax * 1.05];
 
+/* BUG-4 (user 2026-10-07: "holes in the graphs after our 2hz tick change"):
+   FAST-1's union x column mixes ~500 ms live stamps with 5 s stored ones,
+   so every 5 s-path series is ~10 nulls deep between its real points —
+   and uPlot clips its (otherwise continuous) stroke at every null run.
+   The fix bridges only CADENCE-sized holes: v1.6.32 hands the gap rects to
+   a per-series gaps(self, si, i0, i1, gaps) callback before building the
+   clip; we merge the chained [i0,i1] pairs into whole-hole spans and drop
+   the SHORT ones, so the stroke survives across them. A hole longer than
+   the cap keeps its clip rect — a stalled sampler or a metric that truly
+   stopped being reported still shows a break (honest-absence doctrine:
+   spanGaps:true would fabricate the same straight line across real
+   outages, and nulls stay nulls — nothing is interpolated or forward-
+   filled; the straight segment just joins two genuine samples). Cap:
+   3 stored intervals + slack. */
+const GAP_BRIDGE_MS = 12_000;
+function gapBridge(maxGapMs) {
+    const cap = Number.isFinite(maxGapMs) ? maxGapMs : GAP_BRIDGE_MS;
+    return function (self, si, i0, i1, gaps) {
+        if (!gaps || !gaps.length) return gaps;
+        const xs = self && self.data && self.data[0];
+        if (!xs || !xs.length) return gaps;
+        const merged = [];
+        for (const g of gaps) {
+            const last = merged[merged.length - 1];
+            if (last && g[0] === last[1]) last[1] = g[1];
+            else merged.push([g[0], g[1]]);
+        }
+        return merged.filter(g => {
+            const a = xs[g[0]], b = xs[g[1]];
+            // Unmeasurable span (edge indices): stay clipped — bridging a
+            // hole we cannot size is fabrication by omission.
+            if (!(Number.isFinite(a) && Number.isFinite(b))) return true;
+            return b - a > cap;
+        });
+    };
+}
+
 return { AXIS_FONT_PX, AXIS_FONT_FALLBACK, axisFont, cssRgb, toHex2, tint,
          chartColors, SERIES_PALETTE_ORDER, SERIES_PALETTE_MAX, seriesPalette,
-         ZERO_FLOOR_RANGE };
+         ZERO_FLOOR_RANGE, GAP_BRIDGE_MS, gapBridge };
 });

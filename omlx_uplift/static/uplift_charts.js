@@ -255,6 +255,9 @@ function line(label, colorVar, fill, scale) {
     const col = chartColors()[colorVar];
     return { label, scale: scale || 'y', stroke: col, width: 2,
              fill: fill ? tint(col, '22') : undefined,
+             // BUG-4: bridge cadence-sized null runs (union x column mixes
+             // 2 Hz live + 5 s stored stamps); real stalls stay clipped.
+             gaps: KIT.gapBridge(),
              points: { show: false }, value: seriesValue };
 }
 function xAxis(col, boundWin) {
@@ -506,6 +509,7 @@ function createCharts() {
     memOpts.height = Math.max(200, $('chart-mem').clientHeight || 240);
     memOpts.scales.x.range = pinnedXRange('chart-mem');
     memChart = new uPlot(memOpts, memWindowed(), $('chart-mem'));
+    window.__uplotMem = memChart;   // debug handle (BUG-4 drill parity)
     bindCursorUpdater(tpsChart); bindCursorUpdater(memChart);
     bindCursorTip(tpsChart); bindCursorTip(memChart);
     resizeCharts();
@@ -820,6 +824,10 @@ function metricOpts(id, def, col) {
         const sc = s.axis || (s.legendOnly ? 'yleg' : 'y');
         const o = { label: metricSeriesLabel(s.key), scale: sc,
                     stroke: c, width: s.legendOnly ? 0 : 1.6,
+                    // BUG-4: same cadence-gap bridge as the big charts —
+                    // metricUnionCols mixes live 500 ms and stored 5 s
+                    // stamps into one x column.
+                    gaps: KIT.gapBridge(),
                     fill: (s.area || (!mult && i === 0)) ? tint(c, '1c') : undefined,
                     points: { show: false }, value: (u, v) => sf(v === undefined || v !== v ? null : v) };
         return o;
