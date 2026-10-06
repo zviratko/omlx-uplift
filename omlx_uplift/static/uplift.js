@@ -1925,15 +1925,13 @@ function ifPaint(sl) {
         if (sl.elapsed != null) bits.push(`wait ${C.fmtDuration(Math.round(sl.elapsed))}`);
     } else {
         if (sl.prompt) bits.push(`in ${C.fmtCompact(sl.prompt)}`);
-        // U22: classic's scoring extras (same strings as classic's active
-        // models card): "(draft scored N · selected N (keep%))". Non-zero
-        // only while the draft scoring / selected phase is reported.
-        if (sl.scored || sl.selected) {
-            const d = [];
-            if (sl.scored) d.push('draft scored ' + C.fmtCompact(sl.scored));
-            if (sl.selected) d.push('selected ' + C.fmtCompact(sl.selected)
-                + (sl.keepPct != null ? ` (${sl.keepPct}%)` : ''));
-            bits.push('(' + d.join(' · ') + ')');
+        // U42 (user wording 2026-10-06): specprefill extras read
+        // "(draft $selected / $generated)" — a deliberate divergence from
+        // classic's "draft scored N · selected N (keep%)"; classic parity
+        // must NOT be 'restored' here (recorded in the ticket).
+        if (sl.selected) {
+            bits.push(`(draft ${C.fmtCompact(sl.selected)}`
+                + (sl.out ? ` / ${C.fmtCompact(sl.out)}` : '') + ')');
         }
         if (sl.out) bits.push(`out ${C.fmtCompact(sl.out)}`);
         if (sl.tps) bits.push(`${Math.round(sl.tps)} t/s`);

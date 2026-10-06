@@ -87,8 +87,9 @@ function normalize(raw) {
                 // Badge text keys off THIS, not a model-level setting.
                 phase: typeof p.phase === 'string' ? p.phase : '',
                 detail: typeof p.detail === 'string' ? p.detail : '',
-                // U22: classic's scoring extras (specprefill draft.py:251)
-                // — the "(draft scored N · selected N (keep%))" line.
+                // U22 extras mapped from the engine (specprefill draft.py:251);
+                // U42: the feed shows only 'selected' (draft selected/generated),
+                // scored/keep_percent stay mapped but unused by design.
                 scored: Number.isFinite(p.scored_tokens) ? num(p.scored_tokens) : null,
                 selected: Number.isFinite(p.selected_tokens) ? num(p.selected_tokens) : null,
                 keepPct: Number.isFinite(p.keep_percent) ? num(p.keep_percent) : null,

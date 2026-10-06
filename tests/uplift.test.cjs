@@ -816,3 +816,49 @@ test('F-036: all geometry writers clamp x/w at the 1-column breakpoint', () => {
         assert.ok(clamp.test(m[0]), name + ' clamps geometry at c=1 (F-036)');
     }
 });
+
+/* U42 behavioural drift test: the specprefill extras block must read
+   "(draft $selected / $generated)" — user wording deliberately diverging
+   from classic's "draft scored N · selected N (keep%)". ifPaint is sliced
+   out of uplift.js and run against stubbed C/S + a fake slot (uplift.js is
+   a browser IIFE and cannot be require()d whole). */
+test('U42: ifPaint renders "(draft selected / generated)" and never the classic scored/keep% line', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+        path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    const start = src.indexOf('function ifPaint(sl)');
+    const end = src.indexOf('function renderLive(', start);
+    assert.ok(start > 0 && end > start, 'ifPaint slice found in uplift.js');
+    const body = src.slice(start, end);
+
+    const C = {
+        t: k => k,
+        fmtCompact: n => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n)),
+        fmtDuration: s => s + 's',
+    };
+    const S = { reqFeedRows: new Map() };
+    const slot = {
+        terminal: false, state: 'generating', rid: 'r1',
+        prompt: 1200, scored: 4000, selected: 900, keepPct: 22.5,
+        out: 3500, tps: 0, elapsed: null, eta: null,
+        badge: { className: '', textContent: '' },
+        el: { classList: { toggle() {} } },
+        pbar: { style: {} }, pc: { style: {}, title: '' }, pl: { style: {} },
+        meta: { textContent: '' },
+        chip: { style: {} }, abort: { style: {}, textContent: '', title: '' },
+    };
+    const fn = new Function('C', 'S', body + '\nreturn ifPaint;')(C, S);
+    fn(slot);
+    const meta = slot.meta.textContent;
+    assert.ok(meta.includes('(draft 900 / 3.5k)'), 'new wording, got: ' + meta);
+    assert.ok(!meta.includes('scored'), 'classic scored text must be gone: ' + meta);
+    assert.ok(!meta.includes('keep'), 'classic keep% text must be gone: ' + meta);
+
+    // selected==0 (no draft hits yet): no draft block at all, classic-shape
+    // payload with scored>0 included (guard keys on selected alone)
+    const slot2 = { ...slot, meta: { textContent: '' }, selected: 0, scored: 5000 };
+    fn(slot2);
+    assert.ok(!slot2.meta.textContent.includes('draft'),
+        'zero selected must render no draft block: ' + slot2.meta.textContent);
+});
