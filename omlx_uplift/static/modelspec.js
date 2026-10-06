@@ -51,7 +51,8 @@
     ]);
     const REASONING_EFFORT_PRESETS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
     const MODEL_TYPE_OPTIONS = ['llm', 'vlm', 'embedding', 'reranker',
-                                'audio_stt', 'audio_tts', 'audio_sts'];
+                                'audio_stt', 'audio_tts', 'audio_sts',
+                                'decision'];
     const VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES = new Set([
         'gemma4_assistant', 'gemma4_unified_assistant', 'qwen3_5_mtp',
     ]);

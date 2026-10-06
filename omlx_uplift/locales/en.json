@@ -102,6 +102,8 @@
  "uplift.gs.adv.uploads": "Uploads",
  "uplift.gs.adv.wide_proj": "Qwen4 Wide-Proj GDN Decode",
  "uplift.gs.adv.wide_proj_hint": "Wider projection in fused Qwen4 GDN decode (experimental).",
+ "uplift.gs.adv.keep_warm": "GPU Keep-Warm Interval (s)",
+ "uplift.gs.adv.keep_warm_hint": "Seconds between trivial GPU kernels while a model is loaded but idle, keeping the GPU out of its idle power state (the first command buffer after an idle stall can take seconds on large models). Ticks stop after 5 minutes without requests; 0 disables.",
  "uplift.gs.adv.wt": "Hot Cache Write-Through",
  "uplift.gs.adv.wt_hint": "Write hot blocks to SSD immediately.",
  "uplift.gs.auth.api_key": "API Key",

@@ -159,6 +159,8 @@ const GS_LABELS = {
         mid_sys_hint: 'Keep cached KV for system prompts placed mid-conversation.',
         wide_proj: 'Qwen4 Wide-Proj GDN Decode',
         wide_proj_hint: 'Wider projection in fused Qwen4 GDN decode (experimental).',
+        keep_warm: 'GPU Keep-Warm Interval (s)',
+        keep_warm_hint: 'Seconds between trivial GPU kernels while a model is loaded but idle, keeping the GPU out of its idle power state (the first command buffer after an idle stall can take seconds on large models). Ticks stop after 5 minutes without requests; 0 disables.',
         audio: 'Maximum Audio Upload Size (MB)',
         audio_hint: 'Reject audio attachments above this size.',
         ane: 'ANE Compile Cache',
@@ -194,8 +196,11 @@ let GS = null;   // merged working copy (upstream + shadow)
    Fields whose change only takes effect after a server restart are flagged
    red (!) and force the sticky SAVE button into RESTART SERVER once the
    queue is saved. Which fields restart: mirrors the classic template's
-   restart badges (server host/port/auto-start, max concurrent requests,
-   cache enable, MCP config, distributed + CA bundle, proxy endpoints). */
+   restart badges (server host/port/auto-start, cache enable, MCP config,
+   distributed + CA bundle, proxy endpoints). max_concurrent_requests is a
+   conditional: upstream 024ead20 (#3765) live-applies it; classic keeps the
+   badge only while distributed (cluster) engines run, which own their
+   schedulers and reload the limit themselves. */
 let GS_ORIG = {};
 const gsDirty = {};
 let gsRestartPending = false;   // queued edits were saved; server restart still owed
@@ -204,6 +209,15 @@ const GS_RESTART_FIELDS = new Set([
     'host', 'port', 'auto_start_on_launch', 'max_concurrent_requests',
     'cache_enabled', 'mcp_config', 'distributed_inference_enabled',
     'network_ca_bundle', 'hf_endpoint', 'ms_endpoint']);
+// SYNC-1: classic-parity restart semantics for one conditional member.
+function gsDistributedActive() {
+    return !!(GS && GS.server && GS.server.distributed_inference_active);
+}
+function gsRestartField(flat) {
+    if (!GS_RESTART_FIELDS.has(flat)) return false;
+    if (flat === 'max_concurrent_requests') return gsDistributedActive();
+    return true;
+}
 function gsQueueSave(flat, val) {           // edit -> queue, no fetch yet
     // FE-6 step 3: the row marks itself dirty IN PLACE (markFieldDirty).
     // The dead custom_model_prefixes re-render (no such field exists) is
@@ -243,7 +257,7 @@ function markFieldDirty(flat, val) {
         orig, cur,
         row: document.querySelector('#gs-body [data-flat="' + flat + '"]'),
         isSecret: SECRET_KEYS.has(flat),
-        isRestart: GS_RESTART_FIELDS.has(flat),
+        isRestart: gsRestartField(flat),
         display: gsDisplay });
     if (changed) gsDirty[flat] = cur;
     else delete gsDirty[flat];               // edited back = no longer queued
@@ -305,7 +319,7 @@ function gsUpdateSaveBtn() {
     const b = gsSaveBtn(); if (!b) return;
     const n = Object.keys(gsDirty).length;
     const restartQ = gsRestartPending ||
-        Object.keys(gsDirty).some(k => GS_RESTART_FIELDS.has(k));
+        Object.keys(gsDirty).some(k => gsRestartField(k));
     b.classList.toggle('queued', n > 0);
     // the red RESTART state only arms after a save that left a restart owed;
     // while edits are merely queued the button stays amber SAVE (user's flow:
@@ -338,7 +352,7 @@ async function gsCommit() {
         Object.keys(gsDirty).forEach(k => delete gsDirty[k]);
         // a save that touched restart-requiring fields leaves the server
         // owing a restart: arm the red RESTART SERVER button (user flow)
-        if (Object.keys(fields).some(k => GS_RESTART_FIELDS.has(k))) gsRestartPending = true;
+        if (Object.keys(fields).some(k => gsRestartField(k))) gsRestartPending = true;
     }
     // re-render inputs from the new baseline; keeps still-queued edits shown
     renderGlobalSettings();
@@ -475,8 +489,12 @@ function gsRow(sec, labelTxt, hint, control, opts) {
     // The restart warning sits immediately RIGHT OF THE TITLE (user), the
     // description follows after it — previously the chip was appended after
     // the hint and wrapped onto a line below the description.
-    if (opts.badge) lab.append(gsBadge());
-    else if (opts.flat && GS_RESTART_FIELDS.has(opts.flat)) {
+    // SYNC-1: `badge` may be a predicate — classic x-shows the conditional
+    // restart chips (max concurrent requests: only while cluster engines
+    // run). renderGlobalSettings re-runs on every poll/save, so the
+    // predicate is evaluated fresh, same as Alpine.
+    if (opts.badge && (typeof opts.badge !== 'function' || opts.badge())) lab.append(gsBadge());
+    else if (opts.flat && gsRestartField(opts.flat)) {
         // permanent red ! on fields whose change needs a server restart
         const m = document.createElement('span');
         m.className = 'rqmark'; m.textContent = '!';
@@ -1242,10 +1260,12 @@ const GS_SPEC = [
 
     {t: 'Resource Management'},
     {sec: 'res', lab: 'res.max_conc', hint: 'res.max_conc_hint', ctl: {
-        // U7: in GS_RESTART_FIELDS but only showed a bare '!' — full badge
+        // U7: in GS_RESTART_FIELDS but only showed a bare '!' — full badge.
+        // #3765 live-apply: the badge rides distributed_inference_active,
+        // exactly like classic's x-show (cluster ranks reload themselves).
         k: 'num', sec: 'scheduler', field: 'max_concurrent_requests',
         flat: 'max_concurrent_requests', min: 1},
-     opts: {flat: 'max_concurrent_requests', badge: true}},
+     opts: {flat: 'max_concurrent_requests', badge: () => gsDistributedActive()}},
     {sec: 'res', lab: 'res.batch', hint: 'res.batch_hint', ctl: {
         k: 'num', sec: 'scheduler', field: 'embedding_batch_size',
         flat: 'embedding_batch_size', min: 1}},
@@ -1315,6 +1335,12 @@ const GS_SPEC = [
         k: 'tog', sec: 'server', field: 'preserve_mid_system_cache', flat: 'preserve_mid_system_cache'}},
     {sec: 'adv', lab: 'adv.wide_proj', hint: 'adv.wide_proj_hint', ctl: {
         k: 'tog', sec: 'server', field: 'qwen4_gdn_decode_wide_proj', flat: 'qwen4_gdn_decode_wide_proj'}},
+    // SYNC-1: upstream server.gpu_keep_warm_interval (live-applied on save,
+    // no restart badge — classic runtime_applied). Not on the classic page;
+    // uplift exposes it because users tune it (settings.json carries it).
+    {sec: 'adv', lab: 'adv.keep_warm', hint: 'adv.keep_warm_hint', ctl: {
+        k: 'num', sec: 'server', field: 'gpu_keep_warm_interval',
+        flat: 'gpu_keep_warm_interval', min: 0, step: 0.1}},
     {sec: 'adv', lab: 'adv.audio', hint: 'adv.audio_hint', ctl: {
         k: 'num', sec: 'server', field: 'max_audio_upload_size', flat: 'max_audio_upload_size', min: 1}},
     {sec: 'adv', lab: 'adv.ane', hint: 'adv.ane_hint', ctl: {

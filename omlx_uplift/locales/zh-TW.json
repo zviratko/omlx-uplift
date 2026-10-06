@@ -102,6 +102,8 @@
  "uplift.gs.adv.uploads": "上傳",
  "uplift.gs.adv.wide_proj": "Qwen4 Wide-Proj GDN 解碼",
  "uplift.gs.adv.wide_proj_hint": "在融合的 Qwen4 GDN 解碼中使用更寬的投影（實驗性）。",
+ "uplift.gs.adv.keep_warm": "GPU 保溫間隔（秒）",
+ "uplift.gs.adv.keep_warm_hint": "模型已載入但閒置時，傳送簡單 GPU 核心的間隔秒數，使 GPU 不進入閒置低功耗狀態（閒置後的第一個命令緩衝區在大型模型上可能耗時數秒）。5 分鐘無請求後停止；0 表示停用。",
  "uplift.gs.adv.wt": "熱快取直寫",
  "uplift.gs.adv.wt_hint": "立即將熱塊寫入 SSD。",
  "uplift.gs.auth.api_key": "API 密鑰",

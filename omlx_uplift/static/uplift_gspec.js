@@ -18,6 +18,7 @@ const GS_MAP = {
     burst_decode_mode: ['server','burst_decode_mode'],
     preserve_mid_system_cache: ['server','preserve_mid_system_cache'],
     qwen4_gdn_decode_wide_proj: ['server','qwen4_gdn_decode_wide_proj'],
+    gpu_keep_warm_interval: ['server','gpu_keep_warm_interval'],
     distributed_inference_enabled: ['server','distributed_inference_enabled'],
     max_audio_upload_size: ['server','max_audio_upload_size'],
     model_dirs: ['model','model_dirs'], model_fallback: ['model','model_fallback'],
@@ -92,7 +93,7 @@ const GS_PAYLOAD_SKIP = new Set(['base_path', 'api_key', 'ui_dashboard_layout'])
    the others (markitdown_*, web_search_*) save bare — classic parity,
    upstream drops unknown fields with a silent success:true. */
 const INTEG_PREFIXED = new Set(['copilot_model', 'codex_model', 'opencode_model',
-    'openclaw_model', 'hermes_model', 'pi_model', 'openclaw_tools_profile']);
+    'openclaw_model', 'hermes_model', 'pi_model', 'dsh_model', 'openclaw_tools_profile']);
 
 return { GS_MAP, GS_PAYLOAD_SKIP, INTEG_PREFIXED };
 });

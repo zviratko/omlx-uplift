@@ -326,7 +326,8 @@ async function renderHelperModels() {
                         integ.openclaw_tools_profile || 'coding',
                         v => saveIntegration({ openclaw_tools_profile: v }))),
         cliModel('hermes_model', 'Hermes Agent'),
-        cliModel('pi_model', 'Pi'));
+        cliModel('pi_model', 'Pi'),
+        cliModel('dsh_model', 'DeepSeek Harness'));
     // model datalist for the assistant pickers
     const cliDl = document.createElement('datalist'); cliDl.id = 'cli-models';
     for (const m of modelList) {

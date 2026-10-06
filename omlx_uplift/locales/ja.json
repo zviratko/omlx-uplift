@@ -102,6 +102,8 @@
  "uplift.gs.adv.uploads": "アップロード",
  "uplift.gs.adv.wide_proj": "Qwen4 Wide-Proj GDN デコード",
  "uplift.gs.adv.wide_proj_hint": "融合された Qwen4 GDN デコードでより広い射影を使用します(試験的)。",
+ "uplift.gs.adv.keep_warm": "GPUウォームキープ間隔（秒）",
+ "uplift.gs.adv.keep_warm_hint": "モデルがロードされているがアイドルの間に、GPUをアイドル電力状態に遷移させないための軽量カーネル送信の間隔（アイドル後の最初のコマンドバッファは大型モデルで数秒かかることがあります）。5分間リクエストがないと停止。0で無効。",
  "uplift.gs.adv.wt": "ホットキャッシュライトスルー",
  "uplift.gs.adv.wt_hint": "ホットブロックを即座にSSDへ書き込みます。",
  "uplift.gs.auth.api_key": "APIキー",

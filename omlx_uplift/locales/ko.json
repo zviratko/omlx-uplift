@@ -102,6 +102,8 @@
  "uplift.gs.adv.uploads": "업로드",
  "uplift.gs.adv.wide_proj": "Qwen4 Wide-Proj GDN 디코딩",
  "uplift.gs.adv.wide_proj_hint": "융합된 Qwen4 GDN 디코딩에서 더 넓은 투영을 사용합니다(실험적).",
+ "uplift.gs.adv.keep_warm": "GPU 워밍 유지 간격(초)",
+ "uplift.gs.adv.keep_warm_hint": "모델이 로드되었지만 유휴 상태일 때 GPU가 절전 상태로 들어가지 않도록 사소한 커널을 실행하는 간격(유휴 후 첫 명령 버퍼는 대형 모델에서 수초 걸릴 수 있음). 5분간 요청이 없으면 중지되며, 0이면 비활성화.",
  "uplift.gs.adv.wt": "핫 캐시 라이트-쓰루",
  "uplift.gs.adv.wt_hint": "핫 블록을 즉시 SSD에 씁니다.",
  "uplift.gs.auth.api_key": "API 키",
