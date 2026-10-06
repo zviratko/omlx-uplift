@@ -405,13 +405,14 @@ def collect_cache(pool: Any, *, prev_ctr: dict, dt: float,
         if d_ssave is not None:
             pairs["spec.saved_tokens_min"] = 60.0 * d_ssave / dt
     prev_out = pfx_counters if pfx_counters else prev_ctr
-    if pfx_counters:
-        pass
-    elif pool.get_loaded_model_ids() and saw_prefix_cache is False:
+    if rates and not pfx_counters and pool.get_loaded_model_ids() \
+            and saw_prefix_cache is False:
         # Engines stopped reporting prefix_cache counters (the pfx.* series
         # went quiet 2026-09-27 with only a reranker resident). Loaders
         # without a block-aware cache never emit them — say so at debug
-        # instead of leaving the cards silently flat-lined.
+        # instead of leaving the cards silently flat-lined. FAST-1: gated
+        # on rates — the persisting tick owns this notice; the 2 Hz walk
+        # would spam server.log every half second with the same line.
         log.debug("prefix_cache counters absent for %d loaded model(s); "
                   "pfx.*/spec.* series paused", len(pool.get_loaded_model_ids()))
     return pairs, prev_out
