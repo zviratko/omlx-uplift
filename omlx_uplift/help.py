@@ -28,6 +28,8 @@ COMMANDS = [
     ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
     ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure|kegs —"
             " dev patches in a separate keg, keg rollback"),
+    ("env", "list|set|reset|disable-all|enable-all — omlx-dev environment"
+            " overrides (the dashboard's ENVIRONMENT VARIABLES modal)"),
     ("doctor", "check the installed omlx tree against its wheel RECORD"
                " (read-only; exit 1 = unexpected drift)"),
 ]
@@ -67,6 +69,10 @@ COMMAND_USAGE = {
             " [--share K,...] [--no-share K,...] [--interactive]\n"
             "                 dev kegs | dev stash-keg\n"
             "                 dev use <sha> [--force] | dev prune [--keep N]"),
+    "env": ("omlx-uplift env [list] [--json]\n"
+            "                 env set NAME VALUE | env reset NAME\n"
+            "                 env disable-all | env enable-all\n"
+            "                 (the omlx-dev store only; values land at the next dev start)"),
     "doctor": ("omlx-uplift doctor [--json]\n"
                "                 read-only: every omlx file vs the wheel RECORD;\n"
                "                 files an applied patch owns are expected drift"),
@@ -74,7 +80,7 @@ COMMAND_USAGE = {
 
 _CONFIG_FILES = [
     ("metrics.sqlite3", "uplift's own metrics database"),
-    ("env_overrides.json", "stored experimental OMLX_* tunables"),
+    ("env.json", "stored experimental env overrides — omlx-dev only (ENV-4)"),
     ("patches.json", "patch manifest (desired state per patch)"),
     ("patches/", "stored diffs + byte-exact pre-apply backups"),
     ("patches.lock", "reconcile lock (startup and CLI share it)"),

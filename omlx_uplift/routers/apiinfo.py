@@ -8,7 +8,6 @@ import asyncio
 import hashlib
 import json
 import math
-import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -91,14 +90,20 @@ async def serving_identity():
     vanilla keg is the one answering. The uplift .pth runs inside whichever
     omlx server mounted us, so its own sys.prefix/sys.executable name the
     keg: '/omlx-dev/' appears exactly when the omlx-dev formula's keg is
-    serving. Public: the header paints before login."""
+    serving. Public: the header paints before login.
+
+    ENV-4: the ladder moved into paths.is_dev_prefix so that this badge and
+    the env-override dev gate answer from ONE definition — a UI that offered
+    editing on a server that would 403 the write is the failure mode avoided.
+    Public route: no keg path in the response (it carries the username);
+    the header only needs the dev flag. Admin surface shows the keg."""
     import sys
+
     from .. import __version__ as _v
-    probe = f"{sys.prefix} {sys.executable}".lower()
-    dev = "/omlx-dev/" in probe or os.sep + "omlx-dev" in probe.rstrip(os.sep)
-    # Public route: no keg path in the response (it carries the username);
-    # the header only needs the dev flag. Admin surface shows the keg.
-    return {"dev": bool(dev), "version": _v}
+    from .. import paths as _paths
+
+    return {"dev": bool(_paths.is_dev_prefix(sys.prefix, sys.executable)),
+            "version": _v}
 
 
 @api_router.get("/locale")

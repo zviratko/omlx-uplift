@@ -8,9 +8,11 @@ installs never load this file, so they stay untouched.
 The hook must not import omlx (it runs at interpreter startup) — it only
 arms a post-import observer for `omlx.server`.
 
-ENV-1: before arming the observer, uplift-stored experimental OMLX_*
+ENV-1/ENV-4: before arming the observer, uplift-stored experimental OMLX_*
 tunables are seeded into os.environ (genuine launch env always wins; see
-env_tunables.seed_environ). stdlib only, never raises.
+env_tunables.seed_environ). ENV-4 restricts that to the omlx-dev keg: on the
+vanilla `omlx` service the seed is a no-op, so production's environment stays
+exactly as launchd left it. stdlib only, never raises.
 """
 
 import os

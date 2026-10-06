@@ -12,7 +12,7 @@ Two families, deliberately different — keep it that way:
   A) PER-INSTANCE base (~ where the running omlx keeps its data):
      server_state.global_settings.base_path  ->  $OMLX_BASE_PATH  ->  ~/.omlx
      Use for anything the server itself reads/writes for ITS instance:
-     metrics.sqlite3, env_overrides.json, skins dir.
+     metrics.sqlite3, env.json (ENV-4 env overrides), skins dir.
        - server_base_dir()        full ladder (omlx already imported)
        - startup_base_dir()       interpreter-startup-safe subset (NEVER
                                   imports omlx — autopatch runs from a
@@ -102,6 +102,21 @@ def uplift_store_dir() -> Path:
 def metrics_db_path() -> Path:
     """Family A + uplift subdir — the one sqlite every sample lands in."""
     return server_base_dir() / UPLIFT_SUBDIR / "metrics.sqlite3"
+
+
+def is_dev_prefix(prefix: str = "", executable: str = "") -> bool:
+    """True when a `sys.prefix` / `sys.executable` pair belongs to the
+    omlx-dev formula's keg (brew opt or Cellar layout).
+
+    One definition on purpose: /identity reports the serving keg and
+    env_tunables gates override seeding/editing on the SAME answer. Keyed to
+    the keg layout, not to any '/omlx-dev/' substring: a developer venv that
+    happens to be named ~/venvs/omlx-dev must not silently unlock the dev-only
+    surface (or its tests would pass for the wrong reason — this repo's own
+    test venv is exactly that name).
+    """
+    probe = f"{prefix} {executable}".lower()
+    return "/cellar/omlx-dev/" in probe or "/opt/omlx-dev/" in probe
 
 
 def brew_prefix_candidates() -> list[str]:

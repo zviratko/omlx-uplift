@@ -1859,6 +1859,23 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .envcat-chip.warn { color: var(--accent); border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .envcat-chip.dim { color: var(--dim); border-color: var(--edge); }
+/* ENV-4: filter tabs + the legend that finally explains the left border.
+   The border is --accent on every theme, which on an amber-accented skin
+   (shodan) reads like a warning; the legend says plainly that it means
+   "currently set", not "attention". */
+.envcat-filters { display: flex; flex-wrap: wrap; gap: 4px; }
+.envcat-filt { font: 500 9px/1 var(--mono); letter-spacing: 0.06em;
+    padding: 3px 8px; text-transform: uppercase; }
+.envcat-filt.on { background: var(--accent); color: var(--ink-on-accent-soft);
+    border-color: var(--accent); }
+.envcat-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    color: var(--dim); font: 400 9px/1.3 var(--mono); letter-spacing: 0.04em;
+    border-top: 1px solid var(--edge); padding-top: 5px; }
+.envcat-legend-border { width: 12px; height: 12px; flex: 0 0 auto;
+    border: 1px solid var(--edge); border-left: 3px solid var(--accent);
+    background: var(--row2); }
+.envcat-legend-item { white-space: nowrap; }
+@media (max-width: 720px) { .envcat-legend-item { white-space: normal; } }
 
 /* PAT-4: PATCH CARRIER — settings/patches page */
 .pt-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 10px; }

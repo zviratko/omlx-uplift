@@ -43,7 +43,7 @@ def test_metrics_db_follows_env_base(clean_env, monkeypatch):
     assert store.default_db_path() == Path(
         "/tmp/instance-x/uplift/metrics.sqlite3")
     assert env_tunables.overrides_path() == Path(
-        "/tmp/instance-x/uplift/env_overrides.json")
+        "/tmp/instance-x/uplift/env.json")
 
 
 def test_metrics_db_default_home(clean_env):
@@ -55,7 +55,7 @@ def test_set_base_dir_seam_wins(clean_env, monkeypatch):
     env_tunables.set_base_dir("/tmp/seeded")
     try:
         assert env_tunables.overrides_path() == Path(
-            "/tmp/seeded/env_overrides.json")
+            "/tmp/seeded/env.json")
     finally:
         monkeypatch.setattr(env_tunables, "_BASE_DIR", None)
 

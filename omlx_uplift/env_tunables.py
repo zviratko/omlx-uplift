@@ -1,31 +1,55 @@
-"""ENV-1: uplift-owned OMLX_* experimental tunables — the single source of truth.
+"""ENV-1/ENV-4: uplift-owned experimental environment tunables.
 
-Vanilla omlx reads a handful of scheduler/engine knobs from os.environ with
-no settings.json entry. Uplift exposes a hard-coded allow-list of them in
-the settings UI and persists values uplift-side in
-``~/.omlx/uplift/env_overrides.json`` (next to metrics.sqlite3). At
-interpreter startup ``autopatch`` seeds them into ``os.environ`` before any
-omlx module reads them.
+Vanilla omlx reads a large set of engine/scheduler/kernel knobs from
+os.environ with no settings.json entry. Uplift documents every one of them
+in :data:`CATALOG` and lets the DEV instance edit any knob that vanilla does
+not own or alias — see :func:`editable_names`. Values persist uplift-side in
+``<base>/uplift/env.json`` (next to metrics.sqlite3; ``<base>`` is the
+per-instance data dir, so omlx-dev keeps its own file at
+``~/.omlx-dev/uplift/env.json``). At interpreter startup ``autopatch`` seeds
+them into ``os.environ`` before any omlx module reads them.
+
+DEV-ONLY (ENV-4): seeding and editing apply to the omlx-dev keg only. The
+vanilla ``omlx`` service runs the same code with the surface locked: the
+routes refuse writes and the startup hook seeds nothing. Rationale — these
+are unvalidated engine switches, and a wrong value must not be able to break
+the server that answers real traffic. :func:`is_dev_runtime` is the single
+gate, shared by the hook and the routes.
 
 Precedence (the core rule):
   * A genuine launch-time environment variable (launchd plist, shell, CLI)
     ALWAYS wins. autopatch records such names in ``SHADOWED`` and never
     overwrites them.
   * Uplift-stored values fill only the gaps.
+  * ``"enabled": false`` in the store disables seeding ENTIRELY (the
+    ``omlx-uplift env disable-all`` switch). It is persisted, not runtime
+    only, because a runtime-only switch would be silently undone by the
+    next boot's seed.
 
 This module must stay import-safe at interpreter startup: stdlib only,
 no omlx imports. The autopatch hook sets SHADOWED via :func:`mark_shadowed`
 and stores the directory hint via :func:`set_base_dir`.
 
 Effect classes (verified against vanilla read-points 2026-09-19, re-checked
-against HEAD 2026-09-20 — the read sites below are the current lines):
+against HEAD 2026-09-20, types re-derived by AST over the omlx tree for
+ENV-4):
   immediate -> read per call (os.environ at call time): live apply works.
   model     -> EngineConfig default_factory at engine construction: RESTART MODEL.
   server    -> module-import constants / startup config: RESTART SERVER.
-NOT exposed (documented skips):
-  OMLX_DECODE_BURST_BUDGET_SINGLE_S — vanilla burst_decode_mode writes the
-      same var on every mode save (settings.py burst_decode_env());
-      last-writer-wins collision.
+NOT editable (flagged ``managed`` in CATALOG, and the reason, verified against
+vanilla):
+  OMLX_DECODE_BURST_BUDGET_SINGLE_S — vanilla burst_decode_env() writes the
+      same var on EVERY burst-mode save (omlx/settings.py:185) AND at every
+      CLI start (omlx/cli.py:259): last-writer-wins collision.
+  OMLX_DECODE_BURST_MAX_STEPS — same writer as above; it holds this var too.
+      ENV-4 fix: it was in ALLOWED while its partner was excluded.
+  OMLX_CONTINUOUS_BATCHING — ENV-4 fix: this row contradicted itself, sitting
+      in ALLOWED *and* flagged managed. ``managed`` is correct, and worse: its
+      only read site is omlx/config.py:266 inside OMLXConfig.from_env(), and
+      nothing in the omlx package ever constructs OMLXConfig — the value is
+      inert. Flagged ``dead`` so the UI says so instead of offering a knob
+      that cannot do anything.
+  OMLX_MODEL — same dead read site (omlx/config.py:218), now flagged ``dead``.
   OMLX_MAX_NUM_SEQS — settings.py treats it as the env fallback for the
       already-exposed max_concurrent_requests; two fields would fight.
 """
@@ -37,72 +61,83 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-OVERRIDES_FILENAME = "env_overrides.json"
+#: ENV-4: the store file the user asked for. ``env_overrides.json`` was the
+#: ENV-1 name; it is still READ when env.json is absent (adopt, never fork)
+#: so a machine that already stored a value keeps it.
+OVERRIDES_FILENAME = "env.json"
+LEGACY_OVERRIDES_FILENAME = "env_overrides.json"
 
-# name -> spec. Keys here are the ONLY env vars the API accepts; unknown
-# keys are rejected with 400 (this is not a free-form env editor).
-ALLOWED: dict[str, dict] = {
-    # -- class 1: CALL-TIME (effect=immediate) ------------------------------
-    "OMLX_CHUNK_SNAP": {
-        "label": "Chunk quantization",
-        "type": "bool", "default": "1", "effect": "immediate", "group": "scheduler",
-        "desc": "Quantize prefill chunk boundaries to fixed steps; 0 disables (A/B measurement).",
-    },
-    "OMLX_MTP_PROMPT_PRIMING": {
-        "label": "MTP prompt priming",
-        "type": "bool", "default": "1", "effect": "immediate", "group": "mtp",
-        "desc": "Prime MTP drafters from the prompt context.",
-    },
-    "OMLX_MTP_PRIME_WINDOW": {
-        "label": "MTP priming window",
-        "type": "int", "default": "0", "effect": "immediate", "group": "mtp",
-        "desc": "History window (tokens) MTP priming may use; 0 = unlimited.",
-        "min": 0,
-    },
-    "OMLX_DISABLE_PRESSURE_RECLAIM": {
-        "label": "Disable pressure reclaim",
-        "type": "bool", "default": "", "effect": "immediate", "group": "memory",
-        "desc": "1 disables memory-pressure reclaim (restores stock behavior).",
-    },
-    # -- class 2: ENGINE-CONSTRUCTION (effect=model) -------------------------
-    "OMLX_DECODE_BURST_BUDGET_S": {
-        "label": "Burst decode budget (s)",
-        "type": "float", "default": "0.03", "effect": "model", "group": "engine",
-        "desc": "Wall-clock budget (s) per burst-decode pass.",
-        "min": 0.001, "max": 10.0,
-    },
-    "OMLX_DECODE_BURST_MAX_STEPS": {
-        "label": "Burst decode max steps",
-        "type": "int", "default": "64", "effect": "model", "group": "engine",
-        "desc": "Maximum decode steps per burst pass.",
-        "min": 1, "max": 4096,
-    },
-    # -- class 3: MODULE-IMPORT (effect=server) ------------------------------
-    "OMLX_DECODE_FAIR_SHARE": {
-        "label": "Decode fair share",
-        "type": "float", "default": "0.5", "effect": "server", "group": "scheduler",
-        "desc": "Fair share of decode slots per request before yielding.",
-        "min": 0.0, "max": 1.0,
-    },
-    "OMLX_DECODE_STALL_TARGET_MS": {
-        "label": "Decode stall target (ms)",
-        "type": "int", "default": "500", "effect": "server", "group": "scheduler",
-        "desc": "Decode stall target (ms) that triggers scheduler rebalance.",
-        "min": 1,
-    },
-    "OMLX_CONTENDED_PREFILL_CHUNK": {
-        "label": "Contended prefill chunk",
-        "type": "int", "default": "512", "effect": "server", "group": "scheduler",
-        "desc": "Prefill chunk size (tokens) while decode is contended.",
-        "min": 16,
-    },
-    # -- class 4: STARTUP-CONFIG (effect=server) -----------------------------
-    "OMLX_CONTINUOUS_BATCHING": {
-        "label": "Continuous batching",
-        "type": "bool", "default": "false", "effect": "server", "group": "engine",
-        "desc": "Enable experimental continuous batching at startup.",
-    },
+# name -> hand-verified extras for the tunables that predate ENV-4. `type`
+# and the stock default now come from TYPES/CATALOG (single source), so only
+# the readable label and the numeric range live here. Keys must ALWAYS be
+# editable names: test_no_manual_spec_conflicts_with_catalog asserts it, which
+# is the guard that would have caught OMLX_CONTINUOUS_BATCHING sitting in
+# ALLOWED and flagged managed at the same time.
+MANUAL: dict[str, dict] = {
+    "OMLX_CHUNK_SNAP": {"label": "Chunk quantization"},
+    "OMLX_MTP_PROMPT_PRIMING": {"label": "MTP prompt priming"},
+    "OMLX_MTP_PRIME_WINDOW": {"label": "MTP priming window", "min": 0},
+    "OMLX_DISABLE_PRESSURE_RECLAIM": {"label": "Disable pressure reclaim"},
+    "OMLX_DECODE_BURST_BUDGET_S": {"label": "Burst decode budget (s)",
+                                   "min": 0.001, "max": 10.0},
+    "OMLX_DECODE_FAIR_SHARE": {"label": "Decode fair share",
+                               "min": 0.0, "max": 1.0},
+    # vanilla casts this one with float() (omlx/scheduler.py:1535); ENV-1
+    # declared it int, so a 12.5 ms target was rejected by our own validator.
+    "OMLX_DECODE_STALL_TARGET_MS": {"label": "Decode stall target (ms)",
+                                    "type": "float", "min": 1},
+    "OMLX_CONTENDED_PREFILL_CHUNK": {"label": "Contended prefill chunk",
+                                     "min": 16},
 }
+
+# readable labels for the knobs that join an inline settings section (their
+# group is one of the envRows() sections), so the form never shows a raw var
+# name where classic shows prose. Same slot as MANUAL's label.
+MANUAL.update({
+    "OMLX_DISABLE_PREFILL_BACKPRESSURE": {"label": "Disable prefill backpressure"},
+    "OMLX_EMBEDDING_COMPILE": {"label": "Compile embedding models"},
+    "OMLX_INKLING_MTP_PRIME_WINDOW": {"label": "Inkling MTP priming window", "min": 0},
+    "OMLX_INKLING_MTP_FINAL_NORM": {"label": "Inkling MTP final norm route"},
+    "OMLX_MTP_ROW_EXACT_VERIFY": {"label": "MTP row-exact verify"},
+    "OMLX_GLM53_KDA_PREFILL_FUSED": {"label": "GLM-5.3 KDA fused prefill"},
+})
+
+
+# ---------------------------------------------------------------------------
+# DEV-only gate (ENV-4)
+# ---------------------------------------------------------------------------
+
+#: the same ladder routers/apiinfo.py /identity uses: '/omlx-dev/' appears in
+#: sys.prefix/sys.executable exactly when the omlx-dev formula's keg serves.
+_dev_cache: bool | None = None
+
+
+def is_dev_runtime() -> bool:
+    """True when THIS process is served by the omlx-dev keg.
+
+    Stdlib-only and cheap: computed once per process and cached, because the
+    answer cannot change under a running interpreter and the routes call it
+    on every request. The ladder lives in paths.is_dev_prefix so /identity
+    and this gate can never disagree; the lazy import keeps this module
+    import-safe at interpreter startup (the autopatch hook runs from a .pth).
+    """
+    global _dev_cache
+    if _dev_cache is None:
+        try:
+            import sys
+
+            from . import paths
+
+            _dev_cache = paths.is_dev_prefix(sys.prefix, sys.executable)
+        except Exception:
+            _dev_cache = False
+    return _dev_cache
+
+
+def set_dev_runtime(flag: bool | None) -> None:
+    """Test seam (and a future override hook): None restores auto-detect."""
+    global _dev_cache
+    _dev_cache = flag
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +160,25 @@ def shadowed() -> list[str]:
 # ---------------------------------------------------------------------------
 # On-disk store: plain JSON, atomic writes, stdlib only
 # ---------------------------------------------------------------------------
+#
+# ENV-4 document shape (``env.json``)::
+#
+#     {"enabled": true, "vars": {"OMLX_CHUNK_SNAP": {"value": "0", "set_at": "..."}}}
+#
+# ``enabled`` is the master seeding switch the CLI writes
+# (`omlx-uplift env disable-all`); it lives in the file, not in memory, so a
+# disable survives the very restart that would otherwise re-seed everything.
+# ``vars`` is namespaced so a variable can never collide with a document key.
+# The ENV-1 file (``env_overrides.json``, a bare {VAR: {...}} map) is still
+# READ when env.json does not exist, so an existing override is adopted rather
+# than forked.
 
 _BASE_DIR: Path | None = None
+
+#: document keys: the master seeding switch, and the namespace holding the
+#: overrides (namespaced so a variable can never collide with a document key)
+DOC_ENABLED_KEY = "enabled"
+DOC_VARS_KEY = "vars"
 
 
 def set_base_dir(path) -> None:
@@ -148,30 +200,65 @@ def overrides_path() -> Path:
     return _paths.server_base_dir() / "uplift" / OVERRIDES_FILENAME
 
 
-def load_overrides(path: Path | None = None) -> dict[str, dict]:
-    """Read {VAR: {\"value\": str, \"set_at\": iso}}. Missing/corrupt = {}."""
+def _legacy_path(path: Path) -> Path:
+    return path.parent / LEGACY_OVERRIDES_FILENAME
+
+
+def load_doc(path: Path | None = None) -> dict:
+    """Read the whole store document. Missing/corrupt -> the default document.
+    A legacy flat ENV-1 file is adopted into the {enabled, vars} shape."""
     p = path or overrides_path()
+    default = {DOC_ENABLED_KEY: True, DOC_VARS_KEY: {}}
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {}
+        if not p.exists():
+            try:  # ENV-1 adoption: the old file name, flat map
+                raw = json.loads(_legacy_path(p).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return default
+        else:
+            return default
     if not isinstance(raw, dict):
-        return {}
+        return default
+    if DOC_VARS_KEY in raw and isinstance(raw[DOC_VARS_KEY], dict):
+        return {DOC_ENABLED_KEY: bool(raw.get(DOC_ENABLED_KEY, True)),
+                DOC_VARS_KEY: _vars_only(raw[DOC_VARS_KEY])}
+    return {DOC_ENABLED_KEY: bool(raw.get(DOC_ENABLED_KEY, True)),
+            DOC_VARS_KEY: _vars_only(raw)}
+
+
+def _vars_only(mapping: dict) -> dict[str, dict]:
     out = {}
-    for k, v in raw.items():
+    for k, v in mapping.items():
         if k in ALLOWED and isinstance(v, dict) and isinstance(v.get("value"), str):
             out[k] = {"value": v["value"], "set_at": str(v.get("set_at", ""))}
     return out
 
 
-def save_overrides(data: dict[str, dict], path: Path | None = None) -> Path:
-    """Persist atomically (tmp + rename in the same dir). Parent dirs created."""
+def load_overrides(path: Path | None = None) -> dict[str, dict]:
+    """The {VAR: {"value", "set_at"}} map, dropping a name that is no longer
+    editable (renamed/revanilla'd knobs cannot be seeded back to life)."""
+    return load_doc(path)[DOC_VARS_KEY]
+
+
+def seeding_enabled(path: Path | None = None) -> bool:
+    return load_doc(path)[DOC_ENABLED_KEY]
+
+
+def save_overrides(data: dict[str, dict], path: Path | None = None,
+                   enabled: bool | None = None) -> Path:
+    """Persist atomically (tmp + rename in the same dir). Parent dirs created.
+    `enabled=None` keeps the flag currently on disk — a value edit must never
+    silently re-arm seeding after `env disable-all`."""
     p = path or overrides_path()
+    doc_enabled = seeding_enabled(p) if enabled is None else bool(enabled)
+    doc = {DOC_ENABLED_KEY: doc_enabled, DOC_VARS_KEY: _vars_only(data)}
     p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".env_overrides.", suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".env.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2, sort_keys=True)
+            json.dump(doc, fh, indent=2, sort_keys=True)
         os.replace(tmp, p)
     except BaseException:
         try:
@@ -182,9 +269,28 @@ def save_overrides(data: dict[str, dict], path: Path | None = None) -> Path:
     return p
 
 
+def set_seeding_enabled(flag: bool, path: Path | None = None) -> Path:
+    """The CLI's disable-all / enable-all switch."""
+    p = path or overrides_path()
+    return save_overrides(load_overrides(p), p, enabled=bool(flag))
+
+
 # ---------------------------------------------------------------------------
 # Validation + coercion
 # ---------------------------------------------------------------------------
+
+#: the words the UI's On/Off control may produce, per truthy spelling
+_TRUE_WORDS = {"1", "true", "yes", "on"}
+_FALSE_WORDS = {"0", "false", "no", "off"}
+
+
+def truthy_word(name: str) -> str:
+    """"true" when vanilla compares the flag against the WORD true, else "1".
+    Writing the wrong on-value is the silent kind of broken: OMLX_* =1 next to
+    a `== "true"` read turns the feature off with no error anywhere."""
+    spec = ALLOWED.get(name) or {}
+    return spec.get("truthy") or TRUTHY_WORD.get(name, "1")
+
 
 def coerce(name: str, value) -> str:
     """Validate one value against ALLOWED[name] and return its canonical
@@ -200,10 +306,11 @@ def coerce(name: str, value) -> str:
     else:
         s = str(value).strip()
     if t == "bool":
-        if s.lower() in ("1", "true", "yes", "on"):
-            return "1"
-        if s.lower() in ("0", "false", "no", "off"):
-            return "0"
+        on, off = truthy_word(name), ("false" if truthy_word(name) == "true" else "0")
+        if s.lower() in _TRUE_WORDS:
+            return on
+        if s.lower() in _FALSE_WORDS:
+            return off
         if s == "":
             return ""  # store-side: means "no override" but keep shape stable
         raise ValueError(f"{name}: expected a boolean")
@@ -229,18 +336,27 @@ def coerce(name: str, value) -> str:
 def seed_environ(path: Path | None = None) -> dict[str, str]:
     """Apply the precedence rule once at interpreter startup (autopatch).
 
-    For every stored override: if the name is already in os.environ it is
-    genuine launch env -> record as SHADOWED and leave untouched; otherwise
-    write it into os.environ. Returns the vars actually seeded.
+    ENV-4: dev-only. On the vanilla `omlx` keg nothing is seeded and nothing
+    is recorded as shadowed — the stored file simply does not participate, so
+    the production server's environment stays exactly as it was launched.
+
+    For every stored override on omlx-dev: if the name is already in
+    os.environ it is genuine launch env -> record as SHADOWED and leave
+    untouched; otherwise write it into os.environ. Returns the vars actually
+    seeded.
 
     Pure stdlib; missing/corrupt file is silently skipped. Never raises.
     """
     seeded: dict[str, str] = {}
+    if not is_dev_runtime():
+        return seeded
     try:
-        data = load_overrides(path)
+        doc = load_doc(path)
     except Exception:  # belt and braces: startup hook must never crash omlx
         return seeded
-    for name, entry in data.items():
+    if not doc[DOC_ENABLED_KEY]:
+        return seeded  # `omlx-uplift env disable-all` is in force
+    for name, entry in doc[DOC_VARS_KEY].items():
         if name in os.environ:
             mark_shadowed(name)
             continue
@@ -258,8 +374,11 @@ def mask(value: str) -> str:
 
 def snapshot() -> dict:
     """GET payload: current values (stored, or live env when shadowed),
-    shadow list, and the allow-list spec for the UI."""
-    stored = load_overrides()
+    shadow list, and the allow-list spec for the UI. ENV-4 adds `dev` and
+    `seeding_enabled` so the UI never has to guess whether it may edit."""
+    doc = load_doc()
+    stored = doc[DOC_VARS_KEY]
+    dev = is_dev_runtime()
     values = {}
     for name in ALLOWED:
         if name in stored:
@@ -269,11 +388,29 @@ def snapshot() -> dict:
         for n in sorted(SHADOWED)
     ]
     allowed = [
-        {"name": n, **{k: spec[k] for k in ("label", "type", "default", "effect", "group", "desc") if k in spec},
+        {"name": n, **{k: spec[k] for k in ("label", "type", "default", "effect",
+                                            "group", "desc", "truthy") if k in spec},
          **{k: spec[k] for k in ("min", "max") if k in spec}}
         for n, spec in ALLOWED.items()
-    ]
-    return {"values": values, "shadowed": shadow, "allowed": allowed}
+    ] if dev else []
+    return {"dev": dev, "seeding_enabled": doc[DOC_ENABLED_KEY],
+            "values": values if dev else {}, "shadowed": shadow, "allowed": allowed}
+
+
+def dev_store_path() -> Path:
+    """ENV-4 CLI helper: the env.json belonging to the DEV instance, resolved
+    from dev.json's base_path — NOT from this process's runtime.
+
+    `omlx-uplift env` runs from the uplift CLI keg, so is_dev_runtime() is
+    false there and overrides_path() would answer for the wrong instance.
+    The CLI is the one place allowed to reach across and manage the dev file.
+    Lazy import: this module must stay stdlib-only at interpreter startup.
+    """
+    from . import devsrc
+
+    cfg = devsrc.load_config() or {}
+    base = cfg.get("base_path") or "~/.omlx-dev"
+    return Path(os.path.expanduser(base)) / "uplift" / OVERRIDES_FILENAME
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +430,9 @@ def snapshot() -> dict:
 #   managed documented, NOT settable here: vanilla writes the same var at
 #          runtime (last-writer-wins collision) or it aliases an
 #          already-exposed setting.
+#   dead   NOT settable: its only read site is omlx/config.py, and nothing
+#          constructs OMLXConfig — the value can never have an effect. Kept
+#          documented because the name still appears in upstream docs.
 # Growing: one CATALOG entry per verified read site; keep the omlx source
 # line in sync when upstream renames a knob.
 CATALOG: dict[str, dict] = {
@@ -317,9 +457,11 @@ CATALOG: dict[str, dict] = {
         "desc": "Wall-clock budget (s) per burst-decode pass for a single active request.",
         "managed": True},
     "OMLX_DECODE_BURST_MAX_STEPS": {"group": "engine", "effect": "model", "default": "64",
-        "desc": "Maximum decode steps per burst pass (safety cap, bounds the host-side output list)."},
+        "desc": "Maximum decode steps per burst pass (safety cap, bounds the host-side output list).",
+        "managed": True},
     "OMLX_CONTINUOUS_BATCHING": {"group": "engine", "effect": "server", "default": "false",
-        "desc": "Enable experimental continuous batching at startup.", "managed": True},
+        "desc": "Documented only: its sole read site is OMLXConfig.from_env(), which no omlx "
+               "code path ever constructs.", "managed": True, "dead": True},
     "OMLX_MAX_NUM_SEQS": {"group": "engine", "effect": "server", "default": "",
         "desc": "Engine max batch size override; env fallback of the exposed max_concurrent_requests.",
         "managed": True},
@@ -372,9 +514,13 @@ CATALOG: dict[str, dict] = {
         "desc": "0 keeps mx.fast.scaled_dot_product_attention for QSA decode instead of the fused kernel."},
     "OMLX_QWEN4_QSA_DECODE_SELECT": {"group": "attention", "effect": "server", "default": "1",
         "desc": "0 keeps the MLX maximum/argsort ops for QSA decode selection instead of the fused partition kernel."},
-    "OMLX_MINIMAX_MSA_NATIVE_TOPK": {"group": "attention", "effect": "server", "default": "auto",
+    # ENV-4 fix: these two were documented as OMLX_MINIMAX_*, but the vendored
+    # mlx_vlm msa.py reads MLX_MINIMAX_* — the catalog names matched no read
+    # site at all, so they could never show as SET and a value set here would
+    # have done nothing.
+    "MLX_MINIMAX_MSA_NATIVE_TOPK": {"group": "attention", "effect": "server", "default": "auto",
         "desc": "Minimax M3 sparse-attention top-k route: auto | native kernel | fallback."},
-    "OMLX_MINIMAX_MSA_NATIVE_TOPK_SELECT": {"group": "attention", "effect": "server", "default": "auto",
+    "MLX_MINIMAX_MSA_NATIVE_TOPK_SELECT": {"group": "attention", "effect": "server", "default": "auto",
         "desc": "Minimax M3 sparse-attention top-k selection route: auto | native kernel | fallback."},
     "OMLX_GDN_BLOCK_T": {"group": "attention", "effect": "immediate", "default": "",
         "desc": "Token block size for the Gated-DeltaNet prefill kernel (one of the supported values; invalid value raises)."},
@@ -544,7 +690,7 @@ CATALOG: dict[str, dict] = {
         "desc": "Seconds to let peer requests abort before the watchdog escalates."},
     "OMLX_CLUSTER_SIGNAL_CLEAR_TIMEOUT": {"group": "cluster", "effect": "immediate", "default": "10",
         "desc": "Seconds to wait for a wedged rank to clear signals before SIGKILL."},
-    "OMLX_CLUSTER_SSH_HOST_PUBLIC_KEY": {"group": "cluster", "effect": "immediate", "default": "",
+    "OMLX_CLUSTER_SSH_HOST_PUBLIC_KEY": {"group": "cluster", "effect": "immediate", "default": "", "secret": True,
         "desc": "Override the SSH host public key used when pairing cluster peers."},
     "OMLX_JACCL_PYTHON_SIDE_CHANNEL": {"group": "cluster", "effect": "immediate", "default": "1",
         "desc": "0 disables the Python control side-channel next to JaCL."},
@@ -580,7 +726,8 @@ CATALOG: dict[str, dict] = {
         "desc": "Keep at least this many remaining tokens per step in the GLM DSA adaptive prefill."},
     # -- server / integrations --------------------------------------------------
     "OMLX_MODEL": {"group": "engine", "effect": "server", "default": "",
-        "desc": "Default model name for the CLI launch (config-level override).", "managed": True},
+        "desc": "Documented only: read solely by OMLXConfig.from_env(), which no omlx code path "
+               "constructs; `omlx serve --model` is the live switch.", "managed": True, "dead": True},
     "OMLX_MAX_IMAGE_BYTES": {"group": "server", "effect": "server", "default": "",
         "desc": "Cap (bytes) per decoded image; CLI/config override.", "managed": True},
     "OMLX_SUPERVISED": {"group": "server", "effect": "immediate", "default": "",
@@ -606,24 +753,278 @@ CATALOG: dict[str, dict] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# ENV-4: editable set = everything documented, minus what vanilla owns
+# ---------------------------------------------------------------------------
 def _is_secretish(name: str) -> bool:
+    """Credential-shaped name (the classic masking heuristic)."""
     return name.endswith(("_KEY", "_TOKEN", "_SECRET")) or "PASSWORD" in name
 
 
+def is_secret(name: str) -> bool:
+    """Never editable, and masked in every UI/API surface: a credential-
+    shaped name, or one CATALOG marks `secret` explicitly (the cluster SSH
+    host key does not end in _KEY but is a key)."""
+    return bool(CATALOG.get(name, {}).get("secret")) or _is_secretish(name)
+
+
+def editable_names() -> list[str]:
+    """The ENV-4 editable set: documented, and NOT owned/aliased/dead/secret.
+
+    `managed` is vanilla's own last-writer-wins or settings-alias exclusion;
+    `dead` is a knob whose read site no live code path reaches; secrets stay
+    out of a form that round-trips values through JSON.
+    """
+    return [n for n, s in CATALOG.items()
+            if not s.get("managed") and not s.get("dead") and not is_secret(n)]
+
+
+def not_editable_reason(name: str) -> str | None:
+    """Why a documented name cannot be set here, or None when it can.
+
+    ONE definition on purpose: the PUT route raises it as HTTP detail and
+    `omlx-uplift env set` prints it, and the two must never disagree about
+    what a name means.
+    """
+    if name in ALLOWED:
+        return None
+    spec = CATALOG.get(name)
+    if spec is None:
+        return None  # undocumented: callers report 'unknown tunable'
+    if spec.get("dead"):
+        return "no live oMLX code path reads this variable"
+    if spec.get("managed"):
+        return "vanilla oMLX owns this variable at runtime"
+    if is_secret(name):
+        return "a credential; Uplift never edits it"
+    return "not editable from Uplift"
+
+
+def _spec(name: str) -> dict:
+    """One tunable spec, assembled from CATALOG + TYPES (+ MANUAL extras).
+    The ten pre-ENV-4 tunables keep their hand-verified label/range here."""
+    cat = CATALOG[name]
+    manual = MANUAL.get(name, {})
+    t = manual.get("type") or TYPES.get(name, "str")
+    spec = {
+        "label": manual.get("label") or name.replace("OMLX_", "").replace("MLX_", "")
+                                       .replace("_", " ").title(),
+        "type": t,
+        "default": cat.get("default", ""),
+        "effect": cat.get("effect", "server"),
+        "group": cat.get("group", "engine"),
+        "desc": cat.get("desc", ""),
+    }
+    for k in ("min", "max"):
+        if k in manual:
+            spec[k] = manual[k]
+    if name in TRUTHY_WORD:
+        spec["truthy"] = TRUTHY_WORD[name]
+    return spec
+
+
+
+#: How vanilla interprets each documented string AT ITS READ SITE:
+#: bool (flag comparison / membership test), int / float (numeric cast),
+#: str (used raw). Derived by AST over the omlx tree, then cross-checked
+#: against every stock default in CATALOG: all int/float defaults parse as
+#: their type and all flag defaults are 0/1/true/false words — zero
+#: mismatches over 147 vars. Manual fixes from reading sites the regex
+#: pass missed: OMLX_DISTRIBUTED_REQUEST_READ_TIMEOUT (float(raw) two lines
+#: after the read), OMLX_DECODE_STALL_TARGET_MS (float; ENV-1 said int),
+#: OMLX_FAST_ATTENTION / OMLX_NAX_JIT_ATTENTION / OMLX_EMBEDDING_COMPILE /
+#: OMLX_MTP_PROMPT_PRIMING / OMLX_GLM_DSA_INDEXER_NAX (multi-line
+#: `not in {…}` falsey sets), OMLX_GLM53_KDA_RECURRENCE (compares a mode
+#: WORD: percore|blocked). Re-derive when upstream recasts a knob;
+#: tests/test_env_catalog.py pins TYPES against CATALOG.
+TYPES: dict[str, str] = {
+    # -- bool (77)
+    "OMLX_CHUNK_SNAP": "bool",
+    "OMLX_DISABLE_PREFILL_BACKPRESSURE": "bool",
+    "OMLX_DISABLE_PRESSURE_RECLAIM": "bool",
+    "OMLX_CONTINUOUS_BATCHING": "bool",
+    "OMLX_MAX_NUM_SEQS": "bool",
+    "OMLX_FAST_ATTENTION": "bool",
+    "OMLX_NAX_JIT_ATTENTION": "bool",
+    "OMLX_SDPA256_TILED": "bool",
+    "OMLX_FA256_STEEL": "bool",
+    "OMLX_FA256_DISPATCH_BUDGET": "bool",
+    "OMLX_FA256_DEBUG": "bool",
+    "OMLX_MIMO_DECODE_FAST": "bool",
+    "OMLX_DSV4_WSDPA": "bool",
+    "OMLX_DSV4_WSDPA_TOPK": "bool",
+    "OMLX_GLM_SPARSE_MLA_NAX": "bool",
+    "OMLX_INKLING_SLIDING_SLICE": "bool",
+    "OMLX_QWEN4_STEP_TEXT_POSITIONS": "bool",
+    "OMLX_QWEN4_QSA_NAX": "bool",
+    "OMLX_QWEN4_QSA_DECODE_SDPA": "bool",
+    "OMLX_QWEN4_QSA_DECODE_SELECT": "bool",
+    "OMLX_GDN_BLOCK_T": "bool",
+    "OMLX_GLM_DSA_INDEXER_NAX": "bool",
+    "OMLX_GDN_KERNEL": "bool",
+    "OMLX_GDN_STUB": "bool",
+    "OMLX_GDN_FUSED_G_BETA": "bool",
+    "OMLX_QWEN4_GDN_PREFILL_FUSED": "bool",
+    "OMLX_QWEN4_GDN_DECODE_PLAN": "bool",
+    "OMLX_QWEN4_GDN_DECODE_STEP_FUSED": "bool",
+    "OMLX_QWEN4_GDN_DECODE_QMV": "bool",
+    "OMLX_QWEN4_GDN_VERIFY_FUSED": "bool",
+    "OMLX_QWEN4_GDN_VERIFY_TILES": "bool",
+    "OMLX_QWEN4_GDN_VERIFY_DEFERRED_STATES": "bool",
+    "OMLX_GLM53_KDA_PREFILL_FUSED": "bool",
+    "OMLX_NAX": "bool",
+    "OMLX_QWEN35_QMM_NAX": "bool",
+    "OMLX_M5_GATHER_QMM_FIX": "bool",
+    "OMLX_M5_GATHER_QMM_NATIVE": "bool",
+    "OMLX_QWEN35_Q4_MLP": "bool",
+    "OMLX_QWEN35_Q4_MLP_ALLOW_GS128": "bool",
+    "OMLX_QWEN35_Q4_LM_LINEAR": "bool",
+    "OMLX_QWEN35_Q4_LINEAR": "bool",
+    "OMLX_OQ_A8": "bool",
+    "OMLX_OQ_STREAM_CALIBRATION": "bool",
+    "OMLX_MOE_EXPERT_OFFLOAD": "bool",
+    "OMLX_MOE_OFFLOAD_OVERLAP": "bool",
+    "OMLX_MOE_GATE_UP_FUSION": "bool",
+    "OMLX_QWEN35_MOE_GATE_UP": "bool",
+    "OMLX_QWEN35_MOE_DECODE_PLAN": "bool",
+    "OMLX_QWEN35_MOE_ROUTER_GEMV": "bool",
+    "OMLX_QWEN35_MOE_ROUTER_SOFTMAX_FOLD": "bool",
+    "OMLX_QWEN35_MOE_COMBINE_FUSED": "bool",
+    "OMLX_QWEN35_MOE_ROUTED_DECODE": "bool",
+    "OMLX_QWEN35_MOE_ROUTED_DECODE_VIEWS": "bool",
+    "OMLX_QWEN35_MOE_SHARED_FOLD": "bool",
+    "OMLX_QWEN35_MOE_TOPK_FOLD": "bool",
+    "OMLX_QWEN35_MOE_VERIFY_WINDOW": "bool",
+    "OMLX_QWEN35_MOE_WEIGHTED_SUM": "bool",
+    "OMLX_LAGUNA_COMPILED_FUSIONS": "bool",
+    "OMLX_LAGUNA_FUSED_ROUTED_GATE_UP": "bool",
+    "OMLX_LAGUNA_FUSED_SHARED_GATE_UP": "bool",
+    "OMLX_MTP_PROMPT_PRIMING": "bool",
+    "OMLX_MTP_ROW_EXACT_VERIFY": "bool",
+    "OMLX_QWEN35_ANE_PREFILL": "bool",
+    "OMLX_QWEN35_ANE_DOWN_COMBINED_BANK": "bool",
+    "MLX_JACCL_RING": "bool",
+    "MLX_IBV_DEVICES": "bool",
+    "OMLX_CLUSTER_LAUNCHER_LEASE": "bool",
+    "OMLX_JACCL_SIDE_CHANNEL_TRACE": "bool",
+    "OMLX_DISCOVERY": "bool",
+    "OMLX_BONJOUR": "bool",
+    "MLX_MINIMAX_M3_ADAPTIVE_PREFILL_STEP": "bool",
+    "MLX_LM_GLM_DSA_ADAPTIVE_PREFILL_STEP": "bool",
+    "OMLX_MAX_IMAGE_BYTES": "bool",
+    "OMLX_SECRET_KEY": "bool",
+    "OMLX_MCP_CONFIG": "bool",
+    "OMLX_BASE_PATH": "bool",
+    "OMLX_EMBEDDING_COMPILE": "bool",
+    # -- int (31)
+    "OMLX_CONTENDED_PREFILL_CHUNK": "int",
+    "OMLX_DECODE_BURST_MAX_STEPS": "int",
+    "OMLX_FA256_MIN_KV_LEN": "int",
+    "OMLX_FA256_Q_BLOCK": "int",
+    "OMLX_FA256_K_BLOCK": "int",
+    "OMLX_QWEN4_STEP_TEXT_POSITIONS_MIN_CONTEXT": "int",
+    "OMLX_GDN_MIN_T": "int",
+    "OMLX_QWEN35_Q4_MLP_MIN_TOKENS": "int",
+    "OMLX_QWEN35_Q4_MLP_VARIANT": "int",
+    "OMLX_QWEN35_Q4_LINEAR_MIN_TOKENS": "int",
+    "OMLX_QWEN35_Q4_LINEAR_VARIANT": "int",
+    "OMLX_QWEN35_Q8_MLP_MIN_TOKENS": "int",
+    "OMLX_QWEN35_Q8_LINEAR_MIN_TOKENS": "int",
+    "OMLX_OQ_A8_VARIANT": "int",
+    "OMLX_OQ_A8_ACT_MODE": "int",
+    "OMLX_DEEPSEEK_SORT_MIN_ROUTES": "int",
+    "OMLX_DEEPSEEK_MOE_NAX_MIN_ROUTES": "int",
+    "OMLX_DEEPSEEK_AFFINE_BLOCK_MIN_ROUTES": "int",
+    "OMLX_DEEPSEEK_MXFP4_LARGE_BLOCK_MIN_ROUTES": "int",
+    "OMLX_QWEN35_MOE_WEIGHTED_SUM_MIN_TOKENS": "int",
+    "OMLX_MTP_PRIME_WINDOW": "int",
+    "OMLX_INKLING_MTP_PRIME_WINDOW": "int",
+    "OMLX_QWEN35_ANE_DOWN_LAYER_STRIDE": "int",
+    "MLX_RANK": "int",
+    "OMLX_CLUSTER_SIGNAL_CLEAR_TIMEOUT": "int",
+    "MLX_MINIMAX_M3_ADAPTIVE_PREFILL_STEP_SIZE": "int",
+    "MLX_MINIMAX_M3_ADAPTIVE_PREFILL_AFTER": "int",
+    "MLX_MINIMAX_M3_ADAPTIVE_PREFILL_MIN_REMAINING": "int",
+    "MLX_LM_GLM_DSA_ADAPTIVE_PREFILL_STEP_SIZE": "int",
+    "MLX_LM_GLM_DSA_ADAPTIVE_PREFILL_AFTER": "int",
+    "MLX_LM_GLM_DSA_ADAPTIVE_PREFILL_MIN_REMAINING": "int",
+    # -- float (6)
+    # vanilla casts float(); listed here so TYPES covers CATALOG exactly
+    "OMLX_DECODE_STALL_TARGET_MS": "float",
+    "OMLX_DECODE_FAIR_SHARE": "float",
+    "OMLX_DECODE_BURST_BUDGET_S": "float",
+    "OMLX_DECODE_BURST_BUDGET_SINGLE_S": "float",
+    "OMLX_CLUSTER_PEER_ABORT_GRACE": "float",
+    "OMLX_DISTRIBUTED_REQUEST_READ_TIMEOUT": "float",
+    # -- str (33)
+    "OMLX_SDPA_FLASH_CHUNK": "str",
+    "OMLX_SDPA_FLASH_HS": "str",
+    "OMLX_MIMO_DECODE_FLASH_MIN_KEYS": "str",
+    "OMLX_GLM_HC_PREFILL": "str",
+    "OMLX_QWEN4_QSA_NAX_PV": "str",
+    "MLX_MINIMAX_MSA_NATIVE_TOPK": "str",
+    "MLX_MINIMAX_MSA_NATIVE_TOPK_SELECT": "str",
+    "OMLX_GDN_IMPL": "str",
+    "OMLX_GLM53_KDA_RECURRENCE": "str",
+    "OMLX_QWEN4_PLE_MODE": "str",
+    "OMLX_QWEN4_EAGER_DISPATCH_EVERY": "str",
+    "OMLX_QWEN4_GATHERED_MIN_QUERY": "str",
+    "OMLX_QWEN35_QMM_NAX_VARIANT": "str",
+    "MLX_ENABLE_TF32": "str",
+    "OMLX_DEEPSEEK_MOE_NAX": "str",
+    "OMLX_INKLING_MTP_FINAL_NORM": "str",
+    "OMLX_QWEN35_ANE_BANK_MAX_BYTES": "str",
+    "MLX_JACCL_COORDINATOR": "str",
+    "OMLX_CLUSTER_CONTROL_TRANSPORT": "str",
+    "OMLX_CLUSTER_CONTROL_PROXY_PYTHON": "str",
+    "OMLX_CLUSTER_STATE_DIR": "str",
+    "OMLX_CLUSTER_SSH_HOST_PUBLIC_KEY": "str",
+    "OMLX_JACCL_PYTHON_SIDE_CHANNEL": "str",
+    "OMLX_JACCL_SIDE_CHANNEL_TRANSPORT": "str",
+    "OMLX_JACCL_SIDE_CHANNEL_PYTHON": "str",
+    "OMLX_TAILSCALE_CLI": "str",
+    "OMLX_MODEL": "str",
+    "OMLX_SUPERVISED": "str",
+    "OMLX_STARTUP_NOTICE_PATH": "str",
+    "OMLX_DSH_HOME": "str",
+    "OMLX_DSH_API": "str",
+    "PI_CODING_AGENT_DIR": "str",
+    "MODELSCOPE_DOMAIN": "str",
+}
+
+#: flag vars whose ON value vanilla spells the word "true" (it compares
+#: == "true" or tests a membership set containing it). The UI must offer
+#: true/false for these: writing 1 would read as OFF.
+TRUTHY_WORD: dict[str, str] = {
+    "OMLX_CONTINUOUS_BATCHING": "true",
+    "OMLX_OQ_STREAM_CALIBRATION": "true",
+    "OMLX_QWEN35_ANE_DOWN_COMBINED_BANK": "true",
+}
+
+
+#: The ONLY env vars the API accepts. Unknown keys are rejected with 400:
+#: this stays an allow-list, never a free-form env editor.
+ALLOWED: dict[str, dict] = {n: _spec(n) for n in editable_names()}
+
+
+
 def catalog() -> list[dict]:
-    """ENV-3 GET payload: one row per documented var. present/live reflect
-    the RUNNING process env (a launch-time or applied-live value); stored is
-    the uplift override awaiting a restart; settable drives the APPLY chip."""
+    """ENV-3/ENV-4 GET payload: one row per documented var. present/live
+    reflect the RUNNING process env (a launch-time or applied-live value);
+    stored is the uplift override awaiting a restart; settable drives the
+    inline control — and it is only ever true on omlx-dev, because that is
+    the sole runtime the store seeds (ENV-4)."""
     stored = load_overrides()
+    dev = is_dev_runtime()
     rows = []
     for name, spec in CATALOG.items():
         present = name in os.environ
         live = os.environ.get(name) if present else None
-        if live is not None and (spec.get("secret") or _is_secretish(name)):
+        if live is not None and is_secret(name):
             live = mask(live)
         row = {"name": name, "present": present, "live": live,
-               "stored": stored.get(name, {}).get("value"),
-               "settable": name in ALLOWED,
+               "stored": stored.get(name, {}).get("value") if dev else None,
+               "settable": bool(dev and name in ALLOWED),
                "effect": spec.get("effect", "server"),
                "group": spec.get("group", "engine"),
                "default": spec.get("default", "")}
@@ -631,5 +1032,9 @@ def catalog() -> list[dict]:
             row["desc"] = spec["desc"]
         if spec.get("managed"):
             row["managed"] = True
+        if spec.get("dead"):
+            row["dead"] = True
+        if is_secret(name):
+            row["secret"] = True
         rows.append(row)
     return rows

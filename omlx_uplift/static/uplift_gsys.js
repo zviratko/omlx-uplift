@@ -668,9 +668,13 @@ function envRow(a) {
     const cur = ENV_VALUES[a.name] != null ? ENV_VALUES[a.name] : '';
     let ctl;
     if (a.type === 'bool') {
+        // same truthy spelling the modal uses: vanilla compares some flags
+        // against the word "true", so 1/0 would be read as OFF
+        const on = a.truthy === 'true' ? 'true' : '1';
+        const off = a.truthy === 'true' ? 'false' : '0';
         ctl = document.createElement('select');
-        for (const [v, t] of [['', '\u2014'], ['1', C.tf('uplift.env.on', 'On')],
-                               ['0', C.tf('uplift.env.off', 'Off')]]) {
+        for (const [v, t] of [['', '\u2014'], [on, C.tf('uplift.env.on', 'On')],
+                               [off, C.tf('uplift.env.off', 'Off')]]) {
             const o = document.createElement('option');
             o.value = v; o.textContent = t; ctl.append(o);
         }
@@ -741,6 +745,14 @@ async function envSave(fields) {
 // over anything uplift stores), MANAGED (vanilla owns the var — documented
 // only). Settable rows carry a control + APPLY that PUTs /env-overrides
 // directly, outside the gsDirty queue.
+//
+// ENV-4: the editable surface opened up from ten variables to every
+// documented one vanilla does not own or alias — but ONLY on omlx-dev. On
+// the vanilla `omlx` service the store is never seeded, so the server answers
+// settable=false for every row and the modal is a pure reference with an
+// explanatory banner; PUT /env-overrides 403s there. Chip tooltips and the
+// legend line say what MANAGED and the left border mean, which ENV-3 shipped
+// without ever stating.
 // ---------------------------------------------------------------------------
 
 const ENV_CAT_GROUPS = ['scheduler', 'memory', 'engine', 'attention', 'prefill',
@@ -764,12 +776,45 @@ function envCatChip(text, cls) {
 
 function envCatRow(r) {
     const row = document.createElement('div');
+    // 'on' = the variable currently carries a value in the server process.
+    // ENV-4: that is what the coloured left border means, and it used to be
+    // the one signal in this modal with no explanation anywhere.
     row.className = 'envcat-row' + (r.present ? ' on' : '') + (r.managed ? ' managed' : '');
+    if (r.present)
+        row.title = C.tf('uplift.envcat.border_hint',
+            'Left border: this variable currently has a value in the running oMLX process');
     const head = document.createElement('div'); head.className = 'envcat-head';
     const nm = document.createElement('code'); nm.className = 'envcat-name'; nm.textContent = r.name;
     head.append(nm);
-    if (r.settable) head.append(envCatChip(C.tf('uplift.env.badge', 'EXPERIMENTAL'), 'set'));
-    if (r.managed) head.append(envCatChip(C.tf('uplift.envcat.managed', 'MANAGED'), 'dim'));
+    if (r.settable) {
+        const c = envCatChip(C.tf('uplift.env.badge', 'EXPERIMENTAL'), 'set');
+        c.title = C.tf('uplift.envcat.settable_hint',
+            'Editable here. Uplift stores the value and seeds it when the dev server starts; '
+            + 'an unknown or wrong value can change engine behaviour, so it is labelled experimental.');
+        head.append(c);
+    }
+    if (r.managed) {
+        const c = envCatChip(C.tf('uplift.envcat.managed', 'MANAGED'), 'dim');
+        c.title = C.tf('uplift.envcat.managed_hint',
+            'Not editable: vanilla oMLX owns this variable. It either writes the value itself at '
+            + 'runtime (a setting the dashboard already exposes drives it), or the variable is the '
+            + 'environment fallback of an exposed setting — editing it here would conflict with that owner. '
+            + 'Shown for reference only.');
+        head.append(c);
+    }
+    if (r.dead) {
+        const c = envCatChip(C.tf('uplift.envcat.dead', 'NO EFFECT'), 'dim');
+        c.title = C.tf('uplift.envcat.dead_hint',
+            'Not editable: no live oMLX code path reads this variable any more, so any value set '
+            + 'here would do nothing. Documented so the name is not lost.');
+        head.append(c);
+    }
+    if (r.secret) {
+        const c = envCatChip(C.tf('uplift.envcat.secret', 'SECRET'), 'dim');
+        c.title = C.tf('uplift.envcat.secret_hint',
+            'A credential or key. Uplift never edits it and masks its value wherever it appears.');
+        head.append(c);
+    }
     if (r.name in ENV_SHADOW) {
         const c = envCatChip(C.tf('uplift.envcat.launch_env', 'LAUNCH ENV') +
             ' (' + ENV_SHADOW[r.name] + ')', 'warn');
@@ -777,15 +822,23 @@ function envCatRow(r) {
             'environment variable already set — it takes precedence until removed from the launch environment');
         head.append(c);
     } else if (r.present) {
-        head.append(envCatChip(C.tf('uplift.envcat.set', 'SET') +
-            (r.live ? ' = ' + r.live : ''), 'ok'));
+        const c = envCatChip(C.tf('uplift.envcat.set', 'SET') +
+            (r.live ? ' = ' + r.live : ''), 'ok');
+        c.title = C.tf('uplift.envcat.set_hint',
+            'Currently set in the running oMLX process environment');
+        head.append(c);
     } else if (r.stored != null && r.stored !== '') {
-        head.append(envCatChip(C.tf('uplift.envcat.stored', 'STORED'), 'stored'));
+        const c = envCatChip(C.tf('uplift.envcat.stored', 'STORED'), 'stored');
+        c.title = C.tf('uplift.envcat.stored_hint',
+            'Stored by Uplift, not yet in the process environment — apply it with the restart the '
+            + 'badge above names');
+        head.append(c);
     }
     const e = envCatChip(envCatEffectLabel(r.effect),
         r.effect === 'immediate' ? 'ok' : (r.effect === 'model' ? 'stored' : 'dim'));
-    e.title = C.tf('uplift.env.badge_hint',
-        'Uplift-owned environment overrides; not part of oMLX settings');
+    e.title = C.tf('uplift.envcat.effect_hint',
+        'When a new value actually takes effect: immediately (oMLX reads it per request), on the '
+        + 'next model load, or only after the server restarts');
     head.append(e);
     row.append(head);
 
@@ -800,13 +853,22 @@ function envCatRow(r) {
         const act = document.createElement('div'); act.className = 'envcat-act';
         let ctl;
         if (spec.type === 'bool') {
+            // The option VALUES are what vanilla compares against, not a
+            // uniform 1/0: TRUTHY_WORD vars only fire on the word "true", so
+            // a stored "true" also has to select the right option here (with
+            // hardcoded 1/0 it matched nothing and the row silently read as
+            // unset — the value was there, the control just lied).
+            const on = spec.truthy === 'true' ? 'true' : '1';
+            const off = spec.truthy === 'true' ? 'false' : '0';
             ctl = document.createElement('select');
-            for (const [v, t] of [['', '\u2014'], ['1', C.tf('uplift.env.on', 'On')],
-                                   ['0', C.tf('uplift.env.off', 'Off')]]) {
+            for (const [v, t] of [['', '\u2014'], [on, C.tf('uplift.env.on', 'On')],
+                                   [off, C.tf('uplift.env.off', 'Off')]]) {
                 const o = document.createElement('option');
                 o.value = v; o.textContent = t; ctl.append(o);
             }
-            ctl.value = ENV_VALUES[r.name] != null ? ENV_VALUES[r.name] : '';
+            const cur = ENV_VALUES[r.name] != null ? String(ENV_VALUES[r.name]) : '';
+            ctl.value = (cur === 'yes' || cur === 'on') ? on
+                : (cur === 'no' || cur === 'off') ? off : cur;
         } else {
             ctl = document.createElement('input');
             ctl.type = (spec.type === 'int' || spec.type === 'float') ? 'number' : 'text';
@@ -819,6 +881,9 @@ function envCatRow(r) {
         const apply = document.createElement('button');
         apply.type = 'button'; apply.className = 'se-btn';
         apply.textContent = C.tf('uplift.env.apply', 'APPLY');
+        apply.title = C.tf('uplift.envcat.apply_hint',
+            'Apply this value now. Leave the field empty to reset: the stored override is '
+            + 'deleted and oMLX returns to its stock default on the next restart.');
         apply.onclick = async () => {
             apply.disabled = true;
             const ok = await envSave({ [r.name]: ctl.value === '' ? null : ctl.value });
@@ -839,11 +904,11 @@ function envCatRow(r) {
     return row;
 }
 
-function envCatRenderList(list, query) {
+function envCatRenderList(list, query, filt) {
     list.textContent = '';
     const q = (query || '').trim().toLowerCase();
-    const match = r => !q || r.name.toLowerCase().includes(q) ||
-        (r.desc || '').toLowerCase().includes(q);
+    const match = r => (!q || r.name.toLowerCase().includes(q) ||
+        (r.desc || '').toLowerCase().includes(q)) && envCatFiltOk(r, filt);
     const rows = (ENV_CAT.vars || []).filter(match);
     let shown = 0;
     for (const g of ENV_CAT_GROUPS) {
@@ -856,6 +921,18 @@ function envCatRenderList(list, query) {
         shown += gr.length;
     }
     return shown;
+}
+
+// ENV-4 filters: with 136 editable rows and 11 documented-only ones in one
+// list, 'which of these can I actually change' needs to be one click away
+// rather than a scroll through eleven groups.
+const ENV_CAT_FILTERS = ['all', 'settable', 'readonly', 'set'];
+
+function envCatFiltOk(r, filt) {
+    if (filt === 'settable') return !!r.settable;
+    if (filt === 'readonly') return !r.settable;
+    if (filt === 'set') return !!r.present;
+    return true;
 }
 
 async function openEnvCatalog(reopen) {
@@ -890,25 +967,86 @@ async function openEnvCatalog(reopen) {
     x.onclick = () => overlay.remove();
     head.append(h, cnt, x);
     const intro = document.createElement('div'); intro.className = 'se-hint';
-    intro.textContent = C.tf('uplift.envcat.intro',
-        'Expert knobs oMLX reads from the environment only — no settings.json field exists. '
-        + 'Settable rows store the value in Uplift and seed it at server start; a variable '
-        + 'already set in the launch environment always wins.');
+    intro.textContent = ENV_CAT.dev
+        ? C.tf('uplift.envcat.intro',
+            'Expert knobs oMLX reads from the environment only — no settings.json field exists. '
+            + 'Settable rows store the value in Uplift and seed it at server start; a variable '
+            + 'already set in the launch environment always wins.')
+        : C.tf('uplift.envcat.intro_readonly',
+            'Reference only: this is the vanilla oMLX service. Uplift stores and seeds these '
+            + 'overrides on omlx-dev only, so no value here can take effect on this server.');
     const search = document.createElement('input');
     search.type = 'search'; search.className = 'envcat-search';
     search.placeholder = C.tf('uplift.envcat.search', 'Search variable name or description\u2026');
+    // ENV-4: one click to answer 'which of these can I change' (dev) or
+    // 'which are actually live right now' (both runtimes).
+    const filters = document.createElement('div'); filters.className = 'envcat-filters';
+    let filt = 'all';
+    const btns = ENV_CAT_FILTERS.map(f => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'se-btn envcat-filt';
+        b.textContent = C.tf('uplift.envcat.filt.' + f, f);
+        b.onclick = () => { filt = f; paintFilt(); paint(); };
+        return [f, b];
+    });
+    const paintFilt = () => {
+        for (const [f, b] of btns) b.classList.toggle('on', f === filt);
+    };
+    for (const [, b] of btns) filters.append(b);
+    if (!ENV_CAT.dev) {
+        // 'settable' is meaningless on the vanilla runtime; drop the tab
+        const [, b] = btns.find(([f]) => f === 'settable');
+        if (b) b.style.display = 'none';
+    }
+    // ENV-4 legend: the left border and MANAGED both carried meaning that
+    // nothing on screen ever explained.
+    const legend = document.createElement('div'); legend.className = 'envcat-legend';
+    legend.append(Object.assign(document.createElement('span'), {
+        className: 'envcat-legend-border',
+    }));
+    legend.append(Object.assign(document.createElement('span'), {
+        textContent: C.tf('uplift.envcat.legend_border',
+            'coloured left border = currently set in the running server'),
+    }));
+    // each legend entry QUOTES the live chip word (from the same locale key
+    // the chip renders) followed by a short gloss, so the legend can never
+    // name a badge differently than the badge beside it — a hardcoded
+    // 'MANAGED = ...' would have said MANAGED next to a chip reading
+    // 'SPRAVUJE omlx' in Czech and '即時反映' style words elsewhere.
+    const legendItem = (chipLabel, glossKey, glossDef, hintKey) => {
+        const i = document.createElement('span');
+        i.className = 'envcat-legend-item';
+        i.textContent = chipLabel + ' \u2014 ' + C.tf(glossKey, glossDef);
+        i.title = C.tf(hintKey, glossDef);
+        return i;
+    };
+    legend.append(legendItem(
+        C.tf('uplift.envcat.managed', 'MANAGED'),
+        'uplift.envcat.legend_managed', 'vanilla oMLX owns this variable',
+        'uplift.envcat.managed_hint'));
+    legend.append(legendItem(
+        C.tf('uplift.env.badge', 'EXPERIMENTAL'),
+        'uplift.envcat.legend_editable', 'editable here',
+        'uplift.envcat.settable_hint'));
+    legend.append(legendItem(
+        [C.tf('uplift.envcat.e_live', 'LIVE'),
+         C.tf('uplift.envcat.e_model', 'RESTART MODEL'),
+         C.tf('uplift.envcat.e_server', 'RESTART SERVER')].join(' / '),
+        'uplift.envcat.legend_effect', 'when a value takes effect',
+        'uplift.envcat.effect_hint'));
     const list = document.createElement('div'); list.className = 'envcat-list';
     const paint = () => {
-        const n = envCatRenderList(list, search.value);
+        const n = envCatRenderList(list, search.value, filt);
         cnt.textContent = C.tf('uplift.envcat.showing', '{n} of {total} variables',
             { n: n, total: (ENV_CAT.vars || []).length });
     };
     search.oninput = paint;
-    box.append(head, intro, search, list);
+    box.append(head, intro, search, filters, legend, list);
     overlay.append(box);
     overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
     // Escape closes via the global handler (uplift_state.js) — no local listener
     document.body.append(overlay);
+    paintFilt();
     paint();
     if (!reopen) search.focus();
 }

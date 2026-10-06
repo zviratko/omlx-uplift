@@ -212,6 +212,53 @@ never from the copied file.
 Mutable state (usage database, cluster) must stay private while both
 servers run — a shared live write race.
 .El
+.It Xo Ic env
+.Ic list
+.Op Fl -json
+.Xc
+.It Xo Ic env
+.Ic set Ar name Ar value
+.Xc
+.It Xo Ic env
+.Ic reset Ar name
+.Xc
+.It Ic env Ic disable-all | enable-all
+Manage the environment overrides Uplift stores for the
+.Em omlx-dev
+instance — the same surface as the dashboard's
+.Dq Environment variables
+button, editable on
+.Em omlx-dev
+only.
+The store is
+.Pa ~/.omlx-dev/uplift/env.json
+(it follows the
+.Dv base_path
+entry of
+.Pa dev.json ,
+so the CLI reaches across from its own keg; the vanilla
+.Em omlx
+service never reads or seeds that file).
+.Ic list
+shows the stored overrides and whether startup seeding is on;
+.Ic set
+validates
+.Ar value
+against the documented type and range for
+.Ar name
+and refuses a name vanilla owns or one no live code path reads;
+.Ic reset
+drops one override so oMLX returns to its stock default;
+.Ic disable-all
+turns seeding off as a whole
+.Em without
+deleting the stored values, and
+.Ic enable-all
+restores it.
+No subcommand restarts a server — a stored value lands the next time
+.Em omlx-dev
+starts, and a variable already present in the launch environment keeps
+winning until it is removed there.
 .It Xo Ic doctor
 .Op Fl -json
 .Xc
@@ -248,16 +295,31 @@ here.
 Vanilla omlx's
 .Pa ~/.omlx/usage.sqlite3
 (hourly rollups) is opened strictly READ-ONLY and never written by Uplift.
-.It Pa env_overrides.json
-Uplift-stored experimental
-.Dv OMLX_*
-tunables (the allow-list shown in Settings).
-Seeded into the process environment at interpreter startup by the autopatch
-hook.
+.It Pa env.json
+Uplift-stored experimental environment overrides, edited in the
+dashboard's
+.Dq Environment variables
+modal or with
+.Ic omlx-uplift
+.Ic env .
+.Em Exception
+to the rule above: this file is per-instance, not shared — omlx-dev keeps
+its own at
+.Pa ~/.omlx-dev/uplift/env.json .
+Seeding it into the process environment at interpreter startup happens on
+.Em omlx-dev
+only (ENV-4); the vanilla
+.Em omlx
+service neither reads nor writes it.
 A genuine launch-time environment variable (launchd plist, shell, CLI)
 ALWAYS wins; stored values fill only the gaps.
 Effect class per knob is shown in the UI: immediate / restart model /
 restart server.
+The ENV-1 name
+.Pa env_overrides.json
+(a flat map) is still read once and adopted when
+.Pa env.json
+does not exist.
 .It Pa patches.json
 Patch manifest: declarative desired state for every patch carrier
 (state machine: pending -> applied -> update_available / needs_review /

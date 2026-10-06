@@ -61,23 +61,39 @@ async def get_env_overrides(is_admin: bool = Depends(require_admin)):
 async def get_env_catalog(is_admin: bool = Depends(require_admin)):
     """ENV-3: read-only documentation of the env-only omlx knobs — one row
     per variable with effect class, stock default, live/stored state, and
-    the settable flag. Values of secret-ish vars arrive masked."""
+    the settable flag. Values of secret-ish vars arrive masked.
+
+    ENV-4 adds the top-level `dev` flag: the modal is the same surface on
+    both runtimes, and the UI needs to say WHY rows have no control here
+    (vanilla omlx never seeds the store) instead of looking broken."""
     from .. import env_tunables
 
-    return {"vars": env_tunables.catalog()}
+    return {"dev": env_tunables.is_dev_runtime(),
+            "vars": env_tunables.catalog()}
 
 
 @api_router.put("/env-overrides")
 async def put_env_overrides(
     req: dict, is_admin: bool = Depends(require_admin)
 ):
-    """Body: {\"<VAR>\": value|null}. null removes the stored override.
+    """Body: {"<VAR>": value|null}. null removes the stored override.
     Per-key outcome: applied_live | restart_model | restart_server |
-    shadowed (stored for later; genuine launch env keeps precedence)."""
+    shadowed (stored for later; genuine launch env keeps precedence).
+
+    ENV-4: the DEV instance only. On the vanilla `omlx` service the stored
+    file is never seeded, so accepting a write here would persist a value
+    that cannot take effect — 403 says so instead.
+    """
     from datetime import datetime as _dt
 
     from .. import env_tunables
 
+    if not env_tunables.is_dev_runtime():
+        raise HTTPException(
+            status_code=403,
+            detail="environment overrides apply to omlx-dev only; this is the "
+                   "vanilla omlx service, which does not seed them",
+        )
     body = req or {}
     if not isinstance(body, dict) or not body:
         raise HTTPException(status_code=400, detail="body must be a non-empty object")
@@ -85,8 +101,17 @@ async def put_env_overrides(
     prepared: dict[str, "str | None"] = {}
     for name, value in body.items():
         if value is None:
+            # deletion is always allowed: a name that stopped being editable
+            # (vanilla took it over) must still be clearable from the store
             prepared[name] = None
             continue
+        if name not in env_tunables.ALLOWED:
+            # a documented-but-owned name gets the reason, not a bare 400
+            why = env_tunables.not_editable_reason(name)
+            if why is not None:
+                raise HTTPException(status_code=403,
+                                    detail=f"{name} is not editable: {why}")
+            raise HTTPException(status_code=400, detail=f"unknown tunable: {name}")
         try:
             prepared[name] = env_tunables.coerce(name, value)
         except ValueError as e:

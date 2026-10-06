@@ -1206,6 +1206,135 @@ def cmd_kernel(argv=None) -> int:
     return 0 if res.get("verify", {}).get("ok") else 1
 
 
+def cmd_env(argv=None) -> int:
+    """ENV-4: manage the omlx-dev environment overrides from the command line.
+
+      env                       list what is stored (same as `env list`)
+      env list [--json]         stored overrides + which are live in the store,
+                                plus the master seeding switch
+      env set NAME VALUE        store one override (validated like the API)
+      env reset NAME            drop one stored override
+      env disable-all           stop seeding ALL overrides at dev startup
+      env enable-all            allow seeding again
+
+    The store belongs to the DEV instance (~/.omlx-dev/uplift/env.json by
+    default), resolved through dev.json — the CLI runs from the uplift keg, so
+    it is never itself the dev runtime. Values take effect when omlx-dev
+    starts; this command does not restart anything and says so.
+    """
+    import json as _json
+
+    ap = argparse.ArgumentParser(
+        prog="omlx-uplift env",
+        description="show/set omlx-dev environment overrides")
+    ap.add_argument("action", nargs="?", default="list",
+                    choices=["list", "set", "reset", "disable-all", "enable-all"])
+    ap.add_argument("name", nargs="?", help="variable name (set/reset)")
+    ap.add_argument("value", nargs="?", help="value (set)")
+    ap.add_argument("--json", action="store_true", help="machine-readable list")
+    args = ap.parse_args(argv)
+
+    from . import env_tunables as et
+
+    path = et.dev_store_path()
+
+    if args.action == "disable-all":
+        et.set_seeding_enabled(False, path)
+        print(f"seeding disabled: {path}")
+        print("stored values are kept but will NOT be applied at dev startup.")
+        print("restart omlx-dev to drop them from the running server: "
+              "brew services restart omlx-dev")
+        return 0
+    if args.action == "enable-all":
+        et.set_seeding_enabled(True, path)
+        print(f"seeding enabled: {path}")
+        print("restart omlx-dev to apply: brew services restart omlx-dev")
+        return 0
+
+    if args.action == "set":
+        if not args.name or args.value is None:
+            print("usage: omlx-uplift env set NAME VALUE", file=sys.stderr)
+            return 2
+        if args.name not in et.ALLOWED:
+            why = et.not_editable_reason(args.name)
+            if why is None:
+                print(f"env set: unknown tunable {args.name!r} — not documented "
+                      f"in the catalog; this is not a free-form env editor",
+                      file=sys.stderr)
+            else:
+                print(f"env set: {args.name} is not editable: {why}",
+                      file=sys.stderr)
+            return 2
+        try:
+            value = et.coerce(args.name, args.value)
+        except ValueError as exc:
+            print(f"env set: {exc}", file=sys.stderr)
+            return 2
+        if value == "":
+            print(f"env set: {args.name}: empty value resets instead — "
+                  f"use 'omlx-uplift env reset {args.name}'", file=sys.stderr)
+            return 2
+        data = et.load_overrides(path)
+        from datetime import datetime as _dt, timezone as _tz
+        data[args.name] = {"value": value,
+                           "set_at": _dt.now(_tz.utc).isoformat(timespec="seconds")}
+        et.save_overrides(data, path)
+        effect = et.ALLOWED[args.name]["effect"]
+        print(f"stored {args.name}={value} -> {path}")
+        print("takes effect at the next omlx-dev start "
+              f"(this knob is {effect}).")
+        return 0
+
+    if args.action == "reset":
+        if not args.name:
+            print("usage: omlx-uplift env reset NAME", file=sys.stderr)
+            return 2
+        data = et.load_overrides(path)
+        if args.name not in data:
+            print(f"no stored override for {args.name}")
+            return 0
+        data.pop(args.name)
+        et.save_overrides(data, path)
+        print(f"removed {args.name} from {path}")
+        print("oMLX falls back to its stock default at the next omlx-dev start.")
+        return 0
+
+    # -- list -----------------------------------------------------------------
+    doc = et.load_doc(path)
+    stored = doc[et.DOC_VARS_KEY]
+    if args.json:
+        print(_json.dumps({"path": str(path), "enabled": doc[et.DOC_ENABLED_KEY],
+                           "vars": stored}, indent=2, sort_keys=True))
+        return 0
+    print(f"store: {path}")
+    print(f"seeding at dev startup: {'ON' if doc[et.DOC_ENABLED_KEY] else 'OFF'}")
+    if not stored:
+        print("no overrides stored.")
+        print(f"{len(et.ALLOWED)} variables are editable "
+              f"({len(et.CATALOG) - len(et.ALLOWED)} more are documented only).")
+        print("set one with: omlx-uplift env set NAME VALUE")
+        return 0
+    print()
+    width = max(len(n) for n in stored)
+    for name, entry in sorted(stored.items()):
+        spec = et.ALLOWED.get(name, {})
+        # No mask here, and no mask is needed: load_doc() keeps only names in
+        # ALLOWED, and is_secret() names are excluded from ALLOWED by
+        # construction — a credential can never reach this dict. Masking lives
+        # in catalog(), which reads the real process env where secrets DO sit.
+        val = entry["value"]
+        # No "is it shadowed" column either: SHADOWED is recorded by the
+        # autopatch hook inside the DEV SERVER's process. The CLI has its own
+        # environment, so anything it read would describe this shell and not
+        # the thing that matters — the dashboard shows the real answer.
+        note = spec.get("effect", "?")
+        print(f"  {name:<{width}}  {val:<22} [{note}]")
+    print()
+    print(f"{len(stored)} override(s). Values apply when omlx-dev starts; "
+          f"a variable already set in the launch environment wins over them.")
+    return 0
+
+
 def cmd_skin(argv=None) -> int:
     """Skin crate <-> working-dir codecs (design section 8).
 
@@ -1262,7 +1391,7 @@ def main() -> int:
         return show_man()
     if sys.argv[1] not in {
             "serve", "view", "install", "uninstall", "patch", "patches",
-            "kernel", "skin", "dev", "doctor"}:
+            "kernel", "skin", "dev", "env", "doctor"}:
         print(f"omlx-uplift: unknown command {sys.argv[1]!r}\n",
               file=sys.stderr)
         from .help import print_help
@@ -1283,7 +1412,7 @@ def main() -> int:
         return cmd_skin(rest)
     return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
             "uninstall": cmd_uninstall, "patch": cmd_patches,
-            "kernel": cmd_kernel, "dev": cmd_dev,
+            "kernel": cmd_kernel, "dev": cmd_dev, "env": cmd_env,
             "doctor": cmd_doctor}[cmd](rest)
 
 
