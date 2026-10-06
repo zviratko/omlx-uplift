@@ -263,7 +263,8 @@
  "uplift.layout.expand_all": "Expandir todo",
  "uplift.layout.hide_debug": "Ocultar DEBUG en registros",
  "uplift.layout.hint": "Los ajustes se guardan solo en este navegador (localStorage).",
- "uplift.layout.interval": "Intervalo de sondeo",
+ "uplift.layout.interval": "Intervalo de sondeo", "uplift.layout.live_feed": "Flujo de tasas en vivo (2 Hz)",
+
  "uplift.layout.open_new": "Abrir en una pestaña nueva",
  "uplift.layout.remove": "Quitar del panel",
  "uplift.layout.reset": "Restablecer diseño",

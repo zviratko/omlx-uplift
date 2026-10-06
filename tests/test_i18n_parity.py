@@ -24,7 +24,7 @@ TECH_WORDS = {
     "JSON", "HTML", "oMLX", "omlx", "MLX", "HF", "TRENDING", "POPULAR",
     "SEARCH", "TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "GitHub", "PR",
     "Claude", "Code", "Lightning", "MTP", "VLM", "CPU", "GPU", "ANE", "RPM",
-    "W", "°C", "brew", "services", "restart", "omlx-dev", "gateway",
+    "W", "°C", "Hz", "brew", "services", "restart", "omlx-dev", "gateway",
     "cache", "prefill", "SSE", "TLS", "SHA", "DEV", "KEG",
     # accepted git/dev loanwords kept English in these locales' tech style
     "Patches", "patches", "branch", "build",

@@ -259,7 +259,8 @@
  "uplift.layout.expand_all": "Rozbalit vše",
  "uplift.layout.hide_debug": "Skrýt DEBUG v logech",
  "uplift.layout.hint": "Nastavení se ukládají pouze v tomto prohlížeči (localStorage).",
- "uplift.layout.interval": "Interval dotazování",
+ "uplift.layout.interval": "Interval dotazování", "uplift.layout.live_feed": "Živý přenos dat (2 Hz)",
+
  "uplift.layout.open_new": "Otevřít na nové kartě",
  "uplift.layout.remove": "Odebrat z dashboardu",
  "uplift.layout.reset": "Obnovit rozložení",

@@ -92,8 +92,10 @@ class PrefillSampler:
         self._lock = threading.Lock()
         # rid -> (model, processed, total, phase, last_delta, last_seen)
         self._rows: dict[str, tuple[str, int, int, str, int, float]] = {}
-        self._acc = 0.0                # tokens credited, not yet drained
-        self._since: Optional[float] = None
+        # FAST-1: monotonic total of credited tokens; each reporting
+        # channel keeps its own (drain_ts, total) baseline (decode_sampler).
+        self._credited = 0.0
+        self._bases: dict[str, tuple[float, float]] = {}
 
     # ---- engine-thread events -----------------------------------------
 
@@ -159,14 +161,14 @@ class PrefillSampler:
                         # (see module docstring — lookahead/selected burst
                         # the whole prompt through this door).
                         if phase == "prefill":
-                            self._acc += min(processed, FLUSH_CAP_MIN)
+                            self._credited += min(processed, FLUSH_CAP_MIN)
                         return
                     self._rows[rid] = (model, processed, total, phase,
                                        processed, now)
-                    self._acc += processed
+                    self._credited += processed
                     return
                 d = max(processed - prev[1], 0)
-                self._acc += d
+                self._credited += d
                 if processed >= total:
                     self._rows.pop(rid, None)   # completion arrives here
                 else:
@@ -199,34 +201,39 @@ class PrefillSampler:
                     # is DRAFT work — not prefill, flush nothing.
                     return
                 tail = max(total - last_p, 0)
-                self._acc += min(tail, max(2 * last_d, FLUSH_CAP_MIN))
+                self._credited += min(tail, max(2 * last_d, FLUSH_CAP_MIN))
         except Exception:  # noqa: BLE001
             log.debug("prefill note_end failed", exc_info=True)
 
     # ---- collector thread ----------------------------------------------
 
-    def drain(self, *, now: float) -> dict[str, float]:
-        """One tick: tokens since the last drain / dt. Zero always written;
-        dt <= 0 keeps the accumulator for the next tick (never a fake
-        spike)."""
+    def drain(self, *, now: float, channel: str = "tick") -> dict[str, float]:
+        """One drain of ``channel``: tokens credited since THIS channel's
+        last drain / dt. Zero always written; dt <= 0 keeps the baseline
+        (never a fake spike). FAST-1 multi-channel rule and housekeeping
+        on the persisting channel only — see decode_sampler.drain."""
         with self._lock:
-            if self._since is None:
-                self._since = now
+            base = self._bases.get(channel)
+            total = self._credited
+            if base is None:
+                self._bases[channel] = (now, total)
                 return {KEY_PREFILL_TOKENS: 0.0}
-            dt = now - self._since
+            b_ts, b_total = base
+            dt = now - b_ts
             if dt <= 0:
                 return {KEY_PREFILL_TOKENS: 0.0}
-            toks = self._acc
-            self._acc = 0.0
-            self._since = now
-            # housekeeping: abandoned rows expire unflushed
-            cutoff = now - ROW_STALE_S
-            for k in [k for k, v in self._rows.items() if v[5] < cutoff]:
-                self._rows.pop(k, None)
-            if len(self._rows) > MAX_TRACKED:
-                for k in sorted(self._rows, key=lambda r: self._rows[r][5]
-                                )[:len(self._rows) - MAX_TRACKED]:
+            toks = total - b_total
+            self._bases[channel] = (now, total)
+            if channel == "tick":
+                # housekeeping: abandoned rows expire unflushed
+                cutoff = now - ROW_STALE_S
+                for k in [k for k, v in self._rows.items() if v[5] < cutoff]:
                     self._rows.pop(k, None)
+                if len(self._rows) > MAX_TRACKED:
+                    for k in sorted(self._rows,
+                                    key=lambda r: self._rows[r][5]
+                                    )[:len(self._rows) - MAX_TRACKED]:
+                        self._rows.pop(k, None)
         return {KEY_PREFILL_TOKENS: toks / dt}
 
 

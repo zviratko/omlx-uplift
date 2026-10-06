@@ -259,7 +259,8 @@
  "uplift.layout.expand_all": "全部展开",
  "uplift.layout.hide_debug": "隐藏日志中的 DEBUG",
  "uplift.layout.hint": "设置仅保存在此浏览器中（localStorage）。",
- "uplift.layout.interval": "轮询间隔",
+ "uplift.layout.interval": "轮询间隔", "uplift.layout.live_feed": "实时速率数据流（2 Hz）",
+
  "uplift.layout.open_new": "在新标签页打开",
  "uplift.layout.remove": "从仪表盘移除",
  "uplift.layout.reset": "重置布局",

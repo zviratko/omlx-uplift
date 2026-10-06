@@ -88,6 +88,7 @@
     <label><span data-i18n="uplift.layout.interval">Poll interval</span>
         <select id="opt-interval"></select></label>
     <label class="row"><input type="checkbox" id="opt-hide-debug"> <span data-i18n="uplift.layout.hide_debug">Hide DEBUG in logs</span></label>
+    <label class="row"><input type="checkbox" id="opt-live-feed"> <span data-i18n="uplift.layout.live_feed">Live rate feed (2 Hz)</span></label>
     <div class="row retention-row">
         <label><span data-i18n="uplift.layout.retention_metrics">Metrics history (days)</span>
             <input type="number" id="opt-retention-metrics" min="1" max="365" step="1" size="4"></label>
@@ -425,6 +426,7 @@
 <script src="./domkit.js"></script>
 <script src="./uplift_state.js"></script>
 <script src="./uplift_chartkit.js"></script>
+<script src="./uplift_livefeed.js"></script>
 <script src="./uplift_charts.js"></script>
 <script src="./uplift_inspector.js"></script>
 <script src="./uplift_mmchips.js"></script>

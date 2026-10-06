@@ -274,7 +274,8 @@
  "uplift.layout.expand_all": "모두 펼치기",
  "uplift.layout.hide_debug": "로그에서 DEBUG 숨기기",
  "uplift.layout.hint": "설정은 이 브라우저에만 저장됩니다(localStorage).",
- "uplift.layout.interval": "폴링 간격",
+ "uplift.layout.interval": "폴링 간격", "uplift.layout.live_feed": "실시간 속도 피드(2 Hz)",
+
  "uplift.layout.open_new": "새 탭에서 열기",
  "uplift.layout.remove": "대시보드에서 제거",
  "uplift.layout.reset": "레이아웃 초기화",

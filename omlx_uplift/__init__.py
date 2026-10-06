@@ -69,6 +69,9 @@ def _wrap_lifespan(app) -> None:
 
     collector = get_collector()
     original = app.router.lifespan_context
+    from .fast_sampler import get_fast_sampler
+
+    fast = get_fast_sampler()
 
     @asynccontextmanager
     async def lifespan_with_uplift(app_obj):
@@ -85,6 +88,12 @@ def _wrap_lifespan(app) -> None:
             logging.getLogger("omlx_uplift").exception(
                 "bundled skin sync failed (skins listing may be stale)")
         await collector.start()
+        # FAST-1: 2 Hz display sampler — memory rings only, never the DB.
+        try:
+            fast.start()
+        except Exception:
+            logging.getLogger("omlx_uplift").exception(
+                "fast sampler start failed (dashboard keeps 5 s cadence)")
         # DEV-11: AUTO UPDATE — TRACK HEAD check. Own daemon thread so a
         # slow git fetch never delays serving; the hook itself is fully
         # guarded and does nothing at all unless the opt-in flag is ON.
@@ -102,6 +111,10 @@ def _wrap_lifespan(app) -> None:
             async with original(app_obj):
                 yield
         finally:
+            try:
+                fast.stop()
+            except Exception:
+                pass
             await collector.stop()
 
     app.router.lifespan_context = lifespan_with_uplift

@@ -259,7 +259,8 @@
  "uplift.layout.expand_all": "全部展開",
  "uplift.layout.hide_debug": "隱藏日誌中的 DEBUG",
  "uplift.layout.hint": "設定僅保存在此瀏覽器中（localStorage）。",
- "uplift.layout.interval": "輪詢間隔",
+ "uplift.layout.interval": "輪詢間隔", "uplift.layout.live_feed": "即時速率資料流（2 Hz）",
+
  "uplift.layout.open_new": "在新分頁開啟",
  "uplift.layout.remove": "從儀表板移除",
  "uplift.layout.reset": "重置佈局",

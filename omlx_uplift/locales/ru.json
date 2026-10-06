@@ -259,7 +259,8 @@
  "uplift.layout.expand_all": "Развернуть все",
  "uplift.layout.hide_debug": "Скрывать DEBUG в журналах",
  "uplift.layout.hint": "Настройки хранятся только в этом браузере (localStorage).",
- "uplift.layout.interval": "Интервал опроса",
+ "uplift.layout.interval": "Интервал опроса", "uplift.layout.live_feed": "Поток частот в реальном времени (2 Гц)",
+
  "uplift.layout.open_new": "Открыть в новой вкладке",
  "uplift.layout.remove": "Убрать с панели",
  "uplift.layout.reset": "Сбросить компоновку",

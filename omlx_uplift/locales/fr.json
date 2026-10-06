@@ -263,7 +263,8 @@
  "uplift.layout.expand_all": "Tout développer",
  "uplift.layout.hide_debug": "Masquer DEBUG dans les logs",
  "uplift.layout.hint": "Les paramètres ne sont enregistrés que dans ce navigateur (localStorage).",
- "uplift.layout.interval": "Intervalle de sondage",
+ "uplift.layout.interval": "Intervalle de sondage", "uplift.layout.live_feed": "Flux de taux en direct (2 Hz)",
+
  "uplift.layout.open_new": "Ouvrir dans un nouvel onglet",
  "uplift.layout.remove": "Retirer du tableau de bord",
  "uplift.layout.reset": "Réinitialiser la disposition",

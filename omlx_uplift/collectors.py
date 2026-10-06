@@ -118,7 +118,8 @@ def collect_engines(pool: Any) -> dict:
 # --------------------------------------------------------------------------
 
 
-def collect_generation(pool: Any, *, now: float) -> dict:
+def collect_generation(pool: Any, *, now: float,
+                       channel: str = "tick") -> dict:
     """Feed the decode sampler from every loaded scheduler, drain one tick.
 
     ``Request.num_output_tokens`` is ``len(output_token_ids)`` — it grows
@@ -155,7 +156,10 @@ def collect_generation(pool: Any, *, now: float) -> dict:
     from .decode_sampler import get_decode_sampler
     sampler = get_decode_sampler()
     sampler.sample_running(rows, now=now)
-    return sampler.drain(now=now)
+    # FAST-1: the drain is per-channel — the 2 Hz display sampler and the
+    # 5 s persisting Collector each read their own baseline of the same
+    # monotonic credit total (see decode_sampler.drain).
+    return sampler.drain(now=now, channel=channel)
 
 
 # --------------------------------------------------------------------------
@@ -163,22 +167,57 @@ def collect_generation(pool: Any, *, now: float) -> dict:
 # --------------------------------------------------------------------------
 
 
-def collect_memory(pool: Any) -> dict:
-    """mem.used_bytes / mem.percent / mem.custom_ceiling_bytes /
-    mem.iogpu_limit_bytes — same sources classic's /admin/api/stats uses
-    (U38: absolute ceilings read from the enforcer/upstream helpers, never
-    re-derived; 0 = unset -> key absent, no fake zero ceiling)."""
+# FAST-1 (user 2026-10-06): the iogpu wired limit is a KERNEL CONSTANT —
+# `sysctl iogpu.wired_limit_mb` only moves when an admin rewrites it. Its
+# reader FORKS /usr/sbin/sysctl (measured 7.4 ms median per call), so
+# sampling it every tick was pure waste, and a fast sampler would turn it
+# into 14 forks/second. Cache it; re-probe once a minute 'for good
+# measure' (user's words), zero-probes never cached (unset sysctl can gain
+# a value later and must become visible).
+CEILING_CACHE_S = 60.0
+_iogpu_cache: tuple[float, int] = (0.0, 0)
+
+
+def reset_ceiling_cache() -> None:
+    """Test seam: drop the cached iogpu reading (unit tests monkeypatch
+    the sysctl helper and must see each fake value, not the cached one)."""
+    global _iogpu_cache
+    _iogpu_cache = (0.0, 0)
+
+
+def collect_iogpu_limit_bytes(*, force: bool = False) -> int:
+    global _iogpu_cache
+    now = time.time()
+    val, at = _iogpu_cache
+    if not force and val > 0 and now - at < CEILING_CACHE_S:
+        return val
+    try:
+        from omlx.process_memory_enforcer import get_iogpu_wired_limit_bytes
+        wired = int(get_iogpu_wired_limit_bytes() or 0)
+    except Exception:
+        log.debug("iogpu wired limit probe failed", exc_info=True)
+        return 0
+    if wired > 0:
+        _iogpu_cache = (wired, now)
+    return wired
+
+
+def collect_memory_used(pool: Any) -> dict:
+    """FAST-1 fast-path slice of collect_memory: the two values that
+    actually MOVE (used + percent). No sysctl fork, no settings reads —
+    same sources, same accounting as the 5 s path."""
     pairs: dict[str, float] = {}
     from omlx.server import _server_state
 
-    used = 0
     enf = getattr(_server_state, "process_memory_enforcer", None)
     if enf is not None and getattr(enf, "enabled", lambda: False)():
         try:
             used = int(enf.get_status().get("current_bytes", 0))
             maxb = int(enf.get_final_ceiling())
         except Exception:
-            used, maxb = 0, 0
+            used, maxb = 0, 0     # pre-FAST-1 behavior kept: write 0, do
+                                  # NOT drop the key (skipping zeros
+                                  # truncates the series mid-probe-failure)
     else:
         used = int(getattr(pool, "current_model_memory", 0) or 0)
         cb = getattr(pool, "_get_final_ceiling", None)
@@ -186,6 +225,19 @@ def collect_memory(pool: Any) -> dict:
     pairs["mem.used_bytes"] = float(used)
     if maxb > 0:
         pairs["mem.percent"] = 100.0 * used / maxb
+    return pairs
+
+
+def collect_memory(pool: Any) -> dict:
+    """mem.used_bytes / mem.percent / mem.custom_ceiling_bytes /
+    mem.iogpu_limit_bytes — same sources classic's /admin/api/stats uses
+    (U38: absolute ceilings read from the enforcer/upstream helpers, never
+    re-derived; 0 = unset -> key absent, no fake zero ceiling).
+    FAST-1: the sysctl-forking iogpu probe now rides a 60 s cache."""
+    pairs = collect_memory_used(pool)
+    from omlx.server import _server_state
+
+    enf = getattr(_server_state, "process_memory_enforcer", None)
     try:
         ceil_b = int(getattr(enf, "memory_guard_custom_ceiling_bytes", 0) or 0) \
             if enf is not None else 0
@@ -193,13 +245,9 @@ def collect_memory(pool: Any) -> dict:
             pairs["mem.custom_ceiling_bytes"] = float(ceil_b)
     except Exception:
         log.debug("memory enforcer ceiling probe failed", exc_info=True)
-    try:
-        from omlx.process_memory_enforcer import get_iogpu_wired_limit_bytes
-        wired = int(get_iogpu_wired_limit_bytes() or 0)
-        if wired > 0:
-            pairs["mem.iogpu_limit_bytes"] = float(wired)
-    except Exception:
-        log.debug("iogpu wired limit probe failed", exc_info=True)
+    wired = collect_iogpu_limit_bytes()
+    if wired > 0:
+        pairs["mem.iogpu_limit_bytes"] = float(wired)
     return pairs
 
 
@@ -221,7 +269,8 @@ _SPEC_MAP = (
 )
 
 
-def collect_cache(pool: Any, *, prev_ctr: dict, dt: float) -> tuple[dict, dict]:
+def collect_cache(pool: Any, *, prev_ctr: dict, dt: float,
+                  rates: bool = True) -> tuple[dict, dict]:
     """hot.<model>, queue.*, pfx.*/spec.* rates — one walk of the loaded
     models. Returns (pairs, prev_ctr_out).
 
@@ -319,7 +368,11 @@ def collect_cache(pool: Any, *, prev_ctr: dict, dt: float) -> tuple[dict, dict]:
         pairs["queue.running"] = queue_sum["running"]
     # U19 cache savings rates — per-tick deltas of lifetime counters
     # (lifetime ratios are static-ish and useless as time series).
-    if dt > 0 and pfx_counters and prev_ctr:
+    # FAST-1: the 2 Hz walk passes rates=False — pfx/spec rates come from
+    # the SAME lifetime counters the 5 s tick diffs (9 of 10 fast readings
+    # would be identical zeros), and its prev_ctr state stays owned by the
+    # persisting tick. The fast sampler only takes hot.*/queue.* gauges.
+    if rates and dt > 0 and pfx_counters and prev_ctr:
         def _d(key):
             cur = pfx_counters.get(key)
             old = prev_ctr.get(key)

@@ -1483,6 +1483,14 @@ fillSelect($('opt-interval'), C.LAYOUT_INTERVALS.map(ms => [ms, `${ms / 1000} s`
 $('opt-interval').onchange = e => { layout.intervalMs = Number(e.target.value); C.saveLayout(localStorage, layout); restartPolling(); };
 $('opt-hide-debug').checked = layout.logsHideDebug;
 $('opt-hide-debug').onchange = e => { layout.logsHideDebug = e.target.checked; C.saveLayout(localStorage, layout); };
+$('opt-live-feed').checked = layout.liveFeed;
+$('opt-live-feed').onchange = e => {
+    layout.liveFeed = e.target.checked; C.saveLayout(localStorage, layout);
+    const LF = window.Uplift.livefeed;
+    if (layout.liveFeed) { LF.probe(fetchJson); LF.connect(); }
+    else { LF.disable(); }
+    CH.redrawCharts(); CH.drawAllMetricCharts();
+};
 /* Server-side retention (RL-0): reads/writes the uplift store, not localStorage. */
 async function loadRetention() {
     try {

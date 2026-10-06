@@ -39,7 +39,7 @@ from .routers.derive import (
     MAX_SERIES_POINTS, _HOURLY_DERIVE, _USAGE_COLS, _downsample, _hourly_points, _parse_window,
 )
 from .routers.metrics import (
-    metrics_hot, metrics_latest, metrics_series, requests_stats,
+    metrics_hot, metrics_latest, metrics_series, metrics_live, metrics_stream, requests_stats,
 )
 from .routers.requests import (
     _decode_prompt_ids, cancel_request, list_requests, request_detail, requests_models, search_requests,
@@ -79,7 +79,7 @@ __all__ = [
     'delete_deferred_settings_route', 'delete_model_settings_route', 'dev11_boot_check', 'dev_auto_update', 'dev_base', 'dev_bootstrap',
     'dev_build', 'dev_commits', 'dev_reconfigure', 'dev_restart', 'dev_status', 'engine_pool',
     'get_deferred_settings_route', 'get_env_overrides', 'get_model_settings', 'get_retention', 'global_settings', 'list_model_profiles_any',
-    'list_requests', 'load_locale', 'locale_catalog', 'metrics_hot', 'metrics_latest', 'metrics_series',
+    'list_requests', 'load_locale', 'locale_catalog', 'metrics_hot', 'metrics_latest', 'metrics_series', 'metrics_live', 'metrics_stream',
     'model_settings_index', 'models_overlay', 'page_router', 'patch_store', 'patches_add', 'patches_check',
     'patches_config', 'patches_curated', 'patches_curated_adopt', 'patches_curated_sync', 'patches_diff', 'patches_disable',
     'patches_enable', 'patches_promote', 'patches_remove', 'patches_rollback', 'patches_test', 'patches_view',

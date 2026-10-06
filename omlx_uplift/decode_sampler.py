@@ -77,8 +77,11 @@ class DecodeSampler:
         # series has ALREADY been fed for this request, so neither the tick
         # walk nor the departure flush can count a token twice.
         self._rows: dict[str, tuple[int, float]] = {}
-        self._acc = 0.0                # tokens credited, not yet drained
-        self._since: Optional[float] = None
+        # FAST-1: monotonic total of credited tokens; every reporting
+        # channel keeps its own (drain_ts, total_at_drain) baseline, so a
+        # 2 Hz display drain cannot rob the 5 s persisting drain of tokens.
+        self._credited = 0.0
+        self._bases: dict[str, tuple[float, float]] = {}
 
     # ---- collector thread ----------------------------------------------
 
@@ -131,7 +134,7 @@ class DecodeSampler:
                         continue
                     delta = count - prev[0]
                     if delta > 0:
-                        self._acc += delta
+                        self._credited += delta
                     self._rows[rid] = (count, now)
         except Exception:  # noqa: BLE001
             log.debug("decode sample_running failed", exc_info=True)
@@ -179,7 +182,7 @@ class DecodeSampler:
                 credited = prev[0] if prev else 0
                 tail = final - credited
                 if tail > 0:
-                    self._acc += tail
+                    self._credited += tail
                 # Keep the row (with its credited total) so a tick that still
                 # lists the departed request cannot re-credit it; the stale
                 # sweep drops it later.
@@ -189,28 +192,40 @@ class DecodeSampler:
 
     # ---- collector thread -------------------------------------------------
 
-    def drain(self, *, now: float) -> dict[str, float]:
-        """One tick: tokens since the last drain / dt. Zero always written;
-        dt <= 0 keeps the accumulator for the next tick (never a fake
-        spike)."""
+    def drain(self, *, now: float, channel: str = "tick") -> dict[str, float]:
+        """One drain of ``channel``: tokens credited since THIS channel's
+        last drain / dt. Zero always written; dt <= 0 keeps the baseline
+        for the next drain (never a fake spike).
+
+        FAST-1 multi-channel rule: the total of credited tokens is
+        monotonic and each reporting channel ('tick' = the 5 s Collector
+        that PERSISTS, 'fast' = the 2 Hz display sampler) keeps its own
+        (ts, total) baseline. Channels can never steal tokens from each
+        other and the stored series keeps its exact full-window semantics
+        — the whole reason the fast sampler may share these accumulators.
+        Housekeeping runs on the persisting channel only."""
         with self._lock:
-            if self._since is None:
-                self._since = now
+            base = self._bases.get(channel)
+            total = self._credited
+            if base is None:
+                self._bases[channel] = (now, total)
                 return {KEY_GENERATION_TOKENS: 0.0}
-            dt = now - self._since
+            b_ts, b_total = base
+            dt = now - b_ts
             if dt <= 0:
                 return {KEY_GENERATION_TOKENS: 0.0}
-            toks = self._acc
-            self._acc = 0.0
-            self._since = now
-            # housekeeping: rows that never reached note_end expire
-            cutoff = now - ROW_STALE_S
-            for k in [k for k, v in self._rows.items() if v[1] < cutoff]:
-                self._rows.pop(k, None)
-            if len(self._rows) > MAX_TRACKED:
-                for k in sorted(self._rows, key=lambda r: self._rows[r][1]
-                                )[:len(self._rows) - MAX_TRACKED]:
+            toks = total - b_total
+            self._bases[channel] = (now, total)
+            if channel == "tick":
+                # housekeeping: rows that never reached note_end expire
+                cutoff = now - ROW_STALE_S
+                for k in [k for k, v in self._rows.items() if v[1] < cutoff]:
                     self._rows.pop(k, None)
+                if len(self._rows) > MAX_TRACKED:
+                    for k in sorted(self._rows,
+                                    key=lambda r: self._rows[r][1]
+                                    )[:len(self._rows) - MAX_TRACKED]:
+                        self._rows.pop(k, None)
         return {KEY_GENERATION_TOKENS: toks / dt}
 
 

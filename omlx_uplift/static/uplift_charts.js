@@ -12,6 +12,11 @@ const S = window.Uplift.state;
 const layout = S.layout;
 const API = S.API;
 const $ = D.$;
+/* FAST-1: 2 Hz live display feed (uplift_livefeed.js). Every consumer
+   below falls back to the stored 5 s path when the feed is absent,
+   stale, or the card window is too long for the resolution to mean
+   anything (livefeed owns that rule). */
+const LF = window.Uplift.livefeed;
 /* Boot-late bindings into uplift.js (both are hoisted function declarations
    there; these accessors resolve them at CALL time, never at load time). */
 const CH_GLUE = {
@@ -83,7 +88,8 @@ const GIB = 2 ** -30;   // bytes -> GiB (memory chart draws GiB, user 2026-09-30
    model names in the hover legend made the axis label row wrap. History
    still comes from the stable per-model 'hot.<model>' keys via
    /uplift/api/metrics/hot, summed client-side per timestamp. */
-let chartHist = { gen: [], cached: [], prefill: [], mem: [], memLimit: [], cache: [], hot: [] };   // arrays of {ts, v, res}; hot: summed all-models hot cache (GiB)
+let chartHist = { gen: [], cached: [], prefill: [], mem: [], memLimit: [], cache: [], hot: [] };
+let tpsLiveOn = false, memLiveOn = false;   // FAST-1: live-resolution draw flags (badges)   // arrays of {ts, v, res}; hot: summed all-models hot cache (GiB)
 let historyDirty = true, historyLoading = false;
 /* The two shared-history cards backfill at the LARGEST window any of them
    uses (one fetch, superset cached); each card draws its own slice. */
@@ -167,10 +173,31 @@ async function loadChartHistory() {
 function tpsWindowed() {
     const now = Date.now();
     const win = cardWindow('chart-tps');
-    const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], win, now);
-    const p = C.mergeHistory(chartHist.prefill, tpsData[0], tpsData[2], win, now);
+    const liveOn = LF.liveForWindow(win);
+    tpsLiveOn = liveOn && ((LF.liveUsable('generation.tokens_s'))
+                           || (LF.liveUsable('prefill.tokens_s')));
+    // FAST-1: the 500 ms rate windows are spiky by construction — smooth
+    // the LIVE column only (1.5 s centered mean, user pre-approved). The
+    // stored 5 s points keep their existing meaning untouched; smoothing
+    // the merged column would silently 15 s-average them next to the 1.5 s
+    // live stretch.
+    const livePair = key => {
+        const c = LF.liveCol(key);
+        return c ? { ts: c.ts, v: C.movingAverage(c.v, LF.smoothK()) } : null;
+    };
+    const genL = liveOn && LF.liveUsable('generation.tokens_s') ? livePair('generation.tokens_s') : null;
+    const preL = liveOn && LF.liveUsable('prefill.tokens_s') ? livePair('prefill.tokens_s') : null;
+    const g = genL ? C.mergeHistory(chartHist.gen, genL.ts, genL.v, win, now)
+        : C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], win, now);
+    const p = preL ? C.mergeHistory(chartHist.prefill, preL.ts, preL.v, win, now)
+        : C.mergeHistory(chartHist.prefill, tpsData[0], tpsData[2], win, now);
     // U30: cached input rides the same union column (dotted prefill line).
+    // FAST-1 keeps it on the 5 s path deliberately: its source counter is
+    // fed at request COMPLETION — a faster line would only repeat values.
     const k = C.mergeHistory(chartHist.cached || [], tpsData[0], tpsData[3], win, now);
+    // FAST-1: the 500 ms rate windows are spiky by construction — draw a
+    // centered mean over the merged column (user pre-approved smoothing;
+    // the window label says '2 Hz · smoothed').
     const ts = [...new Set(g.ts.concat(p.ts, k.ts))].sort((a, b) => a - b);
     const gi = new Map(g.ts.map((t, i) => [t, g.v[i]]));
     const pi = new Map(p.ts.map((t, i) => [t, p.v[i]]));
@@ -194,7 +221,15 @@ const hotLive = { ts: [], v: [] };   // summed all-models hot cache, GiB
 function memWindowed() {
     const now = Date.now();
     const win = cardWindow('chart-mem');
-    const mm = C.mergeHistory(chartHist.mem, memData[0], memData[1], win, now);
+    // FAST-1: only the USED-memory line has a live twin — the ceilings are
+    // kernel constants (60 s server cache) and the hot-cache gauge stays
+    // on the 5 s path; faster sampling of a constant is fake resolution.
+    memLiveOn = LF.liveForWindow(win) && LF.liveUsable('mem.used_bytes');
+    const mm = memLiveOn
+        ? C.mergeHistory(chartHist.mem, LF.liveCol('mem.used_bytes').ts,
+                         LF.liveCol('mem.used_bytes').v.map(b => +(b * GIB).toFixed(3)),
+                         win, now)
+        : C.mergeHistory(chartHist.mem, memData[0], memData[1], win, now);
     const ml = C.mergeHistory(chartHist.memCeil || [], memData[0], memData[2], win, now);
     const cc = C.mergeHistory(chartHist.memIogpu || [], memData[0], memData[3], win, now);
     const hot = C.mergeHistory(chartHist.hot || [], hotLive.ts, hotLive.v, win, now);
@@ -486,6 +521,9 @@ function redrawCharts() {
     restoreCursor(memChart) || legendUpdater()(memChart);
     const shown = tpsChart.data[0].length;
     let label = shown > 1 ? `${windowLabel(cardWindow('chart-tps'))} window` : '';
+    // FAST-1: honest cadence badge — the line only lies about smoothness
+    // if the viewer cannot see which clock drew it.
+    if (shown > 1 && tpsLiveOn) label += ` · 2 Hz · ${C.tf('uplift.explore.smoothed', 'smoothed')}`;
     // Honest resolution badge: hourly rollups backfill older stretches.
     const now = Date.now();
     const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], cardWindow('chart-tps'), now);
@@ -1036,7 +1074,25 @@ function drawMetricChart(id) {
     const w = windowParam(cardWindow(id));
     const cache = metricCache[w] || { data: {}, bucket_s: 0 };
     const winMs = cardWindow(id) * 1000 + 60000;
-    const cols = metricUnionCols(e.def, cache.data, winMs);
+    // FAST-1: short-window eligible series draw from the 2 Hz live ring
+    // when it is fresh; the stored fetch still backfills everything the
+    // ring does not cover (feed dead -> columns fall through unchanged).
+    const win = cardWindow(id);
+    const liveOn = LF.liveForWindow(win);
+    let liveUsed = false;
+    let data = cache.data;
+    if (liveOn) {
+        const sers = metricServes(e.def);
+        if (sers.some(s => LF.liveUsable(s.key))) {
+            for (const s of sers) {
+                if (!LF.liveUsable(s.key)) continue;
+                const lc = LF.liveCol(s.key);
+                data = { ...data, [s.key]: lc.ts.map((t, i) => ({ ts: t / 1000, v: lc.v[i] })) };
+                liveUsed = true;
+            }
+        }
+    }
+    const cols = metricUnionCols(e.def, data, winMs);
     // U40: rate gauges are per-tick counter deltas — spiky by construction.
     // Smooth the drawn+hovered columns with a window-scaled centered mean
     // (the note badge replaces 'live'). Long windows are already avg-
@@ -1067,6 +1123,10 @@ function drawMetricChart(id) {
     for (let i = pcol.length - 1; i >= 0; i--) if (pcol[i] != null) { last = pcol[i]; break; }
     e.nowEl.textContent = fmtLast(e.fmt, last);
     const bits = [];
+    // FAST-1: say which clock drew this card. '2 Hz' is a unit token
+    // (like GiB — locale-neutral), and the live columns always ride the
+    // k=3 smoothing path below, so the existing 'smoothed' key carries it.
+    if (liveUsed) bits.push('2 Hz');
     if (cache.bucket_s >= 60) bits.push(`${C.tf('uplift.explore.avg', 'averaged')} ≤ ${fmtSpan(Math.max(60, cache.bucket_s))}`);
     const ppts = cache.data[e.def.key] || [];
     if (ppts.length && ppts[ppts.length - 1].res === 'hourly') bits.push(C.tf('uplift.explore.hourly', 'hourly rollups'));

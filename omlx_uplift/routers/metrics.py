@@ -91,6 +91,66 @@ async def metrics_series(
             "bucket_s": bucket, "series_map": series_map}
 
 
+@api_router.get("/metrics/live")
+async def metrics_live(is_admin: bool = Depends(require_admin)):
+    """FAST-1: the 2 Hz in-memory ring snapshot (no SQLite). Fallback for
+    clients without EventSource and the health probe for the stream —
+    `live: false` tells the dashboard the fast sampler is not running so
+    it falls back to the 5 s stored cadence instead of waiting."""
+    from ..fast_sampler import get_fast_sampler
+
+    return get_fast_sampler().snapshot()
+
+
+@api_router.get("/metrics/stream")
+async def metrics_stream(is_admin: bool = Depends(require_admin)):
+    """FAST-1: SSE of the fast sampler's latest values (~2 Hz).
+
+    Frame contract: first frame carries `samples` (the whole ring, so a
+    reconnect replays what the tab missed); every later frame carries
+    only the keys whose VALUE changed (per-connection diff — a change-
+    driven frame, like the request stream's watermark). The tick channel
+    of the samplers is untouched: this stream never writes to SQLite,
+    the store keeps its exact one-value-per-5 s shape.
+    """
+    from ..fast_sampler import FAST_TICK_S, get_fast_sampler
+
+    sampler = get_fast_sampler()
+
+    async def event_generator():
+        sent: dict[str, tuple] = {}
+        first = True
+        try:
+            while True:
+                snap = sampler.snapshot()
+                metrics = snap["metrics"]
+                frame: dict = {"live": snap["live"],
+                               "tick_s": snap["tick_s"], "at": snap["at"]}
+                if first:
+                    frame["samples"] = {k: v["samples"]
+                                        for k, v in metrics.items()}
+                changed = {k: [v["ts"], v["v"]] for k, v in metrics.items()
+                           if sent.get(k) != (v["ts"], v["v"])}
+                if changed or first:
+                    frame["m"] = changed
+                    sent.update({k: tuple(v) for k, v in changed.items()})
+                    yield f"data: {json.dumps(frame)}\n\n"
+                first = False
+                await asyncio.sleep(FAST_TICK_S)
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @api_router.get("/metrics/hot")
 async def metrics_hot(window: str = "1h",
                       is_admin: bool = Depends(require_admin)):

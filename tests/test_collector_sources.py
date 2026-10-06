@@ -405,6 +405,8 @@ def test_u38_memory_budget_lines(monkeypatch):
     monkeypatch.setattr(rt, "engine_pool", lambda: FakePool())
     monkeypatch.setattr(pme, "get_iogpu_wired_limit_bytes",
                         lambda: 124_640 * 1024**2)            # 118.75 GiB
+    import omlx_uplift.collectors as ucl
+    ucl.reset_ceiling_cache()      # FAST-1: 60 s sysctl cache is module state
 
     store = CapturingStore()
     Collector(store=store).sample_once()
@@ -415,6 +417,7 @@ def test_u38_memory_budget_lines(monkeypatch):
     # unset limits -> keys absent (honest), footprint still collected
     enf.memory_guard_custom_ceiling_bytes = 0
     monkeypatch.setattr(pme, "get_iogpu_wired_limit_bytes", lambda: 0)
+    ucl.reset_ceiling_cache()
     store = CapturingStore()
     Collector(store=store).sample_once()
     assert "mem.custom_ceiling_bytes" not in store.pairs

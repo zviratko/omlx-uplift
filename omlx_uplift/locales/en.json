@@ -259,7 +259,8 @@
  "uplift.layout.expand_all": "Expand all",
  "uplift.layout.hide_debug": "Hide DEBUG in logs",
  "uplift.layout.hint": "Settings persist in this browser only (localStorage).",
- "uplift.layout.interval": "Poll interval",
+ "uplift.layout.interval": "Poll interval", "uplift.layout.live_feed": "Live rate feed (2 Hz)",
+
  "uplift.layout.open_new": "Open in new tab",
  "uplift.layout.remove": "Remove from dashboard",
  "uplift.layout.reset": "Reset layout",

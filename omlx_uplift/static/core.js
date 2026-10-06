@@ -182,7 +182,7 @@ function mean(values) {
    redesign. Old v1 blob is dead bytes (same no-migration tradeoff as
    F-020). */
 const LAYOUT_KEY = 'omlx-uplift-layout-v2';
-const LAYOUT_DEFAULTS = { chartWindowSec: 300, intervalMs: 1000, logsHideDebug: true, percentile: 'p95', collapsed: {}, metricWin: {} };
+const LAYOUT_DEFAULTS = { chartWindowSec: 300, intervalMs: 1000, logsHideDebug: true, liveFeed: true, percentile: 'p95', collapsed: {}, metricWin: {} };
 const LAYOUT_WINDOWS = [60, 300, 900, 3600, 21600, 86400, 604800, 2592000];
 const LAYOUT_INTERVALS = [500, 1000, 2000, 5000];
 const LAYOUT_PERCENTILES = ['p50', 'p90', 'p95', 'p99'];
@@ -284,6 +284,9 @@ function loadLayout(storage) {
         chartWindowSec: LAYOUT_WINDOWS.includes(l.chartWindowSec) ? l.chartWindowSec : LAYOUT_DEFAULTS.chartWindowSec,
         intervalMs: LAYOUT_INTERVALS.includes(l.intervalMs) ? l.intervalMs : LAYOUT_DEFAULTS.intervalMs,
         logsHideDebug: l.logsHideDebug !== false,
+        // FAST-1: 2 Hz display feed opt-out (server stream still runs; the
+        // charts just keep drawing the stored 5 s points). Default ON.
+        liveFeed: l.liveFeed !== false,
         percentile: LAYOUT_PERCENTILES.includes(l.percentile) ? l.percentile : LAYOUT_DEFAULTS.percentile,
         collapsed: (l.collapsed && typeof l.collapsed === 'object') ? { ...l.collapsed } : {},
         // Per-metric-card window overrides (block id -> seconds); absent =

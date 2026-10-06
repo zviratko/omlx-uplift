@@ -21,6 +21,8 @@ const MM = window.Uplift.modelmgr;
 const GSY = window.Uplift.gsys;
 const UUP = window.Uplift.usage;
 const FE = window.Uplift.feed;
+const LF = window.Uplift.livefeed;   // FAST-1 live display feed
+const layout = window.Uplift.state.layout;
 const PT = window.Uplift.patches;
 const { fetchJson, applyPrefs, loadLocale, applyTab, restartPolling,
         pollStats, pollGatewayInfo, renderTasks, loadSkins, renderSkinsMenu,
@@ -106,6 +108,29 @@ setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.drawAl
 UUP.initUsageRange();   // seeds the range select now that glue helpers exist
 UUP.pollUsage(); UUP.pollLogs();
 FE.connectEventStream();
+/* FAST-1: live display feed (2 Hz SSE, memory-only server side). Redraw
+   rule: shared charts every frame (~2 Hz — that is the point), metric
+   cards at half rate (the grid renders many canvases; 1 Hz is already
+   5x the stored cadence and keeps a laptop tab cool). Both paths skip
+   the store fetch — metricFetch's TTL still gates server hits. */
+let _lfMainPending = false, _lfCardsAt = 0;
+LF.onFrame(() => {
+    if (document.hidden || currentTab() !== 'status') return;
+    if (_lfMainPending) return;
+    _lfMainPending = true;
+    requestAnimationFrame(() => {
+        _lfMainPending = false;
+        CH.redrawCharts();
+        const now = Date.now();
+        // half rate for the grid: many canvases, and 1 Hz is already 5x
+        // the stored cadence — keeps a laptop tab cool
+        if (now - _lfCardsAt >= 900) { _lfCardsAt = now; CH.drawAllMetricCharts(); }
+    });
+});
+if (layout.liveFeed) {
+    LF.probe(fetchJson);
+    if (window.EventSource) LF.connect();
+}
 setInterval(pollGatewayInfo, 10000);
 setInterval(() => { if (!document.hidden && !FE.sseOpen()) FE.pollRequests(); }, 2000);  // FEED-1
 setInterval(() => { if (!document.hidden && !MM.seModel) MM.render(); }, 8000);
