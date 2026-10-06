@@ -26,6 +26,12 @@ users never see.
 - Max Concurrent Requests no longer demands a server restart after every
   save: upstream #3765 live-applies it, so Uplift shows the restart badge
   only while distributed (cluster) engines are active — classic parity.
+- Restart badges now follow the runtime truth (upstream `runtime_applied`),
+  not the classic template's stale badges: Start on Login, KV Cache,
+  HF/MS endpoints and CA bundle no longer claim RESTART REQUIRED — they
+  apply on save (KV Cache still unloads/reloads models when it takes
+  effect; it just never needed a *server* restart). Divergence filed
+  upstream as tracker UP-6.
 - Achievements: "You upgraded me" / "More memory" / "You made me bigger
   today" no longer fire on their own. They watched `model_memory_max`
   between stats polls — but that value is the memory guard's *dynamic*

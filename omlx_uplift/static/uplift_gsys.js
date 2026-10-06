@@ -28,10 +28,10 @@ const GLUE = {
 };
 /* ---------------- settings (Settings tab: read-only server preview) ------ */
 /* ---- Server settings: editable form mirroring the classic Settings page.
-   Same 11 sections, same fields, labels, hints, restart badges and
-   conditional visibility (i18n strings copied from the original catalog).
-   Saves replicate classic saveGlobalSettings(): full flat payload POSTed to
-   global-settings — the gateway shadows it, real oMLX is never modified. */
+   Same 11 sections, same fields, labels, hints and conditional visibility
+   (i18n strings copied from the original catalog); restart badges follow the
+   runtime truth instead — see GS_RESTART_FIELDS. Saves replicate classic
+   saveGlobalSettings(): full flat payload POSTed to global-settings. */
 /* ---------------- global-settings labels i18n ----------------
    GS_LABELS holds the English literals. When a non-en catalog lands we
    overwrite in place (deep walk; keys = 'uplift.gs.' + dotted path;
@@ -195,20 +195,25 @@ let GS = null;   // merged working copy (upstream + shadow)
    load / last save; gsDirty holds queued-but-unsaved flat->value edits.
    Fields whose change only takes effect after a server restart are flagged
    red (!) and force the sticky SAVE button into RESTART SERVER once the
-   queue is saved. Which fields restart: mirrors the classic template's
-   restart badges (server host/port/auto-start, cache enable, MCP config,
-   distributed + CA bundle, proxy endpoints). max_concurrent_requests is a
-   conditional: upstream 024ead20 (#3765) live-applies it; classic keeps the
-   badge only while distributed (cluster) engines run, which own their
-   schedulers and reload the limit themselves. */
+   queue is saved. This set follows the RUNTIME TRUTH (upstream
+   runtime_applied + the live-apply bodies in update_global_settings),
+   deliberately NOT classic's template badges — the two disagree, see
+   tracker UP-6. Dropped here as live-applied: cache_enabled (the cache
+   save hot-swaps the pool config and reloads ENGINES, not the server),
+   auto_start_on_launch (persist only; the mac app owns the login item),
+   hf_endpoint / ms_endpoint / network_ca_bundle (env rewritten on save,
+   per-call download clients re-read it). max_concurrent_requests is a
+   conditional: upstream 024ead20 (#3765) live-applies it; the badge rides
+   distributed_inference_active only (cluster ranks own their schedulers
+   and pick the limit up on reload). */
 let GS_ORIG = {};
 const gsDirty = {};
 let gsRestartPending = false;   // queued edits were saved; server restart still owed
 let gsForceArmed = false;       // detection said "no supervisor"; next click = FORCE
 const GS_RESTART_FIELDS = new Set([
-    'host', 'port', 'auto_start_on_launch', 'max_concurrent_requests',
-    'cache_enabled', 'mcp_config', 'distributed_inference_enabled',
-    'network_ca_bundle', 'hf_endpoint', 'ms_endpoint']);
+    'host', 'port',
+    'max_concurrent_requests',   // conditional — gsRestartField()
+    'mcp_config', 'distributed_inference_enabled']);
 // SYNC-1: classic-parity restart semantics for one conditional member.
 function gsDistributedActive() {
     return !!(GS && GS.server && GS.server.distributed_inference_active);
@@ -1173,8 +1178,7 @@ const GS_SPEC = [
     {sec: 'server', lab: 'server.log_level', ctl: {
         k: 'sel', field: 'log_level', flat: 'log_level', opts: 'server.levels'}},
     {sec: 'server', lab: 'server.auto_start', hint: 'server.auto_start_hint', ctl: {
-        k: 'tog', field: 'auto_start_on_launch', flat: 'auto_start_on_launch'},
-     opts: {badge: true, flat: 'auto_start_on_launch'}},
+        k: 'tog', field: 'auto_start_on_launch', flat: 'auto_start_on_launch'}},
     {x: (body, L) => {   // one alias per line (classic editor keeps a list; same payload)
         const aliasInp = document.createElement('textarea');
         aliasInp.rows = 2; aliasInp.spellcheck = false;
@@ -1288,8 +1292,7 @@ const GS_SPEC = [
 
     {t: 'Cache'},
     {sec: 'cache', lab: 'cache.enabled', hint: 'cache.enabled_hint', ctl: {
-        k: 'tog', sec: 'cache', field: 'enabled', flat: 'cache_enabled'},
-     opts: {flat: 'cache_enabled', badge: true}},
+        k: 'tog', sec: 'cache', field: 'enabled', flat: 'cache_enabled'}},
     {sec: 'cache', lab: 'cache.hot_only', hint: 'cache.hot_only_hint', ctl: {
         k: 'tog', field: 'hot_cache_only', flat: 'hot_cache_only'}},
     {sec: 'cache', lab: 'cache.ssd_dir', ctl: {k: 'text', field: 'ssd_cache_dir', flat: 'ssd_cache_dir'}},
@@ -1308,11 +1311,9 @@ const GS_SPEC = [
     {sec: 'usage', lab: 'usage.history', hint: 'usage.history_hint', ctl: {
         k: 'tog', field: 'usage_history', flat: 'usage_history'}},
     {sec: 'net', lab: 'net.hf_ep', hint: 'net.hf_ep_hint', ctl: {
-        k: 'text', sec: 'huggingface', field: 'endpoint', flat: 'hf_endpoint', ph: 'https://huggingface.co'},
-     opts: {flat: 'hf_endpoint', badge: true}},
+        k: 'text', sec: 'huggingface', field: 'endpoint', flat: 'hf_endpoint', ph: 'https://huggingface.co'}},
     {sec: 'net', lab: 'net.ms_ep', hint: 'net.ms_ep_hint', ctl: {
-        k: 'text', sec: 'modelscope', field: 'endpoint', flat: 'ms_endpoint', ph: 'https://www.modelscope.cn'},
-     opts: {flat: 'ms_endpoint', badge: true}},
+        k: 'text', sec: 'modelscope', field: 'endpoint', flat: 'ms_endpoint', ph: 'https://www.modelscope.cn'}},
     {sec: 'net', lab: 'net.http_proxy', hint: 'net.proxy_hint', ctl: {
         k: 'text', sec: 'network', field: 'http_proxy', flat: 'network_http_proxy'}},
     {sec: 'net', lab: 'net.https_proxy', hint: 'net.proxy_hint', ctl: {
@@ -1320,8 +1321,7 @@ const GS_SPEC = [
     {sec: 'net', lab: 'net.no_proxy', hint: 'net.no_proxy_hint', ctl: {
         k: 'text', sec: 'network', field: 'no_proxy', flat: 'network_no_proxy'}},
     {sec: 'net', lab: 'net.ca_bundle', hint: 'net.ca_hint', ctl: {
-        k: 'text', sec: 'network', field: 'ca_bundle', flat: 'network_ca_bundle'},
-     opts: {flat: 'network_ca_bundle', badge: true}},
+        k: 'text', sec: 'network', field: 'ca_bundle', flat: 'network_ca_bundle'}},
 
     {t: 'Advanced'},
     {sec: 'adv', lab: 'adv.distributed_enabled', hint: 'adv.distributed_hint', ctl: {
