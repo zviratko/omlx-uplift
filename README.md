@@ -182,8 +182,12 @@ What you get over hook mode:
   background. Any manual rollback or base-pin turns it off.
 - **Keg stash and instant switching.** `dev stash-keg` freezes the
   current keg, `dev use <sha-prefix>` swaps between saved kegs in
-  seconds. `dev rollback` returns to the last-known-good; `dev prune`
-  trims old stashes.
+  seconds (a bare sha picks the NEWEST build of that commit). Stashes
+  are keyed per BUILD — reinstalling at the same commit still keeps the
+  outgoing bytes (`HEAD-<sha>_<UTC>`). `dev rollback` returns to the
+  last-known-good; `dev prune` trims old stashes (newest 5 kept by
+  default; set `keg_stash_keep` in `~/.omlx/uplift/dev.json`, 1..20,
+  or pass `--keep N`).
 - **Build options** the formula ships without: `dev install
   --with-custom-kernel --with-grammar`.
 

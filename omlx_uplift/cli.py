@@ -613,8 +613,9 @@ def cmd_dev(argv=None) -> int:
                                        "rollback", "auto-build"])
     ap.add_argument("name", nargs="?",
                     help="keg name or sha prefix for 'use' (U19)")
-    ap.add_argument("--keep", type=int, default=3,
-                    help="prune: stashes to keep (default 3)")
+    ap.add_argument("--keep", type=int, default=None,
+                    help="prune: stashes to keep (default: dev.json "
+                         "keg_stash_keep, else 5)")
     ap.add_argument("--force", action="store_true",
                     help="use: activate even with a live dev server / "
                          "unverified shebang")
@@ -755,14 +756,20 @@ def cmd_dev(argv=None) -> int:
                 return 0
             for m in rows:
                 size = m.get("bytes") or 0
-                mark = "  <- active" if m.get("name") == act else ""
+                # DEV-13: the ACTIVE guard is the Cellar address — several
+                # stash builds can share one address; only the installed
+                # one is active.
+                mark = ("  <- active"
+                        if (m.get("cellar_name") or m.get("name")) == act
+                        else "")
                 print(f"{m.get('name')}  {m.get('stashed_at', '?')}  "
                       f"{size / 2**30:.1f} GiB  {m.get('method', '?')}{mark}")
             return 0
         if args.action == "prune":
             removed = kegstash.prune(keep=args.keep)
+            kept = args.keep if args.keep is not None else kegstash.stash_keep()
             print("removed: " + (", ".join(removed) if removed else "nothing")
-                  + f" (kept newest {args.keep})")
+                  + f" (kept newest {kept})")
             return 0
         # use
         if not args.name:
@@ -792,7 +799,10 @@ def cmd_dev(argv=None) -> int:
 
         rows = kegstash.list_stashes()
         act = kegstash.active_keg()
-        rows = [m for m in rows if m.get("name") != act]
+        # DEV-13: compare the CELLAR address — the active build's stash
+        # name now carries a time suffix and would never equal `act`.
+        rows = [m for m in rows
+                if (m.get("cellar_name") or m.get("name")) != act]
         if not rows:
             print("nothing to roll back to — no stashed keg other than the "
                   "active one (see: omlx-uplift dev kegs)", file=sys.stderr)

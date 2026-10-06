@@ -1022,6 +1022,17 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
             _emit(res, "out", f"previous keg stashed: {r['name']} "
                               f"({r['method']}) — rollback: omlx-uplift "
                               f"dev use {r['name'][5:12]}")
+            # DEV-13: retention is a policy, not a chore — best-effort
+            # prune right after the build-path stash (dev.json
+            # keg_stash_keep, default 5 builds; never prunes the slot
+            # the active keg occupies). Failure here must never block
+            # the rebuild.
+            try:
+                gone = kegstash.prune()
+                if gone:
+                    _emit(res, "out", f"keg stash pruned: {', '.join(gone)}")
+            except Exception:
+                pass
     except Exception as exc:
         _emit(res, "err", f"keg stash skipped: {exc}")
     # install owns the pin (decision 3): brew refuses to reinstall a pinned

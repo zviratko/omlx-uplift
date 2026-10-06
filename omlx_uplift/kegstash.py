@@ -2,13 +2,24 @@
 
 brew's `reinstall` of a HEAD formula destroys the outgoing keg, so an
 omlx-dev build you want to return to is gone for good. This module keeps
-copies under ``<dev base_path>/uplift/kegs/omlx-dev/HEAD-<sha>/`` using
-APFS clones (``cp -c``): near-zero disk cost on the user's volume,
-plain-copy fallback elsewhere.
+copies under ``<dev base_path>/uplift/kegs/omlx-dev/`` using APFS clones
+(``cp -c``): near-zero disk cost on the user's volume, plain-copy
+fallback elsewhere.
+
+DEV-13 (user 2026-10-07): stash entries are keyed per BUILD, not per
+commit — the directory name is ``HEAD-<sha>_<UTC ts>``. A HEAD formula
+reinstall at the SAME commit (different brew flags, re-materialized
+patch content, or a plain "reinstall to be sure") produced the same
+``HEAD-<sha>`` name before, and the name-idempotent stash no-op'd while
+brew destroyed the outgoing bytes: the hole this closes. The Cellar
+address itself stays ``HEAD-<sha>`` — brew's namespace and the shebang
+anchor — so every entry records ``cellar_name`` and ``activate``
+REPLACES whatever sits in that slot (two builds of one sha share the
+address; silently keeping a stale different build was the second half
+of the hole).
 
 Switching preserves shebang integrity by CONSTRUCTION (U19 risk item):
-every clone is stashed under the keg's own Cellar version name, and
-``activate`` re-installs the clone at that exact ``Cellar/omlx-dev/<name>``
+every clone is re-installed at its recorded ``Cellar/omlx-dev/<cellar_name>``
 path before re-pointing the ``opt/omlx-dev`` symlink. Absolute shebangs
 baked into ``bin/omlx-dev`` and the libexec venv therefore keep pointing
 at files that exist again at the same address. No sed, no relocate.
@@ -25,7 +36,10 @@ import shutil
 import subprocess
 
 FORMULA = "omlx-dev"
-DEFAULT_KEEP = 3
+# DEV-13: retention default 3 -> 5 builds, overridable per user via the
+# `keg_stash_keep` key in dev.json (clamped 1..20 — see stash_keep()).
+DEFAULT_KEEP = 5
+_KEEP_MIN, _KEEP_MAX = 1, 20
 _META = "uplift-kegstash.json"
 
 
@@ -106,10 +120,34 @@ def _dir_size(path: str) -> int:
     return total
 
 
+def stash_keep() -> int:
+    """DEV-13: retention knob — `keg_stash_keep` from dev.json (user's
+    call: the key lives with the rest of the dev-flow config, no new
+    global settings file for one integer), clamped, else DEFAULT_KEEP."""
+    try:
+        from . import devsrc
+
+        cfg = devsrc.load_config() or {}
+        v = int(cfg.get("keg_stash_keep", DEFAULT_KEEP))
+    except Exception:
+        return DEFAULT_KEEP
+    return max(_KEEP_MIN, min(_KEEP_MAX, v))
+
+
+def _build_ts() -> str:
+    # compact UTC: filesystem-safe, lexicographic == chronological
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
 def stash(name: str | None = None, root: str | None = None,
           formula: str = FORMULA) -> dict:
-    """Copy Cellar/<formula>/<name> into the stash. Idempotent: an
-    existing stash of the same name is left alone (kegs are immutable)."""
+    """Copy Cellar/<formula>/<name> into the stash. DEV-13: the stash
+    entry is keyed per BUILD — ``<keg name>_<UTC ts>`` (legacy name +
+    ``cellar_name`` field), so a reinstall at the SAME commit still
+    leaves a fresh rollback artifact. The 'exists' no-op path is gone:
+    two kegs can share a name and differ in bytes (brew flags, patch
+    materialization), and the outgoing bytes die with `brew reinstall`
+    unless this call takes them."""
     if name is None:
         name = active_keg(formula)
     if not name:
@@ -118,23 +156,33 @@ def stash(name: str | None = None, root: str | None = None,
     if not os.path.isdir(src):
         raise FileNotFoundError(f"keg not installed: {src}")
     dest_root = os.path.join(kegs_root(root), formula)
-    dest = os.path.join(dest_root, name)
-    if os.path.isdir(dest):
-        return {"name": name, "path": dest, "method": "exists"}
     os.makedirs(dest_root, exist_ok=True)
-    method = _clone(src, dest)
+    ts = _build_ts()
+    dest_name = f"{name}_{ts}"
+    # same-second double stash (drills, tests): keep names unique
+    n = 1
+    while os.path.isdir(os.path.join(dest_root, dest_name)):
+        n += 1
+        dest_name = f"{name}_{ts}.{n}"
+    method = _clone(src, os.path.join(dest_root, dest_name))
     meta = {
         "formula": formula,
-        "name": name,
+        "name": dest_name,
+        # cellar_name = the Cellar address this build came from and must
+        # return to (shebang anchor). stash name == cellar_name only for
+        # legacy pre-DEV-13 entries.
+        "cellar_name": name,
         "sha": name[len("HEAD-"):].split("_")[0],
         "stashed_at": _dt.datetime.now(_dt.timezone.utc)
                       .isoformat(timespec="seconds"),
         "method": method,
         "bytes": _dir_size(src),
     }
-    with open(os.path.join(dest, _META), "w", encoding="utf-8") as fh:
+    with open(os.path.join(dest_root, dest_name, _META), "w",
+              encoding="utf-8") as fh:
         json.dump(meta, fh, indent=2)
-    return {"name": name, "path": dest, "method": method}
+    return {"name": dest_name, "cellar_name": name,
+            "path": os.path.join(dest_root, dest_name), "method": method}
 
 
 def list_stashes(root: str | None = None, formula: str = FORMULA) -> list[dict]:
@@ -159,13 +207,21 @@ def list_stashes(root: str | None = None, formula: str = FORMULA) -> list[dict]:
     return out
 
 
-def prune(root: str | None = None, keep: int = DEFAULT_KEEP,
+def prune(root: str | None = None, keep: int | None = None,
           formula: str = FORMULA) -> list[str]:
-    """Delete stashes older than the newest `keep` (never the active keg)."""
+    """Delete stashes older than the newest `keep` builds. DEV-13: the
+    default comes from stash_keep() (dev.json `keg_stash_keep`, else 5),
+    and the active guard compares `cellar_name` — two stash entries can
+    map to ONE Cellar address now, and whichever build occupies that
+    address must never be pruned."""
+    if keep is None:
+        keep = stash_keep()
+    act = active_keg(formula)
     removed = []
     for meta in list_stashes(root, formula)[keep:]:
         name = meta.get("name") or ""
-        if name and name == active_keg(formula):
+        cellar = meta.get("cellar_name") or name
+        if act and cellar == act:
             continue
         shutil.rmtree(meta.get("path", ""), ignore_errors=True)
         removed.append(name)
@@ -198,28 +254,47 @@ def activate(name: str, root: str | None = None,
              formula: str = FORMULA, force: bool = False) -> dict:
     """Re-point the active keg at a stashed build.
 
-    Re-installs the clone at its original Cellar path (shebangs intact),
-    moves the opt symlink, refreshes the uplift .pth mount. The service
-    restart itself stays with the user (server_restart_control)."""
+    DEV-13 name resolution: an exact stash entry name (`HEAD-<sha>`
+    legacy or `HEAD-<sha>_<ts>`) activates exactly it; a bare/HEAD sha
+    activates the NEWEST stashed build of that commit (several builds
+    can share one sha now). The clone is installed at its recorded
+    `cellar_name` address, REPLACING whatever is in that Cellar slot —
+    silently keeping a stale different build of the same sha was the
+    second half of the DEV-13 hole. Then the opt symlink moves and the
+    uplift .pth mount refreshes. The service restart itself stays with
+    the user (server_restart_control)."""
+    d = os.path.join(kegs_root(root), formula)
     m = re.fullmatch(r"(?:HEAD-)?([0-9a-f]{7,40})", name.strip())
-    if m:
-        d = os.path.join(kegs_root(root), formula)
-        cands = [s for s in os.listdir(d)
-                 if s.startswith("HEAD-" + m.group(1))] \
-            if os.path.isdir(d) else []
-        if len(cands) == 1:
-            name = cands[0]
-    stashed = os.path.join(kegs_root(root), formula, name)
+    if m and not os.path.isdir(os.path.join(d, name.strip())):
+        sha = m.group(1)
+        rows = [s for s in list_stashes(root, formula)
+                if (s.get("cellar_name") or s.get("name") or "")
+                    .startswith("HEAD-" + sha)]
+        if rows:
+            # list_stashes is newest-first: bare sha = newest build of it
+            name = rows[0].get("name")
+    stashed = os.path.join(d, name)
     if not os.path.isdir(stashed):
         raise FileNotFoundError(
             f"no stashed keg {name!r} — see: omlx-uplift dev kegs")
+    meta = {}
+    try:
+        with open(os.path.join(stashed, _META), encoding="utf-8") as fh:
+            meta = json.load(fh)
+    except (OSError, ValueError):
+        pass
+    cellar_name = meta.get("cellar_name") or name
     if not force and running_pids(formula):
         raise RuntimeError(
             f"a {formula} server is running from this keg family — stop it "
             "first (brew services stop omlx-dev), or pass --force")
-    cellar = os.path.join(cellar_dir(formula), name)
-    if not os.path.isdir(cellar):
-        _clone(stashed, cellar)
+    cellar = os.path.join(cellar_dir(formula), cellar_name)
+    if os.path.isdir(cellar):
+        # DEV-13: the slot may hold a DIFFERENT build of the same sha —
+        # replace it with the one being activated (running_pids guard
+        # above means no process is serving from it).
+        shutil.rmtree(cellar)
+    _clone(stashed, cellar)
     if not _shebang_ok(cellar, formula):
         raise RuntimeError(
             f"{name}: bin/{formula} shebang does not point inside "
@@ -227,7 +302,7 @@ def activate(name: str, root: str | None = None,
             "(pass --force only if you know why)")
     link = opt_link(formula)
     os.makedirs(os.path.dirname(link), exist_ok=True)
-    rel = os.path.join("..", "Cellar", formula, name)
+    rel = os.path.join("..", "Cellar", formula, cellar_name)
     if os.path.islink(link):
         os.unlink(link)
     elif os.path.isdir(link):
@@ -240,5 +315,6 @@ def activate(name: str, root: str | None = None,
         remounted = cli._mount_into_dev_keg()
     except Exception:
         remounted = False
-    return {"name": name, "cellar": cellar, "link": link,
+    return {"name": name, "cellar_name": cellar_name,
+            "cellar": cellar, "link": link,
             "shebang_ok": True, "pth": remounted}
