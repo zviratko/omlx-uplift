@@ -1,12 +1,14 @@
-# Uplift skin crate — "INKWELL" (paper + ink, duotone minimal).
+# Uplift skin crate — "INKWELL" (paper + ink, duotone minimal + one plate).
 # Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
 #
 # Direction 2 (SPARK-4): the honest worst case for a token system — near-zero
-# chroma. chart-1 and chart-2 differ only in VALUE, not in hue. That is the
-# point: it exercises SPARK-1's seriesPalette() de-dupe on luminance
-# separation, and it proves --grid/--dim stay legible with no colour to hide
-# behind. State must then travel by SHAPE (square chips, hard rules), because
-# colour is not available to carry it.
+# chroma. chart-1 and chart-2 differ mostly in VALUE; the 2026-10-07 revision
+# (user: "the monochromatic look is too much, it needs a bit of colour")
+# admits ONE hue — a print-shop registration teal on accent + secondary
+# series — while structure and the state triad stay ink. It still exercises
+# SPARK-1's seriesPalette() de-dupe on luminance separation and proves
+# --grid/--dim stay legible with almost no colour to hide behind. State
+# travels by SHAPE (square chips, hard rules) exactly as before.
 #
 # Texture: pure CSS laid paper — two cross hatches at 3px and 5px pitch
 # (deliberately not multiples of each other, or the weave moires into visible
@@ -25,9 +27,18 @@ tokens:
   edge: "#d2d2cc"
   ink: "#1a1a1a"
   dim: "#5f5f5c"
-  accent: "#1a1a1a"
+  # SCALE-1 follow-up (user 2026-10-07: "the monochromatic look is too
+  # much, it needs a bit of colour"): one hue joins the duotone — a deep
+  # print-shop blue-green (registration-plate teal) on the ACCENT and the
+  # secondary series only. Structure stays ink (titles, rules, frames, the
+  # active tab); the state triad stays ink/dim so good/warn/bad remain a
+  # SHAPE language, not a hue contest. Measured on every text ground
+  # (card/row2/panel/field): accent 6.90:1 worst case — AA text.
+  accent: "#14566b"
   chart-1: "#1a1a1a"
-  chart-2: "#8b8b86"
+  # 3.51:1 as a stroke on card (>=3 is the line/graphics bar) and 4.19:1
+  # against chart-1, so the two series stay separable on paper.
+  chart-2: "#4f8494"
   grid: "#e6e6e2"
   heat: "#3d3d3a"
   frame: "#a8a8a3"
@@ -134,19 +145,33 @@ css: |-
   }
   .meter { background: #ececea; border: 1px solid var(--edge); }
   .meter > div { background: var(--ink); }
+  /* .metric-now inherits --chart-2 from the base sheet (uplift.css:1803) and
+     it is BOLD TEXT, not a stroke: at mid-teal that measures 3.51:1 on card —
+     under the 4.5 text bar (the grey it replaces measured 3.36, so this is a
+     pre-existing trap, not a regression). The readout takes the ink — a
+     number is structure — and the teal stays where it is a stroke: series
+     lines, the active timeframe chip (dark ink on mid-teal: 4.57), meters. */
+  .metric-now { color: var(--ink); }
   .meter.bad > div { background: #55554f; }
   .icon-btn:hover, select:hover { background: var(--ink); color: var(--card); }
   ::selection { background: var(--ink); color: #ffffff; }
+  /* The teal plate lands on solid grounds the base CSS paints with dark
+     ink on top (.badge.Prefilling, .gs-box-title.sec-dirty, .se-tab.se-new
+     :hover, .savebtn.queued — all read --ink-on-accent[-soft], defined at
+     :root for the amber default). #0b0b0b on registration teal measures
+     2.4:1, so the on-plate inks flip to paper here: 7.6:1. --ink itself
+     must NOT flip — it is body text on paper everywhere else. */
+  :root { --ink-on-accent: #f7f7f5; --ink-on-accent-soft: #f7f7f5; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: #efefec; }
   ::-webkit-scrollbar-thumb { background: #c4c4bf; border: 2px solid #efefec; }
   ::-webkit-scrollbar-thumb:hover { background: var(--ink); }
   .logo .logo-below::after {
-      content: "DUOTONE · 64 GSM · NO HUE";
+      content: "DUOTONE · 64 GSM · +1 PLATE";
       color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .2em;
   }
   .logo::after {
-      content: ": 100% K";
+      content: ": K + TEAL";
       color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .1em;
       margin-left: 6px;
   }

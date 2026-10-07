@@ -232,3 +232,18 @@ def test_hourly_prefill_derive_guards():
     # cached > prompt (a counter glitch) -> None, never a negative TPS
     assert up._HOURLY_DERIVE["avg_prefill_tps"](
         {"prompt_tokens": 10, "cached_tokens": 20, "prefill_seconds": 1.0}) is None
+
+
+# ---- SCALE-1 follow-up: the cache_efficiency hourly backfill is a PERCENT
+# (live key = vanilla cached/prompt*100). The raw-ratio derivation only hid
+# while axes auto-scaled; percent cards pin 0..100 now, so a 0..1 backfill
+# would draw flat along the floor on 7d/30d windows (user 2026-10-07).
+
+def test_hourly_cache_efficiency_is_a_percent():
+    row = {"prompt_tokens": 3072, "cached_tokens": 1024}
+    assert abs(up._HOURLY_DERIVE["cache_efficiency"](row) - 33.3333) < 1e-3
+
+
+def test_hourly_cache_efficiency_guards():
+    assert up._HOURLY_DERIVE["cache_efficiency"]({"prompt_tokens": 0, "cached_tokens": 0}) is None
+    assert up._HOURLY_DERIVE["cache_efficiency"]({"prompt_tokens": 100, "cached_tokens": 100}) == 100.0

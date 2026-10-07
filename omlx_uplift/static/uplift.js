@@ -433,7 +433,13 @@ function applyPrefs() {
     document.documentElement.dataset.motion = motionOff ? 'off' : 'auto';
     $('btn-motion').style.opacity = motionOff ? 0.4 : 1;
     if (typeof syncThemeMenu === 'function') syncThemeMenu();
-    CH.rerenderChartsTheme();
+    // SHEET-1: the commit path has the same contract as the preview path —
+    // charts bake strokes at build time, so the re-tint must wait for THIS
+    // dir's sheet (boot fires applyPrefs() right after loadSkins(), when the
+    // preboot link is still in flight). Idempotent: a live sheet repaints
+    // once now, an in-flight one repaints on arrival. Gate on the SAME dir
+    // applySkinCss() was given, or the wait could key on the wrong sheet.
+    whenSkinLive(cssDir, () => CH.rerenderChartsTheme());
     if (typeof syncEmbedTheme === 'function') syncEmbedTheme();   // round 6 item 11
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyPrefs);
@@ -602,10 +608,58 @@ $('dd-theme-menu').addEventListener('click', e => {
    reload. Iframes are deliberately left alone too: re-theming bench/chat on
    every hover row is heavy and jarring, syncEmbedTheme() stays commit-only.
    Charts are the expensive part, so the sweep is debounced and a re-tint
-   fires only when the resolved dir actually changes. */
+   fires only when the resolved dir actually changes.
+
+   SHEET-1 (user 2026-10-07: "inkwell turns almost monochromatic when
+   selected, the preview looks nicer"): uPlot bakes series strokes at build
+   time, so a re-tint that reads tokens BEFORE the new theme.css is in the
+   cascade freezes the PREVIOUS palette into the canvases forever (only a
+   reload cleared it). The old guard asked `link.sheet` — truthy while the
+   browser still exposes the PREVIOUS sheet mid-swap, and every token then
+   falls through to the :root (dark) defaults: previews and cold commits
+   painted amber/white charts on any light skin. 'Live' must mean THIS
+   dir's sheet, checked by URL identity, and the re-tint must also run
+   when the sheet arrives asynchronously — plus a settle timer as a backstop
+   so a missed load event can never strand stale colours. */
 let previewDir = null;
 let previewTimer = 0;
 const PREVIEW_DEBOUNCE_MS = 150;
+
+function skinHref(dir) {
+    return `${API}/uplift/api/skins/${encodeURIComponent(dir)}/theme.css`;
+}
+function skinSheetLive(dir) {
+    const link = document.getElementById('uplift-skin-css');
+    if (!link) return !dir;      // no sheet element: built-in tokens are live
+    if (!dir) return true;       // built-in theme needs no skin sheet
+    const href = link.sheet && link.sheet.href;
+    return !!href && href.indexOf(encodeURIComponent(dir)) !== -1;
+}
+/* Run fn when the skin sheet for `dir` provably drives the page. fn may
+   fire more than once (load + poll); callers keep them idempotent.
+   While a swapped href is still IN FLIGHT the browser keeps the PREVIOUS
+   sheet mounted (measured on the live board: data-theme and href were the
+   new dir while link.sheet still reported the old one), so 'not live'
+   must NEVER repaint — that is the stale bake this ticket exists for.
+   A failed load DOES repaint: the error event means the page is showing
+   base tokens, and the charts must match what the user actually sees. */
+function whenSkinLive(dir, fn) {
+    if (skinSheetLive(dir)) { fn(); return; }
+    const link = document.getElementById('uplift-skin-css');
+    if (!link) { fn(); return; }
+    const want = skinHref(dir);
+    const still = () => link.getAttribute('href') === want;
+    link.addEventListener('load', () => { if (still() && skinSheetLive(dir)) fn(); },
+        { once: true });
+    link.addEventListener('error', () => { if (still()) fn(); }, { once: true });
+    // backstop for a load event that fired before the listener attached or
+    // never fired at all: POLL for the live sheet, never repaint a stale one
+    let tries = 0;
+    const iv = setInterval(() => {
+        if (!still() || ++tries > 10) { clearInterval(iv); return; }
+        if (skinSheetLive(dir)) { clearInterval(iv); fn(); }
+    }, 120);
+}
 
 function committedSkinDir() {
     const skin = (typeof skinLookup === 'function') ? skinLookup(prefs.theme) : null;
@@ -631,19 +685,11 @@ function previewShow(sel) {
     previewDir = dir;
     document.documentElement.dataset.theme = dir;
     applySkinCss(dir);
-    // theme.css is ETag-cached, so an already-loaded skin is live the moment
-    // the link resolves; a FIRST load is async and its tokens are not in
-    // computed style yet. Re-tint when the sheet is provably live, else the
-    // first hover of an unseen skin would paint charts in the old palette.
-    const href = `${API}/uplift/api/skins/${encodeURIComponent(dir)}/theme.css`;
-    const link = document.getElementById('uplift-skin-css');
-    const repaint = () => { if (previewDir === dir) CH.rerenderChartsTheme(); };
-    if (!link || link.getAttribute('href') !== href) CH.rerenderChartsTheme();
-    else if (link.sheet) repaint();
-    else {
-        link.addEventListener('load', repaint, { once: true });
-        link.addEventListener('error', repaint, { once: true });
-    }
+    // SHEET-1: repaint ONLY once this dir's sheet is the one in the cascade.
+    // The previous `link.sheet` truthiness test passed while the browser was
+    // still serving the old sheet, and the rebuild baked the old palette into
+    // every canvas (uPlot fixes series strokes at build time).
+    whenSkinLive(dir, () => { if (previewDir === dir) CH.rerenderChartsTheme(); });
 }
 function previewHover(sel) {
     previewClear();

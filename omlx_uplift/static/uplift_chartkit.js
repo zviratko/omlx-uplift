@@ -144,6 +144,55 @@ function seriesPalette(col) {
 const ZERO_FLOOR_RANGE = (u, dmin, dmax) =>
     [0, (dmax == null || dmax <= 0) ? 1 : dmax * 1.05];
 
+/* SCALE-1 (user 2026-10-07): a zero floor is only honest where 0 is a
+   meaningful reading. Temperature and resident-memory never approach 0 in
+   normal operation — flooring them wastes the whole plot on dead space and
+   flattens the line the user actually watches (measured on the live board:
+   sys.memory pinned at the top edge of a 0..36 GB band). FLOAT_FLOOR_RANGE
+   pads the data window by 12% and rounds outward so uPlot's nice-ticks
+   land on whole numbers. Zero stays clamped as a floor: these units cannot
+   go below it and a genuine 0 sample stays inside the band.
+   PCT_FULL_RANGE pins percent cards to 0..100: efficiency at 3% must LOOK
+   like 3% of the full scale, not 3/4 of an auto-fitted one.
+   All three must return two FINITE numbers — a null bound leaves the uPlot
+   scale unset and the series never draws (U8 regression, same trap). */
+const FLOAT_PAD = 0.12;
+function FLOAT_FLOOR_RANGE(u, dmin, dmax) {
+    if (dmin == null || dmax == null) return [0, 1];
+    if (dmax <= dmin) {
+        if (dmax <= 0) return [0, 1];
+        const half = Math.max(Math.abs(dmax) * 0.05, 1);
+        return [Math.max(0, Math.floor(dmax - half)), Math.ceil(dmax + half)];
+    }
+    const pad = Math.max((dmax - dmin) * FLOAT_PAD, 1e-9);
+    return [Math.max(0, Math.floor(dmin - pad)), Math.ceil(dmax + pad)];
+}
+const PCT_FULL_RANGE = () => [0, 100];
+
+/* SCALE-1: the y-range policy for one metric card, decided from what the
+   card's LEFT-axis keys can physically be (the right-hand y2 axis always
+   carries a rate or a count and stays zero-floored at the call site).
+   - every plotted series is fmt 'pct'  -> pinned 0..100 (cache efficiency,
+     token-hit / lookup-hit %; legend-only series never draw and are out).
+   - every key is a *_temp_c           -> floating (idle floor ~9..30 °C).
+   - every key is sys/mem used|total_bytes -> floating (resident RAM never
+     reads near 0; the ceiling line rides the same band).
+   - anything else (rates, counts, tok/s, queue depth, per-rail watts that
+     legitimately read 0 idle) -> the U8 zero floor.
+   DOM-free by contract (TST-1): takes the crate def object, returns the
+   range fn — the page and the node tests share this ONE decision. */
+function metricYRange(def) {
+    const sers = ((def.series && def.series.length) ? def.series : [def])
+        .filter(s => !s.legendOnly && (!s.axis || s.axis === 'y'));
+    if (!sers.length) return ZERO_FLOOR_RANGE;
+    const keys = sers.map(s => s.key || '');
+    const fmts = sers.map(s => s.fmt || def.fmt || '');
+    if (fmts.every(f => f === 'pct')) return PCT_FULL_RANGE;
+    if (keys.every(k => /_temp_c$/.test(k))) return FLOAT_FLOOR_RANGE;
+    if (keys.every(k => /^(sys|mem)\.(used|total)_bytes$/.test(k))) return FLOAT_FLOOR_RANGE;
+    return ZERO_FLOOR_RANGE;
+}
+
 /* BUG-4 (user 2026-10-07: "holes in the graphs after our 2hz tick change"):
    FAST-1's union x column mixes ~500 ms live stamps with 5 s stored ones,
    so every 5 s-path series is ~10 nulls deep between its real points —
@@ -215,5 +264,6 @@ const TSTAMP_MS = 1;
 
 return { AXIS_FONT_PX, AXIS_FONT_FALLBACK, axisFont, cssRgb, toHex2, tint,
          chartColors, SERIES_PALETTE_ORDER, SERIES_PALETTE_MAX, seriesPalette,
-         ZERO_FLOOR_RANGE, GAP_BRIDGE_MS, gapBridge, TSTAMP_MS, lastNonNull };
+         ZERO_FLOOR_RANGE, FLOAT_FLOOR_RANGE, PCT_FULL_RANGE, metricYRange,
+         GAP_BRIDGE_MS, gapBridge, TSTAMP_MS, lastNonNull };
 });

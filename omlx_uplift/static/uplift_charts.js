@@ -792,9 +792,11 @@ function metricFormat(def) {
    middle"): extended to pct and bytes cards — auto-scaling to the data
    window put the line mid-plot on low-variance series; a floored axis
    shows the real magnitude. */
-function metricZeroFloor(key) {
-    return true;   // every small metric card floors at 0
-}
+/* U8/SCALE-1: the y-range policy lives in chartkit (DOM-free, node-testable
+   — tests/chart-zero-floor.test.cjs pins every card def). metricOpts routes
+   the LEFT axis through it; the right-hand y2 always carries a rate or a
+   count (prefill tok/s, restored tok/min, fan RPM) and keeps the U8 floor. */
+const metricYRange = KIT.metricYRange;
 function metricLabel(key) {
     const s = key.replace(/^(rate|tot|engines|mem|cache|pfx|spec|queue|pwr|therm|fan|prefill)\./, '')
         .replace(/_/g, ' ')
@@ -847,9 +849,10 @@ function metricOpts(id, def, col) {
         return o;
     })];
     const scales = { x: { time: true, range: pinnedXRange(id) },
-                     y: Object.assign({ auto: true },
-                         metricZeroFloor(def.key) ? { range: ZERO_FLOOR_RANGE } : null) };
+                     y: { auto: true, range: metricYRange(def) } };
     if (sers.some(s => s.legendOnly)) scales.yleg = { auto: true };
+    // SCALE-1: y2 always carries a rate or a count (prefill tok/s, restored
+    // tok/min, fan RPM) — those read 0 honestly, so the U8 floor stays.
     if (hasY2) scales.y2 = { auto: true, range: ZERO_FLOOR_RANGE };
     const axes = [metricXAxis(cardWindow(id), col), metricYAxis(col, def)];
     if (hasY2) {
@@ -1021,7 +1024,7 @@ function metricYAxis(col, def) {
     // width on the left gutter (2026-09-26). 10 keeps them clear of the
     // card edge while pulling the plot to nearly full width.
     return { stroke: col.dim, size: 4, font: axisFont(col), grid: true, gap: 2,
-             rotate: 0, space: 50, label: '',
+             rotate: 0, space: 26, label: '',
              values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) };
 }
 function metricFetch(id, force) {

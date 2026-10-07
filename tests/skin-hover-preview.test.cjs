@@ -116,7 +116,7 @@ function harness(committed) {
         querySelectorAll() { return []; },
     };
     const ctx = {
-        setTimeout, clearTimeout, console,
+        setTimeout, clearTimeout, setInterval, clearInterval, console,
         MutationObserver: class { constructor(fn) { this.fn = fn; } observe() {} },
         document: doc,
         API: '',
@@ -125,7 +125,10 @@ function harness(committed) {
         skinLookup(sel) { return SKINS[sel] || null; },
         applySkinCss(dir) { calls.skinCss.push(dir || null);
             link.getAttribute = () => `/uplift/api/skins/${dir}/theme.css`;
-            link.sheet = dir ? {} : null; },
+            // SHEET-1: a real CSSStyleSheet carries its own href. A stub with
+            // no href claimed "sheet live" for a dir the sheet never named,
+            // which is exactly the false positive the bug shipped behind.
+            link.sheet = dir ? { href: `/uplift/api/skins/${dir}/theme.css` } : null; },
         applyPrefs() { calls.applyPrefs++;
             const s = SKINS[ctx.prefs.theme];
             htmlEl.dataset.theme = s ? s.dir : ctx.prefs.theme; },
@@ -202,4 +205,71 @@ test('a commit suppresses the restore (no double rebuild)', async () => {
     assert.equal(h.calls.applyPrefs, before,
         'committed already equals the preview: restore must be a no-op');
     assert.equal(h.storage.writes, 0);
+});
+
+/* ---------------- SHEET-1: the stale-sheet race ----------------
+   uPlot bakes series strokes when a plot is BUILT, so a rerender that runs
+   while the cascade still holds the PREVIOUS theme.css freezes the old
+   palette into every canvas until a reload. The browser swaps <link href>
+   synchronously but exposes the new .sheet only after the fetch — exactly
+   the window the shipped guard read as "live". */
+test('preview must NOT bake strokes while the old sheet is still in the cascade', async () => {
+    const h = harness('nerv');
+    h.htmlEl.dataset.theme = 'nerv-1700000001';
+    h.link.getAttribute = () => '/uplift/api/skins/nerv-1700000001/theme.css';
+    h.link.sheet = { href: '/uplift/api/skins/nerv-1700000001/theme.css' };
+    // model the REAL sheet swap: href changes at once, .sheet follows on load
+    h.ctx.applySkinCss = dir => {
+        h.calls.skinCss.push(dir || null);
+        h.link.getAttribute = () => `/uplift/api/skins/${dir}/theme.css`;
+    };
+    h.ctx.previewShow('lain');
+    assert.equal(h.calls.rerender, 0,
+        'SHEET-1: a rerender with the stale sheet in the cascade strands the old palette');
+    // now the sheet resolves
+    h.link.sheet = { href: '/uplift/api/skins/lain-1700000002/theme.css' };
+    h.link.fire('load');
+    assert.ok(h.calls.rerender >= 1, 'charts re-tint the moment the previewed sheet is live');
+});
+
+test('a live sheet (ETag warm) still re-tints synchronously', async () => {
+    const h = harness('nerv');
+    h.htmlEl.dataset.theme = 'nerv-1700000001';
+    h.ctx.previewShow('lain');            // harness swaps sheet synchronously
+    assert.ok(h.calls.rerender >= 1, 'warm preview must not wait for a load event');
+});
+
+test('the settle backstop repaints even if the load event is missed', async () => {
+    const h = harness('nerv');
+    h.htmlEl.dataset.theme = 'nerv-1700000001';
+    h.link.getAttribute = () => '/uplift/api/skins/nerv-1700000001/theme.css';
+    h.link.sheet = { href: '/uplift/api/skins/nerv-1700000001/theme.css' };
+    h.ctx.applySkinCss = dir => {
+        h.calls.skinCss.push(dir || null);
+        h.link.getAttribute = () => `/uplift/api/skins/${dir}/theme.css`;
+    };
+    h.ctx.previewShow('lain');
+    assert.equal(h.calls.rerender, 0, 'nothing painted yet');
+    // no load event at all; the sheet becomes live on its own
+    await sleep(700);
+    assert.equal(h.calls.rerender, 0,
+        'backstop must not repaint from a sheet that never arrived for this dir');
+    h.link.sheet = { href: '/uplift/api/skins/lain-1700000002/theme.css' };
+    await sleep(50);
+    h.ctx.previewShow('shodan');          // new hover: fresh wait, fresh sheet
+    h.link.sheet = { href: '/uplift/api/skins/shodan-1700000003/theme.css' };
+    await sleep(700);                     // settle timer is the only path left
+    assert.ok(h.calls.rerender >= 1, 'the settle backstop must eventually repaint');
+});
+
+test('the commit path gates its re-tint on the same live-sheet test', () => {
+    // anchor on the addEventListener line (applyPrefs itself calls matchMedia
+    // for 'auto', so the first occurrence would cut the region short)
+    const end = src.indexOf("matchMedia('(prefers-color-scheme: dark)').addEventListener");
+    const ap = src.slice(src.indexOf('function applyPrefs()'), end);
+    assert.ok(ap.length > 300, 'applyPrefs region must be findable (moved — update test)');
+    assert.match(ap, /whenSkinLive\(\s*cssDir\s*,\s*\(\)\s*=>\s*CH\.rerenderChartsTheme\(\)\s*\)/,
+        'commit re-tint must wait for the SAME dir the skin link was given');
+    assert.ok(!/(^|[^w])CH\.rerenderChartsTheme\(\);/m.test(ap.replace(/whenSkinLive\([\s\S]*?\}\)/g, '')),
+        'no synchronous un-gated rerender may survive in applyPrefs');
 });

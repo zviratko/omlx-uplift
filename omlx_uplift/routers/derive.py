@@ -48,7 +48,13 @@ _HOURLY_DERIVE = {
     # usage table records per hour).
     "generation.tokens_s":    lambda r: r["completion_tokens"] / 3600.0,
     "rate.requests_s":        lambda r: r["requests"] / 3600.0,
-    "cache_efficiency":       lambda r: (r["cached_tokens"] / r["prompt_tokens"])
+    # SCALE-1 follow-up (2026-10-07): the LIVE key is a PERCENT (vanilla
+    # server_metrics._build_snapshot: cached / prompt * 100; uplift's
+    # collector passes it through) — this backfill divided raw, so every
+    # hourly point was a 0..1 RATIO. Auto-scaled axes hid the mismatch;
+    # with percent cards pinned to 0..100 a 7 d backfill would draw flat
+    # along the floor (0.4% of the axis). Mirror the live formula: ×100 out.
+    "cache_efficiency":       lambda r: (100.0 * r["cached_tokens"] / r["prompt_tokens"])
                                         if r["prompt_tokens"] else None,
     # (prompt - cached) / prefill_seconds, NOT prompt / prefill_seconds:
     # upstream's own live metric (server_metrics._build_snapshot) divides
