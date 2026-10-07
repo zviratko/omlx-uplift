@@ -32,6 +32,8 @@ COMMANDS = [
             " overrides (the dashboard's ENVIRONMENT VARIABLES modal)"),
     ("doctor", "check the installed omlx tree against its wheel RECORD"
                " (read-only; exit 1 = unexpected drift)"),
+    ("bench-env", "status|create — pinned lm-eval venv for the harness"
+                  " accuracy engine (own venv, never a keg)"),
 ]
 
 _TOP_USAGE = """\
@@ -69,6 +71,10 @@ COMMAND_USAGE = {
             " [--share K,...] [--no-share K,...] [--interactive]\n"
             "                 dev kegs | dev stash-keg\n"
             "                 dev use <sha> [--force] | dev prune [--keep N]"),
+    "bench-env": ("omlx-uplift bench-env [status] [--json]\n"
+              "                 bench-env create [--reinstall]\n"
+              "                 pinned lm-eval venv under ~/.omlx/uplift/bench-env\n"
+              "                 (harness accuracy engine; no torch, ever)"),
     "env": ("omlx-uplift env [list] [--json]\n"
             "                 env set NAME VALUE | env reset NAME\n"
             "                 env disable-all | env enable-all\n"

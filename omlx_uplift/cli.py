@@ -241,6 +241,53 @@ def _verify_mount(python: str) -> tuple[bool, str]:
     return False, " / ".join(tail)
 
 
+def cmd_bench_env(argv=None) -> int:
+    """REPL-2b: manage the pinned lm-evaluation-harness venv.
+
+      bench-env status [--json]   missing | ready | stale (+digests)
+      bench-env create [--reinstall]  build the pinned venv (~1 min first)
+
+    The venv lives under the shared uplift store, NEVER inside a keg:
+    harness pulls ~70 packages and the card forbids torch anywhere near
+    omlx/uplift. Accuracy benchmark runs that choose the harness engine
+    refuse to start when this is missing or stale."""
+    import json as _json
+
+    ap = argparse.ArgumentParser(prog="omlx-uplift bench-env")
+    ap.add_argument("action", nargs="?", default="status",
+                    choices=["status", "create"])
+    ap.add_argument("--reinstall", action="store_true",
+                    help="tear down and rebuild an existing venv")
+    ap.add_argument("--json", action="store_true", help="machine-readable status")
+    args = ap.parse_args(argv)
+
+    from . import bench_env
+
+    if args.action == "create":
+        try:
+            st = bench_env.create(reinstall=args.reinstall)
+        except Exception as e:
+            print(f"bench-env create failed: {e}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(_json.dumps(st))
+        return 0
+    st = bench_env.status()
+    rc = 0 if st["state"] == "ready" else 1
+    if args.json:
+        print(_json.dumps(st))
+        return rc
+    if st["state"] == "ready":
+        print(f"ready: {st['path']}")
+    elif st["state"] == "stale":
+        print(f"stale: {st['path']}\n  built from {st['built_from']}, "
+              f"requirements now {st['wants']}\n  "
+              f"rebuild: omlx-uplift bench-env create --reinstall")
+    else:
+        print(f"missing: {st['path']}\n  create: omlx-uplift bench-env create")
+    return 0 if st["state"] == "ready" else 1
+
+
 def cmd_doctor(argv=None) -> int:
     """KEGID-2: READ-ONLY census of the installed omlx tree against its
     wheel RECORD. Exit 0 clean/expected-only, 1 unexpected drift,
@@ -1401,7 +1448,7 @@ def main() -> int:
         return show_man()
     if sys.argv[1] not in {
             "serve", "view", "install", "uninstall", "patch", "patches",
-            "kernel", "skin", "dev", "env", "doctor"}:
+            "kernel", "skin", "dev", "env", "doctor", "bench-env"}:
         print(f"omlx-uplift: unknown command {sys.argv[1]!r}\n",
               file=sys.stderr)
         from .help import print_help
@@ -1423,7 +1470,7 @@ def main() -> int:
     return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
             "uninstall": cmd_uninstall, "patch": cmd_patches,
             "kernel": cmd_kernel, "dev": cmd_dev, "env": cmd_env,
-            "doctor": cmd_doctor}[cmd](rest)
+            "doctor": cmd_doctor, "bench-env": cmd_bench_env}[cmd](rest)
 
 
 if __name__ == "__main__":

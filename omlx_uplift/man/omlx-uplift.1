@@ -212,6 +212,28 @@ never from the copied file.
 Mutable state (usage database, cluster) must stay private while both
 servers run — a shared live write race.
 .El
+.It Xo Ic bench-env
+.Op Ar action
+.Op Fl -json
+.Xc
+.Bl -tag -width Ds -compact
+.It Ic bench-env Op Ic status Fl -json
+Report the pinned lm-evaluation-harness venv used by the harness accuracy
+engine:
+.Ic missing ,
+.Ic ready ,
+or
+.Ic stale
+(requirements changed since the venv was built; exit status 1).
+.It Ic bench-env Ic create Op Fl -reinstall
+Build the venv under
+.Pa ~/.omlx/uplift/bench-env
+from the shipped
+.Pa bench_env_requirements.txt
+pin (70 packages, torch-free by hard rule). Takes about a minute on a
+warm wheel cache.
+The omlx and uplift kegs are never touched.
+.El
 .It Xo Ic env
 .Ic list
 .Op Fl -json
