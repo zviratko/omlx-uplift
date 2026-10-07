@@ -245,9 +245,14 @@ function applyTab() {
         btn.append(span, ' ', caret);
     }
     for (const card of pageCards) {
-        const show = (card.dataset.tab || 'status') === tab &&
+        // NAT-3: native shells exist only while their surface is flagged on;
+        // with the kill-switch off they must never paint (embed = reality).
+        const nat = card.dataset.native;
+        const natOn = nat && (NATIVE_SURFACES === 'all' || NATIVE_SURFACES === nat);
+        const show = !card.classList.contains('native-page') || natOn;
+        const visible = show && (card.dataset.tab || 'status') === tab &&
             (!card.dataset.sub || card.dataset.sub === sub);
-        card.style.display = show ? '' : 'none';
+        card.style.display = visible ? '' : 'none';
     }
     // Status = the GridStack board; page cards live in #pages (outside it).
     $('grid').style.display = tab === 'status' ? '' : 'none';
@@ -291,9 +296,30 @@ const EMBED_TARGETS = {
     'chat-page': '/admin/chat',
     'cluster-page': '/admin/dashboard?tab=cluster',
 };
+/* NAT-3 kill-switch: value server-substituted into <html
+   data-native-surfaces="..."> (off|bench|chat|all, default off — the
+   embed path below stays byte-identical when off). Names distinct from
+   `NATIVE` (that one means the standalone viewer, PATHS/viewer). */
+const NATIVE_SURFACES = document.documentElement.dataset.nativeSurfaces || 'off';
+function nativeSurfaceOn(tab) {
+    return tab === 'bench' || tab === 'chat';
+}
 function showEmbedPage(tab, sub) {
     const card = pageCards.find(c => c.dataset.id === EMBED_PAGE_IDS[tab]?.[sub]);
     if (!card) return;
+    if (nativeSurfaceOn(tab) && (NATIVE_SURFACES === 'all' || NATIVE_SURFACES === tab)) {
+        // native shell replaces the iframe for this surface (stub cards
+        // until REPL-1/2/3/NAT-4 fill them); embed card stays hidden.
+        const host = pageCards.find(c => c.classList.contains('native-page') && c.dataset.tab === tab);
+        card.style.display = 'none';
+        if (host) {
+            host.hidden = false;
+            host.style.display = '';
+            if (tab === 'bench') UpliftNativeBench.mount();
+            else UpliftNativeChat.mount();
+        }
+        return;
+    }
     const id = card.dataset.id;
     const frame = card.querySelector('.embed-frame');
     const link = card.querySelector('.embed-open');

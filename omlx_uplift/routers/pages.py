@@ -307,11 +307,33 @@ async def uplift_login_page():
     return _login_page()
 
 
+def _serve_index_flagged(request: Request) -> Response:
+    """NAT-3: index.html carries the literal token NATIVE_SURFACES_TOKEN in
+    <html data-native-surfaces="...">. The kill-switch is per-INSTANCE
+    config, so it cannot be baked into the shipped static file — substitute
+    the resolved value at serve time. Index is already Cache-Control:
+    no-store (entry point), so the replacement never strands a stale flag;
+    the ?native= URL override therefore applies on every fresh load."""
+    resp = _static_file(request, "index.html")
+    from .. import native_surfaces
+
+    mode = native_surfaces.resolve(request.query_params.get("native"))
+    if isinstance(resp, FileResponse):
+        body = resp.path.read_bytes().replace(
+            b"NATIVE_SURFACES_TOKEN", mode.encode()
+        )
+        headers = dict(resp.headers)
+        headers.pop("content-length", None)
+        return HTMLResponse(content=body, status_code=resp.status_code,
+                            headers=headers)
+    return resp  # 304 etc.
+
+
 async def _serve_index(request: Request):
     redirect = await _gate(request, "/uplift/login")
     if redirect is not None:
         return redirect
-    return _static_file(request, "index.html")
+    return _serve_index_flagged(request)
 
 
 @page_router.get("/uplift/", include_in_schema=False)
@@ -330,9 +352,9 @@ async def uplift_static(path: str, request: Request):
         redirect = await _gate(request, "/uplift/login")
         if redirect is not None:
             return redirect
-    else:
-        await require_admin(request)
-    return _static_file(request, path or "index.html")
+        return _serve_index_flagged(request)  # NAT-3: token substitution too
+    await require_admin(request)
+    return _static_file(request, path)
 
 
 @page_router.get("/admin/uplift/{path:path}", include_in_schema=False)

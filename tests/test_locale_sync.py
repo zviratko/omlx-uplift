@@ -24,7 +24,9 @@ OWNED_PREFIXES = ("uplift.req.", "uplift.layout.retention_", "uplift.env.",
                   "uplift.bench.", "uplift.chip.", "uplift.dl.", "uplift.feed.",
                   "uplift.gsys.", "uplift.helper.", "uplift.logs.", "uplift.mm.",
                   "uplift.mo.", "uplift.models.", "uplift.retention.",
-                  "uplift.patches.", "uplift.envcat.")
+                  "uplift.patches.", "uplift.envcat.",
+                  # NAT-3: native surface skeleton keys (bench stubs + chat)
+                  "uplift.chat.")
 
 
 def _locale(lang):

@@ -12,6 +12,11 @@ fixed annoyance, changed behavior, new command), add one bullet under an
 users never see.
 
 ## Unreleased
+- **Native Bench/Chat shell (preview branch only, off by default).** The
+  `feat/native-bench-chat` build accepts `?native=off|bench|chat|all` (or
+  `uplift_native_surfaces` in `~/.omlx/uplift/config.json`) to swap the
+  Bench and Chat tabs from the embedded classic iframes to native stub
+  pages; `off` keeps today's behavior exactly. Nothing changes for main.
 
 ## [1.1] — 2026-10-07
 

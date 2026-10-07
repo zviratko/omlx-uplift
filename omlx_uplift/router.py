@@ -1,7 +1,7 @@
 """Uplift HTTP surface — facade (SPLIT-1).
 
 The routes themselves live in omlx_uplift/routers/{base,pages,apiinfo,
-settings,derive,metrics,requests,policy,patches,dev,skins}.py. This
+settings,derive,metrics,requests,policy,patches,dev,skins,bench,chat}.py. This
 module imports the domain modules IN THEIR ORIGINAL FILE ORDER, which
 is what fixes api_router registration order — on the /admin/api alias
 mount, duplicate paths resolve in registration order (vanilla
@@ -63,6 +63,18 @@ from .routers.dev import (
 )
 from .routers.skins import (
     skin_res, skin_theme_css, skins_list,
+)
+# NAT-3: native Bench/Chat surface route trees (501 stubs until REPL-1..4 /
+# NAT-4 fill them). Registered LAST: none of their literals collide with the
+# dynamic shapes above, and appending keeps the SPLIT-1 order comment's
+# original-file mapping intact for every pre-existing block.
+from .routers.bench import (
+    bench_flag, bench_start, bench_active, bench_stream, bench_cancel, bench_results,
+    bench_accuracy_add, bench_accuracy_queue, bench_accuracy_results,
+    bench_context_start, bench_context_active, bench_ane_start, bench_ane_results,
+)
+from .routers.chat import (
+    chat_key, chat_history, chat_history_save,
 )
 
 __all__ = [
