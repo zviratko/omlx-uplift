@@ -188,7 +188,20 @@ function gapBridge(maxGapMs) {
     };
 }
 
+/* TSTAMP_MS: uPlot's opts.ms — the timestamp unit of the data columns
+   (1 = milliseconds; its DEFAULT is 0.001 = seconds). Every x column we
+   feed is ms-epoch (server ts * 1000, Date.now()), but with ms unset
+   uPlot treats those stamps as SECONDS: a pinned 300 000 ms window reads
+   as 300 000 s (3.5 days), the tick chooser picks spacings from the
+   seconds table (43.2 s, 28.8 s...) that are NOT divisors of the real
+   window, and as the pinned range slides every draw the tick count flips
+   6↔7 — bottom-axis labels appear and disappear in a ~12-45 s cycle
+   (live drill 2026-10-07: A/B on the running board, with ms:1 the tick
+   set is stable and lands on clock 30 s boundaries). Reference this in
+   EVERY uPlot opts; never hand-write ms: 1 at a call site. */
+const TSTAMP_MS = 1;
+
 return { AXIS_FONT_PX, AXIS_FONT_FALLBACK, axisFont, cssRgb, toHex2, tint,
          chartColors, SERIES_PALETTE_ORDER, SERIES_PALETTE_MAX, seriesPalette,
-         ZERO_FLOOR_RANGE, GAP_BRIDGE_MS, gapBridge };
+         ZERO_FLOOR_RANGE, GAP_BRIDGE_MS, gapBridge, TSTAMP_MS };
 });

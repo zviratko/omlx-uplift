@@ -23,6 +23,13 @@ users never see.
   standalone repo; they now run against a plain upstream checkout nightly.
 
 ### Fixed
+- Chart bottom-axis tick labels no longer appear and disappear on a
+  ~12–45 s cycle. Every chart feeds uPlot millisecond timestamps but
+  never told it (`opts.ms` defaulted to the seconds unit), so the tick
+  chooser worked on a fake 3.5-day axis and picked spacings (43.2 s,
+  28.8 s) that do not divide the window — as the pinned range slid, the
+  tick count flipped 6↔7. Charts now share `TSTAMP_MS = 1` from the
+  chartkit; ticks land on clock 30 s boundaries and stay put.
 - Max Concurrent Requests no longer demands a server restart after every
   save: upstream #3765 live-applies it, so Uplift shows the restart badge
   only while distributed (cluster) engines are active — classic parity.

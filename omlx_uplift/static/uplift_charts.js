@@ -290,6 +290,7 @@ function baseOpts(specs, axes, legendHook) {
     const col = chartColors();
     return {
         width: 0, height: 240, padding: [4, 0, 0, 0],
+        ms: KIT.TSTAMP_MS,   // x columns are ms-epoch (TSTAMP_MS in chartkit)
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 6, fill: col.dim } },
         // Vendored uPlot 1.6.32 has no legend.labels option (DOM legend is
         // styled by .u-legend in uplift.css) — nothing to skin here.
@@ -849,6 +850,7 @@ function metricOpts(id, def, col) {
     }
     return {
         width: 300, height: 100, padding: [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
+        ms: KIT.TSTAMP_MS,   // x columns are ms-epoch (TSTAMP_MS in chartkit)
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
         // SWEEP178: live:false like the shared charts. With live:true the
         // vendored build re-paints the value cells on its own deferred draw
@@ -1201,6 +1203,7 @@ function createUsageChart() {
     const col = chartColors();
     usageChart = new uPlot({
         width: el.clientWidth || 600, height: 200,
+        ms: KIT.TSTAMP_MS,   // x column is ms-epoch (uplift_usage.js: base.getTime())
         scales: { x: { time: true }, y: { auto: true, range: ZERO_FLOOR_RANGE } },  // U8
         axes: [{ stroke: col.dim, size: 36, font: axisFont(col),
                  values: (s, t) => t.map(ts => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })) },
