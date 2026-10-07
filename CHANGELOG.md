@@ -13,7 +13,47 @@ users never see.
 
 ## Unreleased
 
+## [1.1] — 2026-10-07
+
+The release that closes a self-inflicted production outage: patch
+backups are keyed to a keg identity that never used to change, so an
+upgrade could silently restore old bytes into a new keg. Uplift can now
+detect that class of drift by itself (`doctor`), plus a live 2 Hz metric
+feed and an environment-variables reference.
+
 ### Added
+- **Live rate feed (2 Hz).** Throughput, queue and memory lines resolve at
+  2 Hz over short windows (≤ 5 min) instead of waiting for the 5 s stored
+  tick. A FastSampler thread walks the same collectors into in-memory
+  rings, streamed over SSE with a ring replay on (re)connect. The stored
+  series is untouched: the 5 s tick drains its own accumulator share, so
+  every persisted rate keeps its full-window semantics. Opt-in per card
+  via *Layout → Live rate feed (2 Hz)*; the stream pauses while the tab is
+  hidden. `iogpu.wired_limit_mb` now caches 60 s (its reader forked a
+  sysctl every tick).
+- **Environment variables reference.** A new *ENVIRONMENT VARIABLES*
+  button in Server settings opens a searchable modal over 147 documented
+  `omlx` engine knobs (11 groups), each with its description, stock
+  default, honest apply-class badge and live state (SET / STORED / LAUNCH
+  ENV / MANAGED). On an `omlx-dev` install 136 of them are editable
+  through the UI or `omlx-uplift env list|set|reset|disable-all|enable-all`;
+  on a vanilla install the modal is read-only by design and says so (PUT
+  403s) — vanilla owns those variables and last-writer-wins. Editing
+  stays an allow-list: a name absent from the catalog is rejected.
+- **`omlx-uplift doctor`** — a read-only census of every installed `omlx`
+  file against its install-time hash (exit 0 clean/expected, 1 drift, 2 no
+  RECORD). Custom-kernel binaries that brew legitimately rebuilds and
+  files owned by an applied patch are expected drift, never an alarm. The
+  same census runs at boot (warns, never blocks) and the PATCHES card
+  shows a red banner naming the drifted files. The Oct-1..4 incident
+  below would have failed this check on its first boot.
+- PREFILL, not just decode: the Throughput chart's prefill line and the
+  prefill flagship card now plot the **exact per-tick rate**
+  (`prefill.tokens_s`, credited from the engine's prefill-tracker events
+  as each chunk happens) instead of `avg_prefill_tps`, a session-lifetime
+  average upstream only updates when a request *finishes* — aborted
+  requests never counted and one prefill could not move the line. The
+  average stays collected and labelled as an average on the session tile.
 - SYNC-1 upstream sync: Server settings gained the **GPU Keep-Warm
   Interval** row (upstream `server.gpu_keep_warm_interval` — live-applied,
   was previously settings.json/env-only), the Helper page lists **DeepSeek
@@ -21,15 +61,79 @@ users never see.
   editor's Model Type offers **decision** (upstream #4315, Clef/OpenJev).
   The drift guards that should have caught these silently skipped on the
   standalone repo; they now run against a plain upstream checkout nightly.
+- Classic parity for storage: **SSD Write Buffer** and **SSD Snapshot
+  Precision** are now always visible with the control disabled when the
+  effective storage mode does not use them, exactly like the classic
+  dashboard — previously both rows were hidden unless SSD-snapshot storage
+  was set explicitly. Labels relabelled to the classic catalog across all
+  10 locales.
+- `omlx-uplift serve --qa` runs an isolated instance on its own base
+  (`~/.omlx-qa`, its own fresh API key): a QA server can no longer rewrite
+  production settings — the root cause of the 2026-10-03 port-persistence
+  incidents.
+- Charts respect what their values can physically be: percent metrics pin
+  0–100, temperatures and byte counters float their own range, rates stay
+  floored. Card y-axes give room for 3–4 ticks instead of 2, so the axis
+  no longer reads `[0, 1]` on an idle card.
+- Inkwell gained a teal accent plate (its chart series 2 now clears 3.5:1
+  on the card background).
+
+### Changed
+- Dev builds stash every outgoing keg under its own build name (was: one
+  entry per commit, so a same-commit reinstall discarded the bytes being
+  replaced). Retention default 3 → 5, configurable via `keg_stash_keep` in
+  `dev.json`; a bare commit-ish rollback now picks the newest stashed
+  build of that commit instead of any build of it.
+- In-flight feed wording: spec-prefill extras read
+  `(draft $selected / $generated)` — deliberately diverging from classic's
+  phrasing, per user decision.
+- Stable builds re-pinned to the tested set (`constraints-stable.txt`);
+  `--HEAD` still floats.
 
 ### Fixed
+- **Keg identity: patches no longer resurrect old files into a new
+  install.** `keg_id()` hashed `omlx/version.py`, but real wheels ship
+  `omlx/_version.py` — so *every* production keg identified as the same
+  constant and the documented "reinstall → new identity → patches
+  re-validate" guarantee never held. Live consequence: pre-upgrade
+  first-touch backups survived a reinstall keyed to that constant, and the
+  next patch removal restored 6 files from 5 different upstream commits
+  into the newer keg. Every model load failed with a
+  `validate_moe_expert_offload()` signature mismatch for three days,
+  invisible to pytest, node tests and nightly (none of them load a
+  model). Identity now prefers the wheel's `dist-info` RECORD, then
+  `_version.py`, then `version.py`.
+- A cached `doctor` WARNING used to replay as a false alarm after a manual
+  repair. Clean verdicts cache, drift re-censuses every boot, and the read
+  side refuses a cached `ok:false` — an alarm that can lie is worse than
+  none.
+- A `kernel_source` patch added with dev scope produced eight near-identical
+  SAFEGUARDS rows, held AUTO-APPLY, and rendered the block twice.
+  The heuristic is now scope-aware (on a source tree the rebuild *is* the
+  pipeline, so the kernel paths are one display-only advisory), problems
+  group per code with the long rebuild hint rendered exactly once, and the
+  add-preview defers to the card behind it. Misaligned approve buttons in
+  the preview now have their own borders and spacing.
+- The whole cache/queue/prefix metric family could stop being recorded:
+  `collect_cache` guarded the hits delta but not the misses delta, so an
+  engine reporting `hits` without `misses` raised every tick and the
+  collector's blanket `except` took the family down with it. Spec-prefill
+  *scoring* (draft-model work) is also no longer credited as target
+  prefill.
 - Memory & Cache legend values no longer blink (~1 s apart, forever):
-  the idle legend read the union column's last ROW, which on FAST-1's
+  the idle legend read the union column's last ROW, which on the new
   mixed 2 Hz/5 s cadence belongs to only one stream at a time — the
   other series rendered '—' between their samples. Idle cells now show
   each series' OWN latest value (hovered crosshair rows keep their
   honest nulls). A distinct root from the axis-tick flicker below,
-  same FAST-1 mixed-cadence surface.
+  same mixed-cadence surface.
+- Chart lines no longer show a visible break every ~5 s on short windows.
+  The mixed-cadence x column left ~10 nulls between stored samples and
+  uPlot clipped each run; a per-series gap hook now bridges holes up to
+  ~12 s (3 stored intervals) and keeps a break for a longer one, so a
+  stalled sampler or a genuinely quiet metric still reads as absent.
+  `spanGaps` was rejected — it would fabricate a straight line across a
+  real outage.
 - Chart bottom-axis tick labels no longer appear and disappear on a
   ~12–45 s cycle. Every chart feeds uPlot millisecond timestamps but
   never told it (`opts.ms` defaulted to the seconds unit), so the tick
@@ -37,6 +141,11 @@ users never see.
   28.8 s) that do not divide the window — as the pinned range slid, the
   tick count flipped 6↔7. Charts now share `TSTAMP_MS = 1` from the
   chartkit; ticks land on clock 30 s boundaries and stay put.
+- `server.log` is no longer flooded by the "prefix_cache counters absent"
+  notice (98k lines after one restart). Absence right after a restart is
+  expected — the engine fills those counters only once requests flow — so
+  it now logs once per absence episode instead of on every 5 s tick, and
+  the 2 Hz walk (which shares the collector) stays silent.
 - Max Concurrent Requests no longer demands a server restart after every
   save: upstream #3765 live-applies it, so Uplift shows the restart badge
   only while distributed (cluster) engines are active — classic parity.
@@ -66,6 +175,19 @@ users never see.
   card is now labelled "average generation tok/s" and the Generation tile's
   sub-label reads "average tok/s". Long windows backfill from hourly usage
   rollups; zeros are recorded, so the line drains to 0 instead of vanishing.
+- `cache_efficiency` hourly backfill divided a raw ratio while the live
+  key is a percent; auto-scaled axes hid the 100× error, and the 7 d/30 d
+  history would have drawn flat along the floor once the axis pinned 0–100.
+  Backfill now mirrors the live formula.
+- A selected skin's chart colors no longer freeze to the *previous* skin's
+  palette. Re-tint waited on the wrong signal: mid-swap the browser still
+  exposes the old stylesheet for ~120–300 ms, so every token fell through
+  to the dark defaults. Charts now wait for liveness identified by URL.
+- Six locales (ja, ru, fr, es, pt-BR, zh-TW) had English text pasted
+  verbatim into the storage-settings labels by an earlier parity sync;
+  translated to each locale's own terminology, and the parity guard that
+  should have caught it now whitelists quantization labels (BF16/FP32/
+  "RHT + int16") that are identical by design.
 
 ## [1.0] — 2026-10-03
 

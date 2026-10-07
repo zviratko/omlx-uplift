@@ -5,7 +5,7 @@ class OmlxUplift < Formula
   # Stable tag by default, `--HEAD` follows main. This repo IS the tap
   # (zviratko/uplift), so tag + formula + package version move in one
   # commit; tests/test_release_formula.py pins that they agree.
-  url "https://github.com/zviratko/omlx-uplift.git", tag: "v1.0"
+  url "https://github.com/zviratko/omlx-uplift.git", tag: "v1.1"
   head "https://github.com/zviratko/omlx-uplift.git", branch: "main", using: :git
 
   # Depends on the omlx formula from the upstream tap; brew resolves
