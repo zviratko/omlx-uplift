@@ -2059,3 +2059,32 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .native-stub.card { border: 1px dashed var(--edge); padding: 12px 14px; }
 .native-stub h2 { margin: 0 0 4px; font-size: 13px; }
 .native-stub-note { margin: 0; color: var(--dim); font-size: 11px; }
+
+/* REPL-1: native throughput UI (subtab strip + bench form/table).
+   Colors ride the existing custom properties so skins keep working. */
+.native-subtabs { display: flex; gap: 6px; padding: 6px 10px 0; }
+.native-subtab { background: none; border: 1px solid var(--edge); color: var(--ink);
+  font: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+  padding: 4px 10px; cursor: pointer; }
+.native-subtab.active { border-color: var(--accent); color: var(--accent); }
+.native-subpanel { display: flex; flex-direction: column; gap: 10px; }
+.bench-form.card { border: 1px solid var(--edge); padding: 12px 14px; }
+.bench-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; margin-top: 8px; }
+.bench-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.bench-label { color: var(--dim); letter-spacing: 1px; text-transform: uppercase; font-size: 10px; }
+.bench-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.bench-chips .chip, .bench-check { display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid var(--edge); padding: 2px 6px; font-size: 11px; cursor: pointer; }
+.bench-advanced { font-size: 11px; }
+.bench-adv-body { display: flex; flex-direction: column; gap: 4px; padding: 6px 2px; }
+.bench-external input { background: var(--panel); border: 1px solid var(--edge); color: var(--ink);
+  padding: 3px 6px; font: inherit; font-size: 11px; min-width: 200px; }
+.bench-actions { display: flex; gap: 8px; margin-top: 10px; }
+.bench-status { font-size: 11px; color: var(--dim); min-height: 14px; }
+.bench-status.bench-status-error { color: var(--red); }
+.bench-status-done { color: var(--ink); }
+.bench-table { border-collapse: collapse; width: 100%; font-size: 11px; }
+.bench-table th, .bench-table td { border-bottom: 1px solid var(--edge);
+  padding: 3px 8px; text-align: right; }
+.bench-table th { color: var(--dim); text-transform: uppercase; letter-spacing: 1px; font-size: 10px; }
+.bench-table td:first-child, .bench-table th:first-child { text-align: left; }

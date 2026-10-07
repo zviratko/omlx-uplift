@@ -17,6 +17,16 @@ users never see.
   `uplift_native_surfaces` in `~/.omlx/uplift/config.json`) to swap the
   Bench and Chat tabs from the embedded classic iframes to native stub
   pages; `off` keeps today's behavior exactly. Nothing changes for main.
+- **Native throughput benchmark (preview branch).** With the bench
+  surface flagged on, the Throughput sub-tab is a real native page now:
+  form (model, context profile, prompt lengths, batch sizes, ANE-aligned
+  prompt, force-lm, external endpoint) drives the classic benchmark
+  engine in-process over `/uplift/api/bench/*` — SSE live progress and
+  results, cancel, single-run guard. Community leaderboard upload is an
+  explicit opt-in checkbox (the classic page auto-uploads standard runs;
+  native never posts to omlx.ai unless you check it). All labels ride
+  the classic `bench.*` translation catalog plus new `uplift.bench.*`
+  keys in all 10 locales.
 
 ## [1.1] — 2026-10-07
 

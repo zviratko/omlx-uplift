@@ -112,12 +112,27 @@ def test_stub_resolution_literals_beat_dynamic():
     app.dependency_overrides[up_base.require_admin] = lambda: True
 
     client = TestClient(app)
+    # literal must NOT be swallowed by the dynamic /bench/{run_id}/results
     r = client.get("/uplift/api/bench/accuracy/results")
     assert r.status_code == 501
     assert "bench_accuracy_results" in r.json()["detail"]
-    r = client.get("/uplift/api/bench/whatever123/results")
-    assert r.status_code == 501
-    assert "bench_results" in r.json()["detail"]
+    # dynamic shape resolves to the live bench_results handler (REPL-1):
+    # monkeypatched engine -> unknown-id 404 proves identity (a stubbed
+    # route would answer 501; a shadowed literal would hit this too)
+    from omlx_uplift.routers import bench as bench_mod
+    import types
+    called = {}
+    def _fake_get(run_id):
+        called['id'] = run_id
+        return None
+    _orig_get = bench_mod.bench_engine.get
+    bench_mod.bench_engine.get = _fake_get
+    try:
+        r = client.get("/uplift/api/bench/whatever123/results")
+        assert r.status_code == 404
+        assert called.get('id') == 'whatever123'
+    finally:
+        bench_mod.bench_engine.get = _orig_get
 
 
 def test_stub_routes_require_admin():
