@@ -188,6 +188,18 @@ function gapBridge(maxGapMs) {
     };
 }
 
+/* LEGEND-1: last non-null value at or below `from` in a uPlot data column.
+   The union x column (FAST-1) interleaves the 2 Hz live stamps and the 5 s
+   stored stamps, so at any given row a series that did not sample at that
+   stamp is null. Consumers with 'latest sample' semantics must scan to the
+   column's OWN last non-null instead of reading one union row. */
+function lastNonNull(col, from) {
+    if (!col || !col.length) return null;
+    let k = from === undefined ? col.length - 1 : Math.min(from, col.length - 1);
+    for (; k >= 0; k--) if (col[k] !== null && col[k] !== undefined) return col[k];
+    return null;
+}
+
 /* TSTAMP_MS: uPlot's opts.ms — the timestamp unit of the data columns
    (1 = milliseconds; its DEFAULT is 0.001 = seconds). Every x column we
    feed is ms-epoch (server ts * 1000, Date.now()), but with ms unset
@@ -203,5 +215,5 @@ const TSTAMP_MS = 1;
 
 return { AXIS_FONT_PX, AXIS_FONT_FALLBACK, axisFont, cssRgb, toHex2, tint,
          chartColors, SERIES_PALETTE_ORDER, SERIES_PALETTE_MAX, seriesPalette,
-         ZERO_FLOOR_RANGE, GAP_BRIDGE_MS, gapBridge, TSTAMP_MS };
+         ZERO_FLOOR_RANGE, GAP_BRIDGE_MS, gapBridge, TSTAMP_MS, lastNonNull };
 });

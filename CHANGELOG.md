@@ -23,6 +23,13 @@ users never see.
   standalone repo; they now run against a plain upstream checkout nightly.
 
 ### Fixed
+- Memory & Cache legend values no longer blink (~1 s apart, forever):
+  the idle legend read the union column's last ROW, which on FAST-1's
+  mixed 2 Hz/5 s cadence belongs to only one stream at a time — the
+  other series rendered '—' between their samples. Idle cells now show
+  each series' OWN latest value (hovered crosshair rows keep their
+  honest nulls). A distinct root from the axis-tick flicker below,
+  same FAST-1 mixed-cadence surface.
 - Chart bottom-axis tick labels no longer appear and disappear on a
   ~12–45 s cycle. Every chart feeds uPlot millisecond timestamps but
   never told it (`opts.ms` defaulted to the seconds unit), so the tick
