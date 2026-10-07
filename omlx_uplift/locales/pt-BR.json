@@ -2,6 +2,7 @@
  "uplift.action.download": "Baixar",
  "uplift.action.search": "Pesquisar",
  "uplift.bench.accuracy": "Exatidão",
+ "uplift.bench.ane_candidates": "Candidatos",
  "uplift.bench.ane_tune": "Ajuste ANE",
  "uplift.bench.context": "Contexto",
  "uplift.bench.native_stub": "Superfície nativa — ainda não implementada.",

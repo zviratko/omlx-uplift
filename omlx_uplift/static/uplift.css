@@ -2088,3 +2088,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
   padding: 3px 8px; text-align: right; }
 .bench-table th { color: var(--dim); text-transform: uppercase; letter-spacing: 1px; font-size: 10px; }
 .bench-table td:first-child, .bench-table th:first-child { text-align: left; }
+.bench-result { padding: 10px 14px; border: 1px solid var(--edge); }
+.bench-result-row { display: flex; justify-content: space-between; gap: 18px;
+  font-size: 11px; padding: 2px 0; border-bottom: 1px dotted var(--edge); }
+.bench-result-row:last-of-type { border-bottom: none; }

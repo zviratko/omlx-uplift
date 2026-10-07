@@ -2,6 +2,7 @@
  "uplift.action.download": "ダウンロード",
  "uplift.action.search": "検索",
  "uplift.bench.accuracy": "精度",
+ "uplift.bench.ane_candidates": "候補",
  "uplift.bench.ane_tune": "ANEチューニング",
  "uplift.bench.context": "コンテキスト",
  "uplift.bench.native_stub": "ネイティブサーフェス — まだ未実装です。",

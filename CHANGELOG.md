@@ -27,6 +27,16 @@ users never see.
   native never posts to omlx.ai unless you check it). All labels ride
   the classic `bench.*` translation catalog plus new `uplift.bench.*`
   keys in all 10 locales.
+- **Native context probe + ANE tuning (preview branch).** The Context
+  and ANE Tune sub-tabs are live too: the context benchmark runs in the
+  server over `/uplift/api/bench/context/*` (SSE progress; the measured
+  window auto-applies to the model's Context Window setting, same as
+  classic), and ANE tuning mirrors classic's candidate search + poll
+  model over `/uplift/api/bench/ane-tune/*` with an explicit Apply
+  button that writes the recommendation through the same settings
+  manager the classic UI uses. Labels reuse the classic `ctx_bench.*` /
+  `modal.model_settings.qwen_ane_tune*` catalogs (already complete in
+  all 10 locales).
 
 ## [1.1] — 2026-10-07
 

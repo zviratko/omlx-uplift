@@ -2,6 +2,7 @@
  "uplift.action.download": "下載",
  "uplift.action.search": "搜尋",
  "uplift.bench.accuracy": "準確率",
+ "uplift.bench.ane_candidates": "候選項",
  "uplift.bench.ane_tune": "ANE 調校",
  "uplift.bench.context": "上下文",
  "uplift.bench.native_stub": "原生介面 — 尚未實作。",

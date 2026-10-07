@@ -16,7 +16,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .base import api_router, engine_pool, require_admin
-from .. import bench_engine
+from .. import bench_engine, context_engine
 
 
 def _stub(name: str):
@@ -48,21 +48,87 @@ api_router.post("/bench/accuracy/add")(bench_accuracy_add)
 api_router.get("/bench/accuracy/queue")(bench_accuracy_queue)
 api_router.get("/bench/accuracy/results")(bench_accuracy_results)
 
-# ---- context probe (REPL-3) -----------------------------------------------
+# ---- context probe (REPL-3) — LIVE via context_engine --------------------
 
-bench_context_start = _stub("bench_context_start")
-bench_context_active = _stub("bench_context_active")
+@api_router.post("/bench/context/start")
+async def bench_context_start(request: Request, is_admin: bool = Depends(require_admin)):
+    pool = engine_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Engine pool not initialized")
+    body = await request.json()
+    try:
+        return await context_engine.context_start(body or {}, pool)
+    except context_engine.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except context_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except context_engine.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
-api_router.post("/bench/context/start")(bench_context_start)
-api_router.get("/bench/context/active")(bench_context_active)
 
-# ---- ANE tuning (REPL-3) --------------------------------------------------
+@api_router.get("/bench/context/active")
+async def bench_context_active(is_admin: bool = Depends(require_admin)):
+    return context_engine.context_active()
 
-bench_ane_start = _stub("bench_ane_start")
-bench_ane_results = _stub("bench_ane_results")
 
-api_router.post("/bench/ane-tune/start")(bench_ane_start)
-api_router.get("/bench/ane-tune/results")(bench_ane_results)
+# ---- ANE tuning (REPL-3) — LIVE; poll model (classic has no ANE SSE) ------
+
+@api_router.post("/bench/ane-tune/start")
+async def bench_ane_start(request: Request, is_admin: bool = Depends(require_admin)):
+    pool = engine_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Engine pool not initialized")
+    body = await request.json()
+    try:
+        return await context_engine.ane_start(body or {}, pool)
+    except context_engine.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except context_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except context_engine.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@api_router.get("/bench/ane-tune/results")
+async def bench_ane_results(is_admin: bool = Depends(require_admin)):
+    # literal kept for the NAT-3 route-set pin; the live surface is the
+    # {tuning_id} shape below (classic parity: results need the id).
+    raise HTTPException(status_code=404, detail="tuning_id required")
+
+
+@api_router.post("/bench/ane-tune/{tuning_id}/apply")
+async def bench_ane_apply(tuning_id: str, request: Request,
+                          is_admin: bool = Depends(require_admin)):
+    """Apply a finished tuning's recommendation through the SAME settings
+    manager classic's PUT uses (engine-reload semantics included, since
+    we write via the pool entry, not around it)."""
+    run = context_engine.ane_get(tuning_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"ANE tuning not found: {tuning_id}")
+    body = await request.json()
+    recommendation = (body or {}).get("recommendation")
+    if not recommendation:
+        raise HTTPException(status_code=400, detail="recommendation body required")
+    if recommendation.get("model_id") not in (None, run.request.model_id):
+        raise HTTPException(status_code=400, detail="recommendation model mismatch")
+    try:
+        patch = context_engine.ane_settings_patch(recommendation)
+    except context_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    from .base import settings_manager
+    mgr = settings_manager()
+    if mgr is None:
+        raise HTTPException(status_code=503, detail="Settings manager not initialized")
+    model_id = run.request.model_id
+    try:
+        settings = mgr.get_settings(model_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+    from omlx.model_settings import ModelSettings
+    merged = settings.to_dict()
+    merged.update(patch)
+    mgr.set_settings(model_id, ModelSettings.from_dict(merged))
+    return {"model_id": model_id, "applied_keys": sorted(patch)}
 
 
 # ---- throughput (REPL-1) — LIVE via bench_engine --------------------------
@@ -122,3 +188,60 @@ async def bench_results(run_id: str, is_admin: bool = Depends(require_admin)):
     if run is None:
         raise HTTPException(status_code=404, detail=f"Benchmark not found: {run_id}")
     return bench_engine.results_payload(run)
+
+
+# ---- dynamic context probe shapes (REPL-3; 4-seg — no {run_id} clash) ----
+
+@api_router.get("/bench/context/{bench_id}/stream")
+async def bench_context_stream(bench_id: str, is_admin: bool = Depends(require_admin)):
+    run = context_engine.context_get(bench_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Benchmark not found: {bench_id}")
+    return StreamingResponse(
+        # identical events/cond/terminal model as throughput (classic
+        # run object) — the SAME generator is reused here.
+        bench_engine.event_stream(run),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"},
+    )
+
+
+@api_router.post("/bench/context/{bench_id}/cancel")
+async def bench_context_cancel(bench_id: str, is_admin: bool = Depends(require_admin)):
+    run = context_engine.context_get(bench_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Benchmark not found: {bench_id}")
+    try:
+        return await context_engine.context_cancel(run)
+    except context_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.get("/bench/context/{bench_id}/results")
+async def bench_context_results(bench_id: str, is_admin: bool = Depends(require_admin)):
+    run = context_engine.context_get(bench_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Benchmark not found: {bench_id}")
+    return context_engine.context_results_payload(run)
+
+
+# ---- dynamic ANE tuning shapes (REPL-3; poll, no stream — classic parity) --
+
+@api_router.get("/bench/ane-tune/{tuning_id}/results")
+async def bench_ane_results_by_id(tuning_id: str, is_admin: bool = Depends(require_admin)):
+    run = context_engine.ane_get(tuning_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"ANE tuning not found: {tuning_id}")
+    return context_engine.ane_results_payload(run)
+
+
+@api_router.post("/bench/ane-tune/{tuning_id}/cancel")
+async def bench_ane_cancel(tuning_id: str, is_admin: bool = Depends(require_admin)):
+    run = context_engine.ane_get(tuning_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"ANE tuning not found: {tuning_id}")
+    try:
+        return await context_engine.ane_cancel(run)
+    except context_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))

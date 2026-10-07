@@ -66,6 +66,11 @@ const CAT = {   // fake merged catalog: classic + uplift keys, one marker lang
     'uplift.bench.native_stub': 'STUBNOTE',
     'bench.config.model': 'LBLMODEL',
     'bench.config.run_button': 'BTNRUN',
+    'ctx_bench.heading': 'CTXHEADING',
+    'ctx_bench.start': 'CTXSTART',
+    'ctx_bench.result.section_label': 'CTXRESULT',
+    'modal.model_settings.qwen_ane_tune': 'ANEHEADING',
+    'modal.model_settings.qwen_ane_tune_start': 'ANESTART',
 };
 
 function load() {
@@ -111,6 +116,26 @@ test('showSub(accuracy) swaps in the stub card', () => {
     const text = allText(byId['bench-subpanel']);
     assert.ok(text.includes('SUBACC'), 'stub card title translated');
     assert.ok(text.includes('STUBNOTE'), 'stub note translated');
+});
+
+test('REPL-3: context subtab renders the native probe form', () => {
+    const { win, byId } = load();
+    win.UpliftNativeBench.mount();
+    win.UpliftNativeBench.showSub('context');
+    const text = allText(byId['bench-subpanel']);
+    assert.ok(text.includes('CTXHEADING'), 'ctx heading via classic key');
+    assert.ok(text.includes('CTXSTART'), 'start button via classic key');
+    assert.ok(!text.includes('ctx_bench.'), 'no raw ctx key leaks');
+});
+
+test('REPL-3: ANE subtab renders the tuning form', () => {
+    const { win, byId } = load();
+    win.UpliftNativeBench.mount();
+    win.UpliftNativeBench.showSub('ane');
+    const text = allText(byId['bench-subpanel']);
+    assert.ok(text.includes('ANEHEADING'), 'ane title via classic key');
+    assert.ok(text.includes('ANESTART'), 'start button via classic key');
+    assert.ok(!text.includes('modal.model_settings.'), 'no raw ane key leaks');
 });
 
 test('second mount is a no-op (no double paint)', () => {

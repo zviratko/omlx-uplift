@@ -40,6 +40,7 @@ function t(key, fb) {
 
 var PROMPT_LENGTHS = [1024, 4096, 8192, 16384, 32768, 65536, 131072, 200000];
 var BATCH_SIZES = [2, 4, 8];
+var TARGET_TOKENS = [16384, 32768, 65536, 131072, 262144, 524288];
 var PROFILES = ['code_python', 'code_mixed', 'novel_en', 'novel_ja', 'novel_ko'];
 var PROFILE_FALLBACK = { code_python: 'Code (Python)', code_mixed: 'Code (Mixed)',
     novel_en: 'Novel (English)', novel_ja: 'Novel (Japanese)', novel_ko: 'Novel (Korean)' };
@@ -99,6 +100,8 @@ function showSub(sub) {
     stopStream();
     panel.replaceChildren();
     if (sub === 'throughput') TP.render(panel);
+    else if (sub === 'context') CTX.render(panel);
+    else if (sub === 'ane') ANE.render(panel);
     else panel.appendChild(stubCard(sub));
 }
 
@@ -445,9 +448,448 @@ var TP = {
     },
 };
 
+
+/* ==========================================================================
+   CONTEXT probe (REPL-3) — classic context_benchmark over /uplift/api/
+   bench/context/*. SSE progress like throughput; the classic runner
+   APPLIES the measured window to model settings itself (mirror keeps
+   that auto-apply honest — the warning label is classic's own).
+   ========================================================================== */
+
+var CTX = {
+    state: null,
+
+    render: function (panel) {
+        this.state = { running: false, benchId: null, result: null };
+        panel.appendChild(this.form());
+        var status = el('div', 'bench-status'); status.id = 'bench-ctx-status';
+        var results = el('div', 'bench-results'); results.id = 'bench-ctx-results';
+        panel.append(status, results);
+        this.loadModels();
+        this.discover();
+    },
+
+    form: function () {
+        var self = this;
+        var f = el('div', 'bench-form card');
+        f.appendChild(el('h2', null, t('ctx_bench.heading', 'Context Benchmark')));
+        f.appendChild(el('p', 'native-stub-note', t('ctx_bench.description',
+            'Measure the largest context window this machine can actually prefill for a model. The result is written into the model’s Context Window setting.')));
+
+        var row = el('div', 'bench-row');
+        var modelSel = el('select'); modelSel.id = 'bench-ctx-model';
+        var ph = el('option', null, t('ctx_bench.config.model_placeholder', 'Select a model...'));
+        ph.value = ''; modelSel.appendChild(ph);
+        var targetSel = el('select'); targetSel.id = 'bench-ctx-target';
+        TARGET_TOKENS.forEach(function (tk) {
+            var o = el('option', null, tk.toLocaleString()); o.value = String(tk);
+            if (tk === 131072) o.selected = true;
+            targetSel.appendChild(o);
+        });
+        row.append(labeled(t('ctx_bench.config.model', 'Model'), modelSel),
+                   labeled(t('ctx_bench.config.target', 'Maximum context to test'), targetSel));
+        f.appendChild(row);
+        f.appendChild(el('p', 'native-stub-note', t('ctx_bench.config.target_hint',
+            'The benchmark searches up to this size. Larger targets take longer to verify.')));
+        f.appendChild(el('p', 'native-stub-note', t('ctx_bench.warning.autoapply',
+            'The measured value is applied to the model automatically.')));
+
+        var actions = el('div', 'bench-actions');
+        var runBtn = el('button', 'btn btn-primary', t('ctx_bench.start', 'Start Benchmark'));
+        runBtn.type = 'button'; runBtn.id = 'bench-ctx-run';
+        runBtn.addEventListener('click', function () { self.start(); });
+        var cancelBtn = el('button', 'btn', t('ctx_bench.progress.cancel', 'Cancel'));
+        cancelBtn.type = 'button'; cancelBtn.id = 'bench-ctx-cancel'; cancelBtn.hidden = true;
+        cancelBtn.addEventListener('click', function () { self.cancel(); });
+        actions.append(runBtn, cancelBtn);
+        f.appendChild(actions);
+        return f;
+    },
+
+    loadModels: async function () {
+        var d = dom();
+        try {
+            var data = await d.fetchJson(api() + '/models');
+            var sel = gid('bench-ctx-model');
+            if (!sel) return;
+            var usable = ((data && data.models) || []).filter(function (m) {
+                var ty = m.model_type || m.type;
+                return !ty || ty === 'llm' || ty === 'vlm';
+            });
+            var ph2 = el('option', null, t('ctx_bench.config.model_placeholder', 'Select a model...'));
+            ph2.value = '';
+            sel.replaceChildren(ph2);
+            usable.forEach(function (m) { sel.appendChild(el('option', null, m.id || m.model_id)); });
+        } catch (e) { /* placeholder stays */ }
+    },
+
+    discover: async function () {
+        var d = dom();
+        try {
+            var a = await d.fetchJson(api() + '/bench/context/active');
+            if (a && a.running) {
+                this.state.running = true;
+                this.state.benchId = a.bench_id;
+                this.setButtons();
+                this.startStream(a.bench_id);
+                this.renderStatus(t('bench.other_active.already_running',
+                    'Another throughput benchmark is already running in this server.') +
+                    ' (' + a.model_id + ')');
+            }
+        } catch (e) { /* idle */ }
+    },
+
+    start: async function () {
+        var d = dom();
+        var sel = gid('bench-ctx-model');
+        if (!sel || !sel.value) {
+            d.toast(t('ctx_bench.config.model_placeholder', 'Select a model...'), 'error');
+            return;
+        }
+        this.state.running = true;
+        this.state.result = null;
+        this.setButtons();
+        var rw = gid('bench-ctx-results');
+        if (rw) rw.replaceChildren();
+        try {
+            var out = await d.postJson(api() + '/bench/context/start', {
+                model_id: sel.value,
+                target_tokens: Number(gid('bench-ctx-target').value),
+            });
+            this.state.benchId = out.bench_id;
+            this.startStream(out.bench_id);
+            this.renderStatus(t('ctx_bench.progress.starting', 'Starting...'));
+        } catch (e) {
+            this.state.running = false;
+            this.setButtons();
+            d.toast(String((e && e.message) || e), 'error');
+        }
+    },
+
+    cancel: async function () {
+        if (!this.state.benchId) return;
+        var d = dom();
+        try {
+            await d.postJson(api() + '/bench/context/' +
+                encodeURIComponent(this.state.benchId) + '/cancel', {});
+        } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+    },
+
+    setButtons: function () {
+        var r = gid('bench-ctx-run'), c = gid('bench-ctx-cancel');
+        if (r) r.disabled = this.state.running;
+        if (c) c.hidden = !this.state.running;
+    },
+
+    startStream: function (benchId) {
+        var self = this;
+        stopStream();
+        if (!W().EventSource) { this.poll(benchId); return; }
+        try {
+            _es = new EventSource(api() + '/bench/context/' + encodeURIComponent(benchId) + '/stream');
+            _es.onmessage = function (ev) {
+                var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
+                self.onEvent(data);
+            };
+            _es.onerror = function () { /* auto-reconnect replays from 0 */ };
+        } catch (e) { this.poll(benchId); }
+    },
+
+    poll: function (benchId) {
+        var self = this;
+        var d = dom();
+        if (_poll) clearInterval(_poll);
+        _poll = setInterval(async function () {
+            try {
+                var r = await d.fetchJson(api() + '/bench/context/' + encodeURIComponent(benchId) + '/results');
+                self.renderStatus((r.message || r.phase || '') + ' ' +
+                    Math.round(r.progress || 0) + '%');  // classic: 0-100 scale
+                if (r.result) { self.state.result = r.result; self.renderResult(r.result); }
+                if (r.status !== 'running') self.finish();
+            } catch (e) { /* keep polling */ }
+        }, 3000);
+    },
+
+    onEvent: function (ev) {
+        if (ev.type === 'progress') {
+            this.renderStatus((ev.message || ev.phase || '') + ' ' +
+                Math.round(ev.progress || 0) + '%');  // classic: 0-100 scale
+        } else if (ev.type === 'result') {
+            this.state.result = ev.data;
+            this.renderResult(ev.data);
+        } else if (ev.type === 'error') {
+            this.renderStatus(String(ev.message || 'error'), true);
+            this.finish();
+        }
+        // context bench terminal events are done + error (classic code)
+    },
+
+    renderStatus: function (msg, isError) {
+        var st = gid('bench-ctx-status');
+        if (!st) return;
+        st.textContent = msg || '';
+        st.classList.toggle('bench-status-error', !!isError);
+    },
+
+    renderResult: function (r) {
+        var wrap = gid('bench-ctx-results');
+        if (!wrap) return;
+        var card = el('div', 'bench-result card');
+        card.appendChild(el('h2', null, t('ctx_bench.result.section_label', 'Result')));
+        var rows = [
+            [t('ctx_bench.result.measured', 'Admission boundary'), (r.measured_tokens || 0).toLocaleString()],
+            [t('ctx_bench.result.verified', 'Verified prefill'), (r.verified_tokens || 0).toLocaleString()],
+            [t('ctx_bench.result.tokens_label', 'tokens applied to Context Window'), (r.applied_tokens || 0).toLocaleString()],
+            [t('ctx_bench.result.capped_by', 'Capped by'), t('ctx_bench.capped.' + r.capped_by, r.capped_by || '')],
+            [t('ctx_bench.result.prefill_tps', 'Prefill speed'), (r.prefill_tps || 0).toLocaleString() + ' tok/s'],
+            [t('ctx_bench.result.duration', 'Duration'), (r.duration_s || 0) + ' s'],
+        ];
+        rows.forEach(function (kv) {
+            if (!kv[1]) return;
+            var tr = el('div', 'bench-result-row');
+            tr.append(el('span', 'bench-label', kv[0]), el('span', null, kv[1]));
+            card.appendChild(tr);
+        });
+        if (r.applied) {
+            card.appendChild(el('p', 'native-stub-note', t('ctx_bench.result.applied_note',
+                'The value has been applied to this model’s Context Window setting.')));
+        }
+        card.appendChild(el('p', 'native-stub-note', t('ctx_bench.result.snapshot_note',
+            'The result reflects free memory at benchmark time; rerun after big config changes.')));
+        wrap.replaceChildren(card);
+    },
+
+    finish: function () {
+        stopStream();
+        this.state.running = false;
+        this.setButtons();
+        var st = gid('bench-ctx-status');
+        if (st && !st.classList.contains('bench-status-error') && st.textContent) {
+            st.textContent += ' — ' + t('uplift.bench.run_finished', 'finished');
+        }
+    },
+};
+
+/* ==========================================================================
+   ANE tuning (REPL-3) — classic ane_tuning mirror; POLL model like the
+   classic modal (no SSE upstream). Apply = recommendation -> model
+   settings; keys are derived by the SERVER (mirror of classic's JS),
+   the UI only sends the snapshot back.
+   ========================================================================== */
+
+var ANE = {
+    state: null, _timer: null,
+
+    render: function (panel) {
+        this.state = { running: false, tuningId: null, snapshot: null };
+        panel.appendChild(this.form());
+        var status = el('div', 'bench-status'); status.id = 'bench-ane-status';
+        var results = el('div', 'bench-results'); results.id = 'bench-ane-results';
+        panel.append(status, results);
+        this.loadModels();
+    },
+
+    form: function () {
+        var self = this;
+        var f = el('div', 'bench-form card');
+        f.appendChild(el('h2', null, t('modal.model_settings.qwen_ane_tune', 'ANE Tuning')));
+        f.appendChild(el('p', 'native-stub-note', t('modal.model_settings.k2_ane_tune_hint',
+            'Optional tuning for long-prompt processing.')));
+
+        var row = el('div', 'bench-row');
+        var modelSel = el('select'); modelSel.id = 'bench-ane-model';
+        var ph = el('option', null, t('ctx_bench.config.model_placeholder', 'Select a model...'));
+        ph.value = ''; modelSel.appendChild(ph);
+        row.appendChild(labeled(t('bench.config.model', 'Model'), modelSel));
+        f.appendChild(row);
+
+        var ov = el('details', 'bench-advanced');
+        ov.appendChild(el('summary', null, t('modal.model_settings.qwen_ane_tune_overrides', 'Search space')));
+        var body = el('div', 'bench-adv-body');
+        body.append(
+            check('bench-ane-cpu', t('modal.model_settings.qwen_ane_tune_allow_cpu', 'Allow CPU candidates'), true),
+            check('bench-ane-gate', t('modal.model_settings.qwen_ane_tune_allow_cpu_gate', 'CPU gate projections'), true),
+            check('bench-ane-down', t('modal.model_settings.qwen_ane_tune_allow_cpu_down', 'CPU down projections'), true),
+            check('bench-ane-gdn', t('modal.model_settings.qwen_ane_tune_allow_ane_gdn', 'ANE GDN candidates'), true),
+            check('bench-ane-cpugdn', t('modal.model_settings.qwen_ane_tune_allow_cpu_gdn', 'CPU GDN candidates'), true),
+            check('bench-ane-shared', t('modal.model_settings.qwen_ane_tune_allow_cpu_scheduler', 'CPU shared resource'), true));
+        ov.appendChild(body);
+        f.appendChild(ov);
+
+        var actions = el('div', 'bench-actions');
+        var runBtn = el('button', 'btn btn-primary', t('modal.model_settings.qwen_ane_tune_start', 'Start Tuning'));
+        runBtn.type = 'button'; runBtn.id = 'bench-ane-run';
+        runBtn.addEventListener('click', function () { self.start(); });
+        var cancelBtn = el('button', 'btn', t('modal.model_settings.qwen_ane_tune_cancel', 'Cancel'));
+        cancelBtn.type = 'button'; cancelBtn.id = 'bench-ane-cancel'; cancelBtn.hidden = true;
+        cancelBtn.addEventListener('click', function () { self.cancel(); });
+        actions.append(runBtn, cancelBtn);
+        f.appendChild(actions);
+        return f;
+    },
+
+    loadModels: async function () {
+        var d = dom();
+        try {
+            var data = await d.fetchJson(api() + '/models');
+            var sel = gid('bench-ane-model');
+            if (!sel) return;
+            var usable = ((data && data.models) || []).filter(function (m) {
+                var ty = m.model_type || m.type;
+                return !ty || ty === 'llm' || ty === 'vlm';
+            });
+            var ph2 = el('option', null, t('ctx_bench.config.model_placeholder', 'Select a model...'));
+            ph2.value = '';
+            sel.replaceChildren(ph2);
+            usable.forEach(function (m) { sel.appendChild(el('option', null, m.id || m.model_id)); });
+        } catch (e) { /* placeholder stays */ }
+    },
+
+    start: async function () {
+        var d = dom();
+        var sel = gid('bench-ane-model');
+        if (!sel || !sel.value) {
+            d.toast(t('ctx_bench.config.model_placeholder', 'Select a model...'), 'error');
+            return;
+        }
+        var on = function (id) { var e = gid(id); return e && e.checked; };
+        this.state.running = true;
+        this.state.snapshot = null;
+        this.setButtons();
+        try {
+            var out = await d.postJson(api() + '/bench/ane-tune/start', {
+                model_id: sel.value,
+                sequence_length: 2048,
+                repeats: 2,
+                allow_cpu: on('bench-ane-cpu'),
+                allow_cpu_gate: on('bench-ane-cpu') && on('bench-ane-gate'),
+                allow_cpu_down: on('bench-ane-cpu') && on('bench-ane-down'),
+                allow_ane_gdn: on('bench-ane-gdn'),
+                allow_cpu_gdn: on('bench-ane-cpu') && on('bench-ane-gdn') && on('bench-ane-cpugdn'),
+                allow_cpu_shared_resource: on('bench-ane-cpu') && on('bench-ane-shared'),
+            });
+            this.state.tuningId = out.tuning_id;
+            this.pollNow();
+            if (this._timer) clearInterval(this._timer);
+            var self = this;
+            this._timer = setInterval(function () { self.pollNow(); }, 2000);
+        } catch (e) {
+            this.state.running = false;
+            this.setButtons();
+            d.toast(String((e && e.message) || e), 'error');
+        }
+    },
+
+    pollNow: async function () {
+        if (!this.state.tuningId) return;
+        var d = dom();
+        try {
+            var snap = await d.fetchJson(api() + '/bench/ane-tune/' +
+                encodeURIComponent(this.state.tuningId) + '/results');
+            this.state.snapshot = snap;
+            this.renderStatus((snap.message || snap.phase || '') +
+                (snap.total ? '  (' + (snap.current || 0) + '/' + snap.total + ')' : ''));
+            if (snap.status !== 'running') this.finish();
+            else this.renderResults(snap);
+        } catch (e) {
+            this.stopTimer();
+            this.state.running = false;
+            this.setButtons();
+        }
+    },
+
+    cancel: async function () {
+        if (!this.state.tuningId) return;
+        var d = dom();
+        try {
+            await d.postJson(api() + '/bench/ane-tune/' +
+                encodeURIComponent(this.state.tuningId) + '/cancel', {});
+        } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+    },
+
+    apply: async function () {
+        var d = dom();
+        var snap = this.state.snapshot;
+        if (!snap || !snap.recommendation) return;
+        var btn = gid('bench-ane-apply');
+        if (btn) btn.disabled = true;
+        try {
+            await d.postJson(api() + '/bench/ane-tune/' +
+                encodeURIComponent(snap.tuning_id) + '/apply',
+                { recommendation: snap.recommendation });
+            if (btn) btn.textContent = t('modal.model_settings.qwen_ane_tune_applied', 'Applied');
+        } catch (e) {
+            if (btn) btn.disabled = false;
+            d.toast(String((e && e.message) || e), 'error');
+        }
+    },
+
+    setButtons: function () {
+        var r = gid('bench-ane-run'), c = gid('bench-ane-cancel');
+        if (r) r.disabled = this.state.running;
+        if (c) c.hidden = !this.state.running;
+    },
+
+    stopTimer: function () {
+        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    },
+
+    renderStatus: function (msg, isError) {
+        var st = gid('bench-ane-status');
+        if (!st) return;
+        st.textContent = msg || '';
+        st.classList.toggle('bench-status-error', !!isError);
+    },
+
+    renderResults: function (snap) {
+        var wrap = gid('bench-ane-results');
+        if (!wrap) return;
+        var card = el('div', 'bench-result card');
+        card.appendChild(el('h2', null, t('uplift.bench.ane_candidates', 'Candidates')));
+        var tbl = el('table', 'bench-table');
+        var head = el('tr');
+        ['split', 'state', 'processing_tps', 'latency_ms'].forEach(function (h) {
+            head.appendChild(el('th', null, h));
+        });
+        tbl.appendChild(head);
+        (snap.results || []).forEach(function (r) {
+            var tr = el('tr');
+            [r.split || r.name || '', r.state || '',
+             r.processing_tps == null ? '—' : Math.round(r.processing_tps).toLocaleString(),
+             r.latency_ms == null ? '—' : Math.round(r.latency_ms).toLocaleString()]
+                .forEach(function (v) { tr.appendChild(el('td', null, String(v))); });
+            tbl.appendChild(tr);
+        });
+        card.appendChild(tbl);
+        if (snap.recommendation && snap.status !== 'running') {
+            var rec = snap.recommendation;
+            card.appendChild(el('p', null, t('modal.model_settings.qwen_ane_tune_throughput', 'Recommended throughput') +
+                ': ' + Math.round(rec.processing_tps || 0).toLocaleString() + ' tok/s'));
+            var ab = el('button', 'btn btn-primary', t('modal.model_settings.qwen_ane_tune_apply', 'Apply Recommendation'));
+            ab.type = 'button'; ab.id = 'bench-ane-apply';
+            ab.addEventListener('click', function () { ANE.apply(); });
+            card.appendChild(ab);
+        }
+        wrap.replaceChildren(card);
+    },
+
+    finish: function () {
+        this.stopTimer();
+        this.state.running = false;
+        this.setButtons();
+        if (this.state.snapshot) this.renderResults(this.state.snapshot);
+        var st = gid('bench-ane-status');
+        if (st && !st.classList.contains('bench-status-error') && st.textContent &&
+            this.state.snapshot && this.state.snapshot.status === 'completed') {
+            st.textContent += ' — ' + t('uplift.bench.run_finished', 'finished');
+        }
+    },
+};
+
 function stopStream() {
     if (_es) { try { _es.close(); } catch (_) {} _es = null; }
     if (_poll) { clearInterval(_poll); _poll = null; }
+    if (typeof ANE !== 'undefined' && ANE.stopTimer) ANE.stopTimer();
 }
 
 return { mount: mount, isMounted: function () { return _mounted; },

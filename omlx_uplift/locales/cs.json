@@ -2,6 +2,7 @@
  "uplift.action.download": "Stáhnout",
  "uplift.action.search": "Hledat",
  "uplift.bench.accuracy": "Přesnost",
+ "uplift.bench.ane_candidates": "Kandidáti",
  "uplift.bench.ane_tune": "Ladění ANE",
  "uplift.bench.context": "Kontext",
  "uplift.bench.native_stub": "Nativní povrch — zatím není implementováno.",

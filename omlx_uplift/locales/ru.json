@@ -2,6 +2,7 @@
  "uplift.action.download": "Скачать",
  "uplift.action.search": "Поиск",
  "uplift.bench.accuracy": "Точность",
+ "uplift.bench.ane_candidates": "Кандидаты",
  "uplift.bench.ane_tune": "Настройка ANE",
  "uplift.bench.context": "Контекст",
  "uplift.bench.native_stub": "Нативная поверхность — ещё не реализовано.",

@@ -2,6 +2,7 @@
  "uplift.action.download": "다운로드",
  "uplift.action.search": "검색",
  "uplift.bench.accuracy": "정확도",
+ "uplift.bench.ane_candidates": "후보",
  "uplift.bench.ane_tune": "ANE 튜닝",
  "uplift.bench.context": "컨텍스트",
  "uplift.bench.native_stub": "네이티브 표면 — 아직 구현되지 않았습니다.",
