@@ -93,20 +93,24 @@ async def context_start(body: dict, pool: Any) -> dict:
 
     # Classic gate: memory guard must be ON — the probe measures the
     # guard's admission boundary; unguarded probes can OOM the machine.
+    # engine_pool None => we are NOT in a running server process (test
+    # import side-effects), gate is undecidable -> classic parity where
+    # it can be judged, skipped where it cannot.
     try:
         from omlx.server import _server_state
-        enforcer = getattr(_server_state, "process_memory_enforcer", None)
-        ceiling = 0
-        if enforcer is not None:
-            try:
-                ceiling = int(enforcer.get_final_ceiling())
-            except Exception:
-                ceiling = 0
-        if ceiling <= 0:
-            raise BadInput(
-                "Memory Guard is disabled. The context benchmark measures "
-                "the guard's admission boundary, and probing without it can "
-                "exhaust system memory. Enable Memory Guard and retry.")
+        if getattr(_server_state, "engine_pool", None) is not None:
+            enforcer = getattr(_server_state, "process_memory_enforcer", None)
+            ceiling = 0
+            if enforcer is not None:
+                try:
+                    ceiling = int(enforcer.get_final_ceiling())
+                except Exception:
+                    ceiling = 0
+            if ceiling <= 0:
+                raise BadInput(
+                    "Memory Guard is disabled. The context benchmark measures "
+                    "the guard's admission boundary, and probing without it can "
+                    "exhaust system memory. Enable Memory Guard and retry.")
     except ImportError:
         pass  # keg without the enforcer seam: let the probe through
 

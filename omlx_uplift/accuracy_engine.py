@@ -115,8 +115,10 @@ async def queue_add(body: dict, pool: Any, *, upload: bool = False) -> dict:
     except ImportError:
         pass
 
+    body = dict(body or {})
+    engine = str(body.pop("engine", "classic") or "classic")
     try:
-        req = AB.AccuracyBenchmarkRequest(**(body or {}))
+        req = AB.AccuracyBenchmarkRequest(**body)
     except Exception as e:
         raise BadInput(str(e)) from e
 
@@ -127,6 +129,25 @@ async def queue_add(body: dict, pool: Any, *, upload: bool = False) -> dict:
         if entry.model_type not in ("llm", "vlm", None):
             raise BadInput(f"Model {req.model_id} is not a supported model "
                            f"(type: {entry.model_type})")
+
+    # REPL-2b: engine choice. 'classic' (default) is byte-for-byte the
+    # 2a path; 'harness' tags the request for the dispatcher — it runs
+    # ONLY if every task is mapped and the profile is harness-safe
+    # (harness_engine.run_usable), otherwise the classic engine takes
+    # the run unchanged. The UI shows the effective engine per result row.
+    if engine not in ("classic", "harness"):
+        raise BadInput(f"unknown engine {engine!r} (classic|harness)")
+    if engine == "harness":
+        from . import harness_engine
+        if req.external is not None:
+            raise BadInput("harness engine is for local models "
+                           "(external runs use the classic path)")
+        unmapped = [t for t in req.benchmarks if not harness_engine.harness_available(t)]
+        if unmapped:
+            raise BadInput("harness engine has no equivalent for: "
+                           + ", ".join(sorted(unmapped))
+                           + " — run them with the classic engine")
+        req._uplift_engine = "harness"
 
     if not upload and req.external is None:
         _arm_upload_skip()
@@ -141,6 +162,14 @@ async def queue_add(body: dict, pool: Any, *, upload: bool = False) -> dict:
     # cancel, inline completion), the opt-out window must not stay armed
     return queue_status()
 
+
+# dispatcher wrap: idempotent, in-memory patch of the classic module
+# attribute (classic's file stays untouched on disk)
+try:
+    from . import harness_engine as _he
+    _he.install_dispatcher()
+except Exception:  # CI without omlx: no module to wrap; pure-import OK
+    pass
 
 _upload_orig: Optional[Any] = None
 
@@ -187,6 +216,8 @@ def queue_remove(idx: int) -> dict:
 def results_payload() -> dict:
     AB = _acc()
     status = AB.get_queue_status()
+    for r in AB.get_accumulated_results():
+        r.setdefault("engine", "classic")  # label every row (REPL-2b)
     # second drain point: the UI polls results when the SSE stream
     # closes, so the opt-out window never outlives the queue even if
     # nobody hits /queue between done and the next add.

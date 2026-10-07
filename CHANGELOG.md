@@ -48,6 +48,25 @@ users never see.
   Parity on the dev keg: identical scores native-vs-classic across
   SmolLM2-360M (arc/gsm8k), Qwen2.5-0.5B (queued chain), Qwen3.5-9B
   with thinking on (0.9 = 0.9), and external-endpoint mode.
+- **Harness accuracy engine, opt-in (preview branch).** The Intelligence
+  page gained a Scoring-engine choice: Classic (default, unchanged) or
+  Harness — lm-evaluation-harness running as a pinned subprocess in its
+  own venv (`omlx-uplift bench-env create`, ~600 MB, torch-free by hard
+  rule) against the public /v1 path, one suite per subprocess, progress
+  at task granularity with per-question counts parsed from harness
+  output. Mapped tasks: MMLU (flan 5-shot generative), MMLU-Pro,
+  ARC-Challenge, GSM8K, BBQ-generate; a run containing any unmapped
+  task is refused with the task names (mixed-engine runs come later).
+  humaneval/mbpp STAY classic on purpose: harness exec-scoring runs
+  model code in-process, weaker isolation than classic's sandboxed
+  subprocess. Scores carry an engine label; full-dataset ARC
+  divergence vs classic measured at +1.4 points (few-shot formatting).
+  API key passes only through the child environment and is scrubbed
+  from all captured output; cancel kills the whole process group and a
+  server stop never orphans a harness run (drilled). Dataset cache and
+  offline mode configurable (`bench_hf_cache` / `bench_offline` in
+  `~/.omlx/uplift/config.json`); the offline drill passed from a warm
+  cache.
 
 ## [1.1] — 2026-10-07
 

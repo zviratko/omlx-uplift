@@ -951,6 +951,21 @@ var ACC = {
             check('bench-acc-think', t('acc_bench.config.thinking', 'Enable thinking mode'), false),
             el('p', 'native-stub-note', t('acc_bench.config.thinking_hint', 'Applies to models whose template supports thinking toggles.')),
             check('bench-acc-ext', t('bench.config.external', 'Use external OpenAI API endpoint'), false),
+            el('label', 'bench-field', el('span', 'bench-label', t('uplift.bench.engine', 'Scoring engine'))),
+            (function () {
+                var seg = el('div', 'bench-chips'); seg.id = 'bench-acc-engine';
+                [['classic', t('uplift.bench.engine_classic', 'Classic')],
+                 ['harness', t('uplift.bench.engine_harness', 'Harness')]].forEach(function (e, i) {
+                    var lb = el('label', 'chip');
+                    var rb = el('input'); rb.type = 'radio'; rb.name = 'bench-acc-engine';
+                    rb.value = e[0]; rb.checked = i === 0;
+                    lb.append(rb, document.createTextNode(' ' + e[1]));
+                    seg.appendChild(lb);
+                });
+                return seg;
+            })(),
+            el('p', 'native-stub-note', t('uplift.bench.engine_hint',
+                'Harness = lm-evaluation-harness subprocess (mapped tasks only; a run with unmapped tasks is refused). Classic is the built-in engine.')),
             check('bench-acc-upload', t('uplift.bench.upload_results', 'Upload results to community leaderboard'), false),
             el('p', 'native-stub-note', t('uplift.bench.upload_hint',
                 'Off by default: a native run never posts to omlx.ai unless you check this.')));
@@ -1078,6 +1093,8 @@ var ACC = {
             enable_thinking: !!(gid('bench-acc-think') && gid('bench-acc-think').checked),
             upload: !!(gid('bench-acc-upload') && gid('bench-acc-upload').checked),
         };
+        var eng = document.querySelector('input[name=bench-acc-engine]:checked');
+        body.engine = eng ? eng.value : 'classic';
         var ext = gid('bench-acc-ext');
         if (ext && ext.checked) {
             // classic parity (accuracyExternalRequestBody): extra_body +
@@ -1258,6 +1275,8 @@ var ACC = {
         rows.forEach(function (r) {
             var tr = el('tr');
             var badges = '';
+            if (r.engine === 'harness') badges += ' [H]';
+            else if (r.engine === 'classic') badges += ' [C]';
             if (r.external) badges += ' [' + t('acc_bench.results.external_badge', 'external') + ']';
             if (r.thinking_used) badges += ' [' + t('acc_bench.results.thinking_badge', 'thinking') + ']';
             var up = r.upload ? (r.upload.status === 'skipped' ? '—' : '↑') : '';

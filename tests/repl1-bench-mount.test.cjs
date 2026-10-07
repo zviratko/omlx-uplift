@@ -24,7 +24,7 @@ function makeHarness() {
         const el = {
             tagName: tag, children: [], style: {}, dataset: {},
             className: '', textContent: '', title: '', hidden: false,
-            innerHTML: '', checked: false, disabled: false, value: '', type: '',
+            innerHTML: '', checked: false, disabled: false, value: '', type: '', name: '',
             _id: '',
             get id() { return this._id; },
             set id(v) { this._id = v; if (v) byId[v] = this; },
@@ -70,6 +70,9 @@ const CAT = {   // fake merged catalog: classic + uplift keys, one marker lang
     'acc_bench.config.add_run': 'ACCADD',
     'acc_bench.benchmarks.group_knowledge': 'GRPKNOW',
     'acc_bench.benchmarks.mmlu_desc': 'GRPMMLUDESC',
+    'uplift.bench.engine': 'ENGINEFIELD',
+    'uplift.bench.engine_classic': 'ENGC',
+    'uplift.bench.engine_harness': 'ENGH',
     'ctx_bench.heading': 'CTXHEADING',
     'ctx_bench.start': 'CTXSTART',
     'ctx_bench.result.section_label': 'CTXRESULT',
@@ -157,13 +160,24 @@ test('REPL-2a: accuracy subtab renders form + server task grid', async () => {
     win.UpliftNativeBench.mount();
     win.UpliftNativeBench.showSub('accuracy');
     await new Promise(r => setTimeout(r, 0));  // let loadTasks promise settle
-    const text = allText(byId['bench-subpanel']);
+    const panel = byId['bench-subpanel'];
+    const text = allText(panel);
     assert.ok(text.includes('ACCHEADING'), 'acc heading via classic key');
     assert.ok(text.includes('ACCADD'), 'add button via classic key');
     assert.ok(text.includes('GRPKNOW'), 'group header via classic key');
     assert.ok(text.includes('GRPMMLUDESC'), 'task desc via classic key (from /tasks)');
     assert.ok(text.includes('MMLU'), 'task label passthrough');
     assert.ok(!text.includes('acc_bench.'), 'no raw acc key leaks');
+    // REPL-2b: engine selector (classic default, harness alternative)
+    assert.ok(text.includes('ENGC') && text.includes('ENGH'), 'engine radios translated');
+    const radios = [];
+    (function walk(n) {
+        if (n && n.tagName === 'input' && n.name === 'bench-acc-engine') radios.push(n);
+        for (const k of (n && n.children) || []) walk(k);
+    })(panel);
+    assert.equal(radios.length, 2, 'two engine choices');
+    const checked = radios.filter(r => r.checked).map(r => r.value);
+    assert.deepEqual(checked, ['classic'], 'default engine = classic');
 });
 
 test('second mount is a no-op (no double paint)', () => {

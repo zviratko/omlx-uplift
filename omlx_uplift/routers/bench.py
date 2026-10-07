@@ -37,8 +37,10 @@ async def bench_accuracy_tasks(is_admin: bool = Depends(require_admin)):
     """Classic's task grid (groups, dataset sizes, sample-size options)
     — VALID_BENCHMARKS stays server-owned; labels/descriptions are i18n
     KEYS resolved client-side against the merged catalog."""
+    from .. import harness_engine
     return {"tasks": accuracy_engine.TASK_GROUPS,
-            "valid": accuracy_engine.valid_benchmarks()}
+            "valid": accuracy_engine.valid_benchmarks(),
+            "harness_tasks": sorted(harness_engine.HARNESS_MAP)}
 
 
 @api_router.post("/bench/accuracy/add")

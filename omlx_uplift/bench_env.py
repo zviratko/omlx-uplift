@@ -142,6 +142,38 @@ def harness_python() -> Optional[str]:
     return str(py)
 
 
+def hf_cache_dir() -> Path:
+    """Dataset cache dir, configurable in ~/.omlx/uplift/config.json
+    ('bench_hf_cache', default ~/.omlx/uplift/bench-cache). Kept OUT of
+    ~/.cache/huggingface so uplift owns and can prune it."""
+    from . import paths
+    cfg = paths.uplift_store_dir() / "config.json"
+    default = paths.uplift_store_dir() / "bench-cache"
+    try:
+        import json
+        if cfg.exists():
+            v = json.loads(cfg.read_text()).get("bench_hf_cache")
+            if v:
+                return Path(os.path.expanduser(str(v)))
+    except Exception:
+        pass
+    return default
+
+
+def offline_mode() -> bool:
+    """'bench_offline': true in the same config -> HF_HUB_OFFLINE=1 for
+    harness children (runs must then find every dataset pre-cached)."""
+    from . import paths
+    cfg = paths.uplift_store_dir() / "config.json"
+    try:
+        import json
+        if cfg.exists():
+            return bool(json.loads(cfg.read_text()).get("bench_offline"))
+    except Exception:
+        pass
+    return False
+
+
 # ---------------------------------------------------------------------------
 # subprocess plumbing used by the accuracy harness engine (REPL-2b part 2)
 # ---------------------------------------------------------------------------
