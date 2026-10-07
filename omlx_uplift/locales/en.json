@@ -7,6 +7,7 @@
  "uplift.bench.context": "Context",
  "uplift.bench.native_stub": "Native surface — not implemented yet.",
  "uplift.bench.pick_prompt": "Pick at least one prompt length",
+ "uplift.bench.pick_tasks": "Pick at least one benchmark",
  "uplift.bench.run_finished": "finished",
  "uplift.bench.throughput": "Throughput",
  "uplift.bench.upload_failed": "Upload failed",

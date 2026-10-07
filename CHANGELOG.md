@@ -37,6 +37,17 @@ users never see.
   manager the classic UI uses. Labels reuse the classic `ctx_bench.*` /
   `modal.model_settings.qwen_ane_tune*` catalogs (already complete in
   all 10 locales).
+- **Native intelligence benchmark (preview branch).** The Intelligence
+  sub-tab is a native page over the classic 16-task accuracy engine
+  (`/uplift/api/bench/accuracy/*`): the task grid with per-task sample
+  sizes, queue with remove, batch size, deterministic/model-settings
+  sampling, thinking toggle, external-endpoint mode, SSE progress and
+  the accumulated results table with upload badges. Community
+  leaderboard upload is again an explicit opt-in (classic auto-uploads
+  local runs ≥100 questions; native never posts unless checked).
+  Parity on the dev keg: identical scores native-vs-classic across
+  SmolLM2-360M (arc/gsm8k), Qwen2.5-0.5B (queued chain), Qwen3.5-9B
+  with thinking on (0.9 = 0.9), and external-endpoint mode.
 
 ## [1.1] — 2026-10-07
 

@@ -2092,3 +2092,19 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .bench-result-row { display: flex; justify-content: space-between; gap: 18px;
   font-size: 11px; padding: 2px 0; border-bottom: 1px dotted var(--edge); }
 .bench-result-row:last-of-type { border-bottom: none; }
+/* REPL-2a: accuracy task grid + queue */
+.acc-taskgrid { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.acc-group-tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.acc-task { border: 1px solid var(--edge); padding: 8px; cursor: pointer; user-select: none; }
+.acc-task.on { border-color: var(--accent); background: var(--panel); }
+.acc-task-name { font-size: 12px; font-weight: 600; }
+.acc-task-desc { font-size: 10px; color: var(--dim); min-height: 12px; margin: 2px 0 4px; }
+.acc-task select { width: 100%; font-size: 10px; background: var(--field);
+  border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px; }
+.acc-queue { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.acc-queue-item { display: flex; justify-content: space-between; align-items: center;
+  border: 1px solid var(--edge); padding: 3px 8px; }
+.acc-queue-item.running { border-color: var(--accent); color: var(--accent); }
+.acc-queue-remove { background: none; border: none; color: var(--dim); cursor: pointer;
+  font-size: 13px; padding: 0 4px; }
+.acc-queue-remove:hover { color: var(--red); }

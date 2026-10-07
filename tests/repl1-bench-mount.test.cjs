@@ -66,6 +66,10 @@ const CAT = {   // fake merged catalog: classic + uplift keys, one marker lang
     'uplift.bench.native_stub': 'STUBNOTE',
     'bench.config.model': 'LBLMODEL',
     'bench.config.run_button': 'BTNRUN',
+    'acc_bench.heading': 'ACCHEADING',
+    'acc_bench.config.add_run': 'ACCADD',
+    'acc_bench.benchmarks.group_knowledge': 'GRPKNOW',
+    'acc_bench.benchmarks.mmlu_desc': 'GRPMMLUDESC',
     'ctx_bench.heading': 'CTXHEADING',
     'ctx_bench.start': 'CTXSTART',
     'ctx_bench.result.section_label': 'CTXRESULT',
@@ -77,7 +81,16 @@ function load() {
     const { byId, document } = makeHarness();
     const win = {
         UpliftCore: { t: (k) => (CAT[k] == null ? k : CAT[k]) },
-        UpliftDom: { fetchJson: async () => { throw new Error('no net in tests'); },
+        UpliftDom: { fetchJson: async (u) => {
+                    if (String(u).endsWith('/bench/accuracy/tasks')) {
+                        return { tasks: [{ group: 'acc_bench.benchmarks.group_knowledge',
+                            tasks: [{ key: 'mmlu', label: 'MMLU',
+                                      desc: 'acc_bench.benchmarks.mmlu_desc',
+                                      full_size: 14042, sizes: [30, 50, 100] }] }],
+                                 valid: ['mmlu'] };
+                    }
+                    throw new Error('no net in tests');
+                },
                      postJson: async () => { throw new Error('no net in tests'); },
                      toast: () => {} },
         Uplift: { state: { API: '' } },
@@ -109,12 +122,13 @@ test('mount paints subtabs + throughput form through the catalog', () => {
     assert.ok(win.UpliftNativeBench.isMounted(), 'isMounted flips after mount');
 });
 
-test('showSub(accuracy) swaps in the stub card', () => {
+test('showSub with an unknown key falls back to the honest stub card', () => {
+    // every real subtab is live now (REPL-1/2a/3) — the stub path stays
+    // as the safe fallback for unknown keys, not as a parked feature
     const { win, byId } = load();
     win.UpliftNativeBench.mount();
-    win.UpliftNativeBench.showSub('accuracy');
+    win.UpliftNativeBench.showSub('not-a-surface');
     const text = allText(byId['bench-subpanel']);
-    assert.ok(text.includes('SUBACC'), 'stub card title translated');
     assert.ok(text.includes('STUBNOTE'), 'stub note translated');
 });
 
@@ -136,6 +150,20 @@ test('REPL-3: ANE subtab renders the tuning form', () => {
     assert.ok(text.includes('ANEHEADING'), 'ane title via classic key');
     assert.ok(text.includes('ANESTART'), 'start button via classic key');
     assert.ok(!text.includes('modal.model_settings.'), 'no raw ane key leaks');
+});
+
+test('REPL-2a: accuracy subtab renders form + server task grid', async () => {
+    const { win, byId } = load();
+    win.UpliftNativeBench.mount();
+    win.UpliftNativeBench.showSub('accuracy');
+    await new Promise(r => setTimeout(r, 0));  // let loadTasks promise settle
+    const text = allText(byId['bench-subpanel']);
+    assert.ok(text.includes('ACCHEADING'), 'acc heading via classic key');
+    assert.ok(text.includes('ACCADD'), 'add button via classic key');
+    assert.ok(text.includes('GRPKNOW'), 'group header via classic key');
+    assert.ok(text.includes('GRPMMLUDESC'), 'task desc via classic key (from /tasks)');
+    assert.ok(text.includes('MMLU'), 'task label passthrough');
+    assert.ok(!text.includes('acc_bench.'), 'no raw acc key leaks');
 });
 
 test('second mount is a no-op (no double paint)', () => {

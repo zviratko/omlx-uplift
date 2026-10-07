@@ -1,13 +1,14 @@
-"""Native Bench surface API — throughput LIVE (REPL-1), rest scaffolded.
+"""Native Bench surface API — all throughput/accuracy/context/ANE
+surfaces LIVE (REPL-1/2a/3); chat is NAT-4's file.
 
-REPL-1: /bench/start|active|{id}/stream|cancel|results drive classic's
-engine IN-PROCESS via bench_engine (reuse verdict + upload opt-out rules
+Every handler drives classic's engine IN-PROCESS (bench_engine,
+accuracy_engine, context_engine — reuse verdicts + upload opt-out rules
 documented there; classic routes stay untouched at /admin/api/bench/*).
-REPL-2 layers accuracy, REPL-3 context/ANE — their literals keep their
-slots below the dynamic {run_id} shapes and stay 501 stubs until filled.
 Route order discipline (SPLIT-1): FastAPI matches in registration order,
 every literal under /bench/ is registered BEFORE /bench/{run_id}/... —
-tests/test_nat3_scaffold.py pins set+order and stub identity.
+tests/test_nat3_scaffold.py pins set+order and literal-vs-dynamic
+identity (the 4-segment dynamics can't be shadowed by 3-segment ones,
+and the golden order proves it).
 """
 
 from __future__ import annotations
@@ -16,16 +17,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .base import api_router, engine_pool, require_admin
-from .. import bench_engine, context_engine
-
-
-def _stub(name: str):
-    def handler(is_admin: bool = Depends(require_admin)):
-        raise HTTPException(
-            status_code=501,
-            detail=f"native bench surface '{name}': not implemented yet (NAT-3 scaffold)")
-    handler.__name__ = name
-    return handler
+from .. import accuracy_engine, bench_engine, context_engine
 
 
 @api_router.get("/bench/flag")
@@ -38,15 +30,61 @@ async def bench_flag(is_admin: bool = Depends(require_admin)):
             "chat": native_surfaces.enabled(mode, "chat")}
 
 
-# ---- accuracy (REPL-2) ----------------------------------------------------
+# ---- accuracy (REPL-2a) — LIVE via accuracy_engine ------------------------
 
-bench_accuracy_add = _stub("bench_accuracy_add")
-bench_accuracy_queue = _stub("bench_accuracy_queue")
-bench_accuracy_results = _stub("bench_accuracy_results")
+@api_router.get("/bench/accuracy/tasks")
+async def bench_accuracy_tasks(is_admin: bool = Depends(require_admin)):
+    """Classic's task grid (groups, dataset sizes, sample-size options)
+    — VALID_BENCHMARKS stays server-owned; labels/descriptions are i18n
+    KEYS resolved client-side against the merged catalog."""
+    return {"tasks": accuracy_engine.TASK_GROUPS,
+            "valid": accuracy_engine.valid_benchmarks()}
 
-api_router.post("/bench/accuracy/add")(bench_accuracy_add)
-api_router.get("/bench/accuracy/queue")(bench_accuracy_queue)
-api_router.get("/bench/accuracy/results")(bench_accuracy_results)
+
+@api_router.post("/bench/accuracy/add")
+async def bench_accuracy_add(request: Request, is_admin: bool = Depends(require_admin)):
+    pool = engine_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Engine pool not initialized")
+    body = await request.json()
+    upload = bool((body or {}).pop("upload", False))
+    try:
+        return await accuracy_engine.queue_add(body or {}, pool, upload=upload)
+    except accuracy_engine.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except accuracy_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except accuracy_engine.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@api_router.get("/bench/accuracy/queue")
+async def bench_accuracy_queue(is_admin: bool = Depends(require_admin)):
+    return accuracy_engine.queue_status()
+
+
+@api_router.delete("/bench/accuracy/queue/{idx}")
+async def bench_accuracy_queue_remove(idx: int, is_admin: bool = Depends(require_admin)):
+    try:
+        return accuracy_engine.queue_remove(idx)
+    except accuracy_engine.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@api_router.get("/bench/accuracy/results")
+async def bench_accuracy_results(is_admin: bool = Depends(require_admin)):
+    return accuracy_engine.results_payload()
+
+
+@api_router.post("/bench/accuracy/results/reset")
+async def bench_accuracy_results_reset(is_admin: bool = Depends(require_admin)):
+    return accuracy_engine.results_reset()
+
+
+@api_router.post("/bench/accuracy/cancel")
+async def bench_accuracy_cancel(is_admin: bool = Depends(require_admin)):
+    return await accuracy_engine.cancel()
+
 
 # ---- context probe (REPL-3) — LIVE via context_engine --------------------
 
@@ -245,3 +283,20 @@ async def bench_ane_cancel(tuning_id: str, is_admin: bool = Depends(require_admi
         return await context_engine.ane_cancel(run)
     except context_engine.BadInput as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---- dynamic accuracy stream (REPL-2a; 4-segment, no {run_id} clash) -----
+
+@api_router.get("/bench/accuracy/{bench_id}/stream")
+async def bench_accuracy_stream(bench_id: str, is_admin: bool = Depends(require_admin)):
+    run = accuracy_engine.get_run(bench_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Benchmark not found: {bench_id}")
+    return StreamingResponse(
+        # accuracy run object: same events/cond/terminal + done/error
+        # terminal types as context — event_stream reused verbatim.
+        bench_engine.event_stream(run),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"},
+    )

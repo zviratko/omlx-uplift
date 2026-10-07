@@ -7,6 +7,7 @@
  "uplift.bench.context": "Контекст",
  "uplift.bench.native_stub": "Нативная поверхность — ещё не реализовано.",
  "uplift.bench.pick_prompt": "Выберите хотя бы одну длину промпта",
+ "uplift.bench.pick_tasks": "Выберите хотя бы один бенчмарк",
  "uplift.bench.run_finished": "завершено",
  "uplift.bench.throughput": "Пропускная способность",
  "uplift.bench.upload_failed": "Не удалось загрузить",

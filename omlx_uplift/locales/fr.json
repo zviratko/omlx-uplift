@@ -7,6 +7,7 @@
  "uplift.bench.context": "Contexte",
  "uplift.bench.native_stub": "Surface native — pas encore implémentée.",
  "uplift.bench.pick_prompt": "Choisissez au moins une longueur de prompt",
+ "uplift.bench.pick_tasks": "Choisissez au moins un benchmark",
  "uplift.bench.run_finished": "terminé",
  "uplift.bench.throughput": "Débit",
  "uplift.bench.upload_failed": "Échec du téléversement",

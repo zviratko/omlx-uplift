@@ -53,9 +53,13 @@ def test_flag_write_read_roundtrip(monkeypatch, tmp_path):
 # /bench/{run_id}/... shapes.
 NAT3_ROUTES = [
     ("GET", "/bench/flag"),
+    ("GET", "/bench/accuracy/tasks"),
     ("POST", "/bench/accuracy/add"),
     ("GET", "/bench/accuracy/queue"),
+    ("DELETE", "/bench/accuracy/queue/{idx}"),
     ("GET", "/bench/accuracy/results"),
+    ("POST", "/bench/accuracy/results/reset"),
+    ("POST", "/bench/accuracy/cancel"),
     ("POST", "/bench/context/start"),
     ("GET", "/bench/context/active"),
     ("POST", "/bench/ane-tune/start"),
@@ -73,6 +77,7 @@ NAT3_ROUTES = [
     ("GET", "/bench/context/{bench_id}/results"),
     ("GET", "/bench/ane-tune/{tuning_id}/results"),
     ("POST", "/bench/ane-tune/{tuning_id}/cancel"),
+    ("GET", "/bench/accuracy/{bench_id}/stream"),
     ("GET", "/chat/key"),
     ("GET", "/chat/history"),
     ("POST", "/chat/history"),
@@ -110,8 +115,10 @@ def test_nat3_routes_are_last_block():
 
 
 def test_stub_resolution_literals_beat_dynamic():
-    """GET /bench/accuracy/results must hit bench_accuracy_results, not be
-    swallowed by /bench/{run_id}/results — asserted via the 501 detail."""
+    """GET /bench/accuracy/results must hit bench_accuracy_results (live
+    since REPL-2a), not be swallowed by /bench/{run_id}/results — proven
+    via engine identity: the dynamic handler gets called with
+    run_id='accuracy' if shadowing regresses."""
     from omlx_uplift import router as up
     from omlx_uplift.routers import base as up_base
 
@@ -121,9 +128,14 @@ def test_stub_resolution_literals_beat_dynamic():
 
     client = TestClient(app)
     # literal must NOT be swallowed by the dynamic /bench/{run_id}/results
-    r = client.get("/uplift/api/bench/accuracy/results")
-    assert r.status_code == 501
-    assert "bench_accuracy_results" in r.json()["detail"]
+    from omlx_uplift.routers import bench as bench_mod
+    called = {}
+    bench_mod.accuracy_engine.results_payload = lambda: called.setdefault("literal", True) or {"results": []}
+    try:
+        r = client.get("/uplift/api/bench/accuracy/results")
+        assert r.status_code == 200 and called.get("literal")
+    finally:
+        del bench_mod.accuracy_engine.results_payload
     # dynamic shape resolves to the live bench_results handler (REPL-1):
     # monkeypatched engine -> unknown-id 404 proves identity (a stubbed
     # route would answer 501; a shadowed literal would hit this too)

@@ -7,6 +7,7 @@
  "uplift.bench.context": "コンテキスト",
  "uplift.bench.native_stub": "ネイティブサーフェス — まだ未実装です。",
  "uplift.bench.pick_prompt": "プロンプト長を少なくとも1つ選択してください",
+ "uplift.bench.pick_tasks": "少なくとも1つのベンチマークを選択してください",
  "uplift.bench.run_finished": "完了",
  "uplift.bench.throughput": "スループット",
  "uplift.bench.upload_failed": "アップロードに失敗しました",

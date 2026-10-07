@@ -7,6 +7,7 @@
  "uplift.bench.context": "Kontext",
  "uplift.bench.native_stub": "Nativní povrch — zatím není implementováno.",
  "uplift.bench.pick_prompt": "Vyberte alespoň jednu délku promptu",
+ "uplift.bench.pick_tasks": "Vyberte alespoň jednu benchmarkovou sadu",
  "uplift.bench.run_finished": "dokončeno",
  "uplift.bench.throughput": "Průtok dat",
  "uplift.bench.upload_failed": "Nahrání selhalo",
