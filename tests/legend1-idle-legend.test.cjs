@@ -43,10 +43,12 @@ test('legendUpdater: idle branch resolves lastNonNull; hovered branch untouched'
     const m = src.match(/function legendUpdater\(\)[\s\S]*?\n}/);
     assert.ok(m, 'legendUpdater not found');
     const body = m[0];
-    assert.match(body, /const idle = idx === null \|\| idx === undefined;/,
-        'idle vs hovered must be an explicit split');
+    // 'idle' must be MOUSE state, not idx===null: mouseleave re-pins idx to
+    // the last row, so an idx-based test would blink again after any hover.
+    assert.match(body, /const hovering = c\.cursor\.left >= 0 && idx !== null/,
+        'idle vs hovered must key on cursor presence, not idx alone');
     assert.match(body, /KIT\.lastNonNull\(colData, i\)/,
         'idle legend cells must fall through to the column\'s own last non-null');
-    assert.match(body, /: raw;/,
+    assert.match(body, /const v = hovering \? raw/,
         'hovered cells must keep the shared crosshair row (null stays null)');
 });

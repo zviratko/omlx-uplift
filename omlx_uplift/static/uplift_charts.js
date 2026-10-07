@@ -314,15 +314,18 @@ function legendUpdater() {
         const seriesRows = hasTimeRow ? rows.slice(1) : rows;
         const idx = c.cursor.idx;
         const src = c.data[0];
-        // LEGEND-1: idle = 'latest sample'. On the FAST-1 union column the
-        // LAST ROW belongs to whichever stream (2 Hz live vs 5 s stored)
-        // sampled last, so reading colData[src.length-1] made the legend
-        // blink: memory card alternated 0.8|—|—|— vs —|—|28|0 every ~1 s.
-        // Each series must show its OWN last non-null. Hovered keeps the
-        // shared row (that's the crosshair's truth — null there = no
-        // sample at that instant, which the tooltip explains per series).
-        const idle = idx === null || idx === undefined;
-        const i = idle ? src.length - 1 : Math.min(idx, src.length - 1);
+        // LEGEND-1: 'idle' means the mouse is NOT over the plot. idx alone
+        // cannot answer that: bindCursorUpdater's mouseleave deliberately
+        // re-pins idx to the last row, and uPlot leaves idx null while the
+        // cursor hovers a skipped point. Idle = 'latest sample': on the
+        // FAST-1 union column the LAST ROW belongs to whichever stream
+        // (2 Hz live vs 5 s stored) sampled last, so reading
+        // colData[src.length-1] made the legend blink — memory card
+        // alternated 0.8|—|—|— vs —|—|28|0 every ~1 s. Each series must
+        // show its OWN last non-null. Hovered keeps the shared row: the
+        // crosshair shows one instant, and null there is honest.
+        const hovering = c.cursor.left >= 0 && idx !== null && idx !== undefined;
+        const i = hovering ? Math.min(idx, src.length - 1) : src.length - 1;
         if (hasTimeRow && src.length) {
             /* SWEEP178: the vendored uPlot builds its legend Time cell with
                new Date(ts * 1000) — right only for second-based axes, so an
@@ -348,7 +351,8 @@ function legendUpdater() {
             }
             const colData = c.data[sIdx + 1];
             const raw = colData && colData.length ? colData[i] : null;
-            const v = idle ? (raw !== null && raw !== undefined ? raw : KIT.lastNonNull(colData, i)) : raw;
+            const v = hovering ? raw
+                : (raw !== null && raw !== undefined ? raw : KIT.lastNonNull(colData, i));
             // Honour the series' own value formatter (U19/U20 multi-unit
             // cards: %, W, °C must not render as bare compact numbers).
             const ser = c.series[sIdx + 1];
