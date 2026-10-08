@@ -770,9 +770,19 @@ function toolbar() {
 // 6/6b: audio_stt selected -> fileUpload accepts audio only, placeholder
 // swaps to classic's ASR hint, mic button appears (secure-context gated,
 // same constraint classic states in chat.error.mic_unavailable).
+var _audioMode = null;   // last mode pushed into the component
 function syncAudioMode() {
     if (!_dc) return;
     var stt = isSttModel((_conv && _conv.model) || '');
+    var mic = gid('chat-native-mic');
+    if (mic) mic.hidden = !stt;
+    // config ASSIGNMENT re-renders the component and WIPES rendered
+    // history (drill 2026-10-08: store kept 4 messages, bubbles 0 —
+    // caught by the theme sweep touching the model select). So: write
+    // the config only when the mode actually flips, and re-apply the
+    // history after every write.
+    if (_audioMode === stt) return;
+    _audioMode = stt;
     // reassign the WHOLE property: the component reacts to the setter,
     // not to nested mutation (inp.placeholder.text = ... does nothing)
     _dc.fileUpload = stt ? { acceptedFormats: 'audio/*',
@@ -780,8 +790,7 @@ function syncAudioMode() {
     _dc.textInput = { placeholder: { text: stt
         ? t('chat.input_placeholder_asr', 'Attach an audio file to transcribe')
         : t('chat.input_placeholder', 'Type a message...') } };
-    var mic = gid('chat-native-mic');
-    if (mic) mic.hidden = !stt;
+    renderHistory();
 }
 
 function toggleMic() {
