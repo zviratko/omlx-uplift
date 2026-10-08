@@ -43,6 +43,16 @@ from .evals.systemone import loader, metrics
 logger = logging.getLogger("omlx.uplift.decision")
 
 KIND = "decision"
+
+try:  # new omlx (>= b75060e): the real classes raised by the decode path
+    from omlx.models.decision import (DecisionContextLengthError,  # noqa: F401
+                                      DecisionRequestError)
+except ImportError:  # CI / older kegs: local stand-ins (never raised there)
+    class DecisionRequestError(ValueError):
+        pass
+
+    class DecisionContextLengthError(DecisionRequestError):
+        pass
 # items stream progress at pack granularity + this item stride (a 300-item
 # pack with no mid-progress reads as a hang; per-item events would spam)
 PROGRESS_STRIDE = 20
@@ -233,15 +243,22 @@ def _check_decision_model(model_id: str) -> None:
                        "(this bench scores /v1/systemone models)")
 
 
+def _lease(model_id: str):
+    """The upstream lease seam, isolated for testing: returns an async CM
+    yielding a leased DecisionEngine (server.py acquire_decision_engine).
+    Local stand-in classes above mean _runner itself never imports omlx."""
+    from omlx import server as _srv
+    return _srv.acquire_decision_engine(model_id)
+
+
 async def _runner(run: DecisionRun) -> None:
     cm = None
+    entered = False
     engine = None
     try:
-        from omlx import server as _srv
-        from omlx.models.decision import (DecisionContextLengthError,
-                                          DecisionRequestError)
-        cm = _srv.acquire_decision_engine(run.model_id)
-        engine = await cm.__aenter()
+        cm = _lease(run.model_id)
+        engine = await cm.__aenter__()
+        entered = True
         n = len(run.packs)
         for i, pack_name in enumerate(run.packs):
             if run.cancelled:
@@ -269,7 +286,12 @@ async def _runner(run: DecisionRun) -> None:
         logger.warning(f"decision run {run.run_id} failed: {e}")
         await run.send({"type": "error", "message": run.error_message})
     finally:
-        if cm is not None:
+        if entered and cm is not None:
+            # ONLY release after a successful enter: __aexit__ on a never-
+            # entered _AsyncGeneratorContextManager resumes the generator
+            # (loads the engine!), then raises 'generator didn't stop' and
+            # LEAKS the lease — caught by the live drill via that exact
+            # stray log line.
             try:
                 await cm.__aexit__(None, None, None)
             except Exception as e:

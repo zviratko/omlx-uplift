@@ -1809,8 +1809,10 @@ var DEC = {
 
     onEvent: function (ev) {
         if (ev.type === 'progress') {
-            this.renderStatus((ev.message || ev.phase || '') +
-                (ev.total ? ' (' + (Number(ev.current) + 1) + '/' + ev.total + ')' : ''));
+            // engine messages already carry the counts ("pack (1/3)",
+            // "pack: 20/294") — appending (current+1/total) here would
+            // print them twice (caught in the live UI drill)
+            this.renderStatus(ev.message || ev.phase || '');
         } else if (ev.type === 'result') {
             this.state.results.push(ev.data);
             this.renderResults();
