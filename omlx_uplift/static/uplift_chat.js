@@ -190,20 +190,28 @@ function saveConv() {
     });
     refreshConvList();
 }
-function renderHistory() {
-    // classic persists thinking per message; the single live panel shows
-    // the most recent assistant turn's (older ones stay in the store —
-    // per-message bubbles inside deep-chat need wrappers the bundle does
-    // not expose; stated limitation on the card)
+// Ordinal of the LAST assistant message among the visible (non-empty
+// content) store rows — equals the bubble ordinal under deep-chat's
+// filter (same rule U45 uses for its action rows); -1 when none. Used
+// to anchor the streaming thinking block to the right bubble.
+function lastAiVisible() {
     var ms = (_conv && _conv.messages) || [];
-    _thinkLive = '';
-    for (var i = ms.length - 1; i >= 0; i--) {
-        if (ms[i].role === 'assistant') {
-            _thinkLive = String(ms[i].reasoning_content || '');
-            break;
-        }
+    var ord = -1, k = 0;
+    for (var i = 0; i < ms.length; i++) {
+        if (!ms[i] || !ms[i].content) continue;
+        if (ms[i].role === 'assistant') ord = k;
+        k++;
     }
-    setTimeout(paintThinking, 0);
+    return ord;
+}
+
+function renderHistory() {
+    // U71 (user bug): thinking belonged ABOVE EACH REPLY like classic's
+    // per-message block, not in one fixed panel at the top of the chat —
+    // the old 'live panel shows last turn' rule was a stated limitation,
+    // and it was wrong UX. Bubbles now carry their own thinking; the
+    // in-flight turn streams into the last assistant bubble's block
+    // (classic has the same affordance for its stream).
     if (!_dc) return;
     _dc.history = (_conv.messages || []).filter(function (m) { return m.content; })
         .map(function (m) {
@@ -374,9 +382,12 @@ async function shapeRequest(d) {
     d.headers['Authorization'] = 'Bearer ' + _key;
     _streaming = true;   // fires on every submit path (button, enter,
                          // programmatic) — the reliable streaming start
-    _thinkLive = '';     // new turn: reasoning panel restarts empty
+    _thinkLive = '';     // new turn: reasoning restarts empty
     _tools = [];         // 5/6: per-turn tool log
-    if (typeof paintThinking === 'function') setTimeout(paintThinking, 0);
+    // U71: paintThinking's steal rule re-anchors the live block onto the
+    // NEW in-flight bubble as soon as the first reasoning delta lands;
+    // until then the previous turn's live block was already wiped by the
+    // finalize pass in attachMessageActions.
     var raw = Array.isArray(d.body) ? d.body
         : (d.body && d.body.messages) ? d.body.messages : [];
     var files = [], lastUser = '';
@@ -712,20 +723,63 @@ function observeChatChrome(dc) {
     var ro = new ResizeObserver(function () { fitHeight(dc); });
     var bar = gid('chat-native-bar');
     if (bar) ro.observe(bar);
-    var tp = gid('chat-native-think');
-    if (tp) ro.observe(tp);
     window.addEventListener('resize', function () { fitHeight(dc); });
 }
 
 function paintThinking() {
-    var panel = gid('chat-native-think');
-    if (!panel) return;
-    // classic hides the whole thinking block when the model produced no
-    // visible reasoning (hasVisibleThinking) — same rule here: no text,
-    // no panel, regardless of the mode selection
-    var body = panel.querySelector('.chat-native-think-body');
-    if (body) body.textContent = _thinkLive;
-    panel.hidden = !_thinkLive || !_thinkLive.trim();
+    // U71: paint the LIVE stream thinking into the last assistant
+    // bubble's block (created on demand — the bubble only exists once
+    // deep-chat has painted it). No text anywhere = no blocks (classic's
+    // hasVisibleThinking rule).
+    var root = _dc && _dc.shadowRoot;
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    var bubbles = root.querySelectorAll('.message-bubble');
+    var t0 = null;
+    if (bubbles.length && _thinkLive) {
+        if (_streaming) {
+            // deep-chat creates the assistant bubble at submit (loading
+            // dots) — during the stream THAT bubble is the reply the
+            // thinking belongs above; the store has no row yet
+            t0 = bubbles[bubbles.length - 1];
+        } else {
+            var idx = lastAiVisible();
+            t0 = (idx >= 0 && idx < bubbles.length) ? bubbles[idx] : null;
+        }
+    }
+    var h0 = t0 && t0.parentElement;      // .inner-message-container
+    var target = h0 && h0.querySelector(':scope > .chat-native-thinking');
+    // steal: live blocks anchored elsewhere detach first
+    root.querySelectorAll('.chat-native-thinking[data-live="1"]')
+        .forEach(function (e) { if (e !== target) e.remove(); });
+    if (!target && h0) {
+        target = thinkingBlockEl(_thinkLive, true);
+        if (target) { h0.insertBefore(target, t0); target.dataset.live = '1'; }
+    }
+    if (target) {
+        target.dataset.live = '1';
+        var body = target.querySelector('.chat-native-think-body');
+        if (body) body.textContent = _thinkLive;
+        target.hidden = !_thinkLive || !_thinkLive.trim();
+    }
+}
+
+function thinkingBlockEl(text, open) {
+    if (typeof document === 'undefined' || !document.createElement) return null;
+    var d = document.createElement('details');
+    d.className = 'chat-native-thinking';
+    if (open) d.open = true;
+    var sm = document.createElement('summary');
+    var lab = (W() && W().UpliftCore && W().UpliftCore.t)
+        ? W().UpliftCore.t('chat.thinking_label') : 'chat.thinking_label';
+    sm.textContent = (lab && lab !== 'chat.thinking_label') ? lab : 'Thinking';
+    // U59 doctrine: JS-built labels carry the repair marker so a late
+    // locale catalog still re-labels them (blocks can be built at boot)
+    sm.dataset.i18n = 'chat.thinking_label'; sm.dataset.en = 'Thinking';
+    var pre = document.createElement('pre');
+    pre.className = 'chat-native-think-body';
+    pre.textContent = text || '';
+    d.append(sm, pre);
+    return d;
 }
 
 // ---- vendor (ESM, loaded once at mount, never on the embed path) ---------
@@ -1161,11 +1215,47 @@ function attachMessageActions(dc) {
     for (var i = 0; i < ms.length; i++) {
         if (ms[i] && ms[i].content) visible.push(i);
     }
+    var liveOrd = lastAiVisible();   // bubble ordinal the live stream owns
+    if (!_streaming && typeof root.querySelectorAll === 'function') {
+        // finalize wipe: persisted text (if any) re-creates blocks below —
+        // a live block that outlived its stream is stale by definition
+        root.querySelectorAll('.chat-native-thinking[data-live="1"]')
+            .forEach(function (e) { e.remove(); });
+    }
     for (var k = 0; k < bubbles.length; k++) {
         var b = bubbles[k];
         var holder = b.parentElement;      // .inner-message-container
         if (!holder || !holder.querySelector) continue;
         var storeIdx = visible[k];
+        // U71: this bubble's thinking block. Rule: the PERSISTED store
+        // text is authoritative (classic's per-message block); while a
+        // stream is still in flight, the last-ai bubble shows the live
+        // text instead (deep-chat appends the assistant row only when
+        // the stream closes — same 'current stream' anchor classic uses).
+        var thinkEl = holder.querySelector(':scope > .chat-native-thinking');
+        var txt = '', isLive = false;
+        if (storeIdx !== undefined && (ms[storeIdx] || {}).role === 'assistant') {
+            txt = String(ms[storeIdx].reasoning_content || '');
+        }
+        if (!txt && _streaming && k === bubbles.length - 1) {
+            txt = _thinkLive; isLive = !!txt;   // in-flight ai bubble
+        }
+        if (txt) {
+            if (!thinkEl) {
+                thinkEl = thinkingBlockEl(txt, isLive);
+                if (thinkEl) holder.insertBefore(thinkEl, b);
+            } else {
+                var tb = thinkEl.querySelector('.chat-native-think-body');
+                if (tb && tb.textContent !== txt) { tb.textContent = txt; }
+                if (isLive) { thinkEl.dataset.live = '1'; if (!thinkEl.open) thinkEl.open = true; }
+                else if (thinkEl.dataset.live === '1') {
+                    // finalized from the store: live styling off, stays open
+                    thinkEl.dataset.live = '';
+                }
+            }
+        } else if (thinkEl && thinkEl.dataset.live !== '1') {
+            thinkEl.remove();
+        }
         var existing = holder.querySelector(':scope > .chat-native-msg-actions');
         if (storeIdx === undefined) {     // component-local row (no store twin)
             if (existing) existing.remove();
@@ -1320,6 +1410,17 @@ function applyShadowTheme(dc) {
         // U45: per-message action row (classic parity). Lives in OUR
         // shadow DOM, so its CSS must ship in this tag — light-DOM
         // uplift.css cannot reach across the boundary.
+        // U71: per-reply thinking block (user bug: one panel at the top
+        // of the conversation was wrong; classic shows it above each reply)
+        '.chat-native-thinking { border: 1px solid var(--edge);',
+        '  background: var(--panel, #10151d); padding: 3px 8px; margin: 0 0 4px;',
+        '  font-size: 11px; border-radius: 6px; max-width: 85%; }',
+        '.chat-native-thinking summary { cursor: pointer; color: var(--dim, #8b98ab);',
+        '  font-weight: 600; text-transform: uppercase; font-size: 10px;',
+        '  letter-spacing: 0.04em; }',
+        '.chat-native-thinking .chat-native-think-body { margin: 4px 0 0;',
+        '  white-space: pre-wrap; color: var(--dim, #8b98ab); font-size: 11px;',
+        '  max-height: 160px; overflow: auto; }',
         '.chat-native-msg-actions { display: none; gap: 4px; margin-top: 3px;',
         '  align-items: center; }',
         '.chat-native-msg-actions.user { justify-content: flex-end; }',
@@ -1422,14 +1523,14 @@ function mount() {
             : newConv();
         var b = gid('chat-native-boot'); if (b) b.remove();
         wrap.insertBefore(toolbar(), wrap.firstChild);
-        var tp = el('details'); tp.id = 'chat-native-think';
-        tp.className = 'chat-native-think'; tp.hidden = true; tp.open = true;
-        var th = el('summary'); th.textContent = t('chat.thinking_label', 'Thinking');
-        var tb = el('pre'); tb.className = 'chat-native-think-body';
-        tp.append(th, tb);
+        // U71: the fixed 'Thinking' panel ABOVE the chat is gone — the
+        // user bug report: thinking belonged above EACH reply (classic's
+        // per-message block). attachMessageActions owns per-bubble
+        // blocks inside the shadow root; fitHeight no longer reserves a
+        // band for it.
         var dcHost = gid('chat-native-dc');
         if (!dcHost) { dcHost = el('div'); dcHost.id = 'chat-native-dc'; }
-        wrap.append(tp, dcHost);
+        wrap.append(dcHost);
         // summary rows carry no messages — open the latest conversation
         // fully before rendering (the picker is summaries by design)
         return _convs.length

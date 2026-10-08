@@ -493,3 +493,24 @@ test('U46: inputs parse honoring zero; blank and junk are unset', async () => {
     h.byId[N.genInputId('top_p')].value = '';
     assert.equal(N.readGenerationInputs(), null, 'all blank -> null (unset)');
 });
+
+test('U71: thinking anchors ABOVE each reply, not at the top of the chat', () => {
+    // user bug: the NAT-4 hybrid kept one fixed panel above the whole
+    // conversation; classic shows the block per assistant message. Pins:
+    // no light-DOM panel element, blocks built only inside the shadow
+    // root, and inserted BEFORE the bubble element.
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    assert.ok(!/tp\.id = 'chat-native-think'/.test(src),
+        'fixed thinking panel element is gone');
+    assert.ok(/holder\.insertBefore\(thinkEl, b\)/.test(src),
+        'persisted block goes above the bubble');
+    assert.ok(/h0\.insertBefore\(target, t0\)/.test(src),
+        'live stream block goes above the in-flight bubble');
+    assert.ok(/\.chat-native-thinking \{/.test(src),
+        'shadow-root CSS ships for the block (light DOM cannot reach)');
+    assert.ok(/_lastAiVisible|lastAiVisible\(\)/.test(src),
+        'store-derived anchor helper in use');
+    // classic parity: finished blocks default closed, live one open
+    assert.ok(/thinkingBlockEl\(txt, isLive\)/.test(src),
+        'open state follows live-vs-persisted');
+});
