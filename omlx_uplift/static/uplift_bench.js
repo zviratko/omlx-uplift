@@ -185,6 +185,69 @@ function fmtMs(v) {
 // squeezed beside the batch checkboxes — recorded deviation from classic).
 // Open/closed is a layout preference -> localStorage (board doctrine).
 var ADV_LS = 'omlx-uplift-bench-advanced';
+
+/* ---- U83: accuracy queue board ------------------------------------------
+   The old line read '▸ model (loading)' + '[0/2 suites · 28/300 q]':
+   suite counting was per-request and 0-based (a RUNNING suite showed as
+   0), the question pair duplicated the per-suite counters instead of the
+   queue total, and queued suites were invisible text. The board tracks
+   every suite the user queued THIS session across both engine entries
+   (a mixed pick posts two queue rows; classic counts them separately —
+   the user counts 3 benchmarks), renders each as a box that fills left
+   to right, and computes [running-suite/total · done-q/total-q] from it.
+   Pure helpers so a node test can replay event sequences. */
+function boardSuiteMeta(groups, key) {
+    // classic card truth sources: label for the box, full_size for a
+    // 'Full' selection (size 0); unknown -> null (board renders '?')
+    for (const g of (groups || []))
+        for (const tk of (g.tasks || []))
+            if (tk.key === key) return { label: tk.label || key, full: tk.full_size || 0 };
+    return { label: key, full: 0 };
+}
+function boardQuestions(sizes, engine, hSizes, groups) {
+    // effective question count per suite of one entry (U68 math: harness
+    // --limit applies PER SUBTASK -> size x leaf count)
+    var out = 0, per = {};
+    for (var k in sizes) {
+        var n = sizes[k] | 0, q;
+        if (engine === 'harness') q = n * ((hSizes && hSizes[k]) || 1);
+        else q = n || (boardSuiteMeta(groups, k).full) || 0;
+        per[k] = q; out += q;
+    }
+    return { per: per, total: out };
+}
+function boardSuiteBoxes(entries) {
+    // flat ordered suite list: {key,label,engine,model,state,done,total,q}
+    var out = [];
+    for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        for (var k in (e.sizes || {})) {
+            out.push({ key: k, label: (e.meta && e.meta[k] && e.meta[k].label) || k,
+                       engine: e.engine || 'classic', model: e.model_id,
+                       state: e.suiteState && e.suiteState[k] || 'queued',
+                       done: (e.suiteDone && e.suiteDone[k]) | 0,
+                       total: (e.qper && e.qper[k]) | 0,
+                       quiet: !!(e.suiteQuiet && e.suiteQuiet[k]) });
+        }
+    }
+    return out;
+}
+function boardCounters(entries) {
+    var suites = boardSuiteBoxes(entries), doneS = 0, runIdx = -1, doneQ = 0, totQ = 0;
+    for (var i = 0; i < suites.length; i++) {
+        var s = suites[i]; totQ += s.total;
+        if (s.state === 'done') { doneS++; doneQ += s.total || s.done; }
+        else if (s.state === 'running' && runIdx < 0) runIdx = i;
+    }
+    // 'current suite' is 1-based the moment it runs (user: 0 makes no
+    // sense); between entries (nothing running) the count sits at done
+    var cur = runIdx >= 0 ? runIdx + 1 : doneS;
+    var live = runIdx >= 0 ? suites[runIdx].done : 0;
+    if (runIdx >= 0 && suites[runIdx].total && live > suites[runIdx].total)
+        live = suites[runIdx].total;
+    return { cur: cur, total: suites.length, qDone: doneQ + live, qTotal: totQ,
+             running: runIdx >= 0 ? suites[runIdx] : null };
+}
 function advancedSection(children, labelKey, labelFb) {
     var adv = el('details', 'bench-advanced');
     var sum = el('summary', null, t(labelKey || 'bench.config.advanced_options',
@@ -2091,6 +2154,9 @@ var ACC = {
             ACC._sizesCache = p.sizes;
             if (self.state) { self.state.harnessSizes = p.sizes; }
             self.applyEngineLabels();
+            // U83: harness question math needs the leaf counts
+            if (self.state && (self.state.running || (self.state.queue || []).length))
+                self.refreshQueue();
         }).catch(function () { /* honest plain sizes */ });
     },
 
@@ -2174,6 +2240,11 @@ var ACC = {
             ACC._tasksCache = data.harness_tasks || [];
             self.state.harnessTasks = ACC._tasksCache;
             self.renderGrid();
+            // U83: the board may have painted BEFORE the catalog landed
+            // (queued suites render key-only, 'Full' sizes unknown). Labels
+            // and full-dataset totals come from groups — resync in place.
+            if (self.state.running || (self.state.queue || []).length)
+                self.refreshQueue();
         }).catch(function () {});
     },
 
@@ -2385,39 +2456,245 @@ var ACC = {
             var wasRunning = this.state.running;
             this.state.running = !!st.running;
             this.state.benchId = st.current_bench_id || null;
+            this.state.boardPhase = st.phase || null;
+            this.syncBoard(st);
             this.renderQueue(st);
             if (st.running && !wasRunning && st.current_bench_id) this.startStream(st.current_bench_id);
             if (!st.running && wasRunning) { stopStream(); this.refreshResults(); }
         } catch (e) { /* board offline */ }
     },
 
+    /* U83: board entries = the RUNNING entry (new queue_status field) +
+       waiting entries. Progress state (suite fill, quiet notes) survives
+       re-polls by merging on model|engine — the stream mutates between. */
+    syncBoard: function (st) {
+        var self = this;
+        var prev = this.state.board || [];
+        var groups = this.state.groups;
+        var mk = function (q, running) {
+            var key = q.model_id + '|' + (q.engine || 'classic') + '|' +
+                      Object.keys(q.sizes || {}).sort().join(',');
+            var old = null;
+            for (var i = 0; i < prev.length; i++)
+                if (prev[i].key === key) old = prev[i];
+            var qs = boardQuestions(q.sizes || {}, q.engine || 'classic',
+                                   self.state.harnessSizes, groups);
+            var meta = {};
+            Object.keys(q.sizes || {}).forEach(function (k) { meta[k] = boardSuiteMeta(groups, k); });
+            var e = {
+                key: key, model_id: q.model_id, engine: q.engine || 'classic',
+                external: !!q.external, running: !!running, sizes: q.sizes || {},
+                qper: qs.per, meta: meta,
+                suiteState: (old && old.suiteState) || {},
+                suiteDone: (old && old.suiteDone) || {},
+                suiteQuiet: (old && old.suiteQuiet) || {},
+            };
+            // first paint: running entry's suites are 'running' (or the
+            // first is — others queued), waiting entries all queued
+            if (!Object.keys(e.suiteState).length) {
+                var first = true;
+                Object.keys(e.sizes).forEach(function (k) {
+                    e.suiteState[k] = (running && first) ? 'running' : 'queued';
+                    first = false;
+                });
+            } else if (running && !Object.keys(e.sizes).some(function (k) {
+                    return e.suiteState[k] === 'running'
+                        || e.suiteState[k] === 'preparing'; })) {
+                // reload/refresh between suites: the moment no bar is
+                // active, the first still-queued suite IS the live one
+                var nxt = Object.keys(e.sizes).filter(function (k) {
+                    return e.suiteState[k] === 'queued'; })[0];
+                if (nxt) e.suiteState[nxt] = 'running';
+            }
+            return e;
+        };
+        var entries = [];
+        if (st.running && st.running_entry) entries.push(mk(st.running_entry, true));
+        else if (st.running && st.current_model)   // old server shape: honest fallback
+            entries.push(mk({ model_id: st.current_model, sizes: {} }, true));
+        (st.queue || []).forEach(function (q) { entries.push(mk(q, false)); });
+        this.state.board = entries;
+    },
+
+    /* stream event -> board mutation (pure data, render is separate) */
+    boardEvent: function (ev) {
+        var entries = this.state.board || [];
+        var run = null;
+        for (var i = 0; i < entries.length; i++) if (entries[i].running) run = entries[i];
+        if (!run) return;
+        var b = ev.benchmark || (ev.data && ev.data.benchmark) || '';
+        if (ev.type === 'progress') {
+            if (b) {
+                if (ev.bench_total && (run.qper[b] | 0) < ev.bench_total
+                        && (ev.bench_total <= (run.qper[b] | 0) * 4 || !run.qper[b]))
+                    run.qper[b] = ev.bench_total;      // classic's own total wins
+                if (ev.phase === 'eval' && ev.bench_current != null) {
+                    // Harness suites replay 'Requesting API' once PER LEAF
+                    // subtask (mmlu: 57 bars of N). A bar that restarts
+                    // (cur < last cur) closed the previous leaf — bank its
+                    // total. Classic suites have ONE bar per suite, so the
+                    // accumulator just rides it. (Interleaved same-suite
+                    // bars do not occur in either engine's eval phase.)
+                    run.bar = run.bar || {};
+                    var prev = run.bar[b];
+                    var acc = prev ? prev.acc : 0;
+                    if (prev && ev.bench_current < prev.cur) acc += prev.tot;
+                    run.bar[b] = { cur: ev.bench_current, tot: ev.bench_total || prev && prev.tot || 0, acc: acc };
+                    run.suiteDone[b] = acc + ev.bench_current;
+                    run.suiteState[b] = 'running';
+                    delete run.suiteQuiet[b];
+                }
+                else if (ev.phase === 'prepare' || ev.phase === 'download') {
+                    run.suiteState[b] = 'preparing';
+                    run.suiteQuiet[b] = ev.quiet_s || null;
+                }
+            }
+        } else if (ev.type === 'result') {
+            if (b) {
+                run.suiteState[b] = 'done';
+                var banked = run.bar && run.bar[b]
+                    ? run.bar[b].acc + (run.bar[b].tot || run.bar[b].cur) : 0;
+                run.suiteDone[b] = (ev.data && ev.data.total) || banked
+                    || run.suiteDone[b] || 0;
+                if ((run.qper[b] | 0) < run.suiteDone[b]) run.qper[b] = run.suiteDone[b];
+                // next suite of THIS entry starts when classic says so;
+                // board pre-marks the first still-queued box as running
+                var nxt = Object.keys(run.sizes).filter(function (k) {
+                    return run.suiteState[k] === 'queued'; })[0];
+                if (nxt) run.suiteState[nxt] = 'running';
+            }
+        } else if (ev.type === 'error') {
+            Object.keys(run.sizes).forEach(function (k) {
+                if (run.suiteState[k] === 'running' || run.suiteState[k] === 'preparing')
+                    run.suiteState[k] = 'error';
+            });
+        }
+    },
+
     renderQueue: function (st) {
         var wrap = gid('bench-acc-queue');
         if (!wrap) return;
-        wrap.replaceChildren();
-        var head = el('div', 'bench-label', t('acc_bench.config.queue_label', 'Queue'));
-        wrap.appendChild(head);
-        if (st.running && st.current_model) {
-            var cur = el('div', 'acc-queue-item running',
-                '▸ ' + st.current_model + (st.phase ? ' (' + st.phase + ')' : ''));
-            wrap.appendChild(cur);
-        }
         var self = this;
-        (st.queue || []).forEach(function (q, i) {
-            var it = el('div', 'acc-queue-item', (i + 1) + '. ' + q.model_id +
-                (q.external ? ' [' + t('acc_bench.results.external_badge', 'external') + ']' : '') +
-                ' — ' + (q.benchmarks || []).join(', '));
-            var rm = el('button', 'acc-queue-remove', '×');
-            rm.type = 'button';
-            rm.title = t('models.queue.remove_tooltip', 'Remove');
-            rm.addEventListener('click', async function () {
-                var d = dom();
-                try { await d.deleteJson(api() + '/bench/accuracy/queue/' + i); self.refreshQueue(); }
-                catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        var entries = this.state.board || [];
+        wrap.replaceChildren();
+        if (!st.running && !(st.queue || []).length) { wrap.hidden = true; return; }
+        wrap.hidden = false;
+        wrap.appendChild(el('div', 'bench-label',
+            t('acc_bench.config.queue_label', 'Queue')));
+        var d = dom();
+        var skip = entries.length && entries[0].running ? 1 : 0;
+        entries.forEach(function (e, idx) {
+            var row = el('div', 'acc-board-entry' + (e.running ? ' running' : ''));
+            row.dataset.key = e.key;
+            var head = el('div', 'acc-board-head');
+            head.appendChild(el('span', 'acc-board-model',
+                (e.running ? '▸ ' : (idx - skip + 1) + '. ') + e.model_id +
+                (e.external ? ' [' + t('acc_bench.results.external_badge', 'external') + ']' : '')));
+            var eng = el('span', 'acc-board-engine ' + (e.engine === 'harness' ? 'h' : 'c'),
+                t(e.engine === 'harness' ? 'uplift.bench.engine_harness'
+                                         : 'uplift.bench.engine_classic',
+                  e.engine === 'harness' ? 'LM-Eval' : 'oMLX Classic'));
+            head.appendChild(eng);
+            if (e.running && st.phase)
+                head.appendChild(el('span', 'acc-board-phase', st.phase));
+            else if (!e.running) {
+                var rm = el('button', 'acc-queue-remove', '×');
+                rm.type = 'button';
+                rm.title = t('models.queue.remove_tooltip', 'Remove');
+                rm.addEventListener('click', async function () {
+                    try { await d.deleteJson(api() + '/bench/accuracy/queue/' + (idx - skip)); self.refreshQueue(); }
+                    catch (err) { d.toast(String((err && err.message) || err), 'error'); }
+                });
+                head.appendChild(rm);
+            }
+            row.appendChild(head);
+            var boxes = el('div', 'acc-board-suites');
+            Object.keys(e.sizes).forEach(function (k) {
+                boxes.appendChild(self.suiteBoxEl(e, k));
             });
-            it.appendChild(rm);
-            wrap.appendChild(it);
+            row.appendChild(boxes);
+            wrap.appendChild(row);
         });
+    },
+
+    /* suite box: '[ MMLU  28/300 ]' with a left-to-right fill underlay.
+       Updated IN PLACE from the stream (widths/text only) so hovering and
+       scroll survive 1 Hz events. */
+    suiteBoxEl: function (e, k) {
+        var box = el('div', 'acc-suite st-' + (e.suiteState[k] || 'queued'));
+        box.dataset.k = k;
+        var fill = el('div', 'acc-suite-fill');
+        var done = e.suiteDone[k] | 0, tot = e.qper[k] | 0;
+        fill.style.width = (e.suiteState[k] === 'done' ? 100
+            : (tot ? Math.min(100, Math.round(done / tot * 100)) : 0)) + '%';
+        var lab = el('span', 'acc-suite-name', (e.meta[k] && e.meta[k].label) || k);
+        var cnt = el('span', 'acc-suite-count', this.suiteCountText(e, k));
+        box.append(fill, lab, cnt);
+        box.title = this.suiteTitle(e, k);
+        return box;
+    },
+    suiteCountText: function (e, k) {
+        var stt = e.suiteState[k] || 'queued';
+        var done = e.suiteDone[k] | 0, tot = e.qper[k] | 0;
+        if (stt === 'done') return tot ? tot + '/' + tot : '✓';
+        if (stt === 'queued') return tot ? '0/' + tot : '—';
+        return tot ? done + '/' + tot : (stt === 'preparing' ? '…' : '—');
+    },
+    suiteTitle: function (e, k) {
+        var stt = e.suiteState[k] || 'queued';
+        if (stt === 'preparing') {
+            var q = e.suiteQuiet[k];
+            return q ? t('uplift.bench.board_preparing_quiet',
+                'Preparing dataset — lm-eval silent {n}s (download/build)')
+                .replace('{n}', q)
+                : t('uplift.bench.board_preparing', 'Preparing dataset…');
+        }
+        return ({ running: t('uplift.bench.board_running', 'Running'),
+                  done: t('uplift.bench.board_done', 'Done'),
+                  error: t('uplift.bench.board_error', 'Error'),
+                  queued: t('uplift.bench.board_queued', 'Queued') })[stt] || stt;
+    },
+    /* in-place repaint from the board data (no rebuild) */
+    boardPaint: function () {
+        var wrap = gid('bench-acc-queue');
+        if (!wrap || wrap.hidden) return;
+        var entries = this.state.board || [];
+        var rows = wrap.querySelectorAll('.acc-board-entry');
+        for (var i = 0; i < entries.length; i++) {
+            var e = entries[i];
+            var r = null;
+            for (var j = 0; j < rows.length; j++)
+                if (rows[j].dataset.key === e.key) r = rows[j];
+            if (!r) continue;
+            Object.keys(e.sizes).forEach(function (k) {
+                var box = r.querySelector('.acc-suite[data-k="' + k + '"]');
+                if (!box) return;
+                var stt = e.suiteState[k] || 'queued';
+                box.className = 'acc-suite st-' + stt;
+                var done = e.suiteDone[k] | 0, tot = e.qper[k] | 0;
+                var pct = tot ? Math.min(100, Math.round(done / tot * 100)) : 0;
+                if (stt === 'done') pct = 100;
+                var f = box.querySelector('.acc-suite-fill');
+                if (f) f.style.width = pct + '%';
+                var c = box.querySelector('.acc-suite-count');
+                if (c) c.textContent = ACC.suiteCountText(e, k);
+                box.title = ACC.suiteTitle(e, k);
+            });
+        }
+    },
+
+    statusCounterText: function (ev) {
+        // user shape: [running-suite/total-suites · done-q/total-q] over
+        // the WHOLE board (both engine entries); falls back to the entry
+        // fields when no board data exists (classic-page runs)
+        var c = boardCounters(this.state.board || []);
+        if (!c.total && ev && ev.total) {
+            return ' [' + ((ev.current | 0) + 1) + '/' + ev.total + ' suites]';
+        }
+        if (!c.total) return '';
+        var qs = c.qTotal ? ' · ' + c.qDone.toLocaleString() + '/' +
+                   c.qTotal.toLocaleString() + ' q' : '';
+        return ' [' + c.cur + '/' + c.total + ' suites' + qs + ']';
     },
 
     startStream: function (benchId) {
@@ -2434,7 +2711,17 @@ var ACC = {
                 var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
                 self.onEvent(data);
             };
-            _es.onerror = function () { streamInterrupted('bench-acc-status'); };
+            // U83: onerror fires when the server dies AND when a proxy
+            // half-closes the socket; EventSource then retries silently,
+            // so the board froze on the last event with a live queue (the
+            // 'stuck' half that was NOT the harness). Interrupt visibly and
+            // poll for truth: refreshQueue restarts the stream once the run
+            // reappears or marks the board done when it does not.
+            _es.onerror = function () {
+                streamInterrupted('bench-acc-status');
+                if (_poll) clearInterval(_poll);
+                _poll = setInterval(function () { self.refreshQueue(); }, 4000);
+            };
         } catch (e) {
             if (_poll) clearInterval(_poll);
             _poll = setInterval(function () { self.refreshQueue(); }, 4000);
@@ -2443,19 +2730,23 @@ var ACC = {
 
     onEvent: function (ev) {
         var st = gid('bench-acc-status');
+        // U83: every event first mutates the board data, then the widgets
+        // paint from it — counters and boxes can never disagree with each
+        // other because they read the same source
+        this.boardEvent(ev);
         if (ev.type === 'progress') {
-            // classic event fields: phase, benchmark, current/total (suite
-            // index), bench_current/bench_total (question counters)
             if (st) st.textContent = (ev.message || ev.phase || '') +
-                (ev.bench_total ? '  [' + (ev.current || 0) + '/' + ev.total +
-                    ' suites · ' + (ev.bench_current || 0) + '/' + ev.bench_total + ' q]' : '');
+                this.statusCounterText(ev);
+            this.boardPaint();
         } else if (ev.type === 'result') {
+            this.boardPaint();
             this.refreshResults();
         } else if (ev.type === 'error') {
             if (st) { st.textContent = String(ev.message || 'error');
                       st.classList.add('bench-status-error'); }
             this.state.running = false;
             stopStream();
+            this.boardPaint();
         } else if (ev.type === 'done') {
             if (st) st.classList.remove('bench-status-error');
             this.state.running = false;
@@ -3231,6 +3522,10 @@ function stopStream() {
 
 return { mount: mount, isMounted: function () { return _mounted; },
          showSub: showSub, tp: TP,
+         // U83 test seams: the queue board model (pure) + ACC methods so
+         // a node harness can replay status payloads + event sequences
+         _board: { boardSuiteMeta: boardSuiteMeta, boardQuestions: boardQuestions,
+                   boardSuiteBoxes: boardSuiteBoxes, boardCounters: boardCounters },
          // U49 structural test seams: panel modules + the shared export
          // builders, so a DOM-free harness can prove every panel wires
          // resultsHead/advancedSection (card's Verify: 'import graph or

@@ -235,6 +235,31 @@ def _disarm_upload_skip() -> None:
 
 def queue_status() -> dict:
     st = _acc().get_queue_status()
+    # U83 board data: classic's status lists waiting entries as name-only
+    # ("benchmarks": [names]). The UI queue needs sizes + engine to compute
+    # honest queue-wide suite/question totals, and it needs the RUNNING
+    # entry's full spec (classic reports it as phase text only). Additive —
+    # classic's own admin page ignores the extra keys.
+    AB = _acc()
+    try:
+        for q, r in zip(st.get("queue", []), list(AB._queue)):
+            q["sizes"] = dict(r.benchmarks)
+            q["engine"] = getattr(r, "_uplift_engine", "classic")
+    except Exception:  # private-attr drift: board falls back to names
+        pass
+    if st.get("running") and st.get("current_bench_id"):
+        try:
+            run = AB.get_run(st["current_bench_id"])
+            req = getattr(run, "request", None)
+            if req is not None:
+                st["running_entry"] = {
+                    "model_id": req.model_id,
+                    "sizes": dict(req.benchmarks),
+                    "engine": getattr(req, "_uplift_engine", "classic"),
+                    "external": req.external is not None,
+                }
+        except Exception:
+            pass
     # drain management: once the queue idles, restore classic behavior
     if not st.get("running"):
         _disarm_upload_skip()

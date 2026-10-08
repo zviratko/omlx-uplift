@@ -55,6 +55,9 @@ class FakeQueue:
 
     def add_to_queue(self, request):
         self.queue.append(request)
+        # U83: queue_status enriches by zipping classic's module _queue;
+        # the real module keeps the list under that name — mirror it
+        self._queue = self.queue
 
     def start_next_from_queue(self, pool):
         # fake is synchronous: mark running, mint a run, finish at once

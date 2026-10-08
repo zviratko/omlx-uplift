@@ -2291,13 +2291,61 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     font-size: 11px; padding: 2px 0; }
 .bench-history-item summary:hover { color: var(--ink); }
 .bench-history-item[open] summary { color: var(--ink); margin-bottom: 4px; }
-.acc-queue { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.acc-queue { display: flex; flex-direction: column; gap: 8px; font-size: 11px; }
 .acc-queue-item { display: flex; justify-content: space-between; align-items: center;
   border: 1px solid var(--edge); padding: 3px 8px; }
 .acc-queue-item.running { border-color: var(--accent); color: var(--accent); }
 .acc-queue-remove { background: none; border: none; color: var(--dim); cursor: pointer;
   font-size: 13px; padding: 0 4px; }
 .acc-queue-remove:hover { color: var(--red); }
+/* ---- U83: accuracy queue board ------------------------------------------
+   Item 3 of the user's report: the queue/progress block was 11px gray text
+   that read as an afterthought below the form. The board is the run's
+   dashboard: model+engine per entry, one box per queued suite filling
+   left-to-right, and a big status line. Sharp corners (U82: --radius is
+   the only shape knob); no whole-entry flash — boxes animate width/text
+   in place (no-flash doctrine respected: this is state, not an event). */
+.acc-board-entry { border: 1px solid var(--edge); padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 7px; }
+.acc-board-entry.running { border-color: var(--accent); }
+.acc-board-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.acc-board-model { font: 600 12px/1 var(--mono); color: var(--ink);
+  letter-spacing: 0.02em; }
+.acc-board-entry.running .acc-board-model { color: var(--accent); }
+.acc-board-engine { font: 400 9px/1 var(--mono); text-transform: uppercase;
+  letter-spacing: 0.1em; padding: 3px 6px; border: 1px solid var(--edge); color: var(--dim); }
+.acc-board-engine.h { border-color: var(--accent); color: var(--accent); }
+.acc-board-phase { font: 400 9px/1 var(--mono); text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--dim); margin-left: auto; }
+.acc-board-suites { display: flex; flex-wrap: wrap; gap: 6px; }
+.acc-suite { position: relative; overflow: hidden; isolation: isolate;
+  display: inline-flex; align-items: baseline; gap: 7px;
+  border: 1px solid var(--edge); padding: 5px 9px; min-width: 92px;
+  font: 400 11px/1.2 var(--mono); color: var(--dim); }
+.acc-suite-fill { position: absolute; inset: 0 auto 0 0; z-index: -1; width: 0;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  transition: width 0.5s linear; }
+.acc-suite-name { text-transform: uppercase; letter-spacing: 0.06em; }
+.acc-suite-count { margin-left: auto; font-size: 10px; }
+.acc-suite.st-running { border-color: var(--accent); color: var(--ink); }
+.acc-suite.st-running .acc-suite-name { color: var(--accent); }
+.acc-suite.st-preparing { border-color: var(--warn); border-style: dashed; }
+.acc-suite.st-preparing .acc-suite-fill {
+  background: repeating-linear-gradient(-45deg,
+      color-mix(in srgb, var(--warn) 26%, transparent) 0 6px, transparent 6px 12px);
+  width: 100% !important; }
+.acc-suite.st-done { border-color: var(--ok, #2e8b57); color: var(--ink); }
+.acc-suite.st-done .acc-suite-fill { background:
+  color-mix(in srgb, var(--ok, #2e8b57) 20%, transparent); }
+.acc-suite.st-done .acc-suite-count::after { content: ' ✓'; color: var(--ok, #2e8b57); }
+.acc-suite.st-error { border-color: var(--red); color: var(--red); }
+.acc-suite.st-error .acc-suite-fill { background:
+  color-mix(in srgb, var(--red) 18%, transparent); width: 100% !important; }
+/* the status line is the headline number of a running bench (item 3) */
+#bench-acc-status:not(:empty) { font-size: 13px; color: var(--ink);
+  padding: 6px 10px; border: 1px solid var(--edge); border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent); }
+#bench-acc-status.bench-status-error { border-left-color: var(--red); color: var(--red); }
 
 /* NAT-4 native chat (3/6): toolbar over the vendored deep-chat host */
 .chat-native-wrap { display: flex; flex-direction: column; gap: 8px; }

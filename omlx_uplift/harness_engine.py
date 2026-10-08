@@ -322,11 +322,37 @@ async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
             lines.put_nowait(None)
 
     reader = loop.run_in_executor(None, _reader)
+    # U83 (user report: 'stuck on Preparing mmlu (Generating dev split
+    # 5/5), no CPU/GPU activity'): while lm-eval downloads/builds a dataset
+    # the child prints NOTHING for minutes — the UI froze on the last prep
+    # bar and the run looked dead. Silence is now reported: first gap emits
+    # 'still alive, quiet for Ns' immediately after _QUIET_S, then a
+    # keep-alive every _QUIET_S so the board timestamps the last word.
+    _QUIET_S = 30.0
+    last_line = time.perf_counter()
+    quiet_noted = 0.0
     try:
         while True:
-            line = await lines.get()
+            try:
+                line = await asyncio.wait_for(lines.get(), timeout=_QUIET_S)
+            except asyncio.TimeoutError:
+                if proc.poll() is not None:
+                    continue          # dead: the queued sentinel lands next
+                silent = time.perf_counter() - last_line
+                if silent - quiet_noted >= _QUIET_S:
+                    quiet_noted = silent
+                    await AB._send_event(run, {
+                        "type": "progress", "phase": "prepare",
+                        "model_id": run.request.model_id, "benchmark": task,
+                        "message": f"Preparing {task} — lm-eval silent "
+                                   f"{int(silent)}s (dataset download/build)",
+                        "current": suite_index, "total": suite_total,
+                        "quiet_s": int(silent)})
+                continue
             if line is None:
                 break
+            last_line = time.perf_counter()
+            quiet_noted = 0.0
             line = bench_env.scrub_key(line, key)
             m = _TQDM.search(line)
             if m:

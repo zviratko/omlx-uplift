@@ -12,6 +12,18 @@ fixed annoyance, changed behavior, new command), add one bullet under an
 users never see.
 
 ## Unreleased
+- **Intelligence benchmark: live queue board (U83).** While a benchmark
+  runs, the Bench → Intelligence page now shows a board instead of one
+  gray status line: every queued suite gets a box (name + question
+  counter) that fills left to right as it progresses — suites being
+  prepared are striped, finished ones stay green with a check, later
+  queued entries are all visible and removable. The counters are fixed:
+  a running suite counts as 1/3 (not 0/2), the question pair now shows
+  questions done over the TOTAL across everything you queued (both
+  engines), and lm-eval's per-subtask bars add up instead of restarting.
+  Harness dataset-prep no longer looks frozen: when lm-eval goes quiet
+  during a download/build the board says so with a live silence timer,
+  and a dropped progress stream reconnects visibly with polling fallback.
 - **Native Chat prompt profiles + readability (preview branch).** The
   chat toolbar gained the Profile picker mirroring classic's prompt
   profiles (same localStorage store, so profiles stay the user's across
