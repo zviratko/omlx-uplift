@@ -1765,6 +1765,24 @@ function applyShadowTheme(dc) {
         // rules must name both classes (0,2,0) to outrank
         // .ai-message-text{color:#000} — one-class rules lost before.
         '.message-bubble { color: var(--ink, #e6edf3); }',
+        // U82 (user: 'the background BEHIND the bubbles should alternate'):
+        // ROW bands keyed on the role class the bundle already sets on
+        // the full-width outer container — the stripe spans the thread,
+        // the bubble keeps its own ground ON TOP of it. Two-class
+        // selectors: adopted sheets beat this tag at equal specificity
+        // (U43 lesson). Tokens are overridable by skins like colors.
+        '.outer-message-container.deep-chat-outer-container-role-user {',
+        '  background: var(--chat-band-user, #2b3038); }',
+        '.outer-message-container.deep-chat-outer-container-role-ai {',
+        '  background: var(--chat-band-ai, #262b33); }',
+        // U82 shape knob: the bundle hardcodes 10px pill radii IN ITS
+        // ADOPTED SHEETS; this in-tree tag is overridden unless it names
+        // two classes too — so the bubble corners now ride --radius
+        // like every other box (var() inherits across the boundary).
+        '.message-bubble.user-message-text,',
+        '.message-bubble.ai-message-text { border-radius: var(--radius, 0); }',
+        '#chat-view #text-input-container {',
+        '  border-radius: var(--radius, 0); }',
         // U75 #3 + U81 (user: 'now give the assistant and user messages
         // DISTINCT alternating backgrounds'): 12% accent over --field and
         // --panel over --card measured only ~4 RGB steps apart in the day
@@ -1811,7 +1829,7 @@ function applyShadowTheme(dc) {
         '.chat-native-thinking[open] { width: 100%; }',
         '.chat-native-thinking summary { list-style: none; cursor: pointer;',
         '  user-select: none; display: inline-flex; align-items: center;',
-        '  gap: 6px; padding: 2px 7px; margin-left: -7px; border-radius: 6px;',
+        '  gap: 6px; padding: 2px 7px; margin-left: -7px; border-radius: var(--radius);',
         '  color: var(--dim, #8b98ab); background: transparent;',
         '  font-weight: 500; font-size: 12px; }',
         '.chat-native-thinking summary::-webkit-details-marker { display: none; }',
@@ -1838,7 +1856,7 @@ function applyShadowTheme(dc) {
         '.chat-native-thinking[open] summary::before { transform: rotate(90deg); }',
         '.chat-native-thinking .chat-native-think-body { margin: 5px 0 2px;',
         '  padding: 8px 12px; border: 1px solid var(--edge);',
-        '  border-radius: 10px; white-space: pre-wrap; font-family: inherit;',
+        '  border-radius: var(--radius); white-space: pre-wrap; font-family: inherit;',
         '  background: color-mix(in srgb, var(--panel) 55%, transparent);',
         '  color: var(--dim, #8b98ab); font-size: 12px; line-height: 1.55;',
         '  max-height: 240px; overflow: auto; }',
@@ -1851,7 +1869,7 @@ function applyShadowTheme(dc) {
         '.chat-native-edit { align-self: flex-end; width: 62%;',
         '  box-sizing: border-box; background: var(--field, #1b2330);',
         '  color: var(--ink, #e6edf3); border: 1px solid var(--accent, #4c8dff);',
-        '  border-radius: 10px; padding: 8px 10px; font: inherit;',
+        '  border-radius: var(--radius); padding: 8px 10px; font: inherit;',
         '  font-size: 14px; line-height: 1.4; resize: vertical;',
         '  min-height: 60px; margin-top: 10px; }',
         // U75 #2: the bar spans the editor's own width and hugs its RIGHT
@@ -1863,7 +1881,7 @@ function applyShadowTheme(dc) {
         '.chat-native-edit-actions.left { align-self: flex-start; }',
         '.chat-native-edit-actions button { background: none;',
         '  border: 1px solid var(--edge); color: var(--ink, #e6edf3);',
-        '  font-size: 11px; padding: 2px 12px; border-radius: 6px;',
+        '  font-size: 11px; padding: 2px 12px; border-radius: var(--radius);',
         '  cursor: pointer; }',
         '.chat-native-edit-actions button.save { border-color: var(--accent);',
         '  color: var(--accent, #4c8dff); }',
@@ -1882,7 +1900,7 @@ function applyShadowTheme(dc) {
         '.chat-native-msg-actions:focus-within { visibility: visible; }',
         '.chat-native-msg-action { background: none; border: 0; padding: 2px 5px;',
         '  font: inherit; font-size: 11px; color: var(--dim, #8b98ab);',
-        '  cursor: pointer; border-radius: 4px; }',
+        '  cursor: pointer; border-radius: var(--radius); }',
         '.chat-native-msg-action:hover { color: var(--ink, #e6edf3);',
         '  background: var(--panel, #10151d); }',
         // U43: bundle-hardened leftovers — gray scrollbars and the

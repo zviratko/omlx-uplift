@@ -616,3 +616,31 @@ test('U80: one box height for all text-family controls (doctrine)', () => {
     assert.ok(/textarea \{ min-height: 32px/.test(css),
         'textareas floor at the row height');
 });
+
+test('U82: row bands behind bubbles + single --radius shape knob', () => {
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const css = fs.readFileSync(`${STATIC_DIR}/uplift.css`, 'utf8');
+    // bands ride the FULL-WIDTH row (the bundle's role class), not the pill
+    // the css array splits a rule across entries: {',\n '  background...
+    assert.ok(/deep-chat-outer-container-role-user\s*{[\s\S]{0,40}background: var\(--chat-band-user/.test(src),
+        'user rows get the band token behind the bubble');
+    assert.ok(/deep-chat-outer-container-role-ai\s*{[\s\S]{0,40}background: var\(--chat-band-ai/.test(src),
+        'assistant rows get their band token');
+    // bubble corners ride the knob at 0,2,0 (adopted sheets beat equal specificity)
+    assert.ok(/\.message-bubble\.user-message-text,[\s\S]{0,40}\.message-bubble\.ai-message-text\s*{[\s\S]{0,40}border-radius: var\(--radius/.test(src),
+        'shadow bubble radius is the knob, not the bundle 10px');
+    // the knob is a :root token and the ONLY rectangular radius source
+    assert.ok(/--radius: 0px;/.test(css), 'house default is sharp');
+    // (comments stripped first: 'border-radius:0' inside a prose comment
+    //  matched as a stray value — the U73 comment-vs-code trap)
+    const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const stray = [...cssCode.matchAll(/border-radius:\s*([^;}]+)/g)]
+        .map(m => m[1].trim())
+        .filter(v => !v.includes('var(--radius)') && v !== '50%' && !v.includes('999'));
+    assert.deepEqual(stray, [], 'every rectangular radius derives from --radius (circles/pills excepted)');
+    // selects are flat house boxes with a drawn caret (the macOS bezel fix)
+    assert.ok(/select\s*\{\s*-webkit-appearance: none; appearance: none;/.test(css),
+        'global appearance:none — no native bezel anywhere');
+    assert.ok(/background-image: linear-gradient\(45deg, transparent 50%, var\(--dim\) 50%\)/.test(css),
+        'house caret replaces the native arrow');
+});

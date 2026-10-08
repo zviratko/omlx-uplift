@@ -39,6 +39,21 @@
     --lamp-on: #57d97a;
     --lamp-on-ink: #06130a;
     --pt-update: #d9b400;
+    /* U82 SHAPE KNOB (user: "are bubbles the best shape when everything
+       else is sharp-edged? … can we make one to later use in the skins?"):
+       ONE master radius for every rectangular box — bubbles, inputs,
+       selects, menus, cards the UI rounds. House default is 0 (sharp,
+       the design's actual standard); a skin raises the single value and
+       the whole UI goes soft together. True circles (50%) and pills
+       (999px) are shapes, not box corners — they keep their geometry.
+       Custom properties inherit across the shadow boundary, so the chat
+       (deep-chat) reads this same knob with zero JS. */
+    --radius: 0px;
+    /* Chat row bands (user: "the background BEHIND the bubbles should
+       alternate"): role-keyed stripes the message rows sit on, skins
+       overridable like colors. Subtle — bubbles keep their own grounds. */
+    --chat-band-user: color-mix(in srgb, var(--accent) 7%, var(--card));
+    --chat-band-ai: color-mix(in srgb, var(--dim) 9%, var(--card));
 }
 [data-theme="light"] {
     --bg: #ffffff;              /* round 7 item 6: clean white, beige felt dull */
@@ -119,7 +134,7 @@ html[data-theme="cockpit"] { color-scheme: dark; }
 /* physical instrument buttons: pushed steel, white when pressed */
 [data-theme="cockpit"] .se-btn { border-color: var(--frame); }
 [data-theme="cockpit"] .icon-btn:hover, [data-theme="cockpit"] select:hover {
-    background: var(--ink); color: var(--bg); }
+    background-color: var(--ink); color: var(--bg); }
 /* amber glow on the live telemetry strip */
 [data-theme="cockpit"] .logo .dot { background: var(--good); box-shadow: 0 0 8px rgba(87, 227, 138, .6); }
 [data-theme="cockpit"] .logo .dot.bad { background: var(--red); box-shadow: 0 0 8px rgba(232, 68, 58, .6); }
@@ -330,7 +345,7 @@ header.top .dd-menu a:hover, header.top .dd-menu a.active {
 .chip.state-ok { color: var(--ink); }
 .icon-btn, select {
     background: transparent; border: 1px solid var(--edge); color: var(--dim);
-    height: 32px; border-radius: 0; cursor: pointer;
+    height: 32px; border-radius: var(--radius); cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
     transition: color .1s, background-color .1s, border-color .1s;
     font: 400 12px/1 var(--mono); padding: 0 8px;
@@ -343,8 +358,25 @@ header.top .dd-menu a:hover, header.top .dd-menu a.active {
 .icon-btn svg { width: 26px; height: 26px; flex: none; margin-left: 1px; }   /* user: fill the box — enlarge the glyph, NOT the box (28px stays) */
     /* optical right-nudge: ◐/✦ carry their visual mass on the left */
 /* Hover shifts value one step — never elevation. */
-.icon-btn:hover, select:hover { color: var(--bg); background: var(--ink); border-color: var(--ink); }
+.icon-btn:hover, select:hover { color: var(--bg); background-color: var(--ink); border-color: var(--ink); }
 select { color: var(--ink); }
+/* U82 (user: 'same goes for dropdowns everywhere — do they share a
+   knob?'): border-radius:0 could NEVER square a <select> — macOS paints
+   the NATIVE bezel (rounded, its own chrome) and ignores CSS corners
+   while appearance is auto. The settings rows already solved this
+   (.urow.settings select); it is now the HOUSE rule: every select is a
+   flat box + the same drawn chevron. background-color (NOT the
+   shorthand) so per-context fills — .acc-task's --field wells, hover
+   inversions, cockpit — keep working; options need explicit colors once
+   the native chrome is gone. */
+select { -webkit-appearance: none; appearance: none; background-color: transparent;
+    padding-right: 22px;
+    background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+                      linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+    background-position: calc(100% - 12px) 55%, calc(100% - 7px) 55%;
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+select option { background: var(--field); color: var(--ink); }
+select:hover option { background: var(--field); color: var(--ink); }
 
 /* U80 control-height parity (user doctrine, applies to EVERY surface):
    a box control that sits next to another box control must be the SAME
@@ -387,7 +419,7 @@ input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin: 0;
 .popover .row.buttons { display: flex; gap: 8px; margin-top: 4px; }
 .popover .row.buttons button {
     flex: 1; background: transparent; border: 1px solid var(--edge); color: var(--ink);
-    border-radius: 0; padding: 7px 4px; font: 400 11px/1 var(--mono); cursor: pointer;
+    border-radius: var(--radius); padding: 7px 4px; font: 400 11px/1 var(--mono); cursor: pointer;
 }
 .popover .row.buttons button:hover { background: var(--ink); color: var(--bg); }
 .popover .hint { color: var(--dim); font: 300 11px/1.4 var(--sans); margin-top: 10px; }
@@ -447,7 +479,7 @@ body.layout-editing .card-handle .hatch, .dash-tray-pill-content .hatch {
 }
 body.layout-editing .card-remove {
     background: transparent; border: 1px solid var(--edge); color: var(--dim);
-    width: 18px; height: 18px; border-radius: 0; cursor: pointer; flex-shrink: 0;
+    width: 18px; height: 18px; border-radius: var(--radius); cursor: pointer; flex-shrink: 0;
     font: 400 12px/1 var(--mono); display: inline-flex; align-items: center; justify-content: center; padding: 0;
 }
 body.layout-editing .card-remove:hover { color: var(--bg); background: var(--ink); }
@@ -484,7 +516,7 @@ body.layout-editing { user-select: none; }
 .lt-seg button.on { background: var(--ink); color: var(--bg); }
 #layout-toolbar button:not(.lt-seg button) {
     background: transparent; border: 1px solid var(--edge); color: var(--dim);
-    font: 400 11px/1 var(--mono); padding: 6px 10px; cursor: pointer; border-radius: 0;
+    font: 400 11px/1 var(--mono); padding: 6px 10px; cursor: pointer; border-radius: var(--radius);
 }
 #layout-toolbar button:hover { color: var(--bg); background: var(--ink); }
 #layout-toolbar button.primary { background: var(--ink); color: var(--bg); }
@@ -648,7 +680,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     border-bottom: 1px solid var(--edge); font-size: 13px; }
 .model-row:last-child { border-bottom: 0; }
 .badge { font: 500 9px/1.4 var(--sans); font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase;
-    padding: 3px 8px; border-radius: 0; flex-shrink: 0; min-width: 76px; text-align: center;
+    padding: 3px 8px; border-radius: var(--radius); flex-shrink: 0; min-width: 76px; text-align: center;
     /* UX-2 (user): badges never wrap their text; move as a whole unit instead */
     white-space: nowrap;
     background: transparent; border: 1px solid var(--dim); color: var(--dim); }
@@ -709,7 +741,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-btn.danger[disabled] { opacity: .4; pointer-events: none; }
 /* Settings editor + admin table buttons: sharp rectangles, value-shift hover */
 .se-btn { background: transparent; border: 1px solid var(--dim); color: var(--ink);
-    border-radius: 0; padding: 4px 10px; font: 400 11px/1.4 var(--mono); cursor: pointer; }
+    border-radius: var(--radius); padding: 4px 10px; font: 400 11px/1.4 var(--mono); cursor: pointer; }
 .se-btn:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .se-btn:disabled { border-color: var(--edge); color: var(--dim); cursor: default; }
 .se-btn:disabled:hover { background: transparent; color: var(--dim); }
@@ -755,7 +787,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* U2: guided-grammar pop-out editor — a roomy mono well for EBNF */
 .grammar-pop textarea { flex: 1; min-height: 58vh; width: 100%; resize: vertical;
     font: 400 13px/1.5 var(--mono); color: var(--ink); background: var(--field);
-    border: 1px solid var(--edge); padding: 10px 12px; border-radius: 0;
+    border: 1px solid var(--edge); padding: 10px 12px; border-radius: var(--radius);
     white-space: pre; scrollbar-gutter: stable; }
 /* inherited placeholder look (profile tab) */
 .se-row input::placeholder { color: var(--dim); font-style: italic; opacity: 0.8; }
@@ -772,7 +804,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     border: 1px solid var(--edge); color: var(--ink); padding: 2px 6px; }
 .se-tab { font: 500 10px/1 var(--mono); letter-spacing: 0.06em; padding: 6px 10px;
     border: 1px solid var(--edge); background: transparent; color: var(--dim);
-    cursor: pointer; border-radius: 0; position: relative; }
+    cursor: pointer; border-radius: var(--radius); position: relative; }
 .se-tab.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .se-tab.se-new { color: var(--accent); border-color: var(--accent); }
 .se-tab.se-new:hover { background: var(--accent); color: var(--ink-on-accent-soft); }
@@ -944,7 +976,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .pager { display: flex; align-items: center; gap: 8px; margin-top: 8px;
     font: 400 11px/1 var(--mono); color: var(--dim); }
 .pager button { background: transparent; border: 1px solid var(--edge); color: var(--ink);
-    border-radius: 0; padding: 3px 9px; font: inherit; cursor: pointer; }
+    border-radius: var(--radius); padding: 3px 9px; font: inherit; cursor: pointer; }
 .pager button:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
 .pager button:disabled { color: var(--edge); cursor: default; }
 .pager .pinfo { margin-left: auto; }
@@ -955,7 +987,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 #dl-results .urow.head span:hover, #dl-results .urow.head span.sorted { color: var(--ink); }
 .filterbar input[type="search"] {
     background: transparent; border: 1px solid var(--edge); color: var(--ink);
-    border-radius: 0; height: 32px; padding: 0 10px; font: 400 12px/1 var(--mono);
+    border-radius: var(--radius); height: 32px; padding: 0 10px; font: 400 12px/1 var(--mono);
     min-width: 200px;
 }
 .filterbar input[type="search"]:focus { outline: 1px solid var(--ink); }
@@ -992,7 +1024,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     display: inline-flex; align-items: center; justify-content: center;
     height: 16px; padding: 0 6px; flex: 0 0 auto; min-width: 74px;
     font: 400 9px/1 var(--mono); letter-spacing: 0.08em;
-    border: 1px solid var(--edge); border-radius: 0; white-space: nowrap;
+    border: 1px solid var(--edge); border-radius: var(--radius); white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; max-width: 150px;
 }
 .admin-table .typebadge.t-llm   { border-color: var(--dim); color: var(--ink); }
@@ -1075,7 +1107,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 #model-admin .alias-line .alias-name.dim { color: var(--dim); }
 .copybtn { background: transparent; border: 1px solid var(--edge); color: var(--dim);
     width: 20px; height: 18px; padding: 0; flex: 0 0 auto; cursor: pointer;
-    font: 400 11px/1 var(--mono); border-radius: 0;
+    font: 400 11px/1 var(--mono); border-radius: var(--radius);
     display: inline-flex; align-items: center; justify-content: center; }
 .copybtn:hover { color: var(--bg); background: var(--ink); border-color: var(--ink); }
 .copybtn:disabled { cursor: default; color: var(--accent); border-color: var(--accent);
@@ -1285,8 +1317,8 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 
 .modal.editor input, .modal.editor select, .modal.editor textarea {
     font: 400 12px/1.4 var(--mono); color: var(--ink);
-    background: var(--field); border: 1px solid var(--edge);
-    padding: 6px 8px; border-radius: 0; }
+    background-color: var(--field); border: 1px solid var(--edge);
+    padding: 6px 8px; border-radius: var(--radius); }
 .modal.editor textarea { width: 100%; min-height: 84px; }
 .modal.editor .editor-bar {
     padding: 8px 14px;
@@ -1326,7 +1358,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .modal.nasa .row.buttons > span { flex: 1; }
 .modal.nasa .row.buttons button {
     background: transparent; border: 1px solid var(--edge); color: var(--ink);
-    border-radius: 0; padding: 8px 14px; font: 400 11px/1 var(--mono);
+    border-radius: var(--radius); padding: 8px 14px; font: 400 11px/1 var(--mono);
     text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer;
 }
 .modal.nasa .row.buttons button:hover { background: var(--ink); color: var(--bg); }
@@ -1352,7 +1384,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .qz-form .field small { color: var(--dim); font: 300 10px/1.3 var(--sans); }
 .qz-form input[type="text"], .qz-form input[type="password"], .qz-form select {
     background: transparent; border: 1px solid var(--edge); color: var(--ink);
-    border-radius: 0; height: 32px; padding: 0 8px; font: 400 12px/1 var(--mono); }
+    border-radius: var(--radius); height: 32px; padding: 0 8px; font: 400 12px/1 var(--mono); }
 .qz-form input:focus, .qz-form select:focus { outline: 1px solid var(--ink); }
 .qz-form input[type="checkbox"] { margin: 8px 0; }
 .qz-est { grid-column: 1 / -1; font: 400 12px/1.4 var(--mono); padding-top: 4px; }
@@ -1372,7 +1404,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 @media (max-width: 720px)  { .qz-enh-only { grid-template-columns: 1fr; } }
 .qz-toggle { display: flex; }
 .qz-toggle button { background: transparent; border: 1px solid var(--edge);
-    color: var(--dim); border-radius: 0; padding: 7px 12px;
+    color: var(--dim); border-radius: var(--radius); padding: 7px 12px;
     font: 400 11px/1 var(--mono); cursor: pointer; }
 .qz-toggle button + button { border-left: 0; }
 .qz-toggle button.on { background: var(--ink); color: var(--bg); }
@@ -1386,7 +1418,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .field small { color: var(--dim); font: 300 10px/1.3 var(--sans); }
 .modal.nasa .field input[type="text"], .modal.nasa .field select {
     background: transparent; border: 1px solid var(--edge); color: var(--ink);
-    border-radius: 0; height: 32px; padding: 0 8px; font: 400 12px/1 var(--mono); }
+    border-radius: var(--radius); height: 32px; padding: 0 8px; font: 400 12px/1 var(--mono); }
 
 /* ---- Server settings: instrument-panel sections -------------------------
    Segmented multi-column flow, capped page width so a single column never
@@ -1452,7 +1484,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     font: 400 9px/1 var(--mono); letter-spacing: 0.08em;
     white-space: nowrap;
     border: 1px solid var(--edge); color: var(--dim); background: transparent;
-    border-radius: 0;
+    border-radius: var(--radius);
 }
 /* unlit = grey outline; LIT = solid green fill with dark text — a lit
    cockpit lamp, max contrast on any ground (green outlines on grey were
@@ -1533,7 +1565,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     display: inline-flex; align-items: center; justify-content: center;
     height: 18px; flex: 1 1 auto; min-width: 0; padding: 0 5px; cursor: pointer;
     font: 400 10px/1 var(--mono); letter-spacing: 0.06em;
-    background: transparent; color: var(--dim); border: 0; border-radius: 0;
+    background: transparent; color: var(--dim); border: 0; border-radius: var(--radius);
 }
 .admin-table .lsw-seg + .lsw-seg { border-left: 1px solid var(--edge); }
 .admin-table .lsw-seg.on { background: var(--lamp-on); color: var(--lamp-on-ink); }
@@ -1586,21 +1618,15 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* controls sit in recessed field wells, distinct from the panel ground */
 .urow.settings input, .urow.settings select, .urow.settings textarea {
     font: 400 11px/1.4 var(--mono); color: var(--ink);
-    background: var(--field); border: 1px solid var(--edge);
-    padding: 6px 8px; min-width: 96px; border-radius: 0; }
+    background-color: var(--field); border: 1px solid var(--edge);
+    padding: 6px 8px; min-width: 96px; border-radius: var(--radius); }
 [data-theme="light"] .urow.settings input,
 [data-theme="light"] .urow.settings select { border-color: var(--ink); }
-.urow.settings select { -webkit-appearance: none; appearance: none;
-    padding-right: 22px;
-    background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%),
-                      linear-gradient(135deg, var(--dim) 50%, transparent 50%);
-    background-position: calc(100% - 12px) 55%, calc(100% - 7px) 55%;
-    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 .urow.settings select option { background: var(--field); color: var(--ink); }
 .urow.settings input:hover, .urow.settings select:hover { border-color: var(--dim); }
 .urow.settings input:focus, .urow.settings select:focus { border-color: var(--ink); outline: none; }
 .urow.settings input:disabled, .urow.settings select:disabled {
-    color: var(--ink); opacity: 0.55; background: var(--row2); }
+    color: var(--ink); opacity: 0.55; background-color: var(--row2); }
 .urow.settings input[type=checkbox] { min-width: 0; background: var(--field); }
 .urow.settings .gctl {
     display: flex;
@@ -1810,7 +1836,7 @@ label.se-row.pending-restart > .se-ctl > select {
 .ts-row.ts-collapsed { overflow: visible; border: 0; }
 .ts-more { background: transparent; border: 1px solid var(--edge); color: var(--ink);
     font: 600 10px/1 var(--mono); letter-spacing: .08em; padding: 4px 6px;
-    cursor: pointer; flex: none; border-radius: 0; }
+    cursor: pointer; flex: none; border-radius: var(--radius); }
 .ts-more:hover { background: var(--row2); }
 .ts-pop { position: fixed; z-index: 60; min-width: 96px; display: flex;
     flex-direction: column; background: var(--card); border: 1px solid var(--ink); }
@@ -1927,12 +1953,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-addform-row input[type="text"], .pt-addform-row input[type="file"],
 .pt-addform-row select {
     background: transparent; border: 1px solid var(--edge); color: var(--ink);
-    border-radius: 0; height: 32px; padding: 0 8px;
+    border-radius: var(--radius); height: 32px; padding: 0 8px;
     font: 400 12px/1 var(--mono); box-sizing: border-box; }
 .pt-addform-row input:focus, .pt-addform-row select:focus { outline: 1px solid var(--ink); }
 /* .btn is uplift-owned (patches page only): match the control height. */
 .btn { background: transparent; border: 1px solid var(--edge); color: var(--ink);
-    border-radius: 0; height: 32px; padding: 0 12px; box-sizing: border-box;
+    border-radius: var(--radius); height: 32px; padding: 0 12px; box-sizing: border-box;
     font: 400 12px/1 var(--mono); cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center; }
 .btn:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
@@ -1987,7 +2013,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     display: flex;
     flex-direction: column;
     gap: 5px;
-    border-radius: 2px;
+    border-radius: var(--radius);
 }
 
 #pt-list > .pt-card:hover, #pt-curated-body > .pt-card:hover { border-color: var(--dim); }
@@ -2110,7 +2136,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    roomy body, visible summary, persisted open state (the old 11px details
    beside the batch knobs read as a footnote, not a mode switch). */
 .bench-advanced { font-size: 11px; margin: 4px 0 0; border: 1px solid var(--edge);
-    border-radius: 8px; background: var(--panel); }
+    border-radius: var(--radius); background: var(--panel); }
 .bench-advanced > summary { cursor: pointer; list-style: none;
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 12px; font-size: 12px; font-weight: 600;
@@ -2203,14 +2229,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* U70: Download menus (classic's per-row JSON/CSV/TXT + per-surface sets) */
 .bench-dl { position: relative; display: inline-block; }
 .bench-dl-menu { position: absolute; bottom: 100%; left: 0; z-index: 30;
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 6px;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: var(--radius);
     box-shadow: 0 4px 14px rgba(0,0,0,.25); padding: 3px; min-width: 64px;
     display: flex; flex-direction: column; }
 .bench-dl-menu button { background: none; border: 0; color: var(--ink);
-    font-size: 11px; text-align: left; padding: 3px 8px; cursor: pointer; border-radius: 4px; }
+    font-size: 11px; text-align: left; padding: 3px 8px; cursor: pointer; border-radius: var(--radius); }
 .bench-dl-menu button:hover { background: var(--row2); }
 
-.acc-task select { width: 100%; font-size: 10px; background: var(--field);
+.acc-task select { width: 100%; font-size: 10px; background-color: var(--field);
   border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px;
   margin-top: auto; }   /* U57: pin dropdowns to one row baseline */
 /* U64: collapsible finished-run cards under the live result */
@@ -2249,7 +2275,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     color: var(--accent); font-weight: 600; }
 .chat-native-bar select, .chat-native-bar input[type=text],
 .chat-native-bar input[type=number] {
-  font-size: 11px; background: var(--field); border: 1px solid var(--edge);
+  font-size: 11px; background-color: var(--field); border: 1px solid var(--edge);
   color: var(--ink); padding: 4px 6px; }
 /* U45: the sys prompt lives inside a caption column group now; the old
    row-level flex basis would stretch the input VERTICALLY inside a
