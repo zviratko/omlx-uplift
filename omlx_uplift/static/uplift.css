@@ -2173,6 +2173,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .acc-task select { width: 100%; font-size: 10px; background: var(--field);
   border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px;
   margin-top: auto; }   /* U57: pin dropdowns to one row baseline */
+/* U64: collapsible finished-run cards under the live result */
+.bench-history-item { margin-top: 6px; }
+.bench-history-item summary { cursor: pointer; color: var(--dim);
+    font-size: 11px; padding: 2px 0; }
+.bench-history-item summary:hover { color: var(--ink); }
+.bench-history-item[open] summary { color: var(--ink); margin-bottom: 4px; }
 .acc-queue { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
 .acc-queue-item { display: flex; justify-content: space-between; align-items: center;
   border: 1px solid var(--edge); padding: 3px 8px; }

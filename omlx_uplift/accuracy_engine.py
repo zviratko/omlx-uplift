@@ -40,6 +40,38 @@ def _acc():
     return AB
 
 
+# U64: classic's accumulated list is MEMORY-ONLY (module docstring's
+# 'persists until explicit reset' means within one process — a restart
+# wiped it; the user's exact complaint). Write-through + restore here,
+# classic's file stays untouched; restored rows ride the classic admin
+# page too (same in-memory list), which is honest: they are real results.
+_acc_restored = False
+_acc_last_n = -1          # rows count at the last write-through (poll spam
+                          # guard: results_payload runs on every UI poll)
+
+
+def _ensure_restored() -> None:
+    global _acc_restored
+    if _acc_restored:
+        return
+    _acc_restored = True
+    try:
+        from . import bench_history
+        rows = bench_history.acc_restore()
+        if rows:
+            acc = _acc()
+            live = acc.get_accumulated_results()
+            have = {(r.get("model_id"), r.get("benchmark"), r.get("ts"))
+                    for r in live}
+            for r in rows:
+                if (r.get("model_id"), r.get("benchmark"), r.get("ts")) not in have:
+                    live.append(r)
+            global _acc_last_n
+            _acc_last_n = len(live)
+    except Exception as e:
+        logger.warning(f"accuracy history restore failed: {e}")
+
+
 def valid_benchmarks() -> list[str]:
     return sorted(_acc().VALID_BENCHMARKS)
 
@@ -149,6 +181,9 @@ async def queue_add(body: dict, pool: Any, *, upload: bool = False) -> dict:
                            + " — run them with the classic engine")
         req._uplift_engine = "harness"
 
+    _ensure_restored()   # U64: disk rows must be in the list before the
+                         # next write-through replaces the file (or a
+                         # restart-loop would silently shrink history)
     if not upload and req.external is None:
         _arm_upload_skip()
 
@@ -215,6 +250,7 @@ def queue_remove(idx: int) -> dict:
 
 def results_payload() -> dict:
     AB = _acc()
+    _ensure_restored()
     status = AB.get_queue_status()
     for r in AB.get_accumulated_results():
         r.setdefault("engine", "classic")  # label every row (REPL-2b)
@@ -230,8 +266,22 @@ def results_payload() -> dict:
         run = AB.get_run(status["current_bench_id"])
         if run is None or getattr(run, "terminal", False):
             _disarm_upload_skip()
+    rows = AB.get_accumulated_results()
+    global _acc_last_n
+    # Strict mirror: the file always equals the live list, INCLUDING
+    # shrinking to empty — classic's own admin-page reset must not be
+    # 'resurrected' by a stale file on the next restart. Row-count-only
+    # change detection (poll spam guard); a same-length in-place row edit
+    # (thinking flag flip mid-finalize) is negligible for this store.
+    if len(rows) != _acc_last_n:
+        _acc_last_n = len(rows)
+        try:
+            from . import bench_history
+            bench_history.acc_persist(rows)
+        except Exception as e:
+            logger.warning(f"accuracy history persist failed: {e}")
     return {
-        "results": AB.get_accumulated_results(),
+        "results": rows,
         "running": status["running"],
         "current_model": status["current_model"],
         "current_bench_id": status["current_bench_id"],
@@ -240,6 +290,13 @@ def results_payload() -> dict:
 
 def results_reset() -> dict:
     _acc().reset_accumulated_results()
+    global _acc_last_n
+    _acc_last_n = -1
+    try:  # U64: 'until cleared' cuts both ways — Clear clears the disk too
+        from . import bench_history
+        bench_history.clear("accuracy")
+    except Exception as e:
+        logger.warning(f"accuracy history clear failed: {e}")
     return {"status": "reset"}
 
 

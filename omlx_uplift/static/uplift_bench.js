@@ -589,6 +589,82 @@ function copyPlainText(text, okMsg) {
     }
 }
 
+/* U64: persistent run history for the one-run-per-surface panels
+   (throughput/context/ANE). The server snapshots every finished run into
+   ~/.omlx/uplift/bench-history/<surface>/history.json; the panel lists
+   them below the live result, collapsed per run, each with its own Copy.
+   Accuracy/Embeddings/Decision already accumulate rows across runs — they
+   needed storage, not UI. */
+function simpleTable(cols, rows) {
+    var tbl = el('table', 'bench-table');
+    var head = el('tr');
+    cols.forEach(function (c) { head.appendChild(el('th', null, c[1])); });
+    tbl.appendChild(head);
+    rows.forEach(function (r) {
+        var tr = el('tr');
+        cols.forEach(function (c) {
+            var v = r[c[0]];
+            tr.appendChild(el('td', null, c[2] ? c[2](v, r)
+                : (v == null ? '\u2014' : String(v))));
+        });
+        tbl.appendChild(tr);
+    });
+    return tbl;
+}
+
+function historyEmptyNote() {
+    var pE = el('p', 'native-stub-note',
+        t('uplift.bench.history.empty', 'No completed tests.'));
+    pE.dataset.i18n = 'uplift.bench.history.empty';
+    pE.dataset.en = pE.textContent;      // U59: late catalog repair
+    return pE;
+}
+
+function loadHistory(surface, hostId, buildBody, excludeId) {
+    var host = gid(hostId);
+    if (!host) return Promise.resolve();
+    var d = dom();
+    return d.fetchJson(api() + '/bench/history?surface=' + encodeURIComponent(surface))
+        .then(function (p) {
+            host.replaceChildren();
+            var es = (p.entries || []).slice().reverse()    // newest first
+                .filter(function (e) { return !excludeId || String(e.id) !== String(excludeId); });
+            if (!es.length) return;
+            var hLab = el('div', 'bench-label acc-grid-label',
+                t('uplift.bench.history.title', 'History'));
+            hLab.dataset.i18n = 'uplift.bench.history.title';
+            hLab.dataset.en = hLab.textContent;      // U59: late catalog
+            host.appendChild(hLab);
+            var head = el('div', 'bench-results-head');
+            var clear = el('button', 'btn', t('uplift.bench.history.clear', 'Clear history'));
+            clear.dataset.i18n = 'uplift.bench.history.clear';
+            clear.dataset.en = clear.textContent;    // U59: late catalog
+            clear.type = 'button';
+            clear.addEventListener('click', function () {
+                d.postJson(api() + '/bench/history/clear', { surface: surface })
+                    .then(function () {
+                        d.toast(t('uplift.bench.history.cleared', 'History cleared'));
+                        loadHistory(surface, hostId, buildBody, excludeId);
+                    })
+                    .catch(function (e) { d.toast(String((e && e.message) || e), 'error'); });
+            });
+            head.appendChild(clear);
+            host.appendChild(head);
+            es.forEach(function (e) {
+                var det = el('details', 'bench-history-item');
+                var when = e.ts ? new Date(e.ts * 1000).toLocaleString() : '';
+                var sum = el('summary', null,
+                    when + ' \u00b7 ' + (e.model_id || '') +
+                    (e.status && e.status !== 'completed'
+                        ? ' \u00b7 ' + e.status.toUpperCase() : ''));
+                det.appendChild(sum);
+                det.appendChild(buildBody(e));
+                host.appendChild(det);
+            });
+        })
+        .catch(function () { /* history is an affordance */ });
+}
+
 // U49: one Copy button factory for all result cards (classic's export
 // blocks all say the same 'Copy' with the section label as hover text)
 function resultsHead(buildText, titleKey, titleFb) {
@@ -605,6 +681,45 @@ function resultsHead(buildText, titleKey, titleFb) {
     return head;
 }
 
+// U64: one column definition for the live table AND history snapshots
+function TP_COLS_DEF() {
+    return [
+        ['pp', 'PP'], ['tg', 'TG'],
+        ['ttft_ms', t('bench.metrics.ttft.name', 'TTFT')],
+        ['processing_tps', t('bench.metrics.pp_tps.name', 'pp TPS')],
+        ['gen_tps', t('bench.metrics.tg_tps.name', 'tg TPS')],
+        ['total_throughput', t('bench.metrics.throughput.name', 'Throughput')],
+        ['tpot_ms', t('bench.metrics.tpot.name', 'TPOT')],
+        ['e2e_latency_s', t('bench.metrics.e2e.name', 'E2E')],
+        ['batch_size', t('bench.metrics.batch_size.name', 'Batch Size')],
+    ];
+}
+var TP_COLS = null;   // resolved on first render (catalog may load later)
+
+function tpHistoryBody(e) {
+    var card = el('div', 'bench-result card');
+    var ctx = { model: e.model_id || '',
+                profile: (e.meta && e.meta.context_profile) || 'code_python',
+                forceLm: false,
+                external: (e.meta && e.meta.external) ? { model: e.model_id } : null };
+    var rows = e.rows || [];
+    if (!TP_COLS) TP_COLS = TP_COLS_DEF();
+    if (!rows.length) {
+        card.appendChild(historyEmptyNote());
+        return card;
+    }
+    card.appendChild(simpleTable(TP_COLS.map(function (c) {
+        return [c[0], c[1], function (v) {
+            return v == null ? '\u2014'
+                : (typeof v === 'number' ? TP.fmt(c[0], v) : String(v));
+        }];
+    }), rows));
+    card.prepend(resultsHead(function () {
+        return buildThroughputText(ctx, rows);
+    }));
+    return card;
+}
+
 var TP = {
     state: null,
 
@@ -618,9 +733,17 @@ var TP = {
         panel.appendChild(this.form());
         var status = statusLine('bench-tp-status');
         var results = el('div', 'bench-results'); results.id = 'bench-tp-results';
-        panel.append(status, results);
+        var history = el('div', 'bench-results'); history.id = 'bench-tp-history';
+        panel.append(status, results, history);
         this.loadModels();
         this.discover();
+        this.loadHist();
+    },
+
+    loadHist: function () {
+        var self = this;
+        return loadHistory('throughput', 'bench-tp-history', tpHistoryBody,
+            self.state && self.state.benchId);
     },
 
     form: function () {
@@ -891,34 +1014,18 @@ var TP = {
     },
 
     renderTable: function () {
+        TP_COLS = TP_COLS_DEF();   // U64: labels track the catalog
         var wrap = gid('bench-tp-results');
         if (!wrap) return;
         var rows = this.state.results;
         if (!rows.length) { wrap.replaceChildren(); return; }
-        var cols = [
-            ['pp', 'PP'], ['tg', 'TG'],
-            ['ttft_ms', t('bench.metrics.ttft.name', 'TTFT')],
-            ['processing_tps', t('bench.metrics.pp_tps.name', 'pp TPS')],
-            ['gen_tps', t('bench.metrics.tg_tps.name', 'tg TPS')],
-            ['total_throughput', t('bench.metrics.throughput.name', 'Throughput')],
-            ['tpot_ms', t('bench.metrics.tpot.name', 'TPOT')],
-            ['e2e_latency_s', t('bench.metrics.e2e.name', 'E2E')],
-            ['batch_size', t('bench.metrics.batch_size.name', 'Batch Size')],
-        ];
-        var tbl = el('table', 'bench-table');
-        var thead = el('tr');
-        cols.forEach(function (c) { thead.appendChild(el('th', null, c[1])); });
-        tbl.appendChild(thead);
         var self = this;
-        rows.forEach(function (r) {
-            var tr = el('tr');
-            cols.forEach(function (c) {
-                var v = r[c[0]];
-                tr.appendChild(el('td', null, v == null ? '—'
-                    : (typeof v === 'number' ? self.fmt(c[0], v) : String(v))));
-            });
-            tbl.appendChild(tr);
-        });
+        var tbl = simpleTable(TP_COLS.map(function (c) {
+            return [c[0], c[1], function (v) {
+                return v == null ? '\u2014'
+                    : (typeof v === 'number' ? self.fmt(c[0], v) : String(v));
+            }];
+        }), rows);
         // U47: classic has a Copy of the whole result set as plain text
         // ("Benchmark Results (Text — Copy & Paste)"); mirror it above the
         // table with the classic format (buildThroughputText).
@@ -939,6 +1046,7 @@ var TP = {
         stopStream();
         this.state.running = false;
         this.setButtons();
+        this.loadHist();   // U64: the run is in history now — show it
         var st = gid('bench-tp-status');
         if (st && !st.classList.contains('bench-status-error')) {
             st.textContent += ' — ' + t('uplift.bench.run_finished', 'finished');
@@ -954,6 +1062,28 @@ var TP = {
    that auto-apply honest — the warning label is classic's own).
    ========================================================================== */
 
+function ctxHistoryBody(e) {
+    var card = el('div', 'bench-result card');
+    var rows = e.rows || [];
+    if (!rows.length) {
+        card.appendChild(historyEmptyNote());
+        return card;
+    }
+    var r = rows[rows.length - 1];   // one result per context run
+    var kv = ctxResultPairs(CTX.state && CTX.state.models, r);
+    kv.forEach(function (pair) {
+        var tr = el('div', 'bench-result-row');
+        tr.append(el('span', 'bench-label', pair[0]), el('span', null, pair[1]));
+        card.appendChild(tr);
+    });
+    card.prepend(resultsHead(function () {
+        return buildTableText([t('ctx_bench.heading', 'Context Benchmark'), ''],
+            [{ label: 'Field', get: function (pr) { return pr[0]; } },
+             { label: 'Value', get: function (pr) { return pr[1]; } }], kv);
+    }));
+    return card;
+}
+
 var CTX = {
     state: null,
 
@@ -962,9 +1092,11 @@ var CTX = {
         panel.appendChild(this.form());
         var status = statusLine('bench-ctx-status');
         var results = el('div', 'bench-results'); results.id = 'bench-ctx-results';
-        panel.append(status, results);
+        var history = el('div', 'bench-results'); history.id = 'bench-ctx-history';
+        panel.append(status, results, history);
         this.loadModels();
         this.discover();
+        this.loadHist();
     },
 
     form: function () {
@@ -1237,10 +1369,17 @@ var CTX = {
             card);
     },
 
+    loadHist: function () {
+        var self = this;
+        return loadHistory('context', 'bench-ctx-history', ctxHistoryBody,
+            self.state && self.state.benchId);
+    },
+
     finish: function () {
         stopStream();
         this.state.running = false;
         this.setButtons();
+        this.loadHist();   // U64
         var st = gid('bench-ctx-status');
         if (st && !st.classList.contains('bench-status-error') && st.textContent) {
             st.textContent += ' — ' + t('uplift.bench.run_finished', 'finished');
@@ -1255,6 +1394,38 @@ var CTX = {
    the UI only sends the snapshot back.
    ========================================================================== */
 
+function aneHistoryBody(e) {
+    var card = el('div', 'bench-result card');
+    var rows = (e.rows || []).filter(function (r) {
+        return r && (r.processing_tps != null || r.state); });
+    if (!rows.length) {
+        card.appendChild(historyEmptyNote());
+        return card;
+    }
+    card.appendChild(simpleTable(
+        [['split', 'split'], ['state', 'state'],
+         ['processing_tps', 'processing_tps'], ['latency_ms', 'latency_ms']],
+        rows.map(function (r) {
+            return { split: r.split || r.name || '', state: r.state || '',
+                     processing_tps: r.processing_tps == null ? '\u2014'
+                         : Math.round(r.processing_tps).toLocaleString(),
+                     latency_ms: r.latency_ms == null ? '\u2014'
+                         : Math.round(r.latency_ms).toLocaleString() };
+        })));
+    card.prepend(resultsHead(function () {
+        return buildTableText(
+            ['ANE Tuning \u2014 ' + (e.model_id || ''), ''],
+            [{ label: 'split', get: function (r) { return String(r.split); } },
+             { label: 'state', get: function (r) { return String(r.state); } },
+             { label: 'processing_tps', numeric: true,
+               get: function (r) { return String(r.processing_tps); } },
+             { label: 'latency_ms', numeric: true,
+               get: function (r) { return String(r.latency_ms); } }],
+            rows);
+    }));
+    return card;
+}
+
 var ANE = {
     state: null, _timer: null,
 
@@ -1263,8 +1434,16 @@ var ANE = {
         panel.appendChild(this.form());
         var status = statusLine('bench-ane-status');
         var results = el('div', 'bench-results'); results.id = 'bench-ane-results';
-        panel.append(status, results);
+        var ahist = el('div', 'bench-results'); ahist.id = 'bench-ane-history';
+        panel.append(status, results, ahist);
         this.loadModels();
+        this.loadHist();   // U64
+    },
+
+    loadHist: function () {
+        var self = this;
+        return loadHistory('ane', 'bench-ane-history', aneHistoryBody,
+            self.state && self.state.tuningId);
     },
 
     form: function () {
@@ -1475,6 +1654,7 @@ var ANE = {
         this.stopTimer();
         this.state.running = false;
         this.setButtons();
+        this.loadHist();   // U64
         if (this.state.snapshot) this.renderResults(this.state.snapshot);
         var st = gid('bench-ane-status');
         if (st && !st.classList.contains('bench-status-error') && st.textContent &&

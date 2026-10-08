@@ -112,7 +112,10 @@ async def _real_upload(run, ctx, result_data):
 
 
 @pytest.fixture()
-def fake_acc():
+def fake_acc(monkeypatch, tmp_path):
+    # U64: accuracy write-through now touches the store dir — isolate it
+    from omlx_uplift import paths as _paths
+    monkeypatch.setattr(_paths, "uplift_store_dir", lambda: tmp_path)
     q = FakeQueue()
     q.VALID_BENCHMARKS = FakeAccRequest.VALID
     q.upload_intelligence_result = _real_upload

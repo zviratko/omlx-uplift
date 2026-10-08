@@ -169,6 +169,7 @@ async def context_start(body: dict, pool: Any) -> dict:
     CTX.cleanup_old_runs()
     run = CTX.create_run(req)
     run.task = asyncio.create_task(CTX.run_context_benchmark(run, pool))
+    run.task.add_done_callback(_capture_cb(run))   # U64 history
     logger.info(f"uplift native context probe started: {run.bench_id} "
                 f"model={req.model_id} target={req.target_tokens}")
     return {"bench_id": run.bench_id, "status": "started",
@@ -240,6 +241,7 @@ async def ane_start(body: dict, pool: Any) -> dict:
     ANE.cleanup_old_runs()
     run = ANE.create_run(req)
     run.task = asyncio.create_task(ANE.run_tuning(run, pool))
+    run.task.add_done_callback(_capture_cb(run))   # U64 history
     logger.info(f"uplift native ANE tuning started: {run.tuning_id} "
                 f"model={req.model_id} seq={req.sequence_length}")
     return {"tuning_id": run.tuning_id, "status": "started", "total": run.total}
@@ -252,6 +254,17 @@ async def _other_bench_busy_ctx() -> str | None:
         return (f"A context benchmark is already running (bench_id="
                 f"{c.bench_id}).")
     return await _other_bench_busy()
+
+
+def _capture_cb(run):
+    # U64: snapshot into persistent history when the run task settles —
+    # callback-based so a closed browser tab still persists (a poll-time
+    # hook would miss runs nobody was watching)
+    from . import bench_history
+
+    def _cb(_task):
+        bench_history.capture_run(run)
+    return _cb
 
 
 def ane_get(tuning_id: str):

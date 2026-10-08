@@ -17,7 +17,32 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .base import api_router, engine_pool, require_admin
-from .. import accuracy_engine, bench_engine, context_engine, decision_engine, embed_engine
+from .. import (accuracy_engine, bench_engine, bench_history,
+                context_engine, decision_engine, embed_engine)
+
+
+# ---- U64 run history (literals registered BEFORE /bench/{run_id}/... —
+# the route-order discipline of this file). Accuracy does not need these:
+# its accumulated rows already ride /bench/accuracy/results restored.
+
+@api_router.get("/bench/history")
+async def bench_history_list(surface: str,
+                             is_admin: bool = Depends(require_admin)):
+    if surface not in bench_history.RUN_SURFACES:
+        raise HTTPException(status_code=400,
+                            detail=f"unknown surface: {surface}")
+    return bench_history.entries(surface)
+
+
+@api_router.post("/bench/history/clear")
+async def bench_history_clear(request: Request,
+                              is_admin: bool = Depends(require_admin)):
+    body = await request.json()
+    surface = str((body or {}).get("surface") or "")
+    if surface not in bench_history.RUN_SURFACES:
+        raise HTTPException(status_code=400,
+                            detail=f"unknown surface: {surface}")
+    return bench_history.clear(surface)
 
 
 @api_router.get("/bench/flag")
@@ -28,6 +53,12 @@ async def bench_flag(is_admin: bool = Depends(require_admin)):
     mode = native_surfaces.server_value()
     return {"mode": mode, "bench": native_surfaces.enabled(mode, "bench"),
             "chat": native_surfaces.enabled(mode, "chat")}
+
+
+# U64: classic run objects die with the process; a stored entry still
+# marked 'running' can only mean the server stopped mid-run. One pass per
+# import, before any new run can register (bench_id is uuid-based).
+bench_history.reconcile_interrupted()
 
 
 # ---- accuracy (REPL-2a) — LIVE via accuracy_engine ------------------------

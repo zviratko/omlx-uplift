@@ -52,6 +52,12 @@ def test_flag_write_read_roundtrip(monkeypatch, tmp_path):
 # resolve to ITS OWN handler — literals must not be shadowed by the dynamic
 # /bench/{run_id}/... shapes.
 NAT3_ROUTES = [
+    # U64: history literals lead the /bench band — the only dynamics that
+    # could shadow them are 3-segment /bench/{run_id}/... shapes, and a
+    # 2-segment literal can never collide; registration at the top keeps
+    # the file's literal-before-dynamic discipline visible.
+    ("GET", "/bench/history"),
+    ("POST", "/bench/history/clear"),
     ("GET", "/bench/flag"),
     ("GET", "/bench/accuracy/tasks"),
     ("POST", "/bench/accuracy/add"),

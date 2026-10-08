@@ -113,6 +113,11 @@ async def start(body: dict, pool: Any, *, upload: bool = False) -> dict:
     run = B.create_run(bench_request)
     upload_allowed = upload and bench_request.external is None
     run.task = asyncio.create_task(_runner(run, pool, upload_allowed))
+    # U64: persistent history — snapshot when the run task settles, even
+    # if the browser tab closed before the result was ever polled
+    from . import bench_history
+    run.task.add_done_callback(
+        lambda _t: bench_history.capture_run(run))
     total_tests = len(bench_request.prompt_lengths) + len(bench_request.batch_sizes) * 2
     logger.info(
         f"uplift native bench started: {run.bench_id} model={bench_request.model_id} "

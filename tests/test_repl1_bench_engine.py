@@ -11,7 +11,9 @@ the dev-box run must not depend on a live server. bench_engine imports
 `from omlx.admin import benchmark as B` LAZILY (per-call), which is what
 makes a swap-in fake legal.
 """
+
 from __future__ import annotations
+from pathlib import Path
 
 import asyncio
 import sys
@@ -112,6 +114,13 @@ class FakeBenchmarkModule(types.ModuleType):
 @pytest.fixture()
 def fake_bench(monkeypatch):
     mod = FakeBenchmarkModule()
+    # U64: run-task done callbacks now snapshot into the REAL store dir;
+    # pin it to the test tmp_path like the embed/decision fixtures do, or
+    # fake ids leak into ~/.omlx/uplift/bench-history (observed)
+    import tempfile
+    from omlx_uplift import paths as _paths
+    _tmp = Path(tempfile.mkdtemp(prefix='u64-store-'))
+    monkeypatch.setattr(_paths, "uplift_store_dir", lambda: _tmp)
     ctx = types.ModuleType("omlx.admin.context_benchmark")
     ctx.get_active_run = lambda: None
     ane = types.ModuleType("omlx.admin.ane_tuning")

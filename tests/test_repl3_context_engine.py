@@ -15,7 +15,9 @@ Gates what the card pins:
   for qwen AND k2 backends, enabled AND disabled recommendations
 - ANE start forces backend from the pool entry (client value never wins)
 """
+
 from __future__ import annotations
+from pathlib import Path
 
 import asyncio
 import sys
@@ -184,6 +186,13 @@ class FakeANEModule(types.ModuleType):
 @pytest.fixture()
 def fake_engines(monkeypatch):
     ctx = FakeCtxModule()
+    # U64: run-task done callbacks now snapshot into the REAL store dir;
+    # pin it to the test tmp_path like the embed/decision fixtures do, or
+    # fake ids leak into ~/.omlx/uplift/bench-history (observed)
+    import tempfile
+    from omlx_uplift import paths as _paths
+    _tmp = Path(tempfile.mkdtemp(prefix='u64-store-'))
+    monkeypatch.setattr(_paths, "uplift_store_dir", lambda: _tmp)
     ane = FakeANEModule()
     bench = types.ModuleType("omlx.admin.benchmark")
     bench.get_active_run = lambda: None
