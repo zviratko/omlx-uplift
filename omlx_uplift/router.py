@@ -74,7 +74,8 @@ from .routers.bench import (
     bench_context_start, bench_context_active, bench_ane_start, bench_ane_results,
 )
 from .routers.chat import (
-    chat_key, chat_history, chat_history_save,
+    chat_key, chat_history_list, chat_history_get, chat_history_save,
+    chat_history_delete,
 )
 
 __all__ = [

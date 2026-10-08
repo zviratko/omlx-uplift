@@ -90,7 +90,9 @@ NAT3_ROUTES = [
     ("GET", "/bench/accuracy/{bench_id}/stream"),
     ("GET", "/chat/key"),
     ("GET", "/chat/history"),
+    ("GET", "/chat/history/{conv_id}"),
     ("POST", "/chat/history"),
+    ("DELETE", "/chat/history/{conv_id}"),
 ]
 
 

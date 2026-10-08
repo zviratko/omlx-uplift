@@ -1,0 +1,131 @@
+"""NAT-4: native chat backend (key handout + history store) tests.
+
+Doctrine: real temp store path (no venv, no server), every claim the
+router docstring makes is pinned here — size caps, role whitelist,
+multimodal stripping, count caps, store-full 507, migration-friendly
+shapes. The key route is tested with the settings-file fallback only
+(no live server state on the test machine; the server-state branch is
+the runtime-preferred path and is covered by the live drill).
+"""
+from __future__ import annotations
+
+import json
+import sys
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+# facade FIRST: routers self-register into the shared api_router singleton
+# at import time, and the facade pins bench->chat order — importing
+# routers.chat directly here used to reorder the global route list and
+# turn the NAT-3 golden test red (file-order-dependent, exactly the
+# doctrine test_repl1 learned before).
+from omlx_uplift import router as _up  # noqa: F401
+from omlx_uplift.routers import chat as CH
+
+
+@pytest.fixture()
+def client(monkeypatch, tmp_path):
+    from omlx_uplift import router as up
+    from omlx_uplift.routers import base as up_base
+    monkeypatch.setattr(CH, "store_path", lambda: tmp_path / "chat_history.json")
+    app = FastAPI()
+    app.include_router(up.api_router, prefix="/uplift/api")
+    app.dependency_overrides[up_base.require_admin] = lambda: True
+    return TestClient(app)
+
+
+def _conv(cid="c1", n=3, **kw):
+    c = {"id": cid, "title": "T", "model": "m", "systemPrompt": "",
+         "messages": [{"role": "user", "content": f"u{i}"} for i in range(n)]}
+    c.update(kw)
+    return c
+
+
+def test_save_list_get_roundtrip(client):
+    assert client.get("/uplift/api/chat/history").json() == []
+    r = client.post("/uplift/api/chat/history", json=_conv())
+    assert r.status_code == 200 and r.json()["messages"] == 3
+    lst = client.get("/uplift/api/chat/history").json()
+    assert lst[0]["id"] == "c1" and lst[0]["message_count"] == 3
+    full = client.get("/uplift/api/chat/history/c1").json()
+    assert full["messages"][0]["content"] == "u0"
+
+
+def test_validation(client):
+    assert client.post("/uplift/api/chat/history", json={"messages": []}).status_code == 400
+    r = client.post("/uplift/api/chat/history", json={"id": "x", "messages": "no"})
+    assert r.status_code == 400
+    assert client.get("/uplift/api/chat/history/nope").status_code == 404
+    assert client.delete("/uplift/api/chat/history/nope").status_code == 404
+
+
+def test_message_cleaning(client):
+    conv = _conv(cid="c2", messages=[
+        {"role": "hacker", "content": "kept as user"},                 # role whitelist
+        {"role": "assistant", "content": [                              # multimodal strip
+            {"type": "text", "text": "the text"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]},
+        "not-a-dict",                                                   # dropped
+        {"role": "user", "content": "x" * 300_000},                     # capped
+    ])
+    r = client.post("/uplift/api/chat/history", json=conv)
+    assert r.status_code == 200
+    msgs = client.get("/uplift/api/chat/history/c2").json()["messages"]
+    assert [m["role"] for m in msgs] == ["user", "assistant", "user"]
+    assert msgs[1]["content"] == "the text"          # image parts stripped
+    assert len(msgs[2]["content"]) == 200_000        # per-message cap
+
+
+def test_message_and_title_caps(client):
+    conv = _conv(cid="c3", n=250)
+    conv["title"] = "long " * 40
+    r = client.post("/uplift/api/chat/history", json=conv)
+    assert r.status_code == 200
+    got = client.get("/uplift/api/chat/history/c3").json()
+    assert len(got["messages"]) == CH.MAX_MESSAGES
+    assert len(got["title"]) <= CH.TITLE_CHARS
+
+
+def test_conversation_count_cap(client):
+    for i in range(CH.MAX_CONVOS + 5):
+        c = _conv(cid=f"c{i}", n=1)
+        c["updated"] = 0
+        r = client.post("/uplift/api/chat/history", json=c)
+        assert r.status_code == 200
+    lst = client.get("/uplift/api/chat/history").json()
+    assert len(lst) == CH.MAX_CONVOS
+    assert "c0" not in {x["id"] for x in lst}       # oldest evicted
+
+
+def test_store_full_returns_507(client, monkeypatch):
+    monkeypatch.setattr(CH, "MAX_STORE_BYTES", 50)
+    r = client.post("/uplift/api/chat/history", json=_conv(cid="big"))
+    assert r.status_code == 507
+
+
+def test_corrupt_store_recovers(client, monkeypatch, tmp_path):
+    (tmp_path / "chat_history.json").write_text("{not json")
+    assert client.get("/uplift/api/chat/history").json() == []
+
+
+def test_delete(client):
+    client.post("/uplift/api/chat/history", json=_conv(cid="del"))
+    assert client.delete("/uplift/api/chat/history/del").status_code == 200
+    assert client.get("/uplift/api/chat/history/del").status_code == 404
+
+
+def test_key_handout_from_settings_file(client, monkeypatch, tmp_path):
+    # force the file-fallback branch deterministically: a None sys.modules
+    # entry makes `from omlx.server import ...` raise ImportError on any
+    # machine (on the dev box the live-server branch could otherwise win
+    # and leak the real key into the assertion)
+    monkeypatch.setitem(sys.modules, "omlx.server", None)
+    fake = tmp_path / ".omlx" / "settings.json"
+    fake.parent.mkdir()
+    fake.write_text(json.dumps({"auth": {"api_key": "sekrit"}}))
+    monkeypatch.setattr(CH.Path, "home", classmethod(lambda cls: tmp_path))
+    r = client.get("/uplift/api/chat/key")
+    assert r.status_code == 200
+    assert r.json() == {"api_key": "sekrit"}
