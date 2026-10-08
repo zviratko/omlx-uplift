@@ -569,6 +569,20 @@ test('U74: reply + reasoning edits commit IN PLACE; edited rows ride the wire', 
         .test(src), 'reasoning rides the wire only after a user edit');
 });
 
+test('U79: toolbar rows regrouped by concern', () => {
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    // row membership is the contract: lifecycle together, prompt+Save together
+    assert.ok(/rowConv\.append\([\s\S]*?newBtn, expBtn, impBtn, fileIn, del\);/.test(src),
+        'conversation row: picker, new, export, import, DELETE in one place');
+    assert.ok(/rowPrompt\.append\([\s\S]*?profSave\);/.test(src)
+        && /group\(t\('chat\.system_prompt\.title'/.test(src)
+        && src.indexOf("'chat.system_prompt.title'") < src.indexOf('profSave);'),
+        'Save Settings sits directly after the System Prompt it saves into');
+    assert.ok(!/chat-native-pickers/.test(src),
+        'the accretion-era pickers row is gone');
+    assert.ok(/budGroup/.test(src), 'thinking budget carries a caption group');
+});
+
 test('U76-U78: web label, export/import buttons, sampling provenance chip', () => {
     const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
     assert.ok(/uplift\.chat\.web_search/.test(src),

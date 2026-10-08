@@ -1052,7 +1052,11 @@ function toolbar() {
         _conv.thinking = think.value;
         var b = parseInt(budget.value, 10);
         _conv.thinkingBudget = (isFinite(b) && b >= 0) ? b : null;
-        budget.hidden = think.value !== 'limit';
+        // U79: hide the WHOLE captioned group (hiding the bare input
+        // stranded its 'Thinking Budget' label on the row)
+        var g2 = budget.closest ? budget.closest('.chat-native-group') : null;
+        if (g2) g2.hidden = think.value !== 'limit';
+        else budget.hidden = think.value !== 'limit';
         saveConv();   // fields themselves are live-only (store drops them)
     }
     think.addEventListener('change', saveThinking);
@@ -1100,11 +1104,8 @@ function toolbar() {
         // the sys prompt keeps the old .chat-native-bar stretch behavior
         // (was a direct flex child; now inside a column group)
         if (control.id === 'chat-native-sys') g.classList.add('chat-native-grow');
-        if (control.classList && control.classList.contains('chat-native-histcol'))
-            g.classList.add('chat-native-grow');
         return g;
     }
-    var pickers = el('div', 'chat-native-bar chat-native-pickers');
     // U77 (user: 'add the options to export and import the chat'):
     // classic's Download Chats / Import Chats pair (chat.download_chats /
     // chat.import_chats — classic catalog keys, zero new i18n). Export
@@ -1126,24 +1127,40 @@ function toolbar() {
     fileIn.addEventListener('change', function (ev) {
         importChats(ev.target);
     });
-    var histCtl = el('div', 'chat-native-histcol');
-    var ioRow = el('div', 'chat-native-io');
-    ioRow.append(expBtn, impBtn);
-    histCtl.append(list, ioRow, fileIn);
-    pickers.append(
-        group(t('chat.chat_history_label', 'Chat History'), histCtl,
+    // U79 (user: 'the control layout is horrible... Download and import
+    // on the left, delete on the right, new chat on the left, Save
+    // setting completely disconnected from the system prompt'): rows by
+    // CONCERN, each control next to what it acts on, every destructive
+    // action inside its group rather than orphaned at a screen edge.
+    //   row 1  CONVERSATION: open / new / export / import / delete
+    //   row 2  SESSION:      model, prompt profile, prompt text + Save
+    //                        (Save writes the prompt into the profile —
+    //                        it sits right after the text it saves)
+    //   row 3  BEHAVIOUR:    thinking, budget, web search, mic
+    //   row 4  SAMPLING:     the seven override inputs (unchanged)
+    var rowConv = el('div', 'chat-native-bar chat-native-row');
+    rowConv.append(
+        group(t('chat.chat_history_label', 'Chat History'), list,
               'chat.chat_history_label'),
-        newBtn,
+        newBtn, expBtn, impBtn, fileIn, del);
+    var rowPrompt = el('div', 'chat-native-bar chat-native-row');
+    rowPrompt.append(
         group(t('chat.active_model', 'Active Model'), sel, 'chat.active_model'),
         group(t('chat.active_profile', 'Active Profile'), prof, 'chat.active_profile'),
-        profSave);
-    var gen = el('div', 'chat-native-bar chat-native-gen');
-    think.title = t('chat.thinking_label', 'Thinking');
-    gen.append(
         group(t('chat.system_prompt.title', 'System Prompt'), sys,
               'chat.system_prompt.title'),
+        profSave);
+    var rowGen = el('div', 'chat-native-bar chat-native-row');
+    think.title = t('chat.thinking_label', 'Thinking');
+    // U79: the budget input was the only UNLABELED control left (it only
+    // appears when mode=Limit); classic captions it 'Thinking Budget'
+    var budGroup = group(t('modal.model_settings.thinking_budget',
+                           'Thinking Budget'), budget,
+                         'modal.model_settings.thinking_budget');
+    budGroup.hidden = think.value !== 'limit';
+    rowGen.append(
         group(t('chat.thinking_label', 'Thinking'), think, 'chat.thinking_label'),
-        budget, web, mic, del);
+        budGroup, web, mic);
     // U46: sampling overrides (classic sidebar parity) — own captioned row,
     // each input numeric, blank = engine default, 0 stays a real value.
     var genRow = el('div', 'chat-native-bar chat-native-sampling');
@@ -1160,7 +1177,7 @@ function toolbar() {
         });
         genRow.appendChild(group(t(label, fb), inp));
     });
-    bar.append(pickers, gen, genRow);
+    bar.append(rowConv, rowPrompt, rowGen, genRow);
     return bar;
 }
 

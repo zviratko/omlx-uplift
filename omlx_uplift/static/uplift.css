@@ -2178,11 +2178,6 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     opacity: 0.62;
 }
 .acc-task-harness .acc-task-engine { opacity: 1; color: var(--accent); }
-/* U77: Chat History column — picker on top, Download/Import pair under */
-.chat-native-histcol { display: flex; flex-direction: column; gap: 4px;
-    width: 100%; }
-.chat-native-io { display: flex; gap: 4px; }
-.chat-native-io .btn { font-size: 11px; padding: 3px 8px; }
 
 /* U70: Download menus (classic's per-row JSON/CSV/TXT + per-surface sets) */
 .bench-dl { position: relative; display: inline-block; }
@@ -2238,11 +2233,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    row-level flex basis would stretch the input VERTICALLY inside a
    column flex parent — give the GROUP the stretch, the input a width. */
 /* U55 sibling (found in the U54/55 after-screenshot, the exact defect
-   class the user called out): .chat-native-gen is a flex item of the
-   root bar and sized to its CONTENT (422px of 1194), so the stretched
-   system-prompt input had nowhere to grow and 'Delete chat' orphaned
-   onto a line of its own. Same full-line rule as sampling. */
-.chat-native-gen { flex: 1 1 100%; min-width: 0; }
+   class the user called out): a toolbar ROW that is a flex item of the
+   root bar sizes to its CONTENT (422px of 1194), so the stretched
+   system-prompt input had nowhere to grow and controls orphaned onto
+   lines of their own. Every concern row must own its full-width line. */
+/* U79 (user: 'the control layout is horrible... all over'): rows are by
+   CONCERN now — Conversation / Session+prompt+Save / Behaviour — each
+   pinned to its own line; controls sit next to what they act on. */
+.chat-native-gen, .chat-native-row { flex: 1 1 100%; min-width: 0; }
 .chat-native-bar #chat-native-sys { min-width: 140px; }
 .chat-native-group.chat-native-grow { flex: 1 1 180px; min-width: 140px; }
 .chat-native-group.chat-native-grow #chat-native-sys { width: 100%; }
