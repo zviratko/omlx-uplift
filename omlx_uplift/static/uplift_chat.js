@@ -628,23 +628,43 @@ function toolbar() {
 }
 
 function applyShadowTheme(dc) {
-    /* live restyle hook: deep-chat config styles apply ONCE at render
-       (NAT-1 item 9), so skin colors are pushed into the open shadowRoot
-       as our own <style>. Full skin-matrix drill is card feature 6. */
+    /* NAT-1 item 9: deep-chat config styles apply ONCE at render, so we
+       own a <style> inside the shadowRoot. 6/6: the CSS references the
+       skin custom properties DIRECTLY (var(--card) ...) — custom
+       properties inherit across the shadow boundary, so a skin switch
+       restyles the chat with zero JS and zero reload; the snapshot-
+       colors-into-strings version this replaces could lag the async
+       skin sheet and needed observer hacks on attributes that never
+       change (data-g1..3 were invented in 3/6 — dead observer). */
     var root = dc && dc.shadowRoot;
     if (!root) return false;
-    var s = W().getComputedStyle(document.documentElement);
-    function v(n, fb) { return (s.getPropertyValue(n).trim()) || fb; }
+    // Selector audit live against the mounted 2.5.1 shadowRoot
+    // (2026-10-08): #container > #chat-view, messages are
+    // .message-bubble.user-message / .message-bubble.ai-message inside
+    // .outer-message-container.deep-chat-outer-container-role-*, the
+    // input is a contenteditable .text-input-styling (NO textarea, no
+    // .text-input/.input-container — the 3/6 guess), buttons are
+    // .input-button. Every var() below inherits across the shadow
+    // boundary (probe-proven) so skin switches restyle with zero JS.
     var css = [
-        '.deep-chat-outer-container, #chat-view, .input-container,',
-        '.text-input { background:', v('--card', '#141a24'), ';color:', v("--ink", "#e6edf3"), '; }',
-        '.user-message, .user-message-container { background:', v('--accent', '#4c8dff') + '33;',
-        'color:', v("--ink", "#e6edf3"), '; }',
-        'a { color:', v('--accent', '#4c8dff'), '; }',
+        '#container, #chat-view { background: var(--card, #141a24);',
+        '  color: var(--ink, #e6edf3); }',
+        '.message-bubble { color: var(--ink, #e6edf3); }',
+        '.message-bubble.user-message { background: var(--field, #1b2330); }',
+        '.message-bubble.ai-message { background: var(--panel, #10151d); }',
+        '.message-bubble pre, .message-bubble code { color: var(--ink, #e6edf3);',
+        '  background: var(--bg, #0c1017); }',
+        '.text-input-styling { color: var(--ink, #e6edf3);',
+        '  caret-color: var(--accent, #4c8dff); }',
+        '.input-button { color: var(--dim, #8b98ab); }',
+        'a { color: var(--accent, #4c8dff); }',
     ].join(' ');
     var st = root.getElementById ? root.getElementById('uplift-chat-theme') : null;
     if (!st) { st = el('style'); st.id = 'uplift-chat-theme'; root.appendChild(st); }
     st.textContent = css;
+    // classic-page courtesy (card feature 6): the embedded chat iframe
+    // reads 'omlx-chat-theme' at ITS boot; uplift's syncEmbedTheme
+    // already mirrors it on commit — nothing to write here.
     return true;
 }
 
@@ -784,9 +804,6 @@ function mount() {
             if (!applyShadowTheme(dc) && ++tries < 100) setTimeout(tryTheme, 60);
         };
         tryTheme();
-        var mo = new MutationObserver(function () { applyShadowTheme(dc); });
-        mo.observe(document.documentElement, { attributes: true,
-            attributeFilter: ['class', 'data-g1', 'data-g2', 'data-g3'] });
         var sel = gid('chat-native-model');
         if (sel) sel.value = _conv.model || '';
         var sys = gid('chat-native-sys');
