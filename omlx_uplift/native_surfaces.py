@@ -1,16 +1,22 @@
-"""NAT-3: kill-switch for the native Bench/Chat surfaces (NAT batch).
+"""NAT-3 + NAT-6: kill-switch for the native Bench/Chat surfaces.
 
-The branch `feat/native-bench-chat` ships native replacements for the two
-embedded classic surfaces (Bench tabs, Chat tab). Until NAT-5 cutover, the
-embed path must stay byte-identical by default, so the switch lives in ONE
-place with three inputs, evaluated in this order:
+The NAT batch re-implemented the two embedded classic surfaces (Bench tabs,
+Chat tab) natively. NAT-6 settled the cutover shape (user, 2026-10-08): both
+implementations SHIP and stay reachable — the native surface is what a nav
+click opens, the classic embed is the fallback ("Classic (Embed)" flyout in
+the Bench dropdown, submenu under Chat, plus a switch badge inside each
+embed card). The server switch lives in ONE place with three inputs,
+evaluated in this order:
 
   1. URL parameter  ?native=off|bench|chat|all   (per-viewer, wins over all)
   2. server config  ~/.omlx/uplift/config.json {"uplift_native_surfaces": ...}
-  3. default        "off"
+  3. default        "all"  (NAT-6: native is the shipped surface)
 
-Values: off | bench | chat | all. Anything unrecognized falls back to "off"
-(fail toward the shipped embed path, never toward an unfinished surface).
+Values: off | bench | chat | all — which NATIVE surfaces a click opens.
+The viewer can still flip per surface to the classic embed in the navbar
+without touching the server (localStorage `uplift-classic-embed`, deep-
+linkable as the 3rd hash leg, e.g. #chat/chat/classic). Anything
+unrecognized falls back to the default (fail toward the shipped surface).
 
 Frontend: index.html carries the resolved value as
 `<html data-native-surfaces="...">` — substituted by the page router at
@@ -26,6 +32,11 @@ from . import paths
 
 VALID = ("off", "bench", "chat", "all")
 CONFIG_KEY = "uplift_native_surfaces"
+# NAT-6: native surfaces are the shipped default; the classic embed stays
+# reachable per surface through the navbar ("Classic (Embed)") and the badge
+# inside each embed card. Set the config key to "off" to make the embed the
+# default view again.
+DEFAULT = "all"
 
 
 def config_path() -> Path:
@@ -56,7 +67,7 @@ def write_config(value: str) -> dict:
 
 def server_value() -> str:
     v = read_config().get(CONFIG_KEY)
-    return v if v in VALID else "off"
+    return v if v in VALID else DEFAULT
 
 
 def resolve(url_param: str | None) -> str:

@@ -31,11 +31,16 @@ users never see.
   derived probability questions, position-bias agreement (same item
   re-asked with shuffled options) and ms/question latency. Cancel stops
   between items; a cancelled pack is never persisted.
-- **Native Bench/Chat shell (preview branch only, off by default).** The
-  `feat/native-bench-chat` build accepts `?native=off|bench|chat|all` (or
-  `uplift_native_surfaces` in `~/.omlx/uplift/config.json`) to swap the
-  Bench and Chat tabs from the embedded classic iframes to native stub
-  pages; `off` keeps today's behavior exactly. Nothing changes for main.
+- **Native Bench/Chat + the classic embed, side by side.** The Bench and
+  Chat tabs open the native surfaces by default. The embedded classic
+  pages stay fully reachable as a fallback: hover Bench and an option to
+  reveal "Classic (Embed)" beside it, or hover Chat to reveal it below;
+  each embedded page also carries a NATIVE badge in its header to switch
+  back. The choice persists per browser (and deep-links as
+  `#chat/chat/classic`). A server that wants the embed as the default can
+  still set `uplift_native_surfaces` to `off` (or `bench`/`chat`) in
+  `~/.omlx/uplift/config.json`, and any viewer can override per load with
+  `?native=off|bench|chat|all`.
 - **Native throughput benchmark (preview branch).** With the bench
   surface flagged on, the Throughput sub-tab is a real native page now:
   form (model, context profile, prompt lengths, batch sizes, ANE-aligned

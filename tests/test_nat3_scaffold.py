@@ -19,8 +19,19 @@ from omlx_uplift import native_surfaces
 
 # ---- flag ladder ----------------------------------------------------------
 
-def test_flag_defaults_off(monkeypatch, tmp_path):
+def test_flag_defaults_all_natural_off(monkeypatch, tmp_path):
+    """NAT-6 flipped the shipped default to 'all' (native is the surface a
+    click opens; the classic embed lives on as the per-viewer fallback).
+    'off' stays a first-class config value — a server that opts out of the
+    native surfaces still resolves to the embed path."""
     monkeypatch.setattr(native_surfaces, "config_path", lambda: tmp_path / "config.json")
+    assert native_surfaces.DEFAULT == "all"
+    assert native_surfaces.server_value() == "all"
+    assert native_surfaces.resolve(None) == "all"
+    assert native_surfaces.enabled("all", "bench") is True
+    # an explicit "off" in config still wins over the default
+    (tmp_path / "config.json").write_text(
+        json.dumps({native_surfaces.CONFIG_KEY: "off"}), encoding="utf-8")
     assert native_surfaces.server_value() == "off"
     assert native_surfaces.resolve(None) == "off"
     assert native_surfaces.enabled("off", "bench") is False
@@ -227,8 +238,14 @@ def test_index_token_substituted(monkeypatch, tmp_path):
     client = TestClient(app)
 
     body = client.get("/uplift/").text
-    assert 'data-native-surfaces="off"' in body
+    # NAT-6: the shipped default is 'all' — native opens, embed is fallback
+    assert 'data-native-surfaces="all"' in body
     assert "NATIVE_SURFACES_TOKEN" not in body
+    # a server that opts out still lands on the embed path
+    (tmp_path / "config.json").write_text(
+        json.dumps({native_surfaces.CONFIG_KEY: "off"}), encoding="utf-8")
+    body = client.get("/uplift/").text
+    assert 'data-native-surfaces="off"' in body
 
     (tmp_path / "config.json").write_text(
         json.dumps({native_surfaces.CONFIG_KEY: "all"}), encoding="utf-8")

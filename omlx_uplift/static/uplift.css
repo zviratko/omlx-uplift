@@ -331,6 +331,10 @@ header.top .icon-btn:hover { background: var(--hdr-ink); border-color: var(--hdr
     color: var(--bg); }
 header.top .dd-menu { border-color: var(--hdr-ink); }
 header.top .dd-menu a { color: var(--hdr-ink); border-bottom-color: var(--hdr-edge); font-weight: var(--hdr-weight); }
+/* NAT-6 classic flyout inside the red header menus: same plate as the
+   parent menu (page ground under, ink frame), ink text like its rows. */
+header.top .dd-menu .dd-classic { background: var(--card); border-color: var(--hdr-ink);
+    box-shadow: 2px 2px 0 var(--hdr-edge); }
 header.top .dd-menu a:hover, header.top .dd-menu a.active {
     background: var(--hdr-ink); color: var(--bg); }
 .chip {
@@ -1170,6 +1174,47 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .dd-menu a:last-child { border-bottom: 0; }
 .dd-menu a:hover { background: var(--ink); color: var(--bg); }
 .dd-menu--right { left: auto; right: -1px; min-width: 130px; }
+/* NAT-6: "Classic (Embed)" fallback flyout. Each bench item wraps its
+   native link plus a classic twin in .dd-item; the twin cascades OUT to
+   the right of the menu (flush — no pointer gap, and because it is a
+   descendant of the row, hovering it keeps the row hovered). Revealed on
+   hover of the option, exactly the shape the user described: "hovering
+   over those options would reveal an additional Classic (Embed) option to
+   the right". No JS timer needed — the parent menu's 250 ms grace close
+   covers the travel. */
+.dd-menu .dd-item { position: relative; display: block; }
+.dd-menu .dd-item > a { display: block; }
+.dd-menu .dd-classic {
+    position: absolute; top: -1px; left: 100%; z-index: 51;
+    display: none;                        /* hover-reveal; [hidden] = no native twin */
+    background: var(--card); border: 1px solid var(--ink);
+    white-space: nowrap; padding: 10px 14px; min-width: max-content;
+    font-size: 10px;                      /* reads as a secondary affordance */
+    box-shadow: 2px 2px 0 var(--edge);
+}
+.dd-menu .dd-item:hover .dd-classic:not([hidden]) { display: block; }
+.dd-menu .dd-classic:hover { background: var(--ink); color: var(--bg); }
+/* No-hover devices (phones, tablets): a cascade can never be revealed, so
+   the classic twin joins the row list as a plain indented sub-entry. */
+@media (hover: none) {
+    .dd-menu .dd-classic {
+        position: static; border: 0; border-top: 1px solid var(--edge);
+        box-shadow: none; padding-left: 28px; font-size: 11px;
+    }
+    .dd-menu .dd-item .dd-classic:not([hidden]) { display: block; }
+}
+/* the last row's hairline would double with the menu border now that the
+   literal last child is a wrapper span */
+.dd-menu .dd-item:last-child > a:first-child { border-bottom: 0; }
+/* The surface-switch badge in each embed card header (NATIVE ▸ back).
+   Sharp like every other house box (U82: --radius is the only knob). */
+.embed-mode-switch {
+    border: 1px solid var(--edge); color: var(--dim);
+    font: 400 9px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.12em;
+    padding: 3px 7px; margin-right: 10px; text-decoration: none; white-space: nowrap;
+}
+.embed-mode-switch:hover { border-color: var(--accent); color: var(--accent); }
+.embed-mode-switch[hidden] { display: none; }
 /* Skin picker: names are free-form (crate labels, pinned version dirs) and
    were clipped by the 200px floor's siblings. The menu now hugs its
    content — width comes from the longest entry (up to ~24ch of the 11px

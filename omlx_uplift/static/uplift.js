@@ -273,12 +273,16 @@ function applyTab() {
         btn.append(span, ' ', caret);
     }
     for (const card of pageCards) {
-        // NAT-3: native shells exist only while their surface is flagged on;
-        // with the kill-switch off they must never paint (embed = reality).
+        // NAT-6: a native shell can only paint when its surface is flagged
+        // on server-side AND the viewer is not in classic-embed mode for
+        // this tab; the embed twin hides in exactly the opposite case.
         const nat = card.dataset.native;
-        const natOn = nat && (NATIVE_SURFACES === 'all' || NATIVE_SURFACES === nat);
-        const show = !card.classList.contains('native-page') || natOn;
-        const visible = show && (card.dataset.tab || 'status') === tab &&
+        const natOn = surfaceMode(tab, sub) === 'native';
+        const show = !card.classList.contains('native-page') || (nat && natOn);
+        const isClassicTwin = card.classList.contains('embed-card') &&
+            SURFACE_EMBED_IDS.has(card.dataset.id) && natOn;
+        const visible = show && !isClassicTwin &&
+            (card.dataset.tab || 'status') === tab &&
             (!card.dataset.sub || card.dataset.sub === sub);
         card.style.display = visible ? '' : 'none';
     }
@@ -287,8 +291,7 @@ function applyTab() {
     $('btn-customize').hidden = tab !== 'status' || dashEditing;
     if (tab !== 'status' && dashEditing) cancelDashEdit();
     // navigation (deep link, keyboard, submenu item) closes any open menu
-    for (const m of ['dd-models-menu', 'dd-bench-menu', 'dd-settings-menu'])
-        $(m).hidden = true;
+    for (const [, m] of DD_PAIRS) $(m).hidden = true;
     requestAnimationFrame(CH.resizeCharts);   // charts may have become visible
     if (tab === 'status') requestAnimationFrame(ensureUpliftGrid);
     if (tab === 'usage') UUP.pollUsage();
@@ -306,6 +309,11 @@ function applyTab() {
         if (sub === 'patches') { PT.pollPatches(); PT.pollDev && PT.pollDev(); }
     }
     if (tab === 'bench' || tab === 'chat' || tab === 'cluster') showEmbedPage(tab, sub);
+    // NAT-6: keep the URL's classic leg + the embed-card badges honest for
+    // the effective mode (the bench/chat native shell was already mounted
+    // or hidden by showEmbedPage above).
+    syncClassicHash(tab, sub);
+    syncEmbedSwitches();
 }
 addEventListener('hashchange', applyTab);
 
@@ -325,17 +333,74 @@ const EMBED_TARGETS = {
     'cluster-page': '/admin/dashboard?tab=cluster',
 };
 /* NAT-3 kill-switch: value server-substituted into <html
-   data-native-surfaces="..."> (off|bench|chat|all, default off — the
-   embed path below stays byte-identical when off). Names distinct from
-   `NATIVE` (that one means the standalone viewer, PATHS/viewer). */
+   data-native-surfaces="..."> (off|bench|chat|all — which NATIVE surfaces
+   the server ships on; NAT-6 flipped the default to 'all'). Names distinct
+   from `NATIVE` (that one means the standalone viewer, PATHS/viewer). */
 const NATIVE_SURFACES = document.documentElement.dataset.nativeSurfaces || 'off';
-function nativeSurfaceOn(tab) {
-    return tab === 'bench' || tab === 'chat';
+/* NAT-6 (user, 2026-10-08): both implementations SHIP side by side. The
+   native surface is what a nav click opens; the classic embed stays
+   reachable per surface — "Classic (Embed)" flyout beside each Bench item,
+   submenu under Chat, and a NATIVE badge back in each embed card header.
+   The viewer choice persists in localStorage (layout doctrine), never in
+   server config. Subs that exist ONLY natively (ane/embed/rerank/decision)
+   can never resolve to classic. */
+const CLASSIC_SUBS = { bench: ['throughput', 'accuracy', 'context'], chat: ['chat'] };
+const CLASSIC_LS_KEY = 'uplift-classic-embed';
+function classicTabs() {
+    try {
+        const raw = localStorage.getItem(CLASSIC_LS_KEY) || '';
+        return raw.split(',').filter(x => x === 'bench' || x === 'chat');
+    } catch (_) { return []; }
+}
+function setClassicMode(tab, on) {
+    if (tab !== 'bench' && tab !== 'chat') return;
+    const set = new Set(classicTabs());
+    if (on) set.add(tab); else set.delete(tab);
+    try { localStorage.setItem(CLASSIC_LS_KEY, [...set].join(',')); } catch (_) {}
+}
+function nativeAvailable(tab) {
+    return (tab === 'bench' || tab === 'chat') &&
+        (NATIVE_SURFACES === 'all' || NATIVE_SURFACES === tab);
+}
+/* Third hash leg ('#chat/chat/classic') = explicit, shareable classic
+   request; it outranks the persisted viewer choice so a link opened in a
+   fresh browser lands on the embed. applyTab normalises the URL afterwards
+   (adds the leg when the effective mode IS classic, strips it when it
+   went stale — e.g. the NATIVE badge was clicked back). */
+function hashClassicLeg(tab) {
+    const parts = (location.hash || '').replace('#', '').split('/');
+    return parts[0] === tab && parts[2] === 'classic';
+}
+function surfaceMode(tab, sub) {
+    if (!nativeAvailable(tab)) return 'classic';
+    // subs that exist ONLY natively can never resolve to classic
+    if (sub && !(CLASSIC_SUBS[tab] || []).includes(sub)) return 'native';
+    if (hashClassicLeg(tab)) return 'classic';
+    return classicTabs().includes(tab) ? 'classic' : 'native';
+}
+/* Rewrites the classic leg of #tab/sub[/classic] to the effective mode.
+   replaceState (same precedent as applyTab's stale-hash rewrite): writing
+   location.hash would fire hashchange -> applyTab again. */
+function syncClassicHash(tab, sub) {
+    if (tab !== 'bench' && tab !== 'chat') return;
+    const want = '#' + tab + '/' + sub +
+        (surfaceMode(tab, sub) === 'classic' && nativeAvailable(tab) ? '/classic' : '');
+    if (location.hash !== want)
+        history.replaceState(null, '', location.pathname + location.search + want);
+    // a shared /classic link also becomes that viewer's persisted choice
+    if (hashClassicLeg(tab)) setClassicMode(tab, true);
+}
+/* Cards that the bench/chat surface switch owns (cluster embed is NOT part
+   of it — it has no native twin). */
+const SURFACE_EMBED_IDS = new Set(
+    ['bench-tp-page', 'bench-acc-page', 'bench-ctx-page', 'chat-page']);
+function nativeSurfaceOn(tab, sub) {
+    return surfaceMode(tab, sub) === 'native';
 }
 function showEmbedPage(tab, sub) {
     const card = pageCards.find(c => c.dataset.id === EMBED_PAGE_IDS[tab]?.[sub]);
     if (!card) return;
-    if (nativeSurfaceOn(tab) && (NATIVE_SURFACES === 'all' || NATIVE_SURFACES === tab)) {
+    if (nativeSurfaceOn(tab, sub)) {
         // native shell replaces the iframe for this surface (stub cards
         // until REPL-1/2/3/NAT-4 fill them); embed card stays hidden.
         const host = pageCards.find(c => c.classList.contains('native-page') && c.dataset.tab === tab);
@@ -397,13 +462,27 @@ document.addEventListener('touchstart', () => { ddLastTouch = Date.now(); },
     { passive: true, capture: true });
 const ddTouchHover = () => Date.now() - ddLastTouch < 800;
 function ddOpen(menuId, open) { $(menuId).hidden = !open; }
-function bindDropdown(btnId, menuId) {
+function bindDropdown(btnId, menuId, opts) {
+    opts = opts || {};
     const btn = $(btnId), menu = $(menuId);
     const wrap = btn.closest('.dd');
     let openedBy = null;          // 'hover' | 'click' — distinguishes synthesized hover
     btn.onclick = e => {
         e.preventDefault();
         clearTimeout(ddTimers[menuId]);
+        // NAT-6: a click on CHAT opens the surface it names (the native
+        // chat), it does not toggle the menu — the menu is the hover
+        // affordance that carries the "Classic (Embed)" fallback. Bench and
+        // the rest keep click-to-toggle. TOUCH EXCEPTION: hover never fires
+        // there, so a tap toggles the menu (its Native row is one more tap
+        // from the same place; the fallback must not become unreachable).
+        if (opts.navigateOnClick && !ddTouchHover()) {
+            ddOpen(menuId, false); openedBy = null;
+            const r = '#' + btn.dataset.tab +
+                (opts.hashSub ? '/' + opts.hashSub : '');
+            if (location.hash === r) applyTab(); else location.hash = r;
+            return;
+        }
         // click DROPS THE MENU — it never navigates (submenu items do).
         // A tap's synthesized hover may have opened the menu already; the
         // click that follows must then close it (real toggle, not a no-op).
@@ -415,6 +494,10 @@ function bindDropdown(btnId, menuId) {
     wrap.addEventListener('mouseenter', () => {
         if (ddTouchHover()) return;
         clearTimeout(ddTimers[menuId]);
+        // NAT-6: a surface menu whose rows are all hidden (native off =>
+        // neither 'Native' nor 'Classic (Embed)' applies) must not open as
+        // an empty plate.
+        if (syncMenuState(menuId) === 0) return;
         ddOpen(menuId, true);
         openedBy = 'hover';
     });
@@ -430,22 +513,85 @@ function bindDropdown(btnId, menuId) {
             e.preventDefault();
             menu.hidden = true;
             openedBy = null;
-            location.hash = '#' + btn.dataset.tab + '/' + a.dataset.sub;
+            // NAT-6: every item carries the mode it opens. A plain/native
+            // item CLEARS the classic flag for its tab (a click on the real
+            // menu label always means "open the surface it names"); the
+            // "Classic (Embed)" flyout sets it. The hash keeps the 3rd leg
+            // so the choice survives reload/share.
+            const tab = btn.dataset.tab;
+            const classic = a.dataset.mode === 'classic';
+            if (tab === 'bench' || tab === 'chat') setClassicMode(tab, classic);
+            const hash = '#' + tab + '/' + a.dataset.sub + (classic ? '/classic' : '');
+            if (location.hash === hash) applyTab(); else location.hash = hash;
         });
 }
+/* NAT-6 menu hygiene, re-run every time a menu opens:
+   - a row that carries an explicit data-mode (the surface twins: Chat's
+     Native/Classic pair, the bench dd-classic flyouts) is meaningless when
+     the native surface is NOT available (flag off => the PLAIN items
+     already open the embed) — hide it, so the hover-only Chat menu never
+     opens as an empty plate. Plain rows (no data-mode) always stay.
+   - active row = the sub AND the mode currently in effect. */
+function syncMenuState(menuId) {
+    const menu = $(menuId);
+    if (!menu) return 0;
+    const btn = menu.previousElementSibling;
+    const tab = btn && btn.dataset.tab;
+    const canNative = nativeAvailable(tab);
+    const parts = (location.hash || '').replace('#', '').split('/');
+    const sub = parts[0] === tab ? parts[1] : null;
+    const mode = (tab === 'bench' || tab === 'chat') ? surfaceMode(tab, sub) : null;
+    let shown = 0;
+    for (const a of menu.querySelectorAll('a')) {
+        const am = a.dataset.mode;
+        a.hidden = !!am && !canNative;
+        if (!a.hidden) shown++;
+        a.classList.toggle('active',
+            !!sub && a.dataset.sub === sub && (!mode || (am || 'native') === mode));
+    }
+    return shown;
+}
+/* Header switch badge inside every bench/chat embed card: one click takes
+   the viewer back to the native surface of the panel it sits in. Labels are
+   markup data-i18n (applyI18n pass); this owns ONLY the visibility — the
+   badge is a lie when there is no native twin (server flag off). */
+const EMBED_CARD_TAB = { 'bench-tp-page': 'bench', 'bench-acc-page': 'bench',
+                         'bench-ctx-page': 'bench', 'chat-page': 'chat' };
+function syncEmbedSwitches() {
+    for (const b of document.querySelectorAll('.embed-mode-switch')) {
+        b.hidden = !nativeAvailable(EMBED_CARD_TAB[b.dataset.for]);
+    }
+}
+document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.embed-mode-switch');
+    if (!b) return;
+    e.preventDefault();
+    const tab = EMBED_CARD_TAB[b.dataset.for];
+    setClassicMode(tab, false);
+    const sub = b.dataset.for === 'chat-page' ? 'chat'
+        : (b.dataset.for === 'bench-tp-page' ? 'throughput'
+        : b.dataset.for === 'bench-acc-page' ? 'accuracy' : 'context');
+    const hash = '#' + tab + '/' + sub;
+    if (location.hash === hash) applyTab(); else location.hash = hash;
+});
+const DD_PAIRS = [['dd-models-btn', 'dd-models-menu'], ['dd-bench-btn', 'dd-bench-menu'],
+                  ['dd-chat-btn', 'dd-chat-menu'], ['dd-settings-btn', 'dd-settings-menu']];
 bindDropdown('dd-models-btn', 'dd-models-menu');
 bindDropdown('dd-bench-btn', 'dd-bench-menu');
+// NAT-6 (user's model, verbatim): "clicking on 'Chat' menu would open the
+// new Chat, but hovering over it would reveal 'Classic (Embed)' below it".
+// Chat therefore navigates on click; its menu is a hover-only affordance.
+bindDropdown('dd-chat-btn', 'dd-chat-menu', { navigateOnClick: true, hashSub: 'chat' });
 bindDropdown('dd-settings-btn', 'dd-settings-menu');
 document.addEventListener('click', e => {
-    for (const [btnId, menuId] of [['dd-models-btn', 'dd-models-menu'], ['dd-bench-btn', 'dd-bench-menu'],
-                                    ['dd-settings-btn', 'dd-settings-menu']]) {
+    for (const [btnId, menuId] of DD_PAIRS) {
         const menu = $(menuId);
         if (!menu.hidden && !menu.contains(e.target) && !$(btnId).contains(e.target))
             menu.hidden = true;
     }
 });
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { $('dd-models-menu').hidden = true; $('dd-bench-menu').hidden = true; $('dd-settings-menu').hidden = true; }
+    if (e.key === 'Escape') for (const [, menuId] of DD_PAIRS) $(menuId).hidden = true;
 });
 
 // Keyboard: 1–8 jump to tabs (ignored while typing in inputs).
