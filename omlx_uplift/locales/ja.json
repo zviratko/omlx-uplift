@@ -51,8 +51,6 @@
  "uplift.chat.native_stub": "ネイティブサーフェス — まだ未実装です。",
  "uplift.chat.tools_used": "ツール呼び出し",
  "uplift.chat.booting": "チャットを読み込んでいます…",
- "uplift.chat.edit_reply": "返信を編集",
- "uplift.chat.edit_reasoning": "編集",
  "uplift.chat.edited": "編集済み",
  "uplift.chat.edited_next_reply": "編集済み — 次の返信で使用されます",
  "uplift.chat.history_warn": "この会話は大きくなっています。古いヤりとりがモデルの制限に達する可能性があります。",

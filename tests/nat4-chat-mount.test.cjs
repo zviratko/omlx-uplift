@@ -376,8 +376,8 @@ test('U43: shadow theme outranks the bundle hard-coded colors', async () => {
         'ai pill background stays themed');
     assert.ok(/\.message-bubble\.user-message-text\s*{[^}]*color:\s*var\(--ink/.test(css),
         'user pill color is themed at 0,2,0');
-    assert.ok(/\.message-bubble\.user-message-text\s*{[^}]*background:\s*var\(/.test(css),
-        'user pill background stays themed');
+    assert.ok(/\.message-bubble\.user-message-text\s*{[^}]*background:\s*(var|color-mix)\(/.test(css),
+        'user pill background stays themed (U75: accent color-mix tint)');
     // the white input well needs TWO ids (bundle rule is #id alone)
     assert.ok(/#chat-view\s+#text-input-container\s*{[^}]*background:\s*var\(--field/.test(css),
         'input well background beats the #id rule');
@@ -512,8 +512,8 @@ test('U71: thinking anchors ABOVE each reply, not at the top of the chat', () =>
     assert.ok(/_lastAiVisible|lastAiVisible\(\)/.test(src),
         'store-derived anchor helper in use');
     // classic parity: finished blocks default closed, live one open
-    assert.ok(/thinkingBlockEl\(txt, isLive,/.test(src),
-        'open state follows live-vs-persisted (store idx rides too, U74)');
+    assert.ok(/thinkingBlockEl\(txt, isLive\)/.test(src),
+        'open state follows live-vs-persisted');
 });
 
 test('U72: injected children stack ABOVE the bubble, hover never moves it', () => {
@@ -550,18 +550,21 @@ test('U74: reply + reasoning edits commit IN PLACE; edited rows ride the wire', 
     const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
     // assistant edits never truncate/replay — they condition the next ctx
     assert.ok(/function commitEditedInPlace/.test(src), 'in-place commit exists');
-    assert.ok(/m\.role === 'assistant'\) commitEditedInPlace/.test(src),
-        'assistant content edits go in-place, user edits still replay');
+    assert.ok(/commitEditedInPlace\(idx, taC\.value,/.test(src),
+        'assistant unified save goes in-place, user still replays');
     // the Edited mark distinguishes the two honest states
     assert.ok(/uplift\.chat\.edited_next_reply/.test(src)
         && /uplift\.chat\.edited'/.test(src), 'both mark labels exist');
     assert.ok(/function editedClaim/.test(src),
         'claim rule centralized (last row + edited assistant = next)');
-    // reasoning editor opens from the thinking header, edits the CARD
-    assert.ok(/chat-native-think-edit/.test(src), 'header edit affordance');
-    assert.ok(src.includes("'chat-native-edit reasoning'")
-        || /className = 'chat-native-edit \' \+ \(m\.role/.test(src),
-        'reasoning editor class in use');    // wire: ONLY edited assistant rows carry reasoning back (classic parity)
+    // U75: ONE Edit per row — the header affordance is gone, the unified
+    // editor carries reasoning + reply in one form
+    assert.ok(!/chat-native-think-edit/.test(src),
+        'no second edit affordance (user: one Edit button)');
+    assert.ok(/mkTa\('reasoning'/.test(src)
+        && /class(Name)? = 'chat-native-edit' \+ \(cls \? ' ' \+ cls : ''\)/.test(src),
+        'unified form carries the reasoning field with its class');
+    // wire: ONLY edited assistant rows carry reasoning back (classic parity)
     assert.ok(/m\.edited && m\.role === 'assistant' && m\.reasoning_content/
         .test(src), 'reasoning rides the wire only after a user edit');
 });

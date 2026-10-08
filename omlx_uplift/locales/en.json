@@ -51,8 +51,6 @@
  "uplift.chat.native_stub": "Native surface — not implemented yet.",
  "uplift.chat.tools_used": "Tool calls",
  "uplift.chat.booting": "Loading chat…",
- "uplift.chat.edit_reply": "Edit reply",
- "uplift.chat.edit_reasoning": "Edit",
  "uplift.chat.edited": "Edited",
  "uplift.chat.edited_next_reply": "Edited — used on next reply",
  "uplift.chat.history_warn": "This conversation is large; older turns may hit model limits.",

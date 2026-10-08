@@ -51,8 +51,6 @@
  "uplift.chat.native_stub": "原生介面 — 尚未實作。",
  "uplift.chat.tools_used": "工具呼叫",
  "uplift.chat.booting": "正在載入聊天…",
- "uplift.chat.edit_reply": "編輯回覆",
- "uplift.chat.edit_reasoning": "編輯",
  "uplift.chat.edited": "已編輯",
  "uplift.chat.edited_next_reply": "已編輯 — 將用於下次回覆",
  "uplift.chat.history_warn": "此對話較大，較早的內容可能達到模型上下文限制。",

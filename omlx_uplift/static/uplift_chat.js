@@ -774,7 +774,7 @@ function paintThinking() {
     }
 }
 
-function thinkingBlockEl(text, open, storeIdx) {
+function thinkingBlockEl(text, open) {
     if (typeof document === 'undefined' || !document.createElement) return null;
     var d = document.createElement('details');
     d.className = 'chat-native-thinking';
@@ -790,20 +790,6 @@ function thinkingBlockEl(text, open, storeIdx) {
     pre.className = 'chat-native-think-body';
     pre.textContent = text || '';
     d.append(sm, pre);
-    // U74: the header IS the reasoning block's affordance — a quiet Edit
-    // (hover only) opens the inline reasoning editor. Skipped on live
-    // stream blocks (storeIdx null: nothing persisted yet).
-    if (storeIdx !== null && storeIdx !== undefined) {
-        d.dataset.idx = String(storeIdx);
-        var eb = document.createElement('button');
-        eb.type = 'button'; eb.className = 'chat-native-think-edit';
-        eb.textContent = t('uplift.chat.edit_reasoning', 'Edit');
-        eb.addEventListener('click', function (ev) {
-            ev.preventDefault(); ev.stopPropagation();
-            openEditor(storeIdx, 'reasoning');
-        });
-        sm.appendChild(eb);
-    }
     return d;
 }
 
@@ -1107,18 +1093,14 @@ function msgActionsEl(idx, role, editedLabel, editedKey) {
     if (role === 'assistant') {
         act('regen', t('chat.regenerate_tooltip', 'Regenerate'),
             t('chat.regenerate_tooltip', 'Regenerate'), msgRegenerate);
-        // U74: editing the REPLY too — experiment with model behaviour by
-        // rewriting what the next turn reads as context
-        act('edit', t('uplift.chat.edit_reply', 'Edit reply'),
-            t('uplift.chat.edit_reply', 'Edit reply'), function (i) {
-                openEditor(i, 'content');
-            });
-    } else {
-        act('edit', t('chat.edit_tooltip', 'Edit message'),
-            t('chat.edit_tooltip', 'Edit message'), function (i) {
-                openEditor(i, 'content');
-            });
     }
+    // U75 (user: 'can we have just one Edit button for both the reply and
+    // thinking?'): one affordance per row; assistant rows open the
+    // UNIFIED editor (reasoning + reply together), user rows replay.
+    act('edit', t('chat.edit_tooltip', 'Edit message'),
+        t('chat.edit_tooltip', 'Edit message'), function (i) {
+            openEditor(i, role);
+        });
     act('del', t('chat.delete_message', 'Delete'),
         t('chat.delete_message', 'Delete'), msgDelete);
     return box;
@@ -1219,20 +1201,29 @@ function msgRegenerate(idx) {
     _dc.submitUserMessage({ text: String(prev.content) });
 }
 
-function commitEditedInPlace(idx, field, text) {
-    // U74: assistant edits save ONTO the row (no truncation, no send) —
-    // the point is conditioning the NEXT generation's context. reasoning
-    // edits may empty the block (deliberate: remove it from the card);
-    // content edits keep the non-empty rule.
+function commitEditedInPlace(idx, contentVal, reasoningVal) {
+    // U74 + U75: assistant edits save ONTO the row (no truncation, no
+    // send) — the point is conditioning the NEXT generation's context.
+    // Diff-aware: only fields that actually CHANGED are written, the
+    // edited stamp lands only when something changed (opening the editor
+    // and pressing Save unchanged must NOT mark the message), and the
+    // view persists with a single render. reasoning may be emptied
+    // (deliberate: drop it from the card); content keeps non-empty.
     if (_streaming || !_conv) return false;
     var m = messageAt(idx);
     if (!m || m.role !== 'assistant') return false;
-    if (field === 'content' && !text.trim()) return false;
-    if (field === 'content') m.content = text;
-    else {
-        if (text.trim()) m.reasoning_content = text;
-        else delete m.reasoning_content;
+    var touched = false;
+    if (contentVal != null && contentVal !== String(m.content || '')) {
+        if (!contentVal.trim()) return false;   // empty reply = refuse save
+        m.content = contentVal; touched = true;
     }
+    if (reasoningVal != null &&
+        reasoningVal !== String(m.reasoning_content || '')) {
+        if (reasoningVal.trim()) m.reasoning_content = reasoningVal;
+        else delete m.reasoning_content;
+        touched = true;
+    }
+    if (!touched) return false;
     m.edited = new Date().toISOString();
     renderHistory();
     saveConv();
@@ -1260,17 +1251,17 @@ function visibleOrdinal(msgs, idx) {
     return -1;
 }
 
-function openEditor(idx, field) {
-    // U73 + U74: the inline editor. field='content' edits the message
-    // bubble (user: truncate-and-replay; assistant: in-place store edit),
-    // field='reasoning' edits the Thinking card's text in place. Textarea
-    // REPLACES what it edits (display:none), Save/Cancel under it,
-    // Enter=Save, Shift+Enter=break, Escape=Cancel.
+function openEditor(idx) {
+    // U73 + U75: ONE inline editor per message. Assistant rows get the
+    // UNIFIED form (user: 'just one Edit button for both the reply and
+    // thinking'): thinking textarea (when the row has reasoning) above
+    // the reply textarea, ONE Save/Cancel bar hugging the right edge of
+    // the input on the row's own side. User rows keep the single replay
+    // editor. Textareas REPLACE what they edit (display:none), Enter=
+    // Save, Shift+Enter=break, Escape=Cancel.
     if (_streaming || !_conv) return;
     var m = messageAt(idx);
-    if (!m) return;
-    if (field === 'content' && m.role !== 'user' && m.role !== 'assistant') return;
-    if (field === 'reasoning' && m.role !== 'assistant') return;
+    if (!m || (m.role !== 'user' && m.role !== 'assistant')) return;
     var root = _dc && _dc.shadowRoot;
     if (!root || typeof root.querySelectorAll !== 'function') return;
     var bubbles = root.querySelectorAll('.message-bubble');
@@ -1278,62 +1269,77 @@ function openEditor(idx, field) {
     var bub = bubbles[ord];
     var holder = bub && bub.parentElement;
     if (!holder) return;
-    var ta = holder.querySelector('.chat-native-edit');
-    if (ta) { ta.focus(); return; }           // one editor per message
-    if (field === 'reasoning') {
-        // edit the THINKING card, not the bubble
-        var card = holder.querySelector(':scope > .chat-native-thinking');
-        if (!card) return;
-        var body = card.querySelector('.chat-native-think-body');
-        ta = document.createElement('textarea');
-        ta.className = 'chat-native-edit reasoning';
-        ta.value = String((m.reasoning_content || (body && body.textContent) || ''));
-        ta.rows = Math.min(12, Math.max(3, ta.value.split('\n').length));
-        var bar = document.createElement('div');
-        bar.className = 'chat-native-edit-actions';
-        var saveB = mkBtn('save', t('chat.system_prompt.save', 'Save'));
-        var cancelB = mkBtn('', t('chat.edit_cancel', 'Cancel'));
-        bar.append(saveB, cancelB);
-        function doneR() { ta.remove(); bar.remove(); card.style.display = ''; }
-        saveB.addEventListener('click', function () {
-            var nv = ta.value;
-            doneR();
-            commitEditedInPlace(idx, 'reasoning', nv);
-        });
-        cancelB.addEventListener('click', doneR);
-        wireKeys(ta, saveB, doneR);
-        card.style.display = 'none';          // the editor replaces the card
-        holder.insertBefore(bar, bub);
-        holder.insertBefore(ta, bar);
-        focusEnd(ta);
-        return;
+    var liveTa = holder.querySelector('.chat-native-edit');
+    if (liveTa) { liveTa.focus(); return; }   // one editor per message
+    var ai = m.role === 'assistant';
+    var card = ai ? holder.querySelector(':scope > .chat-native-thinking') : null;
+    var nodes = [];                            // created, for teardown
+
+    function mkTa(cls, value, rows, labelKey) {
+        var ta = document.createElement('textarea');
+        ta.className = 'chat-native-edit' + (cls ? ' ' + cls : '');
+        ta.value = value;
+        ta.rows = rows;
+        if (labelKey) {
+            var lab = tf2(labelKey[0], labelKey[1]);
+            ta.setAttribute('aria-label', lab);
+            ta.placeholder = lab;
+        }
+        nodes.push(ta);
+        return ta;
     }
-    ta = document.createElement('textarea');
-    ta.className = 'chat-native-edit' + (m.role === 'assistant' ? ' ai' : '');
-    ta.value = String(m.content);
-    ta.rows = Math.min(10, Math.max(2, ta.value.split('\n').length));
-    var bar2 = document.createElement('div');
-    bar2.className = 'chat-native-edit-actions';
-    var saveB2 = mkBtn('save', t('chat.system_prompt.save', 'Save'));
-    var cancelB2 = mkBtn('', t('chat.edit_cancel', 'Cancel'));
-    function doneC() { ta.remove(); bar2.remove(); bub.style.display = ''; }
-    saveB2.addEventListener('click', function () {
-        var nv = ta.value;
-        if (!nv.trim()) return;               // empty content edit = no-op
-        doneC();
-        if (m.role === 'assistant') commitEditedInPlace(idx, 'content', nv);
-        else commitEdit(idx, nv);             // U45 truncate-and-replay
+
+    var taR = null;
+    var haveReasoning = ai && !!(m.reasoning_content ||
+        (card && String(card.querySelector('.chat-native-think-body')
+              ? card.querySelector('.chat-native-think-body').textContent : '').trim()));
+    if (haveReasoning) {
+        var bodyEl = card && card.querySelector('.chat-native-think-body');
+        var rv = String(m.reasoning_content || (bodyEl ? bodyEl.textContent : ''));
+        taR = mkTa('reasoning', rv, Math.min(12, Math.max(3, rv.split('\n').length)),
+            ['chat.thinking_label', 'Thinking']);
+    }
+    var taC = mkTa(ai ? 'ai' : '', String(m.content),
+        Math.min(10, Math.max(2, String(m.content).split('\n').length)));
+    var bar = document.createElement('div');
+    bar.className = 'chat-native-edit-actions' + (ai ? ' left' : '');
+    var saveB = mkBtn('save', t('chat.system_prompt.save', 'Save'));
+    var cancelB = mkBtn('', t('chat.edit_cancel', 'Cancel'));
+    bar.append(saveB, cancelB);
+    nodes.push(bar);
+
+    function done() {
+        nodes.forEach(function (n) { n.remove(); });
+        bub.style.display = '';
+        if (card) card.style.display = '';
+    }
+    saveB.addEventListener('click', function () {
+        if (!taC.value.trim()) return;        // empty reply = refuse (editor stays)
+        if (ai) {
+            // in-place; a fully-unchanged save commits nothing and marks
+            // nothing — close quietly
+            commitEditedInPlace(idx, taC.value, taR ? taR.value : null);
+            done();
+        } else {
+            done();
+            commitEdit(idx, taC.value);       // U45 truncate-and-replay
+        }
     });
-    cancelB2.addEventListener('click', doneC);
-    bar2.append(saveB2, cancelB2);
-    wireKeys(ta, saveB2, doneC);
-    bub.style.display = 'none';               // the editor REPLACES the bubble
-    holder.insertBefore(bar2, holder.querySelector('.chat-native-msg-actions'));
-    holder.insertBefore(ta, bar2);
-    focusEnd(ta);
+    cancelB.addEventListener('click', done);
+    nodes.forEach(function (n) {
+        if (n.tagName === 'TEXTAREA') wireKeys(n, saveB, done);
+    });
+    if (card) card.style.display = 'none';
+    bub.style.display = 'none';               // editor replaces the message
+    var anchor = holder.querySelector('.chat-native-msg-actions') || null;
+    if (ai && card) holder.insertBefore(bar, card);
+    else holder.insertBefore(bar, anchor);
+    if (taR) holder.insertBefore(taR, bar);
+    holder.insertBefore(taC, bar);
+    focusEnd(taR || taC);
 }
 
-function msgEdit(idx) { openEditor(idx, 'content'); }
+function msgEdit(idx) { openEditor(idx); }
 
 function tf2(key, fb) {
     var c = C();
@@ -1427,10 +1433,7 @@ function attachMessageActions(dc) {
         }
         if (txt) {
             if (!thinkEl) {
-                // U74: store-backed blocks get their idx -> the header's
-                // Edit affordance; live blocks have no row to edit yet
-                thinkEl = thinkingBlockEl(txt, isLive,
-                    isLive ? null : storeIdx);
+                thinkEl = thinkingBlockEl(txt, isLive);
                 if (thinkEl) holder.insertBefore(thinkEl, b);
             } else {
                 var tb = thinkEl.querySelector('.chat-native-think-body');
@@ -1447,11 +1450,6 @@ function attachMessageActions(dc) {
         var existing = holder.querySelector(':scope > .chat-native-msg-actions');
         if (storeIdx === undefined) {     // component-local row (no store twin)
             if (existing) existing.remove();
-            var tl0 = holder.querySelector(':scope > .chat-native-thinking');
-            if (tl0 && !tl0.dataset.idx) {   // stale store-less card
-                var eb0 = tl0.querySelector('.chat-native-think-edit');
-                if (eb0) eb0.remove();
-            }
             continue;
         }
         var role = (ms[storeIdx] || {}).role;
@@ -1602,8 +1600,13 @@ function applyShadowTheme(dc) {
         // rules must name both classes (0,2,0) to outrank
         // .ai-message-text{color:#000} — one-class rules lost before.
         '.message-bubble { color: var(--ink, #e6edf3); }',
+        // U75 #3: alternating grounds. --field vs --panel are visually
+        // identical in the day skin (measured U43: #f2f2f2 on both), so
+        // the USER side rides a deliberate accent tint — distinct from the
+        // assistant's --panel in every skin, quiet in both.
         '.message-bubble.user-message-text { color: var(--ink, #e6edf3);',
-        '  background: var(--field, #1b2330); }',
+        '  background: color-mix(in srgb, var(--accent, #4c8dff) 12%,',
+        '    var(--field, #1b2330)); }',
         '.message-bubble.ai-message-text { color: var(--ink, #e6edf3);',
         '  background: var(--panel, #10151d); }',
         '.message-bubble pre, .message-bubble code { color: var(--ink, #e6edf3);',
@@ -1643,17 +1646,12 @@ function applyShadowTheme(dc) {
         '  color: var(--dim, #8b98ab); background: transparent;',
         '  font-weight: 500; font-size: 12px; }',
         '.chat-native-thinking summary::-webkit-details-marker { display: none; }',
-        // U74: quiet Edit affordance inside the thinking header (hover)
-        '.chat-native-thinking summary .chat-native-think-edit {',
-        '  display: none; background: none; border: 0; padding: 0 4px;',
-        '  font: inherit; font-size: 11px; color: var(--accent, #4c8dff);',
-        '  cursor: pointer; border-radius: 4px; text-transform: none;',
-        '  letter-spacing: 0; }',
-        '.chat-native-thinking:hover summary .chat-native-think-edit,',
-        '.chat-native-thinking summary:focus-within .chat-native-think-edit {',
-        '  display: inline; }',
         // U74: Edited badge in the meta track (space only when set)
-        '.chat-native-edited { font-size: 10px; color: var(--dim, #8b98ab);',
+        // U75 #1: the mark must NOT hide with the track — visibility is
+        // per-element, the child opts back in (user: 'should not
+        // disappear when mouse is not hovering')
+        '.chat-native-edited { visibility: visible; font-size: 10px;',
+        '  color: var(--dim, #8b98ab);',
         '  border: 1px solid var(--edge); border-radius: 999px;',
         '  padding: 0 7px; line-height: 16px; margin-right: 4px;',
         '  white-space: nowrap; }',
@@ -1681,8 +1679,13 @@ function applyShadowTheme(dc) {
         '  border-radius: 10px; padding: 8px 10px; font: inherit;',
         '  font-size: 14px; line-height: 1.4; resize: vertical;',
         '  min-height: 60px; margin-top: 10px; }',
-        '.chat-native-edit-actions { align-self: flex-end; display: flex;',
-        '  gap: 6px; margin: 4px 0 2px; }',
+        // U75 #2: the bar spans the editor's own width and hugs its RIGHT
+        // edge — 'under the input, right corner' on BOTH sides of the
+        // thread (flex-end for user, .left tracks assistant editors)
+        '.chat-native-edit-actions { display: flex; gap: 6px;',
+        '  justify-content: flex-end; width: 62%; margin: 4px 0 2px;',
+        '  align-self: flex-end; }',
+        '.chat-native-edit-actions.left { align-self: flex-start; }',
         '.chat-native-edit-actions button { background: none;',
         '  border: 1px solid var(--edge); color: var(--ink, #e6edf3);',
         '  font-size: 11px; padding: 2px 12px; border-radius: 6px;',
