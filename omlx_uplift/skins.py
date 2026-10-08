@@ -82,18 +82,26 @@ COLOR_TOKENS = frozenset({
     "bg", "card", "row2", "field", "panel", "edge", "ink", "dim", "accent",
     "chart-1", "chart-2", "grid", "heat", "frame", "red", "good", "warn",
     "bad", "hdr-ink", "hdr-edge", "hdr-hover",
+    # U82: chat row-band grounds (skins may flatten them to == card)
+    "chat-band-user", "chat-band-ai",
 })
 FONT_TOKENS = frozenset({"mono", "sans"})
 NUMERIC_TOKENS = frozenset({"hdr-weight"})
+# U82 shape knob: ONE radius for every rectangular box (bubbles, inputs,
+# selects, menus). Plain px, bounded — a skin saying 'soft' or a 400px
+# blob is a crate bug, not a style.
+SIZE_TOKENS = frozenset({"radius"})
 TOKEN_KIND = {**{k: "color" for k in COLOR_TOKENS},
               **{k: "font" for k in FONT_TOKENS},
-              **{k: "weight" for k in NUMERIC_TOKENS}}
+              **{k: "weight" for k in NUMERIC_TOKENS},
+              **{k: "size" for k in SIZE_TOKENS}}
 
 _HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 _FUNC_RE = re.compile(
     r"^(?:rgb|rgba|hsl|hsla)\(\s*[\d%.a-zA-Z,\s/]+\)\s*$")
 _NAMED_RE = re.compile(r"^(?:[a-z]+|transparent|currentcolor|currentColor)$")
 _WEIGHT_RE = re.compile(r"^(?:[1-9]00|normal|bold)$")
+_SIZE_RE = re.compile(r"^(?:0|[1-9]|[1-2][0-9]|3[0-2])px$")
 _FONT_RE = re.compile(r"^[A-Za-z0-9 ,\"'._-]+$")
 
 
@@ -106,6 +114,8 @@ def _valid_token(name: str, value: str) -> bool:
         return bool(_FONT_RE.match(value)) and len(value) <= 300
     if kind == "weight":
         return bool(_WEIGHT_RE.match(value))
+    if kind == "size":
+        return bool(_SIZE_RE.match(value))
     return False
 
 
