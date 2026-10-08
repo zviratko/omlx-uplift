@@ -63,6 +63,30 @@ function check(id, label, on) {
     return lb;
 }
 function gid(id) { return document.getElementById(id); }
+// U48: one Advanced section builder shared by the panels (classic keeps
+// external-endpoint as a first-class mode; the user explicitly asked for
+// it under a PROMINENT Advanced section instead of the old 11px <details>
+// squeezed beside the batch checkboxes — recorded deviation from classic).
+// Open/closed is a layout preference -> localStorage (board doctrine).
+var ADV_LS = 'omlx-uplift-bench-advanced';
+function advancedSection(children) {
+    var adv = el('details', 'bench-advanced');
+    var sum = el('summary', null,
+        t('bench.config.advanced_options', 'Advanced options'));
+    var chev = el('span', 'bench-adv-chev', '▾');
+    sum.appendChild(chev);
+    adv.appendChild(sum);
+    var body = el('div', 'bench-adv-body');
+    (children || []).forEach(function (c) { body.appendChild(c); });
+    adv.appendChild(body);
+    var open = null;
+    try { open = localStorage.getItem(ADV_LS); } catch (_) {}
+    adv.open = open === '1';   // default closed (classic's details shape)
+    adv.addEventListener('toggle', function () {
+        try { localStorage.setItem(ADV_LS, adv.open ? '1' : '0'); } catch (_) {}
+    });
+    return adv;
+}
 function checkedVals(box) {
     return box ? Array.prototype.map.call(box.querySelectorAll('input:checked'),
         function (i) { return Number(i.value); }) : [];
@@ -365,20 +389,6 @@ var TP = {
             lb.append(cb, document.createTextNode(' ' + bs + '×'));
             bsBox.appendChild(lb);
         });
-        var adv = el('details', 'bench-advanced');
-        adv.appendChild(el('summary', null, t('bench.config.advanced_options', 'Advanced options')));
-        var advBody = el('div', 'bench-adv-body');
-        advBody.append(
-            check('bench-tp-ane', t('bench.config.ane_aligned_prompt', 'ANE-aligned prompts (+1 token)'), false),
-            check('bench-tp-lm', t('bench.config.force_lm_engine', 'Force mlx-lm engine'), false),
-            check('bench-tp-ext', t('bench.config.external', 'Use external OpenAI API endpoint'), false),
-            check('bench-tp-upload', t('uplift.bench.upload_results', 'Upload results to community leaderboard'), false),
-            el('p', 'native-stub-note', t('uplift.bench.upload_hint',
-                'Off by default: a native run never posts to omlx.ai unless you check this.')),
-            el('p', 'native-stub-note', t('bench.config.batch_hint', 'Batch tests use pp1024 / tg128')));
-        adv.appendChild(advBody);
-        row3.append(labeled(t('bench.config.batch_tests', 'Continuous Batching Tests'), bsBox), adv);
-
         var extRow = el('div', 'bench-row bench-external');
         extRow.id = 'bench-tp-ext-row'; extRow.hidden = true;
         var eurl = el('input'); eurl.id = 'bench-tp-ext-url'; eurl.placeholder = t('bench.config.external_base_url', 'Base URL');
@@ -387,6 +397,21 @@ var TP = {
         extRow.append(labeled(t('bench.config.external_base_url', 'Base URL'), eurl),
                       labeled(t('bench.config.external_api_key', 'API key'), ekey),
                       labeled(t('bench.config.external_model', 'Model'), emod));
+
+        // U48: full-width section; external inputs live INSIDE it now (the
+        // old form kept the toggle in the details but rendered its inputs
+        // at form level — the 'visible while you were not looking' half of
+        // the defect)
+        var adv = advancedSection([
+            check('bench-tp-ane', t('bench.config.ane_aligned_prompt', 'ANE-aligned prompts (+1 token)'), false),
+            check('bench-tp-lm', t('bench.config.force_lm_engine', 'Force mlx-lm engine'), false),
+            check('bench-tp-ext', t('bench.config.external', 'Use external OpenAI API endpoint'), false),
+            extRow,
+            check('bench-tp-upload', t('uplift.bench.upload_results', 'Upload results to community leaderboard'), false),
+            el('p', 'native-stub-note', t('uplift.bench.upload_hint',
+                'Off by default: a native run never posts to omlx.ai unless you check this.')),
+            el('p', 'native-stub-note', t('bench.config.batch_hint', 'Batch tests use pp1024 / tg128'))]);
+        row3.append(labeled(t('bench.config.batch_tests', 'Continuous Batching Tests'), bsBox));
 
         var actions = el('div', 'bench-actions');
         var runBtn = el('button', 'btn btn-primary', t('bench.config.run_button', 'Run Benchmark'));
@@ -397,7 +422,7 @@ var TP = {
         cancelBtn.addEventListener('click', function () { self.cancel(); });
         actions.append(runBtn, cancelBtn);
 
-        f.append(row1, row2, row3, extRow, actions);
+        f.append(row1, row2, row3, adv, actions);
         requestAnimationFrame(function () {
             var ext = gid('bench-tp-ext');
             if (ext) ext.addEventListener('change', function () {
