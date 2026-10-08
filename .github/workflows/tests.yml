@@ -8,7 +8,14 @@ name: tests
 
 on:
   push:
-    branches: [main, feat/native-bench-chat]
+    # NAT batch: feature-branch CI is paused (user request 2026-10-08 —
+    # red emails while the branch intentionally lands commits that only
+    # run fully on the macOS dev box). RE-ENABLE by adding
+    # `feat/native-bench-chat` back to this list once the branch suite
+    # is CI-green locally with `unset OMLX_* ; python -m pytest` on a
+    # machine without ~/.omlx (two known branch-only failures pinned in
+    # the card note; main stays protected meanwhile).
+    branches: [main]
     # REL-1: a pushed release tag must prove itself — the tagged commit
     # runs CI too, so `brew install` only ever builds something green.
     tags: ['v*']
