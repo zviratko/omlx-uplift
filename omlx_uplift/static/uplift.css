@@ -1768,6 +1768,13 @@ label.se-row.pending-restart > .se-ctl > select {
    regression (user 2026-09-21). overflow-x:auto stays as the live-value
    growth fallback (metric-now widening squeezes the row, never the layout). */
 .card h2 .ts-row { margin: 0 0 0 auto; max-width: 100%; min-width: 0; }
+/* U52: any header that carries a chip row gets the metric-card wrap rule
+   (.metric-card h2 does since 2026-09-21). Without it, a long inline
+   live-value (Memory & cache) squeezes the nowrap band to a ~2px
+   overflow-scroll sliver: collapse logic says 'chips fit the card'
+   (they do — on a line of their own) but the chips were unreachable.
+   Wrapping puts the row under the title line; it never clips. */
+.card h2:has(.ts-row) { flex-wrap: wrap; }
 .card h2 .ts-chip { padding: 4px 5px; }   /* header band is tight — slimmer chips */
 .ts-chip { background: transparent; border: 0; border-right: 1px solid var(--edge);
     color: var(--dim); font: 600 10px/1 var(--mono); letter-spacing: .08em;
