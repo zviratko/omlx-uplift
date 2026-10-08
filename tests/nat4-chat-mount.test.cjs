@@ -215,6 +215,46 @@ test('shapeRequest strips an orphan user turn left by a failed send', async () =
                      'orphan dropped, exactly one user turn ships');
 });
 
+test('thinking modes map to classic wire fields (enable_thinking / thinking_budget)',
+     async () => {
+    const convs = [{ id: 'c1', title: 'T', model: 'M1', systemPrompt: '',
+                     messages: [] }];
+    const h = await booted(makeHarness({ convs }));
+    const M = h.win.UpliftNativeChat;
+    M.mount();
+    await booted(h);
+    const st = M._state();
+    async function bodyFor(thinking, budget) {
+        st.conv.thinking = thinking; st.conv.thinkingBudget = budget;
+        const d = await M.shapeRequest({ body: { messages: [] }, headers: {} });
+        return (typeof d.body === 'string' ? JSON.parse(d.body) : d.body);
+    }
+    let b = await bodyFor('auto', null);
+    assert.ok(!('enable_thinking' in b) && !('thinking_budget' in b),
+              'auto ships nothing — model/template default (classic parity)');
+    b = await bodyFor('off', null);
+    assert.equal(b.enable_thinking, false);
+    assert.ok(!('thinking_budget' in b));
+    b = await bodyFor('on', null);
+    assert.equal(b.enable_thinking, true);
+    b = await bodyFor('limit', 2048);
+    assert.equal(b.enable_thinking, true);
+    assert.equal(b.thinking_budget, 2048);
+    b = await bodyFor('limit', null);
+    assert.equal(b.enable_thinking, true);
+    assert.ok(!('thinking_budget' in b), 'no budget -> unlimited thinking');
+});
+
+test('shapeResponse accumulates reasoning_content for the thinking panel', () => {
+    const M = makeHarness().win.UpliftNativeChat;
+    assert.equal(M._state().thinkingLive, '');
+    M.shapeResponse({ choices: [{ delta: { reasoning_content: 'step 1 ' } }] });
+    M.shapeResponse({ choices: [{ delta: { reasoning_content: 'step 2' } }] });
+    M.shapeResponse({ choices: [{ delta: { content: 'answer' } }] });
+    assert.equal(M._state().thinkingLive, 'step 1 step 2',
+                 'reasoning deltas buffer while content passes through');
+});
+
 test('shapeResponse: content passes, thinking/tool deltas silent in 3/6', () => {
     const M = makeHarness().win.UpliftNativeChat;
     assert.deepEqual(M.shapeResponse({ choices: [{ delta: { content: 'tok' } }] }),

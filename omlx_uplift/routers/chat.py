@@ -79,6 +79,12 @@ def _clean_message(m: dict) -> dict:
         content = " ".join(str(p.get("text", "")) for p in content
                            if isinstance(p, dict) and p.get("type") == "text")
     out = {"role": role, "content": str(content or "")[:200_000]}
+    # 4/6: thinking persists per assistant message (classic stores
+    # reasoning_content the same way; live panel re-shows the last turn's)
+    rc = m.get("reasoning_content")
+    # classic's hasVisibleThinking: whitespace-only is not thinking
+    if role == "assistant" and isinstance(rc, str) and rc.strip():
+        out["reasoning_content"] = rc[:200_000]
     if m.get("created_at"):
         out["created_at"] = str(m["created_at"])[:40]
     return out

@@ -2117,3 +2117,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
   color: var(--ink); padding: 4px 6px; }
 .chat-native-bar #chat-native-sys { flex: 1 1 180px; min-width: 140px; }
 .chat-native-bar .btn { font-size: 11px; padding: 4px 8px; }
+
+/* NAT-4 (4/6): live thinking panel (deep-chat has none — hybrid, card Rules) */
+.chat-native-think { border: 1px solid var(--edge); background: var(--panel);
+  padding: 4px 8px; font-size: 11px; }
+.chat-native-think summary { cursor: pointer; color: var(--dim);
+  font-weight: 600; text-transform: uppercase; font-size: 10px;
+  letter-spacing: 0.04em; }
+.chat-native-think-body { margin: 4px 0 0; white-space: pre-wrap;
+  color: var(--dim); font-size: 11px; max-height: 180px; overflow: auto; }

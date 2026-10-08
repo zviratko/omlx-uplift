@@ -78,6 +78,23 @@ def test_message_cleaning(client):
     assert len(msgs[2]["content"]) == 200_000        # per-message cap
 
 
+def test_reasoning_content_persists(client):
+    # 4/6: thinking survives reload like classic's per-message reasoning
+    conv = _conv(cid="cr", messages=[
+        {"role": "user", "content": "why?", "reasoning_content": "user spoof"},
+        {"role": "assistant", "content": "because", "reasoning_content": " hmm "},
+    ])
+    assert client.post("/uplift/api/chat/history", json=conv).status_code == 200
+    msgs = client.get("/uplift/api/chat/history/cr").json()["messages"]
+    assert msgs[1]["reasoning_content"] == " hmm "
+    assert "reasoning_content" not in msgs[0]      # assistant-only (classic)
+    conv2 = _conv(cid="cr2", messages=[{"role": "assistant", "content": "x",
+                                        "reasoning_content": " "}])
+    client.post("/uplift/api/chat/history", json=conv2)
+    m2 = client.get("/uplift/api/chat/history/cr2").json()["messages"]
+    assert "reasoning_content" not in m2[0]        # blank reasoning dropped
+
+
 def test_message_and_title_caps(client):
     conv = _conv(cid="c3", n=250)
     conv["title"] = "long " * 40

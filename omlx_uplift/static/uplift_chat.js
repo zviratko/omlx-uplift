@@ -29,7 +29,8 @@
 'use strict';
 
 var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
-    _models = [], _vendorPromise = null, _streaming = false;
+    _models = [], _vendorPromise = null, _streaming = false,
+    _thinkLive = '';   // reasoning deltas of the in-flight turn (live-only)
 
 function W() { return (typeof window !== 'undefined') ? window : null; }
 function C() { return W() && W().UpliftCore ? W().UpliftCore : null; }
@@ -60,7 +61,13 @@ function gid(id) { return document.getElementById(id); }
 function newConv() {
     return { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
              title: t('chat.new_chat', 'New Chat'),
-             model: (_models[0] || {}).id || '', systemPrompt: '', messages: [] };
+             model: (_models[0] || {}).id || '', systemPrompt: '',
+             // thinking: 'auto'|'off'|'on'|'limit' — classic's select, same
+             // wire semantics (openai_models.py: enable_thinking,
+             // thinking_budget). Live-only: the history store keeps
+             // model/systemPrompt/messages; thinking settings re-default
+             // to auto on reload (stated on the NAT-4 card, 4/6).
+             thinking: 'auto', thinkingBudget: null, messages: [] };
 }
 function saveConv() {
     if (!_conv) return;
@@ -83,6 +90,19 @@ function saveConv() {
     refreshConvList();
 }
 function renderHistory() {
+    // classic persists thinking per message; the single live panel shows
+    // the most recent assistant turn's (older ones stay in the store —
+    // per-message bubbles inside deep-chat need wrappers the bundle does
+    // not expose; stated limitation on the card)
+    var ms = (_conv && _conv.messages) || [];
+    _thinkLive = '';
+    for (var i = ms.length - 1; i >= 0; i--) {
+        if (ms[i].role === 'assistant') {
+            _thinkLive = String(ms[i].reasoning_content || '');
+            break;
+        }
+    }
+    setTimeout(paintThinking, 0);
     if (!_dc) return;
     _dc.history = (_conv.messages || []).filter(function (m) { return m.content; })
         .map(function (m) {
@@ -161,6 +181,8 @@ async function shapeRequest(d) {
     d.headers['Authorization'] = 'Bearer ' + _key;
     _streaming = true;   // fires on every submit path (button, enter,
                          // programmatic) — the reliable streaming start
+    _thinkLive = '';     // new turn: reasoning panel restarts empty
+    if (typeof paintThinking === 'function') setTimeout(paintThinking, 0);
     var raw = Array.isArray(d.body) ? d.body
         : (d.body && d.body.messages) ? d.body.messages : [];
     var files = [], lastUser = '';
@@ -204,6 +226,15 @@ async function shapeRequest(d) {
     }
     msgs.push(cur);
     var body = { model: (_conv && _conv.model) || '', messages: msgs, stream: true };
+    var mode = (_conv && _conv.thinking) || 'auto';
+    if (mode === 'off') body.enable_thinking = false;
+    else if (mode === 'on') body.enable_thinking = true;
+    else if (mode === 'limit') {
+        body.enable_thinking = true;
+        var b = parseInt(_conv.thinkingBudget, 10);
+        if (isFinite(b) && b >= 0) body.thinking_budget = b;
+    }
+    // 'auto': send NOTHING — model/template default (classic parity)
     // NAT-6 S1 proven trap: deep-chat stringifies the interceptor body on
     // the TEXT path only; the FILES path sends it raw -> omlx sees
     // multipart FormData and 422s. Files path must hand a JSON string and
@@ -221,9 +252,28 @@ function shapeResponse(r) {
     if (!r || typeof r !== 'object') return { text: '' };
     var ch = (r.choices && r.choices[0]) || {};
     var delta = ch.delta || ch.message || {};
-    // thinking + tool deltas: silent in 3/6 (render lands in 4/6, card
-    // feature 4); content path is exactly the S1 raw3 proof
+    // reasoning arrives as delta.reasoning_content (live-verified against
+    // the dev keg, 4/6 drill); deep-chat has NO thinking support (zero
+    // 'thinking' tokens in the bundle) -> hybrid: we buffer it and render
+    // our own collapsible panel above the component (card Rules allow
+    // this; silent feature drop does not). tool_calls still land in 5/6.
+    var rc = delta.reasoning_content;
+    if (typeof rc === 'string' && rc) {
+        _thinkLive += rc;
+        paintThinking();
+    }
     return { text: delta.content || '' };
+}
+
+function paintThinking() {
+    var panel = gid('chat-native-think');
+    if (!panel) return;
+    // classic hides the whole thinking block when the model produced no
+    // visible reasoning (hasVisibleThinking) — same rule here: no text,
+    // no panel, regardless of the mode selection
+    var body = panel.querySelector('.chat-native-think-body');
+    if (body) body.textContent = _thinkLive;
+    panel.hidden = !_thinkLive || !_thinkLive.trim();
 }
 
 // ---- vendor (ESM, loaded once at mount, never on the embed path) ---------
@@ -283,6 +333,31 @@ function toolbar() {
         b.addEventListener('click', fn);
         return b;
     }
+    var think = el('select'); think.id = 'chat-native-think-mode';
+    [['auto', 'chat.thinking_mode.auto', 'Auto'],
+     ['on', 'chat.thinking_mode.on_unlimited', 'On (Unlimited)'],
+     ['limit', 'chat.thinking_mode.on_limited', 'On (Limit)'],
+     ['off', 'chat.thinking_mode.off', 'Off']].forEach(function (o) {
+        var e2 = el('option', null, t(o[1], o[2])); e2.value = o[0];
+        think.appendChild(e2);
+    });
+    think.value = (_conv && _conv.thinking) || 'auto';
+    var budget = el('input'); budget.id = 'chat-native-think-budget';
+    budget.type = 'number'; budget.min = '0'; budget.step = '1024';
+    budget.placeholder = t('modal.model_settings.thinking_budget_placeholder',
+                           'e.g. 4096');
+    budget.value = (_conv && _conv.thinkingBudget) || '';
+    budget.hidden = think.value !== 'limit';
+    function saveThinking() {
+        if (!_conv) return;
+        _conv.thinking = think.value;
+        var b = parseInt(budget.value, 10);
+        _conv.thinkingBudget = (isFinite(b) && b >= 0) ? b : null;
+        budget.hidden = think.value !== 'limit';
+        saveConv();   // fields themselves are live-only (store drops them)
+    }
+    think.addEventListener('change', saveThinking);
+    budget.addEventListener('change', saveThinking);
     var copy = toolBtn(t('chat.copy_tooltip', 'Copy'),
                        t('uplift.chat.copy_last', 'Copy last reply'),
                        function () {
@@ -344,7 +419,7 @@ function toolbar() {
             refreshConvList();
         } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
     });
-    bar.append(list, newBtn, sel, sys, copy, regen, edit, del);
+    bar.append(list, newBtn, sel, sys, think, budget, copy, regen, edit, del);
     return bar;
 }
 
@@ -406,6 +481,14 @@ function mount() {
             : newConv();
         var b = gid('chat-native-boot'); if (b) b.remove();
         wrap.insertBefore(toolbar(), wrap.firstChild);
+        var tp = el('details'); tp.id = 'chat-native-think';
+        tp.className = 'chat-native-think'; tp.hidden = true; tp.open = true;
+        var th = el('summary'); th.textContent = t('chat.thinking_label', 'Thinking');
+        var tb = el('pre'); tb.className = 'chat-native-think-body';
+        tp.append(th, tb);
+        var dcHost = gid('chat-native-dc');
+        if (!dcHost) { dcHost = el('div'); dcHost.id = 'chat-native-dc'; }
+        wrap.append(tp, dcHost);
         // summary rows carry no messages — open the latest conversation
         // fully before rendering (the picker is summaries by design)
         return _convs.length
@@ -434,8 +517,12 @@ function mount() {
             var role = m.role === 'ai' ? 'assistant' : (m.role || 'user');
             if (role === 'assistant') _streaming = false;
             if (_conv) {
-                _conv.messages.push({ role: role,
-                    content: typeof m.text === 'string' ? m.text : '' });
+                var row = { role: role,
+                    content: typeof m.text === 'string' ? m.text : '' };
+                if (role === 'assistant' && _thinkLive) {
+                    row.reasoning_content = _thinkLive;  // persisted (4/6)
+                }
+                _conv.messages.push(row);
                 if (role === 'user' && _conv.messages.filter(function (x) {
                         return x.role === 'user'; }).length === 1) {
                     _conv.title = String(m.text || '').slice(0, 48)
@@ -459,6 +546,7 @@ function mount() {
             // shapeRequest, proven live 2026-10-08; popping here was
             // tried first and lost typed input on transient errors.
             _streaming = false;
+            paintThinking();
         };
         // un-wedge watch: abort/error before the first chunk removes the
         // loading bubble WITHOUT any onMessage (proven in bundle: stop
@@ -479,7 +567,7 @@ function mount() {
                 _watch = 0;
             else if (++_watch >= 3) _streaming = false;
         }, 700);
-        wrap.appendChild(dc);
+        gid('chat-native-dc').appendChild(dc);
         renderHistory();
         // bounded shadow-theme wait: deep-chat upgrades async; if it never
         // does (stub env / broken vendor) stop after ~6s, don't spin
@@ -510,5 +598,6 @@ return { mount: mount, isMounted: function () { return _mounted; },
          newConv: newConv, migrateLegacy: migrateLegacy,
          _state: function () { return { conv: _conv, convs: _convs,
                                         models: _models,
-                                        streaming: _streaming }; } };
+                                        streaming: _streaming,
+                                        thinkingLive: _thinkLive }; } };
 });
