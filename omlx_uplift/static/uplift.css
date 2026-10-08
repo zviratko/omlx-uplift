@@ -2097,7 +2097,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .acc-group-tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
 .acc-task { border: 1px solid var(--edge); padding: 8px; cursor: pointer; user-select: none; }
 .acc-task.on { border-color: var(--accent); background: var(--panel); }
-.acc-task-name { font-size: 12px; font-weight: 600; }
+.acc-task-name { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+/* MTEB task names are single unbreakable CamelCase tokens
+   (CzechSoMeSentimentClassification.v2): without this they overflow the
+   150px track and paint over the neighbouring card (browser check
+   2026-10-08). */
 .acc-task-desc { font-size: 10px; color: var(--dim); min-height: 12px; margin: 2px 0 4px; }
 .acc-task select { width: 100%; font-size: 10px; background: var(--field);
   border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px; }
