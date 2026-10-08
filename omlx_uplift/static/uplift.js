@@ -315,7 +315,11 @@ function showEmbedPage(tab, sub) {
         if (host) {
             host.hidden = false;
             host.style.display = '';
-            if (tab === 'bench') UpliftNativeBench.mount();
+            // U56: mount() alone ignores WHICH bench page the nav picked —
+            // it is a no-op once mounted, so BENCH ▾ → Intelligence never
+            // switched panels (each embed sub had its own card; native
+            // has one host + subtab strip). Drive the strip from `sub`.
+            if (tab === 'bench') { UpliftNativeBench.mount(); UpliftNativeBench.showSub(sub); }
             else UpliftNativeChat.mount();
         }
         return;

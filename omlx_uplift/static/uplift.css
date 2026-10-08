@@ -2135,9 +2135,22 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* U51: task cards are keyboard-operable now (role=button); give them the
    same focus ring language the inputs use */
 .acc-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.acc-group { border: 1px solid var(--edge); background: var(--panel);
+    padding: 8px 10px 10px; margin-top: 8px; }   /* U58: one boxed
+    category — the caption used to float over bare page ground (user:
+    groups should read together); --panel is the header-band shade that
+    every skin defines against --card */
+.acc-group .bench-label { margin-bottom: 6px; }
 .acc-group-tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
-.acc-task { border: 1px solid var(--edge); padding: 8px; cursor: pointer; user-select: none; }
-.acc-task.on { border-color: var(--accent); background: var(--panel); }
+/* U57: grid rows stretch cards to equal height but the plain-block card
+   left each dropdown directly under its description — 2-line-desc
+   neighbours had dropdowns ~14px apart. Column flex + auto margin pins
+   every dropdown to the same baseline in the row. */
+.acc-task { border: 1px solid var(--edge); padding: 8px; cursor: pointer; user-select: none;
+    display: flex; flex-direction: column; background: var(--card); }
+/* U58: .on used to fill var(--panel) — invisible inside a --panel group
+   box; --row2 is the alternation shade, distinct on dark AND day */
+.acc-task.on { border-color: var(--accent); background: var(--row2); }
 .acc-task-name { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 /* MTEB task names are single unbreakable CamelCase tokens
    (CzechSoMeSentimentClassification.v2): without this they overflow the
@@ -2145,7 +2158,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    2026-10-08). */
 .acc-task-desc { font-size: 10px; color: var(--dim); min-height: 12px; margin: 2px 0 4px; }
 .acc-task select { width: 100%; font-size: 10px; background: var(--field);
-  border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px; }
+  border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px;
+  margin-top: auto; }   /* U57: pin dropdowns to one row baseline */
 .acc-queue { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
 .acc-queue-item { display: flex; justify-content: space-between; align-items: center;
   border: 1px solid var(--edge); padding: 3px 8px; }
