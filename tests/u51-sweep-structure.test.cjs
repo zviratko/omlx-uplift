@@ -107,6 +107,10 @@ test('U51: ACC task cards are keyboard buttons; size-pick selects the card', asy
     assert.equal(card.getAttribute('tabindex'), '0');
     assert.equal(card.getAttribute('aria-pressed'), 'false');
     const sizeSel = card.children.find(c => c.tagName === 'select');
+    // U53: the size dropdown is NEVER disabled — a disabled control eats
+    // the first click (it reaches neither dropdown nor card); picking a
+    // value implies selecting the task
+    assert.equal(sizeSel.disabled, false, 'size select operable on unselected card');
     // the classic key carries '{count}' INSIDE; the mirror must fill it
     const fullOpt = sizeSel.children.find(o => o.value === '0');
     assert.equal(fullOpt.textContent, 'Full (14,042)');

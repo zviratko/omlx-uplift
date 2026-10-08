@@ -30,6 +30,8 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 'use strict';
 
+var CHAT_FLOOR = 160,      // U54: min deep-chat height (input stays usable)
+    CHAT_BOTTOM_GAP = 12;  // host padding + breathing room under dc
 var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _models = [], _vendorPromise = null, _streaming = false,
     _thinkLive = '',   // reasoning deltas of the in-flight turn (live-only)
@@ -689,6 +691,32 @@ function nativeHandler(_componentBody, signals) {
     });
 }
 
+// U54: deep-chat takes exactly the viewport left under the toolbar +
+// thinking panel (floored so the input area stays usable on tiny
+// windows). Called on mount, resize, and whenever the chrome above
+// changes height (ResizeObserver on the toolbar and think panel).
+function fitHeight(dc) {
+    var el = dc || _dc;
+    if (!el || typeof el.getBoundingClientRect !== 'function') return;
+    var r = el.getBoundingClientRect();
+    if (!isFinite(r.top)) return;
+    var h = Math.max(CHAT_FLOOR,
+        Math.floor((window.innerHeight || 0) - r.top - CHAT_BOTTOM_GAP));
+    if (el.style.height !== h + 'px') el.style.height = h + 'px';
+}
+function observeChatChrome(dc) {
+    if (!window.ResizeObserver) {
+        window.addEventListener('resize', function () { fitHeight(dc); });
+        return;
+    }
+    var ro = new ResizeObserver(function () { fitHeight(dc); });
+    var bar = gid('chat-native-bar');
+    if (bar) ro.observe(bar);
+    var tp = gid('chat-native-think');
+    if (tp) ro.observe(tp);
+    window.addEventListener('resize', function () { fitHeight(dc); });
+}
+
 function paintThinking() {
     var panel = gid('chat-native-think');
     if (!panel) return;
@@ -767,7 +795,7 @@ function readGenerationInputs() {
 }
 
 function toolbar() {
-    var bar = el('div', 'chat-native-bar');
+    var bar = el('div', 'chat-native-bar'); bar.id = 'chat-native-bar';
     var list = el('select'); list.id = 'chat-native-convs';
     list.addEventListener('change', function () {
         if (list.value) openConv(list.value).catch(function (e) {
@@ -1412,11 +1440,12 @@ function mount() {
     }).then(function () {
         var dc = document.createElement('deep-chat');
         _dc = dc;
-        // U44: height was a 62vh guess; the embed iframe this replaces used
-        // calc(100vh - 210px) (uplift.css .embed-frame). Same reference
-        // minus OUR toolbar row (~36px) so the chat fills the card at any
-        // viewport. Width comes from CSS (deep-chat :host is 320px).
-        dc.style.height = 'calc(100vh - 246px)';
+        // U44: width comes from CSS (deep-chat :host is 320px).
+        // U54: height was a fixed calc(100vh - 246px) budget — it broke
+        // the moment the toolbar wrapped (4 rows here) or the thinking
+        // panel showed; the input slid below the fold. fitHeight() reads
+        // the real chrome instead of guessing it.
+        fitHeight(dc);
         // 5/6: unified connect.handler (native loop). connect MUST be
         // assigned before the element is appended (spike: handler never
         // fires otherwise); url+stream kept as the component's declared
@@ -1495,6 +1524,8 @@ function mount() {
             else if (++_watch >= 3) _streaming = false;
         }, 700);
         gid('chat-native-dc').appendChild(dc);
+        observeChatChrome(dc);
+        fitHeight(dc);
         renderHistory();
         // bounded shadow-theme wait: deep-chat upgrades async; if it never
         // does (stub env / broken vendor) stop after ~6s, don't spin

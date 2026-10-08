@@ -2161,7 +2161,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    Inline host styles beat :host rules; deep-chat owns its own padding,
    so no card chrome is duplicated here (embed-frame is the reference). */
 #chat-native-dc deep-chat { display: block; width: 100%; border: 0;
-    min-height: 480px; background: var(--card, #141a24); }
+    /* U54: JS fitHeight() clamps to the real chrome above; this floor
+       must match CHAT_FLOOR in uplift_chat.js or it re-introduces the
+       scroll on short viewports. */
+    min-height: 160px; background: var(--card, #141a24); }
 .chat-native-bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: flex-end; }
 /* U45: captioned control groups (classic sidebar section mirror). The
    toolbar was a single row of unlabeled bare controls; every select/input
@@ -2177,13 +2180,30 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* U45: the sys prompt lives inside a caption column group now; the old
    row-level flex basis would stretch the input VERTICALLY inside a
    column flex parent — give the GROUP the stretch, the input a width. */
+/* U55 sibling (found in the U54/55 after-screenshot, the exact defect
+   class the user called out): .chat-native-gen is a flex item of the
+   root bar and sized to its CONTENT (422px of 1194), so the stretched
+   system-prompt input had nowhere to grow and 'Delete chat' orphaned
+   onto a line of its own. Same full-line rule as sampling. */
+.chat-native-gen { flex: 1 1 100%; min-width: 0; }
 .chat-native-bar #chat-native-sys { min-width: 140px; }
 .chat-native-group.chat-native-grow { flex: 1 1 180px; min-width: 140px; }
 .chat-native-group.chat-native-grow #chat-native-sys { width: 100%; }
 .chat-native-bar .btn { font-size: 11px; padding: 4px 8px; }
 /* U46: sampling override inputs — compact numeric fields under captions */
-.chat-native-sampling { align-items: flex-end; }
-.chat-native-sampling input[type=number] { width: 86px; font-size: 11px;
+/* U55: equal-width grid columns (flex let each group size to its label —
+   'Presence Penalty' widened its cell and the row read ragged); captions
+   never wrap, long ones ellipsize. flex:1 1 100% pins the row to its own
+   full-width line: as a plain flex item the grid would size to
+   max-content, which collapses auto-fill to ONE column (309px tall row,
+   caught live). */
+.chat-native-sampling { display: grid; flex: 1 1 100%; min-width: 0;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 6px 10px; }
+.chat-native-sampling .chat-native-group { min-width: 0; }
+.chat-native-sampling .chat-native-group-label { white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+.chat-native-sampling input[type=number] { width: 100%; font-size: 11px;
     background: var(--field); border: 1px solid var(--edge); color: var(--ink);
     padding: 4px 6px; }
 

@@ -116,6 +116,9 @@ function taskCard(label, desc, title, onToggle) {
     }
     card.addEventListener('click', toggle);
     card.addEventListener('keydown', function (ev) {
+        // U53: only when the card itself is focused; Enter/Space on an
+        // inner control (the size select) belongs to that control
+        if (ev.target !== card) return;
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); }
     });
     return card;
@@ -1611,7 +1614,6 @@ var ACC = {
                 fullOpt.value = '0';
                 sizeSel.appendChild(fullOpt);
                 sizeSel.value = String(tk.sizes[Math.min(2, tk.sizes.length - 1)]);
-                sizeSel.disabled = true;
                 // U51: keyboard-operable card (was a click-only div). The
                 // size select lives inside as its own focus target; a
                 // click that lands on it must not double-toggle the card.
@@ -1619,19 +1621,18 @@ var ACC = {
                     tk.desc ? t(tk.desc, tk.desc_literal || tk.key) : (tk.desc_literal || ''),
                     null, function (on) {
                         self.state.selected[tk.key] = on;
-                        sizeSel.disabled = !on;
                     });
                 card.dataset.key = tk.key;
                 card.appendChild(sizeSel);
                 sizeSel.addEventListener('click', function (ev) { ev.stopPropagation(); });
                 sizeSel.addEventListener('change', function () {
-                    // choosing a size implies picking the task (classic:
-                    // the select is only enabled on selected rows)
+                    // choosing a size implies picking the task (U53: the
+                    // select stays operable on unselected cards — classic
+                    // disabled it, which made the FIRST click dead)
                     if (!card.classList.contains('on')) {
                         card.classList.add('on');
                         card.setAttribute('aria-pressed', 'true');
                         self.state.selected[tk.key] = true;
-                        sizeSel.disabled = false;
                     }
                     self.state.sizes[tk.key] = Number(sizeSel.value);
                 });
