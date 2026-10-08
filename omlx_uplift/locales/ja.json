@@ -812,5 +812,8 @@
  "uplift.bench.dec_latency": "ms/質問",
  "uplift.bench.pack.arc_choice": "ARC-Challenge（科学QA）",
  "uplift.bench.pack.bbq_choice": "BBQ（バイアス／安全性ルーティング）",
- "uplift.bench.pack.tqa_choice": "TruthfulQA mc1（真実性）"
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1（真実性）",
+ "uplift.bench.ctx_custom": "カスタム…",
+ "uplift.bench.ctx_custom_placeholder": "トークン (2,048 – 524,288)",
+ "uplift.bench.ctx_custom_range": "カスタム目標は 2,048 ～ 524,288 の整数トークンである必要があります。"
 }

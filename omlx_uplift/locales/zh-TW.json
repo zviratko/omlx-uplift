@@ -809,5 +809,8 @@
  "uplift.bench.dec_latency": "ms/題",
  "uplift.bench.pack.arc_choice": "ARC-Challenge（科學問答）",
  "uplift.bench.pack.bbq_choice": "BBQ（偏見／安全路由）",
- "uplift.bench.pack.tqa_choice": "TruthfulQA mc1（真實性）"
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1（真實性）",
+ "uplift.bench.ctx_custom": "自訂…",
+ "uplift.bench.ctx_custom_placeholder": "詞元 (2,048 – 524,288)",
+ "uplift.bench.ctx_custom_range": "自訂目標必須是介於 2,048 與 524,288 之間的整數詞元數。"
 }

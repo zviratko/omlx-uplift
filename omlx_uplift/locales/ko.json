@@ -824,5 +824,8 @@
  "uplift.bench.dec_latency": "ms/질문",
  "uplift.bench.pack.arc_choice": "ARC-Challenge (과학 QA)",
  "uplift.bench.pack.bbq_choice": "BBQ (편향 / 안전 라우팅)",
- "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (진실성)"
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (진실성)",
+ "uplift.bench.ctx_custom": "사용자 지정…",
+ "uplift.bench.ctx_custom_placeholder": "토큰 (2,048 – 524,288)",
+ "uplift.bench.ctx_custom_range": "사용자 지정 목표는 2,048～524,288 사이의 정수 토큰이어야 합니다."
 }

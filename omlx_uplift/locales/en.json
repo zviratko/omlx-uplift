@@ -809,5 +809,8 @@
  "uplift.bench.dec_latency": "ms/question",
  "uplift.bench.pack.arc_choice": "ARC-Challenge (science QA)",
  "uplift.bench.pack.bbq_choice": "BBQ (bias / safety routing)",
- "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (truthfulness)"
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (truthfulness)",
+ "uplift.bench.ctx_custom": "Custom…",
+ "uplift.bench.ctx_custom_placeholder": "tokens (2,048 – 524,288)",
+ "uplift.bench.ctx_custom_range": "Custom target must be a whole number between 2,048 and 524,288 tokens."
 }

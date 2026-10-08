@@ -41,6 +41,41 @@ function t(key, fb) {
 var PROMPT_LENGTHS = [1024, 4096, 8192, 16384, 32768, 65536, 131072, 200000];
 var BATCH_SIZES = [2, 4, 8];
 var TARGET_TOKENS = [16384, 32768, 65536, 131072, 262144, 524288];
+// U50: context-target option list for a model, pure so it is unit-testable.
+// Rules: the model's OWN config.json window is offered first and selected
+// (classic's classic-page hint says sizes beyond the native window are
+// hidden — we hide them too), the standard ladder keeps only sizes at or
+// below it, and a Custom entry allows an arbitrary probe (server accepts
+// 2048..524288 integers; the runner still clamps to native + floors to
+// 2k, so an over-native custom value is safe, just capped at run time).
+var CTX_CUSTOM_MIN = 2048;
+var CTX_CUSTOM_MAX = 524288;
+function ctxTargetOptions(native, ladder) {
+    // native values ABOVE the accepted ceiling are floored to it and the
+    // label tells the truth ('1,048,576 -> testing 524,288'): never silent
+    // rounding. Below-ceiling natives (135,168) pass through untouched -
+    // the uplift server side accepts any whole number in the range, so no
+    // nearest-power-of-two fallback is needed (card step-1 assumed the
+    // whitelist would stay; step 2 removed that constraint).
+    var out = [];
+    var list = ladder || TARGET_TOKENS;
+    if (native && native > 0) {
+        var test = Math.min(native, CTX_CUSTOM_MAX);
+        var label = native.toLocaleString();
+        if (test !== native) label += ' \u2192 ' + test.toLocaleString();
+        out.push({ value: String(test), label: label, native: true });
+        list.filter(function (tk) { return tk < native && tk <= test; })
+            .forEach(function (tk) {
+                out.push({ value: String(tk), label: tk.toLocaleString() });
+            });
+    } else {
+        list.forEach(function (tk) {
+            out.push({ value: String(tk), label: tk.toLocaleString() });
+        });
+    }
+    out.push({ value: 'custom', custom: true });
+    return out;
+}
 var PROFILES = ['code_python', 'code_mixed', 'novel_en', 'novel_ja', 'novel_ko'];
 var PROFILE_FALLBACK = { code_python: 'Code (Python)', code_mixed: 'Code (Mixed)',
     novel_en: 'Novel (English)', novel_ja: 'Novel (Japanese)', novel_ko: 'Novel (Korean)' };
@@ -694,7 +729,7 @@ var CTX = {
     state: null,
 
     render: function (panel) {
-        this.state = { running: false, benchId: null, result: null };
+        this.state = { running: false, benchId: null, result: null, models: [] };
         panel.appendChild(this.form());
         var status = el('div', 'bench-status'); status.id = 'bench-ctx-status';
         var results = el('div', 'bench-results'); results.id = 'bench-ctx-results';
@@ -715,13 +750,25 @@ var CTX = {
         var ph = el('option', null, t('ctx_bench.config.model_placeholder', 'Select a model...'));
         ph.value = ''; modelSel.appendChild(ph);
         var targetSel = el('select'); targetSel.id = 'bench-ctx-target';
-        TARGET_TOKENS.forEach(function (tk) {
-            var o = el('option', null, tk.toLocaleString()); o.value = String(tk);
-            if (tk === 131072) o.selected = true;
-            targetSel.appendChild(o);
+        var customWrap = el('div', 'bench-ctx-custom'); customWrap.hidden = true;
+        customWrap.id = 'bench-ctx-custom-wrap';   // gid-reachable (test stubs
+        var customInp = el('input'); customInp.type = 'number';
+        customInp.id = 'bench-ctx-target-custom';
+        customInp.min = String(CTX_CUSTOM_MIN); customInp.max = String(CTX_CUSTOM_MAX);
+        customInp.step = '1';
+        customInp.placeholder = t('uplift.bench.ctx_custom_placeholder',
+            'tokens (2,048 – 524,288)');
+        customWrap.appendChild(customInp);
+        // U50: options rebuild per model (native config.json window first,
+        // classic hide-above-native rule, Custom probe last)
+        self.buildTargetOptions();
+        modelSel.addEventListener('change', function () { self.buildTargetOptions(); });
+        targetSel.addEventListener('change', function () {
+            customWrap.hidden = targetSel.value !== 'custom';
         });
         row.append(labeled(t('ctx_bench.config.model', 'Model'), modelSel),
-                   labeled(t('ctx_bench.config.target', 'Maximum context to test'), targetSel));
+                   labeled(t('ctx_bench.config.target', 'Maximum context to test'), targetSel),
+                   customWrap);
         f.appendChild(row);
         f.appendChild(el('p', 'native-stub-note', t('ctx_bench.config.target_hint',
             'The benchmark searches up to this size. Larger targets take longer to verify.')));
@@ -740,6 +787,49 @@ var CTX = {
         return f;
     },
 
+    // U50: rebuild the target list from the selected model's native window
+    buildTargetOptions: function () {
+        var sel = gid('bench-ctx-target');
+        if (!sel) return;
+        var mSel = gid('bench-ctx-model');
+        var id = mSel ? mSel.value : '';
+        var row = (this.state.models || []).filter(function (m) {
+            return (m.id || m.model_id) === id; })[0];
+        var native = row ? Number(row.model_context_length || 0) : 0;
+        var opts = ctxTargetOptions(native);
+        sel.replaceChildren();
+        opts.forEach(function (o) {
+            var e2 = el('option', null, o.custom
+                ? t('uplift.bench.ctx_custom', 'Custom…') : o.label);
+            e2.value = o.value;
+            if (o.native) {
+                e2.textContent = o.label + ' — ' + t('ctx_bench.capped.native',
+                    "Model's native context length");
+                e2.selected = true;
+            }
+            sel.appendChild(e2);
+        });
+        var cw = gid('bench-ctx-custom-wrap');
+        if (cw) cw.hidden = true;
+    },
+
+    // U50: '' | number -> validated whole-number target, or null + toast
+    resolveTargetTokens: function () {
+        var d = dom();
+        var sel = gid('bench-ctx-target');
+        if (!sel) return null;
+        if (sel.value !== 'custom') return Number(sel.value);
+        var inp = gid('bench-ctx-target-custom');
+        var v = inp ? Number(inp.value) : NaN;
+        if (!isFinite(v) || v !== Math.floor(v)
+            || v < CTX_CUSTOM_MIN || v > CTX_CUSTOM_MAX) {
+            d.toast(t('uplift.bench.ctx_custom_range',
+                'Custom target must be a whole number between 2,048 and 524,288 tokens.'));
+            return null;
+        }
+        return v;
+    },
+
     loadModels: async function () {
         var d = dom();
         try {
@@ -750,10 +840,14 @@ var CTX = {
                 var ty = m.model_type || m.type;
                 return !ty || ty === 'llm' || ty === 'vlm';
             });
+            // U50: stash rows for the target builder (model_context_length
+            // is classic's native window from config.json, served verbatim)
+            this.state.models = usable;
             var ph2 = el('option', null, t('ctx_bench.config.model_placeholder', 'Select a model...'));
             ph2.value = '';
             sel.replaceChildren(ph2);
             usable.forEach(function (m) { sel.appendChild(el('option', null, m.id || m.model_id)); });
+            this.buildTargetOptions();   // U50: native option needs the rows
         } catch (e) { /* placeholder stays */ }
     },
 
@@ -780,6 +874,8 @@ var CTX = {
             d.toast(t('ctx_bench.config.model_placeholder', 'Select a model...'), 'error');
             return;
         }
+        var target = this.resolveTargetTokens();   // U50: select or custom
+        if (target == null) return;   // resolveTargetTokens toasted already
         this.state.running = true;
         this.state.result = null;
         this.setButtons();
@@ -788,7 +884,7 @@ var CTX = {
         try {
             var out = await d.postJson(api() + '/bench/context/start', {
                 model_id: sel.value,
-                target_tokens: Number(gid('bench-ctx-target').value),
+                target_tokens: target,
             });
             this.state.benchId = out.bench_id;
             this.startStream(out.bench_id);
@@ -2117,5 +2213,6 @@ return { mount: mount, isMounted: function () { return _mounted; },
          _benchText: { buildThroughputText: buildThroughputText,
                        fmtNum: fmtNum, fmtMemory: fmtMemory,
                        singleTestLabel: singleTestLabel,
-                       batchPromptSummary: batchPromptSummary } };
+                       batchPromptSummary: batchPromptSummary,
+                       ctxTargetOptions: ctxTargetOptions } };
 });

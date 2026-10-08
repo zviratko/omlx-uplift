@@ -813,5 +813,8 @@
  "uplift.bench.dec_latency": "ms/question",
  "uplift.bench.pack.arc_choice": "ARC-Challenge (sciences)",
  "uplift.bench.pack.bbq_choice": "BBQ (biais / routage de sécurité)",
- "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (véracité)"
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (véracité)",
+ "uplift.bench.ctx_custom": "Personnalisé…",
+ "uplift.bench.ctx_custom_placeholder": "jetons (2 048 – 524 288)",
+ "uplift.bench.ctx_custom_range": "La cible personnalisée doit être un nombre entier entre 2 048 et 524 288 jetons."
 }

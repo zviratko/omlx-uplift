@@ -2093,6 +2093,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     padding: 10px 12px 12px; border-top: 1px solid var(--edge); }
 .bench-external input { background: var(--panel); border: 1px solid var(--edge); color: var(--ink);
   padding: 3px 6px; font: inherit; font-size: 11px; min-width: 200px; }
+/* U50: custom context-target input appears when the select is on Custom */
+.bench-ctx-custom input { width: 150px; background: var(--panel);
+    border: 1px solid var(--edge); color: var(--ink); padding: 3px 6px;
+    font: inherit; font-size: 11px; }
 .bench-actions { display: flex; gap: 8px; margin-top: 10px; }
 .bench-status { font-size: 11px; color: var(--dim); min-height: 14px; }
 .bench-status.bench-status-error { color: var(--red); }

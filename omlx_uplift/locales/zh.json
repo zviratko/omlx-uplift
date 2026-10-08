@@ -809,5 +809,8 @@
  "uplift.bench.dec_latency": "ms/题",
  "uplift.bench.pack.arc_choice": "ARC-Challenge（科学问答）",
  "uplift.bench.pack.bbq_choice": "BBQ（偏见／安全路由）",
- "uplift.bench.pack.tqa_choice": "TruthfulQA mc1（真实性）"
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1（真实性）",
+ "uplift.bench.ctx_custom": "自定义…",
+ "uplift.bench.ctx_custom_placeholder": "词元 (2,048 – 524,288)",
+ "uplift.bench.ctx_custom_range": "自定义目标必须是 2,048 到 524,288 之间的整数词元数。"
 }

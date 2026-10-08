@@ -33,6 +33,15 @@ class FakeCtxRequest:
             raise ValueError(f"Invalid target {t}")
         self.target_tokens = t
 
+    @classmethod
+    def model_construct(cls, **kw):
+        # real pydantic skips field validation here — the fake must too
+        # (U50: the off-whitelist path depends on this seam existing)
+        obj = cls.__new__(cls)
+        obj.model_id = kw.get("model_id", "m1")
+        obj.target_tokens = kw.get("target_tokens", 131072)
+        return obj
+
 
 class FakeCtxRun:
     def __init__(self, bench_id, request):
@@ -239,12 +248,23 @@ async def test_context_start_completes_with_classic_shape(fake_engines):
 @pytest.mark.asyncio
 async def test_context_bad_target_and_model(fake_engines):
     ce = _mod()
+    # range/type/bool junk 400s (before any run exists — an accepted start
+    # would arm the contention gate for everything after it)
+    for bad in (5, 2047, 524289, 100000000, "16384", True, 16384.5):
+        with pytest.raises(ce.BadInput):
+            await ce.context_start({"model_id": "m2", "target_tokens": bad},
+                                   FakePool())
     with pytest.raises(ce.BadInput):
-        await ce.context_start({"model_id": "m1", "target_tokens": 12345}, FakePool())
+        await ce.context_start({"target_tokens": 16384}, FakePool())
     with pytest.raises(ce.NotFound):
         await ce.context_start({"model_id": "ghost"}, FakePool())
     with pytest.raises(ce.BadInput):
         await ce.context_start({"model_id": "emb"}, FakePool())
+    # U50: off-whitelist ints inside the sanity range are now ACCEPTED (the
+    # runner treats target as a search cap; guards are untouched)
+    out = await ce.context_start({"model_id": "m1", "target_tokens": 135168},
+                                 FakePool())
+    assert out["target_tokens"] == 135168
 
 
 @pytest.mark.asyncio

@@ -813,5 +813,8 @@
  "uplift.bench.dec_latency": "ms/pregunta",
  "uplift.bench.pack.arc_choice": "ARC-Challenge (ciencia)",
  "uplift.bench.pack.bbq_choice": "BBQ (sesgo / enrutamiento de seguridad)",
- "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (veracidad)"
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (veracidad)",
+ "uplift.bench.ctx_custom": "Personalizado…",
+ "uplift.bench.ctx_custom_placeholder": "tokenes (2.048 – 524.288)",
+ "uplift.bench.ctx_custom_range": "El objetivo personalizado debe ser un número entero entre 2.048 y 524.288 tokens."
 }

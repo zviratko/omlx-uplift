@@ -110,3 +110,30 @@ test('U47: helpers match classic edge cases', () => {
     assert.ok(buildThroughputText({ model: 'M', profile: 'code_python' }, [])
         .endsWith('='.repeat(80)), 'no results -> header block only (button is hidden anyway)');
 });
+
+/* U50: context-target option builder (native window default, hide-above-
+   native ladder, honest floor label past the accepted ceiling, Custom). */
+const { ctxTargetOptions } = B._benchText;
+test('U50: native window is the first + selected option (off-whitelist ok)', () => {
+    const opts = ctxTargetOptions(135168);
+    assert.equal(opts[0].value, '135168');
+    assert.equal(opts[0].native, true);
+    // ladder entries strictly below native, none above
+    assert.deepEqual(opts.slice(1, -1).map(o => Number(o.value)),
+        [16384, 32768, 65536, 131072]);
+    assert.equal(opts[opts.length - 1].custom, true);
+});
+
+test('U50: native past the ceiling is floored and labelled honestly', () => {
+    const opts = ctxTargetOptions(1048576);
+    assert.equal(opts[0].value, '524288');
+    assert.ok(opts[0].label.includes('1,048,576') && opts[0].label.includes('524,288'),
+        'label shows native -> tested, never silent rounding');
+    assert.equal(opts[0].native, true);
+});
+
+test('U50: unknown native keeps the plain ladder (classic shape) + Custom', () => {
+    const opts = ctxTargetOptions(0);
+    assert.equal(opts.length, 7);   // 6 ladder + custom
+    assert.ok(opts.every(o => !o.native));
+});

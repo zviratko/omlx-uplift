@@ -50,6 +50,16 @@ def _ane():
     return ANE
 
 
+# U50: uplift-side sanity range for target_tokens replacing classic's
+# power-of-two whitelist. Floor = _MIN_USEFUL_TOKENS (2048, the value the
+# runner itself rejects below); ceiling = classic's largest offered target
+# (524288 — probing beyond it has never been a supported run shape).
+_CTX_MIN_TARGET = 2048
+_CTX_MAX_TARGET = 524288
+_CTX_DEFAULT_TARGET = 131072   # classic's model default (literal: pydantic-
+                               # independent fallback for test stand-ins)
+
+
 async def _other_bench_busy() -> str | None:
     """Classic routes.py contention: which OTHER bench owns the engine?
     Returns a human reason or None. Accuracy queue counts too (all four
@@ -114,10 +124,40 @@ async def context_start(body: dict, pool: Any) -> dict:
     except ImportError:
         pass  # keg without the enforcer seam: let the probe through
 
+    # U50: classic's pydantic validator pins target_tokens to a power-of-two
+    # whitelist (VALID_TARGET_TOKENS). Two problems: (a) the honest default
+    # is the model's OWN window from config.json, which is often not on the
+    # list; (b) users want to probe arbitrary sizes. The whitelist is a
+    # product guard in the request model only — run_context_benchmark never
+    # re-validates, treats target_tokens as a search cap (clamped to the
+    # native window), and the memory guard + 2k floor + real verification
+    # prefill all run inside it. So bypassing ONLY that field validator
+    # (never an upstream file, never a guard) keeps every safety property;
+    # we add our own sanity range instead of nothing.
+    mid = str((body or {}).get("model_id") or "")
+    if not mid:
+        raise BadInput("model_id required")
+    Req = CTX.ContextBenchmarkRequest
+    tgt_raw = (body or {}).get("target_tokens")
+    if tgt_raw is None:
+        fld = getattr(getattr(Req, "model_fields", None), "get",
+                      lambda *_: None)("target_tokens")
+        tgt_raw = getattr(fld, "default", _CTX_DEFAULT_TARGET)
+    if isinstance(tgt_raw, bool) or not isinstance(tgt_raw, int) \
+            or not (_CTX_MIN_TARGET <= tgt_raw <= _CTX_MAX_TARGET):
+        raise BadInput(
+            f"Invalid target {tgt_raw!r}. Must be a whole number between "
+            f"{_CTX_MIN_TARGET} and {_CTX_MAX_TARGET} tokens.")
     try:
-        req = CTX.ContextBenchmarkRequest(**(body or {}))
+        req = Req(model_id=mid, target_tokens=tgt_raw)
     except Exception as e:
-        raise BadInput(str(e)) from e
+        ctor = getattr(Req, "model_construct", None)
+        if ctor is None:
+            raise BadInput(str(e)) from e   # non-pydantic stand-in: honest 400
+        # off-whitelist int on the real keg: construct the SAME request type
+        # bypassing only the target validator (model_construct skips field
+        # validation; guards live in the runner, untouched)
+        req = ctor(model_id=mid, target_tokens=tgt_raw)
 
     entry = pool.get_entry(req.model_id)
     if entry is None:

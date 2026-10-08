@@ -809,5 +809,8 @@
  "uplift.bench.dec_latency": "мс/вопрос",
  "uplift.bench.pack.arc_choice": "ARC-Challenge (наука)",
  "uplift.bench.pack.bbq_choice": "BBQ (смещения / безопасностная маршрутизация)",
- "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (достоверность)"
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (достоверность)",
+ "uplift.bench.ctx_custom": "Свой…",
+ "uplift.bench.ctx_custom_placeholder": "токенов (2 048 – 524 288)",
+ "uplift.bench.ctx_custom_range": "Пользовательская цель — целое число от 2 048 до 524 288 токенов."
 }

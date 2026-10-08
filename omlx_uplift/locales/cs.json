@@ -809,5 +809,8 @@
  "uplift.bench.dec_latency": "ms/otázku",
  "uplift.bench.pack.arc_choice": "ARC-Challenge (vědecké otázky)",
  "uplift.bench.pack.bbq_choice": "BBQ (zkreslení / bezpečnostní routování)",
- "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (pravdivost)"
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (pravdivost)",
+ "uplift.bench.ctx_custom": "Vlastní…",
+ "uplift.bench.ctx_custom_placeholder": "tokeny (2 048 – 524 288)",
+ "uplift.bench.ctx_custom_range": "Vlastní cíl musí být celé číslo mezi 2 048 a 524 288 tokeny."
 }
