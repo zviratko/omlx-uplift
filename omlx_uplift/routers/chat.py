@@ -70,6 +70,26 @@ def _save(store: dict) -> None:
     tmp.replace(p)
 
 
+GEN_KEYS = ("temperature", "max_tokens", "top_p", "top_k",
+            "min_p", "repetition_penalty", "presence_penalty")
+
+
+def _clean_generation(raw):
+    """U46: per-chat sampling overrides — classic's snapshotGenerationSettings
+    fields (chat.html:3386), persisted per session like classic does.
+    Numeric only: 0 and 0.0 are VALID (temp 0 = greedy) so presence is
+    checked per key, never by truthiness; bools excluded (Python bool is
+    int); anything else means 'not set' -> engine default."""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for k in GEN_KEYS:
+        v = raw.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[k] = v
+    return out or None
+
+
 def _clean_message(m: dict) -> dict:
     role = str(m.get("role") or "user")
     if role not in ("user", "assistant", "system"):
@@ -161,6 +181,10 @@ async def chat_history_save(request: Request,
         "thinking": bool(body.get("thinking")),
         "thinkingBudget": body.get("thinkingBudget")
         if isinstance(body.get("thinkingBudget"), int) else None,
+        # U46: classic persists the sidebar sampling fields per session
+        # (schedulePersistModelSettings -> syncSessionModelSettingsFromUi);
+        # native mirrors the same scope. None = nothing set = engine default.
+        "generation": _clean_generation(body.get("generation")),
         "messages": [_clean_message(m) for m in msgs[-MAX_MESSAGES:]
                      if isinstance(m, dict)],
         "updated": int(time.time() * 1000),

@@ -458,3 +458,38 @@ test('U45: copy splits plain vs markdown; stripMarkdown keeps code content', () 
         'fence info string is not prose (classic copy parity)');
     assert.equal(fn('<b>raw</b>'), 'raw');
 });
+
+/* U46: sampling overrides ride the request only when set; 0 is a value. */
+test('U46: shapeRequest spreads generation; unset adds nothing', async () => {
+    const h = makeHarness({ convs: [{ id: 'c1', title: 'T', model: 'M', messages: [
+        { role: 'user', content: 'hi' }] }] });
+    h.win.UpliftNativeChat.mount();
+    await booted(h);
+    const st = h.win.UpliftNativeChat._state();
+    const mk = () => ({ headers: {}, body: { messages: [{ role: 'text', text: 'again' }] } });
+    let req = await h.win.UpliftNativeChat.shapeRequest(mk());
+    assert.ok(!('temperature' in req.body) && !('top_p' in req.body),
+        'blank generation = absent from the wire (engine default)');
+    st.conv.generation = { temperature: 0, max_tokens: 128, presence_penalty: -0.5 };
+    req = await h.win.UpliftNativeChat.shapeRequest(mk());
+    assert.equal(req.body.temperature, 0, 'temperature 0.0 reaches the wire (greedy is valid)');
+    assert.equal(req.body.max_tokens, 128);
+    assert.equal(req.body.presence_penalty, -0.5);
+});
+
+test('U46: inputs parse honoring zero; blank and junk are unset', async () => {
+    const h = makeHarness();
+    h.win.UpliftNativeChat.mount();
+    await booted(h);
+    const N = h.win.UpliftNativeChat;
+    h.byId[N.genInputId('temperature')].value = '0';
+    h.byId[N.genInputId('top_p')].value = '0.8';
+    h.byId[N.genInputId('min_p')].value = '';
+    h.byId[N.genInputId('top_k')].value = 'abc';
+    const g = N.readGenerationInputs();
+    assert.deepEqual(g, { temperature: 0, top_p: 0.8 },
+        '0 parses, empty/NaN drop out');
+    h.byId[N.genInputId('temperature')].value = '';
+    h.byId[N.genInputId('top_p')].value = '';
+    assert.equal(N.readGenerationInputs(), null, 'all blank -> null (unset)');
+});

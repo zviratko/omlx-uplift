@@ -163,7 +163,10 @@ function newConv() {
              // thinking_budget). Live-only: the history store keeps
              // model/systemPrompt/messages; thinking settings re-default
              // to auto on reload (stated on the NAT-4 card, 4/6).
-             thinking: 'auto', thinkingBudget: null, messages: [] };
+             thinking: 'auto', thinkingBudget: null,
+             // U46: per-chat sampling overrides (classic session settings);
+             // server persists the numeric subset (routers/chat.py).
+             generation: null, messages: [] };
 }
 function saveConv() {
     if (!_conv) return;
@@ -217,6 +220,7 @@ async function openConv(id) {
     if (sel) sel.value = _conv.model || '';
     var sys = gid('chat-native-sys');
     if (sys) sys.value = _conv.systemPrompt || '';
+    fillGenerationInputs(_conv);   // U46
     syncProfileSelect();
     refreshConvList();
 }
@@ -422,6 +426,14 @@ async function shapeRequest(d) {
     msgs.push(cur);
     var body = { model: (_conv && _conv.model) || '', messages: msgs, stream: true };
     if (_webSearch) body.tools = WEB_TOOLS;   // 5/6 toggle-gated
+    // U46: classic spreads the per-session sampling snapshot into the body
+    // (buildChatCompletionBody ...generation); thinking fields keep
+    // priority below because the mode select is the explicit UI for them.
+    var g = _conv && _conv.generation;
+    if (g) for (var gi = 0; gi < GEN_FIELDS.length; gi++) {
+        var gk = GEN_FIELDS[gi][0];
+        if (g[gk] != null) body[gk] = g[gk];
+    }
     var mode = (_conv && _conv.thinking) || 'auto';
     if (mode === 'off') body.enable_thinking = false;
     else if (mode === 'on') body.enable_thinking = true;
@@ -710,6 +722,50 @@ function ensureVendor() {
 
 // ---- UI -------------------------------------------------------------------
 
+var GEN_FIELDS = [
+    // U46: classic's chat sidebar sampling set (chat.html:2126-2192);
+    // labels are the SAME modal.model_settings.* keys the classic page
+    // uses, bounds copied from its inputs. Blank = unset = engine default.
+    ['temperature', 'modal.model_settings.temperature', 'Temperature',
+     { step: '0.1', min: '0', max: '2' }],
+    ['max_tokens', 'modal.model_settings.max_tokens', 'Max Tokens',
+     { min: '1' }],
+    ['top_p', 'modal.model_settings.top_p', 'Top P',
+     { step: '0.05', min: '0', max: '1' }],
+    ['top_k', 'modal.model_settings.top_k', 'Top K', { min: '0' }],
+    ['min_p', 'modal.model_settings.min_p', 'Min P',
+     { step: '0.01', min: '0', max: '1' }],
+    ['repetition_penalty', 'modal.model_settings.repetition_penalty_short',
+     'Repetition', { step: '0.05', min: '0' }],
+    ['presence_penalty', 'modal.model_settings.presence_penalty',
+     'Presence', { step: '0.05', min: '-2', max: '2' }],
+];
+
+function genInputId(key) { return 'chat-native-gen-' + key; }
+
+function fillGenerationInputs(conv) {
+    // one place paints the seven inputs from a conv (openConv, mount,
+    // New Chat); missing/null generation = all blank
+    var g = (conv && conv.generation) || {};
+    GEN_FIELDS.forEach(function (f) {
+        var inp = gid(genInputId(f[0]));
+        if (inp) inp.value = (g[f[0]] == null) ? '' : String(g[f[0]]);
+    });
+}
+
+function readGenerationInputs() {
+    // numeric parse honoring 0/0.0 (greedy sampling is a real choice);
+    // empty or junk = unset
+    var g = {};
+    GEN_FIELDS.forEach(function (f) {
+        var inp = gid(genInputId(f[0]));
+        if (!inp || inp.value === '') return;
+        var v = parseFloat(inp.value);
+        if (isFinite(v)) g[f[0]] = v;
+    });
+    return Object.keys(g).length ? g : null;
+}
+
 function toolbar() {
     var bar = el('div', 'chat-native-bar');
     var list = el('select'); list.id = 'chat-native-convs';
@@ -727,6 +783,7 @@ function toolbar() {
         // profile while a stale prompt is still visibly sent
         var s2 = gid('chat-native-sys');
         if (s2) s2.value = '';
+        fillGenerationInputs(_conv);   // U46: sampling row is per-conv too
         syncProfileSelect();
         refreshConvList();
     });
@@ -874,7 +931,23 @@ function toolbar() {
     gen.append(
         group(t('chat.system_prompt.title', 'System Prompt'), sys),
         group(t('chat.thinking_label', 'Thinking'), think), budget, web, mic, del);
-    bar.append(pickers, gen);
+    // U46: sampling overrides (classic sidebar parity) — own captioned row,
+    // each input numeric, blank = engine default, 0 stays a real value.
+    var genRow = el('div', 'chat-native-bar chat-native-sampling');
+    GEN_FIELDS.forEach(function (f) {
+        var key = f[0], label = f[1], fb = f[2], attrs = f[3];
+        var inp = el('input'); inp.type = 'number';
+        inp.id = genInputId(key);
+        Object.keys(attrs).forEach(function (a) { inp.setAttribute(a, attrs[a]); });
+        inp.placeholder = t('modal.model_settings.placeholder_default', 'Default');
+        inp.addEventListener('change', function () {
+            if (!_conv) return;
+            _conv.generation = readGenerationInputs();
+            saveConv();
+        });
+        genRow.appendChild(group(t(label, fb), inp));
+    });
+    bar.append(pickers, gen, genRow);
     return bar;
 }
 
@@ -1435,6 +1508,7 @@ function mount() {
         syncAudioMode();   // restored conversation may have an STT model
         var sys = gid('chat-native-sys');
         if (sys) sys.value = _conv.systemPrompt || '';
+        fillGenerationInputs(_conv);   // U46: restored conv keeps its overrides
         syncProfileSelect();   // restored conv may carry an activeProfile
         refreshConvList();
         if (!_models.length) {
@@ -1453,6 +1527,10 @@ return { mount: mount, isMounted: function () { return _mounted; },
          toggleWeb: function () { _webSearch = !_webSearch;
                                   return _webSearch; },
          newConv: newConv, migrateLegacy: migrateLegacy,
+         // U46 test seams
+         GEN_FIELDS: GEN_FIELDS,
+         genInputId: genInputId,
+         readGenerationInputs: readGenerationInputs,
          // U45 test seams: index-based message actions (the overlay binds
          // these to per-bubble buttons; tests drive them directly)
          _msgActions: { copy: msgCopy, copyMarkdown: msgCopyMarkdown,

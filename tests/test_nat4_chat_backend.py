@@ -162,3 +162,28 @@ def test_key_handout_from_settings_file(client, monkeypatch, tmp_path):
     r = client.get("/uplift/api/chat/key")
     assert r.status_code == 200
     assert r.json() == {"api_key": "sekrit"}
+
+
+def test_generation_overrides_persist_with_zero(client):
+    # U46: classic persists its sidebar sampling fields per session; the
+    # store keeps the numeric subset. 0 / 0.0 are VALID values (greedy
+    # sampling) so presence is per-key — a truthiness filter would drop
+    # them and change generation behaviour on reload.
+    r = client.post("/uplift/api/chat/history", json=_conv(generation={
+        "temperature": 0, "max_tokens": 128, "top_p": 0.0, "top_k": 40,
+        "presence_penalty": -0.5,
+    }))
+    assert r.status_code == 200
+    full = client.get("/uplift/api/chat/history/c1").json()["generation"]
+    assert full == {"temperature": 0, "max_tokens": 128, "top_p": 0.0,
+                    "top_k": 40, "presence_penalty": -0.5}
+    # junk and non-numerics are not set; bools are not numbers here
+    client.post("/uplift/api/chat/history", json=_conv(generation={
+        "temperature": "hot", "top_p": True, "min_p": 0.1}))
+    assert client.get("/uplift/api/chat/history/c1").json()["generation"] == {"min_p": 0.1}
+    # wrong type entirely -> None (absent), never a crash
+    client.post("/uplift/api/chat/history", json=_conv(generation=[1, 2]))
+    assert client.get("/uplift/api/chat/history/c1").json()["generation"] is None
+    # absent -> None as well
+    client.post("/uplift/api/chat/history", json=_conv())
+    assert client.get("/uplift/api/chat/history/c1").json()["generation"] is None

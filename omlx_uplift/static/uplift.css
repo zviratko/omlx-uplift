@@ -2140,6 +2140,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-native-group.chat-native-grow { flex: 1 1 180px; min-width: 140px; }
 .chat-native-group.chat-native-grow #chat-native-sys { width: 100%; }
 .chat-native-bar .btn { font-size: 11px; padding: 4px 8px; }
+/* U46: sampling override inputs — compact numeric fields under captions */
+.chat-native-sampling { align-items: flex-end; }
+.chat-native-sampling input[type=number] { width: 86px; font-size: 11px;
+    background: var(--field); border: 1px solid var(--edge); color: var(--ink);
+    padding: 4px 6px; }
 
 /* NAT-4 (4/6): live thinking panel (deep-chat has none — hybrid, card Rules) */
 .chat-native-think { border: 1px solid var(--edge); background: var(--panel);
