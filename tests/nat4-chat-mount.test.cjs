@@ -603,3 +603,16 @@ test('U76-U78: web label, export/import buttons, sampling provenance chip', () =
         && /'.chat-native-params \{ visibility: visible/.test(src),
         'chip CSS ships in the SHADOW sheet, visible without hover');
 });
+
+test('U80: one box height for all text-family controls (doctrine)', () => {
+    const css = fs.readFileSync(`${STATIC_DIR}/uplift.css`, 'utf8');
+    // the global parity rule must EXCLUDE non-box input types by name
+    // (attribute selectors miss type-less <input>; the :not(...) form
+    // catches every current and future text input)
+    assert.ok(/input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\):not\(\[type="range"\]\)/.test(css),
+        'global box-height rule present');
+    assert.ok(/height: 32px; box-sizing: border-box/.test(css),
+        'box inputs join the 32px design height');
+    assert.ok(/textarea \{ min-height: 32px/.test(css),
+        'textareas floor at the row height');
+});

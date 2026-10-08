@@ -1052,11 +1052,7 @@ function toolbar() {
         _conv.thinking = think.value;
         var b = parseInt(budget.value, 10);
         _conv.thinkingBudget = (isFinite(b) && b >= 0) ? b : null;
-        // U79: hide the WHOLE captioned group (hiding the bare input
-        // stranded its 'Thinking Budget' label on the row)
-        var g2 = budget.closest ? budget.closest('.chat-native-group') : null;
-        if (g2) g2.hidden = think.value !== 'limit';
-        else budget.hidden = think.value !== 'limit';
+        showBudget(think.value === 'limit');   // U79+U80: group + input together
         saveConv();   // fields themselves are live-only (store drops them)
     }
     think.addEventListener('change', saveThinking);
@@ -1157,7 +1153,14 @@ function toolbar() {
     var budGroup = group(t('modal.model_settings.thinking_budget',
                            'Thinking Budget'), budget,
                          'modal.model_settings.thinking_budget');
-    budGroup.hidden = think.value !== 'limit';
+    function showBudget(on) {
+        // both flags move together (input.hidden AND group.hidden were
+        // managed apart once — the input stayed invisible inside a
+        // visible caption; U80)
+        budget.hidden = !on;
+        budGroup.hidden = !on;
+    }
+    showBudget(think.value === 'limit');
     rowGen.append(
         group(t('chat.thinking_label', 'Thinking'), think, 'chat.thinking_label'),
         budGroup, web, mic);

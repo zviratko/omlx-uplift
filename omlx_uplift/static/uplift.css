@@ -345,6 +345,27 @@ header.top .dd-menu a:hover, header.top .dd-menu a.active {
 /* Hover shifts value one step — never elevation. */
 .icon-btn:hover, select:hover { color: var(--bg); background: var(--ink); border-color: var(--ink); }
 select { color: var(--ink); }
+
+/* U80 control-height parity (user doctrine, applies to EVERY surface):
+   a box control that sits next to another box control must be the SAME
+   height. The design standard is the fixed 32px that select/.btn/
+   qz-form/modal already carry; single-line text-family inputs were
+   inheriting the ~22px UA default and reading as shrunken beside their
+   32px siblings (system prompt next to the selects, sampling row,
+   bench external inputs, settings rows). Checkboxes/radios keep their
+   own 18px square token. Textareas are multi-line by nature: min-height
+   matches the row, growth stays content-driven. */
+/* ENUMERATED-BY-EXCLUSION on purpose: an attribute selector like
+   input[type="text"] does NOT match <input> with no type attribute at
+   all (the UA defaults it to text, the attribute stays absent) — and
+   JS-built controls (el('input') with .type set afterwards) routinely
+   have no attribute. Excluding the non-box types catches every text
+   input now and any new one later. range/checkbox/radio keep their own
+   geometry (sliders must not get a forced track height). */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="image"]) {
+    height: 32px; box-sizing: border-box;
+}
+textarea { min-height: 32px; box-sizing: border-box; }
 option { background: var(--card); color: var(--ink); }
 /* Checkboxes are touch targets, not decoration (user: "make the checkboxes
    bigger, everywhere"). UA default is 13px; 18px with the UA box keeps the
@@ -2226,7 +2247,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     text-transform: uppercase; color: var(--dim); }
 .chat-native-bar #chat-native-web.on { border-color: var(--accent);
     color: var(--accent); font-weight: 600; }
-.chat-native-bar select, .chat-native-bar input[type=text] {
+.chat-native-bar select, .chat-native-bar input[type=text],
+.chat-native-bar input[type=number] {
   font-size: 11px; background: var(--field); border: 1px solid var(--edge);
   color: var(--ink); padding: 4px 6px; }
 /* U45: the sys prompt lives inside a caption column group now; the old
