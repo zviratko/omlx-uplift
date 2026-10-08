@@ -802,5 +802,15 @@
  "uplift.envcat.filt.set": "已设置",
  "uplift.envcat.legend_managed": "此变量由原版 oMLX 拥有",
  "uplift.envcat.legend_editable": "可在此编辑",
- "uplift.envcat.legend_effect": "值生效的时机"
+ "uplift.envcat.legend_effect": "值生效的时机",
+ "uplift.bench.decision": "决策",
+ "uplift.bench.decision_desc": "针对钉选的离线任务包，通过 /v1/systemone 提出类型化问题。",
+ "uplift.bench.dec_accuracy": "准确率",
+ "uplift.bench.dec_brier": "布里尔分数",
+ "uplift.bench.dec_ece": "ECE",
+ "uplift.bench.dec_agreement": "一致率",
+ "uplift.bench.dec_latency": "ms/题",
+ "uplift.bench.pack.arc_choice": "ARC-Challenge（科学问答）",
+ "uplift.bench.pack.bbq_choice": "BBQ（偏见／安全路由）",
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1（真实性）"
 }

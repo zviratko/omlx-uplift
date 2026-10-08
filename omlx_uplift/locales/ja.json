@@ -805,5 +805,15 @@
  "uplift.envcat.filt.set": "設定済み",
  "uplift.envcat.legend_managed": "この変数は oMLX 本体が所有します",
  "uplift.envcat.legend_editable": "ここで変更できます",
- "uplift.envcat.legend_effect": "値が有効になる時期"
+ "uplift.envcat.legend_effect": "値が有効になる時期",
+ "uplift.bench.decision": "判断",
+ "uplift.bench.decision_desc": "ピン留め済みオフラインタスクパックに対する /v1/systemone の型付き質問。",
+ "uplift.bench.dec_accuracy": "精度",
+ "uplift.bench.dec_brier": "ブライアスコア",
+ "uplift.bench.dec_ece": "ECE",
+ "uplift.bench.dec_agreement": "一致率",
+ "uplift.bench.dec_latency": "ms/質問",
+ "uplift.bench.pack.arc_choice": "ARC-Challenge（科学QA）",
+ "uplift.bench.pack.bbq_choice": "BBQ（バイアス／安全性ルーティング）",
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1（真実性）"
 }

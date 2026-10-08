@@ -802,5 +802,15 @@
  "uplift.envcat.filt.set": "Currently set",
  "uplift.envcat.legend_managed": "vanilla oMLX owns this variable",
  "uplift.envcat.legend_editable": "editable here",
- "uplift.envcat.legend_effect": "when a value takes effect"
+ "uplift.envcat.legend_effect": "when a value takes effect",
+ "uplift.bench.decision": "Decision",
+ "uplift.bench.decision_desc": "Typed questions over /v1/systemone against a pinned offline task pack.",
+ "uplift.bench.dec_accuracy": "Accuracy",
+ "uplift.bench.dec_brier": "Brier",
+ "uplift.bench.dec_ece": "ECE",
+ "uplift.bench.dec_agreement": "Agreement",
+ "uplift.bench.dec_latency": "ms/question",
+ "uplift.bench.pack.arc_choice": "ARC-Challenge (science QA)",
+ "uplift.bench.pack.bbq_choice": "BBQ (bias / safety routing)",
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (truthfulness)"
 }

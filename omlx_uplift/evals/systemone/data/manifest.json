@@ -1,0 +1,23 @@
+{
+ "seed": 20261008,
+ "packs": {
+  "arc-choice": {
+   "source": "allenai/ai2_arc (ARC-Challenge) split=test",
+   "license": "CC-BY-SA-4.0",
+   "items": 294,
+   "sha256": "e79c94f26007449aec071739514eeec8db0f65cc6f8b25c0a0f52c02ea29e4ec"
+  },
+  "bbq-choice": {
+   "source": "oskarvanderwal/bbq (All) split=test",
+   "license": "CC-BY-4.0",
+   "items": 300,
+   "sha256": "5a7649d7ed6473fca0adcd7b976b6b180121b5722016c2bd325feefd2d61f357"
+  },
+  "tqa-choice": {
+   "source": "truthfulqa/truthful_qa (multiple_choice) split=validation",
+   "license": "Apache-2.0",
+   "items": 400,
+   "sha256": "377c19e67ffb505632b05a294091e8004e23649c6d0cf21337c9bacfaaf2e857"
+  }
+ }
+}

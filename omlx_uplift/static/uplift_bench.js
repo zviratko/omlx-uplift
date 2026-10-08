@@ -79,7 +79,8 @@ function mount() {
      ['context', t('navbar.dropdown.context', 'Context')],
      ['ane', t('uplift.bench.ane_tune', 'ANE Tune')],
      ['embed', t('uplift.bench.embeddings', 'Embeddings')],
-     ['rerank', t('uplift.bench.rerankers', 'Rerankers')]].forEach(function (s) {
+     ['rerank', t('uplift.bench.rerankers', 'Rerankers')],
+     ['decision', t('uplift.bench.decision', 'Decision')]].forEach(function (s) {
         var b = el('button', 'native-subtab' + (s[0] === _sub ? ' active' : ''), s[1]);
         b.type = 'button';
         b.dataset.sub = s[0];
@@ -107,6 +108,7 @@ function showSub(sub) {
     else if (sub === 'ane') ANE.render(panel);
     else if (sub === 'embed') MTEB('embed').render(panel);
     else if (sub === 'rerank') MTEB('rerank').render(panel);
+    else if (sub === 'decision') DEC.render(panel);
     else panel.appendChild(stubCard(sub));
 }
 
@@ -1614,6 +1616,265 @@ function MTEB(kind) {
         },
     };
 }
+
+/* ---- REPL-4c: decision / System-1 (scored server-side, /v1/systemone) ----
+   Same thin-host doctrine as MTEB: the pinned pack list comes from
+   /bench/decision/tasks (provenance + counts from the manifest), the run
+   executes in the server against the decision engine, this panel draws
+   state and streams events. Scores: accuracy on the choice leg, Brier +
+   ECE on the DERIVED noul legs, agreement = same text after an option
+   re-order (position-bias), ms/question latency class. null = not
+   computable (shown as —, never 0). */
+var DEC_LIMITS = [0, 25, 50, 100];
+var DEC = {
+    state: null,
+
+    render: function (panel) {
+        this.state = { running: false, runId: null, packs: {},
+                       selected: {}, limit: 0, results: [] };
+        panel.appendChild(this.form());
+        var status = el('div', 'bench-status'); status.id = 'bench-dec-status';
+        var results = el('div', 'bench-results'); results.id = 'bench-dec-results';
+        panel.append(status, results);
+        this.loadModels();
+        this.loadTasks();
+        this.refreshResults();
+        this.discover();
+    },
+
+    form: function () {
+        var self = this;
+        var f = el('div', 'bench-form card');
+        f.appendChild(el('h2', null, t('uplift.bench.decision', 'Decision')));
+        f.appendChild(el('p', 'native-stub-note', t('uplift.bench.decision_desc',
+            'Typed questions over /v1/systemone; a pinned offline task pack.')));
+        var row = el('div', 'bench-row');
+        var modelSel = el('select'); modelSel.id = 'bench-dec-model';
+        var ph = el('option', null, t('bench.config.model_placeholder', 'Select model…'));
+        ph.value = ''; modelSel.appendChild(ph);
+        var limSel = el('select'); limSel.id = 'bench-dec-limit';
+        DEC_LIMITS.forEach(function (n) {
+            var o = el('option', null, n === 0
+                ? t('acc_bench.config.full_option', 'Full') : String(n));
+            o.value = String(n);
+            if (n === 25) o.selected = true;
+            limSel.appendChild(o);
+        });
+        row.append(labeled(t('bench.config.model', 'Model'), modelSel),
+                   labeled(t('uplift.bench.sample_limit', 'Sample limit'), limSel));
+        f.appendChild(row);
+        var grid = el('div', 'acc-taskgrid'); grid.id = 'bench-dec-tasks';
+        f.appendChild(grid);
+        var actions = el('div', 'bench-actions');
+        var runBtn = el('button', 'btn btn-primary', t('bench.config.run_button', 'Run'));
+        runBtn.type = 'button'; runBtn.id = 'bench-dec-run';
+        runBtn.addEventListener('click', function () { self.start(); });
+        var cancelBtn = el('button', 'btn', t('bench.progress.cancel', 'Cancel'));
+        cancelBtn.type = 'button'; cancelBtn.id = 'bench-dec-cancel';
+        cancelBtn.hidden = true;
+        cancelBtn.addEventListener('click', function () { self.cancel(); });
+        var clearBtn = el('button', 'btn', t('acc_bench.results.clear', 'Clear Results'));
+        clearBtn.type = 'button'; clearBtn.id = 'bench-dec-clear';
+        clearBtn.addEventListener('click', function () { self.clearResults(); });
+        actions.append(runBtn, cancelBtn, clearBtn);
+        f.appendChild(actions);
+        return f;
+    },
+
+    loadModels: async function () {
+        var d = dom();
+        try {
+            var data = await d.fetchJson(api() + '/models');
+            var sel = gid('bench-dec-model');
+            if (!sel) return;
+            var usable = ((data && data.models) || []).filter(function (m) {
+                return (m.engine_type || m.model_type) === 'decision';
+            });
+            var ph2 = el('option', null, t('bench.config.model_placeholder', 'Select model…'));
+            ph2.value = '';
+            sel.replaceChildren(ph2);
+            usable.forEach(function (m) {
+                sel.appendChild(el('option', null, m.id || m.model_id));
+            });
+        } catch (e) { /* start surfaces errors */ }
+    },
+
+    loadTasks: async function () {
+        var d = dom();
+        var self = this;
+        try {
+            var p = await d.fetchJson(api() + '/bench/decision/tasks');
+            this.state.packs = p.tasks || {};
+            var grid = gid('bench-dec-tasks');
+            if (!grid) return;
+            grid.replaceChildren();
+            Object.keys(this.state.packs).sort().forEach(function (name) {
+                var m = self.state.packs[name];
+                var card = el('div', 'acc-task');
+                card.appendChild(el('div', 'acc-task-name',
+                    t('uplift.bench.pack.' + name.replace(/-/g, '_'), name)));
+                card.appendChild(el('div', 'acc-task-desc',
+                    (m.items || 0).toLocaleString() + ' · ' + (m.license || '')));
+                card.title = String(m.source || '');
+                card.addEventListener('click', function () {
+                    var on = card.classList.toggle('on');
+                    self.state.selected[name] = on;
+                });
+                grid.appendChild(card);
+            });
+        } catch (e) {
+            self.renderStatus('⚠ ' + String((e && e.message) || e));
+        }
+    },
+
+    start: async function () {
+        var d = dom();
+        var model = (gid('bench-dec-model') || {}).value || '';
+        var packs = Object.keys(this.state.selected)
+            .filter(function (k) { return this.state.selected[k]; }, this);
+        if (!model) {
+            d.toast(t('bench.config.model_placeholder', 'Select model…'), 'error');
+            return;
+        }
+        if (!packs.length) {
+            d.toast(t('uplift.bench.pick_tasks', 'Pick at least one benchmark'), 'error');
+            return;
+        }
+        var limSel = gid('bench-dec-limit');
+        this.state.limit = Number((limSel || {}).value || 0);
+        try {
+            var r = await d.postJson(api() + '/bench/decision/start',
+                { model_id: model, packs: packs, limit: this.state.limit });
+            this.state.running = true;
+            this.state.runId = r.run_id;
+            this.setButtons();
+            this.startStream(r.run_id);
+        } catch (e) {
+            d.toast(String((e && e.message) || e), 'error');
+        }
+    },
+
+    cancel: async function () {
+        var d = dom();
+        if (!this.state.runId) return;
+        try { await d.postJson(api() + '/bench/decision/'
+            + encodeURIComponent(this.state.runId) + '/cancel', {}); }
+        catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+    },
+
+    clearResults: async function () {
+        var d = dom();
+        try {
+            await d.postJson(api() + '/bench/decision/results/reset', {});
+            this.refreshResults();
+        } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+    },
+
+    discover: async function () {
+        var d = dom();
+        try {
+            var a = await d.fetchJson(api() + '/bench/decision/active');
+            if (a && a.running) {
+                this.state.running = true;
+                this.state.runId = a.run_id;
+                this.setButtons();
+                this.startStream(a.run_id);
+            }
+        } catch (e) { /* idle */ }
+    },
+
+    refreshResults: async function () {
+        var d = dom();
+        try {
+            var p = await d.fetchJson(api() + '/bench/decision/results');
+            this.state.results = p.results || [];
+            this.renderResults();
+        } catch (e) { /* keep last view */ }
+    },
+
+    startStream: function (runId) {
+        var self = this;
+        stopStream();
+        if (!W().EventSource) return;
+        try {
+            _es = new EventSource(api() + '/bench/decision/'
+                + encodeURIComponent(runId) + '/stream');
+            _es.onmessage = function (ev) {
+                var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
+                self.onEvent(data);
+            };
+            _es.onerror = function () { /* replay-from-0 on reconnect */ };
+        } catch (e) { /* polling fallback omitted: short runs, results refresh covers */ }
+    },
+
+    onEvent: function (ev) {
+        if (ev.type === 'progress') {
+            this.renderStatus((ev.message || ev.phase || '') +
+                (ev.total ? ' (' + (Number(ev.current) + 1) + '/' + ev.total + ')' : ''));
+        } else if (ev.type === 'result') {
+            this.state.results.push(ev.data);
+            this.renderResults();
+        } else if (ev.type === 'done') {
+            this.state.running = false; this.state.runId = null;
+            this.setButtons(); stopStream();
+            this.renderStatus(t('uplift.bench.run_finished', 'Finished'));
+            this.refreshResults();
+        } else if (ev.type === 'error') {
+            this.state.running = false; this.state.runId = null;
+            this.setButtons(); stopStream();
+            this.renderStatus('⚠ ' + (ev.message || 'error'));
+            this.refreshResults();
+        }
+    },
+
+    setButtons: function () {
+        var runBtn = gid('bench-dec-run'), c = gid('bench-dec-cancel');
+        if (runBtn) runBtn.disabled = this.state.running;
+        if (c) c.hidden = !this.state.running;
+    },
+
+    renderStatus: function (s) {
+        var n = gid('bench-dec-status');
+        if (n) n.textContent = s;
+    },
+
+    renderResults: function () {
+        var wrap = gid('bench-dec-results');
+        if (!wrap) return;
+        var rows = this.state.results.slice().reverse();
+        if (!rows.length) { wrap.replaceChildren(); return; }
+        var tbl = el('table', 'bench-table');
+        var head = el('tr');
+        [t('bench.config.model', 'Model'), t('acc_bench.config.benchmarks', 'Benchmarks'),
+         t('uplift.bench.dec_accuracy', 'Accuracy'),
+         t('uplift.bench.dec_brier', 'Brier'),
+         t('uplift.bench.dec_ece', 'ECE'),
+         t('uplift.bench.dec_agreement', 'Agreement'),
+         t('uplift.bench.dec_latency', 'ms/question'),
+         t('uplift.bench.samples', 'Samples'), ''].forEach(function (h) {
+            head.appendChild(el('th', null, h));
+        });
+        tbl.appendChild(head);
+        var fmt = function (v) { return v == null ? '—' : Number(v).toFixed(4); };
+        rows.forEach(function (r) {
+            var tr = el('tr');
+            var packName = r.pack || '';
+            tr.append(
+                el('td', null, String(r.model_id || '')),
+                el('td', null, t('uplift.bench.pack.' + packName.replace(/-/g, '_'), packName)),
+                el('td', null, fmt(r.accuracy)),
+                el('td', null, fmt(r.brier)),
+                el('td', null, fmt(r.ece)),
+                el('td', null, fmt(r.agreement)),
+                el('td', null, r.ms_per_question == null ? '—'
+                    : String(r.ms_per_question)),
+                el('td', null, r.items != null ? String(r.items) : '—'),
+                el('td', null, r.ts ? new Date(r.ts * 1000).toLocaleString() : ''));
+            tbl.appendChild(tr);
+        });
+        wrap.replaceChildren(tbl);
+    },
+};
 
 function stopStream() {
     if (_es) { try { _es.close(); } catch (_) {} _es = null; }

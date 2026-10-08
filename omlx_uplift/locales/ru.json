@@ -802,5 +802,15 @@
  "uplift.envcat.filt.set": "Заданные",
  "uplift.envcat.legend_managed": "этой переменной владеет сам oMLX",
  "uplift.envcat.legend_editable": "можно редактировать здесь",
- "uplift.envcat.legend_effect": "когда значение подействует"
+ "uplift.envcat.legend_effect": "когда значение подействует",
+ "uplift.bench.decision": "Решение",
+ "uplift.bench.decision_desc": "Типизированные вопросы через /v1/systemone по закреплённому офлайн-набору заданий.",
+ "uplift.bench.dec_accuracy": "Точность",
+ "uplift.bench.dec_brier": "Брайер",
+ "uplift.bench.dec_ece": "ECE",
+ "uplift.bench.dec_agreement": "Согласованность",
+ "uplift.bench.dec_latency": "мс/вопрос",
+ "uplift.bench.pack.arc_choice": "ARC-Challenge (наука)",
+ "uplift.bench.pack.bbq_choice": "BBQ (смещения / безопасностная маршрутизация)",
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (достоверность)"
 }

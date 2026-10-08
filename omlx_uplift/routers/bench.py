@@ -17,7 +17,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .base import api_router, engine_pool, require_admin
-from .. import accuracy_engine, bench_engine, context_engine, embed_engine
+from .. import accuracy_engine, bench_engine, context_engine, decision_engine, embed_engine
 
 
 @api_router.get("/bench/flag")
@@ -232,6 +232,74 @@ async def bench_embed_stream(run_id: str, is_admin: bool = Depends(require_admin
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
     return StreamingResponse(
         embed_engine.event_stream(run),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"},
+    )
+
+
+# ---- decision / System-1 (REPL-4c) — LIVE via decision_engine --------------
+# Same order discipline: literals BEFORE /bench/{run_id}/... dynamics
+# (GET /bench/{run_id}/results would swallow /bench/decision/results).
+
+@api_router.get("/bench/decision/tasks")
+async def bench_decision_tasks(is_admin: bool = Depends(require_admin)):
+    """Pinned pack list (provenance + item counts) from the manifest."""
+    return decision_engine.tasks_payload()
+
+
+@api_router.post("/bench/decision/start")
+async def bench_decision_start(request: Request, is_admin: bool = Depends(require_admin)):
+    body = await request.json()
+    try:
+        return await decision_engine.start(body or {})
+    except decision_engine.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except decision_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except decision_engine.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@api_router.get("/bench/decision/active")
+async def bench_decision_active(is_admin: bool = Depends(require_admin)):
+    run = decision_engine.active_run()
+    if run is None:
+        return {"running": False}
+    return {"running": True, "run_id": run.run_id, "status": run.status,
+            "model_id": run.model_id, "packs": run.packs,
+            "done": len(run.results)}
+
+
+@api_router.get("/bench/decision/results")
+async def bench_decision_results(is_admin: bool = Depends(require_admin)):
+    return decision_engine.results_payload()
+
+
+@api_router.post("/bench/decision/results/reset")
+async def bench_decision_results_reset(is_admin: bool = Depends(require_admin)):
+    return decision_engine.reset_results()
+
+
+@api_router.post("/bench/decision/{run_id}/cancel")
+async def bench_decision_cancel(run_id: str, is_admin: bool = Depends(require_admin)):
+    run = decision_engine.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    try:
+        return await decision_engine.cancel(run)
+    except decision_engine.NotRunning as e:
+        raise HTTPException(status_code=400,
+                            detail=f"Run is not active (status: {e})")
+
+
+@api_router.get("/bench/decision/{run_id}/stream")
+async def bench_decision_stream(run_id: str, is_admin: bool = Depends(require_admin)):
+    run = decision_engine.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    return StreamingResponse(
+        decision_engine.event_stream(run),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
                  "X-Accel-Buffering": "no"},

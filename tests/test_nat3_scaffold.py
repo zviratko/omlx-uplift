@@ -75,6 +75,16 @@ NAT3_ROUTES = [
     ("POST", "/bench/embed/results/reset"),
     ("POST", "/bench/embed/{run_id}/cancel"),
     ("GET", "/bench/embed/{run_id}/stream"),
+    # REPL-4c: decision literals sit in the same literal-before-dynamic
+    # band (GET /bench/{run_id}/results would otherwise swallow
+    # /bench/decision/results); dynamics are 4-segment, immune anyway.
+    ("GET", "/bench/decision/tasks"),
+    ("POST", "/bench/decision/start"),
+    ("GET", "/bench/decision/active"),
+    ("GET", "/bench/decision/results"),
+    ("POST", "/bench/decision/results/reset"),
+    ("POST", "/bench/decision/{run_id}/cancel"),
+    ("GET", "/bench/decision/{run_id}/stream"),
     ("POST", "/bench/start"),
     ("GET", "/bench/active"),
     ("GET", "/bench/{run_id}/stream"),

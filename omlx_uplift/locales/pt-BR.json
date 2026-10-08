@@ -806,5 +806,15 @@
  "uplift.envcat.filt.set": "Definidas",
  "uplift.envcat.legend_managed": "o oMLX original é dono desta variável",
  "uplift.envcat.legend_editable": "editável aqui",
- "uplift.envcat.legend_effect": "quando o valor entra em vigor"
+ "uplift.envcat.legend_effect": "quando o valor entra em vigor",
+ "uplift.bench.decision": "Decisão",
+ "uplift.bench.decision_desc": "Perguntas tipadas via /v1/systemone contra um pacote de tarefas offline fixado.",
+ "uplift.bench.dec_accuracy": "Precisão",
+ "uplift.bench.dec_brier": "Brier",
+ "uplift.bench.dec_ece": "ECE",
+ "uplift.bench.dec_agreement": "Concordância",
+ "uplift.bench.dec_latency": "ms/pergunta",
+ "uplift.bench.pack.arc_choice": "ARC-Challenge (ciência)",
+ "uplift.bench.pack.bbq_choice": "BBQ (viés / roteamento de segurança)",
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (veracidade)"
 }

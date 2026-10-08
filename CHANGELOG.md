@@ -12,6 +12,17 @@ fixed annoyance, changed behavior, new command), add one bullet under an
 users never see.
 
 ## Unreleased
+- **Native Decision benchmark (preview branch).** The Bench tab gained a
+  Decision sub-tab for System-1 models (Clef/OpenJev via upstream's new
+  `/v1/systemone`). Scoring runs in-process against the decision engine
+  through upstream's own eviction-proof lease — the bench measures the
+  serving path. The task pack ships pinned and offline: three packs
+  (ARC-Challenge 294, BBQ 300, TruthfulQA mc1 400) as JSON fixtures with
+  sha256 integrity + licence provenance (CC-BY-SA / CC-BY / Apache-2.0,
+  extractor script included). Per pack: choice accuracy, Brier + ECE on
+  derived probability questions, position-bias agreement (same item
+  re-asked with shuffled options) and ms/question latency. Cancel stops
+  between items; a cancelled pack is never persisted.
 - **Native Bench/Chat shell (preview branch only, off by default).** The
   `feat/native-bench-chat` build accepts `?native=off|bench|chat|all` (or
   `uplift_native_surfaces` in `~/.omlx/uplift/config.json`) to swap the

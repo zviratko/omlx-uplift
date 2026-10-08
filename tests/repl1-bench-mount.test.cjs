@@ -78,6 +78,12 @@ const CAT = {   // fake merged catalog: classic + uplift keys, one marker lang
     'ctx_bench.result.section_label': 'CTXRESULT',
     'uplift.bench.embeddings': 'SUBEMB',
     'uplift.bench.rerankers': 'SUBRRK',
+    'uplift.bench.decision': 'SUBDEC',
+    'uplift.bench.decision_desc': 'DECDESC',
+    'uplift.bench.dec_accuracy': 'DECACC',
+    'uplift.bench.pack.arc_choice': 'PACKARC',
+    'uplift.bench.pack.bbq_choice': 'PACKBBQ',
+    'uplift.bench.pack.tqa_choice': 'PACKTQA',
     'modal.model_settings.qwen_ane_tune': 'ANEHEADING',
     'modal.model_settings.qwen_ane_tune_start': 'ANESTART',
 };
@@ -91,6 +97,7 @@ function load() {
                         return { models: [
                             { id: 'Qwen3-Embedding-0.6B-4bit-DWQ', engine_type: 'embedding' },
                             { id: 'jina-reranker-v3.5-mlx-q8', engine_type: 'reranker' },
+                            { id: 'clef-flash-4bit', engine_type: 'decision' },
                             { id: 'SmolLM2-360M-Instruct-oQ4', engine_type: 'llm' }] };
                     }
                     if (String(u).endsWith('/bench/embed/tasks')) {
@@ -98,6 +105,24 @@ function load() {
                             'STS12': { kind: 'embed', group: 'sts', sizes: 3108, cs: false },
                             'CTKFactsNLI': { kind: 'embed', group: 'pair', sizes: 680, cs: true },
                             'HUMECore17InstructionReranking': { kind: 'rerank', group: 'rerank', sizes: 160, cs: false } } };
+                    }
+                    if (String(u).endsWith('/bench/decision/tasks')) {
+                        return { tasks: {
+                            'arc-choice': { kind: 'decision', items: 294, license: 'CC-BY-SA-4.0',
+                                            source: 'allenai/ai2_arc (ARC-Challenge) split=test' },
+                            'bbq-choice': { kind: 'decision', items: 300, license: 'CC-BY-4.0',
+                                            source: 'oskarvanderwal/bbq (All) split=test' },
+                            'tqa-choice': { kind: 'decision', items: 400, license: 'Apache-2.0',
+                                            source: 'truthfulqa/truthful_qa (multiple_choice) split=validation' } } };
+                    }
+                    if (String(u).endsWith('/bench/decision/results')
+                        || String(u).endsWith('/bench/decision/active')) {
+                        return String(u).endsWith('/results')
+                            ? { results: [{ pack: 'arc-choice', model_id: 'clef-flash-4bit',
+                                            accuracy: 0.8571, brier: 0.05, ece: 0.04,
+                                            agreement: 0.96, ms_per_question: 480,
+                                            items: 294, skipped: 0, ts: 1760000000 }] }
+                            : { running: false };
                     }
                     if (String(u).endsWith('/bench/accuracy/tasks')) {
                         return { tasks: [{ group: 'acc_bench.benchmarks.group_knowledge',
@@ -200,6 +225,35 @@ test('REPL-4: subtab strip carries Embeddings + Rerankers through the catalog', 
     const strip = allText(byId['bench-native']).split('BENCHHEADING')[0];
     assert.ok(strip.includes('SUBEMB') && strip.includes('SUBRRK'),
         'embed/rerank subtab labels present');
+});
+
+test('REPL-4c: decision subtab paints pack grid + model filter + results table', async () => {
+    const { win, byId } = load();
+    win.UpliftNativeBench.mount();
+    assert.ok(allText(byId['bench-native']).split('BENCHHEADING')[0]
+        .includes('SUBDEC'), 'decision subtab label present');
+    win.UpliftNativeBench.showSub('decision');
+    await new Promise(r => setTimeout(r, 15));
+    const panel = byId['bench-subpanel'];
+    const text = allText(panel);
+    assert.ok(text.includes('DECDESC'), 'panel desc via uplift key');
+    // pack names come from the catalog, not raw fixture ids
+    assert.ok(text.includes('PACKARC') && text.includes('PACKBBQ')
+        && text.includes('PACKTQA'), 'pack cards translated');
+    assert.ok(!text.includes('arc-choice'), 'no raw pack id leaks to UI');
+    // model filter shows ONLY decision models
+    const opts = [];
+    (function walk(n) {
+        if (n && n.tagName === 'option') opts.push(n.textContent);
+        for (const k of (n && n.children) || []) walk(k);
+    })(panel);
+    assert.ok(opts.includes('clef-flash-4bit'), 'decision model listed');
+    assert.ok(!opts.includes('SmolLM2-360M-Instruct-oQ4'),
+        'LLM must not be selectable on the decision tab');
+    // results roundtrip: accumulated row rendered through the table
+    assert.ok(text.includes('DECACC'), 'translated score column header');
+    assert.ok(text.includes('0.8571') && text.includes('clef-flash-4bit'),
+        'accumulated result row rendered');
 });
 
 test('REPL-4: embed subtab paints model filter + task grid from the server', async () => {

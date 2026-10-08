@@ -802,5 +802,15 @@
  "uplift.envcat.filt.set": "Právě nastaveno",
  "uplift.envcat.legend_managed": "tuto proměnnou vlastní původní oMLX",
  "uplift.envcat.legend_editable": "lze upravit zde",
- "uplift.envcat.legend_effect": "kdy se hodnota projeví"
+ "uplift.envcat.legend_effect": "kdy se hodnota projeví",
+ "uplift.bench.decision": "Rozhodování",
+ "uplift.bench.decision_desc": "Typované otázky přes /v1/systemone proti připnuté offline sadě úloh.",
+ "uplift.bench.dec_accuracy": "Přesnost",
+ "uplift.bench.dec_brier": "Brier",
+ "uplift.bench.dec_ece": "ECE",
+ "uplift.bench.dec_agreement": "Shoda",
+ "uplift.bench.dec_latency": "ms/otázku",
+ "uplift.bench.pack.arc_choice": "ARC-Challenge (vědecké otázky)",
+ "uplift.bench.pack.bbq_choice": "BBQ (zkreslení / bezpečnostní routování)",
+ "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (pravdivost)"
 }

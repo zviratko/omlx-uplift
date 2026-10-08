@@ -34,7 +34,9 @@ include = ["omlx_uplift*"]
 
 [tool.setuptools.package-data]
 "omlx_uplift" = ["static/**/*", "locales/*.json", "skins-example/*.yml",
-                 "man/*.1", "bench_env_requirements.txt"]
+                 "man/*.1", "bench_env_requirements.txt",
+                 "mteb_env_requirements.txt",
+                 "evals/systemone/data/*.json"]
 
 # Autopatch .pth ('import omlx_uplift.autopatch') is written by
 # `omlx-uplift install [--python PATH]` — used by brew post_install and the
