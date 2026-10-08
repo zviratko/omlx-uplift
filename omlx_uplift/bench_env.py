@@ -34,13 +34,13 @@ VENV_DIRNAME = "bench-env"
 MARKER = "uplift-bench-env.json"
 
 
-def bench_env_dir() -> Path:
+def bench_env_dir(dirname: str = VENV_DIRNAME) -> Path:
     from . import paths
-    return paths.uplift_store_dir() / VENV_DIRNAME
+    return paths.uplift_store_dir() / dirname
 
 
-def requirements_digest() -> str:
-    return hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest()[:16]
+def requirements_digest(req: Path = REQUIREMENTS) -> str:
+    return hashlib.sha256(req.read_bytes()).hexdigest()[:16]
 
 
 def _python_for_venv() -> str:
@@ -72,17 +72,18 @@ def _python_for_venv() -> str:
     raise RuntimeError("no python >= 3.10 found for the bench venv")
 
 
-def status() -> dict:
-    venv = bench_env_dir()
+def status(*, dirname: str = VENV_DIRNAME, req: Path = REQUIREMENTS,
+           marker: str = MARKER) -> dict:
+    venv = bench_env_dir(dirname)
     py = venv / "bin" / "python"
-    marker = venv / MARKER
+    marker_path = venv / marker
     if not py.exists():
         return {"state": "missing", "path": str(venv)}
-    digest = requirements_digest()
-    if marker.exists():
+    digest = requirements_digest(req)
+    if marker_path.exists():
         import json
         try:
-            built = json.loads(marker.read_text()).get("requirements")
+            built = json.loads(marker_path.read_text()).get("requirements")
         except Exception:
             built = None
     else:
@@ -93,11 +94,24 @@ def status() -> dict:
     return {"state": "ready", "path": str(venv), "requirements": digest}
 
 
-def create(*, reinstall: bool = False, quiet: bool = False) -> dict:
-    """Build (or rebuild) the pinned venv. Returns status() at the end."""
-    venv = bench_env_dir()
-    if status()["state"] == "ready" and not reinstall:
-        return status()
+def create(*, reinstall: bool = False, quiet: bool = False,
+           dirname: str = VENV_DIRNAME, req: Path = REQUIREMENTS,
+           marker: str = MARKER, import_name: str = "lm_eval",
+           extra_check=None) -> dict:
+    """Build (or rebuild) a pinned bench venv. Returns status() at the end.
+
+    Two envs share this machinery (REPL-4 decision, recorded on the card):
+    - bench-env: harness, torch-free HARD RULE (extra_check=None means the
+      default torch probe below; a torch appearing there is a pin mistake).
+    - mteb-env: MTEB, which hard-requires torch>=2.0 itself. Passing
+      extra_check (a function that RAISES on a bad venv) replaces the
+      torch probe — the kegs stay torch-free either way; only /store envs
+      carry evaluation dependencies.
+    """
+    st_kw = dict(dirname=dirname, req=req, marker=marker)
+    if status(**st_kw)["state"] == "ready" and not reinstall:
+        return status(**st_kw)
+    venv = bench_env_dir(dirname)
     if venv.exists() and reinstall:
         shutil.rmtree(venv)
     venv.parent.mkdir(parents=True, exist_ok=True)
@@ -107,31 +121,45 @@ def create(*, reinstall: bool = False, quiet: bool = False) -> dict:
     subprocess.run([base, "-m", "venv", str(venv)], check=True)
     py = venv / "bin" / "python"
     if not quiet:
-        print("installing pinned harness requirements (first run ~1 min)...")
+        print("installing pinned bench requirements (first run ~1-3 min)...")
     subprocess.run([str(py), "-m", "pip", "install", "--quiet", "--upgrade", "pip"],
                    check=True)
     subprocess.run([str(py), "-m", "pip", "install", "--quiet",
-                    "-r", str(REQUIREMENTS)], check=True)
-    # HARD RULE check: torch must not have snuck in as a transitive dep.
-    # exit 1 == find_spec found torch (see the sys.exit polarity below).
-    probe = subprocess.run(
-        [str(py), "-c", "import importlib.util, sys;"
-         "sys.exit(1 if importlib.util.find_spec('torch') else 0)"],
-        capture_output=True)
-    if probe.returncode != 0:
+                    "-r", str(req)], check=True)
+    try:
+        if extra_check is not None:
+            extra_check(py)
+        else:
+            # HARD RULE check (bench-env): torch must not have snuck in as
+            # a transitive dep. exit 1 == find_spec found torch (see the
+            # sys.exit polarity below).
+            probe = subprocess.run(
+                [str(py), "-c", "import importlib.util, sys;"
+                 "sys.exit(1 if importlib.util.find_spec('torch') else 0)"],
+                capture_output=True)
+            if probe.returncode != 0:
+                raise RuntimeError(
+                    "torch appeared in the bench venv — refusing "
+                    "(card hard rule: harness env stays torch-free)")
+        ver = subprocess.run(
+            [str(py), "-c",
+             f"import {import_name}; print({import_name}.__version__)"],
+            capture_output=True, text=True)
+        if ver.returncode != 0:
+            raise RuntimeError(
+                f"venv built but 'import {import_name}' fails: "
+                f"{ver.stderr.strip()[-200:]}")
+    except Exception:
         shutil.rmtree(venv, ignore_errors=True)
-        raise RuntimeError("torch appeared in the bench venv — refusing "
-                           "(card hard rule: no torch anywhere uplift owns)")
-    ver = subprocess.run([str(py), "-c",
-                          "import lm_eval; print(lm_eval.__version__)"],
-                         capture_output=True, text=True, check=True).stdout.strip()
+        raise
     import json
-    (venv / MARKER).write_text(json.dumps(
-        {"requirements": requirements_digest(), "lm_eval": ver,
+    (venv / marker).write_text(json.dumps(
+        {"requirements": requirements_digest(req),
+         import_name: ver.stdout.strip(),
          "created": int(__import__("time").time())}, indent=1))
     if not quiet:
-        print(f"bench venv ready: lm_eval {ver}")
-    return status()
+        print(f"bench venv ready: {import_name} {ver.stdout.strip()}")
+    return status(**st_kw)
 
 
 def harness_python() -> Optional[str]:
@@ -180,11 +208,14 @@ def offline_mode() -> bool:
 
 def spawn(args: list[str], *, api_key: str, hf_cache: Optional[Path] = None,
           offline: bool = False, cwd: Optional[Path] = None,
-          module: Optional[str] = "lm_eval") -> subprocess.Popen:
+          module: Optional[str] = "lm_eval",
+          python: Optional[str] = None) -> subprocess.Popen:
     """Start a harness run in its own process group with the key ONLY in
     the environment (never argv, never logged). argv = python -m <module>
-    args; module=None runs args directly (tests)."""
-    py = harness_python()
+    args; module=None runs args directly (tests). python= overrides the
+    interpreter (REPL-4: the mteb child uses the mteb-env venv; the key-
+    env-only and process-group rules are identical)."""
+    py = python or harness_python()
     if py is None:
         raise RuntimeError("bench venv not ready — run: omlx-uplift bench-env create")
     env = dict(os.environ)

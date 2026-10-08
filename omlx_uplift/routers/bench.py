@@ -17,7 +17,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .base import api_router, engine_pool, require_admin
-from .. import accuracy_engine, bench_engine, context_engine
+from .. import accuracy_engine, bench_engine, context_engine, embed_engine
 
 
 @api_router.get("/bench/flag")
@@ -169,6 +169,73 @@ async def bench_ane_apply(tuning_id: str, request: Request,
     merged.update(patch)
     mgr.set_settings(model_id, ModelSettings.from_dict(merged))
     return {"model_id": model_id, "applied_keys": sorted(patch)}
+
+
+# ---- embeddings / rerankers (REPL-4) — LIVE via embed_engine ---------------
+
+@api_router.get("/bench/embed/tasks")
+async def bench_embed_tasks(is_admin: bool = Depends(require_admin)):
+    """Curated laptop-sized MTEB shortlist + mteb-env readiness state."""
+    return embed_engine.tasks_payload()
+
+
+@api_router.post("/bench/embed/start")
+async def bench_embed_start(request: Request, is_admin: bool = Depends(require_admin)):
+    pool = engine_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Engine pool not initialized")
+    body = await request.json()
+    try:
+        return await embed_engine.start(body or {}, pool)
+    except embed_engine.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except embed_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.get("/bench/embed/active")
+async def bench_embed_active(is_admin: bool = Depends(require_admin)):
+    run = embed_engine.active_run()
+    if run is None:
+        return {"running": False, "run_id": None}
+    return {"running": True, "run_id": run.run_id, "model_id": run.model_id,
+            "kind": run.kind, "status": run.status, "tasks": run.tasks,
+            "done": len(run.results)}
+
+
+@api_router.get("/bench/embed/results")
+async def bench_embed_results(is_admin: bool = Depends(require_admin)):
+    return embed_engine.results_payload()
+
+
+@api_router.post("/bench/embed/results/reset")
+async def bench_embed_results_reset(is_admin: bool = Depends(require_admin)):
+    return embed_engine.reset_results()
+
+
+@api_router.post("/bench/embed/{run_id}/cancel")
+async def bench_embed_cancel(run_id: str, is_admin: bool = Depends(require_admin)):
+    run = embed_engine.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    try:
+        return await embed_engine.cancel(run)
+    except embed_engine.NotRunning as e:
+        raise HTTPException(status_code=400,
+                            detail=f"Run is not active (status: {e})")
+
+
+@api_router.get("/bench/embed/{run_id}/stream")
+async def bench_embed_stream(run_id: str, is_admin: bool = Depends(require_admin)):
+    run = embed_engine.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    return StreamingResponse(
+        embed_engine.event_stream(run),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"},
+    )
 
 
 # ---- throughput (REPL-1) — LIVE via bench_engine --------------------------

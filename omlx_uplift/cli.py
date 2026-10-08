@@ -253,7 +253,12 @@ def cmd_bench_env(argv=None) -> int:
     refuse to start when this is missing or stale."""
     import json as _json
 
-    ap = argparse.ArgumentParser(prog="omlx-uplift bench-env")
+    argv = list(argv or [])
+    which = "mteb" if argv and argv[0] == "mteb" else "bench"
+    if which == "mteb":
+        argv = argv[1:]
+
+    ap = argparse.ArgumentParser(prog=f"omlx-uplift {which}-env")
     ap.add_argument("action", nargs="?", default="status",
                     choices=["status", "create"])
     ap.add_argument("--reinstall", action="store_true",
@@ -261,18 +266,23 @@ def cmd_bench_env(argv=None) -> int:
     ap.add_argument("--json", action="store_true", help="machine-readable status")
     args = ap.parse_args(argv)
 
-    from . import bench_env
+    from . import mteb_env as _me
+    if which == "mteb":
+        status_fn, create_fn = _me.mteb_status, _me.mteb_create
+    else:
+        from . import bench_env
+        status_fn, create_fn = bench_env.status, bench_env.create
 
     if args.action == "create":
         try:
-            st = bench_env.create(reinstall=args.reinstall)
+            st = create_fn(reinstall=args.reinstall)
         except Exception as e:
-            print(f"bench-env create failed: {e}", file=sys.stderr)
+            print(f"{which}-env create failed: {e}", file=sys.stderr)
             return 1
         if args.json:
             print(_json.dumps(st))
         return 0
-    st = bench_env.status()
+    st = status_fn()
     rc = 0 if st["state"] == "ready" else 1
     if args.json:
         print(_json.dumps(st))
@@ -282,9 +292,9 @@ def cmd_bench_env(argv=None) -> int:
     elif st["state"] == "stale":
         print(f"stale: {st['path']}\n  built from {st['built_from']}, "
               f"requirements now {st['wants']}\n  "
-              f"rebuild: omlx-uplift bench-env create --reinstall")
+              f"rebuild: omlx-uplift {which}-env create --reinstall")
     else:
-        print(f"missing: {st['path']}\n  create: omlx-uplift bench-env create")
+        print(f"missing: {st['path']}\n  create: omlx-uplift {which}-env create")
     return 0 if st["state"] == "ready" else 1
 
 
@@ -1448,7 +1458,8 @@ def main() -> int:
         return show_man()
     if sys.argv[1] not in {
             "serve", "view", "install", "uninstall", "patch", "patches",
-            "kernel", "skin", "dev", "env", "doctor", "bench-env"}:
+            "kernel", "skin", "dev", "env", "doctor", "bench-env",
+            "mteb-env"}:
         print(f"omlx-uplift: unknown command {sys.argv[1]!r}\n",
               file=sys.stderr)
         from .help import print_help
@@ -1470,7 +1481,10 @@ def main() -> int:
     return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
             "uninstall": cmd_uninstall, "patch": cmd_patches,
             "kernel": cmd_kernel, "dev": cmd_dev, "env": cmd_env,
-            "doctor": cmd_doctor, "bench-env": cmd_bench_env}[cmd](rest)
+            "doctor": cmd_doctor, "bench-env": cmd_bench_env,
+             # mteb-env shares the implementation; the leading marker arg
+             # selects the env (REPL-4: second pinned venv, same discipline)
+             "mteb-env": lambda rest: cmd_bench_env(["mteb", *rest])}[cmd](rest)
 
 
 if __name__ == "__main__":

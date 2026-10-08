@@ -77,7 +77,9 @@ function mount() {
     [['throughput', t('navbar.dropdown.performance', 'Throughput')],
      ['accuracy', t('navbar.dropdown.accuracy', 'Intelligence')],
      ['context', t('navbar.dropdown.context', 'Context')],
-     ['ane', t('uplift.bench.ane_tune', 'ANE Tune')]].forEach(function (s) {
+     ['ane', t('uplift.bench.ane_tune', 'ANE Tune')],
+     ['embed', t('uplift.bench.embeddings', 'Embeddings')],
+     ['rerank', t('uplift.bench.rerankers', 'Rerankers')]].forEach(function (s) {
         var b = el('button', 'native-subtab' + (s[0] === _sub ? ' active' : ''), s[1]);
         b.type = 'button';
         b.dataset.sub = s[0];
@@ -103,6 +105,8 @@ function showSub(sub) {
     else if (sub === 'accuracy') ACC.render(panel);
     else if (sub === 'context') CTX.render(panel);
     else if (sub === 'ane') ANE.render(panel);
+    else if (sub === 'embed') MTEB('embed').render(panel);
+    else if (sub === 'rerank') MTEB('rerank').render(panel);
     else panel.appendChild(stubCard(sub));
 }
 
@@ -1299,6 +1303,317 @@ var ACC = {
         wrap.replaceChildren(tbl);
     },
 };
+
+/* ---- REPL-4: embeddings / rerankers (one factory, MTEB server-side) -----
+   Same thin-host doctrine: the curated task list + engine readiness come
+   from /bench/embed/tasks, the run executes as a server subprocess, this
+   panel only draws state and streams events. Score cells show mteb's main
+   metric value with the metric name under it — a bare number with no
+   metric name would lie about what it measures. */
+var MTEB_GROUPS = { sts: 'STS', retrieval: 'Retrieval', class: 'Classification',
+    pair: 'PairClassification', cluster: 'Clustering', bitext: 'BitextMining',
+    rerank: 'Reranking' };
+var MTEB_LIMITS = [0, 100, 500, 1000, 5000];
+
+function MTEB(kind) {
+    var prefix = 'bench-' + kind;
+
+    return {
+        state: null,
+
+        render: function (panel) {
+            this.state = { running: false, runId: null, tasks: {},
+                           selected: {}, limit: 0, results: [] };
+            panel.appendChild(this.form());
+            panel.appendChild(this.envNote());
+            var status = el('div', 'bench-status'); status.id = prefix + '-status';
+            var results = el('div', 'bench-results'); results.id = prefix + '-results';
+            panel.append(status, results);
+            this.loadModels();
+            this.loadTasks();
+            this.refreshResults();
+            this.discover();
+        },
+
+        envNote: function () {
+            var n = el('div', 'native-stub-note'); n.id = prefix + '-envnote';
+            n.hidden = true;
+            n.textContent = t('uplift.bench.mteb_env_missing',
+                'MTEB environment missing — run: omlx-uplift mteb-env create');
+            return n;
+        },
+
+        form: function () {
+            var self = this;
+            var f = el('div', 'bench-form card');
+            f.appendChild(el('h2', null, t(kind === 'embed'
+                ? 'uplift.bench.embeddings' : 'uplift.bench.rerankers',
+                kind === 'embed' ? 'Embeddings' : 'Rerankers')));
+            f.appendChild(el('p', 'native-stub-note', t(kind === 'embed'
+                ? 'uplift.bench.embed_desc' : 'uplift.bench.rerank_desc',
+                'MTEB tasks over the served API; a curated small set.')));
+
+            var row = el('div', 'bench-row');
+            var modelSel = el('select'); modelSel.id = prefix + '-model';
+            var ph = el('option', null, t('bench.config.model_placeholder', 'Select model…'));
+            ph.value = ''; modelSel.appendChild(ph);
+            var limSel = el('select'); limSel.id = prefix + '-limit';
+            MTEB_LIMITS.forEach(function (n) {
+                var o = el('option', null, n === 0
+                    ? t('acc_bench.config.full_option', 'Full') : String(n));
+                o.value = String(n);
+                if (n === 500) o.selected = true;
+                limSel.appendChild(o);
+            });
+            row.append(labeled(t('bench.config.model', 'Model'), modelSel),
+                       labeled(t('uplift.bench.sample_limit', 'Sample limit'), limSel));
+            f.appendChild(row);
+
+            var grid = el('div', 'acc-taskgrid'); grid.id = prefix + '-tasks';
+            f.appendChild(grid);
+
+            var actions = el('div', 'bench-actions');
+            var runBtn = el('button', 'btn btn-primary', t('bench.config.run_button', 'Run'));
+            runBtn.type = 'button'; runBtn.id = prefix + '-run';
+            runBtn.addEventListener('click', function () { self.start(); });
+            var cancelBtn = el('button', 'btn', t('bench.progress.cancel', 'Cancel'));
+            cancelBtn.type = 'button'; cancelBtn.id = prefix + '-cancel';
+            cancelBtn.hidden = true;
+            cancelBtn.addEventListener('click', function () { self.cancel(); });
+            var clearBtn = el('button', 'btn', t('acc_bench.results.clear', 'Clear Results'));
+            clearBtn.type = 'button'; clearBtn.id = prefix + '-clear';
+            clearBtn.addEventListener('click', function () { self.clearResults(); });
+            actions.append(runBtn, cancelBtn, clearBtn);
+            f.appendChild(actions);
+            return f;
+        },
+
+        loadModels: async function () {
+            var d = dom();
+            try {
+                var data = await d.fetchJson(api() + '/models');
+                var sel = gid(prefix + '-model');
+                if (!sel) return;
+                var rows = (data && data.models) || [];
+                var want = kind === 'embed' ? 'embedding' : 'reranker';
+                var usable = rows.filter(function (m) {
+                    return (m.engine_type || m.model_type) === want;
+                });
+                var ph2 = el('option', null, t('bench.config.model_placeholder', 'Select model…'));
+                ph2.value = '';
+                sel.replaceChildren(ph2);
+                usable.forEach(function (m) {
+                    sel.appendChild(el('option', null, m.id || m.model_id));
+                });
+            } catch (e) { /* start surfaces errors */ }
+        },
+
+        loadTasks: async function () {
+            var d = dom();
+            var self = this;
+            try {
+                var p = await d.fetchJson(api() + '/bench/embed/tasks');
+                this.state.tasks = p.tasks || {};
+                var note = gid(prefix + '-envnote');
+                if (note) note.hidden = p.env === 'ready';
+                this.renderGrid();
+            } catch (e) { /* grid stays empty until a retry */ }
+        },
+
+        renderGrid: function () {
+            var grid = gid(prefix + '-tasks');
+            if (!grid) return;
+            var self = this;
+            var byGroup = {};
+            Object.keys(this.state.tasks).forEach(function (name) {
+                var m = self.state.tasks[name];
+                if (m.kind !== kind) return;
+                (byGroup[m.group] = byGroup[m.group] || []).push(name);
+            });
+            grid.replaceChildren();
+            Object.keys(MTEB_GROUPS).forEach(function (g) {
+                if (!byGroup[g]) return;
+                var wrap = el('div', 'acc-group');
+                wrap.appendChild(el('div', 'bench-label', MTEB_GROUPS[g]));
+                var row = el('div', 'acc-group-tasks');
+                byGroup[g].sort().forEach(function (name) {
+                    var m = self.state.tasks[name];
+                    var card = el('div', 'acc-task');
+                    var name1 = el('div', 'acc-task-name',
+                        name + (m.cs ? ' [CZ]' : ''));
+                    var desc = el('div', 'acc-task-desc',
+                        m.sizes.toLocaleString() + (m.cap ? ' → ' + m.cap : ''));
+                    card.append(name1, desc);
+                    card.addEventListener('click', function () {
+                        var on = card.classList.toggle('on');
+                        self.state.selected[name] = on;
+                    });
+                    row.appendChild(card);
+                });
+                wrap.appendChild(row);
+                grid.appendChild(wrap);
+            });
+        },
+
+        start: async function () {
+            var d = dom();
+            var model = (gid(prefix + '-model') || {}).value || '';
+            var tasks = Object.keys(this.state.selected)
+                .filter(function (k) { return this.state.selected[k]; }, this);
+            if (!model) {
+                d.toast(t('bench.config.model_placeholder', 'Select model…'), 'error');
+                return;
+            }
+            if (!tasks.length) {
+                d.toast(t('uplift.bench.pick_tasks', 'Pick at least one benchmark'), 'error');
+                return;
+            }
+            var limitSel = gid(prefix + '-limit');
+            this.state.limit = Number((limitSel || {}).value || 0);
+            try {
+                var r = await d.postJson(api() + '/bench/embed/start',
+                    { model_id: model, kind: kind, tasks: tasks,
+                      limit: this.state.limit });
+                this.state.running = true;
+                this.state.runId = r.run_id;
+                this.setButtons();
+                this.startStream(r.run_id);
+            } catch (e) {
+                d.toast(String((e && e.message) || e), 'error');
+            }
+        },
+
+        cancel: async function () {
+            var d = dom();
+            if (!this.state.runId) return;
+            try { await d.postJson(api() + '/bench/embed/'
+                + encodeURIComponent(this.state.runId) + '/cancel', {}); }
+            catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        },
+
+        clearResults: async function () {
+            var d = dom();
+            try {
+                await d.postJson(api() + '/bench/embed/results/reset', {});
+                this.refreshResults();
+            } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        },
+
+        discover: async function () {
+            var d = dom();
+            try {
+                var a = await d.fetchJson(api() + '/bench/embed/active');
+                if (a && a.running && a.kind === kind) {
+                    this.state.running = true;
+                    this.state.runId = a.run_id;
+                    this.setButtons();
+                    this.startStream(a.run_id);
+                }
+            } catch (e) { /* idle */ }
+        },
+
+        refreshResults: async function () {
+            var d = dom();
+            try {
+                var p = await d.fetchJson(api() + '/bench/embed/results');
+                this.state.results = (p.results || []).filter(function (r) {
+                    return r.kind === kind;
+                });
+                this.renderResults();
+            } catch (e) { /* keep last view */ }
+        },
+
+        startStream: function (runId) {
+            var self = this;
+            stopStream();
+            var poll = function () {
+                if (_poll) clearInterval(_poll);
+                _poll = setInterval(async function () {
+                    var d = dom();
+                    try {
+                        var a = await d.fetchJson(api() + '/bench/embed/active');
+                        if (!a || !a.running) { stopStream(); }
+                        self.refreshResults();
+                    } catch (e) { /* transient */ }
+                }, 5000);
+            };
+            if (!W().EventSource) { poll(); return; }
+            try {
+                _es = new EventSource(api() + '/bench/embed/'
+                    + encodeURIComponent(runId) + '/stream');
+                _es.onmessage = function (ev) {
+                    var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
+                    self.onEvent(data);
+                };
+                _es.onerror = function () { /* replay-from-0 on reconnect */ };
+            } catch (e) { poll(); }
+        },
+
+        onEvent: function (ev) {
+            if (ev.type === 'progress') {
+                this.renderStatus((ev.message || ev.phase || '') +
+                    (ev.total ? ' (' + (Number(ev.current) + 1) + '/' + ev.total + ')' : ''));
+            } else if (ev.type === 'result') {
+                this.state.results.push(ev.data);
+                this.renderResults();
+            } else if (ev.type === 'done') {
+                this.state.running = false; this.state.runId = null;
+                this.setButtons(); stopStream();
+                this.renderStatus(t('uplift.bench.run_finished', 'Finished'));
+                this.refreshResults();
+            } else if (ev.type === 'error') {
+                this.state.running = false; this.state.runId = null;
+                this.setButtons(); stopStream();
+                this.renderStatus('⚠ ' + (ev.message || 'error'));
+                this.refreshResults();
+            }
+        },
+
+        setButtons: function () {
+            var runBtn = gid(prefix + '-run'), c = gid(prefix + '-cancel');
+            if (runBtn) runBtn.disabled = this.state.running;
+            if (c) c.hidden = !this.state.running;
+        },
+
+        renderStatus: function (s) {
+            var n = gid(prefix + '-status');
+            if (n) n.textContent = s;
+        },
+
+        renderResults: function () {
+            var wrap = gid(prefix + '-results');
+            if (!wrap) return;
+            var rows = this.state.results.slice().reverse();
+            if (!rows.length) { wrap.replaceChildren(); return; }
+            var tbl = el('table', 'bench-table');
+            var head = el('tr');
+            [t('bench.config.model', 'Model'), t('acc_bench.config.benchmarks', 'Benchmarks'),
+             t('acc_bench.results.score', 'Score'), t('uplift.bench.metric', 'Metric'),
+             t('uplift.bench.samples', 'Samples'), ''].forEach(function (h) {
+                head.appendChild(el('th', null, h));
+            });
+            tbl.appendChild(head);
+            rows.forEach(function (r) {
+                var tr = el('tr');
+                var tests = Object.keys(r.scores || {});
+                var sc = tests.length ? r.scores[tests[0]] : null;
+                var n = sc && sc.all ? (sc.all.n || sc.all.num || null) : null;
+                tr.append(
+                    el('td', null, String(r.model_id || '')),
+                    el('td', null, String(r.task || '')),
+                    el('td', null, sc && sc.main_score != null
+                        ? Number(sc.main_score).toFixed(4) : '—'),
+                    el('td', null, sc && sc.main_metric ? String(sc.main_metric) : '—'),
+                    el('td', null, n != null ? String(n)
+                        : (r.limit ? ('≤' + r.limit) : '—')),
+                    el('td', null, r.ts ? new Date(r.ts * 1000)
+                        .toLocaleString() : ''));
+                tbl.appendChild(tr);
+            });
+            wrap.replaceChildren(tbl);
+        },
+    };
+}
 
 function stopStream() {
     if (_es) { try { _es.close(); } catch (_) {} _es = null; }

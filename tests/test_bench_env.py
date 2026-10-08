@@ -49,7 +49,7 @@ def test_requirements_file_pins_and_is_torch_free():
 
 @pytest.fixture()
 def tmp_store(monkeypatch, tmp_path):
-    monkeypatch.setattr(bench_env, "bench_env_dir", lambda: tmp_path / "bench-env")
+    monkeypatch.setattr(bench_env, "bench_env_dir", lambda *a, **k: tmp_path / "bench-env")
     return tmp_path
 
 
@@ -65,7 +65,7 @@ def test_status_missing_ready_stale(tmp_store, monkeypatch):
     st = bench_env.status()
     assert st["state"] == "ready"
     # touch the requirements digest -> stale again
-    monkeypatch.setattr(bench_env, "requirements_digest", lambda: "deadbeef")
+    monkeypatch.setattr(bench_env, "requirements_digest", lambda *a, **k: "deadbeef")
     st = bench_env.status()
     assert st["state"] == "stale" and st["built_from"] != "deadbeef"
 
@@ -132,7 +132,7 @@ def test_scrub_key():
 
 def test_cli_dispatch_and_json(tmp_store, monkeypatch, capsys):
     from omlx_uplift import cli
-    monkeypatch.setattr(bench_env, "bench_env_dir", lambda: tmp_store / "bench-env")
+    monkeypatch.setattr(bench_env, "bench_env_dir", lambda *a, **k: tmp_store / "bench-env")
     # main() reads sys.argv; drive it directly
     old = sys.argv
     try:

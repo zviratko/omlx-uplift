@@ -76,6 +76,8 @@ const CAT = {   // fake merged catalog: classic + uplift keys, one marker lang
     'ctx_bench.heading': 'CTXHEADING',
     'ctx_bench.start': 'CTXSTART',
     'ctx_bench.result.section_label': 'CTXRESULT',
+    'uplift.bench.embeddings': 'SUBEMB',
+    'uplift.bench.rerankers': 'SUBRRK',
     'modal.model_settings.qwen_ane_tune': 'ANEHEADING',
     'modal.model_settings.qwen_ane_tune_start': 'ANESTART',
 };
@@ -85,6 +87,18 @@ function load() {
     const win = {
         UpliftCore: { t: (k) => (CAT[k] == null ? k : CAT[k]) },
         UpliftDom: { fetchJson: async (u) => {
+                    if (String(u).endsWith('/models')) {
+                        return { models: [
+                            { id: 'Qwen3-Embedding-0.6B-4bit-DWQ', engine_type: 'embedding' },
+                            { id: 'jina-reranker-v3.5-mlx-q8', engine_type: 'reranker' },
+                            { id: 'SmolLM2-360M-Instruct-oQ4', engine_type: 'llm' }] };
+                    }
+                    if (String(u).endsWith('/bench/embed/tasks')) {
+                        return { env: 'ready', tasks: {
+                            'STS12': { kind: 'embed', group: 'sts', sizes: 3108, cs: false },
+                            'CTKFactsNLI': { kind: 'embed', group: 'pair', sizes: 680, cs: true },
+                            'HUMECore17InstructionReranking': { kind: 'rerank', group: 'rerank', sizes: 160, cs: false } } };
+                    }
                     if (String(u).endsWith('/bench/accuracy/tasks')) {
                         return { tasks: [{ group: 'acc_bench.benchmarks.group_knowledge',
                             tasks: [{ key: 'mmlu', label: 'MMLU',
@@ -178,6 +192,48 @@ test('REPL-2a: accuracy subtab renders form + server task grid', async () => {
     assert.equal(radios.length, 2, 'two engine choices');
     const checked = radios.filter(r => r.checked).map(r => r.value);
     assert.deepEqual(checked, ['classic'], 'default engine = classic');
+});
+
+test('REPL-4: subtab strip carries Embeddings + Rerankers through the catalog', () => {
+    const { win, byId } = load();
+    win.UpliftNativeBench.mount();
+    const strip = allText(byId['bench-native']).split('BENCHHEADING')[0];
+    assert.ok(strip.includes('SUBEMB') && strip.includes('SUBRRK'),
+        'embed/rerank subtab labels present');
+});
+
+test('REPL-4: embed subtab paints model filter + task grid from the server', async () => {
+    const { win, byId } = load();
+    win.UpliftNativeBench.mount();
+    win.UpliftNativeBench.showSub('embed');
+    await new Promise(r => setTimeout(r, 15));
+    const panel = byId['bench-subpanel'];
+    const text = allText(panel);
+    assert.ok(text.includes('SUBEMB'), 'panel heading uses the embeddings key');
+    assert.ok(text.includes('STS12') && text.includes('CTKFactsNLI'),
+        'embed-kind tasks rendered from /bench/embed/tasks');
+    assert.ok(!text.includes('HUMECore17'), 'rerank-kind task hidden on the embed tab');
+    assert.ok(text.includes('[CZ]'), 'Czech task flagged');
+    const sel = byId['bench-embed-model'];
+    const opts = sel.children.map(o => o.textContent);
+    assert.ok(opts.includes('Qwen3-Embedding-0.6B-4bit-DWQ'),
+        'model picker filtered to embedding engine_type');
+    assert.ok(!opts.includes('SmolLM2-360M-Instruct-oQ4'), 'LLMs excluded');
+    const note = byId['bench-embed-envnote'];
+    assert.equal(note.hidden, true, 'env note hidden when mteb-env ready');
+});
+
+test('REPL-4: rerank subtab paints the rerank-kind task only', async () => {
+    const { win, byId } = load();
+    win.UpliftNativeBench.mount();
+    win.UpliftNativeBench.showSub('rerank');
+    await new Promise(r => setTimeout(r, 15));
+    const text = allText(byId['bench-subpanel']);
+    assert.ok(text.includes('HUMECore17InstructionReranking'), 'rerank task rendered');
+    assert.ok(!text.includes('STS12'), 'embed task hidden on the rerank tab');
+    const sel = byId['bench-rerank-model'];
+    const opts = sel.children.map(o => o.textContent);
+    assert.ok(opts.includes('jina-reranker-v3.5-mlx-q8'), 'reranker model offered');
 });
 
 test('second mount is a no-op (no double paint)', () => {

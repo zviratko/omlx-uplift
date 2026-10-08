@@ -67,6 +67,18 @@ users never see.
   offline mode configurable (`bench_hf_cache` / `bench_offline` in
   `~/.omlx/uplift/config.json`); the offline drill passed from a warm
   cache.
+- **Native Embeddings and Rerankers benchmark (preview branch).** The
+  Bench tab gained two sub-tabs over MTEB: a curated, laptop-sized task
+  set (STS, retrieval, classification, pair-classification, clustering,
+  bitext — three of them Czech — plus two small instruction-reranking
+  sets) instead of MTEB's full 1492-task registry. MTEB runs as a
+  subprocess in a second pinned venv (`omlx-uplift mteb-env create`,
+  ~1.5 GB) because mteb itself hard-requires torch; the harness bench-env
+  stays torch-free and neither the omlx nor the uplift keg gains any
+  dependency. Scores stream from the public serving path at task
+  granularity (MTEB over the API offers no per-question events; we report
+  the real granularity, never a fabricated one) and each row names its
+  metric. No community upload exists for these classes.
 
 ## [1.1] — 2026-10-07
 

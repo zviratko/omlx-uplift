@@ -233,6 +233,28 @@ from the shipped
 pin (70 packages, torch-free by hard rule). Takes about a minute on a
 warm wheel cache.
 The omlx and uplift kegs are never touched.
+.It Xo Ic mteb-env
+.Op Ar action
+.Op Fl -json
+.Xc
+.Bl -tag -width Ds -compact
+.It Ic mteb-env Op Ic status Fl -json
+Report the pinned MTEB venv used by the embeddings and rerankers bench:
+.Ic missing ,
+.Ic ready ,
+or
+.Ic stale
+(requirements changed since the venv was built; exit status 1).
+.It Ic mteb-env Ic create Op Fl -reinstall
+Build the venv under
+.Pa ~/.omlx/uplift/mteb-env
+from the shipped
+.Pa mteb_env_requirements.txt
+pin.
+MTEB requires torch, so this venv carries it; it stays a subprocess
+interpreter and the omlx and uplift kegs are never touched.
+Takes a few minutes on a warm wheel cache.
+.El
 .El
 .It Xo Ic env
 .Ic list

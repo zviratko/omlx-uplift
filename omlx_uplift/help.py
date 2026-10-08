@@ -34,6 +34,8 @@ COMMANDS = [
                " (read-only; exit 1 = unexpected drift)"),
     ("bench-env", "status|create — pinned lm-eval venv for the harness"
                   " accuracy engine (own venv, never a keg)"),
+    ("mteb-env", "status|create — pinned MTEB venv for the embeddings/"
+                 "rerankers bench (own venv; carries torch — never a keg)"),
 ]
 
 _TOP_USAGE = """\
@@ -75,6 +77,11 @@ COMMAND_USAGE = {
               "                 bench-env create [--reinstall]\n"
               "                 pinned lm-eval venv under ~/.omlx/uplift/bench-env\n"
               "                 (harness accuracy engine; no torch, ever)"),
+    "mteb-env": ("omlx-uplift mteb-env [status] [--json]\n"
+              "                 mteb-env create [--reinstall]\n"
+              "                 pinned MTEB venv under ~/.omlx/uplift/mteb-env\n"
+              "                 (embeddings/rerankers bench; torch lives HERE,\n"
+              "                 still never in a keg)"),
     "env": ("omlx-uplift env [list] [--json]\n"
             "                 env set NAME VALUE | env reset NAME\n"
             "                 env disable-all | env enable-all\n"

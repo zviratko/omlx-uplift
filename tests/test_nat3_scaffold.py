@@ -65,6 +65,16 @@ NAT3_ROUTES = [
     ("POST", "/bench/ane-tune/start"),
     ("GET", "/bench/ane-tune/results"),
     ("POST", "/bench/ane-tune/{tuning_id}/apply"),
+    # REPL-4: embed literals + dynamics sit BEFORE the throughput 3-segment
+    # dynamics — GET /bench/{run_id}/results would otherwise swallow
+    # /bench/embed/results (run_id='embed'). Order is load-bearing.
+    ("GET", "/bench/embed/tasks"),
+    ("POST", "/bench/embed/start"),
+    ("GET", "/bench/embed/active"),
+    ("GET", "/bench/embed/results"),
+    ("POST", "/bench/embed/results/reset"),
+    ("POST", "/bench/embed/{run_id}/cancel"),
+    ("GET", "/bench/embed/{run_id}/stream"),
     ("POST", "/bench/start"),
     ("GET", "/bench/active"),
     ("GET", "/bench/{run_id}/stream"),
