@@ -1765,15 +1765,19 @@ function applyShadowTheme(dc) {
         // rules must name both classes (0,2,0) to outrank
         // .ai-message-text{color:#000} — one-class rules lost before.
         '.message-bubble { color: var(--ink, #e6edf3); }',
-        // U75 #3: alternating grounds. --field vs --panel are visually
-        // identical in the day skin (measured U43: #f2f2f2 on both), so
-        // the USER side rides a deliberate accent tint — distinct from the
-        // assistant's --panel in every skin, quiet in both.
+        // U75 #3 + U81 (user: 'now give the assistant and user messages
+        // DISTINCT alternating backgrounds'): 12% accent over --field and
+        // --panel over --card measured only ~4 RGB steps apart in the day
+        // skin — technically alternating, perceptually not. Mixes bumped
+        // so BOTH sides separate from the canvas and from each other in
+        // every skin: user rides a clear accent tint, assistant a clear
+        // neutral step. Measured live, not eyeballed.
         '.message-bubble.user-message-text { color: var(--ink, #e6edf3);',
-        '  background: color-mix(in srgb, var(--accent, #4c8dff) 12%,',
+        '  background: color-mix(in srgb, var(--accent, #4c8dff) 16%,',
         '    var(--field, #1b2330)); }',
         '.message-bubble.ai-message-text { color: var(--ink, #e6edf3);',
-        '  background: var(--panel, #10151d); }',
+        '  background: color-mix(in srgb, var(--dim, #8b98ab) 12%,',
+        '    var(--panel, #10151d)); }',
         '.message-bubble pre, .message-bubble code { color: var(--ink, #e6edf3);',
         '  background: var(--bg, #0c1017); }',
         // U43: the input well is #text-input-container{background:#fff} —
