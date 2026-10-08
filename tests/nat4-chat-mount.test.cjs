@@ -617,15 +617,16 @@ test('U80: one box height for all text-family controls (doctrine)', () => {
         'textareas floor at the row height');
 });
 
-test('U82: row bands behind bubbles + single --radius shape knob', () => {
+test('U82: single --radius shape knob; row bands reverted (user dislike)', () => {
     const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
     const css = fs.readFileSync(`${STATIC_DIR}/uplift.css`, 'utf8');
-    // bands ride the FULL-WIDTH row (the bundle's role class), not the pill
-    // the css array splits a rule across entries: {',\n '  background...
-    assert.ok(/deep-chat-outer-container-role-user\s*{[\s\S]{0,40}background: var\(--chat-band-user/.test(src),
-        'user rows get the band token behind the bubble');
-    assert.ok(/deep-chat-outer-container-role-ai\s*{[\s\S]{0,40}background: var\(--chat-band-ai/.test(src),
-        'assistant rows get their band token');
+    // U82-follow-up (user: 'that background does not look good at all,
+    // revert that (just the background)'): NO role-row band painting may
+    // come back, in either sheet — the thread rides the plain card ground.
+    assert.ok(!/--chat-band-/.test(src) && !/--chat-band-/.test(css),
+        'chat band tokens must stay reverted');
+    assert.ok(!/outer-message-container[^\n]*role-(user|ai)[^\n]*{[\s\S]{0,40}background/.test(src),
+        'no background painting on the full-width message rows');
     // bubble corners ride the knob at 0,2,0 (adopted sheets beat equal specificity)
     assert.ok(/\.message-bubble\.user-message-text,[\s\S]{0,40}\.message-bubble\.ai-message-text\s*{[\s\S]{0,40}border-radius: var\(--radius/.test(src),
         'shadow bubble radius is the knob, not the bundle 10px');

@@ -79,10 +79,10 @@ Only whitelisted names compile; anything else is skipped with a warning.
 
 | kind | names |
 |---|---|
-| color (23) | `bg` `card` `row2` `field` `panel` `edge` `ink` `dim` `accent` `chart-1` `chart-2` `grid` `heat` `frame` `red` `good` `warn` `bad` `hdr-ink` `hdr-edge` `hdr-hover` `chat-band-user` `chat-band-ai` |
+| color (21) | `bg` `card` `row2` `field` `panel` `edge` `ink` `dim` `accent` `chart-1` `chart-2` `grid` `heat` `frame` `red` `good` `warn` `bad` `hdr-ink` `hdr-edge` `hdr-hover` |
 | font (2) | `mono` `sans` — CSS font stacks |
 | weight (1) | `hdr-weight` — `normal`, `bold`, or `100`–`900` |
-| size (1) | `radius` — `0px`–`32px`; the ONE corner radius for every rectangular box (message bubbles, inputs, selects, menus). House default is 0 (sharp). `chat-band-user` / `chat-band-ai` are the grounds of the alternating chat rows behind the bubbles |
+| size (1) | `radius` — `0px`–`32px`; the ONE corner radius for every rectangular box (message bubbles, inputs, selects, menus). House default is 0 (sharp) |
 
 Colors accept `#rgb` `#rgba` `#rrggbb` `#rrggbbaa`, `rgb()/rgba()/hsl()/hsla()`
 and named colors. The grounds you will set in almost every skin are

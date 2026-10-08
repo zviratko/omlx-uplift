@@ -49,11 +49,6 @@
        Custom properties inherit across the shadow boundary, so the chat
        (deep-chat) reads this same knob with zero JS. */
     --radius: 0px;
-    /* Chat row bands (user: "the background BEHIND the bubbles should
-       alternate"): role-keyed stripes the message rows sit on, skins
-       overridable like colors. Subtle — bubbles keep their own grounds. */
-    --chat-band-user: color-mix(in srgb, var(--accent) 7%, var(--card));
-    --chat-band-ai: color-mix(in srgb, var(--dim) 9%, var(--card));
 }
 [data-theme="light"] {
     --bg: #ffffff;              /* round 7 item 6: clean white, beige felt dull */

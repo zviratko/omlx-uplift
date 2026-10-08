@@ -1765,16 +1765,10 @@ function applyShadowTheme(dc) {
         // rules must name both classes (0,2,0) to outrank
         // .ai-message-text{color:#000} — one-class rules lost before.
         '.message-bubble { color: var(--ink, #e6edf3); }',
-        // U82 (user: 'the background BEHIND the bubbles should alternate'):
-        // ROW bands keyed on the role class the bundle already sets on
-        // the full-width outer container — the stripe spans the thread,
-        // the bubble keeps its own ground ON TOP of it. Two-class
-        // selectors: adopted sheets beat this tag at equal specificity
-        // (U43 lesson). Tokens are overridable by skins like colors.
-        '.outer-message-container.deep-chat-outer-container-role-user {',
-        '  background: var(--chat-band-user, #2b3038); }',
-        '.outer-message-container.deep-chat-outer-container-role-ai {',
-        '  background: var(--chat-band-ai, #262b33); }',
+        // U82 row bands REVERTED (user after seeing them live: 'that
+        // background does not look good at all, revert that') — the
+        // thread rides the plain card ground again; only the bubble
+        // grounds (U81) alternate. The radius override below STAYS.
         // U82 shape knob: the bundle hardcodes 10px pill radii IN ITS
         // ADOPTED SHEETS; this in-tree tag is overridden unless it names
         // two classes too — so the bubble corners now ride --radius

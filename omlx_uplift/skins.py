@@ -82,8 +82,6 @@ COLOR_TOKENS = frozenset({
     "bg", "card", "row2", "field", "panel", "edge", "ink", "dim", "accent",
     "chart-1", "chart-2", "grid", "heat", "frame", "red", "good", "warn",
     "bad", "hdr-ink", "hdr-edge", "hdr-hover",
-    # U82: chat row-band grounds (skins may flatten them to == card)
-    "chat-band-user", "chat-band-ai",
 })
 FONT_TOKENS = frozenset({"mono", "sans"})
 NUMERIC_TOKENS = frozenset({"hdr-weight"})
