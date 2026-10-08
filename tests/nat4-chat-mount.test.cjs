@@ -372,8 +372,8 @@ test('U43: shadow theme outranks the bundle hard-coded colors', async () => {
     // background keeps the pill distinction.
     assert.ok(/\.message-bubble\.ai-message-text\s*{[^}]*color:\s*var\(--ink/.test(css),
         'ai pill color is themed at 0,2,0');
-    assert.ok(/\.message-bubble\.ai-message-text\s*{[^}]*background:\s*var\(/.test(css),
-        'ai pill background stays themed');
+    assert.ok(/\.message-bubble\.ai-message-text\s*{[^}]*background:\s*(var|color-mix)\(/.test(css),
+        'ai pill background stays themed (U81: dim color-mix tint)');
     assert.ok(/\.message-bubble\.user-message-text\s*{[^}]*color:\s*var\(--ink/.test(css),
         'user pill color is themed at 0,2,0');
     assert.ok(/\.message-bubble\.user-message-text\s*{[^}]*background:\s*(var|color-mix)\(/.test(css),
