@@ -200,6 +200,10 @@ async def start(body: dict, pool: Any) -> dict:
                    tasks, limit)
     _ensure_atexit()
     _active = run
+    # U66: house INFO-at-start / INFO-at-finish pair (see decision_engine)
+    logger.info(f"uplift native {'embedding' if kind == 'embed' else 'reranker'}"
+                f" bench started: {run.run_id} model={model_id} "
+                f"tasks={tasks} limit={limit or 'full'}")
     run.task = asyncio.create_task(_runner(run, pool))
     return {"run_id": run.run_id, "status": "running",
             "model_id": model_id, "kind": kind, "tasks": tasks}
@@ -296,6 +300,11 @@ async def _run_one(run: EmbedRun, task: str, i: int, n: int, pool: Any) -> None:
             if "task" in parsed and "scores" in parsed:
                 payload = parsed
             else:
+                # U66: forward the child's phase announcements at TRACE —
+                # between task start and scored result the child spends its
+                # whole time loading datasets/answers, previously silent
+                logger.log(5, "embed %s %s phase: %s", run.run_id, task,
+                           parsed.get("phase", ""))
                 await run.send({"type": "progress", "phase": "task",
                                 "task": task, "current": i, "total": n,
                                 "message": parsed.get("phase", "")})
@@ -319,11 +328,14 @@ async def _run_one(run: EmbedRun, task: str, i: int, n: int, pool: Any) -> None:
     run.results.append(row)
     get_accumulated().append(row)
     _save_accum()  # write-through: a crash mid-run keeps finished tasks
+    logger.info(f"embed {run.run_id} task {task} scored "
+                f"(limit={row.get('limit') or 'full'})")
     await run.send({"type": "result", "data": row})
 
 
 async def _runner(run: EmbedRun, pool: Any) -> None:
     leased = False
+    _t0 = time.perf_counter()
     try:
         # lease the engine through classic's own pool call — same seam
         # the harness dispatcher uses (settings saves / TTL eviction
@@ -338,10 +350,15 @@ async def _runner(run: EmbedRun, pool: Any) -> None:
         if run.cancelled:
             run.status = "cancelled"
             run.error_message = "Benchmark cancelled by user"
+            logger.info(f"uplift native embed bench cancelled: "
+                        f"{run.run_id} after {len(run.results)} task(s)")
             await run.send({"type": "error", "message": run.error_message})
         else:
             run.status = "completed"
             run.phase = "completed"
+            logger.info(f"uplift native embed bench completed: {run.run_id} "
+                        f"model={run.model_id} tasks={len(run.results)} in "
+                        f"{time.perf_counter() - _t0:.1f}s")
             await run.send({"type": "done", "summary": {
                 "model_id": run.model_id, "kind": run.kind,
                 "tasks": len(run.results)}})

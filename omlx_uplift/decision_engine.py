@@ -224,6 +224,11 @@ async def start(body: dict) -> dict:
     _check_decision_model(model_id)
     run = DecisionRun(f"sys1-{uuid.uuid4().hex[:12]}", model_id, packs, limit)
     _active = run
+    # U66: the house INFO-at-start / INFO-at-finish pair the classic bench
+    # modules all have — a decision run was invisible in server.log even at
+    # TRACE (user report), which reads as 'nothing happened'
+    logger.info(f"uplift native decision bench started: {run.run_id} "
+                f"model={model_id} packs={packs} limit={limit or 'full'}")
     run.task = asyncio.create_task(_runner(run))
     return {"run_id": run.run_id, "status": "running",
             "model_id": model_id, "packs": packs}
@@ -255,6 +260,7 @@ async def _runner(run: DecisionRun) -> None:
     cm = None
     entered = False
     engine = None
+    _t0 = time.perf_counter()
     try:
         cm = _lease(run.model_id)
         engine = await cm.__aenter__()
@@ -271,10 +277,16 @@ async def _runner(run: DecisionRun) -> None:
         if run.cancelled:
             run.status = "cancelled"
             run.error_message = "Benchmark cancelled by user"
+            logger.info(f"uplift native decision bench cancelled: "
+                        f"{run.run_id} after {len(run.results)} pack(s)")
             await run.send({"type": "error", "message": run.error_message})
         else:
             run.status = "completed"
             run.phase = "completed"
+            logger.info(f"uplift native decision bench completed: "
+                        f"{run.run_id} model={run.model_id} "
+                        f"packs={len(run.results)} in "
+                        f"{time.perf_counter() - _t0:.1f}s")
             await run.send({"type": "done", "summary": {
                 "model_id": run.model_id, "kind": run.kind,
                 "packs": len(run.results)}})
@@ -328,6 +340,11 @@ async def _run_pack(run: DecisionRun, engine, pack_name: str,
                             "task": pack_name, "current": j,
                             "total": len(items),
                             "message": f"{pack_name}: {j}/{len(items)}"})
+        # U66: TRACE heartbeat — level 5 is omlx's trace (logging_config
+        # maps TRACE to 5; no logger.trace method exists, discovery.py uses
+        # the same logger.log(5, ...) call shape)
+        logger.log(5, "decision %s %s item %d/%d", run.run_id,
+                   pack_name, j + 1, len(items))
         req = build_request(run.model_id, item, seed=j, shuffle=False)
         try:
             res = await _decide(engine, req)
@@ -358,6 +375,8 @@ async def _run_pack(run: DecisionRun, engine, pack_name: str,
     run.results.append(row)
     get_accumulated().append(row)
     _save_accum()   # write-through: a crash keeps finished packs
+    logger.info(f"decision {run.run_id} pack {pack_name}: "
+                f"{len(rows)} scored, {skipped} skipped, {elapsed:.1f}s")
     await run.send({"type": "result", "data": row})
 
 

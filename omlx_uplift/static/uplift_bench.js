@@ -2046,6 +2046,12 @@ function MTEB(kind) {
                 var note = gid(prefix + '-envnote');
                 if (note) note.hidden = p.env === 'ready';
                 this.renderGrid();
+                // U65: results frequently arrive BEFORE the task grid; the
+                // samples fallback reads meta.sizes, so repaint once the
+                // metadata exists (dashes would otherwise stick forever)
+                if (this.state.results && this.state.results.length) {
+                    this.renderResults();
+                }
             } catch (e) { /* grid stays empty until a retry */ }
         },
 
@@ -2210,6 +2216,22 @@ function MTEB(kind) {
             if (!wrap) return;
             var rows = this.state.results.slice().reverse();
             if (!rows.length) { wrap.replaceChildren(); return; }
+            var selfR = this;
+            // U65: MTEB's scores dict carries metric floats only — no
+            // count key exists (verified against accumulated.json), so a
+            // full run showed '—'. Chain: explicit n/num (future-proof) ->
+            // run limit ('≤50' sampling marker) -> the task's dataset size
+            // (a full run evaluates exactly that many; EMBED_TASKS ships
+            // it) -> dash.
+            function samplesOf(r) {
+                var k0 = Object.keys(r.scores || {})[0];
+                var sc = k0 ? r.scores[k0] : null;
+                var n = sc && sc.all ? (sc.all.n || sc.all.num || null) : null;
+                if (n != null) return String(n);
+                if (r.limit) return '\u2264' + r.limit;
+                var meta = (selfR.state.tasks || {})[r.task];
+                return (meta && meta.sizes) ? String(meta.sizes) : '\u2014';
+            }
             var tbl = el('table', 'bench-table');
             var head = el('tr');
             [t('bench.config.model', 'Model'), t('acc_bench.config.benchmarks', 'Benchmarks'),
@@ -2222,15 +2244,13 @@ function MTEB(kind) {
                 var tr = el('tr');
                 var tests = Object.keys(r.scores || {});
                 var sc = tests.length ? r.scores[tests[0]] : null;
-                var n = sc && sc.all ? (sc.all.n || sc.all.num || null) : null;
                 tr.append(
                     el('td', null, String(r.model_id || '')),
                     el('td', null, String(r.task || '')),
                     el('td', null, sc && sc.main_score != null
                         ? Number(sc.main_score).toFixed(4) : '—'),
                     el('td', null, sc && sc.main_metric ? String(sc.main_metric) : '—'),
-                    el('td', null, n != null ? String(n)
-                        : (r.limit ? ('≤' + r.limit) : '—')),
+                    el('td', null, samplesOf(r)),
                     el('td', null, r.ts ? new Date(r.ts * 1000)
                         .toLocaleString() : ''));
                 tbl.appendChild(tr);
@@ -2254,12 +2274,8 @@ function MTEB(kind) {
                              var k0 = Object.keys(r.scores || {})[0];
                              var sc = k0 ? r.scores[k0] : null;
                              return sc && sc.main_metric ? String(sc.main_metric) : '\u2014'; } },
-                         { label: 'Samples', numeric: true, get: function (r) {
-                             var k0 = Object.keys(r.scores || {})[0];
-                             var sc = k0 ? r.scores[k0] : null;
-                             var n = sc && sc.all ? (sc.all.n || sc.all.num || null) : null;
-                             return n != null ? String(n)
-                                 : (r.limit ? ('\u2264' + r.limit) : '\u2014'); } }],
+                         { label: 'Samples', numeric: true,
+                           get: samplesOf }],
                         selfM.state.results.slice().reverse());
                 }),
                 tbl);
