@@ -91,7 +91,13 @@ users never see.
   (auto/on/limit/off) and persists per message. A web-search toggle
   runs classic's full tool loop natively (web_search/fetch_url via the
   server's /v1/web routes, multi-round chaining, bounded, stop-safe —
-  drilled live). ASR and skin-live theming follow in further commits.
+  drilled live). Selecting a speech-to-text model turns the input into
+  classic's transcription flow (attach audio or record with the mic;
+  capture is WAV client-side because a webm upload needs an ffmpeg the
+  server may not have); the transcript streams into an assistant turn
+  and cannot be regenerated, matching classic. Skins restyle the chat
+  live with zero reload — CSS custom properties cross the component's
+  shadow boundary, so the theme needs no JS on the switch path.
 
 ## [1.1] — 2026-10-07
 
