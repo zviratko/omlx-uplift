@@ -436,8 +436,9 @@ test('U45: edit truncates at the user index; delete removes exactly one row', as
     const st = h.win.UpliftNativeChat._state();
     const sent = [];
     st.dc.submitUserMessage = (m) => sent.push(m.text);
-    h.win.prompt = () => 'two edited';
-    h.win.UpliftNativeChat._msgActions.edit(2);
+    // U73: edit() now opens an INLINE editor (needs real bubbles); the
+    // truncate-and-replay semantics moved to commitEdit — same contract
+    h.win.UpliftNativeChat._msgActions.editCommit(2, 'two edited');
     assert.deepEqual(sent, ['two edited'], 'edited text replays from that index');
     st.conv.messages = convs[0].messages.slice();
     h.win.UpliftNativeChat._msgActions.delete(1);
@@ -529,4 +530,18 @@ test('U72: injected children stack ABOVE the bubble, hover never moves it', () =
     // bubble is the user's own message)
     assert.ok(/contains\('ai-message'\)/.test(src),
         'streaming anchor is AI-bubble-only');
+});
+
+test('U73: message edit is INLINE (no window.prompt); thinking collapses quiet', () => {
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    assert.ok(!/window\.prompt/.test(src),
+        'the prompt() edit dialog is gone for good');
+    assert.ok(/class(Name)? = 'chat-native-edit'|className = "chat-native-edit"/.test(src)
+        || /'chat-native-edit'/.test(src), 'inline editor element');
+    assert.ok(/commitEdit/.test(src), 'truncate-and-replay split from the UI');
+    assert.ok(/bub\.style\.display = 'none'/.test(src),
+        'the bubble swaps to the editor in place');
+    // look pass: collapsed state must be borderless text, card only [open]
+    assert.ok(/\.chat-native-thinking\[open\]/.test(src),
+        'card shape follows open state');
 });

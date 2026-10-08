@@ -1180,21 +1180,73 @@ function msgRegenerate(idx) {
     _dc.submitUserMessage({ text: String(prev.content) });
 }
 
-function msgEdit(idx) {
+function commitEdit(idx, text) {
+    // U45 semantics unchanged (pinned by its test): truncate the store at
+    // the edited user row, persist, replay the edited text as a new turn
     if (_streaming || !_conv) return;
-    var m = messageAt(idx);
-    if (!m || m.role !== 'user') return;
-    // classic edits inline with Save/Cancel buttons; the component's
-    // contenteditable bubbles make a faithful inline editor a bundle
-    // fight — prompt() is the pragmatic mirror (same truncate-and-replay
-    // semantics, same no-audio-regen guard).
-    var nv = window.prompt(t('chat.edit_tooltip', 'Edit message'),
-                           String(m.content));
-    if (nv == null) return;
     _conv.messages = _conv.messages.slice(0, idx);
     renderHistory();
     saveConv();
-    _dc.submitUserMessage({ text: nv });
+    _dc.submitUserMessage({ text: text });
+}
+
+function msgEdit(idx) {
+    // U73 (user: 'editing should not popup like that, edit inline'): the
+    // prompt() shortcut is gone. The bubble itself swaps to a textarea on
+    // ITS side of the thread — classic's inline edit with Save/Cancel,
+    // Enter saves, Shift+Enter breaks a line, Escape cancels. Semantics
+    // unchanged: truncate at idx, replay the edited message.
+    if (_streaming || !_conv) return;
+    var m = messageAt(idx);
+    if (!m || m.role !== 'user') return;
+    var root = _dc && _dc.shadowRoot;
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    var bubbles = root.querySelectorAll('.message-bubble');
+    var ms = _conv.messages, ord = -1;
+    for (var i = 0; i < ms.length; i++) {
+        if (!ms[i] || !ms[i].content) continue;
+        ord++;
+        if (i === idx) break;
+    }
+    var bub = bubbles[ord];
+    var holder = bub && bub.parentElement;
+    if (!holder) return;
+    var live = holder.querySelector('.chat-native-edit');
+    if (live) { live.focus(); return; }        // one editor per message
+    var ta = document.createElement('textarea');
+    ta.className = 'chat-native-edit';
+    ta.value = String(m.content);
+    ta.rows = Math.min(10, Math.max(2, ta.value.split('\n').length));
+    var bar = document.createElement('div');
+    bar.className = 'chat-native-edit-actions';
+    var saveB = document.createElement('button');
+    saveB.type = 'button'; saveB.className = 'save';
+    saveB.textContent = t('chat.system_prompt.save', 'Save');
+    var cancelB = document.createElement('button');
+    cancelB.type = 'button';
+    cancelB.textContent = t('chat.edit_cancel', 'Cancel');
+    function done() {
+        ta.remove(); bar.remove();
+        bub.style.display = '';
+    }
+    saveB.addEventListener('click', function () {
+        var nv = ta.value;
+        if (!nv.trim()) return;               // empty edit = not a send
+        done();
+        commitEdit(idx, nv);
+    });
+    cancelB.addEventListener('click', done);
+    bar.append(saveB, cancelB);
+    ta.addEventListener('keydown', function (ev) {
+        ev.stopPropagation();                 // component keys must not fire
+        if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); saveB.click(); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); done(); }
+    });
+    bub.style.display = 'none';               // the editor REPLACES the bubble
+    holder.insertBefore(bar, holder.querySelector('.chat-native-msg-actions'));
+    holder.insertBefore(ta, bar);
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
 }
 
 function msgDelete(idx) {
@@ -1423,32 +1475,50 @@ function applyShadowTheme(dc) {
         // sheets beat this tag at EQUAL specificity (U43 lesson).
         '.outer-message-container .inner-message-container {',
         '  flex-direction: column; }',
-        // U71+U72: per-reply thinking card (classic .thinking-box look:
-        // header strip + secondary-color body; the bundle paints EVERY pre
-        // with a dark code-card bg — my (0,2,0) rule must name background
-        // explicitly, color alone won before and the dark card was the bug)
-        '.chat-native-thinking { align-self: flex-start; width: fit-content;',
-        '  min-width: 180px; max-width: 60%; border: 1px solid var(--edge);',
-        '  border-radius: 10px; background: var(--panel, #10151d);',
-        '  margin: 10px 0 0; font-size: 12px; overflow: hidden; }',
-        '.chat-native-thinking + .message-bubble { margin-top: 4px; }',
+        // U73 (user: 'still pretty ugly'): the boxed pill read as dead UI.
+        // Collapsed = quiet caret + 'Thinking' text affordance; the bordered
+        // card appears ONLY when open, so shape itself communicates state.
+        // The bundle's dark code-card <pre> rule still needs (0,2,0) +
+        // explicit background (adopted sheets beat this tag, U43 lesson).
+        '.chat-native-thinking { align-self: flex-start; max-width: 62%;',
+        '  margin: 2px 0 0; font-size: 12px; }',
+        '.chat-native-thinking[open] { width: 100%; }',
         '.chat-native-thinking summary { list-style: none; cursor: pointer;',
-        '  user-select: none; display: flex; align-items: center; gap: 6px;',
-        '  padding: 5px 10px; color: var(--dim, #8b98ab);',
-        '  background: color-mix(in srgb, var(--dim) 16%, var(--panel));',
-        '  font-weight: 600; text-transform: uppercase; font-size: 10px;',
-        '  letter-spacing: 0.05em; }',
+        '  user-select: none; display: inline-flex; align-items: center;',
+        '  gap: 6px; padding: 2px 7px; margin-left: -7px; border-radius: 6px;',
+        '  color: var(--dim, #8b98ab); background: transparent;',
+        '  font-weight: 500; font-size: 12px; }',
         '.chat-native-thinking summary::-webkit-details-marker { display: none; }',
-        '.chat-native-thinking summary:hover {',
-        '  background: color-mix(in srgb, var(--dim) 20%, var(--panel)); }',
-        '.chat-native-thinking summary::before { content: "▸";',
-        '  transition: transform 0.15s ease; display: inline-block; }',
+        '.chat-native-thinking summary:hover { color: var(--ink, #e6edf3);',
+        '  background: color-mix(in srgb, var(--dim) 13%, transparent); }',
+        '.chat-native-thinking summary::before { content: "▸"; font-size: 9px;',
+        '  opacity: 0.75; transition: transform 0.15s ease;',
+        '  display: inline-block; }',
         '.chat-native-thinking[open] summary::before { transform: rotate(90deg); }',
-        '.chat-native-thinking .chat-native-think-body { margin: 0;',
-        '  padding: 8px 12px 10px; background: transparent;',
-        '  border-top: 1px solid var(--edge); white-space: pre-wrap;',
-        '  font-family: inherit; color: var(--dim, #8b98ab); font-size: 12px;',
-        '  line-height: 1.55; max-height: 240px; overflow: auto; }',
+        '.chat-native-thinking .chat-native-think-body { margin: 5px 0 2px;',
+        '  padding: 8px 12px; border: 1px solid var(--edge);',
+        '  border-radius: 10px; white-space: pre-wrap; font-family: inherit;',
+        '  background: color-mix(in srgb, var(--panel) 55%, transparent);',
+        '  color: var(--dim, #8b98ab); font-size: 12px; line-height: 1.55;',
+        '  max-height: 240px; overflow: auto; }',
+        // U73: inline message editor — replaces the prompt() dialog. Styled as
+        // the user bubble it edits (field ground, own side of the thread).
+        '.chat-native-edit { align-self: flex-end; width: 62%;',
+        '  box-sizing: border-box; background: var(--field, #1b2330);',
+        '  color: var(--ink, #e6edf3); border: 1px solid var(--accent, #4c8dff);',
+        '  border-radius: 10px; padding: 8px 10px; font: inherit;',
+        '  font-size: 14px; line-height: 1.4; resize: vertical;',
+        '  min-height: 60px; margin-top: 10px; }',
+        '.chat-native-edit-actions { align-self: flex-end; display: flex;',
+        '  gap: 6px; margin: 4px 0 2px; }',
+        '.chat-native-edit-actions button { background: none;',
+        '  border: 1px solid var(--edge); color: var(--ink, #e6edf3);',
+        '  font-size: 11px; padding: 2px 12px; border-radius: 6px;',
+        '  cursor: pointer; }',
+        '.chat-native-edit-actions button.save { border-color: var(--accent);',
+        '  color: var(--accent, #4c8dff); }',
+        '.chat-native-edit-actions button:hover {',
+        '  background: color-mix(in srgb, var(--dim) 13%, transparent); }',
         // U72: visibility + reserved min-height — the old display:none->flex
         // made the row a NEW flex item on hover and reflowed the bubble
         // ('even moves the message'). Column stacking already puts the row
@@ -1704,6 +1774,7 @@ return { mount: mount, isMounted: function () { return _mounted; },
          // U45 test seams: index-based message actions (the overlay binds
          // these to per-bubble buttons; tests drive them directly)
          _msgActions: { copy: msgCopy, copyMarkdown: msgCopyMarkdown,
+            editCommit: commitEdit,
                         regenerate: msgRegenerate, edit: msgEdit,
                         delete: msgDelete, stripMarkdown: stripMarkdown,
                         attach: attachMessageActions },
