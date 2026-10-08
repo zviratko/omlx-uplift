@@ -739,8 +739,11 @@ function paintThinking() {
         if (_streaming) {
             // deep-chat creates the assistant bubble at submit (loading
             // dots) — during the stream THAT bubble is the reply the
-            // thinking belongs above; the store has no row yet
-            t0 = bubbles[bubbles.length - 1];
+            // thinking belongs above; the store has no row yet. AI-only:
+            // right after the send the last bubble IS the user's.
+            var lb = bubbles[bubbles.length - 1];
+            t0 = (lb && lb.classList && lb.classList.contains('ai-message'))
+                ? lb : null;
         } else {
             var idx = lastAiVisible();
             t0 = (idx >= 0 && idx < bubbles.length) ? bubbles[idx] : null;
@@ -1237,8 +1240,9 @@ function attachMessageActions(dc) {
         if (storeIdx !== undefined && (ms[storeIdx] || {}).role === 'assistant') {
             txt = String(ms[storeIdx].reasoning_content || '');
         }
-        if (!txt && _streaming && k === bubbles.length - 1) {
-            txt = _thinkLive; isLive = !!txt;   // in-flight ai bubble
+        if (!txt && _streaming && k === bubbles.length - 1
+            && b.classList && b.classList.contains('ai-message')) {
+            txt = _thinkLive; isLive = !!txt;   // in-flight ai bubble ONLY
         }
         if (txt) {
             if (!thinkEl) {
@@ -1410,22 +1414,52 @@ function applyShadowTheme(dc) {
         // U45: per-message action row (classic parity). Lives in OUR
         // shadow DOM, so its CSS must ship in this tag — light-DOM
         // uplift.css cannot reach across the boundary.
-        // U71: per-reply thinking block (user bug: one panel at the top
-        // of the conversation was wrong; classic shows it above each reply)
-        '.chat-native-thinking { border: 1px solid var(--edge);',
-        '  background: var(--panel, #10151d); padding: 3px 8px; margin: 0 0 4px;',
-        '  font-size: 11px; border-radius: 6px; max-width: 85%; }',
-        '.chat-native-thinking summary { cursor: pointer; color: var(--dim, #8b98ab);',
+        // U72 (user: 'sits next to the reply... moves the message'): the
+        // bundle's .inner-message-container is a ROW flex — every injected
+        // child (thinking card, action row) became a side-by-side sibling
+        // that shrinks the bubble when it appears. Column direction fixes
+        // both: children stack, the bubble's margin-left:auto alignment
+        // still works on the cross axis. Two-class selector: adopted style
+        // sheets beat this tag at EQUAL specificity (U43 lesson).
+        '.outer-message-container .inner-message-container {',
+        '  flex-direction: column; }',
+        // U71+U72: per-reply thinking card (classic .thinking-box look:
+        // header strip + secondary-color body; the bundle paints EVERY pre
+        // with a dark code-card bg — my (0,2,0) rule must name background
+        // explicitly, color alone won before and the dark card was the bug)
+        '.chat-native-thinking { align-self: flex-start; width: fit-content;',
+        '  min-width: 180px; max-width: 60%; border: 1px solid var(--edge);',
+        '  border-radius: 10px; background: var(--panel, #10151d);',
+        '  margin: 10px 0 0; font-size: 12px; overflow: hidden; }',
+        '.chat-native-thinking + .message-bubble { margin-top: 4px; }',
+        '.chat-native-thinking summary { list-style: none; cursor: pointer;',
+        '  user-select: none; display: flex; align-items: center; gap: 6px;',
+        '  padding: 5px 10px; color: var(--dim, #8b98ab);',
+        '  background: color-mix(in srgb, var(--dim) 16%, var(--panel));',
         '  font-weight: 600; text-transform: uppercase; font-size: 10px;',
-        '  letter-spacing: 0.04em; }',
-        '.chat-native-thinking .chat-native-think-body { margin: 4px 0 0;',
-        '  white-space: pre-wrap; color: var(--dim, #8b98ab); font-size: 11px;',
-        '  max-height: 160px; overflow: auto; }',
-        '.chat-native-msg-actions { display: none; gap: 4px; margin-top: 3px;',
-        '  align-items: center; }',
-        '.chat-native-msg-actions.user { justify-content: flex-end; }',
+        '  letter-spacing: 0.05em; }',
+        '.chat-native-thinking summary::-webkit-details-marker { display: none; }',
+        '.chat-native-thinking summary:hover {',
+        '  background: color-mix(in srgb, var(--dim) 20%, var(--panel)); }',
+        '.chat-native-thinking summary::before { content: "▸";',
+        '  transition: transform 0.15s ease; display: inline-block; }',
+        '.chat-native-thinking[open] summary::before { transform: rotate(90deg); }',
+        '.chat-native-thinking .chat-native-think-body { margin: 0;',
+        '  padding: 8px 12px 10px; background: transparent;',
+        '  border-top: 1px solid var(--edge); white-space: pre-wrap;',
+        '  font-family: inherit; color: var(--dim, #8b98ab); font-size: 12px;',
+        '  line-height: 1.55; max-height: 240px; overflow: auto; }',
+        // U72: visibility + reserved min-height — the old display:none->flex
+        // made the row a NEW flex item on hover and reflowed the bubble
+        // ('even moves the message'). Column stacking already puts the row
+        // under the bubble; align-self mirrors the bubble's side.
+        '.chat-native-msg-actions { visibility: hidden; display: flex; gap: 4px;',
+        '  margin-top: 2px; align-items: center; min-height: 20px;',
+        '  align-self: flex-start; }',
+        '.chat-native-msg-actions.user { justify-content: flex-end;',
+        '  align-self: flex-end; }',
         '.inner-message-container:hover > .chat-native-msg-actions,',
-        '.chat-native-msg-actions:focus-within { display: flex; }',
+        '.chat-native-msg-actions:focus-within { visibility: visible; }',
         '.chat-native-msg-action { background: none; border: 0; padding: 2px 5px;',
         '  font: inherit; font-size: 11px; color: var(--dim, #8b98ab);',
         '  cursor: pointer; border-radius: 4px; }',

@@ -514,3 +514,19 @@ test('U71: thinking anchors ABOVE each reply, not at the top of the chat', () =>
     assert.ok(/thinkingBlockEl\(txt, isLive\)/.test(src),
         'open state follows live-vs-persisted');
 });
+
+test('U72: injected children stack ABOVE the bubble, hover never moves it', () => {
+    // user bug: row-flex made thinking sit NEXT to the reply and the
+    // hover actions row reflowed (moved) the message
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    assert.ok(/\.inner-message-container \{['\"]?,?\s*'?\s*flex-direction: column/.test(src),
+        'inner message container forced to column');
+    assert.ok(/\.chat-native-msg-actions \{ visibility: hidden; display: flex/.test(src),
+        'actions row reserves space (visibility, not display:none)');
+    assert.ok(/background: transparent/.test(src),
+        'thinking body beats the bundle dark pre card');
+    // live block anchors ONLY ai bubbles (right after send the last
+    // bubble is the user's own message)
+    assert.ok(/contains\('ai-message'\)/.test(src),
+        'streaming anchor is AI-bubble-only');
+});
