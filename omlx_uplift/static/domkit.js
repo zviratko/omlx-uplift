@@ -42,7 +42,23 @@ async function fetchJson(url, opts) {
    scraping the message. Messages are unified to `url -> status: reason`
    with detail flattened via C.errorText (UP-4) — postJson used to throw
    the raw detail, which is exactly the [object Object] toast class. */
+/* U61: THE central admin-session seam. The uplift session cookie carries
+   a server TTL; when it expires, every /uplift/api/* request starts
+   answering 401 and every catch site in the app silently swallows it —
+   the user saw 'all models from all dropdowns disappear' after browsing
+   for a while (server.log: repeated 'GET /uplift/api/models -> 401:
+   Admin authentication required' at exactly those times). Native bench +
+   chat have NO other data source, so the honest recovery is a redirect
+   to the login page, which restores the full URL (incl. ?native=all and
+   the #bench/... route) via ?next=. kitError is the single choke point
+   every kit throw passes; the hook stays inert until uplift.js installs
+   it (classic admin pages run their own Alpine auth and must keep their
+   behavior), and once/never-twice is the installer's business. */
+let _on401 = null;
+function setUnauthorizedHandler(fn) { _on401 = fn; }
+
 function kitError(url, res, reason) {
+    if (res && res.status === 401 && _on401) { try { _on401(); } catch (_) {} }
     const e = new Error(reason ? `${url} -> ${res.status}: ${reason}` : `${url} -> ${res.status}`);
     e.status = res.status;
     return e;
@@ -101,5 +117,6 @@ function emptyMsg(host, msg) {   // error text goes through textContent, never i
     d.textContent = msg; host.append(d);
 }
 
-return { $, fetchJson, postJson, putJson, deleteJson, toast, cell, emptyMsg };
+return { $, fetchJson, postJson, putJson, deleteJson, toast, cell, emptyMsg,
+         setUnauthorizedHandler };
 });

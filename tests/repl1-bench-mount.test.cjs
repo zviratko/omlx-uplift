@@ -164,6 +164,19 @@ test('mount paints subtabs + throughput form through the catalog', () => {
     assert.ok(win.UpliftNativeBench.isMounted(), 'isMounted flips after mount');
 });
 
+test('U60: showSub mirrors the panel into the URL hash (replaceState)', () => {
+    const { win } = load();
+    let last = null;
+    win.location = { hash: '#bench/throughput', pathname: '/uplift/', search: '?native=all' };
+    win.history = { replaceState: (_s, _t, url) => { last = url; win.location.hash = url.split('#')[1] ? '#' + url.split('#')[1] : ''; } };
+    win.UpliftNativeBench.mount();
+    win.UpliftNativeBench.showSub('decision');
+    assert.equal(last, '/uplift/?native=all#bench/decision', 'hash mirrors the strip');
+    const before = last;
+    win.UpliftNativeBench.showSub('decision');
+    assert.equal(last, before, 'idempotent: same sub does not rewrite');
+});
+
 test('showSub with an unknown key falls back to the honest stub card', () => {
     // every real subtab is live now (REPL-1/2a/3) — the stub path stays
     // as the safe fallback for unknown keys, not as a parked feature

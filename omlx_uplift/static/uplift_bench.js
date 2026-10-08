@@ -86,6 +86,23 @@ function el(tag, cls, text) {
     if (text != null) e.textContent = text;
     return e;
 }
+/* U62: the bench start/add POSTs can block for seconds on a
+   cold model load (queue_add starts the run synchronously). Without a
+   visible in-flight state the click reads as dead — the user's 'add to
+   queue does nothing'. Disable + relabel before the await, restore after. */
+function busyLabel(btn) {
+    if (!btn || btn.dataset.busy === '1') return function () {};
+    var prev = btn.textContent;
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    btn.textContent = t('uplift.bench.starting', 'Starting\u2026');
+    return function () {
+        btn.disabled = false;
+        btn.textContent = prev;
+        delete btn.dataset.busy;
+    };
+}
+
 function labeled(label, node) {
     var w = el('label', 'bench-field');
     w.append(el('span', 'bench-label', label), node);
@@ -220,6 +237,18 @@ function mount() {
 
 function showSub(sub) {
     _sub = sub;
+    // U60: the strip is a navigation control — mirror it into the URL so a
+    // reload (or a shared link) lands on the same benchmark. replaceState
+    // (same precedent as applyTab's stale-hash rewrite), NOT location.hash:
+    // writing the hash would fire hashchange -> applyTab -> showSub again
+    // and re-render the panel a second time per click.
+    var want = '#bench/' + sub;
+    var w = W();
+    // W() guard: node structural harnesses load this module in a vm
+    // context without a location stub
+    if (w && w.location && w.history && w.location.hash !== want) {
+        w.history.replaceState(null, '', w.location.pathname + w.location.search + want);
+    }
     document.querySelectorAll('#bench-native .native-subtab').forEach(function (b) {
         b.classList.toggle('active', b.dataset.sub === sub);
     });
@@ -762,12 +791,15 @@ var TP = {
         this.setButtons();
         var rw = gid('bench-tp-results');
         if (rw) rw.replaceChildren();
+        var rel = busyLabel(gid('bench-tp-run'));
         try {
             var out = await d.postJson(api() + '/bench/start', body);
             this.state.benchId = out.bench_id;
+            rel();
             this.startStream(out.bench_id);
             this.renderStatus(t('bench.progress.preparing', 'Preparing…'));
         } catch (e) {
+            rel();
             this.state.running = false;
             this.setButtons();
             d.toast(String((e && e.message) || e), 'error');
@@ -1081,15 +1113,18 @@ var CTX = {
         this.setButtons();
         var rw = gid('bench-ctx-results');
         if (rw) rw.replaceChildren();
+        var rel = busyLabel(gid('bench-ctx-run'));
         try {
             var out = await d.postJson(api() + '/bench/context/start', {
                 model_id: sel.value,
                 target_tokens: target,
             });
+            rel();
             this.state.benchId = out.bench_id;
             this.startStream(out.bench_id);
             this.renderStatus(t('ctx_bench.progress.starting', 'Starting...'));
         } catch (e) {
+            rel();
             this.state.running = false;
             this.setButtons();
             d.toast(String((e && e.message) || e), 'error');
@@ -1298,6 +1333,7 @@ var ANE = {
         this.state.running = true;
         this.state.snapshot = null;
         this.setButtons();
+        var rel = busyLabel(gid('bench-ane-run'));
         try {
             var out = await d.postJson(api() + '/bench/ane-tune/start', {
                 model_id: sel.value,
@@ -1310,12 +1346,14 @@ var ANE = {
                 allow_cpu_gdn: on('bench-ane-cpu') && on('bench-ane-gdn') && on('bench-ane-cpugdn'),
                 allow_cpu_shared_resource: on('bench-ane-cpu') && on('bench-ane-shared'),
             });
+            rel();
             this.state.tuningId = out.tuning_id;
             this.pollNow();
             if (this._timer) clearInterval(this._timer);
             var self = this;
             this._timer = setInterval(function () { self.pollNow(); }, 2000);
         } catch (e) {
+            rel();
             this.state.running = false;
             this.setButtons();
             d.toast(String((e && e.message) || e), 'error');
@@ -1717,10 +1755,14 @@ var ACC = {
             d.toast(t('uplift.bench.pick_tasks', 'Pick at least one benchmark'), 'error');
             return;
         }
+        var rel = busyLabel(gid('bench-acc-add'));
         try {
             await d.postJson(api() + '/bench/accuracy/add', body);
+            rel();
+            d.toast(t('uplift.bench.queued', 'Added to queue'));
             this.refreshQueue();
         } catch (e) {
+            rel();
             d.toast(String((e && e.message) || e), 'error');
         }
     },
@@ -2050,15 +2092,18 @@ function MTEB(kind) {
             }
             var limitSel = gid(prefix + '-limit');
             this.state.limit = Number((limitSel || {}).value || 0);
+            var rel = busyLabel(gid(prefix + '-run'));
             try {
                 var r = await d.postJson(api() + '/bench/embed/start',
                     { model_id: model, kind: kind, tasks: tasks,
                       limit: this.state.limit });
+                rel();
                 this.state.running = true;
                 this.state.runId = r.run_id;
                 this.setButtons();
                 this.startStream(r.run_id);
             } catch (e) {
+                rel();
                 d.toast(String((e && e.message) || e), 'error');
             }
         },
@@ -2352,14 +2397,17 @@ var DEC = {
         }
         var limSel = gid('bench-dec-limit');
         this.state.limit = Number((limSel || {}).value || 0);
+        var rel = busyLabel(gid('bench-dec-run'));
         try {
             var r = await d.postJson(api() + '/bench/decision/start',
                 { model_id: model, packs: packs, limit: this.state.limit });
+            rel();
             this.state.running = true;
             this.state.runId = r.run_id;
             this.setButtons();
             this.startStream(r.run_id);
         } catch (e) {
+            rel();
             d.toast(String((e && e.message) || e), 'error');
         }
     },

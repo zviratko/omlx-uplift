@@ -194,6 +194,26 @@ let stats = null, prevStats = null, failCount = 0, timer = null;
 const PERCENTILES = { p50: 50, p90: 90, p95: 95, p99: 99 };
 if (!(layout.percentile in PERCENTILES)) layout.percentile = 'p95';
 
+/* ---------------- session expiry (U61) -----------------------------------
+   One-shot redirect to the login page when any kit fetch reports 401.
+   Guarded at module scope so repeated 401s from parallel polls cannot
+   loop the browser; ?next= restores the full URL including ?native=all
+   and the #bench/... route the U60 work just made meaningful. */
+let _sessionRedirected = false;
+D.setUnauthorizedHandler(() => {
+    if (_sessionRedirected) return;
+    // doctrine: deferred SAVE is real state — a settings/models tab can
+    // hold unsaved edits; a surprise redirect there would destroy them.
+    // Native bench + chat hold nothing unsaved (a run lives server-side)
+    // and are 100% API-fed, so redirect is the honest recovery ONLY there.
+    if (currentTab() !== 'bench' && currentTab() !== 'chat') return;
+    _sessionRedirected = true;
+    D.toast(C.tf('uplift.auth.expired', 'Session expired — signing you back in…'), 2600);
+    const back = encodeURIComponent(
+        location.pathname + location.search + (location.hash || ''));
+    setTimeout(() => { location.href = '/uplift/login?next=' + back; }, 900);
+});
+
 /* ---------------- tabs (hash routing, like the classic dashboard) --------- */
 const TABS = ['status', 'cluster', 'models', 'usage', 'logs', 'bench', 'chat', 'settings'];
 const SUBS = {
@@ -203,6 +223,14 @@ const SUBS = {
     chat: ['chat'],
     cluster: ['cluster'],
 };
+/* U60: the native shell owns seven bench panels (ANE/embed/rerank/decision
+   have no classic embed sub). When native bench is on, those subs become
+   first-class URL routes; when off they stay outside the whitelist so a
+   stale #bench/ane deep link falls back to throughput exactly as before. */
+if ((document.documentElement.dataset.nativeSurfaces || 'off') === 'bench'
+    || (document.documentElement.dataset.nativeSurfaces || 'off') === 'all') {
+    SUBS.bench = ['throughput', 'accuracy', 'context', 'ane', 'embed', 'rerank', 'decision'];
+}
 function currentTab() {
     const t = (location.hash || '').replace('#', '').split('/')[0];
     return TABS.includes(t) ? t : 'status';
@@ -346,7 +374,13 @@ function showEmbedPage(tab, sub) {
     frame.dataset.loaded = '1';
 }
 const EMBED_PAGE_IDS = {
-    bench: { throughput: 'bench-tp-page', accuracy: 'bench-acc-page', context: 'bench-ctx-page' },
+    // U60: fallback id keeps showEmbedPage past its `if (!card) return` for
+    // native-only subs (#bench/ane reload); the native branch never reads
+    // the card — it finds the host by data-tab — and the off path can
+    // never reach an unmapped sub (currentSub whitelists them).
+    bench: { throughput: 'bench-tp-page', accuracy: 'bench-acc-page', context: 'bench-ctx-page',
+             ane: 'bench-tp-page', embed: 'bench-tp-page', rerank: 'bench-tp-page',
+             decision: 'bench-tp-page' },
     chat: { chat: 'chat-page' },
     cluster: { cluster: 'cluster-page' },
 };

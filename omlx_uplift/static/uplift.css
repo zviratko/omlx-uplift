@@ -2154,8 +2154,16 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    (both #f2f2f2): the fill alone left the selected tile distinguished
    only by its border. The inset ring gives a double accent frame that
    reads on every skin regardless of fills. */
+/* U63: --row2 fill alone still read as 'not picked' in day theme (the
+   user's "needs more prominence - different colour?"). The selected tile
+   now carries the ACCENT color itself: tinted fill + accent name text,
+   ring kept. Plain var(--card) line first = fallback for engines without
+   color-mix; second declaration wins where supported. */
 .acc-task.on { border-color: var(--accent); background: var(--row2);
-    box-shadow: inset 0 0 0 1px var(--accent); }
+    box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+@supports (background: color-mix(in srgb, red 10%, blue)) {
+    .acc-task.on { background: color-mix(in srgb, var(--accent) 16%, var(--card)); }
+}
 .acc-task-name { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 /* MTEB task names are single unbreakable CamelCase tokens
    (CzechSoMeSentimentClassification.v2): without this they overflow the
