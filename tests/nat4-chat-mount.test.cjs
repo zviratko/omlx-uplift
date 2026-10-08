@@ -351,3 +351,37 @@ test('readability: boot state applies the shadow block; board event restyles liv
     h.win.document.__fire('uplift:embed-theme', { theme: 'dark', enhanced: true });
     assert.ok(style.textContent.includes('font-size: max(12px'), 'and back on');
 });
+
+/* U43: dark-on-dark regression pin. The bundle's adopted sheets carry
+   .ai-message-text{color:#000} ON the bubble element and
+   #text-input-container{background:#fff} — an in-tree <style> at equal
+   specificity LOSES to adopted sheets, so the theme tag must outrank
+   them by specificity (two classes / two IDs), never by luck of order. */
+test('U43: shadow theme outranks the bundle hard-coded colors', async () => {
+    const h = makeHarness();
+    h.win.UpliftNativeChat.mount();
+    for (let i = 0; i < 12; i++) await tick();
+    const style = h.win.document.__shadow.children
+        .find((c) => c.id === 'uplift-chat-theme');
+    const css = style.textContent;
+    // pill rules must carry BOTH bubble + text classes (0,2,0) and set
+    // BOTH properties — color:var(--ink) beats #000/#fff text, the
+    // background keeps the pill distinction.
+    assert.ok(/\.message-bubble\.ai-message-text\s*{[^}]*color:\s*var\(--ink/.test(css),
+        'ai pill color is themed at 0,2,0');
+    assert.ok(/\.message-bubble\.ai-message-text\s*{[^}]*background:\s*var\(/.test(css),
+        'ai pill background stays themed');
+    assert.ok(/\.message-bubble\.user-message-text\s*{[^}]*color:\s*var\(--ink/.test(css),
+        'user pill color is themed at 0,2,0');
+    assert.ok(/\.message-bubble\.user-message-text\s*{[^}]*background:\s*var\(/.test(css),
+        'user pill background stays themed');
+    // the white input well needs TWO ids (bundle rule is #id alone)
+    assert.ok(/#chat-view\s+#text-input-container\s*{[^}]*background:\s*var\(--field/.test(css),
+        'input well background beats the #id rule');
+    // streaming dots: the bundle sets --loading-message-color INLINE per
+    // container, so only a direct !important declaration wins
+    assert.ok(/\.loading-message-dots[^{]*{[^}]*background-color:\s*var\(--dim[^}]*!important/.test(css),
+        'loading dots beat the inline var with !important');
+    assert.ok(/::-webkit-scrollbar-thumb/.test(css),
+        'shadow scrollbars themed (bundle paints #d0d0d0)');
+});

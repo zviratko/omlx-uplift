@@ -1002,15 +1002,38 @@ function applyShadowTheme(dc) {
     var css = [
         '#container, #chat-view { background: var(--card, #141a24);',
         '  color: var(--ink, #e6edf3); }',
+        // U43: the text classes sit ON the bubble element itself
+        // ('message-bubble ai-message ai-message-text text-message' —
+        // live probe) and the bundle's sheets are ADOPTED style sheets,
+        // which beat this in-tree tag at equal specificity. The pill
+        // rules must name both classes (0,2,0) to outrank
+        // .ai-message-text{color:#000} — one-class rules lost before.
         '.message-bubble { color: var(--ink, #e6edf3); }',
-        '.message-bubble.user-message { background: var(--field, #1b2330); }',
-        '.message-bubble.ai-message { background: var(--panel, #10151d); }',
+        '.message-bubble.user-message-text { color: var(--ink, #e6edf3);',
+        '  background: var(--field, #1b2330); }',
+        '.message-bubble.ai-message-text { color: var(--ink, #e6edf3);',
+        '  background: var(--panel, #10151d); }',
         '.message-bubble pre, .message-bubble code { color: var(--ink, #e6edf3);',
         '  background: var(--bg, #0c1017); }',
+        // U43: the input well is #text-input-container{background:#fff} —
+        // an ID rule beats any class rule, so ours needs two IDs
+        // (#chat-view ancestor, unique in this shadow tree).
+        '#chat-view #text-input-container { background: var(--field, #1b2330);',
+        '  border: 1px solid var(--edge, #3a3b40); box-shadow: none; }',
         '.text-input-styling { color: var(--ink, #e6edf3);',
         '  caret-color: var(--accent, #4c8dff); }',
         '.input-button { color: var(--dim, #8b98ab); }',
         'a { color: var(--accent, #4c8dff); }',
+        // U43: bundle-hardened leftovers — gray scrollbars and the
+        // streaming dots. The bundle sets --loading-message-color INLINE
+        // per message container, so an ancestor var() override loses;
+        // direct property declarations on the dot rule win the cascade.
+        ':host { --loading-message-color: var(--dim, #8b98ab); }',
+        '.loading-message-dots, .loading-message-dots::before,',
+        '.loading-message-dots::after {',
+        '  background-color: var(--dim, #8b98ab) !important;',
+        '  color: var(--dim, #8b98ab) !important; }',
+        '::-webkit-scrollbar-thumb { background: var(--dim, #8b98ab); }',
     ];
     if (_readability) {
         // classic's enhanced-readability (base.html:176-206) inside OUR
