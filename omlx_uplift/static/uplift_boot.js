@@ -108,11 +108,16 @@ setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.drawAl
 UUP.initUsageRange();   // seeds the range select now that glue helpers exist
 UUP.pollUsage(); UUP.pollLogs();
 FE.connectEventStream();
-/* FAST-1: live display feed (2 Hz SSE, memory-only server side). Redraw
-   rule: shared charts every frame (~2 Hz — that is the point), metric
-   cards at half rate (the grid renders many canvases; 1 Hz is already
-   5x the stored cadence and keeps a laptop tab cool). Both paths skip
-   the store fetch — metricFetch's TTL still gates server hits. */
+/* FAST-1: live display feed (2 Hz SSE, memory-only server side). HANG-1:
+   the boot connects are focus-gated INSIDE connect() — a tab opened in the
+   background keeps zero permanent streams; a browser allows ~6 concurrent
+   connections per origin over HTTP/1.1 and two forever streams per visible
+   tab starved the 4th tab's page load (measured). The unfocused 2 s poll
+   and the 5 s stored redraw carry background tabs until they take focus.
+   Redraw rule: shared charts every frame (~2 Hz — that is the point),
+   metric cards at half rate (the grid renders many canvases; 1 Hz is
+   already 5x the stored cadence and keeps a laptop tab cool). Both paths
+   skip the store fetch — metricFetch's TTL still gates server hits. */
 let _lfMainPending = false, _lfCardsAt = 0;
 LF.onFrame(() => {
     if (document.hidden || currentTab() !== 'status') return;

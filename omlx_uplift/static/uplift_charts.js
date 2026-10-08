@@ -1309,12 +1309,41 @@ function renderMemLabel() {
     });
 }
 
-/* U20 header chips: watts = mean over the last 60 s, temperature = MAX
-   over the last 60 s (safety-relevant; mean goes to the tooltip). Chips
-   appear ONLY when the series exist — macmon absent means the keys never
-   have samples and both chips stay hidden (silent absence, user addendum).
-   One 5m-window fetch every 10 s covers the whole 60 s mean/max window. */
+/* U20 header chips: the VALUE mirrors the graph card header ("live"
+   readout) exactly — the newest sample of the card's PRIMARY key (power:
+   pwr.total_w; temperature: therm.cpu_temp_c, the card's own first
+   series), same fetch window, last-non-null, no averaging, no smoothing.
+   U20's 60 s mean/max aggregation is retired to the TOOLTIP (the safety
+   readout stays one hover away); a chip whose number could never equal
+   the header number right below it read as a defect (user 2026-10-08:
+   "the temperature at the top should be the same as the live temperature
+   in the graph header; same goes for watts"). Refresh 10 s ≈ the card's
+   own redraw cadence; the stored series is the only clock here — macmon
+   keys are deliberately never 2 Hz fast-sampled (FAST-1 rule), so chip
+   and card tick on the same 5 s collector and a shared fetch can only
+   lag by which side refreshed last, never by a different statistic.
+   Chips appear ONLY when the series exist — macmon absent means the keys
+   never have samples and both chips stay hidden (silent absence). */
 let pwrChipsAt = 0, pwrChipsFetching = false;
+/* Pure aggregation (node-tested): points newest-last (store ORDER BY ts
+   contract). DISPLAYED value = last non-null of the card's PRIMARY key —
+   literally the card header's rule (drawMetricChart's pcol scan), no
+   cross-series cleverness. statsOver only feeds the tooltip (60 s
+   max/mean across the named series). Returns null when the primary key
+   has no fresh sample (chip stays hidden, U24 silent-absence doctrine). */
+function chipReadout(seriesMaps, primary, statsOver) {
+    const out = { primary: null };
+    const p = (seriesMaps[primary] || []);
+    for (let i = p.length - 1; i >= 0; i--) {
+        if (p[i] && p[i].v != null) { out.primary = p[i].v; break; }
+    }
+    const pool = [];
+    for (const k of (statsOver && statsOver.length ? statsOver : [primary]))
+        for (const q of (seriesMaps[k] || [])) if (q && q.v != null) pool.push(q.v);
+    out.mean60 = pool.length ? pool.reduce((a, v) => a + v, 0) / pool.length : null;
+    out.max60 = pool.length ? Math.max(...pool) : null;
+    return out.primary == null ? null : out;
+}
 async function refreshPowerChips() {
     const now = Date.now();
     if (pwrChipsFetching || now - pwrChipsAt < 10_000) return;
@@ -1325,27 +1354,29 @@ async function refreshPowerChips() {
             encodeURIComponent('pwr.total_w,therm.cpu_temp_c,therm.gpu_temp_c') +
             '&window=5m');
         const map = (d && d.series_map) || {};
-        const fresh = k => (map[k] || []).filter(p => p.v != null && now - p.ts * 1000 < 60_000 + 15_000);
-        const pw = fresh('pwr.total_w');
+        const fresh = k => (map[k] || []).filter(p => p.v != null && now - p.ts * 1000 < 5 * 60_000 + 15_000);
+        const freshMap = { 'pwr.total_w': fresh('pwr.total_w'),
+                           'therm.cpu_temp_c': fresh('therm.cpu_temp_c'),
+                           'therm.gpu_temp_c': fresh('therm.gpu_temp_c') };
         const cp = document.getElementById('chip-power');
         const tc = document.getElementById('chip-temp');
+        const pw = chipReadout(freshMap, 'pwr.total_w', null);
         if (cp) {
-            if (pw.length) {
-                const mean = pw.reduce((a, p) => a + p.v, 0) / pw.length;
-                cp.textContent = mean.toFixed(1) + ' W';
-                cp.title = C.tf('uplift.chip.power_mean', 'Package power — 60 s mean');
+            if (pw) {
+                cp.textContent = pw.primary.toFixed(1) + ' W';
+                cp.title = C.tf('uplift.chip.power_mean', 'Package power — 60 s mean') +
+                           `: ${pw.mean60.toFixed(1)} W`;
                 cp.hidden = false;
             } else cp.hidden = true;
         }
+        const tm = chipReadout(freshMap, 'therm.cpu_temp_c',
+                               ['therm.cpu_temp_c', 'therm.gpu_temp_c']);
         if (tc) {
-            const t = [...fresh('therm.cpu_temp_c'), ...fresh('therm.gpu_temp_c')];
-            if (t.length) {
-                const mx = Math.max(...t.map(p => p.v));
-                const mean = t.reduce((a, p) => a + p.v, 0) / t.length;
-                tc.textContent = Math.round(mx) + ' °C';
+            if (tm) {
+                tc.textContent = Math.round(tm.primary) + ' °C';
                 tc.title = C.tf('uplift.chip.temp_max', 'Max CPU/GPU temp — 60 s max') +
-                           ` · ${C.tf('uplift.chip.temp_mean', 'mean')} ${Math.round(mean)} °C`;
-                tc.classList.toggle('chip-hot', mx >= 85);
+                           `: ${Math.round(tm.max60)} °C`;
+                tc.classList.toggle('chip-hot', Math.round(tm.primary) >= 85);
                 tc.hidden = false;
             } else { tc.hidden = true; tc.classList.remove('chip-hot'); }
         }
@@ -1435,5 +1466,7 @@ window.Uplift.charts = {
         } catch (_) { /* silent — absence stays silent */ }
     },
     get usageChart() { return usageChart; },
+    // NAT-6 chip fix: node tests slice/verify the chip aggregation rule
+    chipReadout: chipReadout,
 };
 })();

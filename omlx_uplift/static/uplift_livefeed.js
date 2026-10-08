@@ -93,7 +93,13 @@ const listeners = [];
 function onFrame(fn) { if (typeof fn === 'function') listeners.push(fn); }
 
 function connect() {
-    if (disabled || source || !window.EventSource || document.hidden) return;
+    // HANG-1: like the request feed, the 2 Hz stream belongs to the FOCUSED
+    // tab only — visible-but-unfocused tabs used to burn a permanent slot of
+    // the browser's ~6-per-origin HTTP/1.1 budget (2 streams x 3 tabs = the
+    // 4th tab's page load starves; measured). Unfocused tabs fall back to
+    // the 5 s stored cadence honestly: liveUsable()'s 15 s freshness gate
+    // trips, and the charts keep drawing from the store.
+    if (disabled || source || !window.EventSource || document.hidden || !document.hasFocus()) return;
     try {
         source = new EventSource(`${API}/uplift/api/metrics/stream`);
         source.onmessage = e => { try { ingest(JSON.parse(e.data)); } catch (_) {} };
@@ -158,11 +164,15 @@ function enable() { disabled = false; }
 function smoothK() { return LIVE_SMOOTH_K; }
 function isLive() { return everLive; }
 
-/* Pause/resume with the tab, exactly like the request feed. */
+/* Pause/resume with the tab, exactly like the request feed. HANG-1: blur
+   also releases the slot; focus takes it back (the ring replays on connect,
+   so the live columns refill without a reload). */
 window.addEventListener('visibilitychange', () => {
     if (document.hidden) close();
     else connect();
 });
+window.addEventListener('focus', () => connect());
+window.addEventListener('blur', () => close());
 
 window.Uplift.livefeed = {
     connect, close, probe, liveUsable, liveCol, liveForWindow, smoothK, isLive,

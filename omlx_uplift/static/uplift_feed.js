@@ -378,7 +378,16 @@ function pushServerEvent(ev) {
 }
 function connectEventStream() {
     if (sseSource || !window.EventSource) return;
-    if (document.hidden) return;   // opened in a background tab: resume opens it
+    // HANG-1: the live stream belongs to the tab the user is WORKING IN.
+    // hidden stays closed (SSE-PAUSE-1); visible-but-UNFOCUSED tabs now
+    // close too — a browser allows ~6 concurrent connections PER ORIGIN
+    // over HTTP/1.1 (uvicorn serves h11; no multiplexing), and every open
+    // dashboard holds TWO forever streams (requests + metrics feed), so
+    // three visible tabs already starve the fourth's page load (measured:
+    // 4th tab load stalls >25 s while the first three stream happily).
+    // FEED-1's 2 s poll covers unfocused tabs; a focus-reopen replays from
+    // the ring + pollRequests() catch-up, so no transition is lost.
+    if (document.hidden || !document.hasFocus()) return;
     // R12-3: native oMLX now serves /admin/api/requests/stream (sampled
     // from scheduler snapshots); the gateway keeps its own SSE unchanged.
     try {
@@ -402,6 +411,16 @@ addEventListener('visibilitychange', () => {
         connectEventStream();
         pollRequests();
     }
+});
+/* HANG-1: focus decides who owns the slot — blur frees it for whatever tab
+   the user opened next, focus takes it back and catches up (ring replays on
+   connect + explicit poll, same contract as the visibility resume). */
+addEventListener('focus', () => {
+    connectEventStream();
+    if (!sseOpen()) pollRequests();
+});
+addEventListener('blur', () => {
+    if (sseSource) { sseSource.close(); sseSource = null; }
 });
 /* FEED-1: the periodic fallback poll (uplift_boot) asks this before
    firing. Direct pollRequests() calls (cancel action, resume catch-up)
