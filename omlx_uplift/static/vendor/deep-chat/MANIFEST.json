@@ -1,0 +1,15 @@
+{
+ "name": "deep-chat",
+ "version": "2.5.1",
+ "file": "deep-chat-2.5.1.bundle.js",
+ "sha256": "6844eaf354e19d50dcdd8ee78968d6ae32ccd4b9f15a883902d60e93d69caf84",
+ "bytes": 386971,
+ "source": "https://registry.npmjs.org/deep-chat/-/deep-chat-2.5.1.tgz",
+ "npm_shasum": "42a6e11584ac0603d74e208b58464692c90d8e61",
+ "repo": "https://github.com/OvidijusParsiunas/deep-chat",
+ "license": "MIT",
+ "license_file": "LICENSE",
+ "loader": "script type=module (the bundle is an ES module exporting DeepChat and self-registering the <deep-chat> custom element)",
+ "bundled_deps": ["remarkable@^2.0.1 (MIT)", "speech-to-element@^2.0.0 (MIT)", "@microsoft/fetch-event-source@^2.0.1 (MIT)"],
+ "offline_audit": "NAT-1 probe item 8 (2026-10-07): zero CDN URLs in the bundle, zero remote-initiated network requests during a full S1 chat drill; the provider API URLs inside (api.anthropic.com etc.) are inert constants used only when that provider is explicitly configured. Upgrade policy (NAT-4 card): one vendor commit, update version+sha256 here, tests/test_deepchat_vendor.py pins everything else."
+}
