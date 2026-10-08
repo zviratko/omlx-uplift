@@ -79,6 +79,16 @@ users never see.
   granularity (MTEB over the API offers no per-question events; we report
   the real granularity, never a fabricated one) and each row names its
   metric. No community upload exists for these classes.
+- **Native Chat (preview branch, core features).** The Chat tab can run
+  a native surface (kill switch `?native=chat|all`, default off — the
+  embedded classic page is untouched and the vendored component never
+  hits the wire while off). Streaming chat, stop, model picker
+  (chat-capable models only), system prompt, copy/regenerate/edit,
+  image attachments with vision answered, and a server-side history
+  store with stated caps; classic localStorage chats import once on
+  first boot. deep-chat 2.5.1 (MIT) is vendored with pinned sha256 and
+  a drift test. Thinking/tool-call rendering, ASR, web search and
+  themes follow in further commits on the branch.
 
 ## [1.1] — 2026-10-07
 

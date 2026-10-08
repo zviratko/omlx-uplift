@@ -2108,3 +2108,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .acc-queue-remove { background: none; border: none; color: var(--dim); cursor: pointer;
   font-size: 13px; padding: 0 4px; }
 .acc-queue-remove:hover { color: var(--red); }
+
+/* NAT-4 native chat (3/6): toolbar over the vendored deep-chat host */
+.chat-native-wrap { display: flex; flex-direction: column; gap: 8px; }
+.chat-native-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chat-native-bar select, .chat-native-bar input[type=text] {
+  font-size: 11px; background: var(--field); border: 1px solid var(--edge);
+  color: var(--ink); padding: 4px 6px; }
+.chat-native-bar #chat-native-sys { flex: 1 1 180px; min-width: 140px; }
+.chat-native-bar .btn { font-size: 11px; padding: 4px 8px; }
