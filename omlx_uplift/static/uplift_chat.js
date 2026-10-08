@@ -936,9 +936,10 @@ function toolbar() {
     });
     // U45: classic's right-sidebar sections mirror — EVERY control gets
     // a caption; the picker's own title was the only label before.
-    function group(labelText, control) {
+    function group(labelText, control, labelKey) {
         var g = el('div', 'chat-native-group');
         var lab = el('span', 'chat-native-group-label', labelText);
+        if (labelKey) { lab.dataset.i18n = labelKey; lab.dataset.en = labelText; }  // U59
         g.append(lab, control);
         // the sys prompt keeps the old .chat-native-bar stretch behavior
         // (was a direct flex child; now inside a column group)
@@ -949,16 +950,19 @@ function toolbar() {
     pickers.append(
         group(t('chat.chat_history_label', 'Chat History'),
               (function () { list.title = t('chat.chat_history_label',
-                                            'Chat History'); return list; })()),
+                                            'Chat History'); return list; })(),
+              'chat.chat_history_label'),
         newBtn,
-        group(t('chat.active_model', 'Active Model'), sel),
-        group(t('chat.active_profile', 'Active Profile'), prof),
+        group(t('chat.active_model', 'Active Model'), sel, 'chat.active_model'),
+        group(t('chat.active_profile', 'Active Profile'), prof, 'chat.active_profile'),
         profSave);
     var gen = el('div', 'chat-native-bar chat-native-gen');
     think.title = t('chat.thinking_label', 'Thinking');
     gen.append(
-        group(t('chat.system_prompt.title', 'System Prompt'), sys),
-        group(t('chat.thinking_label', 'Thinking'), think), budget, web, mic, del);
+        group(t('chat.system_prompt.title', 'System Prompt'), sys,
+              'chat.system_prompt.title'),
+        group(t('chat.thinking_label', 'Thinking'), think, 'chat.thinking_label'),
+        budget, web, mic, del);
     // U46: sampling overrides (classic sidebar parity) — own captioned row,
     // each input numeric, blank = engine default, 0 stays a real value.
     var genRow = el('div', 'chat-native-bar chat-native-sampling');

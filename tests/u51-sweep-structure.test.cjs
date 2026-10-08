@@ -119,6 +119,33 @@ test('U51: ACC task cards are keyboard buttons; size-pick selects the card', asy
     assert.equal(ACC.state.selected.mmlu, true);
 });
 
+test('U59: native labels carry data-i18n so a late catalog repairs them', async () => {
+    // doctrine (uplift.js i18n bootstrap): nodes painted before the
+    // locale fetch resolve get re-labelled by applyI18n(document), which
+    // only sees [data-i18n]. A JS-built label WITHOUT the marker keeps
+    // its raw key forever — the 'GROUP_COMMONSENSE' screenshot bug.
+    const { win } = load();
+    const ACC = win.UpliftNativeBench._panels.acc;
+    ACC.state = { results: [], groups: null, selected: {}, sizes: {} };
+    const grid = win.document.getElementById('bench-acc-tasks');
+    ACC.loadTasks();
+    await new Promise(r => setTimeout(r, 10));
+    const found = {};
+    (function walk(n) {
+        if (!n || !n.children) return;
+        for (const c of n.children) {
+            if (c.className === 'bench-label') found.cap = c;
+            if (c.className === 'acc-task') found.card = c;
+            walk(c);
+        }
+    })(grid);
+    assert.ok(found.cap, 'group caption exists');
+    assert.equal(found.cap.dataset.i18n, 'g', 'caption carries its key');
+    assert.equal(found.cap.dataset.en, 'g', 'data-en = the fallback shown');
+    const desc = found.card.children.find(c => c.className === 'acc-task-desc');
+    assert.equal(desc.dataset.i18n, 'd', 'task description carries its key');
+});
+
 test('U51: MTEB + DEC pack cards carry the same button semantics', async () => {
     const { win, byId } = load();
     const M = win.UpliftNativeBench;

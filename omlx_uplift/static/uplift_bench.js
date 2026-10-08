@@ -101,13 +101,20 @@ function gid(id) { return document.getElementById(id); }
 // U51: task/pack cards were click-only divs — keyboard users could not
 // reach them. Real button semantics (role/tabindex/aria-pressed +
 // Enter/Space), selection state mirrored from the .on class.
-function taskCard(label, desc, title, onToggle) {
+function taskCard(label, desc, title, onToggle, i18n) {
     var card = el('div', 'acc-task');
     card.setAttribute('role', 'button');
     card.setAttribute('tabindex', '0');
     card.setAttribute('aria-pressed', 'false');
-    card.appendChild(el('div', 'acc-task-name', label));
-    card.appendChild(el('div', 'acc-task-desc', desc));
+    var nameEl = el('div', 'acc-task-name', label);
+    // U59: t() ran before the locale fetch on a fast grid paint; carrying
+    // the key lets uplift.js's applyI18n(document) pass re-resolve it the
+    // moment the catalog lands (data-en = the fallback we rendered)
+    if (i18n && i18n.l) { nameEl.dataset.i18n = i18n.l; nameEl.dataset.en = label; }
+    card.appendChild(nameEl);
+    var descEl = el('div', 'acc-task-desc', desc);
+    if (i18n && i18n.d) { descEl.dataset.i18n = i18n.d; descEl.dataset.en = desc; }
+    card.appendChild(descEl);
     if (title) card.title = title;
     function toggle() {
         var on = card.classList.toggle('on');
@@ -1597,7 +1604,9 @@ var ACC = {
         grid.replaceChildren();
         this.state.groups.forEach(function (grp) {
             var wrap = el('div', 'acc-group');
-            wrap.appendChild(el('div', 'bench-label', t(grp.group, grp.group.split('.').pop())));
+            var cap = el('div', 'bench-label', t(grp.group, grp.group.split('.').pop()));
+            cap.dataset.i18n = grp.group; cap.dataset.en = cap.textContent;  // U59
+            wrap.appendChild(cap);
             var row = el('div', 'acc-group-tasks');
             grp.tasks.forEach(function (tk) {
                 var sizeSel = el('select');
@@ -1621,7 +1630,7 @@ var ACC = {
                     tk.desc ? t(tk.desc, tk.desc_literal || tk.key) : (tk.desc_literal || ''),
                     null, function (on) {
                         self.state.selected[tk.key] = on;
-                    });
+                    }, { d: tk.desc || null });
                 card.dataset.key = tk.key;
                 card.appendChild(sizeSel);
                 sizeSel.addEventListener('click', function (ev) { ev.stopPropagation(); });
@@ -2314,11 +2323,13 @@ var DEC = {
             grid.replaceChildren();
             Object.keys(this.state.packs).sort().forEach(function (name) {
                 var m = self.state.packs[name];
+                var packKey = 'uplift.bench.pack.' + name.replace(/-/g, '_');
                 var card = taskCard(
-                    t('uplift.bench.pack.' + name.replace(/-/g, '_'), name),
+                    t(packKey, name),
                     (m.items || 0).toLocaleString() + ' · ' + (m.license || ''),
                     String(m.source || ''),
-                    function (on) { self.state.selected[name] = on; });
+                    function (on) { self.state.selected[name] = on; },
+                    { l: packKey });
                 grid.appendChild(card);
             });
         } catch (e) {
