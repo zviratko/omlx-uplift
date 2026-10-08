@@ -134,12 +134,191 @@ function stubCard(sub) {
    tg stays the fixed 128 classic uses (hint shown, no fake control).
    ========================================================================== */
 
+// ---------------------------------------------------------------------------
+// U47: classic-shaped text export of throughput results (dashboard.js
+// benchBuildText / benchCopyText mirrored line-for-line — users paste this
+// into the same threads as classic output, so a prettier-but-different
+// format would be a regression). Pure functions, no DOM: unit-tested;
+// U49 reuses these for the other panels.
+// ---------------------------------------------------------------------------
+function fmtNum(value, decimals, suffix) {
+    // classic benchFmtNum: unmeasured is N/A, never a misleading 0.0
+    if (value === null || value === undefined) return 'N/A';
+    return Number(value).toFixed(decimals) + (suffix || '');
+}
+function fmtMemory(bytes) {
+    // classic benchFormatMemory
+    if (!bytes || bytes === 0) return '-';
+    var gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return gb.toFixed(2) + ' GB';
+    return (bytes / (1024 * 1024)).toFixed(0) + ' MB';
+}
+function contextLabel(profile) {
+    var keys = { code_python: 'Code (Python)', code_mixed: 'Code (Mixed)',
+        novel_ko: 'Novel (Korean)', novel_en: 'Novel (English)',
+        novel_ja: 'Novel (Japanese)' };
+    return t('bench.config.context.' + profile, keys[profile] || keys.code_python);
+}
+function singleTestLabel(r) {
+    var requested = r.requested_pp != null ? r.requested_pp : r.pp;
+    if (requested !== r.pp) {
+        return t('bench.results.test.requested', 'pp{actual} (requested pp{requested})/tg{tg}')
+            .replace('{actual}', r.pp).replace('{requested}', requested)
+            .replace('{tg}', r.tg);
+    }
+    return t('bench.results.test.plain', 'pp{actual}/tg{tg}')
+        .replace('{actual}', r.pp).replace('{tg}', r.tg);
+}
+function batchPromptSummary(rows) {
+    // classic benchBatchPromptSummary (first batch row carries the pp summary)
+    var result = rows[0];
+    if (!result || result.requested_pp === undefined) {
+        return t('bench.results.batch.subtitle', 'pp1024 / tg128');
+    }
+    var requested = result.requested_pp;
+    var minimum = result.prompt_tokens_min != null ? result.prompt_tokens_min : result.pp;
+    var maximum = result.prompt_tokens_max != null ? result.prompt_tokens_max : result.pp;
+    var actual = minimum === maximum
+        ? t('bench.results.batch.actual_pp', 'actual pp{pp}').replace('{pp}', minimum)
+        : t('bench.results.batch.actual_pp_range', 'actual pp{min}-{max}')
+            .replace('{min}', minimum).replace('{max}', maximum);
+    return t('bench.results.batch.requested_summary',
+             'requested pp{requested} / {actual} / tg{tg}')
+        .replace('{requested}', requested).replace('{actual}', actual)
+        .replace('{tg}', result.tg);
+}
+function buildThroughputText(ctx, rows) {
+    // ctx: {model, profile, forceLm, external:{model}|null} — NEVER the
+    // endpoint URL or key (classic prints model @ url for external runs;
+    // the base_url may embed credentials in the query, so external runs
+    // identify by model only — honest and safe; recorded on the card)
+    var pad = function (s, w) { return String(s).padStart(w); };
+    var rpad = function (s, w) { return String(s).padEnd(w); };
+    var lines = [];
+    lines.push(t('bench.results.text_export.title', 'oMLX - {tagline}')
+        .replace('{tagline}', t('app.tagline', 'LLM inference, optimized for your Mac')));
+    lines.push('https://github.com/jundot/omlx');
+    if (ctx.external) {
+        lines.push(t('bench.results.text_export.benchmark_model', 'Benchmark Model: {model}')
+            .replace('{model}', ctx.external.model));
+        lines.push(t('bench.results.text_export.engine_external',
+                     'Engine: External OpenAI-compatible endpoint'));
+    } else {
+        lines.push(t('bench.results.text_export.benchmark_model', 'Benchmark Model: {model}')
+            .replace('{model}', ctx.model));
+        lines.push(ctx.forceLm
+            ? t('bench.results.text_export.engine_force_lm', 'Engine: Force mlx-lm')
+            : t('bench.results.text_export.engine_auto', 'Engine: Auto'));
+    }
+    lines.push(t('bench.results.text_export.context', 'Context: {context}')
+        .replace('{context}', contextLabel(ctx.profile)));
+    lines.push('='.repeat(80));
+    var singles = (rows || []).filter(function (r) { return r.test_type !== 'batch'; });
+    var batch = (rows || []).filter(function (r) { return r.test_type === 'batch'; });
+    if (singles.length) {
+        lines.push('');
+        lines.push(t('bench.results.single.section_label', 'Single Request Results'));
+        lines.push('-'.repeat(80));
+        lines.push([
+            rpad(t('bench.results.single.test', 'Test'), 32),
+            pad('TTFT(ms)', 10), pad('TPOT(ms)', 10), pad('pp TPS', 12),
+            pad('tg TPS', 12), pad('E2E(s)', 10),
+            pad(t('bench.results.single.throughput', 'Throughput'), 12),
+            pad(t('bench.results.single.peak_mem', 'Peak Mem'), 10),
+        ].join('  '));
+        singles.forEach(function (r) {
+            lines.push([
+                rpad(singleTestLabel(r), 32),
+                pad(fmtNum(r.ttft_ms, 1), 10),
+                pad(fmtNum(r.tpot_ms, 2), 10),
+                pad(fmtNum(r.processing_tps, 1, ' tok/s'), 12),
+                pad(fmtNum(r.gen_tps, 1, ' tok/s'), 12),
+                pad(r.e2e_latency_s == null ? 'N/A' : Number(r.e2e_latency_s).toFixed(3), 10),
+                pad(fmtNum(r.total_throughput, 1, ' tok/s'), 12),
+                pad(fmtMemory(r.peak_memory_bytes), 10),
+            ].join('  '));
+        });
+    }
+    if (batch.length) {
+        var baseline = null;
+        for (var bi = 0; bi < singles.length; bi++) {
+            var bpp = singles[bi].requested_pp != null ? singles[bi].requested_pp : singles[bi].pp;
+            if (bpp === 1024) { baseline = singles[bi]; break; }
+        }
+        lines.push('');
+        lines.push(t('bench.results.batch.title', 'Continuous Batching'));
+        lines.push(batchPromptSummary(batch));
+        lines.push('-'.repeat(80));
+        lines.push([
+            rpad(t('bench.results.text_export.batch', 'Batch'), 8),
+            pad('tg TPS', 12), pad(t('bench.results.batch.speedup', 'Speedup'), 8),
+            pad('pp TPS', 12), pad('pp TPS/req', 12), pad('TTFT(ms)', 10), pad('E2E(s)', 10),
+        ].join('  '));
+        if (baseline) {
+            lines.push([
+                rpad('1x', 8),
+                pad(fmtNum(baseline.gen_tps, 1, ' tok/s'), 12),
+                pad('1.00x', 8),
+                pad(fmtNum(baseline.processing_tps, 1, ' tok/s'), 12),
+                pad(fmtNum(baseline.processing_tps, 1, ' tok/s'), 12),
+                pad(fmtNum(baseline.ttft_ms, 1), 10),
+                pad(baseline.e2e_latency_s == null ? 'N/A' : Number(baseline.e2e_latency_s).toFixed(3), 10),
+            ].join('  '));
+        }
+        batch.forEach(function (r) {
+            var speedup = (baseline && baseline.gen_tps > 0 && r.tg_tps != null)
+                ? r.tg_tps / baseline.gen_tps : null;
+            var ppPerReq = (r.pp_tps == null) ? null : r.pp_tps / r.batch_size;
+            lines.push([
+                rpad(r.batch_size + 'x', 8),
+                pad(fmtNum(r.tg_tps, 1, ' tok/s'), 12),
+                pad(speedup != null ? speedup.toFixed(2) + 'x'
+                    : t('bench.results.text_export.not_available', 'N/A'), 8),
+                pad(fmtNum(r.pp_tps, 1, ' tok/s'), 12),
+                pad(fmtNum(ppPerReq, 1, ' tok/s'), 12),
+                pad(fmtNum(r.avg_ttft_ms, 1), 10),
+                pad(r.e2e_latency_s == null ? 'N/A' : Number(r.e2e_latency_s).toFixed(3), 10),
+            ].join('  '));
+        });
+    }
+    return lines.join('\n');
+}
+// classic benchCopyText: clipboard with the same textarea fallback the
+// chat panel uses (plain-http boards have no navigator.clipboard).
+function copyTextFallback(s) {
+    var ta = document.createElement('textarea');
+    ta.value = s;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+}
+function copyPlainText(text, okMsg) {
+    var d = dom();
+    // NOTE: domkit.toast is (text, ms, cls) — the (msg,'error') two-arg
+    // calls scattered through this module are a U51 finding; using the
+    // documented single-arg form here.
+    var onSuccess = function () { if (okMsg && d) d.toast(okMsg); };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(onSuccess, function () {
+            copyTextFallback(text); onSuccess();
+        });
+    } else {
+        copyTextFallback(text); onSuccess();
+    }
+}
+
 var TP = {
     state: null,
 
     render: function (panel) {
         this.state = { active: null, results: [], total: 0, current: 0,
-                       phase: '', running: false, benchId: null };
+                       phase: '', running: false, benchId: null,
+                       // U47: run context for the text export (classic prints
+                       // model/engine/context above the tables)
+                       ctx: { model: '', profile: 'code_python',
+                              forceLm: false, external: null } };
         panel.appendChild(this.form());
         var status = el('div', 'bench-status'); status.id = 'bench-tp-status';
         var results = el('div', 'bench-results'); results.id = 'bench-tp-results';
@@ -257,6 +436,12 @@ var TP = {
                 this.state.running = true;
                 this.state.active = a;
                 this.state.benchId = a.bench_id;
+                if (a.model_id) {   // U47: reattach keeps the export context
+                    this.state.ctx = { model: a.model_id,
+                        profile: a.context_profile || 'code_python',
+                        forceLm: !!a.force_lm_engine,
+                        external: a.external ? { model: a.model_id } : null };
+                }
                 this.setButtons();
                 this.startStream(a.bench_id);
                 this.renderStatus(t('bench.other_active.already_running',
@@ -302,6 +487,10 @@ var TP = {
         }
         this.state.running = true;
         this.state.results = [];
+        this.state.ctx = {   // U47: what the text export will label the run
+            model: body.model_id, profile: body.context_profile,
+            forceLm: !!body.force_lm_engine,
+            external: body.external ? { model: body.external.model } : null };
         this.setButtons();
         var rw = gid('bench-tp-results');
         if (rw) rw.replaceChildren();
@@ -434,7 +623,20 @@ var TP = {
             });
             tbl.appendChild(tr);
         });
-        wrap.replaceChildren(tbl);
+        // U47: classic has a Copy of the whole result set as plain text
+        // ("Benchmark Results (Text — Copy & Paste)"); mirror it above the
+        // table with the classic format (buildThroughputText).
+        var head = el('div', 'bench-results-head');
+        var copyBtn = el('button', 'btn', t('bench.results.text_export.copy', 'Copy'));
+        copyBtn.type = 'button';
+        copyBtn.title = t('bench.results.text_export.section_label',
+                          'Benchmark Results (Text — Copy & Paste)');
+        copyBtn.addEventListener('click', function () {
+            copyPlainText(buildThroughputText(self.state.ctx, self.state.results),
+                          t('bench.results.text_export.copied', 'Copied!'));
+        });
+        head.appendChild(copyBtn);
+        wrap.replaceChildren(head, tbl);
     },
 
     fmt: function (key, v) {
@@ -1885,5 +2087,10 @@ function stopStream() {
 }
 
 return { mount: mount, isMounted: function () { return _mounted; },
-         showSub: showSub, tp: TP };
+         showSub: showSub, tp: TP,
+         // U47 test seams (pure text-export plumbing; U49 reuses)
+         _benchText: { buildThroughputText: buildThroughputText,
+                       fmtNum: fmtNum, fmtMemory: fmtMemory,
+                       singleTestLabel: singleTestLabel,
+                       batchPromptSummary: batchPromptSummary } };
 });
