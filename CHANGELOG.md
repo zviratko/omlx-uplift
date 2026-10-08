@@ -87,8 +87,11 @@ users never see.
   image attachments with vision answered, and a server-side history
   store with stated caps; classic localStorage chats import once on
   first boot. deep-chat 2.5.1 (MIT) is vendored with pinned sha256 and
-  a drift test. Thinking/tool-call rendering, ASR, web search and
-  themes follow in further commits on the branch.
+  a drift test. A live reasoning panel mirrors classic's thinking modes
+  (auto/on/limit/off) and persists per message. A web-search toggle
+  runs classic's full tool loop natively (web_search/fetch_url via the
+  server's /v1/web routes, multi-round chaining, bounded, stop-safe —
+  drilled live). ASR and skin-live theming follow in further commits.
 
 ## [1.1] — 2026-10-07
 

@@ -41,6 +41,7 @@
  "uplift.card.throughput": "Throughput",
  "uplift.card.tokens": "Total tokens",
  "uplift.chat.native_stub": "Native surface — not implemented yet.",
+ "uplift.chat.tools_used": "Tool calls",
  "uplift.chat.booting": "Loading chat…",
  "uplift.chat.copy_last": "Copy last reply",
  "uplift.chat.edit_resend": "Edit & resend last message",

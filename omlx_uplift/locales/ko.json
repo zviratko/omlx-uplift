@@ -41,6 +41,7 @@
  "uplift.card.throughput": "처리량",
  "uplift.card.tokens": "총 토큰",
  "uplift.chat.native_stub": "네이티브 표면 — 아직 구현되지 않았습니다.",
+ "uplift.chat.tools_used": "도구 호출",
  "uplift.chat.booting": "채팅 불러오는 중…",
  "uplift.chat.copy_last": "마지막 답변 복사",
  "uplift.chat.edit_resend": "마지막 메세지 편집 뒤 재발송",

@@ -41,6 +41,7 @@
  "uplift.card.throughput": "スループット",
  "uplift.card.tokens": "総トークン",
  "uplift.chat.native_stub": "ネイティブサーフェス — まだ未実装です。",
+ "uplift.chat.tools_used": "ツール呼び出し",
  "uplift.chat.booting": "チャットを読み込んでいます…",
  "uplift.chat.copy_last": "最近の応答をコピー",
  "uplift.chat.edit_resend": "最近のメッセージを編集して再送信",

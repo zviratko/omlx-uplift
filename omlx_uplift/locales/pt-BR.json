@@ -41,6 +41,7 @@
  "uplift.card.throughput": "Vazão",
  "uplift.card.tokens": "Tokens totais",
  "uplift.chat.native_stub": "Superfície nativa — ainda não implementada.",
+ "uplift.chat.tools_used": "Chamadas de ferramentas",
  "uplift.chat.booting": "Carregando chat…",
  "uplift.chat.copy_last": "Copiar última resposta",
  "uplift.chat.edit_resend": "Editar e reenviar última mensagem",

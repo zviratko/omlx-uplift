@@ -41,6 +41,7 @@
  "uplift.card.throughput": "Průtok dat",
  "uplift.card.tokens": "Celkové tokeny",
  "uplift.chat.native_stub": "Nativní povrch — zatím není implementováno.",
+ "uplift.chat.tools_used": "Volání nástrojů",
  "uplift.chat.booting": "Načítám chat…",
  "uplift.chat.copy_last": "Kopírovat poslední odpověď",
  "uplift.chat.edit_resend": "Upravit a znovu odeslat poslední zprávu",

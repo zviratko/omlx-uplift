@@ -4,8 +4,8 @@
    - shapeRequest: system prompt + full store history + dedup (the
      component records the user message before connect; the outgoing
      body must carry it exactly once) + Bearer from the key handout
-   - shapeResponse: delta.content passes, reasoning/tool deltas are
-     silent in 3/6 (4/6 renders them)
+   - (5/6 note: chunk parsing moved from shapeResponse to the native
+     handler's parseChunk — covered in nat4-tool-loop.test.cjs)
    - migrateLegacy: one-shot import of classic's localStorage store,
      key consumed ONLY after every POST succeeded; corrupt JSON is a
      silent no-op (never deletes legacy data); transport failure keeps
@@ -243,28 +243,6 @@ test('thinking modes map to classic wire fields (enable_thinking / thinking_budg
     b = await bodyFor('limit', null);
     assert.equal(b.enable_thinking, true);
     assert.ok(!('thinking_budget' in b), 'no budget -> unlimited thinking');
-});
-
-test('shapeResponse accumulates reasoning_content for the thinking panel', () => {
-    const M = makeHarness().win.UpliftNativeChat;
-    assert.equal(M._state().thinkingLive, '');
-    M.shapeResponse({ choices: [{ delta: { reasoning_content: 'step 1 ' } }] });
-    M.shapeResponse({ choices: [{ delta: { reasoning_content: 'step 2' } }] });
-    M.shapeResponse({ choices: [{ delta: { content: 'answer' } }] });
-    assert.equal(M._state().thinkingLive, 'step 1 step 2',
-                 'reasoning deltas buffer while content passes through');
-});
-
-test('shapeResponse: content passes, thinking/tool deltas silent in 3/6', () => {
-    const M = makeHarness().win.UpliftNativeChat;
-    assert.deepEqual(M.shapeResponse({ choices: [{ delta: { content: 'tok' } }] }),
-                     { text: 'tok' });
-    assert.deepEqual(M.shapeResponse({ choices: [{ delta:
-        { reasoning_content: 'hmm' } }] }), { text: '' });
-    assert.deepEqual(M.shapeResponse({ choices: [{ delta:
-        { tool_calls: [{ index: 0 }] } }] }), { text: '' });
-    assert.deepEqual(M.shapeResponse(null), { text: '' });
-    assert.deepEqual(M.shapeResponse('ping'), { text: '' });
 });
 
 test('migrateLegacy imports classic store and consumes key only on full success',

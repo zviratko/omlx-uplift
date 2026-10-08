@@ -41,6 +41,7 @@
  "uplift.card.throughput": "Пропускная способность",
  "uplift.card.tokens": "Всего токенов",
  "uplift.chat.native_stub": "Нативная поверхность — ещё не реализовано.",
+ "uplift.chat.tools_used": "Вызовы инструментов",
  "uplift.chat.booting": "Загрузка чата…",
  "uplift.chat.copy_last": "Копировать последний ответ",
  "uplift.chat.edit_resend": "Изменить и отправить последнее сообщение",

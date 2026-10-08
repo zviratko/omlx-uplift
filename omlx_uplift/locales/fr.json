@@ -41,6 +41,7 @@
  "uplift.card.throughput": "Débit",
  "uplift.card.tokens": "Tokens totaux",
  "uplift.chat.native_stub": "Surface native — pas encore implémentée.",
+ "uplift.chat.tools_used": "Appels d'outils",
  "uplift.chat.booting": "Chargement du chat…",
  "uplift.chat.copy_last": "Copier la dernière réponse",
  "uplift.chat.edit_resend": "Modifier et renvoyer le dernier message",
