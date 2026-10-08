@@ -1183,7 +1183,13 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    the right". No JS timer needed — the parent menu's 250 ms grace close
    covers the travel. */
 .dd-menu .dd-item { position: relative; display: block; }
-.dd-menu .dd-item > a { display: block; }
+/* :not(.dd-classic) is load-bearing: '.dd-menu .dd-item > a' (0,2,1) would
+   otherwise OUTRANK the flyout's base 'display:none' (0,2,0) — both links
+   are direct children of the row — and all three "Classic (Embed)" twins
+   would sit painted in the open menu instead of revealing on hover
+   (user report 2026-10-08). The row rule is for the PRIMARY link only. */
+.dd-menu .dd-item > a:not(.dd-classic) { display: block; }
+.dd-menu .dd-item .dd-classic { display: none; }   /* same value, row-scoped */
 .dd-menu .dd-classic {
     position: absolute; top: -1px; left: 100%; z-index: 51;
     display: none;                        /* hover-reveal; [hidden] = no native twin */

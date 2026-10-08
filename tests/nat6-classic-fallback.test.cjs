@@ -120,6 +120,17 @@ test('NAT-6 style: flyout cascades right of the menu, hover-revealed, no-hover f
         'revealed on row hover, JS [hidden] keeps veto power');
     assert.ok(/@media \(hover: none\)[\s\S]{0,300}\.dd-classic\s*\{\s*position: static/.test(css),
         'touch devices get a plain indented sub-entry instead of a cascade');
+    /* Hover-ONLY regression (user, 2026-10-08: "it looks weird when all 3
+       are visible"). The flyout base MUST beat the row rule that makes the
+       primary link block — both links are direct children of .dd-item, so
+       '.dd-menu .dd-item > a { display:block }' (0,2,1) outranked the twin's
+       '.dd-menu .dd-classic { display:none }' (0,2,0) and painted all three
+       twins into the open menu. The row rule must exclude .dd-classic, and
+       a row-scoped display:none with equal-or-higher specificity must hold. */
+    assert.ok(/\.dd-menu \.dd-item > a:not\(\.dd-classic\)\s*\{\s*display: block/.test(css),
+        'row block-link rule must EXCLUDE the flyout twin');
+    const rowHide = css.match(/\.dd-menu \.dd-item( > a)?(\.dd-classic|:has[^{]*)?[^{]*\.dd-classic[^{]*\{[^}]*display: none/);
+    assert.ok(rowHide, 'a .dd-item-scoped display:none guards the flyout base');
 });
 
 // ---- 4) locales ---------------------------------------------------------------
