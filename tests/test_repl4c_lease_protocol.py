@@ -76,3 +76,35 @@ async def test_enter_failure_never_calls_aexit(monkeypatch, tmp_path):
     assert "pool says no" in run.error_message
     assert cm.entered == 1
     assert cm.exited == 0, "must NOT release a lease that was never taken"
+
+
+@pytest.mark.asyncio
+async def test_task_cancel_reaches_terminal_state_and_releases(monkeypatch,
+                                                                tmp_path):
+    """The live cancel drill caught task.cancel() slipping past
+    `except Exception` (CancelledError is BaseException in 3.8+): the run
+    stayed 'running', sent no terminal event, and locked the UI forever."""
+    import asyncio
+    from omlx_uplift import paths
+    monkeypatch.setattr(paths, "uplift_store_dir", lambda: tmp_path)
+    monkeypatch.setattr(de, "_accum", None)
+
+    class HangEngine(_FakeEngine):
+        async def systemone(self, plan):
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    cm = RecordingCM(engine=HangEngine())
+    _patch_lease(monkeypatch, cm)
+    run = de.DecisionRun("sys1-proto3", "fake", ["arc-choice"], limit=0)
+    task = asyncio.create_task(de._runner(run))
+    await asyncio.sleep(0.3)              # inside the first systemone
+    task.cancel()
+    await task                            # must NOT re-raise to the caller
+    assert run.terminal is True
+    assert run.status == "cancelled"
+    assert run.error_message == "Benchmark cancelled by user"
+    types = [e.get("type") for e in run.events]
+    assert "error" in types, "terminal event must reach SSE subscribers"
+    assert cm.exited == 1, "cancelled run still releases its lease exactly once"
+    assert run.results == [], "a cancelled pack is never persisted"

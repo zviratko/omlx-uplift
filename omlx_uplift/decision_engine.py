@@ -278,6 +278,15 @@ async def _runner(run: DecisionRun) -> None:
             await run.send({"type": "done", "summary": {
                 "model_id": run.model_id, "kind": run.kind,
                 "packs": len(run.results)}})
+    except asyncio.CancelledError:
+        # task.cancel() from the cancel route raises BaseException.CancelledError
+        # — `except Exception` MISSES it (embed_engine pins this too; without
+        # this handler the run stayed status='running', no terminal event was
+        # ever sent, and the UI kept the run locked — caught in the live
+        # cancel drill).
+        run.status = "cancelled"
+        run.error_message = "Benchmark cancelled by user"
+        await run.send({"type": "error", "message": run.error_message})
     except Exception as e:
         # (DecisionRequestError/ContextLength are already handled per-item
         # in _run_pack — anything reaching here is a real run failure)
