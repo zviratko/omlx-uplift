@@ -665,9 +665,215 @@ function loadHistory(surface, hostId, buildBody, excludeId) {
         .catch(function () { /* history is an affordance */ });
 }
 
+// U70: file download via Blob (no deps; same primitive classic uses).
+// NEVER put base URLs or keys in file content — model id only, the same
+// credential rule as the Copy exports.
+function dlFile(name, mime, text) {
+    var w = W();
+    if (!w || !w.URL || typeof w.document === 'undefined') return false;
+    var blob = new w.Blob([text], { type: mime });
+    var url = w.URL.createObjectURL(blob);
+    var a = w.document.createElement('a');
+    a.href = url; a.download = name;
+    w.document.body.appendChild(a);
+    a.click();
+    a.remove();
+    w.URL.revokeObjectURL(url);
+    return true;
+}
+
+function dlJson(nameBase, value) {
+    return dlFile(nameBase + '.json', 'application/json',
+        JSON.stringify(value, null, 2));
+}
+
+// CSV from a column spec — shared by every surface's Download CSV
+function dlCsv(nameBase, cols, rows) {
+    var esc = function (x) {
+        if (x == null) return '';
+        return '"' + String(x).replace(/"/g, '""') + '"';
+    };
+    var out = [cols.map(function (c) { return c.head; }).join(',')];
+    rows.forEach(function (r) {
+        out.push(cols.map(function (c) {
+            var v = c.get(r);
+            return typeof v === 'number' ? String(v) : esc(v);
+        }).join(','));
+    });
+    return dlFile(nameBase + '.csv', 'text/csv', out.join('\n'));
+}
+
+// Classic accDownloadResult ported 1:1 (dashboard.js) — field lists, the
+// external/local CSV header split, TXT line order and the classic i18n
+// keys, so files from native and classic are interchangeable.
+var ACC_EXPORT_COLS = {
+    local: 'id,category,correct,expected,predicted,question,raw_response,time_s,finish_reason,completion_tokens',
+    external: 'id,category,status,correct,expected,predicted,finish_reason,reasoning_fields,prompt_tokens,completion_tokens,error_message,question,raw_response,time_s',
+};
+function accExportJson(r) {
+    var qr = r.question_results || [];
+    var out = {
+        model_id: r.model_id, benchmark: r.benchmark, accuracy: r.accuracy,
+        correct: r.correct, total: r.total, time_s: r.time_s,
+        thinking_used: r.thinking_used || false,
+        category_scores: r.category_scores || null,
+        questions: qr,
+    };
+    if (r.engine) out.engine = r.engine;   // native addition: which twin ran
+    if (r.external) {
+        ['valid_response_count', 'empty_content_count', 'truncated_count',
+         'timeout_count', 'http_error_count', 'connection_error_count',
+         'invalid_response_count', 'parse_error_count', 'wrong_count',
+         'valid_response_rate', 'valid_answer_accuracy',
+         'reliability_warning'].forEach(function (k) {
+            if (r[k] !== undefined) out[k] = r[k];
+        });
+    } else if (r.truncated_count !== undefined) {
+        ['truncated_count', 'truncated_correct_count', 'finished_count',
+         'finished_accuracy'].forEach(function (k) {
+            if (r[k] !== undefined) out[k] = r[k];
+        });
+    }
+    return JSON.stringify(out, null, 2);
+}
+function accExportCsv(r) {
+    var esc = function (x) {
+        if (x == null) return '';
+        return '"' + String(x).replace(/"/g, '""') + '"';
+    };
+    var qr = r.question_results || [];
+    var lines = [r.external ? ACC_EXPORT_COLS.external : ACC_EXPORT_COLS.local];
+    qr.forEach(function (q) {
+        if (r.external) {
+            lines.push([q.id, esc(q.category || ''), esc(q.status || ''),
+                q.correct, esc(q.expected), esc(q.predicted),
+                esc(q.finish_reason || ''),
+                esc((q.reasoning_fields_nonempty || []).join('|')),
+                q.prompt_tokens || 0, q.completion_tokens || 0,
+                esc(q.error_message || ''), esc(q.question),
+                esc(q.raw_response), q.time_s].join(','));
+        } else {
+            lines.push([q.id, esc(q.category || ''), q.correct,
+                esc(q.expected), esc(q.predicted), esc(q.question),
+                esc(q.raw_response), q.time_s, esc(q.finish_reason || ''),
+                q.completion_tokens == null ? '' : q.completion_tokens
+            ].join(','));
+        }
+    });
+    return lines.join('\n');
+}
+function accExportTxt(r) {
+    var sub = function (key, vars) {
+        var line = t(key, key);
+        Object.keys(vars || {}).forEach(function (k) {
+            line = line.split('{' + k + '}').join(String(vars[k]));
+        });
+        return line;
+    };
+    var qr = r.question_results || [];
+    var lines = [
+        sub('acc_bench.results.text_export.model', { model: r.model_id }),
+        sub('acc_bench.results.text_export.benchmark_line',
+            { benchmark: String(r.benchmark || '').toUpperCase() }),
+        sub('acc_bench.results.text_export.accuracy_line',
+            { accuracy: ((r.accuracy || 0) * 100).toFixed(1),
+              correct: r.correct, total: r.total }),
+        sub('acc_bench.results.text_export.time_line', { seconds: r.time_s }),
+    ];
+    if (r.external) {
+        lines.push(
+            sub('acc_bench.results.text_export.valid_responses_line',
+                { valid: r.valid_response_count, total: r.total,
+                  rate: ((r.valid_response_rate || 0) * 100).toFixed(1) }),
+            sub('acc_bench.results.text_export.valid_answer_accuracy_line',
+                { accuracy: ((r.valid_answer_accuracy || 0) * 100).toFixed(1) }),
+            sub('acc_bench.results.text_export.external_summary',
+                { empty: r.empty_content_count, truncated: r.truncated_count,
+                  timeout: r.timeout_count, http: r.http_error_count,
+                  connection: r.connection_error_count,
+                  invalid: r.invalid_response_count,
+                  parse: r.parse_error_count }));
+    } else if (r.truncated_count > 0) {
+        lines.push(sub('acc_bench.results.text_export.local_truncation_line',
+            { truncated: r.truncated_count, total: r.total,
+              truncated_correct: r.truncated_correct_count,
+              accuracy: r.finished_accuracy == null
+                  ? '\u2014' : (r.finished_accuracy * 100).toFixed(1) + '%',
+              finished: r.finished_count }));
+    }
+    lines.push('');
+    qr.forEach(function (q) {
+        var label = r.external ? (q.status || 'invalid_response').toUpperCase()
+                               : (q.correct ? 'CORRECT' : 'WRONG');
+        lines.push(sub('acc_bench.results.text_export.question_header',
+            { id: q.id, label: label }));
+        if (q.category) {
+            lines.push(sub('acc_bench.results.text_export.category_line',
+                { category: q.category }));
+        }
+        if (q.finish_reason && (r.external || q.finish_reason !== 'stop')) {
+            lines.push(sub('acc_bench.results.text_export.finish_reason_line',
+                { reason: q.finish_reason }));
+        }
+        if (r.external && (q.reasoning_fields_nonempty || []).length) {
+            lines.push(sub('acc_bench.results.text_export.reasoning_fields_line',
+                { fields: q.reasoning_fields_nonempty.join(', ') }));
+        }
+        if (r.external && q.error_message) {
+            lines.push(sub('acc_bench.results.text_export.error_line',
+                { error: q.error_message }));
+        }
+        lines.push(sub('acc_bench.results.text_export.question_line',
+            { question: q.question || '' }));
+        lines.push(sub('acc_bench.results.text_export.expected_line',
+            { expected: q.expected }));
+        lines.push(sub('acc_bench.results.text_export.predicted_line',
+            { predicted: q.predicted }));
+        lines.push(sub('acc_bench.results.text_export.raw_response_line',
+            { response: q.raw_response
+                || t('acc_bench.results.text_export.empty_value', '(empty)') }));
+        lines.push(sub('acc_bench.results.text_export.time_line',
+            { seconds: q.time_s }));
+        lines.push('');
+    });
+    return lines.join('\n');
+}
+
+// Download menu (classic's per-row JSON/CSV/TXT), labels via the SAME
+// classic keys so they translate with the merged catalog
+function dlMenu(makeName, formats) {
+    var wrap = el('span', 'bench-dl');
+    var btn = el('button', 'btn tiny', t('acc_bench.results.download', 'Download'));
+    btn.type = 'button';
+    var open = null;
+    btn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        if (open) { open.remove(); open = null; return; }
+        open = el('div', 'bench-dl-menu');
+        formats.forEach(function (f) {
+            var b = el('button', null, t(f[1], f[2]));
+            b.type = 'button';
+            b.addEventListener('click', function (ev2) {
+                ev2.stopPropagation();
+                f[0](makeName());
+                open.remove(); open = null;
+            });
+            open.appendChild(b);
+        });
+        wrap.appendChild(open);
+        var dismiss = function () {
+            if (open) { open.remove(); open = null; }
+            document.removeEventListener('click', dismiss);
+        };
+        setTimeout(function () { document.addEventListener('click', dismiss); }, 0);
+    });
+    wrap.appendChild(btn);
+    return wrap;
+}
+
 // U49: one Copy button factory for all result cards (classic's export
 // blocks all say the same 'Copy' with the section label as hover text)
-function resultsHead(buildText, titleKey, titleFb) {
+function resultsHead(buildText, titleKey, titleFb, dl) {
     var head = el('div', 'bench-results-head');
     var btn = el('button', 'btn', t('bench.results.text_export.copy', 'Copy'));
     btn.type = 'button';
@@ -678,7 +884,48 @@ function resultsHead(buildText, titleKey, titleFb) {
             t('bench.results.text_export.copied', 'Copied!'));
     });
     head.appendChild(btn);
+    // U70: whole-result set downloads for EVERY surface (user asked for
+    // classic's availability everywhere, not just Intelligence). dl =
+    // {name(): file stem, rows(), cols(): [{head, get}]}
+    if (dl) {
+        var dlBtn = el('button', 'btn', t('acc_bench.results.download', 'Download'));
+        dlBtn.type = 'button';
+        var open = null;
+        dlBtn.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            if (open) { open.remove(); open = null; return; }
+            open = el('div', 'bench-dl-menu');
+            [['json', 'acc_bench.results.download_json', 'JSON',
+              function () { dlJson(dl.name(), dl.rows()); }],
+             ['csv', 'acc_bench.results.download_csv', 'CSV',
+              function () { dlCsv(dl.name(), dl.cols(), dl.rows()); }]]
+              .forEach(function (f) {
+                var b = el('button', null, t(f[1], f[2]));
+                b.type = 'button';
+                b.addEventListener('click', function (ev2) {
+                    ev2.stopPropagation();
+                    f[3]();
+                    open.remove(); open = null;
+                });
+                open.appendChild(b);
+            });
+            head.appendChild(open);
+            var dismiss = function () {
+                if (open) { open.remove(); open = null; }
+                document.removeEventListener('click', dismiss);
+            };
+            setTimeout(function () { document.addEventListener('click', dismiss); }, 0);
+        });
+        head.appendChild(dlBtn);
+    }
     return head;
+}
+
+// U70: standard cols from the shared [key, label] tables
+function dlCols(defs) {
+    return defs.map(function (c) {
+        return { head: c[1], get: function (r) { return r[c[0]]; } };
+    });
 }
 
 // U64: one column definition for the live table AND history snapshots
@@ -1032,6 +1279,11 @@ var TP = {
         wrap.replaceChildren(
             resultsHead(function () {
                 return buildThroughputText(self.state.ctx, self.state.results);
+            }, null, null, {
+                name: function () { return 'uplift_throughput_'
+                    + String((self.state.ctx && self.state.ctx.model) || 'run'); },
+                rows: function () { return self.state.results; },
+                cols: function () { return dlCols(TP_COLS || TP_COLS_DEF()); },
             }), tbl);
     },
 
@@ -1365,7 +1617,16 @@ var CTX = {
                     [{ label: 'Field', get: function (kv) { return kv[0]; } },
                      { label: 'Value', get: function (kv) { return kv[1]; } }],
                     ctxResultPairs(selfC.state.models, r));
-            }, 'ctx_bench.result.section_label', 'Result'),
+            }, 'ctx_bench.result.section_label', 'Result', {
+                name: function () { return 'uplift_context_'
+                    + String((r && r.model_id) || 'run'); },
+                rows: function () { return r || {}; },
+                cols: function () {
+                    return ctxResultPairs(selfC.state.models, r).map(function (kv) {
+                        return { head: kv[0], get: function () { return kv[1]; } };
+                    });
+                },
+            }),
             card);
     },
 
@@ -1646,7 +1907,18 @@ var ANE = {
                          return r.latency_ms == null ? '\u2014'
                              : Math.round(r.latency_ms).toLocaleString(); } }],
                     snap.results || []);
-            }, aneHeadKey, 'Candidates'),
+            }, aneHeadKey, 'Candidates', {
+                name: function () { return 'uplift_ane_'
+                    + (((mSel && mSel.value) || 'run').replace(/\s+/g, '_')); },
+                rows: function () { return (snap.results || []).map(function (r) {
+                    return { split: r.split || r.name || '', state: r.state || '',
+                             processing_tps: r.processing_tps, latency_ms: r.latency_ms };
+                }); },
+                cols: function () { return dlCols(
+                    [['split', 'split'], ['state', 'state'],
+                     ['processing_tps', 'processing_tps'],
+                     ['latency_ms', 'latency_ms']]); },
+            }),
             card);
     },
 
@@ -1684,6 +1956,7 @@ var ACC = {
                        // U68: {suite: leaf subtask count}; harness --limit
                        // applies PER subtask, the labels must say so
                        harnessSizes: ACC._sizesCache || null,
+                       harnessTasks: ACC._tasksCache || [],
                        engine: 'classic' };
         panel.appendChild(this.form());
         var queue = el('div', 'acc-queue'); queue.id = 'bench-acc-queue';
@@ -1716,26 +1989,16 @@ var ACC = {
         f.appendChild(el('div', 'bench-label acc-grid-label',
             t('acc_bench.config.benchmarks', 'Benchmarks')));
         var grid = el('div', 'acc-taskgrid'); grid.id = 'bench-acc-tasks';
-        var engineSeg = el('div', 'bench-chips'); engineSeg.id = 'bench-acc-engine';
-        [['classic', t('uplift.bench.engine_classic', 'Built-in')],
-         ['harness', t('uplift.bench.engine_harness',
-                       'Community harness (lm-eval)')]].forEach(function (e, i) {
-            var lb = el('label', 'chip');
-            var rb = el('input'); rb.type = 'radio'; rb.name = 'bench-acc-engine';
-            rb.value = e[0]; rb.checked = i === 0;
-            lb.append(rb, document.createTextNode(' ' + e[1]));
-            engineSeg.appendChild(lb);
-        });
-        var engRow = el('div', 'bench-row');
+        // U69 (user): the engine is a property of the benchmark, not a
+        // global mode. One list; every card carries its engine caption
+        // (oMLX Classic / LM-Eval); the lm-eval math shows on the harness
+        // cards' own size options. The old radio row is gone.
         var engNote = el('p', 'native-stub-note', t('uplift.bench.engine_hint',
-            'Built-in samples N questions total. Community harness (lm-eval) evaluates N PER SUBTASK — MMLU has 57 subtasks, so 30 becomes 1710 requests.'));
+            'oMLX Classic samples N questions total. LM-Eval runs N PER SUBTASK — MMLU has 57 subtasks, so 30 becomes 1710 requests. The number of requests for your LM-Eval picks is shown below the list.'));
         engNote.id = 'bench-acc-engine-hint';
-        engRow.append(labeled(t('uplift.bench.engine', 'Scoring engine'), engineSeg), engNote);
-        // U68: per-subtask counts arrive lazily (first probe can be slow);
-        // on arrival, relabel the size dropdowns + hint with the truth
-        engineSeg.addEventListener('change', function () { self.applyEngineLabels(); });
+        var totNote = el('p', 'native-stub-note'); totNote.id = 'bench-acc-engine-total';
+        f.append(grid, engNote, totNote);
         self.loadHarnessSizes();
-        f.append(grid, engRow);
 
         var extRow = el('div', 'bench-row bench-external');
         extRow.id = 'bench-acc-ext-row'; extRow.hidden = true;
@@ -1815,6 +2078,7 @@ var ACC = {
     },
 
     _sizesCache: null,
+    _tasksCache: null,   // U69: harness-mapped suite keys (module cache)
 
     loadHarnessSizes: function () {
         // U68: lazy, never blocks the grid; the first server probe can
@@ -1830,59 +2094,70 @@ var ACC = {
         }).catch(function () { /* honest plain sizes */ });
     },
 
-    currentEngine: function () {
-        // typeof guard: node structural harnesses stub document without
-        // querySelector (radio state only exists in a real page anyway)
-        var eng = (typeof document.querySelector === 'function')
-            ? document.querySelector('input[name=bench-acc-engine]:checked')
-            : null;
-        return eng ? eng.value : (this.state && this.state.engine) || 'classic';
+    _fullSize: function (st, key) {
+        var out = 0;
+        (st.groups || []).forEach(function (g) {
+            (g.tasks || []).forEach(function (tk) {
+                if (tk.key === key) out = tk.full_size || 0;
+            });
+        });
+        return out;
     },
 
     applyEngineLabels: function () {
-        // U68: relabel every size option with the harness truth when the
-        // harness engine is selected; classic keeps plain numbers
+        // U68+U69: every LM-Eval card relabels its OWN size options with
+        // the per-subtask truth ('30 \u00d757'); classic cards stay plain
         var st = this.state;
         if (!st) return;
-        st.engine = this.currentEngine();
-        var mult = {};
-        (st.groups || []).forEach(function (g) {
-            g.tasks.forEach(function (tk) {
-                var c = st.harnessSizes && st.harnessSizes[tk.key];
-                mult[tk.key] = (st.engine === 'harness' && c > 1) ? c : 1;
-            });
-        });
-        document.querySelectorAll('#bench-acc-tasks .acc-task').forEach(function (card) {
-            var key = card.dataset.key;
+        var gdoc = (typeof document.querySelectorAll === 'function')
+            ? document : null;
+        if (gdoc) gdoc.querySelectorAll('#bench-acc-tasks .acc-task').forEach(function (card) {
+            var key = card.dataset.key || '';
+            var bare = key.indexOf('|h') > 0 ? key.slice(0, key.indexOf('|h')) : key;
+            var c = (st.harnessSizes && st.harnessSizes[bare]) || 1;
             var sel = card.querySelector('select');
-            if (!sel || !mult[key]) return;
+            if (!sel) return;
+            var mult = (key.indexOf('|h') > 0 && c > 1) ? c : 1;
             [].forEach.call(sel.children, function (o) {
                 if (o.value === '0') { o.dataset.base = o.dataset.base || o.textContent; return; }
                 o.dataset.base = o.dataset.base || o.textContent;
-                var base = o.dataset.base;
-                o.textContent = mult[key] > 1
-                    ? base + ' \u00d7' + mult[key] : base;
+                o.textContent = mult > 1 ? o.dataset.base + ' \u00d7' + mult : o.dataset.base;
             });
         });
-        // Full (N) options scale too: full_size is the DATASET total, the
-        // harness runs all of it once per subtask — no multiplier math for
-        // 'full' beyond what already applies; leave 'Full' honest.
-        var hint = gid('bench-acc-engine-hint');
-        if (hint && st.harnessSizes) {
-            var picked = Object.keys(st.selected).filter(function (k) { return st.selected[k]; });
-            if (st.engine === 'harness' && picked.length) {
-                var reqs = picked.reduce(function (a, k) {
-                    return a + ((st.harnessSizes[k] || 1) * (st.sizes[k] || 0));
-                }, 0);
-                var c = C();
-                var tot = c ? c.t('uplift.bench.engine_total',
-                    { n: reqs ? reqs.toLocaleString() : '\u2014' })
-                    : 'uplift.bench.engine_total';
-                hint.textContent = tot === 'uplift.bench.engine_total'
-                    ? 'Community harness: about ' + (reqs ? reqs.toLocaleString() : '\u2014')
-                        + ' requests for this selection.'
-                    : tot;
+        // Honest request total for the LM-Eval picks (sizes 0 = full
+        // dataset: counted as full_size per subtask only when known,
+        // otherwise excluded with the total staying a lower bound — we
+        // NEVER print a guessed number)
+        var tot = gid('bench-acc-engine-total');
+        if (tot) {
+            var reqs = 0, counted = false;
+            Object.keys(st.selected).forEach(function (k) {
+                if (!st.selected[k] || k.indexOf('|h') < 0) return;
+                var bare = k.slice(0, k.indexOf('|h'));
+                var c = (st.harnessSizes && st.harnessSizes[bare]) || 1;
+                var n = st.sizes[k] || 0;
+                if (!n) {
+                    var fs = this._fullSize(st, bare);
+                    if (!fs) return;             // unknown: stay silent-ish
+                    n = fs;
+                }
+                reqs += c * n; counted = true;
+            });
+            var shown = counted && reqs ? reqs.toLocaleString() : '\u2014';
+            var c2 = C();
+            var line = (c2 && c2.t) ? c2.t('uplift.bench.engine_total',
+                                            { n: shown }) : null;
+            if (typeof line !== 'string' || line === 'uplift.bench.engine_total'
+                || line.indexOf('{n}') >= 0) {
+                var fb = t('uplift.bench.engine_total',
+                    'LM-Eval selection: about {n} requests.');
+                line = (typeof fb === 'string' ? fb
+                        : 'LM-Eval selection: about {n} requests.')
+                        .replace('{n}', shown);
             }
+            tot.textContent = line;
+            tot.hidden = !(Object.keys(st.selected).some(function (k) {
+                return st.selected[k] && k.indexOf('|h') > 0; }));
         }
     },
 
@@ -1893,6 +2168,11 @@ var ACC = {
         if (g0) g0.replaceChildren(loadingNote());
         return d.fetchJson(api() + '/bench/accuracy/tasks').then(function (data) {
             self.state.groups = data.tasks || [];
+            // U69: which suites have an lm-eval equivalent (module cache:
+            // a panel reopen before this fetch resolves still renders the
+            // full list)
+            ACC._tasksCache = data.harness_tasks || [];
+            self.state.harnessTasks = ACC._tasksCache;
             self.renderGrid();
         }).catch(function () {});
     },
@@ -1909,50 +2189,79 @@ var ACC = {
             wrap.appendChild(cap);
             var row = el('div', 'acc-group-tasks');
             grp.tasks.forEach(function (tk) {
-                var sizeSel = el('select');
-                sizeSel.dataset.key = tk.key;
-                tk.sizes.forEach(function (n) {
-                    var o = el('option', null, String(n)); o.value = String(n); sizeSel.appendChild(o);
-                });
-                // U51: {count} lives INSIDE the translated key
-                // (classic fills it the same way); the old concat showed
-                // the raw placeholder + a paren for non-en locales
-                var fullOpt = el('option', null,
-                    t('acc_bench.config.full_option', 'Full ({count})')
-                        .replace('{count}', tk.full_size.toLocaleString()));
-                fullOpt.value = '0';
-                sizeSel.appendChild(fullOpt);
-                sizeSel.value = String(tk.sizes[Math.min(2, tk.sizes.length - 1)]);
-                // U51: keyboard-operable card (was a click-only div). The
-                // size select lives inside as its own focus target; a
-                // click that lands on it must not double-toggle the card.
-                var card = taskCard(tk.label,
-                    tk.desc ? t(tk.desc, tk.desc_literal || tk.key) : (tk.desc_literal || ''),
-                    null, function (on) {
-                        self.state.selected[tk.key] = on;
-                        self.applyEngineLabels();   // U68: totals hint
-                    }, { d: tk.desc || null });
-                card.dataset.key = tk.key;
-                card.appendChild(sizeSel);
-                sizeSel.addEventListener('click', function (ev) { ev.stopPropagation(); });
-                sizeSel.addEventListener('change', function () {
-                    // choosing a size implies picking the task (U53: the
-                    // select stays operable on unselected cards — classic
-                    // disabled it, which made the FIRST click dead)
-                    if (!card.classList.contains('on')) {
-                        card.classList.add('on');
-                        card.setAttribute('aria-pressed', 'true');
-                        self.state.selected[tk.key] = true;
-                    }
-                    self.state.sizes[tk.key] = Number(sizeSel.value);
-                    self.applyEngineLabels();       // U68: totals hint
-                });
-                row.appendChild(card);
+                row.appendChild(self.taskRowEl(tk, false));
+                // U69: lm-eval variant appears IN the list beside its
+                // built-in twin, not behind a mode switch
+                if ((self.state.harnessTasks || []).indexOf(tk.key) >= 0)
+                    row.appendChild(self.taskRowEl(tk, true));
             });
             wrap.appendChild(row);
             grid.appendChild(wrap);
         });
         this.applyEngineLabels();   // U68: labels are fresh DOM
+    },
+
+    taskRowEl: function (tk, variant) {
+        var self = this;
+        var key = variant ? tk.key + '|h' : tk.key;
+        var sizeSel = el('select');
+        sizeSel.dataset.key = key;
+        tk.sizes.forEach(function (n) {
+            var o = el('option', null, String(n)); o.value = String(n); sizeSel.appendChild(o);
+        });
+        // U51: {count} lives INSIDE the translated key
+        // (classic fills it the same way); the old concat showed
+        // the raw placeholder + a paren for non-en locales
+        // U69: 'Full' (0 = entire dataset) stays on oMLX Classic cards
+        // ONLY. On an LM-Eval twin, lm_eval semantics would make it the
+        // FULL set PER SUBTASK (mmlu: 14,042 x 57 requests) — an hours-
+        // long accident one mis-click away, and the classic twin already
+        // runs the same questions in full. Harness cards are for
+        // controlled sample counts; the total line shows their cost.
+        if (!variant) {
+            var fullOpt = el('option', null,
+                t('acc_bench.config.full_option', 'Full ({count})')
+                    .replace('{count}', tk.full_size.toLocaleString()));
+            fullOpt.value = '0';
+            sizeSel.appendChild(fullOpt);
+        }
+        sizeSel.value = String(tk.sizes[Math.min(2, tk.sizes.length - 1)]);
+        // U51: keyboard-operable card (was a click-only div). The
+        // size select lives inside as its own focus target; a
+        // click that lands on it must not double-toggle the card.
+        var card = taskCard(tk.label,
+            tk.desc ? t(tk.desc, tk.desc_literal || tk.key) : (tk.desc_literal || ''),
+            null, function (on) {
+                self.state.selected[key] = on;
+                self.applyEngineLabels();   // U68: totals hint
+            }, { d: tk.desc || null });
+        card.dataset.key = key;
+        // U69: engine caption inside the card — the list must read the
+        // engine per benchmark (classic doctrine: oMLX Classic vs the
+        // community lm-eval harness)
+        var cap = el('div', 'acc-task-engine',
+            variant ? t('uplift.bench.engine_harness', 'LM-Eval')
+                    : t('uplift.bench.engine_classic', 'oMLX Classic'));
+        cap.dataset.i18n = variant ? 'uplift.bench.engine_harness'
+                                   : 'uplift.bench.engine_classic';
+        cap.dataset.en = cap.textContent;   // U59 repair marker
+        card.appendChild(cap);
+        if (variant) card.classList.add('acc-task-harness');
+        card.appendChild(sizeSel);
+        sizeSel.addEventListener('click', function (ev) { ev.stopPropagation(); });
+        sizeSel.addEventListener('change', function () {
+            // choosing a size implies picking the task (U53: the
+            // select stays operable on unselected cards — classic
+            // disabled it, which made the FIRST click dead)
+            if (!card.classList.contains('on')) {
+                card.classList.add('on');
+                card.setAttribute('aria-pressed', 'true');
+                self.state.selected[key] = true;
+            }
+            self.state.sizes[key] = Number(sizeSel.value);
+            self.applyEngineLabels();       // U68: totals hint
+        });
+        return card;
     },
 
     collect: function () {
@@ -1971,8 +2280,22 @@ var ACC = {
             enable_thinking: !!(gid('bench-acc-think') && gid('bench-acc-think').checked),
             upload: !!(gid('bench-acc-upload') && gid('bench-acc-upload').checked),
         };
-        var eng = document.querySelector('input[name=bench-acc-engine]:checked');
-        body.engine = eng ? eng.value : 'classic';
+        // U69: engine is per CARD now ('key' classic, 'key|h' harness).
+        // This call carries the classic part; the harness part rides as a
+        // second queue entry (add() posts both) so mixed picks work and a
+        // harness rejection (external/thinking) can't eat the classic run.
+        var hBody = {};
+        Object.keys(body.benchmarks).forEach(function (k) {
+            if (k.indexOf('|h') > 0) {
+                hBody[k.slice(0, k.indexOf('|h'))] = body.benchmarks[k];
+                delete body.benchmarks[k];
+            }
+        });
+        body.engine = 'classic';
+        body._harness = Object.keys(hBody).length
+            ? JSON.parse(JSON.stringify(Object.assign({}, body,
+                  { benchmarks: hBody, engine: 'harness' })))
+            : null;
         var ext = gid('bench-acc-ext');
         if (ext && ext.checked) {
             // classic parity (accuracyExternalRequestBody): extra_body +
@@ -1998,10 +2321,12 @@ var ACC = {
     },
 
     defaultSize: function (key) {
+        // U69: 'mmlu|h' variant cards resolve to the same task default
+        var bare = key.indexOf('|h') > 0 ? key.slice(0, key.indexOf('|h')) : key;
         var out = 100;
         (this.state.groups || []).forEach(function (grp) {
             grp.tasks.forEach(function (tk) {
-                if (tk.key === key) out = tk.sizes[Math.min(2, tk.sizes.length - 1)];
+                if (tk.key === bare) out = tk.sizes[Math.min(2, tk.sizes.length - 1)];
             });
         });
         return out;
@@ -2016,20 +2341,28 @@ var ACC = {
             d.toast(t('acc_bench.config.model_placeholder', 'Select a model...'), 'error');
             return;
         }
-        if (!Object.keys(body.benchmarks).length) {
+        if (!Object.keys(body.benchmarks).length && !body._harness) {
             d.toast(t('uplift.bench.pick_tasks', 'Pick at least one benchmark'), 'error');
             return;
         }
         var rel = busyLabel(gid('bench-acc-add'));
+        var harness = body._harness;
+        delete body._harness;
+        var posted = 0, err = null;
         try {
-            await d.postJson(api() + '/bench/accuracy/add', body);
-            rel();
-            d.toast(t('uplift.bench.queued', 'Added to queue'));
-            this.refreshQueue();
-        } catch (e) {
-            rel();
-            d.toast(String((e && e.message) || e), 'error');
-        }
+            if (Object.keys(body.benchmarks).length) {
+                await d.postJson(api() + '/bench/accuracy/add', body);
+                posted++;
+            }
+            if (harness) {
+                await d.postJson(api() + '/bench/accuracy/add', harness);
+                posted++;
+            }
+        } catch (e) { err = String((e && e.message) || e); }
+        rel();
+        if (posted) d.toast(t('uplift.bench.queued', 'Added to queue'));
+        if (err) d.toast(err, 'error');
+        if (posted) this.refreshQueue();
     },
 
     cancelAll: async function () {
@@ -2151,7 +2484,8 @@ var ACC = {
         var head = el('tr');
         [t('bench.config.model', 'Model'), t('acc_bench.results.category', 'Benchmark'),
          t('acc_bench.results.correct_line', '{correct} of {total} in {time}s'),
-         t('acc_bench.results.total_accuracy', 'Total accuracy'), ''].forEach(function (h) {
+         t('acc_bench.results.total_accuracy', 'Total accuracy'),
+         t('acc_bench.results.download', 'Download')].forEach(function (h) {
             head.appendChild(el('th', null, h));
         });
         tbl.appendChild(head);
@@ -2172,12 +2506,25 @@ var ACC = {
             // 'x of y' reads exactly like classic's leaderboard copy;
             // dataset_total is the raw number beside it (no invented key)
             if (r.dataset_total) line += ' · /' + r.dataset_total.toLocaleString();
+            var dlCell = el('td');
+            // U70: classic's per-row Download menu (JSON/CSV/TXT in
+            // classic's exact formats and classic i18n labels)
+            dlCell.appendChild(dlMenu(function () {
+                return String(r.model_id || 'run') + '_' + String(r.benchmark || '');
+            }, [
+                [function (name) { dlFile(name + '.json', 'application/json', accExportJson(r)); },
+                 'acc_bench.results.download_json', 'JSON'],
+                [function (name) { dlFile(name + '.csv', 'text/csv', accExportCsv(r)); },
+                 'acc_bench.results.download_csv', 'CSV'],
+                [function (name) { dlFile(name + '.txt', 'text/plain', accExportTxt(r)); },
+                 'acc_bench.results.download_txt', 'TXT'],
+            ]));
             tr.append(
                 el('td', null, String(r.model_id || '')),
                 el('td', null, String(r.benchmark || '')),
-                el('td', null, line),
+                el('td', null, line + (up ? ' ' + up : '')),
                 el('td', null, ((r.accuracy || 0) * 100).toFixed(1) + '% ' + badges),
-                el('td', null, up));
+                dlCell);
             tbl.appendChild(tr);
         });
         // U49: Copy of the whole matrix in classic's own export format
@@ -2543,6 +2890,28 @@ function MTEB(kind) {
                          { label: 'Samples', numeric: true,
                            get: samplesOf }],
                         selfM.state.results.slice().reverse());
+                }, null, null, {
+                    name: function () {
+                        var mSel = gid(prefix + '-model');
+                        return 'uplift_' + kind + '_'
+                            + String((mSel && mSel.value) || 'run');
+                    },
+                    rows: function () { return selfM.state.results.slice().reverse(); },
+                    cols: function () { return [
+                        { head: 'Model', get: function (r) { return r.model_id || ''; } },
+                        { head: 'Benchmark', get: function (r) { return r.task || ''; } },
+                        { head: 'Score', get: function (r) {
+                            var k0 = Object.keys(r.scores || {})[0];
+                            var sc = k0 ? r.scores[k0] : null;
+                            return sc && sc.main_score != null ? sc.main_score : ''; } },
+                        { head: 'Metric', get: function (r) {
+                            var k0 = Object.keys(r.scores || {})[0];
+                            var sc = k0 ? r.scores[k0] : null;
+                            return sc && sc.main_metric ? sc.main_metric : ''; } },
+                        { head: 'Samples', get: function (r) {
+                            var s = samplesOf(r);
+                            return s === '\u2014' ? '' : s; } },
+                    ]; },
                 }),
                 tbl);
         },
@@ -2832,6 +3201,23 @@ var DEC = {
                          return r.items != null
                              ? Number(r.items).toLocaleString() : '—'; } }],
                     selfD.state.results.slice().reverse());
+            }, null, null, {
+                name: function () {
+                    var mSel = gid('bench-dec-model');
+                    return 'uplift_decision_'
+                        + String((mSel && mSel.value) || 'run');
+                },
+                rows: function () { return selfD.state.results.slice().reverse(); },
+                cols: function () { return [
+                    { head: 'Model', get: function (r) { return r.model_id || ''; } },
+                    { head: 'Benchmark', get: function (r) { return r.pack || ''; } },
+                    { head: 'Accuracy', get: function (r) { return r.accuracy; } },
+                    { head: 'Brier', get: function (r) { return r.brier; } },
+                    { head: 'ECE', get: function (r) { return r.ece; } },
+                    { head: 'Agreement', get: function (r) { return r.agreement; } },
+                    { head: 'ms/question', get: function (r) { return r.ms_per_question; } },
+                    { head: 'Samples', get: function (r) { return r.items; } },
+                ]; },
             }),
             tbl);
     },

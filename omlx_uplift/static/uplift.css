@@ -2170,6 +2170,24 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    150px track and paint over the neighbouring card (browser check
    2026-10-08). */
 .acc-task-desc { font-size: 10px; color: var(--dim); min-height: 12px; margin: 2px 0 4px; }
+.acc-task-engine {
+    /* U69: engine name per benchmark card (oMLX Classic vs LM-Eval) */
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.62;
+}
+.acc-task-harness .acc-task-engine { opacity: 1; color: var(--accent); }
+/* U70: Download menus (classic's per-row JSON/CSV/TXT + per-surface sets) */
+.bench-dl { position: relative; display: inline-block; }
+.bench-dl-menu { position: absolute; bottom: 100%; left: 0; z-index: 30;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25); padding: 3px; min-width: 64px;
+    display: flex; flex-direction: column; }
+.bench-dl-menu button { background: none; border: 0; color: var(--ink);
+    font-size: 11px; text-align: left; padding: 3px 8px; cursor: pointer; border-radius: 4px; }
+.bench-dl-menu button:hover { background: var(--row2); }
+
 .acc-task select { width: 100%; font-size: 10px; background: var(--field);
   border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px;
   margin-top: auto; }   /* U57: pin dropdowns to one row baseline */

@@ -21,11 +21,19 @@ const { STATIC_DIR } = require('./static-src.cjs');
 function makeHarness() {
     const byId = {};
     function makeEl(tag) {
-        const el = {
+        const el = {   // self-reference: the className getter reads _classes
+        
             tagName: tag, children: [], style: {}, dataset: {},
-            className: '', textContent: '', title: '', hidden: false,
+            get className() { return [...(el._classes || [])].join(' '); },
+            set className(v) {
+                (v || '').split(/\s+/).filter(Boolean)
+                    .forEach(c => el._classes && el._classes.add(c));
+            },
+            textContent: '', title: '', hidden: false,
             innerHTML: '', checked: false, disabled: false, value: '', type: '', name: '',
-            _id: '',
+            _id: '', _attrs: {},
+            setAttribute(k, v) { this._attrs[k] = String(v); },
+            getAttribute(k) { return k in this._attrs ? this._attrs[k] : null; },
             get id() { return this._id; },
             set id(v) { this._id = v; if (v) byId[v] = this; },
             replaceChildren(...kids) { this.children = kids; },
@@ -34,11 +42,22 @@ function makeHarness() {
             addEventListener() {}, removeEventListener() {},
             querySelector() { return makeEl('div'); },
             querySelectorAll() { return []; },
-            remove() {}, focus() {}, blur() {}, setAttribute() {},
-            getAttribute() { return null; },
-            classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+            remove() {}, focus() {}, blur() {},
+            // U69: real class tracking — structural tests now inspect
+            // per-card state (acc-task on/off, variant keys), the old
+            // always-false stub made those assertions impossible
+            classList: (() => {
+                const set = new Set();
+                return { _set: set,
+                    add(...c) { c.forEach(x => set.add(x)); },
+                    remove(...c) { c.forEach(x => set.delete(x)); },
+                    contains(c) { return set.has(c); },
+                    toggle(c) { if (set.has(c)) { set.delete(c); return false; } set.add(c); return true; },
+                };
+            })(),
             oninput: null, onchange: null, onclick: null,
         };
+        el._classes = el.classList._set;
         return el;
     }
     const document = {
@@ -129,7 +148,8 @@ function load() {
                             tasks: [{ key: 'mmlu', label: 'MMLU',
                                       desc: 'acc_bench.benchmarks.mmlu_desc',
                                       full_size: 14042, sizes: [30, 50, 100] }] }],
-                                 valid: ['mmlu'] };
+                                 valid: ['mmlu'],
+                                 harness_tasks: ['mmlu'] };
                     }
                     throw new Error('no net in tests');
                 },
@@ -220,16 +240,25 @@ test('REPL-2a: accuracy subtab renders form + server task grid', async () => {
     assert.ok(text.includes('GRPMMLUDESC'), 'task desc via classic key (from /tasks)');
     assert.ok(text.includes('MMLU'), 'task label passthrough');
     assert.ok(!text.includes('acc_bench.'), 'no raw acc key leaks');
-    // REPL-2b: engine selector (classic default, harness alternative)
-    assert.ok(text.includes('ENGC') && text.includes('ENGH'), 'engine radios translated');
-    const radios = [];
+    // U69: NO engine radios — the engine is a per-card caption, and the
+    // harness-mapped suite appears a SECOND time as an LM-Eval card
+    const inputs = [];
     (function walk(n) {
-        if (n && n.tagName === 'input' && n.name === 'bench-acc-engine') radios.push(n);
+        if (n && n.tagName === 'input') inputs.push(n);
         for (const k of (n && n.children) || []) walk(k);
     })(panel);
-    assert.equal(radios.length, 2, 'two engine choices');
-    const checked = radios.filter(r => r.checked).map(r => r.value);
-    assert.deepEqual(checked, ['classic'], 'default engine = classic');
+    assert.ok(!inputs.some(i => i.name === 'bench-acc-engine'),
+        'engine toggle removed (merged list)');
+    const cards = [];
+    (function walk(n) {
+        if (n && n._classes && n._classes.has('acc-task')) cards.push(n);
+        for (const k of (n && n.children) || []) walk(k);
+    })(panel);
+    assert.equal(cards.length, 2, 'mmlu once classic, once LM-Eval');
+    const keys = cards.map(c => c.dataset.key).sort();
+    assert.deepEqual(keys, ['mmlu', 'mmlu|h'], 'variant card keys |h');
+    assert.ok(text.includes('ENGC') && text.includes('ENGH'),
+        'both engine captions via catalog keys');
 });
 
 test('REPL-4: subtab strip carries Embeddings + Rerankers through the catalog', () => {

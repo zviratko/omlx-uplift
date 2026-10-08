@@ -8,9 +8,9 @@
  "uplift.bench.embed_desc": "Benchmarks d'embeddings via MTEB, exécutés sur l'API servie.",
  "uplift.bench.embeddings": "Embeddings",
  "uplift.bench.engine": "Moteur d'évaluation",
- "uplift.bench.engine_classic": "Intégré",
- "uplift.bench.engine_harness": "Harness communautaire (lm-eval)",
- "uplift.bench.engine_hint": "Intégré échantillonne N questions au total. Le harness communautaire (lm-eval) évalue N PAR SOUS-TÂCHE — MMLU compte 57 sous-tâches, donc 30 deviennent 1710 requêtes.",
+ "uplift.bench.engine_classic": "oMLX Classic",
+ "uplift.bench.engine_harness": "LM-Eval",
+ "uplift.bench.engine_hint": "oMLX Classic échantillonne N questions au total. LM-Eval (le harness communautaire lm-eval) évalue N PAR SOUS-TÂCHE — MMLU compte 57 sous-tâches, donc 30 deviennent 1710 requêtes.",
  "uplift.bench.metric": "Métrique",
  "uplift.bench.mteb_env_missing": "Environnement MTEB manquant — exécutez : omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "Surface native — pas encore implémentée.",
@@ -825,7 +825,7 @@
  "uplift.bench.ctx_custom": "Personnalisé…",
  "uplift.bench.ctx_custom_placeholder": "jetons (2 048 – 524 288)",
  "uplift.bench.ctx_custom_range": "La cible personnalisée doit être un nombre entier entre 2 048 et 524 288 jetons.",
- "uplift.bench.engine_total": "Harness communautaire : environ {n} requêtes pour cette sélection.",
+ "uplift.bench.engine_total": "Sélection LM-Eval : environ {n} requêtes.",
  "uplift.bench.badge_harness": "LM-Eval",
- "uplift.bench.badge_classic": "Intégré"
+ "uplift.bench.badge_classic": "oMLX Classic"
 }

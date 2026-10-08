@@ -8,9 +8,9 @@
  "uplift.bench.embed_desc": "Benchmarky embeddingů přes MTEB, spuštěné proti obsluhovanému API.",
  "uplift.bench.embeddings": "Embeddingy",
  "uplift.bench.engine": "Vyhodnocovací engine",
- "uplift.bench.engine_classic": "Vestavěný",
- "uplift.bench.engine_harness": "Komunitní harness (lm-eval)",
- "uplift.bench.engine_hint": "Vestavěný nabírá celkem N otázek. Komunitní harness (lm-eval) hodnotí N PO DÍLČÍM ÚKOLU — MMLU má 57 dílčích úkolů, takže 30 je 1710 požadavků.",
+ "uplift.bench.engine_classic": "oMLX Classic",
+ "uplift.bench.engine_harness": "LM-Eval",
+ "uplift.bench.engine_hint": "oMLX Classic nabírá celkem N otázek. LM-Eval (komunitní harness lm-eval) hodnotí N PO DÍLČÍM ÚKOLU — MMLU má 57 dílčích úkolů, takže 30 je 1710 požadavků.",
  "uplift.bench.metric": "Metrika",
  "uplift.bench.mteb_env_missing": "Chybí prostředí MTEB — spusťte: omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "Nativní povrch — zatím není implementováno.",
@@ -821,7 +821,7 @@
  "uplift.bench.ctx_custom": "Vlastní…",
  "uplift.bench.ctx_custom_placeholder": "tokeny (2 048 – 524 288)",
  "uplift.bench.ctx_custom_range": "Vlastní cíl musí být celé číslo mezi 2 048 a 524 288 tokeny.",
- "uplift.bench.engine_total": "Komunitní harness: pro tento výběr přibližně {n} požadavků.",
+ "uplift.bench.engine_total": "Výběr LM-Eval: přibližně {n} požadavků.",
  "uplift.bench.badge_harness": "LM-Eval",
- "uplift.bench.badge_classic": "Vestavěný"
+ "uplift.bench.badge_classic": "oMLX Classic"
 }

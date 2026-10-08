@@ -8,9 +8,9 @@
  "uplift.bench.embed_desc": "Бенчмарки embedding через MTEB, запуск против обслуживаемого API.",
  "uplift.bench.embeddings": "Embedding",
  "uplift.bench.engine": "Движок оценки",
- "uplift.bench.engine_classic": "Встроенный",
- "uplift.bench.engine_harness": "Общественный харнес (lm-eval)",
- "uplift.bench.engine_hint": "Встроенный берёт N вопросов всего. Общественный харнес (lm-eval) оценивает N НА ПОДЗАДАЧУ — у MMLU 57 подзадач, поэтому 30 превращаются в 1710 запросов.",
+ "uplift.bench.engine_classic": "oMLX Classic",
+ "uplift.bench.engine_harness": "LM-Eval",
+ "uplift.bench.engine_hint": "oMLX Classic берёт N вопросов всего. LM-Eval (общественный харнес lm-eval) оценивает N НА ПОДЗАДАЧУ — у MMLU 57 подзадач, поэтому 30 превращаются в 1710 запросов.",
  "uplift.bench.metric": "Метрика",
  "uplift.bench.mteb_env_missing": "Окружение MTEB не установлено — выполните: omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "Нативная поверхность — ещё не реализовано.",
@@ -821,7 +821,7 @@
  "uplift.bench.ctx_custom": "Свой…",
  "uplift.bench.ctx_custom_placeholder": "токенов (2 048 – 524 288)",
  "uplift.bench.ctx_custom_range": "Пользовательская цель — целое число от 2 048 до 524 288 токенов.",
- "uplift.bench.engine_total": "Общественный харнес: около {n} запросов для этого выбора.",
+ "uplift.bench.engine_total": "Выбор LM-Eval: около {n} запросов.",
  "uplift.bench.badge_harness": "LM-Eval",
- "uplift.bench.badge_classic": "Встроенный"
+ "uplift.bench.badge_classic": "oMLX Classic"
 }

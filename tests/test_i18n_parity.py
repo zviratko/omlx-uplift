@@ -31,6 +31,9 @@ TECH_WORDS = {
     # quantization method labels — identical by design in all locales
     # (classic shows 'RHT + int16' untranslated; it carries no prose)
     "RHT", "int16",
+    # U69: product/brand names shown untranslated on purpose (the user
+    # dictated the spelling 'oMLX Classic'; LM-Eval is the tool's name)
+    "Classic", "LM-Eval",
 }
 
 

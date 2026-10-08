@@ -8,9 +8,9 @@
  "uplift.bench.embed_desc": "通过 MTEB 运行 embedding 基准测试（针对正在服务的 API）。",
  "uplift.bench.embeddings": "Embedding",
  "uplift.bench.engine": "评分引擎",
- "uplift.bench.engine_classic": "内置",
- "uplift.bench.engine_harness": "社区工具链 (lm-eval)",
- "uplift.bench.engine_hint": "内置共抽取 N 道题。社区工具链 (lm-eval) 按每个子任务各评 N 道 — MMLU 有 57 个子任务，30 会变成 1710 次请求。",
+ "uplift.bench.engine_classic": "oMLX Classic",
+ "uplift.bench.engine_harness": "LM-Eval",
+ "uplift.bench.engine_hint": "oMLX Classic 共抽取 N 道题。LM-Eval（社区工具链 lm-eval）按每个子任务各评 N 道 — MMLU 有 57 个子任务，30 会变成 1710 次请求。",
  "uplift.bench.metric": "指标",
  "uplift.bench.mteb_env_missing": "缺少 MTEB 环境 — 请运行：omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "原生界面 — 尚未实现。",
@@ -821,7 +821,7 @@
  "uplift.bench.ctx_custom": "自定义…",
  "uplift.bench.ctx_custom_placeholder": "词元 (2,048 – 524,288)",
  "uplift.bench.ctx_custom_range": "自定义目标必须是 2,048 到 524,288 之间的整数词元数。",
- "uplift.bench.engine_total": "社区工具链：此选择约 {n} 次请求。",
+ "uplift.bench.engine_total": "LM-Eval 选择：约 {n} 次请求。",
  "uplift.bench.badge_harness": "LM-Eval",
- "uplift.bench.badge_classic": "内置"
+ "uplift.bench.badge_classic": "oMLX Classic"
 }

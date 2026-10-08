@@ -8,9 +8,9 @@
  "uplift.bench.embed_desc": "透過 MTEB 執行 embedding 基準測試（針對進行中的 API）。",
  "uplift.bench.embeddings": "Embedding",
  "uplift.bench.engine": "評分引擎",
- "uplift.bench.engine_classic": "內建",
- "uplift.bench.engine_harness": "社群工具鏈 (lm-eval)",
- "uplift.bench.engine_hint": "內建共抽取 N 道題。社群工具鏈 (lm-eval) 依每個子任務各評 N 道 — MMLU 有 57 個子任務，30 會變成 1710 次請求。",
+ "uplift.bench.engine_classic": "oMLX Classic",
+ "uplift.bench.engine_harness": "LM-Eval",
+ "uplift.bench.engine_hint": "oMLX Classic 共抽取 N 道題。LM-Eval（社群工具鏈 lm-eval）依每個子任務各評 N 道 — MMLU 有 57 個子任務，30 會變成 1710 次請求。",
  "uplift.bench.metric": "指標",
  "uplift.bench.mteb_env_missing": "缺少 MTEB 環境 — 請執行：omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "原生介面 — 尚未實作。",
@@ -821,7 +821,7 @@
  "uplift.bench.ctx_custom": "自訂…",
  "uplift.bench.ctx_custom_placeholder": "詞元 (2,048 – 524,288)",
  "uplift.bench.ctx_custom_range": "自訂目標必須是介於 2,048 與 524,288 之間的整數詞元數。",
- "uplift.bench.engine_total": "社群工具鏈：此選擇約 {n} 次請求。",
+ "uplift.bench.engine_total": "LM-Eval 選擇：約 {n} 次請求。",
  "uplift.bench.badge_harness": "LM-Eval",
- "uplift.bench.badge_classic": "內建"
+ "uplift.bench.badge_classic": "oMLX Classic"
 }
