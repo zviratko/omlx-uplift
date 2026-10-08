@@ -82,6 +82,11 @@ async function deleteJson(url) {
 }
 
 function toast(text, ms, cls) {
+    // U51: ~30 call sites across bench/chat pass (msg, 'error') — a string
+    // second arg hit setTimeout as NaN and the toast vanished instantly,
+    // i.e. exactly the failures nobody could read. Accept the shape: a
+    // non-numeric ms is the class.
+    if (typeof ms === 'string') { cls = ms; ms = undefined; }
     const t = document.createElement('div');
     t.className = 'toast' + (cls ? ' ' + cls : ''); t.textContent = text;
     $('toasts').append(t);

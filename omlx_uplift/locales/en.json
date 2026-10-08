@@ -16,6 +16,7 @@
  "uplift.bench.native_stub": "Native surface — not implemented yet.",
  "uplift.bench.pick_prompt": "Pick at least one prompt length",
  "uplift.bench.pick_tasks": "Pick at least one benchmark",
+ "uplift.bench.loading_tasks": "Loading benchmarks…",
  "uplift.bench.rerank_desc": "Reranking benchmarks via MTEB, run against the served API.",
  "uplift.bench.rerankers": "Rerankers",
  "uplift.bench.run_finished": "finished",

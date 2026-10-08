@@ -863,6 +863,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 /* ACHIEVEMENTS scorn: the machine's displeasure in its own colour. Rides
    --red so every skin keeps it in-theme (SHODAN laser, TRON Game red...). */
 .toast-scorn { background: var(--red); color: var(--bg); }
+/* U51: the (msg, 'error') call shape maps through domkit's toast guard to
+   this class — error toasts now render red and actually live long */
+.toast.error { background: var(--red); color: var(--bg); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
 /* ---- Banner ---- */
@@ -2098,6 +2101,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     border: 1px solid var(--edge); color: var(--ink); padding: 3px 6px;
     font: inherit; font-size: 11px; }
 .bench-actions { display: flex; gap: 8px; margin-top: 10px; }
+/* U51: author display beats the UA [hidden]{display:none} (documented
+   trap at .dd-menu above) — hidden Cancel buttons and hidden external
+   input rows rendered anyway on every bench panel. One global guard for
+   everything uplift owns; per-selector rules stay where they existed. */
+.bench-form [hidden], .bench-actions [hidden], .bench-row [hidden],
+.bench-adv-body [hidden], .chat-native-bar [hidden] { display: none; }
 .bench-status { font-size: 11px; color: var(--dim); min-height: 14px; }
 .bench-status.bench-status-error { color: var(--red); }
 .bench-status-done { color: var(--ink); }
@@ -2116,6 +2125,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .bench-result-row:last-of-type { border-bottom: none; }
 /* REPL-2a: accuracy task grid + queue */
 .acc-taskgrid { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+/* U51: task cards are keyboard-operable now (role=button); give them the
+   same focus ring language the inputs use */
+.acc-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .acc-group-tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
 .acc-task { border: 1px solid var(--edge); padding: 8px; cursor: pointer; user-select: none; }
 .acc-task.on { border-color: var(--accent); background: var(--panel); }

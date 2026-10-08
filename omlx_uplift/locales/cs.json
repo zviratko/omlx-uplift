@@ -16,6 +16,7 @@
  "uplift.bench.native_stub": "Nativní povrch — zatím není implementováno.",
  "uplift.bench.pick_prompt": "Vyberte alespoň jednu délku promptu",
  "uplift.bench.pick_tasks": "Vyberte alespoň jednu benchmarkovou sadu",
+ "uplift.bench.loading_tasks": "Načítám benchmarky…",
  "uplift.bench.rerank_desc": "Benchmarky rerankingu přes MTEB, spuštěné proti obsluhovanému API.",
  "uplift.bench.rerankers": "Rerankery",
  "uplift.bench.run_finished": "dokončeno",

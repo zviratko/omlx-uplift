@@ -16,6 +16,7 @@
  "uplift.bench.native_stub": "ネイティブサーフェス — まだ未実装です。",
  "uplift.bench.pick_prompt": "プロンプト長を少なくとも1つ選択してください",
  "uplift.bench.pick_tasks": "少なくとも1つのベンチマークを選択してください",
+ "uplift.bench.loading_tasks": "ベンチマークを読み込み中…",
  "uplift.bench.rerank_desc": "MTEB による reranker ベンチマーク（サーブ中の API に対して実行）。",
  "uplift.bench.rerankers": "Reranker",
  "uplift.bench.run_finished": "完了",

@@ -16,6 +16,7 @@
  "uplift.bench.native_stub": "Нативная поверхность — ещё не реализовано.",
  "uplift.bench.pick_prompt": "Выберите хотя бы одну длину промпта",
  "uplift.bench.pick_tasks": "Выберите хотя бы один бенчмарк",
+ "uplift.bench.loading_tasks": "Загрузка бенчмарков…",
  "uplift.bench.rerank_desc": "Бенчмарки reranking через MTEB, запуск против обслуживаемого API.",
  "uplift.bench.rerankers": "Reranker",
  "uplift.bench.run_finished": "завершено",

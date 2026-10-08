@@ -98,6 +98,60 @@ function check(id, label, on) {
     return lb;
 }
 function gid(id) { return document.getElementById(id); }
+// U51: task/pack cards were click-only divs — keyboard users could not
+// reach them. Real button semantics (role/tabindex/aria-pressed +
+// Enter/Space), selection state mirrored from the .on class.
+function taskCard(label, desc, title, onToggle) {
+    var card = el('div', 'acc-task');
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('aria-pressed', 'false');
+    card.appendChild(el('div', 'acc-task-name', label));
+    card.appendChild(el('div', 'acc-task-desc', desc));
+    if (title) card.title = title;
+    function toggle() {
+        var on = card.classList.toggle('on');
+        card.setAttribute('aria-pressed', on ? 'true' : 'false');
+        onToggle(on);
+    }
+    card.addEventListener('click', toggle);
+    card.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); }
+    });
+    return card;
+}
+// U51: grids rendered nothing while /tasks was in flight (dead-panel
+// look); one honest loading line, replaced by the real grid on resolve.
+function loadingNote() {
+    var n = el('div', 'native-stub-note');
+    n.textContent = t('uplift.bench.loading_tasks', 'Loading benchmarks…');
+    return n;
+}
+// U51: a dropped SSE stream used to freeze the last progress line with no
+// signal. EventSource retries by itself (the server replays from 0), so
+// say that honestly; the next event or finish() overwrites the line.
+function streamInterrupted(statusId) {
+    var st = gid(statusId);
+    if (st && !st.classList.contains('bench-status-error')) {
+        st.textContent = '⚠ ' + t(
+            'uplift.ui.server_restarting_dashboard_reconnecting',
+            'Server restarting — dashboard reconnecting…');
+    }
+}
+// U51: run status text is announced to assistive tech
+function statusLine(id) {
+    var st = el('div', 'bench-status'); st.id = id;
+    st.setAttribute('role', 'status');
+    st.setAttribute('aria-live', 'polite');
+    return st;
+}
+// U51: ms-per-question with locale separators + one decimal (a raw
+// 568.75 next to formatted columns reads like a machine dump)
+function fmtMs(v) {
+    if (v == null) return '—';
+    return Number(v).toLocaleString(undefined,
+        { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
 // U48: one Advanced section builder shared by the panels (classic keeps
 // external-endpoint as a first-class mode; the user explicitly asked for
 // it under a PROMINENT Advanced section instead of the old 11px <details>
@@ -117,7 +171,9 @@ function advancedSection(children, labelKey, labelFb) {
     var open = null;
     try { open = localStorage.getItem(ADV_LS); } catch (_) {}
     adv.open = open === '1';   // default closed (classic's details shape)
+    sum.setAttribute('aria-expanded', adv.open ? 'true' : 'false');  // U51
     adv.addEventListener('toggle', function () {
+        sum.setAttribute('aria-expanded', adv.open ? 'true' : 'false');
         try { localStorage.setItem(ADV_LS, adv.open ? '1' : '0'); } catch (_) {}
     });
     return adv;
@@ -521,7 +577,7 @@ var TP = {
                        ctx: { model: '', profile: 'code_python',
                               forceLm: false, external: null } };
         panel.appendChild(this.form());
-        var status = el('div', 'bench-status'); status.id = 'bench-tp-status';
+        var status = statusLine('bench-tp-status');
         var results = el('div', 'bench-results'); results.id = 'bench-tp-results';
         panel.append(status, results);
         this.loadModels();
@@ -591,7 +647,7 @@ var TP = {
         row3.append(labeled(t('bench.config.batch_tests', 'Continuous Batching Tests'), bsBox));
 
         var actions = el('div', 'bench-actions');
-        var runBtn = el('button', 'btn btn-primary', t('bench.config.run_button', 'Run Benchmark'));
+        var runBtn = el('button', 'btn primary', t('bench.config.run_button', 'Run Benchmark'));
         runBtn.type = 'button'; runBtn.id = 'bench-tp-run';
         runBtn.addEventListener('click', function () { self.start(); });
         var cancelBtn = el('button', 'btn', t('bench.progress.cancel', 'Cancel'));
@@ -733,11 +789,7 @@ var TP = {
                 try { data = JSON.parse(ev.data); } catch (_) { return; }
                 self.onEvent(data);
             };
-            _es.onerror = function () {
-                /* EventSource reconnects on its own; the server replays the
-                   whole event log on every (re)open (replay-after-reconnect
-                   is classic's pinned SSE model, we reuse the run object). */
-            };
+            _es.onerror = function () { streamInterrupted('bench-tp-status'); };
         } catch (e) { this.fallbackPoll(benchId); }
     },
 
@@ -866,7 +918,7 @@ var CTX = {
     render: function (panel) {
         this.state = { running: false, benchId: null, result: null, models: [] };
         panel.appendChild(this.form());
-        var status = el('div', 'bench-status'); status.id = 'bench-ctx-status';
+        var status = statusLine('bench-ctx-status');
         var results = el('div', 'bench-results'); results.id = 'bench-ctx-results';
         panel.append(status, results);
         this.loadModels();
@@ -914,7 +966,7 @@ var CTX = {
         // model/target/custom-input are first-order and already labeled.
 
         var actions = el('div', 'bench-actions');
-        var runBtn = el('button', 'btn btn-primary', t('ctx_bench.start', 'Start Benchmark'));
+        var runBtn = el('button', 'btn primary', t('ctx_bench.start', 'Start Benchmark'));
         runBtn.type = 'button'; runBtn.id = 'bench-ctx-run';
         runBtn.addEventListener('click', function () { self.start(); });
         var cancelBtn = el('button', 'btn', t('ctx_bench.progress.cancel', 'Cancel'));
@@ -1059,7 +1111,7 @@ var CTX = {
                 var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
                 self.onEvent(data);
             };
-            _es.onerror = function () { /* auto-reconnect replays from 0 */ };
+            _es.onerror = function () { streamInterrupted('bench-ctx-status'); };
         } catch (e) { this.poll(benchId); }
     },
 
@@ -1164,7 +1216,7 @@ var ANE = {
     render: function (panel) {
         this.state = { running: false, tuningId: null, snapshot: null };
         panel.appendChild(this.form());
-        var status = el('div', 'bench-status'); status.id = 'bench-ane-status';
+        var status = statusLine('bench-ane-status');
         var results = el('div', 'bench-results'); results.id = 'bench-ane-results';
         panel.append(status, results);
         this.loadModels();
@@ -1197,7 +1249,7 @@ var ANE = {
             'modal.model_settings.qwen_ane_tune_overrides', 'Search space'));
 
         var actions = el('div', 'bench-actions');
-        var runBtn = el('button', 'btn btn-primary', t('modal.model_settings.qwen_ane_tune_start', 'Start Tuning'));
+        var runBtn = el('button', 'btn primary', t('modal.model_settings.qwen_ane_tune_start', 'Start Tuning'));
         runBtn.type = 'button'; runBtn.id = 'bench-ane-run';
         runBtn.addEventListener('click', function () { self.start(); });
         var cancelBtn = el('button', 'btn', t('modal.model_settings.qwen_ane_tune_cancel', 'Cancel'));
@@ -1345,7 +1397,7 @@ var ANE = {
             var rec = snap.recommendation;
             card.appendChild(el('p', null, t('modal.model_settings.qwen_ane_tune_throughput', 'Recommended throughput') +
                 ': ' + Math.round(rec.processing_tps || 0).toLocaleString() + ' tok/s'));
-            var ab = el('button', 'btn btn-primary', t('modal.model_settings.qwen_ane_tune_apply', 'Apply Recommendation'));
+            var ab = el('button', 'btn primary', t('modal.model_settings.qwen_ane_tune_apply', 'Apply Recommendation'));
             ab.type = 'button'; ab.id = 'bench-ane-apply';
             ab.addEventListener('click', function () { ANE.apply(); });
             card.appendChild(ab);
@@ -1403,7 +1455,7 @@ var ACC = {
                        selected: {}, sizes: {}, results: [] };
         panel.appendChild(this.form());
         var queue = el('div', 'acc-queue'); queue.id = 'bench-acc-queue';
-        var status = el('div', 'bench-status'); status.id = 'bench-acc-status';
+        var status = statusLine('bench-acc-status');
         var results = el('div', 'bench-results'); results.id = 'bench-acc-results';
         panel.append(queue, status, results);
         this.loadModels();
@@ -1486,7 +1538,7 @@ var ACC = {
         f.appendChild(adv);
 
         var actions = el('div', 'bench-actions');
-        var addBtn = el('button', 'btn btn-primary', t('acc_bench.config.add_run', 'Add to Queue'));
+        var addBtn = el('button', 'btn primary', t('acc_bench.config.add_run', 'Add to Queue'));
         addBtn.type = 'button'; addBtn.id = 'bench-acc-add';
         addBtn.addEventListener('click', function () { self.add(); });
         var cancelBtn = el('button', 'btn', t('acc_bench.config.cancel_button', 'Cancel All'));
@@ -1527,6 +1579,8 @@ var ACC = {
     loadTasks: function () {
         var d = dom();
         var self = this;
+        var g0 = gid('bench-acc-tasks');
+        if (g0) g0.replaceChildren(loadingNote());
         return d.fetchJson(api() + '/bench/accuracy/tasks').then(function (data) {
             self.state.groups = data.tasks || [];
             self.renderGrid();
@@ -1543,30 +1597,42 @@ var ACC = {
             wrap.appendChild(el('div', 'bench-label', t(grp.group, grp.group.split('.').pop())));
             var row = el('div', 'acc-group-tasks');
             grp.tasks.forEach(function (tk) {
-                var card = el('div', 'acc-task');
-                card.dataset.key = tk.key;
-                var name = el('div', 'acc-task-name', tk.label);
-                var desc = el('div', 'acc-task-desc',
-                    tk.desc ? t(tk.desc, tk.desc_literal || tk.key) : (tk.desc_literal || ''));
                 var sizeSel = el('select');
                 sizeSel.dataset.key = tk.key;
                 tk.sizes.forEach(function (n) {
                     var o = el('option', null, String(n)); o.value = String(n); sizeSel.appendChild(o);
                 });
-                var fullOpt = el('option', null, t('acc_bench.config.full_option', 'Full') +
-                    ' (' + tk.full_size.toLocaleString() + ')');
+                // U51: {count} lives INSIDE the translated key
+                // (classic fills it the same way); the old concat showed
+                // the raw placeholder + a paren for non-en locales
+                var fullOpt = el('option', null,
+                    t('acc_bench.config.full_option', 'Full ({count})')
+                        .replace('{count}', tk.full_size.toLocaleString()));
                 fullOpt.value = '0';
                 sizeSel.appendChild(fullOpt);
                 sizeSel.value = String(tk.sizes[Math.min(2, tk.sizes.length - 1)]);
                 sizeSel.disabled = true;
-                card.append(name, desc, sizeSel);
-                card.addEventListener('click', function (ev) {
-                    if (ev.target === sizeSel) return;
-                    var on = card.classList.toggle('on');
-                    self.state.selected[tk.key] = on;
-                    sizeSel.disabled = !on;
-                });
+                // U51: keyboard-operable card (was a click-only div). The
+                // size select lives inside as its own focus target; a
+                // click that lands on it must not double-toggle the card.
+                var card = taskCard(tk.label,
+                    tk.desc ? t(tk.desc, tk.desc_literal || tk.key) : (tk.desc_literal || ''),
+                    null, function (on) {
+                        self.state.selected[tk.key] = on;
+                        sizeSel.disabled = !on;
+                    });
+                card.dataset.key = tk.key;
+                card.appendChild(sizeSel);
+                sizeSel.addEventListener('click', function (ev) { ev.stopPropagation(); });
                 sizeSel.addEventListener('change', function () {
+                    // choosing a size implies picking the task (classic:
+                    // the select is only enabled on selected rows)
+                    if (!card.classList.contains('on')) {
+                        card.classList.add('on');
+                        card.setAttribute('aria-pressed', 'true');
+                        self.state.selected[tk.key] = true;
+                        sizeSel.disabled = false;
+                    }
                     self.state.sizes[tk.key] = Number(sizeSel.value);
                 });
                 row.appendChild(card);
@@ -1718,7 +1784,7 @@ var ACC = {
                 var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
                 self.onEvent(data);
             };
-            _es.onerror = function () { /* replay-from-0 on reconnect */ };
+            _es.onerror = function () { streamInterrupted('bench-acc-status'); };
         } catch (e) {
             if (_poll) clearInterval(_poll);
             _poll = setInterval(function () { self.refreshQueue(); }, 4000);
@@ -1828,7 +1894,7 @@ function MTEB(kind) {
                            selected: {}, limit: 0, results: [] };
             panel.appendChild(this.form());
             panel.appendChild(this.envNote());
-            var status = el('div', 'bench-status'); status.id = prefix + '-status';
+            var status = statusLine(prefix + '-status');
             var results = el('div', 'bench-results'); results.id = prefix + '-results';
             panel.append(status, results);
             this.loadModels();
@@ -1861,8 +1927,12 @@ function MTEB(kind) {
             ph.value = ''; modelSel.appendChild(ph);
             var limSel = el('select'); limSel.id = prefix + '-limit';
             MTEB_LIMITS.forEach(function (n) {
+                // U51: full_option's {count} slot has no value here (the
+                // limit select is per-run, not per-task) — classic's plain
+                // 'Full' word instead of a raw 'Full ({count})' leak
                 var o = el('option', null, n === 0
-                    ? t('acc_bench.config.full_option', 'Full') : String(n));
+                    ? t('acc_bench.results.text_export.full', 'Full')
+                    : n.toLocaleString());
                 o.value = String(n);
                 if (n === 500) o.selected = true;
                 limSel.appendChild(o);
@@ -1878,7 +1948,7 @@ function MTEB(kind) {
             f.appendChild(grid);
 
             var actions = el('div', 'bench-actions');
-            var runBtn = el('button', 'btn btn-primary', t('bench.config.run_button', 'Run'));
+            var runBtn = el('button', 'btn primary', t('bench.config.run_button', 'Run'));
             runBtn.type = 'button'; runBtn.id = prefix + '-run';
             runBtn.addEventListener('click', function () { self.start(); });
             var cancelBtn = el('button', 'btn', t('bench.progress.cancel', 'Cancel'));
@@ -1916,6 +1986,8 @@ function MTEB(kind) {
         loadTasks: async function () {
             var d = dom();
             var self = this;
+            var g0 = gid(prefix + '-tasks');
+            if (g0) g0.replaceChildren(loadingNote());
             try {
                 var p = await d.fetchJson(api() + '/bench/embed/tasks');
                 this.state.tasks = p.tasks || {};
@@ -1943,16 +2015,9 @@ function MTEB(kind) {
                 var row = el('div', 'acc-group-tasks');
                 byGroup[g].sort().forEach(function (name) {
                     var m = self.state.tasks[name];
-                    var card = el('div', 'acc-task');
-                    var name1 = el('div', 'acc-task-name',
-                        name + (m.cs ? ' [CZ]' : ''));
-                    var desc = el('div', 'acc-task-desc',
-                        m.sizes.toLocaleString() + (m.cap ? ' → ' + m.cap : ''));
-                    card.append(name1, desc);
-                    card.addEventListener('click', function () {
-                        var on = card.classList.toggle('on');
-                        self.state.selected[name] = on;
-                    });
+                    var card = taskCard(name + (m.cs ? ' [CZ]' : ''),
+                        m.sizes.toLocaleString() + (m.cap ? ' → ' + m.cap : ''),
+                        null, function (on) { self.state.selected[name] = on; });
                     row.appendChild(card);
                 });
                 wrap.appendChild(row);
@@ -2050,7 +2115,7 @@ function MTEB(kind) {
                     var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
                     self.onEvent(data);
                 };
-                _es.onerror = function () { /* replay-from-0 on reconnect */ };
+                _es.onerror = function () { streamInterrupted(prefix + '-status'); };
             } catch (e) { poll(); }
         },
 
@@ -2165,7 +2230,7 @@ var DEC = {
         this.state = { running: false, runId: null, packs: {},
                        selected: {}, limit: 0, results: [] };
         panel.appendChild(this.form());
-        var status = el('div', 'bench-status'); status.id = 'bench-dec-status';
+        var status = statusLine('bench-dec-status');
         var results = el('div', 'bench-results'); results.id = 'bench-dec-results';
         panel.append(status, results);
         this.loadModels();
@@ -2187,7 +2252,8 @@ var DEC = {
         var limSel = el('select'); limSel.id = 'bench-dec-limit';
         DEC_LIMITS.forEach(function (n) {
             var o = el('option', null, n === 0
-                ? t('acc_bench.config.full_option', 'Full') : String(n));
+                ? t('acc_bench.results.text_export.full', 'Full')
+                : n.toLocaleString());
             o.value = String(n);
             if (n === 25) o.selected = true;
             limSel.appendChild(o);
@@ -2201,7 +2267,7 @@ var DEC = {
         var grid = el('div', 'acc-taskgrid'); grid.id = 'bench-dec-tasks';
         f.appendChild(grid);
         var actions = el('div', 'bench-actions');
-        var runBtn = el('button', 'btn btn-primary', t('bench.config.run_button', 'Run'));
+        var runBtn = el('button', 'btn primary', t('bench.config.run_button', 'Run'));
         runBtn.type = 'button'; runBtn.id = 'bench-dec-run';
         runBtn.addEventListener('click', function () { self.start(); });
         var cancelBtn = el('button', 'btn', t('bench.progress.cancel', 'Cancel'));
@@ -2237,6 +2303,8 @@ var DEC = {
     loadTasks: async function () {
         var d = dom();
         var self = this;
+        var g0 = gid('bench-dec-tasks');
+        if (g0) g0.replaceChildren(loadingNote());
         try {
             var p = await d.fetchJson(api() + '/bench/decision/tasks');
             this.state.packs = p.tasks || {};
@@ -2245,16 +2313,11 @@ var DEC = {
             grid.replaceChildren();
             Object.keys(this.state.packs).sort().forEach(function (name) {
                 var m = self.state.packs[name];
-                var card = el('div', 'acc-task');
-                card.appendChild(el('div', 'acc-task-name',
-                    t('uplift.bench.pack.' + name.replace(/-/g, '_'), name)));
-                card.appendChild(el('div', 'acc-task-desc',
-                    (m.items || 0).toLocaleString() + ' · ' + (m.license || '')));
-                card.title = String(m.source || '');
-                card.addEventListener('click', function () {
-                    var on = card.classList.toggle('on');
-                    self.state.selected[name] = on;
-                });
+                var card = taskCard(
+                    t('uplift.bench.pack.' + name.replace(/-/g, '_'), name),
+                    (m.items || 0).toLocaleString() + ' · ' + (m.license || ''),
+                    String(m.source || ''),
+                    function (on) { self.state.selected[name] = on; });
                 grid.appendChild(card);
             });
         } catch (e) {
@@ -2338,7 +2401,7 @@ var DEC = {
                 var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
                 self.onEvent(data);
             };
-            _es.onerror = function () { /* replay-from-0 on reconnect */ };
+            _es.onerror = function () { streamInterrupted('bench-dec-status'); };
         } catch (e) { /* polling fallback omitted: short runs, results refresh covers */ }
     },
 
@@ -2403,9 +2466,9 @@ var DEC = {
                 el('td', null, fmt(r.brier)),
                 el('td', null, fmt(r.ece)),
                 el('td', null, fmt(r.agreement)),
-                el('td', null, r.ms_per_question == null ? '—'
-                    : String(r.ms_per_question)),
-                el('td', null, r.items != null ? String(r.items) : '—'),
+                el('td', null, fmtMs(r.ms_per_question)),
+                el('td', null, r.items != null
+                    ? Number(r.items).toLocaleString() : '—'),
                 el('td', null, r.ts ? new Date(r.ts * 1000).toLocaleString() : ''));
             tbl.appendChild(tr);
         });
@@ -2422,9 +2485,10 @@ var DEC = {
                      { label: 'ECE', numeric: true, get: function (r) { return fmt4(r.ece); } },
                      { label: 'Agreement', numeric: true, get: function (r) { return fmt4(r.agreement); } },
                      { label: 'ms/question', numeric: true, get: function (r) {
-                         return r.ms_per_question == null ? '—' : String(r.ms_per_question); } },
+                         return fmtMs(r.ms_per_question); } },
                      { label: 'Samples', numeric: true, get: function (r) {
-                         return r.items != null ? String(r.items) : '—'; } }],
+                         return r.items != null
+                             ? Number(r.items).toLocaleString() : '—'; } }],
                     selfD.state.results.slice().reverse());
             }),
             tbl);
