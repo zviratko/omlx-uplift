@@ -81,6 +81,49 @@ test('toolRequest: web routes get raw args, everything else the MCP envelope', (
     assert.deepEqual(r.payload, {}, 'missing _args -> {} (classic parse-fail path)');
 });
 
+test('isSttModel: engine_type classification off the /models rows', () => {
+    const win = baseWin();
+    const M = win.UpliftNativeChat;
+    const st = M._state();
+    st.models = [
+        { id: 'llm1', engine_type: 'llm' },
+        { id: 'vlm1', model_type: 'vlm' },
+        { id: 'whisper-tiny-mlx-4bit', engine_type: 'audio_stt' },
+    ];
+    assert.equal(M.isSttModel('whisper-tiny-mlx-4bit'), true);
+    assert.equal(M.isSttModel('llm1'), false);
+    assert.equal(M.isSttModel('vlm1'), false);
+    assert.equal(M.isSttModel('nope'), false, 'unknown id is never STT');
+    assert.equal(M.isSttModel(''), false);
+});
+
+test('encodeWav: 44-byte RIFF header + 16-bit mono PCM, clamped', () => {
+    const M = baseWin().UpliftNativeChat;
+    const chunks = [new Float32Array([0, 0.5, -0.5]),
+                    new Float32Array([1.5, -2, 0])];   // out-of-range clamp
+    const buf = M.encodeWav(chunks, 16000);
+    const dv = new DataView(buf);
+    const str = (o, n) => String.fromCharCode(...new Uint8Array(buf, o, n));
+    assert.equal(str(0, 4), 'RIFF');
+    assert.equal(str(8, 4), 'WAVE');
+    assert.equal(str(12, 4), 'fmt ');
+    assert.equal(dv.getUint32(16, true), 16);
+    assert.equal(dv.getUint16(20, true), 1, 'PCM format');
+    assert.equal(dv.getUint16(22, true), 1, 'mono');
+    assert.equal(dv.getUint32(24, true), 16000, 'sample rate');
+    assert.equal(dv.getUint32(28, true), 32000, 'byte rate = rate*2');
+    assert.equal(dv.getUint16(32, true), 2, 'block align');
+    assert.equal(dv.getUint16(34, true), 16, 'bits');
+    assert.equal(str(36, 4), 'data');
+    assert.equal(buf.byteLength, 44 + 6 * 2);
+    assert.equal(dv.getUint32(40, true), 12, 'data length');
+    assert.equal(dv.getInt16(44, true), 0);
+    assert.equal(dv.getInt16(46, true), 16383, '0.5 -> ~0x3FFF');
+    assert.equal(dv.getInt16(48, true), -16384, '-0.5 -> ~-0x4000');
+    assert.equal(dv.getInt16(50, true), 32767, '1.5 clamps to +1.0');
+    assert.equal(dv.getInt16(52, true), -32768, '-2 clamps to -1.0');
+});
+
 test('WEB tools attach to the request only while the toggle is on', async () => {
     const win = baseWin();
     const M = win.UpliftNativeChat;

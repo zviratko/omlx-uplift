@@ -34,7 +34,9 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _models = [], _vendorPromise = null, _streaming = false,
     _thinkLive = '',   // reasoning deltas of the in-flight turn (live-only)
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
-    _lastBody = null;                  // resolved request stashed by shapeRequest
+    _lastBody = null,                  // resolved request stashed by shapeRequest
+    _lastFiles = null,                 // 6/6b: raw audio Files for the STT path
+    _mic = null;                       // 6/6b: live mic recording session
 
 function W() { return (typeof window !== 'undefined') ? window : null; }
 function C() { return W() && W().UpliftCore ? W().UpliftCore : null; }
@@ -169,6 +171,49 @@ async function migrateLegacy() {
     return n;
 }
 
+// ---- 6/6b ASR: STT models + client-side WAV recording -----------------
+// classic flow mirrored: select an audio_stt model, attach audio (file or
+// mic) -> POST /v1/audio/transcriptions multipart stream=true -> SSE
+// transcript.text.delta events -> result is a normal assistant turn.
+// WHY WAV FROM THE MIC: this keg decodes webm/ogg ONLY via ffmpeg
+// (mlx_audio audio_io) and ffmpeg is not a keg dependency — a MediaRecorder
+// blob would 400 on many boxes. AudioContext+ScriptProcessor PCM -> WAV
+// here decodes everywhere (miniaudio handles wav natively).
+function isSttModel(id) {
+    for (var i = 0; i < _models.length; i++) {
+        var m = _models[i];
+        if (m.id === id) {
+            var ty = m.engine_type || m.model_type;
+            return ty === 'audio_stt';
+        }
+    }
+    return false;
+}
+// 16-bit mono PCM WAV (RIFF header + data); pure function of Float32 chunks
+function encodeWav(chunks, sampleRate) {
+    var n = 0, i, j;
+    for (i = 0; i < chunks.length; i++) n += chunks[i].length;
+    var buf = new ArrayBuffer(44 + n * 2);
+    var dv = new DataView(buf);
+    function str(off, s) { for (var k = 0; k < s.length; k++) dv.setUint8(off + k, s.charCodeAt(k)); }
+    str(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); str(8, 'WAVE');
+    str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+    dv.setUint16(22, 1, true); dv.setUint32(24, sampleRate, true);
+    dv.setUint32(28, sampleRate * 2, true); dv.setUint16(32, 2, true);
+    dv.setUint16(34, 16, true);
+    str(36, 'data'); dv.setUint32(40, n * 2, true);
+    var off = 44;
+    for (i = 0; i < chunks.length; i++) {
+        var c = chunks[i];
+        for (j = 0; j < c.length; j++) {
+            var s = Math.max(-1, Math.min(1, c[j]));
+            dv.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            off += 2;
+        }
+    }
+    return buf;
+}
+
 // ---- web tools (5/6): definitions + routes mirror classic exactly ----
 // classic chat.html BUILTIN_WEB_TOOL_ROUTES: web_search/fetch_url are
 // served by omlx itself at /v1/web/*; everything else goes to
@@ -267,7 +312,14 @@ async function shapeRequest(d) {
     // cosmetic history only, never poisons requests again).
     while (msgs.length && msgs[msgs.length - 1].role === 'user') msgs.pop();
     var cur = { role: 'user', content: lastUser };
-    if (files.length) {
+    _lastFiles = null;
+    if (files.length && isSttModel((_conv && _conv.model) || '')) {
+        // audio path: NO data-URL conversion (multipart carries the raw
+        // file); the submit already carries classic's '[audio] filename'
+        // label as its text, so the bubble, the store row and the request
+        // all agree without patching
+        _lastFiles = files;
+    } else if (files.length) {
         var parts = lastUser ? [{ type: 'text', text: lastUser }] : [];
         for (var i = 0; i < files.length; i++) {
             parts.push({ type: 'image_url',
@@ -356,6 +408,64 @@ function executeTool(tc, signal) {
         .catch(function (e) { return 'Error: ' + (e.message || e); });
 }
 
+function transcribeAudio(file, model, signals, signal) {
+    var form = new FormData();
+    form.append('file', file, file.name || 'recording.wav');
+    form.append('model', model);
+    form.append('stream', 'true');
+    var text = '';
+    return fetch('/v1/audio/transcriptions', {   // domkit-exempt: SSE
+        method: 'POST',
+        // NO Content-Type: the browser must set the multipart boundary
+        // (classic's comment at chat.html:5635 — copied because it is a
+        // trap, not a style note)
+        headers: { 'Authorization': 'Bearer ' + _key },
+        body: form, signal: signal })
+    .then(function (resp) {
+        if (resp.status === 404) {
+            throw new Error(t('chat.error.asr_not_available',
+                'Audio transcription is not available on this server.'));
+        }
+        if (!resp.ok) {
+            return resp.text().then(function (bd) {
+                var detail = null;
+                try {
+                    var j = JSON.parse(bd);
+                    detail = (j.error && j.error.message) || j.detail;
+                } catch (e) { /* plain text */ }
+                throw new Error(detail || bd || ('Error: ' + resp.status));
+            });
+        }
+        var reader = resp.body.getReader(), dec = new TextDecoder();
+        var buf = '';
+        function pump() {
+            return reader.read().then(function (res) {
+                if (res.done) return;
+                buf += dec.decode(res.value, { stream: true });
+                var lines = buf.split('\n'); buf = lines.pop();
+                lines.forEach(function (ln) {
+                    if (ln.indexOf('data: ') !== 0) return;
+                    if (ln.trim() === 'data: [DONE]') return;
+                    var d;
+                    try { d = JSON.parse(ln.slice(6)); } catch (e) { return; }
+                    if (d.type === 'transcript.text.delta' && d.delta) {
+                        text += d.delta;
+                        signals.onResponse({ text: d.delta });
+                    } else if (d.type === 'transcript.text.done') {
+                        var fin = d.text == null ? text : d.text;
+                        if (fin.length > text.length) {
+                            signals.onResponse({ text: fin.slice(text.length) });
+                            text = fin;
+                        }
+                    }
+                });
+                return pump();
+            });
+        }
+        return pump();
+    });
+}
+
 function nativeHandler(_componentBody, signals) {
     // 5/6 unified path (spike-proven live 2026-10-08): the interceptor
     // runs BEFORE the handler and stashed the resolved body in _lastBody;
@@ -364,10 +474,26 @@ function nativeHandler(_componentBody, signals) {
     // (spike sp3); stopClicked carries a .listener sink — register the
     // abort there (bundle: streamHandlers.stopClicked).
     var req = _lastBody; _lastBody = null;
+    var files = _lastFiles; _lastFiles = null;
     var closed = false;
     function close() { if (closed) return; closed = true; try { signals.onClose(); } catch (e) {} }
     if (!req || !req.model) { close(); return Promise.resolve(); }
     var controller = new AbortController();
+    // 6/6b: STT model selected -> transcription leg, not a chat request
+    // (audio_stt models are REJECTED by /v1/chat/completions — classic
+    // comment chat.html:6656). Files ride multipart exactly like classic
+    // (file/model/stream fields, NO Content-Type — the browser must set
+    // the boundary); SSE transcript.text.delta streams the answer.
+    if (isSttModel(req.model)) {
+        if (!files || !files.length) {
+            signals.onResponse({ error: t('chat.input_placeholder_asr',
+                'Attach an audio file to transcribe') });
+            close();
+            return Promise.resolve();
+        }
+        return transcribeAudio(files[0], req.model, signals, controller.signal)
+            .then(close);
+    }
     try {
         if (signals.stopClicked && typeof signals.stopClicked.listener === 'function')
             signals.stopClicked.listener(function () { controller.abort(); });
@@ -514,6 +640,7 @@ function toolbar() {
     });
     sel.addEventListener('change', function () {
         if (_conv) { _conv.model = sel.value; saveConv(); }
+        syncAudioMode();
     });
     var sys = el('input'); sys.id = 'chat-native-sys'; sys.type = 'text';
     sys.placeholder = t('chat.system_prompt.placeholder',
@@ -521,6 +648,10 @@ function toolbar() {
     sys.addEventListener('change', function () {
         if (_conv) { _conv.systemPrompt = sys.value; saveConv(); }
     });
+    var mic = el('button', 'btn', t('chat.record_audio', 'Record audio'));
+    mic.type = 'button'; mic.id = 'chat-native-mic'; mic.hidden = true;
+    mic.title = t('chat.record_audio', 'Record audio');
+    mic.addEventListener('click', toggleMic);
     function toolBtn(label, title, fn) {
         var b = el('button', 'btn', label);
         b.type = 'button'; b.title = title;
@@ -582,14 +713,23 @@ function toolbar() {
                         function () {
         if (_streaming || !_conv) return;
         var ms = _conv.messages;
-        while (ms.length && ms[ms.length - 1].role === 'assistant') ms.pop();
-        if (!ms.length) return;
-        var lastUser = ms[ms.length - 1];
-        if (lastUser.role !== 'user') return;
-        ms.pop();
+        // find the last user turn WITHOUT mutating: checking after the
+        // pop is how the first cut lost the assistant row on refused
+        // audio regens (drill 2026-10-08: n 22->21, nothing re-sent)
+        var li = -1;
+        for (var k = ms.length - 1; k >= 0; k--) {
+            if (ms[k].role === 'user') { li = k; break; }
+        }
+        if (li < 0) return;
+        // classic: transcription turns cannot be regenerated — the audio
+        // file is not persisted (chat.html:6656); the label would go out
+        // as prose, so refuse before touching the store
+        if (/^\[audio\] /.test(String(ms[li].content))) return;
+        var resend = String(ms[li].content);
+        _conv.messages = ms.slice(0, li);
         renderHistory();
         saveConv();
-        _dc.submitUserMessage({ text: String(lastUser.content) });
+        _dc.submitUserMessage({ text: resend });
     });
     var edit = toolBtn(t('chat.edit_tooltip', 'Edit message'),
                        t('uplift.chat.edit_resend', 'Edit & resend last message'),
@@ -623,8 +763,77 @@ function toolbar() {
             refreshConvList();
         } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
     });
-    bar.append(list, newBtn, sel, sys, think, budget, web, copy, regen, edit, del);
+    bar.append(list, newBtn, sel, sys, think, budget, web, mic, copy, regen, edit, del);
     return bar;
+}
+
+// 6/6b: audio_stt selected -> fileUpload accepts audio only, placeholder
+// swaps to classic's ASR hint, mic button appears (secure-context gated,
+// same constraint classic states in chat.error.mic_unavailable).
+function syncAudioMode() {
+    if (!_dc) return;
+    var stt = isSttModel((_conv && _conv.model) || '');
+    // reassign the WHOLE property: the component reacts to the setter,
+    // not to nested mutation (inp.placeholder.text = ... does nothing)
+    _dc.fileUpload = stt ? { acceptedFormats: 'audio/*',
+                             maxNumberOfFiles: 1 } : false;
+    _dc.textInput = { placeholder: { text: stt
+        ? t('chat.input_placeholder_asr', 'Attach an audio file to transcribe')
+        : t('chat.input_placeholder', 'Type a message...') } };
+    var mic = gid('chat-native-mic');
+    if (mic) mic.hidden = !stt;
+}
+
+function toggleMic() {
+    // WAV via AudioContext PCM, NOT MediaRecorder webm: this keg decodes
+    // webm/ogg only through ffmpeg which is not a keg dependency — a webm
+    // upload 400s on ffmpeg-less boxes (verified mlx_audio audio_io:533).
+    // WAV decodes everywhere via miniaudio. 60 s cap.
+    var btn = gid('chat-native-mic');
+    if (_mic) { stopMic(); return; }
+    if (!W() || !W().navigator.mediaDevices || !W().navigator.mediaDevices.getUserMedia) {
+        D().toast(t('chat.error.mic_unavailable',
+                    'Microphone unavailable. Check browser permission and use localhost or HTTPS.'), 'error');
+        return;
+    }
+    var AC = W().AudioContext || W().webkitAudioContext;
+    W().navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+        var ac = new AC();
+        var src = ac.createMediaStreamSource(stream);
+        var proc = ac.createScriptProcessor(4096, 1, 1);
+        var chunks = [];
+        src.connect(proc); proc.connect(ac.destination);
+        proc.onaudioprocess = function (e) {
+            chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        };
+        var timer = setTimeout(stopMic, 60000);
+        _mic = { stream: stream, ac: ac, proc: proc, chunks: chunks, timer: timer, btn: btn };
+        if (btn) { btn.classList.add('rec'); btn.title = t('chat.stop_recording', 'Stop recording'); }
+    }).catch(function () {
+        D().toast(t('chat.error.mic_unavailable',
+                    'Microphone unavailable. Check browser permission and use localhost or HTTPS.'), 'error');
+    });
+}
+
+function stopMic() {
+    var m = _mic; if (!m) return;
+    _mic = null;
+    clearTimeout(m.timer);
+    try { m.proc.disconnect(); m.stream.getTracks().forEach(function (tr) { tr.stop(); }); } catch (e) {}
+    var rate = m.ac.sampleRate || 48000;
+    try { m.ac.close(); } catch (e) {}
+    if (m.btn) { m.btn.classList.remove('rec');
+        m.btn.title = t('chat.record_audio', 'Record audio'); }
+    var seconds = Math.round(m.chunks.reduce(function (a, c) { return a + c.length; }, 0) / rate);
+    if (seconds < 1) return;   // nothing meaningful captured, classic no-op
+    var wav = encodeWav(m.chunks, rate);
+    // classic mic label (chat.html:5848): '[audio] microphone recording'
+    var file = new File([wav], 'microphone-recording.wav', { type: 'audio/wav' });
+    if (_conv && _dc) {
+        _dc.submitUserMessage({ text: '[audio] ' + t('chat.mic_recording_label',
+                                                     'Microphone recording'),
+                                files: [file] });
+    }
 }
 
 function applyShadowTheme(dc) {
@@ -691,7 +900,11 @@ function mount() {
     ]).then(function (res) {
         _models = ((res[1] && res[1].models) || []).filter(function (m) {
             var ty = m.engine_type || m.model_type;
-            return ty === 'llm' || ty === 'vlm';
+            // 6/6b: audio_stt models join the picker (selecting one turns
+            // the input into the transcription attach flow; classic
+            // rejects them on /v1/chat/completions — the handler routes
+            // /v1/audio/transcriptions instead)
+            return ty === 'llm' || ty === 'vlm' || ty === 'audio_stt';
         });
         _convs = res[3] || [];
         if (!_convs.length) {
@@ -806,6 +1019,7 @@ function mount() {
         tryTheme();
         var sel = gid('chat-native-model');
         if (sel) sel.value = _conv.model || '';
+        syncAudioMode();   // restored conversation may have an STT model
         var sys = gid('chat-native-sys');
         if (sys) sys.value = _conv.systemPrompt || '';
         refreshConvList();
@@ -821,6 +1035,7 @@ function mount() {
 return { mount: mount, isMounted: function () { return _mounted; },
          shapeRequest: shapeRequest, parseChunk: parseChunk,
          accumulateToolCall: accumulateToolCall, toolRequest: toolRequest,
+         isSttModel: isSttModel, encodeWav: encodeWav,
          toggleWeb: function () { _webSearch = !_webSearch;
                                   return _webSearch; },
          newConv: newConv, migrateLegacy: migrateLegacy,
@@ -829,8 +1044,9 @@ return { mount: mount, isMounted: function () { return _mounted; },
          // fields through it; shapeRequest reads _conv, same identity
          _state: function () { return { get conv() { return _conv; },
                                         set conv(v) { _conv = v; },
+                                        get models() { return _models; },
+                                        set models(v) { _models = v; },
                                         convs: _convs,
-                                        models: _models,
                                         streaming: _streaming,
                                         thinkingLive: _thinkLive,
                                         webSearch: _webSearch,
