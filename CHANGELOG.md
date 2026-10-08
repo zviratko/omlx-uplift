@@ -12,6 +12,14 @@ fixed annoyance, changed behavior, new command), add one bullet under an
 users never see.
 
 ## Unreleased
+- **Native Chat prompt profiles + readability (preview branch).** The
+  chat toolbar gained the Profile picker mirroring classic's prompt
+  profiles (same localStorage store, so profiles stay the user's across
+  both pages; selecting copies the prompt, Save commits an edit back
+  into the active profile, and the active name persists per
+  conversation). Enhanced-readability now reaches the native panel too:
+  switching the board theme restyles the chat bubbles in place — grays
+  lift to primary ink with the 12px floor, no reload, no iframe.
 - **Native Decision benchmark (preview branch).** The Bench tab gained a
   Decision sub-tab for System-1 models (Clef/OpenJev via upstream's new
   `/v1/systemone`). Scoring runs in-process against the decision engine

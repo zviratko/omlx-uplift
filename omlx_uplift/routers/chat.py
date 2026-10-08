@@ -154,6 +154,10 @@ async def chat_history_save(request: Request,
         "title": str(body.get("title") or existing.get("title") or "")[:TITLE_CHARS],
         "model": str(body.get("model") or "")[:120] or None,
         "systemPrompt": str(body.get("systemPrompt") or "")[:8000],
+        # 6/6c: active prompt-profile NAME only (content stays in the
+        # shared localStorage store). Sanitized like title: a stored
+        # string must never reach innerHTML — UI renders it textContent.
+        "activeProfile": str(body.get("activeProfile") or "")[:48] or None,
         "thinking": bool(body.get("thinking")),
         "thinkingBudget": body.get("thinkingBudget")
         if isinstance(body.get("thinkingBudget"), int) else None,

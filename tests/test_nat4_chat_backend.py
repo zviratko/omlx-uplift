@@ -53,6 +53,22 @@ def test_save_list_get_roundtrip(client):
     assert full["messages"][0]["content"] == "u0"
 
 
+def test_active_profile_name_roundtrips_sanitized(client):
+    """6/6c: the store keeps the profile NAME only (content stays in the
+    shared localStorage mirror). Oversized/None degrade like title does."""
+    r = client.post("/uplift/api/chat/history", json=_conv(activeProfile="Coder"))
+    assert r.status_code == 200
+    full = client.get("/uplift/api/chat/history/c1").json()
+    assert full["activeProfile"] == "Coder"
+    client.post("/uplift/api/chat/history", json=_conv(activeProfile="x" * 80))
+    assert len(client.get("/uplift/api/chat/history/c1").json()["activeProfile"]) == 48
+    client.post("/uplift/api/chat/history", json=_conv(activeProfile=""))
+    assert client.get("/uplift/api/chat/history/c1").json()["activeProfile"] is None
+    # a conv saved without the field never grows one
+    client.post("/uplift/api/chat/history", json=_conv(cid="c2"))
+    assert client.get("/uplift/api/chat/history/c2").json()["activeProfile"] is None
+
+
 def test_validation(client):
     assert client.post("/uplift/api/chat/history", json={"messages": []}).status_code == 400
     r = client.post("/uplift/api/chat/history", json={"id": "x", "messages": "no"})

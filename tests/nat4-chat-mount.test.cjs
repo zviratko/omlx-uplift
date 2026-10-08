@@ -28,12 +28,15 @@ const CAT = {
     'chat.delete_tooltip': 'DEL',
     'chat.chat_history_label': 'PICKER',
     'uplift.chat.booting': 'BOOTING',
+    'chat.active_profile': 'APROF',
+    'chat.save_settings': 'SAVESET',
 };
 
 function makeHarness(opts = {}) {
     const byId = {};
     const shadow = { children: [], appendChild(k) { this.children.push(k); return k; },
-                     getElementById() { return null; } };
+                     getElementById(id) {
+                         return this.children.find(c => c.id === id) || null; } };
     function makeEl(tag) {
         const el = {
             tagName: tag, children: [], style: {}, dataset: {},
@@ -64,6 +67,9 @@ function makeHarness(opts = {}) {
         querySelectorAll() { return []; },
         head: { appendChild() {} },
         documentElement: { dataset: { nativeSurfaces: 'all' } },
+        __listeners: {},
+        addEventListener(type, fn) { (this.__listeners[type] = this.__listeners[type] || []).push(fn); },
+        __fire(type, detail) { (this.__listeners[type] || []).forEach(f => f({ detail })); },
     };
     const posts = [], dels = [];
     const win = {
@@ -274,4 +280,74 @@ test('migrateLegacy: corrupt JSON is a silent no-op, transport failure keeps dat
     h.win.UpliftDom.postJson = async () => { throw new Error('offline'); };
     assert.equal(await h.win.UpliftNativeChat.migrateLegacy(), 0);
     assert.ok(h.win.__store.omlx_chat_history, 'legacy kept for the next boot');
+});
+
+/* ---- 6/6c prompt profiles + enhanced readability (mirror doctrine) ---- */
+
+const PROFILE_LS = 'omlx_chat_prompt_profiles';
+
+function optionTexts(sel) {
+    return (sel.children || []).map((o) => o.textContent);
+}
+
+test('profiles: picker renders store contents, restores activeProfile', async () => {
+    const h = makeHarness({
+        localStorage: { [PROFILE_LS]: JSON.stringify([
+            { name: 'System Default', content: '' },
+            { name: 'Coder', content: 'write code' }]) },
+        convs: [{ id: 'c9', title: 'T', model: 'SmolLM2-360M-Instruct-oQ4',
+                  systemPrompt: 'write code', activeProfile: 'Coder',
+                  messages: [] }],
+    });
+    h.win.UpliftNativeChat.mount();
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    assert.ok(sel, 'profile picker in the toolbar');
+    assert.deepEqual(optionTexts(sel), ['APROF', 'System Default', 'Coder'],
+        'blank first option via classic key + store names, textContent not HTML');
+    assert.equal(sel.value, 'Coder', 'active profile restored from the conv');
+    assert.equal(h.byId['chat-native-sys'].value, 'write code',
+        'prompt text matches the profile content');
+});
+
+test('profiles: stale activeProfile name degrades to blank, never a fake option', async () => {
+    const h = makeHarness({
+        localStorage: { [PROFILE_LS]: JSON.stringify(
+            [{ name: 'System Default', content: '' }]) },
+        convs: [{ id: 'c9', title: 'T', model: 'x', systemPrompt: 'keep me',
+                  activeProfile: 'Ghost', messages: [] }],
+    });
+    h.win.UpliftNativeChat.mount();
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    assert.equal(sel.value, '', 'unknown name -> blank (classic Custom)');
+    assert.ok(optionTexts(sel).indexOf('Ghost') < 0, 'ghost not injected into list');
+    assert.equal(h.byId['chat-native-sys'].value, 'keep me',
+        'text survives losing its association');
+});
+
+test('profiles: corrupt store is a silent empty list (classic catch parity)', async () => {
+    const h = makeHarness({ localStorage: { [PROFILE_LS]: '{not json' } });
+    h.win.UpliftNativeChat.mount();
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    assert.deepEqual(optionTexts(sel), ['APROF'], 'only the blank option');
+});
+
+test('readability: boot state applies the shadow block; board event restyles live', async () => {
+    const h = makeHarness({ localStorage: { 'omlx-enhanced-readability': 'on' } });
+    h.win.UpliftNativeChat.mount();
+    for (let i = 0; i < 12; i++) await tick();
+    const shadow = h.win.document.__shadow;
+    const style = shadow.children.find((c) => c.id === 'uplift-chat-theme');
+    assert.ok(style, 'theme style owns the shadow root');
+    assert.ok(style.textContent.includes('font-size: max(12px'),
+        'classic 12px floor mirrored into the shadow DOM');
+    assert.ok(style.textContent.includes('!important'),
+        'gray->primary block baked in while enhanced');
+    h.win.document.__fire('uplift:embed-theme', { theme: 'dark', enhanced: false });
+    assert.ok(!style.textContent.includes('font-size: max(12px'),
+        'switching enhanced off removes the block WITHOUT a reload');
+    h.win.document.__fire('uplift:embed-theme', { theme: 'dark', enhanced: true });
+    assert.ok(style.textContent.includes('font-size: max(12px'), 'and back on');
 });

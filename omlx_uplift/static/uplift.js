@@ -507,6 +507,13 @@ function syncEmbedTheme() {
             else de.removeAttribute('data-enhanced-readability');
         } catch (_) {}
     }
+    // 6/6c: the NATIVE chat panel is not an iframe — tell it too (it owns
+    // its shadowRoot <style> and re-applies the readability block). The
+    // classic page keeps its own localStorage read; this only mirrors the
+    // live switch. Additive: a listener that is not there changes nothing.
+    try {
+        document.dispatchEvent(new CustomEvent('uplift:embed-theme', { detail: st }));
+    } catch (_) {}
 }
 
 const motionOff = () => document.documentElement.dataset.motion === 'off';

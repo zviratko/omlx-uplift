@@ -36,7 +36,9 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
     _lastBody = null,                  // resolved request stashed by shapeRequest
     _lastFiles = null,                 // 6/6b: raw audio Files for the STT path
-    _mic = null;                       // 6/6b: live mic recording session
+    _mic = null,                       // 6/6b: live mic recording session
+    _profiles = [],                    // 6/6c: prompt profiles (localStorage mirror)
+    _readability = false;              // 6/6c: enhanced-readability live mirror
 
 function W() { return (typeof window !== 'undefined') ? window : null; }
 function C() { return W() && W().UpliftCore ? W().UpliftCore : null; }
@@ -62,12 +64,100 @@ function el(tag, cls, text) {
 }
 function gid(id) { return document.getElementById(id); }
 
+// ---- prompt profiles (6/6c) — MIRROR of classic, same localStorage key ----
+// Doctrine call from the card ("decide mirror vs native"): mirror. Classic
+// chat.html:2529 keeps [{name, content}] under 'omlx_chat_prompt_profiles';
+// while both pages exist ONE store serves both — profiles are the user's,
+// not per-surface. Semantics copied from chat.html:5002-5100 exactly:
+// 'System Default' always exists and is FIRST, never deletable/renamable
+// (we do not ship rename/delete UI here — create/edit happens in classic
+// or the store; the native page mirrors selection + save-back);
+// selecting copies content into the prompt; hand-editing does NOT clear
+// the association (classic sets promptDirty and the Save button commits
+// the new text into the active profile); a blank '' selection clears the
+// association keeping the text (classic's Custom). The server store keeps
+// ONLY the active profile NAME (chat.py); the list never leaves the browser.
+var PROFILE_KEY = 'omlx_chat_prompt_profiles';
+var SYSTEM_DEFAULT = 'System Default';
+
+function loadProfiles() {
+    var ls = W() && W().localStorage;
+    if (!ls) return [];
+    var list = null;
+    try {
+        var raw = ls.getItem(PROFILE_KEY);
+        if (raw) {
+            var arr = JSON.parse(raw);
+            if (Array.isArray(arr)) {
+                list = [];
+                for (var i = 0; i < arr.length; i++) {
+                    var p = arr[i];
+                    if (p && typeof p.name === 'string' && p.name
+                        && !findProfile(list, p.name))   // classic's add-path
+                        list.push({ name: p.name,        // can dupe names;
+                                    content: String(p.content || '') }); // keep first
+                }
+            }
+        } else {
+            // classic's one-time migration (chat.html:5002-5008): the old
+            // single system-prompt key becomes System Default's content,
+            // then the old key is dropped (only once we persist ours)
+            var old = null;
+            try { old = ls.getItem('omlx_chat_system_prompt'); } catch (_) {}
+            list = [{ name: SYSTEM_DEFAULT, content: String(old || '') }];
+            persistProfiles(list);
+            if (old !== null && old !== '') {
+                try { ls.removeItem('omlx_chat_system_prompt'); } catch (_) {}
+            }
+            return list;
+        }
+    } catch (_) { return []; }        // corrupt store: behave like classic's catch
+    if (list === null) list = [];
+    if (!list.some(function (p) { return p.name === SYSTEM_DEFAULT; })) {
+        list.unshift({ name: SYSTEM_DEFAULT, content: '' });
+        persistProfiles(list);
+    }
+    return list;
+}
+function persistProfiles(list) {
+    try { W().localStorage.setItem(PROFILE_KEY, JSON.stringify(list)); }
+    catch (_) { /* quota/private mode: profiles simply do not carry over */ }
+}
+function findProfile(list, name) {
+    for (var i = 0; i < list.length; i++) if (list[i].name === name) return list[i];
+    return null;
+}
+function syncProfileSelect() {
+    // one place paints the select + save-button state from _conv/_profiles
+    var sel = gid('chat-native-profile');
+    var sys = gid('chat-native-sys');
+    var save = gid('chat-native-profile-save');
+    if (!sel) return;
+    var active = (_conv && _conv.activeProfile) || '';
+    var names = _profiles.map(function (p) { return p.name; });
+    if (active && names.indexOf(active) < 0) active = '';  // stale name
+    sel.replaceChildren();
+    var first = el('option', null, t('chat.active_profile', 'Active Profile'));
+    first.value = '';
+    sel.appendChild(first);
+    _profiles.forEach(function (p) { sel.appendChild(el('option', null, p.name)); });
+    sel.value = active;
+    if (save) {
+        var prof = active ? findProfile(_profiles, active) : null;
+        save.disabled = !(prof && sys && sys.value !== prof.content);
+    }
+}
+
 // ---- conversation state (server-backed) ----------------------------------
 
 function newConv() {
     return { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
              title: t('chat.new_chat', 'New Chat'),
              model: (_models[0] || {}).id || '', systemPrompt: '',
+             // 6/6c: active prompt-profile NAME (content lives in the
+             // shared localStorage store). Server persists the name only
+             // (routers/chat.py); classic's per-session activeProfile.
+             activeProfile: '',
              // thinking: 'auto'|'off'|'on'|'limit' — classic's select, same
              // wire semantics (openai_models.py: enable_thinking,
              // thinking_budget). Live-only: the history store keeps
@@ -126,6 +216,7 @@ async function openConv(id) {
     if (sel) sel.value = _conv.model || '';
     var sys = gid('chat-native-sys');
     if (sys) sys.value = _conv.systemPrompt || '';
+    syncProfileSelect();
     refreshConvList();
 }
 function refreshConvList() {
@@ -630,6 +721,12 @@ function toolbar() {
     newBtn.addEventListener('click', function () {
         _conv = newConv();
         if (_dc) _dc.history = [];
+        // the prompt field is per-conversation (classic: sessions carry
+        // their own systemPrompt): clear it or the picker would show no
+        // profile while a stale prompt is still visibly sent
+        var s2 = gid('chat-native-sys');
+        if (s2) s2.value = '';
+        syncProfileSelect();
         refreshConvList();
     });
     var sel = el('select'); sel.id = 'chat-native-model';
@@ -645,8 +742,46 @@ function toolbar() {
     var sys = el('input'); sys.id = 'chat-native-sys'; sys.type = 'text';
     sys.placeholder = t('chat.system_prompt.placeholder',
                         'e.g. You are a helpful assistant. Be concise.');
+    sys.addEventListener('input', function () {
+        // classic semantics: editing does NOT clear the association; it
+        // marks the profile dirty and arms Save (chat.html:2060)
+        syncProfileSelect();
+    });
     sys.addEventListener('change', function () {
         if (_conv) { _conv.systemPrompt = sys.value; saveConv(); }
+    });
+    // 6/6c: prompt-profile picker + save-back (classic Profile tab mirror)
+    _profiles = loadProfiles();
+    var prof = el('select'); prof.id = 'chat-native-profile';
+    prof.title = t('chat.active_profile', 'Active Profile');
+    prof.addEventListener('change', function () {
+        var name = prof.value;
+        if (!_conv) return;
+        if (!name) {
+            // custom: keep the prompt text, clear the association
+            _conv.activeProfile = '';
+        } else {
+            var p = findProfile(_profiles, name);
+            if (!p) { syncProfileSelect(); return; }
+            sys.value = p.content;
+            _conv.systemPrompt = p.content;
+            _conv.activeProfile = p.name;
+        }
+        saveConv();
+        syncProfileSelect();
+    });
+    var profSave = el('button', 'btn', t('chat.save_settings', 'Save'));
+    profSave.type = 'button'; profSave.id = 'chat-native-profile-save';
+    profSave.disabled = true;
+    profSave.addEventListener('click', function () {
+        var name = _conv && _conv.activeProfile;
+        var p = name ? findProfile(_profiles, name) : null;
+        if (!p) return;                       // custom: nothing to save (classic)
+        p.content = sys.value;
+        persistProfiles(_profiles);
+        _conv.systemPrompt = p.content;
+        saveConv();
+        syncProfileSelect();
     });
     var mic = el('button', 'btn', t('chat.record_audio', 'Record audio'));
     mic.type = 'button'; mic.id = 'chat-native-mic'; mic.hidden = true;
@@ -763,7 +898,7 @@ function toolbar() {
             refreshConvList();
         } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
     });
-    bar.append(list, newBtn, sel, sys, think, budget, web, mic, copy, regen, edit, del);
+    bar.append(list, newBtn, sel, prof, profSave, sys, think, budget, web, mic, copy, regen, edit, del);
     return bar;
 }
 
@@ -876,10 +1011,25 @@ function applyShadowTheme(dc) {
         '  caret-color: var(--accent, #4c8dff); }',
         '.input-button { color: var(--dim, #8b98ab); }',
         'a { color: var(--accent, #4c8dff); }',
-    ].join(' ');
+    ];
+    if (_readability) {
+        // classic's enhanced-readability (base.html:176-206) inside OUR
+        // shadow DOM: every gray -> primary ink, placeholders opaque, and
+        // the 12px floor. :host-context() is Chromium-only and the user
+        // tests Safari/Firefox, so the block is baked into OUR style tag
+        // and re-applied on the live 'uplift:embed-theme' event instead
+        // of watching attributes that never change on this document.
+        css.push(
+            '.message-bubble, .message-bubble * { color: var(--ink, #f2f0ea) !important; }',
+            '.text-input-styling { color: var(--ink, #f2f0ea) !important; }',
+            '.text-input-styling[textcolor]:empty:before {',
+            '  color: var(--ink, #f2f0ea) !important; opacity: 1 !important; }',
+            '#messages, .message-bubble, .message-bubble pre, .message-bubble code,',
+            '.message-bubble p, .message-bubble li { font-size: max(12px, .9em); }');
+    }
     var st = root.getElementById ? root.getElementById('uplift-chat-theme') : null;
     if (!st) { st = el('style'); st.id = 'uplift-chat-theme'; root.appendChild(st); }
-    st.textContent = css;
+    st.textContent = css.join(' ');
     // classic-page courtesy (card feature 6): the embedded chat iframe
     // reads 'omlx-chat-theme' at ITS boot; uplift's syncEmbedTheme
     // already mirrors it on commit — nothing to write here.
@@ -890,6 +1040,22 @@ function mount() {
     var host = gid('chat-native');
     if (!host || _mounted) return;
     _mounted = true;
+    // 6/6c: enhanced-readability mirror — boot state read the SAME way
+    // classic does (its localStorage key, written by the board's
+    // syncEmbedTheme), then kept live via the additive board event.
+    try {
+        _readability = !!((W() && W().localStorage)
+            && W().localStorage.getItem('omlx-enhanced-readability') === 'on');
+    } catch (_) { _readability = false; }
+    if (W() && W().document &&
+        typeof W().document.addEventListener === 'function') {
+        W().document.addEventListener('uplift:embed-theme', function (e) {
+            var en = !!(e && e.detail && e.detail.enhanced);
+            if (en === _readability) return;
+            _readability = en;
+            if (_dc) applyShadowTheme(_dc);   // restyles without reload
+        });
+    }
     host.replaceChildren();
     var wrap = el('div', 'chat-native-wrap');
     var warn = el('div', 'native-stub-note'); warn.id = 'chat-native-warn';
@@ -1031,6 +1197,7 @@ function mount() {
         syncAudioMode();   // restored conversation may have an STT model
         var sys = gid('chat-native-sys');
         if (sys) sys.value = _conv.systemPrompt || '';
+        syncProfileSelect();   // restored conv may carry an activeProfile
         refreshConvList();
         if (!_models.length) {
             D().toast(t('chat.no_models', 'No models available'), 'error');
@@ -1059,5 +1226,9 @@ return { mount: mount, isMounted: function () { return _mounted; },
                                         streaming: _streaming,
                                         thinkingLive: _thinkLive,
                                         webSearch: _webSearch,
-                                        toolsUsed: _tools }; } };
+                                        toolsUsed: _tools,
+                                        // 6/6c probes (tests + live drills):
+                                        // profiles is the loaded mirror list
+                                        profiles: _profiles,
+                                        readability: _readability }; } };
 });
