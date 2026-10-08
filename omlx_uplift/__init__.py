@@ -14,7 +14,7 @@ Mount points (registered by `register(app)`):
                          dev gateway (?api=) compatibility
 """
 
-__version__ = "1.1"
+__version__ = "1.2"
 
 
 def register(app) -> None:

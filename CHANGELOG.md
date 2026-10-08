@@ -12,6 +12,18 @@ fixed annoyance, changed behavior, new command), add one bullet under an
 users never see.
 
 ## Unreleased
+
+## [1.2] — 2026-10-09
+
+The native release. Bench and Chat are real Uplift pages now —
+throughput, intelligence (classic 16-task engine + opt-in
+lm-evaluation-harness), embeddings/rerankers over MTEB, System-1
+decisions, context probe + ANE tuning, and a full chat with thinking,
+the web-search tool loop, transcription, inline editing and prompt
+profiles. The embedded classic pages stay fully reachable as a
+per-viewer fallback: hover the menu for "Classic (Embed)". Plus honest
+benchmark progress across restarts and multiple tabs.
+
 - **Intelligence benchmark: live queue board (U83).** While a benchmark
   runs, the Bench → Intelligence page now shows a board instead of one
   gray status line: every queued suite gets a box (name + question
@@ -24,7 +36,7 @@ users never see.
   Harness dataset-prep no longer looks frozen: when lm-eval goes quiet
   during a download/build the board says so with a live silence timer,
   and a dropped progress stream reconnects visibly with polling fallback.
-- **Native Chat prompt profiles + readability (preview branch).** The
+- **Native Chat prompt profiles + readability.** The
   chat toolbar gained the Profile picker mirroring classic's prompt
   profiles (same localStorage store, so profiles stay the user's across
   both pages; selecting copies the prompt, Save commits an edit back
@@ -32,7 +44,7 @@ users never see.
   conversation). Enhanced-readability now reaches the native panel too:
   switching the board theme restyles the chat bubbles in place — grays
   lift to primary ink with the 12px floor, no reload, no iframe.
-- **Native Decision benchmark (preview branch).** The Bench tab gained a
+- **Native Decision benchmark.** The Bench tab gained a
   Decision sub-tab for System-1 models (Clef/OpenJev via upstream's new
   `/v1/systemone`). Scoring runs in-process against the decision engine
   through upstream's own eviction-proof lease — the bench measures the
@@ -43,6 +55,26 @@ users never see.
   derived probability questions, position-bias agreement (same item
   re-asked with shuffled options) and ms/question latency. Cancel stops
   between items; a cancelled pack is never persisted.
+- **Dashboard tabs stop starving each other (hang fix).** Every visible
+  tab used to hold two always-open server-sent streams (requests feed +
+  metrics feed). uvicorn speaks HTTP/1.1 and browsers cap a plain origin
+  at ~6 parallel connections — three background tabs of the dashboard
+  already filled the pipe and the fourth froze on load, the "sometimes
+  the page hangs, usually because another tab has it open" report. Now
+  only the FOCUSED tab holds the streams; blurred tabs close theirs and
+  catch up through the existing 2 s poll, and the focused tab replays
+  what happened while it was away on return. Hidden tabs behaved this
+  way already; focus is now the same gate.
+- **Header chips equal the graph headers.** The power and temperature
+  chips at the top of the dashboard now show exactly what the matching
+  chart card header shows (the card's live last-sample value, not a
+  60 s mean/max), so the two readouts can no longer disagree; the
+  windowed mean/max stay in the tooltip.
+- **Benchmark results persist until cleared (U64).** Throughput,
+  accuracy, context and ANE rows survive a server restart and a page
+  reload across every surface — classic kept the accuracy table in
+  memory only, so a restart silently discarded the session's scores.
+  A clear button owns removal now; nothing evicts on its own.
 - **Native Bench/Chat + the classic embed, side by side.** The Bench and
   Chat tabs open the native surfaces by default. The embedded classic
   pages stay fully reachable as a fallback: hover Bench and an option to
@@ -53,8 +85,8 @@ users never see.
   still set `uplift_native_surfaces` to `off` (or `bench`/`chat`) in
   `~/.omlx/uplift/config.json`, and any viewer can override per load with
   `?native=off|bench|chat|all`.
-- **Native throughput benchmark (preview branch).** With the bench
-  surface flagged on, the Throughput sub-tab is a real native page now:
+- **Native throughput benchmark.** The Throughput sub-tab is a real
+  native page now:
   form (model, context profile, prompt lengths, batch sizes, ANE-aligned
   prompt, force-lm, external endpoint) drives the classic benchmark
   engine in-process over `/uplift/api/bench/*` — SSE live progress and
@@ -63,7 +95,7 @@ users never see.
   native never posts to omlx.ai unless you check it). All labels ride
   the classic `bench.*` translation catalog plus new `uplift.bench.*`
   keys in all 10 locales.
-- **Native context probe + ANE tuning (preview branch).** The Context
+- **Native context probe + ANE tuning.** The Context
   and ANE Tune sub-tabs are live too: the context benchmark runs in the
   server over `/uplift/api/bench/context/*` (SSE progress; the measured
   window auto-applies to the model's Context Window setting, same as
@@ -73,7 +105,7 @@ users never see.
   manager the classic UI uses. Labels reuse the classic `ctx_bench.*` /
   `modal.model_settings.qwen_ane_tune*` catalogs (already complete in
   all 10 locales).
-- **Native intelligence benchmark (preview branch).** The Intelligence
+- **Native intelligence benchmark.** The Intelligence
   sub-tab is a native page over the classic 16-task accuracy engine
   (`/uplift/api/bench/accuracy/*`): the task grid with per-task sample
   sizes, queue with remove, batch size, deterministic/model-settings
@@ -84,7 +116,7 @@ users never see.
   Parity on the dev keg: identical scores native-vs-classic across
   SmolLM2-360M (arc/gsm8k), Qwen2.5-0.5B (queued chain), Qwen3.5-9B
   with thinking on (0.9 = 0.9), and external-endpoint mode.
-- **Harness accuracy engine, opt-in (preview branch).** The Intelligence
+- **Harness accuracy engine, opt-in.** The Intelligence
   page gained a Scoring-engine choice: Classic (default, unchanged) or
   Harness — lm-evaluation-harness running as a pinned subprocess in its
   own venv (`omlx-uplift bench-env create`, ~600 MB, torch-free by hard
@@ -103,7 +135,7 @@ users never see.
   offline mode configurable (`bench_hf_cache` / `bench_offline` in
   `~/.omlx/uplift/config.json`); the offline drill passed from a warm
   cache.
-- **Native Embeddings and Rerankers benchmark (preview branch).** The
+- **Native Embeddings and Rerankers benchmark.** The
   Bench tab gained two sub-tabs over MTEB: a curated, laptop-sized task
   set (STS, retrieval, classification, pair-classification, clustering,
   bitext — three of them Czech — plus two small instruction-reranking
@@ -115,10 +147,11 @@ users never see.
   granularity (MTEB over the API offers no per-question events; we report
   the real granularity, never a fabricated one) and each row names its
   metric. No community upload exists for these classes.
-- **Native Chat (preview branch, core features).** The Chat tab can run
-  a native surface (kill switch `?native=chat|all`, default off — the
-  embedded classic page is untouched and the vendored component never
-  hits the wire while off). Streaming chat, stop, model picker
+- **Native Chat (core features).** The Chat tab opens the native page
+  (the embedded classic page stays reachable per viewer — see the
+  fallback entry; a server can still park Chat on the embed with
+  `uplift_native_surfaces` or any viewer with `?native=off|bench`).
+  Streaming chat, stop, model picker
   (chat-capable models only), system prompt, copy/regenerate/edit,
   image attachments with vision answered, and a server-side history
   store with stated caps; classic localStorage chats import once on
