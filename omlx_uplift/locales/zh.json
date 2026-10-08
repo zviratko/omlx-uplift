@@ -48,6 +48,8 @@
  "uplift.card.requests": "请求",
  "uplift.card.throughput": "吞吐量",
  "uplift.card.tokens": "总 Token 数",
+ "uplift.chat.web_search": "网页搜索",
+ "uplift.chat.params_used": "此回复使用的采样参数",
  "uplift.chat.native_stub": "原生界面 — 尚未实现。",
  "uplift.chat.tools_used": "工具调用",
  "uplift.chat.booting": "正在加载聊天…",

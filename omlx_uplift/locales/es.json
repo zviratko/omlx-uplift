@@ -48,6 +48,8 @@
  "uplift.card.requests": "Solicitudes",
  "uplift.card.throughput": "Rendimiento",
  "uplift.card.tokens": "Tokens totales",
+ "uplift.chat.web_search": "Búsqueda web",
+ "uplift.chat.params_used": "Muestreo usado en esta respuesta",
  "uplift.chat.native_stub": "Superficie nativa — aún no implementada.",
  "uplift.chat.tools_used": "Llamadas a herramientas",
  "uplift.chat.booting": "Cargando chat…",

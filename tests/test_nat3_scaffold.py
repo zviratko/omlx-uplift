@@ -107,6 +107,7 @@ NAT3_ROUTES = [
     ("GET", "/bench/accuracy/{bench_id}/stream"),
     ("GET", "/chat/key"),
     ("GET", "/chat/history"),
+    ("GET", "/chat/history/export"),        # U77 literal BEFORE the dynamic
     ("GET", "/chat/history/{conv_id}"),
     ("POST", "/chat/history"),
     ("DELETE", "/chat/history/{conv_id}"),
@@ -240,3 +241,29 @@ def test_index_token_substituted(monkeypatch, tmp_path):
     body = client.get("/uplift/index.html").text
     assert 'data-native-surfaces="all"' in body
     assert 'id="bench-native"' in body and 'id="chat-native"' in body
+
+
+def test_u78_clean_message_params_sanitized():
+    from omlx_uplift.routers.chat import _clean_message
+    m = _clean_message({
+        "role": "assistant", "content": "hi",
+        "params": {"temperature": 0.3, "top_p": 0, "max_tokens": True,
+                   "evil": {"nested": 1}, "enable_thinking": True,
+                   "thinking_budget": 64}})
+    assert m["params"] == {"temperature": 0.3, "top_p": 0,
+                           "enable_thinking": True, "thinking_budget": 64}
+    # bool excluded from numerics (True would sneak past isinstance int);
+    # unknown keys and nested junk never persist; user rows carry none
+    mu = _clean_message({"role": "user", "content": "x",
+                         "params": {"temperature": 1}})
+    assert "params" not in mu
+
+
+def test_u77_export_route_precedes_dynamic():
+    # the golden ORDER list pins it; this is the shadowing proof itself:
+    # Starlette matches registration order, so /chat/history/export must
+    # resolve to the export handler, never to conv_id='export'.
+    from omlx_uplift.routers import chat as ch
+    import inspect
+    src = inspect.getsource(ch)
+    assert src.index('"/chat/history/export"') < src.index('"/chat/history/{conv_id}"')

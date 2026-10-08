@@ -34,6 +34,7 @@ var CHAT_FLOOR = 160,      // U54: min deep-chat height (input stays usable)
     CHAT_BOTTOM_GAP = 12;  // host padding + breathing room under dc
 var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _models = [], _vendorPromise = null, _streaming = false,
+    _turnParams = null,   // U78: EFFECTIVE sampling snapshot of the in-flight turn
     _thinkLive = '',   // reasoning deltas of the in-flight turn (live-only)
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
     _lastBody = null,                  // resolved request stashed by shapeRequest
@@ -220,6 +221,81 @@ function renderHistory() {
         });
     scheduleMessageActions(_dc);   // U45: bubbles re-rendered -> re-attach
 }
+function exportChats() {
+    // U77: whole store as a JSON array — the SAME shape classic's
+    // Download Chats produces (interop both ways). Full conversations
+    // come from the literal /chat/history/export route (summaries alone
+    // would export nothing usable). Model ids only; the file never
+    // carries keys or base URLs (the Copy/Download credential rule).
+    var d = D();
+    d.fetchJson(api() + '/chat/history/export').then(function (convs) {
+        convs = convs || [];
+        if (!convs.length) {
+            d.toast(t('chat.no_chats_to_export', 'No chats to export.'), 'error');
+            return;
+        }
+        var name = 'uplift-chats-' + new Date().toISOString().slice(0, 10);
+        var w = W();
+        var blob = new w.Blob([JSON.stringify(convs, null, 2)],
+                              { type: 'application/json' });
+        var url = w.URL.createObjectURL(blob);
+        var a = w.document.createElement('a');
+        a.href = url; a.download = name + '.json';
+        w.document.body.appendChild(a); a.click(); a.remove();
+        w.URL.revokeObjectURL(url);
+    }).catch(function (e) { d.toast(String((e && e.message) || e), 'error'); });
+}
+
+async function importChats(input) {
+    // U77: classic's merge rules (chat.html importChats): validate
+    // {id:string, messages:array}; the OPEN chat is never overwritten
+    // (its live state is the truth); same-id older entries lose to local.
+    var d = D();
+    var file = input && input.files && input.files[0];
+    if (input) input.value = '';              // re-selecting the same file re-fires
+    if (!file) return;
+    var parsed;
+    try {
+        parsed = JSON.parse(await file.text());
+    } catch (e) {
+        d.toast(t('chat.error.import_invalid', 'Invalid chat history file.'), 'error');
+        return;
+    }
+    var valid = Array.isArray(parsed)
+        ? parsed.filter(function (c) {
+            return c && typeof c.id === 'string' && c.id
+                && Array.isArray(c.messages);
+        }) : [];
+    if (!valid.length) {
+        d.toast(t('chat.error.import_invalid', 'Invalid chat history file.'), 'error');
+        return;
+    }
+    var local = {};
+    try {
+        (await d.fetchJson(api() + '/chat/history')).forEach(function (c) {
+            local[c.id] = c.updated || 0;
+        });
+    } catch (e) { /* empty store still imports */ }
+    var done = 0;
+    for (var i = 0; i < valid.length; i++) {
+        var c = valid[i];
+        if (_conv && c.id === _conv.id) continue;                   // classic rule
+        if (local[c.id] !== undefined && (c.updated || 0) <= local[c.id])
+            continue;                                               // stale
+        try {
+            await d.postJson(api() + '/chat/history', c);
+            done++;
+        } catch (e) { /* server-side save failure: not counted */ }
+    }
+    var sums = await d.fetchJson(api() + '/chat/history').catch(function () { return []; });
+    _convs = sums || [];
+    refreshConvList();
+    // classic's exact feedback: only the imported count (the skip rules
+    // are silent by design — a stale-file merge is not an error)
+    d.toast(t('chat.import_success', 'Imported {count} chats.')
+        .replace('{count}', String(done)));
+}
+
 async function openConv(id) {
     if (id === (_conv && _conv.id)) return;
     var d = D();
@@ -463,6 +539,18 @@ async function shapeRequest(d) {
         var b = parseInt(_conv.thinkingBudget, 10);
         if (isFinite(b) && b >= 0) body.thinking_budget = b;
     }
+    // U78 (user: 'does the history carry the sampling parameters used?'):
+    // snapshot what THIS request actually carries — the per-chat generation
+    // object is only the CURRENT knob state and rewording it mid-chat
+    // would falsify older replies. null = pure-default turn, nothing to log.
+    _turnParams = (Object.keys(body).some(function (k) {
+        return k !== 'model' && k !== 'messages' && k !== 'stream'
+            && k !== 'tools';
+    })) ? Object.keys(body).reduce(function (o, k) {
+        if (k !== 'model' && k !== 'messages' && k !== 'stream' && k !== 'tools')
+            o[k] = body[k];
+        return o;
+    }, {}) : null;
     // 'auto': send NOTHING — model/template default (classic parity)
     // NAT-6 S1 proven trap: deep-chat stringifies the interceptor body on
     // the TEXT path only; the FILES path sends it raw -> omlx sees
@@ -969,7 +1057,10 @@ function toolbar() {
     }
     think.addEventListener('change', saveThinking);
     budget.addEventListener('change', saveThinking);
-    var web = toolBtn('web', t('chat.web_search_off', 'Turn on web search'),
+    // U76 (user: 'what is the web button?'): bare 'web' said nothing —
+    // resting label names the feature; the title still states the action
+    var web = toolBtn(t('uplift.chat.web_search', 'Web search'),
+                      t('chat.web_search_off', 'Turn on web search'),
                       function () { toggleWeb(); });
     web.id = 'chat-native-web';   // on-state styled in uplift.css (U45)
     function toggleWeb() {
@@ -1009,13 +1100,38 @@ function toolbar() {
         // the sys prompt keeps the old .chat-native-bar stretch behavior
         // (was a direct flex child; now inside a column group)
         if (control.id === 'chat-native-sys') g.classList.add('chat-native-grow');
+        if (control.classList && control.classList.contains('chat-native-histcol'))
+            g.classList.add('chat-native-grow');
         return g;
     }
     var pickers = el('div', 'chat-native-bar chat-native-pickers');
+    // U77 (user: 'add the options to export and import the chat'):
+    // classic's Download Chats / Import Chats pair (chat.download_chats /
+    // chat.import_chats — classic catalog keys, zero new i18n). Export
+    // pulls the FULL store (summaries would be useless); import merges
+    // classic's way: valid entries only, never overwrite the open chat,
+    // older-than-local loses, everything else POSTs through the normal
+    // save endpoint (so server-side cleaning applies to imports too).
+    var expBtn = toolBtn(t('chat.download_chats', 'Download Chats'),
+                         t('chat.download_chats', 'Download Chats'),
+                         function () { exportChats(); });
+    expBtn.id = 'chat-native-export';
+    var impBtn = toolBtn(t('chat.import_chats', 'Import Chats'),
+                         t('chat.import_chats', 'Import Chats'),
+                         function () { var f = gid('chat-native-import-file'); if (f) f.click(); });
+    impBtn.id = 'chat-native-import';
+    var fileIn = document.createElement('input');
+    fileIn.type = 'file'; fileIn.accept = '.json,application/json';
+    fileIn.id = 'chat-native-import-file'; fileIn.hidden = true;
+    fileIn.addEventListener('change', function (ev) {
+        importChats(ev.target);
+    });
+    var histCtl = el('div', 'chat-native-histcol');
+    var ioRow = el('div', 'chat-native-io');
+    ioRow.append(expBtn, impBtn);
+    histCtl.append(list, ioRow, fileIn);
     pickers.append(
-        group(t('chat.chat_history_label', 'Chat History'),
-              (function () { list.title = t('chat.chat_history_label',
-                                            'Chat History'); return list; })(),
+        group(t('chat.chat_history_label', 'Chat History'), histCtl,
               'chat.chat_history_label'),
         newBtn,
         group(t('chat.active_model', 'Active Model'), sel, 'chat.active_model'),
@@ -1063,10 +1179,19 @@ function toolbar() {
 var _msgActions = new WeakMap();   // bubble element -> {idx, role}
 var _overlayTimer = null;
 
-function msgActionsEl(idx, role, editedLabel, editedKey) {
+function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
     var box = el('div', 'chat-native-msg-actions' +
                          (role === 'user' ? ' user' : ''));
     box.setAttribute('data-idx', String(idx));
+    if (paramsText) {
+        // U78: sampling provenance chip — always visible (state, not an
+        // action; hover-gating it would hide the very thing it records)
+        var chip = el('span', 'chat-native-params', paramsText);
+        var ttl = tf2('uplift.chat.params_used',
+                      'Sampling used for this reply');
+        chip.title = ttl;
+        box.appendChild(chip);
+    }
     if (editedLabel) {
         // U74: 'Edited' / 'Edited — used on next reply' badge — first in
         // the track so it reads as the row's state, not a button
@@ -1341,6 +1466,23 @@ function openEditor(idx) {
 
 function msgEdit(idx) { openEditor(idx); }
 
+function paramsLabel(pp) {
+    // U78: compact provenance chip text — 'temp 0.6 · top_p 0.9 · think 64';
+    // enable_thinking true alone -> 'think on'; budget implies enable.
+    if (!pp) return '';
+    var short = { temperature: 'temp', max_tokens: 'max', top_p: 'top_p',
+                  top_k: 'top_k', min_p: 'min_p',
+                  repetition_penalty: 'rep', presence_penalty: 'pres' };
+    var bits = [];
+    Object.keys(short).forEach(function (k) {
+        if (pp[k] != null) bits.push(short[k] + ' ' + pp[k]);
+    });
+    if (pp.thinking_budget != null) bits.push('think ' + pp.thinking_budget);
+    else if (pp.enable_thinking === true) bits.push('think on');
+    else if (pp.enable_thinking === false) bits.push('think off');
+    return bits.join(' \u00b7 ');
+}
+
 function tf2(key, fb) {
     var c = C();
     if (!c || !c.t) return fb;
@@ -1469,13 +1611,16 @@ function attachMessageActions(dc) {
                 want = tf2(wantKey, 'Edited');
             }
         }
+        var ptxt = role === 'assistant'
+            ? paramsLabel(ms[storeIdx].params) : '';
         var prev = _msgActions.get(b);
         if (existing && prev && prev.idx === storeIdx && prev.role === role
-            && prev.edited === want)
+            && prev.edited === want && prev.params === ptxt)
             continue;                      // identical — no DOM churn
         if (existing) existing.remove();
-        holder.appendChild(msgActionsEl(storeIdx, role, want, wantKey));
-        _msgActions.set(b, { idx: storeIdx, role: role, edited: want });
+        holder.appendChild(msgActionsEl(storeIdx, role, want, wantKey, ptxt));
+        _msgActions.set(b, { idx: storeIdx, role: role, edited: want,
+                             params: ptxt });
     }
 }
 
@@ -1646,6 +1791,12 @@ function applyShadowTheme(dc) {
         '  color: var(--dim, #8b98ab); background: transparent;',
         '  font-weight: 500; font-size: 12px; }',
         '.chat-native-thinking summary::-webkit-details-marker { display: none; }',
+        // U78: sampling-provenance chip. Lives in the shadow root like
+        // the track itself (light-DOM uplift.css cannot reach across —
+        // the first cut put this rule in the wrong sheet)
+        '.chat-native-params { visibility: visible; font-size: 10px;',
+        '  color: var(--dim, #8b98ab); margin-right: 4px;',
+        '  white-space: nowrap; cursor: default; }',
         // U74: Edited badge in the meta track (space only when set)
         // U75 #1: the mark must NOT hide with the track — visibility is
         // per-element, the child opts back in (user: 'should not
@@ -1851,6 +2002,11 @@ function mount() {
                     content: typeof m.text === 'string' ? m.text : '' };
                 if (role === 'assistant' && _thinkLive) {
                     row.reasoning_content = _thinkLive;  // persisted (4/6)
+                }
+                // U78: per-turn sampling provenance rides the row into the
+                // store (backend _clean_message filters + caps it)
+                if (role === 'assistant' && _turnParams) {
+                    row.params = Object.assign({}, _turnParams);
                 }
                 _conv.messages.push(row);
                 if (role === 'user' && _conv.messages.filter(function (x) {

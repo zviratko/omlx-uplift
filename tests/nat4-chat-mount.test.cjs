@@ -568,3 +568,24 @@ test('U74: reply + reasoning edits commit IN PLACE; edited rows ride the wire', 
     assert.ok(/m\.edited && m\.role === 'assistant' && m\.reasoning_content/
         .test(src), 'reasoning rides the wire only after a user edit');
 });
+
+test('U76-U78: web label, export/import buttons, sampling provenance chip', () => {
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    assert.ok(/uplift\.chat\.web_search/.test(src),
+        'web toggle carries a descriptive resting label');
+    assert.ok(/chat\.download_chats/.test(src) && /chat\.import_chats/.test(src),
+        'export/import use the classic catalog keys (zero new i18n)');
+    assert.ok(/\/chat\/history\/export/.test(src),
+        'export pulls the FULL store, not the summaries list');
+    // classic's merge rules: open chat never overwritten, stale loses
+    assert.ok(/c\.id === _conv\.id/.test(src) && /<= local\[c\.id\]/.test(src),
+        'import merge keeps classic safety rules');
+    // U78: the snapshot rides the assistant row and renders as a chip
+    assert.ok(/row\.params = Object\.assign\(\{\}, _turnParams\)/.test(src),
+        'per-turn sampling snapshot persists on the assistant row');
+    assert.ok(/paramsLabel\(ms\[storeIdx\]\.params\)/.test(src),
+        'chip renders from the stored row (survives reload)');
+    assert.ok(/chat-native-params/.test(src)
+        && /'.chat-native-params \{ visibility: visible/.test(src),
+        'chip CSS ships in the SHADOW sheet, visible without hover');
+});

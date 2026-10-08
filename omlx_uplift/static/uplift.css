@@ -2178,6 +2178,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     opacity: 0.62;
 }
 .acc-task-harness .acc-task-engine { opacity: 1; color: var(--accent); }
+/* U77: Chat History column — picker on top, Download/Import pair under */
+.chat-native-histcol { display: flex; flex-direction: column; gap: 4px;
+    width: 100%; }
+.chat-native-io { display: flex; gap: 4px; }
+.chat-native-io .btn { font-size: 11px; padding: 3px 8px; }
+
 /* U70: Download menus (classic's per-row JSON/CSV/TXT + per-surface sets) */
 .bench-dl { position: relative; display: inline-block; }
 .bench-dl-menu { position: absolute; bottom: 100%; left: 0; z-index: 30;

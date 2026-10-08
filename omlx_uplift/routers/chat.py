@@ -111,6 +111,24 @@ def _clean_message(m: dict) -> dict:
     # no per-field bookkeeping (editing reasoning or content sets it).
     if m.get("edited"):
         out["edited"] = str(m["edited"])[:40]
+    # U78: what the reply was actually sampled with (per-TURN provenance;
+    # the per-chat generation object is the CURRENT knob state, which
+    # rewording mid-chat would falsify for older replies). Sanitized
+    # hard: only known numeric keys + the two thinking fields.
+    raw_p = m.get("params")
+    if role == "assistant" and isinstance(raw_p, dict):
+        clean_p = {}
+        for k in GEN_KEYS:
+            v = raw_p.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                clean_p[k] = v
+        if isinstance(raw_p.get("enable_thinking"), bool):
+            clean_p["enable_thinking"] = raw_p["enable_thinking"]
+        tb = raw_p.get("thinking_budget")
+        if isinstance(tb, int) and not isinstance(tb, bool):
+            clean_p["thinking_budget"] = tb
+        if clean_p:
+            out["params"] = clean_p
     return out
 
 
@@ -149,6 +167,18 @@ async def chat_history_list(is_admin: bool = Depends(require_admin)):
                     "updated": c.get("updated", 0)})
     out.sort(key=lambda x: x["updated"])
     return out
+
+
+@api_router.get("/chat/history/export")
+async def chat_history_export(is_admin: bool = Depends(require_admin)):
+    """U77: whole store as a list of full conversations (classic's
+    Download Chats counterpart; its format is the same array-of-chats).
+    LITERAL path — must stay registered BEFORE /chat/history/{conv_id}
+    or FastAPI shadows it (the bench route-order lesson, golden-tested)."""
+    store = _load()
+    convs = list(store["conversations"].values())
+    convs.sort(key=lambda c: c.get("updated", 0))
+    return convs
 
 
 @api_router.get("/chat/history/{conv_id}")
