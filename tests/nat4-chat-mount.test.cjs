@@ -512,8 +512,8 @@ test('U71: thinking anchors ABOVE each reply, not at the top of the chat', () =>
     assert.ok(/_lastAiVisible|lastAiVisible\(\)/.test(src),
         'store-derived anchor helper in use');
     // classic parity: finished blocks default closed, live one open
-    assert.ok(/thinkingBlockEl\(txt, isLive\)/.test(src),
-        'open state follows live-vs-persisted');
+    assert.ok(/thinkingBlockEl\(txt, isLive,/.test(src),
+        'open state follows live-vs-persisted (store idx rides too, U74)');
 });
 
 test('U72: injected children stack ABOVE the bubble, hover never moves it', () => {
@@ -544,4 +544,24 @@ test('U73: message edit is INLINE (no window.prompt); thinking collapses quiet',
     // look pass: collapsed state must be borderless text, card only [open]
     assert.ok(/\.chat-native-thinking\[open\]/.test(src),
         'card shape follows open state');
+});
+
+test('U74: reply + reasoning edits commit IN PLACE; edited rows ride the wire', () => {
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    // assistant edits never truncate/replay — they condition the next ctx
+    assert.ok(/function commitEditedInPlace/.test(src), 'in-place commit exists');
+    assert.ok(/m\.role === 'assistant'\) commitEditedInPlace/.test(src),
+        'assistant content edits go in-place, user edits still replay');
+    // the Edited mark distinguishes the two honest states
+    assert.ok(/uplift\.chat\.edited_next_reply/.test(src)
+        && /uplift\.chat\.edited'/.test(src), 'both mark labels exist');
+    assert.ok(/function editedClaim/.test(src),
+        'claim rule centralized (last row + edited assistant = next)');
+    // reasoning editor opens from the thinking header, edits the CARD
+    assert.ok(/chat-native-think-edit/.test(src), 'header edit affordance');
+    assert.ok(src.includes("'chat-native-edit reasoning'")
+        || /className = 'chat-native-edit \' \+ \(m\.role/.test(src),
+        'reasoning editor class in use');    // wire: ONLY edited assistant rows carry reasoning back (classic parity)
+    assert.ok(/m\.edited && m\.role === 'assistant' && m\.reasoning_content/
+        .test(src), 'reasoning rides the wire only after a user edit');
 });

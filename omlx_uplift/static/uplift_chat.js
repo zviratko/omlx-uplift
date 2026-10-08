@@ -408,7 +408,15 @@ async function shapeRequest(d) {
     if (sp) msgs.push({ role: 'system', content: sp });
     (_conv ? _conv.messages : []).forEach(function (m) {
         if (m.role === 'system') return;
-        msgs.push({ role: m.role, content: m.content });
+        var wire = { role: m.role, content: m.content };
+        // U74: reasoning normally does NOT travel back (classic parity).
+        // An EDITED row is an explicit experiment: the user changed the
+        // reasoning, so send it — templates that consume history
+        // reasoning (uses_native_reasoning_content families, omlx/api/
+        // utils.py) will see it; others ignore the field.
+        if (m.edited && m.role === 'assistant' && m.reasoning_content)
+            wire.reasoning_content = m.reasoning_content;
+        msgs.push(wire);
     });
     // A trailing user turn in the store is EITHER the submission the
     // component just recorded (re-built below from cur, the authoritative
@@ -766,7 +774,7 @@ function paintThinking() {
     }
 }
 
-function thinkingBlockEl(text, open) {
+function thinkingBlockEl(text, open, storeIdx) {
     if (typeof document === 'undefined' || !document.createElement) return null;
     var d = document.createElement('details');
     d.className = 'chat-native-thinking';
@@ -782,6 +790,20 @@ function thinkingBlockEl(text, open) {
     pre.className = 'chat-native-think-body';
     pre.textContent = text || '';
     d.append(sm, pre);
+    // U74: the header IS the reasoning block's affordance — a quiet Edit
+    // (hover only) opens the inline reasoning editor. Skipped on live
+    // stream blocks (storeIdx null: nothing persisted yet).
+    if (storeIdx !== null && storeIdx !== undefined) {
+        d.dataset.idx = String(storeIdx);
+        var eb = document.createElement('button');
+        eb.type = 'button'; eb.className = 'chat-native-think-edit';
+        eb.textContent = t('uplift.chat.edit_reasoning', 'Edit');
+        eb.addEventListener('click', function (ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            openEditor(storeIdx, 'reasoning');
+        });
+        sm.appendChild(eb);
+    }
     return d;
 }
 
@@ -1055,10 +1077,19 @@ function toolbar() {
 var _msgActions = new WeakMap();   // bubble element -> {idx, role}
 var _overlayTimer = null;
 
-function msgActionsEl(idx, role) {
+function msgActionsEl(idx, role, editedLabel, editedKey) {
     var box = el('div', 'chat-native-msg-actions' +
                          (role === 'user' ? ' user' : ''));
     box.setAttribute('data-idx', String(idx));
+    if (editedLabel) {
+        // U74: 'Edited' / 'Edited — used on next reply' badge — first in
+        // the track so it reads as the row's state, not a button
+        var sp = el('span', 'chat-native-edited', editedLabel);
+        // the KEY rides in, never a substring probe of the translated text
+        sp.dataset.i18n = editedKey || 'uplift.chat.edited';
+        sp.dataset.en = editedLabel;            // U59 repair marker
+        box.appendChild(sp);
+    }
     function act(cls, label, title, fn) {
         var b = el('button', 'chat-native-msg-action ' + cls, label);
         b.type = 'button'; b.title = title;
@@ -1076,9 +1107,17 @@ function msgActionsEl(idx, role) {
     if (role === 'assistant') {
         act('regen', t('chat.regenerate_tooltip', 'Regenerate'),
             t('chat.regenerate_tooltip', 'Regenerate'), msgRegenerate);
+        // U74: editing the REPLY too — experiment with model behaviour by
+        // rewriting what the next turn reads as context
+        act('edit', t('uplift.chat.edit_reply', 'Edit reply'),
+            t('uplift.chat.edit_reply', 'Edit reply'), function (i) {
+                openEditor(i, 'content');
+            });
     } else {
         act('edit', t('chat.edit_tooltip', 'Edit message'),
-            t('chat.edit_tooltip', 'Edit message'), msgEdit);
+            t('chat.edit_tooltip', 'Edit message'), function (i) {
+                openEditor(i, 'content');
+            });
     }
     act('del', t('chat.delete_message', 'Delete'),
         t('chat.delete_message', 'Delete'), msgDelete);
@@ -1180,6 +1219,26 @@ function msgRegenerate(idx) {
     _dc.submitUserMessage({ text: String(prev.content) });
 }
 
+function commitEditedInPlace(idx, field, text) {
+    // U74: assistant edits save ONTO the row (no truncation, no send) —
+    // the point is conditioning the NEXT generation's context. reasoning
+    // edits may empty the block (deliberate: remove it from the card);
+    // content edits keep the non-empty rule.
+    if (_streaming || !_conv) return false;
+    var m = messageAt(idx);
+    if (!m || m.role !== 'assistant') return false;
+    if (field === 'content' && !text.trim()) return false;
+    if (field === 'content') m.content = text;
+    else {
+        if (text.trim()) m.reasoning_content = text;
+        else delete m.reasoning_content;
+    }
+    m.edited = new Date().toISOString();
+    renderHistory();
+    saveConv();
+    return true;
+}
+
 function commitEdit(idx, text) {
     // U45 semantics unchanged (pinned by its test): truncate the store at
     // the edited user row, persist, replay the edited text as a new turn
@@ -1190,63 +1249,129 @@ function commitEdit(idx, text) {
     _dc.submitUserMessage({ text: text });
 }
 
-function msgEdit(idx) {
-    // U73 (user: 'editing should not popup like that, edit inline'): the
-    // prompt() shortcut is gone. The bubble itself swaps to a textarea on
-    // ITS side of the thread — classic's inline edit with Save/Cancel,
-    // Enter saves, Shift+Enter breaks a line, Escape cancels. Semantics
-    // unchanged: truncate at idx, replay the edited message.
+function visibleOrdinal(msgs, idx) {
+    // store idx -> bubble ordinal under renderHistory's content filter
+    var ord = -1;
+    for (var i = 0; i < msgs.length; i++) {
+        if (!msgs[i] || !msgs[i].content) continue;
+        ord++;
+        if (i === idx) return ord;
+    }
+    return -1;
+}
+
+function openEditor(idx, field) {
+    // U73 + U74: the inline editor. field='content' edits the message
+    // bubble (user: truncate-and-replay; assistant: in-place store edit),
+    // field='reasoning' edits the Thinking card's text in place. Textarea
+    // REPLACES what it edits (display:none), Save/Cancel under it,
+    // Enter=Save, Shift+Enter=break, Escape=Cancel.
     if (_streaming || !_conv) return;
     var m = messageAt(idx);
-    if (!m || m.role !== 'user') return;
+    if (!m) return;
+    if (field === 'content' && m.role !== 'user' && m.role !== 'assistant') return;
+    if (field === 'reasoning' && m.role !== 'assistant') return;
     var root = _dc && _dc.shadowRoot;
     if (!root || typeof root.querySelectorAll !== 'function') return;
     var bubbles = root.querySelectorAll('.message-bubble');
-    var ms = _conv.messages, ord = -1;
-    for (var i = 0; i < ms.length; i++) {
-        if (!ms[i] || !ms[i].content) continue;
-        ord++;
-        if (i === idx) break;
-    }
+    var ord = visibleOrdinal(_conv.messages, idx);
     var bub = bubbles[ord];
     var holder = bub && bub.parentElement;
     if (!holder) return;
-    var live = holder.querySelector('.chat-native-edit');
-    if (live) { live.focus(); return; }        // one editor per message
-    var ta = document.createElement('textarea');
-    ta.className = 'chat-native-edit';
+    var ta = holder.querySelector('.chat-native-edit');
+    if (ta) { ta.focus(); return; }           // one editor per message
+    if (field === 'reasoning') {
+        // edit the THINKING card, not the bubble
+        var card = holder.querySelector(':scope > .chat-native-thinking');
+        if (!card) return;
+        var body = card.querySelector('.chat-native-think-body');
+        ta = document.createElement('textarea');
+        ta.className = 'chat-native-edit reasoning';
+        ta.value = String((m.reasoning_content || (body && body.textContent) || ''));
+        ta.rows = Math.min(12, Math.max(3, ta.value.split('\n').length));
+        var bar = document.createElement('div');
+        bar.className = 'chat-native-edit-actions';
+        var saveB = mkBtn('save', t('chat.system_prompt.save', 'Save'));
+        var cancelB = mkBtn('', t('chat.edit_cancel', 'Cancel'));
+        bar.append(saveB, cancelB);
+        function doneR() { ta.remove(); bar.remove(); card.style.display = ''; }
+        saveB.addEventListener('click', function () {
+            var nv = ta.value;
+            doneR();
+            commitEditedInPlace(idx, 'reasoning', nv);
+        });
+        cancelB.addEventListener('click', doneR);
+        wireKeys(ta, saveB, doneR);
+        card.style.display = 'none';          // the editor replaces the card
+        holder.insertBefore(bar, bub);
+        holder.insertBefore(ta, bar);
+        focusEnd(ta);
+        return;
+    }
+    ta = document.createElement('textarea');
+    ta.className = 'chat-native-edit' + (m.role === 'assistant' ? ' ai' : '');
     ta.value = String(m.content);
     ta.rows = Math.min(10, Math.max(2, ta.value.split('\n').length));
-    var bar = document.createElement('div');
-    bar.className = 'chat-native-edit-actions';
-    var saveB = document.createElement('button');
-    saveB.type = 'button'; saveB.className = 'save';
-    saveB.textContent = t('chat.system_prompt.save', 'Save');
-    var cancelB = document.createElement('button');
-    cancelB.type = 'button';
-    cancelB.textContent = t('chat.edit_cancel', 'Cancel');
-    function done() {
-        ta.remove(); bar.remove();
-        bub.style.display = '';
-    }
-    saveB.addEventListener('click', function () {
+    var bar2 = document.createElement('div');
+    bar2.className = 'chat-native-edit-actions';
+    var saveB2 = mkBtn('save', t('chat.system_prompt.save', 'Save'));
+    var cancelB2 = mkBtn('', t('chat.edit_cancel', 'Cancel'));
+    function doneC() { ta.remove(); bar2.remove(); bub.style.display = ''; }
+    saveB2.addEventListener('click', function () {
         var nv = ta.value;
-        if (!nv.trim()) return;               // empty edit = not a send
-        done();
-        commitEdit(idx, nv);
+        if (!nv.trim()) return;               // empty content edit = no-op
+        doneC();
+        if (m.role === 'assistant') commitEditedInPlace(idx, 'content', nv);
+        else commitEdit(idx, nv);             // U45 truncate-and-replay
     });
-    cancelB.addEventListener('click', done);
-    bar.append(saveB, cancelB);
+    cancelB2.addEventListener('click', doneC);
+    bar2.append(saveB2, cancelB2);
+    wireKeys(ta, saveB2, doneC);
+    bub.style.display = 'none';               // the editor REPLACES the bubble
+    holder.insertBefore(bar2, holder.querySelector('.chat-native-msg-actions'));
+    holder.insertBefore(ta, bar2);
+    focusEnd(ta);
+}
+
+function msgEdit(idx) { openEditor(idx, 'content'); }
+
+function tf2(key, fb) {
+    var c = C();
+    if (!c || !c.t) return fb;
+    var v = c.t(key);
+    return (v && v !== key) ? v : fb;
+}
+
+function mkBtn(cls, label) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    if (cls) b.className = cls;
+    b.textContent = label;
+    return b;
+}
+
+function wireKeys(ta, saveB, done) {
     ta.addEventListener('keydown', function (ev) {
         ev.stopPropagation();                 // component keys must not fire
         if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); saveB.click(); }
         else if (ev.key === 'Escape') { ev.preventDefault(); done(); }
     });
-    bub.style.display = 'none';               // the editor REPLACES the bubble
-    holder.insertBefore(bar, holder.querySelector('.chat-native-msg-actions'));
-    holder.insertBefore(ta, bar);
+}
+
+function focusEnd(ta) {
     ta.focus();
-    ta.setSelectionRange(ta.value.length, ta.value.length);
+    try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {}
+}
+
+// U74: what does the Edited mark claim? 'next' = this row conditions the
+// NEXT reply: it is the last message and an assistant row was edited.
+function editedClaim() {
+    var ms = (_conv && _conv.messages) || [];
+    for (var i = ms.length - 1; i >= 0; i--) {
+        if (!ms[i] || !ms[i].content) continue;
+        return ms[i].role === 'assistant' && ms[i].edited ? 'next' : '';
+    }
+    return '';
 }
 
 function msgDelete(idx) {
@@ -1271,6 +1396,10 @@ function attachMessageActions(dc) {
         if (ms[i] && ms[i].content) visible.push(i);
     }
     var liveOrd = lastAiVisible();   // bubble ordinal the live stream owns
+    // U74: mark context — which row the 'used on next reply' claim belongs
+    // to, and the claim for THIS conversation state
+    var claim = editedClaim();
+    var lastVisibleIdx = visible.length ? visible[visible.length - 1] : -1;
     if (!_streaming && typeof root.querySelectorAll === 'function') {
         // finalize wipe: persisted text (if any) re-creates blocks below —
         // a live block that outlived its stream is stale by definition
@@ -1298,7 +1427,10 @@ function attachMessageActions(dc) {
         }
         if (txt) {
             if (!thinkEl) {
-                thinkEl = thinkingBlockEl(txt, isLive);
+                // U74: store-backed blocks get their idx -> the header's
+                // Edit affordance; live blocks have no row to edit yet
+                thinkEl = thinkingBlockEl(txt, isLive,
+                    isLive ? null : storeIdx);
                 if (thinkEl) holder.insertBefore(thinkEl, b);
             } else {
                 var tb = thinkEl.querySelector('.chat-native-think-body');
@@ -1315,15 +1447,37 @@ function attachMessageActions(dc) {
         var existing = holder.querySelector(':scope > .chat-native-msg-actions');
         if (storeIdx === undefined) {     // component-local row (no store twin)
             if (existing) existing.remove();
+            var tl0 = holder.querySelector(':scope > .chat-native-thinking');
+            if (tl0 && !tl0.dataset.idx) {   // stale store-less card
+                var eb0 = tl0.querySelector('.chat-native-think-edit');
+                if (eb0) eb0.remove();
+            }
             continue;
         }
         var role = (ms[storeIdx] || {}).role;
+        // U74: Edited / 'Edited — used on next reply' mark. Claim rule:
+        // the LAST visible row conditions the next reply, and the claim
+        // holds only while that row is an edited ASSISTANT turn (the next
+        // user message will read it as context). Everything older is just
+        // 'Edited'. The badge lives inside the track (msgActionsEl), so a
+        // changed mark rebuilds the row — no orphaned mutations.
+        var want = '', wantKey = '';
+        if (ms[storeIdx].edited) {
+            if (claim === 'next' && storeIdx === lastVisibleIdx) {
+                wantKey = 'uplift.chat.edited_next_reply';
+                want = tf2(wantKey, 'Edited \u2014 used on next reply');
+            } else {
+                wantKey = 'uplift.chat.edited';
+                want = tf2(wantKey, 'Edited');
+            }
+        }
         var prev = _msgActions.get(b);
-        if (existing && prev && prev.idx === storeIdx && prev.role === role)
+        if (existing && prev && prev.idx === storeIdx && prev.role === role
+            && prev.edited === want)
             continue;                      // identical — no DOM churn
         if (existing) existing.remove();
-        holder.appendChild(msgActionsEl(storeIdx, role));
-        _msgActions.set(b, { idx: storeIdx, role: role });
+        holder.appendChild(msgActionsEl(storeIdx, role, want, wantKey));
+        _msgActions.set(b, { idx: storeIdx, role: role, edited: want });
     }
 }
 
@@ -1489,6 +1643,20 @@ function applyShadowTheme(dc) {
         '  color: var(--dim, #8b98ab); background: transparent;',
         '  font-weight: 500; font-size: 12px; }',
         '.chat-native-thinking summary::-webkit-details-marker { display: none; }',
+        // U74: quiet Edit affordance inside the thinking header (hover)
+        '.chat-native-thinking summary .chat-native-think-edit {',
+        '  display: none; background: none; border: 0; padding: 0 4px;',
+        '  font: inherit; font-size: 11px; color: var(--accent, #4c8dff);',
+        '  cursor: pointer; border-radius: 4px; text-transform: none;',
+        '  letter-spacing: 0; }',
+        '.chat-native-thinking:hover summary .chat-native-think-edit,',
+        '.chat-native-thinking summary:focus-within .chat-native-think-edit {',
+        '  display: inline; }',
+        // U74: Edited badge in the meta track (space only when set)
+        '.chat-native-edited { font-size: 10px; color: var(--dim, #8b98ab);',
+        '  border: 1px solid var(--edge); border-radius: 999px;',
+        '  padding: 0 7px; line-height: 16px; margin-right: 4px;',
+        '  white-space: nowrap; }',
         '.chat-native-thinking summary:hover { color: var(--ink, #e6edf3);',
         '  background: color-mix(in srgb, var(--dim) 13%, transparent); }',
         '.chat-native-thinking summary::before { content: "▸"; font-size: 9px;',
@@ -1503,6 +1671,10 @@ function applyShadowTheme(dc) {
         '  max-height: 240px; overflow: auto; }',
         // U73: inline message editor — replaces the prompt() dialog. Styled as
         // the user bubble it edits (field ground, own side of the thread).
+        // U74: assistant replies edit on THEIR side; reasoning editors sit
+        // under the (hidden) thinking card, left-aligned like the card
+        '.chat-native-edit.ai, .chat-native-edit.reasoning {',
+        '  align-self: flex-start; }',
         '.chat-native-edit { align-self: flex-end; width: 62%;',
         '  box-sizing: border-box; background: var(--field, #1b2330);',
         '  color: var(--ink, #e6edf3); border: 1px solid var(--accent, #4c8dff);',

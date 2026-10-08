@@ -107,6 +107,10 @@ def _clean_message(m: dict) -> dict:
         out["reasoning_content"] = rc[:200_000]
     if m.get("created_at"):
         out["created_at"] = str(m["created_at"])[:40]
+    # U74: an Edited mark survives reloads. Timestamp only — honest,
+    # no per-field bookkeeping (editing reasoning or content sets it).
+    if m.get("edited"):
+        out["edited"] = str(m["edited"])[:40]
     return out
 
 
