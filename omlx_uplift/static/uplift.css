@@ -2115,6 +2115,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 
 /* NAT-4 native chat (3/6): toolbar over the vendored deep-chat host */
 .chat-native-wrap { display: flex; flex-direction: column; gap: 8px; }
+/* U44: the bundle's :host default is display:table-cell + width:320px +
+   a light border — an unset host rendered as a narrow strip on the left.
+   Inline host styles beat :host rules; deep-chat owns its own padding,
+   so no card chrome is duplicated here (embed-frame is the reference). */
+#chat-native-dc deep-chat { display: block; width: 100%; border: 0;
+    min-height: 480px; background: var(--card, #141a24); }
 .chat-native-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chat-native-bar select, .chat-native-bar input[type=text] {
   font-size: 11px; background: var(--field); border: 1px solid var(--edge);

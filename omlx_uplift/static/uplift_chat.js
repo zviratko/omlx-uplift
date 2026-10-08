@@ -1138,7 +1138,11 @@ function mount() {
     }).then(function () {
         var dc = document.createElement('deep-chat');
         _dc = dc;
-        dc.style.height = '62vh';
+        // U44: height was a 62vh guess; the embed iframe this replaces used
+        // calc(100vh - 210px) (uplift.css .embed-frame). Same reference
+        // minus OUR toolbar row (~36px) so the chat fills the card at any
+        // viewport. Width comes from CSS (deep-chat :host is 320px).
+        dc.style.height = 'calc(100vh - 246px)';
         // 5/6: unified connect.handler (native loop). connect MUST be
         // assigned before the element is appended (spike: handler never
         // fires otherwise); url+stream kept as the component's declared
