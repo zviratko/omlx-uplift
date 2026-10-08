@@ -109,6 +109,12 @@ def test_stop_kills_whole_group(tmp_store, monkeypatch):
     line = proc.stdout.readline().strip()
     grandchild = int(line)
     bench_env.stop(proc, grace_s=2.0)
+    # stop()'s early-return paths (already-exited / pgid gone) do not
+    # reap; give the parent a bounded window to observe the death — the
+    # contract is 'dead within the grace', not 'reaped atomically'.
+    _dl = __import__("time").monotonic() + 3.0
+    while proc.poll() is None and __import__("time").monotonic() < _dl:
+        __import__("time").sleep(0.05)
     assert proc.poll() is not None and proc.returncode is not None
     # grandchild shared the group -> killpg took it too; os.kill on a dead
     # (and launchd-reaped) pid must raise

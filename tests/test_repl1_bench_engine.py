@@ -262,8 +262,25 @@ def test_routes_require_admin_and_start_without_pool():
     app = FastAPI()
     app.include_router(up.api_router, prefix="/uplift/api")
     client = TestClient(app)
-    r = client.post("/uplift/api/bench/start", json={})
-    assert r.status_code == 401, r.text  # require_admin not overridden
+
+    # admin gate pinned by Depends GRAPH, not by an HTTP code: on a
+    # machine without omlx (CI) base.require_admin is the standalone-
+    # viewer placeholder and FastAPI answers 422/500, not 401 — the
+    # 401 belongs to omlx.auth and is dev-box-only behavior. The graph
+    # assertion holds everywhere: the route WILL consult the gate.
+    def _dep_names(route):
+        out, stack = set(), [route.dependant]
+        while stack:
+            d = stack.pop()
+            fn = getattr(d, "call", None)
+            if fn is not None:
+                out.add(getattr(fn, "__name__", ""))
+            stack.extend(d.dependencies)
+        return out
+
+    for route in app.routes:
+        if getattr(route, "path", "").startswith("/uplift/api/bench/"):
+            assert "require_admin" in _dep_names(route), route.path
 
     app.dependency_overrides[up_base.require_admin] = lambda: True
     import omlx_uplift.bench_engine as be

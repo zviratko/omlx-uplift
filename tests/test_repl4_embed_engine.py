@@ -172,6 +172,7 @@ class _FakeProc:
 async def test_run_one_success_row(monkeypatch, tmp_path):
     _fake_bench_env(monkeypatch)
     monkeypatch.setattr(EE, "env_python", lambda: "/fake/py")
+    monkeypatch.setattr(EE, "_api_key", lambda: "TESTKEY")
     from omlx_uplift import bench_env as be
     seen = {}
 
@@ -211,6 +212,7 @@ async def test_run_one_success_row(monkeypatch, tmp_path):
 async def test_run_one_child_failure_raises(monkeypatch):
     _fake_bench_env(monkeypatch)
     monkeypatch.setattr(EE, "env_python", lambda: "/fake/py")
+    monkeypatch.setattr(EE, "_api_key", lambda: "TESTKEY")
     from omlx_uplift import bench_env as be
     monkeypatch.setattr(be, "spawn", lambda args, **kw: _FakeProc([], rc=3))
     run = EE.EmbedRun("mteb-f", "M", "embed", ["STS12"], 0)
@@ -224,6 +226,7 @@ async def test_run_one_cancellation_short_circuits(monkeypatch):
     # somehow emitted one
     _fake_bench_env(monkeypatch)
     monkeypatch.setattr(EE, "env_python", lambda: "/fake/py")
+    monkeypatch.setattr(EE, "_api_key", lambda: "TESTKEY")
     from omlx_uplift import bench_env as be
     monkeypatch.setattr(be, "spawn", lambda args, **kw: _FakeProc([
         'UPLIFT_RESULT {"task": "STS12", "kind": "embed", "model": "M",'
