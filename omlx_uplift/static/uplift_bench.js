@@ -104,10 +104,10 @@ function gid(id) { return document.getElementById(id); }
 // squeezed beside the batch checkboxes — recorded deviation from classic).
 // Open/closed is a layout preference -> localStorage (board doctrine).
 var ADV_LS = 'omlx-uplift-bench-advanced';
-function advancedSection(children) {
+function advancedSection(children, labelKey, labelFb) {
     var adv = el('details', 'bench-advanced');
-    var sum = el('summary', null,
-        t('bench.config.advanced_options', 'Advanced options'));
+    var sum = el('summary', null, t(labelKey || 'bench.config.advanced_options',
+        labelFb || 'Advanced options'));
     var chev = el('span', 'bench-adv-chev', '▾');
     sum.appendChild(chev);
     adv.appendChild(sum);
@@ -353,6 +353,132 @@ function copyTextFallback(s) {
     try { document.execCommand('copy'); } catch (e) {}
     document.body.removeChild(ta);
 }
+// U49: generic padded table text for the panels without a classic export
+// (MTEB/Decision) — same look as the classic throughput block: header line
+// + one row per result, columns separated by two spaces, right-aligned
+// numbers. Cells arrive pre-formatted (UI shows exactly what copies).
+// U49: Field/Value pairs for the context card's Copy (labels match the
+// rendered rows; the row carries the model_id when the engine stored it)
+function ctxResultPairs(models, r) {
+    var mid = r.model_id || '';
+    var pairs = [];
+    if (mid) pairs.push(['Model', mid]);
+    pairs.push(['Target', (r.target_tokens || 0).toLocaleString() + ' tokens']);
+    pairs.push(['Admission boundary', (r.measured_tokens || 0).toLocaleString() + ' tokens']);
+    pairs.push(['Verified prefill', (r.verified_tokens || 0).toLocaleString() + ' tokens']);
+    pairs.push(['Applied to Context Window', (r.applied_tokens || 0).toLocaleString() + ' tokens']);
+    pairs.push(['Capped by', r.capped_by || '\u2014']);
+    pairs.push(['Prefill speed', Math.round(r.prefill_tps || 0).toLocaleString() + ' tok/s']);
+    pairs.push(['Duration', (r.duration_s || 0) + ' s']);
+    return pairs;
+}
+function buildTableText(headerLines, cols, rows) {
+    var lines = (headerLines || []).slice();
+    if (!rows.length) return lines.join('\n');
+    var widths = cols.map(function (c) { return c.label.length; });
+    var cells = rows.map(function (r, ri) {
+        return cols.map(function (c, ci) {
+            var s = c.get(r, ri);
+            widths[ci] = Math.max(widths[ci], s.length);
+            return s;
+        });
+    });
+    lines.push(cols.map(function (c, ci) {
+        return c.numeric ? c.label.padStart(widths[ci]) : c.label.padEnd(widths[ci]);
+    }).join('  '));
+    cells.forEach(function (row) {
+        lines.push(row.map(function (s, ci) {
+            return cols[ci].numeric ? s.padStart(widths[ci]) : s.padEnd(widths[ci]);
+        }).join('  ').trimEnd());
+    });
+    return lines.join('\n');
+}
+// U49: classic accBuildText mirror (dashboard.js:5358) — comparison matrix
+// + per-model detail. Native rows carry the same accumulated-result shape.
+function buildAccuracyText(rows, groups) {
+    if (!rows.length) return '';
+    var pad = function (s, w) { return String(s).padStart(w); };
+    var rpad = function (s, w) { return String(s).padEnd(w); };
+    var models = []; rows.forEach(function (r) {
+        if (models.indexOf(r.model_id) < 0) models.push(r.model_id); });
+    var benches = []; rows.forEach(function (r) {
+        if (benches.indexOf(r.benchmark) < 0) benches.push(r.benchmark); });
+    var lookup = {};
+    rows.forEach(function (r) {
+        (lookup[r.model_id] = lookup[r.model_id] || {})[r.benchmark] = r; });
+    var fullSizes = {};
+    (groups || []).forEach(function (g) {
+        (g.tasks || []).forEach(function (tk) { fullSizes[tk.key] = tk.full_size; }); });
+    var modelWidth = Math.max.apply(null, [12].concat(models.map(function (m) { return m.length + 2; })));
+    var modeW = 8, sampledW = 14;
+    var benchWidth = Math.max.apply(null, [14].concat(benches.map(function (b) { return b.length + 2; })));
+    var lines = [];
+    lines.push(t('acc_bench.results.comparison_title', 'Intelligence Benchmark Comparison'));
+    lines.push('');
+    var header = rpad('', benchWidth)
+        + rpad(t('acc_bench.results.text_export.mode', 'Mode'), modeW)
+        + rpad(t('acc_bench.results.text_export.sampled', 'Sampled'), sampledW);
+    models.forEach(function (m) { header += pad(m, modelWidth); });
+    lines.push(header);
+    lines.push('-'.repeat(benchWidth + modeW + sampledW + models.length * modelWidth));
+    benches.forEach(function (b) {
+        var sample = null;
+        for (var mi = 0; mi < models.length && !sample; mi++) {
+            sample = (lookup[models[mi]] || {})[b] || null; }
+        var total = (sample && sample.total) || 0;
+        var full = fullSizes[b] || 0;
+        var isFull = total >= full;
+        var mode = isFull ? t('acc_bench.results.text_export.full', 'Full')
+                          : t('acc_bench.results.text_export.sample', 'Sample');
+        var sampledStr = isFull ? String(full) : (total + '/' + full);
+        var row = rpad(b.toUpperCase(), benchWidth) + rpad(mode, modeW) + rpad(sampledStr, sampledW);
+        models.forEach(function (m) {
+            var r = (lookup[m] || {})[b];
+            row += pad(r ? (r.accuracy * 100).toFixed(1) + '%' : '-', modelWidth); });
+        lines.push(row);
+    });
+    lines.push('');
+    lines.push(t('acc_bench.results.text_export.detail', '--- Detail ---'));
+    models.forEach(function (m) {
+        lines.push('');
+        lines.push(t('acc_bench.results.text_export.model', 'Model: {model}')
+            .replace('{model}', function () { return m; }));  // fn replacer:
+            // a model id with $ patterns must not act as a replace pattern
+            // (classic dashboard.js uses the same function form)
+        lines.push(rpad(t('acc_bench.results.text_export.benchmark', 'Benchmark'), 16)
+            + pad(t('acc_bench.results.text_export.accuracy', 'Accuracy'), 10)
+            + pad(t('acc_bench.results.text_export.correct', 'Correct'), 10)
+            + pad(t('acc_bench.results.text_export.total', 'Total'), 8)
+            + pad('Time(s)', 10)
+            + pad(t('acc_bench.results.text_export.think', 'Think'), 8));
+        lines.push('-'.repeat(62));
+        rows.filter(function (r) { return r.model_id === m; }).forEach(function (r) {
+            lines.push(
+                rpad(String(r.benchmark).toUpperCase(), 16)
+                + pad((r.accuracy * 100).toFixed(1) + '%', 10)
+                + pad(r.correct, 10) + pad(r.total, 8) + pad(r.time_s, 10)
+                + pad(r.thinking_used
+                    ? t('acc_bench.results.text_export.yes', 'Yes')
+                    : t('acc_bench.results.text_export.no', 'No'), 8));
+            if (r.external) {
+                lines.push(t('acc_bench.results.text_export.external_detail',
+                    '  Valid responses: {valid}/{total} ({rate}%) · Valid-answer accuracy: {accuracy}% · Empty: {empty} · Truncated: {truncated} · Timeout: {timeout} · HTTP: {http} · Connection: {connection} · Invalid: {invalid} · Parse: {parse}')
+                    .replace('{valid}', r.valid_response_count)
+                    .replace('{total}', r.total)
+                    .replace('{rate}', (r.valid_response_rate * 100).toFixed(1))
+                    .replace('{accuracy}', (r.valid_answer_accuracy * 100).toFixed(1))
+                    .replace('{empty}', r.empty_content_count)
+                    .replace('{truncated}', r.truncated_count)
+                    .replace('{timeout}', r.timeout_count)
+                    .replace('{http}', r.http_error_count)
+                    .replace('{connection}', r.connection_error_count)
+                    .replace('{invalid}', r.invalid_response_count)
+                    .replace('{parse}', r.parse_error_count));
+            }
+        });
+    });
+    return lines.join('\n');
+}
 function copyPlainText(text, okMsg) {
     var d = dom();
     // NOTE: domkit.toast is (text, ms, cls) — the (msg,'error') two-arg
@@ -366,6 +492,22 @@ function copyPlainText(text, okMsg) {
     } else {
         copyTextFallback(text); onSuccess();
     }
+}
+
+// U49: one Copy button factory for all result cards (classic's export
+// blocks all say the same 'Copy' with the section label as hover text)
+function resultsHead(buildText, titleKey, titleFb) {
+    var head = el('div', 'bench-results-head');
+    var btn = el('button', 'btn', t('bench.results.text_export.copy', 'Copy'));
+    btn.type = 'button';
+    btn.title = t(titleKey || 'bench.results.text_export.section_label',
+                  titleFb || 'Benchmark Results (Text — Copy & Paste)');
+    btn.addEventListener('click', function () {
+        copyPlainText(buildText(),
+            t('bench.results.text_export.copied', 'Copied!'));
+    });
+    head.appendChild(btn);
+    return head;
 }
 
 var TP = {
@@ -686,17 +828,10 @@ var TP = {
         // U47: classic has a Copy of the whole result set as plain text
         // ("Benchmark Results (Text — Copy & Paste)"); mirror it above the
         // table with the classic format (buildThroughputText).
-        var head = el('div', 'bench-results-head');
-        var copyBtn = el('button', 'btn', t('bench.results.text_export.copy', 'Copy'));
-        copyBtn.type = 'button';
-        copyBtn.title = t('bench.results.text_export.section_label',
-                          'Benchmark Results (Text — Copy & Paste)');
-        copyBtn.addEventListener('click', function () {
-            copyPlainText(buildThroughputText(self.state.ctx, self.state.results),
-                          t('bench.results.text_export.copied', 'Copied!'));
-        });
-        head.appendChild(copyBtn);
-        wrap.replaceChildren(head, tbl);
+        wrap.replaceChildren(
+            resultsHead(function () {
+                return buildThroughputText(self.state.ctx, self.state.results);
+            }), tbl);
     },
 
     fmt: function (key, v) {
@@ -774,6 +909,9 @@ var CTX = {
             'The benchmark searches up to this size. Larger targets take longer to verify.')));
         f.appendChild(el('p', 'native-stub-note', t('ctx_bench.warning.autoapply',
             'The measured value is applied to the model automatically.')));
+        // U49: deliberately NO Advanced section here — the card says do
+        // not invent an empty one, and there is nothing extra to fold:
+        // model/target/custom-input are first-order and already labeled.
 
         var actions = el('div', 'bench-actions');
         var runBtn = el('button', 'btn btn-primary', t('ctx_bench.start', 'Start Benchmark'));
@@ -965,6 +1103,7 @@ var CTX = {
         var wrap = gid('bench-ctx-results');
         if (!wrap) return;
         var card = el('div', 'bench-result card');
+        this.state.result = r;   // U49: Copy survives reattach/re-render
         card.appendChild(el('h2', null, t('ctx_bench.result.section_label', 'Result')));
         var rows = [
             [t('ctx_bench.result.measured', 'Admission boundary'), (r.measured_tokens || 0).toLocaleString()],
@@ -986,7 +1125,19 @@ var CTX = {
         }
         card.appendChild(el('p', 'native-stub-note', t('ctx_bench.result.snapshot_note',
             'The result reflects free memory at benchmark time; rerun after big config changes.')));
-        wrap.replaceChildren(card);
+        // U49: classic exports no context block; keep the shared Copy
+        // affordance, export exactly what the card shows (model row added
+        // so pasted output is attributable)
+        var selfC = this;
+        wrap.replaceChildren(
+            resultsHead(function () {
+                return buildTableText(
+                    [t('ctx_bench.heading', 'Context Benchmark'), ''],
+                    [{ label: 'Field', get: function (kv) { return kv[0]; } },
+                     { label: 'Value', get: function (kv) { return kv[1]; } }],
+                    ctxResultPairs(selfC.state.models, r));
+            }, 'ctx_bench.result.section_label', 'Result'),
+            card);
     },
 
     finish: function () {
@@ -1033,18 +1184,17 @@ var ANE = {
         row.appendChild(labeled(t('bench.config.model', 'Model'), modelSel));
         f.appendChild(row);
 
-        var ov = el('details', 'bench-advanced');
-        ov.appendChild(el('summary', null, t('modal.model_settings.qwen_ane_tune_overrides', 'Search space')));
-        var body = el('div', 'bench-adv-body');
-        body.append(
+        // U49: same prominent Advanced card as the other panels; only the
+        // label differs — classic names this block 'Search space'
+        var body = [
             check('bench-ane-cpu', t('modal.model_settings.qwen_ane_tune_allow_cpu', 'Allow CPU candidates'), true),
             check('bench-ane-gate', t('modal.model_settings.qwen_ane_tune_allow_cpu_gate', 'CPU gate projections'), true),
             check('bench-ane-down', t('modal.model_settings.qwen_ane_tune_allow_cpu_down', 'CPU down projections'), true),
             check('bench-ane-gdn', t('modal.model_settings.qwen_ane_tune_allow_ane_gdn', 'ANE GDN candidates'), true),
             check('bench-ane-cpugdn', t('modal.model_settings.qwen_ane_tune_allow_cpu_gdn', 'CPU GDN candidates'), true),
-            check('bench-ane-shared', t('modal.model_settings.qwen_ane_tune_allow_cpu_scheduler', 'CPU shared resource'), true));
-        ov.appendChild(body);
-        f.appendChild(ov);
+            check('bench-ane-shared', t('modal.model_settings.qwen_ane_tune_allow_cpu_scheduler', 'CPU shared resource'), true)];
+        f.appendChild(advancedSection(body,
+            'modal.model_settings.qwen_ane_tune_overrides', 'Search space'));
 
         var actions = el('div', 'bench-actions');
         var runBtn = el('button', 'btn btn-primary', t('modal.model_settings.qwen_ane_tune_start', 'Start Tuning'));
@@ -1200,7 +1350,25 @@ var ANE = {
             ab.addEventListener('click', function () { ANE.apply(); });
             card.appendChild(ab);
         }
-        wrap.replaceChildren(card);
+        // U49: classic exports no ANE block; shared Copy over the table
+        // (model named in the header so pasted output is attributable)
+        var mSel = gid('bench-ane-model');
+        var aneHeadKey = 'uplift.bench.ane_candidates';
+        wrap.replaceChildren(
+            resultsHead(function () {
+                return buildTableText(
+                    ['ANE Tuning \u2014 ' + ((mSel && mSel.value) || ''), ''],
+                    [{ label: 'split', get: function (r) { return String(r.split || r.name || ''); } },
+                     { label: 'state', get: function (r) { return String(r.state || ''); } },
+                     { label: 'processing_tps', numeric: true, get: function (r) {
+                         return r.processing_tps == null ? '\u2014'
+                             : Math.round(r.processing_tps).toLocaleString(); } },
+                     { label: 'latency_ms', numeric: true, get: function (r) {
+                         return r.latency_ms == null ? '\u2014'
+                             : Math.round(r.latency_ms).toLocaleString(); } }],
+                    snap.results || []);
+            }, aneHeadKey, 'Candidates'),
+            card);
     },
 
     finish: function () {
@@ -1258,48 +1426,26 @@ var ACC = {
         row1.appendChild(labeled(t('acc_bench.config.model', 'Model'), modelSel));
         f.appendChild(row1);
 
+// U49: task grid gets its classic section caption (it floated
+        // unlabeled before) and the scoring-engine choice moves OUT of
+        // Advanced — first-order per-run decision, classic shows it openly
+        f.appendChild(el('div', 'bench-label acc-grid-label',
+            t('acc_bench.config.benchmarks', 'Benchmarks')));
         var grid = el('div', 'acc-taskgrid'); grid.id = 'bench-acc-tasks';
-        f.appendChild(grid);
-
-        var adv = el('details', 'bench-advanced');
-        adv.appendChild(el('summary', null, t('acc_bench.config.advanced_options', 'Advanced options')));
-        var body = el('div', 'bench-adv-body');
-        var bsSel = el('select'); bsSel.id = 'bench-acc-batch';
-        [1, 2, 4, 8, 16, 32].forEach(function (n) {
-            var o = el('option', null, String(n)); o.value = String(n); bsSel.appendChild(o);
+        var engineSeg = el('div', 'bench-chips'); engineSeg.id = 'bench-acc-engine';
+        [['classic', t('uplift.bench.engine_classic', 'Classic')],
+         ['harness', t('uplift.bench.engine_harness', 'Harness')]].forEach(function (e, i) {
+            var lb = el('label', 'chip');
+            var rb = el('input'); rb.type = 'radio'; rb.name = 'bench-acc-engine';
+            rb.value = e[0]; rb.checked = i === 0;
+            lb.append(rb, document.createTextNode(' ' + e[1]));
+            engineSeg.appendChild(lb);
         });
-        var sampSel = el('select'); sampSel.id = 'bench-acc-sampling';
-        var o1 = el('option', null, t('acc_bench.config.sampling_deterministic', 'Deterministic (greedy)'));
-        o1.value = 'deterministic'; sampSel.appendChild(o1);
-        var o2 = el('option', null, t('acc_bench.config.sampling_model', 'Model settings (temperature)'));
-        o2.value = 'model_settings'; sampSel.appendChild(o2);
-        body.append(
-            labeled(t('acc_bench.config.batch_size', 'Batch size'), bsSel),
-            labeled(t('acc_bench.config.sampling', 'Sampling'), sampSel),
-            el('p', 'native-stub-note', t('acc_bench.config.batch_size_hint', 'Larger batches are faster but use more memory.')),
-            check('bench-acc-think', t('acc_bench.config.thinking', 'Enable thinking mode'), false),
-            el('p', 'native-stub-note', t('acc_bench.config.thinking_hint', 'Applies to models whose template supports thinking toggles.')),
-            check('bench-acc-ext', t('bench.config.external', 'Use external OpenAI API endpoint'), false),
-            el('label', 'bench-field', el('span', 'bench-label', t('uplift.bench.engine', 'Scoring engine'))),
-            (function () {
-                var seg = el('div', 'bench-chips'); seg.id = 'bench-acc-engine';
-                [['classic', t('uplift.bench.engine_classic', 'Classic')],
-                 ['harness', t('uplift.bench.engine_harness', 'Harness')]].forEach(function (e, i) {
-                    var lb = el('label', 'chip');
-                    var rb = el('input'); rb.type = 'radio'; rb.name = 'bench-acc-engine';
-                    rb.value = e[0]; rb.checked = i === 0;
-                    lb.append(rb, document.createTextNode(' ' + e[1]));
-                    seg.appendChild(lb);
-                });
-                return seg;
-            })(),
+        var engRow = el('div', 'bench-row');
+        engRow.append(labeled(t('uplift.bench.engine', 'Scoring engine'), engineSeg),
             el('p', 'native-stub-note', t('uplift.bench.engine_hint',
-                'Harness = lm-evaluation-harness subprocess (mapped tasks only; a run with unmapped tasks is refused). Classic is the built-in engine.')),
-            check('bench-acc-upload', t('uplift.bench.upload_results', 'Upload results to community leaderboard'), false),
-            el('p', 'native-stub-note', t('uplift.bench.upload_hint',
-                'Off by default: a native run never posts to omlx.ai unless you check this.')));
-        adv.appendChild(body);
-        f.appendChild(adv);
+                'Harness = lm-evaluation-harness subprocess (mapped tasks only; a run with unmapped tasks is refused). Classic is the built-in engine.')));
+        f.append(grid, engRow);
 
         var extRow = el('div', 'bench-row bench-external');
         extRow.id = 'bench-acc-ext-row'; extRow.hidden = true;
@@ -1313,7 +1459,31 @@ var ACC = {
                       labeled(t('bench.config.external_model', 'Model'), emod),
                       labeled(t('acc_bench.config.external_max_tokens', 'Max tokens'), emax),
                       labeled(t('acc_bench.config.external_extra_body', 'Extra body (JSON)'), ebody));
-        f.appendChild(extRow);
+
+        // U48/U49: prominent full-width Advanced section; the external
+        // inputs live INSIDE with their toggle (form-level before)
+        var bsSel = el('select'); bsSel.id = 'bench-acc-batch';
+        [1, 2, 4, 8, 16, 32].forEach(function (n) {
+            var o = el('option', null, String(n)); o.value = String(n); bsSel.appendChild(o);
+        });
+        var sampSel = el('select'); sampSel.id = 'bench-acc-sampling';
+        var o1 = el('option', null, t('acc_bench.config.sampling_deterministic', 'Deterministic (greedy)'));
+        o1.value = 'deterministic'; sampSel.appendChild(o1);
+        var o2 = el('option', null, t('acc_bench.config.sampling_model', 'Model settings (temperature)'));
+        o2.value = 'model_settings'; sampSel.appendChild(o2);
+        var adv = advancedSection([
+            labeled(t('acc_bench.config.batch_size', 'Batch size'), bsSel),
+            labeled(t('acc_bench.config.sampling', 'Sampling'), sampSel),
+            el('p', 'native-stub-note', t('acc_bench.config.batch_size_hint', 'Larger batches are faster but use more memory.')),
+            check('bench-acc-think', t('acc_bench.config.thinking', 'Enable thinking mode'), false),
+            el('p', 'native-stub-note', t('acc_bench.config.thinking_hint', 'Applies to models whose template supports thinking toggles.')),
+            check('bench-acc-ext', t('bench.config.external', 'Use external OpenAI API endpoint'), false),
+            extRow,
+            check('bench-acc-upload', t('uplift.bench.upload_results', 'Upload results to community leaderboard'), false),
+            el('p', 'native-stub-note', t('uplift.bench.upload_hint',
+                'Off by default: a native run never posts to omlx.ai unless you check this.'))],
+            'acc_bench.config.advanced_options', 'Advanced options');
+        f.appendChild(adv);
 
         var actions = el('div', 'bench-actions');
         var addBtn = el('button', 'btn btn-primary', t('acc_bench.config.add_run', 'Add to Queue'));
@@ -1589,6 +1759,7 @@ var ACC = {
     },
 
     renderResults: function () {
+        var self = this;
         var wrap = gid('bench-acc-results');
         if (!wrap) return;
         var rows = this.state.results;
@@ -1625,7 +1796,13 @@ var ACC = {
                 el('td', null, up));
             tbl.appendChild(tr);
         });
-        wrap.replaceChildren(tbl);
+        // U49: Copy of the whole matrix in classic's own export format
+        wrap.replaceChildren(
+            resultsHead(function () {
+                return buildAccuracyText(rows, self.state.groups);
+            }, 'acc_bench.results.text_export.section_label',
+               'Benchmark Results (Text — Copy & Paste)'),
+            tbl);
     },
 };
 
@@ -1694,6 +1871,9 @@ function MTEB(kind) {
                        labeled(t('uplift.bench.sample_limit', 'Sample limit'), limSel));
             f.appendChild(row);
 
+            // U49: grid floated unlabeled; classic's caption for the list
+            f.appendChild(el('div', 'bench-label acc-grid-label',
+                t('acc_bench.config.benchmarks', 'Benchmarks')));
             var grid = el('div', 'acc-taskgrid'); grid.id = prefix + '-tasks';
             f.appendChild(grid);
 
@@ -1935,7 +2115,34 @@ function MTEB(kind) {
                         .toLocaleString() : ''));
                 tbl.appendChild(tr);
             });
-            wrap.replaceChildren(tbl);
+            // U49: one shared Copy for both kinds (factory pattern the
+            // card asked for) — Model/Benchmark/Score/Metric/Samples rows
+            var selfM = this;
+            wrap.replaceChildren(
+                resultsHead(function () {
+                    return buildTableText(
+                        [kind === 'embed' ? t('uplift.bench.embeddings', 'Embeddings')
+                                          : t('uplift.bench.rerankers', 'Rerankers'), ''],
+                        [{ label: 'Model', get: function (r) { return String(r.model_id || ''); } },
+                         { label: 'Benchmark', get: function (r) { return String(r.task || ''); } },
+                         { label: 'Score', numeric: true, get: function (r) {
+                             var k0 = Object.keys(r.scores || {})[0];
+                             var sc = k0 ? r.scores[k0] : null;
+                             return sc && sc.main_score != null
+                                 ? Number(sc.main_score).toFixed(4) : '\u2014'; } },
+                         { label: 'Metric', get: function (r) {
+                             var k0 = Object.keys(r.scores || {})[0];
+                             var sc = k0 ? r.scores[k0] : null;
+                             return sc && sc.main_metric ? String(sc.main_metric) : '\u2014'; } },
+                         { label: 'Samples', numeric: true, get: function (r) {
+                             var k0 = Object.keys(r.scores || {})[0];
+                             var sc = k0 ? r.scores[k0] : null;
+                             var n = sc && sc.all ? (sc.all.n || sc.all.num || null) : null;
+                             return n != null ? String(n)
+                                 : (r.limit ? ('\u2264' + r.limit) : '\u2014'); } }],
+                        selfM.state.results.slice().reverse());
+                }),
+                tbl);
         },
     };
 }
@@ -1949,6 +2156,8 @@ function MTEB(kind) {
    re-order (position-bias), ms/question latency class. null = not
    computable (shown as —, never 0). */
 var DEC_LIMITS = [0, 25, 50, 100];
+function fmt4(v) { return v == null ? '\u2014' : Number(v).toFixed(4); }
+
 var DEC = {
     state: null,
 
@@ -1986,6 +2195,9 @@ var DEC = {
         row.append(labeled(t('bench.config.model', 'Model'), modelSel),
                    labeled(t('uplift.bench.sample_limit', 'Sample limit'), limSel));
         f.appendChild(row);
+        // U49: pack grid caption (same classic key as the other panels)
+        f.appendChild(el('div', 'bench-label acc-grid-label',
+            t('acc_bench.config.benchmarks', 'Benchmarks')));
         var grid = el('div', 'acc-taskgrid'); grid.id = 'bench-dec-tasks';
         f.appendChild(grid);
         var actions = el('div', 'bench-actions');
@@ -2197,7 +2409,25 @@ var DEC = {
                 el('td', null, r.ts ? new Date(r.ts * 1000).toLocaleString() : ''));
             tbl.appendChild(tr);
         });
-        wrap.replaceChildren(tbl);
+        // U49: shared Copy helper over the decision rows (MTEB pattern)
+        var selfD = this;
+        wrap.replaceChildren(
+            resultsHead(function () {
+                return buildTableText(
+                    [t('uplift.bench.decision', 'Decision'), ''],
+                    [{ label: 'Model', get: function (r) { return String(r.model_id || ''); } },
+                     { label: 'Benchmark', get: function (r) { return String(r.pack || ''); } },
+                     { label: 'Accuracy', numeric: true, get: function (r) { return fmt4(r.accuracy); } },
+                     { label: 'Brier', numeric: true, get: function (r) { return fmt4(r.brier); } },
+                     { label: 'ECE', numeric: true, get: function (r) { return fmt4(r.ece); } },
+                     { label: 'Agreement', numeric: true, get: function (r) { return fmt4(r.agreement); } },
+                     { label: 'ms/question', numeric: true, get: function (r) {
+                         return r.ms_per_question == null ? '—' : String(r.ms_per_question); } },
+                     { label: 'Samples', numeric: true, get: function (r) {
+                         return r.items != null ? String(r.items) : '—'; } }],
+                    selfD.state.results.slice().reverse());
+            }),
+            tbl);
     },
 };
 
@@ -2209,6 +2439,15 @@ function stopStream() {
 
 return { mount: mount, isMounted: function () { return _mounted; },
          showSub: showSub, tp: TP,
+         // U49 structural test seams: panel modules + the shared export
+         // builders, so a DOM-free harness can prove every panel wires
+         // resultsHead/advancedSection (card's Verify: 'import graph or
+         // DOM assertion in the mount-test harness')
+         _panels: { ctx: CTX, ane: ANE, acc: ACC, dec: DEC },
+         _u49: { resultsHead: resultsHead, buildTableText: buildTableText,
+                 buildAccuracyText: buildAccuracyText,
+                 ctxResultPairs: ctxResultPairs,
+                 advancedSection: advancedSection },
          // U47 test seams (pure text-export plumbing; U49 reuses)
          _benchText: { buildThroughputText: buildThroughputText,
                        fmtNum: fmtNum, fmtMemory: fmtMemory,
