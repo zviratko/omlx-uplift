@@ -74,6 +74,20 @@ async def bench_accuracy_tasks(is_admin: bool = Depends(require_admin)):
             "harness_tasks": sorted(harness_engine.HARNESS_MAP)}
 
 
+@api_router.get("/bench/accuracy/harness-sizes")
+async def bench_accuracy_harness_sizes(is_admin: bool = Depends(require_admin)):
+    """U68: per-suite leaf-subtask counts for the community harness engine
+    (its --limit applies PER task; the UI multiplies so the user chooses
+    with open eyes). The bench-env probe runs at most once and caches on
+    disk; it is OFF the hot route (own endpoint, lazy UI fetch) because
+    the first probe can take ~20s — the event loop must not wait."""
+    import asyncio
+    from .. import harness_engine
+    sizes = await asyncio.get_running_loop().run_in_executor(
+        None, harness_engine.subtask_counts)
+    return {"sizes": sizes}
+
+
 @api_router.post("/bench/accuracy/add")
 async def bench_accuracy_add(request: Request, is_admin: bool = Depends(require_admin)):
     pool = engine_pool()

@@ -8,9 +8,9 @@
  "uplift.bench.embed_desc": "Benchmarks de embeddings via MTEB, executados na API servida.",
  "uplift.bench.embeddings": "Embeddings",
  "uplift.bench.engine": "Motor de pontuação",
- "uplift.bench.engine_classic": "Clássico",
- "uplift.bench.engine_harness": "Harness",
- "uplift.bench.engine_hint": "Harness = subprocesso lm-evaluation-harness (apenas tarefas mapeadas; uma execução com tarefas não mapeadas é recusada). Clássico é o motor integrado.",
+ "uplift.bench.engine_classic": "Integrado",
+ "uplift.bench.engine_harness": "Harness da comunidade (lm-eval)",
+ "uplift.bench.engine_hint": "Integrado amostra N perguntas no total. O harness da comunidade (lm-eval) avalia N POR SUBTAREFA — MMLU tem 57 subtarefas, então 30 viram 1710 requisições.",
  "uplift.bench.metric": "Métrica",
  "uplift.bench.mteb_env_missing": "Ambiente MTEB ausente — execute: omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "Superfície nativa — ainda não implementada.",
@@ -824,5 +824,8 @@
  "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (veracidade)",
  "uplift.bench.ctx_custom": "Personalizado…",
  "uplift.bench.ctx_custom_placeholder": "tokens (2.048 – 524.288)",
- "uplift.bench.ctx_custom_range": "O alvo personalizado deve ser um número inteiro entre 2.048 e 524.288 tokens."
+ "uplift.bench.ctx_custom_range": "O alvo personalizado deve ser um número inteiro entre 2.048 e 524.288 tokens.",
+ "uplift.bench.engine_total": "Harness da comunidade: cerca de {n} requisições para esta seleção.",
+ "uplift.bench.badge_harness": "LM-Eval",
+ "uplift.bench.badge_classic": "Integrado"
 }

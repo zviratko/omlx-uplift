@@ -8,9 +8,9 @@
  "uplift.bench.embed_desc": "MTEB による embedding ベンチマーク（サーブ中の API に対して実行）。",
  "uplift.bench.embeddings": "Embedding",
  "uplift.bench.engine": "採点エンジン",
- "uplift.bench.engine_classic": "クラシック",
- "uplift.bench.engine_harness": "ハーネス",
- "uplift.bench.engine_hint": "ハーネス = lm-evaluation-harness サブプロセス（対応タスクのみ。未対応タスクを含む実行は拒否されます）。クラシックが内蔵エンジンです。",
+ "uplift.bench.engine_classic": "内蔵",
+ "uplift.bench.engine_harness": "コミュニティハーネス (lm-eval)",
+ "uplift.bench.engine_hint": "内蔵は合計N問をサンプリングします。コミュニティハーネス (lm-eval) はサブタスクごとにN問を評価します — MMLUは57サブタスクのため、30は1710リクエストになります。",
  "uplift.bench.metric": "指標",
  "uplift.bench.mteb_env_missing": "MTEB 環境がありません — 実行: omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "ネイティブサーフェス — まだ未実装です。",
@@ -823,5 +823,8 @@
  "uplift.bench.pack.tqa_choice": "TruthfulQA mc1（真実性）",
  "uplift.bench.ctx_custom": "カスタム…",
  "uplift.bench.ctx_custom_placeholder": "トークン (2,048 – 524,288)",
- "uplift.bench.ctx_custom_range": "カスタム目標は 2,048 ～ 524,288 の整数トークンである必要があります。"
+ "uplift.bench.ctx_custom_range": "カスタム目標は 2,048 ～ 524,288 の整数トークンである必要があります。",
+ "uplift.bench.engine_total": "コミュニティハーネス: この選択で約{n}リクエスト。",
+ "uplift.bench.badge_harness": "LM-Eval",
+ "uplift.bench.badge_classic": "内蔵"
 }

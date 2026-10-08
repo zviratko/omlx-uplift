@@ -94,7 +94,11 @@ NOT_HARNESS = {
     "safetybench": "no harness equivalent (card decision)",
 }
 
-_TQDM = re.compile(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)")
+# U67: label-aware tqdm matcher. Group 1 is the bar NAME ('Requesting API'
+# for the real evaluation pass on lm_eval 0.4.13 — verified against raw
+# stdout in the U67 probe), groups 2-3 are cur/tot.
+_TQDM = re.compile(r"([A-Za-z][A-Za-z ]*):\s+\d+%\|[^|]*\|\s*(\d+)/(\d+)")
+_EVAL_BAR = "Requesting API"
 
 # restart safety (card): live harness subprocesses are tracked; the
 # atexit handler kills any survivor's WHOLE GROUP, and run cancellation
@@ -143,6 +147,66 @@ def results_root() -> Path:
     return paths.uplift_store_dir() / "bench-results"
 
 
+# ---- U68: honest per-suite subtask counts ----------------------------------
+# lm_eval --limit applies PER TASK (0.4.13 help: 'Limit number of examples
+# per task'), so suite 30 on mmlu = 57 subjects x 30 requests. The UI must
+# show the multiplication. Expanding a group needs lm_eval = bench-env, so
+# this runs the tiny harness_sizes.py probe there ONCE and caches the map
+# on disk; ready=false answers are honest None (the UI then shows plain
+# sizes — never a guessed number, never a blocking call on page load).
+
+_SIZES_FILE_NAME = "harness-subtask-sizes.json"
+_sizes_mem: Optional[dict] = None
+
+
+def _sizes_file() -> Path:
+    from . import paths
+    return paths.uplift_store_dir() / _SIZES_FILE_NAME
+
+
+def subtask_counts() -> Optional[dict[str, int]]:
+    global _sizes_mem
+    if _sizes_mem is not None:
+        return _sizes_mem
+    f = _sizes_file()
+    try:
+        _sizes_mem = json.loads(f.read_text())
+        return _sizes_mem
+    except Exception:
+        pass
+    if bench_env.status()["state"] != "ready":
+        return None          # no lazy venv build for a label; honest miss
+    import subprocess
+    import sys as _sys
+    suites = {k: spec["tasks"] for k, spec in HARNESS_MAP.items()}
+    py = bench_env.harness_python()
+    if py is None:
+        return None
+    try:
+        r = subprocess.run(
+            [py, str(Path(__file__).with_name("bench_tasks")
+                     / "harness_sizes.py"), json.dumps(suites)],
+            capture_output=True, text=True, timeout=90,
+            env={**__import__("os").environ,
+                 "HF_HOME": str(bench_env.hf_cache_dir())},
+        )
+    except Exception:
+        return None
+    for line in (r.stdout or "").splitlines():
+        if line.startswith("UPLIFT_SIZES "):
+            try:
+                _sizes_mem = json.loads(line[len("UPLIFT_SIZES "):])
+            except Exception:
+                return None
+            try:
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(json.dumps(_sizes_mem))
+            except Exception:
+                pass
+            return _sizes_mem
+    return None
+
+
 def _api_key() -> str:
     from omlx.server import _server_state
     return _server_state.global_settings.auth.api_key
@@ -156,7 +220,15 @@ def _base_url() -> str:
 
 def _parse_results_json(outdir: Path, metric: str,
                         metric_contains: Optional[str]) -> tuple[Optional[float], int]:
-    """(score, sample_len) from the harness results file for the suite."""
+    """(score, sample_len) from the harness results file for the suite.
+
+    U67: lm_eval writes ONE row per leaf subtask PLUS group rows (the root
+    group row carries only sample_len, no metric — probe-verified). A suite
+    like mmlu = 57 subjects: the old first-match return reported ONE
+    SUBJECT's aggregate as the suite score. Now: single-task suites return
+    their row as before; multi-subject suites weight-average the metric
+    over leaf sample_lens and report the SUM as the evaluated count — the
+    truth the classic row prints (accuracy over N questions)."""
     files = sorted(outdir.rglob("results_*.json"))
     if not files:
         return None, 0
@@ -164,17 +236,32 @@ def _parse_results_json(outdir: Path, metric: str,
         data = json.loads(files[-1].read_text())
     except Exception:
         return None, 0
-    for _name, t in (data.get("results") or {}).items():
-        if not isinstance(t, dict):
-            continue
-        n = int(t.get("sample_len") or 0)
-        for key, val in t.items():
+    group_names = set((data.get("groups") or {}).keys())
+
+    def _metric_of(row: dict) -> Optional[float]:
+        for key, val in row.items():
             if not key.startswith(metric + ",") or not isinstance(val, (int, float)):
                 continue
             if metric_contains and metric_contains not in key:
                 continue
-            return float(val), n
-    return None, 0
+            return float(val)
+        return None
+
+    scored: list[tuple[float, int]] = []   # (score, n) per scored leaf
+    for name, t in (data.get("results") or {}).items():
+        if not isinstance(t, dict) or name in group_names:
+            continue                       # group rows: no metric, avoid 2x
+        val = _metric_of(t)
+        if val is None:
+            continue
+        scored.append((val, int(t.get("sample_len") or 0)))
+    if not scored:
+        return None, 0
+    total = sum(n for _s, n in scored)
+    if total <= 0:
+        return scored[0][0], total
+    score = sum(s * n for s, n in scored) / total
+    return score, total
 
 
 def _acc():
@@ -243,13 +330,24 @@ async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
             line = bench_env.scrub_key(line, key)
             m = _TQDM.search(line)
             if m:
+                label = m.group(1).strip()
                 cur, tot = int(m.group(2)), int(m.group(3))
-                await AB._send_event(run, {
-                    "type": "progress", "phase": "eval",
-                    "model_id": run.request.model_id, "benchmark": task,
-                    "message": f"Evaluating {task} ({cur}/{tot})...",
-                    "current": suite_index, "total": suite_total,
-                    "bench_current": cur, "bench_total": tot})
+                if label == _EVAL_BAR:
+                    await AB._send_event(run, {
+                        "type": "progress", "phase": "eval",
+                        "model_id": run.request.model_id, "benchmark": task,
+                        "message": f"Evaluating {task} ({cur}/{tot})...",
+                        "current": suite_index, "total": suite_total,
+                        "bench_current": cur, "bench_total": tot})
+                else:
+                    # U67: prep bars (dataset Map/cache over FULL split
+                    # sizes) must never masquerade as evaluation — the
+                    # number is real but it is NOT question progress
+                    await AB._send_event(run, {
+                        "type": "progress", "phase": "prepare",
+                        "model_id": run.request.model_id, "benchmark": task,
+                        "message": f"Preparing {task} ({label} {cur}/{tot})",
+                        "current": suite_index, "total": suite_total})
         # poll, never executor-blocked wait: cancellation must unwind
         while proc.poll() is None:
             await asyncio.sleep(0.5)

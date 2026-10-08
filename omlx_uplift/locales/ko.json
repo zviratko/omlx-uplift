@@ -8,9 +8,9 @@
  "uplift.bench.embed_desc": "MTEB 기반 embedding 벤치마크(서빙 중인 API 대상).",
  "uplift.bench.embeddings": "Embedding",
  "uplift.bench.engine": "채점 엔진",
- "uplift.bench.engine_classic": "클래식",
- "uplift.bench.engine_harness": "하네스",
- "uplift.bench.engine_hint": "하네스 = lm-evaluation-harness 하위 프로세스(매핑된 작업만; 매핑되지 않은 작업이 포함된 실행은 거부됩니다). 클래식이 기본 엔진입니다.",
+ "uplift.bench.engine_classic": "내장",
+ "uplift.bench.engine_harness": "커뮤니티 하네스 (lm-eval)",
+ "uplift.bench.engine_hint": "내장은 총 N개 질문을 샘플링합니다. 커뮤니티 하네스 (lm-eval)는 하위 작업당 N개를 평가합니다 — MMLU는 57개 하위 작업이므로 30이 1710 요청이 됩니다.",
  "uplift.bench.metric": "지표",
  "uplift.bench.mteb_env_missing": "MTEB 환경이 없습니다 — 실행: omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "네이티브 표면 — 아직 구현되지 않았습니다.",
@@ -835,5 +835,8 @@
  "uplift.bench.pack.tqa_choice": "TruthfulQA mc1 (진실성)",
  "uplift.bench.ctx_custom": "사용자 지정…",
  "uplift.bench.ctx_custom_placeholder": "토큰 (2,048 – 524,288)",
- "uplift.bench.ctx_custom_range": "사용자 지정 목표는 2,048～524,288 사이의 정수 토큰이어야 합니다."
+ "uplift.bench.ctx_custom_range": "사용자 지정 목표는 2,048～524,288 사이의 정수 토큰이어야 합니다.",
+ "uplift.bench.engine_total": "커뮤니티 하네스: 이 선택에 약 {n}개 요청.",
+ "uplift.bench.badge_harness": "LM-Eval",
+ "uplift.bench.badge_classic": "내장"
 }

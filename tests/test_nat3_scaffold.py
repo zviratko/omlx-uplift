@@ -60,6 +60,7 @@ NAT3_ROUTES = [
     ("POST", "/bench/history/clear"),
     ("GET", "/bench/flag"),
     ("GET", "/bench/accuracy/tasks"),
+    ("GET", "/bench/accuracy/harness-sizes"),   # U68 (literal, in-band)
     ("POST", "/bench/accuracy/add"),
     ("GET", "/bench/accuracy/queue"),
     ("DELETE", "/bench/accuracy/queue/{idx}"),

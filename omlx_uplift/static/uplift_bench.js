@@ -1680,7 +1680,11 @@ var ACC = {
     render: function (panel) {
         this.state = { running: false, benchId: null, queue: [],
                        progress: null, groups: null,
-                       selected: {}, sizes: {}, results: [] };
+                       selected: {}, sizes: {}, results: [],
+                       // U68: {suite: leaf subtask count}; harness --limit
+                       // applies PER subtask, the labels must say so
+                       harnessSizes: ACC._sizesCache || null,
+                       engine: 'classic' };
         panel.appendChild(this.form());
         var queue = el('div', 'acc-queue'); queue.id = 'bench-acc-queue';
         var status = statusLine('bench-acc-status');
@@ -1713,8 +1717,9 @@ var ACC = {
             t('acc_bench.config.benchmarks', 'Benchmarks')));
         var grid = el('div', 'acc-taskgrid'); grid.id = 'bench-acc-tasks';
         var engineSeg = el('div', 'bench-chips'); engineSeg.id = 'bench-acc-engine';
-        [['classic', t('uplift.bench.engine_classic', 'Classic')],
-         ['harness', t('uplift.bench.engine_harness', 'Harness')]].forEach(function (e, i) {
+        [['classic', t('uplift.bench.engine_classic', 'Built-in')],
+         ['harness', t('uplift.bench.engine_harness',
+                       'Community harness (lm-eval)')]].forEach(function (e, i) {
             var lb = el('label', 'chip');
             var rb = el('input'); rb.type = 'radio'; rb.name = 'bench-acc-engine';
             rb.value = e[0]; rb.checked = i === 0;
@@ -1722,9 +1727,14 @@ var ACC = {
             engineSeg.appendChild(lb);
         });
         var engRow = el('div', 'bench-row');
-        engRow.append(labeled(t('uplift.bench.engine', 'Scoring engine'), engineSeg),
-            el('p', 'native-stub-note', t('uplift.bench.engine_hint',
-                'Harness = lm-evaluation-harness subprocess (mapped tasks only; a run with unmapped tasks is refused). Classic is the built-in engine.')));
+        var engNote = el('p', 'native-stub-note', t('uplift.bench.engine_hint',
+            'Built-in samples N questions total. Community harness (lm-eval) evaluates N PER SUBTASK — MMLU has 57 subtasks, so 30 becomes 1710 requests.'));
+        engNote.id = 'bench-acc-engine-hint';
+        engRow.append(labeled(t('uplift.bench.engine', 'Scoring engine'), engineSeg), engNote);
+        // U68: per-subtask counts arrive lazily (first probe can be slow);
+        // on arrival, relabel the size dropdowns + hint with the truth
+        engineSeg.addEventListener('change', function () { self.applyEngineLabels(); });
+        self.loadHarnessSizes();
         f.append(grid, engRow);
 
         var extRow = el('div', 'bench-row bench-external');
@@ -1804,6 +1814,78 @@ var ACC = {
         }).catch(function () {});
     },
 
+    _sizesCache: null,
+
+    loadHarnessSizes: function () {
+        // U68: lazy, never blocks the grid; the first server probe can
+        // expand groups through bench-env (~20s once, cached on disk)
+        if (ACC._sizesCache) { this.state.harnessSizes = ACC._sizesCache; this.applyEngineLabels(); return; }
+        var self = this;
+        var d = dom();
+        d.fetchJson(api() + '/bench/accuracy/harness-sizes').then(function (p) {
+            if (!p || !p.sizes) return;              // bench-env not ready: plain sizes
+            ACC._sizesCache = p.sizes;
+            if (self.state) { self.state.harnessSizes = p.sizes; }
+            self.applyEngineLabels();
+        }).catch(function () { /* honest plain sizes */ });
+    },
+
+    currentEngine: function () {
+        // typeof guard: node structural harnesses stub document without
+        // querySelector (radio state only exists in a real page anyway)
+        var eng = (typeof document.querySelector === 'function')
+            ? document.querySelector('input[name=bench-acc-engine]:checked')
+            : null;
+        return eng ? eng.value : (this.state && this.state.engine) || 'classic';
+    },
+
+    applyEngineLabels: function () {
+        // U68: relabel every size option with the harness truth when the
+        // harness engine is selected; classic keeps plain numbers
+        var st = this.state;
+        if (!st) return;
+        st.engine = this.currentEngine();
+        var mult = {};
+        (st.groups || []).forEach(function (g) {
+            g.tasks.forEach(function (tk) {
+                var c = st.harnessSizes && st.harnessSizes[tk.key];
+                mult[tk.key] = (st.engine === 'harness' && c > 1) ? c : 1;
+            });
+        });
+        document.querySelectorAll('#bench-acc-tasks .acc-task').forEach(function (card) {
+            var key = card.dataset.key;
+            var sel = card.querySelector('select');
+            if (!sel || !mult[key]) return;
+            [].forEach.call(sel.children, function (o) {
+                if (o.value === '0') { o.dataset.base = o.dataset.base || o.textContent; return; }
+                o.dataset.base = o.dataset.base || o.textContent;
+                var base = o.dataset.base;
+                o.textContent = mult[key] > 1
+                    ? base + ' \u00d7' + mult[key] : base;
+            });
+        });
+        // Full (N) options scale too: full_size is the DATASET total, the
+        // harness runs all of it once per subtask — no multiplier math for
+        // 'full' beyond what already applies; leave 'Full' honest.
+        var hint = gid('bench-acc-engine-hint');
+        if (hint && st.harnessSizes) {
+            var picked = Object.keys(st.selected).filter(function (k) { return st.selected[k]; });
+            if (st.engine === 'harness' && picked.length) {
+                var reqs = picked.reduce(function (a, k) {
+                    return a + ((st.harnessSizes[k] || 1) * (st.sizes[k] || 0));
+                }, 0);
+                var c = C();
+                var tot = c ? c.t('uplift.bench.engine_total',
+                    { n: reqs ? reqs.toLocaleString() : '\u2014' })
+                    : 'uplift.bench.engine_total';
+                hint.textContent = tot === 'uplift.bench.engine_total'
+                    ? 'Community harness: about ' + (reqs ? reqs.toLocaleString() : '\u2014')
+                        + ' requests for this selection.'
+                    : tot;
+            }
+        }
+    },
+
     loadTasks: function () {
         var d = dom();
         var self = this;
@@ -1848,6 +1930,7 @@ var ACC = {
                     tk.desc ? t(tk.desc, tk.desc_literal || tk.key) : (tk.desc_literal || ''),
                     null, function (on) {
                         self.state.selected[tk.key] = on;
+                        self.applyEngineLabels();   // U68: totals hint
                     }, { d: tk.desc || null });
                 card.dataset.key = tk.key;
                 card.appendChild(sizeSel);
@@ -1862,12 +1945,14 @@ var ACC = {
                         self.state.selected[tk.key] = true;
                     }
                     self.state.sizes[tk.key] = Number(sizeSel.value);
+                    self.applyEngineLabels();       // U68: totals hint
                 });
                 row.appendChild(card);
             });
             wrap.appendChild(row);
             grid.appendChild(wrap);
         });
+        this.applyEngineLabels();   // U68: labels are fresh DOM
     },
 
     collect: function () {
@@ -2073,8 +2158,9 @@ var ACC = {
         rows.forEach(function (r) {
             var tr = el('tr');
             var badges = '';
-            if (r.engine === 'harness') badges += ' [H]';
-            else if (r.engine === 'classic') badges += ' [C]';
+            // U68: the engine word told users nothing; badge the real names
+            if (r.engine === 'harness') badges += ' [' + t('uplift.bench.badge_harness', 'LM-Eval') + ']';
+            else if (r.engine === 'classic') badges += ' [' + t('uplift.bench.badge_classic', 'Built-in') + ']';
             if (r.external) badges += ' [' + t('acc_bench.results.external_badge', 'external') + ']';
             if (r.thinking_used) badges += ' [' + t('acc_bench.results.thinking_badge', 'thinking') + ']';
             var up = r.upload ? (r.upload.status === 'skipped' ? '—' : '↑') : '';

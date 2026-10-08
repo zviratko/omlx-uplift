@@ -132,6 +132,9 @@ def test_accuracy_persist_restore_roundtrip(monkeypatch):
     monkeypatch.setattr(ae, "_acc", lambda: ab)
     monkeypatch.setattr(ae, "_acc_restored", False)
     monkeypatch.setattr(ae, "_disarm_upload_skip", lambda: None)
+    # the write-through guard is a module global; pin it or an earlier
+    # test's row count makes this payload look unchanged (order-dependent)
+    monkeypatch.setattr(ae, "_acc_last_n", -1)
     out = ae.results_payload()          # write-through
     assert _file("accuracy").exists()
     # simulate restart: classic list empty, restore from disk

@@ -168,10 +168,34 @@ def test_parse_results_json(tmp_path):
 
 def test_tqdm_parse_shape():
     import re
-    from omlx_uplift.harness_engine import _TQDM
+    from omlx_uplift.harness_engine import _TQDM, _EVAL_BAR
     m = _TQDM.search("Requesting API:  40%|████      | 40/100 [00:10<00:15]")
     assert m and (m.group(2), m.group(3)) == ("40", "100")
+    assert m.group(1).strip() == _EVAL_BAR          # identity of the eval bar
+    # U67: dataset-prep bars (the 'Evaluating mmlu (5/5)' lie source) carry
+    # a DIFFERENT label — captured from lm_eval 0.4.13 raw stdout
+    m2 = _TQDM.search("Map: 100%|██████████| 1/1 [00:00<00:00, 220.46it/s]")
+    assert m2 and m2.group(1).strip() != _EVAL_BAR
     assert _TQDM.search("some log line without progress") is None
+
+
+def test_parse_results_json_group_weighted(tmp_path):
+    # U67: multi-subject suites (mmlu = 57 leaves + group rows with NO
+    # metric) must weight-average and SUM the evaluated counts — the old
+    # first-match return reported one subject's score and sample_len=30
+    # instead of the whole group (probe JSON structure reproduced).
+    from omlx_uplift.harness_engine import _parse_results_json
+    rows = {"mmlu_flan_n_shot_generative_a":
+                {"exact_match,flexible-extract": 1.0, "sample_len": 2},
+            "mmlu_flan_n_shot_generative_b":
+                {"exact_match,flexible-extract": 0.0, "sample_len": 2},
+            "mmlu_flan_n_shot_generative": {"sample_len": 4}}   # group row
+    (tmp_path / "results_1.json").write_text(json.dumps({
+        "results": rows,
+        "groups": {"mmlu_flan_n_shot_generative": {"sample_len": 4}}}))
+    score, n = _parse_results_json(tmp_path, "exact_match", "flexible-extract")
+    assert n == 4                      # summed across leaves, group skipped
+    assert score == 0.5                # (1.0*2 + 0.0*2) / 4
 
 
 # ---- dispatcher wrap -------------------------------------------------------
