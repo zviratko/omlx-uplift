@@ -205,6 +205,7 @@ function renderHistory() {
             return { role: m.role === 'assistant' ? 'ai' : (m.role || 'user'),
                      text: String(m.content) };
         });
+    scheduleMessageActions(_dc);   // U45: bubbles re-rendered -> re-attach
 }
 async function openConv(id) {
     if (id === (_conv && _conv.id)) return;
@@ -820,6 +821,7 @@ function toolbar() {
     budget.addEventListener('change', saveThinking);
     var web = toolBtn('web', t('chat.web_search_off', 'Turn on web search'),
                       function () { toggleWeb(); });
+    web.id = 'chat-native-web';   // on-state styled in uplift.css (U45)
     function toggleWeb() {
         _webSearch = !_webSearch;
         web.classList.toggle('on', _webSearch);
@@ -828,61 +830,10 @@ function toolbar() {
                                : t('chat.web_search_off', 'Turn on web search');
         return _webSearch;
     }
-    var copy = toolBtn(t('chat.copy_tooltip', 'Copy'),
-                       t('uplift.chat.copy_last', 'Copy last reply'),
-                       function () {
-        var ms = _conv && _conv.messages || [];
-        for (var i = ms.length - 1; i >= 0; i--) {
-            if (ms[i].role === 'assistant') {
-                (W().navigator.clipboard
-                    ? W().navigator.clipboard.writeText(ms[i].content)
-                    : Promise.reject(new Error('no clipboard')))
-                    .then(function () { D().toast(t('chat.copy_tooltip', 'Copy'), 'ok'); },
-                          function (e) { D().toast(String((e && e.message) || e), 'error'); });
-                return;
-            }
-        }
-    });
-    var regen = toolBtn(t('chat.regenerate_tooltip', 'Regenerate'),
-                        t('uplift.chat.regenerate', 'Regenerate last reply'),
-                        function () {
-        if (_streaming || !_conv) return;
-        var ms = _conv.messages;
-        // find the last user turn WITHOUT mutating: checking after the
-        // pop is how the first cut lost the assistant row on refused
-        // audio regens (drill 2026-10-08: n 22->21, nothing re-sent)
-        var li = -1;
-        for (var k = ms.length - 1; k >= 0; k--) {
-            if (ms[k].role === 'user') { li = k; break; }
-        }
-        if (li < 0) return;
-        // classic: transcription turns cannot be regenerated — the audio
-        // file is not persisted (chat.html:6656); the label would go out
-        // as prose, so refuse before touching the store
-        if (/^\[audio\] /.test(String(ms[li].content))) return;
-        var resend = String(ms[li].content);
-        _conv.messages = ms.slice(0, li);
-        renderHistory();
-        saveConv();
-        _dc.submitUserMessage({ text: resend });
-    });
-    var edit = toolBtn(t('chat.edit_tooltip', 'Edit message'),
-                       t('uplift.chat.edit_resend', 'Edit & resend last message'),
-                       function () {
-        if (_streaming || !_conv) return;
-        var ms = _conv.messages, ui = -1;
-        for (var i = ms.length - 1; i >= 0; i--) {
-            if (ms[i].role === 'user') { ui = i; break; }
-        }
-        if (ui < 0) return;
-        var nv = window.prompt(t('chat.edit_tooltip', 'Edit message'),
-                               String(ms[ui].content));
-        if (nv == null) return;
-        _conv.messages = ms.slice(0, ui);
-        renderHistory();
-        saveConv();
-        _dc.submitUserMessage({ text: nv });
-    });
+    // U45: the last-turn toolbar trio is GONE — copy/regenerate/edit/
+    // delete now live on EVERY bubble (classic's per-message set,
+    // attachMessageActions). The chat-level Delete stays: classic keeps
+    // it too (its sidebar trash).
     var del = toolBtn(t('chat.delete_tooltip', 'Delete'),
                       t('chat.delete_tooltip', 'Delete chat'),
                       async function () {
@@ -898,8 +849,245 @@ function toolbar() {
             refreshConvList();
         } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
     });
-    bar.append(list, newBtn, sel, prof, profSave, sys, think, budget, web, mic, copy, regen, edit, del);
+    // U45: classic's right-sidebar sections mirror — EVERY control gets
+    // a caption; the picker's own title was the only label before.
+    function group(labelText, control) {
+        var g = el('div', 'chat-native-group');
+        var lab = el('span', 'chat-native-group-label', labelText);
+        g.append(lab, control);
+        // the sys prompt keeps the old .chat-native-bar stretch behavior
+        // (was a direct flex child; now inside a column group)
+        if (control.id === 'chat-native-sys') g.classList.add('chat-native-grow');
+        return g;
+    }
+    var pickers = el('div', 'chat-native-bar chat-native-pickers');
+    pickers.append(
+        group(t('chat.chat_history_label', 'Chat History'),
+              (function () { list.title = t('chat.chat_history_label',
+                                            'Chat History'); return list; })()),
+        newBtn,
+        group(t('chat.active_model', 'Active Model'), sel),
+        group(t('chat.active_profile', 'Active Profile'), prof),
+        profSave);
+    var gen = el('div', 'chat-native-bar chat-native-gen');
+    think.title = t('chat.thinking_label', 'Thinking');
+    gen.append(
+        group(t('chat.system_prompt.title', 'System Prompt'), sys),
+        group(t('chat.thinking_label', 'Thinking'), think), budget, web, mic, del);
+    bar.append(pickers, gen);
     return bar;
+}
+
+// ---------------------------------------------------------------------------
+// U45: per-message action overlay (classic parity: copy / copy markdown /
+// regenerate / delete). deep-chat 2.5.1 exposes NO per-message hooks
+// (NAT-1 finding) — the seam is the open shadowRoot: bubbles live at
+// .outer-message-container > .inner-message-container > .message-bubble,
+// and the shadow #messages list order equals _conv.messages EXCEPT rows
+// with empty content, which renderHistory filters out. Bubbles the
+// filter drops never enter the store (the save path skips empty rows,
+// handler never emits empty ai turns), so the visible==stored
+// correspondence holds; the action map records WHICH message each
+// bubble got so actions read the store by the right index.
+// ---------------------------------------------------------------------------
+var _msgActions = new WeakMap();   // bubble element -> {idx, role}
+var _overlayTimer = null;
+
+function msgActionsEl(idx, role) {
+    var box = el('div', 'chat-native-msg-actions' +
+                         (role === 'user' ? ' user' : ''));
+    box.setAttribute('data-idx', String(idx));
+    function act(cls, label, title, fn) {
+        var b = el('button', 'chat-native-msg-action ' + cls, label);
+        b.type = 'button'; b.title = title;
+        b.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            fn(idx);
+        });
+        box.appendChild(b);
+        return b;
+    }
+    act('copy', t('chat.copy_tooltip', 'Copy'),
+        t('chat.copy_tooltip', 'Copy'), msgCopy);
+    act('copymd', t('chat.copy_markdown', 'Copy markdown'),
+        t('chat.copy_markdown', 'Copy markdown'), msgCopyMarkdown);
+    if (role === 'assistant') {
+        act('regen', t('chat.regenerate_tooltip', 'Regenerate'),
+            t('chat.regenerate_tooltip', 'Regenerate'), msgRegenerate);
+    } else {
+        act('edit', t('chat.edit_tooltip', 'Edit message'),
+            t('chat.edit_tooltip', 'Edit message'), msgEdit);
+    }
+    act('del', t('chat.delete_message', 'Delete'),
+        t('chat.delete_message', 'Delete'), msgDelete);
+    return box;
+}
+
+function messageAt(idx) {
+    var ms = (_conv && _conv.messages) || [];
+    return (idx >= 0 && idx < ms.length) ? ms[idx] : null;
+}
+
+function msgCopy(idx) {
+    var m = messageAt(idx);
+    if (!m) return;
+    copyText(stripMarkdown(m.content)).then(function () {
+        D().toast(t('chat.copy_tooltip', 'Copy'), 'ok');
+    }, function (e) {
+        D().toast(String((e && e.message) || e), 'error');
+    });
+}
+
+// classic keeps the RAW markdown in the store and renders it at display
+// time (renderMessageContent -> marked). "Copy markdown" therefore gets
+// the stored content verbatim; "Copy" strips the markup for a plain-text
+// paste — both mirror classic's split between copyMessage and
+// copyMarkdown.
+function msgCopyMarkdown(idx) {
+    var m = messageAt(idx);
+    if (!m) return;
+    copyText(String(m.content || '')).then(function () {
+        D().toast(t('chat.copy_markdown', 'Copy markdown'), 'ok');
+    }, function (e) {
+        D().toast(String((e && e.message) || e), 'error');
+    });
+}
+
+function copyText(text) {
+    // classic parity (chat.html _copyText/_copyFallback): the Clipboard API
+    // needs a secure context; the board is served over plain http, so the
+    // offscreen-textarea execCommand path is the real transport here —
+    // without it every copy rejects with 'no clipboard' on the LAN URL.
+    var s = String(text || '');
+    var nav = W() && W().navigator;
+    if (nav && nav.clipboard && nav.clipboard.writeText) {
+        return nav.clipboard.writeText(s).catch(function () {
+            legacyCopy(s);
+        });
+    }
+    legacyCopy(s);
+    return Promise.resolve();
+}
+
+function legacyCopy(s) {
+    var doc = W() && W().document;
+    if (!doc || !doc.createElement || !doc.body) return;
+    var ta = doc.createElement('textarea');
+    ta.value = s;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    doc.body.appendChild(ta);
+    ta.select();
+    try { doc.execCommand('copy'); } catch (e) {}
+    doc.body.removeChild(ta);
+}
+
+function stripMarkdown(src) {
+    // Minimal, deliberately conservative plain-text projection (U47 will
+    // need the same for bench copy): fences/inline code kept as text,
+    // links -> label, emphasis + heading markers dropped. Raw HTML tags
+    // stripped; no innerHTML anywhere.
+    var s = String(src || '');
+    s = s.replace(/```[\w-]*\n?([\s\S]*?)```/g, '$1');
+    s = s.replace(/`([^`]*)`/g, '$1');
+    s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
+    s = s.replace(/\[([^\]]+)\]\(([^)]*)\)/g, '$1');
+    s = s.replace(/<\/?[a-zA-Z][^>]*>/g, '');
+    s = s.replace(/^#{1,6}\s+/gm, '');
+    s = s.replace(/(\*\*|__)(.*?)\1/g, '$2');
+    s = s.replace(/(\*|_)(.*?)\1/g, '$2');
+    s = s.replace(/^\s*[-*+]\s+/gm, '');
+    return s.trim();
+}
+
+function msgRegenerate(idx) {
+    if (_streaming || !_conv) return;
+    var ms = _conv.messages;
+    var m = messageAt(idx);
+    if (!m || m.role !== 'assistant') return;
+    var prev = idx > 0 ? ms[idx - 1] : null;
+    if (!prev || prev.role !== 'user') return;   // no prompt to replay
+    // classic (chat.html:6656): transcription turns cannot be regenerated
+    // — the audio file is not persisted; the label would go out as prose.
+    if (/^\[audio\] /.test(String(prev.content))) return;
+    // slice BEFORE the prompt: the resend re-enters the user row through
+    // onMessage (same as the old last-turn toolbar function did — slicing
+    // at the assistant index would store the prompt twice)
+    _conv.messages = ms.slice(0, idx - 1);
+    renderHistory();
+    saveConv();
+    _dc.submitUserMessage({ text: String(prev.content) });
+}
+
+function msgEdit(idx) {
+    if (_streaming || !_conv) return;
+    var m = messageAt(idx);
+    if (!m || m.role !== 'user') return;
+    // classic edits inline with Save/Cancel buttons; the component's
+    // contenteditable bubbles make a faithful inline editor a bundle
+    // fight — prompt() is the pragmatic mirror (same truncate-and-replay
+    // semantics, same no-audio-regen guard).
+    var nv = window.prompt(t('chat.edit_tooltip', 'Edit message'),
+                           String(m.content));
+    if (nv == null) return;
+    _conv.messages = _conv.messages.slice(0, idx);
+    renderHistory();
+    saveConv();
+    _dc.submitUserMessage({ text: nv });
+}
+
+function msgDelete(idx) {
+    if (!_conv) return;
+    var m = messageAt(idx);
+    if (!m) return;
+    _conv.messages.splice(idx, 1);
+    renderHistory();
+    saveConv();
+}
+
+function attachMessageActions(dc) {
+    var root = dc && dc.shadowRoot;
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    var bubbles = root.querySelectorAll('.message-bubble');
+    if (!bubbles.length) { _msgActions = new WeakMap(); return; }
+    // filtered view order == store order for NON-empty messages (see
+    // header note); map bubble k -> the k-th stored non-empty message
+    var ms = (_conv && _conv.messages) || [];
+    var visible = [];
+    for (var i = 0; i < ms.length; i++) {
+        if (ms[i] && ms[i].content) visible.push(i);
+    }
+    for (var k = 0; k < bubbles.length; k++) {
+        var b = bubbles[k];
+        var holder = b.parentElement;      // .inner-message-container
+        if (!holder || !holder.querySelector) continue;
+        var storeIdx = visible[k];
+        var existing = holder.querySelector(':scope > .chat-native-msg-actions');
+        if (storeIdx === undefined) {     // component-local row (no store twin)
+            if (existing) existing.remove();
+            continue;
+        }
+        var role = (ms[storeIdx] || {}).role;
+        var prev = _msgActions.get(b);
+        if (existing && prev && prev.idx === storeIdx && prev.role === role)
+            continue;                      // identical — no DOM churn
+        if (existing) existing.remove();
+        holder.appendChild(msgActionsEl(storeIdx, role));
+        _msgActions.set(b, { idx: storeIdx, role: role });
+    }
+}
+
+function scheduleMessageActions(dc) {
+    // deep-chat renders history asynchronously; one tick + a couple of
+    // retries ride it out without an observer (re-render resets the
+    // bubbles, so attach is idempotent by map+identity check)
+    if (_overlayTimer) clearTimeout(_overlayTimer);
+    var tries = 0;
+    function go() {
+        attachMessageActions(dc);
+        if (++tries < 4) _overlayTimer = setTimeout(go, 120 * tries);
+        else _overlayTimer = null;
+    }
+    _overlayTimer = setTimeout(go, 0);
 }
 
 // 6/6b: audio_stt selected -> fileUpload accepts audio only, placeholder
@@ -1024,6 +1212,19 @@ function applyShadowTheme(dc) {
         '  caret-color: var(--accent, #4c8dff); }',
         '.input-button { color: var(--dim, #8b98ab); }',
         'a { color: var(--accent, #4c8dff); }',
+        // U45: per-message action row (classic parity). Lives in OUR
+        // shadow DOM, so its CSS must ship in this tag — light-DOM
+        // uplift.css cannot reach across the boundary.
+        '.chat-native-msg-actions { display: none; gap: 4px; margin-top: 3px;',
+        '  align-items: center; }',
+        '.chat-native-msg-actions.user { justify-content: flex-end; }',
+        '.inner-message-container:hover > .chat-native-msg-actions,',
+        '.chat-native-msg-actions:focus-within { display: flex; }',
+        '.chat-native-msg-action { background: none; border: 0; padding: 2px 5px;',
+        '  font: inherit; font-size: 11px; color: var(--dim, #8b98ab);',
+        '  cursor: pointer; border-radius: 4px; }',
+        '.chat-native-msg-action:hover { color: var(--ink, #e6edf3);',
+        '  background: var(--panel, #10151d); }',
         // U43: bundle-hardened leftovers — gray scrollbars and the
         // streaming dots. The bundle sets --loading-message-color INLINE
         // per message container, so an ancestor var() override loses;
@@ -1172,6 +1373,16 @@ function mount() {
                         || _conv.title;
                 }
                 saveConv();
+                // U45: after regenerate/edit the component's async history
+                // flush can race the resend and drop the new bubbles from
+                // the VIEW (store stayed correct — live drill 2026-10-08:
+                // bubbles 1 vs store 3). The finalized assistant turn is
+                // the sync point: re-render history from the store so the
+                // view is authoritative again (classic re-renders after
+                // completion too). User rows just schedule the action
+                // overlay (the component already painted that bubble).
+                if (role === 'assistant') renderHistory();
+                else scheduleMessageActions(_dc);
             }
         };
         // streaming flag for the regen/edit guards: the component fires a
@@ -1242,6 +1453,12 @@ return { mount: mount, isMounted: function () { return _mounted; },
          toggleWeb: function () { _webSearch = !_webSearch;
                                   return _webSearch; },
          newConv: newConv, migrateLegacy: migrateLegacy,
+         // U45 test seams: index-based message actions (the overlay binds
+         // these to per-bubble buttons; tests drive them directly)
+         _msgActions: { copy: msgCopy, copyMarkdown: msgCopyMarkdown,
+                        regenerate: msgRegenerate, edit: msgEdit,
+                        delete: msgDelete, stripMarkdown: stripMarkdown,
+                        attach: attachMessageActions },
          // _state returns LIVE references (conv/convs are the module's
          // own objects) — the browser drills and node tests set conv
          // fields through it; shapeRequest reads _conv, same identity
@@ -1254,6 +1471,9 @@ return { mount: mount, isMounted: function () { return _mounted; },
                                         thinkingLive: _thinkLive,
                                         webSearch: _webSearch,
                                         toolsUsed: _tools,
+                                        // U45: mounted element (drills/tests
+                                        // stub submitUserMessage through it)
+                                        get dc() { return _dc; },
                                         // 6/6c probes (tests + live drills):
                                         // profiles is the loaded mirror list
                                         profiles: _profiles,

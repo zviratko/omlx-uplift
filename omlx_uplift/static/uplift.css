@@ -2121,11 +2121,24 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    so no card chrome is duplicated here (embed-frame is the reference). */
 #chat-native-dc deep-chat { display: block; width: 100%; border: 0;
     min-height: 480px; background: var(--card, #141a24); }
-.chat-native-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chat-native-bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: flex-end; }
+/* U45: captioned control groups (classic sidebar section mirror). The
+   toolbar was a single row of unlabeled bare controls; every select/input
+   now carries a dim caption and the web toggle shows a real on-state. */
+.chat-native-group { display: flex; flex-direction: column; gap: 2px; }
+.chat-native-group-label { font-size: 10px; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--dim); }
+.chat-native-bar #chat-native-web.on { border-color: var(--accent);
+    color: var(--accent); font-weight: 600; }
 .chat-native-bar select, .chat-native-bar input[type=text] {
   font-size: 11px; background: var(--field); border: 1px solid var(--edge);
   color: var(--ink); padding: 4px 6px; }
-.chat-native-bar #chat-native-sys { flex: 1 1 180px; min-width: 140px; }
+/* U45: the sys prompt lives inside a caption column group now; the old
+   row-level flex basis would stretch the input VERTICALLY inside a
+   column flex parent — give the GROUP the stretch, the input a width. */
+.chat-native-bar #chat-native-sys { min-width: 140px; }
+.chat-native-group.chat-native-grow { flex: 1 1 180px; min-width: 140px; }
+.chat-native-group.chat-native-grow #chat-native-sys { width: 100%; }
 .chat-native-bar .btn { font-size: 11px; padding: 4px 8px; }
 
 /* NAT-4 (4/6): live thinking panel (deep-chat has none — hybrid, card Rules) */

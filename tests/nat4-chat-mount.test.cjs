@@ -143,8 +143,11 @@ test('module exports + mount paints toolbar through the catalog', async () => {
     (function walk(e) { texts.push(e.textContent || '');
         (e.children || []).forEach(walk); })(host);
     const all = texts.join(' ');
-    for (const marker of ['NEWCHAT', 'PICKMODEL', 'PICKER', 'COPY', 'REGEN', 'DEL'])
+    for (const marker of ['NEWCHAT', 'PICKMODEL', 'PICKER', 'DEL'])
         assert.ok(all.includes(marker), `label ${marker} rendered`);
+    // U45: the last-turn COPY/REGEN trio left the toolbar; every control
+    // carries a caption instead (classic sidebar mirror) and per-message
+    // actions live on the bubbles.
     assert.ok(!all.includes('chat.new_chat'), 'no raw i18n key leaks');
     // embedding models are filtered out of the chat picker
     const selTexts = [];
@@ -384,4 +387,74 @@ test('U43: shadow theme outranks the bundle hard-coded colors', async () => {
         'loading dots beat the inline var with !important');
     assert.ok(/::-webkit-scrollbar-thumb/.test(css),
         'shadow scrollbars themed (bundle paints #d0d0d0)');
+});
+
+/* U45: index-based message actions (classic parity semantics, driven
+   through the test seams; the overlay binds them to per-bubble buttons
+   in the shadow DOM — proven live in the browser drill). */
+test('U45: regenerate at index truncates to the prompt and replays it', async () => {
+    const h = makeHarness({ convs: [{ id: 'c1', title: 'T', model: 'M', messages: [
+        { role: 'user', content: 'first question' },
+        { role: 'assistant', content: 'first answer' },
+        { role: 'user', content: 'second question' },
+        { role: 'assistant', content: 'second answer' }] }] });
+    h.win.UpliftNativeChat.mount();
+    await booted(h);
+    const st = h.win.UpliftNativeChat._state();
+    const sent = [];
+    st.dc.submitUserMessage = (m) => sent.push(m.text);
+    h.win.UpliftNativeChat._msgActions.regenerate(1);   // first answer
+    assert.deepEqual(sent, ['first question'], 'replays the prompt before idx');
+    assert.deepEqual(st.conv.messages.map(m => m.content), [],
+        'store = history before the prompt; the replayed user turn and the ' +
+        'new answer re-enter via onMessage (live path, not stubbed here)');
+});
+
+test('U45: transcription turns refuse regenerate without touching the store', async () => {
+    const h = makeHarness({ convs: [{ id: 'c1', title: 'T', model: 'M', messages: [
+        { role: 'user', content: '[audio] microphone recording' },
+        { role: 'assistant', content: 'transcript text' }] }] });
+    h.win.UpliftNativeChat.mount();
+    await booted(h);
+    const st = h.win.UpliftNativeChat._state();
+    const sent = [];
+    st.dc.submitUserMessage = (m) => sent.push(m.text);
+    h.win.UpliftNativeChat._msgActions.regenerate(1);
+    assert.deepEqual(sent, [], 'no prose label goes out as a prompt');
+    assert.equal(st.conv.messages.length, 2, 'store untouched');
+});
+
+test('U45: edit truncates at the user index; delete removes exactly one row', async () => {
+    const convs = [{ id: 'c1', title: 'T', model: 'M', messages: [
+        { role: 'user', content: 'one' },
+        { role: 'assistant', content: 'A' },
+        { role: 'user', content: 'two' },
+        { role: 'assistant', content: 'B' }] }];
+    const h = makeHarness({ convs });
+    h.win.UpliftNativeChat.mount();
+    await booted(h);
+    const st = h.win.UpliftNativeChat._state();
+    const sent = [];
+    st.dc.submitUserMessage = (m) => sent.push(m.text);
+    h.win.prompt = () => 'two edited';
+    h.win.UpliftNativeChat._msgActions.edit(2);
+    assert.deepEqual(sent, ['two edited'], 'edited text replays from that index');
+    st.conv.messages = convs[0].messages.slice();
+    h.win.UpliftNativeChat._msgActions.delete(1);
+    assert.deepEqual(st.conv.messages.map(m => m.content), ['one', 'two', 'B'],
+        'delete removes exactly the row under the button');
+});
+
+test('U45: copy splits plain vs markdown; stripMarkdown keeps code content', () => {
+    const strip = require('node:vm');   // seam reachable without a mount
+    void strip;
+    // Pure-function check via a fresh harness (module-level export):
+    const h = makeHarness();
+    const fn = h.win.UpliftNativeChat._msgActions.stripMarkdown;
+    assert.equal(fn('**bold** and `code`'), 'bold and code');
+    assert.equal(fn('[label](http://x)'), 'label');
+    assert.equal(fn('# Head\n- item'), 'Head\nitem');
+    assert.equal(fn('```py\nprint(1)\n```'), 'print(1)',
+        'fence info string is not prose (classic copy parity)');
+    assert.equal(fn('<b>raw</b>'), 'raw');
 });
