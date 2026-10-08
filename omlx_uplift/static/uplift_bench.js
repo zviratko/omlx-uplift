@@ -2171,6 +2171,13 @@ var ACC = {
     },
 
     applyEngineLabels: function () {
+        var self = this;   // U83-FIX: pre-existing since 38c1259 — the
+                           // engine-total loop below calls this._fullSize
+                           // from a forEach callback where `this` is lost
+                           // (crash: "can't access property _fullSize,
+                           // this is undefined"). Found by the U83 drill
+                           // because the board re-syncs labels on catalog
+                           // load; the old code path hit it too.
         // U68+U69: every LM-Eval card relabels its OWN size options with
         // the per-subtask truth ('30 \u00d757'); classic cards stay plain
         var st = this.state;
@@ -2203,7 +2210,7 @@ var ACC = {
                 var c = (st.harnessSizes && st.harnessSizes[bare]) || 1;
                 var n = st.sizes[k] || 0;
                 if (!n) {
-                    var fs = this._fullSize(st, bare);
+                    var fs = self._fullSize(st, bare);
                     if (!fs) return;             // unknown: stay silent-ish
                     n = fs;
                 }
