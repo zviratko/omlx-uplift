@@ -633,7 +633,7 @@ function renderEditorFields(container) {
     if (S.isQwenOqA8(m)) {
         seFam(g, 'qwen35_oq_a8_enabled',
             seBind('bool', 'qwen35_oq_a8_enabled', { label: 'Qwen INT8 Activation Prefill',
-                hint: 'Experimental GPU INT8 activation quantization for supported Q4/Q5 prefill.' }),
+                hint: 'Experimental GPU INT8 activation quantization for supported Q4/Q5/Q8 prefill.' }),
             [seBind('number', 'qwen35_oq_a8_min_tokens',
                 { label: C.tf('uplift.ui.minimum_prompt_tokens', 'Minimum prompt tokens'), min: 1, step: 1 })]);
     }
