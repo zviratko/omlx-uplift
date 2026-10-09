@@ -160,7 +160,12 @@ function alignProfileRows() {
                 const riserTop = first.getBoundingClientRect().top + parseFloat(cs.top);
                 const top = (nr.bottom - 2) - tr.top;
                 const h = (riserTop + 4) - (nr.bottom - 2);
-                treeEl.style.setProperty('--trunk-top', Math.max(0, Math.round(top)) + 'px');
+                // top is NEGATIVE by design: the connector leaves the tree's
+                // box upward into the model row (the tree box is not clipped,
+                // and nothing sits at that x in the row — the lamps indent
+                // right of the trunk). Clamping it to 0 (my first attempt)
+                // detached the wire from the name again — measured live.
+                treeEl.style.setProperty('--trunk-top', Math.round(top) + 'px');
                 treeEl.style.setProperty('--trunk-drop', Math.max(0, Math.round(h)) + 'px');
             } else {   // hidden tree (profiles still resolving): paint nothing
                 treeEl.style.removeProperty('--trunk-top');
