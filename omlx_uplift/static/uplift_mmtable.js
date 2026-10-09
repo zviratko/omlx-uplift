@@ -204,13 +204,18 @@ async function renderModelAdmin(force) {
         row.dataset.mid = m.id;
         const name = document.createElement('span');
         name.className = 'uname'; name.title = m.model_path || m.id;
-        // line 1: lamps left, then size + state pushed to the MM_GLUE.cell's right
-        // edge — which is the card's middle line since the action box now
-        // takes the right 50% (round 5). line 2: [type badge] + model id.
+        /* CARD-1 (user 2026-10-09) row order: line 1 = model NAME (top-left,
+           bigger) with the type badge to its right and the copy icon after the
+           badge; line 2 = the lamps (FAVOURITE/PINNED/DEFAULT/ALIAS) below the
+           name, then size + state pushed to the cell's right edge. The name
+           line leads the cell so the alias trunk can hang below it at a fixed
+           x (see the trunk CSS) and the alias lines stay on their grid. */
         const head1 = document.createElement('span'); head1.className = 'nrow1';
         const nmain = document.createElement('span'); nmain.className = 'nmain';
         const uid = MM_GLUE.cell(m.id); uid.className = 'uid';
-        nmain.append(uid, copyBtn(m.id, 'Copy model id'));
+        // CARD-1: the badge must sit BETWEEN name and copy icon, so the copy
+        // button is appended after it (further down) rather than here.
+        nmain.append(uid);
         // PINNED / DEFAULT / FAVOURITE cockpit lamps, then the model ALIAS as
         // its own lamp (round 4: an alias is not a profile — it must not
         // render as one; the lamp shows the served name and copies it).
@@ -318,8 +323,10 @@ async function renderModelAdmin(force) {
         // badge is EXACTLY the FAVOURITE lamp's size (round 6: max-of-lamps
         // made long types like RERANKER wider). Measured after layout; the
         // label ellipsises inside the fixed box rather than widening it.
-        nmain.prepend(typeC);
-        name.append(head1, nmain);
+        // CARD-1: badge sits between the name and its copy icon — the row's
+        // first line reads NAME · TYPE · COPY, lamps moved below.
+        nmain.append(typeC, copyBtn(m.id, 'Copy model id'));
+        name.append(nmain, head1);
         requestAnimationFrame(() => {
             const fav = lamps.querySelector('.lamp');
             if (fav) { const w = fav.getBoundingClientRect().width;
@@ -401,6 +408,8 @@ async function renderModelAdmin(force) {
             const head1 = document.createElement('span'); head1.className = 'nrow1';
             const nmain = document.createElement('span'); nmain.className = 'nmain';
             const uid = MM_GLUE.cell(e.id); uid.className = 'uid';
+            // CARD-1: name first; missing rows have no type badge to place
+            // between the name and its copy icon.
             nmain.append(uid, copyBtn(e.id, 'Copy model id'));
             const st = document.createElement('span');
             st.textContent = orphan.has(e.id) ? 'MISSING' : 'EXTERNAL';
@@ -418,7 +427,9 @@ async function renderModelAdmin(force) {
             }
             const gap = document.createElement('span'); gap.className = 'nrow-gap';
             head1.append(gap);
-            name.append(head1, nmain);
+            // CARD-1: same line order as present rows — name leads, lamp/alias
+            // line below (missing rows have no type badge to place).
+            name.append(nmain, head1);
             const box = document.createElement('span');
             box.className = 'settings-box hrow solo';   // solo: no chips — centre the acts column
             const acts = document.createElement('span'); acts.className = 'act-col';

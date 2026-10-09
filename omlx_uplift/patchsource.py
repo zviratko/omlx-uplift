@@ -1404,11 +1404,16 @@ def mark_upstreamed_if_merged(store, commits: list[dict]) -> dict:
     return marked
 
 
-def enabled_build_patches(store) -> list[dict]:
+def enabled_build_patches(store, with_bytes: bool = True) -> list[dict]:
     """The materialization input for devsrc (DEV-2): every ENABLED
     build-scope patch as {id, version, diff_bytes} in manifest order
     (order, id). Bytes are the stored UNPRUNED diffs — exactly what the
     gate accepted, sha-consistent.
+
+    with_bytes=False is the cheap enumeration for the header badge
+    (BUILD-1): the same eligibility rule, WITHOUT reading the diff files.
+    One definition on purpose — a second filter chain would drift from
+    'what actually materializes' and the badge would lie.
 
     An OBSOLETE patch is retired, not merely off: the base already
     carries its content, so materializing its stale diff would either
@@ -1427,6 +1432,9 @@ def enabled_build_patches(store) -> list[dict]:
             continue
         ver = _desired_version_entry(store, p)
         if ver is None:
+            continue
+        if not with_bytes:
+            out.append({"id": p.get("id"), "version": ver.get("v", 0)})
             continue
         data = _read_patch_file(store, ver)
         if data is None:

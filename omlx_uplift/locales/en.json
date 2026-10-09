@@ -734,6 +734,8 @@
  "uplift.ui.mlp_on_ane": "MLP on ANE",
  "uplift.ui.mlp_on_cpu_fraction": "MLP on CPU (fraction)",
  "uplift.ui.n_missing_records": "{n} models not present",
+ "uplift.ui.dev_build_info": "DEV build",
+ "uplift.ui.dev_n_patches": "{n} patches",
  "uplift.ui.pad_tails_from": "Pad tails from",
  "uplift.ui.parameters_passed_to_chat_template_force_api_req": "Parameters passed to chat template. Force: API requests cannot override this value.",
  "uplift.ui.performance_aware_scheduling": "Performance-aware scheduling",

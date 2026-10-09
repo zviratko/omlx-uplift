@@ -57,9 +57,9 @@ from .routers.patches import (
 from .routers.dev import (
     DevAutoUpdateRequest, DevBaseRequest, DevBootstrapRequest, DevBuildRequest, DevReconfigureRequest, ServerRestartRequest,
     _DEV_BOOT, _DEV_BUILD, _DEV_BUILD_LOCK, _dev11_evaluate, _dev_boot_run, _dev_boot_state,
-    _dev_build_run, _dev_reconfigure_sync, _dev_service_age, _dev_share_realized, _dev_status_sync, _iso_to_epoch,
-    _supervisor_kind, dev11_boot_check, dev_auto_update, dev_base, dev_bootstrap, dev_build,
-    dev_commits, dev_reconfigure, dev_restart, dev_status, server_restart,
+    _dev_build_run, _dev_build_info_sync, _dev_reconfigure_sync, _dev_service_age, _dev_share_realized, _dev_status_sync, _iso_to_epoch,
+    _omlx_running_version, _supervisor_kind, dev11_boot_check, dev_auto_update, dev_base, dev_bootstrap, dev_build,
+    dev_build_info, dev_commits, dev_reconfigure, dev_restart, dev_status, server_restart,
 )
 from .routers.skins import (
     skin_res, skin_theme_css, skins_list,
@@ -90,7 +90,7 @@ __all__ = [
     '_not_modified', '_parse_window', '_patch_tree_root', '_read_json_dict', '_require_settings_manager', '_safe_lang',
     '_serve_index', '_static_etag', '_static_file', '_supervisor_kind', 'api_router', 'cancel_request',
     'delete_deferred_settings_route', 'delete_model_settings_route', 'dev11_boot_check', 'dev_auto_update', 'dev_base', 'dev_bootstrap',
-    'dev_build', 'dev_commits', 'dev_reconfigure', 'dev_restart', 'dev_status', 'engine_pool',
+    'dev_build', 'dev_build_info', 'dev_commits', 'dev_reconfigure', 'dev_restart', 'dev_status', 'engine_pool',
     'get_deferred_settings_route', 'get_env_overrides', 'get_model_settings', 'get_retention', 'global_settings', 'list_model_profiles_any',
     'list_requests', 'load_locale', 'locale_catalog', 'metrics_hot', 'metrics_latest', 'metrics_series', 'metrics_live', 'metrics_stream',
     'model_settings_index', 'models_overlay', 'page_router', 'patch_store', 'patches_add', 'patches_check',

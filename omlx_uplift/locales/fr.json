@@ -738,6 +738,8 @@
  "uplift.ui.mlp_on_ane": "MLP sur ANE",
  "uplift.ui.mlp_on_cpu_fraction": "MLP sur CPU (fraction)",
  "uplift.ui.n_missing_records": "{n} modèles absents",
+ "uplift.ui.dev_build_info": "Construction DEV",
+ "uplift.ui.dev_n_patches": "{n} correctifs",
  "uplift.ui.pad_tails_from": "Compléter les queues à partir de",
  "uplift.ui.parameters_passed_to_chat_template_force_api_req": "Paramètres passés au modèle de chat. Forcer : les requêtes API ne peuvent pas écraser cette valeur.",
  "uplift.ui.performance_aware_scheduling": "Ordonnancement conscient de la performance",

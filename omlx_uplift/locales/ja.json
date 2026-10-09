@@ -737,6 +737,8 @@
  "uplift.ui.mlp_on_ane": "MLPをANEで",
  "uplift.ui.mlp_on_cpu_fraction": "CPUでのMLP(比率)",
  "uplift.ui.n_missing_records": "{n} 件のモデルが存在しません",
+ "uplift.ui.dev_build_info": "DEV ビルド",
+ "uplift.ui.dev_n_patches": "パッチ {n} 件",
  "uplift.ui.pad_tails_from": "テールのパッド元",
  "uplift.ui.parameters_passed_to_chat_template_force_api_req": "チャットテンプレートへ渡すパラメータ。'強制': APIリクエストは上書きできません。",
  "uplift.ui.performance_aware_scheduling": "パフォーマンス考慮型スケジューリング",

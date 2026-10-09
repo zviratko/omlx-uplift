@@ -280,6 +280,68 @@ class DevBaseRequest(BaseModel):
     pin: Optional[str] = None
 
 
+def _dev_build_info_sync() -> dict:
+    """BUILD-1: the header's DEV superscript — which omlx commit + version the
+    built omlx-dev keg tracks, and which build-scope patches it carries.
+
+    Deliberately CHEAP: file reads only. No fetch, no worktree replay, no
+    `git rev-list` (unlike /dev/status, which is the patches page's heavy
+    truth). The base commit comes from the build receipt (dev.json
+    'built_base'); only a keg built before that key existed pays one local
+    rev-parse. Never raises: any problem answers installed=False so the
+    header simply shows no badge instead of a wrong one.
+    """
+    from .. import devsrc, patchsource
+
+    try:
+        from . import patches as _patches_mod
+
+        cfg = devsrc.load_config()
+        if not cfg:
+            return {"installed": False}
+        base = (cfg.get("built_base") or "").strip()
+        if not base:
+            # no receipt (pre-DEV-11 keg): devsrc remains the ONE definition
+            # of the base (pin else sync-ref tip); costs one local rev-parse
+            base = devsrc.base_sha_of(cfg) or ""
+        patches = [{"id": p.get("id"), "version": p.get("version")}
+                   for p in patchsource.enabled_build_patches(
+                       _patches_mod.patch_store(), with_bytes=False)]
+        return {"installed": True,
+                "base_sha": base or None,
+                "built_sha": (cfg.get("built_sha") or "").strip() or None,
+                "sync_ref": cfg.get("sync_ref"),
+                "omlx_version": _omlx_running_version(),
+                "patches": patches}
+    except Exception:
+        return {"installed": False}
+
+
+def _omlx_running_version() -> str | None:
+    """Version of the omlx package THIS process serves. The uplift .pth runs
+    inside the keg that mounted it, so on the dev keg this is exactly the
+    built version (BUILD-1: never read a file on disk — the U10 lesson)."""
+    import importlib.metadata
+
+    for name in ("omlx", "omlx-dev"):
+        try:
+            return importlib.metadata.version(name)
+        except Exception:
+            continue
+    try:
+        import omlx
+
+        v = getattr(omlx, "__version__", None)
+        return str(v) if v else None
+    except Exception:
+        return None
+
+
+@api_router.get("/dev/build-info")
+async def dev_build_info(is_admin: bool = Depends(require_admin)):
+    return await asyncio.to_thread(_dev_build_info_sync)
+
+
 @api_router.get("/dev/commits")
 async def dev_commits(limit: int = 50,
                       is_admin: bool = Depends(require_admin)):

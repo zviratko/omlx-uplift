@@ -734,6 +734,8 @@
  "uplift.ui.mlp_on_ane": "MLP na ANE",
  "uplift.ui.mlp_on_cpu_fraction": "MLP na CPU (podíl)",
  "uplift.ui.n_missing_records": "{n} modelů chybí",
+ "uplift.ui.dev_build_info": "Sestavení DEV",
+ "uplift.ui.dev_n_patches": "patche: {n}",
  "uplift.ui.pad_tails_from": "Doplnit konce od",
  "uplift.ui.parameters_passed_to_chat_template_force_api_req": "Parametry předané šablonu chatu. Vynucení: API požadavky nemohou tuto hodnotu přepsat.",
  "uplift.ui.performance_aware_scheduling": "Plánování s ohledem na výkon",

@@ -224,6 +224,38 @@ header.top.has-tagline .logo .logo-below {
     opacity: 1; font-weight: 700; letter-spacing: 0.08em;
     color: var(--dev-accent, var(--warn, #e8a020));
 }
+/* BUILD-1: what the DEV keg tracks — base commit + omlx version (line 1, the
+   superscript on 'DEV') and the enabled build-scope patch ids (line 2). Reads
+   small and dimmed (user 2026-10-09: "superscript to the right top of DEV,
+   can be a smaller font").
+   Geometry contract — the header may NOT move: line 1 stays in flow inside
+   the logo's reserved 240px band (measured: 'DEV' ends x≈125, +82px tag =
+   207 < 240), line 2 is ABSOLUTE so a second 9px line can never grow the
+   logo's line box and re-centre the tabs strip. Below 1141px the band is not
+   reserved and the header has no slack — the tag hides (the patches page
+   states the same truth with room to spare). A skin's below-logo tagline
+   owns that strip, so only the patch line yields to it (the ids stay in the
+   tooltip). Content is server truth (GET /dev/build-info); absent = nothing. */
+.logo .logo-build {
+    display: inline-block; position: relative; vertical-align: baseline;
+    font: 400 8px/1 var(--mono); letter-spacing: 0.02em;
+    color: var(--dev-accent, var(--warn, #e8a020)); opacity: .75;
+    margin-left: 3px; top: -0.5em;
+    white-space: nowrap; cursor: default;
+}
+/* line 1 clips itself: overflow on the PARENT would cut off the absolute
+   patch line (the parent is its containing block) */
+.logo .logo-build .lb-main {
+    display: inline-block; max-width: 100px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+}
+.logo .logo-build .lb-patches {
+    position: absolute; top: 100%; left: 3px; margin-top: 2px;
+    max-width: 110px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; color: var(--dim); opacity: .9;
+}
+header.top.has-tagline .logo .logo-build .lb-patches { display: none; }
+@media (max-width: 1140px) { .logo .logo-build { display: none; } }
 header.top .spacer { flex: 1; }
 /* chip + tab text may never break: when the window narrows the tabs strip
    shrinks first (min-width:0), but the chips are flex items with the
@@ -1009,6 +1041,26 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 #model-admin .mbox .uname { padding-top: 5px; gap: 4px; }
 #model-admin .mbox .nrow1 { min-height: 22px; }
 #model-admin .mbox .uname .nmain { min-height: 22px; align-items: center; }
+/* CARD-1 (user 2026-10-09): the model name leads the card at the TOP-LEFT and
+   is bigger; the type badge sits to its RIGHT (left of the copy icon) and the
+   FAVOURITE/PINNED/… lamps moved BELOW the name. The two-line pitch is kept
+   exactly as it was (2 × 22px + 4px gap), so the right-hand action box, its
+   buttons and the alias chips do not move by a single pixel — only the order
+   of the two lines inside the model cell changes. 13.5px/500 on the 12px row
+   font is the largest size that keeps the longest model id on one line at the
+   card's 50% width with the badge + copy icon beside it. */
+#model-admin .mbox .uname .nmain .uid {
+    font: 500 13.5px/1.3 var(--mono);
+    /* the name is the only elastic item on the line: badge + copy never wrap
+       under it, the name shrinks first */
+    min-width: 0; flex: 0 1 auto;
+    /* ONE line, always: the base rule lets long ids wrap (line 2 used to be
+       the card's last line — now it leads, and a wrap would push the lamps
+       off the 2×22px pitch the action box is built on). Long ids ellipsize;
+       the full path is the cell's title and the copy icon sits beside it. */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#model-admin .mbox .uname .nmain .copybtn { flex: 0 0 auto; }
 /* chips share the buttons' 22px line height so chip centre == button centre */
 .admin-table .chip-host .schip { height: 22px; box-sizing: border-box;
     display: inline-flex; align-items: center; }
@@ -1084,12 +1136,21 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* trunk: vertical line dropping from the main row, splitting into aliases.
    Styled as an explicit elbow conduit (rounded corner into each alias) so
    the hierarchy reads at a glance, not a hairline. */
-/* trunk hangs below the model NAME (x≈80px = after the lamps), not the box
-   edge. Square diagram-style wiring: a vertical trunk drops and turns right
-   into every line; the trunk ENDS at the bottom-most branch (no stub below). */
+/* trunk hangs below the model NAME, not the box edge. CARD-1 moved the name
+   to the head of line 1 (the lamps went below it), so the name's left edge is
+   now the row's own left edge (mbox border 1 + row padding 2 = content x+2).
+   The tree follows it: 96px -> 16px. That is not a guess — the riser is
+   ::before at left:-16px of a line whose padding box starts at margin+1, so
+   the stroke lands at M-15 and the elbow run stays (line label x+9):
+     OLD  M=96 -> stroke 81..84, name uid at 82 (after the 74px badge + 6 gap)
+     NEW  M=16 -> stroke  1..4, name uid at  2
+   Same 1px-left-of-the-first-glyph relationship and the same 21px horizontal
+   run, shifted left with the name. Square diagram-style wiring: a vertical
+   trunk drops and turns right into every line; the trunk ENDS at the
+   bottom-most branch (no stub below). */
 /* round 6 item 8: gap between the model row, alias lines and the bottom of
    the box is uniform 6px — same as alias-to-alias spacing */
-#model-admin .alias-tree { margin: 0 10px 6px 96px; padding: 6px 0 0 0; }
+#model-admin .alias-tree { margin: 0 10px 6px 16px; padding: 6px 0 0 0; }
 #model-admin .alias-line { position: relative; display: flex; align-items: center;
     gap: 8px; margin: 0 0 6px; padding: 4px 8px; min-width: 0;
     border: 1px solid var(--edge); background: var(--field);
@@ -1101,6 +1162,16 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 #model-admin .alias-line::before { content: ""; position: absolute;
     left: -16px; top: -16px; bottom: 50%; width: 14px;
     border-left: 3px solid var(--dim); border-bottom: 3px solid var(--dim); }
+/* CARD-1: the trunk now sits at the card's content left edge — exactly under
+   the model NAME (and under the lamp row, which shares that edge). The
+   -16px overdraw that bridges inter-line gaps must NOT reach into the model
+   row for the FIRST line: line 2 is now the lamps, whose box starts 14px
+   above the line's top edge (alias-tree padding-top 6 + row padding-bottom
+   8). -14px bridges that whitespace exactly: touches the lamp row, never
+   overdraws it. Mid-tree lines keep -16 (pure overlap into the previous
+   line's bottom padding — the proven bridge). */
+#model-admin .alias-tree > .alias-line:first-child::before,
+#model-admin .prof-lines > .alias-line:first-child::before { top: -14px; }
 #model-admin .alias-line span { text-align: left !important; }
 #model-admin .alias-line.dim-line { opacity: 0.75; border-style: dashed; }
 #model-admin .alias-line .alias-name.dim { color: var(--dim); }

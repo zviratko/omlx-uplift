@@ -734,6 +734,8 @@
  "uplift.ui.mlp_on_ane": "ANE 上的 MLP",
  "uplift.ui.mlp_on_cpu_fraction": "CPU 上的 MLP（比例）",
  "uplift.ui.n_missing_records": "{n} 个模型不存在",
+ "uplift.ui.dev_build_info": "DEV 构建",
+ "uplift.ui.dev_n_patches": "{n} 个补丁",
  "uplift.ui.pad_tails_from": "从此处开始填充尾部",
  "uplift.ui.parameters_passed_to_chat_template_force_api_req": "传递给聊天模板的参数。“强制”：API 请求无法覆盖此值。",
  "uplift.ui.performance_aware_scheduling": "性能感知调度",

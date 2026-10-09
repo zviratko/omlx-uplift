@@ -749,6 +749,8 @@
  "uplift.ui.mlp_on_ane": "ANE에서 MLP",
  "uplift.ui.mlp_on_cpu_fraction": "CPU의 MLP(비율)",
  "uplift.ui.n_missing_records": "{n}개 모델이 존재하지 않음",
+ "uplift.ui.dev_build_info": "DEV 빌드",
+ "uplift.ui.dev_n_patches": "패치 {n}개",
  "uplift.ui.pad_tails_from": "다음부터 꼬리 패딩",
  "uplift.ui.parameters_passed_to_chat_template_force_api_req": "챗 템플릿에 전달되는 파라미터. '강제': API 요청이 이 값을 재설정할 수 없습니다.",
  "uplift.ui.performance_aware_scheduling": "성능 인지 스케줄링",

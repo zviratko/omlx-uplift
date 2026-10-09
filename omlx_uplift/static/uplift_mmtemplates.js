@@ -42,7 +42,7 @@ function renderTemplatesBox() {
             // round 8 item 4: show the friendly name like models do — the
             // raw t-… id is an internal key (shown in EDIT/delete dialogs)
             uid.title = t.name;
-            nmain.append(badge, uid);   // round 6 item 10: no copy icon for the internal id
+            nmain.append(badge, uid);   // round 6 item 10: no copy icon for the internal id. Template rows are NOT model cards — CARD-1's name-first order applies to #model-admin rows only, by the user's 'nothing else moves' guard.
             const desc = MM_GLUE.cell(t.description || ''); desc.className = 'dim umeta tpl-desc';
             head1.append(desc);
             name.append(nmain, head1);

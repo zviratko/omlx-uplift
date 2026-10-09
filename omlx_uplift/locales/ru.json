@@ -734,6 +734,8 @@
  "uplift.ui.mlp_on_ane": "MLP на ANE",
  "uplift.ui.mlp_on_cpu_fraction": "MLP на CPU (доля)",
  "uplift.ui.n_missing_records": "{n} моделей отсутствует",
+ "uplift.ui.dev_build_info": "Сборка DEV",
+ "uplift.ui.dev_n_patches": "патчей: {n}",
  "uplift.ui.pad_tails_from": "Дополнять хвосты от",
  "uplift.ui.parameters_passed_to_chat_template_force_api_req": "Параметры, передаваемые в chat-шаблон. «Force»: запросы API не могут это переопределить.",
  "uplift.ui.performance_aware_scheduling": "Планирование с учётом производительности",

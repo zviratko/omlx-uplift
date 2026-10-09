@@ -44,7 +44,40 @@ fetchJson(`${API}/admin/api/identity`).then(d => {
     f.classList.add('dev-tag');
     document.querySelector('.logo')?.classList.add('is-dev');
     document.title = 'oMLX · DEV';
+    renderDevBuild();
 }).catch(() => {});
+/* BUILD-1: superscript on the DEV wordmark — line 1: the omlx base commit +
+   version the built keg tracks; line 2: the enabled build-scope patch ids.
+   Server truth comes from /dev/build-info (cheap: file reads only). Honest by
+   construction: an unreadable answer paints NOTHING, never a dash that looks
+   like a build. Commit shas, versions and patch ids are technical brand text
+   (like 'DEV' itself) and stay untranslated; only the labels go through i18n. */
+function renderDevBuild() {
+    fetchJson(`${API}/admin/api/dev/build-info`).then(d => {
+        if (!d || !d.installed || !d.base_sha) return;
+        const patches = d.patches || [];
+        const el = $('logo-build');
+        el.textContent = '';
+        const main = document.createElement('span'); main.className = 'lb-main';
+        main.textContent = d.base_sha.slice(0, 7)
+            + (d.omlx_version ? ' · omlx v' + d.omlx_version : '');
+        el.append(main);
+        if (patches.length) {
+            const ids = patches.map(p => p.id + ' v' + p.version).join(', ');
+            const pl = document.createElement('span'); pl.className = 'lb-patches';
+            pl.textContent = ids.length <= 30 ? ids
+                : C.tf('uplift.ui.dev_n_patches', '{n} patches', { n: patches.length });
+            el.append(pl);
+        }
+        el.title = C.tf('uplift.ui.dev_build_info', 'DEV build')
+            + ': omlx ' + (d.omlx_version || '?')
+            + ' @ ' + d.base_sha.slice(0, 12)
+            + ' (' + (d.sync_ref || '') + ')'
+            + (d.built_sha ? '\nuplift-dev @ ' + d.built_sha.slice(0, 12) : '')
+            + (patches.length ? '\n' + patches.map(p => p.id + ' v' + p.version).join('\n') : '');
+        el.hidden = false;
+    }).catch(() => {});
+}
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
