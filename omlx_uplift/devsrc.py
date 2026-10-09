@@ -452,6 +452,10 @@ def materialize(patches_to_apply: list[dict], cfg: dict) -> dict:
         tip = _git(["rev-parse", "HEAD"], cwd=path).stdout.strip()
     except DevsrcError as exc:
         # abort: restore the branch to its previous tip (or drop a fresh one)
+        # LOG-2: the abort reason went only into the returned dict (console);
+        # the dev-install.log the CLI points at for 'investigation' stayed
+        # empty for the one failure class that matters most.
+        _log.warning("devsrc: materialize aborted: %s", exc)
         if prev_tip:
             _git(["checkout", "-q", "-B", branch, prev_tip], cwd=path,
                  check=False)
@@ -897,19 +901,20 @@ def run_dev_build(*, with_custom_kernel: bool = False,
         res.stage, res.returncode = "fetch", 1
         return res
 
-    # source refresh BEFORE collecting build patches (user policy
-    # 2026-10-09): curated catalog (every build, not only a first one) +
-    # drift check; an auto-promoted curated candidate must be part of
-    # THIS build. Best-effort: a dead network never blocks a build.
-    _refresh_patch_sources(cfg, res)
-
-    build_patches = patchsource.enabled_build_patches(
-        _patches_mod.PatchStore())
     # patch process log: devsrc/patchsource/diffapply log their decisions
     # on the shared "omlx_uplift" logger — a FileHandler here makes the
     # patch pass auditable after the fact. try/finally: the OLD early
     # returns skipped removeHandler and leaked one handler per failed
     # build into the dashboard's process (LOG-1 family).
+    #
+    # LOG-2 (2026-10-09): the handler must be attached BEFORE the source
+    # refresh, not after it. The refresh's curated sync + drift check are
+    # exactly what emits the 'gate REJECTED' warning the user sees on the
+    # console — attached late, that line printed to stderr, the log the
+    # CLI points at for 'investigation' stayed empty, and a user who
+    # disabled the offending patch saw the (now harmless) rejection echo
+    # with no way to tell it apart from the failure that had stopped the
+    # build. The printed hint stays truthful only if the log holds it.
     log_dir = os.path.join(_patches.default_base_dir(), "logs")
     os.makedirs(log_dir, exist_ok=True)
     res.log_path = os.path.join(log_dir, "dev-install.log")
@@ -920,6 +925,14 @@ def run_dev_build(*, with_custom_kernel: bool = False,
     _root.addHandler(_ph)
     _root.setLevel(min(_root.level or _logging.INFO, _logging.INFO))
     try:
+        # source refresh BEFORE collecting build patches (user policy
+        # 2026-10-09): curated catalog (every build, not only a first one)
+        # + drift check; an auto-promoted curated candidate must be part of
+        # THIS build. Best-effort: a dead network never blocks a build.
+        _refresh_patch_sources(cfg, res)
+
+        build_patches = patchsource.enabled_build_patches(
+            _patches_mod.PatchStore())
         return _run_dev_build_body(res, cfg, build_patches, patchsource,
                                    brewutil, with_custom_kernel,
                                    with_grammar, dry_run, warn)
@@ -1014,6 +1027,14 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
             elif rep.get("check") == "obsolete":
                 _emit(res, "out", f"{pid}: upstream now carries the patch "
                                   "(marked obsolete)")
+            elif rep.get("check") == "error":
+                # LOG-2: the drift gate's failure used to vanish here while
+                # fetch_and_gate printed an unattributed 'gate REJECTED' —
+                # users read it as the build failing (it was not; the
+                # candidate simply cannot be stored). Name the patch.
+                _emit(res, "out", f"{pid}: source re-gate failed — "
+                                  f"{str(rep.get('reason') or '')[:160]} "
+                                  "(stored version unchanged)")
     except Exception as exc:                    # noqa: BLE001 — best-effort
         _emit(res, "err", f"drift check skipped: {exc}")
     finally:

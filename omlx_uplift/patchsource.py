@@ -63,7 +63,8 @@ def fetch_and_gate(source: dict, tree_root: str,
                    overrides: dict | None = None,
                    reverse: bool = False,
                    skip_patterns: list[str] | None = None,
-                   tree_kind: str = "keg") -> dict:
+                   tree_kind: str = "keg",
+                   quiet: bool = False) -> dict:
     """One-stop for add/check: source = {kind, repo?, pr?, url?, data?,
     insecure_tls?}. Fetch (if needed) then validate. On fetch failure the
     caller MUST keep stored state untouched (fail-safe rule).
@@ -73,7 +74,13 @@ def fetch_and_gate(source: dict, tree_root: str,
     tree_root — the stored diff bytes are then UNPRUNED, which is what
     the dev-src materializer (DEV-2) applies as commits.
     tree_kind: 'keg' (default) or 'src' — what tree_root IS, for the
-    safeguards heuristics only (advisory; never touches verdicts/bytes)."""
+    safeguards heuristics only (advisory; never touches verdicts/bytes).
+    quiet: log a failed gate at INFO instead of WARNING. The drift check
+    (check_all) re-gates every stored source and its failure is EXPECTED
+    and harmless — the candidate simply is not stored — so it must not
+    print a build-failure-shaped 'gate REJECTED' to the console (LOG-2:
+    users could not tell it apart from the error that stops a build).
+    Logging only; verdicts and stored bytes are untouched."""
     kind = source.get("kind")
     tls = bool(source.get("insecure_tls"))
     if kind == "github_pr":
@@ -118,9 +125,10 @@ def fetch_and_gate(source: dict, tree_root: str,
         # HTTP response truncates to "one or more files failed"
         fails = [f for f in gate.get("files", []) if f["status"] == "fail"]
         detail = "; ".join(f"{f['path']}: {f.get('reason')}" for f in fails[:20])
-        _log.warning("gate REJECTED %s (%d/%d files failed): %s", ref,
-                     len(fails), len(gate.get("files", [])),
-                     detail or gate.get("reason") or "no per-file detail")
+        (_log.info if quiet else _log.warning)(
+            "gate REJECTED %s (%d/%d files failed): %s", ref,
+            len(fails), len(gate.get("files", [])),
+            detail or gate.get("reason") or "no per-file detail")
     else:
         _log.debug("gate passed %s (%d files, sha %s)", ref,
                    len(gate.get("files", [])), gate["content_sha256"][:12])
@@ -280,8 +288,16 @@ def _add_reject(reason: str) -> PatchOpResult:
 
 def _add_gate(store, manifest, patch, creating: bool, patch_id: str,
               source: dict, tree_root: str, effective_scope: str,
-              build_root: str | None) -> tuple[PatchOpResult | None, dict | None]:
+              build_root: str | None,
+              quiet: bool = False) -> tuple[PatchOpResult | None, dict | None]:
     """Fetch + gate for the add/update flow. Returns (failure, result).
+
+    quiet=True logs a failed gate at INFO, not WARNING: the curated sync
+    re-adds every catalog patch on every dev build (user policy
+    2026-10-09), and a catalog source whose stored content no longer
+    matches the new base fails that gate BY DESIGN — the honest verdict
+    rides the sync report and notes, but an unattributed 'gate REJECTED'
+    warning on the console reads as the build itself failing (LOG-2).
 
     'both' scope double-gates: clean on the FULL diff at the dev root,
     AND clean as the PRUNED overlay at the keg — a 'both' patch must never
@@ -295,7 +311,8 @@ def _add_gate(store, manifest, patch, creating: bool, patch_id: str,
     is_dev = _patches.scope_touches_dev(effective_scope)
     result = fetch_and_gate(source, gate_root, overrides=gate_overrides,
                             reverse=bool(patch.get("reversal")),
-                            skip_patterns=patterns, tree_kind=gate_kind)
+                            skip_patterns=patterns, tree_kind=gate_kind,
+                            quiet=quiet)
     if result["ok"] and effective_scope == _patches.SCOPE_BOTH:
         keg_res = fetch_and_gate(source, tree_root,
                                  overrides=_pristine_overlay(store, patch, tree_root),
@@ -547,10 +564,14 @@ def _add_transition(store, manifest, patch, patch_id: str, version: dict,
 
 def add_patch(store, patch_id: str, source: dict, tree_root: str,
               order: int = 100, reversal: bool = False,
-              scope: str | None = None, build_root: str | None = None) -> dict:
+              scope: str | None = None, build_root: str | None = None,
+              quiet: bool = False) -> dict:
     """Add (or update-check) a patch source: fetch -> gate -> store version.
     New patch lands as state=pending (needs Enable semantics are: pending +
     enabled=true -> applied at next reconcile).
+    quiet: log a failed gate at INFO (see _add_gate) — the curated sync's
+    re-gate of a stale catalog source is an EXPECTED verdict, reported in
+    its own right; it must not print a build-failure-shaped warning.
 
     reversal: True records the patch as a REVERSAL — the stored diff stays
     the forward (merged) diff, everything downstream evaluates it in the
@@ -609,7 +630,8 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
 
     is_dev = _patches.scope_touches_dev(effective_scope)
     fail, result = _add_gate(store, manifest, patch, creating, patch_id,
-                             source, tree_root, effective_scope, build_root)
+                             source, tree_root, effective_scope, build_root,
+                             quiet=quiet)
     if fail is not None:
         return fail.render()
 
@@ -893,7 +915,16 @@ def set_enabled(store, patch_id: str, enabled: bool,
         if p.get("state") in ("disabled",):
             store.set_state(p, "pending", "enabled — applies on next restart")
     else:
-        store.set_state(p, "disabled", "disabled — restores on next restart")
+        # a manual disable is a decision, not the kill switch's footprint:
+        # drop any enabled_before_kill stamp so 'patch enable-all' cannot
+        # resurrect what the user just switched off
+        p.pop("enabled_before_kill", None)
+        _ver = (store.get_version(p, p.get("desired_version")) or {})
+        applied = bool(_ver.get("applied") or _ver.get("dev_applied"))
+        store.set_state(
+            p, "disabled",
+            "disabled — restores on next restart" if applied
+            else "disabled — nothing to restore (never applied)")
     store.save(manifest)
     return {"ok": True, "state": p["state"], "approved": approved_now}
 
@@ -1173,7 +1204,8 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
             continue
         result = fetch_and_gate(src, root, overrides=overrides,
                                 reverse=bool(p.get("reversal")),
-                                skip_patterns=skip, tree_kind=kind)
+                                skip_patterns=skip, tree_kind=kind,
+                                quiet=True)
         if not result["ok"]:
             # A merged-then-touched PR fails the drift gate in EXACTLY
             # this shape: its content landed in the base and later
@@ -1199,7 +1231,8 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
                     reports[pid] = {"check": "obsolete"}
                     changed_any = True
                     continue
-            reports[pid] = {"check": "error", "reason": result.get("reason")}
+            reports[pid] = {"check": "error", "reason": result.get("reason"),
+                            "files": _ui_files(result)}
             continue
         sha = result["content_sha256"]
         newest = max((v.get("v", 0) for v in p["versions"]), default=0)
@@ -1234,7 +1267,8 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
                             src, tree_root,
                             overrides=_pristine_overlay(store, p, tree_root),
                             reverse=bool(p.get("reversal")),
-                            skip_patterns=_patches.skip_patterns(manifest))
+                            skip_patterns=_patches.skip_patterns(manifest),
+                            quiet=True)
                         upstreamed = (keg_res.get("ok")
                                       and _gate_all_already(keg_res))
                     else:

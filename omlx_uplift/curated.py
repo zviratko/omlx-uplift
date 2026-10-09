@@ -282,7 +282,8 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
             res = patchsource.add_patch(store, add_id, dict(e["source"]),
                                         tree_root, scope=scope_try,
                                         reversal=bool(e.get("reversal")),
-                                        build_root=build_root)
+                                        build_root=build_root,
+                                        quiet=True)
             both_refused = None
             if (not res.get("ok") and not res.get("obsolete")
                     and scope_try == patches.SCOPE_BOTH):

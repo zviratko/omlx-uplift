@@ -501,16 +501,29 @@ def cmd_patches(argv=None) -> int:
                    diff via --file (also accepts --pr/--url to re-point)
       enable|disable|remove   per-patch control (same paths as the dashboard)
       approve      record a safeguard approval (once|always) without enabling
-    Also: --enable-sentinel-off removes the sentinel after manual fixes.
-    Command name: 'omlx-uplift patch' (singular); legacy 'patches' still
-    dispatches here for compatibility."""
+      promote      accept the newest validated candidate as desired (and
+                   enable) — the CLI twin of the dashboard's Promote button.
+                   Without this a DISABLED patch whose source later gets a
+                   fixed version had no CLI way to adopt it: the drift
+                   check's auto-promote is enabled-only, so 'enable' would
+                   re-apply the stale (broken) desired version.
+    Also: 'disable-all' arms a sentinel file that makes every boot skip
+    the runtime patch pass AND records which patches it switched off;
+    'enable-all' is its twin — it removes the sentinel and restores
+    exactly those recorded flags, leaving patches the user had disabled
+    by hand off. PAT-3 shipped the promise of '--enable-sentinel-off' in
+    this docstring with no code behind it — the only way out of the kill
+    switch was rm(1) on a path the user had to find. Command name:
+    'omlx-uplift patch' (singular); legacy 'patches' still dispatches
+    here for compatibility."""
     import json as _json
 
     ap = argparse.ArgumentParser(prog="omlx-uplift patch")
     ap.add_argument("action", choices=["status", "apply", "check",
-                                       "disable-all", "add", "update",
-                                       "enable", "disable", "remove",
-                                       "approve", "curated", "adopt"])
+                                       "disable-all", "enable-all", "add",
+                                       "update", "enable", "disable",
+                                       "remove", "approve", "promote",
+                                       "curated", "adopt"])
     ap.add_argument("id", nargs="?",
                     help="patch id (add/update/enable/disable/remove/approve)")
     ap.add_argument("--sync", action="store_true",
@@ -633,11 +646,13 @@ def cmd_patches(argv=None) -> int:
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 
-    if args.action in ("enable", "disable", "remove"):
+    if args.action in ("enable", "disable", "remove", "promote"):
         if not args.id:
             ap.error(f"{args.action} needs a patch id")
         if args.action == "remove":
             out = patchsource.remove_patch(store, args.id, tree_root)
+        elif args.action == "promote":
+            out = patchsource.promote(store, args.id, approve=args.approve)
         else:
             out = patchsource.set_enabled(store, args.id,
                                           args.action == "enable",
@@ -656,15 +671,48 @@ def cmd_patches(argv=None) -> int:
         out["kill_switch_active"] = store.patches_disabled()
     elif args.action == "check":
         out = patchsource.check_all(store, tree_root)
-    else:  # disable-all
+    elif args.action == "disable-all":
         manifest = store.load()
         for patch in manifest.get("patches", []):
+            if patch.get("enabled") and "enabled_before_kill" not in patch:
+                # record ONLY what the kill switch itself turned off; a
+                # patch the user had already disabled keeps its own truth
+                # (first-armed wins: a re-arm over a manual state must not
+                # resurrect what was off before)
+                patch["enabled_before_kill"] = True
             patch["enabled"] = False
             store.set_state_if(patch, "disabled", "disabled by CLI")
         store.save(manifest)
         with open(store.sentinel_path, "w") as fh:
             fh.write("disabled via omlx-uplift patch disable-all\n")
         out = {"ok": True, "sentinel": store.sentinel_path}
+    elif args.action == "enable-all":
+        # the documented twin of disable-all: drop the kill switch and put
+        # back exactly the enabled flags disable-all recorded. Patches the
+        # user disabled by hand (no stamp) stay off — enable-all restores
+        # the kill switch's own footprint, it does not overrule decisions.
+        manifest = store.load()
+        restored = []
+        for patch in manifest.get("patches", []):
+            if patch.pop("enabled_before_kill", False):
+                patch["enabled"] = True
+                if patch.get("state") == "disabled":
+                    store.set_state(patch, "pending",
+                                    "enabled — applies on next restart")
+                restored.append(patch.get("id"))
+        store.save(manifest)
+        try:
+            os.remove(store.sentinel_path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            out = {"ok": False,
+                   "reason": f"sentinel still present: {exc}"}
+            print(_json.dumps(out, indent=2))
+            return 1
+        out = {"ok": True, "sentinel": store.sentinel_path,
+               "restored": restored,
+               "kill_switch_active": store.patches_disabled()}
     print(_json.dumps(out, indent=2))
     return 0 if out.get("ok", True) else 1
 

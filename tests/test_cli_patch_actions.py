@@ -187,6 +187,32 @@ class TestPatchActions(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("use 'add'", err.getvalue())
 
+    # --- LOG-2 recovery path (2026-10-09): a disabled patch whose source
+    # later gets a fixed version had no CLI way to adopt it — the drift
+    # check's auto-promote is enabled-only, so 'enable' re-applied the
+    # stale (broken) desired version and dev upgrade died again. ---
+
+    def test_promote_calls_patchsource_promote(self):
+        import omlx_uplift.patchsource as ps
+        pm = mock.MagicMock(return_value={"ok": True, "state": "pending",
+                                          "desired_version": 3})
+        store = FakeStore()
+        store.find = lambda m, pid: {"id": pid}
+        out = io.StringIO()
+        with mock.patch("omlx_uplift.patches.PatchStore", lambda: store), \
+             mock.patch("omlx_uplift.patches._omlx_root",
+                        lambda: "/x/site-packages/omlx/__init__.py"), \
+             mock.patch.object(ps, "promote", pm), \
+             contextlib.redirect_stdout(out):
+            rc = cli.cmd_patches(["promote", "my-pr"])
+        self.assertEqual(rc, 0)
+        pm.assert_called_once()
+        self.assertEqual(pm.call_args[0][1], "my-pr")
+
+    def test_promote_needs_id(self):
+        with self.assertRaises(SystemExit):   # argparse error path
+            self._cmd(["promote"])
+
 
 if __name__ == "__main__":
     unittest.main()

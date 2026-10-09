@@ -60,6 +60,39 @@ def test_materialize_fail_leaks_no_handler(home, monkeypatch):
     assert any("patch disable p-bad" in t for _, t in r2.lines)
 
 
+def test_log_handler_covers_the_source_refresh(home, monkeypatch):
+    """LOG-2 (2026-10-09): the 'gate REJECTED' warning users are told to
+    investigate in dev-install.log was emitted by _refresh_patch_sources —
+    which ran BEFORE the FileHandler was attached. The console got the
+    line, the named log stayed empty. The handler must cover the refresh:
+    a warning logged during the refresh has to land in the file."""
+    _cfg(home, monkeypatch)
+    (home / "dev-src" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(devsrc, "ensure_clone", lambda cfg: None)
+    monkeypatch.setattr(devsrc, "worktree_clean", lambda p: True)
+    monkeypatch.setattr(devsrc, "fetch_sync_ref", lambda cfg: None)
+    from omlx_uplift import patchsource
+
+    def _refresh_side_effect(cfg, res):
+        # the exact thing the real refresh does when a stored source has
+        # drifted onto a tree it no longer matches
+        logging.getLogger("omlx_uplift.patchsource").warning(
+            "gate REJECTED fake-url (1/1 files failed): x: context mismatch")
+        return {"catalog": {"report": {}}, "drift": None}
+
+    monkeypatch.setattr(devsrc, "_refresh_patch_sources", _refresh_side_effect)
+    monkeypatch.setattr(patchsource, "enabled_build_patches", lambda store: [])
+    monkeypatch.setattr(devsrc, "materialize",
+                        lambda patches, cfg: {"ok": True, "tip": "t" * 40,
+                                              "base": "b" * 40,
+                                              "commits": []})
+    r = devsrc.run_dev_build(dry_run=True)
+    assert r.ok, [(s, t) for s, t in r.lines]
+    text = open(r.log_path).read()
+    assert "gate REJECTED fake-url" in text, \
+        "warning logged during the source refresh never reached the log"
+
+
 def test_missing_config_stage_and_rc(home, monkeypatch):
     monkeypatch.setattr(devsrc, "load_config", lambda *a, **k: None)
     before = handler_count()
