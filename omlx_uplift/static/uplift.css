@@ -244,9 +244,11 @@ header.top.has-tagline .logo .logo-below {
     white-space: nowrap; cursor: default;
 }
 /* line 1 clips itself: overflow on the PARENT would cut off the absolute
-   patch line (the parent is its containing block) */
+   patch line (the parent is its containing block). 140px cap = measured
+   worst case ends x≈266, inside the logo's reserved 240+ band edge (x≈274)
+   and left of the tabs strip (x≈284) — the header cannot move. */
 .logo .logo-build .lb-main {
-    display: inline-block; max-width: 100px; overflow: hidden;
+    display: inline-block; max-width: 140px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
 }
 .logo .logo-build .lb-patches {
