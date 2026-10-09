@@ -311,10 +311,10 @@ ALL_OPS = (PATCH_ROW_OPS + PATCH_SCREEN_OPS + CATALOG_ROW_OPS
            + SERVER_ROW_OPS)
 
 # keys the loop reserves for itself — an op must never claim one
-RESERVED_KEYS = frozenset("12345n?q") | {"enter", "escape", "tab", "up",
-                                         "down", "left", "right", "pgup",
-                                         "pgdn", "home", "end", "f5",
-                                         "ctrl_c"}
+RESERVED_KEYS = frozenset("12345mnq ") | {"enter", "escape", "tab",
+                                          "backspace", "up", "down", "left",
+                                          "right", "pgup", "pgdn", "home",
+                                          "end", "f5", "ctrl_c", "space"}
 
 
 def find(key: str, pool: list) -> Op | None:

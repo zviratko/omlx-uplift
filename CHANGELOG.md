@@ -13,6 +13,17 @@ users never see.
 
 ## Unreleased
 
+- **The TUI is a menu system now, not a wall of keys.** It boots on a main
+  menu whose entries say what lives there and carry live state (the Patches
+  line already tells you how many are enabled and whether the kill switch is
+  armed). Enter opens what is highlighted: a screen from the menu, an
+  **action menu** from a patch or keg row — every command listed with a plain
+  description and the CLI command it mirrors. `m` returns to the menu, `Esc`
+  backs out one step, arrows step between screens. Number keys and letter
+  shortcuts all still work — the menus are an extra path, never a worse one.
+  Rows read as sentences too: name + description, then the state in words
+  (`applied | enabled | scope omlx | desired v3`) instead of the old
+  mark legend you had to memorize.
 - **`omlx-uplift tui` — a menu-driven terminal manager.** Five screens
   (overview, patches, curated catalog, omlx-dev keg stash, session log) for
   the everyday recovery work: enable/disable/promote/update/rollback/remove a

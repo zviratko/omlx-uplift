@@ -378,15 +378,30 @@ Repair by reinstalling the omlx formula ; the tool never writes to the
 tree .
 .It Xo Ic tui
 .Xc
-Menu-driven terminal manager over the same surface this page documents:
-overview, patches, curated catalog, the
-.Em omlx-dev
-keg stash, and both services.
-Five screens (keys
-.Ic 1 Ns - Ns Ic 5 ) ,
-.Ic j/k
-or the arrow keys move,
-.Ic enter
+Menu-driven terminal manager over the same surface this page documents.
+It boots on a main menu listing the screens:
+.Em overview ,
+.Em patches ,
+.Em curated catalog ,
+.Em omlx-dev keg
+and
+.Em session log .
+The arrow keys (or
+.Ic j Ns / Ns Ic k )
+move,
+.Ic Enter
+opens what is highlighted \(em a menu entry opens its screen, a patch or
+keg row opens its
+.Em action menu ,
+where every command is listed with what it does and what it mirrors on the
+CLI.
+.Ic m
+returns to the main menu,
+.Ic Esc
+backs out one step (submenu to list, list to menu, menu quits),
+.Ic \&left / right
+step between screens,
+.Ic space
 toggles the detail pane,
 .Ic n
 re-reads live state,
@@ -396,6 +411,10 @@ cycles the colour theme,
 lists the keys,
 .Ic q
 quits.
+The number keys
+.Ic 1 Ns - Ns Ic 5
+still jump straight to a screen, and every action keeps its letter
+shortcut; the menus are an additional path, never a worse one.
 .Pp
 The TUI implements no policy of its own.
 Every action calls the function the dashboard route calls, or runs the CLI
@@ -407,7 +426,7 @@ Nothing writes until you confirm: a state change asks
 and anything that touches tree bytes, a keg, or a running service asks you to
 type
 .Ic YES
-on its own line —
+on its own line \(em
 .Ic q
 cancels an armed question instead of answering it.
 .Pp

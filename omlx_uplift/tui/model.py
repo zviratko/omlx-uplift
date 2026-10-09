@@ -25,27 +25,46 @@ TONE_PANE = "pane"        # the detail text under the rows
 TONES = (TONE_TITLE, TONE_OK, TONE_BAD, TONE_WARN, TONE_DIM, TONE_BOLD,
          TONE_SEL, TONE_PANE)
 
+# The screens in menu order. The number keys still jump straight to a
+# screen (TUI-1 muscle memory, and scripts/tests), but the primary way to
+# move is the main menu: a visible list you arrow through (TUI-2, user
+# request: "instead of numbers I wanted menus").
+SCREEN_ORDER = ("menu", "overview", "patches", "catalog", "dev", "log")
 SCREEN_KEYS = {"1": "overview", "2": "patches", "3": "catalog",
                "4": "dev", "5": "log"}
-NAV_KEYS = [("1", "overview"), ("2", "patches"), ("3", "catalog"),
-            ("4", "dev-keg"), ("5", "log")]
-MAX_ROWS = 12
+MENU_LABELS = {"overview": "Overview", "patches": "Patches",
+               "catalog": "Curated catalog", "dev": "omlx-dev keg",
+               "log": "Session log"}
+# row budget for the renderer, in LINES (rows are one or two lines each)
+MAX_ROWS = 14
 
 
 class Row:
-    """One selectable line: `cols` paint, `detail` fills the info pane."""
+    """One selectable entry. `cols` is the main line (name, one-line
+    description); `cols2` is an optional status line painted indented below
+    it in plain words — TUI-2 replaced the terse column grid and its mark
+    legend with these, because an operator reading a recovery tool at 2 a.m.
+    should not have to decode '! B R K' first. `detail` still fills the info
+    pane under both."""
 
-    __slots__ = ("kind", "key", "cols", "detail", "raw")
+    __slots__ = ("kind", "key", "cols", "detail", "raw", "cols2")
 
-    def __init__(self, kind, key, cols, detail="", raw=None):
+    def __init__(self, kind, key, cols, detail="", raw=None, cols2=None):
         self.kind = kind
         self.key = key
         self.cols = cols
+        self.cols2 = cols2 or []
         self.detail = detail
         self.raw = raw if raw is not None else {}
 
     def text(self) -> str:
         return "  ".join(t for t, _ in self.cols)
+
+    def text2(self) -> str:
+        return " ".join(t for t, _ in self.cols2).strip()
+
+    def line_count(self) -> int:
+        return 2 if self.cols2 else 1
 
     @property
     def selectable(self) -> bool:
@@ -100,7 +119,9 @@ class Screen:
         then screen actions. Deduped by key so a row op wins over a screen op
         that shares its letter (the screen list is only shown when no row op
         claims the key)."""
-        out, seen = [], set(k for k, _ in NAV_KEYS)
+        # 'm' and the space key belong to the loop itself (menu, detail
+        # toggle) — an op label must never shadow them in the bar
+        out, seen = [], set(ops_mod.RESERVED_KEYS)
         for op in self.row_ops() + self.screen_ops():
             if op.key in seen:
                 continue
@@ -144,11 +165,15 @@ def _patch_detail(p: dict) -> str:
     if p.get("description"):
         lines.append(str(p["description"]))
     lines.append(f"source:   {_source_label(p.get('source') or {})}")
+    detail_reason = str(p.get("state_detail") or "").strip()
+    if detail_reason.lower() == str(p.get("state") or "").lower():
+        detail_reason = ""            # 'disabled — disabled' reads like a bug
     lines.append(f"state:    {p.get('state')}"
-                 + (f" — {p['state_detail']}" if p.get("state_detail") else ""))
+                 + (f" — {detail_reason}" if detail_reason else ""))
+    dv = p.get("desired_version")
     lines.append(f"enabled:  {'yes' if p.get('enabled') else 'no'}"
-                 f"   scope: {p.get('scope')}"
-                 f"   desired: v{p.get('desired_version')}")
+                 f"   scope: {p.get('scope') or '?'}"
+                 f"   desired: {('v' + str(dv)) if dv is not None else '-'}")
     if p.get("inactive_reason"):
         lines.append(f"inert:    {p['inactive_reason']}")
     if p.get("requires_approval"):
@@ -183,24 +208,69 @@ def _patch_detail(p: dict) -> str:
     return "\n".join(lines)
 
 
-def _patch_row(p: dict, kind: str) -> Row:
-    marks = "".join(m for m, on in (
-        ("!", p.get("requires_approval")),
-        ("B", p.get("curated")),
-        ("R", p.get("reversal")),
-        ("K", p.get("keg_changed"))) if on)
+def _state_words(p: dict) -> list:
+    """Plain-language status fragments for a patch/catalog row's second line.
+    Words, not marks: 'needs review' beats '!' and needs no legend (TUI-2,
+    user: 'more descriptive, less terse')."""
+    out = []
+    state = str(p.get("state") or "?")
+    if state == "installed":
+        out.append(("in your store", TONE_OK))
+    elif state == "not installed":
+        out.append(("not installed yet", TONE_DIM))
+    else:
+        out.append((state, _state_tone(state)))
+        # 'disabled | disabled' reads like a bug: when the state already IS
+        # the flag, say it once
+        if state != "disabled":
+            out.append(("enabled" if p.get("enabled") else "disabled",
+                        TONE_OK if p.get("enabled") else TONE_DIM))
+    if p.get("scope"):
+        out.append((f"scope {p['scope']}", TONE_DIM))
     desired = p.get("desired_version")
-    cols = [
-        (_pad(marks or ".", 3), TONE_WARN if "!" in marks else TONE_DIM),
-        (_pad("on" if p.get("enabled") else "off", 4),
-         TONE_OK if p.get("enabled") else TONE_DIM),
-        (_pad(str(p.get("state") or "?"), 12), _state_tone(p.get("state"))),
-        (_pad(str(p.get("scope") or "?"), 5), TONE_DIM),
-        (_pad(f"v{desired}" if desired is not None else "-", 4), TONE_DIM),
-        (_trunc(p.get("id") or "?", 30), None),
-        (_trunc((p.get("description") or "")[:40], 40), TONE_DIM),
-    ]
-    return Row(kind, p.get("id") or "?", cols, _patch_detail(p), raw=p)
+    out.append((f"desired v{desired}" if desired is not None
+                else "no version stored", TONE_DIM))
+    if p.get("curated"):
+        out.append((f"bundled ({p['curated']})", TONE_DIM))
+    if p.get("curated_adopted"):
+        out.append(("adopted as local", TONE_DIM))
+    if p.get("reversal"):
+        out.append(("reversal patch", TONE_DIM))
+    if p.get("keg_changed"):
+        out.append(("KEG CHANGED — re-validates on next reconcile", TONE_WARN))
+    if p.get("requires_approval"):
+        out.append(("HELD — approval needed to enable", TONE_BAD))
+    if p.get("state_detail") and state in ("needs_review", "failed"):
+        out.append((str(p["state_detail"]), TONE_BAD))
+    return out
+
+
+def _flow(frag: list, indent: str = "      ") -> list:
+    """(text, tone) fragments -> one [(text, tone)] line, joined with '  |  '
+    so each fragment keeps its own tone for the painter. One line, always:
+    rows claim a fixed number of screen lines and the fit arithmetic depends
+    on it, so overflow fragments fold into the detail pane instead — the row
+    says how many were folded. ASCII separator on purpose: this operator's
+    terminal has eaten fancy glyphs before."""
+    parts = []
+    for text, tone in frag:
+        if not text:
+            continue                     # an optional fragment that is off
+        if parts:
+            parts.append(("  |  ", TONE_DIM))
+        parts.append((text, tone))
+    return [(indent, TONE_DIM)] + parts if parts else [(indent.strip(), TONE_DIM)]
+
+
+def _patch_row(p: dict, kind: str) -> Row:
+    """One patch as two lines: name + description, then the state in words."""
+    pid = _trunc(p.get("id") or "?", 34)
+    desc = _trunc((p.get("description") or "").strip(), 52)
+    cols = [(pid, TONE_BOLD if desc else None)]
+    if desc:
+        cols.append(("  " + desc, TONE_DIM))
+    return Row(kind, p.get("id") or "?", cols, _patch_detail(p), raw=p,
+               cols2=_flow(_state_words(p)))
 
 
 # ---------------------------------------------------------------- screens --
@@ -212,16 +282,11 @@ def build_overview(ctx) -> Screen:
     broken = [p for p in all_patches if p.get("state") == "needs_review"]
     kill = view.get("kill_switch_active")
     rows = [Row("info", "patches", [
-        (_pad("patches", 9), TONE_BOLD),
-        (_pad(f"{len(all_patches)} total", 11), None),
-        (_pad(f"{len(enabled)} enabled", 12),
-         TONE_OK if enabled else TONE_DIM),
-        (_pad(f"{len(held)} held", 9), TONE_WARN if held else TONE_DIM),
-        (_pad(f"{len(broken)} to review", 13),
-         TONE_BAD if broken else TONE_DIM),
-        (_pad("kill switch: " + ("ARMED" if kill else "off"), 17),
-         TONE_BAD if kill else TONE_DIM),
-        (_pad(view.get("load_error") or "", 20), TONE_BAD),
+        ("The patch store", TONE_BOLD),
+        (f"   {len(all_patches)} stored  |  {len(enabled)} enabled"
+         f"  |  {len(held)} held  |  {len(broken)} to review"
+         f"  |  kill switch {'ARMED' if kill else 'off'}",
+         TONE_BAD if (kill or broken) else TONE_DIM),
     ], f"store:  {ctx.store.manifest_path}\n"
        f"tree:   {ctx.tree_root or '(omlx package tree not found)'}\n"
        f"keg id: {view.get('keg_id') or '?'}"
@@ -231,13 +296,12 @@ def build_overview(ctx) -> Screen:
 
     for s in ctx.services():
         state = s.get("state") or "unknown"
+        up = state in ("started", "running")
         rows.append(Row(ops_mod.SERVER, s.get("formula"), [
-            (_pad(s.get("label", ""), 9), TONE_BOLD),
-            (_pad(state, 11),
-             TONE_OK if state in ("started", "running") else TONE_DIM),
-            (_pad(f"port {s.get('port', '?')}", 11), TONE_DIM),
-            (_pad(f"{s.get('patched', '?')} applied", 12), TONE_DIM),
-            (_trunc(s.get("keg") or "", 44), TONE_DIM),
+            (f"Service {s.get('label') or s.get('formula')}", TONE_BOLD),
+            (f"   {state} on port {s.get('port', '?')}"
+             f"  |  {s.get('patched', '?')} enabled patches applied",
+             TONE_OK if up else TONE_DIM),
         ], f"service '{s.get('formula')}': {state}\n"
            f"port: {s.get('port')}\n"
            f"keg: {s.get('keg') or '?'}\n"
@@ -249,21 +313,20 @@ def build_overview(ctx) -> Screen:
     dev = ctx.dev_summary()
     if dev.get("installed"):
         rows.append(Row("info", "dev", [
-            (_pad("omlx-dev", 9), TONE_BOLD),
-            (_pad(str(dev.get("branch") or "?"), 12), None),
-            (_pad(f"tip {str(dev.get('tip') or '?')[:9]}", 15), None),
-            (_pad(f"+{dev.get('ahead', 0)}/-{dev.get('behind', 0)} "
-                  f"{dev.get('sync_ref')}", 26),
+            ("The omlx-dev carrier", TONE_BOLD),
+            (f"   branch {dev.get('branch') or '?'} at "
+             f"{str(dev.get('tip') or '?')[:9]}"
+             f"  |  +{dev.get('ahead', 0)}/-{dev.get('behind', 0)} "
+             f"{dev.get('sync_ref')}"
+             f"  |  {len(dev.get('patch_commits') or [])} patch commits",
              TONE_WARN if dev.get("behind") else TONE_DIM),
-            (_pad(f"{len(dev.get('patch_commits') or [])} commits", 11),
-             TONE_DIM),
-            (_trunc(dev.get("drift_note") or "", 20),
-             TONE_BAD if dev.get("drift") else TONE_DIM),
         ], "\n".join(dev.get("detail") or [])))
     else:
         rows.append(Row("info", "dev", [
-            (_pad("omlx-dev", 9), TONE_BOLD),
-            (_trunc(dev.get("reason") or "not bootstrapped", 66), TONE_DIM),
+            ("The omlx-dev carrier", TONE_BOLD),
+            (_trunc("not set up — " + (dev.get("reason")
+                                       or "run 'omlx-uplift dev bootstrap'"),
+                    60), TONE_DIM),
         ], "run: omlx-uplift dev bootstrap"))
 
     footer = []
@@ -277,13 +340,18 @@ def build_overview(ctx) -> Screen:
     if ctx.pth_missing():
         footer.append(("uplift .pth NOT mounted in the dev keg — run: "
                        "omlx-uplift install --formula omlx-dev", TONE_BAD))
-    return Screen("overview", f"omlx-uplift  |  {ctx.store.base_dir}", rows,
-                  footer, ops_mod.SERVER_ROW_OPS)
+    return Screen("overview",
+                  f"Overview  -  {ctx.store.base_dir}", rows, footer,
+                  ops_mod.SERVER_ROW_OPS)
 
 
 def build_patches(ctx) -> Screen:
     view = ctx.patches_view()
-    rows = [_patch_row(p, ops_mod.PATCH) for p in view.get("patches") or []]
+    all_patches = view.get("patches") or []
+    enabled = [p for p in all_patches if p.get("enabled")]
+    held = [p for p in all_patches if p.get("requires_approval")]
+    broken = [p for p in all_patches if p.get("state") == "needs_review"]
+    rows = [_patch_row(p, ops_mod.PATCH) for p in all_patches]
     err = view.get("load_error")
     if err:
         # a missing tree or an unreadable manifest explains an empty list far
@@ -294,7 +362,8 @@ def build_patches(ctx) -> Screen:
                            "store file on disk is untouched"))
     if not rows:
         rows = [Row("empty", "", [(_trunc(
-            "no patches stored — press 3 for the curated catalog", 70),
+            "no patches stored - open the Curated catalog (m -> catalog) "
+            "and press Enter on an entry to install it", 90),
             TONE_DIM)], "")]
     kill = view.get("kill_switch_active")
     cfg = view.get("config") or {}
@@ -307,9 +376,15 @@ def build_patches(ctx) -> Screen:
                    f"{str(view.get('keg_id') or '?')[:12]}  |  auto-check "
                    f"{'on' if cfg.get('auto_update_check') else 'off'}",
                    TONE_DIM))
-    footer.append(("marks: ! held  B bundled  R reversal  K keg changed",
-                   TONE_DIM))
-    return Screen("patches", "patches", rows, footer,
+    title = (f"Patches  -  {len(all_patches)} stored"
+             f"  |  {len(enabled)} enabled")
+    if kill:
+        title += "  |  KILL SWITCH ARMED"
+    if held:
+        title += f"  |  {len(held)} held"
+    if broken:
+        title += f"  |  {len(broken)} to review"
+    return Screen("patches", title, rows, footer,
                   ops_mod.PATCH_ROW_OPS + ops_mod.PATCH_SCREEN_OPS)
 
 
@@ -326,19 +401,17 @@ def build_catalog(ctx) -> Screen:
             TONE_BAD)], "the store on disk is untouched"))
     for tier, entries in (res.get("tiers") or {}).items():
         rows.append(Row("header", tier, [
-            (f"{tier} ({len(entries)})", TONE_BOLD),
-            (_trunc("installs ENABLED by default" if tier == "default"
-                    else "installs disabled — enable by hand", 46), TONE_DIM),
+            (f"{tier.capitalize()} tier ({len(entries)})", TONE_BOLD),
+            (("  installed by default when you add it" if tier == "default"
+              else "  installed switched off — enable it by hand"), TONE_DIM),
         ], ""))
         for e in entries:
             row = _patch_row({**e,
+                              "id": e.get("under_id") or e.get("id"),
                               "enabled": e.get("installed"),
                               "state": "installed" if e.get("installed")
                               else "not installed"}, ops_mod.CATALOG)
             row.raw = {**e, "entry": e}
-            if e.get("installed"):
-                row.cols[5] = (_trunc(f"{e.get('under_id') or e['id']}", 30),
-                               TONE_OK)
             detail = _patch_detail(e)
             if e.get("source_ok") is False:
                 detail += "\nINCOMPLETE manifest — this entry cannot install"
@@ -351,11 +424,10 @@ def build_catalog(ctx) -> Screen:
                 detail += "\npress i to fetch, gate and store it"
             row.detail = detail
             rows.append(row)
-    footer = [("i installs the selected entry  c syncs the whole catalog  "
-               "o adopts an installed catalog patch as local", TONE_DIM),
-              ("the catalog is served from GitHub — 'c' needs network",
-               TONE_DIM)]
-    return Screen("catalog", "curated catalog", rows, footer,
+    footer = [("the catalog is published in the omlx-uplift repo on GitHub; "
+               "'sync' and 'install' need network. A failed fetch never "
+               "touches your store.", TONE_DIM)]
+    return Screen("catalog", "Curated catalog", rows, footer,
                   ops_mod.CATALOG_ROW_OPS + ops_mod.CATALOG_SCREEN_OPS)
 
 
@@ -368,15 +440,20 @@ def build_dev(ctx) -> Screen:
             TONE_WARN)], "run: omlx-uplift dev bootstrap"))
     else:
         rows.append(Row("info", "dev-src", [
-            (_pad("dev-src", 9), TONE_BOLD),
-            (_pad(str(dev.get("branch") or "?"), 12), None),
-            (_pad(f"tip {str(dev.get('tip') or '?')[:9]}", 15), None),
-            (_pad(f"base {str(dev.get('base') or '?')[:9]}", 16), TONE_DIM),
-            (_pad(f"pin {str(dev.get('base_pin') or 'HEAD')[:9]}", 13),
-             TONE_WARN if dev.get("base_pin") else TONE_DIM),
-            (_trunc(dev.get("auto_note") or "", 28),
-             TONE_DIM if dev.get("auto_update") else TONE_WARN),
-        ], "\n".join(dev.get("detail") or [])))
+            ("Source carrier  dev-src", TONE_BOLD),
+        ], "\n".join(dev.get("detail") or []),
+            cols2=_flow([
+                (f"branch {dev.get('branch') or '?'}", None),
+                (f"tip {str(dev.get('tip') or '?')[:9]}", None),
+                (f"base {str(dev.get('base') or '?')[:9]}", TONE_DIM),
+                (f"pinned at {str(dev.get('base_pin') or 'HEAD')[:9]}"
+                 if dev.get("base_pin") else "follows HEAD (not pinned)",
+                 TONE_WARN if dev.get("base_pin") else TONE_DIM),
+                (dev.get("auto_note") or
+                 ("auto-build on" if dev.get("auto_update")
+                  else "auto-build off — builds happen on demand"),
+                 TONE_DIM if dev.get("auto_update") else TONE_WARN),
+            ])))
         for note in (dev.get("drift") or []):
             rows.append(Row("empty", "", [
                 (_pad("DRIFT", 9), TONE_BAD),
@@ -392,12 +469,8 @@ def build_dev(ctx) -> Screen:
         name = m.get("name") or "?"
         is_active = (m.get("cellar_name") or name) == active
         rows.append(Row(ops_mod.KEG, name, [
-            (_pad(">" if is_active else ".", 3),
-             TONE_OK if is_active else TONE_DIM),
-            (_pad(str(m.get("stashed_at") or "?")[:19], 21), None),
-            (_pad(f"{(m.get('bytes') or 0) / 2 ** 30:.1f} GiB", 9), TONE_DIM),
-            (_pad(str(m.get("method") or "?"), 9), TONE_DIM),
-            (_trunc(name, 44), TONE_OK if is_active else None),
+            (("Active keg  " if is_active else "Keg stash   ")
+             + _trunc(name, 40), TONE_OK if is_active else TONE_BOLD),
         ], f"keg stash: {name}\n"
            f"path:   {m.get('path')}\n"
            f"cellar: {m.get('cellar_name') or '?'}\n"
@@ -406,7 +479,17 @@ def build_dev(ctx) -> Screen:
               "activate: 's' here   (CLI: omlx-uplift dev use " + name + ")")
            + ("\nNOTE: several stashed builds share this Cellar address "
               "(DEV-13) — prune keeps the newest"
-              if m.get("shared_cellar") else "")))
+              if m.get("shared_cellar") else ""),
+            cols2=_flow([
+                ("stashed " + str(m.get("stashed_at") or "?")[:19], TONE_DIM),
+                (f"{(m.get('bytes') or 0) / 2 ** 30:.1f} GiB", TONE_DIM),
+                (f"by {m.get('method') or '?'}", TONE_DIM),
+                ("ACTIVE — the keg the service runs from right now", TONE_OK)
+                if is_active else
+                ("press Enter for actions", TONE_DIM),
+                ("shares a Cellar address (DEV-13)", TONE_WARN)
+                if m.get("shared_cellar") else ("", TONE_DIM),
+            ])))
     if dev.get("installed") and not stashes:
         rows.append(Row("empty", "", [(_trunc(
             "no stashed kegs — 'dev install' stashes automatically", 60),
@@ -416,10 +499,15 @@ def build_dev(ctx) -> Screen:
     if ctx.pth_missing():
         footer.append(("uplift .pth NOT mounted in the active dev keg — run: "
                        "omlx-uplift install --formula omlx-dev", TONE_BAD))
-    footer.append(("switching or rolling back a keg turns auto-build OFF "
-                   "(DEV-11) and rewrites brew's link record — restart the "
-                   "service to load the new keg", TONE_DIM))
-    return Screen("dev", "omlx-dev keg", rows, footer,
+    footer.append(("brew keeps one keg address per formula: activating a "
+                   "stash swaps the physical keg and turns auto-build off "
+                   "(DEV-11), so what runs next is exactly this build. "
+                   "Restart the service afterwards to load it.", TONE_DIM))
+    n_stash = len(stashes)
+    return Screen("dev",
+                  f"omlx-dev keg  -  {n_stash} stash(es)"
+                  + (f"  |  active: {active}" if active else ""),
+                  rows, footer,
                   ops_mod.KEG_ROW_OPS + ops_mod.KEG_SCREEN_OPS)
 
 
@@ -430,12 +518,174 @@ def build_log(ctx) -> Screen:
     if not rows:
         rows = [Row("empty", "", [("nothing has run in this session",
                                    TONE_DIM)], "")]
-    return Screen("log", "session log", rows,
-                  [("in-memory only — every action also logged the CLI command "
-                    "it mirrors", TONE_DIM)], [])
+    return Screen("log",
+                  f"Session log  -  {len(lines)} line(s), newest first",
+                  rows,
+                  [("what you did in this TUI session, newest first. Every "
+                    "line names the CLI command the action mirrored, so the "
+                    "log doubles as the recipe to do it by hand. In-memory "
+                    "only — it is gone when you quit.", TONE_DIM)], [])
 
 
-BUILDERS = {"overview": build_overview, "patches": build_patches,
+def build_menu(ctx) -> Screen:
+    """The front door (TUI-2). The operator asked for menus, not number
+    keys: every destination is one arrow-press and Enter away, each entry
+    says what lives there, and its status line carries live state so the
+    menu doubles as the first-glance overview. 'm' from any screen comes
+    back here; Esc backs out one step; the number keys still jump."""
+    view = ctx.patches_view()
+    all_patches = view.get("patches") or []
+    enabled = [p for p in all_patches if p.get("enabled")]
+    held = [p for p in all_patches if p.get("requires_approval")]
+    kill = view.get("kill_switch_active")
+    broken = [p for p in all_patches if p.get("state") == "needs_review"]
+    services = ctx.services()
+    dev = ctx.dev_summary()
+
+    svc_bits = [((s.get("label") or s.get("formula"))
+                 + " " + (s.get("state") or "?"),
+                 TONE_OK if (s.get("state") or "") in ("started", "running")
+                 else TONE_DIM)
+                for s in services]
+
+    rows = [
+        Row("menu", "overview",
+            [("Overview", TONE_BOLD),
+             ("   the machine at a glance", TONE_DIM)],
+            detail="Start here: the patch store roll-up, both services ("
+                   "omlx on :8000, omlx-dev on :8001) and the dev carrier "
+                   "with its drift notes. A selected service row can be "
+                   "restarted with Enter, after a typed YES.",
+            cols2=_flow([(f"{len(all_patches)} patches stored",
+                          TONE_DIM if all_patches else TONE_WARN)]
+                        + svc_bits)),
+        Row("menu", "patches",
+            [("Patches", TONE_BOLD),
+             ("   enable, promote, roll back, remove", TONE_DIM)],
+            detail="Every patch in the store with its live state. Enter on "
+                   "a patch opens its actions; the letters (e d p u v a t x) "
+                   "still work directly. 'reconcile now' applies the desired "
+                   "state to the tree without a restart; otherwise changes "
+                   "land at the next boot. The kill switch (K/U) boots omlx "
+                   "completely unpatched until cleared.",
+            cols2=_flow([
+                (f"{len(enabled)} of {len(all_patches)} enabled", TONE_DIM),
+                (f"{len(held)} held for approval", TONE_WARN) if held
+                else ("none held", TONE_DIM),
+                (f"{len(broken)} to review" if len(broken) != 1
+             else "1 to review", TONE_BAD) if broken
+                else ("none to review", TONE_DIM),
+                ("KILL SWITCH ARMED - boots unpatched", TONE_BAD) if kill
+                else ("kill switch off", TONE_DIM),
+            ])),
+        Row("menu", "catalog",
+            [("Curated catalog", TONE_BOLD),
+             ("   ready-made patches from the repo", TONE_DIM)],
+            detail="Patches published under curated_patches/ in the public "
+                   "repo. The default tier installs enabled; the optional "
+                   "tier installs switched off. Install fetches, gates and "
+                   "stores one entry; sync re-reads the whole catalog; "
+                   "'adopt as local' detaches an installed entry so future "
+                   "syncs leave your decisions alone. Needs network - a "
+                   "failed fetch never touches your store.",
+            cols2=_flow([("served from GitHub", TONE_DIM),
+                         ("re-reads when you open it", TONE_DIM)])),
+        Row("menu", "dev",
+            [("omlx-dev keg", TONE_BOLD),
+             ("   the patched build and its stash", TONE_DIM)],
+            detail="The omlx-dev carrier: which branch and tip it sits on, "
+                   "and every stashed keg build. Activate switches the "
+                   "running keg (HIGH - brew's link record moves and "
+                   "auto-build turns off, DEV-11); rollback restores the "
+                   "newest stash; prune drops old ones; dev install rebuilds "
+                   "from the current patched source. Restart the service "
+                   "after any keg change.",
+            cols2=_flow([
+                (f"branch {dev.get('branch') or '?'} at "
+                 f"{str(dev.get('tip') or '?')[:9]}", TONE_DIM)
+                if dev.get("installed")
+                else ("not bootstrapped - 'omlx-uplift dev bootstrap' "
+                      "sets it up", TONE_WARN),
+            ])),
+        Row("menu", "log",
+            [("Session log", TONE_BOLD),
+             ("   what you ran, with its CLI twin", TONE_DIM)],
+            detail="Every action this session performed, newest first. Each "
+                   "line names the exact CLI command it mirrored, so the "
+                   "log doubles as the recipe for doing the same by hand. "
+                   "In-memory only - quitting clears it.",
+            ),
+    ]
+    footer = [("Enter opens the highlighted item; arrows or j/k move. "
+               "Number keys 1-5 still jump straight to a screen.", TONE_DIM)]
+    return Screen("menu", "Uplift control menu", rows, footer, [])
+
+
+def build_actions(screen: Screen) -> "Screen":
+    """The action menu for the selected row (TUI-2). Enter on a patch, keg,
+    catalog or service row lands here instead of expecting a remembered
+    letter: one line per action with its description, then the actions the
+    screen itself offers, and what each mirrors on the CLI. Letters stay
+    armed — pressing 'x' here runs the same 'remove' the list screen's 'x'
+    would. This is a VIEW of the same op pool: it dispatches the identical
+    Op objects through the identical confirm gates, so it cannot invent a
+    second policy."""
+    row = screen.current()
+    if row is None:
+        return screen
+    pool = ops_mod.ops_for(row.kind, screen.ops_pool)
+    body = row.raw or {}
+    rows = []
+
+    def op_rows(ops_list, target_row):
+        out = []
+        for op in ops_list:
+            cols = [(f"[{op.key}] {op.label}",
+                     TONE_BAD if op.danger == ops_mod.HIGH else None)]
+            if op.hint:
+                cols.append(("   " + _trunc(op.hint, 60), TONE_DIM))
+            detail = op.hint or ""
+            cli = op.cli_line(body if target_row is not None else None)
+            if cli and not cli.startswith("("):
+                detail += ("\n\nCLI equivalent:\n  " + cli) if detail \
+                          else ("CLI equivalent:\n  " + cli)
+            detail += ("\n\nneeds a typed YES (it changes tree bytes, a keg "
+                       "or a running service)" if op.danger == ops_mod.HIGH
+                       else "\n\nasks for one 'y' before anything is "
+                            "written" if op.danger == ops_mod.WRITE
+                       else "\n\nread-only — changes nothing")
+            if op.needs_tree:
+                detail += "\n\n(needs the omlx package tree to be visible)"
+            out.append(Row("action", op.key, cols, detail.strip(),
+                           raw={"op": op}))
+        return out
+
+    rows.extend(op_rows(pool, row))
+    screen_ops = screen.screen_ops()
+    if screen_ops:
+        rows.append(Row("header", "screen",
+                        [("Screen actions  (apply to the whole screen, "
+                          "not to this row)", TONE_DIM)], ""))
+        rows.extend(op_rows(screen_ops, None))
+    back = Row("action", "", [("  (Esc goes back)", TONE_DIM)],
+               "Go back to the list without running anything. The parent "
+               "screen re-reads its state, so whatever happened is visible.")
+    rows.append(back)
+    # an 'empty' or error row still has the SCREEN's actions (the kill
+    # switch must stay reachable with no tree), so the title names the row
+    # when it has one and the screen when it does not
+    what = (f" for '{row.key}'" if row.key
+            else f" on {MENU_LABELS.get(screen.name, screen.name)}")
+    return Screen(screen.name + ":actions",
+                  f"Actions{what}", rows,
+                  [("arrows choose, Enter runs (then the usual confirmation). "
+                    "The letters work from the list screen too — this menu "
+                    "lists the same commands, it adds none.", TONE_DIM)],
+                  [])
+
+
+BUILDERS = {"menu": build_menu,
+            "overview": build_overview, "patches": build_patches,
             "catalog": build_catalog, "dev": build_dev, "log": build_log}
 
 
@@ -478,8 +728,10 @@ def render(screen: Screen, width: int, detail=None, prompt: str = "",
     tail = _tail(screen, prompt, busy, yes_line, width, kb0)
     body = detail if detail is not None else (
         screen.current().detail if screen.current() else "")
+    # the pane is prose, not a table: wrap it to the window instead of
+    # cutting each source line, so a long explanation stays readable
     pane = [(_trunc(line, width), TONE_PANE)
-            for line in str(body).splitlines()] if body else []
+            for line in _wrap(str(body), width)] if body else []
 
     if not height:                    # no window size given: no clipping
         rows_out = _rows_block(screen, width, MAX_ROWS)
@@ -533,42 +785,72 @@ def render(screen: Screen, width: int, detail=None, prompt: str = "",
     return out
 
 
+def _line_window(counts: list, sel: int, budget: int) -> tuple:
+    """(first, last) half-open range of rows whose combined LINES fit
+    `budget`. The selected row always makes it in (it was asked for); the
+    window then grows one row above, one below, alternating, so the cursor
+    stays roughly centred the way the old row-unit window did."""
+    if counts[sel] > budget:
+        return sel, sel + 1
+    first, last = sel, sel + 1
+    used = counts[sel]
+    below = True
+    while True:
+        placed = False
+        if below and last < len(counts) and used + counts[last] <= budget:
+            used += counts[last]
+            last += 1
+            placed = True
+        elif not below and first > 0 and used + counts[first - 1] <= budget:
+            first -= 1
+            used += counts[first]
+            placed = True
+        elif last < len(counts) and used + counts[last] <= budget:
+            used += counts[last]
+            last += 1
+            placed = True
+        elif first > 0 and used + counts[first - 1] <= budget:
+            first -= 1
+            used += counts[first]
+            placed = True
+        if not placed:
+            return first, last
+        below = not below
+
+
 def _rows_block(screen: Screen, width: int, limit: int) -> list:
-    """At most `limit` painted lines, the '... more rows' marker included —
-    that is what makes the frame budget in render() exact."""
+    """At most `limit` painted LINES — a descriptive row is one or two lines,
+    so the frame budget is counted in lines, never in rows. The hidden-count
+    marker shares the same budget; if the window is down to a single cramped
+    line the marker rides on that line instead of overflowing the frame
+    (curses throws on a write past the last cell — same rule as always)."""
     n = len(screen.rows)
     if limit <= 0 or n == 0:
         screen.shown = (0, 0)
         return []
-    inline_hidden = 0
-    if n <= limit:
+    sel = max(0, min(screen.selected, n - 1))
+    counts = [r.line_count() for r in screen.rows]
+    if sum(counts) <= limit:
         first, last, marker = 0, n, False
-    elif limit == 1:
-        # a second line would overflow the budget, so the hidden count rides
-        # on the row line itself — never silently drop rows
-        first, last = _window(n, screen.selected, 1)
-        marker = False
-        inline_hidden = n - last
     else:
-        cap = max(1, limit - 1)            # the marker costs a line
-        first, last = _window(n, screen.selected, cap)
-        marker = True
-    screen.shown = (first, last)
+        first, last = _line_window(counts, sel, max(1, limit - 1))
+        marker = (last < n) or (first > 0)
     out = []
     for i in range(first, last):
-        row = screen.rows[i]
-        sel = (i == screen.selected)
-        tone = (TONE_SEL if sel and row.selectable else
-                TONE_BOLD if sel else
-                TONE_DIM if row.kind in ("header", "empty", "info") else None)
-        text = _row_text(row, width - 1, selected=sel)
-        if inline_hidden and i == last - 1:
-            note = f"   …+{inline_hidden} row(s)"
-            text = _trunc(text, max(4, width - 1 - len(note))) + note
-        out.append((_trunc(text, width - 1), tone))
-    if marker:
-        out.append((_trunc(f"    ... {n - last} more row(s)", width),
-                    TONE_DIM))
+        for line in _row_lines(screen.rows[i], width,
+                               selected=(i == screen.selected)):
+            if len(out) >= limit:
+                break               # cramped: drop trailing status lines
+            out.append((_trunc(line[0], width - 1), line[1]))
+    hidden = (n - last) + (first if marker else 0)
+    if hidden:
+        note = f"    ... +{hidden} more row(s)"
+        if len(out) < limit:
+            out.append((_trunc(note, width), TONE_DIM))
+        elif out:
+            t, tn = out[-1]
+            out[-1] = (_trunc(t, max(4, width - 1 - len(note))) + note, tn)
+    screen.shown = (first, last)
     return out
 
 
@@ -645,29 +927,65 @@ def _pack(items: list, width: int, nlines: int) -> list:
     return out[:nlines]
 
 
+# one-line legend of the keys that work EVERYWHERE, so a new operator sees
+# the vocabulary before the verbs (TUI-2: menus are the primary path; the
+# letters stay as the fast path)
+# must stay under 80 cols — the legend line may never truncate on a plain
+# terminal, and T (theme) belongs here because it is advertised on every
+# screen, not only where an op lists it
+NAV_LEGEND = ("arrows/j-k move  Enter actions  m menu  T theme  "
+              "? help  q quit")
+
+
 def _keybar(screen: Screen, width: int, maxlines: int = 3) -> list:
-    """Navigation line + the actions available on the current row/screen,
-    wrapped into at most `maxlines` lines TOTAL (nav line included)."""
+    """Legend line + the letter shortcuts available on the current row or
+    screen, wrapped into at most `maxlines` lines TOTAL."""
     maxlines = max(1, int(maxlines))
-    nav = "[" + "] [".join(f"{k} {v}" for k, v in NAV_KEYS) + "]"
     if maxlines == 1:
-        return [_trunc(nav + "  [T] theme  [?] help  [q] quit", width)]
-    chunks = [f"[{k}] {v}" for k, v in screen.keymap()]
+        return [_trunc(NAV_LEGEND, width)]
+    chunks = [f"[{k}] {_trunc(v, 34)}" for k, v in screen.keymap()]
     out = _pack(chunks, width, maxlines - 1)
-    # quit/theme/help are the escape hatch: they must never be the items a
-    # narrow window drops, so they go on their own line (or inline if the
-    # packed lines left room on the last one)
-    escape = "[T] theme  [?] help  [q] quit"
-    if out and len(out[-1]) + len(escape) + 2 <= width:
-        out[-1] = f"{out[-1]}  {escape}"
-    else:
-        out = (out + [escape])[-(maxlines - 1):]
-    return [_trunc(nav, width)] + out
+    return [_trunc(NAV_LEGEND, width)] + out
 
 
 def _row_text(row: Row, width: int, selected: bool = False) -> str:
     return _trunc(f"{'> ' if selected else '  '}"
                   f"{'  '.join(t for t, _ in row.cols)}", width)
+
+
+# how urgent each tone is, for the "paint the whole status line in the
+# worst tone it contains" rule below
+_TONE_RANK = {TONE_BAD: 3, TONE_WARN: 2, TONE_OK: 1, TONE_DIM: 0, None: 0}
+
+
+def _row_lines(row: Row, width: int, selected: bool = False) -> list:
+    """[(text, tone)] for one row: the name line, then the status line.
+    curses paints one attribute per addstr, so the status line takes the
+    WORST tone its fragments carry — a line containing 'HELD' or
+    'needs review' must not wash out to dim just because most of it is
+    ordinary. The status line never uses the selection tone: a selected row
+    should still read as a sentence, not turn into a solid block."""
+    name_tone = (TONE_SEL if selected and row.selectable else
+                 TONE_BOLD if selected else
+                 TONE_DIM if row.kind in ("header", "empty") else None)
+    out = [(_row_text(row, width - 1, selected), name_tone)]
+    if not row.cols2:
+        return out
+    prefix = "      " if not selected else "      > "
+    chunks = [c for c in row.cols2 if c[0] != "      "]
+    line, worst = prefix, 0
+    for text, tone in chunks:
+        if len(line) + len(text) > width - 1:
+            break
+        line += text
+        worst = max(worst, _TONE_RANK.get(tone, 0))
+    # a line cut by the width must not end on a dangling separator
+    line = line.rstrip()
+    while line.endswith("|"):
+        line = line[:-1].rstrip()
+    status_tone = {3: TONE_BAD, 2: TONE_WARN, 1: TONE_OK}.get(worst, TONE_DIM)
+    out.append((_trunc(line, width - 1), status_tone))
+    return out
 
 
 def _window(n: int, sel: int, limit: int = MAX_ROWS) -> tuple:

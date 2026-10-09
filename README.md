@@ -152,11 +152,22 @@ trying to undo broke it.
 omlx-uplift tui
 ```
 
-Five screens: **1** overview (store roll-up, both services, the dev carrier),
-**2** patches, **3** curated catalog, **4** omlx-dev keg stash, **5** session
-log. `j`/`k` or the arrows move, `enter` toggles the detail pane, `n` re-reads
-live state, `T` cycles the colour theme, `?` lists the keys, `q` quits. Mouse
-clicks select a row.
+It boots on a **main menu**: overview (store roll-up, both services, the dev
+carrier), patches, curated catalog, omlx-dev keg stash, session log. Each entry
+says what lives there and carries live state, so the menu is also the
+first-glance view. The arrows (or `j`/`k`) move, **Enter opens what is
+highlighted** — a menu entry opens its screen, and a patch or keg row opens an
+**action menu** listing every command with what it does and the CLI command it
+mirrors. `m` returns to the menu, `Esc` backs out one step, `←`/`→` step between
+screens, `space` toggles the detail pane, `n` re-reads live state, `T` cycles the
+colour theme, `?` lists the keys, `q` quits. Mouse clicks select a row.
+
+Rows read as sentences, not codes: the name and description on the first line,
+the state in words on the second (`applied | enabled | scope omlx | desired v3`),
+tinted by how urgent it is. Nothing needs a legend.
+
+The menus are an extra path, never a worse one: number keys `1`-`5` still jump
+straight to a screen and every action keeps its letter shortcut.
 
 It adds no capability the CLI does not have and **no policy of its own**: each
 action calls the same function the dashboard route calls, or runs the CLI verb

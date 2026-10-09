@@ -28,21 +28,24 @@ YES_PROMPT_SUFFIX = "(type YES, then enter)"
 HELP_LINES = [
     "omlx-uplift tui — keys and rules",
     "",
-    "  1 overview   2 patches   3 catalog   4 dev keg   5 session log",
-    "  j/k or up/down  move     PgUp/PgDn  jump by 8    enter  detail pane",
-    "  n  re-read live state    T  cycle colour theme    ?  this help",
-    "  q  quit",
+    "  Navigate with the arrows (or j/k). Enter opens what is",
+    "  highlighted: a menu entry opens its screen, a patch opens its",
+    "  action list. m goes to the main menu, Esc backs out one step,",
+    "  left/right step between screens. Numbers 1-5 still jump.",
+    "  PgUp/PgDn  jump by 8    space  detail pane    n  re-read state",
+    "  T  cycle colour theme    ?  this help    q  quit",
     "",
-    "  A letter runs the action printed above it in the key bar. Write",
-    "  actions answer y/N; actions that touch tree bytes, a keg or the",
-    "  running service ask you to type YES. Every action shows the CLI",
-    "  command it mirrors, so nothing here is hidden from the shell — you",
-    "  can always do the same thing by hand.",
+    "  Every action is also a letter on the list screen (printed in the",
+    "  bar and in the action menu). Write actions answer y/N; actions",
+    "  that touch tree bytes, a keg or the running service ask you to",
+    "  type YES. Every action shows the CLI command it mirrors, so",
+    "  nothing here is hidden from the shell — you can always do the",
+    "  same thing by hand.",
     "",
-    "  Nothing is written unless you confirm it. The store on disk is the",
-    "  same one the dashboard and the CLI use, and omlx re-applies patches",
-    "  at every boot, so most patch changes land on the next restart (or",
-    "  press 'y' on the patches screen to reconcile right now).",
+    "  Nothing is written unless you confirm it. The store on disk is",
+    "  the same one the dashboard and the CLI use, and omlx re-applies",
+    "  patches at every boot, so most patch changes land on the next",
+    "  restart (or run 'reconcile now' on the patches screen).",
     "",
     "  Ctrl-C cancels a running command (a build, a restart). An in-process",
     "  store write cannot be interrupted and simply finishes.",
@@ -62,7 +65,11 @@ class App:
     def __init__(self, ctx: Context | None = None):
         self.ctx = ctx or Context()
         self.screens: dict[str, model.Screen] = {}
-        self.current = "overview"
+        # TUI-2: boot on the main menu — the operator asked for menus. The
+        # action submenu is a VIEW of another screen (same op objects, same
+        # gates); actions_for names the screen whose row it listed.
+        self.current = "menu"
+        self.actions_for: str | None = None
         self.detail_open = True
         self.notice = ""
         self.busy = ""
@@ -111,6 +118,10 @@ class App:
             self.proc = proc
 
     # --------------------------------------------------------------- screens --
+    @property
+    def parent_screen(self) -> model.Screen | None:
+        return self.screens.get(self.actions_for or self.current)
+
     def build(self, name: str | None = None) -> model.Screen:
         name = name or self.current
         old = self.screens.get(name)
@@ -130,17 +141,83 @@ class App:
         self.last_build = time.monotonic()
         return screen
 
+    def _submenu_name(self) -> str:
+        return (self.actions_for or "") + ":actions"
+
+    def _rebuild_submenu(self) -> None:
+        """Re-derive the submenu from its (freshly rebuilt) parent, keeping
+        the cursor on the same action when it is still offered."""
+        parent = self.screens.get(self.actions_for or "")
+        if parent is None:
+            self.actions_for = None
+            return
+        old = self.screens.get(self._submenu_name())
+        keep = old.current().key if (old and old.current()) else None
+        sub = model.build_actions(parent)
+        if keep:
+            sub.selected = next((i for i, r_ in enumerate(sub.rows)
+                                 if r_.key == keep), 0)
+        self.screens[self._submenu_name()] = sub
+
     @property
     def screen(self) -> model.Screen:
+        if self.in_actions:
+            sub = self.screens.get(self._submenu_name())
+            if sub is not None:
+                return sub
+            self._rebuild_submenu()
+            sub = self.screens.get(self._submenu_name())
+            if sub is not None:
+                return sub
         return self.screens.get(self.current) or self.build()
+
+    def _step_screen(self, direction: int) -> None:
+        """left/right walk the screen list in menu order (TUI-2: arrows are
+        the primary navigation everywhere, not just inside a list)."""
+        order = model.SCREEN_ORDER
+        i = order.index(self.current if self.current in order else "menu")
+        self.goto(order[(i + direction) % len(order)])
 
     def goto(self, name: str) -> None:
         if name not in model.BUILDERS:
             return
         self.current = name
+        self.actions_for = None      # any real screen change closes a submenu
         self.pending = None
         self.yes_line = ""
         self.build(name)
+
+    # ------------------------------------------------------- action submenu --
+    def open_actions(self) -> bool:
+        """Enter on a row that HAS actions opens the action menu (TUI-2).
+        Returns False when there is nothing to open — the caller then does
+        the old Enter behaviour (toggle the detail pane)."""
+        s = self.screen
+        row = s.current()
+        # an 'empty'/error row owns no ROW actions but the screen still has
+        # some (reconcile, the kill switch) — exactly what an operator with a
+        # broken tree needs, so Enter opens the menu for those too
+        if row is None or not (s.row_ops() or s.screen_ops()):
+            return False
+        self.actions_for = self.current
+        submenu = model.build_actions(s)
+        self.screens[self.current + ":actions"] = submenu
+        self.pending = None
+        self.yes_line = ""
+        return True
+
+    def close_actions(self) -> None:
+        """Esc/backspace out of the submenu: drop it, keep the parent's
+        selection exactly where it was, re-read the parent so the view is
+        current (an action may have finished while we were away)."""
+        self.actions_for = None
+        self.pending = None
+        self.yes_line = ""
+        self.build(self.current)
+
+    @property
+    def in_actions(self) -> bool:
+        return self.actions_for is not None
 
     def refresh_if_stale(self) -> None:
         """Re-read state between actions. The catalog screen costs a network
@@ -204,8 +281,34 @@ class App:
         if self.show_help:
             self.show_help = False
             return
-        if key in ("q", "escape", "ctrl_c"):
+        if key == "escape" or key == "backspace":
+            # Esc backs out one step (TUI-2 menu behaviour): submenu ->
+            # list, list -> main menu, main menu -> quit. 'q' still quits
+            # from anywhere — the safety hatch stays one key deep.
+            if self.in_actions:
+                self.notice = "back to the list"
+                self.close_actions()
+                return
+            if self.current != "menu":
+                self.goto("menu")
+                return
             self.running = False
+            return
+        if key in ("q", "ctrl_c"):
+            self.running = False
+            return
+        if key == "m":
+            self.goto("menu")
+            self.notice = ""
+            return
+        if key == "left":
+            self._step_screen(-1)
+            return
+        if key == "right":
+            self._step_screen(+1)
+            return
+        if key == "space":
+            self.detail_open = not self.detail_open
             return
         if key == "?":
             self.show_help = True
@@ -244,6 +347,16 @@ class App:
             self.screen.clamp()
             return
         if key == "enter":
+            if self.in_actions:
+                self._run_submenu_choice()
+                return
+            if self.current == "menu":
+                row = self.screen.current()
+                if row is not None and row.kind == "menu":
+                    self.goto(row.key)
+                return
+            if self.open_actions():
+                return
             self.detail_open = not self.detail_open
             return
         if self.busy:
@@ -254,14 +367,53 @@ class App:
 
     # ----------------------------------------------------------- op dispatch --
     def _pool(self) -> list:
+        if self.in_actions:
+            # the submenu lists the parent's row actions AND its screen
+            # actions (under a divider); the same letters must work here so
+            # muscle memory never breaks
+            parent = self.screens.get(self.actions_for)
+            if parent is None:
+                return []
+            return list(parent.row_ops()) + list(parent.screen_ops())
         s = self.screen
         return list(s.row_ops()) + list(s.screen_ops())
+
+    def _run_submenu_choice(self) -> None:
+        """Enter on a submenu row: run the op that row lists. A row action
+        targets the PARENT's selected patch/keg; a screen action targets
+        nothing, exactly as on the list screen. The divider heading has no
+        op and does nothing; the back row closes."""
+        row = self.screen.current()
+        if row is None or row.kind == "header":
+            return
+        op = (row.raw or {}).get("op")
+        if op is None:
+            self.close_actions()
+            return
+        self._guard_then_run(op, None if op.row_kinds is ops_mod.ANY
+                             else self._target_row())
+
+    def _target_row(self):
+        """The row an op acts on: the PARENT list's selection — while a
+        submenu is open the screen's rows ARE the actions, never a target."""
+        if self.in_actions:
+            parent = self.screens.get(self.actions_for or "")
+            return parent.current() if parent else None
+        return self.screen.current()
 
     def _run_or_ask(self, key: str) -> None:
         op = ops_mod.find(key, self._pool())
         if op is None:
+            if self.in_actions:
+                # stay in the menu: a stray keystroke must not eject the
+                # operator out of the thing they were reading
+                self.notice = f"'{key}' is not one of these actions"
+                return
             self.notice = f"'{key}' does nothing on the {self.current} screen"
             return
+        self._guard_then_run(op, self._target_row(), key)
+
+    def _guard_then_run(self, op, row, key: str = "") -> None:
         # the tree check runs BEFORE the row check: with no omlx tree every
         # one of these actions is unavailable, and 'select a patch row' would
         # send the operator looking for the wrong thing entirely
@@ -269,11 +421,10 @@ class App:
             self.notice = ("no omlx package tree — install omlx or run "
                            "'omlx-uplift install' first")
             return
-        row = None
         if op.row_kinds is not ops_mod.ANY:
-            row = self.screen.current()
             if row is None or not op.applies_to(row.kind):
-                self.notice = f"'{key}' needs a {'/'.join(op.row_kinds)} row"
+                self.notice = f"'{key or op.key}' needs a " \
+                              f"{'/'.join(op.row_kinds)} row"
                 return
         if op.danger == ops_mod.READ:
             self._launch(op, row)
@@ -341,7 +492,10 @@ class App:
         for line in model.result_lines(res):
             self.ctx.log(f"   {line}")
         self.notice = ("done: " if ok else "FAILED: ") + op.label
-        self.build()
+        if self.in_actions:
+            self.close_actions()   # the list re-reads; the result is on it
+        else:
+            self.build()
         return True
 
     def cancel(self) -> str:
@@ -426,6 +580,7 @@ def _key_name(ch):
 
     if not _SPECIAL:
         _SPECIAL.update({27: "escape", 10: "enter", 13: "enter", 9: "enter",
+                         32: "space",
                          127: "backspace", 8: "backspace", 3: "ctrl_c",
                          2: "ctrl_b"})
         # named KEY_* constants are not guaranteed on every platform (a
@@ -543,7 +698,7 @@ def _curses_loop(stdscr, app) -> int:
         if name == "mouse":
             _click(stdscr, app, rows)
             continue
-        if name in (None, "resize", "left", "right", "ctrl_b"):
+        if name in (None, "resize", "ctrl_b"):
             continue
         if name == "ctrl_c":
             app.ctx.log(app.cancel())
@@ -576,7 +731,9 @@ def _feed_yes(key: str, app) -> None:
 
 
 def _click(stdscr, app, rows: int) -> None:
-    """Map a mouse row to a list row using the window the last render chose."""
+    """Map a mouse row to a list row using the window the last render chose.
+    TUI-2: a descriptive row can be two screen lines, so walk the shown rows
+    by their line counts instead of assuming one line each."""
     import curses
 
     try:
@@ -587,9 +744,15 @@ def _click(stdscr, app, rows: int) -> None:
     if not s.rows:
         return
     first, last = s.shown
-    idx = first + (y - 1)                    # line 0 is the title
-    if first <= idx < last:
-        s.selected = min(idx, len(s.rows) - 1)
+    line = y - 1                             # line 0 is the title
+    idx = first
+    while idx < last:
+        n = s.rows[idx].line_count()
+        if line < n:
+            s.selected = idx
+            return
+        line -= n
+        idx += 1
 
 
 def _paint(stdscr, app, rows: int, cols: int) -> None:
@@ -603,9 +766,21 @@ def _paint(stdscr, app, rows: int, cols: int) -> None:
     attrs.setdefault(None, curses.A_NORMAL)
     stdscr.erase()
     lines = app.lines(cols, rows)
-    for y, (text, tone) in enumerate(lines[:max(0, rows - 1)]):
+    # every visible line is written to the full width, padded with spaces in
+    # its own tone. Relying on erase()'s diff to clear the tail of a line
+    # that SHRANK since the last frame leaks old text on some emulators
+    # (seen in a pty capture: 'desired v1kill switch off'). Writing every
+    # cell every frame makes the paint order-independent — and as a side
+    # effect the selected row highlights as a full-width bar, which is what
+    # menus look like everywhere else.
+    for y in range(max(0, rows - 1)):
+        if y < len(lines):
+            text, tone = lines[y]
+        else:
+            text, tone = "", None
         try:
-            stdscr.addstr(y, 0, str(text)[:cols - 1],
+            stdscr.addstr(y, 0,
+                          str(text)[:cols - 1].ljust(cols - 1),
                           attrs.get(tone, curses.A_NORMAL))
         except curses.error:
             pass                             # tiny terminal / last cell

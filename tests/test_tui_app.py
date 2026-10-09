@@ -232,6 +232,7 @@ class TestNavigation(AppCase):
         self.assertNotIn("desired:", hidden)
 
     def test_help_overlay_opens_and_closes_on_any_key(self):
+        self.app.goto("overview")
         self.app.on_key("?")
         self.assertTrue(self.app.show_help)
         self.assertIn("keys and rules", self.app.lines(120, 40)[0][0])
@@ -267,6 +268,167 @@ class TestNavigation(AppCase):
         self.store.save(m)
         self.app.build()
         self.assertEqual(self.app.screen.current().key, "beta")
+
+
+class TestMenus(AppCase):
+    """TUI-2: the operator asked for menus instead of number keys, and for
+    rows that explain themselves. These pin the navigation shape."""
+
+    def test_it_boots_on_the_main_menu(self):
+        self.assertEqual(self.app.current, "menu")
+        text = "\n".join(t for t, _ in self.app.lines(110, 40))
+        for wanted in ("Overview", "Patches", "Curated catalog",
+                       "omlx-dev keg", "Session log"):
+            self.assertIn(wanted, text, f"the menu must name '{wanted}'")
+
+    def test_the_menu_carries_live_state(self):
+        # the menu doubles as the first-glance overview: an armed kill
+        # switch must be visible BEFORE choosing a screen
+        self.store.save({"patches": [{"id": "a", "enabled": True,
+                                      "order": 100,
+                                      "source": {"kind": "url",
+                                                 "url": "http://x"},
+                                      "desired_version": 1,
+                                      "versions": [{"v": 1,
+                                                    "fetched_at": "x"}],
+                                      "state": "applied"}]})
+        self.app.build("menu")
+        rows = {r.key: r for r in self.app.screens["menu"].rows}
+        self.assertIn("1 of 1 enabled", rows["patches"].text2())
+
+    def test_enter_on_a_menu_row_opens_that_screen(self):
+        self.app.screen.selected = next(
+            i for i, r in enumerate(self.app.screen.rows)
+            if r.key == "patches")
+        self.app.on_key("enter")
+        self.assertEqual(self.app.current, "patches")
+        self.assertIsNone(self.app.actions_for)
+
+    def test_m_returns_to_the_menu_from_anywhere(self):
+        self.app.goto("dev")
+        self.app.on_key("m")
+        self.assertEqual(self.app.current, "menu")
+
+    def test_escape_walks_back_not_out(self):
+        self.app.goto("patches")
+        self.app.on_key("escape")        # list -> menu, not quit
+        self.assertEqual(self.app.current, "menu")
+        self.assertTrue(self.app.running)
+        self.app.on_key("escape")        # menu -> quit
+        self.assertFalse(self.app.running)
+
+    def test_arrows_step_between_screens(self):
+        self.app.goto("overview")
+        self.app.on_key("right")
+        self.assertEqual(self.app.current, "patches")
+        self.app.on_key("left")
+        self.assertEqual(self.app.current, "overview")
+
+    def test_enter_on_a_row_opens_its_action_menu(self):
+        self.select_patch("alpha")
+        self.app.on_key("enter")
+        self.assertTrue(self.app.in_actions)
+        self.assertEqual(self.app.actions_for, "patches")
+        text = "\n".join(t for t, _ in self.app.lines(120, 40))
+        self.assertIn("Actions for 'alpha'", text)
+        # the menu lists the same commands the letters run, described
+        for wanted in ("[e] enable", "[d] disable", "[x] remove patch"):
+            self.assertIn(wanted, text)
+
+    def test_a_row_without_actions_keeps_the_old_enter(self):
+        # the menu screen has no row ops — Enter there must not 'open'
+        # an empty submenu; space owns the detail toggle now anyway
+        self.app.goto("menu")
+        before = self.app.detail_open
+        self.app.on_key("enter")        # enters Overview (row 0)
+        self.assertEqual(self.app.current, "overview")
+        self.assertFalse(self.app.in_actions)
+
+    def test_submenu_letter_runs_the_action_through_the_gate(self):
+        self.select_patch("alpha")
+        self.app.on_key("enter")
+        self.assertTrue(self.app.in_actions)
+        self.app.on_key("d")            # WRITE: must ask, never act yet
+        self.assertTrue(self.app.pending)
+        self.app.on_key("n")            # decline
+        self.assertTrue(self.store.load()["patches"][0]["enabled"],
+                        "a cancelled disable must leave the flag alone")
+
+    def test_submenu_enter_runs_and_closes_after_result(self):
+        self.select_patch("alpha")
+        self.app.on_key("enter")
+        row = self.app.screen.current()
+        self.app.on_key("enter")        # runs 'enable' (WRITE -> gate)
+        self.assertTrue(self.app.pending)
+        self.app.on_key("y")
+        self.assertTrue(self.settle())
+        self.assertFalse(self.app.in_actions,
+                         "a finished action returns to the fresh list")
+
+    def test_submenu_targets_the_parent_row_not_its_own_cursor(self):
+        # picking the SECOND action in the menu must act on the patch that
+        # was selected on the list — never on the submenu's own rows
+        self.select_patch("beta")
+        self.app.on_key("enter")
+        order = [r.key for r in self.app.screen.rows]
+        self.app.screen.selected = order.index("d")
+        self.app.on_key("enter")
+        op, row = self.app.pending
+        self.assertEqual(op.key, "d")
+        self.assertEqual(row.key, "beta")
+
+    def test_enter_on_an_empty_error_row_still_offers_screen_actions(self):
+        # a broken store or a missing tree explains itself with a row that
+        # has no id; Enter there must open the SCREEN actions (the kill
+        # switch especially) instead of an empty menu titled for nothing
+        self.ctx._tree_root_override = ""
+        self.app.goto("patches")
+        self.app.on_key("enter")
+        self.assertTrue(self.app.in_actions)
+        self.assertEqual(self.app.screen.title, "Actions on Patches")
+        labels = " ".join(r.text() for r in self.app.screen.rows)
+        self.assertIn("kill switch ON", labels)
+
+    def test_submenu_lists_screen_actions_under_a_divider(self):
+        # reconcile / kill switch act on the whole screen; hiding them
+        # behind Enter-on-a-row would make the menu LESS capable than the
+        # key bar, which is the opposite of the point
+        self.select_patch("alpha")
+        self.app.on_key("enter")
+        kinds = [r.kind for r in self.app.screen.rows]
+        labels = [r.text() for r in self.app.screen.rows]
+        self.assertIn("header", kinds)
+        self.assertTrue(any("Screen actions" in l for l in labels))
+        self.assertTrue(any("[K] kill switch ON" in l for l in labels))
+        self.assertTrue(any("[y] reconcile now" in l for l in labels))
+
+    def test_submenu_screen_action_runs_without_a_row(self):
+        self.select_patch("alpha")
+        self.app.on_key("enter")
+        keys = [r.key for r in self.app.screen.rows]
+        self.app.screen.selected = keys.index("K")
+        self.app.on_key("enter")
+        op, row = self.app.pending
+        self.assertIsNone(row, "a screen action targets no row")
+        self.app.on_key("escape")
+
+    def test_space_toggles_the_detail_pane(self):
+        self.app.goto("patches")
+        before = self.app.detail_open
+        self.app.on_key("space")
+        self.assertEqual(self.app.detail_open, not before)
+
+    def test_rows_read_as_sentences_not_code(self):
+        # TUI-2 core ask: descriptive over terse. A patch row must say its
+        # state in words and keep the description on the first line.
+        self.select_patch("alpha")
+        row = self.app.screen.current()
+        line1, line2 = row.text(), row.text2()
+        self.assertIn("alpha", line1)
+        self.assertTrue(row.line_count() == 2)
+        for wanted in ("applied", "enabled"):
+            self.assertIn(wanted, line2)
+        self.assertNotRegex(line1, r"^[!BRK.] ")   # no mark column anymore
 
 
 class TestGuardRails(AppCase):
@@ -426,9 +588,10 @@ class TestThemeKey(AppCase):
         self.assertEqual(themes.get_theme(), seen[-1],
                          "the choice must survive the session")
         # 'T' is advertised on every screen, not only where an op lists it
+        # (TUI-2 put it in the navigation legend instead of the chip line)
         self.app.goto("overview")
         text = "\n".join(t for t, _ in self.app.lines(140, 40))
-        self.assertIn("[T] theme", text)
+        self.assertIn("T theme", text)
 
     def test_the_named_palette_is_reachable_in_one_pass(self):
         from omlx_uplift.tui import themes

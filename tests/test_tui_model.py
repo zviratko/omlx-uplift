@@ -83,15 +83,18 @@ class TestPatchScreen(ModelTestCase):
                          ["pr4320-web-split", "tq-posids", "revert-ane"])
 
     def test_state_enabled_scope_version_and_id_are_all_visible(self):
-        text = model.build_patches(self.ctx).rows[1].text()
-        for wanted in ("off", "needs_review", "v2", "tq-posids"):
+        # TUI-2: a patch reads as a sentence over two lines — name +
+        # description on line 1, state in words on line 2. No legend needed.
+        row = model.build_patches(self.ctx).rows[1]
+        text = row.text() + "\n" + row.text2()
+        for wanted in ("tq-posids", "needs_review", "disabled", "v2"):
             self.assertIn(wanted, text)
 
-    def test_bundled_and_reversal_marks_render_on_a_real_screen(self):
+    def test_bundled_and_reversal_are_said_in_words(self):
         rows = {r.key: r for r in model.build_patches(self.ctx).rows}
-        self.assertEqual(rows["pr4320-web-split"].cols[0][0].strip(), "B")
-        self.assertEqual(rows["revert-ane"].cols[0][0].strip(), "R")
-        self.assertEqual(rows["tq-posids"].cols[0][0].strip(), ".")
+        self.assertIn("bundled (default)", rows["pr4320-web-split"].text2())
+        self.assertIn("reversal patch", rows["revert-ane"].text2())
+        self.assertNotIn("bundled", rows["tq-posids"].text2())
 
     def test_detail_describes_the_source_and_the_state_detail(self):
         detail = model.build_patches(self.ctx).rows[0].detail
@@ -124,25 +127,36 @@ class TestPatchScreen(ModelTestCase):
 
 
 class TestRowMarks(unittest.TestCase):
-    """_patch_row is the unit that turns flags into the column of marks."""
+    """_patch_row is the unit that turns flags into the descriptive status
+    line (TUI-2 replaced the letter-mark column and its legend)."""
 
-    def test_each_flag_has_its_letter(self):
+    def test_each_flag_says_what_it_means(self):
         cases = (
-            ({"requires_approval": True}, "!"),
-            ({"curated": "optional"}, "B"),
-            ({"reversal": True}, "R"),
-            ({"keg_changed": True}, "K"),
-            ({"requires_approval": True, "keg_changed": True}, "!K"),
-            ({}, "."),
+            ({"requires_approval": True}, "HELD"),
+            ({"curated": "optional"}, "bundled (optional)"),
+            ({"reversal": True}, "reversal patch"),
+            ({"keg_changed": True}, "KEG CHANGED"),
+            ({}, ""),
         )
         for flags, want in cases:
             row = model._patch_row(dict(id="x", **flags), ops.PATCH)
-            self.assertEqual(row.cols[0][0].strip(), want, str(flags))
+            self.assertIn(want, row.text2(), str(flags))
+
+    def test_the_status_line_takes_the_worst_tone_it_contains(self):
+        # curses paints one attribute per addstr: a line that holds 'HELD'
+        # must not wash out to dim just because most fragments are ordinary
+        row = model._patch_row({"id": "x", "requires_approval": True},
+                               ops.PATCH)
+        lines = model._row_lines(row, 100)
+        self.assertEqual(lines[1][1], model.TONE_BAD)
+        calm = model._patch_row({"id": "x", "state": "applied",
+                                 "enabled": True}, ops.PATCH)
+        self.assertEqual(model._row_lines(calm, 100)[1][1], model.TONE_OK)
 
     def test_a_held_patch_is_warned_in_both_the_row_and_the_detail(self):
         row = model._patch_row({"id": "x", "requires_approval": True},
                                ops.PATCH)
-        self.assertEqual(row.cols[0][1], model.TONE_WARN)
+        self.assertIn("HELD", row.text2())
         self.assertIn("HELD", row.detail)
         self.assertIn("omlx-uplift patch approve x", row.detail,
                       "the screen must name the way out, not just the block")
@@ -150,6 +164,16 @@ class TestRowMarks(unittest.TestCase):
     def test_missing_desired_version_does_not_print_none(self):
         row = model._patch_row({"id": "x"}, ops.CATALOG)
         self.assertNotIn("None", row.text())
+
+    def test_the_detail_never_prints_none_or_a_doubled_word(self):
+        # a bare dict is what an incomplete catalog entry or a half-migrated
+        # manifest actually looks like; the pane must stay readable
+        d = model._patch_detail({"id": "x", "state": "disabled",
+                                 "state_detail": "disabled",
+                                 "enabled": False})
+        self.assertNotIn("None", d)
+        self.assertNotIn("disabled — disabled", d)
+        self.assertIn("desired: -", d)
 
 
 class TestDevScreen(ModelTestCase):
@@ -168,9 +192,12 @@ class TestDevScreen(ModelTestCase):
         kegs = [r for r in s.rows if r.kind == ops.KEG]
         self.assertEqual([r.key for r in kegs],
                          ["HEAD-aaa_1", "HEAD-bbb_1"])
-        self.assertIn("2.0 GiB", kegs[0].text())
-        self.assertTrue(kegs[1].text().startswith(">"),
-                        "the active keg carries the selection marker")
+        self.assertIn("2.0 GiB", kegs[0].text2())
+        # TUI-2: the marker is the word, not the column glyph — a screen
+        # reader and a tired human both read 'Active keg' first
+        self.assertTrue(kegs[1].text().startswith("Active keg"),
+                        "the active keg says so on line one")
+        self.assertFalse(kegs[0].text().startswith("Active keg"))
         self.assertIn("ACTIVE", kegs[1].detail)
 
     def test_two_builds_sharing_a_cellar_are_flagged(self):
@@ -206,7 +233,7 @@ class TestDevScreen(ModelTestCase):
 class TestOverview(ModelTestCase):
     def test_counts_roll_up_the_store(self):
         text = model.build_overview(self.ctx).rows[0].text()
-        for wanted in ("3 total", "2 enabled", "0 held", "1 to review"):
+        for wanted in ("3 stored", "2 enabled", "0 held", "1 to review"):
             self.assertIn(wanted, text)
 
     def test_service_rows_are_restartable(self):
@@ -264,37 +291,56 @@ class TestFrameFits(ModelTestCase):
                                          {"id": "tq-posids"}),
         }
 
+    def _submenulike(self, s):
+        """The action submenu is a Screen like any other and the painter
+        cannot tell it apart — sweep it too (TUI-2)."""
+        out = [s]
+        for i in range(len(s.rows)):
+            s.selected = i
+            if s.row_ops():
+                out.append(model.build_actions(s))
+                break
+        s.selected = 0
+        return out
+
     def test_no_frame_is_taller_or_wider_than_the_window(self):
         checked = 0
         for name in model.BUILDERS:
-            s = model.BUILDERS[name](self.ctx)
-            for sel in (0, min(1, len(s.rows) - 1), len(s.rows) - 1):
-                s.selected = sel
-                for height in range(1, 40):
-                    for width in (40, 60, 100, 220):
-                        for prompt in self.prompts().values():
-                            for yes in (None, "YE"):
-                                for busy in ("", "dev install (build)"):
-                                    lines = model.render(
-                                        s, width, prompt=prompt, busy=busy,
-                                        height=height, yes_line=yes)
-                                    checked += 1
-                                    self.assertLessEqual(
-                                        len(lines), height,
-                                        f"{name} sel={sel} {width}x{height} "
-                                        f"prompt={bool(prompt)} "
-                                        f"yes={yes!r} -> {len(lines)} lines")
-                                    for text, _tone in lines:
+            for s in self._submenulike(model.BUILDERS[name](self.ctx)):
+                for sel in (0, min(1, len(s.rows) - 1), len(s.rows) - 1):
+                    s.selected = sel
+                    for height in range(1, 40):
+                        for width in (40, 60, 100, 220):
+                            for prompt in self.prompts().values():
+                                for yes in (None, "YE"):
+                                    for busy in ("",
+                                                 "dev install (build)"):
+                                        lines = model.render(
+                                            s, width, prompt=prompt,
+                                            busy=busy, height=height,
+                                            yes_line=yes)
+                                        checked += 1
                                         self.assertLessEqual(
-                                            len(text), width,
-                                            f"{name} {width}x{height}: "
-                                            f"line too wide: {text!r}")
+                                            len(lines), height,
+                                            f"{name} sel={sel} "
+                                            f"{width}x{height} "
+                                            f"prompt={bool(prompt)} "
+                                            f"yes={yes!r} -> "
+                                            f"{len(lines)} lines")
+                                        for text, _tone in lines:
+                                            self.assertLessEqual(
+                                                len(text), width,
+                                                f"{name} {width}x{height}: "
+                                                f"line too wide: {text!r}")
         self.assertGreater(checked, 4000)
 
     def test_the_key_bar_survives_a_six_line_window(self):
+        # TUI-2: the legend line (which carries q) is the protected last
+        # word; letter chips may fall away below it
         text = "\n".join(t for t, _ in model.render(
             model.build_patches(self.ctx), 90, height=6))
-        self.assertIn("[q] quit", text)
+        self.assertIn("q quit", text)
+        self.assertIn("m menu", text)
 
     def test_a_live_question_survives_a_small_window(self):
         # answering YES to 'remove patch' without reading the question would
@@ -313,7 +359,8 @@ class TestFrameFits(ModelTestCase):
         for r in s.rows:
             r.detail = "\n".join(f"line {i}" for i in range(40))
         lines = [t for t, _ in model.render(s, 100, height=14)]
-        self.assertTrue(any("more detail line(s)" in l for l in lines))
+        self.assertTrue(any("detail line(s) hidden" in l for l in lines),
+                        "a cut pane must say so")
 
     def test_no_room_for_rows_still_names_the_hidden_count(self):
         s = model.build_patches(self.ctx)

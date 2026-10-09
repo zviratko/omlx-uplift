@@ -37,8 +37,9 @@ COMMANDS = [
                   " accuracy engine (own venv, never a keg)"),
     ("mteb-env", "status|create — pinned MTEB venv for the embeddings/"
                  "rerankers bench (own venv; carries torch — never a keg)"),
-    ("tui", "menu-driven terminal manager — patches, curated catalog,"
-            " omlx-dev kegs, services (needs a real terminal)"),
+    ("tui", "menu-driven terminal manager — main menu, action menus,"
+            " patches, catalog, dev kegs, services (needs a real"
+            " terminal)"),
 ]
 
 _TOP_USAGE = """\
@@ -100,12 +101,16 @@ COMMAND_USAGE = {
                "                 read-only: every omlx file vs the wheel RECORD;\n"
                "                 files an applied patch owns are expected drift"),
     "tui": ("omlx-uplift tui\n"
-            "                 interactive screens: 1 overview  2 patches"
-            "  3 catalog\n"
-            "                 4 dev keg  5 session log;"
-            " j/k move, enter detail, n re-read\n"
+            "                 boots on a main menu: overview | patches |"
+            " catalog | dev keg | log\n"
+            "                 arrows/j-k move; Enter opens the screen or the"
+            " row's action menu\n"
+            "                 m menu  Esc back  left/right switch screens"
+            "  space detail  n re-read\n"
             "                 T cycles the colour theme (default | P(DOOM)"
             " | phosphor | mono)\n"
+            "                 numbers 1-5 and the action letters still work"
+            " as shortcuts\n"
             "                 writes nothing until you confirm; shows the CLI"
             " command each action mirrors\n"
             "                 needs a terminal — headless use is 'patch"
