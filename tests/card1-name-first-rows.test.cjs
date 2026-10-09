@@ -69,9 +69,20 @@ test('alias trunk follows the name to the card edge (no orphan 96px indent)', ()
         'first trunk riser must not overdraw into the lamp row (top: -14px)');
 });
 
-test('TREE-2: the badge line is indented by the trunk (hangs from the NAME)', () => {
-    assert.match(CSS, /#model-admin \.mbox \.urow\.admin \.nrow1 \{ padding-left: 14px; \}/,
-        'lamps line must slot right of the trunk (padding-left 14px = alias-tree 16px − row padding 2px), the user 2026-10-09');
+test('TREE-2b: the trunk CONNECTS to the name (measured, not guessed)', () => {
+    // user 2026-10-09 (2nd report): "the trunk begins on the line below the
+    // model badges and there's a free line next to it" — per-line risers
+    // never bridge the model cell. The tree must paint a connector whose
+    // span is MEASURED in the align pass (name bottom -> first riser top).
+    const chips = fs.readFileSync(path.join(STATIC_DIR, 'uplift_mmchips.js'), 'utf8');
+    assert.match(chips, /setProperty\('--trunk-top'/, 'align pass must pin the connector top');
+    assert.match(chips, /setProperty\('--trunk-drop'/, 'align pass must pin the connector height');
+    // the connector paints only on visible trees and at the riser x
+    assert.match(CSS, /\.alias-tree:not\(\[hidden\]\)::before \{[\s\S]*?left: -17px; width: 3px/,
+        'connector must share the riser stroke geometry (-17px from the tree = 49px from the box)');
+    // base-box expansion moves the tree: the fold pill must re-run the align
+    assert.match(chips.slice(chips.indexOf('more.onclick')), /scheduleFold\(host\);\s*\n\s*\/\/ TREE-2b[\s\S]{0,220}scheduleAlign\(\);/,
+        'expanding the base chip box must re-measure the trunk connector');
 });
 
 test('TREE-1: a cached profile paint must show the tree (no hidden-until-mutation race)', () => {

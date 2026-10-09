@@ -140,6 +140,33 @@ function alignProfileRows() {
         if (!lines.length) continue;
         const box = mbox.querySelector('.urow.admin .settings-box');
         if (!box) continue;
+        /* TREE-2b: wire the trunk to the NAME. Each alias line draws only
+           its own riser, so with the name moved to line 1 the wire appeared
+           to START under the badge row, beside an empty gutter (user
+           2026-10-09). The .alias-tree paints one connector segment
+           (--trunk-top/--trunk-drop, its ::before) from the name's bottom
+           edge to the first riser's top — MEASURED here because the tree is
+           appended after render and its offset depends on the name wrapping
+           state, the badge line and the fold. 2px bite into the name box +
+           4px overlap of the riser = no seam on any DPR. */
+        const treeEl = mbox.querySelector(':scope > .alias-tree');
+        if (treeEl) {
+            const uid = mbox.querySelector('.urow.admin .uid');
+            const first = treeEl.querySelector('.alias-line');
+            const tr = treeEl.getBoundingClientRect();
+            if (uid && first && treeEl.offsetHeight && uid.offsetWidth) {
+                const nr = uid.getBoundingClientRect();
+                const cs = getComputedStyle(first, '::before');
+                const riserTop = first.getBoundingClientRect().top + parseFloat(cs.top);
+                const top = (nr.bottom - 2) - tr.top;
+                const h = (riserTop + 4) - (nr.bottom - 2);
+                treeEl.style.setProperty('--trunk-top', Math.max(0, Math.round(top)) + 'px');
+                treeEl.style.setProperty('--trunk-drop', Math.max(0, Math.round(h)) + 'px');
+            } else {   // hidden tree (profiles still resolving): paint nothing
+                treeEl.style.removeProperty('--trunk-top');
+                treeEl.style.removeProperty('--trunk-drop');
+            }
+        }
         const host = box.querySelector('.chip-host');
         const firstChip = host && host.querySelector('.schip:not(.more)');
         let targetX;
@@ -186,6 +213,9 @@ function foldHost(rows) {
         e.stopPropagation();
         host.dataset.open = host.dataset.open === '1' ? '0' : '1';
         scheduleFold(host);
+        // TREE-2b: expanding the BASE box grows the model row, which moves
+        // the tree down — the measured trunk connector must re-pin too.
+        scheduleAlign();
     };
     return host;
 }

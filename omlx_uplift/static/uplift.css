@@ -1159,7 +1159,22 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    bottom-most branch (no stub below). */
 /* round 6 item 8: gap between the model row, alias lines and the bottom of
    the box is uniform 6px — same as alias-to-alias spacing */
-#model-admin .alias-tree { margin: 0 10px 6px 16px; padding: 6px 0 0 0; }
+#model-admin .alias-tree { margin: 0 10px 6px 16px; padding: 6px 0 0 0;
+    position: relative; }   /* TREE-2b: anchor for the trunk connector above */
+/* TREE-2b (user 2026-10-09: "the trunk begins on the line BELOW the model
+   badges and there's a free line next to it"): each alias line draws only
+   ITS OWN riser, so nothing bridged the model cell — the wire appeared to
+   start under the badge row and left an empty gutter beside it. The tree
+   paints one connector segment that runs from the NAME's bottom edge down
+   through the badge line and meets the first riser. --trunk-top/--trunk-drop
+   are MEASURED by the align pass (alignProfileRows): the segment spans
+   nameBottom-2 (2px bite into the name's box so it reads attached) to
+   firstRiserTop+4 (4px overlap so there is no seam). left -17px + 3px width
+   = the exact x the line risers already draw at (line box 66, stroke 49-52).
+   No --trunk-drop set (hidden tree, no lines) => height 0 => nothing paints. */
+#model-admin .alias-tree:not([hidden])::before { content: ""; position: absolute;
+    left: -17px; width: 3px; background: var(--dim);
+    top: var(--trunk-top, 0px); height: var(--trunk-drop, 0px); }
 #model-admin .alias-line { position: relative; display: flex; align-items: center;
     gap: 8px; margin: 0 0 6px; padding: 4px 8px; min-width: 0;
     border: 1px solid var(--edge); background: var(--field);
