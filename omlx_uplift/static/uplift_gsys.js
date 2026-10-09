@@ -520,6 +520,13 @@ function gsRow(sec, labelTxt, hint, control, opts) {
     o.onclick = () => { if (opts.flat) revertField(opts.flat); };
     // the new value is the live control itself; slot shows |original| → only
     rd.append(o, document.createTextNode('→'));
+    // ...except checkboxes: an unchecked box reads as NOTHING, so the user
+    // saw 'true → ⍰' on every toggle. Give checkbox rows an explicit
+    // new-value chip (filled by UpliftDirty.applyRowState via .diff-n).
+    if (control && control.type === 'checkbox') {
+        const n = document.createElement('span'); n.className = 'diff-n';
+        rd.append(n);
+    }
     slot.append(rd);
     const ctl = GLUE.cell(''); ctl.className = 'gctl';
     ctl.append(control);

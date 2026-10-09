@@ -46,6 +46,13 @@ function applyRowState(o) {
                 rd.classList.remove('masked');
                 rd.querySelector('.diff-o').textContent = o.display(o.orig);
             }
+            // checkbox rows carry an explicit NEW-side chip (.diff-n):
+            // "the control IS the new value" fails on a tickbox — an
+            // unchecked box reads as nothing, so `true → ⍰` looked broken.
+            // Text/number rows build no .diff-n and keep the old shape.
+            const rn = rd.querySelector('.diff-n');
+            if (rn) rn.textContent = changed
+                ? (o.isSecret ? SECRET_TEXT : o.display(o.cur)) : '';
         }
     }
     return changed;

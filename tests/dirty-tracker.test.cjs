@@ -86,6 +86,41 @@ test('applyRowState: secret change masks the original chip', () => {
     assert.equal(rd.querySelector('.diff-o').textContent, U.SECRET_TEXT);
 });
 
+/* Checkbox rows carry an explicit .diff-n new-value chip: an unchecked box
+   reads as nothing, so 'true →' with no right side looked broken (user
+   report: unticking hot cache showed 'true -> ' + nothing). */
+function chipRow() {
+    const row = el();
+    const rd = el(); rd.className = 'diff-out';
+    const o = el(); o.className = 'diff-o';
+    const n = el(); n.className = 'diff-n';
+    row.append(rd); rd.append(o, n);
+    return row;
+}
+
+test('applyRowState: checkbox chip fills .diff-n with the new value', () => {
+    const row = chipRow();
+    U.applyRowState({ orig: true, cur: false, row, isSecret: false, isRestart: true, display: v => String(v) });
+    const rd = row.querySelector('.diff-out');
+    assert.equal(rd.querySelector('.diff-o').textContent, 'true');
+    assert.equal(rd.querySelector('.diff-n').textContent, 'false');
+});
+
+test('applyRowState: edited back hides chip and clears .diff-n', () => {
+    const row = chipRow();
+    U.applyRowState({ orig: true, cur: false, row, isSecret: false, isRestart: false, display: v => String(v) });
+    const changed = U.applyRowState({ orig: true, cur: true, row, isSecret: false, isRestart: false, display: v => String(v) });
+    assert.equal(changed, false);
+    assert.equal(row.querySelector('.diff-out').hidden, true);
+    assert.equal(row.querySelector('.diff-n').textContent, '');
+});
+
+test('applyRowState: secret change masks .diff-n too', () => {
+    const row = chipRow();
+    U.applyRowState({ orig: 'sk-live', cur: 'sk-new', row, isSecret: true, isRestart: false, display: v => String(v) });
+    assert.equal(row.querySelector('.diff-n').textContent, U.SECRET_TEXT);
+});
+
 test('DirtyTracker: mark/isDirty/edited-back + payload map', () => {
     const state = { host: 'x' };
     const tr = U.DirtyTracker({

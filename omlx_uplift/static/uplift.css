@@ -1795,6 +1795,13 @@ label.se-row.pending-restart > .se-ctl > select {
     padding: 2px 5px; max-width: 110px; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; cursor: pointer; background: var(--row2); }
 .diff-out .diff-o:hover { color: var(--ink); border-color: var(--ink); }
+/* new-value chip on checkbox rows only (see uplift_dirty.js): the old chip
+   stays clickable-to-revert, this one names the new state the raw tick can't
+   show. Same frame as .diff-o, accent text like .ch-new in the CHANGES list. */
+.diff-out .diff-n { border: 1px solid var(--edge); color: var(--accent);
+    padding: 2px 5px; max-width: 110px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; background: var(--row2); }
+.se-row .diff-out .diff-n { max-width: 68px; }
 .gs-box-title {
     /* signage header strip: inverted colors, full-bleed across the panel */
     font: 500 11px/1 var(--sans);

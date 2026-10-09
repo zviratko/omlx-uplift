@@ -319,6 +319,13 @@ function seBind(kind, key, opts) {
     // the NEW value is the live input itself; the slot only carries the
     // |original| chip pointing at it, so the input never jumps
     rd.append(o, document.createTextNode('→'));
+    // ...except checkboxes: an unchecked box reads as NOTHING, so the user
+    // saw 'true → ⍰' on every toggle. Give checkbox rows an explicit
+    // new-value chip (filled by UpliftDirty.applyRowState via .diff-n).
+    if (input.type === 'checkbox') {
+        const n = document.createElement('span'); n.className = 'diff-n';
+        rd.append(n);
+    }
     slot.append(rd);
     const ctlBox = document.createElement('span'); ctlBox.className = 'se-ctl';
     ctlBox.append(input);

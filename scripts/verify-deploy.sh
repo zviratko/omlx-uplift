@@ -49,7 +49,7 @@ if [ "$code" = "200" ]; then ok login "$code"; else bad login "$code"; fi
 
 # 4. served static bytes == repo tree at EXPECTED (proves keg content AND
 #    that the running process actually serves that keg)
-for f in uplift.css uplift_mmeditor.js uplift_dirty.js uplift.js; do
+for f in uplift.css uplift_mmeditor.js uplift_dirty.js uplift_gsys.js uplift.js; do
   served=$(curl -s -b "$JAR" "$HOST/uplift/$f" | shasum -a 256 | cut -d' ' -f1)
   want=$(git -C "$REPO" show "$EXPECTED:omlx_uplift/static/$f" 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
   if [ -z "$served" ] || [ "$served" != "$want" ]; then
