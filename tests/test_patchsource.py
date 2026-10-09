@@ -401,6 +401,46 @@ class DriftCheckTests(HttpFixture):
         r = patchsource.rollback(self.store, "nope")
         self.assertFalse(r["ok"])
 
+    # --- upstreamed-PR detection when the drift gate FAILS ---------------
+
+    def test_check_gate_failed_merged_pr_marks_obsolete(self):
+        # live case jundot/omlx#4320: the PR merged, later upstream commits
+        # moved the context, so the stored diff no longer gates clean — the
+        # OLD code stopped at 'error' and never probed merged-ness, so the
+        # next dev upgrade died on a patch whose content the base already
+        # carries. Probe says merged -> obsolete.
+        self._add_via_url()
+        self._force_applied()
+        # break every hunk's context so the gate FAILS (stage='gate')
+        pool = os.path.join(self.root, "omlx", "admin", "routes.py")
+        with open(pool, "w") as fh:
+            fh.write("CONTEXT MOVED UPSTREAM\n")
+        with unittest.mock.patch.object(
+                patchsource, "_pr_merged_into_base",
+                lambda src, diff, reverse=False: True):
+            r = patchsource.check_all(self.store, self.root)
+        self.assertEqual(r["reports"]["demo"]["check"], "obsolete")
+        p = self.store.find(self.store.load(), "demo")
+        self.assertEqual(p["state"], "obsolete")
+
+    def test_check_gate_failed_unmerged_pr_stays_error(self):
+        # fail-safe rule: a probe that cannot PROVE the merge (False =
+        # open/closed-unmerged, None = inconclusive) must not move state —
+        # the honest per-patch error stays, the user decides
+        self._add_via_url()
+        self._force_applied()
+        pool = os.path.join(self.root, "omlx", "admin", "routes.py")
+        with open(pool, "w") as fh:
+            fh.write("CONTEXT MOVED UPSTREAM\n")
+        for verdict in (False, None):
+            with unittest.mock.patch.object(
+                    patchsource, "_pr_merged_into_base",
+                    lambda src, diff, reverse=False, v=verdict: v):
+                r = patchsource.check_all(self.store, self.root)
+            self.assertEqual(r["reports"]["demo"]["check"], "error", verdict)
+            p = self.store.find(self.store.load(), "demo")
+            self.assertEqual(p["state"], "applied", verdict)
+
     # --- upstreamed-PR detection in the not-drifted path -----------------
 
     def _force_applied(self, pid="demo"):

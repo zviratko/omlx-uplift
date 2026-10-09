@@ -1175,6 +1175,30 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
                                 reverse=bool(p.get("reversal")),
                                 skip_patterns=skip, tree_kind=kind)
         if not result["ok"]:
+            # A merged-then-touched PR fails the drift gate in EXACTLY
+            # this shape: its content landed in the base and later
+            # commits moved the context (path moves, trimmed hunks).
+            # Stopping here made the upstreamed probe — which lives on
+            # the not-drifted path below — unreachable for precisely
+            # that class (live case jundot/omlx#4320: 6/17 files failed
+            # on a base that ALREADY carried every line). Probe
+            # merged-ness before reporting the error; only an
+            # affirmative verdict changes state (fail-safe rule).
+            if (result.get("stage") == "gate"
+                    and p.get("state") == "applied"):
+                newest0 = max((v.get("v", 0) for v in p["versions"]),
+                              default=0)
+                cur_v0 = store.get_version(p, newest0) if newest0 else None
+                diff_b0 = _read_patch_file(store, cur_v0) if cur_v0 else None
+                merged = _pr_merged_into_base(
+                    src, diff_b0, reverse=bool(p.get("reversal")))
+                if merged is True and store.set_state(
+                        p, "obsolete",
+                        "upstream now contains the patch — "
+                        "consider removing"):
+                    reports[pid] = {"check": "obsolete"}
+                    changed_any = True
+                    continue
             reports[pid] = {"check": "error", "reason": result.get("reason")}
             continue
         sha = result["content_sha256"]
@@ -1384,7 +1408,13 @@ def enabled_build_patches(store) -> list[dict]:
     """The materialization input for devsrc (DEV-2): every ENABLED
     build-scope patch as {id, version, diff_bytes} in manifest order
     (order, id). Bytes are the stored UNPRUNED diffs — exactly what the
-    gate accepted, sha-consistent."""
+    gate accepted, sha-consistent.
+
+    An OBSOLETE patch is retired, not merely off: the base already
+    carries its content, so materializing its stale diff would either
+    abort the build (context moved — live case jundot/omlx#4320) or
+    resurrect lines upstream trimmed away. Removing it is an explicit
+    user act (remove/disable); until then it builds NOTHING."""
     manifest = store.load()
     out: list[dict] = []
     for p in sorted(manifest.get("patches", []),
@@ -1392,6 +1422,8 @@ def enabled_build_patches(store) -> list[dict]:
         if not _patches.scope_touches_dev(_patches.patch_scope(p)):
             continue
         if not p.get("enabled"):
+            continue
+        if p.get("state") == "obsolete":
             continue
         ver = _desired_version_entry(store, p)
         if ver is None:

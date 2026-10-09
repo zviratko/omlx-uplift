@@ -113,6 +113,22 @@ class BothScopeAddTests(unittest.TestCase):
         out = patchsource.enabled_build_patches(self.store)
         self.assertEqual([p["id"] for p in out], ["mix"])
 
+    def test_materialize_input_excludes_obsolete(self):
+        # jundot/omlx#4320 class: an upstream-MERGED patch is marked
+        # obsolete while still enabled — materializing its stale diff
+        # would abort the build (context moved upstream) or resurrect
+        # trimmed lines. Obsolete = retired: builds NOTHING.
+        patchsource.add_patch(
+            self.store, "mix", {"kind": "upload", "data": MIXED_DIFF},
+            self.keg, scope="both", build_root=self.src)
+        patchsource.set_enabled(self.store, "mix", True, approve="always")
+        m = self.store.load()
+        p = self.store.find(m, "mix")
+        self.assertTrue(self.store.set_state(p, "obsolete", "merged upstream"))
+        self.store.save(m)
+        out = patchsource.enabled_build_patches(self.store)
+        self.assertEqual(out, [])
+
 
 class DevKegNeverMountsTests(unittest.TestCase):
     def test_reconcile_skips_everything_on_dev_keg(self):

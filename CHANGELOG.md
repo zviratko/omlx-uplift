@@ -13,6 +13,18 @@ users never see.
 
 ## Unreleased
 
+- **Merged PRs no longer wedge `dev upgrade`. When upstream merges your
+  patch PR and later commits move the surrounding code, the stored diff
+  stops applying — the drift gate used to report a bare `error` and the
+  build died on materialize (live case jundot/omlx#4320: the merged PR's
+  web-UI files moved to `apps/omlx-web`, its context was trimmed). The
+  check now asks GitHub whether the PR merged BEFORE reporting the
+  error: a proven merge marks the patch OBSOLETE ('upstream now contains
+  the patch — consider removing') and the dev build skips it, so the
+  upgrade goes through. A patch that is merely stale (PR still open, or
+  GitHub unreachable) keeps its honest error and needs_review exit —
+  the fail-safe rule is unchanged.
+
 ## [1.2] — 2026-10-09
 
 The native release. Bench and Chat are real Uplift pages now —
