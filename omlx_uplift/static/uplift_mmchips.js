@@ -330,14 +330,23 @@ function aliasTree(m) {
                      renderProfiles(d.profiles || []); scheduleAlign(); })
         .catch(() => profHost.remove());
     if (!lines.length) {
-        // no aliases yet: the tree box appears only once profiles resolve
+        // no aliases yet: the tree box appears only once profiles resolve.
+        // TREE-1 (user 2026-10-09: "after scrolling for a bit all the model
+        // aliases disappear"): the profiles fetch is cached 30 s, so on a
+        // repaint INSIDE that TTL renderProfiles() has ALREADY filled the
+        // host synchronously above — a childList observer would then never
+        // fire again and the tree stayed hidden forever (visible on first
+        // paint, gone on the next 8 s repaint). Check the children BEFORE
+        // deciding to hide; the observer is only the async fallback.
         const t = document.createElement('div'); t.className = 'alias-tree';
-        t.append(profHost); t.hidden = true;
-        profHost.dataset.needsShow = '1';
-        const obs = new MutationObserver(() => {
-            if (profHost.children.length) { t.hidden = false; obs.disconnect(); }
-        });
-        obs.observe(profHost, { childList: true });
+        t.append(profHost);
+        if (!profHost.children.length) {
+            t.hidden = true;
+            const obs = new MutationObserver(() => {
+                if (profHost.children.length) { t.hidden = false; obs.disconnect(); }
+            });
+            obs.observe(profHost, { childList: true });
+        }
         return t;
     }
     const t = document.createElement('div'); t.className = 'alias-tree';

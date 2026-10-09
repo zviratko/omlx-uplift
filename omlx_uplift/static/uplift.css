@@ -1042,6 +1042,13 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .admin-table .urow.admin { align-items: start; }
 #model-admin .mbox .uname { padding-top: 5px; gap: 4px; }
 #model-admin .mbox .nrow1 { min-height: 22px; }
+/* TREE-2 (user 2026-10-09): the trunk hangs from the model NAME alone. The
+   badge line slots to the RIGHT of it — indented by the trunk, to exactly
+   the x the alias lines start at (alias-tree margin 16 − row padding 2 =
+   14px; box-sizing:border-box keeps size/state flush right). The wire then
+   reads name → aliases with the lamps as a neighbouring branch, instead of
+   the trunk appearing to drop out of the badge row. */
+#model-admin .mbox .urow.admin .nrow1 { padding-left: 14px; }
 #model-admin .mbox .uname .nmain { min-height: 22px; align-items: center; }
 /* CARD-1 (user 2026-10-09): the model name leads the card at the TOP-LEFT and
    is bigger; the type badge sits to its RIGHT (left of the copy icon) and the

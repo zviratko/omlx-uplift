@@ -68,3 +68,19 @@ test('alias trunk follows the name to the card edge (no orphan 96px indent)', ()
     assert.match(CSS, /\.alias-line:first-child::before \{ top: -14px; \}/,
         'first trunk riser must not overdraw into the lamp row (top: -14px)');
 });
+
+test('TREE-2: the badge line is indented by the trunk (hangs from the NAME)', () => {
+    assert.match(CSS, /#model-admin \.mbox \.urow\.admin \.nrow1 \{ padding-left: 14px; \}/,
+        'lamps line must slot right of the trunk (padding-left 14px = alias-tree 16px − row padding 2px), the user 2026-10-09');
+});
+
+test('TREE-1: a cached profile paint must show the tree (no hidden-until-mutation race)', () => {
+    // user report 2026-10-09: "after scrolling for a bit, all the model
+    // aliases disappear" — the profiles fetch caches 30 s, so aliasTree()
+    // can receive an ALREADY-filled profHost; hiding it and waiting for a
+    // childList mutation that already happened keeps the tree hidden forever.
+    const src = fs.readFileSync(path.join(STATIC_DIR, 'uplift_mmchips.js'), 'utf8');
+    const noAliasBranch = src.split('if (!lines.length) {')[1].split('}')[0];
+    assert.match(noAliasBranch, /if \(!profHost\.children\.length\) \{\s*t\.hidden = true;/,
+        'the tree may only hide when profHost is EMPTY at build time; the observer is the async fallback');
+});
