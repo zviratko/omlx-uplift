@@ -155,9 +155,42 @@ function alignProfileRows() {
             const first = treeEl.querySelector('.alias-line');
             const tr = treeEl.getBoundingClientRect();
             if (uid && first && treeEl.offsetHeight && uid.offsetWidth) {
+                /* TREE-2c: chain the risers elbow-to-elbow. Alias lines are
+                   two rows tall, so the PREVIOUS line's elbow (its mid
+                   height) is far below this line's top — a fixed -16px
+                   overdraw left a ~17px gap between segments (user: "the
+                   trunk is not continuous, it shifts between the lines").
+                   Each line's --riser-top = previous elbow's bottom - 4px
+                   overlap, measured in the SAME geometry units the ::before
+                   uses (padding-box top: border-box top + border-top).
+                   The first visible line keeps -14px: the connector already
+                   ends 4px INTO its riser, and -16 would poke the lamp row
+                   outline above the tree. */
+                const vis = [...treeEl.querySelectorAll('.alias-line')]
+                    .filter(l => l.offsetHeight);
+                let prevElbowBottom = null;
+                for (const l of vis) {
+                    const lr = l.getBoundingClientRect();
+                    const csL = getComputedStyle(l);
+                    const bt = parseFloat(csL.borderTopWidth) || 0;
+                    const bb = parseFloat(csL.borderBottomWidth) || 0;
+                    if (prevElbowBottom === null) {
+                        l.style.setProperty('--riser-top', '-14px');
+                    } else {
+                        // start inside the previous elbow band (3px tall):
+                        // -4 from its bottom edge = whole band overlapped
+                        const t = Math.round(prevElbowBottom - 4 - (lr.top + bt));
+                        l.style.setProperty('--riser-top', t + 'px');
+                    }
+                    // ::before bottom:50% of the PADDING box => the elbow
+                    // band's bottom edge sits at paddingTop + PH/2
+                    prevElbowBottom = lr.top + bt + (l.offsetHeight - bt - bb) / 2;
+                }
                 const nr = uid.getBoundingClientRect();
-                const cs = getComputedStyle(first, '::before');
-                const riserTop = first.getBoundingClientRect().top + parseFloat(cs.top);
+                const cs = getComputedStyle(vis[0] || first, '::before');
+                const l0 = (vis[0] || first).getBoundingClientRect();
+                const bt0 = parseFloat(getComputedStyle(vis[0] || first).borderTopWidth) || 0;
+                const riserTop = l0.top + bt0 + parseFloat(cs.top);
                 const top = (nr.bottom - 2) - tr.top;
                 const h = (riserTop + 4) - (nr.bottom - 2);
                 // top is NEGATIVE by design: the connector leaves the tree's
@@ -170,6 +203,8 @@ function alignProfileRows() {
             } else {   // hidden tree (profiles still resolving): paint nothing
                 treeEl.style.removeProperty('--trunk-top');
                 treeEl.style.removeProperty('--trunk-drop');
+                for (const l of treeEl.querySelectorAll('.alias-line'))
+                    l.style.removeProperty('--riser-top');
             }
         }
         const host = box.querySelector('.chip-host');

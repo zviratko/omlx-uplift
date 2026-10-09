@@ -1169,11 +1169,14 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    through the badge line and meets the first riser. --trunk-top/--trunk-drop
    are MEASURED by the align pass (alignProfileRows): the segment spans
    nameBottom-2 (2px bite into the name's box so it reads attached) to
-   firstRiserTop+4 (4px overlap so there is no seam). left -17px + 3px width
-   = the exact x the line risers already draw at (line box 66, stroke 49-52).
-   No --trunk-drop set (hidden tree, no lines) => height 0 => nothing paints. */
+   firstRiserTop+4 (4px overlap so there is no seam).
+   left: -15px puts the stroke at x 51..54 — EXACTLY the line risers' x
+   (their ::before is -16px from the line's PADDING box, which is the 1px
+   line border inside the same 66px edge). -17 sat at 49, i.e. ON the card
+   border (49..50) and 2px left of the risers — the user saw the kink and
+   the overlap ("shifts between the lines / goes over the card border"). */
 #model-admin .alias-tree:not([hidden])::before { content: ""; position: absolute;
-    left: -17px; width: 3px; background: var(--dim);
+    left: -15px; width: 3px; background: var(--dim);
     top: var(--trunk-top, 0px); height: var(--trunk-drop, 0px); }
 #model-admin .alias-line { position: relative; display: flex; align-items: center;
     gap: 8px; margin: 0 0 6px; padding: 4px 8px; min-width: 0;
@@ -1184,18 +1187,18 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    into the line. -20px overdraw bridges the 6px gaps between lines so the
    segments read as one continuous wire, and stops at the last corner. */
 #model-admin .alias-line::before { content: ""; position: absolute;
-    left: -16px; top: -16px; bottom: 50%; width: 14px;
+    left: -16px; top: var(--riser-top, -16px); bottom: 50%; width: 14px;
     border-left: 3px solid var(--dim); border-bottom: 3px solid var(--dim); }
-/* CARD-1: the trunk now sits at the card's content left edge — exactly under
-   the model NAME (and under the lamp row, which shares that edge). The
-   -16px overdraw that bridges inter-line gaps must NOT reach into the model
-   row for the FIRST line: line 2 is now the lamps, whose box starts 14px
-   above the line's top edge (alias-tree padding-top 6 + row padding-bottom
-   8). -14px bridges that whitespace exactly: touches the lamp row, never
-   overdraws it. Mid-tree lines keep -16 (pure overlap into the previous
-   line's bottom padding — the proven bridge). */
-#model-admin .alias-tree > .alias-line:first-child::before,
-#model-admin .prof-lines > .alias-line:first-child::before { top: -14px; }
+/* TREE-2c (user 2026-10-09: "the trunk is not continuous, it shifts between
+   the lines"): each riser reached up only 16px, which bridged a gap only for
+   the OLD one-row alias lines. Alias lines are now two rows tall (~56px:
+   name+copy, then EDIT), so the PREVIOUS elbow (its mid height) sits
+   height/2 + 6px below this line's top — a fixed overdraw can never know
+   that. --riser-top is MEASURED per line by the align pass: every visible
+   line's riser runs up to the previous visible line's elbow +4px overlap.
+   The first visible line keeps -14px: the connector ends 4px below its top,
+   and a full -16 would poke 2px into the lamp row outline above. */
+#model-admin .alias-tree > .alias-line:first-child::before { top: -14px; }
 #model-admin .alias-line span { text-align: left !important; }
 #model-admin .alias-line.dim-line { opacity: 0.75; border-style: dashed; }
 #model-admin .alias-line .alias-name.dim { color: var(--dim); }

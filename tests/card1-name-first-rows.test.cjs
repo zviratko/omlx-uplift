@@ -78,8 +78,13 @@ test('TREE-2b: the trunk CONNECTS to the name (measured, not guessed)', () => {
     assert.match(chips, /setProperty\('--trunk-top'/, 'align pass must pin the connector top');
     assert.match(chips, /setProperty\('--trunk-drop'/, 'align pass must pin the connector height');
     // the connector paints only on visible trees and at the riser x
-    assert.match(CSS, /\.alias-tree:not\(\[hidden\]\)::before \{[\s\S]*?left: -17px; width: 3px/,
-        'connector must share the riser stroke geometry (-17px from the tree = 49px from the box)');
+    assert.match(CSS, /\.alias-tree:not\(\[hidden\]\)::before \{[\s\S]*?left: -15px; width: 3px/,
+        'connector must share the riser stroke x (line ::before -16px from the PADDING box = 51; -15px from the tree box = the same 51 — -17 sat on the card border and kinked)');
+    // risers chain by measured --riser-top, not a fixed guess
+    assert.match(CSS, /\.alias-line::before \{ content: ""; position: absolute;\s*left: -16px; top: var\(--riser-top, -16px\); bottom: 50%/,
+        'line risers must read --riser-top (measured) with the old -16px as fallback');
+    assert.match(chips, /setProperty\('--riser-top'/,
+        'align pass must chain the risers elbow-to-elbow (alias lines are 2 rows tall; a fixed overdraw leaves a gap)');
     // base-box expansion moves the tree: the fold pill must re-run the align
     assert.match(chips.slice(chips.indexOf('more.onclick')), /scheduleFold\(host\);\s*\n\s*\/\/ TREE-2b[\s\S]{0,220}scheduleAlign\(\);/,
         'expanding the base chip box must re-measure the trunk connector');
