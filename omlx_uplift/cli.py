@@ -490,12 +490,64 @@ def cmd_view(argv=None) -> int:
     return 0
 
 
+def _kill_switch(store, action: str) -> dict:
+    """TUI-1 (CI red since LOG-2): arm or clear the boot kill switch.
+
+    Deliberately reachable WITHOUT an importable omlx tree — these verbs touch
+    only the manifest and the sentinel file, never tree bytes. The kill switch
+    is the verb you reach for when the runtime patches are the problem, so
+    'is omlx installed for this python?' must never stand between an operator
+    and it. Split out of cmd_patches so that gate can stay where the tree-
+    bound actions need it."""
+    if action == "disable-all":
+        manifest = store.load()
+        for patch in manifest.get("patches", []):
+            if patch.get("enabled") and "enabled_before_kill" not in patch:
+                # record ONLY what the kill switch itself turned off; a
+                # patch the user had already disabled keeps its own truth
+                # (first-armed wins: a re-arm over a manual state must not
+                # resurrect what was off before)
+                patch["enabled_before_kill"] = True
+            patch["enabled"] = False
+            store.set_state_if(patch, "disabled", "disabled by CLI")
+        store.save(manifest)
+        with open(store.sentinel_path, "w") as fh:
+            fh.write("disabled via omlx-uplift patch disable-all\n")
+        return {"ok": True, "sentinel": store.sentinel_path}
+    # enable-all: the documented twin of disable-all — drop the kill switch
+    # and put back exactly the enabled flags disable-all recorded. Patches the
+    # user disabled by hand (no stamp) stay off: enable-all restores the kill
+    # switch's own footprint, it does not overrule decisions.
+    manifest = store.load()
+    restored = []
+    for patch in manifest.get("patches", []):
+        if patch.pop("enabled_before_kill", False):
+            patch["enabled"] = True
+            if patch.get("state") == "disabled":
+                store.set_state(patch, "pending",
+                                "enabled — applies on next restart")
+            restored.append(patch.get("id"))
+    store.save(manifest)
+    try:
+        os.remove(store.sentinel_path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        return {"ok": False, "reason": f"sentinel still present: {exc}"}
+    return {"ok": True, "sentinel": store.sentinel_path,
+            "restored": restored,
+            "kill_switch_active": store.patches_disabled()}
+
+
 def cmd_patches(argv=None) -> int:
     """Out-of-band patch recovery (PAT-3). Subcommands:
       status       manifest + verification view (JSON)
       apply        reconcile now against the live keg (no re-exec)
       check        re-fetch sources, report drift (JSON)
-      disable-all  kill switch on (sentinel) + disable every patch
+      disable-all  kill switch on (sentinel) + disable every patch. Twin:
+                   enable-all. Both write only the manifest and the sentinel,
+                   so they answer BEFORE the omlx-tree check below — the
+                   runtime being unreachable is exactly when you need them.
       add          fetch -> gate -> store a patch (id + --pr/--url/--file)
       update       re-check a stored patch: online source (pr/url) or new
                    diff via --file (also accepts --pr/--url to re-point).
@@ -569,6 +621,17 @@ def cmd_patches(argv=None) -> int:
     from . import patchsource, patches as _patches, patchsync
 
     store = _patches.PatchStore()
+
+    if args.action in ("disable-all", "enable-all"):
+        # TUI-1: the kill switch answers before the tree check. These two
+        # verbs write only the manifest and the sentinel — no tree bytes —
+        # and the situation they exist for is 'the patched runtime is the
+        # problem', where refusing with 'is omlx installed for this python?'
+        # would lock the operator out of the one command that fixes it.
+        out = _kill_switch(store, args.action)
+        print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
+
     root = _patches._omlx_root()
     if not root:
         print("omlx package tree not found — is omlx installed for this python?",
@@ -688,48 +751,6 @@ def cmd_patches(argv=None) -> int:
         out = patchsource.update_all(
             store, tree_root,
             build_root=args.build_root or patchsource.dev_build_root())
-    elif args.action == "disable-all":
-        manifest = store.load()
-        for patch in manifest.get("patches", []):
-            if patch.get("enabled") and "enabled_before_kill" not in patch:
-                # record ONLY what the kill switch itself turned off; a
-                # patch the user had already disabled keeps its own truth
-                # (first-armed wins: a re-arm over a manual state must not
-                # resurrect what was off before)
-                patch["enabled_before_kill"] = True
-            patch["enabled"] = False
-            store.set_state_if(patch, "disabled", "disabled by CLI")
-        store.save(manifest)
-        with open(store.sentinel_path, "w") as fh:
-            fh.write("disabled via omlx-uplift patch disable-all\n")
-        out = {"ok": True, "sentinel": store.sentinel_path}
-    elif args.action == "enable-all":
-        # the documented twin of disable-all: drop the kill switch and put
-        # back exactly the enabled flags disable-all recorded. Patches the
-        # user disabled by hand (no stamp) stay off — enable-all restores
-        # the kill switch's own footprint, it does not overrule decisions.
-        manifest = store.load()
-        restored = []
-        for patch in manifest.get("patches", []):
-            if patch.pop("enabled_before_kill", False):
-                patch["enabled"] = True
-                if patch.get("state") == "disabled":
-                    store.set_state(patch, "pending",
-                                    "enabled — applies on next restart")
-                restored.append(patch.get("id"))
-        store.save(manifest)
-        try:
-            os.remove(store.sentinel_path)
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            out = {"ok": False,
-                   "reason": f"sentinel still present: {exc}"}
-            print(_json.dumps(out, indent=2))
-            return 1
-        out = {"ok": True, "sentinel": store.sentinel_path,
-               "restored": restored,
-               "kill_switch_active": store.patches_disabled()}
     print(_json.dumps(out, indent=2))
     return 0 if out.get("ok", True) else 1
 

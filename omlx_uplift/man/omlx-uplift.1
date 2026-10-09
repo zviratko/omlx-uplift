@@ -122,6 +122,22 @@ gate never stops the rest.
 .Op Fl -approve Ar once|always
 .Xc
 .It Xo Ic patch
+.Ic disable-all | enable-all
+.Xc
+The boot kill switch and its twin.
+.Ic disable-all
+writes the sentinel and turns every patch off, recording in
+.Va enabled_before_kill
+which flags
+.Em it
+switched;
+.Ic enable-all
+removes the sentinel and restores exactly that footprint, so a patch you had
+disabled by hand stays off.
+Both write only the manifest and the sentinel \(em no tree bytes \(em so they
+still work when this python cannot see an omlx package, which is exactly the
+situation they exist for.
+.It Xo Ic patch
 .Ic approve Ar id
 .Op Fl -approve Ar once|always
 .Xc
@@ -482,8 +498,14 @@ Reconcile lock (startup and CLI share it).
 Kill-switch sentinel: when present, startup only verifies patches and
 boots omlx unpatched.
 .Ic omlx-uplift
-patches disable-all
-creates it; delete the file (or re-enable patches in the UI) to resume.
+patch disable-all
+creates it;
+.Ic patch
+.Ic enable-all
+(or the dashboard toggle, or the TUI's
+.Ic U
+key)
+removes it and restores the flags the switch recorded.
 .It Pa kernel-backups/
 Byte-exact originals behind
 .Ic kernel

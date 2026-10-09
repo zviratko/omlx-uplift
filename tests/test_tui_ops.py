@@ -80,12 +80,29 @@ class TestOpTable(unittest.TestCase):
             self.assertIn(wanted, high, f"{wanted} must need a typed YES")
 
     def test_tree_bound_ops_are_flagged(self):
-        # without the flag a write would aim at an empty tree_root
-        for op in ops.PATCH_ROW_OPS + ops.PATCH_SCREEN_OPS:
-            self.assertTrue(op.needs_tree, f"{op.label} needs a tree")
+        # needs_tree means 'this function takes a tree root', not 'this is
+        # about patches'. Without the flag a file write would aim at an empty
+        # tree_root; with it on a store-only verb, the TUI would refuse the
+        # kill switch on a machine with no importable omlx — the one case
+        # where it is needed (this is what kept CI red since LOG-2).
+        tree_bound = {"update", "dry-run test", "remove patch", "check drift",
+                      "reconcile now", "install", "adopt as local",
+                      "sync catalog"}
+        for op in ops.PATCH_ROW_OPS + ops.PATCH_SCREEN_OPS \
+                + ops.CATALOG_ROW_OPS + ops.CATALOG_SCREEN_OPS:
+            self.assertEqual(op.needs_tree, op.label in tree_bound,
+                             f"{op.label}: needs_tree={op.needs_tree}")
         for op in ops.KEG_SCREEN_OPS + ops.SERVER_ROW_OPS + ops.KEG_ROW_OPS:
             self.assertFalse(op.needs_tree,
                              f"{op.label} acts on kegs/services, not the tree")
+
+    def test_store_only_verbs_survive_a_missing_tree(self):
+        # the manifest side of recovery must work with no omlx importable
+        from omlx_uplift.tui import ops as _o
+        for label in ("enable", "disable", "promote", "rollback version",
+                      "approve once", "kill switch ON", "kill switch OFF"):
+            op = next(o for o in _o.ALL_OPS if o.label == label)
+            self.assertFalse(op.needs_tree, label)
 
     def test_labels_fit_the_key_bar(self):
         for op in ops.ALL_OPS:

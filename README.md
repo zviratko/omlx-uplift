@@ -129,7 +129,10 @@ omlx-uplift patch disable-all          # sentinel + disable every patch
 ```
 
 If a patch set wedges boot, use a kill switch, fix the manifest by hand
-(it is plain JSON), remove the sentinel, start again.
+(it is plain JSON), run `patch enable-all`, start again. `disable-all` and
+`enable-all` touch only the manifest and the sentinel, so they work even when
+this python cannot see an omlx package at all — which is the case they exist
+for.
 
 ## Skins (theming)
 

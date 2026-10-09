@@ -37,6 +37,14 @@ users never see.
   approximate, with the status line naming which happened. The choice is
   remembered in `~/.omlx/uplift/tui.json`, kept separate from `patches.json`
   so a cosmetic preference never rides along with the patch manifest.
+- **The kill switch no longer needs an importable omlx.** `patch disable-all`
+  and `patch enable-all` write only the manifest and the sentinel file, but
+  they sat behind the same `is omlx installed for this python?` check as the
+  verbs that touch tree bytes — so on a machine where the runtime is broken or
+  omlx simply is not importable, the one command that rescues you refused to
+  run, and printed nothing on stdout while doing it. Both surfaces now answer
+  the switch first (the TUI's `K`/`U` keys follow the same rule). Found by CI,
+  which has had no omlx since LOG-2 added these verbs.
 - **`omlx-uplift patch rollback ID [--to-v N]`.** The dashboard has had a Roll
   back button for as long as it has had version history; the CLI never got
   its twin, so undoing a bad promote from a shell meant editing the manifest

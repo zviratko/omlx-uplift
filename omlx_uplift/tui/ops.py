@@ -212,23 +212,30 @@ def _service_restart(ctx, row, approve=None):
 
 
 # ------------------------------------------------------------- the tables ---
+# needs_tree marks the ops whose function takes a tree root — i.e. the ones
+# that read or write files in the omlx package. It is NOT a general "this is
+# about patches" flag: enable/disable/promote/rollback/approve and the kill
+# switch write only the manifest, so they stay available with no tree, which
+# is what cmd_patches now does too (TUI-1). Gating them was the bug that kept
+# CI red since LOG-2 and would lock an operator out of the rescue command
+# precisely when the patched runtime is what they are trying to escape.
 PATCH_ROW_OPS = [
-    Op("e", "enable", _enable, (PATCH,), WRITE, needs_tree=True,
+    Op("e", "enable", _enable, (PATCH,), WRITE,
        cli=lambda r: f"patch enable {_pid(r)}",
        hint="lands at the next restart (press 'y' to reconcile now)"),
-    Op("d", "disable", _disable, (PATCH,), WRITE, needs_tree=True,
+    Op("d", "disable", _disable, (PATCH,), WRITE,
        cli=lambda r: f"patch disable {_pid(r)}",
        hint="restores the patch's files on the next reconcile"),
-    Op("p", "promote", _promote, (PATCH,), WRITE, needs_tree=True,
+    Op("p", "promote", _promote, (PATCH,), WRITE,
        cli=lambda r: f"patch promote {_pid(r)}",
        hint="accepts the newest validated candidate as desired"),
     Op("u", "update", _update, (PATCH,), WRITE, needs_tree=True,
        cli=lambda r: f"patch update {_pid(r)}",
        hint="needs network — re-fetches, gates, stores and adopts"),
-    Op("v", "rollback version", _rollback, (PATCH,), WRITE, needs_tree=True,
+    Op("v", "rollback version", _rollback, (PATCH,), WRITE,
        cli=lambda r: f"patch rollback {_pid(r)}",
        hint="points desired_version at the previous stored version"),
-    Op("a", "approve once", _approve, (PATCH,), WRITE, needs_tree=True,
+    Op("a", "approve once", _approve, (PATCH,), WRITE,
        cli=lambda r: f"patch approve {_pid(r)} --approve once",
        hint="lets auto-apply pass the held safeguard codes (bound to this "
             "content sha)"),
@@ -247,10 +254,10 @@ PATCH_SCREEN_OPS = [
     Op("y", "reconcile now", _apply, ANY, WRITE, needs_tree=True,
        cli="patch apply",
        hint="the same pass the server runs at boot"),
-    Op("K", "kill switch ON", _kill_on, ANY, HIGH, needs_tree=True,
+    Op("K", "kill switch ON", _kill_on, ANY, HIGH,
        cli="patch disable-all",
        hint="omlx boots completely unpatched until you turn it off"),
-    Op("U", "kill switch OFF", _kill_off, ANY, HIGH, needs_tree=True,
+    Op("U", "kill switch OFF", _kill_off, ANY, HIGH,
        cli="patch enable-all",
        hint="removes the sentinel and restores exactly the flags the switch "
             "recorded (a patch you had disabled by hand stays off)"),

@@ -274,8 +274,9 @@ class TestGuardRails(AppCase):
         self.ctx._tree_root_override = ""
         self.assertFalse(self.ctx.tree_root)
         self.app.goto("patches")
-        # the screen ops are still bound; they must refuse, not ask
-        for key in ("c", "y", "K", "U"):
+        # ops whose function takes a tree root must refuse, not ask: a write
+        # aimed at an empty tree_root is worse than a refused keypress
+        for key in ("c", "y"):
             self.app.pending = None
             self.app.on_key(key)
             self.assertFalse(self.app.pending, f"'{key}' opened a gate")
@@ -284,6 +285,24 @@ class TestGuardRails(AppCase):
         text = "\n".join(r.text() for r in self.app.screen.rows)
         self.assertIn("omlx package tree not found", text)
         self.assertNotIn("no patches stored", text)
+
+    def test_the_kill_switch_still_works_with_no_omlx_tree(self):
+        # TUI-1: the kill switch writes only the manifest and the sentinel, so
+        # a machine that cannot see an omlx tree must NOT lose its rescue
+        # command. Same rule as cmd_patches, in the same direction — if the
+        # two surfaces disagreed here, the TUI would refuse a key whose own
+        # status line advertises it.
+        self.ctx._tree_root_override = ""
+        self.app.goto("patches")
+        self.app.on_key("K")
+        self.assertTrue(self.app.awaiting_yes, "kill switch must still arm")
+        self.app.on_key("yes:YES")
+        self.assertTrue(self.settle())
+        self.assertTrue(os.path.exists(self.store.sentinel_path))
+        self.app.on_key("U")
+        self.app.on_key("yes:YES")
+        self.assertTrue(self.settle())
+        self.assertFalse(os.path.exists(self.store.sentinel_path))
 
     def test_keg_ops_stay_available_without_a_tree(self):
         # a keg switch does not need the python tree — refusing it would hide

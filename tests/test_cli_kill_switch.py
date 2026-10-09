@@ -12,7 +12,7 @@ import io
 import json
 import os
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 from omlx_uplift import cli, patches
 
@@ -122,6 +122,44 @@ class KillSwitchRoundTrip(unittest.TestCase):
         p = self.store.find(self.store.load(), "on-a")
         self.assertTrue(p["enabled"])
         self.assertEqual(p["state"], "pending")
+
+    def test_the_kill_switch_works_with_no_omlx_tree(self):
+        """TUI-1: these verbs write only the manifest and the sentinel, so
+        they must answer before cmd_patches' tree check. The case they exist
+        for is 'the patched runtime is the problem' — and on a machine where
+        omlx is not importable (the CI venv, or a keg you just broke), the
+        old order refused the rescue command with 'is omlx installed?'.
+        Regression test for the five CI failures that landed in LOG-2."""
+        from unittest import mock
+
+        import omlx_uplift.patches as _patches
+
+        with mock.patch.object(_patches, "_omlx_root", return_value=None):
+            rc_arm, armed = self._run("disable-all")
+            self.assertTrue(armed["ok"], "arm must succeed without a tree")
+            self.assertTrue(os.path.exists(self.store.sentinel_path))
+            self.assertFalse(self._enabled("on-a"))
+            rc_off, back = self._run("enable-all")
+        self.assertTrue(back["ok"], "clear must succeed without a tree")
+        self.assertEqual(back["restored"], ["on-a", "on-b"])
+        self.assertFalse(os.path.exists(self.store.sentinel_path))
+        self.assertTrue(self._enabled("on-a"))
+        self.assertFalse(self._enabled("off-c"),
+                        "a patch the user had off stays off")
+
+    def test_tree_bound_verbs_still_refuse_without_a_tree(self):
+        """The gate stays where it belongs: 'status' reads the live tree to
+        answer 'applied on this keg?', so it must still say it cannot."""
+        from unittest import mock
+
+        import omlx_uplift.patches as _patches
+
+        err = io.StringIO()
+        with mock.patch.object(_patches, "_omlx_root", return_value=None), \
+                redirect_stdout(io.StringIO()), redirect_stderr(err):
+            rc = cli.cmd_patches(["status"])
+        self.assertEqual(rc, 2)
+        self.assertIn("tree not found", err.getvalue())
 
 
 if __name__ == "__main__":
