@@ -378,43 +378,67 @@ Repair by reinstalling the omlx formula ; the tool never writes to the
 tree .
 .It Xo Ic tui
 .Xc
-Menu-driven terminal manager over the same surface this page documents.
-It boots on a main menu listing the screens:
+Menu-driven terminal manager over the same surface this page documents,
+laid out like
+.Em Midnight Commander :
+a bar of menus along the top, panels that fill the window, and a
+function-key legend along the bottom.
+The panels are
 .Em overview ,
 .Em patches ,
 .Em curated catalog ,
 .Em omlx-dev keg
 and
-.Em session log .
-The arrow keys (or
+.Em session log ;
+the bar holds
+.Em Go ,
+.Em Patches ,
+.Em Catalog ,
+.Em Keg ,
+.Em Services ,
+.Em View
+and
+.Em Help .
+.Ic F9
+(or
+.Ic Alt
+plus the menu letter) opens a menu, the arrows walk it,
+.Ic Enter
+runs the highlighted command and
+.Ic Esc
+closes it.
+A command that cannot run right now stays visible and greyed with the
+reason \(em a disabled command that explains itself is easier to learn
+than one that is hidden.
+Menu commands act on the row their panel has selected, the same way
+panel commands do.
+.Pp
+In a panel the arrow keys (or
 .Ic j Ns / Ns Ic k )
 move,
 .Ic Enter
-opens what is highlighted \(em a menu entry opens its screen, a patch or
-keg row opens its
-.Em action menu ,
-where every command is listed with what it does and what it mirrors on the
-CLI.
-.Ic m
-returns to the main menu,
-.Ic Esc
-backs out one step (submenu to list, list to menu, menu quits),
+opens that row's action menu,
+.Ic Tab
+and
 .Ic \&left / right
-step between screens,
-.Ic space
+switch panels,
+.Ic F3
 toggles the detail pane,
-.Ic n
+.Ic F5
 re-reads live state,
 .Ic T
 cycles the colour theme,
-.Ic \&?
+.Ic F1
 lists the keys,
+.Ic F10
+or
 .Ic q
 quits.
 The number keys
 .Ic 1 Ns - Ns Ic 5
-still jump straight to a screen, and every action keeps its letter
-shortcut; the menus are an additional path, never a worse one.
+jump straight to a panel and every action keeps its letter shortcut;
+the bar is an additional path, never a worse one.
+A mouse click selects a row, opens a menu and runs a menu item.
 .Pp
 The TUI implements no policy of its own.
 Every action calls the function the dashboard route calls, or runs the CLI
@@ -444,6 +468,7 @@ ember orange),
 A 256-colour terminal that allows palette writes gets the exact RGB values;
 otherwise the nearest available colour is used and the status line says which,
 because a silently mis-coloured warning is worse than an honest fallback.
+A degraded palette is reported under the panels, never hidden.
 The choice is remembered in
 .Pa tui.json .
 .Pp

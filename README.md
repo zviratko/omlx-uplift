@@ -152,15 +152,20 @@ trying to undo broke it.
 omlx-uplift tui
 ```
 
-It boots on a **main menu**: overview (store roll-up, both services, the dev
-carrier), patches, curated catalog, omlx-dev keg stash, session log. Each entry
-says what lives there and carries live state, so the menu is also the
-first-glance view. The arrows (or `j`/`k`) move, **Enter opens what is
-highlighted** — a menu entry opens its screen, and a patch or keg row opens an
-**action menu** listing every command with what it does and the CLI command it
-mirrors. `m` returns to the menu, `Esc` backs out one step, `←`/`→` step between
-screens, `space` toggles the detail pane, `n` re-reads live state, `T` cycles the
-colour theme, `?` lists the keys, `q` quits. Mouse clicks select a row.
+It is laid out like **Midnight Commander**: a bar of menus along the top
+(`Go`, `Patches`, `Catalog`, `Keg`, `Services`, `View`, `Help`), panels that
+fill the whole window — overview, patches, curated catalog, omlx-dev keg,
+session log — and a function-key legend along the bottom. `F9` or `Alt` plus
+the menu letter opens a menu, the arrows walk it, `Enter` runs the highlighted
+command, `Esc` closes it. A command that cannot run right now stays visible,
+greyed, with the reason — and every menu command acts on the row its panel has
+selected, the same way a panel command does.
+
+In a panel: arrows (or `j`/`k`) move, **Enter opens that row's action menu**,
+`Tab` and `←`/`→` switch panels, `F3` toggles the detail pane, `F5` re-reads
+live state, `T` cycles the theme, `F1` lists the keys, `F10` quits. Mouse
+clicks select rows, open menus and run items. The launcher screen (`m`) and
+the number keys `1`-`5` still work.
 
 Rows read as sentences, not codes: the name and description on the first line,
 the state in words on the second (`applied | enabled | scope omlx | desired v3`),

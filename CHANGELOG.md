@@ -13,6 +13,20 @@ users never see.
 
 ## Unreleased
 
+- **The TUI got a real menu shell, laid out like Midnight Commander.** The
+  previous version listed its screens as a menu, which was a launcher with
+  extra steps; now there is a bar of menus along the top of every panel
+  (`Go`, `Patches`, `Catalog`, `Keg`, `Services`, `View`, `Help`), opened with
+  `F9` or `Alt`+letter, walked with the arrows and run with `Enter`. Commands
+  that cannot run right now stay visible and greyed **with the reason** — a
+  disabled command that explains itself teaches the tool instead of hiding
+  from you — and a menu command acts on the row its own panel has selected,
+  whether or not you are looking at that panel. The panels now fill the whole
+  window (details sit beside the list on a wide terminal, under it on a
+  narrow one) instead of stacking in a corner, and the bottom row carries the
+  function-key legend. Mouse clicks open menus, run items and select rows.
+  Nothing was taken away: number keys, letter shortcuts and the `m` launcher
+  screen all still work, and every command still shows the CLI it mirrors.
 - **Fixed: the TUI showed the wrong vanilla port.** The service rows and
   menu read a top-level `port` key from `~/.omlx/settings.json`, but omlx
   stores it under `server.port` (the same nested key `omlx-uplift view`

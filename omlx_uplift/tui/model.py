@@ -25,11 +25,9 @@ TONE_PANE = "pane"        # the detail text under the rows
 TONES = (TONE_TITLE, TONE_OK, TONE_BAD, TONE_WARN, TONE_DIM, TONE_BOLD,
          TONE_SEL, TONE_PANE)
 
-# The screens in menu order. The number keys still jump straight to a
-# screen (TUI-1 muscle memory, and scripts/tests), but the primary way to
-# move is the main menu: a visible list you arrow through (TUI-2, user
-# request: "instead of numbers I wanted menus").
-SCREEN_ORDER = ("menu", "overview", "patches", "catalog", "dev", "log")
+# Number keys still jump straight to a panel (TUI-1 muscle memory, and
+# scripts/tests); the bar (menus.py) and Tab/left/right (app) are the primary
+# way to move since TUI-3.
 SCREEN_KEYS = {"1": "overview", "2": "patches", "3": "catalog",
                "4": "dev", "5": "log"}
 MENU_LABELS = {"overview": "Overview", "patches": "Patches",

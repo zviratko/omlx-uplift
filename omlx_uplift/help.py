@@ -37,9 +37,8 @@ COMMANDS = [
                   " accuracy engine (own venv, never a keg)"),
     ("mteb-env", "status|create — pinned MTEB venv for the embeddings/"
                  "rerankers bench (own venv; carries torch — never a keg)"),
-    ("tui", "menu-driven terminal manager — main menu, action menus,"
-            " patches, catalog, dev kegs, services (needs a real"
-            " terminal)"),
+    ("tui", "menu-driven terminal manager — menu bar, panels for patches,"
+            " catalog, dev kegs, services (needs a real terminal)"),
 ]
 
 _TOP_USAGE = """\
@@ -101,15 +100,19 @@ COMMAND_USAGE = {
                "                 read-only: every omlx file vs the wheel RECORD;\n"
                "                 files an applied patch owns are expected drift"),
     "tui": ("omlx-uplift tui\n"
-            "                 boots on a main menu: overview | patches |"
-            " catalog | dev keg | log\n"
-            "                 arrows/j-k move; Enter opens the screen or the"
-            " row's action menu\n"
-            "                 m menu  Esc back  left/right switch screens"
-            "  space detail  n re-read\n"
-            "                 T cycles the colour theme (default | P(DOOM)"
-            " | phosphor | mono)\n"
-            "                 numbers 1-5 and the action letters still work"
+            "                 a Midnight-Commander shell: a BAR of menus on"
+            " top of full-size panels\n"
+            "                 panels: overview | patches | catalog | dev keg |"
+            " log (1-5 or Tab to walk)\n"
+            "                 F9 (or Alt+letter) opens a menu; arrows walk"
+            " it, Enter runs it, Esc closes\n"
+            "                 greyed menu items say WHY they cannot run"
+            " right now\n"
+            "                 arrows/j-k move the panel cursor; Enter opens"
+            " that row's action menu\n"
+            "                 F3 detail pane  F5 re-read  T theme (default |"
+            " P(DOOM) | phosphor | mono)\n"
+            "                 F1 help  F10 quit; action letters still work"
             " as shortcuts\n"
             "                 writes nothing until you confirm; shows the CLI"
             " command each action mirrors\n"

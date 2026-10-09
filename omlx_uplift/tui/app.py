@@ -1,14 +1,15 @@
-"""TUI curses loop (TUI-1).
+"""TUI curses loop (TUI-1, menu shell TUI-3).
 
 Thin by design: read a key, ask App what to do, paint what the model rendered.
-`App` holds every behaviour (navigation, the confirm gate, the worker thread)
-and imports no curses, so it is testable headless; curses lives only in the
-plumbing at the bottom of this file.
+`App` holds every behaviour (navigation, the menu bar, the confirm gate, the
+worker thread) and imports no curses, so it is testable headless; curses lives
+only in the plumbing at the bottom of this file.
 
-Keys:  1..5 screens | j/k or arrows move | PgUp/PgDn jump | enter detail
-       n re-read | ? help | q quit | a letter runs the op printed in the key bar
-WRITE ops answer y/N; HIGH ops need a typed YES on its own line, so a stray
-'y' can never arm a keg switch or a restart. One op runs at a time.
+The shell is Midnight Commander's (TUI-3, on the user's request): a BAR of
+menus along the top of every screen, dropdowns of commands with accelerator
+letters, big panels that use the whole window, F-key legend at the bottom.
+F9 (or Alt+letter) opens the bar; letters still run the printed shortcut of
+the visible panel; panels switch with Tab.
 """
 from __future__ import annotations
 
@@ -16,41 +17,41 @@ import queue
 import threading
 import time
 
-from . import model
-from . import ops as ops_mod
-from . import themes
+from . import frame, menus, model, ops as ops_mod, themes
 from .context import Context
 
 REFRESH_SECS = 5.0      # the dashboard, a boot reconcile or another terminal
                         # can change the store while we sit here looking at it
 PULSE_SECS = 1.5        # background collector tick (TUI-3): keeps the TTL
-                        # caches warm OFF the UI thread. A service start shows
-                        # within a pulse + repaint cycle (~6 s worst case),
-                        # which is the same latency the old synchronous
-                        # refresh gave — without the per-frame freeze.
-YES_PROMPT_SUFFIX = "(type YES, then enter)"
+                        # caches warm OFF the UI thread
+LOOP_TIMEOUT_MS = 60    # idle getch wait (repaint throttle, feels instant)
+ESC_COMBINE_MS = 45     # getch window used to assemble ESC-prefixed keys
 
 HELP_LINES = [
     "omlx-uplift tui — keys and rules",
     "",
-    "  Navigate with the arrows (or j/k). Enter opens what is",
-    "  highlighted: a menu entry opens its screen, a patch opens its",
-    "  action list. m goes to the main menu, Esc backs out one step,",
-    "  left/right step between screens. Numbers 1-5 still jump.",
-    "  PgUp/PgDn  jump by 8    space  detail pane    n  re-read state",
-    "  T  cycle colour theme    ?  this help    q  quit",
+    "  The bar along the top is the menu: F9 focuses it, Alt+first-letter",
+    "  opens one, arrows walk it, Enter runs the highlighted command, Esc",
+    "  backs out. Tab switches panels; 1-5 still jump. Every command in a",
+    "  menu is also the printed letter shortcut on its panel — the CLI",
+    "  twin is shown in the log either way.",
     "",
-    "  Every action is also a letter on the list screen (printed in the",
-    "  bar and in the action menu). Write actions answer y/N; actions",
-    "  that touch tree bytes, a keg or the running service ask you to",
-    "  type YES. Every action shows the CLI command it mirrors, so",
-    "  nothing here is hidden from the shell — you can always do the",
-    "  same thing by hand.",
+    "  Navigate with the arrows (or j/k). Enter opens what is highlighted:",
+    "  a menu entry its commands, a patch its action list. PgUp/PgDn jump",
+    "  by 8.  F3 toggles the detail pane.  F5 re-reads state.  T cycles",
+    "  the colour theme.  ? this help.  q (or F10) quits.",
     "",
-    "  Nothing is written unless you confirm it. The store on disk is",
-    "  the same one the dashboard and the CLI use, and omlx re-applies",
-    "  patches at every boot, so most patch changes land on the next",
-    "  restart (or run 'reconcile now' on the patches screen).",
+    "  Commands that cannot run right now stay visible and greyed with the",
+    "  reason — a disabled command that explains itself teaches the tool",
+    "  instead of hiding from you.",
+    "",
+    "  Every action is also a CLI command (shown in the action hint and in",
+    "  the log). Write actions answer y/N; actions that touch tree bytes, a",
+    "  keg or the running service ask you to type YES. Nothing is written",
+    "  unless you confirm it.",
+    "",
+    "  omlx re-applies patches at every boot, so most patch changes land on",
+    "  the next restart (or run 'reconcile now' from the Patches menu).",
     "",
     "  Ctrl-C cancels a running command (a build, a restart). An in-process",
     "  store write cannot be interrupted and simply finishes.",
@@ -63,6 +64,25 @@ HELP_LINES = [
     "  press any key to continue",
 ]
 
+ABOUT_LINES = [
+    "omlx-uplift tui — what this tool is",
+    "",
+    "  A front end, not a second brain. Every command here calls the SAME",
+    "  function the web dashboard and the CLI call — the patch store, the",
+    "  curated catalog, the dev-keg stash, the kill switch. No policy lives",
+    "  in this UI, so behaviour cannot drift from the documented CLI.",
+    "",
+    "  The patch store (~/.omlx/uplift/patches.json) is shared with the",
+    "  dashboard; another terminal or a boot reconcile can change it while",
+    "  you look at this screen. F5 re-reads; the log shows every result",
+    "  with the CLI command that mirrors it.",
+    "",
+    "  The kill switch (Patches menu) needs no omlx tree on purpose: when",
+    "  patches leave the package unbootable, that command is the way out.",
+    "",
+    "  press any key to continue",
+]
+
 
 class App:
     """All TUI behaviour except painting."""
@@ -70,38 +90,44 @@ class App:
     def __init__(self, ctx: Context | None = None):
         self.ctx = ctx or Context()
         self.screens: dict[str, model.Screen] = {}
-        # TUI-2: boot on the main menu — the operator asked for menus. The
-        # action submenu is a VIEW of another screen (same op objects, same
-        # gates); actions_for names the screen whose row it listed.
-        self.current = "menu"
-        self.actions_for: str | None = None
+        # boot on the panels, not a launcher screen (TUI-3): the BAR is the
+        # menu now; 'menu' remains reachable (m, the Panel menu) for people
+        # who want the list view
+        self.current = "patches"
+        self.actions_for: str | None = None   # submenu view of a panel
         self.detail_open = True
+        self.footer_open = True
         self.notice = ""
         self.busy = ""
-        self.pending: tuple | None = None   # (op, row) awaiting confirmation
+        self.pending: tuple | None = None     # (op, row) awaiting confirmation
         self.yes_line = ""
         self.worker: threading.Thread | None = None
         self.results: queue.Queue = queue.Queue()
+        # menu-bar state (TUI-3): which dropdown is open (-1 = none, -2 = bar
+        # focused but closed), the cursor inside it, and the sub-menu path
+        self.bar_index = -1
+        self.bar_focus = False
+        self.item_cursor = 0
+        self.sub_path: list[int] = []         # item indexes of open submenus
+        self._menus_cache: list | None = None
+        self._menus_stamp = 0.0
+        # view state the painter reads: last Frame (for mouse hits)
+        self._frame: frame.Frame | None = None
         # TUI-3: display collectors run on a background pulse thread so the
-        # UI thread's build() is always a cache read. _pulse_now = 'probe
-        # again on the next tick regardless of TTL' (set by 'n' and after an
-        # action finishes); the loop reads it, clears it, calls ctx.pulse().
+        # UI thread's build() is always a cache read.
         self._pulse_now = False
         self.proc = None
         self.proc_lock = threading.Lock()
         self.last_build = 0.0
         self.running = True
         self.show_help = False
-        # theme: persisted in ~/.omlx/uplift/tui.json, 'T' cycles it. The
-        # painter replaces this dict with curses-backed attrs once the screen
-        # is up; until then the model still renders (tests, headless).
+        self.show_about = False
+        # theme: persisted in ~/.omlx/uplift/tui.json, 'T' cycles it
         self.theme_name = themes.get_theme()
-        # painter state: set by _apply_theme once curses is up; headless the
-        # model tones paint as plain text, which is what the tests assert on
         self.attrs: dict = {}
         self.theme_info: dict = {"mode": "headless", "note": "", "pairs": 0,
                                  "label": themes.theme(self.theme_name)["label"]}
-        self.theme_dirty = True         # (re)build colour pairs before paint
+        self.theme_dirty = True
         self.ctx.on_process = self._note_process
         self.build(self.current)
 
@@ -111,25 +137,167 @@ class App:
         return themes.theme(self.theme_name)
 
     def cycle_theme(self, direction: int = 1) -> str:
-        """Next/previous palette, remembered at once — a cosmetic choice the
-        operator just made should not need a save step."""
         order = themes.names()
         i = order.index(themes.norm(self.theme_name))
-        self.theme_name = order[(i + direction) % len(order)]
+        return self.set_theme(order[(i + direction) % len(order)])
+
+    def set_theme(self, name: str) -> str:
+        self.theme_name = themes.norm(name)
         themes.set_theme(self.theme_name)
-        self.theme_dirty = True         # the curses loop re-maps the palette
+        self.theme_dirty = True
         label = themes.theme(self.theme_name)["label"]
         self.ctx.log(f"theme -> {self.theme_name} ({label})")
         return self.theme_name
+
+    # ------------------------------------------------------------------ menus --
+    # menus_env contract (menus.py reads these; row_for(panel) is the MC
+    # 'what the panel has selected' hook that makes commands target things)
+    @property
+    def tree_root(self):
+        return self.ctx.tree_root
+
+    @property
+    def kill_switch(self) -> bool:
+        """State of the boot-time kill switch — the Patches menu shows it as
+        a check mark, so it must read the store like the overview does."""
+        try:
+            return bool(self.ctx.store.patches_disabled())
+        except Exception:
+            return False
+
+    def row_for(self, panel: str) -> model.Row | None:
+        """The row a menu command would act on. NEVER builds a panel that
+        is not open yet: building 'catalog' means a network fetch and
+        building 'dev' means git probes, and menus() runs on every frame —
+        that is exactly the TUI-3a freeze the user complained about. An
+        unvisited panel simply has no selection; its commands show greyed
+        with that reason, and visiting it once lights them up."""
+        s = self.screens.get(panel)
+        if s is None:
+            return None
+        row = s.current()
+        return row if row is not None and row.selectable else None
+
+    def menus(self) -> list:
+        """Rebuild the bar when anything it mirrors moved (panel switch,
+        cursor move, store change). Cheap (data only) — the stamp keeps the
+        per-frame path honest."""
+        s = self.screens.get(self.current)
+        # every panel's cursor belongs in the signature: a menu command can
+        # target a panel the operator is NOT looking at (open Keg from the
+        # patches screen), and its dropdown must carry the stash they just
+        # moved to, not the one cached when the bar was first built
+        sig = (self.current, id(s), s.selected if s else 0,
+               self.detail_open, self.footer_open, self.theme_name,
+               self.ctx.tree_root, self.last_build, self.kill_switch,
+               tuple(p.selected if p is not None else -1
+                     for p in (self.screens.get(n) for n in
+                               menus.PANEL_NAMES)))
+        if self._menus_cache is None or sig != self._menus_stamp:
+            self._menus_cache = menus.build(self)
+            self._menus_stamp = sig
+        return self._menus_cache
+
+    def open_menu(self, idx: int) -> None:
+        ms = self.menus()
+        if not ms:
+            return
+        self.bar_index = idx % len(ms)
+        self.bar_focus = True
+        self.sub_path = []
+        self.item_cursor = self._first_item(self._level_items(self.bar_index))
+
+    def close_menu(self) -> None:
+        self.bar_index = -1
+        self.sub_path = []
+        self.bar_focus = False
+
+    def _level_items(self, menu_idx: int | None = None) -> list:
+        """The item list of the deepest open submenu (or a menu's top level).
+        Separators are menus.SEP — the string 'sep' — which frame renders and
+        navigation skips."""
+        ms = self.menus()
+        idx = self.bar_index if menu_idx is None else menu_idx
+        if idx < 0 or idx >= len(ms):
+            return []
+        items = ms[idx].items
+        for k in self.sub_path:
+            it = items[k] if k < len(items) else None
+            if it is None or isinstance(it, str) or it.kind != "sub":
+                self.sub_path = self.sub_path[:self.sub_path.index(k)]
+                break
+            items = it.payload
+        return items
+
+    @staticmethod
+    def _first_item(items: list) -> int:
+        for i, it in enumerate(items):
+            if not isinstance(it, str) and it.enabled:
+                return i
+        return 0
+
+    def _move_item(self, delta: int) -> None:
+        items = self._level_items()
+        n = len(items)
+        if not n:
+            return
+        i = self.item_cursor
+        for _ in range(n):
+            i = (i + delta) % n
+            it = items[i]
+            if not isinstance(it, str):        # land on any row, greyed too
+                self.item_cursor = i          # (MC stops there to show why)
+                return
+        self.item_cursor = i
+
+    def _activate_item(self) -> None:
+        items = self._level_items()
+        if not items or self.item_cursor >= len(items):
+            return
+        it = items[self.item_cursor]
+        if isinstance(it, str):
+            return
+        if not it.enabled:
+            self.notice = f"{it.label}: {it.reason or 'not available now'}"
+            return
+        if it.kind == "sub":
+            self.sub_path.append(self.item_cursor)
+            self.item_cursor = self._first_item(self._level_items())
+            return
+        self.close_menu()
+        if it.kind == "op":
+            self._guard_then_run(it.payload, it.target, it.accel)
+            return
+        if it.kind == "panel":
+            self.goto(it.payload)
+            return
+        if it.kind == "cmd":
+            self._run_cmd(it.payload)
+
+    def _run_cmd(self, cmd: str) -> None:
+        if cmd == "quit":
+            self.running = False
+        elif cmd == "refresh":
+            self.on_key("n")
+        elif cmd == "toggle_detail":
+            self.detail_open = not self.detail_open
+        elif cmd == "toggle_footer":
+            self.footer_open = not self.footer_open
+        elif cmd == "help":
+            self.show_help = True
+        elif cmd == "about":
+            self.show_about = True
+        elif cmd.startswith("theme:"):
+            self.set_theme(cmd[6:])
+            self.build()
+        else:
+            self.notice = f"unknown command '{cmd}'"
 
     # ------------------------------------------------------------- pulse ----
     def start_pulse(self) -> None:
         """Background collector thread (TUI-3). Touches ONLY the context's
         TTL caches and the _pulse_now flag — never a Screen — so it cannot
-        race with a paint. Exceptions inside a probe are swallowed there
-        (ctx._cached returns the last good value); a dead thread would mean
-        a UI that silently stops updating, so the loop itself keeps running
-        whatever one tick does."""
+        race with a paint."""
         def loop():
             while self.running:
                 force, self._pulse_now = self._pulse_now, False
@@ -139,7 +307,6 @@ class App:
                     self.ctx.pulse(want_catalog=(self.current == "catalog"))
                 except Exception:
                     pass
-                # wake early when the UI asks for an immediate re-probe
                 end = time.monotonic() + PULSE_SECS
                 while self.running and time.monotonic() < end \
                         and not self._pulse_now:
@@ -162,8 +329,6 @@ class App:
         name = name or self.current
         old = self.screens.get(name)
         if old is not None and old.current() is not None:
-            # stay on the same entry across a rebuild (state changed under
-            # us: a patch appeared, a keg was stashed); fall back to position
             key = old.current().key
             screen = model.BUILDERS[name](self.ctx)
             screen.selected = next((i for i, r in enumerate(screen.rows)
@@ -175,14 +340,13 @@ class App:
         screen.notice = self.notice
         self.screens[name] = screen
         self.last_build = time.monotonic()
+        self._menus_cache = None         # rows/selection moved: rebuild the bar
         return screen
 
     def _submenu_name(self) -> str:
         return (self.actions_for or "") + ":actions"
 
     def _rebuild_submenu(self) -> None:
-        """Re-derive the submenu from its (freshly rebuilt) parent, keeping
-        the cursor on the same action when it is still offered."""
         parent = self.screens.get(self.actions_for or "")
         if parent is None:
             self.actions_for = None
@@ -197,6 +361,10 @@ class App:
 
     @property
     def screen(self) -> model.Screen:
+        if self.show_help:
+            return _static_screen("help", HELP_LINES)
+        if self.show_about:
+            return _static_screen("about", ABOUT_LINES)
         if self.in_actions:
             sub = self.screens.get(self._submenu_name())
             if sub is not None:
@@ -208,31 +376,30 @@ class App:
         return self.screens.get(self.current) or self.build()
 
     def _step_screen(self, direction: int) -> None:
-        """left/right walk the screen list in menu order (TUI-2: arrows are
-        the primary navigation everywhere, not just inside a list)."""
-        order = model.SCREEN_ORDER
-        i = order.index(self.current if self.current in order else "menu")
+        # left/right walk the panels. 'menu' (the launcher) is not a panel,
+        # and it must not crash the walk: index() on a missing name is what
+        # killed the TUI when the operator pressed an arrow on the launcher
+        # screen once — an unknown current starts from the first panel.
+        order = menus.PANEL_NAMES
+        if self.in_actions:
+            self.close_actions()          # arrow steps out of the submenu
+            return
+        i = order.index(self.current) if self.current in order else -1
         self.goto(order[(i + direction) % len(order)])
 
     def goto(self, name: str) -> None:
         if name not in model.BUILDERS:
             return
         self.current = name
-        self.actions_for = None      # any real screen change closes a submenu
+        self.actions_for = None
         self.pending = None
         self.yes_line = ""
         self.build(name)
 
     # ------------------------------------------------------- action submenu --
     def open_actions(self) -> bool:
-        """Enter on a row that HAS actions opens the action menu (TUI-2).
-        Returns False when there is nothing to open — the caller then does
-        the old Enter behaviour (toggle the detail pane)."""
         s = self.screen
         row = s.current()
-        # an 'empty'/error row owns no ROW actions but the screen still has
-        # some (reconcile, the kill switch) — exactly what an operator with a
-        # broken tree needs, so Enter opens the menu for those too
         if row is None or not (s.row_ops() or s.screen_ops()):
             return False
         self.actions_for = self.current
@@ -243,9 +410,6 @@ class App:
         return True
 
     def close_actions(self) -> None:
-        """Esc/backspace out of the submenu: drop it, keep the parent's
-        selection exactly where it was, re-read the parent so the view is
-        current (an action may have finished while we were away)."""
         self.actions_for = None
         self.pending = None
         self.yes_line = ""
@@ -256,9 +420,6 @@ class App:
         return self.actions_for is not None
 
     def refresh_if_stale(self) -> None:
-        """TUI-3: collectors refresh on the pulse thread, so a rebuild here
-        is a cache read (~1 ms). We still rebuild only once per REFRESH_SECS
-        to keep repaint churn (and mouse-window resets) down."""
         if (not self.pending and not self.busy
                 and time.monotonic() - self.last_build > REFRESH_SECS):
             self.build()
@@ -297,30 +458,61 @@ class App:
             op, row.raw if row is not None else None, ctx_note=note,
             what=f"'{row.key}'" if row is not None else "this screen")
 
+    @property
+    def bar_open(self) -> bool:
+        return self.bar_index >= 0
+
     def on_key(self, key: str) -> None:
-        """Dispatch one logical key ('q', 'enter', 'down', 'y', ...)."""
+        """Dispatch one logical key: letters/names, 'alt:x', 'yes:<text>'."""
         if self.pending:
-            # q must stay a way out; Ctrl-C too. Everything else while a
-            # HIGH op is pending feeds the typed-YES line (the curses layer
-            # buffers that line and hands the finished answer here as
-            # 'yes:<text>').
             if key in ("q", "ctrl_c", "escape"):
                 self.pending = None
                 self.yes_line = ""
                 self.notice = "cancelled"
                 return
+            if key.startswith("alt:"):
+                return                      # Alt during a gate: swallow
             if key.startswith("yes:"):
                 self._answer_yes(key[4:])
                 return
             self._answer(key)
             return
-        if self.show_help:
-            self.show_help = False
+        if self.show_help or self.show_about:
+            self.show_help = self.show_about = False
             return
+        if key.startswith("alt:"):
+            for i, m in enumerate(self.menus()):
+                if m.accel == key[4:].lower():
+                    if self.bar_index == i:
+                        self.close_menu()
+                        self.bar_focus = False
+                    else:
+                        self.open_menu(i)
+                    return
+            self.notice = f"no menu starts with '{key[4:]}'"
+            return
+        if self.bar_open:
+            self._bar_key(key)
+            return
+        if key == "f9":
+            if self.bar_open:
+                self.close_menu()
+            else:
+                self.bar_focus = not self.bar_focus
+                if self.bar_focus:
+                    self.open_menu(0)
+            return
+        if self.bar_focus:
+            if key in ("left", "right"):
+                self.open_menu(self.bar_index + (1 if key == "right" else -1))
+                return
+            if key in ("down", "enter"):
+                self.open_menu(max(0, self.bar_index))
+                return
+            if key in ("up", "escape"):
+                self.bar_focus = False
+                return
         if key == "escape" or key == "backspace":
-            # Esc backs out one step (TUI-2 menu behaviour): submenu ->
-            # list, list -> main menu, main menu -> quit. 'q' still quits
-            # from anywhere — the safety hatch stays one key deep.
             if self.in_actions:
                 self.notice = "back to the list"
                 self.close_actions()
@@ -330,8 +522,30 @@ class App:
                 return
             self.running = False
             return
-        if key in ("q", "ctrl_c"):
+        if key in ("q", "ctrl_c", "f10"):
             self.running = False
+            return
+        if key == "f1":
+            self.show_help = True
+            return
+        if key == "f2":
+            themes.set_theme(self.theme_name)
+            self.notice = "view saved to tui.json"
+            return
+        if key == "f3":
+            self.detail_open = not self.detail_open
+            return
+        if key == "f4":
+            self.show_about = True
+            return
+        if key == "f5":
+            self.ctx.invalidate()
+            self._pulse_now = True
+            self.build()
+            self.notice = ""
+            return
+        if key == "tab":
+            self._step_screen(+1)
             return
         if key == "m":
             self.goto("menu")
@@ -357,9 +571,9 @@ class App:
         if key in model.SCREEN_KEYS:
             self.goto(model.SCREEN_KEYS[key])
             return
-        if key in ("n", "f5"):
-            self.ctx.invalidate()        # drop display caches…
-            self._pulse_now = True       # …and re-probe on the pulse NOW
+        if key == "n":
+            self.ctx.invalidate()
+            self._pulse_now = True
             self.build()
             self.notice = ""
             return
@@ -403,12 +617,83 @@ class App:
             return
         self._run_or_ask(key)
 
+    def _bar_key(self, key: str) -> None:
+        """Keys while a dropdown is open: everything belongs to the menu."""
+        if key in ("up", "k"):
+            self._move_item(-1)
+            return
+        if key in ("down", "j"):
+            self._move_item(+1)
+            return
+        if key == "home":
+            self.item_cursor = 0
+            return
+        if key == "end":
+            items = self._level_items()
+            self.item_cursor = len(items) - 1 if items else 0
+            return
+        if key == "left":
+            self.open_menu(self.bar_index - 1)
+            return
+        if key == "right":
+            if self.sub_path:
+                self.sub_path.pop()
+                self.item_cursor = self._first_item(self._level_items())
+                return
+            self.open_menu(self.bar_index + 1)
+            return
+        if key in ("escape", "backspace"):
+            if self.sub_path:
+                self.sub_path.pop()
+                self.item_cursor = self._first_item(self._level_items())
+                return
+            # MC: closing a dropdown leaves the BAR selected, so a second
+            # Esc backs out of the panel and arrows can hop to another menu
+            self.bar_index, self.sub_path = -1, []
+            self.bar_focus = True
+            return
+        if key in ("q", "ctrl_c", "f10"):
+            self.close_menu()
+            self.running = False
+            return
+        if key == "f9":
+            self.close_menu()
+            return
+        if key == "enter":
+            self._activate_item()
+            return
+        if key in model.SCREEN_KEYS and not any(
+                not isinstance(it, str) and it.accel == key
+                for it in self._level_items()):
+            self.close_menu()
+            self.goto(model.SCREEN_KEYS[key])
+            return
+        if len(key) == 1:
+            items = self._level_items()
+            # exact-case FIRST: 'u' is update and 'U' is the kill switch on
+            # the panels, and a dropdown must not make them ambiguous — the
+            # case-insensitive fallback only fires when one item matches
+            exact = [i for i, it in enumerate(items)
+                     if not isinstance(it, str) and it.accel == key]
+            loose = [i for i, it in enumerate(items)
+                     if not isinstance(it, str) and it.accel
+                     and it.accel.lower() == key.lower()]
+            chosen = exact or (loose if len(loose) == 1 else [])
+            if chosen:
+                self.item_cursor = chosen[0]
+                self._activate_item()
+                return
+            if len(loose) > 1:
+                self.notice = ("press the letter exactly: "
+                               + ", ".join(items[i].label for i in loose))
+            else:
+                self.notice = f"'{key}' is not a command in this menu"
+            return
+        self.notice = "Esc closes the menu"
+
     # ----------------------------------------------------------- op dispatch --
     def _pool(self) -> list:
         if self.in_actions:
-            # the submenu lists the parent's row actions AND its screen
-            # actions (under a divider); the same letters must work here so
-            # muscle memory never breaks
             parent = self.screens.get(self.actions_for)
             if parent is None:
                 return []
@@ -417,10 +702,6 @@ class App:
         return list(s.row_ops()) + list(s.screen_ops())
 
     def _run_submenu_choice(self) -> None:
-        """Enter on a submenu row: run the op that row lists. A row action
-        targets the PARENT's selected patch/keg; a screen action targets
-        nothing, exactly as on the list screen. The divider heading has no
-        op and does nothing; the back row closes."""
         row = self.screen.current()
         if row is None or row.kind == "header":
             return
@@ -432,8 +713,6 @@ class App:
                              else self._target_row())
 
     def _target_row(self):
-        """The row an op acts on: the PARENT list's selection — while a
-        submenu is open the screen's rows ARE the actions, never a target."""
         if self.in_actions:
             parent = self.screens.get(self.actions_for or "")
             return parent.current() if parent else None
@@ -443,8 +722,6 @@ class App:
         op = ops_mod.find(key, self._pool())
         if op is None:
             if self.in_actions:
-                # stay in the menu: a stray keystroke must not eject the
-                # operator out of the thing they were reading
                 self.notice = f"'{key}' is not one of these actions"
                 return
             self.notice = f"'{key}' does nothing on the {self.current} screen"
@@ -452,9 +729,6 @@ class App:
         self._guard_then_run(op, self._target_row(), key)
 
     def _guard_then_run(self, op, row, key: str = "") -> None:
-        # the tree check runs BEFORE the row check: with no omlx tree every
-        # one of these actions is unavailable, and 'select a patch row' would
-        # send the operator looking for the wrong thing entirely
         if op.needs_tree and not self.ctx.tree_root:
             self.notice = ("no omlx package tree — install omlx or run "
                            "'omlx-uplift install' first")
@@ -487,9 +761,7 @@ class App:
         A HIGH op NEVER launches from here. Its answer arrives as a whole line
         ('yes:<text>') from the curses line reader; a bare keystroke reaching
         this method while a HIGH op is armed means the operator pressed
-        something else (a screen key, a stray letter) — that is a cancellation,
-        never a confirmation. Keeping this branch incapable of launching is the
-        property that makes 'q/1/j during a YES prompt' safe."""
+        something else — that is a cancellation, never a confirmation."""
         op, row = self.pending
         self.pending = None
         if op.danger == ops_mod.HIGH:
@@ -530,18 +802,16 @@ class App:
         for line in model.result_lines(res):
             self.ctx.log(f"   {line}")
         self.notice = ("done: " if ok else "FAILED: ") + op.label
-        self.ctx.invalidate()     # an action changed state the caches may
-                                  # still be showing — re-probe, don't wait
+        self.ctx.invalidate()
         self._pulse_now = True
         if self.in_actions:
-            self.close_actions()   # the list re-reads; the result is on it
+            self.close_actions()
         else:
             self.build()
         return True
 
     def cancel(self) -> str:
-        """Ctrl-C: kill a running child command. An in-process store write
-        cannot be interrupted safely, so say so instead of pretending."""
+        """Ctrl-C: kill a running child command."""
         with self.proc_lock:
             proc = self.proc
         if proc is not None and proc.poll() is None:
@@ -552,26 +822,97 @@ class App:
                 return f"could not kill the command: {exc}"
         return "nothing to cancel (an in-process action cannot be stopped)"
 
+    # ------------------------------------------------------------- mouse ----
+    def click(self, x: int, y: int) -> None:
+        """Turn a frame-coordinate click into behaviour via the last
+        rendered Frame's hit list (bar names, dropdown items, panel rows)."""
+        f = self._frame
+        if f is None:
+            return
+        for x0, x1, y0, y1, action in f.hits:
+            if not (y0 <= y <= y1 and x0 <= x <= x1):
+                continue
+            kind, idx = action
+            if kind == "menu":
+                if self.bar_index == idx:
+                    self.close_menu()
+                    self.bar_focus = False
+                else:
+                    self.open_menu(idx)
+                return
+            if kind == "item":
+                items = self._level_items()
+                if idx < len(items):
+                    self.item_cursor = idx
+                    self._activate_item()
+                return
+            if kind == "row":
+                if self.bar_open:
+                    self.close_menu()
+                s = self.screen
+                if idx < len(s.rows):
+                    s.selected = idx
+                return
+
     # ------------------------------------------------------------- rendering --
+    def utf8(self) -> bool:
+        import os
+        enc = (os.environ.get("PYTHONIOENCODING", "")
+               + os.environ.get("LC_ALL", "")
+               + os.environ.get("LANG", "")).lower()
+        return "utf" in enc or not enc
+
     def lines(self, width: int, height: int) -> list:
-        if self.show_help:
-            # the help text is longer than a small window: paint what fits and
-            # say the rest is one key away, instead of erroring on addstr
-            room = max(3, (height or 24) - 1)
-            lines = [(model._trunc(t, width),
-                      model.TONE_TITLE if i == 0 else None)
-                     for i, t in enumerate(HELP_LINES[:room])]
-            if len(HELP_LINES) > room:
-                lines.append((model._trunc(
-                    f"  ... {len(HELP_LINES) - room} more line(s) — widen the "
-                    f"window", width), model.TONE_WARN))
-            return lines
-        self.screen.notice = self.notice      # a notice must show at once,
-        detail = None if self.detail_open else ""   # not after the next build
-        return model.render(self.screen, width, detail=detail,
-                            prompt=self.prompt, busy=self.busy, height=height,
-                            yes_line=self.yes_line if self.awaiting_yes
-                            else None, theme=self.theme)
+        """The whole frame as segment lines (frame.render_frame). The painter
+        writes segments line by line; the model's plain-text path (model.render)
+        is gone from the live screen but stays as the tested fallback."""
+        s = self.screen
+        notice = self.notice
+        info = self.theme_info or {}
+        head = (self.show_help or self.show_about)
+        # the P(DOOM) persona keeps its on-screen signature: a theme that
+        # declares a title_prefix shows it in the bar (TUI-2 put it in the
+        # old title line; the bar line is the title now)
+        prefix = self.theme.get("title_prefix") or ""
+        bar_note = ((prefix + " :: " if prefix else "")
+                    + f"theme {self.theme_name}  {width}x{height}")
+        footers = [] if head else (list(s.footer) if self.footer_open else [])
+        if notice and not self.busy:
+            footers = [(notice, model.TONE_WARN)] + footers
+        if info.get("note") and info.get("mode") != "truecolor-exact":
+            footers = footers + [(f"palette: {info['note']}", model.TONE_DIM)]
+        # F3 OFF means 'give the rows the whole window' — pass None so the
+        # frame drops the pane entirely (side or stacked) instead of drawing
+        # an empty one. F3 ON feeds it the SELECTED row's detail, which is
+        # what the pane is for on a narrow terminal too.
+        detail = None
+        if self.detail_open and not head:
+            row = s.current()
+            detail = (row.detail if row is not None and row.detail
+                      else "no extra detail for this entry")
+        self._frame = frame.render_frame(
+            s,
+            # the bar is ALWAYS drawn (it is the shell); only the dropdown
+            # opens and closes
+            menus=self.menus(),
+            bar_index=self.bar_index, bar_open=self.bar_open,
+            bar_focus=self.bar_focus and not self.bar_open,
+            items=(self._level_items() if self.bar_open else None),
+            item_cursor=self.item_cursor,
+            detail=detail,
+            footers=footers,
+            prompt=self.prompt,
+            busy=self.busy,
+            yes_line=self.yes_line if self.awaiting_yes else None,
+            width=width, height=height or 24,
+            notice=bar_note, utf8=self.utf8())
+        return self._frame.lines
+
+
+def _static_screen(name: str, lines: list) -> model.Screen:
+    rows = [model.Row("info", "", [(t, model.TONE_TITLE if i == 0 else None)])
+            for i, t in enumerate(lines)]
+    return model.Screen(name, name.title(), rows=rows)
 
 
 # ======================================================== curses plumbing ==
@@ -615,25 +956,24 @@ def run_tui(argv=None) -> int:
 
 
 def _key_name(ch):
-    """curses key code -> the logical key name App.on_key speaks. Built once:
-    the KEY_* constants only exist after curses is imported, so the table
-    cannot be a module literal."""
+    """curses key code -> the logical key name App.on_key speaks."""
     import curses
 
     if not _SPECIAL:
-        _SPECIAL.update({27: "escape", 10: "enter", 13: "enter", 9: "enter",
+        _SPECIAL.update({27: "escape", 10: "enter", 13: "enter", 9: "tab",
                          32: "space",
                          127: "backspace", 8: "backspace", 3: "ctrl_c",
                          2: "ctrl_b"})
-        # named KEY_* constants are not guaranteed on every platform (a
-        # minimal ncurses build can omit KEY_MOUSE or KEY_RESIZE), and one
-        # missing attribute must not kill the TUI at boot
         for attr, name in (("KEY_UP", "up"), ("KEY_DOWN", "down"),
                            ("KEY_PPAGE", "pgup"), ("KEY_NPAGE", "pgdn"),
                            ("KEY_HOME", "home"), ("KEY_END", "end"),
                            ("KEY_LEFT", "left"), ("KEY_RIGHT", "right"),
-                           ("KEY_F5", "f5"), ("KEY_RESIZE", "resize"),
-                           ("KEY_MOUSE", "mouse")):
+                           ("KEY_F1", "f1"), ("KEY_F2", "f2"),
+                           ("KEY_F3", "f3"), ("KEY_F4", "f4"),
+                           ("KEY_F5", "f5"), ("KEY_F6", "f6"),
+                           ("KEY_F7", "f7"), ("KEY_F8", "f8"),
+                           ("KEY_F9", "f9"), ("KEY_F10", "f10"),
+                           ("KEY_RESIZE", "resize"), ("KEY_MOUSE", "mouse")):
             code = getattr(curses, attr, None)
             if code is not None:
                 _SPECIAL.setdefault(code, name)
@@ -646,10 +986,7 @@ def _key_name(ch):
 
 
 def _apply_theme(curses, app) -> None:
-    """Build this theme's tone -> attribute map and remember it, plus the
-    theme name it was built for. Re-runs whenever the operator presses 'T':
-    colour pairs are cheap to re-init and the alternative (a second set of
-    pairs per theme) wastes slots on terminals that only have 64 or 32."""
+    """Build this theme's tone -> attribute map and remember it."""
     try:
         max_colors = curses.COLORS
         n_pairs = curses.COLOR_PAIRS
@@ -662,8 +999,6 @@ def _apply_theme(curses, app) -> None:
     slot = [0]
 
     def alloc_pair(fg, bg):
-        """init_pair + color_pair(pair number). The default colour is -1,
-        which use_default_colors() maps to the terminal's own background."""
         slot[0] += 1
         try:
             curses.init_pair(slot[0], fg, bg)
@@ -686,12 +1021,12 @@ def _apply_theme(curses, app) -> None:
 def _curses_loop(stdscr, app) -> int:
     import curses
 
-    try:                                  # not every terminal can hide it
+    try:
         curses.curs_set(0)
     except curses.error:
         pass
     try:
-        curses.use_default_colors()       # lets a pair keep the terminal's bg
+        curses.use_default_colors()
     except curses.error:
         pass
     try:
@@ -702,16 +1037,9 @@ def _curses_loop(stdscr, app) -> int:
     try:
         stdscr.bkgd(" ", app.theme_info.get("ground", 0))
     except curses.error:
-        pass                            # no colour capability: plain ground
-    # timeout() instead of nodelay()+sleep: getch returns within one tick
-    # of a key landing instead of after up to a 50 ms sleep, which is what
-    # made typing feel distant (TUI-3). 60 ms is short enough to feel
-    # instant, long enough that an idle loop costs nothing measurable.
-    stdscr.timeout(60)
+        pass
+    stdscr.timeout(LOOP_TIMEOUT_MS)
     stdscr.keypad(True)
-    # mouse reporting is a convenience; a minimal ncurses build may not
-    # expose it at all (AttributeError, not curses.error) and that must not
-    # stop the TUI from starting
     mask = getattr(curses, "ALL_MOUSE_EVENTS", None)
     if mask is not None and hasattr(curses, "mousemask"):
         try:
@@ -721,7 +1049,7 @@ def _curses_loop(stdscr, app) -> int:
 
     last_paint = 0.0
     size = (0, 0)
-    dirty = True                  # paint at once: boot must not wait 150 ms
+    dirty = True
     while app.running:
         app.drain()
         app.refresh_if_stale()
@@ -729,11 +1057,8 @@ def _curses_loop(stdscr, app) -> int:
         if app.theme_dirty:
             _apply_theme(curses, app)
             app.theme_dirty = False
-        # A key repaints immediately (the operator must SEE the effect of
-        # what they pressed); background work (drain, pulse-triggered
-        # refresh) is throttled to ~6 Hz so a busy store never turns the
-        # loop into a paint storm over ssh.
-        if dirty or size != (rows, cols) or time.monotonic() - last_paint > 0.15:
+        if dirty or size != (rows, cols) or \
+                time.monotonic() - last_paint > 0.15:
             _paint(stdscr, app, rows, cols)
             last_paint = time.monotonic()
             size = (rows, cols)
@@ -745,14 +1070,15 @@ def _curses_loop(stdscr, app) -> int:
             ch = -1
         if ch == -1:
             continue                      # getch already waited up to 60 ms
-        name = _key_name(ch)
+        name = _read_key(stdscr, curses, ch)
+        if name is None:
+            continue
+        dirty = True
         if name == "mouse":
-            _click(stdscr, app, rows)
-            dirty = True
+            _click(stdscr, app)
             continue
-        if name in (None, "resize", "ctrl_b"):
+        if name in ("resize", "ctrl_b"):
             continue
-        dirty = True                      # any real key answers at once
         if name == "ctrl_c":
             app.ctx.log(app.cancel())
             app.notice = "cancel requested"
@@ -764,10 +1090,78 @@ def _curses_loop(stdscr, app) -> int:
     return 0
 
 
+def _read_key(stdscr, curses, ch):
+    """One logical key name, ESC-prefixed sequences assembled HERE rather
+    than trusted to curses. macOS's ncurses hands an arrow over as three
+    separate getch() results (escape, '[', 'D') whenever the terminal's
+    timing splits the sequence — a plain timer-based Alt window then ate
+    the Escape and orphaned the letters (found live: an arrow press backed
+    out of the panel and typed '[' at the app). So: after a raw 27, wait a
+    few ms for what follows and decode it ourselves; nothing follows in
+    time, it really was Escape."""
+    if ch != 27:
+        return _key_name(ch)
+    # macOS curses.timeout() returns None, not the old value — restore the
+    # constant the loop set, never a captured 'previous'
+    stdscr.timeout(ESC_COMBINE_MS)
+    try:
+        n2 = stdscr.getch()
+        if n2 == -1:
+            return "escape"                   # a real, lonely Escape
+        if n2 == 27:
+            return "escape"                   # double Esc: back out once
+        if n2 == ord("[") or n2 == ord("O"):
+            return _read_csi(stdscr, curses, n2)
+        if 32 < n2 < 127:
+            return "alt:" + chr(n2)           # Meta+letter, as terminals
+        return None                           # Alt+something odd: ignore
+    finally:
+        stdscr.timeout(LOOP_TIMEOUT_MS)
+
+
+def _read_csi(stdscr, curses, lead):
+    """lead is '[' or 'O'; consume the rest of the sequence and name it."""
+    if lead == ord("O"):
+        n3 = stdscr.getch()
+        return {ord("P"): "f1", ord("Q"): "f2", ord("R"): "f3",
+                ord("S"): "f4", ord("A"): "up", ord("B"): "down",
+                ord("C"): "right", ord("D"): "left",
+                ord("M"): "enter"}.get(n3)
+    buf = ""
+    while len(buf) < 16:
+        c = stdscr.getch()
+        if c == -1:
+            return None
+        if 0x40 <= c <= 0x7E:                 # final byte ends the CSI
+            break
+        buf += chr(c)
+    if buf.startswith("M") or buf.startswith("<"):
+        # a mouse report reached us raw (curses did not translate it):
+        # 'M' + 3 legacy bytes, or SGR '<' … m — swallow the payload so it
+        # cannot leak as keys; the click is handled via the curses queue if
+        # one is queued, otherwise this press is simply ignored
+        if buf.startswith("M"):
+            for _ in range(3):
+                stdscr.getch()
+        else:
+            while True:
+                c = stdscr.getch()
+                if c in (-1, ord("m"), ord("M")):
+                    break
+        return "mouse"
+    simple = {"A": "up", "B": "down", "C": "right", "D": "left",
+              "H": "home", "F": "end",
+              "1~": "home", "4~": "end", "5~": "pgup", "6~": "pgdn",
+              "7~": "home", "8~": "end",
+              "11~": "f1", "12~": "f2", "13~": "f3", "14~": "f4",
+              "15~": "f5", "17~": "f6", "18~": "f7", "19~": "f8",
+              "20~": "f9", "21~": "f10", "23~": "f11", "24~": "f12"}
+    return simple.get(buf)
+
+
 def _feed_yes(key: str, app) -> None:
-    """A HIGH-danger confirmation reads a whole LINE, not a key: 'YES' +
-    enter runs, anything else cancels — so a stray 'y' can never arm a keg
-    switch. The buffer echoes on the prompt row while it is typed."""
+    """A HIGH-danger confirmation reads a whole LINE: 'YES' + enter runs,
+    anything else cancels — a stray 'y' can never arm a keg switch."""
     if key == "enter":
         answer, app.yes_line = app.yes_line, ""
         app.on_key("yes:" + answer)
@@ -783,77 +1177,62 @@ def _feed_yes(key: str, app) -> None:
         app.yes_line = (app.yes_line + key)[:24]
 
 
-def _click(stdscr, app, rows: int) -> None:
-    """Map a mouse row to a list row using the window the last render chose.
-    TUI-2: a descriptive row can be two screen lines, so walk the shown rows
-    by their line counts instead of assuming one line each."""
+def _click(stdscr, app) -> None:
+    """Route a mouse click through the last frame's hit list: the menu bar,
+    a dropdown item, or a panel row."""
     import curses
 
     try:
-        _, _x, y, _z, _m = curses.getmouse()
+        _, x, y, _z, _m = curses.getmouse()
     except curses.error:
         return
-    s = app.screen
-    if not s.rows:
-        return
-    first, last = s.shown
-    line = y - 1                             # line 0 is the title
-    idx = first
-    while idx < last:
-        n = s.rows[idx].line_count()
-        if line < n:
-            s.selected = idx
-            return
-        line -= n
-        idx += 1
+    app.click(int(x), int(y))
 
 
 def _paint(stdscr, app, rows: int, cols: int) -> None:
-    """Map the model's tone names to this theme's attributes and write the
-    frame. stdscr.erase() + noutrefresh/doupdate means one clean swap per
-    repaint — no per-cell diffing, which is what keeps a 5 Hz refresh cheap
-    over ssh."""
+    """Map the frame's tones to this theme's attributes and write the cells.
+    stdscr.erase() + noutrefresh/doupdate means one clean swap per repaint.
+    Every visible cell is written every frame — a line that SHRANK must not
+    leak old text, and full-width bars make selections read as bars."""
     import curses
 
-    attrs = app.attrs or {t: curses.A_NORMAL for t in model_tones()}
+    attrs = app.attrs or {}
     attrs.setdefault(None, curses.A_NORMAL)
     stdscr.erase()
     lines = app.lines(cols, rows)
-    # every visible line is written to the full width, padded with spaces in
-    # its own tone. Relying on erase()'s diff to clear the tail of a line
-    # that SHRANK since the last frame leaks old text on some emulators
-    # (seen in a pty capture: 'desired v1kill switch off'). Writing every
-    # cell every frame makes the paint order-independent — and as a side
-    # effect the selected row highlights as a full-width bar, which is what
-    # menus look like everywhere else.
-    for y in range(max(0, rows - 1)):
-        if y < len(lines):
-            text, tone = lines[y]
-        else:
-            text, tone = "", None
-        try:
-            stdscr.addstr(y, 0,
-                          str(text)[:cols - 1].ljust(cols - 1),
-                          attrs.get(tone, curses.A_NORMAL))
-        except curses.error:
-            pass                             # tiny terminal / last cell
-    # bottom line: theme + terminal capability, so a degraded palette is
-    # visible instead of silently mis-coloured
-    info = app.theme_info or {}
-    # name what the terminal actually delivered: an approximated palette is
-    # worth telling the operator about, a theme that ASKS for the terminal's
-    # own basic colours ('default') is not a degradation
-    quality = {"exact RGB": "exact RGB",
-               "xterm-256 approximation": "256-colour approx",
-               "16 basic colours": "16 basic colours",
-               "bold/reverse only": "no colour"}.get(info.get("note"),
-                                                     info.get("note") or "?")
-    status = f" theme {app.theme_name} [{quality}]  {cols}x{rows}"
-    try:
-        stdscr.addstr(max(0, rows - 1), 0, model._trunc(status, cols - 1),
-                      attrs.get(model.TONE_DIM, curses.A_NORMAL))
-    except curses.error:
-        pass
+    app_lines = lines if lines else []
+
+    def tone_attr(tone):
+        return attrs.get(tone, curses.A_NORMAL)
+
+    # every frame line gets painted, INCLUDING the last row: the frame
+    # already clips every line to cols-1, so no write lands in the cell that
+    # triggers auto-scroll. (The old loop stopped one short because the last
+    # row used to hold the status line; the F-key legend lives there now.)
+    for y in range(max(0, rows)):
+        if y >= len(app_lines):
+            break
+        line = app_lines[y]
+        if isinstance(line, str):               # legacy plain-text fallback
+            line = [(line, None)]
+        x = 0
+        for text, tone in line:
+            if not text or x >= cols - 1:
+                break
+            text = text[:cols - 1 - x]
+            try:
+                stdscr.addstr(y, x, text, tone_attr(tone))
+            except curses.error:
+                pass
+            x += len(text)
+        if x < cols - 1:
+            try:
+                stdscr.addstr(y, x, " " * (cols - 1 - x),
+                              tone_attr(line[-1][1] if line else None))
+            except curses.error:
+                pass
+    # theme quality and size live in the bar line (frame notice) now — the
+    # bottom row belongs to the F-key legend, do not paint over it
     stdscr.noutrefresh()
     curses.doupdate()
 

@@ -13,9 +13,14 @@ import time
 import unittest
 
 from omlx_uplift import patches
-from omlx_uplift.tui import model, ops
+from omlx_uplift.tui import frame, menus as menus_mod, model, ops
 from omlx_uplift.tui.app import App
 from omlx_uplift.tui.context import Context
+
+
+def text_of(lines) -> str:
+    """The frame's segment lines as plain text — what the operator reads."""
+    return "\n".join(frame.line_text(l) for l in lines)
 
 
 def store_manifest():
@@ -223,19 +228,23 @@ class TestNavigation(AppCase):
         self.app.on_key("down")
         self.assertGreaterEqual(s.selected, 1)
 
-    def test_enter_toggles_the_detail_pane(self):
+    def test_f3_toggles_the_detail_pane(self):
+        # TUI-3: Enter is the menu key; the detail pane is F3 (MC's viewer)
         self.app.goto("patches")
-        shown = "\n".join(t for t, _ in self.app.lines(120, 40))
-        self.app.on_key("enter")
-        hidden = "\n".join(t for t, _ in self.app.lines(120, 40))
-        self.assertIn("desired:", shown)
-        self.assertNotIn("desired:", hidden)
+        shown = text_of(self.app.lines(120, 40))
+        self.assertIn("source:", shown)
+        self.app.on_key("f3")
+        self.assertFalse(self.app.detail_open)
+        hidden = text_of(self.app.lines(120, 40))
+        self.assertNotIn("source:", hidden)
+        self.app.on_key("f3")
+        self.assertTrue(self.app.detail_open)
 
     def test_help_overlay_opens_and_closes_on_any_key(self):
         self.app.goto("overview")
         self.app.on_key("?")
         self.assertTrue(self.app.show_help)
-        self.assertIn("keys and rules", self.app.lines(120, 40)[0][0])
+        self.assertIn("keys and rules", text_of(self.app.lines(120, 40)))
         self.app.on_key("j")
         self.assertFalse(self.app.show_help)
         self.assertEqual(self.app.current, "overview",
@@ -246,10 +255,10 @@ class TestNavigation(AppCase):
         self.app.on_key("W")
         self.assertIn("does nothing", self.app.notice)
 
-    def test_the_notice_appears_in_the_title(self):
+    def test_the_notice_shows_in_the_status_area(self):
+        # TUI-3: the bar line carries theme/size, the footer carries notices
         self.app.notice = "theme p(doom)"
-        self.assertIn("[theme p(doom)]",
-                      self.app.lines(120, 40)[0][0])
+        self.assertIn("theme p(doom)", text_of(self.app.lines(120, 40)))
 
     def test_selection_survives_a_rebuild(self):
         # state refreshes every few seconds; the cursor must not jump back to
@@ -274,12 +283,76 @@ class TestMenus(AppCase):
     """TUI-2: the operator asked for menus instead of number keys, and for
     rows that explain themselves. These pin the navigation shape."""
 
-    def test_it_boots_on_the_main_menu(self):
-        self.assertEqual(self.app.current, "menu")
-        text = "\n".join(t for t, _ in self.app.lines(110, 40))
-        for wanted in ("Overview", "Patches", "Curated catalog",
-                       "omlx-dev keg", "Session log"):
-            self.assertIn(wanted, text, f"the menu must name '{wanted}'")
+    def test_it_boots_on_a_panel_under_a_menu_bar(self):
+        # TUI-3: the BAR is the menu; the panel under it shows real state
+        self.assertEqual(self.app.current, "patches")
+        text = text_of(self.app.lines(110, 40))
+        for wanted in ("Go", "Patches", "Catalog", "Keg", "Services",
+                       "View", "Help"):
+            self.assertIn(wanted, text, f"the bar must name '{wanted}'")
+        self.assertIn("F9", text, "the legend must say how to open the bar")
+
+    def test_the_go_menu_lists_every_panel(self):
+        ms = self.app.menus()
+        go = [m for m in ms if m.name == "Go"][0]
+        panels = [i.payload for i in go.items
+                  if not isinstance(i, str) and i.kind == "panel"]
+        self.assertEqual(panels, list(menus_mod.PANEL_NAMES))
+
+    def test_alt_letter_opens_a_dropdown_and_escape_closes_it(self):
+        self.app.on_key("alt:p")            # Alt+P -> the Patches menu
+        self.assertTrue(self.app.bar_open)
+        self.assertEqual(self.app.menus()[self.app.bar_index].name, "Patches")
+        self.assertIn("Kill switch ON",
+                      text_of(self.app.lines(120, 40)))
+        self.app.on_key("escape")           # closes the dropdown, keeps bar
+        self.assertFalse(self.app.bar_open)
+        self.assertTrue(self.app.bar_focus)
+        self.app.on_key("escape")           # focused bar backs out too
+        self.assertFalse(self.app.bar_focus)
+
+    def test_a_disabled_command_explains_itself(self):
+        # MC greys commands and keeps them visible; the reason must render
+        self.app.goto("overview")
+        saved = self.ctx._tree_root_override
+        self.ctx._tree_root_override = ""    # no omlx package tree
+        self.app._menus_cache = None
+        try:
+            ms = self.app.menus()
+            patch_menu = [m for m in ms if m.name == "Patches"][0]
+            gated = [i for i in patch_menu.items
+                     if not isinstance(i, str) and not i.enabled]
+            self.assertTrue(gated, "tree-bound commands must show greyed")
+            self.assertIn("omlx", gated[0].reason)
+            # and the reason is VISIBLE in the rendered dropdown
+            self.app.on_key("alt:p")
+            self.assertIn(gated[0].reason, text_of(self.app.lines(120, 40)))
+        finally:
+            self.ctx._tree_root_override = saved
+
+    def test_clicking_a_bar_name_opens_its_dropdown(self):
+        ms = self.app.menus()
+        # find the 'Patches' span from the last rendered frame
+        self.app.lines(120, 40)
+        span = [h for h in self.app._frame.hits if h[4][0] == "menu"]
+        idx = [h[4][1] for h in span].index(
+            [m.name for m in ms].index("Patches"))
+        x0 = span[idx][0]
+        self.app.click(x0 + 1, 0)
+        self.assertTrue(self.app.bar_open)
+        self.assertEqual(ms[self.app.bar_index].name, "Patches")
+
+    def test_f9_walks_the_bar_and_a_letter_runs_the_command_preview(self):
+        self.app.on_key("f9")
+        self.assertTrue(self.app.bar_open)
+        self.app.on_key("right")
+        self.assertEqual(self.app.menus()[self.app.bar_index].name, "Patches")
+        # arrows inside a dropdown move the item cursor, not the panel rows
+        before = self.app.item_cursor
+        self.app.on_key("down")
+        self.assertNotEqual(self.app.item_cursor, before)
+        self.app.on_key("escape")
+        self.assertFalse(self.app.bar_open)
 
     def test_the_menu_carries_live_state(self):
         # the menu doubles as the first-glance overview: an armed kill
@@ -296,7 +369,10 @@ class TestMenus(AppCase):
         rows = {r.key: r for r in self.app.screens["menu"].rows}
         self.assertIn("1 of 1 enabled", rows["patches"].text2())
 
-    def test_enter_on_a_menu_row_opens_that_screen(self):
+    def test_the_menu_screen_is_still_reachable(self):
+        # TUI-3 boots on a panel; the TUI-2 launcher screen ('m') stays alive
+        # and Enter on its rows still walks to that panel
+        self.app.goto("menu")
         self.app.screen.selected = next(
             i for i, r in enumerate(self.app.screen.rows)
             if r.key == "patches")
@@ -329,10 +405,10 @@ class TestMenus(AppCase):
         self.app.on_key("enter")
         self.assertTrue(self.app.in_actions)
         self.assertEqual(self.app.actions_for, "patches")
-        text = "\n".join(t for t, _ in self.app.lines(120, 40))
-        self.assertIn("Actions for 'alpha'", text)
-        # the menu lists the same commands the letters run, described
-        for wanted in ("[e] enable", "[d] disable", "[x] remove patch"):
+        text = text_of(self.app.lines(120, 40))
+        self.assertIn("alpha", text)
+        # the action list shows the same commands the bar lists, described
+        for wanted in ("enable", "disable", "remove patch"):
             self.assertIn(wanted, text)
 
     def test_a_row_without_actions_keeps_the_old_enter(self):
@@ -590,7 +666,7 @@ class TestThemeKey(AppCase):
         # 'T' is advertised on every screen, not only where an op lists it
         # (TUI-2 put it in the navigation legend instead of the chip line)
         self.app.goto("overview")
-        text = "\n".join(t for t, _ in self.app.lines(140, 40))
+        text = text_of(self.app.lines(140, 40))
         self.assertIn("T theme", text)
 
     def test_the_named_palette_is_reachable_in_one_pass(self):
@@ -603,7 +679,7 @@ class TestThemeKey(AppCase):
         self.assertEqual(self.app.theme_name, "p(doom)")
         self.assertEqual(self.app.theme["title_prefix"], "SHODAN")
         self.app.on_key("1")
-        self.assertIn("SHODAN ::", self.app.lines(120, 40)[0][0])
+        self.assertIn("SHODAN ::", text_of(self.app.lines(120, 40)))
 
 
 class TestRenderPath(AppCase):
@@ -616,7 +692,7 @@ class TestRenderPath(AppCase):
     def test_the_prompt_reaches_the_frame_with_its_target(self):
         self.select_patch("alpha")
         self.app.on_key("x")
-        text = "\n".join(t for t, _ in self.app.lines(120, 30))
+        text = text_of(self.app.lines(120, 30))
         self.assertIn("REMOVE PATCH", text)
         self.assertIn("'alpha'", text)
         self.assertIn("type YES", text)
