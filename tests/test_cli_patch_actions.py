@@ -161,31 +161,31 @@ class TestPatchActions(unittest.TestCase):
         self.assertIn(b"diff --git", src["data"])
 
     def test_update_upload_source_without_file_asks(self):
-        import omlx_uplift.patchsource as ps
+        # UPDATE-ADOPT: update errors now ride the JSON verdict on stdout
+        # (the same shape as every other patch action), not stderr prose.
         store = FakeStore()
         store.find = lambda m, pid: {"id": pid,
                                      "source": {"kind": "upload"}}
-        err = io.StringIO()
+        out = io.StringIO()
         with mock.patch("omlx_uplift.patches.PatchStore", lambda: store), \
              mock.patch("omlx_uplift.patches._omlx_root",
                         lambda: "/x/site-packages/omlx/__init__.py"), \
-             contextlib.redirect_stderr(err):
+             contextlib.redirect_stdout(out):
             rc = cli.cmd_patches(["update", "my-pr"])
         self.assertEqual(rc, 1)
-        self.assertIn("--file", err.getvalue())
+        self.assertIn("--file", out.getvalue())
 
     def test_update_unknown_id_asks_for_add(self):
-        import omlx_uplift.patchsource as ps
         store = FakeStore()
         store.find = lambda m, pid: None
-        err = io.StringIO()
+        out = io.StringIO()
         with mock.patch("omlx_uplift.patches.PatchStore", lambda: store), \
              mock.patch("omlx_uplift.patches._omlx_root",
                         lambda: "/x/site-packages/omlx/__init__.py"), \
-             contextlib.redirect_stderr(err):
+             contextlib.redirect_stdout(out):
             rc = cli.cmd_patches(["update", "ghost"])
         self.assertEqual(rc, 1)
-        self.assertIn("use 'add'", err.getvalue())
+        self.assertIn("use 'add'", out.getvalue())
 
     # --- LOG-2 recovery path (2026-10-09): a disabled patch whose source
     # later gets a fixed version had no CLI way to adopt it — the drift

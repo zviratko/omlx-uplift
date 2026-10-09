@@ -98,7 +98,25 @@ Remove the .pth again.
 .It Xo Ic patch
 .Ic update Ar id
 .Op Fl -file Ar F | Fl -pr Ar repo/N | Fl -url Ar URL
+.Op Fl -approve Ar once|always
 .Xc
+Re-fetch a stored patch (or re-point it), gate and store the result, then
+adopt it: the newest version becomes desired and the patch enables.
+Without an explicit source the stored
+.Ic github_pr / Ic url
+is re-checked; an
+.Ic upload
+has no URL and needs
+.Fl -file .
+Newly held safeguard codes block the adoption until
+.Fl -approve
+covers them (the bytes stay stored).
+.It Xo Ic patch
+.Ic update-all
+.Xc
+The same update over every re-fetchable source, enabled and disabled
+patches alike; upload sources are skipped with a note and one failing
+gate never stops the rest.
 .It Xo Ic patch
 .Ic enable | disable Ar id
 .Op Fl -approve Ar once|always

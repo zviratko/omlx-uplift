@@ -991,6 +991,99 @@ def promote(store, patch_id: str, approve: str | None = None) -> dict:
     return {"ok": True, "state": p["state"], "desired_version": newest}
 
 
+def update_patch(store, patch_id: str, tree_root: str,
+                 source: dict | None = None, scope: str | None = None,
+                 build_root: str | None = None,
+                 approve: str | None = None) -> dict:
+    """CLI 'patch update': re-fetch (stored online source, or an explicit
+    --pr/--url/--file re-point), gate, store — and then ADOPT the result.
+
+    An update a human asked for must actually take effect. The plain add
+    flow deliberately leaves a DISABLED or stale-desired patch waiting
+    ('validated, not enabled' — auto-promote is enabled-only by design,
+    check_all owns that lane), which made 'patch update' a verb that
+    fetched the fix, stored the fix, and then applied the OLD desired
+    version at the next restart (live mruu case 2026-10-09: v2 bytes on
+    disk, desired stuck at broken v1). Explicit request = the human
+    decision the auto-promote gate waits for: promote after storing.
+
+    A held-new-safeguards candidate is stored but NOT adopted without an
+    --approve: the safeguard hold survives the shortcut (same codes as
+    enable/promote). Gate/fetch failures keep stored state untouched."""
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None:
+        return {"ok": False,
+                "reason": f"unknown patch id: {patch_id} — use 'add' for a "
+                          "new patch"}
+    if source is None:
+        stored_src = dict(p.get("source") or {})
+        if stored_src.get("kind") not in ("github_pr", "url"):
+            return {"ok": False,
+                    "reason": "the stored source cannot be re-fetched "
+                              "(upload has no URL) — pass --file, --url "
+                              "or --pr"}
+        source = stored_src
+    res = add_patch(store, patch_id, source, tree_root, scope=scope,
+                    build_root=build_root, quiet=True)
+    if not res.get("ok") or res.get("obsolete"):
+        # failure verdicts and all-already-obsolete pass through as-is:
+        # nothing was stored that the user could adopt
+        return res
+    # add_patch saved its own reload — read the manifest FRESH (store-write
+    # ordering rule: stamps on a stale copy are silently discarded)
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    newest = max((v.get("v", 0) for v in p.get("versions", [])), default=0)
+    res["newest_version"] = newest
+    if not newest or newest == p.get("desired_version"):
+        res["promoted"] = False
+        if not res.get("unchanged"):
+            res["note"] = ((res.get("note") or "") +
+                           f"; desired already at v{newest}").lstrip("; ")
+        return res
+    out = promote(store, patch_id, approve=approve)
+    if not out.get("ok"):
+        # the bytes ARE stored — make the recovery one flag away
+        if out.get("requires_approval"):
+            out["v"] = newest
+            out["reason"] = (f"v{newest} stored, not adopted: "
+                             + str(out.get("reason"))
+                             + " (re-run with --approve once|always)")
+        return out
+    res.update({"promoted": True, "state": out["state"],
+                "desired_version": out["desired_version"]})
+    if _patches.scope_touches_dev(_patches.patch_scope(p)):
+        res["note"] = ((res.get("note") or "") +
+                       "; dev scope: lands on the next "
+                       "'omlx-uplift dev install'").lstrip("; ")
+    return res
+
+
+def update_all(store, tree_root: str,
+               build_root: str | None = None) -> dict:
+    """CLI 'patch update-all': update_patch over every re-fetchable
+    source — github_pr and url, ENABLED AND DISABLED alike (same scope
+    rule as check_all: a disabled patch is exactly where the fix must
+    land). Upload sources have no URL: skipped with an honest note, not
+    a failure. One patch's gate failure never stops the others."""
+    manifest = store.load()
+    reports = {}
+    all_ok = True
+    for p in manifest.get("patches", []):
+        pid = p.get("id")
+        src = p.get("source") or {}
+        if src.get("kind") not in ("github_pr", "url"):
+            reports[pid] = {"ok": True,
+                            "skipped": "upload source — no URL to re-fetch"}
+            continue
+        r = update_patch(store, pid, tree_root, build_root=build_root)
+        reports[pid] = r
+        all_ok = all_ok and bool(r.get("ok"))
+    return {"ok": all_ok, "reports": reports,
+            "kill_switch_active": store.patches_disabled()}
+
+
 def rollback(store, patch_id: str, to_v: int | None = None) -> dict:
     """Point desired_version at a previous stored version; reconcile will
     restore its backup and re-apply those bytes at next restart."""

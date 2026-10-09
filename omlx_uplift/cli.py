@@ -498,7 +498,13 @@ def cmd_patches(argv=None) -> int:
       disable-all  kill switch on (sentinel) + disable every patch
       add          fetch -> gate -> store a patch (id + --pr/--url/--file)
       update       re-check a stored patch: online source (pr/url) or new
-                   diff via --file (also accepts --pr/--url to re-point)
+                   diff via --file (also accepts --pr/--url to re-point).
+                   UPDATE-ADOPT: after storing, the newest version becomes
+                   desired and the patch enables (safeguard holds still
+                   need --approve) — an update you asked for takes effect.
+      update-all   'update' over every re-fetchable source (github_pr +
+                   url, enabled AND disabled; uploads skipped with a note;
+                   one failing gate never stops the rest)
       enable|disable|remove   per-patch control (same paths as the dashboard)
       approve      record a safeguard approval (once|always) without enabling
       promote      accept the newest validated candidate as desired (and
@@ -523,7 +529,7 @@ def cmd_patches(argv=None) -> int:
                                        "disable-all", "enable-all", "add",
                                        "update", "enable", "disable",
                                        "remove", "approve", "promote",
-                                       "curated", "adopt"])
+                                       "update-all", "curated", "adopt"])
     ap.add_argument("id", nargs="?",
                     help="patch id (add/update/enable/disable/remove/approve)")
     ap.add_argument("--sync", action="store_true",
@@ -531,7 +537,7 @@ def cmd_patches(argv=None) -> int:
                          "enabled); without the flag only preview")
     ap.add_argument("--approve", choices=["once", "always"],
                     help="accept the desired version's safeguard codes so "
-                         "auto-apply is allowed (enable/approve)")
+                         "auto-apply is allowed (enable/update/approve)")
     ap.add_argument("--pr", help="GitHub PR as repo/N, e.g. jundot/omlx/123")
     ap.add_argument("--url", help="plain URL of a diff file")
     ap.add_argument("--file", help="local diff file (upload kind)")
@@ -583,23 +589,19 @@ def cmd_patches(argv=None) -> int:
         elif args.file:
             with open(args.file, "rb") as fh:
                 source = {"kind": "upload", "data": fh.read()}
-        elif args.action == "update":
-            # no explicit source: re-check the ONLINE source already stored
-            # (github_pr / url) — the CLI twin of the dashboard's re-add
-            manifest = store.load()
-            p = store.find(manifest, args.id)
-            if p is None:
-                print(f"unknown patch id: {args.id} — use 'add' for a new "
-                      "patch", file=sys.stderr)
-                return 1
-            stored_src = dict(p.get("source") or {})
-            if stored_src.get("kind") not in ("github_pr", "url"):
-                print("the stored source cannot be re-fetched (upload has "
-                      "no URL) — pass --file, --url or --pr",
-                      file=sys.stderr)
-                return 1
-            source = stored_src
         build_root = args.build_root or patchsource.dev_build_root()
+        if args.action == "update":
+            # UPDATE-ADOPT: an update the human asked for must take effect —
+            # re-fetch, gate, store AND promote (no source given = re-check
+            # the stored online source). Plain add_patch semantics remain
+            # for 'add'; check_all's enabled-only auto-promote lane is
+            # untouched.
+            out = patchsource.update_patch(store, args.id, tree_root,
+                                           source=source, scope=args.scope,
+                                           build_root=build_root,
+                                           approve=args.approve)
+            print(_json.dumps(out, indent=2))
+            return 0 if out.get("ok") else 1
         out = patchsource.add_patch(store, args.id, source, tree_root,
                                     scope=args.scope, build_root=build_root)
         if not out.get("ok") and out.get("stage") == "classification":
@@ -671,6 +673,10 @@ def cmd_patches(argv=None) -> int:
         out["kill_switch_active"] = store.patches_disabled()
     elif args.action == "check":
         out = patchsource.check_all(store, tree_root)
+    elif args.action == "update-all":
+        out = patchsource.update_all(
+            store, tree_root,
+            build_root=args.build_root or patchsource.dev_build_root())
     elif args.action == "disable-all":
         manifest = store.load()
         for patch in manifest.get("patches", []):
