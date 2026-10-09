@@ -1535,7 +1535,115 @@ function renderDivergenceBanner() {
         panel.querySelector('.se-divergence').append(seDivergenceDetail(diverging));
     };
     line.append(b, expl, show);
+    // DIV-3 (user 2026-10-09): offer to eliminate the divergence the other
+    // way around — adopt the base model's load-time values in every
+    // diverging profile — instead of only warning about it.
+    line.append(seDivergenceSyncBtn(diverging, panel));
     host.append(line);
+}
+/* Two-step arm/confirm button (the write overwrites stored profile
+   settings, so it needs an informed confirmation naming what it touches;
+   confirmDialog cannot host it — its OK handler closes the editor).
+   The sync deletes the diverging load-time keys from each profile's
+   SPARSE overrides, i.e. the profile INHERITS them from the base again —
+   the same mechanic as reverting a field on a profile tab, and exactly
+   why the divergence disappears (effective value = base value). Keys a
+   profile keeps because they do not feed the runtime signature (sampling,
+   thinking, ...) are untouched; a profile deliberately differing in a
+   load-time value is served by NOT clicking this. */
+function seDivergenceSyncBtn(diverging, panel) {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'se-btn se-div-show se-div-sync';
+    const label = () => C.tf('uplift.se.divergence.sync', 'SYNC BASE → PROFILES');
+    let armed = false, timer = null;
+    const disarm = () => { armed = false; btn.textContent = label();
+                           btn.classList.remove('restart');
+                           if (timer) { clearTimeout(timer); timer = null; } };
+    btn.textContent = label();
+    btn.title = C.tf('uplift.se.divergence.sync.title',
+        'Reset the diverging load-time settings of these profiles to the base model\'s current values (they inherit them again). Each profile\'s other overrides stay as they are.');
+    btn.onclick = async () => {
+        if (!armed) {
+            armed = true;
+            btn.classList.add('restart');
+            btn.textContent = C.tf('uplift.se.divergence.sync.confirm',
+                'CONFIRM — sync ') + diverging.map(d => d.api_name || d.display_name).join(', ');
+            timer = setTimeout(disarm, 6000);
+            return;
+        }
+        disarm();
+        btn.disabled = true;
+        const names = diverging.map(d => d.api_name || d.display_name).join(', ');
+        try {
+            const n = await seSyncBaseToProfiles(diverging);
+            if (n) MM_GLUE.toast(C.tf('uplift.se.divergence.synced',
+                'Base load-time settings synced to ') + n + ' profile(s): ' + names);
+            else MM_GLUE.toast(C.tf('uplift.se.divergence.sync.none',
+                'Nothing to sync — profiles already match the base'));
+        } catch (err) {
+            MM_GLUE.toast(C.tf('uplift.toast.action_failed',
+                { action: 'sync profiles', msg: err.message }));
+        }
+        btn.disabled = false;
+        refreshDivergence();
+        seRenderTabs(panel);
+        seUpdateSaveBtn();
+    };
+    return btn;
+}
+async function seSyncBaseToProfiles(diverging) {
+    if (!seModel) throw new Error('no model loaded in editor');
+    const fields = await MM_GLUE.modelSettingsFields();
+    // the runtimeDiff keys speak the payload shape; old servers store the
+    // legacy twin name in the profile (adaptToServerSettings renames)
+    const LEGACY_TWINS = { mtp_adaptive_max_depth: ['mtp_num_draft_tokens'],
+                           mtp_fixed_depth: ['mtp_num_draft_tokens'] };
+    let n = 0;
+    for (const d of diverging) {
+        const p = (MM_DATA.profiles || []).find(x => x.name === d.name);
+        if (!p) continue;
+        // sparse overrides minus the diverging load-time keys = inherit base
+        const ov = JSON.parse(JSON.stringify(p.settings || {}));
+        for (const row of d.diff) {
+            delete ov[row.key];
+            for (const t of (LEGACY_TWINS[row.key] || [])) delete ov[t];
+        }
+        const body = window.UpliftModelSpec.adaptToServerSettings(ov, fields);
+        const req = { settings: body, display_name: p.display_name || d.display_name,
+            expose_as_model: !!p.expose_as_model, api_name: p.api_name || null };
+        try {
+            await D.putJson(`${API}/admin/api/models/${encodeURIComponent(seModel)}`
+                + `/profiles/${encodeURIComponent(d.name)}`, req);
+        } catch (e) {
+            if (e.status !== 404) throw e;
+            // missing base model: classic PUT 404s; uplift upserts (same
+            // fallback saveProfileTab uses)
+            await D.postJson(`${API}/uplift/api/models/${encodeURIComponent(seModel)}/profiles`,
+                Object.assign({ name: d.name }, req));
+        }
+        p.settings = body;
+        // an open tab of this profile must not re-save the stale overrides:
+        // re-base it on the synced record. If that tab is ACTIVE (visible
+        // widgets holding possibly-unsaved edits), re-render it from the
+        // re-based values — the sync confirmation names the profile, so
+        // trading that tab's unsaved edits for an honest display is the
+        // informed outcome. Other tabs re-base silently (not displayed).
+        const t = seTabs.find(z => z.profileId === d.name);
+        if (t) {
+            t.overrides = JSON.parse(JSON.stringify(body));
+            t._ovSnap = JSON.parse(JSON.stringify(body));
+            t.workVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(body)));
+            t.origVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(body)));
+            t.dirty = new Set();
+            if (t.id === seActiveTab) {
+                seRestoreTab(t);
+                renderEditorFields(document.getElementById('se-fields'));
+            }
+        }
+        n++;
+    }
+    CHIPS.clearProfileCache(seModel);   // alias-tree chips must re-fetch
+    return n;
 }
 function seDivergenceDetail(diverging) {
     const det = document.createElement('div');
@@ -1944,6 +2052,9 @@ async function saveEditor() {
                 await MM_GLUE.putModelSettings(seModel, payload);
             if (Object.keys(deferAdd).length) await sePersistDeferred(seModel, deferred);
             else seDeferred = deferred;
+            // the classic store now holds the live keys: keep the raw base
+            // (divergence merge baseline for profiles) honest — DIV-3
+            Object.assign(seBaseRaw, JSON.parse(JSON.stringify(payload)));
             // mark every committed key saved (baseline moves to current), so
             // the deferred set no longer reads as dirty-but-unsaved
             seCommitSaved(t0, Object.keys(deferAdd));

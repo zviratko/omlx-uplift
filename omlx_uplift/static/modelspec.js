@@ -582,16 +582,69 @@
         'vlm_mtp_draft_block_size',
     ]);
     /* Diff two settings payloads (payload shape) through the signature:
-       returns [{key, base, other}] of settings-signature entries that differ. */
+       returns [{key, base, other}] of settings-signature entries that differ.
+       DIV-2 (user 2026-10-09): gated dependent keys whose RAW display values
+       are numerically identical ("qwen35_oq_a8_min_tokens 128 -> 128") never
+       surface as their own row. buildPayload always writes a default for
+       every field, but the signature only carries a dependent key while its
+       master switch is ON — so a master flip (off -> on) made the signature
+       pair `null` vs `"128"` while the RAW base value was 128 all along: a
+       reload IS forced (the master row says it), the knob row was noise. */
     function runtimeDiff(basePayload, otherPayload) {
         const a = runtimeSignature(basePayload), b = runtimeSignature(otherPayload);
         const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
         const out = [];
         for (const k of [...keys].sort()) {
-            if (a[k] !== b[k])
-                out.push({ key: k, base: _sigRaw(basePayload, k), other: _sigRaw(otherPayload, k) });
+            if (a[k] === b[k]) continue;
+            const av = _sigRaw(basePayload, k), bv = _sigRaw(otherPayload, k);
+            const dependent = !!sigMasterKey(k);
+            if (dependent && _rawEq(av, bv)) continue;   // display-equal knob: master row carries it
+            out.push({ key: k, base: av, other: bv });
         }
         return out;
+    }
+    function _rawEq(x, y) {
+        if (x === y) return true;
+        if (x === null || x === undefined || y === null || y === undefined
+            || y === '' || x === '') return false;
+        const nx = Number(x), ny = Number(y);
+        return Number.isFinite(nx) && Number.isFinite(ny) && nx === ny;
+    }
+    /* The master switch that gates a dependent signature key ('' = none).
+       Mirrors the if-gates in runtimeSignature. Only false-defaulted
+       masters get mapped: `qwen35_ane_prefill_gdn` gates on `!== false`
+       (effective default TRUE when absent), so its children keep their
+       parent `qwen35_ane_prefill_enabled` as the mapping master — a knob
+       is dead whenever the whole ANE prefill is off on both sides. */
+    function sigMasterKey(k) {
+        const EXPLICIT = {
+            mtp_adaptive_max_depth: 'mtp_enabled', mtp_fixed_depth: 'mtp_enabled',
+            turboquant_kv_bits: 'turboquant_kv_enabled',
+            qwen35_oq_a8_min_tokens: 'qwen35_oq_a8_enabled',
+            moe_expert_offload_resident_fraction: 'moe_expert_offload_enabled',
+            specprefill_draft_model: 'specprefill_enabled',
+            specprefill_keep_pct: 'specprefill_enabled',
+            specprefill_threshold: 'specprefill_enabled',
+            dflash_draft_model: 'dflash_enabled',
+            dflash_draft_quant_enabled: 'dflash_enabled',
+            dflash_draft_quant_weight_bits: 'dflash_enabled',
+            dflash_draft_quant_activation_bits: 'dflash_enabled',
+            dflash_draft_quant_group_size: 'dflash_enabled',
+            dflash_max_ctx: 'dflash_enabled',
+            dflash_in_memory_cache: 'dflash_enabled',
+            dflash_in_memory_cache_max_entries: 'dflash_enabled',
+            dflash_in_memory_cache_max_bytes: 'dflash_enabled',
+            dflash_ssd_cache: 'dflash_enabled',
+            dflash_ssd_cache_max_bytes: 'dflash_enabled',
+            vlm_mtp_draft_model: 'vlm_mtp_enabled',
+            vlm_mtp_draft_block_size: 'vlm_mtp_enabled',
+        };
+        if (EXPLICIT[k]) return EXPLICIT[k];
+        if (k === 'qwen35_ane_prefill_enabled' || k === 'qwen35_ane_prefill_cpu_enabled')
+            return '';                                     // the masters themselves
+        if (k.indexOf('qwen35_ane_prefill_cpu_') === 0) return 'qwen35_ane_prefill_cpu_enabled';
+        if (k.indexOf('qwen35_ane_prefill_') === 0) return 'qwen35_ane_prefill_enabled';
+        return '';
     }
     function _sigRaw(d, key) {
         // map signature names back to a displayable raw value
@@ -691,7 +744,7 @@
              kwargIdentity, mergeRawKwargs,
              buildState, validate, buildPayload, adaptToServerPayload,
              adaptToServerSettings,
-             runtimeSignature, runtimeDiff, RUNTIME_SETTING_KEYS,
+             runtimeSignature, runtimeDiff, sigMasterKey, RUNTIME_SETTING_KEYS,
              isDflashDraftModel, isVlmMtpDraftModel, isSpecPrefillDraftModel,
              specprefillCandidates, dflashCandidates, vlmMtpDrafters,
              profileRecord, GiB };

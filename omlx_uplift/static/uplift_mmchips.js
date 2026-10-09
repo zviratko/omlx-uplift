@@ -71,9 +71,26 @@ function aliasDiffChips(prof, base) {
         mtp: on('mtp_enabled') || on('vlm_mtp_enabled'),
         vlm_mtp: on('vlm_mtp_enabled'),
     };
+    /* DIV-1 (user 2026-10-09: 'MOE_EXPERT_OFFLOAD_RESIDENT_FRACTION 0.25 on
+       the card but MoE offload is not enabled'): the GATED map above only
+       knows the speculative-decoding families. Every runtime-signature
+       dependent key is gated by its master switch — if the master is OFF on
+       BOTH alias and base, the knob cannot take effect anywhere, so it is
+       not a difference worth a chip. This is exactly how the base row builds
+       its chips (only toggled-ON features print), and why the same value
+       never appears there. */
+    const spec = window.UpliftModelSpec;
+    const masterOff = (k) => {
+        if (!spec || !spec.sigMasterKey) return false;
+        const m = spec.sigMasterKey(k);
+        if (!m) return false;
+        const off = (v) => v === undefined || v === null || v === false || v === '' || v === 0;
+        return off(p[m]) && off(b[m]);
+    };
     for (const [k, v] of Object.entries(p)) {
         if (v === null || v === undefined || v === false) continue;
         if (b[k] === v) continue;
+        if (masterOff(k)) continue;              // DIV-1: knob with both masters off
         if (k === 'chat_template_kwargs' || k === 'forced_ct_kwargs') {
             out.push('CT_KWARGS');       // round 4: no "[object Object]" chips
             continue;

@@ -13,6 +13,18 @@ users never see.
 
 ## Unreleased
 
+- **Alias-card chips and RUNTIME DIVERGENCE no longer show dead knobs.**
+  A profile that overrides a gated setting (MoE resident fraction,
+  turboquant bits, oQ min tokens, ANE/SpecPrefill/DFlash children) while
+  the master switch is off on BOTH the model and the profile printed that
+  knob as its own chip/diff row — e.g. `MOE_EXPERT_OFFLOAD_RESIDENT_FRACTION
+  0.25` on a card whose MoE offload is disabled, or `qwen35_oq_a8_min_tokens
+  128 -> 128` in the editor. Off-master knobs are noise now (base rows only
+  ever printed toggled-ON features); a REAL change under an ON master still
+  shows. The divergence banner gained a **SYNC BASE → PROFILES** action:
+  two-click confirm writes each diverging profile's load-time keys back to
+  the base model's current values (the profile inherits them again;
+  sampling/thinking and other non-load-time overrides stay untouched).
 - **Merged PRs no longer wedge `dev upgrade`. When upstream merges your
   patch PR and later commits move the surrounding code, the stored diff
   stops applying — the drift gate used to report a bare `error` and the
