@@ -37,8 +37,6 @@ COMMANDS = [
                   " accuracy engine (own venv, never a keg)"),
     ("mteb-env", "status|create — pinned MTEB venv for the embeddings/"
                  "rerankers bench (own venv; carries torch — never a keg)"),
-    ("tui", "menu-driven terminal manager — menu bar, panels for patches,"
-            " catalog, dev kegs, services (needs a real terminal)"),
 ]
 
 _TOP_USAGE = """\
@@ -99,25 +97,6 @@ COMMAND_USAGE = {
     "doctor": ("omlx-uplift doctor [--json]\n"
                "                 read-only: every omlx file vs the wheel RECORD;\n"
                "                 files an applied patch owns are expected drift"),
-    "tui": ("omlx-uplift tui\n"
-            "                 a Midnight-Commander shell: a BAR of menus on"
-            " top of full-size panels\n"
-            "                 panels: overview | patches | catalog | dev keg |"
-            " log (1-5 or Tab to walk)\n"
-            "                 F9 (or Alt+letter) opens a menu; arrows walk"
-            " it, Enter runs it, Esc closes\n"
-            "                 greyed menu items say WHY they cannot run"
-            " right now\n"
-            "                 arrows/j-k move the panel cursor; Enter opens"
-            " that row's action menu\n"
-            "                 F3 detail pane  F5 re-read  T theme (default |"
-            " P(DOOM) | phosphor | mono)\n"
-            "                 F1 help  F10 quit; action letters still work"
-            " as shortcuts\n"
-            "                 writes nothing until you confirm; shows the CLI"
-            " command each action mirrors\n"
-            "                 needs a terminal — headless use is 'patch"
-            " status' / 'dev status'"),
 }
 
 _CONFIG_FILES = [
@@ -128,8 +107,6 @@ _CONFIG_FILES = [
     ("patches.lock", "reconcile lock (startup and CLI share it)"),
     ("patches.disabled", "kill switch: boot unpatched when present"),
     ("kernel-backups/", "byte-exact originals behind 'kernel rebuild'"),
-    ("tui.json", "terminal UI preferences (the chosen colour theme) — cosmetic,\n"
-                 "                   deliberately separate from the patch manifest"),
     ("dev.json", "omlx-dev config (origin, sync_ref, port, sharing)"),
     ("dev-src/", "the omlx checkout build patches materialize in"),
 ]

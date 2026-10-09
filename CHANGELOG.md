@@ -13,74 +13,22 @@ users never see.
 
 ## Unreleased
 
-- **The TUI got a real menu shell, laid out like Midnight Commander.** The
-  previous version listed its screens as a menu, which was a launcher with
-  extra steps; now there is a bar of menus along the top of every panel
-  (`Go`, `Patches`, `Catalog`, `Keg`, `Services`, `View`, `Help`), opened with
-  `F9` or `Alt`+letter, walked with the arrows and run with `Enter`. Commands
-  that cannot run right now stay visible and greyed **with the reason** — a
-  disabled command that explains itself teaches the tool instead of hiding
-  from you — and a menu command acts on the row its own panel has selected,
-  whether or not you are looking at that panel. The panels now fill the whole
-  window (details sit beside the list on a wide terminal, under it on a
-  narrow one) instead of stacking in a corner, and the bottom row carries the
-  function-key legend. Mouse clicks open menus, run items and select rows.
-  Nothing was taken away: number keys, letter shortcuts and the `m` launcher
-  screen all still work, and every command still shows the CLI it mirrors.
-- **Fixed: the TUI showed the wrong vanilla port.** The service rows and
-  menu read a top-level `port` key from `~/.omlx/settings.json`, but omlx
-  stores it under `server.port` (the same nested key `omlx-uplift view`
-  rewrites) — so on any box that changed its port the TUI confidently
-  pointed at the default instead. It now reads the real key shape, and the
-  menu's help text quotes the ports from the live rows instead of
-  hardcoding numbers.
-- **The TUI is a menu system now, not a wall of keys.** It boots on a main
-  menu whose entries say what lives there and carry live state (the Patches
-  line already tells you how many are enabled and whether the kill switch is
-  armed). Enter opens what is highlighted: a screen from the menu, an
-  **action menu** from a patch or keg row — every command listed with a plain
-  description and the CLI command it mirrors. `m` returns to the menu, `Esc`
-  backs out one step, arrows step between screens. Number keys and letter
-  shortcuts all still work — the menus are an extra path, never a worse one.
-  Rows read as sentences too: name + description, then the state in words
-  (`applied | enabled | scope omlx | desired v3`) instead of the old
-  mark legend you had to memorize.
-- **`omlx-uplift tui` — a menu-driven terminal manager.** Five screens
-  (overview, patches, curated catalog, omlx-dev keg stash, session log) for
-  the everyday recovery work: enable/disable/promote/update/rollback/remove a
-  patch, check for drift, reconcile now, arm and clear the kill switch, sync
-  the catalog, stash/activate/prune dev kegs, roll back a build, restart a
-  service. It is a front-end, not a second implementation: every action calls
-  the same function the dashboard route calls or runs the CLI verb printed on
-  screen, so the terminal and the browser can never disagree about what a
-  button does. Nothing writes until you confirm — a store change asks `y/N`,
-  and anything touching tree bytes, a keg or a running service asks you to
-  type `YES` on its own line, so a stray keypress cannot arm a rollback.
-  Stdlib `curses` only, no new dependency, and it refuses politely (exit 2)
-  when piped, redirected or run under `TERM=dumb` instead of spraying control
-  codes into a log.
-- **Four colour themes, cycled with `T`.** `default` leaves your terminal's
-  own palette alone, **`p(doom)`** brings the SHODAN dashboard skin to the
-  terminal (void black, laser crimson, ember orange), `phosphor` is a
-  single-hue CRT and `mono` drops colour entirely for screenshots and broken
-  `TERM`s. Truecolour is deliberately not used — it falls apart across ssh
-  hops and remote tmux, which is where this tool gets used — so themes write
-  exact RGB into free palette slots when the terminal allows it and otherwise
-  approximate, with the status line naming which happened. The choice is
-  remembered in `~/.omlx/uplift/tui.json`, kept separate from `patches.json`
-  so a cosmetic preference never rides along with the patch manifest.
 - **The kill switch no longer needs an importable omlx.** `patch disable-all`
   and `patch enable-all` write only the manifest and the sentinel file, but
   they sat behind the same `is omlx installed for this python?` check as the
   verbs that touch tree bytes — so on a machine where the runtime is broken or
   omlx simply is not importable, the one command that rescues you refused to
-  run, and printed nothing on stdout while doing it. Both surfaces now answer
-  the switch first (the TUI's `K`/`U` keys follow the same rule). Found by CI,
-  which has had no omlx since LOG-2 added these verbs.
+  run, and printed nothing on stdout while doing it. The switch now answers
+  before the tree check. Found by CI, which has had no omlx since LOG-2 added
+  these verbs.
 - **`omlx-uplift patch rollback ID [--to-v N]`.** The dashboard has had a Roll
   back button for as long as it has had version history; the CLI never got
   its twin, so undoing a bad promote from a shell meant editing the manifest
-  by hand. Found while wiring the TUI's rollback key.
+  by hand.
+- **Removed: the `tui` terminal manager.** It lived on `main` for a day and
+  proved unusable in practice, so it is back out; the code lives on the
+  `tui-archive` branch in case it is ever worth reviving. The two fixes
+  above stand on their own.
 
 - **Alias-card chips and RUNTIME DIVERGENCE no longer show dead knobs.**
   A profile that overrides a gated setting (MoE resident fraction,

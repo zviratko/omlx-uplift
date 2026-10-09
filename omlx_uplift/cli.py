@@ -491,7 +491,7 @@ def cmd_view(argv=None) -> int:
 
 
 def _kill_switch(store, action: str) -> dict:
-    """TUI-1 (CI red since LOG-2): arm or clear the boot kill switch.
+    """Arm or clear the boot kill switch.
 
     Deliberately reachable WITHOUT an importable omlx tree — these verbs touch
     only the manifest and the sentinel file, never tree bytes. The kill switch
@@ -566,10 +566,9 @@ def cmd_patches(argv=None) -> int:
                    check's auto-promote is enabled-only, so 'enable' would
                    re-apply the stale (broken) desired version.
       rollback     point desired_version at a previous stored version (--to-v
-                   N, default: the one before). TUI-1 added this verb: the
-                   dashboard had a Roll back button (POST /patches/rollback)
-                   with no CLI twin, so an operator at a shell could not undo
-                   a bad promote without the TUI or the browser.
+                   N, default: the one before). The CLI twin of the
+                   dashboard's Roll back button, so undoing a bad promote
+                   needs no browser.
     Also: 'disable-all' arms a sentinel file that makes every boot skip
     the runtime patch pass AND records which patches it switched off;
     'enable-all' is its twin — it removes the sentinel and restores
@@ -623,7 +622,7 @@ def cmd_patches(argv=None) -> int:
     store = _patches.PatchStore()
 
     if args.action in ("disable-all", "enable-all"):
-        # TUI-1: the kill switch answers before the tree check. These two
+        # The kill switch answers before the tree check. These two
         # verbs write only the manifest and the sentinel — no tree bytes —
         # and the situation they exist for is 'the patched runtime is the
         # problem', where refusing with 'is omlx installed for this python?'
@@ -1575,23 +1574,6 @@ def cmd_skin(argv=None) -> int:
     return 0
 
 
-def cmd_tui(argv=None) -> int:
-    """TUI-1: menu-driven terminal manager for the whole patch + dev-keg
-    surface.
-
-        omlx-uplift tui
-
-    A curses front-end over the verbs this CLI already has — it adds no
-    policy of its own: every action calls the same function the dashboard
-    route uses (or runs the CLI verb in process), shows the command it
-    mirrors, and asks before it writes. Keys: 1-5 screens, j/k move, enter
-    detail, n re-read, ? help, q quit. Needs a real terminal; headless use
-    stays `patch status` / `dev status`."""
-    from .tui import run
-
-    return run(argv)
-
-
 def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
         # omlx-uplift [help] -> slim command list; `help <cmd>` -> usage
@@ -1604,7 +1586,7 @@ def main() -> int:
     if sys.argv[1] not in {
             "serve", "view", "install", "uninstall", "patch", "patches",
             "kernel", "skin", "dev", "env", "doctor", "bench-env",
-            "mteb-env", "tui"}:
+            "mteb-env"}:
         print(f"omlx-uplift: unknown command {sys.argv[1]!r}\n",
               file=sys.stderr)
         from .help import print_help
@@ -1627,7 +1609,6 @@ def main() -> int:
             "uninstall": cmd_uninstall, "patch": cmd_patches,
             "kernel": cmd_kernel, "dev": cmd_dev, "env": cmd_env,
             "doctor": cmd_doctor, "bench-env": cmd_bench_env,
-            "tui": cmd_tui,
              # mteb-env shares the implementation; the leading marker arg
              # selects the env (REPL-4: second pinned venv, same discipline)
              "mteb-env": lambda rest: cmd_bench_env(["mteb", *rest])}[cmd](rest)

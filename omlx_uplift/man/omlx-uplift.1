@@ -376,109 +376,6 @@ reported as drift ; exit status 1 .
 Custom-kernel binaries and patch-owned files are excepted .
 Repair by reinstalling the omlx formula ; the tool never writes to the
 tree .
-.It Xo Ic tui
-.Xc
-Menu-driven terminal manager over the same surface this page documents,
-laid out like
-.Em Midnight Commander :
-a bar of menus along the top, panels that fill the window, and a
-function-key legend along the bottom.
-The panels are
-.Em overview ,
-.Em patches ,
-.Em curated catalog ,
-.Em omlx-dev keg
-and
-.Em session log ;
-the bar holds
-.Em Go ,
-.Em Patches ,
-.Em Catalog ,
-.Em Keg ,
-.Em Services ,
-.Em View
-and
-.Em Help .
-.Ic F9
-(or
-.Ic Alt
-plus the menu letter) opens a menu, the arrows walk it,
-.Ic Enter
-runs the highlighted command and
-.Ic Esc
-closes it.
-A command that cannot run right now stays visible and greyed with the
-reason \(em a disabled command that explains itself is easier to learn
-than one that is hidden.
-Menu commands act on the row their panel has selected, the same way
-panel commands do.
-.Pp
-In a panel the arrow keys (or
-.Ic j Ns / Ns Ic k )
-move,
-.Ic Enter
-opens that row's action menu,
-.Ic Tab
-and
-.Ic \&left / right
-switch panels,
-.Ic F3
-toggles the detail pane,
-.Ic F5
-re-reads live state,
-.Ic T
-cycles the colour theme,
-.Ic F1
-lists the keys,
-.Ic F10
-or
-.Ic q
-quits.
-The number keys
-.Ic 1 Ns - Ns Ic 5
-jump straight to a panel and every action keeps its letter shortcut;
-the bar is an additional path, never a worse one.
-A mouse click selects a row, opens a menu and runs a menu item.
-.Pp
-The TUI implements no policy of its own.
-Every action calls the function the dashboard route calls, or runs the CLI
-verb named on screen, so
-.Ic tui
-and a shell can never disagree about what a button does.
-Nothing writes until you confirm: a state change asks
-.Ic y Ns / Ns Ic N ,
-and anything that touches tree bytes, a keg, or a running service asks you to
-type
-.Ic YES
-on its own line \(em
-.Ic q
-cancels an armed question instead of answering it.
-.Pp
-Colour themes:
-.Em default
-(terminal's own colours),
-.Em p(doom)
-(the SHODAN dashboard skin in the terminal \(em void black, laser crimson,
-ember orange),
-.Em phosphor
-(single-hue CRT) and
-.Em mono
-(no colour, for screenshots and broken
-.Ev TERM ) .
-A 256-colour terminal that allows palette writes gets the exact RGB values;
-otherwise the nearest available colour is used and the status line says which,
-because a silently mis-coloured warning is worse than an honest fallback.
-A degraded palette is reported under the panels, never hidden.
-The choice is remembered in
-.Pa tui.json .
-.Pp
-Requires a terminal on both stdin and stdout and a usable
-.Ev TERM .
-Piped or redirected use exits 2 with a pointer to
-.Ic patch
-status and
-.Ic dev
-status instead of writing control codes into your log.
 .It Xo Ic help
 .Op Ar command
 .Xc
@@ -546,25 +443,12 @@ patch disable-all
 creates it;
 .Ic patch
 .Ic enable-all
-(or the dashboard toggle, or the TUI's
-.Ic U
-key)
+(or the dashboard toggle)
 removes it and restores the flags the switch recorded.
 .It Pa kernel-backups/
 Byte-exact originals behind
 .Ic kernel
 rebuild .
-.It Pa tui.json
-Terminal UI preferences: the chosen colour theme.
-Written by
-.Ic tui
-when you press
-.Ic T ;
-purely cosmetic, deliberately kept out of
-.Pa patches.json
-so a UI preference never rides along with the patch manifest and its
-approvals.
-Absent until the theme is changed for the first time.
 .It Pa dev.json
 .Em omlx-dev
 config: origin, sync_ref, formula branch, port, base path, share map,

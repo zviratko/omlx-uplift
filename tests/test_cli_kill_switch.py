@@ -124,7 +124,7 @@ class KillSwitchRoundTrip(unittest.TestCase):
         self.assertEqual(p["state"], "pending")
 
     def test_the_kill_switch_works_with_no_omlx_tree(self):
-        """TUI-1: these verbs write only the manifest and the sentinel, so
+        """These verbs write only the manifest and the sentinel, so
         they must answer before cmd_patches' tree check. The case they exist
         for is 'the patched runtime is the problem' — and on a machine where
         omlx is not importable (the CI venv, or a keg you just broke), the
