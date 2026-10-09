@@ -1,0 +1,5 @@
+{
+  "description": "Qwen4exp: YaRN context extension + full fused TQ on NAX/simdgroup prefill kernels — working rebase of jundot/omlx#4206 onto 0b07e88.",
+  "source": {"kind": "file"},
+  "scope": "dev"
+}
