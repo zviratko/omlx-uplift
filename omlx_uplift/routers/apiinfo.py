@@ -56,17 +56,35 @@ def _read_json_dict(path: Path) -> dict:
         return {}
 
 
+def _classic_i18n():
+    """Classic's own locale loader + dir, across layouts.
+
+    #4359 (upstream 0b07e88) moved the web UI from omlx.admin.routes to the
+    new omlx_web.routes package; the loader name and fallback chain are
+    identical. Try the old import first (every keg before the split), then
+    the new one; None when neither exists (viewer mode)."""
+    for mod in ("omlx.admin.routes", "omlx_web.routes"):
+        try:
+            m = __import__(mod, fromlist=["_load_locale"])
+            return m._load_locale, m._i18n_dir
+        except (ImportError, AttributeError):
+            continue
+    return None, None
+
+
 def load_locale(lang: str) -> dict:
     """Merged catalog for LANG. Classic JSON read through classic's own
     loader when available (its fallback chain is the reference), then our
     overlay on top; without omlx (viewer mode) our files alone."""
     lang = _safe_lang(lang)
     base: dict = {}
-    try:
-        from omlx.admin.routes import _load_locale, _i18n_dir  # read-only reuse
-
-        base = _load_locale(lang)
-    except Exception:
+    _loader, _ = _classic_i18n()  # read-only reuse
+    if _loader is not None:
+        try:
+            base = _loader(lang)
+        except Exception:
+            _loader = None
+    if _loader is None:
         # viewer / no omlx: our own dir replicates the same fallback shape
         base = _read_json_dict(_PACKAGE_LOCALES / "en.json")
         if lang != "en":
@@ -79,7 +97,8 @@ def load_locale(lang: str) -> dict:
         merged_overlay = {**en_overlay, **overlay}
     else:
         merged_overlay = overlay
-    _ = _i18n_dir  # referenced only to prove the import path exists
+    # the classic-import existence proof moved into _classic_i18n() itself
+    # (#4359: two layouts can satisfy it now, so a bare name check is stale)
     return {**base, **merged_overlay}
 
 
@@ -125,11 +144,9 @@ async def locale_catalog(lang: Optional[str] = None):
     # shipped when EITHER layer (classic base or uplift overlay) has it.
     shipped = (_PACKAGE_LOCALES / f"{lang}.json").exists()
     if not shipped:
-        try:
-            from omlx.admin.routes import _i18n_dir
-            shipped = (_i18n_dir / f"{lang}.json").exists()
-        except Exception:
-            pass
+        _, _dir = _classic_i18n()
+        if _dir is not None:
+            shipped = (_dir / f"{lang}.json").exists()
     if not shipped:
         lang = "en"
     return {"lang": lang, "strings": await asyncio.to_thread(load_locale, lang)}

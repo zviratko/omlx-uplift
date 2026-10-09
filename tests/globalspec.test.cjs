@@ -22,13 +22,26 @@ const os = require('os');
 const path = require('path');
 
 const { allStaticJs } = require('./static-src.cjs');
+/* #4359 (0b07e88, 2026-10-09) split the web UI out of omlx/admin into
+   apps/omlx-web. The settings schema stayed in omlx/admin/routes.py; the
+   JS/templates moved. Resolve anchors against BOTH layouts so the gate
+   never goes blind on a moving target (a silently-skipping guard is the
+   REPO-1 failure mode this file exists to avoid). */
+const DASH_REL = ['omlx', 'admin', 'static', 'js', 'dashboard.js'];
+const DASH_REL_NEW = ['apps', 'omlx-web', 'omlx_web', 'static', 'js', 'dashboard.js'];
+const MODAL_REL = ['omlx', 'admin', 'templates', 'dashboard', '_modal_model_settings.html'];
+const MODAL_REL_NEW = ['apps', 'omlx-web', 'omlx_web', 'templates', 'dashboard', '_modal_model_settings.html'];
+function anyRel(root, rels) {
+    for (const rel of rels) if (fs.existsSync(path.join(root, ...rel))) return path.join(root, ...rel);
+    return null;
+}
 function classicRoot() {
     const cands = [process.env.OMLX_SRC,
         path.join(os.homedir(), 'git', 'omlx-upstream'),
         path.join(__dirname, '..', '..', '..')];
     for (const c of cands) {
         if (c && fs.existsSync(path.join(c, 'omlx', 'admin', 'routes.py'))
-             && fs.existsSync(path.join(c, 'omlx', 'admin', 'static', 'js', 'dashboard.js')))
+             && anyRel(c, [DASH_REL, DASH_REL_NEW]))
             return c;
     }
     return null;
@@ -36,7 +49,7 @@ function classicRoot() {
 const ROOT = classicRoot();
 const HAS_CLASSIC = ROOT !== null;
 const routes = HAS_CLASSIC ? fs.readFileSync(path.join(ROOT, 'omlx/admin/routes.py'), 'utf8') : '';
-const dashJs = HAS_CLASSIC ? fs.readFileSync(path.join(ROOT, 'omlx/admin/static/js/dashboard.js'), 'utf8') : '';
+const dashJs = HAS_CLASSIC ? fs.readFileSync(anyRel(ROOT, [DASH_REL, DASH_REL_NEW]), 'utf8') : '';
 // PH2-1 stage 0: read the whole static JS surface, not uplift.js by name —
 // the split into per-section files must not blind this drift test.
 const uplift = allStaticJs();
@@ -125,7 +138,7 @@ test('ModelSettingsRequest fields stay reachable in the Uplift editor', { skip: 
 // modelspec MODEL_TYPE_OPTIONS (upstream adds a value per new model family;
 // #4315 'decision' was the one that taught this test to exist).
 test('MODEL_TYPE_OPTIONS mirrors the classic model-type <option> list', { skip: !HAS_CLASSIC && 'no classic checkout (set OMLX_SRC or create ~/git/omlx-upstream)' }, () => {
-    const tpl = fs.readFileSync(path.join(ROOT, 'omlx/admin/templates/dashboard/_modal_model_settings.html'), 'utf8');
+    const tpl = fs.readFileSync(anyRel(ROOT, [MODAL_REL, MODAL_REL_NEW]), 'utf8');
     const classic = [...tpl.matchAll(/<option value="([a-z_]+)">\{\{ t\('modal\.model_settings\.model_type/g)]
         .map(x => x[1]);
     assert.ok(classic.length >= 5, 'classic option list parsed');
