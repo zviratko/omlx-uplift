@@ -1042,13 +1042,13 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .admin-table .urow.admin { align-items: start; }
 #model-admin .mbox .uname { padding-top: 5px; gap: 4px; }
 #model-admin .mbox .nrow1 { min-height: 22px; }
-/* TREE-2 (user 2026-10-09): the trunk hangs from the model NAME alone. The
-   badge line slots to the RIGHT of it — indented by the trunk, to exactly
-   the x the alias lines start at (alias-tree margin 16 − row padding 2 =
-   14px; box-sizing:border-box keeps size/state flush right). The wire then
-   reads name → aliases with the lamps as a neighbouring branch, instead of
-   the trunk appearing to drop out of the badge row. */
-#model-admin .mbox .urow.admin .nrow1 { padding-left: 14px; }
+/* TREE-2b/2d (user 2026-10-09): the trunk hangs from the model NAME alone;
+   the badge line slots to the RIGHT of it — indented to exactly the x the
+   alias lines start at (alias-tree margin 24 − row padding 2 = 22px; the
+   user wanted "a bit more indentation from the left", so the whole tree +
+   badge indent moved 16→24 together). box-sizing:border-box keeps
+   size/state flush right. */
+#model-admin .mbox .urow.admin .nrow1 { padding-left: 22px; }
 #model-admin .mbox .uname .nmain { min-height: 22px; align-items: center; }
 /* CARD-1 (user 2026-10-09): the model name leads the card at the TOP-LEFT and
    is bigger; the type badge sits to its RIGHT (left of the copy icon) and the
@@ -1159,46 +1159,35 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    bottom-most branch (no stub below). */
 /* round 6 item 8: gap between the model row, alias lines and the bottom of
    the box is uniform 6px — same as alias-to-alias spacing */
-#model-admin .alias-tree { margin: 0 10px 6px 16px; padding: 6px 0 0 0;
-    position: relative; }   /* TREE-2b: anchor for the trunk connector above */
-/* TREE-2b (user 2026-10-09: "the trunk begins on the line BELOW the model
-   badges and there's a free line next to it"): each alias line draws only
-   ITS OWN riser, so nothing bridged the model cell — the wire appeared to
-   start under the badge row and left an empty gutter beside it. The tree
-   paints one connector segment that runs from the NAME's bottom edge down
-   through the badge line and meets the first riser. --trunk-top/--trunk-drop
-   are MEASURED by the align pass (alignProfileRows): the segment spans
-   nameBottom-2 (2px bite into the name's box so it reads attached) to
-   firstRiserTop+4 (4px overlap so there is no seam).
-   left: -15px puts the stroke at x 51..54 — EXACTLY the line risers' x
-   (their ::before is -16px from the line's PADDING box, which is the 1px
-   line border inside the same 66px edge). -17 sat at 49, i.e. ON the card
-   border (49..50) and 2px left of the risers — the user saw the kink and
-   the overlap ("shifts between the lines / goes over the card border"). */
-#model-admin .alias-tree:not([hidden])::before { content: ""; position: absolute;
-    left: -15px; width: 3px; background: var(--dim);
-    top: var(--trunk-top, 0px); height: var(--trunk-drop, 0px); }
+#model-admin .alias-tree { margin: 0 10px 6px 24px; padding: 6px 0 0 0;
+    position: relative; }   /* TREE-2b: anchor for the trunk segments above */
+/* TREE-2d (user 2026-10-09 round 4: "the trunk segments now have a slightly
+   different colour, and they need a bit more indentation from the left").
+   The wire is now built by the align pass as ONE ELEMENT PER LINE, appended
+   to the TREE — no more ::before on the alias lines. Why: stored-profile
+   lines carry opacity .75 (dashed dim look), and anything painted inside
+   them inherits it, so per-line risers rendered lighter than the model-row
+   connector. Painted by the tree every segment is plain var(--dim) at full
+   opacity, and chain continuity is measured, not guessed. The old fixes
+   this replaces: ::before connector (--trunk-top/--trunk-drop) and the
+   per-line --riser-top chain; left -15px from the tree box = the exact x
+   the old line risers drew at (tree box == line border box; line padding
+   box is +1 for the line border, its -16 == tree -15). */
+#model-admin .alias-tree .trunk-seg { position: absolute; left: -15px;
+    width: 14px; border-left: 3px solid var(--dim);
+    border-bottom: 3px solid var(--dim); pointer-events: none; }
 #model-admin .alias-line { position: relative; display: flex; align-items: center;
     gap: 8px; margin: 0 0 6px; padding: 4px 8px; min-width: 0;
     border: 1px solid var(--edge); background: var(--field);
     font: 400 12px/1.4 var(--mono); }
 #model-admin .alias-tree .alias-line:last-child { margin-bottom: 0; }
-/* each line draws its own trunk segment: riser from above + square corner
-   into the line. -20px overdraw bridges the 6px gaps between lines so the
-   segments read as one continuous wire, and stops at the last corner. */
-#model-admin .alias-line::before { content: ""; position: absolute;
-    left: -16px; top: var(--riser-top, -16px); bottom: 50%; width: 14px;
-    border-left: 3px solid var(--dim); border-bottom: 3px solid var(--dim); }
-/* TREE-2c (user 2026-10-09: "the trunk is not continuous, it shifts between
-   the lines"): each riser reached up only 16px, which bridged a gap only for
-   the OLD one-row alias lines. Alias lines are now two rows tall (~56px:
-   name+copy, then EDIT), so the PREVIOUS elbow (its mid height) sits
-   height/2 + 6px below this line's top — a fixed overdraw can never know
-   that. --riser-top is MEASURED per line by the align pass: every visible
-   line's riser runs up to the previous visible line's elbow +4px overlap.
-   The first visible line keeps -14px: the connector ends 4px below its top,
-   and a full -16 would poke 2px into the lamp row outline above. */
-#model-admin .alias-tree > .alias-line:first-child::before { top: -14px; }
+/* TREE-2d: no ::before wire on the lines anymore — the align pass appends
+   .trunk-seg elements to the TREE (see the connector note above): lines
+   with opacity .75 (stored-profile dim lines) used to tint their own riser
+   lighter than the model-row connector. Square wiring geometry, one segment
+   per line, is measured live: each runs from the previous elbow (first one:
+   the NAME's bottom edge) down to the line's padding-box centre, where
+   border-bottom turns right into it. */
 #model-admin .alias-line span { text-align: left !important; }
 #model-admin .alias-line.dim-line { opacity: 0.75; border-style: dashed; }
 #model-admin .alias-line .alias-name.dim { color: var(--dim); }

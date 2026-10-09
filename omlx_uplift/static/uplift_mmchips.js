@@ -140,71 +140,70 @@ function alignProfileRows() {
         if (!lines.length) continue;
         const box = mbox.querySelector('.urow.admin .settings-box');
         if (!box) continue;
-        /* TREE-2b: wire the trunk to the NAME. Each alias line draws only
-           its own riser, so with the name moved to line 1 the wire appeared
-           to START under the badge row, beside an empty gutter (user
-           2026-10-09). The .alias-tree paints one connector segment
-           (--trunk-top/--trunk-drop, its ::before) from the name's bottom
-           edge to the first riser's top — MEASURED here because the tree is
-           appended after render and its offset depends on the name wrapping
-           state, the badge line and the fold. 2px bite into the name box +
-           4px overlap of the riser = no seam on any DPR. */
+        /* TREE-2d (user 2026-10-09 round 4): the wire is painted by the TREE,
+           one .trunk-seg element per alias line. Fixes two things at once:
+           * COLOUR: stored-profile lines carry opacity .75 (dashed dim look)
+             and their ::before risers inherited it — segments downstream of
+             the model row rendered lighter than the connector. Elements
+             appended to the tree all paint var(--dim) at full opacity.
+           * GAP: "extra free space below the model badges — should be the
+             same height as the gap between model aliases". The row cell is
+             as tall as the 58px action box, so the badges (48px) left dead
+             space; the tree top is pinned to the badge line's bottom, and
+             its 6px padding-top then equals the alias-to-alias 6px exactly.
+           Continuity is MEASURED, not guessed: each segment runs from 4px
+           above the previous elbow band down to this line's padding-box
+           centre (border-bottom turns right there); the first starts with a
+           2px bite into the name's box. */
         const treeEl = mbox.querySelector(':scope > .alias-tree');
         if (treeEl) {
+            for (const s of treeEl.querySelectorAll('.trunk-seg')) s.remove();
+            const vis = [...treeEl.querySelectorAll('.alias-line')]
+                .filter(l => l.offsetHeight);
             const uid = mbox.querySelector('.urow.admin .uid');
-            const first = treeEl.querySelector('.alias-line');
-            const tr = treeEl.getBoundingClientRect();
-            if (uid && first && treeEl.offsetHeight && uid.offsetWidth) {
-                /* TREE-2c: chain the risers elbow-to-elbow. Alias lines are
-                   two rows tall, so the PREVIOUS line's elbow (its mid
-                   height) is far below this line's top — a fixed -16px
-                   overdraw left a ~17px gap between segments (user: "the
-                   trunk is not continuous, it shifts between the lines").
-                   Each line's --riser-top = previous elbow's bottom - 4px
-                   overlap, measured in the SAME geometry units the ::before
-                   uses (padding-box top: border-box top + border-top).
-                   The first visible line keeps -14px: the connector already
-                   ends 4px INTO its riser, and -16 would poke the lamp row
-                   outline above the tree. */
-                const vis = [...treeEl.querySelectorAll('.alias-line')]
-                    .filter(l => l.offsetHeight);
-                let prevElbowBottom = null;
+            if (vis.length && treeEl.offsetHeight && uid && uid.offsetWidth) {
+                const lampRow = mbox.querySelector('.urow.admin .lampstack')
+                    || mbox.querySelector('.urow.admin .nrow1');
+                if (lampRow) {
+                    // The gap under the badges must equal the alias-to-alias
+                    // 6px rhythm (user round 4). The row's 8px bottom padding
+                    // and the action box's ~7px overhang below the lamp line
+                    // created 21px of dead space. Pin the FIRST ALIAS LINE to
+                    // lampBottom + 6 — but never ABOVE the settings box: its
+                    // bottom edge wins when lower (fold-open 3rd chip row
+                    // grows it; the full-width lines must clear it entirely).
+                    // Result: 6px gap when free, 7px over a 2-row box — the
+                    // box overhang is untouchable without overlap.
+                    const lineTop = Math.max(
+                        lampRow.getBoundingClientRect().bottom + 6,
+                        box.getBoundingClientRect().bottom);
+                    const d = (lineTop - 6) - treeEl.getBoundingClientRect().top;
+                    if (Math.abs(d) > 0.5)
+                        treeEl.style.marginTop =
+                            (parseFloat(getComputedStyle(treeEl).marginTop) + d) + 'px';
+                }
+                const tr = treeEl.getBoundingClientRect();
+                let prevBottom = uid.getBoundingClientRect().bottom;
+                let first = true;
                 for (const l of vis) {
                     const lr = l.getBoundingClientRect();
                     const csL = getComputedStyle(l);
                     const bt = parseFloat(csL.borderTopWidth) || 0;
                     const bb = parseFloat(csL.borderBottomWidth) || 0;
-                    if (prevElbowBottom === null) {
-                        l.style.setProperty('--riser-top', '-14px');
-                    } else {
-                        // start inside the previous elbow band (3px tall):
-                        // -4 from its bottom edge = whole band overlapped
-                        const t = Math.round(prevElbowBottom - 4 - (lr.top + bt));
-                        l.style.setProperty('--riser-top', t + 'px');
-                    }
-                    // ::before bottom:50% of the PADDING box => the elbow
-                    // band's bottom edge sits at paddingTop + PH/2
-                    prevElbowBottom = lr.top + bt + (l.offsetHeight - bt - bb) / 2;
+                    const mid = lr.top + bt + (l.offsetHeight - bt - bb) / 2;
+                    // overlap the previous elbow band by 4px; the FIRST
+                    // segment starts exactly at the name's bottom edge (a
+                    // bite would cross the glyphs' descender line — measured
+                    // ugly), so no -4 there
+                    const top = first ? prevBottom : prevBottom - 4;
+                    const seg = document.createElement('div');
+                    seg.className = 'trunk-seg';
+                    seg.style.top = Math.round(top - tr.top) + 'px';
+                    seg.style.height = Math.max(6, Math.round(mid - top)) + 'px';
+                    treeEl.append(seg);
+                    prevBottom = mid;
+                    first = false;
                 }
-                const nr = uid.getBoundingClientRect();
-                const cs = getComputedStyle(vis[0] || first, '::before');
-                const l0 = (vis[0] || first).getBoundingClientRect();
-                const bt0 = parseFloat(getComputedStyle(vis[0] || first).borderTopWidth) || 0;
-                const riserTop = l0.top + bt0 + parseFloat(cs.top);
-                const top = (nr.bottom - 2) - tr.top;
-                const h = (riserTop + 4) - (nr.bottom - 2);
-                // top is NEGATIVE by design: the connector leaves the tree's
-                // box upward into the model row (the tree box is not clipped,
-                // and nothing sits at that x in the row — the lamps indent
-                // right of the trunk). Clamping it to 0 (my first attempt)
-                // detached the wire from the name again — measured live.
-                treeEl.style.setProperty('--trunk-top', Math.round(top) + 'px');
-                treeEl.style.setProperty('--trunk-drop', Math.max(0, Math.round(h)) + 'px');
-            } else {   // hidden tree (profiles still resolving): paint nothing
-                treeEl.style.removeProperty('--trunk-top');
-                treeEl.style.removeProperty('--trunk-drop');
-                for (const l of treeEl.querySelectorAll('.alias-line'))
-                    l.style.removeProperty('--riser-top');
             }
         }
         const host = box.querySelector('.chip-host');

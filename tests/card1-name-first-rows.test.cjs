@@ -56,38 +56,35 @@ test('the size bump is scoped to model cards, never the settings editor', () => 
     }
 });
 
-test('alias trunk follows the name to the card edge (no orphan 96px indent)', () => {
+test('alias trunk follows the name (indentation the user asked for)', () => {
     const tree = CSS.match(/#model-admin \.alias-tree \{[^}]*\}/);
     assert.ok(tree, 'alias-tree rule vanished');
     const m = tree[0].match(/margin: 0 10px 6px (\d+)px/);
     assert.ok(m, 'alias-tree left margin not found');
     const left = +m[1];
-    assert.ok(left >= 12 && left <= 24,
-        `trunk indent ${left}px must sit under the name (name now leads the cell at content x+2; 16px) — 96px was the old lamp-width indent`);
-    // the first riser must stop short of the lamp row above it
-    assert.match(CSS, /\.alias-line:first-child::before \{ top: -14px; \}/,
-        'first trunk riser must not overdraw into the lamp row (top: -14px)');
+    assert.ok(left >= 20 && left <= 32,
+        `trunk indent ${left}px: tree + badge column moved to 24px (user round 4: 'a bit more indentation from the left'); 96px was pre-CARD-1, 16px was round-3`);
 });
 
-test('TREE-2b: the trunk CONNECTS to the name (measured, not guessed)', () => {
-    // user 2026-10-09 (2nd report): "the trunk begins on the line below the
-    // model badges and there's a free line next to it" — per-line risers
-    // never bridge the model cell. The tree must paint a connector whose
-    // span is MEASURED in the align pass (name bottom -> first riser top).
+test('TREE-2d: the trunk is painted by the TREE as uniform-colour measured segments', () => {
+    // user 2026-10-09 round 4: "the trunk segments now have a slightly
+    // different colour" — risers drawn by the alias lines inherit the dim
+    // line's opacity .75. Every segment must be a child of the tree.
     const chips = fs.readFileSync(path.join(STATIC_DIR, 'uplift_mmchips.js'), 'utf8');
-    assert.match(chips, /setProperty\('--trunk-top'/, 'align pass must pin the connector top');
-    assert.match(chips, /setProperty\('--trunk-drop'/, 'align pass must pin the connector height');
-    // the connector paints only on visible trees and at the riser x
-    assert.match(CSS, /\.alias-tree:not\(\[hidden\]\)::before \{[\s\S]*?left: -15px; width: 3px/,
-        'connector must share the riser stroke x (line ::before -16px from the PADDING box = 51; -15px from the tree box = the same 51 — -17 sat on the card border and kinked)');
-    // risers chain by measured --riser-top, not a fixed guess
-    assert.match(CSS, /\.alias-line::before \{ content: ""; position: absolute;\s*left: -16px; top: var\(--riser-top, -16px\); bottom: 50%/,
-        'line risers must read --riser-top (measured) with the old -16px as fallback');
-    assert.match(chips, /setProperty\('--riser-top'/,
-        'align pass must chain the risers elbow-to-elbow (alias lines are 2 rows tall; a fixed overdraw leaves a gap)');
-    // base-box expansion moves the tree: the fold pill must re-run the align
-    assert.match(chips.slice(chips.indexOf('more.onclick')), /scheduleFold\(host\);\s*\n\s*\/\/ TREE-2b[\s\S]{0,220}scheduleAlign\(\);/,
-        'expanding the base chip box must re-measure the trunk connector');
+    assert.match(chips, /className = 'trunk-seg'/,
+        'align pass must append .trunk-seg elements to the tree (not ::before on the lines)');
+    assert.match(chips, /querySelectorAll\('\.trunk-seg'\)\) s\.remove\(\)/,
+        're-measure must clear old segments first (align runs on repaint/resize/fold)');
+    assert.doesNotMatch(CSS, /\.alias-line::before \{ content: ""; position: absolute;\s*left: -16px/,
+        'the lines must not draw the wire anymore — per-line risers pick up dim-line opacity');
+    // the badge line is flush with the alias lines (tree 24 − row padding 2)
+    assert.match(CSS, /#model-admin \.mbox \.urow\.admin \.nrow1 \{ padding-left: 22px; \}/,
+        'lamps must slot right of the trunk, flush with the alias lines');
+    // gap under the badges collapses to the 6px alias rhythm
+    assert.match(chips, /lampRow\.getBoundingClientRect\(\)\.bottom \+ 6/,
+        'first alias line must pin to badge-bottom + 6px (same gap as alias-to-alias)');
+    assert.match(chips, /box\.getBoundingClientRect\(\)\.bottom\);/,
+        'the tree must never rise into the settings box (fold-open overlap guard)');
 });
 
 test('TREE-1: a cached profile paint must show the tree (no hidden-until-mutation race)', () => {
