@@ -1,19 +1,26 @@
 name: tests
 
-# CI-1: free ubuntu runner. omlx is not on PyPI and is Apple-Silicon/MLX
-# bound, so it can NEVER be installed here; tests/conftest.py turns the
-# omlx-dependent tests into honest skips (13 as of 2026-10-02) and the
-# rest of the suite runs for real. The full omlx-dependent run stays on
-# the macOS dev box (keg python recipe in README 'Development').
+# CI-1 (slimmed 2026-10-09, user decision): ONE alien-environment check.
+# The suite itself is covered better on the macOS dev box (keg python +
+# real omlx) and by the nightly (CI-3), so the matrix here is minimal:
+# push to main + manual dispatch only (PR trigger dropped — the repo has
+# had zero PRs; tag trigger dropped — the tag rides the just-pushed main
+# commit whose push run already proved it green).
+#
+# What ONLY this workflow catches (no local run can): a FRESH CHECKOUT
+# failing — files committed incomplete, and clean-machine collection
+# errors like ENV-3 (top-level `import omlx` aborting collection where
+# omlx is absent; the keg nightly will never see that).
+# omlx is not on PyPI and is Apple-Silicon-bound, so it can NEVER be
+# installed here; tests/conftest.py turns the omlx-dependent tests into
+# honest skips (13 as of 2026-10-02) and the rest runs for real.
 
 on:
   push:
-    branches: [main, feat/native-bench-chat]
-    # REL-1: a pushed release tag must prove itself — the tagged commit
-    # runs CI too, so `brew install` only ever builds something green.
-    tags: ['v*']
-  pull_request:
+    branches: [main]
   workflow_dispatch:
+# No `pull_request`/`issue_comment` triggers and no ${{ github.event.* }}
+# interpolation anywhere below — nothing untrusted reaches a run: step.
 
 jobs:
   python:
@@ -26,7 +33,7 @@ jobs:
       - name: Install (omlx unresolvable on PyPI — deps minus omlx)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install fastapi "uvicorn" pyyaml pytest pytest-asyncio httpx
+          python -m pip install fastapi uvicorn pyyaml pytest pytest-asyncio httpx
       - name: pytest (omlx-dependent tests skip with reason)
         run: python -m pytest tests -q
 

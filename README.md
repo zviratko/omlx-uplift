@@ -200,7 +200,8 @@ picture and the PATCHES page surfaces the same state.
 ## Development
 
 Tests live in `tests/` (pytest + node:test). CI (`.github/workflows/
-tests.yml`) runs both suites on every push — but `omlx` is not on PyPI
+tests.yml`) runs both suites on every push to `main` as an alien-box
+fresh-checkout smoke — but `omlx` is not on PyPI
 and is Apple-Silicon-bound, so the runner cannot install it: the ~13
 tests that exercise omlx internals SKIP there (conftest.py, reason
 printed per test). The full run needs the macOS dev box and the keg
