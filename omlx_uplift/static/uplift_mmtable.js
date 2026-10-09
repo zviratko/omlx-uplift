@@ -61,6 +61,21 @@ function saveTableSort() {
 }
 
 function stateRank(m) { return m.loaded ? 0 : (m.is_loading ? 1 : 2); }
+/* Optimistic LOADING paint for a click-fired load: swaps the live PRESENT
+   pill for the amber segment (same markup as the server-driven branch) and
+   returns an undo that puts the pill back when the load fails. Honest by
+   construction — the engine IS loading the moment the POST is accepted, so
+   this shows a state the server already holds, not a guess. */
+function paintLoading(sw, title) {
+    const pill = sw.querySelector('.lsw-seg.present');
+    if (!pill) return () => {};
+    const seg = document.createElement('span');
+    seg.className = 'lsw-seg load';
+    seg.textContent = 'LOADING';
+    seg.title = title;
+    pill.replaceWith(seg);
+    return () => { seg.replaceWith(pill); };
+}
 function sortModels(rows) {
     // Match classic dashboard.js semantics (F-027/F-028): favorites pin
     // first regardless of column/direction; name keys are lowercased so
@@ -278,7 +293,17 @@ async function renderModelAdmin(force) {
             const pr = document.createElement('button');
             pr.className = 'lsw-seg present'; pr.textContent = 'PRESENT';
             pr.title = 'On disk, not loaded — click to load';
-            tapBtn(pr, () => MM_GLUE.postModelAction(m.id, 'load'));
+            tapBtn(pr, () => {
+                // The native load POST BLOCKS until the engine is ready and it
+                // runs inside S.trackWrite, so pendingWrites freezes the 8 s
+                // repaint for the whole load: the server's is_loading=true can
+                // never reach the row on a click-fired load. Paint LOADING
+                // optimistically; PRESENT comes back if the load fails, the
+                // forced re-render shows LOADED when it succeeds.
+                const undoLoading = paintLoading(sw, `${m.id} is loading`);
+                return MM_GLUE.postModelAction(m.id, 'load')
+                    .catch(err => { undoLoading(); throw err; });
+            });
             sw.append(pr);
         }
         state.append(sw);
