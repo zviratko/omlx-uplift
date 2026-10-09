@@ -24,6 +24,19 @@ path before re-pointing the ``opt/omlx-dev`` symlink. Absolute shebangs
 baked into ``bin/omlx-dev`` and the libexec venv therefore keep pointing
 at files that exist again at the same address. No sed, no relocate.
 
+LINK-RECORD (user 2026-10-09): brew keeps the "which version is linked"
+state in TWO places — ``opt/<formula>`` AND ``var/homebrew/linked/
+<formula>`` (the linked keg record) plus the real ``bin/`` symlinks.
+activate() used to move only the first, so a rollback left the record
+pointing at the previously brew-LINKED keg. The next ``brew reinstall``
+then died in its link step with ``AlreadyLinkedError`` (keg.rb raises when
+the record exists and its target directory is alive), and ``brew unlink``
+could not clear it: unlink resolves the DEFAULT keg (opt/, the rolled-back
+one) and only removes the record when it belongs to THAT keg. Recovery was
+a manual ``rm var/homebrew/linked/<formula>``. activate() now syncs the
+whole link state itself (sync_brew_link_state) — a keg it activates must
+look to brew exactly like a keg brew linked.
+
 Restarting the service stays user-driven (server_restart_control).
 """
 from __future__ import annotations
@@ -59,6 +72,161 @@ def cellar_dir(formula: str = FORMULA) -> str:
 
 def opt_link(formula: str = FORMULA) -> str:
     return os.path.join(_prefix(), "opt", formula)
+
+
+def linked_record(formula: str = FORMULA) -> str:
+    """brew's linked-keg bookkeeping entry (HOMEBREW_LINKED_KEGS/name).
+    Its mere existence — with a target directory still on disk — makes a
+    `brew reinstall` link step raise AlreadyLinkedError (LINK-RECORD)."""
+    return os.path.join(_prefix(), "var", "homebrew", "linked", formula)
+
+
+# brew only links FILES from these dirs into the prefix (bin/sbin use the
+# :skip_dir policy). omlx-dev's keg footprint is bin/; sbin is covered in
+# case the formula grows one. share/lib/etc are deliberately NOT synced —
+# the unblocked `brew link` handles those if a future build ships them.
+_LINK_SYNC_DIRS = ("bin", "sbin")
+
+
+def sync_brew_link_state(cellar_path: str, formula: str = FORMULA) -> list[str]:
+    """Make brew's own link state match the keg activate() just moved
+    `opt/` to (LINK-RECORD, user 2026-10-09). Two edits:
+
+      1. the linked record var/homebrew/linked/<formula> — re-pointed at
+         cellar_path with a relative symlink, the way brew writes it;
+      2. the prefix bin/sbin symlinks — entries pointing INTO this
+         formula's Cellar family are dropped, then the activated keg's
+         own files are linked in. Entries belonging to other formulae are
+         never touched (a rolled-back omlx-dev must not unlink vanilla
+         omlx's bin/omlx).
+
+    Best-effort: every failure is collected and returned as a problem
+    string (empty list = in sync) — the keg switch itself has already
+    succeeded and must not be reverted over bookkeeping.
+    """
+    problems: list[str] = []
+    prefix = _prefix()
+
+    record = linked_record(formula)
+    try:
+        os.makedirs(os.path.dirname(record), exist_ok=True)
+        if os.path.islink(record) or os.path.exists(record):
+            os.unlink(record)
+        # relpath against RESOLVED dirs: on macOS tmpdirs the parent is
+        # reached through /var -> /private/var; a text-relative link
+        # computed against the unresolved path resolves one level wrong.
+        os.symlink(os.path.relpath(os.path.realpath(cellar_path),
+                                   os.path.realpath(
+                                       os.path.dirname(record))),
+                   record)
+    except OSError as exc:
+        problems.append(f"{record}: {exc} — fix: rm it, then brew link "
+                        f"{formula}")
+
+    cellar_family = os.path.join(os.path.realpath(prefix), "Cellar",
+                                 formula) + os.sep
+    for d in _LINK_SYNC_DIRS:
+        src_dir = os.path.join(cellar_path, d)
+        dst_dir = os.path.join(prefix, d)
+        if not os.path.isdir(src_dir) and not os.path.isdir(dst_dir):
+            continue        # nothing of ours here — don't create empty dirs
+        new_files = ({name for name in os.listdir(src_dir)
+                      if os.path.isfile(os.path.join(src_dir, name))}
+                     if os.path.isdir(src_dir) else set())
+        try:
+            if os.path.isdir(dst_dir):
+                for name in os.listdir(dst_dir):
+                    p = os.path.join(dst_dir, name)
+                    if not os.path.islink(p):
+                        continue
+                    # a brew-written relative link resolves textually;
+                    # compare both raw-resolved and realpath forms so a
+                    # prefix reached through a symlink still matches
+                    fams = (os.path.join(prefix, "Cellar", formula) +
+                            os.sep, cellar_family)
+                    tgt = os.path.normpath(os.path.join(
+                        os.path.dirname(p), os.readlink(p))) \
+                        if not os.path.isabs(os.readlink(p)) \
+                        else os.readlink(p)
+                    if not tgt.startswith(fams) and \
+                       not os.path.realpath(p).startswith(fams):
+                        continue          # other formula's link — hands off
+                    if name not in new_files:
+                        os.unlink(p)      # stale: old keg's entry, gone now
+            if new_files:
+                os.makedirs(dst_dir, exist_ok=True)
+            for name in new_files:
+                p = os.path.join(dst_dir, name)
+                if os.path.islink(p):
+                    os.unlink(p)
+                os.symlink(os.path.relpath(os.path.join(src_dir, name),
+                                           dst_dir), p)
+        except OSError as exc:
+            problems.append(f"{dst_dir}: {exc}")
+    return problems
+
+
+def repair_link_record(formula: str = FORMULA) -> str | None:
+    """LINK-RECORD repair for state this fix did not create: brew's two
+    link-state halves (opt/ keg and var/homebrew/linked record) disagree.
+    Called best-effort before a brew build. Two shapes seen in the wild:
+
+      A. opt/ alive, record alive, different keg — left by a pre-sync
+         `dev use`/`dev rollback`. `brew reinstall` aborts its link step
+         on this (AlreadyLinkedError) and `brew unlink` cannot clear it
+         (it only unlinks the DEFAULT keg). -> re-point the record at the
+         opt keg: brew's reinstall then uninstalls that keg AND its
+         record as one unit, and links the new build cleanly.
+
+      B. opt/ missing/dangling, record alive — left by an upgrade that
+         died in exactly that link step (brew had already uninstalled the
+         old keg; the fresh build sits unlinked). -> adopt the record's
+         keg into opt/: brew sees a consistent install again, and the
+         next reinstall uninstalls it (record included) and links the
+         rebuilt keg.
+
+    Returns a human description when something was repaired, None when
+    already sane (including: no record, dangling record — brew's own
+    checks treat those fine — or no trustworthy target to re-point at).
+    """
+    record = linked_record(formula)
+    if not os.path.islink(record):
+        return None                          # absent or a real dir: brew's
+    act = active_keg(formula)
+    if act:
+        target = os.path.realpath(record)
+        want = os.path.realpath(os.path.join(cellar_dir(formula), act))
+        if target == want:
+            return None                      # consistent
+        old = os.path.basename(target)
+        try:
+            os.unlink(record)
+            os.symlink(os.path.relpath(want, os.path.realpath(
+                os.path.dirname(record))), record)
+        except OSError as exc:
+            return f"repair of {record} FAILED: {exc}"
+        return (f"brew linked-keg record {old!r} -> {act!r}"
+                + ("" if os.path.isdir(target)
+                   else " (old target was already deleted — dangling)"))
+    # shape B: opt/ broken. Adopt the record's keg if it is one of ours
+    rec_target = os.path.realpath(record)
+    cellar_root = os.path.realpath(cellar_dir(formula)) + os.sep
+    name = os.path.basename(rec_target)
+    if (os.path.isdir(rec_target) and name.startswith("HEAD-")
+            and rec_target.startswith(cellar_root)):
+        link = opt_link(formula)
+        try:
+            os.makedirs(os.path.dirname(link), exist_ok=True)
+            if os.path.islink(link) or os.path.exists(link):
+                os.unlink(link)
+            os.symlink(os.path.relpath(rec_target,
+                                       os.path.realpath(
+                                           os.path.dirname(link))), link)
+        except OSError as exc:
+            return f"repair of {link} FAILED: {exc}"
+        return (f"opt/{formula} was missing — re-adopted linked keg "
+                f"{name!r}; the rebuild replaces it normally")
+    return None
 
 
 def kegs_root(root: str | None = None) -> str:
@@ -308,6 +476,11 @@ def activate(name: str, root: str | None = None,
     elif os.path.isdir(link):
         raise RuntimeError(f"{link} is a real directory, not a symlink")
     os.symlink(rel, link)
+    # LINK-RECORD: opt/ alone is NOT brew's link state — the linked keg
+    # record and the prefix bin/ symlinks must follow the keg, or the
+    # next `brew reinstall` dies in AlreadyLinkedError and `brew unlink`
+    # cannot clear it. Advisory: the switch already worked.
+    link_sync = sync_brew_link_state(cellar, formula)
     remounted = False
     try:
         from . import cli
@@ -317,4 +490,5 @@ def activate(name: str, root: str | None = None,
         remounted = False
     return {"name": name, "cellar_name": cellar_name,
             "cellar": cellar, "link": link,
-            "shebang_ok": True, "pth": remounted}
+            "shebang_ok": True, "pth": remounted,
+            "link_sync_problems": link_sync}

@@ -732,6 +732,16 @@ def _dev11_disable_auto_update(via: str) -> bool:
     return True
 
 
+def _warn_link_sync(r: dict) -> None:
+    """LINK-RECORD: activate() keeps brew's link state (var/homebrew/
+    linked record + bin symlinks) in sync with the switched keg. When a
+    sync edit failed, say so — the NEXT `omlx-uplift dev upgrade` would
+    otherwise die in brew's link step with no connection to this run."""
+    for p in (r.get("link_sync_problems") or []):
+        print(f"WARNING: brew link state NOT fully synced ({p})",
+              file=sys.stderr)
+
+
 def cmd_dev(argv=None) -> int:
     """omlx-dev management (DEV queue). Subcommands:
       bootstrap   questionnaire + dev-src clone + dev.json + uplift-dev branch
@@ -924,6 +934,7 @@ def cmd_dev(argv=None) -> int:
         print(f"active keg -> {r['name']} ({r['cellar']})\n"
               f"uplift .pth remounted: {pth_msg}\n"
               "load it with: brew services restart omlx-dev")
+        _warn_link_sync(r)
         return 0
 
     if args.action == "rollback":
@@ -973,6 +984,7 @@ def cmd_dev(argv=None) -> int:
               f"auto-update flag: {'OFF' if off else 'unchanged (no dev.json)'}\n"
               f"uplift .pth remounted: {pth_msg}\n"
               "load it with: brew services restart omlx-dev")
+        _warn_link_sync(r)
         return 0
 
     if args.action == "auto-build":

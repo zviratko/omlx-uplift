@@ -306,6 +306,135 @@ class TestActivate(KegstashTestCase):
         self.assertEqual(r["name"], r0["name"])
 
 
+class TestLinkState(KegstashTestCase):
+    """LINK-RECORD: brew's link state is the var/homebrew/linked record
+    + prefix bin symlinks, not just opt/. activate() must sync all of it,
+    and repair_link_record() must heal drift from pre-fix rollbacks."""
+
+    def _write_record(self, cellar_name):
+        rec = kegstash.linked_record()
+        os.makedirs(os.path.dirname(rec), exist_ok=True)
+        if os.path.islink(rec):
+            os.unlink(rec)
+        # record lives at prefix/var/homebrew/linked — three levels down
+        os.symlink(os.path.join("..", "..", "..", "Cellar", "omlx-dev",
+                                cellar_name), rec)
+        return rec
+
+    def _fake_prefix_bin(self, cellar_name, file="omlx-dev"):
+        binp = os.path.join(self.prefix, "bin")
+        os.makedirs(binp, exist_ok=True)
+        p = os.path.join(binp, file)
+        if os.path.islink(p):
+            os.unlink(p)
+        os.symlink(os.path.join("..", "Cellar", "omlx-dev", cellar_name,
+                                "bin", file), p)
+        return p
+
+    def test_activate_repoints_record_and_bin(self):
+        cellar_a = _make_keg(self.prefix, "HEAD-" + "1" * 8, "1" * 8)
+        self._link_opt("HEAD-" + "1" * 8)
+        r1 = kegstash.stash(root=self.root)
+        shutil.rmtree(cellar_a)
+        _make_keg(self.prefix, "HEAD-" + "2" * 8, "2" * 8)
+        self._link_opt("HEAD-" + "2" * 8)
+        # brew linked keg 2 on install: record + bin point there
+        rec = self._write_record("HEAD-" + "2" * 8)
+        link = self._fake_prefix_bin("HEAD-" + "2" * 8)
+        # activate without the running-pids/shebang stubs is out of
+        # scope here — reuse the real one via TestActivate-style guards
+        old_pids = kegstash.running_pids
+        kegstash.running_pids = lambda formula="omlx-dev": []
+        self.addCleanup(setattr, kegstash, "running_pids", old_pids)
+        from omlx_uplift import cli
+        old_mount = cli._mount_into_dev_keg
+        cli._mount_into_dev_keg = lambda: True
+        self.addCleanup(setattr, cli, "_mount_into_dev_keg", old_mount)
+
+        r = kegstash.activate(r1["name"], root=self.root)
+        self.assertEqual(r["link_sync_problems"], [])
+        self.assertEqual(os.path.realpath(rec), os.path.realpath(cellar_a))
+        self.assertEqual(os.path.realpath(link),
+                         os.path.realpath(os.path.join(cellar_a, "bin",
+                                                       "omlx-dev")))
+
+    def test_sync_drops_stale_entries_keeps_other_formulae(self):
+        cellar = _make_keg(self.prefix, "HEAD-" + "7" * 8, "7" * 8)
+        # other formula's bin link must survive untouched
+        other = os.path.join(self.prefix, "bin")
+        os.makedirs(other, exist_ok=True)
+        os.makedirs(os.path.join(self.prefix, "Cellar", "omlx",
+                                 "HEAD-9999999", "bin"), exist_ok=True)
+        open(os.path.join(self.prefix, "Cellar", "omlx", "HEAD-9999999",
+                          "bin", "omlx"), "w").close()
+        p_other = os.path.join(other, "omlx")
+        os.symlink(os.path.join("..", "Cellar", "omlx", "HEAD-9999999",
+                                "bin", "omlx"), p_other)
+        # stale: our family, but the file no longer exists in cellar
+        p_stale = self._fake_prefix_bin("HEAD-" + "7" * 8, file="gone-bin")
+        problems = kegstash.sync_brew_link_state(cellar)
+        self.assertEqual(problems, [])
+        self.assertTrue(os.path.islink(p_other))
+        self.assertFalse(os.path.lexists(p_stale))
+        # and the activated keg's own bin is linked in
+        self.assertEqual(os.path.realpath(os.path.join(other, "omlx-dev")),
+                         os.path.realpath(os.path.join(cellar, "bin",
+                                                       "omlx-dev")))
+
+    def test_repair_record_drift_and_dangling(self):
+        _make_keg(self.prefix, "HEAD-" + "8" * 8, "8" * 8)
+        self._link_opt("HEAD-" + "8" * 8)
+        # consistent: repair is a no-op
+        rec = self._write_record("HEAD-" + "8" * 8)
+        self.assertIsNone(kegstash.repair_link_record())
+        # stale record pointing at a DIFFERENT live keg (mruu case)
+        _make_keg(self.prefix, "HEAD-" + "9" * 8, "9" * 8)
+        self._write_record("HEAD-" + "9" * 8)
+        msg = kegstash.repair_link_record()
+        self.assertIsNotNone(msg)
+        self.assertEqual(os.path.realpath(rec),
+                         os.path.realpath(os.path.join(
+                             self.prefix, "Cellar", "omlx-dev",
+                             "HEAD-" + "8" * 8)))
+        # dangling record (target keg already deleted)
+        shutil.rmtree(os.path.join(self.prefix, "Cellar", "omlx-dev",
+                                   "HEAD-" + "9" * 8))
+        self._write_record("HEAD-" + "9" * 8)
+        msg = kegstash.repair_link_record()
+        self.assertIn("dangling", msg)
+        # no record at all: nothing to repair, nothing created
+        os.unlink(rec)
+        self.assertIsNone(kegstash.repair_link_record())
+        self.assertFalse(os.path.lexists(rec))
+
+    def test_repair_adopts_record_keg_when_opt_missing(self):
+        """Shape B (the mruu failure state): the failed reinstall left no
+        opt/omlx-dev at all while the record still points at a live keg —
+        repair must re-adopt that keg so brew sees a consistent install."""
+        cellar = _make_keg(self.prefix, "HEAD-" + "6" * 8, "6" * 8)
+        self._write_record("HEAD-" + "6" * 8)
+        link = kegstash.opt_link()
+        self.assertFalse(os.path.lexists(link))
+        msg = kegstash.repair_link_record()
+        self.assertIsNotNone(msg)
+        self.assertIn("re-adopted", msg)
+        self.assertEqual(os.path.realpath(link), os.path.realpath(cellar))
+        # and now opt/ and the record agree — second pass is a no-op
+        self.assertIsNone(kegstash.repair_link_record())
+
+    def test_repair_leaves_foreign_or_dangling_record_alone(self):
+        # dangling record (target keg gone) + no opt keg: nothing to adopt
+        rec = self._write_record("HEAD-" + "0" * 8)
+        self.assertIsNone(kegstash.repair_link_record())
+        self.assertTrue(os.path.islink(rec))   # untouched
+        # record pointing OUTSIDE our Cellar family: hands off
+        foreign = os.path.join(self.prefix, "Cellar", "other", "v1")
+        os.makedirs(foreign, exist_ok=True)
+        os.unlink(rec)
+        os.symlink(os.path.relpath(foreign, os.path.dirname(rec)), rec)
+        self.assertIsNone(kegstash.repair_link_record())
+
+
 class TestCliSurface(unittest.TestCase):
     def test_dev_actions_advertised(self):
         from omlx_uplift import help as helpmod

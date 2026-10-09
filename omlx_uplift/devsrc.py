@@ -1147,6 +1147,18 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     # formula, so lift it for this one rebuild and restore it afterwards —
     # on success AND on failure (the pin must never silently disappear)
     subprocess.run(["brew", "unpin", "omlx-dev"], capture_output=True)
+    # LINK-RECORD: heal a brew linked-keg record left pointing at another
+    # keg (stale after `dev use`/`rollback`, or dangling) — `brew
+    # reinstall` aborts its link step on it and `brew unlink` cannot
+    # clear it. Best-effort: must never block the rebuild.
+    try:
+        from . import kegstash
+
+        healed = kegstash.repair_link_record()
+        if healed:
+            _emit(res, "out", f"self-heal: {healed}")
+    except Exception as exc:
+        _emit(res, "err", f"link-record repair skipped: {exc}")
     _emit(res, "out", "running: " + " ".join(cmd))
     # --quiet skips brew's caveats entirely (formula_installer: return if
     # quiet?) — the restart hint we print after RESULT replaces them
