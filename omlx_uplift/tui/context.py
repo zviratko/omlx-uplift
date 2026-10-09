@@ -18,7 +18,13 @@ from __future__ import annotations
 import io
 import os
 import subprocess
+import time as _time
 from contextlib import redirect_stderr, redirect_stdout
+
+# launchd labels behind the two brew services. `launchctl list <label>`
+# answers in ~5 ms; `brew services list` costs ~450 ms because it boots a
+# Ruby launcher just to ask the same question (TUI-3 perf work).
+_LAUNCHD = {"omlx": "sh.brew.omlx", "omlx-dev": "sh.brew.omlx-dev"}
 
 
 class Context:
@@ -42,6 +48,56 @@ class Context:
         self._lines: list[str] = []
         self._runner = runner          # tests inject a fake command runner
         self.on_process = on_process   # app hook: remember the child (Ctrl-C)
+        # TUI-3: display state (service liveness, git carrier status, mount
+        # probe) is TTL-cached. These are cosmetic seconds-level staleness
+        # at worst and the auto-refresh + 'n' + every action invalidate —
+        # what is NEVER cached is the patch manifest itself (patches_view
+        # re-reads every build), because that is the security-relevant state
+        # the original rule protected.
+        self._cache: dict = {}
+
+    # ----------------------------------------------------------------- cache --
+    def _cached(self, name: str, ttl: float, producer, force: bool = False,
+                empty=None):
+        """TTL memo (TUI-3). A failed producer replays the last good value;
+        with no value yet it returns `empty` — the collector's neutral shape.
+        Callers iterate these results, and an error dict where a list belongs
+        would crash the very repaint this cache exists to protect."""
+        now = _time.monotonic()
+        hit = self._cache.get(name)
+        if hit is not None and not force and now - hit[0] < ttl:
+            return hit[1]
+        try:
+            val = producer()
+        except Exception:                       # a dead probe must not kill
+            if hit is not None:                 # the repaint: the last good
+                return hit[1]                   # value beats a traceback
+            return [] if empty is None else empty
+        self._cache[name] = (now, val)
+        return val
+
+    def pulse(self, want_catalog: bool = False) -> None:
+        """Refresh every TTL-expired display collector. The App runs this on
+        a background thread (TUI-3) so the UI thread's build() is only ever
+        a cache read: a repaint cannot block on brew, git or the network.
+        The catalog is a GitHub fetch, so it is warmed ONLY while the
+        catalog panel is on screen — a terminal left open overnight must
+        not poll the API forever.
+        Thread-safety: producers only replace whole cache entries and re-open
+        their own files — no partial mutation is ever visible."""
+        self.services()
+        self.dev_summary()
+        self.pth_missing()
+        if want_catalog:
+            self.catalog()
+
+    def invalidate(self, *names: str) -> None:
+        """Drop cached display state. Called after every action and on 'n'."""
+        if not names:
+            self._cache.clear()
+            return
+        for n in names:
+            self._cache.pop(n, None)
 
     # ------------------------------------------------------------- plumbing --
     @property
@@ -183,7 +239,15 @@ class Context:
                                   "cannot see omlx"}
         return self.patchsource.view(self.store, self.tree_root, self.keg())
 
-    def catalog(self) -> dict:
+    def catalog(self, force: bool = False) -> dict:
+        """The curated listing is a network fetch, so it is cached longer
+        than anything else and only a sync/'n' forces a re-read."""
+        return self._cached(
+            "catalog", self._CATALOG_TTL, self._catalog_now, force=force,
+            empty={"ok": False, "tiers": {},
+                   "reason": "catalog collector failed"})
+
+    def _catalog_now(self) -> dict:
         try:
             res = self.curated.list_remote()
         except Exception as exc:
@@ -202,7 +266,15 @@ class Context:
             pass                                # a listing is still useful
         return res
 
-    def dev_summary(self) -> dict:
+    def dev_summary(self, force: bool = False) -> dict:
+        """TTL-cached view of the omlx-dev carrier (git subprocess ~150 ms).
+        force=True re-reads — used by 'n' and after dev actions."""
+        return self._cached("dev", self._DEV_TTL, self._dev_summary_now,
+                            force=force,
+                            empty={"installed": False,
+                                   "reason": "dev collector failed"})
+
+    def _dev_summary_now(self) -> dict:
         cfg = self.devsrc.load_config()
         if not cfg:
             return {"installed": False,
@@ -277,7 +349,12 @@ class Context:
         """True when the active dev keg has no uplift .pth — the shape that
         produces a dashboard full of 404s after a keg switch. Deliberately a
         file check, not cli._verify_mount's import probe: a repaint must never
-        block for seconds."""
+        block for seconds. TTL-cached (TUI-3): resolving the formula python
+        costs ~100 ms and the mount only changes when something reinstalls."""
+        return self._cached("pth", self._PTH_TTL, self._pth_missing_now,
+                            empty=False)
+
+    def _pth_missing_now(self) -> bool:
         try:
             from .. import brewutil
 
@@ -291,14 +368,29 @@ class Context:
         except Exception:
             return False
 
+    _SERVICES_TTL = 2.5     # seconds; the auto-refresh cycle is 5, so a
+                            # repaint never pays for the probe twice, and a
+                            # service start shows up on the next cycle
+    _DEV_TTL = 6.0          # git status of the dev carrier: ~150 ms a read
+    _CATALOG_TTL = 30.0     # network listing; 'n' and sync force a refresh
+    _PTH_TTL = 10.0         # file probe, cheap-ish (a brew python resolve)
+
     def services(self) -> list[dict]:
         """Both formulae the operator can restart, each with its port and how
-        many enabled patches its tree currently carries."""
+        many enabled patches its tree currently carries. The whole row set is
+        TTL-cached (TUI-3): every screen quotes it and the answer changes on
+        the order of minutes, not repaints."""
+        return self._cached("services", self._SERVICES_TTL,
+                            self._services_now, empty=[])
+
+    def _services_now(self) -> list[dict]:
         cfg = self.devsrc.load_config() or {}
-        # one table for both rows: `brew services list` costs ~0.5 s, and the
-        # screen rebuilds every few seconds — parsing it twice would double the
-        # cost for the same answer and make the UI feel laggy over ssh
-        table = self._service_table()
+        # launchctl knows whether the service is loaded and running in ~5 ms
+        # per label; `brew services list` pays ~450 ms (Ruby) for the same
+        # answer and used to dominate every repaint. The launchd labels are
+        # exactly the ones brew's own services command manages.
+        states = {f: self._launchd_state(lbl)
+                  for f, lbl in _LAUNCHD.items()}
         rows = []
         for formula, keg_scope in (("omlx", True), ("omlx-dev", False)):
             keg = None
@@ -311,13 +403,37 @@ class Context:
             rows.append({
                 "formula": formula,
                 "label": formula,
-                "state": table.get(formula, ""),
+                "state": states.get(formula, ""),
                 "port": (self.vanilla_port() if formula == "omlx"
                          else cfg.get("port", 8001)),
                 "keg": cellar,
                 "patched": self._applied_count(keg_scope),
             })
         return rows
+
+    _probe = staticmethod(subprocess.run)   # tests swap this; not _runner,
+                                            # which belongs to op commands
+
+    @classmethod
+    def _launchd_state(cls, label: str) -> str:
+        """'started' when launchd reports a live PID, 'stopped' when the job
+        is loaded without one, '' when the label does not exist (brew
+        services can run it as a plain job — build_root-style installs)."""
+        try:
+            res = cls._probe(["launchctl", "list", label],
+                             capture_output=True, text=True, timeout=5)
+            rc, out = res.returncode, (res.stdout or "")
+        except (OSError, subprocess.TimeoutExpired, AttributeError):
+            # AttributeError included deliberately: a malformed result object
+            # must degrade to 'unknown', not propagate — services() has no
+            # error shape that callers can render
+            return "unknown"
+        if rc != 0:
+            return ""
+        out = res.stdout or ""
+        if "\"PID\"" in out:
+            return "started"
+        return "stopped" if "Label" in out else ""
 
     def vanilla_port(self) -> int:
         """The port the vanilla server actually binds: omlx reads

@@ -23,6 +23,11 @@ from .context import Context
 
 REFRESH_SECS = 5.0      # the dashboard, a boot reconcile or another terminal
                         # can change the store while we sit here looking at it
+PULSE_SECS = 1.5        # background collector tick (TUI-3): keeps the TTL
+                        # caches warm OFF the UI thread. A service start shows
+                        # within a pulse + repaint cycle (~6 s worst case),
+                        # which is the same latency the old synchronous
+                        # refresh gave — without the per-frame freeze.
 YES_PROMPT_SUFFIX = "(type YES, then enter)"
 
 HELP_LINES = [
@@ -77,6 +82,11 @@ class App:
         self.yes_line = ""
         self.worker: threading.Thread | None = None
         self.results: queue.Queue = queue.Queue()
+        # TUI-3: display collectors run on a background pulse thread so the
+        # UI thread's build() is always a cache read. _pulse_now = 'probe
+        # again on the next tick regardless of TTL' (set by 'n' and after an
+        # action finishes); the loop reads it, clears it, calls ctx.pulse().
+        self._pulse_now = False
         self.proc = None
         self.proc_lock = threading.Lock()
         self.last_build = 0.0
@@ -111,6 +121,32 @@ class App:
         label = themes.theme(self.theme_name)["label"]
         self.ctx.log(f"theme -> {self.theme_name} ({label})")
         return self.theme_name
+
+    # ------------------------------------------------------------- pulse ----
+    def start_pulse(self) -> None:
+        """Background collector thread (TUI-3). Touches ONLY the context's
+        TTL caches and the _pulse_now flag — never a Screen — so it cannot
+        race with a paint. Exceptions inside a probe are swallowed there
+        (ctx._cached returns the last good value); a dead thread would mean
+        a UI that silently stops updating, so the loop itself keeps running
+        whatever one tick does."""
+        def loop():
+            while self.running:
+                force, self._pulse_now = self._pulse_now, False
+                if force:
+                    self.ctx.invalidate()
+                try:
+                    self.ctx.pulse(want_catalog=(self.current == "catalog"))
+                except Exception:
+                    pass
+                # wake early when the UI asks for an immediate re-probe
+                end = time.monotonic() + PULSE_SECS
+                while self.running and time.monotonic() < end \
+                        and not self._pulse_now:
+                    time.sleep(0.1)
+        self.pulse_thread = threading.Thread(target=loop, daemon=True,
+                                             name="uplift-tui-pulse")
+        self.pulse_thread.start()
 
     # ------------------------------------------------------- child tracking --
     def _note_process(self, proc) -> None:
@@ -220,10 +256,10 @@ class App:
         return self.actions_for is not None
 
     def refresh_if_stale(self) -> None:
-        """Re-read state between actions. The catalog screen costs a network
-        fetch, so it only refreshes on 'n'."""
+        """TUI-3: collectors refresh on the pulse thread, so a rebuild here
+        is a cache read (~1 ms). We still rebuild only once per REFRESH_SECS
+        to keep repaint churn (and mouse-window resets) down."""
         if (not self.pending and not self.busy
-                and self.current != "catalog"
                 and time.monotonic() - self.last_build > REFRESH_SECS):
             self.build()
 
@@ -322,6 +358,8 @@ class App:
             self.goto(model.SCREEN_KEYS[key])
             return
         if key in ("n", "f5"):
+            self.ctx.invalidate()        # drop display caches…
+            self._pulse_now = True       # …and re-probe on the pulse NOW
             self.build()
             self.notice = ""
             return
@@ -492,6 +530,9 @@ class App:
         for line in model.result_lines(res):
             self.ctx.log(f"   {line}")
         self.notice = ("done: " if ok else "FAILED: ") + op.label
+        self.ctx.invalidate()     # an action changed state the caches may
+                                  # still be showing — re-probe, don't wait
+        self._pulse_now = True
         if self.in_actions:
             self.close_actions()   # the list re-reads; the result is on it
         else:
@@ -562,6 +603,7 @@ def run_tui(argv=None) -> int:
               file=sys.stderr)
         return 2
     app = App()
+    app.start_pulse()
     try:
         return curses.wrapper(_curses_loop, app)
     except Exception as exc:                    # curses.wrapper already
@@ -661,7 +703,11 @@ def _curses_loop(stdscr, app) -> int:
         stdscr.bkgd(" ", app.theme_info.get("ground", 0))
     except curses.error:
         pass                            # no colour capability: plain ground
-    stdscr.nodelay(True)
+    # timeout() instead of nodelay()+sleep: getch returns within one tick
+    # of a key landing instead of after up to a 50 ms sleep, which is what
+    # made typing feel distant (TUI-3). 60 ms is short enough to feel
+    # instant, long enough that an idle loop costs nothing measurable.
+    stdscr.timeout(60)
     stdscr.keypad(True)
     # mouse reporting is a convenience; a minimal ncurses build may not
     # expose it at all (AttributeError, not curses.error) and that must not
@@ -675,6 +721,7 @@ def _curses_loop(stdscr, app) -> int:
 
     last_paint = 0.0
     size = (0, 0)
+    dirty = True                  # paint at once: boot must not wait 150 ms
     while app.running:
         app.drain()
         app.refresh_if_stale()
@@ -682,24 +729,30 @@ def _curses_loop(stdscr, app) -> int:
         if app.theme_dirty:
             _apply_theme(curses, app)
             app.theme_dirty = False
-        if time.monotonic() - last_paint > 0.15 or size != (rows, cols):
+        # A key repaints immediately (the operator must SEE the effect of
+        # what they pressed); background work (drain, pulse-triggered
+        # refresh) is throttled to ~6 Hz so a busy store never turns the
+        # loop into a paint storm over ssh.
+        if dirty or size != (rows, cols) or time.monotonic() - last_paint > 0.15:
             _paint(stdscr, app, rows, cols)
             last_paint = time.monotonic()
             size = (rows, cols)
+            dirty = False
 
         try:
             ch = stdscr.getch()
         except curses.error:
             ch = -1
         if ch == -1:
-            time.sleep(0.05)
-            continue
+            continue                      # getch already waited up to 60 ms
         name = _key_name(ch)
         if name == "mouse":
             _click(stdscr, app, rows)
+            dirty = True
             continue
         if name in (None, "resize", "ctrl_b"):
             continue
+        dirty = True                      # any real key answers at once
         if name == "ctrl_c":
             app.ctx.log(app.cancel())
             app.notice = "cancel requested"
