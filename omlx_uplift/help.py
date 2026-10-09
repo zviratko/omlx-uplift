@@ -55,8 +55,10 @@ COMMAND_USAGE = {
     "patch": ("omlx-uplift patch status|apply|check|disable-all\n"
               "                 patch add ID (--pr R/N | --url U | --file F)"
               " [--scope omlx|dev|both]\n"
+              "                 patch update ID [--file F | --pr R/N | --url U]\n"
               "                 patch enable|disable ID [--approve"
               " once|always]\n"
+              "                 patch approve ID [--approve once|always]\n"
               "                 patch remove ID\n"
               "                 ('patches' is accepted as a legacy alias)"),
     "kernel": ("omlx-uplift kernel list\n"

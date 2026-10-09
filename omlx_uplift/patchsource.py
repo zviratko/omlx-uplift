@@ -502,12 +502,21 @@ def _add_adopt(store, manifest, patch, creating: bool, patch_id: str,
 
 
 def _add_transition(store, manifest, patch, patch_id: str, version: dict,
-                    result: dict, held: list) -> PatchOpResult:
+                    result: dict, held: list,
+                    creating: bool = False) -> PatchOpResult:
     """STATE phase: what the stored version means for the patch now
     (validated-not-enabled / awaiting approval / update candidate /
     pending-new)."""
     v = version["v"]
-    if patch["state"] in ("disabled",) and not patch.get("enabled"):
+    if creating and not held:
+        # user policy 2026-10-09: a NEW patch that applies cleanly lands
+        # ENABLED (pending + enabled = the next reconcile applies it — the
+        # same verdict the ADOPT path gives hand-patched trees). The old
+        # flow left every fresh add disabled behind a manual Enable click.
+        store.set_state(patch, "pending", f"v{v} validated, awaiting restart")
+        patch["enabled"] = True
+        patch["desired_version"] = v
+    elif patch["state"] in ("disabled",) and not patch.get("enabled"):
         patch["state_detail"] = ("validated, safeguards need approval" if held
                                  else "validated, not enabled")
     elif held:
@@ -629,7 +638,7 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
     if adopt is not None:
         return adopt.render()
     return _add_transition(store, manifest, patch, patch_id, version,
-                           result, held).render()
+                           result, held, creating=creating).render()
 
 
 def _desired_version_entry(store, patch) -> dict | None:
@@ -889,6 +898,44 @@ def set_enabled(store, patch_id: str, enabled: bool,
     return {"ok": True, "state": p["state"], "approved": approved_now}
 
 
+def approve(store, patch_id: str, mode: str = "once") -> dict:
+    """Record a safeguard approval WITHOUT enabling the patch (CLI parity
+    with the dashboard's approve-then-enable flow). 'mode' is 'once' (bound
+    to the desired version's exact content sha) or 'always' (covers the
+    same codes on future versions). The approval targets the desired
+    version, falling back to the newest stored candidate — the same
+    version Enable would have to approve. Reconcile still owns the apply;
+    this only unblocks it."""
+    if mode not in ("once", "always"):
+        return {"ok": False,
+                "reason": "approve needs --approve once|always"}
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None:
+        return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
+    if not p.get("versions"):
+        return {"ok": False, "reason": "no validated version — add a source first"}
+    target_v = p.get("desired_version") or max(
+        (v.get("v", 0) for v in p["versions"]), default=0)
+    desired = store.get_version(p, target_v) or {}
+    held = _safeguards.held((desired.get("safeguards") or {}).get("codes", []),
+                            p.get("safeguard_always"), p.get("safeguard_once"),
+                            desired.get("content_sha256"))
+    ok, approved, err = _apply_approval(p, desired, mode)
+    if not ok:
+        return err
+    if p.get("state") == "pending" and not p.get("enabled"):
+        p["state_detail"] = (f"approved ({mode}) — enable to apply on "
+                             "next restart")
+    store.save(manifest)
+    out = {"ok": True, "state": p["state"],
+           "enabled": bool(p.get("enabled")),
+           "approved": approved, "version": target_v}
+    if not held:
+        out["note"] = "no safeguards were held for this version"
+    return out
+
+
 def promote(store, patch_id: str, approve: str | None = None) -> dict:
     """Accept the newest validated candidate as desired; on-disk stays until
     the next reconcile (restart). A candidate whose safeguards are not yet
@@ -1094,14 +1141,18 @@ def _pr_merged_into_base(src: dict, diff_bytes: bytes | None,
         return None
 
 
-def check_all(store, tree_root: str) -> dict:
+def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
     """Re-fetch every github_pr/url source — ENABLED AND DISABLED alike.
     A user who disabled a broken patch still wants to know when upstream
     fixes it (an update_available chip is the cue to re-enable). Changed
     content becomes a validated CANDIDATE version (state=update_available).
     Errors are per-patch display-only, never state-degrading (fail-safe
     rule). Disabled patches only ever get the candidate stored — nothing
-    auto-applies to the tree for them (apply stays an enabled-patch act)."""
+    auto-applies to the tree for them (apply stays an enabled-patch act).
+
+    dev_root: override for the source-checkout gate root (the dev build
+    passes the pristine base worktree, so a candidate gates against the
+    tree materialize will cut from; default: dev_build_root())."""
     manifest = store.load()
     reports = {}
     changed_any = False
@@ -1110,11 +1161,15 @@ def check_all(store, tree_root: str) -> dict:
         pid = p.get("id")
         if src.get("kind") not in ("github_pr", "url"):
             continue
-        root, overrides, skip, kind = _gate_root_selection(store, manifest, p, tree_root)
+        root, overrides, skip, kind = _gate_root_selection(
+            store, manifest, p, tree_root, dev_root=dev_root)
         if not root:
-            reports[pid] = {"check": "error",
-                            "reason": "dev-src checkout not found — "
-                                      "cannot re-gate a dev patch"}
+            scope = _patches.patch_scope(p)
+            reports[pid] = {
+                "check": "error",
+                "reason": ("dev-src checkout not found — cannot re-gate a "
+                           "dev patch") if _patches.scope_touches_dev(scope)
+                else "no omlx tree found — cannot re-gate a runtime patch"}
             continue
         result = fetch_and_gate(src, root, overrides=overrides,
                                 reverse=bool(p.get("reversal")),
@@ -1201,7 +1256,7 @@ def check_all(store, tree_root: str) -> dict:
         # first gate in this loop, and nothing reassigned `result` since.)
         # BE-3 step 2 behavior fix: drift candidates now carry the SAME
         # schema as add_patch (safeguards/root_note were silently dropped).
-        if _patches.patch_scope(p) == _patches.SCOPE_BOTH:
+        if _patches.patch_scope(p) == _patches.SCOPE_BOTH and tree_root:
             # a drifted 'both' candidate stores the SRC-gate report; the
             # keg overlay has its own real hazard (custom_kernels/*.py
             # wrapper landing next to stale compiled artifacts). Re-run
@@ -1225,7 +1280,25 @@ def check_all(store, tree_root: str) -> dict:
         version = _store_version(store, p, result)
         v = version["v"]
         store.set_state(p, "update_available", f"v{v} available from source")
-        reports[pid] = {"check": "update_available", "v": v}
+        promoted = False
+        if (p.get("enabled") and p.get("curated")
+                and not p.get("curated_adopted")):
+            # user policy 2026-10-09: a BUNDLED (catalog-owned, not adopted)
+            # patch tracks its catalog version. A validated candidate that
+            # raises no NEW safeguard hold is promoted automatically —
+            # the catalog selected the patch and its upgrade, the human
+            # decision was made at publish time. Adopted and user patches
+            # still wait for the manual Promote.
+            codes = (version.get("safeguards") or {}).get("codes") or []
+            if not _safeguards.held(codes, p.get("safeguard_always"),
+                                    p.get("safeguard_once"), sha):
+                p["desired_version"] = v
+                store.set_state(p, "pending",
+                                f"curated v{v} auto-promoted — applies on "
+                                "next restart")
+                promoted = True
+        reports[pid] = {"check": "update_available", "v": v,
+                        "promoted": promoted}
         changed_any = True
     if changed_any:
         store.save(manifest)

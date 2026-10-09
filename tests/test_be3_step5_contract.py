@@ -66,8 +66,10 @@ class AddPatchContractTests(unittest.TestCase):
     def test_unchanged_verdict_keyset(self):
         self._upload(PR3764)
         r = self._upload(PR3764)
+        # a clean add now lands pending+enabled (2026-10-09 policy) — the
+        # unchanged re-add reports the patch's CURRENT state
         self.assertEqual(r, {"ok": True, "unchanged": True, "v": 1,
-                             "state": "disabled", "advisories": []})
+                             "state": "pending", "advisories": []})
 
     def test_only_one_response_shape_remains(self):
         """Source census: inside the add_patch pipeline no ad-hoc verdict

@@ -128,8 +128,10 @@ class GateAndAdoptTests(TempTree):
         m = self.store.load()
         p = self.store.find(m, "undo-3764")
         self.assertTrue(p["reversal"])
-        # same lifecycle as a forward patch: stored, disabled until Enable
-        self.assertFalse(p["enabled"])
+        # same lifecycle as a forward patch: a clean gate lands
+        # enabled+pending (2026-10-09 policy) — the revert itself still
+        # waits for reconcile (restart)
+        self.assertTrue(p["enabled"])
         # nothing written yet — the revert happens at reconcile (restart)
         with open(self.target(), "rb") as fh:
             self.assertEqual(fh.read(), merged)

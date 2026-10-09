@@ -321,6 +321,22 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                                    "reason": en.get("reason")}
                     notes.append(f"{pid}: {en.get('reason')}")
             else:
+                # optional tier (and a re-scoped patch the user had
+                # disabled): a clean new add now lands ENABLED by default
+                # (user policy 2026-10-09) — the catalog contract says
+                # optional installs DISABLED, so put it back with an
+                # honest detail (never applied -> 'restores' wording from
+                # set_enabled would lie). add_patch saved already; reload,
+                # mutate, save (store-write ordering rule).
+                if p is not None and p.get("enabled"):
+                    manifest = store.load()
+                    q = store.find(manifest, add_id)
+                    if q is not None:
+                        q["enabled"] = False
+                        q["state"] = "disabled"
+                        q["state_detail"] = ("installed from catalog "
+                                             "(optional tier) — not enabled")
+                        store.save(manifest)
                 report[pid] = {"sync": "added_disabled"}
             # annotation LAST: set_enabled saves its own manifest reload —
             # writing description/curated before it would be lost

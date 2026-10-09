@@ -897,25 +897,11 @@ def run_dev_build(*, with_custom_kernel: bool = False,
         res.stage, res.returncode = "fetch", 1
         return res
 
-    # curated catalog: first dev build on this machine surfaces the
-    # published patch set (default tier installs enabled, optional
-    # disabled). Best-effort: a dead network must never block a build.
-    try:
-        from . import curated as _curated
-        crt = _patches_mod.PatchStore().load()
-        if not any(p.get("curated") for p in crt.get("patches", [])):
-            root = _patches_mod._omlx_root()
-            if root:
-                cs = _curated.sync(_patches_mod.PatchStore(),
-                                   os.path.dirname(root), build_root=path)
-                fresh = [k for k, v in cs["report"].items()
-                         if str(v.get("sync", "")).startswith("added")]
-                if fresh:
-                    _emit(res, "out", "curated: " + ", ".join(sorted(fresh)) +
-                          " (default tier enabled — see omlx-uplift patch "
-                          "curated)")
-    except Exception as exc:                    # noqa: BLE001 — best-effort
-        _emit(res, "err", f"curated sync skipped: {exc}")
+    # source refresh BEFORE collecting build patches (user policy
+    # 2026-10-09): curated catalog (every build, not only a first one) +
+    # drift check; an auto-promoted curated candidate must be part of
+    # THIS build. Best-effort: a dead network never blocks a build.
+    _refresh_patch_sources(cfg, res)
 
     build_patches = patchsource.enabled_build_patches(
         _patches_mod.PatchStore())
@@ -940,6 +926,107 @@ def run_dev_build(*, with_custom_kernel: bool = False,
     finally:
         _root.removeHandler(_ph)
         _ph.close()
+
+
+def _vanilla_keg_site_packages() -> str | None:
+    """site-packages of the VANILLA omlx keg (the runtime overlay tree),
+    or None. The dev-build paths run inside the omlx-dev interpreter,
+    where importing omlx resolves to the dev keg — asking IT for a root
+    would gate overlays against patched dev source. probe via subprocess
+    so the current process never imports the wrong omlx; a machine with
+    no vanilla keg gets None (the runtime half is simply skipped)."""
+    import os as _os
+    import subprocess
+
+    from . import brewutil
+    from . import patches as _patches_mod
+
+    root = _patches_mod._omlx_root()
+    if root and "omlx-dev" not in _os.path.normpath(root):
+        return _os.path.dirname(root)
+    py = brewutil.brew_formula_python("omlx")
+    if not py:
+        return None
+    try:
+        out = subprocess.run(
+            [str(py), "-c",
+             "import omlx, os; print(os.path.dirname(os.path.dirname(omlx.__file__)))"],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    cand = out.stdout.strip()
+    return cand if out.returncode == 0 and _os.path.isdir(cand) else None
+
+
+def _refresh_patch_sources(cfg: dict, res) -> dict:
+    """One source refresh before a dev build (user policy 2026-10-09):
+
+    1. curated catalog sync — previously ran only when the store carried
+       ZERO curated patches, so a published NEW VERSION of a bundled patch
+       never reached the machine ('already_present' forever). Now every
+       build runs it (network best-effort: any failure logs and the build
+       continues; the store stays authoritative).
+    2. drift check over github_pr/url sources against the CLEAN base
+       checkout. For catalog-owned (not adopted) patches a validated
+       candidate with no new safeguard hold auto-promotes inside
+       check_all; user patches only light the update_available chip.
+
+    Without a vanilla keg on this machine even step 1 runs: add_patch
+    falls back to the dev carrier when a keg gate errors (tree_root=''
+    fails the gate, not the add — a scope=omlx catalog entry then reports
+    a gate failure and the store is untouched)."""
+    import tempfile
+
+    from . import patchsource
+    from . import patches as _patches_mod
+
+    summary = {"catalog": None, "drift": None}
+    store = _patches_mod.PatchStore()
+    keg_sp = _vanilla_keg_site_packages() or ""
+    try:
+        from . import curated as _curated
+
+        cs = _curated.sync(store, keg_sp, build_root=src_path(cfg))
+        summary["catalog"] = cs
+        changed = [k for k, v in cs["report"].items()
+                   if not str(v.get("sync", "")).endswith("already_present")
+                   and not str(v.get("sync", "")).startswith("skipped")]
+        if changed:
+            _emit(res, "out", "curated: " + ", ".join(sorted(changed))
+                  + (" — store updated" if cs.get("ok") else " (sync had errors)"))
+        for note in cs.get("notes", []):
+            _log.info("curated sync note: %s", note)
+    except Exception as exc:                    # noqa: BLE001 — best-effort
+        _emit(res, "err", f"curated sync skipped: {exc}")
+    tmp = None
+    try:
+        tmp = tempfile.mkdtemp(prefix="uplift-drift-")
+        wt = detached_base_worktree(cfg, tmp)
+        dr = patchsource.check_all(store, keg_sp, dev_root=wt)
+        summary["drift"] = dr
+        for pid, rep in (dr.get("reports") or {}).items():
+            if rep.get("check") == "update_available" and rep.get("promoted"):
+                _emit(res, "out", f"{pid}: curated update v{rep['v']} "
+                                  "auto-promoted — materialized in this build")
+            elif rep.get("check") == "update_available":
+                _emit(res, "out", f"{pid}: update v{rep['v']} available "
+                                  "(Promote in the dashboard to adopt)")
+            elif rep.get("check") == "obsolete":
+                _emit(res, "out", f"{pid}: upstream now carries the patch "
+                                  "(marked obsolete)")
+    except Exception as exc:                    # noqa: BLE001 — best-effort
+        _emit(res, "err", f"drift check skipped: {exc}")
+    finally:
+        if tmp:
+            import shutil
+
+            try:
+                _git(["worktree", "remove", "--force", tmp],
+                     cwd=src_path(cfg), check=False)
+            except DevsrcError:
+                pass
+            shutil.rmtree(tmp, ignore_errors=True)
+    return summary
 
 
 def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,

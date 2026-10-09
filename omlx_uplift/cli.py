@@ -497,7 +497,10 @@ def cmd_patches(argv=None) -> int:
       check        re-fetch sources, report drift (JSON)
       disable-all  kill switch on (sentinel) + disable every patch
       add          fetch -> gate -> store a patch (id + --pr/--url/--file)
+      update       re-check a stored patch: online source (pr/url) or new
+                   diff via --file (also accepts --pr/--url to re-point)
       enable|disable|remove   per-patch control (same paths as the dashboard)
+      approve      record a safeguard approval (once|always) without enabling
     Also: --enable-sentinel-off removes the sentinel after manual fixes.
     Command name: 'omlx-uplift patch' (singular); legacy 'patches' still
     dispatches here for compatibility."""
@@ -505,17 +508,17 @@ def cmd_patches(argv=None) -> int:
 
     ap = argparse.ArgumentParser(prog="omlx-uplift patch")
     ap.add_argument("action", choices=["status", "apply", "check",
-                                       "disable-all", "add",
+                                       "disable-all", "add", "update",
                                        "enable", "disable", "remove",
-                                       "curated", "adopt"])
+                                       "approve", "curated", "adopt"])
     ap.add_argument("id", nargs="?",
-                    help="patch id (add/enable/disable/remove)")
+                    help="patch id (add/update/enable/disable/remove/approve)")
     ap.add_argument("--sync", action="store_true",
                     help="curated: install the catalog (default tier gets "
                          "enabled); without the flag only preview")
     ap.add_argument("--approve", choices=["once", "always"],
                     help="accept the desired version's safeguard codes so "
-                         "auto-apply is allowed (enable)")
+                         "auto-apply is allowed (enable/approve)")
     ap.add_argument("--pr", help="GitHub PR as repo/N, e.g. jundot/omlx/123")
     ap.add_argument("--url", help="plain URL of a diff file")
     ap.add_argument("--file", help="local diff file (upload kind)")
@@ -545,14 +548,17 @@ def cmd_patches(argv=None) -> int:
         return 2
     tree_root = os.path.dirname(root)
 
-    if args.action == "add":
+    if args.action in ("add", "update"):
         import re as _re
 
         if not args.id:
-            ap.error("add needs a patch id")
-        if sum(bool(x) for x in (args.pr, args.url, args.file)) != 1:
+            ap.error(f"{args.action} needs a patch id")
+        given = sum(bool(x) for x in (args.pr, args.url, args.file))
+        if args.action == "add" and given != 1:
             ap.error("add needs exactly one of --pr repo/N, --url, --file")
-        source = {"kind": "url"}
+        if args.action == "update" and given > 1:
+            ap.error("update accepts at most one of --pr repo/N, --url, --file")
+        source = None
         if args.pr:
             m = _re.fullmatch(r"([\w.-]+/[\w.-]+)/?(\d+)", args.pr.strip())
             if not m:
@@ -564,6 +570,22 @@ def cmd_patches(argv=None) -> int:
         elif args.file:
             with open(args.file, "rb") as fh:
                 source = {"kind": "upload", "data": fh.read()}
+        elif args.action == "update":
+            # no explicit source: re-check the ONLINE source already stored
+            # (github_pr / url) — the CLI twin of the dashboard's re-add
+            manifest = store.load()
+            p = store.find(manifest, args.id)
+            if p is None:
+                print(f"unknown patch id: {args.id} — use 'add' for a new "
+                      "patch", file=sys.stderr)
+                return 1
+            stored_src = dict(p.get("source") or {})
+            if stored_src.get("kind") not in ("github_pr", "url"):
+                print("the stored source cannot be re-fetched (upload has "
+                      "no URL) — pass --file, --url or --pr",
+                      file=sys.stderr)
+                return 1
+            source = stored_src
         build_root = args.build_root or patchsource.dev_build_root()
         out = patchsource.add_patch(store, args.id, source, tree_root,
                                     scope=args.scope, build_root=build_root)
@@ -573,6 +595,14 @@ def cmd_patches(argv=None) -> int:
                   "to uplift-dev + pruned overlay on the keg) or --scope "
                   "dev (dev-src only)", file=sys.stderr)
             return 3
+        print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
+
+    if args.action == "approve":
+        if not args.id:
+            ap.error("approve needs a patch id")
+        out = patchsource.approve(store, args.id,
+                                  mode=args.approve or "once")
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 

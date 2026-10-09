@@ -134,10 +134,16 @@ class OrchestrationTests(unittest.TestCase):
         self.assertTrue(res["ok"], res)
         m = self.store.load()
         p = self.store.find(m, "demo")
-        # add = fetch + gate + store version; Enable is an explicit user act
-        self.assertEqual(p["state"], "disabled")
-        self.assertFalse(p["enabled"])
+        # user policy 2026-10-09: a clean add lands ENABLED straight away
+        # (pending + enabled = applies at the next restart) — the manual
+        # Enable click was friction, not a safety gate; safeguards still
+        # hold anything they flag
+        self.assertEqual(p["state"], "pending")
+        self.assertTrue(p["enabled"])
+        self.assertEqual(p["desired_version"], 1)
         self.assertEqual(len(p["versions"]), 1)
+        r = patchsource.set_enabled(self.store, "demo", False)
+        self.assertEqual(r["state"], "disabled")
         r = patchsource.set_enabled(self.store, "demo", True)
         self.assertEqual(r["state"], "pending")
         m = self.store.load()
@@ -643,8 +649,11 @@ class RouterSurfaceTests(unittest.TestCase):
             r = client.post("/uplift/api/patches/add", json={
                 "id": "demo", "kind": "upload", "data": PR3764.decode()})
             self.assertEqual(r.status_code, 200, r.text)
-            self.assertEqual(r.json()["state"], "disabled")
+            # clean add = enabled + pending straight away (2026-10-09)
+            self.assertEqual(r.json()["state"], "pending")
 
+            r = client.post("/uplift/api/patches/disable", json={"id": "demo"})
+            self.assertEqual(r.json()["state"], "disabled")
             r = client.post("/uplift/api/patches/enable", json={"id": "demo"})
             self.assertEqual(r.json()["state"], "pending")
 

@@ -20,6 +20,9 @@ Sits BEFORE the strict gate (PAT-2 flow) and answers two questions:
    - outside_keg: a path that resolves outside the installed site-packages
      tree (or onto a missing file). Sibling packages inside the tree
      (mlx_embeddings, mlx_vlm, ...) are legitimate targets and NOT flagged.
+     KEG-ONLY: on a source checkout ('src') the repo root is the tree, so
+     off-package paths become an advisory instead (a create into a dir the
+     base lacks is normal there and the strict gate cannot fail on it).
 
    Both heuristics are written for the KEG. A dev-scope patch gates
    against a full SOURCE CHECKOUT instead (tree_kind='src'), where those
@@ -271,6 +274,7 @@ def assess(parsed: dict, tree_root: str, tree_kind: str = "keg") -> dict:
     truncated = False
     kernel_paths: list[str] = []
     kernel_native_missing = False   # a csrc/ path the gated tree lacks
+    outside_src: list[str] = []   # off-tree paths on a src checkout (advisory)
     for fp in parsed.get("files", []):
         path = fp.get("path") or ""
         if not path.startswith(_OMLX_PREFIX):
@@ -279,6 +283,18 @@ def assess(parsed: dict, tree_root: str, tree_kind: str = "keg") -> dict:
             if (fp.get("action") == "create"
                     and lexists(os.path.dirname(path) or ".")):
                 continue  # new file into an existing keg dir: fine
+            if tree_kind == "src":
+                # a source checkout IS the repo root: 'outside the
+                # site-packages tree' is a keg premise that does not hold
+                # here. The strict gate already proved every modify
+                # target exists in this tree, so what lands here is a
+                # create into a dir the base lacks (pr4206 false hold:
+                # the PR creates benchmarks/ files that upstream had
+                # deleted; a create into a missing parent passes the gate
+                # BY DESIGN — it must not raise an approval hold either).
+                # One grouped advisory: visible, never a gate.
+                outside_src.append(path)
+                continue
             add("outside_keg", path,
                 "resolves outside the installed site-packages tree (or "
                 "onto a missing file) — verify the target before applying")
@@ -315,6 +331,13 @@ def assess(parsed: dict, tree_root: str, tree_kind: str = "keg") -> dict:
                              # show it exactly once (the card puts it in a
                              # copy-to-clipboard row, not twice in prose)
                              "hint": KERNEL_REBUILD_HINT})
+    if outside_src:
+        advisories.append({
+            "code": "outside_keg",
+            "paths": outside_src,
+            "message": ("paths outside the package dir land at the source "
+                        "repo root — the dev rebuild ships this checkout, "
+                        "so they need no separate approval")})
     codes: list[str] = []
     for p in problems:
         if p["code"] not in codes:
