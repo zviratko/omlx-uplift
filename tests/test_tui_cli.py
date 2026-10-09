@@ -119,6 +119,54 @@ class TestHelpSurface(unittest.TestCase):
         self.assertIn("omlx-uplift tui", helpmod.COMMAND_USAGE["tui"])
 
 
+class TestVanillaPort(unittest.TestCase):
+    """The TUI shows the vanilla board's port; omlx keeps it under
+    settings.json's NESTED server.port (the same key 'omlx-uplift view'
+    rewrites). Reading a flat top-level 'port' made every screen point at
+    :8000 while the board actually served :8011 — a wrong port in a
+    dashboard tool is worse than none."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="tui-port-")
+        self._old = os.environ.get("HOME")
+        os.environ["HOME"] = self.home
+        os.makedirs(os.path.join(self.home, ".omlx"))
+
+    def tearDown(self):
+        if self._old is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = self._old
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def _settings(self, doc):
+        with open(os.path.join(self.home, ".omlx", "settings.json"),
+                  "w") as fh:
+            json.dump(doc, fh)
+
+    def _port(self):
+        from omlx_uplift.tui.context import Context
+        return Context(tree_root="").vanilla_port()
+
+    def test_nested_server_port_wins(self):
+        self._settings({"version": "1.0",
+                        "server": {"host": "0.0.0.0", "port": 8011}})
+        self.assertEqual(self._port(), 8011)
+
+    def test_flat_port_still_understood(self):
+        self._settings({"port": 9000})
+        self.assertEqual(self._port(), 9000)
+
+    def test_missing_or_broken_settings_fall_back_to_8000(self):
+        self.assertEqual(self._port(), 8000)          # no file at all
+        self._settings({"server": {}})
+        self.assertEqual(self._port(), 8000)          # no port key
+        with open(os.path.join(self.home, ".omlx", "settings.json"),
+                  "w") as fh:
+            fh.write("{not json")
+        self.assertEqual(self._port(), 8000)          # unreadable
+
+
 class TestPatchRollbackVerb(unittest.TestCase):
     """The dashboard has had POST /patches/rollback from the start; the CLI did
     not, so an operator at a shell could not undo a bad promote. The TUI's 'v'

@@ -547,16 +547,22 @@ def build_menu(ctx) -> Screen:
                  TONE_OK if (s.get("state") or "") in ("started", "running")
                  else TONE_DIM)
                 for s in services]
+    # the ports read live from the service rows — never written into prose
+    # by hand: an earlier draft hardcoded ':8000' and this box serves the
+    # vanilla board on 8011, so the menu would have pointed at a dead port
+    svc_where = ", ".join(f"{s.get('label') or s.get('formula')} on "
+                          f":{s.get('port')}" for s in services)
 
     rows = [
         Row("menu", "overview",
             [("Overview", TONE_BOLD),
              ("   the machine at a glance", TONE_DIM)],
-            detail="Start here: the patch store roll-up, both services ("
-                   "omlx on :8000, omlx-dev on :8001) and the dev carrier "
-                   "with its drift notes. A selected service row can be "
-                   "restarted with Enter, after a typed YES.",
-            cols2=_flow([(f"{len(all_patches)} patches stored",
+            detail=("Start here: the patch store roll-up, the services ("
+                    + (svc_where or "none found") + ") and the dev carrier "
+                    "with its drift notes. A selected service row can be "
+                    "restarted with Enter, after a typed YES."),
+            cols2=_flow([(f"{len(all_patches)} patch"
+                          f"{'es' if len(all_patches) != 1 else ''} stored",
                           TONE_DIM if all_patches else TONE_WARN)]
                         + svc_bits)),
         Row("menu", "patches",

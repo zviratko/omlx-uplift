@@ -13,6 +13,13 @@ users never see.
 
 ## Unreleased
 
+- **Fixed: the TUI showed the wrong vanilla port.** The service rows and
+  menu read a top-level `port` key from `~/.omlx/settings.json`, but omlx
+  stores it under `server.port` (the same nested key `omlx-uplift view`
+  rewrites) — so on any box that changed its port the TUI confidently
+  pointed at the default instead. It now reads the real key shape, and the
+  menu's help text quotes the ports from the live rows instead of
+  hardcoding numbers.
 - **The TUI is a menu system now, not a wall of keys.** It boots on a main
   menu whose entries say what lives there and carry live state (the Patches
   line already tells you how many are enabled and whether the kill switch is

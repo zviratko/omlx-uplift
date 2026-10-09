@@ -320,13 +320,23 @@ class Context:
         return rows
 
     def vanilla_port(self) -> int:
+        """The port the vanilla server actually binds: omlx reads
+        settings.json's NESTED server.port (the same key 'omlx-uplift view'
+        rewrites — see cli.py), not a top-level 'port'. Reading the wrong
+        shape made the TUI show :8000 while the board served :8011."""
         import json
 
         try:
             with open(os.path.expanduser("~/.omlx/settings.json")) as fh:
-                return int(json.load(fh).get("port", 8000))
+                data = json.load(fh)
+            server = data.get("server")
+            if isinstance(server, dict) and server.get("port"):
+                return int(server["port"])
+            if data.get("port"):            # flat shape, just in case
+                return int(data["port"])
         except (OSError, ValueError, TypeError):
-            return 8000
+            pass
+        return 8000
 
     def _applied_count(self, keg_scope: bool) -> str:
         try:
