@@ -13,46 +13,58 @@ users never see.
 
 ## Unreleased
 
-- **The kill switch no longer needs an importable omlx.** `patch disable-all`
-  and `patch enable-all` write only the manifest and the sentinel file, but
-  they sat behind the same `is omlx installed for this python?` check as the
-  verbs that touch tree bytes — so on a machine where the runtime is broken or
-  omlx simply is not importable, the one command that rescues you refused to
-  run, and printed nothing on stdout while doing it. The switch now answers
-  before the tree check. Found by CI, which has had no omlx since LOG-2 added
-  these verbs.
-- **`omlx-uplift patch rollback ID [--to-v N]`.** The dashboard has had a Roll
-  back button for as long as it has had version history; the CLI never got
-  its twin, so undoing a bad promote from a shell meant editing the manifest
-  by hand.
-- **Removed: the `tui` terminal manager.** It lived on `main` for a day and
-  proved unusable in practice, so it is back out; the code lives on the
-  `tui-archive` branch in case it is ever worth reviving. The two fixes
-  above stand on their own.
+## [1.3] — 2026-10-09
 
-- **Alias-card chips and RUNTIME DIVERGENCE no longer show dead knobs.**
-  A profile that overrides a gated setting (MoE resident fraction,
-  turboquant bits, oQ min tokens, ANE/SpecPrefill/DFlash children) while
-  the master switch is off on BOTH the model and the profile printed that
-  knob as its own chip/diff row — e.g. `MOE_EXPERT_OFFLOAD_RESIDENT_FRACTION
-  0.25` on a card whose MoE offload is disabled, or `qwen35_oq_a8_min_tokens
-  128 -> 128` in the editor. Off-master knobs are noise now (base rows only
-  ever printed toggled-ON features); a REAL change under an ON master still
-  shows. The divergence banner gained a **SYNC BASE → PROFILES** action:
-  two-click confirm writes each diverging profile's load-time keys back to
-  the base model's current values (the profile inherits them again;
-  sampling/thinking and other non-load-time overrides stay untouched).
-- **Merged PRs no longer wedge `dev upgrade`. When upstream merges your
-  patch PR and later commits move the surrounding code, the stored diff
-  stops applying — the drift gate used to report a bare `error` and the
-  build died on materialize (live case jundot/omlx#4320: the merged PR's
-  web-UI files moved to `apps/omlx-web`, its context was trimmed). The
-  check now asks GitHub whether the PR merged BEFORE reporting the
-  error: a proven merge marks the patch OBSOLETE ('upstream now contains
-  the patch — consider removing') and the dev build skips it, so the
-  upgrade goes through. A patch that is merely stale (PR still open, or
-  GitHub unreachable) keeps its honest error and needs_review exit —
-  the fail-safe rule is unchanged.
+The patch-workflow release. The CLI can now drive the whole patch lifecycle
+without a browser, dev builds route around merged-but-moved upstream PRs
+instead of wedging, and the model cards lead with the name and tell the
+build truth.
+
+- **The CLI knows the whole patch lifecycle now.** `patch approve ID` is a
+  standalone approval (records safeguard codes without enabling), `patch
+  promote ID` is the twin of the dashboard button, `patch rollback ID
+  [--to-v N]` points desired_version back at a stored version, and `patch
+  update ID` re-checks (or re-points with `--pr/--url/--file`) the source
+  and **actually adopts** what it stores — a disabled or stuck patch no
+  longer keeps running the stale version. `patch update-all` is its batch
+  twin. A new patch whose gate is clean lands enabled right away; a held
+  one still waits for approval.
+- **The kill switch is reversible and always answers.** `patch disable-all`
+  now records exactly which patches it switched off and `patch enable-all`
+  restores that footprint. Both touch only the manifest and the sentinel
+  file, so they work even when the installed omlx cannot be imported — the
+  very situation you reach for them in.
+- **A merged PR no longer wedges `dev upgrade`.** When upstream merges your
+  patch PR and later commits move the surrounding code, the drift gate asks
+  GitHub whether the PR merged before reporting an error: a proven merge
+  marks the patch OBSOLETE ('upstream now contains the patch — consider
+  removing') and the build skips it, so the upgrade goes through. A merely
+  stale patch (PR open, or GitHub unreachable) keeps its honest error and
+  needs_review exit — the fail-safe rule is unchanged. Dev builds now
+  re-sync catalog sources every build and log each gate verdict with an
+  owner, and `dev-install.log` finally covers the whole pipeline instead of
+  the last stage.
+- **`dev rollback` fixed:** it left brew's linked-keg record behind, so the
+  *next* upgrade died in `brew link` with 'Another version is already
+  linked' — and plain `brew unlink` could not clear it.
+- **Model cards lead with the name, the header tells the build truth.**
+  Cards are reorganised (name first, badges slotted right and below), the
+  DEV wordmark gained a superscript saying what the keg actually tracks —
+  omlx base commit + version and the enabled build-scope patches — and a
+  click-fired load paints LOADING immediately instead of a frozen PRESENT
+  pill. Model aliases no longer vanish after scrolling (the tree survived
+  the first paint but not cached repaints), and the alias trunk draws as
+  one continuous line hanging from the name.
+- **Settings UI stops showing dead knobs.** A profile override under a
+  master switch that is off on both base and profile no longer gets its own
+  chip or divergence row (the `128 -> 128` noise is gone); a real change
+  under an ON master still shows. The divergence banner gained **SYNC BASE →
+  PROFILES**: two-click confirm writes each diverging profile's load-time
+  keys back to the base model's current values. Checkbox dirty-chips show
+  the new value instead of a bare arrow.
+- **Catalog:** new optional entry `pr4206-personal` (a vendored, rebased
+  build of open jundot/omlx#4206); four OQ/GLM env vars are annotated as
+  removed upstream, with catalog text saying when they go dead.
 
 ## [1.2] — 2026-10-09
 
