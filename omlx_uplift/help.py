@@ -23,8 +23,8 @@ COMMANDS = [
                 " 'brew upgrade omlx')"),
     ("uninstall", "remove the mount (.pth) again"),
     ("patch", "status|apply|check|disable-all|enable-all|enable|disable|"
-              "update|update-all|promote|remove — patch recovery without "
-              "the dashboard ('patches' = legacy alias)"),
+              "update|update-all|promote|rollback|remove — patch recovery "
+              "without the dashboard ('patches' = legacy alias)"),
     ("kernel", "list|rebuild <name> — rebuild ONE native kernel in the keg"),
     ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
     ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure|kegs —"
@@ -37,6 +37,8 @@ COMMANDS = [
                   " accuracy engine (own venv, never a keg)"),
     ("mteb-env", "status|create — pinned MTEB venv for the embeddings/"
                  "rerankers bench (own venv; carries torch — never a keg)"),
+    ("tui", "menu-driven terminal manager — patches, curated catalog,"
+            " omlx-dev kegs, services (needs a real terminal)"),
 ]
 
 _TOP_USAGE = """\
@@ -64,6 +66,7 @@ COMMAND_USAGE = {
               " once|always]\n"
               "                 patch approve ID [--approve once|always]\n"
               "                 patch promote ID [--approve once|always]\n"
+              "                 patch rollback ID [--to-v N]\n"
               "                 patch remove ID\n"
               "                 ('patches' is accepted as a legacy alias)"),
     "kernel": ("omlx-uplift kernel list\n"
@@ -96,6 +99,17 @@ COMMAND_USAGE = {
     "doctor": ("omlx-uplift doctor [--json]\n"
                "                 read-only: every omlx file vs the wheel RECORD;\n"
                "                 files an applied patch owns are expected drift"),
+    "tui": ("omlx-uplift tui\n"
+            "                 interactive screens: 1 overview  2 patches"
+            "  3 catalog\n"
+            "                 4 dev keg  5 session log;"
+            " j/k move, enter detail, n re-read\n"
+            "                 T cycles the colour theme (default | P(DOOM)"
+            " | phosphor | mono)\n"
+            "                 writes nothing until you confirm; shows the CLI"
+            " command each action mirrors\n"
+            "                 needs a terminal — headless use is 'patch"
+            " status' / 'dev status'"),
 }
 
 _CONFIG_FILES = [
@@ -106,6 +120,8 @@ _CONFIG_FILES = [
     ("patches.lock", "reconcile lock (startup and CLI share it)"),
     ("patches.disabled", "kill switch: boot unpatched when present"),
     ("kernel-backups/", "byte-exact originals behind 'kernel rebuild'"),
+    ("tui.json", "terminal UI preferences (the chosen colour theme) — cosmetic,\n"
+                 "                   deliberately separate from the patch manifest"),
     ("dev.json", "omlx-dev config (origin, sync_ref, port, sharing)"),
     ("dev-src/", "the omlx checkout build patches materialize in"),
 ]

@@ -107,6 +107,13 @@ omlx-uplift patch remove ID
 omlx-uplift patch apply                # reconcile now (no re-exec)
 omlx-uplift patch check                # re-fetch sources, report drift
 omlx-uplift patch curated [--sync]     # published catalog (see curated_patches/)
+omlx-uplift patch promote ID           # accept the newest validated candidate
+omlx-uplift patch rollback ID [--to-v N]  # undo a promote: previous stored
+                                       # version becomes desired again
+omlx-uplift patch approve ID --approve once|always  # safeguard approval only
+omlx-uplift patch update-all           # re-check + adopt every online source
+omlx-uplift patch enable-all           # twin of disable-all: sentinel gone,
+                                       # flags restored to what it recorded
 ```
 
 `patch curated --sync` installs the catalog: default tier enabled,
@@ -132,6 +139,53 @@ go live on refresh with no restart. The built-in examples ship in
 `omlx_uplift/skins-example/`. **Full authoring guide:
 [docs/skins.md](docs/skins.md).**
 
+## Terminal UI (`omlx-uplift tui`)
+
+A menu-driven manager for people who live in a terminal — on the dev box, over
+ssh, or when the dashboard is unreachable because the very patch you are
+trying to undo broke it.
+
+```bash
+omlx-uplift tui
+```
+
+Five screens: **1** overview (store roll-up, both services, the dev carrier),
+**2** patches, **3** curated catalog, **4** omlx-dev keg stash, **5** session
+log. `j`/`k` or the arrows move, `enter` toggles the detail pane, `n` re-reads
+live state, `T` cycles the colour theme, `?` lists the keys, `q` quits. Mouse
+clicks select a row.
+
+It adds no capability the CLI does not have and **no policy of its own**: each
+action calls the same function the dashboard route calls, or runs the CLI verb
+shown on screen, so the two can never disagree about what a button does.
+
+Nothing writes until you confirm it:
+
+- read-only actions (dry-run test, drift check, status refresh) run at once;
+- a state change to the patch store asks `y/N`;
+- anything that touches **tree bytes, a keg, or a running service** asks you to
+  type `YES` on its own line. A stray `y`, an accidental Enter, or a navigation
+  key cancels instead. `q` cancels an armed question rather than quitting
+  (press it twice to leave).
+
+Every action prints the command it mirrors, so the log screen doubles as a
+teaching surface for the CLI.
+
+**Themes:** `default` (your terminal's own colours), `p(doom)` — the SHODAN
+dashboard skin in the terminal, void black with laser crimson and ember orange,
+`phosphor` (single-hue CRT) and `mono` (no colour, for screenshots and broken
+`TERM`s). Truecolour is deliberately not used: it breaks over ssh hops and
+remote tmux, which is exactly where this tool gets used. On a 256-colour
+terminal that accepts palette writes the themes get their exact RGB; otherwise
+the nearest colour is used **and the status line says so** — a silently
+mis-coloured warning is worse than an honest fallback. The choice is saved to
+`~/.omlx/uplift/tui.json`, kept out of `patches.json` so a cosmetic preference
+never rides along with the patch manifest.
+
+Needs a real terminal on stdin and stdout. Piped or redirected use exits 2 and
+points at `patch status` / `dev status` instead of writing control codes into
+your log.
+
 ## Other commands
 
 ```bash
@@ -144,6 +198,8 @@ omlx-uplift kernel list|rebuild NAME|restore NAME  # rebuild ONE native
 omlx-uplift skin compile DIR|decompile YML         # skin crate codecs;
                                        # themes are drop-in CSS crates,
                                        # picked in the header theme menu
+omlx-uplift tui                        # menu-driven manager (see above)
+omlx-uplift doctor                     # tree vs wheel RECORD census, read-only
 omlx-uplift man                        # full man page
 ```
 

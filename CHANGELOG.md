@@ -13,6 +13,35 @@ users never see.
 
 ## Unreleased
 
+- **`omlx-uplift tui` — a menu-driven terminal manager.** Five screens
+  (overview, patches, curated catalog, omlx-dev keg stash, session log) for
+  the everyday recovery work: enable/disable/promote/update/rollback/remove a
+  patch, check for drift, reconcile now, arm and clear the kill switch, sync
+  the catalog, stash/activate/prune dev kegs, roll back a build, restart a
+  service. It is a front-end, not a second implementation: every action calls
+  the same function the dashboard route calls or runs the CLI verb printed on
+  screen, so the terminal and the browser can never disagree about what a
+  button does. Nothing writes until you confirm — a store change asks `y/N`,
+  and anything touching tree bytes, a keg or a running service asks you to
+  type `YES` on its own line, so a stray keypress cannot arm a rollback.
+  Stdlib `curses` only, no new dependency, and it refuses politely (exit 2)
+  when piped, redirected or run under `TERM=dumb` instead of spraying control
+  codes into a log.
+- **Four colour themes, cycled with `T`.** `default` leaves your terminal's
+  own palette alone, **`p(doom)`** brings the SHODAN dashboard skin to the
+  terminal (void black, laser crimson, ember orange), `phosphor` is a
+  single-hue CRT and `mono` drops colour entirely for screenshots and broken
+  `TERM`s. Truecolour is deliberately not used — it falls apart across ssh
+  hops and remote tmux, which is where this tool gets used — so themes write
+  exact RGB into free palette slots when the terminal allows it and otherwise
+  approximate, with the status line naming which happened. The choice is
+  remembered in `~/.omlx/uplift/tui.json`, kept separate from `patches.json`
+  so a cosmetic preference never rides along with the patch manifest.
+- **`omlx-uplift patch rollback ID [--to-v N]`.** The dashboard has had a Roll
+  back button for as long as it has had version history; the CLI never got
+  its twin, so undoing a bad promote from a shell meant editing the manifest
+  by hand. Found while wiring the TUI's rollback key.
+
 - **Alias-card chips and RUNTIME DIVERGENCE no longer show dead knobs.**
   A profile that overrides a gated setting (MoE resident fraction,
   turboquant bits, oQ min tokens, ANE/SpecPrefill/DFlash children) while

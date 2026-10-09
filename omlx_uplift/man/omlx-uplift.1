@@ -129,6 +129,22 @@ gate never stops the rest.
 .Ic promote Ar id
 .Op Fl -approve Ar once|always
 .Xc
+.It Xo Ic patch
+.Ic rollback Ar id
+.Op Fl -to-v Ar N
+.Xc
+Point
+.Va desired_version
+at an earlier stored version (the one before the current desired, or
+.Fl -to-v
+to name it).
+The patch becomes
+.Em pending
+and re-enables, so the older bytes land on the next restart \(em the CLI
+twin of the dashboard's
+.Dq Roll back
+button, and the way to undo a promote that turned out worse.
+Nothing is fetched and no file is touched until that restart.
 .It Ic patch Ic remove Ar id
 Out-of-band patch-carrier recovery when the dashboard is unreachable:
 the same engine the .pth startup reconcile uses, no re-exec, JSON output.
@@ -344,6 +360,65 @@ reported as drift ; exit status 1 .
 Custom-kernel binaries and patch-owned files are excepted .
 Repair by reinstalling the omlx formula ; the tool never writes to the
 tree .
+.It Xo Ic tui
+.Xc
+Menu-driven terminal manager over the same surface this page documents:
+overview, patches, curated catalog, the
+.Em omlx-dev
+keg stash, and both services.
+Five screens (keys
+.Ic 1 Ns - Ns Ic 5 ) ,
+.Ic j/k
+or the arrow keys move,
+.Ic enter
+toggles the detail pane,
+.Ic n
+re-reads live state,
+.Ic T
+cycles the colour theme,
+.Ic \&?
+lists the keys,
+.Ic q
+quits.
+.Pp
+The TUI implements no policy of its own.
+Every action calls the function the dashboard route calls, or runs the CLI
+verb named on screen, so
+.Ic tui
+and a shell can never disagree about what a button does.
+Nothing writes until you confirm: a state change asks
+.Ic y Ns / Ns Ic N ,
+and anything that touches tree bytes, a keg, or a running service asks you to
+type
+.Ic YES
+on its own line —
+.Ic q
+cancels an armed question instead of answering it.
+.Pp
+Colour themes:
+.Em default
+(terminal's own colours),
+.Em p(doom)
+(the SHODAN dashboard skin in the terminal \(em void black, laser crimson,
+ember orange),
+.Em phosphor
+(single-hue CRT) and
+.Em mono
+(no colour, for screenshots and broken
+.Ev TERM ) .
+A 256-colour terminal that allows palette writes gets the exact RGB values;
+otherwise the nearest available colour is used and the status line says which,
+because a silently mis-coloured warning is worse than an honest fallback.
+The choice is remembered in
+.Pa tui.json .
+.Pp
+Requires a terminal on both stdin and stdout and a usable
+.Ev TERM .
+Piped or redirected use exits 2 with a pointer to
+.Ic patch
+status and
+.Ic dev
+status instead of writing control codes into your log.
 .It Xo Ic help
 .Op Ar command
 .Xc
@@ -413,6 +488,17 @@ creates it; delete the file (or re-enable patches in the UI) to resume.
 Byte-exact originals behind
 .Ic kernel
 rebuild .
+.It Pa tui.json
+Terminal UI preferences: the chosen colour theme.
+Written by
+.Ic tui
+when you press
+.Ic T ;
+purely cosmetic, deliberately kept out of
+.Pa patches.json
+so a UI preference never rides along with the patch manifest and its
+approvals.
+Absent until the theme is changed for the first time.
 .It Pa dev.json
 .Em omlx-dev
 config: origin, sync_ref, formula branch, port, base path, share map,

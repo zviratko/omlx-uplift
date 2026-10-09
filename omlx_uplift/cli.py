@@ -513,6 +513,11 @@ def cmd_patches(argv=None) -> int:
                    fixed version had no CLI way to adopt it: the drift
                    check's auto-promote is enabled-only, so 'enable' would
                    re-apply the stale (broken) desired version.
+      rollback     point desired_version at a previous stored version (--to-v
+                   N, default: the one before). TUI-1 added this verb: the
+                   dashboard had a Roll back button (POST /patches/rollback)
+                   with no CLI twin, so an operator at a shell could not undo
+                   a bad promote without the TUI or the browser.
     Also: 'disable-all' arms a sentinel file that makes every boot skip
     the runtime patch pass AND records which patches it switched off;
     'enable-all' is its twin — it removes the sentinel and restores
@@ -529,9 +534,13 @@ def cmd_patches(argv=None) -> int:
                                        "disable-all", "enable-all", "add",
                                        "update", "enable", "disable",
                                        "remove", "approve", "promote",
-                                       "update-all", "curated", "adopt"])
+                                       "rollback", "update-all", "curated",
+                                       "adopt"])
     ap.add_argument("id", nargs="?",
                     help="patch id (add/update/enable/disable/remove/approve)")
+    ap.add_argument("--to-v", type=int, dest="to_v", default=None,
+                    help="rollback: stored version to make desired "
+                         "(default: the one before the current desired)")
     ap.add_argument("--sync", action="store_true",
                     help="curated: install the catalog (default tier gets "
                          "enabled); without the flag only preview")
@@ -648,13 +657,15 @@ def cmd_patches(argv=None) -> int:
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 
-    if args.action in ("enable", "disable", "remove", "promote"):
+    if args.action in ("enable", "disable", "remove", "promote", "rollback"):
         if not args.id:
             ap.error(f"{args.action} needs a patch id")
         if args.action == "remove":
             out = patchsource.remove_patch(store, args.id, tree_root)
         elif args.action == "promote":
             out = patchsource.promote(store, args.id, approve=args.approve)
+        elif args.action == "rollback":
+            out = patchsource.rollback(store, args.id, to_v=args.to_v)
         else:
             out = patchsource.set_enabled(store, args.id,
                                           args.action == "enable",
@@ -1543,6 +1554,23 @@ def cmd_skin(argv=None) -> int:
     return 0
 
 
+def cmd_tui(argv=None) -> int:
+    """TUI-1: menu-driven terminal manager for the whole patch + dev-keg
+    surface.
+
+        omlx-uplift tui
+
+    A curses front-end over the verbs this CLI already has — it adds no
+    policy of its own: every action calls the same function the dashboard
+    route uses (or runs the CLI verb in process), shows the command it
+    mirrors, and asks before it writes. Keys: 1-5 screens, j/k move, enter
+    detail, n re-read, ? help, q quit. Needs a real terminal; headless use
+    stays `patch status` / `dev status`."""
+    from .tui import run
+
+    return run(argv)
+
+
 def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
         # omlx-uplift [help] -> slim command list; `help <cmd>` -> usage
@@ -1555,7 +1583,7 @@ def main() -> int:
     if sys.argv[1] not in {
             "serve", "view", "install", "uninstall", "patch", "patches",
             "kernel", "skin", "dev", "env", "doctor", "bench-env",
-            "mteb-env"}:
+            "mteb-env", "tui"}:
         print(f"omlx-uplift: unknown command {sys.argv[1]!r}\n",
               file=sys.stderr)
         from .help import print_help
@@ -1578,6 +1606,7 @@ def main() -> int:
             "uninstall": cmd_uninstall, "patch": cmd_patches,
             "kernel": cmd_kernel, "dev": cmd_dev, "env": cmd_env,
             "doctor": cmd_doctor, "bench-env": cmd_bench_env,
+            "tui": cmd_tui,
              # mteb-env shares the implementation; the leading marker arg
              # selects the env (REPL-4: second pinned venv, same discipline)
              "mteb-env": lambda rest: cmd_bench_env(["mteb", *rest])}[cmd](rest)
