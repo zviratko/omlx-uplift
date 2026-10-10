@@ -326,8 +326,21 @@ function yAxis(col, opts) {
    each re-anchor the ticks: the chart "stretches, then jumps". Pinning the
    range to [now-window, now] makes the window scroll smoothly instead. */
 function pinnedXRange(cardId) {
-    return () => { const now = Date.now(); const w = cardWindow(cardId) * 1000;
-                   return [now - w, now]; };
+    // STALL-FREEZE (user 2026-10-10: "it would be better for the graphs
+    // not to move if they don't have data"): the right edge anchors to
+    // the newest DRAWN point, not to Date.now(). While the collector
+    // feeds, the edge is ~now and the chart scrolls as before; when the
+    // data goes stale the chart HOLDS STILL instead of sliding left with
+    // nothing arriving on the right — motion only ever means "new data".
+    // uPlot passes the live instance to range callbacks, so u.data is
+    // exactly what this draw will show. No columns yet -> now-fallback.
+    return (u) => {
+        const w = cardWindow(cardId) * 1000;
+        let edge = Date.now();
+        const d = u && u.data && u.data[0];
+        if (d && d.length && d[d.length - 1] != null) edge = d[d.length - 1];
+        return [edge - w, edge];
+    };
 }
 function baseOpts(specs, axes, legendHook) {
     const col = chartColors();
@@ -912,7 +925,7 @@ function _gateHidden(def) {
 /* fetch cache keyed by windowParam (cards sharing a window share bytes),
    each entry {data: series_map, at, fails, bucket_s} */
 const metricCache = {};
-const _fetching = new Set();
+const _fetching = new Map();   // sk -> {t, seq} (STALE-LEASE: timestamped)
 const _seq = {};
 
 function metricFormat(def) {
@@ -1329,8 +1342,16 @@ function metricFetch(id, force) {
     const missing = keys.some(k => !(k in cache.data));
     if (!force && !stale && !missing) { drawMetricChart(id); return; }
     const sk = w + '|' + key;
-    if (_fetching.has(sk)) return;
-    _fetching.add(sk);
+    const seq = (_seq[sk] = (_seq[sk] || 0) + 1);
+    // STALE-LEASE: a fetch whose promise never settles (server wedged
+    // mid-response — measured: three cards frozen at one tail for 12 min
+    // in a visible tab) would hold the dedupe slot forever, because
+    // .finally only runs when the promise settles. An in-flight entry
+    // older than 20 s no longer blocks a retry; the orphan response is
+    // discarded by the _seq guard when (if) it ever lands.
+    const inflight = _fetching.get(sk);
+    if (inflight && Date.now() - inflight.t < 20000) return;
+    _fetching.set(sk, { t: Date.now(), seq });
     // Freshness stamps at REQUEST issue, not at response: with a slow
     // query, a response-stamped clock re-added the whole RTT to every
     // cycle — the next 5 s tick still saw '< TTL' and skipped, and the
@@ -1338,7 +1359,6 @@ function metricFetch(id, force) {
     // full extra tick before popping). Request-stamped, the next draw
     // tick after TTL elapses always sees the data as due.
     cache.at = Date.now();
-    const seq = (_seq[sk] = (_seq[sk] || 0) + 1);
     CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent(key)}&window=${w}`)
         .then(d => {
             cache.fails = 0;
@@ -1354,7 +1374,10 @@ function metricFetch(id, force) {
         })
         .catch(() => { cache.fails++; cache.at = Date.now(); })
         .finally(() => {
-            _fetching.delete(sk);
+            // Release only OUR lease — a retry that took over the slot
+            // (STALE-LEASE) must not be unlocked by this older request.
+            const l = _fetching.get(sk);
+            if (l && l.seq === seq) _fetching.delete(sk);
             if (_seq[sk] === seq) drawMetricChart(id);   // newest response wins
         });
 }
@@ -1371,11 +1394,20 @@ function multInitData(def) {
    union of its key's sample timestamps; gaps stay null. */
 function metricUnionCols(def, data, winMs) {
     const sers = metricServes(def);
-    const cutoff = Date.now() - winMs;
-    const cols0 = sers.map(s => (data[s.key] || []).filter(p => p.ts * 1000 >= cutoff));
-    const ts = [...new Set(cols0.flatMap(p => p.map(q => q.ts * 1000)))].sort((a, b) => a - b);
+    const cols0 = sers.map(s => (data[s.key] || []));
+    // STALL-FREEZE (partner of pinnedXRange): the cutoff anchors to the
+    // NEWEST sample, not to Date.now(). A stalled window group then holds
+    // its last [edge-window, edge] slice frozen on screen instead of
+    // quietly draining away. Fresh data behaves as before (newest ≈ now).
+    // (.ts values are SECONDS; cutoff arithmetic is ms.)
+    let newest = 0;
+    for (const c of cols0) if (c.length) newest = Math.max(newest, c[c.length - 1].ts);
+    const edge = newest ? Math.min(newest * 1000, Date.now()) : Date.now();
+    const cutoff = edge - winMs;
+    const cut = cols0.map(c => c.filter(p => p.ts * 1000 >= cutoff));
+    const ts = [...new Set(cut.flatMap(p => p.map(q => q.ts * 1000)))].sort((a, b) => a - b);
     const cols = [ts];
-    for (const col of cols0) {
+    for (const col of cut) {
         const m = new Map(col.map(q => [q.ts * 1000, q.v]));
         cols.push(ts.map(t => (m.has(t) ? m.get(t) : null)));
     }
