@@ -347,14 +347,23 @@ async function renderModelAdmin(force) {
             bits.push({ txt: label + ' ' + v, cls: '' }); };
         const tog = (label, on) => { if (!on) return;
             bits.push({ txt: label + ' ON', cls: 'on' }); };
-        val('CTX', s.max_context_window);
-        val('MAX', s.max_tokens);
-        tog('THINK', !!s.enable_thinking);
-        tog('MTP', !!(s.mtp_enabled || s.vlm_mtp_enabled));
-        tog('GRAMMAR', !!s.guided_grammar_enabled);
-        if (s.trust_remote_code) bits.push({ txt: 'TRC ON', cls: 'danger' });
-        tog('SPECPREFILL', !!s.specprefill_enabled);
-        tog('DFLASH', !!s.dflash_enabled);
+        // MT-1: rows must not advertise settings the engine ignores — the
+        // chip set follows the same type gate as the editor (a non-LLM
+        // model row shows only HIDDEN, like classic badges only the type).
+        // Guarded like mmchips' masterOff: render must never crash when
+        // modelspec is not loaded in a host (test sandbox).
+        const llmRow = window.UpliftModelSpec
+            ? window.UpliftModelSpec.llmLike(m) : true;
+        if (llmRow) {
+            val('CTX', s.max_context_window);
+            val('MAX', s.max_tokens);
+            tog('THINK', !!s.enable_thinking);
+            tog('MTP', !!(s.mtp_enabled || s.vlm_mtp_enabled));
+            tog('GRAMMAR', !!s.guided_grammar_enabled);
+            if (s.trust_remote_code) bits.push({ txt: 'TRC ON', cls: 'danger' });
+            tog('SPECPREFILL', !!s.specprefill_enabled);
+            tog('DFLASH', !!s.dflash_enabled);
+        }
         if (m.is_hidden) bits.push({ txt: 'HIDDEN', cls: '' });
         appendChips(chips, bits);
         const btn = (label, fn, title, noRerender) => {

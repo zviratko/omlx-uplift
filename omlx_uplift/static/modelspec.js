@@ -56,8 +56,90 @@
     const VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES = new Set([
         'gemma4_assistant', 'gemma4_unified_assistant', 'qwen3_5_mtp',
     ]);
-    const SAMPLING_TYPES = new Set([null, undefined, '', 'llm', 'vlm']);
+    const SAMPLING_TYPES = new Set(['llm', 'vlm']);
     const GiB = 1024 ** 3;
+
+    /* ---- MT-1: model-type family (parity with classic's four
+       `!selectedModel?.model_type || model_type === 'llm' || 'vlm'` gates
+       in _modal_model_settings.html). Non-LLM engines (embedding, reranker,
+       audio_stt/tts/sts, decision) run a different API surface: sampling,
+       thinking, grammar, spec-decode and chat-template kwargs do not exist
+       there, so classic hides them. The gate tests the EFFECTIVE type —
+       engine_pool.apply_settings_overrides rewrites entry.model_type from
+       model_type_override before any engine is chosen — so a live override
+       flip in the editor must re-shape the form exactly like a real type. ---- */
+    function llmLike(m) {
+        const t = normType((m && (m.model_type_override || m.model_type)) || '');
+        return t === '' || SAMPLING_TYPES.has(t);
+    }
+    /* Payload keys classic hides behind the llm/vlm gate — everything in
+       its Advanced column plus the ctx/max-tokens/temperature rows. The
+       editor must not let a flip save these to a non-LLM model.
+       NOT included: model_alias, model_type_override, reasoning_parser and
+       ttl_seconds — classic renders those for every type (Row 1 + TTL). */
+    const TYPE_ONLY_KEYS = new Set([
+        'max_context_window', 'max_tokens', 'temperature', 'top_p', 'top_k',
+        'repetition_penalty', 'min_p', 'presence_penalty', 'force_sampling',
+        'enable_thinking', 'thinking_budget_enabled',
+        'thinking_budget_tokens', 'cache_reasoning_output',
+        'guided_grammar_enabled', 'guided_grammar',
+        'max_tool_result_tokens', 'chat_template_kwargs', 'forced_ct_kwargs',
+        'trust_remote_code', 'index_cache_freq', 'turboquant_kv_enabled',
+        'turboquant_kv_bits', 'moe_expert_offload_enabled',
+        'moe_expert_offload_resident_fraction', 'qwen4_ple_ssd_offload',
+        'deepseek_v41_ced_prefill_enabled', 'deepseek_v41_engram_ssd_offload',
+        'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
+        'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
+        'specprefill_threshold', 'dflash_enabled', 'dflash_draft_model',
+        'dflash_draft_quant_enabled', 'dflash_draft_quant_weight_bits',
+        'dflash_draft_quant_activation_bits', 'dflash_draft_quant_group_size',
+        'dflash_max_ctx', 'dflash_in_memory_cache',
+        'dflash_in_memory_cache_max_entries', 'dflash_in_memory_cache_max_bytes',
+        'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes',
+        'dflash_draft_window_size', 'dflash_draft_sink_size',
+        'dflash_block_size', 'dflash_verify_mode', 'mtp_enabled',
+        'mtp_adaptive_max_depth', 'mtp_fixed_depth', 'vlm_mtp_enabled',
+        'vlm_mtp_draft_model', 'vlm_mtp_draft_block_size',
+        'qwen35_ane_prefill_enabled', 'qwen35_ane_prefill_sequence_length',
+        'qwen35_ane_prefill_tail_padding_min_tokens', 'qwen35_ane_prefill_fraction',
+        'qwen35_ane_prefill_shared_fraction', 'qwen35_ane_prefill_fused_down',
+        'qwen35_ane_prefill_max_layers', 'qwen35_ane_prefill_dual_ane',
+        'qwen35_ane_prefill_gdn', 'qwen35_ane_prefill_gdn_fraction',
+        'qwen35_ane_prefill_gdn_max_layers', 'qwen35_ane_prefill_cpu_enabled',
+        'qwen35_ane_prefill_cpu_fraction', 'qwen35_ane_prefill_cpu_down_fraction',
+        'qwen35_ane_prefill_cpu_gdn_fraction', 'qwen35_ane_prefill_cpu_threads',
+        'qwen35_ane_prefill_cpu_shared_resource',
+    ]);
+    /* Hidden-family masters whose non-default stored values survive a flip
+       to a non-LLM type (the classic PUT merges — omitted fields are not
+       cleared). stickyForType lists the ones actually ON; the editor warns. */
+    function stickyForType(settings) {
+        // stored settings dict (server shape) -> hidden-family masters that
+        // are actually ON (a knob alone is noise — its master names the
+        // feature). These keys survive a type flip: the PUT merges.
+        const s = settings || {};
+        const on = v => v === true;
+        const out = [];
+        if (on(s.trust_remote_code)) out.push('trust_remote_code');
+        if (on(s.enable_thinking)) out.push('enable_thinking');
+        if (on(s.thinking_budget_enabled)) out.push('thinking_budget_enabled');
+        if (on(s.cache_reasoning_output)) out.push('cache_reasoning_output');
+        if (on(s.guided_grammar_enabled) || s.guided_grammar) out.push('guided_grammar');
+        if (on(s.turboquant_kv_enabled)) out.push('turboquant_kv_enabled');
+        if (on(s.mtp_enabled)) out.push('mtp_enabled');
+        if (on(s.vlm_mtp_enabled)) out.push('vlm_mtp_enabled');
+        if (on(s.specprefill_enabled)) out.push('specprefill_enabled');
+        if (on(s.dflash_enabled)) out.push('dflash_enabled');
+        if (on(s.qwen35_ane_prefill_enabled)) out.push('qwen35_ane_prefill_enabled');
+        if (on(s.qwen35_oq_a8_enabled)) out.push('qwen35_oq_a8_enabled');
+        if (on(s.moe_expert_offload_enabled)) out.push('moe_expert_offload_enabled');
+        if (on(s.qwen4_ple_ssd_offload)) out.push('qwen4_ple_ssd_offload');
+        if (on(s.deepseek_v41_ced_prefill_enabled)) out.push('deepseek_v41_ced_prefill_enabled');
+        if (on(s.deepseek_v41_engram_ssd_offload)) out.push('deepseek_v41_engram_ssd_offload');
+        if (s.chat_template_kwargs && Object.keys(s.chat_template_kwargs).length)
+            out.push('chat_template_kwargs');
+        return out;
+    }
 
     const normType = t => String(t || '').toLowerCase().replace(/-/g, '_');
     const isDiffusion = m => DIFFUSION_CONFIG_MODEL_TYPES.has(normType(m && m.config_model_type));
@@ -140,6 +222,11 @@
         return {
             model_alias: s.model_alias || '',
             model_type_override: s.model_type_override || '',
+            // MT-1: EmbeddingGemma-2 audio input (classic modal's own gate:
+            // entry.embedding_audio_supported — server computes it from
+            // config_model_type == 'embedding_gemma2', routes.py:2228)
+            embedding_audio_enabled: s.embedding_audio_enabled === true,
+            embedding_audio_max_seconds: s.embedding_audio_max_seconds ?? null,
             max_context_window: s.max_context_window || null,
             max_tokens: s.max_tokens || null,
             temperature: isOcr ? 0.0 : (s.temperature ?? null),
@@ -245,8 +332,15 @@
     /* ---- client-side validation (mirrors validateQwenOqA8Settings /
        validateQwenAneSettings + server __post_init__ conflicts) ---- */
     const num = v => Number(v);
-    function validate(ms) {
+    function validate(ms, model) {
         const errors = [];
+        // MT-1: every check below validates a type-gated (LLM/VLM) family.
+        // A non-LLM model's stale hidden values must not block an unrelated
+        // save (e.g. TTL on an embedding model); buildPayload strips the
+        // family from the PUT anyway.
+        if (model && !llmLike(Object.assign({}, model,
+                { model_type_override: ms.model_type_override })))
+            return errors;
         // sweep 1.3a: sampling ranges (classic's input bounds; server has
         // none, so an unvalidated UI happily stores temperature 99)
         const rng = (label, v, lo, hi) => {
@@ -429,6 +523,26 @@
                 ? parseInt(ms.vlm_mtp_draft_block_size) : null,
             trust_remote_code: !!ms.trust_remote_code,
         };
+        // MT-1: classic sends the embedding-audio pair ONLY for models the
+        // server flags embedding_audio_supported (PUT writes any key it
+        // receives, so an unconditional pair would pollute other engines)
+        if (model && model.embedding_audio_supported) {
+            const sec = Number(ms.embedding_audio_max_seconds);
+            payload.embedding_audio_enabled = !!ms.embedding_audio_enabled;
+            payload.embedding_audio_max_seconds = sec > 0 ? sec : null;
+        }
+        // MT-1: a non-LLM effective type must not carry LLM-family values.
+        // Reached via a model_type_override flip: the editor hid those rows,
+        // but buildPayload would otherwise write the stale LLM values back
+        // (PUTs merge — a flipped-away family must never be re-applied).
+        // llmLike prefers model_type_override, so pass the EDITOR state in.
+        const effective = model
+            ? Object.assign({}, model, { model_type_override: ms.model_type_override })
+            : { model_type_override: ms.model_type_override };
+        if (!llmLike(effective)) {
+            for (const k of Object.keys(payload))
+                if (TYPE_ONLY_KEYS.has(k)) delete payload[k];
+        }
         if (diffusion) {
             Object.assign(payload, {
                 top_p: null, top_k: null, repetition_penalty: null, min_p: null,
@@ -473,6 +587,11 @@
         const freq = parseInt(d.index_cache_freq, 10);
         add('trust_remote_code', !!d.trust_remote_code);
         add('index_cache_freq', Number.isFinite(freq) && freq >= 2 ? freq : null);
+        // MT-1: embedding audio tower — engine_pool only counts the length
+        // knob while the tower is loaded (engine_pool.py:1058-1061)
+        const audioOn = !!d.embedding_audio_enabled;
+        add('embedding_audio_enabled', audioOn);
+        if (audioOn) add('embedding_audio_max_seconds', d.embedding_audio_max_seconds ?? null);
         const mtpOn = !!d.mtp_enabled;
         add('mtp_enabled', mtpOn);
         if (mtpOn) {
@@ -556,6 +675,9 @@
        badge and the sparse-save split in the editor). */
     const RUNTIME_SETTING_KEYS = new Set([
         'trust_remote_code', 'index_cache_freq',
+        // MT-1 parity: the embedding audio tower is engine_pool signature
+        // material (engine_pool.py add('embedding_audio_enabled', …))
+        'embedding_audio_enabled', 'embedding_audio_max_seconds',
         'mtp_enabled', 'mtp_adaptive_max_depth', 'mtp_fixed_depth',
         'turboquant_kv_enabled', 'turboquant_kv_bits',
         'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
@@ -619,6 +741,7 @@
     function sigMasterKey(k) {
         const EXPLICIT = {
             mtp_adaptive_max_depth: 'mtp_enabled', mtp_fixed_depth: 'mtp_enabled',
+            embedding_audio_max_seconds: 'embedding_audio_enabled',
             turboquant_kv_bits: 'turboquant_kv_enabled',
             qwen35_oq_a8_min_tokens: 'qwen35_oq_a8_enabled',
             moe_expert_offload_resident_fraction: 'moe_expert_offload_enabled',
@@ -740,6 +863,8 @@
              DIFFUSION_UNSUPPORTED_CT_KWARGS, REASONING_EFFORT_PRESETS,
              MODEL_TYPE_OPTIONS, VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES,
              DFLASH_DRAFTER_CONFIG_MODEL_TYPES,
+             llmLike, TYPE_ONLY_KEYS, stickyForType,
+             normType,
              isDiffusion, isQwenOqA8, coerceKwargValue, buildCtKwargEntries,
              kwargIdentity, mergeRawKwargs,
              buildState, validate, buildPayload, adaptToServerPayload,

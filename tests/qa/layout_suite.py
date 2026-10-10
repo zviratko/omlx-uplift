@@ -35,7 +35,7 @@ Design notes:
 
 import json
 
-VERSION = "2"
+VERSION = "3"
 
 # viewport widths the editor must be correct at; 782 is the pair-grid
 # breakpoint, 1232 the rail flow/overlay breakpoint
@@ -415,6 +415,97 @@ class Suite:
                 self.t_pairs(self._probe(), "cs@%d" % w, w)
         self.close()
 
+    # ---------- MT-1: model-type gate ----------
+    _INVENTORY = """(() => {
+      const f = document.querySelector('#se-fields');
+      if (!f) return {err: 'editor not open'};
+      const rows = [...f.querySelectorAll('[data-key]')].map(e => e.dataset.key);
+      const note = f.querySelector('.se-typenote');
+      return JSON.stringify({
+        sections: [...f.querySelectorAll('h5.se-section')].map(h => h.textContent.trim()),
+        has_temp: rows.indexOf('temperature') >= 0,
+        has_trc: rows.indexOf('trust_remote_code') >= 0,
+        has_mtp: rows.indexOf('mtp_enabled') >= 0,
+        has_grammar: rows.indexOf('guided_grammar') >= 0,
+        has_kwargs_row: rows.indexOf('ctx') >= 0 || rows.indexOf('max_context_window') >= 0,
+        has_ttl: rows.indexOf('ttl_seconds') >= 0,
+        has_type: rows.indexOf('model_type_override') >= 0,
+        note: note ? note.textContent : '',
+      });
+    })()"""
+
+    def _inventory(self):
+        out = self._eval(self._INVENTORY)
+        return json.loads(out) if isinstance(out, str) else out
+
+    def t_type_gate(self):
+        """Non-LLM models show classic's ungated fields ONLY (MT-1): the
+        sampling/thinking/acceleration/spec-decode/grammar families are
+        hidden and an explanation note replaces them. Runs on a real
+        non-LLM model from the QA base — skipped (never faked) when none."""
+        ids = self._eval("""(async () => {
+          const d = await (await fetch('%s/admin/api/models')).json();
+          const non = (d.models || []).filter(m =>
+            m.model_type && m.model_type !== 'llm' && m.model_type !== 'vlm');
+          return JSON.stringify(non.map(m => m.id));
+        })()""" % self.base)
+        cand = json.loads(ids) if isinstance(ids, str) else ids
+        if not cand:
+            self.check("type gate (non-llm model)", None, "QA base has no non-LLM model")
+            return
+        self.model = cand[0]
+        self.open()
+        inv = self._inventory()
+        self.close()
+        if inv.get("err"):
+            self.check("type gate opens", False, inv["err"]); return
+        hidden = [k for k in ("has_temp", "has_trc", "has_mtp", "has_grammar",
+                              "has_kwargs_row") if inv[k]]
+        self.check("non-llm hides LLM families", not hidden,
+                   "%s leaks %s" % (self.model, hidden))
+        self.check("non-llm keeps TTL+type", inv["has_ttl"] and inv["has_type"], str(inv))
+        self.check("non-llm explains the gate", "EMBEDDING" in inv["note"].upper()
+                   or "does not apply" in inv["note"] or "RERANKER" in inv["note"].upper(),
+                   inv["note"][:80])
+        llm_secs = {"Thinking & Reasoning", "Sampling", "Acceleration",
+                    "Speculative Decoding", "Grammar", "Chat Template Kwargs"}
+        self.check("non-llm section set", not (llm_secs & set(inv["sections"])),
+                   ", ".join(inv["sections"]))
+
+    def t_type_flip(self):
+        """On an LLM model, overriding the type to 'embedding' must
+        re-shape the form live (classic's reactive x-show equivalent) and
+        reverting must restore it."""
+        self.open()
+        flipped = self._eval("""(() => {
+          const f = document.querySelector('#se-fields');
+          const sel = f.querySelector('[data-key="model_type_override"] select');
+          if (!sel) return 'NO-SELECT';
+          sel.value = 'embedding';
+          sel.dispatchEvent(new Event('change', {bubbles: true}));
+          return 'ok';
+        })()""")
+        self._wait(250)
+        if flipped != 'ok':
+            self.close(); self.check("type flip", False, str(flipped)); return
+        inv = self._inventory()
+        self.check("flip hides LLM families",
+                   not (inv["has_temp"] or inv["has_mtp"] or inv["has_trc"]),
+                   str({k: v for k, v in inv.items() if k.startswith('has')}))
+        self.check("flip explains", "EMBEDDING" in inv["note"].upper(), inv["note"][:80])
+        self._eval("""(() => {
+          const f = document.querySelector('#se-fields');
+          const sel = f.querySelector('[data-key="model_type_override"] select');
+          sel.value = '';
+          sel.dispatchEvent(new Event('change', {bubbles: true}));
+          return 'ok'; })()""")
+        self._wait(250)
+        inv2 = self._inventory()
+        self.check("revert restores the LLM form",
+                   inv2["has_temp"] and inv2["has_mtp"] and not inv2["note"],
+                   str({k: v for k, v in inv2.items() if k.startswith('has')}))
+        self.close()
+
     def run(self):
         origin = self._eval("location.origin") or ""
         if self.base and not origin.startswith(self.base):
@@ -465,6 +556,18 @@ class Suite:
             self.t_gate()
             self.t_rail_no_animation(WIDTHS[-1])
         finally:
+            self.close()
+        # MT-1: model-type gate (real non-LLM model + live flip on the LLM one)
+        llm_model = self.model
+        try:
+            self.t_type_gate()
+        finally:
+            self.model = llm_model
+            self.close()
+        try:
+            self.t_type_flip()
+        finally:
+            self.model = llm_model
             self.close()
         # B: Czech localization pass (QA reload is locale-persistent:
         # ?lang override lives in the URL we navigate to per reload)

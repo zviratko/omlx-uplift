@@ -427,6 +427,120 @@ function seSection(title) {
     return box;
 }
 
+/* ---- MT-1: model-type family ------------------------------------------
+   Classic hides its sampling rows and the whole Advanced column behind
+   `!model_type || llm || vlm` (four sites in _modal_model_settings.html).
+   The uplift editor mirrors that MECHANISM at section level: an embedding/
+   reranker/audio/decision model has no temperature, no thinking, no
+   grammar, no spec-decode — those settings make no sense for its engine.
+   The gate reads the EFFECTIVE type (a live model_type_override flip
+   re-shapes the form; the server picks the engine from the override).
+   The gated sections are SKIPPED, not greyed: UX-2's render-always rule
+   protects discoverability WITHIN the model's family; classic itself
+   removes the nodes for other types (template x-if / whole-column x-show),
+   and keeping 60 dead rows would bury the few settings that DO apply. */
+
+/* seModelEntry: the editor's view of the model as the SERVER sees it —
+   model_type rewritten by the override, exactly like
+   engine_pool.apply_settings_overrides does at discovery. buildState /
+   buildPayload / llmLike must all see this, or the form gates on the
+   checkpoint type while the engine runs the overridden one. */
+function seModelEntry() {
+    const m = seFormModel || {};
+    const ov = seValues && seValues.model_type_override;
+    return (ov && m.model_type !== ov)
+        ? Object.assign({}, m, { model_type: ov }) : m;
+}
+function seIsLlmFamily() {
+    // a global template is a type-agnostic settings bundle — never gate it
+    if (seFormModel && seFormModel._template) return true;
+    return window.UpliftModelSpec.llmLike(seModelEntry());
+}
+
+/* seTypeNote: banner above the form when the type gate hid fields.
+   Honest in both directions — what the user sees is a subset BY DESIGN
+   (classic parity), and what a type flip would do to hidden values. */
+function seTypeNote(container) {
+    const S = window.UpliftModelSpec;
+    const m = seFormModel || {};
+    const isTemplate = !!m._template;
+    const llm = seIsLlmFamily();
+    const overridePending = !!(seValues && seValues.model_type_override
+        && seValues.model_type_override !== (m.model_type || ''));
+    let note = container.querySelector('.se-typenote');
+    if (note) note.remove();
+    const showType = isTemplate || !llm || overridePending;
+    if (!showType) return;
+    note = document.createElement('div');
+    // OWN class — never reuse .se-pending: seMarkPendingRows() wipes every
+    // .se-pending host when no deferred keys exist (skill rule: a refresh
+    // renderer that deletes 'any element with class X' steals shared ones)
+    note.className = 'se-typenote';
+    const line = document.createElement('div');
+    if (isTemplate) {
+        // A global template is a bundle of UNIVERSAL settings applied to
+        // real models of any type — the template editor never type-gates
+        // its form; this strip explains what a template may carry.
+        line.textContent = C.tf('uplift.se.typenote.template',
+            'Global templates can carry every setting; each model applies only the keys that fit its type.');
+    } else if (!llm) {
+        const eff = S.normType(seValues && seValues.model_type_override
+            || m.model_type || '');
+        // .replace after tf (house pattern of the pending banner): tf only
+        // interpolates a FOUND key — the English fallback needs the manual
+        // substitution until en.json carries the key
+        line.textContent = C.tf('uplift.se.typenote.hidden',
+            'Generation settings (sampling, thinking, grammar, speculative decoding) do not apply to the {type} engine and are hidden here, exactly as in the classic dashboard.')
+            .replace('{type}', (eff || 'non-LLM').toUpperCase());
+    } else {
+        line.textContent = C.tf('uplift.se.typenote.flip',
+            'The type override switches this form to the {type} family. The server rebuilds the engine with the override on the next load.')
+            .replace('{type}', S.normType(seValues.model_type_override).toUpperCase());
+    }
+    note.append(line);
+    // sticky warning: the type gate HIDES rows, it cannot clear stored
+    // values (the classic PUT merges — omitted fields are not touched),
+    // and some load-time keys (trust_remote_code) still take effect for
+    // non-LLM engines. Name them so nobody believes the model is clean.
+    if (!isTemplate && !llm) {
+        const sticky = S.stickyForType(seBaseRaw).filter(
+            k => !seDirtyKeys().includes(k));
+        if (sticky.length) {
+            const warn = document.createElement('div');
+            warn.className = 'se-typenote-sticky';
+            warn.textContent = C.tf('uplift.se.typenote.sticky',
+                'Stored settings from the hidden families are NOT cleared by the type gate and keep their listed effect: {keys}.')
+                .replace('{keys}', sticky.join(', '));
+            note.append(warn);
+        }
+    }
+    container.prepend(note);
+}
+
+/* seReapplyMarks: renderEditorFields rebuilds nodes, losing the dirty
+   visuals applyRowState put on them and the amber pending-restart marks.
+   Re-derive BOTH from state (never cached): dirty rows from the active
+   tab's dirty set against its frozen original, pending rows from
+   seDeferred. The old pattern (U3 chip work) hit exactly this trap —
+   a re-render (kwargs add/remove, tab switch, type flip) silently
+   un-dirtied the CHANGES rail for rows whose value was still changed. */
+function seReapplyMarks() {
+    const t = seTab(); if (!t) return;
+    for (const k of t.dirty) {
+        const row = document.querySelector(`#se-fields [data-key="${k}"]`);
+        if (!row) continue;
+        const orig = (t.id !== 'base' && SE_INHERIT_KEYS.has(k))
+            ? seOvSnap(t)[k] : ((t.origVals || seOrig)[k]);
+        window.UpliftDirty.applyRowState({
+            orig, cur: seValues[k], row,
+            isSecret: MM_GLUE.SECRET_KEYS.has(k),
+            isRestart: seIsRuntimeKey(k),
+            display: MM_GLUE.gsDisplay });
+    }
+    seMarkPendingRows();
+    seUpdateSaveBtn();   // rail + SAVE label refresh after the rebuild
+}
+
 function renderEditorFields(container) {
     const S = window.UpliftModelSpec;
     const m = seFormModel || {};
@@ -489,9 +603,89 @@ function renderEditorFields(container) {
         ban.append(hint);
         container.append(ban);
     }
+    /* ---- MT-1 type gate: classic renders the identity row + TTL for EVERY
+       model type and hides sampling/thinking/acceleration/spec-decode/
+       grammar/kwargs plus trust_remote_code behind `llm || vlm`. Mirror the
+       mechanism (see helper comment above seModelEntry). ---- */
+    const llm = seIsLlmFamily();
+    let g;
+    const aliasRow = () => seBind('text', 'model_alias', { label: 'Display Name' });
+    const typeRow = () => seBind('select', 'model_type_override', {
+        label: 'Model Type',
+        // the override IS the type gate: re-shape the form live (classic's
+        // reactive x-show equivalent)
+        onChange: () => {
+            const root = document.getElementById('se-fields');
+            if (seFormModel && seFormModel._template) {
+                seRefreshGates(root || document);   // templates never gate
+                return;
+            }
+            if (!root) return;
+            if (!S.llmLike(seModelEntry())) {
+                // queued edits to rows the new family hides cannot be
+                // reviewed anymore — revert them (silent drops out of a
+                // CHANGES rail are what DIV-2 lessons call a lie)
+                const t = seTab();
+                if (t) {
+                    for (const k of [...t.dirty]) {
+                        if (!S.TYPE_ONLY_KEYS.has(k)) continue;
+                        const orig = (t.id !== 'base' && SE_INHERIT_KEYS.has(k))
+                            ? seOvSnap(t)[k] : ((t.origVals || seOrig)[k]);
+                        seValues[k] = orig === undefined
+                            ? (t.id !== 'base' ? undefined : seOrig[k]) : orig;
+                        t.dirty.delete(k);
+                        if (t.id !== 'base' && orig === undefined)
+                            delete t.overrides[k];
+                    }
+                    if (seIsBaseTab()) t.workVals = Object.assign({}, seValues);
+                }
+            }
+            renderEditorFields(root);
+        },
+        options: [{ value: '', label: 'Auto-detect' },
+                  ...S.MODEL_TYPE_OPTIONS.map(v => ({ value: v }))] });
+
+    if (!llm) {
+        /* Non-LLM engine (embedding / reranker / audio / decision):
+           classic's ungated fields only — alias, type, reasoning parser,
+           TTL — plus the embedding audio block where the server flags it.
+           Title follows the seSection literal convention (uplift.se.section.*
+           keys carry no translations, like every other section here). */
+        section('Basic Settings');
+        g = grid();
+        if (seIsBaseTab() || !seTab().template) g.append(aliasRow());
+        g.append(typeRow());
+        if (seValues.reasoning_parser !== undefined || m.reasoning_parsers) {
+            const seen = new Set();
+            const rp = [{ value: '', label: 'None' }];
+            const addp = (value, label) => {
+                if (!value || seen.has(value)) return;
+                seen.add(value); rp.push({ value, label: label != null ? label : value });
+            };
+            (GRAMMAR_PARSERS || []).forEach(p => addp(p.value,
+                p.label + (p.models && p.models.length ? ' (' + p.models.join(', ') + ')' : '')));
+            (m.reasoning_parsers || []).forEach(v => addp(v));
+            addp(seValues.reasoning_parser || '');
+            g.append(seBind('select', 'reasoning_parser', { label: 'Reasoning Parser', options: rp }));
+        }
+        g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1 }));
+        if (m.embedding_audio_supported) {
+            seFam(g, 'embedding_audio_enabled',
+                seBind('bool', 'embedding_audio_enabled', { label: 'Audio Input',
+                    hint: 'Load the audio encoder so /v1/embeddings accepts audio items. Uses more memory even for text-only requests. Applies after the model reloads.' }),
+                [seBind('number', 'embedding_audio_max_seconds',
+                    { label: 'Max Audio Length (s)', min: 1, step: 1,
+                      hint: 'Longer audio is cut at this length. Leave empty for 30 s. The model context caps it at about 5 minutes.' })]);
+        }
+        seTypeNote(container);
+        seRefreshGates(container);
+        seReapplyMarks();
+        return;
+    }
+
     /* ---- context & limits (R10-5: pulled out of Basic/Advanced) ---- */
     section('Context & Limits');
-    let g = grid();
+    g = grid();
     g.append(seBind('number', 'max_context_window', { label: 'Ctx Window', step: 1 }));
     g.append(seBind('number', 'max_tokens', { label: 'Max Tokens', step: 1 }));
     g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1 }));
@@ -567,11 +761,8 @@ function renderEditorFields(container) {
     section('Sampling');
     g = grid();
     if (seIsBaseTab() || !seTab().template)
-        g.append(seBind('text', 'model_alias', { label: 'Display Name' }));
-    g.append(seBind('select', 'model_type_override', {
-        label: 'Model Type',
-        options: [{ value: '', label: 'Auto-detect' },
-                  ...S.MODEL_TYPE_OPTIONS.map(v => ({ value: v }))] }));
+        g.append(aliasRow());
+    g.append(typeRow());
     const sampling = [
         ['temperature', 0, 2, 0.05, 'Temperature'], ['top_p', 0, 1, 0.05, 'Top P'],
         ['top_k', 0, null, 1, 'Top K'], ['repetition_penalty', 0.5, 2, 0.01, 'Repetition Penalty'],
@@ -833,8 +1024,11 @@ function renderEditorFields(container) {
     /* chat-template kwargs (subset: key/value rows, add/remove) */
     if (!S.isDiffusion(m)) renderCtKwargs(section('Chat Template Kwargs'));
 
+    // MT-1: explain the gate when an override flips an LLM to another family
+    seTypeNote(container);
     // UX-2: grey out every gated family whose master switch is off
     seRefreshGates(container);
+    seReapplyMarks();
 }
 
 /* ANE prompt processing (classic modal renders a Qwen variant and, for
@@ -1229,7 +1423,7 @@ async function openTemplateEditor(name) {
 }
 async function saveTemplateEditor(tpl, panel) {
     const msg = panel.querySelector('#se-msg');
-    const errors = window.UpliftModelSpec.validate(seValues);
+    const errors = window.UpliftModelSpec.validate(seValues, seFormModel);
     if (errors.length) { msg.textContent = errors[0]; MM_GLUE.toast(errors[0]); return; }
     msg.textContent = 'saving…';
     try {
@@ -1996,7 +2190,7 @@ async function saveEditor() {
     seCaptureTab();
     if (!seIsBaseTab()) return saveProfileTab(panel);
     const msg = panel.querySelector('#se-msg');
-    const errors = window.UpliftModelSpec.validate(seValues);
+    const errors = window.UpliftModelSpec.validate(seValues, seModelEntry());
     if (errors.length) {
         msg.textContent = errors[0];
         MM_GLUE.toast(errors[0]);
@@ -2145,7 +2339,7 @@ async function saveProfileTab(panel) {
     const mergedForValidate = Object.assign({}, seBaseVals,
         JSON.parse(JSON.stringify(t.workVals || {})));
     seNormalizeKwargs(mergedForValidate);   // R10-6
-    const errors = window.UpliftModelSpec.validate(mergedForValidate);
+    const errors = window.UpliftModelSpec.validate(mergedForValidate, seModelEntry());
     if (errors.length) { msg.textContent = errors[0]; MM_GLUE.toast(errors[0]); return; }
     // R10-6: convert the tab's edited kwargs entries back to the raw
     // settings shape so the inheritance diff below can persist them

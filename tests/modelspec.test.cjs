@@ -279,3 +279,97 @@ test('runtimeDiff: a profile enabling a whole feature diverges on its key', () =
 test('runtimeDiff: sampling-only differences never diverge', () => {
     assert.deepStrictEqual(S.runtimeDiff(rt({ temperature: 0.2 }), rt({ temperature: 1.1 })), []);
 });
+
+/* ---- MT-1: model-type family (classic's llm/vlm gate) ----------------- */
+const emb = (over = {}) => Object.assign({
+    id: 'e1', model_type: 'embedding', config_model_type: 'qwen3',
+}, over);
+test('llmLike: llm/vlm/empty are generation families', () => {
+    assert.strictEqual(S.llmLike(base()), true);
+    assert.strictEqual(S.llmLike(base({ model_type: 'vlm' })), true);
+    assert.strictEqual(S.llmLike(base({ model_type: '' })), true);
+    assert.strictEqual(S.llmLike(base({ model_type: null })), true);
+    assert.strictEqual(S.llmLike({}), true);          // unknown -> classic shows all
+});
+test('llmLike: non-generation types are hidden from the LLM form', () => {
+    for (const t of ['embedding', 'reranker', 'audio_stt', 'audio_tts',
+                     'audio_sts', 'decision'])
+        assert.strictEqual(S.llmLike(emb({ model_type: t })), false, t);
+});
+test('llmLike: model_type_override decides — both directions', () => {
+    // the server rewrites entry.model_type from the override at discovery,
+    // so the editor gate must follow the override, not the checkpoint
+    assert.strictEqual(S.llmLike(base({ model_type_override: 'embedding' })), false);
+    assert.strictEqual(S.llmLike(emb({ model_type_override: 'llm' })), true);
+});
+test('buildPayload: non-LLM type strips every type-only key', () => {
+    const st = S.buildState(emb(), { temperature: 0.7, mtp_enabled: true,
+        trust_remote_code: true, guided_grammar_enabled: true,
+        max_context_window: 4096, enable_thinking: true });
+    const p = S.buildPayload(st, emb());
+    for (const k of S.TYPE_ONLY_KEYS)
+        assert.ok(!(k in p), 'stripped key leaked into payload: ' + k);
+    // universal keys classic keeps for every type survive
+    assert.strictEqual(p.max_context_window, undefined);
+    assert.strictEqual(p.ttl_seconds, null);
+    assert.strictEqual(p.model_type_override, null);
+});
+test('buildPayload: override flip strips, override to llm keeps', () => {
+    const st = S.buildState(base(), { temperature: 0.7 });
+    const llm = S.buildPayload(st, base());
+    assert.strictEqual(llm.temperature, 0.7);
+    const flipped = S.buildPayload(Object.assign({}, st,
+        { model_type_override: 'embedding' }), base());
+    assert.ok(!('temperature' in flipped));
+    assert.strictEqual(flipped.model_type_override, 'embedding');
+    const backToLlm = S.buildPayload(Object.assign({}, st,
+        { model_type_override: 'vlm' }), emb());
+    assert.strictEqual(backToLlm.temperature, 0.7);
+});
+test('buildPayload: reasoning_parser and ttl stay for all types', () => {
+    // classic renders Row 1 (alias/type/reasoning parser) and TTL outside
+    // the llm/vlm gate — a reranker keeps its parser setting
+    const st = S.buildState(emb(), { reasoning_parser: 'qwen', ttl_seconds: 60 });
+    const p = S.buildPayload(st, emb());
+    assert.strictEqual(p.reasoning_parser, 'qwen');
+    assert.strictEqual(p.ttl_seconds, 60);
+});
+test('buildPayload: embedding audio pair only for supported models', () => {
+    const st = S.buildState(emb(), { embedding_audio_enabled: true,
+                                     embedding_audio_max_seconds: 45 });
+    const p = S.buildPayload(st, emb({ embedding_audio_supported: true }));
+    assert.strictEqual(p.embedding_audio_enabled, true);
+    assert.strictEqual(p.embedding_audio_max_seconds, 45);
+    const p2 = S.buildPayload(st, emb({ model_type_override: 'llm',
+                                        embedding_audio_supported: true }));
+    assert.strictEqual(p2.embedding_audio_max_seconds, 45); // llm gate must not eat it
+    const q = S.buildPayload(st, emb());
+    assert.ok(!('embedding_audio_enabled' in q), 'unsupported model: key not sent');
+});
+test('validate: non-LLM model skips hidden-family rules', () => {
+    const st = S.buildState(emb(), { mtp_enabled: true, dflash_enabled: true,
+        specprefill_enabled: true, temperature: 99 });
+    assert.deepStrictEqual(S.validate(st, emb()), [],
+        'stale LLM values must not block a reranker save');
+    assert.ok(S.validate(st, base()).length > 0, 'same values DO validate as llm');
+});
+test('stickyForType: only masters that are ON are named', () => {
+    assert.deepStrictEqual(S.stickyForType({ temperature: 1, top_p: 0.9 }), []);
+    assert.deepStrictEqual(S.stickyForType({ trust_remote_code: true,
+        thinking_budget_tokens: 512 }), ['trust_remote_code']);
+    const s = S.stickyForType({ mtp_enabled: true, dflash_enabled: false,
+        chat_template_kwargs: { x: 1 } });
+    assert.deepStrictEqual(s, ['mtp_enabled', 'chat_template_kwargs']);
+});
+test('runtimeSignature: embedding audio mirrors engine_pool gating', () => {
+    const rtA = (over = {}) => S.buildPayload(
+        S.buildState(emb({ embedding_audio_supported: true }), over),
+        emb({ embedding_audio_supported: true }));
+    const on = rtA({ embedding_audio_enabled: true, embedding_audio_max_seconds: 45 });
+    const off = rtA({ embedding_audio_enabled: false, embedding_audio_max_seconds: 10 });
+    // length counts only while the tower is loaded
+    assert.deepStrictEqual(S.runtimeDiff(off, rtA({ embedding_audio_max_seconds: 99 })), []);
+    const d = S.runtimeDiff(on, rtA({ embedding_audio_enabled: true,
+                                      embedding_audio_max_seconds: 10 }));
+    assert.deepStrictEqual(d.map(r => r.key), ['embedding_audio_max_seconds']);
+});

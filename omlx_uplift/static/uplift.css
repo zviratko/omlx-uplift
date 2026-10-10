@@ -871,6 +871,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-pending { border: 1px solid rgba(160, 120, 0, 0.7); background: rgba(220, 160, 0, 0.10);
     padding: 7px 10px; margin: 8px 0; font-size: 12px; }
 .se-pending button { margin-left: 10px; }
+/* MT-1: model-type gate note — same frame language as .se-pending, but its
+   OWN selector (seMarkPendingRows deletes .se-pending hosts) and a neutral
+   tint: this is an explanation, not a pending action */
+.se-typenote { border: 1px solid var(--edge); background: var(--row2);
+    padding: 7px 10px; margin: 8px 0; font-size: 12px; }
+.se-typenote .se-typenote-sticky { color: var(--accent); margin-top: 4px; }
 .se-div-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
     color: var(--diverge); font-weight: 600; }
 .se-div-show { font: 500 10px/1 var(--mono); padding: 3px 6px; }
