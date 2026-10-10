@@ -347,7 +347,6 @@
  "uplift.metric.mtp.acceptance": "acceptation MTP",
  "uplift.metric.mtp.accepted_tokens_s": "MTP acceptés tok/s",
  "uplift.metric.mtp.cycles_s": "cycles de vérif./s",
- "uplift.metric.mtp.depth_acceptance": "acceptation par profondeur MTP",
  "uplift.metric.mtp.depth_avg": "profondeur moyenne",
  "uplift.metric.mtp.depth_d1_pct": "profondeur 1 %",
  "uplift.metric.mtp.depth_d2_pct": "profondeur 2 %",

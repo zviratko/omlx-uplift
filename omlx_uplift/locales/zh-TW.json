@@ -343,7 +343,6 @@
  "uplift.metric.mtp.acceptance": "MTP 接受率",
  "uplift.metric.mtp.accepted_tokens_s": "MTP 接受 tok/s",
  "uplift.metric.mtp.cycles_s": "驗證週期/s",
- "uplift.metric.mtp.depth_acceptance": "MTP 各深度接受率",
  "uplift.metric.mtp.depth_avg": "平均深度",
  "uplift.metric.mtp.depth_d1_pct": "深度 1 %",
  "uplift.metric.mtp.depth_d2_pct": "深度 2 %",

@@ -343,7 +343,6 @@
  "uplift.metric.mtp.acceptance": "přijetí MTP",
  "uplift.metric.mtp.accepted_tokens_s": "MTP přijato tok/s",
  "uplift.metric.mtp.cycles_s": "verifikační cykly/s",
- "uplift.metric.mtp.depth_acceptance": "přijetí podle hloubky",
  "uplift.metric.mtp.depth_avg": "průměrná hloubka",
  "uplift.metric.mtp.depth_d1_pct": "hloubka 1 %",
  "uplift.metric.mtp.depth_d2_pct": "hloubka 2 %",

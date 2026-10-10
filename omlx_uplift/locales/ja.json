@@ -343,7 +343,6 @@
  "uplift.metric.mtp.acceptance": "MTP 受理",
  "uplift.metric.mtp.accepted_tokens_s": "MTP 受理 tok/s",
  "uplift.metric.mtp.cycles_s": "検証サイクル/s",
- "uplift.metric.mtp.depth_acceptance": "MTP 深さ別受理",
  "uplift.metric.mtp.depth_avg": "平均深さ",
  "uplift.metric.mtp.depth_d1_pct": "深さ1 %",
  "uplift.metric.mtp.depth_d2_pct": "深さ2 %",

@@ -358,7 +358,6 @@
  "uplift.metric.mtp.acceptance": "MTP 허용",
  "uplift.metric.mtp.accepted_tokens_s": "MTP 허용 tok/s",
  "uplift.metric.mtp.cycles_s": "검증 주기/s",
- "uplift.metric.mtp.depth_acceptance": "MTP 깊이별 허용",
  "uplift.metric.mtp.depth_avg": "평균 깊이",
  "uplift.metric.mtp.depth_d1_pct": "깊이 1 %",
  "uplift.metric.mtp.depth_d2_pct": "깊이 2 %",
