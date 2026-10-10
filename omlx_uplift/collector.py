@@ -191,6 +191,12 @@ class Collector:
         except Exception:
             log.debug("generation sampler collect failed", exc_info=True)
 
+        # MTP acceptance (mtp.*) — zeros every tick like the decode collect.
+        try:
+            pairs.update(collectors.collect_mtp(pool, now=now))
+        except Exception:
+            log.debug("mtp sampler collect failed", exc_info=True)
+
         # U20: macmon power/temperature (optional, non-blocking)
         try:
             self._macmon_collector.collect(pairs)

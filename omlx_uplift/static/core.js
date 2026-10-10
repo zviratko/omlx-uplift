@@ -249,6 +249,28 @@ const EXPLORE_METRICS = [
         { key: 'spec.saved_tokens_min' },
         { key: 'spec.restored_tokens_min' },
     ] },
+    // MTP acceptance (native Lightning MTP): windowed accept rate + the
+    // share of cycles the depth controller parked at zero. Both are % —
+    // SCALE-1 pins this card 0..100. The legend-only lines (depth tokens
+    // per cycle, mean effective depth, verify cycles/s) ride the fetch but
+    // never draw, so they never fight the pinned scale.
+    { key: 'mtp.accept_pct', fmt: 'pct', titleKey: 'mtp.acceptance', series: [
+        { key: 'mtp.accept_pct', fmt: 'pct', area: true },
+        { key: 'mtp.zero_cycles_pct', fmt: 'pct' },
+        { key: 'mtp.tokens_per_cycle', legendOnly: true },
+        { key: 'mtp.depth_avg', legendOnly: true },
+        { key: 'mtp.cycles_s', legendOnly: true },
+    ] },
+    // Per-depth acceptance ladder: of the cycles where a draft existed at
+    // depth j, how many verified it. Depth-1-only drafting (legacy path)
+    // reads d1 high, d2.. flat. % throughout — pinned 0..100.
+    { key: 'mtp.depth_d1_pct', fmt: 'pct', titleKey: 'mtp.depth_acceptance', series: [
+        { key: 'mtp.depth_d1_pct', fmt: 'pct' },
+        { key: 'mtp.depth_d2_pct', fmt: 'pct' },
+        { key: 'mtp.depth_d3_pct', fmt: 'pct' },
+        { key: 'mtp.depth_d4_pct', fmt: 'pct' },
+        { key: 'mtp.depth_d5_pct', fmt: 'pct' },
+    ] },
     // "Stuck or just slow": waiting / prefilling / running depth split.
     { key: 'queue.waiting', fmt: 'count', titleKey: 'queue.depth', series: [
         { key: 'queue.waiting', fmt: 'count' },

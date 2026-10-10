@@ -274,3 +274,43 @@ def install_prefill_tracker() -> None:
                 log.debug("prefill note_end failed", exc_info=True)
         remove._uplift_hook = True
         PrefillProgressTracker.remove = remove
+
+
+def install_mtp_hooks() -> None:
+    """MTP acceptance: wrap the per-sequence finish logger.
+
+    _log_mtp_stats(uid, stats, reason) fires on every way an MTP sequence
+    ends (finish, abort, park hand-off) and carries the sequence's full
+    _MtpStats. The tick walk in collectors.collect_mtp sees only what is
+    attached to a live generation batch, so this is the exact tail flush:
+    work born and finished inside one 5 s window still lands. Idempotent
+    against the walk (note_finish credits only the delta since the row's
+    last snapshot, and _log_mtp_stats fires repeatedly per state).
+
+    Independent of install()/install_prefill_tracker(): any one wrap may
+    bail on upstream layout drift without taking the others down. The
+    import reaches the uplift-patched mlx_lm module omlx already imports
+    itself (scheduler.py), so no new module is pulled into the server."""
+    try:
+        from omlx.patches.mlx_lm_mtp.batch_generator import _log_mtp_stats
+    except Exception:  # noqa: BLE001 — omlx layout changed; walk path alone
+        log.debug("mtp finish hook import failed", exc_info=True)
+        return
+    if getattr(_log_mtp_stats, "_uplift_hook", False):
+        return
+
+    @functools.wraps(_log_mtp_stats)
+    def _logged(uid, stats, finish_reason, *args, **kwargs):
+        result = _log_mtp_stats(uid, stats, finish_reason, *args, **kwargs)
+        try:
+            from .mtp_sampler import get_mtp_sampler
+            get_mtp_sampler().note_finish(stats)
+        except Exception:  # noqa: BLE001
+            log.debug("mtp note_finish failed", exc_info=True)
+        return result
+    _logged._uplift_hook = True
+    try:
+        from omlx.patches.mlx_lm_mtp import batch_generator as _bg
+        _bg._log_mtp_stats = _logged
+    except Exception:  # noqa: BLE001
+        log.debug("mtp finish hook install failed", exc_info=True)

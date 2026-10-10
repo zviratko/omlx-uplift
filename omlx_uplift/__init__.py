@@ -52,6 +52,8 @@ def register(app) -> None:
         # BE-prefill: prefill tracker wrap is independent of the engine
         # core wrap (install() may bail early on layout drift).
         instrument.install_prefill_tracker()
+        # MTP acceptance: finish-hook wrap, independent of both above.
+        instrument.install_mtp_hooks()
     except Exception:  # never break the server for a capture failure
         import logging
 

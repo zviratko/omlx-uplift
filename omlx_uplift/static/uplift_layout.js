@@ -47,6 +47,9 @@
         'met-pfx-lookup-hit-pct',
         'met-spec-saved-tokens-min',
         'met-queue-waiting',
+        // MTP acceptance cards (2026-10-10): tray-only by the same U19 rule.
+        'met-mtp-accept-pct',
+        'met-mtp-depth-d1-pct',
         // U20 gated (power/temperature): ships on the default board (a
         // hidden parked slot, U24) and shows itself only once macmon data
         // exists — same pattern as the header chips.
@@ -69,6 +72,9 @@
         'met-pfx-token-hit-pct', 'met-pfx-lookup-hit-pct',
         'met-spec-saved-tokens-min', 'met-queue-waiting',
         'met-pwr-total-w', 'met-therm-cpu-temp-c',
+        // MTP acceptance cards (2026-10-10): tray-only by the U19 rule —
+        // adding them never rewrites a saved layout.
+        'met-mtp-accept-pct', 'met-mtp-depth-d1-pct',
     ];
     // U24: gated blocks ship on the default board as hidden parked slots
     // (revealed by the macmon data flag, never by a layout rewrite).

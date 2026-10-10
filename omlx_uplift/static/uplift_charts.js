@@ -67,7 +67,8 @@ function restoreCursor(c) {
     }
     c.setCursor({ idx: i }, false);  // fires hooks + moves the focus point
 }
-const tpsData = [[], [], [], []];  // time, generation tok/s, prefill tok/s, cached tok/s (U30)
+const tpsData = [[], [], [], [], []];  // time, generation tok/s, prefill tok/s, cached tok/s (U30),
+                                       // MTP accepted tok/s (mtp.accepted_tokens_s)
 const memData = [[], [], [], [], []];  // time, omlx used GiB, custom ceiling GiB,
                                        // iogpu wired limit GiB (U38), ALL-models
                                        // hot cache GiB (U40 — one aggregated
@@ -88,7 +89,7 @@ const GIB = 2 ** -30;   // bytes -> GiB (memory chart draws GiB, user 2026-09-30
    model names in the hover legend made the axis label row wrap. History
    still comes from the stable per-model 'hot.<model>' keys via
    /uplift/api/metrics/hot, summed client-side per timestamp. */
-let chartHist = { gen: [], cached: [], prefill: [], mem: [], memLimit: [], cache: [], hot: [] };
+let chartHist = { gen: [], cached: [], prefill: [], mtp: [], mem: [], memLimit: [], cache: [], hot: [] };
 let tpsLiveOn = false, memLiveOn = false;   // FAST-1: live-resolution draw flags (badges)   // arrays of {ts, v, res}; hot: summed all-models hot cache (GiB)
 let historyDirty = true, historyLoading = false;
 /* The two shared-history cards backfill at the LARGEST window any of them
@@ -112,7 +113,7 @@ async function loadChartHistory() {
             // totals since boot): a near-static ramp on a long-running
             // server, the "flat line like cumulative stats" the user
             // reported. The average stays the small card + tile.
-            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('generation.tokens_s,rate.cached_tokens_s')}&window=${w}`).catch(() => null),
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('generation.tokens_s,rate.cached_tokens_s,mtp.accepted_tokens_s')}&window=${w}`).catch(() => null),
             // BE-prefill: the prefill line is the true per-tick computed
             // rate (prefill.tokens_s from the tracker event hooks) — the
             // old avg_prefill_tps is a session-lifetime average that no
@@ -150,7 +151,9 @@ async function loadChartHistory() {
         // race: a slow 24h response landing over a fresh 5m selection).
         if (w === windowToParam()) {
             chartHist = { gen: convMap(g, 'generation.tokens_s'),
-                          cached: convMap(g, 'rate.cached_tokens_s'), prefill: conv(p),
+                          cached: convMap(g, 'rate.cached_tokens_s'),
+                          mtp: convMap(g, 'mtp.accepted_tokens_s'),
+                          prefill: conv(p),
                           // U38/U40: bytes -> GiB ladder for the budget and
                           // hot-cache series (1024^3 — matches fmtBytes/GiB)
                           mem: convMap(m, 'mem.used_bytes', GIB),
@@ -195,16 +198,22 @@ function tpsWindowed() {
     // FAST-1 keeps it on the 5 s path deliberately: its source counter is
     // fed at request COMPLETION — a faster line would only repeat values.
     const k = C.mergeHistory(chartHist.cached || [], tpsData[0], tpsData[3], win, now);
+    // MTP accepted draft tok/s rides the LEFT axis (same unit: generation
+    // tokens it supplies) on the stored 5 s cadence — speculation cycles
+    // are deliberately not fast-sampled (FAST-1 never-fast list).
+    const m = C.mergeHistory(chartHist.mtp || [], tpsData[0], tpsData[4], win, now);
     // FAST-1: the 500 ms rate windows are spiky by construction — draw a
     // centered mean over the merged column (user pre-approved smoothing;
     // the window label says '2 Hz · smoothed').
-    const ts = [...new Set(g.ts.concat(p.ts, k.ts))].sort((a, b) => a - b);
+    const ts = [...new Set(g.ts.concat(p.ts, k.ts, m.ts))].sort((a, b) => a - b);
     const gi = new Map(g.ts.map((t, i) => [t, g.v[i]]));
     const pi = new Map(p.ts.map((t, i) => [t, p.v[i]]));
     const ki = new Map(k.ts.map((t, i) => [t, k.v[i]]));
+    const mi = new Map(m.ts.map((t, i) => [t, m.v[i]]));
     return [ts, ts.map(t => (gi.has(t) ? gi.get(t) : null)),
                 ts.map(t => (pi.has(t) ? pi.get(t) : null)),
-                ts.map(t => (ki.has(t) ? ki.get(t) : null))];
+                ts.map(t => (ki.has(t) ? ki.get(t) : null)),
+                ts.map(t => (mi.has(t) ? mi.get(t) : null))];
 }
 /* U40 (user 2026-09-30): the per-model top-3 hot-cache lines are GONE. The
    model names in the hover legend forced the value row to wrap onto a
@@ -489,6 +498,16 @@ function createCharts() {
     const cachedLine = line(C.tf('uplift.metric.rate.cached_tokens_s', 'cached tok/s'), 'gold', false, 'y2');
     cachedLine.dash = [4, 4];
     tpsSpecs.push(cachedLine);
+    // MTP accepted draft tok/s — only moves on mtp_enabled models; other
+    // sessions ride honest zeros (the collector writes them every tick).
+    // Stroke from the DEDUPED palette (3rd distinct colour): the raw
+    // heat/accent tokens equal gold on every default skin, and a line on
+    // the LEFT axis wearing the two RIGHT-axis lines' colour would read
+    // as one of them.
+    const mtpLine = line(C.tf('uplift.metric.mtp.accepted_tokens_s', 'MTP accepted tok/s'),
+                          'heat', false, 'y');
+    mtpLine.stroke = seriesPalette(col)[2] || mtpLine.stroke;
+    tpsSpecs.push(mtpLine);
     const tpsOpts = baseOpts(
         tpsSpecs,
         { scales: { y: { auto: true, range: ZERO_FLOOR_RANGE },
@@ -798,12 +817,15 @@ function metricFormat(def) {
    count (prefill tok/s, restored tok/min, fan RPM) and keeps the U8 floor. */
 const metricYRange = KIT.metricYRange;
 function metricLabel(key) {
-    const s = key.replace(/^(rate|tot|engines|mem|cache|pfx|spec|queue|pwr|therm|fan|prefill)\./, '')
+    const s = key.replace(/^(rate|tot|engines|mem|cache|pfx|spec|queue|pwr|therm|fan|prefill|mtp)\./, '')
         .replace(/_/g, ' ')
         .replace(/tps$/, 'tok/s');
     // U19/U20 human names for the uglier auto-translations.
     return ({ 'token hit pct': 'token hit %', 'lookup hit pct': 'lookup hit %',
               'saved tokens min': 'saved tok/min', 'restored tokens min': 'restored tok/min',
+              'accepted tokens s': 'MTP accepted tok/s', 'accept pct': 'accepted %',
+              'acceptance': 'MTP acceptance', 'depth acceptance': 'MTP depth acceptance',
+              'cycles s': 'verify cycles/s', 'tokens per cycle': 'emitted tok/cycle',
               'total w': 'total W', 'cpu w': 'CPU W', 'gpu w': 'GPU W', 'ane w': 'ANE W',
               'cpu temp c': 'CPU °C', 'gpu temp c': 'GPU °C', 'max rpm': 'max RPM',
               'max pct': 'fan %', 'tokens min': 'tok/min', 'draw': 'power draw',
@@ -1255,13 +1277,17 @@ let prefillLiveTps = null, prefillLiveTs = 0;
 // collector's generation.tokens_s IS the current rate; rides the same
 // latest-fetch below, stale reads push null (never a stale number).
 let genLiveTps = null, genLiveTs = 0;
+// MTP accepted draft tok/s (the chart's 4th line). Collector-written every
+// tick (zeros included), so a stale-free absence window is not needed the
+// way gen/prefill need theirs; same 120 s staleness rule keeps it honest.
+let mtpLiveTps = null, mtpLiveTs = 0;
 async function refreshSysPct() {
     const now = Date.now();
     if (sysFetching || now - sysAt < 10_000) return;
     sysFetching = true; sysAt = now;
     try {
         const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
-            encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s,prefill.tokens_s,generation.tokens_s'));
+            encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s,prefill.tokens_s,generation.tokens_s,mtp.accepted_tokens_s'));
         const lat = (r && r.latest) || {};
         const gb = k => (lat[k] && typeof lat[k].v === 'number') ? +(lat[k].v * GIB).toFixed(3) : null;
         const u = lat['mem.used_bytes'];
@@ -1277,6 +1303,8 @@ async function refreshSysPct() {
         if (pl && typeof pl.v === 'number') { prefillLiveTps = pl.v; prefillLiveTs = pl.ts * 1000; }
         const gl = lat['generation.tokens_s'];
         if (gl && typeof gl.v === 'number') { genLiveTps = gl.v; genLiveTs = gl.ts * 1000; }
+        const ml = lat['mtp.accepted_tokens_s'];
+        if (ml && typeof ml.v === 'number') { mtpLiveTps = ml.v; mtpLiveTs = ml.ts * 1000; }
     } catch (_) { /* keep last value */ }
     finally { sysFetching = false; renderMemLabel(); }
 }
@@ -1399,6 +1427,7 @@ function pushStatusSample(s) {
     tpsData[1].push(genLiveTps !== null && Date.now() - genLiveTs < 120_000 ? genLiveTps : null);
     tpsData[2].push(prefillLiveTps !== null && Date.now() - prefillLiveTs < 120_000 ? prefillLiveTps : null);
     tpsData[3].push(cachedTps !== null && Date.now() - cachedTpsTs < 120_000 ? cachedTps : null);
+    tpsData[4].push(mtpLiveTps !== null && Date.now() - mtpLiveTs < 120_000 ? mtpLiveTps : null);
     while (tpsData[0].length > MAX_POINTS) for (const col of tpsData) col.shift();
     // U40: ONE summed hot-cache point in GiB. Prefer upstream's process-wide
     // hot_cache_size_bytes (the exact global, same number classic shows);
