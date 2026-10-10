@@ -453,7 +453,7 @@
  "uplift.patches.counts": "{loaded} cargados · {active} activos",
  "uplift.patches.dev_ahead": "{n} commits sobre la base",
  "uplift.patches.dev_auto_fail": "Error al cambiar la autoactualización",
- "uplift.patches.dev_auto_label": "AUTOACTUALIZACIÓN — SEGUIR HEAD",
+ "uplift.patches.dev_auto_label": "AUTOACTUALIZACIÓN — SEGUIR HEAD EN \"OMLX-DEV UPGRADE\" INDEPENDIENTEMENTE DE OMLX VANILLA",
  "uplift.patches.dev_auto_on": "recompilar automáticamente al reiniciar cuando HEAD avance",
  "uplift.patches.dev_auto_pending": "HEAD avanzó — omlx-dev se recompilará en el próximo reinicio",
  "uplift.patches.dev_auto_pinned": "no disponible mientras la base está fijada",

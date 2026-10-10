@@ -449,7 +449,7 @@
  "uplift.patches.counts": "已載入 {loaded} 個 · 啟用中 {active} 個",
  "uplift.patches.dev_ahead": "領先基線 {n} 個提交",
  "uplift.patches.dev_auto_fail": "自動更新更改失敗",
- "uplift.patches.dev_auto_label": "自動更新 — 跟隨 HEAD",
+ "uplift.patches.dev_auto_label": "自動更新 — 在 \"OMLX-DEV UPGRADE\" 時跟隨 HEAD，獨立於 vanilla OMLX",
  "uplift.patches.dev_auto_on": "HEAD 變動時在重啟時自動重新建置",
  "uplift.patches.dev_auto_pending": "HEAD 已移動 — 下次重啟時將重新建置 omlx-dev",
  "uplift.patches.dev_auto_pinned": "基礎版本固定時不可用",

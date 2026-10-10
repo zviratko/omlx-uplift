@@ -449,7 +449,7 @@
  "uplift.patches.counts": "загружено: {loaded} · активно: {active}",
  "uplift.patches.dev_ahead": "{n} коммитов над базой",
  "uplift.patches.dev_auto_fail": "Не удалось изменить автообновление",
- "uplift.patches.dev_auto_label": "АВТООбНОВЛЕНИЕ — СЛЕДИТЬ ЗА HEAD",
+ "uplift.patches.dev_auto_label": "АВТООбНОВЛЕНИЕ — СЛЕДИТЬ ЗА HEAD ПРИ \"OMLX-DEV UPGRADE\" НЕЗАВИСИМО ОТ VANILLA OMLX",
  "uplift.patches.dev_auto_on": "пересобирать при перезапуске, если HEAD сдвинулся",
  "uplift.patches.dev_auto_pending": "HEAD сдвинулся — omlx-dev пересоберётся при следующем перезапуске",
  "uplift.patches.dev_auto_pinned": "недоступно, пока база закреплена",

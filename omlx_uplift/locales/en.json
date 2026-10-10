@@ -449,7 +449,7 @@
  "uplift.patches.counts": "{loaded} loaded · {active} active",
  "uplift.patches.dev_ahead": "{n} commits over base",
  "uplift.patches.dev_auto_fail": "Auto-update change failed",
- "uplift.patches.dev_auto_label": "AUTO UPDATE — TRACK HEAD",
+ "uplift.patches.dev_auto_label": "AUTO UPDATE — TRACK HEAD ON \"OMLX-DEV UPGRADE\" INDEPENDENT OF VANILLA OMLX",
  "uplift.patches.dev_auto_on": "auto-rebuild on restart when HEAD moves",
  "uplift.patches.dev_auto_pending": "HEAD moved — omlx-dev will rebuild on the next restart",
  "uplift.patches.dev_auto_pinned": "unavailable while the base is pinned",

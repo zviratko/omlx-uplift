@@ -449,7 +449,7 @@
  "uplift.patches.counts": "読み込み済み {loaded} 件 · 有効 {active} 件",
  "uplift.patches.dev_ahead": "ベースより{n}コミット",
  "uplift.patches.dev_auto_fail": "自動更新の変更に失敗しました",
- "uplift.patches.dev_auto_label": "自動更新 — HEAD を追跡",
+ "uplift.patches.dev_auto_label": "自動更新 — \"OMLX-DEV UPGRADE\" 時に HEAD を追跡（vanilla OMLX とは独立）",
  "uplift.patches.dev_auto_on": "HEAD が動いたら再起動時に自動で再ビルド",
  "uplift.patches.dev_auto_pending": "HEAD が移動しました — 次回再起動時に omlx-dev を再ビルドします",
  "uplift.patches.dev_auto_pinned": "ベースが固定されている間は使用できません",
