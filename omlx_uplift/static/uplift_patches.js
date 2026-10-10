@@ -148,11 +148,13 @@ async function ptEnableWithApproval(p, approve) {
 }
 
 // One display line per safeguard GROUP (mirrors the backend grouping):
-// one line per code with its path list, then the advisory lines. One
-// line per problem used to mean eight copies of the same 500-char
-// rebuild hint.
-// (paths stored in the manifest are the REWRITTEN ones — say so, or the
-// diff view looks like it disagrees with the source URL).
+// one line per code, then the advisory lines. One line per problem used to
+// mean eight copies of the same 500-char rebuild hint.
+// SIMPLIFY (user 2026-10-10): the line says WHAT the patch targets (kernels,
+// files off the keg) — it must NOT list the affected paths. The per-file
+// detail already lives in the diff view the card links to, and repeating it
+// here buried the actual warning. Group size stays as a bare count prefix
+// ('7 files: ...') so a big patch still reads bigger than a one-path flag.
 function ptSafeguardLines(p) {
     const out = [];
     const ver = (p.versions || []).find(v => v.v === (p.desired_version ||
@@ -169,14 +171,12 @@ function ptSafeguardLines(p) {
     return out;
 }
 
-// 'path — msg' for one path, '<n> files (a, b, …) — msg' for a group
+// '<msg>' for one path, '<n> files: <msg>' for a group. No path list.
 function ptGroupLine(grp) {
+    const msg = grp.message || '';
     const paths = grp.paths || (grp.path ? [grp.path] : []);
-    if (paths.length === 1) return paths[0] + ' — ' + (grp.message || '');
-    if (!paths.length) return grp.message || '';
-    const shown = paths.slice(0, 6).join(', ');
-    const more = paths.length > 6 ? ', … (+' + (paths.length - 6) + ')' : '';
-    return paths.length + ' (' + shown + more + ') — ' + (grp.message || '');
+    if (paths.length > 1) return paths.length + ' files: ' + msg;
+    return msg;
 }
 
 function ptChip(text, cls, title) {

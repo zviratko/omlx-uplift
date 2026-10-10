@@ -129,13 +129,17 @@ test('card renders ONE grouped problem line for 7 kernel paths', async () => {
     assert.equal(cards.length, 1);
     const adv = texts(cards[0], 'pt-advisories');
     assert.equal(adv.length, 1, `one grouped line, got ${adv.length}: ${JSON.stringify(adv)}`);
-    assert.match(adv[0], /^⚠ 7 \(/, 'count + path list prefix');
+    // SIMPLIFY (user 2026-10-10): count prefix + message, NO path list —
+    // the paths live in the diff view, the safeguard line names the GROUP
+    assert.match(adv[0], /^⚠ 7 files: touches a bundled custom kernel/,
+        'bare count prefix, no paths');
+    assert.ok(!adv[0].includes('csrc/'), 'no affected-file list in the message line');
     const hintCount = adv.filter(t => t.includes('brew reinstall')).length
         + texts(cards[0], 'pt-sg-rebuild').filter(t => t.includes('brew reinstall')).length;
     assert.equal(hintCount, 1, 'the long hint appears EXACTLY once per card');
 });
 
-test('legacy single-path problem rows still render', async () => {
+test('legacy single-path problem rows still render (message only)', async () => {
     const sb = loadPatchesModule();
     await runPoll(sb, payload([basePatch({
         id: 'old', state: 'pending', enabled: false,
@@ -149,7 +153,8 @@ test('legacy single-path problem rows still render', async () => {
         .filter(c => (c.className || '').includes('pt-card'));
     const adv = texts(cards[0], 'pt-advisories');
     assert.equal(adv.length, 1);
-    assert.match(adv[0], /omlx\/custom_kernels\/x\/fast\.py — legacy row/);
+    // SIMPLIFY: one path = the plain message, no path prefix either
+    assert.match(adv[0], /^⚠ legacy row$/);
 });
 
 test('advisory-only dev card: one line, no approval buttons, no rebuild row', async () => {

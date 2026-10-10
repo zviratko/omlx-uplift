@@ -315,9 +315,9 @@ def assess(parsed: dict, tree_root: str, tree_kind: str = "keg") -> dict:
                             "by the dev rebuild (the formula's custom-kernel "
                             "option must be on for a real effect)")})
         else:
-            msg = ("touches a bundled custom kernel; the compiled artifacts "
-                   "(_ext*.so, *.dylib, *.metallib) are NOT rebuilt by this "
-                   "patch — native changes need a rebuild")
+            msg = ("touches the bundled native kernels — this patch does "
+                   "NOT rebuild the compiled artifacts, native changes "
+                   "need a kernel rebuild to take effect")
             if kernel_native_missing:
                 # grounded: only true when the gated tree really lacks
                 # the native source (a source checkout carries csrc/ and
