@@ -1196,8 +1196,17 @@ function _neededUnits(el) {
             // Chart bodies stretch to their card, so their rect measures
             // yesterday's size — demand = the CSS min-height floor instead.
             // Otherwise a grown card can never shrink (rect ratchet).
+            // LEGEND-COMPACT (user 2026-10-10: "the values under the graphs
+            // for memory and mtp acceptance are outside of the boxes"):
+            // the metric floor ignored the legend entirely — uPlot renders
+            // it below the canvas INSIDE the host, so every legend row
+            // spilled past the card border. Demand = floor + the legend's
+            // visible height (hidden rows from applyCardLegendCompact
+            // measure 0, so the compact MTP card asks for exactly two rows).
             const lg = plot.parentElement.querySelector('.u-legend');
-            const floor = plot.classList.contains('metric-plot') ? 96
+            const lgH = (lg && lg.childElementCount)
+                ? Math.ceil(lg.getBoundingClientRect().height) || 0 : 0;
+            const floor = plot.classList.contains('metric-plot') ? 96 + lgH
                 : Math.max(210, parseFloat(getComputedStyle(plot).minHeight) || 210)
                   + (lg ? 20 : 0);
             bottom = Math.max(bottom, child.getBoundingClientRect().top - pr.top + floor);

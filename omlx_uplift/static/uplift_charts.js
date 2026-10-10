@@ -1165,6 +1165,7 @@ function createMetricCard(def, park) {
     const chart = new uPlot(metricOpts(id, def, col),
         multInitData(def), host);
     bindCursorTip(chart);
+    applyCardLegendCompact(chart, def);   // LEGEND-COMPACT (card only)
     // SWEEP178: legend live:false (see metricOpts) — hover must drive the
     // shared legendUpdater exactly like the tps/mem charts do; on mouseleave
     // it re-pins to the latest sample.
@@ -1190,6 +1191,7 @@ function reinitMetricPlot(id) {
     e.chart = new uPlot(metricOpts(id, e.def, col),
         e.chart.data && e.chart.data.length ? e.chart.data : multInitData(e.def), e.host);
     bindCursorTip(e.chart);
+    applyCardLegendCompact(e.chart, e.def);   // LEGEND-COMPACT survives theme/skin rebuilds
 }
 function fitMetricPlot(id) {
     const e = metricCharts.get(id);
@@ -1216,10 +1218,43 @@ function fitMetricPlot(id) {
         h = Math.max(64, Math.round(cont.getBoundingClientRect().bottom - border
             - e.host.parentElement.getBoundingClientRect().top - padBottom));
     }
-    host.style.height = h + 'px';
+    // LEGEND-COMPACT (user 2026-10-10: "the values under the graphs for
+    // memory and mtp acceptance are outside of the boxes"): uPlot renders
+    // the legend BELOW the canvas inside the wrapper, but the box-driven
+    // fit only ever sized the canvas — every legend row spilled past the
+    // card border. The HOST box (set by the row engine via the content
+    // demand) is the allocation: carve the legend height out of it and
+    // size the canvas into the remainder. Never grow the host here — the
+    // host's own ResizeObserver re-fires this fit, and adding lgH would
+    // ratchet host = h + lgH upward on every pass (unstable fixed point
+    // whenever lgH > the 32px headroom above the canvas floor).
+    const lg = host.querySelector('.u-legend');
+    const lgH = (lg && lg.childElementCount)
+        ? Math.ceil(lg.getBoundingClientRect().height) || 0 : 0;
+    h = Math.max(64, h - lgH);
+    host.style.height = (h + lgH) + 'px';
     const wrap = host.querySelector('.uplot');
-    if (wrap) wrap.style.height = h + 'px';   // setSize only ever grows it
+    if (wrap) wrap.style.height = (h + lgH) + 'px';   // setSize only ever grows it
     if (host.clientWidth > 0) e.chart.setSize({ width: host.clientWidth, height: h });
+}
+/* LEGEND-COMPACT (user 2026-10-10): s.legendHide drops a series row from
+   the CARD legend. The vendored uPlot has no per-series legend toggle —
+   the rows exist 1:1 with series (after an optional Time row, same probe
+   legendUpdater uses) — so hide them by DOM right after the plot builds.
+   Everything else keeps the full story: hover values ride the tooltip
+   (bindCursorTip, its own DOM), the pop-out rebuilds through metricOpts
+   WITHOUT this pass (uplift_popout.js owns its legend), and the data
+   columns are untouched, so legendUpdater still maps rows by position. */
+function applyCardLegendCompact(chart, def) {
+    if (!chart || !def || !def.series) return;
+    const hidden = def.series.map((s, i) => (s.legendHide ? i : -1)).filter(i => i >= 0);
+    if (!hidden.length) return;
+    const rows = [...chart.root.querySelectorAll('.u-legend .u-series')];
+    if (!rows.length) return;
+    const hasTimeRow = rows[0].querySelector('.u-label')?.textContent === 'Time';
+    const seriesRows = hasTimeRow ? rows.slice(1) : rows;
+    for (const i of hidden)
+        if (seriesRows[i]) seriesRows[i].style.display = 'none';
 }
 function fitAllMetricPlots() { for (const id of metricCharts.keys()) fitMetricPlot(id); }
 function metricXAxis(win, col) {

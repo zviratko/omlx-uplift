@@ -270,16 +270,20 @@ const EXPLORE_METRICS = [
     // cycles/s, accepted tok/s. mtp.depth_dN_pct stay collected for the
     // explore surface. stack:true = uplift_charts draws the columns as
     // uPlot bands over cumulative paths (vendor has no native stacking).
+    // LEGEND-COMPACT (user 2026-10-10): ten legend rows overflow the w=8
+    // card box — in the CARD the stacked bands and the secondary stats
+    // drop out of the legend (hover tooltip + pop-out keep every value);
+    // only mean depth and accepted tok/s stay under the graph.
     { key: 'mtp.accept_pct', fmt: 'pct', titleKey: 'mtp.acceptance', stack: true, series: [
-        { key: 'mtp.cyc0_pct', fmt: 'pct' },
-        { key: 'mtp.cyc1_pct', fmt: 'pct' },
-        { key: 'mtp.cyc2_pct', fmt: 'pct' },
-        { key: 'mtp.cyc3_pct', fmt: 'pct' },
-        { key: 'mtp.cyc4p_pct', fmt: 'pct' },
-        { key: 'mtp.accept_pct', fmt: 'pct', legendOnly: true },
-        { key: 'mtp.tokens_per_cycle', legendOnly: true },
+        { key: 'mtp.cyc0_pct', fmt: 'pct', legendHide: true },
+        { key: 'mtp.cyc1_pct', fmt: 'pct', legendHide: true },
+        { key: 'mtp.cyc2_pct', fmt: 'pct', legendHide: true },
+        { key: 'mtp.cyc3_pct', fmt: 'pct', legendHide: true },
+        { key: 'mtp.cyc4p_pct', fmt: 'pct', legendHide: true },
+        { key: 'mtp.accept_pct', fmt: 'pct', legendOnly: true, legendHide: true },
+        { key: 'mtp.tokens_per_cycle', legendOnly: true, legendHide: true },
         { key: 'mtp.depth_avg', legendOnly: true },
-        { key: 'mtp.cycles_s', legendOnly: true },
+        { key: 'mtp.cycles_s', legendOnly: true, legendHide: true },
         { key: 'mtp.accepted_tokens_s', legendOnly: true },
     ] },
     // "Stuck or just slow": waiting / prefilling / running depth split.
