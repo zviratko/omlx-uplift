@@ -1331,10 +1331,17 @@ function metricFetch(id, force) {
     const sk = w + '|' + key;
     if (_fetching.has(sk)) return;
     _fetching.add(sk);
+    // Freshness stamps at REQUEST issue, not at response: with a slow
+    // query, a response-stamped clock re-added the whole RTT to every
+    // cycle — the next 5 s tick still saw '< TTL' and skipped, and the
+    // period doubled (live proof: 6.9 s fetch gaps, values lagging a
+    // full extra tick before popping). Request-stamped, the next draw
+    // tick after TTL elapses always sees the data as due.
+    cache.at = Date.now();
     const seq = (_seq[sk] = (_seq[sk] || 0) + 1);
     CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent(key)}&window=${w}`)
         .then(d => {
-            cache.at = Date.now(); cache.fails = 0;
+            cache.fails = 0;
             const map = d.series_map || {};
             Object.assign(cache.data, map);
             // Record every REQUESTED key as known — an answered-but-absent
