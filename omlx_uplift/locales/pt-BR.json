@@ -17,6 +17,7 @@
  "uplift.bench.engine_classic": "oMLX Classic",
  "uplift.bench.engine_harness": "LM-Eval",
  "uplift.bench.engine_hint": "oMLX Classic amostra N perguntas no total. O LM-Eval (harness da comunidade lm-eval) avalia N POR SUBTAREFA — MMLU tem 57 subtarefas, então 30 viram 1710 requisições.",
+ "uplift.bench.generation_length": "Comprimento de geração",
  "uplift.bench.metric": "Métrica",
  "uplift.bench.mteb_env_missing": "Ambiente MTEB ausente — execute: omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "Superfície nativa — ainda não implementada.",

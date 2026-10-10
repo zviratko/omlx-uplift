@@ -17,6 +17,7 @@
  "uplift.bench.engine_classic": "oMLX Classic",
  "uplift.bench.engine_harness": "LM-Eval",
  "uplift.bench.engine_hint": "oMLX Classic nabírá celkem N otázek. LM-Eval (komunitní harness lm-eval) hodnotí N PO DÍLČÍM ÚKOLU — MMLU má 57 dílčích úkolů, takže 30 je 1710 požadavků.",
+ "uplift.bench.generation_length": "Délka generování",
  "uplift.bench.metric": "Metrika",
  "uplift.bench.mteb_env_missing": "Chybí prostředí MTEB — spusťte: omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "Nativní povrch — zatím není implementováno.",

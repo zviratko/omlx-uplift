@@ -17,6 +17,7 @@
  "uplift.bench.engine_classic": "oMLX Classic",
  "uplift.bench.engine_harness": "LM-Eval",
  "uplift.bench.engine_hint": "oMLX Classic は合計N問をサンプリングします。LM-Eval（コミュニティハーネス lm-eval）はサブタスクごとにN問を評価します — MMLUは57サブタスクのため、30は1710リクエストになります。",
+ "uplift.bench.generation_length": "生成長",
  "uplift.bench.metric": "指標",
  "uplift.bench.mteb_env_missing": "MTEB 環境がありません — 実行: omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "ネイティブサーフェス — まだ未実装です。",

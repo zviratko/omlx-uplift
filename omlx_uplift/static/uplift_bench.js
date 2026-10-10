@@ -40,6 +40,11 @@ function t(key, fb) {
 
 var PROMPT_LENGTHS = [1024, 4096, 8192, 16384, 32768, 65536, 131072, 200000];
 var BATCH_SIZES = [2, 4, 8];
+// TG-OPT: generation length is selectable (classic fixes it at 128). The
+// engine already takes generation_length on every request (single + batch)
+// — no server-side change needed; default stays 128 so a run started
+// without touching the control is byte-identical to classic's.
+var GEN_LENGTHS = [128, 256, 512, 1024];
 var TARGET_TOKENS = [16384, 32768, 65536, 131072, 262144, 524288];
 // U50: context-target option list for a model, pure so it is unit-testable.
 // Rules: the model's OWN config.json window is offered first and selected
@@ -1082,9 +1087,17 @@ var TP = {
             lb.append(cb, document.createTextNode(' pp' + pp.toLocaleString()));
             ppBox.appendChild(lb);
         });
-        var genNote = el('p', 'native-stub-note', t('bench.config.generation_hint',
-            'Generation length: 128 tokens (fixed)'));
-        row2.append(labeled(t('bench.config.single_request', 'Single Request Tests'), ppBox), genNote);
+        var genBox = el('div', 'bench-chips'); genBox.id = 'bench-tp-gen';
+        GEN_LENGTHS.forEach(function (tg, i) {
+            var lb = el('label', 'chip');
+            var rb = el('input'); rb.type = 'radio'; rb.name = 'bench-tp-gen';
+            rb.value = String(tg);
+            if (i === 0) rb.checked = true;
+            lb.append(rb, document.createTextNode(' tg' + tg));
+            genBox.appendChild(lb);
+        });
+        row2.append(labeled(t('bench.config.single_request', 'Single Request Tests'), ppBox),
+                    labeled(t('uplift.bench.generation_length', 'Generation length'), genBox));
 
         var row3 = el('div', 'bench-row');
         var bsBox = el('div', 'bench-chips'); bsBox.id = 'bench-tp-bs';
@@ -1107,6 +1120,11 @@ var TP = {
         // old form kept the toggle in the details but rendered its inputs
         // at form level — the 'visible while you were not looking' half of
         // the defect)
+        // TG-OPT: the classic batch hint is static ('…/ tg128'); make it
+        // track the chosen generation length so the form can't lie. All 10
+        // locales carry the 'tg128' token in this string — replace is a
+        // no-op if a future locale does not.
+        var batchHint = el('p', 'native-stub-note', t('bench.config.batch_hint', 'Batch tests use pp1024 / tg128'));
         var adv = advancedSection([
             check('bench-tp-ane', t('bench.config.ane_aligned_prompt', 'ANE-aligned prompts (+1 token)'), false),
             check('bench-tp-lm', t('bench.config.force_lm_engine', 'Force mlx-lm engine'), false),
@@ -1115,7 +1133,7 @@ var TP = {
             check('bench-tp-upload', t('uplift.bench.upload_results', 'Upload results to community leaderboard'), false),
             el('p', 'native-stub-note', t('uplift.bench.upload_hint',
                 'Off by default: a native run never posts to omlx.ai unless you check this.')),
-            el('p', 'native-stub-note', t('bench.config.batch_hint', 'Batch tests use pp1024 / tg128'))]);
+            batchHint]);
         row3.append(labeled(t('bench.config.batch_tests', 'Continuous Batching Tests'), bsBox));
 
         var actions = el('div', 'bench-actions');
@@ -1133,6 +1151,13 @@ var TP = {
             if (ext) ext.addEventListener('change', function () {
                 var er = gid('bench-tp-ext-row');
                 if (er) er.hidden = !ext.checked;
+            });
+            var gen = gid('bench-tp-gen');
+            if (gen) gen.addEventListener('change', function (ev) {
+                if (ev.target && ev.target.checked && batchHint)
+                    batchHint.textContent = t('bench.config.batch_hint',
+                        'Batch tests use pp1024 / tg128')
+                        .replace('tg128', 'tg' + Number(ev.target.value).toLocaleString());
             });
         });
         return f;
@@ -1182,10 +1207,11 @@ var TP = {
     },
 
     collect: function () {
+        var genSel = gid('bench-tp-gen') ? gid('bench-tp-gen').querySelector('input:checked') : null;
         var body = {
             model_id: gid('bench-tp-model') ? gid('bench-tp-model').value : '',
             prompt_lengths: checkedVals(gid('bench-tp-pp')),
-            generation_length: 128,
+            generation_length: genSel ? Number(genSel.value) : 128,
             batch_sizes: checkedVals(gid('bench-tp-bs')),
             context_profile: gid('bench-tp-profile') ? gid('bench-tp-profile').value : 'code_python',
             warmup_mode: 'quick',

@@ -17,6 +17,7 @@
  "uplift.bench.engine_classic": "oMLX Classic",
  "uplift.bench.engine_harness": "LM-Eval",
  "uplift.bench.engine_hint": "oMLX Classic 共抽取 N 道题。LM-Eval（社区工具链 lm-eval）按每个子任务各评 N 道 — MMLU 有 57 个子任务，30 会变成 1710 次请求。",
+ "uplift.bench.generation_length": "生成长度",
  "uplift.bench.metric": "指标",
  "uplift.bench.mteb_env_missing": "缺少 MTEB 环境 — 请运行：omlx-uplift mteb-env create",
  "uplift.bench.native_stub": "原生界面 — 尚未实现。",
