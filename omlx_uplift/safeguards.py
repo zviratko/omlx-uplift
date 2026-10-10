@@ -275,8 +275,18 @@ def assess(parsed: dict, tree_root: str, tree_kind: str = "keg") -> dict:
     kernel_paths: list[str] = []
     kernel_native_missing = False   # a csrc/ path the gated tree lacks
     outside_src: list[str] = []   # off-tree paths on a src checkout (advisory)
+    formula_paths: list[str] = []
     for fp in parsed.get("files", []):
         path = fp.get("path") or ""
+        # FORMULA-INERT (user 2026-10-10: a PR editing Formula/omlx.rb
+        # gated clean on the dev carrier — the checkout CARRIES the
+        # formula — showed 'applied' and changed nothing). Homebrew reads
+        # the formula from the TAP repo, never from the built tree, so a
+        # patch onto Formula/*.rb is inert data wherever it lands. Hold
+        # it on EVERY tree kind and say why (the tap is the apply step).
+        if path == "Formula" or path.startswith("Formula/"):
+            formula_paths.append(path)
+            continue
         if not path.startswith(_OMLX_PREFIX):
             if lexists(path):
                 continue  # in-keg sibling: fine, no warning
@@ -304,6 +314,14 @@ def assess(parsed: dict, tree_root: str, tree_kind: str = "keg") -> dict:
             kernel_paths.append(path)
             if "/csrc/" in f"/{rel}" and not lexists(path):
                 kernel_native_missing = True
+    if formula_paths:
+        problems.append({
+            "code": "formula_inert",
+            "paths": formula_paths,
+            "message": ("edits a Homebrew formula — brew installs from the "
+                        "formula in the TAP repo, never from this tree, so "
+                        "this patch cannot take effect here; edit the tap's "
+                        "Formula/*.rb and restart the brew service instead")})
     if kernel_paths:
         if tree_kind == "src":
             # dev carrier: uplift-dev materializes these hunks and the

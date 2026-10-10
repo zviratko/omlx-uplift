@@ -158,6 +158,67 @@ def test_dry_run_builds_branch_and_reports(home, monkeypatch):
     assert "FileHandler" not in names
 
 
+def test_stream_build_forwards_output_and_rc(home, monkeypatch):
+    """BUILD-PROGRESS-1: _stream_build pipes the child's merged output
+    into res.lines AS IT ARRIVES (timestamped) and returns its rc. A
+    failing build's log must reach the dashboard even though brew used to
+    write to the server's inherited stdout."""
+    import sys as _sys
+    res = devsrc.BuildResult(ok=False, stage="build", returncode=2, lines=[])
+    seen = []
+    res.on_line = lambda _r, stream, text: seen.append((stream, text))
+    rc = devsrc._stream_build(
+        res, [_sys.executable, "-c",
+              "print('==> Downloading things'); print('boom', file=__import__('sys').stderr); raise SystemExit(3)"])
+    assert rc == 3
+    assert any("Downloading things" in t for _, t in res.lines)
+    assert any("boom" in t for _, t in res.lines)
+    assert seen == [(s, t) for s, t in res.lines]   # live, not batched
+    assert res.lines[0][1].startswith("[0"), "lines carry an elapsed stamp"
+
+
+def test_stream_build_missing_binary(home):
+    res = devsrc.BuildResult(ok=False, stage="build", returncode=0, lines=[])
+    rc = devsrc._stream_build(res, ["/nonexistent/uplift-test-binary"])
+    assert rc == 127
+    assert any("could not start" in t for _, t in res.lines)
+
+
+def test_dashboard_build_streams_progress_then_clears_on_success(home, monkeypatch):
+    """The router handler must forward live lines into _DEV_BUILD['log']
+    and KEEP them on failure, but clear them on success (DEV-10)."""
+    from omlx_uplift.routers import dev as dev_mod
+    from omlx_uplift import devsrc
+
+    def fake_build(**kw):
+        on_line = kw["on_line"]
+        res = devsrc.BuildResult(ok=True, stage="build", returncode=0, lines=[])
+        on_line(res, "out", "[00:12] ==> brew reinstall")
+        res.ok, res.stage = True, "ok"
+        return res
+    monkeypatch.setattr(devsrc, "run_dev_build", fake_build)
+    with dev_mod._DEV_BUILD_LOCK:
+        dev_mod._DEV_BUILD.update({"running": True, "result": None, "log": []})
+    dev_mod._dev_build_run({})
+    with dev_mod._DEV_BUILD_LOCK:
+        assert dev_mod._DEV_BUILD["log"] == []      # success: quiet again
+        assert dev_mod._DEV_BUILD["result"] == 0
+
+    def fake_fail(**kw):
+        on_line = kw["on_line"]
+        res = devsrc.BuildResult(ok=False, stage="build", returncode=1, lines=[])
+        on_line(res, "out", "[01:03] Error: failure while building")
+        return res
+    monkeypatch.setattr(devsrc, "run_dev_build", fake_fail)
+    with dev_mod._DEV_BUILD_LOCK:
+        dev_mod._DEV_BUILD.update({"running": True, "result": None, "log": []})
+    dev_mod._dev_build_run({})
+    with dev_mod._DEV_BUILD_LOCK:
+        log = list(dev_mod._DEV_BUILD["log"])
+    assert any("failure while building" in l for l in log), log
+    assert any("intact" in l for l in log), log
+
+
 def test_cli_no_longer_reaches_devsrc_privates():
     """BE-1(4): the private-name edges in both directions are deleted."""
     from pathlib import Path

@@ -204,24 +204,45 @@ class DevBuildRequest(BaseModel):
 def _dev_build_run(opts: dict) -> None:
     """BE-1: consume devsrc.run_dev_build's structured BuildResult — no
     more SimpleNamespace contract, no stdout capture, no print scraping.
-    Every engine 'err' line is UI-worthy by construction; success adds
-    nothing to the log (DEV-10 quiet-success contract kept)."""
+    BUILD-PROGRESS-1 (user 2026-10-10: "omlx-dev (re)build from the
+    dashboard should log the progress"): every engine line — including
+    the streamed brew build output — appends to the shared job log the
+    moment it is emitted, so the panel's BUILDING chip and (on failure)
+    the log tail show live progress instead of silence for minutes.
+    DEV-10 quiet-success kept honestly: on SUCCESS the filled log is
+    dropped at completion (the toast + fresh status line are the success
+    signal; the audit trail lives in dev-install.log); on FAILURE the
+    streamed lines stay — that is the progress the user needs to read."""
     from .. import devsrc
+
+    state = {"streamed": False}
+
+    def on_line(_res, _stream, text):
+        state["streamed"] = True
+        with _DEV_BUILD_LOCK:
+            _DEV_BUILD["log"].append(str(text))
 
     rc = 1
     try:
         res = devsrc.run_dev_build(
             with_custom_kernel=bool(opts.get("with_custom_kernel")),
             with_grammar=bool(opts.get("with_grammar")),
-            dry_run=False)
-        keep = [t for s, t in res.lines if s == "err"]
+            dry_run=False, on_line=on_line)
         if not res.ok:
-            keep.append("the previous omlx-dev keg and branch are "
-                        "intact — nothing to roll back; fix or disable "
-                        "the named patch, then rebuild")
+            keep = ["the previous omlx-dev keg and branch are "
+                    "intact — nothing to roll back; fix or disable "
+                    "the named patch, then rebuild"]
+            if not state["streamed"]:
+                # a caller-engine without on_line support (tests, older
+                # fakes): carry the err lines over from the finished
+                # result so the failure log stays complete
+                keep = [t for s, t in res.lines if s == "err"] + keep
+            with _DEV_BUILD_LOCK:
+                _DEV_BUILD["log"].extend(keep)
+        else:
+            with _DEV_BUILD_LOCK:
+                _DEV_BUILD["log"] = []
         rc = res.returncode
-        with _DEV_BUILD_LOCK:
-            _DEV_BUILD["log"].extend(keep)
     except Exception as exc:  # never leave the job stuck on "running"
         with _DEV_BUILD_LOCK:
             _DEV_BUILD["log"].append(f"build crashed: {exc}")

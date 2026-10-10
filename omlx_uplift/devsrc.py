@@ -1007,6 +1007,41 @@ def _emit(res: BuildResult, stream: str, text: str) -> None:
             pass
 
 
+def _stream_build(res: BuildResult, cmd: list) -> int:
+    """BUILD-PROGRESS-1 (user 2026-10-10: "omlx-dev (re)build from the
+    dashboard should log the progress"): run brew with its output piped
+    and merged, forwarding every line through _emit as it arrives. The
+    old subprocess.run inherited the SERVER's stdout — brew's output went
+    to the omlx log, invisible to the dashboard, which sat on 'BUILDING'
+    with an empty log for minutes. on_line (set by the CLI and the
+    dashboard router) streams the same lines live.
+
+    Lines carry a [mm:ss] elapsed stamp: brew's quiet-mode progress is
+    sparse, and the timestamps are what make 'stuck' visible as such.
+    A reader exception never kills the build — fall through to wait().
+    Returns the process exit code."""
+    import time as _time
+
+    t0 = _time.monotonic()
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True,
+                                errors="replace", bufsize=1)
+    except OSError as exc:
+        _emit(res, "err", f"brew could not start: {exc}")
+        return 127
+    try:
+        for raw in proc.stdout:
+            line = raw.rstrip("\r\n")
+            if not line.strip():
+                continue
+            el = int(_time.monotonic() - t0)
+            _emit(res, "out", f"[{el // 60:02d}:{el % 60:02d}] {line}")
+    except Exception as exc:                    # noqa: BLE001 — progress only
+        _emit(res, "err", f"build output reader stopped: {exc}")
+    return proc.wait()
+
+
 def run_dev_build(*, with_custom_kernel: bool = False,
                   with_grammar: bool = False, dry_run: bool = False,
                   warn=None, on_line=None, on_patch_failure=None) -> BuildResult:
@@ -1334,13 +1369,13 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     _emit(res, "out", "running: " + " ".join(cmd))
     # --quiet skips brew's caveats entirely (formula_installer: return if
     # quiet?) — the restart hint we print after RESULT replaces them
-    proc = subprocess.run([*cmd, "--quiet"])
-    if proc.returncode != 0:
+    rc = _stream_build(res, [*cmd, "--quiet"])
+    if rc != 0:
         subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
         _emit(res, "err", "brew build FAILED — dev keg untouched "
                           "(pin restored)")
         _emit(res, "err", f"  investigation: {res.log_path}")
-        res.ok, res.returncode = False, proc.returncode
+        res.ok, res.returncode = False, rc
         return res
     subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
     cfg = load_config() or cfg

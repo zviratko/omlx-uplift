@@ -174,6 +174,40 @@ class HeuristicTests(unittest.TestCase):
         self.assertEqual(g["safeguards"]["codes"], [])
         self.assertTrue(g["ok"])
 
+    def test_formula_edit_holds_on_src_carrier(self):
+        # FORMULA-INERT (user 2026-10-10, jundot/omlx#4421): a PR editing
+        # Formula/omlx.rb gated GREEN on the dev carrier — the checkout
+        # carries the file — showed 'applied' and did nothing: brew builds
+        # from the formula in the TAP repo, never from the built tree.
+        # Must be held on EVERY tree kind, with the reason naming the tap.
+        src = os.path.join(self.tmp, "checkout")
+        os.makedirs(os.path.join(src, "Formula"))
+        with open(os.path.join(src, "Formula", "omlx.rb"), "w") as fh:
+            fh.write("# comment\nrun [opt_bin/\"omlx\", \"serve\"]\n")
+        d = _diff("Formula/omlx.rb", "# comment",
+                  'run [opt_bin/"omlx", "serve"]',
+                  'run ["/usr/sbin/taskpolicy", "-a", opt_bin/"omlx", "serve"]')
+        rep = safeguards.assess(diffapply.parse_diff(d), src, "src")
+        self.assertEqual(rep["codes"], ["formula_inert"])
+        self.assertIn("TAP", rep["problems"][0]["message"])
+        # strict gate itself stays green (the hunks DO apply there) —
+        # it is the safeguard hold that stops the silent no-op
+        g = patchsource.validate(d, src, tree_kind="src")
+        self.assertTrue(g["ok"])
+        self.assertEqual(g["safeguards"]["codes"], ["formula_inert"])
+
+    def test_formula_edit_holds_on_keg_too(self):
+        # a keg-shaped tree with a stray Formula/ path holds as well —
+        # the hazard is tree-kind-independent by design
+        os.makedirs(os.path.join(self.root, "Formula"))
+        with open(os.path.join(self.root, "Formula", "omlx.rb"), "w") as fh:
+            fh.write("# comment\nrun [opt_bin/\"omlx\", \"serve\"]\n")
+        d = _diff("Formula/omlx.rb", "# comment",
+                  'run [opt_bin/"omlx", "serve"]',
+                  'run ["taskpolicy", "-a", opt_bin/"omlx", "serve"]')
+        rep = safeguards.assess(diffapply.parse_diff(d), self.root)
+        self.assertEqual(rep["codes"], ["formula_inert"])
+
     def test_csrc_under_kernels_flagged(self):
         p = "omlx/custom_kernels/decode_fast/csrc/sdpa_decode.metal"
         parsed = {"files": [{"path": p, "action": "create", "hunks": [],

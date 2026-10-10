@@ -148,6 +148,19 @@ function renderDev() {
     if (d.build && !d.build.running && d.build.result)
         state.append(ptChip(ptMsg('uplift.patches.dev_build_failed', 'BUILD FAILED'),
             'pt-st-warn', (d.build.log || []).slice(-8).join('\n')));
+    // BUILD-PROGRESS-1 (user 2026-10-10): the rebuild logs its progress —
+    // brew's streamed lines land in d.build.log while the job runs (the
+    // server appends per line). Shown while running or after a failure;
+    // a success clears the log server-side (DEV-10 quiet-success), so the
+    // box hides itself then. Same element style as the bootstrap log.
+    const blog = $('dv-build-log');
+    if (blog) {
+        const bLog = (d.build && d.build.log) || [];
+        blog.hidden = !(bLog.length && ((d.build && d.build.running)
+                                        || d.build.result));
+        blog.textContent = bLog.slice(-60).join('\n');
+        if (!blog.hidden) blog.scrollTop = blog.scrollHeight;
+    }
 
     warn.hidden = !(d.drift && d.drift.drift);
     if (warn.hidden === false)
