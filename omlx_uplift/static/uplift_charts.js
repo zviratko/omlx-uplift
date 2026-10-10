@@ -1504,13 +1504,16 @@ function drawMetricChart(id) {
     if (e.def.series && e.def.series.length) legendUpdater()(e.chart);
     // per-card x-axis format follows this card's window
     e.chart.axes[0] = metricXAxis(cardWindow(id), chartColors());
-    // big readout = the card's primary key (last non-null on its own series)
-    // STACKED card: the primary key (accept %) is NOT a band — the top
-    // cumulative column IS the acceptance (floats below 100; see core def),
-    // so read it off the stack's ceiling instead of findIndex (which would
-    // miss the removed key and fall back to the 1-accepted band = wrong #).
-    let pi = 1 + metricServes(e.def).findIndex(s => s.key === e.def.key);
-    if (pi < 1 && metricStackCount(e.def) > 1) pi = metricStackCount(e.def);
+    // big readout = the card's headline metric
+    // STACKED card: the ceiling IS the headline (share of cycles accepting
+    // at least one draft = top cumulative, floats below 100; see core def).
+    // Reading findIndex(def.key) would show token-level accept_pct while
+    // the visual stack floats at cycle acceptance — two disagreeing
+    // numbers on one card (user: the stack should graph the acceptance).
+    let pi;
+    if (metricStackCount(e.def) > 1) pi = metricStackCount(e.def);   // top cumulative
+    else pi = 1 + metricServes(e.def).findIndex(s => s.key === e.def.key);
+    if (pi < 1) pi = 1;
     const pcol = cols[pi > 0 ? pi : 1] || [];
     let last = null;
     for (let i = pcol.length - 1; i >= 0; i--) if (pcol[i] != null) { last = pcol[i]; break; }
