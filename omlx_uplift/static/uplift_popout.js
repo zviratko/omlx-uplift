@@ -68,9 +68,47 @@ function titleFor(id) {
     return id === 'chart-tps' ? C.tf('uplift.card.throughput', 'Throughput')
                               : C.tf('uplift.card.memory_cache', 'Memory & cache');
 }
-function open(id) {
+/* POP-TS-1 (user 2026-10-10): the pop-out had no timeframe row — the card
+   chips stay hidden behind the overlay, so the enlarged view was pinned to
+   whatever window the card last used, with no way to widen it. The row
+   drives the SAME setCardWindow the cards use: the window is per-card
+   state, so the card behind follows too (single source, no fork). */
+function renderPopTs(row, id) {
     const pg = PG();
-    if (popout && popout.id === id) { close(); return; }
+    const win = pg.cardWindow(id);
+    row.textContent = '';
+    for (const sec of C.LAYOUT_WINDOWS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ts-chip chart-pop-ts-chip' + (sec === win ? ' on' : '');
+        b.textContent = glue().windowLabel(sec);
+        b.title = glue().windowLabel(sec);
+        b.onclick = () => {
+            if (sec === pg.cardWindow(id)) return;
+            pg.setCardWindow(id, sec);
+            if (!pg.hasMetric(id)) {
+                // shared-history cards: the pinned x-range and the axis
+                // label format both read cardWindow() live — a repaint
+                // with fresh columns (the card paths push theirs) is all
+                // the window change needs.
+                paint(popout.chart, id);
+                renderPopTs(row, id);
+                return;
+            }
+            // metric cards: the popout axes/series bind the window at
+            // build time (metricOpts popout variant) — rebuild the chart
+            // through the same open() path.
+            open(id, true);
+        };
+        row.append(b);
+    }
+}
+function open(id, rebuild) {
+    const pg = PG();
+    // rebuild: the timeframe chips re-open the SAME id on purpose (the
+    // popout variant binds axes/series at build time) — the toggle-close
+    // guard applies only to fresh clicks.
+    if (!rebuild && popout && popout.id === id) { close(); return; }
     close();
     if (!(id === 'chart-tps' || id === 'chart-mem' || pg.hasMetric(id))) return;
     const col = pg.chartColors();
@@ -89,8 +127,11 @@ function open(id) {
     btn.type = 'button'; btn.className = 'chart-pop-x'; btn.textContent = '\u00d7';
     btn.setAttribute('aria-label', 'Close');
     head.append(title, note, btn);
+    const tsRow = document.createElement('div');
+    tsRow.className = 'ts-row chart-pop-ts';
+    tsRow.setAttribute('role', 'group'); tsRow.setAttribute('aria-label', 'Timespan');
     const host = document.createElement('div'); host.className = 'chart-pop-plot';
-    box.append(head, host);
+    box.append(head, tsRow, host);
     overlay.append(box);
     document.body.append(overlay);
 
@@ -119,6 +160,7 @@ function open(id) {
 
     popout = { id, chart, overlay, note, ro, timer: setInterval(() => paint(chart, id), 1000) };
     paint(chart, id);
+    renderPopTs(tsRow, id);
     btn.onclick = close;
     overlay.addEventListener('click', ev => { if (ev.target === overlay) close(); });
     overlay.__upliftModalClose = close;

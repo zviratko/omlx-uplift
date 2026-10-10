@@ -433,7 +433,14 @@ const PREFS_KEY = 'omlx-uplift-prefs-v1';
 // FE-3: the pre-boot script (uplift_preboot.js) copied this key as a string
 // literal; one home here, both sides import it.
 const SKIN_DIR_KEY = 'omlx-uplift-skin-dir';
-const PREFS_DEFAULTS = { theme: 'auto', motion: 'auto', intervalMs: 1000, dense: false };
+/* SKINDEF-1 (user 2026-10-10): Discovery One ships in the package
+   (skins-example) and is the default skin — a fresh board shows it.
+   prefs.theme holds a base name ('follow newest'), so the selection
+   survives every crate update; the preboot script falls back to the
+   built-in dark until loadSkins() resolves the stamped dir (same path
+   any skin selection takes). 'auto' stays a pickable option in the
+   theme menu. */
+const PREFS_DEFAULTS = { theme: 'discovery-one', motion: 'auto', intervalMs: 1000, dense: false };
 const THEMES = ['auto', 'light', 'dark', 'enhanced', 'cockpit'];
 // Skin system: prefs.theme may also store a user-skin selection — base name
 // ('night', follows newest version) or pinned 'night-<10-digit mtime>'.

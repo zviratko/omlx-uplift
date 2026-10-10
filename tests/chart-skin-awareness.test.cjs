@@ -102,14 +102,15 @@ test('no hex-alpha concatenation survives in the chart code', () => {
         'string-concat alpha is the SPARK-1 poisoning bug; route through tint()');
 });
 
-test('both fill sites call tint()', () => {
+test('both fill sites route through the chartkit skin helpers', () => {
     assert.match(src, /fill:\s*fill\s*\?\s*tint\(col,\s*'22'\)/,
         'line() area fill must use tint()');
-    // SMOOTH-3: metricOpts' fill is a nested ternary now (stack bottom
-    // band '3d' / classic area '1c') spanning two lines — both branches
-    // must still route through tint(), which is what this guard is for.
-    assert.match(src, /fill:[\s\S]{0,160}\?\s*tint\(c,\s*'3d'\)[\s\S]{0,160}\?\s*tint\(c,\s*'1c'\)/,
-        'metricOpts() area fills (stack + classic) must use tint()');
+    // SMOOTH-3 painted the stack bottom at tint '3d'; COLOR-1 (user
+    // 2026-10-10) upgraded the stacked fills to the chartkit ramp
+    // (rampAt) — still a pure skin function, which is what this guard
+    // exists for: NO raw hex-alpha concatenation on any fill site.
+    assert.match(src, /fill:\s*\(nStack > 1 && i === 0\)\s*\?\s*rampAt\(0\)[\s\S]{0,120}\?\s*tint\(c,\s*'1c'\)/,
+        "metricOpts() area fills must use rampAt() (stack) and tint() (classic)");
 });
 
 /* ---------------- gap 3: multi-series palette ------------------------- */

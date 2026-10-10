@@ -329,7 +329,7 @@
  "uplift.logs.follow": "follow",
  "uplift.logs.grep_ph": "grep…",
  "uplift.logs.level_all": "all levels",
- "uplift.metric.avg_generation_tps": "average generation tok/s",
+ "uplift.metric.avg_generation_tps": "average tgs",
  "uplift.metric.avg_prefill_tps": "prefill tok/s",
  "uplift.metric.cache.max_bytes": "cache limit",
  "uplift.metric.cache.total_bytes": "disk cache",

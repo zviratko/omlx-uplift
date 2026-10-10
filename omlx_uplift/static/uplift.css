@@ -1505,6 +1505,10 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 }
 .chart-pop .chart-pop-head .chart-pop-x:hover { color: var(--bg); background: var(--ink); }
 .chart-pop .chart-pop-plot { flex: 1 1 auto; min-height: 0; }
+/* POP-TS-1: timeframe row between the head and the plot — same chip look
+   as the cards, sized for the enlarged view. */
+.chart-pop .chart-pop-ts { display: flex; flex-wrap: wrap; gap: 4px; flex: 0 0 auto; }
+.chart-pop .chart-pop-ts .ts-chip { font: 400 11px/1.4 var(--mono); }
 /* The card legend rule forces 9px everywhere (!important); the enlarged
    view earns readable type instead. */
 .chart-pop .u-legend th, .chart-pop .u-legend .u-label { font: 400 11px/1.4 var(--mono) !important; }

@@ -98,6 +98,10 @@ function chartColors(read) {
              gold: v('--chart-2') || '#e8a020',
              heat: v('--heat'),
              accent: v('--accent'),
+             // COLOR-1: the stacked-band ramp mixes toward the card ground
+             // (the surface the bands actually paint on), not the page bg.
+             card: v('--card'),
+             ink: v('--ink'),
              font: v('--mono') };   /* '' when unset -> axisFont() falls back */
 }
 /* Multi-series colour slots (U19/U20 cycle with i % length). The token set
@@ -305,9 +309,65 @@ function stackBands(nStacked) {
     return bands;
 }
 
+/* LIVE-READ (user 2026-10-10: "no values show on mouse hover except in
+   very specific spots"): the FAST-1 union x column mixes 2 Hz live stamps
+   with 5 s stored ones, so a 5 s series is null on ~90% of the rows. The
+   hover tip/legend read the shared row, so between stored stamps every
+   band row printed '—' — the value EXISTED one row to the left. Nearest
+   sample at-or-before idx, accepted only within `capMs` of the hovered
+   timestamp (cap = GAP_BRIDGE_MS, the same cadence hole the stroke
+   bridges): a real outage stays an honest '—'. Returns null when no
+   sample qualifies. */
+function nearestSample(col, tsCol, idx, capMs) {
+    if (!col || !tsCol || idx == null || idx < 0) return null;
+    const cap = Number.isFinite(capMs) ? capMs : GAP_BRIDGE_MS;
+    const n = Math.min(col.length, tsCol.length);
+    if (idx >= n) return null;
+    const t0 = tsCol[idx];
+    let best = null;
+    // nearest non-null in EITHER direction within the cap (values snap to
+    // real samples; nothing is interpolated). Scan both sides fully so a
+    // sample ahead can win when the one behind lies beyond the cap.
+    for (let k = idx; k >= 0; k--) {
+        const v = col[k];
+        if (v === null || v === undefined || v !== v) continue;
+        if (t0 - tsCol[k] > cap) break;
+        best = v; break;
+    }
+    for (let k = idx; k < n; k++) {
+        const v = col[k];
+        if (v === null || v === undefined || v !== v) continue;
+        if (tsCol[k] - t0 > cap) break;
+        if (best === null || tsCol[k] - t0 < t0 - tsCol[idx]) { best = v; }
+        break;
+    }
+    return best;
+}
+
+/* COLOR-1 (user 2026-10-10: stacked MTP card "colors are muted"): bands
+   filled at tint(slot,'3d') = 24% alpha over the card ground, and on the
+   default tokens 3 of 5 palette slots collapse to the same amber, so the
+   five bands read as one beige wash. The ramp keeps the band's palette
+   HUE but pushes chroma toward the ground it sits on: band 0 (bottom)
+   strongest, rising bands progressively lighter on dark grounds / darker
+   on light grounds, each separated by ~2 steps so neighbours stay
+   distinguishable. Pure function of the skin palette + ground — the ramp
+   re-tints on every skin change like the palette it extends. */
+const RAMP_ALPHAS = [0.80, 0.68, 0.56, 0.44, 0.32];   // index = band slot
+function rampColor(slot, ground, n, i, alpha) {
+    const s = cssRgb(slot), g = cssRgb(ground);
+    if (!s || !g) return slot;
+    const k = Math.max(1, n || 1);
+    // t = how far the ground bleeds in: bottom band 0 -> pure slot.
+    const t = (i / k) * 0.55;
+    const m = [0, 1, 2].map(c => Math.round(s[c] * (1 - t) + g[c] * t));
+    const a = Number.isFinite(alpha) ? alpha : (RAMP_ALPHAS[i] != null ? RAMP_ALPHAS[i] : 0.55);
+    return 'rgba(' + m[0] + ',' + m[1] + ',' + m[2] + ',' + a.toFixed(2) + ')';
+}
+
 return { AXIS_FONT_PX, AXIS_FONT_FALLBACK, axisFont, cssRgb, toHex2, tint,
          chartColors, SERIES_PALETTE_ORDER, SERIES_PALETTE_MAX, seriesPalette,
          ZERO_FLOOR_RANGE, FLOAT_FLOOR_RANGE, PCT_FULL_RANGE, metricYRange,
-         GAP_BRIDGE_MS, gapBridge, TSTAMP_MS, lastNonNull,
-         stackCumulative, stackBands };
+         GAP_BRIDGE_MS, gapBridge, TSTAMP_MS, lastNonNull, nearestSample,
+         stackCumulative, stackBands, rampColor, RAMP_ALPHAS };
 });

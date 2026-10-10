@@ -134,6 +134,13 @@ def fetch_and_gate(source: dict, tree_root: str,
                    len(gate.get("files", [])), gate["content_sha256"][:12])
     return {**gate, "stage": "gate", "advisories": advisories,
             "content_sha256": gate["content_sha256"],
+            # VER-1: which tree actually saw this gate. _store_version
+            # stamps the tree's git HEAD as the version's tested_base when
+            # the root is a checkout (dev/build scope), so the dev
+            # materializer can rank alternate versions by distance to the
+            # user's current base. Display/metadata only — never diff bytes
+            # (the sha-consistency rule is untouched).
+            "gate_root": tree_root,
             "source_head_sha": fetched.get("source_head_sha")}
 
 
@@ -697,6 +704,24 @@ def _gate_root_selection(store, manifest, patch, tree_root: str, *,
             _patches.skip_patterns(manifest), "keg")
 
 
+def _tested_base(gate_root) -> str | None:
+    """VER-1: HEAD commit of the git checkout the gate ran against, or
+    None (not a repo, no commit yet, git missing — every failure mode
+    reads as 'untagged', never as an error). Cheap: one rev-parse at
+    store time, not on the gate hot path."""
+    import subprocess
+
+    if not gate_root or not os.path.isdir(gate_root):
+        return None
+    try:
+        p = subprocess.run(["git", "-C", gate_root, "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    sha = (p.stdout or "").strip()
+    return sha if p.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+
 def _store_version(store, patch: dict, result: dict) -> dict:
     """BE-3 step 2: write the gated diff to the patch store and append the
     version entry — ONE schema everywhere (add_patch and check_all's drift
@@ -721,6 +746,16 @@ def _store_version(store, patch: dict, result: dict) -> dict:
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "patch_file": pf_rel,
     }
+    # VER-1 (user 2026-10-10): a version's REAL identity is the base commit
+    # it was validated against — not just its sequence number. Gate against
+    # a git checkout (dev/build scope, and the 'both' src half) and the
+    # checkout's HEAD is what the diff hunks saw; stamp it so the dev
+    # materializer can rank alternates by distance to the user's base.
+    # A keg tree has no HEAD — the runtime half simply stays untagged
+    # (honest absence; materialize never reads these).
+    tb = _tested_base(result.get("gate_root"))
+    if tb:
+        version["tested_base"] = tb
     sg = result.get("safeguards") or {}
     if sg.get("problems") or sg.get("advisories"):
         # one schema: problems block auto-apply, advisories are display-only
@@ -1480,13 +1515,24 @@ def mark_dev_applied(store, commits: list[dict]) -> None:
         c = by_id.get(p.get("id"))
         if c is None or not _patches.scope_touches_dev(_patches.patch_scope(p)):
             continue
+        # VER-1: the ladder may have built an OLDER stored version than
+        # desired — stamp the version that IS on the branch, and say so in
+        # the state detail (a silent 'applied' on the desired v would make
+        # the dashboard claim bytes the keg does not carry).
+        built = store.get_version(p, c.get("v")) if c.get("v") is not None else None
         desired = store.get_version(p, p.get("desired_version"))
-        if desired is None:
+        target = built if built is not None else desired
+        if target is None:
             continue
-        desired["dev_applied"] = {"at": _patches.now_iso(), "sha": c["sha"]}
+        target["dev_applied"] = {"at": _patches.now_iso(), "sha": c["sha"]}
         if p.get("enabled"):
             p["state"] = "applied"
-            p["state_detail"] = "materialized on uplift-dev"
+            if built is not None and desired is not None and built.get("v") != desired.get("v"):
+                p["state_detail"] = (f"materialized on uplift-dev as v{built.get('v')} "
+                                     f"(desired v{desired.get('v')} does not apply "
+                                     "onto the current base)")
+            else:
+                p["state_detail"] = "materialized on uplift-dev"
             p["state_changed_at"] = _patches.now_iso()
         changed = True
     if changed:

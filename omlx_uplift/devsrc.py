@@ -394,17 +394,158 @@ def _apply_one(path: str, pid: str, v: int, diff_bytes: bytes) -> None:
                           f"sync base: {detail}")
 
 
-def materialize(patches_to_apply: list[dict], cfg: dict) -> dict:
+def base_distance(repo: str, a: str | None, b: str | None) -> int | None:
+    """VER-1: commit distance between two shas in one repo (ahead+behind,
+    symmetric). None when either side is unknown (missing stamp, gc'd
+    commit, shallow clone) — callers rank unknown as 'furthest', never
+    as an error."""
+    if not a or not b:
+        return None
+    if a == b:
+        return 0
+    r1 = _git(["rev-list", "--count", f"{a}..{b}"], cwd=repo, check=False)
+    r2 = _git(["rev-list", "--count", f"{b}..{a}"], cwd=repo, check=False)
+    if r1.returncode or r2.returncode:
+        return None
+    try:
+        return int(r1.stdout.strip()) + int(r2.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _alternate_versions(store, pid: str, wanted_v: int, base_sha: str,
+                        repo: str) -> list[dict]:
+    """VER-1 (user 2026-10-10): the versions to TRY when the desired one
+    does not apply onto the current base — every OTHER stored version of
+    this patch, ranked by commit distance from the base each was tested
+    against (versions carry a tested_base stamp since VER-1; pre-VER-1
+    versions rank last, by version number). Capped at MAX_ALTERNATES: the
+    user asked for 'the two closest versions', not a full search.
+    Returns [{v, diff_bytes, distance}] best-first; [] when nothing else
+    is stored."""
+    MAX_ALTERNATES = 2
+    manifest = store.load()
+    entry = store.find(manifest, pid)
+    if not entry:
+        return []
+    from . import diffapply  # noqa: F401 — parity import guard (bytes shape)
+    out = []
+    for ver in entry.get("versions", []):
+        v = ver.get("v")
+        if v == wanted_v:
+            continue
+        data = _read_stored_diff(store, ver)
+        if data is None:
+            continue
+        dist = base_distance(repo, base_sha, ver.get("tested_base"))
+        out.append({"v": v, "diff_bytes": data, "distance": dist})
+    # known distances first (nearest base), then untagged versions by
+    # number (the newest older one is the likeliest fit); newest-first
+    # inside each band
+    def rank(c):
+        d = c["distance"]
+        return (0 if d is not None else 1,
+                d if d is not None else 0,
+                -c["v"])
+    out.sort(key=rank)
+    return out[:MAX_ALTERNATES]
+
+
+def _read_stored_diff(store, version: dict) -> bytes | None:
+    pf = version.get("patch_file") or ""
+    path = pf if os.path.isabs(pf) else os.path.join(store.base_dir, pf)
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+class _PatchSkip(Exception):
+    """Internal control flow: the resolver said 'build without this
+    patch'. Carries the honest record materialize() returns."""
+
+    def __init__(self, record: dict):
+        super().__init__(record.get("reason") or "")
+        self.record = record
+
+
+def _apply_with_ladder(path, store, pid, wanted_v, wanted_bytes, base_sha,
+                       on_patch_failure):
+    """VER-1 ladder for ONE patch onto the current base. Returns
+    (v, diff_bytes, fallback_from, tried) — the applied version and, when
+    an alternate carried the build, the version the user actually wanted
+    (reported, never hidden). Raises _PatchSkip when the resolver chose
+    to build without the patch, DevsrcError to abort the whole pass.
+
+    Order: desired version first; then stored alternates ranked nearest-
+    tested-base first (cap in _alternate_versions); then the resolver —
+    no resolver (dashboard/dry-run/scripted) means abort, never a silent
+    skip. A failed apply never writes (diffapply checks everything
+    first), so each trial starts from the same clean tree."""
+    tried = [wanted_v]
+    try:
+        _apply_one(path, pid, wanted_v, wanted_bytes)
+        return wanted_v, wanted_bytes, None, tried
+    except DevsrcError as exc:
+        first_exc = exc
+    for a in _alternate_versions(store, pid, wanted_v, base_sha, path):
+        if a["v"] in tried:
+            continue
+        tried.append(a["v"])
+        try:
+            _apply_one(path, pid, a["v"], a["diff_bytes"])
+        except DevsrcError:
+            _log.warning("devsrc: %s v%s also fails onto base %s",
+                         pid, a["v"], base_sha[:12])
+            continue
+        _log.warning(
+            "devsrc: %s v%s does not apply onto base %s — building v%s "
+            "instead (tested %s%s)", pid, wanted_v, base_sha[:12], a["v"],
+            (a.get("tested_base") or "?")[:12],
+            "" if a.get("distance") is None
+            else f", {a['distance']} commits away")
+        return a["v"], a["diff_bytes"], wanted_v, tried
+    # ladder exhausted: ask the human (CLI only), else abort the pass
+    decision = None
+    if on_patch_failure:
+        decision = on_patch_failure(pid, str(first_exc), tried)
+    if decision == "skip":
+        _log.warning("devsrc: %s SKIPPED this build — no stored version "
+                     "applies onto base %s (tried %s)", pid, base_sha[:12],
+                     ", ".join(f"v{t}" for t in tried))
+        raise _PatchSkip({"id": pid, "reason": str(first_exc),
+                          "tried": tried})
+    raise first_exc
+
+
+def materialize(patches_to_apply: list[dict], cfg: dict,
+                on_patch_failure=None) -> dict:
     """Re-cut the formula branch from the fetched sync ref and apply each
     enabled build-scope patch (stored UNPRUNED diff bytes) as one commit,
     in list order. patches_to_apply: [{"id", "version", "diff_bytes"}].
 
-    All-or-nothing: a patch that fails aborts the whole pass and the branch
-    returns to its previous tip — brew never sees a half-applied branch.
-    A patch whose hunks are already on the base commits nothing (the commit
-    would be empty) and reports skipped. Push is NOT automatic.
-    Returns {ok, tip, base, branch, commits:[{id,v,sha}], reason?}.
+    All-or-nothing per PASS (not per patch): a patch that fails aborts the
+    whole pass and the branch returns to its previous tip — brew never
+    sees a half-applied branch. A patch whose hunks are already on the
+    base commits nothing (the commit would be empty) and reports skipped.
+    Push is NOT automatic.
+
+    VER-1 (user 2026-10-10) graceful ladder when the DESIRED version does
+    not apply onto the user's base:
+      1. try up to MAX_ALTERNATES other stored versions, nearest-tested-
+         base first — used only if one applies cleanly (a downgrade is
+         reported honestly via commit['fallback_from']);
+      2. still failing: ask on_patch_failure(pid, reason, tried_versions)
+         — a CLI resolver returns 'skip' (build WITHOUT this patch; the
+         honest record lands in result['skipped_patches']) or anything
+         else aborts the pass. No resolver (dashboard, dry-run, scripted
+         use) = abort: the pre-VER-1 behavior, never a silent skip.
+    Returns {ok, tip, base, branch, commits:[{id,v,sha,fallback_from?}],
+             skipped_patches?:[{id,reason,tried}], reason?, failed_patch?}.
     """
+    from . import patches as _patches_mod
+
     path = src_path(cfg)
     branch = cfg.get("formula_branch") or DEV_BRANCH_DEFAULT
     try:
@@ -422,12 +563,20 @@ def materialize(patches_to_apply: list[dict], cfg: dict) -> dict:
 
     _git(["checkout", "-q", "-B", branch, base_sha], cwd=path)
     commits: list[dict] = []
+    skipped: list[dict] = []
     failed_pid = None   # patch whose apply/commit aborted the pass
+    store = _patches_mod.PatchStore()
     try:
         for p in patches_to_apply:
             pid, v = p["id"], p.get("version", 0)
             failed_pid = pid
-            _apply_one(path, pid, v, p["diff_bytes"])
+            try:
+                v, diff_bytes, fallback_from, tried = _apply_with_ladder(
+                    path, store, pid, v, p["diff_bytes"], base_sha,
+                    on_patch_failure)
+            except _PatchSkip as sk:
+                skipped.append(sk.record)
+                continue           # resolver said 'skip this build'
             _git(["add", "-A"], cwd=path)
             if _git(["diff", "--cached", "--quiet"], cwd=path,
                     check=False).returncode == 0:
@@ -446,9 +595,12 @@ def materialize(patches_to_apply: list[dict], cfg: dict) -> dict:
             if proc.returncode != 0:
                 raise DevsrcError(f"git commit failed: "
                                   f"{proc.stderr.strip() or proc.stdout}")
-            commits.append({"id": pid, "v": v,
-                            "sha": _git(["rev-parse", "HEAD"],
-                                        cwd=path).stdout.strip()})
+            c = {"id": pid, "v": v,
+                 "sha": _git(["rev-parse", "HEAD"], cwd=path).stdout.strip()}
+            if fallback_from is not None:
+                c["fallback_from"] = fallback_from
+                c["tried"] = tried
+            commits.append(c)
         tip = _git(["rev-parse", "HEAD"], cwd=path).stdout.strip()
     except DevsrcError as exc:
         # abort: restore the branch to its previous tip (or drop a fresh one)
@@ -467,9 +619,11 @@ def materialize(patches_to_apply: list[dict], cfg: dict) -> dict:
         if cur_branch and cur_branch != branch:
             _git(["checkout", "-q", cur_branch], cwd=path, check=False)
         return {"ok": False, "reason": str(exc), "base": base_sha,
-                "branch": branch, "failed_patch": failed_pid}
+                "branch": branch, "failed_patch": failed_pid,
+                "skipped_patches": skipped}
     return {"ok": True, "tip": tip, "base": base_sha, "branch": branch,
-            "commits": commits}
+            "commits": commits,
+            "skipped_patches": skipped}
 
 
 def ensure_formula_branch(cfg: dict) -> str | None:
@@ -855,7 +1009,7 @@ def _emit(res: BuildResult, stream: str, text: str) -> None:
 
 def run_dev_build(*, with_custom_kernel: bool = False,
                   with_grammar: bool = False, dry_run: bool = False,
-                  warn=None, on_line=None) -> BuildResult:
+                  warn=None, on_line=None, on_patch_failure=None) -> BuildResult:
     """One rebuild path (DEV-context decision 3): re-cut uplift-dev from
     the synced base with one commit per enabled build patch, then
     `brew install` (first build) or `brew reinstall` (rebuild). Both always
@@ -935,7 +1089,8 @@ def run_dev_build(*, with_custom_kernel: bool = False,
             _patches_mod.PatchStore())
         return _run_dev_build_body(res, cfg, build_patches, patchsource,
                                    brewutil, with_custom_kernel,
-                                   with_grammar, dry_run, warn)
+                                   with_grammar, dry_run, warn,
+                                   on_patch_failure)
     finally:
         _root.removeHandler(_ph)
         _ph.close()
@@ -1051,13 +1206,25 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
 
 
 def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
-                        with_custom_kernel, with_grammar, dry_run, warn):
+                        with_custom_kernel, with_grammar, dry_run, warn,
+                        on_patch_failure=None):
     import subprocess
 
     _emit(res, "out", f"patch process log: {res.log_path}")
     res.stage = "materialize"
-    mres = materialize(build_patches, cfg)
+    mres = materialize(build_patches, cfg, on_patch_failure=on_patch_failure)
     res.materialize = mres
+    # VER-1: the resolver said 'build without it' — loud, honest lines;
+    # these patches are NOT in the keg this build ships.
+    for sk in mres.get("skipped_patches") or []:
+        _emit(res, "err", f"{sk['id']}: SKIPPED this build — no stored "
+                          f"version applies (tried "
+                          + ", ".join(f"v{t}" for t in sk.get("tried", [])) + ")")
+    for c in mres.get("commits") or []:
+        if c.get("fallback_from"):
+            _emit(res, "out", f"{c['id']}: v{c['fallback_from']} does not "
+                              f"apply onto this base — built v{c['v']} "
+                              "(nearest tested version) instead")
     if not mres.get("ok"):
         _emit(res, "err", f"materialize FAILED: {mres.get('reason')}")
         for c in mres.get("commits", []):
@@ -1093,8 +1260,13 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     patchsource.mark_dev_applied(store, commits)
 
     # re-gate BEFORE the rebuild (DEV-context decision 9) — failures mark
-    # needs_review per patch, never silently skipped
-    res.regate_failures = recheck_build_patches(build_patches)
+    # needs_review per patch, never silently skipped. VER-1: re-gate what
+    # ACTUALLY got built (commits carry the fallback versions; resolver-
+    # skipped patches built nothing and must not light a needs_review the
+    # user already chose — they are reported via skipped_patches).
+    built = [c for c in commits if c.get("sha") or c.get("skipped")]
+    gated = _build_patches_from_commits(built, patchsource) if built else []
+    res.regate_failures = recheck_build_patches(gated) if gated else {}
     for pid, why in (res.regate_failures or {}).items():
         _emit(res, "err", f"{pid}: RE-GATE FAILED (needs_review): {why}")
         _emit(res, "err", "  one way out — disable it and re-run:")
@@ -1187,6 +1359,30 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                       "refreshed")
     res.ok, res.returncode, res.stage = True, 0, "ok"
     return res
+
+
+def _build_patches_from_commits(commits: list[dict], patchsource) -> list[dict]:
+    """VER-1: the enabled_build_patches shape ({id, version, diff_bytes})
+    for versions that ACTUALLY materialized (commits carry the fallback v
+    when the desired one did not apply) — the re-gate must judge what the
+    brew build sees, not what the store wanted. 'already-present' commits
+    carry no new bytes (base has them); they gate from the stored file too
+    so the loop keeps its per-patch order signal."""
+    from . import patches as _patches_mod
+
+    store = _patches_mod.PatchStore()
+    manifest = store.load()
+    out = []
+    for c in commits:
+        entry = store.find(manifest, c["id"])
+        if not entry:
+            continue
+        ver = store.get_version(entry, c.get("v")) or {}
+        data = _read_stored_diff(store, ver) if ver.get("patch_file") else None
+        if data is None:
+            continue
+        out.append({"id": c["id"], "version": c.get("v"), "diff_bytes": data})
+    return out
 
 
 def recheck_build_patches(build_patches: list[dict]) -> dict:

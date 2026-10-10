@@ -81,6 +81,20 @@ function renderDevBuild() {
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
+    /* FEEL-LIVE-1 (user 2026-10-10: "when the browser tab is backgrounded,
+       it takes a while to show the contents after selected again"): the
+       hidden-gated pollers and the 5 s redraw interval leave the board
+       showing whatever the LAST background tick painted — up to a full
+       interval of visibly stale data after every tab switch. Draw FIRST
+       from what the page already holds (stored columns + the live ring,
+       which the (re)connecting feeds refill from the server's 6 min replay
+       within one frame), THEN run the regular catch-up below. The streams
+       themselves stay focus-gated on purpose (HANG-1: two forever streams
+       per tab starve the browser's ~6-per-origin HTTP/1.1 budget — 'live
+       all the time' for hidden tabs measured worse, not better; this path
+       gives the same feel without the starvation cliff). */
+    CH.redrawCharts();
+    CH.drawAllMetricCharts();
     pollStats(); pollGatewayInfo();
     if (currentTab() === 'usage') UUP.pollUsage();
     if (currentTab() === 'logs') UUP.pollLogs();

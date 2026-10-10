@@ -1227,6 +1227,34 @@ def cmd_dev_reconfigure(args, cfg: dict | None = None,
     return 0
 
 
+def _patch_failure_prompt(pid: str, reason: str, tried: list) -> str:
+    """VER-1 CLI resolver (dev install, tty only). The patch store has no
+    version of this patch that applies onto the current base — the build
+    stops HERE and asks the human. Returns 'skip' (build without it) or
+    anything else ('abort' semantics: materialize re-raises and the pass
+    restores the branch). The current keg stays installed either way on
+    abort; on skip the build ships WITHOUT this patch's feature and the
+    summary says so. Answering with the patch id disables it properly."""
+    print()
+    print(_paint(sys.stdout, "PATCH FAILED", "1;31")
+          + f"  {pid}: no stored version applies onto this base", flush=True)
+    print(f"  tried: {', '.join('v' + str(t) for t in tried)}")
+    for line in (reason or "").splitlines()[:6]:
+        print(f"    {line}")
+    print("  [1] continue this build WITHOUT " + pid
+          + "  (older/newer patch versions missing)")
+    print("  [2] stop and keep the current dev build"
+          + "  (until a newer patch version ships)")
+    try:
+        ans = input("choice [2]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return "abort"
+    if ans in ("1", "s", "skip", "continue", "y", "yes"):
+        return "skip"
+    return "abort"
+
+
 def cmd_dev_install(args) -> int:
     """`omlx-uplift dev install`: thin CLI skin over devsrc.run_dev_build
     (BE-1). The engine is pure data in/out; this function only decides what
@@ -1249,7 +1277,8 @@ def cmd_dev_install(args) -> int:
               + f"  {res.sync_ref} @ {(res.base_sha or '')[:12]}  "
               + f"+{res.n_applied} patch commit(s) -> tip {res.tip[:12]}")
         _dev_patch_table(res.materialize.get("commits", []),
-                         res.upstreamed or {})
+                         res.upstreamed or {},
+                         res.materialize.get("skipped_patches") or [])
 
     def _on_line(res, stream, text):
         # trigger lines only ever appear after a SUCCESSFUL materialize,
@@ -1263,11 +1292,16 @@ def cmd_dev_install(args) -> int:
         print(text, file=sys.stderr if stream == 'err' else sys.stdout,
               flush=True)
 
+    # VER-1 (user 2026-10-10): when NO stored version of a patch applies
+    # onto the current base, a terminal asks what to do; scripted/
+    # non-tty runs keep the pre-VER-1 behavior (abort, change nothing).
+    resolver = _patch_failure_prompt if sys.stdin.isatty() else None
     res = devsrc.run_dev_build(
         with_custom_kernel=bool(getattr(args, 'with_custom_kernel', False)),
         with_grammar=bool(getattr(args, 'with_grammar', False)),
         dry_run=bool(getattr(args, 'dry_run', False)),
-        warn=_coexistence_warnings, on_line=_on_line)
+        warn=_coexistence_warnings, on_line=_on_line,
+        on_patch_failure=resolver)
     # fallback: materialize succeeded but no trigger line came
     if (not state["header"] and res.materialize
             and res.materialize.get("ok")):
@@ -1281,12 +1315,16 @@ def cmd_dev_install(args) -> int:
     return res.returncode
 
 
-def _dev_patch_table(commits: list[dict], upstreamed: dict) -> None:
+def _dev_patch_table(commits: list[dict], upstreamed: dict,
+                     skipped: list[dict] | None = None) -> None:
     """Coloured per-patch table for `dev install` — one row per ENABLED
     dev/both patch in materialize order, plus every DISABLED dev/both patch
     shown explicitly as DISABLED (silent omission made people hunt for
     patches they had simply switched off). Verdicts stay single uppercase
-    words: the dashboard tails this output (RESULT line + build log)."""
+    words: the dashboard tails this output (RESULT line + build log).
+    VER-1 adds two honest verdicts: FALLBACK (the desired version did not
+    apply, an older tested one carried the build) and SKIPPED (the human
+    chose to build without the patch)."""
     from . import patches as _patches
 
     out = sys.stdout
@@ -1298,20 +1336,35 @@ def _dev_patch_table(commits: list[dict], upstreamed: dict) -> None:
         "ALREADY PRESENT": ("SKIPPED", "33",
                             "base already contains the hunks — no commit"),
         "DISABLED": ("DISABLED", "35", "not in this build"),
+        # VER-1: built, but not the version you asked for
+        "FALLBACK": ("FALLBACK", "33",
+                     "wanted v{from} does not apply onto this base — built "
+                     "v{v} (nearest tested version)"),
+        # VER-1: the resolver chose 'continue without it'
+        "RESOLVER SKIP": ("SKIPPED", "31",
+                          "no stored version applies — built WITHOUT this "
+                          "patch (tried {tried})"),
     }
     rows = []
     for c in commits:
-        if c.get("sha"):
+        if c.get("fallback_from"):
+            rows.append((c["id"], "FALLBACK", style["FALLBACK"][2].format(
+                **{"from": c["fallback_from"], "v": c.get("v")})))
+        elif c.get("sha"):
             key, extra = "APPLIED", style["APPLIED"][2].format(
                 sha=c["sha"][:12])
+            rows.append((c["id"], key, extra))
         elif c.get("skipped") == "already-present":
             if c["id"] in upstreamed:
                 key, extra = "UPSTREAMED", style["UPSTREAMED"][2]
             else:
                 key, extra = "ALREADY PRESENT", style["ALREADY PRESENT"][2]
+            rows.append((c["id"], key, extra))
         else:
-            key, extra = "APPLIED", ""   # unreachable today; keeps rows sane
-        rows.append((c["id"], key, extra))
+            rows.append((c["id"], "APPLIED", ""))   # unreachable today
+    for sk in skipped or []:
+        rows.append((sk["id"], "RESOLVER SKIP", style["RESOLVER SKIP"][2].format(
+            tried=", ".join(f"v{t}" for t in sk.get("tried", [])))))
 
     def _disabled_dev_rows():
         try:

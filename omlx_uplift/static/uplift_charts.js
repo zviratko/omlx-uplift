@@ -300,8 +300,11 @@ function line(label, colorVar, fill, scale) {
              gaps: KIT.gapBridge(),
              points: { show: false }, value: seriesValue };
 }
-function xAxis(col, boundWin) {
-    const winOf = () => boundWin >= 0 ? boundWin : cardWindow('chart-tps');
+function xAxis(col, boundWin, id) {
+    // POP-TS-1: with no numeric boundWin (pop-out passes none) the label
+    // format follows the card's LIVE window — a timeframe change inside
+    // the pop-out must not leave second-level ticks labelled like a day.
+    const winOf = () => boundWin >= 0 ? boundWin : cardWindow(id || 'chart-tps');
     return { stroke: col.dim, width: 1, size: 34, font: axisFont(col),
              values: (s, t) => t.map(ts => {
                  const win = winOf();
@@ -393,7 +396,14 @@ function legendUpdater() {
             // bands need them); the legend must show each band's OWN
             // share — _rawSeries carries the pre-cumulation columns.
             const colData = (c._rawSeries && c._rawSeries[sIdx]) || c.data[sIdx + 1];
-            const raw = colData && colData.length ? colData[i] : null;
+            // LIVE-READ: on the mixed-cadence union column a 5 s series is
+            // null at ~9 of every 10 rows — the old shared-row read made
+            // the values appear only in "very specific spots". Snap the
+            // hovered row to each series' NEAREST sample (within the
+            // cadence cap; a real outage still prints the honest '—').
+            let raw = colData && colData.length ? colData[i] : null;
+            if (hovering && raw == null && colData)
+                raw = KIT.nearestSample(colData, src, i);
             const v = hovering ? raw
                 : (raw !== null && raw !== undefined ? raw : KIT.lastNonNull(colData, i));
             // Honour the series' own value formatter (U19/U20 multi-unit
@@ -464,7 +474,10 @@ function showTip(c, ev, i) {
         // SMOOTH-3: stacked cards show each band's own share in the tip
         // too (data columns are cumulative for the band fills).
         const scol = (c._rawSeries && c._rawSeries[s - 1]) || c.data[s] || null;
-        const v = scol ? scol[i] : null;
+        // LIVE-READ: snap to this series' nearest sample when the hovered
+        // union row is a cadence null (see legendUpdater).
+        let v = scol ? scol[i] : null;
+        if (v == null && scol) v = KIT.nearestSample(scol, c.data[0], i);
         if (v === undefined) continue;
         const row = document.createElement('div');
         row.className = 'ut-row';
@@ -583,7 +596,7 @@ function tpsBaseOpts(col, popout, boundWin) {
         legendUpdater());
     if (popout) {
         o.width = 0; o.height = 0;   // setSize by the modal host
-        o.axes[0] = Object.assign(xAxis(col, boundWin), { size: 30, grid: true });
+        o.axes[0] = Object.assign(xAxis(col, boundWin, 'chart-tps'), { size: 30, grid: true });
         o.axes[1] = yAxis(col, { label: 'gen tok/s', stroke: col.blue });
         o.axes[1].scale = 'y';
     }
@@ -613,7 +626,7 @@ function memBaseOpts(col, popout, boundWin) {
         legendUpdater());
     if (popout) {
         o.width = 0; o.height = 0;
-        o.axes[0] = Object.assign(xAxis(col, boundWin), { size: 30, grid: true });
+        o.axes[0] = Object.assign(xAxis(col, boundWin, 'chart-mem'), { size: 30, grid: true });
     }
     return o;
 }
@@ -938,6 +951,11 @@ function metricLabel(key) {
               'saved tokens min': 'saved tok/min', 'restored tokens min': 'restored tok/min',
               'accepted tokens s': 'MTP accepted tok/s', 'accept pct': 'accepted %',
               'acceptance': 'MTP acceptance', 'depth acceptance': 'MTP depth acceptance',
+              // TITLE-1 (user 2026-10-10): 'average generation tok/s' wrapped
+              // to two header lines on the compact card; the card now reads
+              // the short 'average tgs' (locale wins; this is the fallback
+              // for the auto-translation of the avg_generation_tps key).
+              'avg generation tok/s': 'average tgs',
               'cycles s': 'verify cycles/s', 'tokens per cycle': 'emitted tok/cycle',
               // SMOOTH-3 stacked cycle-outcome bands (locale normally wins).
               'cyc0 pct': '0 accepted %', 'cyc1 pct': '1 accepted %',
@@ -987,6 +1005,16 @@ function metricOpts(id, def, col, opts) {
     const nStack = metricStackCount(def);
     const hasY2 = mult && sers.some(s => s.axis === 'y2' && !s.legendOnly);
     const palette = seriesPalette(col);
+    // COLOR-1 (user 2026-10-10): stacked bands own a strong→light ramp of
+    // their palette slots mixed toward the card ground — bottom band at
+    // the raw slot color and 80% alpha, each band above lighter and
+    // thinner — instead of every band at 24% tint over the same ground
+    // (the beige wash the user called muted). The same ramp colors the
+    // legend markers (see legendMarkers below), so a band and its legend
+    // row always match.
+    const ground = col.card || col.grid || '#2b2c30';
+    const rampAt = i => KIT.rampColor(palette[i % palette.length], ground,
+                                      Math.max(nStack, 1), i);
     const series = [{}, ...sers.map((s, i) => {
         const sf = metricFormat({ key: s.key, fmt: s.fmt });
         const c = palette[i % palette.length];
@@ -1002,7 +1030,7 @@ function metricOpts(id, def, col, opts) {
                     // paints the bottom band; the uPlot opts.bands fill
                     // the rest between consecutive cumulative paths.
                     // Non-stacked cards keep the exact old wash ('1c').
-                    fill: (nStack > 1 && i === 0) ? tint(c, '3d')
+                    fill: (nStack > 1 && i === 0) ? rampAt(0)
                           : (s.area || (!mult && i === 0)) ? tint(c, '1c') : undefined,
                     points: { show: false }, value: (u, v) => sf(v === undefined || v !== v ? null : v) };
         return o;
@@ -1045,9 +1073,21 @@ function metricOpts(id, def, col, opts) {
             // stackBands emits pairs (1,2)..(n-1,n) in uPlot series space;
             // band i (0-based) fills between cum(i+1) and cum(i+2), i.e.
             // the share of DRAWN series i+2 (1-based) = palette slot i+1.
-            fill: tint(palette[(i + 1) % palette.length], pop ? '55' : '3d'),
+            // COLOR-1: same ramp the bottom band (series 0 fill) uses, so
+            // the five bands read as one ordered scale, not five washes.
+            fill: rampAt(i + 1),
         }));
     }
+    // COLOR-1: the legend marker must match its band. uPlot paints the
+    // marker border from series.stroke and the background from
+    // series.fill — stacked columns hide their stroke (bands carry the
+    // fills), so the default marker would show only the bottom band's
+    // swatch and four transparent ones (measured in live QA: rows 1-4
+    // marker background rgba(0,0,0,0)). Drive marker AND value-cell text
+    // off the same ramp the canvas draws with.
+    if (nStack > 1) out.legend.markers = { width: 0,
+        fill: (u, si) => (si - 1 < nStack) ? rampAt(si - 1)
+                                           : palette[(si - 1) % palette.length] };
     return out;
 }
 /* Visible-x-axis variant of metricXAxis for the pop-out (the compact card
@@ -1697,6 +1737,10 @@ window.Uplift.charts = {
         bindCursorUpdater: c => bindCursorUpdater(c),
         pinnedXRange: id => pinnedXRange(id),
         cardWindow: id => cardWindow(id),
+        // POP-TS-1 (user 2026-10-10): the pop-out owns a timeframe row;
+        // changing it goes through the SAME setter the card chips use, so
+        // the shared window state never forks (card behind follows too).
+        setCardWindow: (id, sec) => setCardWindow(id, sec),
         metricOpts: (id, def, col, opts) => metricOpts(id, def, col, opts),
         tpsBaseOpts: (col, pop, win) => tpsBaseOpts(col, pop, win),
         memBaseOpts: (col, pop, win) => memBaseOpts(col, pop, win),

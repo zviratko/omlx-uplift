@@ -145,7 +145,7 @@ test('prefs: corrupt storage falls back to defaults', () => {
     C.savePrefs(store, { theme: 'night-watch-1762070400' });
     assert.equal(C.loadPrefs(store).theme, 'night-watch-1762070400');
     items[C.PREFS_KEY] = JSON.stringify({ theme: '../evil' });
-    assert.equal(C.loadPrefs(store).theme, 'auto');  // traversal-ish: rejected
+    assert.equal(C.loadPrefs(store).theme, C.PREFS_DEFAULTS.theme);  // traversal-ish: rejected
 });
 
 // F-014: tableSort must survive the loadPrefs whitelist round-trip.

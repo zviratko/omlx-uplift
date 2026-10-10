@@ -47,9 +47,9 @@ def test_materialize_fail_leaks_no_handler(home, monkeypatch):
     monkeypatch.setattr(curated, "sync", lambda *a, **k: {"report": {}})
     monkeypatch.setattr(patchsource, "enabled_build_patches", lambda store: [])
     monkeypatch.setattr(devsrc, "materialize",
-                        lambda patches, cfg: {"ok": False,
-                                              "reason": "p-bad does not apply",
-                                              "failed_patch": "p-bad"})
+                        lambda patches, cfg, **kw: {"ok": False,
+                                                    "reason": "p-bad does not apply",
+                                                    "failed_patch": "p-bad"})
     before = handler_count()
     r1 = devsrc.run_dev_build()
     r2 = devsrc.run_dev_build()
@@ -83,9 +83,9 @@ def test_log_handler_covers_the_source_refresh(home, monkeypatch):
     monkeypatch.setattr(devsrc, "_refresh_patch_sources", _refresh_side_effect)
     monkeypatch.setattr(patchsource, "enabled_build_patches", lambda store: [])
     monkeypatch.setattr(devsrc, "materialize",
-                        lambda patches, cfg: {"ok": True, "tip": "t" * 40,
-                                              "base": "b" * 40,
-                                              "commits": []})
+                        lambda patches, cfg, **kw: {"ok": True, "tip": "t" * 40,
+                                                    "base": "b" * 40,
+                                                    "commits": []})
     r = devsrc.run_dev_build(dry_run=True)
     assert r.ok, [(s, t) for s, t in r.lines]
     text = open(r.log_path).read()

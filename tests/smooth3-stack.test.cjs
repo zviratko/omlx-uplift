@@ -47,3 +47,60 @@ test('the MTP acceptance card is the stacked cycle-outcome distribution', () => 
     // SCALE-1: a pct card pins 0..100 — the cumulative stack tops at 100
     assert.equal(KIT.metricYRange(mtp), KIT.PCT_FULL_RANGE);
 });
+
+/* LIVE-READ + COLOR-1 (user 2026-10-10): the stacked card must show
+   values anywhere the mouse sits, and the bands must be a readable ramp.
+   The helpers are chartkit-pure (DOM-free) — same contract as the stack
+   ones; the last test pins the static call sites in uplift_charts.js. */
+test('nearestSample bridges cadence nulls within the cap', () => {
+    const ts = [0, 500, 1000, 1500, 2000, 2500];   // ms stamps
+    // a 5 s series on a 2 Hz union column: value at row 0, null after
+    const col = [42, null, null, null, null, null];
+    assert.equal(KIT.nearestSample(col, ts, 0), 42);
+    assert.equal(KIT.nearestSample(col, ts, 1), 42);    // 0.5 s back: take it
+    assert.equal(KIT.nearestSample(col, ts, 2), 42);    // 1.0 s: inside cap
+    assert.equal(KIT.nearestSample(col, ts, 3), 42);    // 1.5 s: inside cap
+    assert.equal(KIT.nearestSample(col, ts, 5, 12_000), 42);   // 2.5 s: < 12 s
+    // same column under a tight cap: beyond 1.5 s the hole is REAL
+    assert.equal(KIT.nearestSample(col, ts, 5, 1_000), null);
+});
+
+test('nearestSample snaps forward too, and honits its guards', () => {
+    const ts = [0, 1_000, 2_000];
+    assert.equal(KIT.nearestSample([null, null, 9], ts, 1, 12_000), 9);
+    assert.equal(KIT.nearestSample(null, ts, 0), null);
+    assert.equal(KIT.nearestSample([1], ts, null), null);
+    assert.equal(KIT.nearestSample([1], ts, 5), null);   // idx out of range
+});
+
+test('rampColor is a strong→light skin ramp of the band slot', () => {
+    // dark card ground, amber slot: bottom band = slot at full strength
+    const a = KIT.rampColor('#e8a020', '#2b2c30', 5, 0);
+    assert.equal(a, 'rgba(232,160,32,0.80)', 'band 0 = raw slot, alpha 0.80');
+    const alpha = s => parseFloat(s.match(/,(0\.\d+)\)$/)[1]);
+    const b = KIT.rampColor('#e8a020', '#2b2c30', 5, 2);
+    const c = KIT.rampColor('#e8a020', '#2b2c30', 5, 4);
+    assert.ok(alpha(b) < alpha(a) && alpha(c) < alpha(b), 'alpha steps down');
+    // later bands mix toward the ground: brightness follows the GROUND,
+    // never a fixed bias (light grounds must not invert the ramp)
+    const rgbSum = s => s.match(/\d+/g).slice(0, 3).reduce((x, y) => x + +y, 0);
+    assert.ok(rgbSum(KIT.rampColor('#e8a020', '#ffffff', 5, 4))
+              > rgbSum(KIT.rampColor('#e8a020', '#ffffff', 5, 0)),
+        'on a light ground upper bands brighten toward white');
+    assert.ok(rgbSum(KIT.rampColor('#e8a020', '#0a0a0a', 5, 4))
+              < rgbSum(KIT.rampColor('#e8a020', '#0a0a0a', 5, 0)),
+        'on a dark ground upper bands darken toward the ground');
+    // unparseable slot: honest passthrough, never a crash
+    assert.equal(KIT.rampColor('currentColor', '#2b2c30', 5, 1), 'currentColor');
+});
+
+test('COLOR-1/LIVE-READ call sites are wired in uplift_charts.js', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync(require('path').join(STATIC_DIR, 'uplift_charts.js'), 'utf8');
+    assert.match(src, /\?\s*rampAt\(0\)/, 'bottom band uses the ramp');
+    assert.match(src, /fill:\s*rampAt\(i \+ 1\)/, 'upper bands use the ramp');
+    assert.match(src, /KIT\.nearestSample\(colData, src, i\)/,
+        'legendUpdater snaps a null hovered row to the nearest sample');
+    assert.match(src, /KIT\.nearestSample\(scol, c\.data\[0\], i\)/,
+        'the hover tip does the same');
+});
