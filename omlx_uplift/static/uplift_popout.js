@@ -124,16 +124,17 @@ function open(id) {
     overlay.__upliftModalClose = close;
 }
 
-/* Delegated titlebar click: any chart card pops out. Skipped while
-   layout-editing (the handle belongs to GridStack's drag machinery then —
-   body.layout-editing is the same flag the edit toolbar sets) and never
-   on the remove button inside the handle. */
+/* Delegated title click: any chart card pops out. The target is the h2
+   TITLE text (the visible titlebar) — .card-handle lives in the chrome
+   strip that only renders in layout-edit mode, where clicks must stay
+   pure drag input, so the handle path is skipped entirely while
+   editing. Never on the remove button or the timespan chips inside h2
+   (those are separate controls with their own handlers). */
 document.addEventListener('click', ev => {
     if (document.body.classList.contains('layout-editing')) return;
-    const h = ev.target && ev.target.closest ? ev.target.closest('.card-handle') : null;
-    if (!h) return;
-    if (ev.target.closest('.card-remove')) return;
-    const card = h.closest('[data-block]');
+    const t = ev.target && ev.target.closest ? ev.target.closest('h2 span[data-i18n], .card-handle') : null;
+    if (!t || t.tagName === 'BUTTON' || t.closest('.ts-row') || t.closest('.right')) return;
+    const card = t.closest('[data-block]');
     const id = card && card.dataset.block;
     if (!id) return;
     const pg = PG();

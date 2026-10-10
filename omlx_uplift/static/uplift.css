@@ -1503,11 +1503,11 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    view earns readable type instead. */
 .chart-pop .u-legend th, .chart-pop .u-legend .u-label { font: 400 11px/1.4 var(--mono) !important; }
 .chart-pop .u-legend .u-value { font: 400 11px/1.4 var(--mono) !important; }
-/* Discoverability: the handle says 'click' only where it means something
-   (chart cards — the click listener is delegated to the same selector). */
-[data-block="chart-tps"] .card-handle, [data-block="chart-mem"] .card-handle,
-section.card[data-id^="met-"] .card-handle { cursor: zoom-in; }
-body.layout-editing [data-block] .card-handle { cursor: grab; }
+/* Discoverability: the card TITLE says 'click' only where it means
+   something (chart cards — the click listener is delegated to the same
+   selector; .card-handle stays a pure drag affordance in edit mode). */
+[data-block="chart-tps"] h2 > span[data-i18n], [data-block="chart-mem"] h2 > span[data-i18n],
+section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
 .modal.nasa h3 { font: 500 13px/1.2 var(--sans); text-transform: uppercase; letter-spacing: 0.1em; }
 .prune-list { overflow: auto; scrollbar-gutter: stable; padding-right: 6px;
     border-top: 1px solid var(--ink); border-bottom: 1px solid var(--edge); }
