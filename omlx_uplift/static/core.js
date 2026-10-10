@@ -255,23 +255,32 @@ const EXPLORE_METRICS = [
     ] },
     // MTP acceptance (native Lightning MTP) — ONE card (user 2026-10-10:
     // the depth ladder is the per-position detail of the same acceptance
-    // story, not its own metric). Headline area = windowed accept %; the
-    // d1..d4 ladder draws the decay (of the cycles where a draft existed
-    // at depth j, how many verified it). All drawn keys are % — SCALE-1
-    // pins the card 0..100; the palette caps drawn series at 5, so the
-    // remaining stats ride the legend (hover values, never plotted, never
-    // fighting the pinned scale): zero-parked cycles %, tokens emitted per
-    // cycle, mean effective depth, verify cycles/s. d5..d8 stay collected.
-    { key: 'mtp.accept_pct', fmt: 'pct', titleKey: 'mtp.acceptance', series: [
-        { key: 'mtp.accept_pct', fmt: 'pct', area: true },
-        { key: 'mtp.depth_d1_pct', fmt: 'pct' },
-        { key: 'mtp.depth_d2_pct', fmt: 'pct' },
-        { key: 'mtp.depth_d3_pct', fmt: 'pct' },
-        { key: 'mtp.depth_d4_pct', fmt: 'pct' },
-        { key: 'mtp.zero_cycles_pct', fmt: 'pct', legendOnly: true },
+    // story, not its own metric). Headline: 100% STACKED cycle-outcome
+    // distribution (user choice): share of verify cycles that accepted
+    // 0 / 1 / 2 / 3 / 4+ draft tokens. The old per-depth conditional-%
+    // lines could not be stacked honestly (four series that each can be
+    // 100% would sum to 400%) — the shares come from the same counters
+    // (mtp_sampler CYCLE_DIST_KEYS) and sum to exactly 100 by
+    // construction. Reading: fat dark band = speculation wasted, fat
+    // warm bands = the draft head carrying real tokens. All drawn keys
+    // are % — SCALE-1 pins the card 0..100; the palette caps drawn
+    // series at 5. Remaining stats ride the legend (hover values, never
+    // plotted, never fighting the pinned scale): accept %, zero-parked
+    // cycles %, tokens emitted per cycle, mean effective depth, verify
+    // cycles/s, accepted tok/s. mtp.depth_dN_pct stay collected for the
+    // explore surface. stack:true = uplift_charts draws the columns as
+    // uPlot bands over cumulative paths (vendor has no native stacking).
+    { key: 'mtp.accept_pct', fmt: 'pct', titleKey: 'mtp.acceptance', stack: true, series: [
+        { key: 'mtp.cyc0_pct', fmt: 'pct' },
+        { key: 'mtp.cyc1_pct', fmt: 'pct' },
+        { key: 'mtp.cyc2_pct', fmt: 'pct' },
+        { key: 'mtp.cyc3_pct', fmt: 'pct' },
+        { key: 'mtp.cyc4p_pct', fmt: 'pct' },
+        { key: 'mtp.accept_pct', fmt: 'pct', legendOnly: true },
         { key: 'mtp.tokens_per_cycle', legendOnly: true },
         { key: 'mtp.depth_avg', legendOnly: true },
         { key: 'mtp.cycles_s', legendOnly: true },
+        { key: 'mtp.accepted_tokens_s', legendOnly: true },
     ] },
     // "Stuck or just slow": waiting / prefilling / running depth split.
     { key: 'queue.waiting', fmt: 'count', titleKey: 'queue.depth', series: [

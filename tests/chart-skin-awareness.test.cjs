@@ -105,8 +105,11 @@ test('no hex-alpha concatenation survives in the chart code', () => {
 test('both fill sites call tint()', () => {
     assert.match(src, /fill:\s*fill\s*\?\s*tint\(col,\s*'22'\)/,
         'line() area fill must use tint()');
-    assert.match(src, /fill:[^\n]*\?\s*tint\(c,\s*'1c'\)/,
-        'metricOpts() area fill must use tint()');
+    // SMOOTH-3: metricOpts' fill is a nested ternary now (stack bottom
+    // band '3d' / classic area '1c') spanning two lines — both branches
+    // must still route through tint(), which is what this guard is for.
+    assert.match(src, /fill:[\s\S]{0,160}\?\s*tint\(c,\s*'3d'\)[\s\S]{0,160}\?\s*tint\(c,\s*'1c'\)/,
+        'metricOpts() area fills (stack + classic) must use tint()');
 });
 
 /* ---------------- gap 3: multi-series palette ------------------------- */

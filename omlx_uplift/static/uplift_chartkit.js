@@ -20,9 +20,11 @@
    wants a full canvas font shorthand, a bare family would break it. */
 const AXIS_FONT_PX = '9px';
 const AXIS_FONT_FALLBACK = 'ui-monospace, SFMono-Regular, Menlo, monospace';
-function axisFont(col) {
+function axisFont(col, scale) {
     const fam = (col && typeof col.font === 'string') ? col.font.trim() : '';
-    return AXIS_FONT_PX + ' ' + (fam || AXIS_FONT_FALLBACK);
+    const k = (typeof scale === 'number' && scale > 0) ? scale : 1;
+    const px = k === 1 ? AXIS_FONT_PX : Math.round(9 * k) + 'px';
+    return px + ' ' + (fam || AXIS_FONT_FALLBACK);
 }
 /* Skin tokens are CSS colors (skins.py accepts rgb()/hsl()/named values), so
    hex-alpha concatenation (col + '22') silently poisons canvas fillStyle and
@@ -262,8 +264,50 @@ function lastNonNull(col, from) {
    EVERY uPlot opts; never hand-write ms: 1 at a call site. */
 const TSTAMP_MS = 1;
 
+/* SMOOTH-3 (user 2026-10-10): stacked rendering WITHOUT vendor stacking —
+   the vendored uPlot 1.6.32 has no native stack; bands (series pairs with
+   a fill between their paths) are the supported mechanism, and uPlot
+   ranges a scale from the VISIBLE paths, so the band pair members must
+   themselves draw the cumulative sums. A def with stack:true therefore
+   feeds uPlot cumulative columns and hides every stroke except the top
+   edge (edgeIdx); each band i fills between cumulative[i-1] and
+   cumulative[i].
+   nulls propagate (cumulative stays null once a value is missing — never
+   a bridged fabrication); a partial run still sums what exists. */
+function stackCumulative(bands) {
+    const n = bands.length ? bands[0].length : 0;
+    const out = [];
+    let run = new Array(n).fill(0);      // cumulative height so far (band i-1)
+    for (let i = 0; i < bands.length; i++) {
+        const src = bands[i], next = new Array(n), col = new Array(n);
+        for (let j = 0; j < n; j++) {
+            const v = src[j];
+            if (v === null || v === undefined || v !== v) {
+                // Absence, not zero: the column is null and the run
+                // restarts at 0 (the next point draws from the floor).
+                next[j] = 0; col[j] = null;
+            } else {
+                next[j] = run[j] + v; col[j] = next[j];
+            }
+        }
+        run = next;
+        out.push(col);
+    }
+    return out;
+}
+/* Band specs for a stacked card: one band between each consecutive pair
+   of cumulative paths (index + 1 = uPlot series number, 0-indexed past
+   the x column). Returns [] when nothing can be drawn. */
+function stackBands(nStacked) {
+    const bands = [];
+    for (let i = 1; i < nStacked; i++)
+        bands.push({ series: [i, i + 1], dir: 1 });
+    return bands;
+}
+
 return { AXIS_FONT_PX, AXIS_FONT_FALLBACK, axisFont, cssRgb, toHex2, tint,
          chartColors, SERIES_PALETTE_ORDER, SERIES_PALETTE_MAX, seriesPalette,
          ZERO_FLOOR_RANGE, FLOAT_FLOOR_RANGE, PCT_FULL_RANGE, metricYRange,
-         GAP_BRIDGE_MS, gapBridge, TSTAMP_MS, lastNonNull };
+         GAP_BRIDGE_MS, gapBridge, TSTAMP_MS, lastNonNull,
+         stackCumulative, stackBands };
 });

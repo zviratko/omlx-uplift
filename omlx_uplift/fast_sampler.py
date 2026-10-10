@@ -99,13 +99,30 @@ class FastSampler:
         return self._thread is not None and self._thread.is_alive()
 
     def _loop(self) -> None:
+        # DEADLINE scheduling (SMOOTH-2, user 2026-10-10: "the 2hz timing
+        # is not very accurate"): the old loop slept a fixed tick AFTER
+        # finishing work, so every sample landed at tick + work + GIL
+        # handoff (measured 585-650 ms on kocour) and the x-axis vertices
+        # carried that spacing noise. Samples now land on a fixed grid of
+        # t0 + n*tick: the wait runs until the NEXT deadline, and a tick
+        # that overruns (a huge batch walk, a paused process) skips ahead
+        # to the next future deadline instead of bursting — an honest
+        # missed sample beats a fake cluster. sample_once gets the NOMINAL
+        # ts so the rings and the drain windows ride the exact grid.
+        next_due = time.monotonic() + self._tick
         # first sample_only() seeds prev-state; its rates are dropped (dt=0)
-        while not self._stop.wait(self._tick):
+        while not self._stop.wait(max(0.0, next_due - time.monotonic())):
+            now_nominal = time.time() + (next_due - time.monotonic())
             try:
-                self.sample_once()
+                self.sample_once(now=now_nominal)
             except Exception:  # never die on a bad tick — same rule as Collector
                 self._errors += 1
                 log.debug("fast sampler tick failed", exc_info=True)
+            next_due += self._tick
+            if next_due < time.monotonic():       # overran: skip ahead
+                next_due = (time.monotonic()
+                            + self._tick * (1 + int((time.monotonic() - next_due)
+                                                    // self._tick)))
 
     # -- one fast tick -------------------------------------------------------
 
@@ -167,6 +184,15 @@ class FastSampler:
                                                      channel="fast"))
         except Exception:
             log.debug("fast prefill drain failed", exc_info=True)
+
+        # MTP accepted rate: per-channel drain (same monotonic-total
+        # doctrine as decode), so the Throughput stack's MTP edge moves
+        # at 2 Hz while the 5 s tick keeps its exact stored window. The
+        # windowed percent/distribution keys stay on the tick channel.
+        try:
+            pairs.update(collectors.collect_mtp_fast(pool, now=now))
+        except Exception:
+            log.debug("fast mtp drain failed", exc_info=True)
 
         # System memory (psutil — in-process, cheap, moves continuously).
         try:

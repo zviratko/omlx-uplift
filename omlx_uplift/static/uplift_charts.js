@@ -69,6 +69,11 @@ function restoreCursor(c) {
 }
 const tpsData = [[], [], [], [], []];  // time, generation tok/s, prefill tok/s, cached tok/s (U30),
                                        // MTP accepted tok/s (mtp.accepted_tokens_s)
+/* POPOUT-1: uplift_popout.js registers itself here at load (registerPopout
+   below); the chart redraw paths hand it the same columns they just built
+   so an open pop-out stays in lockstep without this file knowing anything
+   about the modal (split-module doctrine: no back-references). */
+const popHooks = { ref: null };
 const memData = [[], [], [], [], []];  // time, omlx used GiB, custom ceiling GiB,
                                        // iogpu wired limit GiB (U38), ALL-models
                                        // hot cache GiB (U40 — one aggregated
@@ -209,11 +214,17 @@ function tpsWindowed() {
     // FAST-1 keeps it on the 5 s path deliberately: its source counter is
     // fed at request COMPLETION — a faster line would only repeat values.
     let k = C.mergeHistory(chartHist.cached || [], tpsData[0], tpsData[3], win, now);
-    // MTP accepted draft tok/s rides the LEFT axis (same unit: generation
-    // tokens it supplies) on the stored 5 s cadence — speculation cycles
-    // are deliberately not fast-sampled (FAST-1 never-fast list).
-    let m = C.mergeHistory(chartHist.mtp || [], tpsData[0], tpsData[4], win, now);
-    if (storedOk) { k = { ts: k.ts, v: sm(k.v) }; m = { ts: m.ts, v: sm(m.v) }; }
+    // SMOOTH-2/3: MTP accepted tok/s is fast-capable now (per-channel
+    // drain in mtp_sampler). It stacks under generation as the speculation
+    // slice of the total — a 5 s step edge next to the 2 Hz top line would
+    // read as a tearing chart, so it prefers its live twin exactly like
+    // generation does; the stored 5 s prefix stays raw next to the live
+    // tail (per-cadence smoothing doctrine unchanged).
+    const mtpL = liveOn && LF.liveUsable('mtp.accepted_tokens_s') ? livePair('mtp.accepted_tokens_s') : null;
+    let m = mtpL ? C.mergeHistory(chartHist.mtp || [], mtpL.ts, mtpL.v, win, now)
+        : C.mergeHistory(chartHist.mtp || [], tpsData[0], tpsData[4], win, now);
+    if (!mtpL && storedOk) m = { ts: m.ts, v: sm(m.v) };
+    if (storedOk) k = { ts: k.ts, v: sm(k.v) };
     const ts = [...new Set(g.ts.concat(p.ts, k.ts, m.ts))].sort((a, b) => a - b);
     const gi = new Map(g.ts.map((t, i) => [t, g.v[i]]));
     const pi = new Map(p.ts.map((t, i) => [t, p.v[i]]));
@@ -367,7 +378,10 @@ function legendUpdater() {
                 cell.className = 'u-value';
                 row.append(cell);
             }
-            const colData = c.data[sIdx + 1];
+            // SMOOTH-3: a stacked card's DATA columns are cumulative (the
+            // bands need them); the legend must show each band's OWN
+            // share — _rawSeries carries the pre-cumulation columns.
+            const colData = (c._rawSeries && c._rawSeries[sIdx]) || c.data[sIdx + 1];
             const raw = colData && colData.length ? colData[i] : null;
             const v = hovering ? raw
                 : (raw !== null && raw !== undefined ? raw : KIT.lastNonNull(colData, i));
@@ -436,7 +450,10 @@ function showTip(c, ev, i) {
     t.textContent = new Date(c.data[0][i]).toLocaleTimeString('en-GB');
     tip.append(t);
     for (let s = 1; s < c.series.length; s++) {
-        const v = c.data[s] ? c.data[s][i] : null;
+        // SMOOTH-3: stacked cards show each band's own share in the tip
+        // too (data columns are cumulative for the band fills).
+        const scol = (c._rawSeries && c._rawSeries[s - 1]) || c.data[s] || null;
+        const v = scol ? scol[i] : null;
         if (v === undefined) continue;
         const row = document.createElement('div');
         row.className = 'ut-row';
@@ -490,9 +507,11 @@ function bindCursorUpdater(c) {
     });
 }
 let tpsChart = null, memChart = null, usageChart = null;
-function createCharts() {
-    if (tpsChart) { tpsChart.destroy(); memChart.destroy(); tpsChart = memChart = null; }
-    const col = chartColors();
+/* POPOUT-1: the series/opts construction of the two shared-history cards
+   is a pure function of (col, popout, boundWin) so the pop-out builds the
+   IDENTICAL chart at screen size — no second copy of the legend/axis/
+   stack wiring that could drift from the card. */
+function tpsSpecs(col) {
     // Dual Y: left = generation tok/s, right = prefill tok/s (prefill >> gen).
     // U30: cached input tokens ride the RIGHT axis as a dotted line in the
     // prefill colour (same family: cached ⊆ prompt); absent before uplift's
@@ -501,34 +520,52 @@ function createCharts() {
     // (generation.tokens_s); its label carries that key's name so the
     // legend says what the line measures. The session average lives on its
     // own small card and the Generation tile, labelled as an average.
-    const tpsSpecs = [line(C.tf('uplift.metric.generation.tokens_s', 'generation tok/s'),
-                           'blue', true, 'y'),
-                      line('prefill', 'gold', false, 'y2')];
+    const specs = [line(C.tf('uplift.metric.generation.tokens_s', 'generation tok/s'),
+                        'blue', true, 'y'),
+                   line('prefill', 'gold', false, 'y2')];
+    // SMOOTH-3 stack: generation is the TOP edge of the stack; its own
+    // wash is the base (non-speculated) tokens. MTP draws a denser warm
+    // area 0..mtp on top of it — the band between the two lines IS the
+    // non-MTP share. Nested areas beat an explicit band here: they stay
+    // honest where mtp history is null (absent before install day), and
+    // idle (mtp=0) reads as the plain generation area, same as before.
+    specs[0].fill = tint(col.blue, '14');
     const cachedLine = line(C.tf('uplift.metric.rate.cached_tokens_s', 'cached tok/s'), 'gold', false, 'y2');
     cachedLine.dash = [4, 4];
-    tpsSpecs.push(cachedLine);
+    specs.push(cachedLine);
     // MTP accepted draft tok/s — only moves on mtp_enabled models; other
     // sessions ride honest zeros (the collector writes them every tick).
     // Stroke from the DEDUPED palette (3rd distinct colour): the raw
     // heat/accent tokens equal gold on every default skin, and a line on
     // the LEFT axis wearing the two RIGHT-axis lines' colour would read
     // as one of them.
+    // SMOOTH-3 (user choice): it is now the BOTTOM of a stack — the area
+    // under it is the MTP share of generation, and the band between it
+    // and the generation line is the non-speculated base. Top of the
+    // stack = total generation tok/s; the legend reads honest raw values.
     const mtpLine = line(C.tf('uplift.metric.mtp.accepted_tokens_s', 'MTP accepted tok/s'),
-                          'heat', false, 'y');
+                          'heat', true, 'y');
     mtpLine.stroke = seriesPalette(col)[2] || mtpLine.stroke;
-    tpsSpecs.push(mtpLine);
-    const tpsOpts = baseOpts(
-        tpsSpecs,
+    mtpLine.fill = tint(mtpLine.stroke, '3d');
+    specs.push(mtpLine);
+    return specs;
+}
+function tpsBaseOpts(col, popout, boundWin) {
+    const o = baseOpts(tpsSpecs(col),
         { scales: { y: { auto: true, range: ZERO_FLOOR_RANGE },
                     y2: { auto: true, range: ZERO_FLOOR_RANGE } },
           yAxes: [Object.assign(yAxis(col, { grid: false, label: 'gen tok/s', stroke: col.blue }), { scale: 'y' }),
                   Object.assign(yAxis(col, { side: 1, grid: false, label: 'prefill tok/s', stroke: col.gold, size: 36 }), { scale: 'y2' })] },
         legendUpdater());
-    // y2 axis sits on the right; uPlot axis 'side': 1=right of grid, 3=left.
-    tpsOpts.height = Math.max(200, $('chart-tps').clientHeight || 240);
-    tpsOpts.scales.x.range = pinnedXRange('chart-tps');
-    tpsChart = new uPlot(tpsOpts, tpsWindowed(), $('chart-tps'));
-    window.__uplotTps = tpsChart;   // debug handle
+    if (popout) {
+        o.width = 0; o.height = 0;   // setSize by the modal host
+        o.axes[0] = Object.assign(xAxis(col, boundWin), { size: 30, grid: true });
+        o.axes[1] = yAxis(col, { label: 'gen tok/s', stroke: col.blue });
+        o.axes[1].scale = 'y';
+    }
+    return o;
+}
+function memSpecs(col) {
     // U38: ONE GiB axis — omlx footprint vs the settings ceiling vs the
     // kernel iogpu wired limit. U40: the hot cache joins as ONE summed
     // all-models line (the per-model top-3 lines wrapped the hover legend).
@@ -540,14 +577,32 @@ function createCharts() {
         if (dash) s.dash = dash;
         return s;
     };
-    const memSpecs = [memLine('omlx memory', 'blue'),
-                      memLine('settings ceiling', 'dim', [4, 4]),
-                      memLine('iogpu wired limit', 'gold', [2, 4]),
-                      line(C.tf('uplift.chart.hot_cache', 'hot cache'), 'gold', true, 'y')];
-    const memOpts = baseOpts(memSpecs,
+    return [memLine('omlx memory', 'blue'),
+            memLine('settings ceiling', 'dim', [4, 4]),
+            memLine('iogpu wired limit', 'gold', [2, 4]),
+            line(C.tf('uplift.chart.hot_cache', 'hot cache'), 'gold', true, 'y')];
+}
+function memBaseOpts(col, popout, boundWin) {
+    const o = baseOpts(memSpecs(col),
         { scales: { y: { auto: true } },
           yAxes: [Object.assign(yAxis(col, { label: 'GiB', stroke: col.blue }), { scale: 'y' })] },
         legendUpdater());
+    if (popout) {
+        o.width = 0; o.height = 0;
+        o.axes[0] = Object.assign(xAxis(col, boundWin), { size: 30, grid: true });
+    }
+    return o;
+}
+function createCharts() {
+    if (tpsChart) { tpsChart.destroy(); memChart.destroy(); tpsChart = memChart = null; }
+    const col = chartColors();
+    const tpsOpts = tpsBaseOpts(col, false);
+    // y2 axis sits on the right; uPlot axis 'side': 1=right of grid, 3=left.
+    tpsOpts.height = Math.max(200, $('chart-tps').clientHeight || 240);
+    tpsOpts.scales.x.range = pinnedXRange('chart-tps');
+    tpsChart = new uPlot(tpsOpts, tpsWindowed(), $('chart-tps'));
+    window.__uplotTps = tpsChart;   // debug handle
+    const memOpts = memBaseOpts(col, false);
     memOpts.height = Math.max(200, $('chart-mem').clientHeight || 240);
     memOpts.scales.x.range = pinnedXRange('chart-mem');
     memChart = new uPlot(memOpts, memWindowed(), $('chart-mem'));
@@ -559,8 +614,13 @@ function createCharts() {
 }
 function redrawCharts() {
     if (!tpsChart) return;
-    tpsChart.setData(tpsWindowed());
-    memChart.setData(memWindowed());
+    const tpsD = tpsWindowed(), memD = memWindowed();
+    tpsChart.setData(tpsD);
+    memChart.setData(memD);
+    // POPOUT-1: an open pop-out of a shared card rides the same frame —
+    // one column build, two setData calls (uplift_popout.js owns the
+    // modal; this file only hands it the columns it just built).
+    if (popHooks.ref) popHooks.ref.onSharedRedraw(tpsD, memD);
     // Keep the hovered position pinned across polls (index shifts otherwise);
     // when not hovering, show the latest samples.
     restoreCursor(tpsChart) || legendUpdater()(tpsChart);
@@ -585,6 +645,9 @@ function redrawCharts() {
     $('chart-tps-window').textContent = label;
 }
 function rerenderChartsTheme() {
+    // POPOUT-1: its uPlot holds old-theme colors and the card plot it
+    // mirrored is gone — close it, the next titlebar click rebuilds.
+    if (popHooks.ref) popHooks.ref.close();
     createCharts(); if (usageChart) createUsageChart();
     // ISSUE-2: rebuild each metric plot IN ITS HOST — createMetricCard's
     // exists-guard makes re-calling it a no-op once the card is in the grid,
@@ -852,6 +915,10 @@ function metricLabel(key) {
               'accepted tokens s': 'MTP accepted tok/s', 'accept pct': 'accepted %',
               'acceptance': 'MTP acceptance', 'depth acceptance': 'MTP depth acceptance',
               'cycles s': 'verify cycles/s', 'tokens per cycle': 'emitted tok/cycle',
+              // SMOOTH-3 stacked cycle-outcome bands (locale normally wins).
+              'cyc0 pct': '0 accepted %', 'cyc1 pct': '1 accepted %',
+              'cyc2 pct': '2 accepted %', 'cyc3 pct': '3 accepted %',
+              'cyc4p pct': '4+ accepted %',
               'total w': 'total W', 'cpu w': 'CPU W', 'gpu w': 'GPU W', 'ane w': 'ANE W',
               'cpu temp c': 'CPU °C', 'gpu temp c': 'GPU °C', 'max rpm': 'max RPM',
               'max pct': 'fan %', 'tokens min': 'tok/min', 'draw': 'power draw',
@@ -872,37 +939,62 @@ function metricSeriesLabel(key) {
    element is what the grid parks/places from then on). */
 /* Options for one metric card, shared by create + reinit (theme/skin).
    Multi-series defs (U19/U20) draw every series on a union x column, get a
-   legend, and may put lines on a right-hand y2 axis (different unit). */
+   legend, and may put lines on a right-hand y2 axis (different unit).
+   SMOOTH-3: def.stack = the LEADING drawn (non-legendOnly) series form a
+   100%/absolute stack — their data columns arrive pre-cumulated by
+   drawMetricChart (vendor uPlot has no native stack), every stroke except
+   the top edge hides, and opts.bands fill between consecutive paths with
+   the band's own palette colour. `popout` renders the axis-bearing
+   variant of the card (POPOUT-1): real time axis, roomier type. */
 function metricServes(def) {
     return def.series && def.series.length ? def.series : [{ key: def.key, fmt: def.fmt }];
 }
-function metricOpts(id, def, col) {
+function metricStackCount(def) {
+    if (!def || !def.stack || !def.series) return 0;
+    let n = 0;
+    for (const s of def.series) { if (s.legendOnly || s.axis) break; n++; }
+    return n;
+}
+function metricOpts(id, def, col, opts) {
+    const pop = !!(opts && opts.popout);
     const fmt = metricFormat(def);
     const mult = !!(def.series && def.series.length);
     const sers = metricServes(def);
+    const nStack = metricStackCount(def);
     const hasY2 = mult && sers.some(s => s.axis === 'y2' && !s.legendOnly);
     const palette = seriesPalette(col);
     const series = [{}, ...sers.map((s, i) => {
         const sf = metricFormat({ key: s.key, fmt: s.fmt });
         const c = palette[i % palette.length];
         const sc = s.axis || (s.legendOnly ? 'yleg' : 'y');
+        const inStack = i < nStack;
         const o = { label: metricSeriesLabel(s.key), scale: sc,
-                    stroke: c, width: s.legendOnly ? 0 : 1.6,
+                    stroke: c, width: (s.legendOnly || inStack) ? 0 : 1.6,
                     // BUG-4: same cadence-gap bridge as the big charts —
                     // metricUnionCols mixes live 500 ms and stored 5 s
                     // stamps into one x column.
                     gaps: KIT.gapBridge(),
-                    fill: (s.area || (!mult && i === 0)) ? tint(c, '1c') : undefined,
+                    // SMOOTH-3: the FIRST stacked series' area (path to 0)
+                    // paints the bottom band; the uPlot opts.bands fill
+                    // the rest between consecutive cumulative paths.
+                    // Non-stacked cards keep the exact old wash ('1c').
+                    fill: (nStack > 1 && i === 0) ? tint(c, '3d')
+                          : (s.area || (!mult && i === 0)) ? tint(c, '1c') : undefined,
                     points: { show: false }, value: (u, v) => sf(v === undefined || v !== v ? null : v) };
         return o;
     })];
+    // Every stacked column hides its stroke (bands carry the fills, the
+    // top of a 100% stack would only draw a line at the ceiling); band
+    // paths build regardless of width — verified against the vendor
+    // drawSeries path logic (band dirs come from opts.bands, not stroke).
     const scales = { x: { time: true, range: pinnedXRange(id) },
                      y: { auto: true, range: metricYRange(def) } };
     if (sers.some(s => s.legendOnly)) scales.yleg = { auto: true };
     // SCALE-1: y2 always carries a rate or a count (prefill tok/s, restored
     // tok/min, fan RPM) — those read 0 honestly, so the U8 floor stays.
     if (hasY2) scales.y2 = { auto: true, range: ZERO_FLOOR_RANGE };
-    const axes = [metricXAxis(cardWindow(id), col), metricYAxis(col, def)];
+    const axes = pop ? [popoutXAxis(cardWindow(id), col), metricYAxis(col, def, true)]
+                     : [metricXAxis(cardWindow(id), col), metricYAxis(col, def)];
     if (hasY2) {
         const y2ser = sers.find(s => s.axis === 'y2' && !s.legendOnly);
         axes.push(Object.assign(
@@ -912,10 +1004,11 @@ function metricOpts(id, def, col) {
                   : vals.map(v => v == null ? '' : metricYFmt({ key: y2ser.key, fmt: y2ser.fmt || def.fmt })(v)) },
             { scale: 'y2' }));
     }
-    return {
-        width: 300, height: 100, padding: [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
+    const out = {
+        width: pop ? 600 : 300, height: pop ? 420 : 100,
+        padding: pop ? [10, 8, 4, 0] : [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
         ms: KIT.TSTAMP_MS,   // x columns are ms-epoch (TSTAMP_MS in chartkit)
-        cursor: { drag: { x: false, y: false }, points: { show: true, size: 5, fill: col.dim } },
+        cursor: { drag: { x: false, y: false }, points: { show: true, size: pop ? 6 : 5, fill: col.dim } },
         // SWEEP178: live:false like the shared charts. With live:true the
         // vendored build re-paints the value cells on its own deferred draw
         // pass and stamps '—' (null through series.value) right after our
@@ -923,6 +1016,25 @@ function metricOpts(id, def, col) {
         legend: { show: mult, live: false },
         scales, axes, series,
     };
+    if (nStack > 1) {
+        out.bands = KIT.stackBands(nStack).map((b, i) => Object.assign(b, {
+            // stackBands emits pairs (1,2)..(n-1,n) in uPlot series space;
+            // band i (0-based) fills between cum(i+1) and cum(i+2), i.e.
+            // the share of DRAWN series i+2 (1-based) = palette slot i+1.
+            fill: tint(palette[(i + 1) % palette.length], pop ? '55' : '3d'),
+        }));
+    }
+    return out;
+}
+/* Visible-x-axis variant of metricXAxis for the pop-out (the compact card
+   hides its axis — see metricXAxis; the enlarged view earns the labels). */
+function popoutXAxis(win, col) {
+    const dayish = win >= 86400;
+    return { stroke: col.dim, width: 1, size: 26, font: axisFont(col, 1.35),
+             grid: false, gap: 4, rotate: 0, space: 70,
+             values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
+                 dayish ? { month: 'short', day: 'numeric' }
+                        : { hour: '2-digit', minute: '2-digit', ...(win < 900 ? { second: '2-digit' } : {}) })) };
 }
 function createMetricCard(def, park) {
     const id = C.metricBlockId ? C.metricBlockId(def.key) : 'met-' + def.key.replace(/[._]/g, '-');
@@ -1067,13 +1179,18 @@ function metricYFmt(def) {
                  : Math.abs(v) >= 1e3 ? Math.round(v / 1e3) + 'k'
                  : String(Math.round(v * 10) / 10));
 }
-function metricYAxis(col, def) {
+function metricYAxis(col, def, popout) {
     // Labels render left-aligned at size+gap+12; 26 wasted ~48px of card
     // width on the left gutter (2026-09-26). 10 keeps them clear of the
-    // card edge while pulling the plot to nearly full width.
-    return { stroke: col.dim, size: 4, font: axisFont(col), grid: true, gap: 2,
-             rotate: 0, space: 26, label: '',
-             values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) };
+    // card edge while pulling the plot to nearly full width. The pop-out
+    // (POPOUT-1) earns a real gutter: roomy band + bigger type.
+    return popout
+        ? { stroke: col.dim, size: 34, font: axisFont(col, 1.35), grid: true,
+            gap: 6, rotate: 0, space: 44, label: '',
+            values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) }
+        : { stroke: col.dim, size: 4, font: axisFont(col), grid: true, gap: 2,
+            rotate: 0, space: 26, label: '',
+            values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) };
 }
 function metricFetch(id, force) {
     const e = metricCharts.get(id);
@@ -1182,7 +1299,23 @@ function drawMetricChart(id) {
             smoothed = true;
         }
     }
+    // SMOOTH-3: stacked card -> feed uPlot the CUMULATIVE columns (bands
+    // fill between consecutive paths; the vendor build has no native
+    // stack). The RAW columns stay on the entry: the legend/tooltip read
+    // them, so a hovered row shows the band's own share, never the sum.
+    const nStack = metricStackCount(e.def);
+    if (nStack > 1) {
+        const bandCols = cols.slice(1, nStack + 1);
+        e.rawCols = bandCols.map(c => c.slice());
+        const cum = KIT.stackCumulative(bandCols);
+        for (let i = 0; i < nStack; i++) cols[i + 1] = cum[i];
+    } else {
+        e.rawCols = null;
+    }
+    e.lastCols = cols;
     e.chart.setData(cols);
+    e.chart._rawSeries = e.rawCols;
+    if (popHooks.ref) popHooks.ref.onMetricDraw(id, cols, e.rawCols);
     // SWEEP178: with legend.live:false the vendored build paints value
     // cells only on cursor events, so idle multi-series cards showed '—'
     // forever. Shared charts already refresh their legend after setData
@@ -1523,5 +1656,26 @@ window.Uplift.charts = {
     get usageChart() { return usageChart; },
     // NAT-6 chip fix: node tests slice/verify the chip aggregation rule
     chipReadout: chipReadout,
+    /* POPOUT-1: registration + the read/build surface the pop-out module
+       needs (it must never reach into this IIFE's internals any other
+       way; getters keep the values live across theme re-inits). */
+    registerPopout(api) { popHooks.ref = api; },
+    popGlue: {
+        chartColors: () => chartColors(),
+        legendUpdater: () => legendUpdater(),
+        bindCursorTip: c => bindCursorTip(c),
+        bindCursorUpdater: c => bindCursorUpdater(c),
+        pinnedXRange: id => pinnedXRange(id),
+        cardWindow: id => cardWindow(id),
+        metricOpts: (id, def, col, opts) => metricOpts(id, def, col, opts),
+        tpsBaseOpts: (col, pop, win) => tpsBaseOpts(col, pop, win),
+        memBaseOpts: (col, pop, win) => memBaseOpts(col, pop, win),
+        multInitData: def => multInitData(def),
+        metricLabel: key => metricLabel(key),
+        metricEntry: id => metricCharts.get(id),
+        hasMetric: id => metricCharts.has(id),
+        tpsWindowed: () => tpsWindowed(),
+        memWindowed: () => memWindowed(),
+    },
 };
 })();

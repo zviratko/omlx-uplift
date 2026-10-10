@@ -120,6 +120,13 @@ async def metrics_stream(is_admin: bool = Depends(require_admin)):
     async def event_generator():
         sent: dict[str, tuple] = {}
         first = True
+        # SMOOTH-2: poll at 4x the sampler cadence. Frames stay
+        # change-driven (a poll with no new value sends nothing, so the
+        # bandwidth is unchanged), but the write-to-frame delay drops
+        # from ~1 tick to ~125 ms — measured before: arrival gaps
+        # alternated 501/1004 ms because the generator slept a whole
+        # tick and kept missing writes.
+        poll_s = max(0.05, FAST_TICK_S / 4)
         try:
             while True:
                 snap = sampler.snapshot()
@@ -136,7 +143,7 @@ async def metrics_stream(is_admin: bool = Depends(require_admin)):
                     sent.update({k: tuple(v) for k, v in changed.items()})
                     yield f"data: {json.dumps(frame)}\n\n"
                 first = False
-                await asyncio.sleep(FAST_TICK_S)
+                await asyncio.sleep(poll_s)
         except asyncio.CancelledError:
             pass
 

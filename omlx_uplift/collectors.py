@@ -167,42 +167,62 @@ def collect_generation(pool: Any, *, now: float,
 # --------------------------------------------------------------------------
 
 
+def mtp_live_states(pool: Any) -> list[Any]:
+    """Walk every loaded scheduler for live _MtpStats objects.
+
+    A layout change upstream (batch generator moved, attribute renamed)
+    makes the walk find nothing — the sampler then sees only zeros, never
+    a raised tick. Shared by the 5 s tick and the 2 Hz fast sampler (the
+    walk is pure attribute reads; the sampler dedupes states by id)."""
+    states: list[Any] = []
+    if pool is None:
+        return states
+    for mid in pool.get_loaded_model_ids():
+        try:
+            sched = scheduler_for(pool.get_entry(mid))
+            gen = getattr(sched, "batch_generator", None)
+            batch = getattr(gen, "_generation_batch", None)
+            if batch is None:
+                continue
+            singleton = getattr(batch, "_omlx_mtp_state", None)
+            if singleton is not None:
+                st = getattr(singleton, "stats", None)
+                if st is not None:
+                    states.append(st)
+            batched = getattr(batch, "_omlx_mtp_batch_state", None)
+            for ms in (getattr(batched, "states", None) or {}).values():
+                st = getattr(ms, "stats", None)
+                if st is not None:
+                    states.append(st)
+        except Exception:
+            log.debug("mtp state walk failed for %s", mid, exc_info=True)
+    return states
+
+
 def collect_mtp(pool: Any, *, now: float) -> dict:
-    """Walk every loaded scheduler for live MTP states, then drain one
-    tick of mtp.* pairs.
+    """Feed the sampler one tick's live MTP states, then drain the
+    persisting ('tick') window of mtp.* pairs.
 
     The states hang off the scheduler's BatchGenerator generation batch
     (see mtp_sampler module docstring for the shape and the crediting
     rules). Zero MTP work is a data point, not an absence: the drain
-    always writes the full key set. A layout change upstream (batch
-    generator moved, attribute renamed) makes the walk find nothing —
-    honest flat zeros, never a raised tick."""
-    states: list[Any] = []
-    if pool is not None:
-        for mid in pool.get_loaded_model_ids():
-            try:
-                sched = scheduler_for(pool.get_entry(mid))
-                gen = getattr(sched, "batch_generator", None)
-                batch = getattr(gen, "_generation_batch", None)
-                if batch is None:
-                    continue
-                singleton = getattr(batch, "_omlx_mtp_state", None)
-                if singleton is not None:
-                    st = getattr(singleton, "stats", None)
-                    if st is not None:
-                        states.append(st)
-                batched = getattr(batch, "_omlx_mtp_batch_state", None)
-                for ms in (getattr(batched, "states", None) or {}).values():
-                    st = getattr(ms, "stats", None)
-                    if st is not None:
-                        states.append(st)
-            except Exception:
-                log.debug("mtp state walk failed for %s", mid,
-                          exc_info=True)
+    always writes the full key set."""
     from .mtp_sampler import get_mtp_sampler
     sampler = get_mtp_sampler()
-    sampler.sample_states(states, now=now)
-    return sampler.drain(now=now)
+    sampler.sample_states(mtp_live_states(pool), now=now)
+    return sampler.drain(now=now, channel="tick")
+
+
+def collect_mtp_fast(pool: Any, *, now: float) -> dict:
+    """Fast-channel (2 Hz) MTP drain: the same state walk, but the drain
+    only divides the rate keys by the fast dt on their own baseline.
+    Windowed percent/ratio keys stay with the persisting tick (they must
+    not swap the shared accumulator). Feeds mtp.accepted_tokens_s into
+    the display ring so the Throughput stack's MTP edge moves at 2 Hz."""
+    from .mtp_sampler import get_mtp_sampler
+    sampler = get_mtp_sampler()
+    sampler.sample_states(mtp_live_states(pool), now=now)
+    return sampler.drain(now=now, channel="fast")
 
 
 # --------------------------------------------------------------------------

@@ -41,12 +41,14 @@ test('vendored uPlot still defaults ms to 0.001 (the trap stays live)', () => {
 
 test('every uPlot opts in uplift_charts.js carries ms: KIT.TSTAMP_MS', () => {
     // Three opts BUILDERS own all five `new uPlot(` sites:
-    //   baseOpts()   -> tpsChart, memChart
-    //   metricOpts() -> metric cards (create + reinit)
+    //   baseOpts()   -> tpsChart, memChart (+ their pop-out clones)
+    //   metricOpts() -> metric cards (create + reinit + pop-out clone)
     //   the usageChart literal in createUsageChart()
+    // The pop-out (uplift_popout.js) never builds its own opts — it asks
+    // these builders for them, which is what keeps the clones honest.
     const builders = [
         ['baseOpts',   /function baseOpts\(specs, axes, legendHook\) \{[\s\S]*?\n\}/],
-        ['metricOpts', /function metricOpts\(id, def, col\) \{[\s\S]*?\n\}/],
+        ['metricOpts', /function metricOpts\(id, def, col, opts\) \{[\s\S]*?\n\}/],
         ['usageChart', /usageChart = new uPlot\(\{[\s\S]*?\}, \[\[\], \[\]\], el\)/],
     ];
     let carriers = 0;

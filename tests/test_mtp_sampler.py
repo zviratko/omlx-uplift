@@ -226,3 +226,112 @@ def test_sample_states_never_raises_on_junk():
     s.sample_states([None, object(), FakeStats(cycles="x")], now=100.0)
     s.sample_states("not-an-iterable-item-type"[0:0], now=100.0)  # empty
     assert _drain(s, 105.0)[KEY_ACCEPTED_TOKENS] == 0.0
+
+
+# ------------------------------------------------- cycle-outcome stack
+#
+# SMOOTH-3: the stacked card draws the share of verify cycles by how many
+# drafts they accepted. The buckets come from the depth_accepted ladder
+# (a cycle accepting m bumps da[0..m-1]): cyc0 = cycles - da[0],
+# cycj = da[j-1] - da[j], cyc4p = da[3]. They must sum to 100 % exactly.
+
+
+def _dist(d):
+    return [d[f"mtp.cyc{k}_pct"] for k in ("0", "1", "2", "3", "4p")]
+
+
+def test_cycle_distribution_buckets_sum_to_100():
+    s = MtpSampler()
+    _drain(s, 100.0)
+    # 10 cycles: 2 accepted 0 (incl. one depth-0), 4 accepted 1,
+    # 3 accepted 2, 1 accepted 5 (>= 4 -> the 4+ bucket).
+    st = FakeStats(cycles=10, accepts=0 + 4 + 6 + 5, zero_cycles=1,
+                   depth_drafted=[8, 4, 1, 1, 1],
+                   depth_accepted=[8, 4, 1, 1, 1])
+    # da = [8,4,1,1] -> cyc0=2, cyc1=4, cyc2=3, cyc3=0, cyc4p=1
+    s.note_finish(st, now=101.0)
+    d = _drain(s, 105.0)
+    assert _dist(d) == pytest.approx([20.0, 40.0, 30.0, 0.0, 10.0])
+    assert sum(_dist(d)) == pytest.approx(100.0)
+
+
+def test_cycle_distribution_zero_on_idle_window():
+    s = MtpSampler()
+    _drain(s, 100.0)
+    d = _drain(s, 105.0)
+    assert _dist(d) == [0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+def test_cycle_distribution_guards_broken_ladder():
+    """A non-prefix ladder (never expected, a mixed-depth path could
+    produce one) must floor at 0 — the stack must never draw a negative
+    band — while the honest 4+ share still comes from da[3]."""
+    s = MtpSampler()
+    _drain(s, 100.0)
+    st = FakeStats(cycles=10, accepts=12,
+                   depth_drafted=[8, 8, 8, 8],
+                   depth_accepted=[4, 9, 2, 1])   # da1 > da0: broken run
+    s.note_finish(st, now=101.0)
+    d = _drain(s, 105.0)
+    for v in _dist(d):
+        assert v >= 0.0
+    assert d["mtp.cyc0_pct"] == pytest.approx(60.0)   # (10-4)/10
+    assert d["mtp.cyc1_pct"] == pytest.approx(0.0)    # max(0, 4-9)
+    assert d["mtp.cyc4p_pct"] == pytest.approx(10.0)  # da[3]/10
+
+
+# ---------------------------------------------------- fast channel
+
+
+def test_fast_drain_credits_from_its_own_seed():
+    """The 2 Hz channel seeds from the CURRENT totals (everything before
+    belongs to the tick channel) and then reports only its own windows."""
+    s = MtpSampler()
+    _drain(s, 100.0)                      # tick seed
+    st = FakeStats(cycles=0, accepts=0)
+    s.sample_states([st], now=100.5)      # baseline at zero
+    assert s.drain(now=101.0, channel="fast")[KEY_ACCEPTED_TOKENS] == 0.0
+    st.cycles, st.accepts = 10, 6
+    st.depth_drafted, st.depth_accepted = [10], [6]
+    s.sample_states([st], now=101.3)      # credits +6 accepts
+    d = s.drain(now=101.5, channel="fast")
+    assert d[KEY_ACCEPTED_TOKENS] == pytest.approx(6 / 0.5)
+    # The fast frame carries ONLY the rate keys — the windowed percent
+    # families belong to the persisting tick.
+    assert set(d) == {KEY_ACCEPTED_TOKENS, KEY_CYCLES}
+
+
+def test_fast_drains_never_steal_from_the_tick_window():
+    """The whole point of per-channel baselines: N fast drains between
+    two ticks must leave the STORED 5 s value exactly what it was with
+    no fast drains at all."""
+    a = MtpSampler()      # tick only
+    b = MtpSampler()      # tick + 9 fast drains interleaved
+    for s in (a, b):
+        _drain(s, 100.0)
+    for (s, st) in [(a, FakeStats(cycles=0, accepts=0)),
+                    (b, FakeStats(cycles=0, accepts=0))]:
+        s.sample_states([st], now=101.0)
+        st.cycles, st.accepts = 20, 12
+        st.depth_drafted, st.depth_accepted = [20], [12]
+        s.sample_states([st], now=102.0)
+    for i in range(1, 10):                # b: fast channel at 0.5 s
+        b.drain(now=100.0 + i * 0.5, channel="fast")
+    da, db = _drain(a, 105.0), _drain(b, 105.0)
+    assert db[KEY_ACCEPTED_TOKENS] == pytest.approx(da[KEY_ACCEPTED_TOKENS])
+    assert db[KEY_CYCLES] == pytest.approx(da[KEY_CYCLES])
+
+
+def test_fast_first_drain_seeds_from_totals_not_zero():
+    """A fast sampler starting late (restart, hooks pre-seeded with
+    lifetime-ish window credits) must NOT dump every prior credit into
+    its first 500 ms frame."""
+    s = MtpSampler()
+    _drain(s, 100.0)                      # tick seed (0, 0)
+    st = FakeStats(cycles=8, accepts=5, init_emits=2, draft_emits=5,
+                   depth_drafted=[8], depth_accepted=[5])
+    s.note_finish(st, now=101.0)          # credits 5 before any fast drain
+    d = s.drain(now=101.5, channel="fast")
+    assert d[KEY_ACCEPTED_TOKENS] == 0.0
+    d2 = _drain(s, 105.0)                 # tick sees the FULL window still
+    assert d2[KEY_ACCEPTED_TOKENS] == pytest.approx(5 / 5.0)

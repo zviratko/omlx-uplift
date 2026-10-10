@@ -1478,6 +1478,36 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 /* U2 grammar pop-out: MUST stay after .modal.nasa — same 0,2,0 specificity,
    so source order decides */
 .modal.grammar-pop { width: min(1100px, 96vw); max-height: 92vh; }
+
+/* ---- POPOUT-1: enlarged chart view (titlebar click) ---- */
+.modal-overlay.chart-pop-overlay { align-items: center; padding: 3vh 16px; }
+.modal.nasa.chart-pop {
+    width: min(1240px, 96vw); height: min(88vh, 900px); max-height: none;
+    display: flex; flex-direction: column; gap: 8px;
+}
+.chart-pop .chart-pop-head { display: flex; align-items: baseline; gap: 12px; flex: 0 0 auto; }
+.chart-pop .chart-pop-head h3 { margin: 0; }
+.chart-pop .chart-pop-note { font: 400 10px/1.3 var(--mono); color: var(--dim); flex: 1 1 auto; }
+/* Close button: .card-remove's visible styling only exists under
+   body.layout-editing — the pop-out is never in that mode, so style it
+   from the button itself. */
+.chart-pop .chart-pop-head .chart-pop-x {
+    flex: 0 0 auto; background: transparent; border: 1px solid var(--edge);
+    color: var(--dim); width: 22px; height: 22px; border-radius: var(--radius);
+    cursor: pointer; font: 400 14px/1 var(--mono); display: inline-flex;
+    align-items: center; justify-content: center; padding: 0;
+}
+.chart-pop .chart-pop-head .chart-pop-x:hover { color: var(--bg); background: var(--ink); }
+.chart-pop .chart-pop-plot { flex: 1 1 auto; min-height: 0; }
+/* The card legend rule forces 9px everywhere (!important); the enlarged
+   view earns readable type instead. */
+.chart-pop .u-legend th, .chart-pop .u-legend .u-label { font: 400 11px/1.4 var(--mono) !important; }
+.chart-pop .u-legend .u-value { font: 400 11px/1.4 var(--mono) !important; }
+/* Discoverability: the handle says 'click' only where it means something
+   (chart cards — the click listener is delegated to the same selector). */
+[data-block="chart-tps"] .card-handle, [data-block="chart-mem"] .card-handle,
+section.card[data-id^="met-"] .card-handle { cursor: zoom-in; }
+body.layout-editing [data-block] .card-handle { cursor: grab; }
 .modal.nasa h3 { font: 500 13px/1.2 var(--sans); text-transform: uppercase; letter-spacing: 0.1em; }
 .prune-list { overflow: auto; scrollbar-gutter: stable; padding-right: 6px;
     border-top: 1px solid var(--ink); border-bottom: 1px solid var(--edge); }

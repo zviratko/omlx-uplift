@@ -28,10 +28,13 @@ double-count traps apply):
 * zeros are ALWAYS written — an idle or non-MTP engine is a data point,
   and a skipped key truncates the series exactly when speculation stops.
 
-Window semantics: percent/ratio/depth keys drain the window since the
-previous persisting tick (windowed mean, same shape as pfx.*_pct);
-``mtp.accepted_tokens_s`` and ``mtp.cycles_s`` divide the window delta by
-dt (same shape as generation.tokens_s).
+Window semantics: percent/ratio/depth/cycle-distribution keys drain the
+window since the previous persisting tick (windowed mean, same shape as
+pfx.*_pct); ``mtp.accepted_tokens_s`` and ``mtp.cycles_s`` divide the
+window delta by dt (same shape as generation.tokens_s) and follow the
+FAST-1 multi-channel rule — the rate keys alone also drain on the 2 Hz
+display channel with a per-channel (ts, total) baseline, so the fast
+frame can never shorten the STORED 5 s window (see ``drain``).
 
 Not collected: vlm_mtp (a second, assistant-drafter path — enabled on no
 known model; its counters would make the series mean "some speculation")
@@ -60,7 +63,24 @@ KEY_DEPTH_AVG = "mtp.depth_avg"
 KEY_TOKENS_PER_CYCLE = "mtp.tokens_per_cycle"
 KEY_CYCLES = "mtp.cycles_s"
 KEY_DEPTH_PREFIX = "mtp.depth_d"          # + "1".."8" + "_pct"
+KEY_CYCLE_PREFIX = "mtp.cyc"              # + "0".."3", last = "4p"
 MAX_DEPTH = 8
+
+# Stacked cycle-outcome distribution (user 2026-10-10: the conditional
+# per-depth % ladder cannot be stacked honestly — four series that each
+# can be 100% sum to 400%). Shares of verify cycles by how many drafted
+# tokens they accepted, over the same cycle denominator:
+#   cyc0 = cycles - da[0]        (k == 0 depth-0 cycles + m == 0 rejects)
+#   cycj = da[j-1] - da[j]       (accepted exactly j)
+#   cyc4p = da[3]                (accepted >= 4)
+# da[] is a prefix-run ladder (a cycle at depth d bumps da[0..d-1]), so
+# every bucket is >= 0 and they sum to cycles exactly — the derivation
+# needs NO new upstream counters. Buckets 0..3 then "4+": depths beyond
+# MAX_DRAFT are counted inside 4+ (the plotted ladder was d1..d4 too).
+MAX_DRAFT = 4
+CYCLE_DIST_KEYS = (f"{KEY_CYCLE_PREFIX}0_pct", f"{KEY_CYCLE_PREFIX}1_pct",
+                   f"{KEY_CYCLE_PREFIX}2_pct", f"{KEY_CYCLE_PREFIX}3_pct",
+                   f"{KEY_CYCLE_PREFIX}4p_pct")
 
 # States unseen for this long are dropped: their dataclass id can be
 # recycled for a new sequence, and a stale baseline would mis-credit.
@@ -103,9 +123,12 @@ class MtpSampler:
         self._win = self._zero_totals()
         # mtp.accepted_tokens_s / mtp.cycles_s ride the monotonic-total
         # pattern (drain() divides by dt, dt<=0 keeps the baseline).
+        # FAST-1 multi-channel: each reporting channel ('tick' persists,
+        # 'fast' displays at 2 Hz) keeps its OWN (ts, tot, cyc) baseline,
+        # so the fast frame can never shorten the stored 5 s window.
         self._credited = 0.0
         self._cycles = 0.0
-        self._base: Optional[tuple[float, float, float]] = None  # ts, tot, cyc
+        self._bases: dict[str, tuple[float, float, float]] = {}
 
     @staticmethod
     def _zero_totals() -> dict:
@@ -244,32 +267,52 @@ class MtpSampler:
 
     def drain(self, *, now: float,
               channel: str = "tick") -> dict[str, float]:
-        """One window of MTP pairs. The store has one writer (the 5 s
-        Collector, channel='tick'); the fast display path is deliberately
-        not fed these counters (speculation cycles are not 2 Hz data).
+        """One drain of ``channel``.
 
-        First drain seeds the baseline and credits nothing; ``dt <= 0``
-        returns zeros WITHOUT draining (same no-fake-spike rule as
-        decode_sampler.drain — a swapped baseline would silently lose the
-        window's tokens). The seed is (now, 0, 0), not the current totals:
-        unlike a decode row's lifetime count, our accumulator can only
-        have grown from observations AFTER the hooks installed, so
-        pre-first-drain credits are real window work and must not be
-        swallowed into the baseline."""
+        FAST-1 multi-channel rule (same doctrine as decode_sampler): the
+        credited totals are monotonic and each reporting channel keeps its
+        own (ts, tot, cyc) baseline — 'tick' is the 5 s Collector that
+        PERSISTS, 'fast' the 2 Hz display sampler. The fast frame returns
+        ONLY the two rate keys (``mtp.accepted_tokens_s`` /
+        ``mtp.cycles_s``): the windowed percent/ratio families belong to
+        the persisting tick, which alone swaps ``self._win``.
+
+        First drain of a channel seeds and credits nothing. The seeds
+        differ per channel and both choices are load-bearing:
+        * 'tick' seeds (now, 0, 0) — the accumulator can only have grown
+          from observations AFTER the hooks installed, so pre-seed credits
+          are real window work and must not be swallowed into the
+          baseline (stored-series semantics unchanged by this refactor).
+        * 'fast' seeds (now, tot, cyc) — everything before the seed is
+          already visible on the persisting channel; crediting it again
+          into one 500 ms frame would fabricate a huge spike. Same rule
+          as a decode row first sight: baseline, credit nothing.
+        ``dt <= 0`` returns zeros WITHOUT advancing the baseline (never a
+        fake spike, never a lost window)."""
         with self._lock:
-            if self._base is None:
-                self._base = (now, 0.0, 0.0)
+            base = self._bases.get(channel)
+            total, cycles = self._credited, self._cycles
+            if base is None:
+                seed = (now, 0.0, 0.0) if channel == "tick" else (now, total, cycles)
+                self._bases[channel] = seed
+                if channel != "tick":
+                    return {KEY_ACCEPTED_TOKENS: 0.0, KEY_CYCLES: 0.0}
                 pairs = self._zero_pairs()
                 pairs[KEY_ACCEPTED_TOKENS] = 0.0
                 pairs[KEY_CYCLES] = 0.0
                 return pairs
-            b_ts, b_total, b_cycles = self._base
+            b_ts, b_total, b_cycles = base
             dt = now - b_ts
             if dt <= 0:
+                if channel != "tick":
+                    return {KEY_ACCEPTED_TOKENS: 0.0, KEY_CYCLES: 0.0}
                 return self._all_zero()
+            if channel != "tick":
+                self._bases[channel] = (now, total, cycles)
+                return {KEY_ACCEPTED_TOKENS: (total - b_total) / dt,
+                        KEY_CYCLES: (cycles - b_cycles) / dt}
             win, self._win = self._win, self._zero_totals()
-            total, cycles = self._credited, self._cycles
-            self._base = (now, total, cycles)
+            self._bases[channel] = (now, total, cycles)
 
         pairs = self._pairs_from(win, now)
         pairs[KEY_ACCEPTED_TOKENS] = (total - b_total) / dt
@@ -283,6 +326,8 @@ class MtpSampler:
             KEY_DEPTH_AVG: 0.0, KEY_TOKENS_PER_CYCLE: 0.0}
         for i in range(MAX_DEPTH):
             pairs[f"{KEY_DEPTH_PREFIX}{i + 1}_pct"] = 0.0
+        for k in CYCLE_DIST_KEYS:
+            pairs[k] = 0.0
         return pairs
 
     @classmethod
@@ -310,6 +355,25 @@ class MtpSampler:
             if drafted > 0:
                 pairs[f"{KEY_DEPTH_PREFIX}{i + 1}_pct"] = (
                     100.0 * win["depth_accepted"][i] / drafted)
+        # Stacked cycle-outcome distribution — see CYCLE_DIST_KEYS. The
+        # ladder depth_accepted[j] counts cycles that accepted AT LEAST
+        # j+1 drafts (a cycle accepting m bumps da[0..m-1]), so exact-m
+        # shares are consecutive differences and the buckets sum to the
+        # cycle denominator. The floor-at-0 guard keeps a mixed-depth
+        # engine path that ever broke the prefix-run invariant from
+        # drawing a negative band in the stack.
+        da = win["depth_accepted"]
+
+        def _d(i: int) -> int:
+            return da[i] if i < len(da) else 0
+
+        if cycles_w > 0:
+            def _share(count: float) -> float:
+                return 100.0 * max(0.0, count) / cycles_w
+            pairs[f"{KEY_CYCLE_PREFIX}0_pct"] = _share(cycles_w - _d(0))
+            for j in range(1, MAX_DRAFT):
+                pairs[f"{KEY_CYCLE_PREFIX}{j}_pct"] = _share(_d(j - 1) - _d(j))
+            pairs[f"{KEY_CYCLE_PREFIX}4p_pct"] = _share(_d(MAX_DRAFT - 1))
         return pairs
 
 

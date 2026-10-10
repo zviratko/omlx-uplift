@@ -35,6 +35,12 @@ const LIVE_KEEP_S = 330_000;         // ring span on the server is 360 s
 const LIVE_KEYS = {
     'generation.tokens_s': 'generation.tokens_s',
     'prefill.tokens_s': 'prefill.tokens_s',
+    // SMOOTH-2 (user 2026-10-10): the Throughput chart's MTP area stacks
+    // under generation — a 5 s step edge next to a 2 Hz top line reads as
+    // a tearing chart. The fast sampler now drains the MTP totals on
+    // their own per-channel baseline (mtp_sampler.drain), so the MTP
+    // edge moves at the same cadence as the line above it.
+    'mtp.accepted_tokens_s': 'mtp.accepted_tokens_s',
     'mem.used_bytes': 'mem.used_bytes',
     'sys.used_bytes': 'sys.used_bytes',
     'queue.waiting': 'queue.waiting',
