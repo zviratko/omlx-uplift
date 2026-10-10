@@ -129,7 +129,8 @@ CH.loadChartHistory();
 setInterval(() => { if (!document.hidden) CH.loadChartHistory(); }, 60000);
 // Metric cards: generate DOM from the catalogue BEFORE grid init so the
 // board places them like any static block; boot fetch + keep-alive (the
-// per-window cache TTL gates refetches: 10 s short, 60 s week+).
+// per-window cache TTL gates refetches: 4.5 s short (just under the 5 s
+// collector tick — POP-PIN), 60 s week+).
 // U24: gated (macmon) cards are created too — born PARKED (hidden, no slot,
 // no tray pill) until the probe has seen their data; they then take their
 // DEFAULT slot without anything moving. Presence detection stays data-driven

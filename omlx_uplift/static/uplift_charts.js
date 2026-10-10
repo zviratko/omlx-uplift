@@ -1308,7 +1308,17 @@ function metricFetch(id, force) {
     const keys = metricServes(e.def).map(s => s.key);
     const key = keys.join(',');
     const cache = metricCache[w] || (metricCache[w] = { data: {}, at: 0, fails: 0, bucket_s: 0 });
-    const ttl = cardWindow(id) >= 604800 ? 60000 : 10000;
+    // POP-PIN (user 2026-10-10: "values do not draw current value for a
+    // while, then it pops into place"): the collector commits a sample
+    // every 5 s, but a 10 s TTL made every refetch land TWO samples at
+    // once — with the x-range pinned to [now-window, now] the last point
+    // sat up to a full batch in the past, drifted left, then JUMPED. A
+    // TTL just under the source period (4.5 s < 5 s tick) means every
+    // draw tick whose data can be newer actually fetches; the server
+    // returns the same columns when nothing landed yet (cheap no-op
+    // redraw). 30 d/7 d windows keep 60 s: their points are 60 s+ avg
+    // buckets, faster fetching returns identical bytes.
+    const ttl = cardWindow(id) >= 604800 ? 60000 : 4500;
     const stale = cache.fails > 2 ? Date.now() - cache.at > 30000 : Date.now() - cache.at > ttl;
     // The cache is keyed by WINDOW and shared across cards. Gated cards
     // (temperature/power) are created after the boot fetch filled this
