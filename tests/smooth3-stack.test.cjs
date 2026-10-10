@@ -37,15 +37,22 @@ test('stackBands pairs consecutive uPlot series 1-based', () => {
     assert.equal(stackBands(5).length, 4);
 });
 
-test('the MTP acceptance card is the stacked cycle-outcome distribution', () => {
+test('the MTP acceptance card is a floating stacked-depth ladder', () => {
     const mtp = C.EXPLORE_METRICS.find(m => m.key === 'mtp.accept_pct');
     assert.ok(mtp.stack, 'def must opt into stacked rendering');
-    const drawn = mtp.series.filter(s => !s.legendOnly).map(s => s.key);
-    assert.deepEqual(drawn, ['mtp.cyc0_pct', 'mtp.cyc1_pct', 'mtp.cyc2_pct',
-                             'mtp.cyc3_pct', 'mtp.cyc4p_pct']);
-    assert.ok(drawn.every(k => /^mtp\.cyc/.test(k)), 'only cycle-share keys draw');
-    // SCALE-1: a pct card pins 0..100 — the cumulative stack tops at 100
+    const drawn = mtp.series.filter(s => !s.legendOnly).map(s => mtp.series.indexOf(s));
+    // NO cyc0 (rejected) band: with it the stack is a full partition of
+    // cycles glued to 100% forever (user: 'it shouldn't always add to
+    // 100%'). The drawn bands are the accepted DEPTHS only.
+    const drawnKeys = mtp.series.filter(s => !s.legendOnly && /^mtp\.cyc/.test(s.key)).map(s => s.key);
+    assert.deepEqual(drawnKeys, ['mtp.cyc1_pct', 'mtp.cyc2_pct',
+                                  'mtp.cyc3_pct', 'mtp.cyc4p_pct'],
+        'depths 1..4+ stack; rejected band dropped so top edge floats');
+    // SCALE-1: a pct card pins 0..100 — the stack floats BELOW 100 inside
+    // that band (top edge = acceptance), never glues to the ceiling.
     assert.equal(KIT.metricYRange(mtp), KIT.PCT_FULL_RANGE);
+    // top edge (last drawn band) is the acceptance ceiling = top cumulative
+    assert.ok(mtp.series.some(s => s.key === 'mtp.cyc4p_pct'), 'top band present');
 });
 
 /* LIVE-READ + COLOR-1 (user 2026-10-10): the stacked card must show

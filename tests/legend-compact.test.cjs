@@ -30,7 +30,7 @@ test('MTP card def: legend shows only mean depth + accepted tok/s', () => {
     assert.deepEqual(vis, ['mtp.depth_avg', 'mtp.accepted_tokens_s']);
     // the drawn stack keeps its columns — only the LEGEND rows hide
     const drawn = mtp.series.filter(s => !s.legendOnly).map(s => s.key);
-    assert.equal(drawn.length, 5, 'bands still draw (cumulative columns intact)');
+    assert.equal(drawn.length, 4, 'depths 1..4+ still draw (cumulative columns intact); rejected band dropped');
 });
 
 test('hide pass is card-only, on both build paths, position-mapped', () => {

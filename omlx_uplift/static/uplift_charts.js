@@ -1038,15 +1038,28 @@ function metricOpts(id, def, col, opts) {
     // legend markers (see legendMarkers below), so a band and its legend
     // row always match.
     const ground = col.card || col.grid || '#2b2c30';
-    const rampAt = i => KIT.rampColor(palette[i % palette.length], ground,
-                                      Math.max(nStack, 1), i);
+    // SINGLE-HUE depth ladder (user 2026-10-10: the four-hue rainbow read
+    // 'weird'; bands must read as ONE ordered scale). All bands wear the
+    // SAME hue (the skin's first chart slot — pure function of the skin so
+    // it re-tints); intensity grows from the floor up: depth-1 (bottom)
+    // faintest, the top band (acceptance edge) boldest, so more accepted
+    // depth = a more prominent band and the acceptance ceiling is crisp.
+    const baseHue = palette[0] || '#e8a020';
+    const hueRgb = KIT.cssRgb(baseHue) || [232, 160, 32];
+    const rampAt = i => 'rgba(' + hueRgb[0] + ',' + hueRgb[1] + ',' + hueRgb[2] + ','
+                      + Math.min(0.88, 0.16 + 0.18 * Math.max(0, i)).toFixed(2) + ')';
+    const edgeStroke = 'rgba(' + hueRgb[0] + ',' + hueRgb[1] + ',' + hueRgb[2] + ',0.95)';
     const series = [{}, ...sers.map((s, i) => {
         const sf = metricFormat({ key: s.key, fmt: s.fmt });
         const c = palette[i % palette.length];
         const sc = s.axis || (s.legendOnly ? 'yleg' : 'y');
         const inStack = i < nStack;
         const o = { label: metricSeriesLabel(s.key), scale: sc,
-                    stroke: c, width: (s.legendOnly || inStack) ? 0 : 1.6,
+                    // the acceptance ceiling (top band's upper path) is the
+                    // crisp edge; the lower bands stay stroke-less so the
+                    // ladder reads as one filled area, not stacked outlines
+                    stroke: inStack ? (i === nStack - 1 ? edgeStroke : c) : c,
+                    width: (s.legendOnly || (inStack && i < nStack - 1)) ? 0 : (inStack ? 1.4 : 1.6),
                     // BUG-4: same cadence-gap bridge as the big charts —
                     // metricUnionCols mixes live 500 ms and stored 5 s
                     // stamps into one x column.
@@ -1492,7 +1505,12 @@ function drawMetricChart(id) {
     // per-card x-axis format follows this card's window
     e.chart.axes[0] = metricXAxis(cardWindow(id), chartColors());
     // big readout = the card's primary key (last non-null on its own series)
-    const pi = 1 + metricServes(e.def).findIndex(s => s.key === e.def.key);
+    // STACKED card: the primary key (accept %) is NOT a band — the top
+    // cumulative column IS the acceptance (floats below 100; see core def),
+    // so read it off the stack's ceiling instead of findIndex (which would
+    // miss the removed key and fall back to the 1-accepted band = wrong #).
+    let pi = 1 + metricServes(e.def).findIndex(s => s.key === e.def.key);
+    if (pi < 1 && metricStackCount(e.def) > 1) pi = metricStackCount(e.def);
     const pcol = cols[pi > 0 ? pi : 1] || [];
     let last = null;
     for (let i = pcol.length - 1; i >= 0; i--) if (pcol[i] != null) { last = pcol[i]; break; }
