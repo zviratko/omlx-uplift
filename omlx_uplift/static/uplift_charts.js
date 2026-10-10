@@ -315,10 +315,18 @@ function xAxis(col, boundWin, id) {
              }) };
 }
 function yAxis(col, opts) {
-    // size includes tick labels AND the rotated axis label; 36/44 read to
-    // the user as dead side gaps inside the chart cards (2026-09-19 r3) —
-    // tightened to the smallest size that still fits the rotated labels.
-    return Object.assign({ stroke: col.dim, size: 30, font: axisFont(col), grid: true, gap: 4 }, opts || {});
+    // Adaptive gutter (user 2026-10-10: a fixed gutter clipped the memory
+    // axis — '102 GiB' drew as '02 Gi'). uPlot re-measures on every
+    // resolution pass: size() gets the formatted tick values, so the
+    // gutter grows to exactly fit the widest label instead of clipping
+    // at a fixed width. The null fallback covers the first paint.
+    // Mono glyphs are 0.6em; at 9px that is 5.4px/char, +4px pad.
+    const gut = (u, vals) => {
+        let m = 0;
+        if (vals) for (const v of vals) { if (v == null) continue; for (const seg of String(v).split('\n')) if (seg.length > m) m = seg.length; }
+        return m ? Math.min(64, Math.ceil(m * 5.4) + 8) : 40;
+    };
+    return Object.assign({ stroke: col.dim, size: gut, font: axisFont(col), grid: true, gap: 4 }, opts || {});
 }
 /* ISSUE-1 (jumping timeframe): with an auto x-scale uPlot re-fits the axis
    to wherever the data happens to sit on every setData — sparse backfill
@@ -678,14 +686,12 @@ function redrawCharts() {
     const shown = tpsChart.data[0].length;
     let label = shown > 1 ? `${windowLabel(cardWindow('chart-tps'))} window` : '';
     // FAST-1: honest cadence badge — the line only lies about smoothness
-    // if the viewer cannot see which clock drew it. SMOOTH-1: the smoothing
-    // word now tracks the control — 'off' must say so, never ride the old
-    // unconditional 'smoothed' claim.
-    if (shown > 1) {
-        const kS = C.LAYOUT_SMOOTHES.includes(layout.tpsSmooth) ? layout.tpsSmooth : 1;
-        if (tpsLiveOn) label += ` · 2 Hz · ${kS > 1 ? C.tf('uplift.explore.smoothed', 'smoothed') : C.tf('uplift.explore.smooth_off', 'smoothing off')}`;
-        else if (kS > 1 && cardWindow('chart-tps') <= 3600) label += ` · ${C.tf('uplift.explore.smoothed', 'smoothed')}`;
-    }
+    // if the viewer cannot see which clock drew it. The smoothing word is
+    // NOT carried here: the header already shows the labelled 'Smoothing'
+    // control right beside this badge (user 2026-10-10: drop the redundant
+    // '· smoothed' after the timeframe). Only the cadence stays, because
+    // 2 Hz vs the stored 5 s cadence is not visible from any control.
+    if (shown > 1 && tpsLiveOn) label += ' · 2 Hz';
     // Honest resolution badge: hourly rollups backfill older stretches.
     const now = Date.now();
     const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], cardWindow('chart-tps'), now);
@@ -1298,15 +1304,23 @@ function metricYFmt(def) {
                  : String(Math.round(v * 10) / 10));
 }
 function metricYAxis(col, def, popout) {
-    // Labels render left-aligned at size+gap+12; 26 wasted ~48px of card
-    // width on the left gutter (2026-09-26). 10 keeps them clear of the
-    // card edge while pulling the plot to nearly full width. The pop-out
-    // (POPOUT-1) earns a real gutter: roomy band + bigger type.
+    // Adaptive gutter (user 2026-10-10: the memory card's '32Gi'/'102Gi'
+    // ticks clipped at the canvas edge — the old fixed size:4 pulled the
+    // plot to full width but cut the label down to 'Gi'). uPlot calls
+    // size() with the FORMATTED tick values on every resolution pass, so
+    // measure the widest one instead of guessing a fixed gutter:
+    // mono glyphs are 0.6em (9px font -> 5.4px/char) plus a small pad.
+    // Cap at 48 (metric cards are ~380px wide; never steal more).
+    const gut = (u, vals) => {
+        let m = 0;
+        if (vals) for (const v of vals) { if (v == null) continue; for (const seg of String(v).split('\n')) if (seg.length > m) m = seg.length; }
+        return m ? Math.min(48, Math.ceil(m * 5.4) + 4) : 4;
+    };
     return popout
         ? { stroke: col.dim, size: 34, font: axisFont(col, 1.35), grid: true,
             gap: 6, rotate: 0, space: 44, label: '',
             values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) }
-        : { stroke: col.dim, size: 4, font: axisFont(col), grid: true, gap: 2,
+        : { stroke: col.dim, size: gut, font: axisFont(col), grid: true, gap: 2,
             rotate: 0, space: 26, label: '',
             values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) };
 }

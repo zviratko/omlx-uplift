@@ -588,6 +588,9 @@ body.layout-editing { user-select: none; }
 .card h2 > span:first-child { flex: 0 0 auto; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
 .card h2 .right b { color: var(--ink); font-weight: 400; }
+/* Labelled control pair: 'Smoothing:' sits flush against its select;
+   the colon is CSS (not a text node) so locale swaps stay clean. */
+.card h2 .right .opt-label::after { content: ':'; }
 
 /* Event flash removed 2026-09-21 with the blink mechanic (see uplift.js
    reactTo) — no replacement animation; do not re-add fill-shift flashes. */
