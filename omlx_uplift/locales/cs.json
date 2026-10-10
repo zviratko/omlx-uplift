@@ -334,6 +334,7 @@
  "uplift.metric.cache.max_bytes": "limit cache",
  "uplift.metric.cache.total_bytes": "disková cache",
  "uplift.metric.cache_efficiency": "účinnost cache",
+ "uplift.metric.embedding.tokens_s": "embedování tok/s",
  "uplift.metric.engines.active_requests": "aktivní požadavky",
  "uplift.metric.engines.loaded": "aktivní modely",
  "uplift.metric.fan.max_rpm": "max ot./min",

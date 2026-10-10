@@ -191,6 +191,14 @@ class Collector:
         except Exception:
             log.debug("generation sampler collect failed", exc_info=True)
 
+        # Embedding work rate (embedding.tokens_s) — event-fed encoder
+        # forwards (instrument.wrap credits the sampler; zeros every
+        # tick like the other rate families, family fn in collectors.py).
+        try:
+            pairs.update(collectors.collect_embedding(now=now))
+        except Exception:
+            log.debug("embedding sampler collect failed", exc_info=True)
+
         # MTP acceptance (mtp.*) — zeros every tick like the decode collect.
         try:
             pairs.update(collectors.collect_mtp(pool, now=now))

@@ -334,6 +334,7 @@
  "uplift.metric.cache.max_bytes": "лимит кэша",
  "uplift.metric.cache.total_bytes": "кэш на диске",
  "uplift.metric.cache_efficiency": "эффективность кэша",
+ "uplift.metric.embedding.tokens_s": "embedding ток/с",
  "uplift.metric.engines.active_requests": "активные запросы",
  "uplift.metric.engines.loaded": "активные модели",
  "uplift.metric.fan.max_rpm": "макс. RPM",

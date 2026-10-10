@@ -276,6 +276,67 @@ def install_prefill_tracker() -> None:
         PrefillProgressTracker.remove = remove
 
 
+def install_embed_hooks() -> None:
+    """Embedding work: wrap MLXEmbeddingModel._embed_batch / .embed.
+
+    Embedding models never touch AsyncEngineCore or the prefill tracker,
+    so the two LLM-side instrument paths cannot see them at all — the
+    reported bug (Throughput shows nothing for embedding traffic).
+    _embed_batch is the exact per-forward unit: its return carries the
+    attention-mask token sum for THAT batch (pad-free compute credit).
+    The eager non-custom path returns None there, so .embed is wrapped
+    too: its EmbeddingOutput.total_tokens is the request's usage-level
+    count, and the shortfall over what its batches already credited is
+    added at request end (thread-local pairing — the whole batch loop
+    runs on one executor thread; see embed_sampler). Both wraps are
+    total: any failure degrades to the other path, never to a serving
+    error. Independent of install()/install_prefill_tracker()."""
+    try:
+        from omlx.models.embedding import MLXEmbeddingModel
+    except Exception:  # noqa: BLE001 — omlx layout changed; key stays absent
+        log.debug("embedding model import failed", exc_info=True)
+        return
+
+    orig_batch = MLXEmbeddingModel._embed_batch
+    if not getattr(orig_batch, "_uplift_hook", False):
+        @functools.wraps(orig_batch)
+        def _embed_batch(self, *args, **kwargs):
+            out = orig_batch(self, *args, **kwargs)
+            try:
+                # (embeddings_array, batch_tokens) — count is None on the
+                # eager non-custom path; note_batch pairs/credits per rule.
+                from .embed_sampler import note_batch
+                note_batch(out[1] if isinstance(out, tuple)
+                           and len(out) > 1 else None)
+            except Exception:  # noqa: BLE001
+                log.debug("embed note_batch failed", exc_info=True)
+            return out
+        _embed_batch._uplift_hook = True
+        MLXEmbeddingModel._embed_batch = _embed_batch
+
+    orig_embed = MLXEmbeddingModel.embed
+    if not getattr(orig_embed, "_uplift_hook", False):
+        @functools.wraps(orig_embed)
+        def embed(self, *args, **kwargs):
+            try:
+                from .embed_sampler import begin_request
+                begin_request()
+            except Exception:  # noqa: BLE001
+                log.debug("embed begin_request failed", exc_info=True)
+            # A RAISED embed() never reaches end_request: the batches it
+            # already computed kept their exact credits (real work), the
+            # unknown-count tail is honestly lost (bounded, documented).
+            out = orig_embed(self, *args, **kwargs)
+            try:
+                from .embed_sampler import end_request
+                end_request(getattr(out, "total_tokens", None))
+            except Exception:  # noqa: BLE001
+                log.debug("embed end_request failed", exc_info=True)
+            return out
+        embed._uplift_hook = True
+        MLXEmbeddingModel.embed = embed
+
+
 def install_mtp_hooks() -> None:
     """MTP acceptance: wrap the per-sequence finish logger.
 

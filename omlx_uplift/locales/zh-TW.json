@@ -334,6 +334,7 @@
  "uplift.metric.cache.max_bytes": "快取上限",
  "uplift.metric.cache.total_bytes": "磁碟快取",
  "uplift.metric.cache_efficiency": "快取效率",
+ "uplift.metric.embedding.tokens_s": "嵌入計算 tok/s",
  "uplift.metric.engines.active_requests": "活動請求",
  "uplift.metric.engines.loaded": "活動模型",
  "uplift.metric.fan.max_rpm": "最高 RPM",

@@ -334,6 +334,7 @@
  "uplift.metric.cache.max_bytes": "cache limit",
  "uplift.metric.cache.total_bytes": "disk cache",
  "uplift.metric.cache_efficiency": "cache efficiency",
+ "uplift.metric.embedding.tokens_s": "embedding tok/s",
  "uplift.metric.engines.active_requests": "active requests",
  "uplift.metric.engines.loaded": "active models",
  "uplift.metric.fan.max_rpm": "max RPM",

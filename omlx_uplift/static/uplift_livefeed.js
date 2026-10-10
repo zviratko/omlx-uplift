@@ -35,6 +35,9 @@ const LIVE_KEEP_S = 330_000;         // ring span on the server is 360 s
 const LIVE_KEYS = {
     'generation.tokens_s': 'generation.tokens_s',
     'prefill.tokens_s': 'prefill.tokens_s',
+    // EMBED-1: embedding work rides the same fast channel (per-channel
+    // drain in embed_sampler) so its line moves at 2 Hz beside prefill.
+    'embedding.tokens_s': 'embedding.tokens_s',
     // SMOOTH-2 (user 2026-10-10): the Throughput chart's MTP area stacks
     // under generation — a 5 s step edge next to a 2 Hz top line reads as
     // a tearing chart. The fast sampler now drains the MTP totals on

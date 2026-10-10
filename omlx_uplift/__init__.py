@@ -52,6 +52,9 @@ def register(app) -> None:
         # BE-prefill: prefill tracker wrap is independent of the engine
         # core wrap (install() may bail early on layout drift).
         instrument.install_prefill_tracker()
+        # Embedding work: MLXEmbeddingModel wraps, independent of both
+        # above (the encoder path shares no objects with the LLM cores).
+        instrument.install_embed_hooks()
         # MTP acceptance: finish-hook wrap, independent of both above.
         instrument.install_mtp_hooks()
     except Exception:  # never break the server for a capture failure

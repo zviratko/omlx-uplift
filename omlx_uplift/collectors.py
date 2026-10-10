@@ -163,6 +163,30 @@ def collect_generation(pool: Any, *, now: float,
 
 
 # --------------------------------------------------------------------------
+# embedding (encoder forward) work rate
+# --------------------------------------------------------------------------
+
+
+def collect_embedding(*, now: float, channel: str = "tick") -> dict:
+    """Drain one tick of the embedding work sampler.
+
+    Embedding models never touch the scheduler or the prefill tracker
+    (MLXEmbeddingModel is its own engine path), so the LLM-side samplers
+    are structurally blind to them — the reported bug. instrument.
+    install_embed_hooks() credits the sampler per computed batch; this
+    family only drains. No pool walk needed, but the call sits in the
+    tick's own try like every rate family: an idle engine writes its
+    zero (a skipped key truncates the series exactly at idle).
+
+    ``channel`` follows the FAST-1 multi-channel rule (see
+    embed_sampler.drain) — the 2 Hz display drain cannot shorten the
+    stored 5 s window.
+    """
+    from .embed_sampler import get_embed_sampler
+    return get_embed_sampler().drain(now=now, channel=channel)
+
+
+# --------------------------------------------------------------------------
 # MTP acceptance counters (native Lightning MTP speculation)
 # --------------------------------------------------------------------------
 

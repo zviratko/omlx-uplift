@@ -334,6 +334,7 @@
  "uplift.metric.cache.max_bytes": "缓存上限",
  "uplift.metric.cache.total_bytes": "磁盘缓存",
  "uplift.metric.cache_efficiency": "缓存效率",
+ "uplift.metric.embedding.tokens_s": "嵌入计算 tok/s",
  "uplift.metric.engines.active_requests": "活动请求",
  "uplift.metric.engines.loaded": "活动模型",
  "uplift.metric.fan.max_rpm": "最高 RPM",

@@ -185,6 +185,16 @@ class FastSampler:
         except Exception:
             log.debug("fast prefill drain failed", exc_info=True)
 
+        # Embedding rate: event-driven accumulator (same shape), fast
+        # channel only. SMOOTH-2 doctrine: it rides the Throughput chart
+        # next to prefill — a 5 s step edge under a 2 Hz neighbour reads
+        # as tearing, so it prefers its live twin.
+        try:
+            pairs.update(collectors.collect_embedding(now=now,
+                                                      channel="fast"))
+        except Exception:
+            log.debug("fast embed drain failed", exc_info=True)
+
         # MTP accepted rate: per-channel drain (same monotonic-total
         # doctrine as decode), so the Throughput stack's MTP edge moves
         # at 2 Hz while the 5 s tick keeps its exact stored window. The

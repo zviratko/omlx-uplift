@@ -334,6 +334,7 @@
  "uplift.metric.cache.max_bytes": "キャッシュ上限",
  "uplift.metric.cache.total_bytes": "ディスクキャッシュ",
  "uplift.metric.cache_efficiency": "キャッシュ効率",
+ "uplift.metric.embedding.tokens_s": "埋め込み tok/s",
  "uplift.metric.engines.active_requests": "アクリクエスト",
  "uplift.metric.engines.loaded": "アクティブモデル",
  "uplift.metric.fan.max_rpm": "最大 RPM",

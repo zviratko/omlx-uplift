@@ -349,6 +349,7 @@
  "uplift.metric.cache.max_bytes": "캐시 제한",
  "uplift.metric.cache.total_bytes": "디스크 캐시",
  "uplift.metric.cache_efficiency": "캐시 효율",
+ "uplift.metric.embedding.tokens_s": "임베딩 tok/s",
  "uplift.metric.engines.active_requests": "활성 요청",
  "uplift.metric.engines.loaded": "활성 모델",
  "uplift.metric.fan.max_rpm": "최대 RPM",

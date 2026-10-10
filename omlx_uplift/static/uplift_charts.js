@@ -67,8 +67,9 @@ function restoreCursor(c) {
     }
     c.setCursor({ idx: i }, false);  // fires hooks + moves the focus point
 }
-const tpsData = [[], [], [], [], []];  // time, generation tok/s, prefill tok/s, cached tok/s (U30),
-                                       // MTP accepted tok/s (mtp.accepted_tokens_s)
+const tpsData = [[], [], [], [], [], []];  // time, generation tok/s, prefill tok/s, cached tok/s (U30),
+                                       // MTP accepted tok/s (mtp.accepted_tokens_s),
+                                       // embedding tok/s (embedding.tokens_s)
 /* POPOUT-1: uplift_popout.js registers itself here at load (registerPopout
    below); the chart redraw paths hand it the same columns they just built
    so an open pop-out stays in lockstep without this file knowing anything
@@ -118,7 +119,7 @@ async function loadChartHistory() {
             // totals since boot): a near-static ramp on a long-running
             // server, the "flat line like cumulative stats" the user
             // reported. The average stays the small card + tile.
-            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('generation.tokens_s,rate.cached_tokens_s,mtp.accepted_tokens_s')}&window=${w}`).catch(() => null),
+            CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('generation.tokens_s,rate.cached_tokens_s,mtp.accepted_tokens_s,embedding.tokens_s')}&window=${w}`).catch(() => null),
             // BE-prefill: the prefill line is the true per-tick computed
             // rate (prefill.tokens_s from the tracker event hooks) — the
             // old avg_prefill_tps is a session-lifetime average that no
@@ -158,6 +159,7 @@ async function loadChartHistory() {
             chartHist = { gen: convMap(g, 'generation.tokens_s'),
                           cached: convMap(g, 'rate.cached_tokens_s'),
                           mtp: convMap(g, 'mtp.accepted_tokens_s'),
+                          embed: convMap(g, 'embedding.tokens_s'),
                           prefill: conv(p),
                           // U38/U40: bytes -> GiB ladder for the budget and
                           // hot-cache series (1024^3 — matches fmtBytes/GiB)
@@ -225,15 +227,24 @@ function tpsWindowed() {
         : C.mergeHistory(chartHist.mtp || [], tpsData[0], tpsData[4], win, now);
     if (!mtpL && storedOk) m = { ts: m.ts, v: sm(m.v) };
     if (storedOk) k = { ts: k.ts, v: sm(k.v) };
-    const ts = [...new Set(g.ts.concat(p.ts, k.ts, m.ts))].sort((a, b) => a - b);
+    // Embedding work rate (the reported bug: encoder forwards never
+    // entered gen/prefill — separate engine path, separate hooks). Its
+    // own key, its own line; fast-capable like its prefill neighbour.
+    const embL = liveOn && LF.liveUsable('embedding.tokens_s') ? livePair('embedding.tokens_s') : null;
+    let eb = embL ? C.mergeHistory(chartHist.embed || [], embL.ts, embL.v, win, now)
+        : C.mergeHistory(chartHist.embed || [], tpsData[0], tpsData[5], win, now);
+    if (!embL && storedOk) eb = { ts: eb.ts, v: sm(eb.v) };
+    const ts = [...new Set(g.ts.concat(p.ts, k.ts, m.ts, eb.ts))].sort((a, b) => a - b);
     const gi = new Map(g.ts.map((t, i) => [t, g.v[i]]));
     const pi = new Map(p.ts.map((t, i) => [t, p.v[i]]));
     const ki = new Map(k.ts.map((t, i) => [t, k.v[i]]));
     const mi = new Map(m.ts.map((t, i) => [t, m.v[i]]));
+    const bi = new Map(eb.ts.map((t, i) => [t, eb.v[i]]));
     return [ts, ts.map(t => (gi.has(t) ? gi.get(t) : null)),
                 ts.map(t => (pi.has(t) ? pi.get(t) : null)),
                 ts.map(t => (ki.has(t) ? ki.get(t) : null)),
-                ts.map(t => (mi.has(t) ? mi.get(t) : null))];
+                ts.map(t => (mi.has(t) ? mi.get(t) : null)),
+                ts.map(t => (bi.has(t) ? bi.get(t) : null))];
 }
 /* U40 (user 2026-09-30): the per-model top-3 hot-cache lines are GONE. The
    model names in the hover legend forced the value row to wrap onto a
@@ -548,6 +559,19 @@ function tpsSpecs(col) {
     mtpLine.stroke = seriesPalette(col)[2] || mtpLine.stroke;
     mtpLine.fill = tint(mtpLine.stroke, '3d');
     specs.push(mtpLine);
+    // EMBED-1 (user 2026-10-10, the reported bug): embedding models run on
+    // MLXEmbeddingModel — no scheduler, no prefill tracker — so encoder
+    // forwards were invisible to BOTH existing lines. embedding.tokens_s
+    // gets its own line on the RIGHT axis (same magnitude family as
+    // prefill: thousands of tok/s, one forward pass per batch). Stroked
+    // from the 4th deduped palette slot so it cannot wear gold under the
+    // two gold y2 lines; its wash stays off (the y2 area between lines
+    // would read as a stack it is not part of).
+    const embLine = line(C.tf('uplift.metric.embedding.tokens_s', 'embedding tok/s'),
+                         'gold', false, 'y2');
+    embLine.stroke = seriesPalette(col)[3] || seriesPalette(col)[2] || embLine.stroke;
+    embLine.dash = [1, 3];   // dense dot: distinct from the cached [4,4] dashes
+    specs.push(embLine);
     return specs;
 }
 function tpsBaseOpts(col, popout, boundWin) {
@@ -1440,13 +1464,16 @@ let genLiveTps = null, genLiveTs = 0;
 // tick (zeros included), so a stale-free absence window is not needed the
 // way gen/prefill need theirs; same 120 s staleness rule keeps it honest.
 let mtpLiveTps = null, mtpLiveTs = 0;
+// EMBED-1: live per-tick embedding tok/s (the chart's 5th line). Same
+// collector tick, same latest-fetch, same 120 s staleness rule as mtp.
+let embedLiveTps = null, embedLiveTs = 0;
 async function refreshSysPct() {
     const now = Date.now();
     if (sysFetching || now - sysAt < 10_000) return;
     sysFetching = true; sysAt = now;
     try {
         const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
-            encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s,prefill.tokens_s,generation.tokens_s,mtp.accepted_tokens_s'));
+            encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s,prefill.tokens_s,generation.tokens_s,mtp.accepted_tokens_s,embedding.tokens_s'));
         const lat = (r && r.latest) || {};
         const gb = k => (lat[k] && typeof lat[k].v === 'number') ? +(lat[k].v * GIB).toFixed(3) : null;
         const u = lat['mem.used_bytes'];
@@ -1464,6 +1491,8 @@ async function refreshSysPct() {
         if (gl && typeof gl.v === 'number') { genLiveTps = gl.v; genLiveTs = gl.ts * 1000; }
         const ml = lat['mtp.accepted_tokens_s'];
         if (ml && typeof ml.v === 'number') { mtpLiveTps = ml.v; mtpLiveTs = ml.ts * 1000; }
+        const el = lat['embedding.tokens_s'];
+        if (el && typeof el.v === 'number') { embedLiveTps = el.v; embedLiveTs = el.ts * 1000; }
     } catch (_) { /* keep last value */ }
     finally { sysFetching = false; renderMemLabel(); }
 }
@@ -1587,6 +1616,7 @@ function pushStatusSample(s) {
     tpsData[2].push(prefillLiveTps !== null && Date.now() - prefillLiveTs < 120_000 ? prefillLiveTps : null);
     tpsData[3].push(cachedTps !== null && Date.now() - cachedTpsTs < 120_000 ? cachedTps : null);
     tpsData[4].push(mtpLiveTps !== null && Date.now() - mtpLiveTs < 120_000 ? mtpLiveTps : null);
+    tpsData[5].push(embedLiveTps !== null && Date.now() - embedLiveTs < 120_000 ? embedLiveTps : null);
     while (tpsData[0].length > MAX_POINTS) for (const col of tpsData) col.shift();
     // U40: ONE summed hot-cache point in GiB. Prefer upstream's process-wide
     // hot_cache_size_bytes (the exact global, same number classic shows);

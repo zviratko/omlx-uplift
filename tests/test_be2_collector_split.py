@@ -100,7 +100,12 @@ def test_macmon_collector_owns_its_process_state():
 
 def test_collector_keeps_state_tick_persistence_only():
     src = (REPO / "omlx_uplift" / "collector.py").read_text()
-    assert len(src.splitlines()) < 260, "Collector did not shrink — split regressed"
+    # 260 -> 270 (EMBED-1, 2026-10-10): the embedding.tokens_s rate family
+    # is a tick-level drain call (family fn lives in collectors.py, same
+    # shape as generation/mtp) — an honest 6-line growth, not a regression
+    # of the split. Each rate family keeps its OWN try: a raise in one
+    # must not skip another's zero (zero-suppression truncates series).
+    assert len(src.splitlines()) < 270, "Collector did not shrink — split regressed"
     # one-tick transaction + signature map + daily purge stay on Collector
     assert "write_tick" in src and "_persisted" in src and "purge" in src
 
