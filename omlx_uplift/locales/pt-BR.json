@@ -640,7 +640,7 @@
  "uplift.se.guided_grammar_enabled": "Gramática guiada",
  "uplift.se.max_context_window": "Janela de contexto",
  "uplift.se.max_tokens": "Máx. de Tokens",
- "uplift.se.model_alias": "Nome de exibição",
+ "uplift.se.model_alias": "Apelido do Modelo",
  "uplift.se.model_type_override": "Tipo do Modelo",
  "uplift.se.moe_expert_offload_enabled": "Offload de peritos MoE",
  "uplift.se.mtp_depth": "Profundidade do rascunho",

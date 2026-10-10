@@ -636,7 +636,7 @@
  "uplift.se.guided_grammar_enabled": "Guided Grammar",
  "uplift.se.max_context_window": "Ctx Window",
  "uplift.se.max_tokens": "Max Tokens",
- "uplift.se.model_alias": "Display Name",
+ "uplift.se.model_alias": "Model Alias",
  "uplift.se.model_type_override": "Model Type",
  "uplift.se.moe_expert_offload_enabled": "MoE Expert Offload",
  "uplift.se.mtp_depth": "Draft Depth",

@@ -636,7 +636,7 @@
  "uplift.se.guided_grammar_enabled": "引導語法",
  "uplift.se.max_context_window": "上下文視窗",
  "uplift.se.max_tokens": "最大 Token 數",
- "uplift.se.model_alias": "顯示名稱",
+ "uplift.se.model_alias": "模型別名",
  "uplift.se.model_type_override": "模型類型",
  "uplift.se.moe_expert_offload_enabled": "MoE 專家卸載",
  "uplift.se.mtp_depth": "草稿深度",

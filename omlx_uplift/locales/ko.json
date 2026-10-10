@@ -651,7 +651,7 @@
  "uplift.se.guided_grammar_enabled": "가이드 문법",
  "uplift.se.max_context_window": "컨텍스트 윈도우",
  "uplift.se.max_tokens": "최대 응답 토큰 수",
- "uplift.se.model_alias": "표시 이름",
+ "uplift.se.model_alias": "모델 별칭",
  "uplift.se.model_type_override": "모델 타입",
  "uplift.se.moe_expert_offload_enabled": "MoE 전문가 오프로드",
  "uplift.se.mtp_depth": "드래프트 깊이",

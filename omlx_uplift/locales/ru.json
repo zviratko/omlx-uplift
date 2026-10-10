@@ -636,7 +636,7 @@
  "uplift.se.guided_grammar_enabled": "Управляемая грамматика",
  "uplift.se.max_context_window": "Окно контекста",
  "uplift.se.max_tokens": "Макс. токены",
- "uplift.se.model_alias": "Отображаемое имя",
+ "uplift.se.model_alias": "Псевдоним модели",
  "uplift.se.model_type_override": "Тип модели",
  "uplift.se.moe_expert_offload_enabled": "Выгрузка экспертов MoE",
  "uplift.se.mtp_depth": "Глубина черновика",

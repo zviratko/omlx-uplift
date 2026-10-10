@@ -636,7 +636,7 @@
  "uplift.se.guided_grammar_enabled": "Guided grammar",
  "uplift.se.max_context_window": "Okno kontextu",
  "uplift.se.max_tokens": "Maximální tokeny",
- "uplift.se.model_alias": "Zobrazovaný název",
+ "uplift.se.model_alias": "Alias modelu",
  "uplift.se.model_type_override": "Typ modelu",
  "uplift.se.moe_expert_offload_enabled": "Offload MoE expertů",
  "uplift.se.mtp_depth": "Hloubka návrhu",

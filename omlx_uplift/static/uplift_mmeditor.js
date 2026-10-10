@@ -609,7 +609,11 @@ function renderEditorFields(container) {
        mechanism (see helper comment above seModelEntry). ---- */
     const llm = seIsLlmFamily();
     let g;
-    const aliasRow = () => seBind('text', 'model_alias', { label: 'Display Name' });
+    // MT-1 follow-up (user 2026-10-10): classic's 'Model Alias' — the value
+    // is API-routable (engine_pool resolves model_id_or_alias), so calling
+    // it 'Display Name' suggested a cosmetic rename; the earlier rename was
+    // reverted. Locales carry classic's own translations verbatim.
+    const aliasRow = () => seBind('text', 'model_alias', { label: 'Model Alias' });
     const typeRow = () => seBind('select', 'model_type_override', {
         label: 'Model Type',
         // the override IS the type gate: re-shape the form live (classic's

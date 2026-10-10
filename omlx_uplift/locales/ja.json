@@ -636,7 +636,7 @@
  "uplift.se.guided_grammar_enabled": "誘導文法を有効化",
  "uplift.se.max_context_window": "最大コンテキストウィンドウ",
  "uplift.se.max_tokens": "最大トークン数",
- "uplift.se.model_alias": "表示名",
+ "uplift.se.model_alias": "モデルエイリアス",
  "uplift.se.model_type_override": "モデルタイプ",
  "uplift.se.moe_expert_offload_enabled": "MoEエキスパートオフロード",
  "uplift.se.mtp_depth": "ドラフト深さ",
