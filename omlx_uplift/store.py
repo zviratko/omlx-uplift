@@ -330,6 +330,28 @@ class MetricsStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS ix_samples_instance "
                 "ON samples(instance)")
+            # ZOMBIE-1 boot repair (see request_log stale-drop): rows the
+            # OLD tracker code abandoned mid-flight were persisted without
+            # a terminal update — a 42-h 'queued' row survived in the live
+            # store and the feed painted it as an active request after
+            # every restart. One-time per boot, bounded and honest: no
+            # process on this machine can have a request untouched in the
+            # table for 15 minutes and still be alive (the collector
+            # re-upserts every changed row each tick, and a live
+            # never-progressing queued row was ALREADY age-exempt by
+            # design — the live feed reads the tracker, not this table).
+            # Terminal labels keep search/stats honest.
+            try:
+                self._conn.execute(
+                    "UPDATE requests SET state='error', "
+                    "error=COALESCE(error,'interrupted (engine gone)'), "
+                    "ts_end=COALESCE(ts_end, ts_start) "
+                    "WHERE state IN ('queued','prefilling','generating',"
+                    "                'cancelling') "
+                    "AND COALESCE(ts_end, ts_start) < ?",
+                    (time.time() - 900,))
+            except sqlite3.Error as exc:   # repair must never block boot
+                log.warning("uplift store: zombie repair failed: %s", exc)
             # RL-3: FTS5 index over prompt+output, best-effort — Homebrew
             # python sqlite usually ships it, but on failure everything
             # falls back to LIKE (advertised per-response as mode).

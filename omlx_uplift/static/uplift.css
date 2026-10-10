@@ -909,6 +909,32 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
    — with 30+ rows #reqfeed painted straight past the card border over the
    Events card below. Bound the list so demand can never exceed the box. */
 #reqfeed { max-height: 320px; overflow-y: auto; scrollbar-width: thin; }
+/* Item 5 (user 2026-10-10): the Request feed is a popup opened from the
+   Activity card header, not a board block. Hidden until openFeed() adds
+   .modal-overlay (the global Escape handler in uplift_state.js then owns
+   the close key; the wrapper deliberately does NOT carry modal-overlay
+   while closed, or that handler would remove it on any stray Escape).
+   The box mirrors .card's frame + h2 header styling — the markup lives
+   OUTSIDE #grid on purpose (GridStack would claim any .card inside it). */
+#reqfeed-pop { display: none; }
+#reqfeed-pop.modal-overlay { display: flex; }
+#reqfeed-pop > .reqfeed-modal {
+    background: var(--card); border: 1px solid var(--ink); color: var(--ink);
+    width: min(1100px, 96vw); height: min(80vh, 900px);
+    display: flex; flex-direction: column; min-height: 0;
+}
+.reqfeed-modal .card-pad { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.reqfeed-modal .card-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.reqfeed-modal #reqfeed { flex: 1 1 auto; min-height: 0; max-height: none !important; }
+.reqfeed-modal h2 {
+    color: var(--dim); margin: 0 -16px 4px; padding: 5px 16px; font-size: 12px;
+    background: var(--panel, var(--bg)); border-bottom: 1px solid var(--edge);
+    display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
+    user-select: none;
+}
+.reqfeed-modal h2 .right { margin-left: auto; font: 400 10px/1.4 var(--mono);
+    letter-spacing: 0; display: inline-flex; align-items: center; gap: 6px;
+    color: var(--dim); flex: none; }
 /* fill-card lists ignore the fixed caps — the grid box is the cap (see
    .fill-card above); ID specificity here needs an ID-level override. */
 .fill-card #reqfeed, .fill-card #live-list { max-height: none; }

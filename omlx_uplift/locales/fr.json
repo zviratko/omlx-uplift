@@ -588,6 +588,7 @@
  "uplift.req.decoded_gap": "décodé depuis un échantillon de tokens (début+fin, milieu omis)",
  "uplift.req.follow": "suivre la fin",
  "uplift.req.follow_title": "faire défiler la sortie vers son texte le plus récent",
+ "uplift.req.feed_btn": "inspecter les requêtes traitées",
  "uplift.req.hits": "{n} correspondance(s) · {mode}",
  "uplift.req.inspect": "INSPECTER",
  "uplift.req.inspect_title": "Afficher les détails de la requête",

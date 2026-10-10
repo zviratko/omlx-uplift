@@ -950,7 +950,13 @@ function metricLabel(key) {
     return ({ 'token hit pct': 'token hit %', 'lookup hit pct': 'lookup hit %',
               'saved tokens min': 'saved tok/min', 'restored tokens min': 'restored tok/min',
               'accepted tokens s': 'MTP accepted tok/s', 'accept pct': 'accepted %',
-              'acceptance': 'MTP acceptance', 'depth acceptance': 'MTP depth acceptance',
+              // TITLE-1 + item 1 (user 2026-10-10): the MTP acceptance card
+              // title must fit one header line on a w=8 card — 'MTP acc.'
+              // (locale wins; this is the auto-translation fallback).
+              'acceptance': 'MTP acc.', 'depth acceptance': 'MTP depth acceptance',
+              // Item 2 (user 2026-10-10): 'output tokens/s' wraps on the
+              // compact card; the sibling of 'average tgs' is 'output tgs'.
+              'completion tokens s': 'output tgs',
               // TITLE-1 (user 2026-10-10): 'average generation tok/s' wrapped
               // to two header lines on the compact card; the card now reads
               // the short 'average tgs' (locale wins; this is the fallback

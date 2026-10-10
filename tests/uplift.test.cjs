@@ -349,12 +349,49 @@ test('uplift layout: default layout covers every block once', () => {
         id => !UPL.TRAY_ONLY_IDS.includes(id) || UPL.GATED_IDS.includes(id));
     assert.deepStrictEqual(d.blocks.map(b => b.id).sort(), [...expected].sort());
     for (const id of ['met-pfx-token-hit-pct', 'met-pfx-lookup-hit-pct',
-                      'met-spec-saved-tokens-min', 'met-queue-waiting'])
+                      'met-spec-saved-tokens-min', 'met-queue-waiting',
+                      // items 3+5 (user 2026-10-10): cache efficiency left
+                      // the default board (MTP took its slot); the request
+                      // feed is a popup, not a block at all.
+                      'met-cache-efficiency'])
         assert.ok(!d.blocks.some(b => b.id === id), id + ' must stay tray-only');
+    assert.ok(d.blocks.some(b => b.id === 'met-mtp-accept-pct'),
+        'MTP acceptance must ship on the default board (item 3)');
+    assert.ok(!d.blocks.some(b => b.id === 'reqfeed'),
+        'reqfeed retired from the board contract (item 5)');
     for (const b of d.blocks) {
         assert.ok(b.w >= UPL.minWFor(b.id) && b.w <= UPL.COLUMNS, b.id + ' w out of range');
         assert.ok(b.x >= 0 && b.x + b.w <= UPL.COLUMNS, b.id + ' exceeds grid');
     }
+});
+/* Items 3+5 (user 2026-10-10): the one-shot saved-board migration. */
+test('uplift layout: migrateSavedLayout swaps cache->MTP, drops reqfeed, once', () => {
+    const saved = { width: 'default', blocks: [
+        { id: 'live', x: 0, y: 0, w: 12, h: 30 },
+        { id: 'met-cache-efficiency', x: 16, y: 128, w: 8, h: 20 },
+        { id: 'reqfeed', x: 0, y: 148, w: 24, h: 18 },
+    ], mergedBlocks: ['live', 'met-cache-efficiency', 'met-mtp-accept-pct', 'reqfeed'] };
+    UPL.migrateSavedLayout(saved);
+    const ids = saved.blocks.map(b => b.id);
+    assert.ok(!ids.includes('reqfeed'), 'reqfeed must leave the board');
+    assert.ok(!ids.includes('met-cache-efficiency'), 'cache card swaps out');
+    const mtp = saved.blocks.find(b => b.id === 'met-mtp-accept-pct');
+    assert.ok(mtp, 'MTP card takes the slot');
+    assert.deepEqual([mtp.x, mtp.y, mtp.w, mtp.h], [16, 128, 8, 20],
+        'in-place: exact geometry the cache card had');
+    assert.ok(!saved.mergedBlocks.includes('met-mtp-accept-pct'),
+        'the stale tray-only memo must not keep the card off the board');
+    assert.equal(saved.feedSwapV1, 1, 'one-shot flag set');
+    // second run changes nothing (user re-added cache efficiency manually)
+    saved.blocks.push({ id: 'met-cache-efficiency', x: 0, y: 200, w: 8, h: 20 });
+    const before = JSON.stringify(saved.blocks);
+    UPL.migrateSavedLayout(saved);
+    assert.equal(JSON.stringify(saved.blocks), before, 'flag makes it idempotent');
+    // a board without the cache card: MTP is NOT force-added (user choice stands)
+    const plain = { blocks: [{ id: 'live', x: 0, y: 0, w: 12, h: 30 }] };
+    UPL.migrateSavedLayout(plain);
+    assert.ok(!plain.blocks.some(b => b.id === 'met-mtp-accept-pct'));
+    assert.equal(UPL.migrateSavedLayout(null), null);
 });
 test('uplift layout: small stat tiles clamp to 4, others to 6', () => {
     assert.strictEqual(UPL.minWFor('gen'), 4);
@@ -391,10 +428,10 @@ test('uplift layout: normalize resolves overlapping blocks deterministically', (
     assert.deepStrictEqual(b.blocks, a.blocks);
     // no overlap, no move
     const clean = UPL.normalizeLayout({ blocks: [
-        { id: 'reqfeed', x: 0, y: 0, w: 24, h: 18 },
+        { id: 'reqstats', x: 0, y: 0, w: 24, h: 18 },
         { id: 'gen', x: 0, y: 18, w: 4, h: 20 },
     ] });
-    assert.deepStrictEqual(clean.blocks.map(x => [x.id, x.y]), [['reqfeed', 0], ['gen', 18]]);
+    assert.deepStrictEqual(clean.blocks.map(x => [x.id, x.y]), [['reqstats', 0], ['gen', 18]]);
 });
 test('uplift layout: row-mates move as one band (staircase regression, 2026-09-29)', () => {
     // One block of a row pushed down must drag its row-mates with it, and
@@ -430,10 +467,11 @@ test('uplift layout: normalize drops unknown/dup blocks, clamps geometry', () =>
         { id: 'gen', x: -3, y: -1, w: 99 },
         { id: 'gen', x: 0, y: 5, w: 6 },          // duplicate -> dropped
         { id: 'ghost', x: 0, y: 0, w: 24 },        // unknown -> dropped
-        { id: 'reqfeed', x: 20, y: 2, w: 10 },     // x+w>24 -> x clamped
+        { id: 'reqfeed', x: 20, y: 2, w: 10 },     // retired block id -> dropped
+        { id: 'reqstats', x: 20, y: 2, w: 10 },    // x+w>24 -> x clamped
     ] });
     assert.strictEqual(n.width, 'default');
-    assert.deepStrictEqual(n.blocks.map(b => b.id), ['gen', 'reqfeed']);
+    assert.deepStrictEqual(n.blocks.map(b => b.id), ['gen', 'reqstats']);
     assert.strictEqual(n.blocks[0].w, UPL.COLUMNS);
     assert.strictEqual(n.blocks[0].x, 0);
     assert.strictEqual(n.blocks[1].x, 14);

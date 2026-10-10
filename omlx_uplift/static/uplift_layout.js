@@ -47,7 +47,9 @@
         'met-pfx-lookup-hit-pct',
         'met-spec-saved-tokens-min',
         'met-queue-waiting',
-        // MTP acceptance card (2026-10-10): tray-only by the same U19 rule.
+        // MTP acceptance card (2026-10-10): joins the default board in the
+        // slot cache efficiency held (user item 3); cache efficiency moves
+        // to tray-only above.
         'met-mtp-accept-pct',
         // U20 gated (power/temperature): ships on the default board (a
         // hidden parked slot, U24) and shows itself only once macmon data
@@ -57,10 +59,12 @@
         'reqstats',
         'cache',
         'live',
-        'reqfeed',
-        // 'feed' (Events card) retired 2026-09-22: normalizeLayout drops it
-        // from every saved layout, the static section is gone from
-        // index.html, and pushFeed no-ops without its host.
+        // 'reqfeed' retired 2026-10-10 (user item 5): the Request feed is a
+        // popup opened from the Activity card header, not a board block.
+        // normalizeLayout drops it from saved layouts, the static section
+        // is gone from index.html, and renderReqFeed no-ops without a host
+        // (the popup clones its own).
+        // 'feed' (Events card) retired 2026-09-22 for the same reason.
     ];
     const COLUMNS = 24;
     // U19/U20: tray-only blocks — valid ids, NEVER auto-appended into a
@@ -71,9 +75,10 @@
         'met-pfx-token-hit-pct', 'met-pfx-lookup-hit-pct',
         'met-spec-saved-tokens-min', 'met-queue-waiting',
         'met-pwr-total-w', 'met-therm-cpu-temp-c',
-        // MTP acceptance card (2026-10-10): tray-only by the U19 rule —
-        // adding it never rewrites a saved layout.
-        'met-mtp-accept-pct',
+        // Cache-efficiency card moved out of the shipped default the same
+        // day MTP acceptance moved in (user 2026-10-10, item 3). Saved
+        // layouts keep their placed copy; new boards get MTP instead.
+        'met-cache-efficiency',
     ];
     // U24: gated blocks ship on the default board as hidden parked slots
     // (revealed by the macmon data flag, never by a layout rewrite).
@@ -107,8 +112,9 @@
     //   row 4: Throughput, Request sizes (2 charts/cards half-width)
     //   rows 5-6: metric cards (3 per row, w=8 — even split, full width;
     //          user 2026-10-02: gen / out / in tok/s, then req/s / memory /
-    //          cache efficiency)
-    //   last: Events (full width)
+    //          cache efficiency; user 2026-10-10 item 3: MTP acceptance
+    //          replaced cache efficiency on the default board)
+    //   last: Request feed → popup from the Activity header (item 5)
     // Freeform board: every block carries an explicit h. Content refits
     // correct heights after first paint; positions never reflow sideways.
     // Heights below are the MEASURED content heights at a 1280-1440px
@@ -149,8 +155,15 @@
         { id: 'met-rate-prompt-tokens-s', x: 16, y: 108, w: 8, h: 20 },
         { id: 'met-rate-requests-s', x: 0, y: 128, w: 8, h: 20 },
         { id: 'met-sys-used-bytes', x: 8, y: 128, w: 8, h: 20 },
-        { id: 'met-cache-efficiency', x: 16, y: 128, w: 8, h: 20 },
-        { id: 'reqfeed', x: 0, y: 148, w: COLUMNS, h: 18 },
+        // Item 3 (user 2026-10-10): MTP acceptance takes the slot cache
+        // efficiency held — the cache card stays valid (tray-only) for
+        // boards that carry it, new boards get the acceptance graph.
+        { id: 'met-mtp-accept-pct', x: 16, y: 128, w: 8, h: 20 },
+        // Item 5 (user 2026-10-10): the Request feed is no longer a board
+        // block — it opens on demand from the Activity card header
+        // (popup), so boot never pays for its render. normalizeLayout
+        // drops 'reqfeed' from saved layouts exactly like the retired
+        // Events card ('feed') before it.
     ];
 
     function defaultLayout() {
@@ -159,6 +172,32 @@
             width: 'default',
             blocks: DEFAULT_BLOCKS.map(b => ({ ...b })),
         };
+    }
+
+    /* One-shot saved-board migration (user 2026-10-10, items 3 + 5):
+       - 'reqfeed' left the board contract (it is a popup now) — dropped
+         exactly like the retired Events card; the packer closes the gap.
+       - MTP acceptance REPLACES cache efficiency in place (same x/y/w/h)
+         on boards that carried the cache card. Without the in-place swap
+         the mergedBlocks memo — which marked met-mtp-accept-pct 'seen'
+         when it was still tray-only — would keep the new default card off
+         every existing board forever.
+       The flag makes the migration idempotent even if the user later
+       re-adds cache efficiency by hand. Mutates `saved` (the localStorage
+       layout object) — the caller persists it right after. */
+    function migrateSavedLayout(saved) {
+        if (!saved || saved.feedSwapV1 || !Array.isArray(saved.blocks)) return saved;
+        saved.feedSwapV1 = 1;
+        saved.blocks = saved.blocks.filter(b => !(b && b.id === 'reqfeed'));
+        if (saved.blocks.some(b => b && b.id === 'met-cache-efficiency')
+            && !saved.blocks.some(b => b && b.id === 'met-mtp-accept-pct')) {
+            saved.blocks = saved.blocks.map(b =>
+                (b && b.id === 'met-cache-efficiency')
+                    ? { ...b, id: 'met-mtp-accept-pct' } : b);
+            if (Array.isArray(saved.mergedBlocks))
+                saved.mergedBlocks = saved.mergedBlocks.filter(id => id !== 'met-mtp-accept-pct');
+        }
+        return saved;
     }
 
     function toInt(value, fallback) {
@@ -326,6 +365,7 @@
         WIDTH_CLASSES,
         WIDTH_IDS,
         defaultLayout,
+        migrateSavedLayout,
         normalizeLayout,
         resolveOverlaps,
         packRows,

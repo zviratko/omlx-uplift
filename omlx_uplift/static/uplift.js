@@ -1020,6 +1020,7 @@ const UPL = window.UpliftLayout;
 // an existing saved layout (ids already merged are remembered, so a block
 // the user then removes stays removed).
 function currentBlockLayout(saved) {
+    UPL.migrateSavedLayout(saved);   // items 3+5 one-shot swap (reqfeed→popup, cache→MTP)
     if (saved && Array.isArray(saved.blocks)) {
         const blocks = saved.blocks.slice();
         const merged = Array.isArray(saved.mergedBlocks) ? saved.mergedBlocks : [];
@@ -1802,6 +1803,19 @@ $('btn-layout').onclick = e => {
 document.addEventListener('click', e => {
     if (!$('layout-pop').hidden && !$('layout-pop').contains(e.target) && e.target !== $('btn-layout'))
         $('layout-pop').hidden = true;
+});
+/* Item 4 (user 2026-10-10): Escape must dismiss the settings surfaces that
+   are NOT modal dialogs — the Layout popover first (outside-click already
+   closed it; Escape is the keyboard twin of exactly that action), then
+   dashboard EDIT mode (Escape = the toolbar's Cancel, the same
+   frontmost-first order the global dialog handler uses). Same file already
+   owns the dd-menu/theme-menu Escape listeners; the Request-feed popup IS
+   a dialog overlay, so Escape there goes through the global handler in
+   uplift_state.js + closeFeed. */
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!$('layout-pop').hidden) { $('layout-pop').hidden = true; return; }
+    if (dashEditing) cancelDashEdit();
 });
 
 /* ---------------- animated counters (lightweight rAF tween) --------------- */

@@ -578,6 +578,7 @@
  "uplift.patches.update_avail_toast": "dostupná aktualizace (v{v})",
  "uplift.patches.warn_banner": "VAROVÁNÍ — jeden nebo více patchů vyžaduje po aktualizaci vanilla kontrolu, nebo se nepodařilo je použít. oMLX běží bez nich, dokud se nevyřeší.",
  "uplift.patches.drift_banner": "POSUN STROMU — {n} souborů nainstalovaného oMLX neodpovídá wheel, ze kterého bylo sestaveno ({files}). Načítání modelů může selhat. Oprava: brew reinstall omlx — uplift strom nikdy nepřepisuje.",
+ "uplift.req.feed_btn": "prohlédnout zpracované požadavky",
  "uplift.req.all_models": "všechny modely",
  "uplift.req.cancel": "ZRUŠIT POŽADAVEK",
  "uplift.req.close": "ZAVŘÍT",

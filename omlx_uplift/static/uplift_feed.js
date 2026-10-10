@@ -189,8 +189,57 @@ const MAX_REQFEED = 30;
 const reqFeedRows = S.reqFeedRows;   // shared Map (uplift_state.js): live panel + reqsearch read it
 let sseSource = null;
 
+/* Item 5 (user 2026-10-10): the feed is a POPUP opened from the Activity
+   card header, not a board card — its rows render on demand. Data keeps
+   flowing into reqFeedRows (the in-flight card needs the terminal labels),
+   only the DOM pass and the initial stored-history search wait for the
+   first open. The wrapper carries .modal-overlay ONLY while open, so the
+   global Escape handler (uplift_state.js) sees it as a dialog; it routes
+   through __upliftModalClose (registered below) instead of the remove()
+   fallback — this overlay is reused, never destroyed. */
+let feedOpen = false;
+function openFeed() {
+    const pop = $('reqfeed-pop');
+    if (!pop || feedOpen) return;
+    feedOpen = true;
+    pop.classList.add('modal-overlay');
+    pop.__upliftModalClose = closeFeed;
+    pop.addEventListener('click', feedBackdrop);
+    const RS = window.Uplift.reqSearch;
+    if (RS && RS.ensureBooted) {
+        if (RS.searchOn) RS.run();   // reopen: refresh the stored window
+        else RS.ensureBooted();      // first open: boot chips + first search
+    }
+    renderReqFeed();
+}
+function closeFeed() {
+    const pop = $('reqfeed-pop');
+    if (!pop || !feedOpen) return;
+    feedOpen = false;
+    pop.classList.remove('modal-overlay');
+    pop.removeEventListener('click', feedBackdrop);
+    pop.__upliftModalClose = null;
+    document.activeElement && document.activeElement.blur();
+}
+function feedBackdrop(ev) { if (ev.target === $('reqfeed-pop')) closeFeed(); }
+/* The Activity-header opener binds HERE (module owner), not in uplift.js:
+   uplift.js reassigns _feedGlue wholesale at load, an Object.assign here
+   would not survive it, and the popup belongs to this module's contract.
+   #reqfeed-close binds in uplift_reqsearch.js's control binder (same
+   element lifecycle as SEARCH/LIVE). */
+function bindFeedOpener() {
+    const btn = $('btn-reqfeed');
+    if (!btn || btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.onclick = openFeed;
+}
+if (document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', bindFeedOpener);
+else bindFeedOpener();
+
 function renderReqFeed() {
     if (window.Uplift.reqSearch.searchOn) return;   // search results own the list until LIVE
+    if (!feedOpen) return;                          // popup closed: rows update in the Map only
     const list = $('reqfeed');
     const rows = [...reqFeedRows.values()];
     const activeN = rows.filter(r => ['queued','prefilling','generating'].includes(r.state)).length;
@@ -447,6 +496,7 @@ window.Uplift.feed = {
     pushFeed, reactTo, gateMilestones, celebrate, milestoneQuip,
     milestoneFloor: S.milestoneFloor,
     renderReqFeed, pollRequests, connectEventStream, pushServerEvent, upsertReq,
-    sseOpen,
+    sseOpen, openFeed, closeFeed,
+    get feedOpen() { return feedOpen; },
 };
 })();

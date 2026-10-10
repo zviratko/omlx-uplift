@@ -447,8 +447,30 @@ class RequestTracker:
             # stale active rows (engine vanished mid-flight)
             for rid in list(self._active):
                 if now - self._active[rid].get("ts", now) > ACTIVE_STALE_S:
+                    row = self._active[rid]
                     self._dirty_ids.add(rid)
                     self._miss_counts.pop(rid, None)
+                    # ZOMBIE-1 (user 2026-10-10: 'I see requests in queued
+                    # state after restart, historical ones, no activity'):
+                    # the old path DELETED the row without a terminal
+                    # update, so the store kept whatever non-terminal
+                    # state was last written — 'queued' rows survived in
+                    # history until the retention sweep (up to 2 days) and
+                    # the feed painted them as live after every restart.
+                    # Persist an honest terminal instead: the engine that
+                    # owned it is gone; label error/interrupted (bench
+                    # history's 'interrupted' precedent).
+                    done = dict(row)
+                    done["state"] = "error"
+                    done["error"] = row.get("error") or "interrupted (engine gone)"
+                    done["ts"] = now
+                    done["ended_at"] = row.get("ended_at") or now
+                    done["started_at"] = row.get("started_at") or row.get("ts")
+                    done["_tick_final"] = True   # a guess, not an exact
+                                                 # harvest — resurrectable
+                                                 # if the request is back
+                    self._done.append(done)
+                    self._done_ids.add(rid)
                     del self._active[rid]
             self._sampled_at = now
 

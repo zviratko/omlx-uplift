@@ -187,10 +187,24 @@
             <div class="stat-sub sub-mt8" id="cache-sub"></div>
         </div></div></div></div></section>
 
-    <section class="card grid-stack-item" data-id="live" data-tab="status" gs-id="live" data-block="live"><div class="grid-stack-item-content"><div class="card-frame fill-card"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.inflight">Activity</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.inflight">Activity</span> <span class="right" id="live-count"></span></h2>
+    <section class="card grid-stack-item" data-id="live" data-tab="status" gs-id="live" data-block="live"><div class="grid-stack-item-content"><div class="card-frame fill-card"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.inflight">Activity</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.inflight">Activity</span> <span class="right"><button type="button" class="se-btn act" id="btn-reqfeed" data-i18n="uplift.req.feed_btn" title="inspect processed requests" data-i18n-title="uplift.req.feed_btn">inspect processed requests</button><span id="live-count"></span></span></h2>
         <div class="card-body"><div id="live-list"><div class="empty" data-i18n="uplift.empty.idle">Idle</div></div></div></div></div></div></section>
 
-    <section class="card grid-stack-item" data-id="reqfeed" data-tab="status" gs-id="reqfeed" data-block="reqfeed"><div class="grid-stack-item-content"><div class="card-frame fill-card"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.request_feed">Request feed</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.request_feed">Request feed</span> <span class="right" id="reqfeed-sub"></span></h2>
+        <!-- ============ MODELS ============ -->
+    <!-- ============ USAGE ============ -->
+    <!-- ============ LOGS ============ -->
+    <!-- ============ SETTINGS ============ -->
+    </main>
+
+<!-- Item 5 (user 2026-10-10): the Request feed is no longer a board block —
+     it opens on demand from the Activity header button (uplift_feed.js
+     openFeed), so boot never pays for its render. OUTSIDE #grid (GridStack
+     would claim any .card inside it) and WITHOUT the modal-overlay class
+     while closed — the global Escape handler in uplift_state.js removes
+     every open .modal-overlay; openFeed adds the class, closeFeed takes
+     it back off. -->
+<div id="reqfeed-pop">
+    <section class="card reqfeed-modal"><div class="card-frame fill-card"><div class="card-pad"><h2><span data-i18n="uplift.card.request_feed">Request feed</span> <span class="right" id="reqfeed-sub"></span></h2>
         <div class="card-body">
         <div class="req-search rs-bar">
           <input type="text" id="req-q" class="rs-q" data-i18n-ph="uplift.req.search_ph" placeholder="search prompt/output…">
@@ -198,15 +212,12 @@
           <span id="req-timechips" class="rs-timechips"></span>
           <button type="button" class="se-btn act" id="req-search-btn" data-i18n="uplift.req.search">SEARCH</button>
           <button type="button" class="se-btn act" id="req-live-btn" data-i18n="uplift.req.live" title="" style="display:none">LIVE</button>
+          <button type="button" class="se-btn act" id="reqfeed-close" data-i18n="uplift.req.close" title="" style="margin-left:auto">CLOSE</button>
         </div>
         <div class="se-hint" id="req-search-note" style="display:none"></div>
-        <div id="reqfeed"><div class="empty" data-i18n="uplift.empty.no_requests">No requests yet</div></div></div></div></div></div></section>
-
-        <!-- ============ MODELS ============ -->
-    <!-- ============ USAGE ============ -->
-    <!-- ============ LOGS ============ -->
-    <!-- ============ SETTINGS ============ -->
-    </main>
+        <div id="reqfeed"><div class="empty" data-i18n="uplift.empty.no_requests">No requests yet</div></div>
+        </div></div></div>
+</div>
 
 <div id="pages">
 <section class="card wide page-card" data-id="models-admin-page" data-tab="models" data-sub="manager" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.models">Models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.models">Models</span> <span class="right" id="models-admin-sub"></span></h2>

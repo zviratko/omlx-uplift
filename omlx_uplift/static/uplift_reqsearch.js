@@ -16,7 +16,8 @@ const API = S.API;
    to RL-0 log retention. Results reuse feed row styling; click opens the
    RL-2 inspector (stored variant). */
 let searchOn = false, reqRetainDays = 2;
-const REQ_WINDOWS = [['15m', 900], ['1h', 3600], ['6h', 21600], ['24h', 86400]];
+const REQ_WINDOWS = [['15m', 900], ['1h', 3600], ['2h', 7200],
+                     ['6h', 21600], ['24h', 86400]];
 /* FE-3: file-local shim like every other consumer (was inline pokes of
    window.Uplift._reqGlue at three sites). */
 const RQ_GLUE = {
@@ -27,9 +28,14 @@ const RQ_GLUE = {
 let reqWin = null;                       // null = retention window default
 /* U14 (user): the chip selection died with every page load. Browser layout
    prefs live in localStorage (project rule); remember the seconds, restore
-   the chip at init. Query TEXT is deliberately not persisted (stale queries
+   the chip at boot. Query TEXT is deliberately not persisted (stale queries
    read as bugs). */
 const REQWIN_KEY = 'omlx-uplift-reqwin';
+/* Item 7 (user 2026-10-10): the feed's DEFAULT history window is 2 h —
+   the old fallback was the LAST chip (the full retention window), so every
+   fresh open scanned the whole 2-day log. A remembered chip still wins
+   (U14 rule); 2h only decides the first-time default. */
+const REQ_DEFAULT_WIN = 7200;
 function loadReqWinPref() {
     try {
         const v = +localStorage.getItem(REQWIN_KEY);
@@ -48,22 +54,33 @@ function bindReqSearchControls() {
     btn.dataset.bound = '1';
     btn.onclick = runReqSearch;
     $('req-live-btn').onclick = backToLiveFeed;
+    $('reqfeed-close').onclick = () => window.Uplift.feed.closeFeed();
     $('req-q').onkeydown = e => { if (e.key === 'Enter') runReqSearch(); };
     $('req-model').onchange = () => searchOn && runReqSearch();
 }
 function bootReqSearch() {
     bindReqSearchControls();
+    // Item 5 (user 2026-10-10): data boot moved OUT of page load — the
+    // popup opener (openFeed in uplift_feed.js) calls ensureBooted() on
+    // first open. Here we only bind the static controls so a never-opened
+    // feed costs the boot nothing (it used to fire the retention fetch +
+    // models fetch + a full-window stored search on every page load).
+}
+let _searchBooted = false;
+function ensureBooted() {
+    if (_searchBooted) return;
+    _searchBooted = true;
     // ISSUE-4: the bar is visible from page load but its model dropdown and
     // timespan chips only appeared after pressing SEARCH. Populate eagerly;
     // failures keep the defaults and runReqSearch retries via initReqSearch.
     // U14-follow-up (user: "feed empty until the timeframe is changed"):
     // initReqSearch ALWAYS marks a chip 'on' (remembered window, else the
-    // last chip) but never ran a search, so the list stayed on the live ring
+    // default) but never ran a search, so the list stayed on the live ring
     // — empty after a restart / on a fresh page — while the bar looked
     // active. The user read that as a dead feed until they clicked a chip.
     // The chip selection and the list must agree: run the selected window
     // once at boot. LIVE button is the explicit way back to the ring.
-    initReqSearch().then(() => runReqSearch()).catch(() => {});
+    initReqSearch().then(() => runReqSearch()).catch(() => { _searchBooted = false; });
 }
 if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', bootReqSearch);
@@ -93,8 +110,13 @@ async function initReqSearch() {
     mk(`${reqRetainDays}d`, reqRetainDays * 86400);
     // U14: honour the remembered window when it is still offered (a
     // retention change can shrink the choices away under the old pref).
+    // Item 7 (user 2026-10-10): the FRESH default is 2 h — the old
+    // last-child fallback picked the full retention window (2 d) so every
+    // first open scanned the whole log.
     const want = loadReqWinPref();
-    const onChip = (want && [...chips.children].find(x => +x.dataset.secs === want))
+    const kids = [...chips.children];
+    const onChip = (want && kids.find(x => +x.dataset.secs === want))
+                 || kids.find(x => +x.dataset.secs === REQ_DEFAULT_WIN)
                  || chips.lastChild;
     onChip.classList.add('on'); reqWin = +onChip.dataset.secs;
     $('req-search-btn').onclick = runReqSearch;
@@ -205,6 +227,7 @@ async function syncReqModelOptions() {
 
 window.Uplift.reqSearch = {
     run: runReqSearch,
+    ensureBooted,
     get searchOn() { return searchOn; },
 };
 })();

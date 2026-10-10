@@ -578,6 +578,7 @@
  "uplift.patches.update_avail_toast": "有可用更新 (v{v})",
  "uplift.patches.warn_banner": "警告 — 有补丁在 vanilla 更新后需要复查，或应用失败。在问题解决之前，oMLX 将在没有这些补丁的情况下运行。",
  "uplift.patches.drift_banner": "目录树偏移 — {n} 个已安装的 oMLX 文件与其构建 wheel 不一致（{files}）。模型加载可能失败。修复：brew reinstall omlx — uplift 绝不会改写目录树。",
+ "uplift.req.feed_btn": "检查已处理请求",
  "uplift.req.all_models": "所有模型",
  "uplift.req.cancel": "取消请求",
  "uplift.req.close": "关闭",
