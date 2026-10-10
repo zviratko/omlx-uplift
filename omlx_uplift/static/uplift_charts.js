@@ -179,32 +179,41 @@ function tpsWindowed() {
     const liveOn = LF.liveForWindow(win);
     tpsLiveOn = liveOn && ((LF.liveUsable('generation.tokens_s'))
                            || (LF.liveUsable('prefill.tokens_s')));
-    // FAST-1: the 500 ms rate windows are spiky by construction — smooth
-    // the LIVE column only (1.5 s centered mean, user pre-approved). The
-    // stored 5 s points keep their existing meaning untouched; smoothing
-    // the merged column would silently 15 s-average them next to the 1.5 s
-    // live stretch.
+    // SMOOTH-1 (user 2026-10-10): the smoothing level is a control, not a
+    // constant. layout.tpsSmooth ∈ {1,3,5,9} samples (1 = off); the default
+    // 3 reproduces FAST-1's fixed k. Each column is smoothed IN ITS OWN
+    // CADENCE — the live 2 Hz stretch at k×0.5 s, stored 5 s points at
+    // k×5 s — never one mean across both (the mixed-cadence blur FAST-1
+    // warns about). A stored-cadence series only gets the stored treatment
+    // when it is the ONLY cadence drawn this frame (gen/prefill with no
+    // live twin) — otherwise the stored prefix stays raw next to the
+    // smoothed live tail, exactly as before. Windows >1 h are already
+    // averaged server-side by the series downsample; smoothing there would
+    // be double-averaging, so the control is honest about being inert.
+    const kS = C.LAYOUT_SMOOTHES.includes(layout.tpsSmooth) ? layout.tpsSmooth : 1;
+    const sm = v => (kS > 1 ? C.movingAverage(v, kS) : v);
+    const storedOk = kS > 1 && win <= 3600;
     const livePair = key => {
         const c = LF.liveCol(key);
-        return c ? { ts: c.ts, v: C.movingAverage(c.v, LF.smoothK()) } : null;
+        return c ? { ts: c.ts, v: sm(c.v) } : null;
     };
     const genL = liveOn && LF.liveUsable('generation.tokens_s') ? livePair('generation.tokens_s') : null;
     const preL = liveOn && LF.liveUsable('prefill.tokens_s') ? livePair('prefill.tokens_s') : null;
-    const g = genL ? C.mergeHistory(chartHist.gen, genL.ts, genL.v, win, now)
+    let g = genL ? C.mergeHistory(chartHist.gen, genL.ts, genL.v, win, now)
         : C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], win, now);
-    const p = preL ? C.mergeHistory(chartHist.prefill, preL.ts, preL.v, win, now)
+    let p = preL ? C.mergeHistory(chartHist.prefill, preL.ts, preL.v, win, now)
         : C.mergeHistory(chartHist.prefill, tpsData[0], tpsData[2], win, now);
+    if (!genL && storedOk) g = { ts: g.ts, v: sm(g.v) };
+    if (!preL && storedOk) p = { ts: p.ts, v: sm(p.v) };
     // U30: cached input rides the same union column (dotted prefill line).
     // FAST-1 keeps it on the 5 s path deliberately: its source counter is
     // fed at request COMPLETION — a faster line would only repeat values.
-    const k = C.mergeHistory(chartHist.cached || [], tpsData[0], tpsData[3], win, now);
+    let k = C.mergeHistory(chartHist.cached || [], tpsData[0], tpsData[3], win, now);
     // MTP accepted draft tok/s rides the LEFT axis (same unit: generation
     // tokens it supplies) on the stored 5 s cadence — speculation cycles
     // are deliberately not fast-sampled (FAST-1 never-fast list).
-    const m = C.mergeHistory(chartHist.mtp || [], tpsData[0], tpsData[4], win, now);
-    // FAST-1: the 500 ms rate windows are spiky by construction — draw a
-    // centered mean over the merged column (user pre-approved smoothing;
-    // the window label says '2 Hz · smoothed').
+    let m = C.mergeHistory(chartHist.mtp || [], tpsData[0], tpsData[4], win, now);
+    if (storedOk) { k = { ts: k.ts, v: sm(k.v) }; m = { ts: m.ts, v: sm(m.v) }; }
     const ts = [...new Set(g.ts.concat(p.ts, k.ts, m.ts))].sort((a, b) => a - b);
     const gi = new Map(g.ts.map((t, i) => [t, g.v[i]]));
     const pi = new Map(p.ts.map((t, i) => [t, p.v[i]]));
@@ -559,8 +568,14 @@ function redrawCharts() {
     const shown = tpsChart.data[0].length;
     let label = shown > 1 ? `${windowLabel(cardWindow('chart-tps'))} window` : '';
     // FAST-1: honest cadence badge — the line only lies about smoothness
-    // if the viewer cannot see which clock drew it.
-    if (shown > 1 && tpsLiveOn) label += ` · 2 Hz · ${C.tf('uplift.explore.smoothed', 'smoothed')}`;
+    // if the viewer cannot see which clock drew it. SMOOTH-1: the smoothing
+    // word now tracks the control — 'off' must say so, never ride the old
+    // unconditional 'smoothed' claim.
+    if (shown > 1) {
+        const kS = C.LAYOUT_SMOOTHES.includes(layout.tpsSmooth) ? layout.tpsSmooth : 1;
+        if (tpsLiveOn) label += ` · 2 Hz · ${kS > 1 ? C.tf('uplift.explore.smoothed', 'smoothed') : C.tf('uplift.explore.smooth_off', 'smoothing off')}`;
+        else if (kS > 1 && cardWindow('chart-tps') <= 3600) label += ` · ${C.tf('uplift.explore.smoothed', 'smoothed')}`;
+    }
     // Honest resolution badge: hourly rollups backfill older stretches.
     const now = Date.now();
     const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], cardWindow('chart-tps'), now);
@@ -653,6 +668,17 @@ function setGlobalWindow(sec) {
         if (layout.metricWin[id] === undefined) metricFetch(id, true);
         else drawMetricChart(id);
     }
+}
+/* SMOOTH-1: the Throughput smoothing control. Client-side display rule
+   only — the store keeps its exact 5 s / 2 Hz semantics untouched, so no
+   refetch is needed: re-set the data columns and redraw. */
+function setTpsSmooth(k) {
+    k = Number(k);
+    if (!C.LAYOUT_SMOOTHES.includes(k)) return;
+    if (k === layout.tpsSmooth) return;
+    layout.tpsSmooth = k;
+    C.saveLayout(localStorage, layout);
+    redrawCharts();
 }
 function setCardWindow(id, sec) {
     if (sec === layout.chartWindowSec) delete layout.metricWin[id];
@@ -1459,7 +1485,7 @@ window.Uplift.charts = {
     rerenderChartsTheme: rerenderChartsTheme, createUsageChart: createUsageChart,
     loadChartHistory: loadChartHistory, markHistoryDirty: markHistoryDirty,
     relabelExplore: relabelExplore, windowLabel: windowLabel,
-    setGlobalWindow: setGlobalWindow, renderCardTsRows: renderCardTsRows,
+    setGlobalWindow: setGlobalWindow, setTpsSmooth: setTpsSmooth, renderCardTsRows: renderCardTsRows,
     createMetricCard: createMetricCard, drawAllMetricCharts: drawAllMetricCharts,
     legendUpdater: legendUpdater,   // SWEEP178: exposed for console testability
     fitAllMetricPlots: fitAllMetricPlots, clearMainChartHover: clearMainChartHover,

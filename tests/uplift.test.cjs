@@ -268,6 +268,50 @@ test('layout persistence and clamping', () => {
     assert.strictEqual(C.clampSpan(5, 3), 3);
 });
 
+/* SMOOTH-1 (user 2026-10-10): the Throughput smoothing control. Layout
+   contract (ladder, default = FAST-1's historic fixed k=3, clamped
+   round-trip) + wiring pins (header select with i18n hooks, the draw path
+   reads layout.tpsSmooth instead of the fixed constant, stored-cadence
+   smoothing never on server-averaged windows, setter is display-only).
+   uplift_charts.js is a window-bound IIFE — source-slice pattern. */
+test('SMOOTH-1: Throughput smoothing control', () => {
+    assert.deepStrictEqual(C.LAYOUT_SMOOTHES, [1, 3, 5, 9]);
+    assert.strictEqual(C.LAYOUT_DEFAULTS.tpsSmooth, 3);
+    {   // clamped round-trip: junk and unknown values fall back to light
+        const items = { [C.LAYOUT_KEY]: JSON.stringify({ tpsSmooth: 42 }) };
+        const store = { getItem: k => items[k], setItem: () => {} };
+        assert.strictEqual(C.loadLayout(store).tpsSmooth, 3);
+        items[C.LAYOUT_KEY] = JSON.stringify({ tpsSmooth: 9 });
+        assert.strictEqual(C.loadLayout(store).tpsSmooth, 9);
+    }
+    const fs = require('fs');
+    const path = require('path');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'index.html'), 'utf8');
+    const sel = html.match(/<select id="opt-tps-smooth"[^>]*>([\s\S]*?)<\/select>/);
+    assert.ok(sel, 'opt-tps-smooth select in the Throughput header');
+    const vals = [...sel[1].matchAll(/value="([^"]+)"/g)].map(m => m[1]);
+    assert.deepStrictEqual(vals, ['1', '3', '5', '9']);
+    // every option carries an i18n hook (reverse-lint rule A)
+    assert.ok([...sel[1].matchAll(/<option[^>]*>/g)].every(t => t[0].includes('data-i18n')));
+
+    const charts = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_charts.js'), 'utf8');
+    const start = charts.indexOf('function tpsWindowed()');
+    const end = charts.indexOf('function memWindowed()');
+    assert.ok(start > 0 && end > start, 'tpsWindowed slice found');
+    const body = charts.slice(start, end);
+    assert.ok(body.includes('layout.tpsSmooth'), 'draw path reads the layout control');
+    assert.ok(!body.includes('LF.smoothK()'), 'fixed FAST-1 k must not survive the control');
+    assert.ok(/win <= 3600/.test(body), 'stored smoothing never on server-averaged windows');
+
+    const s0 = charts.indexOf('function setTpsSmooth(');
+    const s1 = charts.indexOf('function setCardWindow(');
+    assert.ok(s0 > 0 && s1 > s0, 'setTpsSmooth slice found');
+    const setter = charts.slice(s0, s1);
+    assert.ok(setter.includes('LAYOUT_SMOOTHES.includes'), 'bad select values rejected');
+    assert.ok(setter.includes('saveLayout') && setter.includes('redrawCharts'), 'persist + redraw');
+    assert.ok(!setter.includes('fetchJson') && !setter.includes('loadChartHistory'), 'display-only: no refetch');
+});
+
 test('F-032: loadLayout passes mergedBlocks through (removed cards must not resurrect)', () => {
     const items = {};
     const store = { getItem: k => items[k], setItem: (k, v) => items[k] = v };

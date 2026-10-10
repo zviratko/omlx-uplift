@@ -183,10 +183,14 @@ function mean(values) {
    redesign. Old v1 blob is dead bytes (same no-migration tradeoff as
    F-020). */
 const LAYOUT_KEY = 'omlx-uplift-layout-v2';
-const LAYOUT_DEFAULTS = { chartWindowSec: 300, intervalMs: 1000, logsHideDebug: true, liveFeed: true, percentile: 'p95', collapsed: {}, metricWin: {} };
+const LAYOUT_DEFAULTS = { chartWindowSec: 300, intervalMs: 1000, logsHideDebug: true, liveFeed: true, percentile: 'p95', tpsSmooth: 3, collapsed: {}, metricWin: {} };
 const LAYOUT_WINDOWS = [60, 300, 900, 3600, 21600, 86400, 604800, 2592000];
 const LAYOUT_INTERVALS = [500, 1000, 2000, 5000];
 const LAYOUT_PERCENTILES = ['p50', 'p90', 'p95', 'p99'];
+/* Throughput smoothing levels (centered-mean window in SAMPLES, live 2 Hz
+   and stored 5 s points of short windows alike — see tpsWindowed):
+   1 = off, 3 = light (FAST-1's historic fixed k), 5, 9. */
+const LAYOUT_SMOOTHES = [1, 3, 5, 9];
 /* Metric catalogue — each entry becomes its own dashboard card (block id
    met-<key with . _ -> ->). `key` is what the collector persists
    (metrics.sqlite3); `fmt` picks the value formatter; `hourly` marks keys
@@ -309,6 +313,7 @@ function loadLayout(storage) {
         // charts just keep drawing the stored 5 s points). Default ON.
         liveFeed: l.liveFeed !== false,
         percentile: LAYOUT_PERCENTILES.includes(l.percentile) ? l.percentile : LAYOUT_DEFAULTS.percentile,
+        tpsSmooth: LAYOUT_SMOOTHES.includes(l.tpsSmooth) ? l.tpsSmooth : LAYOUT_DEFAULTS.tpsSmooth,
         collapsed: (l.collapsed && typeof l.collapsed === 'object') ? { ...l.collapsed } : {},
         // Per-metric-card window overrides (block id -> seconds); absent =
         // follow chartWindowSec. The chip row of a card with an override
@@ -587,7 +592,7 @@ return { num, r, normalize, modelState, appendSample, pruneOlderThan, eventsBetw
          createRequestTracker, percentile, mean, mergeHistory, movingAverage, smoothKey,
          setLocale, getLocale, t, tf,
          PREFS_KEY, SKIN_DIR_KEY, PREFS_DEFAULTS, THEMES, SKIN_NAME_RE, loadPrefs, savePrefs,
-         LAYOUT_KEY, LAYOUT_DEFAULTS, LAYOUT_WINDOWS, LAYOUT_INTERVALS, LAYOUT_PERCENTILES,
+         LAYOUT_KEY, LAYOUT_DEFAULTS, LAYOUT_WINDOWS, LAYOUT_INTERVALS, LAYOUT_PERCENTILES, LAYOUT_SMOOTHES,
          EXPLORE_METRICS, EXPLORE_KEYS, metricBlockId, blockMetricKey, loadLayout, saveLayout, clampSpan,
          fmtCompact, fmtBytes, fmtDuration, fmtNumber, errorText };
 });

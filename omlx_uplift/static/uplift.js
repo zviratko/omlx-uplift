@@ -1754,6 +1754,10 @@ $('opt-live-feed').onchange = e => {
     else { LF.disable(); }
     CH.redrawCharts(); CH.drawAllMetricCharts();
 };
+// SMOOTH-1: Throughput smoothing select (static options in index.html).
+// Display rule only — no refetch; setTpsSmooth saves + redraws columns.
+$('opt-tps-smooth').value = String(layout.tpsSmooth);
+$('opt-tps-smooth').onchange = e => CH.setTpsSmooth(e.target.value);
 /* Server-side retention (RL-0): reads/writes the uplift store, not localStorage. */
 async function loadRetention() {
     try {
