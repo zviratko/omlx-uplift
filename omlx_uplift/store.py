@@ -8,7 +8,10 @@ Our file adds sub-hour samples and per-request rows:
   samples(ts, key, value, instance)   interval metrics (tokens/s, cache
                                hit %, loaded models, active requests,
                                totals) tagged with the server that wrote
-                               them (see server_instance_id)
+                               them (see server_instance_id). Reads under
+                               the HIST-1 policy hide only LIVE co-tenant
+                               writers — history from dead PIDs and old
+                               kegs stays visible (see _hidden_tags)
   requests(id PK, model, state, prompt_tokens, completion_tokens, tps,
            error, ts_start, ts_end)   per-request lifecycle rows
 Retention (RL-0, split + configurable): metrics samples are purged after
@@ -158,6 +161,73 @@ def server_instance_id() -> str:
     return _inst_cache
 
 
+def _split_instance(tag: str) -> tuple[str, int | None]:
+    """Split an instance tag into (keg, pid). Malformed/legacy tags degrade
+    to (tag, None) — an unparseable tag can never be proven dead, so the
+    visibility policy treats it like a live writer's row and keeps hiding
+    it: exactly the pre-HIST-1 behavior for that row, and no crash path."""
+    keg, _, pid_s = tag.rpartition("\x1f")
+    if not keg:
+        return tag, None
+    try:
+        return keg, int(pid_s)
+    except ValueError:
+        return keg, None
+
+
+def _pid_alive(pid: int) -> bool:
+    """True when PID exists. EPERM counts as alive (a foreign-uid process
+    is real and its rows are still live data). PID-reuse collision (a dead
+    session's PID reused by an unrelated process) misclassifies that old
+    tag as live and keeps it hidden — conservative, bounded to one session,
+    and still strictly better than the pre-HIST-1 exact-tag filter."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as exc:
+        # EINVAL: not a valid PID number on this system (e.g. beyond
+        # kern.maxproc) — such a writer cannot exist. Any other errno is
+        # conservative (treat as alive, keep the row hidden).
+        import errno as _errno
+        return exc.errno != _errno.EINVAL
+    return True
+
+
+# HIST-1 (user: "every time I upgrade uplift I lose all historical data").
+# The v3 exact-instance read filter (89bd701) fixed real co-tenant graph
+# corruption but threw the baby out with the bathwater: BOTH halves of the
+# tag — keg path AND PID — change at every restart, and the keg half
+# changes at every `brew reinstall`, so a fresh process matched ZERO old
+# rows and the entire fine (5 s) layer vanished from the dashboard even
+# though 10 M rows sat in the DB. The corruption case was never "old rows
+# exist", it was "another LIVE server interleaves its deltas with ours".
+# Correct policy, therefore: hide only foreign tags whose writer PID is
+# ALIVE; own tag, untagged legacy rows and dead tags (previous sessions,
+# previous kegs) are all visible history.
+VISIBLE_INSTANCES = "visible"
+
+# Freshness for the live-alien probe (per store, see _live_alien_tags): a
+# plain TTL alone could hide a JUST-STARTED co-tenant for up to TTL (its
+# rows would poison the series — the exact bug v3 fixed), and a change-only
+# recompute could trust "writer died" forever. So: recompute when the tag
+# LIST changed (new co-tenant appears immediately) OR after the TTL (death
+# noticed within one tick+TTL at worst). The DISTINCT scan behind it is
+# index-backed (ix_samples_instance) and millisecond-cheap; the probe is a
+# syscall per foreign tag.
+_VISIBLE_TTL_S = 30.0
+
+
+def _distinct_tags(conn) -> list[str]:
+    """All distinct non-NULL sample instance tags (one index-backed scan)."""
+    return [r[0] for r in conn.execute(
+        "SELECT DISTINCT instance FROM samples WHERE instance IS NOT NULL")]
+
+
 def open_usage_ro(path: Path | None = None) -> sqlite3.Connection:
     """Open vanilla's usage.sqlite3 strictly READ-ONLY."""
     p = path or (default_db_path().parent.parent / "usage.sqlite3")
@@ -174,6 +244,15 @@ class MetricsStore:
         self.path = Path(path) if path else default_db_path()
         self._lock = threading.Lock()
         self._has_fts = False   # _init_schema flips it when FTS5 is usable
+        # HIST-1: cache this process's instance tag. server_instance_id()
+        # itself is already memoised module-wide, but keeping the value on
+        # the store means a test that patches it gets a stable identity for
+        # the store's lifetime, and the read path does one attribute load
+        # per query instead of a function call.
+        self._own_instance = server_instance_id()
+        # (tag_list_snapshot, monotonic_deadline, hidden_tags) for the
+        # visible-instances policy — see _hidden_tags().
+        self._alien_cache: tuple[frozenset[str], float, tuple[str, ...]] | None = None
         if read_only:
             if not self.path.exists():
                 raise FileNotFoundError(self.path)
@@ -244,6 +323,13 @@ class MetricsStore:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (str(_SCHEMA_VERSION),),
             )
+            # HIST-1: the visible-instances probe scans DISTINCT instance
+            # tags per (cached) recompute; without an index that is a full
+            # scan of a 10 M-row table holding _lock. Low-cardinality index
+            # -> index-only scan in milliseconds. Idempotent CREATE.
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_samples_instance "
+                "ON samples(instance)")
             # RL-3: FTS5 index over prompt+output, best-effort — Homebrew
             # python sqlite usually ships it, but on failure everything
             # falls back to LIKE (advertised per-response as mode).
@@ -616,47 +702,93 @@ class MetricsStore:
         log.info("uplift store: VACUUM done %d -> %d pages", pages, after)
         return True
 
+    # -- HIST-1 visibility policy ------------------------------------------
+
+    def _hidden_tags(self) -> tuple[str, ...]:
+        """Foreign instance tags whose writer process is STILL ALIVE — the
+        only rows a filtered read must exclude (their collector
+        interleaves deltas with ours: the v3 corruption bug). Dead foreign
+        tags and untagged legacy rows are history and stay visible; our own
+        tag is never in this set. Recomputed when the DB's tag list changes
+        (a co-tenant that just started is hidden on the NEXT read, not one
+        TTL later) or after _VISIBLE_TTL_S (a writer that died re-enters
+        history within a bounded window). Caller must hold _lock."""
+        tags = frozenset(_distinct_tags(self._conn))
+        now = time.monotonic()
+        cached = self._alien_cache
+        if cached is not None and cached[0] == tags and cached[1] > now:
+            return cached[2]
+        hidden = []
+        for t in tags:
+            if t == self._own_instance:
+                continue
+            _keg, pid = _split_instance(t)
+            if pid is None or _pid_alive(pid):
+                hidden.append(t)      # live co-tenant or unprovable: hide
+        self._alien_cache = (tags, now + _VISIBLE_TTL_S, tuple(sorted(hidden)))
+        return self._alien_cache[2]
+
+    def visible_instances(self) -> str:
+        """Sentinel for the API layer: read under the HIST-1 visibility
+        policy (own rows + history, live co-tenants hidden). The store
+        computes the tag set itself — callers must not snapshot it."""
+        return VISIBLE_INSTANCES
+
+    def _instance_sql(self, instance: str | None) -> tuple[str, list]:
+        """(sql fragment, args) restricting a `samples` read to INSTANCE.
+        None: no filter (viewer/CLI browse — everything by design).
+        VISIBLE_INSTANCES: exclude live-alien writers (HIST-1).
+        Anything else: legacy exact match plus untagged rows, unchanged.
+        Caller must hold _lock (the visible branch probes the DB)."""
+        if instance is None:
+            return "", []
+        if instance == VISIBLE_INSTANCES:
+            hidden = self._hidden_tags()
+            if not hidden:
+                return "", []     # nobody to hide: own+dead+NULL is everything
+            # (own + dead + NULL visible) == NOT IN (live aliens)
+            ph = ",".join("?" * len(hidden))
+            return f" AND (instance IS NULL OR instance NOT IN ({ph}))", list(hidden)
+        return " AND (instance IS NULL OR instance=?)", [instance]
+
     # -- read side (API/viewer) -------------------------------------------
 
     def series(self, key: str, window_s: float, now: float | None = None,
                instance: str | None = None) -> list[dict]:
         """Samples for KEY over the window. INSTANCE (when given) restricts
-        the read to that exact writer's rows plus untagged legacy rows —
-        co-tenant collectors cannot poison the series (server_instance_id)."""
+        the read: an exact tag keeps that writer's rows plus untagged legacy
+        rows (co-tenant isolation, v3); the VISIBLE_INSTANCES sentinel keeps
+        history from dead writers too and hides only live co-tenants
+        (HIST-1). See _instance_sql."""
         t0 = (now or time.time()) - window_s
         with self._lock:
-            if instance is None:
-                cur = self._conn.execute(
-                    "SELECT ts, value FROM samples WHERE key=? AND ts>=? ORDER BY ts",
-                    (key, t0),
-                )
-            else:
-                cur = self._conn.execute(
-                    "SELECT ts, value FROM samples "
-                    "WHERE key=? AND ts>=? AND (instance IS NULL OR instance=?) "
-                    "ORDER BY ts",
-                    (key, t0, instance),
-                )
+            frag, args = self._instance_sql(instance)
+            cur = self._conn.execute(
+                "SELECT ts, value FROM samples WHERE key=? AND ts>=?" + frag
+                + " ORDER BY ts",
+                [key, t0] + args,
+            )
             return [{"ts": r[0], "v": r[1]} for r in cur.fetchall()]
 
     def latest(self, key: str, instance: str | None = None) -> dict | None:
         """Newest stored point for KEY (U11: live chart pushes read the
         collector's sample instead of re-deriving it client-side).
-        INSTANCE filtering works as in series(): the newest point of a
-        co-tenant must never drive this server's live line."""
+        INSTANCE filtering works as in series(). Under VISIBLE_INSTANCES a
+        hidden live co-tenant's newer point must never drive our live line,
+        so own-tag rows sort first and history only fills gaps (own writer
+        stops on restart; the newest own point then wins)."""
         with self._lock:
-            if instance is None:
-                row = self._conn.execute(
-                    "SELECT ts, value FROM samples WHERE key=? ORDER BY ts DESC LIMIT 1",
-                    (key,),
-                ).fetchone()
+            frag, args = self._instance_sql(instance)
+            # own rows (TRUE=1) first, then newest — history fills gaps only
+            order = " ORDER BY (instance IS NOT NULL" \
+                    " AND instance=?) DESC, ts DESC LIMIT 1" \
+                if instance == VISIBLE_INSTANCES else " ORDER BY ts DESC LIMIT 1"
+            q = "SELECT ts, value FROM samples WHERE key=?" + frag + order
+            if instance == VISIBLE_INSTANCES:
+                cur = self._conn.execute(q, [key] + args + [self._own_instance])
             else:
-                row = self._conn.execute(
-                    "SELECT ts, value FROM samples "
-                    "WHERE key=? AND (instance IS NULL OR instance=?) "
-                    "ORDER BY ts DESC LIMIT 1",
-                    (key, instance),
-                ).fetchone()
+                cur = self._conn.execute(q, [key] + args)
+            row = cur.fetchone()
         return {"ts": row[0], "v": row[1]} if row else None
 
     def recent_requests(self, limit: int = 200) -> list[dict]:
@@ -685,16 +817,17 @@ class MetricsStore:
         """Metric keys with stored samples in KEY LIKE PREFIX+'%' over the
         window. Discovery for series whose key names the client cannot know
         (per-model hot-cache keys carry the model id). INSTANCE filtering as
-        in series(): a co-tenant's model list must not leak into ours."""
+        in series(): under VISIBLE_INSTANCES a co-tenant's model list stays
+        out but drained models from dead sessions backfill (HIST-1)."""
         t0 = time.time() - window_s
         q = "SELECT DISTINCT key FROM samples WHERE key LIKE ? ESCAPE '\\' AND ts >= ?"
         args = [prefix.replace("\\", "\\\\").replace("%", "\\%")
                       .replace("_", "\\_") + "%", t0]
-        if instance is not None:
-            q += " AND (instance IS NULL OR instance=?)"
-            args.append(instance)
-        q += " ORDER BY key"
         with self._lock:
+            frag, extra = self._instance_sql(instance)
+            q += frag
+            args += extra
+            q += " ORDER BY key"
             return [r[0] for r in self._conn.execute(q, args).fetchall()]
 
     def request_by_id(self, request_id: str) -> dict | None:

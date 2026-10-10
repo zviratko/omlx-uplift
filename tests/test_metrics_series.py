@@ -54,6 +54,11 @@ class _FakeStore:
     def __init__(self, data):
         self._data = data
 
+    def visible_instances(self):
+        # the route only passes the sentinel through to series(); the
+        # policy itself is tested against a real MetricsStore below
+        return "visible"
+
     def series(self, key, window_s, now=None, instance=None):
         # instance filtering is the store's job (tested against a real
         # MetricsStore in test_samples_are_tagged_and_reads_filter_co_tenant)
@@ -164,7 +169,7 @@ def test_store_latest_returns_newest_point(tmp_path):
         s.close()
 
 
-# ---- co-tenant sample tagging (broken-graphs fix) -------------------------
+# ---- co-tenant sample tagging (broken-graphs fix) + HIST-1 history ---------
 
 def test_samples_are_tagged_and_reads_filter_co_tenant(tmp_path):
     """Two servers sharing ONE metrics DB must not poison each other's
@@ -190,6 +195,86 @@ def test_samples_are_tagged_and_reads_filter_co_tenant(tmp_path):
         assert [p["v"] for p in mine] == [1.0, 2.0]     # legacy visible, co-tenant not
         assert s.latest("k", instance=me) == {"ts": 20.0, "v": 2.0}
         assert s.latest("k") == {"ts": 30.0, "v": 99.0}
+    finally:
+        s.close()
+
+
+def test_split_instance_tags():
+    """Tag parsing: well-formed, missing delimiter, and unparseable PID all
+    degrade without raising (an unparseable tag can never be proven dead,
+    so the visibility policy keeps hiding its rows — the conservative leg
+    of the HIST-1 rule)."""
+    from omlx_uplift import store as st
+
+    assert st._split_instance("keg\x1f42") == ("keg", 42)
+    assert st._split_instance("no-delimiter") == ("no-delimiter", None)
+    assert st._split_instance("keg\x1fnot-a-pid") == ("keg", None)
+
+
+def test_visible_policy_restores_dead_session_history(tmp_path):
+    """HIST-1 (user: 'every time I upgrade uplift I lose all historical
+    data'): the exact-instance read filter hid ALL rows from previous
+    restarts and previous kegs because BOTH tag halves change. Under the
+    visible policy, own rows, untagged legacy rows and DEAD writers' rows
+    (old PID, old keg) stay; only foreign tags whose PID is ALIVE — the
+    real co-tenant corruption case — are hidden."""
+    from omlx_uplift import store as st
+
+    s = st.MetricsStore(path=tmp_path / "m.sqlite3")
+    try:
+        me = s._own_instance
+        dead_old_keg = "/old/Cellar/omlx/HEAD-aaa/omlx\x1f999999"  # PID gone
+        live_alien = f"/alien/keg\x1f1"                            # launchd: alive
+        malformed = "no-delimiter-tag"                             # unprovable
+        s._conn.execute("INSERT INTO samples(ts,key,value) VALUES(10,'k',1.0)")
+        s._conn.commit()
+        s.write_samples({"k": 2.0}, ts=20.0)                       # ours
+        for tag, ts, v in ((dead_old_keg, 30.0, 3.0),
+                           (live_alien, 40.0, 99.0),
+                           (malformed, 50.0, 98.0)):
+            s._conn.execute(
+                "INSERT INTO samples(ts,key,value,instance) VALUES(?,?,?,?)",
+                (ts, "k", v, tag))
+        s._conn.commit()
+
+        vis = s.series("k", 10_000, now=100.0, instance=s.visible_instances())
+        assert [p["v"] for p in vis] == [1.0, 2.0, 3.0]
+
+        # latest under the visible policy keeps its U11 contract: the live
+        # line is driven by THIS server's newest point, history only fills
+        # the gap when we have none (own rows sort first).
+        assert s.latest("k", instance=s.visible_instances()) == {"ts": 20.0, "v": 2.0}
+        s._conn.execute("DELETE FROM samples WHERE instance=?", (me,))
+        s._conn.commit()
+        assert s.latest("k", instance=s.visible_instances()) == {"ts": 30.0, "v": 3.0}
+
+        # key discovery follows the same policy (drained models from dead
+        # sessions backfill; live co-tenant keys stay out). NB:
+        # keys_with_prefix windows from REAL time (unlike series()' now=
+        # override), so these rows carry current timestamps.
+        now = time.time()
+        for tag, key in ((dead_old_keg, "hot.old"), (live_alien, "hot.alien")):
+            s._conn.execute(
+                "INSERT INTO samples(ts,key,value,instance) VALUES(?,?,?,?)",
+                (now, key, 1.0, tag))
+        s._conn.commit()
+        keys = s.keys_with_prefix("hot.", 10_000, instance=s.visible_instances())
+        assert keys == ["hot.old"]
+    finally:
+        s.close()
+
+
+def test_visible_policy_with_no_writers_is_unfiltered(tmp_path):
+    """Fresh DB (or single-server install): zero live aliens => the visible
+    sentinel must behave exactly like no filter at all."""
+    from omlx_uplift import store as st
+
+    s = st.MetricsStore(path=tmp_path / "m.sqlite3")
+    try:
+        s.write_samples({"k": 1.0}, ts=10.0)
+        vis = s.series("k", 10_000, now=100.0, instance=s.visible_instances())
+        plain = s.series("k", 10_000, now=100.0)
+        assert vis == plain == [{"ts": 10.0, "v": 1.0}]
     finally:
         s.close()
 
