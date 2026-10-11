@@ -633,6 +633,8 @@
  "uplift.se.divergence.sync.confirm": "确认 — 同步 ",
  "uplift.se.divergence.synced": "基础模型的加载时设置已同步到 ",
  "uplift.se.divergence.sync.none": "无需同步 — 配置文件已与基础模型一致",
+ "uplift.se.eff.global_default": "全局默认值",
+ "uplift.se.eff.model_config": "模型配置",
  "uplift.se.enable_thinking": "启用思考",
  "uplift.se.force_sampling": "强制采样",
  "uplift.se.guided_grammar": "引导语法",

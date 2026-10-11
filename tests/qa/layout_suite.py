@@ -341,6 +341,45 @@ class Suite:
         # BOTH clean and dirty states by design — scroll width equality)
         self.close()
 
+    _EFF = """(() => {
+      const f = document.querySelector('#se-fields');
+      const ph = k => { const e = f.querySelector('[data-key="' + k + '"] input');
+        return e ? {v: e.value, ph: e.placeholder} : null; };
+      return JSON.stringify({
+        temperature: ph('temperature'), top_p: ph('top_p'),
+        min_p: ph('min_p'), ctx: ph('max_context_window'),
+        maxtok: ph('max_tokens'), ttl: ph('ttl_seconds')});
+    })()"""
+
+    def t_eff(self):
+        """EFF-1: empty numeric settings show the server-reported fallback
+        in the dim placeholder; keys the server does NOT report keep the
+        bare '(default)'; a stored value never shows a placeholder claim."""
+        import re
+        ok = re.compile(r"^(\(default\)|\d+(\.\d+)? · (global default|model config)"
+                        r"|Pinned|No TTL|Global default: \d+s)$")
+        self.open()
+        d = json.loads(self._eval(self._EFF))
+        bad = []
+        for k in ("temperature", "top_p", "min_p", "ctx", "maxtok", "ttl"):
+            e = d.get(k)
+            if e is None:
+                continue                      # key absent on this model family
+            if e["v"] != "":
+                if e["ph"]: bad.append("%s: filled but ph=%r" % (k, e["ph"]))
+            elif not ok.match(e["ph"] or ""):
+                bad.append("%s: empty but ph=%r" % (k, e["ph"]))
+        self.check("eff placeholders honest", not bad, "; ".join(bad))
+        # min_p / presence are NOT server-reported -> bare (default) only
+        mp = d.get("min_p")
+        if mp and mp["v"] == "":
+            self.check("unreported keys keep bare (default)",
+                       mp["ph"] == "(default)", "ph=%r" % mp["ph"])
+        else:
+            self.check("unreported keys keep bare (default)", None,
+                       "skip: min_p filled or absent")
+        self.close()
+
     def t_gate(self):
         """Grammar well must track its master toggle BOTH ways: inert
         while off, live while on. (v1 false-FAIL: it clicked 'off' on an
@@ -618,6 +657,7 @@ class Suite:
                        "be vacuously green")
             return self.report()
         self.t_rail()
+        self.t_eff()
         for w in WIDTHS:
             self._width(w)
             try:

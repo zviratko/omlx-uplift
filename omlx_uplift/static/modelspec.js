@@ -859,6 +859,47 @@
         return out;
     }
 
+    /* EFF-1 (upstream #4416 era): the value a field FALLS BACK to when the
+       model has none stored — pure re-export of what the server already
+       reports (admin model entry + global-settings). Never a JS-side
+       re-implementation of engine logic: keys the API does not report
+       (min_p, presence_penalty) return null and keep the bare '(default)'
+       placeholder. Returns {kind, ...payload} so the host localizes. */
+    function effDefault(key, model, gs) {
+        const s = (gs && gs.sampling) || {};
+        // The engine has an OCR defaults tier between model settings and
+        // global that the API does NOT expose. #4416 seeds
+        // temperature/top_p/top_k/repetition_penalty into stored settings at
+        // discovery (SAMPLING_SETTING_KEYS), so those never reach the OCR
+        // tier — but max_tokens is NOT seeded, so an OCR model can be
+        // silently clamped there. Claim nothing for max_tokens on OCR
+        // models; the bare '(default)' placeholder stays.
+        const ocr = ((model && model.config_model_type) || '')
+            .toLowerCase().replace(/-/g, '_').includes('ocr');
+        if (key === 'max_context_window') {
+            const native = model && model.model_context_length;
+            const policy = Number(s.max_context_window_policy) || 0;
+            if (native != null)
+                return { kind: 'model_config',
+                         value: policy > 0 ? Math.min(native, policy) : native };
+            if (s.max_context_window != null)
+                return { kind: 'global_default', value: s.max_context_window };
+            return null;
+        }
+        if (key === 'max_tokens')
+            return (!ocr && s.max_tokens != null)
+                ? { kind: 'global_default', value: s.max_tokens } : null;
+        if (key === 'ttl_seconds') {
+            if (model && model.pinned) return { kind: 'pinned' };
+            const t = gs && gs.idle_timeout && gs.idle_timeout.idle_timeout_seconds;
+            return t ? { kind: 'global_ttl', seconds: t } : { kind: 'no_ttl' };
+        }
+        if (['temperature', 'top_p', 'top_k', 'repetition_penalty'].includes(key)
+                && s[key] != null)
+            return { kind: 'global_default', value: s[key] };
+        return null;    // not reported by the server — no claim made
+    }
+
     return { DIFFUSION_CONFIG_MODEL_TYPES, DIFFUSION_UNSUPPORTED_PROFILE_FIELDS,
              DIFFUSION_UNSUPPORTED_CT_KWARGS, REASONING_EFFORT_PRESETS,
              MODEL_TYPE_OPTIONS, VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES,
@@ -870,6 +911,7 @@
              buildState, validate, buildPayload, adaptToServerPayload,
              adaptToServerSettings,
              runtimeSignature, runtimeDiff, sigMasterKey, RUNTIME_SETTING_KEYS,
+             effDefault,
              isDflashDraftModel, isVlmMtpDraftModel, isSpecPrefillDraftModel,
              specprefillCandidates, dflashCandidates, vlmMtpDrafters,
              profileRecord, GiB };

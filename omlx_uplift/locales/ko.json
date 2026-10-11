@@ -648,6 +648,8 @@
  "uplift.se.divergence.sync.confirm": "확인 — 동기화 ",
  "uplift.se.divergence.synced": "기본 로딩 설정을 다음 프로필에 동기화했습니다: ",
  "uplift.se.divergence.sync.none": "동기화할 것 없음 — 프로필이 이미 기본과 일치",
+ "uplift.se.eff.global_default": "전역 기본값",
+ "uplift.se.eff.model_config": "모델 구성",
  "uplift.se.enable_thinking": "Thinking 모드",
  "uplift.se.force_sampling": "강제 샘플링",
  "uplift.se.guided_grammar": "가이드 문법",

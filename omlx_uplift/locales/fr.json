@@ -637,6 +637,8 @@
  "uplift.se.divergence.sync.confirm": "CONFIRMER — synchroniser ",
  "uplift.se.divergence.synced": "Réglages de chargement de la base synchronisés vers ",
  "uplift.se.divergence.sync.none": "Rien à synchroniser — les profils correspondent déjà à la base",
+ "uplift.se.eff.global_default": "valeur par défaut globale",
+ "uplift.se.eff.model_config": "configuration du modèle",
  "uplift.se.enable_thinking": "Activer la réflexion",
  "uplift.se.force_sampling": "Forcer l'échantillonnage",
  "uplift.se.guided_grammar": "Grammaire guidée",

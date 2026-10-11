@@ -91,6 +91,61 @@ function seModelIsLoaded() {
     return !!(seFormModel && !seFormModel._missing &&
               (seFormModel.loaded || seFormModel.is_loading));
 }
+/* ---- EFF-1: effective (fallback) values -------------------------------
+   An EMPTY settings field is not "nothing" — the server falls back to a
+   reported default (global sampling section, the model's native context,
+   the global idle timeout / pin). Classic shows this for TTL only; uplift
+   shows it for every key the API actually reports, as the input's dim
+   placeholder. Values come from ONE global-settings GET per editor open
+   (cached across opens) — modelspec.effDefault re-exports the tiers, this
+   host only localizes and refreshes the placeholder live while typing.
+   Keys the server does not report (min_p, presence_penalty) keep the bare
+   '(default)'; nothing is ever invented here. */
+let SE_GS = null;            // cached global-settings payload
+let SE_GS_FOR = null;        // model id the cache was fetched for (pin/native)
+
+async function seLoadGs() {
+    try {
+        SE_GS = await MM_GLUE.fetchJson(`${API}/admin/api/global-settings`);
+    } catch (_) { SE_GS = null; }
+}
+
+function seEffHint(key) {
+    if (seFormModel && seFormModel._template) return '';   // bundles: no server context
+    const d = window.UpliftModelSpec.effDefault(key, seFormModel, SE_GS);
+    if (!d) return '';
+    if (d.kind === 'pinned')
+        return C.tf('modal.model_settings.ttl_pinned', 'Pinned');
+    if (d.kind === 'no_ttl')
+        return C.tf('modal.model_settings.ttl_no_ttl', 'No TTL');
+    if (d.kind === 'global_ttl')
+        return C.tf('modal.model_settings.ttl_global_fallback', 'Global default: {seconds}s')
+            .replace('{seconds}', d.seconds);
+    const val = String(d.value);
+    const tag = d.kind === 'model_config'
+        ? C.tf('uplift.se.eff.model_config', 'model config')
+        : C.tf('uplift.se.eff.global_default', 'global default');
+    return val + ' \u00b7 ' + tag;
+}
+
+/* The placeholder IS the effective-value display: empty input shows the
+   fallback, any stored/typed value hides it (native placeholder behavior).
+   On a profile tab an empty field inherits the BASE first — when the base
+   has a value that is the honest placeholder; the fallback only surfaces
+   when the base is empty too (same precedence the widget uses at build). */
+function seEffLive(key, input) {
+    // number widgets ONLY: text/checkbox inputs own their placeholder
+    if (!input || input.type !== 'number') return;
+    const v = seValues[key];
+    if (v !== null && v !== undefined && v !== '') { input.placeholder = ''; return; }
+    const bv = seBaseVals ? seBaseVals[key] : undefined;
+    if (seTab() && seTab().id !== 'base' && bv != null && bv !== '') {
+        input.placeholder = bv + ' (inherited)';
+        return;
+    }
+    input.placeholder = seEffHint(key) || '(default)';
+}
+
 function seUpdateSaveBtn() {
     const b = document.getElementById('se-save'); if (!b) return;
     const rb = document.getElementById('se-restart');
@@ -277,6 +332,7 @@ function seBind(kind, key, opts) {
                 display: MM_GLUE.gsDisplay });
             if (changed) t && t.dirty.add(key); else t && t.dirty.delete(key);
         }
+        seEffLive(key, input);   // EFF-1: typed value hides the fallback hint
         seUpdateSaveBtn();
         if (opts && opts.onChange) opts.onChange(seValues);
         // UX-2: a master toggle flips its gated subtree live — no form
@@ -313,6 +369,7 @@ function seBind(kind, key, opts) {
             isSecret: MM_GLUE.SECRET_KEYS.has(key),
             isRestart: seIsRuntimeKey(key),
             display: MM_GLUE.gsDisplay });
+        seEffLive(key, input);   // EFF-1: reverting to empty re-shows the hint
         // UX-2: a revert of a master switch must re-grey its gated family
         seRefreshGates(document.getElementById('se-fields') || document);
         seUpdateSaveBtn();
@@ -787,7 +844,8 @@ function renderEditorFields(container) {
             addp(seValues.reasoning_parser || '');
             g.append(seBind('select', 'reasoning_parser', { label: 'Reasoning Parser', options: rp }));
         }
-        g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1 }));
+        g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1,
+            effHint: seEffHint('ttl_seconds') }));
         if (m.embedding_audio_supported) {
             seFam(g, 'embedding_audio_enabled',
                 seBind('bool', 'embedding_audio_enabled', { label: 'Audio Input',
@@ -834,14 +892,17 @@ function renderEditorFields(container) {
                     seValues.enable_thinking = sel.value === '' ? null : sel.value === 'true'; });
             }
     g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1,
+        effHint: seEffHint('ttl_seconds'),
         hint: 'Unloads the model automatically after it stays idle this long.' }));
 
     /* ---- generation defaults: context, length, sampling (classic ms-generation) ---- */
     section('Generation Defaults');
     g = grid();
     g.append(seBind('number', 'max_context_window', { label: 'Context Window', step: 1,
+        effHint: seEffHint('max_context_window'),
         hint: 'Sets the total context size the model can handle. Longer prompts are rejected.' }));
     g.append(seBind('number', 'max_tokens', { label: 'Max Tokens', step: 1,
+        effHint: seEffHint('max_tokens'),
         hint: 'Limits how many tokens the model generates in one turn when the request does not set max_tokens.' }));
     const sampling = [
         ['temperature', 0, 2, 0.05, 'Temperature'], ['top_p', 0, 1, 0.05, 'Top P'],
@@ -850,10 +911,15 @@ function renderEditorFields(container) {
     const inheritOn = !seIsBaseTab();
     if (!S.isDiffusion(m)) for (const [k, mn, mx, st, lab] of sampling) {
         if (inheritOn) {
-            g.append(seBind('inheritable-number', k, { label: lab, min: mn, max: mx, step: st }));
+            // EFF-1: an empty inheritable field shows its BASE value as
+            // '(inherited)' (richer than any fallback); the fallback hint
+            // only reaches base-tab empties via effHint below
+            g.append(seBind('inheritable-number', k, { label: lab, min: mn, max: mx, step: st,
+                effHint: seEffHint(k) }));
             continue;
         }
-        g.append(seBind('number', k, { label: lab, min: mn, max: mx, step: st }));
+        g.append(seBind('number', k, { label: lab, min: mn, max: mx, step: st,
+            effHint: seEffHint(k) }));
     }
     g.append(seBind('bool', 'force_sampling', { label: 'Force Sampling',
         hint: 'Override request sampling parameters with configured values' }));
@@ -1501,6 +1567,9 @@ async function openEditor(model, profileName, templateName) {
     } catch (_) { entry = null; }
     seFormModel = entry || { id: model, _missing: !entry };
     seBaseRaw = JSON.parse(JSON.stringify(settings));
+    // EFF-1: one global-settings read per editor open feeds the
+    // dim effective-value placeholders (cheap, cache-busted on model change)
+    if (SE_GS_FOR !== model) { SE_GS_FOR = model; await seLoadGs(); }
     // U41 phase-1 survivors: settings already stored but not yet applied by
     // a reload. They are SAVED, so they seed the form baseline (not dirty)
     // and get an amber pending-restart mark until phase 2 consumes them.

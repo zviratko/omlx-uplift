@@ -633,6 +633,8 @@
  "uplift.se.divergence.sync.confirm": "CONFIRM — sync ",
  "uplift.se.divergence.synced": "Base load-time settings synced to ",
  "uplift.se.divergence.sync.none": "Nothing to sync — profiles already match the base",
+ "uplift.se.eff.global_default": "global default",
+ "uplift.se.eff.model_config": "model config",
  "uplift.se.enable_thinking": "Enable Thinking",
  "uplift.se.force_sampling": "Force Sampling",
  "uplift.se.guided_grammar": "Guided Grammar",

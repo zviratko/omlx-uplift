@@ -633,6 +633,8 @@
  "uplift.se.divergence.sync.confirm": "ПОДТВЕРДИТЬ — синхр. ",
  "uplift.se.divergence.synced": "Настройки загрузки базы синхронизированы в ",
  "uplift.se.divergence.sync.none": "Нечего синхронизировать — профили уже совпадают с базой",
+ "uplift.se.eff.global_default": "глобальное значение по умолчанию",
+ "uplift.se.eff.model_config": "конфигурация модели",
  "uplift.se.enable_thinking": "Включить мышление",
  "uplift.se.force_sampling": "Принудительная выборка",
  "uplift.se.guided_grammar": "Управляемая грамматика",

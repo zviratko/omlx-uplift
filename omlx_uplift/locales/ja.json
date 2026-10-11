@@ -633,6 +633,8 @@
  "uplift.se.divergence.sync.confirm": "確認 — 同期 ",
  "uplift.se.divergence.synced": "ベースのロード時設定を次のプロファイルに同期しました: ",
  "uplift.se.divergence.sync.none": "同期必要なし — プロファイルはすでにベースと一致",
+ "uplift.se.eff.global_default": "グローバル既定値",
+ "uplift.se.eff.model_config": "モデル設定",
  "uplift.se.enable_thinking": "思考モード",
  "uplift.se.force_sampling": "強制サンプリング",
  "uplift.se.guided_grammar": "誘導文法",

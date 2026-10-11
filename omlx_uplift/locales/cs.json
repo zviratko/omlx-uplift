@@ -633,6 +633,8 @@
  "uplift.se.divergence.sync.confirm": "POTVRDIT — synchronizovat ",
  "uplift.se.divergence.synced": "Nastavení ve chvíli načtení ze základu synchronizována do ",
  "uplift.se.divergence.sync.none": "Není co synchronizovat — profily již odpovídají základu",
+ "uplift.se.eff.global_default": "globální výchozí",
+ "uplift.se.eff.model_config": "konfigurace modelu",
  "uplift.se.enable_thinking": "Povolit přemýšlení",
  "uplift.se.force_sampling": "Vynutit vzorkování",
  "uplift.se.guided_grammar": "Guided grammar",
