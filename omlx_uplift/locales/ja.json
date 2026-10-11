@@ -925,5 +925,13 @@
  "uplift.voices.transcribe_empty": "音声が検出されませんでした",
  "uplift.voices.timeout": "サーバーが{n}秒以内に応答しませんでした——モデルの読み込みが停止している可能性があります。リクエストを中断しました（サーバー再起動で解消します）",
  "uplift.dl.queued_flash": "ダウンロードをキューに入れ✓",
- "uplift.dl.queue_fail": "キューに入れませんでした"
+ "uplift.dl.queue_fail": "キューに入れませんでした",
+ "uplift.voices.edit": "編集",
+ "uplift.voices.edit_title": "ボイスを編集",
+ "uplift.voices.edit_hint": "モデルを変更すると同じボイスを別モデルで再クローンできます。文字起こしの編集や新しい参考音声のアップロードも可能です。",
+ "uplift.voices.saveas_hint": "保存すると同じ参考音声で新しいボイスが作成されます——保存済みのものは変更されません。",
+ "uplift.voices.clip_keep": "空欄のままなら現在の音声を保持",
+ "uplift.voices.save_changes": "変更を保存",
+ "uplift.voices.saved_as": "ボイスをコピーとして保存しました",
+ "uplift.voices.save_as": "別名で保存…"
 }

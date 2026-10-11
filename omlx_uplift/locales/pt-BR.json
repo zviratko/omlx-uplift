@@ -926,5 +926,13 @@
  "uplift.voices.transcribe_empty": "o modelo não detectou fala",
  "uplift.voices.timeout": "o servidor não respondeu em {n}s — o carregamento do modelo pode ter travado; requisição abandonada (reinicie o servidor)",
  "uplift.dl.queued_flash": "Download na fila ✓",
- "uplift.dl.queue_fail": "falha ao enfileirar"
+ "uplift.dl.queue_fail": "falha ao enfileirar",
+ "uplift.voices.edit": "EDITAR",
+ "uplift.voices.edit_title": "EDITAR VOZ",
+ "uplift.voices.edit_hint": "Altere o modelo para clonar novamente a MESMA voz, edite a transcrição ou envie um novo clipe de referência.",
+ "uplift.voices.saveas_hint": "Salvar cria uma NOVA voz com o mesmo clipe — nada armazenado é modificado.",
+ "uplift.voices.clip_keep": "deixe vazio para manter o clipe atual",
+ "uplift.voices.save_changes": "SALVAR ALTERAÇÕES",
+ "uplift.voices.saved_as": "Voz salva como cópia",
+ "uplift.voices.save_as": "SALVAR COMO…"
 }

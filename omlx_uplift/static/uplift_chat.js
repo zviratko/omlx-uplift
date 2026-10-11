@@ -1244,7 +1244,12 @@ function syncVoiceSelect() {
     for (var i = 0; i < (_voicesCache || []).length; i++) {
         var o = document.createElement('option');
         o.value = _voicesCache[i].id;
-        o.textContent = _voicesCache[i].name;
+        // VOICE-4 (user): read-aloud voices show as 'model:voice' — the
+        // same composite the speech routes accept as an alias, and the
+        // Voices page uses (Uplift.voices.voiceLabel is the single impl)
+        var V = VOI();
+        o.textContent = V && V.voiceLabel
+            ? V.voiceLabel(_voicesCache[i]) : _voicesCache[i].name;
         sel.append(o);
     }
     if (!(_voicesCache || []).length) {

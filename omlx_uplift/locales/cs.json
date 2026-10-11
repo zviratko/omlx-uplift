@@ -922,5 +922,13 @@
  "uplift.voices.transcribe_empty": "model nerozeznal žádnou řeč",
  "uplift.voices.timeout": "server neodpověděl do {n} s — načtení modelu možná uvízlo; požadavek byl zrušen (vyčistit restartem serveru)",
  "uplift.dl.queued_flash": "Stáhlení ve frontě ✓",
- "uplift.dl.queue_fail": "zařazení do fronty selhalo"
+ "uplift.dl.queue_fail": "zařazení do fronty selhalo",
+ "uplift.voices.edit": "UPRAVIT",
+ "uplift.voices.edit_title": "UPRAVIT HLAS",
+ "uplift.voices.edit_hint": "Změnou modelu klonujete STEJNÝ hlas jinam, upravte přepis nebo nahrajte nový referenční vzorek.",
+ "uplift.voices.saveas_hint": "Uložením vznikne NOVÝ hlas se stejným vzorkem — nic uloženého se nezmění.",
+ "uplift.voices.clip_keep": "nechte prázdné pro zachování současného vzorku",
+ "uplift.voices.save_changes": "ULOŽIT ZMĚNY",
+ "uplift.voices.saved_as": "Hlas uložen jako kopie",
+ "uplift.voices.save_as": "ULOŽIT JAKO…"
 }

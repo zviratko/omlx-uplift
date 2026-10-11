@@ -2019,6 +2019,11 @@ label.se-row.pending-restart > .se-ctl > select {
 .vc-add { margin-bottom: 12px; }
 .vc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px;
     margin-top: 8px; }
+/* VOICE-4: one saved voice = row + its SAVE AS… copy action on the same
+   line; the row keeps its flex-1 so delete/PLAY stay anchored right */
+.vc-rowwrap { display: flex; align-items: center; gap: 8px; }
+.vc-rowwrap > .vc-row { flex: 1 1 auto; min-width: 0; }
+.vc-copy { flex: 0 0 auto; }
 .vc-field { display: flex; flex-direction: column; gap: 4px;
     font: 500 10px/1 var(--mono); letter-spacing: .08em; color: var(--dim);
     text-transform: uppercase; }

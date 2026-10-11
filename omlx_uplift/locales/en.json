@@ -922,5 +922,13 @@
  "uplift.voices.transcribe_empty": "the model heard no speech",
  "uplift.voices.timeout": "the server did not answer in {n}s — model load may be stuck; request abandoned (restart the server to clear it)",
  "uplift.dl.queued_flash": "Download queued ✓",
- "uplift.dl.queue_fail": "queue failed"
+ "uplift.dl.queue_fail": "queue failed",
+ "uplift.voices.edit": "EDIT",
+ "uplift.voices.edit_title": "EDIT VOICE",
+ "uplift.voices.edit_hint": "Change the model to re-clone the SAME voice elsewhere, edit the transcript, or upload a new reference clip.",
+ "uplift.voices.saveas_hint": "Saving creates a NEW voice with the same reference clip — nothing stored is modified.",
+ "uplift.voices.clip_keep": "leave empty to keep the current clip",
+ "uplift.voices.save_changes": "SAVE CHANGES",
+ "uplift.voices.saved_as": "Voice saved as a copy",
+ "uplift.voices.save_as": "SAVE AS…"
 }

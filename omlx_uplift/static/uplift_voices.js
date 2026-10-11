@@ -51,6 +51,14 @@ function sttModels() {
         (m.engine_type || m.model_type) === 'audio_stt');
 }
 
+/* VOICE-4 (user): saved voices present as 'model:voice' EVERYWHERE the
+   user picks or sees one (Voices rows, chat selector) — the exact
+   composite the speech routes accept as an alias (VOICE-1c parses it
+   back), so what you read is literally what you could send. */
+function voiceLabel(v) {
+    return (v.model ? v.model + ':' : '') + v.name;
+}
+
 function stopPlayback() {
     if (_player) { _player.pause(); _player = null; }
     if (_playerUrl) { URL.revokeObjectURL(_playerUrl); _playerUrl = null; }
@@ -169,15 +177,14 @@ function voiceRow(v) {
     row.className = 'urow vc-row';
     const lab = document.createElement('div');
     lab.className = 'vc-name';
-    lab.textContent = v.name;
+    lab.textContent = voiceLabel(v);
     const sub = document.createElement('div');
     sub.className = 'vc-sub';
     // fmtBytes floors at MiB — reference clips are ~100 KB and would all
     // read '0 MiB'; show KiB under a MiB, MiB above (user size-honesty)
     const size = v.ref_bytes ? (v.ref_bytes < 1048576
         ? Math.round(v.ref_bytes / 1024) + ' KiB' : C.fmtBytes(v.ref_bytes)) : '—';
-    sub.textContent = v.model + ' · ' +
-        tf('uplift.voices.clip', 'clip') + ' ' + size;
+    sub.textContent = tf('uplift.voices.clip', 'clip') + ' ' + size;
     sub.title = v.ref_text || '';
     lab.append(sub);
     const act = document.createElement('div');
@@ -200,6 +207,14 @@ function voiceRow(v) {
             D.toast(String(e && e.message || e), 'error');
         }
     };
+    const edit = document.createElement('button');
+    edit.type = 'button'; edit.className = 'se-btn';
+    edit.textContent = tf('uplift.voices.edit', 'EDIT');
+    edit.onclick = () => {
+        _editing = v.id;
+        window.scrollTo(0, 0);
+        renderVoices();
+    };
     const del = document.createElement('button');
     del.type = 'button'; del.className = 'se-btn danger';
     del.textContent = tf('uplift.voices.delete', 'DELETE');
@@ -215,23 +230,45 @@ function voiceRow(v) {
             renderVoices();
         } catch (e) { D.toast(String(e && e.message || e), 'error'); }
     };
-    act.append(play, del);
+    act.append(play, edit, del);
     row.append(lab, act);
     return row;
 }
 
-function addForm(models, sttSelf) {
+let _editing = null;      // voice id while the form edits an existing one
+let _saveAs = null;       // voice id whose clip feeds a SAVE-AS copy
+
+function voiceForm(models, sttSelf) {
+    const editing = _editing
+        ? _voices.find(x => x.id === _editing) || null : null;
+    // modes: null = ADD (new clip), 'edit' = mutate in place,
+    // 'saveas' = new voice reusing another voice's clip (the 'clone it
+    // onto a different model' flow — no audio re-upload)
+    const saveAs = !editing && _saveAs
+        ? _voices.find(x => x.id === _saveAs) || null : null;
+    const mode = editing ? 'edit' : (saveAs ? 'saveas' : 'add');
+    const src = editing || saveAs;
     const box = document.createElement('div');
     box.className = 'mk-box vc-add';
     const head = document.createElement('div');
     head.className = 'mk-title';
-    head.textContent = tf('uplift.voices.add_title', 'ADD VOICE');
+    head.textContent = mode === 'edit'
+        ? tf('uplift.voices.edit_title', 'EDIT VOICE')
+        : tf('uplift.voices.add_title', 'ADD VOICE');
     const hint = document.createElement('div');
     hint.className = 'mk-desc';
-    hint.textContent = tf('uplift.voices.add_hint',
-        'Upload a short reference clip (a few seconds of clean speech) and '
-        + 'type exactly what it says. The TTS model copies that speaking '
-        + 'style for any text you send to this voice.');
+    hint.textContent = mode === 'edit'
+        ? tf('uplift.voices.edit_hint',
+            'Change the model to re-clone the SAME voice elsewhere, edit '
+            + 'the transcript, or upload a new reference clip.')
+        : mode === 'saveas'
+        ? tf('uplift.voices.saveas_hint',
+            'Saving creates a NEW voice with the same reference clip — '
+            + 'nothing stored is modified.')
+        : tf('uplift.voices.add_hint',
+            'Upload a short reference clip (a few seconds of clean speech) '
+            + 'and type exactly what it says. The TTS model copies that '
+            + 'speaking style for any text you send to this voice.');
     const grid = document.createElement('div');
     grid.className = 'vc-grid';
     function field(label, ctl) {
@@ -254,13 +291,29 @@ function addForm(models, sttSelf) {
             'no TTS model installed');
         modelS.append(o); modelS.disabled = true;
     }
+    // a stored voice's model may not be in the catalog anymore (deleted
+    // after download) — keep the select honest by adding it back
+    if (src && models.length && !models.some(m => m.id === src.model)) {
+        const o = document.createElement('option');
+        o.value = src.model; o.textContent = src.model; modelS.append(o);
+    }
     const fileI = document.createElement('input');
     fileI.type = 'file'; fileI.accept = AUDIO_EXTS.map(e => '.' + e).join(',');
+    if (mode !== 'add') {
+        fileI.placeholder = '';
+        fileI.title = tf('uplift.voices.clip_keep',
+            'leave empty to keep the current clip');
+    }
     const refT = document.createElement('textarea');
     refT.rows = 2;
     refT.placeholder = tf('uplift.voices.ref_text_ph',
         'Transcript of the reference clip — exactly what is said in it.');
+    if (src) { nameI.value = src.name; modelS.value = src.model;
+               refT.value = src.ref_text || ''; }
+    if (saveAs) nameI.value = saveAs.name + ' 2';   // a copy, not a clash
     let file = null, b64 = '';
+    // hasClip: an uploaded file now, OR a stored clip behind the edit
+    const hasClip = () => !!b64 || (mode !== 'add' && !!src && !!src.ref_bytes);
     // VOICE-2: AUTO-TRANSCRIBE = model picker + button beside the field.
     // Whisper runs locally in seconds; the result only FILLS the textarea
     // — the user confirms it, because the clone quality lives in the
@@ -340,40 +393,86 @@ function addForm(models, sttSelf) {
     prevB.type = 'button'; prevB.className = 'se-btn';
     prevB.textContent = tf('uplift.voices.preview', 'PREVIEW');
     prevB.onclick = async () => {
-        if (!file || !b64) return D.toast(
+        if (!hasClip()) return D.toast(
             tf('uplift.voices.need_clip', 'pick a reference clip first'), 'error');
         if (!refT.value.trim()) return D.toast(
             tf('uplift.voices.need_ref_text', 'type the reference transcript'), 'error');
         prevB.disabled = true;
         try {
-            const r = await speechJson('/voices/preview', {
-                model: modelS.value, ref_audio_b64: b64, ref_name: file.name,
-                ref_text: refT.value.trim(),
-                input: tf('uplift.voices.sample_text',
-                          'Hello! This is how I sound.') });
+            let r;
+            if (b64 || mode === 'add') {
+                r = await speechJson('/voices/preview', {
+                    model: modelS.value, ref_audio_b64: b64,
+                    ref_name: (file && file.name) || 'r.wav',
+                    ref_text: refT.value.trim(),
+                    input: tf('uplift.voices.sample_text',
+                              'Hello! This is how I sound.') });
+            } else {
+                // edit without a new clip: the STORED clip speaks, the
+                // typed transcript overrides at synth time — exactly the
+                // sentence SAVE would store (server ref_text override)
+                r = await speechJson('/voices/speech', {
+                    voice: editing.id, model: modelS.value,
+                    ref_text: refT.value.trim(),
+                    input: tf('uplift.voices.sample_text',
+                              'Hello! This is how I sound.') });
+            }
             await playBlob(r, prevB);
         } catch (e) { D.toast(String(e && e.message || e), 'error'); }
         prevB.disabled = false;
     };
     const addB = document.createElement('button');
     addB.type = 'button'; addB.className = 'se-btn savebtn';
-    addB.textContent = tf('uplift.voices.save', 'SAVE VOICE');
+    addB.textContent = mode === 'edit'
+        ? tf('uplift.voices.save_changes', 'SAVE CHANGES')
+        : tf('uplift.voices.save', 'SAVE VOICE');
     addB.onclick = async () => {
-        if (!nameI.value.trim() || !modelS.value || !b64 || !refT.value.trim())
+        const nm = nameI.value.trim();
+        if (!nm || !modelS.value || !refT.value.trim() || !hasClip())
             return D.toast(tf('uplift.voices.need_all',
                 'name, model, clip and transcript are all required'), 'error');
         addB.disabled = true;
         try {
-            await D.postJson(`${VAPI}/voices`,
-                { name: nameI.value.trim(), model: modelS.value,
-                  ref_audio_b64: b64, ref_name: file.name,
-                  ref_text: refT.value.trim() });
-            D.toast(tf('uplift.voices.saved', 'Voice saved') + ': ' + nameI.value.trim());
+            if (mode === 'edit') {
+                const body = { name: nm, model: modelS.value,
+                               ref_text: refT.value.trim() };
+                // carry fields the form does not expose: the server's
+                // _sanitize pops whatever a PUT omits, and language/speed
+                // CAN exist on API-created voices — edit must not lose them
+                if (editing.language) body.language = editing.language;
+                if (editing.speed) body.speed = editing.speed;
+                if (b64) { body.ref_audio_b64 = b64; body.ref_name = file.name; }
+                await D.putJson(`${VAPI}/voices/${encodeURIComponent(editing.id)}`,
+                    body);
+                D.toast(tf('uplift.voices.saved', 'Voice saved') + ': '
+                        + nm + ' (' + modelS.value + ')');
+            } else {
+                const body = { name: nm, model: modelS.value,
+                               ref_text: refT.value.trim() };
+                // a COPY keeps the source's non-rendered fields too
+                if (saveAs && saveAs.language) body.language = saveAs.language;
+                if (saveAs && saveAs.speed) body.speed = saveAs.speed;
+                if (b64) { body.ref_audio_b64 = b64; body.ref_name = file.name; }
+                else if (saveAs) body.from_voice = saveAs.id;
+                await D.postJson(`${VAPI}/voices`, body);
+                D.toast((saveAs
+                        ? tf('uplift.voices.saved_as', 'Voice saved as a copy')
+                        : tf('uplift.voices.saved', 'Voice saved'))
+                        + ': ' + nm + ' (' + modelS.value + ')');
+            }
+            _editing = null; _saveAs = null;
             renderVoices();
         } catch (e) { D.toast(String(e && e.message || e), 'error'); }
         addB.disabled = false;
     };
     acts.append(prevB, addB);
+    if (mode !== 'add') {
+        const cx = document.createElement('button');
+        cx.type = 'button'; cx.className = 'se-btn';
+        cx.textContent = C.tf('uplift.layout.cancel', 'Cancel');
+        cx.onclick = () => { _editing = null; _saveAs = null; renderVoices(); };
+        acts.append(cx);
+    }
     if (!models.length) {
         const link = document.createElement('a');
         link.href = '#models/downloader'; link.className = 'vc-dl';
@@ -411,11 +510,25 @@ async function renderVoices() {
     } else if (!models.length && _modelsSelf) {
         models = _modelsSelf;
     }
-    host.append(addForm(models, _sttSelf));
+    host.append(voiceForm(models, _sttSelf));
     const list = document.createElement('div');
     list.className = 'vc-list';
     if (_voices.length) {
-        for (const v of _voices) list.append(voiceRow(v));
+        for (const v of _voices) {
+            if (_saveAs && _saveAs === v.id) { list.append(voiceRow(v)); continue; }
+            const holder = document.createElement('div');
+            holder.className = 'vc-rowwrap';
+            holder.append(voiceRow(v));
+            // 'save it onto a DIFFERENT model' = a NEW voice reusing this
+            // clip (from_voice server-side); the original stays untouched
+            const cp = document.createElement('button');
+            cp.type = 'button'; cp.className = 'se-btn vc-copy';
+            cp.textContent = tf('uplift.voices.save_as', 'SAVE AS…');
+            cp.onclick = () => { _saveAs = v.id; _editing = null;
+                                 window.scrollTo(0, 0); renderVoices(); };
+            holder.append(cp);
+            list.append(holder);
+        }
     } else {
         const none = document.createElement('div');
         D.emptyMsg(none, tf('uplift.voices.none',
@@ -430,5 +543,6 @@ async function renderVoices() {
 window.Uplift = window.Uplift || {};
 window.Uplift.voices = { renderVoices, voices: () => _voices,
                         loadVoices, ttsModels, speechJson, playBlob,
-                        stopPlayback, newPlayer, playInto, voiceFetch, transcribeClip };
+                        stopPlayback, newPlayer, playInto, voiceFetch, transcribeClip,
+                        voiceLabel };
 })();

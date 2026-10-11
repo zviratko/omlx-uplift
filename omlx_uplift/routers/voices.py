@@ -221,11 +221,15 @@ async def _create_transcription(data: bytes, filename: str, model: str,
 
 async def _synth(voice: dict, text: str, stream: bool = False,
                  fmt: str = "wav", speed=None, language=None,
-                 model=None) -> Response:
+                 model=None, ref_text=None) -> Response:
+    # ref_text: the EDITOR previews a changed transcript against the
+    # STORED clip before saving — the override keeps preview truthful
+    # (VOICE-4); absent = the voice's saved transcript
     ref_file = voice.get("ref_file")
     ref_path = (_audio_dir() / Path(ref_file).name) if ref_file else None
     return await _synth_ref(model or voice["model"], text, ref_path,
-                            voice.get("ref_text") or "",
+                            voice.get("ref_text") if ref_text is None
+                            else ref_text,
                             language or voice.get("language"),
                             speed or voice.get("speed"), stream,
                             response_format=fmt)
@@ -324,6 +328,21 @@ async def voices_create(request: Request, _auth=Depends(require_admin)):
         data = base64.b64decode(b64, validate=True) if b64 else b""
     except (binascii.Error, ValueError):
         raise HTTPException(status_code=400, detail="ref_audio_b64 is not valid base64")
+    if not data and raw.get("from_voice"):
+        # SAVE AS: reuse a stored voice's clip (re-cloning the SAME voice
+        # onto a different model must not force an audio re-upload). The
+        # source's extension travels with its bytes.
+        src = _find(store, str(raw["from_voice"]))
+        if not src:
+            raise HTTPException(status_code=404, detail="from_voice not found: %s"
+                                % raw["from_voice"])
+        rf = src.get("ref_file")
+        src_path = (_audio_dir() / Path(rf).name) if rf else None
+        if src_path is None or not src_path.is_file():
+            raise HTTPException(status_code=409, detail=(
+                "reference clip for '%s' is missing from the store" % src["name"]))
+        data = src_path.read_bytes()
+        ext = src_path.suffix.lower()
     if not data:
         raise HTTPException(status_code=400, detail="reference audio is required")
     if len(data) > MAX_VOICE_AUDIO_BYTES:
@@ -410,7 +429,9 @@ async def voices_speech(request: Request, _auth=Depends(require_admin)):
         raise HTTPException(status_code=404,
                             detail="unknown voice; available: %s" % names)
     return await _synth(v, str(raw.get("input") or ""),
-                        stream=bool(raw.get("stream")), model=model_override)
+                        stream=bool(raw.get("stream")), model=model_override,
+                        ref_text=raw.get("ref_text") if "ref_text" in raw
+                        else None)
 
 
 @api_router.post("/voices/transcribe")

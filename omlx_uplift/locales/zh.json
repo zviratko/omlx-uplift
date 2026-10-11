@@ -922,5 +922,13 @@
  "uplift.voices.transcribe_empty": "模型未听到语音",
  "uplift.voices.timeout": "服务器在 {n} 秒内未响应——模型加载可能已卡住；请求已放弃（重启服务器可清除）",
  "uplift.dl.queued_flash": "下载已排队 ✓",
- "uplift.dl.queue_fail": "排队失败"
+ "uplift.dl.queue_fail": "排队失败",
+ "uplift.voices.edit": "编辑",
+ "uplift.voices.edit_title": "编辑语音",
+ "uplift.voices.edit_hint": "更换模型可用同一声音重新克隆，也可编辑转写文本或上传新的参考音频。",
+ "uplift.voices.saveas_hint": "保存将用同一参考音频创建新语音——不会修改已保存的内容。",
+ "uplift.voices.clip_keep": "留空以保留当前音频",
+ "uplift.voices.save_changes": "保存更改",
+ "uplift.voices.saved_as": "语音已另存为副本",
+ "uplift.voices.save_as": "另存为…"
 }

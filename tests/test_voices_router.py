@@ -436,3 +436,71 @@ def test_transcribe_503_without_omlx(client, monkeypatch):
     r = client.post("/uplift/api/voices/transcribe",
                     json={"model": "m", "ref_audio_b64": B64})
     assert r.status_code == 503 and "not available" in r.json()["detail"]
+
+
+# --------------------------------------------------------------------------
+# VOICE-4: save-as / edit — re-clone an EXISTING clip onto another model
+# without re-uploading audio (from_voice), and full-field PUT edits.
+# --------------------------------------------------------------------------
+
+def test_save_as_reuses_stored_clip(client):
+    vid = _mk(client, name="Jake").json()["voice"]["id"]
+    r = client.post("/uplift/api/voices", json={
+        "name": "Jake Big", "model": "other-tts-4b",
+        "ref_text": "My voice sample.", "from_voice": vid})
+    assert r.status_code == 200, r.text
+    nid = r.json()["voice"]["id"]
+    assert nid == "jake-big"
+    # the bytes were COPIED, not moved: both clips on disk, same content
+    d = V._store_dir() / "voices"
+    assert (d / (vid + ".wav")).read_bytes() == WAV
+    assert (d / (nid + ".wav")).read_bytes() == WAV
+    lst = {v["id"]: v for v in client.get("/uplift/api/voices").json()["voices"]}
+    assert lst[nid]["model"] == "other-tts-4b"
+
+
+def test_save_as_validation(client):
+    assert client.post("/uplift/api/voices", json={
+        "name": "X", "model": "m", "from_voice": "ghost"}).status_code == 404
+    vid = _mk(client, name="Jake").json()["voice"]["id"]
+    # clip file gone -> honest 409 (store edit by hand)
+    (V._store_dir() / "voices" / (vid + ".wav")).unlink()
+    r = client.post("/uplift/api/voices", json={
+        "name": "X", "model": "m", "from_voice": vid})
+    assert r.status_code == 409 and "missing" in r.json()["detail"]
+
+
+def test_update_can_change_model_and_text(client):
+    _mk(client, name="Jake")
+    r = client.put("/uplift/api/voices/jake", json={
+        "name": "Jake", "model": "swapped-tts", "ref_text": "new transcript"})
+    assert r.status_code == 200, r.text
+    v = client.get("/uplift/api/voices").json()["voices"][0]
+    assert v["model"] == "swapped-tts" and v["ref_text"] == "new transcript"
+    assert v["ref_bytes"] == len(WAV)      # clip untouched by a text/model edit
+
+
+def test_speech_ref_text_override_for_editor_preview(client, fake_speech):
+    # VOICE-4: the editor previews a NEW transcript against the stored
+    # clip; absent field keeps the stored one (edit-truthful preview)
+    _mk(client, name="Jake")
+    client.put("/uplift/api/voices/jake", json={
+        "name": "Jake", "model": "Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "ref_text": "Original stored line."})
+    client.post("/uplift/api/voices/speech",
+                json={"voice": "jake", "input": "hi"})
+    assert fake_speech["ref_text"] == "Original stored line."
+    client.post("/uplift/api/voices/speech",
+                json={"voice": "jake", "input": "hi", "ref_text": "typed edit"})
+    assert fake_speech["ref_text"] == "typed edit"
+
+
+def test_update_keeps_unlisted_fields_when_client_sends_them(client):
+    # contract behind the editor's passthrough: a PUT carrying language/
+    # speed keeps them; the form echoes fields it does not render
+    _mk(client, name="Jake", language="cs", speed=1.3)
+    client.put("/uplift/api/voices/jake", json={
+        "name": "Jake", "model": "m2", "ref_text": "t",
+        "language": "cs", "speed": 1.3})
+    v = client.get("/uplift/api/voices").json()["voices"][0]
+    assert v["language"] == "cs" and v["speed"] == 1.3
