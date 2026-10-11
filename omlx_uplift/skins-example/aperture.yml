@@ -22,6 +22,8 @@ tokens:
   grid: "#d4cfc2"
   heat: "#f3752a"
   frame: "#388ffa"       # test-chamber blue
+  gs-tab: "#3f93ff"        # EnApDb blue, one step off frame: the
+  gs-tab-ink: "#2b2a26"    #   derived dim cannot clear AA as a slab
   red: "#c0392b"
   bad: "#c0392b"
   warn: "#d98e04"

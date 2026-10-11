@@ -31,6 +31,8 @@ tokens:
   grid: "#dfe2de"
   heat: "#a8791c"
   frame: "#aab0aa"
+  gs-tab: "#aab0aa"        # the fold-line grey: dim (#606662) is too
+  gs-tab-ink: "#1e211f"    #   close to the verdigris accent for a slab
   red: "#9d2f2a"
   bad: "#9d2f2a"
   warn: "#a8791c"

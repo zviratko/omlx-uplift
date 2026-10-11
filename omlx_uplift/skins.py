@@ -76,12 +76,20 @@ MAX_RESOURCE_BYTES = 512 * 1024
 MAX_EXTRACTED_BYTES = 8 * 1024 * 1024
 
 # --- token vocabulary (design section 6) ----------------------------------
-# The 18 color grounds/inks of uplift.css :root + the header-chrome trio +
-# the two font stacks. Unknown token keys are IGNORED (forward compat).
+# The color grounds/inks of uplift.css :root + the header-chrome trio
+# (+ the optional GS-TAB nav pair, see COLOR_TOKENS) + the two font
+# stacks. Unknown token keys are IGNORED (forward compat).
 COLOR_TOKENS = frozenset({
     "bg", "card", "row2", "field", "panel", "edge", "ink", "dim", "accent",
     "chart-1", "chart-2", "grid", "heat", "frame", "red", "good", "warn",
     "bad", "hdr-ink", "hdr-edge", "hdr-hover",
+    # GS-TAB (2026-10-11): optional active-tab pair for the server
+    # settings strip. CSS defaults to the palette (--dim ground, dark
+    # ink); a crate declares these only when its --dim is too close to
+    # its own accent language. The contract (distance from the signage
+    # trio + ink contrast) is gated over every bundled crate in
+    # tests/test_skins_gs_tab.py.
+    "gs-tab", "gs-tab-ink",
 })
 FONT_TOKENS = frozenset({"mono", "sans"})
 NUMERIC_TOKENS = frozenset({"hdr-weight"})

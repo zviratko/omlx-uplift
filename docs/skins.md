@@ -79,7 +79,7 @@ Only whitelisted names compile; anything else is skipped with a warning.
 
 | kind | names |
 |---|---|
-| color (21) | `bg` `card` `row2` `field` `panel` `edge` `ink` `dim` `accent` `chart-1` `chart-2` `grid` `heat` `frame` `red` `good` `warn` `bad` `hdr-ink` `hdr-edge` `hdr-hover` |
+| color (23) | `bg` `card` `row2` `field` `panel` `edge` `ink` `dim` `accent` `chart-1` `chart-2` `grid` `heat` `frame` `red` `good` `warn` `bad` `hdr-ink` `hdr-edge` `hdr-hover` `gs-tab` `gs-tab-ink` |
 | font (2) | `mono` `sans` — CSS font stacks |
 | weight (1) | `hdr-weight` — `normal`, `bold`, or `100`–`900` |
 | size (1) | `radius` — `0px`–`32px`; the ONE corner radius for every rectangular box (message bubbles, inputs, selects, menus). House default is 0 (sharp) |

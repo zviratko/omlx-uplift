@@ -36,10 +36,17 @@
     --type-vlm: #7aa7ff;
     /* GS-TAB (user 2026-10-11): the server-settings section tabs own a
        DIFFERENT accent from the signage headers (white/amber/red) so the
-       two hierarchies never read as the same thing. Steel blue = house
-       --type-vlm family; skins can retune via the tokens. */
-    --gs-tab: #7aa7ff;              /* active tab ground */
-    --gs-tab-ink: #0b0b0b;          /* text on --gs-tab */
+       two hierarchies never read as the same thing — but the accent must
+       come from the SKIN palette, never a fixed hue (blue 'doesn't really
+       suit many of the skins'). The palette's muted signature --dim is
+       the only color family measured collision-free (>=40 RGB distance
+       from ink/accent/red across ALL bundled crates; tests/test_skins_gs
+       _tab.py gates it), with dark ink on top. Crates may override the
+       pair with tokens gs-tab / gs-tab-ink. */
+    --gs-tab: var(--dim);           /* active tab ground */
+    --gs-tab-ink: var(--bg);        /* text = the page ground: the crate
+                                       already tunes dim for AA-as-text
+                                       on bg, and contrast is symmetric */
     --type-embed: #b98fd6;
     --type-tpl: #6fbf9a;
     --lamp-on: #57d97a;
@@ -66,8 +73,6 @@
     --ink: #0b0b0b;
     --dim: #767268;             /* AA on white */
     --accent: #c9243b;          /* red lives on light grounds */
-    --gs-tab: #3f6fbf;          /* deeper blue for white grounds */
-    --gs-tab-ink: #ffffff;
     --chart-1: #0b0b0b;
     --chart-2: #c9243b;
     --grid: #d5d5d5;
@@ -91,7 +96,6 @@
     --ink: #f2efe6;             /* paper white on metal */
     --dim: #9fb0c8;             /* steel grey-blue, AA on card */
     --accent: #ffb830;          /* instrument amber */
-    --gs-tab: #6fa8ff;          /* [70s] instrument blue */
     --chart-1: #f2efe6;
     --chart-2: #ffb830;
     --grid: #222c3c;
@@ -157,7 +161,6 @@ html[data-theme="cockpit"] { color-scheme: dark; }
     --ink: #ffffff;
     --dim: #c9c4ba;
     --accent: #ffb830;
-    --gs-tab: #8fb8ff;          /* pure black ground wants the lighter blue */
     --chart-1: #ffffff;
     --chart-2: #ffb830;
     --grid: #4a4a4a;

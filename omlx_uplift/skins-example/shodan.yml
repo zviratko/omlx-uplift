@@ -35,6 +35,8 @@ tokens:
   warn: "#ffb14a"
   good: "#ffb14a"        # under SHODAN, nominal means ember-lit
   hdr-ink: "#ff4136"     # crimson nav signage
+  gs-tab: "#6e2415"        # ember rim: dim is laser crimson, she owns
+  gs-tab-ink: "#f2e9e1"    #   the heading trio -- bone ink on the rim
   hdr-edge: "#6e2415"
   hdr-hover: "#2a0f0a"
   hdr-weight: "700"

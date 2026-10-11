@@ -29,6 +29,8 @@ tokens:
   hdr-ink: "#ffff55"     # the menu bar IS yellow on blue
   hdr-edge: "#5858ff"
   hdr-hover: "#55ffff"   # cyan inverse, the sound of Alt is implied
+  gs-tab: "#ffff55"        # the menu bar IS yellow on blue; dim is
+  gs-tab-ink: "#0000a8"    #   selection cyan = the accent -- headings
   hdr-weight: "700"
 icons:
   caret.svg: |-
