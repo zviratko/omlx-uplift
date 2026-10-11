@@ -919,5 +919,6 @@
  "uplift.voices.transcribing": "распознаю…",
  "uplift.voices.transcribed": "Транскрипт заполнен — проверьте",
  "uplift.voices.need_stt": "сначала выберите модель STT",
- "uplift.voices.transcribe_empty": "модель не услышала речь"
+ "uplift.voices.transcribe_empty": "модель не услышала речь",
+ "uplift.voices.timeout": "сервер не ответил за {n} с — возможно, загрузка модели зависла; запрос отменён (перезапуск сервера очистит состояние)"
 }

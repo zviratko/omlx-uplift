@@ -99,17 +99,57 @@ async function playBlob(resp, btn) {
 
 /* speech POST returns raw audio BYTES (JSON only on error) — no domkit
    JSON helper fits; D.postJson would choke trying to parse the WAV. */
-async function speechJson(path, body) {
-    // domkit-exempt: binary audio response, errors parsed ad hoc
-    const r = await fetch(`${VAPI}${path}`, { method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body) });
+// Engine-side watchdog (mruu incident 2026-10-11): an STT load that
+// dies inside the engine pool can strand the REQUEST forever — no
+// response, no error — leaving AUTO-TRANSCRIBE stuck on 'transcribing…'
+// while the whole board rots behind the pool lock. The client cannot
+// heal a wedged server, but it must never lie about it: after
+// VOICE_TIMEOUT_S every voice synth/transcribe call is abandoned with
+// an honest toast. Cold model loads are legitimately slow, so the
+// budget bounds a HANG, not a busy server.
+const VOICE_TIMEOUT_S = 240;
+
+function voiceSignal() {
+    // AbortSignal.timeout: Safari 16+/Chrome 103+ (app's existing fetch
+    // floor); guarded so an older engine degrades to no-watchdog, not
+    // no-feature.
+    return (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+        ? AbortSignal.timeout(VOICE_TIMEOUT_S * 1000) : undefined;
+}
+function voiceErrText(e) {
+    // fetch rejects a timeout with DOMException TimeoutError (name) —
+    // translate it, pass anything else through unchanged
+    const nm = String((e && (e.name || e.message)) || e);
+    return /TimeoutError/.test(nm)
+        ? tf('uplift.voices.timeout',
+            'the server did not answer in {n}s — model load may be stuck; '
+            + 'request abandoned (restart the server to clear it)',
+            { n: VOICE_TIMEOUT_S })
+        : String((e && e.message) || e);
+}
+async function voiceFetch(path, body) {
+    // the ONLY voice POST path (binary + JSON responses share the watchdog)
+    let r;
+    try {
+        r = await fetch(`${VAPI}${path}`, {  // domkit-exempt: binary audio
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: voiceSignal(), body: JSON.stringify(body) });
+    } catch (e) { throw new Error(voiceErrText(e)); }
     if (!r.ok) {
         let msg = r.statusText;
         try { msg = C.errorText(await r.json()) || msg; } catch (_) {}
         throw new Error(msg);
     }
     return r;
+}
+
+async function speechJson(path, body) { return voiceFetch(path, body); }
+
+async function transcribeClip(model, audioB64, name) {
+    const r = await voiceFetch('/voices/transcribe',
+        { model: model, ref_audio_b64: audioB64, ref_name: name });
+    return r.json();
 }
 
 function readFileB64(file) {
@@ -270,8 +310,7 @@ function addForm(models, sttSelf) {
         const old = trB.textContent;
         trB.textContent = tf('uplift.voices.transcribing', 'transcribing…');
         try {
-            const d = await D.postJson(`${VAPI}/voices/transcribe`,
-                { model: sttS.value, ref_audio_b64: b64, ref_name: file.name });
+            const d = await transcribeClip(sttS.value, b64, file.name);
             const txt = String(d && d.text || '').trim();
             if (!txt) throw new Error(tf('uplift.voices.transcribe_empty',
                 'the model heard no speech'));
@@ -391,5 +430,5 @@ async function renderVoices() {
 window.Uplift = window.Uplift || {};
 window.Uplift.voices = { renderVoices, voices: () => _voices,
                         loadVoices, ttsModels, speechJson, playBlob,
-                        stopPlayback, newPlayer, playInto };
+                        stopPlayback, newPlayer, playInto, voiceFetch, transcribeClip };
 })();

@@ -919,5 +919,6 @@
  "uplift.voices.transcribing": "轉寫中…",
  "uplift.voices.transcribed": "已填入轉寫文字——請核對",
  "uplift.voices.need_stt": "請先選擇 STT 模型",
- "uplift.voices.transcribe_empty": "模型未聽見語音"
+ "uplift.voices.transcribe_empty": "模型未聽見語音",
+ "uplift.voices.timeout": "伺服器在 {n} 秒內未回應——模型載入可能已卡住；請求已放棄（重新啟動伺服器可清除）"
 }

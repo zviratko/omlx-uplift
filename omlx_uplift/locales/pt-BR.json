@@ -923,5 +923,6 @@
  "uplift.voices.transcribing": "transcrevendo…",
  "uplift.voices.transcribed": "Transcrição preenchida — revise-a",
  "uplift.voices.need_stt": "escolha primeiro um modelo STT",
- "uplift.voices.transcribe_empty": "o modelo não detectou fala"
+ "uplift.voices.transcribe_empty": "o modelo não detectou fala",
+ "uplift.voices.timeout": "o servidor não respondeu em {n}s — o carregamento do modelo pode ter travado; requisição abandonada (reinicie o servidor)"
 }

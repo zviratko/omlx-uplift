@@ -923,5 +923,6 @@
  "uplift.voices.transcribing": "transcribiendo…",
  "uplift.voices.transcribed": "Transcripción completada — revísela",
  "uplift.voices.need_stt": "elija primero un modelo STT",
- "uplift.voices.transcribe_empty": "el modelo no oyó voz"
+ "uplift.voices.transcribe_empty": "el modelo no oyó voz",
+ "uplift.voices.timeout": "el servidor no respondió en {n} s; la carga del modelo puede estar bloqueada; petición abandonada (reinicie el servidor para despejarla)"
 }

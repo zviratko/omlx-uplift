@@ -919,5 +919,6 @@
  "uplift.voices.transcribing": "přepisuji…",
  "uplift.voices.transcribed": "Přepis vyplněn — zkontrolujte ho",
  "uplift.voices.need_stt": "nejprve vyberte model STT",
- "uplift.voices.transcribe_empty": "model nerozeznal žádnou řeč"
+ "uplift.voices.transcribe_empty": "model nerozeznal žádnou řeč",
+ "uplift.voices.timeout": "server neodpověděl do {n} s — načtení modelu možná uvízlo; požadavek byl zrušen (vyčistit restartem serveru)"
 }
