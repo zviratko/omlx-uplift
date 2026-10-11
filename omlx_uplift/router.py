@@ -77,6 +77,11 @@ from .routers.chat import (
     chat_key, chat_history_list, chat_history_get, chat_history_save,
     chat_history_delete,
 )
+from .routers.voices import (          # VOICE-1: registration order last —
+    voices_list, voices_create,        # /voices/* collides with nothing on
+    voices_update, voices_delete,      # the /admin/api alias mount
+    voices_speech, voices_preview,
+)
 
 __all__ = [
     'DevAutoUpdateRequest', 'DevBaseRequest', 'DevBootstrapRequest', 'DevBuildRequest', 'DevReconfigureRequest', 'LOGIN_BLOCK_MAX_S',
@@ -101,4 +106,5 @@ __all__ = [
     'skin_theme_css', 'skins_list', 'stream_requests', 'uplift_index', 'uplift_index_legacy', 'uplift_login',
     'uplift_login_page', 'uplift_root', 'uplift_root_legacy', 'uplift_static', 'uplift_static_legacy', 'upsert_model_profile',
     'upsert_model_settings',
-]
+
+    'voices_create', 'voices_delete', 'voices_list', 'voices_preview', 'voices_speech', 'voices_update',]

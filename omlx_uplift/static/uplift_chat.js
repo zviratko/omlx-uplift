@@ -1161,9 +1161,21 @@ function toolbar() {
         budGroup.hidden = !on;
     }
     showBudget(think.value === 'limit');
+    // VOICE-1b: which voice reads replies aloud. The group hides itself
+    // while the store is empty (syncVoiceSelect) — no dead control. The
+    // pick is a browser preference (localStorage, same rule as theme).
+    var voiceSel = el('select'); voiceSel.id = 'chat-native-voice';
+    voiceSel.title = tf2('uplift.chat.voice_title',
+                         'Voice used by the read-aloud button');
+    voiceSel.addEventListener('change', function () {
+        try { W().localStorage.setItem('omlx-uplift-voice', voiceSel.value); }
+        catch (_) { /* storage may be denied */ }
+        if (_dc) renderHistory();   // re-attach: speak buttons track voices
+    });
     rowGen.append(
         group(t('chat.thinking_label', 'Thinking'), think, 'chat.thinking_label'),
-        budGroup, web, mic);
+        budGroup, web, mic,
+        group(tf2('uplift.chat.voice', 'Voice'), voiceSel, 'uplift.chat.voice'));
     // U46: sampling overrides (classic sidebar parity) — own captioned row,
     // each input numeric, blank = engine default, 0 stays a real value.
     var genRow = el('div', 'chat-native-bar chat-native-sampling');
@@ -1196,6 +1208,104 @@ function toolbar() {
 // correspondence holds; the action map records WHICH message each
 // bubble got so actions read the store by the right index.
 // ---------------------------------------------------------------------------
+// ---- VOICE-1b: read-aloud state ------------------------------------------------
+// Voices are stored server-side (routers/voices.py); this shell only caches
+// the list and the selection. localStorage is the browser-preference
+// mechanism (same rule as layout/theme), never a second source of truth.
+var _voicesCache = null;        // null = not loaded yet
+var _speakAbort = null;         // busy token: one read-aloud at a time
+
+function VOI() { return W() && W().Uplift && W().Uplift.voices; }
+function hasVoices() { return !!(_voicesCache && _voicesCache.length); }
+function chatVoiceId() {
+    var v = W() && W().localStorage;
+    var id = v ? (v.getItem('omlx-uplift-voice') || '') : '';
+    if (_voicesCache && _voicesCache.length) {
+        for (var i = 0; i < _voicesCache.length; i++)
+            if (_voicesCache[i].id === id) return id;
+        return _voicesCache[0].id;    // stored pick vanished -> first voice
+    }
+    return '';
+}
+function refreshVoices() {
+    var V = VOI();
+    if (!V) return;
+    V.loadVoices().then(function (list) {
+        _voicesCache = list || [];
+        syncVoiceSelect();
+        if (_dc) renderHistory();     // bubbles re-attach: speak appears/disappears
+    });
+}
+function syncVoiceSelect() {
+    var sel = gid('chat-native-voice');
+    if (!sel) return;
+    var cur = chatVoiceId();
+    sel.textContent = '';
+    for (var i = 0; i < (_voicesCache || []).length; i++) {
+        var o = document.createElement('option');
+        o.value = _voicesCache[i].id;
+        o.textContent = _voicesCache[i].name;
+        sel.append(o);
+    }
+    if (!(_voicesCache || []).length) {
+        sel.hidden = true;
+        var g = sel.closest('.chat-native-group');
+        if (g) g.hidden = true;
+    } else {
+        sel.hidden = false;
+        sel.value = cur;
+        var g2 = sel.closest('.chat-native-group');
+        if (g2) g2.hidden = false;
+    }
+}
+function msgSpeak(idx, btn) {
+    var m = messageAt(idx);
+    if (!m || !m.content) return;
+    var text = String(stripMarkdown(m.content)).trim();
+    if (!text) return;
+    var V = VOI();
+    if (!V) return;
+    if (_speakAbort) {
+        // busy = synthesizing or playing. Vanilla synthesizes the whole
+        // clip before the first byte, so the request cannot be cancelled
+        // — the honest stop is: kill playback, DISCARD the pending blob
+        // (token bump), drop the busy flag.
+        _speakAbort.token++;                 // late .then sees a stale token
+        _speakAbort = null;
+        V.stopPlayback();
+        if (btn) btn.classList.remove('playing');
+        return;
+    }
+    var st = { token: 0 };
+    _speakAbort = st;
+    // unlock playback inside THIS gesture (autoplay policy ties permission
+    // to the click; synthesis outlives it) — silent WAV now, real src swap
+    // when the bytes land
+    var player = V.newPlayer(btn);
+    V.speechJson('/voices/speech', { voice: chatVoiceId(), input: text })
+        .then(function (r) {
+            if (_speakAbort !== st) return null;     // stopped while synth ran
+            return r.blob().then(function (b) { V.playInto(player, b); });
+        })
+        .then(function () {
+            if (_speakAbort !== st) return;
+            // busy until the clip really ends (or a stop click supersedes us)
+            player.addEventListener('ended', function () {
+                if (_speakAbort === st) _speakAbort = null;
+            });
+            player.addEventListener('error', function () {
+                if (_speakAbort === st) _speakAbort = null;
+                if (btn) btn.classList.remove('playing');
+            });
+        })
+        .catch(function (e) {
+            if (_speakAbort !== st) return;
+            _speakAbort = null;
+            if (btn) btn.classList.remove('playing');
+            var d = D(); if (d) d.toast(String((e && e.message) || e), 'error');
+        });
+}
+
 var _msgActions = new WeakMap();   // bubble element -> {idx, role}
 var _overlayTimer = null;
 
@@ -1236,6 +1346,26 @@ function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
     act('copymd', t('chat.copy_markdown', 'Copy markdown'),
         t('chat.copy_markdown', 'Copy markdown'), msgCopyMarkdown);
     if (role === 'assistant') {
+        // VOICE-1b: read-aloud rides the same per-message track — no new
+        // overlay machinery. Text is stripped like 'Copy' does (the model
+        // answer IS markdown; TTS would read the syntax out loud). The
+        // button exists only while a voice is selected; voices are an
+        // opt-in uplift feature, so no voices = no affordance (not a
+        // dead button that errors on click).
+        if (hasVoices()) {
+            var sp = el('button', 'chat-native-msg-action speak',
+                        '🔊');
+            sp.type = 'button';
+            sp.title = tf2('uplift.chat.speak',
+                           'Read aloud with the selected voice');
+            sp.dataset.i18nTitle = 'uplift.chat.speak';
+            sp.dataset.enTitle = sp.title;
+            sp.addEventListener('click', function (ev) {
+                ev.stopPropagation();
+                msgSpeak(idx, sp);
+            });
+            box.appendChild(sp);
+        }
         act('regen', t('chat.regenerate_tooltip', 'Regenerate'),
             t('chat.regenerate_tooltip', 'Regenerate'), msgRegenerate);
     }
@@ -1989,6 +2119,7 @@ function mount() {
             : newConv();
         var b = gid('chat-native-boot'); if (b) b.remove();
         wrap.insertBefore(toolbar(), wrap.firstChild);
+        refreshVoices();   // VOICE-1b: silent when the store/router absent
         // U71: the fixed 'Thinking' panel ABOVE the chat is gone — the
         // user bug report: thinking belonged above EACH reply (classic's
         // per-message block). attachMessageActions owns per-bubble

@@ -787,6 +787,42 @@ class Suite:
         d = json.loads(out) if isinstance(out, str) else out
         return d
 
+    # ---------- VOICE-1: page plumbing ----------
+    def t_voice(self):
+        """Every nav sub-page must ACTUALLY render: the dropdown entry and
+        the page section exist for #models/voices, SUBS knows the leg, and
+        renderVoices fills the host (this exact triple broke once at
+        construction — the SUBS whitelist forgot 'voices' and the page
+        silently stayed on the Models manager)."""
+        nav = self._eval("""(() => {
+          const a = document.querySelector('#dd-models-menu [data-sub="voices"]');
+          const sec = document.querySelector('#pages [data-id="voices-page"]');
+          return JSON.stringify({nav: !!a, sec: !!sec});
+        })()""")
+        d = json.loads(nav)
+        self.check("voices nav entry", d["nav"])
+        self.check("voices page section", d["sec"])
+        self._eval("location.hash = '#models/voices'; 'nav'")
+        self._wait(900)
+        body = self._eval("""(() => {
+          const host = document.getElementById('vc-body');
+          if (!host) return JSON.stringify({err: 'no #vc-body'});
+          const visible = host.closest('.page-card');
+          return JSON.stringify({
+            form: !!host.querySelector('.vc-add'),
+            list: !!host.querySelector('.vc-list'),
+            shown: visible ? !visible.hidden : false,
+            sub: document.documentElement.dataset.sub});
+        })()""")
+        b = json.loads(body)
+        self.check("voices route renders the page",
+                   not b.get("err") and b["form"] and b["list"] and b["shown"],
+                   str(b))
+        self.check("voices hash lands on the sub", b.get("sub") == "voices",
+                   str(b.get("sub")))
+        self._eval("location.hash = '#'; 'home'")
+        self._wait(400)
+
     def run(self):
         origin = self._eval("location.origin") or ""
         if self.base and not origin.startswith(self.base):
@@ -815,6 +851,7 @@ class Suite:
         self.t_rail()
         self.t_eff()
         self.t_gs()
+        self.t_voice()
         for w in WIDTHS:
             self._width(w)
             try:

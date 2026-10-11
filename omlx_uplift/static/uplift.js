@@ -132,6 +132,7 @@ window.Uplift._helperGlue = {
     get GW_LIVE() { return GW_LIVE; },
 };
 const HLP = window.Uplift.helper;
+const VOI = window.Uplift.voices;
 const UUP = window.Uplift.usage;
 window.Uplift._usageGlue = {
     get setCounter() { return setCounter; },
@@ -217,7 +218,7 @@ D.setUnauthorizedHandler(() => {
 /* ---------------- tabs (hash routing, like the classic dashboard) --------- */
 const TABS = ['status', 'cluster', 'models', 'usage', 'logs', 'bench', 'chat', 'settings'];
 const SUBS = {
-    models: ['manager', 'helper', 'downloader', 'uploader', 'quantizer'],
+    models: ['manager', 'helper', 'voices', 'downloader', 'uploader', 'quantizer'],
     bench: ['throughput', 'accuracy', 'context'],
     settings: ['global', 'patches'],
     chat: ['chat'],
@@ -302,6 +303,7 @@ function applyTab() {
         if (sub === 'quantizer') MOs.renderQuantizer();
         if (sub === 'uploader') MOs.renderUploader();
         if (sub === 'helper') HLP.renderHelperModels();
+        if (sub === 'voices') VOI.renderVoices();
         if (sub === 'manager') MM.renderTemplates();
     }
     if (tab === 'settings') {

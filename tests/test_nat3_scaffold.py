@@ -145,13 +145,19 @@ def test_nat3_routes_registered_in_order():
 def test_nat3_routes_are_last_block():
     """NAT-3 registered its imports AFTER skins (facade comment says the
     appended block is load-bearing): every pre-existing route keeps its
-    position, the bench/chat block is strictly at the end."""
+    position, the bench/chat block is strictly at the end.
+
+    VOICE-1 (2026-10-11) appended a NEW domain block after it, following
+    the same rule — an addition must never shuffle existing positions.
+    The tail is therefore bench/chat/voices only; the golden ORDER list
+    above still pins bench/chat relative order verbatim."""
     from omlx_uplift import router as up
 
     have = _routes_in_order(up.api_router)
     idx_first_nat = next(i for i, (m, p) in enumerate(have)
                          if p.startswith("/bench") or p.startswith("/chat"))
     assert all(p.startswith("/bench") or p.startswith("/chat")
+               or p.startswith("/voices")
                for m, p in have[idx_first_nat:])
 
 
