@@ -1038,17 +1038,18 @@ function metricOpts(id, def, col, opts) {
     // legend markers (see legendMarkers below), so a band and its legend
     // row always match.
     const ground = col.card || col.grid || '#2b2c30';
-    // SINGLE-HUE depth ladder (user 2026-10-10: the four-hue rainbow read
-    // 'weird'; bands must read as ONE ordered scale). All bands wear the
-    // SAME hue (the skin's first chart slot — pure function of the skin so
-    // it re-tints); intensity grows from the floor up: depth-1 (bottom)
-    // faintest, the top band (acceptance edge) boldest, so more accepted
-    // depth = a more prominent band and the acceptance ceiling is crisp.
-    const baseHue = palette[0] || '#e8a020';
-    const hueRgb = KIT.cssRgb(baseHue) || [232, 160, 32];
-    const rampAt = i => 'rgba(' + hueRgb[0] + ',' + hueRgb[1] + ',' + hueRgb[2] + ','
-                      + Math.min(0.88, 0.16 + 0.18 * Math.max(0, i)).toFixed(2) + ')';
-    const edgeStroke = 'rgba(' + hueRgb[0] + ',' + hueRgb[1] + ',' + hueRgb[2] + ',0.95)';
+    // COLORFUL-BANDS (user 2026-10-11: "the MTP graph lost its colour —
+    // could we make it colourful again?"): the single-hue ladder (30e5d54)
+    // faded the bottom bands to alpha 0.16-0.34 over the card ground; once
+    // the rejected band left the stack the whole card read grey. Each band
+    // now wears its OWN palette slot, ramped toward the card ground so
+    // neighbours stay distinct (KIT.rampColor) — a pure function of the
+    // skin palette, so it still re-tints on skin change. The acceptance
+    // ceiling keeps its crisp edge, stroked in the top band's slot.
+    const rampAt = i => KIT.rampColor(palette[i % palette.length], ground,
+                                      Math.max(nStack, 1), i);
+    const edgeStroke = palette[(nStack - 1) % palette.length]
+                       || col.gold || palette[0] || '#e8a020';
     const series = [{}, ...sers.map((s, i) => {
         const sf = metricFormat({ key: s.key, fmt: s.fmt });
         const c = palette[i % palette.length];
@@ -1056,8 +1057,9 @@ function metricOpts(id, def, col, opts) {
         const inStack = i < nStack;
         const o = { label: metricSeriesLabel(s.key), scale: sc,
                     // the acceptance ceiling (top band's upper path) is the
-                    // crisp edge; the lower bands stay stroke-less so the
-                    // ladder reads as one filled area, not stacked outlines
+                    // crisp edge, in the top band's own slot; the lower
+                    // bands stay stroke-less so the stack reads as filled
+                    // areas, not stacked outlines
                     stroke: inStack ? (i === nStack - 1 ? edgeStroke : c) : c,
                     width: (s.legendOnly || (inStack && i < nStack - 1)) ? 0 : (inStack ? 1.4 : 1.6),
                     // BUG-4: same cadence-gap bridge as the big charts —
@@ -1111,8 +1113,9 @@ function metricOpts(id, def, col, opts) {
             // stackBands emits pairs (1,2)..(n-1,n) in uPlot series space;
             // band i (0-based) fills between cum(i+1) and cum(i+2), i.e.
             // the share of DRAWN series i+2 (1-based) = palette slot i+1.
-            // COLOR-1: same ramp the bottom band (series 0 fill) uses, so
-            // the five bands read as one ordered scale, not five washes.
+            // COLORFUL-BANDS: every band wears its OWN slot through the
+            // same ramp the bottom band (series 0 fill) uses — distinct
+            // hues, ground-aware strength ladder, skin-pure.
             fill: rampAt(i + 1),
         }));
     }
