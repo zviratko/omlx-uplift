@@ -212,6 +212,52 @@ def _find(store: dict, key: str) -> Optional[dict]:
     return None
 
 
+def _family_hint(hint: str, model: str) -> bool:
+    """True when a 'Model:' prefix merely names the voice's own base
+    model (exact or as a substring — 'Qwen3-TTS' inside
+    'Qwen3-TTS-12Hz-0.6B-Base-8bit'). A family hint does NOT override
+    the stored model; anything else is an explicit model choice."""
+    h = (hint or "").lower().strip()
+    m = (model or "").lower()
+    return bool(h) and (h == m or h in m)
+
+
+def _alias_lookup(name: str, model: str):
+    """Resolve a possibly 'Model:Voice' composite to a stored voice.
+
+    The whole string is tried first — a display name may legitimately
+    contain ':'. Otherwise the part after the LAST colon selects the
+    voice and the part before it names the base model: a family hint
+    keeps the voice's stored model, any other prefix overrides it (the
+    SAME reference clip clones onto any TTS model that accepts it —
+    vanilla decides, and 404s honestly when the model does not exist).
+    An explicit 'model' field always wins over the prefix. Returns
+    (voice|None, model_override|None, resolved_name)."""
+    store = _load()
+    key = (name or "").strip()
+    if not key:
+        return None, (model or None), key
+    v = _find(store, key)
+    if v is None and ":" in key:
+        head, _, tail = key.rpartition(":")
+        tail = tail.strip()
+        if tail:
+            v = _find(store, tail)
+            if v is not None:
+                explicit = (model or "").strip()
+                # the composite may ITSELF have arrived in the model field
+                # (voice empty) — only a DIFFERENT explicit model overrides
+                if explicit and explicit != key:
+                    return v, explicit, tail
+                hint = head.strip()
+                return v, (None if _family_hint(hint, v["model"]) else
+                           (hint or None)), tail
+        # composite with no voice behind it: not ours (vanilla presets
+        # and model ids never carry ':') — caller answers as unknown
+        return None, (model or None), key
+    return v, (model or None), key
+
+
 @api_router.get("/voices")
 async def voices_list(_auth=Depends(require_admin)):
     store = _load()
@@ -325,14 +371,14 @@ async def voices_speech(request: Request, _auth=Depends(require_admin)):
     raw = await request.json()
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
-    store = _load()
-    v = _find(store, str(raw.get("voice") or ""))
+    v, model_override, _ = _alias_lookup(str(raw.get("voice") or ""),
+                                         str(raw.get("model") or ""))
     if not v:
-        names = ", ".join(x["name"] for x in store["voices"]) or "(none yet)"
+        names = ", ".join(x["name"] for x in _load()["voices"]) or "(none yet)"
         raise HTTPException(status_code=404,
                             detail="unknown voice; available: %s" % names)
     return await _synth(v, str(raw.get("input") or ""),
-                        stream=bool(raw.get("stream")))
+                        stream=bool(raw.get("stream")), model=model_override)
 
 
 @api_router.post("/voices/preview")
@@ -384,6 +430,11 @@ async def voices_preview(request: Request, _auth=Depends(require_admin)):
 #   voice            spec has a preset enum; here it ALSO resolves stored
 #                    voice names/ids (the cloning extension, PR #676
 #                    fields attached by the server, never over the wire)
+#                    … including 'Model:Voice' alias syntax in EITHER the
+#                    voice or model field: text after the LAST ':' picks
+#                    the stored voice, text before it is a base-model
+#                    hint (family prefix keeps the voice's model, any
+#                    other prefix overrides it for this synth)
 #   response_format  mp3|opus|aac|flac|wav|pcm|hc-webm upstream; default
 #                    mp3 per spec. We forward verbatim — vanilla owns the
 #                    honest unsupported-format 400 (aac/hc-webm decode
@@ -472,15 +523,16 @@ async def speech_std(request: Request):
     stream = str(body.get("stream", "")).lower() in ("1", "true", "yes", "on")
     name = str(body.get("voice") or "").strip()
     model = str(body.get("model") or "").strip()
-
-    v = _find(_load(), name) if name else None
-    if name and not v:
-        # spec: unknown voice is a 400-style request error; we keep the
-        # uplift hint (names available) but the OpenAI body shape
+    # 'Model:Voice' alias syntax is accepted in EITHER field (the SDK
+    # habit of stuffing everything into `model` is just as common)
+    v, model_use, lookup = _alias_lookup(name or model, model)
+    if not v and name:
+        # spec: unknown voice is a request error; uplift hint (available
+        # names) inside the OpenAI body shape
         avail = ", ".join(x["name"] for x in _load()["voices"]) or "(none yet)"
         return _openai_err(404, "Voice '%s' is not a stored uplift voice; "
                                 "available: %s" % (name, avail))
-    if not model and not v:
+    if not model_use and not v:
         return _openai_err(400, "You must provide a 'model' (or a stored "
                                 "voice name in 'voice').")
 
@@ -488,11 +540,11 @@ async def speech_std(request: Request):
         if v:
             resp = await _synth(v, text, fmt=fmt, speed=speed, stream=stream,
                                 language=body.get("language") or None,
-                                model=model or None)
+                                model=model_use)
         else:
             # no named voice: pure pass-through to vanilla — anonymous
             # ref_audio cloning (PR #676 fields) included verbatim
-            kw = dict(model=model, input=text, response_format=fmt,
+            kw = dict(model=model_use, input=text, response_format=fmt,
                       speed=speed, stream=stream,
                       language=body.get("language") or None,
                       instructions=body.get("instructions") or None,

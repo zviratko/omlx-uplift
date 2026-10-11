@@ -301,3 +301,74 @@ def test_std_auth_failure_is_authentication_error(std_client, fake_speech,
     r = client.post("/uplift/v1/audio/speech",
                     data={"voice": "Jake", "input": "hi"})
     assert r.status_code == 401 and r.json()["error"]["type"] == "authentication_error"
+
+
+# --------------------------------------------------------------------------
+# 'Model:Voice' alias syntax — vanilla rejects ':' in profile ids so the
+# alias cannot be a stored MODEL alias; instead the speech resolvers parse
+# the composite: after the LAST ':' picks the voice, before it is a base-
+# model hint (family prefix keeps the stored model, any other overrides).
+# Whole-string lookup runs FIRST: display names may themselves contain ':'.
+# --------------------------------------------------------------------------
+
+def test_alias_native_route_family_hint_keeps_stored_model(client, fake_speech):
+    _mk(client, name="Jake")
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": "Qwen3-TTS:Jake", "input": "alias me"})
+    assert r.status_code == 200, r.text
+    # 'qwen3-tts' is a substring of the stored model -> hint, not override
+    assert fake_speech["model"] == "Qwen3-TTS-12Hz-0.6B-Base-8bit"
+    assert base64.b64decode(fake_speech["ref_audio"]) == WAV
+
+
+def test_alias_native_route_foreign_prefix_overrides_model(client, fake_speech):
+    _mk(client, name="Jake")
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": "some-other-tts:Jake", "input": "x"})
+    assert r.status_code == 200, r.text
+    assert fake_speech["model"] == "some-other-tts"         # clip survives
+    assert base64.b64decode(fake_speech["ref_audio"]) == WAV
+
+
+def test_alias_explicit_model_field_wins(client, fake_speech):
+    _mk(client, name="Jake")
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": "hint:Jake", "model": "chosen-tts",
+                          "input": "x"})
+    assert r.status_code == 200 and fake_speech["model"] == "chosen-tts"
+
+
+def test_alias_display_name_containing_colon(client, fake_speech):
+    _mk(client, name="Radio: Jake")                        # id radio--jake
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": "Radio: Jake", "input": "x"})
+    assert r.status_code == 200, r.text
+    assert fake_speech["model"] == "Qwen3-TTS-12Hz-0.6B-Base-8bit"
+
+
+def test_alias_unknown_tail_still_404(client):
+    _mk(client, name="Jake")
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": "Qwen3-TTS:Ghost", "input": "x"})
+    assert r.status_code == 404
+
+
+def test_std_alias_in_voice_field(std_client, fake_speech):
+    client, _ = std_client
+    _mk(client, name="Jake")
+    r = client.post("/uplift/v1/audio/speech",
+                    data={"voice": "Qwen3-TTS-12Hz-0.6B-Base-8bit:Jake",
+                          "input": "std alias"})
+    assert r.status_code == 200, r.text
+    assert fake_speech["model"] == "Qwen3-TTS-12Hz-0.6B-Base-8bit"
+    assert base64.b64decode(fake_speech["ref_audio"]) == WAV
+
+
+def test_std_alias_in_model_field(std_client, fake_speech):
+    client, _ = std_client
+    _mk(client, name="Jake")
+    # SDK users who stuff everything into `model` reach the same voice
+    r = client.post("/uplift/v1/audio/speech",
+                    data={"model": "Qwen3-TTS:Jake", "input": "via model"})
+    assert r.status_code == 200, r.text
+    assert fake_speech["model"] == "Qwen3-TTS-12Hz-0.6B-Base-8bit"
