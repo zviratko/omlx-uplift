@@ -23,6 +23,15 @@ So this router owns the thin part; vanilla stays untouched:
 - POST /voices/preview runs the same synth from ad-hoc ref fields so the
   ADD form can hear the voice before saving it.
 
+- POST /uplift/v1/audio/speech is the STANDARD OpenAI surface
+  (audio/speech/create): form or JSON body, Bearer-key auth shared with
+  /v1/*, response_format honoured, and `voice` extended to accept a
+  stored name/id — clients written for the OpenAI SDK clone voices by
+  name with zero uplift-specific code. Deliberately mirrored under
+  /uplift/v1/ (not a bare /v1 override): a client that appends '/v1'
+  to a base URL ending in /uplift reaches it, and vanilla's own
+  /v1/audio/speech (PR #676, unnamed ref_audio cloning) stays intact.
+
 Size rules are stated, not invented: vanilla caps the base64 field at
 20 MiB of characters (~15 MiB of raw audio — enough for ~60 s). We cap
 raw uploads at MAX_VOICE_AUDIO_BYTES = 14 MiB so the re-encoded base64
@@ -48,9 +57,9 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
-from .base import api_router, require_admin
+from .base import api_router, page_router, require_admin
 
 _log = logging.getLogger("omlx_uplift.voices")
 
@@ -125,7 +134,8 @@ def _sanitize(raw: dict, existing: Optional[dict] = None) -> dict:
 
 async def _synth_ref(model: str, text: str, ref_path: Optional[Path],
                      ref_text: str, language=None, speed=None,
-                     stream: bool = False) -> Response:
+                     stream: bool = False, response_format: str = "wav",
+                     instructions=None) -> Response:
     """Call vanilla create_speech in-process with a reference clip attached.
 
     ref_path None = no cloning (plain preset-voice TTS model). The clip is
@@ -153,6 +163,8 @@ async def _synth_ref(model: str, text: str, ref_path: Optional[Path],
         language=language or None,
         speed=speed or None,
         stream=bool(stream),
+        response_format=response_format or "wav",
+        instructions=instructions or None,
     )
     return await _create_speech(kwargs)
 
@@ -175,12 +187,16 @@ async def _create_speech(kwargs: dict) -> Response:
     return await create_speech(AudioSpeechRequest(**kwargs))
 
 
-async def _synth(voice: dict, text: str, stream: bool = False) -> Response:
+async def _synth(voice: dict, text: str, stream: bool = False,
+                 fmt: str = "wav", speed=None, language=None,
+                 model=None) -> Response:
     ref_file = voice.get("ref_file")
     ref_path = (_audio_dir() / Path(ref_file).name) if ref_file else None
-    return await _synth_ref(voice["model"], text, ref_path,
+    return await _synth_ref(model or voice["model"], text, ref_path,
                             voice.get("ref_text") or "",
-                            voice.get("language"), voice.get("speed"), stream)
+                            language or voice.get("language"),
+                            speed or voice.get("speed"), stream,
+                            response_format=fmt)
 
 
 def _find(store: dict, key: str) -> Optional[dict]:
@@ -355,3 +371,136 @@ async def voices_preview(request: Request, _auth=Depends(require_admin)):
     finally:
         if tmp_path:
             tmp_path.unlink(missing_ok=True)
+
+
+# --------------------------------------------------------------------------
+# Standard OpenAI surface: POST /uplift/v1/audio/speech
+# (https://developers.openai.com/api/reference — audio/speech/create)
+#
+# Contract honoured, field by field:
+#   input            required text (spec: invalid_request_error without it)
+#   model            required — UNLESS `voice` names a stored voice that
+#                    already carries its base model (uplift extension)
+#   voice            spec has a preset enum; here it ALSO resolves stored
+#                    voice names/ids (the cloning extension, PR #676
+#                    fields attached by the server, never over the wire)
+#   response_format  mp3|opus|aac|flac|wav|pcm|hc-webm upstream; default
+#                    mp3 per spec. We forward verbatim — vanilla owns the
+#                    honest unsupported-format 400 (aac/hc-webm decode
+#                    via libsndfile 1.2.2 in the keg, verified)
+#   speed            0.25–4.0 (spec range; coerced from form strings)
+#   stream           chunked audio response, passed through
+#   language         passed through (spec: only some models)
+#   instructions     accepted, forwarded (spec: only gpt-4o TTS; vanilla
+#                    ignores for Qwen — same honesty as upstream)
+# Body may be form-urlencoded, multipart (file parts ignored — reference
+# audio lives in the voice), or JSON; auth is the SAME Bearer key /
+# x-api-key as /v1/* plus the dashboard session cookie for UI use.
+# Errors use the OpenAI {"error": {message, type}} shape.
+# --------------------------------------------------------------------------
+
+_STD_METHODS = ("POST",)
+
+
+def _openai_err(status, message):
+    _types = {401: "authentication_error", 404: "not_found_error",
+              413: "invalid_request_error", 429: "rate_limit_error"}
+    return JSONResponse(status_code=status, content={"error": {
+        "message": message,
+        "type": _types.get(status, "server_error" if status >= 500
+                           else "invalid_request_error"),
+        "param": None, "code": None}})
+
+
+async def _infer_auth(request: Request) -> bool:
+    """Bearer/x-api-key like /v1/audio/speech; dashboard session cookie
+    also accepted so UI code can reuse one path. Vanilla's own verifier
+    IS the implementation — sub-keys, skip-verification and loopback
+    no-auth semantics come along untouched. Raises HTTPException (the
+    handler converts it to an OpenAI error body)."""
+    try:
+        from omlx.server import verify_inference_api_key
+    except ImportError:
+        return await require_admin(request)
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        from fastapi.security import HTTPAuthorizationCredentials
+        creds = HTTPAuthorizationCredentials(scheme="Bearer",
+                                             credentials=auth[7:].strip())
+        return await verify_inference_api_key(request, creds)
+    if request.headers.get("x-api-key"):
+        # verify_api_key re-reads the header itself when creds are None
+        return await verify_inference_api_key(request, None)
+    return await require_admin(request)
+
+
+async def _std_body(request: Request) -> dict:
+    ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if ctype == "application/json":
+        b = await request.json()
+        return b if isinstance(b, dict) else {}
+    form = await request.form()          # urlencoded AND multipart
+    out = {}
+    for k in form.keys():
+        val = form[k]
+        # UploadFile parts (a client uploading a ref clip) are ignored:
+        # reference audio belongs to the stored voice, never to the request
+        if isinstance(val, str):
+            out[k] = val
+    return out
+
+
+@page_router.api_route("/uplift/v1/audio/speech", methods=list(_STD_METHODS),
+                       include_in_schema=True)
+async def speech_std(request: Request):
+    try:
+        await _infer_auth(request)
+    except HTTPException as e:
+        return _openai_err(e.status_code, str(e.detail))
+    body = await _std_body(request)
+    text = str(body.get("input") or body.get("text") or "")
+    if not text.strip():
+        # vanilla's own create_speech answers 400 for empty input — mirror it
+        return _openai_err(400, "'input' field must not be empty")
+    fmt = str(body.get("response_format") or "mp3").strip().lower()
+    try:
+        speed = float(body.get("speed") or 1.0)
+    except (TypeError, ValueError):
+        return _openai_err(400, "speed must be a float between 0.25 and 4.0.")
+    if not 0.25 <= speed <= 4.0:
+        return _openai_err(400, "speed must be between 0.25 and 4.0.")
+    stream = str(body.get("stream", "")).lower() in ("1", "true", "yes", "on")
+    name = str(body.get("voice") or "").strip()
+    model = str(body.get("model") or "").strip()
+
+    v = _find(_load(), name) if name else None
+    if name and not v:
+        # spec: unknown voice is a 400-style request error; we keep the
+        # uplift hint (names available) but the OpenAI body shape
+        avail = ", ".join(x["name"] for x in _load()["voices"]) or "(none yet)"
+        return _openai_err(404, "Voice '%s' is not a stored uplift voice; "
+                                "available: %s" % (name, avail))
+    if not model and not v:
+        return _openai_err(400, "You must provide a 'model' (or a stored "
+                                "voice name in 'voice').")
+
+    try:
+        if v:
+            resp = await _synth(v, text, fmt=fmt, speed=speed, stream=stream,
+                                language=body.get("language") or None,
+                                model=model or None)
+        else:
+            # no named voice: pure pass-through to vanilla — anonymous
+            # ref_audio cloning (PR #676 fields) included verbatim
+            kw = dict(model=model, input=text, response_format=fmt,
+                      speed=speed, stream=stream,
+                      language=body.get("language") or None,
+                      instructions=body.get("instructions") or None,
+                      voice=name or None)
+            if body.get("ref_audio"):
+                kw["ref_audio"] = body["ref_audio"]
+                kw["ref_text"] = body.get("ref_text") or None
+            resp = await _create_speech(kw)
+    except HTTPException as e:
+        return _openai_err(e.status_code, str(e.detail))
+    return resp

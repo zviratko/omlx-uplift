@@ -204,3 +204,100 @@ def test_store_cap(client, monkeypatch):
     assert _mk(client, name="a").status_code == 200
     assert _mk(client, name="b").status_code == 200
     assert _mk(client, name="c").status_code == 507
+
+
+# --------------------------------------------------------------------------
+# POST /uplift/v1/audio/speech — the STANDARD OpenAI surface. Same seam,
+# same store; the contract under test is the SPEC SHAPE: form or JSON or
+# multipart body, mp3 default, response_format/speed/stream forwarded,
+# OpenAI error bodies, auth errors in-band (401 authentication_error).
+# --------------------------------------------------------------------------
+
+@pytest.fixture()
+def std_client(monkeypatch, tmp_path):
+    monkeypatch.setattr(V, "_store_dir", lambda: tmp_path)
+    async def _ok(request):
+        return True
+    monkeypatch.setattr(V, "_infer_auth", _ok)
+    app = FastAPI()
+    app.include_router(_up.api_router, prefix="/uplift/api")
+    app.include_router(_up.page_router)
+    from omlx_uplift.routers import base as up_base
+    app.dependency_overrides[up_base.require_admin] = lambda: True
+    return TestClient(app, raise_server_exceptions=False), None
+
+
+def test_std_named_voice_form_body_default_mp3(std_client, fake_speech):
+    client, _ = std_client
+    _mk(client, name="Jake")
+    r = client.post("/uplift/v1/audio/speech",
+                    data={"voice": "Jake", "input": "hello"})
+    assert r.status_code == 200 and r.content == b"OFAKEAUDIO"
+    assert fake_speech["response_format"] == "mp3"          # spec default
+    assert fake_speech["model"] == "Qwen3-TTS-12Hz-0.6B-Base-8bit"
+    assert base64.b64decode(fake_speech["ref_audio"]) == WAV
+
+
+def test_std_json_body_forwards_format_speed_stream(std_client, fake_speech):
+    client, _ = std_client
+    _mk(client, name="David", model="m-base")
+    r = client.post("/uplift/v1/audio/speech", json={
+        "model": "override-tts", "voice": "David", "input": "hi",
+        "response_format": "flac", "speed": 1.5, "stream": True,
+        "language": "cs"})
+    assert r.status_code == 200, r.text
+    assert fake_speech["model"] == "override-tts"           # explicit wins
+    assert fake_speech["response_format"] == "flac"
+    assert fake_speech["speed"] == 1.5
+    assert fake_speech["stream"] is True
+    assert fake_speech["language"] == "cs"
+
+
+def test_std_multipart_ignores_file_parts(std_client, fake_speech):
+    client, _ = std_client
+    _mk(client, name="Jake")
+    import io
+    files = {"ref_audio": ("x.wav", io.BytesIO(b"ignored-by-design"))}
+    r = client.post("/uplift/v1/audio/speech",
+                    data={"voice": "jake", "input": "multipart"}, files=files)
+    assert r.status_code == 200, r.text
+    assert base64.b64decode(fake_speech["ref_audio"]) == WAV   # STORED clip
+
+
+def test_std_passthrough_without_voice(std_client, fake_speech):
+    client, _ = std_client
+    r = client.post("/uplift/v1/audio/speech", data={
+        "model": "plain-tts", "input": "anon clone",
+        "ref_audio": B64, "ref_text": "sample transcript"})
+    assert r.status_code == 200, r.text
+    assert fake_speech["model"] == "plain-tts"
+    assert base64.b64decode(fake_speech["ref_audio"]) == WAV  # verbatim
+    assert fake_speech["ref_text"] == "sample transcript"
+
+
+def test_std_errors_use_openai_bodies(std_client, fake_speech):
+    client, _ = std_client
+    r = client.post("/uplift/v1/audio/speech", data={"voice": "Jake"})
+    e = r.json()["error"]
+    assert r.status_code == 400 and e["type"] == "invalid_request_error" \
+        and "input" in e["message"]
+    r = client.post("/uplift/v1/audio/speech",
+                    data={"voice": "Ghost", "input": "hi"})
+    assert r.status_code == 404 and r.json()["error"]["type"] == "not_found_error"
+    r = client.post("/uplift/v1/audio/speech", data={"input": "orphan text"})
+    assert r.status_code == 400 and "model" in r.json()["error"]["message"]
+    r = client.post("/uplift/v1/audio/speech",
+                    data={"voice": "Jake", "input": "x", "speed": "9"})
+    assert r.status_code == 400 and "0.25" in r.json()["error"]["message"]
+
+
+def test_std_auth_failure_is_authentication_error(std_client, fake_speech,
+                                                  monkeypatch):
+    client, _ = std_client
+    from fastapi import HTTPException as FH
+    async def deny(request):
+        raise FH(status_code=401, detail="Invalid API key")
+    monkeypatch.setattr(V, "_infer_auth", deny)
+    r = client.post("/uplift/v1/audio/speech",
+                    data={"voice": "Jake", "input": "hi"})
+    assert r.status_code == 401 and r.json()["error"]["type"] == "authentication_error"
