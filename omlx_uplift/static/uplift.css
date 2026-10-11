@@ -827,6 +827,47 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     white-space: pre; scrollbar-gutter: stable; }
 /* inherited placeholder look (profile tab) */
 .se-row input::placeholder { color: var(--dim); font-style: italic; opacity: 0.8; }
+/* ---- SPL-RAIL: vertical section tabs (upstream #4415 parity, user
+   2026-10-11: 'vertical tabs... prominent, visible what is selected') ----
+   The nav is a column of .editor-body; ≥900px it sits LEFT of the form,
+   below that it wraps to a full-width horizontal strip above it. The
+   168px reservation is inside the clean modal (920): dirty = clean+332
+   keeps the FORM (scroll) width identical clean/dirty — the UX-6 rail
+   math is untouched, the nav costs modal width in BOTH states. Active
+   item = inverted (same language as .se-tab.active). */
+.editor-body > .se-rail { display: none; }
+.editor-body.has-rail > .se-rail { display: flex; flex-direction: column;
+    gap: 4px; flex: 0 0 168px; align-items: stretch;
+    padding: 4px 8px 4px 0; border-right: 1px solid var(--edge); }
+@media (max-width: 899px) {
+    .editor-body.has-rail { flex-wrap: wrap; }
+    .editor-body.has-rail > .se-rail { flex: 1 0 100%; order: -1;
+        flex-direction: row; flex-wrap: wrap; border-right: 0;
+        border-bottom: 1px solid var(--edge); padding: 2px 0 8px; }
+}
+.se-rail-item { display: flex; align-items: center; gap: 6px; width: 100%;
+    text-align: left; font: 500 10px/1.3 var(--mono); letter-spacing: .06em;
+    padding: 8px 10px; border: 1px solid var(--edge); background: transparent;
+    color: var(--dim); cursor: pointer; border-radius: var(--radius);
+    text-transform: uppercase; }
+.se-rail-item:hover { color: var(--ink); background: var(--row2); }
+.se-rail-item.active { background: var(--ink); color: var(--bg);
+    border-color: var(--ink); }
+.se-rail-t { min-width: 0; overflow-wrap: anywhere; }
+.se-rail-badge { flex: 0 0 auto; margin-left: auto; min-width: 16px;
+    padding: 1px 4px; font: 600 9px/1.3 var(--mono); text-align: center;
+    background: var(--accent); color: var(--ink-on-accent); }
+.se-rail-badge[hidden] { display: none; }
+.se-rail-badge.restart { background: var(--diverge); color: var(--ink-on-red); }
+/* band header inside a section box (DFlash/SpecPrefill/kwargs join the
+   classic parent section instead of being their own tab) */
+.se-subhead { margin: 14px 0 8px; padding-bottom: 4px; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .18em; color: var(--dim);
+    border-bottom: 1px solid var(--edge); }
+.se-subhead:first-child { margin-top: 0; }
+/* section boxes are paged by the rail: hidden must beat any display rule */
+.modal.editor .se-box[hidden] { display: none; }
+
 /* ---- editor profile tab strip ---- */
 .se-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
     padding: 6px 8px; border-bottom: 1px solid var(--edge); background: var(--card); }
@@ -1432,7 +1473,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    (modal 868 = 1200 − rail 320 − gap 12), the left edge never moves, and
    at rest the modal is compact with no dead space INSIDE it. Below
    1232px the rail overlays instead (98vw cap leaves no room to grow). */
-.modal.nasa.editor { width: min(868px, 98vw); max-height: 92vh; }
+.modal.nasa.editor { width: min(920px, 98vw); max-height: 92vh; }
 @media (min-width: 1232px) {
     /* no-jump rule (step1, still user law): reserve the widen delta as a
        right margin so flex centering pins the LEFT edge exactly where the
@@ -1444,7 +1485,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
        makes the INSTANT widen edge-pinned already; animating it only
        invents motion. */
     .modal.nasa.editor { margin-right: 332px; }
-    .modal.nasa.editor:has(#se-changes.ed:not([hidden])) { width: min(1200px, 98vw); margin-right: 0; }
+    .modal.nasa.editor:has(#se-changes.ed:not([hidden])) { width: min(1252px, 98vw); margin-right: 0; }
 }
 @media (max-width: 1231px) {
     .modal.nasa.editor { margin-right: auto; }   /* near-full-width: grow rightward */

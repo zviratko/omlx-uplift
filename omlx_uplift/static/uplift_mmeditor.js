@@ -124,6 +124,7 @@ function seUpdateSaveBtn() {
         rb.title = C.tf('uplift.se.restart_title',
             'Applies the stored settings by reloading the model now');
     }
+    seUpdateRailBadges();   // SPL-RAIL: badges re-derive from state
     renderEdChanges();
     refreshDivergence();
 }
@@ -414,17 +415,130 @@ function seReloadBadge(keys) {
 function seSection(title) {
     // R10-5: sections read as framed boxes (same language as the settings
     // page gs-boxes / model list rows): inverted header strip, tinted body.
+    // SPL-RAIL (upstream parity #4415, user 2026-10-11): the LLM form shows
+    // ONE section at a time as a vertical tab; hidden boxes stay in the DOM
+    // (classic parity: every row is always RENDERED, visibility drives the
+    // grey-out — so row lookup, gate refresh and dirty marks never change).
     const box = document.createElement('div');
     box.className = 'se-box';
     const h = document.createElement('h5');
     h.className = 'se-section';
     const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    box.dataset.sect = slug;
     h.textContent = C.tf('uplift.se.section.' + slug, title);
     const body = document.createElement('div');
     body.className = 'se-box-body';
     box.append(h, body);
     box.__body = body;
     return box;
+}
+
+/* ---- SPL-RAIL: vertical section tabs (classic #4415's rail, uplift form) ----
+   The nav is a column of .editor-body (built once by editorNode) — rebuilds
+   of #se-fields never touch it, only its items get refilled here. Boxes all
+   stay RENDERED; activation toggles [hidden] so row lookup, gate refresh and
+   dirty marks never change (classic renders every row and greys; uplift
+   additionally pages them behind tabs at the user's request). Badges:
+   amber number = queued changes in that section, red ⟳ = one needs reload. */
+let seActiveSect = null;
+let SE_RAIL_HOST = null;    // cached during construction (panel may be detached)
+
+function seRailHost(container) {
+    const fields = container || document.getElementById('se-fields');
+    if (!fields) return SE_RAIL_HOST;
+    const body = fields.closest('.editor-body');
+    if (!body) return null;
+    SE_RAIL_HOST = { body: body, nav: body.querySelector('.se-rail'), fields: fields };
+    return SE_RAIL_HOST;
+}
+
+function seRailBuild(container) {
+    const h = seRailHost(container); if (!h) return;
+    const boxes = [...container.querySelectorAll('.se-box[data-sect]')];
+    if (boxes.length < 2) {
+        h.body.classList.remove('has-rail');
+        h.nav.textContent = ''; h.nav.hidden = true;
+        return;
+    }
+    h.body.classList.add('has-rail');
+    h.nav.hidden = false;
+    h.nav.textContent = '';
+    h.nav.setAttribute('aria-label', C.tf('uplift.se.rail.label', 'Sections'));
+    for (const b of boxes) {
+        const slug = b.dataset.sect;
+        const title = b.querySelector('.se-section');
+        const it = document.createElement('button');
+        it.type = 'button';
+        it.className = 'se-rail-item';
+        it.dataset.sect = slug;
+        const t = document.createElement('span');
+        t.className = 'se-rail-t';
+        t.textContent = title ? title.textContent : slug;
+        const badge = document.createElement('span');
+        badge.className = 'se-rail-badge'; badge.hidden = true;
+        it.append(t, badge);
+        it.onclick = () => seActivateSection(slug);
+        h.nav.append(it);
+    }
+    const live = boxes.some(b => b.dataset.sect === seActiveSect);
+    seActivateSection(live ? seActiveSect : boxes[0].dataset.sect);
+}
+
+function seActivateSection(slug) {
+    seActiveSect = slug;
+    const h = seRailHost(); if (!h) return;
+    for (const b of h.fields.querySelectorAll('.se-box[data-sect]'))
+        b.hidden = b.dataset.sect !== slug;
+    for (const it of h.nav.querySelectorAll('.se-rail-item')) {
+        const on = it.dataset.sect === slug;
+        it.classList.toggle('active', on);
+        it.setAttribute('aria-selected', on ? 'true' : 'false');
+    }
+    const sc = h.fields.closest('.editor-scroll');
+    if (sc) sc.scrollTop = 0;
+}
+
+/* Section badges re-derive from state, like every other dirty visual.
+   A key whose row is not rendered (gated off this model) simply carries no
+   badge — the CHANGES rail stays the full truth. */
+function seUpdateRailBadges() {
+    const h = seRailHost();
+    if (!h || !h.body.classList.contains('has-rail')) return;
+    const t = seTab(); if (!t) return;
+    const counts = {};
+    const flag = {};
+    const bucket = (k) => {
+        const row = h.fields.querySelector('[data-key="' + k + '"]');
+        const box = row && row.closest('.se-box[data-sect]');
+        return box ? box.dataset.sect : null;
+    };
+    for (const k of t.dirty) {
+        const s = bucket(k); if (!s) continue;
+        counts[s] = (counts[s] || 0) + 1;
+        if (seIsRuntimeKey(k)) flag[s] = true;
+    }
+    // deferred (saved, pending restart) keys: the section awaits the reload
+    for (const k of Object.keys(seDeferred || {})) {
+        const s = bucket(k); if (!s) continue;
+        flag[s] = true;
+        counts[s] = counts[s] || 1;
+    }
+    for (const it of h.nav.querySelectorAll('.se-rail-item')) {
+        const b = it.querySelector('.se-rail-badge');
+        const n = counts[it.dataset.sect] || 0;
+        const restart = !!flag[it.dataset.sect];
+        b.hidden = !n;
+        b.classList.toggle('restart', restart);
+        b.textContent = n ? (restart ? '\u27F3' : String(n)) : '';
+        b.title = restart
+            ? C.tf('uplift.se.rail.restart', 'Changes here need a model reload')
+            : C.tf('uplift.se.rail.pending', 'Queued changes in this section');
+    }
+}
+
+function seRail(container) {
+    seRailBuild(container);
+    seUpdateRailBadges();
 }
 
 /* ---- MT-1: model-type family ------------------------------------------
@@ -562,7 +676,8 @@ function renderEditorFields(container) {
     container.textContent = '';
     let sect = null;
     // R10-5: sections are framed boxes; grid() appends into the open one.
-    const section = (title) => { sect = seSection(title); container.append(sect); return sect.__body; };
+    const section = (title) => { sect = seSection(title);
+        container.append(sect); return sect.__body; };
     const grid = () => { const g = document.createElement('div'); g.className = 'pair';
         (sect ? sect.__body : container).append(g); return g; };
     // R10-14: a toggle's child controls go into an indented sub-block so
@@ -683,90 +798,51 @@ function renderEditorFields(container) {
         }
         seTypeNote(container);
         seRefreshGates(container);
+        { const h = seRailHost(container);       // SPL-RAIL: one box = no nav
+          if (h) { h.body.classList.remove('has-rail'); h.nav.textContent = ''; h.nav.hidden = true; } }
         seReapplyMarks();
         return;
     }
 
-    /* ---- context & limits (R10-5: pulled out of Basic/Advanced) ---- */
-    section('Context & Limits');
-    g = grid();
-    g.append(seBind('number', 'max_context_window', { label: 'Ctx Window', step: 1 }));
-    g.append(seBind('number', 'max_tokens', { label: 'Max Tokens', step: 1 }));
-    g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1 }));
-    g.append(seBind('bool', 'trust_remote_code', { label: 'Trust Remote Code',
-        hint: 'Lets the model repo run arbitrary Python at load. Only enable for trusted repos.' }));
+    /* ---- SPL-RAIL (upstream #4415, user 2026-10-11): the form mirrors
+       classic's section split — Basic / Generation Defaults /
+       Acceleration / Memory Saving / Advanced / Experimental — shown
+       as vertical tabs (one box visible; hidden boxes stay RENDERED so
+       row lookup, gate refresh and dirty marks never change). Field
+       membership follows classic _modal_model_settings.html exactly. ---- */
 
-    /* ---- thinking & reasoning (R10-5 split out of Advanced) ---- */
-    section('Thinking & Reasoning');
-    g = grid();
-    if (!S.isDiffusion(m)) {
-        if (m.thinking_default !== undefined && m.thinking_default !== null || seValues.enable_thinking != null) {
-            const tv = seValues.enable_thinking;
-            g.append(seBind('select', 'enable_thinking', {
-                label: C.tf('uplift.ui.enable_thinking', 'Enable Thinking'), disabled: !!m.thinking_forced,
-                hint: 'Enable reasoning/thinking mode for this model.',
-                options: [{ value: '', label: m.thinking_default === true
-                               ? 'Using model default (on)' : 'Using model default (off)' },
-                          { value: 'true', label: 'On' }, { value: 'false', label: 'Off' }],
-            }));
-            // select needs string values; store real bool/null back
-            const sel = g.lastChild.querySelector('select');
-            sel.value = tv === true ? 'true' : tv === false ? 'false' : '';
-            sel.addEventListener('change', () => {
-                seValues.enable_thinking = sel.value === '' ? null : sel.value === 'true'; });
-        }
-        // NOTE: preserve_thinking has NO widget in the classic modal (it only
-        // appears in the diffusion unsupported-field lists) — parity: none here.
-        if (seValues.reasoning_parser !== undefined || m.reasoning_parsers) {
-            // R10-7: classic fills this list from /admin/api/grammar/parsers
-            // (xgrammar builtin registry); model-reported list is usually empty.
-            const seen = new Set();
-            const rp = [{ value: '', label: 'None' }];
-            const add = (value, label) => {
-                if (!value || seen.has(value)) return;
-                seen.add(value); rp.push({ value, label: label != null ? label : value });
-            };
-            (GRAMMAR_PARSERS || []).forEach(p => add(p.value,
-                p.label + (p.models && p.models.length ? ' (' + p.models.join(', ') + ')' : '')));
-            (m.reasoning_parsers || []).forEach(v => add(v));
-            add(seValues.reasoning_parser || '');
-            g.append(seBind('select', 'reasoning_parser', { label: 'Reasoning Parser', options: rp }));
-        }
-        seFam(g, 'enableThinkingBudget',
-            seBind('bool', 'enableThinkingBudget', { label: 'Thinking Budget',
-                hint: 'Limit thinking tokens for reasoning models.' }),
-            [seBind('number', 'thinking_budget_tokens',
-                { label: C.tf('uplift.ui.thinking_budget_tokens', 'Thinking budget (tokens)'), min: 1, step: 1 })]);
-        // cache_reasoning_output: tri-state (null = auto: cache when history
-        // preserves <think>). Upstream #3525; classic modal has no widget —
-        // additive, same keys as the API.
-        {
-            const cv = seValues.cache_reasoning_output;
-            g.append(seBind('select', 'cache_reasoning_output', {
-                label: C.tf('uplift.ui.cache_reasoning_output', 'Cache Reasoning Output'),
-                hint: 'Cache <think> output for the next turn. Auto = only when history keeps it.',
-                options: [{ value: '', label: 'Auto' },
-                          { value: 'true', label: 'Always' },
-                          { value: 'false', label: 'Never' }],
-            }));
-            const sel = g.lastChild.querySelector('select');
-            sel.value = cv === true ? 'true' : cv === false ? 'false' : '';
-            sel.addEventListener('change', () => {
-                seValues.cache_reasoning_output =
-                    sel.value === '' ? null : sel.value === 'true'; });
-        }
-        seFam(g, 'enableToolResultLimit',
-            seBind('bool', 'enableToolResultLimit', { label: 'Limit Tool Result Tokens',
-                hint: 'Truncate large tool results (e.g. file reads) to a token limit.' }),
-            [seBind('number', 'max_tool_result_tokens',
-                { label: C.tf('uplift.ui.tool_result_token_limit', 'Tool result token limit'), min: 1, step: 1 })]);
-    }
-
-    section('Sampling');
+    /* ---- basic: identity + thinking switch + TTL (classic ms-basic) ---- */
+    section('Basic Settings');
     g = grid();
     if (seIsBaseTab() || !seTab().template)
         g.append(aliasRow());
     g.append(typeRow());
+    if (!S.isDiffusion(m))
+            if (m.thinking_default !== undefined && m.thinking_default !== null || seValues.enable_thinking != null) {
+                const tv = seValues.enable_thinking;
+                g.append(seBind('select', 'enable_thinking', {
+                    label: C.tf('uplift.ui.enable_thinking', 'Enable Thinking'), disabled: !!m.thinking_forced,
+                    hint: 'Enable reasoning/thinking mode for this model.',
+                    options: [{ value: '', label: m.thinking_default === true
+                                   ? 'Using model default (on)' : 'Using model default (off)' },
+                              { value: 'true', label: 'On' }, { value: 'false', label: 'Off' }],
+                }));
+                // select needs string values; store real bool/null back
+                const sel = g.lastChild.querySelector('select');
+                sel.value = tv === true ? 'true' : tv === false ? 'false' : '';
+                sel.addEventListener('change', () => {
+                    seValues.enable_thinking = sel.value === '' ? null : sel.value === 'true'; });
+            }
+    g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1,
+        hint: 'Unloads the model automatically after it stays idle this long.' }));
+
+    /* ---- generation defaults: context, length, sampling (classic ms-generation) ---- */
+    section('Generation Defaults');
+    g = grid();
+    g.append(seBind('number', 'max_context_window', { label: 'Context Window', step: 1,
+        hint: 'Sets the total context size the model can handle. Longer prompts are rejected.' }));
+    g.append(seBind('number', 'max_tokens', { label: 'Max Tokens', step: 1,
+        hint: 'Limits how many tokens the model generates in one turn when the request does not set max_tokens.' }));
     const sampling = [
         ['temperature', 0, 2, 0.05, 'Temperature'], ['top_p', 0, 1, 0.05, 'Top P'],
         ['top_k', 0, null, 1, 'Top K'], ['repetition_penalty', 0.5, 2, 0.01, 'Repetition Penalty'],
@@ -782,17 +858,133 @@ function renderEditorFields(container) {
     g.append(seBind('bool', 'force_sampling', { label: 'Force Sampling',
         hint: 'Override request sampling parameters with configured values' }));
 
-    /* ---- acceleration (kept: engine-level, not spec decode) ---- */
+    /* ---- acceleration: the whole speculative-decode stack + prefill
+       engines (classic ms-acceleration; absorbs the old Speculative
+       Decoding and DFlash sections) ---- */
     section('Acceleration');
     g = grid();
-    if (!S.isDiffusion(m)) {
-        // UX-5: one family band [toggle | frequency]; the knob keeps its
-        // own ⟳RELOAD badge — hot-apply master, reload-triggered child.
-        seFam(g, 'enableIndexCache',
-            seBind('bool', 'enableIndexCache', { label: 'Index Cache',
-                hint: 'Skip redundant indexer computation in DSA layers (DeepSeek V3/GLM-5).' }),
-            [seBind('number', 'index_cache_freq',
-                { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 1, step: 1 })]);
+    const models = MM_STATE.adminModels.length ? MM_STATE.adminModels : [];
+    const S_ = window.UpliftModelSpec;
+    if (!S_.isDiffusion(m)) {
+        // round 6 item 4: DFlash keeps its band header INSIDE the
+        // Acceleration box (classic moved it here); a fresh grid below a
+        // subhead never breaks the pair tracks (UX-5 rule).
+            if (seValues.mtp_enabled !== undefined) {
+                // UX-5: one band [toggle | depth] (both keys share reload
+                // semantics); no re-render, no reflow
+                seFam(g, 'mtp_enabled',
+                    seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
+                        hint: m.mtp_compatible
+                            ? "Drafts several tokens per step with the model's built-in MTP head."
+                            : (m.mtp_compatibility_reason || 'Not compatible with this model') }),
+                    [seBind('select', 'mtp_adaptive_max_depth', {
+                        label: C.tf('uplift.se.mtp_depth', 'Adaptive max depth'),
+                        hint: C.tf('uplift.se.mtp_depth.hint',
+                            'Automatically adjusts the draft depth up to the selected maximum.'),
+                        options: [{ value: '3', label: '3 tokens (Default)' },
+                                  ...[4, 5, 6].map(n => ({ value: String(n),
+                                      label: C.tf('uplift.se.mtp_depth.opt.' + n, n + ' tokens')}))]})]);
+            }
+
+            const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
+            if (seValues.vlm_mtp_enabled !== undefined &&
+                S_.VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES.has(drafterType)) {
+                g.append(seBind('bool', 'vlm_mtp_enabled', { label: 'VLM MTP',
+                    hint: 'Uses an external drafter from mlx-vlm (Gemma 4 assistant or Qwen MTP) instead of the built-in Lightning MTP drafter.' }));
+                const sb = seGate(sub(g), 'vlm_mtp_enabled');
+                const pool = S_.vlmMtpDrafters(models, m.id).map(x => ({ value: x.id }));
+                sb.append(seBind('select', 'vlm_mtp_draft_model', { label: 'Drafter model', options: [
+                    { value: '', label: 'Select an assistant or MTP drafter…' }, ...pool], picker: true }));
+                sb.append(seBind('number', 'vlm_mtp_draft_block_size',
+                    { label: C.tf('uplift.ui.draft_block_size_tokens_per_round_blank_4', 'Draft block size (tokens per round, blank = 4)'), step: 1 }));
+            }
+
+        const dfh = document.createElement('div');
+        dfh.className = 'se-subhead'; dfh.textContent = 'DFlash';
+        sect.__body.append(dfh);
+        g = grid();
+            if (seValues.dflash_enabled !== undefined) {
+                // UX-2: the whole knob family is always rendered and greyed
+                // while DFlash is off (old reflow popped it into existence,
+                // and on a profile tab the toggle snapped back — stale workVals)
+                g.append(seBind('bool', 'dflash_enabled', { label: 'DFlash',
+                    hint: m.dflash_compatible === false ? (m.dflash_compatibility_reason || 'not compatible') : '' }));
+                const sb = seGate(sub(g), 'dflash_enabled');
+                const pool = S_.dflashCandidates(models, m.id).map(x => ({ value: x.id }));
+                sb.append(seBind('select', 'dflash_draft_model',
+                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
+                sb.append(seBind('bool', 'dflash_draft_quant_enabled', { label: 'Quantization' }));
+                const quantBox = seGate(seGatedDiv('se-sub'), 'dflash_draft_quant_enabled');
+                quantBox.append(
+                    seBind('select', 'dflash_draft_quant_weight_bits', { label: 'Weight Bits', options: [
+                        { value: 2, label: '2-bit' }, { value: 4, label: '4-bit' }, { value: 8, label: '8-bit' }], picker: true }),
+                    seBind('select', 'dflash_draft_quant_activation_bits', { label: 'Activation Bits', options: [
+                        { value: 16, label: '16-bit' }, { value: 32, label: '32-bit' }], picker: true }),
+                    seBind('number', 'dflash_draft_quant_group_size', { label: 'Group Size', min: 16, max: 256, step: 16 }));
+                sb.append(quantBox);
+                sb.append(seBind('number', 'dflash_max_ctx', { label: 'Max Context (fallback threshold)', step: 1 }));
+                sb.append(seBind('bool', 'dflash_in_memory_cache', { label: 'In-memory cache' }));
+                const cacheBox = seGate(seGatedDiv('se-sub'), 'dflash_in_memory_cache');
+                cacheBox.append(
+                    seBind('number', 'dflash_in_memory_cache_max_entries',
+                        { label: C.tf('uplift.ui.in_memory_cache_max_entries', 'In-memory cache max entries'), min: 1, step: 1 }),
+                    seBind('number', 'dflash_in_memory_cache_max_gib',
+                        { label: C.tf('uplift.ui.in_memory_cache_size_gib', 'In-memory cache size (GiB)'), min: 1, step: 1,
+                          hint: 'Byte budget for L1 snapshots; LRU evicts when exceeded.' }));
+                if (seValues.dflash_ssd_cache_available) {
+                    cacheBox.append(seBind('bool', 'dflash_ssd_cache', { label: 'SSD cache',
+                        hint: 'Requires in-memory cache to be enabled.' }));
+                    seGate(seGatedDiv(), 'dflash_ssd_cache').append(
+                        seBind('number', 'dflash_ssd_cache_max_gib',
+                            { label: C.tf('uplift.ui.ssd_cache_size_gib', 'SSD cache size (GiB)'), min: 1, step: 1 }));
+                    cacheBox.appendChild(cacheBox.lastChild);
+                }
+                sb.append(cacheBox);
+                sb.append(seBind('number', 'dflash_draft_window_size', { label: 'Draft window size' }));
+                sb.append(seBind('number', 'dflash_draft_sink_size', { label: 'Draft sink size', min: 0, step: 1 }));
+                sb.append(seBind('number', 'dflash_block_size', { label: 'Runtime block size', step: 1 }));
+                sb.append(seBind('select', 'dflash_verify_mode', { label: 'Verify mode', options: [
+                    { value: 'adaptive', label: 'adaptive (default)' },
+                    { value: 'dflash', label: 'dflash' },
+                    { value: 'ddtree', label: 'ddtree' }], picker: true }));
+            }
+    }
+    if (seValues.deepseek_v41_ced_prefill_supported)
+        g.append(seBind('bool', 'deepseek_v41_ced_prefill_enabled',
+            { label: C.tf('uplift.ui.ced_prefill_acceleration_deepseek_v4_1', 'CED Prefill Acceleration (DeepSeek V4.1)'),
+              hint: 'Improves prefill speed by approximately 74-79% in tested configuration.' }));
+    if (S.isQwenOqA8(m)) {
+        seFam(g, 'qwen35_oq_a8_enabled',
+            seBind('bool', 'qwen35_oq_a8_enabled', { label: 'Qwen INT8 Activation Prefill',
+                hint: 'Experimental GPU INT8 activation quantization for supported Q4/Q5/Q8 prefill.' }),
+            [seBind('number', 'qwen35_oq_a8_min_tokens',
+                { label: C.tf('uplift.ui.minimum_prompt_tokens', 'Minimum prompt tokens'), min: 1, step: 1 })]);
+    }
+
+    /* ---- memory saving (classic ms-memory): offload + KV quantization ---- */
+    section('Memory Saving');
+    g = grid();
+    if (m.qwen4_ple_ssd_offload_supported || m.deepseek_v41_engram_ssd_offload_supported
+            || seValues.qwen4_ple_ssd_offload || seValues.deepseek_v41_engram_ssd_offload) {
+        // classic #4415 merged the two per-family rows into ONE 'SSD
+        // N-gram Offload' (ssdNgramOffloadKey): the server keeps both
+        // keys, a model exposes at most one family — resolve the same way.
+        const isQwen = m.qwen4_ple_ssd_offload_supported || !!seValues.qwen4_ple_ssd_offload;
+        const k = isQwen ? 'qwen4_ple_ssd_offload' : 'deepseek_v41_engram_ssd_offload';
+        const forced = isQwen ? m.qwen4_ple_ssd_offload_forced
+                              : m.deepseek_v41_engram_ssd_offload_forced;
+        g.append(seBind('bool', k, { label: 'SSD N-gram Offload',
+            hint: forced
+                ? 'Required because resident loading exceeds the configured model-memory limit.'
+                : 'Keeps the large N-gram table (Qwen4 PLE or DeepSeek V4.1 Engram) on SSD and reads only the rows it needs. Saves memory, but speed depends on SSD reads. Changing this setting reloads the model.',
+            disabled: !!forced }));
+    }
+    if (m.moe_expert_offload_supported && !S.isDiffusion(m)) {
+        seFam(g, 'moe_expert_offload_enabled',
+            seBind('bool', 'moe_expert_offload_enabled', { label: 'MoE Expert Offload',
+                hint: 'Stream Mixture-of-Experts weights from the checkpoint on demand, keeping only part resident.' }),
+            [seBind('number', 'moe_expert_offload_resident_fraction',
+                { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.01, max: 1, step: 0.01 })]);
     }
     if (seValues.turboquant_kv_enabled !== undefined) {
         // U41: no diffusion gate — classic shows TurboQuant for every model
@@ -808,146 +1000,48 @@ function renderEditorFields(container) {
                 { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
                   options: [2, 2.5, 3, 3.5, 4, 6, 8].map(v => ({ value: String(v), label: v + '-bit' })) })]);
     }
-    if (m.qwen4_ple_ssd_offload_supported || seValues.qwen4_ple_ssd_offload)
-        g.append(seBind('bool', 'qwen4_ple_ssd_offload', { label: 'SSD N-gram Offload (Qwen4 only)',
-            hint: m.qwen4_ple_ssd_offload_forced
-                ? 'Required because resident loading exceeds the configured model-memory limit.'
-                : 'Keep the large PLE N-gram table on SSD and read only the required rows.',
-            disabled: !!m.qwen4_ple_ssd_offload_forced }));
-    if (seValues.deepseek_v41_ced_prefill_supported)
-        g.append(seBind('bool', 'deepseek_v41_ced_prefill_enabled',
-            { label: C.tf('uplift.ui.ced_prefill_acceleration_deepseek_v4_1', 'CED Prefill Acceleration (DeepSeek V4.1)'),
-              hint: 'Improves prefill speed by approximately 74-79% in tested configuration.' }));
-    if (m.deepseek_v41_engram_ssd_offload_supported)
-        g.append(seBind('bool', 'deepseek_v41_engram_ssd_offload', {
-            label: C.tf('uplift.ui.ssd_n_gram_offload_deepseek_v4_1', 'SSD N-gram Offload (DeepSeek V4.1)'),
-            hint: m.deepseek_v41_engram_ssd_offload_forced
-                ? 'Required because resident loading exceeds the configured model-memory limit.'
-                : 'Keep Engram tables on SSD and prefetch required rows. Saves memory; speed depends on storage.',
-            disabled: !!m.deepseek_v41_engram_ssd_offload_forced }));
-    if (m.moe_expert_offload_supported && !S.isDiffusion(m)) {
-        seFam(g, 'moe_expert_offload_enabled',
-            seBind('bool', 'moe_expert_offload_enabled', { label: 'MoE Expert Offload',
-                hint: 'Stream Mixture-of-Experts weights from the checkpoint on demand, keeping only part resident.' }),
-            [seBind('number', 'moe_expert_offload_resident_fraction',
-                { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.01, max: 1, step: 0.01 })]);
-    }
-    if (S.isQwenOqA8(m)) {
-        seFam(g, 'qwen35_oq_a8_enabled',
-            seBind('bool', 'qwen35_oq_a8_enabled', { label: 'Qwen INT8 Activation Prefill',
-                hint: 'Experimental GPU INT8 activation quantization for supported Q4/Q5/Q8 prefill.' }),
-            [seBind('number', 'qwen35_oq_a8_min_tokens',
-                { label: C.tf('uplift.ui.minimum_prompt_tokens', 'Minimum prompt tokens'), min: 1, step: 1 })]);
-    }
-    if (m.ane_prefill_backend && !S.isDiffusion(m)) renderAne(container, g);
 
-    /* ---- speculative decode (R10-5 rename) ---- */
-    section('Speculative Decoding');
+    /* ---- advanced (classic ms-advanced): security, reasoning, limits,
+       grammar, parser, chat-template kwargs ---- */
+    section('Advanced Settings');
     g = grid();
-    const models = MM_STATE.adminModels.length ? MM_STATE.adminModels : [];
-    const S_ = window.UpliftModelSpec;
-    if (!S_.isDiffusion(m)) {
-        if (seValues.specprefill_enabled !== undefined) {
-            const pool = S_.specprefillCandidates(models, m.id).map(x => ({ value: x.id }));
-            // UX-5 (user): ONE band, four cells, TWO balanced lines —
-            // [toggle | draft model] then [keep rate | threshold]
-            seFam(g, 'specprefill_enabled',
-                seBind('bool', 'specprefill_enabled', { label: 'SpecPrefill' }),
-                [seBind('select', 'specprefill_draft_model',
-                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }),
-                 seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
-                    { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
-                    { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
-                    { value: '0.25', label: '25% — Conservative+ (~2.5x)' },
-                    { value: '0.3', label: '30% — Conservative (~2.2x)' },
-                    { value: '0.4', label: '40% — Mild (~1.8x)' },
-                    { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true }),
-                 seBind('number', 'specprefill_threshold',
-                    { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 })]);
-        }
-        if (seValues.mtp_enabled !== undefined) {
-            // UX-5: one band [toggle | depth] (both keys share reload
-            // semantics); no re-render, no reflow
-            seFam(g, 'mtp_enabled',
-                seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
-                    hint: m.mtp_compatible
-                        ? "Drafts several tokens per step with the model's built-in MTP head."
-                        : (m.mtp_compatibility_reason || 'Not compatible with this model') }),
-                [seBind('select', 'mtp_adaptive_max_depth', {
-                    label: C.tf('uplift.se.mtp_depth', 'Adaptive max depth'),
-                    hint: C.tf('uplift.se.mtp_depth.hint',
-                        'Automatically adjusts the draft depth up to the selected maximum.'),
-                    options: [{ value: '3', label: '3 tokens (Default)' },
-                              ...[4, 5, 6].map(n => ({ value: String(n),
-                                  label: C.tf('uplift.se.mtp_depth.opt.' + n, n + ' tokens')}))]})]);
-        }
-        const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
-        if (seValues.vlm_mtp_enabled !== undefined &&
-            S_.VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES.has(drafterType)) {
-            g.append(seBind('bool', 'vlm_mtp_enabled', { label: 'VLM MTP',
-                hint: 'Speculative decoding via an external MTP drafter model.' }));
-            const sb = seGate(sub(g), 'vlm_mtp_enabled');
-            const pool = S_.vlmMtpDrafters(models, m.id).map(x => ({ value: x.id }));
-            sb.append(seBind('select', 'vlm_mtp_draft_model', { label: 'Drafter model', options: [
-                { value: '', label: 'Select an assistant or MTP drafter…' }, ...pool], picker: true }));
-            sb.append(seBind('number', 'vlm_mtp_draft_block_size',
-                { label: C.tf('uplift.ui.draft_block_size_tokens_per_round_blank_4', 'Draft block size (tokens per round, blank = 4)'), step: 1 }));
-        }
-        // round 6 item 4: DFlash is its own section, not grouped under
-        // Speculative Decoding (different mechanism — block diffusion).
-        // Header only when the field set actually exists for this model.
-        if (seValues.dflash_enabled !== undefined) {
-            section('DFlash');
-            g = grid();
-            // UX-2: the whole knob family is always rendered and greyed
-            // while DFlash is off (old reflow popped it into existence,
-            // and on a profile tab the toggle snapped back — stale workVals)
-            g.append(seBind('bool', 'dflash_enabled', { label: 'DFlash',
-                hint: m.dflash_compatible === false ? (m.dflash_compatibility_reason || 'not compatible') : '' }));
-            const sb = seGate(sub(g), 'dflash_enabled');
-            const pool = S_.dflashCandidates(models, m.id).map(x => ({ value: x.id }));
-            sb.append(seBind('select', 'dflash_draft_model',
-                { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
-            sb.append(seBind('bool', 'dflash_draft_quant_enabled', { label: 'Quantization' }));
-            const quantBox = seGate(seGatedDiv('se-sub'), 'dflash_draft_quant_enabled');
-            quantBox.append(
-                seBind('select', 'dflash_draft_quant_weight_bits', { label: 'Weight Bits', options: [
-                    { value: 2, label: '2-bit' }, { value: 4, label: '4-bit' }, { value: 8, label: '8-bit' }], picker: true }),
-                seBind('select', 'dflash_draft_quant_activation_bits', { label: 'Activation Bits', options: [
-                    { value: 16, label: '16-bit' }, { value: 32, label: '32-bit' }], picker: true }),
-                seBind('number', 'dflash_draft_quant_group_size', { label: 'Group Size', min: 16, max: 256, step: 16 }));
-            sb.append(quantBox);
-            sb.append(seBind('number', 'dflash_max_ctx', { label: 'Max Context (fallback threshold)', step: 1 }));
-            sb.append(seBind('bool', 'dflash_in_memory_cache', { label: 'In-memory cache' }));
-            const cacheBox = seGate(seGatedDiv('se-sub'), 'dflash_in_memory_cache');
-            cacheBox.append(
-                seBind('number', 'dflash_in_memory_cache_max_entries',
-                    { label: C.tf('uplift.ui.in_memory_cache_max_entries', 'In-memory cache max entries'), min: 1, step: 1 }),
-                seBind('number', 'dflash_in_memory_cache_max_gib',
-                    { label: C.tf('uplift.ui.in_memory_cache_size_gib', 'In-memory cache size (GiB)'), min: 1, step: 1,
-                      hint: 'Byte budget for L1 snapshots; LRU evicts when exceeded.' }));
-            if (seValues.dflash_ssd_cache_available) {
-                cacheBox.append(seBind('bool', 'dflash_ssd_cache', { label: 'SSD cache',
-                    hint: 'Requires in-memory cache to be enabled.' }));
-                seGate(seGatedDiv(), 'dflash_ssd_cache').append(
-                    seBind('number', 'dflash_ssd_cache_max_gib',
-                        { label: C.tf('uplift.ui.ssd_cache_size_gib', 'SSD cache size (GiB)'), min: 1, step: 1 }));
-                cacheBox.appendChild(cacheBox.lastChild);
+    g.append(seBind('bool', 'trust_remote_code', { label: 'Trust Remote Code',
+        hint: 'Lets the model repo run arbitrary Python at load. Only enable for trusted repos.' }));
+    if (!S.isDiffusion(m)) {
+        // NOTE: preserve_thinking has NO widget in the classic modal (it
+        // only appears in the diffusion unsupported-field lists) — parity:
+        // none here.
+            seFam(g, 'enableThinkingBudget',
+                seBind('bool', 'enableThinkingBudget', { label: 'Thinking Budget',
+                    hint: 'Limit thinking tokens for reasoning models.' }),
+                [seBind('number', 'thinking_budget_tokens',
+                    { label: C.tf('uplift.ui.thinking_budget_tokens', 'Thinking budget (tokens)'), min: 1, step: 1 })]);
+
+        // cache_reasoning_output: tri-state (null = auto: cache when
+        // history preserves think-tags). Upstream #3525; additive,
+        // same keys as the API.
+            {
+                const cv = seValues.cache_reasoning_output;
+                g.append(seBind('select', 'cache_reasoning_output', {
+                    label: C.tf('uplift.ui.cache_reasoning_output', 'Cache Reasoning Output'),
+                    hint: 'Cache <think> output for the next turn. Auto = only when history keeps it.',
+                    options: [{ value: '', label: 'Auto' },
+                              { value: 'true', label: 'Always' },
+                              { value: 'false', label: 'Never' }],
+                }));
+                const sel = g.lastChild.querySelector('select');
+                sel.value = cv === true ? 'true' : cv === false ? 'false' : '';
+                sel.addEventListener('change', () => {
+                    seValues.cache_reasoning_output =
+                        sel.value === '' ? null : sel.value === 'true'; });
             }
-            sb.append(cacheBox);
-            sb.append(seBind('number', 'dflash_draft_window_size', { label: 'Draft window size' }));
-            sb.append(seBind('number', 'dflash_draft_sink_size', { label: 'Draft sink size', min: 0, step: 1 }));
-            sb.append(seBind('number', 'dflash_block_size', { label: 'Runtime block size', step: 1 }));
-            sb.append(seBind('select', 'dflash_verify_mode', { label: 'Verify mode', options: [
-                { value: 'adaptive', label: 'adaptive (default)' },
-                { value: 'dflash', label: 'dflash' },
-                { value: 'ddtree', label: 'ddtree' }], picker: true }));
-        }
-    }
 
-    /* ---- grammar (R10-5: own section, wide mono textarea) ---- */
-    section('Grammar');
-    g = grid();
+            seFam(g, 'enableToolResultLimit',
+                seBind('bool', 'enableToolResultLimit', { label: 'Limit Tool Result Tokens',
+                    hint: 'Truncate large tool results (e.g. file reads) to a token limit.' }),
+                [seBind('number', 'max_tool_result_tokens',
+                    { label: C.tf('uplift.ui.tool_result_token_limit', 'Tool result token limit'), min: 1, step: 1 })]);
+    }
     if (!S.isDiffusion(m)) {
         const ggWrap = seBind('textarea', 'guided_grammar', {
             // FE-7: label key, NOT uplift.ui.guided_grammar — that one is
@@ -1025,14 +1119,75 @@ function renderEditorFields(container) {
         gsb.append(ggGate);
     }
 
-    /* chat-template kwargs (subset: key/value rows, add/remove) */
-    if (!S.isDiffusion(m)) renderCtKwargs(section('Chat Template Kwargs'));
+    if (!S.isDiffusion(m))
+            if (seValues.reasoning_parser !== undefined || m.reasoning_parsers) {
+                // R10-7: classic fills this list from /admin/api/grammar/parsers
+                // (xgrammar builtin registry); model-reported list is usually empty.
+                const seen = new Set();
+                const rp = [{ value: '', label: 'None' }];
+                const add = (value, label) => {
+                    if (!value || seen.has(value)) return;
+                    seen.add(value); rp.push({ value, label: label != null ? label : value });
+                };
+                (GRAMMAR_PARSERS || []).forEach(p => add(p.value,
+                    p.label + (p.models && p.models.length ? ' (' + p.models.join(', ') + ')' : '')));
+                (m.reasoning_parsers || []).forEach(v => add(v));
+                add(seValues.reasoning_parser || '');
+                g.append(seBind('select', 'reasoning_parser', { label: 'Reasoning Parser', options: rp }));
+            }
+
+    /* chat-template kwargs: classic ms-advanced — join the open box */
+    if (!S.isDiffusion(m)) {
+        const kwh = document.createElement('div');
+        kwh.className = 'se-subhead'; kwh.textContent = 'Chat Template Kwargs';
+        sect.__body.append(kwh);
+        renderCtKwargs(sect.__body);
+    }
+
+    /* ---- experimental (classic ms-experimental): ANE + index cache + SpecPrefill ---- */
+    section('Experimental Features');
+    g = grid();
+    if (!S.isDiffusion(m))
+            seFam(g, 'enableIndexCache',
+                seBind('bool', 'enableIndexCache', { label: 'Index Cache',
+                    hint: 'Skip redundant indexer computation in DSA layers (DeepSeek V3/GLM-5).' }),
+                [seBind('number', 'index_cache_freq',
+                    { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 1, step: 1 })]);
+    // ANE prompt processing lives in the same section as classic
+    const gAne = document.createElement('div');
+    gAne.className = 'pair'; sect.__body.append(gAne);
+    if (m.ane_prefill_backend && !S.isDiffusion(m)) renderAne(container, gAne);
+    if (!S_.isDiffusion(m)) {
+        const sph = document.createElement('div');
+        sph.className = 'se-subhead'; sph.textContent = 'SpecPrefill';
+        sect.__body.append(sph);
+        g = grid();
+            if (seValues.specprefill_enabled !== undefined) {
+                const pool = S_.specprefillCandidates(models, m.id).map(x => ({ value: x.id }));
+                // UX-5 (user): ONE band, four cells, TWO balanced lines —
+                // [toggle | draft model] then [keep rate | threshold]
+                seFam(g, 'specprefill_enabled',
+                    seBind('bool', 'specprefill_enabled', { label: 'SpecPrefill' }),
+                    [seBind('select', 'specprefill_draft_model',
+                        { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }),
+                     seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
+                        { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
+                        { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
+                        { value: '0.25', label: '25% — Conservative+ (~2.5x)' },
+                        { value: '0.3', label: '30% — Conservative (~2.2x)' },
+                        { value: '0.4', label: '40% — Mild (~1.8x)' },
+                        { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true }),
+                     seBind('number', 'specprefill_threshold',
+                        { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 })]);
+            }
+    }
 
     // MT-1: explain the gate when an override flips an LLM to another family
     seTypeNote(container);
     // UX-2: grey out every gated family whose master switch is off
     seRefreshGates(container);
     seReapplyMarks();
+    seRail(container);   // SPL-RAIL: rebuild section nav after the boxes
 }
 
 /* ANE prompt processing (classic modal renders a Qwen variant and, for
@@ -1246,9 +1401,13 @@ function editorNode() {
     // queued the panel widens and the box appears as a side rail
     const bodyRow = document.createElement('div');
     bodyRow.className = 'editor-body';
+    // SPL-RAIL: vertical section tabs, a column left of the form (classic
+    // #4415's settings-rail pattern in uplift shape); built once per editor
+    const nav = document.createElement('nav');
+    nav.className = 'se-rail'; nav.hidden = true;
     const changes = document.createElement('div');
     changes.id = 'se-changes'; changes.className = 'changelist ed'; changes.hidden = true;
-    bodyRow.append(scroll, changes);
+    bodyRow.append(nav, scroll, changes);
     const save = document.createElement('button');
     save.className = 'se-btn'; save.textContent = 'Save'; save.id = 'se-save';
     // item 3: separate honest reload action — hidden until runtime-signature
@@ -1311,6 +1470,7 @@ function openGrammarPop(srcTa, btn) {
 function closeEditor() {
     if (seModel) CHIPS.clearProfileCache(seModel);   // tree must show new profiles
     seModel = null; seFormModel = null;
+    seActiveSect = null; SE_RAIL_HOST = null;
     renderModelAdmin(); // rows were frozen while the editor was open
     document.querySelectorAll('.editor-overlay').forEach(n => n.remove());
     document.querySelectorAll('.row-editor').forEach(n => n.remove());
@@ -1350,6 +1510,7 @@ async function openEditor(model, profileName, templateName) {
     seOrig = JSON.parse(JSON.stringify(seValues));
     seBaseVals = JSON.parse(JSON.stringify(seValues));
     seTabs = [{ id: 'base', dirty: new Set(), origVals: JSON.parse(JSON.stringify(seOrig)) }];
+    seActiveSect = null; SE_RAIL_HOST = null;   // SPL-RAIL: fresh editor, fresh tab state
     seActiveTab = 'base';
     window.__seDeferred = () => seDeferred;   // debug handle (__upLayout pattern)
     // is_hidden/is_favorite/is_default/pinned are toggled from the models ROW
@@ -1407,6 +1568,7 @@ async function openTemplateEditor(name) {
     seOrig = JSON.parse(JSON.stringify(seValues));
     seBaseVals = JSON.parse(JSON.stringify(seValues));
     seTabs = [{ id: 'base', dirty: new Set(), origVals: JSON.parse(JSON.stringify(seOrig)) }];
+    seActiveSect = null; SE_RAIL_HOST = null;   // SPL-RAIL: fresh editor, fresh tab state
     seActiveTab = 'base';
     const panel = editorNode();
     panel.querySelector('.editor-head').textContent =

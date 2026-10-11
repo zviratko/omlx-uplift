@@ -35,7 +35,7 @@ Design notes:
 
 import json
 
-VERSION = "3"
+VERSION = "4"   # v4: SPL-RAIL — classic #4415 section split as vertical tabs
 
 # viewport widths the editor must be correct at; 782 is the pair-grid
 # breakpoint, 1232 the rail flow/overlay breakpoint
@@ -43,10 +43,25 @@ WIDTHS = (700, 900, 1024, 1280, 1728)
 PAIR_TWO_COL_MIN = 782
 RAIL_RESERVE_MIN = 1232
 
+# SPL-RAIL: classic's #4415 split (upstream _modal_model_settings.html);
+# DFlash/SpecPrefill/kwargs are band subheads INSIDE their parent section.
 SECTIONS_IN_ORDER = [
-    "Context & Limits", "Thinking & Reasoning", "Sampling", "Acceleration",
-    "Speculative Decoding", "DFlash", "Grammar", "Chat Template Kwargs",
+    "Basic Settings", "Generation Defaults", "Acceleration",
+    "Memory Saving", "Advanced Settings", "Experimental Features",
 ]
+SECTION_SLUGS = ["basic_settings", "generation_defaults", "acceleration",
+                 "memory_saving", "advanced_settings", "experimental_features"]
+# key -> owning section slug (for tab activation before clicking)
+KEY_SECT = {
+    "turboquant_kv_enabled": "memory_saving",
+    "turboquant_kv_bits": "memory_saving",
+    "enableThinkingBudget": "advanced_settings",
+    "thinking_budget_tokens": "advanced_settings",
+    "specprefill_enabled": "experimental_features",
+    "guided_grammar_enabled": "advanced_settings",
+    "guided_grammar": "advanced_settings",
+    "max_context_window": "generation_defaults",
+}
 
 # (master toggle key, dependent knob key) — must share a line at >=782px
 PAIRED = [
@@ -139,7 +154,10 @@ class Suite:
         return best, best_n, len(keys)
 
     def _probe(self):
-        """One JS pass returning every measurement for the current state.
+        """Measure with every box visible (rail paging must not change
+        per-section geometry — seProbeUnhide flips [hidden] off first).
+
+        One JS pass returning every measurement for the current state.
 
         Field presence is model-dependent (specprefill exists only for
         drafter-compatible architectures, DFlash only when the field set
@@ -150,6 +168,7 @@ class Suite:
         out = self._eval("""(() => {
           const f = document.querySelector('#se-fields');
           if (!f) return {err: 'editor not open'};
+          for (const b of f.querySelectorAll('.se-box[hidden]')) b.hidden = false;
           const q = k => f.querySelector('[data-key="' + k + '"]');
           const R = e => { if (!e) return null;
             const b = e.getBoundingClientRect();
@@ -268,11 +287,68 @@ class Suite:
         self.check("grammar: EXPAND right-aligned", g["rightAligned"])
         self.check("grammar: action bottoms flush", g["bottomsFlush"])
 
+    _RAIL = """(() => {
+      const body = document.querySelector('.editor-body');
+      const nav = body && body.querySelector('.se-rail');
+      if (!nav) return JSON.stringify({err: 'no rail'});
+      const items = [...nav.querySelectorAll('.se-rail-item')];
+      const vis = [...document.querySelectorAll('#se-fields .se-box[data-sect]')]
+        .filter(b => !b.hidden).map(b => b.dataset.sect);
+      return JSON.stringify({
+        hidden: nav.hidden,
+        slugs: items.map(i => i.dataset.sect),
+        active: items.map(i => i.dataset.sect)[
+          items.findIndex(i => i.classList.contains('active'))] || null,
+        visible: vis,
+        badge: (items.find(i => i.classList.contains('active')) || {})
+               .textContent || '',
+        ink: (() => { const a = items.find(i => i.classList.contains('active'));
+          return a ? getComputedStyle(a).backgroundColor : null; })(),
+      });
+    })()"""
+
+    def t_rail(self):
+        """SPL-RAIL: the section tabs exist in classic's order, show EXACTLY
+        one box, react to a click, and badge the queued-change count red for
+        a reload key. Re-opens the editor — run before the other checks."""
+        self.open()
+        r = json.loads(self._eval(self._RAIL))
+        self.check("rail exists", not r.get("err") and not r.get("hidden"), str(r.get("err")))
+        self.check("rail order = classic sections", r.get("slugs") == SECTION_SLUGS,
+                   ",".join(r.get("slugs") or []))
+        self.check("rail shows one section", len(r.get("visible") or []) == 1,
+                   "visible=%s" % r.get("visible"))
+        if len(r.get("slugs") or []) >= 2:
+            want = r["slugs"][1]
+            self._eval("""(() => { const it = document.querySelector(
+              '.editor-body > .se-rail .se-rail-item[data-sect="%s"]');
+              if (it) it.click(); return 1; })()""" % want)
+            r2 = json.loads(self._eval(self._RAIL))
+            self.check("rail click activates", r2.get("visible") == [want]
+                       and r2.get("active") == want, str(r2.get("visible")))
+        # badge: toggle one reload key from its own tab
+        trig = self._dirty_trigger()
+        if trig:
+            self._click(trig)
+        self._wait(300)
+        r3 = json.loads(self._eval(self._RAIL))
+        import re as _re
+        b = _re.search("[\u27F3]|[1-9]", r3.get("badge") or "")
+        self.check("rail badge counts queued changes", bool(b),
+                   "badge=%r" % r3.get("badge"))
+        # the active tab must not reflow the modal (UX-6 invariants live in
+        # t_rail_invariance; here just assert the nav column is reserved in
+        # BOTH clean and dirty states by design — scroll width equality)
+        self.close()
+
     def t_gate(self):
         """Grammar well must track its master toggle BOTH ways: inert
         while off, live while on. (v1 false-FAIL: it clicked 'off' on an
         already-off toggle and measured a re-enabled well.)"""
         self.open()
+        self._eval("""(() => { const it = document.querySelector(
+          '.editor-body > .se-rail .se-rail-item[data-sect="advanced_settings"]');
+          if (it) it.click(); return 1; })()""")
         cb = '#se-fields [data-key="guided_grammar_enabled"] input[type=checkbox]'
         st = self._click_if(cb, False)
         self._wait(300)
@@ -294,7 +370,10 @@ class Suite:
 
     def _dirty_trigger(self):
         """First toggle that exists on this model — v1 assumed
-        turboquant always exists; on another model family it does not."""
+        turboquant always exists; on another model family it does not.
+        SPL-RAIL: activate the toggle's section tab first — a synthetic
+        click fires on a [hidden] checkbox, but that is not what a user
+        can do and it would skip the activation path."""
         for key in ("turboquant_kv_enabled", "enableThinkingBudget",
                     "specprefill_enabled", "guided_grammar_enabled"):
             sel = ('#se-fields [data-key="%s"] input[type=checkbox]' % key)
@@ -302,6 +381,12 @@ class Suite:
               const el = document.querySelector('%s');
               return el ? 1 : 0;
             })()""" % sel):
+                slug = KEY_SECT.get(key)
+                if slug:
+                    self._eval("""(() => {
+                      const it = document.querySelector(
+                        '.editor-body > .se-rail .se-rail-item[data-sect="%s"]');
+                      if (it) it.click(); return 1; })()""" % slug)
                 return sel
         return None
 
@@ -380,6 +465,7 @@ class Suite:
         info = self._eval("""(() => {
           const f = document.querySelector('#se-fields');
           if (!f) return JSON.stringify({err: 'editor not open'});
+          for (const b of f.querySelectorAll('.se-box[hidden]')) b.hidden = false;
           const names = [...f.querySelectorAll('.se-row > span:first-child')];
           let clipped = 0, csHits = 0;
           for (const n of names) {
@@ -467,8 +553,8 @@ class Suite:
         self.check("non-llm explains the gate", "EMBEDDING" in inv["note"].upper()
                    or "does not apply" in inv["note"] or "RERANKER" in inv["note"].upper(),
                    inv["note"][:80])
-        llm_secs = {"Thinking & Reasoning", "Sampling", "Acceleration",
-                    "Speculative Decoding", "Grammar", "Chat Template Kwargs"}
+        llm_secs = {"Generation Defaults", "Acceleration", "Memory Saving",
+                    "Advanced Settings", "Experimental Features"}
         self.check("non-llm section set", not (llm_secs & set(inv["sections"])),
                    ", ".join(inv["sections"]))
 
@@ -531,6 +617,7 @@ class Suite:
                        "no model exposes ANY invariant key — suite would "
                        "be vacuously green")
             return self.report()
+        self.t_rail()
         for w in WIDTHS:
             self._width(w)
             try:
