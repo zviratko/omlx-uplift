@@ -927,5 +927,12 @@
  "uplift.voices.sample_text": "안녕하세요! 제 목소리는 이렇습니다.",
  "uplift.voices.save": "목소리 저장",
  "uplift.voices.saved": "목소리 저장됨",
- "uplift.voices.too_large": "참고 음성이 14 MiB 초과"
+ "uplift.voices.too_large": "참고 음성이 14 MiB 초과",
+ "uplift.voices.no_stt": "STT 모델이 설치되지 않음",
+ "uplift.voices.transcribe": "자동 전사",
+ "uplift.voices.transcribe_title": "선택한 음성을 로컬 음성 인식 모델로 전사합니다. 결과를 확인하세요 — 전사 텍스트는 음성과 정확히 일치해야 합니다.",
+ "uplift.voices.transcribing": "전사 중…",
+ "uplift.voices.transcribed": "전사 텍스트 입력됨 — 확인하세요",
+ "uplift.voices.need_stt": "먼저 STT 모델을 선택하세요",
+ "uplift.voices.transcribe_empty": "음성이 감지되지 않았습니다"
 }

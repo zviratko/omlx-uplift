@@ -912,5 +912,12 @@
  "uplift.voices.sample_text": "Ahoj! Takto zním.",
  "uplift.voices.save": "ULOŽIT HLAS",
  "uplift.voices.saved": "Hlas uložen",
- "uplift.voices.too_large": "referenční audio překračuje 14 MiB"
+ "uplift.voices.too_large": "referenční audio překračuje 14 MiB",
+ "uplift.voices.no_stt": "není nainstalován model STT",
+ "uplift.voices.transcribe": "AUTO-TRANSKRIPCE",
+ "uplift.voices.transcribe_title": "Přepiše vybranou nahrávku lokálním modelem řeči na text; výsledek zkontrolujte — přepis musí přesně odpovídat nahrávce.",
+ "uplift.voices.transcribing": "přepisuji…",
+ "uplift.voices.transcribed": "Přepis vyplněn — zkontrolujte ho",
+ "uplift.voices.need_stt": "nejprve vyberte model STT",
+ "uplift.voices.transcribe_empty": "model nerozeznal žádnou řeč"
 }

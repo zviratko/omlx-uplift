@@ -916,5 +916,12 @@
  "uplift.voices.sample_text": "Bonjour ! Voilà ma voix.",
  "uplift.voices.save": "ENREGISTRER LA VOIX",
  "uplift.voices.saved": "Voix enregistrée",
- "uplift.voices.too_large": "l'audio dépasse 14 Mio"
+ "uplift.voices.too_large": "l'audio dépasse 14 Mio",
+ "uplift.voices.no_stt": "aucun modèle STT installé",
+ "uplift.voices.transcribe": "AUTO-TRANSCRIPTION",
+ "uplift.voices.transcribe_title": "Transcrit l'extrait sélectionné avec un modèle local de reconnaissance vocale ; vérifiez le résultat — la transcription doit correspondre exactement à l'extrait.",
+ "uplift.voices.transcribing": "transcription…",
+ "uplift.voices.transcribed": "Transcription remplie — vérifiez-la",
+ "uplift.voices.need_stt": "choisissez d'abord un modèle STT",
+ "uplift.voices.transcribe_empty": "le modèle n'a entendu aucune voix"
 }

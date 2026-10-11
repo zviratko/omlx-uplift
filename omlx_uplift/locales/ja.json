@@ -915,5 +915,12 @@
  "uplift.voices.sample_text": "こんにちは、これが私の声です。",
  "uplift.voices.save": "ボイスを保存",
  "uplift.voices.saved": "ボイスを保存しました",
- "uplift.voices.too_large": "参照音が14 MiBを超過"
+ "uplift.voices.too_large": "参照音が14 MiBを超過",
+ "uplift.voices.no_stt": "STTモデルが未インストール",
+ "uplift.voices.transcribe": "自動文字起こし",
+ "uplift.voices.transcribe_title": "選択した音声をローカルの音声認識モデルで文字起こしします。結果を確認してください——トランスクリプトは音声と完全に一致する必要があります。",
+ "uplift.voices.transcribing": "文字起こし中…",
+ "uplift.voices.transcribed": "文字起こし完了——確認してください",
+ "uplift.voices.need_stt": "まずSTTモデルを選択",
+ "uplift.voices.transcribe_empty": "音声が検出されませんでした"
 }

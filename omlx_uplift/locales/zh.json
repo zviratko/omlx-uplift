@@ -912,5 +912,12 @@
  "uplift.voices.sample_text": "你好！这就是我的声音。",
  "uplift.voices.save": "保存语音",
  "uplift.voices.saved": "语音已保存",
- "uplift.voices.too_large": "参考音频超过 14 MiB"
+ "uplift.voices.too_large": "参考音频超过 14 MiB",
+ "uplift.voices.no_stt": "未安装 STT 模型",
+ "uplift.voices.transcribe": "自动转写",
+ "uplift.voices.transcribe_title": "用本地语音识别模型转写所选音频；请检查结果——转写文本必须与音频完全一致。",
+ "uplift.voices.transcribing": "转写中…",
+ "uplift.voices.transcribed": "已填入转写文本——请核对",
+ "uplift.voices.need_stt": "请先选择 STT 模型",
+ "uplift.voices.transcribe_empty": "模型未听到语音"
 }

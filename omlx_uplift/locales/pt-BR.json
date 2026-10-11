@@ -916,5 +916,12 @@
  "uplift.voices.sample_text": "Olá! É assim que eu so.",
  "uplift.voices.save": "SALVAR VOZ",
  "uplift.voices.saved": "Voz salva",
- "uplift.voices.too_large": "o áudio de referência excede 14 MiB"
+ "uplift.voices.too_large": "o áudio de referência excede 14 MiB",
+ "uplift.voices.no_stt": "nenhum modelo STT instalado",
+ "uplift.voices.transcribe": "AUTOTRANSCRIÇÃO",
+ "uplift.voices.transcribe_title": "Transcreve o clipe selecionado com um modelo local de fala para texto; confira o resultado — a transcrição deve corresponder exatamente ao clipe.",
+ "uplift.voices.transcribing": "transcrevendo…",
+ "uplift.voices.transcribed": "Transcrição preenchida — revise-a",
+ "uplift.voices.need_stt": "escolha primeiro um modelo STT",
+ "uplift.voices.transcribe_empty": "o modelo não detectou fala"
 }

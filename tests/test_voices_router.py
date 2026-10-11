@@ -372,3 +372,67 @@ def test_std_alias_in_model_field(std_client, fake_speech):
                     data={"model": "Qwen3-TTS:Jake", "input": "via model"})
     assert r.status_code == 200, r.text
     assert fake_speech["model"] == "Qwen3-TTS-12Hz-0.6B-Base-8bit"
+
+
+# --------------------------------------------------------------------------
+# VOICE-2: /voices/transcribe — auto-transcribe the reference clip via a
+# local STT model. Same seam doctrine as speech: request ASSEMBLY is the
+# uplift code under test, vanilla's engine call is monkeypatched (and the
+# 503 branch lives INSIDE the seam).
+# --------------------------------------------------------------------------
+
+def test_transcribe_passes_clip_bytes_and_model(client, monkeypatch):
+    seen = {}
+    async def fake(data, filename, model, language=None):
+        seen.update(data=data, filename=filename, model=model, language=language)
+        return "  This is what my voice sounds like.  "
+    monkeypatch.setattr(V, "_create_transcription", fake)
+    r = client.post("/uplift/api/voices/transcribe",
+                    json={"model": "whisper-tiny-mlx-4bit",
+                          "ref_audio_b64": B64, "ref_name": "my.wav"})
+    assert r.status_code == 200
+    # text arrives trimmed — the field is a transcript, not a blob
+    assert r.json() == {"text": "This is what my voice sounds like."}
+    assert seen["data"] == WAV and seen["filename"] == "my.wav"
+    assert seen["model"] == "whisper-tiny-mlx-4bit"
+    assert seen["language"] is None
+
+
+def test_transcribe_validation(client, monkeypatch):
+    async def ok(data, filename, model, language=None):
+        return "ok"
+    monkeypatch.setattr(V, "_create_transcription", ok)
+    assert client.post("/uplift/api/voices/transcribe",
+                       json={"ref_audio_b64": B64}).status_code == 400
+    assert client.post("/uplift/api/voices/transcribe",
+                       json={"model": "m"}).status_code == 400
+    assert client.post("/uplift/api/voices/transcribe",
+                       json={"model": "m", "ref_audio_b64": "!!!"}).status_code == 400
+    assert client.post("/uplift/api/voices/transcribe",
+                       json={"model": "m", "ref_audio_b64": ""}).status_code == 400
+    # ext is deliberately NOT whitelisted: vanilla's STT decoder owns
+    # format honesty (miniaudio + its own error); the real flow passes
+    # an already-whitelisted clip, and an exotic one gets vanilla's 400
+    r = client.post("/uplift/api/voices/transcribe",
+                    json={"model": "m", "ref_audio_b64": B64,
+                          "ref_name": "x.webm"})
+    assert r.status_code == 200, r.text
+
+
+def test_transcribe_size_cap(client, monkeypatch):
+    big = base64.b64encode(b"\0" * (V.MAX_VOICE_AUDIO_BYTES + 1)).decode()
+    r = client.post("/uplift/api/voices/transcribe",
+                    json={"model": "m", "ref_audio_b64": big})
+    assert r.status_code == 413
+
+
+def test_transcribe_503_without_omlx(client, monkeypatch):
+    # the no-STT shape: the seam raises the router's own 503 (soft-import
+    # branch lives INSIDE _create_transcription, mirroring _create_speech)
+    from fastapi import HTTPException as FH
+    async def down(*a, **k):
+        raise FH(status_code=503, detail="STT is not available on this server")
+    monkeypatch.setattr(V, "_create_transcription", down)
+    r = client.post("/uplift/api/voices/transcribe",
+                    json={"model": "m", "ref_audio_b64": B64})
+    assert r.status_code == 503 and "not available" in r.json()["detail"]

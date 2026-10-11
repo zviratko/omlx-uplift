@@ -912,5 +912,12 @@
  "uplift.voices.sample_text": "Hello! This is how I sound.",
  "uplift.voices.save": "SAVE VOICE",
  "uplift.voices.saved": "Voice saved",
- "uplift.voices.too_large": "reference audio exceeds 14 MiB"
+ "uplift.voices.too_large": "reference audio exceeds 14 MiB",
+ "uplift.voices.no_stt": "no STT model installed",
+ "uplift.voices.transcribe": "AUTO-TRANSCRIBE",
+ "uplift.voices.transcribe_title": "Transcribe the selected clip with a local speech-to-text model; check the result — the transcript must match the clip exactly.",
+ "uplift.voices.transcribing": "transcribing…",
+ "uplift.voices.transcribed": "Transcript filled — review it",
+ "uplift.voices.need_stt": "pick an STT model first",
+ "uplift.voices.transcribe_empty": "the model heard no speech"
 }

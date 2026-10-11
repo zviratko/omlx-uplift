@@ -44,6 +44,13 @@ function ttsModels() {
         (m.engine_type || m.model_type) === 'audio_tts');
 }
 
+function sttModels() {
+    // VOICE-2: audio_stt (whisper/Qwen3-ASR/...) powers auto-transcribe;
+    // same catalog + same engine_type convention as ttsModels()
+    return (MM.adminModels || []).filter(m =>
+        (m.engine_type || m.model_type) === 'audio_stt');
+}
+
 function stopPlayback() {
     if (_player) { _player.pause(); _player = null; }
     if (_playerUrl) { URL.revokeObjectURL(_playerUrl); _playerUrl = null; }
@@ -173,7 +180,7 @@ function voiceRow(v) {
     return row;
 }
 
-function addForm(models) {
+function addForm(models, sttSelf) {
     const box = document.createElement('div');
     box.className = 'mk-box vc-add';
     const head = document.createElement('div');
@@ -214,6 +221,30 @@ function addForm(models) {
     refT.placeholder = tf('uplift.voices.ref_text_ph',
         'Transcript of the reference clip — exactly what is said in it.');
     let file = null, b64 = '';
+    // VOICE-2: AUTO-TRANSCRIBE = model picker + button beside the field.
+    // Whisper runs locally in seconds; the result only FILLS the textarea
+    // — the user confirms it, because the clone quality lives in the
+    // transcript matching the clip word-for-word (vanilla rule: ref_text
+    // ships on every synth request).
+    const sttS = document.createElement('select');
+    sttS.className = 'vc-stt-sel';
+    const stts = sttModels().length ? sttModels() : (sttSelf || []);
+    for (const m of stts) {
+        const o = document.createElement('option');
+        o.value = m.id; o.textContent = m.name || m.id; sttS.append(o);
+    }
+    if (!stts.length) {
+        const o = document.createElement('option');
+        o.value = ''; o.textContent = tf('uplift.voices.no_stt',
+            'no STT model installed');
+        sttS.append(o); sttS.disabled = true;
+    }
+    const trB = document.createElement('button');
+    trB.type = 'button'; trB.className = 'se-btn';
+    trB.textContent = tf('uplift.voices.transcribe', 'AUTO-TRANSCRIBE');
+    trB.title = tf('uplift.voices.transcribe_title',
+        'Transcribe the selected clip with a local speech-to-text model; '
+        + 'check the result — the transcript must match the clip exactly.');
     fileI.onchange = async () => {
         file = fileI.files && fileI.files[0]; b64 = '';
         if (!file) return;
@@ -226,12 +257,44 @@ function addForm(models) {
         try { b64 = await readFileB64(file); }
         catch (e) { D.toast(String(e && e.message || e), 'error');
                     file = null; fileI.value = ''; }
+        // a fresh clip invalidates a previous auto-transcription guess
+        trB.disabled = !b64 || !sttS.value;
     };
+    trB.disabled = true;
+    trB.onclick = async () => {
+        if (!file || !b64) return D.toast(
+            tf('uplift.voices.need_clip', 'pick a reference clip first'), 'error');
+        if (!sttS.value) return D.toast(
+            tf('uplift.voices.need_stt', 'pick an STT model first'), 'error');
+        trB.disabled = true;
+        const old = trB.textContent;
+        trB.textContent = tf('uplift.voices.transcribing', 'transcribing…');
+        try {
+            const d = await D.postJson(`${VAPI}/voices/transcribe`,
+                { model: sttS.value, ref_audio_b64: b64, ref_name: file.name });
+            const txt = String(d && d.text || '').trim();
+            if (!txt) throw new Error(tf('uplift.voices.transcribe_empty',
+                'the model heard no speech'));
+            refT.value = txt;
+            D.toast(tf('uplift.voices.transcribed', 'Transcript filled — review it') );
+        } catch (e) { D.toast(String(e && e.message || e), 'error'); }
+        trB.textContent = old;
+        trB.disabled = !b64 || !sttS.value;
+    };
+    sttS.onchange = () => { trB.disabled = !b64 || !sttS.value; };
+    const refWrap = document.createElement('div');
+    refWrap.className = 'vc-refwrap';
+    refWrap.append(refT);
+    const trRow = document.createElement('div');
+    trRow.className = 'vc-trrow';
+    if (stts.length) trRow.append(sttS, trB);
+    else trRow.append(trB);      // honest: button visible, picker says why not
+    refWrap.append(trRow);
     grid.append(
         field(tf('uplift.voices.name', 'Voice name'), nameI),
         field(tf('uplift.voices.model', 'TTS model'), modelS),
         field(tf('uplift.voices.clip_file', 'Reference clip'), fileI),
-        field(tf('uplift.voices.ref_text', 'Reference text'), refT));
+        field(tf('uplift.voices.ref_text', 'Reference text'), refWrap));
     const acts = document.createElement('div');
     acts.className = 'vc-acts';
     const prevB = document.createElement('button');
@@ -284,6 +347,7 @@ function addForm(models) {
 }
 
 let _modelsSelf = null;   // self-fetched fallback (see renderVoices)
+let _sttSelf = null;
 async function renderVoices() {
     const host = $('vc-body');
     if (!host) return;
@@ -298,14 +362,17 @@ async function renderVoices() {
         // model installed'
         try {
             const d = await D.fetchJson(`${API}/admin/api/models`);
-            _modelsSelf = (d.models || []).filter(m =>
+            const all = d.models || [];
+            _modelsSelf = all.filter(m =>
                 (m.engine_type || m.model_type) === 'audio_tts');
+            _sttSelf = all.filter(m =>
+                (m.engine_type || m.model_type) === 'audio_stt');
             models = _modelsSelf;
         } catch (e) { /* leave the empty-state hint honest */ }
     } else if (!models.length && _modelsSelf) {
         models = _modelsSelf;
     }
-    host.append(addForm(models));
+    host.append(addForm(models, _sttSelf));
     const list = document.createElement('div');
     list.className = 'vc-list';
     if (_voices.length) {

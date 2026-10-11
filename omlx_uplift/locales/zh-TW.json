@@ -912,5 +912,12 @@
  "uplift.voices.sample_text": "你好！這就是我的聲音。",
  "uplift.voices.save": "儲存語音",
  "uplift.voices.saved": "語音已儲存",
- "uplift.voices.too_large": "參考音訊超過 14 MiB"
+ "uplift.voices.too_large": "參考音訊超過 14 MiB",
+ "uplift.voices.no_stt": "未安裝 STT 模型",
+ "uplift.voices.transcribe": "自動轉寫",
+ "uplift.voices.transcribe_title": "以本機語音辨識模型轉寫所選音訊；請檢查結果——轉寫文字必須與音訊完全一致。",
+ "uplift.voices.transcribing": "轉寫中…",
+ "uplift.voices.transcribed": "已填入轉寫文字——請核對",
+ "uplift.voices.need_stt": "請先選擇 STT 模型",
+ "uplift.voices.transcribe_empty": "模型未聽見語音"
 }

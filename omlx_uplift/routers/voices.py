@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import io
 import json
 import logging
 import re
@@ -185,6 +186,37 @@ async def _create_speech(kwargs: dict) -> Response:
     # vanilla raises HTTPException with honest details (model not found,
     # engine not a TTS model, synthesis failure) — let them propagate
     return await create_speech(AudioSpeechRequest(**kwargs))
+
+
+async def _create_transcription(data: bytes, filename: str, model: str,
+                                language=None) -> str:
+    """Second vanilla seam: speech-to-text, in-process like _create_speech.
+
+    VOICE-2: the ADD form's AUTO-TRANSCRIBE — vanilla owns the engine,
+    uplift only wraps the stored/uploaded bytes into the multipart shape
+    create_transcription expects (UploadFile over BytesIO; its _read_upload
+    awaits file.read(), which starlette provides even for a sync buffer).
+    Returns the transcript text. Same soft-import 503 and honest
+    HTTPException propagation as the TTS seam."""
+    try:
+        from omlx.api.audio_routes import create_transcription
+        from starlette.datastructures import UploadFile
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="STT is not available on this server (omlx audio routes "
+                   "missing: %s)" % exc) from exc
+    uf = UploadFile(file=io.BytesIO(data), filename=filename)
+    # EVERY defaulted Form() param must be passed explicitly: a direct
+    # call skips FastAPI's DI, leaving un-passed ones bound to their
+    # FieldInfo objects ('Form' object has no attribute 'strip' — live QA)
+    resp = await create_transcription(
+        file=uf, model=model, language=language or None, prompt=None,
+        response_format="json", temperature=0.0, stream=False,
+        max_tokens=None, word_timestamps=False)
+    # response_model is FastAPI-only sugar: a direct call returns the
+    # pydantic object itself
+    return getattr(resp, "text", None) or ""
 
 
 async def _synth(voice: dict, text: str, stream: bool = False,
@@ -379,6 +411,35 @@ async def voices_speech(request: Request, _auth=Depends(require_admin)):
                             detail="unknown voice; available: %s" % names)
     return await _synth(v, str(raw.get("input") or ""),
                         stream=bool(raw.get("stream")), model=model_override)
+
+
+@api_router.post("/voices/transcribe")
+async def voices_transcribe(request: Request, _auth=Depends(require_admin)):
+    """VOICE-2: transcript for a reference clip, via a locally-installed
+    STT model (whisper/Qwen3-ASR/...). Body: {model, ref_audio_b64,
+    ref_name?, language?}. The client fills the Reference-text field from
+    the answer — the user still confirms/edits it, because cloning quality
+    depends on the transcript matching the clip EXACTLY (vanilla rule:
+    ref_text ships with every synth)."""
+    raw = await request.json()
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    model = str(raw.get("model") or "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="STT model is required")
+    b64 = raw.get("ref_audio_b64") or ""
+    try:
+        data = base64.b64decode(b64, validate=True) if b64 else b""
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="ref_audio_b64 is not valid base64")
+    if not data:
+        raise HTTPException(status_code=400, detail="audio is required")
+    if len(data) > MAX_VOICE_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail=(
+            "audio exceeds %d MiB" % (MAX_VOICE_AUDIO_BYTES // (1024 * 1024))))
+    fname = str(raw.get("ref_name") or "clip.wav")
+    text = await _create_transcription(data, fname, model, raw.get("language"))
+    return {"text": text.strip()}   # the field holds a transcript, not a blob
 
 
 @api_router.post("/voices/preview")

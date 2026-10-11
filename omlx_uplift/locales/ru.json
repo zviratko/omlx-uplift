@@ -912,5 +912,12 @@
  "uplift.voices.sample_text": "Привет! Вот как я звучу.",
  "uplift.voices.save": "СОХРАНИТЬ ГОЛОС",
  "uplift.voices.saved": "Голос сохранён",
- "uplift.voices.too_large": "образец превышает 14 МиБ"
+ "uplift.voices.too_large": "образец превышает 14 МиБ",
+ "uplift.voices.no_stt": "модель STT не установлена",
+ "uplift.voices.transcribe": "АВТО-ТРАНСКРИПЦИЯ",
+ "uplift.voices.transcribe_title": "Распознаёт выбранный клип локальной моделью распознавания речи; проверьте результат — транскрипт должен точно соответствовать клипу.",
+ "uplift.voices.transcribing": "распознаю…",
+ "uplift.voices.transcribed": "Транскрипт заполнен — проверьте",
+ "uplift.voices.need_stt": "сначала выберите модель STT",
+ "uplift.voices.transcribe_empty": "модель не услышала речь"
 }

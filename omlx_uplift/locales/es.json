@@ -916,5 +916,12 @@
  "uplift.voices.sample_text": "¡Hola! Así sueno.",
  "uplift.voices.save": "GUARDAR VOZ",
  "uplift.voices.saved": "Voz guardada",
- "uplift.voices.too_large": "el audio de referencia supera 14 MiB"
+ "uplift.voices.too_large": "el audio de referencia supera 14 MiB",
+ "uplift.voices.no_stt": "no hay modelo STT instalado",
+ "uplift.voices.transcribe": "AUTOTRASCIPCIÓN",
+ "uplift.voices.transcribe_title": "Transcribe el clip seleccionado con un modelo local de voz a texto; revise el resultado — la transcripción debe coincidir exactamente con el clip.",
+ "uplift.voices.transcribing": "transcribiendo…",
+ "uplift.voices.transcribed": "Transcripción completada — revísela",
+ "uplift.voices.need_stt": "elija primero un modelo STT",
+ "uplift.voices.transcribe_empty": "el modelo no oyó voz"
 }
