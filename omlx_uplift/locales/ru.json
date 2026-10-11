@@ -243,6 +243,8 @@
  "uplift.gs.server.host": "Хост",
  "uplift.gs.server.log_level": "Уровень логов",
  "uplift.gs.server.port": "Порт",
+ "uplift.gs.tab.all": "ВСЕ",
+ "uplift.gs.tab.badge_restart": "Содержит изменения, требующие перезапуска сервера",
  "uplift.gs.title.advanced": "Дополнительно",
  "uplift.gs.title.auth": "Аутентификация",
  "uplift.gs.title.cache": "Кэш",

@@ -258,6 +258,8 @@
  "uplift.gs.server.levels.warning": "경고",
  "uplift.gs.server.log_level": "로그 수준",
  "uplift.gs.server.port": "포트",
+ "uplift.gs.tab.all": "전체",
+ "uplift.gs.tab.badge_restart": "서버 재시작이 필요한 변경 포함",
  "uplift.gs.title.advanced": "고급",
  "uplift.gs.title.auth": "인증",
  "uplift.gs.title.cache": "캐시",

@@ -35,7 +35,7 @@ Design notes:
 
 import json
 
-VERSION = "4"   # v4: SPL-RAIL — classic #4415 section split as vertical tabs
+VERSION = "5"   # v5: GS-TAB — server settings ALL/section tab strip (classic #4364)
 
 # viewport widths the editor must be correct at; 782 is the pair-grid
 # breakpoint, 1232 the rail flow/overlay breakpoint
@@ -631,6 +631,135 @@ class Suite:
                    str({k: v for k, v in inv2.items() if k.startswith('has')}))
         self.close()
 
+    # ---------- GS-TAB: server settings ALL / section strip ----------
+    _GS_STATE = """(() => {
+      const bar = document.getElementById('gs-tabs');
+      const wrap = document.getElementById('gs-body');
+      if (!bar || !wrap) return JSON.stringify({err: 'settings page not rendered'});
+      const tabs = [...bar.querySelectorAll('[data-gstab]')];
+      const boxes = [...wrap.querySelectorAll('.gs-box')];
+      return JSON.stringify({
+        tabs: tabs.map(t => ({slug: t.dataset.gstab,
+                              active: t.classList.contains('active'),
+                              badge: (() => { const b = t.querySelector('.gs-tab-badge');
+                                  return b && !b.hidden ? {n: b.textContent,
+                                      restart: b.classList.contains('restart')} : null; })()})),
+        boxes: boxes.map(b => ({slug: b.dataset.slug, hidden: b.hidden,
+                                ord: b.dataset.ord | 0})),
+        cols: [...wrap.querySelectorAll('.gs-col')].length,
+        savebar: !!document.getElementById('gs-savebar'),
+      });
+    })()"""
+
+    def _gs_page(self):
+        """Navigate to the settings page and wait for the form to render."""
+        self._eval("location.hash = '#settings'; 'nav'")
+        for _ in range(30):
+            import time as _t; _t.sleep(0.4)
+            if self._eval("!!document.querySelector('#gs-body .gs-box')"):
+                return True
+        return False
+
+    def t_gs(self):
+        """GS-TAB: strip mirrors the section boxes 1:1 (+ALL first); a section
+        tab hides every other box WITHOUT destroying them (dirty queue,
+        FE-6 hosts and the savebar survive a switch); a queued edit badges
+        the owning tab, and the badge re-derives across tab switches."""
+        ok = self._gs_page()
+        if not ok:
+            self.check("gs settings page renders", False, "no .gs-box after nav")
+            return
+        # persistence is a FEATURE (the strip restores your last section),
+        # but the ALL-state checks below need a known entry: start at ALL.
+        # gsTabSet no-ops when already active, so this click is always safe.
+        self._eval('document.querySelector(\'#gs-tabs [data-gstab="all"]\')'
+                   ' && document.querySelector(\'#gs-tabs'
+                   ' [data-gstab="all"]\').click(); "norm"')
+        self._wait(350)
+        st = json.loads(self._gs_state())
+        if st.get("err"):
+            self.check("gs tabs exist", False, st["err"]); return
+        self.check("gs tabs exist", len(st["tabs"]) >= 5, str(len(st["tabs"])))
+        self.check("gs first tab is ALL", st["tabs"] and st["tabs"][0]["slug"] == "all")
+        canon = [b["slug"] for b in
+                 sorted((b for b in st["boxes"] if b["slug"]), key=lambda b: b["ord"])]
+        self.check("gs tabs mirror boxes",
+                   [t["slug"] for t in st["tabs"][1:]] == canon,
+                   "tabs=%s canon=%s" % ([t["slug"] for t in st["tabs"][1:]], canon))
+        # ALL: nothing hidden, multi-column layout active
+        self.check("gs ALL shows every box",
+                   all(not b["hidden"] for b in st["boxes"]) and st["cols"] >= 1)
+        # pick a section that owns a checkbox row (the badge probe needs
+        # one; Claude Code / Language tabs hold text or select only)
+        cands = self._eval("""(() => {
+          const have = {};
+          for (const b of document.querySelectorAll('#gs-body .gs-box'))
+            if (b.dataset.slug) have[b.dataset.slug] =
+              !!b.querySelector('[data-flat] input[type=checkbox]');
+          return JSON.stringify(have);
+        })()""")
+        cands = json.loads(cands)
+        mid = next((t["slug"] for t in st["tabs"][1:] if cands.get(t["slug"])), None)
+        if not mid:
+            self.check("gs checkbox probe row", False,
+                       "no section box holds a checkbox: %s" % cands)
+            return
+        self._eval('document.querySelector(\'#gs-tabs [data-gstab="%s"]\').click(); "c"' % mid)
+        self._wait(350)
+        st2 = json.loads(self._gs_state())
+        self.check("gs tab order stable when filtered",
+                   [t["slug"] for t in st2["tabs"][1:]]
+                   == [t["slug"] for t in st["tabs"][1:]],
+                   str([t["slug"] for t in st2["tabs"][1:]]))
+        vis = [b["slug"] for b in st2["boxes"] if not b["hidden"]]
+        self.check("gs section tab shows one box", vis == [mid], str(vis))
+        self.check("gs section tab single column", st2["cols"] == 1, "cols=%s" % st2["cols"])
+        self.check("gs savebar survives tab switch", st2["savebar"])
+        # queue an edit in the visible box; tab badge must light up
+        flat = self._eval("""(() => {
+          const box = [...document.querySelectorAll('#gs-body .gs-box')]
+              .find(b => !b.hidden);
+          const row = box && box.querySelector('[data-flat] input[type=checkbox]');
+          if (!row) return '';
+          row.click();
+          return row.closest('[data-flat]').dataset.flat;
+        })()""")
+        self._wait(300)
+        st3 = json.loads(self._gs_state())
+        tb = {t["slug"]: t for t in st3["tabs"]}
+        if flat:
+            b = tb[mid]["badge"] if mid in tb else None
+            self.check("gs queued edit badges the tab", bool(b) and b["n"] == "1", str(b))
+            # switch tab and back: queue and badge survive (dirty re-derived)
+            self._eval('document.querySelector(\'#gs-tabs [data-gstab="all"]\').click(); "c"')
+            self._wait(350)
+            st4 = json.loads(self._gs_state())
+            tb4 = {t["slug"]: t for t in st4["tabs"]}
+            self.check("gs queue survives ALL switch",
+                       all(not x["hidden"] for x in st4["boxes"])
+                       and tb4[mid]["badge"] and tb4[mid]["badge"]["n"] == "1",
+                       str(tb4.get(mid)))
+            # revert: badge must vanish (re-derived, never stale)
+            self._eval("""(() => {
+              const c = document.querySelector('#gs-body [data-flat="%s"] input[type=checkbox]');
+              c.click(); return 'r'; })()""" % flat)
+            self._wait(300)
+            st5 = json.loads(self._gs_state())
+            tb5 = {t["slug"]: t for t in st5["tabs"]}
+            self.check("gs badge clears on revert", tb5[mid]["badge"] is None,
+                       str(tb5.get(mid)))
+        else:
+            self.check("gs checkbox probe row", False,
+                       "picked box %s lost its checkbox" % mid)
+        # back to ALL for any later pass / user
+        self._eval('document.querySelector(\'#gs-tabs [data-gstab="all"]\').click(); "c"')
+        self._wait(250)
+        self._eval("location.hash = '#'; 'home'")
+        self._wait(250)
+
+    def _gs_state(self):
+        return self._eval(self._GS_STATE)
+
     def run(self):
         origin = self._eval("location.origin") or ""
         if self.base and not origin.startswith(self.base):
@@ -658,6 +787,7 @@ class Suite:
             return self.report()
         self.t_rail()
         self.t_eff()
+        self.t_gs()
         for w in WIDTHS:
             self._width(w)
             try:

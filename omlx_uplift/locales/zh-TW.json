@@ -243,6 +243,8 @@
  "uplift.gs.server.host": "主機",
  "uplift.gs.server.log_level": "日誌級別",
  "uplift.gs.server.port": "端口",
+ "uplift.gs.tab.all": "全部",
+ "uplift.gs.tab.badge_restart": "包含需要重新啟動伺服器的變更",
  "uplift.gs.title.advanced": "高級",
  "uplift.gs.title.auth": "身份驗證",
  "uplift.gs.title.cache": "快取",

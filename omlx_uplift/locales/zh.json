@@ -243,6 +243,8 @@
  "uplift.gs.server.host": "主机",
  "uplift.gs.server.log_level": "日志级别",
  "uplift.gs.server.port": "端口",
+ "uplift.gs.tab.all": "全部",
+ "uplift.gs.tab.badge_restart": "包含需要重启服务器的更改",
  "uplift.gs.title.advanced": "高级",
  "uplift.gs.title.auth": "身份验证",
  "uplift.gs.title.cache": "缓存",

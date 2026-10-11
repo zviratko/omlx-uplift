@@ -243,6 +243,8 @@
  "uplift.gs.server.host": "Hostitel",
  "uplift.gs.server.log_level": "Úroveň logování",
  "uplift.gs.server.port": "Port",
+ "uplift.gs.tab.all": "VŠECHNY",
+ "uplift.gs.tab.badge_restart": "Obsahuje změny vyžadující restart serveru",
  "uplift.gs.title.advanced": "Pokročilé",
  "uplift.gs.title.auth": "Autentizace",
  "uplift.gs.title.cache": "Cache",

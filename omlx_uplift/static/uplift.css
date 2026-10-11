@@ -1690,6 +1690,17 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
    stretches edge to edge (mirrors classic page cap). Each section is a
    framed panel with an inverted signage header strip; rows alternate
    shades inside the panel; controls sit in recessed field wells. */
+/* GS-TAB (user 2026-10-11): ALL / per-section strip above the server
+   settings form. Same tab language as the model editor (.se-tab inverted
+   active state); boxes stay rendered and only hidden, so the strip is pure
+   presentation over the existing dirty machinery. */
+.gs-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px;
+    max-width: 1500px; margin-left: auto; margin-right: auto; }
+.gs-tab-badge { margin-left: 6px; min-width: 14px; padding: 0 3px;
+    display: inline-block; font: 600 9px/1.5 var(--mono); text-align: center;
+    background: var(--accent); color: var(--ink-on-accent); }
+.gs-tab-badge[hidden] { display: none; }
+.gs-tab-badge.restart { background: var(--diverge); color: var(--ink-on-red); }
 #gs-body.gs-wrap {
     /* U5 fix: JS-distributed flex columns replace CSS multicol (which tore
        tall boxes into fragments and staggered column tops). gsLayoutColumns()
@@ -1699,6 +1710,7 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
 }
 .gs-col { min-width: 0; }
 /* boxes stretch to their column so no trailing gap opens at the right edge */
+.gs-box[hidden] { display: none; }
 .gs-box {
     margin: 0 0 14px;
     border: 1px solid var(--edge); background: var(--card);

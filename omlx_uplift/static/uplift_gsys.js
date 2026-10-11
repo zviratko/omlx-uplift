@@ -310,6 +310,7 @@ function gsMarkSections() {
         warn.textContent = anyRestart ? ' RESTART REQUIRED ' : ' ⚡ HOT APPLY ON SAVE ';
         warn.style.display = rows.length ? '' : 'none';
     }
+    gsTabBadges();   // GS-TAB: same dirty truth feeds the section tabs
 }
 function renderDirtyList() {
     UDirty.renderChangesBox(
@@ -607,7 +608,94 @@ function gsTitle(t) {
     // section titles localize via slug key; English literal is fallback
     const slug = t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
     h.className = 'gs-title'; h.textContent = C.tf('uplift.gs.title.' + slug, t);
+    h.dataset.slug = slug;    // GS-TAB: stable tab key (locale-proof)
     return h;
+}
+
+/* ---------------- GS-TAB: ALL / per-section tab strip (classic #4364 split)
+   Top tabs over the section boxes: ALL shows today's balanced multi-column
+   page; a section tab shows only that box. Boxes STAY RENDERED (hidden attr
+   only) so the dirty queue, FE-6 surgical insertion (rowHostBox finds hidden
+   boxes) and the savebar never change. Selection persists in localStorage —
+   a browser layout preference, same rule as skins/columns. */
+const GS_TAB_LS = 'uplift.gs.tab';
+let gsTab = 'all';
+try { gsTab = localStorage.getItem(GS_TAB_LS) || 'all'; } catch (e) { /* private mode */ }
+function gsTabSet(slug) {
+    if (gsTab === slug) return;
+    gsTab = slug;
+    try { localStorage.setItem(GS_TAB_LS, slug); } catch (e) { /* ignore */ }
+    renderGlobalSettings();
+}
+function gsBuildTabs(wrap) {
+    let bar = document.getElementById('gs-tabs');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'gs-tabs'; bar.className = 'gs-tabs';
+        wrap.parentElement.insertBefore(bar, wrap);
+    }
+    bar.textContent = '';
+    const mk = (slug, label) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'se-tab' + (gsTab === slug ? ' active' : '');
+        b.dataset.gstab = slug;
+        const t = document.createElement('span'); t.textContent = label;
+        b.append(t);
+        if (slug !== 'all') {
+            const badge = document.createElement('span');
+            badge.className = 'gs-tab-badge'; badge.hidden = true;
+            b.append(badge);
+        }
+        b.onclick = () => gsTabSet(slug);
+        bar.append(b);
+    };
+    mk('all', C.tf('uplift.gs.tab.all', 'ALL'));
+    // CANONICAL order: in section mode the hidden boxes are parked on the
+    // wrap (before the columns), so DOM order alone shuffles the strip
+    const boxes = [...wrap.querySelectorAll('.gs-box')]
+        .sort((a, b) => (a.dataset.ord | 0) - (b.dataset.ord | 0));
+    for (const box of boxes) {
+        const slug = box.dataset.slug;
+        if (!slug) continue;
+        const title = box.querySelector('.gs-box-title');
+        mk(slug, title ? title.textContent : slug);
+    }
+    gsTabBadges();
+}
+function gsTabValid() {
+    // a stored tab whose section no longer exists (spec change, gated
+    // rebuild) must never land the user on an empty page
+    if (gsTab === 'all') return;
+    for (const it of GS_SPEC) {
+        if (!it.t) continue;
+        const slug = it.t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        if (slug === gsTab) return;
+    }
+    gsTab = 'all';
+    try { localStorage.setItem(GS_TAB_LS, 'all'); } catch (e) {}
+}
+function gsTabBadges() {
+    const bar = document.getElementById('gs-tabs');
+    if (!bar) return;
+    const cnt = {}, restart = {};
+    for (const box of document.querySelectorAll('#gs-body .gs-box')) {
+        const slug = box.dataset.slug; if (!slug) continue;
+        const rows = [...box.querySelectorAll('[data-flat].dirty')];
+        cnt[slug] = (cnt[slug] || 0) + rows.length;
+        if (rows.some(r => r.classList.contains('restartq'))) restart[slug] = true;
+    }
+    for (const b of bar.querySelectorAll('[data-gstab]')) {
+        const badge = b.querySelector('.gs-tab-badge');
+        if (!badge) continue;
+        const slug = b.dataset.gstab, n = cnt[slug] || 0;
+        badge.hidden = !n;
+        badge.textContent = n > 9 ? '9+' : String(n);
+        badge.classList.toggle('restart', !!restart[slug]);
+        badge.title = restart[slug]
+            ? C.tf('uplift.gs.tab.badge_restart',
+                   'Includes changes that need a server restart') : '';
+    }
 }
 
 async function pollGlobalSettings() {
@@ -1468,6 +1556,7 @@ function rowHostBox(title) {
 }
 
 function renderGlobalSettings() {
+    gsTabValid();
     const body = document.createElement('div');   // staged; grouped into boxes below
     body.textContent = '';
     const L = GS_LABELS;
@@ -1521,6 +1610,8 @@ function renderGlobalSettings() {
             box.className = 'gs-box';
             box.dataset.ord = ord++;   // stable order for resize re-layout
             box.dataset.sec = n.textContent.trim();   // FE-6: target for surgical updates
+            box.dataset.slug = n.dataset.slug || '';  // GS-TAB: filter key
+            box.hidden = gsTab !== 'all' && box.dataset.slug !== gsTab;
             const h = document.createElement('div');
             h.className = 'gs-box-title';
             h.textContent = n.textContent;
@@ -1536,6 +1627,10 @@ function renderGlobalSettings() {
     }
     // column layout: JS-distributed flex columns (U5 fix — see above).
     gsLayoutColumns(items);
+    // GS-TAB: ALL / section strip (built AFTER boxes carry slugs, BEFORE the
+    // first badge pass; clicking a tab re-enters this render with the queue
+    // re-applied, so dirty edits survive a tab switch)
+    gsBuildTabs(wrap);
     // section header click scrolls to the SAVE bar (item 10); header also
     // carries the section dirty/restart state color (item 8)
     for (const h of wrap.querySelectorAll('.gs-box-title')) {
@@ -1606,6 +1701,11 @@ function gsLayoutColumns(forced) {
     if (!wrap) return;
     let items = (forced && forced.length) ? forced.slice()
         : [...wrap.querySelectorAll('.gs-box')].sort((a, b) => (a.dataset.ord | 0) - (b.dataset.ord | 0));
+    // GS-TAB: a filtered-out box must not consume a column slot — keep it
+    // parked on the wrap (display:none) and lay out only what is visible
+    const filtered = items.filter(it => !(it.classList && it.classList.contains('gs-box') && it.hidden));
+    for (const it of items) if (filtered.indexOf(it) < 0) wrap.append(it);
+    items = filtered;
     if (!items.length) return;
     // alternate box shading by GLOBAL index (nth-of-type restarts per column)
     items.forEach((it, i) => it.classList.toggle('alt', i % 2 === 1));

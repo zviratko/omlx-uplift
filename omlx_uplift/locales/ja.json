@@ -243,6 +243,8 @@
  "uplift.gs.server.host": "バインドホストとポート",
  "uplift.gs.server.log_level": "ログレベル",
  "uplift.gs.server.port": "ポート",
+ "uplift.gs.tab.all": "すべて",
+ "uplift.gs.tab.badge_restart": "サーバーの再起動が必要な変更を含みます",
  "uplift.gs.title.advanced": "詳細設定",
  "uplift.gs.title.auth": "認証",
  "uplift.gs.title.cache": "キャッシュ",

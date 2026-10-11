@@ -247,6 +247,8 @@
  "uplift.gs.server.host": "Host",
  "uplift.gs.server.log_level": "Nível de log",
  "uplift.gs.server.port": "Porta",
+ "uplift.gs.tab.all": "TODOS",
+ "uplift.gs.tab.badge_restart": "Inclui alterações que exigem reiniciar o servidor",
  "uplift.gs.title.advanced": "Avançado",
  "uplift.gs.title.auth": "Autenticação",
  "uplift.gs.title.cache": "Cache",
