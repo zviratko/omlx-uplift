@@ -859,6 +859,103 @@
         return out;
     }
 
+    /* REQ-DIV: request-time settings a profile snapshot can carry (classic's
+       UNIVERSAL_PROFILE_FIELDS — the server merges exactly these per request;
+       engine keys belong to runtimeDiff instead). A profile is a SNAPSHOT:
+       it does NOT follow the base. Inheritance semantics decide the rows:
+       - a key the profile does NOT store is truly inherited from the base —
+         it can never diverge, whatever the base holds;
+       - a key the profile DOES stores diverges when it differs from the
+         base's EFFECTIVE value: the stored base value, else the
+         server-reported fallback (effDefault: global sampling / native ctx /
+         thinking_default); when even that cannot say (min_p,
+         presence_penalty), claim nothing;
+       - a gated knob whose master switch is off on BOTH sides does nothing
+         anywhere — no row (DIV-1 rule, request edition);
+       - numeric equality is display equality (0 vs 0.0 is not drift).
+       basePayload is the modelspec payload of the base tab's CURRENT
+       (queued) state, so the host previews divergence BEFORE the save that
+       would make it real. profSettings is the profile's raw stored dict. */
+    const REQUEST_DIFF_KEYS = [
+        'max_context_window', 'max_tokens', 'temperature', 'top_p', 'top_k',
+        'min_p', 'repetition_penalty', 'presence_penalty', 'force_sampling',
+        'enable_thinking', 'cache_reasoning_output',
+        'thinking_budget_enabled', 'thinking_budget_tokens',
+        'reasoning_parser', 'guided_grammar_enabled', 'guided_grammar',
+        'max_tool_result_tokens',
+    ];
+    const REQ_CHILD_MASTER = {
+        thinking_budget_tokens: 'thinking_budget_enabled',
+        guided_grammar: 'guided_grammar_enabled',
+    };
+    function _reqNullish(v) { return v === null || v === undefined || v === ''; }
+    function _reqEq(a, b) {
+        if (a === b) return true;
+        if (typeof a === 'number' || typeof b === 'number') return _rawEq(a, b);
+        if (typeof a === 'object' && typeof b === 'object')
+            return _stable(a) === _stable(b);
+        return false;
+    }
+    // JSON.stringify keeps insertion order — kwargs dicts written by
+    // different code paths would compare unequal on key order alone
+    function _stable(v) {
+        if (v === null || v === undefined) return 'null';
+        if (Array.isArray(v)) return '[' + v.map(_stable).join(',') + ']';
+        if (typeof v === 'object')
+            return '{' + Object.keys(v).sort().map(k =>
+                JSON.stringify(k) + ':' + _stable(v[k])).join(',') + '}';
+        return JSON.stringify(v);
+    }
+    /* The value a settings key EFFECTIVELY holds: the stored value, else the
+       server-reported fallback (effDefault) when model+gs are given. null =
+       'cannot say' — callers must then claim nothing. */
+    function _reqEff(v, k, model, gs) {
+        if (!_reqNullish(v)) return v;
+        if (!model && !gs) return null;
+        const d = effDefault(k, model, gs);
+        return d && d.value !== undefined && d.value !== null ? d.value : null;
+    }
+    function requestDiff(basePayload, profSettings, model, gs) {
+        const prof = profSettings || {};
+        const base = basePayload || {};
+        const out = [];
+        for (const k of REQUEST_DIFF_KEYS) {
+            if (_reqNullish(prof[k])) continue;       // inherited: cannot diverge
+            const eb = _reqEff(base[k], k, model, gs);
+            if (eb === null) continue;                // base value unreportable
+            if (_reqEq(eb, prof[k])) continue;
+            const m = REQ_CHILD_MASTER[k];
+            if (m) {
+                const off = v => v === undefined || v === null || v === false || v === '' || v === 0;
+                if (off(prof[m]) && off(base[m])) continue;   // dead knob both sides
+            }
+            out.push({ key: k, base: eb, other: prof[k] });
+        }
+        // kwargs dicts: one honest lump row each, like the manager chips
+        for (const k of ['chat_template_kwargs', 'forced_ct_kwargs']) {
+            const ov = prof[k];
+            if (ov === null || ov === undefined) continue;
+            if (Array.isArray(ov) && !ov.length) continue;
+            if (typeof ov === 'object' && !Array.isArray(ov) && !Object.keys(ov).length) continue;
+            if (!_reqEq(base[k] === undefined ? null : base[k], ov))
+                out.push({ key: k, base: base[k] === undefined ? null : base[k], other: ov });
+        }
+        return out;
+    }
+    /* REQ-DIV display: does a profile's STORED value equal the base's
+       EFFECTIVE value (i.e. the snapshot currently behaves like
+       inheritance)? Strict rule without server data (stored-vs-stored);
+       with model+gs the base side may resolve through effDefault. Equal
+       snapshot rows are dimmed with an '(inherited)' tag — when base moves,
+       requestDiff starts reporting the row and the tag lifts (it compares
+       against the ORIGINAL base, so the queued edit shows the drift). */
+    function eqBase(val, baseVal, k, model, gs) {
+        if (_reqNullish(val)) return false;
+        if (!_reqNullish(baseVal)) return _reqEq(val, baseVal);
+        const e = _reqEff(baseVal, k, model, gs);
+        return e !== null && _reqEq(val, e);
+    }
+
     /* EFF-1 (upstream #4416 era): the value a field FALLS BACK to when the
        model has none stored — pure re-export of what the server already
        reports (admin model entry + global-settings). Never a JS-side
@@ -894,6 +991,14 @@
             const t = gs && gs.idle_timeout && gs.idle_timeout.idle_timeout_seconds;
             return t ? { kind: 'global_ttl', seconds: t } : { kind: 'no_ttl' };
         }
+        // REQ-DIV support: an unset enable_thinking falls back to the model's
+        // OWN default, which the admin entry reports (thinking_default) —
+        // resolve it when present, claim nothing when absent.
+        if (key === 'enable_thinking') {
+            const td = model && model.thinking_default;
+            return td === true || td === false
+                ? { kind: 'model_config', value: td } : null;
+        }
         if (['temperature', 'top_p', 'top_k', 'repetition_penalty'].includes(key)
                 && s[key] != null)
             return { kind: 'global_default', value: s[key] };
@@ -911,7 +1016,7 @@
              buildState, validate, buildPayload, adaptToServerPayload,
              adaptToServerSettings,
              runtimeSignature, runtimeDiff, sigMasterKey, RUNTIME_SETTING_KEYS,
-             effDefault,
+             effDefault, requestDiff, eqBase, REQUEST_DIFF_KEYS,
              isDflashDraftModel, isVlmMtpDraftModel, isSpecPrefillDraftModel,
              specprefillCandidates, dflashCandidates, vlmMtpDrafters,
              profileRecord, GiB };

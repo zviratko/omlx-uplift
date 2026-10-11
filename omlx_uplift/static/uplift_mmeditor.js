@@ -246,6 +246,7 @@ const MM_DATA = {
     presets: null,     // bundled global presets, lazily fetched + cached
     templates: [],     // profile-templates (renderTemplatesBox also fills)
     divergence: [],    // [{name, display_name, api_name, diff:[…]}]
+    reqDivergence: [], // REQ-DIV: same shape, request-time keys
 };
 /* Sampling keys are inheritable on profile tabs (empty = follow base). */
 const SE_INHERIT_KEYS = new Set(['temperature', 'top_p', 'top_k',
@@ -695,6 +696,62 @@ function seTypeNote(container) {
    seDeferred. The old pattern (U3 chip work) hit exactly this trap —
    a re-render (kwargs add/remove, tab switch, type flip) silently
    un-dirtied the CHANGES rail for rows whose value was still changed. */
+/* ---- REQ-DIV display: snapshot-equals-base tagging ----------------------
+   A profile is a snapshot, but a stored value that EQUALS the base's
+   current effective value behaves exactly like inheritance today. Those
+   rows carry a dim '(= base)' tag; the moment a base edit (queued or
+   saved) breaks the equality the tag lifts and REQUEST DIVERGENCE names
+   the row — the user sees the snapshot turn stale instead of discovering
+   it at request time. Server-key -> editor-state-key twins for the few
+   renamed fields; everything else is name-identical. */
+const SE_REQ_TWINS = { thinking_budget_enabled: 'enableThinkingBudget',
+                       max_tool_result_tokens: 'enableToolResultLimit' };
+function seReqBaseVals() {
+    // base tab's CURRENT state: frozen snapshot + queued (dirty) edits
+    const t0 = seTabs.find(z => z.id === 'base');
+    if (!t0) return seBaseVals;
+    const out = Object.assign({}, seBaseVals, t0.workVals);
+    if (seActiveTab === 'base') Object.assign(out, seValues);
+    return out;
+}
+function seTagInheritedRows() {
+    const fields = document.getElementById('se-fields');
+    if (!fields || !seModel || (seFormModel && seFormModel._template)) return;
+    const t = seTab(); if (!t || t.id === 'base') return;
+    const base = seReqBaseVals();
+    const S = window.UpliftModelSpec;
+    // stored = the profile's OWN overrides ONLY (never the merged workVals:
+    // an inherited key already reads as such via the placeholder; tagging
+    // it '(= base)' would claim a stored snapshot that does not exist).
+    // Fresh tabs carry server keys (p.settings), captured tabs editor keys.
+    const stored = t.overrides || {};
+    for (const k of S.REQUEST_DIFF_KEYS) {
+        const sk = SE_REQ_TWINS[k] || k;
+        const row = fields.querySelector('[data-key="' + sk + '"]');
+        if (!row) continue;
+        const has = (k in stored) || (sk in stored);
+        if (!has) { const old0 = row.querySelector('.se-req-tag');
+                    if (old0) old0.remove(); row.classList.remove('se-req-eq');
+                    continue; }
+        const val = stored[sk] !== undefined ? stored[sk] : stored[k];
+        const bval = base[sk] !== undefined ? base[sk] : base[k];
+        let eq = S.eqBase(val, bval, k, seFormModel, SE_GS);
+        // a row the user is actively editing is never 'equal to base'
+        if (t.dirty.has(sk) || t.dirty.has(k)) eq = false;
+        row.classList.toggle('se-req-eq', eq);
+        let tag = row.querySelector('.se-req-tag');
+        if (eq && !tag) {
+            tag = document.createElement('small');
+            tag.className = 'se-req-tag';
+            tag.textContent = C.tf('uplift.se.reqdivergence.equal',
+                '(= base)');
+            tag.title = C.tf('uplift.se.reqdivergence.equal.title',
+                'The profile stores this value itself; it only matches the base right now. A base change makes it stale — the REQUEST DIVERGENCE banner names it.');
+            row.querySelector('span:first-child').append(' ', tag);
+        } else if (!eq && tag) tag.remove();
+    }
+}
+
 function seReapplyMarks() {
     const t = seTab(); if (!t) return;
     for (const k of t.dirty) {
@@ -709,6 +766,7 @@ function seReapplyMarks() {
             display: MM_GLUE.gsDisplay });
     }
     seMarkPendingRows();
+    seTagInheritedRows();   // REQ-DIV: (= base) tags from current state
     seUpdateSaveBtn();   // rail + SAVE label refresh after the rebuild
 }
 
@@ -1934,7 +1992,19 @@ function refreshDivergence() {
                        api_name: p.api_name || null, diff });
     }
     MM_DATA.divergence = out;
+    // REQ-DIV: the same preview for request-time keys. baseP is built from
+    // the base tab's QUEUED state, so a not-yet-saved base edit that WOULD
+    // make a snapshot stale warns before the SAVE, not after.
+    const reqOut = [];
+    for (const p of (MM_DATA.profiles || [])) {
+        const diff = S.requestDiff(baseP, p.settings || {}, seFormModel, SE_GS);
+        if (diff.length)
+            reqOut.push({ name: p.name, display_name: p.display_name || p.name,
+                          api_name: p.api_name || null, diff });
+    }
+    MM_DATA.reqDivergence = reqOut;
     renderDivergenceBanner();
+    renderReqDivergenceBanner();
 }
 function renderDivergenceBanner() {
     const panel = document.querySelector('.modal.editor');
@@ -1987,7 +2057,45 @@ function renderDivergenceBanner() {
    profile keeps because they do not feed the runtime signature (sampling,
    thinking, ...) are untouched; a profile deliberately differing in a
    load-time value is served by NOT clicking this. */
-function seDivergenceSyncBtn(diverging, panel) {
+function renderReqDivergenceBanner() {
+    const panel = document.querySelector('.modal.editor');
+    if (!panel) return;
+    let host = panel.querySelector('.se-reqdivergence');
+    const fields = panel.querySelector('#se-fields');
+    if (!fields) return;
+    const diverging = MM_DATA.reqDivergence || [];
+    if (!diverging.length) { if (host) host.remove(); return; }
+    if (!host) {
+        host = document.createElement('div');
+        host.className = 'se-reqdivergence';
+        fields.prepend(host);
+    }
+    host.textContent = '';
+    const line = document.createElement('div');
+    line.className = 'se-div-head';
+    const names = diverging.map(d => d.api_name || d.display_name).join(', ');
+    line.textContent = '⚠ REQUEST DIVERGENCE — ';
+    const b = document.createElement('b');
+    b.textContent = diverging.length === 1
+        ? C.tf('uplift.se.divergence.one', 'profile ') + names
+        : C.tf('uplift.se.divergence.many', 'profiles ') + names;
+    const expl = document.createElement('span');
+    expl.textContent = C.tf('uplift.se.reqdivergence.expl',
+        ': request-time values stored there differ from the base model\'s current ones. A profile is a snapshot — it keeps its own value; the change shown reflects the base settings as queued right now.');
+    const show = document.createElement('button');
+    show.type = 'button'; show.className = 'se-btn se-div-show';
+    show.textContent = C.tf('uplift.se.divergence.show', '(show)');
+    show.onclick = () => {
+        const det = host.querySelector('.se-div-detail');
+        if (det) { det.remove(); show.textContent = C.tf('uplift.se.divergence.show', '(show)'); return; }
+        show.textContent = C.tf('uplift.se.divergence.hide', '(hide)');
+        host.append(seDivergenceDetail(diverging));
+    };
+    line.append(b, expl, show);
+    line.append(seDivergenceSyncBtn(diverging, panel, true));
+    host.append(line);
+}
+function seDivergenceSyncBtn(diverging, panel, isReq) {
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'se-btn se-div-show se-div-sync';
     const label = () => C.tf('uplift.se.divergence.sync', 'SYNC BASE → PROFILES');
@@ -1998,6 +2106,8 @@ function seDivergenceSyncBtn(diverging, panel) {
     btn.textContent = label();
     btn.title = C.tf('uplift.se.divergence.sync.title',
         'Reset the diverging load-time settings of these profiles to the base model\'s current values (they inherit them again). Each profile\'s other overrides stay as they are.');
+    if (isReq) btn.title = C.tf('uplift.se.reqdivergence.sync.title',
+        'Drop the diverging request-time values from these profiles so they truly inherit the base model again. Each profile\'s other settings stay as they are; base edits still pending in the editor are NOT saved by this.');
     btn.onclick = async () => {
         if (!armed) {
             armed = true;
@@ -2011,9 +2121,11 @@ function seDivergenceSyncBtn(diverging, panel) {
         btn.disabled = true;
         const names = diverging.map(d => d.api_name || d.display_name).join(', ');
         try {
-            const n = await seSyncBaseToProfiles(diverging);
-            if (n) MM_GLUE.toast(C.tf('uplift.se.divergence.synced',
-                'Base load-time settings synced to ') + n + ' profile(s): ' + names);
+            const n = await seSyncBaseToProfiles(diverging, isReq);
+            if (n) MM_GLUE.toast(C.tf(isReq ? 'uplift.se.reqdivergence.synced'
+                                            : 'uplift.se.divergence.synced',
+                isReq ? 'Base request-time settings synced to '
+                      : 'Base load-time settings synced to ') + n + ' profile(s): ' + names);
             else MM_GLUE.toast(C.tf('uplift.se.divergence.sync.none',
                 'Nothing to sync — profiles already match the base'));
         } catch (err) {
@@ -2027,7 +2139,7 @@ function seDivergenceSyncBtn(diverging, panel) {
     };
     return btn;
 }
-async function seSyncBaseToProfiles(diverging) {
+async function seSyncBaseToProfiles(diverging, isReq) {
     if (!seModel) throw new Error('no model loaded in editor');
     const fields = await MM_GLUE.modelSettingsFields();
     // the runtimeDiff keys speak the payload shape; old servers store the

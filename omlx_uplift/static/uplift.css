@@ -921,8 +921,30 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-typenote { border: 1px solid var(--edge); background: var(--row2);
     padding: 7px 10px; margin: 8px 0; font-size: 12px; }
 .se-typenote .se-typenote-sticky { color: var(--accent); margin-top: 4px; }
+/* REQ-DIV: request-time snapshot drift — its OWN class (the runtime
+   renderer adds/removes .se-divergence by that name; a shared class would
+   let either banner wipe the other — the pending-banner lesson repeated).
+   Amber frame: stale values still SERVE (silently), unlike the orange
+   reload-trigger warning; same detail rows, different ground. */
+.se-reqdivergence { border: 1px solid rgba(200, 150, 20, 0.65);
+    background: rgba(220, 160, 0, 0.07); padding: 7px 10px; margin: 8px 0;
+    font-size: 12px; }
+.se-reqdivergence .se-div-head { color: var(--accent); }
+.se-reqdivergence .se-div-prof { color: var(--accent); }
+.se-reqdivergence .se-div-new { color: var(--accent); }
+.se-reqdivergence .se-div-detail { border-top-color: rgba(200, 150, 20, 0.5); }
 .se-div-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
     color: var(--diverge); font-weight: 600; }
+/* REQ-DIV: a profile row storing a value that equals the base's effective
+   value today — dimmed like a real inherited placeholder, tagged, with the
+   snapshot truth one hover away */
+.se-row.se-req-eq { opacity: 0.72; }
+.se-row.se-req-eq .se-ctl input, .se-row.se-req-eq .se-ctl select {
+    color: var(--dim); font-style: italic; }
+.se-row.se-req-eq.dirty, .se-row.se-req-eq.restartq { opacity: 1; }
+.se-row.se-req-eq.dirty .se-ctl input, .se-row.se-req-eq.dirty .se-ctl select,
+.se-row.se-req-eq.restartq .se-ctl input { color: var(--ink); font-style: normal; }
+.se-req-tag { color: var(--dim); font-style: italic; }
 .se-div-show { font: 500 10px/1 var(--mono); padding: 3px 6px; }
 .se-div-detail { margin-top: 6px; border-top: 1px dashed rgba(179, 84, 30, 0.5);
     padding-top: 6px; font: 400 11px/1.5 var(--mono); color: var(--ink); }
