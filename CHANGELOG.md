@@ -13,6 +13,40 @@ users never see.
 
 ## Unreleased
 
+## [1.4] — 2026-10-11
+
+The measurement-honesty release: the dashboard shows what is really
+happening, and hides nothing that happened before.
+
+- **MTP acceptance metrics.** Native Lightning MTP stats that vanilla
+  only printed at sequence finish are now collected and graphed: an
+  'MTP accepted tgs' area under the Throughput generation line, and
+  one acceptance card with the per-depth decay ladder. The card's
+  headline reads the same number as the ladder's top edge.
+- **Embedding work counts in Throughput (EMBED-1).** Embedding and
+  reranker models ran on a path the chart never watched; they now have
+  their own series.
+- **Charts hold still when data goes stale.** No more sliding the
+  window left with an empty hole; the 'value holds, then pops into
+  place' delay on 5-second cards is fixed at the root.
+- **Metric history survives upgrades.** Rows from previous sessions
+  and old kegs are visible again; only live co-tenant writers are
+  filtered.
+- **Faster, smoother live feed.** The 2 Hz sampler is deadline-
+  scheduled; backgrounded tabs paint instantly on return; a
+  'Smoothing:' select on the Throughput chart; click any card title to
+  pop the graph out full-size.
+- **Honest settings and patch workflow.** Non-LLM models no longer
+  show ~47 LLM settings that their engines ignore; a patch touching
+  the Homebrew formula is held with an explanation instead of showing
+  APPLIED while doing nothing; dashboard rebuilds stream their log
+  live; stored patch versions remember the base they tested against.
+- **Small touches:** the Request feed is now a popup with 2 h default
+  history (stale 'queued' rows are repaired at open), legends fit
+  inside cards, card titles fit one line, Escape closes layout edit
+  mode, default skin is Discovery One, the throughput bench lets you
+  pick generation length (tg128–1024).
+
 ## [1.3] — 2026-10-09
 
 The patch-workflow release. The CLI can now drive the whole patch lifecycle
