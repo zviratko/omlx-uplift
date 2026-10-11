@@ -21,6 +21,12 @@ dependencies = [
     # today, but a direct import needs a direct declaration (CI without
     # omlx proved it).
     "pyyaml",
+    # /uplift/v1/audio/speech parses form/multipart bodies via
+    # request.form() — starlette hard-requires python-multipart for that
+    # (AssertionError -> 500 without it). Present in every real deploy
+    # ONLY as omlx's transitive dep; same direct-import rule as pyyaml,
+    # and CI caught exactly that (6 std-route tests, 2026-10-11).
+    "python-multipart>=0.0.5",
 ]
 
 [project.scripts]
