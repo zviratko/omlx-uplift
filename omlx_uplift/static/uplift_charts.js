@@ -972,7 +972,7 @@ function metricLabel(key) {
               // TITLE-1 + item 1 (user 2026-10-10): the MTP acceptance card
               // title must fit one header line on a w=8 card — 'MTP acc.'
               // (locale wins; this is the auto-translation fallback).
-              'acceptance': 'MTP acc.', 'depth acceptance': 'MTP depth acceptance',
+              'acceptance': 'MTP', 'depth acceptance': 'MTP depth acceptance',
               // Item 2 (user 2026-10-10): 'output tokens/s' wraps on the
               // compact card; the sibling of 'average tgs' is 'output tgs'.
               'completion tokens s': 'output tgs',
@@ -1454,7 +1454,20 @@ function drawMetricChart(id) {
     let liveUsed = false;
     let data = cache.data;
     if (liveOn) {
-        const sers = metricServes(e.def);
+        // LIVE-UNION-1 (user 2026-10-11: MTP card 'moves but doesn't draw
+        // any datapoints, the 0 line only appears after a refresh'): only
+        // DRAWN series may push their live column into the union x. A
+        // legendOnly key never paints a path, but its 2 Hz stamps extend
+        // the union x beyond the last stored sample — and that live-only
+        // tail (measured: 15.8 s past the last 5 s band point, 94% of rows
+        // null in every stacked column) makes uPlot's gap-clip wipe the
+        // whole band render: the stack vanished while the badge claimed
+        // '2 Hz'. Live A/B on the running board: tail rows present 192 px
+        // drawn, tail trimmed 820 px, full stored-only 826 px. On boot the
+        // ring is still empty so the first draws are stored-only and the
+        // line appears — the exact refresh-dependent symptom. The legend
+        // row of a legendOnly key reads the honest 5 s value instead.
+        const sers = metricServes(e.def).filter(s => !s.legendOnly);
         if (sers.some(s => LF.liveUsable(s.key))) {
             for (const s of sers) {
                 if (!LF.liveUsable(s.key)) continue;

@@ -343,7 +343,7 @@
  "uplift.metric.mem.percent": "memory %",
  "uplift.metric.mem.used_bytes": "memory used",
  "uplift.metric.mtp.accept_pct": "accepted %",
- "uplift.metric.mtp.acceptance": "MTP acc.",
+ "uplift.metric.mtp.acceptance": "MTP",
  "uplift.metric.mtp.accepted_tokens_s": "MTP accepted tok/s",
  "uplift.metric.mtp.cyc0_pct": "0 accepted %",
  "uplift.metric.mtp.cyc1_pct": "1 accepted %",
