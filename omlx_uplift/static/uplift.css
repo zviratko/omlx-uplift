@@ -34,6 +34,12 @@
     --diverge-hover: #94451a;
     --amber-text: #9a6b00;         /* amber text on translucent amber bg */
     --type-vlm: #7aa7ff;
+    /* GS-TAB (user 2026-10-11): the server-settings section tabs own a
+       DIFFERENT accent from the signage headers (white/amber/red) so the
+       two hierarchies never read as the same thing. Steel blue = house
+       --type-vlm family; skins can retune via the tokens. */
+    --gs-tab: #7aa7ff;              /* active tab ground */
+    --gs-tab-ink: #0b0b0b;          /* text on --gs-tab */
     --type-embed: #b98fd6;
     --type-tpl: #6fbf9a;
     --lamp-on: #57d97a;
@@ -60,6 +66,8 @@
     --ink: #0b0b0b;
     --dim: #767268;             /* AA on white */
     --accent: #c9243b;          /* red lives on light grounds */
+    --gs-tab: #3f6fbf;          /* deeper blue for white grounds */
+    --gs-tab-ink: #ffffff;
     --chart-1: #0b0b0b;
     --chart-2: #c9243b;
     --grid: #d5d5d5;
@@ -83,6 +91,7 @@
     --ink: #f2efe6;             /* paper white on metal */
     --dim: #9fb0c8;             /* steel grey-blue, AA on card */
     --accent: #ffb830;          /* instrument amber */
+    --gs-tab: #6fa8ff;          /* [70s] instrument blue */
     --chart-1: #f2efe6;
     --chart-2: #ffb830;
     --grid: #222c3c;
@@ -148,6 +157,7 @@ html[data-theme="cockpit"] { color-scheme: dark; }
     --ink: #ffffff;
     --dim: #c9c4ba;
     --accent: #ffb830;
+    --gs-tab: #8fb8ff;          /* pure black ground wants the lighter blue */
     --chart-1: #ffffff;
     --chart-2: #ffb830;
     --grid: #4a4a4a;
@@ -1694,10 +1704,25 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
    settings form. Same tab language as the model editor (.se-tab inverted
    active state); boxes stay rendered and only hidden, so the strip is pure
    presentation over the existing dirty machinery. */
-.gs-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px;
+.gs-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px;
     max-width: 1500px; margin-left: auto; margin-right: auto; }
-.gs-tab-badge { margin-left: 6px; min-width: 14px; padding: 0 3px;
-    display: inline-block; font: 600 9px/1.5 var(--mono); text-align: center;
+/* GS-TAB sizing (user 2026-10-11): the strip is the page's PRIMARY
+   navigation — it must out-size the section signage inside (11px), and
+   its active state carries --gs-tab, never the header's white/amber/red
+   dirty language. */
+.gs-tabs .se-tab { font: 600 13px/1 var(--sans); letter-spacing: 0.14em;
+    text-transform: uppercase; padding: 10px 18px; color: var(--ink);
+    border-color: var(--edge); }
+.gs-tabs .se-tab:hover { background: var(--row2); }
+.gs-tabs .se-tab.active { background: var(--gs-tab); color: var(--gs-tab-ink);
+    border-color: var(--gs-tab); }
+.gs-tabs .se-tab.active:hover { background: var(--gs-tab); }
+.gs-tabs .se-tab.active .gs-tab-badge { background: var(--gs-tab-ink);
+    color: var(--gs-tab); }
+.gs-tabs .se-tab.active .gs-tab-badge.restart { background: var(--gs-tab-ink);
+    color: var(--diverge); }
+.gs-tab-badge { margin-left: 8px; min-width: 16px; padding: 0 4px;
+    display: inline-block; font: 600 10px/1.6 var(--mono); text-align: center;
     background: var(--accent); color: var(--ink-on-accent); }
 .gs-tab-badge[hidden] { display: none; }
 .gs-tab-badge.restart { background: var(--diverge); color: var(--ink-on-red); }

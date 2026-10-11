@@ -681,6 +681,15 @@ class Suite:
             self.check("gs tabs exist", False, st["err"]); return
         self.check("gs tabs exist", len(st["tabs"]) >= 5, str(len(st["tabs"])))
         self.check("gs first tab is ALL", st["tabs"] and st["tabs"][0]["slug"] == "all")
+        # GS-TAB sizing contract (user 2026-10-11): the active tab's font
+        # must out-size the section signage it labels, and its ground must
+        # be the tab accent -- never the header's white/amber/red language.
+        sz = self._gs_sizes()
+        self.check("gs tabs out-size section headers",
+                   sz["tf"] > sz["hf"], "tab=%s px header=%s px" % (sz["tf"], sz["hf"]))
+        self.check("gs active tab carries tab accent",
+                   sz["tint"] == sz["accent"],
+                   "active bg=%s --gs-tab=%s" % (sz["tint"], sz["accent"]))
         canon = [b["slug"] for b in
                  sorted((b for b in st["boxes"] if b["slug"]), key=lambda b: b["ord"])]
         self.check("gs tabs mirror boxes",
@@ -759,6 +768,24 @@ class Suite:
 
     def _gs_state(self):
         return self._eval(self._GS_STATE)
+
+    _GS_SIZES = """(() => {
+      const tab = document.querySelector('#gs-tabs .se-tab.active')
+               || document.querySelector('#gs-tabs .se-tab');
+      const h = document.querySelector('#gs-body .gs-box-title');
+      const cs = getComputedStyle(tab), hs = getComputedStyle(h);
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--gs-tab)'; document.body.append(probe);
+      const accent = getComputedStyle(probe).color; probe.remove();
+      return JSON.stringify({tf: parseFloat(cs.fontSize),
+                             hf: parseFloat(hs.fontSize),
+                             tint: cs.backgroundColor, accent});
+    })()"""
+
+    def _gs_sizes(self):
+        out = self._eval(self._GS_SIZES)
+        d = json.loads(out) if isinstance(out, str) else out
+        return d
 
     def run(self):
         origin = self._eval("location.origin") or ""
