@@ -34,19 +34,18 @@
     --diverge-hover: #94451a;
     --amber-text: #9a6b00;         /* amber text on translucent amber bg */
     --type-vlm: #7aa7ff;
-    /* GS-TAB (user 2026-10-11): the server-settings section tabs own a
-       DIFFERENT accent from the signage headers (white/amber/red) so the
-       two hierarchies never read as the same thing — but the accent must
-       come from the SKIN palette, never a fixed hue (blue 'doesn't really
-       suit many of the skins'). The palette's muted signature --dim is
-       the only color family measured collision-free (>=40 RGB distance
-       from ink/accent/red across ALL bundled crates; tests/test_skins_gs
-       _tab.py gates it), with dark ink on top. Crates may override the
-       pair with tokens gs-tab / gs-tab-ink. */
-    --gs-tab: var(--dim);           /* active tab ground */
-    --gs-tab-ink: var(--bg);        /* text = the page ground: the crate
-                                       already tunes dim for AA-as-text
-                                       on bg, and contrast is symmetric */
+    /* GS-TAB (user 2026-10-11, rework): the tab accent IS the skin's
+       accent (--gs-tab: var(--accent)) — 'use a different colour for the
+       accent (red in discovery one)'. The tab must not be confusable
+       with a section header, but the header trio is ink/accent/red, so
+       the CONTRACT is: distance >=40 from the CLEAN heading ground
+       (--ink slab) and AA text on the slab. Ink pairing: the page ground
+       when it clears AA (light/red slabs want dark text; bright slabs
+       likelain green take the page ground); theme blocks and crates
+       declare the pair where the default fails. tests/test_skins_gs_tab
+       .py gates every built-in + bundled crate on exactly this. */
+    --gs-tab: var(--accent);        /* active tab ground = the skin accent */
+    --gs-tab-ink: var(--bg);        /* text = page ground (AA-paired) */
     --type-embed: #b98fd6;
     --type-tpl: #6fbf9a;
     --lamp-on: #57d97a;
@@ -1713,8 +1712,8 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
    navigation — it must out-size the section signage inside (11px), and
    its active state carries --gs-tab, never the header's white/amber/red
    dirty language. */
-.gs-tabs .se-tab { font: 600 13px/1 var(--sans); letter-spacing: 0.14em;
-    text-transform: uppercase; padding: 10px 18px; color: var(--ink);
+.gs-tabs .se-tab { font: 600 12px/1 var(--sans); letter-spacing: 0.14em;
+    text-transform: uppercase; padding: 9px 16px; color: var(--ink);
     border-color: var(--edge); }
 .gs-tabs .se-tab:hover { background: var(--row2); }
 .gs-tabs .se-tab.active { background: var(--gs-tab); color: var(--gs-tab-ink);

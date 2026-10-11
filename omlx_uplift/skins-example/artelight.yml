@@ -24,6 +24,8 @@ tokens:
   ink: "#2e2722"         # warm near-black, never pure black on cream
   dim: "#6e624f"         # muted umber — AA on every ground (min 4.7:1, panel is the binding one)
   accent: "#c57721"      # sodium lamp amber
+  gs-tab: "#9a5d1a"        # amber one shade deeper: the sodium accent
+  gs-tab-ink: "#f6efe2"    #   cannot carry page-ground text at AA
   chart-1: "#c57721"     # series 1 = the lamp itself
   chart-2: "#3e7d4f"     # series 2 = the one cool voice in the palette
   grid: "#e6dac2"        # gridlines must recede on paper or the chart becomes a graph of lines

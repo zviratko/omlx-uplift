@@ -17,6 +17,8 @@ tokens:
   ink: "#ece7f5"         # pilot-suit pale
   dim: "#9a86c8"         # washed lavender
   accent: "#e60012"      # NERV blood red
+  gs-tab: "#ff5c5c"        # brightened MAGI red: the blood-red accent
+  gs-tab-ink: "#0a0710"    #   is too dark to carry AA slab text either way
   chart-1: "#8a5fd6"     # series 1: AT-field violet
   chart-2: "#ff6a1f"     # series 2: pattern orange
   grid: "#241636"

@@ -1222,49 +1222,10 @@ function gsSpecRow(it, L, ctx) {
 }
 
 const GS_SPEC = [
-    {t: 'Language'},
+    {t: 'Server'},
     {sec: 'ui', lab: () => C.tf('uplift.gs.ui.interface_language', 'Interface language'), ctl: {
         k: 'sel', sec: 'ui', field: 'language', flat: 'ui_language', opts: () => Object.entries(GS_LABELS.lang)}},
 
-
-    {t: 'Claude Code'},   // classic renders this on Status; Uplift keeps it with settings
-    {sec: 'claude_code', lab: 'cc.mode', hint: 'cc.mode_hint', ctl: {
-        k: 'sel', sec: 'claude_code', field: 'mode', flat: 'claude_code_mode',
-        curFn: (ctx) => ctx.ccLocal ? 'local' : 'cloud',
-        opts: () => [['local', GS_LABELS.cc.local], ['cloud', GS_LABELS.cc.cloud]]}},
-    {x: (body, L, ctx) => {
-        if (!ctx.ccLocal) return;
-        const dl = document.createElement('datalist'); dl.id = 'cc-models';
-        body.append(dl);
-        GLUE.fetchJson(`${API}/admin/api/models`).then(d => {
-            for (const m of d.models || []) {
-                const o2 = document.createElement('option');
-                o2.value = m.name || m.id || ''; dl.append(o2);
-            }
-        }).catch(() => { /* picker list optional */ });
-        for (const [lab, field] of [['opus', 'opus_model'], ['sonnet', 'sonnet_model'], ['haiku', 'haiku_model']]) {
-            body.append(gsRow('claude_code', L.cc[lab], '',
-                gsText('claude_code', field, 'claude_code_' + lab, L,
-                       { placeholder: L.cc.ph, list: 'cc-models' }),
-                { flat: 'claude_code_' + lab }));
-        }
-    }},
-
-    {t: 'Auth'},
-    {sec: 'auth', lab: 'auth.api_key', hint: 'auth.api_key_hint', ctl: {
-        k: 'text', field: 'api_key', flat: 'api_key', type: 'password',
-        ph: 'auth.api_key_placeholder'}},
-    {x: (body, L) => {
-        const bpIn = document.createElement('input');
-        bpIn.type = 'text'; bpIn.value = GS.base_path || '';
-        bpIn.disabled = true;
-        bpIn.title = C.tf('uplift.ui.set_at_launch_base_path_read_only', 'Set at launch (--base-path); read-only');
-        body.append(gsRow('auth', L.auth.base_path, L.auth.base_path_hint, bpIn));
-    }},
-    {sec: 'auth', lab: 'auth.skip', hint: (L) => L.auth.skip_hint + ' ' + L.auth.skip_warning, ctl: {
-        k: 'tog', field: 'skip_api_key_verification', flat: 'skip_api_key_verification'}},
-
-    {t: 'Server'},
     {sec: 'server', lab: 'server.host', ctl: {
         k: 'text', field: 'host', flat: 'host', ph: 'server.host_placeholder'},
      opts: {badge: true, flat: 'host'}},
@@ -1284,7 +1245,21 @@ const GS_SPEC = [
             { flat: 'server_aliases' }));
     }},
 
-    {t: 'Model'},
+    {t: 'Auth'},
+    {sec: 'auth', lab: 'auth.api_key', hint: 'auth.api_key_hint', ctl: {
+        k: 'text', field: 'api_key', flat: 'api_key', type: 'password',
+        ph: 'auth.api_key_placeholder'}},
+    {x: (body, L) => {
+        const bpIn = document.createElement('input');
+        bpIn.type = 'text'; bpIn.value = GS.base_path || '';
+        bpIn.disabled = true;
+        bpIn.title = C.tf('uplift.ui.set_at_launch_base_path_read_only', 'Set at launch (--base-path); read-only');
+        body.append(gsRow('auth', L.auth.base_path, L.auth.base_path_hint, bpIn));
+    }},
+    {sec: 'auth', lab: 'auth.skip', hint: (L) => L.auth.skip_hint + ' ' + L.auth.skip_warning, ctl: {
+        k: 'tog', field: 'skip_api_key_verification', flat: 'skip_api_key_verification'}},
+
+    {t: 'Models'},
     {x: (body, L) => {
         const dirs = gsGet('model', 'model_dirs') || [];
         const dl = document.createElement('div');
@@ -1334,7 +1309,6 @@ const GS_SPEC = [
         k: 'sel', sec: 'idle_timeout', field: 'idle_timeout_seconds', nullTo: '',
         flat: 'idle_timeout_seconds', opts: 'model.idle_opts'}},
 
-    {t: 'Generation Defaults'},
     {sec: 'gen', lab: 'gen.temperature', hint: 'gen.temperature_hint', ctl: {
         k: 'range', sec: 'sampling', field: 'temperature', flat: 'sampling_temperature',
         min: 0, max: 2, step: 0.1}},
@@ -1385,7 +1359,6 @@ const GS_SPEC = [
         flat: 'memory_guard_custom_ceiling_gb', min: 1, step: 1, ph: 'res.custom_ph'}},
     {env: ['scheduler', 'memory']},
 
-    {t: 'Cache'},
     {sec: 'cache', lab: 'cache.enabled', hint: 'cache.enabled_hint', ctl: {
         k: 'tog', sec: 'cache', field: 'enabled', flat: 'cache_enabled'}},
     {sec: 'cache', lab: 'cache.hot_only', hint: 'cache.hot_only_hint', ctl: {
@@ -1396,13 +1369,34 @@ const GS_SPEC = [
     {sec: 'cache', lab: 'cache.hot_max', hint: 'cache.hot_max_hint', ctl: {
         k: 'text', field: 'hot_cache_max_size', flat: 'hot_cache_max_size', ph: '8GB'}},
 
-    {t: 'MCP'},
+    {t: 'Integrations'},
+    {sec: 'claude_code', lab: 'cc.mode', hint: 'cc.mode_hint', ctl: {
+        k: 'sel', sec: 'claude_code', field: 'mode', flat: 'claude_code_mode',
+        curFn: (ctx) => ctx.ccLocal ? 'local' : 'cloud',
+        opts: () => [['local', GS_LABELS.cc.local], ['cloud', GS_LABELS.cc.cloud]]}},
+    {x: (body, L, ctx) => {
+        if (!ctx.ccLocal) return;
+        const dl = document.createElement('datalist'); dl.id = 'cc-models';
+        body.append(dl);
+        GLUE.fetchJson(`${API}/admin/api/models`).then(d => {
+            for (const m of d.models || []) {
+                const o2 = document.createElement('option');
+                o2.value = m.name || m.id || ''; dl.append(o2);
+            }
+        }).catch(() => { /* picker list optional */ });
+        for (const [lab, field] of [['opus', 'opus_model'], ['sonnet', 'sonnet_model'], ['haiku', 'haiku_model']]) {
+            body.append(gsRow('claude_code', L.cc[lab], '',
+                gsText('claude_code', field, 'claude_code_' + lab, L,
+                       { placeholder: L.cc.ph, list: 'cc-models' }),
+                { flat: 'claude_code_' + lab }));
+        }
+    }},
+
     {sec: 'mcp', lab: 'mcp.path', ctl: {k: 'text', field: 'config_path', flat: 'mcp_config', ph: 'mcp.ph'},
      opts: {badge: true, flat: 'mcp_config'}},
     {sec: 'mcp', lab: 'mcp.expose', hint: 'mcp.expose_hint', ctl: {
         k: 'tog', field: 'expose_tools', flat: 'mcp_expose_tools'}},
 
-    {t: 'Usage & Network'},
     {sec: 'usage', lab: 'usage.history', hint: 'usage.history_hint', ctl: {
         k: 'tog', field: 'usage_history', flat: 'usage_history'}},
     {sec: 'net', lab: 'net.hf_ep', hint: 'net.hf_ep_hint', ctl: {

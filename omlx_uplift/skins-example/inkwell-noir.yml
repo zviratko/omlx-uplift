@@ -27,6 +27,8 @@ tokens:
   ink: "#f2f1ec"         # bone — the ink, inverted (15.2:1 on card)
   dim: "#a8a7a0"         # 6.6:1 on panel, the binding ground
   accent: "#f2f1ec"      # duotone: accent IS the ink
+  gs-tab: "#8a8983"        # graphite: the duotone accent IS the ink,
+  gs-tab-ink: "#131315"    #   so the slab steps to the frame grey
   chart-1: "#f2f1ec"     # series separated by value only
   chart-2: "#6f6f69"     # 3.4:1 on card; seriesPalette() tops up from here
   grid: "#232326"        # faintest thing on the card

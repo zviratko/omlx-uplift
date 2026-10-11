@@ -17,13 +17,14 @@ tokens:
   ink: "#2b2a26"         # printed-manual black
   dim: "#8a8375"         # photocopy grey
   accent: "#f3752a"      # Aperture long-drop orange
+  gs-tab-ink: "#2b2a26"    # long-drop orange carries the slab fine but
+                           #   beige page-text is 2.26:1 on it — printed
+                           #   manual black does (5.05:1)
   chart-1: "#388ffa"     # EnApDb blue
   chart-2: "#f3752a"     # long-drop orange
   grid: "#d4cfc2"
   heat: "#f3752a"
   frame: "#388ffa"       # test-chamber blue
-  gs-tab: "#3f93ff"        # EnApDb blue, one step off frame: the
-  gs-tab-ink: "#2b2a26"    #   derived dim cannot clear AA as a slab
   red: "#c0392b"
   bad: "#c0392b"
   warn: "#d98e04"
