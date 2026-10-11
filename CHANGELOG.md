@@ -13,6 +13,30 @@ users never see.
 
 ## Unreleased
 
+## [1.99b] — 2026-10-11
+
+The voice release.
+
+- **Named voice cloning.** Save a reference clip + transcript as a
+  named voice on the new Voices page, preview it before saving, edit
+  it later or save a copy onto another TTS model. A local
+  speech-recognition model can transcribe the clip for you. Chat got a
+  read-aloud button on every assistant reply with a voice picker that
+  remembers your choice.
+- **Voices from any audio client.** A standard OpenAI-shaped endpoint
+  (`/uplift/v1/audio/speech`, works with the official SDK as-is). Any
+  speech route accepts `Model:Voice` — e.g. `Qwen3-TTS:Jake` — so a
+  stored voice is one field away from any client, on any TTS model.
+- **Voice calls cannot hang forever** — a 240 s watchdog ends a stuck
+  request with an honest message.
+- **Tabbed settings.** The model editor and the server settings page
+  now split their long forms into tabs (with dirty-count badges); tab
+  colors derive from the active skin.
+- **Profile drift is shown before it bites** — `(= base)` tags and a
+  request-divergence preview with one-click sync.
+- **Small touches:** "Download queued" no longer locks the download
+  button.
+
 ## [1.4] — 2026-10-11
 
 The measurement-honesty release: the dashboard shows what is really
