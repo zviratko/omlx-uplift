@@ -119,17 +119,44 @@ function dlSortModels(list, key, dir, fallbackKey) {
 }
 function initDownloader() {
     const token = () => (D.$('dl-token') || {}).value?.trim() || '';
+    /* DL-FLASH (user 2026-10-11): the download button used to flip to a
+       disabled 'queued…' — and on SUCCESS it never came back, so one click
+       locked the row forever and no second model could be queued. The
+       button is now IMMUTABLE: confirmation is a small flash to its right
+       ('Download queued ✓', fades on its own). A brief cooldown absorbs
+       double-clicks without ever changing the button's look or state. */
+    const FLASH_MS = 2600;
+    function flashQueued(btn, ok) {
+        if (!btn || !btn.parentNode) return;
+        let f = btn.parentNode.querySelector('.dl-flash');
+        if (!f) { f = document.createElement('span');
+                  f.className = 'dl-flash'; btn.after(f); }
+        f.textContent = ok
+            ? C.tf('uplift.dl.queued_flash', 'Download queued ✓')
+            : C.tf('uplift.dl.queue_fail', 'queue failed');
+        f.classList.toggle('err', !ok);
+        f.classList.remove('out'); void f.offsetWidth;   // restart fade
+        f.classList.add('in');
+        clearTimeout(f._t);
+        f._t = setTimeout(() => { f.classList.remove('in'); f.classList.add('out'); },
+                          FLASH_MS - 600);
+        f._t2 = setTimeout(() => f.remove(), FLASH_MS);
+    }
     const queueDownload = (repoId, fromBtn) => {
         if (!repoId) { DG.toast(C.t('uplift.toast.repo_id_required')); return; }
-        if (fromBtn) { fromBtn.disabled = true; fromBtn.textContent = 'queued…'; }
+        if (fromBtn && fromBtn._cool) return;      // silent double-click guard
+        if (fromBtn) { fromBtn._cool = true;
+                       setTimeout(() => { fromBtn._cool = false; }, FLASH_MS); }
         DG.postJson(`${API}/admin/api/hf/download`,
             { repo_id: repoId, hf_token: token() }).then(r => {
                 // live: {success, task:{task_id}} · shadow: {task_id}
                 const tid = (r.task && r.task.task_id) || r.task_id || r.id || '';
                 DG.toast(C.t('uplift.toast.download_queued', {repo: repoId}) + (tid ? ` #${String(tid).slice(0, 8)}` : ''));
+                flashQueued(fromBtn, true);
                 renderTasks('dl-tasks', 'hf');
             }).catch(e => { DG.toast(C.tf('uplift.dl.download_fail', 'download: ') + e.message);
-                if (fromBtn) { fromBtn.disabled = false; fromBtn.textContent = 'download'; } });
+                flashQueued(fromBtn, false);
+                if (fromBtn) fromBtn._cool = false; });
     };
     function setTab(tab) {
         DL.tab = tab;

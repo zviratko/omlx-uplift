@@ -1244,6 +1244,17 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    cancel/retry appeared as nameless text under the repo, not as buttons).
    Long error text must not starve the name: all tracks shrink fractionally */
 .admin-table .urow.usage.with-acts { grid-template-columns: minmax(0,4fr) minmax(0,2fr) 120px minmax(0,3fr) 96px; }
+/* DL-FLASH: transient confirmation riding to the right of the download
+   button — the button itself never changes (a disabled 'queued…' button
+   locked the row after one click). Accent text + auto-fade; .err is the
+   honest failure tint (var(--bad): readable red on dark grounds). */
+.dl-flash { font: 500 10px/1 var(--mono); letter-spacing: .06em;
+    color: var(--accent); white-space: nowrap; align-self: center;
+    opacity: 0; transform: translateY(2px); transition: opacity .25s ease,
+    transform .25s ease; }
+.dl-flash.in { opacity: 1; transform: none; }
+.dl-flash.out { opacity: 0; }
+.dl-flash.err { color: var(--bad); }
 .admin-table .urow.usage .rowacts { display: flex; gap: 6px; justify-content: flex-end;
     text-align: right; overflow: visible; }
 .admin-table .urow.head { color: var(--dim); border-top: 1px solid var(--ink); }

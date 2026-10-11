@@ -923,5 +923,7 @@
  "uplift.voices.transcribed": "文字起こし完了——確認してください",
  "uplift.voices.need_stt": "まずSTTモデルを選択",
  "uplift.voices.transcribe_empty": "音声が検出されませんでした",
- "uplift.voices.timeout": "サーバーが{n}秒以内に応答しませんでした——モデルの読み込みが停止している可能性があります。リクエストを中断しました（サーバー再起動で解消します）"
+ "uplift.voices.timeout": "サーバーが{n}秒以内に応答しませんでした——モデルの読み込みが停止している可能性があります。リクエストを中断しました（サーバー再起動で解消します）",
+ "uplift.dl.queued_flash": "ダウンロードをキューに入れ✓",
+ "uplift.dl.queue_fail": "キューに入れませんでした"
 }

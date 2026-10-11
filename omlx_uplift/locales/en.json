@@ -920,5 +920,7 @@
  "uplift.voices.transcribed": "Transcript filled — review it",
  "uplift.voices.need_stt": "pick an STT model first",
  "uplift.voices.transcribe_empty": "the model heard no speech",
- "uplift.voices.timeout": "the server did not answer in {n}s — model load may be stuck; request abandoned (restart the server to clear it)"
+ "uplift.voices.timeout": "the server did not answer in {n}s — model load may be stuck; request abandoned (restart the server to clear it)",
+ "uplift.dl.queued_flash": "Download queued ✓",
+ "uplift.dl.queue_fail": "queue failed"
 }

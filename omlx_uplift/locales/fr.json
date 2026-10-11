@@ -924,5 +924,7 @@
  "uplift.voices.transcribed": "Transcription remplie — vérifiez-la",
  "uplift.voices.need_stt": "choisissez d'abord un modèle STT",
  "uplift.voices.transcribe_empty": "le modèle n'a entendu aucune voix",
- "uplift.voices.timeout": "le serveur n'a pas répondu en {n} s — le chargement du modèle est peut-être bloqué ; requête abandonnée (redémarrez le serveur)"
+ "uplift.voices.timeout": "le serveur n'a pas répondu en {n} s — le chargement du modèle est peut-être bloqué ; requête abandonnée (redémarrez le serveur)",
+ "uplift.dl.queued_flash": "Téléchargement en file ✓",
+ "uplift.dl.queue_fail": "échec de la mise en file"
 }
