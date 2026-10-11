@@ -142,6 +142,22 @@ go live on refresh with no restart. The built-in examples ship in
 `omlx_uplift/skins-example/`. **Full authoring guide:
 [docs/skins.md](docs/skins.md).**
 
+## Voices (voice cloning)
+
+Uplift adds named-voice storage on top of vanilla's zero-shot TTS,
+without touching omlx files:
+
+- **Voices page** (under Models): save a reference clip + transcript as
+  a named voice, preview before saving, edit later or copy the voice
+  onto another TTS model. A local STT model can transcribe the clip for
+  you (you confirm the text — clone quality depends on it).
+- **Chat read-aloud**: native chat gets a voice button on every
+  assistant reply, with a voice picker that remembers your choice.
+- **Any audio client**: standard OpenAI-shaped endpoint
+  `POST /uplift/v1/audio/speech` (official SDK works as-is), and both
+  speech routes accept the `Model:Voice` alias — `Qwen3-TTS:Jake` —
+  where the prefix optionally re-clones the voice onto another model.
+
 ## Other commands
 
 ```bash
