@@ -957,6 +957,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-reqdivergence .se-div-detail { border-top-color: var(--edge); }
 .se-div-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
     color: var(--div-red, var(--red)); font-weight: 600; }
+/* U85: the apply-base-edits picker lives inline in the banner row */
+.se-div-apply-pick { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.se-div-apply-pick label { font-weight: 400; color: var(--ink); cursor: pointer; }
 /* REQ-DIV: a profile row storing a value that equals the base's effective
    value today — dimmed like a real inherited placeholder, tagged, with the
    snapshot truth one hover away */

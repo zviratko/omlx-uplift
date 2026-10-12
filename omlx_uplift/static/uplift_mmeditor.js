@@ -87,6 +87,38 @@ function seIsRuntimeKey(k) {
 }
 function seRuntimeDirtyKeys() { return seDirtyKeys().filter(seIsRuntimeKey); }
 function sePlainDirtyKeys() { return seDirtyKeys().filter(k => !seIsRuntimeKey(k)); }
+// dirty state keys -> the payload keys they own (some are derived). One map
+// for the base save AND the U85 edit-sync (shared site on purpose).
+const SE_KEY_MAP = {
+    enableThinkingBudget: ['thinking_budget_enabled', 'thinking_budget_tokens'],
+    enableIndexCache: ['index_cache_freq'],
+    enableToolResultLimit: ['max_tool_result_tokens'],
+};
+// the runtimeDiff keys speak the payload shape; old servers store the
+// legacy twin name in the profile (adaptToServerSettings renames)
+const SE_LEGACY_TWINS = { mtp_adaptive_max_depth: ['mtp_num_draft_tokens'],
+                          mtp_fixed_depth: ['mtp_num_draft_tokens'] };
+/* U85 (user 2026-10-12): the keys JUST EDITED on the base tab, in payload
+   shape (KEY_MAP resolved + kwargs handled via their entry list). These,
+   and ONLY these, are what "APPLY BASE EDITS → PROFILES" pushes — the old
+   full-reset SYNC wiped every deliberate divergence, which defeats the
+   point of profiles. Returns null when the base tab holds no edit to apply
+   (the button must not offer an empty write). Unsaved-and-then-applied
+   values are the editor's queued state — honest wording: apply pushes the
+   CURRENT base values, it does not save the base itself. */
+function seBaseEditKeys() {
+    const bt = seTabs.find(z => z.id === 'base');
+    if (!bt) return null;
+    const out = new Set();
+    for (const k of (bt.dirty || []))
+        for (const pk of (SE_KEY_MAP[k] || [k])) out.add(pk);
+    const vals = seIsBaseTab() ? seValues : (bt.workVals || {});
+    if (JSON.stringify((vals || {}).ctKwargEntries || []) !==
+        JSON.stringify((bt.origVals || {}).ctKwargEntries || [])) {
+        out.add('chat_template_kwargs'); out.add('forced_ct_kwargs');
+    }
+    return out.size ? out : null;
+}
 function seModelIsLoaded() {
     return !!(seFormModel && !seFormModel._missing &&
               (seFormModel.loaded || seFormModel.is_loading));
@@ -2060,6 +2092,10 @@ function renderDivergenceBanner() {
     // DIV-3 (user 2026-10-09): offer to eliminate the divergence the other
     // way around — adopt the base model's load-time values in every
     // diverging profile — instead of only warning about it.
+    // U85: the PRIMARY verb is applying just the queued base edits; the
+    // full reset stays reachable but secondary.
+    const apply = seDivergenceEditApplyBtn(panel);
+    if (apply) line.append(apply);
     line.append(seDivergenceSyncBtn(diverging, panel));
     host.append(line);
 }
@@ -2108,6 +2144,8 @@ function renderReqDivergenceBanner() {
         host.append(seDivergenceDetail(diverging));
     };
     line.append(b, expl, show);
+    const applyR = seDivergenceEditApplyBtn(panel);
+    if (applyR) line.append(applyR);
     line.append(seDivergenceSyncBtn(diverging, panel, true));
     host.append(line);
 }
@@ -2121,9 +2159,9 @@ function seDivergenceSyncBtn(diverging, panel, isReq) {
                            if (timer) { clearTimeout(timer); timer = null; } };
     btn.textContent = label();
     btn.title = C.tf('uplift.se.divergence.sync.title',
-        'Reset the diverging load-time settings of these profiles to the base model\'s current values (they inherit them again). Each profile\'s other overrides stay as they are.');
+        'Reset the diverging load-time settings of these profiles to the base model\'s current values (they inherit them again). Each profile\'s other overrides stay as they are. RESETS ALL DIVERGING VALUES, not just your current base edits — for a single edited key use APPLY BASE EDITS instead.');
     if (isReq) btn.title = C.tf('uplift.se.reqdivergence.sync.title',
-        'Drop the diverging request-time values from these profiles so they truly inherit the base model again. Each profile\'s other settings stay as they are; base edits still pending in the editor are NOT saved by this.');
+        'Drop the diverging request-time values from these profiles so they truly inherit the base model again. Each profile\'s other settings stay as they are; base edits still pending in the editor are NOT saved by this. RESETS ALL DIVERGING VALUES, not just your current base edits.');
     btn.onclick = async () => {
         if (!armed) {
             armed = true;
@@ -2158,10 +2196,6 @@ function seDivergenceSyncBtn(diverging, panel, isReq) {
 async function seSyncBaseToProfiles(diverging, isReq) {
     if (!seModel) throw new Error('no model loaded in editor');
     const fields = await MM_GLUE.modelSettingsFields();
-    // the runtimeDiff keys speak the payload shape; old servers store the
-    // legacy twin name in the profile (adaptToServerSettings renames)
-    const LEGACY_TWINS = { mtp_adaptive_max_depth: ['mtp_num_draft_tokens'],
-                           mtp_fixed_depth: ['mtp_num_draft_tokens'] };
     let n = 0;
     for (const d of diverging) {
         const p = (MM_DATA.profiles || []).find(x => x.name === d.name);
@@ -2170,44 +2204,164 @@ async function seSyncBaseToProfiles(diverging, isReq) {
         const ov = JSON.parse(JSON.stringify(p.settings || {}));
         for (const row of d.diff) {
             delete ov[row.key];
-            for (const t of (LEGACY_TWINS[row.key] || [])) delete ov[t];
+            for (const t of (SE_LEGACY_TWINS[row.key] || [])) delete ov[t];
         }
-        const body = window.UpliftModelSpec.adaptToServerSettings(ov, fields);
-        const req = { settings: body, display_name: p.display_name || d.display_name,
-            expose_as_model: !!p.expose_as_model, api_name: p.api_name || null };
-        try {
-            await D.putJson(`${API}/admin/api/models/${encodeURIComponent(seModel)}`
-                + `/profiles/${encodeURIComponent(d.name)}`, req);
-        } catch (e) {
-            if (e.status !== 404) throw e;
-            // missing base model: classic PUT 404s; uplift upserts (same
-            // fallback saveProfileTab uses)
-            await D.postJson(`${API}/uplift/api/models/${encodeURIComponent(seModel)}/profiles`,
-                Object.assign({ name: d.name }, req));
-        }
-        p.settings = body;
-        // an open tab of this profile must not re-save the stale overrides:
-        // re-base it on the synced record. If that tab is ACTIVE (visible
-        // widgets holding possibly-unsaved edits), re-render it from the
-        // re-based values — the sync confirmation names the profile, so
-        // trading that tab's unsaved edits for an honest display is the
-        // informed outcome. Other tabs re-base silently (not displayed).
-        const t = seTabs.find(z => z.profileId === d.name);
-        if (t) {
-            t.overrides = JSON.parse(JSON.stringify(body));
-            t._ovSnap = JSON.parse(JSON.stringify(body));
-            t.workVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(body)));
-            t.origVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(body)));
-            t.dirty = new Set();
-            if (t.id === seActiveTab) {
-                seRestoreTab(t);
-                renderEditorFields(document.getElementById('se-fields'));
-            }
-        }
-        n++;
+        n += await seWriteProfileSettings(d.name, d.display_name, ov, fields) ? 1 : 0;
     }
     CHIPS.clearProfileCache(seModel);   // alias-tree chips must re-fetch
     return n;
+}
+/* U85 (user 2026-10-12): profiles are MEANT to diverge — that is their
+   point — so the full RESET sync above is demoted (secondary button, its
+   title says plainly that it resets ALL diverging values). This is the
+   verb the user actually wants: take ONLY the keys just edited on the
+   base and push their current values into the chosen profiles. The write
+   is an explicit override (not inheritance): a profile keeps tracking
+   deliberately — divergence stays possible; the user diverges a value
+   again on the profile tab whenever they want. */
+async function seApplyBaseEditsToProfiles(edits, vals, targets) {
+    if (!seModel) throw new Error('no model loaded in editor');
+    const fields = await MM_GLUE.modelSettingsFields();
+    const full = window.UpliftModelSpec.buildPayload(vals || seValues, seFormModel);
+    const kwargsEdited = edits.has('chat_template_kwargs');
+    let n = 0;
+    for (const p of targets) {
+        const ov = JSON.parse(JSON.stringify(p.settings || {}));
+        for (const k of edits) {
+            if (k === 'chat_template_kwargs' || k === 'forced_ct_kwargs') continue;
+            if (full[k] === undefined) continue;
+            if (full[k] === null) { delete ov[k];
+                for (const t of (SE_LEGACY_TWINS[k] || [])) delete ov[t]; }
+            else ov[k] = full[k];
+        }
+        if (kwargsEdited) {
+            if (full.chat_template_kwargs == null) delete ov.chat_template_kwargs;
+            else ov.chat_template_kwargs = full.chat_template_kwargs;
+            if (full.forced_ct_kwargs == null) delete ov.forced_ct_kwargs;
+            else ov.forced_ct_kwargs = full.forced_ct_kwargs;
+        }
+        n += await seWriteProfileSettings(p.name, p.display_name || p.name, ov, fields) ? 1 : 0;
+    }
+    CHIPS.clearProfileCache(seModel);
+    return n;
+}
+/* One profile settings write + open-tab re-base, shared by BOTH sync
+   verbs (U85: 'if U84 landed first, reuse its per-tab commit helper' —
+   this is that shared commit seam). The PUT carries the profile's other
+   fields unchanged; 404 (no engine entry) falls back to uplift upsert
+   exactly like saveProfileCommit. */
+async function seWriteProfileSettings(name, display_name, ov, fields) {
+    const body = window.UpliftModelSpec.adaptToServerSettings(ov, fields);
+    const p = (MM_DATA.profiles || []).find(x => x.name === name);
+    const req = { settings: body, display_name: display_name || (p && p.display_name) || name,
+        expose_as_model: !!(p && p.expose_as_model), api_name: (p && p.api_name) || null };
+    try {
+        await D.putJson(`${API}/admin/api/models/${encodeURIComponent(seModel)}`
+            + `/profiles/${encodeURIComponent(name)}`, req);
+    } catch (e) {
+        if (e.status !== 404) throw e;
+        // missing base model: classic PUT 404s; uplift upserts (same
+        // fallback saveProfileTab uses)
+        await D.postJson(`${API}/uplift/api/models/${encodeURIComponent(seModel)}/profiles`,
+            Object.assign({ name }, req));
+    }
+    if (p) p.settings = body;
+    // an open tab of this profile must not re-save the stale overrides:
+    // re-base it on the written record. If that tab is ACTIVE (visible
+    // widgets holding possibly-unsaved edits), re-render it from the
+    // re-based values — both sync verbs confirm by name first, so trading
+    // that tab's unsaved edits for an honest display is the informed
+    // outcome. Other tabs re-base silently (not displayed).
+    const t = seTabs.find(z => z.profileId === name);
+    if (t) {
+        t.overrides = JSON.parse(JSON.stringify(body));
+        t._ovSnap = JSON.parse(JSON.stringify(body));
+        t.workVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(body)));
+        t.origVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(body)));
+        t.dirty = new Set();
+        if (t.id === seActiveTab) {
+            seRestoreTab(t);
+            renderEditorFields(document.getElementById('se-fields'));
+        }
+    }
+    return true;
+}
+/* The primary U85 verb, rendered in BOTH divergence banners whenever the
+   base tab holds queued edits: click opens a checkbox list of the stored
+   profiles (default: every profile the banner lists as diverging — the
+   user's "ticked set" rule; non-diverging profiles appear unticked so an
+   edited value can still be pushed to them deliberately), the key list in
+   the confirm tooltip (write-before-confirm honesty: nothing is written
+   until CONFIRM in the picker), then APPLY. */
+function seDivergenceEditApplyBtn(panel) {
+    const edits = seBaseEditKeys();
+    if (!edits || !(MM_DATA.profiles || []).length) return null;
+    const wrap = document.createElement('span');
+    wrap.className = 'se-div-apply';
+    const keyList = [...edits].join(', ');
+    const divNames = new Set((MM_DATA.divergence || []).map(d => d.name)
+        .concat((MM_DATA.reqDivergence || []).map(d => d.name)));
+    const mkBtn = () => {
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'se-btn se-div-show';
+        btn.textContent = C.tf('uplift.se.editsync.apply', 'APPLY BASE EDITS \u2192 PROFILES');
+        btn.title = C.tf('uplift.se.editsync.apply.title',
+            'Push ONLY the values you just edited on the base model into the ticked profiles as explicit overrides. Every other profile setting stays exactly as it is — divergence survives.')
+            + ' [' + keyList + ']';
+        btn.onclick = openPicker;
+        return btn;
+    };
+    const close = () => { wrap.textContent = ''; wrap.append(mkBtn()); };
+    const openPicker = () => {
+        wrap.textContent = '';
+        const det = document.createElement('span');
+        det.className = 'se-div-apply-pick';
+        const boxes = [];
+        for (const p of (MM_DATA.profiles || [])) {
+            const l = document.createElement('label');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox'; cb.value = p.name;
+            cb.checked = divNames.has(p.name);   // default: diverging listed
+            l.append(cb, ' ' + (p.api_name || p.display_name || p.name));
+            det.append(l); boxes.push(cb);
+        }
+        const ok = document.createElement('button');
+        ok.type = 'button'; ok.className = 'se-btn restart';
+        ok.textContent = C.tf('uplift.se.editsync.confirm',
+            'CONFIRM \u2014 apply these base values to the ticked profiles');
+        ok.title = C.tf('uplift.se.editsync.keys', 'Keys: ') + keyList;
+        const cancel = document.createElement('button');
+        cancel.type = 'button'; cancel.className = 'se-btn se-div-show';
+        cancel.textContent = C.tf('uplift.se.editsync.cancel', '(cancel)');
+        ok.onclick = async () => {
+            const names = boxes.filter(c => c.checked).map(c => c.value);
+            if (!names.length) { MM_GLUE.toast(C.tf('uplift.se.editsync.none',
+                'tick at least one profile')); return; }
+            ok.disabled = true; cancel.disabled = true;
+            const targets = (MM_DATA.profiles || []).filter(p => names.includes(p.name));
+            try {
+                seCaptureTab();   // the queued base edits must be current
+                const bt = seTabs.find(z => z.id === 'base');
+                const vals = seIsBaseTab() ? seValues : (bt && bt.workVals) || seValues;
+                const n = await seApplyBaseEditsToProfiles(edits, vals, targets);
+                MM_GLUE.toast(C.tf('uplift.se.editsync.applied',
+                    'Base edits applied to ') + n + ' profile(s): ' + names.join(', ')
+                    + ' \u00b7 ' + keyList);
+            } catch (err) {
+                MM_GLUE.toast(C.tf('uplift.toast.action_failed',
+                    { action: 'apply base edits to profiles', msg: err.message }));
+            }
+            refreshDivergence();
+            seRenderTabs(panel);
+            seUpdateSaveBtn();
+            if (panel.isConnected) renderDivergenceBanner();
+        };
+        cancel.onclick = close;
+        det.append(ok, cancel);
+        wrap.append(det);
+    };
+    wrap.append(mkBtn());
+    return wrap;
 }
 function seDivergenceDetail(diverging) {
     const det = document.createElement('div');
@@ -2617,11 +2771,7 @@ async function commitBaseTab(panel, msg) {
         const plain = sePlainDirtyKeys();
         const runtime = seRuntimeDirtyKeys();
         // dirty state keys -> the payload keys they own (some are derived)
-        const KEY_MAP = {
-            enableThinkingBudget: ['thinking_budget_enabled', 'thinking_budget_tokens'],
-            enableIndexCache: ['index_cache_freq'],
-            enableToolResultLimit: ['max_tool_result_tokens'],
-        };
+        const KEY_MAP = SE_KEY_MAP;
         payload = {};
         for (const k of plain) {
             for (const pk of (KEY_MAP[k] || [k])) if (pk in full) payload[pk] = full[pk];
