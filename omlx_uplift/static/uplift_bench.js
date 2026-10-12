@@ -2895,8 +2895,11 @@ function MTEB(kind) {
         envNote: function () {
             var n = el('div', 'native-stub-note'); n.id = prefix + '-envnote';
             n.hidden = true;
+            // U86: the first Run click builds the env server-side (the
+            // panel streams its progress) — no terminal round-trip
             n.textContent = t('uplift.bench.mteb_env_missing',
-                'MTEB environment missing — run: omlx-uplift mteb-env create');
+                'MTEB environment not installed yet — the first Run '
+                + 'creates it automatically (2-5 min for the download).');
             return n;
         },
 
@@ -3043,6 +3046,11 @@ function MTEB(kind) {
                 rel();
                 this.state.running = true;
                 this.state.runId = r.run_id;
+                // U86: start succeeded => the run itself now owns the
+                // env build; the static 'not installed yet' note would
+                // just contradict the live progress line below it
+                var note0 = gid(prefix + '-envnote');
+                if (note0) note0.hidden = true;
                 this.setButtons();
                 this.startStream(r.run_id);
             } catch (e) {

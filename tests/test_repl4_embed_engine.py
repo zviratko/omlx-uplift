@@ -27,10 +27,12 @@ def _fresh_state(monkeypatch, tmp_path):
     # monkeypatch.setattr on the real modules, which restores itself.
     EE._active = None
     EE._accum = []
+    EE._building = False
     monkeypatch.setattr(EE.paths, "uplift_store_dir", lambda: tmp_path)
     yield
     EE._active = None
     EE._accum = []
+    EE._building = False
 
 
 def _fake_bench_env(monkeypatch, *, mteb_state="ready"):
@@ -112,9 +114,110 @@ def test_validate_body_rules():
 # ---- start gates -----------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_start_requires_env_ready(monkeypatch):
+async def test_start_creates_missing_env_on_the_spot(monkeypatch):
+    # U86: the env gate LEFT start() — a missing mteb-env must not
+    # BadInput; ensure_env builds it inside _runner before the lease.
     _fake_bench_env(monkeypatch, mteb_state="missing")
-    with pytest.raises(EE.BadInput, match="mteb-env"):
+    calls = []
+
+    async def fake_ensure(run):
+        calls.append(run)
+
+    monkeypatch.setattr(EE, "ensure_env", fake_ensure)
+
+    class Pool:
+        async def get_engine(self, *a, **k):
+            raise RuntimeError("stop here")
+    r = await EE.start({"model_id": "M", "kind": "embed", "tasks": ["STS12"]},
+                       pool=Pool())
+    assert r["status"] == "running"
+    run = EE._active
+    await run.task
+    assert calls == [run]                       # build attempted, in-run
+    assert run.status == "failed"               # died later on the fake pool
+
+
+@pytest.mark.asyncio
+async def test_ensure_env_ready_is_a_noop(monkeypatch):
+    _fake_bench_env(monkeypatch, mteb_state="ready")
+    from omlx_uplift import mteb_env as me
+    monkeypatch.setattr(me, "mteb_create",
+                        lambda **k: pytest.fail("ready must not rebuild"))
+    await EE.ensure_env(EE.EmbedRun("mteb-e0", "M", "embed", ["STS12"], 0))
+
+
+@pytest.mark.asyncio
+async def test_ensure_env_missing_builds_once_then_streams_ready(monkeypatch):
+    st = {"state": "missing"}
+    _fake_bench_env(monkeypatch)
+    from omlx_uplift import mteb_env as me
+
+    def fake_create(*, reinstall=False, quiet=False):
+        assert st["state"] == "missing" and reinstall is False and quiet
+        st["state"] = "ready"
+        return {"state": "ready", "path": "/fake/mteb-env"}
+    monkeypatch.setattr(me, "mteb_status",
+                        lambda **k: {"state": st["state"],
+                                     "path": "/fake/mteb-env"})
+    monkeypatch.setattr(me, "mteb_create", fake_create)
+    run = EE.EmbedRun("mteb-e1", "M", "embed", ["STS12"], 0)
+    await EE.ensure_env(run)
+    msgs = [e.get("message", "") for e in run.events]
+    assert any("Creating MTEB environment" in m for m in msgs)
+    assert any("MTEB environment ready" in m for m in msgs)
+    assert EE._building is False                # flag always released
+
+
+@pytest.mark.asyncio
+async def test_ensure_env_stale_reinstalls_for_upgrades(monkeypatch):
+    # the upgrade answer: uplift bumped the pin file -> digest moved ->
+    # status 'stale' -> the same click rebuilds via reinstall=True
+    _fake_bench_env(monkeypatch, mteb_state="stale")
+    seen = {}
+    from omlx_uplift import mteb_env as me
+
+    def fake_create(*, reinstall=False, quiet=False):
+        seen["reinstall"] = reinstall
+        return {"state": "ready", "path": "/fake/mteb-env"}
+    monkeypatch.setattr(me, "mteb_create", fake_create)
+    monkeypatch.setattr(EE, "env_python", lambda: "/fake/py")
+    run = EE.EmbedRun("mteb-e2", "M", "embed", ["STS12"], 0)
+    await EE.ensure_env(run)
+    assert seen["reinstall"] is True
+    assert any("Updating MTEB environment" in e.get("message", "")
+               for e in run.events)
+
+
+@pytest.mark.asyncio
+async def test_ensure_env_build_failure_raises_and_frees_flag(monkeypatch):
+    _fake_bench_env(monkeypatch, mteb_state="missing")
+    from omlx_uplift import mteb_env as me
+
+    def boom(*, reinstall=False, quiet=False):
+        raise RuntimeError("pip died: torch wheel 404")
+    monkeypatch.setattr(me, "mteb_create", boom)
+    run = EE.EmbedRun("mteb-e3", "M", "embed", ["STS12"], 0)
+    with pytest.raises(RuntimeError, match="torch wheel 404"):
+        await EE.ensure_env(run)
+    assert EE._building is False                # retry stays possible
+
+
+@pytest.mark.asyncio
+async def test_ensure_env_one_build_at_a_time(monkeypatch):
+    # a stuck build (pip churns while a second click lands) never means
+    # two rmtree/pip races — second caller gets Conflict, not corruption
+    _fake_bench_env(monkeypatch, mteb_state="missing")
+    EE._building = True
+    run = EE.EmbedRun("mteb-e4", "M", "embed", ["STS12"], 0)
+    with pytest.raises(EE.Conflict, match="build already in progress"):
+        await EE.ensure_env(run)
+
+
+@pytest.mark.asyncio
+async def test_start_conflicts_with_stuck_build(monkeypatch):
+    _fake_bench_env(monkeypatch)
+    EE._building = True
+    with pytest.raises(EE.Conflict, match="build already in progress"):
         await EE.start({"model_id": "M", "kind": "embed", "tasks": ["STS12"]},
                        pool=object())
 

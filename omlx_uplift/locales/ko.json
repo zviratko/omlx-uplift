@@ -19,7 +19,7 @@
  "uplift.bench.engine_hint": "oMLX Classic는 총 N개 질문을 샘플링합니다. LM-Eval(커뮤니티 하네스 lm-eval)은 하위 작업당 N개를 평가합니다 — MMLU는 57개 하위 작업이므로 30이 1710 요청이 됩니다.",
  "uplift.bench.generation_length": "생성 길이",
  "uplift.bench.metric": "지표",
- "uplift.bench.mteb_env_missing": "MTEB 환경이 없습니다 — 실행: omlx-uplift mteb-env create",
+ "uplift.bench.mteb_env_missing": "MTEB 환경이 아직 설치되지 않았습니다 — 첫 실행 시 자동으로 생성됩니다(다운로드에 2-5분 소요).",
  "uplift.bench.native_stub": "네이티브 표면 — 아직 구현되지 않았습니다.",
  "uplift.bench.pick_prompt": "프롬프트 길이를 하나 이상 선택하세요",
  "uplift.bench.pick_tasks": "벤치마크를 하나 이상 선택하세요",

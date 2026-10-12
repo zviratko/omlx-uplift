@@ -36,6 +36,7 @@ import atexit
 import json
 import logging
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -148,6 +149,70 @@ def env_python() -> Optional[str]:
     return str(Path(st["path"]) / "bin" / "python")
 
 
+# U86: on-demand mteb-env creation. One build at a time — the flag is
+# checked in start() (inside the event loop, no await between check and
+# set) and re-checked under _build_lock for callers that skip start().
+_building = False
+_build_lock = threading.Lock()
+
+
+async def ensure_env(run: "EmbedRun") -> None:
+    """Create/rebuild the pinned mteb-env venv if it is not ready, then
+    verify. Streams progress onto the run so the UI is alive while pip
+    works (torch is ~587 MB — first run takes minutes). 'stale' (the
+    requirements digest moved, e.g. after an uplift upgrade bumped the
+    pin file) rebuilds via reinstall=True; 'ready' is a no-op fast path.
+    Raises RuntimeError with the pip tail on failure — _runner's except
+    turns it into the run's ⚠ error and the next click retries.
+
+    The build runs on a plain daemon thread (not to_thread) so _building
+    is cleared by the WORKER's finally, not the awaiting coroutine's: a
+    cancelled run leaves the flag set while pip still churns, and the
+    next click gets a clean Conflict instead of rmtree-ing a live venv.
+    """
+    global _building
+    st = _mteb_env().mteb_status()
+    if st["state"] == "ready":
+        return
+    with _build_lock:
+        if _building:
+            raise Conflict("mteb-env build already in progress")
+        _building = True
+    reinstall = st["state"] == "stale"
+    verb = "Updating" if reinstall else "Creating"
+    # engine-side progress messages are plain English by house rule
+    # (harness_engine precedent) — the UI shows them verbatim
+    await run.send({"type": "progress", "phase": "env",
+                    "message": f"{verb} MTEB environment "
+                               "(first run downloads torch, 2-5 min)..."})
+    logger.info(f"uplift mteb-env auto-{st['state']} starting")
+    loop = asyncio.get_running_loop()
+    done = asyncio.Event()
+    err: list[BaseException] = []
+
+    def _work() -> None:
+        global _building
+        try:
+            _mteb_env().mteb_create(reinstall=reinstall, quiet=True)
+        except BaseException as e:      # noqa: BLE001 — re-raised below
+            err.append(e)
+        finally:
+            with _build_lock:
+                _building = False
+            loop.call_soon_threadsafe(done.set)
+
+    threading.Thread(target=_work, daemon=True).start()
+    await done.wait()
+    if err:
+        raise RuntimeError(f"mteb-env build failed: {err[0]}")
+    if env_python() is None:
+        raise RuntimeError(
+            "mteb-env build finished but the venv is still not ready")
+    await run.send({"type": "progress", "phase": "env",
+                    "message": "MTEB environment ready"})
+    logger.info("uplift mteb-env auto-build done")
+
+
 def _bench_env():
     from . import bench_env
     return bench_env
@@ -193,8 +258,11 @@ async def start(body: dict, pool: Any) -> dict:
     global _active
     if active_run() is not None:
         raise Conflict("an embeddings benchmark is already running")
-    if env_python() is None:
-        raise BadInput("mteb-env is not ready — run: omlx-uplift mteb-env create")
+    if _building:
+        raise Conflict("mteb-env build already in progress")
+    # U86: NO env gate here — clicking RUN is the intent; _runner's
+    # ensure_env() creates the venv on the spot (progress streams over
+    # the run's SSE). BadInput stays for the shape checks below.
     model_id, kind, tasks, limit = validate_body(body)
     run = EmbedRun(f"mteb-{uuid.uuid4().hex[:12]}", model_id, kind,
                    tasks, limit)
@@ -337,6 +405,9 @@ async def _runner(run: EmbedRun, pool: Any) -> None:
     leased = False
     _t0 = time.perf_counter()
     try:
+        # U86: env first, lease second — building the venv can take
+        # minutes and must NOT hold a loaded model hostage
+        await ensure_env(run)
         # lease the engine through classic's own pool call — same seam
         # the harness dispatcher uses (settings saves / TTL eviction
         # cannot unload the model mid-run)

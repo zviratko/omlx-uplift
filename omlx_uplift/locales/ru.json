@@ -19,7 +19,7 @@
  "uplift.bench.engine_hint": "oMLX Classic берёт N вопросов всего. LM-Eval (общественный харнес lm-eval) оценивает N НА ПОДЗАДАЧУ — у MMLU 57 подзадач, поэтому 30 превращаются в 1710 запросов.",
  "uplift.bench.generation_length": "Длина генерации",
  "uplift.bench.metric": "Метрика",
- "uplift.bench.mteb_env_missing": "Окружение MTEB не установлено — выполните: omlx-uplift mteb-env create",
+ "uplift.bench.mteb_env_missing": "Окружение MTEB ещё не установлено — первый запуск создаст его автоматически (2–5 мин на загрузку).",
  "uplift.bench.native_stub": "Нативная поверхность — ещё не реализовано.",
  "uplift.bench.pick_prompt": "Выберите хотя бы одну длину промпта",
  "uplift.bench.pick_tasks": "Выберите хотя бы один бенчмарк",
