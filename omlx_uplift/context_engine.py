@@ -52,10 +52,11 @@ def _ane():
 
 # U50: uplift-side sanity range for target_tokens replacing classic's
 # power-of-two whitelist. Floor = _MIN_USEFUL_TOKENS (2048, the value the
-# runner itself rejects below); ceiling = classic's largest offered target
-# (524288 — probing beyond it has never been a supported run shape).
+# runner itself rejects below — a smaller target can never produce a usable
+# run, so it stays the only rejection bound). No ceiling: any target at or
+# above the floor is accepted, including sizes beyond the model's declared
+# window (the runner clamps to native at run time and labels the cap).
 _CTX_MIN_TARGET = 2048
-_CTX_MAX_TARGET = 524288
 _CTX_DEFAULT_TARGET = 131072   # classic's model default (literal: pydantic-
                                # independent fallback for test stand-ins)
 
@@ -144,10 +145,10 @@ async def context_start(body: dict, pool: Any) -> dict:
                       lambda *_: None)("target_tokens")
         tgt_raw = getattr(fld, "default", _CTX_DEFAULT_TARGET)
     if isinstance(tgt_raw, bool) or not isinstance(tgt_raw, int) \
-            or not (_CTX_MIN_TARGET <= tgt_raw <= _CTX_MAX_TARGET):
+            or tgt_raw < _CTX_MIN_TARGET:
         raise BadInput(
-            f"Invalid target {tgt_raw!r}. Must be a whole number between "
-            f"{_CTX_MIN_TARGET} and {_CTX_MAX_TARGET} tokens.")
+            f"Invalid target {tgt_raw!r}. Must be a whole number of at "
+            f"least {_CTX_MIN_TARGET} tokens.")
     try:
         req = Req(model_id=mid, target_tokens=tgt_raw)
     except Exception as e:

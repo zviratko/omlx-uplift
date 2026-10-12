@@ -51,25 +51,20 @@ var TARGET_TOKENS = [16384, 32768, 65536, 131072, 262144, 524288];
 // (classic's classic-page hint says sizes beyond the native window are
 // hidden — we hide them too), the standard ladder keeps only sizes at or
 // below it, and a Custom entry allows an arbitrary probe (server accepts
-// 2048..524288 integers; the runner still clamps to native + floors to
-// 2k, so an over-native custom value is safe, just capped at run time).
+// any whole number >= 2048, including beyond the declared window; the
+// runner still clamps to native + floors to 2k, so an over-native custom
+// value is safe, just capped at run time).
 var CTX_CUSTOM_MIN = 2048;
-var CTX_CUSTOM_MAX = 524288;
 function ctxTargetOptions(native, ladder) {
-    // native values ABOVE the accepted ceiling are floored to it and the
-    // label tells the truth ('1,048,576 -> testing 524,288'): never silent
-    // rounding. Below-ceiling natives (135,168) pass through untouched -
-    // the uplift server side accepts any whole number in the range, so no
-    // nearest-power-of-two fallback is needed (card step-1 assumed the
-    // whitelist would stay; step 2 removed that constraint).
+    // No ceiling: every offered size is a search cap the runner accepts —
+    // beyond the native window the run is clamped to native at run time and
+    // the result says so ('capped by native'), never silent rounding.
     var out = [];
     var list = ladder || TARGET_TOKENS;
     if (native && native > 0) {
-        var test = Math.min(native, CTX_CUSTOM_MAX);
-        var label = native.toLocaleString();
-        if (test !== native) label += ' \u2192 ' + test.toLocaleString();
-        out.push({ value: String(test), label: label, native: true });
-        list.filter(function (tk) { return tk < native && tk <= test; })
+        out.push({ value: String(native), label: native.toLocaleString(),
+                   native: true });
+        list.filter(function (tk) { return tk < native; })
             .forEach(function (tk) {
                 out.push({ value: String(tk), label: tk.toLocaleString() });
             });
@@ -1456,10 +1451,10 @@ var CTX = {
         customWrap.id = 'bench-ctx-custom-wrap';   // gid-reachable (test stubs
         var customInp = el('input'); customInp.type = 'number';
         customInp.id = 'bench-ctx-target-custom';
-        customInp.min = String(CTX_CUSTOM_MIN); customInp.max = String(CTX_CUSTOM_MAX);
+        customInp.min = String(CTX_CUSTOM_MIN);
         customInp.step = '1';
         customInp.placeholder = t('uplift.bench.ctx_custom_placeholder',
-            'tokens (2,048 – 524,288)');
+            'tokens (at least 2,048)');
         customWrap.appendChild(customInp);
         // U50: options rebuild per model (native config.json window first,
         // classic hide-above-native rule, Custom probe last)
@@ -1526,10 +1521,9 @@ var CTX = {
         if (sel.value !== 'custom') return Number(sel.value);
         var inp = gid('bench-ctx-target-custom');
         var v = inp ? Number(inp.value) : NaN;
-        if (!isFinite(v) || v !== Math.floor(v)
-            || v < CTX_CUSTOM_MIN || v > CTX_CUSTOM_MAX) {
+        if (!isFinite(v) || v !== Math.floor(v) || v < CTX_CUSTOM_MIN) {
             d.toast(t('uplift.bench.ctx_custom_range',
-                'Custom target must be a whole number between 2,048 and 524,288 tokens.'));
+                'Custom target must be a whole number of at least 2,048 tokens.'));
             return null;
         }
         return v;

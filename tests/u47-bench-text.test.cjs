@@ -124,12 +124,16 @@ test('U50: native window is the first + selected option (off-whitelist ok)', () 
     assert.equal(opts[opts.length - 1].custom, true);
 });
 
-test('U50: native past the ceiling is floored and labelled honestly', () => {
+test('no ceiling: native past the old ceiling is offered verbatim', () => {
     const opts = ctxTargetOptions(1048576);
-    assert.equal(opts[0].value, '524288');
-    assert.ok(opts[0].label.includes('1,048,576') && opts[0].label.includes('524,288'),
-        'label shows native -> tested, never silent rounding');
+    assert.equal(opts[0].value, '1048576');
+    assert.equal(opts[0].label, '1,048,576');
+    assert.ok(!opts[0].label.includes('\u2192'), 'no floored-to-ceiling arrow');
     assert.equal(opts[0].native, true);
+    // full ladder below native + custom
+    assert.deepEqual(opts.slice(1, -1).map(o => Number(o.value)),
+        [16384, 32768, 65536, 131072, 262144, 524288]);
+    assert.equal(opts[opts.length - 1].custom, true);
 });
 
 test('U50: unknown native keeps the plain ladder (classic shape) + Custom', () => {

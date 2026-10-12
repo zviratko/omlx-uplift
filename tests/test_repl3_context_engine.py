@@ -258,8 +258,10 @@ async def test_context_start_completes_with_classic_shape(fake_engines):
 async def test_context_bad_target_and_model(fake_engines):
     ce = _mod()
     # range/type/bool junk 400s (before any run exists — an accepted start
-    # would arm the contention gate for everything after it)
-    for bad in (5, 2047, 524289, 100000000, "16384", True, 16384.5):
+    # would arm the contention gate for everything after it). No ceiling:
+    # 524289/1048576 are accepted now (beyond native the runner clamps to
+    # the native window at run time and labels the cap).
+    for bad in (5, 2047, 0, -3, "16384", True, 16384.5):
         with pytest.raises(ce.BadInput):
             await ce.context_start({"model_id": "m2", "target_tokens": bad},
                                    FakePool())
@@ -269,7 +271,7 @@ async def test_context_bad_target_and_model(fake_engines):
         await ce.context_start({"model_id": "ghost"}, FakePool())
     with pytest.raises(ce.BadInput):
         await ce.context_start({"model_id": "emb"}, FakePool())
-    # U50: off-whitelist ints inside the sanity range are now ACCEPTED (the
+    # U50: off-whitelist ints at/above the floor are now ACCEPTED (the
     # runner treats target as a search cap; guards are untouched)
     out = await ce.context_start({"model_id": "m1", "target_tokens": 135168},
                                  FakePool())
