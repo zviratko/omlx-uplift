@@ -1,5 +1,5 @@
 diff --git a/.gitignore b/.gitignore
-index 52bb5af6..e561a0ae 100644
+index 52bb5af..e561a0a 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -131,3 +131,12 @@ tq_batch_memory.md
@@ -16,10 +16,10 @@ index 52bb5af6..e561a0ae 100644
 +benchmarks/mscale_sweep.jsonl
 +benchmarks/parity/
 diff --git a/apps/omlx-mac/Resources/Localizable.xcstrings b/apps/omlx-mac/Resources/Localizable.xcstrings
-index f4b4c277..ab46da19 100644
+index 3e8a6f2..f6fd136 100644
 --- a/apps/omlx-mac/Resources/Localizable.xcstrings
 +++ b/apps/omlx-mac/Resources/Localizable.xcstrings
-@@ -21250,6 +21250,102 @@
+@@ -21274,6 +21274,102 @@
          }
        }
      },
@@ -123,7 +123,7 @@ index f4b4c277..ab46da19 100644
        "comment" : "Row label for the max generated tokens field",
        "extractionState" : "manual",
 diff --git a/apps/omlx-mac/Sources/AppView/Screens/ModelSettingsScreen.swift b/apps/omlx-mac/Sources/AppView/Screens/ModelSettingsScreen.swift
-index 1f97923c..6553ca10 100644
+index 1f97923..6553ca1 100644
 --- a/apps/omlx-mac/Sources/AppView/Screens/ModelSettingsScreen.swift
 +++ b/apps/omlx-mac/Sources/AppView/Screens/ModelSettingsScreen.swift
 @@ -939,6 +939,8 @@ private struct BasicTab: View {
@@ -170,7 +170,7 @@ index 1f97923c..6553ca10 100644
                                defaultValue: "Max Tokens",
                                comment: "Row label for the max generated tokens field"),
 diff --git a/apps/omlx-mac/Sources/AppView/ViewModels/ModelSettingsScreenVM.swift b/apps/omlx-mac/Sources/AppView/ViewModels/ModelSettingsScreenVM.swift
-index c9c6ed0e..b4528284 100644
+index c9c6ed0..b452828 100644
 --- a/apps/omlx-mac/Sources/AppView/ViewModels/ModelSettingsScreenVM.swift
 +++ b/apps/omlx-mac/Sources/AppView/ViewModels/ModelSettingsScreenVM.swift
 @@ -477,6 +477,114 @@ final class ModelSettingsScreenVM {
@@ -289,7 +289,7 @@ index c9c6ed0e..b4528284 100644
          switch field {
          case .topP, .topK, .minP, .repetitionPenalty, .presencePenalty:
 diff --git a/apps/omlx-mac/Sources/Net/DTO/ModelsDTO.swift b/apps/omlx-mac/Sources/Net/DTO/ModelsDTO.swift
-index 7ed7b5e7..18360171 100644
+index 7ed7b5e..1836017 100644
 --- a/apps/omlx-mac/Sources/Net/DTO/ModelsDTO.swift
 +++ b/apps/omlx-mac/Sources/Net/DTO/ModelsDTO.swift
 @@ -61,6 +61,10 @@ struct ModelDTO: Codable, Equatable, Sendable, Identifiable {
@@ -304,7 +304,7 @@ index 7ed7b5e7..18360171 100644
      let qwen4PleSsdOffloadSupported: Bool?
      let qwen4PleSsdOffloadForced: Bool?
 diff --git a/apps/omlx-mac/Tests/oMLXTests/DTOFixtureTests.swift b/apps/omlx-mac/Tests/oMLXTests/DTOFixtureTests.swift
-index 297a9689..884e2e5b 100644
+index 297a968..884e2e5 100644
 --- a/apps/omlx-mac/Tests/oMLXTests/DTOFixtureTests.swift
 +++ b/apps/omlx-mac/Tests/oMLXTests/DTOFixtureTests.swift
 @@ -159,6 +159,9 @@ final class DTOFixtureTests: XCTestCase {
@@ -327,7 +327,7 @@ index 297a9689..884e2e5b 100644
  
      // MARK: - Profile templates
 diff --git a/apps/omlx-mac/Tests/oMLXTests/Fixtures/models.json b/apps/omlx-mac/Tests/oMLXTests/Fixtures/models.json
-index ed8aff7e..575dbdbd 100644
+index ed8aff7..575dbdb 100644
 --- a/apps/omlx-mac/Tests/oMLXTests/Fixtures/models.json
 +++ b/apps/omlx-mac/Tests/oMLXTests/Fixtures/models.json
 @@ -25,6 +25,7 @@
@@ -339,7 +339,7 @@ index ed8aff7e..575dbdbd 100644
                  "max_context_window": 131072,
                  "max_tokens": 262144,
 diff --git a/apps/omlx-mac/Tests/oMLXTests/ModelSettingsScreenVMTests.swift b/apps/omlx-mac/Tests/oMLXTests/ModelSettingsScreenVMTests.swift
-index 46d40ff2..e371df47 100644
+index 46d40ff..e371df4 100644
 --- a/apps/omlx-mac/Tests/oMLXTests/ModelSettingsScreenVMTests.swift
 +++ b/apps/omlx-mac/Tests/oMLXTests/ModelSettingsScreenVMTests.swift
 @@ -399,6 +399,104 @@ final class ModelSettingsScreenVMTests: XCTestCase {
@@ -448,10 +448,10 @@ index 46d40ff2..e371df47 100644
          let decoder = JSONDecoder()
          decoder.keyDecodingStrategy = .convertFromSnakeCase
 diff --git a/apps/omlx-web/omlx_web/i18n/cs.json b/apps/omlx-web/omlx_web/i18n/cs.json
-index 0ae106c6..b2801ead 100644
+index 65c7f2f..bbbb42b 100644
 --- a/apps/omlx-web/omlx_web/i18n/cs.json
 +++ b/apps/omlx-web/omlx_web/i18n/cs.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "TurboQuant KV cache",
    "modal.model_settings.turboquant_kv_hint": "Komprimovat KV cache vektorovou kvantizací. Méně bitů = větší komprese, více bitů = lepší kvalita. Podporuje 2 až 8 bitů.",
    "modal.model_settings.turboquant_kv_bits_label": "Bitů na kanál",
@@ -460,10 +460,10 @@ index 0ae106c6..b2801ead 100644
    "modal.model_settings.k2_ane_hint": "Použít ANE pro zpracování promptů K2 včetně MoVA. Dekódování zůstává na GPU. ANE používá privátní rozhraní Apple. Výstupy se mohou lišit.",
    "modal.model_settings.k2_ane_shared": "SDÍLENÝ MLP na ANE",
 diff --git a/apps/omlx-web/omlx_web/i18n/en.json b/apps/omlx-web/omlx_web/i18n/en.json
-index 69a64fcb..57670d36 100644
+index 0d593d3..099c595 100644
 --- a/apps/omlx-web/omlx_web/i18n/en.json
 +++ b/apps/omlx-web/omlx_web/i18n/en.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "TurboQuant KV Cache",
    "modal.model_settings.turboquant_kv_hint": "Compress KV cache using vector quantization. Lower bits = more compression, higher bits = better quality. Supports 2 to 8 bits.",
    "modal.model_settings.turboquant_kv_bits_label": "Bits per channel",
@@ -472,10 +472,10 @@ index 69a64fcb..57670d36 100644
    "modal.model_settings.k2_ane_hint": "Use ANE for K2 prompt processing, including MoVA. Decode stays on GPU. ANE uses private Apple interfaces. Outputs may differ.",
    "modal.model_settings.k2_ane_shared": "Shared MLP on ANE",
 diff --git a/apps/omlx-web/omlx_web/i18n/es.json b/apps/omlx-web/omlx_web/i18n/es.json
-index c3bcf7aa..42744e27 100644
+index b885ed0..5bd1b02 100644
 --- a/apps/omlx-web/omlx_web/i18n/es.json
 +++ b/apps/omlx-web/omlx_web/i18n/es.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "Caché KV TurboQuant",
    "modal.model_settings.turboquant_kv_hint": "Comprimir caché KV usando cuantización vectorial. Bits más bajos = más compresión, bits más altos = mejor calidad. Soporta de 2 a 8 bits.",
    "modal.model_settings.turboquant_kv_bits_label": "Bits por canal",
@@ -484,10 +484,10 @@ index c3bcf7aa..42744e27 100644
    "modal.model_settings.k2_ane_hint": "Usa ANE para procesar prompts K2 BF16, incluido MoVA. La decodificación permanece en la GPU. Usa interfaces privadas de Apple; los resultados pueden variar.",
    "modal.model_settings.k2_ane_shared": "MLP compartido en ANE",
 diff --git a/apps/omlx-web/omlx_web/i18n/fr.json b/apps/omlx-web/omlx_web/i18n/fr.json
-index d75b4c65..4fbc0d84 100644
+index 38deb3b..0f2b628 100644
 --- a/apps/omlx-web/omlx_web/i18n/fr.json
 +++ b/apps/omlx-web/omlx_web/i18n/fr.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "Cache KV TurboQuant",
    "modal.model_settings.turboquant_kv_hint": "Compressez le cache KV en utilisant la quantification vectorielle. Bits inférieurs = plus de compression, bits supérieurs = meilleure qualité. Supporte 2 à 8 bits.",
    "modal.model_settings.turboquant_kv_bits_label": "Bits par canal",
@@ -496,10 +496,10 @@ index d75b4c65..4fbc0d84 100644
    "modal.model_settings.k2_ane_hint": "Utilise ANE pour les prompts K2 BF16, y compris MoVA. Le décodage reste sur le GPU. Utilise des interfaces privées Apple ; les sorties peuvent différer.",
    "modal.model_settings.k2_ane_shared": "MLP partagé sur ANE",
 diff --git a/apps/omlx-web/omlx_web/i18n/ja.json b/apps/omlx-web/omlx_web/i18n/ja.json
-index db699e7f..32a5f03d 100644
+index 17bfec6..df1cce6 100644
 --- a/apps/omlx-web/omlx_web/i18n/ja.json
 +++ b/apps/omlx-web/omlx_web/i18n/ja.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "TurboQuant KV Cache",
    "modal.model_settings.turboquant_kv_hint": "Compress KV cache using vector quantization. Reduces memory ~60-75% with near-lossless quality for long context.",
    "modal.model_settings.turboquant_kv_bits_label": "Bits per channel",
@@ -508,10 +508,10 @@ index db699e7f..32a5f03d 100644
    "modal.model_settings.k2_ane_hint": "MoVAを含むK2のプロンプト処理にANEを使用します。デコードはGPUで行います。Appleの非公開APIを使用するため、出力が変わる場合があります。",
    "modal.model_settings.k2_ane_shared": "共有MLPのANE割合",
 diff --git a/apps/omlx-web/omlx_web/i18n/ko.json b/apps/omlx-web/omlx_web/i18n/ko.json
-index 42d56c88..0d1ca2e2 100644
+index 6994712..f9bb8ff 100644
 --- a/apps/omlx-web/omlx_web/i18n/ko.json
 +++ b/apps/omlx-web/omlx_web/i18n/ko.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "TurboQuant KV Cache",
    "modal.model_settings.turboquant_kv_hint": "Compress KV cache using vector quantization. Reduces memory ~60-75% with near-lossless quality for long context.",
    "modal.model_settings.turboquant_kv_bits_label": "Bits per channel",
@@ -520,10 +520,10 @@ index 42d56c88..0d1ca2e2 100644
    "modal.model_settings.k2_ane_hint": "MoVA를 포함한 K2 프롬프트 처리에 ANE를 사용합니다. 디코딩은 GPU에서 실행됩니다. Apple 비공개 인터페이스를 사용하며 출력이 달라질 수 있습니다.",
    "modal.model_settings.k2_ane_shared": "ANE의 공유 MLP 비율",
 diff --git a/apps/omlx-web/omlx_web/i18n/pt-BR.json b/apps/omlx-web/omlx_web/i18n/pt-BR.json
-index c0eccec5..15f56d39 100644
+index fadb641..0fcdba6 100644
 --- a/apps/omlx-web/omlx_web/i18n/pt-BR.json
 +++ b/apps/omlx-web/omlx_web/i18n/pt-BR.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "Cache KV TurboQuant",
    "modal.model_settings.turboquant_kv_hint": "Comprimir o cache KV usando quantização vetorial. Menos bits = mais compressão, mais bits = melhor qualidade. Suporta de 2 a 8 bits.",
    "modal.model_settings.turboquant_kv_bits_label": "Bits por canal",
@@ -532,10 +532,10 @@ index c0eccec5..15f56d39 100644
    "modal.model_settings.k2_ane_hint": "Usa ANE para prompts K2 BF16, incluindo MoVA. A decodificação permanece na GPU. Usa interfaces privadas da Apple; as saídas podem variar.",
    "modal.model_settings.k2_ane_shared": "MLP compartilhado na ANE",
 diff --git a/apps/omlx-web/omlx_web/i18n/ru.json b/apps/omlx-web/omlx_web/i18n/ru.json
-index f824442b..2b40e0c5 100644
+index 2b2f6cd..dcf9821 100644
 --- a/apps/omlx-web/omlx_web/i18n/ru.json
 +++ b/apps/omlx-web/omlx_web/i18n/ru.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "TurboQuant KV-кэш",
    "modal.model_settings.turboquant_kv_hint": "Сжимайте KV-кэш с помощью векторного квантования. Меньшее число бит = сильнее сжатие, большее = лучше качество. Поддерживает от 2 до 8 бит.",
    "modal.model_settings.turboquant_kv_bits_label": "Битов на канал",
@@ -544,10 +544,10 @@ index f824442b..2b40e0c5 100644
    "modal.model_settings.k2_ane_hint": "Использует ANE для обработки запросов K2, включая MoVA. Декодирование остаётся на GPU. Используются закрытые интерфейсы Apple; результаты могут отличаться.",
    "modal.model_settings.k2_ane_shared": "Общий MLP на ANE",
 diff --git a/apps/omlx-web/omlx_web/i18n/zh-TW.json b/apps/omlx-web/omlx_web/i18n/zh-TW.json
-index 0e2133fa..2028a351 100644
+index b2333a1..fc5bfe2 100644
 --- a/apps/omlx-web/omlx_web/i18n/zh-TW.json
 +++ b/apps/omlx-web/omlx_web/i18n/zh-TW.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "TurboQuant KV Cache",
    "modal.model_settings.turboquant_kv_hint": "使用向量量化壓縮 KV 快取。較低位元 = 更多壓縮，較高位元 = 更佳品質。支援 2 到 8 位元。",
    "modal.model_settings.turboquant_kv_bits_label": "每通道位元數",
@@ -556,10 +556,10 @@ index 0e2133fa..2028a351 100644
    "modal.model_settings.k2_ane_hint": "使用 ANE 處理 K2 提示，包括 MoVA。解碼仍由 GPU 執行。使用 Apple 私有介面，輸出可能不同。",
    "modal.model_settings.k2_ane_shared": "ANE 上的共用 MLP",
 diff --git a/apps/omlx-web/omlx_web/i18n/zh.json b/apps/omlx-web/omlx_web/i18n/zh.json
-index 0f68b634..534e5c59 100644
+index f828969..db91bc3 100644
 --- a/apps/omlx-web/omlx_web/i18n/zh.json
 +++ b/apps/omlx-web/omlx_web/i18n/zh.json
-@@ -1151,6 +1151,7 @@
+@@ -1155,6 +1155,7 @@
    "modal.model_settings.turboquant_kv": "TurboQuant KV 缓存",
    "modal.model_settings.turboquant_kv_hint": "使用向量量化压缩 KV 缓存。位数越低压缩越多，位数越高质量越好。支持 2 到 8 位。",
    "modal.model_settings.turboquant_kv_bits_label": "每通道位数",
@@ -568,10 +568,10 @@ index 0f68b634..534e5c59 100644
    "modal.model_settings.k2_ane_hint": "使用 ANE 处理 K2 提示，包括 MoVA。解码仍由 GPU 执行。使用 Apple 私有接口，输出可能不同。",
    "modal.model_settings.k2_ane_shared": "ANE 上的共享 MLP",
 diff --git a/apps/omlx-web/omlx_web/static/js/dashboard.js b/apps/omlx-web/omlx_web/static/js/dashboard.js
-index 79749d2e..fdef5067 100644
+index 46aeac6..a0d5eb5 100644
 --- a/apps/omlx-web/omlx_web/static/js/dashboard.js
 +++ b/apps/omlx-web/omlx_web/static/js/dashboard.js
-@@ -2042,6 +2042,8 @@
+@@ -2085,6 +2085,8 @@
                          model?.qwen4_ple_ssd_offload_supported === true,
                      qwen4_ple_ssd_offload_forced:
                          model?.qwen4_ple_ssd_offload_forced === true,
@@ -580,7 +580,7 @@ index 79749d2e..fdef5067 100644
                      deepseek_v41_ced_prefill_enabled:
                          s.deepseek_v41_ced_prefill_enabled === true,
                      deepseek_v41_ced_prefill_supported:
-@@ -2997,6 +2999,43 @@
+@@ -3053,6 +3055,43 @@
                  return null;
              },
  
@@ -624,7 +624,7 @@ index 79749d2e..fdef5067 100644
              async saveModelSettings() {
                  if (!this.selectedModel) return;
  
-@@ -3012,6 +3051,12 @@
+@@ -3068,6 +3107,12 @@
                      return;
                  }
  
@@ -638,27 +638,25 @@ index 79749d2e..fdef5067 100644
                  try {
                      const response = await fetch(`/admin/api/models/${encodeURIComponent(this.selectedModel.id)}/settings`, {
 diff --git a/apps/omlx-web/omlx_web/templates/dashboard/_modal_model_settings.html b/apps/omlx-web/omlx_web/templates/dashboard/_modal_model_settings.html
-index 3017b8c4..59f8d1c8 100644
+index c53a315..645f0bc 100644
 --- a/apps/omlx-web/omlx_web/templates/dashboard/_modal_model_settings.html
 +++ b/apps/omlx-web/omlx_web/templates/dashboard/_modal_model_settings.html
-@@ -359,7 +359,13 @@
-                                         <div>
-                                             <label class="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-2">{{ t('modal.model_settings.max_context_window') }}</label>
-                                             <input type="number" x-model.number="modelSettings.max_context_window" placeholder="{{ t('modal.model_settings.placeholder_default') }}" min="1"
--                                                   class="w-full px-4 py-2.5 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all">
-+                                                   class="w-full px-4 py-2.5 border border-neutral-200 rounded-xl text-sm focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all">
-+                                            <div x-show="modelSettings.yarn_rope_supported" x-cloak class="mt-1">
-+                                                <p class="text-xs text-neutral-500">
-+                                                    {{ t('modal.model_settings.yarn_factor_label') }} =
-+                                                    <span class="font-mono" x-text="yarnFactorDisplay()"></span>
-+                                                </p>
-+                                            </div>
-                                         </div>
-                                         <div>
-                                             <label class="block text-xs font-bold uppercase tracking-wider text-neutral-500 mb-2">{{ t('modal.model_settings.max_tokens') }}</label>
+@@ -427,6 +427,12 @@
+                                 <span class="min-w-0">
+                                     <span class="block {{ ms_row_label }}">{{ t('modal.model_settings.max_context_window') }}</span>
+                                     <span class="{{ ms_row_hint }}">{{ t('modal.model_settings.max_context_window_hint') }}</span>
++                                    <div x-show="modelSettings.yarn_rope_supported" x-cloak class="mt-1">
++                                        <p class="text-xs text-neutral-500">
++                                            {{ t('modal.model_settings.yarn_factor_label') }} =
++                                            <span class="font-mono" x-text="yarnFactorDisplay()"></span>
++                                        </p>
++                                    </div>
+                                 </span>
+                                 <input type="number" x-model.number="modelSettings.max_context_window" placeholder="{{ t('modal.model_settings.placeholder_default') }}" min="1"
+                                        class="{{ ms_field_short }}">
 diff --git a/benchmarks/kernel_parity.py b/benchmarks/kernel_parity.py
 new file mode 100755
-index 00000000..9a4489b6
+index 0000000..9a4489b
 --- /dev/null
 +++ b/benchmarks/kernel_parity.py
 @@ -0,0 +1,182 @@
@@ -846,7 +844,7 @@ index 00000000..9a4489b6
 +    sys.exit(main())
 diff --git a/benchmarks/mscale_sweep.py b/benchmarks/mscale_sweep.py
 new file mode 100755
-index 00000000..b99a063b
+index 0000000..b99a063
 --- /dev/null
 +++ b/benchmarks/mscale_sweep.py
 @@ -0,0 +1,120 @@
@@ -971,10 +969,10 @@ index 00000000..b99a063b
 +if __name__ == "__main__":
 +    sys.exit(main())
 diff --git a/omlx/admin/routes.py b/omlx/admin/routes.py
-index 83641af3..67df2c42 100644
+index 51c9a14..d20b469 100644
 --- a/omlx/admin/routes.py
 +++ b/omlx/admin/routes.py
-@@ -2221,6 +2221,7 @@ def _model_options(model_info: dict, settings) -> dict:
+@@ -2222,6 +2222,7 @@ def _model_options(model_info: dict, settings) -> dict:
          ],
          "reasoning_effort_default": "high" if is_k2 else "low",
          "reasoning_effort_custom": not is_k2,
@@ -982,7 +980,7 @@ index 83641af3..67df2c42 100644
          "ane_prefill_backend": ane_backend,
          "ane_prefill_default_fraction": ane_prefill_fraction(None, model_type),
          "ane_prefill_mlp_fractions": [1 / 3, 0.5] if ane_backend == "k2" else [],
-@@ -3560,6 +3561,26 @@ def _validate_model_settings(entry, settings):
+@@ -3561,6 +3562,26 @@ def _validate_model_settings(entry, settings):
                  status_code=400,
                  detail="ANE prefill and oQ A8 prefill cannot both be enabled.",
              )
@@ -1010,7 +1008,7 @@ index 83641af3..67df2c42 100644
          try:
              validate_ane_prefill(settings, entry.config_model_type)
 diff --git a/omlx/cache/paged_ssd_cache.py b/omlx/cache/paged_ssd_cache.py
-index df261453..b9b7d53c 100644
+index df26145..b9b7d53 100644
 --- a/omlx/cache/paged_ssd_cache.py
 +++ b/omlx/cache/paged_ssd_cache.py
 @@ -247,6 +247,7 @@ def _canonicalize_layer_cache_types(
@@ -1365,7 +1363,7 @@ index df261453..b9b7d53c 100644
              self.forget_block(h)
  
 diff --git a/omlx/cache/prefix_cache.py b/omlx/cache/prefix_cache.py
-index 6be65b46..d601d60d 100644
+index 8cf3395..19e8526 100644
 --- a/omlx/cache/prefix_cache.py
 +++ b/omlx/cache/prefix_cache.py
 @@ -962,7 +962,11 @@ class BlockAwarePrefixCache(CacheManager):
@@ -1381,7 +1379,7 @@ index 6be65b46..d601d60d 100644
                      else layer_state.get("cache_type", "KVCache")
                  )
                  for layer_state in cache_data
-@@ -1704,7 +1708,11 @@ class BlockAwarePrefixCache(CacheManager):
+@@ -1718,7 +1722,11 @@ class BlockAwarePrefixCache(CacheManager):
                          "class_name", layer_state.get("cache_type", "KVCache")
                      )
                      if layer_state.get("class_name", "")
@@ -1394,7 +1392,7 @@ index 6be65b46..d601d60d 100644
                      else layer_state.get("cache_type", "KVCache")
                  )
                  for layer_state in cache_data
-@@ -2468,6 +2476,37 @@ class BlockAwarePrefixCache(CacheManager):
+@@ -2482,6 +2490,37 @@ class BlockAwarePrefixCache(CacheManager):
                              (ks, vs),
                          )
                      )
@@ -1432,7 +1430,7 @@ index 6be65b46..d601d60d 100644
                  elif handler.supports_block_slicing:
                      # Standard 4D KV cache slicing
                      state = layer_state["state"]
-@@ -4278,6 +4317,84 @@ class BlockAwarePrefixCache(CacheManager):
+@@ -4292,6 +4331,84 @@ class BlockAwarePrefixCache(CacheManager):
                  # reverse mixing direction (dense-typed chain with
                  # TQ-tagged blocks appended later) is routed here by payload
                  # scan for the same reason.
@@ -1517,7 +1515,7 @@ index 6be65b46..d601d60d 100644
                  if cache_type_name in (
                      "TurboQuantKVCache",
                      "BatchTurboQuantKVCache",
-@@ -4873,6 +4990,30 @@ class BlockAwarePrefixCache(CacheManager):
+@@ -4887,6 +5004,30 @@ class BlockAwarePrefixCache(CacheManager):
                  return True
          return False
  
@@ -1548,7 +1546,7 @@ index 6be65b46..d601d60d 100644
      def _tq_block_params(
          self,
          all_block_meta_states: list[Any],
-@@ -5070,6 +5211,7 @@ class BlockAwarePrefixCache(CacheManager):
+@@ -5084,6 +5225,7 @@ class BlockAwarePrefixCache(CacheManager):
              "BatchKVCache",
              "TurboQuantKVCache",
              "BatchTurboQuantKVCache",
@@ -1557,7 +1555,7 @@ index 6be65b46..d601d60d 100644
          }
          non_sliceable_types = {
 diff --git a/omlx/cache/type_registry.py b/omlx/cache/type_registry.py
-index 7680c5dc..3a85dda3 100644
+index 7680c5d..3a85dda 100644
 --- a/omlx/cache/type_registry.py
 +++ b/omlx/cache/type_registry.py
 @@ -72,6 +72,11 @@ class CacheTypeRegistry:
@@ -1573,7 +1571,7 @@ index 7680c5dc..3a85dda3 100644
          # patches/deepseek_v4/cache_handlers.py and register on patch apply.
          "PoolingCache": CacheType.POOLING_CACHE,
 diff --git a/omlx/custom_kernels/common/csrc/mlx/backend/metal/kernels/steel/attn/params.h b/omlx/custom_kernels/common/csrc/mlx/backend/metal/kernels/steel/attn/params.h
-index 7894276a..4183d61a 100644
+index 7894276..4183d61 100644
 --- a/omlx/custom_kernels/common/csrc/mlx/backend/metal/kernels/steel/attn/params.h
 +++ b/omlx/custom_kernels/common/csrc/mlx/backend/metal/kernels/steel/attn/params.h
 @@ -183,6 +183,27 @@ struct Qwen4QSASparseGQAParams {
@@ -1605,7 +1603,7 @@ index 7894276a..4183d61a 100644
    int C; ///< Number of key chunks
    int H; ///< Heads
 diff --git a/omlx/custom_kernels/glm_moe_dsa/csrc/CMakeLists.txt b/omlx/custom_kernels/glm_moe_dsa/csrc/CMakeLists.txt
-index fd35ad70..5199acc5 100644
+index fd35ad7..5199acc 100644
 --- a/omlx/custom_kernels/glm_moe_dsa/csrc/CMakeLists.txt
 +++ b/omlx/custom_kernels/glm_moe_dsa/csrc/CMakeLists.txt
 @@ -41,6 +41,7 @@ target_sources(
@@ -1625,7 +1623,7 @@ index fd35ad70..5199acc5 100644
    file(GLOB_RECURSE OMLX_GLM_METAL_HEADERS CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_LIST_DIR}/*.h
 diff --git a/omlx/custom_kernels/glm_moe_dsa/csrc/bindings.cpp b/omlx/custom_kernels/glm_moe_dsa/csrc/bindings.cpp
-index 526b5341..a1bf6655 100644
+index 526b534..a1bf665 100644
 --- a/omlx/custom_kernels/glm_moe_dsa/csrc/bindings.cpp
 +++ b/omlx/custom_kernels/glm_moe_dsa/csrc/bindings.cpp
 @@ -12,6 +12,7 @@
@@ -1661,7 +1659,7 @@ index 526b5341..a1bf6655 100644
        &omlx::glm_kernels::dsa_topk_indices,
 diff --git a/omlx/custom_kernels/glm_moe_dsa/csrc/kernels/steel_qwen4_qsa_sparse_gqa_tq.h b/omlx/custom_kernels/glm_moe_dsa/csrc/kernels/steel_qwen4_qsa_sparse_gqa_tq.h
 new file mode 100644
-index 00000000..db3f9d97
+index 0000000..db3f9d9
 --- /dev/null
 +++ b/omlx/custom_kernels/glm_moe_dsa/csrc/kernels/steel_qwen4_qsa_sparse_gqa_tq.h
 @@ -0,0 +1,414 @@
@@ -2081,7 +2079,7 @@ index 00000000..db3f9d97
 +}
 diff --git a/omlx/custom_kernels/glm_moe_dsa/csrc/qwen4_qsa_sparse_gqa_tq.cpp b/omlx/custom_kernels/glm_moe_dsa/csrc/qwen4_qsa_sparse_gqa_tq.cpp
 new file mode 100644
-index 00000000..1878f1f1
+index 0000000..1878f1f
 --- /dev/null
 +++ b/omlx/custom_kernels/glm_moe_dsa/csrc/qwen4_qsa_sparse_gqa_tq.cpp
 @@ -0,0 +1,286 @@
@@ -2373,7 +2371,7 @@ index 00000000..1878f1f1
 +} // namespace omlx::glm_kernels
 diff --git a/omlx/custom_kernels/glm_moe_dsa/csrc/qwen4_qsa_sparse_gqa_tq.h b/omlx/custom_kernels/glm_moe_dsa/csrc/qwen4_qsa_sparse_gqa_tq.h
 new file mode 100644
-index 00000000..06553b4d
+index 0000000..06553b4
 --- /dev/null
 +++ b/omlx/custom_kernels/glm_moe_dsa/csrc/qwen4_qsa_sparse_gqa_tq.h
 @@ -0,0 +1,21 @@
@@ -2400,7 +2398,7 @@ index 00000000..06553b4d
 +} // namespace omlx::glm_kernels
 diff --git a/omlx/custom_kernels/glm_moe_dsa/csrc/qwen4_qsa_sparse_gqa_tq.metal b/omlx/custom_kernels/glm_moe_dsa/csrc/qwen4_qsa_sparse_gqa_tq.metal
 new file mode 100644
-index 00000000..52a0b0eb
+index 0000000..52a0b0e
 --- /dev/null
 +++ b/omlx/custom_kernels/glm_moe_dsa/csrc/qwen4_qsa_sparse_gqa_tq.metal
 @@ -0,0 +1,36 @@
@@ -2441,7 +2439,7 @@ index 00000000..52a0b0eb
 +instantiate_qwen4_sparse_gqa_tq(float16, half, 8, 8, 64, 64);
 +instantiate_qwen4_sparse_gqa_tq(float16, half, 4, 4, 128, 32);
 diff --git a/omlx/custom_kernels/glm_moe_dsa/fast.py b/omlx/custom_kernels/glm_moe_dsa/fast.py
-index e63a4433..becc63ad 100644
+index e63a443..becc63a 100644
 --- a/omlx/custom_kernels/glm_moe_dsa/fast.py
 +++ b/omlx/custom_kernels/glm_moe_dsa/fast.py
 @@ -104,6 +104,7 @@ NATIVE_SYMBOLS = (
@@ -2507,7 +2505,7 @@ index e63a4433..becc63ad 100644
      queries: mx.array,
      keys: mx.array,
 diff --git a/omlx/engine/base.py b/omlx/engine/base.py
-index f505e3aa..1f2dfb43 100644
+index f505e3a..1f2dfb4 100644
 --- a/omlx/engine/base.py
 +++ b/omlx/engine/base.py
 @@ -88,6 +88,7 @@ async def _run_scheduler_preflight_with_cleanup_retry(
@@ -2541,7 +2539,7 @@ index f505e3aa..1f2dfb43 100644
          return
  
 diff --git a/omlx/engine/batched.py b/omlx/engine/batched.py
-index bf4cee45..62397af2 100644
+index 4ca3443..6aebd18 100644
 --- a/omlx/engine/batched.py
 +++ b/omlx/engine/batched.py
 @@ -107,6 +107,7 @@ class BatchedEngine(BaseEngine):
@@ -2570,7 +2568,7 @@ index bf4cee45..62397af2 100644
          scheduler.refresh_ssd_layer_signature()
  
          # SpecPrefill: load draft model and pass to scheduler
-@@ -1400,7 +1405,10 @@ class BatchedEngine(BaseEngine):
+@@ -1402,7 +1407,10 @@ class BatchedEngine(BaseEngine):
          self._prepare_k2_tool_grammar(tools, kwargs)
          prepared = kwargs.get("_prepared_prompt")
          if prepared is not None:
@@ -2582,7 +2580,7 @@ index bf4cee45..62397af2 100644
          else:
              messages = self._preprocess_messages(messages)
              template_tools = convert_tools_for_template(tools) if tools else None
-@@ -1413,7 +1421,8 @@ class BatchedEngine(BaseEngine):
+@@ -1415,7 +1423,8 @@ class BatchedEngine(BaseEngine):
              # Standalone preflight keeps tokenizer failures for the real chat
              # path to surface through its existing error handler.
              try:
@@ -2592,7 +2590,7 @@ index bf4cee45..62397af2 100644
              except Exception as e:
                  logger.warning(
                      "BatchedEngine.preflight_chat: tokenizer.encode raised %s; "
-@@ -1427,7 +1436,10 @@ class BatchedEngine(BaseEngine):
+@@ -1429,7 +1438,10 @@ class BatchedEngine(BaseEngine):
              _warn_scheduler_unreachable_once(self, "preflight_chat")
              return
          await self._preflight_or_raise_with_eviction(
@@ -2604,7 +2602,7 @@ index bf4cee45..62397af2 100644
          )
  
      async def preflight_completion(
-@@ -1443,7 +1455,8 @@ class BatchedEngine(BaseEngine):
+@@ -1445,7 +1457,8 @@ class BatchedEngine(BaseEngine):
          if not self._loaded:
              await self.start()
          try:
@@ -2614,7 +2612,7 @@ index bf4cee45..62397af2 100644
          except Exception as e:
              logger.warning(
                  "BatchedEngine.preflight_completion: tokenizer.encode raised "
-@@ -1457,7 +1470,10 @@ class BatchedEngine(BaseEngine):
+@@ -1459,7 +1472,10 @@ class BatchedEngine(BaseEngine):
              _warn_scheduler_unreachable_once(self, "preflight_completion")
              return
          await self._preflight_or_raise_with_eviction(
@@ -2627,7 +2625,7 @@ index bf4cee45..62397af2 100644
  
      async def stream_chat(
 diff --git a/omlx/engine/vlm.py b/omlx/engine/vlm.py
-index aa95f3d4..44ca79af 100644
+index c537e4d..c86662b 100644
 --- a/omlx/engine/vlm.py
 +++ b/omlx/engine/vlm.py
 @@ -2584,6 +2584,19 @@ class VLMBatchedEngine(BaseEngine):
@@ -2651,10 +2649,10 @@ index aa95f3d4..44ca79af 100644
          # batched.py for rationale. Passthrough-safe; strictly gated route.
          if getattr(self._model_settings, "sdpa256_prefill_enabled", True) is not False:
 diff --git a/omlx/engine_pool.py b/omlx/engine_pool.py
-index 266150a2..362b2f8c 100644
+index ccdfd9a..325da49 100644
 --- a/omlx/engine_pool.py
 +++ b/omlx/engine_pool.py
-@@ -1083,6 +1083,23 @@ class EnginePool:
+@@ -1084,6 +1084,23 @@ class EnginePool:
                  getattr(settings, "deepseek_v41_ced_prefill_enabled", False),
              )
  
@@ -2679,7 +2677,7 @@ index 266150a2..362b2f8c 100644
          add("turboquant_kv_enabled", turboquant_active)
          if turboquant_active:
 diff --git a/omlx/memory_monitor.py b/omlx/memory_monitor.py
-index 139959be..677846ca 100644
+index 139959b..677846c 100644
 --- a/omlx/memory_monitor.py
 +++ b/omlx/memory_monitor.py
 @@ -1983,8 +1983,18 @@ def estimate_qwen4_exp_kv_bytes_per_token(
@@ -2732,7 +2730,7 @@ index 139959be..677846ca 100644
  
  # Per-layer caches that hold recurrent state instead of attention KV.
 diff --git a/omlx/model_profiles.py b/omlx/model_profiles.py
-index 09e5e6d4..5cf92900 100644
+index 09e5e6d..5cf9290 100644
 --- a/omlx/model_profiles.py
 +++ b/omlx/model_profiles.py
 @@ -86,6 +86,7 @@ MODEL_SPECIFIC_PROFILE_FIELDS = (
@@ -2744,7 +2742,7 @@ index 09e5e6d4..5cf92900 100644
      "vlm_mtp_draft_model",
      "vlm_mtp_draft_block_size",
 diff --git a/omlx/model_settings.py b/omlx/model_settings.py
-index 3509787f..47d0c5be 100644
+index 9f48c99..3ec2436 100644
 --- a/omlx/model_settings.py
 +++ b/omlx/model_settings.py
 @@ -463,6 +463,14 @@ class ModelSettings:
@@ -2763,7 +2761,7 @@ index 3509787f..47d0c5be 100644
      # VLM MTP speculative decoding via external MTP drafter (mlx-vlm f96138e+).
      # Supported drafter types: gemma4_assistant (for Gemma 4 VLMs), qwen3_5_mtp
 diff --git a/omlx/patches/mlx_lm_mtp/prompt_priming.py b/omlx/patches/mlx_lm_mtp/prompt_priming.py
-index d424abd8..ac2d16a5 100644
+index d424abd..ac2d16a 100644
 --- a/omlx/patches/mlx_lm_mtp/prompt_priming.py
 +++ b/omlx/patches/mlx_lm_mtp/prompt_priming.py
 @@ -41,6 +41,7 @@ main_tok) pair is folded by :func:`take_primed` at activation instead.
@@ -2898,7 +2896,7 @@ index d424abd8..ac2d16a5 100644
  
  __all__ = [
 diff --git a/omlx/patches/mlx_vlm_qwen4_exp_compat/__init__.py b/omlx/patches/mlx_vlm_qwen4_exp_compat/__init__.py
-index b580b92b..49c89e41 100644
+index b580b92..49c89e4 100644
 --- a/omlx/patches/mlx_vlm_qwen4_exp_compat/__init__.py
 +++ b/omlx/patches/mlx_vlm_qwen4_exp_compat/__init__.py
 @@ -170,17 +170,28 @@ def configure_qwen4_exp_runtime(
@@ -2932,7 +2930,7 @@ index b580b92b..49c89e41 100644
          logger.warning(
              "Qwen4-Exp Lightning MTP was requested for %s, but no embedded "
 diff --git a/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/language.py b/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/language.py
-index 27111c45..17edc236 100644
+index 27111c4..17edc23 100644
 --- a/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/language.py
 +++ b/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/language.py
 @@ -37,6 +37,7 @@ from mlx_vlm.models.cache import ArraysCache
@@ -3932,7 +3930,7 @@ index 27111c45..17edc236 100644
              x,
              cache,
 diff --git a/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/qsa_fast.py b/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/qsa_fast.py
-index a12d2b15..567b0a5d 100644
+index a12d2b1..567b0a5 100644
 --- a/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/qsa_fast.py
 +++ b/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/qsa_fast.py
 @@ -41,6 +41,53 @@ _NATIVE_TOPK_MIN_ROWS = 8
@@ -4648,7 +4646,7 @@ index a12d2b15..567b0a5d 100644
      "pool_completed_index_keys",
  ]
 diff --git a/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/qsa_nax.py b/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/qsa_nax.py
-index a84a84bc..e323c3ea 100644
+index a84a84b..e323c3e 100644
 --- a/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/qsa_nax.py
 +++ b/omlx/patches/mlx_vlm_qwen4_exp_compat/vendor/mlx_vlm/models/qwen4_exp/qsa_nax.py
 @@ -19,18 +19,28 @@ persistent tensor-unit cooperative tensors (no per-MMA operand copies),
@@ -5114,7 +5112,7 @@ index a84a84bc..e323c3ea 100644
 +    )
 diff --git a/omlx/patches/mlx_vlm_qwen4_exp_compat/yarn_rope.py b/omlx/patches/mlx_vlm_qwen4_exp_compat/yarn_rope.py
 new file mode 100644
-index 00000000..00077d7b
+index 0000000..00077d7
 --- /dev/null
 +++ b/omlx/patches/mlx_vlm_qwen4_exp_compat/yarn_rope.py
 @@ -0,0 +1,527 @@
@@ -5646,7 +5644,7 @@ index 00000000..00077d7b
 +    resolved["original_max_position_embeddings"] = native
 +    return resolved
 diff --git a/omlx/scheduler.py b/omlx/scheduler.py
-index f885be09..e240e9a3 100644
+index 7010f8c..9d1ab28 100644
 --- a/omlx/scheduler.py
 +++ b/omlx/scheduler.py
 @@ -17,6 +17,7 @@ import gc
@@ -5657,7 +5655,7 @@ index f885be09..e240e9a3 100644
  import threading
  import time
  from array import array
-@@ -530,6 +531,10 @@ class _PrefillState:
+@@ -623,6 +624,10 @@ class _PrefillState:
      # Tail snapshot plan, see _prefill_tail_plan.
      tail_at: int | None = None
      end_tail: bool = False
@@ -5668,7 +5666,7 @@ index f885be09..e240e9a3 100644
  
  
  @dataclass
-@@ -1207,6 +1212,8 @@ _KNOWN_SLICEABLE_CACHE_TYPES = frozenset(
+@@ -1300,6 +1305,8 @@ _KNOWN_SLICEABLE_CACHE_TYPES = frozenset(
          "QuantizedKVCache",
          "TurboQuantKVCache",
          "BatchTurboQuantKVCache",
@@ -5677,7 +5675,7 @@ index f885be09..e240e9a3 100644
          "ChunkedKVCache",
          "MiniMaxM3KVCache",
          # Both QSA handlers support block slicing, so their growing KV and
-@@ -1221,6 +1228,8 @@ _TURBOQUANT_KV_CACHE_TYPES = frozenset(
+@@ -1314,6 +1321,8 @@ _TURBOQUANT_KV_CACHE_TYPES = frozenset(
      {
          "TurboQuantKVCache",
          "BatchTurboQuantKVCache",
@@ -5686,7 +5684,7 @@ index f885be09..e240e9a3 100644
      }
  )
  
-@@ -1234,10 +1243,77 @@ def _is_turboquant_kv_cache(cache_obj: Any) -> bool:
+@@ -1327,10 +1336,77 @@ def _is_turboquant_kv_cache(cache_obj: Any) -> bool:
  
  
  def _is_turboquant_kv_family_cache(cache_obj: Any) -> bool:
@@ -5768,7 +5766,7 @@ index f885be09..e240e9a3 100644
  
  
  class _BoundaryStoreUnavailable(Exception):
-@@ -1414,10 +1490,25 @@ def _collect_cache_storage_arrays(cache_obj: Any) -> list[mx.array]:
+@@ -1507,10 +1583,25 @@ def _collect_cache_storage_arrays(cache_obj: Any) -> list[mx.array]:
          for item in array_cache:
              arrays.extend(_collect_cache_storage_arrays(item))
  
@@ -5795,7 +5793,7 @@ index f885be09..e240e9a3 100644
  
      return arrays
  
-@@ -2001,6 +2092,10 @@ class Scheduler:
+@@ -2094,6 +2185,10 @@ class Scheduler:
          # TurboQuant KV cache (set by engine if model_settings has it enabled)
          self._turboquant_kv_bits: float | None = None
          self._turboquant_skip_last: bool = True
@@ -5806,7 +5804,7 @@ index f885be09..e240e9a3 100644
          # Memoized MLA-architecture detection (see _model_uses_mla / #1613).
          self._mla_model: bool | None = None
          self._mla_latent_model: bool | None = None
-@@ -3639,6 +3734,13 @@ class Scheduler:
+@@ -3732,6 +3827,13 @@ class Scheduler:
              return False
  
          def _ok(c: Any) -> bool:
@@ -5820,7 +5818,7 @@ index f885be09..e240e9a3 100644
              if isinstance(c, (KVCache, _vlm_cache.KVCache)):
                  return True
              if isinstance(c, (ArraysCache, _vlm_cache.ArraysCache)):
-@@ -3708,6 +3810,17 @@ class Scheduler:
+@@ -3801,6 +3903,17 @@ class Scheduler:
                      continue
                  prompt_cache[i] = TurboQuantKVCache(bits=bits)
                  converted += 1
@@ -5838,7 +5836,7 @@ index f885be09..e240e9a3 100644
              elif isinstance(cache_obj, (CacheList, _vlm_cache.CacheList)):
                  new_caches = []
                  for c in cache_obj.caches:
-@@ -3727,11 +3840,14 @@ class Scheduler:
+@@ -3820,11 +3933,14 @@ class Scheduler:
      def _apply_turboquant_kv_convert(self, prompt_cache: list[Any]) -> None:
          """Convert populated KVCache data to TurboQuantKVCache via from_cache().
  
@@ -5858,7 +5856,7 @@ index f885be09..e240e9a3 100644
          """
          from mlx_lm.models.cache import CacheList, KVCache
          from mlx_vlm.turboquant import TurboQuantKVCache
-@@ -3750,6 +3866,23 @@ class Scheduler:
+@@ -3843,6 +3959,23 @@ class Scheduler:
                      continue
                  prompt_cache[i] = TurboQuantKVCache.from_cache(cache_obj, bits=bits)
                  converted += 1
@@ -5882,7 +5880,7 @@ index f885be09..e240e9a3 100644
              elif isinstance(cache_obj, (CacheList, _vlm_cache.CacheList)):
                  new_caches = []
                  for c in cache_obj.caches:
-@@ -3766,6 +3899,159 @@ class Scheduler:
+@@ -3859,6 +3992,159 @@ class Scheduler:
                  f"cache layers to {bits}-bit{skip_msg}"
              )
  
@@ -6042,7 +6040,7 @@ index f885be09..e240e9a3 100644
      def _qwen4_prefill_accounting_enabled(self) -> bool:
          monitor = getattr(self, "memory_monitor", None)
          checker = getattr(monitor, "is_qwen4_gathered_prefill_profile", None)
-@@ -4021,6 +4307,11 @@ class Scheduler:
+@@ -4114,6 +4400,11 @@ class Scheduler:
          # its arrays are sized once instead of doubling mid-prefill.
          reserve_tokens = _cache_base_sizes(prompt_cache) + n_tokens
          self._reserve_qsa_index_capacity(prompt_cache, reserve_tokens)
@@ -6054,7 +6052,7 @@ index f885be09..e240e9a3 100644
  
          Scheduler._announce_first_prefill_chunk(self, input_arr, base_size, boundary_enabled, block_size, embeds_array)
  
-@@ -4248,6 +4539,18 @@ class Scheduler:
+@@ -4341,6 +4632,18 @@ class Scheduler:
                          request, prompt_cache, total_tokens
                      )
  
@@ -6073,7 +6071,7 @@ index f885be09..e240e9a3 100644
              Scheduler._check_post_prefill_memory(
                  self,
                  request_id=request.request_id,
-@@ -4343,15 +4646,17 @@ class Scheduler:
+@@ -4436,15 +4739,17 @@ class Scheduler:
          request._prefill_saved_rope_deltas = None
  
          # Quantize the completed fp16 KV cache to TurboQuant for decode.
@@ -6096,7 +6094,7 @@ index f885be09..e240e9a3 100644
  
          if getattr(request, "cached_tokens", 0) > 0:
              with mx.stream(self._stream):
-@@ -4616,6 +4921,14 @@ class Scheduler:
+@@ -4709,6 +5014,14 @@ class Scheduler:
          )
          raise _PrefillEvictionNeeded(eviction_request)
  
@@ -6111,7 +6109,7 @@ index f885be09..e240e9a3 100644
      def _guard_prefill_chunk(
          self,
          n_tokens: int,
-@@ -4663,6 +4976,21 @@ class Scheduler:
+@@ -4756,6 +5069,21 @@ class Scheduler:
          min_transient = self._admission_transient_bound(
              min_chunk, kv_len, gathered_core=gathered_core
          )
@@ -6133,7 +6131,7 @@ index f885be09..e240e9a3 100644
          if current + min_transient > cap:
              maybe_raise_eviction = getattr(
                  self, "_raise_prefill_eviction_if_available", None
-@@ -6214,12 +6542,18 @@ class Scheduler:
+@@ -6307,12 +6635,18 @@ class Scheduler:
                  Scheduler._announce_first_prefill_chunk(self, state.tokens_remaining, state.base_size, state.boundary_enabled, state.block_size, None)
              # Known horizon: size the QSA indexer once instead of doubling
              # mid-prefill (see _reserve_qsa_index_capacity).
@@ -6155,7 +6153,7 @@ index f885be09..e240e9a3 100644
          # No-op until a chunk has shaped the caches, then sizes them once.
          Scheduler._reserve_prefill_capacity(
              self,
-@@ -6486,6 +6820,15 @@ class Scheduler:
+@@ -6579,6 +6913,15 @@ class Scheduler:
          self._maybe_record_fixed_state_bytes(state.cache)
          state.tokens_processed += plan.tokens
  
@@ -6171,7 +6169,7 @@ index f885be09..e240e9a3 100644
          # Boundary snapshot
          if state.boundary_enabled:
              total_tokens = state.base_size + state.tokens_processed
-@@ -6504,6 +6847,17 @@ class Scheduler:
+@@ -6597,6 +6940,17 @@ class Scheduler:
                      state.request, state.cache, total_tokens
                  )
  
@@ -6189,7 +6187,7 @@ index f885be09..e240e9a3 100644
          # Progress callback so the admin UI prefilling list advances during
          # chunked prefill. _do_external_prefill calls _on_prompt_progress
          # via the temp_uid mapping; the chunked path has no temp uid so we
-@@ -6623,6 +6977,7 @@ class Scheduler:
+@@ -6716,6 +7070,7 @@ class Scheduler:
          # ops; keep them on the engine stream so the next decode step's eval
          # graph stays single-stream (#2235, see _remove_uid_from_active_batch).
          with mx.stream(self._stream):
@@ -6197,7 +6195,7 @@ index f885be09..e240e9a3 100644
              uids = self.batch_generator.insert(
                  [state.last_token],
                  max_tokens=[request.sampling_params.max_tokens],
-@@ -6632,6 +6987,7 @@ class Scheduler:
+@@ -6725,6 +7080,7 @@ class Scheduler:
                  logits_processors=[per_row_lps],
                  stop_sequences=[state.sm],
              )
@@ -6205,7 +6203,7 @@ index f885be09..e240e9a3 100644
          if uids:
              # The generator owns the restored cache now. Keeping the request's
              # alias pins its old full-window banks after batching copies them.
-@@ -9442,7 +9798,13 @@ class Scheduler:
+@@ -9580,7 +9936,13 @@ class Scheduler:
                      continue
  
                  if hasattr(layer_cache, "state"):
@@ -6220,7 +6218,7 @@ index f885be09..e240e9a3 100644
                          state = handler.serialize_state(layer_cache)
                          meta = handler.serialize_meta_state(layer_cache)
                      else:
-@@ -11697,12 +12059,42 @@ class Scheduler:
+@@ -11835,12 +12197,42 @@ class Scheduler:
              f"({' - '.join(parts)}). {advice}."
          )
  
@@ -6263,7 +6261,7 @@ index f885be09..e240e9a3 100644
      ) -> None:
          """Pre-StreamingResponse prefill memory check.
  
-@@ -11722,6 +12114,8 @@ class Scheduler:
+@@ -11860,6 +12252,8 @@ class Scheduler:
              return
          if self.memory_monitor is None:
              return
@@ -6272,7 +6270,7 @@ index f885be09..e240e9a3 100644
  
          current = self._current_usage_bytes(refresh_mlx_active=False)
          est = self._admission_estimate(
-@@ -11790,6 +12184,7 @@ class Scheduler:
+@@ -11928,6 +12322,7 @@ class Scheduler:
          num_prompt_tokens: int,
          cached_tokens: int = 0,
          request_id: str | None = None,
@@ -6280,7 +6278,7 @@ index f885be09..e240e9a3 100644
      ) -> PrefillEvictionRequest | None:
          """Return an idle-model eviction request for route-level preflight.
  
-@@ -11805,6 +12200,8 @@ class Scheduler:
+@@ -11943,6 +12338,8 @@ class Scheduler:
              return None
          if self.memory_monitor is None:
              return None
@@ -6289,7 +6287,7 @@ index f885be09..e240e9a3 100644
  
          current = self._current_usage_bytes(refresh_mlx_active=False)
          request_id = request_id or "preflight"
-@@ -11916,6 +12313,68 @@ class Scheduler:
+@@ -12054,6 +12451,68 @@ class Scheduler:
              limit_bytes=int(cap),
          )
  
@@ -6358,7 +6356,7 @@ index f885be09..e240e9a3 100644
      def _schedule_waiting(
          self,
      ) -> tuple[list["Request"], list[RequestOutput]]:
-@@ -11951,6 +12410,22 @@ class Scheduler:
+@@ -12089,6 +12548,22 @@ class Scheduler:
              # continue. First request always passes (no admitted work yet)
              # so admission can recover by completing the current generation.
              admitted = self._num_admitted_requests()
@@ -6381,7 +6379,7 @@ index f885be09..e240e9a3 100644
              if self._admission_paused and admitted:
                  logger.debug(
                      "Admission paused by memory pressure, %d admitted",
-@@ -12671,6 +13146,7 @@ class Scheduler:
+@@ -12809,6 +13284,7 @@ class Scheduler:
              # step's eval graph stays single-stream (#2235, see
              # _remove_uid_from_active_batch).
              with mx.stream(self._stream):
@@ -6389,7 +6387,7 @@ index f885be09..e240e9a3 100644
                  uids = self.batch_generator.insert(
                      [tokens_to_process],
                      max_tokens=[request.sampling_params.max_tokens],
-@@ -12680,6 +13156,7 @@ class Scheduler:
+@@ -12818,6 +13294,7 @@ class Scheduler:
                      logits_processors=[per_row_lps],
                      stop_sequences=[sm],
                  )
@@ -6397,7 +6395,7 @@ index f885be09..e240e9a3 100644
              if uids:
                  # As in the chunked path, transfer ownership after insertion.
                  request.prompt_cache = None
-@@ -14782,7 +15259,34 @@ class Scheduler:
+@@ -14961,7 +15438,34 @@ class Scheduler:
                      config,
                      cache_list_for_tq,
                      base_dtype_size,
@@ -6433,7 +6431,7 @@ index f885be09..e240e9a3 100644
              if (
                  kv_bytes_per_token is None
                  and estimate_mla_kv_bytes_per_token is not None
-@@ -14955,7 +15459,14 @@ class Scheduler:
+@@ -15134,7 +15638,14 @@ class Scheduler:
          last_kv_idx = kv_indices[-1] if skip_last else -1
          for idx in kv_indices:
              if idx != last_kv_idx and idx < len(layer_cache_types):
@@ -6449,7 +6447,7 @@ index f885be09..e240e9a3 100644
  
          # The depth is keyed off the same eligibility gate the request path
          # uses, not the rewritten names: models whose convertible caches sit
-@@ -14989,6 +15500,7 @@ class Scheduler:
+@@ -15168,6 +15679,7 @@ class Scheduler:
                      turboquant_kv_bits=turboquant_kv_bits,
                      cachelist_subtypes=cachelist_subtypes,
                      numerics=numerics_revision_for_model(self.model),
@@ -6458,7 +6456,7 @@ index f885be09..e240e9a3 100644
              else:
                  manager.adopt_layer_signature_if_unset(layer_cache_types)
 diff --git a/omlx/specprefill/draft.py b/omlx/specprefill/draft.py
-index e321bee4..def1e5ee 100644
+index e321bee..def1e5e 100644
 --- a/omlx/specprefill/draft.py
 +++ b/omlx/specprefill/draft.py
 @@ -50,6 +50,8 @@ _SLICEABLE_CACHE_TYPES = frozenset(
@@ -6471,7 +6469,7 @@ index e321bee4..def1e5ee 100644
          "MiniMaxM3KVCache",
          "QSAKVCache",
 diff --git a/omlx/turboquant_kv.py b/omlx/turboquant_kv.py
-index 13faf9c8..f4cc3849 100644
+index 13faf9c..f4cc384 100644
 --- a/omlx/turboquant_kv.py
 +++ b/omlx/turboquant_kv.py
 @@ -140,6 +140,45 @@ def _concat_state_token_axis(states):
@@ -6550,7 +6548,7 @@ index 13faf9c8..f4cc3849 100644
  
      def make_mask(
 diff --git a/omlx/utils/model_loading.py b/omlx/utils/model_loading.py
-index a6b9f1bd..eae2e378 100644
+index a6b9f1b..eae2e37 100644
 --- a/omlx/utils/model_loading.py
 +++ b/omlx/utils/model_loading.py
 @@ -571,6 +571,16 @@ def maybe_apply_pre_load_patches(
@@ -6608,7 +6606,7 @@ index a6b9f1bd..eae2e378 100644
      if for_vlm and model_type == "glm5_next":
 diff --git a/scripts/agentic_invalidation.py b/scripts/agentic_invalidation.py
 new file mode 100755
-index 00000000..649f5f7b
+index 0000000..649f5f7
 --- /dev/null
 +++ b/scripts/agentic_invalidation.py
 @@ -0,0 +1,360 @@
@@ -6974,7 +6972,7 @@ index 00000000..649f5f7b
 +    sys.exit(main())
 diff --git a/scripts/needle_run.py b/scripts/needle_run.py
 new file mode 100755
-index 00000000..cf3f483a
+index 0000000..cf3f483
 --- /dev/null
 +++ b/scripts/needle_run.py
 @@ -0,0 +1,234 @@
@@ -7214,7 +7212,7 @@ index 00000000..cf3f483a
 +    sys.exit(main())
 diff --git a/scripts/prefill_ab_bench.py b/scripts/prefill_ab_bench.py
 new file mode 100755
-index 00000000..90abba50
+index 0000000..90abba5
 --- /dev/null
 +++ b/scripts/prefill_ab_bench.py
 @@ -0,0 +1,596 @@
@@ -7815,7 +7813,7 @@ index 00000000..90abba50
 +if __name__ == "__main__":
 +    sys.exit(main())
 diff --git a/tests/test_admin_model_settings.py b/tests/test_admin_model_settings.py
-index 51dfcfb0..facb81c3 100644
+index 51dfcfb..facb81c 100644
 --- a/tests/test_admin_model_settings.py
 +++ b/tests/test_admin_model_settings.py
 @@ -800,3 +800,47 @@ async def test_enabling_dflash_over_a_deleted_draft_path_is_rejected(tmp_path):
@@ -7867,7 +7865,7 @@ index 51dfcfb0..facb81c3 100644
 +    )
 +    assert settings.max_context_window == 10_000_000
 diff --git a/tests/test_batched_engine.py b/tests/test_batched_engine.py
-index 06956df7..ad9ebf1b 100644
+index 06956df..ad9ebf1 100644
 --- a/tests/test_batched_engine.py
 +++ b/tests/test_batched_engine.py
 @@ -1262,6 +1262,7 @@ class TestBatchedEnginePreparedPrompt:
@@ -7879,10 +7877,10 @@ index 06956df7..ad9ebf1b 100644
          engine._tokenizer.apply_chat_template.assert_called_once()
          rendered_options = engine._tokenizer.apply_chat_template.call_args.kwargs
 diff --git a/tests/test_engine_pool.py b/tests/test_engine_pool.py
-index f28a34fc..b504cad9 100644
+index e5d2b62..7d8dec9 100644
 --- a/tests/test_engine_pool.py
 +++ b/tests/test_engine_pool.py
-@@ -1893,6 +1893,43 @@ class TestEnginePoolAsync:
+@@ -1958,6 +1958,43 @@ class TestEnginePoolAsync:
          assert signature(8) == signature(8.0)
          assert signature(3) != signature(3.5)
  
@@ -7927,7 +7925,7 @@ index f28a34fc..b504cad9 100644
          self, pool_with_mock_engines
      ):
 diff --git a/tests/test_engine_preflight.py b/tests/test_engine_preflight.py
-index 21b5d803..333831db 100644
+index 21b5d80..333831d 100644
 --- a/tests/test_engine_preflight.py
 +++ b/tests/test_engine_preflight.py
 @@ -221,10 +221,12 @@ async def test_batched_engine_preflight_runs_eviction_before_final_check():
@@ -7960,7 +7958,7 @@ index 21b5d803..333831db 100644
      evict.assert_not_awaited()
  
 diff --git a/tests/test_mtp_prompt_priming.py b/tests/test_mtp_prompt_priming.py
-index 7b8dbb18..7ad6dfb7 100644
+index 7b8dbb1..7ad6dfb 100644
 --- a/tests/test_mtp_prompt_priming.py
 +++ b/tests/test_mtp_prompt_priming.py
 @@ -1368,3 +1368,32 @@ def test_generation_scope_uses_uids_after_realignment(monkeypatch):
@@ -7997,7 +7995,7 @@ index 7b8dbb18..7ad6dfb7 100644
 +    assert ModelSettings().mtp_prime_window == 0
 +    assert ModelSettings(mtp_prime_window=65536).mtp_prime_window == 65536
 diff --git a/tests/test_paged_ssd_cache.py b/tests/test_paged_ssd_cache.py
-index 8750a476..e5d8f706 100644
+index 8750a47..e5d8f70 100644
 --- a/tests/test_paged_ssd_cache.py
 +++ b/tests/test_paged_ssd_cache.py
 @@ -4771,3 +4771,107 @@ class TestTurboquantBitsSignature:
@@ -8109,7 +8107,7 @@ index 8750a476..e5d8f706 100644
 +        assert manager._index.get(b"22" * 10) is None
 +        assert manager._index.get(b"33" * 10) is None
 diff --git a/tests/test_prefill_oom_graceful.py b/tests/test_prefill_oom_graceful.py
-index 00703f94..c895a2af 100644
+index 00703f9..c895a2a 100644
 --- a/tests/test_prefill_oom_graceful.py
 +++ b/tests/test_prefill_oom_graceful.py
 @@ -523,6 +523,55 @@ def test_guard_recovers_after_reclaim_frees_memory():
@@ -8213,7 +8211,7 @@ index 00703f94..c895a2af 100644
 +    assert not due(262_144, 2_048, 0)  # disabled
 +    assert due(1_000_000, 999_999, 131_072)  # huge chunk crossing several
 diff --git a/tests/test_qwen4_qsa_reserved_capacity.py b/tests/test_qwen4_qsa_reserved_capacity.py
-index 3fe6cdcd..ca2a3e59 100644
+index 3fe6cdc..ca2a3e5 100644
 --- a/tests/test_qwen4_qsa_reserved_capacity.py
 +++ b/tests/test_qwen4_qsa_reserved_capacity.py
 @@ -159,6 +159,7 @@ def test_chunked_reservation_includes_restored_prefix(snapshots_enabled):
@@ -8226,7 +8224,7 @@ index 3fe6cdcd..ca2a3e59 100644
          ns,
 diff --git a/tests/test_qwen4_yarn_rope.py b/tests/test_qwen4_yarn_rope.py
 new file mode 100644
-index 00000000..d4914cb7
+index 0000000..d4914cb
 --- /dev/null
 +++ b/tests/test_qwen4_yarn_rope.py
 @@ -0,0 +1,646 @@
@@ -8877,7 +8875,7 @@ index 00000000..d4914cb7
 +    )
 +    assert attn.rotary_emb.attention_scaling == pytest.approx(0.1 * math.log(2.0) + 1.0)
 diff --git a/tests/test_scheduler_prefill_memory_guard.py b/tests/test_scheduler_prefill_memory_guard.py
-index d52757c9..771e61ed 100644
+index d52757c..771e61e 100644
 --- a/tests/test_scheduler_prefill_memory_guard.py
 +++ b/tests/test_scheduler_prefill_memory_guard.py
 @@ -1317,3 +1317,72 @@ def test_post_prefill_guard_uses_stable_physical_cap(
@@ -8955,7 +8953,7 @@ index d52757c9..771e61ed 100644
 +        assert seen["new_tokens"] == 65_536
 diff --git a/tests/test_turboquant_qsa.py b/tests/test_turboquant_qsa.py
 new file mode 100644
-index 00000000..2b79e217
+index 0000000..2b79e21
 --- /dev/null
 +++ b/tests/test_turboquant_qsa.py
 @@ -0,0 +1,2060 @@
@@ -11020,7 +11018,7 @@ index 00000000..2b79e217
 +    )
 +    assert r < 0.01, f"relL2 {r:.5f} at {chunk}-row tail chunk"
 diff --git a/tests/test_vlm_mtp_chunked_prefill.py b/tests/test_vlm_mtp_chunked_prefill.py
-index 4a08dc4c..ee87e369 100644
+index 4a08dc4..ee87e36 100644
 --- a/tests/test_vlm_mtp_chunked_prefill.py
 +++ b/tests/test_vlm_mtp_chunked_prefill.py
 @@ -51,6 +51,7 @@ def _make_fixture(monkeypatch, drafter_returns_uid):
@@ -11033,7 +11031,7 @@ index 4a08dc4c..ee87e369 100644
          request_id_to_uid={},
 diff --git a/tests/yarn_context_ui.test.cjs b/tests/yarn_context_ui.test.cjs
 new file mode 100644
-index 00000000..94fd6e9c
+index 0000000..94fd6e9
 --- /dev/null
 +++ b/tests/yarn_context_ui.test.cjs
 @@ -0,0 +1,89 @@
