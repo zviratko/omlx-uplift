@@ -1718,7 +1718,9 @@ async function saveTemplateEditor(tpl, panel) {
     const msg = panel.querySelector('#se-msg');
     const errors = window.UpliftModelSpec.validate(seValues, seFormModel);
     if (errors.length) { msg.textContent = errors[0]; MM_GLUE.toast(errors[0]); return; }
-    msg.textContent = 'saving…';
+    // BUG-6 doctrine: no intermediate label; the button carries busy state
+    const sb = document.getElementById('se-save');
+    if (sb) sb.disabled = true;
     try {
         const full = window.UpliftModelSpec.buildPayload(seValues, seFormModel);
         let uni = [];
@@ -1738,6 +1740,7 @@ async function saveTemplateEditor(tpl, panel) {
     } catch (err) {
         msg.textContent = 'error: ' + err.message;
         MM_GLUE.toast(C.tf('uplift.mm.tpl_save_fail', 'Template save failed: ') + err.message);
+        if (sb) sb.disabled = false;   // reactivates for a retry
     }
 }
 
@@ -2591,7 +2594,10 @@ async function saveEditor() {
         const deferred = Object.keys(deferAdd).length
             ? Object.assign({}, seDeferred, deferAdd) : seDeferred;
         reloadStep = Object.keys(deferred).length > 0;
-        msg.textContent = 'saving…';
+        // BUG-6 doctrine: no intermediate 'saving…' label — button goes
+        // busy for the duration, the label carries only the final state
+        const sbtn = document.getElementById('se-save');
+        if (sbtn) sbtn.disabled = true;
         const achvOld = t0 && t0.origVals ? Object.assign({}, t0.origVals) : null;
         try {
             // live keys ride the sparse classic PUT (empty payload = nothing
@@ -2623,11 +2629,14 @@ async function saveEditor() {
         } catch (err) {
             msg.textContent = `error: ${err.message}`;
             MM_GLUE.toast(C.t('uplift.toast.save_failed', {msg: err.message}));
+            if (sbtn) sbtn.disabled = false;   // BUG-6: reactivates for a retry
         }
         return;
     }
-    msg.textContent = 'saving…';
-    const achvOldBase = (() => { const z = seTabs.find(q => q.id === 'base');
+    // BUG-6 doctrine: no intermediate label; busy state lives on the button
+    const sbtn2 = document.getElementById('se-save');
+    if (sbtn2) sbtn2.disabled = true;
+    const achvOldBase = (() => { const z = seTabs.find(q => z.id === 'base');
         return z && z.origVals ? Object.assign({}, z.origVals) : null; })();
     try {
         const r = await MM_GLUE.putModelSettings(seModel, payload);
@@ -2647,6 +2656,7 @@ async function saveEditor() {
     } catch (err) {
         msg.textContent = `error: ${err.message}`;
         MM_GLUE.toast(C.t('uplift.toast.save_failed', {msg: err.message}));
+        if (sbtn2) sbtn2.disabled = false;   // BUG-6: reactivates for a retry
     }
 }
 /* RESTART MODEL (phase 2): push EVERYTHING — deferred values are already in
@@ -2682,6 +2692,23 @@ async function saveProfileTab(panel) {
     const t = seTab();
     const name = (t.name || '').trim();
     if (!name) { MM_GLUE.toast(C.t('uplift.toast.profile_name_required')); return; }
+    // BUG-6 (user doctrine): NO intermediate "saving…" label — the label
+    // shows only saved ✓ or the error; the button carries the busy state
+    // (disabled while the request is in flight) and reactivates when the
+    // write truly finished. The save call site must also catch rejections
+    // — an uncaught async error used to strand both label and button.
+    const btn = document.getElementById('se-save');
+    if (btn) btn.disabled = true;
+    try {
+        await saveProfileCommit(panel, t, name, msg);
+    } catch (e) {
+        msg.textContent = 'error: ' + e.message;
+        MM_GLUE.toast(C.t('uplift.toast.profile_save_failed', {msg: e.message}));
+    } finally {
+        if (btn) btn.disabled = seDirtyKeys().length === 0;
+    }
+}
+async function saveProfileCommit(panel, t, name, msg) {
     // full modelspec-shaped settings + inheritable validation via base merge
     const mergedForValidate = Object.assign({}, seBaseVals,
         JSON.parse(JSON.stringify(t.workVals || {})));
@@ -2696,49 +2723,47 @@ async function saveProfileTab(panel) {
         t.workVals.forced_ct_kwargs = kw.forced_ct_kwargs;
     }
     // only keys that differ from base persist (inheritance semantics)
-    const ov = {};
+    let ov = {};
     for (const [k, v] of Object.entries(t.workVals || {})) {
         if (k === 'ctKwargEntries' || k === 'model_alias') continue;
         if (v === undefined) continue;
         if (JSON.stringify(v) !== JSON.stringify(seBaseVals[k])) ov[k] = v;
     }
-    msg.textContent = 'saving profile…';
     // version adaptation: an older server drops unknown keys from profile
-    // settings (silent mis-save) — translate renamed fields first
+    // settings (silent mis-save) — translate renamed fields first.
+    // BUG-6 root cause: `ov` used to be const and reassigned here — a
+    // runtime TypeError that killed EVERY profile save before the request
+    // was issued (node --check parses sloppy mode, so the gate could not
+    // see it; pinned behaviourally in bug6-profile-save.test.cjs).
     ov = window.UpliftModelSpec.adaptToServerSettings(
         ov, await MM_GLUE.modelSettingsFields());
     const body = { name, display_name: t.display_name || name, settings: ov,
         expose_as_model: !!t.expose_as_model, api_name: t.api_name || null };
+    const path = `${API}/admin/api/models/${encodeURIComponent(seModel)}/profiles` +
+        (t.profileId ? '/' + encodeURIComponent(t.profileId) : '');
     try {
-        const path = `${API}/admin/api/models/${encodeURIComponent(seModel)}/profiles` +
-            (t.profileId ? '/' + encodeURIComponent(t.profileId) : '');
-        try {
-            if (t.profileId) {
-                await D.putJson(path, { settings: ov, display_name: t.display_name || name,
-                    expose_as_model: !!t.expose_as_model, api_name: t.api_name || null });
-            } else {
-                await D.postJson(path, body);
-            }
-        } catch (e) {
-            if (e.status !== 404) throw e;
-            // missing base model: classic routes 404 (no engine entry);
-            // uplift's upsert create-or-updates the stored profile instead
-            await D.postJson(`${API}/uplift/api/models/${encodeURIComponent(seModel)}/profiles`, body);
+        if (t.profileId) {
+            await D.putJson(path, { settings: ov, display_name: t.display_name || name,
+                expose_as_model: !!t.expose_as_model, api_name: t.api_name || null });
+        } else {
+            await D.postJson(path, body);
         }
-        MM_GLUE.toast(C.t('uplift.toast.saved_profile', {name: name}));
-        t.profileId = name; t.dirty = new Set();
-        t._origExpose = !!t.expose_as_model; t._origApi = t.api_name || '';
-        t.name = name; t.display_name = name;
-        t.origVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(t.workVals || {})));
-        t._ovSnap = JSON.parse(JSON.stringify(ov));   // saved overrides are the new original
-        const mirror = (MM_DATA.profiles || []).find(x => x.name === name);
-        if (mirror) mirror.settings = JSON.parse(JSON.stringify(ov));
-        msg.textContent = 'saved ✓';
-        seRenderTabs(panel); seUpdateSaveBtn();
     } catch (e) {
-        msg.textContent = 'error: ' + e.message;
-        MM_GLUE.toast(C.t('uplift.toast.profile_save_failed', {msg: e.message}));
+        if (e.status !== 404) throw e;
+        // missing base model: classic routes 404 (no engine entry);
+        // uplift's upsert create-or-updates the stored profile instead
+        await D.postJson(`${API}/uplift/api/models/${encodeURIComponent(seModel)}/profiles`, body);
     }
+    MM_GLUE.toast(C.t('uplift.toast.saved_profile', {name: name}));
+    t.profileId = name; t.dirty = new Set();
+    t._origExpose = !!t.expose_as_model; t._origApi = t.api_name || '';
+    t.name = name; t.display_name = name;
+    t.origVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(t.workVals || {})));
+    t._ovSnap = JSON.parse(JSON.stringify(ov));   // saved overrides are the new original
+    const mirror = (MM_DATA.profiles || []).find(x => x.name === name);
+    if (mirror) mirror.settings = JSON.parse(JSON.stringify(ov));
+    msg.textContent = 'saved ✓';
+    seRenderTabs(panel); seUpdateSaveBtn();
 }
 
 
