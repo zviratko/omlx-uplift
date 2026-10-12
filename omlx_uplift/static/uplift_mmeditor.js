@@ -150,6 +150,15 @@ function seUpdateSaveBtn() {
     const b = document.getElementById('se-save'); if (!b) return;
     const rb = document.getElementById('se-restart');
     const n = seDirtyKeys().length;
+    // U84: the label counts changes across ALL tabs (one press commits
+    // every one of them). The active tab's own change count (dirty keys +
+    // kwargs + expose/api flips — seTabChangeCount) decides the single-tab
+    // wording; it also FIXED a dead end: an expose/api_name flip alone now
+    // enables SAVE instead of leaving a CHANGES entry nobody could commit.
+    const all = seTabs.reduce((s, t) => s + seTabChangeCount(t), 0);
+    const at = seTab();
+    const activeN = at ? seTabChangeCount(at) : 0;
+    const multi = all > activeN;
     const onProfile = !seIsBaseTab();
     // U41 two-phase (user design): SAVE commits EVERY dirty key — live keys
     // via the sparse classic PUT, runtime keys via the uplift deferred
@@ -162,15 +171,19 @@ function seUpdateSaveBtn() {
     const awaitingReload = pending + runtimeDirty;
     b.classList.toggle('queued', n > 0);
     b.classList.toggle('restart-mode', false);
-    const tabTxt = onProfile ? ' PROFILE' : '';
-    b.textContent = n
-        ? ('SAVE' + tabTxt + ' (' + n + ')')
-        : (onProfile ? 'SAVE PROFILE' : 'SAVE');
-    b.title = runtimeDirty || pending
-        ? C.tf('uplift.se.save_split_title',
-            'SAVE stores everything now; settings that rebuild the engine apply when you press RESTART MODEL.')
-        : '';
-    b.disabled = n === 0;
+    const shown = multi ? all : n;
+    const tabTxt = multi ? ' ALL' : (onProfile ? ' PROFILE' : '');
+    b.textContent = shown
+        ? ('SAVE' + tabTxt + ' (' + shown + ')')
+        : (multi ? 'SAVE ALL' : (onProfile ? 'SAVE PROFILE' : 'SAVE'));
+    b.title = multi
+        ? C.tf('uplift.se.save_all_title',
+            'Saves the base model and every profile tab with unsaved changes in one go (base first)')
+        : (runtimeDirty || pending
+            ? C.tf('uplift.se.save_split_title',
+                'SAVE stores everything now; settings that rebuild the engine apply when you press RESTART MODEL.')
+            : '');
+    b.disabled = shown === 0;
     if (rb) {
         rb.hidden = awaitingReload === 0;
         // unloaded base tab: SAVE already stores everything, RESTART MODEL
@@ -2533,18 +2546,53 @@ function seMarkPendingRows() {
     host.append(line);
 }
 
-async function saveEditor() {
-    if (!seModel) return;
-    const panel = document.querySelector('.modal.editor');
-    if (!panel) return;
+/* U84 (user 2026-10-12): one SAVE commits EVERY dirty tab — base and the
+   profiles edited in the same session. Tab change accounting: the dirty
+   set (widgets) plus the chat-template kwargs list (bypasses the dirty set
+   everywhere — R10-6 design) plus the expose/api_name flips on profiles
+   (the CHANGES box already counts them; the button used to ignore them, a
+   dead end). Order is load-bearing: the base goes FIRST — profile
+   overrides are a sparse diff against seBaseVals, and seCommitSaved
+   advances those; committing profiles later makes values that just became
+   equal to the base drop out as pure inheritance. Partial failure stays
+   honest: tabs commit independently, a failed tab keeps its dirty state
+   and its reason in the summary (no blanket success). */
+function seTabChangeCount(t) {
+    let n = t.dirty.size;
+    // live kwargs: for the ACTIVE base tab seValues is the live state (its
+    // workVals copy only refreshes on capture); every other tab owns a live
+    // workVals reference (seSyncKwEntries + in-place entry mutation share it)
+    const cur = (seTab() === t && t.id === 'base') ? seValues : (t.workVals || {});
+    if (JSON.stringify(cur.ctKwargEntries || []) !==
+        JSON.stringify((t.origVals || {}).ctKwargEntries || [])) n++;
+    if (t.id !== 'base') {
+        if ((t._origExpose || false) !== !!t.expose_as_model) n++;
+        if ((t._origApi || '') !== (t.api_name || '')) n++;
+    }
+    return n;
+}
+function seTabHasChanges(t) { return seTabChangeCount(t) > 0; }
+function seTabLabel(t) { return t.id === 'base' ? 'BASE' : (t.display_name || t.name || t.id); }
+function seActivateTab(panel, t) {
+    // the tab-click activation, shared with the U84 save loop so a
+    // not-currently-shown tab can be committed through the very same
+    // globals the single-tab flows expect
     seCaptureTab();
-    if (!seIsBaseTab()) return saveProfileTab(panel);
-    const msg = panel.querySelector('#se-msg');
+    seActiveTab = t.id;
+    if (t.id !== 'base') seRestoreTab(t);
+    else { seValues = Object.assign({}, t.workVals || seBaseVals);
+           seOrig = t.origVals || seOrig; }
+    renderEditorFields(document.getElementById('se-fields'));
+    seRenderTabs(panel); seUpdateSaveBtn();
+}
+async function commitBaseTab(panel, msg) {
+    // the ACTIVE tab must be the base (seActivateTab) — this is the old
+    // saveEditor body, minus the close decision (the orchestrator owns it)
     const errors = window.UpliftModelSpec.validate(seValues, seModelEntry());
     if (errors.length) {
         msg.textContent = errors[0];
         MM_GLUE.toast(errors[0]);
-        return;
+        return { ok: false, validation: true, error: errors[0] };
     }
     const full = window.UpliftModelSpec.buildPayload(seValues, seFormModel);
     // boolean management flags ride the same PUT (real API accepts them too)
@@ -2556,6 +2604,14 @@ async function saveEditor() {
     // dirty keys that apply live (sparse PUT; the server treats "not sent"
     // as "don't touch"). Runtime keys stay queued for RESTART MODEL.
     const loaded = seModelIsLoaded();
+    const t0 = seTabs.find(z => z.id === 'base');
+    const achvOld = t0 && t0.origVals ? Object.assign({}, t0.origVals) : null;
+    const announce = () => {
+        try {
+            const AC = window.Uplift && window.Uplift.achv;
+            if (AC && achvOld) AC.announce(AC.modelSavedReaction(achvOld, seValues));
+        } catch (_) { /* a verdict must never break the save */ }
+    };
     let payload = full, reloadStep = false;
     if (loaded) {
         const plain = sePlainDirtyKeys();
@@ -2572,7 +2628,6 @@ async function saveEditor() {
         }
         // chat-template kwargs bypass the dirty set (entries list) — include
         // them whenever they differ from the tab's saved baseline
-        const t0 = seTabs.find(z => z.id === 'base');
         const kwNow = JSON.stringify(seValues.ctKwargEntries || []);
         const kwWas = JSON.stringify((t0 && t0.origVals || {}).ctKwargEntries || []);
         if (kwNow !== kwWas) {
@@ -2594,69 +2649,116 @@ async function saveEditor() {
         const deferred = Object.keys(deferAdd).length
             ? Object.assign({}, seDeferred, deferAdd) : seDeferred;
         reloadStep = Object.keys(deferred).length > 0;
-        // BUG-6 doctrine: no intermediate 'saving…' label — button goes
-        // busy for the duration, the label carries only the final state
-        const sbtn = document.getElementById('se-save');
-        if (sbtn) sbtn.disabled = true;
-        const achvOld = t0 && t0.origVals ? Object.assign({}, t0.origVals) : null;
-        try {
-            // live keys ride the sparse classic PUT (empty payload = nothing
-            // live changed; skip it so we never touch the engine path)
-            if (Object.keys(payload).length)
-                await MM_GLUE.putModelSettings(seModel, payload);
-            if (Object.keys(deferAdd).length) await sePersistDeferred(seModel, deferred);
-            else seDeferred = deferred;
-            // the classic store now holds the live keys: keep the raw base
-            // (divergence merge baseline for profiles) honest — DIV-3
-            Object.assign(seBaseRaw, JSON.parse(JSON.stringify(payload)));
-            // mark every committed key saved (baseline moves to current), so
-            // the deferred set no longer reads as dirty-but-unsaved
-            seCommitSaved(t0, Object.keys(deferAdd));
-            seMarkPendingRows();
-            msg.textContent = reloadStep
-                ? 'saved ✓ — ' + Object.keys(seDeferred).length + ' setting(s) apply on RESTART MODEL'
-                : 'saved ✓';
-            MM_GLUE.toast(C.t('uplift.toast.settings_saved_model', {model: seModel}));
-            seUpdateSaveBtn();
-            refreshDivergence();
-            if (!reloadStep) setTimeout(closeEditor, 1200);
-            // ACHIEVEMENTS: judge what this save did to the machine
-            try {
-                const AC = window.Uplift && window.Uplift.achv;
-                if (AC && achvOld) AC.announce(AC.modelSavedReaction(achvOld, seValues));
-            } catch (_) { /* a verdict must never break the save */ }
-            // restart still pending: editor stays open, RESTART MODEL visible
-        } catch (err) {
-            msg.textContent = `error: ${err.message}`;
-            MM_GLUE.toast(C.t('uplift.toast.save_failed', {msg: err.message}));
-            if (sbtn) sbtn.disabled = false;   // BUG-6: reactivates for a retry
-        }
-        return;
-    }
-    // BUG-6 doctrine: no intermediate label; busy state lives on the button
-    const sbtn2 = document.getElementById('se-save');
-    if (sbtn2) sbtn2.disabled = true;
-    const achvOldBase = (() => { const z = seTabs.find(q => z.id === 'base');
-        return z && z.origVals ? Object.assign({}, z.origVals) : null; })();
-    try {
-        const r = await MM_GLUE.putModelSettings(seModel, payload);
-        // no engine running: the full PUT stored everything classic-side —
-        // a leftover deferred record is redundant, drop it
-        await seClearDeferred(seModel);
-        seCommitSaved(seTabs.find(z => z.id === 'base'), []);
-        msg.textContent = 'saved ✓';
+        // live keys ride the sparse classic PUT (empty payload = nothing
+        // live changed; skip it so we never touch the engine path)
+        if (Object.keys(payload).length)
+            await MM_GLUE.putModelSettings(seModel, payload);
+        if (Object.keys(deferAdd).length) await sePersistDeferred(seModel, deferred);
+        else seDeferred = deferred;
+        // the classic store now holds the live keys: keep the raw base
+        // (divergence merge baseline for profiles) honest — DIV-3
+        Object.assign(seBaseRaw, JSON.parse(JSON.stringify(payload)));
+        // mark every committed key saved (baseline moves to current), so
+        // the deferred set no longer reads as dirty-but-unsaved
+        seCommitSaved(t0, Object.keys(deferAdd));
+        seMarkPendingRows();
+        msg.textContent = reloadStep
+            ? 'saved ✓ — ' + Object.keys(seDeferred).length + ' setting(s) apply on RESTART MODEL'
+            : 'saved ✓';
         MM_GLUE.toast(C.t('uplift.toast.settings_saved_model', {model: seModel}));
         seUpdateSaveBtn();
         refreshDivergence();
-        setTimeout(closeEditor, 1200);
-        try {
-            const AC = window.Uplift && window.Uplift.achv;
-            if (AC && achvOldBase) AC.announce(AC.modelSavedReaction(achvOldBase, seValues));
-        } catch (_) { /* a verdict must never break the save */ }
-    } catch (err) {
-        msg.textContent = `error: ${err.message}`;
-        MM_GLUE.toast(C.t('uplift.toast.save_failed', {msg: err.message}));
-        if (sbtn2) sbtn2.disabled = false;   // BUG-6: reactivates for a retry
+        announce();
+        // restart still pending: editor stays open, RESTART MODEL visible
+        return { ok: true, reloadStep };
+    }
+    // no engine running: the full PUT stores everything classic-side —
+    // a leftover deferred record is redundant, drop it
+    await MM_GLUE.putModelSettings(seModel, payload);
+    await seClearDeferred(seModel);
+    seCommitSaved(t0, []);
+    msg.textContent = 'saved ✓';
+    MM_GLUE.toast(C.t('uplift.toast.settings_saved_model', {model: seModel}));
+    seUpdateSaveBtn();
+    refreshDivergence();
+    announce();
+    return { ok: true, reloadStep: false };
+}
+async function saveEditor() {
+    if (!seModel) return;
+    const panel = document.querySelector('.modal.editor');
+    if (!panel) return;
+    seCaptureTab();
+    const msg = panel.querySelector('#se-msg');
+    const baseTab = seTabs.find(z => z.id === 'base');
+    const changed = seTabs.filter(seTabHasChanges);
+    // single dirty profile tab, base untouched: the BUG-6-pinned wrapper
+    // carries the busy state + rejection handling — behavior unchanged
+    if (changed.length === 1 && changed[0].id !== 'base' && !seIsBaseTab())
+        return saveProfileTab(panel);
+    if (!changed.length) return;
+    // base FIRST when it carries changes (sparse-diff ordering, see header)
+    const targets = [];
+    if (baseTab && seTabHasChanges(baseTab)) targets.push(baseTab);
+    for (const t of changed) if (t.id !== 'base') targets.push(t);
+    const btn = document.getElementById('se-save');
+    if (btn) btn.disabled = true;
+    const saved = [], failed = [];
+    let baseReload = false;
+    try {
+        for (const t of targets) {
+            if (seTab() !== t) seActivateTab(panel, t);
+            const label = seTabLabel(t);
+            try {
+                if (t.id === 'base') {
+                    const r = await commitBaseTab(panel, msg);
+                    if (r.ok) saved.push(label);
+                    else failed.push([label, r.error]);
+                    baseReload = baseReload || !!r.reloadStep;
+                } else {
+                    const nm = (t.name || '').trim();
+                    if (!nm) {
+                        failed.push([label, C.t('uplift.toast.profile_name_required')]);
+                        MM_GLUE.toast(C.t('uplift.toast.profile_name_required'));
+                        continue;
+                    }
+                    const st = await saveProfileCommit(panel, t, nm, msg);
+                    if (st === 'saved') saved.push(label);
+                    else failed.push([label, msg.textContent || 'invalid']);
+                }
+            } catch (e) {
+                failed.push([label, e.message]);
+                MM_GLUE.toast(t.id === 'base'
+                    ? C.t('uplift.toast.save_failed', {msg: e.message})
+                    : C.t('uplift.toast.profile_save_failed', {msg: e.message}));
+            }
+        }
+        if (targets.length > 1) {
+            // per-tab honest summary (BUG-6 doctrine: final state only)
+            const parts = [];
+            if (saved.length) parts.push(C.tf('uplift.se.saved_all', 'saved') + ': ' + saved.join(', '));
+            if (failed.length) parts.push(C.tf('uplift.se.failed_suffix', 'failed') + ': '
+                + failed.map(x => x[0] + ' (' + x[1] + ')').join(', '));
+            msg.textContent = parts.join(' — ');
+            if (baseReload && Object.keys(seDeferred).length)
+                msg.textContent += ' · ' + Object.keys(seDeferred).length
+                    + ' setting(s) apply on RESTART MODEL';
+            if (baseReload && baseTab) seActivateTab(panel, baseTab);  // RESTART lives on the base tab
+            seRenderTabs(panel); seUpdateSaveBtn();
+        } else if (failed.length === 1) {
+            // single target that failed via a soft path (validation short-
+            // circuit already wrote its message) — keep the old bare-error
+            // label shape, no 'failed: X ()' wrapper
+            if (!/^error: |^saved/i.test(msg.textContent || ''))
+                msg.textContent = 'error: ' + failed[0][1];
+        } else if (saved.length === 1 && targets[0].id === 'base'
+                   && !baseReload && seTabs.every(t => !seTabHasChanges(t))) {
+            setTimeout(closeEditor, 1200);   // old single-base close behavior
+        }
+    } finally {
+        // recompute from tab state: clean tabs leave the button disabled,
+        // a failed one re-enables it for a retry (BUG-6 doctrine)
+        if (btn) btn.disabled = !seTabs.some(seTabHasChanges);
     }
 }
 /* RESTART MODEL (phase 2): push EVERYTHING — deferred values are already in
@@ -2714,7 +2816,7 @@ async function saveProfileCommit(panel, t, name, msg) {
         JSON.parse(JSON.stringify(t.workVals || {})));
     seNormalizeKwargs(mergedForValidate);   // R10-6
     const errors = window.UpliftModelSpec.validate(mergedForValidate, seModelEntry());
-    if (errors.length) { msg.textContent = errors[0]; MM_GLUE.toast(errors[0]); return; }
+    if (errors.length) { msg.textContent = errors[0]; MM_GLUE.toast(errors[0]); return 'invalid'; }
     // R10-6: convert the tab's edited kwargs entries back to the raw
     // settings shape so the inheritance diff below can persist them
     if (t.workVals && t.workVals.ctKwargEntries) {
@@ -2764,6 +2866,7 @@ async function saveProfileCommit(panel, t, name, msg) {
     if (mirror) mirror.settings = JSON.parse(JSON.stringify(ov));
     msg.textContent = 'saved ✓';
     seRenderTabs(panel); seUpdateSaveBtn();
+    return 'saved';
 }
 
 
