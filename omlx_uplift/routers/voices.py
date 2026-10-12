@@ -68,6 +68,7 @@ MAX_VOICES = 64
 MAX_VOICE_AUDIO_BYTES = 14 * 1024 * 1024     # base64 then <= 20 MiB chars
 MAX_NAME_CHARS = 64
 MAX_REF_TEXT_CHARS = 4000
+MAX_INSTRUCT_CHARS = 1000                    # VOICE-6: style instruction prose
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 AUDIO_EXTS = {".wav", ".mp3", ".flac"}
 
@@ -125,9 +126,23 @@ def _sanitize(raw: dict, existing: Optional[dict] = None) -> dict:
     ref_text = str(raw.get("ref_text") or "").strip()[:MAX_REF_TEXT_CHARS]
     v = dict(existing or {})
     v.update({"name": name, "model": model, "ref_text": ref_text})
-    for k in ("language", "speed"):
+    for k in ("language", "speed", "instructions", "speaker", "designed_from"):
         if raw.get(k) not in (None, ""):
-            v[k] = raw[k]
+            val = raw[k]
+            # VOICE-5/6/7 caps: language/speaker are short ids, instruct
+            # free text (vanilla feeds it to the model prompt; 1k chars is
+            # generous prose and keeps voices.json sane)
+            if k == "instructions":
+                val = str(val).strip()[:MAX_INSTRUCT_CHARS]
+            elif k in ("language", "speaker"):
+                val = str(val).strip()[:64]
+            elif k == "designed_from":       # VOICE-8: honest origin note
+                val = str(val).strip()[:MAX_INSTRUCT_CHARS]
+            v[k] = val
+        elif k == "designed_from":
+            # origin survives an edit that does not resend it (metadata,
+            # never re-sent to the engine — only _sanitize's editable set pops)
+            pass
         else:
             v.pop(k, None)
     return v
@@ -136,12 +151,15 @@ def _sanitize(raw: dict, existing: Optional[dict] = None) -> dict:
 async def _synth_ref(model: str, text: str, ref_path: Optional[Path],
                      ref_text: str, language=None, speed=None,
                      stream: bool = False, response_format: str = "wav",
-                     instructions=None) -> Response:
+                     instructions=None, speaker=None) -> Response:
     """Call vanilla create_speech in-process with a reference clip attached.
 
     ref_path None = no cloning (plain preset-voice TTS model). The clip is
     read from disk here and base64'd only for the duration of the call —
-    it never lands in any JSON store or log.
+    it never lands in any JSON store or log. speaker (VOICE-7) is the
+    CustomVoice preset name — vanilla routes it to the engine's `voice`
+    kwarg; Base checkpoints carry no presets and vanilla drops it there
+    (_accepts_preset_voice).
     """
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="'input' must not be empty")
@@ -159,6 +177,7 @@ async def _synth_ref(model: str, text: str, ref_path: Optional[Path],
     kwargs = dict(
         model=model,
         input=text,
+        voice=speaker or None,
         ref_audio=ref_b64,
         ref_text=(ref_text or None) if ref_b64 else None,
         language=language or None,
@@ -221,10 +240,15 @@ async def _create_transcription(data: bytes, filename: str, model: str,
 
 async def _synth(voice: dict, text: str, stream: bool = False,
                  fmt: str = "wav", speed=None, language=None,
-                 model=None, ref_text=None) -> Response:
+                 model=None, ref_text=None, instructions=None,
+                 speaker=None) -> Response:
     # ref_text: the EDITOR previews a changed transcript against the
     # STORED clip before saving — the override keeps preview truthful
-    # (VOICE-4); absent = the voice's saved transcript
+    # (VOICE-4); absent = the voice's saved transcript. instructions
+    # follows the SAME override rule (VOICE-6): the editor's live form
+    # value previews, the stored one applies to plain speech calls.
+    # speaker (VOICE-7): preset name for CustomVoice models; a voice
+    # without one clones via ref clip exactly as before.
     ref_file = voice.get("ref_file")
     ref_path = (_audio_dir() / Path(ref_file).name) if ref_file else None
     return await _synth_ref(model or voice["model"], text, ref_path,
@@ -232,7 +256,11 @@ async def _synth(voice: dict, text: str, stream: bool = False,
                             else ref_text,
                             language or voice.get("language"),
                             speed or voice.get("speed"), stream,
-                            response_format=fmt)
+                            response_format=fmt,
+                            instructions=voice.get("instructions")
+                            if instructions is None else instructions,
+                            speaker=voice.get("speaker")
+                            if speaker is None else speaker)
 
 
 def _find(store: dict, key: str) -> Optional[dict]:
@@ -300,12 +328,93 @@ async def voices_list(_auth=Depends(require_admin)):
     out = []
     for v in store["voices"]:
         row = {k: v.get(k) for k in ("id", "name", "model", "ref_text",
-                                     "language", "speed", "created")}
+                                     "language", "speed", "instructions",
+                                     "speaker", "created")}
         f = v.get("ref_file")
         row["ref_bytes"] = (_audio_dir() / Path(f).name).stat().st_size \
             if f and (_audio_dir() / Path(f).name).is_file() else None
         out.append(row)
     return {"voices": out}
+
+
+@api_router.post("/voices/design")
+async def voices_design(request: Request, _auth=Depends(require_admin)):
+    """VOICE-8: design a reference clip with a VoiceDesign checkpoint.
+
+    Body: {model, instruct, input?, language?}. The design model needs NO
+    ref audio — the description IS the input; mlx_audio raises honestly
+    when the checkpoint is not a voice_design one, and the capability
+    probe double-checks it here BEFORE burning a model load. Returns the
+    raw WAV (the client then stores it as an ordinary clone voice's
+    reference clip — the card's own 'Voice Design then Clone' workflow,
+    no fine-tuning, no training framework)."""
+    raw = await request.json()
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    model = str(raw.get("model") or "").strip()
+    instruct = str(raw.get("instruct") or "").strip()[:MAX_INSTRUCT_CHARS]
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+    if not instruct:
+        raise HTTPException(status_code=400,
+                            detail="instruct (the voice description) is required")
+    caps = await voices_capabilities(model=model, _auth=True)
+    if not caps.get("qwen3") or caps.get("type") != "voice_design":
+        raise HTTPException(status_code=400, detail=(
+            "'%s' is not a Qwen3-TTS VoiceDesign checkpoint "
+            "(type: %s) — download e.g. mlx-community/"
+            "Qwen3-TTS-12Hz-1.7B-VoiceDesign-4bit first"
+            % (model, caps.get("type") or "unknown")))
+    text = str(raw.get("input") or "Hello! This is how I sound.").strip()
+    return await _synth_ref(model, text, None, "",
+                            raw.get("language") or None, None,
+                            False, "wav", instruct)
+
+
+@api_router.get("/voices/capabilities")
+async def voices_capabilities(model: str = "", _auth=Depends(require_admin)):
+    """VOICE-5/6/7: what THIS TTS model can actually do, read from the
+    checkpoint's config.json — never guessed from the model name.
+
+    Static metadata only (same trick as vanilla GET /v1/audio/voices: the
+    spk_id table + the language table live in the config, the model does
+    not need to load). Non-Qwen3-TTS engines and unknown models answer
+    {'qwen3': False,...} — the UI then stays SILENT about language/
+    speaker/instruct (those fields are Qwen3-TTS specific per the user).
+
+    Fields:
+      qwen3      bool  — the checkpoint is qwen3_tts
+      type       str   — 'base' | 'custom_voice' | 'voice_design'
+      languages  list  — engine language ids (lowercase; 'auto' first)
+      speakers   list  — preset speaker names (empty on Base clones)
+    """
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+    empty = {"model": model, "qwen3": False, "type": "",
+             "languages": [], "speakers": []}
+    try:
+        # vanilla's OWN resolution (audio_routes.list_model_voices does
+        # exactly this): pool entry -> on-disk model dir, no load needed
+        from omlx.api.audio_routes import _get_engine_pool, _resolve_model
+        pool = _get_engine_pool()
+        resolved = _resolve_model(model)
+        entry = pool.get_entry(resolved) if pool is not None else None
+        if entry is None:
+            return empty
+        cfg = Path(entry.model_path) / "config.json"
+        empty["model"] = resolved
+        j = json.loads(cfg.read_text())
+    except (ImportError, OSError, ValueError):
+        return empty
+    if j.get("model_type") != "qwen3_tts" and "talker_config" not in j:
+        return empty
+    tc = j.get("talker_config") or {}
+    langs = ["auto"] + [k for k in (tc.get("codec_language_id") or {})
+                        if "dialect" not in k]
+    return {"model": resolved, "qwen3": True,
+            "type": j.get("tts_model_type") or "base",
+            "languages": langs,
+            "speakers": sorted((tc.get("spk_id") or {}).keys())}
 
 
 @api_router.post("/voices")
@@ -343,8 +452,14 @@ async def voices_create(request: Request, _auth=Depends(require_admin)):
                 "reference clip for '%s' is missing from the store" % src["name"]))
         data = src_path.read_bytes()
         ext = src_path.suffix.lower()
-    if not data:
-        raise HTTPException(status_code=400, detail="reference audio is required")
+    # VOICE-7: a CustomVoice voice is (speaker [+instruct]) with NO ref
+    # clip — that is a complete voice; a Base clone needs the clip. The
+    # store keeps whichever shape arrived; _synth passes ref only if stored.
+    if not data and not str(raw.get("speaker") or "").strip():
+        raise HTTPException(status_code=400, detail=(
+            "reference audio is required (or a preset speaker for a "
+            "CustomVoice model)")
+        )
     if len(data) > MAX_VOICE_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail=(
             "reference audio exceeds %d MiB" % (MAX_VOICE_AUDIO_BYTES // (1024 * 1024))))
@@ -356,14 +471,15 @@ async def voices_create(request: Request, _auth=Depends(require_admin)):
     if v["id"] in taken:
         raise HTTPException(status_code=409,
                             detail="voice id exists: %s" % v["id"])
-    v["ref_file"] = v["id"] + ext
     v["created"] = int(time.time())
-    d = _audio_dir()
-    d.mkdir(parents=True, exist_ok=True)
-    (d / v["ref_file"]).write_bytes(data)
+    if data:                        # VOICE-7: a speaker-only voice stores NO clip
+        v["ref_file"] = v["id"] + ext
+        d = _audio_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        (d / v["ref_file"]).write_bytes(data)
     store["voices"].append(v)
     _save(store)
-    return {"ok": True, "voice": {k: v[k] for k in
+    return {"ok": True, "voice": {k: v.get(k) for k in
                                   ("id", "name", "model", "ref_file")}}
 
 
@@ -430,6 +546,10 @@ async def voices_speech(request: Request, _auth=Depends(require_admin)):
                             detail="unknown voice; available: %s" % names)
     return await _synth(v, str(raw.get("input") or ""),
                         stream=bool(raw.get("stream")), model=model_override,
+                        language=raw.get("language") or None,
+                        speed=raw.get("speed") or None,
+                        instructions=raw.get("instructions")
+                        if "instructions" in raw else None,
                         ref_text=raw.get("ref_text") if "ref_text" in raw
                         else None)
 
@@ -495,7 +615,9 @@ async def voices_preview(request: Request, _auth=Depends(require_admin)):
                                 str(raw.get("input")
                                     or "This is a preview of this voice."),
                                 tmp_path, ref_text,
-                                raw.get("language"), raw.get("speed"))
+                                raw.get("language"), raw.get("speed"),
+                                instructions=raw.get("instructions"),
+                                speaker=raw.get("speaker"))
     finally:
         if tmp_path:
             tmp_path.unlink(missing_ok=True)
@@ -622,6 +744,7 @@ async def speech_std(request: Request):
         if v:
             resp = await _synth(v, text, fmt=fmt, speed=speed, stream=stream,
                                 language=body.get("language") or None,
+                                instructions=body.get("instructions") or None,
                                 model=model_use)
         else:
             # no named voice: pure pass-through to vanilla — anonymous

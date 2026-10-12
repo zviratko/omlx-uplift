@@ -172,6 +172,26 @@ function readFileB64(file) {
     });
 }
 
+/* VOICE-5/6/7: per-checkpoint capabilities from the SERVER (it reads the
+   model's config.json — the honest source for language/speaker tables;
+   the UI must not guess them from model names). Fetched once per model id
+   (static metadata, safe to cache for the page lifetime). Non-Qwen3-TTS
+   engines answer qwen3:false and the language/speaker/instruct fields
+   stay SILENT — those controls are Qwen3-TTS specific (user doctrine). */
+const _capsCache = {};
+function capsFor(model) {
+    if (!model) return Promise.resolve(null);
+    if (!_capsCache[model]) {
+        _capsCache[model] = D.fetchJson(
+            `${VAPI}/voices/capabilities?model=${encodeURIComponent(model)}`)
+            .then(c => { _capsCache[model] = c; return c; })
+            .catch(() => { delete _capsCache[model]; return null; });
+    }
+    return _capsCache[model];
+}
+window.Uplift = window.Uplift || {};
+window.Uplift.capsFor = capsFor;   // VOICE-8 (design flow) reuses the probe
+
 function voiceRow(v) {
     const row = document.createElement('div');
     row.className = 'urow vc-row';
@@ -184,7 +204,11 @@ function voiceRow(v) {
     // read '0 MiB'; show KiB under a MiB, MiB above (user size-honesty)
     const size = v.ref_bytes ? (v.ref_bytes < 1048576
         ? Math.round(v.ref_bytes / 1024) + ' KiB' : C.fmtBytes(v.ref_bytes)) : '—';
-    sub.textContent = tf('uplift.voices.clip', 'clip') + ' ' + size;
+    // VOICE-7: a preset-speaker voice carries NO clip — the row says what
+    // it actually is instead of the misleading 'clip —'
+    sub.textContent = v.speaker
+        ? tf('uplift.voices.speaker_tag', 'speaker') + ' ' + v.speaker
+        : tf('uplift.voices.clip', 'clip') + ' ' + size;
     sub.title = v.ref_text || '';
     lab.append(sub);
     const act = document.createElement('div');
@@ -384,38 +408,122 @@ function voiceForm(models, sttSelf) {
     refWrap.append(trRow);
     grid.append(
         field(tf('uplift.voices.name', 'Voice name'), nameI),
-        field(tf('uplift.voices.model', 'TTS model'), modelS),
-        field(tf('uplift.voices.clip_file', 'Reference clip'), fileI),
-        field(tf('uplift.voices.ref_text', 'Reference text'), refWrap));
+        field(tf('uplift.voices.model', 'TTS model'), modelS));
+    // ---- VOICE-5/6/7: Qwen3-TTS extras, gated by the server capability
+    // probe. Hidden for engines without the data (silent-absence doctrine
+    // — these fields are Qwen3-TTS specific per the user). Reveal order =
+    // build order; the probes answer async and applyCaps() toggles.
+    const langS = document.createElement('select');
+    langS.title = tf('uplift.voices.language_title',
+        'Force the output language, or Auto to let the model adapt to the text.');
+    const spkS = document.createElement('select');
+    spkS.title = tf('uplift.voices.speaker_title',
+        'Preset speaker of this CustomVoice model — no reference clip needed. '
+        + 'Each speaker is strongest in its native language.');
+    const instrT = document.createElement('textarea');
+    instrT.rows = 2;
+    instrT.placeholder = tf('uplift.voices.instruct_ph',
+        'e.g. Very happy. — tone, emotion, speaking rate in plain words');
+    instrT.title = tf('uplift.voices.instruct_title',
+        'Style instruction (Qwen3-TTS CustomVoice/VoiceDesign): natural-language '
+        + 'control over tone, emotion and speaking rate. Empty = neutral.');
+    const langF = field(tf('uplift.voices.language', 'Language'), langS);
+    const spkF = field(tf('uplift.voices.speaker', 'Speaker'), spkS);
+    const instrF = field(tf('uplift.voices.instruct', 'Instruct'), instrT);
+    const clipF = field(tf('uplift.voices.clip_file', 'Reference clip'), fileI);
+    const refF = field(tf('uplift.voices.ref_text', 'Reference text'), refWrap);
+    for (const f of [langF, spkF, instrF]) { f.hidden = true; grid.append(f); }
+    grid.append(clipF, refF);
+    let caps = null;
+    const fillSel = (sel, items, firstLabel) => {
+        sel.textContent = '';
+        if (firstLabel !== null) {
+            const o = document.createElement('option');
+            o.value = ''; o.textContent = firstLabel; sel.append(o);
+        }
+        for (const it of items) {
+            const o = document.createElement('option');
+            o.value = it; o.textContent = it; sel.append(o);
+        }
+    };
+    const applyCaps = c => {
+        caps = c;
+        const q3 = !!(c && c.qwen3);
+        if (!q3) {
+            // foreign engine / unknown: the classic clone form, extras SILENT
+            langF.hidden = spkF.hidden = instrF.hidden = true;
+            clipF.hidden = refF.hidden = false;
+            return;
+        }
+        fillSel(langS, (c.languages || []).filter(l => l !== 'auto'),
+            tf('uplift.voices.lang_auto', 'Auto (adaptive)'));
+        langS.value = (src && src.language) || '';
+        langF.hidden = false;
+        if (c.type === 'custom_voice' && (c.speakers || []).length) {
+            fillSel(spkS, c.speakers,
+                tf('uplift.voices.spk_clone', '— clone from the reference clip —'));
+            spkS.value = (src && src.speaker) || '';
+            spkF.hidden = false;
+        } else spkF.hidden = true;
+        // base checkpoints ignore instruct (model card) — field hidden there
+        instrF.hidden = c.type === 'base';
+        if (src && src.instructions) instrT.value = src.instructions;
+        // VoiceDesign: the description IS the voice — no clip, no transcript
+        clipF.hidden = refF.hidden = (c.type === 'voice_design');
+        if (c.type === 'voice_design' && !instrT.value && src && src.ref_text)
+            instrT.value = src.ref_text;   // (defensive: design voices store none)
+    };
+    const probeModel = () => { capsFor(modelS.value).then(applyCaps); };
+    modelS.onchange = probeModel;
+    probeModel();
     const acts = document.createElement('div');
     acts.className = 'vc-acts';
     const prevB = document.createElement('button');
     prevB.type = 'button'; prevB.className = 'se-btn';
     prevB.textContent = tf('uplift.voices.preview', 'PREVIEW');
     prevB.onclick = async () => {
-        if (!hasClip()) return D.toast(
+        const design = caps && caps.type === 'voice_design';
+        if (!design && !hasClip()) return D.toast(
             tf('uplift.voices.need_clip', 'pick a reference clip first'), 'error');
-        if (!refT.value.trim()) return D.toast(
+        if (!design && !refT.value.trim()) return D.toast(
             tf('uplift.voices.need_ref_text', 'type the reference transcript'), 'error');
+        if (design && !instrT.value.trim()) return D.toast(
+            tf('uplift.voices.need_instruct', 'describe the voice first'), 'error');
         prevB.disabled = true;
         try {
             let r;
-            if (b64 || mode === 'add') {
-                r = await speechJson('/voices/preview', {
+            const extras = {};
+            if (caps && caps.qwen3) {
+                if (langS.value) extras.language = langS.value;
+                if (!spkF.hidden && spkS.value) extras.speaker = spkS.value;
+                if (!instrF.hidden && instrT.value.trim())
+                    extras.instructions = instrT.value.trim();
+            }
+            if (design) {
+                // VOICE-8: the design model speaks the sample FROM the
+                // description — preview IS the design step
+                r = await speechJson('/voices/design', Object.assign({
+                    model: modelS.value,
+                    input: tf('uplift.voices.sample_text',
+                              'Hello! This is how I sound.'),
+                    instruct: instrT.value.trim() },
+                    langS.value ? { language: langS.value } : {}));
+            } else if (b64 || mode === 'add') {
+                r = await speechJson('/voices/preview', Object.assign({
                     model: modelS.value, ref_audio_b64: b64,
                     ref_name: (file && file.name) || 'r.wav',
                     ref_text: refT.value.trim(),
                     input: tf('uplift.voices.sample_text',
-                              'Hello! This is how I sound.') });
+                              'Hello! This is how I sound.') }, extras));
             } else {
                 // edit without a new clip: the STORED clip speaks, the
                 // typed transcript overrides at synth time — exactly the
                 // sentence SAVE would store (server ref_text override)
-                r = await speechJson('/voices/speech', {
+                r = await speechJson('/voices/speech', Object.assign({
                     voice: editing.id, model: modelS.value,
                     ref_text: refT.value.trim(),
                     input: tf('uplift.voices.sample_text',
-                              'Hello! This is how I sound.') });
+                              'Hello! This is how I sound.') }, extras));
             }
             await playBlob(r, prevB);
         } catch (e) { D.toast(String(e && e.message || e), 'error'); }
@@ -428,32 +536,82 @@ function voiceForm(models, sttSelf) {
         : tf('uplift.voices.save', 'SAVE VOICE');
     addB.onclick = async () => {
         const nm = nameI.value.trim();
-        if (!nm || !modelS.value || !refT.value.trim() || !hasClip())
+        const design = caps && caps.type === 'voice_design';
+        const needText = !design && (!refT.value.trim() || !hasClip())
+            && !(caps && caps.qwen3 && !spkF.hidden && spkS.value);
+        if (!nm || !modelS.value || needText)
             return D.toast(tf('uplift.voices.need_all',
                 'name, model, clip and transcript are all required'), 'error');
+        if (design && !instrT.value.trim())
+            return D.toast(tf('uplift.voices.need_instruct',
+                'describe the voice first'), 'error');
+        // VOICE-8 (design flow): saving runs the design synth ONCE and
+        // stores its WAV as the reference clip — from then on the voice
+        // behaves like any uploaded-clip clone, no second model load per
+        // speech. The design model must be LOADED (the server answers a
+        // clear 400/503 otherwise — surfaced as an error toast).
+        const extras = {};
+        if (caps && caps.qwen3) {
+            if (langS.value) extras.language = langS.value;
+            if (!spkF.hidden && spkS.value) extras.speaker = spkS.value;
+            if (!instrF.hidden && instrT.value.trim())
+                extras.instructions = instrT.value.trim();
+        }
         addB.disabled = true;
         try {
-            if (mode === 'edit') {
-                const body = { name: nm, model: modelS.value,
-                               ref_text: refT.value.trim() };
-                // carry fields the form does not expose: the server's
-                // _sanitize pops whatever a PUT omits, and language/speed
-                // CAN exist on API-created voices — edit must not lose them
-                if (editing.language) body.language = editing.language;
-                if (editing.speed) body.speed = editing.speed;
+            if (design) {
+                const sample = tf('uplift.voices.sample_text',
+                    'Hello! This is how I sound.');
+                const blob = await (await speechJson('/voices/design',
+                    Object.assign({ model: modelS.value, input: sample,
+                                    instruct: instrT.value.trim() },
+                        langS.value ? { language: langS.value } : {}))).blob();
+                const fr = new FileReader();
+                await new Promise((res, rej) => {
+                    fr.onload = () => res(); fr.onerror = () => rej(new Error('read failed'));
+                    fr.readAsDataURL(blob);
+                });
+                extras.ref_audio_b64 = String(fr.result).split(',')[1] || '';
+                extras.ref_name = 'designed.wav';
+                extras.ref_text = sample;      // we AUTHORED the transcript — exact by construction
+                extras.designed_from = instrT.value.trim();
+                if (mode === 'edit') {
+                    await D.putJson(`${VAPI}/voices/${encodeURIComponent(editing.id)}`,
+                        Object.assign({ name: nm, model: modelS.value }, extras));
+                } else {
+                    await D.postJson(`${VAPI}/voices`,
+                        Object.assign({ name: nm, model: modelS.value }, extras));
+                }
+                D.toast(tf('uplift.voices.designed', 'Voice designed and saved') + ': ' + nm);
+            } else if (mode === 'edit') {
+                const body = Object.assign({ name: nm, model: modelS.value,
+                    ref_text: refT.value.trim() }, extras);
+                // carry fields the form does not expose when the engine
+                // hides them: the server's _sanitize pops whatever a PUT
+                // omits — edit must not lose API-set values
+                if (!(caps && caps.qwen3)) {
+                    if (editing.language) body.language = editing.language;
+                    if (editing.speed) body.speed = editing.speed;
+                    if (editing.instructions) body.instructions = editing.instructions;
+                    if (editing.speaker) body.speaker = editing.speaker;
+                }
                 if (b64) { body.ref_audio_b64 = b64; body.ref_name = file.name; }
                 await D.putJson(`${VAPI}/voices/${encodeURIComponent(editing.id)}`,
                     body);
                 D.toast(tf('uplift.voices.saved', 'Voice saved') + ': '
                         + nm + ' (' + modelS.value + ')');
             } else {
-                const body = { name: nm, model: modelS.value,
-                               ref_text: refT.value.trim() };
+                const body = Object.assign({ name: nm, model: modelS.value,
+                    ref_text: refT.value.trim() }, extras);
                 // a COPY keeps the source's non-rendered fields too
-                if (saveAs && saveAs.language) body.language = saveAs.language;
-                if (saveAs && saveAs.speed) body.speed = saveAs.speed;
+                if (saveAs && !(caps && caps.qwen3)) {
+                    if (saveAs.language) body.language = saveAs.language;
+                    if (saveAs.speed) body.speed = saveAs.speed;
+                    if (saveAs.instructions) body.instructions = saveAs.instructions;
+                    if (saveAs.speaker) body.speaker = saveAs.speaker;
+                }
                 if (b64) { body.ref_audio_b64 = b64; body.ref_name = file.name; }
-                else if (saveAs) body.from_voice = saveAs.id;
+                else if (saveAs && !body.speaker) body.from_voice = saveAs.id;
                 await D.postJson(`${VAPI}/voices`, body);
                 D.toast((saveAs
                         ? tf('uplift.voices.saved_as', 'Voice saved as a copy')
