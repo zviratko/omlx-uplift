@@ -413,9 +413,21 @@ function voiceForm(models, sttSelf) {
     // probe. Hidden for engines without the data (silent-absence doctrine
     // — these fields are Qwen3-TTS specific per the user). Reveal order =
     // build order; the probes answer async and applyCaps() toggles.
-    const langS = document.createElement('select');
+    // U-LANG (user 2026-10-12): editable combobox — pick one of the
+    // model's declared languages or type any other language string;
+    // empty = Auto (the model adapts to the text). Czech ships in the
+    // list by request; Qwen3-TTS tables do not list it, the engine maps
+    // free-text language names best-effort.
+    const langDL = document.createElement('datalist');
+    langDL.id = 'vc-lang-dl';
+    const langS = document.createElement('input');
+    langS.type = 'text';
+    langS.setAttribute('list', 'vc-lang-dl');
+    langS.autocomplete = 'off';
+    langS.placeholder = tf('uplift.voices.lang_auto', 'Auto (adaptive)');
     langS.title = tf('uplift.voices.language_title',
         'Force the output language, or Auto to let the model adapt to the text.');
+    const langVal = () => (langS.value || '').trim().toLowerCase();
     const spkS = document.createElement('select');
     spkS.title = tf('uplift.voices.speaker_title',
         'Preset speaker of this CustomVoice model — no reference clip needed. '
@@ -427,7 +439,9 @@ function voiceForm(models, sttSelf) {
     instrT.title = tf('uplift.voices.instruct_title',
         'Style instruction (Qwen3-TTS CustomVoice/VoiceDesign): natural-language '
         + 'control over tone, emotion and speaking rate. Empty = neutral.');
-    const langF = field(tf('uplift.voices.language', 'Language'), langS);
+    const langCtl = document.createElement('div');
+    langCtl.append(langS, langDL);
+    const langF = field(tf('uplift.voices.language', 'Language'), langCtl);
     const spkF = field(tf('uplift.voices.speaker', 'Speaker'), spkS);
     const instrF = field(tf('uplift.voices.instruct', 'Instruct'), instrT);
     const clipF = field(tf('uplift.voices.clip_file', 'Reference clip'), fileI);
@@ -446,6 +460,13 @@ function voiceForm(models, sttSelf) {
             o.value = it; o.textContent = it; sel.append(o);
         }
     };
+    const fillDL = (dl, items) => {
+        dl.textContent = '';
+        for (const it of items) {
+            const o = document.createElement('option');
+            o.value = it; dl.append(o);
+        }
+    };
     const applyCaps = c => {
         caps = c;
         const q3 = !!(c && c.qwen3);
@@ -455,8 +476,11 @@ function voiceForm(models, sttSelf) {
             clipF.hidden = refF.hidden = false;
             return;
         }
-        fillSel(langS, (c.languages || []).filter(l => l !== 'auto'),
-            tf('uplift.voices.lang_auto', 'Auto (adaptive)'));
+        // U-LANG: datalist = model's declared languages + Czech (explicit
+        // request); the combobox accepts ANY other language string typed in
+        const lset = (c.languages || []).filter(l => l !== 'auto');
+        if (lset.indexOf('czech') < 0) lset.push('czech');
+        fillDL(langDL, lset);
         langS.value = (src && src.language) || '';
         langF.hidden = false;
         if (c.type === 'custom_voice' && (c.speakers || []).length) {
@@ -494,7 +518,7 @@ function voiceForm(models, sttSelf) {
             let r;
             const extras = {};
             if (caps && caps.qwen3) {
-                if (langS.value) extras.language = langS.value;
+                if (langVal()) extras.language = langVal();
                 if (!spkF.hidden && spkS.value) extras.speaker = spkS.value;
                 if (!instrF.hidden && instrT.value.trim())
                     extras.instructions = instrT.value.trim();
@@ -507,7 +531,7 @@ function voiceForm(models, sttSelf) {
                     input: tf('uplift.voices.sample_text',
                               'Hello! This is how I sound.'),
                     instruct: instrT.value.trim() },
-                    langS.value ? { language: langS.value } : {}));
+                    langVal() ? { language: langVal() } : {}));
             } else if (b64 || mode === 'add') {
                 r = await speechJson('/voices/preview', Object.assign({
                     model: modelS.value, ref_audio_b64: b64,
@@ -552,7 +576,7 @@ function voiceForm(models, sttSelf) {
         // clear 400/503 otherwise — surfaced as an error toast).
         const extras = {};
         if (caps && caps.qwen3) {
-            if (langS.value) extras.language = langS.value;
+            if (langVal()) extras.language = langVal();
             if (!spkF.hidden && spkS.value) extras.speaker = spkS.value;
             if (!instrF.hidden && instrT.value.trim())
                 extras.instructions = instrT.value.trim();
@@ -565,7 +589,7 @@ function voiceForm(models, sttSelf) {
                 const blob = await (await speechJson('/voices/design',
                     Object.assign({ model: modelS.value, input: sample,
                                     instruct: instrT.value.trim() },
-                        langS.value ? { language: langS.value } : {}))).blob();
+                        langVal() ? { language: langVal() } : {}))).blob();
                 const fr = new FileReader();
                 await new Promise((res, rej) => {
                     fr.onload = () => res(); fr.onerror = () => rej(new Error('read failed'));

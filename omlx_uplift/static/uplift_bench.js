@@ -166,11 +166,35 @@ function streamInterrupted(statusId) {
     }
 }
 // U51: run status text is announced to assistive tech
+// U-PROG (user 2026-10-12): every panel's status sits in a prominent box
+// with a determinate progress bar. The old dim 11px single line was
+// easily missed while a bench ran. statusLine builds the box (bar under
+// the text); panels paint the text via gid(id) as before and move the
+// bar with setBar(id, pct). The box hides itself when empty and idle.
 function statusLine(id) {
+    var box = el('div', 'bench-statusbox');
     var st = el('div', 'bench-status'); st.id = id;
     st.setAttribute('role', 'status');
     st.setAttribute('aria-live', 'polite');
-    return st;
+    var bar = el('div', 'bench-bar'); bar.id = id + '-bar';
+    bar.setAttribute('role', 'progressbar');
+    bar.setAttribute('aria-valuemin', '0');
+    bar.setAttribute('aria-valuemax', '100');
+    bar.setAttribute('aria-valuenow', '0');
+    var fill = el('div', 'bench-bar-fill');
+    bar.appendChild(fill);
+    box.append(st, bar);
+    return box;
+}
+// U-PROG: move the bar of a status box. stId is the .bench-status id
+// (same key every panel already uses); pct is 0-100.
+function setBar(stId, pct) {
+    var bar = gid(stId + '-bar');
+    if (!bar) return;
+    var p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    var fill = bar.querySelector('.bench-bar-fill');
+    if (fill) fill.style.width = p + '%';
+    bar.setAttribute('aria-valuenow', String(p));
 }
 // U51: ms-per-question with locale separators + one decimal (a raw
 // 568.75 next to formatted columns reads like a machine dump)
@@ -1251,6 +1275,7 @@ var TP = {
             this.state.benchId = out.bench_id;
             rel();
             this.startStream(out.bench_id);
+            setBar('bench-tp-status', 0);   // U-PROG: new run, bar starts empty
             this.renderStatus(t('bench.progress.preparing', 'Preparing…'));
         } catch (e) {
             rel();
@@ -1309,6 +1334,7 @@ var TP = {
             s.phase = ev.phase || s.phase;
             if (ev.current != null) s.current = ev.current;
             if (ev.total != null) s.total = ev.total;
+            if (s.total) setBar('bench-tp-status', s.current / s.total * 100);
             this.renderStatus((ev.message || ev.phase || '') +
                 (s.total ? '  (' + s.current + '/' + s.total + ')' : ''));
         } else if (ev.type === 'result') {
@@ -1385,6 +1411,7 @@ var TP = {
         this.loadHist();   // U64: the run is in history now — show it
         var st = gid('bench-tp-status');
         if (st && !st.classList.contains('bench-status-error')) {
+            setBar('bench-tp-status', 100);   // U-PROG: run complete
             st.textContent += ' — ' + t('uplift.bench.run_finished', 'finished');
         }
     },
@@ -1634,6 +1661,7 @@ var CTX = {
         _poll = setInterval(async function () {
             try {
                 var r = await d.fetchJson(api() + '/bench/context/' + encodeURIComponent(benchId) + '/results');
+                setBar('bench-ctx-status', r.progress || 0);
                 self.renderStatus((r.message || r.phase || '') + ' ' +
                     Math.round(r.progress || 0) + '%');  // classic: 0-100 scale
                 if (r.result) { self.state.result = r.result; self.renderResult(r.result); }
@@ -1644,6 +1672,7 @@ var CTX = {
 
     onEvent: function (ev) {
         if (ev.type === 'progress') {
+            setBar('bench-ctx-status', ev.progress || 0);
             this.renderStatus((ev.message || ev.phase || '') + ' ' +
                 Math.round(ev.progress || 0) + '%');  // classic: 0-100 scale
         } else if (ev.type === 'result') {
@@ -1726,6 +1755,7 @@ var CTX = {
         this.loadHist();   // U64
         var st = gid('bench-ctx-status');
         if (st && !st.classList.contains('bench-status-error') && st.textContent) {
+            setBar('bench-ctx-status', 100);
             st.textContent += ' — ' + t('uplift.bench.run_finished', 'finished');
         }
     },
@@ -1890,6 +1920,7 @@ var ANE = {
             var snap = await d.fetchJson(api() + '/bench/ane-tune/' +
                 encodeURIComponent(this.state.tuningId) + '/results');
             this.state.snapshot = snap;
+            if (snap.total) setBar('bench-ane-status', snap.current / snap.total * 100);
             this.renderStatus((snap.message || snap.phase || '') +
                 (snap.total ? '  (' + (snap.current || 0) + '/' + snap.total + ')' : ''));
             if (snap.status !== 'running') this.finish();
@@ -2764,6 +2795,12 @@ var ACC = {
         if (ev.type === 'progress') {
             if (st) st.textContent = (ev.message || ev.phase || '') +
                 this.statusCounterText(ev);
+            // U-PROG: the queue box fills per suite; the top bar tracks the
+            // whole board (same counters the text reads from)
+            var c = boardCounters(this.state.board || []);
+            var denom = c.qTotal || c.total;
+            if (denom) setBar('bench-acc-status',
+                (c.qTotal ? c.qDone / c.qTotal : c.cur / c.total) * 100);
             this.boardPaint();
         } else if (ev.type === 'result') {
             this.boardPaint();
@@ -3121,6 +3158,8 @@ function MTEB(kind) {
 
         onEvent: function (ev) {
             if (ev.type === 'progress') {
+                if (ev.total) setBar(prefix + '-status',
+                    Math.min(100, (Number(ev.current) || 0) / ev.total * 100));
                 this.renderStatus((ev.message || ev.phase || '') +
                     (ev.total ? ' (' + (Number(ev.current) + 1) + '/' + ev.total + ')' : ''));
             } else if (ev.type === 'result') {
@@ -3129,6 +3168,7 @@ function MTEB(kind) {
             } else if (ev.type === 'done') {
                 this.state.running = false; this.state.runId = null;
                 this.setButtons(); stopStream();
+                setBar(prefix + '-status', 100);
                 this.renderStatus(t('uplift.bench.run_finished', 'Finished'));
                 this.refreshResults();
             } else if (ev.type === 'error') {
@@ -3446,7 +3486,10 @@ var DEC = {
         if (ev.type === 'progress') {
             // engine messages already carry the counts ("pack (1/3)",
             // "pack: 20/294") — appending (current+1/total) here would
-            // print them twice (caught in the live UI drill)
+            // print them twice (caught in the live UI drill); the bar
+            // (U-PROG) tracks the whole queue from the same counters
+            if (ev.total) setBar('bench-dec-status',
+                Math.min(100, (Number(ev.current) || 0) / ev.total * 100));
             this.renderStatus(ev.message || ev.phase || '');
         } else if (ev.type === 'result') {
             this.state.results.push(ev.data);
@@ -3454,6 +3497,7 @@ var DEC = {
         } else if (ev.type === 'done') {
             this.state.running = false; this.state.runId = null;
             this.setButtons(); stopStream();
+            setBar('bench-dec-status', 100);
             this.renderStatus(t('uplift.bench.run_finished', 'Finished'));
             this.refreshResults();
         } else if (ev.type === 'error') {

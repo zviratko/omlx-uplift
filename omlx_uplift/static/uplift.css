@@ -2541,9 +2541,28 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    everything uplift owns; per-selector rules stay where they existed. */
 .bench-form [hidden], .bench-actions [hidden], .bench-row [hidden],
 .bench-adv-body [hidden], .chat-native-bar [hidden] { display: none; }
-.bench-status { font-size: 11px; color: var(--dim); min-height: 14px; }
+/* U-PROG (user 2026-10-12): every bench panel's status sits in one
+   prominent box with a live determinate bar. The old dim 11px single line
+   was easily missed while a run was going; the box is now the panel's
+   headline. Absorbs the former #bench-acc-status-only rule — all six
+   panels (throughput/context/ANE/Intelligence/Embeddings/Rerankers/
+   Decision) share it via statusLine(); the bar hides itself with the
+   box when there is nothing to report. */
+.bench-statusbox { display: flex; flex-direction: column; gap: 7px;
+  padding: 8px 11px; border: 1px solid var(--edge);
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.bench-statusbox:has(.bench-status:empty) { display: none; }
+.bench-status { font-size: 13px; color: var(--ink); min-height: 14px; }
 .bench-status.bench-status-error { color: var(--red); }
-.bench-status-done { color: var(--ink); }
+.bench-statusbox:has(.bench-status-error) { border-left-color: var(--red);
+  background: color-mix(in srgb, var(--red) 8%, transparent); }
+.bench-bar { height: 7px; border-radius: var(--radius); overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 14%, transparent); }
+.bench-bar-fill { height: 100%; width: 0%; border-radius: var(--radius);
+  background: var(--accent); transition: width .45s ease; }
+.bench-statusbox:has(.bench-status-error) .bench-bar-fill {
+  background: var(--red); }
 .bench-table { border-collapse: collapse; width: 100%; font-size: 11px; }
 /* U47: result-card header row — Copy lives top-right like classic's */
 .bench-results-head { display: flex; justify-content: flex-end; gap: 6px;
@@ -2675,11 +2694,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .acc-suite.st-error { border-color: var(--red); color: var(--red); }
 .acc-suite.st-error .acc-suite-fill { background:
   color-mix(in srgb, var(--red) 18%, transparent); width: 100% !important; }
-/* the status line is the headline number of a running bench (item 3) */
-#bench-acc-status:not(:empty) { font-size: 13px; color: var(--ink);
-  padding: 6px 10px; border: 1px solid var(--edge); border-left: 3px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, transparent); }
-#bench-acc-status.bench-status-error { border-left-color: var(--red); color: var(--red); }
+/* U-PROG: the box look moved to .bench-statusbox (shared by all panels) */
 
 /* NAT-4 native chat (3/6): toolbar over the vendored deep-chat host */
 .chat-native-wrap { display: flex; flex-direction: column; gap: 8px; }

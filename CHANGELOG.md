@@ -13,6 +13,18 @@ users never see.
 
 ## Unreleased
 
+- **Bench menu lists every benchmark.** The Bench dropdown now shows all
+  seven surfaces — Throughput, Intelligence, Context, ANE Tune,
+  Embeddings, Rerankers, Decision. Before, ANE/embed/rerank/decision were
+  only reachable by deep link.
+- **Visible progress.** Every bench panel's status line became a prominent
+  box with a live progress bar — the old dim 11 px line was easy to miss
+  while a run was going.
+- **Voices: type any language.** The language field is an editable
+  combobox now — pick one of the model's declared languages (Czech ships
+  in the list), type any other language string, or leave it empty for
+  Auto.
+
 ## [1.99b] — 2026-10-11
 
 The voice release.
