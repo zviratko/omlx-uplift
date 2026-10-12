@@ -35,10 +35,12 @@ import asyncio
 import atexit
 import json
 import logging
+import os
 import subprocess
 import threading
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
@@ -278,23 +280,46 @@ async def start(body: dict, pool: Any) -> dict:
 
 
 def _api_key() -> str:
+    """Key of the serving process the child will auth against — live
+    _server_state, NOT a hardcoded ~/.omlx read (a dev-based instance
+    runs under OMLX_BASE_PATH with its own key; and the bound port is
+    whatever the process says, :11435 included — it must follow the
+    spawner, same seam harness_engine._api_key uses)."""
+    try:
+        from omlx.server import _server_state
+        gs = getattr(_server_state, "global_settings", None)
+        if gs is not None:
+            k = getattr(getattr(gs, "auth", None), "api_key", None)
+            if k:
+                return k
+    except Exception:
+        pass
     import json as _json
-    cfg = Path.home() / ".omlx" / "settings.json"
-    return _json.loads(cfg.read_text())["auth"]["api_key"]
+    base = Path(os.environ.get("OMLX_BASE_PATH")
+                or (Path.home() / ".omlx"))
+    return _json.loads((base / "settings.json").read_text())["auth"]["api_key"]
 
 
 def _base_root() -> str:
     """Server root for the mteb wrapper (endpoint_url convention, S3):
-    uplift runs inside the same omlx process; ask it for its bind port."""
+    uplift runs inside the same omlx process — ask IT for its bound port
+    (_server_state.global_settings.server.port, the harness seam). The old
+    code read getattr(_server_state, 'port') which does not exist on
+    ServerState, so EVERY child got the hardcoded 8001 fallback: refused
+    on any box where the server is elsewhere (e.g. :11435), or — worse —
+    silently measured the wrong server when both dev and vanilla ran.
+    NOTE: port changes only bind on restart; until then the live
+    process still answers on the old port — same caveat upstream has."""
     try:
-        from omlx import server as _srv
-        st = getattr(_srv, "_server_state", None)
-        port = getattr(st, "port", None) if st else None
-        if port:
-            return f"http://127.0.0.1:{port}"
+        from omlx.server import _server_state
+        gs = getattr(_server_state, "global_settings", None)
+        if gs is not None:
+            port = getattr(getattr(gs, "server", None), "port", None)
+            if port:
+                return f"http://127.0.0.1:{int(port)}"
     except Exception:
         pass
-    return "http://127.0.0.1:8001"
+    return f"http://127.0.0.1:{os.environ.get('OMLX_PORT', '8001')}"
 
 
 def _parse_child_line(line: str, key: str) -> Optional[dict]:
@@ -318,13 +343,17 @@ async def _run_one(run: EmbedRun, task: str, i: int, n: int, pool: Any) -> None:
     py = env_python()
     if py is None:
         raise RuntimeError("mteb-env disappeared mid-run")
+    # root/key from the LIVE process state — the child must auth against
+    # the very server that spawned it (whatever port it bound, :11435
+    # included), never a hardcoded ~/.omlx read or an 8001 guess
+    root = _base_root()
     key = _api_key()
     runner = Path(__file__).with_name("bench_tasks") / "mteb_run.py"
     outdir = results_root() / run.run_id / task
     # module=None: bench_env.spawn places args right after the
     # interpreter, so the script path MUST be args[0] (pinned by test —
     # a usage-error rc=2 in 50 ms was this exact bug)
-    args = [str(runner), "--root", _base_root(), "--model", run.model_id,
+    args = [str(runner), "--root", root, "--model", run.model_id,
             "--task", task, "--kind", EMBED_TASKS[task]["kind"],
             "--outdir", str(outdir)]
     if run.limit:
@@ -344,6 +373,11 @@ async def _run_one(run: EmbedRun, task: str, i: int, n: int, pool: Any) -> None:
     run.proc = proc
     _live_procs.add(proc)
     payload: Optional[dict] = None
+    # every line the child said (scrubbed, last 40 kept) — on a nonzero
+    # exit this is the difference between 'rc=1' (useless) and a real
+    # error the operator can act on; the traceback lands in stderr which
+    # spawn merges into the same pipe
+    tail: deque[str] = deque(maxlen=40)
     try:
         loop = asyncio.get_running_loop()
         lines: asyncio.Queue = asyncio.Queue()
@@ -362,6 +396,9 @@ async def _run_one(run: EmbedRun, task: str, i: int, n: int, pool: Any) -> None:
             line = await lines.get()
             if line is None:
                 break
+            txt = line.rstrip("\n")
+            if txt:
+                tail.append(bench_env.scrub_key(txt, key))
             parsed = _parse_child_line(line, key)
             if parsed is None:
                 continue
@@ -389,7 +426,9 @@ async def _run_one(run: EmbedRun, task: str, i: int, n: int, pool: Any) -> None:
     if run.cancelled:
         return
     if payload is None:
-        raise RuntimeError(f"mteb child failed rc={rc} task={task}")
+        raise RuntimeError(
+            f"mteb child failed rc={rc} task={task} root={root}\n"
+            + "\n".join(list(tail)[-12:]))
     row = _finite({"task": task, "kind": run.kind, "model_id": run.model_id,
                    "scores": payload.get("scores"), "limit": payload.get("limit"),
                    "engine": "mteb", "ts": int(time.time())})

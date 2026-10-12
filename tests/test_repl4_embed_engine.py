@@ -316,11 +316,67 @@ async def test_run_one_child_failure_raises(monkeypatch):
     _fake_bench_env(monkeypatch)
     monkeypatch.setattr(EE, "env_python", lambda: "/fake/py")
     monkeypatch.setattr(EE, "_api_key", lambda: "TESTKEY")
+    monkeypatch.setattr(EE, "_base_root",
+                        lambda: "http://127.0.0.1:11435")
     from omlx_uplift import bench_env as be
-    monkeypatch.setattr(be, "spawn", lambda args, **kw: _FakeProc([], rc=3))
+    # the child's traceback must reach the operator: 'rc=1' alone is
+    # not a diagnostic (mteb-badcdcfada64: server refused on a guessed
+    # root, the actual error sat in the dropped pipe)
+    tb = ("Traceback (most recent call last):\n"
+          '  File "mteb_run.py", line 102, in main\n'
+          "  .../openai_wrappers.py\", line 587, in __init__\n"
+          "    self._verify_server()\n"
+          "requests.exceptions.HTTPError: 401 Client Error for url: "
+          "http://127.0.0.1:9999/v1/models key=TESTKEY")
+    monkeypatch.setattr(be, "spawn",
+                        lambda args, **kw: _FakeProc(
+                            [tb + "\n"], rc=1))
     run = EE.EmbedRun("mteb-f", "M", "embed", ["STS12"], 0)
-    with pytest.raises(RuntimeError, match="rc=3"):
+    with pytest.raises(RuntimeError) as ei:
         await EE._run_one(run, "STS12", 0, 1, pool=None)
+    msg = str(ei.value)
+    assert "rc=1" in msg and "root=http://127.0.0.1:11435" in msg
+    assert "401 Client Error" in msg        # the real cause is visible
+    assert "TESTKEY" not in msg              # ... and the key is scrubbed
+    assert "[REDACTED]" in msg
+
+
+def test_base_root_and_api_key_follow_live_server_state(monkeypatch):
+    # the child must auth against the very server that spawned it, on
+    # whatever port IT bound — ServerState has no 'port' attribute; the
+    # live seam is _server_state.global_settings.server.port / .auth
+    pkg = types.ModuleType("omlx")
+    srv = types.ModuleType("omlx.server")
+    srv._server_state = types.SimpleNamespace(
+        global_settings=types.SimpleNamespace(
+            server=types.SimpleNamespace(port=11435),
+            auth=types.SimpleNamespace(api_key="LIVE-KEY")))
+    pkg.server = srv
+    monkeypatch.setitem(sys.modules, "omlx", pkg)
+    monkeypatch.setitem(sys.modules, "omlx.server", srv)
+    assert EE._base_root() == "http://127.0.0.1:11435"
+    assert EE._api_key() == "LIVE-KEY"
+
+
+def test_api_key_root_fallback_honors_omlx_base_path(monkeypatch, tmp_path):
+    # no live settings in the process -> fall back to the ACTIVE base
+    # (OMLX_BASE_PATH), never a hardcoded ~/.omlx. setitem only: popping
+    # 'omlx' re-imports a fresh package on every later dotted-path lookup
+    # and decouples OTHER tests' monkeypatches from the module objects
+    # they already hold (this exact pop made test_request_log fail on
+    # suite order — the false-failure class this comment pins).
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"auth": {"api_key": "BASE-KEY"}}))
+    monkeypatch.setenv("OMLX_BASE_PATH", str(tmp_path))
+    monkeypatch.setenv("OMLX_PORT", "11435")
+    pkg = types.ModuleType("omlx")
+    srv = types.ModuleType("omlx.server")
+    srv._server_state = types.SimpleNamespace(global_settings=None)
+    pkg.server = srv
+    monkeypatch.setitem(sys.modules, "omlx", pkg)
+    monkeypatch.setitem(sys.modules, "omlx.server", srv)
+    assert EE._api_key() == "BASE-KEY"
+    assert EE._base_root() == "http://127.0.0.1:11435"
 
 
 @pytest.mark.asyncio
