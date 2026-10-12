@@ -1,0 +1,18 @@
+--- a/omlx/admin/context_benchmark.py
++++ b/omlx/admin/context_benchmark.py
+@@ -445,11 +445,12 @@
+ 
+         entry = engine_pool.get_entry(request.model_id)
+         native = getattr(entry, "model_context_length", None) or 0
++        # uplift: honor the entered target as the search ceiling. The
++        # machine's real admission boundary can sit ABOVE the declared
++        # window (memory decides, not config.json); clamping here hid it
++        # and made every above-native run end 'limited by native'.
+         cap = request.target_tokens
+         cap_source = "target"
+-        if 0 < native < cap:
+-            cap = native
+-            cap_source = "native"
+ 
+         # Phase 2: calibrate — JIT warmup, then one real mid-size prefill
+         # to seed the transient tracker EWMA and the GDN fixed-state probe.
