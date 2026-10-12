@@ -93,7 +93,8 @@ const GS_PAYLOAD_SKIP = new Set(['base_path', 'api_key', 'ui_dashboard_layout'])
    the others (markitdown_*, web_search_*) save bare — classic parity,
    upstream drops unknown fields with a silent success:true. */
 const INTEG_PREFIXED = new Set(['copilot_model', 'codex_model', 'opencode_model',
-    'openclaw_model', 'hermes_model', 'pi_model', 'dsh_model', 'openclaw_tools_profile']);
+    'openclaw_model', 'hermes_model', 'pi_model', 'vibe_model', 'dsh_model',
+    'openclaw_tools_profile']);
 
 return { GS_MAP, GS_PAYLOAD_SKIP, INTEG_PREFIXED };
 });

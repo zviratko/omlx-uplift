@@ -327,6 +327,7 @@ async function renderHelperModels() {
                         v => saveIntegration({ openclaw_tools_profile: v }))),
         cliModel('hermes_model', 'Hermes Agent'),
         cliModel('pi_model', 'Pi'),
+        cliModel('vibe_model', 'Mistral Vibe'),
         cliModel('dsh_model', 'DeepSeek Harness'));
     // model datalist for the assistant pickers
     const cliDl = document.createElement('datalist'); cliDl.id = 'cli-models';
