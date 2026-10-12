@@ -36,6 +36,20 @@ const CODE = [
     region('async function seSyncBaseToProfiles', '/* The primary U85 verb', 'both sync verbs + shared write'),
 ].join('\n');
 
+/* ---- tiny fake DOM for the picker-builder test --------------------- */
+function fakeEl(tag) {
+    const e = { tag, children: [], attrs: {}, textContent: '' };
+    e.append = (...c) => { e.children.push(...c.filter(Boolean)); return e; };
+    return e;
+}
+function findInputs(e, out = []) {
+    for (const c of e.children || []) {
+        if (c.tag === 'input') out.push(c);
+        findInputs(c, out);
+    }
+    return out;
+}
+
 function harness({ profiles, tabs = [], baseTab = null, seBaseVals = {},
                    payloadVals = {}, putFail = null, seValues = {},
                    seFormModel = { id: 'M1' } } = {}) {
@@ -165,4 +179,38 @@ test('a NON-404 PUT failure propagates — no silent success', async () => {
     const h = harness({ profiles, payloadVals: { temperature: 0.3 }, putFail: 500 });
     await assert.rejects(() => h.api.seApplyBaseEditsToProfiles(
         new Set(['temperature']), {}, h.MM_DATA.profiles));
+});
+
+test('apply-picker opens with EVERY profile ticked (user 2026-10-12: first profile pre-deselected)', () => {
+    // profiles NOT listed in any divergence banner (empty lists) — under the
+    // old "diverging listed" default this opened as an all-unticked box
+    // list; the verb's subject is ALL profiles of the base.
+    const profiles = [
+        { name: 'alpha', display_name: 'Alpha', api_name: 'alpha', settings: { temperature: 0.5 } },
+        { name: 'beta', display_name: 'Beta', settings: {} },
+    ];
+    const h = harness({ profiles,
+        tabs: [{ id: 'base', dirty: new Set(['temperature']), origVals: { temperature: 0.1 } }],
+        seValues: { temperature: 0.5 }, payloadVals: { temperature: 0.5 } });
+    const code2 = CODE + '\n' + region('function seDivergenceEditApplyBtn',
+        'function seDivergenceDetail', 'apply picker');
+    const stubDoc = { createElement: t => fakeEl(t), querySelector: () => null,
+        getElementById: () => null };
+    const fns = new Function('D', 'window', 'MM_DATA', 'CHIPS', 'MM_GLUE', 'document',
+        'seNormalizeKwargs', 'renderEditorFields', 'seModelEntry', 'C',
+        code2 + '\nreturn { seDivergenceEditApplyBtn };')(
+        { putJson: async () => ({}), postJson: async () => ({}) },
+        { UpliftModelSpec: { adaptToServerSettings: o => o,
+            buildPayload: () => ({ temperature: 0.5 }) } },
+        h.MM_DATA, { clearProfileCache: () => {} },
+        { toast: () => {}, modelSettingsFields: async () => null },
+        stubDoc, () => {}, () => {}, () => ({}), { tf: (k, d) => d });
+    const wrap = fns.seDivergenceEditApplyBtn();
+    assert.ok(wrap, 'banner button rendered when base tab holds edits');
+    const applyBtn = wrap.children.find(c => c.tag === 'button');
+    applyBtn.onclick();  // open the picker exactly like a click
+    const boxes = findInputs(wrap);
+    assert.equal(boxes.length, 2, 'both profiles listed in the picker');
+    assert.ok(boxes.every(c => c.checked === true),
+        'EVERY profile is ticked by default — never a pre-deselected first profile');
 });

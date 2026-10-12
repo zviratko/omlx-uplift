@@ -2288,19 +2288,17 @@ async function seWriteProfileSettings(name, display_name, ov, fields) {
 }
 /* The primary U85 verb, rendered in BOTH divergence banners whenever the
    base tab holds queued edits: click opens a checkbox list of the stored
-   profiles (default: every profile the banner lists as diverging — the
-   user's "ticked set" rule; non-diverging profiles appear unticked so an
-   edited value can still be pushed to them deliberately), the key list in
-   the confirm tooltip (write-before-confirm honesty: nothing is written
-   until CONFIRM in the picker), then APPLY. */
+   profiles (default: EVERY profile ticked — follow-up user report
+   2026-10-12: a profile appearing pre-deselected read as "not targeted";
+   the verb's subject is all profiles of this base, untick to exclude),
+   the key list in the confirm tooltip (write-before-confirm honesty:
+   nothing is written until CONFIRM in the picker), then APPLY. */
 function seDivergenceEditApplyBtn(panel) {
     const edits = seBaseEditKeys();
     if (!edits || !(MM_DATA.profiles || []).length) return null;
     const wrap = document.createElement('span');
     wrap.className = 'se-div-apply';
     const keyList = [...edits].join(', ');
-    const divNames = new Set((MM_DATA.divergence || []).map(d => d.name)
-        .concat((MM_DATA.reqDivergence || []).map(d => d.name)));
     const mkBtn = () => {
         const btn = document.createElement('button');
         btn.type = 'button'; btn.className = 'se-btn se-div-show';
@@ -2321,7 +2319,7 @@ function seDivergenceEditApplyBtn(panel) {
             const l = document.createElement('label');
             const cb = document.createElement('input');
             cb.type = 'checkbox'; cb.value = p.name;
-            cb.checked = divNames.has(p.name);   // default: diverging listed
+            cb.checked = true;   // default: every profile ticked; untick to exclude
             l.append(cb, ' ' + (p.api_name || p.display_name || p.name));
             det.append(l); boxes.push(cb);
         }
