@@ -2547,7 +2547,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    headline. Absorbs the former #bench-acc-status-only rule — all six
    panels (throughput/context/ANE/Intelligence/Embeddings/Rerankers/
    Decision) share it via statusLine(); the bar hides itself with the
-   box when there is nothing to report. */
+   box when there is nothing to report.
+   U-PROG3 (user 2026-10-13: 'I see two progress bars'): the box used to
+   hold a graphical .bench-bar track AND this ASCII line, both painted from
+   the same percentage. The graphical bar is gone — the ASCII line is the
+   one bar (it survives every skin/font) and carries the progressbar role. */
 .bench-statusbox { display: flex; flex-direction: column; gap: 7px;
   padding: 8px 11px; border: 1px solid var(--edge);
   border-left: 3px solid var(--accent);
@@ -2557,18 +2561,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .bench-status.bench-status-error { color: var(--red); }
 .bench-statusbox:has(.bench-status-error) { border-left-color: var(--red);
   background: color-mix(in srgb, var(--red) 8%, transparent); }
-.bench-bar { height: 10px; border-radius: var(--radius); overflow: hidden;
-  background: color-mix(in srgb, var(--ink) 14%, transparent); }
-.bench-bar-fill { height: 100%; width: 0%; border-radius: var(--radius);
-  background: var(--accent); transition: width .45s ease; }
-/* U-PROG2: prominent ASCII progress line under the bar — monospace so the
-   block cells stay aligned on any skin; hidden while no run has painted it. */
+/* U-PROG2: the progress line — monospace so the block cells stay aligned
+   on any skin; hidden while no run has painted it. */
 .bench-bar-ascii { font-family: ui-monospace, SFMono-Regular, Menlo,
   Consolas, "DejaVu Sans Mono", monospace; font-size: 13px; font-weight: 600;
   letter-spacing: 1px; white-space: pre; color: var(--ink); }
 .bench-bar-ascii:empty { display: none; }
-.bench-statusbox:has(.bench-status-error) .bench-bar-fill {
-  background: var(--red); }
+.bench-statusbox:has(.bench-status-error) .bench-bar-ascii {
+  color: var(--red); }
 .bench-table { border-collapse: collapse; width: 100%; font-size: 11px; }
 /* U47: result-card header row — Copy lives top-right like classic's */
 .bench-results-head { display: flex; justify-content: flex-end; gap: 6px;
@@ -2645,6 +2645,27 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .bench-dl-menu button { background: none; border: 0; color: var(--ink);
     font-size: 11px; text-align: left; padding: 3px 8px; cursor: pointer; border-radius: var(--radius); }
 .bench-dl-menu button:hover { background: var(--row2); }
+/* U-TERM (user 2026-10-13): column explainers. A '?' marker in a decision
+   table header opens a one-sentence popover — bench-dl-menu's surface
+   language (panel ground, edge border, --radius, above the table), anchored
+   to the cell instead of to a results head. The cell is the positioned
+   ancestor; the popover resets the header's uppercase/dim typography so the
+   sentence reads like body text. */
+.bench-th { position: relative; }
+.bench-help-btn { margin-left: 4px; width: 14px; height: 14px; padding: 0;
+  border: 1px solid var(--edge); border-radius: 50%; background: none;
+  color: var(--dim); font-size: 9px; font-weight: 700; line-height: 1;
+  letter-spacing: 0; text-transform: none; vertical-align: 1px;
+  cursor: pointer; }
+.bench-help-btn:hover { color: var(--accent); border-color: var(--accent); }
+.bench-help-btn:focus-visible { outline: 2px solid var(--accent);
+  outline-offset: 1px; }   /* U51 focus-ring language (see .acc-task) */
+.bench-help-pop { position: absolute; top: calc(100% + 4px); right: 0;
+  z-index: 31; width: 250px; padding: 7px 9px; background: var(--panel);
+  border: 1px solid var(--edge); border-radius: var(--radius);
+  box-shadow: 0 4px 14px rgba(0,0,0,.25); color: var(--ink); font-size: 11px;
+  font-weight: 400; letter-spacing: normal; line-height: 1.45;
+  text-align: left; text-transform: none; white-space: normal; }
 
 .acc-task select { width: 100%; font-size: 10px; background-color: var(--field);
   border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px;

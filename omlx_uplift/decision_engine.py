@@ -25,7 +25,16 @@ Scores per pack (metrics.py has the definitions):
               at run time so the fixtures stay single-shape.
   agreement — same item re-asked with option keys permuted picks the
               same TEXT again (position-bias test; 1-agreement = bias)
-  ms/question — wall time of the full typed call (latency class sanity)
+  latency   — two bases, both reported (user 2026-10-13: a run showed
+              ms/question 253.4 next to Time 298.0 / 294 items because
+              the legacy field divides by PROBES, not by questions):
+              ms_per_question is PER QUESTION-PROBE — each fixture item
+              issues 3 probes in the main call (choice + gold noul +
+              distractor noul) plus 1 more in the option-shuffled re-ask,
+              i.e. 4 probes per item; ms_per_item is PER FIXTURE QUESTION.
+              The legacy NAME stays for old accumulated rows; the UI
+              labels ms_per_item 'ms/question' and ms_per_question
+              'ms/probe'.
 """
 from __future__ import annotations
 
@@ -93,7 +102,10 @@ def validate_body(body: dict) -> tuple[str, list[str], int]:
     limit = int(body.get("limit") or 0)
     if limit < 0 or limit > 10_000:
         raise BadInput("limit must be 0 (full pack) .. 10000")
-    return model_id, [str(p) for p in packs], limit
+    # stable execution order: the UI sends packs in CLICK order, so two
+    # runs of the same pack SET would otherwise interleave differently in
+    # the results table / progress feed (user request, 2026-10-13)
+    return model_id, sorted(str(p) for p in packs), limit
 
 
 # ---- request shaping (pure, tested) ----------------------------------------
@@ -173,6 +185,15 @@ def pack_scores(rows: list[dict], elapsed_s: float, n_questions: int) -> dict:
         "agreement": metrics.accuracy(sum(1 for a in ags if a), len(ags)),
         "ms_per_question": (round(elapsed_s * 1000 / n_questions, 2)
                             if n_questions else None),
+        # per FIXTURE QUESTION — the number the UI labels 'ms/question'.
+        # The field above keeps its legacy per-PROBE basis (name and value)
+        # so accumulated rows written before this change stay comparable
+        # (user 2026-10-13: 253.4 'ms/question' vs 298.0s / 294 items).
+        "ms_per_item": (round(elapsed_s * 1000 / len(rows), 2)
+                        if rows else None),
+        # what ms_per_question actually divided by: 3 probes per item in
+        # the main call + 1 in the shuffled re-ask
+        "probes": n_questions,
         # whole-pack wall time — the honest "time (performance)" figure the
         # results table/exports show next to the per-question latency
         "time_s": round(elapsed_s, 2),
@@ -405,6 +426,12 @@ async def _run_pack(run: DecisionRun, engine, pack_name: str,
     row = {"pack": pack_name, "model_id": run.model_id, "kind": run.kind,
            "engine": "systemone", "skipped": skipped,
            "ts": int(time.time()),
+           # per-item raw rows ride on the result row: it is persisted to
+           # accumulated.json verbatim, so the existing JSON download exports
+           # the question-level detail (chosen text, probs, agreement) with
+           # no second store and no download-route change (user 2026-10-13).
+           # NO per-item timing here — the pack call is one wall clock.
+           "item_results": rows,
            **pack_scores(rows, elapsed, n_q)}
     row = _finite(row)
     run.results.append(row)

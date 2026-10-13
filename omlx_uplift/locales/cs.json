@@ -955,5 +955,13 @@
  "uplift.voices.clip_keep": "nechte prázdné pro zachování současného vzorku",
  "uplift.voices.save_changes": "ULOŽIT ZMĚNY",
  "uplift.voices.saved_as": "Hlas uložen jako kopie",
- "uplift.voices.save_as": "ULOŽIT JAKO…"
+ "uplift.voices.save_as": "ULOŽIT JAKO…",
+ "uplift.bench.help.accuracy": "Podíl otázek, ve kterých model vybral správné znění možnosti.",
+ "uplift.bench.help.brier": "Brierovo skóre: průměrná čtvercová chyba mezi pravděpodobností, kterou model uvádí, a skutečností (0 = dokonalé). Nižší hodnota je lepší.",
+ "uplift.bench.help.ece": "Očekávaná chyba kalibrace: rozdíl mezi uvedenou sebejistotou a skutečnou úspěšností, rozdělený do 10 přihrádek pravděpodobnosti (0 = dokonalé). Nižší hodnota je lepší.",
+ "uplift.bench.help.agreement": "Kontrola zkreslení pozicí: stejná otázka se položí dvakrát s přeházenými možnostmi. 1,0000 znamená, že model pokaždé vybere stejné znění odpovědi.",
+ "uplift.bench.help.ms_question": "Průměrná doba na jednu otázku (čas běhu dělený počtem vzorků). Každá otázka spouští několik interních dotazů; sloupec ms/probe najdete v exportech.",
+ "uplift.bench.help.time": "Celková doba tohoto běhu testu.",
+ "uplift.bench.help.samples": "Počet otázek vyhodnocených v tomto běhu.",
+ "uplift.bench.help_aria": "Co tento sloupec znamená?"
 }

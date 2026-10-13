@@ -959,5 +959,13 @@
  "uplift.voices.clip_keep": "dejar vacío para conservar el clip actual",
  "uplift.voices.save_changes": "GUARDAR CAMBIOS",
  "uplift.voices.saved_as": "Voz guardada como copia",
- "uplift.voices.save_as": "GUARDAR COMO…"
+ "uplift.voices.save_as": "GUARDAR COMO…",
+ "uplift.bench.help.accuracy": "Proporción de preguntas en las que el modelo eligió el texto de opción correcto.",
+ "uplift.bench.help.brier": "Índice de Brier: error cuadrático medio entre la probabilidad que declara el modelo y la realidad (0 = perfecto). Menor es mejor.",
+ "uplift.bench.help.ece": "Error de calibración esperado: diferencia entre la confianza declarada y la tasa de aciertos real, agrupada en 10 intervalos de probabilidad (0 = perfecto). Menor es mejor.",
+ "uplift.bench.help.agreement": "Comprobación de sesgo de posición: la misma pregunta se plantea dos veces con las opciones reordenadas. 1,0000 significa que el modelo elige el mismo texto ambas veces.",
+ "uplift.bench.help.ms_question": "Tiempo medio por pregunta (duración dividida entre el número de muestras). Cada pregunta ejecuta varias sondas internas; consulta la columna ms/probe en las exportaciones.",
+ "uplift.bench.help.time": "Duración total de esta ejecución de la prueba.",
+ "uplift.bench.help.samples": "Número de preguntas evaluadas en esta ejecución.",
+ "uplift.bench.help_aria": "¿Qué significa esta columna?"
 }

@@ -124,12 +124,21 @@ def test_pack_scores_math():
     assert s["accuracy"] == 0.5
     assert s["agreement"] == 0.5
     assert s["brier"] == metrics.brier([(0.9, 1), (0.1, 0), (0.8, 1), (0.7, 0)])
+    # LEGACY name, PER-PROBE basis: 2 fixture items cost 6 probes
+    # (3 in the main call + 1 re-ask each), so 1500ms/6 = 250ms per probe.
     assert s["ms_per_question"] == 250.0
+    # the figure the UI labels 'ms/question' divides by ITEMS (user 2026-10-13)
+    assert s["ms_per_item"] == round(1500 / len(rows), 2)
+    assert s["ms_per_item"] == 750.0
+    # ...and the probe count is now visible so the two can never be confused
+    assert s["probes"] == 6
     assert s["time_s"] == 1.5
     assert s["items"] == 2
     empty = de.pack_scores([], elapsed_s=0.0, n_questions=0)
     assert all(empty[k] is None for k in
-               ("accuracy", "brier", "ece", "agreement", "ms_per_question"))
+               ("accuracy", "brier", "ece", "agreement", "ms_per_question",
+                "ms_per_item"))
+    assert empty["probes"] == 0     # 0 probes, not None — a count, not a rate
 
 
 def test_metrics_edge_cases():
@@ -156,6 +165,16 @@ def test_validate_body_rejects_unknown_pack_and_bad_limit():
     mid, packs, limit = de.validate_body(
         {"model_id": "m", "packs": ["arc-choice"], "limit": 25})
     assert (mid, packs, limit) == ("m", ["arc-choice"], 25)
+
+
+def test_validate_body_sorts_packs():
+    # packs arrive in UI CLICK order; execution order must not depend on it
+    # (user request 2026-10-13) — same SET always yields the same sequence
+    mid, packs, limit = de.validate_body(
+        {"model_id": "m",
+         "packs": ["tqa-choice", "arc-choice", "bbq-choice"], "limit": 0})
+    assert mid == "m" and limit == 0
+    assert packs == ["arc-choice", "bbq-choice", "tqa-choice"]
 
 
 # ---- routes registered in the load-bearing order ------------------------------
@@ -232,6 +251,47 @@ async def test_run_pack_loop_cancels_between_items(monkeypatch, tmp_path):
     run2.cancelled = True
     await de._run_pack(run2, eng, "arc-choice", ValueError, KeyError)
     assert run2.results == []           # cancelled before first item
+
+
+@pytest.mark.asyncio
+async def test_run_pack_persists_item_results(monkeypatch, tmp_path):
+    """The per-item rows ride on the persisted result row (user 2026-10-13):
+    accumulated.json is what the JSON download exports, so raw question
+    results reach the export with no second store and no route change."""
+    from omlx_uplift import paths
+    monkeypatch.setattr(paths, "uplift_store_dir", lambda: tmp_path)
+    monkeypatch.setattr(de, "_accum", None)
+    run = de.DecisionRun("sys1-items", "fake-model", ["arc-choice"], limit=3)
+    eng = FakeEngine()
+    await de._run_pack(run, eng, "arc-choice", ValueError, KeyError)
+    row = run.results[0]
+    items = row["item_results"]
+    gold_ids = [it["id"] for it in loader.load_pack("arc-choice")["items"][:3]]
+    assert [i["id"] for i in items] == gold_ids
+    for i in items:
+        # exactly the score_item shape — NO per-item timing (the pack is
+        # measured as one wall clock) and no extra keys
+        assert set(i) == {"id", "correct", "chosen_text", "probs",
+                          "agreement", "input_tokens"}
+    assert row["items"] == len(items) == 3
+    assert eng.calls == 3 * 2
+    # latency fields agree with the row count: 3 probes in the main call
+    # + 1 in the shuffled re-ask = 4 per item (user's 253.4-vs-298/294 bug)
+    assert row["probes"] == 4 * row["items"] == 12
+    # per-item divides by 3 rows, per-probe by 12 — same wall clock, so the
+    # item figure is the larger one (exact ratio checked in
+    # test_pack_scores_math; here time_s is sub-ms and its rounding dominates)
+    assert row["ms_per_item"] >= row["ms_per_question"]
+    assert row["ms_per_item"] is not None and row["probes"]
+    # survives the JSON roundtrip through accumulated.json
+    de._save_accum()
+    monkeypatch.setattr(de, "_accum", None)
+    back = de.results_payload()["results"][0]
+    assert [i["id"] for i in back["item_results"]] == gold_ids
+    assert back["item_results"][0]["input_tokens"] == 10
+    # tuples are JSON arrays on the way out — the (p, y) pairs stay addressable
+    assert list(back["item_results"][0]["probs"][0]) == [0.9, 1]
+    assert back["probes"] == row["probes"] and back["ms_per_item"] is not None
 
 
 @pytest.mark.asyncio

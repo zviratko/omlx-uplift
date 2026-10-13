@@ -959,5 +959,13 @@
  "uplift.voices.clip_keep": "laisser vide pour conserver l'extrait actuel",
  "uplift.voices.save_changes": "ENREGISTRER LES MODIFICATIONS",
  "uplift.voices.saved_as": "Voix enregistrée comme copie",
- "uplift.voices.save_as": "ENREGISTRER SOUS…"
+ "uplift.voices.save_as": "ENREGISTRER SOUS…",
+ "uplift.bench.help.accuracy": "Part des questions où le modèle a choisi le bon texte d'option.",
+ "uplift.bench.help.brier": "Score de Brier : erreur quadratique moyenne entre la probabilité annoncée par le modèle et la réalité (0 = parfait). Plus c'est bas, mieux c'est.",
+ "uplift.bench.help.ece": "Erreur de calibration attendue : écart entre la confiance annoncée et le taux de réussite réel, regroupé en 10 classes de probabilité (0 = parfait). Plus c'est bas, mieux c'est.",
+ "uplift.bench.help.agreement": "Contrôle du biais de position : la même question est posée deux fois avec les options réordonnées. 1,0000 signifie que le modèle choisit le même texte de réponse les deux fois.",
+ "uplift.bench.help.ms_question": "Durée moyenne par question (temps d'exécution divisé par le nombre d'échantillons). Chaque question lance plusieurs sondes internes ; voir la colonne ms/probe dans les exports.",
+ "uplift.bench.help.time": "Durée totale de cette exécution du benchmark.",
+ "uplift.bench.help.samples": "Nombre de questions notées lors de cette exécution.",
+ "uplift.bench.help_aria": "Que signifie cette colonne ?"
 }

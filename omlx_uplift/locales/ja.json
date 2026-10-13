@@ -958,5 +958,13 @@
  "uplift.voices.clip_keep": "空欄のままなら現在の音声を保持",
  "uplift.voices.save_changes": "変更を保存",
  "uplift.voices.saved_as": "ボイスをコピーとして保存しました",
- "uplift.voices.save_as": "別名で保存…"
+ "uplift.voices.save_as": "別名で保存…",
+ "uplift.bench.help.accuracy": "モデルが正しい選択肢のテキストを選んだ質問の割合。",
+ "uplift.bench.help.brier": "ブライアスコア：モデルが示す確率と正解の間の平均二乗誤差（0＝完全）。低いほど良い。",
+ "uplift.bench.help.ece": "期待校正誤差：宣言された信頼度と実際の正答率の差を10の確率区間に分けて集計（0＝完全）。低いほど良い。",
+ "uplift.bench.help.agreement": "位置バイアスの確認：同じ質問を選択肢の順を入れ替えて2回質問します。1.0000は常に同じ回答テキストを選ぶことを意味します。",
+ "uplift.bench.help.ms_question": "1問あたりの平均実時間（実行時間÷サンプル数）。各質問は内部で複数のプローブを実行します。エクスポートの ms/probe 列も参照してください。",
+ "uplift.bench.help.time": "このベンチマーク実行の総実時間。",
+ "uplift.bench.help.samples": "この実行で採点された質問数。",
+ "uplift.bench.help_aria": "この列の意味は何ですか？"
 }

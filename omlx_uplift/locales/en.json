@@ -955,5 +955,13 @@
  "uplift.voices.clip_keep": "leave empty to keep the current clip",
  "uplift.voices.save_changes": "SAVE CHANGES",
  "uplift.voices.saved_as": "Voice saved as a copy",
- "uplift.voices.save_as": "SAVE AS…"
+ "uplift.voices.save_as": "SAVE AS…",
+ "uplift.bench.help.accuracy": "Share of questions where the model picked the correct option text.",
+ "uplift.bench.help.brier": "Brier score: mean squared error between the probability the model states and the truth (0 = perfect). Lower is better.",
+ "uplift.bench.help.ece": "Expected Calibration Error: the gap between stated confidence and actual hit rate, grouped into 10 probability buckets (0 = perfect). Lower is better.",
+ "uplift.bench.help.agreement": "Position-bias check: the same question is asked twice with the options re-ordered. 1.0000 means the model picks the same answer text both times.",
+ "uplift.bench.help.ms_question": "Average wall time per question (run time divided by samples). Each question runs several internal probes; see the ms/probe column in the exports.",
+ "uplift.bench.help.time": "Total wall time of this benchmark run.",
+ "uplift.bench.help.samples": "Number of questions scored in this run.",
+ "uplift.bench.help_aria": "What does this column mean?"
 }

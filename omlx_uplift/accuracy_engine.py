@@ -149,6 +149,13 @@ async def queue_add(body: dict, pool: Any, *, upload: bool = False) -> dict:
 
     body = dict(body or {})
     engine = str(body.pop("engine", "classic") or "classic")
+    # classic iterates request.benchmarks in dict order, so suite order used
+    # to be UI CLICK order — two runs of the same task SET executed (and
+    # reported) differently (user request, 2026-10-13). Sort the keys here so
+    # the request the classic engine sees is deterministic; values untouched.
+    bm = body.get("benchmarks")
+    if isinstance(bm, dict):
+        body["benchmarks"] = {k: bm[k] for k in sorted(bm)}
     try:
         req = AB.AccuracyBenchmarkRequest(**body)
     except Exception as e:

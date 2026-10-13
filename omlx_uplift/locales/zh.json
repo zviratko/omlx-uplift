@@ -955,5 +955,13 @@
  "uplift.voices.clip_keep": "留空以保留当前音频",
  "uplift.voices.save_changes": "保存更改",
  "uplift.voices.saved_as": "语音已另存为副本",
- "uplift.voices.save_as": "另存为…"
+ "uplift.voices.save_as": "另存为…",
+ "uplift.bench.help.accuracy": "模型选对选项文本的题目比例。",
+ "uplift.bench.help.brier": "布里尔分数：模型给出的概率与真实结果之间的均方误差（0 = 完美）。越低越好。",
+ "uplift.bench.help.ece": "期望校准误差：声明的置信度与实际正确率之间的差距，按 10 个概率区间统计（0 = 完美）。越低越好。",
+ "uplift.bench.help.agreement": "位置偏差检查：同一题目在选项重新排序后问两次。1.0000 表示模型每次都选择相同的答案文本。",
+ "uplift.bench.help.ms_question": "每道题的平均耗时（运行时间除以样本数）。每题会执行多次内部探测；导出文件中另有 ms/probe 列。",
+ "uplift.bench.help.time": "本次基准测试的总耗时。",
+ "uplift.bench.help.samples": "本次运行中评分的题目数。",
+ "uplift.bench.help_aria": "此列是什么意思？"
 }

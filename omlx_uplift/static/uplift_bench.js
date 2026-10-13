@@ -171,22 +171,24 @@ function streamInterrupted(statusId) {
 // easily missed while a bench ran. statusLine builds the box (bar under
 // the text); panels paint the text via gid(id) as before and move the
 // bar with setBar(id, pct). The box hides itself when empty and idle.
+// U-PROG3 (user 2026-10-13: 'I see two progress bars'): the box used to
+// carry the graphical .bench-bar AND the ASCII line painted from the same
+// percentage — the same progress twice, one of them skin-fragile. The
+// ASCII line is now the one bar; it took over the progressbar semantics
+// (role + aria-value*) that the graphical div owned.
 function statusLine(id) {
     var box = el('div', 'bench-statusbox');
     var st = el('div', 'bench-status'); st.id = id;
     st.setAttribute('role', 'status');
     st.setAttribute('aria-live', 'polite');
-    var bar = el('div', 'bench-bar'); bar.id = id + '-bar';
-    bar.setAttribute('role', 'progressbar');
-    bar.setAttribute('aria-valuemin', '0');
-    bar.setAttribute('aria-valuemax', '100');
-    bar.setAttribute('aria-valuenow', '0');
-    var fill = el('div', 'bench-bar-fill');
-    bar.appendChild(fill);
     // U-PROG2: prominent ASCII progress line (user 2026-10-13) — monospace
     // block bar survives every skin/font and prints alongside the counts.
     var ascii = el('div', 'bench-bar-ascii'); ascii.id = id + '-bar-ascii';
-    box.append(st, bar, ascii);
+    ascii.setAttribute('role', 'progressbar');
+    ascii.setAttribute('aria-valuemin', '0');
+    ascii.setAttribute('aria-valuemax', '100');
+    ascii.setAttribute('aria-valuenow', '0');
+    box.append(st, ascii);
     return box;
 }
 // U-PROG: move the bar of a status box. stId is the .bench-status id
@@ -194,19 +196,13 @@ function statusLine(id) {
 // counter string ("20/294") echoed into the ASCII line.
 function setBar(stId, pct, meta) {
     var p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
-    var bar = gid(stId + '-bar');
-    if (bar) {
-        var fill = bar.querySelector('.bench-bar-fill');
-        if (fill) fill.style.width = p + '%';
-        bar.setAttribute('aria-valuenow', String(p));
-    }
     var ascii = gid(stId + '-bar-ascii');
-    if (ascii) {
-        var cells = 20, on = Math.round(cells * p / 100);
-        ascii.textContent = '[' + new Array(on + 1).join('\u2588')
-            + new Array(cells - on + 1).join('\u2591') + '] ' + p + '%'
-            + (meta ? '  ' + meta : '');
-    }
+    if (!ascii) return;
+    var cells = 20, on = Math.round(cells * p / 100);
+    ascii.textContent = '[' + new Array(on + 1).join('\u2588')
+        + new Array(cells - on + 1).join('\u2591') + '] ' + p + '%'
+        + (meta ? '  ' + meta : '');
+    ascii.setAttribute('aria-valuenow', String(p));
 }
 // U51: ms-per-question with locale separators + one decimal (a raw
 // 568.75 next to formatted columns reads like a machine dump)
@@ -214,6 +210,22 @@ function fmtMs(v) {
     if (v == null) return '—';
     return Number(v).toLocaleString(undefined,
         { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+// U-LAT (user 2026-10-13: '253.4ms but 298s for 294 samples?'): the stored
+// ms_per_question is divided by the engine's INTERNAL question-probes (4 per
+// item — original, re-ordered, …) while the Samples column counts ITEMS, so
+// the cell quoted a number no arithmetic in the row could reproduce. The
+// table's 'ms/question' column is per-ITEM latency now (honest against
+// Time (s) / Samples); the probe-level number still ships as 'ms/probe' in
+// the Copy/Download exports. Rows written before the backend stored
+// ms_per_item derive it from time_s/items; a row with neither keeps the old
+// value rather than printing an em-dash over real data.
+function msPerItem(r) {
+    if (r.ms_per_item != null) return r.ms_per_item;
+    if (r.time_s != null && r.items) {
+        return Math.round(r.time_s * 1000 / r.items * 100) / 100;
+    }
+    return r.ms_per_question;
 }
 // U48: one Advanced section builder shared by the panels (classic keeps
 // external-endpoint as a first-class mode; the user explicitly asked for
@@ -1026,6 +1038,56 @@ function dropMenu(host, btn, entries) {
         setTimeout(function () { document.addEventListener('click', dismiss); }, 0);
     });
     host.appendChild(btn);
+}
+
+/* ---- U-TERM (user 2026-10-13): column explainers ----------------------
+   'Brier', 'ECE', 'Agreement' and the two latency flavours are jargon; the
+   decision table now puts a '?' marker in those headers that opens a
+   one-sentence popover. Same dismiss contract as dropMenu (outside click,
+   via the deferred document listener so the opening click cannot close it)
+   plus Escape for the keyboard. The text is set with textContent — never
+   innerHTML — and carries data-i18n + data-en exactly like taskCard, so
+   applyI18n() re-resolves an explainer that was painted before the locale
+   catalog arrived. Only one popover is open at a time. */
+var _helpPop = null, _helpKey = null;
+function helpPopClose() {
+    if (!_helpPop) return;
+    var p = _helpPop; _helpPop = null; _helpKey = null;
+    p.remove();
+    document.removeEventListener('click', helpPopClose);
+    document.removeEventListener('keydown', helpPopKey);
+}
+function helpPopKey(ev) { if (ev.key === 'Escape') helpPopClose(); }
+function thHelp(label, i18nKey, fallbackText) {
+    var th = el('th', 'bench-th');
+    th.appendChild(document.createTextNode(label));
+    var btn = el('button', 'bench-help-btn', '?');
+    btn.type = 'button';
+    btn.setAttribute('aria-label',
+        t('uplift.bench.help_aria', 'What does this column mean?'));
+    btn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var wasOpen = (_helpKey === i18nKey);
+        helpPopClose();
+        if (wasOpen) return;                       // the marker toggles itself
+        var pop = el('div', 'bench-help-pop');
+        pop.textContent = t(i18nKey, fallbackText);
+        pop.dataset.i18n = i18nKey;
+        pop.dataset.en = fallbackText;
+        pop.setAttribute('role', 'tooltip');
+        th.appendChild(pop);
+        _helpPop = pop; _helpKey = i18nKey;
+        setTimeout(function () {
+            // the deferred arm must re-check: a fast toggle can close this
+            // pop before the timer runs, and a stale document listener would
+            // then hang around for the life of the page
+            if (_helpPop !== pop) return;
+            document.addEventListener('click', helpPopClose);
+            document.addEventListener('keydown', helpPopKey);
+        }, 0);
+    });
+    th.appendChild(btn);
+    return th;
 }
 
 // U49: shared Copy/Download factory for all result cards (classic's export
@@ -3476,7 +3538,11 @@ var DEC = {
         var d = dom();
         var model = (gid('bench-dec-model') || {}).value || '';
         var packs = Object.keys(this.state.selected)
-            .filter(function (k) { return this.state.selected[k]; }, this);
+            .filter(function (k) { return this.state.selected[k]; }, this)
+            // U-ORDER: stable queue order — selection order depended on the
+            // order the user clicked the cards, so two identical runs posted
+            // different packs arrays (and different progress text)
+            .sort();
         if (!model) {
             d.toast(t('bench.config.model_placeholder', 'Select model…'), 'error');
             return;
@@ -3609,16 +3675,39 @@ var DEC = {
         if (!rows.length) { wrap.replaceChildren(); return; }
         var tbl = el('table', 'bench-table');
         var head = el('tr');
-        [t('bench.config.model', 'Model'), t('acc_bench.config.benchmarks', 'Benchmarks'),
-         t('uplift.bench.dec_accuracy', 'Accuracy'),
-         t('uplift.bench.dec_brier', 'Brier'),
-         t('uplift.bench.dec_ece', 'ECE'),
-         t('uplift.bench.dec_agreement', 'Agreement'),
-         t('uplift.bench.dec_latency', 'ms/question'),
-         t('uplift.bench.dec_time', 'Time (s)'),
-         t('uplift.bench.samples', 'Samples'), ''].forEach(function (h) {
-            head.appendChild(el('th', null, h));
-        });
+        // U-TERM: the metric columns carry a '?' explainer marker (thHelp);
+        // Model / Benchmarks / the timestamp column are self-evident.
+        head.appendChild(el('th', null, t('bench.config.model', 'Model')));
+        head.appendChild(el('th', null, t('acc_bench.config.benchmarks', 'Benchmarks')));
+        head.appendChild(thHelp(t('uplift.bench.dec_accuracy', 'Accuracy'),
+            'uplift.bench.help.accuracy',
+            'Share of questions where the model picked the correct option text.'));
+        head.appendChild(thHelp(t('uplift.bench.dec_brier', 'Brier'),
+            'uplift.bench.help.brier',
+            'Brier score: mean squared error between the probability the '
+            + 'model states and the truth (0 = perfect). Lower is better.'));
+        head.appendChild(thHelp(t('uplift.bench.dec_ece', 'ECE'),
+            'uplift.bench.help.ece',
+            'Expected Calibration Error: the gap between stated confidence '
+            + 'and actual hit rate, grouped into 10 probability buckets '
+            + '(0 = perfect). Lower is better.'));
+        head.appendChild(thHelp(t('uplift.bench.dec_agreement', 'Agreement'),
+            'uplift.bench.help.agreement',
+            'Position-bias check: the same question is asked twice with the '
+            + 'options re-ordered. 1.0000 means the model picks the same '
+            + 'answer text both times.'));
+        head.appendChild(thHelp(t('uplift.bench.dec_latency', 'ms/question'),
+            'uplift.bench.help.ms_question',
+            'Average wall time per question (run time divided by samples). '
+            + 'Each question runs several internal probes; see the ms/probe '
+            + 'column in the exports.'));
+        head.appendChild(thHelp(t('uplift.bench.dec_time', 'Time (s)'),
+            'uplift.bench.help.time',
+            'Total wall time of this benchmark run.'));
+        head.appendChild(thHelp(t('uplift.bench.samples', 'Samples'),
+            'uplift.bench.help.samples',
+            'Number of questions scored in this run.'));
+        head.appendChild(el('th', null, ''));
         tbl.appendChild(head);
         var fmt = function (v) { return v == null ? '—' : Number(v).toFixed(4); };
         rows.forEach(function (r) {
@@ -3631,7 +3720,7 @@ var DEC = {
                 el('td', null, fmt(r.brier)),
                 el('td', null, fmt(r.ece)),
                 el('td', null, fmt(r.agreement)),
-                el('td', null, fmtMs(r.ms_per_question)),
+                el('td', null, fmtMs(msPerItem(r))),
                 el('td', null, r.time_s != null
                     ? Number(r.time_s).toFixed(1) : '—'),
                 el('td', null, r.items != null
@@ -3652,6 +3741,11 @@ var DEC = {
                      { label: 'ECE', numeric: true, get: function (r) { return fmt4(r.ece); } },
                      { label: 'Agreement', numeric: true, get: function (r) { return fmt4(r.agreement); } },
                      { label: 'ms/question', numeric: true, get: function (r) {
+                         return fmtMs(msPerItem(r)); } },
+                     // U-LAT: the probe-level number (ms_per_question divides
+                     // by the engine's internal re-ordered probes, ~4 per
+                     // item) stays available where the jargon belongs
+                     { label: 'ms/probe', numeric: true, get: function (r) {
                          return fmtMs(r.ms_per_question); } },
                      { label: 'Time (s)', numeric: true, get: function (r) {
                          return r.time_s != null
@@ -3681,7 +3775,8 @@ var DEC = {
                     { head: 'Brier', get: function (r) { return r.brier; } },
                     { head: 'ECE', get: function (r) { return r.ece; } },
                     { head: 'Agreement', get: function (r) { return r.agreement; } },
-                    { head: 'ms/question', get: function (r) { return r.ms_per_question; } },
+                    { head: 'ms/question', get: function (r) { return msPerItem(r); } },
+                    { head: 'ms/probe', get: function (r) { return r.ms_per_question; } },
                     { head: 'Time (s)', get: function (r) { return r.time_s; } },
                     { head: 'Samples', get: function (r) { return r.items; } },
                 ]; },
