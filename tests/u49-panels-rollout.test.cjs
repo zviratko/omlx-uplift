@@ -235,3 +235,53 @@ test('U49: model id with $ patterns cannot corrupt the detail header', () => {
     const text = buildAccuracyText(rows, []);
     assert.ok(text.includes("Model: m$'x"), "literal model id survives replace");
 });
+
+/* U-CPY (2026-10-13): clipboard format generators wired via _u49 seam. */
+test('U-CPY: csvText matches the download CSV byte-for-byte logic', () => {
+    const { win } = load();
+    const { csvText } = win.UpliftNativeBench._u49;
+    const cols = [
+        { head: 'Model', get: r => r.model_id },
+        { head: 'Accuracy', get: r => r.accuracy },
+        { head: 'Note', get: r => r.note },
+    ];
+    const rows = [
+        { model_id: 'clef-flash-4bit', accuracy: 1.0, note: 'plain' },
+        { model_id: 'x,y', accuracy: null, note: 'quote " inside' },
+    ];
+    assert.equal(csvText(cols, rows), [
+        'Model,Accuracy,Note',
+        '"clef-flash-4bit",1,"plain"',
+        '"x,y",,"quote "" inside"',
+    ].join('\n'));
+});
+
+test('U-CPY: toMarkdown produces a GitHub-flavoured table, pipes escaped', () => {
+    const { win } = load();
+    const { toMarkdown } = win.UpliftNativeBench._u49;
+    const cols = [
+        { head: 'Model', get: r => r.model_id },
+        { head: 'ms/question', get: r => r.ms },
+        { head: 'Note', get: r => r.note },
+    ];
+    const rows = [
+        { model_id: 'clef', ms: 736.14, note: 'a|b' },
+        { model_id: 'x', ms: null, note: '' },
+    ];
+    assert.equal(toMarkdown(cols, rows), [
+        '| Model | ms/question | Note |',
+        '| --- | --- | --- |',
+        '| clef | 736.14 | a\\|b |',
+        '| x |  |  |',
+    ].join('\n'));
+});
+
+test('U-CPY: decision dl spec carries the Time (s) column', () => {
+    const { win } = load();
+    const src = fs.readFileSync(require('path').join(STATIC_DIR,
+        'uplift_bench.js'), 'utf8');
+    assert.ok(/head: 'Time \(s\)'/.test(src),
+        'decision download/copy cols include Time (s)');
+    assert.ok(/uplift\.bench\.dec_time/.test(src),
+        'decision table header uses the dec_time key');
+});

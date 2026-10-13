@@ -173,6 +173,9 @@ def pack_scores(rows: list[dict], elapsed_s: float, n_questions: int) -> dict:
         "agreement": metrics.accuracy(sum(1 for a in ags if a), len(ags)),
         "ms_per_question": (round(elapsed_s * 1000 / n_questions, 2)
                             if n_questions else None),
+        # whole-pack wall time — the honest "time (performance)" figure the
+        # results table/exports show next to the per-question latency
+        "time_s": round(elapsed_s, 2),
         "items": len(rows),
     }
 

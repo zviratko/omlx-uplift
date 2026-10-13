@@ -125,6 +125,7 @@ def test_pack_scores_math():
     assert s["agreement"] == 0.5
     assert s["brier"] == metrics.brier([(0.9, 1), (0.1, 0), (0.8, 1), (0.7, 0)])
     assert s["ms_per_question"] == 250.0
+    assert s["time_s"] == 1.5
     assert s["items"] == 2
     empty = de.pack_scores([], elapsed_s=0.0, n_questions=0)
     assert all(empty[k] is None for k in

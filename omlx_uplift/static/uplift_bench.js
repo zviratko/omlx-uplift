@@ -183,18 +183,30 @@ function statusLine(id) {
     bar.setAttribute('aria-valuenow', '0');
     var fill = el('div', 'bench-bar-fill');
     bar.appendChild(fill);
-    box.append(st, bar);
+    // U-PROG2: prominent ASCII progress line (user 2026-10-13) — monospace
+    // block bar survives every skin/font and prints alongside the counts.
+    var ascii = el('div', 'bench-bar-ascii'); ascii.id = id + '-bar-ascii';
+    box.append(st, bar, ascii);
     return box;
 }
 // U-PROG: move the bar of a status box. stId is the .bench-status id
-// (same key every panel already uses); pct is 0-100.
-function setBar(stId, pct) {
-    var bar = gid(stId + '-bar');
-    if (!bar) return;
+// (same key every panel already uses); pct is 0-100; meta is an optional
+// counter string ("20/294") echoed into the ASCII line.
+function setBar(stId, pct, meta) {
     var p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
-    var fill = bar.querySelector('.bench-bar-fill');
-    if (fill) fill.style.width = p + '%';
-    bar.setAttribute('aria-valuenow', String(p));
+    var bar = gid(stId + '-bar');
+    if (bar) {
+        var fill = bar.querySelector('.bench-bar-fill');
+        if (fill) fill.style.width = p + '%';
+        bar.setAttribute('aria-valuenow', String(p));
+    }
+    var ascii = gid(stId + '-bar-ascii');
+    if (ascii) {
+        var cells = 20, on = Math.round(cells * p / 100);
+        ascii.textContent = '[' + new Array(on + 1).join('\u2588')
+            + new Array(cells - on + 1).join('\u2591') + '] ' + p + '%'
+            + (meta ? '  ' + meta : '');
+    }
 }
 // U51: ms-per-question with locale separators + one decimal (a raw
 // 568.75 next to formatted columns reads like a machine dump)
@@ -774,8 +786,9 @@ function dlJson(nameBase, value) {
         JSON.stringify(value, null, 2));
 }
 
-// CSV from a column spec — shared by every surface's Download CSV
-function dlCsv(nameBase, cols, rows) {
+// CSV from a column spec — shared by every surface's Download CSV and
+// U-CPY clipboard CSV (identical escaping, one source of truth)
+function csvText(cols, rows) {
     var esc = function (x) {
         if (x == null) return '';
         return '"' + String(x).replace(/"/g, '""') + '"';
@@ -787,7 +800,23 @@ function dlCsv(nameBase, cols, rows) {
             return typeof v === 'number' ? String(v) : esc(v);
         }).join(','));
     });
-    return dlFile(nameBase + '.csv', 'text/csv', out.join('\n'));
+    return out.join('\n');
+}
+function dlCsv(nameBase, cols, rows) {
+    return dlFile(nameBase + '.csv', 'text/csv', csvText(cols, rows));
+}
+
+// U-CPY: GitHub-flavoured Markdown table from the same [head,get] spec
+function toMarkdown(cols, rows) {
+    var esc = function (x) {
+        return (x == null ? '' : String(x)).split('|').join('\\|');
+    };
+    var lines = ['| ' + cols.map(function (c) { return c.head; }).join(' | ') + ' |',
+                 '|' + cols.map(function () { return ' --- '; }).join('|') + '|'];
+    rows.forEach(function (r) {
+        lines.push('| ' + cols.map(function (c) { return esc(c.get(r)); }).join(' | ') + ' |');
+    });
+    return lines.join('\n');
 }
 
 // Classic accDownloadResult ported 1:1 (dashboard.js) — field lists, the
@@ -958,52 +987,77 @@ function dlMenu(makeName, formats) {
     return wrap;
 }
 
-// U49: one Copy button factory for all result cards (classic's export
-// blocks all say the same 'Copy' with the section label as hover text)
+// U-CPY: one dropdown pattern for the results-head buttons (classic's
+// bench-dl-menu styling). entries = [[i18nKey, fallback, onClick], ...]
+function dropMenu(host, btn, entries) {
+    var open = null;
+    btn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        if (open) { open.remove(); open = null; return; }
+        open = el('div', 'bench-dl-menu');
+        entries.forEach(function (f) {
+            var b = el('button', null, t(f[0], f[1]));
+            b.type = 'button';
+            b.addEventListener('click', function (ev2) {
+                ev2.stopPropagation();
+                f[2]();
+                open.remove(); open = null;
+            });
+            open.appendChild(b);
+        });
+        host.appendChild(open);
+        var dismiss = function () {
+            if (open) { open.remove(); open = null; }
+            document.removeEventListener('click', dismiss);
+        };
+        setTimeout(function () { document.addEventListener('click', dismiss); }, 0);
+    });
+    host.appendChild(btn);
+}
+
+// U49: shared Copy/Download factory for all result cards (classic's export
+// blocks all say the same 'Copy' with the section label as hover text).
+// U-CPY (user 2026-10-13): Copy is a 3-format menu — Markdown, CSV, table
+// (plaintext for monospace) — whenever the panel carries a dl column spec;
+// panels without one keep the single legacy plaintext-copy button.
 function resultsHead(buildText, titleKey, titleFb, dl) {
     var head = el('div', 'bench-results-head');
     var btn = el('button', 'btn', t('bench.results.text_export.copy', 'Copy'));
     btn.type = 'button';
     btn.title = t(titleKey || 'bench.results.text_export.section_label',
                   titleFb || 'Benchmark Results (Text — Copy & Paste)');
-    btn.addEventListener('click', function () {
+    var copyTable = function () {
         copyPlainText(buildText(),
             t('bench.results.text_export.copied', 'Copied!'));
-    });
-    head.appendChild(btn);
+    };
+    if (dl && dl.cols && dl.rows) {
+        dropMenu(head, btn, [
+            ['uplift.bench.copy_markdown', 'Markdown', function () {
+                copyPlainText(toMarkdown(dl.cols(), dl.rows()),
+                    t('bench.results.text_export.copied', 'Copied!'));
+            }],
+            ['acc_bench.results.download_csv', 'CSV', function () {
+                copyPlainText(csvText(dl.cols(), dl.rows()),
+                    t('bench.results.text_export.copied', 'Copied!'));
+            }],
+            ['uplift.bench.copy_table', 'Table (text)', copyTable],
+        ]);
+    } else {
+        btn.addEventListener('click', copyTable);
+        head.appendChild(btn);
+    }
     // U70: whole-result set downloads for EVERY surface (user asked for
     // classic's availability everywhere, not just Intelligence). dl =
     // {name(): file stem, rows(), cols(): [{head, get}]}
     if (dl) {
         var dlBtn = el('button', 'btn', t('acc_bench.results.download', 'Download'));
         dlBtn.type = 'button';
-        var open = null;
-        dlBtn.addEventListener('click', function (ev) {
-            ev.stopPropagation();
-            if (open) { open.remove(); open = null; return; }
-            open = el('div', 'bench-dl-menu');
-            [['json', 'acc_bench.results.download_json', 'JSON',
-              function () { dlJson(dl.name(), dl.rows()); }],
-             ['csv', 'acc_bench.results.download_csv', 'CSV',
-              function () { dlCsv(dl.name(), dl.cols(), dl.rows()); }]]
-              .forEach(function (f) {
-                var b = el('button', null, t(f[1], f[2]));
-                b.type = 'button';
-                b.addEventListener('click', function (ev2) {
-                    ev2.stopPropagation();
-                    f[3]();
-                    open.remove(); open = null;
-                });
-                open.appendChild(b);
-            });
-            head.appendChild(open);
-            var dismiss = function () {
-                if (open) { open.remove(); open = null; }
-                document.removeEventListener('click', dismiss);
-            };
-            setTimeout(function () { document.addEventListener('click', dismiss); }, 0);
-        });
-        head.appendChild(dlBtn);
+        dropMenu(head, dlBtn, [
+            ['acc_bench.results.download_json', 'JSON',
+             function () { dlJson(dl.name(), dl.rows()); }],
+            ['acc_bench.results.download_csv', 'CSV',
+             function () { dlCsv(dl.name(), dl.cols(), dl.rows()); }],
+        ]);
     }
     return head;
 }
@@ -3453,6 +3507,16 @@ var DEC = {
                 this.state.running = true;
                 this.state.runId = a.run_id;
                 this.setButtons();
+                // U-PROG2: progress is known the moment the page re-attaches
+                // to a live run — packs done/total drive the bar immediately
+                // (SSE events refine it from there).
+                var total = ((a.packs || []).length) || 0;
+                var done = Number(a.done || 0);
+                if (total) {
+                    this.renderStatus(String(a.model_id || ''));
+                    setBar('bench-dec-status', done / total * 100,
+                        done + '/' + total + ' packs');
+                }
                 this.startStream(a.run_id);
             }
         } catch (e) { /* idle */ }
@@ -3532,6 +3596,7 @@ var DEC = {
          t('uplift.bench.dec_ece', 'ECE'),
          t('uplift.bench.dec_agreement', 'Agreement'),
          t('uplift.bench.dec_latency', 'ms/question'),
+         t('uplift.bench.dec_time', 'Time (s)'),
          t('uplift.bench.samples', 'Samples'), ''].forEach(function (h) {
             head.appendChild(el('th', null, h));
         });
@@ -3548,6 +3613,8 @@ var DEC = {
                 el('td', null, fmt(r.ece)),
                 el('td', null, fmt(r.agreement)),
                 el('td', null, fmtMs(r.ms_per_question)),
+                el('td', null, r.time_s != null
+                    ? Number(r.time_s).toFixed(1) : '—'),
                 el('td', null, r.items != null
                     ? Number(r.items).toLocaleString() : '—'),
                 el('td', null, r.ts ? new Date(r.ts * 1000).toLocaleString() : ''));
@@ -3567,15 +3634,25 @@ var DEC = {
                      { label: 'Agreement', numeric: true, get: function (r) { return fmt4(r.agreement); } },
                      { label: 'ms/question', numeric: true, get: function (r) {
                          return fmtMs(r.ms_per_question); } },
+                     { label: 'Time (s)', numeric: true, get: function (r) {
+                         return r.time_s != null
+                             ? Number(r.time_s).toFixed(1) : '—'; } },
                      { label: 'Samples', numeric: true, get: function (r) {
                          return r.items != null
                              ? Number(r.items).toLocaleString() : '—'; } }],
                     selfD.state.results.slice().reverse());
             }, null, null, {
                 name: function () {
-                    var mSel = gid('bench-dec-model');
-                    return 'uplift_decision_'
-                        + String((mSel && mSel.value) || 'run');
+                    // U-CPY: name from the newest result when the selector
+                    // was reset between runs — 'uplift_decision_run' told
+                    // the user nothing (download drill 2026-10-13)
+                    var rows = selfD.state.results;
+                    var m = rows.length ? rows[rows.length - 1].model_id : '';
+                    if (!m) {
+                        var mSel = gid('bench-dec-model');
+                        m = mSel && mSel.value;
+                    }
+                    return 'uplift_decision_' + String(m || 'run');
                 },
                 rows: function () { return selfD.state.results.slice().reverse(); },
                 cols: function () { return [
@@ -3586,6 +3663,7 @@ var DEC = {
                     { head: 'ECE', get: function (r) { return r.ece; } },
                     { head: 'Agreement', get: function (r) { return r.agreement; } },
                     { head: 'ms/question', get: function (r) { return r.ms_per_question; } },
+                    { head: 'Time (s)', get: function (r) { return r.time_s; } },
                     { head: 'Samples', get: function (r) { return r.items; } },
                 ]; },
             }),
@@ -3613,6 +3691,8 @@ return { mount: mount, isMounted: function () { return _mounted; },
          _u49: { resultsHead: resultsHead, buildTableText: buildTableText,
                  buildAccuracyText: buildAccuracyText,
                  ctxResultPairs: ctxResultPairs,
+                 // U-CPY clipboard/export generators
+                 toMarkdown: toMarkdown, csvText: csvText, dropMenu: dropMenu,
                  advancedSection: advancedSection },
          // U47 test seams (pure text-export plumbing; U49 reuses)
          _benchText: { buildThroughputText: buildThroughputText,

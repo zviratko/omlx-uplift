@@ -2557,10 +2557,16 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .bench-status.bench-status-error { color: var(--red); }
 .bench-statusbox:has(.bench-status-error) { border-left-color: var(--red);
   background: color-mix(in srgb, var(--red) 8%, transparent); }
-.bench-bar { height: 7px; border-radius: var(--radius); overflow: hidden;
+.bench-bar { height: 10px; border-radius: var(--radius); overflow: hidden;
   background: color-mix(in srgb, var(--ink) 14%, transparent); }
 .bench-bar-fill { height: 100%; width: 0%; border-radius: var(--radius);
   background: var(--accent); transition: width .45s ease; }
+/* U-PROG2: prominent ASCII progress line under the bar — monospace so the
+   block cells stay aligned on any skin; hidden while no run has painted it. */
+.bench-bar-ascii { font-family: ui-monospace, SFMono-Regular, Menlo,
+  Consolas, "DejaVu Sans Mono", monospace; font-size: 13px; font-weight: 600;
+  letter-spacing: 1px; white-space: pre; color: var(--ink); }
+.bench-bar-ascii:empty { display: none; }
 .bench-statusbox:has(.bench-status-error) .bench-bar-fill {
   background: var(--red); }
 .bench-table { border-collapse: collapse; width: 100%; font-size: 11px; }
