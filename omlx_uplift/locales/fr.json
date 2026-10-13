@@ -909,6 +909,7 @@
  "uplift.bench.extras_family_instruction": "Suivi des instructions",
  "uplift.bench.extras_family_reasoning": "Raisonnement",
  "uplift.bench.extras_family_locale": "Langue et locale",
+ "uplift.bench.extras_family_other": "Autres",
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "Lire à voix haute avec la voix sélectionnée",

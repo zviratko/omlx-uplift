@@ -2498,8 +2498,12 @@ var EXTRAS = {
     CAP: 6,                          // visible cards per family before 'show all'
     LIMIT: 100,                      // per-subtask sample limit of an extras pick
     FAMILIES: ['instruction', 'reasoning', 'locale'],
+    // 'other' is the honest bucket: the ACC-2b seam emits family straight
+    // off the spec ('spec.get("family")'), so a suite added without one
+    // must still land somewhere NAMED, not under a raw null
     FAM_FALLBACK: { instruction: 'Instruction following', reasoning: 'Reasoning',
-                    locale: 'Language & locale' },
+                    locale: 'Language & locale', other: 'Other' },
+    FAM_KEYS: ['instruction', 'reasoning', 'locale', 'other'],
 
     norm: function (list) {
         // Server order is kept (same doctrine as the classic grid: the
@@ -2538,7 +2542,7 @@ var EXTRAS = {
     groups: function (list) {
         var byF = {}, order = [];
         (list || []).forEach(function (s) {
-            var f = s.family || 'other';
+            var f = s.family || 'other';    // norm() mapped a null family here
             if (!byF[f]) { byF[f] = []; order.push(f); }
             byF[f].push(s);
         });

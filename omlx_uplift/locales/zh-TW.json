@@ -905,6 +905,7 @@
  "uplift.bench.extras_family_instruction": "指令遵循",
  "uplift.bench.extras_family_reasoning": "推理",
  "uplift.bench.extras_family_locale": "語言與地區設定",
+ "uplift.bench.extras_family_other": "其他",
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "用所選語音朗讀",

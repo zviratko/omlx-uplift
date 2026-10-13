@@ -908,6 +908,7 @@
  "uplift.bench.extras_family_instruction": "指示追従",
  "uplift.bench.extras_family_reasoning": "推論",
  "uplift.bench.extras_family_locale": "言語とロケール",
+ "uplift.bench.extras_family_other": "その他",
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "選択中の音声で読み上げる",

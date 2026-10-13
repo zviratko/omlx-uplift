@@ -920,6 +920,7 @@
  "uplift.bench.extras_family_instruction": "지시 따르기",
  "uplift.bench.extras_family_reasoning": "추론",
  "uplift.bench.extras_family_locale": "언어 및 로케일",
+ "uplift.bench.extras_family_other": "기타",
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "선택한 목소리로 읽기",

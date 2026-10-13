@@ -905,6 +905,7 @@
  "uplift.bench.extras_family_instruction": "Plnění pokynů",
  "uplift.bench.extras_family_reasoning": "Uvažování",
  "uplift.bench.extras_family_locale": "Jazyk a lokalizace",
+ "uplift.bench.extras_family_other": "Ostatní",
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "Předčítat nahlas vybraným hlasem",

@@ -551,9 +551,11 @@ test('ACC-2a: every extras key exists in all 10 locales with the EN placeholder 
         const used = [...src.matchAll(/t\('(uplift\.bench\.extras_[a-z_]+)'/g)]
             .map(m => m[1]).filter(k => !k.endsWith('_'));
         // 'uplift.bench.extras_family_' + family is assembled at runtime
-        // (the same dynamic-key family test_locale_sync cannot see) — the
-        // three shipped families are checked explicitly
-        const fams = ['instruction', 'reasoning', 'locale']
+        // (the same dynamic-key family test_locale_sync cannot see), so
+        // the gate walks the module's OWN family list — not a hardcoded
+        // triple — and every caption it can ever show must be translated
+        const { B } = load({});
+        const fams = B._extras.FAM_KEYS
             .map(f => 'uplift.bench.extras_family_' + f);
         const keys = [...new Set(used.concat(fams))];
         assert.ok(keys.length >= 10, 'the section must be fully i18n-driven');
@@ -623,6 +625,24 @@ test('ACC-2a: the extras module seam exposes honest pure helpers', () => {
     assert.equal(X.uploadOk(st, 'mmlu'), true, 'a classic twin is unaffected');
     assert.equal(X.isExtra(st, 'mmlu'), false);
 });
+
+test('ACC-2a: a suite the seam ships WITHOUT a family still lands somewhere named',
+    async () => {
+        // harness_engine.extra_suites() reads family straight off the spec
+        // (spec.get('family') -> null when ACC-2c forgets it). Such a suite
+        // must never vanish from the picker or caption itself with 'null'.
+        const h = await accuracy({ tasks: { extra_suites: [
+            { key: 'orphan', label: 'Orphan Suite', family: null,
+              rows: 10, upload_ok: false }] } });
+        const sec = extrasSec(h)[0];
+        const fam = famsOf(sec);
+        assert.equal(fam.length, 1, 'the orphan still renders in a family');
+        assert.equal(fam[0].dataset.family, 'other');
+        const cap = texts(fam[0].children[0]);
+        assert.ok(cap.includes('Other'), 'translated caption, not a raw null: ' + cap);
+        assert.ok(!/null|undefined/.test(texts(sec)), 'no null leaks into the DOM');
+        assert.equal(cards(sec).length, 1);
+    });
 
 test('ACC-2a: uplift.css adds the extras block with no re-opened selector', () => {
     const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');

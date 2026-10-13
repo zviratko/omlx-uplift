@@ -905,6 +905,7 @@
  "uplift.bench.extras_family_instruction": "Следование инструкциям",
  "uplift.bench.extras_family_reasoning": "Рассуждение",
  "uplift.bench.extras_family_locale": "Язык и локаль",
+ "uplift.bench.extras_family_other": "Другие",
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "Озвучить выбранным голосом",
