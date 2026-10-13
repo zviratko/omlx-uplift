@@ -31,6 +31,12 @@ users never see.
   queue pick them up automatically. cmmlu, humaneval, mbpp, jmmlu,
   livecodebench and safetybench intentionally stay on the classic
   engine (dataset script wall / code-exec isolation / no equivalent).
+- **Bench environments stay clean on upgrade.** A stale bench venv is
+  now rebuilt from a full wipe (no orphaned packages surviving a pin
+  change), installs no longer grow the global pip cache, and the
+  torch-in-venv guard is pin-driven: a heavy dep is accepted only when
+  the requirements file actually asks for it. `bench-env status` shows
+  honest venv/cache sizes.
 
 ## [1.99b] — 2026-10-11
 
