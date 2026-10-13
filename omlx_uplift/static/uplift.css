@@ -2541,6 +2541,42 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    everything uplift owns; per-selector rules stay where they existed. */
 .bench-form [hidden], .bench-actions [hidden], .bench-row [hidden],
 .bench-adv-body [hidden], .chat-native-bar [hidden] { display: none; }
+/* ---- BENCHQ: the global bench queue side box ----------------------------
+   The bench tab is two columns now: the strip+panel column the tab always
+   was, and — only while something is queued or running — a 250px queue
+   column. Queue empty = single column, i.e. the pre-BENCHQ layout, and the
+   box is sticky so the wait stays visible while a long form scrolls.
+   Rows borrow the accuracy queue's visual language (.acc-queue-item /
+   .acc-queue-remove) — same border, same accent for the running entry. */
+.bench-cols { display: grid; grid-template-columns: 1fr; gap: 12px;
+  align-items: start; }
+.bench-cols.has-q { grid-template-columns: minmax(0, 1fr) 250px; }
+.bench-col-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+@media (max-width: 1100px) { .bench-cols.has-q { grid-template-columns: minmax(0, 1fr); } }
+.bench-queue { display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid var(--edge); padding: 0 0 8px; min-width: 0;
+  position: sticky; top: 10px; align-self: start;
+  max-height: calc(100vh - 220px); overflow: auto; }
+.bench-queue[hidden] { display: none; }   /* flex beats the UA hidden attr */
+.bench-queue-head { font: 500 10px/1.4 var(--sans); text-transform: uppercase;
+  letter-spacing: .12em; color: var(--dim); margin: 0; padding: 5px 8px;
+  background: var(--panel, var(--bg)); border-bottom: 1px solid var(--edge);
+  position: sticky; top: 0; }
+.bench-queue-list { display: flex; flex-direction: column; gap: 6px; padding: 0 8px; }
+.bench-queue-item { align-items: flex-start; gap: 6px; font-size: 11px; }
+.bench-queue-kind { font: 400 9px/1 var(--mono); text-transform: uppercase;
+  letter-spacing: .1em; color: var(--dim); border: 1px solid var(--edge);
+  padding: 3px 5px; flex: none; }
+.bench-queue-main { flex: 1 1 auto; min-width: 0; display: flex;
+  flex-direction: column; gap: 2px; }
+.bench-queue-model { font: 600 11px/1.2 var(--mono); color: var(--ink);
+  overflow-wrap: anywhere; }
+.bench-queue-detail { color: var(--dim); font-size: 10px; line-height: 1.3;
+  overflow-wrap: anywhere; }
+.bench-queue-status { flex: none; font-size: 10px; color: var(--dim); }
+.bench-queue-item.failed { border-color: var(--red); }
+.bench-queue-item.failed .bench-queue-status { color: var(--red); }
+.bench-queue-item .acc-queue-remove { flex: none; align-self: center; }
 /* U-PROG (user 2026-10-12): every bench panel's status sits in one
    prominent box with a live determinate bar. The old dim 11px single line
    was easily missed while a run was going; the box is now the panel's

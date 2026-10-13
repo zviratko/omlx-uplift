@@ -963,5 +963,9 @@
  "uplift.bench.help.ms_question": "每道題的平均耗時（執行時間除以樣本數）。每題會執行多次內部探測；匯出檔案中另有 ms/probe 欄。",
  "uplift.bench.help.time": "此次基準測試的總耗時。",
  "uplift.bench.help.samples": "此次執行中計分的題目數。",
- "uplift.bench.help_aria": "此欄是什麼意思？"
+ "uplift.bench.help_aria": "此欄是什麼意思？",
+ "uplift.bench.queue_title": "基準測試佇列",
+ "uplift.bench.queue_running": "執行中",
+ "uplift.bench.queue_queued": "排隊中",
+ "uplift.bench.queue_failed": "失敗"
 }

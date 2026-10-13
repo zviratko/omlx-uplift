@@ -4,6 +4,14 @@ surfaces LIVE (REPL-1/2a/3); chat is NAT-4's file.
 Every handler drives classic's engine IN-PROCESS (bench_engine,
 accuracy_engine, context_engine — reuse verdicts + upload opt-out rules
 documented there; classic routes stay untouched at /admin/api/bench/*).
+
+GLOBAL BENCH QUEUE (user 2026-10-13, items 6+7): a start arriving while
+ANOTHER bench of ANY kind holds the single engine slot no longer 409s —
+routers ask bench_queue.busy_check() first and, when it answers, the click
+becomes a FIFO entry (HTTP 200 + queued/qid/position). The accuracy
+IN-TYPE queue stays classic's own. ANE tuning is the one surface that
+keeps 409 (apply-semantics, human present — see bench_ane_start).
+
 Route order discipline (SPLIT-1): FastAPI matches in registration order,
 every literal under /bench/ is registered BEFORE /bench/{run_id}/... —
 tests/test_nat3_scaffold.py pins set+order and literal-vs-dynamic
@@ -17,8 +25,23 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .base import api_router, engine_pool, require_admin
-from .. import (accuracy_engine, bench_engine, bench_history,
+from .. import (accuracy_engine, bench_engine, bench_history, bench_queue,
                 context_engine, decision_engine, embed_engine)
+
+
+async def _queued_start(kind: str, body: dict, label: str = "") -> dict:
+    """GLOBAL BENCH QUEUE: the engine slot is busy, so this click becomes a
+    queue entry instead of a 409 (user 2026-10-13, items 6+7). Returns
+    200 + {queued: true, qid, position} — the client shows the queue row,
+    the pump in bench_queue starts the run when the bench before it ends.
+
+    bench_queue.submit validates through the owning engine's pure validator
+    first, so a bad body still lands on 400 here and never occupies a slot.
+    """
+    try:
+        return await bench_queue.submit(kind, body or {}, label=label)
+    except bench_queue.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---- U64 run history (literals registered BEFORE /bench/{run_id}/... —
@@ -53,6 +76,27 @@ async def bench_flag(is_admin: bool = Depends(require_admin)):
     mode = native_surfaces.server_value()
     return {"mode": mode, "bench": native_surfaces.enabled(mode, "bench"),
             "chat": native_surfaces.enabled(mode, "chat")}
+
+
+# ---- global bench queue (user 2026-10-13 items 6+7) ------------------------
+# Literals FIRST in their band, as everywhere in this file: a later
+# /bench/{run_id}/... dynamic must never shadow /bench/queue.
+
+@api_router.get("/bench/queue")
+async def bench_queue_status(is_admin: bool = Depends(require_admin)):
+    """The cross-type FIFO: every entry (kind, label, body, status, run_id,
+    error) plus the machine-wide idle flag the start routes consult."""
+    return bench_queue.status()
+
+
+@api_router.delete("/bench/queue/{qid}")
+async def bench_queue_drop(qid: str, is_admin: bool = Depends(require_admin)):
+    """Drop a queued entry; a RUNNING one is cancelled through its own
+    engine first (bench_queue.CANCELS) and then dropped."""
+    try:
+        return await bench_queue.remove(qid)
+    except bench_queue.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # U64: classic run objects die with the process; a stored entry still
@@ -96,9 +140,14 @@ async def bench_accuracy_add(request: Request, is_admin: bool = Depends(require_
     body = await request.json()
     upload = bool((body or {}).pop("upload", False))
     try:
+        # IN-TYPE queue stays classic's (accuracy_engine.queue_add appends
+        # to AB's own queue and starts when its turn comes) — untouched.
         return await accuracy_engine.queue_add(body or {}, pool, upload=upload)
-    except accuracy_engine.Conflict as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    except accuracy_engine.Conflict:
+        # Cross-TYPE contention (ANE tuning / context probe holds the
+        # engine): queue it globally instead of bouncing the click (6+7).
+        return await _queued_start("accuracy", {**(body or {}),
+                                                "upload": upload})
     except accuracy_engine.BadInput as e:
         raise HTTPException(status_code=400, detail=str(e))
     except accuracy_engine.NotFound as e:
@@ -141,6 +190,10 @@ async def bench_context_start(request: Request, is_admin: bool = Depends(require
     if pool is None:
         raise HTTPException(status_code=503, detail="Engine pool not initialized")
     body = await request.json()
+    # GLOBAL BENCH QUEUE: any other bench (any kind, classic accuracy queue
+    # included) holding the engine turns this click into a queue entry.
+    if await bench_queue.busy_check("context"):
+        return await _queued_start("context", body or {})
     try:
         return await context_engine.context_start(body or {}, pool)
     except context_engine.Conflict as e:
@@ -160,6 +213,12 @@ async def bench_context_active(is_admin: bool = Depends(require_admin)):
 
 @api_router.post("/bench/ane-tune/start")
 async def bench_ane_start(request: Request, is_admin: bool = Depends(require_admin)):
+    """ANE tuning STAYS 409 while another bench runs — it is deliberately
+    NOT part of the global bench queue. Its product is a recommendation a
+    human reads and then APPLIES to model settings (apply-semantics, human
+    present); a tuning that fires unattended at 03:00 from a queue could
+    leave a saved setting nobody chose. ANE busy still BLOCKS the queue
+    (bench_queue._busy_ane), so the two never overlap."""
     pool = engine_pool()
     if pool is None:
         raise HTTPException(status_code=503, detail="Engine pool not initialized")
@@ -231,6 +290,13 @@ async def bench_embed_start(request: Request, is_admin: bool = Depends(require_a
         raise HTTPException(status_code=503, detail="Engine pool not initialized")
     body = await request.json()
     try:
+        # pure shape check FIRST: garbage is a 400, never a queue entry
+        embed_engine.validate_body(body or {})
+    except embed_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if await bench_queue.busy_check("embed"):
+        return await _queued_start("embed", body or {})
+    try:
         return await embed_engine.start(body or {}, pool)
     except embed_engine.Conflict as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -297,6 +363,14 @@ async def bench_decision_tasks(is_admin: bool = Depends(require_admin)):
 async def bench_decision_start(request: Request, is_admin: bool = Depends(require_admin)):
     body = await request.json()
     try:
+        # pure (manifest-only) check FIRST: garbage is a 400, never a queue
+        # entry — start() repeats it, and validate_body touches no engine.
+        decision_engine.validate_body(body or {})
+    except decision_engine.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if await bench_queue.busy_check("decision"):
+        return await _queued_start("decision", body or {})
+    try:
         return await decision_engine.start(body or {})
     except decision_engine.Conflict as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -360,6 +434,11 @@ async def bench_start(request: Request, is_admin: bool = Depends(require_admin))
         raise HTTPException(status_code=503, detail="Engine pool not initialized")
     body = await request.json()
     upload = bool((body or {}).pop("upload", False))
+    if await bench_queue.busy_check("throughput"):
+        # upload rides the stored body: the pump re-pops it at dispatch,
+        # so a queued run keeps the opt-in the click made (or didn't).
+        return await _queued_start("throughput", {**(body or {}),
+                                                  "upload": upload})
     try:
         return await bench_engine.start(body or {}, pool, upload=upload)
     except bench_engine.Conflict as e:

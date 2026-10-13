@@ -978,5 +978,9 @@
  "uplift.bench.help.ms_question": "질문당 평균 실소요 시간(실행 시간 ÷ 표본 수). 각 질문은 내부적으로 여러 탐색을 수행합니다. 내보내기 파일의 ms/probe 열을 참고하세요.",
  "uplift.bench.help.time": "이 벤치마크 실행의 총 실소요 시간.",
  "uplift.bench.help.samples": "이 실행에서 채점된 질문 수.",
- "uplift.bench.help_aria": "이 열은 어떤 의미인가요?"
+ "uplift.bench.help_aria": "이 열은 어떤 의미인가요?",
+ "uplift.bench.queue_title": "벤치마크 대기열",
+ "uplift.bench.queue_running": "실행 중",
+ "uplift.bench.queue_queued": "대기 중",
+ "uplift.bench.queue_failed": "실패"
 }

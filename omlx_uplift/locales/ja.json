@@ -966,5 +966,9 @@
  "uplift.bench.help.ms_question": "1問あたりの平均実時間（実行時間÷サンプル数）。各質問は内部で複数のプローブを実行します。エクスポートの ms/probe 列も参照してください。",
  "uplift.bench.help.time": "このベンチマーク実行の総実時間。",
  "uplift.bench.help.samples": "この実行で採点された質問数。",
- "uplift.bench.help_aria": "この列の意味は何ですか？"
+ "uplift.bench.help_aria": "この列の意味は何ですか？",
+ "uplift.bench.queue_title": "ベンチマークキュー",
+ "uplift.bench.queue_running": "実行中",
+ "uplift.bench.queue_queued": "待機中",
+ "uplift.bench.queue_failed": "失敗"
 }

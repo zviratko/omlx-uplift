@@ -963,5 +963,9 @@
  "uplift.bench.help.ms_question": "Среднее время на вопрос (время выполнения, делённое на число примеров). На каждый вопрос приходится несколько внутренних проверок; столбец ms/probe есть в экспорте.",
  "uplift.bench.help.time": "Полное время этого запуска теста.",
  "uplift.bench.help.samples": "Число вопросов, оценённых в этом запуске.",
- "uplift.bench.help_aria": "Что означает этот столбец?"
+ "uplift.bench.help_aria": "Что означает этот столбец?",
+ "uplift.bench.queue_title": "Очередь бенчмарков",
+ "uplift.bench.queue_running": "Выполняется",
+ "uplift.bench.queue_queued": "В очереди",
+ "uplift.bench.queue_failed": "Ошибка"
 }

@@ -967,5 +967,9 @@
  "uplift.bench.help.ms_question": "Tiempo medio por pregunta (duración dividida entre el número de muestras). Cada pregunta ejecuta varias sondas internas; consulta la columna ms/probe en las exportaciones.",
  "uplift.bench.help.time": "Duración total de esta ejecución de la prueba.",
  "uplift.bench.help.samples": "Número de preguntas evaluadas en esta ejecución.",
- "uplift.bench.help_aria": "¿Qué significa esta columna?"
+ "uplift.bench.help_aria": "¿Qué significa esta columna?",
+ "uplift.bench.queue_title": "Cola de benchmarks",
+ "uplift.bench.queue_running": "En ejecución",
+ "uplift.bench.queue_queued": "En cola",
+ "uplift.bench.queue_failed": "Fallido"
 }

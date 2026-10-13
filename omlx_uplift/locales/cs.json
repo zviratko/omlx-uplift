@@ -963,5 +963,9 @@
  "uplift.bench.help.ms_question": "Průměrná doba na jednu otázku (čas běhu dělený počtem vzorků). Každá otázka spouští několik interních dotazů; sloupec ms/probe najdete v exportech.",
  "uplift.bench.help.time": "Celková doba tohoto běhu testu.",
  "uplift.bench.help.samples": "Počet otázek vyhodnocených v tomto běhu.",
- "uplift.bench.help_aria": "Co tento sloupec znamená?"
+ "uplift.bench.help_aria": "Co tento sloupec znamená?",
+ "uplift.bench.queue_title": "Fronta benchmarků",
+ "uplift.bench.queue_running": "Běží",
+ "uplift.bench.queue_queued": "Ve frontě",
+ "uplift.bench.queue_failed": "Selhalo"
 }

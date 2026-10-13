@@ -173,7 +173,19 @@ test('mount paints subtabs + throughput form through the catalog', () => {
     assert.ok(win.UpliftNativeBench, 'module global exported on window');
     win.UpliftNativeBench.mount();
     const host = byId['bench-native'];
-    assert.ok(host.children.length >= 2, 'strip + panel mounted');
+    // BENCHQ: host children legitimately moved — strip+panel now live in
+    // .bench-col-main inside the .bench-cols grid (queue box = column 2).
+    // Same two nodes, one level down; everything below still walks them.
+    assert.equal(host.children.length, 1, 'one host child: the cols grid');
+    const cols = host.children[0];
+    assert.ok(String(cols.className).includes('bench-cols'), 'cols wrapper mounted');
+    const main = cols.children[0];
+    assert.ok(String(main.className).includes('bench-col-main'), 'strip+panel column');
+    assert.equal(main.children.length, 2, 'strip + panel inside the column');
+    assert.ok(String(cols.children[1].className).includes('bench-queue'),
+        'queue box is the sibling column');
+    assert.equal(cols.children[1].hidden, true, 'queue box hidden while empty');
+    assert.ok(!String(cols.className).includes('has-q'), 'no 2nd column when empty');
     const text = allText(host);
     for (const marker of ['SUBTP', 'SUBACC', 'SUBCTX', 'SUBANE'])
         assert.ok(text.includes(marker), `subtab label ${marker} rendered`);

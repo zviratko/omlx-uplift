@@ -963,5 +963,9 @@
  "uplift.bench.help.ms_question": "Average wall time per question (run time divided by samples). Each question runs several internal probes; see the ms/probe column in the exports.",
  "uplift.bench.help.time": "Total wall time of this benchmark run.",
  "uplift.bench.help.samples": "Number of questions scored in this run.",
- "uplift.bench.help_aria": "What does this column mean?"
+ "uplift.bench.help_aria": "What does this column mean?",
+ "uplift.bench.queue_title": "Bench Queue",
+ "uplift.bench.queue_running": "Running",
+ "uplift.bench.queue_queued": "Queued",
+ "uplift.bench.queue_failed": "Failed"
 }

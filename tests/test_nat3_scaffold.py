@@ -70,6 +70,10 @@ NAT3_ROUTES = [
     ("GET", "/bench/history"),
     ("POST", "/bench/history/clear"),
     ("GET", "/bench/flag"),
+    # GLOBAL BENCH QUEUE (user 2026-10-13 items 6+7): literals at the head
+    # of the band — a /bench/{run_id}/... dynamic must never swallow them.
+    ("GET", "/bench/queue"),
+    ("DELETE", "/bench/queue/{qid}"),
     ("GET", "/bench/accuracy/tasks"),
     ("GET", "/bench/accuracy/harness-sizes"),   # U68 (literal, in-band)
     ("POST", "/bench/accuracy/add"),

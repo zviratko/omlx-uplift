@@ -22,6 +22,7 @@ var _mounted = false;
 var _sub = 'throughput';
 var _es = null;          // throughput SSE
 var _poll = null;        // fallback poll timer while SSE unavailable
+var _curPanel = null;    // BENCHQ: the panel instance showSub() painted
 
 function W() { return (typeof window !== 'undefined') ? window : null; }
 function C() { return W() && W().UpliftCore ? W().UpliftCore : null; }
@@ -342,8 +343,18 @@ function mount() {
     });
     var panel = el('div', 'native-subpanel');
     panel.id = 'bench-subpanel';
-    host.append(strip, panel);
+    // BENCHQ: one grid now that the bench tab has a side column — the
+    // strip+panel keep their old order inside .bench-col-main (queue empty
+    // = single column, i.e. today's markup), the queue box is the sibling
+    // column that appears only when the server has something in flight.
+    var cols = el('div', 'bench-cols');
+    var main = el('div', 'bench-col-main');
+    main.append(strip, panel);
+    cols.appendChild(main);
+    host.appendChild(cols);
+    BENCHQ.mount(cols);
     showSub(_sub);
+    BENCHQ.start();
 }
 
 function showSub(sub) {
@@ -367,14 +378,28 @@ function showSub(sub) {
     if (!panel) return;
     stopStream();
     panel.replaceChildren();
-    if (sub === 'throughput') TP.render(panel);
-    else if (sub === 'accuracy') ACC.render(panel);
-    else if (sub === 'context') CTX.render(panel);
-    else if (sub === 'ane') ANE.render(panel);
-    else if (sub === 'embed') MTEB('embed').render(panel);
-    else if (sub === 'rerank') MTEB('rerank').render(panel);
-    else if (sub === 'decision') DEC.render(panel);
+    // BENCHQ: remember the instance we are showing so the queue can hand a
+    // run it did not start back to the live panel (discover/repaint).
+    _curPanel = null;
+    if (sub === 'throughput') _curPanel = TP;
+    else if (sub === 'accuracy') _curPanel = ACC;
+    else if (sub === 'context') _curPanel = CTX;
+    else if (sub === 'ane') _curPanel = ANE;
+    else if (sub === 'embed') _curPanel = mtebPanel('embed');
+    else if (sub === 'rerank') _curPanel = mtebPanel('rerank');
+    else if (sub === 'decision') _curPanel = DEC;
+    if (_curPanel) _curPanel.render(panel);
     else panel.appendChild(stubCard(sub));
+}
+
+// BENCHQ: MTEB is a factory (embed + rerank share the code), so the live
+// instance must be cached per kind — a queue entry that starts running
+// while the tab is open has to talk to the panel that is ON SCREEN, not to
+// a fresh object with no state.
+var _mtebPanels = {};
+function mtebPanel(kind) {
+    if (!_mtebPanels[kind]) _mtebPanels[kind] = MTEB(kind);
+    return _mtebPanels[kind];
 }
 
 function stubCard(sub) {
@@ -388,6 +413,247 @@ function stubCard(sub) {
                     'Native surface — not implemented yet.')));
     return card;
 }
+
+/* ---- BENCHQ: the global bench queue ---------------------------------------
+   Every bench start route (decision / embed / throughput / context /
+   accuracy) now answers {queued:true, qid, position} instead of a 409 when
+   the server is busy, and serves ONE queue for all of them. The queue is
+   server-wide and kind-agnostic, so its box is too: a side column on the
+   bench tab that outlives whichever panel started the entry.
+   Doctrine copied from the ACC board: poll for truth (a cheap local GET
+   every 4s beats trusting one POST response), and poll ONLY while the
+   surface is actually on screen — offsetParent is null inside a [hidden]
+   page, so a backgrounded tab costs zero requests. */
+var BENCHQ_MS = 4000;
+// kind -> the subtab's own [key, fallback] (no new vocabulary in the box)
+var BENCHQ_KIND_LABEL = {
+    decision:   ['uplift.bench.decision', 'Decision'],
+    embed:      ['uplift.bench.embeddings', 'Embeddings'],
+    rerank:     ['uplift.bench.rerankers', 'Rerankers'],
+    throughput: ['navbar.dropdown.performance', 'Throughput'],
+    context:    ['navbar.dropdown.context', 'Context'],
+    accuracy:   ['navbar.dropdown.accuracy', 'Intelligence'],
+    ane:        ['uplift.bench.ane_tune', 'ANE Tune']
+};
+// kind -> the sub key showSub() uses, for the running-entry hand-back
+var BENCHQ_KIND_SUB = { decision: 'decision', embed: 'embed', rerank: 'rerank',
+    throughput: 'throughput', context: 'context', accuracy: 'accuracy',
+    ane: 'ane' };
+
+var BENCHQ = {
+    cols: null, box: null, list: null, timer: null,
+    entries: [], _seen: {}, _order: [],
+
+    /* mount builds the (empty, hidden) column: with nothing queued the
+       bench tab's DOM stays what it was before this box existed. */
+    mount: function (cols) {
+        this.cols = cols;
+        var box = el('aside', 'bench-queue card');
+        box.id = 'bench-queue';
+        box.hidden = true;                 // empty queue: no second column
+        var head = el('div', 'bench-queue-head',
+            t('uplift.bench.queue_title', 'Bench Queue'));
+        // U59 doctrine: labels painted before the locale fetch land carry
+        // their key + the English shown, so applyI18n() repairs them — the
+        // header is built once per mount and never re-rendered by the poll.
+        head.dataset.i18n = 'uplift.bench.queue_title';
+        head.dataset.en = t('uplift.bench.queue_title', 'Bench Queue');
+        box.appendChild(head);
+        var list = el('div', 'bench-queue-list acc-queue');
+        list.id = 'bench-queue-list';
+        box.appendChild(list);
+        cols.appendChild(box);
+        this.box = box;
+        this.list = list;
+    },
+
+    start: function () {
+        var self = this;
+        var w = W();
+        // no timers in the vm structural harnesses (and never a second one)
+        if (this.timer || !w || typeof w.setInterval !== 'function') return;
+        this.timer = w.setInterval(function () { self.tick(); }, BENCHQ_MS);
+        this.refresh();                    // first paint, don't wait 4s
+    },
+
+    tick: function () { if (this.visible()) this.refresh(); },
+
+    visible: function () {
+        if (!this.box) return false;
+        var host = gid('bench-native');
+        return !!host && host.offsetParent !== null;
+    },
+
+    refresh: async function () {
+        var d = dom();
+        if (!d || !this.box) return;
+        var payload;
+        try { payload = await d.fetchJson(api() + '/bench/queue'); }
+        catch (e) { return; }              // board offline: keep last view
+        this.render(payload || {});
+    },
+
+    /* render is split from refresh so a harness (and the panel start paths)
+       can replay a payload without a server. */
+    render: function (payload) {
+        if (!this.box) return;
+        var self = this;
+        var raw = payload.entries || payload.queue || [];
+        var entries = raw.filter(function (e) { return e && e.status !== 'done'; });
+        // queued -> running transition: hand the run to the panel on screen
+        entries.forEach(function (e) {
+            var prev = self._seen[e.qid];
+            self._seen[e.qid] = e.status;
+            if (e.status === 'running' && prev && prev !== 'running')
+                self.reattach(e);
+        });
+        this.entries = entries;
+        var alive = {};
+        entries.forEach(function (e) { alive[e.qid] = self._seen[e.qid]; });
+        this._seen = alive;                // forget removed/finished qids
+        var has = entries.length > 0;
+        this.box.hidden = !has;
+        if (this.cols) {                   // 250px side column only when used
+            if (has) this.cols.classList.add('has-q');
+            else this.cols.classList.remove('has-q');
+        }
+        if (!this.list) return;
+        // position number = ordinal among the still-queued entries
+        var pos = 0;
+        var spots = entries.map(function (e) {
+            if (e.status === 'queued') pos++;
+            return pos;
+        });
+        var order = entries.map(function (e) { return String(e.qid); });
+        var same = this.list.children.length === entries.length
+            && order.join('|') === (this._order || []).join('|');
+        this._order = order;
+        if (same) {
+            // ACC board doctrine (U83): repaint text IN PLACE. Replacing the
+            // nodes every 4s would eat a hover and can land between a mousedown
+            // and its click, which reads as 'the × button does nothing'.
+            entries.forEach(function (e, i) {
+                self.updateRow(self.list.children[i], e, spots[i]);
+            });
+            return;
+        }
+        this.list.replaceChildren();
+        entries.forEach(function (e, i) {
+            self.list.appendChild(self.row(e, spots[i]));
+        });
+    },
+
+    rowState: function (e) {
+        return e.status === 'running' ? 'running'
+             : e.status === 'failed' ? 'failed' : 'queued';
+    },
+
+    /* Row children are positional and stable: [badge, main[model, detail],
+       status, ×] — updateRow depends on that shape. */
+    row: function (e, pos) {
+        var self = this;
+        var d = dom();
+        var body = e.body || {};
+        var st = BENCHQ.rowState(e);
+        var row = el('div', 'acc-queue-item bench-queue-item ' + st);
+        row.dataset.qid = String(e.qid == null ? '' : e.qid);
+        var kl = BENCHQ_KIND_LABEL[e.kind];
+        var badge = el('span', 'bench-queue-kind',
+            kl ? t(kl[0], kl[1]) : String(e.kind || ''));
+        if (kl) { badge.dataset.i18n = kl[0]; badge.dataset.en = badge.textContent; }
+        row.appendChild(badge);
+        var main = el('div', 'bench-queue-main');
+        // liberal: the server's label wins, else compose from the body
+        var head = (typeof e.label === 'string' && e.label) || body.model_id || '';
+        main.appendChild(el('div', 'bench-queue-model', String(head || '—')));
+        main.appendChild(el('div', 'bench-queue-detail', BENCHQ.detail(body)));
+        row.appendChild(main);
+        var stat = el('span', 'bench-queue-status', BENCHQ.statusText(e, pos));
+        if (st === 'failed' && e.error) stat.title = String(e.error);
+        row.appendChild(stat);
+        var rm = el('button', 'acc-queue-remove', '×');
+        rm.type = 'button';
+        rm.title = t('models.queue.remove_tooltip', 'Remove');
+        rm.dataset.i18nTitle = 'models.queue.remove_tooltip';
+        rm.dataset.enTitle = rm.title;
+        rm.addEventListener('click', async function () {
+            try {
+                if (d && d.deleteJson)
+                    await d.deleteJson(api() + '/bench/queue/'
+                        + encodeURIComponent(String(e.qid)));
+            } catch (err) {
+                if (d) d.toast(String((err && err.message) || err), 'error');
+            }
+            self.refresh();
+        });
+        row.appendChild(rm);
+        return row;
+    },
+
+    updateRow: function (row, e, pos) {
+        if (!row || !row.children) return;
+        var st = BENCHQ.rowState(e);
+        ['running', 'queued', 'failed'].forEach(function (c) {
+            if (c === st) row.classList.add(c); else row.classList.remove(c);
+        });
+        var body = e.body || {};
+        var main = row.children[1];
+        if (main && main.children) {
+            var head = (typeof e.label === 'string' && e.label) || body.model_id || '';
+            main.children[0].textContent = String(head || '—');
+            main.children[1].textContent = BENCHQ.detail(body);
+        }
+        var stat = row.children[2];
+        if (!stat) return;
+        stat.textContent = BENCHQ.statusText(e, pos);
+        stat.title = (st === 'failed' && e.error) ? String(e.error) : '';
+    },
+
+    /* The body shape differs per kind (packs / tasks / benchmarks / target);
+       the row shows whatever identifiers the entry carries. body.kind is NOT
+       repeated here — the badge on the left already says it. */
+    detail: function (body) {
+        var out = [];
+        if (Array.isArray(body.packs)) out = out.concat(body.packs);
+        if (Array.isArray(body.tasks)) out = out.concat(body.tasks);
+        if (body.benchmarks && typeof body.benchmarks === 'object')
+            out = out.concat(Object.keys(body.benchmarks));
+        if (body.target != null) out.push(String(body.target));
+        return out.map(function (s) { return String(s); }).join(', ');
+    },
+
+    statusText: function (e, pos) {
+        if (e.status === 'running')
+            return t('uplift.bench.queue_running', 'Running');
+        if (e.status === 'failed')
+            return t('uplift.bench.queue_failed', 'Failed');
+        var q = t('uplift.bench.queue_queued', 'Queued');
+        return pos ? q + ' ' + pos : q;     // position number appended here
+    },
+
+    /* A run started from the queue is not the panel's own run: without this
+       the live panel keeps saying 'idle' while its benchmark is scoring.
+       typeof-guarded — ANE has neither, and the box must never throw. */
+    reattach: function (e) {
+        if (BENCHQ_KIND_SUB[e.kind] !== _sub) return;
+        var p = _curPanel;
+        if (!p) return;
+        var fn = (typeof p.discover === 'function' ? p.discover
+                : typeof p.refreshQueue === 'function' ? p.refreshQueue
+                : typeof p.refreshResults === 'function' ? p.refreshResults
+                : typeof p.refresh === 'function' ? p.refresh : null);
+        if (!fn) return;
+        try { fn.call(p); } catch (_) { /* panel repaint is best-effort */ }
+    },
+
+    // POST start routes answer {queued:true} while the server is busy
+    isQueued: function (out) { return !!(out && out.queued === true); },
+    note: function () {
+        var d = dom();
+        if (d) d.toast(t('uplift.bench.queued', 'Added to queue'));
+        BENCHQ.refresh();
+    },
+};
 
 /* ==========================================================================
    THROUGHPUT (REPL-1) — classic engine driven over /uplift/api/bench/*
@@ -1401,8 +1667,17 @@ var TP = {
         var rel = busyLabel(gid('bench-tp-run'));
         try {
             var out = await d.postJson(api() + '/bench/start', body);
-            this.state.benchId = out.bench_id;
             rel();
+            // BENCHQ: a busy server queued the run instead of starting it —
+            // no running state, no EventSource on a qid that has not begun.
+            if (BENCHQ.isQueued(out)) {
+                this.state.running = false;
+                this.state.benchId = null;
+                this.setButtons();
+                BENCHQ.note();
+                return;
+            }
+            this.state.benchId = out.bench_id;
             this.startStream(out.bench_id);
             setBar('bench-tp-status', 0);   // U-PROG: new run, bar starts empty
             this.renderStatus(t('bench.progress.preparing', 'Preparing…'));
@@ -1743,6 +2018,14 @@ var CTX = {
                 target_tokens: target,
             });
             rel();
+            // BENCHQ: queued behind the live run — stay idle, the box shows it
+            if (BENCHQ.isQueued(out)) {
+                this.state.running = false;
+                this.state.benchId = null;
+                this.setButtons();
+                BENCHQ.note();
+                return;
+            }
             this.state.benchId = out.bench_id;
             this.startStream(out.bench_id);
             this.renderStatus(t('ctx_bench.progress.starting', 'Starting...'));
@@ -2621,6 +2904,9 @@ var ACC = {
         if (posted) d.toast(t('uplift.bench.queued', 'Added to queue'));
         if (err) d.toast(err, 'error');
         if (posted) this.refreshQueue();
+        // BENCHQ: Intelligence already had its own queue toast — reuse it and
+        // push the GLOBAL box to the new state without waiting for the poll
+        if (posted) BENCHQ.refresh();
     },
 
     cancelAll: async function () {
@@ -3204,6 +3490,9 @@ function MTEB(kind) {
                     { model_id: model, kind: kind, tasks: tasks,
                       limit: this.state.limit });
                 rel();
+                // BENCHQ: busy server => queued behind the live run. The Run
+                // button stays enabled precisely so this click was legal.
+                if (BENCHQ.isQueued(r)) { BENCHQ.note(); return; }
                 this.state.running = true;
                 this.state.runId = r.run_id;
                 // U86: start succeeded => the run itself now owns the
@@ -3309,8 +3598,11 @@ function MTEB(kind) {
         },
 
         setButtons: function () {
-            var runBtn = gid(prefix + '-run'), c = gid(prefix + '-cancel');
-            if (runBtn) runBtn.disabled = this.state.running;
+            var c = gid(prefix + '-cancel');
+            // BENCHQ (user item 6): Run stays ENABLED during a live run — a
+            // second click is not an error, the server queues it behind the
+            // first (benchmarks+models within one benchmark type, the way
+            // Intelligence already does). Only Cancel is state-dependent.
             if (c) c.hidden = !this.state.running;
         },
 
@@ -3558,6 +3850,9 @@ var DEC = {
             var r = await d.postJson(api() + '/bench/decision/start',
                 { model_id: model, packs: packs, limit: this.state.limit });
             rel();
+            // BENCHQ: busy server => queued behind the live run. The Run
+            // button stays enabled precisely so this click was legal.
+            if (BENCHQ.isQueued(r)) { BENCHQ.note(); return; }
             this.state.running = true;
             this.state.runId = r.run_id;
             this.setButtons();
@@ -3658,8 +3953,10 @@ var DEC = {
     },
 
     setButtons: function () {
-        var runBtn = gid('bench-dec-run'), c = gid('bench-dec-cancel');
-        if (runBtn) runBtn.disabled = this.state.running;
+        var c = gid('bench-dec-cancel');
+        // BENCHQ (user item 6): Run stays ENABLED during a live run — a
+        // second click queues this model/pack set behind the first instead
+        // of being refused. Only Cancel is state-dependent.
         if (c) c.hidden = !this.state.running;
     },
 
@@ -3793,6 +4090,9 @@ function stopStream() {
 
 return { mount: mount, isMounted: function () { return _mounted; },
          showSub: showSub, tp: TP,
+         // BENCHQ test seam: the global queue box (mount/render/remove are
+         // pure DOM + one GET, so a node harness can replay payloads)
+         BENCHQ: BENCHQ,
          // U83 test seams: the queue board model (pure) + ACC methods so
          // a node harness can replay status payloads + event sequences
          _board: { boardSuiteMeta: boardSuiteMeta, boardQuestions: boardQuestions,
@@ -3801,7 +4101,10 @@ return { mount: mount, isMounted: function () { return _mounted; },
          // builders, so a DOM-free harness can prove every panel wires
          // resultsHead/advancedSection (card's Verify: 'import graph or
          // DOM assertion in the mount-test harness')
-         _panels: { ctx: CTX, ane: ANE, acc: ACC, dec: DEC },
+         _panels: { ctx: CTX, ane: ANE, acc: ACC, dec: DEC,
+                    // BENCHQ: mtebPanel is the instance CACHE (showSub uses
+                    // it too), so a harness reaches the panel on screen
+                    mteb: mtebPanel },
          _u49: { resultsHead: resultsHead, buildTableText: buildTableText,
                  buildAccuracyText: buildAccuracyText,
                  ctxResultPairs: ctxResultPairs,
