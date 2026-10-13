@@ -1,9 +1,14 @@
 # REPL-2b: lm-evaluation-harness pins for the bench venv.
 # Created from the verified NAT-6 S2 install (freeze:
 # ~/.omlx/uplift/spikes/harness-pip-freeze.txt, lm_eval 0.4.13, py3.11).
-# HARD RULE (REPL-2 card): no torch / no transformers-class deps.
-# bench_env.py verifies absence after install; tests/test_bench_env.py
-# pins this file contains no torch line.
+# RULE (REPL-2 card, evolved by ACC-2e 2026-10-14): this env carries the
+# measured-minimal scorer set and NOTHING heavy — no torch, no
+# transformers-class deps. bench_env._guard_heavy_dep is pin-driven: a
+# heavy module is allowed only if it is listed HERE (torch is not), and
+# appearing without a pin fails the build. tests/test_bench_env.py pins
+# that this file contains no torch line.
+# Adding a heavy scorer dep = edit this file (deliberate, reviewed,
+# digest changes -> status 'stale' -> create() full-wipes and rebuilds).
 absl-py==2.5.0
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.4

@@ -244,8 +244,11 @@ def _verify_mount(python: str) -> tuple[bool, str]:
 def cmd_bench_env(argv=None) -> int:
     """REPL-2b: manage the pinned lm-evaluation-harness venv.
 
-      bench-env status [--json]   missing | ready | stale (+digests)
-      bench-env create [--reinstall]  build the pinned venv (~1 min first)
+      bench-env status [--json]   missing | ready | stale (+digests, +MB
+                                  on disk: venv_bytes/cache_bytes)
+      bench-env create [--reinstall]  build the pinned venv (~30 s first;
+                                  a STALE env is wiped and rebuilt by a
+                                  plain create — ACC-2e, no flag needed)
 
     The venv lives under the shared uplift store, NEVER inside a keg:
     harness pulls ~70 packages and the card forbids torch anywhere near
@@ -287,12 +290,23 @@ def cmd_bench_env(argv=None) -> int:
     if args.json:
         print(_json.dumps(st))
         return rc
+
+    def _mb(v) -> str:
+        # status() sizes are apparent bytes walked in-process (not du
+        # blocks); None = walk exceeded its budget
+        return f"{v / 1e6:.0f} MB" if isinstance(v, (int, float)) else "—"
+
+    disk = f"\n  on disk: venv {_mb(st.get('venv_bytes'))}, " \
+           f"dataset cache {_mb(st.get('cache_bytes'))}"
     if st["state"] == "ready":
-        print(f"ready: {st['path']}")
+        print(f"ready: {st['path']}{disk}")
     elif st["state"] == "stale":
-        print(f"stale: {st['path']}\n  built from {st['built_from']}, "
+        print(f"stale: {st['path']}{disk}\n  built from {st['built_from']}, "
               f"requirements now {st['wants']}\n  "
-              f"rebuild: omlx-uplift {which}-env create --reinstall")
+              # ACC-2e: a plain create wipes + rebuilds a stale env; the
+              # flag is now only for forcing a rebuild of a 'ready' one
+              f"rebuild: omlx-uplift {which}-env create "
+              f"(full wipe, no orphans)")
     else:
         print(f"missing: {st['path']}\n  create: omlx-uplift {which}-env create")
     return 0 if st["state"] == "ready" else 1

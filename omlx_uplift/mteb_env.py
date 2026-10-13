@@ -10,8 +10,10 @@ exactly like bench-env.
 
 Same machinery as bench-env (bench_env.create/status parameterized):
 marker digest vs mteb_env_requirements.txt, refuse-to-run-when-stale,
-key-via-env-only children. The extra_check here verifies mteb imports
-instead of the torch absence probe.
+key-via-env-only children, stale ⇒ full wipe (ACC-2e). The heavy-dep
+guard is pin-driven, so torch passes HERE (it is pinned in this file) and
+still fails the bench-env build; extra_check adds the 'mteb imports'
+probe on top of that guard (ACC-2e: it no longer replaces it).
 """
 from __future__ import annotations
 

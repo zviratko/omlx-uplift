@@ -10,7 +10,33 @@ Card rules implemented here (all deliberate, tests pin them):
   which requirements digest the venv was built from; a mismatched venv
   is 'stale', and accuracy runs refuse to use a stale venv (the
   alternative — silently running a different harness than the one the
-  score labels claim — is dishonest).
+  score labels claim — is dishonest). The digest is over what pip acts
+  on, comments stripped (ACC-2e): prose in a pin file must not cost a
+  rebuild, a pin change must.
+- Stale ⇒ FULL WIPE (ACC-2e). create() removes the whole venv before
+  every (re)build, whatever the reason for rebuilding — a pin bump only
+  ADDS/UPDATES packages, so layering a new pin onto the old
+  site-packages left the packages that dropped out of the file behind as
+  orphans while the marker flipped the state back to 'ready'. The venv
+  then lied about what it holds, which is the same dishonesty the
+  staleness check exists to prevent. No flag needed at any call site.
+- On-demand heavy deps (user policy 2026-10-14): a scoring dependency
+  like torch MAY enter an env when a suite's scorer actually imports it
+  — but only when that env's own requirements file PINS it. The builder
+  still refuses an unpinned torch that snuck in transitively: the guard
+  is pin-driven now, not absolute (see _guard_heavy_dep).
+- Disk hygiene: pip runs --no-cache-dir, so an uplift build leaves no
+  cache behind. Measured on kocour 2026-10-14 with the real 70-pin
+  requirements file: install with NOTHING cached (what --no-cache-dir
+  means here) 29 s, ~117 MB downloaded; the same install served from a
+  warm uplift-owned cache dir 15 s. Buying those 14 s per pin bump with a
+  wheel cache that passes a gigabyte the moment mteb-env's torch (587 MB)
+  lands in it is the wrong trade under 'no gigabyte leftovers from stale
+  versions' — and pip's default cache is machine-global (884 MB on this
+  box today), so the alternative was an owned dir plus prune code we then
+  have to keep honest. status() reports venv_bytes/cache_bytes walked
+  in-process under a wall-clock budget — None means 'too slow to say',
+  never a half-summed number.
 - Auth: the harness gets the API key through OPENAI_API_KEY in the
   child env ONLY. It is never placed in argv (ps would leak it) and
   never logged; scrub_key() redacts the literal from any captured
@@ -22,16 +48,36 @@ Card rules implemented here (all deliberate, tests pin them):
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger("uplift.bench_env")
 
 REQUIREMENTS = Path(__file__).with_name("bench_env_requirements.txt")
 VENV_DIRNAME = "bench-env"
 MARKER = "uplift-bench-env.json"
+
+# ACC-2e guard: the heavy dependency the card forbids by accident. It is
+# ALLOWED when (and only when) the env's own requirements file pins it —
+# the user's on-demand-deps policy (2026-10-14): torch may enter an env
+# when a scorer actually imports it, measured minimal set, deliberately.
+GUARD_MODULE = "torch"
+
+# Wall-clock budget per size walk in status() (see _dir_bytes). Measured
+# on kocour 2026-10-14 (warm FS cache, scandir): bench-env (604 MB / 33k
+# files) 150-300 ms, mteb-env (1.5 GB / 47k files) 250-390 ms, the uplift
+# HF dataset cache (614 MB / 5k files) 50-60 ms. 0.3 s is therefore
+# 'always answers for bench-env, usually for mteb-env' while still
+# capping a pathological tree; over budget the key is None, never a
+# partial sum. Callers on a hot path pass sizes=False.
+SIZE_BUDGET_S = 0.3
 
 
 def bench_env_dir(dirname: str = VENV_DIRNAME) -> Path:
@@ -40,7 +86,118 @@ def bench_env_dir(dirname: str = VENV_DIRNAME) -> Path:
 
 
 def requirements_digest(req: Path = REQUIREMENTS) -> str:
+    """Digest of what pip ACTS ON — comment and blank lines are stripped
+    first (ACC-2e). Rationale: the marker's whole job is to prove which
+    PIN SET the venv was built from, and prose cannot change the
+    installed tree; without this normalization a comment edit to a pin
+    file declares a working 604 MB / 1.5 GB env stale and the user pays
+    a rebuild to read a sentence. Any change to a pin, an option line
+    (-r/-c/--index-url/...) or an extra still moves the digest, so the
+    stale check keeps its teeth."""
+    body = "\n".join(ln for ln in (raw.strip() for raw in
+                                   req.read_text().splitlines())
+                     if ln and not ln.startswith("#"))
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
+
+_REQ_NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def requirements_digest_legacy(req: Path) -> str:
+    """Pre-ACC-2e digest: sha256 over the WHOLE file, comments included.
+    status() accepts it as current (see _digests_current) so the switch
+    above does not by itself push every existing store env through a
+    wipe+rebuild — a marker stamped with this value over an UNCHANGED
+    file proves the same pin set. It is a migration accommodation, not a
+    second source of truth: safe to delete one release after ACC-2e,
+    once every env has been rebuilt at least once."""
     return hashlib.sha256(req.read_bytes()).hexdigest()[:16]
+
+
+def _digests_current(built, req: Path) -> bool:
+    """Marker value vs what `req` now pins (either digest algorithm)."""
+    if built is None:
+        return False
+    try:
+        legacy = requirements_digest_legacy(req)
+    except OSError:
+        legacy = None
+    return built == requirements_digest(req) or built == legacy
+
+
+def requirements_names(req: Path) -> set[str]:
+    """Normalized distribution names pinned/listed in a requirements file
+    (PEP 503-ish: lowercased, '_' -> '-'). Comment lines, option lines
+    (-r/-c/--hashes) and blank lines are skipped; extras and version
+    specifiers are cut off at the first delimiter, so 'lm_eval[xx]>=1'
+    reports 'lm-eval'. Used by the pin-driven heavy-dep guard."""
+    names: set[str] = set()
+    try:
+        text = Path(req).read_text()
+    except OSError:
+        return names
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("-"):
+            continue
+        m = _REQ_NAME_RE.match(line)
+        if m:
+            names.add(m.group(1).lower().replace("_", "-"))
+    return names
+
+
+def _dir_bytes(root: Path, deadline: float) -> Optional[int]:
+    """Sum of apparent file sizes under `root`, or None if the walk hits
+    `deadline` (time.monotonic). scandir, in-process — NEVER `du`: a
+    subprocess per status() call is a worse dashboard lag than the walk
+    itself and a dependency on a coreutils whose output format we would
+    then parse. Symlinks are measured as links (not followed), matching
+    what a venv actually costs us on disk.
+    NOTE: apparent bytes < `du -sh` blocks (measured 537.6 MB vs 604 MB
+    for bench-env) — the key documents this; do not compare it to du."""
+    total = 0
+    stack = [str(root)]
+    now = time.monotonic
+    while stack:
+        try:
+            it = os.scandir(stack.pop())
+        except OSError:                     # unreadable dir: skip, keep summing
+            continue
+        with it:
+            for entry in it:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(entry.path)
+                    else:
+                        total += entry.stat(follow_symlinks=False).st_size
+                except OSError:             # raced away mid-rebuild
+                    continue
+                if now() > deadline:
+                    return None
+    return total
+
+
+def size_facts(venv: Path, cache: Optional[Path] = None, *,
+               budget_s: float = SIZE_BUDGET_S) -> dict:
+    """{'venv_bytes', 'cache_bytes'} — bounded by `budget_s` PER walk (so
+    a status() call costs at most ~2x that, and typically 150+50 ms).
+    None = not measured (budget spent, path missing, or sizes skipped).
+    `cache` is uplift's OWN dataset cache (hf_cache_dir), the directory
+    that actually grows while a user runs suites; there is deliberately
+    no pip cache to report — installs run --no-cache-dir."""
+    t0 = time.monotonic()
+    out: dict = {"venv_bytes": None, "cache_bytes": None}
+    try:
+        if venv.is_dir():
+            out["venv_bytes"] = _dir_bytes(venv, t0 + budget_s)
+    except OSError:
+        pass
+    try:
+        if cache is not None and cache.is_dir():
+            out["cache_bytes"] = _dir_bytes(cache, t0 + 2 * budget_s)
+    except OSError:
+        pass
+    return out
 
 
 def _python_for_venv() -> str:
@@ -73,12 +230,35 @@ def _python_for_venv() -> str:
 
 
 def status(*, dirname: str = VENV_DIRNAME, req: Path = REQUIREMENTS,
-           marker: str = MARKER) -> dict:
+           marker: str = MARKER, sizes: bool = True,
+           size_budget_s: float = SIZE_BUDGET_S) -> dict:
+    """State of one uplift env (bench-env / mteb-env): missing|stale|ready.
+
+    ACC-2e: every state also carries the honest disk facts —
+      venv_bytes:  apparent bytes of the venv itself (None if not asked
+                   for / the dir is gone / the walk spent its budget)
+      cache_bytes: apparent bytes of uplift's OWN HF dataset cache
+                   (hf_cache_dir) — the tree that grows as suites run.
+    Both are bounded by `size_budget_s` per walk so no caller can be
+    ambushed by a huge tree; None means 'did not measure', and a partial
+    sum is never passed off as a size. Pass sizes=False on a hot path.
+    Existing keys are unchanged (consumers: cli, harness_engine,
+    embed_engine, mteb_env)."""
     venv = bench_env_dir(dirname)
+
+    def _facts() -> dict:
+        if not sizes:
+            return {"venv_bytes": None, "cache_bytes": None}
+        try:
+            cache = hf_cache_dir()
+        except Exception:               # config.json unreadable: venv only
+            cache = None
+        return size_facts(venv, cache, budget_s=size_budget_s)
+
     py = venv / "bin" / "python"
     marker_path = venv / marker
     if not py.exists():
-        return {"state": "missing", "path": str(venv)}
+        return {"state": "missing", "path": str(venv), **_facts()}
     digest = requirements_digest(req)
     if marker_path.exists():
         import json
@@ -88,10 +268,59 @@ def status(*, dirname: str = VENV_DIRNAME, req: Path = REQUIREMENTS,
             built = None
     else:
         built = None
-    if built != digest:
+    if not _digests_current(built, req):
+        # 'built == legacy digest' is deliberate (see
+        # requirements_digest_legacy): a comment-only edit to the pin
+        # file must not send a working 604 MB / 1.5 GB env through a
+        # wipe+rebuild.
         return {"state": "stale", "path": str(venv),
-                "built_from": built, "wants": digest}
-    return {"state": "ready", "path": str(venv), "requirements": digest}
+                "built_from": built, "wants": digest, **_facts()}
+    return {"state": "ready", "path": str(venv), "requirements": digest,
+            **_facts()}
+
+
+def _guard_heavy_dep(py: Path, req: Path, *, quiet: bool = False) -> None:
+    """Pin-driven heavy-dependency guard (ACC-2e; evolves the old absolute
+    bench-env torch ban, it does not remove it).
+
+    Behavior matrix, all four cells deliberate:
+      torch pinned in `req`  + present  -> PASS, info log. The env asked
+                                          for it in its own requirements
+                                          file (mteb-env does; that is
+                                          the on-demand-deps policy:
+                                          measured minimal set, added
+                                          deliberately, reviewed).
+      torch NOT pinned       + present  -> RAISE + error log. Something
+                                          pulled ~600 MB in transitively
+                                          or a pin drifted; the accidental
+                                          bloat guard still bites.
+      anything               + absent   -> PASS silently (bench-env's
+                                          normal shape; a pin that failed
+                                          to install already died in pip).
+    `req` is the file THIS env was built from, so the answer is per-env:
+    bench-env refuses torch, mteb-env allows it, both by the same rule.
+    """
+    probe = subprocess.run(
+        [str(py), "-c", f"import importlib.util, sys;"
+         f"sys.exit(1 if importlib.util.find_spec({GUARD_MODULE!r}) else 0)"],
+        capture_output=True)
+    present = probe.returncode != 0        # exit 1 == find_spec found it
+    if not present:
+        return
+    pinned = GUARD_MODULE in requirements_names(req)
+    if pinned:
+        msg = (f"{GUARD_MODULE} present in env built from {Path(req).name} "
+               f"and pinned there — allowed (on-demand deps policy)")
+        if not quiet:
+            print(msg)
+        logger.info("uplift bench_env: %s", msg)
+        return
+    msg = (f"{GUARD_MODULE} appeared in the venv but is NOT pinned in "
+           f"{Path(req).name} — refusing (transitive bloat; if a scorer "
+           f"genuinely needs {GUARD_MODULE}, pin it in that file "
+           f"deliberately and rebuild)")
+    logger.error("uplift bench_env: %s", msg)
+    raise RuntimeError(msg)
 
 
 def create(*, reinstall: bool = False, quiet: bool = False,
@@ -101,18 +330,34 @@ def create(*, reinstall: bool = False, quiet: bool = False,
     """Build (or rebuild) a pinned bench venv. Returns status() at the end.
 
     Two envs share this machinery (REPL-4 decision, recorded on the card):
-    - bench-env: harness, torch-free HARD RULE (extra_check=None means the
-      default torch probe below; a torch appearing there is a pin mistake).
-    - mteb-env: MTEB, which hard-requires torch>=2.0 itself. Passing
-      extra_check (a function that RAISES on a bad venv) replaces the
-      torch probe — the kegs stay torch-free either way; only /store envs
-      carry evaluation dependencies.
+    - bench-env: harness; the heavy-dep guard refuses torch unless that
+      env's own requirements file pins it (today it does not — see
+      _guard_heavy_dep for the matrix).
+    - mteb-env: MTEB, which hard-requires torch>=2.0 and DOES pin it, so
+      the guard passes it by the same rule. extra_check (a function that
+      RAISES on a bad venv) runs IN ADDITION to the guard — it adds a
+      check, it does not switch the guard off. The kegs stay
+      torch-free either way; only /store envs carry evaluation
+      dependencies.
+
+    Rebuild semantics (ACC-2e): any build that is not a ready-no-op wipes
+    the target venv first — stale pin bump, explicit --reinstall, or a
+    half-present directory. pip cannot subtract, so a layered rebuild
+    would keep whatever the old pin had and the new one dropped: an
+    orphaned tree wearing a 'ready' marker.
     """
     st_kw = dict(dirname=dirname, req=req, marker=marker)
-    if status(**st_kw)["state"] == "ready" and not reinstall:
+    # the probe does not need to touch the tree — sizes are for the
+    # dict we RETURN, not for the decision we make here
+    if status(sizes=False, **st_kw)["state"] == "ready" and not reinstall:
         return status(**st_kw)
     venv = bench_env_dir(dirname)
-    if venv.exists() and reinstall:
+    if venv.exists():
+        # rmtree ALWAYS before a build (ACC-2e) — previously only
+        # reinstall=True wiped, which is how a stale rebuild silently
+        # kept dropped packages. The failure path below still wipes the
+        # half-built env, so no broken tree is ever left to be mistaken
+        # for a working one.
         shutil.rmtree(venv)
     venv.parent.mkdir(parents=True, exist_ok=True)
     base = _python_for_venv()
@@ -121,26 +366,26 @@ def create(*, reinstall: bool = False, quiet: bool = False,
     subprocess.run([base, "-m", "venv", str(venv)], check=True)
     py = venv / "bin" / "python"
     if not quiet:
-        print("installing pinned bench requirements (first run ~1-3 min)...")
-    subprocess.run([str(py), "-m", "pip", "install", "--quiet", "--upgrade", "pip"],
+        print("installing pinned bench requirements "
+              "(--no-cache-dir; measured 29 s cold, ~1-3 min on a slow "
+              "link — uplift keeps no pip cache, see module docstring)...")
+    # --no-cache-dir is the disk-hygiene half of ACC-2e: pip's default
+    # HTTP cache is machine-global (measured 884 MB on this box today)
+    # and every uplift rebuild would feed it forever, which is exactly
+    # the 'gigabyte leftovers' the on-demand-deps policy forbids. The
+    # owned-bounded-cache alternative was measured too (15 s warm vs
+    # 29 s cold) and rejected: 14 s saved per pin bump is not worth a
+    # cache we would have to prune, and mteb-env's torch wheel would
+    # have made it ~700 MB on its own.
+    subprocess.run([str(py), "-m", "pip", "install", "--quiet",
+                    "--no-cache-dir", "--upgrade", "pip"],
                    check=True)
     subprocess.run([str(py), "-m", "pip", "install", "--quiet",
-                    "-r", str(req)], check=True)
+                    "--no-cache-dir", "-r", str(req)], check=True)
     try:
+        _guard_heavy_dep(py, req, quiet=quiet)
         if extra_check is not None:
             extra_check(py)
-        else:
-            # HARD RULE check (bench-env): torch must not have snuck in as
-            # a transitive dep. exit 1 == find_spec found torch (see the
-            # sys.exit polarity below).
-            probe = subprocess.run(
-                [str(py), "-c", "import importlib.util, sys;"
-                 "sys.exit(1 if importlib.util.find_spec('torch') else 0)"],
-                capture_output=True)
-            if probe.returncode != 0:
-                raise RuntimeError(
-                    "torch appeared in the bench venv — refusing "
-                    "(card hard rule: harness env stays torch-free)")
         ver = subprocess.run(
             [str(py), "-c",
              f"import {import_name}; print({import_name}.__version__)"],
@@ -163,7 +408,7 @@ def create(*, reinstall: bool = False, quiet: bool = False,
 
 
 def harness_python() -> Optional[str]:
-    st = status()
+    st = status(sizes=False)   # hot path (every suite start): state only
     if st["state"] != "ready":
         return None
     py = Path(st["path"]) / "bin" / "python"
