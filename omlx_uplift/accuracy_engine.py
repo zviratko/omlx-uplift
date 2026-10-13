@@ -23,6 +23,14 @@ Contention mirrors classic's queue-add route (ANE tuning + context probe
 block accuracy adds; accuracy queue blocks throughput/context/ANE starts
 — the queue side is already wired through _other_bench_busy in
 context_engine.py, extended here).
+
+3. the ACC-2b SUITE SEAM (see suite_request_class below): harness-only
+  suites — HARNESS_MAP entries marked 'extra', beyond classic's 16 — are
+  admitted to the native queue through an UPLIFT-OWNED REQUEST SUBCLASS,
+  never by patching classic's class, and only for engine='harness'. They
+  ride the identical add/status/results/SSE/upload contract; they are
+  LOCAL-ONLY and the harness runner refuses to upload them (see
+  harness_engine.LOCAL_ONLY_UPLOAD_REASON).
 """
 from __future__ import annotations
 
@@ -74,6 +82,75 @@ def _ensure_restored() -> None:
 
 def valid_benchmarks() -> list[str]:
     return sorted(_acc().VALID_BENCHMARKS)
+
+
+# ---- ACC-2b: the suite seam ----------------------------------------------
+# classic's AccuracyBenchmarkRequest.validate_benchmarks
+# (accuracy_benchmark.py:93-103, VANILLA read-only code) hard-refuses any
+# name outside VALID_BENCHMARKS (the 16). Harness-only suites — HARNESS_MAP
+# entries marked 'extra' (IFEval/BBH/Czech, added by ACC-2c) — must still be
+# queueable through the SAME native contract (add/status/results/SSE/upload
+# shape), so uplift owns a request SUBCLASS that overrides exactly that one
+# validator and admits HARNESS_MAP names alongside the 16.
+#
+# Why a subclass and not a shim/patch of classic's class:
+# * pydantic v2 replaces a parent field_validator by NAME in a subclass, so
+#   the override is the framework's own extension point (drift-guarded
+#   against the real class in tests/test_acc2b_suite_seam.py);
+# * classic's own admin route, its /admin/api/bench/accuracy contract and
+#   every other caller keep the vanilla 16-name wall — a module-level patch
+#   of AB.AccuracyBenchmarkRequest would silently widen the PUBLIC omlx
+#   surface to names omlx cannot run (its Phase-3 evaluator registry has no
+#   such entry: accuracy_benchmark.py:494 skips it with a warning only);
+# * the subclass is chosen per request, at construction, on the engine the
+#   USER picked: 'harness' only. classic requests stay byte-for-byte 2a.
+# Admitted names are read from HARNESS_MAP at VALIDATION time (never a
+# frozen snapshot), so ACC-2c grows the map without touching this file.
+_request_class_cache: tuple = (None, None)     # (base class, uplift subclass)
+
+
+def suite_request_class(base: type) -> type:
+    """The uplift subclass over a given classic request class. Cached per
+    base identity so a module reload of classic rebuilds it and repeated
+    queue_adds do not create classes.
+
+    A non-class base means the caller is NOT talking to real classic (the
+    engine test doubles hand over a plain constructor): there is no
+    validator to override, so it is returned unchanged — logged, because on
+    a live server it would mean upstream left pydantic and the seam has to
+    be revisited (the drift guard in tests/test_acc2b_suite_seam.py is the
+    tripwire for exactly that)."""
+    global _request_class_cache
+    if _request_class_cache[0] is base:
+        return _request_class_cache[1]
+    if not isinstance(base, type):
+        logger.warning("accuracy suite seam: request base %r is not a class "
+                       "— nothing to override (test double?), extras stay "
+                       "refused", base)
+        return base
+    import pydantic
+    from . import harness_engine
+
+    class UpliftAccuracyRequest(base):  # type: ignore[misc,valid-type]
+        @pydantic.field_validator("benchmarks")
+        @classmethod
+        def validate_benchmarks(cls, v: dict) -> dict:
+            if not v:
+                raise ValueError("At least one benchmark is required")
+            admitted = harness_engine.admitted_benchmarks(
+                _acc().VALID_BENCHMARKS)
+            for name, size in v.items():
+                if name not in admitted:
+                    raise ValueError(
+                        f"Invalid benchmark '{name}'. Must be one of "
+                        f"{sorted(admitted)}")
+                if size < 0:
+                    raise ValueError(
+                        f"Sample size for '{name}' must be >= 0")
+            return v
+
+    _request_class_cache = (base, UpliftAccuracyRequest)
+    return UpliftAccuracyRequest
 
 
 # Task grid config: the static table from classic dashboard.js
@@ -149,6 +226,13 @@ async def queue_add(body: dict, pool: Any, *, upload: bool = False) -> dict:
 
     body = dict(body or {})
     engine = str(body.pop("engine", "classic") or "classic")
+    # ACC-2b: the engine decides WHICH request class validates the names, so
+    # this check moved above construction (message unchanged). Constructing
+    # a harness-only suite with classic's vanilla class would fail first
+    # with the misleading 'Must be one of [the 16]' wall and the seam's
+    # honest refusal would never be reached.
+    if engine not in ("classic", "harness"):
+        raise BadInput(f"unknown engine {engine!r} (classic|harness)")
     # classic iterates request.benchmarks in dict order, so suite order used
     # to be UI CLICK order — two runs of the same task SET executed (and
     # reported) differently (user request, 2026-10-13). Sort the keys here so
@@ -156,8 +240,12 @@ async def queue_add(body: dict, pool: Any, *, upload: bool = False) -> dict:
     bm = body.get("benchmarks")
     if isinstance(bm, dict):
         body["benchmarks"] = {k: bm[k] for k in sorted(bm)}
+    # the seam: a harness-engine request is validated by the uplift subclass
+    # (admits HARNESS_MAP extras); classic keeps classic's own class exactly
+    AB_cls = (suite_request_class(AB.AccuracyBenchmarkRequest)
+              if engine == "harness" else AB.AccuracyBenchmarkRequest)
     try:
-        req = AB.AccuracyBenchmarkRequest(**body)
+        req = AB_cls(**body)
     except Exception as e:
         raise BadInput(str(e)) from e
 
@@ -174,8 +262,6 @@ async def queue_add(body: dict, pool: Any, *, upload: bool = False) -> dict:
     # ONLY if every task is mapped and the profile is harness-safe
     # (harness_engine.run_usable), otherwise the classic engine takes
     # the run unchanged. The UI shows the effective engine per result row.
-    if engine not in ("classic", "harness"):
-        raise BadInput(f"unknown engine {engine!r} (classic|harness)")
     if engine == "harness":
         from . import harness_engine
         if req.external is not None:
@@ -186,6 +272,13 @@ async def queue_add(body: dict, pool: Any, *, upload: bool = False) -> dict:
             raise BadInput("harness engine has no equivalent for: "
                            + ", ".join(sorted(unmapped))
                            + " — run them with the classic engine")
+        # ACC-2b: a harness-only suite (an 'extra') has NO classic evaluator,
+        # so the dispatcher's classic fallback would DROP it silently — it
+        # must be admitted only into a run the harness will actually execute.
+        # Mirrors run_usable() gate for gate; honest refusal, cmmlu style.
+        refusal = harness_engine.extra_admission_error(req)
+        if refusal:
+            raise BadInput(refusal)
         req._uplift_engine = "harness"
 
     _ensure_restored()   # U64: disk rows must be in the list before the

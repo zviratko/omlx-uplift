@@ -33,7 +33,9 @@ Card decisions implemented (each pinned here or in tests):
   construction on both profiles.
 - UPLOAD: reuses classic's build_upload_context + upload_intelligence_
   result through the SAME opt-in window patch as REPL-2a, per suite,
-  BEFORE done — identical SSE contract.
+  BEFORE done — identical SSE contract. ACC-2b exception: a suite marked
+  'extra' (harness-only, see the seam block below) is NEVER uploaded —
+  omlx.ai knows only the classic 16 — and its row records the skip.
 """
 from __future__ import annotations
 
@@ -181,14 +183,112 @@ def _ensure_atexit() -> None:
     _atexit_done = True
 
 
+# ---- ACC-2b: the suite seam (harness-only suites beyond classic's 16) ------
+# A HARNESS_MAP entry may be an uplift-OWNED suite — one classic has never
+# heard of (IFEval, BBH, Czech sets ... added by ACC-2c). Such a spec carries
+# metadata keys NEXT TO the execution keys it already needs:
+#
+#   {'extra': True, 'label': <display str>, 'family': one of EXTRA_FAMILIES,
+#    'rows': <full-dataset question count or None>, 'upload_ok': False}
+#
+# Everything else (default-map entries, incl. the classic-16 twins such as
+# cmmlu when the sibling lane maps it) carries NO 'extra' key and keeps its
+# pre-2b semantics untouched.
+#
+# 'extra' means two hard things:
+# 1. classic's AccuracyBenchmarkRequest.validate_benchmarks refuses the name,
+#    so ONLY the harness engine can ever run it. accuracy_engine admits it
+#    through an uplift-owned request subclass (see there) — classic's class
+#    is never patched, its own admin route keeps the 16-name contract.
+# 2. omlx.ai's leaderboard knows only the 16, so the suite is LOCAL-ONLY:
+#    uploading would post a score the site has no column for. upload_blocked()
+#    is the single runner-side gate for that.
+EXTRA_FAMILIES = frozenset({"instruction", "reasoning", "locale"})
+# Machine-readable skip reason recorded on the row (and in the 'upload'
+# event) instead of an upload attempt. The native board renders ANY
+# upload.status == 'skipped' as '—' (uplift_bench.js:3275) exactly like the
+# REPL-2a opt-out, so no UI string was needed to surface this.
+LOCAL_ONLY_UPLOAD_REASON = "local_only_suite"
+
+
 def harness_available(task: str) -> bool:
     return task in HARNESS_MAP
+
+
+def suite_spec(task: str) -> dict:
+    """The HARNESS_MAP spec of a suite, or {} (never raises — callers read
+    metadata off names that may not be mapped at all)."""
+    return HARNESS_MAP.get(task) or {}
+
+
+def is_extra(task: str) -> bool:
+    """True for an uplift-owned suite outside classic's VALID_BENCHMARKS."""
+    return bool(suite_spec(task).get("extra"))
+
+
+def upload_blocked(task: str) -> bool:
+    """Runner gate: never hand this suite's score to omlx.ai. Driven by
+    'extra' (the leaderboard has no column for it) and honours an explicit
+    upload_ok: False on any future spec."""
+    spec = suite_spec(task)
+    return bool(spec.get("extra")) or spec.get("upload_ok") is False
+
+
+def admitted_benchmarks(classic_names: Any) -> set:
+    """Names a HARNESS-engine request may carry: classic's 16 plus every
+    HARNESS_MAP key (twins and extras). Read live on every call — never a
+    frozen snapshot — so ACC-2c adding a suite to HARNESS_MAP takes effect
+    without touching the seam, and tests can inject a fake extra."""
+    return set(classic_names) | set(HARNESS_MAP)
+
+
+def extra_suites() -> list[dict]:
+    """The picker's 'Additional suites' payload (ACC-2b contract, exact
+    shape): [{'key','label','family','rows','upload_ok': False}, ...] for
+    spec.get('extra') entries only, sorted by key. Twin entries (no
+    'extra') never appear here — they are already in the classic grid."""
+    out = []
+    for key in sorted(HARNESS_MAP):
+        spec = HARNESS_MAP[key]
+        if not spec.get("extra"):
+            continue
+        out.append({"key": key,
+                    "label": str(spec.get("label") or key),
+                    "family": spec.get("family"),
+                    "rows": spec.get("rows"),
+                    "upload_ok": False})
+    return out
+
+
+def extra_admission_error(request: Any) -> Optional[str]:
+    """Queue-side refusal for local-only suites, mirroring run_usable()
+    gate for gate (an extra admitted by the seam must be a run the harness
+    can ACTUALLY execute — classic cannot run it, so 'tag it and let the
+    dispatcher fall back' would silently drop the suite). Returns None when
+    the extras may be queued, else the honest message (same style as the
+    cmmlu 'no equivalent' refusal)."""
+    extras = sorted(t for t in (getattr(request, "benchmarks", None) or {})
+                    if is_extra(t))
+    if not extras:
+        return None
+    names = ", ".join(extras)
+    if getattr(request, "external", None) is not None:
+        return (f"harness-only suite(s) {names} run against a local model "
+                f"only — external endpoints use the classic engine")
+    if getattr(request, "enable_thinking", False):
+        return (f"harness-only suite(s) {names} cannot run with thinking "
+                f"enabled — the harness cannot send chat-template kwargs and "
+                f"the classic engine has no such suite")
+    return None
 
 
 def run_usable(request: Any) -> bool:
     """Dispatcher gate: tagged harness, local (external classic path is
     already native-compatible), no thinking (harness cannot send chat
-    template kwargs — classic keeps it honest), all tasks mapped."""
+    template kwargs — classic keeps it honest), all tasks mapped.
+    ACC-2b: extras live IN HARNESS_MAP, so they pass through here with no
+    change; queue_add.extra_admission_error keeps them from being tagged
+    into a run the harness would not execute."""
     if getattr(request, "_uplift_engine", None) != "harness":
         return False
     if request.external is not None or request.enable_thinking:
@@ -522,6 +622,20 @@ async def run_harness(run: Any, engine_pool: Any, classic_runner) -> None:
             emitted_any = True
             await AB._send_event(run, {"type": "result", "data": result_data})
             if run.upload_ctx is not None and run.status != "cancelled":
+                if upload_blocked(task):
+                    # ACC-2b upload gate: a local-only suite's score is
+                    # NEVER handed to omlx.ai, even when the user turned
+                    # community upload on for the run — the leaderboard has
+                    # no column for it. Recorded as a skip (not silence) so
+                    # the row and the SSE stream say why; the board renders
+                    # any status=='skipped' as '—', same as the opt-out.
+                    outcome = {"status": "skipped",
+                               "reason": LOCAL_ONLY_UPLOAD_REASON}
+                    result_data["upload"] = outcome
+                    await AB._send_event(run, {"type": "upload", "data": {
+                        "model_id": request.model_id, "benchmark": task,
+                        **outcome}})
+                    continue
                 outcome = await AB.upload_intelligence_result(
                     run, run.upload_ctx, result_data)
                 result_data["upload"] = outcome
@@ -543,8 +657,18 @@ async def run_harness(run: Any, engine_pool: Any, classic_runner) -> None:
         await AB._send_event(run, {"type": "error", "message": run.error_message})
     except Exception as e:
         logger.error(f"harness run failed: {e}", exc_info=True)
-        if emitted_any:
-            # half-scored run: report error honestly, NO silent re-run
+        # ACC-2b landmine (grep-verified): classic's Phase-3 loop dispatches
+        # on omlx.eval.BENCHMARKS.get(name) and only WARNS on a miss
+        # (accuracy_benchmark.py:494 'Unknown benchmark' -> continue). A
+        # local-only suite has no classic evaluator, so falling back would
+        # 'complete' the run with the extras silently DROPPED (0 suites for
+        # an all-extra run) — a green zombie. Runs carrying extras therefore
+        # never fall back: the harness failure is reported as the run's own
+        # error and the user decides.
+        has_extras = any(is_extra(t) for t in request.benchmarks)
+        if emitted_any or has_extras:
+            # half-scored run (or unrunnable-by-classic run): report the
+            # error honestly, NO silent re-run
             run.status = "error"
             run.error_message = str(e)
             await AB._send_event(run, {"type": "error", "message": str(e)})

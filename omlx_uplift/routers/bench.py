@@ -111,11 +111,22 @@ bench_history.reconcile_interrupted()
 async def bench_accuracy_tasks(is_admin: bool = Depends(require_admin)):
     """Classic's task grid (groups, dataset sizes, sample-size options)
     — VALID_BENCHMARKS stays server-owned; labels/descriptions are i18n
-    KEYS resolved client-side against the merged catalog."""
+    KEYS resolved client-side against the merged catalog.
+
+    ACC-2b seam keys (both additive; classic ignores what it does not know):
+    - 'harness_tasks': every HARNESS_MAP suite (classic-16 twins + extras)
+      — UNCHANGED shape, the queue's mapping check reads it;
+    - 'extra_suites': the harness-only suites beyond the 16, as
+      [{'key','label','family','rows','upload_ok': False}, ...]. The picker
+      renders them as a separate 'Additional suites' section; upload_ok is
+      False by definition (omlx.ai knows only the 16). 'valid' deliberately
+      STAYS the classic 16 — it is the leaderboard-eligible set, not the
+      queueable set."""
     from .. import harness_engine
     return {"tasks": accuracy_engine.TASK_GROUPS,
             "valid": accuracy_engine.valid_benchmarks(),
-            "harness_tasks": sorted(harness_engine.HARNESS_MAP)}
+            "harness_tasks": sorted(harness_engine.HARNESS_MAP),
+            "extra_suites": harness_engine.extra_suites()}
 
 
 @api_router.get("/bench/accuracy/harness-sizes")
