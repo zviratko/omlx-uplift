@@ -2572,7 +2572,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .bench-table { border-collapse: collapse; width: 100%; font-size: 11px; }
 /* U47: result-card header row — Copy lives top-right like classic's */
 .bench-results-head { display: flex; justify-content: flex-end; gap: 6px;
-    margin: 0 0 6px; }
+    margin: 0 0 6px; position: relative; }
+/* U-DL (2026-10-13): .bench-dl-menu is absolute; without a positioned
+   ancestor the results-head menus opened pinned to the page's top-left —
+   "clicking Download does nothing" next to the button. Anchor them to the
+   head, right-aligned under the buttons that open them. */
+.bench-results-head .bench-dl-menu { left: auto; right: 0; }
 .bench-results-head .btn { font-size: 11px; padding: 3px 10px; }
 .bench-table th, .bench-table td { border-bottom: 1px solid var(--edge);
   padding: 3px 8px; text-align: right; }

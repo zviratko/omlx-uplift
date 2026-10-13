@@ -776,8 +776,13 @@ function dlFile(name, mime, text) {
     a.href = url; a.download = name;
     w.document.body.appendChild(a);
     a.click();
-    a.remove();
-    w.URL.revokeObjectURL(url);
+    // Safari/Firefox read the blob URL asynchronously after click() —
+    // revoking synchronously here silently kills the download (embed
+    // bench 'Download does nothing', user 2026-10-13). Detach lazily.
+    w.setTimeout(function () {
+        a.remove();
+        w.URL.revokeObjectURL(url);
+    }, 4000);
     return true;
 }
 
@@ -971,8 +976,12 @@ function dlMenu(makeName, formats) {
             b.type = 'button';
             b.addEventListener('click', function (ev2) {
                 ev2.stopPropagation();
+                // close BEFORE the action: the action's synthetic anchor
+                // click bubbles to document and fires our dismiss — a
+                // stale `open.remove()` after it threw TypeError (2026-10-13)
+                var o = open; open = null;
+                if (o) o.remove();
                 f[0](makeName());
-                open.remove(); open = null;
             });
             open.appendChild(b);
         });
@@ -1000,8 +1009,12 @@ function dropMenu(host, btn, entries) {
             b.type = 'button';
             b.addEventListener('click', function (ev2) {
                 ev2.stopPropagation();
+                // close BEFORE the action — same document-dismiss race
+                // as dlMenu (anchor click bubbles; stale open.remove()
+                // threw TypeError after every download, 2026-10-13)
+                var o = open; open = null;
+                if (o) o.remove();
                 f[2]();
-                open.remove(); open = null;
             });
             open.appendChild(b);
         });
@@ -3312,9 +3325,15 @@ function MTEB(kind) {
                         selfM.state.results.slice().reverse());
                 }, null, null, {
                     name: function () {
-                        var mSel = gid(prefix + '-model');
-                        return 'uplift_' + kind + '_'
-                            + String((mSel && mSel.value) || 'run');
+                        // same fallback as the decision panel: newest
+                        // result's model beats the (possibly reset) selector
+                        var rs = selfM.state.results;
+                        var m = rs.length ? rs[rs.length - 1].model_id : '';
+                        if (!m) {
+                            var mSel = gid(prefix + '-model');
+                            m = mSel && mSel.value;
+                        }
+                        return 'uplift_' + kind + '_' + String(m || 'run');
                     },
                     rows: function () { return selfM.state.results.slice().reverse(); },
                     cols: function () { return [
