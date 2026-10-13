@@ -108,3 +108,25 @@ async def test_task_cancel_reaches_terminal_state_and_releases(monkeypatch,
     assert "error" in types, "terminal event must reach SSE subscribers"
     assert cm.exited == 1, "cancelled run still releases its lease exactly once"
     assert run.results == [], "a cancelled pack is never persisted"
+
+
+def test_lease_seam_matches_installed_omlx_shape():
+    """Drift guard — the LIVE shape, not the mock.
+
+    REPL-4c guessed `omlx.server.acquire_decision_engine` (mirroring
+    acquire_embedding/reranker_engine); it never existed upstream and the
+    mocked seam above kept the suite green until a live bench run died with
+    AttributeError. This test imports the REAL omlx when present and pins
+    that _lease can produce an enter/exit-able CM from it. CI (no omlx)
+    skips it via importorskip."""
+    pytest.importorskip("omlx.server")
+    from omlx import server as srv
+
+    has_helper = callable(getattr(srv, "acquire_decision_engine", None))
+    assert has_helper or (
+        callable(getattr(srv, "get_decision_engine", None))
+        and hasattr(srv, "_LLMEngineLease")
+    ), "omlx.server changed the decision lease shape again — adapt _lease()"
+
+    cm = de._lease("seam-shape-check-not-entered")  # must NOT load a model
+    assert hasattr(cm, "__aenter__") and hasattr(cm, "__aexit__")

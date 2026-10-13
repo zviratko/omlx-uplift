@@ -7,7 +7,8 @@ request format is bespoke (typed questions: choice / noul).
 Why in-process instead of a subprocess venv (contrast with REPL-4a/4b):
 the eval here IS a sequence of /v1/systemone calls — nothing to delegate.
 We call the EXACT public endpoint logic (server.create_systemone) through
-upstream's own lease helper `acquire_decision_engine` so:
+upstream's real decision lease (`_LLMEngineLease` + `get_decision_engine`,
+wrapped as an async CM in _lease) so:
   - the scored path is byte-for-byte what any API client hits (parity
     doctrine: bench measures the serving path, not a private seam),
   - the decision engine cannot be evicted mid-run (eviction-proof lease),
@@ -250,10 +251,38 @@ def _check_decision_model(model_id: str) -> None:
 
 def _lease(model_id: str):
     """The upstream lease seam, isolated for testing: returns an async CM
-    yielding a leased DecisionEngine (server.py acquire_decision_engine).
-    Local stand-in classes above mean _runner itself never imports omlx."""
+    yielding a leased DecisionEngine. Local stand-in classes above mean
+    _runner itself never imports omlx.
+
+    There is NO `acquire_decision_engine` upstream — REPL-4c guessed the
+    name after acquire_embedding_engine/acquire_reranker_engine and the
+    mocked seam hid the AttributeError until a live bench run. The real
+    create_systemone lease shape is object-based:
+        lease = _LLMEngineLease()
+        engine = await get_decision_engine(model_id, lease)
+        ...
+        finally: await lease.release()   # idempotent
+    Wrapped as an async CM here so the pinned enter/exit protocol in
+    _runner keeps working: when get_decision_engine raises, __aenter__
+    raises before any yield, the finally releases a never-taken lease
+    (model_id None -> no-op) and _runner correctly skips __aexit__.
+    """
+    from contextlib import asynccontextmanager
     from omlx import server as _srv
-    return _srv.acquire_decision_engine(model_id)
+
+    acquire = getattr(_srv, "acquire_decision_engine", None)
+    if callable(acquire):   # prefer a symmetric helper if upstream ever adds one
+        return acquire(model_id)
+
+    @asynccontextmanager
+    async def _cm():
+        lease = _srv._LLMEngineLease()
+        try:
+            yield await _srv.get_decision_engine(model_id, lease)
+        finally:
+            await lease.release()
+
+    return _cm()
 
 
 async def _runner(run: DecisionRun) -> None:
