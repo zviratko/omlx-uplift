@@ -92,7 +92,8 @@ HARNESS_MAP: dict[str, dict[str, Any]] = {
     "kmmlu": {"tasks": ["kmmlu_direct"], "fewshot": 5,
               # 2026-10-14 re-probe: the old group-load KeyError is GONE
               # in this bench-env (TaskManager loads kmmlu + all 30
-              # kmmlu_* groups cleanly; 108 kmmlu_direct leaves,
+              # kmmlu_* groups cleanly; 45 kmmlu_direct leaves — measured
+              # with the repo's own harness_sizes.py probe 2026-10-14),
               # generate_until on HAERAE-HUB/KMMLU with per-subject
               # dataset_name). direct = letter-answer prompt, closest to
               # classic (omlx/eval/kmmlu.py); 5-shot mirrors classic's
