@@ -10,8 +10,15 @@ Fake-classic-module doctrine as in the other engine test files. Pinned:
 - dispatcher wraps AB exactly once and untagged runs reach classic
 - 2b-carryover: the custom generative yamls parse as harness configs and
   match their HARNESS_MAP specs; --include_path rides every suite spawn;
-  map/NOT_HARNESS stay disjoint (cmmlu REFUSED with its script-wall
-  reason); the sizes cache is fingerprinted and a stale file is ignored
+  map/NOT_HARNESS stay disjoint; the sizes cache is fingerprinted and a
+  stale file is ignored
+- cmmlu vendoring (user override of the script-wall refusal, 2026-10-14):
+  the twin's group yaml matches its map spec and carries one inline leaf
+  per vendored subject; the packaged JSONL is present, shaped and
+  row-count-complete (whitespace verbatim — classic parity); PROVENANCE.md
+  states the pinned revision, checksum, counts and the licence actually
+  found; the loader resolves its data from Path(__file__) (no hub, no
+  absolute path) and never needs `datasets` at import time
 """
 from __future__ import annotations
 
@@ -251,6 +258,10 @@ def test_custom_generative_yamls_match_harness_map():
     custom = {k: v for k, v in he.HARNESS_MAP.items()
               if any(t.startswith("uplift_") for t in v["tasks"])}
     assert {"hellaswag", "winogrande", "mathqa", "truthfulqa"} <= set(custom)
+    # cmmlu's custom task is a GROUP file (one inline leaf per subject),
+    # not a single-task leaf: it has no top-level `task:`/`metric_list` of
+    # its own to match, so it is checked by its own test below.
+    custom = {k: v for k, v in custom.items() if k != "cmmlu"}
     for suite, spec in custom.items():
         name = spec["tasks"][0]
         f = ydir / f"{name}.yaml"
@@ -340,15 +351,17 @@ def test_map_and_refusals_disjoint_and_current():
     # list — and must STAY off (regression pin for the next person)
     for t in ("hellaswag", "winogrande", "mathqa", "truthfulqa", "kmmlu"):
         assert he.harness_available(t), t
-    # cmmlu stays refused: script-only dataset, unloadable in bench-env
-    # (NOT_HARNESS carries the fresh probe evidence — do not map it just
-    # because a yaml file could be written for it)
-    assert "cmmlu" not in he.HARNESS_MAP
-    assert "cmmlu" in he.NOT_HARNESS and "script" in he.NOT_HARNESS["cmmlu"]
+    # cmmlu: the hub-side script wall still STANDS as a fact, but the user
+    # verdict of 2026-10-14 is that the twin sidesteps it by scoring
+    # VENDORED data — so cmmlu is mapped and NOT in NOT_HARNESS any more.
+    # The proof it is a real home (not just a yaml file that cannot load):
+    # its data ships in the package, checked below.
+    assert he.harness_available("cmmlu")
+    assert "cmmlu" not in he.NOT_HARNESS
     # exec-isolation + no-equivalent decisions STAND (card: do not
     # regress)
     assert set(he.NOT_HARNESS) >= {"humaneval", "mbpp", "jmmlu",
-                                   "livecodebench", "safetybench", "cmmlu"}
+                                   "livecodebench", "safetybench"}
 
 
 @pytest.mark.asyncio
@@ -373,17 +386,17 @@ async def test_queue_add_engine_validation_after_mapping(fake_ab):
     # newly mapped tasks are ACCEPTED by the harness engine now
     await ae.queue_add({"model_id": "m1",
                         "benchmarks": {"hellaswag": 5, "truthfulqa": 5,
-                                       "kmmlu": 5},
+                                       "kmmlu": 5, "cmmlu": 5},
                         "engine": "harness"}, Pool())
     assert getattr(fake_ab.queue[-1], "_uplift_engine") == "harness"
-    # cmmlu still REFUSED, naming itself (the queue-side mirror of the
-    # script-wall finding — the UI hides it because the tasks endpoint
+    # jmmlu still REFUSED, naming itself (the queue-side mirror of the
+    # NOT_HARNESS decision — the UI hides it because the tasks endpoint
     # data-drives off HARNESS_MAP)
     with pytest.raises(ae.BadInput) as e:
         await ae.queue_add({"model_id": "m1",
-                            "benchmarks": {"cmmlu": 5},
+                            "benchmarks": {"jmmlu": 5},
                             "engine": "harness"}, Pool())
-    assert "cmmlu" in str(e.value)
+    assert "jmmlu" in str(e.value)
 
 
 # ---- sizes cache fingerprint ------------------------------------------------
@@ -423,3 +436,289 @@ def test_sizes_cache_ignores_stale_fingerprint(tmp_path, monkeypatch):
                              "sizes": {"mmlu": 57}}))
     monkeypatch.setattr(he, "_sizes_mem", None)
     assert he.subtask_counts() is None
+
+
+# ---- cmmlu: vendored dataset + group twin (2026-10-14 user override) ------
+#
+# The hub-side fact that once put cmmlu in NOT_HARNESS still stands:
+# haonan-li/cmmlu (= lmlmcat/cmmlu) ships only a datasets loader script +
+# cmmlu_v1_0_1.zip, datasets 5.x refuses scripts, no parquet mirror. What
+# changed is that the twin never asks the hub: the splits are packaged, so
+# these tests are the load-bearing proof that the suite is real (a yaml
+# whose data cannot load would pass every other check in this file).
+
+CMMLU_REVISION = "efcc940752ea4a1ea94d2727f11f83858d64fc8e"
+CMMLU_ZIP_SHA256 = ("22ecf70b28bef447ee7d8aa5fe144f56996762f901a8537b03b"
+                    "7693773c672a6")
+CMMLU_TEST_ROWS = 11582          # == classic's bundled cmmlu_test.jsonl
+CMMLU_SUBJECTS = 67              # cmmlu.py task_list
+
+
+def _cmmlu_data_dir():
+    from pathlib import Path
+    from omlx_uplift import harness_engine as he
+    return Path(he._task_yamls_dir()).parent / "cmmlu_data"
+
+
+def _cmmlu_rows(split, subject):
+    import json
+    p = _cmmlu_data_dir() / split / f"{subject}.jsonl"
+    return [json.loads(line) for line in
+            p.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _cmmlu_subject_files(split):
+    return sorted(p.stem for p in (_cmmlu_data_dir() / split).glob("*.jsonl"))
+
+
+def _gen_utils():
+    """Load the yaml helper module the way lm_eval does: straight from the
+    file, WITHOUT lm_eval or `datasets` (this is what CI can run)."""
+    import importlib.util
+    from pathlib import Path
+    from omlx_uplift import harness_engine as he
+    p = Path(he._task_yamls_dir()) / "uplift_generative_utils.py"
+    s = importlib.util.spec_from_file_location("uplift_gen_utils_cmmlu_probe", p)
+    mod = importlib.util.module_from_spec(s)
+    s.loader.exec_module(mod)
+    return mod
+
+
+def test_cmmlu_vendored_data_is_present_shaped_and_complete():
+    d = _cmmlu_data_dir()
+    assert (d / "test").is_dir() and (d / "dev").is_dir(), f"no vendored data at {d}"
+    assert (d / "PROVENANCE.md").is_file()
+    assert _cmmlu_subject_files("test") == _cmmlu_subject_files("dev")
+    subs = _cmmlu_subject_files("test")
+    assert len(subs) == CMMLU_SUBJECTS, len(subs)
+    total = 0
+    for s in subs:
+        dev = _cmmlu_rows("dev", s)
+        assert len(dev) == 5, f"{s}: dev pool {len(dev)} != 5 (classic caps at 5)"
+        assert [r["row_id"] for r in dev] == [0, 1, 2, 3, 4]
+        assert all(r["subject"] == s for r in dev)
+        test = _cmmlu_rows("test", s)
+        assert len(test) >= 100, f"{s}: only {len(test)} test rows"
+        total += len(test)
+        for r in test + dev:
+            assert set(r) == {"row_id", "question", "choices", "answer",
+                              "subject"}, r.keys()
+            assert isinstance(r["choices"], list) and len(r["choices"]) == 4
+            assert all(c for c in r["choices"]), f"{s}: empty option"
+            assert r["answer"] in ("A", "B", "C", "D"), r
+            assert r["question"], f"{s}: empty question"
+    assert total == CMMLU_TEST_ROWS, total
+
+
+def test_cmmlu_vendored_questions_keep_the_sources_whitespace():
+    """Parity pin: classic prints the question VERBATIM
+    (omlx/eval/cmmlu.py _format_question does no strip), and the upstream
+    CSVs carry trailing/leading spaces on some rows. Stripping during
+    vendoring would silently change the scored prompt, so the exact counts
+    of whitespace-bearing rows are part of the contract."""
+    trail = lead = total = 0
+    for s in _cmmlu_subject_files("test"):
+        for r in _cmmlu_rows("test", s):
+            total += 1
+            q = r["question"]
+            trail += q != q.rstrip()
+            lead += q != q.lstrip()
+    assert total == CMMLU_TEST_ROWS
+    assert (trail, lead) == (37, 3), (trail, lead)
+    # the agronomy first row classic scores is the shape we ship
+    r0 = _cmmlu_rows("test", "agronomy")[0]
+    assert r0["answer"] == "B" and r0["choices"][1] == "土地"
+
+
+def test_cmmlu_group_yaml_matches_harness_map():
+    from omlx_uplift import harness_engine as he
+    yaml, Loader = _harness_yaml_loader()
+    spec = he.HARNESS_MAP["cmmlu"]
+    name = spec["tasks"][0]
+    f = he._task_yamls_dir() / f"{name}.yaml"
+    cfg = yaml.load(f.read_text(), Loader=Loader)
+    assert cfg["group"] == name == "uplift_cmmlu_generative"
+    # the data route: never dataset_path (that is the hub, and the hub is
+    # unloadable here) — a packaged custom_dataset instead
+    assert "dataset_path" not in cfg
+    assert cfg["custom_dataset"] == "uplift_generative_utils.cmmlu_dataset"
+    assert cfg["test_split"] == "test" and cfg["fewshot_split"] == "dev"
+    assert cfg["output_type"] == "generate_until"          # NAT-2: no logprobs
+    assert cfg["num_fewshot"] == spec["fewshot"] == 5      # classic is 5-shot
+    assert cfg["fewshot_config"]["sampler"] == "first_n"   # classic: file order
+    for key in ("doc_to_text", "doc_to_target"):
+        assert cfg[key].startswith("uplift_generative_utils.cmmlu_"), key
+    assert any(m["metric"] == spec["metric"] for m in cfg["metric_list"])
+    assert any(fl["name"] == spec["metric_contains"] for fl in cfg["filter_list"])
+    # stop where classic's extractor stops looking (same two-char escape the
+    # sibling custom yamls carry)
+    assert "\\n" in str(cfg["generation_kwargs"]["until"])
+    # one inline leaf per vendored subject, keyed by the subject id
+    members = cfg["task"]
+    assert len(members) == CMMLU_SUBJECTS, len(members)
+    assert [m["task"] for m in members] == _cmmlu_subject_files("test")
+    for m in members:
+        assert m["dataset_kwargs"] == {"subject": m["task"]}, m
+        # bare ids must never collide with a registered lm_eval task: the
+        # built-in cmmlu/kmmlu leaves are prefixed, ours are not (the
+        # foreign-cwd registration probe verified zero collisions)
+        assert not m["task"].startswith(("cmmlu_", "kmmlu_", "mmlu", "uplift_"))
+    # no absolute paths anywhere: the wheel must work wherever it is installed
+    assert "/Users/" not in f.read_text() and str(_cmmlu_data_dir()) not in f.read_text()
+
+
+def test_cmmlu_loader_is_packaged_relative_and_imports_no_datasets():
+    mod = _gen_utils()
+    from pathlib import Path
+    import omlx_uplift
+    pkg = Path(omlx_uplift.__file__).resolve().parent
+    assert str(mod.CMMLU_DATA_DIR).startswith(str(pkg)), mod.CMMLU_DATA_DIR
+    assert mod.CMMLU_DATA_DIR.is_dir()
+    assert len(mod.cmmlu_subjects()) == CMMLU_SUBJECTS
+    src = (Path(mod.__file__)).read_text(encoding="utf-8")
+    top = [ln for ln in src.splitlines()
+           if ln.startswith(("import ", "from "))]
+    assert not any(d in ln for ln in top for d in ("datasets", "lm_eval",
+                                                   "huggingface")), top
+    # the loader refuses to invent data, and checks BEFORE importing
+    # anything (so this needs neither lm_eval nor datasets): a subject with
+    # no packaged file fails loudly instead of scoring an empty split
+    with pytest.raises(FileNotFoundError):
+        mod.cmmlu_dataset(subject="no_such_subject")
+    with pytest.raises(ValueError):
+        mod.cmmlu_dataset()
+
+
+def test_cmmlu_prompt_mirror_is_classic_byte_equal():
+    """Byte-level parity with classic's format_prompt WITHOUT lm_eval.
+
+    The right-hand side is the classic algorithm re-typed from
+    omlx/eval/cmmlu.py (header part with its own trailing newline, per
+    example: question block then '答案: X' with a trailing newline, then the
+    test block then '答案:', everything joined with '\\n'); the left-hand
+    side is what the harness assembles from the vendored rows with THIS
+    yaml's delimiters. bench-env independently confirmed 30/30 real
+    fewshot_context() strings equal classic's own content."""
+    import yaml as _yaml
+    from omlx_uplift import harness_engine as he
+
+    def classic_format(item):
+        parts = [item["question"]]
+        for letter, choice in zip(["A", "B", "C", "D"], item["choices"]):
+            parts.append(f"{letter}. {choice}")
+        return "\n".join(parts)
+
+    def classic_prompt(subject, examples, item):
+        name = subject.replace("_", " ").replace("-", " ").title()
+        parts = [f"以下是关于{name}的单选题，请直接回答正确选项的字母（A、B、C或D）。\n"]
+        for ex in examples:
+            parts.append(classic_format(ex))
+            parts.append(f"答案: {ex['answer']}\n")
+        parts.append(classic_format(item))
+        parts.append("答案:")
+        return "\n".join(parts)
+
+    mod = _gen_utils()
+    yaml, Loader = _harness_yaml_loader()
+    cfg = yaml.load((he._task_yamls_dir() / "uplift_cmmlu_generative.yaml")
+                    .read_text(), Loader=Loader)
+    fs = cfg["fewshot_config"]
+    tgt, few = fs["target_delimiter"], fs["fewshot_delimiter"]
+
+    for subject in ("agronomy", "chinese_food_culture", "professional_law"):
+        pool = _cmmlu_rows("dev", subject)[:cfg["num_fewshot"]]
+        assert len(pool) == 5
+        # exactly lm_eval's single-turn collapse: per example
+        # q+tgt_delim+a+few_delim, then the eval question with no delimiter
+        head = "".join(mod.cmmlu_fewshot_doc_to_text(d) + tgt
+                       + mod.cmmlu_fewshot_doc_to_target(d) + few for d in pool)
+        for item in _cmmlu_rows("test", subject)[:3] + pool[:1]:
+            assert head + mod.cmmlu_doc_to_text(item) == \
+                classic_prompt(subject, pool, item), subject
+            assert mod.cmmlu_doc_to_target(item) == item["answer"]
+    # the instruction line appears ONCE (classic), not once per example
+    once = mod.cmmlu_fewshot_doc_to_text(_cmmlu_rows("dev", "arts")[0])
+    twice = mod.cmmlu_fewshot_doc_to_text(_cmmlu_rows("dev", "arts")[1])
+    assert once.count("单选题") == 1 and twice.count("单选题") == 0
+    assert once.startswith("以下是关于Arts的单选题")   # title-cased subject
+
+
+def test_cmmlu_provenance_states_snapshot_counts_and_found_licence():
+    p = _cmmlu_data_dir() / "PROVENANCE.md"
+    text = p.read_text(encoding="utf-8")
+    assert CMMLU_REVISION in text                       # pinned data snapshot
+    assert CMMLU_ZIP_SHA256 in text                     # the exact zip
+    assert "cmmlu_v1_0_1.zip" in text
+    assert "haonan-li/cmmlu" in text and "lmlmcat/cmmlu" in text
+    assert str(CMMLU_TEST_ROWS) in text and "335" in text
+    # licence: BOTH statements found on the hub, neither smoothed over, and
+    # the non-commercial term called out explicitly
+    assert "cc-by-nc-4.0" in text and "BY-NC-SA" in text
+    assert "NonCommercial" in text and "NON-COMMERCIAL" in text
+    assert "no LICENSE file" in text                     # upstream repo: none
+    # the extraction rule that keeps classic parity is documented, not tribal
+    assert "verbatim" in text
+    # and the reproducible extractor is part of the repo
+    import re
+    vendor = (p.parents[3] / "scripts" / "vendor_cmmlu.py").read_text()
+    assert CMMLU_REVISION in vendor and CMMLU_ZIP_SHA256 in vendor
+    assert "datasets.load_dataset" not in vendor and "import pandas" not in vendor
+    assert re.search(r"import (zipfile|csv)", vendor)
+
+
+def test_cmmlu_data_is_declared_as_package_data():
+    """A packaged dataset nobody installs is a silent 0-score suite: the
+    wheel must carry the JSONL next to the yamls (the ac97e12 mechanism)."""
+    import re
+    from pathlib import Path
+    from omlx_uplift import harness_engine as he
+    toml = (Path(he.__file__).resolve().parents[1] / "pyproject.toml")
+    block = toml.read_text(encoding="utf-8")
+    sec = block.split("[tool.setuptools.package-data]", 1)[1]
+    for pat in ("cmmlu_data/test/*.jsonl", "cmmlu_data/dev/*.jsonl",
+                "cmmlu_data/PROVENANCE.md"):
+        assert pat in sec, pat
+    assert re.search(r"\"omlx_uplift\.bench_tasks\"\s*=", sec)
+
+
+def test_cmmlu_results_json_group_shape_is_scored_over_all_leaves(tmp_path):
+    """Real captured shape (results_2026-10-14T01-38-56, scratch smoke):
+    67 leaf rows `uplift_cmmlu_generative::<subject>` each carrying both
+    filters, PLUS a metric-less group row and NO 'groups' key at all. The
+    engine must weight-average the leaves, report 67 x --limit as the
+    evaluated count, and never take the group row for a leaf (U67 rule)."""
+    import json
+    from pathlib import Path
+    from omlx_uplift import harness_engine as he
+    spec = he.HARNESS_MAP["cmmlu"]
+    rows = {f"uplift_cmmlu_generative::{s}":
+                {"name": f"uplift_cmmlu_generative::{s}",
+                 "alias": f"uplift_cmmlu_generative::{s}",
+                 "sample_len": 5,
+                 "exact_match,strict-match": 0.0,
+                 "exact_match_stderr,strict-match": 0.0,
+                 "exact_match,flexible-extract": 1.0 if i % 2 else 0.0,
+                 "exact_match_stderr,flexible-extract": 0.2449}
+            for i, s in enumerate(_cmmlu_subject_files("test"))}
+    rows["uplift_cmmlu_generative"] = {"alias": "cmmlu (generative)",
+                                       "name": "uplift_cmmlu_generative"}
+    Path(tmp_path, "results_1.json").write_text(json.dumps({"results": rows}))
+    score, n = he._parse_results_json(tmp_path, spec["metric"],
+                                      spec["metric_contains"])
+    assert n == 5 * CMMLU_SUBJECTS == 335, n
+    assert score == pytest.approx(33 / 67), score      # flexible, not strict
+    # metric_contains=None would take the strict row of the first leaf: the
+    # map MUST keep naming flexible-extract (repo mmlu doctrine)
+    s2, _ = he._parse_results_json(tmp_path, spec["metric"], None)
+    assert s2 == 0.0
+
+
+def test_cmmlu_suite_args_carry_the_group_task(tmp_path):
+    from omlx_uplift import harness_engine as he
+    args = he._suite_args(he.HARNESS_MAP["cmmlu"],
+                          "http://127.0.0.1:8124/v1/chat/completions",
+                          "SmolLM2-360M-Instruct-oQ4", tmp_path, 5,
+                          "deterministic")
+    assert args[args.index("--tasks") + 1] == "uplift_cmmlu_generative"
+    assert args[args.index("--num_fewshot") + 1] == "5"
+    assert args[args.index("--include_path") + 1] == str(he._task_yamls_dir())

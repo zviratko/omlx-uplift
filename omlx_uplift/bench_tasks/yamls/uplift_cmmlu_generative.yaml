@@ -1,0 +1,313 @@
+# REPL-2b(cmmlu): generative twin of classic's cmmlu (omlx/eval/cmmlu.py),
+# scored on VENDORED data — see ../cmmlu_data/PROVENANCE.md for where the
+# rows come from and under what licence.
+#
+# Why the data is in the repo: haonan-li/cmmlu (a redirect to lmlmcat/cmmlu)
+# ships ONLY a datasets loader script + cmmlu_v1_0_1.zip; datasets 5.x in
+# bench-env refuses loader scripts and the hub has no auto-converted parquet
+# (2026-10-14 probe, the reason cmmlu sat in NOT_HARNESS). `custom_dataset`
+# below therefore reads the packaged JSONL next to this file's parent dir:
+# Path(__file__)-relative, so it resolves identically from any cwd, with
+# --include_path, and inside an installed wheel. No hub, no script, no
+# absolute paths — HF_HUB_OFFLINE=1 builds it.
+#
+# Suite shape: ONE LEAF PER SUBJECT (67), like mmlu (57) / kmmlu (45),
+# because lm_eval's --limit is per task: a 'N questions' run stays a spread
+# over subjects (classic stratified-samples by subject, omlx/eval/cmmlu.py
+# :73) instead of the first N rows of one alphabetically-first file. The
+# leaves are INLINE members of this group (lm_eval builds any `task:` entry
+# whose name is not in the registry from the group's own keys), so the whole
+# suite is this one file — the shared prompt/metric block below is inherited
+# by every member, and only `subject` differs. Member base names are bare
+# subject ids on purpose: they must NOT collide with a registered task name
+# (the 67 bare ids collide with none; tests pin that the member list equals
+# the vendored file list).
+#
+# Parity inputs, all read off classic (omlx/eval/cmmlu.py, cross-checked
+# against its bundled data): dataset id haonan-li/cmmlu, EVALUATED SPLIT
+# test (11582 rows, byte-identical to classic's own cmmlu_test.jsonl),
+# FEW-SHOT POOL dev (5 rows/subject, first_n sampler in file order = the
+# order classic appends them), NUM SHOTS 5, letters A-D from the CSV columns,
+# prompt = instruction line + 'X. option' lines + '\n答案:' cue. The
+# instruction line appears ONCE, above the first example — classic joins its
+# parts with '\n' that way, so cmmlu_fewshot_doc_to_text emits it for
+# dev row_id 0 only and the harness context is byte-equal to classic's
+# single user message. Measured on exactly the samples a --limit 5
+# run scores (first 5 test rows x 67 leaves, contexts built by
+# lm_eval itself from a foreign cwd with HF_HUB_OFFLINE=1): 50/50
+# BYTE-IDENTICAL for the 10 subjects classic still has a pool for,
+# and for the other 285 classic's prompt is byte-identical to
+# header+question block — i.e. the ONLY difference is the shots
+# classic's own dev bundle lost (divergence note below), zero other
+# diffs. Wall time of the full 67-leaf x 5-sample run: 47 s at
+# 5-shot, 70 s at 0-shot, SmolLM2-360M-oQ4, scratch :8124 server.
+#
+# KNOWN, DELIBERATE divergence from classic's RUNTIME (classic-side data
+# bug, not a twin bug): classic's bundled cmmlu_dev.jsonl covers only 10 of
+# the 67 subjects, so 57 subjects silently run 0-SHOT there while the module
+# documents 5-shot. The vendored dev split is the full 67x5 (the first five
+# rows of the 10 subjects classic does have are identical), so the twin is
+# honestly 5-shot everywhere. Divergence wave: quantify before blaming the
+# model.
+group: uplift_cmmlu_generative
+group_alias: cmmlu (generative)
+num_fewshot: 5
+
+# ---------------- shared leaf config (inherited by every member) ----------
+custom_dataset: !function uplift_generative_utils.cmmlu_dataset
+test_split: test
+fewshot_split: dev
+output_type: generate_until
+doc_to_text: !function uplift_generative_utils.cmmlu_doc_to_text
+doc_to_target: !function uplift_generative_utils.cmmlu_doc_to_target
+fewshot_config:
+  # classic takes the FIRST 5 dev rows per subject, in file order — not a
+  # random draw (mmlu/ceval/kmmlu use the same sampler for the same reason).
+  sampler: first_n
+  doc_to_text: !function uplift_generative_utils.cmmlu_fewshot_doc_to_text
+  doc_to_target: !function uplift_generative_utils.cmmlu_fewshot_doc_to_target
+  # '...D. option' + '\n' + '答案: X', then a blank line before the next
+  # example — exactly classic's '\n'.join(parts) shape.
+  target_delimiter: "\n"
+  fewshot_delimiter: "\n\n"
+target_delimiter: "\n"
+fewshot_delimiter: "\n\n"
+generation_kwargs:
+  # classic sends no stop sequence and reads the whole reply; the harness
+  # stops at the first newline like the other letter-answer twins (a chat
+  # reply after the letter is prose classic's extractor would ignore too).
+  until:
+    - "</s>"
+    - "\n"
+  do_sample: false
+  temperature: 0.0
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+filter_list:
+  # Same doctrine as uplift_hellaswag_generative.yaml: score classic's own
+  # strategy (the LAST standalone A-D letter — omlx/eval/base.py
+  # _extract_mc_answer), keep the strict full-reply form as a reference row.
+  # Case-sensitive [A-D]: classic upper-cases the reply first, so a lower-case
+  # answer diverges — same documented gap as the other letter suites.
+  - name: "strict-match"
+    filter:
+      - function: "regex"
+        regex_pattern: "^\\s*([A-D])\\s*$"
+        group_select: 0
+      - function: "take_first"
+  - name: "flexible-extract"
+    filter:
+      - function: "regex"
+        regex_pattern: "\\b([A-D])\\b"
+        group_select: -1
+        fallback: "[invalid]"
+      - function: "take_first"
+metadata:
+  version: 1.0
+
+task:
+  - task: agronomy
+    dataset_kwargs:
+      subject: agronomy
+  - task: anatomy
+    dataset_kwargs:
+      subject: anatomy
+  - task: ancient_chinese
+    dataset_kwargs:
+      subject: ancient_chinese
+  - task: arts
+    dataset_kwargs:
+      subject: arts
+  - task: astronomy
+    dataset_kwargs:
+      subject: astronomy
+  - task: business_ethics
+    dataset_kwargs:
+      subject: business_ethics
+  - task: chinese_civil_service_exam
+    dataset_kwargs:
+      subject: chinese_civil_service_exam
+  - task: chinese_driving_rule
+    dataset_kwargs:
+      subject: chinese_driving_rule
+  - task: chinese_food_culture
+    dataset_kwargs:
+      subject: chinese_food_culture
+  - task: chinese_foreign_policy
+    dataset_kwargs:
+      subject: chinese_foreign_policy
+  - task: chinese_history
+    dataset_kwargs:
+      subject: chinese_history
+  - task: chinese_literature
+    dataset_kwargs:
+      subject: chinese_literature
+  - task: chinese_teacher_qualification
+    dataset_kwargs:
+      subject: chinese_teacher_qualification
+  - task: clinical_knowledge
+    dataset_kwargs:
+      subject: clinical_knowledge
+  - task: college_actuarial_science
+    dataset_kwargs:
+      subject: college_actuarial_science
+  - task: college_education
+    dataset_kwargs:
+      subject: college_education
+  - task: college_engineering_hydrology
+    dataset_kwargs:
+      subject: college_engineering_hydrology
+  - task: college_law
+    dataset_kwargs:
+      subject: college_law
+  - task: college_mathematics
+    dataset_kwargs:
+      subject: college_mathematics
+  - task: college_medical_statistics
+    dataset_kwargs:
+      subject: college_medical_statistics
+  - task: college_medicine
+    dataset_kwargs:
+      subject: college_medicine
+  - task: computer_science
+    dataset_kwargs:
+      subject: computer_science
+  - task: computer_security
+    dataset_kwargs:
+      subject: computer_security
+  - task: conceptual_physics
+    dataset_kwargs:
+      subject: conceptual_physics
+  - task: construction_project_management
+    dataset_kwargs:
+      subject: construction_project_management
+  - task: economics
+    dataset_kwargs:
+      subject: economics
+  - task: education
+    dataset_kwargs:
+      subject: education
+  - task: electrical_engineering
+    dataset_kwargs:
+      subject: electrical_engineering
+  - task: elementary_chinese
+    dataset_kwargs:
+      subject: elementary_chinese
+  - task: elementary_commonsense
+    dataset_kwargs:
+      subject: elementary_commonsense
+  - task: elementary_information_and_technology
+    dataset_kwargs:
+      subject: elementary_information_and_technology
+  - task: elementary_mathematics
+    dataset_kwargs:
+      subject: elementary_mathematics
+  - task: ethnology
+    dataset_kwargs:
+      subject: ethnology
+  - task: food_science
+    dataset_kwargs:
+      subject: food_science
+  - task: genetics
+    dataset_kwargs:
+      subject: genetics
+  - task: global_facts
+    dataset_kwargs:
+      subject: global_facts
+  - task: high_school_biology
+    dataset_kwargs:
+      subject: high_school_biology
+  - task: high_school_chemistry
+    dataset_kwargs:
+      subject: high_school_chemistry
+  - task: high_school_geography
+    dataset_kwargs:
+      subject: high_school_geography
+  - task: high_school_mathematics
+    dataset_kwargs:
+      subject: high_school_mathematics
+  - task: high_school_physics
+    dataset_kwargs:
+      subject: high_school_physics
+  - task: high_school_politics
+    dataset_kwargs:
+      subject: high_school_politics
+  - task: human_sexuality
+    dataset_kwargs:
+      subject: human_sexuality
+  - task: international_law
+    dataset_kwargs:
+      subject: international_law
+  - task: journalism
+    dataset_kwargs:
+      subject: journalism
+  - task: jurisprudence
+    dataset_kwargs:
+      subject: jurisprudence
+  - task: legal_and_moral_basis
+    dataset_kwargs:
+      subject: legal_and_moral_basis
+  - task: logical
+    dataset_kwargs:
+      subject: logical
+  - task: machine_learning
+    dataset_kwargs:
+      subject: machine_learning
+  - task: management
+    dataset_kwargs:
+      subject: management
+  - task: marketing
+    dataset_kwargs:
+      subject: marketing
+  - task: marxist_theory
+    dataset_kwargs:
+      subject: marxist_theory
+  - task: modern_chinese
+    dataset_kwargs:
+      subject: modern_chinese
+  - task: nutrition
+    dataset_kwargs:
+      subject: nutrition
+  - task: philosophy
+    dataset_kwargs:
+      subject: philosophy
+  - task: professional_accounting
+    dataset_kwargs:
+      subject: professional_accounting
+  - task: professional_law
+    dataset_kwargs:
+      subject: professional_law
+  - task: professional_medicine
+    dataset_kwargs:
+      subject: professional_medicine
+  - task: professional_psychology
+    dataset_kwargs:
+      subject: professional_psychology
+  - task: public_relations
+    dataset_kwargs:
+      subject: public_relations
+  - task: security_study
+    dataset_kwargs:
+      subject: security_study
+  - task: sociology
+    dataset_kwargs:
+      subject: sociology
+  - task: sports_science
+    dataset_kwargs:
+      subject: sports_science
+  - task: traditional_chinese_medicine
+    dataset_kwargs:
+      subject: traditional_chinese_medicine
+  - task: virology
+    dataset_kwargs:
+      subject: virology
+  - task: world_history
+    dataset_kwargs:
+      subject: world_history
+  - task: world_religions
+    dataset_kwargs:
+      subject: world_religions

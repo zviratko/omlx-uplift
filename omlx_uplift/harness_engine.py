@@ -99,6 +99,26 @@ HARNESS_MAP: dict[str, dict[str, Any]] = {
               # classic (omlx/eval/kmmlu.py); 5-shot mirrors classic's
               # '< 5' dev examples.
               "metric": "exact_match", "metric_contains": None},
+    "cmmlu": {"tasks": ["uplift_cmmlu_generative"], "fewshot": 5,
+              # 2026-10-14 USER OVERRIDE of the script-wall refusal: the
+              # finding about the hub STANDS (haonan-li/cmmlu =
+              # lmlmcat/cmmlu ships only a datasets loader script + a raw
+              # zip; datasets 5.x refuses scripts, no parquet mirror) — the
+              # twin simply never asks the hub. CMMLU's test + dev splits
+              # are VENDORED under bench_tasks/cmmlu_data/ (PROVENANCE.md:
+              # pinned revision, checksum, CC BY-NC-SA 4.0) and served by
+              # the custom_dataset in bench_tasks/yamls/, so the suite
+              # builds with HF_HUB_OFFLINE=1. One leaf per subject (67 =
+              # the mmlu suite shape, because --limit is PER TASK), prompt
+              # byte-identical to classic's format_prompt on the 50
+              # pool-backed samples of a --limit 5 run; the other 285
+              # differ ONLY by the shots classic's own dev bundle lost.
+              # 5 dev shots, A-D letters; metric key pinned on REAL
+              # results_*.json (0-shot AND 5-shot smokes, 67 leaves x 5
+              # samples): 'exact_match,flexible-extract' — the group row
+              # carries no metric, so _parse_results_json weight-averages
+              # the leaves and reports n=335.
+              "metric": "exact_match", "metric_contains": "flexible-extract"},
 }
 
 # Custom generative task pack for the suites above (REPL-2b carryover).
@@ -112,14 +132,12 @@ def _task_yamls_dir() -> Path:
 # live-verified (2b drills) or card decisions; do not 'optimize' a task
 # into the map without re-running the divergence check the card demands.
 NOT_HARNESS = {
-    "cmmlu": "dataset script wall (2026-10-14 probe): both haonan-li/cmmlu "
-             "and its rename lmlmcat/cmmlu ship ONLY a cmmlu.py loader "
-             "script + a raw zip; datasets 5.1 (bench-env pin) rejects "
-             "scripts ('Dataset scripts are no longer supported') and the "
-             "hub exposes NO auto-converted parquet — even the built-in "
-             "multiple_choice cmmlu tasks cannot load in this bench-env. "
-             "A parity-honest generative yaml cannot reach a loadable "
-             "dataset without vendoring the data — classic stays.",
+    # cmmlu USED to live here: the 2026-10-14 probe finding (haonan-li/cmmlu
+    # ships only a datasets loader script + a raw zip, datasets 5.x refuses
+    # scripts, no parquet mirror on the hub) is still true of the HUB. It
+    # stopped being a blocker the moment the user overrode the refusal: the
+    # twin scores VENDORED data (bench_tasks/cmmlu_data/ + PROVENANCE.md)
+    # through custom_dataset, so the hub is never contacted. See HARNESS_MAP.
     "jmmlu": "no harness equivalent (card decision)",
     "humaneval": "exec-scoring needs HF_ALLOW_CODE_EVAL=1 running model "
                  "code IN-PROCESS in the harness python — weaker isolation "
