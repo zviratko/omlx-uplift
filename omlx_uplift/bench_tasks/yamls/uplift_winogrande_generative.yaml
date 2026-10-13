@@ -1,0 +1,49 @@
+# REPL-2b carryover: generative conversion of winogrande. Built-in
+# `winogrande` is multiple_choice only (loglikelihood); omlx has no
+# logprobs/echo (NAT-2). Parity inputs from omlx/eval/winogrande.py:
+# allenai/winogrande config winogrande_xl, VALIDATION split (classic
+# bundle winogrande_val.jsonl, 1267 q), 0-shot, and classic answers are
+# the NUMERIC labels 1/2 (its extractor is _extract_mc_answer(resp,
+# ["1","2"])) — kept numeric here on purpose: switching to letters would
+# silently change the prompt format classic scores against.
+task: uplift_winogrande_generative
+dataset_path: allenai/winogrande
+dataset_name: winogrande_xl
+output_type: generate_until
+training_split: null
+validation_split: validation
+test_split: null
+num_fewshot: 0
+doc_to_text: "Choose the correct option to fill in the blank (_). Answer with just the number (1 or 2).\n\nSentence: {{sentence}}\n\n1. {{option1}}\n2. {{option2}}\n\nAnswer:"
+doc_to_target: "{{answer}}"
+generation_kwargs:
+  until:
+    - "</s>"
+    - "\n"
+  do_sample: false
+  temperature: 0.0
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+filter_list:
+  # classic winogrande extracts ['1','2'] — last standalone digit
+  # (omlx/eval/base.py _extract_mc_answer); negative group_select = last
+  # findall match. Letters would be a prompt-format change vs classic.
+  - name: "strict-match"
+    filter:
+      - function: "regex"
+        regex_pattern: "^\\s*([12])\\s*$"
+        group_select: 0
+      - function: "take_first"
+  - name: "flexible-extract"
+    filter:
+      - function: "regex"
+        regex_pattern: "\\b([12])\\b"
+        group_select: -1
+        fallback: "[invalid]"
+      - function: "take_first"
+metadata:
+  version: 1.0

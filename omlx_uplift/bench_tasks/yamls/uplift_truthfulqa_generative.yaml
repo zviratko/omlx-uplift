@@ -1,0 +1,54 @@
+# REPL-2b carryover: generative conversion of truthfulqa MC.
+# The judge-scored `truthfulqa_gen` is NOT parity with classic (needs a
+# judge model — card decision); the loglikelihood `truthfulqa_mc1/mc2`
+# cannot run over HTTP (no logprobs/echo — NAT-2). So: mc1 TARGETS
+# (classic scores exactly the MC1 single-correct form, omlx/eval/
+# truthfulqa.py) turned into a generate_until letter-extract task.
+# Parity inputs: truthfulqa/truthful_qa config multiple_choice,
+# VALIDATION split (817 q — classic bundle truthfulqa_mc.jsonl), 0-shot,
+# lettered A.. choices in dataset order. Divergences vs classic are
+# documented in uplift_generative_utils.truthfulqa_doc_to_text (choice
+# shuffle order only; both map label==1 -> its letter).
+task: uplift_truthfulqa_generative
+dataset_path: truthfulqa/truthful_qa
+dataset_name: multiple_choice
+output_type: generate_until
+training_split: null
+validation_split: validation
+test_split: null
+num_fewshot: 0
+doc_to_text: !function uplift_generative_utils.truthfulqa_doc_to_text
+doc_to_target: !function uplift_generative_utils.truthfulqa_doc_to_target
+generation_kwargs:
+  until:
+    - "</s>"
+    - "\n"
+  do_sample: false
+  temperature: 0.0
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+filter_list:
+  # classic truthfulqa extracts the LAST standalone letter among the
+  # row's A.. valid letters (choice count varies) — negative
+  # group_select = last findall match. [A-Z] because mc1 can exceed 5
+  # choices; rows with >26 choices cannot be answered in either engine
+  # (classic's chr() mapping breaks there too — see utils note).
+  - name: "strict-match"
+    filter:
+      - function: "regex"
+        regex_pattern: "^\\s*([A-Z])\\s*$"
+        group_select: 0
+      - function: "take_first"
+  - name: "flexible-extract"
+    filter:
+      - function: "regex"
+        regex_pattern: "\\b([A-Z])\\b"
+        group_select: -1
+        fallback: "[invalid]"
+      - function: "take_first"
+metadata:
+  version: 1.0

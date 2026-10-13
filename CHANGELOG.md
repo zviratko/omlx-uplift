@@ -24,6 +24,13 @@ users never see.
   combobox now — pick one of the model's declared languages (Czech ships
   in the list), type any other language string, or leave it empty for
   Auto.
+- **Harness engine covers 5 more benchmarks.** Accuracy runs on the
+  community harness engine can now measure hellaswag, winogrande,
+  mathqa, truthfulqa (new generative task pack shipped with uplift) and
+  kmmlu (built-in `kmmlu_direct`, 5-shot); the harness task grid and
+  queue pick them up automatically. cmmlu, humaneval, mbpp, jmmlu,
+  livecodebench and safetybench intentionally stay on the classic
+  engine (dataset script wall / code-exec isolation / no equivalent).
 
 ## [1.99b] — 2026-10-11
 

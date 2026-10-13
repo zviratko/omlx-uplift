@@ -1,0 +1,55 @@
+# REPL-2b carryover: generative conversion of hellaswag for the harness
+# engine. The built-in `hellaswag` task is multiple_choice (loglikelihood)
+# — omlx exposes no logprobs/echo (NAT-2), so the harness engine needs a
+# generate_until + letter-extract task. Parity inputs from
+# omlx/eval/hellaswag.py: dataset Rowan/hellaswag, VALIDATION split (the
+# classic bundle is hellaswag_val.jsonl), 0-shot, A-D letters, exact
+# classic prompt. Filter stack mirrors the repo's mmlu choice
+# (flexible-extract scored; strict single-letter is kept for reference).
+task: uplift_hellaswag_generative
+dataset_path: Rowan/hellaswag
+dataset_name: null
+output_type: generate_until
+training_split: null
+validation_split: validation
+test_split: null
+num_fewshot: 0
+doc_to_text: "Choose the most plausible continuation. Answer with just the letter (A, B, C, or D).\n\nContext: {{ctx}}\n\nA. {{endings[0]}}\nB. {{endings[1]}}\nC. {{endings[2]}}\nD. {{endings[3]}}\n\nAnswer:"
+doc_to_target: "{{['A', 'B', 'C', 'D'][label | int]}}"
+generation_kwargs:
+  until:
+    - "</s>"
+    - "\n"
+  do_sample: false
+  temperature: 0.0
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+filter_list:
+  # Extraction = classic's own strategy (omlx/eval/base.py
+  # _extract_mc_answer): the LAST standalone valid letter in the
+  # response. lm_eval's 'regex' filter supports a NEGATIVE group_select
+  # (last findall match). Case-sensitive [A-D] skips English articles —
+  # classic uppercases first, so it matches 'a' too; that divergence is
+  # for the full-dataset wave to quantify. The built-in
+  # multi_choice_regex filter is NOT usable here: it requires a
+  # doc['choices'] column and emits '(A)'-shaped targets ( flan-mmlu
+  # house style), which would change the letter format classic scores.
+  - name: "strict-match"
+    filter:
+      - function: "regex"
+        regex_pattern: "^\\s*([A-D])\\s*$"
+        group_select: 0
+      - function: "take_first"
+  - name: "flexible-extract"
+    filter:
+      - function: "regex"
+        regex_pattern: "\\b([A-D])\\b"
+        group_select: -1
+        fallback: "[invalid]"
+      - function: "take_first"
+metadata:
+  version: 1.0

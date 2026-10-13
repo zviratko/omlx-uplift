@@ -38,6 +38,7 @@ Card decisions implemented (each pinned here or in tests):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -51,8 +52,10 @@ logger = logging.getLogger("uplift.harness_engine")
 
 # classic task -> harness invocation. Names VERIFIED loadable in the
 # bench venv (TaskManager().all_tasks, lm_eval 0.4.13, dev box
-# 2026-10-08). fewshot mirrors CLASSIC's own prompting (mmlu-family is
-# 5-shot in omlx/eval/mmlu.py:85; generative-native tasks 0).
+# 2026-10-08; the uplift_* names come from bench_tasks/yamls/ via
+# --include_path, 2b-carryover). fewshot mirrors CLASSIC's own prompting
+# (mmlu-family is 5-shot in omlx/eval/mmlu.py:85; generative-native
+# tasks 0).
 # metric = the result-dict key prefix ('exact_match,flexible-extract'
 # style); metric_contains narrows it where several filters coexist.
 HARNESS_MAP: dict[str, dict[str, Any]] = {
@@ -69,22 +72,54 @@ HARNESS_MAP: dict[str, dict[str, Any]] = {
               "metric": "exact_match", "metric_contains": None},
     "bbq": {"tasks": ["bbq_generate"], "fewshot": 0,
             "metric": "acc", "metric_contains": None},
+    # ---- 2b-carryover: custom generative yamls (bench_tasks/yamls/,
+    # shipped via --include_path; metric keys VERIFIED against real
+    # results_*.json in the scratch smoke, 2026-10-14). All use the
+    # repo's mmlu doctrine: flexible-extract scored, strict kept as
+    # reference row only.
+    "hellaswag": {"tasks": ["uplift_hellaswag_generative"], "fewshot": 0,
+                  "metric": "exact_match",
+                  "metric_contains": "flexible-extract"},
+    "winogrande": {"tasks": ["uplift_winogrande_generative"], "fewshot": 0,
+                   "metric": "exact_match",
+                   "metric_contains": "flexible-extract"},
+    "mathqa": {"tasks": ["uplift_mathqa_generative"], "fewshot": 0,
+               "metric": "exact_match",
+               "metric_contains": "flexible-extract"},
+    "truthfulqa": {"tasks": ["uplift_truthfulqa_generative"], "fewshot": 0,
+                   "metric": "exact_match",
+                   "metric_contains": "flexible-extract"},
+    "kmmlu": {"tasks": ["kmmlu_direct"], "fewshot": 5,
+              # 2026-10-14 re-probe: the old group-load KeyError is GONE
+              # in this bench-env (TaskManager loads kmmlu + all 30
+              # kmmlu_* groups cleanly; 108 kmmlu_direct leaves,
+              # generate_until on HAERAE-HUB/KMMLU with per-subject
+              # dataset_name). direct = letter-answer prompt, closest to
+              # classic (omlx/eval/kmmlu.py); 5-shot mirrors classic's
+              # '< 5' dev examples.
+              "metric": "exact_match", "metric_contains": None},
 }
+
+# Custom generative task pack for the suites above (REPL-2b carryover).
+# lm_eval only knows these through --include_path; the sizes probe must
+# register the same dir or the new suites have no leaf counts and the
+# U68 UI math silently degrades to 'x1'.
+def _task_yamls_dir() -> Path:
+    return Path(__file__).with_name("bench_tasks") / "yamls"
 
 # Why every other classic task stays on the classic engine. Findings are
 # live-verified (2b drills) or card decisions; do not 'optimize' a task
 # into the map without re-running the divergence check the card demands.
 NOT_HARNESS = {
-    "kmmlu": "in all_tasks but group load raised KeyError in 0.4.13 "
-             "(only per-subject kmmlu_* load) — re-probe before mapping",
-    "cmmlu": "no generative variant ships; custom yaml = open 2b work "
-             "item (NAT-2 residual 1)",
+    "cmmlu": "dataset script wall (2026-10-14 probe): both haonan-li/cmmlu "
+             "and its rename lmlmcat/cmmlu ship ONLY a cmmlu.py loader "
+             "script + a raw zip; datasets 5.1 (bench-env pin) rejects "
+             "scripts ('Dataset scripts are no longer supported') and the "
+             "hub exposes NO auto-converted parquet — even the built-in "
+             "multiple_choice cmmlu tasks cannot load in this bench-env. "
+             "A parity-honest generative yaml cannot reach a loadable "
+             "dataset without vendoring the data — classic stays.",
     "jmmlu": "no harness equivalent (card decision)",
-    "hellaswag": "multiple_choice only; custom yaml open (NAT-2 residual 1)",
-    "truthfulqa": "truthfulqa_gen is LLM-judge scored (needs a judge "
-                  "model) — not parity with classic MC; yaml conversion open",
-    "winogrande": "multiple_choice only; custom yaml open (NAT-2 residual 1)",
-    "mathqa": "multiple_choice only; custom yaml open (NAT-2 residual 1)",
     "humaneval": "exec-scoring needs HF_ALLOW_CODE_EVAL=1 running model "
                  "code IN-PROCESS in the harness python — weaker isolation "
                  "than classic's resource-limited subprocess (2b live "
@@ -164,28 +199,46 @@ def _sizes_file() -> Path:
     return paths.uplift_store_dir() / _SIZES_FILE_NAME
 
 
+def _sizes_fingerprint(suites: dict) -> str:
+    """Cache validity stamp: the suite->tasks map AND the custom yaml
+    pack are what the probe measured. When HARNESS_MAP grows (or a yaml
+    renames) the fingerprint changes and a stale cache is ignored — the
+    U68 labels must never multiply against an old task set."""
+    payload = json.dumps({"suites": suites,
+                          "include_path": str(_task_yamls_dir())},
+                         sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
 def subtask_counts() -> Optional[dict[str, int]]:
     global _sizes_mem
     if _sizes_mem is not None:
         return _sizes_mem
+    suites = {k: spec["tasks"] for k, spec in HARNESS_MAP.items()}
+    fp = _sizes_fingerprint(suites)
     f = _sizes_file()
     try:
-        _sizes_mem = json.loads(f.read_text())
-        return _sizes_mem
+        data = json.loads(f.read_text())
+        # old cache shape (bare {suite: n}, pre-2b-carryover) fails the
+        # fingerprint check like any stale one: re-probe, never trust.
+        if data.get("fingerprint") == fp and isinstance(data.get("sizes"),
+                                                        dict):
+            _sizes_mem = data["sizes"]
+            return _sizes_mem
     except Exception:
         pass
     if bench_env.status()["state"] != "ready":
         return None          # no lazy venv build for a label; honest miss
     import subprocess
     import sys as _sys
-    suites = {k: spec["tasks"] for k, spec in HARNESS_MAP.items()}
     py = bench_env.harness_python()
     if py is None:
         return None
     try:
         r = subprocess.run(
             [py, str(Path(__file__).with_name("bench_tasks")
-                     / "harness_sizes.py"), json.dumps(suites)],
+                     / "harness_sizes.py"), json.dumps(suites),
+             str(_task_yamls_dir())],
             capture_output=True, text=True, timeout=90,
             env={**__import__("os").environ,
                  "HF_HOME": str(bench_env.hf_cache_dir())},
@@ -200,7 +253,8 @@ def subtask_counts() -> Optional[dict[str, int]]:
                 return None
             try:
                 f.parent.mkdir(parents=True, exist_ok=True)
-                f.write_text(json.dumps(_sizes_mem))
+                f.write_text(json.dumps({"fingerprint": fp,
+                                         "sizes": _sizes_mem}))
             except Exception:
                 pass
             return _sizes_mem
@@ -269,6 +323,34 @@ def _acc():
     return AB
 
 
+def _suite_args(spec: dict, base_url: str, model_id: str, outdir: Path,
+                sample_size: int, sampling_profile: str) -> list[str]:
+    """CLI args for one suite subprocess. Own function so tests pin the
+    surface without omlx/server state — notably --include_path: the
+    custom generative yamls (bench_tasks/yamls/) are ONLY visible to
+    lm_eval through it, and omitting it would break exactly the suites
+    the 2b-carryover added while the 5 originals keep working (the
+    silent-regression shape)."""
+    args = ["--model", "local-chat-completions",
+            "--model_args", (f"base_url={base_url},"
+                             f"model={model_id},"
+                             "max_gen_toks=256,timeout=300,"
+                             "tokenizer_backend=None"),
+            "--apply_chat_template",
+            "--tasks", ",".join(spec["tasks"]),
+            "--include_path", str(_task_yamls_dir()),
+            "--num_fewshot", str(spec["fewshot"]),
+            "--batch_size", "1",
+            "--output_path", str(outdir)]
+    if sample_size:
+        args += ["--limit", str(sample_size)]
+    if sampling_profile == "deterministic":
+        args += ["--gen_kwargs", "temperature=0.0"]
+    # model_settings profile: NO gen_kwargs -> server applies the model's
+    # configured sampling (classic's own profile semantics)
+    return args
+
+
 async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
                     suite_index: int, suite_total: int) -> dict:
     """One suite = one harness subprocess. Progress events go through
@@ -282,22 +364,8 @@ async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
                                                          lambda: bench_env.create(quiet=True))
     outdir = results_root() / run.bench_id / task
     outdir.mkdir(parents=True, exist_ok=True)
-    args = ["--model", "local-chat-completions",
-            "--model_args", (f"base_url={_base_url()},"
-                             f"model={run.request.model_id},"
-                             "max_gen_toks=256,timeout=300,"
-                             "tokenizer_backend=None"),
-            "--apply_chat_template",
-            "--tasks", ",".join(spec["tasks"]),
-            "--num_fewshot", str(spec["fewshot"]),
-            "--batch_size", "1",
-            "--output_path", str(outdir)]
-    if sample_size:
-        args += ["--limit", str(sample_size)]
-    if run.request.sampling_profile == "deterministic":
-        args += ["--gen_kwargs", "temperature=0.0"]
-    # model_settings profile: NO gen_kwargs -> server applies the model's
-    # configured sampling (classic's own profile semantics)
+    args = _suite_args(spec, _base_url(), run.request.model_id, outdir,
+                       sample_size, run.request.sampling_profile)
 
     key = _api_key()
     t0 = time.perf_counter()

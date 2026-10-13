@@ -25,7 +25,11 @@ def leaf_count(obj):
 def main() -> int:
     from lm_eval.tasks import TaskManager
     suites = json.loads(sys.argv[1])      # {suite_key: [harness task names]}
-    tm = TaskManager(verbosity="error")
+    # argv[2] (REPL-2b carryover): the uplift custom-yaml dir. WITHOUT it
+    # the uplift_* generative tasks are unknown, their suites get no leaf
+    # count, and the UI's honest 'N x limit' math silently degrades.
+    include_path = sys.argv[2] if len(sys.argv) > 2 else None
+    tm = TaskManager(verbosity="error", include_path=include_path)
     out = {}
     for key, names in suites.items():
         total = 0

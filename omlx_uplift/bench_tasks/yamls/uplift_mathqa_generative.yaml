@@ -1,0 +1,49 @@
+# REPL-2b carryover: generative conversion of mathqa. Built-in `mathqa`
+# is multiple_choice only; omlx has no logprobs/echo (NAT-2). Parity
+# inputs from omlx/eval/mathqa.py: HF dataset math_qa (harness pin:
+# regisss/math_qa), TEST split (classic bundle mathqa_test.jsonl), 0-shot,
+# option letters A-E taken from the dataset's own option order, prompt
+# text verbatim classic. Option parsing + target letter live in
+# uplift_generative_utils (same regex the built-in task uses).
+task: uplift_mathqa_generative
+dataset_path: regisss/math_qa
+dataset_name: null
+output_type: generate_until
+training_split: null
+validation_split: null
+test_split: test
+num_fewshot: 0
+doc_to_text: !function uplift_generative_utils.mathqa_doc_to_text
+doc_to_target: !function uplift_generative_utils.mathqa_doc_to_target
+generation_kwargs:
+  until:
+    - "</s>"
+    - "\n"
+  do_sample: false
+  temperature: 0.0
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+filter_list:
+  # classic mathqa extracts the LAST standalone letter among the row's
+  # own labels (A-E) — negative group_select = last findall match;
+  # case-sensitive avoids 'a' articles (classic uppercases; the
+  # difference is divergence-wave material).
+  - name: "strict-match"
+    filter:
+      - function: "regex"
+        regex_pattern: "^\\s*([A-E])\\s*$"
+        group_select: 0
+      - function: "take_first"
+  - name: "flexible-extract"
+    filter:
+      - function: "regex"
+        regex_pattern: "\\b([A-E])\\b"
+        group_select: -1
+        fallback: "[invalid]"
+      - function: "take_first"
+metadata:
+  version: 1.0

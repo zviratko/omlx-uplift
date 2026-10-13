@@ -8,6 +8,10 @@ Fake-classic-module doctrine as in the other engine test files. Pinned:
 - progress parsing: tqdm fraction -> bench_current/bench_total (never
   fabricated: lines without a fraction emit nothing)
 - dispatcher wraps AB exactly once and untagged runs reach classic
+- 2b-carryover: the custom generative yamls parse as harness configs and
+  match their HARNESS_MAP specs; --include_path rides every suite spawn;
+  map/NOT_HARNESS stay disjoint (cmmlu REFUSED with its script-wall
+  reason); the sizes cache is fingerprinted and a stale file is ignored
 """
 from __future__ import annotations
 
@@ -219,3 +223,203 @@ async def test_dispatcher_install_idempotent_and_routes(fake_ab):
                                 upload_ctx=None)
     await fake_ab.run_accuracy_benchmark(run, None)
     assert fake_ab.run_calls == [("classic", "acc1")]
+
+
+
+# ---- 2b-carryover: custom generative yaml pack ---------------------------
+
+
+def _harness_yaml_loader():
+    """SafeLoader that tolerates lm_eval's '!function' yaml tag (a bare
+    string is enough for this shape check; bench-env proves the real
+    resolution, and the smoke run scores it end to end)."""
+    import yaml
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    Loader.add_constructor("!function",
+                           lambda l, n: l.construct_scalar(n))
+    return yaml, Loader
+
+
+def test_custom_generative_yamls_match_harness_map():
+    from omlx_uplift import harness_engine as he
+    yaml, Loader = _harness_yaml_loader()
+    ydir = he._task_yamls_dir()
+    assert ydir.is_dir(), f"missing custom task pack at {ydir}"
+    custom = {k: v for k, v in he.HARNESS_MAP.items()
+              if any(t.startswith("uplift_") for t in v["tasks"])}
+    assert {"hellaswag", "winogrande", "mathqa", "truthfulqa"} <= set(custom)
+    for suite, spec in custom.items():
+        name = spec["tasks"][0]
+        f = ydir / f"{name}.yaml"
+        assert f.is_file(), f"{suite}: {f} not shipped"
+        cfg = yaml.load(f.read_text(), Loader=Loader)
+        assert cfg["task"] == name
+        # the ONLY reason this task exists: no logprobs/echo (NAT-2)
+        assert cfg["output_type"] == "generate_until", suite
+        # the metric the engine parses must be the metric the yaml emits,
+        # and metric_contains must name a real filter of it
+        assert any(m["metric"] == spec["metric"]
+                   for m in cfg["metric_list"]), suite
+        assert any(fl["name"] == spec["metric_contains"]
+                   for fl in cfg["filter_list"]), suite
+        assert cfg.get("num_fewshot") == spec["fewshot"], suite
+        # generation must stop where classic's extractor stops looking
+        assert "\\n" in str(cfg["generation_kwargs"]["until"]), suite
+
+
+def test_generative_utils_parity_shapes():
+    """The !function helpers, exercised WITHOUT lm_eval (CI has no
+    bench-env): option parsing + target letters must mirror the classic
+    modules' prompts (omlx/eval/mathqa.py, omlx/eval/truthfulqa.py)."""
+    import importlib.util
+    from pathlib import Path
+    from omlx_uplift import harness_engine as he
+    p = Path(he._task_yamls_dir()) / "uplift_generative_utils.py"
+    s = importlib.util.spec_from_file_location("uplift_gen_utils_probe", p)
+    mod = importlib.util.module_from_spec(s)
+    s.loader.exec_module(mod)
+    row = {"Problem": "what is 2+2", "correct": "c",
+           "options": "a ) 3 , b ) 27.675 , c ) 4 , d ) data inadequate,"
+                      " e ) none of these"}
+    txt = mod.mathqa_doc_to_text(row)
+    assert txt.startswith("Solve the following math problem")
+    assert "C. 4" in txt and "A. 3" in txt
+    assert txt.endswith("Answer:")
+    assert mod.mathqa_doc_to_target(row) == "C"
+    trow = {"question": "smallest country?",
+            "mc1_targets": {"choices": ["Vatican City is the smallest.",
+                                        "Monaco is the smallest."],
+                            "labels": [1, 0]}}
+    assert mod.truthfulqa_doc_to_target(trow) == "A"
+    ttxt = mod.truthfulqa_doc_to_text(trow)
+    assert "A. Vatican City is the smallest." in ttxt
+    assert ttxt.startswith("Answer the following question truthfully")
+    assert ttxt.endswith("Answer:")
+    # malformed row (no label==1): honest 0-score, never a crash
+    assert mod.truthfulqa_doc_to_target(
+        {"question": "x",
+         "mc1_targets": {"choices": ["a"], "labels": [0]}}) == ""
+
+
+# ---- include_path + suite args ---------------------------------------------
+
+
+def test_suite_args_carries_include_path_and_flags(tmp_path):
+    from omlx_uplift import harness_engine as he
+    spec = he.HARNESS_MAP["hellaswag"]
+    args = he._suite_args(spec, "http://127.0.0.1:9/v1/chat/completions",
+                          "SomeModel", tmp_path, 5, "deterministic")
+    i = args.index("--include_path")
+    assert args[i + 1] == str(he._task_yamls_dir())
+    import pathlib
+    assert pathlib.Path(args[i + 1]).is_dir()      # shipped, not dangling
+    assert args[args.index("--tasks") + 1] == "uplift_hellaswag_generative"
+    assert args[args.index("--num_fewshot") + 1] == "0"
+    assert args[args.index("--limit") + 1] == "5"
+    assert args[args.index("--gen_kwargs") + 1] == "temperature=0.0"
+    # sample_size 0 = full dataset: NO --limit line at all
+    a2 = he._suite_args(he.HARNESS_MAP["kmmlu"], "http://x/v1",
+                        "m", tmp_path, 0, "model_settings")
+    assert "--limit" not in a2 and "--gen_kwargs" not in a2
+    assert a2[a2.index("--num_fewshot") + 1] == "5"
+    # every mapped suite's custom yaml is only findable via include_path:
+    # built-in suites must carry it too (one code path, no per-suite flag)
+    for suite, s in he.HARNESS_MAP.items():
+        a3 = he._suite_args(s, "http://x/v1", "m", tmp_path, 1,
+                            "deterministic")
+        assert "--include_path" in a3, suite
+
+
+def test_map_and_refusals_disjoint_and_current():
+    from omlx_uplift import harness_engine as he
+    assert not set(he.HARNESS_MAP) & set(he.NOT_HARNESS)
+    # carryover: the five that got generative homes are OFF the refusal
+    # list — and must STAY off (regression pin for the next person)
+    for t in ("hellaswag", "winogrande", "mathqa", "truthfulqa", "kmmlu"):
+        assert he.harness_available(t), t
+    # cmmlu stays refused: script-only dataset, unloadable in bench-env
+    # (NOT_HARNESS carries the fresh probe evidence — do not map it just
+    # because a yaml file could be written for it)
+    assert "cmmlu" not in he.HARNESS_MAP
+    assert "cmmlu" in he.NOT_HARNESS and "script" in he.NOT_HARNESS["cmmlu"]
+    # exec-isolation + no-equivalent decisions STAND (card: do not
+    # regress)
+    assert set(he.NOT_HARNESS) >= {"humaneval", "mbpp", "jmmlu",
+                                   "livecodebench", "safetybench", "cmmlu"}
+
+
+@pytest.mark.asyncio
+async def test_queue_add_engine_validation_after_mapping(fake_ab):
+    from omlx_uplift import accuracy_engine as ae
+    import importlib
+    ae = importlib.reload(ae)
+
+    class Pool:
+        def get_entry(self, mid):
+            return types.SimpleNamespace(model_type="llm")
+    fake_ab.add_to_queue = lambda r: fake_ab.queue.append(r)
+    fake_ab.queue = []
+    fake_ab.get_queue_status = lambda: {"running": False,
+                                        "current_model": None,
+                                        "current_bench_id": None,
+                                        "queue": []}
+
+    async def noop(pool):
+        pass
+    fake_ab.start_next_from_queue = noop
+    # newly mapped tasks are ACCEPTED by the harness engine now
+    await ae.queue_add({"model_id": "m1",
+                        "benchmarks": {"hellaswag": 5, "truthfulqa": 5,
+                                       "kmmlu": 5},
+                        "engine": "harness"}, Pool())
+    assert getattr(fake_ab.queue[-1], "_uplift_engine") == "harness"
+    # cmmlu still REFUSED, naming itself (the queue-side mirror of the
+    # script-wall finding — the UI hides it because the tasks endpoint
+    # data-drives off HARNESS_MAP)
+    with pytest.raises(ae.BadInput) as e:
+        await ae.queue_add({"model_id": "m1",
+                            "benchmarks": {"cmmlu": 5},
+                            "engine": "harness"}, Pool())
+    assert "cmmlu" in str(e.value)
+
+
+# ---- sizes cache fingerprint ------------------------------------------------
+
+
+def test_sizes_fingerprint_tracks_the_suite_map():
+    from omlx_uplift import harness_engine as he
+    base = he._sizes_fingerprint({"a": ["x"]})
+    assert base == he._sizes_fingerprint({"a": ["x"]})       # stable
+    assert base != he._sizes_fingerprint({"a": ["x", "y"]})  # suite grew
+    assert base != he._sizes_fingerprint({"a": ["x"], "b": ["z"]})
+
+
+def test_sizes_cache_ignores_stale_fingerprint(tmp_path, monkeypatch):
+    from omlx_uplift import harness_engine as he
+    from omlx_uplift import paths
+    from omlx_uplift import bench_env
+    monkeypatch.setattr(he, "_sizes_mem", None)
+    monkeypatch.setattr(paths, "uplift_store_dir", lambda: tmp_path)
+    # venv 'not ready' also blocks the re-probe path: what a stale file
+    # must produce is an honest None, NEVER the old numbers
+    monkeypatch.setattr(bench_env, "status",
+                        lambda **kw: {"state": "missing", "path": None})
+    f = he._sizes_file()
+    # 1) legacy bare-dict shape (pre-carryover caches on disk)
+    f.write_text(json.dumps({"mmlu": 57, "gsm8k": 1}))
+    assert he.subtask_counts() is None
+    # 2) right fingerprint -> served
+    suites = {k: s["tasks"] for k, s in he.HARNESS_MAP.items()}
+    f.write_text(json.dumps({"fingerprint": he._sizes_fingerprint(suites),
+                             "sizes": {"mmlu": 57, "kmmlu": 45}}))
+    monkeypatch.setattr(he, "_sizes_mem", None)
+    assert he.subtask_counts() == {"mmlu": 57, "kmmlu": 45}
+    # 3) wrong fingerprint (someone edited HARNESS_MAP) -> ignored
+    suites["extra"] = ["uplift_something"]
+    f.write_text(json.dumps({"fingerprint": he._sizes_fingerprint(suites),
+                             "sizes": {"mmlu": 57}}))
+    monkeypatch.setattr(he, "_sizes_mem", None)
+    assert he.subtask_counts() is None
