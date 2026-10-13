@@ -373,3 +373,29 @@ test('runtimeSignature: embedding audio mirrors engine_pool gating', () => {
                                       embedding_audio_max_seconds: 10 }));
     assert.deepStrictEqual(d.map(r => r.key), ['embedding_audio_max_seconds']);
 });
+
+/* SYNC-1 2026-10-13: upstream external_engine (splash). engine_pool lists it
+   in _engine_runtime_signature, so the editor must treat it as deferred
+   runtime material — never a live classic PUT key (auto-unload doctrine). */
+test('external_engine: round-trips state<->payload and diffs as runtime key', () => {
+    const on = S.buildPayload(S.buildState(base(), { external_engine: 'splash' }), base());
+    assert.strictEqual(on.external_engine, 'splash');
+    const off = S.buildPayload(S.buildState(base(), {}), base());
+    assert.strictEqual(off.external_engine, null);
+    assert.ok(S.RUNTIME_SETTING_KEYS.has('external_engine'),
+        'signed by engine_pool — must ride the deferred store + RELOAD badge');
+    const d = S.runtimeDiff(off, on);
+    assert.deepStrictEqual(d.map(r => r.key), ['external_engine']);
+});
+test('external_engine: off by default; non-LLM payloads must not carry it', () => {
+    assert.strictEqual(S.buildState(base(), {}).external_engine, '');
+    // TYPE_ONLY_KEYS: classic renders the row only under its llm/vlm gate,
+    // so a non-LLM save must not touch the key. (Diffusion: the mmeditor
+    // hides the row and the classic PUT itself forces None server-side.)
+    assert.ok(S.RUNTIME_SETTING_KEYS.has('external_engine'));
+    const nonLlm = base({ model_type: 'embedding', config_model_type: '' });
+    const p = S.buildPayload(S.buildState(nonLlm, {}), nonLlm);
+    assert.ok(!('external_engine' in p),
+        'buildPayload must strip TYPE_ONLY keys for non-LLM models');
+});
+

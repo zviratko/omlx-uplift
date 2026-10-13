@@ -34,6 +34,7 @@
         'qwen35_ane_prefill_cpu_threads', 'qwen35_ane_prefill_cpu_shared_resource',
         'moe_expert_offload_enabled', 'moe_expert_offload_resident_fraction',
         'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
+        'external_engine',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
         'specprefill_threshold', 'dflash_enabled', 'dflash_draft_model',
         'dflash_draft_quant_enabled', 'dflash_draft_quant_weight_bits',
@@ -89,6 +90,7 @@
         'moe_expert_offload_resident_fraction', 'qwen4_ple_ssd_offload',
         'deepseek_v41_ced_prefill_enabled', 'deepseek_v41_engram_ssd_offload',
         'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
+        'external_engine',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
         'specprefill_threshold', 'dflash_enabled', 'dflash_draft_model',
         'dflash_draft_quant_enabled', 'dflash_draft_quant_weight_bits',
@@ -287,6 +289,7 @@
             specprefill_draft_model: s.specprefill_draft_model || '',
             specprefill_keep_pct: s.specprefill_keep_pct ? String(s.specprefill_keep_pct) : '0.2',
             specprefill_threshold: s.specprefill_threshold || null,
+            external_engine: s.external_engine || '',
             dflash_enabled: s.dflash_enabled || false,
             dflash_draft_model: s.dflash_draft_model || '',
             dflash_draft_quant_enabled: s.dflash_draft_quant_enabled || false,
@@ -484,6 +487,7 @@
             specprefill_draft_model: ms.specprefill_draft_model || null,
             specprefill_keep_pct: ms.specprefill_enabled ? (parseFloat(ms.specprefill_keep_pct) || 0.2) : null,
             specprefill_threshold: ms.specprefill_enabled ? (ms.specprefill_threshold || null) : null,
+            external_engine: ms.external_engine || null,
             dflash_enabled: !!ms.dflash_enabled,
             dflash_draft_model: ms.dflash_draft_model || null,
             dflash_draft_quant_enabled: !!ms.dflash_enabled && !!ms.dflash_draft_quant_enabled,
@@ -563,6 +567,7 @@
                 qwen35_ane_prefill_cpu_threads: 8, qwen35_ane_prefill_cpu_shared_resource: true,
                 specprefill_enabled: false, specprefill_draft_model: null,
                 specprefill_keep_pct: null, specprefill_threshold: null,
+                external_engine: '',
                 dflash_enabled: false, mtp_enabled: false,
                 mtp_adaptive_max_depth: null, mtp_fixed_depth: null,
                 vlm_mtp_enabled: false, vlm_mtp_draft_model: null,
@@ -644,6 +649,11 @@
             add('specprefill_keep_pct', d.specprefill_keep_pct ?? 0.2);
             add('specprefill_threshold', d.specprefill_threshold ?? null);
         }
+        // SYNC-1 2026-10-13: engine_pool._engine_runtime_signature adds
+        // ('external_engine', value or None) UNCONDITIONALLY under its
+        // security/load gates — mirror the same shape so runtimeDiff and
+        // the deferred split agree with the server, key present or not.
+        add('external_engine', d.external_engine || null);
         const dfOn = !!d.dflash_enabled && has(d.dflash_draft_model);
         add('dflash_enabled', dfOn);
         if (dfOn) {
@@ -695,6 +705,7 @@
         'deepseek_v41_ced_prefill_enabled',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
         'specprefill_threshold',
+        'external_engine',
         'dflash_enabled', 'dflash_draft_model', 'dflash_draft_quant_enabled',
         'dflash_draft_quant_weight_bits', 'dflash_draft_quant_activation_bits',
         'dflash_draft_quant_group_size', 'dflash_max_ctx', 'dflash_in_memory_cache',

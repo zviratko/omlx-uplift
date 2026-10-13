@@ -1176,6 +1176,26 @@ function renderEditorFields(container) {
     g = grid();
     g.append(seBind('bool', 'trust_remote_code', { label: 'Trust Remote Code',
         hint: 'Lets the model repo run arbitrary Python at load. Only enable for trusted repos.' }));
+    // SYNC-1 2026-10-13 (upstream external_engine, splash): serve the model
+    // from another engine's process. Classic renders it inside the Advanced
+    // block, hidden for diffusion and when the model has no candidate
+    // engines; the choice is engine-load material (engine_pool signature)
+    // -> RUNTIME_SETTING_KEYS routes it through the deferred store, so the
+    // classic PUT never sees it and a loaded model is not auto-unloaded.
+    const eeList = (m && m.external_engines) || [];
+    if (!S.isDiffusion(m) && eeList.length) {
+        const cur = seValues.external_engine || '';
+        const eeOpts = [{ value: '', label: 'Native oMLX engine' }].concat(
+            eeList.filter(e => e.compatible || e.id === cur)
+                .map(e => ({ value: e.id,
+                    label: e.compatible ? e.label : (e.label + ' — unavailable') })));
+        g.append(seBind('select', 'external_engine', {
+            label: 'External Engine',
+            hint: (eeList.some(e => e.compatible)
+                ? 'Run this model inside another installed engine (takes effect on model reload).'
+                : (eeList[0].reason || 'No external engine available.')),
+            options: eeOpts, picker: true }));
+    }
     if (!S.isDiffusion(m)) {
         // NOTE: preserve_thinking has NO widget in the classic modal (it
         // only appears in the diffusion unsupported-field lists) — parity:

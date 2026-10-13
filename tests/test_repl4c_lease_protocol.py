@@ -110,23 +110,78 @@ async def test_task_cancel_reaches_terminal_state_and_releases(monkeypatch,
     assert run.results == [], "a cancelled pack is never persisted"
 
 
+def _serving_server_py():
+    """Resolve omlx/server.py from a checkout that can actually be READ —
+    not from an importable venv. SYNC-1 2026-10-13: this guard used to
+    import omlx.server, which broke two ways: the dev venv's editable
+    ~/git/omlx drifted stale (phantom 'seam removed'), then a fresh pull
+    failed to IMPORT on an unrelated mlx_vlm dependency gap. The question
+    here is the lease API's TEXT shape, so read the file the server ships:
+    newest installed keg first (that is what runs), then the upstream
+    mirror. None found -> None -> test skips loudly-by-absence like CI."""
+    import glob as _glob
+    import os as _os
+    cands = sorted(_glob.glob("/opt/homebrew/Cellar/omlx*/**/site-packages/"
+                              "omlx/server.py", recursive=True),
+                   key=_os.path.getmtime)
+    mirror = _os.path.expanduser("~/git/omlx-upstream/omlx/server.py")
+    if _os.path.exists(mirror):
+        cands.append(mirror)
+    for path in reversed(cands):          # newest keg wins
+        if _os.path.exists(path):
+            return path
+    return None
+
+
 def test_lease_seam_matches_installed_omlx_shape():
     """Drift guard — the LIVE shape, not the mock.
 
     REPL-4c guessed `omlx.server.acquire_decision_engine` (mirroring
     acquire_embedding/reranker_engine); it never existed upstream and the
     mocked seam above kept the suite green until a live bench run died with
-    AttributeError. This test imports the REAL omlx when present and pins
-    that _lease can produce an enter/exit-able CM from it. CI (no omlx)
-    skips it via importorskip."""
-    pytest.importorskip("omlx.server")
-    from omlx import server as srv
+    AttributeError. This pins that _lease()'s expected API exists in the
+    serving/installed source text. CI (no keg, no mirror) skips."""
+    path = _serving_server_py()
+    if path is None:
+        pytest.skip("no readable omlx source (keg or ~/git/omlx-upstream)")
+    src = open(path, encoding="utf-8").read()
 
-    has_helper = callable(getattr(srv, "acquire_decision_engine", None))
-    assert has_helper or (
-        callable(getattr(srv, "get_decision_engine", None))
-        and hasattr(srv, "_LLMEngineLease")
-    ), "omlx.server changed the decision lease shape again — adapt _lease()"
+    has_helper = "def acquire_decision_engine" in src
+    has_object_lease = ("async def get_decision_engine" in src
+                        and "class _LLMEngineLease" in src)
+    assert has_helper or has_object_lease, (
+        f"omlx.server changed the decision lease shape again in {path} — "
+        "adapt _lease()")
 
-    cm = de._lease("seam-shape-check-not-entered")  # must NOT load a model
+    # _lease()'s adapter logic, pinned without importing the real runtime
+    # (the dev venv may not satisfy omlx's heavy deps — the shape question
+    # is answered by the source text above): stub the seam the shape says
+    # exists and require a never-entered async CM back.
+    import sys
+    import types
+
+    fake_pkg = types.ModuleType("omlx")
+    fake = types.ModuleType("omlx.server")
+
+    class _Lease:
+        async def release(self):
+            pass
+
+    async def get_decision_engine(model, lease):  # noqa: ARG001
+        raise AssertionError("must not be entered by the shape check")
+
+    fake._LLMEngineLease = _Lease
+    fake.get_decision_engine = get_decision_engine
+    fake_pkg.server = fake
+    saved = {k: sys.modules.get(k) for k in ("omlx", "omlx.server")}
+    sys.modules["omlx"] = fake_pkg
+    sys.modules["omlx.server"] = fake
+    try:
+        cm = de._lease("seam-shape-check-not-entered")
+    finally:
+        for k, v in saved.items():
+            if v is not None:
+                sys.modules[k] = v
+            else:
+                sys.modules.pop(k, None)
     assert hasattr(cm, "__aenter__") and hasattr(cm, "__aexit__")
