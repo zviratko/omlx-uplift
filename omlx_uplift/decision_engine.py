@@ -367,7 +367,10 @@ async def _run_pack(run: DecisionRun, engine, pack_name: str,
     for j, item in enumerate(items):
         if run.cancelled:
             break
-        if j and j % PROGRESS_STRIDE == 0:
+        # first item moves the bar immediately (short runs used to sit at
+        # 0% then jump — 20-item stride was the only event source); then
+        # every PROGRESS_STRIDE to keep SSE traffic flat on full packs
+        if j == 1 or (j and j % PROGRESS_STRIDE == 0):
             await run.send({"type": "progress", "phase": "items",
                             "task": pack_name, "current": j,
                             "total": len(items),
