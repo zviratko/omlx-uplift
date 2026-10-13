@@ -219,14 +219,19 @@ function fmtMs(v) {
 // table's 'ms/question' column is per-ITEM latency now (honest against
 // Time (s) / Samples); the probe-level number still ships as 'ms/probe' in
 // the Copy/Download exports. Rows written before the backend stored
-// ms_per_item derive it from time_s/items; a row with neither keeps the old
-// value rather than printing an em-dash over real data.
+// ms_per_item derive it from time_s/items; rows with neither stay '—'.
 function msPerItem(r) {
     if (r.ms_per_item != null) return r.ms_per_item;
     if (r.time_s != null && r.items) {
         return Math.round(r.time_s * 1000 / r.items * 100) / 100;
     }
-    return r.ms_per_question;
+    // Legacy rows (pre ms_per_item AND pre time_s — 10/08 era): per-item
+    // latency is NOT derivable honestly (probe count was never stored and
+    // skipped/shuffle-failed items vary it), so the column says '—'.
+    // The per-PROBE figure (ms/probe column / ms_per_question export key)
+    // stays truthful for every era. EFF-1 doctrine: never claim a value
+    // the server does not report.
+    return null;
 }
 // U48: one Advanced section builder shared by the panels (classic keeps
 // external-endpoint as a first-class mode; the user explicitly asked for
