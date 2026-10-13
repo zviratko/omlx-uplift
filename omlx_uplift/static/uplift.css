@@ -2706,6 +2706,35 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .acc-task select { width: 100%; font-size: 10px; background-color: var(--field);
   border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px;
   margin-top: auto; }   /* U57: pin dropdowns to one row baseline */
+/* ---- ACC-2a: 'Additional suites' — a SEPARATE section under the classic
+   grid. The classic block owns none of these selectors: whoever ignores
+   the extras sees the panel exactly as before. Every rule here is a NEW
+   selector string (css2: a re-opened selector is drift, never a tweak). */
+.acc-extras { margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--edge); }
+.acc-extras-cap { color: var(--accent); }
+.acc-extras-search { display: block; width: 100%; box-sizing: border-box;
+  font-size: 11px; margin: 4px 0 2px; padding: 3px 6px;
+  background-color: var(--field); border: 1px solid var(--edge);
+  color: var(--ink); }
+.acc-extras-fams { display: flex; flex-direction: column; gap: 4px; }
+.acc-extras-fam { border: 1px solid var(--edge); background: var(--panel);
+  padding: 6px 8px 8px; }   /* U58 group-box language, extras' own selector */
+.acc-extras-fam > summary { cursor: pointer; list-style: none;
+  color: var(--dim); letter-spacing: 1px; text-transform: uppercase;
+  font-size: 10px; margin-bottom: 6px; }
+.acc-extras-fam > summary::-webkit-details-marker { display: none; }
+.acc-extras-fam > summary::before { content: '\25b8'; margin-right: 5px;
+  display: inline-block; }
+.acc-extras-fam[open] > summary::before { content: '\25be'; }
+.acc-extras-fam > summary:focus-visible { outline: 2px solid var(--accent);
+  outline-offset: 1px; }   /* U51 focus-ring language */
+.acc-task-chip { font-size: 10px; color: var(--dim); margin-top: auto;
+  padding-top: 4px; letter-spacing: 0.02em; }
+.acc-task-harness .acc-task-chip { color: var(--accent); opacity: 0.85; }
+.acc-extras-more { background: none; border: 0; color: var(--accent);
+  font-size: 10px; padding: 4px 0 0; cursor: pointer; text-align: left; }
+.acc-extras-more:hover { text-decoration: underline; }
 /* U64: collapsible finished-run cards under the live result */
 .bench-history-item { margin-top: 6px; }
 .bench-history-item summary { cursor: pointer; color: var(--dim);

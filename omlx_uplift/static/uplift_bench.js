@@ -250,12 +250,17 @@ var ADV_LS = 'omlx-uplift-bench-advanced';
    the user counts 3 benchmarks), renders each as a box that fills left
    to right, and computes [running-suite/total · done-q/total-q] from it.
    Pure helpers so a node test can replay event sequences. */
-function boardSuiteMeta(groups, key) {
+function boardSuiteMeta(groups, key, extras) {
     // classic card truth sources: label for the box, full_size for a
     // 'Full' selection (size 0); unknown -> null (board renders '?')
     for (const g of (groups || []))
         for (const tk of (g.tasks || []))
             if (tk.key === key) return { label: tk.label || key, full: tk.full_size || 0 };
+    // ACC-2a: a harness-only suite lives in extra_suites, not in the
+    // classic groups — without this the board would print the raw key
+    for (const x of (extras || []))
+        if (x && x.key === key)
+            return { label: x.label || key, full: x.rows || 0 };
     return { label: key, full: 0 };
 }
 function boardQuestions(sizes, engine, hSizes, groups) {
@@ -2469,12 +2474,308 @@ var ANE = {
 
 
 /* ==========================================================================
-   ACCURACY (REPL-2a) — classic 16-task engine over /uplift/api/bench/
-   accuracy/*. Queue chaining + per-suite upload events belong to the
+   ACC-2a — ADDITIONAL SUITES (harness-only) — a SEPARATE section under the
+   classic grid, NEVER merged into it. The user's hard constraint on this
+   card: the original classic suites stay first-class and unmixed, so
+   whoever ignores the expanded catalog sees the panel exactly as before.
+   Data contract (sibling of /bench/accuracy/harness-sizes, added to the
+   harness-tasks response by the ACC-2b seam lane):
+       {"tasks": [...], "valid": [...], "harness_tasks": [...],
+        "extra_suites": [{"key": "ifeval", "label": "IFEval",
+                          "family": "instruction", "rows": 541,
+                          "upload_ok": false}, ...]}
+   family is one of instruction|reasoning|locale (unknown families render
+   under their own raw name). rows is a dataset fact or null — a null row
+   count renders NO row part in the chip (U68: never a guessed number).
+   Leaf counts come from the harness-sizes map the panel already owns; a
+   suite the probe does not know yet omits the 'x' part the same way.
+   Extras are local-only by construction (the omlx.ai leaderboard knows
+   just the classic 16), so this section carries NO upload affordance and
+   its picks leave /add in their own queue entry with upload forced off.
+   ========================================================================== */
+var EXTRAS = {
+    KEY: 'uplift.bench.extras.v1',   // fold + show-all persistence (browser pref)
+    CAP: 6,                          // visible cards per family before 'show all'
+    LIMIT: 100,                      // per-subtask sample limit of an extras pick
+    FAMILIES: ['instruction', 'reasoning', 'locale'],
+    FAM_FALLBACK: { instruction: 'Instruction following', reasoning: 'Reasoning',
+                    locale: 'Language & locale' },
+
+    norm: function (list) {
+        // Server order is kept (same doctrine as the classic grid: the
+        // order of the catalog is a server-side decision, not a UI one)
+        var out = [];
+        (list || []).forEach(function (s) {
+            if (!s || !s.key) return;
+            out.push({ key: String(s.key), label: s.label || String(s.key),
+                       family: s.family ? String(s.family) : 'other',
+                       rows: (typeof s.rows === 'number' && s.rows > 0)
+                             ? s.rows : null,
+                       upload_ok: s.upload_ok === true });
+        });
+        return out;
+    },
+
+    isExtra: function (st, bareKey) {
+        var list = (st && st.extraSuites) || [];
+        for (var i = 0; i < list.length; i++)
+            if (list[i] && list[i].key === bareKey) return true;
+        return false;
+    },
+
+    uploadOk: function (st, bareKey) {
+        // ACC-2a: the server owns the leaderboard truth per suite. The
+        // omlx.ai site knows only the classic 16, so it advertises
+        // upload_ok:false for every extra — the UI must then never let an
+        // extras pick travel in a request that carries the upload flag.
+        var list = (st && st.extraSuites) || [];
+        for (var i = 0; i < list.length; i++)
+            if (list[i] && list[i].key === bareKey)
+                return list[i].upload_ok === true;
+        return true;   // not an extra: the classic/harness rule stands
+    },
+
+    groups: function (list) {
+        var byF = {}, order = [];
+        (list || []).forEach(function (s) {
+            var f = s.family || 'other';
+            if (!byF[f]) { byF[f] = []; order.push(f); }
+            byF[f].push(s);
+        });
+        var known = EXTRAS.FAMILIES.filter(function (f) { return byF[f]; });
+        var rest = order.filter(function (f) {
+            return known.indexOf(f) < 0; });
+        return known.concat(rest).map(function (f) {
+            return { family: f, items: byF[f] };
+        });
+    },
+
+    famLabel: function (f) {
+        var fb = EXTRAS.FAM_FALLBACK[f] || f;
+        return t('uplift.bench.extras_family_' + f, fb);
+    },
+
+    match: function (s, family, q) {
+        if (!q) return true;
+        return (String(s.label) + ' ' + String(s.key) + ' ' + family + ' '
+                + EXTRAS.famLabel(family)).toLowerCase().indexOf(q) >= 0;
+    },
+
+    chip: function (rows, leaves) {
+        // 'N rows · x<leaves> · LM-Eval' with the honest omissions: rows
+        // unknown -> no row part, leaves unknown -> no 'x' part. Never a
+        // guessed number (U68 doctrine).
+        var parts = [];
+        if (typeof rows === 'number' && rows > 0)
+            parts.push(t('uplift.bench.extras_rows', '{n} rows')
+                .replace('{n}', rows.toLocaleString()));
+        // x1 is not information — the size-option labels apply the same
+        // rule (applyEngineLabels multiplies only when the count is > 1)
+        if (typeof leaves === 'number' && leaves > 1)
+            parts.push('\u00d7' + leaves);
+        parts.push(t('uplift.bench.engine_harness', 'LM-Eval'));
+        return parts.join(' \u00b7 ');
+    },
+
+    ui: function () { return { fold: {}, all: {}, q: '' }; },
+
+    load: function () {
+        var out = EXTRAS.ui();
+        try {
+            var raw = localStorage.getItem(EXTRAS.KEY);
+            var d = raw ? JSON.parse(raw) : null;
+            if (d && d.fold && typeof d.fold === 'object') out.fold = d.fold;
+            if (d && d.all && typeof d.all === 'object') out.all = d.all;
+        } catch (_) { /* a broken pref is no pref: defaults, never a throw */ }
+        return out;
+    },
+
+    save: function (ui) {
+        try {
+            localStorage.setItem(EXTRAS.KEY,
+                JSON.stringify({ fold: ui.fold, all: ui.all }));
+        } catch (_) {}
+    },
+
+    render: function (acc) {
+        var st = acc && acc.state;
+        if (!st) return;
+        st.extrasItems = EXTRAS.norm(st.extraSuites);
+        if (!st.extrasItems.length) {
+            // nothing to show: no node at all, so the panel is the one
+            // that shipped before this section existed
+            if (st.extrasSec && st.extrasSec.remove) st.extrasSec.remove();
+            st.extrasSec = null; st.extrasBox = null;
+            return;
+        }
+        // The section belongs to ONE form() build: state is rebuilt on
+        // every panel mount, so 'no st.extrasSec' means 'this form has no
+        // section yet'. (Never look the node up by id — a remount detaches
+        // the old one and an id lookup can still find a stale node.)
+        if (!st.extrasSec) {
+            var sec = el('div', 'acc-extras'); sec.id = 'bench-acc-extras';
+            var cap = el('div', 'bench-label acc-extras-cap',
+                t('uplift.bench.extras_title', 'Additional suites'));
+            cap.dataset.i18n = 'uplift.bench.extras_title';
+            cap.dataset.en = cap.textContent;                 // U59 repair
+            var note = el('p', 'native-stub-note',
+                t('uplift.bench.extras_note',
+                  'Local only \u2014 the community leaderboard knows just the classic suites.'));
+            note.dataset.i18n = 'uplift.bench.extras_note';
+            note.dataset.en = note.textContent;               // U59 repair
+            var search = el('input');
+            search.type = 'search'; search.id = 'bench-acc-extras-search';
+            search.className = 'acc-extras-search';
+            var ph = t('uplift.bench.extras_search',
+                'Search additional suites\u2026');
+            search.placeholder = ph;
+            // U51: a placeholder is not an accessible name; the box lives
+            // beside its own caption, so label it with the section title
+            search.setAttribute('aria-label',
+                t('uplift.bench.extras_title', 'Additional suites'));
+            search.dataset.i18nPh = 'uplift.bench.extras_search';
+            search.dataset.enPh = ph;
+            var box = el('div', 'acc-extras-fams'); box.id = 'bench-acc-extras-fams';
+            sec.append(cap, note, search, box);
+            // Below the classic grid, ABOVE the Advanced block: the suite
+            // choice must never sit after the run buttons (U79 grouping by
+            // concern). insertBefore keeps the classic children untouched.
+            var host = st.extrasHost, anchor = st.extrasAnchor;
+            if (!host) return;        // form() not built yet: stay unbuilt,
+                                      // a later render() retries (never
+                                      // adopt a detached node — painting
+                                      // into one would show nothing)
+            if (anchor && host.insertBefore) host.insertBefore(sec, anchor);
+            else host.appendChild(sec);
+            st.extrasSec = sec; st.extrasBox = box;
+            search.addEventListener('input', function () {
+                st.extrasUI.q = String(search.value || '');
+                EXTRAS.paint(acc);
+            });
+        }
+        if (!st.extrasUI) st.extrasUI = EXTRAS.load();
+        EXTRAS.paint(acc);
+    },
+
+    paint: function (acc) {
+        var st = acc.state, box = st.extrasBox, sec = st.extrasSec;
+        if (!box || !sec) return;
+        var ui = st.extrasUI || (st.extrasUI = EXTRAS.load());
+        var q = String(ui.q || '').trim().toLowerCase();
+        box.replaceChildren();
+        EXTRAS.groups(st.extrasItems).forEach(function (g) {
+            var hits = q ? g.items.filter(function (s) {
+                return EXTRAS.match(s, g.family, q); }) : g.items;
+            if (q && !hits.length) return;      // a filtered-out family is gone
+            // Families default open. A LIVE SEARCH always reveals them:
+            // a folded <details> would keep the very match the user typed
+            // for invisible (the pref itself is untouched — clearing the
+            // box restores the folded state)
+            var open = q ? true : ui.fold[g.family] !== false;
+            var full = !!ui.all[g.family];
+            // a search shows every hit — capping the matches would hide
+            // the very suite the user typed for
+            var vis = (full || q) ? hits : hits.slice(0, EXTRAS.CAP);
+            var det = el('details', 'acc-extras-fam');
+            det.open = open;
+            det.dataset.family = g.family;
+            var sum = el('summary', 'acc-extras-fam-cap',
+                EXTRAS.famLabel(g.family) + ' (' + hits.length + ')');
+            sum.setAttribute('aria-expanded', open ? 'true' : 'false');
+            det.appendChild(sum);
+            var row = el('div', 'acc-group-tasks acc-extras-tasks');
+            vis.forEach(function (s) {
+                row.appendChild(EXTRAS.card(acc, s, g.family, det));
+            });
+            det.appendChild(row);
+            if (!q && hits.length > vis.length) {
+                var more = el('button', 'btn acc-extras-more',
+                    t('uplift.bench.extras_show_all', 'show all ({n})')
+                        .replace('{n}', String(hits.length)));
+                more.type = 'button';
+                more.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    ui.all[g.family] = true; EXTRAS.save(ui); EXTRAS.paint(acc);
+                });
+                det.appendChild(more);
+            } else if (!q && full && hits.length > EXTRAS.CAP) {
+                var less = el('button', 'btn acc-extras-more',
+                    t('uplift.bench.extras_hide', 'hide'));
+                less.type = 'button';
+                less.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    delete ui.all[g.family]; EXTRAS.save(ui); EXTRAS.paint(acc);
+                });
+                det.appendChild(less);
+            }
+            det.addEventListener('toggle', function () {
+                var on = det.open !== false;
+                sum.setAttribute('aria-expanded', on ? 'true' : 'false');
+                if (ui.fold[g.family] === on) return;
+                ui.fold[g.family] = on;
+                if (!on) delete ui.all[g.family];   // refold re-caps the list
+                EXTRAS.save(ui);
+            });
+            box.appendChild(det);
+        });
+        if (!box.children.length) {
+            box.appendChild(el('p', 'native-stub-note',
+                t('uplift.bench.extras_none',
+                  'No additional suite matches that search.')));
+        }
+    },
+
+    card: function (acc, s, family, det) {
+        var st = acc.state, ui = st.extrasUI;
+        var key = s.key + '|h';   // the harness engine carries these picks
+        var card = taskCard(s.label, '', null, function (on) {
+            if (on) {
+                st.selected[key] = true;
+                st.sizes[key] = EXTRAS.LIMIT;
+                // a pick must never stay invisible: reveal the folded
+                // family (and a capped list) it lives in
+                if (det && det.open === false) {
+                    det.open = true; ui.fold[family] = true; EXTRAS.save(ui);
+                }
+                if (!ui.all[family] && !ui.q) {
+                    var g = EXTRAS.groups(st.extrasItems).filter(function (x) {
+                        return x.family === family; })[0];
+                    var idx = g ? g.items.indexOf(s) : -1;
+                    if (idx >= EXTRAS.CAP) {
+                        ui.all[family] = true; EXTRAS.save(ui); EXTRAS.paint(acc);
+                    }
+                }
+            } else {
+                delete st.selected[key]; delete st.sizes[key];
+            }
+            acc.applyEngineLabels();   // U68: totals hint counts the pick
+        });
+        card.dataset.key = key;
+        card.dataset.localOnly = '1';
+        card.classList.add('acc-task-harness');
+        var leaves = (st.harnessSizes && st.harnessSizes[s.key]) || null;
+        var chip = el('div', 'acc-task-chip',
+            EXTRAS.chip(s.rows, leaves));
+        chip.title = t('uplift.bench.extras_limit',
+            'Sample limit {n} per subtask (harness default)').replace(
+                '{n}', String(EXTRAS.LIMIT));
+        card.appendChild(chip);
+        if (st.selected[key]) {
+            card.classList.add('on');
+            card.setAttribute('aria-pressed', 'true');
+        }
+        return card;
+    },
+};
+
+/* ==========================================================================
+   ACCURACY (REPL-2a) — classic 16-task engine over /uplift/api/
+   bench/accuracy/*. Queue chaining + per-suite upload events belong to the
    classic runner; uplift flips upload to explicit OPT-IN (engine window
    patch, documented in accuracy_engine.py). Task grid comes from the
    server (/tasks) so dataset facts ship in one place; labels are classic
-   acc_bench.* keys.
+   acc_bench.* keys. The ACC-2a extras section above renders under this
+   grid as its own block and never mixes into it.
    ========================================================================== */
 
 var ACC = {
@@ -2488,6 +2789,11 @@ var ACC = {
                        // applies PER subtask, the labels must say so
                        harnessSizes: ACC._sizesCache || null,
                        harnessTasks: ACC._tasksCache || [],
+                       // ACC-2a: harness-only suites (the SEPARATE section
+                       // under the classic grid). /tasks owns the list; an
+                       // absent key is the pre-ACC-2b server, and the
+                       // section then does not exist in the DOM at all
+                       extraSuites: ACC._extrasCache || [],
                        engine: 'classic' };
         panel.appendChild(this.form());
         var queue = el('div', 'acc-queue'); queue.id = 'bench-acc-queue';
@@ -2496,6 +2802,10 @@ var ACC = {
         panel.append(queue, status, results);
         this.loadModels();
         this.loadTasks();
+        // ACC-2a: paint the extras section from the module cache right
+        // away (a panel reopen must not blank it while /tasks is in
+        // flight); loadTasks repaints when the payload lands
+        EXTRAS.render(this);
         this.refreshQueue();
         this.refreshResults();
     },
@@ -2530,6 +2840,13 @@ var ACC = {
         var totNote = el('p', 'native-stub-note'); totNote.id = 'bench-acc-engine-total';
         f.append(grid, engNote, totNote);
         self.loadHarnessSizes();
+        // ACC-2a: the extras section is a SIBLING that lands under the
+        // classic grid and above the Advanced block (the suite choice may
+        // never sit after the run buttons, U79). form() only records where
+        // it goes — the node itself exists only once /tasks has advertised
+        // extra_suites, so the classic panel DOM stays byte-identical.
+        self.state.extrasHost = f;
+        self.state.extrasAnchor = null;   // set below, once the block exists
 
         var extRow = el('div', 'bench-row bench-external');
         extRow.id = 'bench-acc-ext-row'; extRow.hidden = true;
@@ -2568,6 +2885,9 @@ var ACC = {
                 'Off by default: a native run never posts to omlx.ai unless you check this.'))],
             'acc_bench.config.advanced_options', 'Advanced options');
         f.appendChild(adv);
+        // ACC-2a insertion anchor: extras go between the classic grid and
+        // this block (never below the run controls)
+        self.state.extrasAnchor = adv;
 
         var actions = el('div', 'bench-actions');
         var addBtn = el('button', 'btn primary', t('acc_bench.config.add_run', 'Add to Queue'));
@@ -2610,6 +2930,7 @@ var ACC = {
 
     _sizesCache: null,
     _tasksCache: null,   // U69: harness-mapped suite keys (module cache)
+    _extrasCache: null,  // ACC-2a: harness-only suites (module cache)
 
     loadHarnessSizes: function () {
         // U68: lazy, never blocks the grid; the first server probe can
@@ -2622,6 +2943,9 @@ var ACC = {
             ACC._sizesCache = p.sizes;
             if (self.state) { self.state.harnessSizes = p.sizes; }
             self.applyEngineLabels();
+            // ACC-2a: the chips multiply by the leaf count — repaint once
+            // the probe lands (before that they honestly omit the 'x' part)
+            if (self.state && self.state.extrasBox) EXTRAS.paint(self);
             // U83: harness question math needs the leaf counts
             if (self.state && (self.state.running || (self.state.queue || []).length))
                 self.refreshQueue();
@@ -2714,7 +3038,14 @@ var ACC = {
             // full list)
             ACC._tasksCache = data.harness_tasks || [];
             self.state.harnessTasks = ACC._tasksCache;
+            // ACC-2a: harness-only suites for the SEPARATE section (the
+            // key is absent on a pre-ACC-2b server — an absent key and an
+            // empty list both mean: render nothing, ever)
+            ACC._extrasCache = data.extra_suites || [];
+            self.state.extraSuites = ACC._extrasCache;
             self.renderGrid();
+            EXTRAS.render(self);
+            self.applyEngineLabels();   // ACC-2a: totals see the extras cache
             // U83: the board may have painted BEFORE the catalog landed
             // (queued suites render key-only, 'Full' sizes unknown). Labels
             // and full-dataset totals come from groups — resync in place.
@@ -2831,9 +3162,18 @@ var ACC = {
         // second queue entry (add() posts both) so mixed picks work and a
         // harness rejection (external/thinking) can't eat the classic run.
         var hBody = {};
+        // ACC-2a: an extras pick (server upload_ok:false — the omlx.ai
+        // leaderboard only knows the classic 16) leaves in ITS OWN queue
+        // entry with upload forced off. The U69 upload opt-in can never
+        // reach a local-only suite, not even when both are picked at once.
+        var xBody = {};
         Object.keys(body.benchmarks).forEach(function (k) {
             if (k.indexOf('|h') > 0) {
-                hBody[k.slice(0, k.indexOf('|h'))] = body.benchmarks[k];
+                var bare = k.slice(0, k.indexOf('|h'));
+                if (EXTRAS.isExtra(g, bare) && !EXTRAS.uploadOk(g, bare))
+                    xBody[bare] = body.benchmarks[k];
+                else
+                    hBody[bare] = body.benchmarks[k];
                 delete body.benchmarks[k];
             }
         });
@@ -2841,6 +3181,10 @@ var ACC = {
         body._harness = Object.keys(hBody).length
             ? JSON.parse(JSON.stringify(Object.assign({}, body,
                   { benchmarks: hBody, engine: 'harness' })))
+            : null;
+        body._extras = Object.keys(xBody).length
+            ? JSON.parse(JSON.stringify(Object.assign({}, body,
+                  { benchmarks: xBody, engine: 'harness', upload: false })))
             : null;
         var ext = gid('bench-acc-ext');
         if (ext && ext.checked) {
@@ -2887,13 +3231,16 @@ var ACC = {
             d.toast(t('acc_bench.config.model_placeholder', 'Select a model...'), 'error');
             return;
         }
-        if (!Object.keys(body.benchmarks).length && !body._harness) {
+        if (!Object.keys(body.benchmarks).length && !body._harness
+            && !body._extras) {
             d.toast(t('uplift.bench.pick_tasks', 'Pick at least one benchmark'), 'error');
             return;
         }
         var rel = busyLabel(gid('bench-acc-add'));
         var harness = body._harness;
+        var extras = body._extras;   // ACC-2a: local-only, upload off
         delete body._harness;
+        delete body._extras;
         var posted = 0, err = null;
         try {
             if (Object.keys(body.benchmarks).length) {
@@ -2902,6 +3249,10 @@ var ACC = {
             }
             if (harness) {
                 await d.postJson(api() + '/bench/accuracy/add', harness);
+                posted++;
+            }
+            if (extras) {
+                await d.postJson(api() + '/bench/accuracy/add', extras);
                 posted++;
             }
         } catch (e) { err = String((e && e.message) || e); }
@@ -2958,7 +3309,9 @@ var ACC = {
             var qs = boardQuestions(q.sizes || {}, q.engine || 'classic',
                                    self.state.harnessSizes, groups);
             var meta = {};
-            Object.keys(q.sizes || {}).forEach(function (k) { meta[k] = boardSuiteMeta(groups, k); });
+            Object.keys(q.sizes || {}).forEach(function (k) {
+                meta[k] = boardSuiteMeta(groups, k, self.state.extraSuites);
+            });
             var e = {
                 key: key, model_id: q.model_id, engine: q.engine || 'classic',
                 external: !!q.external, running: !!running, sizes: q.sizes || {},
@@ -4110,6 +4463,10 @@ return { mount: mount, isMounted: function () { return _mounted; },
                     // BENCHQ: mtebPanel is the instance CACHE (showSub uses
                     // it too), so a harness reaches the panel on screen
                     mteb: mtebPanel },
+         // ACC-2a test seam: the extras module (its pure helpers are
+         // asserted directly; the section itself is proven through the
+         // mount harness in tests/acc2a-extras.test.cjs)
+         _extras: EXTRAS,
          _u49: { resultsHead: resultsHead, buildTableText: buildTableText,
                  buildAccuracyText: buildAccuracyText,
                  ctxResultPairs: ctxResultPairs,
