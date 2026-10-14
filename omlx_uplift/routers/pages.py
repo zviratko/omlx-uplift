@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -307,13 +308,50 @@ async def uplift_login_page():
     return _login_page()
 
 
+_ASSET_URL_RE = re.compile(rb'((?:src|href)="\./[^"?]+)(")')
+_ASSET_VER: tuple = (0, "", 0)  # (boot mtime_ns, size, stamp)
+
+
+def _asset_stamp() -> str:
+    """Deploy identity of the shipped static bundle. Anchored on
+    uplift_boot.js (every deploy rewrites the whole package dir together)
+    plus the package version, hashed short. Two stats per request; the
+    result is cached on the anchor's (mtime_ns, size)."""
+    global _ASSET_VER
+    from .. import __version__
+
+    try:
+        st = (STATIC_DIR / "uplift_boot.js").stat()
+        key = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return "0"
+    if _ASSET_VER[0] == key[0] and _ASSET_VER[1] == key[1]:
+        return _ASSET_VER[2]
+    stamp = hashlib.sha1(
+        f"{__version__}:{key[0]}:{key[1]}".encode()).hexdigest()[:12]
+    _ASSET_VER = (key[0], key[1], stamp)
+    return stamp
+
+
 def _serve_index_flagged(request: Request) -> Response:
     """NAT-3: index.html carries the literal token NATIVE_SURFACES_TOKEN in
     <html data-native-surfaces="...">. The kill-switch is per-INSTANCE
-    config, so it cannot be baked into the shipped static file — substitute
+    config, so it cannot be baked into the shipped file — substitute
     the resolved value at serve time. Index is already Cache-Control:
     no-store (entry point), so the replacement never strands a stale flag;
-    the ?native= URL override therefore applies on every fresh load."""
+    the ?native= URL override therefore applies on every fresh load.
+
+    VSTAMP (user doctrine 2026-10-14): every relative asset URL
+    (``./uplift_boot.js``, ``./vendor/*.css`` …) is served with
+    ``?v=<stamp>``, where the stamp changes whenever the shipped package
+    changes. A no-store index plus content-addressed URLs means a browser
+    that loads the page AFTER a deploy physically cannot execute the
+    PREVIOUS bundle — the failure this kills for good: a reinstall moved
+    the Cellar dir under a live board, its asset route 404'd all afternoon,
+    and the browsers quietly kept serving the stale cached JS (a 'fixed'
+    client that never fixes, not even after a hard reload). 304
+    revalidation of a dead URL falls back to cache; a NEW URL cannot.
+    """
     resp = _static_file(request, "index.html")
     from .. import native_surfaces
 
@@ -321,6 +359,10 @@ def _serve_index_flagged(request: Request) -> Response:
     if isinstance(resp, FileResponse):
         body = resp.path.read_bytes().replace(
             b"NATIVE_SURFACES_TOKEN", mode.encode()
+        )
+        stamp = _asset_stamp().encode()
+        body = _ASSET_URL_RE.sub(
+            lambda m: m.group(1) + b"?v=" + stamp + b'"', body
         )
         headers = dict(resp.headers)
         headers.pop("content-length", None)

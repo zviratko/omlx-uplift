@@ -19,6 +19,34 @@ from omlx_uplift import native_surfaces
 
 # ---- flag ladder ----------------------------------------------------------
 
+def test_vstamp_serves_every_relative_asset_versioned():
+    """VSTAMP: the no-store index must hand out asset URLs that change with
+    the deployed bundle — a browser that loads the page after a deploy can
+    then never execute the previous JS, not even via a stale-cache fallback
+    (the exact afternoon a moved Cellar dir 404'd the asset route and the
+    'fixed' client refused to fix)."""
+    import re as _rx
+
+    from starlette.requests import Request
+
+    from omlx_uplift.routers import pages
+
+    scope = {"type": "http", "method": "GET", "path": "/uplift/",
+             "query_string": b"", "headers": [], "scheme": "http",
+             "server": ("t", 80), "client": ("127.0.0.1", 1),
+             "root_path": ""}
+    resp = pages._serve_index_flagged(Request(scope))
+    body = resp.body.decode()
+    assert "?v=" in body
+    # NOT ONE unstamped relative asset survives (class excludes '?', so a
+    # stamped '"./x.js?v=.."' cannot match):
+    assert _rx.search(r'(?:src|href)="\./[^"?]+\.(?:js|css)"', body) is None
+    # the stamp is real, stable within a bundle, and moves with the anchor
+    stamp = pages._asset_stamp()
+    assert len(stamp) == 12 and stamp in body
+    assert pages._asset_stamp() == stamp
+
+
 def test_flag_defaults_all_natural_off(monkeypatch, tmp_path):
     """NAT-6 flipped the shipped default to 'all' (native is the surface a
     click opens; the classic embed lives on as the per-viewer fallback).

@@ -13,6 +13,14 @@ users never see.
 
 ## Unreleased
 
+- Changed: dashboard assets are now URL-versioned (`?v=<stamp>`). After an
+  update, a normal reload always runs the new bundle — no hard-reload
+  rituals, and a failed asset fetch can never resurrect a cached old
+  client. (Found the hard way: a reinstall under a running dev board 404'd
+  its static route and browsers served the previous JS from cache all
+  afternoon.)
+
+
 - Fixed: boards freezing requests for 2–6 s and pinning a CPU core while a
   dashboard tab was open. The stats-over-SSE lane (added today) rebuilt
   vanilla's payload **on the event loop**; on a loaded engine pool that
