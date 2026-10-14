@@ -89,8 +89,20 @@ HARNESS_MAP: dict[str, dict[str, Any]] = {
                "metric": "exact_match",
                "metric_contains": "flexible-extract"},
     "truthfulqa": {"tasks": ["uplift_truthfulqa_generative"], "fewshot": 0,
+                   # MC1 hides the correct answer at choices[0] in EVERY row,
+                   # so this twin needs BOTH halves of classic: the seeded
+                   # choice shuffle (process_docs,
+                   # uplift_generative_utils.truthfulqa_shuffle_row) and
+                   # classic's OWN extractor. flexible-extract's plain
+                   # last-[A-Z] regex cannot express classic's
+                   # upper-case-then-cue-then-valid-letters rules and lost
+                   # 3.06 pt on identical responses (78/817 rows), so the
+                   # scored filter is the 'classic-extract' custom mirror;
+                   # strict-match + flexible-extract stay in the yaml as
+                   # reference rows. Keys pinned from the real
+                   # results_2026-10-14T03-1x run (n=817).
                    "metric": "exact_match",
-                   "metric_contains": "flexible-extract"},
+                   "metric_contains": "classic-extract"},
     "kmmlu": {"tasks": ["kmmlu_direct"], "fewshot": 5,
               # 2026-10-14 re-probe: the old group-load KeyError is GONE
               # in this bench-env (TaskManager loads kmmlu + all 30

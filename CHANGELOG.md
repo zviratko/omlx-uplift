@@ -35,6 +35,18 @@ users never see.
   pick them up automatically. humaneval, mbpp, jmmlu, livecodebench and
   safetybench intentionally stay on the classic engine (code-exec
   isolation / no equivalent).
+- **Truthfulqa (harness engine) measures truthfulness again.** TruthfulQA
+  MC1 hides the correct answer at choice #1 in EVERY one of its 817
+  validation rows, so the generative twin that presented the dataset order
+  was scoring the letter 'A' on all 817 questions — a high-scoring answer
+  of "A", not a truthfulness signal. The twin now mirrors the classic
+  module's per-question choice shuffle (seeded by the row index, so the
+  option order and the answer letter agree question for question) and is
+  scored by a mirror of classic's own answer extraction (upper-case, then an
+  "answer is/:" cue, then only the letters the question offers) instead of a
+  last-capital-letter regex. Measured on SmolLM2-360M against one greedy
+  server: harness 17.63% → 18.48% (shuffle) → 21.54% (+ extraction mirror),
+  vs the classic engine's 21.18% on the same server — 0.36 pt apart.
 - **Additional suites: a separate bench section.** The Intelligence
   bench now has an 'Additional suites' section below the classic grid —
   the classic 16 render byte-identical and are never mixed in. First

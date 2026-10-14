@@ -5,10 +5,14 @@
 # (classic scores exactly the MC1 single-correct form, omlx/eval/
 # truthfulqa.py) turned into a generate_until letter-extract task.
 # Parity inputs: truthfulqa/truthful_qa config multiple_choice,
-# VALIDATION split (817 q — classic bundle truthfulqa_mc.jsonl), 0-shot,
-# lettered A.. choices in dataset order. Divergences vs classic are
-# documented in uplift_generative_utils.truthfulqa_doc_to_text (choice
-# shuffle order only; both map label==1 -> its letter).
+# VALIDATION split (817 q — classic bundle truthfulqa_mc.jsonl, VERIFIED
+# same 817 questions in the same order: question strings and mc1
+# choices/labels match row-for-row), 0-shot, lettered A.. choices.
+# `process_docs` is NOT optional: MC1 hides the correct answer at
+# choices[0] in EVERY row, so scoring the dataset order makes the target
+# letter 'A' on all 817 questions and measures nothing (truthfulqa
+# -3.55 pt divergence, card REPL-2 Divergence section). See
+# uplift_generative_utils.truthfulqa_shuffle_row for the classic mirror.
 task: uplift_truthfulqa_generative
 dataset_path: truthfulqa/truthful_qa
 dataset_name: multiple_choice
@@ -17,6 +21,7 @@ training_split: null
 validation_split: validation
 test_split: null
 num_fewshot: 0
+process_docs: !function uplift_generative_utils.truthfulqa_process_docs
 doc_to_text: !function uplift_generative_utils.truthfulqa_doc_to_text
 doc_to_target: !function uplift_generative_utils.truthfulqa_doc_to_target
 generation_kwargs:
@@ -32,11 +37,10 @@ metric_list:
     ignore_case: true
     ignore_punctuation: true
 filter_list:
-  # classic truthfulqa extracts the LAST standalone letter among the
-  # row's A.. valid letters (choice count varies) — negative
-  # group_select = last findall match. [A-Z] because mc1 can exceed 5
-  # choices; rows with >26 choices cannot be answered in either engine
-  # (classic's chr() mapping breaks there too — see utils note).
+  # [A-Z] because mc1 rows vary in choice count (measured 2..13 letters
+  # A..M in the validation split); an extraction may not return a letter
+  # the question never offered, and rows >26 choices (none exist) would
+  # score 0 in classic too — see uplift_generative_utils note.
   - name: "strict-match"
     filter:
       - function: "regex"
@@ -50,5 +54,18 @@ filter_list:
         group_select: -1
         fallback: "[invalid]"
       - function: "take_first"
+  # PARITY FILTER — the one the engine scores (HARNESS_MAP metric_contains).
+  # classic's extractor is not a plain last-letter regex: it upper-cases the
+  # response, honours an "answer is/:" cue, and only accepts letters the
+  # question actually offers. `regex` cannot express any of that; the
+  # `custom` filter runs the line-by-line mirror in
+  # uplift_generative_utils.truthfulqa_classic_answer. Measured effect on
+  # the twin's own 817 responses: flexible-extract 18.48% vs classic rules
+  # 21.54% (78 rows extracted differently) with the shuffle already fixed.
+  - name: "classic-extract"
+    filter:
+      - function: "custom"
+        filter_fn: !function uplift_generative_utils.truthfulqa_classic_extract
+      - function: "take_first"
 metadata:
-  version: 1.0
+  version: 1.2
