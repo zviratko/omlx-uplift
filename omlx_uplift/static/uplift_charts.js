@@ -1393,12 +1393,12 @@ function metricFetch(id, force) {
     // the collector committed since the last tick, hundreds of bytes, not
     // 74 KB. Downsampled windows (1 h+: server averages, tail-appending
     // raw points onto avg buckets would misrepresent resolution) re-fetch
-    // whole only until the first tail lands. A tail on a DOWNSAMPLED
+    // whole until the first tail lands. A tail on a DOWNSAMPLED
     // window appends raw fine points past the newest avg bucket — the
     // same shape the 5 m chart has always drawn (finer at the live edge,
     // coarser behind), and the next forced full re-fetch recomputes the
     // partial last bucket honestly. MAX_SERIES_POINTS is 20 000, so 1 h
-    // and 24 h windows served nearly RAW points per whole fetch (measured
+    // and 24 h windows served nearly RAW points per window read, measured
     // 136 KB / 3.3 MB) — without a tail path those were the next 74 KB.
     const tailOk = cache.full && cache.maxTs > 0 && !cache.tailBreak;
     const ttl = tailOk ? 4500
