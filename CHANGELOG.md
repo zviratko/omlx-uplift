@@ -19,7 +19,9 @@ users never see.
   walk takes about a second per build (cluster-key path resolution plus a
   JSON encoder fallback), so the loop starved everything behind it. The
   build now runs in a worker thread every 2 s, the first-frame seed is one
-  shared off-loop build, and the encoder fallback is gone. Charts, the
+  shared off-loop build, and the encoder fallback is gone. The engine-pool
+  walk also only re-runs every 15 s (counters stay live at 2 s) so the
+  board spends ~5 % of a core on stats instead of a full one. Charts, the
   counters and the stream contract are unchanged.
 
 - **Voice cloning: record the reference clip in the tab.** The Voices

@@ -85,6 +85,14 @@ LOOP_REST_S = 0.25
 # before its frame 1 goes out without 's'/'sa' (the client's poll fallback
 # covers the gap; the ticker lands within one tick anyway).
 SEED_WAIT_S = 5.0
+# The engine-walk half of the payload (active models, runtime cache) moves
+# at model-load / minute scale; the snapshot scalars move with traffic. One
+# full build per this window, cheap fast rebuilds in between (each ~1 s of
+# worker-thread walk costs ~7 % of a core at this cadence instead of 70 %).
+SLOW_EVERY_S = 15.0
+# Payload keys owned by the slow half; cached and merged under every fast
+# rebuild so the frame shape is identical either way.
+COMPOSITE_KEYS = ("active_models", "runtime_cache")
 # ``uptime_seconds`` is excluded from the signature at this granularity
 # (floored to whole minutes) — see the module docstring.
 UPTIME_BUCKET_S = 60
@@ -130,45 +138,70 @@ def _vanilla_ready(admin_routes) -> bool:
     return True
 
 
-def _build_stats_raw() -> Optional[dict]:
-    """Build the session-scope stats payload exactly as vanilla's
-    ``/admin/api/stats`` does — minus the four route-decoration keys.
+def _build_stats_fast() -> Optional[dict]:
+    """The cheap half of the stats payload: server_metrics snapshot scalars.
 
-    Returns None when vanilla is absent or refuses (older keg without these
-    helpers, a server whose admin route table was never initialised so
-    ``_get_engine_pool`` is still None): the caller degrades the LANE,
-    never the stream. Called by the ticker and the shared seed — ALWAYS
-    from a worker thread, never on the event loop (LOOP-SAFE).
+    One lock-guarded dict build — microseconds, safe to redo every tick.
+    Returns None when vanilla is absent or refuses (same lane-degradation
+    contract as _build_stats_raw).
     """
-    from omlx.admin import routes as admin_routes
     from omlx.server_metrics import get_server_metrics
 
-    if not _vanilla_ready(admin_routes):
-        return None
     metrics = get_server_metrics()
     if metrics is None:
         return None
-    # Empty model_id + scope='session' is exactly what pollStats requested
-    # (no query params); resolve_model_id('') stays '' upstream.
     snapshot = metrics.get_snapshot(model_id="", scope="session")
+    return _json_safe(dict(snapshot))
 
-    # _get_global_settings is a module global that vanilla's init fills at
-    # app startup; before that it is literally None (not a callable), and
-    # _build_runtime_cache_observability(None) returns its empty shape —
-    # the same thing the poll would have got at that moment.
+
+def _build_stats_slow() -> Optional[dict]:
+    """The expensive half: active models + runtime cache observability.
+
+    THIS is the multi-second walk (engine_pool.get_status() resolves each
+    model's cluster key through Path.resolve(), twice). Vanilla's poll paid
+    it per request; the feed pays it once per SLOW_EVERY_S, in a worker
+    thread, and caches the composites between.
+    """
+    from omlx.admin import routes as admin_routes
+
+    if not _vanilla_ready(admin_routes):
+        return None
+    payload: dict[str, Any] = {}
+    payload["active_models"] = admin_routes._build_active_models_data()
     gs_getter = getattr(admin_routes, "_get_global_settings", None)
     global_settings = gs_getter() if callable(gs_getter) else None
-
-    # The whole snapshot, not a filtered copy: those nine scalars ARE the
-    # snapshot today (server_metrics._build_snapshot) and a key upstream
-    # adds later is a key the client can start reading without a server
-    # change. The two composites keep their vanilla names and nesting.
-    payload: dict[str, Any] = dict(snapshot)
-    payload["active_models"] = admin_routes._build_active_models_data()
     payload["runtime_cache"] = admin_routes._build_runtime_cache_observability(
         global_settings, model_filter="",
     )
     return _json_safe(payload)
+
+
+def _build_stats_raw() -> Optional[dict]:
+    """The FULL payload: cheap snapshot scalars + the expensive composites.
+
+    This is what a first frame and every SLOW_EVERY_S full rebuild build;
+    in between the ticker uses _build_stats_fast() merged over the cached
+    composites (LOOP-SAFE duty-cycle split — the walk is ~1 s of engine
+    pool + cluster path resolution, the snapshot is microseconds).
+    Composition keeps ONE payload shape either way: same keys, same
+    nesting, exactly the vanilla /admin/api/stats body minus the four
+    route-decoration keys. Returns None when vanilla is absent or refuses:
+    the caller degrades the LANE, never the stream. Called by the ticker
+    and the shared seed — ALWAYS from a worker thread, never on the event
+    loop (LOOP-SAFE).
+    """
+    from omlx.admin import routes as admin_routes
+
+    if not _vanilla_ready(admin_routes):
+        return None
+    payload = _build_stats_fast()
+    if payload is None:
+        return None
+    slow = _build_stats_slow()
+    if slow is None:
+        return None
+    payload.update(slow)
+    return payload
 
 
 def _build_alltime_raw() -> Optional[int]:
@@ -266,14 +299,18 @@ class StatsFeed:
                  *,
                  stats_builder: Optional[Callable[[], Optional[dict]]] = None,
                  alltime_builder: Optional[Callable[[], Optional[int]]] = None,
+                 stats_fast_builder: Optional[Callable[[], Optional[dict]]] = None,
                  tick_s: float = STATS_TICK_S,
                  idle_stop_s: float = IDLE_STOP_S) -> None:
         # None (the normal case) resolves the MODULE-LEVEL seams at call
         # time, which keeps monkeypatching ``stats_feed._build_stats_raw``
         # effective against an already-built singleton; an explicit builder
-        # is the constructor-injection path used by unit tests.
+        # is the constructor-injection path used by unit tests. A custom
+        # stats_builder also forces FULL ticks (the fast/slow split is an
+        # optimization for the real vanilla seams, not for injected fakes).
         self._stats_builder = stats_builder
         self._alltime_builder = alltime_builder
+        self._stats_fast_builder = stats_fast_builder
         self._tick = tick_s
         self._idle_stop_s = idle_stop_s
 
@@ -305,6 +342,10 @@ class StatsFeed:
         # any number of racing connections.
         self._build_lock = threading.Lock()
         self._seed_task: Optional["asyncio.Task[bool]"] = None
+        # slow-half cache (LOOP-SAFE duty split): composites from the last
+        # FULL build, merged under every fast rebuild in between.
+        self._slow: Optional[dict] = None
+        self._slow_at = 0.0
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -402,7 +443,7 @@ class StatsFeed:
             await asyncio.sleep(max(rest_floor,
                                     next_due - time.monotonic()))
             try:
-                await asyncio.to_thread(self.tick_once)
+                await asyncio.to_thread(self.tick)
             except Exception:      # never die on a bad tick — Collector rule
                 self._failures += 1
                 log.debug("stats feed tick failed", exc_info=True)
@@ -422,7 +463,20 @@ class StatsFeed:
 
     # -- one tick / one read -----------------------------------------------
 
-    def tick_once(self) -> bool:
+    def tick(self) -> bool:
+        """Ticker entry (LOOP-SAFE duty split): the FULL build — including
+        the multi-second engine-pool/cluster walk — runs at most once per
+        ``SLOW_EVERY_S``; in between, only the snapshot scalars are rebuilt
+        (microseconds) and merged over the cached composites. Injected
+        builders (tests, standalone viewer) always take the full path: the
+        split exists for the real vanilla seams only.
+        """
+        full = (self._stats_builder is not None
+                or self._slow is None
+                or time.monotonic() - self._slow_at >= SLOW_EVERY_S)
+        return self.tick_once(full=full)
+
+    def tick_once(self, *, full: bool = True) -> bool:
         """Rebuild both lanes and bump the version cells on change. Returns
         whether the 's' cell changed (the 'sa' lane is reported by ver).
 
@@ -435,14 +489,25 @@ class StatsFeed:
         if not self._build_lock.acquire(blocking=False):
             return False
         try:
-            return self._tick_locked()
+            return self._tick_locked(full=full)
         finally:
             self._build_lock.release()
 
-    def _tick_locked(self) -> bool:
-        stats_b = self._stats_builder or _build_stats_raw
+    def _tick_locked(self, *, full: bool = True) -> bool:
         alltime_b = self._alltime_builder or _build_alltime_raw
-        stats = self._attempt(stats_b, "stats")
+        stats: Optional[dict] = None
+        if full:
+            stats_b = self._stats_builder or _build_stats_raw
+            stats = self._attempt(stats_b, "stats")
+            if isinstance(stats, dict):
+                self._slow_at = time.monotonic()
+                self._slow = {k: stats[k] for k in COMPOSITE_KEYS
+                              if k in stats}
+        else:
+            fast = self._attempt(self._stats_fast_builder or _build_stats_fast,
+                                 "stats")
+            if fast is not None:
+                stats = {**(self._slow or {}), **fast}
         alltime = self._attempt(alltime_b, "alltime")
 
         with self._lock:
@@ -555,8 +620,11 @@ class StatsFeed:
             return {"running": self.running, "subscribers": self._subscribers,
                     "off": self._off, "tick_s": self._tick,
                     "s_ver": self._s_ver, "sa": self._alltime,
-                    "sa_ver": self._a_ver, "ticks": self._ticks,
-                    "failures": self._failures}
+                    "sa_ver": self._a_ver,
+                    "ticks": self._ticks,
+                    "failures": self._failures,
+                    "slow_age_s": (round(time.monotonic() - self._slow_at, 1)
+                                   if self._slow is not None else None)}
 
     def _log_offonce(self, msg: str) -> None:
         """The ONE honest line (project logging doctrine forbids silent

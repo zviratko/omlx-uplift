@@ -282,6 +282,57 @@ def test_shared_cell_one_build_serves_every_connection():
     assert m.calls_s == before            # ...never cost more than one build
 
 
+def test_split_lanes_walk_the_engine_only_every_slow_window():
+    """LOOP-SAFE duty split: full builds (the ~1 s walk) are rate-limited
+    to SLOW_EVERY_S; cheap ticks still move the counters. Injected
+    builders bypass the split entirely (they are the whole fake payload)."""
+    calls = {"full": 0, "fast": 0}
+
+    def full_build():
+        calls["full"] += 1
+        return payload(requests=1)
+
+    def fast_build():
+        calls["fast"] += 1
+        return {"total_requests": 41, "uptime_seconds": 5}
+
+    orig_full, orig_fast = SF._build_stats_raw, SF._build_stats_fast
+    SF._build_stats_raw, SF._build_stats_fast = full_build, fast_build
+    try:
+        f = StatsFeed(alltime_builder=lambda: 7, tick_s=999.0)
+        assert f.tick() is True                   # first tick: no cache -> FULL
+        assert calls == {"full": 1, "fast": 0}
+        base = f.snapshot_now()["s_ver"]
+
+        assert f.tick() is True                   # counters moved on fast
+        assert calls == {"full": 1, "fast": 1}
+        snap = f.snapshot_now()
+        assert snap["s"]["total_requests"] == 41          # fresh fast value
+        assert snap["s"]["active_models"]["models"] == []  # cached composite
+        assert snap["s_ver"] == base + 1
+
+        assert f.tick() is False                  # identical fast value: no bump
+        assert f.snapshot_now()["s_ver"] == base + 1
+        assert calls == {"full": 1, "fast": 2}
+
+        # forced full rebuild refreshes the composites again
+        assert f.tick_once(full=True) is True
+        assert calls["full"] == 2
+        f.stop()
+    finally:
+        SF._build_stats_raw, SF._build_stats_fast = orig_full, orig_fast
+
+
+def test_injected_builders_always_take_the_full_path():
+    m = Model(p=payload(requests=1), a=1)
+    f = m.feed(tick_s=999.0)
+    assert f.tick() is True
+    m.p = payload(requests=2)
+    assert f.tick() is True
+    assert m.calls_s == 2          # no fast/slow split for injected seams
+    f.stop()
+
+
 def test_version_cursor_diff_sends_per_connection():
     """A tab that connects late starts at ver 0 and therefore still gets the
     CURRENT payload (not 'wait for the next change'), while an up-to-date
