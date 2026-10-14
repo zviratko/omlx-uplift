@@ -310,6 +310,12 @@ function applyTab() {
         // STATS-SSE: the 60 s chart-history interval now runs on Status
         // only — on re-entry, refresh history once it is older than that.
         if (CH.historyAge() > 60_000) CH.loadChartHistory();
+        // POLL-BATCH-2: the off-Status gates (sysPct, request-stats) skip
+        // fetches while another page shows; entry is the catch-up moment —
+        // 'each menu loads its page on click', exactly one round.
+        reqStatsPoll();
+        if (CH.refreshSysPct) CH.refreshSysPct();
+        CH.probeGatedCards();
     }
     if (tab === 'usage') UUP.pollUsage();
     if (tab === 'logs') UUP.pollLogs();
@@ -2450,6 +2456,9 @@ function reqStatsParam() {
     return m % 60 === 0 ? `${m / 60}h` : `${m}m`;
 }
 function reqStatsPoll() {
+    // POLL-BATCH-2: the Request-sizes card lives on Status; off-tab frames
+    // (the stats stream keeps flowing for tiles/events) must not feed it.
+    if (document.hidden || document.documentElement.dataset.tab !== 'status') return;
     const w = reqStatsParam();
     const now = Date.now();
     if (reqStatsFetching || (w === reqStatsWin && now - reqStatsAt < 15_000)) return;

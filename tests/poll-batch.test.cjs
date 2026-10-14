@@ -63,8 +63,5 @@ test('POLL-BATCH: Manager side-loads are TTL-cached, entry and writes force', ()
         'snapshot-to-template creation invalidates');
     const u = src('uplift.js');
     assert.match(u, /MM\.render\(true\);   \/\/ POLL-BATCH: entry = full fresh side-loads/,
-        'tab entry forces; the interval stays soft');
-    const b = src('uplift_boot.js');
-    assert.match(b, /currentTab\(\) === 'models' && !MM\.seModel\) MM\.render\(\); \}, 8000\)/,
-        'the 8 s tick passes NO force (models list only)');
+        'tab entry forces; there is no interval left to stay soft');
 });

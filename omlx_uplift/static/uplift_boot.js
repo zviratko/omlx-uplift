@@ -146,9 +146,14 @@ for (const def of C.EXPLORE_METRICS)
    (one /metrics/latest); re-check every 60 s so a macmon installed
    mid-session lights up without a reload. */
 CH.probeGatedCards();
-setInterval(() => { if (!document.hidden) CH.probeGatedCards(); }, 60000);
+/* POLL-BATCH-2: gated-card presence and the power/temp chips feed the
+   Status board + header. macmon probe stays (60 s, Status-only — a card
+   revealed by new data appears the next time you LOOK at the board);
+   the header chips slow 12 s -> 30 s (user: "even that does not need to
+   update as fast as if we were in stats"). */
+setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.probeGatedCards(); }, 60000);
 CH.refreshPowerChips();
-setInterval(() => { if (!document.hidden) CH.refreshPowerChips(); }, 12000);
+setInterval(() => { if (!document.hidden) CH.refreshPowerChips(); }, 30000);
 /* ---- PAT-4 patches page: extracted to uplift_patches.js (PH2-1 stage 8);
    window.Uplift.patches aliases live at the top. initPatchesPage() boots
    its own listeners; pollPatches runs via applyTab. ---- */
@@ -189,17 +194,20 @@ if (layout.liveFeed) {
     if (window.EventSource) LF.connect();
 }
 setInterval(pollGatewayInfo, 10000);
-setInterval(() => { if (!document.hidden && !FE.sseOpen()) FE.pollRequests(); }, 2000);  // FEED-1
-/* STATS-SSE: the 8 s model-table refresh feeds Models-tab surfaces ONLY —
-   evidence: every S.adminModels reader renders there (mmtable paint + the
-   editor's profile/divergence reads live in the Models manager/editor;
-   voices' TTS selects are the models/voices sub; helper's chip column is
-   models/helper; uplift.js/feed/reqsearch read NONE, and the Status tab's
-   per-model tiles come from the stats snapshot s.models, not adminModels).
-   Entering the tab already paints: applyTab calls MM.render() for Models,
-   the helper 'manager' chip navigates (#models/manager -> hashchange ->
-   applyTab), and the seModel guard keeps the open editor undisturbed. */
-setInterval(() => { if (!document.hidden && currentTab() === 'models' && !MM.seModel) MM.render(); }, 8000);
+/* FEED-1 fallback, slowed by POLL-BATCH-2 (user: "polling of requests"
+   seen while a tab was unfocused): the requests stream is focus-owned
+   (HANG-1), and this chain fed unfocused tabs every 2 s. Events for an
+   UNFOCUSED tab are not watched live anyway — toasts and the feed panel
+   catch up from the server ring on focus-reopen, so 10 s is the honest
+   background cadence. Focused tabs never take this path. */
+setInterval(() => { if (!document.hidden && !FE.sseOpen()) FE.pollRequests(); }, 10000);  // FEED-1
+/* MODELS POLL REMOVED (user 2026-10-14: "I don't see a reason to poll
+   /models — if something changes it's likely the user who did that and
+   they will refresh the window"): the table refreshes on tab ENTRY
+   (applyTab MM.render(true) — full fresh side-loads) and after every
+   WRITE path (they all call render(true)); the consumer audit still
+   holds (every S.adminModels reader renders on Models). No background
+   timer here anymore. */
 setInterval(() => { if (!document.hidden && currentTab() === 'usage') UUP.pollUsage(); }, 15000);
 setInterval(() => { if (!document.hidden && currentTab() === 'logs' && UUP.logsFollow) UUP.pollLogs(); }, 5000);
 })();

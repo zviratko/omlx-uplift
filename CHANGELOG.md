@@ -26,13 +26,17 @@ users never see.
   **Additional suites** section, now a prominent, collapsed-by-default
   fold that remembers whether you opened it. The request-total line
   stays visible under the fold.
-- **Dashboard traffic drops sharply off the Status tab.** The stats
-  payload now rides the live stream the dashboard already holds (one
-  shared server-side sample, change-driven frames — an idle board pushes
-  about a frame per minute instead of a full rebuild per tab per second);
-  the 1 s poll survives only as the fallback, at 20 s off Status, and the
-  8 s model-catalog and 60 s chart-history refetches now run only on the
-  tabs that show them.
+- **Dashboard traffic: streams in, timers out.** The stats payload now
+  rides the live stream the dashboard already holds (one shared
+  server-side sample, change-driven frames), a **visible** tab keeps that
+  stream even when DevTools steals window focus (the old focus gate made
+  the board fall back to 1 s polling exactly while you watched it), and
+  the metric grid fetches one batched series call per window instead of
+  one per card. Model Manager no longer polls anything in the background:
+  the table refreshes on tab entry and after your own writes. Left
+  running: a 10 s catch-up poll for unfocused tabs (their streams are
+  closed by design), 20 s stats fallback when a stream truly dies, and
+  the 30 s header power/temp chip refresh.
 - **Decision bench scores any model.** The model picker split into
   **Decision models** (native heads, `/v1/systemone`) and **Other models**
   (any chat model, scored through the new upstream `/v1/decisions` readout

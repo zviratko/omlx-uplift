@@ -424,16 +424,24 @@ test('applyTab: tab-change retunes the stats chain; Status entry refreshes stale
         'Status entry refreshes chart history when older than 60 s');
 });
 
-test('(d) boot: 8 s model-table poll is Models-tab-only; 60 s history poll is Status-only', () => {
-    const mm = /setInterval\(\(\) => \{[^\n]*MM\.render\(\); \}, 8000\);/.exec(bootSrc);
-    assert.ok(mm, 'the 8 s MM.render interval still exists (its data lane is needed)');
-    assert.ok(mm[0].includes("currentTab() === 'models'"),
-        'gated to Models: every S.adminModels reader (mmtable/mmeditor/voices/helper) renders there; applyTab paints on entry');
-    assert.ok(mm[0].includes('!MM.seModel'), 'editor-open guard unchanged');
+test('(d) boot: NO model-table poll at all; history/gated probes are Status-only', () => {
+    // USER DOCTRINE (2026-10-14): "I don't see a reason to poll /models,
+    // if something changes then it's likely the user who did that and
+    // they will refresh the window" — the 8 s Models interval is GONE.
+    // Freshness = tab entry (applyTab MM.render(true)) + write paths.
+    assert.ok(!/MM\.render\(\); \}, 8000\)/.test(bootSrc),
+        'no background /models poll survives');
+    assert.ok(/MODELS POLL REMOVED/.test(bootSrc),
+        'the removal carries its reason in-place');
     const hist = /setInterval\(\(\) => \{[^\n]*CH\.loadChartHistory\(\); \}, 60000\);/.exec(bootSrc);
     assert.ok(hist, 'the 60 s history interval still exists');
     assert.ok(hist[0].includes("currentTab() === 'status'"),
         'gated to Status — the only consumer is the Status chart pair');
+    const gate = /setInterval\(\(\) => \{[^\n]*CH\.probeGatedCards\(\); \}, 60000\);/.exec(bootSrc);
+    assert.ok(gate && gate[0].includes("currentTab() === 'status'"),
+        'the macmon probe is Status-only too');
+    const pwr = /setInterval\(\(\) => \{ if \(!document\.hidden\) CH\.refreshPowerChips\(\); \}, 30000\);/.test(bootSrc);
+    assert.ok(pwr, 'header chips survive but at 30 s, not 12 s');
 });
 
 test('charts age hook is additive: historyAt stamps only an ADOPTED load', () => {

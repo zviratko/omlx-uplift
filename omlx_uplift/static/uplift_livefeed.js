@@ -122,13 +122,18 @@ function onFrame(fn) { if (typeof fn === 'function') listeners.push(fn); }
 function onStats(fn) { if (typeof fn === 'function') statsCbs.push(fn); }
 
 function connect() {
-    // HANG-1: like the request feed, the 2 Hz stream belongs to the FOCUSED
-    // tab only — visible-but-unfocused tabs used to burn a permanent slot of
-    // the browser's ~6-per-origin HTTP/1.1 budget (2 streams x 3 tabs = the
-    // 4th tab's page load starves; measured). Unfocused tabs fall back to
-    // the 5 s stored cadence honestly: liveUsable()'s 15 s freshness gate
-    // trips, and the charts keep drawing from the store.
-    if (disabled || source || !window.EventSource || document.hidden || !document.hasFocus()) return;
+    // HANG-1 (revised by LIVE-FOCUS-1, user 2026-10-14: "I still see
+    // polling of stats once per second"): the focus gate made the board
+    // fall back to polling EXACTLY while the user watched DevTools — the
+    // inspector steals window focus, the stream closed, the 1 s chain
+    // resumed. The observer effect made the fallback look like the design.
+    // The stats lane now rides this connection, so a VISIBLE tab keeps it
+    // regardless of focus; only hidden tabs release their slots. Budget
+    // check: each visible tab holds ONE forever stream (this one); the
+    // request stream stays focus-owned, so a typical 3-4 visible-tab
+    // desktop sits at 4-5 of the ~6 HTTP/1.1 connections, not 6+ (the
+    // 2-streams-x-3-tabs starvation measured at HANG-1 time never forms).
+    if (disabled || source || !window.EventSource || document.hidden) return;
     try {
         source = new EventSource(`${API}/uplift/api/metrics/stream`);
         source.onmessage = e => { try { ingest(JSON.parse(e.data)); } catch (_) {} };
@@ -205,15 +210,15 @@ function enable() { disabled = false; }
 function smoothK() { return LIVE_SMOOTH_K; }
 function isLive() { return everLive; }
 
-/* Pause/resume with the tab, exactly like the request feed. HANG-1: blur
-   also releases the slot; focus takes it back (the ring replays on connect,
-   so the live columns refill without a reload). */
+/* Pause/resume with the tab. LIVE-FOCUS-1: blur NO LONGER releases this
+   slot (a visible tab is a watching tab — that's who the stream is for);
+   only document.hidden closes it. The focus listener stays as a cheap
+   re-open for the resume-from-hidden path. */
 window.addEventListener('visibilitychange', () => {
     if (document.hidden) close();
     else connect();
 });
 window.addEventListener('focus', () => connect());
-window.addEventListener('blur', () => close());
 
 window.Uplift.livefeed = {
     connect, close, probe, liveUsable, liveCol, liveForWindow, smoothK, isLive,

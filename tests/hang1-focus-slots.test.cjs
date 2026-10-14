@@ -24,23 +24,27 @@ test('HANG-1: request-feed connect gates on hidden AND focus', () => {
         'connectEventStream must refuse unfocused visible tabs');
 });
 
-test('HANG-1: live-feed connect gates on hidden AND focus', () => {
+test('LIVE-FOCUS-1: live-feed connect gates on HIDDEN only (stats lane)', () => {
+    // Revised 2026-10-14: the stats payload now rides this stream, and the
+    // focus gate made boards poll at full rate EXACTLY while the user had
+    // DevTools open (the inspector steals focus). A visible tab keeps its
+    // ONE forever stream regardless of focus; hidden tabs still release.
     const fn = lf.slice(lf.indexOf('function connect()'), lf.indexOf('function close()'));
-    assert.ok(/document\.hidden \|\| !document\.hasFocus\(\)/.test(fn),
-        'livefeed connect must refuse unfocused visible tabs');
+    assert.ok(/document\.hidden\) return;/.test(fn) && !/hasFocus/.test(fn),
+        'livefeed connect refuses HIDDEN tabs only');
 });
 
-test('HANG-1: focus/blur listeners hand the slots over', () => {
+test('HANG-1 (kept for the request stream): focus/blur listeners hand its slot over', () => {
     assert.ok(/addEventListener\('focus'/.test(feed) && /addEventListener\('blur'/.test(feed),
         'request feed reopens on focus, releases on blur');
-    assert.ok(/addEventListener\('focus', \(\) => connect\(\)\)/.test(lf)
-        && /addEventListener\('blur', \(\) => close\(\)\)/.test(lf),
-        'live feed reopens on focus, releases on blur');
+    assert.ok(/addEventListener\('focus', \(\) => connect\(\)\)/.test(lf),
+        'live feed reopens on focus (resume path)');
+    assert.ok(!/addEventListener\('blur', \(\) => close\(\)\)/.test(lf),
+        'LIVE-FOCUS-1: live feed NO LONGER closes on blur');
 });
 
-test('HANG-1: FEED-1 poll stays the unfocused-tab fallback', () => {
+test('FEED-1: the unfocused fallback poll survives, slowed to 10 s', () => {
     const boot = read('uplift_boot.js');
-    assert.ok(/!document\.hidden && !FE\.sseOpen\(\)\) FE\.pollRequests\(\); \}, 2000\)/.test(boot)
-        || /FE\.pollRequests\(\); \}, 2000\)/.test(boot),
-        'the 2 s fallback poll must survive — it is what feeds unfocused tabs');
+    assert.ok(/FE\.pollRequests\(\); \}, 10000\)/.test(boot),
+        'unfocused tabs catch events on a 10 s background cadence; the ring replays on focus');
 });

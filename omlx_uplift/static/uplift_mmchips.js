@@ -44,8 +44,10 @@ function copyText(t) {   // plain-http LAN origins lack navigator.clipboard
 }
 /* Properties of an alias/exposed profile that diverge from the model's own
    settings — rendered as indicator chips next to the alias tree line. */
-/* cached per-model profile lists for the row alias tree (30 s TTL; editor
-   writes invalidate immediately) */
+/* cached per-model profile lists for the row alias tree (POLL-BATCH-2:
+   120 s TTL — they ride EVERY table repaint, and with the 8 s Manager
+   tick gone the repaints are entry+writes only, so this TTL now mostly
+   bounds external profile churn; editor writes invalidate immediately) */
 const profilesCache = {};
 function aliasDiffChips(prof, base) {
     const SHORT = { temperature: 'TEMP', top_p: 'TOP_P', top_k: 'TOP_K',
@@ -411,7 +413,7 @@ function aliasTree(m) {
         if (!profHost.children.length) profHost.remove();
     };
     const c = profilesCache[m.id];
-    if (c && Date.now() - c.t < 30000) { renderProfiles(c.profs); scheduleAlign(); }
+    if (c && Date.now() - c.t < 120000) { renderProfiles(c.profs); scheduleAlign(); }
     else MM_GLUE.fetchJson(`${API}/uplift/api/models/${encodeURIComponent(m.id)}/profiles`)
         .then(d => { profilesCache[m.id] = { t: Date.now(), profs: d.profiles || [] };
                      renderProfiles(d.profiles || []); scheduleAlign(); })

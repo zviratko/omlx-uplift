@@ -1684,6 +1684,10 @@ let mtpLiveTps = null, mtpLiveTs = 0;
 // collector tick, same latest-fetch, same 120 s staleness rule as mtp.
 let embedLiveTps = null, embedLiveTs = 0;
 async function refreshSysPct() {
+    // POLL-BATCH-2: these latest-reads feed the Status chart pair only.
+    // While another tab shows, the fetch is pure waste — the values stay
+    // in the columns, and the next s-frame/status entry refreshes again.
+    if (document.hidden || document.documentElement.dataset.tab !== 'status') return;
     const now = Date.now();
     if (sysFetching || now - sysAt < 10_000) return;
     sysFetching = true; sysAt = now;
@@ -1870,6 +1874,7 @@ window.Uplift.charts = {
     legendUpdater: legendUpdater,   // SWEEP178: exposed for console testability
     fitAllMetricPlots: fitAllMetricPlots, clearMainChartHover: clearMainChartHover,
     refreshPowerChips: refreshPowerChips,
+    refreshSysPct: refreshSysPct,   // POLL-BATCH-2: Status-entry catch-up
     /* U24 gated cards (macmon): the card DOM ALWAYS exists (boot creates it
        parked); this probe only FLIPS it visible once the series actually
        have values — the same data-driven flag the header chips use. Absence
