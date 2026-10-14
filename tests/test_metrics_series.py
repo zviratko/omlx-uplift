@@ -25,6 +25,21 @@ def test_downsample_noop_below_cap():
     assert out is pts and bucket == 0
 
 
+def test_downsample_rounds_wire_values():
+    """SQUEEZE: response values carry 6 significant digits, not float64
+    full repr — 74 KB series payloads were dominated by '...0000004'."""
+    from omlx_uplift.routers.derive import _downsample, _wire_v
+
+    pts = [{"ts": 1000.0 + i, "v": 0.1 + 0.2, "res": "fine"} for i in range(3)]
+    out, bucket = _downsample(pts)          # passthrough leg (no averaging)
+    assert all(p["v"] == 0.3 for p in out) and out is pts and bucket == 0
+    big = [{"ts": float(i * 10), "v": 123456789012.0, "res": "fine"}
+           for i in range(3)]
+    out2, _ = _downsample(big)
+    assert out2[0]["v"] == 123457000000.0   # 6 sig digits, magnitude intact
+    assert _wire_v(None) is None and _wire_v(7) == 7
+
+
 def test_downsample_buckets_average_and_stay_under_cap():
     pts = _fine("k", 10_000, step=5.0)   # ~14h of 5s samples
     out, bucket = up._downsample(pts, max_pts=500)

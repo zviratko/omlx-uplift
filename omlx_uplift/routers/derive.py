@@ -83,14 +83,27 @@ _USAGE_COLS = ("requests", "prompt_tokens", "completion_tokens",
 MAX_SERIES_POINTS = 20000
 
 
+def _wire_v(x):
+    """Compact wire form of a series value (SQUEEZE): float64 full repr
+    (0.36000000000000004) tripled payload bytes for a precision no chart,
+    axis or tooltip consumes. Six significant digits is far below one pixel
+    of any plot; it also stabilizes ETag-ish byte sizes across rerolls."""
+    if isinstance(x, float):
+        return float(f"{x:.6g}")
+    return x
+
+
 def _downsample(points: list[dict], max_pts: int = MAX_SERIES_POINTS):
     """Average into equal-width buckets so a 30d pull is ~thousands of
     points, not hundreds of thousands. Buckets align to wall-clock
     multiples of bucket_s; each output point carries the bucket START and
     res='avg' (plus the true resolution inside: 'hourly' stays hourly if
     the whole bucket came from coarse rollups). Returns (points, bucket_s)
-    or (points, 0) when no downsampling was needed."""
+    or (points, 0) when no downsampling was needed. All values pass
+    through _wire_v — the round-trip is the response body either way."""
     if len(points) <= max_pts:
+        for p in points:      # fresh dicts from store.series per request —
+            p["v"] = _wire_v(p["v"])   # in-place keeps the identity contract
         return points, 0
     span = points[-1]["ts"] - points[0]["ts"] or 1.0
     # Next power of 10 that fits the cap; 60 s is the honest floor (never
@@ -107,7 +120,8 @@ def _downsample(points: list[dict], max_pts: int = MAX_SERIES_POINTS):
         if not vals:
             continue
         res = "hourly" if all(r["res"] == "hourly" for r in rows) else "avg"
-        out.append({"ts": b * bucket_s, "v": sum(vals) / len(vals), "res": res})
+        out.append({"ts": b * bucket_s, "v": _wire_v(sum(vals) / len(vals)),
+                    "res": res})
     return out, bucket_s
 
 
