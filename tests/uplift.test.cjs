@@ -941,6 +941,47 @@ test('U42: ifPaint renders "(draft selected / generated)" and never the classic 
     // payload with scored>0 included (guard keys on selected alone)
     const slot2 = { ...slot, meta: { textContent: '' }, selected: 0, scored: 5000 };
     fn(slot2);
+    // zeroselected
     assert.ok(!slot2.meta.textContent.includes('draft'),
         'zero selected must render no draft block: ' + slot2.meta.textContent);
+});
+
+test('client-perf: lazy tab scripts, cached DateTimeFormat, binary-search mergeHistory, cached ts-row width, lazy parked plots', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'index.html'), 'utf8');
+    // 2A: heavy non-Status tab scripts are loaded on demand via D.loadScript
+    for (const lazy of ['uplift_bench.js', 'uplift_chat.js', 'uplift_mmeditor.js', 'uplift_voices.js']) {
+        assert.ok(!html.includes(`src="./${lazy}"`), `${lazy} must not load synchronously in index.html`);
+    }
+    const D = require('../omlx_uplift/static/domkit.js');
+    assert.strictEqual(typeof D.loadScript, 'function', 'domkit exports loadScript');
+
+    // 2B: uplift_charts.js uses cached Intl.DateTimeFormat instances instead of per-tick toLocale*String
+    const charts = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_charts.js'), 'utf8');
+    assert.ok(charts.includes("new Intl.DateTimeFormat('en-GB'"), 'cached Intl.DateTimeFormat present');
+    const chartCodeNoComments = charts.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(!/toLocale(?:Time)?String/.test(chartCodeNoComments), 'no uncached toLocale*String in uplift_charts.js');
+
+    // 2C: mergeHistory binary-searches pre-sorted history and falls back on unsorted/malformed
+    const now = 2_000_000;
+    const sortedHist = [
+        { ts: now - 10_000, v: 1, res: 'hourly' },
+        { ts: now - 4_000, v: 2, res: 'hourly' },
+        { ts: now - 2_000, v: 3, res: 'fine' },
+        { ts: now - 2_000, v: 4, res: 'fine' }, // duplicate ts: last wins
+    ];
+    const m1 = C.mergeHistory(sortedHist, [now - 3_000, now - 500], [99, 5], 5, now);
+    assert.deepStrictEqual(m1.ts, [now - 4_000, now - 2_000, now - 500]);
+    assert.deepStrictEqual(m1.v, [2, 4, 5]);
+    assert.strictEqual(m1.boundary, now - 4_000);
+
+    // D: renderCardTsRows caches _tsRowNeedW across cards
+    assert.match(charts, /let _tsRowNeedW = 0;/, 'ts-row width cache declared');
+    assert.match(charts, /if \(force\) _tsRowNeedW = 0;/, 'force invalidates ts-row width cache');
+
+    // E: parked cards defer uPlot instantiation until placement and skip metricFetch/drawMetricChart
+    assert.match(charts, /function _cardParked\(id, e\)/, '_cardParked helper exists');
+    assert.match(charts, /function ensureMetricPlot\(id\)/, 'ensureMetricPlot helper exists');
+    assert.match(charts, /if \(!park\) ensureMetricPlot\(id\);/, 'createMetricCard skips uPlot init when parked');
 });

@@ -31,6 +31,7 @@ window.Uplift._chartGlue = {
     get _padObserver() { return _padObserver; },
     get removeCard() { return removeCard; },
     get applyI18n() { return applyI18n; },
+    get upLayout() { return upLayout; },
     /* U24 gated metric cards (macmon power/temperature): the card DOM ships
        at boot — parked when its data has not been seen yet. This reveal is
        the probe's flip switch: place the card in the slot its layout (saved
@@ -132,7 +133,6 @@ window.Uplift._helperGlue = {
     get GW_LIVE() { return GW_LIVE; },
 };
 const HLP = window.Uplift.helper;
-const VOI = window.Uplift.voices;
 const UUP = window.Uplift.usage;
 window.Uplift._usageGlue = {
     get setCounter() { return setCounter; },
@@ -326,7 +326,10 @@ function applyTab() {
         if (sub === 'quantizer') MOs.renderQuantizer();
         if (sub === 'uploader') MOs.renderUploader();
         if (sub === 'helper') HLP.renderHelperModels();
-        if (sub === 'voices') VOI.renderVoices();
+        if (sub === 'voices') {
+            if (window.Uplift.voices) window.Uplift.voices.renderVoices();
+            else D.loadScript('./uplift_voices.js').then(() => window.Uplift.voices.renderVoices());
+        }
         if (sub === 'manager') MM.renderTemplates();
     }
     if (tab === 'settings') {
@@ -437,8 +440,18 @@ function showEmbedPage(tab, sub) {
             // it is a no-op once mounted, so BENCH ▾ → Intelligence never
             // switched panels (each embed sub had its own card; native
             // has one host + subtab strip). Drive the strip from `sub`.
-            if (tab === 'bench') { UpliftNativeBench.mount(); UpliftNativeBench.showSub(sub); }
-            else UpliftNativeChat.mount();
+            if (tab === 'bench') {
+                const runBench = () => { UpliftNativeBench.mount(); UpliftNativeBench.showSub(sub); };
+                if (typeof UpliftNativeBench !== 'undefined') runBench();
+                else D.loadScript('./uplift_bench.js').then(runBench);
+            } else {
+                const runChat = () => UpliftNativeChat.mount();
+                if (typeof UpliftNativeChat !== 'undefined') runChat();
+                else Promise.all([
+                    window.Uplift.voices ? Promise.resolve() : D.loadScript('./uplift_voices.js'),
+                    D.loadScript('./uplift_chat.js'),
+                ]).then(runChat);
+            }
         }
         return;
     }
@@ -1388,6 +1401,7 @@ function _placeCard(id, pos, h) {
     const el = _blockEl(id);
     if (!el || el.gridstackNode) return null;
     el.classList.remove('card-parked');
+    if (CH && CH.ensureMetricPlot) CH.ensureMetricPlot(id);
     dashGrid.makeWidget(el, { id, x: pos.x, y: pos.y, w: pos.w, h: h || 1, minW: UPL.minWFor(id) });
     if (!dashPlacedIds.includes(id)) dashPlacedIds = [...dashPlacedIds, id];
     return el;
@@ -1420,6 +1434,7 @@ function applyUpliftLayout(saved) {
             if (el.classList.contains('card-parked') && _gateStillHidden(block.id))
                 return;
             el.classList.remove('card-parked');   // un-park before placement
+            if (CH && CH.ensureMetricPlot) CH.ensureMetricPlot(block.id);
             if (!el.gridstackNode) {
                 dashGrid.makeWidget(el, { id: block.id, x: block.x, y: block.y, w: block.w, h: block.h, minW: UPL.minWFor(block.id) });
             }

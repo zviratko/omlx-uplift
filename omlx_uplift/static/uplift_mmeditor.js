@@ -289,7 +289,7 @@ let seBaseRaw = {};         // raw stored base settings dict (fetched in openEdi
 const MM_DATA = {
     profiles: [],      // stored profiles of seModel (fetched in openEditor)
     presets: null,     // bundled global presets, lazily fetched + cached
-    templates: [],     // profile-templates (renderTemplatesBox also fills)
+    templates: MM_STATE._mmTemplates || [],     // profile-templates (renderTemplatesBox also fills)
     divergence: [],    // [{name, display_name, api_name, diff:[…]}]
     reqDivergence: [], // REQ-DIV: same shape, request-time keys
 };

@@ -38,13 +38,22 @@ def test_vstamp_serves_every_relative_asset_versioned():
     resp = pages._serve_index_flagged(Request(scope))
     body = resp.body.decode()
     assert "?v=" in body
+    assert 'data-vstamp="' in body
     # NOT ONE unstamped relative asset survives (class excludes '?', so a
     # stamped '"./x.js?v=.."' cannot match):
     assert _rx.search(r'(?:src|href)="\./[^"?]+\.(?:js|css)"', body) is None
     # the stamp is real, stable within a bundle, and moves with the anchor
     stamp = pages._asset_stamp()
     assert len(stamp) == 12 and stamp in body
+    assert f'data-vstamp="{stamp}"' in body
     assert pages._asset_stamp() == stamp
+    # stamped asset requests receive immutable caching; unstamped stay no-cache
+    st_req = Request({**scope, "path": "/uplift/uplift.js",
+                      "query_string": f"v={stamp}".encode()})
+    st_resp = pages._static_file(st_req, "uplift.js")
+    assert st_resp.headers["cache-control"] == "public, max-age=31536000, immutable"
+    unst_req = Request({**scope, "path": "/uplift/uplift.js", "query_string": b""})
+    assert pages._static_file(unst_req, "uplift.js").headers["cache-control"] == "no-cache"
 
 
 def test_flag_defaults_all_natural_off(monkeypatch, tmp_path):

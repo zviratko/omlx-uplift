@@ -17,15 +17,19 @@ const S = window.Uplift.state;
 const T = () => window.Uplift.mmTable;
 const P = () => window.Uplift.mmTemplates;
 const E = () => window.Uplift.mmEditor;
+const D = window.UpliftDom;
 
 window.Uplift.modelmgr = {
     render: (...a) => T().render(...a),
     renderTemplates: (...a) => P().render(...a),
-    openEditor: (...a) => E().openEditor(...a),
-    closeEditor: (...a) => E().closeEditor(...a),
+    openEditor: (...a) => {
+        if (E()) return E().openEditor(...a);
+        return D.loadScript('./uplift_mmeditor.js').then(() => E().openEditor(...a));
+    },
+    closeEditor: (...a) => E() && E().closeEditor(...a),
     openInspector: (...a) => window.Uplift.inspector.open(...a),
     get adminModels() { return S.adminModels; },
-    get seModel() { return E().seModel; },
+    get seModel() { return E() ? E().seModel : null; },
     confirmDialog: (...a) => T().confirmDialog(...a),
 };
 P().init();

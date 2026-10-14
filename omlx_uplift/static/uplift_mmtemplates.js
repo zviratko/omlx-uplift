@@ -36,6 +36,7 @@ function renderTemplatesBox(force) {
         if (!templates.length) { D.emptyMsg(host, C.t('uplift.mm.no_templates')); return; }
         // FE-6: hand the list to the editor via the module store
         const _md = window.Uplift.mmData; if (_md) _md.templates = templates;
+        else S._mmTemplates = templates;
         for (const t of templates) {
             const row = document.createElement('div'); row.className = 'urow admin tpl';
             const name = document.createElement('span'); name.className = 'uname';

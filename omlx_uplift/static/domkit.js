@@ -117,6 +117,21 @@ function emptyMsg(host, msg) {   // error text goes through textContent, never i
     d.textContent = msg; host.append(d);
 }
 
+const _scripts = {};
+function loadScript(src) {
+    if (_scripts[src]) return _scripts[src];
+    _scripts[src] = new Promise((res, rej) => {
+        const s = document.createElement('script');
+        const v = document.documentElement && document.documentElement.dataset
+            && document.documentElement.dataset.vstamp;
+        s.src = v ? `${src}?v=${v}` : src;
+        s.onload = () => res();
+        s.onerror = () => { delete _scripts[src]; rej(new Error(`script load failed: ${src}`)); };
+        document.head.append(s);
+    });
+    return _scripts[src];
+}
+
 return { $, fetchJson, postJson, putJson, deleteJson, toast, cell, emptyMsg,
-         setUnauthorizedHandler };
+         setUnauthorizedHandler, loadScript };
 });

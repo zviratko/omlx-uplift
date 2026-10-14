@@ -27,6 +27,7 @@ const CH_GLUE = {
     get _padObserver() { return window.Uplift._chartGlue._padObserver; },
     get removeCard() { return window.Uplift._chartGlue.removeCard; },
     get applyI18n() { return window.Uplift._chartGlue.applyI18n; },
+    get upLayout() { return window.Uplift._chartGlue.upLayout; },
     get revealGatedCard() { return window.Uplift._chartGlue.revealGatedCard; },
 };
 /* ---------------- charts ---------------- */
@@ -139,9 +140,10 @@ async function loadChartHistory() {
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes')}&window=${w}`).catch(() => null),
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/hot?window=${w}`).catch(() => null),
         ]);
-        const conv = a => (a && a.series ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })) : []);
+        const conv = a => (a && a.series
+            ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })).sort((x, y) => x.ts - y.ts) : []);
         const convMap = (o, k, scale) => (o && o.series_map && o.series_map[k]
-            ? o.series_map[k].map(x => ({ ts: x.ts * 1000, v: scale ? x.v * scale : x.v, res: x.res })) : []);
+            ? o.series_map[k].map(x => ({ ts: x.ts * 1000, v: scale ? x.v * scale : x.v, res: x.res })).sort((x, y) => x.ts - y.ts) : []);
         // U40: sum every per-model 'hot.<model>' series into ONE aggregate
         // history column. A timestamp missing a model still sums the present
         // ones (the collector writes every loaded model each tick, so gaps
@@ -306,19 +308,25 @@ function line(label, colorVar, fill, scale) {
              gaps: KIT.gapBridge(),
              points: { show: false }, value: seriesValue };
 }
+/* Cached Intl.DateTimeFormat instances for axis ticks, legend Time row,
+   hover tooltip and hourly boundary readout — avoids re-parsing locale
+   options on every 1–2 Hz redraw across ~14 canvases. */
+const FMT_TIME_HMS = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const FMT_TIME_HM = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+const FMT_WK_HM = new Intl.DateTimeFormat('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const FMT_MD_HM = new Intl.DateTimeFormat('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const FMT_MD = new Intl.DateTimeFormat('en-GB', { month: 'short', day: 'numeric' });
 function xAxis(col, boundWin, id) {
     // POP-TS-1: with no numeric boundWin (pop-out passes none) the label
     // format follows the card's LIVE window — a timeframe change inside
     // the pop-out must not leave second-level ticks labelled like a day.
     const winOf = () => boundWin >= 0 ? boundWin : cardWindow(id || 'chart-tps');
     return { stroke: col.dim, width: 1, size: 34, font: axisFont(col),
-             values: (s, t) => t.map(ts => {
+             values: (s, t) => {
                  const win = winOf();
-                 return win >= 86400
-                     ? new Date(ts).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
-                     : new Date(ts).toLocaleTimeString('en-GB',
-                         { hour: '2-digit', minute: '2-digit', ...(win < 900 ? { second: '2-digit' } : {}) });
-             }) };
+                 const fmt = win >= 86400 ? FMT_WK_HM : (win < 900 ? FMT_TIME_HMS : FMT_TIME_HM);
+                 return t.map(ts => fmt.format(ts));
+             } };
 }
 function yAxis(col, opts) {
     // Adaptive gutter (user 2026-10-10: a fixed gutter clipped the memory
@@ -407,9 +415,7 @@ function legendUpdater() {
             const t = src[i];
             const dayish = src.length > 1 && (src[src.length - 1] - src[0]) > 2 * 86400e3;
             cell.textContent = (typeof t === 'number' && t > 0)
-                ? new Date(t).toLocaleString('en-GB', dayish
-                    ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
-                    : { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                ? (dayish ? FMT_MD_HM : FMT_TIME_HMS).format(t)
                 : '--';
         }
         seriesRows.forEach((row, sIdx) => {
@@ -495,7 +501,7 @@ function showTip(c, ev, i) {
     tip.textContent = '';
     const t = document.createElement('div');
     t.className = 'ut-time';
-    t.textContent = new Date(c.data[0][i]).toLocaleTimeString('en-GB');
+    t.textContent = FMT_TIME_HMS.format(c.data[0][i]);
     tip.append(t);
     for (let s = 1; s < c.series.length; s++) {
         // SMOOTH-3: stacked cards show each band's own share in the tip
@@ -702,7 +708,7 @@ function redrawCharts() {
     const now = Date.now();
     const g = C.mergeHistory(chartHist.gen, tpsData[0], tpsData[1], cardWindow('chart-tps'), now);
     if (shown > 1 && g.boundary && g.boundary < now - 120000) {
-        label += ` · hourly ≤ ${new Date(g.boundary).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+        label += ` · hourly ≤ ${FMT_TIME_HM.format(g.boundary)}`;
     }
     $('chart-tps-window').textContent = label;
 }
@@ -854,6 +860,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeTsPop(); });
 
+let _tsRowNeedW = 0;   // cached natural width of the 8-chip row (measured once per locale/label pass)
 function renderCardTsRows(force) {
     // Metric headers wrap (CSS): chips that fit the CARD get a header line of
     // their own instead of collapsing; only chips wider than the whole card
@@ -862,6 +869,7 @@ function renderCardTsRows(force) {
     // the card = the always-showing-button regression (user 2026-09-21).
     // Zero-width band = card not laid out yet (parked boot): skip, the settle
     // pass re-checks after placement.
+    if (force) _tsRowNeedW = 0;
     for (const row of document.querySelectorAll('.ts-row')) {
         const id = row.dataset.block;
         const win = cardWindow(id);
@@ -869,17 +877,20 @@ function renderCardTsRows(force) {
         const bandW = h2 ? h2.clientWidth : row.parentElement.clientWidth;
         if (!bandW) continue;
         const avail = bandW - 24;   // h2 padding (16) + flex gap (8)
-        const probe = document.createElement('div');
-        probe.className = 'ts-row';
-        probe.style.cssText = 'position:absolute;visibility:hidden;width:max-content;max-width:none;';
-        (h2 || row.parentElement).append(probe);
-        for (const sec of C.LAYOUT_WINDOWS) {
-            const b = document.createElement('button');
-            b.type = 'button'; b.className = 'ts-chip'; b.textContent = windowLabel(sec);
-            probe.append(b);
+        if (!_tsRowNeedW) {
+            const probe = document.createElement('div');
+            probe.className = 'ts-row';
+            probe.style.cssText = 'position:absolute;visibility:hidden;width:max-content;max-width:none;';
+            (h2 || row.parentElement).append(probe);
+            for (const sec of C.LAYOUT_WINDOWS) {
+                const b = document.createElement('button');
+                b.type = 'button'; b.className = 'ts-chip'; b.textContent = windowLabel(sec);
+                probe.append(b);
+            }
+            _tsRowNeedW = probe.scrollWidth;
+            probe.remove();
         }
-        const shouldCollapse = probe.scrollWidth > avail + 1;
-        probe.remove();
+        const shouldCollapse = _tsRowNeedW > avail + 1;
         const collapsed = row.classList.contains('ts-collapsed');
         // The row is ResizeObserver-watched by the row-height engine: only
         // rebuild on an actual state change (or a force pass — window-label
@@ -933,6 +944,30 @@ const gateSeen = new Set();
 /* True while a gated def stays hidden (data never seen this session). */
 function _gateHidden(def) {
     return !!(def && def.gated && !gateSeen.has(def.key));
+}
+/* True while a card is parked (in the tray or gated-hidden) and not placed on the board. */
+function _cardParked(id, e) {
+    if (!e) e = metricCharts.get(id);
+    if (!e) return true;
+    if (_gateHidden(e.def)) return true;
+    const sec = e.sec || (e.host && e.host.closest('.card'));
+    return !!(sec && sec.classList.contains('card-parked'));
+}
+/* Instantiate uPlot + ResizeObserver for a metric card on demand (when placed on the grid). */
+function ensureMetricPlot(id) {
+    const e = metricCharts.get(id);
+    if (!e || e.chart) return e && e.chart;
+    const col = chartColors();
+    const chart = new uPlot(metricOpts(id, e.def, col), multInitData(e.def), e.host);
+    bindCursorTip(chart);
+    applyCardLegendCompact(chart, e.def);   // LEGEND-COMPACT (card only)
+    if (e.def.series && e.def.series.length) bindCursorUpdater(chart);
+    e.chart = chart;
+    if (!e.host._ro) {
+        e.host._ro = new ResizeObserver(() => { fitMetricPlot(id); });
+        e.host._ro.observe(e.host);
+    }
+    return chart;
 }
 /* fetch cache keyed by windowParam (cards sharing a window share bytes),
    each entry {data: series_map, at, fails, bucket_s} */
@@ -1140,16 +1175,17 @@ function metricOpts(id, def, col, opts) {
 /* Visible-x-axis variant of metricXAxis for the pop-out (the compact card
    hides its axis — see metricXAxis; the enlarged view earns the labels). */
 function popoutXAxis(win, col) {
-    const dayish = win >= 86400;
+    const fmt = win >= 86400 ? FMT_MD : (win < 900 ? FMT_TIME_HMS : FMT_TIME_HM);
     return { stroke: col.dim, width: 1, size: 26, font: axisFont(col, 1.35),
              grid: false, gap: 4, rotate: 0, space: 70,
-             values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
-                 dayish ? { month: 'short', day: 'numeric' }
-                        : { hour: '2-digit', minute: '2-digit', ...(win < 900 ? { second: '2-digit' } : {}) })) };
+             values: (s, t) => t.map(ts => fmt.format(ts)) };
 }
 function createMetricCard(def, park) {
     const id = C.metricBlockId ? C.metricBlockId(def.key) : 'met-' + def.key.replace(/[._]/g, '-');
     if (document.querySelector(`#grid .card[data-block="${id}"]`)) return;
+    if (!park && CH_GLUE.upLayout && Array.isArray(CH_GLUE.upLayout.blocks)) {
+        if (!CH_GLUE.upLayout.blocks.some(b => b.id === id)) park = true;
+    }
     const titleKey = def.titleKey || def.key;   // U19 flagship reads better under its own name
     const sec = document.createElement('section');
     sec.className = 'card grid-stack-item';
@@ -1201,21 +1237,9 @@ function createMetricCard(def, park) {
     pad.append(h2, body);
     frame.append(chrome, pad); content.append(frame); sec.append(content);
     $('grid').append(sec);
-    const col = chartColors();
     const fmt = metricFormat(def);
-    const chart = new uPlot(metricOpts(id, def, col),
-        multInitData(def), host);
-    bindCursorTip(chart);
-    applyCardLegendCompact(chart, def);   // LEGEND-COMPACT (card only)
-    // SWEEP178: legend live:false (see metricOpts) — hover must drive the
-    // shared legendUpdater exactly like the tps/mem charts do; on mouseleave
-    // it re-pins to the latest sample.
-    if (def.series && def.series.length) bindCursorUpdater(chart);
-    metricCharts.set(id, { chart, host, fmt, def, nameEl: title, nowEl: now, noteEl: note });
-    if (!host._ro) {
-        host._ro = new ResizeObserver(() => { fitMetricPlot(id); });
-        host._ro.observe(host);
-    }
+    metricCharts.set(id, { chart: null, sec, host, fmt, def, nameEl: title, nowEl: now, noteEl: note });
+    if (!park) ensureMetricPlot(id);
 }
 /* ISSUE-2 (small metric cards blank after a theme/skin switch): the rerender
    path destroyed each uPlot and cleared its host, then called
@@ -1226,17 +1250,26 @@ function createMetricCard(def, park) {
 function reinitMetricPlot(id) {
     const e = metricCharts.get(id);
     if (!e) return;
-    try { e.chart.destroy(); } catch (_) {}
+    if (_cardParked(id, e)) {
+        if (e.chart) { try { e.chart.destroy(); } catch (_) {} e.chart = null; e.host.textContent = ''; }
+        return;
+    }
+    const prevData = e.chart && e.chart.data && e.chart.data.length ? e.chart.data : (e.lastCols || multInitData(e.def));
+    if (e.chart) { try { e.chart.destroy(); } catch (_) {} }
     e.host.textContent = '';
     const col = chartColors();
-    e.chart = new uPlot(metricOpts(id, e.def, col),
-        e.chart.data && e.chart.data.length ? e.chart.data : multInitData(e.def), e.host);
+    e.chart = new uPlot(metricOpts(id, e.def, col), prevData, e.host);
     bindCursorTip(e.chart);
     applyCardLegendCompact(e.chart, e.def);   // LEGEND-COMPACT survives theme/skin rebuilds
+    if (e.def.series && e.def.series.length) bindCursorUpdater(e.chart);
+    if (!e.host._ro) {
+        e.host._ro = new ResizeObserver(() => { fitMetricPlot(id); });
+        e.host._ro.observe(e.host);
+    }
 }
 function fitMetricPlot(id) {
     const e = metricCharts.get(id);
-    if (!e) return;
+    if (!e || !e.chart || _cardParked(id, e)) return;
     // The card grows/shrinks via the row-height engine; the plot takes the
     // space left after title + timespan row. The floor keeps a bare card
     // readable; CH_GLUE._neededUnits() treats the .metric-plot floor as the
@@ -1299,7 +1332,7 @@ function applyCardLegendCompact(chart, def) {
 }
 function fitAllMetricPlots() { for (const id of metricCharts.keys()) fitMetricPlot(id); }
 function metricXAxis(win, col) {
-    const dayish = win >= 86400;
+    const fmt = win >= 86400 ? FMT_MD : FMT_TIME_HM;
     // Sparkline cards: uPlot never fitted readable time labels into the short
     // band (default 30° rotation + tick space), so its 26px band was dead
     // space that pushed the y=0 line to card mid-height. Hide the axis
@@ -1307,9 +1340,7 @@ function metricXAxis(win, col) {
     // 6px plot padding keeping the label off the card edge. Timespans are
     // already selected by the 1m..30d buttons above each chart. (2026-09-26)
     return { show: false, stroke: col.dim, width: 1, rotate: 0, font: axisFont(col),
-             values: (s, t) => t.map(ts => new Date(ts).toLocaleString('en-GB',
-                 dayish ? { month: 'short', day: 'numeric' }
-                        : { hour: '2-digit', minute: '2-digit' })) };
+             values: (s, t) => t.map(ts => fmt.format(ts)) };
 }
 /* Compact axis labels with units (user 2026-09-21: raw y-labels like
    '1234567' clipped inside the 30px gutter of the small metric cards).
@@ -1359,6 +1390,7 @@ function windowKeys(w) {
     const out = [];
     for (const [cid, ce] of metricCharts) {
         if (_gateHidden(ce.def)) continue;      // parked cards request nothing
+        if (_cardParked(cid, ce)) continue;
         if (windowParam(cardWindow(cid)) !== w) continue;
         for (const s of metricServes(ce.def))
             if (out.indexOf(s.key) < 0) out.push(s.key);
@@ -1375,7 +1407,7 @@ function metricFetch(id, force) {
     // U24: a gated card that has not been revealed yet (parked — no macmon
     // data) must not fetch or draw: no series cost, no empty-column cache
     // entries. Same network footprint as when the card did not exist.
-    if (_gateHidden(e.def)) return;
+    if (_gateHidden(e.def) || _cardParked(id, e)) return;
     const w = windowParam(cardWindow(id));
     const keys = windowKeys(w);
     const key = keys.join(',');
@@ -1527,7 +1559,8 @@ function metricUnionCols(def, data, winMs) {
 }
 function drawMetricChart(id) {
     const e = metricCharts.get(id);
-    if (!e || _gateHidden(e.def)) return;   // U24: hidden gated card = no work
+    if (!e || _gateHidden(e.def) || _cardParked(id, e)) return;   // U24: hidden/parked card = no work
+    if (!e.chart) ensureMetricPlot(id);
     const w = windowParam(cardWindow(id));
     const cache = metricCache[w] || { data: {}, bucket_s: 0 };
     const winMs = cardWindow(id) * 1000 + 60000;
@@ -1652,6 +1685,7 @@ function relabelExplore() {
     renderCardTsRows(true);
     CH_GLUE.refitUpliftBlocks();   // chip rows just materialised: demand changed
     for (const [id, e] of metricCharts) {
+        if (!e.chart) continue;
         const sers = metricServes(e.def);
         for (let i = 0; i < sers.length; i++)
             e.chart.series[i + 1].label = metricSeriesLabel(sers[i].key);
@@ -1690,7 +1724,7 @@ function createUsageChart() {
         ms: KIT.TSTAMP_MS,   // x column is ms-epoch (uplift_usage.js: base.getTime())
         scales: { x: { time: true }, y: { auto: true, range: ZERO_FLOOR_RANGE } },  // U8
         axes: [{ stroke: col.dim, size: 36, font: axisFont(col),
-                 values: (s, t) => t.map(ts => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })) },
+                 values: (s, t) => t.map(ts => FMT_TIME_HM.format(ts)) },
                yAxis(col, { grid: true })],
         series: [{ label: 'tokens' }, line('tokens', 'blue', true)],
         cursor: { drag: { x: false, y: false }, points: { show: true, size: 6, fill: col.dim } },
@@ -1917,7 +1951,7 @@ window.Uplift.charts = {
     historyAge: historyAge,   // STATS-SSE age hook (ms since last adopted load)
     relabelExplore: relabelExplore, windowLabel: windowLabel,
     setGlobalWindow: setGlobalWindow, setTpsSmooth: setTpsSmooth, renderCardTsRows: renderCardTsRows,
-    createMetricCard: createMetricCard, drawAllMetricCharts: drawAllMetricCharts,
+    createMetricCard: createMetricCard, ensureMetricPlot: ensureMetricPlot, drawAllMetricCharts: drawAllMetricCharts,
     legendUpdater: legendUpdater,   // SWEEP178: exposed for console testability
     fitAllMetricPlots: fitAllMetricPlots, clearMainChartHover: clearMainChartHover,
     refreshPowerChips: refreshPowerChips,

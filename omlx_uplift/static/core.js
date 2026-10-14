@@ -565,13 +565,41 @@ function smoothKey(key) {
    trailing run (for honest 'hourly before here' labelling), or 0. */
 function mergeHistory(history, liveTs, liveVal, windowSec, now) {
     const t0 = now - windowSec * 1000;
-    const pts = history
-        .filter(p => p && typeof p.ts === 'number' && typeof p.v === 'number'
-                     && p.ts > t0 && p.ts <= now + 5000)
-        .sort((a, b) => a.ts - b.ts);
+    const tMax = now + 5000;
+    let pts = [];
+    if (Array.isArray(history) && history.length) {
+        let sorted = true, prev = -Infinity;
+        for (let i = 0; i < history.length; i++) {
+            const p = history[i];
+            if (!p || typeof p.ts !== 'number' || typeof p.v !== 'number' || p.ts < prev) {
+                sorted = false;
+                break;
+            }
+            prev = p.ts;
+        }
+        if (sorted) {
+            let lo = 0, hi = history.length;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (history[mid].ts <= t0) lo = mid + 1;
+                else hi = mid;
+            }
+            let end = history.length;
+            while (end > lo && history[end - 1].ts > tMax) end--;
+            if (end > lo) pts = history.slice(lo, end);
+        } else {
+            pts = history
+                .filter(p => p && typeof p.ts === 'number' && typeof p.v === 'number'
+                             && p.ts > t0 && p.ts <= tMax)
+                .sort((a, b) => a.ts - b.ts);
+        }
+    }
     const lastHistTs = pts.length ? pts[pts.length - 1].ts : 0;
     const outTs = [], outVal = [];
-    for (const p of pts) {
+    let boundary = 0;
+    for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        if (p.res === 'hourly' && p.ts > boundary) boundary = p.ts;
         if (outTs.length && outTs[outTs.length - 1] === p.ts) {
             outVal[outVal.length - 1] = p.v;   // same ts: history wins
             continue;
@@ -583,8 +611,6 @@ function mergeHistory(history, liveTs, liveVal, windowSec, now) {
             outTs.push(liveTs[i]); outVal.push(liveVal[i]);
         }
     }
-    let boundary = 0;
-    for (const p of pts) if (p.res === 'hourly') boundary = Math.max(boundary, p.ts);
     return { ts: outTs, v: outVal, boundary };
 }
 

@@ -89,6 +89,8 @@ def _static_file(request: Request, path: str) -> Response:
     # failed deploy' trap. Assets are local; 304 revalidation is free.
     if file_path.suffix == ".html":
         cache_control = "no-store"
+    elif request.query_params.get("v"):
+        cache_control = "public, max-age=31536000, immutable"
     else:
         cache_control = "no-cache"
     # CACHE-1: FileResponse advertises ETag/Last-Modified but does NOT
@@ -361,6 +363,11 @@ def _serve_index_flagged(request: Request) -> Response:
             b"NATIVE_SURFACES_TOKEN", mode.encode()
         )
         stamp = _asset_stamp().encode()
+        body = body.replace(
+            b"data-native-surfaces=",
+            b'data-vstamp="' + stamp + b'" data-native-surfaces=',
+            1,
+        )
         body = _ASSET_URL_RE.sub(
             lambda m: m.group(1) + b"?v=" + stamp + b'"', body
         )
