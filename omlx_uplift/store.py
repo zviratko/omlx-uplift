@@ -310,8 +310,8 @@ class MetricsStore:
                     key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS samples (
                     ts REAL NOT NULL, key TEXT NOT NULL, value REAL NOT NULL);
-                CREATE INDEX IF NOT EXISTS ix_samples_latest
-                    ON samples(key, instance, ts);
+                -- SQUEEZE-LATEST-2: the samples index is built AFTER the
+                -- instance ALTER below (fresh DBs start v1-shape!).
                 CREATE TABLE IF NOT EXISTS requests (
                     id TEXT PRIMARY KEY, model TEXT, state TEXT,
                     prompt_tokens INTEGER, completion_tokens INTEGER,
