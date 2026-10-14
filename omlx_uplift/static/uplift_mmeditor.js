@@ -1795,7 +1795,7 @@ async function saveTemplateEditor(tpl, panel) {
         MM_GLUE.toast(C.tf('uplift.mm.tpl_saved', 'Template saved: ') + (tpl.display_name || tpl.name));
         seOrig = JSON.parse(JSON.stringify(seValues));
         seUpdateSaveBtn();
-        MM_TPL.render();
+        MM_TPL.render(true);
         setTimeout(closeEditor, 1000);
     } catch (err) {
         msg.textContent = 'error: ' + err.message;
@@ -2629,6 +2629,8 @@ async function seLoadProfiles(model, host) {
                     { method: 'POST', headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ name, display_name: typed, description: null, settings }) });
                 MM_GLUE.toast(C.t('uplift.toast.saved_template', {name: typed}));
+                const _tp = window.Uplift.mmTemplates;
+                if (_tp && _tp.invalidate) _tp.invalidate();   // POLL-BATCH
                 seLoadProfiles(model, host);
             } catch (e) { MM_GLUE.toast(C.t('uplift.toast.template_error', {msg: e.message})); }
         };

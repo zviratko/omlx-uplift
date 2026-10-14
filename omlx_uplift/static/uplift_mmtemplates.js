@@ -22,11 +22,16 @@ const MMF = {
    description+date view said nothing useful (round 5) — a template is a
    settings bundle, so the row gets EDIT (opens the same editor on the
    template) and DELETE SETTINGS (removes the stored bundle). */
-function renderTemplatesBox() {
+/* POLL-BATCH: the template list changes only through writes (this box's
+   own DELETE, the editor's template save — both invalidate) or externally
+   (caught on tab entry, which renders force). The soft 8 s Manager tick
+   repaints from cache instead of refetching. */
+const TPL_TTL_MS = 60000;
+let _tpl = null, _tplAt = 0;
+function renderTemplatesBox(force) {
     const host = $('ms-templates');
     if (!host) return;
-    MM_GLUE.fetchJson(`${API}/admin/api/profile-templates`)
-        .then(d => d.templates || []).catch(() => []).then(templates => {
+    const paint = (templates) => {
         host.innerHTML = '';   // empty string + static markup only, no user data
         if (!templates.length) { D.emptyMsg(host, C.t('uplift.mm.no_templates')); return; }
         // FE-6: hand the list to the editor via the module store
@@ -57,6 +62,7 @@ function renderTemplatesBox() {
                 `Delete the global template "${t.display_name || t.name}"? Models and profiles already created from it keep their own settings.`,
                 async () => {
                     await D.deleteJson(`${API}/admin/api/profile-templates/${encodeURIComponent(t.name)}`);
+                    _tpl = null;   // POLL-BATCH: a delete IS a write — invalidate
                 }, `Deleted template: ${t.display_name || t.name}`);
             aDel.append(del);
             const aEdit = document.createElement('span'); aEdit.className = 'act-col right';
@@ -69,7 +75,13 @@ function renderTemplatesBox() {
             row.append(name, box);
             host.append(row);
         }
-    });
+    };
+    if (_tpl && !force && Date.now() - _tplAt <= TPL_TTL_MS) { paint(_tpl); return; }
+    MM_GLUE.fetchJson(`${API}/admin/api/profile-templates`)
+        .then(d => d.templates || []).catch(() => []).then(templates => {
+            _tpl = templates; _tplAt = Date.now();
+            paint(templates);
+        });
 }
 function init() {
     $('ma-filter').oninput = () => {
@@ -83,5 +95,8 @@ function init() {
     $('ma-present-only').onchange = () => { if (MMF.seModel) MMF.closeEditor(); MMF.render(true); };
 }
 
-window.Uplift.mmTemplates = { render: renderTemplatesBox, init: init };
+window.Uplift.mmTemplates = { render: renderTemplatesBox, init: init,
+    // POLL-BATCH: write paths that create templates OUTSIDE the box (the
+    // editor's snapshot-to-template POST) must invalidate the cache too.
+    invalidate: () => { _tpl = null; } };
 })();

@@ -314,7 +314,8 @@ function applyTab() {
     if (tab === 'usage') UUP.pollUsage();
     if (tab === 'logs') UUP.pollLogs();
     if (tab === 'models') {
-        MM.render();
+        MM.render(true);   // POLL-BATCH: entry = full fresh side-loads;
+                           // the 8 s tick while staying here stays soft
         if (sub === 'downloader') DLR.initDownloader();
         if (sub === 'quantizer') MOs.renderQuantizer();
         if (sub === 'uploader') MOs.renderUploader();

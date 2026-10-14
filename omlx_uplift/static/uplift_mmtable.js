@@ -98,7 +98,13 @@ function sortModels(rows) {
     return rows.sort((a, b) => favFirst(a, b) || (cmp(a, b) || 0) * sortDir || key(a, b));
 }
 
+/* POLL-BATCH: model-settings-index refetch clock. */
+const IDX_TTL_MS = 60000;
+let _idxAt = 0;
+
 async function renderModelAdmin(force) {
+    // POLL-BATCH side-load clocks (see the idx gate below): soft 8 s ticks
+    // ride these caches; force = tab entry or any local write.
     let models;
     try { models = (await MM_GLUE.fetchJson(`${API}/admin/api/models`)).models; }
     catch (_) { D.emptyMsg($('model-admin'), C.t('uplift.mm.api_unreachable')); return; }
@@ -134,8 +140,15 @@ async function renderModelAdmin(force) {
         && !!$('ma-present-only');
     let idx = { stored: S.settingsIdx.stored, orphans: S.settingsIdx.orphans || [],
         entries: S.settingsIdx.entries || [], profiles: S.settingsIdx.profiles || [] };
-    if (onManager) { try { idx = await MM_GLUE.fetchJson(`${API}/admin/api/model-settings-index`);
-                            S.settingsIdx = idx; } catch (_) {} }
+    // POLL-BATCH (user 2026-10-14: Manager ticked models+index+templates
+    // every 8 s): these two side-loads change only through WRITES — every
+    // write path already re-renders with force=true — so the soft 8 s tick
+    // rides the cache and refetches at most once a minute. Tab ENTRY runs
+    // force (applyTab), so an external change is caught on next visit.
+    if (onManager && (force || Date.now() - _idxAt > IDX_TTL_MS)) {
+        try { idx = await MM_GLUE.fetchJson(`${API}/admin/api/model-settings-index`);
+                            S.settingsIdx = idx; _idxAt = Date.now(); } catch (_) {}
+    }
     const orphan = new Set(idx.orphans || []);
     const knownIds = new Set(models.map(m => m.id));
     const missingAll = (idx.entries || []).filter(e => !knownIds.has(e.id));
@@ -143,7 +156,7 @@ async function renderModelAdmin(force) {
         (e.alias || '').toLowerCase().includes(filter));
     if (presentOnly) missing = [];
     const loadedN = models.filter(m => m.loaded).length;
-    if (onManager) MM_TPL.render();
+    if (onManager) MM_TPL.render(force);   // POLL-BATCH: force = entry/write
     // stored/missing never follow the filters; shown counts every visible row
     $('models-admin-sub').textContent = `${loadedN}/${models.length} loaded \u00b7 `
         + `${idx.stored} stored \u00b7 ${shown.length + missing.length} shown`;

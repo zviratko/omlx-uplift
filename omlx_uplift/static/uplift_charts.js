@@ -1346,6 +1346,29 @@ function metricYAxis(col, def, popout) {
             rotate: 0, space: 26, label: '',
             values: (u, vals) => vals == null ? vals : vals.map(v => v == null ? '' : metricYFmt(def)(v)) };
 }
+/* POLL-BATCH (user 2026-10-14: "several requests/s while sitting in stats"):
+   every card used to fetch its OWN /metrics/series call on the same 4.5 s
+   TTL — a dozen visible cards = a dozen parallel requests per tick. The
+   server already takes key LISTS (that's the power-chip call), so a window
+   is fetched ONCE for the union of its visible cards' keys. The cache is
+   keyed by WINDOW today; this only widens the key set a fetch carries and
+   makes the in-flight lease one-per-window (sk = w) instead of
+   one-per-card-keylist. GATED-EMPTY rules are unchanged and now work for
+   the whole window: answered-but-absent keys are still remembered as []. */
+function windowKeys(w) {
+    const out = [];
+    for (const [cid, ce] of metricCharts) {
+        if (_gateHidden(ce.def)) continue;      // parked cards request nothing
+        if (windowParam(cardWindow(cid)) !== w) continue;
+        for (const s of metricServes(ce.def))
+            if (out.indexOf(s.key) < 0) out.push(s.key);
+    }
+    return out;
+}
+function drawWindow(w) {
+    for (const [cid] of metricCharts)
+        if (windowParam(cardWindow(cid)) === w) drawMetricChart(cid);
+}
 function metricFetch(id, force) {
     const e = metricCharts.get(id);
     if (!e) return;
@@ -1354,7 +1377,7 @@ function metricFetch(id, force) {
     // entries. Same network footprint as when the card did not exist.
     if (_gateHidden(e.def)) return;
     const w = windowParam(cardWindow(id));
-    const keys = metricServes(e.def).map(s => s.key);
+    const keys = windowKeys(w);
     const key = keys.join(',');
     const cache = metricCache[w] || (metricCache[w] = { data: {}, at: 0, fails: 0, bucket_s: 0 });
     // POP-PIN (user 2026-10-10: "values do not draw current value for a
@@ -1377,7 +1400,11 @@ function metricFetch(id, force) {
     // key is NOT fresh for this card, regardless of its timestamp.
     const missing = keys.some(k => !(k in cache.data));
     if (!force && !stale && !missing) { drawMetricChart(id); return; }
-    const sk = w + '|' + key;
+    // POLL-BATCH: ONE in-flight lease per WINDOW — cards of the same window
+    // that arrive later in the draw loop find the lease held and skip; they
+    // drew from cache in the loop already and are redrawn by drawWindow()
+    // when the shared response lands (STALE-LEASE unchanged).
+    const sk = 'W|' + w;
     const seq = (_seq[sk] = (_seq[sk] || 0) + 1);
     // STALE-LEASE: a fetch whose promise never settles (server wedged
     // mid-response — measured: three cards frozen at one tail for 12 min
@@ -1414,7 +1441,9 @@ function metricFetch(id, force) {
             // (STALE-LEASE) must not be unlocked by this older request.
             const l = _fetching.get(sk);
             if (l && l.seq === seq) _fetching.delete(sk);
-            if (_seq[sk] === seq) drawMetricChart(id);   // newest response wins
+            // POLL-BATCH: the shared response carries EVERY card of this
+            // window — redraw them all, not just the card that won the lease.
+            if (_seq[sk] === seq) drawWindow(w);
         });
 }
 /* Initial uPlot data: one column per series slot (multi defs reserve a
