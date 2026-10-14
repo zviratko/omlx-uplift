@@ -178,19 +178,233 @@ function readFileB64(file) {
    (static metadata, safe to cache for the page lifetime). Non-Qwen3-TTS
    engines answer qwen3:false and the language/speaker/instruct fields
    stay SILENT — those controls are Qwen3-TTS specific (user doctrine). */
-const _capsCache = {};
+const _capsCache = {};        // model -> resolved capabilities (page lifetime)
+const _capsPending = {};      // model -> the in-flight promise ONLY
 function capsFor(model) {
     if (!model) return Promise.resolve(null);
-    if (!_capsCache[model]) {
-        _capsCache[model] = D.fetchJson(
+    // VOICE-9 fix (found by tests/voice-record.test.cjs): the promise used to
+    // be stored IN _capsCache and then overwritten by its resolved value, so
+    // the SECOND voiceForm for the same model (i.e. every SAVE/DELETE
+    // re-render) handed back a plain object and probeModel died on
+    // 'capsFor(...).then is not a function' — the Qwen3 fields never
+    // appeared again. Cache the value and the promise separately; the
+    // contract is always a Promise.
+    if (_owns(_capsCache, model)) return Promise.resolve(_capsCache[model]);
+    if (!_capsPending[model]) {
+        _capsPending[model] = D.fetchJson(
             `${VAPI}/voices/capabilities?model=${encodeURIComponent(model)}`)
-            .then(c => { _capsCache[model] = c; return c; })
-            .catch(() => { delete _capsCache[model]; return null; });
+            .then(c => { _capsCache[model] = c; delete _capsPending[model]; return c; })
+            .catch(() => { delete _capsPending[model]; return null; });
     }
-    return _capsCache[model];
+    return _capsPending[model];
 }
 window.Uplift = window.Uplift || {};
 window.Uplift.capsFor = capsFor;   // VOICE-8 (design flow) reuses the probe
+
+/* ---- VOICE-9: record the reference clip IN the board -------------------
+   A clone needs a clip AND the exact words in it. Uploading a file gets a
+   clip; holding the microphone to the machine gets a clip AND — because the
+   user was reading a sample text we supplied — a transcript known by
+   construction, which beats an STT guess. Everything mic-related is
+   CAPABILITY-GATED (doctrine): a browser without MediaRecorder/getUserMedia/
+   AudioContext gets not one extra node (silent absence, same rule as the
+   Qwen3 fields); an insecure origin (the board is normally served over
+   http://LAN-ip, where browsers refuse getUserMedia) gets a DISABLED button
+   whose title states the reason and the workaround. The WAV encoder and the
+   language resolver are pure and exported under Uplift.voices._rec so node
+   tests drive them without an AudioContext. */
+const MIN_SECONDS = 3;      // below this the clip is not a usable clone
+const MAX_SECONDS = 90;     // auto-stop: longer clips only cost VRAM per synth
+const REC_MIMES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+
+/* Read-aloud samples: 10-20 s, phonetically varied, deliberately NOT the
+   sterile 'This is a test' — cs opens with the classic all-letters pangram.
+   The SAME scene (rainbow + old teacher walking by the river) in every
+   language, so switching language reads the same thing. Arbitrary text stays
+   possible: this only fills an editable textarea. */
+const SUGGEST = {
+    en: 'When the sunlight strikes raindrops in the air, they act like a '
+        + 'prism and form a rainbow. The rainbow is a division of white '
+        + 'light into many beautiful colors. Last autumn our old English '
+        + 'teacher walked along a narrow path beside the river, quietly '
+        + 'talking about strange ideas and forgotten songs.',
+    cs: 'Příliš žluťoučký kůň úpěl ďábelské ódy. Když slunce svítí na '
+        + 'kapky deště, lámou světlo a na obloze se objeví duha. Minulý '
+        + 'podzim náš starý učitel kráčel úzkou cestičkou podél řeky a '
+        + 'tiše vyprávěl o divných nápadech a zapomenutých písních.',
+    de: 'Wenn die Sonne auf die Regentropfen scheint, bricht sich das '
+        + 'Licht und am Himmel erscheint ein Regenbogen. Letzte Woche '
+        + 'fuhr der alte Förster mit seinem braunen Hund quer durch das '
+        + 'verschneite Tal und sang dabei leise ein vertrautes Lied.',
+    es: 'Cuando la luz del sol atraviesa las gotas de lluvia, se '
+        + 'descompone en muchos colores y forma un arcoíris. La semana '
+        + 'pasada el viejo profesor paseó un perro flaco junto al río, '
+        + 'hablando en voz baja de historias raras y canciones antiguas.',
+    fr: 'Quand la lumière du soleil traverse les gouttes de pluie, elle '
+        + 'se décompose en mille couleurs et forme un arc-en-ciel. La '
+        + 'semaine dernière, le vieux professeur du village se promenait '
+        + 'au bord de la rivière en chantant doucement de vieilles chansons.',
+    it: 'Quando la luce del sole attraversa le gocce di pioggia, si '
+        + 'scompone in tanti colori e forma un arcobaleno. La settimana '
+        + 'scorsa il vecchio professore passeggiava lungo il fiume con un '
+        + 'cane magro, cantando piano vecchie canzoni.',
+    pt: 'Quando a luz do sol atravessa as gotas de chuva, ela se decompõe '
+        + 'em muitas cores e forma um arco-íris. Na semana passada, o '
+        + 'velho professor caminhava à beira do rio com um cão magro, '
+        + 'cantando baixinho antigas canções.',
+    ru: 'Когда солнечный свет проходит сквозь капли дождя, он распадается '
+        + 'на множество цветов и рождает радугу. На прошлой неделе старый '
+        + 'учитель гулял вдоль быстрой реки с худым серым псом и тихо '
+        + 'напевал забытые песни.',
+    ja: '雨上がりの空に、七色の虹がゆったりとかかりました。先週の金曜日、'
+        + '古い先生のそばで痩せた犬が川沿いを歩きながら、昔の歌を静かに'
+        + '口ずさんでいました。',
+    zh: '雨停以后，太阳的光穿过空中的水滴，折射出一道美丽的彩虹。上星期'
+        + '五，年迈的老师带着一只瘦瘦的黄狗，沿着安静的河边慢慢散步，嘴'
+        + '里轻轻哼着古老的歌。',
+    ko: '비가 그친 뒤 햇빛이 물방울을 통과하면 무지개가 뜹니다. 지난 금요'
+        + '일에 늙은 선생님은 마른 개 한 마리를 데리고 조용한 강가를 걸으'
+        + '며 옛 노래를 나직이 흥얼거렸습니다.',
+};
+/* The Language combobox holds free text (server-declared names, 'czech',
+   whatever the user typed). Map the names a human or a model card actually
+   uses — English name, native name (accented AND ascii-folded spellings,
+   because nothing here strips diacritics), ISO code — onto a SUGGEST code. */
+const LANG_ALIAS = {
+    en: ['english', 'angle', 'en'],
+    cs: ['czech', 'cetina', 'čeština', 'cesky', 'česky', 'cs'],
+    de: ['german', 'deutsch', 'de'],
+    es: ['spanish', 'espanol', 'español', 'es'],
+    fr: ['french', 'francais', 'français', 'fr'],
+    it: ['italian', 'italiano', 'it'],
+    pt: ['portuguese', 'portugues', 'português', 'pt-br', 'pt'],
+    ru: ['russian', 'rossijskiy', 'русский', 'ru'],
+    ja: ['japanese', 'nihongo', '日本語', 'ja'],
+    zh: ['chinese', 'mandarin', '中文', '普通话', 'zh-cn', 'zh-tw', 'zh'],
+    ko: ['korean', 'hangugeo', '한국어', 'ko'],
+};
+const _langTo = Object.create(null);   // null-proto: 'constructor' is not a language
+for (const _c in LANG_ALIAS) {
+    for (const _a of LANG_ALIAS[_c]) _langTo[String(_a).toLowerCase()] = _c;
+}
+const _owns = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+/* normLang: raw = whatever the Language field says, uiLang = the board's own
+   locale. Empty raw → derive from uiLang (pt-BR → pt, zh-TW → zh, else the
+   first two letters); unknown raw or unknown locale → 'en' (honest default,
+   never a crash and never an empty textarea). */
+function normLang(raw, uiLang) {
+    const key = String(raw == null ? '' : raw).trim().toLowerCase();
+    if (key) {
+        if (_owns(SUGGEST, key)) return key;
+        if (Object.prototype.hasOwnProperty.call(_langTo, key)) return _langTo[key];
+        const leg = key.split(/[-_]/)[0];        // 'pt-br' → 'pt'
+        if (_owns(SUGGEST, leg)) return leg;
+        if (Object.prototype.hasOwnProperty.call(_langTo, leg)) return _langTo[leg];
+        return 'en';
+    }
+    const ui = String(uiLang == null ? '' : uiLang).trim().toLowerCase();
+    if (_owns(SUGGEST, ui)) return ui;
+    const base = ui.split(/[-_]/)[0];
+    if (_owns(SUGGEST, base)) return base;
+    if (Object.prototype.hasOwnProperty.call(_langTo, base)) return _langTo[base];
+    const two = base.slice(0, 2);
+    if (_owns(SUGGEST, two)) return two;
+    return 'en';
+}
+function promptFor(raw, uiLang) { return SUGGEST[normLang(raw, uiLang)]; }
+
+function currentUiLang() {
+    try {
+        return (C.getLocale && C.getLocale().lang)
+            || (document.documentElement && document.documentElement.lang)
+            || 'en';
+    } catch (e) { return 'en'; }
+}
+
+/* pcmToWavMono: the ONLY encoder here — pure, so the container bytes are
+   node-testable. The engine takes ref_audio as WAV/MP3/FLAC and mic capture
+   hands back webm/mp4-opus, so the browser decodes and we re-pack: 44-byte
+   canonical header, PCM (1), mono, 16-bit little-endian, clamped samples. */
+function pcmToWavMono(samples, sampleRate) {
+    const n = (samples && samples.length) || 0;
+    const rate = Math.round(Number(sampleRate) || 0) || 24000;
+    const bytes = n * 2;
+    const out = new Uint8Array(44 + bytes);
+    const dv = new DataView(out.buffer);
+    const str = (off, s) => {
+        for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i));
+    };
+    str(0, 'RIFF'); dv.setUint32(4, 36 + bytes, true); str(8, 'WAVE');
+    str(12, 'fmt '); dv.setUint32(16, 16, true);
+    dv.setUint16(20, 1, true);                       // PCM
+    dv.setUint16(22, 1, true);                       // mono
+    dv.setUint32(24, rate, true);                    // sampleRate
+    dv.setUint32(28, rate * 2, true);                // byteRate
+    dv.setUint16(32, 2, true);                       // blockAlign
+    dv.setUint16(34, 16, true);                      // bits
+    str(36, 'data'); dv.setUint32(40, bytes, true);
+    for (let i = 0; i < n; i++) {
+        let v = Number(samples[i]);
+        if (!isFinite(v)) v = 0;
+        v = v < -1 ? -1 : (v > 1 ? 1 : v);
+        dv.setInt16(44 + i * 2, Math.round(v < 0 ? v * 32768 : v * 32767), true);
+    }
+    return out;
+}
+
+// recorder capability (see the gate doctrine at the top of this block)
+function recCapability() {
+    let nav = {};
+    try { nav = (typeof navigator !== 'undefined' && navigator) || {}; }
+    catch (e) { nav = {}; }
+    const has = !!(window.MediaRecorder && nav.mediaDevices
+        && nav.mediaDevices.getUserMedia
+        && (window.AudioContext || window.webkitAudioContext));
+    // 'dev' keeps mediaDevices as the receiver — getUserMedia is a method of
+    // mediaDevices (Chrome throws 'Illegal invocation' on a detached call)
+    return { has: has, secure: !!window.isSecureContext, dev: nav.mediaDevices };
+}
+function recPickMime() {
+    for (const m of REC_MIMES) {
+        try {
+            if (window.MediaRecorder.isTypeSupported
+                && window.MediaRecorder.isTypeSupported(m)) return m;
+        } catch (e) { /* a lying engine: try the next candidate */ }
+    }
+    return '';        // '' → MediaRecorder's own default container
+}
+/* One AudioContext for the page: browsers cap the live count (and Safari
+   counts a leaked one forever), so decode never builds a fresh context per
+   recording. Created lazily — an AudioContext must not exist before the
+   user actually records. */
+let _recAC = null;
+function recAudioCtx() {
+    if (!_recAC) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) _recAC = new AC();
+    }
+    return _recAC;
+}
+function recToMono(buf) {
+    const n = (buf && buf.length) | 0;
+    const ch = Math.max(1, (buf && buf.numberOfChannels) || 1);
+    const out = new Float32Array(n);
+    for (let c = 0; c < ch; c++) {
+        const d = (buf.getChannelData && buf.getChannelData(c)) || [];
+        for (let i = 0; i < n; i++) out[i] += Number(d[i]) || 0;
+    }
+    if (ch > 1) for (let i = 0; i < n; i++) out[i] /= ch;   // mean, no clipping
+    return out;
+}
+function recStopTracks(stream) {
+    // every exit path runs this: a live mic track is a recording light the
+    // user cannot turn off
+    if (!stream || !stream.getTracks) return;
+    try { stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); }
+    catch (e) {}
+}
+function recErrText(e) { return String((e && e.message) || (e && e.name) || e || ''); }
 
 function voiceRow(v) {
     const row = document.createElement('div');
@@ -445,6 +659,251 @@ function voiceForm(models, sttSelf) {
     const spkF = field(tf('uplift.voices.speaker', 'Speaker'), spkS);
     const instrF = field(tf('uplift.voices.instruct', 'Instruct'), instrT);
     const clipF = field(tf('uplift.voices.clip_file', 'Reference clip'), fileI);
+    /* ---- VOICE-9a: 'use suggested text' (never capability-gated — plain
+       text, works everywhere, and a clip typed by hand stays possible) ---- */
+    const promptRow = document.createElement('div');
+    promptRow.className = 'vc-trrow';
+    const promptB = document.createElement('button');
+    promptB.type = 'button'; promptB.className = 'se-btn';
+    promptB.textContent = tf('uplift.voices.prompt_insert', 'use suggested text');
+    promptB.title = tf('uplift.voices.prompt_title',
+        'Fills the transcript with a sample text for the selected language. '
+        + 'Read it aloud while recording; edit it freely afterwards.');
+    promptB.onclick = () => {
+        // REPLACES the text (the sample is meant to be read verbatim) and
+        // the textarea stays editable — arbitrary text is never locked out
+        refT.value = promptFor(langS.value, currentUiLang());
+    };
+    promptRow.append(promptB);
+    refWrap.insertBefore(promptRow, trRow);
+    /* ---- VOICE-9b: the recorder, capability-gated (see doctrine at the
+       top of the VOICE-9 block): no MediaRecorder/getUserMedia/AudioContext
+       → build NOTHING (zero DOM delta, like the silent Qwen3 fields). ---- */
+    const REC = recCapability();
+    if (REC.has) {
+        let recBlob = null, recUrl = null, recAudio = null;   // local preview
+        let recState = 'idle';   // idle|starting|recording|decoding = lock
+        let recTimer = null, recT0 = 0, recMR = null, recStream = null;
+        let recChunks = null, recAuto = 0;
+        const recRow = document.createElement('div');
+        recRow.className = 'vc-trrow';
+        const recB = document.createElement('button');
+        recB.type = 'button'; recB.className = 'se-btn';
+        recB.textContent = tf('uplift.voices.record', 'RECORD');
+        const recSt = document.createElement('span');
+        recSt.className = 'native-stub-note';
+        recSt.hidden = true;                    // silent until something happens
+        const recPlay = document.createElement('button');
+        recPlay.type = 'button'; recPlay.className = 'se-btn';
+        recPlay.textContent = '▶'; recPlay.hidden = true;
+        recPlay.title = tf('uplift.voices.record_listen', 'play back');
+        const recClear = document.createElement('button');
+        recClear.type = 'button'; recClear.className = 'se-btn';
+        recClear.textContent = '✕'; recClear.hidden = true;
+        recClear.title = tf('uplift.voices.record_clear', 'clear');
+        recRow.append(recB, recSt, recPlay, recClear);
+        // INSIDE the clip field: voice_design hides clipF and the recorder
+        // disappears with it — no second hiding rule to forget
+        clipF.append(recRow);
+        if (!REC.secure) {
+            // http://LAN-ip: browsers refuse the mic here. Render the button
+            // DISABLED with the reason (capability-gate doctrine: never a
+            // control that fails silently on click, never a fake one either).
+            recB.disabled = true;
+            recB.title = tf('uplift.voices.record_insecure',
+                'The browser only allows microphone capture on https or '
+                + 'localhost — open the dashboard through a localhost tunnel, '
+                + 'or upload a saved audio file.');
+        } else {
+            recB.title = tf('uplift.voices.record_title',
+                'Record a reference clip right here — read the suggested text '
+                + 'aloud for 10-30 s in a quiet room.');
+            recB.onclick = () => (recState === 'recording' ? recStop() : recStart());
+        }
+        const recSecs = () => Math.max(0, (Date.now() - recT0) / 1000);
+        const recLabel = (txt) => { recB.textContent = txt; };
+        /* the preview player is LOCAL on purpose: the module _player owns
+           server-synth playback (stopPlayback/playInto) and mixing a mic
+           preview into that machinery would let a row's PLAY kill a take. */
+        const recDropPreview = () => {
+            if (recAudio) { try { recAudio.pause(); } catch (e) {} recAudio = null; }
+            if (recUrl) { URL.revokeObjectURL(recUrl); recUrl = null; }
+            recPlay.textContent = '▶';
+            recPlay.classList.remove('playing');
+        };
+        const recIdle = () => {
+            if (recTimer) { clearInterval(recTimer); recTimer = null; }
+            recState = 'idle';
+            recLabel(tf('uplift.voices.record', 'RECORD'));
+            recB.disabled = false;
+            recSt.hidden = true;
+            recSt.textContent = '';
+        };
+        const recTick = () => {
+            const n = Math.floor(recSecs());
+            recSt.textContent = tf('uplift.voices.recording', 'recording… {n}s')
+                .replace('{n}', String(n));
+            if (n >= MAX_SECONDS && !recAuto) {
+                recAuto = n;                    // one toast, then stop
+                D.toast(tf('uplift.voices.record_max',
+                    'Recording auto-stopped at {n} s').replace('{n}', String(n)));
+                recStop();
+            }
+        };
+        const recStop = () => {
+            if (recState !== 'recording') return;
+            recState = 'decoding';              // re-entry lock for the decode
+            if (recTimer) { clearInterval(recTimer); recTimer = null; }
+            recB.disabled = true;
+            recSt.hidden = false;
+            recSt.textContent = tf('uplift.voices.record_decode', 'processing…');
+            try { recMR.stop(); }               // onstop → recFinish
+            catch (e) {
+                recStopTracks(recStream);
+                D.toast(tf('uplift.voices.record_failed', 'Recording failed')
+                        + ': ' + recErrText(e), 'error');
+                recStream = null; recMR = null; recChunks = null; recAuto = 0;
+                recIdle();
+            }
+        };
+        const recFinish = async () => {
+            const chunks = recChunks || [];
+            const stream = recStream;           // released in EVERY exit path
+            const secs = recAuto || recSecs();
+            recMR = null; recChunks = null; recStream = null; recAuto = 0;
+            try {
+                recState = 'decoding';
+                if (recTimer) { clearInterval(recTimer); recTimer = null; }
+                recB.disabled = true;
+                recSt.hidden = false;
+                recSt.textContent = tf('uplift.voices.record_decode', 'processing…');
+                recDropPreview();               // the old take is gone now
+                if (!chunks.length) {
+                    file = null; b64 = '';
+                    trB.disabled = !b64 || !sttS.value;
+                    throw new Error(tf('uplift.voices.record_failed',
+                        'Recording failed'));
+                }
+                const raw = new Blob(chunks,
+                    { type: (chunks[0] && chunks[0].type) || 'audio/webm' });
+                const ac = recAudioCtx();
+                const dec = ac && ac.decodeAudioData
+                    ? await ac.decodeAudioData(await raw.arrayBuffer()) : null;
+                if (!dec) throw new Error(tf('uplift.voices.record_failed',
+                    'Recording failed'));
+                const rate = dec.sampleRate || 48000;
+                const heard = Number(dec.duration)
+                    || ((dec.length || 0) / rate) || secs;
+                if (heard < MIN_SECONDS) {
+                    // honest refusal: a 1 s cough is not a voice clone
+                    file = null; b64 = '';
+                    trB.disabled = !b64 || !sttS.value;
+                    D.toast(tf('uplift.voices.record_short',
+                        'Only {n} s recorded — too short for a good clone')
+                        .replace('{n}', String(Math.round(heard))), 'error');
+                    recPlay.hidden = recClear.hidden = true;
+                    recBlob = null;
+                    return;
+                }
+                const wav = new Blob([pcmToWavMono(recToMono(dec), rate)],
+                    { type: 'audio/wav' });
+                recBlob = wav;
+                file = new File([wav], 'recording.wav', { type: 'audio/wav' });
+                b64 = await readFileB64(file);      // 14 MiB cap lives there
+                fileI.value = '';                   // inputs never disagree
+                trB.disabled = !b64 || !sttS.value; // exactly the upload rule
+                if (!refT.value)
+                    // they just READ the sample: the transcript is known
+                    // exactly — better ground truth than an STT guess, and
+                    // a non-empty transcript is never overwritten
+                    refT.value = promptFor(langS.value, currentUiLang());
+                recPlay.hidden = false; recClear.hidden = false;
+                D.toast(tf('uplift.voices.record_done',
+                    'Clip recorded — check the transcript before saving'));
+            } catch (e) {
+                file = null; b64 = ''; recBlob = null;
+                trB.disabled = !b64 || !sttS.value;
+                recPlay.hidden = recClear.hidden = true;
+                D.toast(tf('uplift.voices.record_failed', 'Recording failed')
+                        + ': ' + recErrText(e), 'error');
+            } finally {
+                recStopTracks(stream);
+                recIdle();
+            }
+        };
+        const recStart = async () => {
+            if (recState !== 'idle') return;    // one gesture at a time
+            recState = 'starting';
+            recB.disabled = true;
+            recSt.hidden = false;
+            recSt.textContent = tf('uplift.voices.record_decode', 'processing…');
+            let stream = null;
+            try {
+                stream = await REC.dev.getUserMedia({ audio: {
+                    echoCancellation: true, noiseSuppression: true } });
+                recStream = stream;
+                const mt = recPickMime();
+                recMR = mt ? new window.MediaRecorder(stream, { mimeType: mt })
+                           : new window.MediaRecorder(stream);
+                recChunks = [];
+                recAuto = 0;
+                recMR.ondataavailable = ev => {
+                    if (ev && ev.data && ev.data.size) recChunks.push(ev.data);
+                };
+                recMR.onstop = () => { recFinish(); };
+                recMR.onerror = () => {
+                    recStopTracks(recStream);
+                    D.toast(tf('uplift.voices.record_failed', 'Recording failed'),
+                        'error');
+                    recIdle();
+                };
+                recMR.start();
+                recT0 = Date.now();
+                recState = 'recording';
+                recB.disabled = false;          // it is the STOP button now
+                recLabel(tf('uplift.voices.record_stop', 'STOP'));
+                recSt.textContent = tf('uplift.voices.recording', 'recording… {n}s')
+                    .replace('{n}', '0');
+                recTimer = setInterval(recTick, 200);
+            } catch (e) {
+                recStopTracks(stream);
+                recStopTracks(recStream);
+                recStream = null; recMR = null; recChunks = null;
+                const denied = e && e.name === 'NotAllowedError';
+                D.toast(denied
+                    ? tf('uplift.voices.record_denied',
+                        'Microphone access was denied')
+                    : tf('uplift.voices.record_failed', 'Recording failed')
+                        + ': ' + recErrText(e), 'error');
+                recIdle();
+            }
+        };
+        recPlay.onclick = () => {
+            if (!recBlob) return;
+            if (recAudio && recPlay.classList.contains('playing')) {
+                recDropPreview(); return;
+            }
+            recDropPreview();
+            recUrl = URL.createObjectURL(recBlob);
+            const a = new Audio(recUrl);
+            recAudio = a;
+            a.onended = () => { if (recAudio === a) recDropPreview(); };
+            a.onerror = () => { if (recAudio === a) recDropPreview(); };
+            recPlay.textContent = '■';
+            recPlay.classList.add('playing');   // user gesture: never autoplay
+            const p = a.play && a.play();
+            if (p && p.catch) p.catch(() => recDropPreview());
+        };
+        recClear.onclick = () => {
+            recDropPreview();
+            recBlob = null;
+            file = null; b64 = '';              // the clip is gone
+            trB.disabled = !b64 || !sttS.value;
+            recPlay.hidden = recClear.hidden = true;
+            recSt.hidden = true;
+            // refT stays: they may still type (or keep the sample) by hand
+        };
+    }
     const refF = field(tf('uplift.voices.ref_text', 'Reference text'), refWrap);
     for (const f of [langF, spkF, instrF]) { f.hidden = true; grid.append(f); }
     grid.append(clipF, refF);
@@ -726,5 +1185,10 @@ window.Uplift = window.Uplift || {};
 window.Uplift.voices = { renderVoices, voices: () => _voices,
                         loadVoices, ttsModels, speechJson, playBlob,
                         stopPlayback, newPlayer, playInto, voiceFetch, transcribeClip,
-                        voiceLabel };
+                        voiceLabel,
+                        // VOICE-9 test seam: the recorder's pure half (the
+                        // WAV container, the language resolver) — no
+                        // AudioContext, no DOM, node-drivable.
+                        _rec: { pcmToWavMono, normLang, promptFor, SUGGEST,
+                                MIN_SECONDS, MAX_SECONDS } };
 })();
