@@ -2474,14 +2474,19 @@ var ANE = {
 
 
 /* ==========================================================================
-   ACC-2a — ADDITIONAL SUITES (harness-only) — a SEPARATE section under the
-   classic grid, NEVER merged into it. The user's hard constraint on this
-   card: the original classic suites stay first-class and unmixed, so
-   whoever ignores the expanded catalog sees the panel exactly as before.
-   Data contract (sibling of /bench/accuracy/harness-sizes, added to the
-   harness-tasks response by the ACC-2b seam lane):
-       {"tasks": [...], "valid": [...], "harness_tasks": [...],
-        "extra_suites": [{"key": "ifeval", "label": "IFEval",
+   ACC-2a/ACC-2b — 'ADDITIONAL SUITES' — the home of EVERY LM-Eval card.
+   The user's hard constraint on this block: the classic grid (#bench-acc-tasks)
+   shows oMLX Classic cards ONLY, and every harness card — both the twin of a
+   classic suite (mmlu -> 'mmlu|h') and the expanded catalog's own suites —
+   lives here instead. The section is a COLLAPSED-BY-DEFAULT <details> framed
+   in the accent colour: the harness path is the expensive, per-subtask one,
+   so it is revealed by a deliberate click, never by scrolling past it.
+   Two sources feed one list (buildExtras, deterministic server order):
+     - family 'core': the classic catalog crossed with 'harness_tasks' —
+       rendered by the REAL taskRowEl(tk, true) card, so its size select,
+       its '|h' key and its uploadable routing are exactly as before
+     - the ACC-2a extra_suites payload (sibling of harness-sizes):
+       {"extra_suites": [{"key": "ifeval", "label": "IFEval",
                           "family": "instruction", "rows": 541,
                           "upload_ok": false}, ...]}
    family is one of instruction|reasoning|locale (unknown families render
@@ -2489,21 +2494,22 @@ var ANE = {
    count renders NO row part in the chip (U68: never a guessed number).
    Leaf counts come from the harness-sizes map the panel already owns; a
    suite the probe does not know yet omits the 'x' part the same way.
-   Extras are local-only by construction (the omlx.ai leaderboard knows
-   just the classic 16), so this section carries NO upload affordance and
-   its picks leave /add in their own queue entry with upload forced off.
+   The extra_suites are local-only by construction (the omlx.ai leaderboard
+   knows just the classic 16), so this section carries NO upload affordance
+   and their picks leave /add in their own queue entry with upload off.
    ========================================================================== */
 var EXTRAS = {
     KEY: 'uplift.bench.extras.v1',   // fold + show-all persistence (browser pref)
     CAP: 6,                          // visible cards per family before 'show all'
     LIMIT: 100,                      // per-subtask sample limit of an extras pick
-    FAMILIES: ['instruction', 'reasoning', 'locale'],
+    FAMILIES: ['core', 'instruction', 'reasoning', 'locale'],
     // 'other' is the honest bucket: the ACC-2b seam emits family straight
     // off the spec ('spec.get("family")'), so a suite added without one
     // must still land somewhere NAMED, not under a raw null
-    FAM_FALLBACK: { instruction: 'Instruction following', reasoning: 'Reasoning',
-                    locale: 'Language & locale', other: 'Other' },
-    FAM_KEYS: ['instruction', 'reasoning', 'locale', 'other'],
+    FAM_FALLBACK: { core: 'Core benchmarks', instruction: 'Instruction following',
+                    reasoning: 'Reasoning', locale: 'Language & locale',
+                    other: 'Other' },
+    FAM_KEYS: ['core', 'instruction', 'reasoning', 'locale', 'other'],
 
     norm: function (list) {
         // Server order is kept (same doctrine as the classic grid: the
@@ -2518,6 +2524,31 @@ var EXTRAS = {
                        upload_ok: s.upload_ok === true });
         });
         return out;
+    },
+
+    buildExtras: function (st) {
+        // ONE list, two sources, both in server order (the deterministic-
+        // order doctrine: the catalog's order is a server-side decision).
+        // 'core' first: the LM-Eval TWINS of the classic suites left the
+        // classic grid (user directive: the grid is classic-only) and live
+        // here, so the section exists as soon as a harness twin exists —
+        // a pre-ACC-2b server (empty harness_tasks AND no extra_suites)
+        // still gets zero DOM delta.
+        var out = [];
+        var twins = (st && st.harnessTasks) || [];
+        ((st && st.groups) || []).forEach(function (grp) {
+            (grp.tasks || []).forEach(function (tk) {
+                if (!tk || !tk.key) return;
+                if (twins.indexOf(tk.key) < 0) return;
+                out.push({ key: String(tk.key), label: tk.label || String(tk.key),
+                           family: 'core',
+                           rows: (typeof tk.full_size === 'number'
+                                  && tk.full_size > 0) ? tk.full_size : null,
+                           upload_ok: true,      // a classic twin uploads
+                           task: tk });          // painted by taskRowEl
+            });
+        });
+        return out.concat(EXTRAS.norm((st && st.extraSuites) || []));
     },
 
     isExtra: function (st, bareKey) {
@@ -2581,7 +2612,7 @@ var EXTRAS = {
         return parts.join(' \u00b7 ');
     },
 
-    ui: function () { return { fold: {}, all: {}, q: '' }; },
+    ui: function () { return { fold: {}, all: {}, open: false, q: '' }; },
 
     load: function () {
         var out = EXTRAS.ui();
@@ -2590,26 +2621,31 @@ var EXTRAS = {
             var d = raw ? JSON.parse(raw) : null;
             if (d && d.fold && typeof d.fold === 'object') out.fold = d.fold;
             if (d && d.all && typeof d.all === 'object') out.all = d.all;
+            // the SECTION's own fold: collapsed until the user opens it,
+            // and that choice is remembered like every other pref here
+            if (d && typeof d.open === 'boolean') out.open = d.open;
         } catch (_) { /* a broken pref is no pref: defaults, never a throw */ }
         return out;
     },
 
     save: function (ui) {
         try {
-            localStorage.setItem(EXTRAS.KEY,
-                JSON.stringify({ fold: ui.fold, all: ui.all }));
+            localStorage.setItem(EXTRAS.KEY, JSON.stringify(
+                { fold: ui.fold, all: ui.all, open: ui.open === true }));
         } catch (_) {}
     },
 
     render: function (acc) {
         var st = acc && acc.state;
         if (!st) return;
-        st.extrasItems = EXTRAS.norm(st.extraSuites);
+        if (!st.extrasUI) st.extrasUI = EXTRAS.load();
+        var ui = st.extrasUI;
+        st.extrasItems = EXTRAS.buildExtras(st);
         if (!st.extrasItems.length) {
-            // nothing to show: no node at all, so the panel is the one
-            // that shipped before this section existed
+            // nothing to show (no twin, no extra suite): no node at all, so
+            // the panel is the one that shipped before this section existed
             if (st.extrasSec && st.extrasSec.remove) st.extrasSec.remove();
-            st.extrasSec = null; st.extrasBox = null;
+            st.extrasSec = null; st.extrasBox = null; st.extrasCount = null;
             return;
         }
         // The section belongs to ONE form() build: state is rebuilt on
@@ -2617,11 +2653,28 @@ var EXTRAS = {
         // section yet'. (Never look the node up by id — a remount detaches
         // the old one and an id lookup can still find a stale node.)
         if (!st.extrasSec) {
-            var sec = el('div', 'acc-extras'); sec.id = 'bench-acc-extras';
-            var cap = el('div', 'bench-label acc-extras-cap',
+            // A <details> that stays COLLAPSED until the user clicks it:
+            // the harness path is the expensive one (N requests PER
+            // subtask), so reaching it must be a deliberate act, never a
+            // scroll past it.
+            var sec = el('details', 'acc-extras'); sec.id = 'bench-acc-extras';
+            var head = el('summary', 'acc-extras-head');
+            var cap = el('span', 'bench-label acc-extras-cap',
                 t('uplift.bench.extras_title', 'Additional suites'));
             cap.dataset.i18n = 'uplift.bench.extras_title';
             cap.dataset.en = cap.textContent;                 // U59 repair
+            var fbCount = t('uplift.bench.extras_count', '{n} suites')
+                .replace('{n}', String(st.extrasItems.length));
+            var count = el('span', 'acc-extras-count', fbCount);
+            count.dataset.i18n = 'uplift.bench.extras_count';
+            count.dataset.en = count.textContent;             // U59 repair
+            // exactly like the cap: data-en holds the RENDERED text, so an
+            // applyI18n pass with no catalog answer restores '13 suites'
+            // rather than a raw '{n}' template. paint() is the authority
+            // for the number (the {n} key is re-substituted on every
+            // repaint, the same contract as the chip / show-all labels).
+            head.append(cap, count, el('span', 'bench-adv-chev', '▾'));
+            var body = el('div', 'acc-extras-body');
             var note = el('p', 'native-stub-note',
                 t('uplift.bench.extras_note',
                   'Local only \u2014 the community leaderboard knows just the classic suites.'));
@@ -2640,10 +2693,24 @@ var EXTRAS = {
             search.dataset.i18nPh = 'uplift.bench.extras_search';
             search.dataset.enPh = ph;
             var box = el('div', 'acc-extras-fams'); box.id = 'bench-acc-extras-fams';
-            sec.append(cap, note, search, box);
-            // Below the classic grid, ABOVE the Advanced block: the suite
-            // choice must never sit after the run buttons (U79 grouping by
-            // concern). insertBefore keeps the classic children untouched.
+            // Everything that belongs to the fold lives INSIDE the details;
+            // the body wrapper keeps a CLOSED section at zero stray padding
+            // (nothing but the header strip is laid out at all).
+            body.append(note, search, box);
+            sec.append(head, body);
+            sec.open = ui.open === true;      // collapsed by default
+            head.setAttribute('aria-expanded', sec.open ? 'true' : 'false');
+            sec.addEventListener('toggle', function () {
+                var on = sec.open === true;
+                head.setAttribute('aria-expanded', on ? 'true' : 'false');
+                if (ui.open === on) return;
+                ui.open = on;
+                EXTRAS.save(ui);
+            });
+            // Below the classic grid, ABOVE the LM-Eval request total: the
+            // suite choice may never sit after the run buttons (U79
+            // grouping by concern) and the total stays readable outside the
+            // fold. insertBefore keeps the classic children untouched.
             var host = st.extrasHost, anchor = st.extrasAnchor;
             if (!host) return;        // form() not built yet: stay unbuilt,
                                       // a later render() retries (never
@@ -2651,13 +2718,12 @@ var EXTRAS = {
                                       // into one would show nothing)
             if (anchor && host.insertBefore) host.insertBefore(sec, anchor);
             else host.appendChild(sec);
-            st.extrasSec = sec; st.extrasBox = box;
+            st.extrasSec = sec; st.extrasBox = box; st.extrasCount = count;
             search.addEventListener('input', function () {
                 st.extrasUI.q = String(search.value || '');
                 EXTRAS.paint(acc);
             });
         }
-        if (!st.extrasUI) st.extrasUI = EXTRAS.load();
         EXTRAS.paint(acc);
     },
 
@@ -2666,6 +2732,14 @@ var EXTRAS = {
         if (!box || !sec) return;
         var ui = st.extrasUI || (st.extrasUI = EXTRAS.load());
         var q = String(ui.q || '').trim().toLowerCase();
+        // The header answers 'how much is behind this fold' — a count of
+        // the SUITES in the section, not of the picks (the request math
+        // stays in #bench-acc-engine-total, outside the fold). A search
+        // filters the list; it does not change what the section holds.
+        if (st.extrasCount) {
+            st.extrasCount.textContent = t('uplift.bench.extras_count',
+                '{n} suites').replace('{n}', String(st.extrasItems.length));
+        }
         box.replaceChildren();
         EXTRAS.groups(st.extrasItems).forEach(function (g) {
             var hits = q ? g.items.filter(function (s) {
@@ -2689,7 +2763,14 @@ var EXTRAS = {
             det.appendChild(sum);
             var row = el('div', 'acc-group-tasks acc-extras-tasks');
             vis.forEach(function (s) {
-                row.appendChild(EXTRAS.card(acc, s, g.family, det));
+                // 'core' is the twin of a classic suite: it is painted by
+                // the SAME taskRowEl(tk, true) that used to sit in the
+                // classic grid, so its size select, its '|h' key and its
+                // uploadable routing are untouched by the move. The extra
+                // suites keep their own local-only card.
+                row.appendChild((g.family === 'core' && s.task)
+                    ? acc.taskRowEl(s.task, true)
+                    : EXTRAS.card(acc, s, g.family, det));
             });
             det.appendChild(row);
             if (!q && hits.length > vis.length) {
@@ -2778,8 +2859,9 @@ var EXTRAS = {
    classic runner; uplift flips upload to explicit OPT-IN (engine window
    patch, documented in accuracy_engine.py). Task grid comes from the
    server (/tasks) so dataset facts ship in one place; labels are classic
-   acc_bench.* keys. The ACC-2a extras section above renders under this
-   grid as its own block and never mixes into it.
+   acc_bench.* keys. The grid holds oMLX Classic cards ONLY — every
+   LM-Eval card (a classic suite's twin as well as the expanded catalog)
+   renders in the 'Additional suites' fold above, and never mixes in here.
    ========================================================================== */
 
 var ACC = {
@@ -2839,18 +2921,25 @@ var ACC = {
         // (oMLX Classic / LM-Eval); the lm-eval math shows on the harness
         // cards' own size options. The old radio row is gone.
         var engNote = el('p', 'native-stub-note', t('uplift.bench.engine_hint',
-            'oMLX Classic samples N questions total. LM-Eval runs N PER SUBTASK — MMLU has 57 subtasks, so 30 becomes 1710 requests. The number of requests for your LM-Eval picks is shown below the list.'));
+            'oMLX Classic samples N questions total. LM-Eval (the community '
+            + 'harness lm-eval) runs N PER SUBTASK — MMLU has 57 subtasks, so '
+            + '30 becomes 1710 requests. The LM-Eval suites live in the '
+            + 'Additional suites section below; its request total is shown '
+            + 'under it.'));
         engNote.id = 'bench-acc-engine-hint';
         var totNote = el('p', 'native-stub-note'); totNote.id = 'bench-acc-engine-total';
         f.append(grid, engNote, totNote);
         self.loadHarnessSizes();
-        // ACC-2a: the extras section is a SIBLING that lands under the
-        // classic grid and above the Advanced block (the suite choice may
-        // never sit after the run buttons, U79). form() only records where
-        // it goes — the node itself exists only once /tasks has advertised
-        // extra_suites, so the classic panel DOM stays byte-identical.
+        // ACC-2a/2b: the extras section is a SIBLING that lands under the
+        // classic grid and ABOVE the LM-Eval request total (the suite
+        // choice may never sit after the run buttons, U79; and the total
+        // has to stay readable while the fold is closed). form() only
+        // records where it goes — the node itself exists only once the
+        // server offers a harness card, so a plain classic panel is
+        // byte-identical to the one that shipped without this section.
         self.state.extrasHost = f;
-        self.state.extrasAnchor = null;   // set below, once the block exists
+        self.state.extrasAnchor = totNote;   // insertBefore(target) = the
+                                             // section goes above the total
 
         var extRow = el('div', 'bench-row bench-external');
         extRow.id = 'bench-acc-ext-row'; extRow.hidden = true;
@@ -2889,9 +2978,6 @@ var ACC = {
                 'Off by default: a native run never posts to omlx.ai unless you check this.'))],
             'acc_bench.config.advanced_options', 'Advanced options');
         f.appendChild(adv);
-        // ACC-2a insertion anchor: extras go between the classic grid and
-        // this block (never below the run controls)
-        self.state.extrasAnchor = adv;
 
         var actions = el('div', 'bench-actions');
         var addBtn = el('button', 'btn primary', t('acc_bench.config.add_run', 'Add to Queue'));
@@ -2980,7 +3066,12 @@ var ACC = {
         if (!st) return;
         var gdoc = (typeof document.querySelectorAll === 'function')
             ? document : null;
-        if (gdoc) gdoc.querySelectorAll('#bench-acc-tasks .acc-task').forEach(function (card) {
+        if (gdoc) gdoc.querySelectorAll(
+            // ACC-2b: the harness twins moved into the extras fold — the
+            // multiplier must follow them there or their size options
+            // would silently stop showing '30 \u00d757'
+            '#bench-acc-tasks .acc-task, #bench-acc-extras .acc-task'
+        ).forEach(function (card) {
             var key = card.dataset.key || '';
             var bare = key.indexOf('|h') > 0 ? key.slice(0, key.indexOf('|h')) : key;
             var c = (st.harnessSizes && st.harnessSizes[bare]) || 1;
@@ -3071,10 +3162,11 @@ var ACC = {
             var row = el('div', 'acc-group-tasks');
             grp.tasks.forEach(function (tk) {
                 row.appendChild(self.taskRowEl(tk, false));
-                // U69: lm-eval variant appears IN the list beside its
-                // built-in twin, not behind a mode switch
-                if ((self.state.harnessTasks || []).indexOf(tk.key) >= 0)
-                    row.appendChild(self.taskRowEl(tk, true));
+                // ACC-2b (user directive): the LM-Eval twin of a classic
+                // suite no longer renders beside its classic twin here.
+                // The grid shows oMLX Classic cards ONLY; every harness
+                // card lives in the 'Additional suites' fold, which paints
+                // it as the very same variant card it always was.
             });
             wrap.appendChild(row);
             grid.appendChild(wrap);

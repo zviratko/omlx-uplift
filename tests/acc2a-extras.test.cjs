@@ -1,23 +1,35 @@
-/* ACC-2a — the 'Additional suites' section (harness-only suites kept in
-   their OWN block under the classic grid; the user's hard constraint is
-   that whoever ignores the expanded catalog sees the classic picker
-   unchanged). Behavioural proofs run through the vm sandbox + a DOM stub
-   strong enough to express the real interactions (parent/child splice via
-   insertBefore + remove, per-element listener registries fired with fire(),
-   a working localStorage map, and a querySelectorAll that implements the
-   '#id .class' descendant selectors the module uses).
+/* ACC-2a + ACC-2b — the 'Additional suites' section.
+
+   Frozen user contract this file guards:
+     (2) the classic grid (#bench-acc-tasks) shows oMLX CLASSIC cards ONLY —
+         every LM-Eval card, both the twin of a classic suite and the
+         expanded catalog, lives inside the section;
+     (3) the section is a <details> fold, COLLAPSED until the user clicks it,
+         framed stronger than the Advanced block (accent spine + row ground)
+         with a header summary: title + suite count + chevron.
+
+   Behavioural proofs run through the vm sandbox + a DOM stub strong enough
+   to express the real interactions (parent/child splice via insertBefore +
+   remove, per-element listener registries fired with fire(), a working
+   localStorage map, and a querySelectorAll that implements the
+   '#id .class' descendant selectors AND the comma list the module now uses).
 
    Pinned here:
-   - the section exists ONLY when the server sends a non-empty extra_suites
-     (absent key and empty list both mean zero DOM delta)
+   - the section exists as soon as a harness card exists (a twin OR an extra
+     suite); with neither, zero DOM delta
+   - no '|h' card may stay in the classic grid, ever
    - the size chip does the honest U68 math (rows · ×leaves · LM-Eval) and
      omits a part it does not know — never a guessed number
-   - 6-card family cap + 'show all (N)' / 'hide'
-   - fold + show-all persisted under 'uplift.bench.extras.v1' and restored
-   - selecting a suite in a folded family auto-reveals it
-   - the search box filters the extras ONLY; the classic grid is untouched
-   - a local-only pick never travels with the leaderboard upload flag
-   - structural: one IIFE, extras code is its own module block, every new
+   - 6-card family cap + 'show all (N)' / 'hide' — for the core family too
+   - the section fold, the family folds and show-all persist under
+     'uplift.bench.extras.v1' and are restored; aria-expanded is honest
+   - the LM-Eval request total stays OUTSIDE the fold
+   - the search box filters the section INCLUDING the twins; the classic
+     grid is untouched
+   - a local-only pick never travels with the leaderboard upload flag, and
+     the twin that moved into the fold still rides the uploadable entry
+   - structural: one IIFE, the extras code is its own module block, the
+     classic grid paints no variant card, and every new
      uplift.bench.extras_* key lives in all 10 locales (test_locale_sync
      cannot see the t(key, fallback) call style, so this closes that gap) */
 'use strict';
@@ -106,6 +118,9 @@ function makeDom() {
     }
     function queryAll(root, sel) {
         const all = walk(root, []);
+        // A comma list ('#a .x, #b .x') is ONE query: every group is
+        // matched, the union deduped — the shape applyEngineLabels needs
+        // now that the harness cards live in a second container.
         const groups = String(sel).split(',').map(s => s.trim()).filter(Boolean);
         const hit = [];
         for (const g of groups) {
@@ -173,6 +188,16 @@ const EXTRAS_FIX = [
     ...EXTRA9,
 ];
 const SIZES = { mmlu: 57, ifeval: 1, bbh_cot_fewshot: 27 };
+// a 16-suite classic catalog whose every key has a harness twin: the core
+// family must obey the SAME per-family cap the extras families always did
+const TASKS16 = [{
+    group: 'acc_bench.benchmarks.group_all',
+    tasks: Array.from({ length: 16 }, (_, i) => ({
+        key: 'k' + i, label: 'Suite ' + i, desc: 'acc_bench.benchmarks.k_desc',
+        full_size: 1000 + i, sizes: [30, 50, 100],
+    })),
+}];
+const KEYS16 = TASKS16[0].tasks.map(t => t.key);
 
 function load(opts) {
     const o = opts || {};
@@ -180,7 +205,10 @@ function load(opts) {
     const store = o.store || {};
     const posts = [];
     const win = {
-        UpliftCore: { t: k => k },
+        // t(): the real module resolves through UpliftCore.t(key) and keeps
+        // its own EN fallback when the answer is the bare key. `tr` lets a
+        // test answer for one key so a {n} substitution can be pinned.
+        UpliftCore: { t: k => (o.tr && o.tr[k]) || k },
         UpliftDom: {
             fetchJson: async (u) => {
                 if (String(u).endsWith('/models')) return { models: [{ id: 'm1' }] };
@@ -221,11 +249,19 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 async function accuracy(opts) {
     const h = load(opts);
     h.B.mount();
+    // STUB EXTENSION (ACC-2b): the stub's document root had no children at
+    // all (mount attaches to #bench-native, which only lived in the byId
+    // registry), so a document-wide querySelectorAll could never resolve
+    // ANY descendant selector and the module's new
+    // '#bench-acc-tasks .acc-task, #bench-acc-extras .acc-task' list was
+    // untestable. Hanging the real mount point under the root BEFORE the
+    // fetches settle makes the lookup behave like the browser's.
+    const host = h.byId['bench-native'];
+    if (host && h.doc.children.indexOf(host) < 0) h.doc.appendChild(host);
     h.B.showSub('accuracy');
     await tick(); await tick();
     h.panel = h.byId['bench-subpanel'];
-    // the stub document root holds nothing (mount attaches to #bench-native
-    // by id), so the form is taken from where it is really attached
+    // the form is taken from where it is really attached
     h.form = classes(h.panel, 'bench-form')[0];
     return h;
 }
@@ -237,55 +273,105 @@ function classes(n, c, out) {
 }
 function extrasSec(h) { return classes(h.panel, 'acc-extras'); }
 function famsOf(sec) { return classes(sec, 'acc-extras-fam'); }
+function famOf(sec, family) {
+    return famsOf(sec).filter(f => f.dataset.family === family)[0] || null;
+}
 function cards(sec) { return classes(sec, 'acc-task'); }
+function headOf(sec) { return classes(sec, 'acc-extras-head')[0] || null; }
+function countOf(sec) { return classes(sec, 'acc-extras-count')[0] || null; }
+function bodyOf(sec) { return classes(sec, 'acc-extras-body')[0] || null; }
 function texts(n) {
     let s = n.textContent || '';
     (n.children || []).forEach(c => { s += ' ' + texts(c); });
     return s;
 }
 function classicGrid(h) { return h.byId['bench-acc-tasks']; }
+function gridKeys(h) { return cards(classicGrid(h)).map(c => c.dataset.key).sort(); }
 function findCard(sec, key) {
     return cards(sec).filter(c => c.dataset && c.dataset.key === key)[0] || null;
 }
+function selectOf(card) { return (card.children.filter(c => c.tagName === 'select'))[0]; }
+function chipOf(card) {
+    return texts(card.children.filter(c => c._classes.has('acc-task-chip'))[0]);
+}
+// direct-children index of the form (-1 when absent)
+function at(h, pred) { return h.form.children.findIndex(pred); }
 
-/* ---- 1. the section exists ONLY when the server offers extras ---------- */
-test('ACC-2a: no extra_suites key at all -> the section does not exist',
+/* ---- 1. who owns which card ------------------------------------------- */
+test('ACC-2b: the classic grid shows CLASSIC cards only — no |h card survives',
     async () => {
-        const h = await accuracy({});                        // key absent
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
+        assert.deepEqual(gridKeys(h), ['gsm8k', 'mmlu'],
+            'the twin left the grid: mmlu|h is not a classic-grid card anymore');
+        assert.ok(!gridKeys(h).some(k => k.indexOf('|h') > 0),
+            'NOT ONE harness card may stay inside #bench-acc-tasks');
+    });
+
+test('ACC-2b: the twin of a classic suite lives in the fold, family core',
+    async () => {
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
+        const sec = extrasSec(h)[0];
+        assert.ok(famOf(sec, 'core'), 'a core family exists for the classic twins');
+        const twin = findCard(famOf(sec, 'core'), 'mmlu|h');
+        assert.ok(twin, 'the twin renders inside its own family group');
+        // it is the REAL taskRowEl card: same key, its own size select, the
+        // LM-Eval engine caption — only its HOME moved
+        assert.equal(twin.getAttribute('role'), 'button');
+        assert.equal(twin.classList.contains('acc-task-harness'), true);
+        assert.equal(selectOf(twin).dataset.key, 'mmlu|h',
+            'the size select still carries the |h key (collect() is unchanged)');
+        assert.equal(classes(twin, 'acc-task-engine').length, 1,
+            'and its engine caption is the LM-Eval one');
+        assert.equal(twin.dataset.localOnly, undefined,
+            'a classic twin is NOT a local-only suite');
+    });
+
+test('ACC-2b: a twin alone builds the section (no extra_suites needed)',
+    async () => {
+        const h = await accuracy({});                      // key absent
+        const sec = extrasSec(h);
+        assert.equal(sec.length, 1, 'harness_tasks alone is enough');
+        assert.equal(cards(sec[0]).length, 1, 'and it holds the one twin');
+        assert.equal(famOf(sec[0], 'core').dataset.family, 'core',
+            'the twin lands in the core family, not a bare list');
+    });
+
+test('ACC-2b: no twin AND no extra suite -> the section does not exist at all',
+    async () => {
+        const h = await accuracy({ tasks: { harness_tasks: [], extra_suites: [] } });
         assert.deepEqual(extrasSec(h), [], 'no .acc-extras node may be built');
         assert.ok(!h.byId['bench-acc-extras'],
             'the section id was never even allocated: zero DOM delta');
-        // classic grid still owns both groups + the one LM-Eval twin
-        assert.equal(cards(classicGrid(h)).length, 3,
-            'classic grid keeps its own 3 cards (mmlu, mmlu|h, gsm8k)');
+        assert.deepEqual(gridKeys(h), ['gsm8k', 'mmlu'],
+            'a pre-ACC-2b server keeps the plain classic grid');
     });
 
-test('ACC-2a: extra_suites: [] -> the section does not exist either',
-    async () => {
-        const h = await accuracy({ tasks: { extra_suites: [] } });
-        assert.deepEqual(extrasSec(h), [], 'an empty list is as silent as no key');
-    });
-
-test('ACC-2a: non-empty extra_suites -> one separate section, classic grid untouched',
+test('ACC-2b: the fold sits under the grid and ABOVE the LM-Eval total',
     async () => {
         const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
-        const sec = extrasSec(h);
-        assert.equal(sec.length, 1, 'exactly one extras section');
-        // separation is the whole point: the classic grid has no extras card
-        const inGrid = cards(classicGrid(h)).map(c => c.dataset.key);
-        assert.deepEqual(inGrid.sort(), ['gsm8k', 'mmlu', 'mmlu|h'],
-            'the classic grid keeps EXACTLY its own cards');
-        // ...and the section sits below the grid, above the Advanced block
         const kids = h.form.children;
-        const gi = kids.findIndex(k => k.id === 'bench-acc-tasks');
-        const ei = kids.findIndex(k => k._classes && k._classes.has('acc-extras'));
-        const ai = kids.findIndex(k => k.tagName === 'details');
-        assert.ok(gi >= 0 && ei > gi, 'extras render BELOW the classic grid');
-        assert.ok(ai < 0 || ei < ai, 'extras render ABOVE the Advanced block');
-        // and it never carries an upload/leaderboard affordance
-        assert.deepEqual(classes(sec[0], 'bench-check'), [],
+        const gi = at(h, k => k.id === 'bench-acc-tasks');
+        const hi = at(h, k => k.id === 'bench-acc-engine-hint');
+        const ei = at(h, k => k._classes && k._classes.has('acc-extras'));
+        const ti = at(h, k => k.id === 'bench-acc-engine-total');
+        const ai = at(h, k => k._classes && k._classes.has('bench-advanced'));
+        assert.ok(gi >= 0, 'the grid exists');
+        assert.equal(hi, gi + 1, 'the engine hint stays right under the grid');
+        assert.equal(ei, hi + 1, 'the fold is the next block');
+        assert.equal(ti, ei + 1,
+            'the request total is a SIBLING below the fold, not inside it: '
+            + 'it must stay readable while the section is collapsed');
+        assert.ok(ai > ti, 'and the fold never sits after Advanced / the run buttons');
+        assert.equal(kids[ei].id, 'bench-acc-extras');
+    });
+
+test('ACC-2b: the section carries no upload affordance of its own',
+    async () => {
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
+        const sec = extrasSec(h)[0];
+        assert.deepEqual(classes(sec, 'bench-check'), [],
             'no checkbox may live inside the extras section');
-        assert.ok(!texts(sec[0]).includes('uplift.bench.upload'),
+        assert.ok(!texts(sec).includes('uplift.bench.upload'),
             'no upload control or raw key in the extras DOM');
     });
 
@@ -298,12 +384,12 @@ test('ACC-2a: with extras present, the CLASSIC panel still serializes byte-ident
         const ser = (n) => {
             const ds = Object.keys(n.dataset || {}).sort()
                 .map(k => 'data-' + k + '=' + n.dataset[k]);
-            const at = Object.keys(n.attrs || {}).sort().map(k => k + '=' + n.attrs[k]);
+            const at2 = Object.keys(n.attrs || {}).sort().map(k => k + '=' + n.attrs[k]);
             return '<' + n.tagName + ' id=' + (n.id || '') +
                 ' class=' + n.className + ' type=' + n.type + ' value=' + n.value +
                 ' hidden=' + (n.hidden ? 1 : 0) + ' ph=' + (n.placeholder || '') +
                 ' title=' + (n.title || '') + ' open=' + (n.open ? 1 : 0) + ' ' +
-                ds.concat(at).join(',') + '>' + (n.textContent || '') +
+                ds.concat(at2).join(',') + '>' + (n.textContent || '') +
                 (n.children || []).map(ser).join('') + '</' + n.tagName + '>';
         };
         const panel = async (tasks) => {
@@ -311,13 +397,20 @@ test('ACC-2a: with extras present, the CLASSIC panel still serializes byte-ident
             return h.form.children.filter(n => !(n._classes && n._classes.has('acc-extras')))
                 .map(ser).join('\n');
         };
-        const without = await panel(undefined);
-        const empty = await panel({ extra_suites: [] });
+        const without = await panel({ harness_tasks: [], extra_suites: [] });
+        const empty = await panel({ harness_tasks: [], extra_suites: [] });
+        const twins = await panel(undefined);            // a twin, no extras
         const withExtras = await panel({ extra_suites: EXTRAS_FIX });
         assert.ok(without.length > 500, 'the classic panel really did render');
         assert.equal(withExtras, without,
             'extras present must not perturb ONE node of the classic panel');
         assert.equal(empty, without, 'an empty list is identical too');
+        assert.equal(twins, without,
+            'a twin moved into the fold: the grid outside it is untouched');
+        // the grid itself loses its twin on every server that has one, so
+        // the zero-delta reading applies to a plain classic server only
+        assert.deepEqual(gridKeys(await accuracy({ tasks: { harness_tasks: [] } })),
+            ['gsm8k', 'mmlu'], 'classic-only, always');
     });
 
 /* ---- 2. chip math (U68 honesty) --------------------------------------- */
@@ -325,9 +418,8 @@ test('ACC-2a: size chip is rows · ×leaves · LM-Eval, omitting what is unknown
     async () => {
         const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
         const sec = extrasSec(h)[0];
-        const chip = k => texts(findCard(sec, k + '|h').children
-            .filter(c => c._classes.has('acc-task-chip'))[0]);
-        assert.equal(chip('ifeval'), '1 rows · LM-Eval'.replace('1 rows', (541).toLocaleString() + ' rows'),
+        const chip = k => chipOf(findCard(sec, k + '|h'));
+        assert.equal(chip('ifeval'), (541).toLocaleString() + ' rows · LM-Eval',
             'a known leaf count of 1 is still honest: ×1 is noise, so only rows+engine');
         assert.equal(chip('bbh_cot_fewshot'),
             (6500).toLocaleString() + ' rows · ×27 · LM-Eval');
@@ -339,68 +431,163 @@ test('ACC-2a: chip keeps the honest omission when the probe has no leaf count',
     async () => {
         const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, sizes: null });
         const sec = extrasSec(h)[0];
-        const c = findCard(sec, 'bbh_cot_fewshot|h');
-        assert.equal(texts(c.children.filter(x => x._classes.has('acc-task-chip'))[0]),
+        assert.equal(chipOf(findCard(sec, 'bbh_cot_fewshot|h')),
             (6500).toLocaleString() + ' rows · LM-Eval',
             'no harness-sizes map -> no ×leaves part, never a guessed ×1 lie');
+    });
+
+test('ACC-2b: the twin renders the classic card shape, not a chip card',
+    async () => {
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
+        const twin = findCard(extrasSec(h)[0], 'mmlu|h');
+        assert.deepEqual(classes(twin, 'acc-task-chip'), [],
+            'taskRowEl has no chip: its cost reads on the size options instead');
     });
 
 /* ---- 3. family cap + show all ----------------------------------------- */
 test('ACC-2a: 6-card cap per family + show all (N) then hide', async () => {
     const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
     const sec = extrasSec(h)[0];
-    const reasoning = famsOf(sec).filter(f => f.dataset.family === 'reasoning')[0];
+    const reasoning = famOf(sec, 'reasoning');
     assert.equal(cards(reasoning).length, 6, 'the family shows CAP=6 cards');
     const more = classes(reasoning, 'acc-extras-more')[0];
     assert.ok(more, 'a show-all toggle exists for a capped family');
     assert.equal(texts(more), 'show all (10)',
         'the toggle counts EVERY suite of the family, not the hidden tail');
     h.fire(more, 'click');
-    const r2 = famsOf(extrasSec(h)[0]).filter(f => f.dataset.family === 'reasoning')[0];
+    const r2 = famOf(extrasSec(h)[0], 'reasoning');
     assert.equal(cards(r2).length, 10, 'show all reveals the whole family');
     const hide = classes(r2, 'acc-extras-more')[0];
     assert.equal(texts(hide), 'hide');
     h.fire(hide, 'click');
-    const r3 = famsOf(extrasSec(h)[0]).filter(f => f.dataset.family === 'reasoning')[0];
-    assert.equal(cards(r3).length, 6, 'hide re-caps at 6');
+    assert.equal(cards(famOf(extrasSec(h)[0], 'reasoning')).length, 6, 'hide re-caps at 6');
     // the instruction family (1 card) must carry NO toggle
-    const instr = famsOf(extrasSec(h)[0]).filter(f => f.dataset.family === 'instruction')[0];
+    const instr = famOf(extrasSec(h)[0], 'instruction');
     assert.equal(cards(instr).length, 1);
     assert.deepEqual(classes(instr, 'acc-extras-more'), [],
         'a family under the cap gets no toggle');
 });
 
-/* ---- 4. fold persistence ---------------------------------------------- */
-test('ACC-2a: fold state persists under uplift.bench.extras.v1 and restores',
+test('ACC-2b: the core family obeys the same cap (16 twins -> 6 + show all)',
+    async () => {
+        const h = await accuracy({ tasks: { tasks: TASKS16, harness_tasks: KEYS16,
+                                            extra_suites: [] } });
+        const sec = extrasSec(h)[0];
+        assert.equal(famsOf(sec).length, 1, 'only the core family exists here');
+        assert.equal(famsOf(sec)[0].dataset.family, 'core',
+            'and it leads the section (FAMILIES order is a contract)');
+        const core = famOf(sec, 'core');
+        assert.equal(cards(core).length, 6, 'the twins are capped like any family');
+        const more = classes(core, 'acc-extras-more')[0];
+        assert.equal(texts(more), 'show all (16)');
+        h.fire(more, 'click');
+        assert.equal(cards(famOf(extrasSec(h)[0], 'core')).length, 16);
+        // the grid keeps all 16 CLASSIC cards regardless
+        assert.equal(cards(classicGrid(h)).length, 16);
+        assert.ok(!gridKeys(h).some(k => k.indexOf('|h') > 0));
+    });
+
+/* ---- 4. the SECTION fold (collapsed by default) ------------------------ */
+test('ACC-2b: the section is a <details> fold, collapsed until clicked',
     async () => {
         const store = {};
         const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
         const sec = extrasSec(h)[0];
-        const instr = famsOf(sec).filter(f => f.dataset.family === 'instruction')[0];
+        assert.equal(sec.tagName, 'details', 'the section root is a real fold');
+        assert.equal(sec.id, 'bench-acc-extras');
+        assert.equal(sec.open, false, 'COLLAPSED by default — nothing to click past');
+        const head = headOf(sec);
+        assert.ok(head, 'the fold has its own header');
+        assert.equal(head.tagName, 'summary');
+        assert.equal(head.getAttribute('aria-expanded'), 'false',
+            'aria-expanded is honest on the FIRST paint (U51)');
+        // title + count + chevron, in that shape
+        assert.ok(classes(head, 'acc-extras-cap')[0], 'the caption lives in the header');
+        assert.ok(countOf(sec), 'the header carries a suite count');
+        assert.ok(classes(head, 'bench-adv-chev')[0], 'and a chevron');
+        // everything that belongs to the fold is INSIDE the details, and
+        // the header is its only always-visible part
+        const body = bodyOf(sec);
+        assert.ok(body, 'the fold has a body wrapper');
+        assert.ok(classes(body, 'acc-extras-search')[0]);
+        assert.ok(classes(body, 'acc-extras-fams')[0]);
+        assert.equal(body.parentNode, sec);
+        assert.equal(sec.children[0], head, 'summary first, body second');
+        assert.equal(sec.children.length, 2);
+    });
+
+test('ACC-2b: opening the fold persists open:true and is restored on reopen',
+    async () => {
+        const store = {};
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
+        const sec = extrasSec(h)[0];
+        assert.ok(!('uplift.bench.extras.v1' in store),
+            'an untouched section writes no pref at all');
+        sec.open = true;
+        h.fire(sec, 'toggle');
+        assert.equal(headOf(extrasSec(h)[0]).getAttribute('aria-expanded'), 'true');
+        assert.equal(JSON.parse(store['uplift.bench.extras.v1']).open, true,
+            'the section fold lives in the SAME localStorage object');
+        const h2 = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
+        assert.equal(extrasSec(h2)[0].open, true, 'the opened fold is restored');
+        assert.equal(headOf(extrasSec(h2)[0]).getAttribute('aria-expanded'), 'true',
+            'and aria-expanded is restored with it');
+        const reopened = extrasSec(h2)[0];
+        reopened.open = false;
+        h2.fire(reopened, 'toggle');
+        assert.equal(JSON.parse(store['uplift.bench.extras.v1']).open, false,
+            'closing it again is remembered too');
+        const h3 = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
+        assert.equal(extrasSec(h3)[0].open, false, 'collapsed again on the next visit');
+    });
+
+test('ACC-2b: the families INSIDE the fold keep their own prefs',
+    async () => {
+        const store = {};
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
+        const sec = extrasSec(h)[0];
+        assert.equal(sec.open, false, 'the section is folded...');
+        assert.equal(famOf(sec, 'instruction').open, true,
+            '...while the families inside still default open (unchanged)');
+        famOf(sec, 'instruction').open = false;
+        h.fire(famOf(sec, 'instruction'), 'toggle');
+        const saved = JSON.parse(store['uplift.bench.extras.v1']);
+        assert.equal(saved.fold.instruction, false, 'the family fold is persisted');
+        assert.equal(saved.open, false, 'the section fold is NOT flipped by it');
+        const h2 = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
+        const s2 = extrasSec(h2)[0];
+        assert.equal(s2.open, false, 'the section reopened collapsed');
+        assert.equal(famOf(s2, 'instruction').open, false, 'the family reopened folded');
+        // ...and the show-all choice persists the same way
+        h2.fire(classes(famOf(s2, 'reasoning'), 'acc-extras-more')[0], 'click');
+        assert.equal(JSON.parse(store['uplift.bench.extras.v1']).all.reasoning, true);
+        const h3 = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
+        assert.equal(cards(famOf(extrasSec(h3)[0], 'reasoning')).length, 10,
+            'show-all survives the reopen');
+    });
+
+test('ACC-2a: fold state persists under uplift.bench.extras.v1 and restores',
+    async () => {
+        const store = {};
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
+        const instr = famOf(extrasSec(h)[0], 'instruction');
         assert.equal(instr.open, true, 'families start open');
         instr.open = false;
         h.fire(instr, 'toggle');
-        const saved = JSON.parse(store['uplift.bench.extras.v1']);
-        assert.equal(saved.fold.instruction, false, 'the fold is persisted');
-        // a fresh panel with the same storage starts folded
+        assert.equal(JSON.parse(store['uplift.bench.extras.v1']).fold.instruction, false);
         const h2 = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
-        const i2 = famsOf(extrasSec(h2)[0]).filter(f => f.dataset.family === 'instruction')[0];
-        assert.equal(i2.open, false, 'the restored family is folded');
-        // ...and the show-all choice persists the same way
-        const r = famsOf(extrasSec(h2)[0]).filter(f => f.dataset.family === 'reasoning')[0];
-        h.fire(classes(r, 'acc-extras-more')[0], 'click');
-        assert.equal(JSON.parse(store['uplift.bench.extras.v1']).all.reasoning, true);
-        const h3 = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
-        const r3 = famsOf(extrasSec(h3)[0]).filter(f => f.dataset.family === 'reasoning')[0];
-        assert.equal(cards(r3).length, 10, 'show-all survives the reopen');
+        assert.equal(famOf(extrasSec(h2)[0], 'instruction').open, false,
+            'a fresh panel with the same storage starts folded');
     });
 
 test('ACC-2a: a corrupt pref is no pref (defaults, never a throw)', async () => {
     const store = { 'uplift.bench.extras.v1': '{not json' };
     const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
     const sec = extrasSec(h)[0];
-    assert.equal(famsOf(sec).length, 3, 'families still render from defaults');
-    assert.equal(famsOf(sec)[0].open, true);
+    // core (the mmlu twin) + instruction + reasoning + locale
+    assert.equal(famsOf(sec).length, 4, 'families still render from defaults');
+    assert.equal(famsOf(sec)[0].open, true, 'families default open');
+    assert.equal(sec.open, false, 'the SECTION defaults collapsed');
 });
 
 /* ---- 5. selection auto-reveals the folded family ---------------------- */
@@ -408,11 +595,11 @@ test('ACC-2a: selecting in a folded family auto-reveals it (and persists)',
     async () => {
         const store = {};
         const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
-        const instr = famsOf(extrasSec(h)[0]).filter(f => f.dataset.family === 'instruction')[0];
+        const instr = famOf(extrasSec(h)[0], 'instruction');
         instr.open = false; h.fire(instr, 'toggle');
         const h2 = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
         const sec = extrasSec(h2)[0];
-        const fam = famsOf(sec).filter(f => f.dataset.family === 'instruction')[0];
+        const fam = famOf(sec, 'instruction');
         assert.equal(fam.open, false, 'restored folded');
         const card = findCard(sec, 'ifeval|h');
         h2.fire(card, 'click');
@@ -427,53 +614,82 @@ test('ACC-2a: selecting in a folded family auto-reveals it (and persists)',
         assert.equal(ACC.state.sizes['ifeval|h'], 100, 'the pick carries a sample limit');
     });
 
-/* ---- 6. search filters the extras ONLY -------------------------------- */
+/* ---- 6. the header count ---------------------------------------------- */
+test('ACC-2b: the header shows the suite count, with its i18n repair attrs',
+    async () => {
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX },
+            tr: { 'uplift.bench.extras_count': '{n} suites' } });
+        const sec = extrasSec(h)[0];
+        const cnt = countOf(sec);
+        // 1 core twin + 3 named extras + 9 BBH leaves
+        assert.equal(cnt.textContent, '13 suites',
+            'the count answers how much is behind the fold');
+        assert.equal(cnt.dataset.i18n, 'uplift.bench.extras_count');
+        assert.equal(cnt.dataset.en, '13 suites',
+            'U59: data-en carries the RENDERED text (like the cap), never a '
+            + "raw '{n}' template");
+        // a search filters the LIST, not what the section holds
+        const search = h.byId['bench-acc-extras-search'];
+        search.value = 'prox'; h.fire(search, 'input');
+        assert.equal(countOf(extrasSec(h)[0]).textContent, '13 suites');
+        // and the count is right when a twin alone opens the section
+        const h2 = await accuracy({ tr: { 'uplift.bench.extras_count': '{n} suites' } });
+        assert.equal(countOf(extrasSec(h2)[0]).textContent, '1 suites',
+            'no invented singular: the {n} key owns its own plural shape');
+    });
+
+/* ---- 7. search filters the section (twins included) -------------------- */
 test('ACC-2a: search filters inside the section; the classic grid never moves',
     async () => {
         const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
-        const before = cards(classicGrid(h)).map(c => c.dataset.key).sort();
+        const before = gridKeys(h);
         const search = h.byId['bench-acc-extras-search'];
         search.value = 'prox';
         h.fire(search, 'input');
-        const sec = extrasSec(h)[0];
-        const fam = famsOf(sec);
+        const fam = famsOf(extrasSec(h)[0]);
         assert.equal(fam.length, 1, 'only the matching family is left');
         assert.equal(fam[0].dataset.family, 'locale');
-        assert.equal(cards(sec).length, 1);
-        assert.deepEqual(cards(classicGrid(h)).map(c => c.dataset.key).sort(), before,
+        assert.equal(cards(extrasSec(h)[0]).length, 1);
+        assert.deepEqual(gridKeys(h), before,
             'THE CLASSIC GRID IS NOT FILTERED — separation is the point');
         // a match beyond the CAP is shown: capping search hits would hide
         // the very suite the user typed for
         search.value = 'BBH Leaf'; h.fire(search, 'input');
         assert.equal(cards(extrasSec(h)[0]).length, 9, 'every search hit renders');
+        // THE TWIN IS SEARCHABLE NOW TOO — it left the grid, so a search
+        // that does not reach it would simply lose MMLU's harness card
+        search.value = 'mmlu'; h.fire(search, 'input');
+        const sec = extrasSec(h)[0];
+        assert.ok(findCard(sec, 'mmlu|h'), 'the twin matches its own key/label');
+        assert.ok(famOf(sec, 'core'), 'and its family stays in the section');
+        assert.deepEqual(gridKeys(h), before, 'the grid is STILL not filtered');
         // a folded family's MATCH must not stay hidden behind the fold
         const store = {};
         const h2 = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
-        const i0 = famsOf(extrasSec(h2)[0]).filter(f => f.dataset.family === 'instruction')[0];
+        const i0 = famOf(extrasSec(h2)[0], 'instruction');
         i0.open = false; h2.fire(i0, 'toggle');
         const h3 = await accuracy({ tasks: { extra_suites: EXTRAS_FIX }, store });
-        const s2 = extrasSec(h3)[0];
-        assert.equal(famsOf(s2).filter(f => f.dataset.family === 'instruction')[0].open,
-            false, 'the fold is restored from the pref');
+        assert.equal(famOf(extrasSec(h3)[0], 'instruction').open, false,
+            'the family fold is restored from the pref');
         const s3 = h3.byId['bench-acc-extras-search'];
         s3.value = 'ifeval'; h3.fire(s3, 'input');
-        const i1 = famsOf(extrasSec(h3)[0]).filter(f => f.dataset.family === 'instruction')[0];
-        assert.equal(i1.open, true, 'a search match reveals the folded family');
+        assert.equal(famOf(extrasSec(h3)[0], 'instruction').open, true,
+            'a search match reveals the folded family');
         assert.equal(JSON.parse(store['uplift.bench.extras.v1']).fold.instruction, false,
             'revealing for a search does NOT overwrite the stored preference');
+        assert.equal(JSON.parse(store['uplift.bench.extras.v1']).open, false,
+            'and it does not blow the section fold open either');
         s3.value = ''; h3.fire(s3, 'input');
-        assert.equal(famsOf(extrasSec(h3)[0])
-            .filter(f => f.dataset.family === 'instruction')[0].open, false,
+        assert.equal(famOf(extrasSec(h3)[0], 'instruction').open, false,
             'clearing the search puts the fold back');
-
         search.value = 'zzz'; h.fire(search, 'input');
         assert.ok(texts(extrasSec(h)[0]).includes('No additional suite matches'),
             'an honest empty line, not a silent blank panel');
-        assert.deepEqual(cards(classicGrid(h)).map(c => c.dataset.key).sort(), before,
+        assert.deepEqual(gridKeys(h), before,
             'classic still untouched while the search matches nothing');
     });
 
-/* ---- 7. upload can never reach a local-only suite --------------------- */
+/* ---- 8. upload can never reach a local-only suite ---------------------- */
 test('ACC-2a: a local-only pick leaves in its own entry with upload off',
     async () => {
         const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
@@ -482,11 +698,12 @@ test('ACC-2a: a local-only pick leaves in its own entry with upload off',
         h.byId['bench-acc-model'].value = 'm1';
         h.byId['bench-acc-upload'].checked = true;     // user opts into the leaderboard
         h.fire(findCard(sec, 'ifeval|h'), 'click');           // local-only suite
-        h.fire(findCard(classicGrid(h), 'mmlu|h'), 'click');  // its uploadable twin
+        h.fire(findCard(sec, 'mmlu|h'), 'click');     // the twin, now in the fold
         const body = ACC.collect();
         assert.ok(body.upload, 'the classic entry keeps the opt-in');
         assert.ok(body._harness && body._harness.benchmarks.mmlu,
-            'the classic harness twin still rides the uploadable entry');
+            "the twin still rides the UPLOADABLE harness entry from its new home");
+        assert.equal(body._harness.upload, true, 'and keeps the flag with it');
         assert.ok(!('mmlu' in (body.benchmarks || {})), 'mmlu moved to the harness entry');
         assert.ok(body._extras, 'the extras entry is its own request');
         assert.deepEqual(Object.keys(body._extras.benchmarks), ['ifeval']);
@@ -509,12 +726,28 @@ test('ACC-2a: add() posts the extras entry too, after the other two',
         assert.deepEqual(Object.keys(h.posts[0].body.benchmarks), ['ifeval']);
     });
 
+test('ACC-2b: picking only the twin posts one uploadable harness entry',
+    async () => {
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
+        const ACC = h.B._panels.acc;
+        h.byId['bench-acc-model'].value = 'm1';
+        h.byId['bench-acc-upload'].checked = true;
+        h.fire(findCard(extrasSec(h)[0], 'mmlu|h'), 'click');
+        await ACC.add();
+        await tick();
+        assert.equal(h.posts.length, 1, 'the twin is not an extra: one entry');
+        assert.equal(h.posts[0].body.engine, 'harness');
+        assert.equal(h.posts[0].body.upload, true,
+            'a classic suite keeps its leaderboard right after the move');
+        assert.equal(h.posts[0].body.benchmarks.mmlu, ACC.defaultSize('mmlu|h'),
+            'and the size default resolves through the |h key');
+    });
+
 test('ACC-2a: the U68 request total counts an extras pick honestly',
     async () => {
         // sizes map: ifeval x1, bbh_cot_fewshot x27; every extras pick
         // carries the harness sample limit -> 100 + 2700 = 2800 requests
         const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
-        const ACC = h.B._panels.acc;
         const sec = extrasSec(h)[0];
         const tot = h.byId['bench-acc-engine-total'];
         assert.equal(tot.hidden, true, 'no pick -> the line stays hidden');
@@ -525,7 +758,28 @@ test('ACC-2a: the U68 request total counts an extras pick honestly',
             'the total must multiply by the leaf count, got: ' + texts(tot));
     });
 
-/* ---- 8. structural pins ---------------------------------------------- */
+test('ACC-2b: the size-option multiplier follows the twin into the fold',
+    async () => {
+        // applyEngineLabels() queries '#bench-acc-tasks .acc-task,
+        // #bench-acc-extras .acc-task' — the comma list is what keeps the
+        // '30 ×57' truth alive after the move, so it must resolve here.
+        const h = await accuracy({ tasks: { extra_suites: EXTRAS_FIX } });
+        const twin = findCard(extrasSec(h)[0], 'mmlu|h');
+        assert.deepEqual(selectOf(twin).children.map(o => o.textContent),
+            ['30 \u00d757', '50 \u00d757', '100 \u00d757'],
+            'the harness twin multiplies its own options');
+        assert.deepEqual(selectOf(twin).children.map(o => o.dataset.base),
+            ['30', '50', '100'], 'the base text is kept (idempotent repaint)');
+        const classic = findCard(classicGrid(h), 'mmlu');
+        assert.deepEqual(selectOf(classic).children.map(o => o.textContent),
+            ['30', '50', '100', 'Full (14,042)'],
+            'a classic card is never multiplied, and keeps its Full option');
+        // an extras LIMIT card has no select at all: it must skip, not throw
+        assert.ok(!selectOf(findCard(extrasSec(h)[0], 'ifeval|h')),
+            'the extras card carries no size select');
+    });
+
+/* ---- 9. structural pins ----------------------------------------------- */
 test('ACC-2a: the extras module is a section of the existing IIFE, not a new one',
     () => {
         const src = fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'), 'utf8');
@@ -534,15 +788,35 @@ test('ACC-2a: the extras module is a section of the existing IIFE, not a new one
         assert.match(src, /^var EXTRAS = \{$/m, 'extras is a module-scope object');
         assert.match(src, /KEY: 'uplift\.bench\.extras\.v1'/, 'the LS key is exact');
         assert.match(src, /CAP: 6,/, 'the family cap is 6');
-        // the classic grid path must not gain a single extras reference
+        assert.match(src, /buildExtras: function \(st\) \{/,
+            'the section owns ONE merged item list (twins + extra suites)');
+        // the classic grid path must not gain a single extras reference,
+        // and must not paint a variant card either
         const g = src.slice(src.indexOf('renderGrid: function () {'));
         const body = g.slice(0, g.indexOf('\n    },'));
         assert.ok(body.includes('renderGrid'), 'renderGrid found');
         assert.ok(!/EXTRAS/.test(body), 'renderGrid stays extras-free');
-        assert.match(src, /self\.state\.extrasAnchor = adv;/,
-            'the anchor keeps the section between the grid and Advanced');
+        assert.ok(!/taskRowEl\(\s*\w+\s*,\s*true\s*\)/.test(body),
+            'the twin-card branch is GONE: the grid paints classic cards only');
+        assert.match(body, /self\.taskRowEl\(tk, false\)/, 'once per classic task');
+        assert.match(src, /self\.state\.extrasAnchor = totNote;/,
+            'the anchor keeps the section between the grid and the total');
         assert.match(src, /self\.state\.extraSuites = ACC\._extrasCache;/,
             'loadTasks feeds the section from the harness-tasks response');
+        assert.match(src, /'#bench-acc-tasks \.acc-task, #bench-acc-extras \.acc-task'/,
+            'the engine labels cover BOTH containers now');
+    });
+
+test('ACC-2b: the engine hint points at the section instead of at the grid',
+    async () => {
+        const h = await accuracy({});
+        const hint = h.byId['bench-acc-engine-hint'];
+        assert.equal(hint.id, 'bench-acc-engine-hint', 'the id is untouched');
+        assert.match(hint.textContent,
+            /The LM-Eval suites live in the Additional suites section below/,
+            'the EN fallback sends the reader to the fold: ' + hint.textContent);
+        assert.ok(hint.textContent.indexOf('1710') > 0,
+            'and keeps the per-subtask math that justifies the fold');
     });
 
 test('ACC-2a: every extras key exists in all 10 locales with the EN placeholder set',
@@ -559,6 +833,12 @@ test('ACC-2a: every extras key exists in all 10 locales with the EN placeholder 
             .map(f => 'uplift.bench.extras_family_' + f);
         const keys = [...new Set(used.concat(fams))];
         assert.ok(keys.length >= 10, 'the section must be fully i18n-driven');
+        // ACC-2b adds exactly two: the 'core' family caption and the
+        // header's suite count. The orchestrator lands them in locales/ in
+        // its own lane — until then THIS pin is the expected red.
+        for (const k of ['uplift.bench.extras_family_core',
+                         'uplift.bench.extras_count'])
+            assert.ok(keys.includes(k), 'the gate must cover the new key ' + k);
         const langs = fs.readdirSync(LOCALES).filter(f => f.endsWith('.json'))
             .map(f => f.replace(/\.json$/, ''));
         assert.equal(langs.length, 10, 'all 10 locales are on disk');
@@ -601,17 +881,40 @@ test('ACC-2a: the extras module seam exposes honest pure helpers', () => {
     const X = B._extras;
     assert.equal(X.CAP, 6);
     assert.equal(X.KEY, 'uplift.bench.extras.v1');
+    // the family contract: 'core' LEADS, unknown families render after it
+    assert.deepEqual(X.FAMILIES, ['core', 'instruction', 'reasoning', 'locale']);
+    assert.deepEqual(X.FAM_KEYS,
+        ['core', 'instruction', 'reasoning', 'locale', 'other']);
     // norm: a malformed entry is dropped, a null/0 rows count is NOT a number
     assert.deepEqual(X.norm([{ key: 'a', rows: 5 }, null, {}, { rows: 9 }]),
         [{ key: 'a', label: 'a', family: 'other', rows: 5, upload_ok: false }]);
     assert.equal(X.norm([{ key: 'a', rows: 0 }])[0].rows, null,
         'rows 0 is not a dataset fact -> null -> the chip omits it');
-    // families: the three known ones in contract order, unknown AFTER them
+    // buildExtras: the twins come FIRST, in server/catalog order, and carry
+    // their task object so the real card can be painted
+    const items = X.buildExtras({ groups: CLASSIC.tasks,
+                                  harnessTasks: ['mmlu'], extraSuites: EXTRAS_FIX });
+    assert.equal(items[0].family, 'core');
+    assert.equal(items[0].key, 'mmlu');
+    assert.equal(items[0].rows, 14042, 'the classic full_size is the row truth');
+    assert.equal(items[0].upload_ok, true, 'a twin is NOT local-only');
+    assert.equal(items[0].task.key, 'mmlu', 'and it carries the task object');
+    assert.equal(items[1].key, 'ifeval', 'the extra suites follow in server order');
+    assert.equal(items.length, 1 + EXTRAS_FIX.length);
+    assert.deepEqual(X.buildExtras({ groups: null, harnessTasks: [], extraSuites: [] }),
+        [], 'nothing known -> nothing rendered');
+    assert.deepEqual(X.buildExtras({ groups: CLASSIC.tasks, harnessTasks: ['gsm8k'],
+                                    extraSuites: [] }).map(i => i.key), ['gsm8k'],
+        'a twin is built for every advertised harness key, in catalog order');
+    // families: the known ones in contract order, unknown AFTER them
     assert.deepEqual(X.groups(X.norm([
         { key: 'z', family: 'arcade' }, { key: 'l', family: 'locale' },
         { key: 'i', family: 'instruction' }, { key: 'r', family: 'reasoning' },
     ])).map(g => g.family), ['instruction', 'reasoning', 'locale', 'arcade'],
         'an unknown family renders, never disappears');
+    assert.deepEqual(X.groups(items).map(g => g.family),
+        ['core', 'instruction', 'reasoning', 'locale'],
+        'core leads a real section');
     // chip math through the seam (the catalog is identity here: t -> key)
     assert.equal(X.chip(6500, 27), (6500).toLocaleString() + ' rows · \u00d727 · LM-Eval');
     assert.equal(X.chip(null, 27), '\u00d727 · LM-Eval');
@@ -623,7 +926,10 @@ test('ACC-2a: the extras module seam exposes honest pure helpers', () => {
     assert.equal(X.uploadOk(st, 'ifeval'), false);
     assert.equal(X.uploadOk(st, 'maybe'), true);
     assert.equal(X.uploadOk(st, 'mmlu'), true, 'a classic twin is unaffected');
-    assert.equal(X.isExtra(st, 'mmlu'), false);
+    assert.equal(X.isExtra(st, 'mmlu'), false,
+        'the twin in the section is STILL not an extra — its entry stays uploadable');
+    // the section fold rides the SAME pref object
+    assert.equal(X.ui().open, false, 'collapsed by default');
 });
 
 test('ACC-2a: a suite the seam ships WITHOUT a family still lands somewhere named',
@@ -631,7 +937,7 @@ test('ACC-2a: a suite the seam ships WITHOUT a family still lands somewhere name
         // harness_engine.extra_suites() reads family straight off the spec
         // (spec.get('family') -> null when ACC-2c forgets it). Such a suite
         // must never vanish from the picker or caption itself with 'null'.
-        const h = await accuracy({ tasks: { extra_suites: [
+        const h = await accuracy({ tasks: { harness_tasks: [], extra_suites: [
             { key: 'orphan', label: 'Orphan Suite', family: null,
               rows: 10, upload_ok: false }] } });
         const sec = extrasSec(h)[0];
@@ -644,13 +950,29 @@ test('ACC-2a: a suite the seam ships WITHOUT a family still lands somewhere name
         assert.equal(cards(sec).length, 1);
     });
 
-test('ACC-2a: uplift.css adds the extras block with no re-opened selector', () => {
+test('ACC-2b: uplift.css styles the fold, with no re-opened selector', () => {
     const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
     for (const sel of ['.acc-extras', '.acc-extras-cap', '.acc-extras-search',
-        '.acc-extras-fams', '.acc-extras-more', '.acc-task-chip']) {
+        '.acc-extras-fams', '.acc-extras-more', '.acc-task-chip',
+        // the fold's own shape (ACC-2b)
+        '.acc-extras-head', '.acc-extras-count', '.acc-extras-body']) {
         const n = (css.match(new RegExp('\\n' + sel.replace(/[.-]/g, '\\$&') +
             '\\s*[,{> ]', 'g')) || []).length;
         assert.ok(n >= 1, sel + ' must be styled');
         assert.ok(n <= 2, sel + ' appears ' + n + 'x — do not re-open a selector');
     }
+    // prominent, and honest about the fold
+    assert.match(css, /\.acc-extras \{[^}]*border-left:\s*3px solid var\(--accent\)/,
+        'the accent spine is what makes it read stronger than Advanced');
+    assert.match(css, /\.acc-extras \{[^}]*var\(--row2\)/,
+        'the ground is a token, so skins keep working');
+    assert.match(css, /\.acc-extras-head \{[^}]*list-style:\s*none/,
+        'the native <details> marker is hidden on the header');
+    assert.match(css, /\.acc-extras-head::-webkit-details-marker \{ display: none/,
+        'including in webkit');
+    assert.match(css,
+        /\.acc-extras\[open\] > \.acc-extras-head \.bench-adv-chev \{[^}]*rotate\(180deg\)/,
+        'the chevron turns with the section fold (the .bench-advanced rule cannot)');
+    assert.ok(!/\.acc-extras \{[^}]*padding-top/.test(css),
+        'a CLOSED fold may not carry stray padding — the body owns its padding');
 });

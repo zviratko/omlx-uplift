@@ -2706,13 +2706,34 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .acc-task select { width: 100%; font-size: 10px; background-color: var(--field);
   border: 1px solid var(--edge); color: var(--ink); padding: 2px 4px;
   margin-top: auto; }   /* U57: pin dropdowns to one row baseline */
-/* ---- ACC-2a: 'Additional suites' — a SEPARATE section under the classic
-   grid. The classic block owns none of these selectors: whoever ignores
-   the extras sees the panel exactly as before. Every rule here is a NEW
-   selector string (css2: a re-opened selector is drift, never a tweak). */
-.acc-extras { margin-top: 12px; padding-top: 10px;
-  border-top: 1px solid var(--edge); }
-.acc-extras-cap { color: var(--accent); }
+/* ---- ACC-2a/2b: 'Additional suites' — the fold that holds EVERY LM-Eval
+   card (a classic suite's twin plus the expanded harness catalog). It sits
+   under the classic grid, COLLAPSED until the user clicks it, and is framed
+   as the heavier path it is: an accent spine and a row-shade ground on the
+   same tokens the Advanced block uses, so every skin keeps working. The
+   classic block owns none of these selectors. `.acc-extras` /
+   `.acc-extras-cap` predate the fold and are edited IN PLACE; everything
+   below them is a NEW selector string (css2: a re-opened selector is
+   drift, never a tweak). */
+.acc-extras { margin-top: 12px; font-size: 11px; background: var(--row2);
+  border: 1px solid var(--edge); border-left: 3px solid var(--accent);
+  border-radius: var(--radius); }
+.acc-extras-cap { color: var(--accent); font-size: 12px; letter-spacing: .04em; }
+.acc-extras-head { display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; cursor: pointer; user-select: none; list-style: none;
+  font-size: 12px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink); }
+.acc-extras-head::-webkit-details-marker { display: none; }
+.acc-extras-head:hover { background: var(--panel); }
+.acc-extras-head:focus-visible { outline: 2px solid var(--accent);
+  outline-offset: -2px; }   /* U51 focus-ring language */
+.acc-extras-count { margin-left: auto; color: var(--dim); font-weight: 400;
+  font-size: 10px; letter-spacing: 0; text-transform: none; }
+/* .bench-adv-chev is already the transition owner; the rotation is scoped
+   to each fold that uses it, so an [open] section reads as open */
+.acc-extras[open] > .acc-extras-head .bench-adv-chev { transform: rotate(180deg); }
+.acc-extras-body { display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px 12px; border-top: 1px solid var(--edge); }
 .acc-extras-search { display: block; width: 100%; box-sizing: border-box;
   font-size: 11px; margin: 4px 0 2px; padding: 3px 6px;
   background-color: var(--field); border: 1px solid var(--edge);
