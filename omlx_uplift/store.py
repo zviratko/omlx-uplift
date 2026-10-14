@@ -337,6 +337,23 @@ class MetricsStore:
                     "PRAGMA table_info(samples)")}:
                 self._conn.execute(
                     "ALTER TABLE samples ADD COLUMN instance TEXT")
+            # SQUEEZE-LATEST-2: /metrics/latest asks for the NEWEST visible
+            # row per key. With only (key, ts), every instance filter is a
+            # per-row table lookup, so a miss (own writer gone after a
+            # restart — the normal state for non-hot keys) walks the whole
+            # key range: measured 311 ms on a 326 K-row key, ~1.2 s per
+            # 4-key request. A covering (key, instance, ts) index lets both
+            # query shapes walk-and-stop. Migrate once: create the new
+            # index, then DROP the old one (SQLite keeps preferring the old
+            # index while it exists — verified on the live DB).
+            if not self._conn.execute(
+                "SELECT 1 FROM pragma_index_info('ix_samples_latest') "
+                "WHERE name='instance'"
+            ).fetchone():
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_samples_latest "
+                    "ON samples(key, instance, ts)")
+                self._conn.execute("DROP INDEX IF EXISTS ix_samples_key_ts")
             self._conn.execute(
                 "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -776,8 +793,16 @@ class MetricsStore:
 
     def _refresh_hidden(self) -> tuple[str, ...]:
         try:
-            with self._rlock:
-                tags = frozenset(_distinct_tags(self._rconn))
+            # OWN throwaway ro connection: the covering-index scan costs
+            # ~0.6 s on a big table — taking _rlock for it would make every
+            # reader convoy behind the background refresher (the exact bug
+            # SPLIT-READ exists to kill). WAL readers need no lock.
+            conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True,
+                                   timeout=2.0)
+            try:
+                tags = frozenset(_distinct_tags(conn))
+            finally:
+                conn.close()
             hidden = []
             for t in tags:
                 if t == self._own_instance:
