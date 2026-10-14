@@ -116,7 +116,7 @@ async def metrics_stream(is_admin: bool = Depends(require_admin)):
 
     STATS-SSE adds two OPTIONAL fields to the same frame — `s` (the
     vanilla /admin/api/stats payload) and `sa` (the all-time request
-    total) — diff-sent the same way, off the shared 1 Hz StatsFeed. They
+    total) — diff-sent the same way, off the shared StatsFeed ticker. They
     are only ever ADDED: `live`/`tick_s`/`at`/`samples`/`m` keep their
     exact bytes, so a client that does not know the lanes is unaffected,
     and a server whose vanilla seams are unavailable simply never emits
@@ -145,7 +145,7 @@ async def metrics_stream(is_admin: bool = Depends(require_admin)):
         s_ver = 0
         a_ver = 0
         # Reference-counted: the FIRST subscribed connection starts the one
-        # shared 1 Hz ticker, the LAST one leaves it an idle-stop countdown.
+        # shared stats ticker, the LAST one leaves it an idle-stop countdown.
         # subscribe() must run inside the event loop, which a generator body
         # does on its first __anext__ (StreamingResponse drives it there).
         feed.subscribe()
@@ -168,11 +168,11 @@ async def metrics_stream(is_admin: bool = Depends(require_admin)):
                 # are missing: no lock, no cell read, no log, every tick.
                 lane = False
                 if not feed.off:
-                    # snapshot_now() builds ON DEMAND while the cells are
-                    # unseeded — a tab that connects between ticks gets real
-                    # numbers in frame 1 instead of '—' until the next tick
-                    # (and that one build is then shared by every tab that
-                    # connects before it).
+                    # LOOP-SAFE: the first-frame build runs in a worker
+                    # thread SHARED by all racing connections (never on the
+                    # loop — the walk costs seconds on a live pool); after
+                    # the cells exist this is a lock-guarded dict read only.
+                    await feed.ensure_seeded()
                     st = feed.snapshot_now()
                     if st["s"] is not None and st["s_ver"] != s_ver:
                         frame["s"] = st["s"]

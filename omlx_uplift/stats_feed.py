@@ -6,7 +6,7 @@ Vanilla rebuilds that payload per request — an engine-pool walk, the SSD/hot
 cache observability walk and the metrics snapshot — so N open boards cost N
 rebuilds per second, over N HTTP round trips, and each round trip is a full
 response (the client only ever consumes ~11 of its keys). One in-process
-sampler, shared by all connections, does the identical work ONCE per second
+sampler, shared by all connections, does the identical work ONCE per tick
 and rides the SSE that is already open: zero extra HTTP, zero extra socket
 churn, and the per-tab cost drops out of the event loop entirely.
 
@@ -69,11 +69,22 @@ from typing import Any, Callable, Optional
 
 log = logging.getLogger("omlx_uplift.stats_feed")
 
-# One build per second. The payload's own sources move at request-completion
-# granularity (server_metrics counters) plus the engine walks; anything
-# faster than 1 Hz buys duplicate frames, and the vanilla poll it replaces
-# ran at exactly 1 Hz — matching it keeps every number's meaning identical.
-STATS_TICK_S = 1.0
+# One build every two seconds. The payload's sources move at
+# request-completion granularity (server_metrics counters), and the
+# signature already suppresses idle frames — 1 Hz bought duplicates while
+# the BUILD turned out to cost ~0.5-1.5 s of real work on a loaded engine
+# pool (see LOOP-SAFE below), so the slower cadence is also the cheaper one.
+STATS_TICK_S = 2.0
+# Minimum rest the ticker gives the loop between builds even when a build
+# overran its slot. Without a floor, a build slower than the tick makes
+# sleep(0) continuous and one core disappears — the exact starvation this
+# file's first edition shipped with (measured 2026-10-14: 30.07 CPU-s per
+# 30 s wall on a vanilla board with one dashboard tab).
+LOOP_REST_S = 0.25
+# How long a fresh stream connection waits for the shared first build
+# before its frame 1 goes out without 's'/'sa' (the client's poll fallback
+# covers the gap; the ticker lands within one tick anyway).
+SEED_WAIT_S = 5.0
 # ``uptime_seconds`` is excluded from the signature at this granularity
 # (floored to whole minutes) — see the module docstring.
 UPTIME_BUCKET_S = 60
@@ -125,9 +136,9 @@ def _build_stats_raw() -> Optional[dict]:
 
     Returns None when vanilla is absent or refuses (older keg without these
     helpers, a server whose admin route table was never initialised so
-    ``_get_engine_pool`` is still None): the caller degrades the 's' lane,
-    never the stream. Called by the ticker at 1 Hz and synchronously by the
-    first frame of a fresh connection.
+    ``_get_engine_pool`` is still None): the caller degrades the LANE,
+    never the stream. Called by the ticker and the shared seed — ALWAYS
+    from a worker thread, never on the event loop (LOOP-SAFE).
     """
     from omlx.admin import routes as admin_routes
     from omlx.server_metrics import get_server_metrics
@@ -176,22 +187,28 @@ def _build_alltime_raw() -> Optional[int]:
     return int(total)
 
 
-def _json_safe(payload: dict) -> dict:
+def _json_safe(payload: dict) -> dict | None:
     """Return a payload that plain ``json.dumps`` can serialise.
 
-    The SSE frame uses ``json.dumps`` (not FastAPI's jsonable_encoder), so a
-    dataclass/set leaking out of an engine walk would raise inside the
+    The SSE frame uses ``json.dumps`` (not FastAPI's encoder), so a
+    dataclass/set leaking out of an engine walk must not raise inside the
     generator and kill the 2 Hz stream — the exact failure mode this module
-    must never cause. Round-tripping through the real encoder once per
-    second makes the frame's dumps provably safe. Vanilla's own response
-    goes through the same encoder, so key names and nesting stay identical.
+    must never cause. ``default=str`` renders anything else as its string
+    form in the SAME pass: no second encoder walk, no inspect machinery
+    (see the LOOP-SAFE note below). None is returned only for structures
+    json truly cannot take (circular references) — the lane degrades.
     """
     try:
-        return json.loads(json.dumps(payload, sort_keys=True))
-    except (TypeError, ValueError):
-        from fastapi.encoders import jsonable_encoder
-
-        return json.loads(json.dumps(jsonable_encoder(payload), sort_keys=True))
+        return json.loads(json.dumps(payload, sort_keys=True, default=str))
+    except (TypeError, ValueError):  # mixed-type keys / circular: degrade the lane
+        return None
+    # NO jsonable_encoder fallback (starvation fix): the encoder walked
+    # payload objects through inspect/torch machinery — a cProfile capture
+    # counted 137 ``_register_fake``/getsource -> realpath storms inside a
+    # single 80 s window, i.e. the fallback cost was a second CPU sink on
+    # the loop. ``default=str`` renders anything dumps cannot handle
+    # (Path, datetime, dataclass) as its string form, which is exactly what
+    # the client's defensive readers want anyway.
 
 
 def stats_signature(payload: dict) -> str:
@@ -224,18 +241,25 @@ def stats_signature(payload: dict) -> str:
 # --------------------------------------------------------------------------
 
 class StatsFeed:
-    """ONE asyncio task per server building the payload at 1 Hz for ALL
-    subscribed stream connections.
+    """ONE asyncio task per server building the payload every STATS_TICK_S
+    for ALL subscribed stream connections.
 
     Cell semantics: ``_stats_ver`` / ``_alltime_ver`` bump only when the
     signature / value changed, so each generator diff-sends by version —
     the same trick the 'm' lane uses with its per-connection ``sent`` dict.
-    The builders are sync functions that read lock-guarded in-process state
-    (server_metrics takes its own lock; the engine walks are plain object
-    reads), i.e. the same work the poll did inside the request handler —
-    so they run directly in the task, no ``to_thread`` executor hop (a hop
-    would add a thread handoff per second for work that is microseconds of
-    dict math and, unlike a blocking socket read, cannot starve the loop).
+
+    LOOP-SAFE (starvation fix, 2026-10-14): the builders are NOT the
+    "microseconds of dict math" the first edition claimed. A live engine
+    pool makes one build walk ``engine_pool.get_status()`` TWICE (active
+    models + runtime cache), and each walk resolves every model's cluster
+    key through ``Path.resolve()`` — thousands of lstat/pathlib steps per
+    second measured in a cProfile capture. Vanilla runs the same builders
+    in its route THREADPOOL (sync def routes); calling them directly on
+    the event loop pinned a core, queued every HTTP response behind it
+    (2.5-6.5 s for 512 B) and drove the browser into EventSource reconnect
+    storms. Every tick therefore runs via ``asyncio.to_thread``, the seed
+    build is shared and awaited off-loop, and a hard ``LOOP_REST_S`` floor
+    keeps a slow build from ever becoming a hot loop.
     """
 
     def __init__(self,
@@ -276,6 +300,11 @@ class StatsFeed:
         self._keys_warned = False     # snapshot-shape drift said once
         self._ticks = 0
         self._failures = 0
+        # LOOP-SAFE guards: at most ONE builder walk runs at a time (ticker
+        # and seed share it), and the seed task is created once, awaited by
+        # any number of racing connections.
+        self._build_lock = threading.Lock()
+        self._seed_task: Optional["asyncio.Task[bool]"] = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -354,17 +383,26 @@ class StatsFeed:
         """Hard stop (tests / shutdown): cancel and forget the refcount."""
         with self._lock:
             task, self._task, self._task_loop = self._task, None, None
+            seed, self._seed_task = self._seed_task, None
             self._subscribers = 0
             self._idle_since = None
         if task is not None and not task.done():
             task.cancel()
+        if seed is not None and not seed.done():
+            seed.cancel()
 
     async def _run(self) -> None:
+        rest_floor = min(LOOP_REST_S, self._tick)   # tests drive small ticks
         next_due = time.monotonic() + self._tick
         while True:
-            await asyncio.sleep(max(0.0, next_due - time.monotonic()))
+            # The rest floor is load-bearing: it turns "a build slower
+            # than the tick" from a hot loop into a slower stats lane.
+            # to_thread keeps the walk itself off the loop — even a
+            # 10-second build only occupies a worker thread now.
+            await asyncio.sleep(max(rest_floor,
+                                    next_due - time.monotonic()))
             try:
-                self.tick_once()
+                await asyncio.to_thread(self.tick_once)
             except Exception:      # never die on a bad tick — Collector rule
                 self._failures += 1
                 log.debug("stats feed tick failed", exc_info=True)
@@ -386,7 +424,22 @@ class StatsFeed:
 
     def tick_once(self) -> bool:
         """Rebuild both lanes and bump the version cells on change. Returns
-        whether the 's' cell changed (the 'sa' lane is reported by ver)."""
+        whether the 's' cell changed (the 'sa' lane is reported by ver).
+
+        Thread-safe by construction (the ticker and the seed call it from
+        worker threads). A build already in flight is SKIPPED, not queued:
+        the walk is seconds of real work on a loaded pool, and stacking
+        identical builds is exactly the waste this whole class exists to
+        prevent.
+        """
+        if not self._build_lock.acquire(blocking=False):
+            return False
+        try:
+            return self._tick_locked()
+        finally:
+            self._build_lock.release()
+
+    def _tick_locked(self) -> bool:
         stats_b = self._stats_builder or _build_stats_raw
         alltime_b = self._alltime_builder or _build_alltime_raw
         stats = self._attempt(stats_b, "stats")
@@ -457,22 +510,44 @@ class StatsFeed:
             log.debug("stats feed %s seam failed", what, exc_info=True)
             return None
 
-    def snapshot_now(self, *, build_if_empty: bool = True) -> dict:
-        """The current cells, synchronously.
+    def snapshot_now(self) -> dict:
+        """The current cells — a lock-guarded read, NEVER a build.
 
-        ``build_if_empty`` is the first-frame guarantee: a fresh connection
-        must receive 's'/'sa' in frame 1 instead of waiting up to a whole
-        tick, so an unseeded cell is built on demand, right here (one build,
-        shared by every connection that connects before the next tick).
+        (The first edition built ON DEMAND here when the cells were empty,
+        which ran multi-second vanilla walks synchronously on the event
+        loop every 250 ms tick until the first seed landed. The
+        first-frame guarantee moved to ``ensure_seeded``.)
         """
-        with self._lock:
-            empty = self._s_ver == 0 and self._a_ver == 0
-        if build_if_empty and empty and not self._off:
-            self.tick_once()
         with self._lock:
             return {"s": self._payload, "s_ver": self._s_ver, "s_at": self._s_at,
                     "sa": self._alltime, "sa_ver": self._a_ver, "a_at": self._a_at,
                     "off": self._off}
+
+    async def ensure_seeded(self) -> None:
+        """First-frame guarantee, off the loop: if the cells have never been
+        built, run ONE tick in a worker thread and await it briefly.
+
+        Every racing connection SHARES the same seed task; the await is
+        capped at ``SEED_WAIT_S`` and a disconnect (generator CancelledError)
+        never kills the build for the others. Frame 1 may legitimately lack
+        's'/'sa' — the client keeps its slow fallback poll until the first
+        real frame, so the cost of a slow board is latency on counters, not
+        a frozen loop.
+        """
+        if self._off or (self._s_ver or self._a_ver):
+            return
+        loop = asyncio.get_running_loop()
+        task = self._seed_task
+        if task is None or task.done():
+            task = loop.create_task(asyncio.to_thread(self.tick_once))
+            self._seed_task = task
+        try:
+            await asyncio.wait_for(task, timeout=SEED_WAIT_S)
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            # Timeout: frame 1 goes without the lane. Cancelled (disconnect):
+            # the shield-less task keeps running for everyone else. Any
+            # builder error is already counted and logged where it happened.
+            pass
 
     def stats(self) -> dict:
         """Observability for /uplift/api/dev panels (and these tests)."""
@@ -502,7 +577,7 @@ _feed_lock = threading.Lock()
 
 
 def get_stats_feed() -> StatsFeed:
-    """Process-wide singleton: the whole point is ONE build per second."""
+    """Process-wide singleton: the whole point is ONE build per tick."""
     global _feed
     with _feed_lock:
         if _feed is None:

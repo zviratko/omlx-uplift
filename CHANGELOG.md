@@ -13,6 +13,15 @@ users never see.
 
 ## Unreleased
 
+- Fixed: boards freezing requests for 2–6 s and pinning a CPU core while a
+  dashboard tab was open. The stats-over-SSE lane (added today) rebuilt
+  vanilla's payload **on the event loop**; on a loaded engine pool that
+  walk takes about a second per build (cluster-key path resolution plus a
+  JSON encoder fallback), so the loop starved everything behind it. The
+  build now runs in a worker thread every 2 s, the first-frame seed is one
+  shared off-loop build, and the encoder fallback is gone. Charts, the
+  counters and the stream contract are unchanged.
+
 - **Voice cloning: record the reference clip in the tab.** The Voices
   form gained a RECORD button (mic → browser → WAV, wired straight into
   the existing transcribe/preview/save flow) plus a suggested read-aloud

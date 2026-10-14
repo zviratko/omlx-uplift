@@ -250,28 +250,36 @@ def test_unavailable_alltime_keeps_the_lane_absent_not_zero():
     assert snap["s"] is not None      # the other lane is unaffected
 
 
-def test_first_read_seeds_the_cells_without_waiting_for_a_tick():
-    """The first-frame guarantee, stated as a build count: a fresh
-    connection's snapshot_now() must not return empty cells and must not
-    need the ticker to fire first."""
+def test_first_seed_is_shared_off_the_loop_and_never_rides_a_read():
+    """The first-frame guarantee lives in ensure_seeded(), not in a read:
+    snapshot_now() is pure cell read (LOOP-SAFE — a read must never run
+    vanilla's multi-second walk on whatever thread asked), and concurrent
+    seeds share ONE build task."""
     m = Model(p=payload(requests=5), a=99)
     f = m.feed()
     snap = f.snapshot_now()
+    assert snap["s"] is None and snap["s_ver"] == 0   # never built on read
+
+    async def go():
+        await asyncio.gather(*[f.ensure_seeded() for _ in range(4)])
+
+    asyncio.run(go())
+    snap = f.snapshot_now()
     assert snap["s"]["total_requests"] == 5 and snap["sa"] == 99
-    assert m.calls_s == 1 and m.calls_a == 1
+    assert m.calls_s == 1 and m.calls_a == 1           # ONE shared build
+    # structural pin: both schedulers hand the walk to a worker thread
+    assert "to_thread" in f._run.__code__.co_names
+    assert "to_thread" in f.ensure_seeded.__code__.co_names
 
 
 def test_shared_cell_one_build_serves_every_connection():
     m = Model(p=payload(requests=5), a=99)
     f = m.feed()
-    for _ in range(4):                    # 4 tabs read the cell unseeded+seeded
-        f.snapshot_now()
-    f.snapshot_now(build_if_empty=False)
-    assert m.calls_s == 1                 # ONE build, not one per reader
-    # an explicit no-build read never calls the seam again
+    f.tick_once()
     before = m.calls_s
-    f.snapshot_now(build_if_empty=False)
-    assert m.calls_s == before
+    for _ in range(5):                    # any number of readers...
+        f.snapshot_now()
+    assert m.calls_s == before            # ...never cost more than one build
 
 
 def test_version_cursor_diff_sends_per_connection():
@@ -760,8 +768,16 @@ def test_json_safe_makes_a_leaky_upstream_frame_serialisable():
         id: str = "m1"
 
     out = SF._json_safe({"active_models": {"models": [Row()]}, "x": 1})
-    assert out["active_models"]["models"] == [{"id": "m1"}]
-    assert json.dumps(out)                       # the frame is now provably safe
+    # LOOP-SAFE contract: default=str, no jsonable_encoder walk (that walk's
+    # inspect/torch chain was a measured CPU sink). Anything dumps cannot
+    # handle rides as its honest string form — the client reads numbers
+    # from REAL fields, never from a dataclass repr.
+    assert out["active_models"]["models"] == [str(Row())]
+    assert json.dumps(out)                       # the frame is still safe
+    assert SF._json_safe({"leak": {1, 2}})["leak"] == str({1, 2})
+    cyc: dict = {}
+    cyc["self"] = cyc                            # unserialisable structure
+    assert SF._json_safe(cyc) is None            # degrades the lane, not the stream
 
 
 # --------------------------------------------------------------------------
