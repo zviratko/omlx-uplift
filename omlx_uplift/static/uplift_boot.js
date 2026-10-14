@@ -161,7 +161,11 @@ PT.initPatchesPage();
 
 CH.renderCardTsRows();
 CH.drawAllMetricCharts();
-setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.drawAllMetricCharts(); }, 5000);
+// SERIES-QUIET: the live edge animates at 2 Hz off the metrics stream
+// (FAST-1 live draws); this loop only re-syncs window history shape, so
+// 30 s is plenty — and it is one batched fetch PER WINDOW, not per card
+// (POLL-BATCH). Tab entry redraws immediately (uplift.js applyTab).
+setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.drawAllMetricCharts(); }, 30_000);
 UUP.initUsageRange();   // seeds the range select now that glue helpers exist
 UUP.pollUsage(); UUP.pollLogs();
 FE.connectEventStream();
