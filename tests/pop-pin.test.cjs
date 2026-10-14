@@ -56,8 +56,8 @@ test('TAIL-1: fine windows stay live at POP-PIN cadence via incremental tails', 
         `tail TTL ${m[1]} must stay near the ${TICK_MS}ms collector period (that is the point of the tail)`);
     assert.match(src, /cardWindow\(id\) >= 604800 \? 60000 : 15000/,
         'non-tail windows: 7 d/30 d at 60 s, downsampled ones at 15 s');
-    assert.match(src, /tailOk = cache\.full && !cache\.bucket_s && cache\.maxTs > 0/,
-        'tail must require a completed FULL fetch of a FINE-resolution window');
+    assert.match(src, /tailOk = cache\.full && cache\.maxTs > 0 && !cache\.tailBreak/,
+        'tail must require a completed FULL fetch and no detected hole');
     assert.match(src, /&after=\$\{cache\.maxTs\.toFixed\(3\)\}/,
         'tail request must carry after=<newest held ts>');
     assert.match(src, /if \(d\.after !== undefined\)/,
