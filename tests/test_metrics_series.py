@@ -25,6 +25,51 @@ def test_downsample_noop_below_cap():
     assert out is pts and bucket == 0
 
 
+def test_alien_probe_never_blocks_expired_reads(tmp_path, monkeypatch):
+    """SPLIT-READ stale-while-revalidate: an expired tag cache must serve
+    instantly (stale) and refresh on a background thread — the 0.65 s
+    scan may never land on a request path. Cold start probes inline
+    exactly once."""
+    import threading as _th
+
+    from omlx_uplift import store as st
+
+    gate = _th.Event()
+    probes = {"n": 0}
+    real = st._distinct_tags
+
+    def slow_probe(conn):
+        probes["n"] += 1
+        if probes["n"] > 1:            # only the BACKGROUND probe waits
+            gate.wait(timeout=5)
+        return real(conn)
+
+    monkeypatch.setattr(st, "_distinct_tags", slow_probe)
+    s = st.MetricsStore(path=tmp_path / "m.sqlite3")
+    try:
+        s.write_samples({"k": 1.0}, ts=20.0)
+        s.series("k", 10_000, now=100.0, instance=st.VISIBLE_INSTANCES)
+        assert probes["n"] == 1                          # inline cold start
+        s._alien_cache = (s._alien_cache[0], 0.0, s._alien_cache[2])  # expire
+        s.series("k", 10_000, now=100.0, instance=st.VISIBLE_INSTANCES)
+        s.series("k", 10_000, now=100.0, instance=st.VISIBLE_INSTANCES)
+        assert probes["n"] <= 2                          # reads not serialized
+        for _ in range(100):                             # behind the gate
+            if probes["n"] == 2:
+                break
+            time.sleep(0.01)
+        assert probes["n"] == 2                          # refresher started
+        gate.set()
+        for _ in range(200):                             # join it
+            if not s._alien_refreshing:
+                break
+            time.sleep(0.01)
+        assert not s._alien_refreshing
+    finally:
+        gate.set()
+        s.close()
+
+
 def test_downsample_rounds_wire_values():
     """SQUEEZE: response values carry 6 significant digits, not float64
     full repr — 74 KB series payloads were dominated by '...0000004'."""

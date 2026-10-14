@@ -13,6 +13,15 @@ users never see.
 
 ## Unreleased
 
+- Fixed: chart reads taking 0.4–1.8 s even on an idle board. Every API read
+  shared one SQLite connection AND one process lock with the collector, so
+  each request queued behind the write tick. Request-path reads now run on
+  a dedicated read-only WAL connection (readers never block on writers),
+  and the once-per-30 s co-tenant cache probe moved off the request path
+  entirely: expired reads are served stale while a background thread
+  refreshes.
+
+
 - Changed: dashboard assets are now URL-versioned (`?v=<stamp>`). After an
   update, a normal reload always runs the new bundle — no hard-reload
   rituals, and a failed asset fetch can never resurrect a cached old

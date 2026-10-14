@@ -240,7 +240,10 @@ log = logging.getLogger("omlx_uplift.store")
 class MetricsStore:
     def __init__(self, path: Path | None = None, read_only: bool = False):
         self.path = Path(path) if path else default_db_path()
-        self._lock = threading.Lock()
+        # RLock (not Lock): the read path holds _rlock while
+        # _instance_sql may cold-start the tag probe re-entering it, and
+        # write helpers occasionally re-enter through meta getters.
+        self._lock = threading.RLock()
         self._has_fts = False   # _init_schema flips it when FTS5 is usable
         # HIST-1: cache this process's instance tag. server_instance_id()
         # itself is already memoised module-wide, but keeping the value on
@@ -257,6 +260,9 @@ class MetricsStore:
             self._conn = sqlite3.connect(
                 f"file:{self.path}?mode=ro", uri=True, check_same_thread=False
             )
+            self._rconn = self._conn     # SPLIT-READ: viewer reads rw conn
+            self._rlock = self._lock
+            self._alien_refreshing = False
             # read-only viewer: FTS is usable iff the table already exists
             try:
                 self._has_fts = bool(self._conn.execute(
@@ -280,6 +286,21 @@ class MetricsStore:
             self._conn.execute("PRAGMA journal_size_limit=4194304")
             self._conn.execute("PRAGMA busy_timeout=5000")
             self._init_schema()
+            # SPLIT-READ (starvation fix, 2026-10-14): request-path reads
+            # used to take the SAME lock + connection as the collector's
+            # writes — every chart read queued behind whatever the 5 s tick
+            # held the lock for (measured: /metrics/latest 0.44-1.24 s,
+            # the FIRST read of each request paying the convoy). A separate
+            # read-only connection lets WAL do its job: readers never block
+            # on the writer and vice versa. The rlock only serialises
+            # readers against each other (sqlite connections are not
+            # thread-safe); every hold is a microsecond query.
+            self._rconn = sqlite3.connect(
+                f"file:{self.path}?mode=ro", uri=True,
+                check_same_thread=False, timeout=2.0,
+            )
+            self._rlock = threading.RLock()
+            self._alien_refreshing = False
 
     def _init_schema(self):
         with self._lock, self._conn:
@@ -731,32 +752,45 @@ class MetricsStore:
         tags and untagged legacy rows are history and stay visible; our own
         tag is never in this set.
 
-        CACHE-FIRST (starvation fix, 2026-10-14): the tag-set probe is a
-        full covering-index scan over `samples` — measured 0.65 s native on
-        a 13.2 M-row table — and it used to run BEFORE the cache check, on
-        every filtered read. Inside an async route (``/metrics/latest``
-        called it inline) that froze the whole event loop; inside
-        ``to_thread`` callers it burned worker cores. One recompute per
-        ``_VISIBLE_TTL_S`` instead: a co-tenant that just starts is hidden
-        within one TTL (not one read), a writer that died re-enters history
-        within the same bounded window, and every read in between is a
-        dict hit. Correctness is unchanged — the filter never hides rows
-        this cache says are safe. Caller must hold _lock.
+        STALE-WHILE-REVALIDATE (SPLIT-READ, 2026-10-14): the tag-set probe
+        is a full covering-index scan over `samples` — measured 0.65 s
+        native on a 13.2 M-row table. It must never land on a request:
+        after the cold-start inline probe the cache is always served
+        (stale is fine: it only decides which FOREIGN tags to hide, and a
+        just-started co-tenant is filtered within one TTL+scan of its
+        first write), while a daemon thread refreshes an expired cache.
+        Called with _rlock held by the read path; the refresh thread takes
+        the lock itself.
         """
         now = time.monotonic()
         cached = self._alien_cache
-        if cached is not None and cached[1] > now:
+        if cached is None:
+            return self._refresh_hidden()          # cold start: once, inline
+        if cached[1] > now:
             return cached[2]
-        tags = frozenset(_distinct_tags(self._conn))
-        hidden = []
-        for t in tags:
-            if t == self._own_instance:
-                continue
-            _keg, pid = _split_instance(t)
-            if pid is None or _pid_alive(pid):
-                hidden.append(t)      # live co-tenant or unprovable: hide
-        self._alien_cache = (tags, now + _VISIBLE_TTL_S, tuple(sorted(hidden)))
-        return self._alien_cache[2]
+        if not self._alien_refreshing:
+            self._alien_refreshing = True
+            threading.Thread(target=self._refresh_hidden, daemon=True,
+                             name="uplift-alien-probe").start()
+        return cached[2]
+
+    def _refresh_hidden(self) -> tuple[str, ...]:
+        try:
+            with self._rlock:
+                tags = frozenset(_distinct_tags(self._rconn))
+            hidden = []
+            for t in tags:
+                if t == self._own_instance:
+                    continue
+                _keg, pid = _split_instance(t)
+                if pid is None or _pid_alive(pid):
+                    hidden.append(t)   # live co-tenant or unprovable: hide
+            result = tuple(sorted(hidden))
+            self._alien_cache = (tags, time.monotonic() + _VISIBLE_TTL_S,
+                                 result)
+            return result
+        finally:
+            self._alien_refreshing = False
 
     def visible_instances(self) -> str:
         """Sentinel for the API layer: read under the HIST-1 visibility
@@ -769,7 +803,8 @@ class MetricsStore:
         None: no filter (viewer/CLI browse — everything by design).
         VISIBLE_INSTANCES: exclude live-alien writers (HIST-1).
         Anything else: legacy exact match plus untagged rows, unchanged.
-        Caller must hold _lock (the visible branch probes the DB)."""
+        Read-path callers must hold _rlock; the visible branch consults the
+        (never-request-blocking) hidden-tags cache — see _hidden_tags."""
         if instance is None:
             return "", []
         if instance == VISIBLE_INSTANCES:
@@ -791,9 +826,9 @@ class MetricsStore:
         history from dead writers too and hides only live co-tenants
         (HIST-1). See _instance_sql."""
         t0 = (now or time.time()) - window_s
-        with self._lock:
+        with self._rlock:      # SPLIT-READ: ro conn, never behind a writer
             frag, args = self._instance_sql(instance)
-            cur = self._conn.execute(
+            cur = self._rconn.execute(
                 "SELECT ts, value FROM samples WHERE key=? AND ts>=?" + frag
                 + " ORDER BY ts",
                 [key, t0] + args,
@@ -807,7 +842,7 @@ class MetricsStore:
         hidden live co-tenant's newer point must never drive our live line,
         so own-tag rows sort first and history only fills gaps (own writer
         stops on restart; the newest own point then wins)."""
-        with self._lock:
+        with self._rlock:      # SPLIT-READ
             frag, args = self._instance_sql(instance)
             # own rows (TRUE=1) first, then newest — history fills gaps only
             order = " ORDER BY (instance IS NOT NULL" \
@@ -815,15 +850,15 @@ class MetricsStore:
                 if instance == VISIBLE_INSTANCES else " ORDER BY ts DESC LIMIT 1"
             q = "SELECT ts, value FROM samples WHERE key=?" + frag + order
             if instance == VISIBLE_INSTANCES:
-                cur = self._conn.execute(q, [key] + args + [self._own_instance])
+                cur = self._rconn.execute(q, [key] + args + [self._own_instance])
             else:
-                cur = self._conn.execute(q, [key] + args)
+                cur = self._rconn.execute(q, [key] + args)
             row = cur.fetchone()
         return {"ts": row[0], "v": row[1]} if row else None
 
     def recent_requests(self, limit: int = 200) -> list[dict]:
-        with self._lock:
-            cur = self._conn.execute(
+        with self._rlock:      # SPLIT-READ
+            cur = self._rconn.execute(
                 "SELECT * FROM requests ORDER BY ts_start DESC LIMIT ?", (limit,)
             )
             cols = [d[0] for d in cur.description]
@@ -839,8 +874,8 @@ class MetricsStore:
             q += " AND ts_start >= ?"
             args.append(float(ts_from))
         q += " ORDER BY model"
-        with self._lock:
-            return [r[0] for r in self._conn.execute(q, args).fetchall()]
+        with self._rlock:      # SPLIT-READ
+            return [r[0] for r in self._rconn.execute(q, args).fetchall()]
 
     def keys_with_prefix(self, prefix: str, window_s: float,
                          instance: str | None = None) -> list[str]:
@@ -853,16 +888,16 @@ class MetricsStore:
         q = "SELECT DISTINCT key FROM samples WHERE key LIKE ? ESCAPE '\\' AND ts >= ?"
         args = [prefix.replace("\\", "\\\\").replace("%", "\\%")
                       .replace("_", "\\_") + "%", t0]
-        with self._lock:
+        with self._rlock:      # SPLIT-READ
             frag, extra = self._instance_sql(instance)
             q += frag
             args += extra
             q += " ORDER BY key"
-            return [r[0] for r in self._conn.execute(q, args).fetchall()]
+            return [r[0] for r in self._rconn.execute(q, args).fetchall()]
 
     def request_by_id(self, request_id: str) -> dict | None:
-        with self._lock:
-            cur = self._conn.execute(
+        with self._rlock:      # SPLIT-READ
+            cur = self._rconn.execute(
                 "SELECT * FROM requests WHERE id = ?", (request_id,)
             )
             row = cur.fetchone()
@@ -904,7 +939,7 @@ class MetricsStore:
         cols = ["id", "model", "state", "prompt_tokens", "completion_tokens",
                 "tps", "error", "finish", "ts_start", "ts_end"]
 
-        with self._lock:
+        with self._rlock:      # SPLIT-READ (FTS queries are read-only)
             match_expr = fts_query(q) if use_fts else None
             if use_fts and match_expr is None:
                 # PUNCT-1: only punctuation tokens — MATCH can never hit;
@@ -913,7 +948,7 @@ class MetricsStore:
                 mode = "like"
             if use_fts:
                 try:
-                    cur = self._conn.execute(
+                    cur = self._rconn.execute(
                         f"""SELECT {sel},
                                    snippet(request_fts, 1, '[', ']', '...', 24) AS ex
                             FROM request_fts f JOIN requests r ON r.id = f.id
@@ -942,7 +977,7 @@ class MetricsStore:
                                  "OR r.output LIKE ? ESCAPE '\\')")
                     args += [pat, pat]
 
-            cur = self._conn.execute(
+            cur = self._rconn.execute(
                 f"""SELECT {sel}, r.prompt, r.output
                     FROM requests r {_where_clause(where)}
                     ORDER BY r.ts_start DESC LIMIT ?""",
@@ -957,6 +992,10 @@ class MetricsStore:
     def close(self):
         with self._lock:
             self._conn.close()
+        rconn = getattr(self, "_rconn", None)
+        if rconn is not None and rconn is not self._conn:
+            with self._rlock:
+                rconn.close()
 
 
 _store: MetricsStore | None = None
