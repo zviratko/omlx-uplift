@@ -126,7 +126,11 @@ GSY.gateClusterFromServer();
 restartPolling();
 pollGatewayInfo();
 CH.loadChartHistory();
-setInterval(() => { if (!document.hidden) CH.loadChartHistory(); }, 60000);
+/* STATS-SSE: the 60 s chart-history refetch feeds ONLY the Status charts —
+   off-Status it painted hidden canvases every minute. Re-entry catch-up
+   (age > 60 s) lives in applyTab's status branch (uplift.js), which the
+   historyAge() hook in uplift_charts.js gates. */
+setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.loadChartHistory(); }, 60000);
 // Metric cards: generate DOM from the catalogue BEFORE grid init so the
 // board places them like any static block; boot fetch + keep-alive (the
 // per-window cache TTL gates refetches: 4.5 s short (just under the 5 s
@@ -186,7 +190,16 @@ if (layout.liveFeed) {
 }
 setInterval(pollGatewayInfo, 10000);
 setInterval(() => { if (!document.hidden && !FE.sseOpen()) FE.pollRequests(); }, 2000);  // FEED-1
-setInterval(() => { if (!document.hidden && !MM.seModel) MM.render(); }, 8000);
+/* STATS-SSE: the 8 s model-table refresh feeds Models-tab surfaces ONLY —
+   evidence: every S.adminModels reader renders there (mmtable paint + the
+   editor's profile/divergence reads live in the Models manager/editor;
+   voices' TTS selects are the models/voices sub; helper's chip column is
+   models/helper; uplift.js/feed/reqsearch read NONE, and the Status tab's
+   per-model tiles come from the stats snapshot s.models, not adminModels).
+   Entering the tab already paints: applyTab calls MM.render() for Models,
+   the helper 'manager' chip navigates (#models/manager -> hashchange ->
+   applyTab), and the seModel guard keeps the open editor undisturbed. */
+setInterval(() => { if (!document.hidden && currentTab() === 'models' && !MM.seModel) MM.render(); }, 8000);
 setInterval(() => { if (!document.hidden && currentTab() === 'usage') UUP.pollUsage(); }, 15000);
 setInterval(() => { if (!document.hidden && currentTab() === 'logs' && UUP.logsFollow) UUP.pollLogs(); }, 5000);
 })();

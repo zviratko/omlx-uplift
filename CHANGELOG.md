@@ -13,6 +13,26 @@ users never see.
 
 ## Unreleased
 
+- **Voice cloning: record the reference clip in the tab.** The Voices
+  form gained a RECORD button (mic → browser → WAV, wired straight into
+  the existing transcribe/preview/save flow) plus a suggested read-aloud
+  text that follows the selected language (11 languages, transcript
+  stays freely editable). Browsers only allow the mic on https or
+  localhost — on a plain http LAN address the button shows disabled with
+  that reason instead of failing silently.
+- **Intelligence bench: vanilla-only grid, one LM-Eval fold.** The
+  Benchmark list now shows only the oMLX Classic suites; every LM-Eval
+  card (the twins of the classic suites included) moved into the
+  **Additional suites** section, now a prominent, collapsed-by-default
+  fold that remembers whether you opened it. The request-total line
+  stays visible under the fold.
+- **Dashboard traffic drops sharply off the Status tab.** The stats
+  payload now rides the live stream the dashboard already holds (one
+  shared server-side sample, change-driven frames — an idle board pushes
+  about a frame per minute instead of a full rebuild per tab per second);
+  the 1 s poll survives only as the fallback, at 20 s off Status, and the
+  8 s model-catalog and 60 s chart-history refetches now run only on the
+  tabs that show them.
 - **Decision bench scores any model.** The model picker split into
   **Decision models** (native heads, `/v1/systemone`) and **Other models**
   (any chat model, scored through the new upstream `/v1/decisions` readout

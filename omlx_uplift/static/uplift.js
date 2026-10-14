@@ -192,6 +192,7 @@ async function loadLocale(lang) {
 }
 
 let stats = null, prevStats = null, failCount = 0, timer = null;
+let appliedTab = null;   // STATS-SSE: applyTab reschedules the stats chain on CHANGE only
 const PERCENTILES = { p50: 50, p90: 90, p95: 95, p99: 99 };
 if (!(layout.percentile in PERCENTILES)) layout.percentile = 'p95';
 
@@ -294,7 +295,22 @@ function applyTab() {
     // navigation (deep link, keyboard, submenu item) closes any open menu
     for (const [, m] of DD_PAIRS) $(m).hidden = true;
     requestAnimationFrame(CH.resizeCharts);   // charts may have become visible
-    if (tab === 'status') requestAnimationFrame(ensureUpliftGrid);
+    // STATS-SSE: a tab change retunes the stats chain — immediate catch-up
+    // poll (free no-op while the stream is fresh or a poll is in flight) and
+    // a schedule at the NEW tab's rate. Boot's first pass runs this before
+    // restartPolling(), which re-polls (statsBusy dedupes) and re-schedules.
+    if (tab !== appliedTab) {
+        appliedTab = tab;
+        clearTimeout(timer);
+        pollStats();
+        scheduleStats();
+    }
+    if (tab === 'status') {
+        requestAnimationFrame(ensureUpliftGrid);
+        // STATS-SSE: the 60 s chart-history interval now runs on Status
+        // only — on re-entry, refresh history once it is older than that.
+        if (CH.historyAge() > 60_000) CH.loadChartHistory();
+    }
     if (tab === 'usage') UUP.pollUsage();
     if (tab === 'logs') UUP.pollLogs();
     if (tab === 'models') {
@@ -1896,8 +1912,8 @@ function render(s) {
         ? C.tf('uplift.label.total_out', 'out') + ' ' + C.fmtCompact(s.completionTokens) : '';
     // U27: all-time served count from the slow 30 s scope=alltime poll
     // (session-scope /admin/api/stats never carries it — see ticket verdict).
-    $('v-requests-sub').textContent = alltimeRequests !== null
-        ? C.tf('uplift.label.all_time', 'all-time') + ' ' + C.fmtNumber(alltimeRequests) : '';
+    // STATS-SSE: the stream's 'sa' field paints the same node (paintAlltimeSub).
+    paintAlltimeSub();
     $('chip-uptime').textContent = `up ${C.fmtDuration(s.uptime)}`;
     // U40: the active/waiting readouts are instantaneous engine counts and
     // jitter between polls; the tile shows a rolling mean of the last 12
@@ -2547,35 +2563,57 @@ async function postModelAction(model, action) {
         throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail || body));
     return body;
 }
+/* STATS-SSE: the stats lane has TWO sources feeding ONE pipeline:
+   - the 's'/'sa' fields riding the 2 Hz livefeed frames (zero extra request)
+   - the vanilla GET /admin/api/stats poll as fallback, at a tab-aware rate.
+   consumeRaw is the single entry: normalize + events/milestones + tracker +
+   render + feed reactions. A frame landing here clears the stale banner and
+   failCount exactly like a successful fetch did — an arriving frame proves
+   server reachability just as loudly as a 200. */
+async function consumeRaw(raw) {
+    const s = C.normalize(raw);
+    failCount = 0;
+    document.body.classList.remove('stale');
+    $('banner').classList.remove('show');
+    const events = C.eventsBetween(prevStats, s);
+    const miles = C.milestonesBetween(prevStats, s);
+    prevStats = stats; stats = s;
+    if (S.milestoneFloor.requests === undefined && s.requests !== null)
+        S.milestoneFloor.requests = C.milestoneFloorOf(s.requests);
+    if (S.milestoneFloor.totalTokens === undefined && s.totalTokens !== null)
+        S.milestoneFloor.totalTokens = C.milestoneFloorOf(s.totalTokens);
+    tracker.observe(s);
+    render(s);
+    FE.reactTo(events);
+    // milestones join the achievement system: >=1M rungs get the AWE
+    // double burst; uplift_achievements owns the tone decision
+    const AC = window.Uplift.achv;
+    for (const mi of FE.gateMilestones(miles))
+        FE.celebrate(FE.milestoneQuip(mi), AC ? AC.milestoneTone(mi.rung) : null);
+}
+let statsBusy = false;
+/* True while the livefeed is carrying the stats lane itself (OPEN stream +
+   a stats-bearing frame within its window). Bounded defensively so a page
+   without uplift_livefeed.js (never in index.html order; the glue is
+   defensive like the _…Glue objects) keeps the plain poll working. */
+function statsStreamFresh() {
+    const lf = window.Uplift.livefeed;
+    return !!(lf && lf.statsFresh && lf.statsFresh());
+}
 async function pollStats() {
     if (document.hidden) return;
+    if (statsStreamFresh()) return;   // the 's' frames ARE the poll
+    if (statsBusy) return;            // one in-flight fallback poll at a time
+    statsBusy = true;
     try {
-        const s = C.normalize(await fetchJson(`${API}/admin/api/stats`));
-        failCount = 0;
-        document.body.classList.remove('stale');
-        $('banner').classList.remove('show');
-        const events = C.eventsBetween(prevStats, s);
-        const miles = C.milestonesBetween(prevStats, s);
-        prevStats = stats; stats = s;
-        if (S.milestoneFloor.requests === undefined && s.requests !== null)
-            S.milestoneFloor.requests = C.milestoneFloorOf(s.requests);
-        if (S.milestoneFloor.totalTokens === undefined && s.totalTokens !== null)
-            S.milestoneFloor.totalTokens = C.milestoneFloorOf(s.totalTokens);
-        tracker.observe(s);
-        render(s);
-        FE.reactTo(events);
-        // milestones join the achievement system: >=1M rungs get the AWE
-        // double burst; uplift_achievements owns the tone decision
-        const AC = window.Uplift.achv;
-        for (const mi of FE.gateMilestones(miles))
-            FE.celebrate(FE.milestoneQuip(mi), AC ? AC.milestoneTone(mi.rung) : null);
+        await consumeRaw(await fetchJson(`${API}/admin/api/stats`));
     } catch (err) {
         if (++failCount >= 2) {
             document.body.classList.add('stale');
             $('banner-text').textContent = `Cannot reach API at ${API || location.origin}: ${err.message}`;
             $('banner').classList.add('show');
         }
-    }
+    } finally { statsBusy = false; }
     pollAlltime();   // throttled inside; U27 second-half readout
 }
 /* U27: the persisted all-time request count lives on the SAME route behind
@@ -2583,9 +2621,15 @@ async function pollStats() {
    ~/.omlx/stats.json and restores it at boot — see ticket verdict). The
    route rebuilds the full observability payload, so it is NOT worth a
    per-second poll: refresh every 30 s, silent on failure (last value
-   stays; the sub-line simply keeps what it showed). */
+   stays; the sub-line simply keeps what it showed). STATS-SSE: the stream's
+   'sa' field carries it — while the stream is fresh, zero requests. */
 let alltimeRequests = null, alltimeAt = 0, alltimeFetching = false;
+function paintAlltimeSub() {
+    $('v-requests-sub').textContent = alltimeRequests !== null
+        ? C.tf('uplift.label.all_time', 'all-time') + ' ' + C.fmtNumber(alltimeRequests) : '';
+}
 async function pollAlltime() {
+    if (statsStreamFresh()) return;   // 'sa' rides the stream
     const now = Date.now();
     if (alltimeFetching || now - alltimeAt < 30_000) return;
     alltimeFetching = true;
@@ -2597,10 +2641,50 @@ async function pollAlltime() {
     } catch (_) { /* keep last value; retry rides the next poll */ }
     finally { alltimeFetching = false; }
 }
+/* STATS-SSE: the livefeed stats lane feeds the SAME pipeline as the poll.
+   Pinned 'sa'-without-'s' rule: the all-time count updates immediately and
+   repaints the ONE sub-node it lives on — no full render() is faked without
+   a stats snapshot (a frame with BOTH lets consumeRaw's render() paint the
+   sub-line; see tests/stats-stream.test.cjs). Registered here (uplift.js
+   owns this DOM) AFTER livefeed loads; livefeed tolerates zero
+   registrations. */
+function consumeStreamStats(frame) {
+    if (!frame || typeof frame !== 'object') return;
+    const hasSnap = frame.s !== undefined;
+    const sa = typeof frame.sa === 'number' && Number.isFinite(frame.sa) && frame.sa >= 0
+        ? Math.round(frame.sa) : null;
+    // sa lands BEFORE the snapshot (consumeRaw runs its render synchronously
+    // up to return): a frame carrying BOTH then paints the SAME frame's
+    // all-time count, never one-frame-stale.
+    if (sa !== null) { alltimeRequests = sa; alltimeAt = Date.now(); }
+    // consumeRaw is async: a render throw must NOT surface as an unhandled
+    // rejection (livefeed's dispatch catch only sees sync throws). Reachability
+    // is already proven by the frame — a broken paint just waits for the poll.
+    if (hasSnap) consumeRaw(frame.s).catch(() => {});
+    else if (sa !== null) paintAlltimeSub();   // sa-only: repaint the ONE sub-node
+}
+if (window.Uplift.livefeed && window.Uplift.livefeed.onStats)
+    window.Uplift.livefeed.onStats(consumeStreamStats);
+/* STATS-SSE: tab-aware cadence for the FALLBACK chain (the stream carries
+   stats itself while it is open). Off Status only the uptime chip / health
+   dot / event feed consume stats — and an UNFOCUSED window has no stream at
+   all (HANG-1 closes it), so it needs the slow heartbeat; a focused
+   Settings tab keeps the stream OPEN and sees ZERO polls via the
+   statsStreamFresh() guard. Self-rescheduling setTimeout (was a fixed
+   setInterval chain): the delay is re-read per tick, so a tab switch
+   retunes instantly and an in-flight poll never overlaps the next. */
+const STATS_SLOW_MS = 20000;
+function intervalForTab() {
+    return currentTab() === 'status' ? layout.intervalMs : STATS_SLOW_MS;
+}
+function scheduleStats() {
+    clearTimeout(timer);
+    timer = setTimeout(() => { pollStats(); scheduleStats(); }, intervalForTab());
+}
 function restartPolling() {
-    clearInterval(timer);
+    clearTimeout(timer);
     pollStats();
-    timer = setInterval(pollStats, layout.intervalMs);
+    scheduleStats();
 }
 
 /* ---------------- gateway status chip ---------------- */

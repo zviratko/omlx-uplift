@@ -98,6 +98,11 @@ const GIB = 2 ** -30;   // bytes -> GiB (memory chart draws GiB, user 2026-09-30
 let chartHist = { gen: [], cached: [], prefill: [], mtp: [], mem: [], memLimit: [], cache: [], hot: [] };
 let tpsLiveOn = false, memLiveOn = false;   // FAST-1: live-resolution draw flags (badges)   // arrays of {ts, v, res}; hot: summed all-models hot cache (GiB)
 let historyDirty = true, historyLoading = false;
+/* STATS-SSE age hook (additive, boot's 60 s refetch is Status-tab-gated):
+   when the last FULL history actually landed. A skipped/aborted load never
+   stamps it, so the next Status entry retries. */
+let historyAt = 0;
+function historyAge() { return historyAt ? Date.now() - historyAt : Infinity; }
 /* The two shared-history cards backfill at the LARGEST window any of them
    uses (one fetch, superset cached); each card draws its own slice. */
 function windowToParam() {
@@ -169,6 +174,7 @@ async function loadChartHistory() {
                           // U40: summed all-models hot cache (was per-model)
                           hot: sumSeriesMap(h, GIB) };
             historyDirty = false;
+            historyAt = Date.now();   // STATS-SSE: only an ADOPTED load ages
             if (tpsChart) redrawCharts();
         } else {
             historyDirty = true;
@@ -1828,6 +1834,7 @@ window.Uplift.charts = {
     createCharts: createCharts, redrawCharts: redrawCharts, resizeCharts: resizeCharts,
     rerenderChartsTheme: rerenderChartsTheme, createUsageChart: createUsageChart,
     loadChartHistory: loadChartHistory, markHistoryDirty: markHistoryDirty,
+    historyAge: historyAge,   // STATS-SSE age hook (ms since last adopted load)
     relabelExplore: relabelExplore, windowLabel: windowLabel,
     setGlobalWindow: setGlobalWindow, setTpsSmooth: setTpsSmooth, renderCardTsRows: renderCardTsRows,
     createMetricCard: createMetricCard, drawAllMetricCharts: drawAllMetricCharts,

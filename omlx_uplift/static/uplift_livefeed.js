@@ -58,6 +58,14 @@ const LIVE_SMOOTH_K = 3;
 
 const live = {};           // key -> {ts: [], v: [], last: 0}
 let source = null, probing = false, everLive = false;
+/* STATS-SSE: the vanilla /admin/api/stats subset ('s') and the all-time
+   count ('sa') ride the SAME frames as the metric keys — the stats lane of
+   the dashboard consumes them through its OWN registry (onStats) so a pure
+   stats frame never redraws charts and an m-only frame never touches the
+   stats pipeline (a frame may carry both; both registries then fire).
+   Older servers simply never send s/sa: unknown fields cost nothing. */
+const statsCbs = [];
+let statsAt = 0;
 /* Layout toggle (FAST-1): the user can turn the display path off without
    a reload. The server sampler keeps running (it costs 0.05 ms/tick and
    other tabs may read it); this client just stops connecting and stops
@@ -77,6 +85,17 @@ function prune(c) {
    the whole ring; `m` frames carry {key: [ts, v]}. */
 function ingest(d) {
     if (!d || typeof d !== 'object') return;
+    // STATS-SSE: 's' / 'sa' land BEFORE the sampler gate — the stats lane
+    // is the vanilla API snapshot, independent of the fast sampler's health
+    // (live:false must freeze the columns, never the stats pipeline), and
+    // a frame carrying only stats must leave the columns AND the chart
+    // listeners untouched.
+    const statsFrame = d.s !== undefined || d.sa !== undefined;
+    if (statsFrame) {
+        statsAt = Date.now();
+        for (const fn of statsCbs) { try { fn(d); } catch (_) {} }
+        if (!d.samples && !d.m) return;
+    }
     if (d.live === false) return;             // sampler dead: columns freeze
     everLive = true;
     const add = (key, ts, v) => {
@@ -100,6 +119,7 @@ function ingest(d) {
 }
 const listeners = [];
 function onFrame(fn) { if (typeof fn === 'function') listeners.push(fn); }
+function onStats(fn) { if (typeof fn === 'function') statsCbs.push(fn); }
 
 function connect() {
     // HANG-1: like the request feed, the 2 Hz stream belongs to the FOCUSED
@@ -164,6 +184,18 @@ function liveCol(key) {
 /* Smoothing is the charts' job (movingAverage lives in core.js); the
    feed only exposes the window rule so every card gates consistently. */
 function liveForWindow(winSec) { return !disabled && winSec <= LIVE_MAX_WIN_S; }
+/* STATS-SSE: true while the stream itself IS the stats source — an OPEN
+   connection that landed a frame carrying 's'/'sa' within the last 2 min
+   (idle servers push ~1/min on the minute-floored-uptime signature; two
+   missed pushes = hand back to polling). close() nulls `source`, so a
+   hidden/unfocused window (HANG-1) or a disabled feed flips this false and
+   uplift.js's own poll chain takes over. Zero registrations tolerated:
+   statsCbs may legitimately stay empty (the lane is server-optional). */
+function statsFresh() {
+    return !disabled && !!source && !!window.EventSource
+        && source.readyState === window.EventSource.OPEN
+        && Date.now() - statsAt < 120_000;
+}
 function disable() {
     disabled = true;
     close();
@@ -185,7 +217,7 @@ window.addEventListener('blur', () => close());
 
 window.Uplift.livefeed = {
     connect, close, probe, liveUsable, liveCol, liveForWindow, smoothK, isLive,
-    disable, enable, onFrame,
+    disable, enable, onFrame, onStats, statsFresh,
     LIVE_KEYS, LIVE_MAX_WIN_S,
 };
 })();

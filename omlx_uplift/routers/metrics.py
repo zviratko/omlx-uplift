@@ -113,10 +113,20 @@ async def metrics_stream(is_admin: bool = Depends(require_admin)):
     driven frame, like the request stream's watermark). The tick channel
     of the samplers is untouched: this stream never writes to SQLite,
     the store keeps its exact one-value-per-5 s shape.
+
+    STATS-SSE adds two OPTIONAL fields to the same frame — `s` (the
+    vanilla /admin/api/stats payload) and `sa` (the all-time request
+    total) — diff-sent the same way, off the shared 1 Hz StatsFeed. They
+    are only ever ADDED: `live`/`tick_s`/`at`/`samples`/`m` keep their
+    exact bytes, so a client that does not know the lanes is unaffected,
+    and a server whose vanilla seams are unavailable simply never emits
+    them. See omlx_uplift/stats_feed.py for the payload contract.
     """
     from ..fast_sampler import FAST_TICK_S, get_fast_sampler
+    from ..stats_feed import get_stats_feed
 
     sampler = get_fast_sampler()
+    feed = get_stats_feed()
 
     async def event_generator():
         sent: dict[str, tuple] = {}
@@ -128,6 +138,17 @@ async def metrics_stream(is_admin: bool = Depends(require_admin)):
         # alternated 501/1004 ms because the generator slept a whole
         # tick and kept missing writes.
         poll_s = max(0.05, FAST_TICK_S / 4)
+        # STATS-SSE per-connection cursors into the SHARED cells — the 'm'
+        # lane's `sent` dict applied to the two new fields. 0 means "never
+        # sent", so the first frame carries both lanes whenever the server
+        # can produce them, and a lane that has not moved is never re-sent.
+        s_ver = 0
+        a_ver = 0
+        # Reference-counted: the FIRST subscribed connection starts the one
+        # shared 1 Hz ticker, the LAST one leaves it an idle-stop countdown.
+        # subscribe() must run inside the event loop, which a generator body
+        # does on its first __anext__ (StreamingResponse drives it there).
+        feed.subscribe()
         try:
             while True:
                 snap = sampler.snapshot()
@@ -142,11 +163,38 @@ async def metrics_stream(is_admin: bool = Depends(require_admin)):
                 if changed or first:
                     frame["m"] = changed
                     sent.update({k: tuple(v) for k, v in changed.items()})
+                # --- 's' / 'sa': appended lanes, the keys above are untouched.
+                # feed.off is the cheap latch for a server whose vanilla seams
+                # are missing: no lock, no cell read, no log, every tick.
+                lane = False
+                if not feed.off:
+                    # snapshot_now() builds ON DEMAND while the cells are
+                    # unseeded — a tab that connects between ticks gets real
+                    # numbers in frame 1 instead of '—' until the next tick
+                    # (and that one build is then shared by every tab that
+                    # connects before it).
+                    st = feed.snapshot_now()
+                    if st["s"] is not None and st["s_ver"] != s_ver:
+                        frame["s"] = st["s"]
+                        s_ver = st["s_ver"]
+                        lane = True
+                    if st["sa"] is not None and st["sa_ver"] != a_ver:
+                        frame["sa"] = st["sa"]
+                        a_ver = st["sa_ver"]
+                        lane = True
+                # A changed stats lane must produce a frame even when no fast
+                # metric moved — an idle server still updates request counts.
+                if changed or first or lane:
                     yield f"data: {json.dumps(frame)}\n\n"
                 first = False
                 await asyncio.sleep(poll_s)
         except asyncio.CancelledError:
             pass
+        finally:
+            # Cancellation is the NORMAL exit here (tab close / navigate
+            # away), so the release lives in finally, not in the handler:
+            # any path out of the loop drops this connection's reference.
+            feed.unsubscribe()
 
     return StreamingResponse(
         event_generator(),
