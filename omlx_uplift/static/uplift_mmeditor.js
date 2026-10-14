@@ -156,6 +156,8 @@ function seEffHint(key) {
     const val = String(d.value);
     const tag = d.kind === 'model_config'
         ? C.tf('uplift.se.eff.model_config', 'model config')
+        : d.kind === 'policy_clamp'   // CW-1: value bound by the global policy
+        ? C.tf('uplift.se.eff.policy_clamp', 'server cap')
         : C.tf('uplift.se.eff.global_default', 'global default');
     return val + ' \u00b7 ' + tag;
 }
@@ -1457,13 +1459,11 @@ function renderCtKwargs(container) {   // R10-5: container is the section body
     g.className = 'pair'; container.append(g);
     const entries = seValues.ctKwargEntries || [];
     entries.forEach((e, idx) => {
-        if (e.force) {
-            const l = document.createElement('label'); l.className = 'se-row';
-            const fk = document.createElement('span'); fk.textContent = `${e.key} (forced)`;
-            const fv = document.createElement('span'); fv.className = 'stat-sub'; fv.textContent = String(e.value);
-            l.append(fk, fv);
-            g.append(l); return;
-        }
+        // BUG-FORCE (user 2026-10-14): forced entries used to render as a
+        // dead read-only row — no way to edit the value, un-force, or even
+        // remove it. Every entry is now a regular editable row with a
+        // 'force' checkbox; buildPayload already splits e.force into
+        // forced_ct_kwargs.
         const row = document.createElement('div');
         row.className = 'se-row se-kwarg';
         // BUG-1: typed entries (reasoning_effort, enable_thinking) have no
@@ -1520,8 +1520,23 @@ function renderCtKwargs(container) {   // R10-5: container is the section body
             seValues.ctKwargEntries.splice(idx, 1);
             renderEditorFields(editorRoot);
         });
+        // BUG-FORCE: the force flag is now a first-class editable control.
+        const fkLbl = document.createElement('label');
+        fkLbl.className = 'se-kwforce';
+        const fkBox = document.createElement('input');
+        fkBox.type = 'checkbox'; fkBox.checked = !!e.force;
+        fkBox.title = C.tf('uplift.ui.kwarg_force_hint',
+            'API requests cannot override this value');
+        fkBox.addEventListener('change', () => {
+            e.force = fkBox.checked;
+            seSyncKwEntries();
+        });
+        const fkTxt = document.createElement('span');
+        fkTxt.textContent = C.tf('uplift.ui.kwarg_force', 'force');
+        fkTxt.dataset.i18n = 'uplift.ui.kwarg_force'; fkTxt.dataset.en = 'force';
+        fkLbl.append(fkBox, fkTxt);
         if (!row.children.length) row.append(key, val);
-        row.append(rm);
+        row.append(fkLbl, rm);
         g.append(row);
     });
     if (!entries.length) {

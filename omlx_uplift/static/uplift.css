@@ -1531,8 +1531,12 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    no-jump rule) — the form's content width is identical clean vs dirty
    (modal 868 = 1200 − rail 320 − gap 12), the left edge never moves, and
    at rest the modal is compact with no dead space INSIDE it. Below
-   1232px the rail overlays instead (98vw cap leaves no room to grow). */
-.modal.nasa.editor { width: min(920px, 98vw); max-height: 92vh; }
+   1232px the rail overlays instead (98vw cap leaves no room to grow).
+   WRAP-1 (user 2026-10-14): Generation-defaults labels still wrapped at
+   920px — both editor widths +160px (the widen-delta invariant 1412-332=
+   1080 is preserved, so the no-jump rule and clean==dirty content width
+   hold; the left edge grows leftwards as asked). */
+.modal.nasa.editor { width: min(1080px, 98vw); max-height: 92vh; }
 @media (min-width: 1232px) {
     /* no-jump rule (step1, still user law): reserve the widen delta as a
        right margin so flex centering pins the LEFT edge exactly where the
@@ -1544,7 +1548,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
        makes the INSTANT widen edge-pinned already; animating it only
        invents motion. */
     .modal.nasa.editor { margin-right: 332px; }
-    .modal.nasa.editor:has(#se-changes.ed:not([hidden])) { width: min(1252px, 98vw); margin-right: 0; }
+    .modal.nasa.editor:has(#se-changes.ed:not([hidden])) { width: min(1412px, 98vw); margin-right: 0; }
 }
 @media (max-width: 1231px) {
     .modal.nasa.editor { margin-right: auto; }   /* near-full-width: grow rightward */
@@ -2171,6 +2175,9 @@ label.se-row.pending-restart > .se-ctl > select {
 .se-kwarg input[type=text], .se-kwarg select { flex: 1 1 0; min-width: 0; width: auto; }
 /* BUG-1: read-only key label for typed kwargs (reasoning_effort etc.) */
 .se-kwarg .se-kwarg-key { flex: 1 1 0; min-width: 0; opacity: .75; font-style: italic; }
+/* BUG-FORCE: per-row force toggle (API requests cannot override the value) */
+.se-kwarg .se-kwforce { flex: 0 0 auto; display: flex; align-items: center;
+    gap: 4px; font: 400 10px/1.4 var(--mono); opacity: .8; white-space: nowrap; }
 .se-kwarg .se-btn { flex: 0 0 auto; }
 .row-editor .se-kwarg input, .row-editor .se-kwarg select { width: auto; }
 .row-editor .se-prof-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

@@ -46,8 +46,17 @@ test('context window: native wins, policy clamps, global is the last tier', () =
         { kind: 'model_config', value: 131072 });
     const pol = JSON.parse(JSON.stringify(GS));
     pol.sampling.max_context_window_policy = 32768;
+    // CW-1 (user 2026-10-14): a policy-bound number is NOT from the model's
+    // config.json — it wears its own honest kind ('server cap' in the UI).
     assert.deepEqual(S.effDefault('max_context_window', { model_context_length: 131072 }, pol),
-        { kind: 'model_config', value: 32768 }, 'min(native, policy) per get_max_context_window');
+        { kind: 'policy_clamp', value: 32768 }, 'min(native, policy) per get_max_context_window');
+    // policy above/equal native: native stays the truth -> still model config
+    pol.sampling.max_context_window_policy = 131072;
+    assert.deepEqual(S.effDefault('max_context_window', { model_context_length: 131072 }, pol),
+        { kind: 'model_config', value: 131072 });
+    pol.sampling.max_context_window_policy = 999999;
+    assert.deepEqual(S.effDefault('max_context_window', { model_context_length: 131072 }, pol),
+        { kind: 'model_config', value: 131072 });
     assert.deepEqual(S.effDefault('max_context_window', {}, GS),
         { kind: 'global_default', value: 65536 });
     assert.equal(S.effDefault('max_context_window', {},

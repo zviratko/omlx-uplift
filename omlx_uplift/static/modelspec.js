@@ -1007,8 +1007,15 @@
             const native = model && model.model_context_length;
             const policy = Number(s.max_context_window_policy) || 0;
             if (native != null)
-                return { kind: 'model_config',
-                         value: policy > 0 ? Math.min(native, policy) : native };
+                // CW-1 (user 2026-10-14): when the POLICY is the binding tier
+                // the number comes from the server's global setting, not the
+                // model's config.json — labelling it 'model config' was a lie
+                // (config.json said 262144, the clamp showed 256000). Same
+                // value the server computes (min(native, policy)); only the
+                // HONEST KIND changes.
+                return policy > 0 && policy < native
+                    ? { kind: 'policy_clamp', value: policy }
+                    : { kind: 'model_config', value: native };
             if (s.max_context_window != null)
                 return { kind: 'global_default', value: s.max_context_window };
             return null;
