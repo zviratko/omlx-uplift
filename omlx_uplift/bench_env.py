@@ -481,12 +481,14 @@ if target not in nltk.data.path:
 out = {}
 dl = None
 for pkg in pkgs:
-    try:
-        nltk.data.find("tokenizers/" + pkg)
+    # Target-scoped check ONLY (2026-10-14 fix): nltk.data.find searches
+    # every entry of nltk.data.path — a corpus sitting in ~/nltk_data made
+    # this report 'present' while the uplift store stayed EMPTY, so the
+    # marker lied and the offline promise rode on the user's home dir.
+    # The seeded tree in `target` is what the promise is about.
+    if os.path.isdir(os.path.join(target, "tokenizers", pkg)):
         out[pkg] = "present"
         continue
-    except Exception:
-        pass
     try:
         if dl is None:
             dl = Downloader(download_dir=target)

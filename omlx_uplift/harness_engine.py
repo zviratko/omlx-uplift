@@ -374,13 +374,18 @@ def _sizes_file() -> Path:
 
 
 def _sizes_fingerprint(suites: dict) -> str:
-    """Cache validity stamp: the suite->tasks map AND the custom yaml
-    pack are what the probe measured. When HARNESS_MAP grows (or a yaml
-    renames) the fingerprint changes and a stale cache is ignored — the
-    U68 labels must never multiply against an old task set."""
-    payload = json.dumps({"suites": suites,
-                          "include_path": str(_task_yamls_dir())},
-                         sort_keys=True)
+    """Cache validity stamp: ONLY the suite->tasks map, which is what the
+    probe measured. When HARNESS_MAP grows the fingerprint changes and a
+    stale cache is ignored — the U68 labels must never multiply against an
+    old task set. (2026-10-14 fix: the include_path string used to be part
+    of this hash. It must not be: it resolves to the interpreter's own
+    install dir, so the repo-checkout and the deployed keg computed
+    different fingerprints for the SAME map — the live board then refused
+    a cache the CLI had just written and re-probed on every call, blowing
+    its own subprocess timeout. The path is process-local plumbing, not a
+    measurement input; the suites dict passed to the probe is what
+    matters.)"""
+    payload = json.dumps({"suites": suites}, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -413,7 +418,10 @@ def subtask_counts() -> Optional[dict[str, int]]:
             [py, str(Path(__file__).with_name("bench_tasks")
                      / "harness_sizes.py"), json.dumps(suites),
              str(_task_yamls_dir())],
-            capture_output=True, text=True, timeout=90,
+            capture_output=True, text=True, timeout=240,
+            # 14-suite warm probe measured ~100 s (cmmlu's 67 inline leaves
+            # register one by one); 90 s timed out the board's re-probe and
+            # left U68 labels honest-but-missing forever.
             # ACC-2c: expanding a suite LOADS its task module, and lm_eval's
             # ifeval utils import nltk (+ langdetect) at that moment — the
             # probe is a harness child for these purposes and gets the same

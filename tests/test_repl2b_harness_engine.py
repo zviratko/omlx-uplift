@@ -410,6 +410,21 @@ def test_sizes_fingerprint_tracks_the_suite_map():
     assert base != he._sizes_fingerprint({"a": ["x"], "b": ["z"]})
 
 
+def test_sizes_fingerprint_is_install_path_agnostic(monkeypatch):
+    """Regression (2026-10-14): the fingerprint once hashed _task_yamls_dir(),
+    i.e. the interpreter's INSTALL path — repo-checkout and deployed keg
+    then computed different stamps for the SAME suite map, so the live
+    board rejected any cache written from a CLI context and re-probed on
+    every call until it timed out. The map is the measurement input; the
+    path is plumbing."""
+    from omlx_uplift import harness_engine as he
+    from pathlib import Path
+    fp_a = he._sizes_fingerprint({"a": ["x"]})
+    monkeypatch.setattr(he, "_task_yamls_dir",
+                        lambda: Path("/some/other/install/yamls"))
+    assert he._sizes_fingerprint({"a": ["x"]}) == fp_a
+
+
 def test_sizes_cache_ignores_stale_fingerprint(tmp_path, monkeypatch):
     from omlx_uplift import harness_engine as he
     from omlx_uplift import paths
