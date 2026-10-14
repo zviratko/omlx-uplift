@@ -160,12 +160,14 @@ def test_extra_helpers_read_the_map_live(extra_map):
     assert FAKE_EXTRA not in VALID_16            # the whole point
     admitted = he.admitted_benchmarks(VALID_16)
     assert {FAKE_EXTRA, "mmlu", "gsm8k"} <= admitted
-    # extras-only payload, exact contract keys
+    # ACC-2c put REAL extras into the map, so the payload is no longer the
+    # fake alone: assert the fake's exact row is IN there and that every row
+    # — fake or real — honours the contract keys.
     out = he.extra_suites()
-    assert out == [{"key": FAKE_EXTRA, "label": "Fake IFEval",
-                    "family": "instruction", "rows": 541,
-                    "upload_ok": False}]
+    assert {"key": FAKE_EXTRA, "label": "Fake IFEval", "family": "instruction",
+            "rows": 541, "upload_ok": False} in out
     for row in out:
+        assert set(row) == {"key", "label", "family", "rows", "upload_ok"}
         assert row["family"] in he.EXTRA_FAMILIES
         assert isinstance(row["label"], str) and row["label"]
         assert row["rows"] is None or isinstance(row["rows"], int)
@@ -449,9 +451,16 @@ def test_tasks_endpoint_adds_extra_suites(fake_ab, extra_map):
     # 'valid' is the leaderboard-eligible 16 — deliberately NOT widened
     assert out["valid"] == sorted(VALID_16)
     assert FAKE_EXTRA not in out["valid"]
-    assert out["extra_suites"] == [{"key": FAKE_EXTRA, "label": "Fake IFEval",
-                                    "family": "instruction", "rows": 541,
-                                    "upload_ok": False}]
+    # ACC-2c: real extras now ship next to the fake — the contract is
+    # 'the fake row appears verbatim + every row is exactly the 5 keys'
+    # (exact-list equality here would silently bless whatever landed).
+    assert {"key": FAKE_EXTRA, "label": "Fake IFEval",
+            "family": "instruction", "rows": 541,
+            "upload_ok": False} in out["extra_suites"]
+    for row in out["extra_suites"]:
+        assert set(row) == {"key", "label", "family", "rows", "upload_ok"}
+        assert row["upload_ok"] is False
+        assert row["key"] not in VALID_16
     assert {t["key"] for g in out["tasks"] for t in g["tasks"]} <= set(VALID_16)
 
 

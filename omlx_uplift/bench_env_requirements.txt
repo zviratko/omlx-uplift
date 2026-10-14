@@ -35,8 +35,17 @@ httpcore2==2.13.1
 httpx2==2.13.1
 huggingface_hub==2.1.1
 idna==3.20
+# ACC-2c batch-1 scoring deps, both MEASURED as missing in the pre-2c
+# bench-env (importlib.util.find_spec -> False) and both required at task
+# LOAD, not merely at scoring: lm_eval/tasks/ifeval/instructions.py imports
+# langdetect at module scope and utils.py imports immutabledict. Bytes:
+# langdetect 2.6 MB (only stdlib-ish dep is `six`, already pinned above),
+# immutabledict ~0 MB. Neither pulls torch, numpy or transformers — the
+# pin-driven _guard_heavy_dep stays unarmed here by design.
+immutabledict==4.3.1
 Jinja2==3.1.6
 joblib==1.6.0
+langdetect==1.0.9
 lm_eval==0.4.13
 lxml==6.1.3
 MarkupSafe==3.0.4

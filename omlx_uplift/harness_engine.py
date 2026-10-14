@@ -121,6 +121,59 @@ HARNESS_MAP: dict[str, dict[str, Any]] = {
               # carries no metric, so _parse_results_json weight-averages
               # the leaves and reports n=335.
               "metric": "exact_match", "metric_contains": "flexible-extract"},
+    # ---- ACC-2c: batch-1 HARNESS-ONLY extras (the seam's first residents).
+    # Each carries the seam metadata block (harness_engine, 'extra' means:
+    # outside classic's 16, harness-runnable only, never uploadable). Task
+    # names, leaf counts, splits and METRIC KEYS below were pinned against
+    # REAL results_*.json from the SmolLM2-360M scratch smokes of 2026-10-14
+    # (outdir ~/.omlx/uplift/bench-results/<bench_id>/<suite>/), never from
+    # what the yaml 'should' emit.
+    "ifeval": {"tasks": ["ifeval"], "fewshot": 0,
+               # Instruction following (google/IFEval). generate_until, ONE
+               # leaf, 541 rows — and its eval split is literally named
+               # 'train' (ifeval.yaml: test_split: train), which classic's
+               # board has no notion of: no parity obligation, no twin.
+               # The suite has FOUR metrics (prompt/inst x strict/loose);
+               # prompt_level_strict_acc is the headline number the IFEval
+               # paper leads with, so it is the ONE we score — averaging
+               # across them would invent a measure nobody asked for.
+               # Scoring needs langdetect + immutabledict (both pinned in
+               # bench_env_requirements.txt) and the nltk corpora that
+               # bench_env now pre-seeds (punkt_tab at import, punkt while
+               # counting sentences).
+               "metric": "prompt_level_strict_acc", "metric_contains": None,
+               "extra": True, "label": "IFEval", "family": "instruction",
+               "rows": 541, "upload_ok": False},
+    "bbh_cot_fewshot": {"tasks": ["bbh_cot_fewshot"], "fewshot": 3,
+               # BIG-Bench Hard, chain-of-thought, 3-shot — the task's OWN
+               # native num_fewshot (cot_fewshot template), so the prompt
+               # shape is what the suite was designed for. 27 leaves /
+               # 6511 rows (measured in bench-env; the design pass's
+               # 6761 predates the 0.4.13 subset set). The card feared a per-leaf metric zoo
+               # (lm_eval's bigbench sets really do mix em/f1/qa); MEASURED
+               # on 0.4.13 this group is uniform: every leaf inherits
+               # exact_match from _cot_fewshot_template_yaml and the results
+               # row keys it as 'exact_match,get-answer' (the 'get-answer'
+               # regex filter), so one pinned pair covers all 27 and the
+               # suite needs no 'metrics' fallback list.
+               "metric": "exact_match", "metric_contains": "get-answer",
+               "extra": True, "label": "BBH (CoT)", "family": "reasoning",
+               "rows": 6511, "upload_ok": False},
+    "mmlu_prox_lite_cs": {"tasks": ["mmlu_prox_lite_cs"], "fewshot": 5,
+               # Czech knowledge: li-lab/MMLU-ProX-Lite config 'cs', 14
+               # subject leaves / 588 rows, ~1 MB. The locale answer to the
+               # card's Czech question — every OTHER Czech candidate
+               # (Global-MMLU-cs, Belebele-cs, multiblimp, CSATQA) is
+               # multiple_choice = loglikelihood, which omlx cannot serve
+               # (NAT-2), so they stay refused-BY-METHOD. This one is
+               # generate_until with a Czech answer-regex extractor
+               # ('Odpověď je (X)') and 5-shot from its validation split —
+               # again the task's native setting, matched rather than
+               # imposed. Metric pinned from the real run:
+               # 'exact_match,custom-extract'.
+               "metric": "exact_match", "metric_contains": "custom-extract",
+               "extra": True, "label": "Czech knowledge (MMLU-ProX-Lite)",
+               "family": "locale", "rows": 588, "upload_ok": False},
 }
 
 # Custom generative task pack for the suites above (REPL-2b carryover).
@@ -359,8 +412,14 @@ def subtask_counts() -> Optional[dict[str, int]]:
                      / "harness_sizes.py"), json.dumps(suites),
              str(_task_yamls_dir())],
             capture_output=True, text=True, timeout=90,
+            # ACC-2c: expanding a suite LOADS its task module, and lm_eval's
+            # ifeval utils import nltk (+ langdetect) at that moment — the
+            # probe is a harness child for these purposes and gets the same
+            # uplift-owned NLTK_DATA the real run gets, or a sizes probe on a
+            # fresh box reaches the network just to print a leaf count.
             env={**__import__("os").environ,
-                 "HF_HOME": str(bench_env.hf_cache_dir())},
+                 "HF_HOME": str(bench_env.hf_cache_dir()),
+                 "NLTK_DATA": str(bench_env.nltk_data_dir())},
         )
     except Exception:
         return None
@@ -391,8 +450,43 @@ def _base_url() -> str:
     return f"http://127.0.0.1:{port}/v1/chat/completions"
 
 
+def _suite_metrics(spec: dict) -> list[tuple[str, Optional[str]]]:
+    """The ordered metric CANDIDATES of a suite: [(prefix, contains), ...].
+
+    ACC-2c: one (metric, metric_contains) pair is enough while every leaf of
+    a suite scores with the same metric (all 11 shipped twins do, and
+    bbh_cot_fewshot measured uniformly too — exact_match/get-answer on all
+    27 leaves of lm_eval 0.4.13, see HARNESS_MAP). It stops being enough the
+    moment a suite mixes families: lm_eval's bigbench-style groups carry a
+    per-subset metric_list (em / f1 / qa_number ...), and generic-style
+    suites add 'alias' rows. A suite declares 'metrics': [...] in that case
+    and each leaf takes the FIRST candidate it actually has — no leaf is
+    scored twice, and a leaf with NONE of the candidates is MISSING, not
+    guessed at.
+
+    Accepted item shapes (documented by the tests, nothing cleverer):
+      'exact_match'                      -> ('exact_match', spec's contains)
+      ['prompt_level_strict_acc', 'none']-> ('prompt_level_strict_acc','none')
+    A spec with only the classic 'metric' key behaves EXACTLY as before.
+    """
+    contains = spec.get("metric_contains")
+    out: list[tuple[str, Optional[str]]] = []
+    for item in (spec.get("metrics") or []):
+        if isinstance(item, (list, tuple)):
+            prefix = item[0]
+            narrow = item[1] if len(item) > 1 else contains
+        else:
+            prefix, narrow = item, contains
+        if prefix:
+            out.append((str(prefix), narrow or None))
+    if not out and spec.get("metric"):
+        out.append((spec["metric"], contains or None))
+    return out
+
+
 def _parse_results_json(outdir: Path, metric: str,
-                        metric_contains: Optional[str]) -> tuple[Optional[float], int]:
+                        metric_contains: Optional[str],
+                        metrics: Any = None) -> tuple[Optional[float], int]:
     """(score, sample_len) from the harness results file for the suite.
 
     U67: lm_eval writes ONE row per leaf subtask PLUS group rows (the root
@@ -401,7 +495,14 @@ def _parse_results_json(outdir: Path, metric: str,
     SUBJECT's aggregate as the suite score. Now: single-task suites return
     their row as before; multi-subject suites weight-average the metric
     over leaf sample_lens and report the SUM as the evaluated count — the
-    truth the classic row prints (accuracy over N questions)."""
+    truth the classic row prints (accuracy over N questions).
+
+    ACC-2c: `metric` may be one prefix (every existing caller) or the whole
+    candidate LIST may arrive as `metrics` / a list `metric` — see
+    _suite_metrics. The weight-averaging is over whatever leaves DID score,
+    so a mixed-metric suite still reports 'accuracy over N questions' and
+    never a fabricated mean for a leaf no candidate matched.
+    """
     files = sorted(outdir.rglob("results_*.json"))
     if not files:
         return None, 0
@@ -410,14 +511,26 @@ def _parse_results_json(outdir: Path, metric: str,
     except Exception:
         return None, 0
     group_names = set((data.get("groups") or {}).keys())
+    # candidates in priority order: an explicit list (either shape) wins,
+    # otherwise the classic single (metric, metric_contains) pair
+    if isinstance(metric, list):
+        cands = _suite_metrics({"metrics": metric,
+                                "metric_contains": metric_contains})
+    elif metrics is not None:
+        cands = _suite_metrics({"metrics": list(metrics),
+                                "metric_contains": metric_contains})
+    else:
+        cands = _suite_metrics({"metric": metric,
+                                "metric_contains": metric_contains})
 
     def _metric_of(row: dict) -> Optional[float]:
-        for key, val in row.items():
-            if not key.startswith(metric + ",") or not isinstance(val, (int, float)):
-                continue
-            if metric_contains and metric_contains not in key:
-                continue
-            return float(val)
+        for prefix, contains in cands:
+            for key, val in row.items():
+                if not key.startswith(prefix + ",") or not isinstance(val, (int, float)):
+                    continue
+                if contains and contains not in key:
+                    continue
+                return float(val)         # first hit for THIS leaf, in order
         return None
 
     scored: list[tuple[float, int]] = []   # (score, n) per scored leaf
@@ -573,10 +686,15 @@ async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
         _live.discard(proc)
     if rc != 0:
         raise RuntimeError(f"harness exited {rc} for {task} (output under {outdir})")
-    score, total = _parse_results_json(outdir, spec["metric"],
-                                       spec.get("metric_contains"))
+    score, total = _parse_results_json(outdir, spec.get("metric"),
+                                       spec.get("metric_contains"),
+                                       metrics=spec.get("metrics"))
     if score is None:
-        raise RuntimeError(f"harness produced no '{spec['metric']}' score for {task}")
+        # Honest failure, ACC-2c: a suite whose leaves carry NONE of the
+        # declared metrics is MISSING, not zero. Never average what the
+        # harness did not score, and never invent a number here.
+        names = "/".join(p for p, _c in _suite_metrics(spec)) or "(no metric)"
+        raise RuntimeError(f"harness produced no '{names}' score for {task}")
     return {"model_id": run.request.model_id, "external": False,
             "benchmark": task, "accuracy": round(score, 4),
             "thinking_used": False,

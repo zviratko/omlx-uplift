@@ -41,6 +41,10 @@ Card rules implemented here (all deliberate, tests pin them):
   child env ONLY. It is never placed in argv (ps would leak it) and
   never logged; scrub_key() redacts the literal from any captured
   output before it reaches logs or SSE events.
+- NLTK (ACC-2c): the corpora a scorer imports at MODULE LOAD (ifeval:
+  punkt_tab, punkt) are pre-seeded into uplift's OWN nltk_data dir when
+  the venv is built and handed to every child through NLTK_DATA — never
+  ~/nltk_data, no network at run time, prunable with the rest of store.
 - Lifecycle: the child runs in its own process group; stop = killpg
   TERM then KILL — the accuracy engine owns this and guarantees no
   orphan survives a server stop (restart-safety, card Verify).
@@ -398,10 +402,16 @@ def create(*, reinstall: bool = False, quiet: bool = False,
         shutil.rmtree(venv, ignore_errors=True)
         raise
     import json
-    (venv / marker).write_text(json.dumps(
-        {"requirements": requirements_digest(req),
-         import_name: ver.stdout.strip(),
-         "created": int(__import__("time").time())}, indent=1))
+    stamp = {"requirements": requirements_digest(req),
+             import_name: ver.stdout.strip(),
+             "created": int(__import__("time").time())}
+    if dirname == VENV_DIRNAME:
+        # ACC-2c: the venv is the thing that owns nltk, so the corpora are
+        # seeded here — once, at build time, where the network is already in
+        # use — instead of at a harness child's import time. Bench-env only:
+        # mteb-env shares this machinery and no scorer there imports nltk.
+        stamp["nltk"] = seed_nltk_data(py, quiet=quiet)
+    (venv / marker).write_text(json.dumps(stamp, indent=1))
     if not quiet:
         print(f"bench venv ready: {import_name} {ver.stdout.strip()}")
     return status(**st_kw)
@@ -431,6 +441,116 @@ def hf_cache_dir() -> Path:
     except Exception:
         pass
     return default
+
+
+# ---- ACC-2c: the NLTK corpora, uplift-owned and pre-seeded -----------------
+# lm_eval's IFEval scorer calls nltk.download('punkt_tab') AT MODULE IMPORT
+# (lm_eval/tasks/ifeval/instructions_util.py:36-52, verified against the
+# installed 0.4.13) and its sentence counter loads
+# 'nltk:tokenizers/punkt/english.pickle' while scoring (instructions_util.py
+# :1689, reached from instructions.py:260). With no NLTK_DATA set, nltk
+# resolves that download into the FIRST entry of its default search path —
+# the user's home (~/nltk_data) — so a first IFEval run reaches the network,
+# writes outside every uplift dir, and dies outright under bench_offline
+# (HF_HUB_OFFLINE does not cover nltk; the corpus is not a hub asset).
+#
+# Fix at the right layer: uplift OWNS a corpus dir under its own store,
+# fills it when the bench venv is BUILT (network there is already assumed —
+# pip just used it), and points every harness child at it via NLTK_DATA.
+# Consequences, all deliberate:
+#   * offline-safe — nltk.data.find() hits before any download attempt, so
+#     importing the scorer needs no network on later runs;
+#   * prunable — one dir, `omlx-uplift bench-env`'s own store family, and
+#     it is re-seeded by the next create();
+#   * never ~/nltk_data — and if a user deletes our dir anyway, the
+#     scorer's own nltk.download() lands in NLTK_DATA (nltk writes to the
+#     FIRST path), so the worst case is a self-healing download in the
+#     place we chose, not a stray home directory.
+NLTK_DATA_DIRNAME = "nltk_data"
+NLTK_PACKAGES = ("punkt_tab", "punkt")
+
+# Runs IN the bench venv (it is the one that owns nltk). argv: target dir +
+# JSON package list. Prints one 'UPLIFT_NLTK <json>' line and nothing else.
+_NLTK_SEED_CODE = """
+import json, os, sys
+target, pkgs = sys.argv[1], json.loads(sys.argv[2])
+import nltk
+from nltk.downloader import Downloader
+if target not in nltk.data.path:
+    nltk.data.path.insert(0, target)
+out = {}
+dl = None
+for pkg in pkgs:
+    try:
+        nltk.data.find("tokenizers/" + pkg)
+        out[pkg] = "present"
+        continue
+    except Exception:
+        pass
+    try:
+        if dl is None:
+            dl = Downloader(download_dir=target)
+        ok = dl.download(pkg, quiet=True)
+        out[pkg] = "downloaded" if ok else "failed"
+    except Exception as e:
+        out[pkg] = "error:" + type(e).__name__
+# ACC-2c hygiene: the downloader leaves the archive next to the tree it
+# unpacked (measured: punkt 14 MB + punkt_tab 4 MB of dead .zip beside 47 MB
+# of corpus). The tree is what nltk loads, so the zip goes.
+dropped = 0
+tok = os.path.join(target, "tokenizers")
+if os.path.isdir(tok):
+    for name in sorted(os.listdir(tok)):
+        if not name.endswith(".zip"):
+            continue
+        if os.path.isdir(os.path.join(tok, name[:-4])):
+            try:
+                os.remove(os.path.join(tok, name))
+                dropped += 1
+            except OSError:
+                pass
+out["_zips_removed"] = dropped
+print("UPLIFT_NLTK " + json.dumps(out), flush=True)
+"""
+
+
+def nltk_data_dir() -> Path:
+    """The uplift-owned NLTK corpus dir (sibling of the venvs, so a test
+    that redirects bench_env_dir() redirects the corpus with it — no path
+    may ever reach the developer's real store)."""
+    return bench_env_dir().parent / NLTK_DATA_DIRNAME
+
+
+def seed_nltk_data(py: str | Path, *, packages: tuple[str, ...] = NLTK_PACKAGES,
+                   quiet: bool = False, timeout: int = 600) -> dict:
+    """Fill nltk_data_dir() with the corpora a harness child imports at
+    module load. NEVER raises and NEVER fails a venv build: a missing
+    corpus costs one suite at run time, a failed build costs the user their
+    working board. The returned facts land in the env marker so 'did the
+    offline gap actually get closed' is answerable without running anything.
+    """
+    target = nltk_data_dir()
+    try:
+        import json
+        target.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run([str(py), "-c", _NLTK_SEED_CODE, str(target),
+                            json.dumps(list(packages))],
+                           capture_output=True, text=True, timeout=timeout)
+        for line in (r.stdout or "").splitlines():
+            if line.startswith("UPLIFT_NLTK "):
+                facts = json.loads(line[len("UPLIFT_NLTK "):])
+                facts["dir"] = str(target)
+                if not quiet:
+                    print(f"nltk corpora: {facts}")
+                return facts
+        msg = (r.stderr or r.stdout or "").strip()[-200:]
+        facts = {"state": "unresponsive", "detail": msg, "dir": str(target)}
+    except Exception as e:                                # noqa: BLE001
+        facts = {"state": "error", "detail": f"{type(e).__name__}: {e}",
+                 "dir": str(target)}
+    logger.warning("uplift bench_env: nltk pre-seed incomplete (%s) — "
+                   "IFEval may need the network on its first run", facts)
+    return facts
 
 
 def offline_mode() -> bool:
@@ -466,6 +586,11 @@ def spawn(args: list[str], *, api_key: str, hf_cache: Optional[Path] = None,
     env = dict(os.environ)
     env["OPENAI_API_KEY"] = api_key
     env["PYTHONUNBUFFERED"] = "1"
+    # ACC-2c: a harness child must find the NLTK corpora in the uplift dir
+    # (see nltk_data_dir) — otherwise lm_eval's ifeval import reaches the
+    # network. NLTK_DATA is PREPENDED to nltk's search path by nltk itself,
+    # so a corpus the user already has elsewhere stays usable.
+    env["NLTK_DATA"] = str(nltk_data_dir())
     if hf_cache:
         env["HF_HOME"] = str(hf_cache)
         env["HF_DATASETS_CACHE"] = str(Path(hf_cache) / "datasets")
