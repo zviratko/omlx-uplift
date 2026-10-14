@@ -24,13 +24,27 @@ users never see.
   combobox now — pick one of the model's declared languages (Czech ships
   in the list), type any other language string, or leave it empty for
   Auto.
-- **Harness engine covers 5 more benchmarks.** Accuracy runs on the
+- **Harness engine covers 6 more benchmarks.** Accuracy runs on the
   community harness engine can now measure hellaswag, winogrande,
-  mathqa, truthfulqa (new generative task pack shipped with uplift) and
-  kmmlu (built-in `kmmlu_direct`, 5-shot); the harness task grid and
-  queue pick them up automatically. cmmlu, humaneval, mbpp, jmmlu,
-  livecodebench and safetybench intentionally stay on the classic
-  engine (dataset script wall / code-exec isolation / no equivalent).
+  mathqa, truthfulqa (new generative task pack shipped with uplift),
+  kmmlu (built-in `kmmlu_direct`, 5-shot) and cmmlu — for cmmlu the hub
+  ships only a datasets loader script that modern `datasets` refuses,
+  so the test+dev splits are VENDORED into the package
+  (`bench_tasks/cmmlu_data`, pinned revision + checksum, CC BY-NC-SA
+  attribution, loads fully offline). The harness task grid and queue
+  pick them up automatically. humaneval, mbpp, jmmlu, livecodebench and
+  safetybench intentionally stay on the classic engine (code-exec
+  isolation / no equivalent).
+- **Additional suites: a separate bench section.** The Intelligence
+  bench now has an 'Additional suites' section below the classic grid —
+  the classic 16 render byte-identical and are never mixed in. First
+  extras (harness-engine only, local results — never uploaded to the
+  community leaderboard): IFEval (instruction following), BBH (CoT)
+  and Czech knowledge (MMLU-ProX-Lite). Collapsible families, a search
+  box, per-card size chips (rows x leaves), a 6-card cap with 'show
+  all'. New scoring deps (langdetect, immutabledict) enter bench-env
+  via the measured pin; the nltk corpora IFEval imports at load are
+  pre-seeded into uplift's own store so runs stay offline.
 - **Bench environments stay clean on upgrade.** A stale bench venv is
   now rebuilt from a full wipe (no orphaned packages surviving a pin
   change), installs no longer grow the global pip cache, and the

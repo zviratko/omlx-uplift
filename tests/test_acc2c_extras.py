@@ -52,7 +52,10 @@ BATCH1 = ("ifeval", "bbh_cot_fewshot", "mmlu_prox_lite_cs")
 # full-dataset question count per suite (the picker's size chip). lm_eval's
 # --limit is PER TASK, so requests = leaves x limit for a group — U68 says
 # the UI multiplies, the chip states the corpus size.
-ROWS = {"ifeval": 541, "bbh_cot_fewshot": 6761, "mmlu_prox_lite_cs": 588}
+ROWS = {"ifeval": 541, "bbh_cot_fewshot": 6511, "mmlu_prox_lite_cs": 588}
+# bbh = 6511: measured over every leaf's test_docs() in bench-env — the
+# rows a run ACTUALLY scores. The design pass's 6761 is a dataset-card
+# figure that includes rows lm_eval's test split does not emit.
 FAMILIES = {"ifeval": "instruction", "bbh_cot_fewshot": "reasoning",
             "mmlu_prox_lite_cs": "locale"}
 LABELS = {"ifeval": "IFEval", "bbh_cot_fewshot": "BBH (CoT)",

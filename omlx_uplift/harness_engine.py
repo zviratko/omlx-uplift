@@ -148,8 +148,10 @@ HARNESS_MAP: dict[str, dict[str, Any]] = {
                # BIG-Bench Hard, chain-of-thought, 3-shot — the task's OWN
                # native num_fewshot (cot_fewshot template), so the prompt
                # shape is what the suite was designed for. 27 leaves /
-               # 6511 rows (measured in bench-env; the design pass's
-               # 6761 predates the 0.4.13 subset set). The card feared a per-leaf metric zoo
+               # 6511 rows (measured over every leaf's test_docs() in
+               # bench-env — what a run actually scores; the design pass's
+               # 6761 is a dataset-card figure including rows the test split
+               # does not emit). The card feared a per-leaf metric zoo
                # (lm_eval's bigbench sets really do mix em/f1/qa); MEASURED
                # on 0.4.13 this group is uniform: every leaf inherits
                # exact_match from _cot_fewshot_template_yaml and the results
