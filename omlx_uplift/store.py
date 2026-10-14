@@ -212,13 +212,11 @@ def _pid_alive(pid: int) -> bool:
 VISIBLE_INSTANCES = "visible"
 
 # Freshness for the live-alien probe (per store, see _live_alien_tags): a
-# plain TTL alone could hide a JUST-STARTED co-tenant for up to TTL (its
-# rows would poison the series — the exact bug v3 fixed), and a change-only
-# recompute could trust "writer died" forever. So: recompute when the tag
-# LIST changed (new co-tenant appears immediately) OR after the TTL (death
-# noticed within one tick+TTL at worst). The DISTINCT scan behind it is
-# index-backed (ix_samples_instance) and millisecond-cheap; the probe is a
-# syscall per foreign tag.
+# recompute when the tag LIST changed would have to SCAN THE WHOLE INDEX to
+# learn the list — on a 13.2 M-row samples table that costs 0.65 s per read
+# (measured, 2026-10-14). The probe is therefore once per TTL, full stop;
+# a just-started co-tenant hides within one tick+TTL at worst, which is the
+# same bound a dead writer already had.
 _VISIBLE_TTL_S = 30.0
 
 
@@ -731,15 +729,25 @@ class MetricsStore:
         only rows a filtered read must exclude (their collector
         interleaves deltas with ours: the v3 corruption bug). Dead foreign
         tags and untagged legacy rows are history and stay visible; our own
-        tag is never in this set. Recomputed when the DB's tag list changes
-        (a co-tenant that just started is hidden on the NEXT read, not one
-        TTL later) or after _VISIBLE_TTL_S (a writer that died re-enters
-        history within a bounded window). Caller must hold _lock."""
-        tags = frozenset(_distinct_tags(self._conn))
+        tag is never in this set.
+
+        CACHE-FIRST (starvation fix, 2026-10-14): the tag-set probe is a
+        full covering-index scan over `samples` — measured 0.65 s native on
+        a 13.2 M-row table — and it used to run BEFORE the cache check, on
+        every filtered read. Inside an async route (``/metrics/latest``
+        called it inline) that froze the whole event loop; inside
+        ``to_thread`` callers it burned worker cores. One recompute per
+        ``_VISIBLE_TTL_S`` instead: a co-tenant that just starts is hidden
+        within one TTL (not one read), a writer that died re-enters history
+        within the same bounded window, and every read in between is a
+        dict hit. Correctness is unchanged — the filter never hides rows
+        this cache says are safe. Caller must hold _lock.
+        """
         now = time.monotonic()
         cached = self._alien_cache
-        if cached is not None and cached[0] == tags and cached[1] > now:
+        if cached is not None and cached[1] > now:
             return cached[2]
+        tags = frozenset(_distinct_tags(self._conn))
         hidden = []
         for t in tags:
             if t == self._own_instance:

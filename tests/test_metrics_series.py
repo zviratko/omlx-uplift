@@ -199,6 +199,36 @@ def test_samples_are_tagged_and_reads_filter_co_tenant(tmp_path):
         s.close()
 
 
+def test_alien_probe_is_cache_first(tmp_path, monkeypatch):
+    """LOOP-SAFE: the tag-set DISTINCT scan must run AT MOST once per TTL,
+    never per read — measured 0.65 s on a 13.2 M-row samples table, and
+    the pre-fix order (probe, then compare) ran it on every filtered read.
+    Semantics survive: after the cache lapses, a new live co-tenant is
+    hidden again."""
+    from omlx_uplift import store as st
+
+    probes = {"n": 0}
+    real = st._distinct_tags
+
+    def counting(conn):
+        probes["n"] += 1
+        return real(conn)
+
+    monkeypatch.setattr(st, "_distinct_tags", counting)
+    s = st.MetricsStore(path=tmp_path / "m.sqlite3")
+    try:
+        s.write_samples({"k": 1.0}, ts=20.0)
+        for _ in range(5):
+            s.series("k", 10_000, now=100.0, instance=st.VISIBLE_INSTANCES)
+            s.latest("k", instance=st.VISIBLE_INSTANCES)
+        assert probes["n"] == 1                     # ONE probe for ten reads
+        s._alien_cache = None                       # stand-in for TTL expiry
+        s.series("k", 10_000, now=100.0, instance=st.VISIBLE_INSTANCES)
+        assert probes["n"] == 2                     # recomputed after lapse
+    finally:
+        s.close()
+
+
 def test_split_instance_tags():
     """Tag parsing: well-formed, missing delimiter, and unparseable PID all
     degrade without raising (an unparseable tag can never be proven dead,

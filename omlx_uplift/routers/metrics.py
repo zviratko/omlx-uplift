@@ -36,11 +36,14 @@ async def metrics_latest(keys: str = "", is_admin: bool = Depends(require_admin)
     not drive the live line (latest() orders own rows first)."""
     wanted = [k.strip() for k in keys.split(",") if k.strip()][:16]
     store = get_collector().store
-    # HIST-1: visible policy (own rows + dead-session history; a live
-    # co-tenant's newest point must not drive the live line — the store's
-    # latest() orders own rows first under this sentinel).
-    return {"latest": {k: store.latest(k, instance=store.visible_instances())
-                       for k in wanted}}
+    # HIST-1: visibility policy — LOOP-SAFE: the whole dict runs in a
+    # worker thread (latest() takes the store lock and may run the
+    # once-per-TTL alien probe; 16 of those inline would queue every other
+    # response behind them on this loop).
+    def _read_all():
+        inst = store.visible_instances()
+        return {k: store.latest(k, instance=inst) for k in wanted}
+    return {"latest": await asyncio.to_thread(_read_all)}
 
 
 @api_router.get("/metrics/series")

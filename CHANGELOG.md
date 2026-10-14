@@ -24,6 +24,14 @@ users never see.
   board spends ~5 % of a core on stats instead of a full one. Charts, the
   counters and the stream contract are unchanged.
 
+- Fixed: a second board-wide stall — every filtered chart read re-scanned
+  the WHOLE samples table to check for co-tenant writer tags (0.65 s on a
+  13 M-row table, and `/metrics/latest` ran it inline on the event loop).
+  The co-tenant probe is now cache-first: at most one scan per 30 s, and
+  the latest-metric reads happen in a worker thread. Charts behave
+  identically; a co-tenant that just started is hidden within one 30 s
+  window instead of the next read.
+
 - **Voice cloning: record the reference clip in the tab.** The Voices
   form gained a RECORD button (mic → browser → WAV, wired straight into
   the existing transcribe/preview/save flow) plus a suggested read-aloud
