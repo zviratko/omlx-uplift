@@ -844,16 +844,33 @@ class MetricsStore:
         stops on restart; the newest own point then wins)."""
         with self._rlock:      # SPLIT-READ
             frag, args = self._instance_sql(instance)
-            # own rows (TRUE=1) first, then newest — history fills gaps only
-            order = " ORDER BY (instance IS NOT NULL" \
-                    " AND instance=?) DESC, ts DESC LIMIT 1" \
-                if instance == VISIBLE_INSTANCES else " ORDER BY ts DESC LIMIT 1"
-            q = "SELECT ts, value FROM samples WHERE key=?" + frag + order
             if instance == VISIBLE_INSTANCES:
-                cur = self._rconn.execute(q, [key] + args + [self._own_instance])
+                # SQUEEZE-LATEST: the original single query ordered by the
+                # COMPUTED key (instance=own) DESC, ts DESC — which defeats
+                # the (key, ts) index and scanned every row of the key
+                # (468 K on a bench day => 0.49 s per call, measured). Same
+                # semantics from two index-fast queries: own-tag newest
+                # first (the live line follows OUR collector whenever its
+                # rows exist), then any visible newest as history backfill
+                # (own writer stopped after a restart; the newest foreign/
+                # legacy point then fills the gap).
+                cur = self._rconn.execute(
+                    "SELECT ts, value FROM samples WHERE key=?" + frag
+                    + " AND instance=? ORDER BY ts DESC LIMIT 1",
+                    [key] + args + [self._own_instance])
+                row = cur.fetchone()
+                if row is None:
+                    cur = self._rconn.execute(
+                        "SELECT ts, value FROM samples WHERE key=?" + frag
+                        + " ORDER BY ts DESC LIMIT 1",
+                        [key] + args)
+                    row = cur.fetchone()
             else:
-                cur = self._rconn.execute(q, [key] + args)
-            row = cur.fetchone()
+                cur = self._rconn.execute(
+                    "SELECT ts, value FROM samples WHERE key=?" + frag
+                    + " ORDER BY ts DESC LIMIT 1",
+                    [key] + args)
+                row = cur.fetchone()
         return {"ts": row[0], "v": row[1]} if row else None
 
     def recent_requests(self, limit: int = 200) -> list[dict]:
