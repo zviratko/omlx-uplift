@@ -13,6 +13,15 @@ users never see.
 
 ## Unreleased
 
+- **Decision bench scores any model.** The model picker split into
+  **Decision models** (native heads, `/v1/systemone`) and **Other models**
+  (any chat model, scored through the new upstream `/v1/decisions` readout
+  path). Groups come from the server now, and when the running omlx build
+  predates `/v1/decisions` the Other-models group stays visible but disabled
+  with the reason — nothing silently disappears. Result rows that were
+  scored generatively are marked `(decisions)` in the table and exports, so
+  a number is never quoted without the path that produced it.
+
 - **Sync to upstream 6d17522 (model settings keep saving).** Upstream
   deleted eight `dflash_*` cache/quant knobs and the server rejects unknown
   keys — Uplift no longer sends them, so model-settings saves keep working

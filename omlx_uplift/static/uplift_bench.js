@@ -4084,6 +4084,24 @@ function MTEB(kind) {
 var DEC_LIMITS = [0, 25, 50, 100];
 function fmt4(v) { return v == null ? '\u2014' : Number(v).toFixed(4); }
 
+/* DEC-API marker: a run scored through /v1/decisions (any chat model) rather
+   than the native decision heads. CHOSEN FORM = a ' (decisions)' suffix on
+   the Model text, NOT a new 'Scoring' column: a column needs a 10th header
+   key, shifts every existing column, and repeats one of two values down the
+   whole table for a native-only run set. The suffix rides on the Model cell
+   and on the Model column of the Copy / Markdown / CSV exports, so a pasted
+   table still says which endpoint produced the number.
+   Contract: rows gain path:'native'|'generic'; rows written before the
+   feature have NO path (engine:'systemone') and must render untouched, so
+   missing path = native. engine:'decisions' is accepted as a marker when
+   path is absent (a row can only reach that engine via the generic path). */
+function decModelCell(r) {
+    var id = String((r && r.model_id) || '');
+    var generic = !!r && (r.path ? r.path === 'generic'
+                                 : r.engine === 'decisions');
+    return generic ? id + ' (decisions)' : id;
+}
+
 var DEC = {
     state: null,
 
@@ -4143,21 +4161,82 @@ var DEC = {
         return f;
     },
 
+    /* DEC model picker (design brief D): ONE select, TWO optgroups —
+       'Decision models' (native /v1/systemone decision heads) and 'Other
+       models' (any chat model scored through /v1/decisions). The GROUPS come
+       from the server (`/bench/decision/models`): only the server can probe
+       whether this omlx build exposes /v1/decisions, so the client no longer
+       guesses on engine_type. /models is still fetched — it is the row source
+       for the native group (membership keeps the ids the manager actually
+       has) and carries the display rows/flags. Order inside both groups is
+       the SERVER's id order, never a client sort.
+       Degrade honestly: if the groups endpoint fails (pre-feature server),
+       fall back to the previous single-group behaviour so the panel never
+       bricks. If the server says the generic path is unavailable, the 'Other
+       models' group stays visible with every option disabled plus a leading
+       disabled note — a greyed group that explains itself beats a silent
+       omission. When the path IS available but no chat model is installed,
+       the empty group is dropped: there is nothing to show and nothing to
+       apologise for. */
     loadModels: async function () {
         var d = dom();
+        var sel = gid('bench-dec-model');
+        if (!sel || !d) return;
+        // one bad row must not leave the picker half-built: the whole fill
+        // is guarded exactly like the pre-feature version (silently keeps the
+        // placeholder; start() surfaces the real error)
         try {
-            var data = await d.fetchJson(api() + '/models');
-            var sel = gid('bench-dec-model');
-            if (!sel) return;
-            var usable = ((data && data.models) || []).filter(function (m) {
-                return (m.engine_type || m.model_type) === 'decision';
+            var both = await Promise.all([
+                d.fetchJson(api() + '/models').catch(function () { return null; }),
+                d.fetchJson(api() + '/bench/decision/models')
+                    .catch(function () { return null; }),
+            ]);
+            var rows = ((both[0] && both[0].models) || []);
+            // null-proto: a model id like 'toString' must not read as installed
+            var present = Object.create(null);
+            rows.forEach(function (m) {
+                var id = String((m && (m.id || m.model_id)) || '');
+                if (id) present[id] = m;
             });
-            var ph2 = el('option', null, t('bench.config.model_placeholder', 'Select model…'));
+            var ph2 = el('option', null,
+                t('bench.config.model_placeholder', 'Select model…'));
             ph2.value = '';
             sel.replaceChildren(ph2);
-            usable.forEach(function (m) {
-                sel.appendChild(el('option', null, m.id || m.model_id));
+            var mk = function (label, disabled) {
+                var o = el('option', null, label);
+                o.value = label;
+                if (disabled) o.disabled = true;
+                return o;
+            };
+            var g = both[1];
+            if (!g || !Array.isArray(g.native)) {
+                // legacy single group (the behaviour before the path split)
+                rows.filter(function (m) {
+                    return (m.engine_type || m.model_type) === 'decision';
+                }).forEach(function (m) {
+                    sel.appendChild(mk(String(m.id || m.model_id || '')));
+                });
+                return;
+            }
+            var nat = el('optgroup');
+            nat.label = t('uplift.bench.dec_group_native', 'Decision models');
+            (g.native || []).forEach(function (id) {
+                if (present[id]) nat.appendChild(mk(String(id)));
             });
+            // same rule as below: an empty group labels nothing, so skip it
+            if (nat.children.length) sel.appendChild(nat);
+            var available = !!g.generic_available;
+            var other = el('optgroup');
+            other.label = t('uplift.bench.dec_group_generic', 'Other models');
+            if (!available) {
+                // capability-honest note, FIRST in the group (see brief D)
+                other.appendChild(mk(t('uplift.bench.dec_generic_needs_newer',
+                    'Other models need /v1/decisions — update omlx'), true));
+            }
+            (g.generic || []).forEach(function (id) {
+                other.appendChild(mk(String(id), !available));
+            });
+            if (!available || other.children.length) sel.appendChild(other);
         } catch (e) { /* start surfaces errors */ }
     },
 
@@ -4373,7 +4452,7 @@ var DEC = {
             var tr = el('tr');
             var packName = r.pack || '';
             tr.append(
-                el('td', null, String(r.model_id || '')),
+                el('td', null, decModelCell(r)),
                 el('td', null, t('uplift.bench.pack.' + packName.replace(/-/g, '_'), packName)),
                 el('td', null, fmt(r.accuracy)),
                 el('td', null, fmt(r.brier)),
@@ -4393,7 +4472,9 @@ var DEC = {
             resultsHead(function () {
                 return buildTableText(
                     [t('uplift.bench.decision', 'Decision'), ''],
-                    [{ label: 'Model', get: function (r) { return String(r.model_id || ''); } },
+                    // DEC-API: the Model column carries the ' (decisions)'
+                    // marker so a copied table says which endpoint scored it
+                    [{ label: 'Model', get: function (r) { return decModelCell(r); } },
                      { label: 'Benchmark', get: function (r) { return String(r.pack || ''); } },
                      { label: 'Accuracy', numeric: true, get: function (r) { return fmt4(r.accuracy); } },
                      { label: 'Brier', numeric: true, get: function (r) { return fmt4(r.brier); } },
@@ -4428,7 +4509,7 @@ var DEC = {
                 },
                 rows: function () { return selfD.state.results.slice().reverse(); },
                 cols: function () { return [
-                    { head: 'Model', get: function (r) { return r.model_id || ''; } },
+                    { head: 'Model', get: function (r) { return decModelCell(r); } },
                     { head: 'Benchmark', get: function (r) { return r.pack || ''; } },
                     { head: 'Accuracy', get: function (r) { return r.accuracy; } },
                     { head: 'Brier', get: function (r) { return r.brier; } },

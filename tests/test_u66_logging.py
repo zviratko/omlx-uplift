@@ -50,7 +50,7 @@ async def test_decision_start_and_finish_log(monkeypatch, tmp_path, caplog):
     from omlx_uplift import paths
     monkeypatch.setattr(paths, "uplift_store_dir", lambda: tmp_path)
     monkeypatch.setattr(de, "_accum", None)
-    monkeypatch.setattr(de, "_check_decision_model", lambda m: None)
+    monkeypatch.setattr(de, "resolve_path", lambda m: de.PATH_NATIVE)
     monkeypatch.setattr(de, "_lease", lambda m: _ok_cm(FakeEngine()))
     with caplog.at_level(logging.INFO, logger="omlx.uplift.decision"):
         out = await de.start({"model_id": "fake-model",
@@ -86,3 +86,45 @@ class _ok_cm:
 
     async def __aexit__(self, *a):
         return False
+
+
+async def _fake_generic_decide(engine, request):
+    """Generic-path stand-in: this file pins the LOGGING, and the installed
+    keg has no omlx.api.decisions to call for real (the generic loop itself
+    is pinned in tests/test_repl4c_decision.py)."""
+    answers = []
+    for q in request["questions"]:
+        answers.append({"type": "choice", "name": q["name"],
+                        "choice": q["choices"][0]["value"]}
+                       if q["type"] == "choice" else
+                       {"type": "predicate", "name": q["name"],
+                        "probability": 0.9})
+    return {"answers": answers, "input_tokens": 3, "cached_tokens": 1}
+
+
+@pytest.mark.asyncio
+async def test_generic_decision_run_logs_its_path(monkeypatch, tmp_path,
+                                                  caplog):
+    """A chat-model run says so out loud: path=generic on both house lines
+    and the per-pack INFO. 'decision bench completed' alone cannot tell an
+    operator whether /v1/systemone heads or /v1/decisions readouts produced
+    the number — the two paths are not comparable."""
+    from omlx_uplift import paths
+    monkeypatch.setattr(paths, "uplift_store_dir", lambda: tmp_path)
+    monkeypatch.setattr(de, "_accum", None)
+    monkeypatch.setattr(de, "resolve_path", lambda m: de.PATH_GENERIC)
+    monkeypatch.setattr(de, "_preprobe_letter_tokens", lambda engine: None)
+    monkeypatch.setattr(de, "_decide_generic", _fake_generic_decide)
+    monkeypatch.setattr(de, "_lease_chat", lambda m: _ok_cm(FakeEngine()))
+    with caplog.at_level(logging.INFO, logger="omlx.uplift.decision"):
+        out = await de.start({"model_id": "chat-model",
+                              "packs": ["arc-choice"], "limit": 1})
+        await de._active.task
+    msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    assert any(f"started: {out['run_id']}" in m and "path=generic" in m
+               for m in msgs), msgs
+    assert any(f"completed: {out['run_id']}" in m and "path=generic" in m
+               for m in msgs), msgs
+    assert any("pack arc-choice" in m and "1 scored" in m for m in msgs), msgs
+    assert de._active.results[0]["engine"] == "decisions"
+    monkeypatch.setattr(de, "_active", None)

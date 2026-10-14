@@ -100,7 +100,11 @@ NAT3_ROUTES = [
     # REPL-4c: decision literals sit in the same literal-before-dynamic
     # band (GET /bench/{run_id}/results would otherwise swallow
     # /bench/decision/results); dynamics are 4-segment, immune anyway.
+    # DEC-bench generic: +GET /bench/decision/models (literal, registered next
+    # to tasks and BEFORE the {run_id} dynamics — a 3-segment dynamic must
+    # never resolve it).
     ("GET", "/bench/decision/tasks"),
+    ("GET", "/bench/decision/models"),
     ("POST", "/bench/decision/start"),
     ("GET", "/bench/decision/active"),
     ("GET", "/bench/decision/results"),

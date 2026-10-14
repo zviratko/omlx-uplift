@@ -370,6 +370,21 @@ async def bench_decision_tasks(is_admin: bool = Depends(require_admin)):
     return decision_engine.tasks_payload()
 
 
+@api_router.get("/bench/decision/models")
+async def bench_decision_models(is_admin: bool = Depends(require_admin)):
+    """Picker split: Decision models (native /v1/systemone) vs chat models
+    (generic /v1/decisions) — classified SERVER-side from the engine pool,
+    so the UI stops guessing engine_type off /models rows.
+
+    {generic_available, generic_reason, native: [ids], generic: [ids]}.
+    generic is empty (and generic_available false, with the reason) on kegs
+    that predate upstream 981ebcc; embedding / reranker / audio_* /
+    markitdown rows are in neither list. Literal route, registered with the
+    other /bench/decision/ literals — BEFORE the {run_id} dynamics.
+    """
+    return decision_engine.classify_models()
+
+
 @api_router.post("/bench/decision/start")
 async def bench_decision_start(request: Request, is_admin: bool = Depends(require_admin)):
     body = await request.json()

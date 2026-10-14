@@ -5,7 +5,8 @@ Card 4c: no existing harness — the pack is in-house
 request format is bespoke (typed questions: choice / noul).
 
 Why in-process instead of a subprocess venv (contrast with REPL-4a/4b):
-the eval here IS a sequence of /v1/systemone calls — nothing to delegate.
+the eval here IS a sequence of endpoint calls — /v1/systemone on the
+native path, /v1/decisions on the generic one — nothing to delegate.
 We call the EXACT public endpoint logic (server.create_systemone) through
 upstream's real decision lease (`_LLMEngineLease` + `get_decision_engine`,
 wrapped as an async CM in _lease) so:
@@ -16,6 +17,34 @@ wrapped as an async CM in _lease) so:
 Error contract mirrored from server.py: DecisionContextLengthError ->
 per-item skip with reason, DecisionRequestError -> run fails (a fixture
 the endpoint rejects is a bug in US, not noise to hide).
+
+TWO SCORING PATHS (generic /v1/decisions extension; upstream 981ebcc +
+1b96f67), reported per run and per result row as "path":
+  "native"   decision models (pool engine_type == 'decision') scored
+             through /v1/systemone exactly as above — untouched.
+  "generic"  ANY chat model (engine_type 'batched' | 'vlm') scored by
+             mirroring server.create_decisions' else-arm IN-PROCESS:
+             _LLMEngineLease + get_engine_for_model (_lease_chat), then
+             omlx.api.decisions.decide(engine, DecisionRequest, multimodal,
+             prepare=_prepare_readout(engine)) — the same serving code the
+             HTTP route runs, the same eviction-proof lease, still no HTTP
+             self-call from inside the server.
+             Capability-gated, never version-pinned: kegs older than
+             981ebcc carry neither omlx/api/decisions.py nor the
+             SamplingParams.logits_observer hook the letter readouts need,
+             so decisions_capability() gates the path (classify_models
+             reports it, resolve_path enforces it) and uplift ships ahead
+             of keg bumps with the group empty-plus-reason.
+KNOWN deviations from the HTTP route, stated rather than papered over:
+  - get_server_metrics().record_request_complete() is NOT called, so
+    generic bench traffic is absent from the dashboard serving charts
+    (mirroring _decisions_body for that is follow-up work).
+  - _json_response_or_keepalive() is a transport concern; irrelevant
+    in-process.
+  - generic "input_tokens" is the SUM OVER READOUTS (one forward pass per
+    question, decisions.py), so token counts are NOT comparable across
+    paths and must never be averaged between them. Probe accounting stays
+    name-based (len(questions)) so probes line up: 3 + 1 shuffled re-ask.
 
 Scores per pack (metrics.py has the definitions):
   accuracy  — choice answer text == gold text
@@ -53,6 +82,18 @@ from .evals.systemone import loader, metrics
 logger = logging.getLogger("omlx.uplift.decision")
 
 KIND = "decision"
+
+# Eligibility split (design brief C). 'decision' is the native /v1/systemone
+# path; these two are the generic /v1/decisions path (chat + VLM). Every
+# other engine_type the pool can hold — embedding, reranker, audio_stt/
+# audio_tts/audio_sts, markitdown, sts — can never answer typed questions and
+# is NOT offered on either list (offering them re-creates the "load a 30B
+# just to fail" problem the original type gate exists to prevent).
+GENERIC_ENGINE_TYPES = ("batched", "vlm")
+NATIVE_ENGINE_TYPE = "decision"
+NEVER_SCORED_ENGINE_TYPES = ("embedding", "reranker", "markitdown", "sts")
+PATH_NATIVE = "native"
+PATH_GENERIC = "generic"
 
 try:  # new omlx (>= b75060e): the real classes raised by the decode path
     from omlx.models.decision import (DecisionContextLengthError,  # noqa: F401
@@ -142,6 +183,91 @@ def build_request(model_id: str, item: dict, *, seed: int,
             "questions": questions, "truncate": True}
 
 
+def build_generic_request(model_id: str, item: dict, *, seed: int,
+                          shuffle: bool) -> dict:
+    """One /v1/decisions body (DecisionRequest shape) for one fixture item.
+
+    Sibling of build_request for the generic path — a plain dict, no omlx
+    import here (the module must stay importable on kegs without the
+    feature). Question NAMES match the native legs ('answer' / 'gold' /
+    'distractor') so the same score_item + the same probe accounting
+    (3 legs + 1 shuffled re-ask) work on both paths.
+
+    Native 'noul' legs become 'predicate' questions (probability that the
+    quoted statement is true); the choice leg's criteria dict becomes an
+    ordered choices list whose `value` is the OPTION KEY, so the answer's
+    `choice` field is the same key the native path reports. Distractor
+    choice is deterministic and identical to build_request (first sorted
+    non-gold key) so two runs stay comparable.
+    """
+    options = item["options"]
+    keys = list(sorted(options))
+    if shuffle:
+        keys = keys[:]
+        random.Random(seed).shuffle(keys)
+    gold = options[item["answer"]]
+    distr_keys = [k for k in sorted(options) if k != item["answer"]]
+    distr = options[distr_keys[0]] if distr_keys else None
+    questions: list[dict] = [
+        {"type": "choice", "name": "answer",
+         "instructions": "Pick the single correct option.",
+         "choices": [{"value": k, "description": options[k]} for k in keys]},
+        {"type": "predicate", "name": "gold",
+         "instructions": 'Is this the correct answer: "' + gold + '"'},
+    ]
+    if distr is not None:
+        questions.append({
+            "type": "predicate", "name": "distractor",
+            "instructions": 'Is this the correct answer: "' + distr + '"'})
+    return {"model": model_id, "input": item["state"],
+            "questions": questions}
+
+
+def _adapt_answer(answer: dict) -> dict:
+    """One generic answer -> the native answer shape score_item reads.
+
+    choice: `choice` already carries the option KEY (we send keys as the
+    choice values), so it passes through untouched.
+    predicate: the scorer reads `noul`, the endpoint reports `probability`.
+    refusal: no letter mass at all — report NO choice (scored None, never
+    False: the model did not answer, it did not answer wrong).
+    """
+    atype = answer.get("type")
+    if atype == "predicate":
+        return {"type": "noul", "noul": answer.get("probability")}
+    if atype == "refusal":
+        return {"type": "refusal", "name": answer.get("name"), "choice": None}
+    return answer
+
+
+def adapt_generic_answers(result: dict) -> dict:
+    """decide()'s result -> the /v1/systemone response shape.
+
+    decide() returns answers as a LIST ordered by the request's questions,
+    each carrying its own `name` (decisions.py); score_item wants a DICT
+    keyed by question name in the native shapes. Adapter only — the scoring
+    math is shared by both paths, which is what keeps accuracy/brier/ece/
+    agreement comparable. `input_tokens` is the SUM OVER READOUTS on this
+    path (one pass per question) and is NOT comparable with the native
+    single-call figure; never average the two.
+    """
+    answers = (result or {}).get("answers") or []
+    by_name: dict[str, Any] = {}
+    if isinstance(answers, dict):        # already native-shaped (defensive)
+        by_name = {k: _adapt_answer(dict(v or {})) for k, v in answers.items()}
+    else:
+        for a in answers:
+            if not isinstance(a, dict):
+                continue
+            name = a.get("name")
+            if name is None:
+                continue                 # unaddressable: treated missing
+            by_name[str(name)] = _adapt_answer(a)
+    return {"answers": by_name,
+            "usage": {"input_tokens": (result or {}).get("input_tokens")},
+            "cached_tokens": (result or {}).get("cached_tokens")}
+
+
 def score_item(item: dict, res: dict, res_shuffle: Optional[dict]) -> dict:
     """Reduce two raw /v1/systemone responses to one item result row."""
     answers = res.get("answers") or {}
@@ -205,10 +331,15 @@ def pack_scores(rows: list[dict], elapsed_s: float, n_questions: int) -> dict:
 
 class DecisionRun:
     def __init__(self, run_id: str, model_id: str,
-                 packs: list[str], limit: int):
+                 packs: list[str], limit: int,
+                 path: str = PATH_NATIVE):
         self.run_id = run_id
         self.model_id = model_id
         self.kind = KIND
+        # 'native' (/v1/systemone heads) | 'generic' (/v1/decisions letter
+        # readouts). Default native: every pre-existing constructor — and
+        # every accumulated row written before the split — is a native run.
+        self.path = path or PATH_NATIVE
         self.packs = packs
         self.limit = limit
         self.status = "running"          # running|completed|cancelled|failed
@@ -244,31 +375,148 @@ async def start(body: dict) -> dict:
     if active_run() is not None:
         raise Conflict("a decision benchmark is already running")
     model_id, packs, limit = validate_body(body)
-    # type gate BEFORE leasing: pointing the bench at an LLM would load a
-    # 30B model just to fail — ask the pool what this id is first
-    _check_decision_model(model_id)
-    run = DecisionRun(f"sys1-{uuid.uuid4().hex[:12]}", model_id, packs, limit)
+    # type gate BEFORE leasing: pointing the bench at a model that cannot
+    # answer typed questions would load a 30B just to fail — ask the pool
+    # what this id is first, and pick the scoring path from the answer.
+    path = resolve_path(model_id)
+    run = DecisionRun(f"sys1-{uuid.uuid4().hex[:12]}", model_id, packs, limit,
+                      path=path)
     _active = run
     # U66: the house INFO-at-start / INFO-at-finish pair the classic bench
     # modules all have — a decision run was invisible in server.log even at
     # TRACE (user report), which reads as 'nothing happened'
     logger.info(f"uplift native decision bench started: {run.run_id} "
-                f"model={model_id} packs={packs} limit={limit or 'full'}")
+                f"model={model_id} path={path} packs={packs} "
+                f"limit={limit or 'full'}")
     run.task = asyncio.create_task(_runner(run))
     return {"run_id": run.run_id, "status": "running",
-            "model_id": model_id, "packs": packs}
+            "model_id": model_id, "packs": packs, "path": path}
+
+
+# ---- eligibility + capability (the picker's single source of truth) ---------
+
+def decisions_capability() -> tuple[bool, str]:
+    """Single honest gate for the generic /v1/decisions path. Uplift ships
+    ahead of keg bumps, so probe the three things the feature needs — never
+    a version string:
+      1. omlx.api.decisions        (the route module; 981ebcc)
+      2. SamplingParams.logits_observer (the engine hook 981ebcc added —
+         without it every readout dies on 'does not expose next-token
+         logits', so the module alone is NOT sufficient)
+      3. server.get_engine_for_model (the chat lease used by the else-arm)
+    Never raises: any import/attribute failure is a (False, reason) answer.
+    """
+    try:
+        from dataclasses import fields
+
+        import omlx.api.decisions  # noqa: F401  (absent on kegs < 981ebcc)
+        from omlx import server as _srv
+        from omlx.request import SamplingParams
+    except Exception as e:
+        return False, (f"omlx.api.decisions unavailable "
+                       f"({type(e).__name__}: {e})")
+    try:
+        names = {f.name for f in fields(SamplingParams)}
+    except TypeError:                 # not a dataclass any more: be literal
+        names = {n for n in ("logits_observer",) if hasattr(SamplingParams, n)}
+    if "logits_observer" not in names:
+        return False, ("engine has no logits_observer hook "
+                       "(needs upstream 981ebcc)")
+    if not callable(getattr(_srv, "get_engine_for_model", None)):
+        return False, "server.get_engine_for_model missing"
+    return True, ""
+
+
+def _pool() -> Optional[Any]:
+    """The live engine pool, or None when the server is not initialised
+    (tests, pre-boot). The private _entries access mirrors upstream's own
+    _is_decision_model (server.py) — one read point for both classifiers."""
+    try:
+        from omlx import server as _srv
+        return _srv.get_engine_pool()
+    except Exception:
+        return None
+
+
+def _pool_entries(pool=None) -> Optional[dict]:
+    """{model_id -> pool entry}, or None when the pool is not readable
+    (server not up / _entries renamed). Entries may be objects (upstream) or
+    plain dicts (test fakes)."""
+    pool = _pool() if pool is None else pool
+    if pool is None:
+        return None
+    entries = getattr(pool, "_entries", None)
+    return entries if isinstance(entries, dict) else None
+
+
+def _entry_engine_type(entry) -> Optional[str]:
+    if entry is None:
+        return None
+    if isinstance(entry, dict):
+        return entry.get("engine_type")
+    return getattr(entry, "engine_type", None)
+
+
+def classify_models() -> dict:
+    """Picker payload, FROZEN with the static lane (do not rename keys):
+    {"generic_available": bool, "generic_reason": str (empty when
+    available), "native": [ids], "generic": [ids]} — both lists sorted.
+
+    Server-side classification so the UI stops guessing engine_type from
+    /models rows. Pool unavailable -> empty lists (the capability answer
+    still stands: it does not need the pool). embedding / reranker /
+    audio_* / markitdown rows are in NEITHER group.
+    """
+    ok, reason = decisions_capability()
+    out: dict[str, Any] = {"generic_available": ok, "generic_reason": reason,
+                           "native": [], "generic": []}
+    for mid, entry in (_pool_entries() or {}).items():
+        et = _entry_engine_type(entry)
+        if et in NEVER_SCORED_ENGINE_TYPES or str(et or "").startswith("audio_"):
+            continue      # never offered on either list, gated or not
+        if et == NATIVE_ENGINE_TYPE:
+            out["native"].append(mid)
+        elif ok and et in GENERIC_ENGINE_TYPES:
+            out["generic"].append(mid)
+    out["native"].sort()
+    out["generic"].sort()
+    return out
+
+
+def resolve_path(model_id: str) -> str:
+    """'native' | 'generic' for this model — raises NotFound / BadInput
+    exactly like the old boolean gate, plus the capability refusal.
+
+    Pool not up -> 'native' (REPL-4c's original behaviour: the lease below
+    produces the real error, and unit tests never need a pool). A pool that
+    IS up but holds no entry for the id is a NotFound, never a passthrough.
+    """
+    entries = _pool_entries()
+    if entries is None:
+        return PATH_NATIVE
+    entry = entries.get(model_id)
+    if entry is None:
+        raise NotFound(f"model not found: {model_id}")
+    et = _entry_engine_type(entry)
+    if et == NATIVE_ENGINE_TYPE:
+        return PATH_NATIVE
+    if et in GENERIC_ENGINE_TYPES:
+        ok, reason = decisions_capability()
+        if not ok:
+            raise BadInput(f"{model_id} is a chat model; scoring it needs "
+                           f"/v1/decisions, which this server lacks: {reason}")
+        return PATH_GENERIC
+    raise BadInput(f"{model_id} (engine_type={et}) cannot be scored by the "
+                   "decision bench (only decision models via /v1/systemone "
+                   "and chat models via /v1/decisions)")
 
 
 def _check_decision_model(model_id: str) -> None:
-    from omlx import server as _srv
-    try:
-        pool = _srv.get_engine_pool()
-    except Exception:
-        return   # pool not up yet; the lease below produces the real error
-    entry = pool._entries.get(model_id)
-    if entry is None:
-        raise NotFound(f"model not found: {model_id}")
-    if getattr(entry, "engine_type", None) != "decision":
+    """Legacy native-only seam (REPL-4c), kept alive: start() now routes
+    through resolve_path, this asserts the /v1/systemone path specifically
+    (and is the monkeypatch target of the U66 logging tests)."""
+    path = resolve_path(model_id)
+    if path != PATH_NATIVE:
         raise BadInput(f"{model_id} is not a decision model "
                        "(this bench scores /v1/systemone models)")
 
@@ -309,15 +557,54 @@ def _lease(model_id: str):
     return _cm()
 
 
+def _lease_chat(model_id: str):
+    """Async CM yielding a leased CHAT engine — the create_decisions
+    else-arm's lease (tip server.py: `lease = _LLMEngineLease()` /
+    `engine = await get_engine_for_model(request.model, lease=lease)` /
+    `finally: await lease.release()`), same enter/exit discipline as _lease.
+
+    Note the keyword: get_engine_for_model takes `lease=` (positional is
+    `model`). When the acquisition raises, __aenter__ raises BEFORE any
+    yield, the finally releases the never-taken lease (model_id None ->
+    no-op upstream) and _runner correctly skips __aexit__ — the exact
+    protocol the lease-protocol tests pin for both seams.
+    """
+    from contextlib import asynccontextmanager
+    from omlx import server as _srv
+
+    @asynccontextmanager
+    async def _cm():
+        lease = _srv._LLMEngineLease()
+        try:
+            yield await _srv.get_engine_for_model(model_id, lease=lease)
+        finally:
+            await lease.release()
+
+    return _cm()
+
+
+def _lease_for(model_id: str, path: str):
+    """The seam _runner actually calls, so path selection is one line and
+    testable: native -> the decision engine, generic -> the chat engine."""
+    return _lease_chat(model_id) if path == PATH_GENERIC else _lease(model_id)
+
+
 async def _runner(run: DecisionRun) -> None:
     cm = None
     entered = False
     engine = None
     _t0 = time.perf_counter()
+    path = getattr(run, "path", None) or PATH_NATIVE
     try:
-        cm = _lease(run.model_id)
+        cm = _lease_for(run.model_id, path)
         engine = await cm.__aenter__()
         entered = True
+        if path == PATH_GENERIC:
+            # fail FAST: decide() computes the A-Z letter token ids up front
+            # and raises for every question if the tokenizer cannot spell them
+            # (decisions.py letter_token_ids). Discovering that after 200 items
+            # — or after pack 1 of 3 — is a wasted GPU hour.
+            _preprobe_letter_tokens(engine)
         n = len(run.packs)
         for i, pack_name in enumerate(run.packs):
             if run.cancelled:
@@ -337,7 +624,7 @@ async def _runner(run: DecisionRun) -> None:
             run.status = "completed"
             run.phase = "completed"
             logger.info(f"uplift native decision bench completed: "
-                        f"{run.run_id} model={run.model_id} "
+                        f"{run.run_id} model={run.model_id} path={path} "
                         f"packs={len(run.results)} in "
                         f"{time.perf_counter() - _t0:.1f}s")
             await run.send({"type": "done", "summary": {
@@ -377,6 +664,8 @@ async def _runner(run: DecisionRun) -> None:
 
 async def _run_pack(run: DecisionRun, engine, pack_name: str,
                     ctx_err, req_err) -> None:
+    path = getattr(run, "path", None) or PATH_NATIVE
+    generic = path == PATH_GENERIC
     pack = loader.load_pack(pack_name)
     items = pack["items"]
     if run.limit:
@@ -401,22 +690,34 @@ async def _run_pack(run: DecisionRun, engine, pack_name: str,
         # the same logger.log(5, ...) call shape)
         logger.log(5, "decision %s %s item %d/%d", run.run_id,
                    pack_name, j + 1, len(items))
-        req = build_request(run.model_id, item, seed=j, shuffle=False)
+        build = build_generic_request if generic else build_request
+        call = _decide_generic if generic else _decide
+        req = build(run.model_id, item, seed=j, shuffle=False)
         try:
-            res = await _decide(engine, req)
+            res = await call(engine, req)
         except ctx_err:
             skipped += 1     # state too long even truncated: honest skip
             continue
         except req_err as e:
             raise BadInput(f"{pack_name} item {item['id']}: {e}") from e
+        # probe accounting is NAME-based and identical on both paths
+        # (3 legs + 1 shuffled re-ask), which is what makes ms/probe
+        # comparable. Token counts are NOT: generic input_tokens is the
+        # SUM OVER READOUTS (one forward pass per question), native is one
+        # batched call — never average the two across paths.
         n_q += len(req["questions"])
         res_s = None
         try:
-            res_s = await _decide(engine, build_request(
+            res_s = await call(engine, build(
                 run.model_id, item, seed=j, shuffle=True))
             n_q += 1
         except (ctx_err, req_err):
             pass             # re-ask is optional; agreement stays None
+        if generic:
+            # adapter only — score_item's math is shared, so accuracy /
+            # brier / ece / agreement stay cross-path comparable
+            res = adapt_generic_answers(res)
+            res_s = adapt_generic_answers(res_s) if res_s else None
         rows.append(score_item(item, res, res_s))
     elapsed = time.perf_counter() - t0
     if run.cancelled:
@@ -424,7 +725,13 @@ async def _run_pack(run: DecisionRun, engine, pack_name: str,
                            # is NOT scored/persisted (partial rows would
                            # silently pollute the accumulated table)
     row = {"pack": pack_name, "model_id": run.model_id, "kind": run.kind,
-           "engine": "systemone", "skipped": skipped,
+           # 'path' is the picker truth ('native' | 'generic'); 'engine'
+           # stays and mirrors the endpoint that scored the row
+           # ('systemone' | 'decisions') — legacy readers use it, and rows
+           # written before the split have neither and default to native.
+           "path": path,
+           "engine": "decisions" if generic else "systemone",
+           "skipped": skipped,
            "ts": int(time.time()),
            # per-item raw rows ride on the result row: it is persisted to
            # accumulated.json verbatim, so the existing JSON download exports
@@ -437,7 +744,8 @@ async def _run_pack(run: DecisionRun, engine, pack_name: str,
     run.results.append(row)
     get_accumulated().append(row)
     _save_accum()   # write-through: a crash keeps finished packs
-    logger.info(f"decision {run.run_id} pack {pack_name}: "
+    logger.info(f"decision {run.run_id} pack {pack_name} "
+                f"({row['path']}/{row['engine']}): "
                 f"{len(rows)} scored, {skipped} skipped, {elapsed:.1f}s")
     await run.send({"type": "result", "data": row})
 
@@ -446,6 +754,172 @@ async def _decide(engine, request: dict) -> dict:
     """The create_systemone logic in-process: encode -> systemone."""
     plan = await engine.encode(request, truncate=request.get("truncate", True))
     return await engine.systemone(plan)
+
+
+# ---- generic path: /v1/decisions on a chat model (capability-gated) ---------
+
+_LETTERS = [chr(code) for code in range(ord("A"), ord("Z") + 1)]
+
+
+def probe_letter_tokens(tokenizer) -> Optional[str]:
+    """None when this tokenizer can spell every option letter, else the
+    reason it cannot.
+
+    Mirror of upstream decisions.letter_token_ids' precondition, kept HERE so
+    the fail-fast check exists on kegs that do not have the module at all
+    (identical walk: bare + space-prefixed single-token spellings, and no
+    letter may reuse another letter's id — a collision makes the readout
+    unattributable). _preprobe_letter_tokens prefers the real upstream
+    function when it is importable.
+    """
+    seen: set[int] = set()
+    for letter in _LETTERS:
+        ids: list[int] = []
+        for text in (letter, " " + letter):
+            try:
+                encoded = tokenizer.encode(text, add_special_tokens=False)
+            except TypeError:                 # tokenizers without the kwarg
+                encoded = tokenizer.encode(text)
+            except Exception as e:
+                return f"tokenizer.encode({text!r}) raised {e!r}"
+            if len(encoded) == 1 and int(encoded[0]) not in ids:
+                ids.append(int(encoded[0]))
+        if not ids or seen.intersection(ids):
+            return f"no distinct single token for the option letter {letter!r}"
+        seen.update(ids)
+    return None
+
+
+def _preprobe_letter_tokens(engine) -> None:
+    """Fail the RUN (BadInput) before pack 1 when the tokenizer cannot carry
+    the letter readouts — upstream raises the same way per question, which
+    would burn the whole lease before telling us."""
+    tokenizer = getattr(engine, "tokenizer", None)
+    if tokenizer is None:
+        return        # nothing to check without a tokenizer (decide() will
+                      # produce the engine's own honest error)
+    reason = None
+    try:                                    # prefer the real thing (parity)
+        from omlx.api.decisions import letter_token_ids
+    except Exception:
+        reason = probe_letter_tokens(tokenizer)
+    else:
+        try:
+            letter_token_ids(tokenizer)
+        except Exception as e:
+            reason = str(e) or type(e).__name__
+    if reason:
+        raise BadInput("tokenizer lacks distinct single-letter tokens A-Z; "
+                       "/v1/decisions cannot score this model"
+                       f" ({reason})")
+
+
+def _looks_like_context_error(exc) -> bool:
+    """Overflow in any spelling the serving stack uses (the generic path
+    reaches it as an HTTPException raised in-process, not as a response)."""
+    text = str(getattr(exc, "detail", None) or exc).lower()
+    status = getattr(exc, "status_code", None)
+    markers = ("context_length_exceeded", "prompt too long",
+               "maximum context length", "context window", "too many tokens")
+    return bool(status in (400, 413)
+                and any(m in text for m in markers))
+
+
+def _generic_multimodal(engine) -> bool:
+    """create_decisions' test, with the import guarded: `isinstance(engine,
+    VLMBatchedEngine) or getattr(engine, 'supports_multimodal_fallback',
+    False)`. Class-name fallback keeps it honest if the import path moves."""
+    try:
+        from omlx.engine import VLMBatchedEngine
+    except Exception:
+        VLMBatchedEngine = None
+    if VLMBatchedEngine is not None and isinstance(engine, VLMBatchedEngine):
+        return True
+    if type(engine).__name__ == "VLMBatchedEngine":
+        return True
+    return bool(getattr(engine, "supports_multimodal_fallback", False))
+
+
+def _prepare_readout(engine, model_id: Optional[str] = None):
+    """prepare(messages) -> extra engine.chat kwargs, mirroring tip
+    create_decisions' inner _prepare_readout: render the readout prompt
+    through the real chat-prompt path, validate the context window, and hand
+    the already-prepared prompt to chat() so the prefix cache is reused.
+
+    Returns None (decide()'s degraded arm: plain engine.chat) when the
+    helpers are missing, and raises our DecisionContextLengthError on
+    overflow so _run_pack skips the ITEM instead of failing the run — the
+    same handling the native path gives DecisionContextLengthError.
+    """
+    from omlx import server as _srv
+
+    prep = getattr(_srv, "_prepare_chat_prompt_for_request", None)
+    validate = getattr(_srv, "validate_context_window", None)
+    if not (callable(prep) and callable(validate)):
+        return None
+    try:
+        from omlx.api.decisions import READOUT_TEMPLATE_KWARGS
+    except Exception:
+        READOUT_TEMPLATE_KWARGS = {"enable_thinking": False}
+
+    def _prepare(messages):
+        try:
+            num_prompt_tokens, prepared = prep(
+                engine, messages,
+                chat_template_kwargs=dict(READOUT_TEMPLATE_KWARGS),
+                is_partial=True)
+        except Exception as e:
+            if _looks_like_context_error(e):
+                raise DecisionContextLengthError(str(
+                    getattr(e, "detail", None) or e)) from e
+            raise
+        try:
+            validate(num_prompt_tokens, model_id)
+        except Exception as e:
+            if _looks_like_context_error(e):
+                raise DecisionContextLengthError(str(
+                    getattr(e, "detail", None) or e)) from e
+            raise
+        return {} if prepared is None else {"_prepared_prompt": prepared}
+
+    return _prepare
+
+
+async def _decide_generic(engine, request: dict) -> dict:
+    """The create_decisions else-arm in-process (mirror of _decide for the
+    native path): DecisionRequest -> decide() -> {answers, input_tokens,
+    cached_tokens}. Answers come back as a LIST ordered by the request's
+    questions; adapt_generic_answers maps them onto score_item's shape.
+
+    Error translation (the HTTP route turns these into 4xx; we have no
+    transport, so they become the classes _run_pack already handles):
+    context overflow -> DecisionContextLengthError (skip the item),
+    DecisionsRequestError/pydantic ValidationError -> DecisionRequestError
+    (fail the run: a fixture the endpoint rejects is a bug in US).
+    """
+    from omlx.api.decisions import DecisionsRequestError, decide
+    from omlx.api.decisions_models import DecisionRequest
+
+    dr = DecisionRequest(**request)
+    prepare = _prepare_readout(engine, request.get("model"))
+    try:
+        result = await decide(engine, dr, _generic_multimodal(engine),
+                              prepare=prepare)
+    except DecisionContextLengthError:
+        raise                      # already translated by _prepare_readout
+    except DecisionRequestError:
+        raise
+    except Exception as e:
+        if _looks_like_context_error(e):
+            raise DecisionContextLengthError(str(
+                getattr(e, "detail", None) or e)) from e
+        if isinstance(e, DecisionsRequestError) or type(e).__name__ in (
+                "DecisionsRequestError", "ValidationError"):
+            raise DecisionRequestError(str(e)) from e
+        raise
+    return {"answers": result.get("answers") or [],
+            "input_tokens": result.get("input_tokens"),
+            "cached_tokens": result.get("cached_tokens")}
 
 
 def _finite(v):

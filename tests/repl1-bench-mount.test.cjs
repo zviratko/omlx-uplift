@@ -76,6 +76,23 @@ function allText(el) {
     return s;
 }
 
+/* DEC-GROUPS: read the model picker back out of the DOM stub.
+   { groups: [{label, options:[{text, disabled}]}], loose: [option...] } —
+   'loose' is what the pre-feature (and the fallback) picker produces, so a
+   test can prove WHICH shape the panel painted, not just which ids are in it. */
+function decPicker(sel) {
+    const groups = [];
+    const loose = [];
+    const opt = (o) => ({ text: o.textContent, disabled: !!o.disabled,
+                          value: o.value });
+    for (const kid of (sel && sel.children) || []) {
+        if (kid.tagName === 'optgroup')
+            groups.push({ label: kid.label, options: (kid.children || []).map(opt) });
+        else if (kid.tagName === 'option') loose.push(opt(kid));
+    }
+    return { groups, loose };
+}
+
 const CAT = {   // fake merged catalog: classic + uplift keys, one marker lang
     'bench.heading': 'BENCHHEADING',
     'navbar.dropdown.performance': 'SUBTP',
@@ -100,6 +117,10 @@ const CAT = {   // fake merged catalog: classic + uplift keys, one marker lang
     'uplift.bench.decision': 'SUBDEC',
     'uplift.bench.decision_desc': 'DECDESC',
     'uplift.bench.dec_accuracy': 'DECACC',
+    // DEC-GROUPS: the two picker optgroups + the capability note
+    'uplift.bench.dec_group_native': 'DECGRPNAT',
+    'uplift.bench.dec_group_generic': 'DECRPOTHER',
+    'uplift.bench.dec_generic_needs_newer': 'DECNEEDSNEWER',
     'uplift.bench.pack.arc_choice': 'PACKARC',
     'uplift.bench.pack.bbq_choice': 'PACKBBQ',
     'uplift.bench.pack.tqa_choice': 'PACKTQA',
@@ -107,12 +128,26 @@ const CAT = {   // fake merged catalog: classic + uplift keys, one marker lang
     'modal.model_settings.qwen_ane_tune_start': 'ANESTART',
 };
 
-function load() {
+function load(opts) {
+    opts = opts || {};
     const { byId, document } = makeHarness();
+    // DEC-GROUPS: the server-owned picker groups (frozen contract: ids only,
+    // already sorted server-side). Override per-test to drive the disabled /
+    // fallback states.
+    const decModels = opts.decModels === null ? null : (opts.decModels || {
+        generic_available: true, generic_reason: '',
+        native: ['clef-flash-4bit'], generic: ['SmolLM2-360M-Instruct-oQ4'] });
     const win = {
         UpliftCore: { t: (k) => (CAT[k] == null ? k : CAT[k]) },
         UpliftDom: { fetchJson: async (u) => {
-                    if (String(u).endsWith('/models')) {
+                    u = String(u);
+                    // BEFORE the /models branch: this URL ENDS with
+                    // '/models' too, so ordering is the whole stub contract
+                    if (u.includes('/bench/decision/models')) {
+                        if (decModels === null) throw new Error('404');
+                        return decModels;
+                    }
+                    if (u.endsWith('/models')) {
                         return { models: [
                             { id: 'Qwen3-Embedding-0.6B-4bit-DWQ', engine_type: 'embedding' },
                             { id: 'jina-reranker-v3.5-mlx-q8', engine_type: 'reranker' },
@@ -295,19 +330,57 @@ test('REPL-4c: decision subtab paints pack grid + model filter + results table',
     assert.ok(text.includes('PACKARC') && text.includes('PACKBBQ')
         && text.includes('PACKTQA'), 'pack cards translated');
     assert.ok(!text.includes('arc-choice'), 'no raw pack id leaks to UI');
-    // model filter shows ONLY decision models
-    const opts = [];
-    (function walk(n) {
-        if (n && n.tagName === 'option') opts.push(n.textContent);
-        for (const k of (n && n.children) || []) walk(k);
-    })(panel);
-    assert.ok(opts.includes('clef-flash-4bit'), 'decision model listed');
-    assert.ok(!opts.includes('SmolLM2-360M-Instruct-oQ4'),
-        'LLM must not be selectable on the decision tab');
+    // model picker: TWO server-owned groups, decision models in the first
+    const picker = decPicker(byId['bench-dec-model']);
+    const nat = picker.groups.find(g => g.label === 'DECGRPNAT');
+    const oth = picker.groups.find(g => g.label === 'DECRPOTHER');
+    assert.ok(nat && oth, 'two optgroups (Decision models / Other models) '
+        + 'with labels through the catalog');
+    assert.deepEqual(picker.groups.map(g => g.label), ['DECGRPNAT', 'DECRPOTHER'],
+        'decision group first, other models second');
+    assert.deepEqual(nat.options.map(o => o.text), ['clef-flash-4bit'],
+        'decision model in the native group');
+    assert.ok(!nat.options.some(o => o.disabled), 'native group selectable');
+    // REPL-4C PIN INVERTED: a chat model (engine_type 'llm' in /models) is
+    // now a legal decision-bench target — scored through /v1/decisions — and
+    // appears under 'Other models'. The group comes from the SERVER's
+    // native/generic lists, not from client engine_type guessing.
+    assert.deepEqual(oth.options.map(o => o.text), ['SmolLM2-360M-Instruct-oQ4'],
+        'LLM is selectable on the decision tab, in the Other models group');
+    assert.ok(!oth.options.some(o => o.disabled),
+        'Other models enabled when generic_available is true');
+    assert.ok(!allText(panel).includes('uplift.bench.dec_group')
+        && !allText(panel).includes('dec_generic_needs_newer'),
+        'no raw picker key leaks');
     // results roundtrip: accumulated row rendered through the table
     assert.ok(text.includes('DECACC'), 'translated score column header');
     assert.ok(text.includes('0.8571') && text.includes('clef-flash-4bit'),
         'accumulated result row rendered');
+});
+
+test('DEC-GROUPS: generic_available:false disables Other models and says why', async () => {
+    const { win, byId } = load({ decModels: {
+        generic_available: false,
+        generic_reason: 'this omlx build does not expose /v1/decisions',
+        native: ['clef-flash-4bit'],
+        generic: ['SmolLM2-360M-Instruct-oQ4'] } });
+    win.UpliftNativeBench.mount();
+    win.UpliftNativeBench.showSub('decision');
+    await new Promise(r => setTimeout(r, 15));
+    const picker = decPicker(byId['bench-dec-model']);
+    const nat = picker.groups.find(g => g.label === 'DECGRPNAT');
+    const oth = picker.groups.find(g => g.label === 'DECRPOTHER');
+    assert.ok(oth, 'the group stays visible — a greyed group that explains '
+        + 'itself beats a silent omission');
+    assert.equal(oth.options[0].text, 'DECNEEDSNEWER',
+        'capability note is the FIRST entry of the group, via its catalog key');
+    assert.equal(oth.options[0].disabled, true, 'the note is not selectable');
+    assert.deepEqual(oth.options.slice(1).map(o => o.text),
+        ['SmolLM2-360M-Instruct-oQ4'], 'the models are still listed');
+    assert.ok(oth.options.every(o => o.disabled),
+        'every Other model is DISABLED while the server cannot score it');
+    assert.ok(!nat.options.some(o => o.disabled),
+        'decision models stay selectable when the generic path is missing');
 });
 
 test('REPL-4: embed subtab paints model filter + task grid from the server', async () => {
