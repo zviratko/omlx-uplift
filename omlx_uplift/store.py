@@ -346,13 +346,21 @@ class MetricsStore:
             # query shapes walk-and-stop. Migrate once: create the new
             # index, then DROP the old one (SQLite keeps preferring the old
             # index while it exists — verified on the live DB).
-            if not self._conn.execute(
-                "SELECT 1 FROM pragma_index_info('ix_samples_latest') "
-                "WHERE name='instance'"
-            ).fetchone():
+            # Column ORDER matters twice over: (key, ts) prefix drives the
+            # window scans and ORDER BY ts of series(); a third `instance`
+            # column lets latest()'s own/visible filters read from the
+            # index instead of per-row table lookups. An intermediate
+            # release built (key, instance, ts) — that cannot order by ts
+            # and forced a temp B-tree over the whole key range (verified
+            # via EXPLAIN QUERY PLAN); rebuilding here once fixes those DBs.
+            order = [r[0] for r in self._conn.execute(
+                "SELECT name FROM pragma_index_info('ix_samples_latest') "
+                "ORDER BY seqno")]
+            if order != ["key", "ts", "instance"]:
+                self._conn.execute("DROP INDEX IF EXISTS ix_samples_latest")
                 self._conn.execute(
                     "CREATE INDEX IF NOT EXISTS ix_samples_latest "
-                    "ON samples(key, instance, ts)")
+                    "ON samples(key, ts, instance)")
             self._conn.execute("DROP INDEX IF EXISTS ix_samples_key_ts")
             self._conn.execute(
                 "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
@@ -844,13 +852,19 @@ class MetricsStore:
     # -- read side (API/viewer) -------------------------------------------
 
     def series(self, key: str, window_s: float, now: float | None = None,
-               instance: str | None = None) -> list[dict]:
+               instance: str | None = None,
+               since: float | None = None) -> list[dict]:
         """Samples for KEY over the window. INSTANCE (when given) restricts
         the read: an exact tag keeps that writer's rows plus untagged legacy
         rows (co-tenant isolation, v3); the VISIBLE_INSTANCES sentinel keeps
         history from dead writers too and hides only live co-tenants
         (HIST-1). See _instance_sql."""
         t0 = (now or time.time()) - window_s
+        # TAIL-1: SINCE clamps the low edge — the client's incremental
+        # "give me everything after the newest point I hold" fetch. The
+        # (key, ts) index prefix turns it into a seek, not a filter.
+        if since is not None and since > t0:
+            t0 = since
         with self._rlock:      # SPLIT-READ: ro conn, never behind a writer
             frag, args = self._instance_sql(instance)
             cur = self._rconn.execute(

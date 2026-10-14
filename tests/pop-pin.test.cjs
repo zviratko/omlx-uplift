@@ -41,17 +41,34 @@ const { STATIC_DIR } = require('./static-src.cjs');
 const src = fs.readFileSync(path.join(STATIC_DIR, 'uplift_charts.js'), 'utf8');
 const TICK_MS = 5000;   // collector.py TICK_S
 
-test('metric cache TTL stays below the collector tick (no 2-sample batches)', () => {
-    const m = src.match(/const ttl = cardWindow\(id\) >= 604800 \? (\d+) : (\d+);/);
-    assert.ok(m, 'ttl line present');
-    assert.ok(Number(m[2]) < TICK_MS,
-        `short-window TTL ${m[2]} must be < the ${TICK_MS}ms source period`);
-    assert.ok(Number(m[1]) >= 60000, 'week/month windows keep the 60 s TTL (60 s buckets)');
+test('TAIL-1: fine windows stay live at POP-PIN cadence via incremental tails', () => {
+    // (user 2026-10-14: "74 KB every 5 s — unacceptable") The old 4.5 s
+    // TTL re-fetched the FULL window on nearly every livefeed draw tick —
+    // that was the real 5 s clock. POP-PIN freshness (max one collector
+    // sample per fetch) is now bought with a TAIL, not with bytes: the
+    // fine windows keep ~4.5 s TTL but send after=<newest ts> and
+    // merge-append the response; downsampled windows (server avg-buckets)
+    // must re-fetch whole — slower.
+    assert.match(src, /const ttl = tailOk \? (\d+)/,
+        'tail (fine) windows keep an explicit short TTL');
+    const m = src.match(/const ttl = tailOk \? (\d+)/);
+    assert.ok(Number(m[1]) < 2 * TICK_MS,
+        `tail TTL ${m[1]} must stay near the ${TICK_MS}ms collector period (that is the point of the tail)`);
+    assert.match(src, /cardWindow\(id\) >= 604800 \? 60000 : 15000/,
+        'non-tail windows: 7 d/30 d at 60 s, downsampled ones at 15 s');
+    assert.match(src, /tailOk = cache\.full && !cache\.bucket_s && cache\.maxTs > 0/,
+        'tail must require a completed FULL fetch of a FINE-resolution window');
+    assert.match(src, /&after=\$\{cache\.maxTs\.toFixed\(3\)\}/,
+        'tail request must carry after=<newest held ts>');
+    assert.match(src, /if \(d\.after !== undefined\)/,
+        'response with after= must MERGE-APPEND, never Object.assign over the columns');
+    assert.match(src, /tailBreak/,
+        'a detected hole must trip tailBreak so the next fetch repairs with a full window');
 });
 
 test('freshness stamps at REQUEST issue, not at response', () => {
     const fetchSite = src.slice(src.indexOf('_fetching.set(sk, { t: Date.now(), seq });'),
-                                src.indexOf('_fetching.set(sk, { t: Date.now(), seq });') + 1500);
+                                src.indexOf('_fetching.set(sk, { t: Date.now(), seq });') + 4500);   // TAIL-1: merge block grew the handler
     assert.ok(fetchSite.indexOf('cache.at = Date.now();')
               < fetchSite.indexOf('fetchJson('),
         'cache.at must be stamped BEFORE the request fires');

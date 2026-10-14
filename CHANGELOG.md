@@ -12,6 +12,21 @@ fixed annoyance, changed behavior, new command), add one bullet under an
 users never see.
 
 ## Unreleased
+- Fixed: the Status tab refetched the FULL metric window every ~5 s
+  (74 KB x 12/min per open tab). The livefeed's 1 Hz draw loop hits
+  metricFetch constantly and the POP-PIN freshness TTL turned nearly every
+  tick into a whole-window store query. Fine-resolution windows (the
+  default 5 m/15 m) now fetch INCREMENTALLY (new `after=<ts>` parameter:
+  only the points the collector committed since the last tick — hundreds
+  of bytes), keeping the same live-edge freshness. Fixed: /metrics/latest
+  cost 1.2-1.8 s per request; its visible-history sort defeated the
+  (key, ts) index (full key-range scans, 326 K rows each). The samples
+  index is now the covering (key, ts, instance) — one-time rebuild at
+  boot — and the two latest() queries walk-and-stop again (measured
+  0.04 ms). Fixed: chart reads queued behind the collector's write
+  connection (SPLIT-READ: dedicated read-only WAL connection; the
+  co-tenant cache probe is stale-while-revalidate on its own thread and
+  connection, never on a request path).
 
 - Fixed: chart reads taking 0.4–1.8 s even on an idle board. Every API read
   shared one SQLite connection AND one process lock with the collector, so

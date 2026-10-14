@@ -119,10 +119,13 @@ class _FakeStore:
         # policy itself is tested against a real MetricsStore below
         return "visible"
 
-    def series(self, key, window_s, now=None, instance=None):
+    def series(self, key, window_s, now=None, instance=None, since=None):
         # instance filtering is the store's job (tested against a real
         # MetricsStore in test_samples_are_tagged_and_reads_filter_co_tenant)
-        return [dict(p) for p in self._data.get(key, [])]
+        pts = [dict(p) for p in self._data.get(key, [])]
+        if since is not None:                     # TAIL-1 clamp mirrors store.series
+            pts = [p for p in pts if p["ts"] >= since]
+        return pts
 
 
 async def _call(**kw):
@@ -162,6 +165,34 @@ async def test_long_window_gets_downsampled_and_advertises_bucket():
         d = await _call(key="avg_generation_tps", window="7d")
     assert len(d["series"]) <= up.MAX_SERIES_POINTS + 1
     assert d["bucket_s"] >= 60
+
+
+async def test_tail_fetch_after_returns_only_newer_points():
+    """TAIL-1: ?after=<ts> answers with only points at/after AFTER (raw
+    fine, no downsample, hourly skipped), echoes after= so the client
+    merge-appends instead of replacing. The steady-state ~5 s dashboard
+    refresh costs hundreds of bytes, not a full 74 KB window."""
+    pts = _fine("a", 5)
+    cut = pts[-2]["ts"]
+    store = _FakeStore({"a": pts})
+    collector = MagicMock(store=store)
+    with patch.object(up_m, "get_collector", return_value=collector), \
+         patch.object(up_m, "_hourly_points",
+                      side_effect=AssertionError("hourly must not run on a tail")):
+        d = await _call(keys="a", window="5m", after=cut)
+    assert d["after"] == cut
+    assert len(d["series_map"]["a"]) == 2
+    assert d["bucket_s"] == 0
+    assert all(p["res"] == "fine" for p in d["series_map"]["a"])
+    # single-key backcompat shape carries the marker too
+    with patch.object(up_m, "get_collector", return_value=collector):
+        d1 = await _call(key="a", window="5m", after=cut)
+    assert d1["after"] == cut and len(d1["series"]) == 2
+    # after=0 (default) = full fetch, no marker
+    with patch.object(up_m, "get_collector", return_value=collector), \
+         patch.object(up_m, "_hourly_points", return_value=[]):
+        d2 = await _call(keys="a", window="5m")
+    assert "after" not in d2 and len(d2["series_map"]["a"]) == 5
 
 
 async def test_no_keys_is_400():

@@ -1379,18 +1379,25 @@ function metricFetch(id, force) {
     const w = windowParam(cardWindow(id));
     const keys = windowKeys(w);
     const key = keys.join(',');
-    const cache = metricCache[w] || (metricCache[w] = { data: {}, at: 0, fails: 0, bucket_s: 0 });
-    // POP-PIN (user 2026-10-10: "values do not draw current value for a
-    // while, then it pops into place"): the collector commits a sample
-    // every 5 s, but a 10 s TTL made every refetch land TWO samples at
-    // once — with the x-range pinned to [now-window, now] the last point
-    // sat up to a full batch in the past, drifted left, then JUMPED. A
-    // TTL just under the source period (4.5 s < 5 s tick) means every
-    // draw tick whose data can be newer actually fetches; the server
-    // returns the same columns when nothing landed yet (cheap no-op
-    // redraw). 30 d/7 d windows keep 60 s: their points are 60 s+ avg
-    // buckets, faster fetching returns identical bytes.
-    const ttl = cardWindow(id) >= 604800 ? 60000 : 4500;
+    const cache = metricCache[w] || (metricCache[w] = { data: {}, at: 0, fails: 0, bucket_s: 0,
+                                                        full: false, maxTs: 0 });
+    // TAIL-1 (user 2026-10-14: "74 KB every 5 s — unacceptable"). Two
+    // past attempts and why they were wrong: POP-PIN's 4.5 s TTL made the
+    // livefeed's 1 Hz draw loop re-fetch the FULL window every tick (that
+    // IS the 5 s clock — no setInterval change can stop it); flattening
+    // the TTL to 60 s instead starves every card whose key the 2 Hz live
+    // ring does not carry (the ring holds throughput/memory keys only).
+    // The honest split: FINE-resolution windows (the default 5 m/15 m —
+    // the heavy ones) keep POP-PIN freshness but fetch INCREMENTALLY
+    // (after=<newest ts held>): steady-state response is the few points
+    // the collector committed since the last tick, hundreds of bytes, not
+    // 74 KB. Downsampled windows (1 h+: server averages, tail-appending
+    // raw points onto avg buckets would misrepresent resolution) re-fetch
+    // whole at 15 s; 7 d/30 d at 60 s (their points are 60 s+ buckets —
+    // faster returns identical bytes).
+    const tailOk = cache.full && !cache.bucket_s && cache.maxTs > 0 && !cache.tailBreak;
+    const ttl = tailOk ? 4500
+            : (cardWindow(id) >= 604800 ? 60000 : 15000);
     const stale = cache.fails > 2 ? Date.now() - cache.at > 30000 : Date.now() - cache.at > ttl;
     // The cache is keyed by WINDOW and shared across cards. Gated cards
     // (temperature/power) are created after the boot fetch filled this
@@ -1422,11 +1429,33 @@ function metricFetch(id, force) {
     // full extra tick before popping). Request-stamped, the next draw
     // tick after TTL elapses always sees the data as due.
     cache.at = Date.now();
-    CH_GLUE.fetchJson(`${API}/uplift/api/metrics/series?keys=${encodeURIComponent(key)}&window=${w}`)
+    const url = `${API}/uplift/api/metrics/series?keys=${encodeURIComponent(key)}&window=${w}`
+              + (tailOk ? `&after=${cache.maxTs.toFixed(3)}` : '');
+    CH_GLUE.fetchJson(url)
         .then(d => {
             cache.fails = 0;
             const map = d.series_map || {};
-            Object.assign(cache.data, map);
+            if (d.after !== undefined) {
+                // TAIL-1 incremental: merge-append only points past what we
+                // hold; a hole (missed ticks — sleep, lease race) trips
+                // tailBreak so the NEXT fetch is full and repairs it.
+                let gap = false;
+                for (const [k, pts] of Object.entries(map)) {
+                    if (!Array.isArray(pts)) continue;
+                    const cur = cache.data[k] || (cache.data[k] = []);
+                    for (const p of pts) {
+                        if (!cur.length) { if (k in cache.data) gap = true; }
+                        else if (p.ts <= cur[cur.length - 1].ts) continue;
+                        else if (p.ts - cur[cur.length - 1].ts > 3 * 60_000) gap = true;
+                        cur.push(p);
+                    }
+                }
+                cache.tailBreak = gap;
+            } else {
+                Object.assign(cache.data, map);
+                cache.full = true;
+                cache.tailBreak = false;
+            }
             // Record every REQUESTED key as known — an answered-but-absent
             // key (collector stopped) gets an empty column, not a forever-
             // missing one. Without this the missing-key rule above would
@@ -1434,6 +1463,19 @@ function metricFetch(id, force) {
             // comes. Failed fetches keep the keys missing (retry next tick).
             for (const k of keys) if (!(k in cache.data)) cache.data[k] = [];
             cache.bucket_s = d.bucket_s || 0;
+            // newest ts + window-bounded trim: a week-long tab session may
+            // tail-append thousands of points per key; the chart cutoff is
+            // one window, keep exactly that much history in memory.
+            const winS = cardWindow(id) + 60;
+            const floor = Date.now() / 1000 - winS;
+            let m = 0;
+            for (const pts of Object.values(cache.data)) {
+                let i = 0;
+                while (i < pts.length && pts[i].ts < floor) i++;
+                if (i) pts.splice(0, i);
+                if (pts.length && pts[pts.length - 1].ts > m) m = pts[pts.length - 1].ts;
+            }
+            cache.maxTs = m;
         })
         .catch(() => { cache.fails++; cache.at = Date.now(); })
         .finally(() => {

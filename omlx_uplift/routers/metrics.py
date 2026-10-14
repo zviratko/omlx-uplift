@@ -51,12 +51,20 @@ async def metrics_series(
     key: str = "",
     keys: str = "",
     window: str = "1h",
+    after: float = 0.0,
     is_admin: bool = Depends(require_admin),
 ):
     """Series over WINDOW (5m..30d) for KEY, or for every key in
     comma-separated KEYS (multi-metric explorer: one request, one merged
     per-key response in `series_map`). Long windows are averaged down to
-    ~MAX_SERIES_POINTS points and say so (res='avg', bucket_s)."""
+    ~MAX_SERIES_POINTS points and say so (res='avg', bucket_s).
+
+    TAIL-1: AFTER (epoch seconds) returns ONLY points newer than AFTER —
+    the raw fine tail, no downsample, no history. The dashboard refetches
+    every ~4.5 s per window (POP-PIN: one collector sample per fetch max);
+    before TAIL-1 each of those re-paid the FULL window payload (measured:
+    74 KB x ~12/min per open tab). With AFTER the steady-state response is
+    a handful of points."""
     import asyncio
 
     wanted = [k.strip() for k in (keys or key).split(",") if k.strip()]
@@ -68,10 +76,15 @@ async def metrics_series(
     # co-tenant sharing this DB stays filtered out (server_instance_id).
     inst = store.visible_instances()
 
+    tail = after if after and after > 0 else None
+
     async def one(k: str):
-        fine = await asyncio.to_thread(store.series, k, window_s, None, inst)
+        fine = await asyncio.to_thread(
+            lambda: store.series(k, window_s, None, inst, since=tail))
         for p in fine:
             p["res"] = "fine"
+        if tail is not None:
+            return fine, 0          # TAIL-1: raw new points only
         hourly = []
         derive = _HOURLY_DERIVE.get(k)
         if derive is not None:
@@ -89,10 +102,14 @@ async def metrics_series(
         bucket = max(bucket, b)
     if key and not keys:
         pts = series_map.get(key, [])
-        return {"key": key, "window": window, "window_s": window_s,
-                "bucket_s": bucket, "series": pts}
-    return {"keys": wanted, "window": window, "window_s": window_s,
-            "bucket_s": bucket, "series_map": series_map}
+        out = {"key": key, "window": window, "window_s": window_s,
+               "bucket_s": bucket, "series": pts}
+    else:
+        out = {"keys": wanted, "window": window, "window_s": window_s,
+               "bucket_s": bucket, "series_map": series_map}
+    if tail is not None:
+        out["after"] = tail         # client: merge-append, never replace
+    return out
 
 
 @api_router.get("/metrics/live")
