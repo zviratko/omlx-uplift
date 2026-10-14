@@ -310,8 +310,8 @@ class MetricsStore:
                     key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS samples (
                     ts REAL NOT NULL, key TEXT NOT NULL, value REAL NOT NULL);
-                CREATE INDEX IF NOT EXISTS ix_samples_key_ts
-                    ON samples(key, ts);
+                CREATE INDEX IF NOT EXISTS ix_samples_latest
+                    ON samples(key, instance, ts);
                 CREATE TABLE IF NOT EXISTS requests (
                     id TEXT PRIMARY KEY, model TEXT, state TEXT,
                     prompt_tokens INTEGER, completion_tokens INTEGER,
@@ -353,7 +353,7 @@ class MetricsStore:
                 self._conn.execute(
                     "CREATE INDEX IF NOT EXISTS ix_samples_latest "
                     "ON samples(key, instance, ts)")
-                self._conn.execute("DROP INDEX IF EXISTS ix_samples_key_ts")
+            self._conn.execute("DROP INDEX IF EXISTS ix_samples_key_ts")
             self._conn.execute(
                 "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
