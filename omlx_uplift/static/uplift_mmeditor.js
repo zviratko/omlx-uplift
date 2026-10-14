@@ -1087,41 +1087,36 @@ function renderEditorFields(container) {
                 quantBox.append(
                     seBind('select', 'dflash_draft_quant_weight_bits', { label: 'Weight Bits', options: [
                         { value: 2, label: '2-bit' }, { value: 4, label: '4-bit' }, { value: 8, label: '8-bit' }], picker: true }),
-                    seBind('select', 'dflash_draft_quant_activation_bits', { label: 'Activation Bits', options: [
-                        { value: 16, label: '16-bit' }, { value: 32, label: '32-bit' }], picker: true }),
                     seBind('number', 'dflash_draft_quant_group_size', { label: 'Group Size', min: 16, max: 256, step: 16 }));
                 sb.append(quantBox);
-                sb.append(seBind('number', 'dflash_max_ctx', { label: 'Max Context (fallback threshold)', step: 1 }));
-                sb.append(seBind('bool', 'dflash_in_memory_cache', { label: 'In-memory cache' }));
-                const cacheBox = seGate(seGatedDiv('se-sub'), 'dflash_in_memory_cache');
-                cacheBox.append(
-                    seBind('number', 'dflash_in_memory_cache_max_entries',
-                        { label: C.tf('uplift.ui.in_memory_cache_max_entries', 'In-memory cache max entries'), min: 1, step: 1 }),
-                    seBind('number', 'dflash_in_memory_cache_max_gib',
-                        { label: C.tf('uplift.ui.in_memory_cache_size_gib', 'In-memory cache size (GiB)'), min: 1, step: 1,
-                          hint: 'Byte budget for L1 snapshots; LRU evicts when exceeded.' }));
-                if (seValues.dflash_ssd_cache_available) {
-                    cacheBox.append(seBind('bool', 'dflash_ssd_cache', { label: 'SSD cache',
-                        hint: 'Requires in-memory cache to be enabled.' }));
-                    seGate(seGatedDiv(), 'dflash_ssd_cache').append(
-                        seBind('number', 'dflash_ssd_cache_max_gib',
-                            { label: C.tf('uplift.ui.ssd_cache_size_gib', 'SSD cache size (GiB)'), min: 1, step: 1 }));
-                    cacheBox.appendChild(cacheBox.lastChild);
-                }
-                sb.append(cacheBox);
+                // SYNC-1 (upstream 7a4ea39): activation bits, max ctx, the
+                // in-memory/SSD cache rows and the draft-sink row are DELETED
+                // from ModelSettingsRequest (extra='forbid') — classic's modal
+                // dropped them too; what survives is window/block/verify.
                 sb.append(seBind('number', 'dflash_draft_window_size', { label: 'Draft window size' }));
-                sb.append(seBind('number', 'dflash_draft_sink_size', { label: 'Draft sink size', min: 0, step: 1 }));
                 sb.append(seBind('number', 'dflash_block_size', { label: 'Runtime block size', step: 1 }));
                 sb.append(seBind('select', 'dflash_verify_mode', { label: 'Verify mode', options: [
                     { value: 'adaptive', label: 'adaptive (default)' },
                     { value: 'dflash', label: 'dflash' },
-                    { value: 'ddtree', label: 'ddtree' }], picker: true }));
+                    { value: 'off', label: 'off' }], picker: true }));
             }
     }
     if (seValues.deepseek_v41_ced_prefill_supported)
         g.append(seBind('bool', 'deepseek_v41_ced_prefill_enabled',
             { label: C.tf('uplift.ui.ced_prefill_acceleration_deepseek_v4_1', 'CED Prefill Acceleration (DeepSeek V4.1)'),
               hint: 'Improves prefill speed by approximately 74-79% in tested configuration.' }));
+    // SYNC-1 (upstream 3c39990): qwen4_gdn_decode_wide_proj moved from the
+    // SERVER settings to per-model settings — the row left the global page and
+    // lives here now, classic's model-level capability gate (dashboard.js:2152:
+    // config_model_type === 'qwen4_exp'; the server clamps it the same way at
+    // routes.py:2833). A model row without the input (an older keg) leaves the
+    // row hidden AND buildPayload omits the key, so a pre-move server never
+    // sees it. Labels reuse the keys the global row already ships.
+    if (seValues.qwen4_gdn_decode_wide_proj_supported)
+        g.append(seBind('bool', 'qwen4_gdn_decode_wide_proj',
+            { label: C.tf('uplift.gs.adv.wide_proj', 'Qwen4 Wide-Proj GDN Decode'),
+              hint: C.tf('uplift.gs.adv.wide_proj_hint',
+                  'Wider projection in fused Qwen4 GDN decode (experimental).') }));
     if (S.isQwenOqA8(m)) {
         seFam(g, 'qwen35_oq_a8_enabled',
             seBind('bool', 'qwen35_oq_a8_enabled', { label: 'Qwen INT8 Activation Prefill',

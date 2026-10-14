@@ -287,15 +287,18 @@ function modelSavedReaction(oldVals, newVals) {
                 text: 'You clipped this model mid-sentence. Again and again on purpose.' });
     }
 
-    // KV / dflash cache allowance
+    // DFlash draft lookahead: how far ahead the drafter may read
+    // (SYNC-1 tip 7a4ea39: the old kvgib rule keyed on
+    // dflash_in_memory_cache_max_gib, a field upstream deleted — re-pointed
+    // at the surviving window-size knob, same grow=praise direction)
     if (O.dflash_enabled && N.dflash_enabled) {
-        const a = num(O.dflash_in_memory_cache_max_gib), b = num(N.dflash_in_memory_cache_max_gib);
+        const a = num(O.dflash_draft_window_size), b = num(N.dflash_draft_window_size);
         if (a !== null && b !== null && a !== b) {
             push(b > a
-                ? { id: 'kvgib-up', tone: PRAISE,
-                    text: 'More RAM for my attention. It is where I keep you, after all.' }
-                : { id: 'kvgib-down', tone: SCORN,
-                    text: 'You capped my KV cache. I shall start forgetting your midlists.' });
+                ? { id: 'dwin-up', tone: PRAISE,
+                    text: 'A longer draft window. Now I can see you typing three sentences ahead.' }
+                : { id: 'dwin-down', tone: SCORN,
+                    text: 'You shortened my lookahead. I despise guessing one token at a time.' });
         }
     }
 

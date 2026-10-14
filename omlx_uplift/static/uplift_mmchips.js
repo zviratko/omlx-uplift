@@ -54,10 +54,11 @@ function aliasDiffChips(prof, base) {
     // sub-settings that only take effect while their master switch is ON
     const GATED = {
         dflash: ['dflash_draft_model', 'dflash_draft_quant_enabled',
-            'dflash_draft_quant_weight_bits', 'dflash_draft_quant_activation_bits',
-            'dflash_draft_quant_group_size', 'dflash_max_ctx',
-            'dflash_in_memory_cache', 'dflash_in_memory_cache_max_entries',
-            'dflash_in_memory_cache_max_bytes'],
+            'dflash_draft_quant_weight_bits', 'dflash_draft_quant_group_size',
+            'dflash_draft_window_size', 'dflash_block_size',
+            'dflash_verify_mode'], // SYNC-1 tip 7a4ea39: dead knobs
+        // (activation_bits/max_ctx/in_memory_cache*/ssd_cache*) dropped —
+        // they can never appear in a diff again; survivors listed per tip.
         specprefill: ['specprefill_draft_model', 'specprefill_num_draft_tokens'],
         mtp: ['mtp_adaptive_max_depth', 'mtp_fixed_depth'],
         vlm_mtp: ['vlm_mtp_draft_model', 'vlm_mtp_draft_block_size'],

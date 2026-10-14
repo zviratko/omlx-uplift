@@ -157,6 +157,10 @@ const GS_LABELS = {
         sse_opts: [['chunk','Chunk'],['comment','Comment'],['off','Off']],
         mid_sys: 'Preserve Mid-System Cache',
         mid_sys_hint: 'Keep cached KV for system prompts placed mid-conversation.',
+        // SYNC-1 (3c39990): no global row uses these two anymore — the toggle
+        // moved to the per-model editor, which reuses the SAME locale keys
+        // (uplift.gs.adv.wide_proj[_hint]) via C.tf. Kept as the English
+        // fallback pair; the locale files are owned elsewhere.
         wide_proj: 'Qwen4 Wide-Proj GDN Decode',
         wide_proj_hint: 'Wider projection in fused Qwen4 GDN decode (experimental).',
         keep_warm: 'GPU Keep-Warm Interval (s)',
@@ -1422,8 +1426,12 @@ const GS_SPEC = [
         k: 'sel', sec: 'server', field: 'sse_keepalive_mode', flat: 'sse_keepalive_mode', opts: 'adv.sse_opts'}},
     {sec: 'adv', lab: 'adv.mid_sys', hint: 'adv.mid_sys_hint', ctl: {
         k: 'tog', sec: 'server', field: 'preserve_mid_system_cache', flat: 'preserve_mid_system_cache'}},
-    {sec: 'adv', lab: 'adv.wide_proj', hint: 'adv.wide_proj_hint', ctl: {
-        k: 'tog', sec: 'server', field: 'qwen4_gdn_decode_wide_proj', flat: 'qwen4_gdn_decode_wide_proj'}},
+    // SYNC-1 (upstream 3c39990): the 'adv.wide_proj' row is GONE from this
+    // page — qwen4_gdn_decode_wide_proj moved out of GlobalSettingsRequest
+    // into ModelSettingsRequest, so it is a per-model Advanced row now
+    // (uplift_mmeditor.js, classic _modal_model_settings.html:726-735). The
+    // adv.wide_proj / adv.wide_proj_hint locale keys stay and are reused
+    // there; not sending the global key means "keep" server-side.
     // SYNC-1: upstream server.gpu_keep_warm_interval (live-applied on save,
     // no restart badge — classic runtime_applied). Not on the classic page;
     // uplift exposes it because users tune it (settings.json carries it).

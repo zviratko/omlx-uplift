@@ -11,6 +11,16 @@ const base = (over = {}) => Object.assign({
     id: 'm1', model_type: 'llm', config_model_type: 'qwen3_5',
 }, over);
 
+/* SYNC-1 (upstream 7a4ea39): exactly the 8 fields deleted from
+   ModelSettingsRequest (omlx/admin/routes.py, class has extra='forbid').
+   None of them may reach the PUT body, the form state or the signature. */
+const DEAD_DFLASH_KEYS = [
+    'dflash_draft_quant_activation_bits', 'dflash_draft_sink_size',
+    'dflash_in_memory_cache', 'dflash_in_memory_cache_max_entries',
+    'dflash_in_memory_cache_max_bytes', 'dflash_max_ctx',
+    'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes',
+];
+
 /* ---- buildState ---- */
 test('buildState: sane defaults for a plain LLM', () => {
     const st = S.buildState(base(), {});
@@ -109,16 +119,70 @@ test('buildPayload: full key set, null for unset numerics', () => {
     assert.strictEqual(p.thinking_budget_tokens, 0);
     assert.strictEqual(p.max_tool_result_tokens, 0);
     assert.strictEqual(p.turboquant_kv_bits, 4);
-    assert.strictEqual(p.dflash_ssd_cache_max_bytes, 20 * S.GiB);
+    // SYNC-1 (upstream 7a4ea39): the 8 dflash cache/context fields are DELETED
+    // from ModelSettingsRequest (extra='forbid') — buildPayload must never
+    // emit them, or the whole save 422s.
+    for (const dead of DEAD_DFLASH_KEYS)
+        assert.ok(!(dead in p), 'dead dflash key in payload: ' + dead);
+    // what survives at tip
+    for (const live of ['dflash_enabled', 'dflash_draft_model',
+                        'dflash_draft_quant_enabled',
+                        'dflash_draft_quant_weight_bits',
+                        'dflash_draft_quant_group_size',
+                        'dflash_draft_window_size', 'dflash_block_size',
+                        'dflash_verify_mode'])
+        assert.ok(live in p, 'surviving dflash key missing: ' + live);
 });
-test('buildPayload: alias blank -> null; Gibbs -> bytes', () => {
+test('buildPayload: dflash ON still omits every dead field', () => {
+    // the deletion is schema-side, not UI-side: even with the feature fully
+    // configured (and a legacy stored value present in the state) the PUT
+    // body must not carry a removed key.
+    const st = S.buildState(base(), { dflash_enabled: true,
+        dflash_draft_model: 'd1', dflash_draft_quant_enabled: true });
+    st.dflash_ssd_cache = true;            // stale state from an old profile
+    st.dflash_in_memory_cache_max_gib = 8;
+    const p = S.buildPayload(st, base());
+    assert.strictEqual(p.dflash_enabled, true);
+    assert.strictEqual(p.dflash_verify_mode, 'adaptive');
+    assert.strictEqual(p.dflash_draft_quant_weight_bits, 4);
+    assert.strictEqual(p.dflash_draft_quant_group_size, 64);
+    for (const dead of DEAD_DFLASH_KEYS)
+        assert.ok(!(dead in p), 'dead dflash key in payload: ' + dead);
+});
+test('buildState: legacy dflash cache fields and the ssd DTO flag are gone', () => {
+    const st = S.buildState(base(), { dflash_ssd_cache: true,
+        dflash_max_ctx: 4096, dflash_in_memory_cache_max_bytes: 8 * S.GiB });
+    for (const dead of DEAD_DFLASH_KEYS.concat(['dflash_in_memory_cache_max_gib',
+                                                'dflash_ssd_cache_max_gib']))
+        assert.ok(!(dead in st), 'dead dflash field still in state: ' + dead);
+    assert.ok(!('dflash_ssd_cache_available' in st),
+        'tip deleted the dflash_ssd_cache_available DTO field — no reader');
+});
+test('buildState/buildPayload: dflash_verify_mode enum is adaptive|dflash|off', () => {
+    // tip model_settings.py:429; a stored legacy 'ddtree' normalizes to
+    // 'adaptive' exactly like the server's own validator (model_settings:495)
+    assert.strictEqual(S.buildState(base(),
+        { dflash_enabled: true, dflash_verify_mode: 'ddtree' }).dflash_verify_mode,
+        'adaptive');
+    assert.strictEqual(S.buildState(base(),
+        { dflash_enabled: true, dflash_verify_mode: 'off' }).dflash_verify_mode,
+        'off');
+    const p = S.buildPayload(S.buildState(base(),
+        { dflash_enabled: true, dflash_verify_mode: 'ddtree' }), base());
+    assert.strictEqual(p.dflash_verify_mode, 'adaptive');
+});
+test('model editor verify-mode options match the tip enum (no ddtree)', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..',
+        'omlx_uplift', 'static', 'uplift_mmeditor.js'), 'utf8');
+    assert.ok(!/value:\s*'ddtree'/.test(src), "'ddtree' option must be gone");
+    assert.ok(/dflash_verify_mode[\s\S]{0,400}value:\s*'off'/.test(src),
+        "the 'off' option classic renders must be offered");
+});
+test('buildPayload: alias blank -> null', () => {
     const st = S.buildState(base(), {});
     st.model_alias = '   ';
-    st.dflash_enabled = true;
-    st.dflash_ssd_cache_max_gib = 30;
     const p = S.buildPayload(st, base());
     assert.strictEqual(p.model_alias, null);
-    assert.strictEqual(p.dflash_ssd_cache_max_bytes, 30 * S.GiB);
 });
 test('buildPayload: ct kwargs coerce + forced list tracks force', () => {
     const st = S.buildState(base(), {
@@ -398,4 +462,104 @@ test('external_engine: off by default; non-LLM payloads must not carry it', () =
     assert.ok(!('external_engine' in p),
         'buildPayload must strip TYPE_ONLY keys for non-LLM models');
 });
+
+/* ================= SYNC-1: qwen4_gdn_decode_wide_proj global -> model =====
+   Upstream 3c39990 removed it from GlobalSettingsRequest and added it to
+   ModelSettingsRequest (routes.py:365; default False, model_settings.py:344;
+   the server clamps it to config_model_type == 'qwen4_exp' at routes.py:2833,
+   and classic gates the row on the same test — dashboard.js:2152). The
+   RUNNING keg may still be pre-move, so the key is emitted ONLY for a
+   supported model and adaptToServer* strips it whenever the live schema
+   lacks it. */
+const qwen4Exp = (over = {}) => base(Object.assign(
+    { config_model_type: 'qwen4_exp' }, over));
+test('qwen4_gdn: support flag mirrors classic (config_model_type qwen4_exp)', () => {
+    assert.strictEqual(S.buildState(qwen4Exp(), {}).qwen4_gdn_decode_wide_proj_supported, true);
+    assert.strictEqual(S.buildState(base(), {}).qwen4_gdn_decode_wide_proj_supported, false,
+        'qwen3_5 must not show the row');
+    assert.strictEqual(S.buildState(base({ config_model_type: 'Qwen4-Exp' }), {})
+        .qwen4_gdn_decode_wide_proj_supported, true, 'normalized like classic');
+});
+test('qwen4_gdn: payload key ONLY when the row is supported', () => {
+    const off = S.buildPayload(S.buildState(qwen4Exp(), {}), qwen4Exp());
+    assert.strictEqual(off.qwen4_gdn_decode_wide_proj, false);
+    const on = S.buildPayload(S.buildState(qwen4Exp(),
+        { qwen4_gdn_decode_wide_proj: true }), qwen4Exp());
+    assert.strictEqual(on.qwen4_gdn_decode_wide_proj, true);
+    const foreign = S.buildPayload(S.buildState(base(),
+        { qwen4_gdn_decode_wide_proj: true }), base());
+    assert.ok(!('qwen4_gdn_decode_wide_proj' in foreign),
+        'unsupported model: key must be ABSENT (old keg forbids it, 422 else)');
+});
+test('qwen4_gdn: non-LLM type strips it like the other Advanced rows', () => {
+    const m = qwen4Exp({ model_type: 'embedding' });
+    const p = S.buildPayload(S.buildState(m, { qwen4_gdn_decode_wide_proj: true }), m);
+    assert.ok(!('qwen4_gdn_decode_wide_proj' in p));
+    assert.ok(S.TYPE_ONLY_KEYS.has('qwen4_gdn_decode_wide_proj'));
+});
+test('qwen4_gdn: engine-reload material, so the editor badges RELOAD', () => {
+    // tip engine_pool:1118-1122 adds it to _engine_runtime_signature
+    assert.ok(S.RUNTIME_SETTING_KEYS.has('qwen4_gdn_decode_wide_proj'));
+    const a = S.buildPayload(S.buildState(qwen4Exp(), {}), qwen4Exp());
+    const b = S.buildPayload(S.buildState(qwen4Exp(),
+        { qwen4_gdn_decode_wide_proj: true }), qwen4Exp());
+    assert.deepStrictEqual(S.runtimeDiff(a, b).map(r => r.key),
+        ['qwen4_gdn_decode_wide_proj']);
+    assert.deepStrictEqual(S.runtimeDiff(a, a), [], 'identical values do not diverge');
+});
+test('qwen4_gdn: adaptToServer drops it for a pre-3c39990 keg, keeps otherwise', () => {
+    const oldSchema = new Set(['mtp_adaptive_max_depth', 'dflash_enabled']);
+    const newSchema = new Set([...oldSchema, 'qwen4_gdn_decode_wide_proj']);
+    const body = { temperature: 0.7, qwen4_gdn_decode_wide_proj: true };
+    assert.ok(!('qwen4_gdn_decode_wide_proj' in
+        S.adaptToServerPayload(body, oldSchema)), 'old keg: never PUT the key');
+    assert.strictEqual(S.adaptToServerPayload(body, newSchema), body,
+        'new keg + no dead key: payload passes through by identity');
+    assert.strictEqual(S.adaptToServerPayload(body, null), body,
+        'unknown schema: send as modeled');
+    // profile overrides ride the same gate
+    assert.ok(!('qwen4_gdn_decode_wide_proj' in
+        S.adaptToServerSettings(body, oldSchema)), 'old keg: profile write too');
+    assert.strictEqual(S.adaptToServerSettings(body, newSchema), body);
+});
+test('qwen4_gdn: sticky when a profile flips the model to a non-LLM type', () => {
+    assert.deepStrictEqual(S.stickyForType({ qwen4_gdn_decode_wide_proj: true }),
+        ['qwen4_gdn_decode_wide_proj']);
+});
+test('qwen4_gdn: NOT a global setting anymore (GS_MAP dropped the row)', () => {
+    const GS = require('../omlx_uplift/static/uplift_gspec.js');
+    assert.ok(!('qwen4_gdn_decode_wide_proj' in GS.GS_MAP),
+        'tip GlobalSettingsRequest has no such field — the global save must not send it');
+    const gsys = require('fs').readFileSync(require('path').join(__dirname, '..',
+        'omlx_uplift', 'static', 'uplift_gsys.js'), 'utf8');
+    assert.ok(!/field:\s*'qwen4_gdn_decode_wide_proj'/.test(gsys),
+        'the global toggle row must be gone from the Server tab');
+});
+/* SYNC-1 (7a4ea39): dead dflash fields must not survive on ANY modelspec
+   surface — the lists, the state, the payload, the signature. */
+test('dflash: no dead field name is left anywhere in modelspec.js', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..',
+        'omlx_uplift', 'static', 'modelspec.js'), 'utf8');
+    for (const dead of DEAD_DFLASH_KEYS.concat(['dflash_ssd_cache_available'])) {
+        const re = new RegExp("'" + dead + "'");
+        assert.ok(!re.test(src), 'modelspec.js still names ' + dead);
+    }
+});
+test('dflash: surviving family keeps its payload + signature semantics', () => {
+    const st = S.buildState(base(), { dflash_enabled: true, dflash_draft_model: 'd1',
+        dflash_draft_window_size: 1024, dflash_block_size: 8, dflash_verify_mode: 'dflash' });
+    const p = S.buildPayload(st, base());
+    assert.strictEqual(p.dflash_draft_window_size, 1024);
+    assert.strictEqual(p.dflash_block_size, 8);
+    assert.strictEqual(p.dflash_verify_mode, 'dflash');
+    const off = S.buildPayload(S.buildState(base(), { dflash_enabled: false,
+        dflash_draft_model: 'd1', dflash_block_size: 8 }), base());
+    assert.strictEqual(off.dflash_block_size, null);
+    assert.strictEqual(off.dflash_verify_mode, null);
+    for (const k of ['dflash_draft_window_size', 'dflash_block_size', 'dflash_verify_mode']) {
+        assert.ok(S.RUNTIME_SETTING_KEYS.has(k), k + ' is engine_pool signature material');
+        assert.strictEqual(S.sigMasterKey(k), 'dflash_enabled', k + ' gated by dflash');
+    }
+});
+
 

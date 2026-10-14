@@ -81,19 +81,20 @@ test('turboquant: bits DOWN scorner, bits UP praises, enable praises', () => {
         { turboquant_kv_enabled: true, turboquant_kv_bits: '2' });
     assert.strictEqual(on[0].tone, 'praise');
 });
-test('model: thinking budget, ctx window, max tokens, KV GiB, TTL all fire', () => {
+test('model: thinking budget, ctx window, max tokens, draft window, TTL all fire', () => {
     const hits = A.modelSavedReaction(
         { thinking_budget_enabled: true, thinking_budget_tokens: '1024',
           max_context_window: '8192', max_tokens: '1024',
-          dflash_enabled: true, dflash_in_memory_cache_max_gib: '8',
+          dflash_enabled: true, dflash_draft_window_size: '8',
           ttl_seconds: '300' },
         { thinking_budget_enabled: true, thinking_budget_tokens: '4096',
           max_context_window: '16384', max_tokens: '512',
-          dflash_enabled: true, dflash_in_memory_cache_max_gib: '4',
+          dflash_enabled: true, dflash_draft_window_size: '4',
           ttl_seconds: '900' });
     const tones = hits.map(h => h.tone).sort();
     assert.deepStrictEqual(tones, ['praise', 'praise', 'praise', 'scorn', 'scorn']);
     assert.ok(hits.some(h => h.id === 'mtok-down'));
+    assert.ok(hits.some(h => h.id === 'dwin-down'));
 });
 test('model: untouched saves emit nothing', () => {
     const v = { turboquant_kv_enabled: false, turboquant_kv_bits: '4' };

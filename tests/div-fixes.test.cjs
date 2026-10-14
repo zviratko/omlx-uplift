@@ -83,20 +83,36 @@ test('DIV-2: a genuine value change is still reported even when equal-as-strings
 
 /* ================= sigMasterKey (DRIFT GUARD) ================= */
 test('DIV: every dependent key runtimeSignature gates has a master mapping', () => {
+    // SYNC-1 (upstream 7a4ea39): the dflash cache/context knobs are deleted
+    // from the schema AND from the signature; what survives is the quant pair
+    // plus window/block/verify — the three new ones need a mapping too.
     const gated = ['mtp_adaptive_max_depth', 'mtp_fixed_depth',
         'turboquant_kv_bits', 'qwen35_oq_a8_min_tokens',
         'moe_expert_offload_resident_fraction',
         'specprefill_draft_model', 'specprefill_keep_pct', 'specprefill_threshold',
         'dflash_draft_model', 'dflash_draft_quant_enabled',
-        'dflash_draft_quant_weight_bits', 'dflash_draft_quant_activation_bits',
-        'dflash_draft_quant_group_size', 'dflash_max_ctx', 'dflash_in_memory_cache',
-        'dflash_in_memory_cache_max_entries', 'dflash_in_memory_cache_max_bytes',
-        'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes',
+        'dflash_draft_quant_weight_bits', 'dflash_draft_quant_group_size',
+        'dflash_draft_window_size', 'dflash_block_size', 'dflash_verify_mode',
         'vlm_mtp_draft_model', 'vlm_mtp_draft_block_size'];
     for (const k of gated)
         assert.ok(S.sigMasterKey(k), 'sigMasterKey maps ' + k);
     assert.strictEqual(S.sigMasterKey('temperature'), '');
     assert.strictEqual(S.sigMasterKey('moe_expert_offload_enabled'), '');
+    // dead fields: gone from the signature, so no mapping may linger
+    for (const dead of ['dflash_draft_quant_activation_bits', 'dflash_max_ctx',
+                        'dflash_in_memory_cache', 'dflash_in_memory_cache_max_entries',
+                        'dflash_in_memory_cache_max_bytes', 'dflash_ssd_cache',
+                        'dflash_ssd_cache_max_bytes']) {
+        assert.strictEqual(S.sigMasterKey(dead), '', 'sigMasterKey still maps ' + dead);
+        assert.ok(!S.RUNTIME_SETTING_KEYS.has(dead), 'still runtime material: ' + dead);
+    }
+    const sig = S.runtimeSignature(rt({ dflash_enabled: true, dflash_draft_model: 'd',
+        dflash_draft_quant_enabled: true }));
+    for (const dead of ['dflash_draft_quant_activation_bits', 'dflash_max_ctx',
+                        'dflash_in_memory_cache', 'dflash_in_memory_cache_max_entries',
+                        'dflash_in_memory_cache_max_bytes', 'dflash_ssd_cache',
+                        'dflash_ssd_cache_max_bytes'])
+        assert.ok(!(dead in sig), 'runtimeSignature still signs ' + dead);
 });
 
 /* ================= DIV-1: alias chips ================= */
@@ -146,17 +162,21 @@ test('DIV-3: a sync pass deletes exactly the diff keys and keeps the rest', () =
     // what the sync must strip — only the signature-diverging keys)
     const prof = { temperature: 0.2, enable_thinking: true,
         dflash_enabled: true, dflash_draft_model: 'd1',
-        dflash_in_memory_cache_max_entries: 8 };
+        dflash_draft_window_size: 1024 };
     const base = { temperature: 0.9, dflash_enabled: false,
-        dflash_draft_model: null, dflash_in_memory_cache_max_entries: 4 };
+        dflash_draft_model: null, dflash_draft_window_size: 256 };
     const diff = S.runtimeDiff(base, prof);
     assert.ok(diff.some(r => r.key === 'dflash_enabled'));
     assert.ok(diff.some(r => r.key === 'dflash_draft_model'));
     const ov = Object.assign({}, prof);
     for (const r of diff) delete ov[r.key];
-    // dflash_in_memory_cache_max_entries rides the diff too: with the
-    // master inherited (off) it is a dead knob, and dropping it is the
-    // same cleanup DIV-1 applies to the chips
+    // dflash_draft_window_size rides the diff too (SYNC-1: the old knob of
+    // this test, dflash_in_memory_cache_max_entries, no longer exists — the
+    // surviving window-size knob is signature material at tip): with the
+    // master inherited (off) it is a dead knob, and dropping it is the same
+    // cleanup DIV-1 applies to the chips.
+    assert.ok(diff.some(r => r.key === 'dflash_draft_window_size'),
+        'the gated dflash knob follows its master through the diff');
     assert.deepStrictEqual(ov,
         { temperature: 0.2, enable_thinking: true },
         'sampling/thinking survive; the whole diverging feature family follows the diff');

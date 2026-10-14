@@ -36,14 +36,12 @@
         'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
         'external_engine',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
+        // SYNC-1 (upstream 7a4ea39): the dflash cache/context knobs are gone
+        // from ModelSettingsRequest (extra='forbid'); only these survive.
         'specprefill_threshold', 'dflash_enabled', 'dflash_draft_model',
         'dflash_draft_quant_enabled', 'dflash_draft_quant_weight_bits',
-        'dflash_draft_quant_activation_bits', 'dflash_draft_quant_group_size',
-        'dflash_max_ctx', 'dflash_in_memory_cache',
-        'dflash_in_memory_cache_max_entries', 'dflash_in_memory_cache_max_bytes',
-        'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes',
-        'dflash_draft_window_size', 'dflash_draft_sink_size', 'dflash_block_size',
-        'dflash_verify_mode', 'mtp_enabled', 'mtp_adaptive_max_depth',
+        'dflash_draft_quant_group_size', 'dflash_draft_window_size',
+        'dflash_block_size', 'dflash_verify_mode', 'mtp_enabled', 'mtp_adaptive_max_depth',
         'mtp_fixed_depth', 'qwen35_ane_prefill_shared_fraction',
         'vlm_mtp_enabled', 'vlm_mtp_draft_model', 'vlm_mtp_draft_block_size',
     ]);
@@ -88,17 +86,16 @@
         'trust_remote_code', 'index_cache_freq', 'turboquant_kv_enabled',
         'turboquant_kv_bits', 'moe_expert_offload_enabled',
         'moe_expert_offload_resident_fraction', 'qwen4_ple_ssd_offload',
+        // SYNC-1 (upstream 3c39990): model-level, not server-level
+        'qwen4_gdn_decode_wide_proj',
         'deepseek_v41_ced_prefill_enabled', 'deepseek_v41_engram_ssd_offload',
         'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
         'external_engine',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
+        // SYNC-1 (upstream 7a4ea39): surviving dflash family only.
         'specprefill_threshold', 'dflash_enabled', 'dflash_draft_model',
         'dflash_draft_quant_enabled', 'dflash_draft_quant_weight_bits',
-        'dflash_draft_quant_activation_bits', 'dflash_draft_quant_group_size',
-        'dflash_max_ctx', 'dflash_in_memory_cache',
-        'dflash_in_memory_cache_max_entries', 'dflash_in_memory_cache_max_bytes',
-        'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes',
-        'dflash_draft_window_size', 'dflash_draft_sink_size',
+        'dflash_draft_quant_group_size', 'dflash_draft_window_size',
         'dflash_block_size', 'dflash_verify_mode', 'mtp_enabled',
         'mtp_adaptive_max_depth', 'mtp_fixed_depth', 'vlm_mtp_enabled',
         'vlm_mtp_draft_model', 'vlm_mtp_draft_block_size',
@@ -136,6 +133,7 @@
         if (on(s.qwen35_oq_a8_enabled)) out.push('qwen35_oq_a8_enabled');
         if (on(s.moe_expert_offload_enabled)) out.push('moe_expert_offload_enabled');
         if (on(s.qwen4_ple_ssd_offload)) out.push('qwen4_ple_ssd_offload');
+        if (on(s.qwen4_gdn_decode_wide_proj)) out.push('qwen4_gdn_decode_wide_proj');
         if (on(s.deepseek_v41_ced_prefill_enabled)) out.push('deepseek_v41_ced_prefill_enabled');
         if (on(s.deepseek_v41_engram_ssd_offload)) out.push('deepseek_v41_engram_ssd_offload');
         if (s.chat_template_kwargs && Object.keys(s.chat_template_kwargs).length)
@@ -247,6 +245,15 @@
             qwen4_ple_ssd_offload_forced: !!(model && model.qwen4_ple_ssd_offload_forced === true),
             deepseek_v41_ced_prefill_enabled: s.deepseek_v41_ced_prefill_enabled === true,
             deepseek_v41_ced_prefill_supported: normType(model && model.config_model_type) === 'deepseek_v41',
+            // SYNC-1 (upstream 3c39990): qwen4_gdn_decode_wide_proj moved from
+            // GlobalSettingsRequest to ModelSettingsRequest. Classic computes
+            // the row gate from the /models row's config_model_type
+            // (dashboard.js:2152 — 'qwen4_exp', server clamp routes.py:2833);
+            // mirror it, so on a server that never sends the field the row
+            // simply stays hidden and the key is never PUT (old keg forbids it).
+            qwen4_gdn_decode_wide_proj: s.qwen4_gdn_decode_wide_proj === true,
+            qwen4_gdn_decode_wide_proj_supported:
+                normType(model && model.config_model_type) === 'qwen4_exp',
             deepseek_v41_engram_ssd_offload: (model && model.deepseek_v41_engram_ssd_offload_forced === true) || s.deepseek_v41_engram_ssd_offload === true,
             deepseek_v41_engram_ssd_offload_requested: s.deepseek_v41_engram_ssd_offload === true,
             deepseek_v41_engram_ssd_offload_supported: !!(model && model.deepseek_v41_engram_ssd_offload_supported === true),
@@ -294,23 +301,16 @@
             dflash_draft_model: s.dflash_draft_model || '',
             dflash_draft_quant_enabled: s.dflash_draft_quant_enabled || false,
             dflash_draft_quant_weight_bits: s.dflash_draft_quant_weight_bits || 4,
-            dflash_draft_quant_activation_bits: s.dflash_draft_quant_activation_bits || 16,
             dflash_draft_quant_group_size: s.dflash_draft_quant_group_size || 64,
-            dflash_max_ctx: s.dflash_max_ctx ?? null,
-            dflash_in_memory_cache: s.dflash_in_memory_cache !== false,
-            dflash_in_memory_cache_max_entries: s.dflash_in_memory_cache_max_entries || 4,
-            dflash_in_memory_cache_max_gib: s.dflash_in_memory_cache_max_bytes
-                ? Math.round(s.dflash_in_memory_cache_max_bytes / GiB) : 8,
-            dflash_ssd_cache: s.dflash_ssd_cache || false,
-            dflash_ssd_cache_max_gib: s.dflash_ssd_cache_max_bytes
-                ? Math.round(s.dflash_ssd_cache_max_bytes / GiB) : 20,
             dflash_draft_window_size: s.dflash_draft_window_size ?? null,
-            dflash_draft_sink_size: s.dflash_draft_sink_size ?? 0,
             dflash_block_size: s.dflash_block_size ?? null,
-            dflash_verify_mode: s.dflash_verify_mode || 'adaptive',
+            // SYNC-1 (upstream tip model_settings.py:429/495): the enum is
+            // adaptive|dflash|off — a legacy stored 'ddtree' normalizes to
+            // 'adaptive' exactly like the server's own validator does.
+            dflash_verify_mode: s.dflash_verify_mode === 'ddtree'
+                ? 'adaptive' : (s.dflash_verify_mode || 'adaptive'),
             dflash_compatible: !(model && model.dflash_compatible === false),
             dflash_compatibility_reason: (model && model.dflash_compatibility_reason) || '',
-            dflash_ssd_cache_available: !!(model && model.dflash_ssd_cache_available),
             mtp_enabled: s.mtp_enabled || false,
             mtp_compatible: !!(model && model.mtp_compatible === true),
             mtp_compatibility_reason: (model && model.mtp_compatibility_reason) || '',
@@ -444,6 +444,14 @@
             enable_thinking: model && model.thinking_forced ? null : ms.enable_thinking,
             qwen4_ple_ssd_offload: !!ms.qwen4_ple_ssd_offload,
             deepseek_v41_ced_prefill_enabled: !!ms.deepseek_v41_ced_prefill_enabled,
+            // SYNC-1 (upstream 3c39990 + tip routes.py:2833): model-level key,
+            // sent ONLY when the row is supported. The running keg may still
+            // be pre-3c39990, whose ModelSettingsRequest has no such field and
+            // extra='forbid' — an unknown key 422s the whole save, so the
+            // safe shape is omission (adaptToServerPayload double-gates it).
+            ...(ms.qwen4_gdn_decode_wide_proj_supported
+                ? { qwen4_gdn_decode_wide_proj: !!ms.qwen4_gdn_decode_wide_proj }
+                : {}),
             deepseek_v41_engram_ssd_offload: ms.deepseek_v41_engram_ssd_offload_forced
                 ? !!ms.deepseek_v41_engram_ssd_offload_requested
                 : !!ms.deepseek_v41_engram_ssd_offload,
@@ -488,33 +496,24 @@
             specprefill_keep_pct: ms.specprefill_enabled ? (parseFloat(ms.specprefill_keep_pct) || 0.2) : null,
             specprefill_threshold: ms.specprefill_enabled ? (ms.specprefill_threshold || null) : null,
             external_engine: ms.external_engine || null,
+            // SYNC-1 (upstream 7a4ea39): the cache/context knobs (activation
+            // bits, max_ctx, in-memory cache + entries + bytes, ssd cache +
+            // bytes, sink size) are deleted from ModelSettingsRequest — they
+            // must never appear in the PUT body (extra='forbid' 422s).
             dflash_enabled: !!ms.dflash_enabled,
             dflash_draft_model: ms.dflash_draft_model || null,
             dflash_draft_quant_enabled: !!ms.dflash_enabled && !!ms.dflash_draft_quant_enabled,
             dflash_draft_quant_weight_bits: ms.dflash_enabled && ms.dflash_draft_quant_enabled
                 ? parseInt(ms.dflash_draft_quant_weight_bits) : null,
-            dflash_draft_quant_activation_bits: ms.dflash_enabled && ms.dflash_draft_quant_enabled
-                ? parseInt(ms.dflash_draft_quant_activation_bits) : null,
             dflash_draft_quant_group_size: ms.dflash_enabled && ms.dflash_draft_quant_enabled
                 ? parseInt(ms.dflash_draft_quant_group_size) : null,
-            dflash_max_ctx: ms.dflash_enabled && ms.dflash_max_ctx ? parseInt(ms.dflash_max_ctx) : null,
-            dflash_in_memory_cache: ms.dflash_enabled ? !!ms.dflash_in_memory_cache : true,
-            dflash_in_memory_cache_max_entries: ms.dflash_enabled
-                ? (parseInt(ms.dflash_in_memory_cache_max_entries) || 4) : 4,
-            dflash_in_memory_cache_max_bytes: ms.dflash_enabled
-                ? Math.max(1, parseInt(ms.dflash_in_memory_cache_max_gib) || 8) * GiB : 8 * GiB,
-            dflash_ssd_cache: !!ms.dflash_enabled && !!ms.dflash_in_memory_cache
-                && !!ms.dflash_ssd_cache_available && !!ms.dflash_ssd_cache,
-            dflash_ssd_cache_max_bytes: ms.dflash_enabled
-                ? Math.max(1, parseInt(ms.dflash_ssd_cache_max_gib) || 20) * GiB : 20 * GiB,
             dflash_draft_window_size: ms.dflash_enabled && ms.dflash_draft_window_size
                 ? parseInt(ms.dflash_draft_window_size) : null,
-            dflash_draft_sink_size: ms.dflash_enabled && ms.dflash_draft_sink_size !== null
-                && ms.dflash_draft_sink_size !== undefined && ms.dflash_draft_sink_size !== ''
-                ? parseInt(ms.dflash_draft_sink_size) : 0,
             dflash_block_size: ms.dflash_enabled && ms.dflash_block_size
                 ? parseInt(ms.dflash_block_size) : null,
-            dflash_verify_mode: ms.dflash_enabled ? (ms.dflash_verify_mode || 'adaptive') : null,
+            dflash_verify_mode: ms.dflash_enabled
+                ? (ms.dflash_verify_mode === 'ddtree' ? 'adaptive'
+                   : (ms.dflash_verify_mode || 'adaptive')) : null,
             mtp_enabled: !!ms.mtp_enabled,
             // upstream 62171bdf: depth rides mtp_adaptive_max_depth only;
             // the legacy fixed depth is cleared on every save.
@@ -640,6 +639,9 @@
         // entry too — forced values can only make these ON, approximation is
         // conservative for the divergence warning)
         add('qwen4_ple_ssd_offload', !!d.qwen4_ple_ssd_offload);
+        // SYNC-1 (3c39990): model-level now — engine_pool:1118-1122 adds it to
+        // the signature unconditionally next to the PLE offload.
+        add('qwen4_gdn_decode_wide_proj', !!d.qwen4_gdn_decode_wide_proj);
         add('deepseek_v41_engram_ssd_offload', !!d.deepseek_v41_engram_ssd_offload);
         add('deepseek_v41_ced_prefill_enabled', !!d.deepseek_v41_ced_prefill_enabled);
         const spOn = !!d.specprefill_enabled && has(d.specprefill_draft_model);
@@ -657,21 +659,18 @@
         const dfOn = !!d.dflash_enabled && has(d.dflash_draft_model);
         add('dflash_enabled', dfOn);
         if (dfOn) {
+            // SYNC-1: tip engine_pool._engine_runtime_signature (1243-1261) —
+            // quant pair + window/block/verify; the cache knobs are gone.
             add('dflash_draft_model', d.dflash_draft_model);
             const dqOn = !!d.dflash_draft_quant_enabled;
             add('dflash_draft_quant_enabled', dqOn);
             if (dqOn) {
                 add('dflash_draft_quant_weight_bits', d.dflash_draft_quant_weight_bits ?? 4);
-                add('dflash_draft_quant_activation_bits', d.dflash_draft_quant_activation_bits ?? 16);
                 add('dflash_draft_quant_group_size', d.dflash_draft_quant_group_size ?? 64);
             }
-            add('dflash_max_ctx', d.dflash_max_ctx ?? null);
-            add('dflash_in_memory_cache', d.dflash_in_memory_cache !== false);
-            add('dflash_in_memory_cache_max_entries', d.dflash_in_memory_cache_max_entries ?? 4);
-            add('dflash_in_memory_cache_max_bytes', d.dflash_in_memory_cache_max_bytes ?? null);
-            const ssdOn = !!d.dflash_ssd_cache;
-            add('dflash_ssd_cache', ssdOn);
-            if (ssdOn) add('dflash_ssd_cache_max_bytes', d.dflash_ssd_cache_max_bytes ?? null);
+            add('dflash_draft_window_size', d.dflash_draft_window_size ?? null);
+            add('dflash_block_size', d.dflash_block_size ?? null);
+            add('dflash_verify_mode', d.dflash_verify_mode ?? null);
         }
         const vlmOn = !!d.vlm_mtp_enabled && has(d.vlm_mtp_draft_model);
         add('vlm_mtp_enabled', vlmOn);
@@ -703,14 +702,17 @@
         'moe_expert_offload_enabled', 'moe_expert_offload_resident_fraction',
         'qwen4_ple_ssd_offload', 'deepseek_v41_engram_ssd_offload',
         'deepseek_v41_ced_prefill_enabled',
+        // SYNC-1 (3c39990): model-level + engine_pool signature material → the
+        // editor must badge it RELOAD, exactly like the PLE offload row.
+        'qwen4_gdn_decode_wide_proj',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
         'specprefill_threshold',
         'external_engine',
+        // SYNC-1 (7a4ea39): surviving dflash family only — the cache/context
+        // knobs no longer exist server-side, so they cannot be runtime material.
         'dflash_enabled', 'dflash_draft_model', 'dflash_draft_quant_enabled',
-        'dflash_draft_quant_weight_bits', 'dflash_draft_quant_activation_bits',
-        'dflash_draft_quant_group_size', 'dflash_max_ctx', 'dflash_in_memory_cache',
-        'dflash_in_memory_cache_max_entries', 'dflash_in_memory_cache_max_bytes',
-        'dflash_ssd_cache', 'dflash_ssd_cache_max_bytes',
+        'dflash_draft_quant_weight_bits', 'dflash_draft_quant_group_size',
+        'dflash_draft_window_size', 'dflash_block_size', 'dflash_verify_mode',
         'mtp_enabled', 'vlm_mtp_enabled', 'vlm_mtp_draft_model',
         'vlm_mtp_draft_block_size',
     ]);
@@ -762,14 +764,10 @@
             dflash_draft_model: 'dflash_enabled',
             dflash_draft_quant_enabled: 'dflash_enabled',
             dflash_draft_quant_weight_bits: 'dflash_enabled',
-            dflash_draft_quant_activation_bits: 'dflash_enabled',
             dflash_draft_quant_group_size: 'dflash_enabled',
-            dflash_max_ctx: 'dflash_enabled',
-            dflash_in_memory_cache: 'dflash_enabled',
-            dflash_in_memory_cache_max_entries: 'dflash_enabled',
-            dflash_in_memory_cache_max_bytes: 'dflash_enabled',
-            dflash_ssd_cache: 'dflash_enabled',
-            dflash_ssd_cache_max_bytes: 'dflash_enabled',
+            dflash_draft_window_size: 'dflash_enabled',
+            dflash_block_size: 'dflash_enabled',
+            dflash_verify_mode: 'dflash_enabled',
             vlm_mtp_draft_model: 'vlm_mtp_enabled',
             vlm_mtp_draft_block_size: 'vlm_mtp_enabled',
         };
@@ -843,15 +841,34 @@
        fields = accepted ModelSettingsRequest property names, or null when
        the server schema is unknown (then send as modeled). */
     function adaptToServerPayload(payload, fields) {
-        if (!fields || fields.has('mtp_adaptive_max_depth')) return payload;
-        const out = Object.assign({}, payload);
-        if ('mtp_adaptive_max_depth' in out) {
-            out.mtp_num_draft_tokens = out.mtp_adaptive_max_depth;
-            delete out.mtp_adaptive_max_depth;
+        let out = payload;
+        if (fields && !fields.has('mtp_adaptive_max_depth')) {
+            out = Object.assign({}, out);
+            if ('mtp_adaptive_max_depth' in out) {
+                out.mtp_num_draft_tokens = out.mtp_adaptive_max_depth;
+                delete out.mtp_adaptive_max_depth;
+            }
+            // fixed depth has no legacy equivalent — drop it (null anyway:
+            // 62171bdf retired the fixed-depth select, buildPayload clears it)
+            delete out.mtp_fixed_depth;
         }
-        // fixed depth has no legacy equivalent — drop it (null anyway:
-        // 62171bdf retired the fixed-depth select, buildPayload clears it)
-        delete out.mtp_fixed_depth;
+        return dropPostTipKeys(out, fields);
+    }
+    /* SYNC-1 (upstream 3c39990): a key the editor models that only the NEW
+       ModelSettingsRequest accepts. The running keg may predate it and its
+       body model is extra='forbid' — the mere key 422s the save. When the
+       live schema is known and lacks it, omit (omission = "keep"). The
+       payload shape AND the profile-override shape both pass through here. */
+    const POST_TIP_MSR_KEYS = ['qwen4_gdn_decode_wide_proj'];
+    function dropPostTipKeys(obj, fields) {
+        if (!fields) return obj;
+        let out = obj;
+        for (const k of POST_TIP_MSR_KEYS) {
+            if ((k in out) && !fields.has(k)) {
+                if (out === obj) out = Object.assign({}, out);
+                delete out[k];
+            }
+        }
         return out;
     }
     // The same rename seen through the EDITOR STATE shape (profile
@@ -859,7 +876,9 @@
     // server's ModelSettings.from_dict silently DROPS the unknown key —
     // without this translation a profile's MTP depth would never apply.
     function adaptToServerSettings(settings, fields) {
-        if (!fields || fields.has('mtp_adaptive_max_depth')) return settings;
+        if (!fields) return settings;
+        if (fields.has('mtp_adaptive_max_depth'))
+            return dropPostTipKeys(settings, fields);   // only the qwen4 gate
         const out = Object.assign({}, settings);
         if (out.mtp_adaptive_max_depth != null) {
             out.mtp_num_draft_tokens = Math.max(1,
@@ -867,7 +886,7 @@
         }
         delete out.mtp_adaptive_max_depth;
         delete out.mtp_fixed_depth;
-        return out;
+        return dropPostTipKeys(out, fields);
     }
 
     /* REQ-DIV: request-time settings a profile snapshot can carry (classic's

@@ -17,7 +17,10 @@ const GS_MAP = {
     sse_keepalive_mode: ['server','sse_keepalive_mode'],
     burst_decode_mode: ['server','burst_decode_mode'],
     preserve_mid_system_cache: ['server','preserve_mid_system_cache'],
-    qwen4_gdn_decode_wide_proj: ['server','qwen4_gdn_decode_wide_proj'],
+    // SYNC-1 (upstream 3c39990): qwen4_gdn_decode_wide_proj left
+    // GlobalSettingsRequest for ModelSettingsRequest (per-model now — see
+    // modelspec.js / uplift_mmeditor.js). Sending it here is dead weight on a
+    // tip server and must never come back.
     gpu_keep_warm_interval: ['server','gpu_keep_warm_interval'],
     distributed_inference_enabled: ['server','distributed_inference_enabled'],
     max_audio_upload_size: ['server','max_audio_upload_size'],

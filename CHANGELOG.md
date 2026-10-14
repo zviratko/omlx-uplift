@@ -13,6 +13,13 @@ users never see.
 
 ## Unreleased
 
+- **Sync to upstream 6d17522 (model settings keep saving).** Upstream
+  deleted eight `dflash_*` cache/quant knobs and the server rejects unknown
+  keys — Uplift no longer sends them, so model-settings saves keep working
+  on newer servers. Qwen4 wide-proj GDN decode moved from the global
+  System-Settings Advanced page into the per-model editor, shown only for
+  models that support it, matching classic.
+
 - **Bench menu lists every benchmark.** The Bench dropdown now shows all
   seven surfaces — Throughput, Intelligence, Context, ANE Tune,
   Embeddings, Rerankers, Decision. Before, ANE/embed/rerank/decision were
