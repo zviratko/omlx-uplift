@@ -620,6 +620,33 @@ def _collect_question_results(outdir: Path) -> list[dict]:
     """
     rows: list[dict] = []
     seen: set = set()
+
+    def _extract_prompt(arg0: Any) -> str:
+        # lm_eval emits the prompt in several shapes: a plain context str,
+        # a chat messages list-of-dicts, or a list wrapping ONE serialized
+        # JSON str (the double-encoded blob actually observed in sample
+        # files: ['[{\"role\":\"user\",\"content\":\"...\"}]']). Flatten
+        # them all to the human-readable prompt the model saw.
+        if isinstance(arg0, str):
+            s = arg0.strip()
+            if s.startswith("[") or s.startswith("{"):
+                try:
+                    return _extract_prompt(json.loads(s))
+                except Exception:
+                    return arg0
+            return arg0
+        if isinstance(arg0, (list, tuple)):
+            parts: list[str] = []
+            for item in arg0:
+                t = _extract_prompt(item)
+                if t:
+                    parts.append(t)
+            return "\n".join(parts)
+        if isinstance(arg0, dict):
+            c = arg0.get("content")
+            return str(c) if c is not None else json.dumps(arg0)[:2000]
+        return str(arg0) if arg0 is not None else ""
+
     for f in sorted(outdir.rglob("samples_*.jsonl")):
         m = _SAMPLES_RE.match(f.name)
         leaf = m.group(1) if m else f.stem
@@ -639,8 +666,8 @@ def _collect_question_results(outdir: Path) -> list[dict]:
                 args = rec.get("arguments") or {}
                 question = ""
                 for _k, v in sorted(args.items()):
-                    if isinstance(v, dict) and isinstance(v.get("arg_0"), str):
-                        question = v["arg_0"]
+                    if isinstance(v, dict) and "arg_0" in v:
+                        question = _extract_prompt(v.get("arg_0"))
                         break
                 preds = rec.get("filtered_resps") or []
                 predicted = str(preds[0]) if preds else ""
@@ -721,8 +748,14 @@ def _suite_args(spec: dict, base_url: str, model_id: str, outdir: Path,
     if sampling_profile == "deterministic":
         gen_kwargs["temperature"] = 0.0
     if enable_thinking:
-        # room for reasoning THEN the answer; task-native budgets
-        # (ifeval 1280 / bbh 1024) are below what a thinking pass needs.
+        # two overrides a thinking pass NEEDS, proven live on the board:
+        # 1) until:[] — the task's "\n" stop (letter/MC/everything) fires
+        #    INSIDE the reasoning block and kills the answer before it
+        #    lands (content came back '' with until=["\n"], the full answer
+        #    with until=[]). Let the server's own turn-end eos end it.
+        # 2) a real budget (2048): task-native 256/1024/1280 is below what
+        #    reasoning THEN the answer needs; short budgets finish on length.
+        gen_kwargs["until"] = []
         gen_kwargs["max_gen_toks"] = 2048
     args += ["--gen_kwargs", json.dumps(gen_kwargs)]
     return args

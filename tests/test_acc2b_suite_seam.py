@@ -339,12 +339,18 @@ def test_extra_flows_through_suite_args_without_classic_registry(extra_map):
     assert parsed["chat_template_kwargs"] == {"enable_thinking": False}
     assert parsed["temperature"] == 0.0
     assert "max_gen_toks" not in parsed
-    # thinking on: enable_thinking true + a real budget so the answer lands
+    # thinking off: NO until override — each task keeps its native stops
+    # (the letter-MC "\n" boundary works fine without reasoning in the way)
+    assert "until" not in parsed
+    # thinking on: enable_thinking true + until:[] + real budget so the
+    # answer lands AFTER the reasoning ("\n" stop fires inside the CoT and
+    # killed the answer live; the server's own eos ends the turn instead)
     h2 = __import__("pathlib").Path("/tmp/o2")
     args_t = he._suite_args(he.HARNESS_MAP[FAKE_EXTRA], "http://x/v1", "m",
                             h2, 7, "deterministic", True)
     p2 = _json.loads(args_t[args_t.index("--gen_kwargs") + 1])
     assert p2["chat_template_kwargs"] == {"enable_thinking": True}
+    assert p2["until"] == []
     assert p2["max_gen_toks"] == 2048
 
 
