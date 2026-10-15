@@ -109,7 +109,7 @@ def test_run_usable_gates():
     r._uplift_engine = "harness"
     assert he.run_usable(r) is True                        # mmlu mapped
     r.enable_thinking = True
-    assert he.run_usable(r) is False                       # thinking -> classic
+    assert he.run_usable(r) is True                        # thinking threaded now
     r.enable_thinking = False
     r.external = object()
     assert he.run_usable(r) is False                       # external -> classic
@@ -344,11 +344,20 @@ def test_suite_args_carries_include_path_and_flags(tmp_path):
     assert args[args.index("--tasks") + 1] == "uplift_hellaswag_generative"
     assert args[args.index("--num_fewshot") + 1] == "0"
     assert args[args.index("--limit") + 1] == "5"
-    assert args[args.index("--gen_kwargs") + 1] == "temperature=0.0"
+    # --gen_kwargs is ONE JSON token now: explicit chat_template_kwargs
+    # (thinking toggle reaches the server) + temperature when deterministic
+    import json as _json
+    gk = _json.loads(args[args.index("--gen_kwargs") + 1])
+    assert gk["chat_template_kwargs"] == {"enable_thinking": False}
+    assert gk["temperature"] == 0.0
     # sample_size 0 = full dataset: NO --limit line at all
     a2 = he._suite_args(he.HARNESS_MAP["kmmlu"], "http://x/v1",
                         "m", tmp_path, 0, "model_settings")
-    assert "--limit" not in a2 and "--gen_kwargs" not in a2
+    assert "--limit" not in a2
+    # model_settings: NO temperature (server sampling), thinking still explicit
+    gk2 = _json.loads(a2[a2.index("--gen_kwargs") + 1])
+    assert "temperature" not in gk2
+    assert gk2["chat_template_kwargs"] == {"enable_thinking": False}
     assert a2[a2.index("--num_fewshot") + 1] == "5"
     # every mapped suite's custom yaml is only findable via include_path:
     # built-in suites must carry it too (one code path, no per-suite flag)

@@ -8,8 +8,10 @@ Pinned here:
 - queue_add admits an EXTRA under engine='harness' (uplift request
   SUBCLASS), through the same native contract, tagged for the dispatcher
 - the same EXTRA is REFUSED under engine='classic' (classic's vanilla
-  16-name wall stays exactly as shipped) and under harness+external /
-  harness+thinking (run_usable's gates mirrored, honest refusal)
+  16-name wall stays exactly as shipped) and under harness+external
+  (local-model only). harness+thinking is ADMITTED (2026-10-15): the
+  checkbox now reaches the server via chat_template_kwargs, so a thinking
+  run on an extra is a run the harness can actually execute
 - run_usable accepts an all-extra run; classic-16 twin names are
   unaffected (vanilla class still constructs them, both engines)
 - the seam never touches classic's class: the vanilla request still
@@ -235,7 +237,7 @@ async def test_queue_add_refuses_extra_under_classic(fake_ab, extra_map):
 
 
 @pytest.mark.asyncio
-async def test_queue_add_refuses_extra_external_and_thinking(fake_ab,
+async def test_queue_add_refuses_external_admits_thinking(fake_ab,
                                                              extra_map):
     from omlx_uplift import accuracy_engine as ae
     # external: harness refuses local-only suites (and external anyway)
@@ -245,16 +247,14 @@ async def test_queue_add_refuses_extra_external_and_thinking(fake_ab,
                              "external": {"base_url": "http://x"},
                              "engine": "harness"})
     assert "external" in str(e.value)
-    # thinking: run_usable would never take the harness branch, and the
-    # classic fallback DROPS extras — refuse at the queue instead
-    with pytest.raises(ae.BadInput) as e:
-        await _add(fake_ab, {"model_id": "m1",
-                             "benchmarks": {FAKE_EXTRA: 5, "mmlu": 5},
-                             "enable_thinking": True, "engine": "harness"})
-    assert FAKE_EXTRA in str(e.value) and "thinking" in str(e.value)
-    assert len(fake_ab.queue) == 0
-    # a twin-only run with thinking keeps its PRE-2b behaviour (tag it,
-    # dispatcher routes classic) — the seam changed nothing for the 16
+    # thinking is threaded now (2026-10-15), not refused: harness+thinking
+    # is a valid run; the checkbox reaches the server via chat_template_kwargs
+    await _add(fake_ab, {"model_id": "m1",
+                         "benchmarks": {FAKE_EXTRA: 5, "mmlu": 5},
+                         "enable_thinking": True, "engine": "harness"})
+    assert len(fake_ab.queue) == 1          # admitted, not refused
+    # a twin-only run with thinking keeps its behaviour (tag it, harness
+    # runs it with thinking) — the seam changed nothing for the 16
     await _add(fake_ab, {"model_id": "m1", "benchmarks": {"mmlu": 5},
                          "enable_thinking": True, "engine": "harness"})
     assert getattr(fake_ab.queue[-1], "_uplift_engine") == "harness"
@@ -304,17 +304,17 @@ def test_run_usable_accepts_all_extra_run(extra_map):
                               _uplift_engine="harness")
     assert extra_map.run_usable(r) is True
     r.enable_thinking = True
-    assert extra_map.run_usable(r) is False      # gate still holds
-    r.enable_thinking = False
+    assert extra_map.run_usable(r) is True      # thinking threaded, not a wall
     r.external = object()
-    assert extra_map.run_usable(r) is False
-    # refusal text comes from the seam, per gate, naming the suite
+    assert extra_map.run_usable(r) is False     # external still a wall
+    # admission: with thinking now valid, only external is refused for extras
     r.external = None
-    assert extra_map.extra_admission_error(r) is None
     r.enable_thinking = True
+    assert extra_map.extra_admission_error(r) is None
+    r.external = object()
     msg = extra_map.extra_admission_error(r)
-    assert msg and FAKE_EXTRA in msg and "thinking" in msg
-    r.enable_thinking = False
+    assert msg and FAKE_EXTRA in msg and "external" in msg
+    r.external = None
     r.benchmarks = {"mmlu": 5}
     assert extra_map.extra_admission_error(r) is None   # twins untouched
 
@@ -330,6 +330,22 @@ def test_extra_flows_through_suite_args_without_classic_registry(extra_map):
     assert args[args.index("--tasks") + 1] == "uplift_fake_ifeval"
     assert args[args.index("--limit") + 1] == "7"
     assert "--include_path" in args
+    # the thinking checkbox reaches the wire (2026-10-15 fix): exactly one
+    # --gen_kwargs token, JSON, with an explicit enable_thinking bool
+    gk = [i for i, a in enumerate(args) if a == "--gen_kwargs"]
+    assert len(gk) == 1
+    import json as _json
+    parsed = _json.loads(args[gk[0] + 1])
+    assert parsed["chat_template_kwargs"] == {"enable_thinking": False}
+    assert parsed["temperature"] == 0.0
+    assert "max_gen_toks" not in parsed
+    # thinking on: enable_thinking true + a real budget so the answer lands
+    h2 = __import__("pathlib").Path("/tmp/o2")
+    args_t = he._suite_args(he.HARNESS_MAP[FAKE_EXTRA], "http://x/v1", "m",
+                            h2, 7, "deterministic", True)
+    p2 = _json.loads(args_t[args_t.index("--gen_kwargs") + 1])
+    assert p2["chat_template_kwargs"] == {"enable_thinking": True}
+    assert p2["max_gen_toks"] == 2048
 
 
 # ---- upload gate + fallback guard in the runner ---------------------------

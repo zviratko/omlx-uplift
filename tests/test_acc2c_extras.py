@@ -107,7 +107,12 @@ def test_batch1_specs_are_executable_by_the_harness():
         assert args[args.index("--tasks") + 1] == ",".join(spec["tasks"])
         assert args[args.index("--num_fewshot") + 1] == str(spec["fewshot"])
         assert args[args.index("--limit") + 1] == "10"
-        assert args[-2:] == ["--gen_kwargs", "temperature=0.0"]
+        # --gen_kwargs: ONE JSON token, explicit thinking bool (reaches the
+        # server); deterministic profile also pins temperature=0.0
+        assert args[-2] == "--gen_kwargs"
+        gk = json.loads(args[-1])
+        assert gk["chat_template_kwargs"] == {"enable_thinking": False}
+        assert gk["temperature"] == 0.0
 
 
 def test_extra_suites_payload_carries_the_real_chip_values():
@@ -149,12 +154,16 @@ async def test_queue_add_admits_a_real_batch1_extra(fake_ab):
                            Pool())
     assert "ifeval" in str(e.value) and "Must be one of" in str(e.value)
     assert len(fake_ab.queue) == 1
-    # harness + thinking: refused, extras can never fall back to classic
-    with pytest.raises(ae.BadInput) as e:
-        await ae.queue_add({"model_id": "m1", "benchmarks": {"ifeval": 10},
-                            "enable_thinking": True, "engine": "harness"},
-                           Pool())
-    assert "thinking" in str(e.value)
+    # harness + thinking: ADMITTED (2026-10-15 fix) — the checkbox now
+    # reaches the server via chat_template_kwargs, so the harness can run it
+    await ae.queue_add({"model_id": "m1", "benchmarks": {"ifeval": 10},
+                        "enable_thinking": True, "engine": "harness"},
+                       Pool())
+    req2 = fake_ab.queue[-1]
+    assert getattr(req2, "_uplift_engine") == "harness"
+    assert req2.enable_thinking is True
+    assert he.run_usable(req2) is True
+    assert len(fake_ab.queue) == 2
 
 
 # ---- 2. mixed-leaf metric parsing -----------------------------------------

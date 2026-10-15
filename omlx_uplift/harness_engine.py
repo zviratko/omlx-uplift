@@ -373,23 +373,22 @@ def extra_admission_error(request: Any) -> Optional[str]:
     if getattr(request, "external", None) is not None:
         return (f"harness-only suite(s) {names} run against a local model "
                 f"only — external endpoints use the classic engine")
-    if getattr(request, "enable_thinking", False):
-        return (f"harness-only suite(s) {names} cannot run with thinking "
-                f"enabled — the harness cannot send chat-template kwargs and "
-                f"the classic engine has no such suite")
+    # thinking is NOT a wall anymore (2026-10-15): the harness threads the
+    # checkbox through chat_template_kwargs, so an extra may run thinking.
     return None
 
 
 def run_usable(request: Any) -> bool:
     """Dispatcher gate: tagged harness, local (external classic path is
-    already native-compatible), no thinking (harness cannot send chat
-    template kwargs — classic keeps it honest), all tasks mapped.
-    ACC-2b: extras live IN HARNESS_MAP, so they pass through here with no
-    change; queue_add.extra_admission_error keeps them from being tagged
-    into a run the harness would not execute."""
+    already native-compatible), all tasks mapped. ACC-2b: extras live IN
+    HARNESS_MAP, so they pass through here with no change; queue_add's
+    extra_admission_error keeps them from being tagged into a run the
+    harness would not execute. THINKING (2026-10-15): no longer a wall —
+    the harness now threads the checkbox through chat_template_kwargs, so a
+    thinking run on the harness is honest (and gets the budget it needs)."""
     if getattr(request, "_uplift_engine", None) != "harness":
         return False
-    if request.external is not None or request.enable_thinking:
+    if request.external is not None:
         return False
     return all(harness_available(t) for t in request.benchmarks)
 
@@ -609,13 +608,27 @@ def _acc():
 
 
 def _suite_args(spec: dict, base_url: str, model_id: str, outdir: Path,
-                sample_size: int, sampling_profile: str) -> list[str]:
+                sample_size: int, sampling_profile: str,
+    enable_thinking: bool = False) -> list[str]:
     """CLI args for one suite subprocess. Own function so tests pin the
     surface without omlx/server state — notably --include_path: the
     custom generative yamls (bench_tasks/yamls/) are ONLY visible to
     lm_eval through it, and omitting it would break exactly the suites
     the 2b-carryover added while the 5 originals keep working (the
-    silent-regression shape)."""
+    silent-regression shape).
+
+    THINKING (user 2026-10-15): the advanced-settings checkbox is the ONLY
+    thinking control; it was never reaching the server here (the harness
+    built no chat_template_kwargs), so the server's per-model default leaked
+    a CoT into every 'direct' suite. Now EVERY request carries an explicit
+    chat_template_kwargs={'enable_thinking': <choice>} — checked => thinking,
+    unchecked => direct (no CoT). lm_eval merges --gen_kwargs onto each
+    task's generation_kwargs (evaluator update=True), so this reaches both
+    the native suites (ifeval/bbh, whose own budgets I don't touch) and my
+    custom twins. When thinking is ON I also raise max_gen_toks so the
+    answer lands AFTER the reasoning (else it finishes on length). The value
+    is a real JSON dict passed as one --gen_kwargs token (MergeDictAction
+    try_parse_json -> nested bool, not a string)."""
     args = ["--model", "local-chat-completions",
             "--model_args", (f"base_url={base_url},"
                              f"model={model_id},"
@@ -629,10 +642,14 @@ def _suite_args(spec: dict, base_url: str, model_id: str, outdir: Path,
             "--output_path", str(outdir)]
     if sample_size:
         args += ["--limit", str(sample_size)]
+    gen_kwargs = {"chat_template_kwargs": {"enable_thinking": bool(enable_thinking)}}
     if sampling_profile == "deterministic":
-        args += ["--gen_kwargs", "temperature=0.0"]
-    # model_settings profile: NO gen_kwargs -> server applies the model's
-    # configured sampling (classic's own profile semantics)
+        gen_kwargs["temperature"] = 0.0
+    if enable_thinking:
+        # room for reasoning THEN the answer; task-native budgets
+        # (ifeval 1280 / bbh 1024) are below what a thinking pass needs.
+        gen_kwargs["max_gen_toks"] = 2048
+    args += ["--gen_kwargs", json.dumps(gen_kwargs)]
     return args
 
 
@@ -650,7 +667,8 @@ async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
     outdir = results_root() / run.bench_id / task
     outdir.mkdir(parents=True, exist_ok=True)
     args = _suite_args(spec, _base_url(), run.request.model_id, outdir,
-                       sample_size, run.request.sampling_profile)
+                       sample_size, run.request.sampling_profile,
+                       bool(getattr(run.request, "enable_thinking", False)))
 
     key = _api_key()
     t0 = time.perf_counter()
@@ -750,7 +768,7 @@ async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
         raise RuntimeError(f"harness produced no '{names}' score for {task}")
     return {"model_id": run.request.model_id, "external": False,
             "benchmark": task, "accuracy": round(score, 4),
-            "thinking_used": False,
+            "thinking_used": bool(getattr(run.request, "enable_thinking", False)),
             "total": total, "correct": int(round(score * total)) if total else 0,
             "time_s": round(time.perf_counter() - t0, 1),
             "dataset_total": None,  # harness reports sampled n, not split size
