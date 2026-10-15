@@ -18,8 +18,9 @@ Error contract mirrored from server.py: DecisionContextLengthError ->
 per-item skip with reason, DecisionRequestError -> run fails (a fixture
 the endpoint rejects is a bug in US, not noise to hide).
 
-TWO SCORING PATHS (generic /v1/decisions extension; upstream 981ebcc +
-1b96f67), reported per run and per result row as "path":
+THREE SCORING PATHS (generic /v1/decisions extension; upstream 981ebcc +
+1b96f67; forced mode FORCED-1 on 5833533), reported per run and per result
+row as "path":
   "native"   decision models (pool engine_type == 'decision') scored
              through /v1/systemone exactly as above — untouched.
   "generic"  ANY chat model (engine_type 'batched' | 'vlm') scored by
@@ -35,6 +36,19 @@ TWO SCORING PATHS (generic /v1/decisions extension; upstream 981ebcc +
              so decisions_capability() gates the path (classify_models
              reports it, resolve_path enforces it) and uplift ships ahead
              of keg bumps with the group empty-plus-reason.
+  "forced"   FORCED-1: the SAME chat lease and decide() call, but with
+             require_answer=False — the /v1/systemone CHAT semantics added
+             by upstream 5833533 (#4552, "System One has no refusal
+             answer"): every readout skips the letter-mass floor and
+             reports a normalized distribution even for near-zero mass.
+             Different MEASURAND, not a better gated run: accuracy is the
+             quality of a forced guess, brier/ece include the confidence
+             of models that abstain entirely when gated. Rows carry
+             path:'forced' + engine:'systemone' and the UI marks them
+             '(forced)'; never average forced with gated totals.
+             forced_capability() probes decide()'s signature (the kwarg
+             only exists at/after 5833533) — classify_models reports
+             forced_available/forced_reason, start() refuses otherwise.
 KNOWN deviations from the HTTP route, stated rather than papered over:
   - get_server_metrics().record_request_complete() is NOT called, so
     generic bench traffic is absent from the dashboard serving charts
@@ -68,6 +82,7 @@ Scores per pack (metrics.py has the definitions):
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import random
@@ -94,6 +109,13 @@ NATIVE_ENGINE_TYPE = "decision"
 NEVER_SCORED_ENGINE_TYPES = ("embedding", "reranker", "markitdown", "sts")
 PATH_NATIVE = "native"
 PATH_GENERIC = "generic"
+# FORCED-1: systemone chat semantics (require_answer=False, upstream
+# 5833533). Shares the generic lease + decide() call; differs only in the
+# letter-mass floor. 'mode' in the request body selects it: 'gated'
+# (default, == today's generic path) | 'forced'.
+PATH_FORCED = "forced"
+MODE_GATED = "gated"
+MODE_FORCED = "forced"
 
 try:  # new omlx (>= b75060e): the real classes raised by the decode path
     from omlx.models.decision import (DecisionContextLengthError,  # noqa: F401
@@ -131,7 +153,7 @@ def tasks_payload() -> dict:
                       for name, meta in loader.packs_summary().items()}}
 
 
-def validate_body(body: dict) -> tuple[str, list[str], int]:
+def validate_body(body: dict) -> tuple[str, list[str], int, str]:
     model_id = str(body.get("model_id") or "").strip()
     packs = body.get("packs") or []
     if not isinstance(packs, list) or not packs:
@@ -143,10 +165,16 @@ def validate_body(body: dict) -> tuple[str, list[str], int]:
     limit = int(body.get("limit") or 0)
     if limit < 0 or limit > 10_000:
         raise BadInput("limit must be 0 (full pack) .. 10000")
+    # FORCED-1: answer policy. 'gated' is the historical /v1/decisions
+    # behaviour (refusals stay honest nulls) and the DEFAULT — every body
+    # written before the mode existed must keep scoring exactly as before.
+    mode = str(body.get("mode") or MODE_GATED)
+    if mode not in (MODE_GATED, MODE_FORCED):
+        raise BadInput(f"mode must be '{MODE_GATED}' or '{MODE_FORCED}'")
     # stable execution order: the UI sends packs in CLICK order, so two
     # runs of the same pack SET would otherwise interleave differently in
     # the results table / progress feed (user request, 2026-10-13)
-    return model_id, sorted(str(p) for p in packs), limit
+    return model_id, sorted(str(p) for p in packs), limit, mode
 
 
 # ---- request shaping (pure, tested) ----------------------------------------
@@ -374,11 +402,25 @@ async def start(body: dict) -> dict:
     global _active
     if active_run() is not None:
         raise Conflict("a decision benchmark is already running")
-    model_id, packs, limit = validate_body(body)
+    model_id, packs, limit, mode = validate_body(body)
     # type gate BEFORE leasing: pointing the bench at a model that cannot
     # answer typed questions would load a 30B just to fail — ask the pool
     # what this id is first, and pick the scoring path from the answer.
     path = resolve_path(model_id)
+    if mode == MODE_FORCED:
+        # forced is the /v1/systemone CHAT semantics (5833533): defined
+        # only where decide() runs — decision models never refuse, and
+        # the native engine has no require_answer to flip.
+        if path != PATH_GENERIC:
+            raise BadInput(f"mode 'forced' scores chat models through "
+                           f"decide(require_answer=False); {model_id} is "
+                           f"scored on the native path and never refuses")
+        fok, freason = forced_capability()
+        if not fok:
+            raise BadInput(f"{model_id}: this server cannot force an "
+                           f"answer (/v1/systemone chat support missing): "
+                           f"{freason}")
+        path = PATH_FORCED
     run = DecisionRun(f"sys1-{uuid.uuid4().hex[:12]}", model_id, packs, limit,
                       path=path)
     _active = run
@@ -427,6 +469,26 @@ def decisions_capability() -> tuple[bool, str]:
     return True, ""
 
 
+def forced_capability() -> tuple[bool, str]:
+    """ADDITIVE gate for the forced-choice (System One chat) mode, on top
+    of decisions_capability(): decide() must accept require_answer — the
+    kwarg upstream 5833533 added when /v1/systemone learned to answer with
+    chat models. Signature probe, never a version string; never raises
+    (a stubbed/None decide() answers honestly False with the reason)."""
+    try:
+        import inspect
+
+        from omlx.api.decisions import decide
+        params = inspect.signature(decide).parameters
+    except Exception as e:
+        return False, (f"decide() has no readable require_answer signature "
+                       f"({type(e).__name__}: {e})")
+    if "require_answer" not in params:
+        return False, ("decide() lacks require_answer "
+                       "(needs upstream 5833533)")
+    return True, ""
+
+
 def _pool() -> Optional[Any]:
     """The live engine pool, or None when the server is not initialised
     (tests, pre-boot). The private _entries access mirrors upstream's own
@@ -460,7 +522,8 @@ def _entry_engine_type(entry) -> Optional[str]:
 def classify_models() -> dict:
     """Picker payload, FROZEN with the static lane (do not rename keys):
     {"generic_available": bool, "generic_reason": str (empty when
-    available), "native": [ids], "generic": [ids]} — both lists sorted.
+    available), "forced_available": bool, "forced_reason": str (FORCED-1,
+    additive), "native": [ids], "generic": [ids]} — both lists sorted.
 
     Server-side classification so the UI stops guessing engine_type from
     /models rows. Pool unavailable -> empty lists (the capability answer
@@ -470,6 +533,15 @@ def classify_models() -> dict:
     ok, reason = decisions_capability()
     out: dict[str, Any] = {"generic_available": ok, "generic_reason": reason,
                            "native": [], "generic": []}
+    # FORCED-1: additive answer-policy axis. Forced rides on the generic
+    # lease, so when generic is unavailable the forced answer IS generic's
+    # reason (one honest chain, no second mystery failure).
+    if ok:
+        fok, freason = forced_capability()
+    else:
+        fok, freason = False, reason
+    out["forced_available"] = fok
+    out["forced_reason"] = freason
     for mid, entry in (_pool_entries() or {}).items():
         et = _entry_engine_type(entry)
         if et in NEVER_SCORED_ENGINE_TYPES or str(et or "").startswith("audio_"):
@@ -585,8 +657,10 @@ def _lease_chat(model_id: str):
 
 def _lease_for(model_id: str, path: str):
     """The seam _runner actually calls, so path selection is one line and
-    testable: native -> the decision engine, generic -> the chat engine."""
-    return _lease_chat(model_id) if path == PATH_GENERIC else _lease(model_id)
+    testable: native -> the decision engine, generic/forced -> the chat
+    engine (forced reuses the SAME lease; only decide()'s floor differs)."""
+    return (_lease_chat(model_id) if path in (PATH_GENERIC, PATH_FORCED)
+            else _lease(model_id))
 
 
 async def _runner(run: DecisionRun) -> None:
@@ -599,11 +673,13 @@ async def _runner(run: DecisionRun) -> None:
         cm = _lease_for(run.model_id, path)
         engine = await cm.__aenter__()
         entered = True
-        if path == PATH_GENERIC:
+        if path in (PATH_GENERIC, PATH_FORCED):
             # fail FAST: decide() computes the A-Z letter token ids up front
             # and raises for every question if the tokenizer cannot spell them
             # (decisions.py letter_token_ids). Discovering that after 200 items
-            # — or after pack 1 of 3 — is a wasted GPU hour.
+            # — or after pack 1 of 3 — is a wasted GPU hour. Forced mode reads
+            # the SAME letters with the floor removed, so it needs the probe
+            # just as much as gated.
             _preprobe_letter_tokens(engine)
         n = len(run.packs)
         for i, pack_name in enumerate(run.packs):
@@ -665,7 +741,12 @@ async def _runner(run: DecisionRun) -> None:
 async def _run_pack(run: DecisionRun, engine, pack_name: str,
                     ctx_err, req_err) -> None:
     path = getattr(run, "path", None) or PATH_NATIVE
-    generic = path == PATH_GENERIC
+    generic = path in (PATH_GENERIC, PATH_FORCED)
+    # FORCED-1: the ONLY scoring difference is the letter-mass floor flag;
+    # request shapes, legs, adapters and the probe accounting are shared so
+    # forced vs gated stay comparable WITHIN the chat-model axis (and the
+    # row labels keep them apart in the accumulated table).
+    require_answer = path != PATH_FORCED
     pack = loader.load_pack(pack_name)
     items = pack["items"]
     if run.limit:
@@ -691,7 +772,13 @@ async def _run_pack(run: DecisionRun, engine, pack_name: str,
         logger.log(5, "decision %s %s item %d/%d", run.run_id,
                    pack_name, j + 1, len(items))
         build = build_generic_request if generic else build_request
-        call = _decide_generic if generic else _decide
+        if generic:
+            # partial binds the CURRENT module global -> monkeypatched fakes
+            # (tests) and future reassignment both take effect at call time
+            call = functools.partial(_decide_generic,
+                                     require_answer=require_answer)
+        else:
+            call = _decide
         req = build(run.model_id, item, seed=j, shuffle=False)
         try:
             res = await call(engine, req)
@@ -730,7 +817,11 @@ async def _run_pack(run: DecisionRun, engine, pack_name: str,
            # ('systemone' | 'decisions') — legacy readers use it, and rows
            # written before the split have neither and default to native.
            "path": path,
-           "engine": "decisions" if generic else "systemone",
+           # FORCED-1: forced rows were scored by the /v1/systemone chat
+           # branch (decide with the floor off) -> engine says so honestly;
+           # gated generic rows keep 'decisions', native keeps 'systemone'
+           "engine": ("systemone" if path == PATH_FORCED
+                      else "decisions" if generic else "systemone"),
            "skipped": skipped,
            "ts": int(time.time()),
            # per-item raw rows ride on the result row: it is persisted to
@@ -885,11 +976,18 @@ def _prepare_readout(engine, model_id: Optional[str] = None):
     return _prepare
 
 
-async def _decide_generic(engine, request: dict) -> dict:
+async def _decide_generic(engine, request: dict,
+                          require_answer: bool = True) -> dict:
     """The create_decisions else-arm in-process (mirror of _decide for the
     native path): DecisionRequest -> decide() -> {answers, input_tokens,
     cached_tokens}. Answers come back as a LIST ordered by the request's
     questions; adapt_generic_answers maps them onto score_item's shape.
+
+    require_answer=False is the /v1/systemone CHAT branch (upstream
+    5833533): the kwarg is passed ONLY when False, so a keg that predates
+    5833533 still runs the gated path unchanged (its decide() has no such
+    parameter; start()'s forced_capability() gate is the front door, this
+    is the belt).
 
     Error translation (the HTTP route turns these into 4xx; we have no
     transport, so they become the classes _run_pack already handles):
@@ -902,9 +1000,10 @@ async def _decide_generic(engine, request: dict) -> dict:
 
     dr = DecisionRequest(**request)
     prepare = _prepare_readout(engine, request.get("model"))
+    forced = {} if require_answer else {"require_answer": False}
     try:
         result = await decide(engine, dr, _generic_multimodal(engine),
-                              prepare=prepare)
+                              prepare=prepare, **forced)
     except DecisionContextLengthError:
         raise                      # already translated by _prepare_readout
     except DecisionRequestError:

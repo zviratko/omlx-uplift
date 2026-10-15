@@ -355,3 +355,109 @@ test('DEC-API: the marker reaches the Copy / Markdown / CSV Model column', () =>
     assert.equal((decBlock.match(/decModelCell\(r\)/g) || []).length, 3,
         'table cell + the two export column defs');
 });
+
+
+// ---- FORCED-1: the Answer-policy control -----------------------------------
+// The mode select is driven ONLY by the server's groups payload: membership
+// in `generic` enables it, forced_available enables the 'forced' option, the
+// server's reason rides in the title, and a stale 'forced' selection snaps
+// back the moment it would produce a run the server refuses.
+
+const MODE_CAT = { 'uplift.bench.dec.mode_label': 'MODELBL',
+                   'uplift.bench.dec.mode_gated': 'MODEGATED',
+                   'uplift.bench.dec.mode_forced': 'MODEFORCED',
+                   'uplift.bench.dec.mode_hint': 'MODEHINT' };
+Object.assign(CAT, MODE_CAT);
+
+function modeSel(byId) { return byId['bench-dec-mode']; }
+function optsOf(s) {
+    return (s.children || []).map(o => ({ text: o.textContent,
+                                          value: o.value, disabled: !!o.disabled }));
+}
+
+test('FORCED-1: chat membership enables the control; forced option needs the flag',
+async () => {
+    // default groups payload has NO forced_available (pre-FORCED-1 server)
+    const { DEC, sel, byId } = load();
+    await DEC.loadModels();
+    const m = modeSel(byId);
+    assert.ok(m, 'the Answer-policy select exists');
+    assert.deepEqual(optsOf(m).map(o => o.value), ['gated', 'forced']);
+    assert.deepEqual(optsOf(m).map(o => o.text), ['MODEGATED', 'MODEFORCED'],
+        'labels via the catalog');
+
+    sel.value = ''; DEC._syncMode();
+    assert.equal(m.disabled, true, 'no model -> control disabled');
+
+    sel.value = 'zzz-decision'; DEC._syncMode();
+    assert.equal(m.disabled, true, 'native model -> forced is meaningless');
+
+    sel.value = 'chat-gamma'; DEC._syncMode();
+    assert.equal(m.disabled, false, 'chat model -> control live');
+    assert.deepEqual(optsOf(m).find(o => o.value === 'forced').disabled, true,
+        'no forced_available -> option stays DISABLED with the reason, ' +
+        'never hidden and never silently accepted');
+    assert.equal(m.title, 'MODEHINT',
+        'absent server reason -> honest generic hint, not an empty title');
+});
+
+test('FORCED-1: forced_available opens the option; a server reason titles it',
+async () => {
+    const { DEC, sel, byId } = load({ groups: {
+        generic_available: true, generic_reason: '',
+        forced_available: true, forced_reason: '',
+        native: ['zzz-decision', 'aaa-decision'],
+        generic: ['chat-gamma', 'chat-alpha'] } });
+    await DEC.loadModels();
+    sel.value = 'chat-alpha'; DEC._syncMode();
+    assert.equal(optsOf(modeSel(byId)).find(o => o.value === 'forced').disabled,
+        false, 'chat + capable base -> forced selectable');
+    // switch to a native model while forced is SELECTED: snap back to gated
+    modeSel(byId).value = 'forced';
+    sel.value = 'aaa-decision'; DEC._syncMode();
+    assert.equal(modeSel(byId).value, 'gated',
+        'a stale forced choice can never ride onto a native model');
+});
+
+test('FORCED-1: the start body carries the mode explicitly (queue-safe)',
+async () => {
+    const { win, DEC, sel, byId, net } = load({ groups: {
+        generic_available: true, generic_reason: '',
+        forced_available: true, forced_reason: '',
+        native: [], generic: ['chat-gamma'] } });
+    net.posts = [];
+    win.UpliftDom.postJson = async (u, body) => {
+        net.posts.push([u, body]); throw new Error('recorded, stop here'); };
+    await DEC.loadModels();
+    sel.value = 'chat-gamma'; DEC._syncMode();
+    modeSel(byId).value = 'forced';
+    DEC.state.selected = { 'arc-choice': true };
+    await DEC.start();
+    assert.equal(net.posts.length, 1);
+    assert.equal(net.posts[0][0], '/uplift/api/bench/decision/start');
+    assert.equal(net.posts[0][1].mode, 'forced',
+        'the chosen policy travels in the body (queue replays it verbatim)');
+    // and gated stays explicit when the control is disabled again
+    modeSel(byId).value = 'gated';
+    await DEC.start();
+    assert.equal(net.posts[1][1].mode, 'gated');
+});
+
+test('FORCED-1: forced rows carry the (forced) marker, legacy rows untouched',
+() => {
+    const { DEC, byId } = load();
+    DEC.state.results = [
+        { model_id: 'chat-a', pack: 'arc-choice',
+          engine: 'decisions', path: 'generic', accuracy: 0.7, brier: 0.06,
+          ece: 0.05, agreement: 0.9, ms_per_question: 900, items: 10,
+          ts: 1760000001 },
+        { model_id: 'chat-forced', pack: 'arc-choice',
+          engine: 'systemone', path: 'forced', accuracy: 0.55, brier: 0.25,
+          ece: 0.02, agreement: 0.8, ms_per_question: 900, items: 10,
+          ts: 1760000004 },
+    ];
+    DEC.renderResults();
+    assert.deepEqual(firstCol(byId),
+        ['chat-forced (forced)', 'chat-a (decisions)'],
+        'forced is its own marker — never blank, never (decisions)');
+});

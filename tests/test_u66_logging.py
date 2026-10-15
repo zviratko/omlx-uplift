@@ -88,10 +88,10 @@ class _ok_cm:
         return False
 
 
-async def _fake_generic_decide(engine, request):
-    """Generic-path stand-in: this file pins the LOGGING, and the installed
-    keg has no omlx.api.decisions to call for real (the generic loop itself
-    is pinned in tests/test_repl4c_decision.py)."""
+async def _fake_generic_decide(engine, request, require_answer=True):
+    """Generic-path stand-in: this file pins the LOGGING (the generic loop
+    itself is pinned in tests/test_repl4c_decision.py). FORCED-1: _run_pack
+    always forwards the floor flag, so the stand-in carries the kwarg."""
     answers = []
     for q in request["questions"]:
         answers.append({"type": "choice", "name": q["name"],

@@ -376,11 +376,14 @@ async def bench_decision_models(is_admin: bool = Depends(require_admin)):
     (generic /v1/decisions) — classified SERVER-side from the engine pool,
     so the UI stops guessing engine_type off /models rows.
 
-    {generic_available, generic_reason, native: [ids], generic: [ids]}.
+    {generic_available, generic_reason, forced_available, forced_reason,
+     native: [ids], generic: [ids]}.
     generic is empty (and generic_available false, with the reason) on kegs
-    that predate upstream 981ebcc; embedding / reranker / audio_* /
-    markitdown rows are in neither list. Literal route, registered with the
-    other /bench/decision/ literals — BEFORE the {run_id} dynamics.
+    that predate upstream 981ebcc; forced_available additionally requires
+    the require_answer kwarg from 5833533 (forced_capability() probe).
+    embedding / reranker / audio_* / markitdown rows are in neither list.
+    Literal route, registered with the other /bench/decision/ literals —
+    BEFORE the {run_id} dynamics.
     """
     return decision_engine.classify_models()
 

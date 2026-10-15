@@ -263,9 +263,11 @@ def test_lease_for_routes_by_path(monkeypatch):
     assert calls == [("native", "m"), ("generic", "m"), ("native", "m")]
 
 
-async def _fake_generic_decide(engine, request):
+async def _fake_generic_decide(engine, request, require_answer=True):
     """Generic-path stand-in for _decide_generic: the lease tests are about
-    the LEASE, and the installed keg has no omlx.api.decisions to call."""
+    the LEASE, and the installed keg has no omlx.api.decisions to call.
+    FORCED-1: _run_pack now ALWAYS forwards the floor flag, so every stand-in
+    carries the kwarg (True = the gated default)."""
     qs = request["questions"]
     answers = []
     for q in qs:

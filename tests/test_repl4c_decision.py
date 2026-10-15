@@ -162,18 +162,26 @@ def test_validate_body_rejects_unknown_pack_and_bad_limit():
     with pytest.raises(de.BadInput):
         de.validate_body({"model_id": "m", "packs": ["arc-choice"],
                           "limit": 999999})
-    mid, packs, limit = de.validate_body(
+    # FORCED-1: any body written before the mode existed scores GATED —
+    # the default must never drift
+    mid, packs, limit, mode = de.validate_body(
         {"model_id": "m", "packs": ["arc-choice"], "limit": 25})
     assert (mid, packs, limit) == ("m", ["arc-choice"], 25)
+    assert mode == "gated"
+    assert de.validate_body({"model_id": "m", "packs": ["arc-choice"],
+                             "mode": "forced"})[3] == "forced"
+    with pytest.raises(de.BadInput, match="mode must be"):
+        de.validate_body({"model_id": "m", "packs": ["arc-choice"],
+                          "mode": "yolo"})
 
 
 def test_validate_body_sorts_packs():
     # packs arrive in UI CLICK order; execution order must not depend on it
     # (user request 2026-10-13) — same SET always yields the same sequence
-    mid, packs, limit = de.validate_body(
+    mid, packs, limit, mode = de.validate_body(
         {"model_id": "m",
          "packs": ["tqa-choice", "arc-choice", "bbq-choice"], "limit": 0})
-    assert mid == "m" and limit == 0
+    assert mid == "m" and limit == 0 and mode == "gated"
     assert packs == ["arc-choice", "bbq-choice", "tqa-choice"]
 
 
@@ -440,8 +448,12 @@ def test_classify_models_new_base(monkeypatch):
     _stub_base(monkeypatch)
     out = de.classify_models()
     assert set(out) == {"generic_available", "generic_reason",
-                        "native", "generic"}        # frozen contract keys
+                        "forced_available", "forced_reason",
+                        "native", "generic"}   # frozen contract keys
     assert out["generic_available"] is True and out["generic_reason"] == ""
+    # _stub_base sets decide=None: the forced probe must answer honestly
+    # False with a reason, never raise (additive FORCED-1 keys)
+    assert out["forced_available"] is False and out["forced_reason"]
     assert out["native"] == ["alpha-dec", "zed-dec"]        # sorted
     assert out["generic"] == ["qwen-chat", "vision-vlm"]
     # embedding/reranker/audio/markitdown are in NEITHER group, ever
@@ -455,6 +467,10 @@ def test_classify_models_old_base_keeps_native_and_explains(monkeypatch):
     out = de.classify_models()
     assert out["generic_available"] is False
     assert out["generic_reason"]                       # non-empty: the UI note
+    # FORCED-1: forced rides on generic — when generic is dead the forced
+    # answer IS generic's reason (one honest chain, no second mystery failure)
+    assert out["forced_available"] is False
+    assert out["forced_reason"] == out["generic_reason"]
     assert out["native"] == ["alpha-dec", "zed-dec"]   # native never gated
     assert out["generic"] == []
 
@@ -464,7 +480,10 @@ def test_classify_models_without_pool(monkeypatch):
     _stub_base(monkeypatch)
     out = de.classify_models()
     assert out == {"generic_available": True, "generic_reason": "",
+                   "forced_available": False,
+                   "forced_reason": out["forced_reason"],
                    "native": [], "generic": []}
+    assert out["forced_reason"]      # decide=None stub: honest reason
     _stub_base(monkeypatch, module=False)
     gated = de.classify_models()
     assert gated["generic_available"] is False and gated["native"] == []
@@ -1036,11 +1055,11 @@ async def test_generic_item_context_overflow_skips_the_item(monkeypatch,
     calls = {"n": 0}
     real = de._decide_generic
 
-    async def flaky(engine, request):
+    async def flaky(engine, request, require_answer=True):
         calls["n"] += 1
         if calls["n"] == 1:
             raise de.DecisionContextLengthError("too long")
-        return await real(engine, request)
+        return await real(engine, request, require_answer=require_answer)
     monkeypatch.setattr(de, "_decide_generic", flaky)
     run = de.DecisionRun("sys1-skip", "chat", ["arc-choice"], 2,
                          path="generic")
@@ -1399,3 +1418,157 @@ async def test_real_context_overflow_skips_the_item(upstream, monkeypatch,
                                  de.build_generic_request("chat", _item(),
                                                           seed=0,
                                                           shuffle=False))
+
+
+# ================= FORCED-1: forced-choice (System One chat) mode ============
+# Upstream 5833533 taught /v1/systemone to answer with chat models by running
+# the SAME decide() readouts with require_answer=False — the letter-mass floor
+# off ("System One has no refusal answer"). The forced path must therefore
+# (a) appear only where that kwarg exists, (b) be refused for native models,
+# (c) turn what gated mode scores as an honest null into a SCORED forced guess.
+
+
+def test_forced_capability_probe(monkeypatch):
+    import sys
+    import types
+
+    _stub_base(monkeypatch)                      # decide=None on the stub
+    ok, reason = de.forced_capability()
+    assert ok is False and "require_answer" in reason   # honest, never raises
+
+    dec = sys.modules["omlx.api.decisions"]
+
+    async def old_decide(engine, request, multimodal, prepare=None):
+        return {}
+
+    async def new_decide(engine, request, multimodal, prepare=None,
+                         require_answer=True):
+        return {}
+
+    dec.decide = old_decide
+    ok, reason = de.forced_capability()
+    assert ok is False and "require_answer" in reason
+    dec.decide = new_decide
+    assert de.forced_capability() == (True, "")
+
+    # a module that cannot even import stays a (False, reason) answer
+    monkeypatch.setitem(sys.modules, "omlx.api.decisions", None)
+    ok, reason = de.forced_capability()
+    assert ok is False and reason
+
+
+def test_forced_capability_real_seam(upstream):
+    """Drift-guard on the REAL decide(): the kwarg FORCED-1 mirrors must
+    exist upstream (5833533), or this test goes red before any live run does."""
+    import inspect
+
+    assert "require_answer" in inspect.signature(upstream.decide).parameters
+    assert de.forced_capability() == (True, "")
+
+
+@pytest.mark.asyncio
+async def test_start_forced_mode_gates(monkeypatch):
+    import sys
+
+    _patch_pool(monkeypatch, dict(_POOL))
+    _stub_base(monkeypatch)
+    dec = sys.modules["omlx.api.decisions"]
+
+    async def new_decide(engine, request, multimodal, prepare=None,
+                         require_answer=True):
+        return {}
+
+    # native model + forced: the flag has nowhere to go -> refuse BEFORE
+    # any lease; the message says why (native never refuses)
+    dec.decide = new_decide
+    monkeypatch.setattr(de, "_active", None)
+    with pytest.raises(de.BadInput, match="native path"):
+        await de.start({"model_id": "alpha-dec", "packs": ["arc-choice"],
+                        "mode": "forced"})
+    assert de._active is None
+
+    # chat model on a decide() WITHOUT the kwarg: capability refusal
+    async def old_decide(engine, request, multimodal, prepare=None):
+        return {}
+    dec.decide = old_decide
+    with pytest.raises(de.BadInput, match="cannot force"):
+        await de.start({"model_id": "qwen-chat", "packs": ["arc-choice"],
+                        "mode": "forced"})
+    assert de._active is None
+
+    # chat + capable base: the run is BORN on the forced path
+    dec.decide = new_decide
+    captured = {}
+
+    async def fake_runner(run):
+        captured["run"] = run
+        run.terminal = True
+
+    monkeypatch.setattr(de, "_runner", fake_runner)
+    out = await de.start({"model_id": "qwen-chat", "packs": ["arc-choice"],
+                          "mode": "forced", "limit": 2})
+    await de._active.task                    # create_task needs one tick
+    assert out["path"] == de.PATH_FORCED
+    assert captured["run"].path == de.PATH_FORCED
+    assert captured["run"].limit == 2
+
+
+@pytest.mark.asyncio
+async def test_run_pack_forced_flag_and_row_labels(monkeypatch, tmp_path):
+    """The ONLY scoring delta is the floor flag; rows self-label so forced
+    and gated can never be silently averaged in the accumulated table."""
+    from omlx_uplift import paths
+    monkeypatch.setattr(paths, "uplift_store_dir", lambda: tmp_path)
+    monkeypatch.setattr(de, "_accum", None)
+    seen = []
+
+    async def fake_generic(engine, request, require_answer=True):
+        seen.append(require_answer)
+        return {"answers": [
+                    {"name": "answer", "type": "choice", "choice": "a"},
+                    {"name": "gold", "type": "predicate", "probability": 0.5},
+                    {"name": "distractor", "type": "predicate",
+                     "probability": 0.5}],
+                "input_tokens": 10, "cached_tokens": 0}
+
+    monkeypatch.setattr(de, "_decide_generic", fake_generic)
+    run = de.DecisionRun("sys1-f", "chat", ["arc-choice"], 1,
+                         path=de.PATH_FORCED)
+    await de._run_pack(run, object(), "arc-choice", ValueError, KeyError)
+    assert set(seen) == {False}                       # floor OFF, once+re-ask
+    row = run.results[0]
+    assert (row["path"], row["engine"]) == ("forced", "systemone")
+    assert row["item_results"][0]["correct"] is False  # scored guess, not null
+
+    seen.clear()
+    run2 = de.DecisionRun("sys1-g", "chat", ["arc-choice"], 1,
+                          path=de.PATH_GENERIC)
+    await de._run_pack(run2, object(), "arc-choice", ValueError, KeyError)
+    assert set(seen) == {True}                        # gated default survives
+    assert (run2.results[0]["path"], run2.results[0]["engine"]) == \
+        ("generic", "decisions")
+
+
+@pytest.mark.asyncio
+async def test_forced_semantics_refusal_becomes_scored_guess(upstream):
+    """THE semantic proof, against the real decide(): a flat-logits model is
+    a 100% refusal gated — and must come back as a scored forced guess with
+    ~coin-flip probabilities (not a null, not a 0) once the floor is off."""
+    req = de.build_generic_request("chat", _item(), seed=0, shuffle=False)
+
+    gated = await de._decide_generic(RealReadoutEngine(refuse=True), req)
+    assert any(a.get("type") == "refusal" for a in gated["answers"])
+    g_row = de.score_item(_item(), de.adapt_generic_answers(gated), None)
+    assert g_row["correct"] is None and g_row["probs"] == []
+
+    forced = await de._decide_generic(RealReadoutEngine(refuse=True), req,
+                                      require_answer=False)
+    assert not any(a.get("type") == "refusal" for a in forced["answers"])
+    f_row = de.score_item(_item(), de.adapt_generic_answers(forced), None)
+    # uniform letter mass -> argmax lands on option 'a' -> WRONG, but SCORED
+    assert f_row["correct"] is False
+    # both derived noul legs carry probabilities (the calibration signal
+    # the gated refusal could never produce)
+    assert len(f_row["probs"]) == 2
+    for p, _y in f_row["probs"]:
+        assert 0.4 <= p <= 0.6

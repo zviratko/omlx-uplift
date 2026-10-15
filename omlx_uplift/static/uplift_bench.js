@@ -4183,14 +4183,21 @@ function fmt4(v) { return v == null ? '\u2014' : Number(v).toFixed(4); }
    whole table for a native-only run set. The suffix rides on the Model cell
    and on the Model column of the Copy / Markdown / CSV exports, so a pasted
    table still says which endpoint produced the number.
-   Contract: rows gain path:'native'|'generic'; rows written before the
-   feature have NO path (engine:'systemone') and must render untouched, so
-   missing path = native. engine:'decisions' is accepted as a marker when
-   path is absent (a row can only reach that engine via the generic path). */
+   Contract: rows gain path:'native'|'generic'|'forced'; rows written before
+   the feature have NO path (engine:'systemone') and must render untouched,
+   so missing path = native. engine:'decisions' is accepted as a marker when
+   path is absent (a row can only reach that engine via the generic path).
+   FORCED-1: path:'forced' rows were scored with the /v1/systemone chat
+   semantics (decide floor OFF) — a DIFFERENT MEASURAND (forced guess, never
+   an abstention), so they carry their own ' (forced)' marker; they must
+   never be mixed into gated averages (the server keeps them as their own
+   rows, the label keeps humans honest). */
 function decModelCell(r) {
     var id = String((r && r.model_id) || '');
-    var generic = !!r && (r.path ? r.path === 'generic'
-                                 : r.engine === 'decisions');
+    var path = r && r.path;
+    if (path === 'forced') return id + ' (forced)';
+    var generic = path ? path === 'generic'
+                       : !!(r && r.engine === 'decisions');
     return generic ? id + ' (decisions)' : id;
 }
 
@@ -4199,7 +4206,8 @@ var DEC = {
 
     render: function (panel) {
         this.state = { running: false, runId: null, packs: {},
-                       selected: {}, limit: 0, results: [] };
+                       selected: {}, limit: 0, results: [],
+                       groups: null, modeEls: null };
         panel.appendChild(this.form());
         var status = statusLine('bench-dec-status');
         var results = el('div', 'bench-results'); results.id = 'bench-dec-results';
@@ -4229,8 +4237,28 @@ var DEC = {
             if (n === 25) o.selected = true;
             limSel.appendChild(o);
         });
+        // FORCED-1: answer policy. 'gated' is the historical /v1/decisions
+        // behaviour (refusals stay honest nulls) and the DEFAULT; 'forced'
+        // mirrors the /v1/systemone chat branch (upstream 5833533: the
+        // letter-mass floor off, the model can never abstain). It measures
+        // a DIFFERENT thing — the row marker and the hint say so. Wired
+        // live by _syncMode: native models never see it enabled, and the
+        // forced option stays disabled with the server's reason until the
+        // keg carries decide(require_answer=...).
+        var modeSel = el('select'); modeSel.id = 'bench-dec-mode';
+        var modeG = el('option', null,
+            t('uplift.bench.dec.mode_gated', 'Quality-gated (may refuse)'));
+        modeG.value = 'gated';
+        var modeF = el('option', null,
+            t('uplift.bench.dec.mode_forced', 'Forced choice (must pick)'));
+        modeF.value = 'forced'; modeF.disabled = true;
+        modeSel.append(modeG, modeF);
+        modeSel.disabled = true;   // until a chat model is selected
+        this.state.modeEls = { sel: modeSel, gated: modeG, forced: modeF };
         row.append(labeled(t('bench.config.model', 'Model'), modelSel),
-                   labeled(t('uplift.bench.sample_limit', 'Sample limit'), limSel));
+                   labeled(t('uplift.bench.sample_limit', 'Sample limit'), limSel),
+                   labeled(t('uplift.bench.dec.mode_label', 'Answer policy'), modeSel));
+        modelSel.addEventListener('change', function () { self._syncMode(); });
         f.appendChild(row);
         // U49: pack grid caption (same classic key as the other panels)
         f.appendChild(el('div', 'bench-label acc-grid-label',
@@ -4329,7 +4357,38 @@ var DEC = {
                 other.appendChild(mk(String(id), !available));
             });
             if (!available || other.children.length) sel.appendChild(other);
+            // FORCED-1: remember the SERVER's answer for the mode control
+            // (membership + both capability flags) and re-sync it. NOTE
+            // `this` — loadModels has no self-alias (loadTasks does).
+            this.state.groups = g;
+            this._syncMode();
         } catch (e) { /* start surfaces errors */ }
+    },
+
+    /* FORCED-1: one place decides the Answer-policy control's truth:
+       - only a model the SERVER listed as generic (chat/VLM) enables it
+       - the 'forced' option needs groups.forced_available (decide()'s
+         require_answer kwarg on this keg, 5833533); the server's reason
+         rides in the title so the disabled option explains itself
+       - losing either condition while forced is selected snaps back to
+         'gated' — a stale selection must never start a run the server
+         would refuse. */
+    _syncMode: function () {
+        var els = this.state && this.state.modeEls;
+        if (!els) return;
+        var g = this.state.groups || {};
+        var mid = String((gid('bench-dec-model') || {}).value || '');
+        var isChat = (g.generic || []).indexOf(mid) >= 0;
+        var canForce = isChat && !!g.forced_available;
+        els.sel.disabled = !isChat;
+        els.forced.disabled = !canForce;
+        if (els.sel.value === 'forced' && !canForce) els.sel.value = 'gated';
+        var hint = t('uplift.bench.dec.mode_hint',
+            'Forced choice mirrors /v1/systemone chat semantics: the model '
+            + 'never abstains, so accuracy measures the quality of a forced '
+            + 'guess and is not comparable with quality-gated runs.');
+        els.sel.title = (isChat && !canForce && g.forced_reason)
+            ? g.forced_reason : hint;
     },
 
     loadTasks: async function () {
@@ -4378,10 +4437,18 @@ var DEC = {
         }
         var limSel = gid('bench-dec-limit');
         this.state.limit = Number((limSel || {}).value || 0);
+        // FORCED-1: mode travels in the body; 'gated' is sent EXPLICITLY so
+        // a queued replay carries the same answer policy the user chose
+        // (a queue entry is replayed verbatim; the server default must
+        // never silently upgrade a gated choice into a forced run).
+        var modeSel = gid('bench-dec-mode');
+        var mode = (modeSel && !modeSel.disabled
+                    && modeSel.value === 'forced') ? 'forced' : 'gated';
         var rel = busyLabel(gid('bench-dec-run'));
         try {
             var r = await d.postJson(api() + '/bench/decision/start',
-                { model_id: model, packs: packs, limit: this.state.limit });
+                { model_id: model, packs: packs, limit: this.state.limit,
+                  mode: mode });
             rel();
             // BENCHQ: busy server => queued behind the live run. The Run
             // button stays enabled precisely so this click was legal.
