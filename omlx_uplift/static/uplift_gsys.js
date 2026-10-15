@@ -581,9 +581,14 @@ function gsText(sec, field, flat, L, extra) {
     return inp;
 }   // (gsText)
 
-function gsToggle(flat, on) {
+function gsToggle(flat, on, confirmMsg) {
+    // SYNC-1 (upstream 1c3adf2): destructive toggles carry a classic-style
+    // confirmation on the OFF->ON edge only; turning off is never blocked.
     const t = window.UpliftWidgets.build('bool', { checked: on }).el;
-    t.onchange = () => gsQueueSave(flat, t.checked);
+    t.onchange = () => {
+        if (confirmMsg && t.checked && !window.confirm(confirmMsg)) { t.checked = false; return; }
+        gsQueueSave(flat, t.checked);
+    };
     return t;
 }
 
@@ -1208,7 +1213,7 @@ function gsSpecRow(it, L, ctx) {
         const cur = (c.curFn ? c.curFn(ctx) : gsGet(sec, c.field)) ?? (c.nullTo !== undefined ? c.nullTo : undefined);
         control = gsSelect(flat, gsRef(L, c.opts) || [], cur);
     } else if (c.k === 'tog') {
-        control = gsToggle(flat, gsGet(sec, c.field));
+        control = gsToggle(flat, gsGet(sec, c.field), c.confirm ? gsRef(L, c.confirm) : null);
     } else if (c.k === 'range') {
         control = gsText(sec, c.field, flat, L,
             { range: true, min: c.min, max: c.max, step: c.step });
@@ -1262,6 +1267,11 @@ const GS_SPEC = [
     }},
     {sec: 'auth', lab: 'auth.skip', hint: (L) => L.auth.skip_hint + ' ' + L.auth.skip_warning, ctl: {
         k: 'tog', field: 'skip_api_key_verification', flat: 'skip_api_key_verification'}},
+    // SYNC-1 (upstream 1c3adf2 #4528): keyless inference — classic parity row,
+    // red in classic because it opens /v1 to the network; confirm on enable.
+    {sec: 'auth', lab: 'auth.keyless', hint: 'auth.keyless_hint', ctl: {
+        k: 'tog', field: 'allow_unauthenticated_inference', flat: 'allow_unauthenticated_inference',
+        confirm: 'auth.keyless_confirm'}},
 
     {t: 'Models'},
     {x: (body, L) => {

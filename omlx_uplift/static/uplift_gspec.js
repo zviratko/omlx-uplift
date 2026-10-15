@@ -60,6 +60,11 @@ const GS_MAP = {
     ui_language: ['ui','language'],
     api_key: ['auth','api_key'],
     skip_api_key_verification: ['auth','skip_api_key_verification'],
+    // SYNC-1 (upstream 1c3adf2 #4528): keyless-inference toggle — flat in
+    // GlobalSettingsRequest, nested under auth in the classic store.
+    // Applies without restart (server reads it per-request), so no restart
+    // badge, and enabling it asks for confirmation like classic does.
+    allow_unauthenticated_inference: ['auth','allow_unauthenticated_inference'],
     // P1A parity with classic GlobalSettingsRequest (79 keys)
     server_aliases: ['server','server_aliases'],
     auto_start_on_launch: ['server','auto_start_on_launch'],
