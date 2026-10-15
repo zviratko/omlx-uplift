@@ -267,8 +267,12 @@ def test_custom_generative_yamls_match_harness_map():
     assert {"hellaswag", "winogrande", "mathqa", "truthfulqa"} <= set(custom)
     # cmmlu's custom task is a GROUP file (one inline leaf per subject),
     # not a single-task leaf: it has no top-level `task:`/`metric_list` of
-    # its own to match, so it is checked by its own test below.
-    custom = {k: v for k, v in custom.items() if k != "cmmlu"}
+    # its own to match, so it is checked by its own test below. ACC-2c
+    # batch-2: prox_lite_cs_direct is a group file too (14 category leaves,
+    # pinned in tests/test_acc2c_batch2.py); belebele_cs stays single-task
+    # and IS checked here.
+    custom = {k: v for k, v in custom.items()
+              if k not in ("cmmlu", "prox_lite_cs_direct")}
     for suite, spec in custom.items():
         name = spec["tasks"][0]
         f = ydir / f"{name}.yaml"

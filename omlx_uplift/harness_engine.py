@@ -188,6 +188,37 @@ HARNESS_MAP: dict[str, dict[str, Any]] = {
                "metric": "exact_match", "metric_contains": "custom-extract",
                "extra": True, "label": "Czech knowledge (MMLU-ProX-Lite)",
                "family": "locale", "rows": 588, "upload_ok": False},
+    # ---- ACC-2c batch-2: the two FAST Czech extras (direct answer emit;
+    # one line of generation per item instead of a reasoning chain). Both
+    # harness-only 'extra' — no classic twin, no 2-pt parity duty. Metric
+    # keys pinned from REAL results_*.json of the 2026-10-15 scratch
+    # smokes (SmolLM2-360M, isolated :8130 server, --limit 5).
+    "prox_lite_cs_direct": {"tasks": ["uplift_prox_lite_cs_direct"],
+               "fewshot": 5,
+               # Direct sibling of the suite above: same dataset/splits/pool
+               # and the SAME native extractor + filter name ('custom-
+               # extract' / 'Odpověď je (X)') so scores stay comparable;
+               # the CoT cue is swapped for a direct-answer directive and
+               # shot targets are trimmed to their answer line. 14 leaves /
+               # 588 rows (sizes probe + test_docs walk re-measured this
+               # session); run1 weighted 0.1714 over n=70 (--limit 5).
+               "metric": "exact_match", "metric_contains": "custom-extract",
+               "extra": True, "label": "Czech knowledge (ProX-Lite, direct)",
+               "family": "locale", "rows": 588, "upload_ok": False},
+    "belebele_cs": {"tasks": ["uplift_belebele_cs"], "fewshot": 0,
+               # Reading comprehension over the translated Flores passages
+               # (facebook/belebele ces_Latn, ONE split 'test', 900 rows —
+               # fewshot_split 'train' would crash, so 0-shot like
+               # arc_challenge_chat). Built-in is multiple_choice = refused
+               # by method on omlx (NAT-2); this is the letter-answer
+               # generative twin. Licence CC-BY-NC 4.0: local-only extra,
+               # rows never upload. run1: flexible-extract 0.2 on n=5,
+               # strict 0.0 — the model writes 'Odpověď: X', never bare
+               # letters, which is exactly why flexible scores and strict
+               # is kept only as a reference row (house doctrine).
+               "metric": "exact_match", "metric_contains": "flexible-extract",
+               "extra": True, "label": "Belebele (Czech)", "family": "locale",
+               "rows": 900, "upload_ok": False},
 }
 
 # Custom generative task pack for the suites above (REPL-2b carryover).

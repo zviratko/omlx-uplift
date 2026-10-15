@@ -1,0 +1,54 @@
+# ACC-2c batch-2: generative twin of facebook/belebele config ces_Latn.
+# Built-in `belebele` is multiple_choice (loglikelihood) => refused-by-
+# method on omlx (NAT-2, no logprobs/echo) — same conversion as the
+# hellaswag/winogrande twins: letter-answer generate_until + extract.
+# Harness-only extra: no classic twin, no 2-pt parity duty. Acceptance:
+# extraction on real non-empty text + temp-0 determinism witness +
+# measured rows (one leaf, 900 test rows — the hub config ships ONE split
+# only; fewshot_split 'train' would crash, so 0-shot like arc_challenge_
+# chat). Licence on the hub card: CC-BY-NC 4.0 — fine for a local-only
+# extra (upload_ok False; rows never leave the box).
+#
+# Prompt: instruction line + 'P:' passage + 'Q:' question + 'X. option'
+# lines + 'Odpověď:' cue (house shape; Czech keeps token vocabulary per
+# the i18n doctrine). Target: letter A-D from correct_answer_num (a
+# STRING '1'..'4' in this dataset — belebele_cs_doc_to_target maps it).
+# Metric pinned from REAL results_*.json of the scratch smoke below:
+# 'exact_match,flexible-extract' (strict kept as reference row).
+task: uplift_belebele_cs
+dataset_path: facebook/belebele
+dataset_name: ces_Latn
+output_type: generate_until
+test_split: test
+num_fewshot: 0
+doc_to_text: !function uplift_generative_utils.belebele_cs_doc_to_text
+doc_to_target: !function uplift_generative_utils.belebele_cs_doc_to_target
+target_delimiter: "\n"
+generation_kwargs:
+  until:
+    - "</s>"
+    - "\n"
+  do_sample: false
+  temperature: 0.0
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+filter_list:
+  - name: "strict-match"
+    filter:
+      - function: "regex"
+        regex_pattern: "^\\s*([A-D])\\s*$"
+        group_select: 0
+      - function: "take_first"
+  - name: "flexible-extract"
+    filter:
+      - function: "regex"
+        regex_pattern: "\\b([A-D])\\b"
+        group_select: -1
+        fallback: "[invalid]"
+      - function: "take_first"
+metadata:
+  version: 1.0

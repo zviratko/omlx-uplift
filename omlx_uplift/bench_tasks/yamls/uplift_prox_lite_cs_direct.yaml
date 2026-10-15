@@ -1,0 +1,92 @@
+# ACC-2c batch-2: the DIRECT sibling of mmlu_prox_lite_cs (batch-1, native
+# CoT suite). Harness-only extra; no classic twin, no 2-pt parity duty.
+# Acceptance bar per card: extraction on real non-empty text + temp-0
+# determinism witness + measured rows/leaf facts (pinned from REAL
+# results_*.json).
+#
+# Why a twin: the native cs template forces the reasoning demand IN the
+# prompt itself (LANG_LIBS['cs'][2] = 'Odpověď: Přemýšlejme krok za
+# krokem.', present even at 0-shot), so 'direct' here = SAME dataset,
+# SAME splits, SAME shot pool/count (first_n x validation, 5) and SAME
+# answer phrase + filter name ('custom-extract'), with the CoT cue swapped
+# for a direct-answer directive and shot targets trimmed to their answer
+# line (from the 'answer' column, never parsed from cot_content). Scores
+# stay comparable to the CoT sister on the same 588 rows; generation cost
+# drops from a reasoning chain to one line per item.
+#
+# 14 leaves / 588 rows re-measured with the repo's sizes probe +
+# test_docs() walk. --limit is PER TASK: 'N questions' = 14 x N requests.
+group: uplift_prox_lite_cs_direct
+group_alias: Czech knowledge (ProX-Lite, direct)
+num_fewshot: 5
+
+# ---------------- shared leaf config (inherited by every member) ----------
+dataset_path: li-lab/MMLU-ProX-Lite
+dataset_name: cs
+test_split: test
+fewshot_split: validation
+output_type: generate_until
+doc_to_text: !function uplift_generative_utils.prox_lite_cs_doc_to_text
+doc_to_target: answer
+fewshot_config:
+  sampler: first_n
+  doc_to_text: !function uplift_generative_utils.prox_lite_cs_doc_to_text
+  doc_to_target: !function uplift_generative_utils.prox_lite_cs_fewshot_doc_to_target
+  target_delimiter: "\n"
+fewshot_delimiter: "\n\n"
+target_delimiter: "\n"
+generation_kwargs:
+  until:
+    - "</s>"
+    - "\n"
+    - "Q:"
+    - "Otázka:"
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+    ignore_case: true
+    ignore_punctuation: true
+filter_list:
+  # Native extractor kept VERBATIM (same regex + same filter name) so
+  # scores are comparable with the mmlu_prox_lite_cs sister suite; no
+  # strict/flexible rows here — the native suite has one filter and the
+  # doctrine for a SIBLING is 'match, not enrich' (unlike the classic
+  # twins, there is no third scorer to keep reference rows for).
+  - name: "custom-extract"
+    filter:
+      - function: "regex"
+        regex_pattern: 'Odpověď je \(?([ABCDEFGHIJ])\)?'
+      - function: "take_first"
+metadata:
+  version: 1.0
+
+task:
+  - task: uplift_prox_lite_cs_direct_biology
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_biology
+  - task: uplift_prox_lite_cs_direct_business
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_business
+  - task: uplift_prox_lite_cs_direct_chemistry
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_chemistry
+  - task: uplift_prox_lite_cs_direct_computer_science
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_computer_science
+  - task: uplift_prox_lite_cs_direct_economics
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_economics
+  - task: uplift_prox_lite_cs_direct_engineering
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_engineering
+  - task: uplift_prox_lite_cs_direct_health
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_health
+  - task: uplift_prox_lite_cs_direct_history
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_history
+  - task: uplift_prox_lite_cs_direct_law
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_law
+  - task: uplift_prox_lite_cs_direct_math
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_math
+  - task: uplift_prox_lite_cs_direct_other
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_other
+  - task: uplift_prox_lite_cs_direct_philosophy
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_philosophy
+  - task: uplift_prox_lite_cs_direct_physics
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_physics
+  - task: uplift_prox_lite_cs_direct_psychology
+    process_docs: !function uplift_generative_utils.prox_lite_cs_process_psychology
