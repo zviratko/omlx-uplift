@@ -5,14 +5,7 @@ class OmlxUplift < Formula
   # Stable tag by default, `--HEAD` follows main. This repo IS the tap
   # (zviratko/uplift), so tag + formula + package version move in one
   # commit; tests/test_release_formula.py pins that they agree.
-  url "https://github.com/zviratko/omlx-uplift.git", tag: "v1.99b"
-  # V199B: brew truncates the tag 'v1.99b' to '1' when deriving the
-  # version (letters after a multi-digit segment are not tag-parsable),
-  # which sorts BELOW v1.4 and silently blocks `brew upgrade`. Declare
-  # the version explicitly; Version '1.99b' compares correctly (proved
-  # with brew ruby). The tag stays as published — fix-forward, never
-  # move a pushed tag.
-  version "1.99b"
+  url "https://github.com/zviratko/omlx-uplift.git", tag: "v2.0"
   head "https://github.com/zviratko/omlx-uplift.git", branch: "main", using: :git
 
   # Depends on the omlx formula from the upstream tap; brew resolves

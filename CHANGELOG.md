@@ -12,148 +12,27 @@ fixed annoyance, changed behavior, new command), add one bullet under an
 users never see.
 
 ## Unreleased
-- Fixed: the Status tab refetched the FULL metric window every ~5 s
-  (74 KB x 12/min per open tab). The livefeed's 1 Hz draw loop hits
-  metricFetch constantly and the POP-PIN freshness TTL turned nearly every
-  tick into a whole-window store query. Fine-resolution windows (the
-  default 5 m/15 m) now fetch INCREMENTALLY (new `after=<ts>` parameter:
-  only the points the collector committed since the last tick — hundreds
-  of bytes), keeping the same live-edge freshness. Fixed: /metrics/latest
-  cost 1.2-1.8 s per request; its visible-history sort defeated the
-  (key, ts) index (full key-range scans, 326 K rows each). The samples
-  index is now the covering (key, ts, instance) — one-time rebuild at
-  boot — and the two latest() queries walk-and-stop again (measured
-  0.04 ms). Fixed: chart reads queued behind the collector's write
-  connection (SPLIT-READ: dedicated read-only WAL connection; the
-  co-tenant cache probe is stale-while-revalidate on its own thread and
-  connection, never on a request path).
 
-- Fixed: chart reads taking 0.4–1.8 s even on an idle board. Every API read
-  shared one SQLite connection AND one process lock with the collector, so
-  each request queued behind the write tick. Request-path reads now run on
-  a dedicated read-only WAL connection (readers never block on writers),
-  and the once-per-30 s co-tenant cache probe moved off the request path
-  entirely: expired reads are served stale while a background thread
-  refreshes.
+## [2.0] — 2026-10-15
 
-
-- Changed: dashboard assets are now URL-versioned (`?v=<stamp>`). After an
-  update, a normal reload always runs the new bundle — no hard-reload
-  rituals, and a failed asset fetch can never resurrect a cached old
-  client. (Found the hard way: a reinstall under a running dev board 404'd
-  its static route and browsers served the previous JS from cache all
-  afternoon.)
-
-
-- Fixed: boards freezing requests for 2–6 s and pinning a CPU core while a
-  dashboard tab was open. The stats-over-SSE lane (added today) rebuilt
-  vanilla's payload **on the event loop**; on a loaded engine pool that
-  walk takes about a second per build (cluster-key path resolution plus a
-  JSON encoder fallback), so the loop starved everything behind it. The
-  build now runs in a worker thread every 2 s, the first-frame seed is one
-  shared off-loop build, and the encoder fallback is gone. The engine-pool
-  walk also only re-runs every 15 s (counters stay live at 2 s) so the
-  board spends ~5 % of a core on stats instead of a full one. Charts, the
-  counters and the stream contract are unchanged.
-
-- Fixed: a second board-wide stall — every filtered chart read re-scanned
-  the WHOLE samples table to check for co-tenant writer tags (0.65 s on a
-  13 M-row table, and `/metrics/latest` ran it inline on the event loop).
-  The co-tenant probe is now cache-first: at most one scan per 30 s, and
-  the latest-metric reads happen in a worker thread. Charts behave
-  identically; a co-tenant that just started is hidden within one 30 s
-  window instead of the next read.
-
-- **Voice cloning: record the reference clip in the tab.** The Voices
-  form gained a RECORD button (mic → browser → WAV, wired straight into
-  the existing transcribe/preview/save flow) plus a suggested read-aloud
-  text that follows the selected language (11 languages, transcript
-  stays freely editable). Browsers only allow the mic on https or
-  localhost — on a plain http LAN address the button shows disabled with
-  that reason instead of failing silently.
-- **Intelligence bench: vanilla-only grid, one LM-Eval fold.** The
-  Benchmark list now shows only the oMLX Classic suites; every LM-Eval
-  card (the twins of the classic suites included) moved into the
-  **Additional suites** section, now a prominent, collapsed-by-default
-  fold that remembers whether you opened it. The request-total line
-  stays visible under the fold.
-- **Dashboard traffic: streams in, timers out.** The stats payload now
-  rides the live stream the dashboard already holds (one shared
-  server-side sample, change-driven frames), a **visible** tab keeps that
-  stream even when DevTools steals window focus (the old focus gate made
-  the board fall back to 1 s polling exactly while you watched it), and
-  the metric grid fetches one batched series call per window instead of
-  one per card. Model Manager no longer polls anything in the background:
-  the table refreshes on tab entry and after your own writes. Left
-  running: a 10 s catch-up poll for unfocused tabs (their streams are
-  closed by design), 20 s stats fallback when a stream truly dies, and
-  the 30 s header power/temp chip refresh.
-- **Decision bench scores any model.** The model picker split into
-  **Decision models** (native heads, `/v1/systemone`) and **Other models**
-  (any chat model, scored through the new upstream `/v1/decisions` readout
-  path). Groups come from the server now, and when the running omlx build
-  predates `/v1/decisions` the Other-models group stays visible but disabled
-  with the reason — nothing silently disappears. Result rows that were
-  scored generatively are marked `(decisions)` in the table and exports, so
-  a number is never quoted without the path that produced it.
-
-- **Sync to upstream 6d17522 (model settings keep saving).** Upstream
-  deleted eight `dflash_*` cache/quant knobs and the server rejects unknown
-  keys — Uplift no longer sends them, so model-settings saves keep working
-  on newer servers. Qwen4 wide-proj GDN decode moved from the global
-  System-Settings Advanced page into the per-model editor, shown only for
-  models that support it, matching classic.
-
-- **Bench menu lists every benchmark.** The Bench dropdown now shows all
-  seven surfaces — Throughput, Intelligence, Context, ANE Tune,
-  Embeddings, Rerankers, Decision. Before, ANE/embed/rerank/decision were
-  only reachable by deep link.
-- **Visible progress.** Every bench panel's status line became a prominent
-  box with a live progress bar — the old dim 11 px line was easy to miss
-  while a run was going.
-- **Voices: type any language.** The language field is an editable
-  combobox now — pick one of the model's declared languages (Czech ships
-  in the list), type any other language string, or leave it empty for
-  Auto.
-- **Harness engine covers 6 more benchmarks.** Accuracy runs on the
-  community harness engine can now measure hellaswag, winogrande,
-  mathqa, truthfulqa (new generative task pack shipped with uplift),
-  kmmlu (built-in `kmmlu_direct`, 5-shot) and cmmlu — for cmmlu the hub
-  ships only a datasets loader script that modern `datasets` refuses,
-  so the test+dev splits are VENDORED into the package
-  (`bench_tasks/cmmlu_data`, pinned revision + checksum, CC BY-NC-SA
-  attribution, loads fully offline). The harness task grid and queue
-  pick them up automatically. humaneval, mbpp, jmmlu, livecodebench and
-  safetybench intentionally stay on the classic engine (code-exec
-  isolation / no equivalent).
-- **Truthfulqa (harness engine) measures truthfulness again.** TruthfulQA
-  MC1 hides the correct answer at choice #1 in EVERY one of its 817
-  validation rows, so the generative twin that presented the dataset order
-  was scoring the letter 'A' on all 817 questions — a high-scoring answer
-  of "A", not a truthfulness signal. The twin now mirrors the classic
-  module's per-question choice shuffle (seeded by the row index, so the
-  option order and the answer letter agree question for question) and is
-  scored by a mirror of classic's own answer extraction (upper-case, then an
-  "answer is/:" cue, then only the letters the question offers) instead of a
-  last-capital-letter regex. Measured on SmolLM2-360M against one greedy
-  server: harness 17.63% → 18.48% (shuffle) → 21.54% (+ extraction mirror),
-  vs the classic engine's 21.18% on the same server — 0.36 pt apart.
-- **Additional suites: a separate bench section.** The Intelligence
-  bench now has an 'Additional suites' section below the classic grid —
-  the classic 16 render byte-identical and are never mixed in. First
-  extras (harness-engine only, local results — never uploaded to the
-  community leaderboard): IFEval (instruction following), BBH (CoT)
-  and Czech knowledge (MMLU-ProX-Lite). Collapsible families, a search
-  box, per-card size chips (rows x leaves), a 6-card cap with 'show
-  all'. New scoring deps (langdetect, immutabledict) enter bench-env
-  via the measured pin; the nltk corpora IFEval imports at load are
-  pre-seeded into uplift's own store so runs stay offline.
-- **Bench environments stay clean on upgrade.** A stale bench venv is
-  now rebuilt from a full wipe (no orphaned packages surviving a pin
-  change), installs no longer grow the global pip cache, and the
-  torch-in-venv guard is pin-driven: a heavy dep is accepted only when
-  the requirements file actually asks for it. `bench-env status` shows
-  honest venv/cache sizes.
+- **The board stopped fighting itself.** An open dashboard tab no longer
+  pins a CPU core or freezes requests: stats build off the event loop,
+  ride a live stream instead of timers, and charts fetch only new
+  points — ~5 % of a core instead of a full one.
+- **Decision bench scores any chat model** via the new upstream
+  /v1/decisions readout, with a forced-choice "System One" answer
+  policy; every row carries the path that produced it.
+- **Nine more suites in a collapsed "Additional suites" section**
+  (IFEval, BBH, Czech MMLU-ProX-Lite, hellaswag, winogrande, mathqa,
+  TruthfulQA, KMMLU, CMMLU) — the classic grid stays pure and
+  TruthfulQA measures truthfulness again.
+- **Benches are easier to run:** all seven surfaces in the menu, one
+  clear progress bar, a global queue instead of a rejection, honest
+  ms/question labels, raw rows downloadable.
+- **Voices: record the reference clip in the tab**, with a per-language
+  read-aloud suggestion and a free-form language field.
+- **Synced to upstream 0.7.1** — model settings keep saving; one SAVE
+  now commits base + all profile tabs; bench envs rebuild clean.
 
 ## [1.99b] — 2026-10-11
 
