@@ -602,6 +602,78 @@ def _parse_results_json(outdir: Path, metric: str,
     return score, total
 
 
+_SAMPLES_RE = re.compile(r"^samples_(.+)_\d{4}-\d{2}-\d{2}T[\d:.+-]+\.jsonl$")
+
+
+def _collect_question_results(outdir: Path) -> list[dict]:
+    """Raw QR lines for harness runs (user: raw question/result downloads
+    for ALL bench types, not just the classic 16).
+
+    lm_eval writes samples_<task>_<ts>.jsonl under the model subdir when
+    --log_samples is set; one line = one request. Map to classic's QR
+    contract (id/question/expected/predicted/correct/raw_response/
+    finish_reason/prompt_tokens/completion_tokens/time_s/category) so the
+    UI and the downloads need no engine-awareness. finish_reason, per-line
+    token counts and per-line times are NOT in lm_eval's sample log — null
+    shows as blank in the UI; we don't invent numbers we didn't measure.
+    Rows dedupe by id (first wins) and sort by leaf then doc_id.
+    """
+    rows: list[dict] = []
+    seen: set = set()
+    for f in sorted(outdir.rglob("samples_*.jsonl")):
+        m = _SAMPLES_RE.match(f.name)
+        leaf = m.group(1) if m else f.stem
+        try:
+            fh = f.open(encoding="utf-8")
+        except OSError:
+            continue
+        with fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                args = rec.get("arguments") or {}
+                question = ""
+                for _k, v in sorted(args.items()):
+                    if isinstance(v, dict) and isinstance(v.get("arg_0"), str):
+                        question = v["arg_0"]
+                        break
+                preds = rec.get("filtered_resps") or []
+                predicted = str(preds[0]) if preds else ""
+                raw = ""
+                resps = rec.get("resps") or []
+                if resps:
+                    first = resps[0]
+                    raw = (str(first[0]) if isinstance(first, (list, tuple))
+                          and first else str(first))
+                expected = str(rec.get("target") or "")
+                correct = None
+                for mk in (rec.get("metrics") or []):
+                    v = rec.get(mk)
+                    if isinstance(v, (int, float)):
+                        correct = v >= 1.0
+                        break
+                if correct is None:
+                    correct = (predicted.strip().casefold()
+                             == expected.strip().casefold())
+                rid = f"{leaf}:{rec.get('doc_id', '?')}"
+                if rid in seen:
+                    continue
+                seen.add(rid)
+                rows.append({
+                    "id": rid, "question": question, "expected": expected,
+                    "predicted": predicted, "correct": bool(correct),
+                    "raw_response": raw, "finish_reason": None,
+                    "prompt_tokens": None, "completion_tokens": None,
+                    "time_s": None, "category": leaf,
+                })
+    return rows
+
+
 def _acc():
     from omlx.admin import accuracy_benchmark as AB
     return AB
@@ -639,6 +711,9 @@ def _suite_args(spec: dict, base_url: str, model_id: str, outdir: Path,
             "--include_path", str(_task_yamls_dir()),
             "--num_fewshot", str(spec["fewshot"]),
             "--batch_size", "1",
+            # raw per-question records for the QR tab/download: the user
+            # wants raw results for ALL bench types, not just classic.
+            "--log_samples",
             "--output_path", str(outdir)]
     if sample_size:
         args += ["--limit", str(sample_size)]
@@ -773,7 +848,8 @@ async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
             "time_s": round(time.perf_counter() - t0, 1),
             "dataset_total": None,  # harness reports sampled n, not split size
             "sampling_profile": run.request.sampling_profile,
-            "engine": "harness", "question_results": []}
+            "engine": "harness", "question_results":
+            _collect_question_results(outdir)}
 
 
 async def run_harness(run: Any, engine_pool: Any, classic_runner) -> None:
