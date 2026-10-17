@@ -14,8 +14,9 @@ What is guaranteed by the build itself (verified 2026-09-21):
 - artifacts are ad-hoc re-signed after the swap (same policy brew uses).
 
 What the user must provide (and what makes this NOT a brew reinstall):
-- a source checkout containing omlx/custom_kernels/<name>/csrc (git clone
-  or an existing omlx clone; --src reuses one);
+- a source checkout containing omlx/custom_kernels/<name>/csrc WITH a
+  CMakeLists.txt (pre-#4550 revisions only — see resolve_sources; git
+  clone or an existing omlx clone; --src reuses one);
 - a throwaway build venv (created here) with cmake, ninja and nanobind
   pinned to the MLX build's version + the same mlx release as the keg.
 
@@ -34,8 +35,13 @@ import subprocess
 import sys
 import tempfile
 
-KERNELS = ("bonsai", "decode_fast", "glm_moe_dsa", "minimax_m3",
-           "qwen35_prefill")
+# Kept in sync with upstream omlx.custom_kernels.NATIVE_KERNEL_PACKAGES:
+# 94363f8 (#4550) moved kernel builds to MLX MetalExtension (setup.py) and
+# dropped the per-directory csrc/CMakeLists.txt; 8c9a4b2 (#4601) renamed the
+# model-based dirs (bonsai, decode_fast, glm_moe_dsa, minimax_m3,
+# qwen35_prefill) to method-based ones. Older kegs keep the old layout —
+# deploy() refuses loudly when the target dir is missing.
+KERNELS = ("attention", "lowbit", "quant_matmul", "sparse_index")
 
 # nanobind ABI must match MLX's own build (see omlx pyproject [build-system]);
 # a mismatch silently rejects every mlx.core.array at runtime.
@@ -59,9 +65,14 @@ def resolve_sources(name: str, src: str | None) -> str:
     csrc = os.path.join(base, "csrc")
     if not os.path.isfile(os.path.join(csrc, "CMakeLists.txt")):
         raise SystemExit(
-            f"no kernel sources at {csrc} — run inside an omlx source "
-            "checkout (any revision containing the kernel) or pass "
-            "--src /path/to/omlx-checkout")
+            f"no kernel CMakeLists at {csrc} — run inside an omlx source "
+            "checkout or pass --src /path/to/omlx-checkout. Mind that "
+            "upstream 94363f8 (#4550) replaced per-kernel CMake builds "
+            "with MLX MetalExtension in setup.py, so checkouts at/after it "
+            "carry no CMakeLists: the one-kernel cmake path is legacy and "
+            "needs a pre-#4550 checkout AND the matching older keg. For "
+            "current kegs rebuild the whole formula: `brew reinstall "
+            "omlx` (receipt keeps --with-custom-kernel).")
     return csrc
 
 
