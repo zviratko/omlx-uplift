@@ -2919,9 +2919,16 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    the rail width by itself. */
 .chat-native-layout { display: flex; gap: 10px; align-items: flex-start; }
 .chat-native-hist { flex: 0 0 170px; min-width: 0; position: sticky;
-    top: 6px; max-height: calc(100vh - 195px); }
+    top: 6px; max-height: calc(100vh - 195px); overflow-y: auto; }
+/* CHAT-3R defect (user report): .chat-native-bar sets flex-wrap: wrap —
+   legal in its ROW context, but the rails are COLUMN boxes; once their
+   content passed the max-height cap (short viewports) the surplus WRAPPED
+   SIDEWAYS — the history rail walked into the chat box, the control rail
+   spilled past the card edge. nowrap + the internal scroller are the fix
+   (spec's auto-nowrap needs overflow on BOTH axes; overflow-y:auto alone
+   was not enough to save hist, which had visible overflow). */
 .chat-native-hist.chat-native-bar { flex-direction: column;
-    align-items: stretch; gap: 6px; }
+    flex-wrap: nowrap; align-items: stretch; gap: 6px; }
 .chat-native-main { flex: 1 1 auto; min-width: 0; display: flex;
     flex-direction: column; gap: 8px; }
 /* CHAT-3R (live QA): the rail's CONTENT is taller than the chat column —
@@ -2929,9 +2936,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    does not do this). The rails scroll INTERNALLY like classic's drawer;
    the cap mirrors fitHeight's budget (viewport - top chrome). */
 .chat-native-side { flex: 0 0 220px; min-width: 0; position: sticky;
-    top: 6px; max-height: calc(100vh - 195px); overflow-y: auto; }
+    top: 6px; max-height: calc(100vh - 195px); overflow: auto; }
 .chat-native-side.chat-native-bar { flex-direction: column;
-    align-items: stretch; }
+    flex-wrap: nowrap; align-items: stretch; }
 .chat-native-toprow .chat-native-group { flex: 1 1 180px; min-width: 140px; }
 .chat-native-sec { display: flex; flex-direction: column; gap: 4px;
     min-width: 0; }

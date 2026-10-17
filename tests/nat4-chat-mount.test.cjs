@@ -606,8 +606,16 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'layout + history-list CSS shipped');
     assert.ok(/\.chat-native-side \.chat-native-pop \{ left: auto; right: 0;/.test(css),
         'the voice-input popover opens leftwards inside the rail');
-    assert.ok(/\.chat-native-side \{[^}]*overflow-y: auto/.test(css),
+    assert.ok(/\.chat-native-side \{[^}]*overflow-y: auto/.test(css) ||
+        /\.chat-native-side \{[^}]*overflow: auto/.test(css),
         'the rail scrolls INTERNALLY (classic drawer), the page does not');
+    // regression pin (user report): .chat-native-bar's flex-wrap:wrap is a
+    // ROW idiom; in the COLUMN rails surplus content wrapped SIDEWAYS into
+    // the chat box. Both rails must be nowrap.
+    assert.ok(/\.chat-native-hist\.chat-native-bar \{[^}]*flex-wrap: nowrap/.test(css),
+        'history rail never wraps sideways');
+    assert.ok(/\.chat-native-side\.chat-native-bar \{[^}]*flex-wrap: nowrap/.test(css),
+        'control rail never wraps sideways');
     // one new key, ten locales, real translations (cs must not equal en)
     const en = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/en.json`, 'utf8'));
     const cs = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/cs.json`, 'utf8'));
