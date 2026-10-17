@@ -1114,6 +1114,8 @@ function toolbar() {
     presetAdd.type = 'button'; presetAdd.id = 'chat-native-preset-add';
     var presetCancel = el('button', 'btn', t('chat.edit_cancel', 'Cancel'));
     presetCancel.type = 'button'; presetCancel.id = 'chat-native-preset-cancel';
+    nameRow.append(nameInp, presetAdd, presetCancel);   // live QA: the row
+    // was once left empty — byId stubs cannot catch un-appended children
     function closePresetName() {
         nameRow.hidden = true; nameInp.value = '';
     }

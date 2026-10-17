@@ -370,6 +370,18 @@ function bootPreset(convOver, profiles) {
     return h;
 }
 
+function presetRow(h) {
+    // TREE access, not byId: the id registry exists even if the module
+    // forgets to append a control (live QA caught an empty name row)
+    const row = h.byId['chat-native-preset-row'];
+    assert.ok(row, 'name row in the DOM');
+    const [inp, add, cancel] = row.children;
+    assert.equal(inp.id, 'chat-native-preset-name', 'row holds the input');
+    assert.equal(add.id, 'chat-native-preset-add', 'row holds Add');
+    assert.equal(cancel.id, 'chat-native-preset-cancel', 'row holds Cancel');
+    return { row, inp, add, cancel };
+}
+
 test('preset: editing bound text flips the picker to Modified (unsaved)', async () => {
     const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
         [{ name: 'System Default', content: '' },
@@ -418,12 +430,12 @@ test('preset: New preset commits the current text under a name (inline row)', as
     assert.equal(sys.value, 'persona X');
     assert.equal(h.byId['chat-native-profile'].value, '__modified',
         'unbound text with content is custom by definition');
-    assert.equal(h.byId['chat-native-preset-row'].hidden, true,
-        'name row starts folded (no dead input in the rail)');
+    const { row, inp, add } = presetRow(h);
+    assert.equal(row.hidden, true, 'name row starts folded (no dead input)');
     h.byId['chat-native-preset-new'].dispatch('click');
-    assert.equal(h.byId['chat-native-preset-row'].hidden, false);
-    h.byId['chat-native-preset-name'].value = 'Persona';
-    h.byId['chat-native-preset-add'].dispatch('click');
+    assert.equal(row.hidden, false);
+    inp.value = 'Persona';
+    add.dispatch('click');
     const store = JSON.parse(h.win.__store[PROFILE_LS]);
     assert.deepEqual(store.map((p) => p.name), ['System Default', 'Persona']);
     assert.equal(store[1].content, 'persona X', 'text committed verbatim');
@@ -431,8 +443,7 @@ test('preset: New preset commits the current text under a name (inline row)', as
         'the new preset is active and CLEAN immediately');
     assert.equal(h.byId['chat-native-preset-del'].disabled, false,
         'a deletable preset is bound now');
-    assert.equal(h.byId['chat-native-preset-row'].hidden, true,
-        'the row folds back after commit');
+    assert.equal(row.hidden, true, 'the row folds back after commit');
 });
 
 test('preset: Enter commits, Cancel abandons, duplicates never overwrite', async () => {
@@ -440,8 +451,8 @@ test('preset: Enter commits, Cancel abandons, duplicates never overwrite', async
         [{ name: 'System Default', content: '' },
          { name: 'Persona', content: 'taken' }]);
     for (let i = 0; i < 12; i++) await tick();
+    const { inp, cancel } = presetRow(h);
     h.byId['chat-native-preset-new'].dispatch('click');
-    const inp = h.byId['chat-native-preset-name'];
     inp.value = 'Typed';
     inp.dispatch('keydown', { key: 'Enter' });
     let store = JSON.parse(h.win.__store[PROFILE_LS]);
@@ -449,7 +460,7 @@ test('preset: Enter commits, Cancel abandons, duplicates never overwrite', async
         'Enter is the commit key (classic rename-row parity)');
     h.byId['chat-native-preset-new'].dispatch('click');
     inp.value = 'Nope';
-    h.byId['chat-native-preset-cancel'].dispatch('click');
+    cancel.dispatch('click');
     assert.equal(inp.value, '', 'Cancel clears the draft name');
     store = JSON.parse(h.win.__store[PROFILE_LS]);
     assert.equal(store.map((p) => p.name).indexOf('Nope'), -1, 'nothing written');
