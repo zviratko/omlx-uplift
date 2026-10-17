@@ -2954,7 +2954,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    leftover height (align-content: stretch distributes the slack
    BETWEEN rows — caught live). Pin it to content instead. */
 .chat-native-side .chat-native-sampling { flex: 0 0 auto;
-    align-content: start; }
+    align-content: start;
+    /* auto-fill would compute from the container's CONTENT box — with the
+       rail's overflow-y:auto the scrollbar eats ~15px and the 92px min
+       collapses the grid to ONE column (live QA). The rail width is fixed,
+       so 2x(96+10) fits by design: pin it. */
+    grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .chat-native-side #chat-native-profile-save { align-self: flex-start; }
 /* the voice-input popover opens to the LEFT inside the right rail so it
    can never overflow the viewport edge (its anchor group is position:
