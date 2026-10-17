@@ -510,6 +510,86 @@ test('marker: discarding a BOUND edit reverts to the preset, keeping it', async 
     assert.equal(sel.value, 'Coder', 'the preset still exists and is bound');
 });
 
+test('profile: round 9 — captures the WHOLE page, model excluded', async () => {
+    const h = bootPreset({ systemPrompt: 'persona', activeProfile: 'P1' },
+        [{ name: 'System Default', content: '' },
+         { name: 'P1', content: 'persona' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    // drive real page state: thinking+budget, one sampling override,
+    // web search, voice-out picker
+    const think = h.byId['chat-native-think-mode'];
+    think.value = 'limit'; think.dispatch('change');
+    const bud = h.byId['chat-native-think-budget'];
+    bud.value = '400'; bud.dispatch('change');
+    const temp = h.byId[h.win.UpliftNativeChat.genInputId('temperature')];
+    temp.value = '0.7'; temp.dispatch('change');
+    h.byId['chat-native-web'].dispatch('click');           // toggleWeb
+    h.win.__store['omlx-uplift-voice'] = 'zuzana';
+    await tick();
+    assert.equal(h.byId['chat-native-profile'].value, 'P1',
+        'clean bound prompt + changed SETTINGS => marker... ');
+    // ^ settings differ from P1 (P1 has NO settings blob => unmanaged:
+    // classic-era entries stay prompt-only BY DESIGN) — so P1 is correct:
+    // commit a ROUND-9 entry and re-run the expectation there
+    const sel = h.byId['chat-native-profile'];
+    h.byId['chat-native-profile-save'].dispatch('click');
+    const { inp, add } = presetRow(h);
+    inp.value = 'Setup'; add.dispatch('click');
+    const store = JSON.parse(h.win.__store[PROFILE_LS]);
+    const setup = store.find((p) => p.name === 'Setup');
+    assert.equal(setup.settings.thinking, 'limit');
+    assert.equal(setup.settings.thinkingBudget, 400);
+    assert.deepEqual(setup.settings.generation, { temperature: 0.7 });
+    assert.equal(setup.settings.webSearch, true);
+    assert.equal(setup.settings.voice, 'zuzana');
+    assert.ok(!('model' in setup.settings),
+        'the model is the ONE exception (user: Exception - the model used)');
+    assert.equal(sel.value, 'Setup', 'committing snapshots => clean');
+    // flip one setting -> the marker is BACK without touching the prompt
+    think.value = 'off'; think.dispatch('change');
+    assert.equal(sel.value, '__modified',
+        'a settings-only change re-marks the profile (round 9)');
+    // discard reverts the WHOLE page, not just the prompt
+    h.win.confirm = () => true;
+    h.byId['chat-native-preset-del'].dispatch('click');
+    assert.equal(think.value, 'limit', 'thinking reverted to the snapshot');
+    assert.equal(bud.value, '400', 'budget reverted');
+    assert.equal(temp.value, '0.7', 'sampling reverted');
+    assert.equal(sel.value, 'Setup');
+    // switching profiles APPLIES the other page state
+    const sys = h.byId['chat-native-sys'];
+    sel.value = 'System Default'; sel.dispatch('change'); await tick();
+    assert.equal(sys.value, '');
+    assert.equal(think.value, 'auto', 'apply = whole-page re-provision');
+    assert.equal(h.win.__store['omlx-uplift-voice'] || '', '',
+        'voice key follows the profile (unmanaged SD => defaults)');
+});
+
+test('profile: the stash round-trips settings across a switch', async () => {
+    const h = bootPreset({ systemPrompt: '', activeProfile: '' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Setup', content: 'persona',
+           settings: { thinking: 'on', webSearch: false } }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    const think = h.byId['chat-native-think-mode'];
+    // unbound scratch page with its OWN settings
+    h.byId['chat-native-sys'].value = 'mine';
+    h.byId['chat-native-sys'].dispatch('input');
+    think.value = 'off'; think.dispatch('change');
+    // switch to Setup -> MY page is stashed whole; Setup is applied
+    sel.value = 'Setup'; sel.dispatch('change'); await tick();
+    assert.equal(think.value, 'on', 'Setup applied');
+    const posts = h.posts.filter((p) => String(p[0]).endsWith('/chat/history'));
+    const last = posts[posts.length - 1][1];
+    assert.equal(last.customState.prompt, 'mine', 'stash carries the prompt');
+    assert.equal(last.customState.settings.thinking, 'off', 'and the settings');
+    // back to the marker: the WHOLE page returns
+    sel.value = '__modified'; sel.dispatch('change'); await tick();
+    assert.equal(think.value, 'off');
+    assert.equal(h.byId['chat-native-sys'].value, 'mine');
+});
+
 test('preset: Save prefills the name — keeping it UPDATES, retyping CREATES', async () => {
     const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
         [{ name: 'System Default', content: '' },

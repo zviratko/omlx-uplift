@@ -74,6 +74,44 @@ GEN_KEYS = ("temperature", "max_tokens", "top_p", "top_k",
             "min_p", "repetition_penalty", "presence_penalty")
 
 
+def _clean_state(raw):
+    """ROUND 9: the stash of UNSAVED page state (prompt + settings the
+    active preset does not own). Whitelist-only: known keys, pinned types,
+    generation via the same cleaner as conv.generation; anything else or
+    an oversized blob collapses to None (a stash is a convenience, never
+    a payload channel)."""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    p = raw.get("prompt")
+    out["prompt"] = str(p or "")[:8000]
+    s = raw.get("settings")
+    if isinstance(s, dict):
+        keep = {}
+        th = s.get("thinking")
+        if isinstance(th, str) and th in ("auto", "off", "on", "limit"):
+            keep["thinking"] = th
+        tb = s.get("thinkingBudget")
+        if isinstance(tb, int) and not isinstance(tb, bool) and tb >= 0:
+            keep["thinkingBudget"] = tb
+        gen = _clean_generation(s.get("generation"))
+        if gen:
+            keep["generation"] = gen
+        keep["webSearch"] = bool(s.get("webSearch"))
+        for k, mx in (("voice", 120), ("autospeak", 1), ("chunk", 16),
+                      ("sttModel", 120), ("sttLang", 16),
+                      ("sttAutosend", 1), ("sttMode", 11)):
+            v = s.get(k)
+            if isinstance(v, str):
+                keep[k] = v[:mx]
+        out["settings"] = keep
+    else:
+        out["settings"] = None
+    if len(json.dumps(out, ensure_ascii=False)) > 6000:
+        return None
+    return out
+
+
 def _clean_generation(raw):
     """U46: per-chat sampling overrides — classic's snapshotGenerationSettings
     fields (chat.html:3386), persisted per session like classic does.
@@ -216,6 +254,8 @@ async def chat_history_save(request: Request,
         # user can go back safely): the stashed unbound/edited prompt.
         # Same textContent-only rule as activeProfile.
         "customPrompt": str(body.get("customPrompt") or "")[:8000],
+        # ROUND 9: full-page stash twin ({prompt, settings}) — see _clean_state
+        "customState": _clean_state(body.get("customState")),
         "thinking": bool(body.get("thinking")),
         "thinkingBudget": body.get("thinkingBudget")
         if isinstance(body.get("thinkingBudget"), int) else None,

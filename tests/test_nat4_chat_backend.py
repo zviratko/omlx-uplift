@@ -81,6 +81,27 @@ def test_custom_prompt_stash_roundtrips(client):
     assert client.get("/uplift/api/chat/history/c2").json()["customPrompt"] == ""
 
 
+def test_custom_state_stash_roundtrips(client):
+    """ROUND 9: the full-page stash {prompt, settings} persists, whitelist
+    only — junk keys drop, non-dicts collapse, oversized blobs refuse."""
+    st = {"prompt": "mine", "settings": {
+        "thinking": "limit", "thinkingBudget": 400, "generation": {"temperature": 0.7},
+        "webSearch": True, "voice": "zuzana", "autospeak": "1", "chunk": "line",
+        "sttModel": "qwen3-asr", "sttLang": "cs", "sttAutosend": "0",
+        "sttMode": "ptt", "model": "SHOULD-NOT-PERSIST", "evil": "<script>"}}
+    client.post("/uplift/api/chat/history", json=_conv(customState=st))
+    full = client.get("/uplift/api/chat/history/c1").json()
+    assert full["customState"]["prompt"] == "mine"
+    got = full["customState"]["settings"]
+    assert got["thinking"] == "limit" and got["thinkingBudget"] == 400
+    assert got["generation"] == {"temperature": 0.7} and got["webSearch"] is True
+    assert "model" not in got and "evil" not in got   # exception pinned: model
+    client.post("/uplift/api/chat/history", json=_conv(customState={"prompt": "junk"}))
+    assert client.get("/uplift/api/chat/history/c1").json()["customState"]["settings"] is None
+    client.post("/uplift/api/chat/history", json=_conv(customState="not a dict"))
+    assert client.get("/uplift/api/chat/history/c1").json()["customState"] is None
+
+
 def test_validation(client):
     assert client.post("/uplift/api/chat/history", json={"messages": []}).status_code == 400
     r = client.post("/uplift/api/chat/history", json={"id": "x", "messages": "no"})

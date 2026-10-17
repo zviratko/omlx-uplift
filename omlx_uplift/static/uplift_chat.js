@@ -95,6 +95,107 @@ var SYSTEM_DEFAULT = 'System Default';
 // through the same strip the input performs.
 function stripNL(s) { return String(s == null ? '' : s).replace(/[\r\n]/g, ''); }
 
+// ---- profile STATE (ROUND 9, user: 'profiles should track all changes
+// to the chat - voice input, web search, voice output, everything
+// settable on the page... Exception - the model used'). A preset
+// captures the WHOLE page: prompt, thinking, sampling overrides, web
+// search, voice-in (model/lang/auto-send/mode) and voice-out (voice/
+// auto-speak/chunk). Model is excluded BY DESIGN — it is the conversation,
+// not the persona. localStorage keys are page-global; applying a profile
+// re-provisions them, exactly like loading a setup sheet.
+function chatSettingsSnapshot() {
+    var out = {};
+    try {
+        var think = gid('chat-native-think-mode');
+        out.thinking = String((think && think.value) || 'auto');
+        var bud = gid('chat-native-think-budget');
+        var b = parseInt((bud && bud.value) || '', 10);
+        out.thinkingBudget = (isFinite(b) && b >= 0) ? b : null;
+        out.generation = readGenerationInputs();
+        out.webSearch = !!_webSearch;
+        var ls = W() && W().localStorage;
+        if (ls) {
+            out.voice = ls.getItem('omlx-uplift-voice') || '';
+            out.autospeak = ls.getItem(AUTO_KEY) || '0';
+            out.chunk = ls.getItem(CHUNK_KEY) || 'sentence';
+            out.sttModel = ls.getItem(STT_MODEL_KEY) || '';
+            out.sttLang = ls.getItem(STT_LANG_KEY) || '';
+            out.sttAutosend = ls.getItem(STT_SEND_KEY) || '0';
+            out.sttMode = ls.getItem(STT_MODE_KEY) || 'off';
+        }
+    } catch (_) { /* mid-build: whatever was readable stands */ }
+    return out;
+}
+function normSettings(s) {
+    // canonical compare string: unknown keys dropped, types pinned,
+    // generation in GEN_FIELDS order (no key-order false positives)
+    s = (s && typeof s === 'object') ? s : {};
+    var g = null;
+    if (s.generation && typeof s.generation === 'object') {
+        g = {};
+        GEN_FIELDS.forEach(function (f) {
+            if (typeof s.generation[f[0]] === 'number') g[f[0]] = s.generation[f[0]];
+        });
+    }
+    return JSON.stringify({
+        thinking: /^(auto|off|on|limit)$/.test(s.thinking) ? s.thinking : 'auto',
+        thinkingBudget: (typeof s.thinkingBudget === 'number' && s.thinkingBudget >= 0)
+            ? s.thinkingBudget : null,
+        generation: g,
+        webSearch: !!s.webSearch,
+        voice: String(s.voice || ''),
+        autospeak: s.autospeak === '1' ? '1' : '0',
+        chunk: /^(sentence|line|paragraph)$/.test(s.chunk) ? s.chunk : 'sentence',
+        sttModel: String(s.sttModel || ''),
+        sttLang: String(s.sttLang || ''),
+        sttAutosend: s.sttAutosend === '1' ? '1' : '0',
+        sttMode: /^(off|ptt|continuous)$/.test(s.sttMode) ? s.sttMode : 'off'
+    });
+}
+function settingsDiffer(a, b) { return normSettings(a) !== normSettings(b); }
+function applyChatSettings(s) {
+    // false = nothing to apply (classic/pre-round-9 entry: PROMPT-only
+    // profile — the page's settings stay the user's own, unmanaged)
+    if (!s || typeof s !== 'object') return false;
+    var n = JSON.parse(normSettings(s));    // sanitize once, use everywhere
+    var think = gid('chat-native-think-mode');
+    var bud = gid('chat-native-think-budget');
+    if (think) think.value = n.thinking;
+    if (bud) bud.value = n.thinkingBudget == null ? '' : String(n.thinkingBudget);
+    if (_conv) {
+        _conv.thinking = n.thinking;
+        _conv.thinkingBudget = n.thinkingBudget;
+        _conv.generation = n.generation;
+    }
+    fillGenerationInputs(_conv || {});
+    var web = gid('chat-native-web');
+    _webSearch = n.webSearch;
+    if (web) {
+        web.classList.toggle('on', _webSearch);
+        web.title = t(_webSearch ? 'chat.web_search_on' : 'chat.web_search_off',
+                      _webSearch ? 'Web search is on. Click to turn it off'
+                                 : 'Turn on web search');
+    }
+    var ls = W() && W().localStorage;
+    if (ls) {
+        ls.setItem('omlx-uplift-voice', n.voice);
+        lsSet(AUTO_KEY, n.autospeak);
+        lsSet(CHUNK_KEY, n.chunk);
+        lsSet(STT_MODEL_KEY, n.sttModel);
+        lsSet(STT_LANG_KEY, n.sttLang);
+        lsSet(STT_SEND_KEY, n.sttAutosend);
+        lsSet(STT_MODE_KEY, n.sttMode);
+    }
+    var vs = gid('chat-native-voice');
+    if (vs) vs.value = n.voice;
+    var ab = gid('chat-native-autospeak');
+    if (ab) ab.classList.toggle('on', n.autospeak === '1');
+    var cs = gid('chat-native-speak-chunk');
+    if (cs) cs.value = n.chunk;
+    syncAudioMode();   // mic visibility follows the applied STT model
+    return true;
+}
+
 function loadProfiles() {
     var ls = W() && W().localStorage;
     if (!ls) return [];
@@ -108,9 +209,13 @@ function loadProfiles() {
                 for (var i = 0; i < arr.length; i++) {
                     var p = arr[i];
                     if (p && typeof p.name === 'string' && p.name
-                        && !findProfile(list, p.name))   // classic's add-path
-                        list.push({ name: p.name,        // can dupe names;
-                                    content: String(p.content || '') }); // keep first
+                        && !findProfile(list, p.name)) {   // classic's add-path
+                        var entry = { name: p.name,        // can dupe names;
+                                      content: String(p.content || '') }; // keep first
+                        if (p.settings && typeof p.settings === 'object')
+                            entry.settings = p.settings;   // ROUND 9 blob
+                        list.push(entry);
+                    }
                 }
             }
         } else {
@@ -156,6 +261,13 @@ function syncProfileSelect() {
     if (active && !prof) active = '';               // stale name
     var cur = sys ? String(sys.value || '') : '';
     var dirty = prof ? cur !== stripNL(prof.content) : !!cur;
+    // ROUND 9: a preset owns the WHOLE page — changing thinking, sampling,
+    // web search or voice (anything but the model) re-marks it just like
+    // a prompt edit. Entries without a settings blob (classic or written
+    // before round 9) manage the PROMPT only: their settings are never
+    // compared and never applied.
+    if (prof && prof.settings && !dirty
+        && settingsDiffer(chatSettingsSnapshot(), prof.settings)) dirty = true;
     // ROUND 8 (user: 'allow deleting Modified (unsaved); it should only
     // reappear when settings are changed but not saved to a profile'):
     // the marker is a STATE, not a permanent row. It exists only while
@@ -200,6 +312,9 @@ function newConv() {
              // switches so the user can go back safely (server-persisted
              // alongside systemPrompt).
              customPrompt: '',
+             // ROUND 9: full-page stash ({prompt, settings}) — the twin of
+             // customPrompt carrying everything the active preset does NOT
+             customState: null,
              // thinking: 'auto'|'off'|'on'|'limit' — classic's select, same
              // wire semantics (openai_models.py: enable_thinking,
              // thinking_budget). Live-only: the history store keeps
@@ -1080,15 +1195,22 @@ function toolbar() {
         var sysEl = gid('chat-native-sys');
         var cur = String((sysEl && sysEl.value) || '');
         if (name === '__modified') {
-            // return to the stashed custom text; the CURRENT text is
-            // re-stashed so a flip back keeps the last state too
-            var stash = _conv.customPrompt || '';
+            // return to the STASHED page (prompt + settings); the CURRENT
+            // state is re-stashed first so a flip back keeps the latest
+            var nowSnap = chatSettingsSnapshot();
+            var st = _conv.customState || null;
+            var stashP = String((st && st.prompt) || _conv.customPrompt || '');
+            var stashS = (st && st.settings) || null;
             var bound = _conv.activeProfile
                 ? findProfile(_profiles, _conv.activeProfile) : null;
-            if (bound && cur !== stripNL(bound.content)) stash = cur;
-            _conv.customPrompt = stash;
-            if (sysEl) sysEl.value = stash;
-            _conv.systemPrompt = stash;
+            var cleanBound = bound && cur === stripNL(bound.content)
+                && !(bound.settings && settingsDiffer(nowSnap, bound.settings));
+            if (!cleanBound) { stashP = cur; stashS = nowSnap; }
+            _conv.customState = { prompt: stashP, settings: stashS };
+            _conv.customPrompt = stashP;          // compat twin (server old readers)
+            if (sysEl) sysEl.value = stashP;
+            _conv.systemPrompt = sysEl ? sysEl.value : stripNL(stashP);
+            applyChatSettings(stashS);
             _conv.activeProfile = '';
             saveConv();
             syncProfileSelect();
@@ -1096,14 +1218,24 @@ function toolbar() {
         }
         var p = findProfile(_profiles, name);
         if (!p) { syncProfileSelect(); return; }
+        var nowS = chatSettingsSnapshot();
         var boundNow = _conv.activeProfile
             ? findProfile(_profiles, _conv.activeProfile) : null;
-        var cleanNow = boundNow && cur === stripNL(boundNow.content);
-        if (!cleanNow) _conv.customPrompt = cur;   // edited OR unbound: stash
+        var cleanNow = boundNow && cur === stripNL(boundNow.content)
+            && !(boundNow.settings && settingsDiffer(nowS, boundNow.settings));
+        if (!cleanNow) {                          // unsaved page: stash it whole
+            _conv.customPrompt = cur;
+            _conv.customState = { prompt: cur, settings: nowS };
+        }
         if (sysEl) sysEl.value = p.content;
         // what the FIELD holds is the truth (browser stripped newlines);
         // persist that exact string so a reload cannot look 'dirty'
         _conv.systemPrompt = sysEl ? sysEl.value : stripNL(p.content);
+        // ROUND 9: selecting ALWAYS re-provisions the whole page — an
+        // entry without a settings blob (classic-era) means DEFAULTS.
+        // (The dirty COMPARISON stays prompt-only for such entries: we
+        // never re-mark state the preset never claimed to own.)
+        applyChatSettings(p.settings || {});
         _conv.activeProfile = p.name;
         saveConv();
         syncProfileSelect();
@@ -1150,18 +1282,26 @@ function toolbar() {
         var name = String(nameInp.value || '').trim().slice(0, 48);
         if (!name) return;
         var content = String(sys.value || '');
+        // ROUND 9: the whole page is captured — thinking, sampling, web
+        // search, voice in/out (model excluded by design)
+        var snap = chatSettingsSnapshot();
         var existing = findProfile(_profiles, name);
-        if (existing) existing.content = content;      // keep the name: UPDATE
-        else _profiles.push({ name: name, content: content });  // new: CREATE
+        if (existing) { existing.content = content; existing.settings = snap; }
+        else _profiles.push({ name: name, content: content, settings: snap });
         persistProfiles(_profiles);
         // the text now LIVES under this name — nothing unsaved is dropped,
         // so the stash only applies to picker switches (change handler)
         if (_conv) {
             _conv.activeProfile = name;
             _conv.systemPrompt = content;
-            // round 8: the text is SAVED now — an equal stash is stale
-            // clutter and would keep the Modified (unsaved) marker alive
-            if (_conv.customPrompt === content) _conv.customPrompt = '';
+            // round 8/9: the page is SAVED now — a stash equal to what we
+            // just committed is stale clutter haunting the marker
+            var st = _conv.customState;
+            if (_conv.customPrompt === content
+                && (!st || !st.settings || !settingsDiffer(st.settings, snap))) {
+                _conv.customPrompt = '';
+                _conv.customState = null;
+            }
             saveConv();
         }
         closePresetName();
@@ -1201,10 +1341,12 @@ function toolbar() {
             if (bound) {
                 sys.value = stripNL(bound.content);
                 _conv.systemPrompt = String(sys.value || '');
+                applyChatSettings(bound.settings || {});  // round 9: page back
             } else {
                 sys.value = '';
                 _conv.systemPrompt = '';
                 _conv.customPrompt = '';    // unbound: the stash IS the text
+                _conv.customState = null;
             }
             saveConv();
             syncProfileSelect();
@@ -1262,6 +1404,7 @@ function toolbar() {
         _conv.thinkingBudget = (isFinite(b) && b >= 0) ? b : null;
         showBudget(think.value === 'limit');   // U79+U80: group + input together
         saveConv();   // fields themselves are live-only (store drops them)
+        syncProfileSelect();   // ROUND 9: a settings change re-marks the preset
     }
     think.addEventListener('change', saveThinking);
     budget.addEventListener('change', saveThinking);
@@ -1277,6 +1420,7 @@ function toolbar() {
         web.title = _webSearch ? t('chat.web_search_on',
                                    'Web search is on. Click to turn it off')
                                : t('chat.web_search_off', 'Turn on web search');
+        syncProfileSelect();   // ROUND 9: web search is part of the preset
         return _webSearch;
     }
     // U45: the last-turn toolbar trio is GONE — copy/regenerate/edit/
@@ -1371,6 +1515,7 @@ function toolbar() {
                          // current speech — half a sentence in the old
                          // voice reads like a glitch
         if (_dc) renderHistory();   // re-attach: speak buttons track voices
+        syncProfileSelect();        // ROUND 9: voice-out is part of the preset
     });
     // VOICE-11: AUTO-SPEAK toggle + chunk mode, next to the Voice picker
     var autoBtn = el('button', 'btn', tf2('uplift.chat.autospeak', 'Auto-speak'));
@@ -1389,6 +1534,7 @@ function toolbar() {
         // VOICE-11 cancel rule: toggled OFF cuts the live read; toggled
         // ON spends this gesture unlocking the shared AudioContext
         if (on) unlockSpeak(); else speakCancel();
+        syncProfileSelect();   // ROUND 9
     });
     var chunkSel = el('select'); chunkSel.id = 'chat-native-speak-chunk';
     [['sentence', 'uplift.chat.speak_chunk_sentence', 'Sentence'],
@@ -1408,6 +1554,7 @@ function toolbar() {
     chunkSel.addEventListener('change', function () {
         // takes effect NEXT turn (the live splitter keeps its boundaries)
         lsSet(CHUNK_KEY, chunkSel.value || 'sentence');
+        syncProfileSelect();   // ROUND 9
     });
     // CHAT-3R: the TTS trio (voice / auto-speak / chunk) under its own
     // section; captions keep the U45 one-label-per-control rule.
@@ -1451,6 +1598,7 @@ function toolbar() {
             if (!_conv) return;
             _conv.generation = readGenerationInputs();
             saveConv();
+            syncProfileSelect();   // ROUND 9: sampling re-marks the preset
         });
         genRow.appendChild(group(t(label, fb), inp));
     });
@@ -2371,6 +2519,7 @@ function openSttPop(host) {
         sttListenerStop(false);   // VOICE-13: a live session on the OLD model
                                   // must release the engine's one realtime slot
         syncSttMic();
+        syncProfileSelect();      // ROUND 9: voice-in is part of the preset
     });
     row('uplift.chat.stt_input_model', 'Input model', ms);
     // row 2 — LANGUAGE: Auto = omit the form field entirely (VOICE-5
@@ -2386,6 +2535,7 @@ function openSttPop(host) {
     lsel.value = sttLang();
     lsel.addEventListener('change', function () {
         lsSet(STT_LANG_KEY, lsel.value || '');
+        syncProfileSelect();   // ROUND 9
     });
     row('uplift.chat.stt_language', 'Language', lsel,
         'uplift.chat.stt_lang_hint',
@@ -2397,6 +2547,7 @@ function openSttPop(host) {
     cb.checked = sttAutoSend();
     cb.addEventListener('change', function () {
         lsSet(STT_SEND_KEY, cb.checked ? '1' : '0');
+        syncProfileSelect();   // ROUND 9
     });
     row('uplift.chat.stt_autosend', 'Auto-send', cb).classList.add('inline');
     // row 4 — MODE radios. VOICE-13: 'continuous' IS the live listener now
@@ -2428,6 +2579,7 @@ function openSttPop(host) {
             sttListenerStop(false);
             hint.hidden = mo[0] !== 'continuous';
             syncSttMic();        // Off hides the mic; the hint follows the mode
+            syncProfileSelect(); // ROUND 9
         });
         var lb = el('span', null, tf2(mo[1], mo[2]));
         lb.dataset.i18n = mo[1]; lb.dataset.en = mo[2];
@@ -3659,6 +3811,8 @@ return { mount: mount, isMounted: function () { return _mounted; },
          GEN_FIELDS: GEN_FIELDS,
          genInputId: genInputId,
          readGenerationInputs: readGenerationInputs,
+        // ROUND 9 test seam: read-only page snapshot (what a preset stores)
+        chatSettingsSnapshot: chatSettingsSnapshot,
          // U45 test seams: index-based message actions (the overlay binds
          // these to per-bubble buttons; tests drive them directly)
          _msgActions: { copy: msgCopy, copyMarkdown: msgCopyMarkdown,
