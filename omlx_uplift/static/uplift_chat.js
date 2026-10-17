@@ -161,7 +161,10 @@ function syncProfileSelect() {
     // Delete would orphan the active name; System Default
     // stays (loadProfiles would resurrect it EMPTY — silent content loss,
     // so we forbid it here rather than follow classic's looser rule).
-    if (del) del.disabled = !prof || prof.name === SYSTEM_DEFAULT;
+    // Round 6: 'Modified (unsaved)' is not a NAME — nothing to delete,
+    // so Delete follows the displayed selection, not the hidden binding.
+    if (del) del.disabled = sel.value === '__modified'
+        || !prof || prof.name === SYSTEM_DEFAULT;
 }
 
 // ---- conversation state (server-backed) ----------------------------------
@@ -1092,8 +1095,19 @@ function toolbar() {
     var profSave = el('button', 'btn',
                       t('uplift.chat.preset_save', 'Save preset'));
     profSave.type = 'button'; profSave.id = 'chat-native-profile-save';
-    var nameRow = el('div', 'chat-native-sec-row'); nameRow.hidden = true;
+    // ROUND 6 (user: 'the Save preset button should popup a modal entry
+    // for the name, not show a form below the model name'): the naming
+    // control is a fixed OVERLAY — appended to the bar but taken out of
+    // its flow, so the chat box never jumps when it opens. Backdrop
+    // click and Cancel/Esc fold it; Enter and Save commit the upsert.
+    var nameRow = el('div', 'chat-native-sec-row chat-native-modal');
+    nameRow.hidden = true;
     nameRow.id = 'chat-native-preset-row';
+    var modalBox = el('div', 'chat-native-modal-box');
+    var modalTitle = el('span', 'chat-native-sec-title',
+                        t('uplift.chat.preset_save', 'Save preset'));
+    modalTitle.dataset.i18n = 'uplift.chat.preset_save';
+    modalTitle.dataset.en = 'Save preset';
     var nameInp = el('input'); nameInp.type = 'text';
     nameInp.id = 'chat-native-preset-name';
     nameInp.placeholder = t('chat.profile_name_placeholder', 'Profile name...');
@@ -1101,8 +1115,13 @@ function toolbar() {
     presetAdd.type = 'button'; presetAdd.id = 'chat-native-preset-add';
     var presetCancel = el('button', 'btn', t('chat.edit_cancel', 'Cancel'));
     presetCancel.type = 'button'; presetCancel.id = 'chat-native-preset-cancel';
-    nameRow.append(nameInp, presetAdd, presetCancel);   // live QA: the row
-    // was once left empty — byId stubs cannot catch un-appended children
+    var modalBtns = el('div', 'chat-native-sec-row');
+    modalBtns.append(presetAdd, presetCancel);
+    modalBox.append(modalTitle, nameInp, modalBtns);
+    nameRow.append(modalBox);   // live QA: reach children THROUGH the tree
+    nameRow.addEventListener('click', function (ev) {
+        if (ev.target === nameRow) closePresetName();   // backdrop dismiss
+    });
     function closePresetName() {
         nameRow.hidden = true; nameInp.value = '';
     }
@@ -1143,8 +1162,13 @@ function toolbar() {
     presetDel.type = 'button'; presetDel.id = 'chat-native-preset-del';
     presetDel.disabled = true;
     presetDel.addEventListener('click', function () {
-        var name = _conv && _conv.activeProfile;
-        var p = name ? findProfile(_profiles, name) : null;
+        // round 6 (user: 'I have Modified (unsaved) selected, but Delete
+        // shows another one'): delete acts on WHAT THE PICKER DISPLAYS,
+        // never on a hidden binding. __modified names nothing => the
+        // button is disabled in syncProfileSelect; the guard stays for
+        // stale state between syncs.
+        var name = prof.value;
+        var p = (name && name !== '__modified') ? findProfile(_profiles, name) : null;
         if (!p || p.name === SYSTEM_DEFAULT) return;
         if (!window.confirm(t('uplift.chat.preset_delete_confirm',
                               "Delete preset '{name}'?")
@@ -1401,6 +1425,9 @@ function toolbar() {
     var rowIO = el('div', 'chat-native-sec-row');
     rowIO.append(expBtn, impBtn, fileIn);
     hist.append(histTitle, newBtn, rowIO, list, del);
+    // CHAT-3R round 5/6 (user): Model | Preset | Save | Delete in the
+    // top row; the naming MODAL rides in the bar's DOM but is fixed —
+    // it covers the page instead of expanding the bar.
     top.append(
         group(t('chat.active_model', 'Active Model'), sel, 'chat.active_model'),
         group(t('uplift.chat.preset_title', 'Active preset'), prof,

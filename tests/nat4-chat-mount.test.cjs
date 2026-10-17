@@ -372,13 +372,17 @@ function bootPreset(convOver, profiles) {
 
 function presetRow(h) {
     // TREE access, not byId: the id registry exists even if the module
-    // forgets to append a control (live QA caught an empty name row)
+    // forgets to append a control. Round 6: the naming row is a MODAL —
+    // collect the subtree, locate controls by id through it.
     const row = h.byId['chat-native-preset-row'];
-    assert.ok(row, 'name row in the DOM');
-    const [inp, add, cancel] = row.children;
-    assert.equal(inp.id, 'chat-native-preset-name', 'row holds the input');
-    assert.equal(add.id, 'chat-native-preset-add', 'row holds Add');
-    assert.equal(cancel.id, 'chat-native-preset-cancel', 'row holds Cancel');
+    assert.ok(row, 'name modal in the DOM');
+    const all = [];
+    (function walk(n) { all.push(n); (n.children || []).forEach(walk); })(row);
+    const by = (id) => all.find((e) => e.id === id);
+    const inp = by('chat-native-preset-name');
+    const add = by('chat-native-preset-add');
+    const cancel = by('chat-native-preset-cancel');
+    assert.ok(inp && add && cancel, 'modal holds input + both buttons');
     return { row, inp, add, cancel };
 }
 
@@ -396,6 +400,9 @@ test('preset: editing bound text flips the picker to Modified (unsaved)', async 
         'the edit is visible in the picker WITHOUT any save');
     assert.equal(h.byId['chat-native-profile-save'].disabled, false,
         'Save is never dead — it opens the prefilled name row');
+    assert.equal(h.byId['chat-native-preset-del'].disabled, true,
+        'round 6: Modified (unsaved) is not a NAME — Delete does not act '
+        + 'on the hidden binding the picker is not showing');
 });
 
 test('preset: switching stashes custom text, the marker restores it', async () => {
@@ -766,8 +773,11 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'the voice-input pop is placed by real rects (viewport-aware)');
     assert.ok(/\.chat-native-sec-row\[hidden\] \{ display: none;/.test(css),
         'folded name row must actually collapse (author display beats UA hidden)');
-    assert.ok(/\.chat-native-toprow #chat-native-preset-row \{ flex: 1 1 100%;/.test(css),
-        'the opened name row owns a full second line of the top bar');
+    assert.ok(/\.chat-native-modal \{ position: fixed; inset: 0/.test(css)
+        && /\.chat-native-modal-box \{/.test(css),
+        'naming row is a fixed modal overlay (round 6), not a bar expander');
+    assert.ok(!/chat-native-toprow #chat-native-preset-row/.test(css),
+        'the second-line-of-the-bar rule is gone');
     // CHAT-3R bug fix pins: the rail is an overflow scroller — a pop
     // absolutely positioned inside it gets CLIPPED (user: invisible
     // behind the chat box). fixed + real-rect placement + close-on-scroll.

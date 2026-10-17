@@ -2952,7 +2952,19 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    bounded control; Save/Delete are content-width, bottom-aligned by the
    bar's flex-end */
 .chat-native-toprow .chat-native-group:first-child { flex: 2 1 300px; }
-.chat-native-toprow #chat-native-preset-row { flex: 1 1 100%; }
+/* the bar wraps rows; a modal is NOT a row — its display comes from the
+   sec-row class, which would defeat the UA [hidden] rule even if the
+   modal class were renamed later: pin it by higher specificity too */
+.chat-native-sec-row[hidden].chat-native-modal { display: none; }
+/* round 6: the naming row is a modal overlay (fixed: escapes the bar's
+   flow, so opening it never resizes the chat box) */
+.chat-native-modal { position: fixed; inset: 0; z-index: 60;
+  align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .45); }
+.chat-native-modal-box { display: flex; flex-direction: column; gap: 8px;
+  min-width: 280px; max-width: min(420px, 90vw); padding: 12px 14px;
+  background: var(--card); border: 1px solid var(--edge);
+  border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0, 0, 0, .45); }
 .chat-native-sec { display: flex; flex-direction: column; gap: 4px;
     min-width: 0; }
 .chat-native-sec-title { font-size: 10px; letter-spacing: .06em;
