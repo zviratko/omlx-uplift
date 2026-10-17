@@ -10,6 +10,7 @@ import math
 import os
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
@@ -137,13 +138,54 @@ async def cancel_request(
     raise HTTPException(status_code=404, detail=f"Request not found: {request_id}")
 
 
+_TOK_CACHE_MAX = 4
+_tok_cache: "OrderedDict[str, Any]" = OrderedDict()
+_tok_lock = threading.Lock()
+
+
+def _disk_tokenizer(model_path: str):
+    """Tokenizer-only load from the model DIRECTORY (no weights, no engine).
+
+    ISSUE-3 follow-up (user 2026-10-17): a token-id prompt can only be read
+    back once with the model's tokenizer — but the lazy decode needed a LIVE
+    engine, so inspecting a request after the model was unloaded said
+    'model not loaded' forever. Vanilla keeps the discovered entry
+    (model_path) after unload, and a HF tokenizer is a few MB of vocab files:
+    cheap to load on the inspector's worker thread and cache. local_files_only
+    = never reach for the network. Returns None on any failure; the caller
+    keeps the honest raw-tokens note. LRU-capped, lock-guarded (2 Hz poll +
+    open modal can call concurrently)."""
+    with _tok_lock:
+        tok = _tok_cache.get(model_path)
+        if tok is not None:
+            _tok_cache.move_to_end(model_path)
+            return tok
+    try:
+        from transformers import AutoTokenizer
+        try:
+            tok = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
+        except Exception:  # noqa: BLE001 — custom/tokenizer_class repos want the slow path
+            tok = AutoTokenizer.from_pretrained(model_path, local_files_only=True,
+                                                use_fast=False)
+    except Exception:  # noqa: BLE001
+        return None
+    with _tok_lock:
+        _tok_cache[model_path] = tok
+        _tok_cache.move_to_end(model_path)
+        while len(_tok_cache) > _TOK_CACHE_MAX:
+            _tok_cache.popitem(last=False)
+    return tok
+
+
 def _decode_prompt_ids(model_id: str, ids_json: str, truncated: bool):
     """ISSUE-3: decode a stored token-id sample with the model's tokenizer.
 
     Runs in a worker thread (tokenizer decode can take ~ms on big samples).
     Never raises: returns None-shaped blocks with an honest note when the
     engine is unloaded or the tokenizer chokes (skip_special_tokens keeps
-    chat-template markers from spamming the view)."""
+    chat-template markers from spamming the view). An unloaded engine falls
+    back to the discovered entry's model_path with a tokenizer-only disk
+    load, so the text survives the model's lifetime on the board."""
     import json as _json
 
     try:
@@ -158,8 +200,15 @@ def _decode_prompt_ids(model_id: str, ids_json: str, truncated: bool):
     entry = pool.get_entry(model_id) if pool is not None and model_id else None
     engine = getattr(entry, "engine", None) if entry is not None else None
     tok = getattr(engine, "tokenizer", None) if engine is not None else None
+    if tok is None and entry is not None:
+        path = getattr(entry, "model_path", None)
+        if path:
+            tok = _disk_tokenizer(str(path))
     if tok is None:
-        note = "model not loaded — tokens kept raw"
+        # Three honest states: the board does not know this id at all, or
+        # it knows the directory but no tokenizer could be read from it.
+        note = ("model unknown to the server — tokens kept raw" if entry is None
+                else "tokenizer unavailable for this model — tokens kept raw")
     else:
         try:
             text = tok.decode(ids, skip_special_tokens=True)
