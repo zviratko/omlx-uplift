@@ -942,6 +942,7 @@
  "uplift.chat.preset_delete": "Smazat předvolbu",
  "uplift.chat.preset_unsaved": "Upraveno (neuloženo)",
  "uplift.chat.preset_delete_confirm": "Smazat předvolbu „{name}“?",
+ "uplift.chat.preset_discard_confirm": "Zahodit neuložené změny promptu?",
  "uplift.chat.preset_created": "Předvolba uložena jako {name}",
  "uplift.chat.stt_input_model": "Vstupní model",
  "uplift.chat.stt_none": "Žádný",

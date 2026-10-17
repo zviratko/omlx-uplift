@@ -945,6 +945,7 @@
  "uplift.chat.preset_delete": "プリセットを削除",
  "uplift.chat.preset_unsaved": "変更未保存",
  "uplift.chat.preset_delete_confirm": "プリセット「{name}」を削除しますか？",
+ "uplift.chat.preset_discard_confirm": "保存されていないプロンプトの変更を破棄しますか？",
  "uplift.chat.preset_created": "プリセットを {name} として保存しました",
  "uplift.chat.stt_input_model": "入力モデル",
  "uplift.chat.stt_none": "なし",

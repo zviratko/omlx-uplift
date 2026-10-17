@@ -156,23 +156,34 @@ function syncProfileSelect() {
     if (active && !prof) active = '';               // stale name
     var cur = sys ? String(sys.value || '') : '';
     var dirty = prof ? cur !== stripNL(prof.content) : !!cur;
+    // ROUND 8 (user: 'allow deleting Modified (unsaved); it should only
+    // reappear when settings are changed but not saved to a profile'):
+    // the marker is a STATE, not a permanent row. It exists only while
+    // something unsaved lives in the field (dirty) or in the stash (the
+    // safe-go-back text). Nothing modified => no marker at all, and the
+    // no-binding/no-text state reads honestly as System Default.
+    var hasMod = dirty || !!String((_conv && _conv.customPrompt) || '');
     sel.replaceChildren();
-    var mod = el('option', null,
-                 t('uplift.chat.preset_unsaved', 'Modified (unsaved)'));
-    mod.value = '__modified';
-    sel.appendChild(mod);
+    if (hasMod) {
+        var mod = el('option', null,
+                     t('uplift.chat.preset_unsaved', 'Modified (unsaved)'));
+        mod.value = '__modified';
+        sel.appendChild(mod);
+    }
     _profiles.forEach(function (p) { sel.appendChild(el('option', null, p.name)); });
-    sel.value = (active && !dirty) ? active : '__modified';
+    sel.value = (active && !dirty) ? active : (dirty ? '__modified' : SYSTEM_DEFAULT);
+    // real browsers blank the select when the value matches no option
+    // (corrupt-store boot: System Default itself may be missing) — then
+    // show nothing rather than a lie the picker cannot hold
+    if (sel.selectedIndex < 0 && sel.value) { sel.value = ''; }
     // CHAT-3R round 3: Save is ALWAYS enabled — it opens the name row
     // (prefilled), so it doubles as rename/copy/create; there is no
     // dead-button state to compute anymore.
-    // Delete would orphan the active name; System Default
-    // stays (loadProfiles would resurrect it EMPTY — silent content loss,
-    // so we forbid it here rather than follow classic's looser rule).
-    // Round 6: 'Modified (unsaved)' is not a NAME — nothing to delete,
-    // so Delete follows the displayed selection, not the hidden binding.
-    if (del) del.disabled = sel.value === '__modified'
-        || !prof || prof.name === SYSTEM_DEFAULT;
+    // Round 8: Delete follows the DISPLAYED selection and every display
+    // state has an action: a name deletes the preset, the marker
+    // DISCARDS the unsaved changes. Only System Default — the no-op
+    // bucket loadProfiles resurrects EMPTY — stays forbidden.
+    if (del) del.disabled = sel.value === SYSTEM_DEFAULT;
 }
 
 // ---- conversation state (server-backed) ----------------------------------
@@ -1148,6 +1159,9 @@ function toolbar() {
         if (_conv) {
             _conv.activeProfile = name;
             _conv.systemPrompt = content;
+            // round 8: the text is SAVED now — an equal stash is stale
+            // clutter and would keep the Modified (unsaved) marker alive
+            if (_conv.customPrompt === content) _conv.customPrompt = '';
             saveConv();
         }
         closePresetName();
@@ -1172,13 +1186,31 @@ function toolbar() {
     presetDel.type = 'button'; presetDel.id = 'chat-native-preset-del';
     presetDel.disabled = true;
     presetDel.addEventListener('click', function () {
-        // round 6 (user: 'I have Modified (unsaved) selected, but Delete
-        // shows another one'): delete acts on WHAT THE PICKER DISPLAYS,
-        // never on a hidden binding. __modified names nothing => the
-        // button is disabled in syncProfileSelect; the guard stays for
-        // stale state between syncs.
+        // round 6/8 (user): delete acts on WHAT THE PICKER DISPLAYS.
+        // A NAME deletes that preset; the MARKER is not a name — it is
+        // the unsaved state, so deleting it DISCARDS the unsaved
+        // changes: a bound edit reverts to its preset, unbound text
+        // (and its stash) is dropped and the state reads System Default.
         var name = prof.value;
-        var p = (name && name !== '__modified') ? findProfile(_profiles, name) : null;
+        if (name === '__modified') {
+            if (!_conv) return;
+            if (!window.confirm(t('uplift.chat.preset_discard_confirm',
+                                  'Discard unsaved prompt changes?'))) return;
+            var bound = _conv.activeProfile
+                ? findProfile(_profiles, _conv.activeProfile) : null;
+            if (bound) {
+                sys.value = stripNL(bound.content);
+                _conv.systemPrompt = String(sys.value || '');
+            } else {
+                sys.value = '';
+                _conv.systemPrompt = '';
+                _conv.customPrompt = '';    // unbound: the stash IS the text
+            }
+            saveConv();
+            syncProfileSelect();
+            return;
+        }
+        var p = findProfile(_profiles, name);
         if (!p || p.name === SYSTEM_DEFAULT) return;
         if (!window.confirm(t('uplift.chat.preset_delete_confirm',
                               "Delete preset '{name}'?")

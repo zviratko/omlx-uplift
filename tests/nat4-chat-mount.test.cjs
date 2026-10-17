@@ -48,10 +48,19 @@ function makeHarness(opts = {}) {
             // FAITHFUL <input> semantics: assigning value to a single-line
             // input STRIPS newlines (HTML spec). The round-7 bug only fires
             // in a browser — a raw-value stub would ship it green.
-            get value() { return this._value === undefined ? '' : this._value; },
+            get value() {
+                if (tag === 'option' && this._value === '') {
+                    return this.textContent;   // browser: value falls back to text
+                }
+                return this._value === undefined ? '' : this._value;
+            },
             set value(v) {
                 this._value = tag === 'input'
                     ? String(v == null ? '' : v).replace(/[\r\n]/g, '') : v;
+            },
+            get selectedIndex() {
+                if (tag !== 'select') return -1;
+                return this.children.findIndex((o) => o.value === this._value);
             },
             get id() { return this._id; },
             set id(v) { this._id = v; if (v) byId[v] = this; },
@@ -334,8 +343,9 @@ test('profiles: picker renders store contents, restores activeProfile', async ()
     for (let i = 0; i < 12; i++) await tick();
     const sel = h.byId['chat-native-profile'];
     assert.ok(sel, 'preset picker in the rail');
-    assert.deepEqual(optionTexts(sel), ['MODDED', 'System Default', 'Coder'],
-        'state-marker first + store names, textContent not HTML (CHAT-3R)');
+    assert.deepEqual(optionTexts(sel), ['System Default', 'Coder'],
+        'store names, textContent not HTML (CHAT-3R); NO state marker — '
+        + 'the clean selection IS the state (round 8)');
     assert.equal(sel.value, 'Coder', 'clean bound preset shows its NAME');
     assert.equal(h.byId['chat-native-sys'].value, 'write code',
         'prompt text matches the profile content');
@@ -363,7 +373,8 @@ test('profiles: corrupt store is a silent empty list (classic catch parity)', as
     h.win.UpliftNativeChat.mount();
     for (let i = 0; i < 12; i++) await tick();
     const sel = h.byId['chat-native-profile'];
-    assert.deepEqual(optionTexts(sel), ['MODDED'], 'only the state marker');
+    assert.deepEqual(optionTexts(sel), [],
+        'corrupt store + empty unmodified field => NO marker row (round 8)');
 });
 
 /* ---- CHAT-3R presets: state marker, New/Delete, safe-go-back stash ---- */
@@ -408,9 +419,9 @@ test('preset: editing bound text flips the picker to Modified (unsaved)', async 
         'the edit is visible in the picker WITHOUT any save');
     assert.equal(h.byId['chat-native-profile-save'].disabled, false,
         'Save is never dead — it opens the prefilled name row');
-    assert.equal(h.byId['chat-native-preset-del'].disabled, true,
-        'round 6: Modified (unsaved) is not a NAME — Delete does not act '
-        + 'on the hidden binding the picker is not showing');
+    assert.equal(h.byId['chat-native-preset-del'].disabled, false,
+        'round 8: the marker CAN be deleted — deleting it DISCARDS the '
+        + 'unsaved changes (it never touches the hidden binding silently)');
 });
 
 test('preset: switching stashes custom text, the marker restores it', async () => {
@@ -458,6 +469,45 @@ test('preset: multi-line content from classic stays CLEAN on selection', async (
     assert.equal(h.byId['chat-native-sys'].value, 'line oneline two',
         'the strip matches real <input> behaviour');
     assert.equal(sel.value, 'ML', 'still clean after the switch round-trip');
+});
+
+test('marker: is a STATE, not a permanent row; Delete on it discards', async () => {
+    const h = bootPreset({ systemPrompt: '' },
+        [{ name: 'System Default', content: 'sd base' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    const sys = h.byId['chat-native-sys'];
+    const del = h.byId['chat-native-preset-del'];
+    assert.deepEqual(sel.children.map((o) => o.value), ['System Default'],
+        'nothing modified => NO Modified (unsaved) row at all (round 8)');
+    assert.equal(sel.value, 'System Default');
+    assert.equal(del.disabled, true, 'System Default stays forbidden');
+    sys.value = 'scratch note'; sys.dispatch('input');
+    assert.ok(sel.children.some((o) => o.value === '__modified'),
+        'an unsaved change REAPPEARS the marker');
+    assert.equal(sel.value, '__modified');
+    assert.equal(del.disabled, false, 'the marker is now deletable');
+    h.win.confirm = () => true;
+    del.dispatch('click');
+    assert.equal(sys.value, '', 'deleting the marker DISCARDS the text');
+    assert.equal(sel.children.map((o) => o.value).indexOf('__modified'), -1,
+        'and the state (and its stash) is gone for good');
+    assert.equal(sel.value, 'System Default');
+});
+
+test('marker: discarding a BOUND edit reverts to the preset, keeping it', async () => {
+    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Coder', content: 'write code' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    const sys = h.byId['chat-native-sys'];
+    sys.value = 'write code but sloppier'; sys.dispatch('input');
+    assert.equal(sel.value, '__modified');
+    h.win.confirm = () => true;
+    h.byId['chat-native-preset-del'].dispatch('click');
+    assert.equal(sys.value, 'write code', 'reverted to the bound preset text');
+    assert.equal(sel.value, 'Coder', 'the preset still exists and is bound');
 });
 
 test('preset: Save prefills the name — keeping it UPDATES, retyping CREATES', async () => {
@@ -834,7 +884,8 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
     // {name} placeholder multisets (dynamic t() usage is gate-invisible,
     // so this file is the self-pin per the doctrine)
     const PRESET_KEYS = ['preset_title', 'preset_save', 'preset_delete',
-        'preset_unsaved', 'preset_delete_confirm', 'preset_created'];
+        'preset_unsaved',
+        'preset_delete_confirm', 'preset_discard_confirm', 'preset_created'];
     const en = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/en.json`, 'utf8'));
     const marks = (s) => (String(s).match(/\{name\}/g) || []).length;
     for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {

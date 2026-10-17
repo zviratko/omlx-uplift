@@ -942,6 +942,7 @@
  "uplift.chat.preset_delete": "刪除預設",
  "uplift.chat.preset_unsaved": "已修改（未儲存）",
  "uplift.chat.preset_delete_confirm": "刪除預設「{name}」？",
+ "uplift.chat.preset_discard_confirm": "捨棄未儲存的提示詞變更？",
  "uplift.chat.preset_created": "預設已儲存為 {name}",
  "uplift.chat.stt_input_model": "輸入模型",
  "uplift.chat.stt_none": "無",

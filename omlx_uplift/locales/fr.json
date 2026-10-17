@@ -946,6 +946,7 @@
  "uplift.chat.preset_delete": "Supprimer le préréglage",
  "uplift.chat.preset_unsaved": "Modifié (non enregistré)",
  "uplift.chat.preset_delete_confirm": "Supprimer le préréglage « {name} » ?",
+ "uplift.chat.preset_discard_confirm": "Jeter les modifications du prompt non enregistrées ?",
  "uplift.chat.preset_created": "Préréglage enregistré sous {name}",
  "uplift.chat.stt_input_model": "Modèle d’entrée",
  "uplift.chat.stt_none": "Aucun",
