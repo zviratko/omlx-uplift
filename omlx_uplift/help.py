@@ -25,7 +25,6 @@ COMMANDS = [
     ("patch", "status|apply|check|disable-all|enable-all|enable|disable|"
               "update|update-all|promote|rollback|remove — patch recovery "
               "without the dashboard ('patches' = legacy alias)"),
-    ("kernel", "list|rebuild <name> — rebuild ONE native kernel in the keg"),
     ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
     ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure|kegs —"
             " dev patches in a separate keg, keg rollback"),
@@ -67,8 +66,6 @@ COMMAND_USAGE = {
               "                 patch rollback ID [--to-v N]\n"
               "                 patch remove ID\n"
               "                 ('patches' is accepted as a legacy alias)"),
-    "kernel": ("omlx-uplift kernel list\n"
-               "                 kernel rebuild <name> [--src PATH]"),
     "skin": ("omlx-uplift skin compile <dir> [-o out.yml]\n"
              "                 skin decompile <yml> [-C skins-dir]"),
     "dev": ("omlx-uplift dev bootstrap [--yes] [--src PATH] [--origin URL]"
@@ -106,7 +103,6 @@ _CONFIG_FILES = [
     ("patches/", "stored diffs + byte-exact pre-apply backups"),
     ("patches.lock", "reconcile lock (startup and CLI share it)"),
     ("patches.disabled", "kill switch: boot unpatched when present"),
-    ("kernel-backups/", "byte-exact originals behind 'kernel rebuild'"),
     ("dev.json", "omlx-dev config (origin, sync_ref, port, sharing)"),
     ("dev-src/", "the omlx checkout build patches materialize in"),
 ]

@@ -110,7 +110,7 @@ async function runPoll(sandbox, payloadObj) {
 
 const kernelPaths = ['a.metal', 'b.metal', 'c.cpp', 'd.h', 'e.h', 'f.h', 'g.txt']
     .map(n => 'omlx/custom_kernels/glm_moe_dsa/csrc/' + n);
-const HINT = 'omlx-uplift kernel rebuild <name> --src /path (brew reinstall hint)';
+const HINT = 'native changes need a whole-keg rebuild: omlx-uplift dev install --with-custom-kernel …';
 const grouped = {
     problems: [{ code: 'kernel_source', paths: kernelPaths,
                  message: 'touches a bundled custom kernel; rebuild needed' }],
@@ -134,8 +134,8 @@ test('card renders ONE grouped problem line for 7 kernel paths', async () => {
     assert.match(adv[0], /^⚠ 7 files: touches a bundled custom kernel/,
         'bare count prefix, no paths');
     assert.ok(!adv[0].includes('csrc/'), 'no affected-file list in the message line');
-    const hintCount = adv.filter(t => t.includes('brew reinstall')).length
-        + texts(cards[0], 'pt-sg-rebuild').filter(t => t.includes('brew reinstall')).length;
+    const hintCount = adv.filter(t => t.includes('whole-keg rebuild')).length
+        + texts(cards[0], 'pt-sg-rebuild').filter(t => t.includes('whole-keg rebuild')).length;
     assert.equal(hintCount, 1, 'the long hint appears EXACTLY once per card');
 });
 

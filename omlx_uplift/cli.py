@@ -1418,55 +1418,6 @@ def _dev_next_steps(cfg: dict, fresh: bool) -> None:
           f"(data root {rt['base_path']})")
 
 
-def cmd_kernel(argv=None) -> int:
-    """Rebuild one bundled native custom kernel IN THE LIVE KEG.
-
-      omlx-uplift kernel rebuild <name> --src /path/to/omlx-checkout
-      omlx-uplift kernel list
-
-    A patch that touches kernel code needs this: the keg ships compiled
-    artifacts, not csrc/ sources, so --src points at ANY omlx source
-    checkout (git clone; the kernel name must exist there). Much cheaper
-    than `brew reinstall --HEAD --with-custom-kernel`: one kernel, no
-    re-download of the world. Originals are backed up byte-exactly under
-    the uplift data dir (kernel-backups/<name>/files/). Restart omlx
-    afterwards: launchctl kickstart -k gui/$(id -u)/sh.brew.omlx"""
-    import json as _json
-
-    ap = argparse.ArgumentParser(prog="omlx-uplift kernel")
-    ap.add_argument("action", choices=["list", "rebuild", "restore"])
-    ap.add_argument("kernel", nargs="?", help="kernel name (see list)")
-    ap.add_argument("--src", help="omlx source checkout containing the "
-                                  "kernel's csrc/ (default: cwd)")
-    ap.add_argument("--workdir", help="keep build dir here for debugging")
-    args = ap.parse_args(argv)
-
-    from . import kernelbuild
-
-    if args.action == "list":
-        print(_json.dumps({"kernels": list(kernelbuild.KERNELS)}, indent=2))
-        return 0
-    if args.action == "restore":
-        if not args.kernel:
-            ap.error("restore needs a kernel name")
-        res = kernelbuild.restore(args.kernel)
-        print(_json.dumps(res, indent=2))
-        return 0 if res.get("ok") else 1
-    if not args.kernel:
-        ap.error("rebuild needs a kernel name (see: omlx-uplift kernel list)")
-    try:
-        res = kernelbuild.rebuild(args.kernel, src=args.src,
-                                  workdir=args.workdir)
-    except SystemExit as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    except subprocess.CalledProcessError as exc:
-        print(f"kernel build failed: {exc}", file=sys.stderr)
-        return 1
-    print(_json.dumps(res, indent=2))
-    return 0 if res.get("verify", {}).get("ok") else 1
-
-
 def cmd_env(argv=None) -> int:
     """ENV-4: manage the omlx-dev environment overrides from the command line.
 
@@ -1652,7 +1603,7 @@ def main() -> int:
         return show_man()
     if sys.argv[1] not in {
             "serve", "view", "install", "uninstall", "patch", "patches",
-            "kernel", "skin", "dev", "env", "doctor", "bench-env",
+            "skin", "dev", "env", "doctor", "bench-env",
             "mteb-env"}:
         print(f"omlx-uplift: unknown command {sys.argv[1]!r}\n",
               file=sys.stderr)
@@ -1674,7 +1625,7 @@ def main() -> int:
         return cmd_skin(rest)
     return {"serve": cmd_serve, "view": cmd_view, "install": cmd_install,
             "uninstall": cmd_uninstall, "patch": cmd_patches,
-            "kernel": cmd_kernel, "dev": cmd_dev, "env": cmd_env,
+            "dev": cmd_dev, "env": cmd_env,
             "doctor": cmd_doctor, "bench-env": cmd_bench_env,
              # mteb-env shares the implementation; the leading marker arg
              # selects the env (REPL-4: second pinned venv, same discipline)

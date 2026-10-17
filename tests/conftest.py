@@ -40,7 +40,7 @@ def pytest_runtest_makereport(item, call):
             and str(exc.name or "").split(".")[0] == "omlx":
         reason = f"needs the omlx package ({exc.name})"
     elif isinstance(exc, SystemExit):
-        # kernelbuild._keg_dirs() etc. raise SystemExit('...omlx...not
+        # tree-probing CLI helpers raise SystemExit('...omlx...not
         # found') instead of importing omlx — same dependency, other door.
         msg = str(exc)
         if "omlx" in msg.lower():

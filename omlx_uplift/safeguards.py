@@ -46,14 +46,18 @@ __all__ = ["normalize_root", "assess", "held", "KERNEL_REBUILD_HINT"]
 
 _OMLX_PREFIX = "omlx/"
 
-# Honest rebuild path: the keg carries no csrc/ sources, so a native
-# rebuild needs a source checkout (kernel rebuild swap) or a full source
-# build of the formula. Both verified 2026-09-21.
+# Honest rebuild path: the keg carries no csrc/ sources and upstream
+# 94363f8 (#4550) replaced the per-kernel cmake builds with MLX
+# MetalExtension in setup.py — a native change can only take effect
+# through a WHOLE-KEG rebuild. The uplift one-kernel swap was retired
+# 2026-10-17 for the same reason (omlx-dev is the patch carrier that
+# compiles kernel sources; nobody recompiles a single kernel by hand).
 KERNEL_REBUILD_HINT = (
-    "omlx-uplift kernel rebuild <name> --src /path/to/omlx-checkout "
-    "(one kernel, keeps a byte-exact backup) — or the full path: "
-    "brew reinstall --HEAD --with-custom-kernel jundot/omlx/omlx; "
-    "either way then restart omlx and re-run omlx-uplift install)")
+    "native changes need a whole-keg rebuild: on the dev carrier run "
+    "omlx-uplift dev install --with-custom-kernel (the materialized "
+    "tree is compiled by the formula) — on a vanilla keg there is no "
+    "supported path (brew builds pristine upstream source); either way "
+    "restart omlx and re-run omlx-uplift install")
 
 _MAX_REPORTED_PROBLEMS = 20
 
@@ -335,7 +339,7 @@ def assess(parsed: dict, tree_root: str, tree_kind: str = "keg") -> dict:
         else:
             msg = ("touches the bundled native kernels — this patch does "
                    "NOT rebuild the compiled artifacts, native changes "
-                   "need a kernel rebuild to take effect")
+                   "need a whole-keg rebuild to take effect")
             if kernel_native_missing:
                 # grounded: only true when the gated tree really lacks
                 # the native source (a source checkout carries csrc/ and

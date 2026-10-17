@@ -163,10 +163,6 @@ without touching omlx files:
 ```bash
 omlx-uplift serve                      # wrapper around 'omlx serve'
 omlx-uplift view [--api URL]           # standalone viewer for DMG installs
-omlx-uplift kernel list|rebuild NAME|restore NAME  # rebuild ONE native
-                                       # kernel in the keg after a patch
-                                       # touched csrc/ (originals kept in
-                                       # kernel-backups/)
 omlx-uplift skin compile DIR|decompile YML         # skin crate codecs;
                                        # themes are drop-in CSS crates,
                                        # picked in the header theme menu

@@ -119,8 +119,8 @@ class HeuristicTests(unittest.TestCase):
         prob = g["safeguards"]["problems"][0]
         self.assertEqual(prob["paths"],
                          ["omlx/custom_kernels/decode_fast/fast.py"])
-        self.assertIn("brew reinstall", prob["hint"])
-        self.assertNotIn("brew reinstall", prob["message"])
+        self.assertIn("whole-keg rebuild", prob["hint"])
+        self.assertNotIn("omlx-uplift dev install", prob["message"])
 
     def test_kernel_paths_group_into_one_problem(self):
         # the PR-4206 shape: many kernel paths -> exactly ONE problem row,
@@ -311,7 +311,7 @@ class OrchestrationTests(unittest.TestCase):
         v = patchsource.view(self.store, self.root, "tree:abc")
         p = v["patches"][0]
         self.assertEqual(p["requires_approval"], ["kernel_source"])
-        self.assertIn("brew reinstall", p["kernel_rebuild_hint"])
+        self.assertIn("whole-keg rebuild", p["kernel_rebuild_hint"])
         self.assertEqual(p["versions"][0]["safeguards"]["codes"],
                          ["kernel_source"])
 
