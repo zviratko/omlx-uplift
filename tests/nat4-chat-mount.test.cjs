@@ -120,7 +120,7 @@ function makeHarness(opts = {}) {
         // (upgraded component): tag the el when the module asks for one
         __shadowReady: true,
         getComputedStyle: () => ({ getPropertyValue: () => '' }),
-        addEventListener() {}, MutationObserver: function () {
+        addEventListener() {}, removeEventListener() {}, MutationObserver: function () {
             this.observe = () => {}; },
         prompt: () => null, confirm: () => true,
         setTimeout: (f, ms) => setTimeout(f, ms),   // tryTheme retry loop
@@ -746,8 +746,9 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'Voice input section: settings entry in its position:relative group + mic');
     assert.ok(/secTts\.append\(\s*group\(tf2\('uplift\.chat\.voice'[\s\S]*?autospeak[\s\S]*?speak_chunk/.test(src),
         'Voice output section owns the TTS trio (voice / auto-speak / chunk)');
-    assert.ok(/secPreset\.append\(prof, profSave, nameRow, presetDel\)/.test(src),
-        'preset stack: picker, Save (opens prefilled row), name row, Delete');
+    assert.ok(/presetActions\.append\(profSave, presetDel\)/.test(src)
+        && /secPreset\.append\(prof, presetActions, nameRow\)/.test(src),
+        'Save + Delete side by side under the picker (user round 4)');
     assert.ok(!/preset_new|presetNew/.test(src),
         'the New/Save distinction is gone (round 3: one Save button)');
     assert.ok(/side\.append\(secPreset, secModel, secStt, secTts, secSys\)/.test(src),
@@ -760,8 +761,17 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
     const css = fs.readFileSync(`${STATIC_DIR}/uplift.css`, 'utf8');
     assert.ok(/\.chat-native-layout \{/.test(css) && /\.chat-native-convlist \{/.test(css),
         'layout + history-list CSS shipped');
-    assert.ok(/\.chat-native-side \.chat-native-pop \{ left: auto; right: 0;/.test(css),
-        'the voice-input popover opens leftwards inside the rail');
+    assert.ok(/sttPopPlace/.test(src),
+        'the voice-input pop is placed by real rects (viewport-aware)');
+    // CHAT-3R bug fix pins: the rail is an overflow scroller — a pop
+    // absolutely positioned inside it gets CLIPPED (user: invisible
+    // behind the chat box). fixed + real-rect placement + close-on-scroll.
+    assert.ok(/\.chat-native-pop \{ position: fixed/.test(css),
+        'the voice-input pop escapes the rail clip (fixed)');
+    assert.ok(!/\.chat-native-pop \{[^}]*position: absolute/.test(css),
+        'no absolute positioning remains on the rail pop');
+    assert.ok(/window\.addEventListener\('scroll', sttPopEscape, true\)/.test(src),
+        'any scroll closes the fixed pop — it never floats detached');
     assert.ok(/\.chat-native-side \{[^}]*overflow-y: auto/.test(css) ||
         /\.chat-native-side \{[^}]*overflow: auto/.test(css),
         'the rail scrolls INTERNALLY (classic drawer), the page does not');

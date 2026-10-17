@@ -1367,8 +1367,12 @@ function toolbar() {
     // profile below the dropdown'): the whole preset stack is a section
     // of its own, at the very top of the rail, each action below the
     // picker it acts on. Save sits right under the picker.
+    // user round 4: Save and Delete side-by-side — one actions row under
+    // the picker, the name row opens beneath it
+    var presetActions = el('div', 'chat-native-sec-row');
+    presetActions.append(profSave, presetDel);
     var secPreset = section('uplift.chat.preset_title', 'Active preset');
-    secPreset.append(prof, profSave, nameRow, presetDel);
+    secPreset.append(prof, presetActions, nameRow);
     // CHAT-3R: the prompt text lives under its own caption (the preset
     // that owns it is one section above — the picker shows whether the
     // text still matches).
@@ -2225,6 +2229,8 @@ function sttSettingsBtn() {
     return btn;
 }
 function sttPopKey(ev) { if (ev.key === 'Escape') closeSttPop(); }
+function sttPopEscape() { closeSttPop(); }   // scroll/resize: a fixed pop
+// would otherwise float detached from its anchor — close is honest
 function closeSttPop() {
     if (!_sttPop) return;
     var p = _sttPop; _sttPop = null;
@@ -2232,6 +2238,26 @@ function closeSttPop() {
     // own listeners, removed on close (helpPop pattern, uplift_bench)
     document.removeEventListener('click', closeSttPop);
     document.removeEventListener('keydown', sttPopKey);
+    window.removeEventListener('scroll', sttPopEscape, true);
+    window.removeEventListener('resize', sttPopEscape);
+}
+function sttPopPlace(pop, anchor) {
+    // CHAT-3R bug (user: 'Voice input settings end up invisible behind
+    // the chat box'): the pop is a child of the rail, and the rail is an
+    // overflow:auto scroller — an ABSOLUTE pop gets clipped by it. fixed
+    // positioning escapes the clip; the pop is placed by real rects and
+    // FLIPS above the anchor when the viewport bottom is tight.
+    var vw = window.innerWidth || 1200;
+    var vh = window.innerHeight || 800;
+    var pw = pop.offsetWidth || 250;
+    var ph = pop.offsetHeight || 260;
+    var ar = anchor && anchor.getBoundingClientRect
+        ? anchor.getBoundingClientRect() : null;
+    var left = ar ? Math.min(Math.max(8, ar.right - pw), vw - pw - 8) : 8;
+    var top = ar ? ar.bottom + 4 : 8;
+    if (ar && top + ph > vh - 8) top = Math.max(8, ar.top - ph - 4);
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.top = Math.round(top) + 'px';
 }
 function openSttPop(host) {
     var pop = el('div', 'chat-native-pop'); pop.id = 'chat-native-stt-pop';
@@ -2335,6 +2361,7 @@ function openSttPop(host) {
     });
     host.appendChild(pop);
     _sttPop = pop;
+    sttPopPlace(pop, host);   // fixed placement (rail clipping, see above)
     setTimeout(function () {
         // deferred arm RE-CHECKS the identity: a fast toggle can close this
         // pop before the timer runs, and a stale document listener would
@@ -2342,6 +2369,8 @@ function openSttPop(host) {
         if (_sttPop !== pop) return;
         document.addEventListener('click', closeSttPop);
         document.addEventListener('keydown', sttPopKey);
+        window.addEventListener('scroll', sttPopEscape, true);   // capture:
+        window.addEventListener('resize', sttPopEscape);         // any scroll
     }, 0);
 }
 

@@ -2863,10 +2863,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-native-bar #chat-native-mic.connecting,
 .chat-native-bar #chat-native-mic.paused { border-color: var(--edge);
     color: var(--dim); animation: none; }
-.chat-native-pop { position: absolute; top: 100%; left: 0; z-index: 30;
+.chat-native-pop { position: fixed; z-index: 40;
   display: flex; flex-direction: column; gap: 6px; padding: 8px;
   min-width: 230px; background: var(--card); border: 1px solid var(--edge);
   border-radius: var(--radius); box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
+/* left/top are set per-open from real rects by sttPopPlace (fixed:
+   escapes the rail's overflow clip and the chat box always stays
+   underneath) */
 .chat-native-pop-row { display: flex; flex-direction: column; gap: 2px; }
 .chat-native-pop-row.inline { flex-direction: row; align-items: center; }
 .chat-native-pop-row.modes { flex-direction: row; flex-wrap: wrap;
@@ -2972,11 +2975,6 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
        collapses the grid to ONE column (live QA). The rail width is fixed,
        so 2x(96+10) fits by design: pin it. */
     grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.chat-native-side #chat-native-profile-save { align-self: flex-start; }
-/* the voice-input popover opens to the LEFT inside the right rail so it
-   can never overflow the viewport edge (its anchor group is position:
-   relative — same mechanism as the old row layout) */
-.chat-native-side .chat-native-pop { left: auto; right: 0; }
 @media (max-width: 940px) {
     .chat-native-layout { flex-direction: column; }
     .chat-native-hist, .chat-native-side { flex: 1 1 auto; width: 100%; }

@@ -255,6 +255,9 @@ function makeHarness(opts) {
         customElements: { get: () => function DeepChat() {} },
         getComputedStyle: () => ({ getPropertyValue: () => '' }),
         addEventListener(type, fn) { (winListeners[type] = winListeners[type] || []).push(fn); },
+        removeEventListener(type, fn) {
+            const l = winListeners[type] || [];
+            const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); },
         navigator: { mediaDevices: {
             getUserMedia() { gumCalls++; return Promise.resolve(fakeStream); } } },
         AudioContext: FakeAudioContext,

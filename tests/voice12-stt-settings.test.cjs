@@ -223,7 +223,7 @@ function makeHarness(opts) {
         document,
         customElements: { get: () => function DeepChat() {} },
         getComputedStyle: () => ({ getPropertyValue: () => '' }),
-        addEventListener() {},
+        addEventListener() {}, removeEventListener() {},
         navigator: { mediaDevices: {
             getUserMedia() { gumCalls++; return Promise.resolve(fakeStream); } } },
         AudioContext: FakeAudioContext,
