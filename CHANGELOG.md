@@ -13,6 +13,35 @@ users never see.
 
 ## Unreleased
 
+## [2.1] — 2026-10-18
+
+- **The chat got a voice and ears.** Replies read themselves aloud
+  while streaming (gapless chunked TTS — sentence / line / paragraph),
+  and push-to-talk plus continuous hands-free listening ride a live
+  speech-recognition stream — echo-guarded and decoupled from the chat
+  model. STT model, language and auto-send live in the Voice input
+  settings.
+- **Whole-page presets.** A profile stores and restores the prompt,
+  thinking, sampling, web search and voice — everything settable on the
+  page except the model you talk to. Edits surface as
+  'Profile (modified)', Save suggests the original name (keep it to
+  update, type a new one to create), Delete reverts unsaved changes or
+  removes the preset — and nothing is lost silently: a page you switch
+  away from is stashed.
+- **The chat was rebuilt classic-style:** histories left, settings
+  right, model and preset on top; the voice-settings popover stays
+  visible and follows scroll.
+- **Request Inspector** decodes prompts even after the model was
+  unloaded (tokenizer from disk); the Activity card gained a per-model
+  Unload button.
+- **Bench:** harness runs carry per-question records (raw downloads),
+  the thinking checkbox reaches the server, and two more FAST Czech
+  suites joined.
+- Small touches: voice references in mp3/flac transcode to WAV at
+  save, the streaming reader cuts at sentence boundaries, the chat
+  picker lists text models only, and classic multi-line profiles are
+  no longer falsely marked modified.
+
 ## [2.0] — 2026-10-15
 
 - **The board stopped fighting itself.** An open dashboard tab no longer
