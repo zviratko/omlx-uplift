@@ -395,7 +395,7 @@ test('preset: editing bound text flips the picker to Modified (unsaved)', async 
     assert.equal(sel.value, '__modified',
         'the edit is visible in the picker WITHOUT any save');
     assert.equal(h.byId['chat-native-profile-save'].disabled, false,
-        'Save unlocks: it writes into the bound preset');
+        'Save is never dead — it opens the prefilled name row');
 });
 
 test('preset: switching stashes custom text, the marker restores it', async () => {
@@ -422,56 +422,62 @@ test('preset: switching stashes custom text, the marker restores it', async () =
     assert.equal(sel.value, '__modified', 'still unbound afterwards');
 });
 
-test('preset: New preset commits the current text under a name (inline row)', async () => {
+test('preset: Save prefills the name — keeping it UPDATES, retyping CREATES', async () => {
+    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Coder', content: 'write code' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sys = h.byId['chat-native-sys'];
+    const { row, inp, add } = presetRow(h);
+    sys.value = 'write terse code';
+    sys.dispatch('input');
+    h.byId['chat-native-profile-save'].dispatch('click');
+    assert.equal(row.hidden, false, 'Save opens the name row');
+    assert.equal(inp.value, 'Coder', 'prefilled with the bound name');
+    // (a) keep the name -> update in place
+    add.dispatch('click');
+    let store = JSON.parse(h.win.__store[PROFILE_LS]);
+    assert.deepEqual(store.map((p) => p.name), ['System Default', 'Coder']);
+    assert.equal(store[1].content, 'write terse code', 'updated in place');
+    assert.equal(h.byId['chat-native-profile'].value, 'Coder',
+        'clean again immediately');
+    // (b) a different name -> create, the old preset survives intact
+    sys.value = 'pirate voice';
+    sys.dispatch('input');
+    h.byId['chat-native-profile-save'].dispatch('click');
+    assert.equal(inp.value, 'Coder', 'prefill always starts from the bound name');
+    inp.value = 'Pirate';
+    add.dispatch('click');
+    store = JSON.parse(h.win.__store[PROFILE_LS]);
+    assert.deepEqual(store.map((p) => p.name), ['System Default', 'Coder', 'Pirate']);
+    assert.equal(store[1].content, 'write terse code', 'Coder NOT clobbered');
+    assert.equal(store[2].content, 'pirate voice');
+    assert.equal(h.byId['chat-native-profile'].value, 'Pirate');
+    assert.equal(row.hidden, true, 'the row folds after commit');
+});
+
+test('preset: unbound draft starts with an empty name; Enter commits, Cancel abandons', async () => {
     const h = bootPreset({ systemPrompt: 'persona X' },
         [{ name: 'System Default', content: '' }]);
     for (let i = 0; i < 12; i++) await tick();
-    const sys = h.byId['chat-native-sys'];
-    assert.equal(sys.value, 'persona X');
     assert.equal(h.byId['chat-native-profile'].value, '__modified',
         'unbound text with content is custom by definition');
-    const { row, inp, add } = presetRow(h);
-    assert.equal(row.hidden, true, 'name row starts folded (no dead input)');
-    h.byId['chat-native-preset-new'].dispatch('click');
-    assert.equal(row.hidden, false);
-    inp.value = 'Persona';
-    add.dispatch('click');
-    const store = JSON.parse(h.win.__store[PROFILE_LS]);
-    assert.deepEqual(store.map((p) => p.name), ['System Default', 'Persona']);
-    assert.equal(store[1].content, 'persona X', 'text committed verbatim');
-    assert.equal(h.byId['chat-native-profile'].value, 'Persona',
-        'the new preset is active and CLEAN immediately');
-    assert.equal(h.byId['chat-native-preset-del'].disabled, false,
-        'a deletable preset is bound now');
-    assert.equal(row.hidden, true, 'the row folds back after commit');
-});
-
-test('preset: Enter commits, Cancel abandons, duplicates never overwrite', async () => {
-    const h = bootPreset({ systemPrompt: 'x' },
-        [{ name: 'System Default', content: '' },
-         { name: 'Persona', content: 'taken' }]);
-    for (let i = 0; i < 12; i++) await tick();
     const { inp, cancel } = presetRow(h);
-    h.byId['chat-native-preset-new'].dispatch('click');
+    h.byId['chat-native-profile-save'].dispatch('click');
+    assert.equal(inp.value, '', 'no bound name -> blank draft, not a lie');
     inp.value = 'Typed';
     inp.dispatch('keydown', { key: 'Enter' });
     let store = JSON.parse(h.win.__store[PROFILE_LS]);
-    assert.deepEqual(store.map((p) => p.name), ['System Default', 'Persona', 'Typed'],
+    assert.deepEqual(store.map((p) => p.name), ['System Default', 'Typed'],
         'Enter is the commit key (classic rename-row parity)');
-    h.byId['chat-native-preset-new'].dispatch('click');
+    h.byId['chat-native-profile-save'].dispatch('click');
     inp.value = 'Nope';
     cancel.dispatch('click');
     assert.equal(inp.value, '', 'Cancel clears the draft name');
     store = JSON.parse(h.win.__store[PROFILE_LS]);
     assert.equal(store.map((p) => p.name).indexOf('Nope'), -1, 'nothing written');
-    h.byId['chat-native-preset-new'].dispatch('click');
-    inp.value = 'Persona';
-    inp.dispatch('keydown', { key: 'Enter' });
-    store = JSON.parse(h.win.__store[PROFILE_LS]);
-    assert.equal(store.filter((p) => p.name === 'Persona').length, 1,
-        'no dupe written; the toast path owns the feedback');
-    assert.equal(store.find((p) => p.name === 'Persona').content, 'taken',
-        'the existing preset was NOT silently overwritten');
+    assert.equal(h.byId['chat-native-profile'].value, 'Typed',
+        'Cancel never changes the binding');
 });
 
 test('preset: Delete drops the name but keeps the text; System Default is guarded', async () => {
@@ -494,23 +500,6 @@ test('preset: Delete drops the name but keeps the text; System Default is guarde
     await tick();
     assert.equal(h.byId['chat-native-preset-del'].disabled, true,
         'System Default is not deletable');
-});
-
-test('preset: Save writes the edit into the bound preset (classic save-back)', async () => {
-    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
-        [{ name: 'System Default', content: '' },
-         { name: 'Coder', content: 'write code' }]);
-    for (let i = 0; i < 12; i++) await tick();
-    const sys = h.byId['chat-native-sys'];
-    sys.value = 'write better code';
-    sys.dispatch('input');
-    const save = h.byId['chat-native-profile-save'];
-    assert.equal(save.disabled, false);
-    save.dispatch('click');
-    const store = JSON.parse(h.win.__store[PROFILE_LS]);
-    assert.equal(store[1].content, 'write better code', 'persisted into the preset');
-    assert.equal(h.byId['chat-native-profile'].value, 'Coder',
-        'clean again: the picker shows the NAME once saved');
 });
 
 test('readability: boot state applies the shadow block; board event restyles live', async () => {
@@ -757,8 +746,10 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'Voice input section: settings entry in its position:relative group + mic');
     assert.ok(/secTts\.append\(\s*group\(tf2\('uplift\.chat\.voice'[\s\S]*?autospeak[\s\S]*?speak_chunk/.test(src),
         'Voice output section owns the TTS trio (voice / auto-speak / chunk)');
-    assert.ok(/secPreset\.append\(prof, profSave, presetNew, nameRow, presetDel\)/.test(src),
-        'preset stack: picker, Save, New, inline name row, Delete');
+    assert.ok(/secPreset\.append\(prof, profSave, nameRow, presetDel\)/.test(src),
+        'preset stack: picker, Save (opens prefilled row), name row, Delete');
+    assert.ok(!/preset_new|presetNew/.test(src),
+        'the New/Save distinction is gone (round 3: one Save button)');
     assert.ok(/side\.append\(secPreset, secModel, secStt, secTts, secSys\)/.test(src),
         'Active preset is the FIRST right-rail section (user: top)');
     assert.ok(/secSys\.append\(sys\)/.test(src),
@@ -784,9 +775,8 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
     // CHAT-3R preset keys: ten locales, real translations, matching
     // {name} placeholder multisets (dynamic t() usage is gate-invisible,
     // so this file is the self-pin per the doctrine)
-    const PRESET_KEYS = ['preset_title', 'preset_save', 'preset_new',
-        'preset_delete', 'preset_unsaved',
-        'preset_exists', 'preset_delete_confirm', 'preset_created'];
+    const PRESET_KEYS = ['preset_title', 'preset_save', 'preset_delete',
+        'preset_unsaved', 'preset_delete_confirm', 'preset_created'];
     const en = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/en.json`, 'utf8'));
     const marks = (s) => (String(s).match(/\{name\}/g) || []).length;
     for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {

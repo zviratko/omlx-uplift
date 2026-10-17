@@ -141,7 +141,6 @@ function syncProfileSelect() {
     // no command-shaped placeholder anymore.
     var sel = gid('chat-native-profile');
     var sys = gid('chat-native-sys');
-    var save = gid('chat-native-profile-save');
     var del = gid('chat-native-preset-del');
     if (!sel) return;
     var active = (_conv && _conv.activeProfile) || '';
@@ -156,9 +155,10 @@ function syncProfileSelect() {
     sel.appendChild(mod);
     _profiles.forEach(function (p) { sel.appendChild(el('option', null, p.name)); });
     sel.value = (active && !dirty) ? active : '__modified';
-    if (save) save.disabled = !(prof && dirty && cur);
-    // Save writes INTO the bound preset; unbound text is kept by
-    // 'New preset'. Delete would orphan the active name; System Default
+    // CHAT-3R round 3: Save is ALWAYS enabled — it opens the name row
+    // (prefilled), so it doubles as rename/copy/create; there is no
+    // dead-button state to compute anymore.
+    // Delete would orphan the active name; System Default
     // stays (loadProfiles would resurrect it EMPTY — silent content loss,
     // so we forbid it here rather than follow classic's looser rule).
     if (del) del.disabled = !prof || prof.name === SYSTEM_DEFAULT;
@@ -1084,33 +1084,20 @@ function toolbar() {
         saveConv();
         syncProfileSelect();
     });
+    // CHAT-3R round 3 (user: 'Drop the New/Save distinction — just Save
+    // preset, default the popup to the current name, editable: keeping
+    // it saves, a different name creates a new one'). One button, inline
+    // row (U73: no native dialogs), prefilled with the bound name when
+    // there is one. Commit is an upsert under the typed name.
     var profSave = el('button', 'btn',
                       t('uplift.chat.preset_save', 'Save preset'));
     profSave.type = 'button'; profSave.id = 'chat-native-profile-save';
-    profSave.disabled = true;
-    profSave.addEventListener('click', function () {
-        var name = _conv && _conv.activeProfile;
-        var p = name ? findProfile(_profiles, name) : null;
-        if (!p) return;                       // unbound: New preset owns that
-        p.content = String(sys.value || '');
-        persistProfiles(_profiles);
-        _conv.systemPrompt = p.content;
-        saveConv();
-        syncProfileSelect();
-    });
-    // CHAT-3R (user: 'I see no way to save the profile... Put a New
-    // profile and a Delete profile below the dropdown'): both live
-    // actions. Naming is an INLINE input row — U73 doctrine: no native
-    // dialogs for text entry (classic's Profile tab does the same).
-    var presetNew = el('button', 'btn',
-                       t('uplift.chat.preset_new', 'New preset'));
-    presetNew.type = 'button'; presetNew.id = 'chat-native-preset-new';
     var nameRow = el('div', 'chat-native-sec-row'); nameRow.hidden = true;
     nameRow.id = 'chat-native-preset-row';
     var nameInp = el('input'); nameInp.type = 'text';
     nameInp.id = 'chat-native-preset-name';
     nameInp.placeholder = t('chat.profile_name_placeholder', 'Profile name...');
-    var presetAdd = el('button', 'btn', t('chat.add_profile', 'Add Profile'));
+    var presetAdd = el('button', 'btn', t('uplift.chat.preset_save', 'Save preset'));
     presetAdd.type = 'button'; presetAdd.id = 'chat-native-preset-add';
     var presetCancel = el('button', 'btn', t('chat.edit_cancel', 'Cancel'));
     presetCancel.type = 'button'; presetCancel.id = 'chat-native-preset-cancel';
@@ -1122,20 +1109,13 @@ function toolbar() {
     function commitPresetName() {
         var name = String(nameInp.value || '').trim().slice(0, 48);
         if (!name) return;
-        if (findProfile(_profiles, name)) {
-            D().toast(t('uplift.chat.preset_exists',
-                        'A preset with that name already exists'), 'error');
-            return;
-        }
         var content = String(sys.value || '');
-        var bound = _conv && _conv.activeProfile
-            ? findProfile(_profiles, _conv.activeProfile) : null;
-        // the text being committed becomes the new preset; the previously
-        // bound preset stays intact and the stash keeps any other edit
-        if (_conv && bound && content !== String(bound.content || ''))
-            _conv.customPrompt = content;
-        _profiles.push({ name: name, content: content });
+        var existing = findProfile(_profiles, name);
+        if (existing) existing.content = content;      // keep the name: UPDATE
+        else _profiles.push({ name: name, content: content });  // new: CREATE
         persistProfiles(_profiles);
+        // the text now LIVES under this name — nothing unsaved is dropped,
+        // so the stash only applies to picker switches (change handler)
         if (_conv) {
             _conv.activeProfile = name;
             _conv.systemPrompt = content;
@@ -1146,7 +1126,9 @@ function toolbar() {
         D().toast(t('uplift.chat.preset_created', 'Preset saved as {name}')
                     .replace('{name}', name));
     }
-    presetNew.addEventListener('click', function () {
+    profSave.addEventListener('click', function () {
+        // prefill: the bound name (editable); unbound = blank draft
+        nameInp.value = (_conv && _conv.activeProfile) || '';
         nameRow.hidden = false;
         if (nameInp.focus) nameInp.focus();
     });
@@ -1386,7 +1368,7 @@ function toolbar() {
     // of its own, at the very top of the rail, each action below the
     // picker it acts on. Save sits right under the picker.
     var secPreset = section('uplift.chat.preset_title', 'Active preset');
-    secPreset.append(prof, profSave, presetNew, nameRow, presetDel);
+    secPreset.append(prof, profSave, nameRow, presetDel);
     // CHAT-3R: the prompt text lives under its own caption (the preset
     // that owns it is one section above — the picker shows whether the
     // text still matches).
