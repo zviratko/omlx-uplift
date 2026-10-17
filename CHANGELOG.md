@@ -13,6 +13,21 @@ users never see.
 
 ## Unreleased
 
+## [2.2] — 2026-10-18
+
+- **Profiles now remember what you were editing.** Change the prompt or
+  any setting while a profile is selected and the picker reads
+  `Profile (modified)` — the unsaved copy lives **on that profile**.
+  Switching between profiles no longer overwrites in-progress work
+  (the old design had one anonymous stash slot for everyone), coming
+  back finds your edits where you left them, and they survive a
+  reload. Delete on a modified row reverts to the saved profile; Save
+  keeps suggesting its original name.
+- The anonymous "Modified (unsaved)" row is gone from profile flows —
+  it appears only for a chat never saved under any profile. Existing
+  conversations migrate their pending edits onto their selected
+  profile automatically.
+
 ## [2.1] — 2026-10-18
 
 - **The chat got a voice and ears.** Replies read themselves aloud
