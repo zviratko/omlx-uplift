@@ -308,6 +308,216 @@ test('splitter: sanitize is on by default (code fences never reach the TTS)', ()
                      ['Spoken part one.', 'Spoken part two.']);
 });
 
+/* ---- VOICE-11a: the streaming sanitizer cuts at SENTENCES ---------------
+   The bug it fixes: createSpeechSanitizer held a line until its newline
+   arrived, so a reply streamed as ONE long line (the common short answer)
+   gave the splitter nothing until turn end — and sentence mode's whole
+   promise is first audio after the first SENTENCE. These proofs pin both
+   halves: emission mid-line, and the suppression that must stay absolute
+   (fence bodies, table rows, thinking spills, and any inline construct
+   still open at the cut), plus the invariant that the provisional text
+   reassembles to exactly the one-shot sanitising.                        */
+
+const L1 = 'Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo mike one.';
+const L2 = 'Lima november oscar papa quebec romeo sierra tango uniform victor whiskey two.';
+const L3 = 'Xray yankee zulu alpha bravo charlie delta echo foxtrot golf hotel three.';
+
+// the VOICE-11 sentence-mode wiring, run off a fake stream: delta ->
+// sanitizer -> splitter. `emits` is what the sanitizer handed the splitter,
+// in order, so join('') is the faithful projection of the streamed text.
+function streamLive(text, size, opts) {
+    const o = opts || {};
+    const san = createSpeechSanitizer(o.lineOnly ? { provisional: false } : undefined);
+    const z = createSpeechSplitter({ mode: 'sentence',
+                                     minFloor: o.floor == null ? 60 : o.floor,
+                                     cap: o.cap == null ? 200 : o.cap });
+    const chunks = [], emits = [];
+    let i = 0, firstChunkAt = -1;
+    while (i < text.length) {
+        i += Math.max(1, size);
+        const t = san.push(text.slice(i - Math.max(1, size), i));
+        emits.push(t);
+        const c = z.push(t);
+        if (c.length && firstChunkAt < 0) firstChunkAt = i;
+        chunks.push(...c);
+    }
+    const tail = san.flush();
+    if (tail) { emits.push(tail); chunks.push(...z.push(tail)); }
+    chunks.push(...z.flush());
+    return { chunks, firstChunkAt, emits: emits.filter(Boolean),
+             streamed: norm(emits.join('')), len: text.length };
+}
+
+test('VOICE-11a: a one-line reply is spoken sentence by sentence, mid-stream', () => {
+    const text = L1 + ' ' + L2 + ' ' + L3;          // no newline until the end
+    for (const size of [1, 3, 7, 64]) {
+        const r = streamLive(text, size);
+        assert.ok(r.firstChunkAt > 0 && r.firstChunkAt < text.length,
+                  'Δ' + size + ': first chunk cut at ' + r.firstChunkAt
+                  + '/' + text.length + ', before turn end');
+        assert.equal(r.chunks[0], L1, 'Δ' + size + ': exactly the first sentence');
+        assert.equal(r.chunks.length, 3, 'Δ' + size + ': every sentence its own chunk');
+        assert.deepEqual(r.chunks, splitSpeechChunks(text, 'sentence', 60, { cap: 200 }),
+                         'Δ' + size + ': streaming split == one-shot split');
+    }
+    // the two rules that stay: the sanitizer hands a sentence over as soon as
+    // its boundary is unambiguous — with the JOIN carried in front of the next
+    // piece, never glued onto the end of what was already handed over — and
+    // the splitter still cuts only once one character past the boundary has
+    // arrived (the incremental == whole-text proof above).
+    const s = createSpeechSanitizer();
+    assert.equal(s.push(text.slice(0, text.indexOf(L2))), L1,
+                 'the sentence leaves the sanitizer mid-line, before any newline');
+    assert.equal(s.push('Lima'), '', 'a partial next word is still held');
+    assert.equal(s.push(' ' + L2.slice(5) + ' '), ' ' + L2,
+                 'the second sentence goes out at its own boundary, join in front');
+    assert.equal(s.flush(), '', 'nothing is left waiting at turn end');
+    const z = createSpeechSplitter({ mode: 'sentence', minFloor: 60, cap: 200 });
+    assert.deepEqual(z.push(L1), [], 'the boundary needs one char past it');
+    assert.deepEqual(z.push(' Lima'), [L1], 'then the first sentence is cut');
+});
+
+test('VOICE-11a: the one-shot sanitizer keeps waiting for the line', () => {
+    // provisional:false is what sanitizeSpeechText uses: byte-identical to
+    // the proven VOICE-10 path, so only the LIVE stream cuts early.
+    const text = L1 + ' ' + L2;
+    const r = streamLive(text, 1, { lineOnly: true });
+    assert.equal(r.firstChunkAt, -1, 'nothing is cut before the flush');
+    assert.deepEqual(r.chunks, splitSpeechChunks(text, 'sentence', 60, { cap: 200 }));
+    assert.equal(r.emits.length, 1, 'the whole line arrives once, at the end');
+});
+
+test('VOICE-11a: fenced code across delta splits emits nothing from inside the fence', () => {
+    const md = 'The answer is simple and it clears the floor here.\n\n```python\n'
+             + 'print("zebra_secret = 1.5; # note. more.")\nprint("second_secret")\n'
+             + '```\n\nTail sentence that clears the floor on its own.';
+    for (const size of [1, 3, 7]) {
+        const r = streamLive(md, size);
+        const spoken = r.emits.join('');
+        assert.ok(!/zebra_secret|second_secret|print\(/.test(spoken),
+                  'Δ' + size + ': no code word reaches the TTS: ' + spoken);
+        assert.ok(!/```/.test(spoken), 'Δ' + size + ': the fence marker is never spoken');
+        // the fence BODY holds sentence ends ('note. more.') — the reason the
+        // provisional cut must consult the fence state, not just the line
+        assert.ok(/note\./.test(md), 'the fixture really does end a sentence in code');
+        assert.equal(r.streamed, sanitizeSpeechText(md), 'Δ' + size + ': same text, less waiting');
+        assert.deepEqual(r.chunks, splitSpeechChunks(md, 'sentence', 60, { cap: 200 }), 'Δ' + size);
+    }
+    // a reply that OPENS with a fence: line one is the marker itself
+    const md2 = '```python\nprint("secret. note. more.")\n```\n'
+              + 'Done now with the rest of the reply here for the floor.';
+    const r2 = streamLive(md2, 1);
+    assert.ok(!/secret/.test(r2.emits.join('')), 'an open fence suppresses everything');
+    assert.equal(r2.streamed, sanitizeSpeechText(md2));
+});
+
+test('VOICE-11a: table rows are still fully dropped, mid-stream', () => {
+    const md = 'Prose sentence one is long enough to clear the floor.\n| a | b |\n'
+             + '|---|---|\n| 1.5 | 2.5 x. y |\nMore prose follows here, cleared too.';
+    for (const size of [1, 5]) {
+        const r = streamLive(md, size);
+        assert.ok(!/\|/.test(r.emits.join('')), 'Δ' + size + ': no pipe is ever spoken');
+        assert.ok(!/2\.5/.test(r.emits.join('')), 'Δ' + size + ': the row body is gone');
+        assert.equal(r.streamed, sanitizeSpeechText(md), 'Δ' + size);
+        assert.deepEqual(r.chunks, splitSpeechChunks(md, 'sentence', 60, { cap: 200 }), 'Δ' + size);
+    }
+});
+
+test('VOICE-11a: an inline construct open at the cut holds its sentence', () => {
+    const cases = [
+        'Plain first sentence here with words. Bold **middle words. More bold** tail goes on.',
+        'Italic first _sentence here. And the second_ closes after the break, fine.',
+        'Use `npm install` first and wait a while. Second sentence follows for the floor.',
+        'See [the docs](https://x.example/a. b) now please. Second sentence follows here.',
+    ];
+    for (const t of cases) {
+        const r = streamLive(t, 1);
+        assert.ok(!/[*`[\]]/.test(r.emits.join('')),
+                  'no raw marker is spoken mid-line: ' + r.emits.join(''));
+        assert.equal(r.streamed, sanitizeSpeechText(t));
+        assert.deepEqual(r.chunks, splitSpeechChunks(t, 'sentence', 60, { cap: 200 }));
+    }
+    // a thinking spill swallows its sentences until the tag closes
+    const sp = 'Visible answer begins here, long enough for the floor. <thinking>'
+             + 'hidden chain of thought. still hidden. </thinking> visible tail ends here.';
+    const r = streamLive(sp, 1);
+    assert.ok(!/hidden|thinking/.test(r.emits.join('')), 'the spill is never spoken');
+    assert.equal(r.streamed, sanitizeSpeechText(sp));
+});
+
+test('VOICE-11a: a full-width sentence end cuts without inventing a space', () => {
+    const cjk = '第一句话很长很长。第二句话也来了。第三句话结束。';
+    const r = streamLive(cjk, 1, { floor: 4 });
+    assert.equal(r.emits.length, 3, 'one provisional emit per sentence');
+    assert.ok(r.firstChunkAt > 0 && r.firstChunkAt < cjk.length, 'cut mid-stream');
+    assert.equal(r.streamed, sanitizeSpeechText(cjk), 'no space glued into the CJK text');
+    assert.deepEqual(r.chunks, splitSpeechChunks(cjk, 'sentence', 4, { cap: 200 }));
+});
+
+test('VOICE-11a: provisional text reassembles to the one-shot sanitize', () => {
+    const docs = [
+        L1 + ' ' + L2 + ' ' + L3,
+        '# Heading\n> quoted prose line\n\n```js\nvar x = 1.5;\n```\n'
+          + '| a | b |\n|---|---|\nplain <b>text</b> with a tail sentence.',
+        '- first bullet item. second sentence in the same item.\n1. numbered item here.\n'
+          + '--- dashed prose after an ambiguous prefix line.',
+        'One line with an unclosed ` backtick and sentences. Then more text arrives.',
+        'E.g. numbers like v1.2 or 3.14 must not cut a sentence in half, ever.',
+        'Trailing image ![alt text. more](/x.png) marker risk at the sentence end here.',
+    ];
+    for (const md of docs) {
+        for (const size of [1, 3, 7, 64]) {
+            const r = streamLive(md, size);
+            assert.equal(r.streamed, sanitizeSpeechText(md), 'Δ' + size + ' on ' + md.slice(0, 24));
+            assert.deepEqual(r.chunks, splitSpeechChunks(md, 'sentence', 60, { cap: 200 }),
+                             'Δ' + size + ' split equals one-shot on ' + md.slice(0, 24));
+            r.chunks.forEach(c => assert.ok(c.length, 'no empty chunk'));
+        }
+    }
+});
+
+test('VOICE-11a: seeded markdown soup — streamed projection == one-shot, always', () => {
+    /* The invariant the provisional path must never break, checked where it is
+       easiest to break it: fences, tables, thinking spills and inline
+       constructs left dangling, split into 400 random documents and fed at
+       five delta sizes. Text equality is checked on the CONCATENATED emissions
+       (what the splitter really receives) and on the chunk list. */
+    const FRAG = [
+        'Alpha bravo charlie.', 'delta echo.', 'foxtrot golf hotel india.',
+        '**bold words. second bold sentence** tail.', '_it _alic.', 'a `code word` b.',
+        '`unclosed code here. more sentences follow.', 'see [label](target. x) ok.',
+        '[dangling label. more text arrives here', '<b>html words</b> next.',
+        '<thinking>hidden. thoughts. </thinking>shown.', '</thinking> stray close.',
+        '```py', 'print("x = 1.5; # note. more.")', '```', '| a | b |', '|---|---|',
+        '| 1.5 | 2.5 x. y |', '# Heading title.', '> quoted prose.', '- bullet item.',
+        '1. numbered item.', '---', '- - -', 'v1.2 and 3.14 numbers.', 'end.',
+        'image ![alt. text](/x.png) here.', 'trailing bang !', 'snake_case_word here.',
+        '第一句话很长。第二句来了。', 'no terminator at all', '', ' ', 'x',
+    ];
+    const rng = (seed) => () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    let docs = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+        const r = rng(seed * 7919);
+        const lines = [];
+        let cur = [], n = 2 + Math.floor(r() * 8);
+        for (let i = 0; i < n; i++) {
+            cur.push(FRAG[Math.floor(r() * FRAG.length) % FRAG.length]);
+            if (r() < 0.35) { lines.push(cur.join(' ')); cur = []; }
+        }
+        if (cur.length) lines.push(cur.join(' '));
+        const text = lines.join(r() < 0.3 ? '\n\n' : '\n');
+        const whole = sanitizeSpeechText(text);
+        const ref = splitSpeechChunks(text, 'sentence', 20, { cap: 120 });
+        docs++;
+        for (const size of [1, 2, 5, 17, 997]) {
+            const r1 = streamLive(text, size, { floor: 20, cap: 120 });
+            assert.equal(r1.streamed, whole, 'Δ' + size + ' seed ' + seed + ': ' + text.slice(0, 30));
+            assert.deepEqual(r1.chunks, ref, 'Δ' + size + ' seed ' + seed + ': ' + text.slice(0, 30));
+        }
+    }
+    assert.equal(docs, 400, 'every seeded document was checked');
+});
+
 /* ================================ queue ================================ */
 
 test('queue: strictly ordered when promises resolve out of order', async () => {

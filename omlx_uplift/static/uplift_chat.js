@@ -1364,7 +1364,10 @@ function beginSpeakTurn() {
     var mode = speakChunkMode();
     _speakZ = SIO().createSpeechSplitter({ mode: mode });
     // the sanitizer flattens newlines; in line/paragraph modes the newline
-    // IS the boundary, so only the prose (sentence) mode strips markdown
+    // IS the boundary, so only the prose (sentence) mode strips markdown.
+    // VOICE-11a: it now hands over clean words as they arrive instead of
+    // waiting for each line's newline, so a reply that is ONE long line still
+    // gets its first SENTENCE synthesized while the model writes the second.
     _speakSan = mode === 'sentence' ? SIO().createSpeechSanitizer() : null;
     _speakDropMark = q.dropped().length;
     _speakPlayedMark = q.played();

@@ -97,24 +97,45 @@
        reading aloud), so this is a stricter sibling: it DROPS code fences,
        tables, rules, reasoning spills and blockquote/heading/bullet
        markers, and flattens inline markup. It is a line state machine fed
-       by deltas — an unterminated line is held back until its newline
-       arrives, so incremental sanitising == sanitising the whole text.   */
-    function cleanLine(line, st) {
-        var s = String(line);
-        if (/^\s*(```|~~~)/.test(s)) {                    // fence toggle: dropped
-            st.inFence = !st.inFence;
-            return '';
-        }
-        if (st.inFence) return '';
-        if (/^\s*\|?[\s:|-]*\|[\s:|-]*$/.test(s)) return '';    // table rule row
-        if (/^\s*\|.*\|?\s*$/.test(s)) return '';               // table row
-        if (/^\s*([-*_]\s*){3,}$/.test(s)) return '';           // thematic break
+       by deltas.
+
+       VOICE-11a: it no longer waits for the newline. A whole-line PREDICATE
+       (fence toggle, fence body, table row) is decided by the line's prefix,
+       so the suppression can be applied as soon as the first characters of a
+       line arrive; only the `$`-anchored predicates (rule row, thematic break)
+       stay ambiguous for a prefix, and those HOLD — never guess. Text inside a
+       prose line is then handed to the splitter word by word (a full-width
+       sentence end counts as a word break), each piece emitted only once it is
+       ANCHOR-SETTLED (the line-start marker run can no longer grow) and
+       CONSTRUCT-CLEAN (after the same inline removals nothing of ` * _ [ <`
+       and no trailing ! is left open, so no emphasis pair, link target,
+       inline-code span, html tag or thinking tag can straddle the cut). What
+       goes out early is therefore exactly what the whole-line cleaner would
+       have produced — incremental sanitising still equals sanitising the whole
+       text — a stray '**' is never spoken, because a segment with a dangling
+       marker is held for its line instead, and the SENTENCE decision stays
+       where it belongs: in the splitter. sanitizeSpeechText asks for
+       provisional:false, so the one-shot output is byte-identical; only the
+       live stream cuts early.                                            */
+    var LINE_FENCE = /^\s*(```|~~~)/;             // fence toggle (whole line)
+    var LINE_RULE = /^\s*\|?[\s:|-]*\|[\s:|-]*$/;   // table alignment row
+    var LINE_ROW = /^\s*\|.*\|?\s*$/;              // table row
+    var LINE_HR = /^\s*([-*_]\s*){3,}$/;           // thematic break
+    var CJK_END = '。！？…';       // VOICE-11a: sentence end, no space follows
+
+    function cleanSpan(s, st, head) {
+        /* everything a line — or one provisional slice of a line — gets after
+           the whole-line predicates. head:false is a mid-line remainder: the
+           anchored markers (blockquote/heading/bullet/list) are LINE-START
+           properties, already applied to the segment that opened the line. */
         s = stripReasoning(s, st);                              // chain of thought
         if (!s.trim()) return '';
-        s = s.replace(/^\s*(>\s?)+/, '');                       // blockquote
-        s = s.replace(/^\s*#{1,6}\s+/, '');                     // heading
-        s = s.replace(/^\s*[-*+]\s+/, '');                      // bullet
-        s = s.replace(/^\s*\d+[.)]\s+/, '');                    // list number
+        if (head) {
+            s = s.replace(/^\s*(>\s?)+/, '');                   // blockquote
+            s = s.replace(/^\s*#{1,6}\s+/, '');                 // heading
+            s = s.replace(/^\s*[-*+]\s+/, '');                  // bullet
+            s = s.replace(/^\s*\d+[.)]\s+/, '');                // list number
+        }
         s = s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1');        // links/images
         s = s.replace(/`([^`]*)`/g, '$1');                      // inline code
         s = s.replace(/(\*\*|__)(.*?)\1/g, '$2');
@@ -123,17 +144,104 @@
         return s.replace(/\s+/g, ' ').trim();
     }
 
-    function createSpeechSanitizer() {
-        var st = { inFence: false, inThink: false, line: '', pending: '' };
+    function dropLine(s, st) {
+        if (LINE_FENCE.test(s)) { st.inFence = !st.inFence; return true; }
+        if (st.inFence) return true;
+        if (LINE_RULE.test(s)) return true;
+        if (LINE_ROW.test(s)) return true;
+        if (LINE_HR.test(s)) return true;
+        return false;
+    }
+
+    function cleanLine(line, st) {
+        var s = String(line);
+        if (dropLine(s, st)) return '';
+        return cleanSpan(s, st, true);
+    }
+
+    /* VOICE-11a: the predicates decided on a line PREFIX. 'drop' is final —
+       a fence opener, a fence body or a leading pipe can never stop being
+       what they look like. 'hold' waits for the newline (a `---` prefix may
+       still grow into `-- prose`; blank text has not declared itself yet). */
+    function headKind(s, st) {
+        if (LINE_FENCE.test(s) || st.inFence || LINE_ROW.test(s)) return 'drop';
+        if (st.inThink || LINE_RULE.test(s) || LINE_HR.test(s) || !s.trim())
+            return 'hold';
+        return 'go';
+    }
+
+    /* VOICE-11a: the anchored strips (blockquote / heading / bullet / list
+       number) all need the whitespace AFTER the marker to decide, so a head
+       segment that is nothing but marker characters ('1.', '###', '> >') may
+       still grow into a marker the whole line loses. Hold it until a real word
+       character arrives — after that the match, if any, is already complete
+       inside the segment, because none of those regexes can cross one. */
+    var HEAD_WORD = /[^\s>#*+\-.0-9]/;
+    function anchorSettled(seg) { return HEAD_WORD.test(seg); }
+
+    /* VOICE-11a: may [0, at) be spoken now? Run cleanSpan's own replacements
+       in its own order and, after each one, demand that its opener is GONE:
+       a leftover means a construct is still open at the cut and the whole-line
+       cleaner would have paired it with something past it (which shifts every
+       pairing after that point). Held instead, the segment goes out through the
+       line path unchanged — conservative, never wrong, and it is what keeps
+       'incremental sanitising == sanitising the whole text' true for text that
+       carries bold, links, inline code or thinking tags. */
+    function segClean(seg, st) {
+        if (st.inThink) return false;
+        var s = seg, k;
+        for (k = 0; k < THINK_OPEN.length; k++)
+            if (s.indexOf(THINK_OPEN[k]) >= 0) return false;
+        s = s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1');       // links/images
+        if (/\[/.test(s) || /!$/.test(s)) return false;
+        s = s.replace(/`([^`]*)`/g, '$1');                     // inline code
+        if (/`/.test(s)) return false;
+        s = s.replace(/(\*\*|__)(.*?)\1/g, '$2');
+        s = s.replace(/(\*|_)(.*?)\1/g, '$2');                 // emphasis
+        if (/[*_]/.test(s)) return false;
+        s = s.replace(/<[^>]*>/g, '');                         // raw html
+        return !/</.test(s);
+    }
+
+    function createSpeechSanitizer(opts) {
+        opts = opts || {};
+        /* VOICE-11a: provisional = the live stream (speak a sentence the moment
+           its boundary is unambiguous). The one-shot sanitizeSpeechText opts
+           out, so its output stays exactly the line-complete projection. */
+        var live = opts.provisional !== false;
+        var st = { inFence: false, inThink: false, line: '', pending: '',
+                   head: true, ws: false, emitted: false };
 
         function add(text) {
-            st.pending += (st.pending ? ' ' : '') + text + ' ';
+            if (!text) return;
+            // VOICE-11a: st.ws = whitespace that passed in the source since the
+            // last emitted character; the projection collapses it to one space,
+            // so the join is re-put IN FRONT of the text that follows (never at
+            // the end of text already handed over, where two whitespace events
+            // in a row would put two spaces where the line has one). Nothing is
+            // glued in front of the first words: the whole-text projection is
+            // trimmed at its start.
+            if (st.ws && st.emitted) st.pending += ' ';
+            st.pending += text;
+            st.ws = false;
+            st.emitted = true;
         }
 
         function take() {
             var s = st.pending;
             st.pending = '';
-            return s.trim();
+            return s;
+        }
+
+        function finish(raw) {
+            // VOICE-11a: the join sits in front of the raw text being consumed
+            // (whitespace that arrived after the previous cut, before the
+            // cleaner trimmed it away) — line-end AND flush paths both count.
+            if (/^\s/.test(raw)) st.ws = true;
+            // a line whose head already went out is cleaned as a SPAN: the
+            // line-drop predicates and the anchored markers are line-start
+            // properties, decided/applied when the head segment was emitted
+            return st.head ? cleanLine(raw, st) : cleanSpan(raw, st, false);
         }
 
         function commit() {
@@ -141,9 +249,55 @@
             while (nl >= 0) {
                 var outLine = st.line.slice(0, nl);
                 st.line = st.line.slice(nl + 1);
-                var clean = cleanLine(outLine, st);
+                var clean = finish(outLine);
+                st.head = true;
                 if (clean) add(clean);
+                st.ws = true;         // VOICE-11a: the newline is whitespace
                 nl = st.line.indexOf('\n');
+            }
+            provisional();
+        }
+
+        /* VOICE-11a: the last point of the pending line the stream can hand
+           over — a WORD end (the whitespace run after it is consumed) or a
+           full-width sentence end — whose text before it is settled and
+           construct-clean. Earlier points are tried when a later one sits
+           inside bold/code/a link, so one unresolvable construct never holds
+           back the prose that came before it. Word granularity is what makes
+           the live timing equal to feeding clean text raw: the splitter cuts a
+           sentence one character into the NEXT one, not one sentence into it. */
+        function findCut(s) {
+            for (var i = s.length - 1; i >= 0; i--) {
+                var ch = s.charAt(i);
+                if (/\s/.test(ch)) continue;              // whitespace never cuts
+                var wide = CJK_END.indexOf(ch) >= 0;
+                var j = skipWs(s, i + 1);
+                if (j === i + 1 && !wide) continue;       // 'oneTwo': not a break
+                var seg = s.slice(0, j);
+                // the cut ate the whitespace after the word: that run is the
+                // join into whatever comes next (a full-width end may have
+                // none, and then the next piece follows with no space at all)
+                if ((!st.head || anchorSettled(seg)) && segClean(seg, st))
+                    return { at: j, ws: j > i + 1 };
+            }
+            return null;
+        }
+
+        function provisional() {
+            if (!live) return;
+            var guard = 0;
+            while (st.line && guard++ < 64) {
+                if (st.head && headKind(st.line, st) !== 'go') return;
+                var cut = findCut(st.line);
+                if (!cut) return;
+                var seg = st.line.slice(0, cut.at);
+                var clean = cleanSpan(seg, st, st.head);
+                if (!clean) return;     // markers only: the line path decides
+                if (/^\s/.test(seg)) st.ws = true;   // the join sat inside it
+                st.line = st.line.slice(cut.at);
+                st.head = false;
+                add(clean);
+                st.ws = cut.ws;
             }
         }
 
@@ -155,12 +309,14 @@
                 return take();
             },
             flush: function () {
-                if (st.line && !st.inFence) {
-                    var tail = cleanLine(st.line, st);
+                if (st.line && !(st.head && st.inFence)) {
+                    var tail = finish(st.line);
                     if (tail) add(tail);
                 }
                 st.line = '';
                 st.inFence = false;
+                st.head = true;
+                st.ws = false;
                 return take();
             },
             state: function () { return st; },
@@ -168,7 +324,7 @@
     }
 
     function sanitizeSpeechText(text) {
-        var z = createSpeechSanitizer();
+        var z = createSpeechSanitizer({ provisional: false });
         var s = z.push(String(text == null ? '' : text));
         return (s + ' ' + z.flush()).replace(/\s+/g, ' ').trim();
     }

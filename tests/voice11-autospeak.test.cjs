@@ -3,8 +3,9 @@
    fake AudioContext + fake SSE stream; the voices module is stubbed at
    its speechJson/loadVoices seam — that is the chunk source contract).
    Proves:
-   - the first /voices/speech POST fires after the first completed
-     boundary while the stream is still open (not at turn end)
+   - the first /voices/speech POST fires after the first completed SENTENCE of
+     a reply that is ONE long line (VOICE-11a), while the stream is still open
+     — and not at turn end, which is all the old line-buffering sanitizer gave
    - chunk mode switches move the boundaries (sentence vs paragraph)
    - every cancel rule bumps the queue token and stale pushes/late
      responses schedule nothing
@@ -229,30 +230,70 @@ async function startTurn(h) {
 }
 
 // ---- (a) first POST before the turn completes --------------------------------
-test('VOICE-11a: TTS fires after the first boundary, before turn end', async () => {
+test('VOICE-11a: TTS fires after the first SENTENCE of a ONE-LINE reply', async () => {
+    // VOICE-11a pin, FLIPPED. It used to prove the first boundary on a reply
+    // that carried newlines, because createSpeechSanitizer held every line
+    // until its '\n' arrived — so the most common short answer, ONE long line,
+    // got its first audio at TURN END. Sentence mode promises the first
+    // sentence while the model is still writing the second: that is what is
+    // asserted here, word-delta by word-delta, with no newline in the reply.
     const h = await makeHarness({
         localStorage: { 'omlx-uplift-autospeak': '1' } }).booted();
     assert.ok(h.byId['chat-native-autospeak'], 'AUTO-SPEAK toggle rendered');
     assert.ok(h.byId['chat-native-speak-chunk'], 'chunk mode select rendered');
     const turn = await startTurn(h);
-    h.stream.push(frame(S1 + '\n'));
-    await flush();
-    assert.equal(h.speechCalls.length, 0, 'nothing past a boundary yet (no char after S1)');
-    h.stream.push(frame(S2 + '\n'));
+    const w1 = S1.split(' '), w2 = S2.split(' '), w3 = S3.split(' ');
+    for (const w of w1) h.stream.push(frame(w + ' '));
+    await flush(10);
+    assert.equal(turn.done(), false, 'the stream is still open');
+    assert.equal(h.speechCalls.length, 0,
+                 'the first sentence is complete on screen but unconfirmed: a '
+                 + 'boundary is only honoured once one character past it arrives');
+    h.stream.push(frame(w2[0] + ' '));
     await flush();
     assert.equal(turn.done(), false, 'the turn is still streaming');
-    assert.equal(h.speechCalls.length, 1, 'first chunk POSTed at the first boundary');
+    assert.equal(h.speechCalls.length, 1, 'first chunk POSTed at the first SENTENCE');
     assert.equal(h.speechCalls[0].url, '/voices/speech');
     assert.equal(h.speechCalls[0].body.voice, VOICE_ID, 'saved composite voice rides the body');
-    assert.equal(h.speechCalls[0].body.input, S1, 'exactly the completed chunk, floor honoured');
-    // finish the turn: tail flushes through the SAME queue, no toast when all played
+    assert.equal(h.speechCalls[0].body.input, S1, 'exactly the completed sentence, floor honoured');
+    for (const w of w2.slice(1)) h.stream.push(frame(w + ' '));
+    h.stream.push(frame(w3[0] + ' '));
+    await flush(10);
+    assert.equal(turn.done(), false, 'still streaming when the second chunk fires');
+    assert.equal(h.speechCalls.length, 2, 'the second sentence cuts the same way');
+    assert.equal(h.speechCalls[1].body.input, S2, 'no overlap, no gap');
+    for (const w of w3.slice(1)) h.stream.push(frame(w + ' '));
     h.stream.end();
     await turn.p;
     await flush(10);
-    const inputs = h.speechCalls.map((c) => c.body.input);
-    assert.equal(inputs.length, 2, 'tail chunk follows');
-    assert.equal(inputs[1], S2, 'the remainder flushes as the tail chunk');
+    assert.deepEqual(h.speechCalls.map((c) => c.body.input), [S1, S2, S3],
+                     'one chunk per sentence; only the tail waits for turn end');
     assert.deepEqual(h.toasts, [], 'clean read: no toast');
+});
+
+// ---- (a2) suppression survives the live wiring ------------------------------
+test('VOICE-11a2: a fenced reply streams its prose and never a line of code', async () => {
+    // the fence body carries sentence ends ('note. more.') and the prose is one
+    // line per sentence: the provisional cut must consult the fence state, so
+    // the first SENTENCE goes out while not one CODE WORD ever does.
+    const h = await makeHarness({
+        localStorage: { 'omlx-uplift-autospeak': '1' } }).booted();
+    const turn = await startTurn(h);
+    const code = 'print("zebra_secret = 1.5; # note. more.")';
+    for (const w of S1.split(' ')) h.stream.push(frame(w + ' '));
+    h.stream.push(frame('\n\n```python\n' + code + '\n```\n\n'));
+    for (const w of S2.split(' ')) h.stream.push(frame(w + ' '));
+    await flush(10);
+    assert.equal(turn.done(), false, 'still streaming');
+    assert.ok(h.speechCalls.length >= 1, 'the prose cut mid-stream anyway');
+    const said = h.speechCalls.map((c) => c.body.input).join(' ');
+    assert.ok(!/zebra_secret|print\(|```/.test(said), 'no code reached the TTS: ' + said);
+    h.stream.end();
+    await turn.p;
+    await flush(10);
+    const all = h.speechCalls.map((c) => c.body.input).join(' ');
+    assert.ok(!/zebra_secret|print\(|```/.test(all), 'and none after the flush either');
+    assert.ok(all.indexOf(S1) >= 0 && all.indexOf(S2) >= 0, 'both prose sentences spoken');
 });
 
 // ---- (b) chunk mode changes the boundaries -----------------------------------
