@@ -2948,12 +2948,21 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-native-side.chat-native-bar { flex-direction: column;
     flex-wrap: nowrap; align-items: stretch; }
 .chat-native-toprow .chat-native-group { flex: 1 1 180px; min-width: 140px; }
+/* round 5: model keeps the long name (2 shares), preset picker is a
+   bounded control; Save/Delete are content-width, bottom-aligned by the
+   bar's flex-end */
+.chat-native-toprow .chat-native-group:first-child { flex: 2 1 300px; }
+.chat-native-toprow #chat-native-preset-row { flex: 1 1 100%; }
 .chat-native-sec { display: flex; flex-direction: column; gap: 4px;
     min-width: 0; }
 .chat-native-sec-title { font-size: 10px; letter-spacing: .06em;
     text-transform: uppercase; color: var(--dim); }
 .chat-native-sec-row { display: flex; gap: 6px; }
 .chat-native-sec-row .btn { flex: 1 1 0; min-width: 0; }
+/* the author display: above BEATS the UA [hidden] rule — without this a
+   'folded' name row still renders, and in the top row it stole a whole
+   empty line (the bar wraps) */
+.chat-native-sec-row[hidden] { display: none; }
 .chat-native-convlist { display: flex; flex-direction: column; gap: 2px;
     flex: 1 1 auto; min-height: 60px; max-height: 45vh; overflow-y: auto; }
 .chat-native-conv { text-align: left; font-size: 11px; padding: 4px 6px;

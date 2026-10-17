@@ -746,13 +746,14 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'Voice input section: settings entry in its position:relative group + mic');
     assert.ok(/secTts\.append\(\s*group\(tf2\('uplift\.chat\.voice'[\s\S]*?autospeak[\s\S]*?speak_chunk/.test(src),
         'Voice output section owns the TTS trio (voice / auto-speak / chunk)');
-    assert.ok(/presetActions\.append\(profSave, presetDel\)/.test(src)
-        && /secPreset\.append\(prof, presetActions, nameRow\)/.test(src),
-        'Save + Delete side by side under the picker (user round 4)');
+    assert.ok(/top\.append\(\s*group\(t\('chat\.active_model'[\s\S]*?group\(t\('uplift\.chat\.preset_title'[\s\S]*?profSave, presetDel, nameRow\);/.test(src),
+        'top row: Model | Preset | Save | Delete, name row folds below (round 5)');
+    assert.ok(!/secPreset|presetActions/.test(src),
+        'the rail preset section is gone — nothing left behind');
     assert.ok(!/preset_new|presetNew/.test(src),
         'the New/Save distinction is gone (round 3: one Save button)');
-    assert.ok(/side\.append\(secPreset, secModel, secStt, secTts, secSys\)/.test(src),
-        'Active preset is the FIRST right-rail section (user: top)');
+    assert.ok(/side\.append\(secModel, secStt, secTts, secSys\)/.test(src),
+        'right rail: Model Settings is the first section again');
     assert.ok(/secSys\.append\(sys\)/.test(src),
         'System Prompt keeps just the text; Save moved next to the picker');
     assert.ok(!/rowConv|rowPrompt\b|rowGen\b/.test(src),
@@ -763,6 +764,10 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'layout + history-list CSS shipped');
     assert.ok(/sttPopPlace/.test(src),
         'the voice-input pop is placed by real rects (viewport-aware)');
+    assert.ok(/\.chat-native-sec-row\[hidden\] \{ display: none;/.test(css),
+        'folded name row must actually collapse (author display beats UA hidden)');
+    assert.ok(/\.chat-native-toprow #chat-native-preset-row \{ flex: 1 1 100%;/.test(css),
+        'the opened name row owns a full second line of the top bar');
     // CHAT-3R bug fix pins: the rail is an overflow scroller — a pop
     // absolutely positioned inside it gets CLIPPED (user: invisible
     // behind the chat box). fixed + real-rect placement + close-on-scroll.

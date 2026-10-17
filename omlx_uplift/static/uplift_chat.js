@@ -1362,20 +1362,14 @@ function toolbar() {
     var sttGroup = el('div', 'chat-native-group');
     sttGroup.appendChild(sttSettingsBtn());
     secStt.append(sttGroup, mic);
-    // CHAT-3R (user: 'move the Active profile to the right controls -
-    // top, rename it to Active preset... put New profile and Delete
-    // profile below the dropdown'): the whole preset stack is a section
-    // of its own, at the very top of the rail, each action below the
-    // picker it acts on. Save sits right under the picker.
-    // user round 4: Save and Delete side-by-side — one actions row under
-    // the picker, the name row opens beneath it
-    var presetActions = el('div', 'chat-native-sec-row');
-    presetActions.append(profSave, presetDel);
-    var secPreset = section('uplift.chat.preset_title', 'Active preset');
-    secPreset.append(prof, presetActions, nameRow);
-    // CHAT-3R: the prompt text lives under its own caption (the preset
-    // that owns it is one section above — the picker shows whether the
-    // text still matches).
+    // CHAT-3R round 5 (user: 'move the Active preset and save/delete back
+    // to the top of the chat box, right of the model name'): the preset
+    // stack lives in the top row — Model | Preset | Save | Delete. The
+    // name row flexes to its own second line inside the same bar;
+    // observeChatChrome watches THIS row, so fitHeight follows its expand.
+    // CHAT-3R: the prompt text keeps its own rail caption; the preset
+    // that owns it is the picker in the top row (the picker shows whether
+    // the text still matches).
     var secSys = section('chat.system_prompt.title', 'System Prompt');
     secSys.append(sys);
     // U46: sampling overrides (classic sidebar parity) — own captioned row,
@@ -1399,7 +1393,7 @@ function toolbar() {
     // Voice input, Voice output, System Prompt).
     secModel.append(thinkGroup, budGroup, web, genRow);
     var side = el('aside', 'chat-native-bar chat-native-side');
-    side.append(secPreset, secModel, secStt, secTts, secSys);
+    side.append(secModel, secStt, secTts, secSys);
     var histTitle = el('span', 'chat-native-sec-title',
                        t('chat.chat_history_label', 'Chat History'));
     histTitle.dataset.i18n = 'chat.chat_history_label';
@@ -1407,10 +1401,11 @@ function toolbar() {
     var rowIO = el('div', 'chat-native-sec-row');
     rowIO.append(expBtn, impBtn, fileIn);
     hist.append(histTitle, newBtn, rowIO, list, del);
-    // CHAT-3R (user): presets moved into the rail — the top row over the
-    // chat box keeps only the model picker.
     top.append(
-        group(t('chat.active_model', 'Active Model'), sel, 'chat.active_model'));
+        group(t('chat.active_model', 'Active Model'), sel, 'chat.active_model'),
+        group(t('uplift.chat.preset_title', 'Active preset'), prof,
+              'uplift.chat.preset_title'),
+        profSave, presetDel, nameRow);
     var dcHost = el('div'); dcHost.id = 'chat-native-dc';
     var mainCol = el('div', 'chat-native-main');
     mainCol.append(top, dcHost);
