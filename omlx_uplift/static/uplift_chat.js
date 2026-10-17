@@ -87,6 +87,14 @@ function gid(id) { return document.getElementById(id); }
 var PROFILE_KEY = 'omlx_chat_prompt_profiles';
 var SYSTEM_DEFAULT = 'System Default';
 
+// Classic stores profiles from a TEXTAREA — content can carry \r\n. Our
+// system-prompt field is single-line <input>, and the browser STRIPS
+// newlines when you assign value, so sys.value never equals a multi-line
+// content and the picker flipped to 'Modified (unsaved)' on a FRESH
+// selection (user round 7). Every content-vs-field comparison must go
+// through the same strip the input performs.
+function stripNL(s) { return String(s == null ? '' : s).replace(/[\r\n]/g, ''); }
+
 function loadProfiles() {
     var ls = W() && W().localStorage;
     if (!ls) return [];
@@ -147,7 +155,7 @@ function syncProfileSelect() {
     var prof = active ? findProfile(_profiles, active) : null;
     if (active && !prof) active = '';               // stale name
     var cur = sys ? String(sys.value || '') : '';
-    var dirty = prof ? cur !== String(prof.content || '') : !!cur;
+    var dirty = prof ? cur !== stripNL(prof.content) : !!cur;
     sel.replaceChildren();
     var mod = el('option', null,
                  t('uplift.chat.preset_unsaved', 'Modified (unsaved)'));
@@ -1066,7 +1074,7 @@ function toolbar() {
             var stash = _conv.customPrompt || '';
             var bound = _conv.activeProfile
                 ? findProfile(_profiles, _conv.activeProfile) : null;
-            if (bound && cur !== String(bound.content || '')) stash = cur;
+            if (bound && cur !== stripNL(bound.content)) stash = cur;
             _conv.customPrompt = stash;
             if (sysEl) sysEl.value = stash;
             _conv.systemPrompt = stash;
@@ -1079,10 +1087,12 @@ function toolbar() {
         if (!p) { syncProfileSelect(); return; }
         var boundNow = _conv.activeProfile
             ? findProfile(_profiles, _conv.activeProfile) : null;
-        var cleanNow = boundNow && cur === String(boundNow.content || '');
+        var cleanNow = boundNow && cur === stripNL(boundNow.content);
         if (!cleanNow) _conv.customPrompt = cur;   // edited OR unbound: stash
         if (sysEl) sysEl.value = p.content;
-        _conv.systemPrompt = p.content;
+        // what the FIELD holds is the truth (browser stripped newlines);
+        // persist that exact string so a reload cannot look 'dirty'
+        _conv.systemPrompt = sysEl ? sysEl.value : stripNL(p.content);
         _conv.activeProfile = p.name;
         saveConv();
         syncProfileSelect();

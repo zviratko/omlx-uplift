@@ -43,8 +43,16 @@ function makeHarness(opts = {}) {
         const el = {
             tagName: tag, children: [], style: {}, dataset: {},
             className: '', textContent: '', title: '', hidden: false,
-            innerHTML: '', checked: false, disabled: false, value: '', type: '', name: '',
-            _id: '',
+            innerHTML: '', checked: false, disabled: false, type: '', name: '',
+            _value: '',
+            // FAITHFUL <input> semantics: assigning value to a single-line
+            // input STRIPS newlines (HTML spec). The round-7 bug only fires
+            // in a browser — a raw-value stub would ship it green.
+            get value() { return this._value === undefined ? '' : this._value; },
+            set value(v) {
+                this._value = tag === 'input'
+                    ? String(v == null ? '' : v).replace(/[\r\n]/g, '') : v;
+            },
             get id() { return this._id; },
             set id(v) { this._id = v; if (v) byId[v] = this; },
             replaceChildren(...kids) { this.children = kids; },
@@ -427,6 +435,29 @@ test('preset: switching stashes custom text, the marker restores it', async () =
     await tick();
     assert.equal(sys.value, 'my own rules', 'the marker restores the stash');
     assert.equal(sel.value, '__modified', 'still unbound afterwards');
+});
+
+test('preset: multi-line content from classic stays CLEAN on selection', async () => {
+    // ROUND 7 BUG: classic stores profiles from a TEXTAREA (may carry
+    // \\r\\n); our field is a single-line <input> that STRIPS newlines on
+    // assignment, so the raw compare flagged every such preset 'modified'
+    // the instant you picked it: picker showed Modified (unsaved), Delete
+    // went dark, and Save prefilled the 'wrong' (hidden-binding) name.
+    const h = bootPreset({ systemPrompt: 'line one\nline two', activeProfile: 'ML' },
+        [{ name: 'System Default', content: '' },
+         { name: 'ML', content: 'line one\nline two' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    assert.equal(sel.value, 'ML',
+        'field holds what the browser CAN hold — that IS the content');
+    assert.equal(h.byId['chat-native-preset-del'].disabled, false,
+        'a freshly selected preset is deletable');
+    // switching TO it from elsewhere also lands clean:
+    sel.value = 'System Default'; sel.dispatch('change'); await tick();
+    sel.value = 'ML'; sel.dispatch('change'); await tick();
+    assert.equal(h.byId['chat-native-sys'].value, 'line oneline two',
+        'the strip matches real <input> behaviour');
+    assert.equal(sel.value, 'ML', 'still clean after the switch round-trip');
 });
 
 test('preset: Save prefills the name — keeping it UPDATES, retyping CREATES', async () => {
