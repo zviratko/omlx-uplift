@@ -2841,6 +2841,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     text-transform: uppercase; color: var(--dim); }
 .chat-native-bar #chat-native-web.on { border-color: var(--accent);
     color: var(--accent); font-weight: 600; }
+/* VOICE-11: AUTO-SPEAK rides the same on-state visual as the web toggle */
+.chat-native-bar #chat-native-autospeak.on { border-color: var(--accent);
+    color: var(--accent); font-weight: 600; }
 .chat-native-bar select, .chat-native-bar input[type=text],
 .chat-native-bar input[type=number] {
   font-size: 11px; background-color: var(--field); border: 1px solid var(--edge);

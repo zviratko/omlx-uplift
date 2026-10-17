@@ -299,6 +299,7 @@ async function importChats(input) {
 
 async function openConv(id) {
     if (id === (_conv && _conv.id)) return;
+    speakCancel();   // VOICE-11 cancel rule: conversation switch cuts speech
     var d = D();
     var full = await d.fetchJson(api() + '/chat/history/' + encodeURIComponent(id));
     _conv = Object.assign(newConv(), full);
@@ -693,7 +694,10 @@ function nativeHandler(_componentBody, signals) {
     var req = _lastBody; _lastBody = null;
     var files = _lastFiles; _lastFiles = null;
     var closed = false;
-    function close() { if (closed) return; closed = true; try { signals.onClose(); } catch (e) {} }
+    var speakGen = null;   // VOICE-11 session id (begin assigns below)
+    function close() { if (closed) return; closed = true;
+        endSpeakTurn(speakGen);   // VOICE-11: flush + settle at EVERY turn end
+        try { signals.onClose(); } catch (e) {} }
     if (!req || !req.model) { close(); return Promise.resolve(); }
     var controller = new AbortController();
     // 6/6b: STT model selected -> transcription leg, not a chat request
@@ -711,9 +715,16 @@ function nativeHandler(_componentBody, signals) {
         return transcribeAudio(files[0], req.model, signals, controller.signal)
             .then(close);
     }
+    // VOICE-11: one auto-speak session per streamed turn while AUTO-SPEAK
+    // is on. Skips: STT returns above; reasoning-only / empty replies push
+    // no text deltas and therefore no chunks.
+    speakGen = beginSpeakTurn();
     try {
         if (signals.stopClicked && typeof signals.stopClicked.listener === 'function')
-            signals.stopClicked.listener(function () { controller.abort(); });
+            signals.stopClicked.listener(function () {
+                speakCancel();       // VOICE-11 cancel rule: Stop kills audio
+                controller.abort();  // instantly (token bump, stale drops)
+            });
     } catch (e) { /* stop wiring optional; rounds still bounded */ }
     var msgs = req.messages.slice();
     var maxRounds = req.tools ? MAX_TOOL_ROUNDS : 0;
@@ -752,7 +763,8 @@ function nativeHandler(_componentBody, signals) {
                         if (c.reasoning) { _thinkLive += c.reasoning; paintThinking(); }
                         c.toolCalls.forEach(function (tc) { accumulateToolCall(toolMap, tc); });
                         if (c.finish) finish = c.finish;
-                        if (c.text) { text += c.text; signals.onResponse({ text: c.text }); }
+                        if (c.text) { text += c.text; signals.onResponse({ text: c.text });
+                                      speakFeed(c.text, speakGen); }
                     });
                     return pump();
                 });
@@ -961,6 +973,7 @@ function toolbar() {
     var newBtn = el('button', 'btn', t('chat.new_chat', 'New Chat'));
     newBtn.type = 'button';
     newBtn.addEventListener('click', function () {
+        speakCancel();   // VOICE-11 cancel rule: New Chat cuts the live read
         _conv = newConv();
         if (_dc) _dc.history = [];
         // the prompt field is per-conversation (classic: sessions carry
@@ -1174,12 +1187,56 @@ function toolbar() {
     voiceSel.addEventListener('change', function () {
         try { W().localStorage.setItem('omlx-uplift-voice', voiceSel.value); }
         catch (_) { /* storage may be denied */ }
+        speakCancel();   // VOICE-11 cancel rule: a voice change cuts the
+                         // current speech — half a sentence in the old
+                         // voice reads like a glitch
         if (_dc) renderHistory();   // re-attach: speak buttons track voices
+    });
+    // VOICE-11: AUTO-SPEAK toggle + chunk mode, next to the Voice picker
+    var autoBtn = el('button', 'btn', tf2('uplift.chat.autospeak', 'Auto-speak'));
+    autoBtn.type = 'button'; autoBtn.id = 'chat-native-autospeak';
+    autoBtn.dataset.i18n = 'uplift.chat.autospeak';
+    autoBtn.dataset.en = autoBtn.textContent;                       // U59
+    autoBtn.dataset.i18nTitle = 'uplift.chat.autospeak_hint';
+    autoBtn.dataset.enTitle = tf2('uplift.chat.autospeak_hint',
+        'Read replies aloud while the model is still streaming');
+    autoBtn.title = autoBtn.dataset.enTitle;
+    if (autoSpeakOn()) autoBtn.classList.add('on');
+    autoBtn.addEventListener('click', function () {
+        var on = !autoSpeakOn();
+        lsSet(AUTO_KEY, on ? '1' : '0');
+        autoBtn.classList.toggle('on', on);
+        // VOICE-11 cancel rule: toggled OFF cuts the live read; toggled
+        // ON spends this gesture unlocking the shared AudioContext
+        if (on) unlockSpeak(); else speakCancel();
+    });
+    var chunkSel = el('select'); chunkSel.id = 'chat-native-speak-chunk';
+    [['sentence', 'uplift.chat.speak_chunk_sentence', 'Sentence'],
+     ['line', 'uplift.chat.speak_chunk_line', 'Line'],
+     ['paragraph', 'uplift.chat.speak_chunk_paragraph', 'Paragraph']
+    ].forEach(function (o) {
+        var e2 = el('option', null, tf2(o[1], o[2]));
+        e2.value = o[0];
+        e2.dataset.i18n = o[1]; e2.dataset.en = e2.textContent;     // U59
+        chunkSel.appendChild(e2);
+    });
+    chunkSel.value = speakChunkMode();
+    chunkSel.title = tf2('uplift.chat.speak_chunk_hint',
+                         'Split streamed replies at every boundary of this size');
+    chunkSel.dataset.i18nTitle = 'uplift.chat.speak_chunk_hint';
+    chunkSel.dataset.enTitle = chunkSel.title;
+    chunkSel.addEventListener('change', function () {
+        // takes effect NEXT turn (the live splitter keeps its boundaries)
+        lsSet(CHUNK_KEY, chunkSel.value || 'sentence');
     });
     rowGen.append(
         group(t('chat.thinking_label', 'Thinking'), think, 'chat.thinking_label'),
         budGroup, web, mic,
-        group(tf2('uplift.chat.voice', 'Voice'), voiceSel, 'uplift.chat.voice'));
+        group(tf2('uplift.chat.voice', 'Voice'), voiceSel, 'uplift.chat.voice'),
+        group(tf2('uplift.chat.autospeak', 'Auto-speak'), autoBtn,
+              'uplift.chat.autospeak'),
+        group(tf2('uplift.chat.speak_chunk', 'Chunk'), chunkSel,
+              'uplift.chat.speak_chunk'));
     // U46: sampling overrides (classic sidebar parity) — own captioned row,
     // each input numeric, blank = engine default, 0 stays a real value.
     var genRow = el('div', 'chat-native-bar chat-native-sampling');
@@ -1217,7 +1274,140 @@ function toolbar() {
 // the list and the selection. localStorage is the browser-preference
 // mechanism (same rule as layout/theme), never a second source of truth.
 var _voicesCache = null;        // null = not loaded yet
-var _speakAbort = null;         // busy token: one read-aloud at a time
+
+// ---- VOICE-11: auto-speak live turns -----------------------------------------
+// The chunked engine (uplift_speechio.js) wired into the stream: one shared
+// SpeechQueue serves BOTH live turns and manual SPEAK (whole-text push),
+// so a new read always cuts the old one — the old _speakAbort busy token
+// is replaced by the queue's own session token + stop().
+var AUTO_KEY = 'omlx-uplift-autospeak';        // '1'/'0', default OFF
+var CHUNK_KEY = 'omlx-uplift-speak-chunk';     // sentence|line|paragraph
+var _speakQ = null;        // the ONE SpeechQueue (live + manual reads)
+var _speakCtx = null;      // lazy shared AudioContext (gesture-created)
+var _speakGen = 0;         // session id: cancel/end retire it, stale feeds die
+var _speakZ = null;        // live-turn splitter   (per turn)
+var _speakSan = null;      // live-turn sanitizer  (per turn, sentence mode)
+var _speakBtn = null;      // manual SPEAK button currently reading
+var _speakPushed = 0, _speakDropMark = 0, _speakPlayedMark = 0;
+
+function lsGet(k) {
+    try { return (W() && W().localStorage) ? W().localStorage.getItem(k) : null; }
+    catch (_) { return null; }
+}
+function lsSet(k, v) {
+    try { if (W() && W().localStorage) W().localStorage.setItem(k, v); }
+    catch (_) { /* storage may be denied */ }
+}
+function autoSpeakOn() { return lsGet(AUTO_KEY) === '1'; }
+function speakChunkMode() {
+    var m = lsGet(CHUNK_KEY);
+    return (m === 'line' || m === 'paragraph') ? m : 'sentence';
+}
+function SIO() { return W() && W().Uplift && W().Uplift.speechio; }
+function speakCtx() {
+    // queue NEVER creates/resumes a context (VOICE-10 contract): this is
+    // the seam, called from the Send/SPEAK click gestures only
+    if (!_speakCtx) {
+        var AC = W() && (W().AudioContext || W().webkitAudioContext);
+        if (!AC) return null;
+        try { _speakCtx = new AC(); } catch (_) { return null; }
+    }
+    return _speakCtx;
+}
+function unlockSpeak() {
+    // autoplay policy ties permission to the gesture: resume the shared
+    // AudioContext INSIDE it; VOICE-1's silent-WAV unlock stays as the
+    // fallback (iOS AudioSession rides any media played during the click)
+    var c = speakCtx();
+    if (c && c.state === 'suspended' && c.resume) { try { c.resume(); } catch (_) {} }
+    var V = VOI();
+    if (V && V.newPlayer) { try { V.newPlayer(null); } catch (_) {} }
+}
+function ensureSpeakQueue() {
+    if (_speakQ) return _speakQ;
+    var sio = SIO(), V = VOI();
+    if (!sio || !V || !V.speechJson) return null;
+    var ctx = speakCtx();
+    if (!ctx) return null;
+    _speakQ = sio.SpeechQueue({
+        ctx: ctx,
+        // the queue's default body is {input} alone; /voices/speech 404s
+        // without a stored voice — the request seam adds the picker's
+        // composite. speechJson stays the transport (no hand-rolled fetch).
+        request: function (chunk) {
+            return { url: '/voices/speech',
+                     body: { voice: chatVoiceId(), input: chunk } };
+        },
+    });
+    return _speakQ;
+}
+function beginSpeakTurn() {
+    if (!autoSpeakOn() || !hasVoices() || !SIO()) return null;
+    var q = ensureSpeakQueue();
+    if (!q) return null;
+    q.reset();                       // new session after a stop() (fresh clock)
+    var mode = speakChunkMode();
+    _speakZ = SIO().createSpeechSplitter({ mode: mode });
+    // the sanitizer flattens newlines; in line/paragraph modes the newline
+    // IS the boundary, so only the prose (sentence) mode strips markdown
+    _speakSan = mode === 'sentence' ? SIO().createSpeechSanitizer() : null;
+    _speakDropMark = q.dropped().length;
+    _speakPlayedMark = q.played();
+    _speakPushed = 0;
+    return ++_speakGen;
+}
+function speakFeed(delta, gen) {
+    if (gen == null || gen !== _speakGen || !_speakZ) return;
+    var q = ensureSpeakQueue();
+    if (!q) return;
+    var text = _speakSan ? _speakSan.push(delta) : delta;
+    if (!text) return;
+    var chunks = _speakZ.push(text);
+    for (var i = 0; i < chunks.length; i++)
+        if (q.push(chunks[i]) >= 0) _speakPushed++;
+}
+function endSpeakTurn(gen) {
+    // turn end / error: flush the tail through the SAME queue and settle
+    // once; the Stop path cancels via speakCancel (gen bump) and lands
+    // silent here — cancelled audio never toasts
+    if (gen == null || gen !== _speakGen) return;
+    _speakGen++;
+    var z = _speakZ, san = _speakSan, q = _speakQ;
+    _speakZ = null; _speakSan = null;
+    if (!z || !q) return;
+    var chunks = [];
+    if (san) { var last = san.flush(); if (last) chunks = z.push(last); }
+    chunks = chunks.concat(z.flush());
+    for (var i = 0; i < chunks.length; i++)
+        if (q.push(chunks[i]) >= 0) _speakPushed++;
+    var pushed = _speakPushed, dropMark = _speakDropMark,
+        playMark = _speakPlayedMark;
+    q.drain().then(function (res) {
+        if (res.stopped) return;     // cancelled mid-drain: stay silent
+        speakToast(res, pushed, dropMark, playMark);
+    });
+}
+function speakCancel() {
+    // VOICE-11 cancel rules: Stop button, new user send, conversation
+    // switch, New Chat, voice change, AUTO-SPEAK toggled off. Token bump:
+    // late responses hit stale tokens and schedule nothing.
+    _speakGen++;
+    _speakZ = null;
+    _speakSan = null;
+    if (_speakQ) _speakQ.stop();
+    if (_speakBtn) { _speakBtn.classList.remove('playing'); _speakBtn = null; }
+}
+function speakToast(res, pushed, dropMark, playMark) {
+    // the ONE dropped-chunks toast of the ticket (engine only counts)
+    var d = D();
+    if (!d) return;
+    var drops = res.dropped.length - (dropMark || 0);
+    if (drops > 0) d.toast(t('uplift.chat.speak_dropped',
+        '{n} audio chunks were skipped').replace('{n}', String(drops)), 'error');
+    else if (pushed && (res.played - (playMark || 0)) <= 0)
+        d.toast(t('uplift.chat.speak_failed',
+            'No audio could be played for this reply.'), 'error');
+}
 
 function VOI() { return W() && W().Uplift && W().Uplift.voices; }
 function hasVoices() { return !!(_voicesCache && _voicesCache.length); }
@@ -1268,51 +1458,36 @@ function syncVoiceSelect() {
     }
 }
 function msgSpeak(idx, btn) {
+    // VOICE-11: manual SPEAK = one whole-reply push through the SAME queue
+    // (replaces VOICE-1's single-blob path — and it keeps working with
+    // AUTO-SPEAK off, exactly as before). Busy click on the same bubble is
+    // a stop; one read-aloud at a time across the page.
     var m = messageAt(idx);
     if (!m || !m.content) return;
     var text = String(stripMarkdown(m.content)).trim();
     if (!text) return;
-    var V = VOI();
-    if (!V) return;
-    if (_speakAbort) {
-        // busy = synthesizing or playing. Vanilla synthesizes the whole
-        // clip before the first byte, so the request cannot be cancelled
-        // — the honest stop is: kill playback, DISCARD the pending blob
-        // (token bump), drop the busy flag.
-        _speakAbort.token++;                 // late .then sees a stale token
-        _speakAbort = null;
-        V.stopPlayback();
-        if (btn) btn.classList.remove('playing');
+    if (!VOI() || !SIO()) return;
+    if (_speakBtn && _speakBtn === btn) { speakCancel(); return; }
+    speakCancel();                      // supersede any live/manual read
+    unlockSpeak();                      // THIS click is the gesture
+    var q = ensureSpeakQueue();
+    if (!q) {
+        var d = D();
+        if (d) d.toast(t('uplift.chat.speak_failed',
+            'No audio could be played for this reply.'), 'error');
         return;
     }
-    var st = { token: 0 };
-    _speakAbort = st;
-    // unlock playback inside THIS gesture (autoplay policy ties permission
-    // to the click; synthesis outlives it) — silent WAV now, real src swap
-    // when the bytes land
-    var player = V.newPlayer(btn);
-    V.speechJson('/voices/speech', { voice: chatVoiceId(), input: text })
-        .then(function (r) {
-            if (_speakAbort !== st) return null;     // stopped while synth ran
-            return r.blob().then(function (b) { V.playInto(player, b); });
-        })
-        .then(function () {
-            if (_speakAbort !== st) return;
-            // busy until the clip really ends (or a stop click supersedes us)
-            player.addEventListener('ended', function () {
-                if (_speakAbort === st) _speakAbort = null;
-            });
-            player.addEventListener('error', function () {
-                if (_speakAbort === st) _speakAbort = null;
-                if (btn) btn.classList.remove('playing');
-            });
-        })
-        .catch(function (e) {
-            if (_speakAbort !== st) return;
-            _speakAbort = null;
-            if (btn) btn.classList.remove('playing');
-            var d = D(); if (d) d.toast(String((e && e.message) || e), 'error');
-        });
+    q.reset();
+    var dropMark = q.dropped().length, playMark = q.played();
+    if (q.push(text) < 0) return;       // sanitised to nothing
+    _speakBtn = btn || null;
+    if (btn) btn.classList.add('playing');
+    q.drain().then(function (res) {
+        if (btn) btn.classList.remove('playing');
+        if (_speakBtn === btn) _speakBtn = null;
+        if (res.stopped) return;        // superseded mid-read: silent
+        speakToast(res, 1, dropMark, playMark);
+    });
 }
 
 var _msgActions = new WeakMap();   // bubble element -> {idx, role}
@@ -2189,6 +2364,13 @@ function mount() {
             if (!m || body.isHistory) return;
             var role = m.role === 'ai' ? 'assistant' : (m.role || 'user');
             if (role === 'assistant') _streaming = false;
+            if (role === 'user') {
+                // VOICE-11 cancel rule: a new send cuts the previous speech.
+                // This callback runs INSIDE the click/Enter gesture, so it is
+                // also where the shared AudioContext is created + resumed
+                speakCancel();
+                if (autoSpeakOn()) unlockSpeak();
+            }
             if (_conv) {
                 var row = { role: role,
                     content: typeof m.text === 'string' ? m.text : '' };
@@ -2235,6 +2417,10 @@ function mount() {
             // tried first and lost typed input on transient errors.
             _streaming = false;
             paintThinking();
+            // VOICE-11: an errored turn is a settle point — speak what
+            // streamed, toast once, retire the session (a later handler
+            // close sees the retired gen and stays silent)
+            endSpeakTurn(_speakGen);
         };
         // un-wedge watch: abort/error before the first chunk removes the
         // loading bubble WITHOUT any onMessage (proven in bundle: stop
@@ -2300,6 +2486,9 @@ return { mount: mount, isMounted: function () { return _mounted; },
             editCommit: commitEdit,
                         regenerate: msgRegenerate, edit: msgEdit,
                         delete: msgDelete, stripMarkdown: stripMarkdown,
+                        // VOICE-11: manual SPEAK seam (the overlay binds it
+                        // to the per-bubble 🔊 button; tests drive directly)
+                        speak: msgSpeak,
                         attach: attachMessageActions },
          // _state returns LIVE references (conv/convs are the module's
          // own objects) — the browser drills and node tests set conv
@@ -2319,5 +2508,10 @@ return { mount: mount, isMounted: function () { return _mounted; },
                                         // 6/6c probes (tests + live drills):
                                         // profiles is the loaded mirror list
                                         profiles: _profiles,
-                                        readability: _readability }; } };
+                                        readability: _readability }; },
+         // VOICE-11 test/drill probe: live auto-speak session state
+         _speak: function () { return { gen: _speakGen, q: _speakQ,
+                                        mode: _speakZ && _speakZ.mode,
+                                        on: autoSpeakOn(),
+                                        chunk: speakChunkMode() }; } };
 });
