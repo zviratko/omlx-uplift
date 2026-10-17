@@ -35,10 +35,14 @@ So this router owns the thin part; vanilla stays untouched:
 Size rules are stated, not invented: vanilla caps the base64 field at
 20 MiB of characters (~15 MiB of raw audio — enough for ~60 s). We cap
 raw uploads at MAX_VOICE_AUDIO_BYTES = 14 MiB so the re-encoded base64
-always fits with margin. Formats are capped to what miniaudio decodes
-natively (wav/mp3/flac): the keg has NO ffmpeg, and the mlx_audio audio
-path silently 400s on webm/ogg/m4a for the same reason the chat STT
-recorder ships WAV (NAT-4 6/6b lesson).
+always fits with margin. Formats accepted by extension: wav/mp3/flac —
+but the STORE always holds real WAV: vanilla's speech route writes the
+ref bytes to a tempfile with a hardcoded .wav suffix, so mp3/flac clips
+transcribe fine (miniaudio sniffs content) yet poison every synthesis
+that uses the voice. Non-WAV uploads are therefore transcoded to WAV
+with ffmpeg at save time; if the server has no ffmpeg the save fails
+with 415 and the reason. webm/ogg/m4a stay out (the recorder ships WAV
+— NAT-4 6/6b lesson).
 
 Standalone-viewer mode (omlx or mlx_audio absent): imports stay soft,
 CRUD still works against the JSON store, synthesis answers 503 with the
@@ -53,6 +57,9 @@ import io
 import json
 import logging
 import re
+import shutil
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
@@ -71,6 +78,58 @@ MAX_REF_TEXT_CHARS = 4000
 MAX_INSTRUCT_CHARS = 1000                    # VOICE-6: style instruction prose
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 AUDIO_EXTS = {".wav", ".mp3", ".flac"}
+
+
+def _is_wav(data: bytes) -> bool:
+    return data[:4] == b"RIFF" and data[8:12] == b"WAVE"
+
+
+def _sniff_kind(data: bytes, ext: str) -> str:
+    """Content wins over the extension hint; the guess only names ffmpeg's
+    input file, ffmpeg probes the bytes themselves anyway."""
+    if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF
+                              and data[1] & 0xE0 == 0xE0):
+        return "mp3"
+    if data[:4] == b"fLaC":
+        return "flac"
+    return (ext or "").lstrip(".").lower() or "audio"
+
+
+def _to_wav(data: bytes, kind: str) -> bytes:
+    """The store's single audio format is WAV (module docstring: vanilla
+    hardcodes the .wav tempfile suffix for ref bytes). WAV passes through
+    untouched; anything else transcodes via ffmpeg or fails honestly —
+    there is no other decoder on a ffmpeg-less keg."""
+    if _is_wav(data):
+        return data
+    exe = shutil.which("ffmpeg")
+    if not exe:
+        raise HTTPException(status_code=415, detail=(
+            "reference audio is %s, not WAV, and this server has no ffmpeg "
+            "to convert it — install ffmpeg or provide a WAV clip" % kind))
+    with tempfile.TemporaryDirectory(prefix="uplift-ref-") as td:
+        src = Path(td) / ("src." + kind)
+        dst = Path(td) / "dst.wav"
+        src.write_bytes(data)
+        try:
+            proc = subprocess.run(
+                [exe, "-hide_banner", "-loglevel", "error", "-y",
+                 "-i", str(src), "-ac", "1", str(dst)],
+                capture_output=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504,
+                                detail="ffmpeg conversion timed out")
+        if proc.returncode != 0 or not dst.is_file():
+            why = proc.stderr.decode(errors="replace").strip()[-300:]
+            raise HTTPException(status_code=400, detail=(
+                "ffmpeg could not decode the reference audio: "
+                + (why or "no output produced")))
+        out = dst.read_bytes()
+    if len(out) > MAX_VOICE_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail=(
+            "reference audio exceeds %d MiB after conversion to WAV — use a "
+            "shorter clip" % (MAX_VOICE_AUDIO_BYTES // (1024 * 1024))))
+    return out
 
 
 def _store_dir() -> Path:
@@ -173,7 +232,15 @@ async def _synth_ref(model: str, text: str, ref_path: Optional[Path],
             raise HTTPException(status_code=400,
                                 detail="ref_text is required for voice "
                                        "cloning (vanilla rule)")
-        ref_b64 = base64.b64encode(ref_path.read_bytes()).decode()
+        ref_bytes = ref_path.read_bytes()
+        if not _is_wav(ref_bytes):
+            # voice stored before the WAV invariant existed (mp3/flac era):
+            # transcode ONCE and migrate the file in place — every later
+            # synth reads WAV. Without ffmpeg this raises the honest 415
+            # here rather than crashing vanilla's .wav-suffixed tempfile.
+            ref_bytes = _to_wav(ref_bytes, _sniff_kind(ref_bytes, ref_path.suffix))
+            ref_path.write_bytes(ref_bytes)
+        ref_b64 = base64.b64encode(ref_bytes).decode()
     kwargs = dict(
         model=model,
         input=text,
@@ -463,6 +530,13 @@ async def voices_create(request: Request, _auth=Depends(require_admin)):
     if len(data) > MAX_VOICE_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail=(
             "reference audio exceeds %d MiB" % (MAX_VOICE_AUDIO_BYTES // (1024 * 1024))))
+    # THE store invariant: ref_file bytes are always real WAV (module
+    # docstring). Sniff content, not the name — an mp3 renamed .wav would
+    # otherwise poison the voice exactly like an mp3 named honestly.
+    # (speaker-only voices carry no clip — nothing to normalize.)
+    if data:
+        data = _to_wav(data, _sniff_kind(data, ext))
+        ext = ".wav"
     taken = {v["id"] for v in store["voices"]}
     v = _sanitize(raw)
     v["id"] = (raw.get("id") or "").strip() or _slug(v["name"], taken)
@@ -507,8 +581,9 @@ async def voices_update(vid: str, request: Request,
             raise HTTPException(status_code=400, detail="invalid base64")
         if len(data) > MAX_VOICE_AUDIO_BYTES:
             raise HTTPException(status_code=413, detail="reference audio too large")
+        data = _to_wav(data, _sniff_kind(data, ext))
         old = _audio_dir() / Path(v.get("ref_file", "")).name
-        merged["ref_file"] = v["id"] + ext
+        merged["ref_file"] = v["id"] + ".wav"
         (_audio_dir() / merged["ref_file"]).write_bytes(data)
         if old.is_file() and old.name != merged["ref_file"]:
             old.unlink(missing_ok=True)

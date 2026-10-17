@@ -85,13 +85,16 @@ def test_update_swap_keeps_single_audio(client):
     vid = _mk(client).json()["voice"]["id"]
     audio = V._store_dir() / "voices" / (vid + ".wav")
     assert audio.is_file()
+    # WAV bytes even under a .mp3 name pass through untouched (content is
+    # the authority); the swap payload stays a legal clip post-invariant
+    WAVE2 = b"RIFF\x24\x00\x00\x00WAVEfmt new-take" + b"\1" * 32
     r = client.put("/uplift/api/voices/" + vid, json={
         "name": "Jake", "model": "other-tts", "ref_text": "new sample",
-        "ref_audio_b64": base64.b64encode(b"NEW").decode(),
-        "ref_name": "take2.wav"})
+        "ref_audio_b64": base64.b64encode(WAVE2).decode(),
+        "ref_name": "take2.mp3"})
     assert r.status_code == 200
     assert V._load()["voices"][0]["model"] == "other-tts"
-    assert audio.read_bytes() == b"NEW"
+    assert audio.read_bytes() == WAVE2
     # update WITHOUT new audio edits metadata only, file survives
     assert client.put("/uplift/api/voices/" + vid, json={
         "name": "Jay", "model": "other-tts",
@@ -504,3 +507,93 @@ def test_update_keeps_unlisted_fields_when_client_sends_them(client):
         "language": "cs", "speed": 1.3})
     v = client.get("/uplift/api/voices").json()["voices"][0]
     assert v["language"] == "cs" and v["speed"] == 1.3
+
+
+# ------------- mp3/flac references: ffmpeg transcode, honest failure ------
+# vanilla writes ref bytes to a FIXED .wav-suffixed tempfile, so the store
+# may only ever hold real WAV. These pin that invariant end to end.
+
+MP3_BYTES = b"ID3\x04\x00\x00" + b"\x11" * 120
+FAKE_WAV = b"RIFF\x24\x00\x00\x00WAVEfmt fake-output"
+
+
+def _fake_ffmpeg(tmp_path, monkeypatch, out=FAKE_WAV):
+    import sys
+    exe = tmp_path / "ffmpeg"
+    exe.write_text("#!%s\nimport sys\nopen(sys.argv[-1], 'wb').write(%r)\n"
+                   % (sys.executable, out))
+    exe.chmod(0o755)
+    monkeypatch.setattr(V.shutil, "which",
+                        lambda name: str(exe) if name == "ffmpeg" else None)
+    return exe
+
+
+def test_mp3_reference_transcoded_with_ffmpeg(client, monkeypatch, tmp_path):
+    _fake_ffmpeg(tmp_path, monkeypatch)
+    r = client.post("/uplift/api/voices", json={
+        "name": "Mira", "model": "Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        "ref_text": "sample", "ref_name": "clip.mp3",
+        "ref_audio_b64": base64.b64encode(MP3_BYTES).decode()})
+    assert r.status_code == 200, r.text
+    vid = r.json()["voice"]["id"]
+    assert r.json()["voice"]["ref_file"] == vid + ".wav"
+    # the STORE holds the converted bytes, never the mp3
+    stored = V._store_dir() / "voices" / (vid + ".wav")
+    assert stored.read_bytes() == FAKE_WAV
+
+
+def test_mp3_reference_without_ffmpeg_fails_415(client, monkeypatch):
+    monkeypatch.setattr(V.shutil, "which", lambda name: None)
+    r = client.post("/uplift/api/voices", json={
+        "name": "Mira", "model": "m", "ref_text": "sample",
+        "ref_name": "clip.mp3",
+        "ref_audio_b64": base64.b64encode(MP3_BYTES).decode()})
+    assert r.status_code == 415
+    assert "no ffmpeg" in r.json()["detail"] and "WAV" in r.json()["detail"]
+
+
+def test_content_beats_extension(client, monkeypatch):
+    # a real WAV named .mp3 stores WITHOUT touching ffmpeg; an mp3 lying
+    # behind .wav gets converted (or 415 without ffmpeg)
+    monkeypatch.setattr(V.shutil, "which", lambda name: None)
+    r = _mk(client, ref_name="honest-mistake.mp3")   # WAV bytes, .mp3 name
+    assert r.status_code == 200, r.text
+    vid = r.json()["voice"]["id"]
+    assert (V._store_dir() / "voices" / (vid + ".wav")).read_bytes() == WAV
+    r2 = client.post("/uplift/api/voices", json={
+        "name": "Liar", "model": "m", "ref_text": "s",
+        "ref_name": "okay.wav",                        # mp3 bytes, .wav name
+        "ref_audio_b64": base64.b64encode(MP3_BYTES).decode()})
+    assert r2.status_code == 415
+
+
+def test_speaker_only_voice_never_reaches_the_converter(client, monkeypatch):
+    monkeypatch.setattr(V.shutil, "which", lambda name: None)
+    r = client.post("/uplift/api/voices", json={
+        "name": "Viv", "model": "Qwen3-TTS-CustomVoice", "speaker": "vivian",
+        "ref_text": "", "ref_audio_b64": ""})
+    assert r.status_code == 200, r.text
+
+
+def test_legacy_mp3_clip_migrates_on_first_synth(client, monkeypatch,
+                                                 tmp_path, fake_speech):
+    _fake_ffmpeg(tmp_path, monkeypatch)
+    vid = _mk(client).json()["voice"]["id"]
+    clip = V._store_dir() / "voices" / (vid + ".wav")
+    clip.write_bytes(MP3_BYTES)          # simulate a pre-invariant store
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": vid, "input": "hi"})
+    assert r.status_code == 200, r.text
+    assert base64.b64decode(fake_speech["ref_audio"]) == FAKE_WAV
+    assert clip.read_bytes() == FAKE_WAV          # migrated in place
+
+
+def test_legacy_mp3_clip_without_ffmpeg_fails_honestly(client, monkeypatch,
+                                                       fake_speech):
+    monkeypatch.setattr(V.shutil, "which", lambda name: None)
+    vid = _mk(client).json()["voice"]["id"]
+    clip = V._store_dir() / "voices" / (vid + ".wav")
+    clip.write_bytes(MP3_BYTES)
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": vid, "input": "hi"})
+    assert r.status_code == 415 and "no ffmpeg" in r.json()["detail"]
