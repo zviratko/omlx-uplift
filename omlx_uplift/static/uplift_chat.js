@@ -303,6 +303,8 @@ async function importChats(input) {
 async function openConv(id) {
     if (id === (_conv && _conv.id)) return;
     speakCancel();   // VOICE-11 cancel rule: conversation switch cuts speech
+    sttListenerStop(false);   // VOICE-13 teardown: the socket follows the
+                              // conversation it was dictating into
     var d = D();
     var full = await d.fetchJson(api() + '/chat/history/' + encodeURIComponent(id));
     _conv = Object.assign(newConv(), full);
@@ -977,6 +979,7 @@ function toolbar() {
     newBtn.type = 'button';
     newBtn.addEventListener('click', function () {
         speakCancel();   // VOICE-11 cancel rule: New Chat cuts the live read
+        sttListenerStop(false);   // VOICE-13 teardown: same rule for the mic
         _conv = newConv();
         if (_dc) _dc.history = [];
         // the prompt field is per-conversation (classic: sessions carry
@@ -1366,6 +1369,7 @@ function beginSpeakTurn() {
     _speakDropMark = q.dropped().length;
     _speakPlayedMark = q.played();
     _speakPushed = 0;
+    speakEvent(true);    // VOICE-13 echo guard: the mic stops listening NOW
     return ++_speakGen;
 }
 function speakFeed(delta, gen) {
@@ -1395,6 +1399,7 @@ function endSpeakTurn(gen) {
     var pushed = _speakPushed, dropMark = _speakDropMark,
         playMark = _speakPlayedMark;
     q.drain().then(function (res) {
+        speakEvent(false);           // VOICE-13: the mic may hear again
         if (res.stopped) return;     // cancelled mid-drain: stay silent
         speakToast(res, pushed, dropMark, playMark);
     });
@@ -1408,6 +1413,20 @@ function speakCancel() {
     _speakSan = null;
     if (_speakQ) _speakQ.stop();
     if (_speakBtn) { _speakBtn.classList.remove('playing'); _speakBtn = null; }
+    speakEvent(false);   // VOICE-13: stop() cut the audio — the mic may hear
+}
+// VOICE-13 echo-guard seam (the half-duplex law: the listener never hears
+// the assistant). ONE predicate + ONE event, wired into the settle points
+// VOICE-11 already owns — begin/manual push = busy, drain/speakCancel = idle.
+// No audio-clock polling: the queue itself says when it is done.
+function speakBusy() {
+    if (_speakZ || _speakBtn) return true;          // a turn feeding / reading
+    var q = _speakQ;
+    return !!(q && q.pending && q.pending() > 0);   // chunks unsettled
+}
+function speakEvent(busy) {
+    try { rtSpeakEvent(!!busy); }
+    catch (e) { /* the mic must never break a read-aloud */ }
 }
 function speakToast(res, pushed, dropMark, playMark) {
     // the ONE dropped-chunks toast of the ticket (engine only counts)
@@ -1494,7 +1513,9 @@ function msgSpeak(idx, btn) {
     if (q.push(text) < 0) return;       // sanitised to nothing
     _speakBtn = btn || null;
     if (btn) btn.classList.add('playing');
+    speakEvent(true);    // VOICE-13 echo guard: manual read = mic paused
     q.drain().then(function (res) {
+        speakEvent(false);              // VOICE-13: drained, listener resumes
         if (btn) btn.classList.remove('playing');
         if (_speakBtn === btn) _speakBtn = null;
         if (res.stopped) return;        // superseded mid-read: silent
@@ -2038,7 +2059,7 @@ function sttMode() {
 }
 function syncSttMic() {
     // VOICE-12 visibility gate: an input model is configured and the mode
-    // is not Off. (Continuous records like PTT until VOICE-13 ships it.)
+    // is not Off. VOICE-13: 'continuous' is now the LISTENER, not PTT.
     var mic = gid('chat-native-mic');
     if (mic) mic.hidden = !(sttModel() && sttMode() !== 'off');
 }
@@ -2095,6 +2116,8 @@ function openSttPop(host) {
     ms.value = sttModel();
     ms.addEventListener('change', function () {
         lsSet(STT_MODEL_KEY, ms.value || '');
+        sttListenerStop(false);   // VOICE-13: a live session on the OLD model
+                                  // must release the engine's one realtime slot
         syncSttMic();
     });
     row('uplift.chat.stt_input_model', 'Input model', ms);
@@ -2124,13 +2147,21 @@ function openSttPop(host) {
         lsSet(STT_SEND_KEY, cb.checked ? '1' : '0');
     });
     row('uplift.chat.stt_autosend', 'Auto-send', cb).classList.add('inline');
-    // row 4 — MODE radios. Continuous is VOICE-13's: until then it records
-    // like Push to talk but PERSISTS its value (VOICE-13 swaps behavior).
+    // row 4 — MODE radios. VOICE-13: 'continuous' IS the live listener now
+    // (realtime WS + segmented fallback); 'ptt' keeps its record-stop-send.
     var r4 = el('div', 'chat-native-pop-row modes');
     var lab4 = el('span', 'chat-native-group-label',
                   tf2('uplift.chat.stt_mode', 'Mode'));
     lab4.dataset.i18n = 'uplift.chat.stt_mode'; lab4.dataset.en = 'Mode';
     r4.appendChild(lab4);
+    // VOICE-13: the headphones line is the CONTINUOUS row's hint (the card:
+    // echo is what the listener cannot survive) — existing VOICE-12 key, no
+    // new string, shown only where it applies.
+    var hint = el('div', 'chat-native-pop-hint',
+        tf2('uplift.chat.stt_headphone_hint',
+            'Use headphones in continuous mode to avoid echo.'));
+    hint.dataset.i18n = 'uplift.chat.stt_headphone_hint';
+    hint.dataset.en = hint.textContent;
     [['off', 'uplift.chat.stt_mode_off', 'Off'],
      ['ptt', 'uplift.chat.stt_mode_ptt', 'Push to talk'],
      ['continuous', 'uplift.chat.stt_mode_cont', 'Continuous']
@@ -2140,19 +2171,18 @@ function openSttPop(host) {
         rb.checked = sttMode() === mo[0];
         rb.addEventListener('change', function () {
             lsSet(STT_MODE_KEY, mo[0]);
-            syncSttMic();   // Off hides the mic; Continuous == PTT for now
+            // mode change is a teardown point: a listener armed under the old
+            // mode would keep the engine's one realtime slot open forever
+            sttListenerStop(false);
+            hint.hidden = mo[0] !== 'continuous';
+            syncSttMic();        // Off hides the mic; the hint follows the mode
         });
         var lb = el('span', null, tf2(mo[1], mo[2]));
         lb.dataset.i18n = mo[1]; lb.dataset.en = mo[2];
         r4.append(rb, lb);
     });
     pop.appendChild(r4);
-    // VOICE-13 foreshadow (the card: headphones avoid echo when continuous)
-    var hint = el('div', 'chat-native-pop-hint',
-        tf2('uplift.chat.stt_headphone_hint',
-            'Use headphones in continuous mode to avoid echo.'));
-    hint.dataset.i18n = 'uplift.chat.stt_headphone_hint';
-    hint.dataset.en = hint.textContent;
+    hint.hidden = sttMode() !== 'continuous';
     pop.appendChild(hint);
     pop.addEventListener('click', function (ev) {
         if (ev && ev.stopPropagation) ev.stopPropagation();   // in-panel stays open
@@ -2173,31 +2203,41 @@ function toggleMic() {
     // VOICE-12: the mic is push-to-talk INTO THE COMPOSER now, gated by the
     // INPUT MODEL setting — no longer a chat-turn recorder (restored STT
     // conversations still transcribe ATTACHED files through nativeHandler).
+    // VOICE-13: Continuous arms the LISTENER instead — same button, and its
+    // second click closes the session (committing what was heard).
+    if (_rt) { sttListenerStop(true); return; }
+    if (sttMode() === 'continuous') { sttListenerStart(); return; }
     if (_mic) { sttCaptureStop(); return; }
     sttCaptureStart();
 }
 
-function sttCaptureStart() {
+function sttCaptureStart(opts) {
     // WAV via AudioContext PCM, NOT MediaRecorder webm: this keg decodes
     // webm/ogg only through ffmpeg which is not a keg dependency — a webm
     // upload 400s on ffmpeg-less boxes (verified mlx_audio audio_io:533).
     // WAV decodes everywhere via miniaudio. 60 s cap.
-    if (_sttXfer || !sttModel() || sttMode() === 'off') return;
+    // VOICE-13 opts = {onFrame(Float32Array), onReady(rate), onFail()}:
+    // continuous mode TAPS the same mic path frame-by-frame and keeps NO
+    // growing WAV (the listener owns the audio's lifetime, so the 60 s PTT
+    // cap does not apply — the listener tears down). Returns true when the
+    // capture was actually armed (false = refused by a guard).
+    if (_sttXfer || !sttModel() || sttMode() === 'off') return false;
     if (_streaming) {
         // half-duplex (the VOICE-13 seed): never record over a streaming
         // reply — one honest toast, no queueing
         D().toast(tf2('uplift.chat.stt_wait_reply',
                       'Wait for the reply to finish before recording.'),
                   'error');
-        return;
+        return false;
     }
     var btn = gid('chat-native-mic');
     if (!W() || !W().navigator.mediaDevices || !W().navigator.mediaDevices.getUserMedia) {
         D().toast(t('chat.error.mic_unavailable',
                     'Microphone unavailable. Check browser permission and use localhost or HTTPS.'), 'error');
-        return;
+        return false;
     }
     var AC = W().AudioContext || W().webkitAudioContext;
+    var tap = !!(opts && opts.onFrame);
     var snapModel = sttModel(), snapLang = sttLang();  // settings snapshot
     W().navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
         var ac = new AC();
@@ -2206,17 +2246,27 @@ function sttCaptureStart() {
         var chunks = [];
         src.connect(proc); proc.connect(ac.destination);
         proc.onaudioprocess = function (e) {
-            chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+            var f = new Float32Array(e.inputBuffer.getChannelData(0));
+            if (!tap) chunks.push(f);        // PTT keeps the whole recording
+            if (tap) { try { opts.onFrame(f); } catch (x) {} }
         };
-        var timer = setTimeout(sttCaptureStop, 60000);
+        // the 60 s PTT cap has no meaning for a tap: the listener stops the
+        // stream itself (utterance cap / endpoint / teardown paths)
+        var timer = tap ? 0 : setTimeout(sttCaptureStop, 60000);
         _mic = { stream: stream, ac: ac, proc: proc, chunks: chunks,
-                 timer: timer, btn: btn, model: snapModel, lang: snapLang };
-        if (btn) { btn.classList.add('rec');
+                 timer: timer, btn: btn, model: snapModel, lang: snapLang,
+                 tap: tap };
+        if (btn && !tap) { btn.classList.add('rec');
             btn.title = tf2('uplift.chat.stt_listening', 'Listening…'); }
-    }).catch(function () {
+        if (tap && opts.onReady) {
+            try { opts.onReady(ac.sampleRate || 48000); } catch (x) {}
+        }
+    }).catch(function (e) {
         D().toast(t('chat.error.mic_unavailable',
                     'Microphone unavailable. Check browser permission and use localhost or HTTPS.'), 'error');
+        if (tap && opts.onFail) { try { opts.onFail(e); } catch (x) {} }
     });
+    return true;
 }
 
 function sttCaptureStop() {
@@ -2226,8 +2276,10 @@ function sttCaptureStop() {
     try { m.proc.disconnect(); m.stream.getTracks().forEach(function (tr) { tr.stop(); }); } catch (e) {}
     var rate = m.ac.sampleRate || 48000;
     try { m.ac.close(); } catch (e) {}
-    if (m.btn) { m.btn.classList.remove('rec');
+    if (m.btn && !m.tap) { m.btn.classList.remove('rec');
         m.btn.title = tf2('chat.record_audio', 'Record audio'); }
+    if (m.tap) return;   // VOICE-13: the LISTENER owns this stream — no WAV,
+                         // no POST, no deliver here (it delivers per utterance)
     var seconds = Math.round(m.chunks.reduce(function (a, c) { return a + c.length; }, 0) / rate);
     if (seconds < 1) return;   // nothing meaningful captured, classic no-op
     var wav = encodeWav(m.chunks, rate);
@@ -2385,6 +2437,518 @@ function sttDeliver(text) {
     return full;
 }
 
+// ---- VOICE-13: continuous listening ---------------------------------------
+// Hands-free mode next to push-to-talk: the mic stays open, deltas render
+// into the composer live, silence lands the utterance, a fresh session
+// reopens. Wire VERBATIM from omlx audio_routes.py:644 realtime_transcription
+// (read 2026-10-17, same origin as the dashboard, api_key in the start frame
+// because a browser WS cannot carry an Authorization header):
+//   client {"type":"start","model":..,"api_key":..,"language"?}  (Auto OMITS
+//          language — VOICE-5 doctrine, same as the multipart path)
+//   server {"type":"ready"} | {"type":"error","detail":..} then close
+//   client BINARY frames = 16 kHz mono little-endian Int16 PCM
+//   server {"type":"transcript.delta","delta":..} per text commit
+//   client {"type":"stop"} -> server flushes deltas,
+//   {"type":"transcript.done","text":..}, closes 1000.
+// Capability is decided SERVER-SIDE (engine.supports_realtime_stt — whisper
+// family / voxtral_realtime; Qwen3-ASR stays UNKNOWN, we do not claim it):
+// a rejection arrives as a clean error frame and the listener drops to
+// SEGMENTED capture. ONE realtime session per engine, so a refusal or a drop
+// is surfaced ONCE and never retried in a loop.
+var RT_PATH = '/v1/audio/transcriptions/realtime';
+var RT_RATE = 16000;                         // the wire rate
+var RT_FRAME_MS = 100;                       // ~100 ms binary frames
+var RT_FRAME_SAMPLES = RT_RATE * RT_FRAME_MS / 1000;   // 1600 smp = 3200 B
+var RT_SILENCE_RMS = 0.01;   // endpoint gate: below this = silence
+var RT_SILENCE_MS = 1200;    // endpoint: >=1 delta AND this much silence
+var RT_STUCK_MS = 6000;      // escape: voiced audio, ZERO deltas -> restart
+var RT_MAX_RESTARTS = 3;     // ...and after that the engine is not coming back
+var RT_MAX_MS = 120000;      // hard utterance cap -> force stop + deliver
+var RT_GAP_MS = 300;         // session reopen / echo-guard resume tail
+var RT_HANDSHAKE_MS = 10000; // the server's OWN handshake budget, client copy
+var RT_DONE_MS = 5000;       // bounded wait for transcript.done after stop
+// segmented fallback windows (the card's numbers, client VAD over the tap)
+var RT_SEG_PREROLL_MS = 300;   // speech started before the first voiced frame
+var RT_SEG_SILENCE_MS = 800;   // silence that closes a segment
+var RT_SEG_MIN_MS = 400;       // shorter than this is a cough, not an utterance
+var RT_SEG_MAX_MS = 60000;     // VOICE-12's PTT capture cap, per segment
+
+var _rt = null;    // the ONE live listener (continuous mode), null = idle
+
+// -- pure capture-tap helpers (no AudioContext, so node can drive them) ----
+function rtRms(f) {
+    // RMS of a float frame — the silence gate reads the SAME frames the
+    // endpointer counts, never a second tap.
+    if (!f || !f.length) return 0;
+    var s = 0;
+    for (var i = 0; i < f.length; i++) s += f[i] * f[i];
+    return Math.sqrt(s / f.length);
+}
+function rtS16le(floats) {
+    // Float32 -> Int16 little-endian, clamped to [-1,1] with encodeWav's EXACT
+    // scale (-1 -> -0x8000, +1 -> +0x7FFF) — one conversion doctrine for both
+    // transports, so a byte the WAV path would have sent is a byte the WS
+    // sends. Pure: the node test feeds a ramp and asserts the bytes.
+    var out = new Uint8Array(floats.length * 2);
+    var dv = new DataView(out.buffer);
+    for (var i = 0; i < floats.length; i++) {
+        var s = Math.max(-1, Math.min(1, floats[i]));
+        dv.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    return out;
+}
+function rtTap(srcRate, dstRate, frameSamples) {
+    // Linear decimate device-rate blocks into whole dstRate frames. The
+    // ScriptProcessor hands over 4096-sample blocks that are NOT a multiple
+    // of the 100 ms/16 kHz frame, so BOTH the leftover samples and the
+    // interpolation phase carry across pushes — restarting the phase per
+    // block is a periodic resample wobble (and 16k from 44.1/48k deserves
+    // better than that). MEASUREMENT CALL from the card: ScriptProcessor +
+    // this decimator ships now; AudioWorklet is the recorded follow-up (the
+    // worklet module needs a real, non-cookie-gated URL on Safari).
+    var step = srcRate / dstRate, acc = [], pos = 0;
+    return {
+        push: function (floats) {
+            var frames = [], i;
+            for (i = 0; i < floats.length; i++) acc.push(floats[i]);
+            // indices below are all relative to THIS acc[0]: the buffer is
+            // compacted ONCE per push, never per frame (a per-frame slice of
+            // a multi-second backlog is quadratic)
+            for (;;) {
+                var last = pos + (frameSamples - 1) * step;
+                // +2: interpolation reads the sample AFTER the last one
+                if (Math.floor(last) + 2 > acc.length) break;
+                var out = new Float32Array(frameSamples);
+                for (var k = 0; k < frameSamples; k++) {
+                    var p = pos + k * step, i0 = Math.floor(p), fr = p - i0;
+                    var a = acc[i0], b = acc[i0 + 1];
+                    out[k] = a + ((b === undefined ? a : b) - a) * fr;
+                }
+                pos = last + step;               // phase continues, never resets
+                frames.push(out);
+            }
+            var drop = Math.floor(pos);          // release the consumed prefix
+            if (drop > 0) { acc = acc.slice(drop); pos -= drop; }
+            return frames;
+        },
+    };
+}
+
+// -- listener ---------------------------------------------------------------
+function rtNew() {
+    return { state: 'connecting', transport: 'realtime', phase: 'up',
+             ws: null, wsOpen: false, paused: false, dead: false, told: false,
+             model: sttModel(), lang: sttLang(), rate: 48000, tap: null,
+             text: '', got: false, frames: 0, voiced: 0, silent: 0,
+             restarts: 0, seg: null, segMs: 0, segSilent: 0,
+             preroll: [], prerollMs: 0, provEl: null, cancel: null,
+             hsTimer: 0, doneTimer: 0, reopenTimer: 0, resumeTimer: 0 };
+}
+function sttListenerStart() {
+    if (_rt || _mic || !sttModel() || sttMode() !== 'continuous') return;
+    if (_streaming) {
+        // VOICE-12's half-duplex guard, extended to continuous: one honest
+        // toast, no queueing, no silent retry
+        var d0 = D();
+        if (d0) d0.toast(tf2('uplift.chat.stt_wait_reply',
+            'Wait for the reply to finish before recording.'), 'error');
+        return;
+    }
+    _rt = rtNew();
+    // the handshake waits for audio: the engine holds ONE realtime session,
+    // so it must not be spent while getUserMedia is still prompting the user
+    if (!sttCaptureStart({
+        onFrame: rtFrame,
+        onReady: function (rate) {
+            var s = _rt; if (!s) return;
+            s.rate = rate || 48000;
+            s.tap = rtTap(s.rate, RT_RATE, RT_FRAME_SAMPLES);
+            rtOpen(s);
+        },
+        onFail: function () { sttListenerStop(false); },
+    })) { _rt = null; return; }
+    rtChip();
+}
+function sttListenerStop(commit) {
+    // teardown discipline: mic off / mode change / input-model change /
+    // conversation switch / New Chat / unload ALL close the socket, or the
+    // engine keeps a session no browser owns (an engine leak is worse than a
+    // UI leak). commit=true (the user's own click) lands what was already
+    // heard through THE sink; commit=false (context switched under the user)
+    // drops the provisional line instead.
+    var s = _rt;
+    if (!s) return;
+    _rt = null;
+    s.dead = true;
+    s.paused = false;
+    s.state = 'idle';
+    clearTimeout(s.hsTimer); clearTimeout(s.doneTimer);
+    clearTimeout(s.reopenTimer); clearTimeout(s.resumeTimer);
+    s.hsTimer = s.doneTimer = s.reopenTimer = s.resumeTimer = 0;
+    rtHaltSocket(s);
+    if (s.cancel) { try { s.cancel(); } catch (e) {} s.cancel = null; }
+    if (commit) rtCommit(s);
+    else { rtProvisional(s, ''); s.text = ''; s.got = false; }
+    if (_mic && _mic.tap) sttCaptureStop();   // tap stop: no WAV, no POST
+    rtChip();
+}
+function rtUrl() {
+    // same-origin wss://host/v1/... on https, ws:// on http — the WS lives on
+    // the omlx API mount, NOT /admin/api, so no cookie is involved
+    var loc = W() && W().location;
+    if (!loc || !loc.host) return '';
+    var secure = String(loc.protocol || 'http:').indexOf('s') > 0;
+    return (secure ? 'wss://' : 'ws://') + loc.host + RT_PATH;
+}
+function rtSendText(s, obj) {
+    if (!s || !s.ws) return;
+    try { s.ws.send(typeof obj === 'string' ? obj : JSON.stringify(obj)); }
+    catch (e) {}
+}
+function rtHaltSocket(s) {
+    // detach the handlers FIRST: our own close() must not read as a drop
+    var ws = s.ws;
+    s.ws = null; s.wsOpen = false;
+    clearTimeout(s.hsTimer); s.hsTimer = 0;
+    if (!ws) return;
+    try { ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null; } catch (e) {}
+    try { ws.close(); } catch (e) {}
+}
+function rtOpen(s) {
+    if (!s || s.dead || _rt !== s || s.transport !== 'realtime') return;
+    clearTimeout(s.reopenTimer); s.reopenTimer = 0;
+    var WS = W() && W().WebSocket, url = rtUrl();
+    if (!WS || !url) { rtFallback(s, ''); return; }   // no transport at all
+    s.state = 'connecting'; s.phase = 'up'; s.wsOpen = false;
+    rtChip();
+    var ws = null;
+    try { ws = new WS(url); } catch (e) { rtFallback(s, String(e && e.message || e)); return; }
+    s.ws = ws;
+    try { ws.binaryType = 'arraybuffer'; } catch (e) {}
+    ws.onopen = function () {
+        if (_rt !== s || s.dead || s.ws !== ws) return;
+        var frame = { type: 'start', model: s.model, api_key: _key };
+        if (s.lang) frame.language = s.lang;   // Auto = field OMITTED
+        rtSendText(s, frame);
+    };
+    // s.ws !== ws is the guard that makes our OWN close (and any late frame
+    // from a socket already replaced) inert — rtHaltSocket nulls s.ws first
+    ws.onmessage = function (ev) {
+        if (_rt === s && !s.dead && s.ws === ws) rtMessage(s, ev && ev.data);
+    };
+    ws.onerror = function () {
+        if (_rt !== s || s.dead || s.ws !== ws) return;
+        rtFallback(s, tf2('uplift.chat.stt_lost', 'The listening session closed.'));
+    };
+    ws.onclose = function () {
+        if (_rt === s && !s.dead && s.ws === ws) rtClosed(s);
+    };
+    clearTimeout(s.hsTimer);
+    s.hsTimer = setTimeout(function () {
+        s.hsTimer = 0;
+        if (_rt !== s || s.dead || s.wsOpen) return;
+        // the server answers 'ready' inside its own 10 s budget; silence is
+        // an answer too — say it ONCE and fall back, never reconnect-loop
+        rtFallback(s, '');
+    }, RT_HANDSHAKE_MS);
+}
+function rtMessage(s, data) {
+    var m = data;
+    if (typeof data === 'string') {
+        // the upstream answer is a JSON object, {"type":"ready"}; the ticket
+        // short-hand writes it as bare 'ready' — accept that spelling too
+        // rather than inventing a third one
+        if (data.trim() === 'ready') m = { type: 'ready' };
+        else { try { m = JSON.parse(data); } catch (e) { return; } }
+    }
+    if (!m || typeof m !== 'object') return;
+    if (m.type === 'ready') {
+        clearTimeout(s.hsTimer); s.hsTimer = 0;
+        s.wsOpen = true; s.phase = 'up';
+        s.state = s.paused ? 'paused' : 'listening';
+        rtChip();
+        return;
+    }
+    if (m.type === 'error') { rtFallback(s, String(m.detail || '')); return; }
+    if (m.type === 'transcript.delta') {
+        if (!m.delta) return;
+        s.text += m.delta;
+        s.got = true;
+        s.silent = 0;                 // speech resumed: the window restarts
+        rtProvisional(s, s.text);
+        return;
+    }
+    if (m.type === 'transcript.done') {
+        rtFinish(s, m.text == null ? s.text : m.text);
+    }
+}
+function rtFrame(floats) {
+    // THE capture tap — one device-rate block per ScriptProcessor callback.
+    var s = _rt;
+    if (!s || s.dead || !floats || !floats.length) return;
+    if (s.paused) {
+        // echo guard: frames are DROPPED while the assistant talks (nothing
+        // of its voice may reach the engine). The drain event resumes; this
+        // check is the state-sync twin in case the queue settled first.
+        if (!speakBusy()) rtResumeSoon(s);
+        return;
+    }
+    if (speakBusy()) { rtPause(s); return; }
+    if (s.transport === 'segmented') { rtSegment(s, floats); return; }
+    if (!s.tap) return;
+    var fr = s.tap.push(floats);
+    for (var i = 0; i < fr.length; i++) rtFeed(s, fr[i]);
+}
+function rtFeed(s, f16) {
+    if (s.phase !== 'up') return;   // stop sent: the utterance is already closed
+    var silent = rtRms(f16) < RT_SILENCE_RMS;
+    s.frames++;
+    s.silent = silent ? s.silent + 1 : 0;
+    if (!silent) s.voiced++;
+    if (s.wsOpen && s.ws) {
+        try { s.ws.send(rtS16le(f16)); } catch (e) {}
+    }
+    // windows count 100 ms FRAMES, not wall time: fake-timer deterministic and
+    // identical to what the engine actually received
+    if (s.got && s.silent * RT_FRAME_MS >= RT_SILENCE_MS) { rtEndpoint(s); return; }
+    if (!s.got && s.voiced * RT_FRAME_MS >= RT_STUCK_MS) { rtRestart(s); return; }
+    if (s.frames * RT_FRAME_MS >= RT_MAX_MS) rtEndpoint(s);
+}
+function rtEndpoint(s) {
+    // >=1 delta + 1.2 s of silence (or the 120 s cap): ask the engine to
+    // flush, land the utterance on transcript.done, reopen a FRESH session.
+    if (s.phase !== 'up') return;
+    s.phase = 'finishing';
+    rtSendText(s, { type: 'stop' });
+    clearTimeout(s.doneTimer);
+    s.doneTimer = setTimeout(function () {
+        s.doneTimer = 0;
+        if (_rt !== s || s.dead) return;
+        rtFinish(s, s.text);      // the flush stalled: keep what we heard
+    }, RT_DONE_MS);
+}
+function rtRestart(s) {
+    // stuck-engine escape: ~6 s of VOICED audio produced ZERO deltas. Drop
+    // the session, keep listening on a new one; after RT_MAX_RESTARTS the
+    // engine has said all it is going to say — go segmented.
+    if (s.reopenTimer || s.dead) return;
+    rtResetUtterance(s);
+    rtHaltSocket(s);
+    s.restarts++;
+    if (s.restarts > RT_MAX_RESTARTS) { rtFallback(s, ''); return; }
+    s.state = 'connecting';
+    rtChip();
+    rtReopenLater(s);
+}
+function rtFinish(s, text) {
+    clearTimeout(s.doneTimer); s.doneTimer = 0;
+    s.phase = 'idle';
+    s.text = String(text == null ? '' : text);
+    rtHaltSocket(s);
+    rtCommit(s);
+    if (s.dead || _rt !== s || s.paused || s.transport !== 'realtime') return;
+    rtReopenLater(s);
+}
+function rtClosed(s) {
+    // the socket went away without a done frame (server died, engine was
+    // freed, another tab took the session). Honest chip, ONE toast, and NO
+    // reconnect storm: the listener stops, the user re-arms it.
+    clearTimeout(s.doneTimer); s.doneTimer = 0;
+    var finishing = s.phase === 'finishing';
+    rtHaltSocket(s);
+    // deltas the engine already committed are the user's words — land them,
+    // lose nothing, whatever killed the socket
+    rtCommit(s);
+    if (finishing) {
+        if (!_rt || _rt !== s || s.dead || s.paused) return;
+        rtReopenLater(s);              // the utterance closed; keep listening
+        return;
+    }
+    var d = D();
+    if (d) d.toast(tf2('uplift.chat.stt_lost', 'The listening session closed.'),
+                   'error');
+    sttListenerStop(false);
+}
+function rtReopenLater(s) {
+    if (s.reopenTimer || s.dead || _rt !== s) return;
+    s.reopenTimer = setTimeout(function () {
+        s.reopenTimer = 0;
+        if (_rt !== s || s.dead || s.paused || s.transport !== 'realtime') return;
+        rtOpen(s);
+    }, RT_GAP_MS);
+}
+function rtResetUtterance(s) {
+    s.text = ''; s.got = false;
+    s.frames = 0; s.voiced = 0; s.silent = 0;
+    s.seg = null; s.segMs = 0; s.segSilent = 0;
+    s.preroll = []; s.prerollMs = 0;
+    s.phase = 'up';
+    if (s.tap) s.tap = rtTap(s.rate, RT_RATE, RT_FRAME_SAMPLES);   // phase-clean
+}
+function rtCommit(s) {
+    // provisional line -> plain text through sttDeliver, THE single result
+    // sink (append + auto-send decision). The span is stripped FIRST:
+    // sttComposerAppend reads the live textContent and would double the text.
+    var text = s.text;
+    rtResetUtterance(s);
+    rtProvisional(s, '');
+    if (text && String(text).trim()) sttDeliver(text);
+}
+function rtProvisional(s, text) {
+    // live deltas render as a MUTED span inside the vendor composer (its
+    // styling ships in applyShadowTheme — the light-DOM sheet cannot cross
+    // the shadow boundary). A child node, not a textContent rewrite, so the
+    // user's own unsent draft is never touched; the send button does not see
+    // provisional text because no input event fires for it.
+    var root = _dc && _dc.shadowRoot;
+    var inp = (root && root.getElementById)
+        ? root.getElementById('text-input') : null;
+    if (!inp) return;
+    try {
+        if (!text) {
+            if (s.provEl) { s.provEl.remove(); s.provEl = null; }
+            return;
+        }
+        if (s.provEl && s.provEl.parentNode !== inp
+                       && s.provEl.parentElement !== inp) {
+            s.provEl = null;    // the vendor rebuilt the composer (submit,
+                                // history render): never write into a
+                                // detached node, attach a fresh one
+        }
+        if (!s.provEl) {
+            s.provEl = el('span', 'chat-native-stt-prov');
+            inp.appendChild(s.provEl);
+        }
+        s.provEl.textContent = String(text);
+    } catch (e) {
+        s.provEl = null;    // a styling seam must never cost the user words
+    }
+}
+// -- segmented fallback (model rejected realtime / no WS / handshake stall) --
+function rtFallback(s, detail) {
+    // Same UX above the transport line: client VAD cuts utterances out of the
+    // SAME live tap and hands them to VOICE-12's record->encodeWav->
+    // sttTranscribe->sttDeliver path. Decided by the server's first answer;
+    // told ONCE; the realtime socket is never opened again this run.
+    if (s.transport === 'segmented') return;
+    rtResetUtterance(s);
+    rtHaltSocket(s);
+    s.transport = 'segmented';
+    s.state = s.paused ? 'paused' : 'listening';
+    if (!s.told) {
+        s.told = true;
+        var d = D();
+        if (d) d.toast(tf2('uplift.chat.stt_segmented',
+            'Realtime listening unavailable — capturing in segments instead.')
+            + (detail ? ' (' + detail + ')' : ''), 'error');
+    }
+    rtChip();
+}
+function rtSegment(s, floats) {
+    var rate = s.rate || 48000;
+    if (_sttXfer) return;    // one transcribe in flight (VOICE-12 doctrine):
+                             // drop, do not grow an unbounded queue
+    var ms = floats.length / rate * 1000;
+    var voiced = rtRms(floats) >= RT_SILENCE_RMS;
+    if (voiced) {
+        s.segSilent = 0;
+        if (!s.seg) {
+            s.seg = s.preroll.slice();     // speech started ~300 ms earlier
+            s.segMs = s.prerollMs;
+        }
+    }
+    if (!voiced && !s.seg) {
+        s.preroll.push(floats); s.prerollMs += ms;
+        while (s.preroll.length > 1 &&
+               s.prerollMs > RT_SEG_PREROLL_MS) {
+            var d = s.preroll.shift();
+            s.prerollMs -= d.length / rate * 1000;
+        }
+        return;
+    }
+    s.preroll = []; s.prerollMs = 0;
+    s.seg.push(floats); s.segMs += ms;
+    if (!voiced) s.segSilent += ms;
+    if ((s.segSilent >= RT_SEG_SILENCE_MS || s.segMs >= RT_SEG_MAX_MS) &&
+        !_sttXfer) rtSegmentClose(s);
+}
+function rtSegmentClose(s) {
+    var chunks = s.seg || [];
+    var ms = s.segMs;
+    s.seg = null; s.segMs = 0; s.segSilent = 0;
+    if (ms < RT_SEG_MIN_MS || !chunks.length) return;   // a cough is not speech
+    var wav = encodeWav(chunks, s.rate || 48000);
+    sttSetBusy(true);
+    s.cancel = sttTranscribe(new Blob([wav], { type: 'audio/wav' }), {
+        model: s.model, language: s.lang,
+        onDone: function (text) {
+            s.cancel = null;
+            sttSetBusy(false); rtChip();
+            if (s.dead || _rt !== s) return;    // no late write into a new ctx
+            sttDeliver(text);
+        },
+        onErr: function (err) {
+            s.cancel = null;
+            sttSetBusy(false); rtChip();
+            if (s.dead || _rt !== s) return;
+            var d = D();
+            if (d) d.toast(String((err && err.message) || err), 'error');
+        } });
+}
+// -- echo guard (half-duplex vs the VOICE-11 speak queue) -------------------
+function rtSpeakEvent(busy) {
+    // the ONE call speakBusy()/speakEvent() reaches: wired to the queue's own
+    // start/drain/cancel points, never to an audio-clock poll
+    var s = _rt;
+    if (!s || s.dead) return;
+    if (busy) rtPause(s);
+    else rtResumeSoon(s);
+}
+function rtPause(s) {
+    if (s.paused || s.state === 'idle') return;
+    s.paused = true;
+    s.state = 'paused';
+    clearTimeout(s.reopenTimer); s.reopenTimer = 0;
+    clearTimeout(s.doneTimer); s.doneTimer = 0;
+    // the assistant's voice must not reach the engine, so the frames stop AND
+    // the engine's single slot is freed while we are deaf. What was already
+    // heard is committed as-is (provisional -> text) rather than thrown away.
+    if (s.transport === 'realtime') { rtCommit(s); rtHaltSocket(s); }
+    else { s.seg = null; s.segMs = 0; s.segSilent = 0; s.preroll = [];
+           s.prerollMs = 0; }
+    rtChip();
+}
+function rtResumeSoon(s) {
+    if (!s.paused || s.resumeTimer || s.dead) return;
+    s.resumeTimer = setTimeout(function () {
+        s.resumeTimer = 0;
+        if (_rt !== s || s.dead || !s.paused) return;
+        if (speakBusy() || _streaming) { rtResumeSoon(s); return; }
+        s.paused = false;
+        rtResetUtterance(s);
+        if (s.transport === 'realtime') rtOpen(s);
+        else { s.state = 'listening'; rtChip(); }
+    }, RT_GAP_MS);
+}
+function rtChip() {
+    // the mic button IS the chip (no new toolbar element to crowd the row):
+    // 'rt' pulses while listening, 'connecting'/'paused' stay steady.
+    var btn = gid('chat-native-mic');
+    if (!btn || !btn.classList) return;
+    var s = _rt, st = s ? s.state : 'idle';
+    var live = st === 'listening' || st === 'connecting';
+    btn.classList.toggle('rt', live);
+    btn.classList.toggle('connecting', st === 'connecting');
+    btn.classList.toggle('paused', st === 'paused');
+    btn.title = st === 'connecting'
+        ? tf2('uplift.chat.stt_connecting', 'Connecting…')
+        : (st === 'paused'
+            ? tf2('uplift.chat.stt_paused_echo',
+                  'Paused while the assistant speaks')
+            : (st === 'idle' ? tf2('chat.record_audio', 'Record audio')
+               : tf2('uplift.chat.stt_listening', 'Listening…')));
+}
+
 function applyShadowTheme(dc) {
     /* NAT-1 item 9: deep-chat config styles apply ONCE at render, so we
        own a <style> inside the shadowRoot. 6/6: the CSS references the
@@ -2448,6 +3012,12 @@ function applyShadowTheme(dc) {
         '  border: 1px solid var(--edge, #3a3b40); box-shadow: none; }',
         '.text-input-styling { color: var(--ink, #e6edf3);',
         '  caret-color: var(--accent, #4c8dff); }',
+        // VOICE-13: the provisional dictation line renders MUTED while the
+        // utterance is still open and becomes plain text when it closes —
+        // the visual carries the "not final yet" state. The composer lives
+        // in this shadow root, so the rule must ship here (U45 lesson:
+        // light-DOM uplift.css cannot cross the boundary).
+        '#text-input .chat-native-stt-prov { color: var(--dim, #8b98ab); }',
         '.input-button { color: var(--dim, #8b98ab); }',
         'a { color: var(--accent, #4c8dff); }',
         // U45: per-message action row (classic parity). Lives in OUR
@@ -2600,6 +3170,15 @@ function mount() {
             _readability = en;
             if (_dc) applyShadowTheme(_dc);   // restyles without reload
         });
+    }
+    // VOICE-13 teardown discipline: a page going away MUST close the realtime
+    // socket — the engine serves ONE realtime session, so an orphan is worse
+    // than any UI leak. pagehide because iOS Safari does not promise
+    // beforeunload; either one closing the same socket is idempotent.
+    if (W() && typeof W().addEventListener === 'function') {
+        var rtGone = function () { sttListenerStop(false); };
+        W().addEventListener('beforeunload', rtGone);
+        W().addEventListener('pagehide', rtGone);
     }
     host.replaceChildren();
     var wrap = el('div', 'chat-native-wrap');
@@ -2862,8 +3441,35 @@ return { mount: mount, isMounted: function () { return _mounted; },
                 transcribe: sttTranscribe, deliver: sttDeliver,
                 composerAppend: sttComposerAppend,
                 toggle: toggleMic,
+                // VOICE-13: continuous listening. listen.feed is the capture
+                // tap the node tests (and a browser drill) drive by hand —
+                // there is no microphone in a vm sandbox, so the seam IS the
+                // ScriptProcessor callback.
+                listen: { start: sttListenerStart, stop: sttListenerStop,
+                          url: rtUrl, feed: rtFrame,
+                          state: function () { return _rt ? {
+                              state: _rt.state, transport: _rt.transport,
+                              phase: _rt.phase, paused: _rt.paused,
+                              text: _rt.text, frames: _rt.frames,
+                              voiced: _rt.voiced, silent: _rt.silent,
+                              restarts: _rt.restarts,
+                              segMs: _rt.segMs, wsOpen: _rt.wsOpen,
+                              prov: _rt.provEl ? _rt.provEl.textContent : '' }
+                                                   : null; } },
+                // pure conversion helpers, unit-tested without any audio API
+                pcm: { rms: rtRms, s16le: rtS16le, tap: rtTap,
+                       frameMs: RT_FRAME_MS, rate: RT_RATE,
+                       samples: RT_FRAME_SAMPLES, silenceRms: RT_SILENCE_RMS },
+                // echo-guard probe + the stub-queue seam the node test drives
+                // (the real queue's start/drain points call the same event)
+                speakBusy: speakBusy,
+                queueSpeak: function (q) { _speakQ = q || null;
+                                           speakEvent(speakBusy()); },
                 settings: function () { return { model: sttModel(),
                     lang: sttLang(), autosend: sttAutoSend(), mode: sttMode(),
                     rows: _sttModels, recording: !!_mic,
-                    busy: !!_sttXfer, popen: !!_sttPop }; } } };
+                    busy: !!_sttXfer, popen: !!_sttPop,
+                    // VOICE-13: 'idle' | 'connecting' | 'listening' | 'paused'
+                    live: _rt ? _rt.state : 'idle',
+                    transport: _rt ? _rt.transport : '' }; } } };
 });

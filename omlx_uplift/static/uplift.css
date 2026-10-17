@@ -2850,6 +2850,15 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-native-bar #chat-native-mic.rec { border-color: var(--accent);
     color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .chat-native-bar #chat-native-mic.busy { opacity: .6; cursor: progress; }
+/* VOICE-13: continuous listening rides the SAME mic button as its state
+   chip — 'rt' PULSES while the listener is hearing (reuse of the pulse
+   keyframe above), 'connecting'/'paused' hold STEADY, so a paused-by-echo
+   mic never looks like a live one. */
+.chat-native-bar #chat-native-mic.rt { border-color: var(--accent);
+    color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.chat-native-bar #chat-native-mic.connecting,
+.chat-native-bar #chat-native-mic.paused { border-color: var(--edge);
+    color: var(--dim); animation: none; }
 .chat-native-pop { position: absolute; top: 100%; left: 0; z-index: 30;
   display: flex; flex-direction: column; gap: 6px; padding: 8px;
   min-width: 230px; background: var(--card); border: 1px solid var(--edge);
