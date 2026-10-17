@@ -33,7 +33,8 @@
 var CHAT_FLOOR = 160,      // U54: min deep-chat height (input stays usable)
     CHAT_BOTTOM_GAP = 12;  // host padding + breathing room under dc
 var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
-    _models = [], _vendorPromise = null, _streaming = false,
+    _models = [], _sttIds = {},   // picker rows (chat types only) + STT id set
+    _vendorPromise = null, _streaming = false,
     _turnParams = null,   // U78: EFFECTIVE sampling snapshot of the in-flight turn
     _thinkLive = '',   // reasoning deltas of the in-flight turn (live-only)
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
@@ -362,10 +363,13 @@ async function migrateLegacy() {
 // blob would 400 on many boxes. AudioContext+ScriptProcessor PCM -> WAV
 // here decodes everywhere (miniaudio handles wav natively).
 function isSttModel(id) {
+    if (!id) return false;
+    if (_sttIds[id]) return true;   // 6/6d: STT left the picker but a
+                                    // restored conv may still carry one
     for (var i = 0; i < _models.length; i++) {
         var m = _models[i];
         if (m.id === id) {
-            var ty = m.engine_type || m.model_type;
+            var ty = m.model_type || m.engine_type;
             return ty === 'audio_stt';
         }
     }
@@ -2104,13 +2108,29 @@ function mount() {
         D().fetchJson(api() + '/chat/key').then(function (k) { _key = k.api_key; }),
         D().fetchJson(api() + '/chat/history'),
     ]).then(function (res) {
-        _models = ((res[1] && res[1].models) || []).filter(function (m) {
-            var ty = m.engine_type || m.model_type;
-            // 6/6b: audio_stt models join the picker (selecting one turns
-            // the input into the transcription attach flow; classic
-            // rejects them on /v1/chat/completions — the handler routes
-            // /v1/audio/transcriptions instead)
-            return ty === 'llm' || ty === 'vlm' || ty === 'audio_stt';
+        // CHAT-FILTER (user bug 2026-10-17): rows carry TWO type fields
+        // with DIFFERENT vocabularies (vanilla model_discovery):
+        // model_type is the capability ('llm'|'vlm'|'embedding'|
+        // 'audio_stt'|...), engine_type is the serving engine — a text
+        // LLM is engine 'batched', and engine_type is NEVER 'llm'. The
+        // old check read engine_type first, so the 'llm' arm could not
+        // match and every text model (LFM2.5, SmolLM, ...) vanished from
+        // the picker while only vlm-engine + ASR rows showed. Classify
+        // on model_type (bench picker's convention); 'batched' is the
+        // engine-side fallback spelling for the same population.
+        // 6/6d (user decision 2026-10-17): audio_stt leaves the picker —
+        // chat models only. The transcription plumbing stays reachable
+        // for a conversation already bound to an STT model (restored
+        // convs), which is why the full row set is kept as _sttIds.
+        var rows = (res[1] && res[1].models) || [];
+        _models = rows.filter(function (m) {
+            var ty = m.model_type || m.engine_type;
+            return ty === 'llm' || ty === 'vlm' || ty === 'batched';
+        });
+        _sttIds = {};
+        rows.forEach(function (m) {
+            if ((m.model_type || m.engine_type) === 'audio_stt')
+                _sttIds[m.id] = true;
         });
         _convs = res[3] || [];
         if (!_convs.length) {

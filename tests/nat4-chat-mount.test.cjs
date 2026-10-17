@@ -78,8 +78,17 @@ function makeHarness(opts = {}) {
             fetchJson: async (u) => {
                 u = String(u);
                 if (u.endsWith('/models')) return { models: [
-                    { id: 'SmolLM2-360M-Instruct-oQ4', engine_type: 'llm' },
-                    { id: 'Qwen3-Embedding-0.6B-4bit-DWQ', engine_type: 'embedding' }] };
+                    // REAL row shapes (vanilla admin routes): text LLM =
+                    // engine 'batched' + model_type 'llm'; engine_type is
+                    // never 'llm' — the old stub hid the filter bug
+                    { id: 'SmolLM2-360M-Instruct-oQ4',
+                      engine_type: 'batched', model_type: 'llm' },
+                    { id: 'Qwen3.5-9B-mtp',
+                      engine_type: 'vlm', model_type: 'vlm' },
+                    { id: 'Qwen3-Embedding-0.6B-4bit-DWQ',
+                      engine_type: 'embedding', model_type: 'embedding' },
+                    { id: 'whisper-large-v3-turbo-oQ8',
+                      engine_type: 'audio_stt', model_type: 'audio_stt' }] };
                 if (u.endsWith('/chat/key')) return { api_key: 'KEY' };
                 if (u.endsWith('/chat/history'))
                     return (opts.convs || []).map((c) => ({ id: c.id,
@@ -149,12 +158,17 @@ test('module exports + mount paints toolbar through the catalog', async () => {
     // carries a caption instead (classic sidebar mirror) and per-message
     // actions live on the bubbles.
     assert.ok(!all.includes('chat.new_chat'), 'no raw i18n key leaks');
-    // embedding models are filtered out of the chat picker
+    // embedding + ASR models are filtered out of the chat picker;
+    // a batched-engine TEXT model must be selectable (2026-10-17 bug:
+    // the filter compared engine_type to 'llm' — a value it never takes
+    // — hiding every text model)
     const selTexts = [];
     (function walk(e) { selTexts.push(e.value || ''); (e.children || []).forEach(walk); })(
         h.byId['chat-native-model']);
-    assert.ok(selTexts.includes('SmolLM2-360M-Instruct-oQ4'), 'llm selectable');
+    assert.ok(selTexts.includes('SmolLM2-360M-Instruct-oQ4'), 'text llm selectable');
+    assert.ok(selTexts.includes('Qwen3.5-9B-mtp'), 'vlm selectable');
     assert.ok(!selTexts.includes('Qwen3-Embedding-0.6B-4bit-DWQ'), 'embedding filtered');
+    assert.ok(!selTexts.includes('whisper-large-v3-turbo-oQ8'), 'audio_stt filtered');
 });
 
 test('shapeRequest: system prompt, full history, dedup, auth header', async () => {
