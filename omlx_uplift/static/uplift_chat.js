@@ -42,7 +42,10 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _lastFiles = null,                 // 6/6b: raw audio Files for the STT path
     _mic = null,                       // 6/6b: live mic recording session
     _profiles = [],                    // 6/6c: prompt profiles (localStorage mirror)
-    _readability = false;              // 6/6c: enhanced-readability live mirror
+    _readability = false,              // 6/6c: enhanced-readability live mirror
+    _sttModels = [],                   // VOICE-12: audio_stt rows (id+name)
+    _sttPop = null,                    // VOICE-12: open voice-input popover
+    _sttXfer = null;                   // VOICE-12: live transcribe session
 
 function W() { return (typeof window !== 'undefined') ? window : null; }
 function C() { return W() && W().UpliftCore ? W().UpliftCore : null; }
@@ -1039,6 +1042,10 @@ function toolbar() {
         saveConv();
         syncProfileSelect();
     });
+    // VOICE-12: PTT mic into the composer. Hidden until an INPUT MODEL is
+    // configured (syncAudioMode -> syncSttMic flips it at boot and on
+    // every settings change); 'rec'/'busy' classes = live recording /
+    // transcribing states (styled in uplift.css).
     var mic = el('button', 'btn', t('chat.record_audio', 'Record audio'));
     mic.type = 'button'; mic.id = 'chat-native-mic'; mic.hidden = true;
     mic.title = t('chat.record_audio', 'Record audio');
@@ -1236,7 +1243,12 @@ function toolbar() {
         group(tf2('uplift.chat.autospeak', 'Auto-speak'), autoBtn,
               'uplift.chat.autospeak'),
         group(tf2('uplift.chat.speak_chunk', 'Chunk'), chunkSel,
-              'uplift.chat.speak_chunk'));
+              'uplift.chat.speak_chunk'),
+        // VOICE-12: voice INPUT is a setting, not a chat-model choice —
+        // this opens the popover owning STT model / language / auto-send /
+        // mode; the mic button on this row follows it (syncSttMic).
+        group(tf2('uplift.chat.stt_title', 'Voice input'),
+              sttSettingsBtn(), 'uplift.chat.stt_title'));
     // U46: sampling overrides (classic sidebar parity) — own captioned row,
     // each input numeric, blank = engine default, 0 stays a real value.
     var genRow = el('div', 'chat-native-bar chat-native-sampling');
@@ -1973,14 +1985,14 @@ function scheduleMessageActions(dc) {
 }
 
 // 6/6b: audio_stt selected -> fileUpload accepts audio only, placeholder
-// swaps to classic's ASR hint, mic button appears (secure-context gated,
-// same constraint classic states in chat.error.mic_unavailable).
+// swaps to classic's ASR hint. VOICE-12: the mic-button line of this gate
+// moved to the INPUT MODEL setting (syncSttMic) — the old chat-model-STT
+// rule is kept as a no-op for the restored-conversation plumbing below.
 var _audioMode = null;   // last mode pushed into the component
 function syncAudioMode() {
     if (!_dc) return;
     var stt = isSttModel((_conv && _conv.model) || '');
-    var mic = gid('chat-native-mic');
-    if (mic) mic.hidden = !stt;
+    syncSttMic();   // VOICE-12: visibility = input-model setting, not chat model
     // config ASSIGNMENT re-renders the component and WIPES rendered
     // history (drill 2026-10-08: store kept 4 messages, bubbles 0 —
     // caught by the theme sweep touching the model select). So: write
@@ -1998,19 +2010,195 @@ function syncAudioMode() {
     renderHistory();
 }
 
+// ---- VOICE-12: voice INPUT as a setting (model/language/auto-send/mode) ----
+// Decoupled from the chat model (policy ae5647c moved audio_stt rows OUT of
+// the picker; this completes the move). localStorage carries the browser
+// preference — same key style as omlx-uplift-voice / omlx-uplift-autospeak.
+// 'None' input model = the whole surface stays SILENT (optional-surface
+// doctrine: no mic button, no hints, zero noise when unset).
+var STT_MODEL_KEY = 'omlx-uplift-stt-model';
+var STT_LANG_KEY = 'omlx-uplift-stt-lang';        // '' = Auto (field omitted)
+var STT_SEND_KEY = 'omlx-uplift-stt-autosend';    // '1'/'0', default OFF
+var STT_MODE_KEY = 'omlx-uplift-stt-mode';        // 'off'|'ptt'|'continuous'
+var STT_LANGS = ['en', 'cs', 'sk', 'de', 'fr', 'es', 'it', 'pt', 'ru',
+                 'ja', 'ko', 'zh'];   // OpenAI whisper language convention
+var STT_TIMEOUT_MS = 240000;   // VOICE-3 watchdog doctrine (uplift_voices
+                               // voiceSignal/240 s): the budget bounds a
+                               // HANG, not a busy server; the interim
+                               // button state must END HONESTLY on every
+                               // outcome — a stuck 'transcribing…' is a
+                               // protocol violation.
+
+function sttModel() { return lsGet(STT_MODEL_KEY) || ''; }
+function sttLang() { return lsGet(STT_LANG_KEY) || ''; }
+function sttAutoSend() { return lsGet(STT_SEND_KEY) === '1'; }
+function sttMode() {
+    var m = lsGet(STT_MODE_KEY);
+    return (m === 'off' || m === 'continuous') ? m : 'ptt';
+}
+function syncSttMic() {
+    // VOICE-12 visibility gate: an input model is configured and the mode
+    // is not Off. (Continuous records like PTT until VOICE-13 ships it.)
+    var mic = gid('chat-native-mic');
+    if (mic) mic.hidden = !(sttModel() && sttMode() !== 'off');
+}
+
+function sttSettingsBtn() {
+    var btn = el('button', 'btn', tf2('uplift.chat.stt_title', 'Voice input'));
+    btn.type = 'button'; btn.id = 'chat-native-stt';
+    btn.dataset.i18n = 'uplift.chat.stt_title';              // U59 marker
+    btn.dataset.en = btn.textContent;
+    btn.addEventListener('click', function (ev) {
+        // dropMenu dismiss contract: the opener stops propagation so the
+        // deferred document-dismiss cannot eat the opening click
+        ev.stopPropagation();
+        if (_sttPop) { closeSttPop(); return; }   // the button toggles
+        openSttPop(btn.parentElement || btn);
+    });
+    return btn;
+}
+function sttPopKey(ev) { if (ev.key === 'Escape') closeSttPop(); }
+function closeSttPop() {
+    if (!_sttPop) return;
+    var p = _sttPop; _sttPop = null;
+    p.remove();
+    // own listeners, removed on close (helpPop pattern, uplift_bench)
+    document.removeEventListener('click', closeSttPop);
+    document.removeEventListener('keydown', sttPopKey);
+}
+function openSttPop(host) {
+    var pop = el('div', 'chat-native-pop'); pop.id = 'chat-native-stt-pop';
+    function row(labelKey, labelFb, control, titleKey, titleFb) {
+        var r = el('div', 'chat-native-pop-row');
+        var lab = el('span', 'chat-native-group-label', tf2(labelKey, labelFb));
+        lab.dataset.i18n = labelKey; lab.dataset.en = labelFb;
+        if (titleKey) {
+            lab.title = tf2(titleKey, titleFb);
+            lab.dataset.i18nTitle = titleKey; lab.dataset.enTitle = lab.title;
+        }
+        r.append(lab, control);
+        pop.appendChild(r);
+        return r;
+    }
+    // row 1 — INPUT MODEL: the audio_stt rows collected at boot; 'None'
+    // (value '') = feature fully silent.
+    var ms = el('select'); ms.id = 'chat-native-stt-model';
+    var oNone = el('option', null, tf2('uplift.chat.stt_none', 'None'));
+    oNone.value = '';
+    oNone.dataset.i18n = 'uplift.chat.stt_none'; oNone.dataset.en = 'None';
+    ms.appendChild(oNone);
+    _sttModels.forEach(function (m) {
+        var o = el('option', null, m.name || m.id);   // name-ish display, id value
+        o.value = m.id;
+        ms.appendChild(o);
+    });
+    ms.value = sttModel();
+    ms.addEventListener('change', function () {
+        lsSet(STT_MODEL_KEY, ms.value || '');
+        syncSttMic();
+    });
+    row('uplift.chat.stt_input_model', 'Input model', ms);
+    // row 2 — LANGUAGE: Auto = omit the form field entirely (VOICE-5
+    // doctrine); the fixed code list is the whisper convention.
+    var lsel = el('select'); lsel.id = 'chat-native-stt-lang';
+    var oAuto = el('option', null, tf2('uplift.chat.stt_auto', 'Auto'));
+    oAuto.value = '';
+    oAuto.dataset.i18n = 'uplift.chat.stt_auto'; oAuto.dataset.en = 'Auto';
+    lsel.appendChild(oAuto);
+    STT_LANGS.forEach(function (code) {
+        var o = el('option', null, code); o.value = code; lsel.appendChild(o);
+    });
+    lsel.value = sttLang();
+    lsel.addEventListener('change', function () {
+        lsSet(STT_LANG_KEY, lsel.value || '');
+    });
+    row('uplift.chat.stt_language', 'Language', lsel,
+        'uplift.chat.stt_lang_hint',
+        'Auto detects the language per request; transcription quality '
+        + 'varies by model family');
+    // row 3 — AUTO-SEND (default OFF: the transcript lands for review)
+    var cb = el('input'); cb.type = 'checkbox';
+    cb.id = 'chat-native-stt-autosend';
+    cb.checked = sttAutoSend();
+    cb.addEventListener('change', function () {
+        lsSet(STT_SEND_KEY, cb.checked ? '1' : '0');
+    });
+    row('uplift.chat.stt_autosend', 'Auto-send', cb).classList.add('inline');
+    // row 4 — MODE radios. Continuous is VOICE-13's: until then it records
+    // like Push to talk but PERSISTS its value (VOICE-13 swaps behavior).
+    var r4 = el('div', 'chat-native-pop-row modes');
+    var lab4 = el('span', 'chat-native-group-label',
+                  tf2('uplift.chat.stt_mode', 'Mode'));
+    lab4.dataset.i18n = 'uplift.chat.stt_mode'; lab4.dataset.en = 'Mode';
+    r4.appendChild(lab4);
+    [['off', 'uplift.chat.stt_mode_off', 'Off'],
+     ['ptt', 'uplift.chat.stt_mode_ptt', 'Push to talk'],
+     ['continuous', 'uplift.chat.stt_mode_cont', 'Continuous']
+    ].forEach(function (mo) {
+        var rb = el('input'); rb.type = 'radio';
+        rb.name = 'chat-native-stt-mode'; rb.value = mo[0];
+        rb.checked = sttMode() === mo[0];
+        rb.addEventListener('change', function () {
+            lsSet(STT_MODE_KEY, mo[0]);
+            syncSttMic();   // Off hides the mic; Continuous == PTT for now
+        });
+        var lb = el('span', null, tf2(mo[1], mo[2]));
+        lb.dataset.i18n = mo[1]; lb.dataset.en = mo[2];
+        r4.append(rb, lb);
+    });
+    pop.appendChild(r4);
+    // VOICE-13 foreshadow (the card: headphones avoid echo when continuous)
+    var hint = el('div', 'chat-native-pop-hint',
+        tf2('uplift.chat.stt_headphone_hint',
+            'Use headphones in continuous mode to avoid echo.'));
+    hint.dataset.i18n = 'uplift.chat.stt_headphone_hint';
+    hint.dataset.en = hint.textContent;
+    pop.appendChild(hint);
+    pop.addEventListener('click', function (ev) {
+        if (ev && ev.stopPropagation) ev.stopPropagation();   // in-panel stays open
+    });
+    host.appendChild(pop);
+    _sttPop = pop;
+    setTimeout(function () {
+        // deferred arm RE-CHECKS the identity: a fast toggle can close this
+        // pop before the timer runs, and a stale document listener would
+        // then hang around for the life of the page (dropMenu lesson)
+        if (_sttPop !== pop) return;
+        document.addEventListener('click', closeSttPop);
+        document.addEventListener('keydown', sttPopKey);
+    }, 0);
+}
+
 function toggleMic() {
+    // VOICE-12: the mic is push-to-talk INTO THE COMPOSER now, gated by the
+    // INPUT MODEL setting — no longer a chat-turn recorder (restored STT
+    // conversations still transcribe ATTACHED files through nativeHandler).
+    if (_mic) { sttCaptureStop(); return; }
+    sttCaptureStart();
+}
+
+function sttCaptureStart() {
     // WAV via AudioContext PCM, NOT MediaRecorder webm: this keg decodes
     // webm/ogg only through ffmpeg which is not a keg dependency — a webm
     // upload 400s on ffmpeg-less boxes (verified mlx_audio audio_io:533).
     // WAV decodes everywhere via miniaudio. 60 s cap.
+    if (_sttXfer || !sttModel() || sttMode() === 'off') return;
+    if (_streaming) {
+        // half-duplex (the VOICE-13 seed): never record over a streaming
+        // reply — one honest toast, no queueing
+        D().toast(tf2('uplift.chat.stt_wait_reply',
+                      'Wait for the reply to finish before recording.'),
+                  'error');
+        return;
+    }
     var btn = gid('chat-native-mic');
-    if (_mic) { stopMic(); return; }
     if (!W() || !W().navigator.mediaDevices || !W().navigator.mediaDevices.getUserMedia) {
         D().toast(t('chat.error.mic_unavailable',
                     'Microphone unavailable. Check browser permission and use localhost or HTTPS.'), 'error');
         return;
     }
     var AC = W().AudioContext || W().webkitAudioContext;
+    var snapModel = sttModel(), snapLang = sttLang();  // settings snapshot
     W().navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
         var ac = new AC();
         var src = ac.createMediaStreamSource(stream);
@@ -2020,16 +2208,18 @@ function toggleMic() {
         proc.onaudioprocess = function (e) {
             chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
         };
-        var timer = setTimeout(stopMic, 60000);
-        _mic = { stream: stream, ac: ac, proc: proc, chunks: chunks, timer: timer, btn: btn };
-        if (btn) { btn.classList.add('rec'); btn.title = t('chat.stop_recording', 'Stop recording'); }
+        var timer = setTimeout(sttCaptureStop, 60000);
+        _mic = { stream: stream, ac: ac, proc: proc, chunks: chunks,
+                 timer: timer, btn: btn, model: snapModel, lang: snapLang };
+        if (btn) { btn.classList.add('rec');
+            btn.title = tf2('uplift.chat.stt_listening', 'Listening…'); }
     }).catch(function () {
         D().toast(t('chat.error.mic_unavailable',
                     'Microphone unavailable. Check browser permission and use localhost or HTTPS.'), 'error');
     });
 }
 
-function stopMic() {
+function sttCaptureStop() {
     var m = _mic; if (!m) return;
     _mic = null;
     clearTimeout(m.timer);
@@ -2037,17 +2227,162 @@ function stopMic() {
     var rate = m.ac.sampleRate || 48000;
     try { m.ac.close(); } catch (e) {}
     if (m.btn) { m.btn.classList.remove('rec');
-        m.btn.title = t('chat.record_audio', 'Record audio'); }
+        m.btn.title = tf2('chat.record_audio', 'Record audio'); }
     var seconds = Math.round(m.chunks.reduce(function (a, c) { return a + c.length; }, 0) / rate);
     if (seconds < 1) return;   // nothing meaningful captured, classic no-op
     var wav = encodeWav(m.chunks, rate);
-    // classic mic label (chat.html:5848): '[audio] microphone recording'
-    var file = new File([wav], 'microphone-recording.wav', { type: 'audio/wav' });
-    if (_conv && _dc) {
-        _dc.submitUserMessage({ text: '[audio] ' + t('chat.mic_recording_label',
-                                                     'Microphone recording'),
-                                files: [file] });
+    sttSetBusy(true);
+    sttTranscribe(new Blob([wav], { type: 'audio/wav' }), {
+        model: m.model, language: m.lang,
+        onDone: function (text) {
+            sttSetBusy(false);
+            sttDeliver(text);   // result -> composer (NOT a chat turn)
+        },
+        onErr: function (err) {
+            sttSetBusy(false);
+            D().toast(String((err && err.message) || err), 'error');
+        } });
+}
+
+function sttSetBusy(on) {
+    // the transcribing interim state rides the mic button and MUST end on
+    // every outcome — done, error, or watchdog (VOICE-3 doctrine)
+    _sttXfer = on ? Date.now() : null;
+    var btn = gid('chat-native-mic');
+    if (!btn) return;
+    btn.classList.toggle('busy', !!on);
+    btn.title = on ? tf2('uplift.chat.stt_transcribing', 'Transcribing…')
+                   : tf2('chat.record_audio', 'Record audio');
+}
+
+function sttTranscribe(wavBlob, opts) {
+    // VOICE-12 transport, named small on purpose: VOICE-13's WS client
+    // reuses THIS and sttDeliver without copy-paste. opts =
+    // {model, language, onDelta(text), onDone(fullText), onErr(err)};
+    // returns a cancel() handle. multipart stream=true -> SSE
+    // transcript.text.delta/.done (the wire 6/6b proved live).
+    opts = opts || {};
+    var form = new FormData();
+    form.append('file', wavBlob, 'microphone-recording.wav');
+    form.append('model', opts.model || sttModel());
+    form.append('stream', 'true');
+    if (opts.language) form.append('language', opts.language);  // Auto=omit
+    var controller = new AbortController();
+    var settled = false, text = '';
+    function settle(err) {
+        clearTimeout(watchdog);
+        if (settled) return;      // the watchdog already told the truth
+        settled = true;
+        if (err) { if (opts.onErr) opts.onErr(err); return; }
+        if (opts.onDone) opts.onDone(text);
     }
+    var watchdog = setTimeout(function () {
+        // abandon a HUNG request honestly (voiceSignal's client-side twin:
+        // the server may stay stuck, the button must not lie)
+        try { controller.abort(); } catch (e) {}
+        settle(new Error(tf2('uplift.voices.timeout',
+            'the server did not answer in {n}s — model load may be stuck; '
+            + 'request abandoned (restart the server to clear it)')
+            .replace('{n}', String(Math.round(STT_TIMEOUT_MS / 1000)))));
+    }, STT_TIMEOUT_MS);
+    fetch('/v1/audio/transcriptions', {   // domkit-exempt: SSE + multipart
+        method: 'POST',
+        // NO Content-Type: the browser must set the multipart boundary
+        // (classic's comment at chat.html:5635 — a trap, not a style note)
+        headers: { 'Authorization': 'Bearer ' + _key },
+        body: form, signal: controller.signal })
+    .then(function (resp) {
+        if (resp.status === 404) {
+            throw new Error(t('chat.error.asr_not_available',
+                'Audio transcription is not available on this server.'));
+        }
+        if (!resp.ok) {
+            return resp.text().then(function (bd) {
+                var detail = null;
+                try {
+                    var j = JSON.parse(bd);
+                    detail = (j.error && j.error.message) || j.detail;
+                } catch (e) { /* plain text */ }
+                throw new Error(detail || bd || ('Error: ' + resp.status));
+            });
+        }
+        var reader = resp.body.getReader(), dec = new TextDecoder();
+        var buf = '';
+        function pump() {
+            return reader.read().then(function (res) {
+                if (res.done) return;
+                buf += dec.decode(res.value, { stream: true });
+                var lines = buf.split('\n'); buf = lines.pop();
+                lines.forEach(function (ln) {
+                    if (ln.indexOf('data: ') !== 0) return;
+                    if (ln.trim() === 'data: [DONE]') return;
+                    var d;
+                    try { d = JSON.parse(ln.slice(6)); } catch (e) { return; }
+                    if (d.type === 'transcript.text.delta' && d.delta) {
+                        text += d.delta;
+                        if (opts.onDelta) opts.onDelta(d.delta);
+                    } else if (d.type === 'transcript.text.done') {
+                        var fin = d.text == null ? text : d.text;
+                        if (fin.length > text.length) {
+                            if (opts.onDelta) opts.onDelta(fin.slice(text.length));
+                            text = fin;
+                        }
+                    }
+                });
+                return pump();
+            });
+        }
+        return pump();
+    }).then(function () { settle(null); }, function (e) { settle(e); });
+    return function cancel() {
+        settled = true;
+        clearTimeout(watchdog);
+        try { controller.abort(); } catch (e) {}
+    };
+}
+
+function sttComposerAppend(text) {
+    // COMPOSER SEAM (bundle audit 2026-10-17, deep-chat 2.5.1): the input
+    // is the contenteditable #text-input inside the OPEN shadowRoot
+    // (TextInputService.createInputElement: u.id=TEXT_INPUT_ID='text-input',
+    // class text-input-styling; NO textarea, and 2.5.1 exposes no
+    // textInputService/setInputText property). submitFromInput reads its
+    // innerText, attemptSubmit clears it — so writing textContent here IS
+    // what the Send button will send. Never clobber unsent user text:
+    // append after it with one space, focus, caret kept at end.
+    var root = _dc && _dc.shadowRoot;
+    var inp = (root && root.getElementById)
+        ? root.getElementById('text-input') : null;
+    if (!inp) return text;      // component absent (stub env): pass through
+    var cur = inp.textContent || '';
+    inp.textContent = (cur ? cur + ' ' : '') + text;
+    try {
+        // keep the component's placeholder/tracking logic in the loop
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+    } catch (e) { /* no Event ctor in the node stub — value still set */ }
+    inp.focus();
+    try {
+        var r = document.createRange();
+        r.selectNodeContents(inp); r.collapse(false);
+        var sel = W() && W().getSelection && W().getSelection();
+        if (sel) { sel.removeAllRanges(); sel.addRange(r); }
+    } catch (e) { /* contenteditable caret is best-effort (vendor does the same) */ }
+    return inp.textContent;
+}
+
+function sttDeliver(text) {
+    // THE result sink (VOICE-13's WS client reuses this one function):
+    // transcript -> composer for review; AUTO-SEND ON submits it through
+    // the component's real send route — dc.submitUserMessage is
+    // programmaticSubmit -> attemptSubmit, the SAME path the Send button
+    // and regenerate/edit take (onMessage pump + nativeHandler included).
+    var s = String(text == null ? '' : text).replace(/\s+$/, '');
+    if (!s.trim()) return '';               // silence: silent no-op
+    var full = sttComposerAppend(s);
+    if (sttAutoSend() && _dc && _dc.submitUserMessage) {
+        _dc.submitUserMessage({ text: full });   // attemptSubmit clears the box
+    }
+    return full;
 }
 
 function applyShadowTheme(dc) {
@@ -2307,6 +2642,12 @@ function mount() {
             if ((m.model_type || m.engine_type) === 'audio_stt')
                 _sttIds[m.id] = true;
         });
+        // VOICE-12: full STT rows (id + display name) for the voice-input
+        // settings select — collected at boot from the SAME response; the
+        // picker policy (ae5647c) keeps them out of the chat picker.
+        _sttModels = rows.filter(function (m) {
+            return (m.model_type || m.engine_type) === 'audio_stt';
+        }).map(function (m) { return { id: m.id, name: m.name || m.id }; });
         _convs = res[3] || [];
         if (!_convs.length) {
             return migrateLegacy().then(function (n) {
@@ -2513,5 +2854,16 @@ return { mount: mount, isMounted: function () { return _mounted; },
          _speak: function () { return { gen: _speakGen, q: _speakQ,
                                         mode: _speakZ && _speakZ.mode,
                                         on: autoSpeakOn(),
-                                        chunk: speakChunkMode() }; } };
+                                        chunk: speakChunkMode() }; },
+         // VOICE-12 seams: record / transport / result-sink pieces named for
+         // the node tests AND for VOICE-13's WS client (which reuses
+         // sttTranscribe + sttDeliver instead of copy-pasting them).
+         stt: { start: sttCaptureStart, stop: sttCaptureStop,
+                transcribe: sttTranscribe, deliver: sttDeliver,
+                composerAppend: sttComposerAppend,
+                toggle: toggleMic,
+                settings: function () { return { model: sttModel(),
+                    lang: sttLang(), autosend: sttAutoSend(), mode: sttMode(),
+                    rows: _sttModels, recording: !!_mic,
+                    busy: !!_sttXfer, popen: !!_sttPop }; } } };
 });

@@ -2836,7 +2836,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* U45: captioned control groups (classic sidebar section mirror). The
    toolbar was a single row of unlabeled bare controls; every select/input
    now carries a dim caption and the web toggle shows a real on-state. */
-.chat-native-group { display: flex; flex-direction: column; gap: 2px; }
+.chat-native-group { display: flex; flex-direction: column; gap: 2px;
+    position: relative; }   /* VOICE-12: anchor for the voice-input popover */
 .chat-native-group-label { font-size: 10px; letter-spacing: .04em;
     text-transform: uppercase; color: var(--dim); }
 .chat-native-bar #chat-native-web.on { border-color: var(--accent);
@@ -2844,6 +2845,22 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* VOICE-11: AUTO-SPEAK rides the same on-state visual as the web toggle */
 .chat-native-bar #chat-native-autospeak.on { border-color: var(--accent);
     color: var(--accent); font-weight: 600; }
+/* VOICE-12: mic live states + the voice-input settings popover
+   (dropMenu family: absolute under its captioned group, textContent-built) */
+.chat-native-bar #chat-native-mic.rec { border-color: var(--accent);
+    color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.chat-native-bar #chat-native-mic.busy { opacity: .6; cursor: progress; }
+.chat-native-pop { position: absolute; top: 100%; left: 0; z-index: 30;
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  min-width: 230px; background: var(--card); border: 1px solid var(--edge);
+  border-radius: var(--radius); box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
+.chat-native-pop-row { display: flex; flex-direction: column; gap: 2px; }
+.chat-native-pop-row.inline { flex-direction: row; align-items: center; }
+.chat-native-pop-row.modes { flex-direction: row; flex-wrap: wrap;
+  align-items: center; gap: 4px; }
+.chat-native-pop-row select { font-size: 11px; background-color: var(--field);
+  border: 1px solid var(--edge); color: var(--ink); padding: 4px 6px; }
+.chat-native-pop-hint { font-size: 10px; color: var(--dim); }
 .chat-native-bar select, .chat-native-bar input[type=text],
 .chat-native-bar input[type=number] {
   font-size: 11px; background-color: var(--field); border: 1px solid var(--edge);
