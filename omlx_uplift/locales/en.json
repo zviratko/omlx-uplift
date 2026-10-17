@@ -1037,5 +1037,7 @@
  "uplift.voices.record_short": "Only {n} s recorded — too short for a good clone",
  "uplift.voices.record_stop": "STOP",
  "uplift.voices.record_title": "Record a reference clip right here — read the suggested text aloud for 10-30 s in a quiet room.",
- "uplift.voices.recording": "recording… {n}s"
+ "uplift.voices.recording": "recording… {n}s",
+ "uplift.inflight.unload": "UNLOAD",
+ "uplift.inflight.unload_tip": "Unload this model"
 }

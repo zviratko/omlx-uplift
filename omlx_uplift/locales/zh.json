@@ -1037,5 +1037,7 @@
  "uplift.bench.queue_title": "基准测试队列",
  "uplift.bench.queue_running": "运行中",
  "uplift.bench.queue_queued": "排队中",
- "uplift.bench.queue_failed": "失败"
+ "uplift.bench.queue_failed": "失败",
+ "uplift.inflight.unload": "卸载",
+ "uplift.inflight.unload_tip": "卸载此模型"
 }

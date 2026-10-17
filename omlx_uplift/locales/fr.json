@@ -1041,5 +1041,7 @@
  "uplift.bench.queue_title": "File d'attente des benchmarks",
  "uplift.bench.queue_running": "En cours",
  "uplift.bench.queue_queued": "En attente",
- "uplift.bench.queue_failed": "Échoué"
+ "uplift.bench.queue_failed": "Échoué",
+ "uplift.inflight.unload": "DÉCHARGER",
+ "uplift.inflight.unload_tip": "Décharger ce modèle"
 }

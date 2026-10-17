@@ -1037,5 +1037,7 @@
  "uplift.bench.queue_title": "基準測試佇列",
  "uplift.bench.queue_running": "執行中",
  "uplift.bench.queue_queued": "排隊中",
- "uplift.bench.queue_failed": "失敗"
+ "uplift.bench.queue_failed": "失敗",
+ "uplift.inflight.unload": "卸載",
+ "uplift.inflight.unload_tip": "卸載此模型"
 }

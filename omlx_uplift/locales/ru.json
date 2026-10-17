@@ -1037,5 +1037,7 @@
  "uplift.bench.queue_title": "Очередь бенчмарков",
  "uplift.bench.queue_running": "Выполняется",
  "uplift.bench.queue_queued": "В очереди",
- "uplift.bench.queue_failed": "Ошибка"
+ "uplift.bench.queue_failed": "Ошибка",
+ "uplift.inflight.unload": "ВЫГРУЗИТЬ",
+ "uplift.inflight.unload_tip": "Выгрузить эту модель"
 }

@@ -1052,5 +1052,7 @@
  "uplift.bench.queue_title": "벤치마크 대기열",
  "uplift.bench.queue_running": "실행 중",
  "uplift.bench.queue_queued": "대기 중",
- "uplift.bench.queue_failed": "실패"
+ "uplift.bench.queue_failed": "실패",
+ "uplift.inflight.unload": "언로드",
+ "uplift.inflight.unload_tip": "이 모델 언로드"
 }

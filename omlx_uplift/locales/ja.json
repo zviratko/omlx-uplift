@@ -1040,5 +1040,7 @@
  "uplift.bench.queue_title": "ベンチマークキュー",
  "uplift.bench.queue_running": "実行中",
  "uplift.bench.queue_queued": "待機中",
- "uplift.bench.queue_failed": "失敗"
+ "uplift.bench.queue_failed": "失敗",
+ "uplift.inflight.unload": "アンロード",
+ "uplift.inflight.unload_tip": "このモデルをアンロード"
 }

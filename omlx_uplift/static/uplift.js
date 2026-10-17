@@ -2064,7 +2064,8 @@ function ifGroup(model) {
     if (g) return g;
     const el = document.createElement('div'); el.className = 'if-group';
     const h = document.createElement('div'); h.className = 'if-model';
-    const nm = document.createElement('span'); nm.textContent = model; nm.title = model;
+    const nm = document.createElement('span'); nm.className = 'if-name';
+    nm.textContent = model; nm.title = model;
     h.append(nm);
     // U12: per-model memory line — hot-cache bytes only (user 2026-09-29:
     // per-model weights and SSD-cache display removed from the IN-FLIGHT
@@ -2072,6 +2073,27 @@ function ifGroup(model) {
     // gap, see U12 ticket finding).
     const mm = document.createElement('span'); mm.className = 'if-mem-meta';
     h.append(mm);
+    // UNLOAD (user 2026-10-17): right-aligned control in the model-name line.
+    // Same endpoint the Manager's LOADED pill uses; the server aborts active
+    // requests itself (202 unloading / immediate ok), so no client-side
+    // confirm dance — the Manager precedent is a single informed click.
+    const un = document.createElement('button');
+    un.type = 'button'; un.className = 'se-btn act danger if-unload';
+    un.textContent = C.tf('uplift.inflight.unload', 'UNLOAD');
+    un.title = C.tf('uplift.inflight.unload_tip', 'Unload this model');
+    un.onclick = async () => {
+        if (un.disabled) return;
+        un.disabled = true;           // busy for the whole write (no label change)
+        try {
+            await postModelAction(model, 'unload');
+        } catch (err) {
+            toast(C.t('uplift.toast.action_failed', { action: un.textContent, msg: err.message }));
+            un.disabled = false;      // failure: the model stays, the button returns
+        }
+        // success needs no re-enable: renderLive evicts the group on the next
+        // stats frame (the model is gone from s.models).
+    };
+    h.append(un);
     // U16-rework: DFlash speculation mirrors the classic dashboard's
     // model-level sub-row (upstream has no per-request DFlash row). Empty
     // for non-DFlash engines. Rendered by ifDflash() below renderLive.
@@ -2090,7 +2112,7 @@ function ifGroup(model) {
     const list = $('live-list');
     const ph = list.querySelector('.empty'); if (ph) ph.remove();
     list.append(el);
-    g = { model, el, wrap, mm, df, idle };
+    g = { model, el, wrap, mm, df, idle, un };
     S.ifModels.push(g);
     return g;
 }
@@ -2402,6 +2424,22 @@ function renderLive(s) {
     // slot in the card. DOM append order already equals seq order for rows
     // born live, but a pruned-then-recaptured row would re-append at the
     // bottom; re-sort by seq so the list order never changes on a landing.
+    // UNLOAD button (user 2026-10-17): a model that left s.models (manual
+    // unload, TTL eviction, external admin action) loses its group — until now
+    // the header ghosted as 'Idle' forever (S.ifModels was append-only). Rows
+    // and slots go with it; every rid is marked evicted so the /requests ring
+    // replay cannot resurrect the group through ifSlot (same guard as BUG-2).
+    const ifLoaded = new Set(s.models.map(m => m.id));
+    for (const g of [...S.ifModels]) {
+        if (ifLoaded.has(g.model)) continue;
+        for (const [rid, sl] of [...S.ifSlots]) {
+            if (sl.model !== g.model) continue;
+            S.ifSlots.delete(rid);
+            ifMarkEvicted(rid);
+        }
+        g.el.remove();
+        S.ifModels.splice(S.ifModels.indexOf(g), 1);
+    }
     for (const g of S.ifModels) {
         // Paint FIRST so the terminal state is on the row before ordering.
         for (const sl of S.ifSlots.values()) if (sl.model === g.model) ifPaint(sl);
@@ -2432,6 +2470,9 @@ function renderLive(s) {
         // the group was created (same reason the card placeholder relabels).
         g.idle.textContent = C.t('uplift.empty.idle');
         g.idle.style.display = g.wrap.children.length ? 'none' : '';
+        // UNLOAD button relabels too (C.t literal = locale-sync gate coverage).
+        g.un.textContent = C.t('uplift.inflight.unload');
+        g.un.title = C.t('uplift.inflight.unload_tip');
     }
     for (const sl of S.ifSlots.values()) ifPaint(sl);
     // every live row (queued, prefilling, generating) counts — queued

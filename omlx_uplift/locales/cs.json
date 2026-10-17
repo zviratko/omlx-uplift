@@ -1037,5 +1037,7 @@
  "uplift.bench.queue_title": "Fronta benchmarků",
  "uplift.bench.queue_running": "Běží",
  "uplift.bench.queue_queued": "Ve frontě",
- "uplift.bench.queue_failed": "Selhalo"
+ "uplift.bench.queue_failed": "Selhalo",
+ "uplift.inflight.unload": "UVOLNIT",
+ "uplift.inflight.unload_tip": "Uvolnit tento model"
 }

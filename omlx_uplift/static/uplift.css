@@ -752,9 +752,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .if-group { border-bottom: 1px solid var(--edge); padding: 4px 0 6px; }
 .if-group:last-child { border-bottom: 0; }
 .if-model { font: 500 11px/1.5 var(--mono); color: var(--ink); padding: 3px 2px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+/* UNLOAD (user 2026-10-17): the name is the flex-shrink victim (ellipsis on
+   the span, not the container), meta and button never squeeze. */
+.if-model .if-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* U12: per-model memory meta (weights · cache · hot) in the model header. */
-.if-model .if-mem-meta { color: var(--dim); font-weight: 400; font-size: 10px; margin-left: 8px; }
+.if-model .if-mem-meta { color: var(--dim); font-weight: 400; font-size: 10px; flex: none; }
+.if-model .if-unload { margin-left: auto; flex: none; }
 /* U16-rework: DFlash speculation sub-row — the classic dashboard's model-
    level stats line, mirrored (upstream has no per-request DFlash row). */
 .if-dflash { font: 400 10px/1.5 var(--mono); color: var(--dim);
