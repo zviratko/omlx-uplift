@@ -415,13 +415,16 @@ test('preset: editing bound text flips the picker to Modified (unsaved)', async 
     assert.equal(sel.value, 'Coder', 'clean start: name visible');
     sys.value = 'write code, but terse';
     sys.dispatch('input');
-    assert.equal(sel.value, '__modified',
-        'the edit is visible in the picker WITHOUT any save');
+    assert.equal(sel.value, '__revert:Coder',
+        'round 10: a BOUND edit keeps its identity — the row is '
+        + "'Coder (modified)', not an anonymous marker");
+    const row = sel.children.find((o) => o.value === '__revert:Coder');
+    assert.equal(row.textContent, 'Coder (modified)', 'labeled with the name');
     assert.equal(h.byId['chat-native-profile-save'].disabled, false,
         'Save is never dead — it opens the prefilled name row');
     assert.equal(h.byId['chat-native-preset-del'].disabled, false,
-        'round 8: the marker CAN be deleted — deleting it DISCARDS the '
-        + 'unsaved changes (it never touches the hidden binding silently)');
+        'round 8: the modified state CAN be deleted — it DISCARDS back '
+        + 'to the saved profile');
 });
 
 test('preset: switching stashes custom text, the marker restores it', async () => {
@@ -503,11 +506,17 @@ test('marker: discarding a BOUND edit reverts to the preset, keeping it', async 
     const sel = h.byId['chat-native-profile'];
     const sys = h.byId['chat-native-sys'];
     sys.value = 'write code but sloppier'; sys.dispatch('input');
-    assert.equal(sel.value, '__modified');
+    assert.equal(sel.value, '__revert:Coder');
     h.win.confirm = () => true;
     h.byId['chat-native-preset-del'].dispatch('click');
     assert.equal(sys.value, 'write code', 'reverted to the bound preset text');
     assert.equal(sel.value, 'Coder', 'the preset still exists and is bound');
+    // the '(modified)' row itself is a revert affordance: edit, pick it
+    sys.value = 'sloppy again'; sys.dispatch('input');
+    sel.value = '__revert:Coder'; sel.dispatch('change');
+    await tick();
+    assert.equal(sys.value, 'write code', 'selecting the row reverts too');
+    assert.equal(sel.value, 'Coder');
 });
 
 test('profile: round 9 — captures the WHOLE page, model excluded', async () => {
@@ -547,8 +556,8 @@ test('profile: round 9 — captures the WHOLE page, model excluded', async () =>
     assert.equal(sel.value, 'Setup', 'committing snapshots => clean');
     // flip one setting -> the marker is BACK without touching the prompt
     think.value = 'off'; think.dispatch('change');
-    assert.equal(sel.value, '__modified',
-        'a settings-only change re-marks the profile (round 9)');
+    assert.equal(sel.value, '__revert:Setup',
+        'a settings-only change re-marks UNDER the profile name (round 10)');
     // discard reverts the WHOLE page, not just the prompt
     h.win.confirm = () => true;
     h.byId['chat-native-preset-del'].dispatch('click');
@@ -964,7 +973,7 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
     // {name} placeholder multisets (dynamic t() usage is gate-invisible,
     // so this file is the self-pin per the doctrine)
     const PRESET_KEYS = ['preset_title', 'preset_save', 'preset_delete',
-        'preset_unsaved',
+        'preset_unsaved', 'preset_modified',
         'preset_delete_confirm', 'preset_discard_confirm', 'preset_created'];
     const en = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/en.json`, 'utf8'));
     const marks = (s) => (String(s).match(/\{name\}/g) || []).length;

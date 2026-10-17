@@ -941,6 +941,7 @@
  "uplift.chat.preset_save": "Сохранить пресет",
  "uplift.chat.preset_delete": "Удалить пресет",
  "uplift.chat.preset_unsaved": "Изменено (не сохранено)",
+ "uplift.chat.preset_modified": "(изменено)",
  "uplift.chat.preset_delete_confirm": "Удалить пресет «{name}»?",
  "uplift.chat.preset_discard_confirm": "Отменить несохранённые изменения промпта?",
  "uplift.chat.preset_created": "Пресет сохранён как {name}",

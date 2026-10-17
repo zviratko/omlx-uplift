@@ -941,6 +941,7 @@
  "uplift.chat.preset_save": "Save preset",
  "uplift.chat.preset_delete": "Delete preset",
  "uplift.chat.preset_unsaved": "Modified (unsaved)",
+ "uplift.chat.preset_modified": "(modified)",
  "uplift.chat.preset_delete_confirm": "Delete preset '{name}'?",
  "uplift.chat.preset_discard_confirm": "Discard unsaved prompt changes?",
  "uplift.chat.preset_created": "Preset saved as {name}",

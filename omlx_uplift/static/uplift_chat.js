@@ -274,16 +274,32 @@ function syncProfileSelect() {
     // something unsaved lives in the field (dirty) or in the stash (the
     // safe-go-back text). Nothing modified => no marker at all, and the
     // no-binding/no-text state reads honestly as System Default.
-    var hasMod = dirty || !!String((_conv && _conv.customPrompt) || '');
+    var hasMod = !!dirty || !!String((_conv && _conv.customPrompt) || '');
     sel.replaceChildren();
-    if (hasMod) {
+    // ROUND 10 (user: 'when changing settings show OriginalProfile
+    // (modified) as the profile name'): a BOUND edit keeps its name — the
+    // row reads 'Coder (modified)' and selecting it (or Delete) reverts
+    // to the saved base. The plain 'Modified (unsaved)' row is for
+    // UNBOUND drafts and for the stash of a switched-away page.
+    var stashRow = hasMod && !!String((_conv && _conv.customPrompt) || '');
+    if (stashRow || (dirty && !active)) {
         var mod = el('option', null,
                      t('uplift.chat.preset_unsaved', 'Modified (unsaved)'));
         mod.value = '__modified';
         sel.appendChild(mod);
     }
-    _profiles.forEach(function (p) { sel.appendChild(el('option', null, p.name)); });
-    sel.value = (active && !dirty) ? active : (dirty ? '__modified' : SYSTEM_DEFAULT);
+    _profiles.forEach(function (p) {
+        if (dirty && p.name === active) {
+            var mo = el('option', null, p.name + ' ' +
+                        t('uplift.chat.preset_modified', '(modified)'));
+            mo.value = '__revert:' + p.name;
+            sel.appendChild(mo);
+            return;
+        }
+        sel.appendChild(el('option', null, p.name));
+    });
+    sel.value = dirty ? (active ? '__revert:' + active : '__modified')
+                      : (active || SYSTEM_DEFAULT);
     // real browsers blank the select when the value matches no option
     // (corrupt-store boot: System Default itself may be missing) — then
     // show nothing rather than a lie the picker cannot hold
@@ -1217,7 +1233,23 @@ function toolbar() {
             return;
         }
         var p = findProfile(_profiles, name);
-        if (!p) { syncProfileSelect(); return; }
+        if (!p) {
+            // ROUND 10: the '<name> (modified)' row is an explicit
+            // REVERT — pick your own base back, discard the live edits
+            if (name.indexOf('__revert:') === 0) {
+                var base = findProfile(_profiles, name.slice(9));
+                if (base && _conv) {
+                    sysEl.value = base.content;
+                    _conv.systemPrompt = String(sysEl.value || '');
+                    applyChatSettings(base.settings || {});
+                    _conv.activeProfile = base.name;
+                    saveConv();
+                    syncProfileSelect();
+                }
+                return;
+            }
+            syncProfileSelect(); return;
+        }
         var nowS = chatSettingsSnapshot();
         var boundNow = _conv.activeProfile
             ? findProfile(_profiles, _conv.activeProfile) : null;
@@ -1332,7 +1364,10 @@ function toolbar() {
         // changes: a bound edit reverts to its preset, unbound text
         // (and its stash) is dropped and the state reads System Default.
         var name = prof.value;
-        if (name === '__modified') {
+        // '__modified' (stash/unbound draft) and '__revert:<name>'
+        // (round 10: '<name> (modified)' row) are both UNSAVED states —
+        // Delete reverts/drops them, never touches the store entry
+        if (name === '__modified' || name.indexOf('__revert:') === 0) {
             if (!_conv) return;
             if (!window.confirm(t('uplift.chat.preset_discard_confirm',
                                   'Discard unsaved prompt changes?'))) return;

@@ -956,6 +956,7 @@
  "uplift.chat.preset_save": "프리셋 저장",
  "uplift.chat.preset_delete": "프리셋 삭제",
  "uplift.chat.preset_unsaved": "수정됨 (저장 안 됨)",
+ "uplift.chat.preset_modified": "(수정됨)",
  "uplift.chat.preset_delete_confirm": "프리셋 '{name}'을(를) 삭제할까요?",
  "uplift.chat.preset_discard_confirm": "저장하지 않은 프롬프트 변경을 삭제할까요?",
  "uplift.chat.preset_created": "프리셋을 {name}(으)로 저장했습니다",
