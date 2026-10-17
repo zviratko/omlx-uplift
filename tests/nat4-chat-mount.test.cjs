@@ -606,6 +606,8 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'layout + history-list CSS shipped');
     assert.ok(/\.chat-native-side \.chat-native-pop \{ left: auto; right: 0;/.test(css),
         'the voice-input popover opens leftwards inside the rail');
+    assert.ok(/\.chat-native-side \{[^}]*overflow-y: auto/.test(css),
+        'the rail scrolls INTERNALLY (classic drawer), the page does not');
     // one new key, ten locales, real translations (cs must not equal en)
     const en = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/en.json`, 'utf8'));
     const cs = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/cs.json`, 'utf8'));

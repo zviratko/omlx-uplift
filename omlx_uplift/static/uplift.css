@@ -2918,12 +2918,18 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    sampling grid needs no override — auto-fill collapses to 2 columns at
    the rail width by itself. */
 .chat-native-layout { display: flex; gap: 10px; align-items: flex-start; }
-.chat-native-hist { flex: 0 0 170px; min-width: 0; }
+.chat-native-hist { flex: 0 0 170px; min-width: 0; position: sticky;
+    top: 6px; max-height: calc(100vh - 195px); }
 .chat-native-hist.chat-native-bar { flex-direction: column;
     align-items: stretch; gap: 6px; }
 .chat-native-main { flex: 1 1 auto; min-width: 0; display: flex;
     flex-direction: column; gap: 8px; }
-.chat-native-side { flex: 0 0 220px; min-width: 0; }
+/* CHAT-3R (live QA): the rail's CONTENT is taller than the chat column —
+   uncapped it grew the whole page (dead band under the composer, classic
+   does not do this). The rails scroll INTERNALLY like classic's drawer;
+   the cap mirrors fitHeight's budget (viewport - top chrome). */
+.chat-native-side { flex: 0 0 220px; min-width: 0; position: sticky;
+    top: 6px; max-height: calc(100vh - 195px); overflow-y: auto; }
 .chat-native-side.chat-native-bar { flex-direction: column;
     align-items: stretch; }
 .chat-native-toprow .chat-native-group { flex: 1 1 180px; min-width: 140px; }
