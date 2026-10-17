@@ -2229,16 +2229,32 @@ function sttSettingsBtn() {
     return btn;
 }
 function sttPopKey(ev) { if (ev.key === 'Escape') closeSttPop(); }
-function sttPopEscape() { closeSttPop(); }   // scroll/resize: a fixed pop
-// would otherwise float detached from its anchor — close is honest
+var _sttPopAnchor = null, _sttPopFrame = 0;
+function sttPopEscape() { closeSttPop(); }   // resize: geometry assumptions
+// die — closing is honest
+function sttPopFollow() {
+    // LIVE QA race: scroll events land a frame AFTER the wheel/programmatic
+    // scroll, so a click that follows a scroll by milliseconds used to see
+    // its freshly-opened pop closed by the late event. A fixed pop that
+    // knows its anchor just REPOSITIONS (rAF-coalesced) — the pop stays
+    // glued to the button instead of vanishing on the user's hands.
+    if (!_sttPop || !_sttPopAnchor) return;
+    if (typeof requestAnimationFrame === 'function') {
+        if (_sttPopFrame) return;
+        _sttPopFrame = requestAnimationFrame(function () {
+            _sttPopFrame = 0;
+            if (_sttPop) sttPopPlace(_sttPop, _sttPopAnchor);
+        });
+    } else sttPopPlace(_sttPop, _sttPopAnchor);
+}
 function closeSttPop() {
     if (!_sttPop) return;
-    var p = _sttPop; _sttPop = null;
+    var p = _sttPop; _sttPop = null; _sttPopAnchor = null;
     p.remove();
     // own listeners, removed on close (helpPop pattern, uplift_bench)
     document.removeEventListener('click', closeSttPop);
     document.removeEventListener('keydown', sttPopKey);
-    window.removeEventListener('scroll', sttPopEscape, true);
+    window.removeEventListener('scroll', sttPopFollow, true);
     window.removeEventListener('resize', sttPopEscape);
 }
 function sttPopPlace(pop, anchor) {
@@ -2361,6 +2377,7 @@ function openSttPop(host) {
     });
     host.appendChild(pop);
     _sttPop = pop;
+    _sttPopAnchor = host;
     sttPopPlace(pop, host);   // fixed placement (rail clipping, see above)
     setTimeout(function () {
         // deferred arm RE-CHECKS the identity: a fast toggle can close this
@@ -2369,7 +2386,7 @@ function openSttPop(host) {
         if (_sttPop !== pop) return;
         document.addEventListener('click', closeSttPop);
         document.addEventListener('keydown', sttPopKey);
-        window.addEventListener('scroll', sttPopEscape, true);   // capture:
+        window.addEventListener('scroll', sttPopFollow, true);   // capture:
         window.addEventListener('resize', sttPopEscape);         // any scroll
     }, 0);
 }

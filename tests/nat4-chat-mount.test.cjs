@@ -770,8 +770,10 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'the voice-input pop escapes the rail clip (fixed)');
     assert.ok(!/\.chat-native-pop \{[^}]*position: absolute/.test(css),
         'no absolute positioning remains on the rail pop');
-    assert.ok(/window\.addEventListener\('scroll', sttPopEscape, true\)/.test(src),
-        'any scroll closes the fixed pop — it never floats detached');
+    assert.ok(/window\.addEventListener\('scroll', sttPopFollow, true\)/.test(src),
+        'scroll REPOSITIONS the fixed pop (follow, not close: late-event race)');
+    assert.ok(/requestAnimationFrame/.test(src),
+        'follow is rAF-coalesced — one placement per frame');
     assert.ok(/\.chat-native-side \{[^}]*overflow-y: auto/.test(css) ||
         /\.chat-native-side \{[^}]*overflow: auto/.test(css),
         'the rail scrolls INTERNALLY (classic drawer), the page does not');
