@@ -30,6 +30,7 @@ const CAT = {
     'chat.chat_history_label': 'PICKER',
     'uplift.chat.booting': 'BOOTING',
     'chat.active_profile': 'APROF',
+    'uplift.chat.preset_unsaved': 'MODDED',
     'chat.save_settings': 'SAVESET',
 };
 
@@ -50,7 +51,11 @@ function makeHarness(opts = {}) {
             append(...kids) { this.children.push(...kids); },
             appendChild(k) { this.children.push(k); return k; },
             insertBefore(k) { this.children.unshift(k); return k; },
-            addEventListener() {}, removeEventListener() {},
+            _lis: {},
+            addEventListener(t2, fn) { (this._lis[t2] = this._lis[t2] || []).push(fn); },
+            removeEventListener() {},
+            dispatch(t2, ev) { (this._lis[t2] || []).forEach((fn) => fn(
+                Object.assign({ stopPropagation() {}, target: this }, ev))); },
             querySelector() { return makeEl('div'); },
             querySelectorAll() { return []; },
             remove() {}, focus() {}, blur() {}, setAttribute() {},
@@ -320,15 +325,15 @@ test('profiles: picker renders store contents, restores activeProfile', async ()
     h.win.UpliftNativeChat.mount();
     for (let i = 0; i < 12; i++) await tick();
     const sel = h.byId['chat-native-profile'];
-    assert.ok(sel, 'profile picker in the toolbar');
-    assert.deepEqual(optionTexts(sel), ['APROF', 'System Default', 'Coder'],
-        'blank first option via classic key + store names, textContent not HTML');
-    assert.equal(sel.value, 'Coder', 'active profile restored from the conv');
+    assert.ok(sel, 'preset picker in the rail');
+    assert.deepEqual(optionTexts(sel), ['MODDED', 'System Default', 'Coder'],
+        'state-marker first + store names, textContent not HTML (CHAT-3R)');
+    assert.equal(sel.value, 'Coder', 'clean bound preset shows its NAME');
     assert.equal(h.byId['chat-native-sys'].value, 'write code',
         'prompt text matches the profile content');
 });
 
-test('profiles: stale activeProfile name degrades to blank, never a fake option', async () => {
+test('profiles: stale activeProfile name degrades to the marker, never a fake option', async () => {
     const h = makeHarness({
         localStorage: { [PROFILE_LS]: JSON.stringify(
             [{ name: 'System Default', content: '' }]) },
@@ -338,7 +343,8 @@ test('profiles: stale activeProfile name degrades to blank, never a fake option'
     h.win.UpliftNativeChat.mount();
     for (let i = 0; i < 12; i++) await tick();
     const sel = h.byId['chat-native-profile'];
-    assert.equal(sel.value, '', 'unknown name -> blank (classic Custom)');
+    assert.equal(sel.value, '__modified',
+        'unknown name + real text -> Modified (unsaved) marker');
     assert.ok(optionTexts(sel).indexOf('Ghost') < 0, 'ghost not injected into list');
     assert.equal(h.byId['chat-native-sys'].value, 'keep me',
         'text survives losing its association');
@@ -349,7 +355,151 @@ test('profiles: corrupt store is a silent empty list (classic catch parity)', as
     h.win.UpliftNativeChat.mount();
     for (let i = 0; i < 12; i++) await tick();
     const sel = h.byId['chat-native-profile'];
-    assert.deepEqual(optionTexts(sel), ['APROF'], 'only the blank option');
+    assert.deepEqual(optionTexts(sel), ['MODDED'], 'only the state marker');
+});
+
+/* ---- CHAT-3R presets: state marker, New/Delete, safe-go-back stash ---- */
+
+function bootPreset(convOver, profiles) {
+    const h = makeHarness({
+        localStorage: { [PROFILE_LS]: JSON.stringify(profiles) },
+        convs: [Object.assign({ id: 'c9', title: 'T',
+            model: 'SmolLM2-360M-Instruct-oQ4', messages: [] }, convOver)],
+    });
+    h.win.UpliftNativeChat.mount();
+    return h;
+}
+
+test('preset: editing bound text flips the picker to Modified (unsaved)', async () => {
+    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Coder', content: 'write code' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    const sys = h.byId['chat-native-sys'];
+    assert.equal(sel.value, 'Coder', 'clean start: name visible');
+    sys.value = 'write code, but terse';
+    sys.dispatch('input');
+    assert.equal(sel.value, '__modified',
+        'the edit is visible in the picker WITHOUT any save');
+    assert.equal(h.byId['chat-native-profile-save'].disabled, false,
+        'Save unlocks: it writes into the bound preset');
+});
+
+test('preset: switching stashes custom text, the marker restores it', async () => {
+    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
+        [{ name: 'System Default', content: 'sd text' },
+         { name: 'Coder', content: 'write code' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    const sys = h.byId['chat-native-sys'];
+    sys.value = 'my own rules';
+    sys.dispatch('input');
+    sel.value = 'System Default';
+    sel.dispatch('change');
+    await tick();
+    assert.equal(sys.value, 'sd text', 'preset content loaded');
+    const posts = h.posts.filter((p) => String(p[0]).endsWith('/chat/history'));
+    const last = posts[posts.length - 1][1];
+    assert.equal(last.customPrompt, 'my own rules',
+        'the edited text was STASHED, not destroyed (safe go back)');
+    sel.value = '__modified';
+    sel.dispatch('change');
+    await tick();
+    assert.equal(sys.value, 'my own rules', 'the marker restores the stash');
+    assert.equal(sel.value, '__modified', 'still unbound afterwards');
+});
+
+test('preset: New preset commits the current text under a name (inline row)', async () => {
+    const h = bootPreset({ systemPrompt: 'persona X' },
+        [{ name: 'System Default', content: '' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sys = h.byId['chat-native-sys'];
+    assert.equal(sys.value, 'persona X');
+    assert.equal(h.byId['chat-native-profile'].value, '__modified',
+        'unbound text with content is custom by definition');
+    assert.equal(h.byId['chat-native-preset-row'].hidden, true,
+        'name row starts folded (no dead input in the rail)');
+    h.byId['chat-native-preset-new'].dispatch('click');
+    assert.equal(h.byId['chat-native-preset-row'].hidden, false);
+    h.byId['chat-native-preset-name'].value = 'Persona';
+    h.byId['chat-native-preset-add'].dispatch('click');
+    const store = JSON.parse(h.win.__store[PROFILE_LS]);
+    assert.deepEqual(store.map((p) => p.name), ['System Default', 'Persona']);
+    assert.equal(store[1].content, 'persona X', 'text committed verbatim');
+    assert.equal(h.byId['chat-native-profile'].value, 'Persona',
+        'the new preset is active and CLEAN immediately');
+    assert.equal(h.byId['chat-native-preset-del'].disabled, false,
+        'a deletable preset is bound now');
+    assert.equal(h.byId['chat-native-preset-row'].hidden, true,
+        'the row folds back after commit');
+});
+
+test('preset: Enter commits, Cancel abandons, duplicates never overwrite', async () => {
+    const h = bootPreset({ systemPrompt: 'x' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Persona', content: 'taken' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    h.byId['chat-native-preset-new'].dispatch('click');
+    const inp = h.byId['chat-native-preset-name'];
+    inp.value = 'Typed';
+    inp.dispatch('keydown', { key: 'Enter' });
+    let store = JSON.parse(h.win.__store[PROFILE_LS]);
+    assert.deepEqual(store.map((p) => p.name), ['System Default', 'Persona', 'Typed'],
+        'Enter is the commit key (classic rename-row parity)');
+    h.byId['chat-native-preset-new'].dispatch('click');
+    inp.value = 'Nope';
+    h.byId['chat-native-preset-cancel'].dispatch('click');
+    assert.equal(inp.value, '', 'Cancel clears the draft name');
+    store = JSON.parse(h.win.__store[PROFILE_LS]);
+    assert.equal(store.map((p) => p.name).indexOf('Nope'), -1, 'nothing written');
+    h.byId['chat-native-preset-new'].dispatch('click');
+    inp.value = 'Persona';
+    inp.dispatch('keydown', { key: 'Enter' });
+    store = JSON.parse(h.win.__store[PROFILE_LS]);
+    assert.equal(store.filter((p) => p.name === 'Persona').length, 1,
+        'no dupe written; the toast path owns the feedback');
+    assert.equal(store.find((p) => p.name === 'Persona').content, 'taken',
+        'the existing preset was NOT silently overwritten');
+});
+
+test('preset: Delete drops the name but keeps the text; System Default is guarded', async () => {
+    const h = bootPreset({ systemPrompt: 'temp text', activeProfile: 'Temp' },
+        [{ name: 'System Default', content: 'sd' },
+         { name: 'Temp', content: 'temp text' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    h.win.confirm = () => true;
+    h.byId['chat-native-preset-del'].dispatch('click');
+    const store = JSON.parse(h.win.__store[PROFILE_LS]);
+    assert.equal(store.map((p) => p.name).indexOf('Temp'), -1, 'gone from the store');
+    assert.equal(h.byId['chat-native-sys'].value, 'temp text',
+        'the prompt text SURVIVES deleting its preset (nothing is lost)');
+    assert.equal(h.byId['chat-native-profile'].value, '__modified');
+    // bind System Default -> the delete button must go dark (loadProfiles
+    // would resurrect it EMPTY: silent content loss, so we forbid it)
+    const sel = h.byId['chat-native-profile'];
+    sel.value = 'System Default';
+    sel.dispatch('change');
+    await tick();
+    assert.equal(h.byId['chat-native-preset-del'].disabled, true,
+        'System Default is not deletable');
+});
+
+test('preset: Save writes the edit into the bound preset (classic save-back)', async () => {
+    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Coder', content: 'write code' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sys = h.byId['chat-native-sys'];
+    sys.value = 'write better code';
+    sys.dispatch('input');
+    const save = h.byId['chat-native-profile-save'];
+    assert.equal(save.disabled, false);
+    save.dispatch('click');
+    const store = JSON.parse(h.win.__store[PROFILE_LS]);
+    assert.equal(store[1].content, 'write better code', 'persisted into the preset');
+    assert.equal(h.byId['chat-native-profile'].value, 'Coder',
+        'clean again: the picker shows the NAME once saved');
 });
 
 test('readability: boot state applies the shadow block; board event restyles live', async () => {
@@ -596,8 +746,12 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'Voice input section: settings entry in its position:relative group + mic');
     assert.ok(/secTts\.append\(\s*group\(tf2\('uplift\.chat\.voice'[\s\S]*?autospeak[\s\S]*?speak_chunk/.test(src),
         'Voice output section owns the TTS trio (voice / auto-speak / chunk)');
-    assert.ok(/secSys\.append\(sys, profSave\)/.test(src),
-        'Save sits directly after the System Prompt it saves into');
+    assert.ok(/secPreset\.append\(prof, profSave, presetNew, nameRow, presetDel\)/.test(src),
+        'preset stack: picker, Save, New, inline name row, Delete');
+    assert.ok(/side\.append\(secPreset, secModel, secStt, secTts, secSys\)/.test(src),
+        'Active preset is the FIRST right-rail section (user: top)');
+    assert.ok(/secSys\.append\(sys\)/.test(src),
+        'System Prompt keeps just the text; Save moved next to the picker');
     assert.ok(!/rowConv|rowPrompt\b|rowGen\b/.test(src),
         'the stacked-rows era is gone (U79 contract moved into the rail)');
     assert.ok(/budGroup/.test(src), 'thinking budget carries a caption group');
@@ -616,19 +770,26 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'history rail never wraps sideways');
     assert.ok(/\.chat-native-side\.chat-native-bar \{[^}]*flex-wrap: nowrap/.test(css),
         'control rail never wraps sideways');
-    // one new key, ten locales, real translations (cs must not equal en)
+    // CHAT-3R preset keys: ten locales, real translations, matching
+    // {name} placeholder multisets (dynamic t() usage is gate-invisible,
+    // so this file is the self-pin per the doctrine)
+    const PRESET_KEYS = ['preset_title', 'preset_save', 'preset_new',
+        'preset_delete', 'preset_unsaved',
+        'preset_exists', 'preset_delete_confirm', 'preset_created'];
     const en = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/en.json`, 'utf8'));
-    const cs = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/cs.json`, 'utf8'));
+    const marks = (s) => (String(s).match(/\{name\}/g) || []).length;
     for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
         const d = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/${loc}.json`, 'utf8'));
-        const v = d['uplift.chat.tts_title'];
-        assert.ok(v && v.length, `uplift.chat.tts_title present in ${loc}`);
-        if (loc !== 'en') assert.notEqual(v, en['uplift.chat.tts_title'],
-            `${loc} carries a real translation, not the EN text`);
+        for (const name of PRESET_KEYS) {
+            const key = `uplift.chat.${name}`;
+            const v = d[key];
+            assert.ok(v && v.length, `${key} present in ${loc}`);
+            assert.equal(marks(v), marks(en[key]),
+                `${key} keeps the {name} placeholders in ${loc}`);
+            if (loc !== 'en') assert.notEqual(v, en[key],
+                `${key} translated in ${loc}, not an EN fill`);
+        }
     }
-    assert.notEqual(cs['uplift.chat.tts_title'], en['uplift.chat.tts_title'],
-        'cs differs from en');
-    void cs;
 });
 
 test('U79-era doctrine: destructive action inside its region (moved to the history rail)', () => {

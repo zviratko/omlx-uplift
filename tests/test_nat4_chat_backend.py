@@ -69,6 +69,18 @@ def test_active_profile_name_roundtrips_sanitized(client):
     assert client.get("/uplift/api/chat/history/c2").json()["activeProfile"] is None
 
 
+def test_custom_prompt_stash_roundtrips(client):
+    """CHAT-3R: the safe-go-back stash persists (server-whitelisted field)."""
+    client.post("/uplift/api/chat/history",
+                json=_conv(activeProfile="Other", customPrompt="my own rules"))
+    full = client.get("/uplift/api/chat/history/c1").json()
+    assert full["customPrompt"] == "my own rules"
+    client.post("/uplift/api/chat/history", json=_conv(customPrompt="x" * 9000))
+    assert len(client.get("/uplift/api/chat/history/c1").json()["customPrompt"]) == 8000
+    client.post("/uplift/api/chat/history", json=_conv(cid="c2"))
+    assert client.get("/uplift/api/chat/history/c2").json()["customPrompt"] == ""
+
+
 def test_validation(client):
     assert client.post("/uplift/api/chat/history", json={"messages": []}).status_code == 400
     r = client.post("/uplift/api/chat/history", json={"id": "x", "messages": "no"})

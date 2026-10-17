@@ -212,6 +212,10 @@ async def chat_history_save(request: Request,
         # shared localStorage store). Sanitized like title: a stored
         # string must never reach innerHTML — UI renders it textContent.
         "activeProfile": str(body.get("activeProfile") or "")[:48] or None,
+        # CHAT-3R (user: changing a preset must keep custom text so the
+        # user can go back safely): the stashed unbound/edited prompt.
+        # Same textContent-only rule as activeProfile.
+        "customPrompt": str(body.get("customPrompt") or "")[:8000],
         "thinking": bool(body.get("thinking")),
         "thinkingBudget": body.get("thinkingBudget")
         if isinstance(body.get("thinkingBudget"), int) else None,

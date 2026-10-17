@@ -2918,6 +2918,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    sampling grid needs no override — auto-fill collapses to 2 columns at
    the rail width by itself. */
 .chat-native-layout { display: flex; gap: 10px; align-items: flex-start; }
+/* CHAT-3R (user: 'left and right controls should have a visual
+   separation from the chat box'): the rails are hairline-framed boxes —
+   same flat edge language as the cards, no shadow. */
+.chat-native-hist, .chat-native-side { border: 1px solid var(--edge);
+    border-radius: var(--radius); padding: 8px; }
 .chat-native-hist { flex: 0 0 170px; min-width: 0; position: sticky;
     top: 6px; max-height: calc(100vh - 195px); overflow-y: auto; }
 /* CHAT-3R defect (user report): .chat-native-bar sets flex-wrap: wrap —
