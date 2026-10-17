@@ -2976,7 +2976,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     .chat-native-layout { flex-direction: column; }
     .chat-native-hist, .chat-native-side { flex: 1 1 auto; width: 100%; }
     .chat-native-hist.chat-native-bar { flex-wrap: wrap; }
-    .chat-native-side.chat-native-bar { flex-direction: row; }
+    /* stacked mode is the OLD row context — sections flow as wrap rows
+       (the base nowrap pin guards the COLUMN rails only) */
+    .chat-native-side.chat-native-bar { flex-direction: row;
+        flex-wrap: wrap; }
     .chat-native-sec { flex: 1 1 200px; }
     .chat-native-convlist { flex: 1 1 140px; min-width: 140px;
         max-height: 22vh; }
