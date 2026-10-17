@@ -2943,6 +2943,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-native-conv.active { border-color: var(--edge);
     background: var(--field); font-weight: 600; }
 .chat-native-side #chat-native-sys { width: 100%; min-height: 44px; }
+/* the grid's original flex:1 1 100% is a ROW-line pinner in the old
+   toolbar; in a column rail it would stretch the auto rows across the
+   leftover height (align-content: stretch distributes the slack
+   BETWEEN rows — caught live). Pin it to content instead. */
+.chat-native-side .chat-native-sampling { flex: 0 0 auto;
+    align-content: start; }
 .chat-native-side #chat-native-profile-save { align-self: flex-start; }
 /* the voice-input popover opens to the LEFT inside the right rail so it
    can never overflow the viewport edge (its anchor group is position:
