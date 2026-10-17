@@ -405,7 +405,7 @@ function presetRow(h) {
     return { row, inp, add, cancel };
 }
 
-test('preset: editing bound text flips the picker to Modified (unsaved)', async () => {
+test('preset: a bound edit creates the profile\'s MODIFIED VARIANT (round 11)', async () => {
     const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
         [{ name: 'System Default', content: '' },
          { name: 'Coder', content: 'write code' }]);
@@ -415,40 +415,45 @@ test('preset: editing bound text flips the picker to Modified (unsaved)', async 
     assert.equal(sel.value, 'Coder', 'clean start: name visible');
     sys.value = 'write code, but terse';
     sys.dispatch('input');
-    assert.equal(sel.value, '__revert:Coder',
-        'round 10: a BOUND edit keeps its identity — the row is '
-        + "'Coder (modified)', not an anonymous marker");
-    const row = sel.children.find((o) => o.value === '__revert:Coder');
+    assert.equal(sel.value, '__variant:Coder',
+        'T01: the edit belongs to CODER — row is "Coder (modified)"');
+    const row = sel.children.find((o) => o.value === '__variant:Coder');
     assert.equal(row.textContent, 'Coder (modified)', 'labeled with the name');
-    assert.equal(h.byId['chat-native-profile-save'].disabled, false,
-        'Save is never dead — it opens the prefilled name row');
+    assert.equal(sel.children.map((o) => o.value).indexOf('__modified'), -1,
+        'T01b: NO anonymous "Modified (unsaved)" row in a bound flow');
     assert.equal(h.byId['chat-native-preset-del'].disabled, false,
-        'round 8: the modified state CAN be deleted — it DISCARDS back '
-        + 'to the saved profile');
+        'the variant row is deletable (= discard back to the base)');
+    const posts = h.posts.filter((p) => String(p[0]).endsWith('/chat/history'));
+    const last = posts[posts.length - 1][1];
+    assert.ok(last.variants && last.variants.Coder,
+        'the working copy rides the conversation (server-persisted)');
+    assert.equal(last.variants.Coder.prompt, 'write code, but terse');
 });
 
-test('preset: switching stashes custom text, the marker restores it', async () => {
-    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
+test('variant: two modified profiles are INDEPENDENT (single-slot bug)', async () => {
+    // ROUND 11 core: the old design had ONE global stash — edit A, switch
+    // B, edit B and A's work was overwritten. Variants are per profile.
+    const h = bootPreset({ systemPrompt: 'aaa', activeProfile: 'A' },
         [{ name: 'System Default', content: 'sd text' },
-         { name: 'Coder', content: 'write code' }]);
+         { name: 'A', content: 'aaa' },
+         { name: 'B', content: 'bbb' }]);
     for (let i = 0; i < 12; i++) await tick();
     const sel = h.byId['chat-native-profile'];
     const sys = h.byId['chat-native-sys'];
-    sys.value = 'my own rules';
-    sys.dispatch('input');
-    sel.value = 'System Default';
-    sel.dispatch('change');
-    await tick();
-    assert.equal(sys.value, 'sd text', 'preset content loaded');
-    const posts = h.posts.filter((p) => String(p[0]).endsWith('/chat/history'));
-    const last = posts[posts.length - 1][1];
-    assert.equal(last.customPrompt, 'my own rules',
-        'the edited text was STASHED, not destroyed (safe go back)');
-    sel.value = '__modified';
-    sel.dispatch('change');
-    await tick();
-    assert.equal(sys.value, 'my own rules', 'the marker restores the stash');
-    assert.equal(sel.value, '__modified', 'still unbound afterwards');
+    sys.value = 'aaa edited'; sys.dispatch('input');       // A diverges
+    sel.value = 'B'; sel.dispatch('change'); await tick();
+    assert.equal(sys.value, 'bbb', 'B loads its own base');
+    sys.value = 'bbb edited'; sys.dispatch('input');       // B diverges
+    assert.deepEqual(
+        sel.children.filter((o) => o.value.indexOf('__variant:') === 0)
+            .map((o) => o.textContent).sort(),
+        ['A (modified)', 'B (modified)'],
+        'T04: BOTH profiles carry their own unsaved copy');
+    sel.value = '__variant:A'; sel.dispatch('change'); await tick();
+    assert.equal(sys.value, 'aaa edited',
+        'T03: A\'s edit SURVIVED the detour through B (the regression)');
+    sel.value = '__variant:B'; sel.dispatch('change'); await tick();
+    assert.equal(sys.value, 'bbb edited', 'B\'s copy is its own too');
 });
 
 test('preset: multi-line content from classic stays CLEAN on selection', async () => {
@@ -498,7 +503,7 @@ test('marker: is a STATE, not a permanent row; Delete on it discards', async () 
     assert.equal(sel.value, 'System Default');
 });
 
-test('marker: discarding a BOUND edit reverts to the preset, keeping it', async () => {
+test('variant: Delete on "Name (modified)" DISCARDS back to the base', async () => {
     const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
         [{ name: 'System Default', content: '' },
          { name: 'Coder', content: 'write code' }]);
@@ -506,17 +511,71 @@ test('marker: discarding a BOUND edit reverts to the preset, keeping it', async 
     const sel = h.byId['chat-native-profile'];
     const sys = h.byId['chat-native-sys'];
     sys.value = 'write code but sloppier'; sys.dispatch('input');
-    assert.equal(sel.value, '__revert:Coder');
+    assert.equal(sel.value, '__variant:Coder');
     h.win.confirm = () => true;
     h.byId['chat-native-preset-del'].dispatch('click');
-    assert.equal(sys.value, 'write code', 'reverted to the bound preset text');
-    assert.equal(sel.value, 'Coder', 'the preset still exists and is bound');
-    // the '(modified)' row itself is a revert affordance: edit, pick it
-    sys.value = 'sloppy again'; sys.dispatch('input');
-    sel.value = '__revert:Coder'; sel.dispatch('change');
-    await tick();
-    assert.equal(sys.value, 'write code', 'selecting the row reverts too');
+    assert.equal(sys.value, 'write code', 'page reverted to the saved base');
+    assert.equal(sel.value, 'Coder', 'row cleaned; the preset still exists');
+    assert.equal(sel.children.map((o) => o.value).indexOf('__variant:Coder'), -1,
+        'no variant row left anywhere');
+    // T07b: an INACTIVE profile's variant is discarded too, page untouched
+    sys.value = 'edit again'; sys.dispatch('input');
+    sel.value = 'System Default'; sel.dispatch('change'); await tick();
+    h.byId['chat-native-preset-del'].dispatch('click');   // 'System Default' clean -> dark
+    assert.equal(h.byId['chat-native-preset-del'].disabled, true,
+        'T09: a cleanly selected System Default is STILL not deletable');
+    const vrow = sel.children.find((o) => o.value === '__variant:Coder');
+    assert.ok(vrow, 'Coder still shows (modified) while you sit on SD');
+    sel.value = '__variant:Coder'; sel.dispatch('change'); await tick();
+    h.byId['chat-native-preset-del'].dispatch('click');
+    assert.equal(sys.value, 'write code', 'discard from afar reverts on arrival');
     assert.equal(sel.value, 'Coder');
+});
+
+test('variant: edits back to the saved text clean themselves; drafts stay special', async () => {
+    // T11
+    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Coder', content: 'write code' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    const sys = h.byId['chat-native-sys'];
+    sys.value = 'who knows'; sys.dispatch('input');
+    assert.equal(sel.value, '__variant:Coder');
+    sys.value = 'write code'; sys.dispatch('input');
+    assert.equal(sel.value, 'Coder',
+        'T11: back to the base text => the working copy DROPS itself');
+    assert.equal(sel.children.map((o) => o.value).indexOf('__variant:Coder'), -1);
+});
+
+test('variant: legacy single-stash migrates into the bound profile', async () => {
+    // T13: conversations saved by the old rounds carry customPrompt while
+    // bound; boot must NOT pop the anonymous row — attribute the stash.
+    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder',
+                           customPrompt: 'my old draft' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Coder', content: 'write code' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    assert.equal(sel.children.map((o) => o.value).indexOf('__modified'), -1,
+        'no anonymous row for a BOUND conversation anymore');
+    assert.equal(sel.value, '__variant:Coder', 'the draft became Coder\'s copy');
+    assert.equal(h.byId['chat-native-sys'].value, 'my old draft',
+        'the variant is the page again — nothing lost in the migration');
+});
+
+test('variant: model changes NEVER mark anything (the one exception)', async () => {
+    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Coder', content: 'write code' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    const model = h.byId['chat-native-model'];
+    model.value = model.children[1] ? model.children[1].value : model.value;
+    model.dispatch('change');
+    await tick();
+    assert.equal(sel.value, 'Coder', 'T14: swapping the model is not a persona edit');
+    assert.equal(sel.children.map((o) => o.value).indexOf('__variant:Coder'), -1);
 });
 
 test('profile: round 9 — captures the WHOLE page, model excluded', async () => {
@@ -535,11 +594,9 @@ test('profile: round 9 — captures the WHOLE page, model excluded', async () =>
     h.byId['chat-native-web'].dispatch('click');           // toggleWeb
     h.win.__store['omlx-uplift-voice'] = 'zuzana';
     await tick();
-    assert.equal(h.byId['chat-native-profile'].value, 'P1',
-        'clean bound prompt + changed SETTINGS => marker... ');
-    // ^ settings differ from P1 (P1 has NO settings blob => unmanaged:
-    // classic-era entries stay prompt-only BY DESIGN) — so P1 is correct:
-    // commit a ROUND-9 entry and re-run the expectation there
+    assert.equal(h.byId['chat-native-profile'].value, '__variant:P1',
+        'a settings change under ANY profile diverges IT (round 11: '
+        + 'even a classic-era entry gains a working copy, never a ghost)');
     const sel = h.byId['chat-native-profile'];
     h.byId['chat-native-profile-save'].dispatch('click');
     const { inp, add } = presetRow(h);
@@ -556,8 +613,8 @@ test('profile: round 9 — captures the WHOLE page, model excluded', async () =>
     assert.equal(sel.value, 'Setup', 'committing snapshots => clean');
     // flip one setting -> the marker is BACK without touching the prompt
     think.value = 'off'; think.dispatch('change');
-    assert.equal(sel.value, '__revert:Setup',
-        'a settings-only change re-marks UNDER the profile name (round 10)');
+    assert.equal(sel.value, '__variant:Setup',
+        'a settings-only change diverges the profile (round 11)');
     // discard reverts the WHOLE page, not just the prompt
     h.win.confirm = () => true;
     h.byId['chat-native-preset-del'].dispatch('click');
@@ -574,7 +631,7 @@ test('profile: round 9 — captures the WHOLE page, model excluded', async () =>
         'voice key follows the profile (unmanaged SD => defaults)');
 });
 
-test('profile: the stash round-trips settings across a switch', async () => {
+test('variant: settings copies round-trip across switches', async () => {
     const h = bootPreset({ systemPrompt: '', activeProfile: '' },
         [{ name: 'System Default', content: '' },
          { name: 'Setup', content: 'persona',
@@ -582,21 +639,22 @@ test('profile: the stash round-trips settings across a switch', async () => {
     for (let i = 0; i < 12; i++) await tick();
     const sel = h.byId['chat-native-profile'];
     const think = h.byId['chat-native-think-mode'];
-    // unbound scratch page with its OWN settings
-    h.byId['chat-native-sys'].value = 'mine';
-    h.byId['chat-native-sys'].dispatch('input');
-    think.value = 'off'; think.dispatch('change');
-    // switch to Setup -> MY page is stashed whole; Setup is applied
+    // select Setup: its saved page state applies
     sel.value = 'Setup'; sel.dispatch('change'); await tick();
     assert.equal(think.value, 'on', 'Setup applied');
+    // diverge its SETTINGS only -> working copy tracks the whole page
+    think.value = 'off'; think.dispatch('change'); await tick();
+    assert.equal(sel.value, '__variant:Setup');
+    // leave and come back: the VARIANT returns, not the base
+    sel.value = 'System Default'; sel.dispatch('change'); await tick();
+    assert.equal(think.value, 'auto', 'SD re-provisions defaults');
+    sel.value = '__variant:Setup'; sel.dispatch('change'); await tick();
+    assert.equal(think.value, 'off', 'Setup\'s unsaved settings came back');
+    assert.equal(h.byId['chat-native-sys'].value, 'persona');
     const posts = h.posts.filter((p) => String(p[0]).endsWith('/chat/history'));
     const last = posts[posts.length - 1][1];
-    assert.equal(last.customState.prompt, 'mine', 'stash carries the prompt');
-    assert.equal(last.customState.settings.thinking, 'off', 'and the settings');
-    // back to the marker: the WHOLE page returns
-    sel.value = '__modified'; sel.dispatch('change'); await tick();
-    assert.equal(think.value, 'off');
-    assert.equal(h.byId['chat-native-sys'].value, 'mine');
+    assert.equal(last.variants.Setup.settings.thinking, 'off',
+        'the copy persisted WITH the conversation (server field)');
 });
 
 test('preset: Save prefills the name — keeping it UPDATES, retyping CREATES', async () => {

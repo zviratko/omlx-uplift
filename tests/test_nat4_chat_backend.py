@@ -102,6 +102,35 @@ def test_custom_state_stash_roundtrips(client):
     assert client.get("/uplift/api/chat/history/c1").json()["customState"] is None
 
 
+def test_variants_per_profile_copies(client):
+    """ROUND 11: per-profile working copies persist; junk entries drop,
+    caps hold, and the model never rides along."""
+    vs = {"Coder": {"prompt": "edited", "settings": {
+              "thinking": "on", "webSearch": True, "temperature": 1,
+              "model": "NOPE", "sttMode": "ptt"}},
+          "Bad": {"prompt": "x", "settings": None},
+          "": {"prompt": "nameless"},
+          "x" * 60: {"prompt": "too long"},
+          "Junk": "not a dict"}
+    client.post("/uplift/api/chat/history", json=_conv(activeProfile="Coder",
+                                                       variants=vs))
+    got = client.get("/uplift/api/chat/history/c1").json()["variants"]
+    assert got["Coder"]["prompt"] == "edited"
+    assert got["Coder"]["settings"]["thinking"] == "on"
+    assert got["Coder"]["settings"]["webSearch"] is True
+    assert "model" not in got["Coder"]["settings"]
+    assert "temperature" not in got["Coder"]["settings"]   # not a state key
+    assert got["Bad"]["prompt"] == "x" and got["Bad"]["settings"] is None
+    assert "" not in got and "Junk" not in got             # nameless/junk drop
+    assert all(len(k) <= 48 for k in got)
+    client.post("/uplift/api/chat/history", json=_conv(variants="junk"))
+    assert client.get("/uplift/api/chat/history/c1").json()["variants"] == {}
+    huge = {f"p{i}": {"prompt": "y" * 1750, "settings": {"thinking": "on"}}
+            for i in range(12)}
+    client.post("/uplift/api/chat/history", json=_conv(variants=huge))
+    assert client.get("/uplift/api/chat/history/c1").json()["variants"] == {}
+
+
 def test_validation(client):
     assert client.post("/uplift/api/chat/history", json={"messages": []}).status_code == 400
     r = client.post("/uplift/api/chat/history", json={"id": "x", "messages": "no"})

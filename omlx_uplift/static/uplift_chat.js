@@ -247,11 +247,41 @@ function findProfile(list, name) {
     for (var i = 0; i < list.length; i++) if (list[i].name === name) return list[i];
     return null;
 }
+function variantOf(n) { return (_conv && _conv.variants && _conv.variants[n]) || null; }
+function setVariant(n, v) {
+    if (!_conv) return;
+    _conv.variants = _conv.variants || {};
+    if (v) _conv.variants[n] = v; else delete _conv.variants[n];
+}
+function pageMatchesBase(p) {
+    var sys = gid('chat-native-sys');
+    if (String((sys && sys.value) || '') !== stripNL(p.content)) return false;
+    return !settingsDiffer(chatSettingsSnapshot(), p.settings || null);
+}
+function onPageEdited() {
+    // ROUND 11 (user: 'changing any settings should trigger divergence
+    // and save the setting TO THE MODIFIED VARIANT'): divergence belongs
+    // to the PROFILE, not to one global anonymous slot. Every page change
+    // while bound updates that profile's working copy; editing back to
+    // the saved base drops the copy and the row cleans itself.
+    var active = (_conv && _conv.activeProfile) || '';
+    var p = active ? findProfile(_profiles, active) : null;
+    if (p) {
+        var sys = gid('chat-native-sys');
+        if (pageMatchesBase(p)) { if (variantOf(p.name)) setVariant(p.name, null); }
+        else setVariant(p.name, { prompt: String((sys && sys.value) || ''),
+                                  settings: chatSettingsSnapshot() });
+        saveConv();   // variants ride the conversation
+    }
+    syncProfileSelect();
+}
 function syncProfileSelect() {
-    // CHAT-3R (user: 'I have no idea what Active profile in the selection
-    // is'): the picker shows the STATE — the bound preset name while the
-    // text still equals its content, else 'Modified (unsaved)'. There is
-    // no command-shaped placeholder anymore.
+    // ROUND 11 model: the picker lists PROFILES. A profile carrying an
+    // unsaved working copy reads 'Name (modified)' (value '__variant:'),
+    // selecting it restores that copy, Delete reverts to the saved base.
+    // The anonymous 'Modified (unsaved)' row exists ONLY for a never-
+    // bound draft — bound flows must never pop it (user: 'there should
+    // not be a Modified (unsaved) profile popping up').
     var sel = gid('chat-native-profile');
     var sys = gid('chat-native-sys');
     var del = gid('chat-native-preset-del');
@@ -260,58 +290,70 @@ function syncProfileSelect() {
     var prof = active ? findProfile(_profiles, active) : null;
     if (active && !prof) active = '';               // stale name
     var cur = sys ? String(sys.value || '') : '';
-    var dirty = prof ? cur !== stripNL(prof.content) : !!cur;
-    // ROUND 9: a preset owns the WHOLE page — changing thinking, sampling,
-    // web search or voice (anything but the model) re-marks it just like
-    // a prompt edit. Entries without a settings blob (classic or written
-    // before round 9) manage the PROMPT only: their settings are never
-    // compared and never applied.
-    if (prof && prof.settings && !dirty
-        && settingsDiffer(chatSettingsSnapshot(), prof.settings)) dirty = true;
-    // ROUND 8 (user: 'allow deleting Modified (unsaved); it should only
-    // reappear when settings are changed but not saved to a profile'):
-    // the marker is a STATE, not a permanent row. It exists only while
-    // something unsaved lives in the field (dirty) or in the stash (the
-    // safe-go-back text). Nothing modified => no marker at all, and the
-    // no-binding/no-text state reads honestly as System Default.
-    var hasMod = !!dirty || !!String((_conv && _conv.customPrompt) || '');
+    var draft = !active
+        && (!!cur || !!String((_conv && _conv.customPrompt) || ''));
     sel.replaceChildren();
-    // ROUND 10 (user: 'when changing settings show OriginalProfile
-    // (modified) as the profile name'): a BOUND edit keeps its name — the
-    // row reads 'Coder (modified)' and selecting it (or Delete) reverts
-    // to the saved base. The plain 'Modified (unsaved)' row is for
-    // UNBOUND drafts and for the stash of a switched-away page.
-    var stashRow = hasMod && !!String((_conv && _conv.customPrompt) || '');
-    if (stashRow || (dirty && !active)) {
+    if (draft) {
         var mod = el('option', null,
                      t('uplift.chat.preset_unsaved', 'Modified (unsaved)'));
         mod.value = '__modified';
         sel.appendChild(mod);
     }
     _profiles.forEach(function (p) {
-        if (dirty && p.name === active) {
+        if (variantOf(p.name)) {
             var mo = el('option', null, p.name + ' ' +
                         t('uplift.chat.preset_modified', '(modified)'));
-            mo.value = '__revert:' + p.name;
+            mo.value = '__variant:' + p.name;
             sel.appendChild(mo);
-            return;
+        } else {
+            sel.appendChild(el('option', null, p.name));
         }
-        sel.appendChild(el('option', null, p.name));
     });
-    sel.value = dirty ? (active ? '__revert:' + active : '__modified')
-                      : (active || SYSTEM_DEFAULT);
+    sel.value = active ? (variantOf(active) ? '__variant:' + active : active)
+                       : (draft ? '__modified' : SYSTEM_DEFAULT);
     // real browsers blank the select when the value matches no option
     // (corrupt-store boot: System Default itself may be missing) — then
     // show nothing rather than a lie the picker cannot hold
     if (sel.selectedIndex < 0 && sel.value) { sel.value = ''; }
-    // CHAT-3R round 3: Save is ALWAYS enabled — it opens the name row
-    // (prefilled), so it doubles as rename/copy/create; there is no
-    // dead-button state to compute anymore.
-    // Round 8: Delete follows the DISPLAYED selection and every display
-    // state has an action: a name deletes the preset, the marker
-    // DISCARDS the unsaved changes. Only System Default — the no-op
-    // bucket loadProfiles resurrects EMPTY — stays forbidden.
+    // Save is ALWAYS enabled (round 3): it opens the prefilled modal.
+    // Delete follows the displayed row: a NAME removes the preset, a
+    // '(modified)' row or a draft DISCARDS unsaved work; only the clean
+    // System Default bucket (resurrected EMPTY by loadProfiles) stays
+    // forbidden.
     if (del) del.disabled = sel.value === SYSTEM_DEFAULT;
+}
+function hydrateConv() {
+    // ROUND 11: fill the page from a freshly loaded conversation, then
+    // migrate legacy state: a BOUND conv still carrying the old single
+    // anonymous stash converts it into that profile's variant (best
+    // attribution — the phantom row cannot pop again), and an active
+    // variant re-provisions the whole page after reload.
+    if (!_conv) return;
+    if (!_conv.variants) _conv.variants = {};
+    if (_conv.activeProfile && (_conv.customPrompt || _conv.customState)) {
+        var bp = findProfile(_profiles, _conv.activeProfile);
+        var lp = String(_conv.customPrompt ||
+                        (_conv.customState && _conv.customState.prompt) || '');
+        var lset = (_conv.customState && _conv.customState.settings) || null;
+        if (bp && !variantOf(bp.name)
+            && (lp !== stripNL(bp.content) || lset)) {
+            setVariant(bp.name, { prompt: lp || stripNL(bp.content),
+                                  settings: lset });
+        }
+        _conv.customPrompt = '';
+        _conv.customState = null;
+        saveConv();
+    }
+    var sys = gid('chat-native-sys');
+    var v = variantOf(_conv.activeProfile);
+    if (sys) sys.value = v ? String(v.prompt || '')
+                           : String(_conv.systemPrompt || '');
+    if (v) {
+        _conv.systemPrompt = sys ? sys.value : '';
+        applyChatSettings(v.settings || {});
+    }
+    fillGenerationInputs(_conv);
+    syncProfileSelect();
 }
 
 // ---- conversation state (server-backed) ----------------------------------
@@ -331,6 +373,9 @@ function newConv() {
              // ROUND 9: full-page stash ({prompt, settings}) — the twin of
              // customPrompt carrying everything the active preset does NOT
              customState: null,
+             // ROUND 11: per-profile unsaved working copies —
+             // { <profileName>: {prompt, settings} } (server-persisted)
+             variants: {},
              // thinking: 'auto'|'off'|'on'|'limit' — classic's select, same
              // wire semantics (openai_models.py: enable_thinking,
              // thinking_budget). Live-only: the history store keeps
@@ -477,10 +522,7 @@ async function openConv(id) {
     renderHistory();
     var sel = gid('chat-native-model');
     if (sel) sel.value = _conv.model || '';
-    var sys = gid('chat-native-sys');
-    if (sys) sys.value = _conv.systemPrompt || '';
-    fillGenerationInputs(_conv);   // U46
-    syncProfileSelect();
+    hydrateConv();   // round 11: sys fill + variant apply + legacy migration
     refreshConvList();
 }
 function refreshConvList() {
@@ -1186,16 +1228,21 @@ function toolbar() {
     sys.placeholder = t('chat.system_prompt.placeholder',
                         'e.g. You are a helpful assistant. Be concise.');
     sys.addEventListener('input', function () {
-        // classic semantics: editing does NOT clear the association; it
-        // marks the profile dirty and arms Save (chat.html:2060)
-        syncProfileSelect();
+        // ROUND 11: a keystroke on a bound profile diverges IT (variant),
+        // classic semantics kept: the association is never silently lost
+        onPageEdited();
     });
     sys.addEventListener('change', function () {
         if (!_conv) return;
         _conv.systemPrompt = sys.value;
-        // CHAT-3R: unbound text IS the custom stash (safe-go-back)
-        if (!_conv.activeProfile) _conv.customPrompt = sys.value;
-        saveConv();
+        if (!_conv.activeProfile) {
+            // unbound text IS the draft (the only anonymous state left)
+            _conv.customPrompt = sys.value;
+            _conv.customState = { prompt: sys.value,
+                                  settings: chatSettingsSnapshot() };
+            saveConv();
+        }
+        onPageEdited();   // bound: keep the variant in step (saves)
     });
     // 6/6c + CHAT-3R: preset picker mirror (classic Profile tab), state
     // first. Options are [Modified (unsaved)] + preset names; selecting
@@ -1211,64 +1258,39 @@ function toolbar() {
         var sysEl = gid('chat-native-sys');
         var cur = String((sysEl && sysEl.value) || '');
         if (name === '__modified') {
-            // return to the STASHED page (prompt + settings); the CURRENT
-            // state is re-stashed first so a flip back keeps the latest
-            var nowSnap = chatSettingsSnapshot();
+            // unbound draft: restore the stashed never-saved page (this
+            // row only exists when UNBOUND — round 11)
             var st = _conv.customState || null;
             var stashP = String((st && st.prompt) || _conv.customPrompt || '');
-            var stashS = (st && st.settings) || null;
-            var bound = _conv.activeProfile
-                ? findProfile(_profiles, _conv.activeProfile) : null;
-            var cleanBound = bound && cur === stripNL(bound.content)
-                && !(bound.settings && settingsDiffer(nowSnap, bound.settings));
-            if (!cleanBound) { stashP = cur; stashS = nowSnap; }
-            _conv.customState = { prompt: stashP, settings: stashS };
-            _conv.customPrompt = stashP;          // compat twin (server old readers)
             if (sysEl) sysEl.value = stashP;
-            _conv.systemPrompt = sysEl ? sysEl.value : stripNL(stashP);
-            applyChatSettings(stashS);
+            _conv.systemPrompt = sysEl ? sysEl.value : '';
+            _conv.customPrompt = String(sysEl ? sysEl.value : stashP);
+            _conv.customState = { prompt: _conv.customPrompt,
+                                  settings: chatSettingsSnapshot() };
+            applyChatSettings(st && st.settings);
             _conv.activeProfile = '';
             saveConv();
             syncProfileSelect();
             return;
         }
-        var p = findProfile(_profiles, name);
-        if (!p) {
-            // ROUND 10: the '<name> (modified)' row is an explicit
-            // REVERT — pick your own base back, discard the live edits
-            if (name.indexOf('__revert:') === 0) {
-                var base = findProfile(_profiles, name.slice(9));
-                if (base && _conv) {
-                    sysEl.value = base.content;
-                    _conv.systemPrompt = String(sysEl.value || '');
-                    applyChatSettings(base.settings || {});
-                    _conv.activeProfile = base.name;
-                    saveConv();
-                    syncProfileSelect();
-                }
-                return;
-            }
-            syncProfileSelect(); return;
-        }
-        var nowS = chatSettingsSnapshot();
-        var boundNow = _conv.activeProfile
-            ? findProfile(_profiles, _conv.activeProfile) : null;
-        var cleanNow = boundNow && cur === stripNL(boundNow.content)
-            && !(boundNow.settings && settingsDiffer(nowS, boundNow.settings));
-        if (!cleanNow) {                          // unsaved page: stash it whole
+        // ROUND 11: '__variant:Name' and 'Name' both select the profile;
+        // the variant (working copy) is applied when one exists, so the
+        // page you left is the page you come back to.
+        var pname = name.indexOf('__variant:') === 0 ? name.slice(10) : name;
+        var base = findProfile(_profiles, pname);
+        if (!base) { syncProfileSelect(); return; }
+        // leaving an UNBOUND draft behind: stash it (the anonymous slot
+        // survives ONLY for never-saved text now)
+        if (!_conv.activeProfile && (cur || _conv.customPrompt)) {
             _conv.customPrompt = cur;
-            _conv.customState = { prompt: cur, settings: nowS };
+            _conv.customState = { prompt: cur, settings: chatSettingsSnapshot() };
         }
-        if (sysEl) sysEl.value = p.content;
-        // what the FIELD holds is the truth (browser stripped newlines);
-        // persist that exact string so a reload cannot look 'dirty'
-        _conv.systemPrompt = sysEl ? sysEl.value : stripNL(p.content);
-        // ROUND 9: selecting ALWAYS re-provisions the whole page — an
-        // entry without a settings blob (classic-era) means DEFAULTS.
-        // (The dirty COMPARISON stays prompt-only for such entries: we
-        // never re-mark state the preset never claimed to own.)
-        applyChatSettings(p.settings || {});
-        _conv.activeProfile = p.name;
+        var v = variantOf(base.name);
+        var wantP = v ? String(v.prompt || '') : String(base.content || '');
+        if (sysEl) sysEl.value = wantP;
+        _conv.systemPrompt = sysEl ? sysEl.value : stripNL(wantP);
+        applyChatSettings(v ? v.settings : (base.settings || {}));
+        _conv.activeProfile = base.name;
         saveConv();
         syncProfileSelect();
     });
@@ -1326,8 +1348,9 @@ function toolbar() {
         if (_conv) {
             _conv.activeProfile = name;
             _conv.systemPrompt = content;
-            // round 8/9: the page is SAVED now — a stash equal to what we
-            // just committed is stale clutter haunting the marker
+            // round 8/9/11: the page is SAVED now — the profile's working
+            // copy (and any equal stash) is committed, not pending
+            setVariant(name, null);
             var st = _conv.customState;
             if (_conv.customPrompt === content
                 && (!st || !st.settings || !settingsDiffer(st.settings, snap))) {
@@ -1358,31 +1381,38 @@ function toolbar() {
     presetDel.type = 'button'; presetDel.id = 'chat-native-preset-del';
     presetDel.disabled = true;
     presetDel.addEventListener('click', function () {
-        // round 6/8 (user): delete acts on WHAT THE PICKER DISPLAYS.
-        // A NAME deletes that preset; the MARKER is not a name — it is
-        // the unsaved state, so deleting it DISCARDS the unsaved
-        // changes: a bound edit reverts to its preset, unbound text
-        // (and its stash) is dropped and the state reads System Default.
+        // ROUND 11: Delete follows the displayed row. 'Name (modified)'
+        // DISCARDS that profile's working copy and reverts the page to
+        // the saved base; the draft row drops the unsaved text; a clean
+        // NAME removes the preset (page keeps its text); System Default
+        // clean stays forbidden (loadProfiles would resurrect it EMPTY).
         var name = prof.value;
-        // '__modified' (stash/unbound draft) and '__revert:<name>'
-        // (round 10: '<name> (modified)' row) are both UNSAVED states —
-        // Delete reverts/drops them, never touches the store entry
-        if (name === '__modified' || name.indexOf('__revert:') === 0) {
+        if (name.indexOf('__variant:') === 0) {
+            var vn = name.slice(10);
             if (!_conv) return;
             if (!window.confirm(t('uplift.chat.preset_discard_confirm',
                                   'Discard unsaved prompt changes?'))) return;
-            var bound = _conv.activeProfile
-                ? findProfile(_profiles, _conv.activeProfile) : null;
-            if (bound) {
-                sys.value = stripNL(bound.content);
-                _conv.systemPrompt = String(sys.value || '');
-                applyChatSettings(bound.settings || {});  // round 9: page back
-            } else {
-                sys.value = '';
-                _conv.systemPrompt = '';
-                _conv.customPrompt = '';    // unbound: the stash IS the text
-                _conv.customState = null;
+            setVariant(vn, null);
+            if (_conv.activeProfile === vn) {
+                var b2 = findProfile(_profiles, vn);
+                if (b2) {
+                    sys.value = stripNL(b2.content);
+                    _conv.systemPrompt = String(sys.value || '');
+                    applyChatSettings(b2.settings || {});
+                }
             }
+            saveConv();
+            syncProfileSelect();
+            return;
+        }
+        if (name === '__modified') {
+            if (!_conv) return;
+            if (!window.confirm(t('uplift.chat.preset_discard_confirm',
+                                  'Discard unsaved prompt changes?'))) return;
+            sys.value = '';
+            _conv.systemPrompt = '';
+            _conv.customPrompt = '';    // unbound: the draft IS the text
+            _conv.customState = null;
             saveConv();
             syncProfileSelect();
             return;
@@ -1395,6 +1425,7 @@ function toolbar() {
         _profiles = _profiles.filter(function (x) { return x.name !== p.name; });
         persistProfiles(_profiles);
         if (_conv) {
+            setVariant(p.name, null);   // the entry is gone; its copy too
             // text stays visible; it becomes the stashed custom prompt
             _conv.customPrompt = String(sys.value || '');
             _conv.systemPrompt = _conv.customPrompt;
@@ -1439,7 +1470,7 @@ function toolbar() {
         _conv.thinkingBudget = (isFinite(b) && b >= 0) ? b : null;
         showBudget(think.value === 'limit');   // U79+U80: group + input together
         saveConv();   // fields themselves are live-only (store drops them)
-        syncProfileSelect();   // ROUND 9: a settings change re-marks the preset
+        onPageEdited();        // ROUND 11: settings divergence -> variant
     }
     think.addEventListener('change', saveThinking);
     budget.addEventListener('change', saveThinking);
@@ -1455,7 +1486,7 @@ function toolbar() {
         web.title = _webSearch ? t('chat.web_search_on',
                                    'Web search is on. Click to turn it off')
                                : t('chat.web_search_off', 'Turn on web search');
-        syncProfileSelect();   // ROUND 9: web search is part of the preset
+        onPageEdited();        // ROUND 11
         return _webSearch;
     }
     // U45: the last-turn toolbar trio is GONE — copy/regenerate/edit/
@@ -1550,7 +1581,7 @@ function toolbar() {
                          // current speech — half a sentence in the old
                          // voice reads like a glitch
         if (_dc) renderHistory();   // re-attach: speak buttons track voices
-        syncProfileSelect();        // ROUND 9: voice-out is part of the preset
+        onPageEdited();             // ROUND 11
     });
     // VOICE-11: AUTO-SPEAK toggle + chunk mode, next to the Voice picker
     var autoBtn = el('button', 'btn', tf2('uplift.chat.autospeak', 'Auto-speak'));
@@ -1569,7 +1600,7 @@ function toolbar() {
         // VOICE-11 cancel rule: toggled OFF cuts the live read; toggled
         // ON spends this gesture unlocking the shared AudioContext
         if (on) unlockSpeak(); else speakCancel();
-        syncProfileSelect();   // ROUND 9
+        onPageEdited();        // ROUND 11
     });
     var chunkSel = el('select'); chunkSel.id = 'chat-native-speak-chunk';
     [['sentence', 'uplift.chat.speak_chunk_sentence', 'Sentence'],
@@ -1589,7 +1620,7 @@ function toolbar() {
     chunkSel.addEventListener('change', function () {
         // takes effect NEXT turn (the live splitter keeps its boundaries)
         lsSet(CHUNK_KEY, chunkSel.value || 'sentence');
-        syncProfileSelect();   // ROUND 9
+        onPageEdited();        // ROUND 11
     });
     // CHAT-3R: the TTS trio (voice / auto-speak / chunk) under its own
     // section; captions keep the U45 one-label-per-control rule.
@@ -1633,7 +1664,7 @@ function toolbar() {
             if (!_conv) return;
             _conv.generation = readGenerationInputs();
             saveConv();
-            syncProfileSelect();   // ROUND 9: sampling re-marks the preset
+            onPageEdited();        // ROUND 11
         });
         genRow.appendChild(group(t(label, fb), inp));
     });
@@ -2554,7 +2585,7 @@ function openSttPop(host) {
         sttListenerStop(false);   // VOICE-13: a live session on the OLD model
                                   // must release the engine's one realtime slot
         syncSttMic();
-        syncProfileSelect();      // ROUND 9: voice-in is part of the preset
+        onPageEdited();           // ROUND 11
     });
     row('uplift.chat.stt_input_model', 'Input model', ms);
     // row 2 — LANGUAGE: Auto = omit the form field entirely (VOICE-5
@@ -2570,7 +2601,7 @@ function openSttPop(host) {
     lsel.value = sttLang();
     lsel.addEventListener('change', function () {
         lsSet(STT_LANG_KEY, lsel.value || '');
-        syncProfileSelect();   // ROUND 9
+        onPageEdited();        // ROUND 11
     });
     row('uplift.chat.stt_language', 'Language', lsel,
         'uplift.chat.stt_lang_hint',
@@ -2582,7 +2613,7 @@ function openSttPop(host) {
     cb.checked = sttAutoSend();
     cb.addEventListener('change', function () {
         lsSet(STT_SEND_KEY, cb.checked ? '1' : '0');
-        syncProfileSelect();   // ROUND 9
+        onPageEdited();        // ROUND 11
     });
     row('uplift.chat.stt_autosend', 'Auto-send', cb).classList.add('inline');
     // row 4 — MODE radios. VOICE-13: 'continuous' IS the live listener now
@@ -2614,7 +2645,7 @@ function openSttPop(host) {
             sttListenerStop(false);
             hint.hidden = mo[0] !== 'continuous';
             syncSttMic();        // Off hides the mic; the hint follows the mode
-            syncProfileSelect(); // ROUND 9
+            onPageEdited();      // ROUND 11
         });
         var lb = el('span', null, tf2(mo[1], mo[2]));
         lb.dataset.i18n = mo[1]; lb.dataset.en = mo[2];
@@ -3824,7 +3855,7 @@ function mount() {
         var sys = gid('chat-native-sys');
         if (sys) sys.value = _conv.systemPrompt || '';
         fillGenerationInputs(_conv);   // U46: restored conv keeps its overrides
-        syncProfileSelect();   // restored conv may carry an activeProfile
+        hydrateConv();   // round 11: variant apply + legacy migration at boot
         refreshConvList();
         if (!_models.length) {
             D().toast(t('chat.no_models', 'No models available'), 'error');

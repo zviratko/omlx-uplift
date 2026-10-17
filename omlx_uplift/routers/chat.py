@@ -112,6 +112,25 @@ def _clean_state(raw):
     return out
 
 
+def _clean_variants(raw):
+    """ROUND 11: per-profile unsaved working copies {name: {prompt,
+    settings}}. Reuses _clean_state per entry; caps entry count and name
+    length; total blob cap 20 KB, over-cap collapses to {} (variants are
+    a convenience, the saved store is the truth)."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for k, v in list(raw.items())[:12]:
+        if not isinstance(k, str) or not k or len(k) > 48:
+            continue
+        cv = _clean_state(v if isinstance(v, dict) else None)
+        if cv and (cv["prompt"] or cv["settings"]):
+            out[k] = cv
+    if len(json.dumps(out, ensure_ascii=False)) > 20000:
+        return {}
+    return out
+
+
 def _clean_generation(raw):
     """U46: per-chat sampling overrides — classic's snapshotGenerationSettings
     fields (chat.html:3386), persisted per session like classic does.
@@ -256,6 +275,9 @@ async def chat_history_save(request: Request,
         "customPrompt": str(body.get("customPrompt") or "")[:8000],
         # ROUND 9: full-page stash twin ({prompt, settings}) — see _clean_state
         "customState": _clean_state(body.get("customState")),
+        # ROUND 11: per-profile unsaved working copies (the stash's
+        # successor — divergence belongs to the profile, not to a slot)
+        "variants": _clean_variants(body.get("variants")),
         "thinking": bool(body.get("thinking")),
         "thinkingBudget": body.get("thinkingBudget")
         if isinstance(body.get("thinkingBudget"), int) else None,
