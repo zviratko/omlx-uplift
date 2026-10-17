@@ -936,6 +936,7 @@
  "uplift.chat.speak_dropped": "已跳过 {n} 个音频分段",
  "uplift.chat.speak_failed": "无法播放此回复的音频。",
  "uplift.chat.stt_title": "语音输入",
+ "uplift.chat.tts_title": "语音输出",
  "uplift.chat.stt_input_model": "输入模型",
  "uplift.chat.stt_none": "无",
  "uplift.chat.stt_language": "语言",

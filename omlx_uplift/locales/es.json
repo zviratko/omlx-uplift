@@ -940,6 +940,7 @@
  "uplift.chat.speak_dropped": "Se omitieron {n} fragmentos de audio",
  "uplift.chat.speak_failed": "No se pudo reproducir audio de esta respuesta.",
  "uplift.chat.stt_title": "Entrada de voz",
+ "uplift.chat.tts_title": "Salida de voz",
  "uplift.chat.stt_input_model": "Modelo de entrada",
  "uplift.chat.stt_none": "Ninguno",
  "uplift.chat.stt_language": "Idioma",

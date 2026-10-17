@@ -343,14 +343,15 @@ const CANCEL_RULES = {
         h.win.UpliftNativeChat._state().dc.onMessage({ message: { role: 'user', text: 'next' } });
     },
     'conversation switch': async (h) => {
-        const list = h.byId['chat-native-convs'];
-        list.value = 'c1';   // mount opened the LATEST (c2); switch away
-        list.dispatch('change');
+        // CHAT-3R: the picker became the left history LIST — switching is a
+        // click on the conversation row (dataset.id), not a select change.
+        const item = (h.byId['chat-native-convs'].children || [])
+            .find(c => c.dataset && c.dataset.id === 'c1');
+        item.dispatch('click');
         await flush();
     },
     'new chat button': async (h) => {
-        const rowConv = h.byId['chat-native-bar'].children[0];
-        rowConv.children[1].dispatch('click');   // [0]=history group, [1]=newBtn
+        h.byId['chat-native-new'].dispatch('click');   // CHAT-3R: stable id
     },
     'voice picker change': async (h) => {
         const sel = h.byId['chat-native-voice'];

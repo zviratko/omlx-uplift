@@ -16,6 +16,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { STATIC_DIR } = require('./static-src.cjs');
+const LOCALES_DIR = `${STATIC_DIR}/../locales`;   // CHAT-3R locale parity pins
 
 const CAT = {
     'chat.new_chat': 'NEWCHAT',
@@ -583,18 +584,51 @@ test('U74: reply + reasoning edits commit IN PLACE; edited rows ride the wire', 
         .test(src), 'reasoning rides the wire only after a user edit');
 });
 
-test('U79: toolbar rows regrouped by concern', () => {
+test('CHAT-3R: three-region layout — histories left, model/profile top, controls right', () => {
     const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
-    // row membership is the contract: lifecycle together, prompt+Save together
-    assert.ok(/rowConv\.append\([\s\S]*?newBtn, expBtn, impBtn, fileIn, del\);/.test(src),
-        'conversation row: picker, new, export, import, DELETE in one place');
-    assert.ok(/rowPrompt\.append\([\s\S]*?profSave\);/.test(src)
-        && /group\(t\('chat\.system_prompt\.title'/.test(src)
-        && src.indexOf("'chat.system_prompt.title'") < src.indexOf('profSave);'),
-        'Save Settings sits directly after the System Prompt it saves into');
+    assert.ok(/layout\.append\(hist, mainCol, side\)/.test(src),
+        'hist LEFT | chat column | control rail RIGHT');
+    assert.ok(/hist\.append\(histTitle, newBtn, rowIO, list, del\)/.test(src),
+        'history rail: caption, new, export+import row, the list, DELETE in-region');
+    assert.ok(/secModel\.append\(thinkGroup, budGroup, web, genRow\)/.test(src),
+        'Model Settings section owns thinking + budget + web + the sampling grid');
+    assert.ok(/secStt\.append\(sttGroup, mic\)/.test(src),
+        'Voice input section: settings entry in its position:relative group + mic');
+    assert.ok(/secTts\.append\(\s*group\(tf2\('uplift\.chat\.voice'[\s\S]*?autospeak[\s\S]*?speak_chunk/.test(src),
+        'Voice output section owns the TTS trio (voice / auto-speak / chunk)');
+    assert.ok(/secSys\.append\(sys, profSave\)/.test(src),
+        'Save sits directly after the System Prompt it saves into');
+    assert.ok(!/rowConv|rowPrompt\b|rowGen\b/.test(src),
+        'the stacked-rows era is gone (U79 contract moved into the rail)');
+    assert.ok(/budGroup/.test(src), 'thinking budget carries a caption group');
+    const css = fs.readFileSync(`${STATIC_DIR}/uplift.css`, 'utf8');
+    assert.ok(/\.chat-native-layout \{/.test(css) && /\.chat-native-convlist \{/.test(css),
+        'layout + history-list CSS shipped');
+    assert.ok(/\.chat-native-side \.chat-native-pop \{ left: auto; right: 0;/.test(css),
+        'the voice-input popover opens leftwards inside the rail');
+    // one new key, ten locales, real translations (cs must not equal en)
+    const en = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/en.json`, 'utf8'));
+    const cs = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/cs.json`, 'utf8'));
+    for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+        const d = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/${loc}.json`, 'utf8'));
+        const v = d['uplift.chat.tts_title'];
+        assert.ok(v && v.length, `uplift.chat.tts_title present in ${loc}`);
+        if (loc !== 'en') assert.notEqual(v, en['uplift.chat.tts_title'],
+            `${loc} carries a real translation, not the EN text`);
+    }
+    assert.notEqual(cs['uplift.chat.tts_title'], en['uplift.chat.tts_title'],
+        'cs differs from en');
+    void cs;
+});
+
+test('U79-era doctrine: destructive action inside its region (moved to the history rail)', () => {
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    // the delete button lives in the HISTORY rail now, right where the
+    // conversation being deleted is selected — same intent, new geometry
+    assert.ok(/hist\.append\([\s\S]*?del\)/.test(src),
+        'DELETE stays inside its group rather than orphaned at a screen edge');
     assert.ok(!/chat-native-pickers/.test(src),
         'the accretion-era pickers row is gone');
-    assert.ok(/budGroup/.test(src), 'thinking budget carries a caption group');
 });
 
 test('U76-U78: web label, export/import buttons, sampling provenance chip', () => {

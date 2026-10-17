@@ -951,6 +951,7 @@
  "uplift.chat.speak_dropped": "오디오 청크 {n}개를 건너뛰었습니다",
  "uplift.chat.speak_failed": "이 답변의 오디오를 재생할 수 없습니다.",
  "uplift.chat.stt_title": "음성 입력",
+ "uplift.chat.tts_title": "음성 출력",
  "uplift.chat.stt_input_model": "입력 모델",
  "uplift.chat.stt_none": "없음",
  "uplift.chat.stt_language": "언어",

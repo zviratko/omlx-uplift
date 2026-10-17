@@ -939,6 +939,7 @@
  "uplift.chat.speak_dropped": "音声チャンク {n} 個をスキップしました",
  "uplift.chat.speak_failed": "この応答の音声を再生できませんでした。",
  "uplift.chat.stt_title": "音声入力",
+ "uplift.chat.tts_title": "音声出力",
  "uplift.chat.stt_input_model": "入力モデル",
  "uplift.chat.stt_none": "なし",
  "uplift.chat.stt_language": "言語",

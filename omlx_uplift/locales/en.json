@@ -936,6 +936,7 @@
  "uplift.chat.speak_dropped": "{n} audio chunks were skipped",
  "uplift.chat.speak_failed": "No audio could be played for this reply.",
  "uplift.chat.stt_title": "Voice input",
+ "uplift.chat.tts_title": "Voice output",
  "uplift.chat.stt_input_model": "Input model",
  "uplift.chat.stt_none": "None",
  "uplift.chat.stt_language": "Language",

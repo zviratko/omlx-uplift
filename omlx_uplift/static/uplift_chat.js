@@ -318,16 +318,26 @@ async function openConv(id) {
     refreshConvList();
 }
 function refreshConvList() {
+    // CHAT-3R: the picker became the LEFT history list (classic renders
+    // conversations as rows, not a <select>). Same contract as before:
+    // one entry per summary, newest first, click switches (openConv keeps
+    // the VOICE-11/13 cancel + teardown rules).
     var list = gid('chat-native-convs');
     if (!list) return;
-    var ph = el('option', null, t('chat.chat_history_label', 'Chat History'));
-    ph.value = '';
-    list.replaceChildren(ph);
+    list.replaceChildren();
     _convs.slice().reverse().forEach(function (s) {
-        var o = el('option', null, (s.title || s.id).slice(0, 40));
-        o.value = s.id;
-        if (_conv && s.id === _conv.id) o.selected = true;
-        list.appendChild(o);
+        var b = el('button', 'chat-native-conv',
+                   (s.title || s.id).slice(0, 48));
+        b.type = 'button';
+        b.title = s.title || s.id;
+        b.dataset.id = s.id;
+        if (_conv && s.id === _conv.id) b.classList.add('active');
+        b.addEventListener('click', function () {
+            if (_conv && s.id === _conv.id) return;
+            openConv(s.id).catch(function (e) {
+                D().toast(String((e && e.message) || e), 'error'); });
+        });
+        list.appendChild(b);
     });
 }
 
@@ -968,15 +978,18 @@ function readGenerationInputs() {
     return Object.keys(g).length ? g : null;
 }
 
+// CHAT-3R (user 2026-10-17): classic's 3-region layout — histories LEFT,
+// model/profile ABOVE the chat box, controls RIGHT grouped by concern
+// (Model Settings incl. sampling | Voice input | Voice output | System
+// Prompt). Every control keeps its id and behavior; this is relocation,
+// not rework. Containers that hold controls keep .chat-native-bar so the
+// control-sizing/[hidden]/.btn cascade applies unchanged.
 function toolbar() {
-    var bar = el('div', 'chat-native-bar'); bar.id = 'chat-native-bar';
-    var list = el('select'); list.id = 'chat-native-convs';
-    list.addEventListener('change', function () {
-        if (list.value) openConv(list.value).catch(function (e) {
-            D().toast(String((e && e.message) || e), 'error'); });
-    });
+    var hist = el('aside', 'chat-native-bar chat-native-hist');
+    var list = el('div'); list.id = 'chat-native-convs';
+    list.className = 'chat-native-convlist';
     var newBtn = el('button', 'btn', t('chat.new_chat', 'New Chat'));
-    newBtn.type = 'button';
+    newBtn.type = 'button'; newBtn.id = 'chat-native-new';
     newBtn.addEventListener('click', function () {
         speakCancel();   // VOICE-11 cancel rule: New Chat cuts the live read
         sttListenerStop(false);   // VOICE-13 teardown: same rule for the mic
@@ -991,6 +1004,8 @@ function toolbar() {
         syncProfileSelect();
         refreshConvList();
     });
+    var top = el('div', 'chat-native-bar chat-native-toprow');
+    top.id = 'chat-native-bar';   // observeChatChrome watches THIS row
     var sel = el('select'); sel.id = 'chat-native-model';
     var ph = el('option', null, t('chat.select_model', 'Select Model'));
     ph.value = ''; sel.appendChild(ph);
@@ -1124,9 +1139,6 @@ function toolbar() {
         var lab = el('span', 'chat-native-group-label', labelText);
         if (labelKey) { lab.dataset.i18n = labelKey; lab.dataset.en = labelText; }  // U59
         g.append(lab, control);
-        // the sys prompt keeps the old .chat-native-bar stretch behavior
-        // (was a direct flex child; now inside a column group)
-        if (control.id === 'chat-native-sys') g.classList.add('chat-native-grow');
         return g;
     }
     // U77 (user: 'add the options to export and import the chat'):
@@ -1150,31 +1162,23 @@ function toolbar() {
     fileIn.addEventListener('change', function (ev) {
         importChats(ev.target);
     });
-    // U79 (user: 'the control layout is horrible... Download and import
-    // on the left, delete on the right, new chat on the left, Save
-    // setting completely disconnected from the system prompt'): rows by
-    // CONCERN, each control next to what it acts on, every destructive
-    // action inside its group rather than orphaned at a screen edge.
-    //   row 1  CONVERSATION: open / new / export / import / delete
-    //   row 2  SESSION:      model, prompt profile, prompt text + Save
-    //                        (Save writes the prompt into the profile —
-    //                        it sits right after the text it saves)
-    //   row 3  BEHAVIOUR:    thinking, budget, web search, mic
-    //   row 4  SAMPLING:     the seven override inputs (unchanged)
-    var rowConv = el('div', 'chat-native-bar chat-native-row');
-    rowConv.append(
-        group(t('chat.chat_history_label', 'Chat History'), list,
-              'chat.chat_history_label'),
-        newBtn, expBtn, impBtn, fileIn, del);
-    var rowPrompt = el('div', 'chat-native-bar chat-native-row');
-    rowPrompt.append(
-        group(t('chat.active_model', 'Active Model'), sel, 'chat.active_model'),
-        group(t('chat.active_profile', 'Active Profile'), prof, 'chat.active_profile'),
-        group(t('chat.system_prompt.title', 'System Prompt'), sys,
-              'chat.system_prompt.title'),
-        profSave);
-    var rowGen = el('div', 'chat-native-bar chat-native-row');
+    // CHAT-3R (the U79 doctrine survives, relocated): sections by CONCERN
+    // in the RIGHT rail; destructive actions stay inside their region;
+    // Save stays next to the prompt it saves; every control keeps its
+    // caption. section() is the group() idea one level up: a caption with
+    // stacked controls under it.
+    function section(titleKey, titleFb) {
+        var s = el('div', 'chat-native-sec');
+        var h = el('span', 'chat-native-sec-title', t(titleKey, titleFb));
+        h.dataset.i18n = titleKey; h.dataset.en = titleFb;
+        s.appendChild(h);
+        return s;
+    }
+    var secModel = section('navbar.dropdown.model_settings',
+                           'Model Settings');
     think.title = t('chat.thinking_label', 'Thinking');
+    var thinkGroup = group(t('chat.thinking_label', 'Thinking'), think,
+                           'chat.thinking_label');
     // U79: the budget input was the only UNLABELED control left (it only
     // appears when mode=Limit); classic captions it 'Thinking Budget'
     var budGroup = group(t('modal.model_settings.thinking_budget',
@@ -1239,19 +1243,28 @@ function toolbar() {
         // takes effect NEXT turn (the live splitter keeps its boundaries)
         lsSet(CHUNK_KEY, chunkSel.value || 'sentence');
     });
-    rowGen.append(
-        group(t('chat.thinking_label', 'Thinking'), think, 'chat.thinking_label'),
-        budGroup, web, mic,
+    // CHAT-3R: the TTS trio (voice / auto-speak / chunk) under its own
+    // section; captions keep the U45 one-label-per-control rule.
+    var secTts = section('uplift.chat.tts_title', 'Voice output');
+    secTts.append(
         group(tf2('uplift.chat.voice', 'Voice'), voiceSel, 'uplift.chat.voice'),
         group(tf2('uplift.chat.autospeak', 'Auto-speak'), autoBtn,
               'uplift.chat.autospeak'),
         group(tf2('uplift.chat.speak_chunk', 'Chunk'), chunkSel,
-              'uplift.chat.speak_chunk'),
-        // VOICE-12: voice INPUT is a setting, not a chat-model choice —
-        // this opens the popover owning STT model / language / auto-send /
-        // mode; the mic button on this row follows it (syncSttMic).
-        group(tf2('uplift.chat.stt_title', 'Voice input'),
-              sttSettingsBtn(), 'uplift.chat.stt_title'));
+              'uplift.chat.speak_chunk'));
+    // VOICE-12: voice INPUT is a setting, not a chat-model choice — the
+    // section owns the popover (STT model / language / auto-send / mode)
+    // and the mic button that follows it (syncSttMic).
+    var secStt = section('uplift.chat.stt_title', 'Voice input');
+    // openSttPop positions against btn.parentElement — keep a
+    // .chat-native-group wrapper (it carries position:relative) or the
+    // popover anchors to the whole section instead of the button.
+    var sttGroup = el('div', 'chat-native-group');
+    sttGroup.appendChild(sttSettingsBtn());
+    secStt.append(sttGroup, mic);
+    // CHAT-3R: prompt + Save together (classic drawer Profile tab mirror).
+    var secSys = section('chat.system_prompt.title', 'System Prompt');
+    secSys.append(sys, profSave);
     // U46: sampling overrides (classic sidebar parity) — own captioned row,
     // each input numeric, blank = engine default, 0 stays a real value.
     var genRow = el('div', 'chat-native-bar chat-native-sampling');
@@ -1268,8 +1281,29 @@ function toolbar() {
         });
         genRow.appendChild(group(t(label, fb), inp));
     });
-    bar.append(rowConv, rowPrompt, rowGen, genRow);
-    return bar;
+    // CHAT-3R assembly: LEFT histories | MAIN top row + chat box | RIGHT
+    // control rail (Model Settings with the seven sampling overrides,
+    // Voice input, Voice output, System Prompt).
+    secModel.append(thinkGroup, budGroup, web, genRow);
+    var side = el('aside', 'chat-native-bar chat-native-side');
+    side.append(secModel, secStt, secTts, secSys);
+    var histTitle = el('span', 'chat-native-sec-title',
+                       t('chat.chat_history_label', 'Chat History'));
+    histTitle.dataset.i18n = 'chat.chat_history_label';
+    histTitle.dataset.en = 'Chat History';
+    var rowIO = el('div', 'chat-native-sec-row');
+    rowIO.append(expBtn, impBtn, fileIn);
+    hist.append(histTitle, newBtn, rowIO, list, del);
+    top.append(
+        group(t('chat.active_model', 'Active Model'), sel, 'chat.active_model'),
+        group(t('chat.active_profile', 'Active Profile'), prof,
+              'chat.active_profile'));
+    var dcHost = el('div'); dcHost.id = 'chat-native-dc';
+    var mainCol = el('div', 'chat-native-main');
+    mainCol.append(top, dcHost);
+    var layout = el('div', 'chat-native-layout');
+    layout.append(hist, mainCol, side);
+    return layout;
 }
 
 // ---------------------------------------------------------------------------
@@ -3249,8 +3283,11 @@ function mount() {
         // blocks inside the shadow root; fitHeight no longer reserves a
         // band for it.
         var dcHost = gid('chat-native-dc');
-        if (!dcHost) { dcHost = el('div'); dcHost.id = 'chat-native-dc'; }
-        wrap.append(dcHost);
+        if (!dcHost) {
+            // legacy shape (no CHAT-3R layout): fall back to the flat wrap
+            dcHost = el('div'); dcHost.id = 'chat-native-dc';
+            wrap.append(dcHost);
+        }
         // summary rows carry no messages — open the latest conversation
         // fully before rendering (the picker is summaries by design)
         return _convs.length

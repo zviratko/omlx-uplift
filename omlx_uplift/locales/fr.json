@@ -940,6 +940,7 @@
  "uplift.chat.speak_dropped": "{n} segments audio ont été ignorés",
  "uplift.chat.speak_failed": "Aucun audio n'a pu être lu pour cette réponse.",
  "uplift.chat.stt_title": "Saisie vocale",
+ "uplift.chat.tts_title": "Sortie vocale",
  "uplift.chat.stt_input_model": "Modèle d’entrée",
  "uplift.chat.stt_none": "Aucun",
  "uplift.chat.stt_language": "Langue",

@@ -698,9 +698,9 @@ test('VOICE-13: conversation switch closes the socket and clears the chip', asyn
     const ws = await h.listen();
     ws.open(); ws.ready();
     ws.delta('still talking when I left');
-    const picker = h.byId['chat-native-convs'];
-    picker.value = 'c1';
-    picker.dispatch('change');
+    const c1 = (h.byId['chat-native-convs'].children || [])
+        .find(c => c.dataset && c.dataset.id === 'c1');
+    c1.dispatch('click');   // CHAT-3R: history rows are buttons now
     await h.flush(10);
     assert.equal(ws.closed, true, 'the realtime socket closed on the switch');
     assert.equal(h.probe(), null, 'listener idle again');

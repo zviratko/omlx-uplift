@@ -936,6 +936,7 @@
  "uplift.chat.speak_dropped": "Předčítání: přeskočeno {n} úseků audia",
  "uplift.chat.speak_failed": "Tuto odpověď se nepodařilo ozvučit.",
  "uplift.chat.stt_title": "Hlasový vstup",
+ "uplift.chat.tts_title": "Hlasový výstup",
  "uplift.chat.stt_input_model": "Vstupní model",
  "uplift.chat.stt_none": "Žádný",
  "uplift.chat.stt_language": "Jazyk",

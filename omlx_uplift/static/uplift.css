@@ -2910,6 +2910,53 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-native-sampling input[type=number] { width: 100%; font-size: 11px;
     background: var(--field); border: 1px solid var(--edge); color: var(--ink);
     padding: 4px 6px; }
+/* CHAT-3R (user: 'put the controls on the right... chat histories at the
+   left... similar to what classic does'): three regions — history rail |
+   chat column (top row + box) | control rail. Rails reuse .chat-native-bar
+   as the styling CONTEXT (control sizing, [hidden], .btn all cascade);
+   these rules only add the flex direction and the new widgets. The
+   sampling grid needs no override — auto-fill collapses to 2 columns at
+   the rail width by itself. */
+.chat-native-layout { display: flex; gap: 10px; align-items: flex-start; }
+.chat-native-hist { flex: 0 0 170px; min-width: 0; }
+.chat-native-hist.chat-native-bar { flex-direction: column;
+    align-items: stretch; gap: 6px; }
+.chat-native-main { flex: 1 1 auto; min-width: 0; display: flex;
+    flex-direction: column; gap: 8px; }
+.chat-native-side { flex: 0 0 220px; min-width: 0; }
+.chat-native-side.chat-native-bar { flex-direction: column;
+    align-items: stretch; }
+.chat-native-toprow .chat-native-group { flex: 1 1 180px; min-width: 140px; }
+.chat-native-sec { display: flex; flex-direction: column; gap: 4px;
+    min-width: 0; }
+.chat-native-sec-title { font-size: 10px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--dim); }
+.chat-native-sec-row { display: flex; gap: 6px; }
+.chat-native-sec-row .btn { flex: 1 1 0; min-width: 0; }
+.chat-native-convlist { display: flex; flex-direction: column; gap: 2px;
+    flex: 1 1 auto; min-height: 60px; max-height: 45vh; overflow-y: auto; }
+.chat-native-conv { text-align: left; font-size: 11px; padding: 4px 6px;
+    border: 1px solid transparent; border-radius: var(--radius);
+    background: none; color: var(--ink); cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-native-conv:hover { background: var(--field); }
+.chat-native-conv.active { border-color: var(--edge);
+    background: var(--field); font-weight: 600; }
+.chat-native-side #chat-native-sys { width: 100%; min-height: 44px; }
+.chat-native-side #chat-native-profile-save { align-self: flex-start; }
+/* the voice-input popover opens to the LEFT inside the right rail so it
+   can never overflow the viewport edge (its anchor group is position:
+   relative — same mechanism as the old row layout) */
+.chat-native-side .chat-native-pop { left: auto; right: 0; }
+@media (max-width: 940px) {
+    .chat-native-layout { flex-direction: column; }
+    .chat-native-hist, .chat-native-side { flex: 1 1 auto; width: 100%; }
+    .chat-native-hist.chat-native-bar { flex-wrap: wrap; }
+    .chat-native-side.chat-native-bar { flex-direction: row; }
+    .chat-native-sec { flex: 1 1 200px; }
+    .chat-native-convlist { flex: 1 1 140px; min-width: 140px;
+        max-height: 22vh; }
+}
 
 /* U71: the light-DOM thinking panel is GONE — thinking renders per reply
    INSIDE deep-chat's shadow root (.chat-native-thinking, styled in
