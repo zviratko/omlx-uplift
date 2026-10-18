@@ -1905,6 +1905,7 @@ function speakFeed(delta, gen) {
         if (q.push({ text: chunks[i],
                      source: p ? chunkSource(p.owner, chunks[i]) : null }) >= 0) {
             _speakPushed++;
+            q.__pushed = (q.__pushed || 0) + 1;
             if (p) { p.chunks.push(chunks[i]); sayGrow(p); }
         }
     }
@@ -1934,6 +1935,7 @@ function endSpeakTurn(gen) {
         if (q.push({ text: chunks[i], source: _livePlan
                      ? chunkSource(_livePlan.owner, chunks[i]) : null }) >= 0) {
             _speakPushed++;
+            q.__pushed = (q.__pushed || 0) + 1;
             if (_livePlan) { _livePlan.chunks.push(chunks[i]); sayGrow(_livePlan); }
         }
     }
@@ -2374,21 +2376,28 @@ function queueFor(plan) {
     return plan.q;
 }
 function sayItemEvent(plan, it, st) {
+    // NOTE: the engine marks a chunk 'playing' when it is SCHEDULED, which for
+    // a gapless read happens while the PREVIOUS chunk is still sounding. The
+    // highlight must therefore follow position(), never this event — otherwise
+    // the first thing that lights is the second line.
     sayPaint(plan, it.seq);
-    if (st === 'playing') {
-        plan.playSeq = it.seq;
-        sayHighlight(plan, it.seq);
-        sayWatch(plan);
-    }
+    if (st === 'playing') sayWatch(plan);
     sayInlinePaint(plan);
 }
 function sayFeed(plan, q) {
-    if (q.__fed) return q;
-    for (var i = 0; i < plan.chunks.length; i++) {
-        var text = plan.chunks[i];
-        q.push({ text: text, source: chunkSource(plan.owner, text) });
+    // The live turn already handed its chunks to this queue one by one; feeding
+    // them a second time gave the queue TWO copies of the reply, which is why
+    // play-all read everything twice (and why the second pass had no row to
+    // light: rows are numbered by the plan, the queue was not). Count what the
+    // queue owns and push only what is missing.
+    var have = q.__pushed || 0;
+    for (var i = have; i < plan.chunks.length; i++) {
+        if (q.push({ text: plan.chunks[i],
+                     source: chunkSource(plan.owner, plan.chunks[i]) }) >= 0) {
+            q.__pushed = (q.__pushed || 0) + 1;
+        }
     }
-    q.__fed = true;
+    if (!q.__pushed) q.__pushed = have;
     return q;
 }
 function sayToastNoAudio() {
@@ -2690,6 +2699,7 @@ function sayAnnotate(plan, bubbleEl) {
     if (!bubble || !bubble.appendChild) return;
     plan.bubble = bubble;
     sayClean(bubble);
+    sayFitGrid(plan, bubble);
     var m = sayMatch(plan, bubble);
     plan._match = m;
     plan.refs = {};
@@ -2855,6 +2865,15 @@ function sayGrid(holder, plan, idx, bubble) {
     plan.bubble = bubble;
     sayStructure(plan, bubble);
     return grid;
+}
+function sayFitGrid(plan, bubble) {
+    // measured, not guessed: the stack stops at the bubble's own right edge
+    var g = plan.planEl, rect = bubble && bubble.getBoundingClientRect
+        ? bubble.getBoundingClientRect() : null;
+    if (!g || !g.style) return;
+    if (rect && isFinite(rect.width) && rect.width > 40) {
+        g.style.maxWidth = Math.round(rect.width) + 'px';
+    }
 }
 /* per-bubble refresh (idempotent: attach runs on every render tick) */
 function sayAttach(holder, idx, role, bubble) {
@@ -4541,6 +4560,9 @@ function applyShadowTheme(dc) {
         // sheets beat this tag at EQUAL specificity (U43 lesson).
         '.outer-message-container .inner-message-container {',
         '  flex-direction: column; }',
+        // (user: 'allow the bubble to be bigger') 62% made long replies crawl;
+        // (0,2,0) so the bundle's own sheet cannot out-specify this
+        '.outer-message-container .message-bubble { max-width: 80%; }',
         // U73 (user: 'still pretty ugly'): the boxed pill read as dead UI.
         // Collapsed = quiet caret + 'Thinking' text affordance; the bordered
         // card appears ONLY when open, so shape itself communicates state.
@@ -4629,23 +4651,33 @@ function applyShadowTheme(dc) {
         // action line and is pushed right; the auto-speak stack is a 3-column
         // grid capped at five visible rows, then it scrolls inside.
         // the whole-reply transport is one more control on the chunk line
-        '.chat-native-say-all { min-width: 0; }',
+        '.chat-native-say-all { flex: 0 0 auto; min-width: 90px;',
+        '  visibility: hidden; }',
+        '.chat-native-say-grid:hover .chat-native-say-all,',
+        '.chat-native-say-grid:focus-within .chat-native-say-all {',
+        '  visibility: visible; }',
         '.chat-native-say-all .chat-native-say-bar { flex: 1 1 auto;',
         '  position: static; height: 6px; bottom: auto; }',
         '.chat-native-say-all[hidden], .chat-native-say-grid[hidden] {',
         '  display: none; }',
-        '.chat-native-say-grid { display: grid; gap: 2px 10px; width: 100%;',
-        '  grid-template-columns: repeat(3, minmax(0, 1fr));',
-        '  align-content: start; max-height: 118px; overflow-y: auto;',
-        '  margin-top: 4px; }',
+        // three controls per line, wrapping — and the whole-reply pair is just
+        // the next control on that same line, not a row of its own
+        '.chat-native-say-grid { display: flex; flex-wrap: wrap; gap: 2px 10px;',
+        '  width: 100%; max-width: 100%; align-content: start;',
+        '  max-height: 118px; overflow-y: auto; margin-top: 4px;',
+        '  box-sizing: border-box; }',
         '.chat-native-say-row { display: flex; align-items: center; gap: 4px;',
-        '  min-width: 0; padding: 1px 3px; border-radius: var(--radius);',
+        '  flex: 0 0 calc((100% - 20px) / 3); min-width: 0; position: relative;',
+        '  padding: 1px 3px; border-radius: var(--radius);',
         '  font-size: 11px; color: var(--dim, #8b98ab); }',
         '.chat-native-say-row.hot {',
         '  background: color-mix(in srgb, var(--accent, #4c8dff) 14%, transparent); }',
         '.chat-native-say-pp, .chat-native-say-re { background: none; border: 0;',
         '  color: inherit; cursor: pointer; padding: 0 2px; font: inherit;',
-        '  font-size: 14px; line-height: 1; border-radius: var(--radius); }',
+        '  font-size: 15px; line-height: 1; border-radius: var(--radius); }',
+        // the ⟳ glyph sits inside a much larger em box than ▶, so the same
+        // font-size reads smaller: it gets its own size and a fixed square
+        '.chat-native-say-re { font-size: 19px; }',
         '.chat-native-say-pp:hover, .chat-native-say-re:hover {',
         '  color: var(--ink, #e6edf3); }',
         '.chat-native-say-row.playing .chat-native-say-pp,',
@@ -4841,6 +4873,12 @@ function mount() {
         dc.errorMessages = { displayServiceErrorMessages: true };
         dc.textInput = { placeholder: {
             text: t('chat.input_placeholder', 'Type a message...') } };
+        // deep-chat's own knob for bubble width (kept beside its siblings
+        // rather than fought with CSS): replies get 80% of the chat box
+        try {
+            if (dc.messages) dc.messages.maxWidth = '80%';
+            else dc.messages = { maxWidth: '80%' };
+        } catch (e) { /* the CSS rule above carries it if the prop is frozen */ }
         dc.images = true;           // card feature 3 base (vision drill 4/6)
         dc.onMessage = function (body) {
             var m = body.message;

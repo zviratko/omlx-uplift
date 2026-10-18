@@ -222,10 +222,23 @@ function cssRule(sel, css) {
 test('css: the stack is a 3-column grid capped at five visible rows', () => {
     const CSS = themeCss();
     const grid = cssRule('.chat-native-say-grid', CSS);
-    assert.ok(grid.includes('display: grid'), 'grid rule found: ' + grid.slice(0, 60));
-    assert.match(grid, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+    assert.ok(grid.includes('display: flex') && grid.includes('flex-wrap: wrap'),
+              'a wrapping LINE of controls, not a table: ' + grid.slice(0, 80));
     assert.match(grid, /max-height:\s*118px/);
     assert.match(grid, /overflow-y:\s*auto/);
+    const row = cssRule('.chat-native-say-row', CSS);
+    assert.match(row, /flex:\s*0 0 calc\(\(100% - 20px\) \/ 3\)/,
+                 'three chunk controls per line');
+    const all = cssRule('.chat-native-say-all', CSS);
+    assert.match(all, /flex:\s*0 0 auto/, 'the whole-reply pair takes its own width');
+    assert.match(all, /visibility:\s*hidden/, 'hidden until the line is hovered');
+    assert.match(CSS, /\.chat-native-say-grid:hover \.chat-native-say-all[^}]*visibility:\s*visible/,
+                 'revealed when the control line is hovered');
+    // the pair rule comes first in the sheet, so match the standalone one
+    assert.match(CSS, /\.chat-native-say-re \{ font-size: 19px; \}/,
+                 'the reload glyph is sized to read as big as play');
+    assert.match(CSS, /\.outer-message-container \.message-bubble \{ max-width: 80%; \}/,
+                 'a reply may use 80% of the chat box');
     const guard = cssRule('.chat-native-say-all[hidden], .chat-native-say-grid[hidden]', CSS);
     assert.match(guard, /display:\s*none/,
                  'author display beats [hidden] without this guard: ' + guard);
@@ -248,14 +261,37 @@ test('rows: a chunk row is built from real parts, not just wired ones', () => {
     // the append-omission class: a control built, wired and never appended
     // passes every byId probe and shows up EMPTY in the browser
     const pp = cssRule('.chat-native-say-pp, .chat-native-say-re', themeCss());
-    assert.match(pp, /font: inherit;\s*font-size: 14px/,
-                 'the reload glyph is set AFTER the shorthand or it stays small');
+    assert.match(pp, /font: inherit;\s*font-size: 15px/,
+                 'transport glyphs are set AFTER the shorthand or they stay small');
     const body = slice('sayRow');
     assert.match(body, /row\.append\(pp, n, wave, re\)/,
                  'play, number, waveform and reload all ride the row');
     assert.match(body, /row\._pp = pp/, 'the row keeps its own handles');
     assert.match(SRC, /g\.appendChild\(sayRow\(plan, i\)\)/,
                  'the stack appends every row it builds');
+});
+
+test('play-all: a chunk already handed to the queue is never pushed twice', () => {
+    // the live turn pushes chunk by chunk; play-all then feeds the SAME plan.
+    // Without the counter the queue got a second copy and read the reply twice.
+    const feed = slice('sayFeed');
+    assert.match(feed, /var have = q\.__pushed \|\| 0;/, 'it asks what the queue owns');
+    assert.match(feed, /for \(var i = have; i < plan\.chunks\.length; i\+\+\)/,
+                 'and pushes only the missing tail');
+    assert.match(SRC, /q\.__pushed = \(q\.__pushed \|\| 0\) \+ 1;/,
+                 'every live-path push counts too');
+    // the highlight follows the measured playhead, never the schedule event
+    const ev = slice('sayItemEvent');
+    assert.ok(!/sayHighlight\(plan, it\.seq\)/.test(ev),
+        'a SCHEDULED chunk must not steal the highlight');
+});
+
+test('stack: the controls stop at the bubble edge', () => {
+    const fit = slice('sayFitGrid');
+    assert.match(fit, /getBoundingClientRect\(\)/, 'measured, not guessed');
+    assert.match(fit, /g\.style\.maxWidth = Math\.round\(rect\.width\)/);
+    assert.match(SRC, /sayFitGrid\(plan, bubble\);\n    var m = sayMatch/,
+                 'every annotate pass re-fits the stack');
 });
 
 test('waveform: peaks come off the decoded buffer, nothing else', () => {
@@ -357,7 +393,7 @@ function bubbleOf(blocks) {
     return b;
 }
 const A = load(['sayWords', 'sayBlocks', 'sayBlockWords', 'sayCollect',
-                'sayMatch', 'saySweep', 'sayClean',
+                'sayMatch', 'saySweep', 'sayClean', 'sayFitGrid',
                 'saySeg', 'sayRefEl', 'sayWrap', 'sayAnnotate', 'sayHighlight',
                 'sayHover'], {
     el: (tag, cls, text) => { const e = mkEl(tag, cls); if (text) e._text = text; return e; },
