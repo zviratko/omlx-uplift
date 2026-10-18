@@ -87,6 +87,11 @@ function makeDom() {
                 add(...c) { c.forEach(x => set.add(x)); },
                 remove(...c) { set.delete(c); },
                 contains(c) { return set.has(c); },
+                toggle(c, on) {
+                    if (on === undefined) on = !set.has(c);
+                    if (on) set.add(c); else set.delete(c);
+                    return on;
+                },
             },
         };
         return el;
@@ -141,8 +146,8 @@ const ROSTER = [
 ];
 
 async function mount(opt) {
-    const o = Object.assign({ supported: true, voices: ROSTER, store: [] },
-                            opt || {});
+    const o = Object.assign({ supported: true, voices: ROSTER, store: [],
+                              ls: {} }, opt || {});
     const { doc, byId } = makeDom();
     const st = { posts: [], fetches: [], toasts: [], gets: [] };
     byId['vc-body'] = doc.createElement('div');
@@ -158,6 +163,10 @@ async function mount(opt) {
         Intl: { DisplayNames: (globalThis.Intl || {}).DisplayNames },
         location: { hash: '#models/voices', pathname: '/uplift/', search: '' },
         navigator: {},
+        localStorage: {
+            getItem: k => (k in o.ls ? o.ls[k] : null),
+            setItem: (k, v) => { o.ls[k] = String(v); },
+        },
         URL: { createObjectURL: () => 'blob:fake', revokeObjectURL: () => {} },
         Audio: function () { return { play() { st.audioPlays = (st.audioPlays || 0) + 1; },
                                       pause() {}, set src(v) {}, }; },
@@ -221,9 +230,13 @@ test('say tab lists groups by language name, quality inside', async () => {
     // the click RE-RENDERS the panel — assert on the fresh buttons
     const [c2, s2] = classes(h.host, 'vc-tab');
     assert.ok(s2._classes.has('on') && !c2._classes.has('on'));
+    // folded by default: rows exist in the DOM but every group is hidden
+    for (const g of classes(h.host, 'vc-say-grp')) {
+        assert.equal(g.hidden, true, 'groups collapse by default');
+    }
     assert.ok(!classes(h.host, 'vc-add').length,
               'the clone form is off-tab — one box at a time');
-    const heads = classes(h.host, 'vc-say-head').map(n => n.textContent);
+    const heads = classes(h.host, 'vc-say-label').map(n => n.textContent);
     // English / Czech / German by language NAME (Czech < English < German)
     assert.deepEqual(heads, ['Czech · cs_CZ', 'English · en_US',
                              'German · de_DE'], heads);
@@ -328,6 +341,62 @@ test('filter matches name, locale AND language name', async () => {
     assert.equal(classes(rowsBox, 'vc-row').length, 0);
     assert.ok(allText(rowsBox).includes('No macOS voice matches'),
               'empty state is translated, not blank');
+});
+
+test('folds: collapsed by default, click expands, choice is remembered', async () => {
+    const ls = {};
+    const h = await mount({ ls });
+    await h.sayClick();
+    const heads = classes(h.host, 'vc-say-head');
+    const grps = classes(h.host, 'vc-say-grp');
+    assert.equal(heads.length, 3);
+    assert.ok(grps.every(g => g.hidden), 'all folded on first visit');
+    assert.equal(allText(heads[0]).includes('▸'), true, 'closed arrow');
+    heads[0].click();                       // open Czech
+    assert.equal(grps[0].hidden, false);
+    assert.ok(allText(heads[0]).includes('▾'), 'open arrow');
+    assert.equal(JSON.parse(ls['uplift.vcSayOpen']).cs_CZ, true,
+                 'click persists the choice');
+    assert.ok(!('en_US' in JSON.parse(ls['uplift.vcSayOpen'])),
+              'groups the user never touched stay unrecorded (default closed)');
+    // REOPEN the page with the saved map: only Czech greets you open
+    const h2 = await mount({ ls });
+    await h2.sayClick();
+    const grps2 = classes(h2.host, 'vc-say-grp');
+    assert.equal(grps2[0].hidden, false, 'remembered open survives a reload');
+    assert.ok(grps2.slice(1).every(g => g.hidden), 'others stay folded');
+    // and clicking again CLOSES + records that too
+    classes(h2.host, 'vc-say-head')[0].click();
+    assert.equal(JSON.parse(ls['uplift.vcSayOpen']).cs_CZ, false);
+});
+
+test('filter reveals matches WITHOUT rewriting the remembered folds', async () => {
+    const ls = { 'uplift.vcSayOpen': JSON.stringify({ de_DE: true }) };
+    const h = await mount({ ls });
+    await h.sayClick();
+    const heads = classes(h.host, 'vc-say-head');
+    const grps = classes(h.host, 'vc-say-grp');
+    assert.equal(grps[0].hidden, true);            // cs folded (unrecorded)
+    assert.equal(grps[2].hidden, false);           // de open (remembered)
+    const input = classes(h.host, 'vc-say-filter')[0];
+    input.value = 'zuzana';
+    input.oninput();
+    const g2 = classes(h.host, 'vc-say-grp');
+    assert.ok(g2.every(g => g.hidden === false),
+              'matched groups show while filtering, folded or not');
+    assert.deepEqual(JSON.parse(ls['uplift.vcSayOpen']), { de_DE: true },
+                     'filtering wrote nothing to the remembered folds');
+    input.value = '';
+    input.oninput();
+    const g3 = classes(h.host, 'vc-say-grp');
+    assert.equal(g3[0].hidden, true, 'the fold returns with the filter');
+    assert.equal(g3[2].hidden, false);
+});
+
+test('hidden-state CSS guard exists (a display rule could outspec [hidden])', () => {
+    const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+    assert.ok(/\.vc-say-grp\[hidden\]\s*\{\s*display:\s*none/.test(css),
+              '.vc-say-grp[hidden]{display:none} must ride alongside the fold');
 });
 
 test('voiceLabel hides the marker behind a macOS tag', async () => {

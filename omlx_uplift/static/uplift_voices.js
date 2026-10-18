@@ -1148,6 +1148,17 @@ const SAY_TIERS = { premium: ['uplift.voices.say_tier_premium', 'PREMIUM', 0],
                     personal: ['uplift.voices.say_tier_personal', 'PERSONAL', 2] };
 let _sayData = null;        // last /voices/say payload (per page visit)
 let _sayFilter = '';
+const SAY_OPEN_KEY = 'uplift.vcSayOpen';    // remembered per-locale folds
+
+function _sayOpenMap() {
+    try { return JSON.parse(localStorage.getItem(SAY_OPEN_KEY)) || {}; }
+    catch (e) { return {}; }
+}
+function _sayOpenSet(loc, v) {
+    const m = _sayOpenMap();
+    m[loc] = !!v;
+    try { localStorage.setItem(SAY_OPEN_KEY, JSON.stringify(m)); } catch (e) {}
+}
 
 function _langName(locale) {
     try {
@@ -1262,18 +1273,47 @@ function _sayRows(rowsBox, voices) {
     }
     const locs = Object.keys(groups).sort(
         (a, b) => _langName(a).localeCompare(_langName(b)) || a.localeCompare(b));
+    const openMap = _sayOpenMap();
     let shown = 0;
     for (const loc of locs) {
-        const head = document.createElement('div');
-        head.className = 'vc-say-head';
-        head.textContent = _langName(loc) + ' · ' + loc;
-        rowsBox.append(head);
+        const list = groups[loc];
         // quality promise: the better recording of a voice wins the top
-        groups[loc].sort((a, b) =>
+        list.sort((a, b) =>
             ((SAY_TIERS[a.quality] || [0, 0, 3])[2]
                 - (SAY_TIERS[b.quality] || [0, 0, 3])[2])
             || a.name.localeCompare(b.name));
-        for (const v of groups[loc]) { rowsBox.append(sayRow(v, used)); shown++; }
+        // A filter must SHOW what it matched even inside a folded group;
+        // that reveal is display-only — the remembered fold is untouched
+        // (nothing writes localStorage here but a user click).
+        const grp = document.createElement('div');
+        grp.className = 'vc-say-grp';
+        const head = document.createElement('button');
+        head.type = 'button';
+        head.className = 'vc-say-head';
+        const arrow = document.createElement('span');
+        arrow.className = 'vc-say-arrow';
+        const lab = document.createElement('span');
+        lab.className = 'vc-say-label';
+        lab.textContent = _langName(loc) + ' · ' + loc;
+        const cnt = document.createElement('span');
+        cnt.className = 'vc-say-count';
+        cnt.textContent = String(list.length);
+        const paint = (open) => {
+            grp.hidden = !open;
+            head.classList.toggle('open', open);
+            arrow.textContent = open ? '▾' : '▸';
+            lab.setAttribute('aria-expanded', open ? 'true' : 'false');
+        };
+        head.append(arrow, lab, cnt);
+        head.onclick = () => {
+            const now = grp.hidden;         // hidden -> clicking opens
+            paint(now);
+            _sayOpenSet(loc, now);
+        };
+        const open = !!needle || openMap[loc] === true;
+        for (const v of list) { grp.append(sayRow(v, used)); shown++; }
+        rowsBox.append(head, grp);
+        paint(open);
     }
     if (!shown) {
         const none = document.createElement('div');
