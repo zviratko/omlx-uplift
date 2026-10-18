@@ -2284,7 +2284,8 @@ function sayStructure(plan, bubble) {
     if (g && g.appendChild) {
         while (plan.rows.length < plan.chunks.length)
             g.appendChild(sayRow(plan, plan.rows.length));
-        if (plan.box) g.appendChild(plan.box);       // keep it the last control
+        // (the whole-reply pair is not part of this stack — it rides the
+        // message action line, right-aligned, and appears with it)
     }
     sayAnnotate(plan, bubble);
     sayPaintAll(plan);
@@ -2748,7 +2749,7 @@ function sayHighlight(plan, seq) {
    AUTO-SPEAK on: one row per chunk under the bubble, always visible, each with
    its own number, bar and ⟳. */
 function sayTrackEl(idx) {
-    var box = el('div', 'chat-native-say-row chat-native-say-all');
+    var box = el('div', 'chat-native-say-all');
     box.dataset.idx = String(idx);
     var pp = el('button', 'chat-native-say-pp'); pp.type = 'button';
     pp.textContent = '\u25b6';
@@ -2776,6 +2777,17 @@ function sayTrackEl(idx) {
         sayRerecord(box);
     });
     return box;
+}
+function sayAdoptTrack(plan, holder, idx) {
+    // the action line may be built before or after the plan exists; either way
+    // the plan ends up holding the one pair that belongs to its bubble
+    if (!plan || plan.box) return;
+    var a = holder && holder.querySelector
+        ? holder.querySelector('.chat-native-say-all') : null;
+    // the action line is rebuilt whenever the message is re-attached, so an
+    // adopted pair that is no longer in the document must be replaced — else
+    // progress paints into a detached node and the control looks dead
+    if (a && (!plan.box || plan.box.isConnected === false)) plan.box = a;
 }
 function sayPlanOfBox(box) {
     var msg = messageAt(box._idx);
@@ -2844,8 +2856,6 @@ function sayGridEl(plan, idx) {
     g.__plan = plan;
     plan.planEl = g;
     for (var i = 0; i < plan.chunks.length; i++) g.appendChild(sayRow(plan, i));
-    plan.box = sayTrackEl(idx);            // whole-reply play + ⟳, at the end
-    g.appendChild(plan.box);
     return g;
 }
 function sayFindGrid(holder) {
@@ -2863,6 +2873,7 @@ function sayGrid(holder, plan, idx, bubble) {
         holder.appendChild(grid);
     }
     plan.bubble = bubble;
+    sayAdoptTrack(plan, holder, idx);
     sayStructure(plan, bubble);
     return grid;
 }
@@ -2946,6 +2957,7 @@ function cleanupAudioCache(say, sizeOf, orphansOf) {
 }
 
 function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
+    // declared below; the pair is appended once the buttons exist
     var box = el('div', 'chat-native-msg-actions' +
                          (role === 'user' ? ' user' : ''));
     box.setAttribute('data-idx', String(idx));
@@ -2988,9 +3000,6 @@ function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
         // button exists only while a voice is selected; voices are an
         // opt-in uplift feature, so no voices = no affordance (not a
         // dead button that errors on click).
-        // VOICE-16f: the whole-reply transport no longer sits here — it lives
-        // at the END of the chunk line under the bubble (sayGridEl), so every
-        // audio control for a message reads as one row.
         act('regen', t('chat.regenerate_tooltip', 'Regenerate'),
             t('chat.regenerate_tooltip', 'Regenerate'), msgRegenerate);
     }
@@ -3003,6 +3012,15 @@ function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
         });
     act('del', t('chat.delete_message', 'Delete'),
         t('chat.delete_message', 'Delete'), msgDelete);
+    if (role === 'assistant' && hasVoices()) {
+        // VOICE-16j (user: 'not on the line with the other controls and aligned
+        // to the right like I asked'): the whole-reply pair is the LAST control
+        // on the action line, pushed right, and it appears and disappears with
+        // that line — one hover rule for all message controls, not two.
+        var track = sayTrackEl(idx);
+        box.appendChild(track);
+        if (_plans[idx]) _plans[idx].box = track;
+    }
     return box;
 }
 
@@ -4651,14 +4669,14 @@ function applyShadowTheme(dc) {
         // action line and is pushed right; the auto-speak stack is a 3-column
         // grid capped at five visible rows, then it scrolls inside.
         // the whole-reply transport is one more control on the chunk line
-        '.chat-native-say-all { flex: 0 0 78px; visibility: hidden; }',
-        // same trigger as the message actions: hovering the MESSAGE reveals it
-        // (the old rule asked for a hover on the control strip itself, which is
-        // invisible until you are already standing on it)
-        '.inner-message-container:hover .chat-native-say-all,',
-        '.chat-native-say-all:focus-within { visibility: visible; }',
-        '.chat-native-say-all .chat-native-say-bar { flex: 1 1 auto;',
-        '  position: static; height: 6px; bottom: auto; }',
+        // the last control on the message action line: right-aligned, and it
+        // inherits that line's reveal (hover the message) — no rule of its own
+        '.chat-native-say-all { display: flex; align-items: center; gap: 4px;',
+        '  margin-left: auto; color: var(--dim, #8b98ab); font-size: 11px; }',
+        '.chat-native-say-all .chat-native-say-bar { flex: 0 0 84px;',
+        '  width: 84px; position: static; height: 6px; bottom: auto;',
+        '  border-radius: 3px; background: color-mix(in srgb,',
+        '  var(--dim, #8b98ab) 25%, transparent); }',
         '.chat-native-say-all[hidden], .chat-native-say-grid[hidden] {',
         '  display: none; }',
         // three controls per line, wrapping — and the whole-reply pair is just
@@ -4671,12 +4689,11 @@ function applyShadowTheme(dc) {
         // bubble is narrow, so the whole-reply pair fits on the last line too
         // instead of being pushed onto one of its own (user: 'not on their own
         // line'). Three controls per line while there is room, fewer when not.
-        // Three chunk controls per line, measured in PERCENT with the tail of
-        // the line reserved for the whole-reply pair (78px + its gap): the last
-        // line therefore has room for it and it never gets a line of its own.
+        // three chunk controls per line, equal thirds (border-box: the padding
+        // used to sit on top of the basis and overflow the line by 6px)
         '.chat-native-say-row { display: flex; align-items: center; gap: 4px;',
         '  box-sizing: border-box;',
-        '  flex: 1 1 calc((100% - 140px) / 3); min-width: 0; position: relative;',
+        '  flex: 1 1 calc((100% - 20px) / 3); min-width: 0; position: relative;',
         '  padding: 1px 3px; border-radius: var(--radius);',
         '  font-size: 11px; color: var(--dim, #8b98ab); }',
         '.chat-native-say-row.hot {',

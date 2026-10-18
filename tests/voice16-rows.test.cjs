@@ -186,13 +186,17 @@ test('i18n: every VOICE-16 key is actually reached from the chat module', () => 
 test('structure: the speaker button is replaced by the transport row', () => {
     assert.ok(!/chat-native-msg-action speak/.test(SRC),
               'the old per-bubble speaker button is gone');
-    assert.ok(!/box\.appendChild\(sayTrackEl\(idx\)\)/.test(SRC),
-              'the action line no longer carries the transport');
-    assert.ok(/plan\.box = sayTrackEl\(idx\);/.test(SRC)
-        && /g\.appendChild\(plan\.box\)/.test(SRC),
-        'the whole-reply controls live at the END of the chunk line');
-    assert.match(slice('sayTrackEl'), /chat-native-say-row chat-native-say-all/,
-                 'the transport is styled as one more row');
+    // the pair rides the MESSAGE ACTION line, as its last control
+    const actions = slice('msgActionsEl');
+    assert.match(actions, /var track = sayTrackEl\(idx\);\n        box\.appendChild\(track\);/,
+                 'the whole-reply pair is appended to the action line');
+    assert.match(actions, /role === 'assistant' && hasVoices\(\)/,
+                 'and only where there is audio to control');
+    const grid = slice('sayGridEl');
+    assert.ok(!/sayTrackEl/.test(grid),
+              'it is NOT another row in the chunk stack');
+    assert.match(slice('sayTrackEl'), /el\('div', 'chat-native-say-all'\)/,
+                 'the pair is not styled as a chunk row');
     assert.ok(/sayAttach\(holder, storeIdx, role, b\)/.test(SRC),
               'rows refresh on every attach pass');
     assert.ok(/row\.mid = _turnMid/.test(SRC),
@@ -229,13 +233,12 @@ test('css: the stack is a 3-column grid capped at five visible rows', () => {
     const row = cssRule('.chat-native-say-row', CSS);
     assert.match(row, /box-sizing:\s*border-box/,
                  'padding must sit inside the basis or the line overflows by 6px');
-    assert.match(row, /flex:\s*1 1 calc\(\(100% - 140px\) \/ 3\)/,
-                 'the line keeps a reserved tail so the pair is never orphaned');
+    assert.match(row, /flex:\s*1 1 calc\(\(100% - 20px\) \/ 3\)/,
+                 'three equal chunk controls per line');
     const all = cssRule('.chat-native-say-all', CSS);
-    assert.match(all, /flex:\s*0 0 78px/, 'the pair is exactly the reserved tail');
-    assert.match(all, /visibility:\s*hidden/, 'hidden until the message is hovered');
-    assert.match(CSS, /\.inner-message-container:hover \.chat-native-say-all[^}]*visibility:\s*visible/,
-                 'hovering the MESSAGE reveals it, not only the strip itself');
+    assert.match(all, /margin-left:\s*auto/, 'aligned to the right end of the line');
+    assert.ok(!/visibility/.test(all),
+              'no reveal rule of its own — it follows the action line');
     // the pair rule comes first in the sheet, so match the standalone one
     assert.match(CSS, /\.chat-native-say-re \{ font-size: 17px; \}/,
                  'the reload glyph is sized to read as big as play');
@@ -286,6 +289,14 @@ test('play-all: a chunk already handed to the queue is never pushed twice', () =
     const ev = slice('sayItemEvent');
     assert.ok(!/sayHighlight\(plan, it\.seq\)/.test(ev),
         'a SCHEDULED chunk must not steal the highlight');
+});
+
+test('track: a rebuilt action line does not orphan the pair', () => {
+    const adopt = slice('sayAdoptTrack');
+    assert.match(adopt, /plan\.box\.isConnected === false/,
+                 'a detached pair is replaced, not painted into');
+    assert.match(SRC, /sayAdoptTrack\(plan, holder, idx\);\n    sayStructure/,
+                 'adopted before every structure pass');
 });
 
 test('stack: the controls stop at the bubble edge', () => {
