@@ -42,9 +42,11 @@ So this router owns the thin part; vanilla stays untouched:
   language ("Mark preferred for: cs-CZ") instead of creating
   pseudo-model voices. A language route resolves: preferred mark →
   the language's default voice → its best installed voice → honest
-  404 naming the language. No mark, no language: the Mac's system
-  default voice answers. Existing stored 'say:<Name>' voices keep
-  working unchanged; the tab simply stops creating new ones.
+  404 naming the language. No mark, no language: the TEXT answers —
+  Apple's own NaturalLanguage identifier guesses the language
+  (confidence-gated; a shaky guess or an uninstalled one falls back to
+  the Mac's system default voice). Existing stored 'say:<Name>' voices
+  keep working unchanged; the tab simply stops creating new ones.
 
 - POST /uplift/v1/audio/speech is the STANDARD OpenAI surface
   (audio/speech/create): form or JSON body, Bearer-key auth shared with
@@ -343,7 +345,8 @@ async def _say_response(name: str, text: str, speed=None,
     byte-exact (no re-encode) — the common case pays nothing for formats
     it never asked for. SAY-2: an empty `name` is no longer an error — it
     routes through the preferred mark for `language`, the language's own
-    default, or the Mac's default voice (say_engine.route)."""
+    default, the detected language of the text, or the Mac's default
+    voice (say_engine.route)."""
     if not say_engine.available():
         raise HTTPException(status_code=404,
                             detail="macOS say is not available on this server")

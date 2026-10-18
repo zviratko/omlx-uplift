@@ -59,6 +59,9 @@ log = logging.getLogger(__name__)
 SAY_PREFIX = "say:"            # voice.model marker for this engine
 SAY_ENGINE = "say"             # bare engine token (SAY-2: language routing)
 MAX_SAY_CHARS = 10000          # a whole long reply already; keep the cap honest
+_MIN_DETECT_CHARS = 3          # below this there is nothing to recognise
+_NL_CONFIDENT = 50             # percent; 'ok' scores pl@29 — garbage stops here
+_DETECT_CHARS = 1000           # a reply's first lines decide the language
 _TIMEOUT_S = 180
 _SAMPLE_RATE = 22050
 _BASE_WPM = 175                # say's default pace is ~175-190; multipliers ride on it
@@ -96,6 +99,27 @@ return out
 '''
 
 _QUALITY_RE = re.compile(r"Quality:\s*([A-Za-z-]+)")
+
+# SAY-2 auto-detection: Apple's OWN text-language identifier (the
+# NaturalLanguage framework Spotlight and TextEdit use) — offline, no
+# model download, and proven on this box: Czech scores cs@99 with AND
+# without diacritics, Slovak stays sk (never mistaken for cs), and
+# garbage like 'ok' only reaches pl@29, under the confidence gate.
+# Same AppleScriptObjC lane as the voice probe; the candidate rides in
+# argv (no shell), the script arrives on stdin. Output: 'cs\t99'.
+_NL_PROBE = '''use framework "NaturalLanguage"
+use scripting additions
+on run argv
+\tset rec to current application's NLLanguageRecognizer's alloc()'s init()
+\t(rec's processString:(item 1 of argv))
+\tset d to rec's languageHypothesesWithMaximum:1
+\tset ks to d's allKeys()
+\tif (count of ks) is 0 then return ""
+\tset k to item 1 of ks
+\tset conf to ((d's objectForKey:k)'s doubleValue()) as real
+\treturn (k as text) & "\\t" & ((conf * 100) div 1 as text)
+end run
+'''
 
 
 def available() -> bool:
@@ -474,16 +498,53 @@ def default_voice() -> Optional[dict]:
     return None
 
 
-def route(name: str, language=None, preferred=None) -> str:
+def detect_language(text) -> str:
+    """SAY-2 auto-detection: dominant written language of one utterance,
+    normalised to what the voice chain understands. '' — meaning "do not
+    route, keep the old system-default behaviour" — for too little text,
+    a missing osascript, any probe failure, 'und', or a top hypothesis
+    under the confidence gate. Script-only subtags fold to the primary
+    language ('zh-Hans' -> 'zh') because voice locales carry a REGION
+    ('zh-CN') and the locale chain answers a region-less request by
+    primary language."""
+    t = " ".join(str(text or "").split())
+    if len(t) < _MIN_DETECT_CHARS or shutil.which("osascript") is None:
+        return ""
+    try:
+        p = subprocess.run(["osascript", "-", t[:_DETECT_CHARS]],
+                           input=_NL_PROBE, capture_output=True,
+                           text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        log.info("say language detect failed to run: %s", e)
+        return ""
+    if p.returncode != 0:
+        log.info("say language detect rc=%d: %s", p.returncode,
+                 (p.stderr or "").strip()[:160])
+        return ""
+    lang, _, conf = (p.stdout or "").strip().partition("\t")
+    try:
+        score = int(conf)
+    except ValueError:
+        return ""
+    lang = lang.strip()
+    if not lang or lang.lower() == "und" or score < _NL_CONFIDENT:
+        return ""
+    parts = [x for x in lang.split("-") if not (len(x) == 4 and x.isalpha())]
+    return "-".join(parts)
+
+
+def route(name: str, language=None, preferred=None, text=None) -> str:
     """The address to speak with. An explicit name wins when it resolves
     to an installed voice (identifier or display name). SAY-2 adds the
     language-carrying alias: when the tail is NOT a voice but looks like
     a locale ('say:cs-CZ', 'say:cs'), it routes exactly like a bare
     request carrying that language — preferred mark, language default,
-    best installed voice. A bare request (no name) routes by `language`,
-    and with no language either the Mac's system default answers. ''
-    means 'no -v flag — `say` picks its own default'. Raises LookupError
-    with a user-safe reason when nothing can speak."""
+    best installed voice. A bare request with NO language is answered
+    from the TEXT: Apple's own identifier guesses the language —
+    confidence-gated, and any shaky or unanswerable guess degrades to
+    '' leaving the Mac's system default in place. '' means 'no -v flag
+    — `say` picks its own default'. Raises LookupError with a user-safe
+    reason when an EXPLICIT language has nothing installed."""
     name = (name or "").strip()
     if name:
         v = resolve(name)
@@ -495,6 +556,14 @@ def route(name: str, language=None, preferred=None) -> str:
             "voice '%s' is not installed on this Mac" % name[:64])
     if language:
         return _by_language(language, preferred)
+    det = detect_language(text)
+    if det:
+        v = language_voice(det, preferred)
+        if v is not None:
+            # a shaky guess must never be WORSE than no guess: with
+            # nothing installed for the detected language we fall
+            # through to the system default below
+            return v.get("identifier") or v["name"]
     v = default_voice()
     return (v.get("identifier") or v["name"]) if v else ""
 
@@ -530,14 +599,15 @@ def synth_bytes(name: str, text: str, speed=None,
     the resolved row's IDENTIFIER when it has one — display names collide
     (the system ships two Samanthas), identifiers do not.
     SAY-2: an empty `name` routes — the preferred mark for `language`,
-    the language's own default, else the Mac-wide default voice; when
-    even that is unknown the -v flag is dropped and `say` answers in the
+    the language's own default, the best installed voice for the
+    detected language of TEXT, or the Mac-wide default voice; when even
+    that is unknown the -v flag is dropped and `say` answers in the
     system voice (never a silent failure)."""
+    text = (text or "").strip()
     try:
-        target = route(name, language, preferred)
+        target = route(name, language, preferred, text)
     except LookupError as e:
         raise RuntimeError(str(e))
-    text = (text or "").strip()
     if not text:
         raise RuntimeError("nothing to say")
     if len(text) > MAX_SAY_CHARS:

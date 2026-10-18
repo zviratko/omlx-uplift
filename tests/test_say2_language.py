@@ -201,6 +201,7 @@ def test_synth_omits_voice_flag_for_system_default(monkeypatch):
     monkeypatch.setattr(SE, "_cache", {"ts": 9e15, "voices": []})
     monkeypatch.setattr(SE, "_av_rows", lambda: [])
     monkeypatch.setattr(SE, "_say_rows", lambda: [])
+    monkeypatch.setattr(SE, "detect_language", lambda t: "")
     seen = {}
 
     class P:
@@ -214,6 +215,109 @@ def test_synth_omits_voice_flag_for_system_default(monkeypatch):
     monkeypatch.setattr(SE.subprocess, "run", fake_run)
     SE.synth_bytes("", "hello")        # no roster at all
     assert "-v" not in seen["cmd"]     # `say` answers with its own default
+
+
+# --------------------------------------------------- auto-detection (A)
+
+class _Run:
+    """stand-in for subprocess.run capturing every argv"""
+
+    def __init__(self, out="cs\t99", rc=0):
+        self.out, self.rc, self.calls = out, rc, []
+
+    def __call__(self, cmd, **kw):
+        self.calls.append(list(cmd))
+
+        class P:
+            pass
+        P.returncode = self.rc
+        P.stdout = self.out
+        P.stderr = ""
+        return P()
+
+
+def test_detect_language_parses_and_gates(monkeypatch):
+    monkeypatch.setattr(SE.shutil, "which", lambda x: "/usr/bin/osascript")
+
+    def run_with(out, rc=0):
+        r = _Run(out, rc)
+        monkeypatch.setattr(SE.subprocess, "run", r)
+        return r
+
+    run_with("cs\t99")
+    assert SE.detect_language("Ahoj, jak se máš dnes?") == "cs"
+    run_with("zh-Hans\t95")
+    assert SE.detect_language("你好，今天过得怎么样啊") == "zh"   # script folds
+    run_with("pl\t29")
+    assert SE.detect_language("ok") == ""          # under the gate
+    run_with("und\t80")
+    assert SE.detect_language("??? !!! ...") == ""
+    run_with("", rc=1)
+    assert SE.detect_language("some text here") == ""
+    run_with("garbage without a tab")
+    assert SE.detect_language("some text here") == ""
+    # too little text never pays for a subprocess
+    r = run_with("cs\t99")
+    assert SE.detect_language("ah") == "" and not r.calls
+
+
+def test_detect_text_travels_in_argv_not_shell(monkeypatch):
+    r = _Run("cs\t99")
+    monkeypatch.setattr(SE.shutil, "which", lambda x: "/usr/bin/osascript")
+    monkeypatch.setattr(SE.subprocess, "run", r)
+    SE.detect_language("Ahoj; rm -rf / #`backtick`")
+    cmd = r.calls[0]
+    assert cmd[0] == "osascript" and cmd[1] == "-"
+    assert cmd[2] == "Ahoj; rm -rf / #`backtick`"   # verbatim argv item
+
+
+def test_route_auto_detects_only_when_nothing_explicit(monkeypatch, on_mac):
+    pref = {"cs-CZ": "com.apple.ttsbundle.siri_cs-CZ_compact"}
+    calls = []
+
+    def fake_detect(t):
+        calls.append(t)
+        return "cs"
+    monkeypatch.setattr(SE, "detect_language", fake_detect)
+    # bare + no language: the text decides, preferred mark answers
+    assert SE.route("", None, pref, "Ahoj, jak se máš?") == \
+        "com.apple.ttsbundle.siri_cs-CZ_compact"
+    assert calls == ["Ahoj, jak se máš?"]
+    # explicit language or voice: never pays for detection
+    calls.clear()
+    SE.route("", "sk", pref, "text")
+    SE.route("Zuzana", None, pref, "text")
+    assert calls == []
+    # a guess with nothing installed falls back to the system default
+    monkeypatch.setattr(SE, "detect_language", lambda t: "xx")
+    assert SE.route("", None, {}, "some english") == \
+        "com.apple.speech.synthesis.voice.Samantha"
+    # shaky guess ('' from the gate) — same safe fallback
+    monkeypatch.setattr(SE, "detect_language", lambda t: "")
+    assert SE.route("", None, {}, "ok") == \
+        "com.apple.speech.synthesis.voice.Samantha"
+
+
+def test_synth_end_to_end_auto_routes(monkeypatch, on_mac):
+    """the FULL synth_bytes path: bare call, detector says cs, the
+    preferred voice answers — one osascript probe then one say run."""
+    pref = {"cs-CZ": "com.apple.ttsbundle.siri_cs-CZ_compact"}
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        if cmd[0] == "osascript":
+            class A:
+                returncode, stdout, stderr = 0, "cs\t99", ""
+            return A()
+        seen["cmd"] = cmd
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"RIFF" + b"\0" * 200)
+        class S:
+            returncode, stdout, stderr = 0, "", ""
+        return S()
+    monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    SE.synth_bytes("", "Ahoj, jak se dnes máš?", None, None, pref)
+    assert seen["cmd"][seen["cmd"].index("-v") + 1] == \
+        "com.apple.ttsbundle.siri_cs-CZ_compact"
 
 
 # ---------------------------------------------------------------- marks
