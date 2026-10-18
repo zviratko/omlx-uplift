@@ -474,8 +474,8 @@ test('preset: multi-line content from classic stays CLEAN on selection', async (
     // switching TO it from elsewhere also lands clean:
     sel.value = 'System Default'; sel.dispatch('change'); await tick();
     sel.value = 'ML'; sel.dispatch('change'); await tick();
-    assert.equal(h.byId['chat-native-sys'].value, 'line oneline two',
-        'the strip matches real <input> behaviour');
+    assert.equal(h.byId['chat-native-sys'].value, 'line one\nline two',
+        'round 13: the textarea KEEPS classic newlines (stripNL era over)');
     assert.equal(sel.value, 'ML', 'still clean after the switch round-trip');
 });
 
@@ -1007,22 +1007,24 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'hist LEFT | chat column | control rail RIGHT');
     assert.ok(/hist\.append\(histTitle, newBtn, rowIO, list, del\)/.test(src),
         'history rail: caption, new, export+import row, the list, DELETE in-region');
-    assert.ok(/secModel\.append\(thinkGroup, budGroup, web, genRow\)/.test(src),
-        'Model Settings section owns thinking + budget + web + the sampling grid');
-    assert.ok(/secStt\.append\(sttGroup, mic\)/.test(src),
-        'Voice input section: settings entry in its position:relative group + mic');
-    assert.ok(/secTts\.append\(\s*group\(tf2\('uplift\.chat\.voice'[\s\S]*?autospeak[\s\S]*?speak_chunk/.test(src),
-        'Voice output section owns the TTS trio (voice / auto-speak / chunk)');
+    assert.ok(/secModel\.append\(thinkGroup, budGroup\)/.test(src),
+        'Model Settings = thinking + budget (round 13)');
+    assert.ok(/secVoice\.append\(\s*sttGroup, mic,\s*group\(tf2\('uplift\.chat\.voice'[\s\S]*?autospeak[\s\S]*?speak_chunk/.test(src),
+        'ONE Voice section: input settings + mic + the TTS trio (round 13)');
+    assert.ok(/secSamp\.append\(genRow\)/.test(src)
+        && /secTools\.append\(web\)/.test(src),
+        'Sampling owns the grid; Tools owns web search at the bottom');
     assert.ok(/top\.append\(\s*group\(t\('chat\.active_model'[\s\S]*?group\(t\('uplift\.chat\.preset_title'[\s\S]*?profSave, presetDel, nameRow\);/.test(src),
         'top row: Model | Preset | Save | Delete, name row folds below (round 5)');
     assert.ok(!/secPreset|presetActions/.test(src),
         'the rail preset section is gone — nothing left behind');
     assert.ok(!/preset_new|presetNew/.test(src),
         'the New/Save distinction is gone (round 3: one Save button)');
-    assert.ok(/side\.append\(secModel, secStt, secTts, secSys\)/.test(src),
-        'right rail: Model Settings is the first section again');
-    assert.ok(/secSys\.append\(sys\)/.test(src),
-        'System Prompt keeps just the text; Save moved next to the picker');
+    assert.ok(/side\.append\(secModel, secSys, secSamp, secVoice, secTools\)/.test(src),
+        'rail order round 13: Model | System Prompt | Sampling | Voice | Tools');
+    assert.ok(/secSys\.append\(sys\)/.test(src)
+        && /el\('textarea'\); sys\.id = 'chat-native-sys'/.test(src),
+        'System Prompt is the multiline textarea (round 13)');
     assert.ok(!/rowConv|rowPrompt\b|rowGen\b/.test(src),
         'the stacked-rows era is gone (U79 contract moved into the rail)');
     assert.ok(/budGroup/.test(src), 'thinking budget carries a caption group');
@@ -1078,6 +1080,23 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
             if (loc !== 'en') assert.notEqual(v, en[key],
                 `${key} translated in ${loc}, not an EN fill`);
         }
+    }
+    // ROUND 13 section captions: present in all ten; cs keeps the
+    // established term 'Sampling' in ENGLISH (user terminology policy) —
+    // everything else must read as a real translation
+    const R13_KEYS = { stt_settings: 'Input settings', voice_section: 'Voice',
+        tools: 'Tools', sampling: 'Sampling' };
+    for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+        const d = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/${loc}.json`, 'utf8'));
+        for (const [k, enV] of Object.entries(R13_KEYS)) {
+            const v = d[`uplift.chat.${k}`];
+            assert.ok(v && v.length, `uplift.chat.${k} present in ${loc}`);
+            if (loc !== 'en' && !(loc === 'cs' && k === 'sampling'))
+                assert.notEqual(v, enV, `uplift.chat.${k} translated in ${loc}`);
+        }
+        // the two split captions are gone for good
+        assert.ok(!('uplift.chat.stt_title' in d) && !('uplift.chat.tts_title' in d),
+            `stt_title/tts_title pruned from ${loc} (ONE Voice section)`);
     }
 });
 

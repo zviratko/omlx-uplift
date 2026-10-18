@@ -87,13 +87,9 @@ function gid(id) { return document.getElementById(id); }
 var PROFILE_KEY = 'omlx_chat_prompt_profiles';
 var SYSTEM_DEFAULT = 'System Default';
 
-// Classic stores profiles from a TEXTAREA — content can carry \r\n. Our
-// system-prompt field is single-line <input>, and the browser STRIPS
-// newlines when you assign value, so sys.value never equals a multi-line
-// content and the picker flipped to 'Modified (unsaved)' on a FRESH
-// selection (user round 7). Every content-vs-field comparison must go
-// through the same strip the input performs.
-function stripNL(s) { return String(s == null ? '' : s).replace(/[\r\n]/g, ''); }
+// ROUND 13: the system-prompt field became a multiline <textarea>, so
+// classic's \r\n content compares equal RAW — the round-7 stripNL
+// workaround for <input> newline-stripping is obsolete and removed.
 
 // ---- profile STATE (ROUND 9, user: 'profiles should track all changes
 // to the chat - voice input, web search, voice output, everything
@@ -254,8 +250,11 @@ function setVariant(n, v) {
     if (v) _conv.variants[n] = v; else delete _conv.variants[n];
 }
 function pageMatchesBase(p) {
+    // ROUND 13: the prompt field is a TEXTAREA now — newlines survive,
+    // so the comparison is RAW (the round-7 strip rule was an <input>
+    // artifact; classic multi-line profiles compare equal as they are)
     var sys = gid('chat-native-sys');
-    if (String((sys && sys.value) || '') !== stripNL(p.content)) return false;
+    if (String((sys && sys.value) || '') !== String(p.content || '')) return false;
     return !settingsDiffer(chatSettingsSnapshot(), p.settings || null);
 }
 function onPageEdited() {
@@ -339,8 +338,8 @@ function hydrateConv() {
                         (_conv.customState && _conv.customState.prompt) || '');
         var lset = (_conv.customState && _conv.customState.settings) || null;
         if (bp && !variantOf(bp.name)
-            && (lp !== stripNL(bp.content) || lset)) {
-            setVariant(bp.name, { prompt: lp || stripNL(bp.content),
+            && (lp !== String(bp.content || '') || lset)) {
+            setVariant(bp.name, { prompt: lp || String(bp.content || ''),
                                   settings: lset });
         }
         _conv.customPrompt = '';
@@ -1227,7 +1226,8 @@ function toolbar() {
         if (_conv) { _conv.model = sel.value; saveConv(); }
         syncAudioMode();
     });
-    var sys = el('input'); sys.id = 'chat-native-sys'; sys.type = 'text';
+    var sys = el('textarea'); sys.id = 'chat-native-sys'; sys.rows = 3;
+    sys.spellcheck = false;   // persona text is full of names, not prose
     sys.placeholder = t('chat.system_prompt.placeholder',
                         'e.g. You are a helpful assistant. Be concise.');
     sys.addEventListener('input', function () {
@@ -1301,7 +1301,7 @@ function toolbar() {
         var v = isCopy ? variantOf(base.name) : null;
         var wantP = v ? String(v.prompt || '') : String(base.content || '');
         if (sysEl) sysEl.value = wantP;
-        _conv.systemPrompt = sysEl ? sysEl.value : stripNL(wantP);
+        _conv.systemPrompt = sysEl ? sysEl.value : String(wantP || '');
         applyChatSettings(v ? v.settings : (base.settings || {}));
         _conv.activeProfile = base.name;
         saveConv();
@@ -1409,7 +1409,7 @@ function toolbar() {
             if (_conv.activeProfile === vn) {
                 var b2 = findProfile(_profiles, vn);
                 if (b2) {
-                    sys.value = stripNL(b2.content);
+                    sys.value = String(b2.content || '');   // textarea keeps newlines
                     _conv.systemPrompt = String(sys.value || '');
                     applyChatSettings(b2.settings || {});
                 }
@@ -1635,25 +1635,19 @@ function toolbar() {
         lsSet(CHUNK_KEY, chunkSel.value || 'sentence');
         onPageEdited();        // ROUND 11
     });
-    // CHAT-3R: the TTS trio (voice / auto-speak / chunk) under its own
-    // section; captions keep the U45 one-label-per-control rule.
-    var secTts = section('uplift.chat.tts_title', 'Voice output');
-    secTts.append(
+    // ROUND 13 (user): ONE 'Voice' section owns input AND output. The
+    // settings button renames to 'Input settings' (the section already
+    // says Voice); openSttPop positions against btn.parentElement — keep
+    // the .chat-native-group wrapper (position:relative) for the popover.
+    var secVoice = section('uplift.chat.voice_section', 'Voice');
+    var sttGroup = el('div', 'chat-native-group');
+    sttGroup.appendChild(sttSettingsBtn());
+    secVoice.append(sttGroup, mic,
         group(tf2('uplift.chat.voice', 'Voice'), voiceSel, 'uplift.chat.voice'),
         group(tf2('uplift.chat.autospeak', 'Auto-speak'), autoBtn,
               'uplift.chat.autospeak'),
         group(tf2('uplift.chat.speak_chunk', 'Chunk'), chunkSel,
               'uplift.chat.speak_chunk'));
-    // VOICE-12: voice INPUT is a setting, not a chat-model choice — the
-    // section owns the popover (STT model / language / auto-send / mode)
-    // and the mic button that follows it (syncSttMic).
-    var secStt = section('uplift.chat.stt_title', 'Voice input');
-    // openSttPop positions against btn.parentElement — keep a
-    // .chat-native-group wrapper (it carries position:relative) or the
-    // popover anchors to the whole section instead of the button.
-    var sttGroup = el('div', 'chat-native-group');
-    sttGroup.appendChild(sttSettingsBtn());
-    secStt.append(sttGroup, mic);
     // CHAT-3R round 5 (user: 'move the Active preset and save/delete back
     // to the top of the chat box, right of the model name'): the preset
     // stack lives in the top row — Model | Preset | Save | Delete. The
@@ -1681,12 +1675,17 @@ function toolbar() {
         });
         genRow.appendChild(group(t(label, fb), inp));
     });
-    // CHAT-3R assembly: LEFT histories | MAIN top row + chat box | RIGHT
-    // control rail (Model Settings with the seven sampling overrides,
-    // Voice input, Voice output, System Prompt).
-    secModel.append(thinkGroup, budGroup, web, genRow);
+    // ROUND 13 assembly (user): Model Settings = thinking only, System
+    // Prompt directly below it (now a multiline textarea), Sampling its
+    // own section, one Voice section, and a new TOOLS section at the
+    // bottom owning web search.
+    var secSamp = section('uplift.chat.sampling', 'Sampling');
+    secSamp.append(genRow);
+    var secTools = section('uplift.chat.tools', 'Tools');
+    secTools.append(web);
+    secModel.append(thinkGroup, budGroup);
     var side = el('aside', 'chat-native-bar chat-native-side');
-    side.append(secModel, secStt, secTts, secSys);
+    side.append(secModel, secSys, secSamp, secVoice, secTools);
     var histTitle = el('span', 'chat-native-sec-title',
                        t('chat.chat_history_label', 'Chat History'));
     histTitle.dataset.i18n = 'chat.chat_history_label';
@@ -2506,9 +2505,9 @@ function syncSttMic() {
 }
 
 function sttSettingsBtn() {
-    var btn = el('button', 'btn', tf2('uplift.chat.stt_title', 'Voice input'));
+    var btn = el('button', 'btn', tf2('uplift.chat.stt_settings', 'Input settings'));
     btn.type = 'button'; btn.id = 'chat-native-stt';
-    btn.dataset.i18n = 'uplift.chat.stt_title';              // U59 marker
+    btn.dataset.i18n = 'uplift.chat.stt_settings';           // U59 marker
     btn.dataset.en = btn.textContent;
     btn.addEventListener('click', function (ev) {
         // dropMenu dismiss contract: the opener stops propagation so the

@@ -29,7 +29,7 @@ const { STATIC_DIR } = require('./static-src.cjs');
 const STT_ID = 'whisper-large-v3-turbo-oQ8';
 
 const CAT = {
-    'uplift.chat.stt_title': 'STTTITLE',
+    'uplift.chat.stt_settings': 'STTTITLE',
     'uplift.chat.stt_input_model': 'INPUTMODEL',
     'uplift.chat.stt_none': 'NONE',
     'uplift.chat.stt_language': 'STTLANG',

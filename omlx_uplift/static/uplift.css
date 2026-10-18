@@ -2878,7 +2878,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
   border: 1px solid var(--edge); color: var(--ink); padding: 4px 6px; }
 .chat-native-pop-hint { font-size: 10px; color: var(--dim); }
 .chat-native-bar select, .chat-native-bar input[type=text],
-.chat-native-bar input[type=number] {
+.chat-native-bar input[type=number],
+.chat-native-bar textarea {
   font-size: 11px; background-color: var(--field); border: 1px solid var(--edge);
   color: var(--ink); padding: 4px 6px; }
 /* U45: the sys prompt lives inside a caption column group now; the old
@@ -2926,7 +2927,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    same flat edge language as the cards, no shadow. */
 .chat-native-hist, .chat-native-side { border: 1px solid var(--edge);
     border-radius: var(--radius); padding: 8px; }
-.chat-native-hist { flex: 0 0 170px; min-width: 0; position: sticky;
+/* ROUND 13 (user: 'Expand both left and right setting boxes and make
+   them wider (30%?)'): percentage rails with sane clamps so the chat
+   box keeps the majority at every viewport */
+.chat-native-hist { flex: 0 0 30%; min-width: 190px; max-width: 300px;
+    position: sticky;
     top: 6px; max-height: calc(100vh - 195px); overflow-y: auto; }
 /* CHAT-3R defect (user report): .chat-native-bar sets flex-wrap: wrap —
    legal in its ROW context, but the rails are COLUMN boxes; once their
@@ -2943,7 +2948,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    uncapped it grew the whole page (dead band under the composer, classic
    does not do this). The rails scroll INTERNALLY like classic's drawer;
    the cap mirrors fitHeight's budget (viewport - top chrome). */
-.chat-native-side { flex: 0 0 220px; min-width: 0; position: sticky;
+.chat-native-side { flex: 0 0 30%; min-width: 230px; max-width: 340px;
+    position: sticky;
     top: 6px; max-height: calc(100vh - 195px); overflow: auto; }
 .chat-native-side.chat-native-bar { flex-direction: column;
     flex-wrap: nowrap; align-items: stretch; }
@@ -2984,7 +2990,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-native-conv:hover { background: var(--field); }
 .chat-native-conv.active { border-color: var(--edge);
     background: var(--field); font-weight: 600; }
-.chat-native-side #chat-native-sys { width: 100%; min-height: 44px; }
+/* ROUND 13: multiline prompt — a textarea that grows with the rail,
+   keeps the control font, and may be dragged taller by the user */
+.chat-native-side #chat-native-sys { width: 100%; min-height: 64px;
+    resize: vertical; font: inherit; line-height: 1.35;
+    box-sizing: border-box; }
 /* the grid's original flex:1 1 100% is a ROW-line pinner in the old
    toolbar; in a column rail it would stretch the auto rows across the
    leftover height (align-content: stretch distributes the slack
