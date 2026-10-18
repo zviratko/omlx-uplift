@@ -295,6 +295,22 @@ test('queue: reload() of the chunk on air restarts it when the audio lands', asy
     assert.equal(fresh[0].lead, 0, 'a re-recorded chunk starts from its top');
 });
 
+/* ---- 6b. feed-then-seek is how the UI starts a read --------------------- */
+
+test('queue: feeding a whole plan and then seeking plays each chunk ONCE', async () => {
+    // the transport row does exactly this: push every chunk (each with its own
+    // cached source), then move the playhead to the top. If the push itself
+    // started the clock, the seek would restart chunk 1 mid-air.
+    const { q, ctx, calls } = rig([2, 2]);
+    q.push({ text: 'one', source: () => { calls.push(0); return b(2, 'C0'); } });
+    q.push({ text: 'two', source: () => { calls.push(1); return b(2, 'C1'); } });
+    assert.equal(ctx.heard().length, 0, 'a push never starts playback');
+    assert.equal(q.seek(0, 0), true);
+    await endAll(ctx, q);
+    assert.deepEqual(ctx.heard().map(s => s.buffer.tag), ['C0', 'C1'],
+                     'two chunks in, two clips out — no repeated first line');
+});
+
 /* ---- 7. stop() still wins over the playhead ---------------------------- */
 
 test('queue: stop() clears a pause and settles the turn', async () => {

@@ -192,6 +192,12 @@ def _clean_message(m: dict) -> dict:
         rev = tts_cache.token(speech.get("rev"))
         if rev:
             clean_s["rev"] = rev
+        # the text fingerprint that proves the plan still matches the bubble:
+        # a strategy change re-plans NEW bubbles only, an edited text re-plans
+        # that one (VOICE-16, user 2026-10-18)
+        summ = tts_cache.token(speech.get("sum"))
+        if summ:
+            clean_s["sum"] = summ
         if clean_s:
             out["speech"] = clean_s
     # U78: what the reply was actually sampled with (per-TURN provenance;

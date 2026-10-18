@@ -51,7 +51,8 @@ function load(names, extra) {
 }
 
 // (1) the matcher -----------------------------------------------------------
-const M = load(['sayWords', 'sayBlocks', 'sayBlockText', 'sayMatch']);
+const M = load(['sayWords', 'sayBlocks', 'sayBlockText', 'sayBlockWords', 'sayCollect',
+                'sayMatch']);
 
 function block(text) {
     return {
@@ -255,4 +256,171 @@ test('waveform: peaks come off the decoded buffer, nothing else', () => {
     assert.match(SRC, /getChannelData/, 'peaks read the decoded samples');
     assert.ok(!/wavesurfer|<audio|new Audio\(/.test(SRC),
               'no parallel audio element path was invented beside the queue');
+});
+
+// ---- exact placement inside the bubble (real text-node surgery) ------------
+function mkText(v, parent) {
+    const t = {
+        nodeType: 3, nodeValue: v, parentNode: parent,
+        splitText(off) {
+            const rest = t.nodeValue.slice(off);
+            t.nodeValue = t.nodeValue.slice(0, off);
+            const sib = mkText(rest, null);
+            if (parent) {
+                const i = parent.children.indexOf(t);
+                sib.parentNode = parent;
+                parent.children.splice(i + 1, 0, sib);
+            }
+            return sib;
+        },
+    };
+    return t;
+}
+function mkEl(tag, cls) {
+    const e = {
+        nodeType: 1, tagName: (tag || 'div').toUpperCase(), className: cls || '',
+        children: [], parentNode: null, dataset: {}, style: {},
+        addEventListener() {}, remove() { if (e.parentNode) e.parentNode.removeChild(e); },
+        get childNodes() { return e.children; },
+        get firstChild() { return e.children[0] || null; },
+        get nextSibling() {
+            const p = e.parentNode; if (!p) return null;
+            return p.children[p.children.indexOf(e) + 1] || null;
+        },
+        get textContent() {
+            return (e._text || '') + e.children.map(c => c.nodeType === 3
+                ? c.nodeValue : c.textContent).join('');
+        },
+        appendChild(n) { if (n.parentNode) n.parentNode.removeChild(n);
+            n.parentNode = e; e.children.push(n); return n; },
+        insertBefore(n, ref) { if (n.parentNode) n.parentNode.removeChild(n);
+            n.parentNode = e;
+            const i = ref ? e.children.indexOf(ref) : -1;
+            if (i < 0) e.children.push(n); else e.children.splice(i, 0, n);
+            return n; },
+        removeChild(n) { const i = e.children.indexOf(n);
+            if (i >= 0) e.children.splice(i, 1); n.parentNode = null; return n; },
+        querySelectorAll(sel) {
+            const want = String(sel).replace(/^\./, '');
+            const out = [];
+            (function walk(node) {
+                (node.children || []).forEach(c => {
+                    if (c.nodeType === 1 && String(c.className).includes(want)) out.push(c);
+                    if (c.children) walk(c);
+                });
+            })(e);
+            return out;
+        },
+    };
+    return e;
+}
+function para(text) {
+    const p = mkEl('p');
+    p.appendChild(mkText(text, p));
+    return p;
+}
+function bubbleOf(blocks) {
+    const b = mkEl('div');
+    blocks.forEach(x => b.appendChild(x));
+    b.querySelectorAll = (sel) => {
+        const want = String(sel).split(',')[0].trim();
+        if (want === '*') {                                  // every descendant
+            const all = [];
+            (function walk(node) {
+                (node.children || []).forEach(c => {
+                    if (c.nodeType === 1) { all.push(c); walk(c); }
+                });
+            })(b);
+            return all;
+        }
+        const out = [];
+        (function walk(node) {
+            (node.children || []).forEach(c => {
+                if (c.nodeType === 1) {
+                    if (c.tagName === want.toUpperCase() ||
+                        (want.startsWith('.') && String(c.className).includes(want.slice(1))))
+                        out.push(c);
+                    walk(c);
+                }
+            });
+        })(b);
+        return out;
+    };
+    return b;
+}
+const A = load(['sayWords', 'sayBlocks', 'sayBlockWords', 'sayCollect',
+                'sayMatch', 'saySweep', 'sayClean',
+                'saySeg', 'sayRefEl', 'sayWrap', 'sayAnnotate', 'sayHighlight',
+                'sayHover'], {
+    el: (tag, cls, text) => { const e = mkEl(tag, cls); if (text) e._text = text; return e; },
+    tf2: (k, fb) => fb,
+    document: { createElement: (t) => mkEl(t) },
+});
+// sayAnnotate calls sayHover/sayToggle indirectly; stub the missing collaborator
+A.sayToggle = () => {};
+
+test('placement: the number lands after ITS chunk, not after the message', () => {
+    const p = para('First sentence here. Second one follows.');
+    const bubble = bubbleOf([p]);
+    const plan = { chunks: ['First sentence here.', 'Second one follows.'], rows: [] };
+    A.sayAnnotate(plan, bubble);
+
+    const segs = p.children.filter(c => String(c.className).includes('say-seg'));
+    const refs = p.children.filter(c => String(c.className).includes('say-ref'));
+    assert.equal(segs.length, 2, 'one span per chunk: ' + JSON.stringify(
+        p.children.map(c => c.className || c.nodeValue)));
+    assert.equal(segs[0].textContent.trim(), 'First sentence here.');
+    assert.equal(segs[1].textContent.trim(), 'Second one follows.');
+    assert.equal(refs.length, 2, 'both numbers live inside the paragraph');
+    // order in the text: [chunk1][1][chunk2][2] — not [chunk1][chunk2][1][2]
+    const order = p.children.map(c => c.nodeType === 3 ? 'text'
+        : (String(c.className).includes('say-ref') ? 'ref' + c._text : 'seg' + c.dataset.seq));
+    assert.deepEqual(order, ['seg0', 'ref1', 'seg1', 'ref2'], order.join(','));
+});
+
+test('placement: only the playing chunk lights', () => {
+    const p = para('Alpha one two. Alpha three four.');
+    const bubble = bubbleOf([p]);
+    const plan = { chunks: ['Alpha one two.', 'Alpha three four.'], rows: [] };
+    A.sayAnnotate(plan, bubble);
+    A.sayHighlight(plan, 1);
+    const segs = p.children.filter(c => String(c.className).includes('say-seg'));
+    assert.ok(!/say-here/.test(segs[0].className), 'chunk 1 stays dark');
+    assert.match(segs[1].className, /say-here/, 'chunk 2 is lit');
+    const refs = p.children.filter(c => String(c.className).includes('say-ref'));
+    assert.match(refs[1].className, /hot/);
+    assert.ok(!/hot/.test(refs[0].className), 'the other number stays quiet');
+});
+
+test('placement: re-annotating does not stack numbers or nest spans', () => {
+    const p = para('One sentence. Two sentence.');
+    const bubble = bubbleOf([p]);
+    const plan = { chunks: ['One sentence.', 'Two sentence.'], rows: [] };
+    A.sayAnnotate(plan, bubble);
+    const first = p.children.length;
+    A.sayAnnotate(plan, bubble);
+    assert.equal(p.children.length, first, 'idempotent: ' + JSON.stringify(
+        p.children.map(c => c.className || c.nodeValue)));
+    const prose = p.children.filter(c => c.nodeType === 3 ||
+        String(c.className).includes('say-seg'))
+        .map(c => c.nodeType === 3 ? c.nodeValue : c.textContent).join('');
+    assert.equal(prose.replace(/\s+/g, ' ').trim(),
+                 'One sentence. Two sentence.', 'the prose itself is untouched');
+});
+
+test('placement: a chunk that crosses inline markup lights both pieces', () => {
+    const p = mkEl('p');
+    p.appendChild(mkText('Read the ', p));
+    const strong = mkEl('strong');
+    strong.appendChild(mkText('manual', strong));
+    p.appendChild(strong);
+    p.appendChild(mkText(' now and again.', p));
+    const bubble = bubbleOf([p]);
+    const plan = { chunks: ['Read the manual now and again.'], rows: [] };
+    A.sayAnnotate(plan, bubble);
+    const segs = p.querySelectorAll('.chat-native-say-seg');
+    assert.ok(segs.length >= 2, 'both the plain text and the bold word are covered');
+    A.sayHighlight(plan, 0);
+    const lit = segs.filter(s => s.className.includes('say-here'));
+    assert.equal(lit.length, segs.length, 'every piece lights together');
 });

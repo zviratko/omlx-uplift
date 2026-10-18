@@ -287,7 +287,8 @@ def _msg(role, content, mid, speech=None):
 
 
 def test_speech_plan_and_mid_survive_the_sanitizer(client):
-    plan = {"mode": "sentence", "n": 3, "rev": "ab12", "junk": "x" * 999}
+    plan = {"mode": "sentence", "n": 3, "rev": "ab12", "sum": "s9f2ab",
+            "junk": "x" * 999}
     conv = {"id": "c1", "title": "T", "model": "m", "systemPrompt": "",
             "messages": [_msg("assistant", "hi", "m1", plan),
                          _msg("assistant", "yo", "<script>", {"n": 0})]}
@@ -295,7 +296,8 @@ def test_speech_plan_and_mid_survive_the_sanitizer(client):
     assert r.status_code == 200
     msgs = client.get("/uplift/api/chat/history/c1").json()["messages"]
     assert msgs[0]["mid"] == "m1"
-    assert msgs[0]["speech"] == {"mode": "sentence", "n": 3, "rev": "ab12"}
+    assert msgs[0]["speech"] == {"mode": "sentence", "n": 3, "rev": "ab12",
+                                 "sum": "s9f2ab"}, msgs[0]["speech"]
     assert "mid" not in msgs[1], "a junk id collapses to no id at all"
     assert "speech" not in msgs[1], "n<=0 is not a plan"
 

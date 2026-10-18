@@ -368,10 +368,23 @@ function hydrateConv() {
 
 // ---- conversation state (server-backed) ----------------------------------
 
+/* Which model a NEW chat starts with (user, 2026-10-18: it took the first row
+   of the list while the picker still showed the model in use). The answer is
+   the model the operator is LOOKING AT: the picker's current value, else the
+   model of the chat being replaced, else the first row as the last resort. */
+function preferredModel() {
+    var sel = gid('chat-native-model');
+    var known = {};
+    for (var i = 0; i < _models.length; i++) known[_models[i].id] = 1;
+    var shown = sel && sel.value ? String(sel.value) : '';
+    if (known[shown]) return shown;
+    if (_conv && known[_conv.model]) return _conv.model;
+    return (_models[0] || {}).id || '';
+}
 function newConv() {
     return { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
              title: t('chat.new_chat', 'New Chat'),
-             model: (_models[0] || {}).id || '', systemPrompt: '',
+             model: preferredModel(), systemPrompt: '',
              // 6/6c: active prompt-profile NAME (content lives in the
              // shared localStorage store). Server persists the name only
              // (routers/chat.py); classic's per-session activeProfile.
@@ -2103,15 +2116,27 @@ function planOf(msg) {
     return (msg && msg.mid && _plans[msg.mid]) ? _plans[msg.mid] : null;
 }
 
-function makePlan(msg, text, mode, rev) {
+function makePlan(msg, text, mode, rev, voice) {
     var chunks = planChunks(text, mode);
     var p = { mid: ensureMid(msg), conv: (_conv || {}).id || '', mode: mode,
-              voice: chatVoiceId(), rev: rev || ('r' + r6()), text: String(text || ''),
-              chunks: chunks, rows: [], planEl: null, seqs: {} };
+              voice: voice || chatVoiceId(), rev: rev || ('r' + r6()),
+              text: String(text || ''), chunks: chunks, rows: [],
+              planEl: null, seqs: {} };
     p.owner = { conv: p.conv, msg: p.mid, rev: p.rev };
     if (p.mid) _plans[p.mid] = p;
-    if (msg) msg.speech = { mode: mode, n: chunks.length, rev: p.rev, voice: p.voice };
+    if (msg) msg.speech = { mode: mode, n: chunks.length, rev: p.rev,
+                            voice: p.voice, sum: sayDigest(text) };
     return p;
+}
+function sayDigest(s) {
+    // djb2 over the text, just long enough to be a fingerprint: it answers ONE
+    // question — has this bubble's text changed since its chunks were cut?
+    var str = String(s || ''), h = 5381 >>> 0, g = 52711 >>> 0;
+    for (var i = 0; i < str.length; i++) {
+        h = (((h << 5) + h) >>> 0) ^ str.charCodeAt(i);
+        g = (((g * 33) >>> 0) + str.charCodeAt(i)) >>> 0;
+    }
+    return 's' + (h >>> 0).toString(36) + (g >>> 0).toString(36);
 }
 
 /* The plan a bubble reads from. `rev` is only replaced when the plan itself
@@ -2121,14 +2146,18 @@ function makePlan(msg, text, mode, rev) {
 function planFor(msg) {
     var text = String((msg && msg.content) || '');
     if (!text.trim() || !SIO() || !hasVoices()) return null;
-    var mode = speakChunkMode(), voice = chatVoiceId();
     var p = msg.mid ? _plans[msg.mid] : null;
-    if (p && p.text === text && p.mode === mode && p.voice === voice) return p;
-    var stored = (msg && msg.speech) || {};
-    var keep = p && p.mode === mode && p.voice === voice ? p.rev
-        : (stored.mode === mode && stored.voice === voice && stored.rev
-           ? stored.rev : '');
-    return makePlan(msg, text, mode, keep);
+    if (p && p.text === text) return p;
+    // THE RULE (user, 2026-10-18): the chunk strategy is decided when a bubble
+    // is born. Changing the setting affects NEW bubbles only — an existing one
+    // keeps the lines it was cut into (and the audio recorded for them) until
+    // its text is regenerated or edited, which is also the only case where its
+    // revision moves and the old files are released.
+    var s = (msg && msg.speech) || {};
+    if (s.mode && s.sum === sayDigest(text) && s.rev) {
+        return makePlan(msg, text, s.mode, s.rev, s.voice);
+    }
+    return makePlan(msg, text, speakChunkMode(), '', null);
 }
 
 // ---- byte source: memory cache, then the bubble-owned disk cache -------------
@@ -2486,11 +2515,47 @@ function sayBlockText(block) {
     }
     return out;
 }
+/* the words of one block WITH their positions: text node + offset in it, so a
+   number can be put after the exact word its chunk ended on, and the chunk's
+   own span can be wrapped and lit. Text we inserted ourselves is skipped, so a
+   repeated pass sees the same words it saw the first time. */
+function sayCollect(block, nodes) {
+    var kids = (block && block.childNodes) || [];
+    for (var i = 0; i < kids.length; i++) {
+        var k = kids[i];
+        if (!k) continue;
+        if (k.nodeType === 3) {
+            var par = String((k.parentNode && k.parentNode.className) || '');
+            if (par.indexOf('chat-native-say-seg') >= 0) continue;
+            nodes.push(k);
+        } else if (k.nodeType === 1) {
+            var cls = String(k.className || '');
+            if (cls.indexOf('chat-native-say-ref') >= 0) continue;
+            if (k.tagName === 'SCRIPT' || k.tagName === 'STYLE') continue;
+            sayCollect(k, nodes);              // inline markup rides along
+        }
+    }
+    return nodes;
+}
+function sayBlockWords(block, b) {
+    var toks = [], nodes = [];
+    sayCollect(block, nodes);
+    for (var n = 0; n < nodes.length; n++) {
+        var s = String(nodes[n].nodeValue || '');
+        var re = /[a-z0-9\u00c0-\uffff]+/g, m;
+        while ((m = re.exec(s.toLowerCase()))) {
+            toks.push({ b: b, node: nodes[n], off: m.index, w: m[0],
+                        len: m[0].length });
+        }
+    }
+    return { toks: toks, nodes: nodes.length };
+}
 function sayMatch(plan, bubble) {
-    var blocks = sayBlocks(bubble), stream = [], i, j;
+    var blocks = sayBlocks(bubble), stream = [], i, j, spans = [];
     for (i = 0; i < blocks.length; i++) {
-        var toks = sayWords(sayBlockText(blocks[i]));
-        for (j = 0; j < toks.length; j++) stream.push({ b: i, w: toks[j] });
+        var bw = sayBlockWords(blocks[i], i);
+        spans.push(bw.nodes);
+        for (j = 0; j < bw.toks.length; j++) stream.push(bw.toks[j]);
     }
     var marks = [], cursor = 0;
     for (i = 0; i < plan.chunks.length; i++) {
@@ -2500,7 +2565,7 @@ function sayMatch(plan, bubble) {
             var run = 0;
             while (run < words.length && at + run < stream.length &&
                    stream[at + run].w === words[run]) run++;
-            if (run > best.len) best = { end: at + run - 1, len: run };
+            if (run > best.len) best = { start: at, end: at + run - 1, len: run };
             if (run === words.length) break;
         }
         if (!words.length || best.len < Math.min(2, words.length)) {
@@ -2508,70 +2573,151 @@ function sayMatch(plan, bubble) {
             continue;
         }
         cursor = best.end + 1;
-        marks.push({ seq: i, b: stream[best.end].b, linked: true });
+        marks.push({ seq: i, b: stream[best.end].b, linked: true,
+                     toks: stream.slice(best.start, best.end + 1) });
     }
-    return { marks: marks, blocks: blocks };
+    return { marks: marks, blocks: blocks, nodesPerBlock: spans };
+}
+/* strip our own marks before re-measuring, so a repeated pass sees the words
+   it saw the first time (numbers never stack, spans never nest) */
+/* splitText leaves empty text nodes behind; between two spans they are pure
+   clutter (and every later sibling count trips over them) */
+function saySweep(bubble) {
+    if (!bubble) return;
+    var hosts = [bubble].concat(Array.prototype.slice.call(
+        bubble.querySelectorAll ? bubble.querySelectorAll('*') : []));
+    for (var hi = 0; hi < hosts.length; hi++) {
+        var kids = (hosts[hi].childNodes || []);
+        for (var ki = kids.length - 1; ki >= 0; ki--) {
+            var kn = kids[ki];
+            if (kn && kn.nodeType === 3 && !(kn.nodeValue || '').length)
+                hosts[hi].removeChild(kn);
+        }
+    }
+}
+function sayClean(bubble) {
+    if (!bubble || !bubble.querySelectorAll) return;
+    saySweep(bubble);
+    var i, j, list;
+    list = Array.prototype.slice.call(bubble.querySelectorAll('.chat-native-say-ref'));
+    for (i = 0; i < list.length; i++) { if (list[i].remove) list[i].remove(); }
+    list = Array.prototype.slice.call(bubble.querySelectorAll('.chat-native-say-seg'));
+    for (i = 0; i < list.length; i++) {
+        var seg = list[i], par = seg.parentNode;
+        if (!par || !seg.childNodes) continue;
+        while (seg.firstChild) par.insertBefore(seg.firstChild, seg);
+        par.removeChild(seg);
+    }
+}
+function saySeg(plan, seq) {
+    var seg = el('span', 'chat-native-say-seg');
+    seg.dataset.seq = String(seq);
+    seg.addEventListener('mouseenter', function () { sayHover(plan, seq, true); });
+    seg.addEventListener('mouseleave', function () { sayHover(plan, seq, false); });
+    seg.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        sayToggle(plan, seq);
+    });
+    return seg;
+}
+function sayRefEl(plan, seq) {
+    var ref = el('sup', 'chat-native-say-ref', String(seq + 1));
+    ref.dataset.seq = String(seq);
+    ref.title = tf2('uplift.chat.say_line', 'Line {n} of the spoken reply')
+        .replace('{n}', String(seq + 1));
+    ref.addEventListener('mouseenter', function () { sayHover(plan, seq, true); });
+    ref.addEventListener('mouseleave', function () { sayHover(plan, seq, false); });
+    ref.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        sayToggle(plan, seq);
+    });
+    return ref;
+}
+/* wrap the words of ONE chunk: each touched text node is split at the word
+   boundaries and the covered part goes into a span. A chunk that runs across
+   inline markup lights every piece it actually reads. */
+function sayWrap(plan, mark) {
+    var toks = mark.toks || [], out = [], i;
+    if (!toks.length) return out;
+    var runs = [];
+    for (i = 0; i < toks.length; i++) {
+        var t = toks[i], node = t.node;
+        if (!node || !node.parentNode || typeof node.splitText !== 'function') continue;
+        var last = runs[runs.length - 1];
+        if (last && last.node === node) { last.to = t.off + t.len; continue; }
+        runs.push({ par: node.parentNode, node: node,
+                    from: t.off, to: t.off + t.len });
+    }
+    if (runs.length) {
+        var lr = runs[runs.length - 1];
+        var txt = lr.node.nodeValue || '';
+        // '...sentence.' — the mark that ends the chunk ends with it
+        while (lr.to < txt.length && !/\s/.test(txt.charAt(lr.to))) lr.to++;
+        var fr = runs[0];
+        var ftxt = fr.node.nodeValue || '';
+        // and the gap in front of it belongs to the chunk too, so two spans
+        // never sit next to each other with a loose space between them
+        while (fr.from > 0 && /\s/.test(ftxt.charAt(fr.from - 1))) fr.from--;
+    }
+    for (var i = runs.length - 1; i >= 0; i--) {
+        var r = runs[i];
+        if (r.node.parentNode !== r.par) continue;         // already moved
+        var from = Math.max(0, Math.min(r.from, (r.node.nodeValue || '').length));
+        var coveredLen = Math.max(0, Math.min(r.to, (r.node.nodeValue || '').length) - from);
+        if (!coveredLen) continue;
+        var before = from ? r.node.splitText(from) : r.node;
+        var after = before.splitText ? before.splitText(coveredLen) : null;
+        if (before === r.node && r.node.parentNode === r.par) {
+            // nothing was left in front: the whole node is covered
+        }
+        var seg = saySeg(plan, mark.seq);
+        r.par.insertBefore(seg, after || null);
+        seg.appendChild(before);
+        out.push(seg);
+    }
+    return out;
 }
 function sayAnnotate(plan, bubbleEl) {
     var bubble = bubbleEl || plan.bubble;
     if (!bubble || !bubble.appendChild) return;
     plan.bubble = bubble;
+    sayClean(bubble);
     var m = sayMatch(plan, bubble);
     plan._match = m;
     plan.refs = {};
-    var i, k, kids;
-    for (i = 0; i < m.blocks.length; i++) {
-        kids = m.blocks[i].querySelectorAll
-            ? Array.prototype.slice.call(m.blocks[i].querySelectorAll('.chat-native-say-ref'))
-            : [];
-        for (k = 0; k < kids.length; k++) { if (kids[k].remove) kids[k].remove(); }
-    }
-    for (i = 0; i < m.marks.length; i++) {
+    plan.segs = {};
+    // LAST chunk first: splitting a text node for an earlier chunk would move
+    // the words of a later one out from under the offsets we already measured
+    for (var i = m.marks.length - 1; i >= 0; i--) {
         var mark = m.marks[i];
-        var ref = el('sup', 'chat-native-say-ref', String(mark.seq + 1));
-        ref.dataset.seq = String(mark.seq);
-        ref.title = tf2('uplift.chat.say_line', 'Line {n} of the spoken reply')
-            .replace('{n}', String(mark.seq + 1));
-        (function (seq) {
-            ref.addEventListener('mouseenter', function () { sayHover(plan, seq, true); });
-            ref.addEventListener('mouseleave', function () { sayHover(plan, seq, false); });
-            ref.addEventListener('click', function (ev) {
-                ev.stopPropagation();
-                sayToggle(plan, seq);
-            });
-        })(mark.seq);
-        (m.blocks[mark.b] || bubble).appendChild(ref);
+        var segs = mark.linked ? sayWrap(plan, mark) : [];
+        var ref = sayRefEl(plan, mark.seq);
+        var host = segs.length ? segs[0].parentNode : null;
+        if (host) host.insertBefore(ref, segs[0].nextSibling);
+        else (m.blocks[mark.b] || bubble).appendChild(ref);
         plan.refs[mark.seq] = ref;
+        plan.segs[mark.seq] = segs;
     }
+    saySweep(bubble);
     sayHighlight(plan, plan.marked != null ? plan.marked : -1);
 }
 function sayHover(plan, seq, on) {
     if (!plan) return;
     plan.hot = on ? seq : -1;
-    var row = plan.rows[seq];
-    if (row) {
-        var cls = String(row.className || '').replace(/\s*hot\s*/g, ' ');
-        row.className = cls + (on ? ' hot' : '');
-    }
-    if (on) sayHighlight(plan, seq);
-    else sayHighlight(plan, plan.marked != null ? plan.marked : -1);
+    sayPaint(plan, seq);                                  // row carries .hot
+    sayHighlight(plan, on ? seq
+                          : (plan.marked != null ? plan.marked : -1));
 }
-/* one class on both sides of a pair: the row and the text it reads */
+/* one class on both sides of the pair: the row and the words it reads — now the
+   EXACT span of that chunk, not the whole block it sits in */
 function sayHighlight(plan, seq) {
     if (!plan || !plan.bubble || !plan.bubble.querySelectorAll) return;
-    var m = plan._match || sayMatch(plan, plan.bubble);
-    var want = {};
-    if (seq >= 0) {
-        for (var i = 0; i < m.marks.length; i++)
-            if (m.marks[i].seq === seq) want[m.marks[i].b] = 1;
+    var segs = plan.bubble.querySelectorAll('.chat-native-say-seg');
+    for (var i = 0; i < segs.length; i++) {
+        segs[i].className = 'chat-native-say-seg' +
+            (String(segs[i].dataset.seq) === String(seq) ? ' chat-native-say-here' : '');
     }
-    for (var b = 0; b < m.blocks.length; b++) {
-        var blk = m.blocks[b];
-        var cls = String(blk.className || '')
-            .replace(/\s*chat-native-say-here\s*/g, ' ').replace(/\s+$/, '');
-        blk.className = cls + (want[b] ? ' chat-native-say-here' : '');
-    }
-    var refs = m.blocks.length ? plan.bubble.querySelectorAll('.chat-native-say-ref') : [];
+    var refs = plan.bubble.querySelectorAll('.chat-native-say-ref');
     for (var r = 0; r < refs.length; r++) {
         refs[r].className = 'chat-native-say-ref' +
             (String(refs[r].dataset.seq) === String(seq) ? ' hot' : '');
@@ -2708,11 +2854,15 @@ function sayAttach(holder, idx, role, bubble) {
         if (grid) grid.remove();
         return;
     }
-    var plan = planOf(msg);
-    if (!plan && msg.speech && msg.speech.n) plan = planFor(msg);
+    // planned on sight: the chunk lines come from the text, so they exist
+    // before a single byte of audio does
+    var plan = planOf(msg) || planFor(msg);
     // an empty stack is worse than none: a turn that produced no chunk (or a
     // plan that sanitized to nothing) must not leave a visible empty shelf
-    if (!plan || !plan.chunks.length || !autoSpeakOn()) {
+    // Every assistant bubble shows its lines from the start: the chunks are
+    // known from the text and the bubble's own strategy, so a row exists before
+    // anything was synthesized — empty waveform, waiting to be played.
+    if (!plan || !plan.chunks.length) {
         if (grid) grid.remove();
         if (plan) { plan.planEl = null; }
         return;
@@ -4511,6 +4661,7 @@ function applyShadowTheme(dc) {
         '  background: var(--accent, #4c8dff); }',
         '.chat-native-say-status { font-size: 10px; color: var(--dim);',
         '  white-space: nowrap; }',
+        '.chat-native-say-seg { cursor: pointer; }',
         '.chat-native-say-ref { font-size: 9px; line-height: 1; cursor: pointer;',
         '  color: var(--dim, #8b98ab); margin-left: 3px; padding: 0 2px;',
         '  border-radius: var(--radius); }',

@@ -907,12 +907,17 @@
                     item.source = chunk.source;
                 items.push(item);
                 doneMarker = Math.max(doneMarker, items.length);
-                // a solo cap only guards what already existed: fresh work (the
-                // next streamed chunk of a live turn) must never be swallowed
-                // by a one-line play that finished before it arrived
-                if (soloSeq >= 0 && SETTLED[items[soloSeq].state]) soloSeq = -1;
                 dispatch();
-                if (soloSeq < 0) advance();
+                // A solo cap only guards what already existed: fresh work (the
+                // next streamed chunk of a live turn) must never be swallowed
+                // by a one-line play that finished before it arrived. Advancing
+                // here is correct ONLY in that lifted-cap case — pushing must
+                // never start playback by itself, or a caller that feeds the
+                // whole plan and then seeks restarts the first chunk mid-air.
+                if (soloSeq >= 0 && SETTLED[items[soloSeq].state]) {
+                    soloSeq = -1;
+                    advance();
+                }
                 return item.seq;
             },
             /* resolves when every chunk pushed SO FAR has settled (played,

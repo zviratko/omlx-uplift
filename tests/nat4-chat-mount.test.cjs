@@ -1183,3 +1183,15 @@ test('U82: single --radius shape knob; row bands reverted (user dislike)', () =>
     assert.ok(/background-image: linear-gradient\(45deg, transparent 50%, var\(--dim\) 50%\)/.test(css),
         'house caret replaces the native arrow');
 });
+
+test('NEW-CHAT-1: a new chat inherits the model on screen, not row one', () => {
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    assert.ok(/model: preferredModel\(\)/.test(src), 'newConv takes the resolved model');
+    assert.ok(!/model: \(_models\[0\] \|\| \{\}\)\.id/.test(src),
+        'the first row of the list is not the answer');
+    const body = /function preferredModel\(\) \{[\s\S]*?\n\}/.exec(src);
+    assert.ok(body, 'preferredModel exists');
+    assert.ok(/sel && sel\.value/.test(body[0]), 'the picker value wins');
+    assert.ok(/_conv && known\[_conv\.model\]/.test(body[0]),
+        'then the model of the chat being replaced');
+});
