@@ -238,10 +238,24 @@ test('queue: solo seek plays ONE chunk and settles without dragging the tail', a
     const res = await orTimeout(done, 2000, 'solo drain');
     assert.equal(res.stopped, false, 'a solo play resolves its own drain');
     assert.equal(q.itemAt(2).state, 'played', 'the tail was not replayed');
-    // the solo cap must not outlive the solo play
+    assert.equal(q.pending(), 0, 'a finished solo line owes nothing after it');
+    const afterSolo = ctx.heard().length;
+    await settle(6);
+    assert.equal(ctx.heard().length, afterSolo,
+                 'the tail must not sneak in after a solo line');
+    // and the cap is lifted by the next real seek, not by the solo finishing
+    // fresh work after a finished solo is NOT swallowed by the old cap
     q.push('d');
-    await settle(3);
-    assert.ok(ctx.heard().some(s => s.buffer.tag === 'C3'), 'later chunks still play');
+    await settle(4);
+    assert.ok(ctx.heard().slice(afterSolo).some(s => s.buffer.tag === 'C3'),
+              'a later chunk still reaches the clock');
+    ctx.currentTime = 60;
+    const replayFrom = ctx.heard().length;
+    assert.equal(q.seek(0, 0), true);
+    await endAll(ctx, q);
+    const tags = ctx.heard().slice(replayFrom).map(s => s.buffer.tag);
+    assert.deepEqual(tags, ['C0', 'C1', 'C2', 'C3'],
+                     'a full replay after a solo plays the whole read: ' + tags);
 });
 
 /* ---- 6. ⟳ reload one chunk --------------------------------------------- */

@@ -2406,7 +2406,9 @@ function sayReload(plan, seq) {
     sayFeed(plan, q);
     plan.playSeq = seq;
     speakEvent(true);
-    q.reload(seq, chunkSource(plan.owner, plan.chunks[seq]), { play: true });
+    // ⟳ on a row means: THIS line again, freshly recorded — not the rest
+    q.reload(seq, chunkSource(plan.owner, plan.chunks[seq]),
+             { play: true, solo: true });
     sayWatch(plan);
 }
 

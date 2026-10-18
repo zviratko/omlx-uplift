@@ -506,6 +506,7 @@
         var soloSeq = -1;         // schedule nothing above this seq
         var startOffset = 0;      // seconds of the next item already heard
         var autoPlayFrom = -1;    // seq to play when its reload finishes loading
+        var autoPlaySolo = false; // ...and whether that play is one line only
         var CLIP_EPS = 0.05;      // clock slop: scheduled-ahead seams
 
         function transport() {
@@ -721,7 +722,9 @@
                 setState(item, 'ready');
                 if (autoPlayFrom === item.seq) {     // ⟳ of the chunk on air
                     autoPlayFrom = -1;
-                    seek(item.seq, 0);
+                    var solo = autoPlaySolo;
+                    autoPlaySolo = false;
+                    seek(item.seq, 0, solo ? { solo: true } : null);
                     return;
                 }
                 dispatch();
@@ -757,12 +760,17 @@
             var p = schedule(item, item.buffers, from);
             checkDone();
             p.then(function () {
-                if ((item.regen || 0) !== regen) return;    // paused/seeked away
-                if (item.token !== token) { setState(item, 'stale'); return; }
+                // a rewound or retired clip must not strand the queue: the work
+                // it was waiting for is gone, so hand the clock back to advance()
+                if ((item.regen || 0) !== regen) { advance(); return; }
+                if (item.token !== token) { setState(item, 'stale'); advance(); return; }
                 item.clips = null;
                 setState(item, 'played');
                 played++;
-                if (soloSeq === item.seq) soloSeq = -1;     // one-chunk play done
+                // A solo line ENDS the read: the cap stays where it is, so
+                // advance() stops at it and nothing after the clicked chunk
+                // plays. The next seek()/resume()/reload() moves or lifts it.
+                if (soloSeq === item.seq) { checkDone(); return; }
                 advance();
                 checkDone();
             });
@@ -853,6 +861,7 @@
             it.buffers = null;
             rewind(it);
             if (onAir || (opts && opts.play)) autoPlayFrom = seq;
+            autoPlaySolo = !!(opts && opts.solo);
             if (onAir) { schedIdx = seq; soloSeq = -1; prevEnd = 0; }
             dispatch();
             advance();
@@ -898,7 +907,12 @@
                     item.source = chunk.source;
                 items.push(item);
                 doneMarker = Math.max(doneMarker, items.length);
+                // a solo cap only guards what already existed: fresh work (the
+                // next streamed chunk of a live turn) must never be swallowed
+                // by a one-line play that finished before it arrived
+                if (soloSeq >= 0 && SETTLED[items[soloSeq].state]) soloSeq = -1;
                 dispatch();
+                if (soloSeq < 0) advance();
                 return item.seq;
             },
             /* resolves when every chunk pushed SO FAR has settled (played,
@@ -919,6 +933,7 @@
                 soloSeq = -1;
                 startOffset = 0;
                 autoPlayFrom = -1;
+                autoPlaySolo = false;
                 var dying = live.slice();
                 live = [];
                 for (var i = 0; i < dying.length; i++) {
@@ -940,6 +955,7 @@
                 soloSeq = -1;
                 startOffset = 0;
                 autoPlayFrom = -1;
+                autoPlaySolo = false;
                 return token;
             },
             token: function () { return token; },
@@ -947,7 +963,13 @@
             dropped: function () { return dropped.slice(); },
             queued: function () { return items.slice(); },
             pending: function () {
-                return items.filter(function (it) { return !SETTLED[it.state]; }).length;
+                // past the solo cap nothing is owed, or a one-line play would
+                // keep the echo guard (and the progress loop) alive forever
+                var cap = soloSeq;
+                return items.filter(function (it) {
+                    if (SETTLED[it.state]) return false;
+                    return cap < 0 || it.seq <= cap;
+                }).length;
             },
             /* the clock position the next clip starts at (ms-accurate seam) */
             clock: function () { return prevEnd; },
