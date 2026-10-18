@@ -1,0 +1,386 @@
+"""SAY-1: macOS `say` as a TTS engine — roster parsing, synthesis contract,
+and dispatch through the ordinary voice routes.
+
+CI runs these on Linux, where the real binary does not exist: every test
+either exercises a PURE function or monkeypatches availability, so the
+machinery is proven everywhere while a real Mac stays the only place the
+subprocess itself runs. The subprocess call is captured, never faked at
+the Response level — the exact argv the engine builds is under test
+(injection-safety lives in that list).
+"""
+from __future__ import annotations
+
+import base64
+import json
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.testclient import TestClient
+
+from omlx_uplift import router as _up            # facade FIRST (route order)
+from omlx_uplift import say_engine as SE
+from omlx_uplift.routers import voices as V
+
+
+ROSTER = """Albert              en_US    # Hello! My name is Albert.
+Zuzana               cs_CZ    # Ahoj! Já jsem Zuzana.
+Samantha (English (US)) en_US # Hello! My name is Samantha.
+Ava (Enhanced)       en_US    # Hello, I'm Ava.
+Ava (Premium)        en_US    # Hello, I'm Ava.
+Noa (Personal)       he_IL    # שלום, קוראים לי נועה.
+garbage line without structure
+"""
+
+
+@pytest.fixture()
+def on_mac(monkeypatch):
+    """Pretend this box has the engine; empty isolated cache per test."""
+    monkeypatch.setattr(SE, "available", lambda: True)
+    monkeypatch.setattr(SE, "_cache", {"ts": 0.0, "voices": []})
+    monkeypatch.setattr(SE, "_downloaded_names", lambda: set())
+    return SE
+
+
+@pytest.fixture()
+def client(monkeypatch, tmp_path):
+    from omlx_uplift.routers import base as up_base
+    monkeypatch.setattr(V, "_store_dir", lambda: tmp_path)
+    app = FastAPI()
+    app.include_router(_up.api_router, prefix="/uplift/api")
+    app.include_router(_up.page_router)
+    app.dependency_overrides[up_base.require_admin] = lambda: True
+
+    async def _ok(request):
+        return True
+    monkeypatch.setattr(V, "_infer_auth", _ok)
+    return TestClient(app)
+
+
+# ---------------------------------------------------------------- engine
+
+def test_parse_roster_names_locales_tiers():
+    vs = SE.parse_voices(ROSTER)
+    assert [v["name"] for v in vs] == [
+        "Albert", "Zuzana", "Samantha (English (US))", "Ava (Enhanced)",
+        "Ava (Premium)", "Noa (Personal)"]
+    assert vs[2]["locale"] == "en_US"           # parenthesized name part
+    assert vs[2]["sample"].startswith("Hello!")
+    q = {v["name"]: v["quality"] for v in vs}
+    assert q["Ava (Premium)"] == "premium"
+    assert q["Ava (Enhanced)"] == "enhanced"
+    assert q["Noa (Personal)"] == "personal"
+    assert q["Zuzana"] == "standard"
+
+
+def test_parse_tolerates_nothing_and_junk_only():
+    assert SE.parse_voices("") == []
+    assert SE.parse_voices("total garbage\nmore garbage") == []
+
+
+def test_list_voices_caches_and_marks_downloaded(monkeypatch, on_mac):
+    calls = []
+
+    class P:
+        stdout = ROSTER
+        returncode = 0
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return P()
+    monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    monkeypatch.setattr(SE, "_downloaded_names", lambda: {"Zuzana"})
+    a = on_mac.list_voices()
+    b = on_mac.list_voices()
+    assert calls == [["say", "-v", "?"]]        # second call was cache
+    assert a == b and a[1]["downloaded"] is True and a[0]["downloaded"] is False
+
+
+def test_list_voices_empty_roster_does_not_poison_cache(monkeypatch, on_mac):
+    monkeypatch.setattr(SE.subprocess, "run",
+                        lambda *a, **k: type("P", (), {"stdout": ""})())
+    assert on_mac.list_voices() == []
+    monkeypatch.setattr(SE.subprocess, "run",
+                        lambda *a, **k: type("P", (), {"stdout": ROSTER})())
+    assert len(on_mac.list_voices()) == 6       # not pinned empty for the TTL
+
+
+def test_say_name_of_marker_roundtrip():
+    assert SE.say_name_of("say:Zuzana") == "Zuzana"
+    assert SE.say_name_of("say:Samantha (English (US))") == \
+        "Samantha (English (US))"
+    assert SE.say_name_of("Qwen3-TTS") == ""
+    assert SE.say_name_of("") == ""
+
+
+def test_speed_multiplier_maps_and_clamps():
+    assert SE._speed_wpm(None) is None
+    assert SE._speed_wpm("") is None
+    assert SE._speed_wpm("junk") is None
+    assert SE._speed_wpm(0) is None and SE._speed_wpm(-1) is None
+    assert SE._speed_wpm(1.25) == "219"
+    assert SE._speed_wpm(99) == "450"
+    assert SE._speed_wpm(0.01) == "80"
+
+
+def test_resolve_exact_name(monkeypatch, on_mac):
+    monkeypatch.setattr(SE.subprocess, "run",
+                        lambda *a, **k: type("P", (), {"stdout": ROSTER})())
+    assert on_mac.resolve("Zuzana")["locale"] == "cs_CZ"
+    assert on_mac.resolve("zuzana") is None      # case matters like in say
+    assert on_mac.resolve("") is None
+
+
+def test_synth_builds_safe_argv(monkeypatch, on_mac):
+    """The injection-surface proof: text NEVER reaches argv (it goes
+    through a temp file), argv is a list, and the voice name must be on
+    the installed roster."""
+    _as_say(on_mac)
+    seen = {}
+
+    class P:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        # emulate say writing the requested -o file
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"RIFF" + b"\0" * 200)
+        # and echo the text file back for content assertions
+        seen["text"] = Path(cmd[cmd.index("-f") + 1]).read_text()
+        return P()
+    monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    data = on_mac.synth_bytes("Zuzana", "Ahoj; rm -rf / #`backtick`",
+                              speed=1.1)
+    assert data.startswith(b"RIFF")
+    cmd = seen["cmd"]
+    assert cmd[0] == "say" and "-v" in cmd and cmd[cmd.index("-v") + 1] == "Zuzana"
+    assert "-f" in cmd and "-o" in cmd
+    assert "--data-format=LEI16@22050" in cmd
+    assert cmd[cmd.index("-r") + 1] == "193"    # 175*1.1
+    # the shell-junk text reached the FILE verbatim, never as an argv item
+    assert seen["text"] == "Ahoj; rm -rf / #`backtick`"
+    assert all(";" not in str(a) for a in cmd)
+
+
+def test_synth_guards(monkeypatch, on_mac):
+    _as_say(on_mac)
+    with pytest.raises(RuntimeError):
+        on_mac.synth_bytes("Nobody", "hi")
+    with pytest.raises(RuntimeError):
+        on_mac.synth_bytes("Zuzana", "   ")
+    # truncation instead of rejection for long-but-sane text:
+    captured = {}
+
+    class P:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        captured["text"] = Path(cmd[cmd.index("-f") + 1]).read_text()
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"RIFF" + b"\0" * 200)
+        return P()
+    monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    on_mac.synth_bytes("Zuzana", "x" * (on_mac.MAX_SAY_CHARS + 500))
+    assert len(captured["text"]) == on_mac.MAX_SAY_CHARS
+
+
+def test_synth_failure_reason_propagates(monkeypatch, on_mac):
+    _as_say(on_mac)
+    bad = type("P", (), {"returncode": 1, "stderr": "could not start",
+                         "stdout": ""})()
+    monkeypatch.setattr(SE.subprocess, "run", lambda *a, **k: bad)
+    with pytest.raises(RuntimeError, match="could not start"):
+        on_mac.synth_bytes("Zuzana", "hi")
+
+
+def test_convert_formats(on_mac, monkeypatch):
+    assert on_mac.convert_wav(b"W", "wav") == b"W"
+    assert on_mac.convert_wav(b"W", "") == b"W"
+    with pytest.raises(ValueError):
+        on_mac.convert_wav(b"W", "m4a")
+    monkeypatch.setattr(on_mac.shutil, "which", lambda x: None)
+    with pytest.raises(RuntimeError, match="ffmpeg"):
+        on_mac.convert_wav(b"W", "mp3")
+
+    class P:
+        returncode = 0
+
+    def fake_run(cmd, **kw):
+        Path(cmd[-1]).write_bytes(b"MP3DATA")
+        return P()
+    monkeypatch.setattr(on_mac.shutil, "which", lambda x: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(on_mac.subprocess, "run", fake_run)
+    assert on_mac.convert_wav(b"W", "mp3") == b"MP3DATA"
+    assert on_mac.media_type("opus") == "audio/ogg"
+    assert on_mac.media_type("what") == "audio/wav"
+
+
+def test_not_macos_answers_empty_and_synth_refuses(monkeypatch):
+    monkeypatch.setattr(SE, "_cache", {"ts": 0.0, "voices": []})
+    monkeypatch.setattr(SE.sys, "platform", "linux")
+    assert SE.available() is False
+    assert SE.list_voices() == []
+    assert SE.resolve("Zuzana") is None
+    with pytest.raises(RuntimeError):
+        SE.synth_bytes("Zuzana", "hi")
+
+
+# ---------------------------------------------------------------- router
+
+def _as_say(on_mac, roster=ROSTER):
+    on_mac._cache.update(ts=9e15, voices=on_mac.parse_voices(roster))
+
+
+def test_say_endpoint_hides_when_unavailable(client, monkeypatch):
+    monkeypatch.setattr(SE, "available", lambda: False)
+    r = client.get("/uplift/api/voices/say")
+    assert r.status_code == 200
+    assert r.json() == {"supported": False, "voices": []}
+
+
+def test_say_list_badges_in_use_without_cache_pollution(client, on_mac):
+    _as_say(on_mac)
+    r = client.post("/uplift/api/voices", json={
+        "name": "Zuzana", "model": "say:Zuzana"})
+    assert r.status_code == 200, r.text
+    d = client.get("/uplift/api/voices/say").json()
+    assert d["supported"] is True
+    zz = [v for v in d["voices"] if v["name"] == "Zuzana"][0]
+    assert zz["added"] is True and zz["sample"].startswith("Ahoj")
+    assert all(v["added"] is False for v in d["voices"] if v["name"] != "Zuzana")
+    # the per-request 'added' flag must not leak into the shared cache
+    assert all("added" not in v for v in on_mac._cache["voices"])
+    # and the say voice needs no clip/speaker — it was accepted bare
+    store = client.get("/uplift/api/voices").json()["voices"]
+    assert store[0]["model"] == "say:Zuzana" and "ref_file" not in store[0]
+
+
+def test_say_create_rejects_unknown_voice(client, on_mac):
+    _as_say(on_mac)
+    r = client.post("/uplift/api/voices", json={
+        "name": "Ghost", "model": "say:Nobody"})
+    assert r.status_code == 400 and "not an installed" in r.text
+    # off a Mac even a real name is refused (no store litter)
+    monkey = client  # available False below
+    import omlx_uplift.say_engine as _se
+    orig = _se.available
+    _se.available = lambda: False
+    try:
+        r = monkey.post("/uplift/api/voices", json={
+            "name": "Ghost", "model": "say:Zuzana"})
+        assert r.status_code == 400
+    finally:
+        _se.available = orig
+
+
+def test_speech_synth_never_touches_vanilla(client, on_mac, monkeypatch):
+    _as_say(on_mac)
+    hit = []
+
+    def fake_synth(name, text, speed=None):
+        hit.append((name, text, speed))
+        return b"RIFFsay" + b"\0" * 100
+    monkeypatch.setattr(SE, "synth_bytes", fake_synth)
+
+    async def no_vanilla(kwargs):
+        raise AssertionError("vanilla seam called for a say voice")
+    monkeypatch.setattr(V, "_create_speech", no_vanilla)
+
+    client.post("/uplift/api/voices", json={"name": "Zu", "model": "say:Zuzana"})
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": "Zu", "input": "Dobrý den", "speed": "1.2"})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("audio/wav")
+    assert r.content == b"RIFFsay" + b"\0" * 100
+    assert hit == [("Zuzana", "Dobrý den", "1.2")]
+
+
+def test_audition_endpoint_defaults_to_the_voice_greeting(client, on_mac,
+                                                          monkeypatch):
+    _as_say(on_mac)
+    got = {}
+
+    def fake_synth(name, text, speed=None):
+        got["args"] = (name, text)
+        return b"RIFF" + b"\0" * 100
+    monkeypatch.setattr(SE, "synth_bytes", fake_synth)
+    r = client.post("/uplift/api/voices/say/speech", json={"name": "Zuzana"})
+    assert r.status_code == 200
+    assert got["args"] == ("Zuzana", "Ahoj! Já jsem Zuzana.")
+    r = client.post("/uplift/api/voices/say/speech", json={"name": "Nobody"})
+    assert r.status_code == 404
+
+
+def test_standard_surface_named_and_anonymous(client, on_mac, monkeypatch):
+    _as_say(on_mac)
+
+    def fake_synth(name, text, speed=None):
+        return b"RIFF" + b"\0" * 100
+    monkeypatch.setattr(SE, "synth_bytes", fake_synth)
+    # anonymous model:'say:...' with NO response_format: WAV answer
+    # (the spec's mp3 default must not force an ffmpeg hop silently)
+    r = client.post("/uplift/v1/audio/speech",
+                    json={"model": "say:Ava (Enhanced)", "input": "hi"})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("audio/wav")
+    # explicit format is honoured (declare + actually produce)
+    monkeypatch.setattr(SE, "convert_wav", lambda w, f: b"MP3BYTES")
+    r = client.post("/uplift/v1/audio/speech",
+                    json={"model": "say:Ava (Enhanced)", "input": "hi",
+                          "response_format": "mp3"})
+    assert r.content == b"MP3BYTES"
+    assert r.headers["content-type"].startswith("audio/mpeg")
+    # stored say voice by name, no model field at all
+    client.post("/uplift/api/voices", json={"name": "Zu", "model": "say:Zuzana"})
+    monkeypatch.setattr(SE, "convert_wav", lambda w, f: w)
+    r = client.post("/uplift/v1/audio/speech", json={"voice": "Zu",
+                                                     "input": "ahoj"})
+    assert r.status_code == 200 and r.content.startswith(b"RIFF")
+    # engine failure answers 502 with the reason, not a silent file
+    def boom(name, text, speed=None):
+        raise RuntimeError("say: could not start")
+    monkeypatch.setattr(SE, "synth_bytes", boom)
+    r = client.post("/uplift/v1/audio/speech",
+                    json={"model": "say:Zuzana", "input": "hi"})
+    assert r.status_code == 502 and "could not start" in r.text
+
+
+def test_edit_away_from_say_needs_a_clip(client, on_mac):
+    _as_say(on_mac)
+    vid = client.post("/uplift/api/voices",
+                      json={"name": "Zu", "model": "say:Zuzana"}
+                      ).json()["voice"]["id"]
+    r = client.put("/uplift/api/voices/" + vid,
+                   json={"name": "Zu", "model": "Qwen3-TTS-12Hz-0.6B-Base"})
+    assert r.status_code == 400 and "reference clip" in r.text
+    # editing to a DIFFERENT installed say voice is fine (the endpoint
+    # contract, like the form: PUT always carries name + model)
+    r = client.put("/uplift/api/voices/" + vid,
+                   json={"name": "Zu", "model": "say:Albert"})
+    assert r.status_code == 200
+    # but not to a name this Mac cannot speak
+    r = client.put("/uplift/api/voices/" + vid,
+                   json={"name": "Zu", "model": "say:Ghost"})
+    assert r.status_code == 400
+
+
+def test_say_dispatch_works_without_omlx(client, on_mac, monkeypatch):
+    """Standalone-viewer honesty: the system engine has no dependency on
+    the omlx audio import — synthesis must NOT 503 just because vanilla
+    is absent."""
+    _as_say(on_mac)
+    monkeypatch.setattr(SE, "synth_bytes",
+                        lambda n, t, speed=None: b"RIFF" + b"\0" * 100)
+    import builtins
+    real_import = builtins.__import__
+
+    def no_omlx(name, *a, **k):
+        if name.startswith("omlx.api"):
+            raise ImportError("vanilla absent")
+        return real_import(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", no_omlx)
+    client.post("/uplift/api/voices", json={"name": "Zu", "model": "say:Zuzana"})
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": "Zu", "input": "hi"})
+    assert r.status_code == 200 and r.content.startswith(b"RIFF")

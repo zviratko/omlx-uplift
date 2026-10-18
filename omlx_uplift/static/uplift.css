@@ -2064,6 +2064,24 @@ label.se-row.pending-restart > .se-ctl > select {
 .vc-play.playing { background: var(--gs-tab, var(--accent));
     border-color: var(--gs-tab, var(--accent));
     color: var(--gs-tab-ink, var(--ink-on-accent)); }
+/* SAY-1: macOS voices tab strip + catalog chips (new selectors only) */
+.vc-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.vc-tab.on { background: var(--ink); color: var(--bg);
+    border-color: var(--ink); }
+.vc-chip { display: inline-block; font: 500 9px/1 var(--mono);
+    color: var(--dim); border: 1px solid var(--edge);
+    border-radius: var(--radius);
+    padding: 2px 6px; vertical-align: 1px; white-space: nowrap; }
+.vc-chip-tier { color: var(--accent); border-color: var(--accent); }
+.vc-say-head { margin-top: 10px; padding: 4px 6px 3px;
+    font: 600 10px/1.3 var(--mono); letter-spacing: .06em;
+    text-transform: uppercase; color: var(--dim);
+    border-bottom: 1px solid var(--edge); }
+.vc-say-filter { display: block; width: 100%; box-sizing: border-box;
+    margin: 8px 0 6px; padding: 6px 8px; background: transparent;
+    border: 1px solid var(--edge); color: var(--ink);
+    font: 400 12px/1.3 var(--mono); }
+.vc-say-filter:focus { outline: none; border-color: var(--accent); }
 @media (max-width: 900px) { .vc-grid { grid-template-columns: 1fr; } }
 /* VOICE-1b: chat read-aloud — playing state on the per-message button */
 .chat-native-msg-action.speak.playing { background: var(--accent);

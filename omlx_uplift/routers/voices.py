@@ -23,6 +23,15 @@ So this router owns the thin part; vanilla stays untouched:
 - POST /voices/preview runs the same synth from ad-hoc ref fields so the
   ADD form can hear the voice before saving it.
 
+- SAY-1: the macOS system synthesizer rides the SAME machinery as a
+  pseudo-model: a voice with model 'say:<Name>' is dispatched inside
+  _synth_ref to omlx_uplift/say_engine (say -v Name -f in -o out.wav).
+  GET /voices/say serves the tab catalog (installed voices, quality tier,
+  downloaded badge), POST /voices/say/speech auditions one before saving.
+  Stored AND anonymous ('model': 'say:Zuzana') speech on the standard
+  surface both work — every caller (chat read-aloud included) gets `say`
+  through the ordinary voice name.
+
 - POST /uplift/v1/audio/speech is the STANDARD OpenAI surface
   (audio/speech/create): form or JSON body, Bearer-key auth shared with
   /v1/*, response_format honoured, and `voice` extended to accept a
@@ -51,6 +60,7 @@ reason — the store is data, the engine is a service.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import io
@@ -67,6 +77,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from .. import say_engine
 from .base import api_router, page_router, require_admin
 
 _log = logging.getLogger("omlx_uplift.voices")
@@ -222,6 +233,15 @@ async def _synth_ref(model: str, text: str, ref_path: Optional[Path],
     """
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="'input' must not be empty")
+    # SAY-1: a voice whose model is 'say:<Name>' is rendered by the macOS
+    # system synthesizer — no TTS model, no reference clip, no vanilla call.
+    # The name rides the model marker; stream is not supported by this
+    # engine (the whole utterance renders in well under a second, so
+    # chunking would only complicate the response for zero latency gain).
+    if (model or "").strip().startswith(say_engine.SAY_PREFIX):
+        return await _say_response(say_engine.say_name_of(model), text,
+                                   speed=speed,
+                                   response_format=response_format)
     ref_b64 = None
     if ref_path is not None:
         if not ref_path.is_file():
@@ -272,6 +292,33 @@ async def _create_speech(kwargs: dict) -> Response:
     # vanilla raises HTTPException with honest details (model not found,
     # engine not a TTS model, synthesis failure) — let them propagate
     return await create_speech(AudioSpeechRequest(**kwargs))
+
+
+async def _say_response(name: str, text: str, speed=None,
+                        response_format: str = "wav") -> Response:
+    """Render one utterance with the macOS engine. The two blocking steps
+    (say subprocess, optional ffmpeg) run off the event loop; every failure
+    answers with the reason instead of a fake silent wav. WAV stays
+    byte-exact (no re-encode) — the common case pays nothing for formats
+    it never asked for."""
+    if not name or not name.strip():
+        raise HTTPException(status_code=400,
+                            detail="macOS say voice name is missing")
+    if not say_engine.available():
+        raise HTTPException(status_code=404,
+                            detail="macOS say is not available on this server")
+    try:
+        wav = await asyncio.to_thread(say_engine.synth_bytes, name, text,
+                                      speed)
+        data = await asyncio.to_thread(say_engine.convert_wav, wav,
+                                       response_format)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        _log.warning("macOS say failed: %s", e)
+        raise HTTPException(status_code=502, detail=str(e))
+    return Response(content=data,
+                    media_type=say_engine.media_type(response_format))
 
 
 async def _create_transcription(data: bytes, filename: str, model: str,
@@ -484,6 +531,42 @@ async def voices_capabilities(model: str = "", _auth=Depends(require_admin)):
             "speakers": sorted((tc.get("spk_id") or {}).keys())}
 
 
+@api_router.get("/voices/say")
+async def voices_say_list(_auth=Depends(require_admin)):
+    """SAY-1: the macOS-voices tab catalog. Roster comes from `say -v ?`
+    — what THIS Mac can actually speak — plus the quality tier parsed
+    from the name and the 'additional' badge from on-disk voice bundles
+    (only proven downloads are badged; nothing is guessed). 'added' marks
+    voices already saved into the named-voice store so the tab can show
+    them as in use instead of offering a duplicate."""
+    if not say_engine.available():
+        return {"supported": False, "voices": []}
+    voices = await asyncio.to_thread(say_engine.list_voices)
+    saved = {say_engine.say_name_of(v.get("model") or "")
+             for v in _load()["voices"]}
+    return {"supported": True,
+            "voices": [dict(v, added=v["name"] in saved) for v in voices]}
+
+
+@api_router.post("/voices/say/speech")
+async def voices_say_speech(request: Request, _auth=Depends(require_admin)):
+    """Audition a system voice from the tab before saving anything.
+    Body {name, input?}: the default text is the voice's OWN greeting
+    from the roster — every voice introduces itself in its own language."""
+    raw = await request.json()
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    name = str(raw.get("name") or "").strip()
+    v = await asyncio.to_thread(say_engine.resolve, name)
+    if v is None:
+        raise HTTPException(status_code=404,
+                            detail="'%s' is not an installed macOS voice"
+                                   % name[:64])
+    text = str(raw.get("input") or v.get("sample")
+               or "Hello! My name is %s." % v["name"])
+    return await _say_response(v["name"], text, speed=raw.get("speed"))
+
+
 @api_router.post("/voices")
 async def voices_create(request: Request, _auth=Depends(require_admin)):
     raw = await request.json()
@@ -493,6 +576,19 @@ async def voices_create(request: Request, _auth=Depends(require_admin)):
     if len(store["voices"]) >= MAX_VOICES:
         raise HTTPException(status_code=507,
                             detail="voice store is full (%d)" % MAX_VOICES)
+    # SAY-1: a system voice carries no clip and no speaker — its whole
+    # definition is 'say:<installed name>'; validate that against the
+    # roster so a typo cannot create a voice that only ever 502s.
+    is_say = str(raw.get("model") or "").strip().startswith(
+        say_engine.SAY_PREFIX)
+    if is_say:
+        nm = say_engine.say_name_of(str(raw.get("model")))
+        if not say_engine.available():
+            raise HTTPException(status_code=400, detail=(
+                "macOS say is not available on this server"))
+        if await asyncio.to_thread(say_engine.resolve, nm) is None:
+            raise HTTPException(status_code=400, detail=(
+                "'%s' is not an installed macOS voice" % nm[:64]))
     b64 = raw.get("ref_audio_b64") or ""
     fname = raw.get("ref_name") or "reference.wav"
     ext = Path(fname).suffix.lower()
@@ -522,7 +618,7 @@ async def voices_create(request: Request, _auth=Depends(require_admin)):
     # VOICE-7: a CustomVoice voice is (speaker [+instruct]) with NO ref
     # clip — that is a complete voice; a Base clone needs the clip. The
     # store keeps whichever shape arrived; _synth passes ref only if stored.
-    if not data and not str(raw.get("speaker") or "").strip():
+    if not data and not str(raw.get("speaker") or "").strip() and not is_say:
         raise HTTPException(status_code=400, detail=(
             "reference audio is required (or a preset speaker for a "
             "CustomVoice model)")
@@ -568,6 +664,23 @@ async def voices_update(vid: str, request: Request,
     if not v:
         raise HTTPException(status_code=404, detail="no such voice: %s" % vid)
     merged = _sanitize(raw, existing=v)
+    # SAY-1 round trip: editing INTO a system voice validates the name
+    # like create does; editing AWAY from one must not strip the voice
+    # down to nothing (no clip, no speaker = a voice that cannot speak).
+    _m = merged.get("model") or ""
+    if _m.startswith(say_engine.SAY_PREFIX):
+        nm = say_engine.say_name_of(_m)
+        if not say_engine.available():
+            raise HTTPException(status_code=400, detail=(
+                "macOS say is not available on this server"))
+        if await asyncio.to_thread(say_engine.resolve, nm) is None:
+            raise HTTPException(status_code=400, detail=(
+                "'%s' is not an installed macOS voice" % nm[:64]))
+    elif not (merged.get("ref_file") or v.get("ref_file")) \
+            and not (merged.get("speaker") or "").strip():
+        raise HTTPException(status_code=400, detail=(
+            "this voice has no reference clip — attach one or keep it on "
+            "the macOS say engine"))
     b64 = raw.get("ref_audio_b64")
     if b64:
         fname = raw.get("ref_name") or "reference.wav"
@@ -793,6 +906,7 @@ async def speech_std(request: Request):
         # vanilla's own create_speech answers 400 for empty input — mirror it
         return _openai_err(400, "'input' field must not be empty")
     fmt = str(body.get("response_format") or "mp3").strip().lower()
+    fmt_given = bool(str(body.get("response_format") or "").strip())
     try:
         speed = float(body.get("speed") or 1.0)
     except (TypeError, ValueError):
@@ -817,10 +931,22 @@ async def speech_std(request: Request):
 
     try:
         if v:
+            _tgt = model_use or v.get("model") or ""
+            if _tgt.startswith(say_engine.SAY_PREFIX) and not fmt_given:
+                fmt = "wav"        # same honest default as the anonymous leg
             resp = await _synth(v, text, fmt=fmt, speed=speed, stream=stream,
                                 language=body.get("language") or None,
                                 instructions=body.get("instructions") or None,
                                 model=model_use)
+        elif (model_use or "").strip().startswith(say_engine.SAY_PREFIX):
+            # anonymous system-voice call: model 'say:<Name>' with no stored
+            # voice. The spec's mp3 DEFAULT would force an ffmpeg hop (or a
+            # 502 on a server without one) for a caller that never asked for
+            # a format; a WAV answer declared as WAV is the honest reading.
+            resp = await _say_response(
+                say_engine.say_name_of(model_use), text,
+                speed=speed,
+                response_format=fmt if fmt_given else "wav")
         else:
             # no named voice: pure pass-through to vanilla — anonymous
             # ref_audio cloning (PR #676 fields) included verbatim

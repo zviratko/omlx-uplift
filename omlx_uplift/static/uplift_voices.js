@@ -56,6 +56,11 @@ function sttModels() {
    composite the speech routes accept as an alias (VOICE-1c parses it
    back), so what you read is literally what you could send. */
 function voiceLabel(v) {
+    // SAY-1: the 'say:<Name>' marker is store plumbing — in the picker a
+    // system voice reads as its name + a 'macOS' tag, never as a fake model.
+    if (v.model && String(v.model).indexOf('say:') === 0) {
+        return v.name + ' (macOS)';
+    }
     return (v.model ? v.model + ':' : '') + v.name;
 }
 
@@ -1127,6 +1132,215 @@ function voiceForm(models, sttSelf) {
 
 let _modelsSelf = null;   // self-fetched fallback (see renderVoices)
 let _sttSelf = null;
+/* ---- SAY-1: the macOS system-voice tab ----------------------------------
+   Catalog of the voices the server's `say` binary can actually speak
+   (GET /voices/say). 'USE' stores a regular named voice carrying the
+   'say:<Name>' model marker — from that moment it behaves like any other
+   voice: chat picker, auto-speak, bubble SPEAK, the standard
+   /uplift/v1/audio/speech surface. Nothing else on the client learns a
+   special case. Ordering is a quality promise: within a language the
+   better recordings first (Premium > Enhanced > Personal > standard);
+   languages sorted by name. The ADDITIONAL chip appears only for voices
+   whose bundle sits in the download folders — shown when proven, never
+   guessed. */
+const SAY_TIERS = { premium: ['uplift.voices.say_tier_premium', 'PREMIUM', 0],
+                    enhanced: ['uplift.voices.say_tier_enhanced', 'ENHANCED', 1],
+                    personal: ['uplift.voices.say_tier_personal', 'PERSONAL', 2] };
+let _sayData = null;        // last /voices/say payload (per page visit)
+let _sayFilter = '';
+
+function _langName(locale) {
+    try {
+        if (!window.Intl || !Intl.DisplayNames) return locale;
+        return new Intl.DisplayNames(['en'], { type: 'language' })
+            .of(String(locale).split(/[-_]/)[0]) || locale;
+    } catch (e) { return locale; }
+}
+
+function _sayUsedNames() {
+    const s = {};
+    for (const v of _voices) {
+        if (v.model && String(v.model).indexOf('say:') === 0) {
+            s[String(v.model).slice(4)] = true;
+        }
+    }
+    return s;
+}
+
+function _sayStoreName(v) {
+    // display name stays the voice's own; a clash (clone named like a
+    // system voice) disambiguates with the locale, then a counter
+    const taken = {};
+    for (const x of _voices) taken[String(x.name).toLowerCase()] = true;
+    let n = v.name;
+    if (taken[n.toLowerCase()]) n = v.name + ' (' + v.locale + ')';
+    let i = 2; const base = n;
+    while (taken[n.toLowerCase()]) n = base + ' ' + (i++);
+    return n;
+}
+
+function sayRow(v, used) {
+    const row = document.createElement('div');
+    row.className = 'vc-row';
+    const lab = document.createElement('div');
+    lab.className = 'vc-name';
+    lab.textContent = v.name;
+    const q = SAY_TIERS[v.quality];
+    if (q) {
+        const c = document.createElement('span');
+        c.className = 'vc-chip vc-chip-tier';
+        c.textContent = tf(q[0], q[1]);
+        lab.append(' ', c);
+    }
+    if (v.downloaded) {
+        const c = document.createElement('span');
+        c.className = 'vc-chip';
+        c.textContent = tf('uplift.voices.say_additional', 'ADDITIONAL');
+        c.title = tf('uplift.voices.say_additional_hint',
+                     'Downloaded on this Mac, not part of the system set.');
+        lab.append(' ', c);
+    }
+    const act = document.createElement('div');
+    act.className = 'vc-actions';
+    const play = document.createElement('button');
+    play.type = 'button'; play.className = 'se-btn vc-play';
+    play.dataset.en = '▶'; play.textContent = '▶';
+    play.title = tf('uplift.voices.play', 'Speak a sample with this voice');
+    play.onclick = async () => {
+        if (play.classList.contains('playing')) return stopPlayback();
+        play.disabled = true;
+        try {
+            // no input: the server answers with the voice's own greeting
+            const r = await speechJson('/voices/say/speech', { name: v.name });
+            play.disabled = false;
+            await playBlob(r, play);
+        } catch (e) {
+            play.disabled = false;
+            D.toast(String(e && e.message || e), 'error');
+        }
+    };
+    const use = document.createElement('button');
+    use.type = 'button'; use.className = 'se-btn';
+    if (used[v.name]) {
+        use.textContent = tf('uplift.voices.say_in_use', 'IN USE');
+        use.disabled = true;
+    } else {
+        use.textContent = tf('uplift.voices.say_use', 'USE');
+        use.onclick = async () => {
+            use.disabled = true;
+            try {
+                await D.postJson(`${VAPI}/voices`,
+                    { name: _sayStoreName(v), model: 'say:' + v.name,
+                      language: v.locale });
+                D.toast(tf('uplift.voices.say_added_ok', 'Voice added')
+                        + ': ' + v.name);
+                await loadVoices();
+                renderVoices();
+            } catch (e) {
+                use.disabled = false;
+                D.toast(String(e && e.message || e), 'error');
+            }
+        };
+    }
+    act.append(play, use);
+    row.append(lab, act);
+    return row;
+}
+
+function _sayRows(rowsBox, voices) {
+    rowsBox.textContent = '';
+    const used = _sayUsedNames();
+    const needle = _sayFilter.trim().toLowerCase();
+    const match = (v) => !needle
+        || v.name.toLowerCase().indexOf(needle) >= 0
+        || String(v.locale).toLowerCase().indexOf(needle) >= 0
+        || _langName(v.locale).toLowerCase().indexOf(needle) >= 0;
+    const groups = {};
+    for (const v of voices) {
+        if (!match(v)) continue;
+        (groups[v.locale] = groups[v.locale] || []).push(v);
+    }
+    const locs = Object.keys(groups).sort(
+        (a, b) => _langName(a).localeCompare(_langName(b)) || a.localeCompare(b));
+    let shown = 0;
+    for (const loc of locs) {
+        const head = document.createElement('div');
+        head.className = 'vc-say-head';
+        head.textContent = _langName(loc) + ' · ' + loc;
+        rowsBox.append(head);
+        // quality promise: the better recording of a voice wins the top
+        groups[loc].sort((a, b) =>
+            ((SAY_TIERS[a.quality] || [0, 0, 3])[2]
+                - (SAY_TIERS[b.quality] || [0, 0, 3])[2])
+            || a.name.localeCompare(b.name));
+        for (const v of groups[loc]) { rowsBox.append(sayRow(v, used)); shown++; }
+    }
+    if (!shown) {
+        const none = document.createElement('div');
+        D.emptyMsg(none, tf('uplift.voices.say_nomatch',
+                            'No macOS voice matches that filter.'));
+        rowsBox.append(none);
+    }
+}
+
+async function sayPanel(host) {
+    const box = document.createElement('div');
+    box.className = 'mk-box vc-say';
+    const title = document.createElement('div');
+    title.className = 'mk-title';
+    title.textContent = tf('uplift.voices.say_title', 'macOS SYSTEM VOICES');
+    const hint = document.createElement('div');
+    hint.className = 'mk-desc';
+    hint.textContent = tf('uplift.voices.say_hint',
+        'Voices already installed on this Mac — no model to load, they '
+        + 'speak instantly. USE adds one to your voices; download more '
+        + '(and better) qualities in System Settings under Accessibility '
+        + '> Spoken Content > Voices.');
+    box.append(title, hint);
+    host.append(box);
+    if (!_sayData) {
+        const load = document.createElement('div');
+        load.className = 'mk-desc';
+        load.textContent = tf('uplift.voices.say_loading', 'Reading voices…');
+        box.append(load);
+        try {
+            _sayData = await D.fetchJson(`${VAPI}/voices/say`);
+        } catch (e) {
+            _sayData = { supported: false, voices: [] };
+        }
+        load.remove();
+    }
+    if (!_sayData.supported) {
+        const off = document.createElement('div');
+        off.className = 'mk-desc';
+        off.textContent = tf('uplift.voices.say_unsupported',
+            'The macOS say engine is not available on this server.');
+        box.append(off);
+        return;
+    }
+    const filter = document.createElement('input');
+    filter.type = 'text'; filter.className = 'vc-say-filter';
+    filter.placeholder = tf('uplift.voices.say_filter_ph',
+                            'Filter by name or language…');
+    const rows = document.createElement('div');
+    rows.className = 'vc-list';
+    filter.oninput = () => { _sayFilter = filter.value; _sayRows(rows, _sayData.voices); };
+    box.append(filter, rows);
+    _sayRows(rows, _sayData.voices);
+}
+
+let _vcTab = 'clone';
+
+function vcTabBtn(key, en, id) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'se-btn vc-tab' + (_vcTab === id ? ' on' : '');
+    b.textContent = tf(key, en);
+    b.dataset.i18n = key; b.dataset.en = en;
+    b.onclick = () => { if (_vcTab !== id) { _vcTab = id; renderVoices(); } };
+    return b;
+}
+
 async function renderVoices() {
     const host = $('vc-body');
     if (!host) return;
@@ -1150,6 +1364,18 @@ async function renderVoices() {
         } catch (e) { /* leave the empty-state hint honest */ }
     } else if (!models.length && _modelsSelf) {
         models = _modelsSelf;
+    }
+    const tabs = document.createElement('div');
+    tabs.className = 'vc-tabs';
+    tabs.append(vcTabBtn('uplift.voices.tab_clone', 'CLONED VOICES', 'clone'),
+                vcTabBtn('uplift.voices.tab_say', 'macOS VOICES', 'say'));
+    host.append(tabs);
+    if (_vcTab === 'say') {
+        // one panel per visit; the ADD form (clone flow) stays on its tab
+        await sayPanel(host);
+        const sub = $('vc-sub');
+        if (sub) sub.textContent = _voices.length + ' ×';
+        return;
     }
     host.append(voiceForm(models, _sttSelf));
     const list = document.createElement('div');
@@ -1190,5 +1416,9 @@ window.Uplift.voices = { renderVoices, voices: () => _voices,
                         // WAV container, the language resolver) — no
                         // AudioContext, no DOM, node-drivable.
                         _rec: { pcmToWavMono, normLang, promptFor, SUGGEST,
-                                MIN_SECONDS, MAX_SECONDS } };
+                                MIN_SECONDS, MAX_SECONDS },
+                        // SAY-1 test seams: the pure half of the macOS tab
+                        // (tier table, name/label helpers, row builder)
+                        _say: { SAY_TIERS, langName: _langName,
+                                storeName: _sayStoreName, rows: _sayRows } };
 })();
