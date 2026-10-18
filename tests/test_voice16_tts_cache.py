@@ -243,15 +243,38 @@ def test_a_junk_owner_is_ignored_not_fatal(client, store, synth_spy):
     assert list(store.glob("*")) == []
 
 
-def test_cache_endpoints_are_admin_gated():
-    from omlx_uplift.routers.base import require_admin
-    app = FastAPI()
+def test_cache_endpoints_answer_the_operator(client, store, synth_spy):
+    _speech(client, "One taken.", {"conv": "c1", "msg": "m1", "rev": "r1"})
+    # the bubble must exist in the chat store, or the sweep is RIGHT to call
+    # its audio orphaned (that is the delete-a-bubble rule)
+    client.post("/uplift/api/chat/history", json={
+        "id": "c1", "title": "T", "model": "m", "systemPrompt": "",
+        "messages": [_msg("assistant", "One taken.", "m1",
+                          {"mode": "sentence", "n": 1, "rev": "r1"})]})
+    rep = client.get("/uplift/api/voices/speech-cache").json()
+    assert rep["files"] == 1 and rep["totals"]["bytes"] > 0, rep
+    assert rep["orphan_files"] == 0, rep
+    (store / "stray.wav").write_bytes(b"z" * 50)
+    rep = client.get("/uplift/api/voices/speech-cache").json()
+    assert rep["orphans"].get("stray_file", {}).get("count") == 1, rep["orphans"]
+    out = client.post("/uplift/api/voices/speech-cache/cleanup", json={}).json()
+    assert out["removed"] == 1 and out["freed"] == 50, out
+    assert not (store / "stray.wav").exists()
+    assert client.get("/uplift/api/voices/speech-cache").json()["files"] == 1, \
+        "live audio survives a cleanup"
+
+
+def test_cache_sweep_never_runs_unauthenticated():
+    # the contract is "no sweep without admin", not one particular rejection
+    # code: without the override the request must not reach the handler (401/
+    # 403 from the auth leg, 422 where the auth dependency itself demands a
+    # credential — CI has no omlx settings, the keg does)
     from omlx_uplift import router as up
+    app = FastAPI()
     app.include_router(up.api_router, prefix="/uplift/api")
-    # no dependency override: an unauthenticated sweep must not run
     c = TestClient(app)
-    assert c.get("/uplift/api/voices/speech-cache").status_code in (401, 403)
-    assert c.post("/uplift/api/voices/speech-cache/cleanup").status_code in (401, 403)
+    assert c.get("/uplift/api/voices/speech-cache").status_code != 200
+    assert c.post("/uplift/api/voices/speech-cache/cleanup", json={}).status_code != 200
 
 
 # ---- routers: the chat lifecycle feeds the cache --------------------------
