@@ -2953,11 +2953,19 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     top: 6px; max-height: calc(100vh - 195px); overflow: auto; }
 .chat-native-side.chat-native-bar { flex-direction: column;
     flex-wrap: nowrap; align-items: stretch; }
-.chat-native-toprow .chat-native-group { flex: 1 1 180px; min-width: 140px; }
+/* ROUND 13: rails widened to 30% — the chat column got narrower, so the
+   bar groups must FIT-AS-CONCEIVED instead of wrapping Save/Delete to a
+   second line (flex-wrap measures hypothetical basis, not min-width:
+   big bases wrapped first and the two-row bar overflowed the page ~60px
+   and re-broke the round-5 inline order). Small bases, shrink to tight
+   mins, nowrap buttons. */
+.chat-native-toprow .chat-native-group { flex: 1 1 100px; min-width: 96px; }
+.chat-native-toprow .btn { white-space: nowrap; }
 /* round 5: model keeps the long name (2 shares), preset picker is a
    bounded control; Save/Delete are content-width, bottom-aligned by the
    bar's flex-end */
-.chat-native-toprow .chat-native-group:first-child { flex: 2 1 300px; }
+.chat-native-toprow .chat-native-group:first-child { flex: 2 1 150px;
+    min-width: 130px; }
 /* the bar wraps rows; a modal is NOT a row — its display comes from the
    sec-row class, which would defeat the UA [hidden] rule even if the
    modal class were renamed later: pin it by higher specificity too */
