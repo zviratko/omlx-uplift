@@ -253,7 +253,6 @@ def _print_patch_status(out: dict, stream=None) -> None:
         return (st or "?").upper(), "36"
 
     idw = min(30, max(len(str(p.get("id", ""))) for p in patches) + 1)
-    desc_budget = max(16, cols - 12 - idw - 9)
     for p in patches:
         word, code = verdict(p)
         desc = " ".join(str(p.get("description") or "").split())
@@ -267,14 +266,33 @@ def _print_patch_status(out: dict, stream=None) -> None:
                         or src.get("file") or "")
                 tail = u.replace("\\", "/").rstrip("/").split("/")[-1]
                 desc = "(from %s%s)" % (kind, ": " + tail if tail else "")
-        if len(desc) > desc_budget:
-            desc = desc[:desc_budget - 1].rstrip() + "…"
         scope = str(p.get("scope") or "")
         pid = str(p.get("id", ""))
-        print("  " + _paint(stream, "%12s" % word, code) + "  "
-              + "%-*s" % (idw, pid) + " "
-              + _paint(stream, "[%s]" % scope, "90") + "  " + desc,
-              file=stream)
+        # The budget is this row's OWN visible prefix length: the scope tag
+        # varies ([dev]=5, [omlx]=7) and ids may exceed the padded column —
+        # one flat constant per row overflowed the terminal (user report:
+        # wrapped 2 chars + ellipsis). Colour codes are invisible width, so
+        # the measurement uses the plain head and painting rides along.
+        head_plain = ("  " + "%12s" % word + "  "
+                      + "%-*s" % (idw, pid) + " "
+                      + "[%s]" % scope + "  ")
+        budget = cols - len(head_plain)
+        cont = ""
+        if budget < 8:
+            # the id alone (a command handle — never clipped or rewritten)
+            # nearly fills the line: move the description to an indented
+            # continuation row instead of letting the line wrap
+            cont, desc, budget = desc, "", cols - 15
+        elif len(desc) > budget:
+            desc = desc[:budget - 1].rstrip() + "…"
+        line = ("  " + _paint(stream, "%12s" % word, code) + "  "
+                + "%-*s" % (idw, pid) + " "
+                + _paint(stream, "[%s]" % scope, "90") + "  " + desc)
+        print(line.rstrip(), file=stream)
+        if cont:
+            print("  " + " " * 13 + _paint(stream,
+                  cont[:budget - 1] + ("…" if len(cont) > budget else ""),
+                  "90"), file=stream)
         note = ""
         if word == "RE-APPLY":
             note = ("omlx was updated — the patch is NOT in the running "

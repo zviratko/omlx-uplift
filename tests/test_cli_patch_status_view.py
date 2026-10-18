@@ -90,6 +90,37 @@ class Renderer(unittest.TestCase):
         self.assertNotIn("\n", body.split("details:")[0].strip("\n")[1:])
         self.assertIn("…", t)
 
+    def test_rows_never_exceed_terminal_width(self):
+        # 2026-10-18 regression: a flat per-row budget ignored the [scope]
+        # tag width and long ids — descriptions wrapped by 2 chars + '…'.
+        out = {"keg_id": "k", "patches": [
+            _p("devrow", scope="dev", description="d" * 500),
+            _p("omlxrow", scope="omlx", description="d" * 500),
+            _p("bothrow", scope="both", description="d" * 500),
+            _p("an-extremely-long-patch-id-that-exceeds-thirty-chars",
+               scope="both", description="d" * 500),
+            _p("short"),
+        ]}
+        saved = os.environ.get("COLUMNS")
+        os.environ["COLUMNS"] = "80"
+        try:
+            t = self.render(out)
+        finally:
+            if saved is None:
+                os.environ.pop("COLUMNS", None)
+            else:
+                os.environ["COLUMNS"] = saved
+        for line in t.splitlines():
+            self.assertLessEqual(len(line), 80,
+                                 "overflowing row: %r" % line)
+        # the over-long id keeps its handle and gets the description on a
+        # continuation row
+        lines = t.splitlines()
+        i = next(k for k, l in enumerate(lines) if "exceeds-thirty-chars" in l)
+        self.assertFalse(lines[i].rstrip().endswith(("ddd…", "ddddd")))
+        self.assertIn("dddd", lines[i + 1])
+        self.assertIn("…", t)
+
     def test_kill_switch_and_load_error_banners(self):
         out = dict(OUT, kill_switch_active=True, load_error="manifest v9?!")
         t = self.render(out)
