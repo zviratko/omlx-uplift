@@ -299,11 +299,18 @@ test('release: a deleted or regenerated bubble stops talking and loses its mid',
     assert.match(rel, /_turnMid === mid\) _turnMid = ''/,
                  'the minted mid is not left behind for the next reply');
     assert.match(rel, /delete _plans\[mid\]/, 'and the plan itself goes');
-    assert.match(slice('msgDelete'), /sayRelease\(m\.mid\);/,
-                 'Delete silences that bubble');
+    const del = slice('msgDelete');
+    assert.match(del, /saySilence\(m\.mid\);/, 'Delete silences that bubble');
+    assert.match(del, /saySweepPlans\(\);/, 'and leaves no plan behind');
     const regen = slice('msgRegenerate');
-    assert.match(regen, /role === 'assistant'\) sayRelease\(ms\[k\]\.mid\)/,
+    assert.match(regen, /role === 'assistant'\) saySilence\(ms\[k\]\.mid\)/,
                  'Regenerate silences every reply it cuts away');
+    // silence must not need the map: a row can be stored without its mid
+    const sil = slice('saySilence');
+    assert.match(sil, /_speakQ\.__plan\.mid === mid/, 'it goes through the queue');
+    const sweep = slice('saySweepPlans');
+    assert.match(sweep, /if \(_turnMid\) live\[_turnMid\] = 1;/,
+                 'the reply still being streamed is never swept');
 });
 
 test('identity: a stale turn mid cannot lend its chunks to a new reply', () => {
