@@ -924,9 +924,7 @@
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "Read aloud with the selected voice",
- "uplift.chat.voice": "Voice",
  "uplift.chat.voice_title": "Voice used by the read-aloud button",
- "uplift.chat.autospeak": "Auto-speak",
  "uplift.chat.autospeak_hint": "Read replies aloud while the model is still streaming",
  "uplift.chat.speak_chunk": "Chunk",
  "uplift.chat.speak_chunk_hint": "Split streamed replies at every boundary of this size",
@@ -1050,5 +1048,7 @@
  "uplift.voices.record_title": "Record a reference clip right here — read the suggested text aloud for 10-30 s in a quiet room.",
  "uplift.voices.recording": "recording… {n}s",
  "uplift.inflight.unload": "UNLOAD",
- "uplift.inflight.unload_tip": "Unload this model"
+ "uplift.inflight.unload_tip": "Unload this model",
+ "uplift.chat.speak_header": "Speak",
+ "uplift.chat.auto": "Auto"
 }

@@ -924,9 +924,7 @@
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "用所选语音朗读",
- "uplift.chat.voice": "语音",
  "uplift.chat.voice_title": "朗读按钮使用的语音",
- "uplift.chat.autospeak": "自动朗读",
  "uplift.chat.autospeak_hint": "在模型仍在生成时朗读回复",
  "uplift.chat.speak_chunk": "分段",
  "uplift.chat.speak_chunk_hint": "按此大小的边界切分流式回复",
@@ -1050,5 +1048,7 @@
  "uplift.bench.queue_queued": "排队中",
  "uplift.bench.queue_failed": "失败",
  "uplift.inflight.unload": "卸载",
- "uplift.inflight.unload_tip": "卸载此模型"
+ "uplift.inflight.unload_tip": "卸载此模型",
+ "uplift.chat.speak_header": "朗读",
+ "uplift.chat.auto": "自动"
 }

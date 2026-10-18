@@ -1009,8 +1009,9 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'history rail: caption, new, export+import row, the list, DELETE in-region');
     assert.ok(/secModel\.append\(thinkGroup, budGroup\)/.test(src),
         'Model Settings = thinking + budget (round 13)');
-    assert.ok(/secVoice\.append\(\s*sttGroup, mic,\s*group\(tf2\('uplift\.chat\.voice'[\s\S]*?autospeak[\s\S]*?speak_chunk/.test(src),
-        'ONE Voice section: input settings + mic + the TTS trio (round 13)');
+    assert.ok(/secVoice\.append\(\s*sttGroup, mic, speakHead, speakRow,/.test(src)
+        && /speakRow\.append\(voiceSel, autoBtn\)/.test(src),
+        'ROUND 14: one Speak line under the Voice caption — picker + Auto');
     assert.ok(/secSamp\.append\(genRow\)/.test(src)
         && /secTools\.append\(web\)/.test(src),
         'Sampling owns the grid; Tools owns web search at the bottom');
@@ -1081,22 +1082,27 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
                 `${key} translated in ${loc}, not an EN fill`);
         }
     }
-    // ROUND 13 section captions: present in all ten; cs keeps the
+    // ROUND 13/14 section captions: present in all ten; cs keeps the
     // established term 'Sampling' in ENGLISH (user terminology policy) —
     // everything else must read as a real translation
     const R13_KEYS = { stt_settings: 'Input settings', voice_section: 'Voice',
-        tools: 'Tools', sampling: 'Sampling' };
+        tools: 'Tools', sampling: 'Sampling', speak_header: 'Speak',
+        auto: 'Auto' };
+    // words that legitimately stay EN in some locales (terminology policy)
+    const SAME_EN = { sampling: ['cs'], auto: ['cs', 'es', 'fr', 'pt-BR'] };
     for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
         const d = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/${loc}.json`, 'utf8'));
         for (const [k, enV] of Object.entries(R13_KEYS)) {
             const v = d[`uplift.chat.${k}`];
             assert.ok(v && v.length, `uplift.chat.${k} present in ${loc}`);
-            if (loc !== 'en' && !(loc === 'cs' && k === 'sampling'))
+            if (loc !== 'en' && !(SAME_EN[k] || []).includes(loc))
                 assert.notEqual(v, enV, `uplift.chat.${k} translated in ${loc}`);
         }
-        // the two split captions are gone for good
-        assert.ok(!('uplift.chat.stt_title' in d) && !('uplift.chat.tts_title' in d),
-            `stt_title/tts_title pruned from ${loc} (ONE Voice section)`);
+        // captions folded away for good: split voice titles (round 13)
+        // and the tall Voice/Auto-speak group stack (round 14 one-liner)
+        for (const dead of ['stt_title', 'tts_title', 'autospeak', 'voice'])
+            assert.ok(!(`uplift.chat.${dead}` in d),
+                `uplift.chat.${dead} pruned from ${loc}`);
     }
 });
 

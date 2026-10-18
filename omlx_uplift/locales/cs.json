@@ -924,9 +924,7 @@
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "Předčítat nahlas vybraným hlasem",
- "uplift.chat.voice": "Hlas",
  "uplift.chat.voice_title": "Hlas používaný tlačítkem předčítání",
- "uplift.chat.autospeak": "Předčítat hned",
  "uplift.chat.autospeak_hint": "Předčítat odpovědi už během generování",
  "uplift.chat.speak_chunk": "Úsek",
  "uplift.chat.speak_chunk_hint": "Rozdělovat odpovědi po hranicích této velikosti",
@@ -1050,5 +1048,7 @@
  "uplift.bench.queue_queued": "Ve frontě",
  "uplift.bench.queue_failed": "Selhalo",
  "uplift.inflight.unload": "UVOLNIT",
- "uplift.inflight.unload_tip": "Uvolnit tento model"
+ "uplift.inflight.unload_tip": "Uvolnit tento model",
+ "uplift.chat.speak_header": "Předčítání",
+ "uplift.chat.auto": "Auto"
 }

@@ -927,9 +927,7 @@
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "選択中の音声で読み上げる",
- "uplift.chat.voice": "音声",
  "uplift.chat.voice_title": "読み上げボタンが使用する音声",
- "uplift.chat.autospeak": "自動読み上げ",
  "uplift.chat.autospeak_hint": "モデルの生成中に返信を読み上げる",
  "uplift.chat.speak_chunk": "区切り",
  "uplift.chat.speak_chunk_hint": "この大きさの境界で応答を分割して読み上げる",
@@ -1053,5 +1051,7 @@
  "uplift.bench.queue_queued": "待機中",
  "uplift.bench.queue_failed": "失敗",
  "uplift.inflight.unload": "アンロード",
- "uplift.inflight.unload_tip": "このモデルをアンロード"
+ "uplift.inflight.unload_tip": "このモデルをアンロード",
+ "uplift.chat.speak_header": "読み上げ",
+ "uplift.chat.auto": "自動"
 }

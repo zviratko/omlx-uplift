@@ -1601,10 +1601,13 @@ function toolbar() {
         if (_dc) renderHistory();   // re-attach: speak buttons track voices
         onPageEdited();             // ROUND 11
     });
-    // VOICE-11: AUTO-SPEAK toggle + chunk mode, next to the Voice picker
-    var autoBtn = el('button', 'btn', tf2('uplift.chat.autospeak', 'Auto-speak'));
+    // VOICE-11: AUTO-SPEAK toggle + chunk mode, next to the Voice picker.
+    // ROUND 14 (user): the button shrinks to 'Auto' — it shares a line
+    // with the voice picker under a 'Speak' header now; the title keeps
+    // the full meaning.
+    var autoBtn = el('button', 'btn', tf2('uplift.chat.auto', 'Auto'));
     autoBtn.type = 'button'; autoBtn.id = 'chat-native-autospeak';
-    autoBtn.dataset.i18n = 'uplift.chat.autospeak';
+    autoBtn.dataset.i18n = 'uplift.chat.auto';
     autoBtn.dataset.en = autoBtn.textContent;                       // U59
     autoBtn.dataset.i18nTitle = 'uplift.chat.autospeak_hint';
     autoBtn.dataset.enTitle = tf2('uplift.chat.autospeak_hint',
@@ -1647,10 +1650,18 @@ function toolbar() {
     var secVoice = section('uplift.chat.voice_section', 'Voice');
     var sttGroup = el('div', 'chat-native-group');
     sttGroup.appendChild(sttSettingsBtn());
-    secVoice.append(sttGroup, mic,
-        group(tf2('uplift.chat.voice', 'Voice'), voiceSel, 'uplift.chat.voice'),
-        group(tf2('uplift.chat.autospeak', 'Auto-speak'), autoBtn,
-              'uplift.chat.autospeak'),
+    // ROUND 14 (user: 'turn Auto-speak and voice input one line + header.
+    // Header: Speak and below it voiceSelector + Auto'): the TTS output
+    // pair collapses into one line under its own caption — picker grows,
+    // Auto sits at content width. Chunk keeps its group (it is a splitter
+    // setting, not a speak-now control).
+    var speakHead = el('span', 'chat-native-group-label',
+        tf2('uplift.chat.speak_header', 'Speak'));
+    speakHead.dataset.i18n = 'uplift.chat.speak_header';
+    speakHead.dataset.en = speakHead.textContent;                   // U59
+    var speakRow = el('div', 'chat-native-sec-row chat-native-speak-row');
+    speakRow.append(voiceSel, autoBtn);
+    secVoice.append(sttGroup, mic, speakHead, speakRow,
         group(tf2('uplift.chat.speak_chunk', 'Chunk'), chunkSel,
               'uplift.chat.speak_chunk'));
     // CHAT-3R round 5 (user: 'move the Active preset and save/delete back

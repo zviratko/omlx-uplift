@@ -464,9 +464,11 @@ test('VOICE-11e: toggle + chunk mode persist and restore', async () => {
 test('VOICE-11: new toolbar labels carry the dataset.i18n + dataset.en markers', async () => {
     const h = await makeHarness({}).booted();     // identity t(): fallbacks render
     const btn = h.byId['chat-native-autospeak'];
-    assert.equal(btn.textContent, 'Auto-speak');
-    assert.equal(btn.dataset.i18n, 'uplift.chat.autospeak');
-    assert.equal(btn.dataset.en, 'Auto-speak', 'repair marker = the rendered fallback');
+    // ROUND 14: the toggle shrank to 'Auto' — it shares the 'Speak' line
+    // with the voice picker now; the meaning stays in the title hint.
+    assert.equal(btn.textContent, 'Auto');
+    assert.equal(btn.dataset.i18n, 'uplift.chat.auto');
+    assert.equal(btn.dataset.en, 'Auto', 'repair marker = the rendered fallback');
     const sel = h.byId['chat-native-speak-chunk'];
     const opt = (sel.children || [])
         .find((o) => o.dataset.i18n === 'uplift.chat.speak_chunk_paragraph');

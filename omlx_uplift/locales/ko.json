@@ -939,9 +939,7 @@
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "선택한 목소리로 읽기",
- "uplift.chat.voice": "목소리",
  "uplift.chat.voice_title": "읽기 버튼이 사용하는 목소리",
- "uplift.chat.autospeak": "자동 읽기",
  "uplift.chat.autospeak_hint": "모델이 생성하는 동안 답변을 소리 내어 읽기",
  "uplift.chat.speak_chunk": "분할",
  "uplift.chat.speak_chunk_hint": "이 크기의 경계마다 응답을 나누어 읽기",
@@ -1065,5 +1063,7 @@
  "uplift.bench.queue_queued": "대기 중",
  "uplift.bench.queue_failed": "실패",
  "uplift.inflight.unload": "언로드",
- "uplift.inflight.unload_tip": "이 모델 언로드"
+ "uplift.inflight.unload_tip": "이 모델 언로드",
+ "uplift.chat.speak_header": "읽기",
+ "uplift.chat.auto": "자동"
 }

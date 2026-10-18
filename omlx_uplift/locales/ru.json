@@ -924,9 +924,7 @@
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "Озвучить выбранным голосом",
- "uplift.chat.voice": "Голос",
  "uplift.chat.voice_title": "Голос для кнопки озвучивания",
- "uplift.chat.autospeak": "Автоозвучка",
  "uplift.chat.autospeak_hint": "Читать ответы вслух, пока модель ещё генерирует",
  "uplift.chat.speak_chunk": "Фрагмент",
  "uplift.chat.speak_chunk_hint": "Разделять ответ по границам этого размера",
@@ -1050,5 +1048,7 @@
  "uplift.bench.queue_queued": "В очереди",
  "uplift.bench.queue_failed": "Ошибка",
  "uplift.inflight.unload": "ВЫГРУЗИТЬ",
- "uplift.inflight.unload_tip": "Выгрузить эту модель"
+ "uplift.inflight.unload_tip": "Выгрузить эту модель",
+ "uplift.chat.speak_header": "Озвучка",
+ "uplift.chat.auto": "Авт."
 }

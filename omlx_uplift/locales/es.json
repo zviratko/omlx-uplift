@@ -928,9 +928,7 @@
  "uplift.bench.badge_harness": "LM-Eval",
  "uplift.bench.badge_classic": "oMLX Classic",
  "uplift.chat.speak": "Leer en voz alta con la voz seleccionada",
- "uplift.chat.voice": "Voz",
  "uplift.chat.voice_title": "Voz usada por el botón de lectura en voz alta",
- "uplift.chat.autospeak": "Lectura automática",
  "uplift.chat.autospeak_hint": "Leer las respuestas en voz alta mientras el modelo aún genera",
  "uplift.chat.speak_chunk": "Fragmento",
  "uplift.chat.speak_chunk_hint": "Dividir las respuestas en cada límite de este tamaño",
@@ -1054,5 +1052,7 @@
  "uplift.bench.queue_queued": "En cola",
  "uplift.bench.queue_failed": "Fallido",
  "uplift.inflight.unload": "DESCARGAR",
- "uplift.inflight.unload_tip": "Descargar este modelo"
+ "uplift.inflight.unload_tip": "Descargar este modelo",
+ "uplift.chat.speak_header": "Lectura",
+ "uplift.chat.auto": "Auto"
 }

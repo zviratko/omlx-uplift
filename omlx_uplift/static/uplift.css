@@ -2994,6 +2994,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    'folded' name row still renders, and in the top row it stole a whole
    empty line (the bar wraps) */
 .chat-native-sec-row[hidden] { display: none; }
+/* ROUND 14 (user): the 'Speak' line — voice picker grows to the free
+   width, the short Auto toggle keeps content width (the .btn rule above
+   would otherwise split the line 50/50). */
+.chat-native-speak-row { align-items: flex-end; }
+.chat-native-speak-row select { flex: 1 1 auto; min-width: 0; width: auto; }
+.chat-native-speak-row .btn { flex: 0 0 auto; }
 .chat-native-convlist { display: flex; flex-direction: column; gap: 2px;
     flex: 1 1 auto; min-height: 60px; max-height: 45vh; overflow-y: auto; }
 .chat-native-conv { text-align: left; font-size: 11px; padding: 4px 6px;
