@@ -200,6 +200,95 @@ def print_patch_preview(store, stream=None) -> None:
         print(f"OMLX-UPLIFT PATCHES: preview unavailable ({exc})", file=stream)
 
 
+def _print_patch_status(out: dict, stream=None) -> None:
+    """Human view of `patch status`: ONE line per patch, colour on a TTY.
+
+    Words mirror the dashboard chips (APPLIED / RE-APPLY / HELD / OFF /
+    ERROR / REVIEW) — the same fact reads the same everywhere. The old
+    JSON dump stays available verbatim via `patch status --json`.
+    """
+    import shutil
+    import sys
+    stream = stream or sys.stdout
+    cols = shutil.get_terminal_size((100, 24)).columns
+    print(_paint(stream, "OMLX-UPLIFT PATCHES", "1;36")
+          + "   omlx: " + str(out.get("keg_id") or "?"), file=stream)
+    if out.get("kill_switch_active"):
+        print(_paint(stream,
+                     "KILL SWITCH ACTIVE — boot runs UNPATCHED "
+                     "(clear with: omlx-uplift patch enable-all)", "1;33"),
+              file=stream)
+    if out.get("warning"):
+        print(_paint(stream, "WARNING: %s" % out["warning"], "33"),
+              file=stream)
+    if out.get("load_error"):
+        print(_paint(stream, "STORE LOAD ERROR: %s" % out["load_error"],
+                     "31"), file=stream)
+    patches = out.get("patches") or []
+    if not patches:
+        print("  (no patches stored)", file=stream)
+        return
+
+    def verdict(p):
+        # precedence is deliberate: off first, then a human decision that
+        # blocks applying (HELD/REVIEW), then the keg-moved fact (RE-APPLY)
+        # which outranks a stale 'applied' stamp, then the stored state.
+        if not p.get("enabled"):
+            return "OFF", "90"
+        if p.get("requires_approval"):
+            return "HELD", "33"
+        if p.get("keg_changed"):
+            return "RE-APPLY", "33"
+        st = p.get("state") or ""
+        if st == "applied":
+            return "APPLIED", "32"
+        if st == "error":
+            return "ERROR", "31"
+        if st == "needs_review":
+            return "REVIEW", "33"
+        if st == "obsolete":
+            return "GONE", "90"
+        if st == "pending":
+            return "PENDING", "33"
+        return (st or "?").upper(), "36"
+
+    idw = min(30, max(len(str(p.get("id", ""))) for p in patches) + 1)
+    desc_budget = max(16, cols - 12 - idw - 9)
+    for p in patches:
+        word, code = verdict(p)
+        desc = " ".join(str(p.get("description") or "").split())
+        if not desc:
+            src = p.get("source") or {}
+            kind = str(src.get("kind") or "?")
+            if kind == "github_pr" and src.get("pr"):
+                desc = "(PR %s#%s)" % (src.get("repo", "?"), src["pr"])
+            else:
+                u = str(src.get("url") or src.get("path")
+                        or src.get("file") or "")
+                tail = u.replace("\\", "/").rstrip("/").split("/")[-1]
+                desc = "(from %s%s)" % (kind, ": " + tail if tail else "")
+        if len(desc) > desc_budget:
+            desc = desc[:desc_budget - 1].rstrip() + "…"
+        scope = str(p.get("scope") or "")
+        pid = str(p.get("id", ""))
+        print("  " + _paint(stream, "%12s" % word, code) + "  "
+              + "%-*s" % (idw, pid) + " "
+              + _paint(stream, "[%s]" % scope, "90") + "  " + desc,
+              file=stream)
+        note = ""
+        if word == "RE-APPLY":
+            note = ("omlx was updated — the patch is NOT in the running "
+                    "code; restart the server to re-apply")
+        elif word not in ("APPLIED", "OFF") and p.get("state_detail"):
+            note = str(p["state_detail"])
+        if note:
+            print("  " + " " * 13 + _paint(stream, note[:cols - 16], "90"),
+                  file=stream)
+    print(_paint(stream,
+                 "details: omlx-uplift patch status --json", "90"),
+          file=stream)
+
+
 def _example_skins_dir() -> Path:
     """Deprecated alias kept for 3rd-party callers/tests; the package crate
     dir is the single source of bundled skins (see skins.bundled_package_dir)."""
@@ -609,7 +698,10 @@ def _kill_switch(store, action: str) -> dict:
 
 def cmd_patches(argv=None) -> int:
     """Out-of-band patch recovery (PAT-3). Subcommands:
-      status       manifest + verification view (JSON)
+      status       one line per patch, colour on a TTY: verdict word, id,
+                   scope, short description (+ a note when action is
+                   needed). --json prints the full technical dump instead
+                   (the pre-2026 default, unchanged).
       apply        reconcile now against the live keg (no re-exec)
       check        re-fetch sources, report drift (JSON)
       disable-all  kill switch on (sentinel) + disable every patch. Twin:
@@ -683,6 +775,10 @@ def cmd_patches(argv=None) -> int:
     ap.add_argument("--build-root", help="source checkout used to gate "
                                          "scope=dev/both (default: ~/.omlx/"
                                          "uplift/dev-src when present)")
+    ap.add_argument("--json", action="store_true",
+                    help="status: machine-readable JSON dump (the pre-2026 "
+                         "default); without it status prints one colour-"
+                         "coded line per patch")
     args = ap.parse_args(argv)
 
     from . import patchsource, patches as _patches, patchsync
@@ -818,6 +914,9 @@ def cmd_patches(argv=None) -> int:
         out = patchsource.update_all(
             store, tree_root,
             build_root=args.build_root or patchsource.dev_build_root())
+    if args.action == "status" and not args.json:
+        _print_patch_status(out)
+        return 0
     print(_json.dumps(out, indent=2))
     return 0 if out.get("ok", True) else 1
 
