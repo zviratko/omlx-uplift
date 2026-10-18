@@ -192,6 +192,25 @@ def test_parse_catalog_accepts_both_shapes():
                     "quality": "enhanced"}]
 
 
+def test_parse_catalog_footprint_reads_each_entrys_own_tier():
+    # TTS-4: the modern TTSAX catalog carries every tier of a voice in
+    # ONE file, distinguished by Footprint — compact == the plain
+    # factory-quality row ('Iveta', not 'Iveta (Enhanced)')
+    doc = {"Assets": [
+        {"Name": "Zuzana", "Languages": ["cs-CZ"], "Footprint": "premium"},
+        {"Name": "Zuzana", "Languages": ["cs-CZ"], "Footprint": "enhanced"},
+        {"Name": "Iveta", "Languages": ["cs-CZ"], "Footprint": "compact"},
+        {"Name": "Odd", "Language": "cs-CZ", "Footprint": "gigantic"},
+    ]}
+    out = SE.parse_catalog(doc, "footprint")
+    assert out == [
+        {"name": "Zuzana", "locale": "cs-CZ", "quality": "premium"},
+        {"name": "Zuzana", "locale": "cs-CZ", "quality": "enhanced"},
+        {"name": "Iveta", "locale": "cs-CZ", "quality": "standard"},
+        {"name": "Odd", "locale": "cs-CZ", "quality": "standard"},
+    ]
+
+
 def test_parse_av_maps_quality_from_description():
     vs = SE.parse_av(AV_ROSTER)
     assert [v["name"] for v in vs] == ["Albert", "Zuzana", "Zuzana", "Voice 2"]

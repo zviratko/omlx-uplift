@@ -203,9 +203,15 @@ def _downloaded_names() -> set:
 
 
 # System Settings' downloadable roster: the MobileAsset catalogs the OS
-# ships (readable, no root). MacinTalk entries are the classic compact
-# voices; the Vocalizer set is the enhanced-quality downloads. What is
-# INSTALLED still comes from AV/say only — these two files say what
+# ships (readable, no root). Three generations live side by side:
+#   MacinTalk        — the classic compact voices (all standard quality)
+#   CombinedVocalizer — the legacy enhanced-quality downloads
+#   TTSAXResourceModel — the modern 'Maui' neural set; ONE file carries
+#       every tier per voice (Footprint: compact/enhanced/premium/
+#       personal), and System Settings' picker is built from it. Missing
+#       it hid the plain 'Iveta' and the 'Zuzana (Premium)' offer (user
+#       report: 'there is an Iveta without (Enhanced) not shown at all').
+# What is INSTALLED still comes from AV/say only — these files say what
 # Apple offers here, never what this Mac currently holds.
 _CAT_PATHS = (
     ("/System/Library/AssetsV2/com_apple_MobileAsset_MacinTalkVoiceAssets/"
@@ -213,7 +219,13 @@ _CAT_PATHS = (
     ("/System/Library/AssetsV2/com_apple_MobileAsset_VoiceServices_"
      "CombinedVocalizerVoices/com_apple_MobileAsset_VoiceServices_"
      "CombinedVocalizerVoices.xml", "enhanced"),
+    ("/System/Library/AssetsV2/com_apple_MobileAsset_TTSAXResourceModelAssets/"
+     "com_apple_MobileAsset_TTSAXResourceModelAssets.xml", "footprint"),
 )
+
+_TIER_BY_FOOTPRINT = {"premium": "premium", "enhanced": "enhanced",
+                      "personal": "personal", "compact": "standard",
+                      "default": "standard"}
 
 
 def _norm_locale(loc) -> str:
@@ -229,18 +241,24 @@ def _root_name(name) -> str:
 
 
 def parse_catalog(doc, quality: str) -> list:
-    """One AssetsV2 plist -> [{name, locale, quality}]."""
+    """One AssetsV2 plist -> [{name, locale, quality}]. quality is a
+    fixed tier word, or 'footprint' to read each entry's own Footprint
+    field (the modern TTSAX catalog holds several tiers per voice)."""
     out = []
     for e in ((doc or {}).get("Assets") or []):
         if not isinstance(e, dict):
             continue
         name = str(e.get("Name") or "").strip()
+        q = quality
+        if quality == "footprint":
+            q = _TIER_BY_FOOTPRINT.get(
+                str(e.get("Footprint") or "").strip().lower(), "standard")
         locs = e.get("Languages") or ([e.get("Language")]
                                       if e.get("Language") else [])
         for l in locs:
             if name and l:
                 out.append({"name": name, "locale": _norm_locale(l),
-                            "quality": quality})
+                            "quality": q})
     return out
 
 
@@ -479,11 +497,15 @@ def language_voice(lang, preferred=None) -> Optional[dict]:
     """SAY-2: the row that answers a language-carrying `say` request.
     Chain: the voice marked preferred for that language (exact locale
     beats primary-language match; a mark pointing at a voice this Mac
-    no longer holds is skipped) -> the language's default voice (AV
-    isDefault) -> the best installed voice for the language (the tab's
-    own quality promise: Premium > Enhanced > Personal > standard).
-    None when the language has nothing installed — the caller fails
-    honestly instead of speaking the text in a random language."""
+    no longer holds is skipped) -> the language's BEST installed tier
+    (the tab's quality promise: Premium > Enhanced > Personal > standard)
+    -> None when the language has nothing installed — the caller fails
+    honestly instead of speaking the text in a random language.
+    TTS-4 (user): the tier beats AVFoundation's isDefault flag. That flag
+    marks the factory default-quality voice, NOT the user's System
+    Settings choice — a Mac that downloaded 'Zuzana (Premium)' speaks
+    Czech with Premium, and said so when the chip named the compact
+    factory row instead. Within a tier the flagged row still wins."""
     if not lang:
         return None
     best = _marked_voice(lang, preferred)
@@ -493,10 +515,25 @@ def language_voice(lang, preferred=None) -> Optional[dict]:
     in_lang = [v for v in rows if _locale_score(lang, v.get("locale"))]
     if not in_lang:
         return None
-    in_lang.sort(key=lambda v: (not v.get("default"),
-                                _quality_rank(v.get("quality")),
+    in_lang.sort(key=lambda v: (_quality_rank(v.get("quality")),
+                                not v.get("default"),
                                 str(v.get("name") or "")))
     return in_lang[0]
+
+
+def effective_default_addrs() -> set:
+    """TTS-4: addresses (identifier, else name) of the rows that answer
+    their OWN language with no preferred mark involved — what the tabs
+    badge 'macOS DEFAULT'. Computed per language through the same
+    quality-first chain the router uses, so the badge and the voice that
+    actually speaks can never disagree."""
+    langs = {v.get("locale") for v in _installed_rows() if v.get("locale")}
+    addrs = set()
+    for loc in langs:
+        d = language_voice(loc)
+        if d:
+            addrs.add(d.get("identifier") or d["name"])
+    return addrs
 
 
 _SYS_LANG_TTL_S = 300              # the language rarely changes; but it can
@@ -552,20 +589,18 @@ def default_answered(locale) -> bool:
 
 def default_voice() -> Optional[dict]:
     """The Mac's own system default voice (the one `say` speaks when no
-    -v is given). SAY-2c: the flagged row for the Mac's own language
-    wins — `say`'s System Voice follows the system language, while the
-    AV isDefault flag alone marks every language's default. None when
-    the AV probe could not tell us — the caller then addresses `say`
-    with no voice and lets the system choose."""
-    rows = _installed_rows()
+    -v is given). TTS-4: answered through the SAME quality-first chain
+    the language routing and the DEFAULT badge use — System Settings
+    follows the best installed tier of the system language, not the
+    factory isDefault row. None when the probe cannot name a voice —
+    the caller then addresses `say` with no voice and lets the system
+    choose."""
     sysl = system_language()
     if sysl:
-        hits = [(v, _locale_score(sysl, v.get("locale")))
-                for v in rows if v.get("default")]
-        hits = [h for h in hits if h[1]]
-        if hits:
-            hits.sort(key=lambda h: -h[1])
-            return hits[0][0]
+        v = language_voice(sysl)
+        if v is not None:
+            return v
+    rows = _installed_rows()
     for v in rows:
         if v.get("default"):
             return v

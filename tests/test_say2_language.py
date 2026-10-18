@@ -158,7 +158,9 @@ def test_language_voice_stale_mark_falls_through(on_mac):
 
 
 def test_language_voice_default_beats_quality_then_none(on_mac):
-    # en-US: Samantha carries the isDefault flag — she answers 'en'
+    # en-US: Samantha is the ONLY English row — she answers 'en'
+    # (TTS-4 note: she no longer wins BY her isDefault flag — the tier
+    # order leads now; the flag breaks ties inside one tier only)
     assert SE.language_voice("en", {})["identifier"] == \
         "com.apple.speech.synthesis.voice.Samantha"
     # cs-CZ: nothing isDefault -> the tab's quality promise: Premium Ilja
@@ -168,6 +170,62 @@ def test_language_voice_default_beats_quality_then_none(on_mac):
     assert SE.language_voice("sk", {})["name"] == "Laura"
     assert SE.language_voice("de", {}) is None
     assert SE.language_voice("", {}) is None
+
+
+def test_language_voice_tier_beats_the_is_default_flag(on_mac):
+    """TTS-4 (user): AVFoundation's isDefault marks the FACTORY voice of
+    a language, not the Spoken Content choice. A Mac that downloaded
+    'Zuzana (Premium)' answers Czech with Premium — the chip and the
+    router must agree with that, never name the compact factory row."""
+    rows = [
+        {"name": "Zuzana", "locale": "cs-CZ", "quality": "standard",
+         "identifier": "com.apple.voice.super-compact.cs-CZ.Zuzana",
+         "installed": True, "default": True},
+        {"name": "Zuzana (Premium)", "locale": "cs-CZ", "quality": "premium",
+         "identifier": "com.apple.voice.premium.cs-CZ.Zuzana",
+         "installed": True, "default": False},
+    ]
+    on_mac._cache.update(ts=9e15, voices=rows)
+    assert SE.language_voice("cs-CZ", {})["identifier"] == \
+        "com.apple.voice.premium.cs-CZ.Zuzana"
+    # the badge set answers with exactly the row the router picks
+    assert SE.effective_default_addrs() == \
+        {"com.apple.voice.premium.cs-CZ.Zuzana"}
+
+
+def test_default_voice_follows_the_tier_for_the_system_language(
+        monkeypatch, on_mac):
+    monkeypatch.setattr(SE, "system_language", lambda force=False: "cs-CZ")
+    rows = [
+        {"name": "Zuzana", "locale": "cs-CZ", "quality": "standard",
+         "identifier": "com.apple.voice.super-compact.cs-CZ.Zuzana",
+         "installed": True, "default": True},
+        {"name": "Zuzana (Premium)", "locale": "cs-CZ", "quality": "premium",
+         "identifier": "com.apple.voice.premium.cs-CZ.Zuzana",
+         "installed": True, "default": False},
+    ]
+    on_mac._cache.update(ts=9e15, voices=rows)
+    assert SE.default_voice()["identifier"] == \
+        "com.apple.voice.premium.cs-CZ.Zuzana"
+
+
+def test_say_list_badges_the_effective_default_not_the_flag(client, on_mac):
+    rows = [
+        {"name": "Zuzana", "locale": "cs-CZ", "quality": "standard",
+         "sample": "",
+         "identifier": "com.apple.voice.super-compact.cs-CZ.Zuzana",
+         "installed": True, "downloaded": False, "default": True},
+        {"name": "Zuzana (Premium)", "locale": "cs-CZ", "quality": "premium",
+         "sample": "",
+         "identifier": "com.apple.voice.premium.cs-CZ.Zuzana",
+         "installed": True, "downloaded": True, "default": False},
+    ]
+    on_mac._cache.update(ts=9e15, voices=rows)
+    r = client.get("/uplift/api/voices/say")
+    assert r.status_code == 200
+    vs = {v["identifier"]: v for v in r.json()["voices"]}
+    assert vs["com.apple.voice.premium.cs-CZ.Zuzana"]["default"] is True
+    assert vs["com.apple.voice.super-compact.cs-CZ.Zuzana"]["default"] is False
 
 
 def test_route_explicit_locale_tail_and_default(on_mac):
@@ -473,7 +531,11 @@ def test_say_list_advertises_the_system_default(client, on_mac, monkeypatch):
     monkeypatch.setattr(SE, "system_language", lambda force=False: "cs-CZ")
     d = client.get("/uplift/api/voices/say").json()
     assert d["system_language"] == "cs-CZ"
-    assert d["system_voice"] == "Samantha"   # nothing cs-CZ is AV-flagged
+    # TTS-4: the system language's OWN best tier answers — Ilja (Premium)
+    # for cs-CZ. The old code fell through to the factory-flagged row of
+    # ANOTHER language (Samantha) whenever cs-CZ held no flag; that is
+    # what made the UI name the wrong 'macOS default'.
+    assert d["system_voice"] == "Ilja"
     by = {v["identifier"]: v for v in d["voices"]}
     assert by["com.apple.voice.compact.cs-CZ.Zuzana"]["answers_default"] is True
     assert by["com.apple.speech.synthesis.voice.Samantha"]["answers_default"] is False

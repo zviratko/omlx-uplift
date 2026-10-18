@@ -709,6 +709,12 @@ async def voices_say_list(_auth=Depends(require_admin)):
         if addr:
             addr2loc[addr] = loc
     dv = say_engine.default_voice() or {}
+    # TTS-4: 'default' answers "does THIS row speak its language by
+    # default" — computed through the routing chain (best installed tier;
+    # a downloaded Premium outranks the factory isDefault compact row),
+    # never the raw AVFoundation flag, so the badge and the voice that
+    # actually answers can never disagree
+    eff = say_engine.effective_default_addrs()
     return {"supported": True, "preferred": pref,
             "system_language": sysl, "system_voice": dv.get("name") or "",
             "voices": [dict(
@@ -716,6 +722,8 @@ async def voices_say_list(_auth=Depends(require_admin)):
                 or v.get("identifier") in saved,
                 preferred_for=addr2loc.get(v.get("identifier"))
                 or addr2loc.get(v["name"]) or "",
+                default=v.get("installed", True) is not False and (
+                    (v.get("identifier") or v["name"]) in eff),
                 answers_default=bool(sysl)
                 and say_engine._locale_score(sysl, v.get("locale")) > 0)
                        for v in voices]}
