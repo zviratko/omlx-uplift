@@ -4675,7 +4675,8 @@ function applyShadowTheme(dc) {
         // the line reserved for the whole-reply pair (78px + its gap): the last
         // line therefore has room for it and it never gets a line of its own.
         '.chat-native-say-row { display: flex; align-items: center; gap: 4px;',
-        '  flex: 1 1 calc((100% - 120px) / 3); min-width: 0; position: relative;',
+        '  box-sizing: border-box;',
+        '  flex: 1 1 calc((100% - 140px) / 3); min-width: 0; position: relative;',
         '  padding: 1px 3px; border-radius: var(--radius);',
         '  font-size: 11px; color: var(--dim, #8b98ab); }',
         '.chat-native-say-row.hot {',

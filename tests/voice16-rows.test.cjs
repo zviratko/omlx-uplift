@@ -227,7 +227,9 @@ test('css: the stack is a 3-column grid capped at five visible rows', () => {
     assert.match(grid, /max-height:\s*118px/);
     assert.match(grid, /overflow-y:\s*auto/);
     const row = cssRule('.chat-native-say-row', CSS);
-    assert.match(row, /flex:\s*1 1 calc\(\(100% - 120px\) \/ 3\)/,
+    assert.match(row, /box-sizing:\s*border-box/,
+                 'padding must sit inside the basis or the line overflows by 6px');
+    assert.match(row, /flex:\s*1 1 calc\(\(100% - 140px\) \/ 3\)/,
                  'the line keeps a reserved tail so the pair is never orphaned');
     const all = cssRule('.chat-native-say-all', CSS);
     assert.match(all, /flex:\s*0 0 78px/, 'the pair is exactly the reserved tail');
