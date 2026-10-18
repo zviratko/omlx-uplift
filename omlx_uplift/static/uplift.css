@@ -2932,7 +2932,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    box keeps the majority at every viewport */
 .chat-native-hist { flex: 0 0 30%; min-width: 190px; max-width: 300px;
     position: sticky;
-    top: 6px; max-height: calc(100vh - 195px); overflow-y: auto; }
+    top: 6px; max-height: calc(100vh - 200px); overflow-y: auto; }
 /* CHAT-3R defect (user report): .chat-native-bar sets flex-wrap: wrap —
    legal in its ROW context, but the rails are COLUMN boxes; once their
    content passed the max-height cap (short viewports) the surplus WRAPPED
@@ -2950,7 +2950,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    the cap mirrors fitHeight's budget (viewport - top chrome). */
 .chat-native-side { flex: 0 0 30%; min-width: 230px; max-width: 340px;
     position: sticky;
-    top: 6px; max-height: calc(100vh - 195px); overflow: auto; }
+    top: 6px; max-height: calc(100vh - 200px); overflow: auto; }
+/* ROUND 13 (sweep: constant 52px page scroll survived the GAP fix): the
+   global .wrap carries 60px of bottom breathing room — fine for short
+   pages, but CHAT sizes itself to the viewport, so the pad spilled past
+   it. The chat page drops it; :has scopes this to CHAT only. */
+.wrap:has(.chat-native-layout) { padding-bottom: 12px; }
 .chat-native-side.chat-native-bar { flex-direction: column;
     flex-wrap: nowrap; align-items: stretch; }
 /* ROUND 13: rails widened to 30% — the chat column got narrower, so the
@@ -3019,8 +3024,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    1024/1100). Slimmer rails + compact controls keep one line there;
    below 940 stacked mode takes over. */
 @media (max-width: 1180px) {
-    .chat-native-hist { flex-basis: 24%; min-width: 160px; max-width: 250px; }
-    .chat-native-side { flex-basis: 26%; min-width: 200px; max-width: 290px; }
+    .chat-native-hist { flex-basis: 23%; min-width: 150px; max-width: 240px; }
+    .chat-native-side { flex-basis: 25%; min-width: 195px; max-width: 280px; }
     .chat-native-toprow { gap: 6px; }
     .chat-native-toprow .btn { padding: 3px 8px; font-size: 12px; }
     .chat-native-toprow .chat-native-group { min-width: 84px; }
