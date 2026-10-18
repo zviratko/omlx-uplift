@@ -1134,15 +1134,19 @@ let _modelsSelf = null;   // self-fetched fallback (see renderVoices)
 let _sttSelf = null;
 /* ---- SAY-1: the macOS system-voice tab ----------------------------------
    Catalog of the voices the server's `say` binary can actually speak
-   (GET /voices/say). 'USE' stores a regular named voice carrying the
-   'say:<Name>' model marker — from that moment it behaves like any other
-   voice: chat picker, auto-speak, bubble SPEAK, the standard
-   /uplift/v1/audio/speech surface. Nothing else on the client learns a
-   special case. Ordering is a quality promise: within a language the
-   better recordings first (Premium > Enhanced > Personal > standard);
-   languages sorted by name. The ADDITIONAL chip appears only for voices
-   whose bundle sits in the download folders — shown when proven, never
-   guessed. */
+   (GET /voices/say). SAY-2 replaced the 'USE' button with a per-voice
+   star: "Mark preferred for: cs-CZ" records the voice that answers a
+   `say` request carrying that language (POST /voices/say/preferred ->
+   the store's language map). No pseudo-model voice is created — the
+   tab only marks favourites. Explicit selection keeps working at the
+   API: 'say:<identifier>' (or the display name) addresses that exact
+   voice, 'say:<locale>' routes like a language-carrying request. The
+   star rides the row's own language; one voice per language, marking
+   a second replaces the first, marking again clears. Ordering is a
+   quality promise: within a language the better recordings first
+   (Premium > Enhanced > Personal > standard); languages sorted by
+   name. The ADDITIONAL chip appears only for voices whose bundle sits
+   in the download folders — shown when proven, never guessed. */
 const SAY_TIERS = { premium: ['uplift.voices.say_tier_premium', 'PREMIUM', 0],
                     enhanced: ['uplift.voices.say_tier_enhanced', 'ENHANCED', 1],
                     personal: ['uplift.voices.say_tier_personal', 'PERSONAL', 2] };
@@ -1168,36 +1172,20 @@ function _langName(locale) {
     } catch (e) { return locale; }
 }
 
-function _sayUsedNames() {
-    const s = {};
-    for (const v of _voices) {
-        if (v.model && String(v.model).indexOf('say:') === 0) {
-            s[String(v.model).slice(4)] = true;
-        }
-    }
-    return s;
-}
-function _sayIsUsed(v, used) {
-    // rows address themselves by identifier; legacy store rows carry the
-    // display name — accept either as the saved marker
-    return !!(used[v.name] || (v.identifier && used[v.identifier]));
+async function _sayReload(rowsBox) {
+    // fresh catalogue after a mark/clear: the server owns preferred_for,
+    // the client never patches it locally (one truth, one repaint)
+    try {
+        const d = await D.fetchJson(`${VAPI}/voices/say`);
+        if (d && d.supported) _sayData = d;
+    } catch (e) { /* keep the stale frame; the rows below repaint anyway */ }
+    _sayRows(rowsBox, _sayData.voices || []);
 }
 
-function _sayStoreName(v) {
-    // display name stays the voice's own; a clash (clone named like a
-    // system voice) disambiguates with the locale, then a counter
-    const taken = {};
-    for (const x of _voices) taken[String(x.name).toLowerCase()] = true;
-    let n = v.name;
-    if (taken[n.toLowerCase()]) n = v.name + ' (' + v.locale + ')';
-    let i = 2; const base = n;
-    while (taken[n.toLowerCase()]) n = base + ' ' + (i++);
-    return n;
-}
-
-function sayRow(v, used) {
+function sayRow(v, repaint) {
     const addr = v.identifier || v.name;   // exact OS handle when present
     const inst = v.installed !== false;
+    const marked = !!v.preferred_for;
     const row = document.createElement('div');
     row.className = 'vc-row' + (inst ? '' : ' vc-say-off');
     const lab = document.createElement('div');
@@ -1224,6 +1212,15 @@ function sayRow(v, used) {
         lab.append(' ', c);
         row.append(lab);
         return row;
+    }
+    if (marked) {
+        // SAY-2: this voice answers `say` requests for that language
+        const c = document.createElement('span');
+        c.className = 'vc-chip vc-chip-pref';
+        c.textContent = tf('uplift.voices.say_preferred_for',
+                           'PREFERRED FOR {locale}')
+                        .replace('{locale}', v.preferred_for);
+        lab.append(' ', c);
     }
     if (v.downloaded) {
         const c = document.createElement('span');
@@ -1252,37 +1249,40 @@ function sayRow(v, used) {
             D.toast(String(e && e.message || e), 'error');
         }
     };
-    const use = document.createElement('button');
-    use.type = 'button'; use.className = 'se-btn';
-    if (_sayIsUsed(v, used)) {
-        use.textContent = tf('uplift.voices.say_in_use', 'IN USE');
-        use.disabled = true;
-    } else {
-        use.textContent = tf('uplift.voices.say_use', 'USE');
-        use.onclick = async () => {
-            use.disabled = true;
-            try {
-                await D.postJson(`${VAPI}/voices`,
-                    { name: _sayStoreName(v), model: 'say:' + addr,
-                      language: v.locale });
-                D.toast(tf('uplift.voices.say_added_ok', 'Voice added')
-                        + ': ' + v.name);
-                await loadVoices();
-                renderVoices();
-            } catch (e) {
-                use.disabled = false;
-                D.toast(String(e && e.message || e), 'error');
-            }
-        };
-    }
-    act.append(play, use);
+    // SAY-2 star: the row's favourite marker for ITS language. Marking
+    // replaces the previous voice for that language (one per language);
+    // clicking the lit star clears it and the language falls back to its
+    // default voice. No stored pseudo-model is created — ever.
+    const pref = document.createElement('button');
+    pref.type = 'button';
+    pref.className = 'se-btn vc-pref' + (marked ? ' on' : '');
+    pref.textContent = '★';
+    pref.dataset.i18n = marked ? 'uplift.voices.say_unmark'
+                               : 'uplift.voices.say_mark';
+    pref.title = tf(pref.dataset.i18n,
+                    marked ? 'Not preferred for: {locale}'
+                           : 'Mark preferred for: {locale}')
+                   .replace('{locale}', marked ? v.preferred_for : v.locale);
+    pref.onclick = async () => {
+        pref.disabled = true;
+        try {
+            await D.postJson(`${VAPI}/voices/say/preferred`,
+                { locale: marked ? v.preferred_for : v.locale,
+                  identifier: marked ? '' : addr });
+            await repaint();
+        } catch (e) {
+            pref.disabled = false;
+            D.toast(String(e && e.message || e), 'error');
+        }
+    };
+    act.append(play, pref);
     row.append(lab, act);
     return row;
 }
 
 function _sayRows(rowsBox, voices) {
     rowsBox.textContent = '';
-    const used = _sayUsedNames();
+    const repaint = () => _sayReload(rowsBox);
     const needle = _sayFilter.trim().toLowerCase();
     const match = (v) => !needle
         || v.name.toLowerCase().indexOf(needle) >= 0
@@ -1341,7 +1341,7 @@ function _sayRows(rowsBox, voices) {
             _sayOpenSet(loc, now);
         };
         const open = !!needle || openMap[loc] === true;
-        for (const v of list) { grp.append(sayRow(v, used)); shown++; }
+        for (const v of list) { grp.append(sayRow(v, repaint)); shown++; }
         rowsBox.append(head, grp);
         paint(open);
     }
@@ -1365,7 +1365,9 @@ async function sayPanel(host) {
         'Every voice this macOS offers. Installed voices speak instantly '
         + '— no model to load; greyed rows need a download '
         + 'first in System Settings under Accessibility > Spoken Content '
-        + '> Voices. USE adds an installed voice to your voices.');
+        + '> Voices. ★ marks the voice that answers `say` requests in '
+        + 'that language; requests can also name a voice (say:<voice>) '
+        + 'or a language (say:<locale>) explicitly.');
     box.append(title, hint);
     host.append(box);
     if (!_sayData) {
@@ -1488,7 +1490,9 @@ window.Uplift.voices = { renderVoices, voices: () => _voices,
                         _rec: { pcmToWavMono, normLang, promptFor, SUGGEST,
                                 MIN_SECONDS, MAX_SECONDS },
                         // SAY-1 test seams: the pure half of the macOS tab
-                        // (tier table, name/label helpers, row builder)
+                        // (tier table, language label, row builder).
+                        // SAY-2 dropped storeName: the tab stores no
+                        // pseudo-model voices any more.
                         _say: { SAY_TIERS, langName: _langName,
-                                storeName: _sayStoreName, rows: _sayRows } };
+                                rows: _sayRows } };
 })();

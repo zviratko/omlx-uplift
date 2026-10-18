@@ -31,7 +31,15 @@ Contract of this module:
   no injection surface, no unbounded work;
 - formats other than WAV are transcoded with the same optional ffmpeg
   the reference-clip path uses; without ffmpeg the call fails 415 with
-  the reason instead of lying about the bytes.
+  the reason instead of lying about the bytes;
+- SAY-2: the engine token 'say' works bare as well as 'say:<voice>'.
+  route(name, language, preferred) picks the address: an explicit voice
+  (identifier or display name) wins; a bare request routes by language
+  through the caller-supplied preferred map (the tab's "mark preferred
+  for cs-CZ" favourites), then the language's AV default, then its best
+  installed voice; with no language at all the Mac's own default voice
+  answers (and if even that is unknown, `say` runs without -v and picks
+  it itself). Routing lives here; the marks live in the voice store.
 """
 from __future__ import annotations
 
@@ -49,6 +57,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 SAY_PREFIX = "say:"            # voice.model marker for this engine
+SAY_ENGINE = "say"             # bare engine token (SAY-2: language routing)
 MAX_SAY_CHARS = 10000          # a whole long reply already; keep the cap honest
 _TIMEOUT_S = 180
 _SAMPLE_RATE = 22050
@@ -79,7 +88,8 @@ repeat with i from 0 to (n - 1)
 \tset lg to (v's language()) as text
 \tset idr to (v's identifier()) as text
 \tset dsc to (v's |description|()) as text
-\tset out to out & nm & "\t" & lg & "\t" & idr & "\t" & dsc & "
+\tset dfl to ((v's isDefault()) as integer)
+set out to out & nm & "\t" & lg & "\t" & idr & "\t" & dsc & "\t" & dfl & "
 "
 end repeat
 return out
@@ -119,8 +129,10 @@ def parse_voices(text: str) -> list:
 
 
 def parse_av(text: str) -> list:
-    """AV probe output -> rows {name, locale, quality, identifier, desc}.
-    Locale keeps AV's BCP-47 spelling (en-US); the UI normalises."""
+    """AV probe output -> rows {name, locale, quality, identifier, desc,
+    default}. Locale keeps AV's BCP-47 spelling (en-US); the UI
+    normalises. The 5th column (isDefault, SAY-2) is optional — older
+    probe output without it parses as non-default, never as junk."""
     out = []
     for line in (text or "").splitlines():
         parts = line.split("\t")
@@ -133,8 +145,9 @@ def parse_av(text: str) -> list:
         q = (m.group(1).lower() if m else "default")
         if q == "default":
             q = "standard"        # same vocabulary the UI chips use
+        default = len(parts) > 4 and parts[4].strip() == "1"
         out.append({"name": name, "locale": lang, "quality": q,
-                    "identifier": ident, "desc": desc})
+                    "identifier": ident, "desc": desc, "default": default})
     return out
 
 
@@ -320,12 +333,12 @@ def list_voices(force: bool = False) -> list:
             "locale": _norm_locale(a["locale"]), "quality": quality,
             "sample": (s or {}).get("sample", ""),
             "identifier": a["identifier"], "downloaded": downloaded,
-            "installed": True,
+            "installed": True, "default": bool(a.get("default")),
         })
     for s in sayv:
         add({"name": s["name"], "locale": _norm_locale(s["locale"]),
              "quality": s["quality"], "sample": s["sample"],
-             "identifier": s["name"], "installed": True,
+             "identifier": s["name"], "installed": True, "default": False,
              "downloaded": s["name"] in downloaded_bundles
              or s["quality"] != "standard"})
     for c in _catalog_rows():
@@ -336,7 +349,7 @@ def list_voices(force: bool = False) -> list:
                                    c["name"]),
              "locale": _norm_locale(c["locale"]), "quality": c["quality"],
              "sample": "", "identifier": "", "downloaded": False,
-             "installed": False})
+             "installed": False, "default": False})
     if rows:
         _cache.update(ts=now, voices=rows)
     return rows
@@ -365,6 +378,137 @@ def say_name_of(model: str) -> str:
         SAY_PREFIX) else ""
 
 
+# A tail like 'cs-CZ' / 'zh-Hans' / 'pt' is a language, not a voice name.
+# Voice names with spaces or dots (identifiers) never match; a genuine
+# three-letter voice name still wins, because resolve() runs first.
+_LOCALEISH_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
+
+
+def say_split(model) -> tuple:
+    """(is_say, voice_or_empty) for every spelling of the engine token:
+    'say' (bare — SAY-2 language routing), 'say:' and 'say:<tail>' —
+    where the tail is an explicit voice (identifier or display name)
+    or, SAY-2, a locale ('say:cs-CZ' routes exactly like a bare say
+    request carrying language cs-CZ). The token is matched
+    case-insensitively; the tail keeps its exact spelling because that
+    is what `resolve` must match."""
+    s = str(model or "").strip()
+    low = s.lower()
+    if low == SAY_ENGINE:
+        return True, ""
+    if low.startswith(SAY_PREFIX):
+        return True, s[len(SAY_PREFIX):].strip()
+    return False, ""
+
+
+def _locale_score(req, have) -> int:
+    """How well a requested language answers a marked/spoken locale:
+    2 = same full locale, 1 = same primary language when ONE side names
+    no region (request 'cs' satisfies mark 'cs-CZ' and vice versa),
+    0 = different — 'cs-CZ' never answers 'cs-SK'."""
+    r = _norm_locale(req).lower()
+    k = _norm_locale(have).lower()
+    if not r or not k:
+        return 0
+    if r == k:
+        return 2
+    rp, _, rs = r.partition("-")
+    kp, _, ks = k.partition("-")
+    if rp == kp and not (rs and ks):
+        return 1
+    return 0
+
+
+_QUALITY_ORDER = {"premium": 0, "enhanced": 1, "personal": 2}
+
+
+def _quality_rank(quality) -> int:
+    return _QUALITY_ORDER.get(str(quality or ""), 3)
+
+
+def _installed_rows() -> list:
+    return [v for v in list_voices() if v.get("installed") is not False]
+
+
+def language_voice(lang, preferred=None) -> Optional[dict]:
+    """SAY-2: the row that answers a language-carrying `say` request.
+    Chain: the voice marked preferred for that language (exact locale
+    beats primary-language match; a mark pointing at a voice this Mac
+    no longer holds is skipped) -> the language's default voice (AV
+    isDefault) -> the best installed voice for the language (the tab's
+    own quality promise: Premium > Enhanced > Personal > standard).
+    None when the language has nothing installed — the caller fails
+    honestly instead of speaking the text in a random language."""
+    if not lang:
+        return None
+    rows = _installed_rows()
+    by_addr = {}
+    for v in rows:
+        by_addr[v.get("identifier") or v["name"]] = v
+    best, best_score = None, 0
+    for loc, addr in (preferred or {}).items():
+        v = by_addr.get(str(addr or ""))
+        if v is None:
+            continue            # stale mark (voice deleted/downloaded away)
+        score = _locale_score(lang, loc)
+        if score > best_score:
+            best, best_score = v, score
+    if best is not None:
+        return best
+    in_lang = [v for v in rows if _locale_score(lang, v.get("locale"))]
+    if not in_lang:
+        return None
+    in_lang.sort(key=lambda v: (not v.get("default"),
+                                _quality_rank(v.get("quality")),
+                                str(v.get("name") or "")))
+    return in_lang[0]
+
+
+def default_voice() -> Optional[dict]:
+    """The Mac's own system default voice (the one `say` speaks when no
+    -v is given). None when the AV probe could not tell us — the caller
+    then addresses `say` with no voice and lets the system choose."""
+    for v in _installed_rows():
+        if v.get("default"):
+            return v
+    return None
+
+
+def route(name: str, language=None, preferred=None) -> str:
+    """The address to speak with. An explicit name wins when it resolves
+    to an installed voice (identifier or display name). SAY-2 adds the
+    language-carrying alias: when the tail is NOT a voice but looks like
+    a locale ('say:cs-CZ', 'say:cs'), it routes exactly like a bare
+    request carrying that language — preferred mark, language default,
+    best installed voice. A bare request (no name) routes by `language`,
+    and with no language either the Mac's system default answers. ''
+    means 'no -v flag — `say` picks its own default'. Raises LookupError
+    with a user-safe reason when nothing can speak."""
+    name = (name or "").strip()
+    if name:
+        v = resolve(name)
+        if v is not None:
+            return v.get("identifier") or v["name"]
+        if _LOCALEISH_RE.match(name):
+            return _by_language(name, preferred)
+        raise LookupError(
+            "voice '%s' is not installed on this Mac" % name[:64])
+    if language:
+        return _by_language(language, preferred)
+    v = default_voice()
+    return (v.get("identifier") or v["name"]) if v else ""
+
+
+def _by_language(lang, preferred) -> str:
+    v = language_voice(lang, preferred)
+    if v is None:
+        raise LookupError(
+            "no installed macOS voice for language '%s' — mark one "
+            "preferred in the macOS voices tab or download a voice in "
+            "System Settings" % str(lang)[:32])
+    return v.get("identifier") or v["name"]
+
+
 def _speed_wpm(speed) -> Optional[str]:
     try:
         mult = float(str(speed).strip() or "nan")
@@ -379,21 +523,26 @@ _MEDIA = {"wav": "audio/wav", "mp3": "audio/mpeg", "flac": "audio/flac",
           "opus": "audio/ogg", "aac": "audio/aac", "pcm": "audio/L16;codec=pcm"}
 
 
-def synth_bytes(name: str, text: str, speed=None) -> bytes:
+def synth_bytes(name: str, text: str, speed=None,
+                language=None, preferred=None) -> bytes:
     """Render one utterance to plain WAV bytes. Raises RuntimeError with a
     user-safe reason; input never reaches a shell. Addressing goes through
     the resolved row's IDENTIFIER when it has one — display names collide
-    (the system ships two Samanthas), identifiers do not."""
-    row = resolve(name)
-    if row is None:
-        raise RuntimeError("voice '%s' is not installed on this Mac" % name)
-    target = row.get("identifier") or row["name"]
+    (the system ships two Samanthas), identifiers do not.
+    SAY-2: an empty `name` routes — the preferred mark for `language`,
+    the language's own default, else the Mac-wide default voice; when
+    even that is unknown the -v flag is dropped and `say` answers in the
+    system voice (never a silent failure)."""
+    try:
+        target = route(name, language, preferred)
+    except LookupError as e:
+        raise RuntimeError(str(e))
     text = (text or "").strip()
     if not text:
         raise RuntimeError("nothing to say")
     if len(text) > MAX_SAY_CHARS:
         text = text[:MAX_SAY_CHARS]     # truncate, don't punish the whole reply
-    args = ["say", "-v", target]
+    args = ["say"] + (["-v", target] if target else [])
     wpm = _speed_wpm(speed)
     if wpm:
         args += ["-r", wpm]

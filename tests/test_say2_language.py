@@ -1,0 +1,366 @@
+"""SAY-2: language routing for the macOS `say` engine.
+
+Pins the contract added on top of SAY-1:
+- say_split: 'say' bare, 'say:' empty tail, 'say:<voice>', case-insensitive
+  token, non-say models untouched;
+- the AV probe's isDefault column parses through (4-column legacy rows
+  still load, default False);
+- language_voice chain: preferred mark (exact locale beats primary match,
+  stale marks skipped, wrong-region marks never answer) -> language
+  default -> best installed for the language -> None when nothing speaks;
+- route(): explicit voice wins, a locale tail ('say:cs-CZ') routes like a
+  language-carrying request, bare with no language = system default, and
+  an unknown voice stays an honest miss;
+- synth argv: a routed request carries the preferred voice's identifier;
+  with no default known the -v flag is dropped (say picks the system
+  voice itself) — never a fabricated silence;
+- the tab endpoints: POST /voices/say/preferred set/replace/clear + the
+  preferred_for flag on GET /voices/say, with NO pseudo-model voice ever
+  added to the store;
+- dispatch: bare 'say' + language and 'say:<locale>' on the standard
+  /uplift/v1/audio/speech surface and on /voices/speech;
+- validation: a stored voice may carry model 'say' (routes per request),
+  'say:<installed>' or 'say:<routable locale>' — junk and unspappable
+  languages are refused at the door.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from omlx_uplift import router as _up            # facade FIRST (route order)
+from omlx_uplift import say_engine as SE
+from omlx_uplift.routers import voices as V
+
+AV2 = (
+    "Zuzana\tcs-CZ\tcom.apple.voice.compact.cs-CZ.Zuzana\t"
+    "[AVSpeechSynthesisVoice 0x1] Language: cs-CZ, Name: Zuzana, "
+    "Quality: Default [com.apple.voice.compact.cs-CZ.Zuzana]\t0\n"
+    "Zuzana\tcs-CZ\tcom.apple.ttsbundle.siri_cs-CZ_compact\t"
+    "[AVSpeechSynthesisVoice 0x2] Language: cs-CZ, Name: Zuzana, "
+    "Quality: Enhanced [com.apple.ttsbundle.siri_cs-CZ_compact]\t0\n"
+    "Ilja\tcs-CZ\tcom.apple.voice.premium.cs-CZ.Ilja\t"
+    "[AVSpeechSynthesisVoice 0x3] Language: cs-CZ, Name: Ilja, "
+    "Quality: Premium [com.apple.voice.premium.cs-CZ.Ilja]\t0\n"
+    "Samantha\ten-US\tcom.apple.speech.synthesis.voice.Samantha\t"
+    "[AVSpeechSynthesisVoice 0x4] Language: en-US, Name: Samantha, "
+    "Quality: Default [com.apple.speech.synthesis.voice.Samantha]\t1\n"
+    "Laura\tsk-SK\tcom.apple.voice.compact.sk-SK.Laura\t"
+    "[AVSpeechSynthesisVoice 0x5] Language: sk-SK, Name: Laura, "
+    "Quality: Default [com.apple.voice.compact.sk-SK.Laura]\t0\n")
+
+
+@pytest.fixture()
+def on_mac(monkeypatch):
+    """Pretend this box has the engine; the fixture cache is the ONLY
+    roster — both probes answer empty so a miss never runs the real
+    osascript and never pollutes the cache on a live Mac."""
+    monkeypatch.setattr(SE, "available", lambda: True)
+    monkeypatch.setattr(SE, "_downloaded_names", lambda: set())
+    monkeypatch.setattr(SE, "_catalog_rows", lambda: [])
+    monkeypatch.setattr(SE, "_av_rows", lambda: [])
+    monkeypatch.setattr(SE, "_say_rows", lambda: [])
+    monkeypatch.setattr(SE, "_cache",
+                        {"ts": 9e15, "voices": SE.parse_av(AV2)})
+    return SE
+
+
+@pytest.fixture()
+def client(monkeypatch, tmp_path):
+    from omlx_uplift.routers import base as up_base
+    monkeypatch.setattr(V, "_store_dir", lambda: tmp_path)
+    app = FastAPI()
+    app.include_router(_up.api_router, prefix="/uplift/api")
+    app.include_router(_up.page_router)
+    app.dependency_overrides[up_base.require_admin] = lambda: True
+
+    async def _ok(request):
+        return True
+    monkeypatch.setattr(V, "_infer_auth", _ok)
+    return TestClient(app)
+
+
+def _fake_synth(monkeypatch):
+    """Capture (name, text, speed, language, preferred) instead of
+    running `say`; return honest-looking WAV bytes."""
+    seen = []
+
+    def fake(name, text, speed=None, language=None, preferred=None):
+        seen.append((name, text, speed, language, preferred))
+        return b"RIFF" + b"\0" * 100
+    monkeypatch.setattr(SE, "synth_bytes", fake)
+    return seen
+
+
+# ------------------------------------------------------------------ token
+
+def test_say_split_all_spellings():
+    assert SE.say_split("say") == (True, "")
+    assert SE.say_split("say:") == (True, "")
+    assert SE.say_split(" say ") == (True, "")
+    assert SE.say_split("SAY:Zuzana") == (True, "Zuzana")   # token CI
+    assert SE.say_split("say:com.apple.voice.compact.cs-CZ.Zuzana") == \
+        (True, "com.apple.voice.compact.cs-CZ.Zuzana")      # tail verbatim
+    assert SE.say_split("say:cs-CZ") == (True, "cs-CZ")
+    assert SE.say_split("Qwen3-TTS-12Hz") == (False, "")
+    assert SE.say_split("saysomething") == (False, "")
+    assert SE.say_split("") == (False, "")
+    assert SE.say_split(None) == (False, "")
+
+
+def test_parse_av_default_column_and_legacy_rows():
+    rows = SE.parse_av(AV2)
+    assert [r["default"] for r in rows] == [False, False, False, True, False]
+    legacy = SE.parse_av("X\ten-US\tcom.x\tQuality: Default [com.x]")
+    assert legacy[0]["default"] is False        # 4-col probe still loads
+
+
+# ------------------------------------------------------------------ chain
+
+def test_language_voice_preferred_exact_beats_primary(on_mac):
+    pref = {"cs": "com.apple.voice.premium.cs-CZ.Ilja",
+            "cs-CZ": "com.apple.ttsbundle.siri_cs-CZ_compact"}
+    v = SE.language_voice("cs-CZ", pref)
+    assert v["identifier"] == "com.apple.ttsbundle.siri_cs-CZ_compact"
+    # primary-only request accepts the primary mark only as fallback
+    v2 = SE.language_voice("cs", pref)          # exact cs mark exists
+    assert v2["identifier"] == "com.apple.voice.premium.cs-CZ.Ilja"
+
+
+def test_language_voice_region_mismatch_never_answers(on_mac):
+    pref = {"cs-SK": "com.apple.voice.compact.sk-SK.Laura"}
+    v = SE.language_voice("cs-CZ", pref)        # Laura is sk, not cs-CZ
+    assert v["identifier"] == "com.apple.voice.premium.cs-CZ.Ilja"
+
+
+def test_language_voice_stale_mark_falls_through(on_mac):
+    pref = {"cs-CZ": "com.apple.voice.long-gone"}
+    v = SE.language_voice("cs-CZ", pref)
+    assert v is not None and v["identifier"] != "com.apple.voice.long-gone"
+
+
+def test_language_voice_default_beats_quality_then_none(on_mac):
+    # en-US: Samantha carries the isDefault flag — she answers 'en'
+    assert SE.language_voice("en", {})["identifier"] == \
+        "com.apple.speech.synthesis.voice.Samantha"
+    # cs-CZ: nothing isDefault -> the tab's quality promise: Premium Ilja
+    assert SE.language_voice("cs-CZ", {})["identifier"] == \
+        "com.apple.voice.premium.cs-CZ.Ilja"
+    # sk: primary match on the sk-SK row
+    assert SE.language_voice("sk", {})["name"] == "Laura"
+    assert SE.language_voice("de", {}) is None
+    assert SE.language_voice("", {}) is None
+
+
+def test_route_explicit_locale_tail_and_default(on_mac):
+    assert SE.route("Zuzana") == "com.apple.voice.compact.cs-CZ.Zuzana"
+    # locale tail routes like a language-carrying request
+    pref = {"cs-CZ": "com.apple.ttsbundle.siri_cs-CZ_compact"}
+    assert SE.route("cs-CZ", None, pref) == "com.apple.ttsbundle.siri_cs-CZ_compact"
+    assert SE.route("", "cs", pref) == "com.apple.ttsbundle.siri_cs-CZ_compact"
+    # no language, no tail: the Mac's own default voice
+    assert SE.route("") == "com.apple.speech.synthesis.voice.Samantha"
+    with pytest.raises(LookupError) as e:
+        SE.route("Nobody")
+    assert "not installed" in str(e.value)
+    with pytest.raises(LookupError) as e:
+        SE.route("de")
+    assert "language 'de'" in str(e.value)
+
+
+def test_route_without_default_flag_addresses_say_directly(monkeypatch, on_mac):
+    rows = [r for r in SE.parse_av(AV2) if not r["default"]]
+    SE._cache.update(ts=9e15, voices=rows)
+    assert SE.route("") == ""          # nothing is marked default
+    assert SE.default_voice() is None
+
+
+def test_synth_argv_carries_the_routed_identifier(monkeypatch, on_mac):
+    pref = {"cs-CZ": "com.apple.ttsbundle.siri_cs-CZ_compact"}
+    seen = {}
+
+    class P:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"RIFF" + b"\0" * 200)
+        return P()
+    monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    SE.synth_bytes("", "ahoj", None, "cs-CZ", pref)
+    assert seen["cmd"][seen["cmd"].index("-v") + 1] == \
+        "com.apple.ttsbundle.siri_cs-CZ_compact"
+
+
+def test_synth_omits_voice_flag_for_system_default(monkeypatch):
+    monkeypatch.setattr(SE, "available", lambda: True)
+    monkeypatch.setattr(SE, "_cache", {"ts": 9e15, "voices": []})
+    monkeypatch.setattr(SE, "_av_rows", lambda: [])
+    monkeypatch.setattr(SE, "_say_rows", lambda: [])
+    seen = {}
+
+    class P:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"RIFF" + b"\0" * 200)
+        return P()
+    monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    SE.synth_bytes("", "hello")        # no roster at all
+    assert "-v" not in seen["cmd"]     # `say` answers with its own default
+
+
+# ---------------------------------------------------------------- marks
+
+def test_preferred_endpoints_roundtrip(client, on_mac):
+    r = client.post("/uplift/api/voices/say/preferred", json={
+        "locale": "cs-CZ",
+        "identifier": "com.apple.ttsbundle.siri_cs-CZ_compact"})
+    assert r.status_code == 200, r.text
+    assert r.json()["preferred"] == {
+        "cs-CZ": "com.apple.ttsbundle.siri_cs-CZ_compact"}
+    d = client.get("/uplift/api/voices/say").json()
+    zz = [v for v in d["voices"]
+          if v["identifier"] == "com.apple.ttsbundle.siri_cs-CZ_compact"][0]
+    assert zz["preferred_for"] == "cs-CZ"
+    assert all(not v.get("preferred_for") for v in d["voices"]
+               if v is not zz)
+    # marking a SECOND voice in the same language REPLACES the first
+    r = client.post("/uplift/api/voices/say/preferred", json={
+        "locale": "cs-CZ", "identifier": "com.apple.voice.premium.cs-CZ.Ilja"})
+    assert r.json()["preferred"] == {
+        "cs-CZ": "com.apple.voice.premium.cs-CZ.Ilja"}
+    # clearing
+    r = client.post("/uplift/api/voices/say/preferred", json={
+        "locale": "cs-CZ", "identifier": ""})
+    assert r.json()["preferred"] == {}
+    # marking NEVER touches the voice store (no pseudo-models)
+    assert client.get("/uplift/api/voices").json()["voices"] == []
+
+
+def test_preferred_rejects_junk(client, on_mac):
+    r = client.post("/uplift/api/voices/say/preferred", json={})
+    assert r.status_code == 400
+    r = client.post("/uplift/api/voices/say/preferred",
+                    json={"locale": "cs-CZ", "identifier": "Nobody"})
+    assert r.status_code == 404 and "not an installed" in r.text
+
+
+def test_preferred_normalises_locale_spelling(client, on_mac):
+    r = client.post("/uplift/api/voices/say/preferred", json={
+        "locale": "cs_CZ", "identifier": "Ilja"})
+    assert r.json()["preferred"] == {
+        "cs-CZ": "com.apple.voice.premium.cs-CZ.Ilja"}
+
+
+# ------------------------------------------------------------- dispatch
+
+def test_bare_say_routes_by_request_language(client, on_mac, monkeypatch):
+    seen = _fake_synth(monkeypatch)
+    client.post("/uplift/api/voices/say/preferred", json={
+        "locale": "cs-CZ", "identifier": "com.apple.voice.premium.cs-CZ.Ilja"})
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": "say", "input": "Ahoj",
+                          "language": "cs-CZ"})
+    assert r.status_code == 200, r.text
+    name, text, _sp, _lg, pref = seen[-1]
+    assert name == ""                       # routing happens in the engine
+    assert pref["cs-CZ"] == "com.apple.voice.premium.cs-CZ.Ilja"
+
+
+def test_standard_surface_locale_tail_and_voice_field(client, on_mac,
+                                                      monkeypatch):
+    seen = _fake_synth(monkeypatch)
+    r = client.post("/uplift/v1/audio/speech",
+                    json={"model": "say:cs-CZ", "input": "ahoj"})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("audio/wav")
+    assert seen[-1][0] == "cs-CZ"           # locale tail, verbatim
+    # engine token in the voice field (the SDK habit)
+    r = client.post("/uplift/v1/audio/speech",
+                    json={"model": "gpt-4o-mini-tts", "voice": "say",
+                          "input": "ahoj", "language": "sk"})
+    assert r.status_code == 200, r.text
+    assert seen[-1][0] == "" and seen[-1][3] == "sk"
+    # explicit identifier in the voice field, no stored entry
+    r = client.post("/uplift/v1/audio/speech",
+                    json={"model": "x", "input": "hi",
+                          "voice": "say:com.apple.ttsbundle.siri_cs-CZ_compact"})
+    assert r.status_code == 200, r.text
+    assert seen[-1][0] == "com.apple.ttsbundle.siri_cs-CZ_compact"
+
+
+def test_language_without_voice_is_honest(client, on_mac, monkeypatch):
+    # synth_bytes runs FOR REAL here (no subprocess): route() must raise
+    # through the engine chain and the router must surface the reason
+    r = client.post("/uplift/v1/audio/speech",
+                    json={"model": "say", "input": "hallo",
+                          "language": "de"})
+    assert r.status_code == 502
+    assert "language 'de'" in r.text
+
+
+def test_stored_voice_accepts_locale_and_bare_say(client, on_mac):
+    r = client.post("/uplift/api/voices", json={
+        "name": "Cestina", "model": "say:cs-CZ", "language": "cs-CZ"})
+    assert r.status_code == 200, r.text
+    r = client.post("/uplift/api/voices", json={
+        "name": "Auto", "model": "say"})
+    assert r.status_code == 200, r.text
+    r = client.post("/uplift/api/voices", json={
+        "name": "Ghost", "model": "say:de"})
+    assert r.status_code == 400 and "neither an installed" in r.text
+    r = client.post("/uplift/api/voices", json={
+        "name": "Ghost", "model": "say:com.apple.voice.nope"})
+    assert r.status_code == 400
+
+
+def test_stored_locale_voice_speaks(client, on_mac, monkeypatch):
+    seen = _fake_synth(monkeypatch)
+    vid = client.post("/uplift/api/voices", json={
+        "name": "Cestina", "model": "say:cs-CZ"}).json()["voice"]["id"]
+    r = client.post("/uplift/api/voices/speech",
+                    json={"voice": vid, "input": "ahoj"})
+    assert r.status_code == 200, r.text
+    assert seen[-1][0] == "cs-CZ"
+
+
+# --------------------------------------------------------------- locales
+# The three new tab strings are assembled through tf(key, fallback) with
+# a {locale} placeholder — invisible to the C.t literal gate, so they
+# self-pin here (uplift-static-ui-gate doctrine: every family has exactly
+# one owner file; this is that owner for say_mark/say_unmark/
+# say_preferred_for).
+
+SAY2_KEYS = ("uplift.voices.say_mark", "uplift.voices.say_unmark",
+             "uplift.voices.say_preferred_for")
+SAY2_DROPPED = ("uplift.voices.say_use", "uplift.voices.say_in_use",
+                "uplift.voices.say_added_ok")
+
+
+@pytest.mark.parametrize("loc", ["en", "cs", "es", "fr", "ja", "ko",
+                                 "pt-BR", "ru", "zh", "zh-TW"])
+def test_say2_locale_keys(loc):
+    import json as _json
+    from pathlib import Path as _P
+    path = _P(__file__).parent.parent / "omlx_uplift" / "locales" / (loc + ".json")
+    d = _json.loads(path.read_text())
+    en = d if loc == "en" else _json.loads(
+        (path.parent / "en.json").read_text())
+    for k in SAY2_KEYS:
+        assert k in d and d[k].strip(), "%s missing in %s" % (k, loc)
+        assert d[k].count("{locale}") == en[k].count("{locale}") == 1, \
+            "%s placeholder drift in %s" % (k, loc)
+        if loc != "en":
+            assert d[k] != en[k], "%s untranslated in %s" % (k, loc)
+    for k in SAY2_DROPPED:
+        assert k not in d, "%s is dead copy in %s" % (k, loc)
+    # the hint must teach the new model, not the removed USE button
+    hint = d["uplift.voices.say_hint"]
+    assert "★" in hint and "USE" not in hint and "say:<locale>" in hint

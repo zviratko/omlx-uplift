@@ -381,7 +381,7 @@ def test_say_create_rejects_unknown_voice(client, on_mac):
     _as_say(on_mac)
     r = client.post("/uplift/api/voices", json={
         "name": "Ghost", "model": "say:Nobody"})
-    assert r.status_code == 400 and "not an installed" in r.text
+    assert r.status_code == 400 and "neither an installed" in r.text
     # off a Mac even a real name is refused (no store litter)
     monkey = client  # available False below
     import omlx_uplift.say_engine as _se
@@ -399,7 +399,8 @@ def test_speech_synth_never_touches_vanilla(client, on_mac, monkeypatch):
     _as_say(on_mac)
     hit = []
 
-    def fake_synth(name, text, speed=None):
+    def fake_synth(name, text, speed=None, language=None,
+                 preferred=None):
         hit.append((name, text, speed))
         return b"RIFFsay" + b"\0" * 100
     monkeypatch.setattr(SE, "synth_bytes", fake_synth)
@@ -422,7 +423,8 @@ def test_audition_endpoint_defaults_to_the_voice_greeting(client, on_mac,
     _as_say(on_mac)
     got = {}
 
-    def fake_synth(name, text, speed=None):
+    def fake_synth(name, text, speed=None, language=None,
+                 preferred=None):
         got["args"] = (name, text)
         return b"RIFF" + b"\0" * 100
     monkeypatch.setattr(SE, "synth_bytes", fake_synth)
@@ -436,7 +438,8 @@ def test_audition_endpoint_defaults_to_the_voice_greeting(client, on_mac,
 def test_standard_surface_named_and_anonymous(client, on_mac, monkeypatch):
     _as_say(on_mac)
 
-    def fake_synth(name, text, speed=None):
+    def fake_synth(name, text, speed=None, language=None,
+                 preferred=None):
         return b"RIFF" + b"\0" * 100
     monkeypatch.setattr(SE, "synth_bytes", fake_synth)
     # anonymous model:'say:...' with NO response_format: WAV answer
@@ -459,7 +462,8 @@ def test_standard_surface_named_and_anonymous(client, on_mac, monkeypatch):
                                                      "input": "ahoj"})
     assert r.status_code == 200 and r.content.startswith(b"RIFF")
     # engine failure answers 502 with the reason, not a silent file
-    def boom(name, text, speed=None):
+    def boom(name, text, speed=None, language=None,
+             preferred=None):
         raise RuntimeError("say: could not start")
     monkeypatch.setattr(SE, "synth_bytes", boom)
     r = client.post("/uplift/v1/audio/speech",
@@ -492,7 +496,7 @@ def test_say_dispatch_works_without_omlx(client, on_mac, monkeypatch):
     is absent."""
     _as_say(on_mac)
     monkeypatch.setattr(SE, "synth_bytes",
-                        lambda n, t, speed=None: b"RIFF" + b"\0" * 100)
+                        lambda n, t, speed=None, language=None, preferred=None: b"RIFF" + b"\0" * 100)
     import builtins
     real_import = builtins.__import__
 

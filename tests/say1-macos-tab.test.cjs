@@ -1,6 +1,7 @@
-/* SAY-1 — the macOS voices tab in the Voices panel (uplift_voices.js).
-   Same vm + hand-rolled DOM pattern as voice-record.test.cjs (that harness
-   is recorder-shaped; this panel needs no MediaDevices at all).
+/* SAY-1/SAY-2 — the macOS voices tab in the Voices panel
+   (uplift_voices.js). Same vm + hand-rolled DOM pattern as
+   voice-record.test.cjs (that harness is recorder-shaped; this panel
+   needs no MediaDevices at all).
 
    Pinned:
    - the tab strip renders above the existing ADD form; clone is the
@@ -10,10 +11,11 @@
    - grouping: languages sorted by language NAME (Czech before English),
      inside a language Premium > Enhanced > standard, then alphabetical
    - chips: tier labels, ADDITIONAL only when the server proved a bundle
-   - USE: exact POST /voices payload (name, model 'say:<Name>', language
-     locale), clash suffix (locale, then counter), IN USE disabled for
-     voices the store already carries, toast on success, repaint keeps
-     the tab open
+   - STAR (SAY-2 replaced USE): exact POST /voices/say/preferred payload
+     {locale, identifier}; a preferred_for row shows the PREFERRED FOR
+     chip + lit star, its click posts the CLEAR (empty identifier);
+     marking repaints from a fresh GET — the client never patches
+     preferred_for locally; no pseudo-model voice is ever posted
    - PLAY: hits /voices/say/speech with only {name} (the greeting text is
      the server's choice — the client never invents sample copy)
    - filter: matches name, raw locale AND language name; no-match message
@@ -262,7 +264,7 @@ test('catalog rows: greyed, no buttons, NOT DOWNLOADED, split counts', async () 
     assert.ok(ab._classes.has('vc-say-off'), 'rendered dimmed');
     assert.ok(allText(ab).includes('NOT DOWNLOADED'), allText(ab));
     assert.equal(classes(ab, 'se-btn').length, 0,
-                 'no PLAY/USE on a voice this Mac cannot speak yet');
+                 'no PLAY/star on a voice this Mac cannot speak yet');
     const heads = classes(h.host, 'vc-say-head');
     const counts = heads.map(n => n.children[2].textContent);
     assert.deepEqual(counts, ['1', '4/5', '1'], counts);
@@ -286,41 +288,54 @@ test('chips: tier labels and ADDITIONAL only when proven', async () => {
               'unproven -> NO badge at all (never claim System)');
 });
 
-test('USE posts the say marker; IN USE reflects the store', async () => {
-    const store = [{ id: 'zuzana', name: 'Zuzana', model: 'say:Zuzana' }];
-    const h = await mount({ store });
+test('STAR posts the preferred mark; PREFERRED FOR chip reflects the server', async () => {
+    const voices = ROSTER.map(v => Object.assign({}, v));
+    voices[0].preferred_for = 'cs_CZ';      // Zuzana answers say+cs-CZ
+    voices[0].identifier = 'com.apple.voice.compact.cs-CZ.Zuzana';
+    const h = await mount({ voices });
     await h.sayClick();
     const rows = classes(h.host, 'vc-row');
     const find = (name) => rows.find(r => String(r.children[0].textContent) === name);
     const zu = find('Zuzana');
-    const zuBtns = classes(zu, 'se-btn');
-    const zuUse = zuBtns[zuBtns.length - 1];
-    assert.equal(zuUse.disabled, true, 'already saved -> IN USE, disabled');
-    assert.ok(zuUse.textContent === 'IN USE', zuUse.textContent);
+    assert.ok(allText(zu).includes('PREFERRED FOR cs_CZ'), allText(zu));
+    const zuStar = classes(zu, 'vc-pref')[0];
+    assert.ok(zuStar._classes.has('on'), 'marked row shows the lit star');
     const al = find('Albert');
-    const btns = classes(al, 'se-btn');
-    const use = btns[btns.length - 1];
-    use.click();
+    assert.ok(!classes(al, 'vc-pref')[0]._classes.has('on'));
+    // marking Albert for English: exact payload, routed to the map endpoint
+    classes(al, 'vc-pref')[0].click();
     await settle(); await settle();
-    const post = h.st.posts.find(p => p.url.includes('/voices'));
-    assert.deepEqual(post.body, { name: 'Albert', model: 'say:Albert',
-                                  language: 'en_US' });
-    assert.ok(h.st.toasts.some(t => t.msg.includes('Voice added')));
-    // after the save the repaint keeps the tab and marks IN USE
+    const post = h.st.posts.find(p => p.url.includes('/voices/say/preferred'));
+    assert.deepEqual(post.body, { locale: 'en_US', identifier: 'Albert' });
+    // repaint comes from a FRESH GET (server owns preferred_for), not a
+    // local patch — and nothing ever posts a pseudo-model voice
+    assert.ok(!h.st.posts.some(p => /\/voices$/.test(p.url)),
+              'SAY-2: the tab never creates stored say voices');
+    assert.ok(h.st.gets.filter(u => u.includes('/voices/say')).length >= 2,
+              'the catalogue was re-read after the mark');
     assert.ok(classes(h.host, 'vc-say').length, 'still on the say tab');
+    // clicking the lit star CLEARS the mark for its language
+    const rows2 = classes(h.host, 'vc-row');
+    const zuStar2 = classes(rows2.find(r =>
+        String(r.children[0].textContent) === 'Zuzana'), 'vc-pref')[0];
+    zuStar2.click();
+    await settle(); await settle();
+    const clr = h.st.posts.filter(p => p.url.includes('/voices/say/preferred'))[1];
+    assert.deepEqual(clr.body,
+        { locale: 'cs_CZ', identifier: '' });
 });
 
-test('name clash falls to locale then counter', async () => {
-    const store = [{ id: 'al', name: 'Albert', model: 'x' },
-                   { id: 'al2', name: 'Albert (en_US)', model: 'x' }];
+test('star rows survive the clone-store: stored voices are irrelevant', async () => {
+    // SAY-1 stored say voices must NOT dim or disable anything: the star
+    // is the language map, independent of the voice store
+    const store = [{ id: 'zuzana', name: 'Zuzana', model: 'say:Zuzana' }];
     const h = await mount({ store });
     await h.sayClick();
     const rows = classes(h.host, 'vc-row');
-    const al = rows.find(r => String(r.children[0].textContent) === 'Albert');
-    al.children[1].children[1].click();     // USE
-    await settle(); await settle();
-    const post = h.st.posts.find(p => p.url.endsWith('/voices'));
-    assert.equal(post.body.name, 'Albert (en_US) 2');
+    const zu = rows.find(r => String(r.children[0].textContent) === 'Zuzana');
+    const star = classes(zu, 'vc-pref')[0];
+    assert.equal(star.disabled, false);
+    assert.ok(!allText(zu).includes('IN USE'), 'IN USE is gone with USE');
 });
 
 test('PLAY auditions with the roster greeting chosen by the SERVER', async () => {
