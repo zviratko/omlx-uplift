@@ -112,6 +112,14 @@ HARNESS_MAP: dict[str, dict[str, Any]] = {
               # dataset_name). direct = letter-answer prompt, closest to
               # classic (omlx/eval/kmmlu.py); 5-shot mirrors classic's
               # '< 5' dev examples.
+              # REPL-2c gen_budget: classic kmmlu never overrides
+              # base.get_max_tokens() — its extraction window is 128 while
+              # model_args defaulted the harness to 256: double the tokens
+              # a rambler burns per question AND a wider window than
+              # classic ever scores (a stray letter at token 150 is visible
+              # only to the harness — a divergence source in its own
+              # right). 128 = classic parity first, waste cut second.
+              "gen_budget": 128,
               "metric": "exact_match", "metric_contains": None},
     "cmmlu": {"tasks": ["uplift_cmmlu_generative"], "fewshot": 5,
               # 2026-10-14 USER OVERRIDE of the script-wall refusal: the
@@ -132,6 +140,9 @@ HARNESS_MAP: dict[str, dict[str, Any]] = {
               # samples): 'exact_match,flexible-extract' — the group row
               # carries no metric, so _parse_results_json weight-averages
               # the leaves and reports n=335.
+              # REPL-2c gen_budget: same doctrine as kmmlu — classic's
+              # cmmlu window is the base get_max_tokens()=128.
+              "gen_budget": 128,
               "metric": "exact_match", "metric_contains": "flexible-extract"},
     # ---- ACC-2c: batch-1 HARNESS-ONLY extras (the seam's first residents).
     # Each carries the seam metadata block (harness_engine, 'extra' means:
@@ -757,6 +768,13 @@ def _suite_args(spec: dict, base_url: str, model_id: str, outdir: Path,
         #    reasoning THEN the answer needs; short budgets finish on length.
         gen_kwargs["until"] = []
         gen_kwargs["max_gen_toks"] = 2048
+    elif spec.get("gen_budget"):
+        # REPL-2c: letter-answer MC suites cap their direct generation at
+        # classic's own window (see HARNESS_MAP gen_budget comments). Like
+        # classic's 'max_tokens is always benchmark-controlled', this rides
+        # the model_settings profile too — the user's server-side sampling
+        # must not re-open the runaway window on a bench run.
+        gen_kwargs["max_gen_toks"] = int(spec["gen_budget"])
     args += ["--gen_kwargs", json.dumps(gen_kwargs)]
     return args
 

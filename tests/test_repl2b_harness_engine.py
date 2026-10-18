@@ -367,6 +367,37 @@ def test_suite_args_carries_include_path_and_flags(tmp_path):
         assert "--include_path" in a3, suite
 
 
+def test_gen_budget_caps_mc_twins_at_classic_window(tmp_path):
+    # REPL-2c: kmmlu/cmmlu twins must request EXACTLY classic's generation
+    # window (classic never overrides base get_max_tokens()=128). 256 was
+    # double the runaway waste AND a wider extraction window than classic
+    # scores — a divergence source in its own right.
+    import json as _json
+    from omlx_uplift import harness_engine as he
+
+    def gk_of(args):
+        return _json.loads(args[args.index("--gen_kwargs") + 1])
+
+    for suite in ("kmmlu", "cmmlu"):
+        spec = he.HARNESS_MAP[suite]
+        g = gk_of(he._suite_args(spec, "http://x/v1", "m", tmp_path, 5,
+                                 "deterministic"))
+        assert g["max_gen_toks"] == 128, suite
+        # model_settings profile: budget is benchmark-controlled (classic
+        # doctrine), only temperature stays out
+        gm = gk_of(he._suite_args(spec, "http://x/v1", "m", tmp_path, 5,
+                                  "model_settings"))
+        assert gm["max_gen_toks"] == 128 and "temperature" not in gm, suite
+        # thinking owns a bigger budget — gen_budget must not touch it
+        gt = gk_of(he._suite_args(spec, "http://x/v1", "m", tmp_path, 5,
+                                  "deterministic", enable_thinking=True))
+        assert gt["max_gen_toks"] == 2048 and gt["until"] == [], suite
+    # suites without a declared budget keep the model_args default (256)
+    assert "max_gen_toks" not in gk_of(he._suite_args(
+        he.HARNESS_MAP["hellaswag"], "http://x/v1", "m", tmp_path, 5,
+        "deterministic"))
+
+
 def test_map_and_refusals_disjoint_and_current():
     from omlx_uplift import harness_engine as he
     assert not set(he.HARNESS_MAP) & set(he.NOT_HARNESS)
