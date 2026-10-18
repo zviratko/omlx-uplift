@@ -545,7 +545,9 @@ async def voices_say_list(_auth=Depends(require_admin)):
     saved = {say_engine.say_name_of(v.get("model") or "")
              for v in _load()["voices"]}
     return {"supported": True,
-            "voices": [dict(v, added=v["name"] in saved) for v in voices]}
+            "voices": [dict(v, added=v["name"] in saved
+                            or v.get("identifier") in saved)
+                       for v in voices]}
 
 
 @api_router.post("/voices/say/speech")
@@ -563,7 +565,7 @@ async def voices_say_speech(request: Request, _auth=Depends(require_admin)):
                             detail="'%s' is not an installed macOS voice"
                                    % name[:64])
     text = str(raw.get("input") or v.get("sample")
-               or "Hello! My name is %s." % v["name"])
+               or "Hello! My name is %s." % v["name"].split(" (")[0])
     return await _say_response(v["name"], text, speed=raw.get("speed"))
 
 

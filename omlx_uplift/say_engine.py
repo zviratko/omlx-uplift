@@ -62,6 +62,31 @@ _LINE_RE = re.compile(
 _TIERS = (("premium", "(Premium)"), ("enhanced", "(Enhanced)"),
           ("personal", "(Personal)"))
 
+# The installed-voice catalog System Settings itself uses: AVFoundation
+# sees voices the CLI roster omits (downloaded Siri/neural sets) and
+# carries the true audio quality (Default/Enhanced/Premium) in the
+# object description. Probed headless through AppleScriptObjC — works
+# over ssh and in launchd sessions (verified); a failure degrades to
+# the plain `say -v ?` list, never to an empty tab.
+_AV_PROBE = '''use framework "AVFoundation"
+use scripting additions
+set vs to current application's AVSpeechSynthesisVoice's speechVoices()
+set n to (vs's |count|()) as integer
+set out to ""
+repeat with i from 0 to (n - 1)
+\tset v to vs's objectAtIndex:i
+\tset nm to (v's |name|()) as text
+\tset lg to (v's language()) as text
+\tset idr to (v's identifier()) as text
+\tset dsc to (v's |description|()) as text
+\tset out to out & nm & "\t" & lg & "\t" & idr & "\t" & dsc & "
+"
+end repeat
+return out
+'''
+
+_QUALITY_RE = re.compile(r"Quality:\s*([A-Za-z-]+)")
+
 
 def available() -> bool:
     """True when `say` exists on this platform. Probed per call (cheap
@@ -88,13 +113,45 @@ def parse_voices(text: str) -> list:
                 quality = tier
                 break
         out.append({"name": name, "locale": m.group("locale").strip(),
-                    "quality": quality, "sample": m.group("sample").strip()})
+                    "quality": quality, "sample": m.group("sample").strip(),
+                    "identifier": name})   # CLI rows have no id: the name IS it
     return out
+
+
+def parse_av(text: str) -> list:
+    """AV probe output -> rows {name, locale, quality, identifier, desc}.
+    Locale keeps AV's BCP-47 spelling (en-US); the UI normalises."""
+    out = []
+    for line in (text or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 4:
+            continue
+        name, lang, ident, desc = (p.strip() for p in parts[:4])
+        if not name or not ident:
+            continue
+        m = _QUALITY_RE.search(desc)
+        q = (m.group(1).lower() if m else "default")
+        if q == "default":
+            q = "standard"        # same vocabulary the UI chips use
+        out.append({"name": name, "locale": lang, "quality": q,
+                    "identifier": ident, "desc": desc})
+    return out
+
+
+def _say_key(name: str, locale: str) -> tuple:
+    """Cross-roster identity: AV 'Eddy' + en-US == say
+    'Eddy (English (US))' + en_US once the region parenthesis and the
+    separator style drop out."""
+    root = re.sub(r"\s*\(.*\)\s*$", "", name).strip().lower()
+    return (root, locale.replace("_", "-").lower())
 
 
 def _downloaded_names() -> set:
     """Voice names backed by *.SpeechVoice bundles in the two readable
-    install locations. Name = bundle's VoiceName, else bundle basename."""
+    install locations. Name = bundle's VoiceName, else bundle basename.
+    (Legacy macOS 11-era path; kept because those installs are still
+    what older boxes have — modern downloads surface through the AV
+    probe's quality/presence rules instead.)"""
     found = set()
     for base in (Path.home() / "Library" / "Speech" / "Voices",
                  Path("/Library/Speech/Voices")):
@@ -114,48 +171,118 @@ def _downloaded_names() -> set:
     return found
 
 
+def _av_rows() -> list:
+    """AVFoundation catalog via osascript, or [] when unavailable."""
+    if shutil.which("osascript") is None:
+        return []
+    try:
+        p = subprocess.run(["osascript", "-"], input=_AV_PROBE,
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        log.warning("macOS voice probe failed: %s", e)
+        return []
+    if p.returncode != 0:
+        log.warning("macOS voice probe rc=%d: %s", p.returncode,
+                    (p.stderr or "").strip()[:200])
+        return []
+    return parse_av(p.stdout or "")
+
+
+def _say_rows() -> list:
+    try:
+        p = subprocess.run(["say", "-v", "?"], capture_output=True,
+                           text=True, timeout=15)
+        return parse_voices(p.stdout or "")
+    except (OSError, subprocess.SubprocessError) as e:
+        log.warning("say voice probe failed: %s", e)
+        return []
+
+
 _cache: dict = {"ts": 0.0, "voices": []}
 
 
 def list_voices(force: bool = False) -> list:
-    """Installed voices + downloaded badge, cached (the roster changes only
-    when the owner downloads in System Settings — 5 min is plenty)."""
+    """Every voice this Mac has INSTALLED (System Settings' set, not the
+    CLI subset), cached. AVFoundation is the catalog; `say -v ?` adds
+    anything AV misses and supplies each voice's demo greeting.
+
+    Downloaded flag, from the OS's own facts:
+      - quality above Default — the sealed system set ships Default
+        voices only; Enhanced/Premium/Personal variants exist solely
+        because someone downloaded them;
+      - or simply absent from the `say` roster (downloaded neural/Siri
+        sets: say speaks them by IDENTIFIER, which is why every row
+        carries one);
+      - or a legacy *.SpeechVoice bundle on disk (older macOS path).
+    Nothing else is claimed: system-shipped rows carry no badge."""
     if not available():
         return []
     now = time.time()
     if not force and now - _cache["ts"] < _CACHE_TTL_S:
         return _cache["voices"]
-    try:
-        p = subprocess.run(["say", "-v", "?"], capture_output=True,
-                           text=True, timeout=15)
-        voices = parse_voices(p.stdout or "")
-    except (OSError, subprocess.SubprocessError) as e:
-        log.warning("say voice probe failed: %s", e)
-        voices = []
-    downloaded = _downloaded_names()
-    for v in voices:
-        v["downloaded"] = v["name"] in downloaded
-    # keep the previous stamp only when the roster survived parsing, so a
-    # transient junk run does not pin a bad list for a cache lifetime
-    if voices:
-        _cache.update(ts=now, voices=voices)
-    return voices
+    av = _av_rows()
+    sayv = _say_rows()
+    downloaded_bundles = _downloaded_names()
+    say_by_key = {}
+    for s in sayv:
+        say_by_key.setdefault(_say_key(s["name"], s["locale"]), s)
+    rows, seen = [], set()
+    for a in av:
+        key = _say_key(a["name"], a["locale"])
+        if (a["identifier"], key) in seen:
+            continue
+        seen.add((a["identifier"], key))
+        s = say_by_key.get(key)
+        quality = a["quality"]
+        if quality == "standard" and s and s["quality"] != "standard":
+            quality = s["quality"]
+        downloaded = (quality != "standard") or (s is None) \
+            or (a["name"] in downloaded_bundles)
+        rows.append({
+            "name": a["name"] + ("" if quality == "standard" else
+                                 " (%s)" % quality.title()),
+            "locale": a["locale"], "quality": quality,
+            "sample": (s or {}).get("sample", ""),
+            "identifier": a["identifier"], "downloaded": downloaded,
+        })
+    def _row_key(nm, loc, qual):
+        # tier parenthesis is part of the IDENTITY (Ava Enhanced and Ava
+        # Premium are two downloads); region parenthesis is not
+        root = re.sub(r"\s*\((?!\s*(?:Premium|Enhanced|Personal)).*?\)\s*$",
+                      "", nm, flags=re.I).strip().lower()
+        return (root, loc.replace("_", "-").lower(), qual)
+
+    for s in sayv:
+        # say sees something AV did not: honor the CLI roster too
+        if any(_row_key(r["name"], r["locale"], r["quality"])
+               == _row_key(s["name"], s["locale"], s["quality"])
+               or (r["name"] == s["name"] and
+                   _say_key(r["name"], r["locale"])
+                   == _say_key(s["name"], s["locale"]))
+               for r in rows):
+            continue
+        rows.append({"name": s["name"], "locale": s["locale"],
+                     "quality": s["quality"], "sample": s["sample"],
+                     "identifier": s["name"],
+                     "downloaded": s["name"] in downloaded_bundles
+                     or s["quality"] != "standard"})
+    if rows:
+        _cache.update(ts=now, voices=rows)
+    return rows
 
 
 def resolve(name: str) -> Optional[dict]:
-    """Exact-match a requested voice name against the installed roster
-    (case-sensitive: `say` itself is, and the list we render came from it).
+    """Match a requested voice by IDENTIFIER first (the exact address —
+    two system voices share one display name), then by display name.
     A miss refreshes the roster once: the owner may have downloaded the
     voice in System Settings seconds ago, and waiting out a cache TTL to
     accept it would read as a bug."""
     if not name:
         return None
-    for v in list_voices():
-        if v["name"] == name:
-            return v
-    for v in list_voices(force=True):
-        if v["name"] == name:
-            return v
+    for fresh in (False, True):
+        for v in list_voices(force=fresh):
+            if v["identifier"] == name or v["name"] == name:
+                return v
     return None
 
 
@@ -181,15 +308,19 @@ _MEDIA = {"wav": "audio/wav", "mp3": "audio/mpeg", "flac": "audio/flac",
 
 def synth_bytes(name: str, text: str, speed=None) -> bytes:
     """Render one utterance to plain WAV bytes. Raises RuntimeError with a
-    user-safe reason; input never reaches a shell."""
-    if resolve(name) is None:
+    user-safe reason; input never reaches a shell. Addressing goes through
+    the resolved row's IDENTIFIER when it has one — display names collide
+    (the system ships two Samanthas), identifiers do not."""
+    row = resolve(name)
+    if row is None:
         raise RuntimeError("voice '%s' is not installed on this Mac" % name)
+    target = row.get("identifier") or row["name"]
     text = (text or "").strip()
     if not text:
         raise RuntimeError("nothing to say")
     if len(text) > MAX_SAY_CHARS:
         text = text[:MAX_SAY_CHARS]     # truncate, don't punish the whole reply
-    args = ["say", "-v", name]
+    args = ["say", "-v", target]
     wpm = _speed_wpm(speed)
     if wpm:
         args += ["-r", wpm]

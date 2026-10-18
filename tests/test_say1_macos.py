@@ -32,6 +32,13 @@ Noa (Personal)       he_IL    # שלום, קוראים לי נועה.
 garbage line without structure
 """
 
+AV_ROSTER = """Albert\ten-US\tcom.apple.speech.synthesis.voice.Albert\t[AVSpeechSynthesisVoice 0x1] Language: en-US, Name: Albert, Quality: Default [com.apple.speech.synthesis.voice.Albert]
+Zuzana\tcs-CZ\tcom.apple.voice.compact.cs-CZ.Zuzana\t[AVSpeechSynthesisVoice 0x2] Language: cs-CZ, Name: Zuzana, Quality: Default [com.apple.voice.compact.cs-CZ.Zuzana]
+Zuzana\tcs-CZ\tcom.apple.ttsbundle.siri_cs-CZ_compact\t[AVSpeechSynthesisVoice 0x3] Language: cs-CZ, Name: Zuzana, Quality: Enhanced [com.apple.ttsbundle.siri_cs-CZ_compact]
+Voice 2\ten-US\tcom.apple.siri.natural.Simone\t[AVSpeechSynthesisVoice 0x4] Language: en-US, Name: Voice 2, Quality: Enhanced [com.apple.siri.natural.Simone]
+junk-no-tabs
+"""
+
 
 @pytest.fixture()
 def on_mac(monkeypatch):
@@ -79,30 +86,78 @@ def test_parse_tolerates_nothing_and_junk_only():
 
 
 def test_list_voices_caches_and_marks_downloaded(monkeypatch, on_mac):
-    calls = []
+    calls = {"av": 0, "say": 0}
 
-    class P:
-        stdout = ROSTER
-        returncode = 0
+    def fake_av():
+        calls["av"] += 1
+        return on_mac.parse_av(AV_ROSTER)
 
-    def fake_run(cmd, **kw):
-        calls.append(cmd)
-        return P()
-    monkeypatch.setattr(SE.subprocess, "run", fake_run)
-    monkeypatch.setattr(SE, "_downloaded_names", lambda: {"Zuzana"})
+    def fake_say():
+        calls["say"] += 1
+        return on_mac.parse_voices(ROSTER)
+    monkeypatch.setattr(on_mac, "_av_rows", fake_av)
+    monkeypatch.setattr(on_mac, "_say_rows", fake_say)
     a = on_mac.list_voices()
     b = on_mac.list_voices()
-    assert calls == [["say", "-v", "?"]]        # second call was cache
-    assert a == b and a[1]["downloaded"] is True and a[0]["downloaded"] is False
+    assert a == b and calls == {"av": 1, "say": 1}   # second call was cache
+    zz = [v for v in a if v["name"] == "Zuzana"][0]
+    assert zz["downloaded"] is False and zz["sample"].startswith("Ahoj")
+    avo = [v for v in a if v["identifier"] == "com.apple.siri.natural.Simone"][0]
+    assert avo["downloaded"] is True                 # AV-only = downloaded
+    assert avo["quality"] == "enhanced"
+    ava = [v for v in a if v["name"] == "Zuzana (Enhanced)"]
+    assert ava and ava[0]["downloaded"] is True      # above-Default = downloaded
 
 
-def test_list_voices_empty_roster_does_not_poison_cache(monkeypatch, on_mac):
-    monkeypatch.setattr(SE.subprocess, "run",
-                        lambda *a, **k: type("P", (), {"stdout": ""})())
+def test_list_voices_empty_probe_does_not_poison_cache(monkeypatch, on_mac):
+    monkeypatch.setattr(on_mac, "_av_rows", lambda: [])
+    monkeypatch.setattr(on_mac, "_say_rows", lambda: [])
     assert on_mac.list_voices() == []
-    monkeypatch.setattr(SE.subprocess, "run",
-                        lambda *a, **k: type("P", (), {"stdout": ROSTER})())
-    assert len(on_mac.list_voices()) == 6       # not pinned empty for the TTL
+    monkeypatch.setattr(on_mac, "_say_rows",
+                        lambda: on_mac.parse_voices(ROSTER))
+    assert len(on_mac.list_voices()) == 6            # not pinned empty
+
+
+def test_say_only_voices_survive_the_merge(monkeypatch, on_mac):
+    """If the CLI ever lists what AV misses, the row must still appear
+    (identifiers fall back to the name, nothing is silently dropped)."""
+    monkeypatch.setattr(on_mac, "_av_rows", lambda: [])
+    monkeypatch.setattr(on_mac, "_say_rows",
+                        lambda: on_mac.parse_voices(ROSTER))
+    vs = on_mac.list_voices()
+    assert any(v["name"] == "Zarvox" and v["identifier"] == "Zarvox"
+               for v in vs) if "Zarvox" in ROSTER else True
+    assert all("identifier" in v and "downloaded" in v for v in vs)
+
+
+def test_parse_av_maps_quality_from_description():
+    vs = SE.parse_av(AV_ROSTER)
+    assert [v["name"] for v in vs] == ["Albert", "Zuzana", "Zuzana", "Voice 2"]
+    q = [v["quality"] for v in vs]
+    assert q == ["standard", "standard", "enhanced", "enhanced"]
+    assert vs[1]["locale"] == "cs-CZ"
+    assert vs[3]["identifier"] == "com.apple.siri.natural.Simone"
+
+
+def test_synth_addresses_by_identifier_when_resolved(monkeypatch, on_mac):
+    """'Voice 2' is a display name `say` cannot resolve; the engine must
+    hand say the IDENTIFIER it resolved from the catalog row."""
+    _as_say(on_mac, roster_rows=on_mac.parse_av(AV_ROSTER))
+
+    class P:
+        returncode = 0
+        stderr = ""
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"RIFF" + b"\0" * 200)
+        return P()
+    monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    data = on_mac.synth_bytes("Voice 2", "hello")
+    assert data.startswith(b"RIFF")
+    assert seen["cmd"][seen["cmd"].index("-v") + 1] == "com.apple.siri.natural.Simone"
 
 
 def test_say_name_of_marker_roundtrip():
@@ -124,9 +179,11 @@ def test_speed_multiplier_maps_and_clamps():
 
 
 def test_resolve_exact_name(monkeypatch, on_mac):
-    monkeypatch.setattr(SE.subprocess, "run",
-                        lambda *a, **k: type("P", (), {"stdout": ROSTER})())
-    assert on_mac.resolve("Zuzana")["locale"] == "cs_CZ"
+    monkeypatch.setattr(on_mac, "_av_rows", lambda: on_mac.parse_av(AV_ROSTER))
+    monkeypatch.setattr(on_mac, "_say_rows",
+                        lambda: on_mac.parse_voices(ROSTER))
+    assert on_mac.resolve("Zuzana")["locale"] in ("cs-CZ", "cs_CZ")
+    assert on_mac.resolve("com.apple.siri.natural.Simone")["name"] == "Voice 2 (Enhanced)"
     assert on_mac.resolve("zuzana") is None      # case matters like in say
     assert on_mac.resolve("") is None
 
@@ -154,7 +211,8 @@ def test_synth_builds_safe_argv(monkeypatch, on_mac):
                               speed=1.1)
     assert data.startswith(b"RIFF")
     cmd = seen["cmd"]
-    assert cmd[0] == "say" and "-v" in cmd and cmd[cmd.index("-v") + 1] == "Zuzana"
+    assert cmd[0] == "say" and "-v" in cmd
+    assert cmd[cmd.index("-v") + 1] == "Zuzana"   # roster row: id == name
     assert "-f" in cmd and "-o" in cmd
     assert "--data-format=LEI16@22050" in cmd
     assert cmd[cmd.index("-r") + 1] == "193"    # 175*1.1
@@ -228,8 +286,9 @@ def test_not_macos_answers_empty_and_synth_refuses(monkeypatch):
 
 # ---------------------------------------------------------------- router
 
-def _as_say(on_mac, roster=ROSTER):
-    on_mac._cache.update(ts=9e15, voices=on_mac.parse_voices(roster))
+def _as_say(on_mac, roster=ROSTER, roster_rows=None):
+    on_mac._cache.update(ts=9e15,
+                         voices=roster_rows or on_mac.parse_voices(roster))
 
 
 def test_say_endpoint_hides_when_unavailable(client, monkeypatch):

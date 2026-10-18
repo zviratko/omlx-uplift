@@ -1177,6 +1177,11 @@ function _sayUsedNames() {
     }
     return s;
 }
+function _sayIsUsed(v, used) {
+    // rows address themselves by identifier; legacy store rows carry the
+    // display name — accept either as the saved marker
+    return !!(used[v.name] || (v.identifier && used[v.identifier]));
+}
 
 function _sayStoreName(v) {
     // display name stays the voice's own; a clash (clone named like a
@@ -1191,6 +1196,7 @@ function _sayStoreName(v) {
 }
 
 function sayRow(v, used) {
+    const addr = v.identifier || v.name;   // exact OS handle when present
     const row = document.createElement('div');
     row.className = 'vc-row';
     const lab = document.createElement('div');
@@ -1206,9 +1212,9 @@ function sayRow(v, used) {
     if (v.downloaded) {
         const c = document.createElement('span');
         c.className = 'vc-chip';
-        c.textContent = tf('uplift.voices.say_additional', 'ADDITIONAL');
+        c.textContent = tf('uplift.voices.say_additional', 'DOWNLOADED');
         c.title = tf('uplift.voices.say_additional_hint',
-                     'Downloaded on this Mac, not part of the system set.');
+                     'Installed on this Mac beyond the factory set — downloaded via System Settings.');
         lab.append(' ', c);
     }
     const act = document.createElement('div');
@@ -1222,7 +1228,7 @@ function sayRow(v, used) {
         play.disabled = true;
         try {
             // no input: the server answers with the voice's own greeting
-            const r = await speechJson('/voices/say/speech', { name: v.name });
+            const r = await speechJson('/voices/say/speech', { name: addr });
             play.disabled = false;
             await playBlob(r, play);
         } catch (e) {
@@ -1232,7 +1238,7 @@ function sayRow(v, used) {
     };
     const use = document.createElement('button');
     use.type = 'button'; use.className = 'se-btn';
-    if (used[v.name]) {
+    if (_sayIsUsed(v, used)) {
         use.textContent = tf('uplift.voices.say_in_use', 'IN USE');
         use.disabled = true;
     } else {
@@ -1241,7 +1247,7 @@ function sayRow(v, used) {
             use.disabled = true;
             try {
                 await D.postJson(`${VAPI}/voices`,
-                    { name: _sayStoreName(v), model: 'say:' + v.name,
+                    { name: _sayStoreName(v), model: 'say:' + addr,
                       language: v.locale });
                 D.toast(tf('uplift.voices.say_added_ok', 'Voice added')
                         + ': ' + v.name);

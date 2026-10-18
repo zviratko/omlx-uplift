@@ -255,9 +255,9 @@ test('chips: tier labels and ADDITIONAL only when proven', async () => {
     assert.ok(allText(byName['Ava (Premium)']).includes('PREMIUM'));
     assert.ok(allText(byName['Ava (Enhanced)']).includes('ENHANCED'));
     assert.ok(!allText(byName['Albert']).includes('PREMIUM'));
-    assert.ok(allText(byName['Zuzana']).includes('ADDITIONAL'),
+    assert.ok(allText(byName['Zuzana']).includes('DOWNLOADED'),
               'downloaded bundle proven by the server -> badged');
-    assert.ok(!allText(byName['Albert']).includes('ADDITIONAL'),
+    assert.ok(!allText(byName['Albert']).includes('DOWNLOADED'),
               'unproven -> NO badge at all (never claim System)');
 });
 
