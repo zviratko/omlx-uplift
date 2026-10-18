@@ -19,7 +19,7 @@ from .router import _LOGIN_HTML, _static_file
 
 
 def build_viewer_app(api_base: str = "") -> FastAPI:
-    app = FastAPI(title="Uplift viewer", docs_url=None, redoc=None)
+    app = FastAPI(title="Uplift viewer", docs_url=None, redoc_url=None)
     base = api_base.rstrip("/")
 
     def _proxy(path: str, request: Request) -> Response:
