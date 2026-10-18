@@ -18,7 +18,8 @@
      marking repaints from a fresh GET — the client never patches
      preferred_for locally; no pseudo-model voice is ever posted
    - OVERRIDE label (SAY-2c): rows the server flags answers_default get
-     'Override macOS default ({locale})'; a marked one 'Clear override';
+     'Override macOS default ({voice})' naming the detected default
+     voice; a marked one 'Clear override';
      the panel names the detected default (system_voice/system_language)
      and shows NOTHING of the sort when the server could not detect one
    - PLAY: hits /voices/say/speech with only {name} (the greeting text is
@@ -355,9 +356,10 @@ test('OVERRIDE label (SAY-2c): default-language rows say what they override', as
     const find = (name) => rows.find(r => String(r.children[0].textContent) === name);
     const alBtn = classes(find('Albert'), 'vc-pref')[0];
     assert.ok(alBtn._classes.has('on'));
-    assert.equal(alBtn.textContent, 'Clear override (en_US)');
+    assert.equal(alBtn.textContent, 'Clear override (Samantha)',
+                 'the button names the default VOICE it overrides, not the locale');
     const saBtn = classes(find('Samantha'), 'vc-pref')[0];
-    assert.equal(saBtn.textContent, 'Override macOS default (en_US)');
+    assert.equal(saBtn.textContent, 'Override macOS default (Samantha)');
     // the Czech rows stay plain favourites
     assert.equal(classes(find('Zuzana'), 'vc-pref')[0].textContent,
                  'Mark preferred');

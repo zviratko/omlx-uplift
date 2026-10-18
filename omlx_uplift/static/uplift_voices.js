@@ -1137,7 +1137,7 @@ let _sttSelf = null;
    (GET /voices/say). SAY-2 replaced the 'USE' button with a per-voice
    star; SAY-2c turned that star into a TEXT button and taught it the
    Mac's own language: rows answering the system default (the server's
-   'answers_default') read "Override macOS default (en-US)" — marking
+   'answers_default') read "Override macOS default (Samantha)" — marking
    one replaces what language-less `say` requests speak (the system
    voice, named in the panel hint); every other row reads "Mark
    preferred" (POST /voices/say/preferred -> the store's language map).
@@ -1254,15 +1254,18 @@ function sayRow(v, repaint) {
         }
     };
     // SAY-2c text button (was the star): honest about its target. A row
-    // answering the Mac's OWN language overrides the system default
-    // voice named in the panel hint; every other row marks a favourite
-    // for its language. Clicking a marked button clears it again; no
-    // stored pseudo-model is created — ever. The label carries a
-    // {locale} placeholder, so it gets NO dataset.i18n (applyI18n
-    // would repaint the raw placeholder back in); the panel re-renders
-    // on a locale change anyway.
+    // answering the Mac's OWN language overrides the DETECTED DEFAULT
+    // VOICE for that language — the button names that voice ("Override
+    // macOS default (Samantha)"), falling back to the locale when the
+    // voice itself could not be resolved. Every other row marks a
+    // favourite for its language. Clicking a marked button clears it
+    // again; no stored pseudo-model is created — ever. The label
+    // carries a {voice} placeholder, so it gets NO dataset.i18n
+    // (applyI18n would repaint the raw placeholder back in); the panel
+    // re-renders on a locale change anyway.
     const ansDef = !!v.answers_default;
-    const sysl = (_sayData && _sayData.system_language) || '';
+    const sysv = (_sayData && _sayData.system_voice)
+        || (_sayData && _sayData.system_language) || '';
     const pref = document.createElement('button');
     pref.type = 'button';
     pref.className = 'se-btn vc-pref' + (marked ? ' on' : '');
@@ -1271,10 +1274,10 @@ function sayRow(v, repaint) {
                          : 'uplift.voices.say_btn_override')
                : (marked ? 'uplift.voices.say_btn_clear'
                          : 'uplift.voices.say_btn_mark'),
-        ansDef ? (marked ? 'Clear override ({locale})'
-                         : 'Override macOS default ({locale})')
+        ansDef ? (marked ? 'Clear override ({voice})'
+                         : 'Override macOS default ({voice})')
                : (marked ? 'Clear preferred' : 'Mark preferred'))
-        .replace('{locale}', sysl || v.preferred_for || v.locale);
+        .replace('{voice}', sysv);
     pref.title = tf(marked ? 'uplift.voices.say_unmark'
                            : 'uplift.voices.say_mark',
                     marked ? 'Not preferred for: {locale}'
