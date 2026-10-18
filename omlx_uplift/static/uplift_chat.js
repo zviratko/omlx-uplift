@@ -2193,6 +2193,8 @@ function sayRow(plan, seq) {
     pp.title = tf2('uplift.chat.say_play', 'Play this line');
     pp.dataset.i18nTitle = 'uplift.chat.say_play';
     pp.dataset.enTitle = pp.title;
+    row.append(pp, n, wave, re);
+    row._n = n;
     row._pp = pp; row._cv = cv; row._fill = fill; row._bar = bar; row._re = re;
     pp.addEventListener('click', function (ev) {
         ev.stopPropagation();
@@ -2706,7 +2708,9 @@ function sayAttach(holder, idx, role, bubble) {
     }
     var plan = planOf(msg);
     if (!plan && msg.speech && msg.speech.n) plan = planFor(msg);
-    if (!plan || !autoSpeakOn()) {
+    // an empty stack is worse than none: a turn that produced no chunk (or a
+    // plan that sanitized to nothing) must not leave a visible empty shelf
+    if (!plan || !plan.chunks.length || !autoSpeakOn()) {
         if (grid) grid.remove();
         if (plan) { plan.planEl = null; }
         return;

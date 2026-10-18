@@ -238,6 +238,17 @@ test('css: the stack is a 3-column grid capped at five visible rows', () => {
     assert.ok(sels.length >= 10, 'the player brings its own rules: ' + sels.length);
 });
 
+test('rows: a chunk row is built from real parts, not just wired ones', () => {
+    // the append-omission class: a control built, wired and never appended
+    // passes every byId probe and shows up EMPTY in the browser
+    const body = slice('sayRow');
+    assert.match(body, /row\.append\(pp, n, wave, re\)/,
+                 'play, number, waveform and reload all ride the row');
+    assert.match(body, /row\._pp = pp/, 'the row keeps its own handles');
+    assert.match(SRC, /g\.appendChild\(sayRow\(plan, i\)\)/,
+                 'the stack appends every row it builds');
+});
+
 test('waveform: peaks come off the decoded buffer, nothing else', () => {
     const say = fs.readFileSync(path.join(STATIC_DIR, 'uplift_speechio.js'), 'utf8');
     assert.match(say, /onItem\(item, state\)/, 'the row ladder is an engine seam');
