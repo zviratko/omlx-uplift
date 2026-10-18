@@ -1052,7 +1052,7 @@
  "uplift.voices.tab_clone": "CLONED VOICES",
  "uplift.voices.tab_say": "macOS VOICES",
  "uplift.voices.say_title": "macOS SYSTEM VOICES",
- "uplift.voices.say_hint": "Voices already installed on this Mac — no model to load, they speak instantly. USE adds one to your voices; download more (and better) qualities in System Settings under Accessibility > Spoken Content > Voices.",
+ "uplift.voices.say_hint": "Every voice this macOS offers. Installed voices speak instantly — no model to load; greyed rows need a download first in System Settings under Accessibility > Spoken Content > Voices. USE adds an installed voice to your voices.",
  "uplift.voices.say_unsupported": "The macOS say engine is not available on this server.",
  "uplift.voices.say_loading": "Reading voices…",
  "uplift.voices.say_filter_ph": "Filter by name or language…",

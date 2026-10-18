@@ -1055,7 +1055,7 @@
  "uplift.voices.tab_clone": "클론 보이스",
  "uplift.voices.tab_say": "macOS 보이스",
  "uplift.voices.say_title": "macOS 시스템 보이스",
- "uplift.voices.say_hint": "이 Mac에 이미 설치된 음성 — 모델 로드 없이 즉시 말합니다. 사용을 누르면 내 보이스에 추가됩니다. 더 높은 품질의 음성은 시스템 설정 > 손쉬운 사용 > 음성 콘텐츠 > 음성에서 다운로드하세요.",
+ "uplift.voices.say_hint": "이 macOS가 제공하는 모든 음성. 설치된 음성은 모델 로드 없이 즉시 말합니다. 회색 줄은 시스템 설정 > 손쉬운 사용 > 음성 콘텐츠 > 음성에서 먼저 다운로드해야 합니다. 사용을 누르면 설치된 음성이 내 보이스에 추가됩니다.",
  "uplift.voices.say_unsupported": "이 서버에서는 macOS say 엔진을 사용할 수 없습니다.",
  "uplift.voices.say_loading": "음성 읽는 중…",
  "uplift.voices.say_filter_ph": "이름 또는 언어로 필터…",

@@ -1040,7 +1040,7 @@
  "uplift.voices.tab_clone": "複製語音",
  "uplift.voices.tab_say": "macOS 語音",
  "uplift.voices.say_title": "macOS 系統語音",
- "uplift.voices.say_hint": "這台 Mac 上已安裝的聲音 — 無需載入模型，即時發聲。點「使用」加入你的語音；更多（更高品質）的聲音可在「系統設定 > 輔助使用 > 語音內容 > 聲音」下載。",
+ "uplift.voices.say_hint": "此 macOS 提供的全部聲音。已安裝的聲音無需載入模型，即時發聲；灰色列需先在「系統設定 > 輔助使用 > 語音內容 > 聲音」中下載。點「使用」將已安裝的聲音加入你的語音。",
  "uplift.voices.say_unsupported": "此伺服器不支援 macOS 的 say 引擎。",
  "uplift.voices.say_loading": "正在讀取聲音…",
  "uplift.voices.say_filter_ph": "依名稱或語言篩選…",

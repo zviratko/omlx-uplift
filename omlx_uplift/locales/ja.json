@@ -1043,7 +1043,7 @@
  "uplift.voices.tab_clone": "クローン音声",
  "uplift.voices.tab_say": "macOS の音声",
  "uplift.voices.say_title": "macOS システム音声",
- "uplift.voices.say_hint": "この Mac にインストール済みの音声です — モデルの読み込み不要で即座に発話します。使う を押すと音声一覧に追加されます。より高品質な音声は「システム設定 > アクセシビリティ > 音声コンテンツ > 音声」でダウンロードできます。",
+ "uplift.voices.say_hint": "この macOS が提供するすべての音声。インストール済み音声はモデル読み込み不要で即座に発話します。灰色の行は先に「システム設定 > アクセシビリティ > 音声コンテンツ > 音声」でダウンロードが必要です。使う を押すとインストール済み音声が音声一覧に追加されます。",
  "uplift.voices.say_unsupported": "このサーバーでは macOS の say エンジンを利用できません。",
  "uplift.voices.say_loading": "音声を読み込み中…",
  "uplift.voices.say_filter_ph": "名前または言語で絞り込み…",

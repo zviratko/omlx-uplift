@@ -1040,7 +1040,7 @@
  "uplift.voices.tab_clone": "KLONOVANÉ HLASY",
  "uplift.voices.tab_say": "HLASY macOS",
  "uplift.voices.say_title": "SYSTÉMOVÉ HLASY macOS",
- "uplift.voices.say_hint": "Hlasy už nainstalované v tomto Macu — žádný model se nenačítá, mluví hned. POUŽÍT přidá hlas do vašich hlasů; více (a lepší) kvality stáhnete v Nastavení Systému > Zjednodušený přístup > Mluvený obsah > Hlasy.",
+ "uplift.voices.say_hint": "Všechny hlasy, které tento macOS nabízí. Nainstalované mluví hned — žádný model se nenačítá; šedé řádky je dřív treba stáhnout v Nastavení Systému > Zjednodušený přístup > Mluvený obsah > Hlasy. POUŽÍT přidá nainstalovaný hlas mezi vaše hlasy.",
  "uplift.voices.say_unsupported": "Hlasový engine say z macOS není na tomto serveru dostupný.",
  "uplift.voices.say_loading": "Načítám hlasy…",
  "uplift.voices.say_filter_ph": "Filtrovat podle jména nebo jazyka…",

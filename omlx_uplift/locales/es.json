@@ -1044,7 +1044,7 @@
  "uplift.voices.tab_clone": "VOCES CLONADAS",
  "uplift.voices.tab_say": "VOCES DE macOS",
  "uplift.voices.say_title": "VOCES DEL SISTEMA DE macOS",
- "uplift.voices.say_hint": "Voces ya instaladas en este Mac — sin cargar modelos, hablan al instante. USAR la añade a tus voces; descarga más (y mejores) calidades en Ajustes del Sistema > Accesibilidad > Contenido hablado > Voces.",
+ "uplift.voices.say_hint": "Todas las voces que ofrece este macOS. Las instaladas hablan al instante, sin cargar modelos; las filas en gris requieren descarga en Ajustes del Sistema > Accesibilidad > Contenido hablado > Voces. USAR añade una voz instalada a sus voces.",
  "uplift.voices.say_unsupported": "El motor say de macOS no está disponible en este servidor.",
  "uplift.voices.say_loading": "Leyendo voces…",
  "uplift.voices.say_filter_ph": "Filtrar por nombre o idioma…",

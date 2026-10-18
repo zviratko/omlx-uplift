@@ -1362,10 +1362,10 @@ async function sayPanel(host) {
     const hint = document.createElement('div');
     hint.className = 'mk-desc';
     hint.textContent = tf('uplift.voices.say_hint',
-        'Voices already installed on this Mac — no model to load, they '
-        + 'speak instantly. USE adds one to your voices; download more '
-        + '(and better) qualities in System Settings under Accessibility '
-        + '> Spoken Content > Voices.');
+        'Every voice this macOS offers. Installed voices speak instantly '
+        + '— no model to load; greyed rows need a download '
+        + 'first in System Settings under Accessibility > Spoken Content '
+        + '> Voices. USE adds an installed voice to your voices.');
     box.append(title, hint);
     host.append(box);
     if (!_sayData) {
