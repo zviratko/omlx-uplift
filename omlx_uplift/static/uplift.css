@@ -2932,7 +2932,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    box keeps the majority at every viewport */
 .chat-native-hist { flex: 0 0 30%; min-width: 190px; max-width: 300px;
     position: sticky;
-    top: 6px; max-height: calc(100vh - 200px); overflow-y: auto; }
+    top: 6px; max-height: calc(100vh - 225px); overflow-y: auto; }
 /* CHAT-3R defect (user report): .chat-native-bar sets flex-wrap: wrap —
    legal in its ROW context, but the rails are COLUMN boxes; once their
    content passed the max-height cap (short viewports) the surplus WRAPPED
@@ -2950,7 +2950,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    the cap mirrors fitHeight's budget (viewport - top chrome). */
 .chat-native-side { flex: 0 0 30%; min-width: 230px; max-width: 340px;
     position: sticky;
-    top: 6px; max-height: calc(100vh - 200px); overflow: auto; }
+    top: 6px; max-height: calc(100vh - 225px); overflow: auto; }
 /* ROUND 13 (sweep: constant 52px page scroll survived the GAP fix): the
    global .wrap carries 60px of bottom breathing room — fine for short
    pages, but CHAT sizes itself to the viewport, so the pad spilled past
@@ -3028,8 +3028,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     .chat-native-side { flex-basis: 25%; min-width: 195px; max-width: 280px; }
     .chat-native-toprow { gap: 6px; }
     .chat-native-toprow .btn { padding: 3px 8px; font-size: 12px; }
-    .chat-native-toprow .chat-native-group { min-width: 84px; }
-    .chat-native-toprow .chat-native-group:first-child { min-width: 118px; }
+    /* hypothetical-basis budget at 1024 (measured): bar had 469px and the
+       line packed to 469.0156 — Delete fell to a second row on 0.02px.
+       Tighter bases keep all four controls conceivable on one line. */
+    .chat-native-toprow .chat-native-group { flex-basis: 88px; min-width: 84px; }
+    .chat-native-toprow .chat-native-group:first-child { flex-basis: 130px;
+        min-width: 118px; }
 }
 @media (max-width: 940px) {
     .chat-native-layout { flex-direction: column; }
