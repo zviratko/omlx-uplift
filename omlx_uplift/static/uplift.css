@@ -3014,9 +3014,22 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
        collapses the grid to ONE column (live QA). The rail width is fixed,
        so 2x(96+10) fits by design: pin it. */
     grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* ROUND 13: between 941 and 1180 the 30% rails squeeze the chat column
+   until Save/Delete wrap to a second line (sweep: 87px bars at
+   1024/1100). Slimmer rails + compact controls keep one line there;
+   below 940 stacked mode takes over. */
+@media (max-width: 1180px) {
+    .chat-native-hist { flex-basis: 24%; min-width: 160px; max-width: 250px; }
+    .chat-native-side { flex-basis: 26%; min-width: 200px; max-width: 290px; }
+    .chat-native-toprow { gap: 6px; }
+    .chat-native-toprow .btn { padding: 3px 8px; font-size: 12px; }
+    .chat-native-toprow .chat-native-group { min-width: 84px; }
+    .chat-native-toprow .chat-native-group:first-child { min-width: 118px; }
+}
 @media (max-width: 940px) {
     .chat-native-layout { flex-direction: column; }
-    .chat-native-hist, .chat-native-side { flex: 1 1 auto; width: 100%; }
+    .chat-native-hist, .chat-native-side { flex: 1 1 auto; width: 100%;
+        min-width: 0; max-width: none; }
     .chat-native-hist.chat-native-bar { flex-wrap: wrap; }
     /* stacked mode is the OLD row context — sections flow as wrap rows
        (the base nowrap pin guards the COLUMN rails only) */

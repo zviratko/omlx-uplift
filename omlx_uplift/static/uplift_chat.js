@@ -31,7 +31,9 @@
 'use strict';
 
 var CHAT_FLOOR = 160,      // U54: min deep-chat height (input stays usable)
-    CHAT_BOTTOM_GAP = 12;  // host padding + breathing room under dc
+    CHAT_BOTTOM_GAP = 72;  // dc host padding + .wrap's 61px bottom pad +
+                           // breathing room (round 13: 12 was an estimate
+                           // that left a constant 60px page scroll)
 var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _models = [], _sttIds = {},   // picker rows (chat types only) + STT id set
     _vendorPromise = null, _streaming = false,
