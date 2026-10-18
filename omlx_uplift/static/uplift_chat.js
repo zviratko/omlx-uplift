@@ -4985,16 +4985,17 @@ function mount() {
                 if (role === 'assistant' && _turnMid) {
                     // VOICE-16: bind the plan (and therefore the audio files)
                     // to this bubble before it reaches the store.
-                    // A turn that ended badly (stopped, deleted, errored) left
-                    // its minted mid behind; if the text does not match what
-                    // that plan spoke, the plan belongs to somebody else.
+                    // REGRESSION GUARD (user: 'no audio at all, though it looks
+                    // like it plays'): this used to compare the reply text with
+                    // the plan's chunks and release the plan on a mismatch — but
+                    // the stored text is markdown while the chunks are the
+                    // flattened prose, so it fired on HEALTHY turns and cancelled
+                    // the read that had just started. Deleting or regenerating
+                    // already clears _turnMid, so the only leftover worth acting
+                    // on is a turn that never spoke a single chunk.
                     var carry = _plans[_turnMid];
-                    if (carry) {
-                        var now = String(row.content || '').replace(/\s+/g, ' ').trim();
-                        var spoke = (carry.chunks || []).join(' ').replace(/\s+/g, ' ').trim();
-                        if (spoke && now.slice(0, 24) !== spoke.slice(0, 24)) {
-                            sayRelease(_turnMid);
-                        }
+                    if (carry && !(carry.chunks && carry.chunks.length) && !carry.live) {
+                        sayRelease(_turnMid);
                     }
                 }
                 if (role === 'assistant' && _turnMid) {

@@ -313,16 +313,17 @@ test('release: a deleted or regenerated bubble stops talking and loses its mid',
                  'the reply still being streamed is never swept');
 });
 
-test('identity: a stale turn mid cannot lend its chunks to a new reply', () => {
-    // deep-chat keeps the minted mid from the turn start; an aborted or deleted
-    // turn must not have it stamped onto the next answer (that is what made a
-    // regenerated bubble show the dead one's chunk lines)
+test('identity: closing a turn must never cancel the read that just started', () => {
+    // REGRESSION (user: 'no audio at all, though it looks like it plays'): the
+    // finalize guard compared the stored markdown with the plan's flattened
+    // prose and released the plan on a mismatch — silencing every healthy reply
+    // while the UI kept painting progress from the known durations.
     const stamp = SRC.slice(SRC.indexOf('VOICE-16: bind the plan'),
-                            SRC.indexOf('VOICE-16: bind the plan') + 1400);
-    assert.match(stamp, /var carry = _plans\[_turnMid\];/);
-    assert.match(stamp, /now\.slice\(0, 24\) !== spoke\.slice\(0, 24\)/,
-                 'text is compared before the plan is reused');
-    assert.match(stamp, /sayRelease\(_turnMid\);/);
+                            SRC.indexOf('VOICE-16: bind the plan') + 1600);
+    assert.ok(!/now\.slice\(0, 24\) !== spoke\.slice\(0, 24\)/.test(stamp),
+              'no text comparison at turn close');
+    assert.match(stamp, /carry\.chunks && carry\.chunks\.length/, 'it asks what the turn spoke');
+    assert.match(stamp, /&& !carry\.live/, 'and never releases a turn that is still live');
 });
 
 test('pair: the action line binds by mid, never by row position', () => {
