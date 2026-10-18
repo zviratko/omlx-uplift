@@ -489,12 +489,10 @@ def _add_adopt(store, manifest, patch, creating: bool, patch_id: str,
                 diffapply.record_merged_backup(result["diff"], tree_root, backup_dir)
             else:
                 diffapply.record_pristine_backup(result["diff"], tree_root, backup_dir)
-            from datetime import datetime as _dt, timezone as _tz
-            version["applied"] = {"keg_id": keg,
-                                  "at": _dt.now(_tz.utc).isoformat(
-                                      timespec="seconds"),
-                                  "files": applied_files}
-            version["backup_dir"] = _patches.rel(backup_dir, store.base_dir)
+            _patches.set_keg_record(
+                version, keg, at=_patches.now_iso(), files=applied_files,
+                backup_dir=_patches.rel(backup_dir, store.base_dir),
+                tree_root=tree_root)
             version["adopted"] = True
             patch["enabled"] = True
             patch["desired_version"] = v
@@ -549,7 +547,8 @@ def _add_transition(store, manifest, patch, patch_id: str, version: dict,
                         "safeguards need approval: " + ", ".join(held))
     else:
         # new candidate on top of an applied patch -> update_available
-        if any(ver.get("applied") for ver in patch["versions"]):
+        if any(ver.get("applied") or ver.get("kegs")
+               for ver in patch["versions"]):
             store.set_state(patch, "update_available",
                             f"candidate v{v} fetched and validated")
         else:
@@ -785,13 +784,13 @@ def _pristine_overlay(store, patch, tree_root: str) -> dict | None:
     overlay: dict[str, bytes] = {}
     seen = False
     vers = sorted(patch.get("versions", []),
-                  key=lambda v: ((v.get("applied") or {}).get("at") or "",
+                  key=lambda v: ((_patches.keg_record(v, keg) or {}).get("at") or "",
                                  v.get("v", 0)))
     for v in vers:
-        applied = v.get("applied") or {}
-        if not applied or applied.get("keg_id") != keg:
+        rec = _patches.keg_record(v, keg)
+        if not rec or rec.get("status") != "applied":
             continue
-        bd = v.get("backup_dir")
+        bd = rec.get("backup_dir")
         if not bd:
             continue
         seen = True
@@ -819,6 +818,11 @@ def view(store, tree_root: str, keg: str | None) -> dict:
     for p in manifest.get("patches", []):
         desired = _desired_version_entry(store, p) or {}
         applied = desired.get("applied") or {}
+        rec = _patches.keg_record(desired, keg)
+        applied_here = bool(rec and rec.get("status") == "applied")
+        applied_any = (applied_here or bool(applied)
+                       or any((r or {}).get("status") == "applied"
+                              for r in (desired.get("kegs") or {}).values()))
         scope = _patches.patch_scope(p)
         # approvals are evaluated against the desired version; a never-
         # enabled patch has no desired yet -> judge its newest candidate so
@@ -831,15 +835,11 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             # (DEV-context 1): the dev-src materializer owns them
             inactive_reason = ("dev scope — materialized on the omlx-dev "
                                "branch, never applied to the keg")
-        elif target == "dev" and scope == _patches.SCOPE_OMLX:
-            inactive_reason = ("running inside the omlx-dev keg — its source "
-                               "already carries dev patches; omlx-scope "
-                               "overlays mount on the vanilla keg only")
         if target == "dev" and _patches.scope_touches_dev(scope):
             active = bool(p.get("enabled")) and p.get("state") == "applied"
         else:
             active = (_patches.scope_touches_keg(scope)
-                      and bool(p.get("enabled")) and target != "dev")
+                      and bool(p.get("enabled")))
         entry = {
             "id": p.get("id"), "enabled": p.get("enabled", False),
             "scope": scope,
@@ -852,7 +852,7 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             "desired_version": p.get("desired_version"),
             "versions": [{k: v.get(k) for k in
                           ("v", "content_sha256", "source_head_sha",
-                           "fetched_at", "applied", "safeguards",
+                           "fetched_at", "applied", "kegs", "safeguards",
                            "root_note", "adopted")}
                          for v in p.get("versions", [])],
             "safeguard_always": p.get("safeguard_always") or [],
@@ -865,9 +865,11 @@ def view(store, tree_root: str, keg: str | None) -> dict:
                                     if "kernel_source" in
                                     (gate_ver.get("safeguards") or {}).get("codes", [])
                                     else None),
-            "applied_v": desired.get("v") if applied else None,
-            "keg_changed": bool(applied.get("keg_id") and keg
-                                and applied["keg_id"] != keg),
+            "applied_v": desired.get("v") if applied_here else None,
+            "keg_changed": bool(applied_any and not applied_here
+                                and p.get("enabled")),
+            "this_keg": (rec or {}).get("status") if rec else None,
+            "this_keg_detail": (rec or {}).get("detail"),
             "advisories": url_advisories(
                 (p.get("source") or {}).get("url") or ""),
             "last_verified": p.get("last_verified"),
@@ -955,7 +957,8 @@ def set_enabled(store, patch_id: str, enabled: bool,
         # resurrect what the user just switched off
         p.pop("enabled_before_kill", None)
         _ver = (store.get_version(p, p.get("desired_version")) or {})
-        applied = bool(_ver.get("applied") or _ver.get("dev_applied"))
+        applied = bool(_ver.get("applied") or _ver.get("kegs")
+                       or _ver.get("dev_applied"))
         store.set_state(
             p, "disabled",
             "disabled — restores on next restart" if applied
@@ -1145,7 +1148,10 @@ def remove_patch(store, patch_id: str, tree_root: str) -> dict:
     """Remove a patch: restore its pristine files NOW if it is applied, then
     drop manifest entry + stored files (backups included). Unwinds EVERY
     applied version's backup for the live keg (a version cycle leaves a
-    chain; restoring only one link does not reach vanilla bytes)."""
+    chain; restoring only one link does not reach vanilla bytes). Other
+    kegs that recorded this patch (multi-board store, RUNTIME-MOUNT) are
+    unwound best-effort via their recorded tree root; a tree that is gone
+    leaves its backups on disk — honest leftovers over silent data loss."""
     manifest = store.load()
     p = store.find(manifest, patch_id)
     if p is None:
@@ -1153,11 +1159,18 @@ def remove_patch(store, patch_id: str, tree_root: str) -> dict:
     restore_report = {"ok": True, "reason": None, "files": []}
     keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
     chain = [v for v in p.get("versions", [])
-             if (v.get("applied") or {}).get("keg_id") == keg]
-    chain.sort(key=lambda v: ((v["applied"] or {}).get("at") or "", v.get("v", 0)),
+             if _patches.keg_record(v, keg)]
+    chain.sort(key=lambda v: ((_patches.keg_record(v, keg) or {}).get("at") or "",
+                              v.get("v", 0)),
                reverse=True)
+    swept: dict = {}  # version -> backup dirs restored on this remove
+
+    def _sweep(v, bd):
+        if bd:
+            swept.setdefault(id(v), []).append(bd)
+
     for v in chain:
-        bd = v.get("backup_dir")
+        bd = (_patches.keg_record(v, keg) or {}).get("backup_dir")
         if not bd:
             continue
         bd_full = bd if os.path.isabs(bd) else os.path.join(store.base_dir, bd)
@@ -1168,15 +1181,34 @@ def remove_patch(store, patch_id: str, tree_root: str) -> dict:
             restore_report["ok"] = False
             restore_report["reason"] = one["reason"]
             break
-    if chain:
+        _sweep(v, bd)
+        _patches.clear_keg_record(v, keg)
+    # other boards' trees: restore where the recorded root still exists
+    for v in p.get("versions", []):
+        for other_keg, rec in list((v.get("kegs") or {}).items()):
+            if other_keg == keg or (rec or {}).get("status") != "applied":
+                continue
+            other_root = rec.get("tree_root")
+            bd = rec.get("backup_dir")
+            if not other_root or not bd or not os.path.isdir(other_root):
+                continue
+            bd_full = (bd if os.path.isabs(bd)
+                       else os.path.join(store.base_dir, bd))
+            diffapply.restore_backup(bd_full, other_root)
+            _sweep(v, bd)
+            _patches.clear_keg_record(v, other_keg)
+    if chain or swept:
         import shutil
 
-        for v in chain:
-            bd = v.get("backup_dir")
-            if bd:
+        for v in p.get("versions", []):
+            if v.get("kegs"):
+                continue  # another tree still needs these backups
+            for bd in swept.get(id(v), []):
                 bd_full = (bd if os.path.isabs(bd)
                            else os.path.join(store.base_dir, bd))
+                # sweep every keg's leaf under backups/<id>.v<N>/
                 shutil.rmtree(os.path.dirname(bd_full), ignore_errors=True)
+            v.pop("kegs", None)
     for ver in p.get("versions", []):
         pf = ver.get("patch_file")
         if pf:

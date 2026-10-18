@@ -70,14 +70,35 @@ def _files_match(tree_root: str, applied_files: list) -> bool:
     return True
 
 
+def _stamp_failure(store, tree_root, keg, patch, version, prefix, reason):
+    """Per-keg failure record. The GLOBAL state only drops to needs_review
+    when no other tree still carries the version applied — a dev keg whose
+    build moved on must not put the vanilla board's chip in doubt."""
+    rec = {"status": "error", "at": _patches.now_iso(), "files": [],
+           "backup_dir": None, "tree_root": tree_root, "detail": reason}
+    recs = dict(version.get("kegs") or {})
+    legacy = version.get("applied") or {}
+    if not recs and legacy.get("keg_id") and legacy["keg_id"] != keg:
+        # pre-migration store: keep the other tree's truth in the map
+        recs[legacy["keg_id"]] = {"status": "applied",
+                                  "at": legacy.get("at"),
+                                  "files": legacy.get("files") or [],
+                                  "backup_dir": version.get("backup_dir")}
+    recs[keg] = rec
+    version["kegs"] = recs
+    if not _patches.keg_applied_elsewhere(version, except_keg=keg):
+        patch["state"] = "needs_review"
+        patch["state_detail"] = f"{prefix}: {reason}"
+        patch["state_changed_at"] = _patches.now_iso()
+
+
 def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
     """Strict-apply one stored version. Returns report dict; mutates patch."""
     pid = patch["id"]
     data = _read(_abs(store, version.get("patch_file", "")))
     if data is None:
-        patch["state"] = "needs_review"
-        patch["state_detail"] = "stored diff file missing"
-        patch["state_changed_at"] = _patches.now_iso()
+        _stamp_failure(store, tree_root, keg, patch, version,
+                       "apply failed", "stored diff file missing")
         _log.warning("patch %s: stored diff file missing (%s) -> needs_review",
                      pid, version.get("patch_file"))
         return {"id": pid, "action": "needs_review", "reason": "diff file missing"}
@@ -93,10 +114,9 @@ def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
     reverse = bool(patch.get("reversal"))
     result = diffapply.apply_diff(data, tree_root, backup_dir, reverse=reverse)
     if not result["ok"]:
-        patch["state"] = "needs_review"
-        patch["state_detail"] = ("reversal failed: " if reverse else
-                                 "apply failed: ") + result["reason"]
-        patch["state_changed_at"] = _patches.now_iso()
+        _stamp_failure(store, tree_root, keg, patch, version,
+                       "reversal failed" if reverse else "apply failed",
+                       result["reason"])
         fails = [f for f in result.get("files", []) if f["status"] == "fail"]
         _log.warning("patch %s v%d %s: %s | %s", pid, version["v"],
                      "reversal FAILED" if reverse else "apply FAILED",
@@ -113,13 +133,14 @@ def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
         applied_files.append({"path": f["path"],
                               "sha256": _sha(data_now) if data_now is not None else None,
                               "status": f["status"]})
-    version["applied"] = {"keg_id": keg, "at": _patches.now_iso(),
-                          "files": applied_files}
-    version["backup_dir"] = _patches.rel(backup_dir, store.base_dir)
+    at = _patches.now_iso()
+    _patches.set_keg_record(version, keg, at=at, files=applied_files,
+                            backup_dir=_patches.rel(backup_dir, store.base_dir),
+                            tree_root=tree_root)
     patch["state"] = "applied"
     patch["state_detail"] = ""
-    patch["state_changed_at"] = _patches.now_iso()
-    patch["last_verified"] = {"keg_id": keg, "at": _patches.now_iso()}
+    patch["state_changed_at"] = at
+    patch["last_verified"] = {"keg_id": keg, "at": at}
     changed = any(f["status"] == "applied" for f in result["files"])
     return {"id": pid, "action": "applied", "v": version["v"],
             "changed_on_disk": changed}
@@ -133,22 +154,23 @@ def _unwind_applied(store, tree_root, keg, patch, skip_v=None):
     Returns False (patch marked needs_review) on a failed restore."""
     pid = patch["id"]
     vers = [v for v in patch.get("versions", [])
-            if (v.get("applied") or {}).get("keg_id") == keg
+            if _patches.keg_record(v, keg)
+            and _patches.keg_record(v, keg).get("status") == "applied"
             and v.get("v") != skip_v]
-    vers.sort(key=lambda v: ((v["applied"] or {}).get("at") or "", v.get("v", 0)),
+    vers.sort(key=lambda v: ((_patches.keg_record(v, keg) or {}).get("at") or "",
+                             v.get("v", 0)),
               reverse=True)
     for v in vers:
-        bd = v.get("backup_dir")
+        bd = (_patches.keg_record(v, keg) or {}).get("backup_dir")
         if bd:
             result = diffapply.restore_backup(_abs(store, bd), tree_root)
             if not result["ok"]:
-                patch["state"] = "needs_review"
-                patch["state_detail"] = f"restore failed: {result['reason']}"
-                patch["state_changed_at"] = _patches.now_iso()
+                _stamp_failure(store, tree_root, keg, patch, v,
+                               "restore failed", result["reason"])
                 _log.warning("patch %s: backup restore FAILED (v%d, %s): %s",
                              pid, v.get("v"), bd, result["reason"])
                 return False
-        v.pop("applied", None)
+        _patches.clear_keg_record(v, keg)
     return True
 
 
@@ -156,11 +178,10 @@ def _restore_patch(store, tree_root, keg, patch, version) -> dict:
     """Restore pristine bytes: unwind the whole applied chain for this keg
     (a version cycle v1->v2 leaves backups that must rewind newest-first)."""
     pid = patch["id"]
-    bd = version.get("backup_dir")
-    applied = version.get("applied") or {}
-    if not bd or applied.get("keg_id") != keg:
+    rec = _patches.keg_record(version, keg)
+    if rec is None or not rec.get("backup_dir") or rec.get("status") != "applied":
         # nothing on disk for THIS keg (fresh upgrade) — already pristine
-        version.pop("applied", None)
+        _patches.clear_keg_record(version, keg)
         patch["state"] = "disabled"
         patch["state_detail"] = "disabled"
         return {"id": pid, "action": "already-clean"}
@@ -220,11 +241,12 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
         on_dev_keg = _patches.detect_patch_target() == "dev"
         for patch in ordered:
             scope = _patches.patch_scope(patch)
-            if on_dev_keg:
-                # DEV-6 decision 2: the omlx-dev keg's SOURCE already carries
-                # its patches (materialized uplift-dev). An overlay would be
-                # redundant at best and fight the patched source at worst —
-                # so no scope ever mounts into a dev keg.
+            if on_dev_keg and scope != _patches.SCOPE_OMLX:
+                # RUNTIME-MOUNT doctrine (2026-10-18): a dev keg mounts the
+                # runtime (omlx) overlays just like the vanilla keg — patching
+                # without a rebuild. dev/both diffs ride the uplift-dev branch
+                # instead; their keg halves would collide with the branch-
+                # baked hunks or carry files the keg does not own.
                 continue
             if not _patches.scope_touches_keg(scope):
                 # dev-scope patches never touch a keg (DEV-context 1): the
@@ -251,14 +273,15 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
                         {"id": patch["id"], "action": "approval_required",
                          "codes": held})
                     continue
-                applied = desired.get("applied") or {}
-                if (state == "applied" and applied.get("keg_id") == keg
+                applied = _patches.keg_record(desired, keg)
+                if (state == "applied" and applied
+                        and applied.get("status") == "applied"
                         and _files_match(tree_root, applied.get("files", []))):
                     # desired is live; still unwind any stale earlier-version
                     # backups so a later disable/remove has a clean chain
                     patch["last_verified"] = {"keg_id": keg,
                                               "at": _patches.now_iso()}
-                    if any((v.get("applied") or {}).get("keg_id") == keg
+                    if any(_patches.keg_record(v, keg)
                            and v.get("v") != desired.get("v")
                            for v in patch.get("versions", [])):
                         _unwind_applied(store, tree_root, keg, patch,
@@ -281,7 +304,7 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
             elif not enabled:
                 applied_v = None
                 for ver in patch.get("versions", []):
-                    if (ver.get("applied") or {}).get("keg_id") == keg:
+                    if _patches.keg_record(ver, keg):
                         applied_v = ver
                         break
                 if applied_v is not None:

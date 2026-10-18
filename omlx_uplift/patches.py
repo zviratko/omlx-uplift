@@ -77,6 +77,61 @@ def scope_touches_dev(scope: str) -> bool:
     return scope in (SCOPE_DEV, SCOPE_BOTH)
 
 
+# --- per-keg apply records (RUNTIME-MOUNT doctrine, 2026-10-18) -----------
+# An omlx-scope (runtime) overlay now mounts into EVERY keg it lands in —
+# vanilla and omlx-dev alike — so one patch version can be live on two
+# trees at the same time. version["kegs"][keg_id] is the per-tree truth;
+# the legacy single-slot version["applied"]/["backup_dir"] stay mirrored
+# from the most recent apply so pre-multi-keg code and stores keep working.
+def keg_record(version: dict, keg: str | None) -> dict | None:
+    """Apply record for ONE tree. Falls back to the legacy stamp when it
+    points at this keg and no map entry exists yet (pre-migration stores)."""
+    if not keg or not version:
+        return None
+    rec = (version.get("kegs") or {}).get(keg)
+    if rec is not None:
+        return rec
+    applied = version.get("applied") or {}
+    if applied.get("keg_id") == keg:
+        return {"status": "applied", "at": applied.get("at"),
+                "files": applied.get("files") or [],
+                "backup_dir": version.get("backup_dir")}
+    return None
+
+
+def set_keg_record(version: dict, keg: str, *, at: str, files: list,
+                   backup_dir: str | None = None,
+                   tree_root: str | None = None,
+                   status: str = "applied") -> None:
+    recs = dict(version.get("kegs") or {})
+    recs[keg] = {"status": status, "at": at, "files": files or [],
+                 "backup_dir": backup_dir, "tree_root": tree_root}
+    version["kegs"] = recs
+    if status == "applied":
+        # legacy mirror (last tree to apply wins) for older readers
+        version["applied"] = {"keg_id": keg, "at": at, "files": files or []}
+        if backup_dir is not None:
+            version["backup_dir"] = backup_dir
+
+
+def clear_keg_record(version: dict, keg: str) -> None:
+    recs = version.get("kegs") or {}
+    recs.pop(keg, None)
+    if (version.get("applied") or {}).get("keg_id") == keg:
+        version.pop("applied", None)
+        version.pop("backup_dir", None)
+
+
+def keg_applied_elsewhere(version: dict, except_keg: str | None = None) -> bool:
+    """True when some tree holds this version applied (map or legacy stamp)."""
+    for k, rec in (version.get("kegs") or {}).items():
+        if k != except_keg and (rec or {}).get("status") == "applied":
+            return True
+    applied = version.get("applied") or {}
+    return (bool(applied.get("keg_id")) and applied.get("keg_id") != except_keg
+            and not (version.get("kegs") or {}))
+
+
 def detect_patch_target(omlx_root: str | None = None) -> str:
     """Which product this process is patching: 'omlx' (vanilla keg) or
     'dev' (running from the omlx-dev keg). Brew layout puts the keg name in
@@ -514,7 +569,7 @@ def prune_versions(manifest: dict, store: PatchStore) -> list[str]:
         keep_ids = {patch.get("desired_version")}
         keep_ids.update(
             v.get("v") for v in versions
-            if (v.get("applied") or {}).get("keg_id")
+            if (v.get("applied") or {}).get("keg_id") or (v.get("kegs") or {})
         )
         kept = versions[:MAX_VERSIONS_PER_PATCH]
         kept_ids = {v.get("v") for v in kept} | {i for i in keep_ids if i is not None}
@@ -534,7 +589,9 @@ def prune_versions(manifest: dict, store: PatchStore) -> list[str]:
                     import shutil
 
                     path = bd if os.path.isabs(bd) else os.path.join(store.base_dir, bd)
-                    shutil.rmtree(path, ignore_errors=True)
+                    # the version is applied on NO tree: sweep every keg's
+                    # backup leaf under backups/<id>.v<N>/
+                    shutil.rmtree(os.path.dirname(path), ignore_errors=True)
         patch["versions"] = sorted(kept_set.values(), key=lambda v: v.get("v", 0))
     return removed
 

@@ -496,7 +496,8 @@ omlx ,
 dev
 or
 .Ic both ) :
-omlx applies the pruned overlay to the vanilla keg only;
+omlx applies the runtime overlay to any board's keg
+(vanilla and omlx-dev alike, no rebuild needed);
 dev materializes the full diff (tests included) on the
 .Em uplift-dev
 branch and never touches a keg;

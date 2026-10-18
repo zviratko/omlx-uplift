@@ -142,14 +142,15 @@ def expected_drift(store, tree_root: str, keg: str | None) -> set[str]:
         manifest = store.load()
     except Exception:
         return paths
+    from . import patches as _patches
     for patch in manifest.get("patches", []):
         if patch.get("state") not in ("applied", "update_available"):
             continue
         for ver in patch.get("versions", []):
-            applied = ver.get("applied") or {}
-            if applied.get("keg_id") != keg:
+            rec = _patches.keg_record(ver, keg)
+            if not rec or rec.get("status") != "applied":
                 continue
-            bd = ver.get("backup_dir")
+            bd = rec.get("backup_dir")
             if not bd:
                 continue
             # same rule as patchsync._abs (kept local: import order)
@@ -202,10 +203,14 @@ def _manifest_fp(store) -> str:
         return "unloadable"
     rows = []
     for patch in manifest.get("patches", []):
-        kegs = sorted((v.get("applied") or {}).get("keg_id", "")
-                      for v in patch.get("versions", []))
+        seen = set()
+        for v in patch.get("versions", []):
+            ap = (v.get("applied") or {}).get("keg_id")
+            if ap:
+                seen.add(ap)
+            seen.update((v.get("kegs") or {}).keys())
         rows.append(f"{patch.get('id')}|{patch.get('state')}"
-                    f"|{patch.get('desired_version')}|{','.join(kegs)}")
+                    f"|{patch.get('desired_version')}|{','.join(sorted(seen))}")
     blob = ";".join(sorted(rows))
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 

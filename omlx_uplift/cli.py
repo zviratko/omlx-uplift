@@ -88,8 +88,9 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
             continue
         # Fast happy path: applied on THIS keg and recorded files still have
         # the applied bytes -> nothing to do, verified.
-        applied = ver.get("applied") or {}
-        if (patch.get("state") == "applied" and applied.get("keg_id") == keg):
+        applied = _patches_mod.keg_record(ver, keg) or {}
+        if (patch.get("state") == "applied"
+                and applied.get("status") == "applied"):
             try:
                 from . import patchsync
                 if patchsync._files_match(tree_root, applied.get("files", [])):
@@ -781,8 +782,10 @@ def cmd_patches(argv=None) -> int:
     ap.add_argument("--file", help="local diff file (upload kind)")
     ap.add_argument("--scope", choices=["omlx", "dev", "both",
                                         "runtime", "build"],
-                    help="patch scope (DEV-6). omlx: pruned overlay on the "
-                         "vanilla keg only. dev: materialized on the "
+                    help="patch scope (DEV-6). omlx: runtime overlay, "
+                         "mounted into any board's keg (vanilla or "
+                         "omlx-dev) without a rebuild. dev: materialized on "
+                         "the "
                          "uplift-dev branch only (full diff, incl. tests), "
                          "gated against a source checkout (--build-root or "
                          "the dev-src clone). both: uplift-dev gets the "

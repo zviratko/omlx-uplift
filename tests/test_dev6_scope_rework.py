@@ -130,36 +130,53 @@ class BothScopeAddTests(unittest.TestCase):
         self.assertEqual(out, [])
 
 
-class DevKegNeverMountsTests(unittest.TestCase):
-    def test_reconcile_skips_everything_on_dev_keg(self):
-        # DEV-6 decision 2: even omlx/both scopes must not overlay a dev keg
+class DevKegRuntimeMountTests(unittest.TestCase):
+    # RUNTIME-MOUNT doctrine (2026-10-18, user ruling): the dev keg mounts
+    # omlx-scope overlays rebuild-free; dev/both still ride the branch.
+    def _setup(self, tmp, scope):
         import hashlib
 
+        store = patches.PatchStore(os.path.join(tmp, "uplift"))
+        diff = (b"diff --git a/omlx/kernels.py b/omlx/kernels.py\n"
+                b"index 3..4 100644\n--- a/omlx/kernels.py\n"
+                b"+++ b/omlx/kernels.py\n@@ -1 +1,2 @@\n import Metal\n"
+                b"+OVERLAID = 1\n")
+        pf = store.patch_file("pk", 1)
+        os.makedirs(os.path.dirname(pf), exist_ok=True)
+        with open(pf, "wb") as fh:
+            fh.write(diff)
+        store.save({"version": 2, "config": {}, "patches": [
+            {"id": "pk", "enabled": True, "scope": scope,
+             "desired_version": 1, "state": "pending",
+             "versions": [{"v": 1, "content_sha256":
+                           hashlib.sha256(diff).hexdigest(),
+                           "patch_file": patches.rel(pf, store.base_dir)}]}]})
+        target = os.path.join(tmp, "site-packages")
+        os.makedirs(os.path.join(target, "omlx"))
+        with open(os.path.join(target, "omlx", "_version.py"), "w") as fh:
+            fh.write('VERSION = "9.9.9"\n')
+        with open(os.path.join(target, "omlx", "kernels.py"), "w") as fh:
+            fh.write("import Metal\n")
+        return store, target
+
+    def test_reconcile_mounts_omlx_scope_on_dev_keg(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = patches.PatchStore(os.path.join(tmp, "uplift"))
-            diff = (b"diff --git a/omlx/kernels.py b/omlx/kernels.py\n"
-                    b"index 3..4 100644\n--- a/omlx/kernels.py\n"
-                    b"+++ b/omlx/kernels.py\n@@ -1 +1,2 @@\n import Metal\n"
-                    b"+OVERLAID = 1\n")
-            pf = store.patch_file("pk", 1)
-            os.makedirs(os.path.dirname(pf), exist_ok=True)
-            with open(pf, "wb") as fh:
-                fh.write(diff)
-            store.save({"version": 2, "config": {}, "patches": [
-                {"id": "pk", "enabled": True, "scope": "omlx",
-                 "desired_version": 1, "state": "pending",
-                 "versions": [{"v": 1, "content_sha256":
-                               hashlib.sha256(diff).hexdigest(),
-                               "patch_file": patches.rel(pf, store.base_dir)}]}]})
-            target = os.path.join(tmp, "site-packages")
-            os.makedirs(os.path.join(target, "omlx"))
-            with open(os.path.join(target, "omlx", "kernels.py"), "w") as fh:
-                fh.write("import Metal\n")
+            store, target = self._setup(tmp, "omlx")
             with unittest.mock.patch.object(patches, "detect_patch_target",
                                             return_value="dev"):
                 patchsync.reconcile(store, target, allow_reexec=False)
-            # the patched source already carries everything: no overlay,
-            # state untouched
+            with open(os.path.join(target, "omlx", "kernels.py")) as fh:
+                self.assertIn("OVERLAID", fh.read())
+            self.assertEqual(store.find(store.load(), "pk")["state"],
+                             "applied")
+
+    def test_reconcile_skips_both_scope_on_dev_keg(self):
+        # the dev build carries the full diff: no overlay mount, no state mix
+        with tempfile.TemporaryDirectory() as tmp:
+            store, target = self._setup(tmp, "both")
+            with unittest.mock.patch.object(patches, "detect_patch_target",
+                                            return_value="dev"):
+                patchsync.reconcile(store, target, allow_reexec=False)
             with open(os.path.join(target, "omlx", "kernels.py")) as fh:
                 self.assertNotIn("OVERLAID", fh.read())
             self.assertEqual(store.find(store.load(), "pk")["state"],
