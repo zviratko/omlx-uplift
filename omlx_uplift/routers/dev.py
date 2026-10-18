@@ -137,7 +137,15 @@ def _dev_status_sync() -> dict:
     clone_ok = os.path.isdir(os.path.join(devsrc.src_path(cfg), ".git"))
     build_patches = patchsource.enabled_build_patches(
         _patches_mod.patch_store())
-    out = devsrc.status(cfg, build_patches if clone_ok else None)
+    # content that a DRIFT report must NOT blame on a hand edit: stored
+    # diffs of patches that left the build set (rescope/disable residue)
+    try:
+        residue_pool = patchsource.build_residue_pool(
+            _patches_mod.patch_store(), build_patches)
+    except Exception:
+        residue_pool = None
+    out = devsrc.status(cfg, build_patches if clone_ok else None,
+                        residue_patches=residue_pool)
     if not clone_ok:
         out["installed"] = False
         out["bootstrap"] = _dev_boot_state()
@@ -150,6 +158,21 @@ def _dev_status_sync() -> dict:
     out["built_sha"] = built
     out["expected_tip"] = exp.get("tip")
     out["stale"] = bool(exp.get("ok")) and built != exp.get("tip")
+    # BUILD-ZONE honesty (mruu report, 2026-10-18): stale is a fact about
+    # shas, not a verdict. Classify by CONTENT so the warning chip lights
+    # only when the enabled patch set is genuinely not in the installed
+    # build — residue from a rescope gets a quiet cleanup hint, and the
+    # base advancing gets only the informational base_stale note.
+    try:
+        out.update(devsrc.classify_build(devsrc.src_path(cfg), built,
+                                         cfg.get("built_base"), exp,
+                                         build_patches, residue_pool))
+    except Exception:
+        out.update({"needs_rebuild": bool(out["stale"]),
+                    "build_ahead": False, "build_state": "classify-error"})
+    out["base_stale"] = bool(built and cfg.get("built_base")
+                             and out.get("base")
+                             and cfg["built_base"] != out.get("base"))
     # DEV-11: AUTO UPDATE — TRACK HEAD. The tip probe is LOCAL-only (rev-parse
     # of the already-fetched sync ref) — the boot hook fetches first, the
     # dashboard poll must never pay for network.

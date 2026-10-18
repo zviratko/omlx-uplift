@@ -667,7 +667,69 @@ def expected_tip(patches_to_apply: list[dict], cfg: dict) -> dict:
 # Status + drift
 # ---------------------------------------------------------------------------
 
-def status(cfg: dict, patches_to_apply: list[dict] | None = None) -> dict:
+def tree_of(path: str, ref: str) -> str | None:
+    """The tree sha behind a commit ref (None for unknown/bad refs)."""
+    if not ref:
+        return None
+    proc = _git(["rev-parse", "--verify", "--quiet", f"{ref}^{{tree}}"],
+                cwd=path, check=False)
+    sha = (proc.stdout or "").strip()
+    return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+
+def classify_build(path: str, built_sha: str | None, built_base: str | None,
+                   exp: dict, patches_to_apply: list[dict],
+                   residue_patches: list[dict] | None = None) -> dict:
+    """BUILD-ZONE chip honesty (mruu report, 2026-10-18): a sha mismatch
+    between the installed build and the replayed expected tip is NOT
+    automatically an alarm. Classify by CONTENT:
+
+      needs_rebuild  enabled patch content is missing from the installed
+                     build, or unexplained (hand) content sits in it —
+                     only this state deserves the warning chip.
+      build_ahead    every enabled patch is fully present and the build
+                     merely carries RESIDUE from patches that left the
+                     build set (a rescope/disable). Pressing Build drops
+                     the leftovers; nothing is missing. Quiet hint, no
+                     warning.
+      neither        content-current — a sha gap caused by the base
+                     advancing alone (base_stale covers it informationally).
+
+    A failed replay (exp.ok False) changes nothing here: the build-time
+    ladder/failure path reports that honestly when Build is pressed."""
+    if not exp.get("ok"):
+        return {"needs_rebuild": False, "build_ahead": False,
+                "build_state": "replay-failed"}
+    if not built_sha:
+        return {"needs_rebuild": True, "build_ahead": False,
+                "build_state": "never-built"}
+    bt = tree_of(path, built_sha)
+    et = tree_of(path, exp.get("tip") or "")
+    if bt and et and bt == et:
+        return {"needs_rebuild": False, "build_ahead": False,
+                "build_state": "current"}
+    if not built_base:
+        # unknown built base: stay strict on the sha (pre-BUILD-ZONE cfg)
+        return {"needs_rebuild": built_sha != exp.get("tip"),
+                "build_ahead": False, "build_state": "unknown-base"}
+    verdict = drift_check(path, built_base, built_sha,
+                          patches_to_apply, residue_patches)
+    if not verdict.get("complete"):
+        return {"needs_rebuild": True, "build_ahead": False,
+                "build_state": "missing-content"}
+    if verdict.get("hand"):
+        return {"needs_rebuild": True, "build_ahead": False,
+                "build_state": "hand-content"}
+    if verdict.get("residue"):
+        return {"needs_rebuild": False, "build_ahead": True,
+                "build_state": "ahead"}
+    # trees differ but no patch-relevant content moved: base advanced
+    return {"needs_rebuild": False, "build_ahead": False,
+            "build_state": "base-moved"}
+
+
+def status(cfg: dict, patches_to_apply: list[dict] | None = None,
+           residue_patches: list[dict] | None = None) -> dict:
     """Branch, tip, ahead/behind vs sync_ref, patch-commit list, and (when
     a patch set is given) materialization drift: someone committed to
     uplift-dev by hand, or the branch no longer matches the enabled set."""
@@ -691,7 +753,8 @@ def status(cfg: dict, patches_to_apply: list[dict] | None = None) -> dict:
                                  cwd=path).stdout.strip() or 0)
         out["patch_commits"] = _patch_commits(path, base_sha, tip)
     if patches_to_apply is not None and tip and base_sha:
-        out["drift"] = drift_check(path, base_sha, tip, patches_to_apply)
+        out["drift"] = drift_check(path, base_sha, tip, patches_to_apply,
+                                   residue_patches)
     return out
 
 
@@ -741,7 +804,8 @@ def _patch_in_base(path: str, cut: str, files: list[dict]) -> bool:
 
 
 def drift_check(path: str, base_sha: str, tip: str,
-                patches_to_apply: list[dict]) -> dict:
+                patches_to_apply: list[dict],
+                residue_patches: list[dict] | None = None) -> dict:
     """Compare the branch content (base..tip) against the expected patch
     set. Content-level, so commit-date noise never false-alarms: a file or
     added-line the patches do not account for -> drift.
@@ -757,7 +821,16 @@ def drift_check(path: str, base_sha: str, tip: str,
     A patch whose ADDED lines already exist in the cut base is also excluded
     from the expectation: materialize commits nothing for it (an upstream-
     merged patch lands as skipped/already-present), so expecting its lines
-    on the branch would false-alarm 'expected content missing'."""
+    on the branch would false-alarm 'expected content missing'.
+
+    BUILD-ZONE honesty (mruu report, 2026-10-18): residue_patches are the
+    stored diffs of patches NOT in the enabled build set (disabled, retired,
+    or rescoped away — e.g. a curated 'both' patch that became runtime).
+    Extra content they explain is RESIDUE: the next Build drops it, nothing
+    is broken, so it must not light the DRIFT 'edited by hand?' warning.
+    Only unexplained extras are hand content -> real drift. The structured
+    lists (missing/changed/extra/residue/hand/complete) drive the
+    needs_rebuild vs build_ahead classification in classify_build()."""
     from . import diffapply
 
     cut = _merge_base(base_sha, tip, path) or base_sha
@@ -766,33 +839,65 @@ def drift_check(path: str, base_sha: str, tip: str,
     for p in patches_to_apply:
         ep = diffapply.parse_diff(p["diff_bytes"])
         if not ep["ok"]:
-            return {"drift": True, "detail": f"stored diff of {p['id']} is "
-                                             "unparseable"}
+            return {"drift": True, "complete": False,
+                    "detail": f"stored diff of {p['id']} is "
+                             "unparseable"}
         if _patch_in_base(path, cut, ep["files"]):
             continue
         for fp in ep["files"]:
             expected.setdefault(fp["path"], set()).update(_added_lines(fp))
+    vocab: dict[str, set[str]] = {}
+    for rp in residue_patches or []:
+        try:
+            ep = diffapply.parse_diff(rp.get("diff_bytes") or b"")
+        except Exception:
+            continue
+        if not ep.get("ok"):
+            continue
+        for fp in ep["files"]:
+            vocab.setdefault(fp["path"], set()).update(_added_lines(fp))
     actual = diffapply.parse_diff(diff) if diff.strip() else {"ok": True, "files": []}
     if not actual.get("ok"):
-        return {"drift": True, "detail": f"branch diff unparseable: {actual.get('reason')}"}
+        return {"drift": True, "complete": False,
+                "detail": f"branch diff unparseable: {actual.get('reason')}"}
     actual_map = {fp["path"]: set(_added_lines(fp)) for fp in actual["files"]}
     missing = sorted(set(expected) - set(actual_map))
     changed = sorted(p for p in set(expected) & set(actual_map)
                      if expected[p] - actual_map[p])
     extra = sorted(p for p in set(actual_map) - set(expected))
     # an unpatch commit that only DELETES adds no lines -> catch via paths too
-    drift = bool(missing or changed or extra)
+    residue, hand = [], []
+    for p in extra:
+        (hand if actual_map[p] - vocab.get(p, set()) else residue).append(p)
+    # SURPLUS lines on paths an enabled patch also touches: residue from a
+    # rescoped patch sharing files with an enabled one must not hide behind
+    # the per-path expectation (mruu shape), and anything on those files
+    # explained by neither is hand content.
+    for p in set(expected) & set(actual_map):
+        beyond = actual_map[p] - expected[p]
+        if not beyond:
+            continue
+        (hand if beyond - vocab.get(p, set()) else residue).append(p)
+    residue.sort()
+    hand.sort()
+    drift = bool(missing or changed or hand)
+    complete = not missing and not changed
     detail = []
     if missing:
-        detail.append("expected content missing from branch: "
+        detail.append("enabled patch content missing from branch: "
                       + ", ".join(missing[:5]))
     if changed:
         detail.append("branch content differs from stored patches: "
                       + ", ".join(changed[:5]))
-    if extra:
+    if hand:
         detail.append("touched outside the patch set (hand commit?): "
-                      + ", ".join(extra[:5]))
-    return {"drift": drift, "detail": "; ".join(detail) or "clean"}
+                      + ", ".join(hand[:5]))
+    if residue:
+        detail.append("still carries retired patch content (next Build "
+                      "drops it): " + ", ".join(residue[:5]))
+    return {"drift": drift, "complete": complete, "detail": "; ".join(detail) or "clean",
+            "missing": missing, "changed": changed, "extra": extra,
+            "residue": residue, "hand": hand}
 
 
 def _added_lines(filepatch: dict) -> set[str]:

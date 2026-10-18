@@ -171,7 +171,14 @@ def list_remote(fetch=None) -> dict:
             continue
         for e in r["entries"]:
             meta = _fetch_manifest(e, fetch)
-            e["description"] = str(meta.get("description") or "")[:300]
+            d = str(meta.get("description") or "").strip()
+            if len(d) > 300:
+                # word-boundary cut — a description ending "...fed a repetiti"
+                # reads as corruption (mruu store, 2026-10-18)
+                cut = d[:300]
+                sp = cut.rfind(" ")
+                d = (cut[:sp] if sp > 200 else cut).rstrip(" ,;:") + "…"
+            e["description"] = d
             e["reversal"] = bool(meta.get("reversal"))
             e["scope"] = meta.get("scope")
             src = _entry_source(dict(meta, tier=tier, name=e["name"]))

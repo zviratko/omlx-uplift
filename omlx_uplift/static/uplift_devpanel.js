@@ -128,14 +128,34 @@ function renderDev() {
             .replace('{ref}', d.sync_ref || '').replace('{n}', d.behind));
     bits.push(ptMsg('uplift.patches.dev_built', 'installed build: {s}')
         .replace('{s}', dvSha(d.built_sha)));
+    if (d.base_stale)
+        // base currency is an INFO line under the build status, not a
+        // patch warning: the patches did not drift, omlx-dev just is not
+        // built from the newest fetched sources yet (user 2026-10-18).
+        bits.push(ptMsg('uplift.patches.dev_base_stale',
+            'built from older sources — next Build/upgrade refreshes them'));
     statusEl.hidden = false;
     statusEl.textContent = bits.join(' · ');
 
-    if (d.stale)
-        state.append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
-            'NEEDS REBUILD'), 'pt-st-warn',
-            ptMsg('uplift.patches.dev_stale_hint',
-                'the installed omlx-dev build no longer matches the enabled patches — press Build')));
+    if (d.stale) {
+        // BUILD-ZONE honesty (mruu report, 2026-10-18): a sha gap is not a
+        // verdict. The server classifies by CONTENT — warn only when the
+        // enabled patches are genuinely NOT in the installed build; a
+        // build that merely carries retired-patch residue gets a quiet
+        // cleanup hint (nothing is missing, the next Build tidies up).
+        const warn = d.needs_rebuild === undefined ? true : d.needs_rebuild;
+        if (warn) {
+            state.append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
+                'NEEDS REBUILD'), 'pt-st-warn',
+                ptMsg('uplift.patches.dev_stale_hint',
+                    'the installed omlx-dev build no longer matches the enabled patches — press Build')));
+        } else if (d.build_ahead) {
+            state.append(ptChip(ptMsg('uplift.patches.dev_cleanup_build',
+                'OLD CONTENT'), 'pt-st-dim',
+                ptMsg('uplift.patches.dev_cleanup_build_hint',
+                    'the build still carries patch content that left the build set — press Build to drop it (nothing is missing)')));
+        }
+    }
     if (d.restart_needed)
         state.append(ptChip(ptMsg('uplift.patches.dev_restart_needed',
             'RESTART NEEDED'), 'pt-st-warn',

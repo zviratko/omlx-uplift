@@ -1241,7 +1241,9 @@ def cmd_dev(argv=None) -> int:
             except devsrc.DevsrcError as exc:
                 print(f"fetch failed: {exc}", file=sys.stderr)
         out = devsrc.status(cfg, patchsource.enabled_build_patches(
-            _patches_store()))
+            _patches_store()), residue_patches=patchsource.build_residue_pool(
+            _patches_store(), patchsource.enabled_build_patches(
+                _patches_store(), with_bytes=False)))
         print(_json.dumps(out, indent=2))
         return 0
 

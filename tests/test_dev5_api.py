@@ -41,7 +41,7 @@ def test_status_not_installed_when_clone_missing(tmp_path, monkeypatch):
     # status() itself would inspect the real clone — prove the router's own
     # clone-missing guard overrides whatever status() reports
     monkeypatch.setattr(devsrc, "status",
-                        lambda c, p: {"installed": True, "branch": "x"})
+                        lambda c, p, **kw: {"installed": True, "branch": "x"})
     st = dev_mod._dev_status_sync()
     assert st["installed"] is False
 
@@ -86,9 +86,10 @@ def test_status_stale_flag_matches_expected_tip(tmp_path, monkeypatch):
     monkeypatch.setattr(devsrc, "src_path", lambda c: str(tmp_path / "nope"))
     (tmp_path / "nope" / ".git").mkdir(parents=True)
     monkeypatch.setattr(devsrc, "status",
-                        lambda c, p: {"installed": True, "branch": "uplift-dev",
-                                      "tip": "c" * 40, "drift": {"drift": False},
-                                      "ahead": 0, "behind": 0})
+                        lambda c, p, residue_patches=None:
+                        {"installed": True, "branch": "uplift-dev",
+                         "tip": "c" * 40, "drift": {"drift": False},
+                         "ahead": 0, "behind": 0})
     monkeypatch.setattr(devsrc, "expected_tip",
                         lambda p, c: {"ok": True, "tip": "c" * 40})
     monkeypatch.setattr(devsrc, "runtime_config",
@@ -105,6 +106,12 @@ def test_status_stale_flag_matches_expected_tip(tmp_path, monkeypatch):
     assert st["stale"] is True
     assert st["expected_tip"] == "c" * 40
     assert st["port"] == 8001 and st["vanilla_port"] == 8000
+    # BUILD-ZONE honesty fields exist even when the classify probe cannot
+    # run (fake src path -> no git repo -> unknown built base -> strict
+    # sha verdict, so the warning still lights — fail-safe, never silent)
+    assert st["needs_rebuild"] is True
+    assert st["build_ahead"] is False
+    assert st["base_stale"] is False
 
 
 # --------------------------------------------------------------------------

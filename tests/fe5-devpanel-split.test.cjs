@@ -61,3 +61,16 @@ test('panel absent => patches page still boots (graceful seam, vm)', () => {
     // and the old accessor resolves to undefined, not a crash
     assert.equal(vm.runInContext('typeof window.Uplift.patches.pollDev', sb), 'undefined');
 });
+
+/* BUILD-ZONE honesty (mruu report, 2026-10-18): the warning chip follows
+   the server's CONTENT verdict (needs_rebuild), retired-patch residue
+   gets the quiet OLD CONTENT hint (build_ahead), and base movement is a
+   status-line note (base_stale) — never a patch-zone alarm. */
+test('devpanel chips read the content classification, not the raw stale sha gap', () => {
+    for (const sym of ['needs_rebuild', 'build_ahead', 'base_stale',
+                       'dev_cleanup_build'])
+        assert.ok(devpanel.includes(sym), `devpanel missing ${sym}`);
+    // stale alone must not directly light the warning chip anymore
+    assert.ok(!/if \(d\.stale\)\s*\n?\s*state\.append\(ptChip\(ptMsg\('uplift\.patches\.dev_needs_rebuild'/.test(devpanel),
+        'warning chip still keyed on the raw stale sha fact');
+});

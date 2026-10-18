@@ -221,6 +221,62 @@ class DevsrcFixture(unittest.TestCase):
         self.assertTrue(st["drift"]["drift"], st["drift"])
         self.assertIn("hand.py", st["drift"]["detail"])
 
+    def test_rescoped_patch_content_is_residue_not_drift(self):
+        # BUILD-ZONE honesty (mruu, 2026-10-18): a patch that LEFT the build
+        # set (narrowed to runtime by curated sync) keeps its materialized
+        # commit until the next build. Its content is residue — the next
+        # Build drops it — and must never be blamed on a hand edit. The
+        # residue pool explains it; without the pool the strict old verdict
+        # stays (fail-safe: unknown extras remain drift).
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        both = [{"id": "p-one", "version": 1,
+                 "diff_bytes": self._patch_diff("one")},
+                {"id": "p-two", "version": 1,
+                 "diff_bytes": self._patch_diff("two")}]
+        devsrc.materialize(both, self.cfg)
+        enabled = [both[0]]            # p-two left the build set
+        st = devsrc.status(self.cfg, enabled, residue_patches=[both[1]])
+        self.assertFalse(st["drift"]["drift"], st["drift"])
+        self.assertTrue(st["drift"]["complete"])
+        self.assertEqual(sorted(st["drift"]["residue"]),
+                         ["omlx/custom_kernels/k/csrc/k.mm", "omlx/k.py"])
+        self.assertIn("retired patch content", st["drift"]["detail"])
+        st2 = devsrc.status(self.cfg, enabled)   # no pool -> strict drift
+        self.assertTrue(st2["drift"]["drift"])
+        self.assertIn("hand commit?", st2["drift"]["detail"])
+
+    def test_classify_build_ahead_vs_rebuild_vs_current(self):
+        # stale is a sha fact; the CHIP verdict needs content classification
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        src = devsrc.src_path(self.cfg)
+        one = [{"id": "p-one", "version": 1,
+                "diff_bytes": self._patch_diff("one")}]
+        both = one + [{"id": "p-two", "version": 1,
+                       "diff_bytes": self._patch_diff("two")}]
+        m_one = devsrc.materialize(one, self.cfg)
+        m_both = devsrc.materialize(both, self.cfg)
+        exp_both = devsrc.expected_tip(both, self.cfg)
+        # build == what the enabled set wants -> current, no warning
+        r = devsrc.classify_build(src, m_both["tip"], m_both["base"],
+                                  exp_both, both)
+        self.assertEqual(r["build_state"], "current")
+        self.assertFalse(r["needs_rebuild"])
+        # build carries p-two but the enabled set is only p-one -> AHEAD
+        # (residue): nothing missing, quiet cleanup, no warning chip
+        exp_one = devsrc.expected_tip(one, self.cfg)
+        r2 = devsrc.classify_build(src, m_both["tip"], m_both["base"],
+                                   exp_one, one, residue_patches=[both[1]])
+        self.assertEqual(r2["build_state"], "ahead")
+        self.assertFalse(r2["needs_rebuild"])
+        self.assertTrue(r2["build_ahead"])
+        # enabled set grew beyond the installed build -> genuine rebuild
+        r3 = devsrc.classify_build(src, m_one["tip"], m_one["base"],
+                                   exp_both, both)
+        self.assertEqual(r3["build_state"], "missing-content")
+        self.assertTrue(r3["needs_rebuild"])
+
     def test_stale_patch_version_flags_drift(self):
         devsrc.ensure_clone(self.cfg)
         devsrc.fetch_sync_ref(self.cfg)

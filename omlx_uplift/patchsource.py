@@ -846,8 +846,8 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         if not _patches.scope_touches_keg(scope) and target != "dev":
             # dev-scope patches are inert on a vanilla keg by design
             # (DEV-context 1): the dev-src materializer owns them
-            inactive_reason = ("dev scope — materialized on the omlx-dev "
-                               "branch, never applied to the keg")
+            inactive_reason = ("dev scope — applied to the omlx-dev build "
+                               "sources, not to the running server")
         if target == "dev" and _patches.scope_touches_dev(scope):
             active = bool(p.get("enabled")) and p.get("state") == "applied"
         else:
@@ -1672,6 +1672,30 @@ def enabled_build_patches(store, with_bytes: bool = True) -> list[dict]:
             continue
         out.append({"id": p.get("id"), "version": ver.get("v", 0),
                     "diff_bytes": data})
+    return out
+
+
+def build_residue_pool(store, enabled: list[dict]) -> list[dict]:
+    """Stored diffs that EXPLAIN build/branch content without it being a
+    hand edit: every patch's desired-version bytes NOT in the enabled
+    build set — disabled, retired, or rescoped away (BUILD-ZONE honesty,
+    mruu report 2026-10-18: a curated 'both' patch narrowed to runtime
+    keeps its old materialized commit on the branch until the next
+    build; that residue must not light the DRIFT warning)."""
+    excl = {(p.get("id"), p.get("version")) for p in enabled}
+    manifest = store.load()
+    out: list[dict] = []
+    for p in manifest.get("patches", []):
+        ver = _desired_version_entry(store, p)
+        if ver is None:
+            continue
+        key = (p.get("id"), ver.get("v", 0))
+        if key in excl:
+            continue
+        data = _read_patch_file(store, ver)
+        if data is not None:
+            out.append({"id": p.get("id"), "version": key[1],
+                        "diff_bytes": data})
     return out
 
 
