@@ -279,9 +279,11 @@ function patchCard(p, view) {
             'pt-st-warn', p.state_detail || ''));
     }
     if (p.keg_changed && p.enabled)
-        head.append(ptChip(ptMsg('uplift.patches.keg_changed', 'KEG CHANGED'), 'pt-st-warn',
+        head.append(ptChip(ptMsg('uplift.patches.keg_changed', 'NEEDS RE-APPLY'), 'pt-st-warn',
             ptMsg('uplift.patches.keg_changed_hint',
-                  'vanilla omlx was upgraded — the patch re-validates on next start')));
+                  'omlx was updated or reinstalled — this patch is enabled but ' +
+                  'NOT in the running code. Restart the omlx server; the patch ' +
+                  're-checks and re-applies at start.')));
     if (p.state_detail) {
         const det = document.createElement('span');
         det.className = 'pt-detail';
