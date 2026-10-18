@@ -722,18 +722,70 @@ test('VOICE-13: conversation switch closes the socket and clears the chip', asyn
     assert.equal(h.sockets.length, 1, 'no ghost reopen after teardown');
 });
 
-test('VOICE-13: the mic button toggles the listener off and commits what was heard', async () => {
+test('VOICE-13: the mic button toggles off through a FLUSH, then commits', async () => {
     const h = await makeHarness({ localStorage: Object.assign({}, CONT) }).booted();
     const ws = await h.listen();
     ws.open(); ws.ready();
     ws.delta('one more line');
-    h.mic().dispatch('click');           // toggleMic -> listener stop (commit)
+    h.mic().dispatch('click');           // toggleMic -> listener stop (flush-first)
+    assert.ok(ws.count({ type: 'stop' }) === 1,
+              'stop rides the LIVE socket so the server flushes the tail');
+    assert.equal(h.sockets.length, 1, 'the socket survives just for the flush');
+    assert.equal(h.probe().phase, 'finishing', 'the session rides its flush');
+    ws.done('one more line');            // the server's flush answer
     assert.equal(h.probe(), null);
     assert.equal(ws.closed, true);
     assert.ok(h.textInput.textContent.includes('one more line'),
               'a deliberate stop keeps the words the user already saw');
     h.advance(60000);
     assert.equal(h.sockets.length, 1, 'and nothing reopens behind it');
+});
+
+test('VOICE-14 stop-flush: toggling off mid-utterance keeps the tail (mruu report)', async () => {
+    // A whole-buffer backend commits ONLY after a pause. The user stops
+    // before any pause ever happened: the OLD client halted the socket here
+    // and the just-spoken sentence vanished. Now: stop frame -> server
+    // close_sync answers -> deliver -> tear down.
+    const h = await makeHarness({ localStorage: Object.assign({}, CONT) }).booted();
+    const ws = await h.listen();
+    ws.open(); ws.ready();
+    h.say(2, 0.2);                       // speech, no pause: nothing committed yet
+    assert.equal(h.probe().text, '', 'no delta before the server endpoint');
+    h.mic().dispatch('click');
+    assert.equal(ws.count({ type: 'stop' }), 1);
+    ws.done('the tail survives');        // close_sync flush over the live socket
+    await h.flush();
+    assert.equal(h.probe(), null);
+    assert.ok(h.textInput.textContent.includes('the tail survives'),
+              'the flush result lands through the single sink');
+});
+
+test('VOICE-14 stop-flush: a dead server cannot strand the listener', async () => {
+    const h = await makeHarness({ localStorage: Object.assign({}, CONT) }).booted();
+    const ws = await h.listen();
+    ws.open(); ws.ready();
+    ws.delta('heard so far');
+    h.mic().dispatch('click');           // stop sent...
+    ws.drop();                           // ...but the answer never comes
+    assert.equal(h.probe(), null, 'the socket dying mid-flush still tears down');
+    assert.ok(h.textInput.textContent.includes('heard so far'),
+              'committed deltas survive a flush that dies');
+    h.advance(60000);
+    assert.equal(h.sockets.length, 1, 'no ghost reopen');
+});
+
+test('VOICE-14: whole-buffer models ride the cap, never the 6 s restart ladder', async () => {
+    const h = await makeHarness({ localStorage: Object.assign({}, CONT,
+        { 'omlx-uplift-stt-model': 'mlx-community/Qwen3-ASR-0.6B-6bit' }) }).booted();
+    const ws = await h.listen();
+    ws.open(); ws.ready();
+    h.say(8, 0.2);                       // 8 s voiced, zero deltas: tiny would restart
+    assert.equal(h.sockets.length, 1, 'no stuck-restart against a whole-buffer backend');
+    assert.equal(h.probe().restarts, 0);
+    h.say(2, 0);                         // the speaker pauses: server will commit
+    ws.delta('after the pause');         // ...and does
+    h.say(2, 0);                         // 1.2 s silence after a delta -> endpoint
+    assert.equal(ws.count({ type: 'stop' }), 1, 'normal endpointing still works');
 });
 
 test('VOICE-13: page unload closes the socket', async () => {

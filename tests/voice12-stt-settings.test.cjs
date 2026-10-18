@@ -339,7 +339,8 @@ test('VOICE-12: settings popover rows persist and dismiss (dropMenu contract)', 
         'Auto + the fixed whisper code list');
     assert.ok(String(ls.parentElement.children[0].title)
               .includes('LANGHINT'), 'language quality hint on the row label');
-    assert.equal(h.byId['chat-native-stt-autosend'].checked, false, 'auto-send OFF by default');
+    assert.ok(!Object.prototype.hasOwnProperty.call(h.byId, 'chat-native-stt-autosend'),
+              'the Auto-send control is GONE — spoken means sent (user 2026-10-18)');
     // choosing a model persists + flips the mic gate live
     ms.value = STT_ID; ms.dispatch('change');
     assert.equal(h.store['omlx-uplift-stt-model'], STT_ID, 'key omlx-uplift-stt-model');
@@ -354,14 +355,15 @@ test('VOICE-12: settings popover rows persist and dismiss (dropMenu contract)', 
     h.flushTimers();
     h.win.document.__fire('click');
     assert.equal(h.stt().popen, false, 'outside click closed');
-    // language + mode + autosend persistence through their controls
+    // language + mode persistence through their controls
     h.byId['chat-native-stt'].dispatch('click');
     h.byId['chat-native-stt-lang'].value = 'cs';
     h.byId['chat-native-stt-lang'].dispatch('change');
     assert.equal(h.store['omlx-uplift-stt-lang'], 'cs', 'key omlx-uplift-stt-lang');
-    const as = h.byId['chat-native-stt-autosend'];
-    as.checked = true; as.dispatch('change');
-    assert.equal(h.store['omlx-uplift-stt-autosend'], '1', 'key omlx-uplift-stt-autosend');
+    // a stale localStorage key (pre-removal profile) is IGNORED: settings()
+    // still reports autosend true — delivery always goes to the model
+    h.store['omlx-uplift-stt-autosend'] = '0';
+    assert.equal(h.stt().autosend, true, 'spoken = sent regardless of old keys');
     // mode radios: find the one whose value is 'continuous' by walking the pop
     let radio = null;
     (function walk(e) { if (e.type === 'radio' && e.value === 'continuous') radio = e;
