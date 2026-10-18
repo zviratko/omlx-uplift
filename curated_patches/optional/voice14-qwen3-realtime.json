@@ -1,0 +1,7 @@
+{
+  "description": "Serve Qwen3-ASR over the realtime transcription WebSocket: server-side per-utterance endpointing + one whole-buffer generate() per closed utterance (measured ~1 s commits, text identical to the file endpoint); also replaces the whisper catch-all dispatch with an explicit check + honest refuse. Reference implementation of the UP-11 escalation, measured on the kocour dev board (VOICE-14). Gates strict against omlx engine/stt.py at the 165be1ff era — older/newer bases refuse honestly and await a rebased version.",
+  "source": {
+    "kind": "file"
+  },
+  "scope": "omlx"
+}
