@@ -305,12 +305,12 @@ class CuratedSyncTests(unittest.TestCase):
         ids = [x["id"] for x in self.store.load()["patches"]]
         self.assertEqual(ids.count("live-apply"), 1)
 
-    def test_rescope_narrows_stale_both_back_to_omlx(self):
-        # the mruu stuck shape (RUNTIME-MOUNT doctrine): the catalog
-        # flipped its mind and declared the patch runtime-only again —
-        # sync follows the catalog's scope in BOTH directions for
-        # catalog-owned entries. Enabled flag, store id and the single
-        # copy all survive the rescope.
+    def test_catalog_never_demotes_from_the_build(self):
+        # USER VETO 2026-10-18 (mruu): I narrowed ctx-probe/voice14
+        # both->omlx in the catalog and their next dev upgrade dropped them
+        # from the build without a word. Rule now pinned by code: sync may
+        # widen toward the build, a declared-narrower catalog NEVER shrinks
+        # a catalog-owned entry's scope. Leaving the build is a user action.
         br = self._build_root()
         curated.sync(self.store, self.root, fetch=make_fetch(
                          self._files_scope_both()),
@@ -320,16 +320,13 @@ class CuratedSyncTests(unittest.TestCase):
         r = curated.sync(self.store, self.root, fetch=make_fetch(FILES),
                          build_root=br)
         p = self.store.find(self.store.load(), "live-apply")
-        self.assertEqual(patches.patch_scope(p), "omlx")
+        self.assertEqual(patches.patch_scope(p), "both",
+                         "sync demoted a build-scope patch to runtime")
         self.assertTrue(p["enabled"])
-        self.assertEqual(r["report"]["live-apply"]["sync"], "added_enabled")
+        self.assertEqual(r["report"]["live-apply"]["sync"], "already_present")
+        # no re-materialize churn either
         ids = [x["id"] for x in self.store.load()["patches"]]
         self.assertEqual(ids.count("live-apply"), 1)
-        # converges: a second sync changes nothing (no churn)
-        r2 = curated.sync(self.store, self.root, fetch=make_fetch(FILES),
-                          build_root=br)
-        self.assertEqual(r2["report"]["live-apply"]["sync"],
-                         "already_present")
 
     def test_narrow_never_touches_adopted_or_user_scopes(self):
         # an adopted patch left the catalog's scope decisions to the

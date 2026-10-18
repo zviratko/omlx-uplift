@@ -238,18 +238,23 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                     if not p.get("description") and e.get("description"):
                         p["description"] = e["description"]
                     store.save(manifest)
-                # scope migration — the catalog's declared scope is the
-                # TRUTH and sync follows it in BOTH directions (RUNTIME-
-                # MOUNT doctrine 2026-10-18: runtime overlays mount every
-                # keg, so 'both' is reserved for diffs the keg cannot
-                # carry; a curated patch narrowed back to 'omlx' must
-                # rescope too — the mruu stuck-both case). Scope is fixed
-                # per patch inside patchsource (stored bytes differ:
-                # omlx keeps the pruned diff, both stores the FULL diff),
-                # so a rescope re-materializes: remove restores vanilla
-                # bytes NOW, the re-add gates the catalog bytes and
-                # reconcile re-applies at next boot. Never touch a scope
-                # on a patch the user adopted.
+                # scope migration — sync follows the catalog ONLY TOWARD
+                # THE BUILD (user veto 2026-10-18, same day as PATCH-ZONES:
+                # I narrowed ctx-probe + voice14 both->omlx because "runtime
+                # overlays mount every keg now, both is unnecessary" and
+                # their next dev upgrade silently dropped them from the
+                # build — "I expect all patches that I scoped for omlx-dev
+                # build to be applied there, not to end up in runtime just
+                # because they can"). Rule: the catalog may WIDEN omlx->both
+                # (more of the user's patch lands in the build), never
+                # narrow. Removing a patch from the build is a user
+                # decision (scope picker / disable / adopt), not a sync
+                # side effect. Scope is fixed per patch inside patchsource
+                # (stored bytes differ: omlx keeps the pruned diff, both
+                # stores the FULL diff), so a widen re-materializes:
+                # remove restores vanilla bytes NOW, the re-add gates the
+                # catalog bytes and reconcile re-applies at next boot.
+                # Never touch a scope on a patch the user adopted.
                 cur = patches.patch_scope(p)
                 was_enabled = bool(p.get("enabled"))
                 owned = (p.get("curated") and not p.get("curated_adopted"))
@@ -265,11 +270,7 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                          and build_root
                          and p.get("both_refused_v")
                          != p.get("desired_version"))
-                # narrowing is safe on any machine and converges after one
-                # pass (cur becomes omlx, the condition goes false)
-                narrow = (owned and want == patches.SCOPE_OMLX
-                          and cur == patches.SCOPE_BOTH)
-                if widen or narrow:
+                if widen:
                     res = patchsource.remove_patch(store, p["id"], tree_root)
                     if not res.get("ok"):
                         report[pid] = {"sync": "already_present",
