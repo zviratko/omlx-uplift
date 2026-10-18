@@ -375,9 +375,12 @@ def _commit_message(pid: str, v: int) -> str:
             f"{ATTRIBUTION_LINE}\n")
 
 
-def _apply_one(path: str, pid: str, v: int, diff_bytes: bytes) -> None:
+def _apply_one(path: str, pid: str, v: int, diff_bytes: bytes) -> dict:
     """Apply one stored diff into the worktree (strict). Raises on failure;
-    a throwaway backup dir keeps diffapply happy — git owns the originals."""
+    a throwaway backup dir keeps diffapply happy — git owns the originals.
+    PROCESS-LOG-1: returns diffapply's result so materialize can record HOW
+    the patch landed (files touched) — 'applied' with no evidence was the
+    same blind spot as the keg-side log had."""
     from . import diffapply
 
     tmp = tempfile.mkdtemp(prefix="uplift-devsrc-bak-")
@@ -392,6 +395,7 @@ def _apply_one(path: str, pid: str, v: int, diff_bytes: bytes) -> None:
         detail = "; ".join(f"{f['path']}" for f in fails[:5]) or res.get("reason")
         raise DevsrcError(f"build patch {pid} v{v} does not apply onto the "
                           f"sync base: {detail}")
+    return res
 
 
 def base_distance(repo: str, a: str | None, b: str | None) -> int | None:
@@ -485,8 +489,8 @@ def _apply_with_ladder(path, store, pid, wanted_v, wanted_bytes, base_sha,
     first), so each trial starts from the same clean tree."""
     tried = [wanted_v]
     try:
-        _apply_one(path, pid, wanted_v, wanted_bytes)
-        return wanted_v, wanted_bytes, None, tried
+        ares = _apply_one(path, pid, wanted_v, wanted_bytes)
+        return wanted_v, wanted_bytes, None, tried, ares
     except DevsrcError as exc:
         first_exc = exc
     for a in _alternate_versions(store, pid, wanted_v, base_sha, path):
@@ -494,7 +498,7 @@ def _apply_with_ladder(path, store, pid, wanted_v, wanted_bytes, base_sha,
             continue
         tried.append(a["v"])
         try:
-            _apply_one(path, pid, a["v"], a["diff_bytes"])
+            ares = _apply_one(path, pid, a["v"], a["diff_bytes"])
         except DevsrcError:
             _log.warning("devsrc: %s v%s also fails onto base %s",
                          pid, a["v"], base_sha[:12])
@@ -505,7 +509,7 @@ def _apply_with_ladder(path, store, pid, wanted_v, wanted_bytes, base_sha,
             (a.get("tested_base") or "?")[:12],
             "" if a.get("distance") is None
             else f", {a['distance']} commits away")
-        return a["v"], a["diff_bytes"], wanted_v, tried
+        return a["v"], a["diff_bytes"], wanted_v, tried, ares
     # ladder exhausted: ask the human (CLI only), else abort the pass
     decision = None
     if on_patch_failure:
@@ -571,19 +575,21 @@ def materialize(patches_to_apply: list[dict], cfg: dict,
             pid, v = p["id"], p.get("version", 0)
             failed_pid = pid
             try:
-                v, diff_bytes, fallback_from, tried = _apply_with_ladder(
+                v, diff_bytes, fallback_from, tried, ares = _apply_with_ladder(
                     path, store, pid, v, p["diff_bytes"], base_sha,
                     on_patch_failure)
             except _PatchSkip as sk:
                 skipped.append(sk.record)
                 continue           # resolver said 'skip this build'
+            nfiles = len(ares.get("files") or [])
             _git(["add", "-A"], cwd=path)
             if _git(["diff", "--cached", "--quiet"], cwd=path,
                     check=False).returncode == 0:
                 _log.info("devsrc: patch %s already present on base — no commit",
                           pid)
                 commits.append({"id": pid, "v": v, "sha": None,
-                                "skipped": "already-present"})
+                                "skipped": "already-present",
+                                "files": nfiles})
                 continue
             env = dict(os.environ, GIT_AUTHOR_DATE="946684800 +0000",
                        GIT_COMMITTER_DATE="946684800 +0000")
@@ -595,7 +601,7 @@ def materialize(patches_to_apply: list[dict], cfg: dict,
             if proc.returncode != 0:
                 raise DevsrcError(f"git commit failed: "
                                   f"{proc.stderr.strip() or proc.stdout}")
-            c = {"id": pid, "v": v,
+            c = {"id": pid, "v": v, "files": nfiles,
                  "sha": _git(["rev-parse", "HEAD"], cwd=path).stdout.strip()}
             if fallback_from is not None:
                 c["fallback_from"] = fallback_from
@@ -1122,15 +1128,45 @@ class BuildResult:
     n_skipped: int = 0
     cfg: dict | None = None      # refreshed dev.json after a successful build
     on_line: object = None       # optional (stream, text) progress callback
+    fh: object = None            # dev-install.log mirror writer (PROCESS-LOG-1)
 
 
 def _emit(res: BuildResult, stream: str, text: str) -> None:
     res.lines.append((stream, text))
+    # PROCESS-LOG-1 (user 2026-10-18: "the log holds only useless past
+    # information"): the whole milestone stream — clone, fetch, every patch
+    # commit, the exact brew command, stash lines, exit codes — belongs in
+    # dev-install.log, not just on the console that scrolls away. Module
+    # logging alone made the file a failure-only archive.
+    fh = getattr(res, "fh", None)
+    if fh:
+        try:
+            import time as _time
+            fh.write(_time.strftime("[%H:%M:%S] ") + stream.upper()
+                     + ": " + text + "\n")
+            fh.flush()
+        except OSError:
+            pass
     if res.on_line:
         try:
             res.on_line(res, stream, text)
         except Exception:                        # noqa: BLE001 — progress only
             pass
+
+
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-9;:<=>?!\$]*[a-zA-Z]"        # CSI (incl. DEC private + $y)
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"    # OSC
+    r"|\x1b[@-Z\\-_]"                        # other single-char ESC seqs
+    r"|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")    # stray control chars
+
+
+def _sanitize(line: str) -> str:
+    """PROCESS-LOG-1: brew probes the terminal even with stdout piped; the
+    raw bytes (mode queries, pixel-report escapes) landed in the 'clean'
+    log. A process log for investigation must be readable in a plain
+    editor, so every escape sequence is stripped at the stream boundary."""
+    return _ANSI_RE.sub("", line)
 
 
 def _stream_build(res: BuildResult, cmd: list) -> int:
@@ -1158,7 +1194,7 @@ def _stream_build(res: BuildResult, cmd: list) -> int:
         return 127
     try:
         for raw in proc.stdout:
-            line = raw.rstrip("\r\n")
+            line = _sanitize(raw.rstrip("\r\n"))
             if not line.strip():
                 continue
             el = int(_time.monotonic() - t0)
@@ -1170,7 +1206,8 @@ def _stream_build(res: BuildResult, cmd: list) -> int:
 
 def run_dev_build(*, with_custom_kernel: bool = False,
                   with_grammar: bool = False, dry_run: bool = False,
-                  warn=None, on_line=None, on_patch_failure=None) -> BuildResult:
+                  warn=None, on_line=None, on_patch_failure=None,
+                  trigger: str = "cli") -> BuildResult:
     """One rebuild path (DEV-context decision 3): re-cut uplift-dev from
     the synced base with one commit per enabled build patch, then
     `brew install` (first build) or `brew reinstall` (rebuild). Both always
@@ -1197,30 +1234,16 @@ def run_dev_build(*, with_custom_kernel: bool = False,
                           "omlx-uplift dev bootstrap")
         return res
     path = src_path(cfg)
-    if not os.path.isdir(os.path.join(path, ".git")):
-        _emit(res, "err", f"dev-src clone missing ({path}) — run: "
-                          "omlx-uplift dev bootstrap")
-        res.stage, res.returncode = "clone", 2
-        return res
-    try:
-        ensure_clone(cfg)            # drift guard before any fetch
-        if not worktree_clean(path):
-            _emit(res, "err", f"dev-src worktree is dirty: {path}\n"
-                              "uplift refuses to re-cut the branch over "
-                              "local edits — commit or discard them first.")
-            res.stage, res.returncode = "worktree", 1
-            return res
-        fetch_sync_ref(cfg)
-    except DevsrcError as exc:
-        _emit(res, "err", f"dev-src: {exc}")
-        res.stage, res.returncode = "fetch", 1
-        return res
-
-    # patch process log: devsrc/patchsource/diffapply log their decisions
-    # on the shared "omlx_uplift" logger — a FileHandler here makes the
-    # patch pass auditable after the fact. try/finally: the OLD early
-    # returns skipped removeHandler and leaked one handler per failed
-    # build into the dashboard's process (LOG-1 family).
+    # patch process log (PROCESS-LOG-1): opened BEFORE any guarded step so
+    # even a clone-missing or fetch failure lands in the file the CLI
+    # points at for 'investigation'. devsrc/patchsource/diffapply log their
+    # decisions on the shared "omlx_uplift" logger via _ph; the milestone
+    # stream (_emit) mirrors through res.fh into the same file. The previous
+    # build moves to dev-install.log.1 — the CURRENT build is what an
+    # investigation needs, and 'only useless past information' was the old
+    # file's defining trait. try/finally: the OLD early returns skipped
+    # removeHandler and leaked one handler per failed build into the
+    # dashboard's process (LOG-1 family).
     #
     # LOG-2 (2026-10-09): the handler must be attached BEFORE the source
     # refresh, not after it. The refresh's curated sync + drift check are
@@ -1233,6 +1256,11 @@ def run_dev_build(*, with_custom_kernel: bool = False,
     log_dir = os.path.join(_patches.default_base_dir(), "logs")
     os.makedirs(log_dir, exist_ok=True)
     res.log_path = os.path.join(log_dir, "dev-install.log")
+    try:
+        if os.path.exists(res.log_path):
+            os.replace(res.log_path, res.log_path + ".1")
+    except OSError:
+        pass
     _ph = _logging.FileHandler(res.log_path)
     _ph.setFormatter(_logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
@@ -1240,10 +1268,43 @@ def run_dev_build(*, with_custom_kernel: bool = False,
     _root.addHandler(_ph)
     _root.setLevel(min(_root.level or _logging.INFO, _logging.INFO))
     try:
+        from . import __version__ as _uv
+        res.fh = open(res.log_path, "a")
+        _emit(res, "out", "=== omlx-uplift dev build %s — uplift %s, "
+                          "trigger %s%s%s" % (
+            _patches.now_iso(), _uv, trigger,
+            ", --with-custom-kernel" if with_custom_kernel else "",
+            ", --with-grammar" if with_grammar else ""))
+        if not os.path.isdir(os.path.join(path, ".git")):
+            _emit(res, "err", f"dev-src clone missing ({path}) — run: "
+                              "omlx-uplift dev bootstrap")
+            res.stage, res.returncode = "clone", 2
+            return res
+        _emit(res, "detail", f"dev-src clone: {path}  origin: "
+                             f"{cfg.get('origin') or '?'}  sync ref: "
+                             f"{cfg.get('sync_ref') or '?'}")
+        try:
+            ensure_clone(cfg)            # drift guard before any fetch
+            if not worktree_clean(path):
+                _emit(res, "err", f"dev-src worktree is dirty: {path}\n"
+                                  "uplift refuses to re-cut the branch over "
+                                  "local edits — commit or discard them "
+                                  "first.")
+                res.stage, res.returncode = "worktree", 1
+                return res
+            fetch_sync_ref(cfg)
+            _emit(res, "detail", f"fetched {cfg.get('sync_ref')} -> "
+                                 f"{(_rev_parse(cfg['sync_ref'], path) or '?')[:12]}")
+        except DevsrcError as exc:
+            _emit(res, "err", f"dev-src: {exc}")
+            res.stage, res.returncode = "fetch", 1
+            return res
+
         # source refresh BEFORE collecting build patches (user policy
-        # 2026-10-09): curated catalog (every build, not only a first one)
-        # + drift check; an auto-promoted curated candidate must be part of
-        # THIS build. Best-effort: a dead network never blocks a build.
+        # 2026-10-09): curated catalog (every build, not only a first
+        # one) + drift check; an auto-promoted curated candidate must
+        # be part of THIS build. Best-effort: a dead network never
+        # blocks a build.
         _refresh_patch_sources(cfg, res)
 
         build_patches = patchsource.enabled_build_patches(
@@ -1255,6 +1316,12 @@ def run_dev_build(*, with_custom_kernel: bool = False,
     finally:
         _root.removeHandler(_ph)
         _ph.close()
+        if res.fh:
+            try:
+                res.fh.close()
+            except OSError:
+                pass
+            res.fh = None
 
 
 def _vanilla_keg_site_packages() -> str | None:
@@ -1371,7 +1438,32 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                         on_patch_failure=None):
     import subprocess
 
+    from . import patches as _patches_mod
+
     _emit(res, "out", f"patch process log: {res.log_path}")
+
+    # PROCESS-LOG-1: say what is NOT in this build and why. The '+1 patch
+    # commit(s)' line next to a 'patch status' showing three APPLIED rows
+    # looked like two patches vanished — they did not: runtime-scope patches
+    # mount on the live install at server start and never belong to the
+    # branch. The log must answer that without a phone call.
+    try:
+        _store = _patches_mod.PatchStore()
+        _build_ids = {p["id"] for p in build_patches}
+        for _e in (_store.load().get("patches") or []):
+            if not _e.get("enabled") or _e.get("id") in _build_ids:
+                continue
+            _sc = _patches_mod.patch_scope(_e)
+            if _sc == _patches_mod.SCOPE_OMLX:
+                _emit(res, "out", f"{_e['id']} [omlx]: runtime patch — "
+                                  "mounts onto the running install at server "
+                                  "start, NOT part of the omlx-dev build")
+            elif _sc == _patches_mod.SCOPE_BOTH:
+                _emit(res, "detail", f"{_e['id']} [both]: enabled but absent "
+                                     "from the build patch set this pass")
+    except Exception as exc:                    # noqa: BLE001 — note only
+        _log.debug("devsrc: runtime-scope note skipped: %s", exc)
+
     res.stage = "materialize"
     mres = materialize(build_patches, cfg, on_patch_failure=on_patch_failure)
     res.materialize = mres
@@ -1405,6 +1497,24 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     res.sync_ref = cfg.get("sync_ref")
     res.base_sha = mres.get("base") or ""
     commits = mres.get("commits", [])
+    # PROCESS-LOG-1: WHAT landed on the branch — per patch the apply
+    # method, file count and resulting commit — so an investigation starts
+    # with facts, not guesses.
+    _emit(res, "detail", "branch %s re-cut from %s (git checkout -B; one "
+                         "commit per patch, deterministic dates)"
+          % (mres.get("branch"), str(mres.get("base"))[:12]))
+    for c in commits:
+        if c.get("sha"):
+            _emit(res, "detail",
+                  "APPLIED %s v%s — strict patch -p1-style apply "
+                  "(uplift diffapply, pre-checked all-or-nothing), "
+                  "%s file(s) -> commit %s"
+                  % (c["id"], c.get("v"), c.get("files", "?"),
+                     c["sha"][:12]))
+        elif c.get("skipped") == "already-present":
+            _emit(res, "detail", "%s v%s: base already carries the "
+                                 "content — no commit"
+                  % (c["id"], c.get("v")))
     res.n_applied = len([c for c in commits if c.get("sha")])
     res.n_skipped = len([c for c in commits
                          if c.get("skipped") == "already-present"])
@@ -1495,7 +1605,11 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     _emit(res, "out", "running: " + " ".join(cmd))
     # --quiet skips brew's caveats entirely (formula_installer: return if
     # quiet?) — the restart hint we print after RESULT replaces them
+    import time as _t
+    _t0 = _t.monotonic()
     rc = _stream_build(res, [*cmd, "--quiet"])
+    _emit(res, "detail", "brew exited rc=%d after %ds (cwd %s)"
+          % (rc, int(_t.monotonic() - _t0), os.getcwd()))
     if rc != 0:
         subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
         _emit(res, "err", "brew build FAILED — dev keg untouched "

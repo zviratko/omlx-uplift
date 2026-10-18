@@ -1475,6 +1475,10 @@ def cmd_dev_install(args) -> int:
                          res.materialize.get("skipped_patches") or [])
 
     def _on_line(res, stream, text):
+        # PROCESS-LOG-1: 'detail' lines are investigation depth for the
+        # file and the dashboard box — the terminal keeps its old shape.
+        if stream == "detail":
+            return
         # trigger lines only ever appear after a SUCCESSFUL materialize,
         # so seeing one is the boundary signal; print the header first.
         if (not state["header"]

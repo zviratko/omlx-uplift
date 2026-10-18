@@ -281,7 +281,7 @@ def _dev_build_run(opts: dict) -> None:
         res = devsrc.run_dev_build(
             with_custom_kernel=bool(opts.get("with_custom_kernel")),
             with_grammar=bool(opts.get("with_grammar")),
-            dry_run=False, on_line=on_line)
+            dry_run=False, on_line=on_line, trigger="dashboard")
         if not res.ok:
             keep = ["the previous omlx-dev keg and branch are "
                     "intact — nothing to roll back; fix or disable "
