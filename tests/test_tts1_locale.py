@@ -29,6 +29,8 @@ TTS1_KEYS = (
     # TTS-3: the macOS card line + the per-language system-default chip
     "uplift.voices.tts_mac_stat", "uplift.voices.say_default_chip",
     "uplift.voices.say_default_hint",
+    # TTS-3b: the override-only card gained its honest empty line
+    "uplift.voices.tts_mac_stat_none",
 )
 RENAMED = ("uplift.tab.voices", "uplift.page.voices_full")
 _PH_RE = re.compile(r"\{\w+\}")

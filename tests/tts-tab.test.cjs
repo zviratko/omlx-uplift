@@ -696,7 +696,8 @@ test('tts tab: no macOS group when the store rides no say voice', async () => {
     assert.equal(classes(h.host, 'vc-tts-mac').length, 1,
                  'a supported engine gets its card even with no rows');
     assert.ok(allText(classes(h.host, 'vc-tts-mac')[0]).includes(
-        'Speakable now — no model to load'), 'the card line speaks');
+        'No overrides — every language speaks with its macOS default'),
+        'the empty card line says so honestly');
     assert.equal(voiceRows(h).length, 2);
     assert.equal(subCounter(h), '3 ' + String.fromCharCode(215));
     const off = await mount({ store: STORE.slice(0, 2), saySupported: false });
@@ -822,58 +823,70 @@ test('TTS-3: every engine is a framed card; its voices hang in one tree', async 
                   'the engine line itself is never a kid');
 });
 
-test('TTS-3: the macOS card answers per language — defaults, preferreds, chips', async () => {
+test('TTS-3b: the macOS card lists ONLY overrides of the system defaults', async () => {
+    // user: 'it should only show non-default settings, not the default
+    // voices for the languages' — a default is what macOS already does,
+    // not a setting; only a PREFERRED mark that picks a DIFFERENT voice
+    // than the default belongs on this tree
     const h = await mount({ store: MAC_STORE, sayVoices: SAY_VOICES });
     const cards = classes(h.host, 'vc-card');
     const mac = cards[cards.length - 1];
     const kids = classes(mac, 'vc-kid');
     assert.deepEqual(kids.map(r => String(r.children[0].textContent)), [
-        'Zuzana · cs-CZ', 'Samantha · en-US', 'Novak · fr-FR',
-        'Laura · sk-SK', 'Ghost (macOS)'],
-        'language name order, default before the preferred of the same '
-        + 'locale, the preferred-only row rides, a store voice no catalog '
-        + 'row answers stands last as its own line — and the not-installed '
-        + 'Iveta is nobody\'s answer, so she stays on the catalog tab');
-    const [zuz, sam, nov, lau] = kids;
-    for (const r of [zuz, sam, lau])
-        assert.ok(allText(r).includes('macOS DEFAULT'),
-                  'the OS-picked voice badges itself: ' + allText(r));
-    assert.ok(!allText(nov).includes('macOS DEFAULT'),
-              'a preferred-only row is no system default');
-    assert.ok(allText(zuz).includes('PREFERRED FOR cs-CZ'),
-              'one voice may hold BOTH facts — same line');
-    const chip = classes(zuz, 'vc-chip-def')[0];
-    assert.ok(chip.title.includes('cs-CZ'),
-              'the tooltip names the language it defaults: ' + chip.title);
+        'Novak · fr-FR',        // the one real override: preferred, NOT the default
+        'Zuzana (macOS)',       // her mark mirrors her own default — not a row;
+        'Ghost (macOS)'],       // only her legacy STORE voice stands here
+        'defaults are nobody\'s setting; Zuzana (default+preferred) and the '
+        + 'not-installed Iveta never show — Laura/Samantha (pure defaults) '
+        + 'are gone from this card');
+    assert.ok(allText(mac).includes('Overrides of macOS defaults: 1'),
+              'the header counts what it lists: ' + allText(mac).slice(0, 160));
+    assert.ok(!allText(kids[0]).includes('macOS DEFAULT'),
+              'an override row is by definition not a default');
+    assert.ok(allText(kids[0]).includes('PREFERRED FOR fr-FR'));
 });
 
-test('TTS-3: a merged store row manages itself; a pure catalog row does not', async () => {
-    const h = await mount({ store: MAC_STORE, sayVoices: SAY_VOICES });
+test('TTS-3b: an override merged with a store row manages itself once', async () => {
+    const store = [{ id: 'novak', name: 'Novak', model: 'say:Novak',
+                     language: 'fr' }];
+    const h = await mount({ store, sayVoices: SAY_VOICES });
     const cards = classes(h.host, 'vc-card');
     const kids = classes(cards[cards.length - 1], 'vc-kid');
-    const [zuz, sam] = kids;
-    assert.deepEqual(classes(zuz, 'se-btn').map(b => String(b.textContent)),
+    assert.deepEqual(kids.map(r => String(r.children[0].textContent)),
+        ['Novak · fr-FR'], 'covered store row does NOT duplicate below');
+    const novak = kids[0];
+    assert.deepEqual(classes(novak, 'se-btn').map(b => String(b.textContent)),
         ['▶', 'Clear preferred', 'EDIT', 'DELETE'],
-        'the SAME line carries the mark button AND the store management');
-    assert.deepEqual(classes(sam, 'se-btn').map(b => String(b.textContent)),
-        ['▶', 'Mark preferred'], 'no store row behind it: nothing to manage');
-    classes(zuz, 'se-btn').find(b => String(b.textContent) === 'EDIT').click();
+        'mark button (lit) plus the store management on ONE line');
+    classes(novak, 'se-btn').find(b => String(b.textContent) === 'EDIT').click();
     await settle(); await settle();
     assert.ok(classes(h.host, 'vc-add').length,
               'EDIT opens the shared voice form atop this tab');
     assert.ok(allText(classes(h.host, 'vc-add')[0]).includes('EDIT VOICE'));
 });
 
-test('TTS-3: DELETE on a merged row removes the STORE entry only', async () => {
-    const h = await mount({ store: MAC_STORE, sayVoices: SAY_VOICES });
+test('TTS-3b: DELETE on a merged row removes the STORE entry only', async () => {
+    const store = [{ id: 'novak', name: 'Novak', model: 'say:Novak',
+                     language: 'fr' }];
+    const h = await mount({ store, sayVoices: SAY_VOICES });
     const kids = classes(classes(h.host, 'vc-card').pop(), 'vc-kid');
     classes(kids[0], 'se-btn').find(b => String(b.textContent) === 'DELETE')
         .click();
     await settle(); await settle();
-    assert.deepEqual(h.st.deletes, ['/uplift/api/voices/zuzana'],
+    assert.deepEqual(h.st.deletes, ['/uplift/api/voices/novak'],
         'the store id goes to the store route — the system voice itself '
         + 'lives in macOS, not in the delete path');
     assert.equal(h.st.toasts.length, 1, 'one honest toast');
+});
+
+test('TTS-3b: no overrides at all: the header admits it, no rows', async () => {
+    const h = await mount({ sayVoices: SAY_VOICES.filter(v => !v.preferred_for) });
+    const cards = classes(h.host, 'vc-card');
+    const mac = cards[cards.length - 1];
+    assert.equal(classes(mac, 'vc-kid').length, 0);
+    assert.ok(allText(mac).includes(
+        'No overrides — every language speaks with its macOS default'),
+        allText(mac).slice(0, 200));
 });
 
 test('TTS-3: the macOS card reads /voices/say ONCE per visit, like defaults', async () => {

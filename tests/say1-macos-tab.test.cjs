@@ -337,6 +337,22 @@ test('DEFAULT chip: the row that is already the macOS default says so', async ()
     // the chip is a FACT about the system: neutral chip ground, never the
     // amber user-mark styling (vc-chip-pref stays the mark's alone)
     assert.ok(!chip._classes.has('vc-chip-pref'));
+    // TTS-3b (user): an UNMARKED default row gets no mark button — marking
+    // the default as preferred for its own language changes nothing
+    assert.equal(classes(find('Zuzana'), 'vc-pref').length, 0,
+                 'Samantha-style rows no longer offer to override themselves');
+    assert.equal(classes(find('Albert'), 'vc-pref').length, 1,
+                 'non-default rows keep the button');
+    // a default row carrying a STALE redundant mark keeps 'Clear
+    // preferred' — the mark must stay removable from the UI
+    const dv = ROSTER.map(v => Object.assign({}, v));
+    dv[0].default = true;
+    dv[0].preferred_for = 'cs_CZ';
+    const h2 = await mount({ voices: dv });
+    await h2.sayClick();
+    const rows2 = classes(h2.host, 'vc-row');
+    const zu2 = rows2.find(r => String(r.children[0].textContent) === 'Zuzana');
+    assert.equal(classes(zu2, 'vc-pref')[0].textContent, 'Clear preferred');
 });
 
 test('BUTTON posts the preferred mark; label text, PREFERRED FOR chip reflect the server', async () => {

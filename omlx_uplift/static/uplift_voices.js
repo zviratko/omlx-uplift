@@ -1298,39 +1298,48 @@ function sayRow(v, repaint, opt) {
     // carries a {voice} placeholder, so it gets NO dataset.i18n
     // (applyI18n would repaint the raw placeholder back in); the panel
     // re-renders on a locale change anyway.
+    // TTS-3b (user): on the row that IS the language's macOS default a
+    // mark changes nothing (marking the default voice as preferred for its
+    // own language routes to... itself) — so an unmarked default row gets
+    // no button. A default row carrying a STALE redundant mark keeps
+    // 'Clear preferred': the mark must stay removable from the UI.
     const ansDef = !!v.answers_default;
     const sysv = (_sayData && _sayData.system_voice)
         || (_sayData && _sayData.system_language) || '';
-    const pref = document.createElement('button');
-    pref.type = 'button';
-    pref.className = 'se-btn vc-pref' + (marked ? ' on' : '');
-    pref.textContent = tf(
-        ansDef ? (marked ? 'uplift.voices.say_btn_override_clear'
-                         : 'uplift.voices.say_btn_override')
-               : (marked ? 'uplift.voices.say_btn_clear'
-                         : 'uplift.voices.say_btn_mark'),
-        ansDef ? (marked ? 'Clear override ({voice})'
-                         : 'Override macOS default ({voice})')
-               : (marked ? 'Clear preferred' : 'Mark preferred'))
-        .replace('{voice}', sysv);
-    pref.title = tf(marked ? 'uplift.voices.say_unmark'
-                           : 'uplift.voices.say_mark',
-                    marked ? 'Not preferred for: {locale}'
-                           : 'Mark preferred for: {locale}')
-                   .replace('{locale}', marked ? v.preferred_for : v.locale);
-    pref.onclick = async () => {
-        pref.disabled = true;
-        try {
-            await D.postJson(`${VAPI}/voices/say/preferred`,
-                { locale: marked ? v.preferred_for : v.locale,
-                  identifier: marked ? '' : addr });
-            await repaint();
-        } catch (e) {
-            pref.disabled = false;
-            D.toast(String(e && e.message || e), 'error');
-        }
-    };
-    act.append(play, pref);
+    if (!v.default || marked) {
+        const pref = document.createElement('button');
+        pref.type = 'button';
+        pref.className = 'se-btn vc-pref' + (marked ? ' on' : '');
+        pref.textContent = tf(
+            ansDef ? (marked ? 'uplift.voices.say_btn_override_clear'
+                             : 'uplift.voices.say_btn_override')
+                   : (marked ? 'uplift.voices.say_btn_clear'
+                             : 'uplift.voices.say_btn_mark'),
+            ansDef ? (marked ? 'Clear override ({voice})'
+                             : 'Override macOS default ({voice})')
+                   : (marked ? 'Clear preferred' : 'Mark preferred'))
+            .replace('{voice}', sysv);
+        pref.title = tf(marked ? 'uplift.voices.say_unmark'
+                               : 'uplift.voices.say_mark',
+                        marked ? 'Not preferred for: {locale}'
+                               : 'Mark preferred for: {locale}')
+                       .replace('{locale}', marked ? v.preferred_for : v.locale);
+        pref.onclick = async () => {
+            pref.disabled = true;
+            try {
+                await D.postJson(`${VAPI}/voices/say/preferred`,
+                    { locale: marked ? v.preferred_for : v.locale,
+                      identifier: marked ? '' : addr });
+                await repaint();
+            } catch (e) {
+                pref.disabled = false;
+                D.toast(String(e && e.message || e), 'error');
+            }
+        };
+        act.append(play, pref);
+    } else {
+        act.append(play);
+    }
     if (opt.storeVoice) {
         // the SAME row is also a stored voice (legacy 'say:<Name>'): the
         // voiceRow management, not a duplicate line — EDIT opens the
@@ -1660,15 +1669,18 @@ function ttsCard(headRow, kidRows) {
 }
 
 function _sayPick() {
-    // the installed voices the routing chain can actually answer with:
-    // each language's OS default and/or its preferred override
+    // TTS-3b (user): the card lists SETTINGS the dashboard adds on top of
+    // macOS — voices a PREFERRED mark makes answer INSTEAD of that
+    // language's system default. A default voice is not a setting; it is
+    // what macOS already does, so it has no row here (it lives on the
+    // catalog tab). Installed + carrying a preferred mark + not itself the
+    // default of that language.
     const vs = (_sayData && _sayData.voices) || [];
     const pick = vs.filter(v => v.installed !== false
-        && (v.default || v.preferred_for));
+        && v.preferred_for && !v.default);
     pick.sort((a, b) =>
         _langName(a.locale).localeCompare(_langName(b.locale))
         || String(a.locale).localeCompare(String(b.locale))
-        || (b.default ? 1 : 0) - (a.default ? 1 : 0)
         || a.name.localeCompare(b.name));
     return pick;
 }
@@ -1724,8 +1736,15 @@ async function _ttsRows(rowsBox, models) {
         'macOS system voices');
     const stat = document.createElement('span');
     stat.className = 'vc-tts-stat';
-    stat.textContent = tf('uplift.voices.tts_mac_stat',
-        'Speakable now — no model to load');
+    // TTS-3b: the card is the dashboard's OVERRIDE surface; when nothing
+    // overrides macOS the honest line says so (defaults live on the
+    // catalog tab, they are not settings)
+    stat.textContent = picked.length
+        ? tf('uplift.voices.tts_mac_stat',
+             'Overrides of macOS defaults: {n}').replace('{n}',
+             String(picked.length))
+        : tf('uplift.voices.tts_mac_stat_none',
+             'No overrides — every language speaks with its macOS default');
     head.append(lab, stat);
     const kids = [];
     const repaintMac = async () => {
