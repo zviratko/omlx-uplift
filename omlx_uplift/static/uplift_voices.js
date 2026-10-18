@@ -1197,8 +1197,9 @@ function _sayStoreName(v) {
 
 function sayRow(v, used) {
     const addr = v.identifier || v.name;   // exact OS handle when present
+    const inst = v.installed !== false;
     const row = document.createElement('div');
-    row.className = 'vc-row';
+    row.className = 'vc-row' + (inst ? '' : ' vc-say-off');
     const lab = document.createElement('div');
     lab.className = 'vc-name';
     lab.textContent = v.name;
@@ -1208,6 +1209,21 @@ function sayRow(v, used) {
         c.className = 'vc-chip vc-chip-tier';
         c.textContent = tf(q[0], q[1]);
         lab.append(' ', c);
+    }
+    if (!inst) {
+        // downloadable per Apple's catalogs, absent on this Mac: the
+        // engine cannot speak it — no buttons, just the way to get it
+        const c = document.createElement('span');
+        c.className = 'vc-chip';
+        c.textContent = tf('uplift.voices.say_not_downloaded',
+                           'NOT DOWNLOADED');
+        c.title = tf('uplift.voices.say_not_downloaded_hint',
+                     'Not on this Mac yet — download it in System '
+                     + 'Settings under Accessibility > Spoken Content > '
+                     + 'Voices.');
+        lab.append(' ', c);
+        row.append(lab);
+        return row;
     }
     if (v.downloaded) {
         const c = document.createElement('span');
@@ -1303,7 +1319,15 @@ function _sayRows(rowsBox, voices) {
         lab.textContent = _langName(loc) + ' · ' + loc;
         const cnt = document.createElement('span');
         cnt.className = 'vc-say-count';
-        cnt.textContent = String(list.length);
+        const ready = list.filter(v => v.installed !== false).length;
+        cnt.textContent = ready === list.length ? String(list.length)
+                          : ready + '/' + list.length;
+        if (ready !== list.length) {
+            cnt.title = tf('uplift.voices.say_count_hint',
+                           '{n} speakable now, {t} offered for download '
+                           + 'by this macOS').replace('{n}', ready)
+                                   .replace('{t}', list.length);
+        }
         const paint = (open) => {
             grp.hidden = !open;
             head.classList.toggle('open', open);

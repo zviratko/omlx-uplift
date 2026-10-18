@@ -138,14 +138,6 @@ def parse_av(text: str) -> list:
     return out
 
 
-def _say_key(name: str, locale: str) -> tuple:
-    """Cross-roster identity: AV 'Eddy' + en-US == say
-    'Eddy (English (US))' + en_US once the region parenthesis and the
-    separator style drop out."""
-    root = re.sub(r"\s*\(.*\)\s*$", "", name).strip().lower()
-    return (root, locale.replace("_", "-").lower())
-
-
 def _downloaded_names() -> set:
     """Voice names backed by *.SpeechVoice bundles in the two readable
     install locations. Name = bundle's VoiceName, else bundle basename.
@@ -169,6 +161,60 @@ def _downloaded_names() -> set:
                 pass
             found.add((name or b.stem).strip())
     return found
+
+
+# System Settings' downloadable roster: the MobileAsset catalogs the OS
+# ships (readable, no root). MacinTalk entries are the classic compact
+# voices; the Vocalizer set is the enhanced-quality downloads. What is
+# INSTALLED still comes from AV/say only — these two files say what
+# Apple offers here, never what this Mac currently holds.
+_CAT_PATHS = (
+    ("/System/Library/AssetsV2/com_apple_MobileAsset_MacinTalkVoiceAssets/"
+     "com_apple_MobileAsset_MacinTalkVoiceAssets.xml", "standard"),
+    ("/System/Library/AssetsV2/com_apple_MobileAsset_VoiceServices_"
+     "CombinedVocalizerVoices/com_apple_MobileAsset_VoiceServices_"
+     "CombinedVocalizerVoices.xml", "enhanced"),
+)
+
+
+def _norm_locale(loc) -> str:
+    return str(loc or "").strip().replace("_", "-")
+
+
+def _root_name(name) -> str:
+    """Display identity across rosters: 'Samantha (English (US))' and
+    'Samantha' are the same person; 'Ava (Premium)' vs 'Ava (Enhanced)'
+    are not — the parenthetical is stripped here but the row's QUALITY
+    travels alongside, so tiers stay distinct without the suffix text."""
+    return str(name or "").split(" (")[0].strip().lower()
+
+
+def parse_catalog(doc, quality: str) -> list:
+    """One AssetsV2 plist -> [{name, locale, quality}]."""
+    out = []
+    for e in ((doc or {}).get("Assets") or []):
+        if not isinstance(e, dict):
+            continue
+        name = str(e.get("Name") or "").strip()
+        locs = e.get("Languages") or ([e.get("Language")]
+                                      if e.get("Language") else [])
+        for l in locs:
+            if name and l:
+                out.append({"name": name, "locale": _norm_locale(l),
+                            "quality": quality})
+    return out
+
+
+def _catalog_rows() -> list:
+    rows = []
+    for path, quality in _CAT_PATHS:
+        try:
+            with open(path, "rb") as fh:
+                rows += parse_catalog(plistlib.load(fh), quality)
+        except (OSError, ValueError) as e:
+            log.info("voice catalog %s unavailable: %s",
+                     path.rsplit("/", 1)[-1], e)
+    return rows
 
 
 def _av_rows() -> list:
@@ -198,23 +244,36 @@ def _say_rows() -> list:
         return []
 
 
+def _display_name(root_name: str, quality: str, os_name: str) -> str:
+    """Plain names stay plain; above-Default rows show their tier. The
+    OS sometimes bakes the suffix into the display name already
+    ('Zuzana (Premium)' on newer macOS) — never append it twice."""
+    if quality == "standard":
+        return os_name or root_name.title()
+    suffix = "(%s)" % quality.title()
+    if suffix.lower() in str(os_name or "").lower():
+        return os_name
+    return "%s %s" % (os_name or root_name.title(), suffix)
+
+
 _cache: dict = {"ts": 0.0, "voices": []}
 
 
 def list_voices(force: bool = False) -> list:
-    """Every voice this Mac has INSTALLED (System Settings' set, not the
-    CLI subset), cached. AVFoundation is the catalog; `say -v ?` adds
-    anything AV misses and supplies each voice's demo greeting.
-
-    Downloaded flag, from the OS's own facts:
-      - quality above Default — the sealed system set ships Default
-        voices only; Enhanced/Premium/Personal variants exist solely
-        because someone downloaded them;
-      - or simply absent from the `say` roster (downloaded neural/Siri
-        sets: say speaks them by IDENTIFIER, which is why every row
-        carries one);
-      - or a legacy *.SpeechVoice bundle on disk (older macOS path).
-    Nothing else is claimed: system-shipped rows carry no badge."""
+    """The full picture for the tab, cached:
+      INSTALLED rows — every voice this Mac actually holds: AVFoundation
+      (System Settings' own source; sees downloaded neural/Siri voices
+      the CLI roster omits) UNION `say -v ?` (adds anything AV misses
+      and supplies each voice's demo greeting). Each carries its OS
+      identifier — the exact say -v address.
+      DOWNLOADABLE rows — Apple's local MobileAsset catalogs: offered
+      here but not on this Mac (installed False; no buttons, the engine
+      cannot speak them yet).
+    Downloaded badge, from system facts only: quality above Default (the
+    sealed system ships Default voices), absence from the CLI roster, or
+    a legacy *.SpeechVoice bundle. Shipped rows carry no badge.
+    Locale spelling is normalised to BCP-47 everywhere (say uses
+    cs_CZ, AV and the catalogs cs-CZ — one language, one group)."""
     if not available():
         return []
     now = time.time()
@@ -225,47 +284,59 @@ def list_voices(force: bool = False) -> list:
     downloaded_bundles = _downloaded_names()
     say_by_key = {}
     for s in sayv:
-        say_by_key.setdefault(_say_key(s["name"], s["locale"]), s)
+        say_by_key.setdefault((_root_name(s["name"]),
+                               _norm_locale(s["locale"]).lower(),
+                               s["quality"]), s)
+    # standard-quality say rows also answer to the bare (root, locale):
+    # AV 'Samantha' == CLI 'Samantha (English (US))'
+    say_flat = {}
+    for s in sayv:
+        say_flat.setdefault((_root_name(s["name"]),
+                             _norm_locale(s["locale"]).lower()), s)
     rows, seen = [], set()
+
+    def add(row):
+        key = (_root_name(row["name"]), _norm_locale(row["locale"]).lower(),
+               row["quality"])
+        if key in seen:
+            return
+        seen.add(key)
+        rows.append(row)
+
     for a in av:
-        key = _say_key(a["name"], a["locale"])
-        if (a["identifier"], key) in seen:
-            continue
-        seen.add((a["identifier"], key))
-        s = say_by_key.get(key)
+        s = say_by_key.get((_root_name(a["name"]),
+                            _norm_locale(a["locale"]).lower(),
+                            a["quality"])) \
+            or (say_flat.get((_root_name(a["name"]),
+                              _norm_locale(a["locale"]).lower()))
+                if a["quality"] == "standard" else None)
         quality = a["quality"]
         if quality == "standard" and s and s["quality"] != "standard":
             quality = s["quality"]
         downloaded = (quality != "standard") or (s is None) \
             or (a["name"] in downloaded_bundles)
-        rows.append({
-            "name": a["name"] + ("" if quality == "standard" else
-                                 " (%s)" % quality.title()),
-            "locale": a["locale"], "quality": quality,
+        add({
+            "name": _display_name(_root_name(a["name"]), quality, a["name"]),
+            "locale": _norm_locale(a["locale"]), "quality": quality,
             "sample": (s or {}).get("sample", ""),
             "identifier": a["identifier"], "downloaded": downloaded,
+            "installed": True,
         })
-    def _row_key(nm, loc, qual):
-        # tier parenthesis is part of the IDENTITY (Ava Enhanced and Ava
-        # Premium are two downloads); region parenthesis is not
-        root = re.sub(r"\s*\((?!\s*(?:Premium|Enhanced|Personal)).*?\)\s*$",
-                      "", nm, flags=re.I).strip().lower()
-        return (root, loc.replace("_", "-").lower(), qual)
-
     for s in sayv:
-        # say sees something AV did not: honor the CLI roster too
-        if any(_row_key(r["name"], r["locale"], r["quality"])
-               == _row_key(s["name"], s["locale"], s["quality"])
-               or (r["name"] == s["name"] and
-                   _say_key(r["name"], r["locale"])
-                   == _say_key(s["name"], s["locale"]))
-               for r in rows):
+        add({"name": s["name"], "locale": _norm_locale(s["locale"]),
+             "quality": s["quality"], "sample": s["sample"],
+             "identifier": s["name"], "installed": True,
+             "downloaded": s["name"] in downloaded_bundles
+             or s["quality"] != "standard"})
+    for c in _catalog_rows():
+        if (_root_name(c["name"]), _norm_locale(c["locale"]).lower(),
+                c["quality"]) in seen:
             continue
-        rows.append({"name": s["name"], "locale": s["locale"],
-                     "quality": s["quality"], "sample": s["sample"],
-                     "identifier": s["name"],
-                     "downloaded": s["name"] in downloaded_bundles
-                     or s["quality"] != "standard"})
+        add({"name": _display_name(_root_name(c["name"]), c["quality"],
+                                   c["name"]),
+             "locale": _norm_locale(c["locale"]), "quality": c["quality"],
+             "sample": "", "identifier": "", "downloaded": False,
+             "installed": False})
     if rows:
         _cache.update(ts=now, voices=rows)
     return rows
@@ -281,6 +352,8 @@ def resolve(name: str) -> Optional[dict]:
         return None
     for fresh in (False, True):
         for v in list_voices(force=fresh):
+            if v.get("installed") is False:
+                continue        # downloadable-but-absent: nothing to speak
             if v["identifier"] == name or v["name"] == name:
                 return v
     return None

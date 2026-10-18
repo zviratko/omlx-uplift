@@ -2083,6 +2083,8 @@ label.se-row.pending-restart > .se-ctl > select {
 .vc-say-label { flex: 1 1 auto; min-width: 0; }
 .vc-say-count { flex: 0 0 auto; color: var(--dim); font-weight: 400; }
 .vc-say-grp[hidden] { display: none; }
+.vc-say-off { opacity: .55; }
+.vc-say-off .vc-name { font-weight: 400; }
 .vc-say-filter { display: block; width: 100%; box-sizing: border-box;
     margin: 8px 0 6px; padding: 6px 8px; background: transparent;
     border: 1px solid var(--edge); color: var(--ink);

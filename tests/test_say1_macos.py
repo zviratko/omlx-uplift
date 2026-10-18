@@ -46,6 +46,7 @@ def on_mac(monkeypatch):
     monkeypatch.setattr(SE, "available", lambda: True)
     monkeypatch.setattr(SE, "_cache", {"ts": 0.0, "voices": []})
     monkeypatch.setattr(SE, "_downloaded_names", lambda: set())
+    monkeypatch.setattr(SE, "_catalog_rows", lambda: [])
     return SE
 
 
@@ -128,6 +129,67 @@ def test_say_only_voices_survive_the_merge(monkeypatch, on_mac):
     assert any(v["name"] == "Zarvox" and v["identifier"] == "Zarvox"
                for v in vs) if "Zarvox" in ROSTER else True
     assert all("identifier" in v and "downloaded" in v for v in vs)
+
+
+def test_display_name_never_doubles_the_tier():
+    """Newer macOS bakes '(Premium)' into AV names — the old merge
+    produced 'Zuzana (Premium) (Premium)' and a second identity key,
+    which is how cs_CZ/cs-CZ duplicate groups appeared."""
+    assert SE._display_name("zuzana", "premium", "Zuzana (Premium)") \
+        == "Zuzana (Premium)"
+    assert SE._display_name("zuzana", "premium", "Zuzana") \
+        == "Zuzana (Premium)"
+    assert SE._display_name("zuzana", "standard", "Zuzana") == "Zuzana"
+
+
+def test_av_baked_premium_name_merges_with_cli_row(monkeypatch, on_mac):
+    av = [{"name": "Zuzana (Premium)", "locale": "cs-CZ",
+           "quality": "premium", "identifier": "com.x.zuzana.premium",
+           "desc": "Quality: Premium"}]
+    sayv = SE.parse_voices(
+        "Zuzana (Premium)        cs_CZ    # Ahoj! Jsem Zuzana.\n")
+    monkeypatch.setattr(on_mac, "_av_rows", lambda: av)
+    monkeypatch.setattr(on_mac, "_say_rows", lambda: sayv)
+    vs = on_mac.list_voices()
+    zz = [v for v in vs if v["name"].startswith("Zuzana")]
+    assert len(zz) == 1, vs
+    assert zz[0]["name"] == "Zuzana (Premium)"
+    assert zz[0]["locale"] == "cs-CZ"        # ONE spelling, one group
+    assert zz[0]["downloaded"] is True
+
+
+def test_catalog_rows_join_as_greyed_and_resolve_refuses(monkeypatch, on_mac):
+    monkeypatch.setattr(on_mac, "_av_rows", lambda: [])
+    monkeypatch.setattr(on_mac, "_say_rows",
+                        lambda: on_mac.parse_voices(ROSTER))
+    monkeypatch.setattr(on_mac, "_catalog_rows", lambda: [
+        {"name": "Zuzana", "locale": "cs-CZ", "quality": "enhanced"},
+        {"name": "Zuzana", "locale": "cs-CZ", "quality": "standard"},
+        {"name": "Allison", "locale": "en-US", "quality": "enhanced"},
+    ])
+    vs = on_mac.list_voices()
+    zz = [v for v in vs if v["locale"] == "cs-CZ" and v["quality"] == "enhanced"]
+    assert zz and zz[0]["installed"] is False and not zz[0]["identifier"]
+    # the already-installed standard Zuzana swallowed its catalog twin
+    assert sum(1 for v in vs if v["name"] == "Zuzana"
+               and v["quality"] == "standard") == 1
+    ab = [v for v in vs if v["name"] == "Allison (Enhanced)"]
+    assert ab and ab[0]["installed"] is False
+    # a greyed voice can never be resolved for synthesis
+    assert on_mac.resolve("Allison (Enhanced)") is None or \
+        on_mac.resolve("Allison (Enhanced)")["installed"] is not False
+
+
+def test_parse_catalog_accepts_both_shapes():
+    doc = {"Assets": [{"Name": "Allison", "Languages": ["en-US"]},
+                      {"Name": "Agnes", "Language": "en-US"},
+                      {"Name": "", "Language": "xx"},
+                      "junk"]}
+    out = SE.parse_catalog(doc, "enhanced")
+    assert out == [{"name": "Allison", "locale": "en-US",
+                    "quality": "enhanced"},
+                   {"name": "Agnes", "locale": "en-US",
+                    "quality": "enhanced"}]
 
 
 def test_parse_av_maps_quality_from_description():

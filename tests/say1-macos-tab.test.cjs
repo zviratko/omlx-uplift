@@ -143,6 +143,10 @@ const ROSTER = [
       downloaded: false, sample: 'Hello, I am Ava.' },
     { name: 'Anna', locale: 'de_DE', quality: 'standard', downloaded: false,
       sample: 'Hallo! Ich bin Anna.' },
+    // the SERVER normalises every locale to BCP-47 hyphens; fixtures here
+    // mirror the delivered shape (en_US stands for the normalised form)
+    { name: 'Allison (Enhanced)', locale: 'en_US', quality: 'enhanced',
+      downloaded: false, sample: '', identifier: '', installed: false },
 ];
 
 async function mount(opt) {
@@ -242,8 +246,29 @@ test('say tab lists groups by language name, quality inside', async () => {
                              'German · de_DE'], heads);
     // depth-first walk keeps document order: rows follow their header
     const names = classes(h.host, 'vc-row').map(r => String(r.children[0].textContent));
-    assert.deepEqual(names, ['Zuzana', 'Ava (Premium)', 'Ava (Enhanced)',
-                             'Albert', 'Samantha', 'Anna'], names);
+    // tier first, then alphabetical (Allison precedes Ava inside Enhanced)
+    assert.deepEqual(names, ['Zuzana', 'Ava (Premium)', 'Allison (Enhanced)',
+                             'Ava (Enhanced)', 'Albert', 'Samantha',
+                             'Anna'], JSON.stringify(names));
+});
+
+test('catalog rows: greyed, no buttons, NOT DOWNLOADED, split counts', async () => {
+    const h = await mount({});
+    await h.sayClick();
+    const rows = classes(h.host, 'vc-row');
+    const ab = rows.find(r => String(r.children[0].textContent)
+        === 'Allison (Enhanced)');
+    assert.ok(ab, 'the downloadable-but-absent voice is listed');
+    assert.ok(ab._classes.has('vc-say-off'), 'rendered dimmed');
+    assert.ok(allText(ab).includes('NOT DOWNLOADED'), allText(ab));
+    assert.equal(classes(ab, 'se-btn').length, 0,
+                 'no PLAY/USE on a voice this Mac cannot speak yet');
+    const heads = classes(h.host, 'vc-say-head');
+    const counts = heads.map(n => n.children[2].textContent);
+    assert.deepEqual(counts, ['1', '4/5', '1'], counts);
+    const enHead = heads[1];
+    assert.ok(enHead.children[2].title.includes('speakable now'),
+              'the split count explains itself');
 });
 
 test('chips: tier labels and ADDITIONAL only when proven', async () => {
