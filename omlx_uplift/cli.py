@@ -221,24 +221,78 @@ def install_example_skins(stream=None, force: str = "ask") -> None:
           file=out)
 
 
-def _verify_mount(python: str) -> tuple[bool, str]:
+def _verify_mount(python: str, *, timeout: int = 120) -> tuple[bool, str]:
     """Import omlx.server in a throwaway subprocess and check the mount
     flag autopatch/register sets. The 404-after-upgrade reports all came
     from a server whose mount never happened; this turns 'install printed
-    success' into 'mount actually works' (or names the failure)."""
-    import subprocess
+    success' into 'mount actually works' (or names the failure).
 
-    code = ("import omlx.server as s; "
-            "raise SystemExit(0 if getattr(s.app, '_omlx_uplift_mounted', False) else 1)")
+    VERIFY-MOUNT-DEADLOCK (mruu 2026-10-18): the old shape used
+    subprocess.run(capture_output=True, timeout=...). 'import omlx.server'
+    can leave helper children/grandchildren that INHERIT the capture
+    pipes; when the probe then timed out, run()'s kill + second
+    communicate() blocked on those pipes forever — an unctrl-C-able hang
+    that made a SUCCESSFUL install look fatal. Fix: no pipes at all — the
+    verdict rides a result file the probe child writes itself, stdout/
+    stderr go to DEVNULL, and the timeout kills the child's whole process
+    group (start_new_session + killpg), which can no longer wedge the
+    parent because nobody shares its stdio.
+    """
+    import os
+    import signal
+    import subprocess
+    import tempfile
+    import contextlib
+
+    fd, res_path = tempfile.mkstemp(prefix="uplift-mount-probe.")
+    os.close(fd)
+    os.unlink(res_path)  # the child creates it; absence == no verdict
+    code = (
+        "import os\n"
+        "try:\n"
+        "    import omlx.server as _s\n"
+        "    _ok = bool(getattr(_s.app, '_omlx_uplift_mounted', False))\n"
+        "    _out = '1' if _ok else '0'\n"
+        "except BaseException as _e:  # import blew up: name it, still file it\n"
+        "    _out = 'E' + repr(_e)[:600]\n"
+        "try:\n"
+        "    open(os.environ['UPLIFT_PROBE_FILE'], 'w').write(_out)\n"
+        "except OSError:\n"
+        "    pass\n"
+    )
+    env = dict(os.environ, UPLIFT_PROBE_FILE=res_path)
     try:
-        r = subprocess.run([python, "-c", code], capture_output=True,
-                           text=True, timeout=120)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        p = subprocess.Popen([python, "-c", code], env=env,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+    except OSError as exc:
         return False, f"probe failed: {exc}"
-    if r.returncode == 0:
+    try:
+        p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(OSError):
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        with contextlib.suppress(Exception):
+            p.wait(timeout=5)
+        return False, (f"probe timed out after {timeout}s (the server import "
+                       "never finished — the mount itself may be fine; "
+                       "open /uplift/ in the browser to check)")
+    finally:
+        try:
+            with open(res_path) as f:
+                verdict = f.read().strip()
+            os.unlink(res_path)
+        except OSError:
+            verdict = ""
+    if verdict == "1":
         return True, ""
-    tail = (r.stderr or r.stdout or "").strip().splitlines()[-3:]
-    return False, " / ".join(tail)
+    if verdict == "0":
+        return False, ("omlx.server imported WITHOUT the Uplift mount flag — "
+                       "/uplift/ will 404")
+    if verdict.startswith("E"):
+        return False, verdict[1:]
+    return False, f"probe left no verdict (exit {p.returncode})"
 
 
 def cmd_bench_env(argv=None) -> int:
