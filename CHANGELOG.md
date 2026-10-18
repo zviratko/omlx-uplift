@@ -13,6 +13,38 @@ users never see.
 
 ## Unreleased
 
+## [2.3] — 2026-10-19
+
+- **macOS `say` is now a TTS engine.** A VOICES tab lists every
+  system voice, folded by language, with quality tiers; downloadable
+  voices are marked and install from there. Mark a preferred voice
+  per language, or let bare `say` work the language out from the
+  text.
+- **TTS settings restructured.** "TTS & Voices" opens on TEXT TO
+  SPEECH; each engine is a card with its voices wired under it, and
+  a model's VOICES chip jumps to its cloned voices.
+- **Reading replies aloud got real controls.** Play, pause, progress,
+  re-record — pause stops where you left and resumes from that
+  second. With auto-speak, every chunk gets a numbered row with a
+  waveform and the highlight follows the voice.
+- **Voice recognition is steadier.** The last sentence always arrives
+  when you stop talking; whisper large-class models avoid a broken
+  transport; the LISTEN noise floor calibrates itself. A new
+  optional patch runs Qwen3-ASR live: utterances commit in about a
+  second.
+- **Audio shows on the dashboard.** Speaking and listening activity
+  rides the stats feed as it happens.
+- **The chat page sits still.** One-line top bar, no more whole-page
+  scroll, voice picker and Auto merged into one "Speak" row; a saved
+  preset stays selectable beside your edited copy, so reverting no
+  longer means deleting.
+- **Patch zones cleaned up.** Two exclusive zones, rebuild chips
+  classified by actual content, dev kegs take runtime overlays
+  without a rebuild.
+- Small touches: install no longer hangs on a probe, `patch status`
+  reads like a human wrote it, per-bubble SPEAK follows the chunk
+  strategy, a stale voice no longer blanks the picker.
+
 ## [2.2] — 2026-10-18
 
 - **Profiles now remember what you were editing.** Change the prompt or
