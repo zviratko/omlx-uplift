@@ -227,15 +227,15 @@ test('css: the stack is a 3-column grid capped at five visible rows', () => {
     assert.match(grid, /max-height:\s*118px/);
     assert.match(grid, /overflow-y:\s*auto/);
     const row = cssRule('.chat-native-say-row', CSS);
-    assert.match(row, /flex:\s*0 0 calc\(\(100% - 20px\) \/ 3\)/,
-                 'three chunk controls per line');
+    assert.match(row, /flex:\s*1 1 150px/,
+                 'rows share the line and shrink rather than pushing the pair off it');
     const all = cssRule('.chat-native-say-all', CSS);
     assert.match(all, /flex:\s*0 0 auto/, 'the whole-reply pair takes its own width');
     assert.match(all, /visibility:\s*hidden/, 'hidden until the line is hovered');
     assert.match(CSS, /\.chat-native-say-grid:hover \.chat-native-say-all[^}]*visibility:\s*visible/,
                  'revealed when the control line is hovered');
     // the pair rule comes first in the sheet, so match the standalone one
-    assert.match(CSS, /\.chat-native-say-re \{ font-size: 19px; \}/,
+    assert.match(CSS, /\.chat-native-say-re \{ font-size: 17px; \}/,
                  'the reload glyph is sized to read as big as play');
     assert.match(CSS, /\.outer-message-container \.message-bubble \{ max-width: 80%; \}/,
                  'a reply may use 80% of the chat box');

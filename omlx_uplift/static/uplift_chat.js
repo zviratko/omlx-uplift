@@ -4651,7 +4651,7 @@ function applyShadowTheme(dc) {
         // action line and is pushed right; the auto-speak stack is a 3-column
         // grid capped at five visible rows, then it scrolls inside.
         // the whole-reply transport is one more control on the chunk line
-        '.chat-native-say-all { flex: 0 0 auto; min-width: 90px;',
+        '.chat-native-say-all { flex: 0 0 auto; min-width: 78px;',
         '  visibility: hidden; }',
         '.chat-native-say-grid:hover .chat-native-say-all,',
         '.chat-native-say-grid:focus-within .chat-native-say-all {',
@@ -4666,8 +4666,12 @@ function applyShadowTheme(dc) {
         '  width: 100%; max-width: 100%; align-content: start;',
         '  max-height: 118px; overflow-y: auto; margin-top: 4px;',
         '  box-sizing: border-box; }',
+        // basis, not a fixed third: rows SHARE the line and shrink when the
+        // bubble is narrow, so the whole-reply pair fits on the last line too
+        // instead of being pushed onto one of its own (user: 'not on their own
+        // line'). Three controls per line while there is room, fewer when not.
         '.chat-native-say-row { display: flex; align-items: center; gap: 4px;',
-        '  flex: 0 0 calc((100% - 20px) / 3); min-width: 0; position: relative;',
+        '  flex: 1 1 150px; min-width: 0; position: relative;',
         '  padding: 1px 3px; border-radius: var(--radius);',
         '  font-size: 11px; color: var(--dim, #8b98ab); }',
         '.chat-native-say-row.hot {',
@@ -4677,7 +4681,7 @@ function applyShadowTheme(dc) {
         '  font-size: 15px; line-height: 1; border-radius: var(--radius); }',
         // the ⟳ glyph sits inside a much larger em box than ▶, so the same
         // font-size reads smaller: it gets its own size and a fixed square
-        '.chat-native-say-re { font-size: 19px; }',
+        '.chat-native-say-re { font-size: 17px; }',
         '.chat-native-say-pp:hover, .chat-native-say-re:hover {',
         '  color: var(--ink, #e6edf3); }',
         '.chat-native-say-row.playing .chat-native-say-pp,',
