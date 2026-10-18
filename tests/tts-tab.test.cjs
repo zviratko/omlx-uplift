@@ -174,10 +174,17 @@ const CAPS = {
 
 async function mount(opt) {
     const o = Object.assign({ models: MODELS, caps: CAPS, defaults: {},
-                              store: [], src: null, editor: true }, opt || {});
+                              store: [], src: null, editor: true,
+                              // TTS-3: the tts tab now also reads /voices/say
+                              // (the macOS engine card); fixtures default to
+                              // a supported engine with an EMPTY catalog —
+                              // legacy store rows then render exactly as the
+                              // TTS-2 tests describe them
+                              saySupported: true, sayVoices: [],
+                              sysl: '', sysv: '' }, opt || {});
     const { doc, byId } = makeDom();
     const st = { posts: [], fetches: [], toasts: [], gets: [], editor: [],
-                 audioPlays: 0 };
+                 deletes: [], audioPlays: 0 };
     // the SERVER's copy of voices.json > tts_defaults: postJson mutates it,
     // fetchJson hands out a fresh snapshot, so a repaint can only come from a
     // real re-GET (the client patching its own cache would still pass, but a
@@ -195,6 +202,7 @@ async function mount(opt) {
         Number, Boolean, RegExp, Set, Map, Error, TypeError, isFinite, isNaN,
         parseInt, parseFloat, setTimeout, clearTimeout,
         scrollTo: () => {},       // voiceRow EDIT + SAVE AS scroll to the form
+        confirm: () => true,      // TTS-3: merged-row DELETE is confirm-gated
         // the self-fetch fallback path in renderVoices uses the bare API global
         API: '',
         Intl: { DisplayNames: (globalThis.Intl || {}).DisplayNames },
@@ -227,7 +235,9 @@ async function mount(opt) {
                                            languages: [], speakers: [] };
                 }
                 if (u.includes('/voices/say'))
-                    return { supported: true, voices: [] };
+                    return { supported: o.saySupported,
+                             voices: o.sayVoices.map(v => Object.assign({}, v)),
+                             system_language: o.sysl, system_voice: o.sysv };
                 if (u.includes('/admin/api/models'))
                     return { models: o.models };
                 return { voices: o.store };
@@ -248,7 +258,8 @@ async function mount(opt) {
                 }
                 return { ok: true, defaults: live.defaults };
             },
-            putJson: async () => ({}), deleteJson: async () => ({}),
+            putJson: async () => ({}),
+            deleteJson: async (u) => { st.deletes.push(String(u)); return {}; },
             toast: (msg, ms, cls) => st.toasts.push(
                 { msg: String(msg), cls: typeof ms === 'string' ? ms : cls }),
             emptyMsg: (el, msg) => { el.textContent = msg; },
@@ -310,7 +321,10 @@ test('tts tab: models sorted, speakers only where the probe proved them', async 
     assert.ok(allText(box[0]).includes('TTS MODELS'), 'title');
     assert.ok(allText(box[0]).includes(
         'SETTINGS opens the same editor as in the model manager'), 'hint');
-    assert.deepEqual(modelRows(h).map(rowName),
+    // TTS-3: the macOS engine line rides the model-row geometry too — the
+    // MLX sort is asserted WITHOUT it (the card itself is pinned below)
+    assert.deepEqual(modelRows(h).filter(r => !r._classes.has('vc-tts-mac'))
+        .map(rowName),
         ['Kokoro-82M', 'Qwen3-TTS-1.7B-CustomVoice'], 'sorted by model name');
     // one SETTINGS per model, none on a speaker row
     assert.equal(classes(h.host, 'vc-tts-set').length, 2);
@@ -331,11 +345,14 @@ test('tts tab: models sorted, speakers only where the probe proved them', async 
         u => decodeURIComponent(u.match(/[?&]model=([^&]*)/)[1])),
         ['kokoro-82m', 'Qwen3-TTS-1.7B-CustomVoice'],
         'one GET /voices/capabilities per model');
-    assert.equal(subCounter(h), '2 ×', 'the counter counts models on this tab');
+    assert.equal(subCounter(h), '3 ×',
+        'TTS-3: models PLUS the macOS engine card are what the tab offers '
+        + '(the say engine is an engine — it gets a card whenever it is '
+        + 'available, even with nothing picked yet)');
 });
 
-test('no TTS model: the honest empty state, no rows', async () => {
-    const h = await mount({ models: [] });
+test('no TTS model, no say engine: the honest empty state, no rows', async () => {
+    const h = await mount({ models: [], saySupported: false });
     await h.clickTab('TEXT TO SPEECH');
     const box = classes(h.host, 'vc-tts')[0];
     assert.ok(box, 'the box still frames the message');
@@ -509,7 +526,9 @@ const ser = (n) => {
 // the remaining two to the old order (the strip itself is pinned by the
 // tab-strip test); (2) the data-model focus hook TTS-2 added to every voice
 // row; (3) the macOS-voice filter — this fixture store holds no say: row so
-// it is inert HERE, and pinned by its own TTS-2 test below
+// it is inert HERE, and pinned by its own TTS-2 test below; (4) TTS-3 —
+// voiceRow dropped the 'urow' class: inside .admin-table it rendered the
+// row as a display:grid column stack (the live defect the user reported)
 const serCloneTab = (host) => host.children.map(kid => {
     if (kid._classes && kid._classes.has('vc-tabs')) {
         const keep = kid.children
@@ -518,7 +537,8 @@ const serCloneTab = (host) => host.children.map(kid => {
         return '<div class=vc-tabs>' + keep.join('') + '</div>';
     }
     return ser(kid);
-}).join('\n').replace(/ data-model=[^ >]*/g, '');
+}).join('\n').replace(/ data-model=[^ >]*/g, '')
+   .replace(/class=urow vc-row/g, 'class=vc-row');
 
 test('CLONED VOICES tab serializes byte-identical to the pre-TTS-1 build', async (t) => {
     let oldSrc = null;
@@ -577,9 +597,12 @@ test('frozen EN copy: the tf() fallbacks are the contract strings verbatim', asy
     const def = defBtn(spkRows(h)[0]);
     assert.equal(def.textContent, 'DEFAULT');
     assert.ok(def._classes.has('se-btn'), 'the lamp is a styled button, not a chip');
-    const empty = await mount({ models: [] });
+    const empty = await mount({ models: [], saySupported: false });
     await empty.clickTab('TEXT TO SPEECH');
-    assert.equal(allText(classes(empty.host, 'vc-tts')[0]).trim(),
+    // TTS-3: the (empty) rows container sits between the hint and the
+    // message — whitespace-normalised, the WORDING is the contract
+    assert.equal(allText(classes(empty.host, 'vc-tts')[0]).trim()
+        .replace(/\s+/g, ' '),
         'TTS MODELS Every text-to-speech model installed on this server. '
         + "Built-in voices come from the model's own metadata; your custom "
         + 'voices are grouped under their model. SETTINGS opens the same '
@@ -599,12 +622,22 @@ test('the panel never shows instructions or language (modal-only)', async () => 
         r => /language|instruction/i.test(allText(r))).length, 0);
 });
 
-test('the speaker-row indent lives in uplift.css (CSS LANE closed)', () => {
-    // say1's pattern: the row class is JS, the 38px is the stylesheet's —
-    // a re-inline would keep the panel looking right and rot the pin
+test('TTS-3: the card/tree geometry lives in uplift.css (CSS LANE closed)', () => {
+    // say1's pattern: the row classes are JS, the geometry is the
+    // stylesheet's — a re-inline would keep the panel looking right and
+    // rot the pin. TTS-3 replaced the flat 38px indent (which .admin-table
+    // .urow outranked in practice) with the model-manager card language.
     const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
-    assert.ok(/\.vc-tts-sp \{ padding-left: 38px; \}/.test(css),
-              '.vc-tts-sp indent rule missing from uplift.css');
+    assert.ok(/\.vc-card \{ border: 1px solid var\(--edge\)/.test(css),
+              '.vc-card frame rule missing from uplift.css');
+    assert.ok(/\.vc-tree \{ margin: 2px 10px 8px 24px; \}/.test(css),
+              '.vc-tree indent rule missing');
+    assert.ok(/\.vc-kid::before \{[^}]*border-left: 3px solid var\(--dim\)/
+        .test(css), 'the trunk riser must be 3px square wiring like the mm trunk');
+    assert.ok(/\.vc-tree > \.vc-kid:first-child::before \{ top: -12px/.test(css),
+              'the first segment stops under the engine line (no stub above)');
+    assert.ok(!/\.vc-tts-sp \{ padding-left: 38px; \}/.test(css),
+              'the superseded flat indent must not sneak back');
     assert.ok(!/ttsSpeakerRow[\s\S]{0,400}style\.paddingLeft/.test(
         fs.readFileSync(SRC, 'utf8')),
         'no inline paddingLeft crept back into ttsSpeakerRow');
@@ -655,10 +688,21 @@ test('tts tab: stored voices group under their model; macOS voices last', async 
 });
 
 test('tts tab: no macOS group when the store rides no say voice', async () => {
+    // TTS-3 SUPERSEDES the TTS-2 rule: the say engine is an ENGINE, so its
+    // card rides whenever the server supports it — with an empty pick list
+    // — and never otherwise. (The card's children are the per-language
+    // defaults/preferreds, pinned in the TTS-3 block below.)
     const h = await mount({ store: STORE.slice(0, 2) });
-    assert.equal(classes(h.host, 'vc-tts-mac').length, 0);
+    assert.equal(classes(h.host, 'vc-tts-mac').length, 1,
+                 'a supported engine gets its card even with no rows');
+    assert.ok(allText(classes(h.host, 'vc-tts-mac')[0]).includes(
+        'Speakable now — no model to load'), 'the card line speaks');
     assert.equal(voiceRows(h).length, 2);
-    assert.equal(subCounter(h), '2 ' + String.fromCharCode(215));
+    assert.equal(subCounter(h), '3 ' + String.fromCharCode(215));
+    const off = await mount({ store: STORE.slice(0, 2), saySupported: false });
+    assert.equal(classes(off.host, 'vc-tts-mac').length, 0,
+                 'no say engine (Linux): no card, no promise');
+    assert.equal(subCounter(off), '2 ' + String.fromCharCode(215));
 });
 
 test('CLONED VOICES lists the clones, never the macOS voice', async () => {
@@ -737,4 +781,106 @@ test('no models installed but a macOS voice stored: the TTS tab still lists it',
     assert.deepEqual(classes(box, 'vc-tts-model').map(
         r => String(r.children[0].textContent)), ['macOS system voices']);
     assert.equal(subCounter(h), '1 ' + String.fromCharCode(215));
+});
+
+/* ---- TTS-3: cards, the macOS engine card, the system-default chip ------- */
+const SAY_VOICES = [
+    { name: 'Laura', locale: 'sk-SK', quality: 'standard', installed: true,
+      default: true, preferred_for: '', downloaded: false,
+      identifier: 'com.apple.voice.compact.sk-SK.Laura' },
+    { name: 'Zuzana', locale: 'cs-CZ', quality: 'standard', installed: true,
+      default: true, preferred_for: 'cs-CZ', downloaded: false,
+      identifier: 'com.apple.voice.super-compact.cs-CZ.Zuzana' },
+    { name: 'Iveta', locale: 'cs-CZ', quality: 'enhanced', installed: false,
+      default: false, preferred_for: '', downloaded: false, identifier: '' },
+    { name: 'Samantha', locale: 'en-US', quality: 'standard', installed: true,
+      default: true, preferred_for: '', downloaded: false,
+      identifier: 'com.apple.voice.compact.en-US.Samantha' },
+    { name: 'Novak', locale: 'fr-FR', quality: 'standard', installed: true,
+      default: false, preferred_for: 'fr-FR', downloaded: false,
+      identifier: 'com.apple.voice.compact.fr-FR.Thomas' },
+];
+const MAC_STORE = [
+    { id: 'zuzana', name: 'Zuzana', model: 'say:Zuzana', language: 'cs' },
+    { id: 'ghost', name: 'Ghost', model: 'say:Ghost', language: 'xx' },
+];
+
+test('TTS-3: every engine is a framed card; its voices hang in one tree', async () => {
+    const h = await mount({ store: STORE });
+    const cards = classes(h.host, 'vc-card');
+    assert.equal(cards.length, 3, 'Kokoro, Qwen3 and the macOS engine cards');
+    const kidsOf = (c) => classes(c, 'vc-kid');
+    assert.equal(classes(cards[0], 'vc-tree').length, 1, 'kids live in THE tree');
+    assert.deepEqual(kidsOf(cards[0]).map(r => String(r.children[0].textContent)),
+        ['kokoro-82m:Katka'], 'the Kokoro card holds its one clone');
+    assert.deepEqual(kidsOf(cards[1]).map(r => String(r.children[0].textContent)),
+        ['Uncle_Fu', 'Vivian', 'Qwen3-TTS-1.7B-CustomVoice:Jake'],
+        'speakers then clones, model order preserved');
+    for (const c of cards)
+        assert.ok(!c._classes.has('vc-kid')
+                  && !c.children[0]._classes.has('vc-kid'),
+                  'the engine line itself is never a kid');
+});
+
+test('TTS-3: the macOS card answers per language — defaults, preferreds, chips', async () => {
+    const h = await mount({ store: MAC_STORE, sayVoices: SAY_VOICES });
+    const cards = classes(h.host, 'vc-card');
+    const mac = cards[cards.length - 1];
+    const kids = classes(mac, 'vc-kid');
+    assert.deepEqual(kids.map(r => String(r.children[0].textContent)), [
+        'Zuzana · cs-CZ', 'Samantha · en-US', 'Novak · fr-FR',
+        'Laura · sk-SK', 'Ghost (macOS)'],
+        'language name order, default before the preferred of the same '
+        + 'locale, the preferred-only row rides, a store voice no catalog '
+        + 'row answers stands last as its own line — and the not-installed '
+        + 'Iveta is nobody\'s answer, so she stays on the catalog tab');
+    const [zuz, sam, nov, lau] = kids;
+    for (const r of [zuz, sam, lau])
+        assert.ok(allText(r).includes('macOS DEFAULT'),
+                  'the OS-picked voice badges itself: ' + allText(r));
+    assert.ok(!allText(nov).includes('macOS DEFAULT'),
+              'a preferred-only row is no system default');
+    assert.ok(allText(zuz).includes('PREFERRED FOR cs-CZ'),
+              'one voice may hold BOTH facts — same line');
+    const chip = classes(zuz, 'vc-chip-def')[0];
+    assert.ok(chip.title.includes('cs-CZ'),
+              'the tooltip names the language it defaults: ' + chip.title);
+});
+
+test('TTS-3: a merged store row manages itself; a pure catalog row does not', async () => {
+    const h = await mount({ store: MAC_STORE, sayVoices: SAY_VOICES });
+    const cards = classes(h.host, 'vc-card');
+    const kids = classes(cards[cards.length - 1], 'vc-kid');
+    const [zuz, sam] = kids;
+    assert.deepEqual(classes(zuz, 'se-btn').map(b => String(b.textContent)),
+        ['▶', 'Clear preferred', 'EDIT', 'DELETE'],
+        'the SAME line carries the mark button AND the store management');
+    assert.deepEqual(classes(sam, 'se-btn').map(b => String(b.textContent)),
+        ['▶', 'Mark preferred'], 'no store row behind it: nothing to manage');
+    classes(zuz, 'se-btn').find(b => String(b.textContent) === 'EDIT').click();
+    await settle(); await settle();
+    assert.ok(classes(h.host, 'vc-add').length,
+              'EDIT opens the shared voice form atop this tab');
+    assert.ok(allText(classes(h.host, 'vc-add')[0]).includes('EDIT VOICE'));
+});
+
+test('TTS-3: DELETE on a merged row removes the STORE entry only', async () => {
+    const h = await mount({ store: MAC_STORE, sayVoices: SAY_VOICES });
+    const kids = classes(classes(h.host, 'vc-card').pop(), 'vc-kid');
+    classes(kids[0], 'se-btn').find(b => String(b.textContent) === 'DELETE')
+        .click();
+    await settle(); await settle();
+    assert.deepEqual(h.st.deletes, ['/uplift/api/voices/zuzana'],
+        'the store id goes to the store route — the system voice itself '
+        + 'lives in macOS, not in the delete path');
+    assert.equal(h.st.toasts.length, 1, 'one honest toast');
+});
+
+test('TTS-3: the macOS card reads /voices/say ONCE per visit, like defaults', async () => {
+    const h = await mount({});
+    const reads = () => h.st.gets.filter(
+        u => u.includes('/voices/say')).length;
+    await h.clickTab('CLONED');
+    await h.clickTab('TEXT TO SPEECH');
+    assert.equal(reads(), 1, 're-entering the tab reuses the cached catalog');
 });

@@ -314,6 +314,31 @@ test('chips: tier labels and ADDITIONAL only when proven', async () => {
               'unproven -> NO badge at all (never claim System)');
 });
 
+/* TTS-3 (user): the voice macOS ALREADY uses for a language was invisible
+   — the server has always carried the per-language isDefault fact ('default'
+   on the row) and only ever surfaced the SYSTEM-language override wording. */
+test('DEFAULT chip: the row that is already the macOS default says so', async () => {
+    const voices = ROSTER.map(v => Object.assign({}, v));
+    voices[0].default = true;              // Zuzana: cs_CZ
+    voices[2].default = true;              // Samantha: en_US
+    voices[2].identifier = 'com.apple.voice.compact.en-US.Samantha';
+    const h = await mount({ voices });
+    await h.sayClick();
+    const rows = classes(h.host, 'vc-row');
+    const find = (name) => rows.find(r =>
+        String(r.children[0].textContent) === name);
+    assert.ok(allText(find('Zuzana')).includes('macOS DEFAULT'));
+    assert.ok(allText(find('Samantha')).includes('macOS DEFAULT'));
+    assert.ok(!allText(find('Albert')).includes('DEFAULT'),
+              'a row that is nobody\'s default carries no chip');
+    const chip = classes(find('Zuzana'), 'vc-chip-def')[0];
+    assert.ok(chip.title.includes('cs_CZ'),
+              'the tooltip names which language: ' + chip.title);
+    // the chip is a FACT about the system: neutral chip ground, never the
+    // amber user-mark styling (vc-chip-pref stays the mark's alone)
+    assert.ok(!chip._classes.has('vc-chip-pref'));
+});
+
 test('BUTTON posts the preferred mark; label text, PREFERRED FOR chip reflect the server', async () => {
     const voices = ROSTER.map(v => Object.assign({}, v));
     voices[0].preferred_for = 'cs_CZ';      // Zuzana answers say+cs-CZ

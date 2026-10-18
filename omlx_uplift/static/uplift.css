@@ -2089,13 +2089,39 @@ label.se-row.pending-restart > .se-ctl > select {
 .vc-pref.on { color: var(--accent); border-color: var(--accent); }
 .vc-chip-pref { color: var(--accent); border-color: var(--accent); }
 /* TTS-1: the TEXT TO SPEECH tab rows (model + built-in voice entries) and
-   the DEFAULT lamp. Indent matches the macOS tab's folded rows (38px) so
-   built-in voices read as children of their model everywhere. */
+   the DEFAULT lamp. (TTS-3 moved the child indent from a flat 38px pad to
+   the card/trunk geometry below.) */
 .vc-tts { margin-bottom: 12px; }   /* same footer as .vc-add */
-.vc-tts-sp { padding-left: 38px; }
-/* TTS-2: stored voices grouped under their model take the SAME indent as
-   the built-in speakers (one truth: children of the model row line up) */
-.vc-tts-voice { padding-left: 38px; }
+/* TTS-3 (user): the model manager's grouping language. Each engine is one
+   framed card; its voices hang below the engine line on a visible trunk,
+   like the profiles/aliases do in #model-admin. Supersedes the flat
+   'padding-left: 38px' rows — inside .admin-table the voice rows never
+   actually got it (.urow grid outranked them; live catch on the board). */
+.vc-card { border: 1px solid var(--edge); background: var(--card);
+           margin-bottom: 6px; padding-top: 2px; }
+.vc-card:nth-of-type(even) { background: var(--row2); }
+.vc-card > .vc-row { border-bottom: 0; }
+.vc-tree { margin: 2px 10px 8px 24px; }
+.vc-kid { position: relative; margin: 0 0 6px;
+          border: 1px solid var(--edge); background: var(--field); }
+.vc-row.vc-kid { padding-left: 10px; }
+.vc-kid:last-child { margin-bottom: 0; }
+/* square diagram wiring (the mm trunk language): a 3px riser drops just
+   left of every line and turns right into it. Unlike the alias tree, these
+   kids never fold, so a FIXED overdraw reaches the previous elbow (rows
+   stay one text line: the riser starts 40px above the box, the previous
+   elbow sits at gap 6 + half a row ≈ 23px up); the FIRST segment stops
+   12px above the tree — right under the engine line — and the chain ends
+   at the LAST elbow: no stub below. */
+.vc-kid::before { content: ''; position: absolute; left: -15px; top: -40px;
+    height: calc(50% + 40px); width: 14px; pointer-events: none;
+    border-left: 3px solid var(--dim); border-bottom: 3px solid var(--dim); }
+.vc-tree > .vc-kid:first-child::before { top: -12px;
+    height: calc(50% + 12px); }
+/* TTS-3: the macOS card's per-language pick list rides the same rows the
+   macOS VOICES tab builds (sayRow), so the DEFAULT chip needs the neutral
+   system-fact look — plain chip ground, never the amber of a user mark */
+.vc-chip-def { opacity: .8; }
 /* manager-jump focus: the row the VOICES chip / editor EDIT aimed at,
    flagged until the next repaint (no timer, no animation to chase) */
 .vc-row.vc-focus { outline: 1px solid var(--accent); outline-offset: -1px; }

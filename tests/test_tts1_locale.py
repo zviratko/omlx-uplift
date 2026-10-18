@@ -26,6 +26,9 @@ TTS1_KEYS = (
     # voices block
     "uplift.voices.tts_mac_title", "uplift.voices.editor_title",
     "uplift.voices.editor_hint",
+    # TTS-3: the macOS card line + the per-language system-default chip
+    "uplift.voices.tts_mac_stat", "uplift.voices.say_default_chip",
+    "uplift.voices.say_default_hint",
 )
 RENAMED = ("uplift.tab.voices", "uplift.page.voices_full")
 _PH_RE = re.compile(r"\{\w+\}")

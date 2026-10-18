@@ -421,7 +421,12 @@ function recErrText(e) { return String((e && e.message) || (e && e.name) || e ||
 
 function voiceRow(v, extraClass) {
     const row = document.createElement('div');
-    row.className = 'urow vc-row' + (extraClass ? ' ' + extraClass : '');
+    // TTS-3 (live catch): 'urow' is poison HERE — inside the page's
+    // .admin-table it renders display:grid and OUTRANKS .vc-row, which
+    // stacked the label over the buttons and ate the group indent.
+    // .vc-row already carries the flex row geometry; voice rows never
+    // meant to join the admin table's grid.
+    row.className = 'vc-row' + (extraClass ? ' ' + extraClass : '');
     // TTS-2: a manager jump (VOICES chip / editor EDIT) focuses this model's
     // rows — the row carries its model so the clone list can find it without
     // re-deriving the mapping
@@ -1198,7 +1203,12 @@ async function _sayReload(rowsBox) {
     _sayRows(rowsBox, _sayData.voices || []);
 }
 
-function sayRow(v, repaint) {
+function sayRow(v, repaint, opt) {
+    // TTS-3 opt: localeInName — off the language-grouped tab the locale is
+    // in the header; in the TTS card a flat list needs it on the line.
+    // storeVoice — a legacy 'say:<Name>' store row merged into this
+    // catalog row: EDIT/DELETE ride the SAME line (no duplicate row).
+    opt = opt || {};
     const addr = v.identifier || v.name;   // exact OS handle when present
     const inst = v.installed !== false;
     const marked = !!v.preferred_for;
@@ -1206,7 +1216,7 @@ function sayRow(v, repaint) {
     row.className = 'vc-row' + (inst ? '' : ' vc-say-off');
     const lab = document.createElement('div');
     lab.className = 'vc-name';
-    lab.textContent = v.name;
+    lab.textContent = opt.localeInName ? v.name + ' · ' + v.locale : v.name;
     const q = SAY_TIERS[v.quality];
     if (q) {
         const c = document.createElement('span');
@@ -1228,6 +1238,19 @@ function sayRow(v, repaint) {
         lab.append(' ', c);
         row.append(lab);
         return row;
+    }
+    if (v.default) {
+        // TTS-3 (user): macOS itself picked this voice for its language —
+        // a SYSTEM fact, shown on every row that answers that role. The
+        // amber PREFERRED chip is the user's own override; this one reads
+        // neutral, and the tooltip says which voice role it names.
+        const c = document.createElement('span');
+        c.className = 'vc-chip vc-chip-def';
+        c.textContent = tf('uplift.voices.say_default_chip', 'macOS DEFAULT');
+        c.title = tf('uplift.voices.say_default_hint',
+            'The voice macOS already uses for {locale} — a preferred mark '
+            + 'for this language replaces it.').replace('{locale}', v.locale);
+        lab.append(' ', c);
     }
     if (marked) {
         // SAY-2: this voice answers `say` requests for that language
@@ -1308,6 +1331,35 @@ function sayRow(v, repaint) {
         }
     };
     act.append(play, pref);
+    if (opt.storeVoice) {
+        // the SAME row is also a stored voice (legacy 'say:<Name>'): the
+        // voiceRow management, not a duplicate line — EDIT opens the
+        // shared voice form, DELETE removes the STORE entry (the system
+        // voice itself stays in the catalog untouched)
+        const sv = opt.storeVoice;
+        const edit = document.createElement('button');
+        edit.type = 'button'; edit.className = 'se-btn';
+        edit.textContent = tf('uplift.voices.edit', 'EDIT');
+        edit.onclick = () => { _editing = sv.id;
+                               window.scrollTo(0, 0); renderVoices(); };
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'se-btn danger';
+        del.textContent = tf('uplift.voices.delete', 'DELETE');
+        del.onclick = async () => {
+            // destructive-action rule: name the record in the confirm
+            if (!confirm(tf('uplift.voices.delete_confirm', 'Delete voice')
+                         + ' "' + sv.name + '"? '
+                         + tf('uplift.voices.delete_confirm2',
+                              'The reference clip is removed too.'))) return;
+            try {
+                await D.deleteJson(`${VAPI}/voices/${encodeURIComponent(sv.id)}`);
+                D.toast(tf('uplift.voices.deleted', 'Voice deleted')
+                        + ': ' + sv.name);
+                renderVoices();
+            } catch (e) { D.toast(String(e && e.message || e), 'error'); }
+        };
+        act.append(edit, del);
+    }
     row.append(lab, act);
     return row;
 }
@@ -1402,18 +1454,17 @@ async function sayPanel(host) {
         + '(say:<locale>) explicitly.');
     box.append(title, hint);
     host.append(box);
+    // TTS-3: same shared loader the tts card uses — one GET per visit even
+    // when both panels were built this session
+    let load = null;
     if (!_sayData) {
-        const load = document.createElement('div');
+        load = document.createElement('div');
         load.className = 'mk-desc';
         load.textContent = tf('uplift.voices.say_loading', 'Reading voices…');
         box.append(load);
-        try {
-            _sayData = await D.fetchJson(`${VAPI}/voices/say`);
-        } catch (e) {
-            _sayData = { supported: false, voices: [] };
-        }
-        load.remove();
     }
+    await _sayEnsure();
+    if (load) load.remove();
     if (!_sayData.supported) {
         const off = document.createElement('div');
         off.className = 'mk-desc';
@@ -1457,6 +1508,19 @@ async function sayPanel(host) {
    (window.Uplift.modelmgr.openEditor) — one code path, two entries.
    Instructions/language are modal-only: this panel lists, it does not edit. */
 let _ttsDefaults = null;    // last /voices/tts/defaults payload (per visit)
+let _ttsSayOn = false;      // TTS-3: did the tts render show the macOS card?
+let _sayPromise = null;     // one in-flight /voices/say GET shared by tab+card
+/* TTS-3 pacing (live catch): the say catalog probe runs seconds cold
+   (AVFoundation + AssetsV2 scans). Model cards must NEVER wait on it —
+   callers await this only when they are about to build the macOS card. */
+async function _sayEnsure() {
+    if (_sayData) return _sayData;
+    if (!_sayPromise)
+        _sayPromise = D.fetchJson(`${VAPI}/voices/say`)
+            .catch(() => ({ supported: false, voices: [] }));
+    try { _sayData = await _sayPromise; } finally { _sayPromise = null; }
+    return _sayData;
+}
 
 async function _ttsLoadDefaults() {
     // The SERVER owns the map (same rule as the say tab's preferred_for):
@@ -1511,8 +1575,8 @@ function ttsModelRow(m) {
 function ttsSpeakerRow(model, spk, repaint) {
     const row = document.createElement('div');
     row.className = 'vc-row vc-tts-sp';
-    // indent comes from '.vc-tts-sp { padding-left: 38px }' in uplift.css
-    // (CSS LANE closed; tts-tab.test.cjs pins the rule, say1 the pattern)
+    // TTS-3: the tree (.vc-tree margin + .vc-kid box) carries the indent
+    // now (CSS LANE; tts-tab.test.cjs pins the rules) — no inline style
     const lab = document.createElement('div');
     lab.className = 'vc-name';
     lab.textContent = spk;
@@ -1572,6 +1636,50 @@ function ttsSpeakerRow(model, spk, repaint) {
     return row;
 }
 
+/* TTS-3 (user 2026-10-18): the model manager's grouping language. Every
+   TTS engine is one framed CARD; its voices hang below the engine line in
+   a trunk-wired tree (.vc-tree > .vc-kid), exactly like profiles/aliases
+   do in the model manager. The macOS say engine is an engine too: its
+   card lists the voice each language actually answers with — the OS
+   SYSTEM DEFAULT, plus the PREFERRED mark wherever one overrides it —
+   while the full browsable catalog stays on the macOS VOICES tab. Legacy
+   'say:<Name>' store rows merge into their catalog row (EDIT/DELETE ride
+   the same line); a store voice the catalog no longer holds stands alone
+   as a plain voice row. The tree rules live in uplift.css (pin: tts-tab). */
+function ttsCard(headRow, kidRows) {
+    const box = document.createElement('div');
+    box.className = 'vc-card';
+    box.append(headRow);
+    if (kidRows.length) {
+        const tree = document.createElement('div');
+        tree.className = 'vc-tree';
+        for (const r of kidRows) { r.classList.add('vc-kid'); tree.append(r); }
+        box.append(tree);
+    }
+    return box;
+}
+
+function _sayPick() {
+    // the installed voices the routing chain can actually answer with:
+    // each language's OS default and/or its preferred override
+    const vs = (_sayData && _sayData.voices) || [];
+    const pick = vs.filter(v => v.installed !== false
+        && (v.default || v.preferred_for));
+    pick.sort((a, b) =>
+        _langName(a.locale).localeCompare(_langName(b.locale))
+        || String(a.locale).localeCompare(String(b.locale))
+        || (b.default ? 1 : 0) - (a.default ? 1 : 0)
+        || a.name.localeCompare(b.name));
+    return pick;
+}
+
+function _sayTailMatch(cat, tail) {
+    // 'say:<tail>' addresses a catalog voice by display name OR identifier
+    const nm = String(cat.name || '').toLowerCase();
+    const idf = String(cat.identifier || '').toLowerCase();
+    return tail === nm || (!!idf && tail === idf);
+}
+
 async function _ttsRows(rowsBox, models) {
     rowsBox.textContent = '';
     const repaint = () => _ttsRows(rowsBox, models);
@@ -1579,39 +1687,67 @@ async function _ttsRows(rowsBox, models) {
     const list = models.slice().sort((a, b) =>
         String(a.name || a.id).localeCompare(String(b.name || b.id)));
     for (const m of list) {
-        rowsBox.append(ttsModelRow(m));
+        const kids = [];
         let caps = null;
         try { caps = await window.Uplift.capsFor(m.id); } catch (e) { caps = null; }
         // Built-in speakers exist only where the checkpoint PROVES them
         // (qwen3 with a spk_id table); Kokoro/... answer qwen3:false and stay
-        // a bare model row.
-        if (caps && caps.qwen3 && (caps.speakers || []).length) {
+        // a bare model card.
+        if (caps && caps.qwen3 && (caps.speakers || []).length)
             for (const spk of caps.speakers)
-                rowsBox.append(ttsSpeakerRow(m.id, spk, repaint));
-        }
-        // TTS-2 (user): the custom voices cloned ON this model group under
-        // it — store rows, so PLAY/EDIT/DELETE work right here; the CLONED
-        // VOICES tab keeps the full list as well (one store, two views).
+                kids.push(ttsSpeakerRow(m.id, spk, repaint));
+        // TTS-2: the custom voices cloned ON this model; store rows, so
+        // PLAY/EDIT/DELETE work right here (one store, two views — the
+        // CLONED VOICES tab keeps the full list too)
         for (const v of _voices.filter(x => x.model === m.id))
-            rowsBox.append(voiceRow(v, 'vc-tts-voice'));
+            kids.push(voiceRow(v, 'vc-tts-voice'));
+        rowsBox.append(ttsCard(ttsModelRow(m), kids));
     }
-    // The macOS say engine gets its own group when the store holds voices
-    // riding it (legacy 'say:<Name>' entries) — TTS-2: those SYSTEM voices
-    // belong here, not among the clones. No header without rows: the full
-    // catalog stays on the macOS VOICES tab.
-    const sayV = _voices.filter(isSayVoice);
-    if (sayV.length) {
-        const head = document.createElement('div');
-        head.className = 'vc-row vc-tts-model vc-tts-mac';
-        const lab = document.createElement('div');
-        lab.className = 'vc-name';
-        lab.textContent = tf('uplift.voices.tts_mac_title',
-            'macOS system voices');
-        head.append(lab);
-        rowsBox.append(head);
-        for (const v of sayV)
-            rowsBox.append(voiceRow(v, 'vc-tts-voice'));
+    // The macOS say engine: a card whenever it is available (or the store
+    // still rides it) — voices per language as the tree above. The model
+    // cards ABOVE are already in the DOM; only this section waits on the
+    // cold say probe (TTS-3 pacing).
+    await _sayEnsure();
+    const picked = _sayPick();
+    const legacy = _voices.filter(v => {
+        if (!isSayVoice(v)) return false;
+        const tail = String(v.model).slice(4).toLowerCase();
+        return !picked.some(c => _sayTailMatch(c, tail));
+    });
+    _ttsSayOn = !!(_sayData && _sayData.supported) || !!legacy.length;
+    if (!_ttsSayOn) return;
+    const head = document.createElement('div');
+    head.className = 'vc-row vc-tts-model vc-tts-mac';
+    const lab = document.createElement('div');
+    lab.className = 'vc-name';
+    lab.textContent = tf('uplift.voices.tts_mac_title',
+        'macOS system voices');
+    const stat = document.createElement('span');
+    stat.className = 'vc-tts-stat';
+    stat.textContent = tf('uplift.voices.tts_mac_stat',
+        'Speakable now — no model to load');
+    head.append(lab, stat);
+    const kids = [];
+    const repaintMac = async () => {
+        // server owns preferred_for/default: re-GET, then rebuild the tab
+        try {
+            const d = await D.fetchJson(`${VAPI}/voices/say`);
+            if (d && d.supported) _sayData = d;
+        } catch (e) { /* keep the stale frame */ }
+        await _ttsRows(rowsBox, models);
+    };
+    for (const v of picked) {
+        const tail = String(v.identifier || v.name).toLowerCase();
+        const sv = _voices.find(x => isSayVoice(x)
+            && String(x.model).slice(4).toLowerCase() === tail)
+            || _voices.find(x => isSayVoice(x)
+                && String(x.model).slice(4).toLowerCase()
+                   === String(v.name).toLowerCase())
+            || null;
+        kids.push(sayRow(v, repaintMac, { localeInName: true, storeVoice: sv }));
     }
+    for (const v of legacy) kids.push(voiceRow(v, 'vc-tts-voice'));
+    rowsBox.append(ttsCard(head, kids));
 }
 
 async function ttsPanel(host, models) {
@@ -1629,19 +1765,20 @@ async function ttsPanel(host, models) {
         + 'as in the model manager.');
     box.append(title, hint);
     host.append(box);
-    if ((!models || !models.length) && !_voices.some(isSayVoice)) {
+    if (!_ttsDefaults) await _ttsLoadDefaults();
+    const rows = document.createElement('div');
+    rows.className = 'vc-list';
+    box.append(rows);
+    await _ttsRows(rows, models || []);      // sets _ttsSayOn (say-gated part last)
+    if (!models.length && !_ttsSayOn) {
+        // honest ONLY when the card area really is empty (no engines, no
+        // say) — a visible macOS card already contradicts the sentence
         const none = document.createElement('div');
         D.emptyMsg(none, tf('uplift.voices.tts_none',
             'No TTS model installed — download one in the model manager '
             + 'first.'));
         box.append(none);
-        return;
     }
-    if (!_ttsDefaults) await _ttsLoadDefaults();
-    const rows = document.createElement('div');
-    rows.className = 'vc-list';
-    box.append(rows);
-    await _ttsRows(rows, models || []);
 }
 
 let _vcTab = 'tts';       // TTS-2: TEXT TO SPEECH is the first/default tab
@@ -1712,7 +1849,7 @@ async function renderVoices() {
         await ttsPanel(host, models);
         const sub = $('vc-sub');
         if (sub) sub.textContent = (models.length
-            + (_voices.some(isSayVoice) ? 1 : 0)) + ' ×';
+            + (_ttsSayOn ? 1 : 0)) + ' ×';
         return;
     }
     if (_vcTab === 'say') {
