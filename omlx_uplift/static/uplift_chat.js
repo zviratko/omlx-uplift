@@ -2081,6 +2081,25 @@ var SAY_SEGS = 26;                     // waveform bars per row
 function r6() { return Math.random().toString(36).slice(2, 8); }
 function newMid() { return 'm' + Date.now().toString(36) + r6(); }
 function ensureMid(m) { if (m && !m.mid) m.mid = newMid(); return m ? m.mid : ''; }
+function sayRelease(mid) {
+    // A bubble that is gone must not keep talking, keep its rows on screen, or
+    // keep its identity in the plan map: that stale mid is what later grafted
+    // the dead reply's chunk plan onto a NEW bubble (user: 'the new bubble
+    // doesn't show chunks properly after delete + regenerate').
+    var p = mid && _plans[mid];
+    if (!p) return false;
+    if (p.q) {
+        if (_speakQ === p.q) { try { speakCancel(); } catch (e) { p.q.stop(); } }
+        else { try { p.q.stop(); } catch (e) {} }
+        p.q = null;
+    }
+    if (_livePlan === p) _livePlan = null;
+    if (_turnMid === mid) _turnMid = '';
+    if (p.planEl && p.planEl.remove) p.planEl.remove();
+    p.planEl = null; p.bubble = null; p.box = null; p.rows = []; p.seqs = {};
+    delete _plans[mid];
+    return true;
+}
 function memKey(text) { return chatVoiceId() + '\u001f' + text; }
 function memGet(text) {
     var k = memKey(text), v = _mem.get(k);
@@ -3019,7 +3038,10 @@ function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
         // that line — one hover rule for all message controls, not two.
         var track = sayTrackEl(idx);
         box.appendChild(track);
-        if (_plans[idx]) _plans[idx].box = track;
+        // plans are keyed by mid: an index goes stale the moment a row above is
+        // deleted, and the pair would then drive another bubble's audio
+        var owner = messageAt(idx);
+        if (owner && owner.mid && _plans[owner.mid]) _plans[owner.mid].box = track;
     }
     return box;
 }
@@ -3113,6 +3135,8 @@ function msgRegenerate(idx) {
     // slice BEFORE the prompt: the resend re-enters the user row through
     // onMessage (same as the old last-turn toolbar function did — slicing
     // at the assistant index would store the prompt twice)
+    for (var k = idx; k < ms.length; k++)
+        if (ms[k] && ms[k].role === 'assistant') sayRelease(ms[k].mid);
     _conv.messages = ms.slice(0, idx - 1);
     renderHistory();
     saveConv();
@@ -3319,6 +3343,7 @@ function msgDelete(idx) {
     if (!_conv) return;
     var m = messageAt(idx);
     if (!m) return;
+    sayRelease(m.mid);                 // (user) deleting a bubble silences it
     _conv.messages.splice(idx, 1);
     renderHistory();
     saveConv();
@@ -4931,7 +4956,20 @@ function mount() {
                 }
                 if (role === 'assistant' && _turnMid) {
                     // VOICE-16: bind the plan (and therefore the audio files)
-                    // to this bubble before it reaches the store
+                    // to this bubble before it reaches the store.
+                    // A turn that ended badly (stopped, deleted, errored) left
+                    // its minted mid behind; if the text does not match what
+                    // that plan spoke, the plan belongs to somebody else.
+                    var carry = _plans[_turnMid];
+                    if (carry) {
+                        var now = String(row.content || '').replace(/\s+/g, ' ').trim();
+                        var spoke = (carry.chunks || []).join(' ').replace(/\s+/g, ' ').trim();
+                        if (spoke && now.slice(0, 24) !== spoke.slice(0, 24)) {
+                            sayRelease(_turnMid);
+                        }
+                    }
+                }
+                if (role === 'assistant' && _turnMid) {
                     row.mid = _turnMid;
                     var lp = _plans[_turnMid];
                     if (lp) {

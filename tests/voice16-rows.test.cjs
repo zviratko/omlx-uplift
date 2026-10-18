@@ -291,6 +291,39 @@ test('play-all: a chunk already handed to the queue is never pushed twice', () =
         'a SCHEDULED chunk must not steal the highlight');
 });
 
+test('release: a deleted or regenerated bubble stops talking and loses its mid', () => {
+    const rel = slice('sayRelease');
+    assert.match(rel, /_plans\[mid\]/, 'it finds the plan by the bubble identity');
+    assert.match(rel, /speakCancel\(\)/, 'the active read is cancelled');
+    assert.match(rel, /p\.q\.stop\(\)/, 'a background read is stopped too');
+    assert.match(rel, /_turnMid === mid\) _turnMid = ''/,
+                 'the minted mid is not left behind for the next reply');
+    assert.match(rel, /delete _plans\[mid\]/, 'and the plan itself goes');
+    assert.match(slice('msgDelete'), /sayRelease\(m\.mid\);/,
+                 'Delete silences that bubble');
+    const regen = slice('msgRegenerate');
+    assert.match(regen, /role === 'assistant'\) sayRelease\(ms\[k\]\.mid\)/,
+                 'Regenerate silences every reply it cuts away');
+});
+
+test('identity: a stale turn mid cannot lend its chunks to a new reply', () => {
+    // deep-chat keeps the minted mid from the turn start; an aborted or deleted
+    // turn must not have it stamped onto the next answer (that is what made a
+    // regenerated bubble show the dead one's chunk lines)
+    const stamp = SRC.slice(SRC.indexOf('VOICE-16: bind the plan'),
+                            SRC.indexOf('VOICE-16: bind the plan') + 1400);
+    assert.match(stamp, /var carry = _plans\[_turnMid\];/);
+    assert.match(stamp, /now\.slice\(0, 24\) !== spoke\.slice\(0, 24\)/,
+                 'text is compared before the plan is reused');
+    assert.match(stamp, /sayRelease\(_turnMid\);/);
+});
+
+test('pair: the action line binds by mid, never by row position', () => {
+    const acts = slice('msgActionsEl');
+    assert.match(acts, /var owner = messageAt\(idx\);\n        if \(owner && owner\.mid && _plans\[owner\.mid\]\)/,
+                 'plans are keyed by mid; an index shifts when a row is deleted');
+});
+
 test('track: a rebuilt action line does not orphan the pair', () => {
     const adopt = slice('sayAdoptTrack');
     assert.match(adopt, /plan\.box\.isConnected === false/,
