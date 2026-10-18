@@ -186,8 +186,13 @@ test('i18n: every VOICE-16 key is actually reached from the chat module', () => 
 test('structure: the speaker button is replaced by the transport row', () => {
     assert.ok(!/chat-native-msg-action speak/.test(SRC),
               'the old per-bubble speaker button is gone');
-    assert.ok(/box\.appendChild\(sayTrackEl\(idx\)\)/.test(SRC),
-              'the action line carries the audio transport instead');
+    assert.ok(!/box\.appendChild\(sayTrackEl\(idx\)\)/.test(SRC),
+              'the action line no longer carries the transport');
+    assert.ok(/plan\.box = sayTrackEl\(idx\);/.test(SRC)
+        && /g\.appendChild\(plan\.box\)/.test(SRC),
+        'the whole-reply controls live at the END of the chunk line');
+    assert.match(slice('sayTrackEl'), /chat-native-say-row chat-native-say-all/,
+                 'the transport is styled as one more row');
     assert.ok(/sayAttach\(holder, storeIdx, role, b\)/.test(SRC),
               'rows refresh on every attach pass');
     assert.ok(/row\.mid = _turnMid/.test(SRC),
@@ -221,7 +226,7 @@ test('css: the stack is a 3-column grid capped at five visible rows', () => {
     assert.match(grid, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
     assert.match(grid, /max-height:\s*118px/);
     assert.match(grid, /overflow-y:\s*auto/);
-    const guard = cssRule('.chat-native-say-inline[hidden], .chat-native-say-grid[hidden]', CSS);
+    const guard = cssRule('.chat-native-say-all[hidden], .chat-native-say-grid[hidden]', CSS);
     assert.match(guard, /display:\s*none/,
                  'author display beats [hidden] without this guard: ' + guard);
     // no rule re-opens the same selector (the css2 doctrine, applied to the
@@ -242,6 +247,9 @@ test('css: the stack is a 3-column grid capped at five visible rows', () => {
 test('rows: a chunk row is built from real parts, not just wired ones', () => {
     // the append-omission class: a control built, wired and never appended
     // passes every byId probe and shows up EMPTY in the browser
+    const pp = cssRule('.chat-native-say-pp, .chat-native-say-re', themeCss());
+    assert.match(pp, /font: inherit;\s*font-size: 14px/,
+                 'the reload glyph is set AFTER the shorthand or it stays small');
     const body = slice('sayRow');
     assert.match(body, /row\.append\(pp, n, wave, re\)/,
                  'play, number, waveform and reload all ride the row');

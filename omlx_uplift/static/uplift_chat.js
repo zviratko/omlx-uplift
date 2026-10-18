@@ -1928,8 +1928,15 @@ function endSpeakTurn(gen) {
     var chunks = [];
     if (san) { var last = san.flush(); if (last) chunks = z.push(last); }
     chunks = chunks.concat(z.flush());
-    for (var i = 0; i < chunks.length; i++)
-        if (q.push(chunks[i]) >= 0) _speakPushed++;
+    for (var i = 0; i < chunks.length; i++) {
+        // the last sentence of a reply usually arrives HERE, not in the feed:
+        // it has to join the plan as well, or it plays without a row or a number
+        if (q.push({ text: chunks[i], source: _livePlan
+                     ? chunkSource(_livePlan.owner, chunks[i]) : null }) >= 0) {
+            _speakPushed++;
+            if (_livePlan) { _livePlan.chunks.push(chunks[i]); sayGrow(_livePlan); }
+        }
+    }
     var pushed = _speakPushed, dropMark = _speakDropMark,
         playMark = _speakPlayedMark;
     q.drain().then(function (res) {
@@ -2275,6 +2282,7 @@ function sayStructure(plan, bubble) {
     if (g && g.appendChild) {
         while (plan.rows.length < plan.chunks.length)
             g.appendChild(sayRow(plan, plan.rows.length));
+        if (plan.box) g.appendChild(plan.box);       // keep it the last control
     }
     sayAnnotate(plan, bubble);
     sayPaintAll(plan);
@@ -2730,7 +2738,7 @@ function sayHighlight(plan, seq) {
    AUTO-SPEAK on: one row per chunk under the bubble, always visible, each with
    its own number, bar and ⟳. */
 function sayTrackEl(idx) {
-    var box = el('div', 'chat-native-say-inline');
+    var box = el('div', 'chat-native-say-row chat-native-say-all');
     box.dataset.idx = String(idx);
     var pp = el('button', 'chat-native-say-pp'); pp.type = 'button';
     pp.textContent = '\u25b6';
@@ -2741,14 +2749,13 @@ function sayTrackEl(idx) {
     var fill = el('i');
     bar.appendChild(fill);
     bar.hidden = true;
-    var st = el('span', 'chat-native-say-status', '');
     var re = el('button', 'chat-native-say-re'); re.type = 'button';
     re.textContent = '\u27f3';
     re.title = tf2('uplift.chat.say_reread', 'Record the whole reply again');
     re.dataset.i18nTitle = 'uplift.chat.say_reread';
     re.dataset.enTitle = re.title;
-    box.append(pp, bar, st, re);
-    box._pp = pp; box._fill = fill; box._bar = bar; box._st = st; box._re = re;
+    box.append(pp, bar, re);
+    box._pp = pp; box._fill = fill; box._bar = bar; box._re = re;
     box._idx = idx;
     pp.addEventListener('click', function (ev) {
         ev.stopPropagation();
@@ -2769,7 +2776,8 @@ function sayInlinePaint(plan) {
     var box = plan && plan.box;
     if (!box || !box._fill) return;
     var q = plan.q;
-    box._st.textContent = tf2('uplift.chat.say_lines', '{n} lines')
+    // the line count rides the tooltip: it says what this control covers
+    box.title = tf2('uplift.chat.say_lines', '{n} lines')
         .replace('{n}', String(plan.chunks.length));
     if (!q) { box._bar.hidden = true; return; }
     var pos = q.position();
@@ -2826,6 +2834,8 @@ function sayGridEl(plan, idx) {
     g.__plan = plan;
     plan.planEl = g;
     for (var i = 0; i < plan.chunks.length; i++) g.appendChild(sayRow(plan, i));
+    plan.box = sayTrackEl(idx);            // whole-reply play + ⟳, at the end
+    g.appendChild(plan.box);
     return g;
 }
 function sayFindGrid(holder) {
@@ -2959,13 +2969,9 @@ function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
         // button exists only while a voice is selected; voices are an
         // opt-in uplift feature, so no voices = no affordance (not a
         // dead button that errors on click).
-        if (hasVoices()) {
-            // VOICE-16: the read-aloud TRANSPORT replaces the old speaker
-            // button — play/pause left, progress middle, \u27f3 right, pushed to
-            // the right end of the action line. Its chunk list IS the bubble's
-            // plan, so the numbers under the text and these rows agree.
-            box.appendChild(sayTrackEl(idx));
-        }
+        // VOICE-16f: the whole-reply transport no longer sits here — it lives
+        // at the END of the chunk line under the bubble (sayGridEl), so every
+        // audio control for a message reads as one row.
         act('regen', t('chat.regenerate_tooltip', 'Regenerate'),
             t('chat.regenerate_tooltip', 'Regenerate'), msgRegenerate);
     }
@@ -4622,10 +4628,11 @@ function applyShadowTheme(dc) {
         // VOICE-16: the bubble audio player. Ad-hoc transport sits on the
         // action line and is pushed right; the auto-speak stack is a 3-column
         // grid capped at five visible rows, then it scrolls inside.
-        '.chat-native-say-inline { display: flex; align-items: center;',
-        '  gap: 6px; margin-left: auto; min-width: 130px; }',
-        '.chat-native-say-inline .chat-native-say-bar { flex: 1 1 auto; }',
-        '.chat-native-say-inline[hidden], .chat-native-say-grid[hidden] {',
+        // the whole-reply transport is one more control on the chunk line
+        '.chat-native-say-all { min-width: 0; }',
+        '.chat-native-say-all .chat-native-say-bar { flex: 1 1 auto;',
+        '  position: static; height: 6px; bottom: auto; }',
+        '.chat-native-say-all[hidden], .chat-native-say-grid[hidden] {',
         '  display: none; }',
         '.chat-native-say-grid { display: grid; gap: 2px 10px; width: 100%;',
         '  grid-template-columns: repeat(3, minmax(0, 1fr));',
@@ -4638,7 +4645,7 @@ function applyShadowTheme(dc) {
         '  background: color-mix(in srgb, var(--accent, #4c8dff) 14%, transparent); }',
         '.chat-native-say-pp, .chat-native-say-re { background: none; border: 0;',
         '  color: inherit; cursor: pointer; padding: 0 2px; font: inherit;',
-        '  line-height: 1; border-radius: var(--radius); }',
+        '  font-size: 14px; line-height: 1; border-radius: var(--radius); }',
         '.chat-native-say-pp:hover, .chat-native-say-re:hover {',
         '  color: var(--ink, #e6edf3); }',
         '.chat-native-say-row.playing .chat-native-say-pp,',
