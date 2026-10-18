@@ -315,6 +315,10 @@ def test_synth_end_to_end_auto_routes(monkeypatch, on_mac):
             returncode, stdout, stderr = 0, "", ""
         return S()
     monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    # the detector guards on shutil.which('osascript'): absent on the
+    # Linux runner, so fake the whole Mac here — the wiring under test
+    # is synth_bytes -> detect -> preferred chain, not PATH discovery
+    monkeypatch.setattr(SE.shutil, "which", lambda x: "/usr/bin/osascript")
     SE.synth_bytes("", "Ahoj, jak se dnes máš?", None, None, pref)
     assert seen["cmd"][seen["cmd"].index("-v") + 1] == \
         "com.apple.ttsbundle.siri_cs-CZ_compact"
