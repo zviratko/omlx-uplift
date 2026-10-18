@@ -4651,11 +4651,12 @@ function applyShadowTheme(dc) {
         // action line and is pushed right; the auto-speak stack is a 3-column
         // grid capped at five visible rows, then it scrolls inside.
         // the whole-reply transport is one more control on the chunk line
-        '.chat-native-say-all { flex: 0 0 auto; min-width: 78px;',
-        '  visibility: hidden; }',
-        '.chat-native-say-grid:hover .chat-native-say-all,',
-        '.chat-native-say-grid:focus-within .chat-native-say-all {',
-        '  visibility: visible; }',
+        '.chat-native-say-all { flex: 0 0 78px; visibility: hidden; }',
+        // same trigger as the message actions: hovering the MESSAGE reveals it
+        // (the old rule asked for a hover on the control strip itself, which is
+        // invisible until you are already standing on it)
+        '.inner-message-container:hover .chat-native-say-all,',
+        '.chat-native-say-all:focus-within { visibility: visible; }',
         '.chat-native-say-all .chat-native-say-bar { flex: 1 1 auto;',
         '  position: static; height: 6px; bottom: auto; }',
         '.chat-native-say-all[hidden], .chat-native-say-grid[hidden] {',
@@ -4670,8 +4671,11 @@ function applyShadowTheme(dc) {
         // bubble is narrow, so the whole-reply pair fits on the last line too
         // instead of being pushed onto one of its own (user: 'not on their own
         // line'). Three controls per line while there is room, fewer when not.
+        // Three chunk controls per line, measured in PERCENT with the tail of
+        // the line reserved for the whole-reply pair (78px + its gap): the last
+        // line therefore has room for it and it never gets a line of its own.
         '.chat-native-say-row { display: flex; align-items: center; gap: 4px;',
-        '  flex: 1 1 150px; min-width: 0; position: relative;',
+        '  flex: 1 1 calc((100% - 120px) / 3); min-width: 0; position: relative;',
         '  padding: 1px 3px; border-radius: var(--radius);',
         '  font-size: 11px; color: var(--dim, #8b98ab); }',
         '.chat-native-say-row.hot {',

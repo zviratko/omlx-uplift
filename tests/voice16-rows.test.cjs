@@ -227,13 +227,13 @@ test('css: the stack is a 3-column grid capped at five visible rows', () => {
     assert.match(grid, /max-height:\s*118px/);
     assert.match(grid, /overflow-y:\s*auto/);
     const row = cssRule('.chat-native-say-row', CSS);
-    assert.match(row, /flex:\s*1 1 150px/,
-                 'rows share the line and shrink rather than pushing the pair off it');
+    assert.match(row, /flex:\s*1 1 calc\(\(100% - 120px\) \/ 3\)/,
+                 'the line keeps a reserved tail so the pair is never orphaned');
     const all = cssRule('.chat-native-say-all', CSS);
-    assert.match(all, /flex:\s*0 0 auto/, 'the whole-reply pair takes its own width');
-    assert.match(all, /visibility:\s*hidden/, 'hidden until the line is hovered');
-    assert.match(CSS, /\.chat-native-say-grid:hover \.chat-native-say-all[^}]*visibility:\s*visible/,
-                 'revealed when the control line is hovered');
+    assert.match(all, /flex:\s*0 0 78px/, 'the pair is exactly the reserved tail');
+    assert.match(all, /visibility:\s*hidden/, 'hidden until the message is hovered');
+    assert.match(CSS, /\.inner-message-container:hover \.chat-native-say-all[^}]*visibility:\s*visible/,
+                 'hovering the MESSAGE reveals it, not only the strip itself');
     // the pair rule comes first in the sheet, so match the standalone one
     assert.match(CSS, /\.chat-native-say-re \{ font-size: 17px; \}/,
                  'the reload glyph is sized to read as big as play');
