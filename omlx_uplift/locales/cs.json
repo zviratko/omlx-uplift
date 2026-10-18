@@ -1071,5 +1071,10 @@
  "uplift.inflight.unload": "UVOLNIT",
  "uplift.inflight.unload_tip": "Uvolnit tento model",
  "uplift.chat.speak_header": "Předčítání",
- "uplift.chat.auto": "Auto"
+ "uplift.chat.auto": "Auto",
+ "uplift.audio.transcribing": "Přepis",
+ "uplift.audio.realtime": "Přepis realtime",
+ "uplift.audio.synthesizing": "Syntéza řeči",
+ "uplift.audio.processing": "Zpracování zvuku",
+ "uplift.audio.busy": "Zvuková úloha"
 }

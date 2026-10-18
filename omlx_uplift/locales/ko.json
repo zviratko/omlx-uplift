@@ -1086,5 +1086,10 @@
  "uplift.inflight.unload": "언로드",
  "uplift.inflight.unload_tip": "이 모델 언로드",
  "uplift.chat.speak_header": "읽기",
- "uplift.chat.auto": "자동"
+ "uplift.chat.auto": "자동",
+ "uplift.audio.transcribing": "변환 중",
+ "uplift.audio.realtime": "실시간 변환",
+ "uplift.audio.synthesizing": "음성 합성 중",
+ "uplift.audio.processing": "오디오 처리 중",
+ "uplift.audio.busy": "오디오 작업"
 }

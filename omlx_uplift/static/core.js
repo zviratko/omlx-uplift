@@ -71,6 +71,15 @@ function normalize(raw) {
             // 'dflash' block — null on non-DFlash engines); the IN-FLIGHT
             // card mirrors classic's model-level sub-row from it.
             dflash: (m.dflash && typeof m.dflash === 'object') ? m.dflash : null,
+            // VOICE-15: audio-engine work (STT/TTS/STS calls live right now
+            // + open realtime sessions), merged server-side onto audio rows
+            // only. [] on text models — the IN-FLIGHT card then renders a
+            // sub-row instead of the Idle line.
+            audio: (Array.isArray(m.audio) ? m.audio : [])
+                .map(x => ({ kind: String((x && x.kind) || ''),
+                             count: num(x && x.count) || 1,
+                             elapsed: num(x && x.elapsed) }))
+                .filter(x => x.kind),
             // Live per-request rows: kept raw-ish (guarded) for the request panel
             // and the client-side percentile tracker.
             prefilling: (Array.isArray(m.prefilling) ? m.prefilling : []).map(p => ({

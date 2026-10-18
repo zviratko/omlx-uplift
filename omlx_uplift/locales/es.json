@@ -1075,5 +1075,10 @@
  "uplift.inflight.unload": "DESCARGAR",
  "uplift.inflight.unload_tip": "Descargar este modelo",
  "uplift.chat.speak_header": "Lectura",
- "uplift.chat.auto": "Auto"
+ "uplift.chat.auto": "Auto",
+ "uplift.audio.transcribing": "Transcribiendo",
+ "uplift.audio.realtime": "Transcripción en tiempo real",
+ "uplift.audio.synthesizing": "Sintetizando voz",
+ "uplift.audio.processing": "Procesando audio",
+ "uplift.audio.busy": "Trabajo de audio"
 }

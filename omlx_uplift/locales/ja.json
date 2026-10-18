@@ -1074,5 +1074,10 @@
  "uplift.inflight.unload": "アンロード",
  "uplift.inflight.unload_tip": "このモデルをアンロード",
  "uplift.chat.speak_header": "読み上げ",
- "uplift.chat.auto": "自動"
+ "uplift.chat.auto": "自動",
+ "uplift.audio.transcribing": "文字起こし中",
+ "uplift.audio.realtime": "リアルタイム文字起こし",
+ "uplift.audio.synthesizing": "音声合成中",
+ "uplift.audio.processing": "音声処理中",
+ "uplift.audio.busy": "音声処理"
 }

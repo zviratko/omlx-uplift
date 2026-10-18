@@ -1071,5 +1071,10 @@
  "uplift.inflight.unload": "UNLOAD",
  "uplift.inflight.unload_tip": "Unload this model",
  "uplift.chat.speak_header": "Speak",
- "uplift.chat.auto": "Auto"
+ "uplift.chat.auto": "Auto",
+ "uplift.audio.transcribing": "Transcribing",
+ "uplift.audio.realtime": "Realtime transcription",
+ "uplift.audio.synthesizing": "Synthesizing",
+ "uplift.audio.processing": "Processing audio",
+ "uplift.audio.busy": "Audio work"
 }

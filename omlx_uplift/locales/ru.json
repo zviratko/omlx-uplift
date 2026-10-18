@@ -1071,5 +1071,10 @@
  "uplift.inflight.unload": "ВЫГРУЗИТЬ",
  "uplift.inflight.unload_tip": "Выгрузить эту модель",
  "uplift.chat.speak_header": "Озвучка",
- "uplift.chat.auto": "Авт."
+ "uplift.chat.auto": "Авт.",
+ "uplift.audio.transcribing": "Транскрипция",
+ "uplift.audio.realtime": "Транскрипция в реальном времени",
+ "uplift.audio.synthesizing": "Синтез речи",
+ "uplift.audio.processing": "Обработка аудио",
+ "uplift.audio.busy": "Аудиозадача"
 }

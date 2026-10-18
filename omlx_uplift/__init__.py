@@ -62,6 +62,17 @@ def register(app) -> None:
 
         logging.getLogger("omlx_uplift").exception(
             "instrument install failed (tick-based capture only)")
+    # VOICE-15: audio-engine busy wraps (STT/TTS/STS) — independent of the
+    # LLM instrument paths; the status card stays quiet if this fails.
+    try:
+        from . import audio_activity
+
+        audio_activity.install()
+    except Exception:
+        import logging
+
+        logging.getLogger("omlx_uplift").exception(
+            "audio activity install failed (audio rows stay idle)")
     app._omlx_uplift_mounted = True
 
 

@@ -204,6 +204,17 @@ def _build_stats_raw() -> Optional[dict]:
     return payload
 
 
+def _merge_audio(payload):
+    """VOICE-15 seam: attach audio-engine activity to the stats payload.
+
+    Soft import INSIDE (same rule as the other seams: this module must
+    import cleanly where omlx is absent). The merge itself never raises —
+    audio_activity.merge_stats guards and returns the payload unchanged."""
+    from . import audio_activity
+
+    return audio_activity.merge_stats(payload)
+
+
 def _build_alltime_raw() -> Optional[int]:
     """All-time served request count (U27's 30 s ``scope=alltime`` poll,
     now a single int on the stream). None when unavailable; 0 is a REAL
@@ -508,6 +519,13 @@ class StatsFeed:
                                  "stats")
             if fast is not None:
                 stats = {**(self._slow or {}), **fast}
+        if stats is not None:
+            # VOICE-15: audio-engine activity rides BOTH tiers — the fast
+            # rebuild reuses the cached slow composite, and a 3-second
+            # transcription must not wait up to SLOW_EVERY_S for the next
+            # engine walk. merge_stats replaces rows, never mutates the
+            # cache. Failures return the payload untouched.
+            stats = _merge_audio(stats)
         alltime = self._attempt(alltime_b, "alltime")
 
         with self._lock:
