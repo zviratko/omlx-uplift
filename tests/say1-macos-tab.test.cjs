@@ -424,7 +424,7 @@ test('hidden-state CSS guard exists (a display rule could outspec [hidden])', ()
               '.vc-say-grp[hidden]{display:none} must ride alongside the fold');
     // rows indent under their language header (user: 'add some
     // indentation after the language is expanded')
-    assert.ok(/\.vc-say-grp \.vc-row \{ padding-left: 24px; \}/.test(css),
+    assert.ok(/\.vc-say-grp \.vc-row \{ padding-left: 38px; \}/.test(css),
               'voice rows indent inside the expanded group');
     // the header speaks at the same size as the voices below it
     const head = css.match(/\.vc-say-head \{[^}]*font: ([^;]+);/);

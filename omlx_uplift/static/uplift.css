@@ -2084,7 +2084,7 @@ label.se-row.pending-restart > .se-ctl > select {
 .vc-say-count { flex: 0 0 auto; color: var(--dim); font-weight: 400; }
 .vc-say-grp[hidden] { display: none; }
 /* voices sit indented under their language header (one arrow width in) */
-.vc-say-grp .vc-row { padding-left: 24px; }
+.vc-say-grp .vc-row { padding-left: 38px; }
 .vc-say-off { opacity: .55; }
 .vc-say-off .vc-name { font-weight: 400; }
 .vc-say-filter { display: block; width: 100%; box-sizing: border-box;
