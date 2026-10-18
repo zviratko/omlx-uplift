@@ -78,8 +78,13 @@ def on_mac(monkeypatch):
     monkeypatch.setattr(SE, "_cache",
                         {"ts": 9e15, "voices": SE.parse_av(AV2)})
     # SAY-2c: the system-language probe never runs for real in tests —
-    # '' keeps every legacy expectation (no override, first flagged row)
+    # '' keeps every legacy expectation (no override, first flagged row).
+    # TTS-4b: same for the selected-voice probe (a real osascript would
+    # read the TEST MAC's System Settings into every expectation).
     monkeypatch.setattr(SE, "system_language", lambda force=False: "")
+    monkeypatch.setattr(SE, "selected_voice_identifier",
+                        lambda force=False: "")
+    monkeypatch.setattr(SE, "_sel_cache", {"ts": 9e15, "id": ""})
     return SE
 
 
@@ -172,20 +177,27 @@ def test_language_voice_default_beats_quality_then_none(on_mac):
     assert SE.language_voice("", {}) is None
 
 
-def test_language_voice_tier_beats_the_is_default_flag(on_mac):
-    """TTS-4 (user): AVFoundation's isDefault marks the FACTORY voice of
-    a language, not the Spoken Content choice. A Mac that downloaded
-    'Zuzana (Premium)' answers Czech with Premium — the chip and the
-    router must agree with that, never name the compact factory row."""
-    rows = [
-        {"name": "Zuzana", "locale": "cs-CZ", "quality": "standard",
-         "identifier": "com.apple.voice.super-compact.cs-CZ.Zuzana",
-         "installed": True, "default": True},
-        {"name": "Zuzana (Premium)", "locale": "cs-CZ", "quality": "premium",
-         "identifier": "com.apple.voice.premium.cs-CZ.Zuzana",
-         "installed": True, "default": False},
-    ]
-    on_mac._cache.update(ts=9e15, voices=rows)
+ZUZ_PAIR = [
+    {"name": "Zuzana", "locale": "cs-CZ", "quality": "standard",
+     "identifier": "com.apple.voice.super-compact.cs-CZ.Zuzana",
+     "installed": True, "default": True},
+    {"name": "Zuzana (Premium)", "locale": "cs-CZ", "quality": "premium",
+     "identifier": "com.apple.voice.premium.cs-CZ.Zuzana",
+     "installed": True, "default": False},
+]
+
+
+def test_selected_voice_beats_the_factory_flag(monkeypatch, on_mac):
+    """TTS-4b (user): System Settings ▸ Read & Speak names the Mac's real
+    default voice; AVFoundation's isDefault only marks the factory row.
+    A Mac whose selection is 'Zuzana (Premium)' must badge and answer
+    with Premium — exactly what bare `say` speaks (byte-proven)."""
+    monkeypatch.setattr(SE, "selected_voice_identifier",
+                        lambda force=False:
+                        "com.apple.voice.premium.cs-CZ.Zuzana")
+    on_mac._cache.update(ts=9e15, voices=[dict(r) for r in ZUZ_PAIR])
+    assert SE.selected_row()["identifier"] == \
+        "com.apple.voice.premium.cs-CZ.Zuzana"
     assert SE.language_voice("cs-CZ", {})["identifier"] == \
         "com.apple.voice.premium.cs-CZ.Zuzana"
     # the badge set answers with exactly the row the router picks
@@ -193,39 +205,66 @@ def test_language_voice_tier_beats_the_is_default_flag(on_mac):
         {"com.apple.voice.premium.cs-CZ.Zuzana"}
 
 
-def test_default_voice_follows_the_tier_for_the_system_language(
-        monkeypatch, on_mac):
-    monkeypatch.setattr(SE, "system_language", lambda force=False: "cs-CZ")
-    rows = [
-        {"name": "Zuzana", "locale": "cs-CZ", "quality": "standard",
-         "identifier": "com.apple.voice.super-compact.cs-CZ.Zuzana",
-         "installed": True, "default": True},
-        {"name": "Zuzana (Premium)", "locale": "cs-CZ", "quality": "premium",
-         "identifier": "com.apple.voice.premium.cs-CZ.Zuzana",
-         "installed": True, "default": False},
-    ]
+def test_flag_answers_when_no_selection_is_known(on_mac):
+    # probe blind (non-Mac layout, deleted voice): the factory flag keeps
+    # answering its language — quality alone must not invent a default
+    # (kocour truth: bare say == flagged Samantha although an Enhanced
+    #  en-US row is installed)
+    on_mac._cache.update(ts=9e15, voices=[dict(r) for r in ZUZ_PAIR])
+    assert SE.selected_row() is None
+    assert SE.language_voice("cs-CZ", {})["identifier"] == \
+        "com.apple.voice.super-compact.cs-CZ.Zuzana"
+    assert SE.effective_default_addrs() == \
+        {"com.apple.voice.super-compact.cs-CZ.Zuzana"}
+
+
+def test_selection_only_answers_its_own_language(monkeypatch, on_mac):
+    # a Premium cs-CZ selection must not hijack sk-SK: Laura still
+    # answers Slovak (flagged there) — the selection scores locales like
+    # everything else in the chain
+    monkeypatch.setattr(SE, "selected_voice_identifier",
+                        lambda force=False:
+                        "com.apple.voice.premium.cs-CZ.Zuzana")
+    rows = [dict(r) for r in ZUZ_PAIR] + [
+        {"name": "Laura", "locale": "sk-SK", "quality": "standard",
+         "identifier": "com.apple.voice.compact.sk-SK.Laura",
+         "installed": True, "default": True}]
     on_mac._cache.update(ts=9e15, voices=rows)
+    assert SE.language_voice("sk", {})["name"] == "Laura"
+
+
+def test_default_voice_leads_with_the_selection(monkeypatch, on_mac):
+    # no sysl, no flags matching... the selection IS the bare-say default
+    monkeypatch.setattr(SE, "selected_voice_identifier",
+                        lambda force=False:
+                        "com.apple.voice.premium.cs-CZ.Zuzana")
+    on_mac._cache.update(ts=9e15, voices=[dict(r) for r in ZUZ_PAIR])
     assert SE.default_voice()["identifier"] == \
         "com.apple.voice.premium.cs-CZ.Zuzana"
 
 
-def test_say_list_badges_the_effective_default_not_the_flag(client, on_mac):
-    rows = [
-        {"name": "Zuzana", "locale": "cs-CZ", "quality": "standard",
-         "sample": "",
-         "identifier": "com.apple.voice.super-compact.cs-CZ.Zuzana",
-         "installed": True, "downloaded": False, "default": True},
-        {"name": "Zuzana (Premium)", "locale": "cs-CZ", "quality": "premium",
-         "sample": "",
-         "identifier": "com.apple.voice.premium.cs-CZ.Zuzana",
-         "installed": True, "downloaded": True, "default": False},
-    ]
+def test_say_list_badges_the_selection_over_the_flag(client,
+                                                     monkeypatch, on_mac):
+    rows = [dict(r) for r in ZUZ_PAIR]
+    for r in rows:
+        r.update(sample="", downloaded=r["quality"] != "standard")
     on_mac._cache.update(ts=9e15, voices=rows)
-    r = client.get("/uplift/api/voices/say")
-    assert r.status_code == 200
-    vs = {v["identifier"]: v for v in r.json()["voices"]}
+    # without a selection: the factory flag is badged
+    vs = {v["identifier"]: v for v in
+          client.get("/uplift/api/voices/say").json()["voices"]}
+    assert vs["com.apple.voice.super-compact.cs-CZ.Zuzana"]["default"] is True
+    assert vs["com.apple.voice.premium.cs-CZ.Zuzana"]["default"] is False
+    # with the user's System Settings selection: the badge moves — and
+    # the compact row becomes what the tabs call an OVERRIDE candidate
+    monkeypatch.setattr(SE, "selected_voice_identifier",
+                        lambda force=False:
+                        "com.apple.voice.premium.cs-CZ.Zuzana")
+    vs = {v["identifier"]: v for v in
+          client.get("/uplift/api/voices/say").json()["voices"]}
     assert vs["com.apple.voice.premium.cs-CZ.Zuzana"]["default"] is True
     assert vs["com.apple.voice.super-compact.cs-CZ.Zuzana"]["default"] is False
+    d = client.get("/uplift/api/voices/say").json()
+    assert d["system_voice"] == "Zuzana (Premium)"
 
 
 def test_route_explicit_locale_tail_and_default(on_mac):
@@ -276,6 +315,10 @@ def test_synth_omits_voice_flag_for_system_default(monkeypatch):
     monkeypatch.setattr(SE, "_say_rows", lambda: [])
     monkeypatch.setattr(SE, "detect_language", lambda t: "")
     monkeypatch.setattr(SE, "system_language", lambda force=False: "")
+    # TTS-4b: this test fakes ALL of subprocess.run — the selected-voice
+    # probe must not fall into it
+    monkeypatch.setattr(SE, "selected_voice_identifier",
+                        lambda force=False: "")
     seen = {}
 
     class P:
@@ -531,10 +574,11 @@ def test_say_list_advertises_the_system_default(client, on_mac, monkeypatch):
     monkeypatch.setattr(SE, "system_language", lambda force=False: "cs-CZ")
     d = client.get("/uplift/api/voices/say").json()
     assert d["system_language"] == "cs-CZ"
-    # TTS-4: the system language's OWN best tier answers — Ilja (Premium)
-    # for cs-CZ. The old code fell through to the factory-flagged row of
-    # ANOTHER language (Samantha) whenever cs-CZ held no flag; that is
-    # what made the UI name the wrong 'macOS default'.
+    # TTS-4b: no selection in this fixture, cs-CZ has no flagged row —
+    # chain step 4 (best tier) answers: Ilja (Premium). The old code fell
+    # through to the factory-flagged row of ANOTHER language (Samantha)
+    # whenever cs-CZ held no flag; that is what made the UI name the
+    # wrong 'macOS default'.
     assert d["system_voice"] == "Ilja"
     by = {v["identifier"]: v for v in d["voices"]}
     assert by["com.apple.voice.compact.cs-CZ.Zuzana"]["answers_default"] is True

@@ -495,17 +495,19 @@ def _marked_voice(lang, preferred=None) -> Optional[dict]:
 
 def language_voice(lang, preferred=None) -> Optional[dict]:
     """SAY-2: the row that answers a language-carrying `say` request.
-    Chain: the voice marked preferred for that language (exact locale
-    beats primary-language match; a mark pointing at a voice this Mac
-    no longer holds is skipped) -> the language's BEST installed tier
-    (the tab's quality promise: Premium > Enhanced > Personal > standard)
-    -> None when the language has nothing installed — the caller fails
-    honestly instead of speaking the text in a random language.
-    TTS-4 (user): the tier beats AVFoundation's isDefault flag. That flag
-    marks the factory default-quality voice, NOT the user's System
-    Settings choice — a Mac that downloaded 'Zuzana (Premium)' speaks
-    Czech with Premium, and said so when the chip named the compact
-    factory row instead. Within a tier the flagged row still wins."""
+    Chain (TTS-4b, System Settings as truth):
+      1. the voice marked preferred for that language (exact locale beats
+         primary-language match; a mark pointing at a voice this Mac no
+         longer holds is skipped);
+      2. the Mac's SELECTED system voice (System Settings ▸ Read & Speak)
+         when its own language answers this request — that is what `say`
+         and macOS itself speak with;
+      3. the language's AVFoundation-flagged default row (the factory
+         default for languages the selection does not cover);
+      4. the best installed tier (Premium > Enhanced > Personal >
+         standard) when the language has no flagged row;
+      5. None when the language has nothing installed — the caller fails
+         honestly instead of speaking the text in a random language."""
     if not lang:
         return None
     best = _marked_voice(lang, preferred)
@@ -515,18 +517,81 @@ def language_voice(lang, preferred=None) -> Optional[dict]:
     in_lang = [v for v in rows if _locale_score(lang, v.get("locale"))]
     if not in_lang:
         return None
-    in_lang.sort(key=lambda v: (_quality_rank(v.get("quality")),
-                                not v.get("default"),
+    sel = selected_row()
+    if sel is not None and _locale_score(lang, sel.get("locale")):
+        return sel
+    in_lang.sort(key=lambda v: (not v.get("default"),
+                                _quality_rank(v.get("quality")),
                                 str(v.get("name") or "")))
     return in_lang[0]
+
+
+_SEL_TTL_S = 300
+_sel_cache: dict = {"ts": 0.0, "id": None}
+
+# NSSpeechSynthesizer's class method answers with the identifier of the
+# voice System Settings ▸ Accessibility ▸ Read & Speak has selected — the
+# same one bare `say` speaks with (byte-proven against `say -o` output on
+# a default box). AVFoundation's per-voice isDefault is NOT that: it marks
+# the factory default-QUALITY row of every language (a Mac with a
+# downloaded 'Zuzana (Premium)' selected still flags compact Zuzana).
+_DV_PROBE = '''use framework "AppKit"
+use scripting additions
+set dv to current application's NSSpeechSynthesizer's defaultVoice()
+return dv as text
+'''
+
+
+def selected_voice_identifier(force: bool = False) -> str:
+    """Identifier of the user's selected system voice ('' when unknown:
+    non-Mac, probe failure, or a name the responder cannot print).
+    Cached like system_language — the setting rarely changes."""
+    if not available():
+        return ""
+    now = time.time()
+    if not force and _sel_cache["id"] is not None \
+            and now - _sel_cache["ts"] < _SEL_TTL_S:
+        return _sel_cache["id"]
+    ident = ""
+    if shutil.which("osascript") is not None:
+        try:
+            p = subprocess.run(["osascript", "-e", _DV_PROBE],
+                               capture_output=True, text=True, timeout=15)
+            if p.returncode == 0:
+                ident = p.stdout.strip()
+        except (OSError, subprocess.SubprocessError) as e:
+            log.info("say selected-voice probe failed: %s", e)
+    _sel_cache.update(ts=now, id=ident)
+    return ident
+
+
+def selected_row() -> Optional[dict]:
+    """The installed catalog row behind the selected system voice.
+    Identifier first (AV rows carry the exact handle); legacy CLI rows
+    address themselves by name, so fall back to the identifier's last
+    segment matched case-insensitively against row names. None when the
+    selection names a voice this Mac no longer holds or the probe failed
+    — every caller then keeps the pre-TTS-4 behaviour."""
+    sel = selected_voice_identifier()
+    if not sel:
+        return None
+    rows = _installed_rows()
+    for v in rows:
+        if (v.get("identifier") or v["name"]) == sel:
+            return v
+    tail = sel.rsplit(".", 1)[-1].lower()
+    for v in rows:
+        if _root_name(v["name"]) == tail:
+            return v
+    return None
 
 
 def effective_default_addrs() -> set:
     """TTS-4: addresses (identifier, else name) of the rows that answer
     their OWN language with no preferred mark involved — what the tabs
-    badge 'macOS DEFAULT'. Computed per language through the same
-    quality-first chain the router uses, so the badge and the voice that
-    actually speaks can never disagree."""
+    badge 'macOS DEFAULT'. Computed per language through the SAME chain
+    the router uses (selection beats flag), so the badge and the voice
+    that actually speaks can never disagree."""
     langs = {v.get("locale") for v in _installed_rows() if v.get("locale")}
     addrs = set()
     for loc in langs:
@@ -588,13 +653,15 @@ def default_answered(locale) -> bool:
 
 
 def default_voice() -> Optional[dict]:
-    """The Mac's own system default voice (the one `say` speaks when no
-    -v is given). TTS-4: answered through the SAME quality-first chain
-    the language routing and the DEFAULT badge use — System Settings
-    follows the best installed tier of the system language, not the
-    factory isDefault row. None when the probe cannot name a voice —
-    the caller then addresses `say` with no voice and lets the system
-    choose."""
+    """The Mac's own system default voice — what bare `say` (no -v)
+    speaks with. TTS-4b: the System Settings selection IS that voice and
+    leads; when the probe cannot see it (non-Mac, failure, deleted
+    voice) fall back to the system language's chain row, then to any
+    factory-flagged row. None when nothing can be named — the caller
+    then addresses `say` with no voice and lets the system choose."""
+    sel = selected_row()
+    if sel is not None:
+        return sel
     sysl = system_language()
     if sysl:
         v = language_voice(sysl)

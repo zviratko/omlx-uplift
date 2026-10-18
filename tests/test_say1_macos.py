@@ -42,11 +42,15 @@ junk-no-tabs
 
 @pytest.fixture()
 def on_mac(monkeypatch):
-    """Pretend this box has the engine; empty isolated cache per test."""
+    """Pretend this box has the engine; empty isolated cache per test.
+    TTS-4b: the selected-voice probe never runs for real in tests — ''
+    keeps every chain on its pre-selection shape unless a test opts in."""
     monkeypatch.setattr(SE, "available", lambda: True)
     monkeypatch.setattr(SE, "_cache", {"ts": 0.0, "voices": []})
     monkeypatch.setattr(SE, "_downloaded_names", lambda: set())
     monkeypatch.setattr(SE, "_catalog_rows", lambda: [])
+    monkeypatch.setattr(SE, "selected_voice_identifier",
+                        lambda force=False: "")
     return SE
 
 
