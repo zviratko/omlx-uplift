@@ -1,8 +1,8 @@
 diff --git a/omlx/engine/stt.py b/omlx/engine/stt.py
-index 4e1d77cb..3fa63cdd 100644
+index 9a028539..8585cf70 100644
 --- a/omlx/engine/stt.py
 +++ b/omlx/engine/stt.py
-@@ -436,6 +436,170 @@ class _WhisperRealtimeBackend:
+@@ -436,6 +436,181 @@ class _WhisperRealtimeBackend:
          return [text] if text else []
  
  
@@ -101,9 +101,20 @@ index 4e1d77cb..3fa63cdd 100644
 +        if audio is None or not len(audio):
 +            return ""
 +        t0 = _time.monotonic()
-+        res = self._model.generate(
-+            np.asarray(audio, dtype=np.float32), language=self._language
-+        )
++        try:
++            res = self._model.generate(
++                np.asarray(audio, dtype=np.float32), language=self._language
++            )
++        except Exception:
++            # One poison segment must not kill the session (nor the engine
++            # slot bookkeeping): log the real traceback and keep listening.
++            # The route-level finally still releases cleanly on teardown.
++            logger.exception(
++                "STT realtime utterance failed (%.1fs audio) — segment "
++                "dropped, session continues",
++                n / REALTIME_SAMPLE_RATE,
++            )
++            return ""
 +        text = getattr(res, "text", None)
 +        if text is None:
 +            text = str(res)
@@ -173,7 +184,7 @@ index 4e1d77cb..3fa63cdd 100644
  class _VoxtralRealtimeBackend:
      """Push-input adapter over mlx-audio's VoxtralStreamingSession."""
  
-@@ -1088,13 +1252,17 @@ class STTEngine(BaseNonStreamingEngine):
+@@ -1091,13 +1266,17 @@ class STTEngine(BaseNonStreamingEngine):
  
          Whisper-family models expose ``generate_streaming`` (AlignAtt
          StreamingDecoder); voxtral_realtime exposes
@@ -195,7 +206,7 @@ index 4e1d77cb..3fa63cdd 100644
          )
  
      async def create_realtime_session(
-@@ -1124,8 +1292,17 @@ class STTEngine(BaseNonStreamingEngine):
+@@ -1127,8 +1306,17 @@ class STTEngine(BaseNonStreamingEngine):
              backend: Any = _VoxtralRealtimeBackend(model)
              loop = asyncio.get_running_loop()
              await loop.run_in_executor(get_mlx_executor(), backend.start_sync)

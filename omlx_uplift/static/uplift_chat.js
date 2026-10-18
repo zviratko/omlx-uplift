@@ -121,7 +121,6 @@ function chatSettingsSnapshot() {
             out.chunk = ls.getItem(CHUNK_KEY) || 'sentence';
             out.sttModel = ls.getItem(STT_MODEL_KEY) || '';
             out.sttLang = ls.getItem(STT_LANG_KEY) || '';
-            out.sttAutosend = ls.getItem(STT_SEND_KEY) || '0';
             out.sttMode = ls.getItem(STT_MODE_KEY) || 'off';
         }
     } catch (_) { /* mid-build: whatever was readable stands */ }
@@ -149,7 +148,6 @@ function normSettings(s) {
         chunk: /^(sentence|line|paragraph)$/.test(s.chunk) ? s.chunk : 'sentence',
         sttModel: String(s.sttModel || ''),
         sttLang: String(s.sttLang || ''),
-        sttAutosend: s.sttAutosend === '1' ? '1' : '0',
         sttMode: /^(off|ptt|continuous)$/.test(s.sttMode) ? s.sttMode : 'off'
     });
 }
@@ -190,7 +188,6 @@ function applyChatSettings(s) {
         lsSet(CHUNK_KEY, n.chunk);
         lsSet(STT_MODEL_KEY, n.sttModel);
         lsSet(STT_LANG_KEY, n.sttLang);
-        lsSet(STT_SEND_KEY, n.sttAutosend);
         lsSet(STT_MODE_KEY, n.sttMode);
     }
     var vs = gid('chat-native-voice');
@@ -2501,7 +2498,6 @@ function syncAudioMode() {
 // doctrine: no mic button, no hints, zero noise when unset).
 var STT_MODEL_KEY = 'omlx-uplift-stt-model';
 var STT_LANG_KEY = 'omlx-uplift-stt-lang';        // '' = Auto (field omitted)
-var STT_SEND_KEY = 'omlx-uplift-stt-autosend';    // '1'/'0', default OFF
 var STT_MODE_KEY = 'omlx-uplift-stt-mode';        // 'off'|'ptt'|'continuous'
 var STT_LANGS = ['en', 'cs', 'sk', 'de', 'fr', 'es', 'it', 'pt', 'ru',
                  'ja', 'ko', 'zh'];   // OpenAI whisper language convention
@@ -2514,7 +2510,11 @@ var STT_TIMEOUT_MS = 240000;   // VOICE-3 watchdog doctrine (uplift_voices
 
 function sttModel() { return lsGet(STT_MODEL_KEY) || ''; }
 function sttLang() { return lsGet(STT_LANG_KEY) || ''; }
-function sttAutoSend() { return lsGet(STT_SEND_KEY) === '1'; }
+// RETIRED CONTROL (user 2026-10-18): the point of the mic is hands-free —
+// every spoken utterance goes straight to the chat model. The Auto-send
+// row is gone from the Voice input popover; a stale localStorage key left
+// by an old profile is deliberately ignored.
+function sttAutoSend() { return true; }
 function sttMode() {
     var m = lsGet(STT_MODE_KEY);
     return (m === 'off' || m === 'continuous') ? m : 'ptt';
@@ -2641,16 +2641,8 @@ function openSttPop(host) {
         'uplift.chat.stt_lang_hint',
         'Auto detects the language per request; transcription quality '
         + 'varies by model family');
-    // row 3 — AUTO-SEND (default OFF: the transcript lands for review)
-    var cb = el('input'); cb.type = 'checkbox';
-    cb.id = 'chat-native-stt-autosend';
-    cb.checked = sttAutoSend();
-    cb.addEventListener('change', function () {
-        lsSet(STT_SEND_KEY, cb.checked ? '1' : '0');
-        onPageEdited();        // ROUND 11
-    });
-    row('uplift.chat.stt_autosend', 'Auto-send', cb).classList.add('inline');
-    // row 4 — MODE radios. VOICE-13: 'continuous' IS the live listener now
+    // AUTO-SEND row REMOVED (user 2026-10-18): spoken = sent.
+    // row 3 — MODE radios. VOICE-13: 'continuous' IS the live listener now
     // (realtime WS + segmented fallback); 'ptt' keeps its record-stop-send.
     var r4 = el('div', 'chat-native-pop-row modes');
     var lab4 = el('span', 'chat-native-group-label',
@@ -2976,6 +2968,13 @@ var RT_SILENCE_MS = 1200;    // endpoint: >=1 delta AND this much silence
 var RT_STUCK_MS = 6000;      // escape: voiced audio, ZERO deltas -> restart
 var RT_MAX_RESTARTS = 3;     // ...and after that the engine is not coming back
 var RT_MAX_MS = 120000;      // hard utterance cap -> force stop + deliver
+// VOICE-14: whole-buffer backends (Qwen3-ASR via the voice14 patch) cannot
+// commit before a real pause — their first delta arrives only after the
+// server's 0.7 s endpoint + decode. The 6 s zero-delta stuck-escape assumes
+// true-streaming cadence and would restart-loop mid-sentence, discarding
+// every uncommitted buffer each time (mruu report: nothing transcribed,
+// engine forever busy). Such models ride the 120 s cap instead.
+var RT_WB_ID = /qwen3[-_. ]?asr/i;
 var RT_GAP_MS = 300;         // session reopen / echo-guard resume tail
 var RT_HANDSHAKE_MS = 10000; // the server's OWN handshake budget, client copy
 var RT_DONE_MS = 5000;       // bounded wait for transcript.done after stop
@@ -3051,6 +3050,7 @@ function rtNew() {
     return { state: 'connecting', transport: 'realtime', phase: 'up',
              ws: null, wsOpen: false, paused: false, dead: false, told: false,
              model: sttModel(), lang: sttLang(), rate: 48000, tap: null,
+             wb: RT_WB_ID.test(sttModel()), closing: false,
              text: '', got: false, frames: 0, voiced: 0, silent: 0,
              restarts: 0, seg: null, segMs: 0, segSilent: 0,
              // VOICE-13a(c): noise-floor calibration, ONCE per listener run
@@ -3090,11 +3090,24 @@ function sttListenerStop(commit) {
     // teardown discipline: mic off / mode change / input-model change /
     // conversation switch / New Chat / unload ALL close the socket, or the
     // engine keeps a session no browser owns (an engine leak is worse than a
-    // UI leak). commit=true (the user's own click) lands what was already
-    // heard through THE sink; commit=false (context switched under the user)
-    // drops the provisional line instead.
+    // UI leak). commit=true (the user's own click) FIRST FLUSHES the tail:
+    // the server only closes uncommitted audio over a LIVE socket (voice14
+    // commits whole utterances after a pause), so halting straight away
+    // silently ate the words spoken since the last pause (mruu report).
+    // commit=false (context switched under the user) drops the provisional
+    // line instead — never flush what the user no longer owns.
     var s = _rt;
     if (!s) return;
+    if (commit && !s.dead && !s.closing && !s.paused
+        && s.transport === 'realtime' && s.wsOpen && s.phase === 'up') {
+        s.closing = true;
+        rtEndpoint(s);            // stop -> done/timeout -> rtFinish -> teardown
+        return;
+    }
+    if (commit && !s.dead && !s.closing && s.transport === 'segmented'
+        && s.seg && s.segMs >= RT_SEG_MIN_MS && !_sttXfer) {
+        rtSegmentClose(s, true);  // detached POST: outlives the teardown
+    }
     _rt = null;
     s.dead = true;
     s.paused = false;
@@ -3254,7 +3267,7 @@ function rtFeed(s, f16) {
     // windows count 100 ms FRAMES, not wall time: fake-timer deterministic and
     // identical to what the engine actually received
     if (s.got && s.silent * RT_FRAME_MS >= RT_SILENCE_MS) { rtEndpoint(s); return; }
-    if (!s.got && s.voiced * RT_FRAME_MS >= RT_STUCK_MS) { rtRestart(s); return; }
+    if (!s.got && !s.wb && s.voiced * RT_FRAME_MS >= RT_STUCK_MS) { rtRestart(s); return; }
     if (s.frames * RT_FRAME_MS >= RT_MAX_MS) rtEndpoint(s);
 }
 function rtEndpoint(s) {
@@ -3289,6 +3302,7 @@ function rtFinish(s, text) {
     s.text = String(text == null ? '' : text);
     rtHaltSocket(s);
     rtCommit(s);
+    if (s.closing) { sttListenerStop(false); return; }   // flush done -> real stop
     if (s.dead || _rt !== s || s.paused || s.transport !== 'realtime') return;
     rtReopenLater(s);
 }
@@ -3302,6 +3316,7 @@ function rtClosed(s) {
     // deltas the engine already committed are the user's words — land them,
     // lose nothing, whatever killed the socket
     rtCommit(s);
+    if (s.closing) { sttListenerStop(false); return; }   // flush was in flight
     if (finishing) {
         if (!_rt || _rt !== s || s.dead || s.paused) return;
         rtReopenLater(s);              // the utterance closed; keep listening
@@ -3373,6 +3388,7 @@ function rtFallback(s, detail) {
     // SAME live tap and hands them to VOICE-12's record->encodeWav->
     // sttTranscribe->sttDeliver path. Decided by the server's first answer;
     // told ONCE; the realtime socket is never opened again this run.
+    if (s.closing) { sttListenerStop(false); return; }   // user already stopped
     if (s.transport === 'segmented') return;
     rtResetUtterance(s);
     rtHaltSocket(s);
@@ -3415,28 +3431,37 @@ function rtSegment(s, floats) {
     if ((s.segSilent >= RT_SEG_SILENCE_MS || s.segMs >= RT_SEG_MAX_MS) &&
         !_sttXfer) rtSegmentClose(s);
 }
-function rtSegmentClose(s) {
+function rtSegmentClose(s, keepAlive) {
     var chunks = s.seg || [];
     var ms = s.segMs;
     s.seg = null; s.segMs = 0; s.segSilent = 0;
     if (ms < RT_SEG_MIN_MS || !chunks.length) return;   // a cough is not speech
     var wav = encodeWav(chunks, s.rate || 48000);
     sttSetBusy(true);
-    s.cancel = sttTranscribe(new Blob([wav], { type: 'audio/wav' }), {
+    // keepAlive: the STOP flush detaches the POST from the dying session —
+    // teardown must not cancel the user's own words. The result may land
+    // AFTER the listener is gone, so the guards below only drop it when a
+    // SUCCESSOR context exists (_rt moved on), never because this session ended.
+    var handle = sttTranscribe(new Blob([wav], { type: 'audio/wav' }), {
         model: s.model, language: s.lang,
         onDone: function (text) {
-            s.cancel = null;
+            if (!keepAlive) s.cancel = null;
             sttSetBusy(false); rtChip();
-            if (s.dead || _rt !== s) return;    // no late write into a new ctx
+            // keepAlive (stop flush) may only be dropped by a SUCCESSOR
+            // context; the live-session path keeps the original discipline
+            // (a teardown mid-POST means the result is no longer wanted —
+            // and never leaks words into a conversation the user switched to)
+            if (keepAlive ? !!(_rt && _rt !== s) : (s.dead || _rt !== s)) return;
             sttDeliver(text);
         },
         onErr: function (err) {
-            s.cancel = null;
+            if (!keepAlive) s.cancel = null;
             sttSetBusy(false); rtChip();
-            if (s.dead || _rt !== s) return;
+            if (keepAlive ? !!(_rt && _rt !== s) : (s.dead || _rt !== s)) return;
             var d = D();
             if (d) d.toast(String((err && err.message) || err), 'error');
         } });
+    if (!keepAlive) s.cancel = handle;
 }
 // -- echo guard (half-duplex vs the VOICE-11 speak queue) -------------------
 function rtSpeakEvent(busy) {
@@ -3448,7 +3473,7 @@ function rtSpeakEvent(busy) {
     else rtResumeSoon(s);
 }
 function rtPause(s) {
-    if (s.paused || s.state === 'idle') return;
+    if (s.paused || s.state === 'idle' || s.closing) return;
     s.paused = true;
     s.state = 'paused';
     clearTimeout(s.reopenTimer); s.reopenTimer = 0;
