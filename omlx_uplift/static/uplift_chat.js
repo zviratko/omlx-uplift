@@ -2100,6 +2100,32 @@ function sayRelease(mid) {
     delete _plans[mid];
     return true;
 }
+function saySilence(mid) {
+    // The plan map is keyed by mid and a mid can go missing (a row stored
+    // before the identity was stamped, an aborted turn). The queue always knows
+    // its own plan, so silence does not depend on the lookup succeeding.
+    var hit = false;
+    if (_speakQ && _speakQ.__plan && (!mid || _speakQ.__plan.mid === mid)) {
+        speakCancel();
+        hit = true;
+    }
+    if (mid && _plans[mid] && _plans[mid].q) { try { _plans[mid].q.stop(); } catch (e) {} }
+    return sayRelease(mid) || hit;
+}
+function saySweepPlans() {
+    // drop every plan whose bubble is no longer in the conversation: deletes and
+    // regenerates go through paths that never knew about audio, and an orphaned
+    // plan both keeps talking and lends its chunk lines to a later bubble
+    var live = {}, ms = (_conv && _conv.messages) || [], i;
+    for (i = 0; i < ms.length; i++) if (ms[i] && ms[i].mid) live[ms[i].mid] = 1;
+    if (_turnMid) live[_turnMid] = 1;           // the reply still being streamed
+    var orphans = [];
+    for (var k in _plans) {
+        if (Object.prototype.hasOwnProperty.call(_plans, k) && !live[k]) orphans.push(k);
+    }
+    for (i = 0; i < orphans.length; i++) saySilence(orphans[i]);
+    return orphans.length;
+}
 function memKey(text) { return chatVoiceId() + '\u001f' + text; }
 function memGet(text) {
     var k = memKey(text), v = _mem.get(k);
@@ -3136,9 +3162,10 @@ function msgRegenerate(idx) {
     // onMessage (same as the old last-turn toolbar function did — slicing
     // at the assistant index would store the prompt twice)
     for (var k = idx; k < ms.length; k++)
-        if (ms[k] && ms[k].role === 'assistant') sayRelease(ms[k].mid);
+        if (ms[k] && ms[k].role === 'assistant') saySilence(ms[k].mid);
     _conv.messages = ms.slice(0, idx - 1);
     renderHistory();
+    saySweepPlans();
     saveConv();
     _dc.submitUserMessage({ text: String(prev.content) });
 }
@@ -3343,9 +3370,10 @@ function msgDelete(idx) {
     if (!_conv) return;
     var m = messageAt(idx);
     if (!m) return;
-    sayRelease(m.mid);                 // (user) deleting a bubble silences it
+    saySilence(m.mid);                 // (user) deleting a bubble silences it
     _conv.messages.splice(idx, 1);
     renderHistory();
+    saySweepPlans();                   // nothing left behind that can speak
     saveConv();
 }
 
@@ -5092,6 +5120,9 @@ return { mount: mount, isMounted: function () { return _mounted; },
                         // VOICE-11: manual SPEAK seam (the overlay binds it
                         // to the per-bubble 🔊 button; tests drive directly)
                         speak: msgSpeak,
+                        plans: function () { return Object.keys(_plans); },
+                        release: saySilence,
+                        sweep: saySweepPlans,
                         attach: attachMessageActions },
          // _state returns LIVE references (conv/convs are the module's
          // own objects) — the browser drills and node tests set conv
