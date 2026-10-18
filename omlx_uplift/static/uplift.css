@@ -1829,6 +1829,9 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
     border: 1px solid var(--edge); color: var(--dim); background: transparent;
     border-radius: var(--radius);
 }
+/* TTS-1: the VOICES chip is a fact, not a control — same lamp geometry,
+   never pointer feedback (attached async by attachVoiceBadges) */
+.admin-table .lamp.voices-lamp { cursor: default; }
 /* unlit = grey outline; LIT = solid green fill with dark text — a lit
    cockpit lamp, max contrast on any ground (green outlines on grey were
    unreadable). Glow marks powered instruments on dark themes. */
@@ -2083,6 +2086,16 @@ label.se-row.pending-restart > .se-ctl > select {
 .vc-pref { min-width: 0; flex: 0 0 auto; white-space: nowrap; }
 .vc-pref.on { color: var(--accent); border-color: var(--accent); }
 .vc-chip-pref { color: var(--accent); border-color: var(--accent); }
+/* TTS-1: the TEXT TO SPEECH tab rows (model + built-in voice entries) and
+   the DEFAULT lamp. Indent matches the macOS tab's folded rows (38px) so
+   built-in voices read as children of their model everywhere. */
+.vc-tts { margin-bottom: 12px; }   /* same footer as .vc-add */
+.vc-tts-sp { padding-left: 38px; }
+.vc-tts-set { min-width: 0; flex: 0 0 auto; white-space: nowrap; }
+.vc-tts-def { min-width: 0; flex: 0 0 auto; white-space: nowrap; }
+.vc-tts-def.on { color: var(--accent); border-color: var(--accent); }
+.vc-tts-stat { opacity: .6; font-size: 11px; margin: 0 10px;
+               white-space: nowrap; }
 .vc-say-head { display: flex; align-items: center; gap: 8px; width: 100%;
     margin-top: 8px; padding: 5px 6px; background: transparent;
     border: 0; border-bottom: 1px solid var(--edge); cursor: pointer;

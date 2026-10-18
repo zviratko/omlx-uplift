@@ -57,6 +57,25 @@ So this router owns the thin part; vanilla stays untouched:
   to a base URL ending in /uplift reaches it, and vanilla's own
   /v1/audio/speech (PR #676, unnamed ref_audio cloning) stays intact.
 
+- TTS-1: models get a DEFAULT tier. voices.json gains a top-level
+  'tts_defaults' map ({model: {speaker, instructions, language}}; '' is
+  unset, a model whose three fields are all empty has NO key) edited
+  through GET/POST /voices/tts/defaults. Every uplift speech path now
+  resolves per field: request > stored voice field > tts_defaults[model].
+  ONE helper (_tts_defaults_merge) owns that order; the say engine stays
+  untouched (its `language` is ROUTING, not a checkpoint field) and a
+  model with no defaults row passes through exactly as before.
+  POST /voices/tts/speak speaks a MODEL with no stored voice and no
+  reference clip (the TEXT TO SPEECH tab audition, editor preview)
+  through the same _create_speech seam and the same merge. The
+  capability probe answers from checkpoint CONFIG only — never from a
+  model name: 'type' from the top-level tts_model_type (the spk_id
+  table is the fallback only when the marker is absent), plus
+  'size' (tts_model_size) and 'instruct' (voice_design, or
+  custom_voice whose size is known and not 0b6 — per the official
+  Qwen3-TTS model card the 0.6B-CustomVoice has no instruction control;
+  absent/unknown can never prove it, so it answers False).
+
 Size rules are stated, not invented: vanilla caps the base64 field at
 20 MiB of characters (~15 MiB of raw audio — enough for ~60 s). We cap
 raw uploads at MAX_VOICE_AUDIO_BYTES = 14 MiB so the re-encoded base64
@@ -103,6 +122,15 @@ MAX_VOICE_AUDIO_BYTES = 14 * 1024 * 1024     # base64 then <= 20 MiB chars
 MAX_NAME_CHARS = 64
 MAX_REF_TEXT_CHARS = 4000
 MAX_INSTRUCT_CHARS = 1000                    # VOICE-6: style instruction prose
+# TTS-1 caps: model keys are ids, speaker/language short ids (same cap
+# _sanitize gives a voice's own language/speaker); DEFAULT instruction
+# prose rides EVERY synth of the model, so it stays tighter than the
+# per-voice MAX_INSTRUCT_CHARS. The clip-less speak route's text cap is
+# the say engine's own number — one honest limit for spoken utterances.
+MAX_TTS_MODEL_CHARS = 128
+MAX_TTS_ID_CHARS = 64
+MAX_TTS_DEFAULT_INSTRUCT_CHARS = 500
+MAX_SPEECH_INPUT_CHARS = say_engine.MAX_SAY_CHARS
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 AUDIO_EXTS = {".wav", ".mp3", ".flac"}
 
@@ -321,6 +349,52 @@ def _say_preferred() -> dict:
     return {str(k): str(v) for k, v in p.items()} if isinstance(p, dict) else {}
 
 
+def _tts_defaults() -> dict:
+    """TTS-1: the {model: {speaker, instructions, language}} map from the
+    voice store — the model-level DEFAULT tier of synth resolution, same
+    store-map shape as _say_preferred. The store predates the key and
+    lanes may hand-edit it: a missing map, a non-dict row or an
+    all-empty row is simply not returned, never an error. Unknown keys
+    inside a row are DROPPED — the three fields are the whole contract,
+    so a smuggled 'speed' can never ride every synth of the model.
+    Values stay verbatim (no case folding anywhere in this feature):
+    locale-ish strings are distinct strings to whatever table reads them."""
+    d = _load().get("tts_defaults")
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for model, row in d.items():
+        if not isinstance(row, dict):
+            continue
+        clean = {k: str(row.get(k) or "") for k in
+                 ("speaker", "instructions", "language")}
+        if any(clean.values()):
+            out[str(model)] = clean
+    return out
+
+
+def _tts_defaults_merge(model: str, language, instructions, speaker):
+    """TTS-1: THE single resolution point — per field, request > stored
+    voice field > tts_defaults[model]. Callers pass what they already
+    resolved from request+voice (this helper only adds the third tier);
+    None means unset, so an explicit '' from a request stays '' and is
+    NOT replaced by a default. A model with no defaults row returns the
+    inputs untouched — that is the passthrough guarantee every pre-TTS-1
+    request keeps today. The say engine is exempt BY CONTRACT: its
+    `language` drives SAY-2 routing (the preferred map), not a
+    checkpoint language table, and speaker/instructions would be
+    silently dropped by that engine anyway."""
+    if say_engine.say_split(model)[0]:
+        return language, instructions, speaker
+    d = _tts_defaults().get((model or "").strip())
+    if not d:
+        return language, instructions, speaker
+    return (language or d.get("language") or None,
+            instructions if instructions is not None
+            else (d.get("instructions") or None),
+            speaker if speaker is not None else (d.get("speaker") or None))
+
+
 async def _say_tail_ok(tail: str) -> bool:
     """A stored voice may name an installed system voice OR a locale
     that routes today ('say:cs-CZ', SAY-2); an empty tail (bare 'say')
@@ -409,16 +483,24 @@ async def _synth(voice: dict, text: str, stream: bool = False,
     # without one clones via ref clip exactly as before.
     ref_file = voice.get("ref_file")
     ref_path = (_audio_dir() / Path(ref_file).name) if ref_file else None
-    return await _synth_ref(model or voice["model"], text, ref_path,
+    eff_model = model or voice["model"]
+    # TTS-1 third tier, per field: request (already merged over the voice
+    # value below) > stored voice field > tts_defaults[resolved model].
+    # The None-vs-'' distinction is kept: an explicit empty override from
+    # the editor form is the REQUEST speaking, not an unset field.
+    language, instructions, speaker = _tts_defaults_merge(
+        eff_model,
+        language or voice.get("language"),
+        voice.get("instructions") if instructions is None else instructions,
+        voice.get("speaker") if speaker is None else speaker)
+    return await _synth_ref(eff_model, text, ref_path,
                             voice.get("ref_text") if ref_text is None
                             else ref_text,
-                            language or voice.get("language"),
+                            language,
                             speed or voice.get("speed"), stream,
                             response_format=fmt,
-                            instructions=voice.get("instructions")
-                            if instructions is None else instructions,
-                            speaker=voice.get("speaker")
-                            if speaker is None else speaker)
+                            instructions=instructions,
+                            speaker=speaker)
 
 
 def _find(store: dict, key: str) -> Optional[dict]:
@@ -543,13 +625,22 @@ async def voices_capabilities(model: str = "", _auth=Depends(require_admin)):
     Fields:
       qwen3      bool  — the checkpoint is qwen3_tts
       type       str   — 'base' | 'custom_voice' | 'voice_design'
+      size       str   — tts_model_size ('0b6'|'1b7'|…; '' unknown)
       languages  list  — engine language ids (lowercase; 'auto' first)
       speakers   list  — preset speaker names (empty on Base clones)
+      instruct   bool  — the engine accepts a style instruction prompt
+                         (TTS-1: from CONFIG fields only — voice_design,
+                         or custom_voice whose size is known and not
+                         0b6, the model card's no-instruct checkpoint;
+                         absent/unknown never guesses to True)
+
+    Non-qwen3 answers carry the SAME key set (size '', instruct False):
+    consumers read one shape, not two.
     """
     if not model:
         raise HTTPException(status_code=400, detail="model is required")
-    empty = {"model": model, "qwen3": False, "type": "",
-             "languages": [], "speakers": []}
+    empty = {"model": model, "qwen3": False, "type": "", "size": "",
+             "languages": [], "speakers": [], "instruct": False}
     try:
         # vanilla's OWN resolution (audio_routes.list_model_voices does
         # exactly this): pool entry -> on-disk model dir, no load needed
@@ -569,10 +660,22 @@ async def voices_capabilities(model: str = "", _auth=Depends(require_admin)):
     tc = j.get("talker_config") or {}
     langs = ["auto"] + [k for k in (tc.get("codec_language_id") or {})
                         if "dialect" not in k]
-    return {"model": resolved, "qwen3": True,
-            "type": j.get("tts_model_type") or "base",
-            "languages": langs,
-            "speakers": sorted((tc.get("spk_id") or {}).keys())}
+    speakers = sorted((tc.get("spk_id") or {}).keys())
+    # TTS-1: the checkpoint NAMES its own family — the top-level
+    # tts_model_type/tts_model_size keys (verified on disk: VoiceDesign
+    # 1.7B ships voice_design/1b7, Base 0.6B ships base/0b6, and both
+    # carry an EMPTY spk_id table). The speaker table is the fallback
+    # ONLY when the marker is absent (a pre-marker CustomVoice still
+    # has its presets); nothing is ever guessed from the model NAME.
+    ttype = str(j.get("tts_model_type") or "").strip().lower()
+    if not ttype:
+        ttype = "custom_voice" if speakers else "base"
+    size = str(j.get("tts_model_size") or "").strip().lower()
+    instruct = (ttype == "voice_design"
+                or (ttype == "custom_voice" and bool(size)
+                    and size != "0b6"))
+    return {"model": resolved, "qwen3": True, "type": ttype, "size": size,
+            "languages": langs, "speakers": speakers, "instruct": instruct}
 
 
 @api_router.get("/voices/say")
@@ -670,6 +773,99 @@ async def voices_say_speech(request: Request, _auth=Depends(require_admin)):
     text = str(raw.get("input") or v.get("sample")
                or "Hello! My name is %s." % v["name"].split(" (")[0])
     return await _say_response(v["name"], text, speed=raw.get("speed"))
+
+
+# ---------------------------------------------------------------------------
+# TTS-1: per-model speech defaults + clip-less model speech. The store map
+# is a SIBLING of say_preferred (same _load/_save discipline); the merge
+# tier it feeds is _tts_defaults_merge, applied by every uplift speech
+# path. No engine probe on the defaults routes on purpose: the tab's
+# model list comes from the manager, and a DEFAULT mark is metadata
+# until some synth actually reads it.
+# ---------------------------------------------------------------------------
+
+@api_router.get("/voices/tts/defaults")
+async def voices_tts_defaults_get(_auth=Depends(require_admin)):
+    """TTS-1: the WHOLE {model: {speaker, instructions, language}} map,
+    normalized (junk and all-empty rows are not returned). The TEXT TO
+    SPEECH tab's DEFAULT badges and the model editor's TTS section both
+    prefill from here — one read, no per-model round trips."""
+    return {"defaults": _tts_defaults()}
+
+
+@api_router.post("/voices/tts/defaults")
+async def voices_tts_defaults_set(request: Request,
+                                  _auth=Depends(require_admin)):
+    """TTS-1: set or clear one model's default speaker/instructions/
+    language. Body {model, speaker?, instructions?, language?}: a field
+    absent or empty is UNSET, and all three empty drops the model key —
+    the store never keeps a row that could not change anything. Every
+    POST REPLACES the model's whole row (the editor always resends all
+    three fields, so a stale field cannot hide in a partial update).
+    Caps mirror the voice fields (module constants); values are trimmed
+    but otherwise verbatim — 'cs-CZ' and 'CS-cz' are different strings
+    to an engine's language table and this server plays no language
+    police. Unknown body keys are ignored, never stored."""
+    raw = await request.json()
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    model = str(raw.get("model") or "").strip()[:MAX_TTS_MODEL_CHARS]
+    if not model:
+        raise HTTPException(status_code=400, detail="'model' is required")
+    row = {
+        "speaker": str(raw.get("speaker") or "").strip()[:MAX_TTS_ID_CHARS],
+        "language": str(raw.get("language") or "").strip()[:MAX_TTS_ID_CHARS],
+        "instructions": str(raw.get("instructions") or "")
+                        .strip()[:MAX_TTS_DEFAULT_INSTRUCT_CHARS],
+    }
+    store = _load()
+    d = store.get("tts_defaults")
+    if not isinstance(d, dict):
+        d = {}
+    if any(row.values()):
+        d[model] = row
+    else:
+        d.pop(model, None)
+    store["tts_defaults"] = d
+    _save(store)
+    return {"ok": True, "defaults": _tts_defaults()}
+
+
+@api_router.post("/voices/tts/speak")
+async def voices_tts_speak(request: Request, _auth=Depends(require_admin)):
+    """TTS-1: speak with a MODEL — no stored voice, no reference clip.
+    The TEXT TO SPEECH tab auditions a built-in speaker and the model
+    editor previews its defaults through exactly this route: the request
+    rides _synth_ref's shape minus the clip (ref_audio/ref_text None,
+    speaker -> vanilla's `voice` kwarg), wav default. Absent fields
+    still pick up tts_defaults[model] — the tab previews what the
+    DEFAULT mark actually produces. Unknown model / non-TTS engine /
+    synthesis failure: vanilla's honest HTTPExceptions propagate through
+    the seam unchanged (same 404/502 semantics as every speech route),
+    and a server without the audio module answers the seam's 503."""
+    raw = await request.json()
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    model = str(raw.get("model") or "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+    text = str(raw.get("input") or "")
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="'input' must not be empty")
+    if len(text) > MAX_SPEECH_INPUT_CHARS:
+        raise HTTPException(status_code=400, detail=(
+            "'input' exceeds %d characters" % MAX_SPEECH_INPUT_CHARS))
+    # the SAME merge as every other uplift speech path: this route has no
+    # stored voice, so it is request > default (say models exempt inside)
+    language, instructions, speaker = _tts_defaults_merge(
+        model,
+        str(raw.get("language") or "").strip() or None,
+        str(raw.get("instructions") or "").strip() or None,
+        str(raw.get("speaker") or "").strip() or None)
+    return await _synth_ref(model, text, None, "",
+                            language=language,
+                            stream=False, response_format="wav",
+                            instructions=instructions, speaker=speaker)
 
 
 @api_router.post("/voices")
@@ -1084,13 +1280,23 @@ async def speech_std(request: Request):
                 response_format=fmt if fmt_given else "wav",
                 language=body.get("language") or None)
         else:
-            # no named voice: pure pass-through to vanilla — anonymous
-            # ref_audio cloning (PR #676 fields) included verbatim
+            # no named voice: pass-through to vanilla — anonymous
+            # ref_audio cloning (PR #676 fields) included verbatim.
+            # TTS-1 adds the model-default tier: `name` is empty here
+            # (a non-empty unknown name 404s above, a say name took the
+            # say leg), so request > tts_defaults[model] for
+            # language/instructions/speaker(=vanilla voice). No defaults
+            # row = the exact pre-TTS-1 request, field for field.
+            language, instructions, speaker = _tts_defaults_merge(
+                model_use,
+                body.get("language") or None,
+                body.get("instructions") or None,
+                name or None)
             kw = dict(model=model_use, input=text, response_format=fmt,
                       speed=speed, stream=stream,
-                      language=body.get("language") or None,
-                      instructions=body.get("instructions") or None,
-                      voice=name or None)
+                      language=language,
+                      instructions=instructions,
+                      voice=speaker)
             if body.get("ref_audio"):
                 kw["ref_audio"] = body["ref_audio"]
                 kw["ref_text"] = body.get("ref_text") or None

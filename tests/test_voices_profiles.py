@@ -217,8 +217,8 @@ def test_capabilities_non_qwen3_stays_silent(client, fake_pool):
     # kokoro-style: a voices/ DIRECTORY and no talker_config at all
     c = client.get("/uplift/api/voices/capabilities",
                    params={"model": "Kokoro"}).json()
-    assert c == {"model": "Kokoro", "qwen3": False, "type": "",
-                 "languages": [], "speakers": []}
+    assert c == {"model": "Kokoro", "qwen3": False, "type": "", "size": "",
+                 "languages": [], "speakers": [], "instruct": False}
 
 
 def test_capabilities_without_omlx_answers_empty(client, monkeypatch):
@@ -228,8 +228,8 @@ def test_capabilities_without_omlx_answers_empty(client, monkeypatch):
     # (monkeypatch restores the entry).
     monkeypatch.setitem(sys.modules, "omlx.api.audio_routes", None)
     c = client.get("/uplift/api/voices/capabilities", params={"model": "m"}).json()
-    assert c == {"model": "m", "qwen3": False, "type": "",
-                 "languages": [], "speakers": []}
+    assert c == {"model": "m", "qwen3": False, "type": "", "size": "",
+                 "languages": [], "speakers": [], "instruct": False}
 
 
 # ---------------- VOICE-8: design route ----------------

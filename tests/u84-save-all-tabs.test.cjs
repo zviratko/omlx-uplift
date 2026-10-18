@@ -37,6 +37,10 @@ const CODE = [
     region('function seCommitSaved', '/* Pending-restart surfacing', 'commit bookkeeping'),
     region('async function sePersistDeferred', 'function seDirtyKeys', 'deferred store'),
     region('function seTabChangeCount', 'window.Uplift.mmEditor', 'save orchestration'),
+    // TTS-1: the slice needs the voice-defaults state trio — seTts is a
+    // LET in this same combined body, so saveEditor's dirty-check and the
+    // commit resolve without any global accessor
+    region('let seTts = null;', 'function seTtsField', 'tts defaults trio'),
 ].join('\n');
 
 function harness({ validations = {}, loaded = true,

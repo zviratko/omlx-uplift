@@ -502,7 +502,60 @@ async function renderModelAdmin(force) {
             table.append(mbox);
         }
     }
+    attachVoiceBadges(table);   // TTS-1: VOICES chips land async (never blocks)
     scheduleAlign();   // profile chips line up with the base box (rAF)
+}
+
+/* ---- TTS-1: VOICES badge ------------------------------------------------
+   Model rows show the voices the USER created on that model in the voice
+   store (clones / designs) — factory speakers are the model's own metadata
+   and stay out of the manager. Condensed: three names, then +N. The store
+   is tiny JSON; a 30 s TTL keeps re-renders free, and any voices-page
+   mutation re-renders the manager with a fresh frame anyway. Async attach
+   (aliasTree doctrine): rows are fully built before the map resolves, so
+   the chip APPENDS to the lamp line — no measured fold depends on it. */
+const VOICE_BADGE_TTL_S = 30;
+let _voiceBadge = { ts: 0, byModel: null };
+function voicesByModel(force) {
+    const now = Date.now();
+    if (!force && _voiceBadge.byModel
+            && now - _voiceBadge.ts < VOICE_BADGE_TTL_S * 1000)
+        return Promise.resolve(_voiceBadge.byModel);
+    return MM_GLUE.fetchJson(`${API}/uplift/api/voices`)
+        .then(d => {
+            const map = {};
+            for (const v of ((d && d.voices) || [])) {
+                const m = String((v && v.model) || '');
+                if (!m) continue;
+                (map[m] = map[m] || []).push(String(v.name || m));
+            }
+            _voiceBadge = { ts: now, byModel: map };
+            return map;
+        })
+        .catch(() => _voiceBadge.byModel || {});
+}
+function attachVoiceBadges(table) {
+    if (!table) return;
+    voicesByModel().then(map => {
+        const rows = [...table.querySelectorAll('.urow.admin')];
+        for (const row of rows) {
+            const names = map[row.dataset.mid];
+            if (!names || !names.length) continue;
+            const host = row.querySelector('.lampstack')
+                || row.querySelector('.nrow1');
+            if (!host) continue;
+            const chip = document.createElement('span');
+            chip.className = 'lamp voices-lamp';
+            const shown = names.slice(0, 3);
+            chip.textContent = 'VOICES:' + shown.join(',')
+                + (names.length > shown.length
+                    ? ',+' + (names.length - shown.length) : '');
+            chip.title = C.tf('uplift.voices.tts_badge_title',
+                'Voices saved on this model: {names}')
+                .replace('{names}', names.join(', '));
+            host.append(chip);
+        }
+    });
 }
 
 /* shared informed-confirmation modal; runs act() on confirm, then refreshes */

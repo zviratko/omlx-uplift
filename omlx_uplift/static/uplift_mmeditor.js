@@ -183,13 +183,14 @@ function seEffLive(key, input) {
 function seUpdateSaveBtn() {
     const b = document.getElementById('se-save'); if (!b) return;
     const rb = document.getElementById('se-restart');
-    const n = seDirtyKeys().length;
+    const n = seDirtyKeys().length + (seTtsIsDirty() ? 1 : 0);
     // U84: the label counts changes across ALL tabs (one press commits
     // every one of them). The active tab's own change count (dirty keys +
     // kwargs + expose/api flips — seTabChangeCount) decides the single-tab
     // wording; it also FIXED a dead end: an expose/api_name flip alone now
     // enables SAVE instead of leaving a CHANGES entry nobody could commit.
-    const all = seTabs.reduce((s, t) => s + seTabChangeCount(t), 0);
+    const all = seTabs.reduce((s, t) => s + seTabChangeCount(t), 0)
+        + (seTtsIsDirty() ? 1 : 0);
     const at = seTab();
     const activeN = at ? seTabChangeCount(at) : 0;
     const multi = all > activeN;
@@ -259,6 +260,13 @@ function renderEdChanges() {
         if ((t._origApi || '') !== (t.api_name || ''))
             entries.unshift({ key: 'api_name', orig: t._origApi, cur: t.api_name || '',
                               isSecret: false, display: disp });
+    }
+    if (seTts) {           // TTS-1: voice defaults ride the same CHANGES list
+        for (const k of ['speaker', 'language', 'instructions'])
+            if (seTts.vals[k] !== seTts.orig[k])
+                entries.push({ key: 'voice_' + k, orig: seTts.orig[k] || '',
+                               cur: seTts.vals[k] || '', isSecret: false,
+                               display: disp });
     }
     window.UpliftDirty.renderChangesBox(box, entries, C.tf);
 }
@@ -1625,6 +1633,137 @@ function editorNode() {
     close.onclick = () => closeEditor();
     return panel;
 }
+/* ---- TTS-1: per-model voice defaults INSIDE the shared editor ----------
+   The TEXT TO SPEECH tab's SETTINGS button and the manager's EDIT open the
+   SAME editor (openEditor), so these fields exist in exactly one place.
+   Honest by construction: the section renders only for audio_tts models
+   whose CAPABILITIES PROBE proves the support (Qwen3-TTS checkpoints
+   declare tts_model_type/size + spk_id in config.json — never guessed
+   from names); every other engine sees NOTHING (silent-absence doctrine).
+   What is set here is applied by uplift's OWN speech paths (stored-voice
+   synthesis, the /uplift/v1 standard route, chat read-aloud) as
+   request > voice > model-default per field; vanilla /v1 semantics are
+   untouched. Storage is the uplift voice store (tts_defaults map), not
+   classic model settings — a dirty TTS block counts like any other change
+   and commits through POST /voices/tts/defaults inside the same SAVE. */
+let seTts = null;             // {host, vals, orig, fields} | null
+let seTtsGen = 0;             // editor-instance token (async attach race)
+const TTS_EMPTY = { speaker: '', language: '', instructions: '' };
+
+function seTtsIsDirty() {
+    return !!seTts && JSON.stringify(seTts.vals) !== JSON.stringify(seTts.orig);
+}
+
+async function seCommitTts() {
+    // the whole 3-key entry is (re)written: a control this model cannot
+    // show keeps orig == vals, so it can never be dirtied by accident
+    const d = await D.postJson(`${API}/uplift/api/voices/tts/defaults`,
+        Object.assign({ model: seModel }, seTts.vals));
+    const stored = (d && d.defaults && d.defaults[seModel]) || {};
+    seTts.orig = Object.assign({}, TTS_EMPTY, stored);
+}
+
+function seTtsField(body, labelText, ctl) {
+    const row = document.createElement('label');
+    row.className = 'se-row';
+    const cap = document.createElement('span');
+    cap.textContent = labelText;
+    row.append(cap, ctl);
+    body.append(row);
+    return row;
+}
+
+async function seTtsAttach(panel) {
+    seTts = null;
+    const gen = ++seTtsGen;
+    const m = seFormModel || {};
+    if ((m.engine_type || m.model_type) !== 'audio_tts') return;
+    const model = seModel;
+    // caps: reuse the voices-page probe cache when that module is loaded,
+    // fetch directly otherwise (the editor may open before the Voices
+    // page ever rendered); both answer the same shape
+    let caps = null;
+    try {
+        caps = window.Uplift && window.Uplift.capsFor
+            ? await window.Uplift.capsFor(model)
+            : await MM_GLUE.fetchJson(`${API}/uplift/api/voices/capabilities`
+                + `?model=${encodeURIComponent(model)}`);
+    } catch (_) { return; }
+    if (gen !== seTtsGen || !caps || !caps.qwen3) return;   // stale / silent
+    let defaults = {};
+    try {
+        const d = await MM_GLUE.fetchJson(`${API}/uplift/api/voices/tts/defaults`);
+        defaults = (d && d.defaults) || {};
+    } catch (_) { defaults = {}; }
+    if (gen !== seTtsGen || seModel !== model) return;
+    const cur = Object.assign({}, TTS_EMPTY, defaults[model] || {});
+    const vals = Object.assign({}, TTS_EMPTY, cur);
+
+    const box = document.createElement('div');
+    box.className = 'se-box se-tts';
+    const h = document.createElement('h5');
+    h.className = 'se-section';
+    h.textContent = C.tf('uplift.voices.tts_section', 'TTS voice defaults');
+    const body = document.createElement('div');
+    body.className = 'se-box-body';
+    const note = document.createElement('div');
+    note.className = 'se-typenote';
+    note.textContent = C.tf('uplift.voices.tts_section_note',
+        'Used by every reading and voice output this dashboard produces with '
+        + 'this model, unless the voice or the request says otherwise.');
+    body.append(note);
+    box.append(h, body);
+    const touch = () => seUpdateSaveBtn();
+    if (caps.type === 'custom_voice' && (caps.speakers || []).length) {
+        const sel = document.createElement('select');
+        const o0 = document.createElement('option');
+        o0.value = '';
+        o0.textContent = C.tf('uplift.voices.tts_no_default',
+            'No default (each request decides)');
+        sel.append(o0);
+        for (const s of caps.speakers) {
+            const o = document.createElement('option');
+            o.value = s; o.textContent = s;
+            sel.append(o);
+        }
+        sel.value = vals.speaker = cur.speaker || '';
+        sel.onchange = () => { vals.speaker = sel.value; touch(); };
+        seTtsField(body, C.tf('uplift.voices.speaker', 'Speaker'), sel);
+    }
+    if ((caps.languages || []).length) {
+        const dl = document.createElement('datalist');
+        dl.id = 'se-tts-lang-dl';
+        for (const l of caps.languages) {
+            const o = document.createElement('option'); o.value = l; dl.append(o);
+        }
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.setAttribute('list', 'se-tts-lang-dl');
+        inp.autocomplete = 'off';
+        inp.placeholder = C.tf('uplift.voices.lang_auto', 'Auto (adaptive)');
+        inp.value = vals.language = cur.language || '';
+        inp.oninput = () => { vals.language = inp.value; touch(); };
+        const wrap = document.createElement('span');
+        wrap.append(inp, dl);
+        seTtsField(body, C.tf('uplift.voices.language', 'Language'), wrap);
+    }
+    if (caps.instruct) {
+        const ta = document.createElement('textarea');
+        ta.rows = 2;
+        ta.placeholder = C.tf('uplift.voices.instruct_ph',
+            "e.g. Very happy. — tone, emotion, speaking rate in plain words");
+        ta.value = vals.instructions = cur.instructions || '';
+        ta.oninput = () => { vals.instructions = ta.value; touch(); };
+        seTtsField(body, C.tf('uplift.voices.instruct', 'Instruct'), ta);
+    }
+    const orig = JSON.parse(JSON.stringify(vals));
+    seTts = { host: box, vals, orig,
+        labels: { speaker: 'speaker', language: 'language',
+                  instructions: 'instruction' } };
+    const scroll = panel.querySelector('.editor-scroll');
+    if (!scroll) { seTts = null; return; }
+    scroll.append(box);
+    box.hidden = !seIsBaseTab();
+}
 /* U2: roomy grammar editing pop-out over the model editor. OK copies the
    text back into the small textarea through its own 'input' event, so the
    bound listener does dirty-marking / override bookkeeping exactly as if
@@ -1668,6 +1807,7 @@ function openGrammarPop(srcTa, btn) {
 }
 function closeEditor() {
     if (seModel) CHIPS.clearProfileCache(seModel);   // tree must show new profiles
+    seTts = null; seTtsGen++;   // TTS-1: a stale probe must not attach here
     seModel = null; seFormModel = null;
     seActiveSect = null; SE_RAIL_HOST = null;
     renderModelAdmin(); // rows were frozen while the editor was open
@@ -1720,6 +1860,7 @@ async function openEditor(model, profileName, templateName) {
     // popup modal, not an inline accordion: stable size for long forms
     const panel = editorNode();
     renderEditorFields(panel.querySelector('#se-fields'));
+    seTtsAttach(panel);   // TTS-1: silent unless this is a probed TTS model
     seLoadProfiles(model, panel.querySelector('.se-profs')).then(() => {
         // item 2: existing profiles are prominent top tabs, each showing
         // that profile's merged values (item 1: values are visible)
@@ -2767,6 +2908,9 @@ function seActivateTab(panel, t) {
     else { seValues = Object.assign({}, t.workVals || seBaseVals);
            seOrig = t.origVals || seOrig; }
     renderEditorFields(document.getElementById('se-fields'));
+    // TTS-1: voice defaults are model-wide (base scope) — the block rides
+    // the base tab only; its dirty state still commits from any tab
+    if (seTts && seTts.host) seTts.host.hidden = t.id !== 'base';
     seRenderTabs(panel); seUpdateSaveBtn();
 }
 async function commitBaseTab(panel, msg) {
@@ -2874,9 +3018,11 @@ async function saveEditor() {
     const changed = seTabs.filter(seTabHasChanges);
     // single dirty profile tab, base untouched: the BUG-6-pinned wrapper
     // carries the busy state + rejection handling — behavior unchanged
-    if (changed.length === 1 && changed[0].id !== 'base' && !seIsBaseTab())
+    const ttsDirty = seTtsIsDirty();   // TTS-1: independent store, one SAVE
+    if (changed.length === 1 && changed[0].id !== 'base' && !seIsBaseTab()
+        && !ttsDirty)
         return saveProfileTab(panel);
-    if (!changed.length) return;
+    if (!changed.length && !ttsDirty) return;
     // base FIRST when it carries changes (sparse-diff ordering, see header)
     const targets = [];
     if (baseTab && seTabHasChanges(baseTab)) targets.push(baseTab);
@@ -2913,7 +3059,15 @@ async function saveEditor() {
                     : C.t('uplift.toast.profile_save_failed', {msg: e.message}));
             }
         }
-        if (targets.length > 1) {
+        // TTS-1: commit the voice-defaults block through the same SAVE press
+        let ttsAttempted = false;
+        if (ttsDirty) {
+            ttsAttempted = true;
+            const lab = C.tf('uplift.voices.tts_section', 'TTS voice defaults');
+            try { await seCommitTts(); saved.push(lab); }
+            catch (e) { failed.push([lab, e.message]); MM_GLUE.toast(e.message); }
+        }
+        if (targets.length > 1 || (ttsAttempted && (targets.length >= 1 || failed.length))) {
             // per-tab honest summary (BUG-6 doctrine: final state only)
             const parts = [];
             if (saved.length) parts.push(C.tf('uplift.se.saved_all', 'saved') + ': ' + saved.join(', '));
@@ -2931,14 +3085,14 @@ async function saveEditor() {
             // label shape, no 'failed: X ()' wrapper
             if (!/^error: |^saved/i.test(msg.textContent || ''))
                 msg.textContent = 'error: ' + failed[0][1];
-        } else if (saved.length === 1 && targets[0].id === 'base'
+        } else if (!ttsAttempted && saved.length === 1 && targets[0].id === 'base'
                    && !baseReload && seTabs.every(t => !seTabHasChanges(t))) {
             setTimeout(closeEditor, 1200);   // old single-base close behavior
         }
     } finally {
         // recompute from tab state: clean tabs leave the button disabled,
         // a failed one re-enables it for a retry (BUG-6 doctrine)
-        if (btn) btn.disabled = !seTabs.some(seTabHasChanges);
+        if (btn) btn.disabled = !seTabs.some(seTabHasChanges) && !seTtsIsDirty();
     }
 }
 /* RESTART MODEL (phase 2): push EVERYTHING — deferred values are already in

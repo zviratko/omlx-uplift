@@ -225,9 +225,17 @@ async function mount(opt) {
     const host = byId['vc-body'];
     const tabs = classes(host, 'vc-tabs')[0];
     assert.ok(tabs, 'tab strip renders above everything');
-    const [tClone, tSay] = classes(tabs, 'vc-tab');
+    // TTS-1 inserted TEXT TO SPEECH between clone and say: the say tab is
+    // picked by its LABEL, never by its index (an index pin silently
+    // re-points every test at the wrong tab the moment the strip grows).
+    const tabBtns = classes(tabs, 'vc-tab');
+    const byText = (frag) => tabBtns.find(b => String(b.textContent).includes(frag));
+    const tClone = byText('CLONED');
+    const tSay = byText('macOS');
+    assert.ok(tClone && tSay, 'clone + macOS tabs exist by name');
     const sayClick = async () => { tSay.click(); await settle(); await settle(); };
-    return { V, st, host, tClone, tSay, sayClick, byId, doc };
+    return { V, st, host, tClone, tSay, tTts: byText('TEXT TO SPEECH'),
+             sayClick, byId, doc };
 }
 
 test('tab strip defaults to CLONED and keeps the add form', async () => {
@@ -242,8 +250,9 @@ test('say tab lists groups by language name, quality inside', async () => {
     const h = await mount({});
     await h.sayClick();
     // the click RE-RENDERS the panel — assert on the fresh buttons
-    const [c2, s2] = classes(h.host, 'vc-tab');
-    assert.ok(s2._classes.has('on') && !c2._classes.has('on'));
+    const fresh = classes(h.host, 'vc-tab');
+    const onOf = (frag) => fresh.find(b => String(b.textContent).includes(frag));
+    assert.ok(onOf('macOS')._classes.has('on') && !onOf('CLONED')._classes.has('on'));
     // folded by default: rows exist in the DOM but every group is hidden
     for (const g of classes(h.host, 'vc-say-grp')) {
         assert.equal(g.hidden, true, 'groups collapse by default');

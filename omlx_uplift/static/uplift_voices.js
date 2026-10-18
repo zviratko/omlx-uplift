@@ -1434,6 +1434,181 @@ async function sayPanel(host) {
     _sayRows(rows, _sayData.voices);
 }
 
+/* ---- TTS-1: the TEXT TO SPEECH tab --------------------------------------
+   The MODELS themselves, each with the BUILT-IN speakers its own checkpoint
+   metadata declares indented under it (the caps probe, never guessed here —
+   VOICE-5 doctrine). Cloned voices stay on the CLONED VOICES tab; a built-in
+   speaker is not a stored voice and gets no badge in the model manager.
+   DEFAULT marks ONE speaker per model — the voice a request gets when it
+   names none (store: voices.json > tts_defaults; POST /voices/tts/defaults,
+   speaker '' clears). SETTINGS is the SAME editor the model manager opens
+   (window.Uplift.modelmgr.openEditor) — one code path, two entries.
+   Instructions/language are modal-only: this panel lists, it does not edit. */
+let _ttsDefaults = null;    // last /voices/tts/defaults payload (per visit)
+
+async function _ttsLoadDefaults() {
+    // The SERVER owns the map (same rule as the say tab's preferred_for):
+    // read it once per visit, re-read after a DEFAULT click, never patch
+    // the cache from the click payload.
+    try {
+        const d = await D.fetchJson(`${VAPI}/voices/tts/defaults`);
+        _ttsDefaults = (d && d.defaults) || {};
+    } catch (e) { _ttsDefaults = _ttsDefaults || {}; }
+    return _ttsDefaults;
+}
+
+function ttsModelRow(m) {
+    const row = document.createElement('div');
+    row.className = 'vc-row vc-tts-model';
+    const lab = document.createElement('div');
+    lab.className = 'vc-name';
+    lab.textContent = m.name || m.id;
+    // live status: which built-in voice answers a voice-less request for
+    // this model right now ('' clears falls back to the honest no-default
+    // text — the same server map the DEFAULT lamps repaint from)
+    const stat = document.createElement('span');
+    stat.className = 'vc-tts-stat';
+    const cur = _ttsDefaults && _ttsDefaults[m.id];
+    if (cur && cur.speaker) {
+        stat.textContent = tf('uplift.voices.tts_default', 'DEFAULT')
+            + ': ' + cur.speaker;
+    } else {
+        stat.textContent = tf('uplift.voices.tts_no_default',
+            'No default (each request decides)');
+    }
+    const act = document.createElement('div');
+    act.className = 'vc-actions';
+    const set = document.createElement('button');
+    set.type = 'button'; set.className = 'se-btn vc-tts-set';
+    set.textContent = tf('uplift.voices.tts_settings', 'SETTINGS');
+    set.onclick = () => {
+        // late-bound on purpose (uplift_mmchips precedent): this module may
+        // load before the editor, and the editor is another module's export.
+        const mgr = window.Uplift.modelmgr;
+        if (!mgr || typeof mgr.openEditor !== 'function') {
+            D.toast('model manager editor not loaded', 'error');  // i18n-exempt: seam missing
+            return;
+        }
+        mgr.openEditor(m.id);
+    };
+    act.append(set);
+    row.append(lab, stat, act);
+    return row;
+}
+
+function ttsSpeakerRow(model, spk, repaint) {
+    const row = document.createElement('div');
+    row.className = 'vc-row vc-tts-sp';
+    // indent comes from '.vc-tts-sp { padding-left: 38px }' in uplift.css
+    // (CSS LANE closed; tts-tab.test.cjs pins the rule, say1 the pattern)
+    const lab = document.createElement('div');
+    lab.className = 'vc-name';
+    lab.textContent = spk;
+    const cur = _ttsDefaults && _ttsDefaults[model];
+    const lit = !!(cur && cur.speaker === spk);
+    const act = document.createElement('div');
+    act.className = 'vc-actions';
+    const play = document.createElement('button');
+    play.type = 'button'; play.className = 'se-btn vc-play';
+    play.dataset.en = '▶'; play.textContent = '▶';
+    play.title = tf('uplift.voices.play', 'Speak a sample with this voice');
+    play.onclick = async () => {
+        if (play.classList.contains('playing')) return stopPlayback();
+        play.disabled = true;
+        try {
+            // no stored voice behind a built-in speaker: the request names
+            // model + speaker outright (/voices/tts/speak, TTS-1)
+            const r = await speechJson('/voices/tts/speak', {
+                model: model, speaker: spk,
+                input: 'Hello! My name is ' + spk + '.' });
+            play.disabled = false;
+            await playBlob(r, play);
+        } catch (e) {
+            play.disabled = false;
+            D.toast(String(e && e.message || e), 'error');
+        }
+    };
+    const def = document.createElement('button');
+    def.type = 'button';
+    def.className = 'se-btn vc-tts-def' + (lit ? ' on' : '');
+    def.textContent = tf('uplift.voices.tts_default', 'DEFAULT');
+    def.title = tf(lit ? 'uplift.voices.tts_clear_default'
+                       : 'uplift.voices.tts_set_default',
+                   lit ? 'Clear the default voice for this model'
+                       : 'Speak with this voice by default when a request '
+                         + 'names no voice');
+    def.onclick = async () => {
+        def.disabled = true;
+        try {
+            // the POST REPLACES the model's whole row (router contract):
+            // resend language/instructions the modal may have set, else a
+            // DEFAULT click would silently erase them (cross-lane catch)
+            const keep = (_ttsDefaults && _ttsDefaults[model]) || {};
+            await D.postJson(`${VAPI}/voices/tts/defaults`,
+                { model: model, speaker: lit ? '' : spk,
+                  language: keep.language || '',
+                  instructions: keep.instructions || '' });
+            await _ttsLoadDefaults();     // one truth: repaint from the server
+            await repaint();
+        } catch (e) {
+            def.disabled = false;
+            D.toast(String(e && e.message || e), 'error');
+        }
+    };
+    act.append(play, def);
+    row.append(lab, act);
+    return row;
+}
+
+async function _ttsRows(rowsBox, models) {
+    rowsBox.textContent = '';
+    const repaint = () => _ttsRows(rowsBox, models);
+    // alphabetical by display name — the panel is a catalogue, not a queue
+    const list = models.slice().sort((a, b) =>
+        String(a.name || a.id).localeCompare(String(b.name || b.id)));
+    for (const m of list) {
+        rowsBox.append(ttsModelRow(m));
+        let caps = null;
+        try { caps = await window.Uplift.capsFor(m.id); } catch (e) { caps = null; }
+        // Built-in speakers exist only where the checkpoint PROVES them
+        // (qwen3 with a spk_id table); Kokoro/... answer qwen3:false and stay
+        // a bare model row.
+        if (caps && caps.qwen3 && (caps.speakers || []).length) {
+            for (const spk of caps.speakers)
+                rowsBox.append(ttsSpeakerRow(m.id, spk, repaint));
+        }
+    }
+}
+
+async function ttsPanel(host, models) {
+    const box = document.createElement('div');
+    box.className = 'mk-box vc-tts';
+    const title = document.createElement('div');
+    title.className = 'mk-title';
+    title.textContent = tf('uplift.voices.tts_title', 'TTS MODELS');
+    const hint = document.createElement('div');
+    hint.className = 'mk-desc';
+    hint.textContent = tf('uplift.voices.tts_hint',
+        'Every text-to-speech model installed on this server. Built-in '
+        + 'voices come from the model\'s own metadata. SETTINGS opens the '
+        + 'same editor as in the model manager.');
+    box.append(title, hint);
+    host.append(box);
+    if (!models || !models.length) {
+        const none = document.createElement('div');
+        D.emptyMsg(none, tf('uplift.voices.tts_none',
+            'No TTS model installed — download one in the model manager '
+            + 'first.'));
+        box.append(none);
+        return;
+    }
+    if (!_ttsDefaults) await _ttsLoadDefaults();
+    const rows = document.createElement('div');
+    rows.className = 'vc-list';
+    box.append(rows);
+    await _ttsRows(rows, models);
+}
+
 let _vcTab = 'clone';
 
 function vcTabBtn(key, en, id) {
@@ -1473,8 +1648,17 @@ async function renderVoices() {
     const tabs = document.createElement('div');
     tabs.className = 'vc-tabs';
     tabs.append(vcTabBtn('uplift.voices.tab_clone', 'CLONED VOICES', 'clone'),
+                vcTabBtn('uplift.voices.tab_tts', 'TEXT TO SPEECH', 'tts'),
                 vcTabBtn('uplift.voices.tab_say', 'macOS VOICES', 'say'));
     host.append(tabs);
+    if (_vcTab === 'tts') {
+        // models is resolved ABOVE the branch (the same catalog the clone
+        // form feeds its select with — one fetch, one truth)
+        await ttsPanel(host, models);
+        const sub = $('vc-sub');
+        if (sub) sub.textContent = models.length + ' ×';
+        return;
+    }
     if (_vcTab === 'say') {
         // one panel per visit; the ADD form (clone flow) stays on its tab
         await sayPanel(host);
