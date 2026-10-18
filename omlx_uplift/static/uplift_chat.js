@@ -407,6 +407,13 @@ function saveConv() {
         if (i === _convs.length - 1) _convs.push(sum);
     }
     if (!_convs.length) _convs.push(sum);
+    // VOICE-16: every bubble carries an identity the audio cache can hang on.
+    // Assigned here (not at push time) so restored, imported and edited rows
+    // all get one, and it never changes for a bubble that survives the save.
+    var ms = _conv.messages || [];
+    for (var mi = 0; mi < ms.length; mi++) {
+        if (ms[mi] && !ms[mi].mid) ms[mi].mid = newMid();
+    }
     var d = D();
     d.postJson(api() + '/chat/history', _conv).then(function (r) {
         var warn = gid('chat-native-warn');
@@ -1711,7 +1718,38 @@ function toolbar() {
     histTitle.dataset.en = 'Chat History';
     var rowIO = el('div', 'chat-native-sec-row');
     rowIO.append(expBtn, impBtn, fileIn);
-    hist.append(histTitle, newBtn, rowIO, list, del);
+    // VOICE-16: the audio cache belongs to the bubbles, but the operator gets
+    // a look inside: CHECK counts what is on disk and reports what nothing
+    // refers to any more, CLEANUP deletes only those. Never automatic.
+    function cacheSay(msg, kind) {
+        var d = D();
+        if (d && d.toast) d.toast(msg, kind || 'ok');
+    }
+    function cacheSize(bytes) {
+        var n = Number(bytes) || 0;
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+        return (n / 1024 / 1024).toFixed(1) + ' MB';
+    }
+    function orphansOf(rep) {
+        var by = 0, n = rep.orphan_files || 0;
+        var kinds = rep.orphans || {};
+        Object.keys(kinds).forEach(function (k) { by += (kinds[k] || {}).bytes || 0; });
+        return { n: n, bytes: by };
+    }
+    var cacheHint = tf2('uplift.chat.cache_hint',
+                        'Recorded reply audio lives with its message.');
+    var cacheChk = toolBtn(tf2('uplift.chat.cache_check', 'Check audio cache'),
+                           cacheHint, function () { checkAudioCache(cacheSay, cacheSize, orphansOf); });
+    cacheChk.id = 'chat-native-cache-check';
+    cacheChk.dataset.i18n = 'uplift.chat.cache_check';
+    cacheChk.dataset.en = 'Check audio cache';
+    var cacheClr = toolBtn(tf2('uplift.chat.cache_cleanup', 'Cleanup audio cache'),
+                           cacheHint, function () { cleanupAudioCache(cacheSay, cacheSize, orphansOf); });
+    cacheClr.id = 'chat-native-cache-cleanup';
+    cacheClr.dataset.i18n = 'uplift.chat.cache_cleanup';
+    cacheClr.dataset.en = 'Cleanup audio cache';
+    hist.append(histTitle, newBtn, rowIO, list, del, cacheChk, cacheClr);
     // CHAT-3R round 5/6 (user): Model | Preset | Save | Delete in the
     // top row; the naming MODAL rides in the bar's DOM but is fixed —
     // it covers the page instead of expanding the bar.
@@ -1814,10 +1852,21 @@ function ensureSpeakQueue() {
 }
 function beginSpeakTurn() {
     if (!autoSpeakOn() || !hasVoices() || !SIO()) return null;
-    var q = ensureSpeakQueue();
-    if (!q) return null;
-    q.reset();                       // new session after a stop() (fresh clock)
     var mode = speakChunkMode();
+    // VOICE-16: the turn gets its OWN plan + queue before the first token, so
+    // every chunk can raise its row the moment it is synthesized. The bubble
+    // is not in the store yet (deep-chat appends the assistant row when the
+    // stream closes), so the mid is minted HERE and stamped in onMessage —
+    // that stamp is what binds the audio files to the bubble.
+    _turnMid = newMid();
+    _livePlan = { mid: _turnMid, conv: (_conv || {}).id || '', mode: mode,
+                  voice: chatVoiceId(), rev: 'r' + r6(), text: '', chunks: [],
+                  rows: [], seqs: {}, planEl: null, bubble: null, live: true };
+    _livePlan.owner = { conv: _livePlan.conv, msg: _turnMid, rev: _livePlan.rev };
+    _plans[_turnMid] = _livePlan;
+    var q = queueFor(_livePlan);
+    if (!q) { _livePlan = null; _turnMid = ''; return null; }
+    sayTake(q, _livePlan);
     _speakZ = SIO().createSpeechSplitter({ mode: mode });
     // the sanitizer flattens newlines; in line/paragraph modes the newline
     // IS the boundary, so only the prose (sentence) mode strips markdown.
@@ -1833,13 +1882,26 @@ function beginSpeakTurn() {
 }
 function speakFeed(delta, gen) {
     if (gen == null || gen !== _speakGen || !_speakZ) return;
-    var q = ensureSpeakQueue();
+    var p = _livePlan;
+    var q = p && p.q ? p.q : ensureSpeakQueue();
     if (!q) return;
     var text = _speakSan ? _speakSan.push(delta) : delta;
     if (!text) return;
     var chunks = _speakZ.push(text);
-    for (var i = 0; i < chunks.length; i++)
-        if (q.push(chunks[i]) >= 0) _speakPushed++;
+    for (var i = 0; i < chunks.length; i++) {
+        if (q.push({ text: chunks[i],
+                     source: p ? chunkSource(p.owner, chunks[i]) : null }) >= 0) {
+            _speakPushed++;
+            if (p) { p.chunks.push(chunks[i]); sayGrow(p); }
+        }
+    }
+}
+/* a chunk arrived mid-stream: its row appears at once (synthesizing), then
+   fills with the waveform when the bytes land */
+function sayGrow(plan) {
+    if (plan.planEl) sayStructure(plan, plan.bubble);
+    var box = plan.box;
+    if (box) sayInlinePaint(plan);
 }
 function endSpeakTurn(gen) {
     // turn end / error: flush the tail through the SAME queue and settle
@@ -1867,7 +1929,17 @@ function speakCancel() {
     // VOICE-11 cancel rules: Stop button, new user send, conversation
     // switch, New Chat, voice change, AUTO-SPEAK toggled off. Token bump:
     // late responses hit stale tokens and schedule nothing.
+    var cp = _speakQ && _speakQ.__plan;
     _speakGen++;
+    if (cp) {                         // VOICE-16: the rows stop mid-animation
+        cp.playSeq = -1;
+        cp.paused = false;
+        sayHighlight(cp, -1);
+        sayPaintAll(cp);
+        sayInlinePaint(cp);
+    }
+    if (_speakQ && _livePlan && _speakQ === _livePlan.q) _livePlan.q = null;
+    _sayPlan = null;
     _speakZ = null;
     _speakSan = null;
     if (_speakQ) _speakQ.stop();
@@ -1948,51 +2020,745 @@ function syncVoiceSelect() {
     }
 }
 function msgSpeak(idx, btn) {
-    // VOICE-11: manual SPEAK = the SAME queue as auto-read (replaces
-    // VOICE-1's single-blob path — and it keeps working with AUTO-SPEAK
-    // off, exactly as before). Busy click on the same bubble is a stop;
-    // one read-aloud at a time across the page.
+    // VOICE-16: the seam behind the transport row (and the old VOICE-11
+    // tests). Manual read of a whole reply runs through the SAME plan the
+    // auto-read uses — same chunk list, same cached audio, same numbers —
+    // so speaking a bubble twice costs nothing and the two modes never
+    // disagree about what chunk 3 is. A second click on the same button is
+    // a stop; one read-aloud at a time across the page.
     var m = messageAt(idx);
     if (!m || !m.content) return;
-    var text = String(stripMarkdown(m.content)).trim();
-    if (!text) return;
-    if (!VOI() || !SIO()) return;
+    if (!VOI() || !SIO() || !hasVoices()) return;
     if (_speakBtn && _speakBtn === btn) { speakCancel(); return; }
+    var plan = planFor(m);
+    if (!plan || !plan.chunks.length) return;      // sanitised to nothing
     speakCancel();                      // supersede any live/manual read
     unlockSpeak();                      // THIS click is the gesture
-    var q = ensureSpeakQueue();
-    if (!q) {
-        var d = D();
-        if (d) d.toast(t('uplift.chat.speak_failed',
-            'No audio could be played for this reply.'), 'error');
-        return;
-    }
-    q.reset();
-    var dropMark = q.dropped().length, playMark = q.played();
-    // the VOICE-10 chunker joins the manual path: bubble SPEAK follows the
-    // configured chunk strategy (sentence/line/paragraph) exactly like the
-    // auto-read of the same reply — first sentences synthesize while the
-    // rest is still queued instead of one whole-reply blob
-    var z = SIO().createSpeechSplitter({ mode: speakChunkMode() });
-    var chunks = z.push(text).concat(z.flush());
-    var fed = 0;
-    for (var ci = 0; ci < chunks.length; ci++)
-        if (q.push(chunks[ci]) >= 0) fed++;
-    if (!fed) return;                   // sanitised to nothing
     _speakBtn = btn || null;
     if (btn) btn.classList.add('playing');
-    speakEvent(true);    // VOICE-13 echo guard: manual read = mic paused
-    q.drain().then(function (res) {
-        speakEvent(false);              // VOICE-13: drained, listener resumes
-        if (btn) btn.classList.remove('playing');
-        if (_speakBtn === btn) _speakBtn = null;
-        if (res.stopped) return;        // superseded mid-read: silent
-        speakToast(res, 1, dropMark, playMark);
+    sayPlayAll(plan, plan.box || null);
+}
+
+// ---- VOICE-16: the bubble audio player ---------------------------------------
+// One PLAN per spoken bubble: the exact chunk list the splitter produced (the
+// same list a reload re-derives from the stored text), an opaque revision that
+// ties those chunks to the audio files the bubble owns, and the rows the
+// operator drives. The engine (uplift_speechio.js) owns the clock; this section
+// owns the DOM, the in-page buffer cache in front of the server-side disk
+// cache, and the number links between a row and the text it reads.
+var _plans = {};                       // message mid -> plan
+var _mem = new Map();                  // voice + US + chunk text -> AudioBuffer(s)
+var _memBytes = 0;
+var MEM_CAP = 64 * 1024 * 1024;        // one page session's replay budget
+var _sayLoop = null;                   // the ONE rAF progress loop
+var _sayPlan = null;                   // the plan that loop is painting
+var _livePlan = null;                  // plan of the turn still streaming
+var _turnMid = '';                     // mid the next assistant row will carry
+var SAY_SEGS = 26;                     // waveform bars per row
+
+function r6() { return Math.random().toString(36).slice(2, 8); }
+function newMid() { return 'm' + Date.now().toString(36) + r6(); }
+function ensureMid(m) { if (m && !m.mid) m.mid = newMid(); return m ? m.mid : ''; }
+function memKey(text) { return chatVoiceId() + '\u001f' + text; }
+function memGet(text) {
+    var k = memKey(text), v = _mem.get(k);
+    if (v) { _mem.delete(k); _mem.set(k, v); }        // LRU touch
+    return v || null;
+}
+function memSize(bufs) {
+    var list = (bufs && bufs.length !== undefined && !Array.isArray(bufs))
+        ? [bufs] : (bufs || []);
+    var n = 0;
+    for (var i = 0; i < list.length; i++)
+        n += (list[i] && list[i].length ? list[i].length * 4 : 0);
+    return n;
+}
+function memPut(text, bufs) {
+    var k = memKey(text), size = memSize(bufs);
+    if (!size) return;
+    if (_mem.has(k)) { _memBytes -= memSize(_mem.get(k)); _mem.delete(k); }
+    _mem.set(k, bufs);
+    _memBytes += size;
+    while (_memBytes > MEM_CAP && _mem.size > 1) {
+        var oldest = _mem.keys().next().value;
+        _memBytes -= memSize(_mem.get(oldest));
+        _mem.delete(oldest);
+    }
+}
+
+/* the ONE chunk list of a bubble: identical for a live read, a manual read and
+   the rebuild after a reload. Sentence mode runs the markdown sanitizer (whose
+   streaming twin is byte-identical, pinned in voice10/VOICE-11a); line and
+   paragraph modes stay RAW, because there the newline IS the boundary. */
+function planChunks(text, mode) {
+    var S = SIO();
+    if (!S) return [];
+    var src = String(text || '');
+    if (!src.trim()) return [];
+    return mode === 'sentence' ? S.splitSpeechChunks(src, 'sentence')
+        : S.splitSpeechChunks(src, mode, undefined, { sanitize: false });
+}
+
+function planOf(msg) {
+    return (msg && msg.mid && _plans[msg.mid]) ? _plans[msg.mid] : null;
+}
+
+function makePlan(msg, text, mode, rev) {
+    var chunks = planChunks(text, mode);
+    var p = { mid: ensureMid(msg), conv: (_conv || {}).id || '', mode: mode,
+              voice: chatVoiceId(), rev: rev || ('r' + r6()), text: String(text || ''),
+              chunks: chunks, rows: [], planEl: null, seqs: {} };
+    p.owner = { conv: p.conv, msg: p.mid, rev: p.rev };
+    if (p.mid) _plans[p.mid] = p;
+    if (msg) msg.speech = { mode: mode, n: chunks.length, rev: p.rev, voice: p.voice };
+    return p;
+}
+
+/* The plan a bubble reads from. `rev` is only replaced when the plan itself
+   changes (the text was edited, the mode or the voice moved), because the rev
+   is what keeps the bubble's stored audio reachable — and dropping it is what
+   frees those files again (routers/chat.py prunes by rev on every save). */
+function planFor(msg) {
+    var text = String((msg && msg.content) || '');
+    if (!text.trim() || !SIO() || !hasVoices()) return null;
+    var mode = speakChunkMode(), voice = chatVoiceId();
+    var p = msg.mid ? _plans[msg.mid] : null;
+    if (p && p.text === text && p.mode === mode && p.voice === voice) return p;
+    var stored = (msg && msg.speech) || {};
+    var keep = p && p.mode === mode && p.voice === voice ? p.rev
+        : (stored.mode === mode && stored.voice === voice && stored.rev
+           ? stored.rev : '');
+    return makePlan(msg, text, mode, keep);
+}
+
+// ---- byte source: memory cache, then the bubble-owned disk cache -------------
+function chunkSource(owner, text) {
+    return function () {
+        var hit = memGet(text);
+        if (hit) return hit;
+        var V = VOI();
+        if (!V || !V.speechJson) return Promise.reject(new Error('no voices module'));
+        return Promise.resolve(V.speechJson('/voices/speech',
+            { voice: chatVoiceId(), input: text, cache: owner }))
+            .then(function (r) { return rememberAudio(text, r); });
+    };
+}
+function rememberAudio(text, r) {
+    // Cache what we can hold on to: decoded buffers replay with no request at
+    // all. Anything this browser/environment will not hand us stays uncached
+    // for this session — the server-side cache still answers it.
+    if (!r || typeof r.arrayBuffer !== 'function') return r;
+    var ctx = speakCtx();
+    if (!ctx || typeof ctx.decodeAudioData !== 'function') return r;
+    return r.arrayBuffer().then(function (ab) {
+        return new Promise(function (res) {
+            var done = false;
+            function give(bufs) {
+                if (done) return;
+                done = true;
+                var list = Array.isArray(bufs) ? bufs : [bufs];
+                if (list.length && list[0]) memPut(text, list);
+                res(list.length === 1 ? list[0] : list);
+            }
+            try {
+                var p = ctx.decodeAudioData(ab, function (b) { give(b); },
+                                            function () { give(null); });
+                if (p && typeof p.then === 'function')
+                    p.then(give, function () { give(null); });
+            } catch (e) { give(null); }
+        });
     });
+}
+
+// ---- the rows ---------------------------------------------------------------
+function sayRow(plan, seq) {
+    var row = el('div', 'chat-native-say-row');
+    row.dataset.seq = String(seq);
+    var pp = el('button', 'chat-native-say-pp'); pp.type = 'button';
+    pp.textContent = '\u25b6';                       // ▶
+    var n = el('span', 'chat-native-say-n', String(seq + 1));
+    var wave = el('div', 'chat-native-say-wave');
+    var cv = document.createElement('canvas');
+    cv.className = 'chat-native-say-cv';
+    var bar = el('div', 'chat-native-say-bar');
+    bar.hidden = true;
+    var fill = el('i');
+    bar.appendChild(fill);
+    wave.append(cv, bar);
+    var re = el('button', 'chat-native-say-re'); re.type = 'button';
+    re.textContent = '\u27f3';                       // ⟳
+    re.title = tf2('uplift.chat.say_redo', 'Synthesize this line again');
+    re.dataset.i18nTitle = 'uplift.chat.say_redo';
+    re.dataset.enTitle = re.title;
+    pp.title = tf2('uplift.chat.say_play', 'Play this line');
+    pp.dataset.i18nTitle = 'uplift.chat.say_play';
+    pp.dataset.enTitle = pp.title;
+    row._pp = pp; row._cv = cv; row._fill = fill; row._bar = bar; row._re = re;
+    pp.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        sayToggle(plan, seq);
+    });
+    re.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        sayReload(plan, seq);
+    });
+    row.addEventListener('mouseenter', function () { sayHover(plan, seq, true); });
+    row.addEventListener('mouseleave', function () { sayHover(plan, seq, false); });
+    plan.rows[seq] = row;
+    return row;
+}
+
+/* paint one row from what the queue knows about that chunk */
+function sayPaint(plan, seq) {
+    var row = plan.rows[seq];
+    if (!row) return;
+    var q = _speakQ, it = q && q.itemAt ? q.itemAt(seq) : null;
+    var state = 'idle';
+    if (it) state = it.state || 'idle';
+    if (plan.playSeq === seq && (state === 'playing' || plan.paused)) state =
+        plan.paused ? 'paused' : 'playing';
+    row.className = 'chat-native-say-row ' + state +
+        (plan.hot === seq ? ' hot' : '');
+    row._pp.textContent = (state === 'playing') ? '\u23f8' : '\u25b6';  // ⏸ / ▶
+    var dur = (it && it.duration) || 0;
+    sayWave(row._cv, it && it.buffers, dur ? 0 : 0, state);
+    if (state === 'playing' || state === 'paused') {
+        var pos = q.position();
+        var frac = pos.seq === seq && pos.duration
+            ? pos.offset / pos.duration : (state === 'paused' ? -1 : 0);
+        row._bar.hidden = false;
+        row._fill.style.width = (frac >= 0 ? Math.round(frac * 100) : 
+            Math.round((plan.pauseFrac || 0) * 100)) + '%';
+    } else {
+        row._bar.hidden = !(state === '' || state === 'loading');
+        row._fill.style.width = state === 'played' ? '100%' : '0%';
+    }
+}
+function sayPaintAll(plan) {
+    if (!plan) return;
+    for (var i = 0; i < plan.rows.length; i++) sayPaint(plan, i);
+}
+function sayStructure(plan, bubble) {
+    if (!plan) return;
+    var g = plan.planEl;
+    if (g && g.appendChild) {
+        while (plan.rows.length < plan.chunks.length)
+            g.appendChild(sayRow(plan, plan.rows.length));
+    }
+    sayAnnotate(plan, bubble);
+    sayPaintAll(plan);
+}
+
+/* waveform: peaks straight off the decoded buffer — no server work, no extra
+   request. Nothing to draw until the bytes exist (a plain bar covers that). */
+function sayWave(cv, bufs, _unused, state) {
+    if (!cv || !cv.getContext) return;
+    var list = !bufs ? [] : (Array.isArray(bufs) ? bufs : [bufs]);
+    var w = cv.clientWidth || 140, h = cv.clientHeight || 16;
+    if (cv.width !== w) cv.width = w;
+    if (cv.height !== h) cv.height = h;
+    var g = cv.getContext('2d');
+    if (!g) return;
+    g.clearRect(0, 0, w, h);
+    if (!list.length) return;
+    var peaks = [], n = SAY_SEGS, i, k;
+    for (i = 0; i < n; i++) peaks.push(0);
+    var span = 0, off = [];
+    for (i = 0; i < list.length; i++) {
+        var ch = null;
+        try { ch = list[i].getChannelData ? list[i].getChannelData(0) : null; }
+        catch (e) { ch = null; }
+        off.push(span);
+        span += ch ? ch.length : 0;
+    }
+    if (!span) return;
+    var idx = 0, acc = 0, seen = 0;
+    for (var s = 0; s < n; s++) {
+        var from = Math.floor(span * s / n), to = Math.max(from + 1, Math.floor(span * (s + 1) / n));
+        while (idx < list.length - 1) {
+            var c2 = list[idx];
+            var len = (c2 && c2.length) || 0;
+            if (from < off[idx] + len) break;
+            idx++;
+        }
+        var peak = 0;
+        for (var j = from; j < to; j += Math.max(1, Math.floor((to - from) / 64))) {
+            var l2 = 0, cc = idx;
+            while (cc < list.length) {
+                var base = off[cc], arr = null;
+                try { arr = list[cc].getChannelData ? list[cc].getChannelData(0) : null; }
+                catch (e) { arr = null; }
+                var ln = arr ? arr.length : 0;
+                if (j - base < ln) { peak = Math.max(peak, Math.abs(arr[j - base] || 0)); break; }
+                cc++;
+            }
+            if (peak > 0.98) break;
+        }
+        peaks[s] = peak;
+        seen += peak;
+    }
+    var scale = seen ? Math.min(1, (n * 0.55) / (seen / n) * 0.55) : 1;
+    var bw = Math.max(1, Math.floor(w / n) - 1);
+    var css = getComputedStyle(cv);
+    g.fillStyle = (state === 'failed') ? '#e05d5d'
+        : (css.getPropertyValue('--dim') || '#8b98ab') ;
+    for (i = 0; i < n; i++) {
+        var amp = Math.max(0.06, Math.min(1, peaks[i] * scale * 2));
+        var bh = Math.max(1, Math.round(amp * (h - 2)));
+        g.fillRect(Math.round(i * w / n), Math.round((h - bh) / 2), bw, bh);
+    }
+}
+
+// ---- play / pause / replay / re-synthesize ----------------------------------
+// ---- play / pause / replay / re-synthesize ----------------------------------
+/* ONE queue instance per plan: the queue owns its chunk list, so a fresh
+   instance per bubble is what keeps plan index == queue sequence, and the
+   previous read is cut by speakCancel() before the swap (VOICE-11 rule: one
+   read-aloud at a time, a new one always wins). */
+function queueFor(plan) {
+    if (plan.q) return plan.q;
+    var sio = SIO(), V = VOI();
+    if (!sio || !V || !V.speechJson) return null;
+    var ctx = speakCtx();
+    if (!ctx) return null;
+    plan.q = sio.SpeechQueue({
+        ctx: ctx,
+        onItem: function (it, st) { sayItemEvent(plan, it, st); },
+        // the queue's own leg stays wired for a chunk with no cached source
+        request: function (chunk) {
+            return { url: '/voices/speech',
+                     body: { voice: chatVoiceId(), input: chunk } };
+        },
+    });
+    plan.dropMark = plan.q.dropped().length;
+    plan.playMark = plan.q.played();
+    return plan.q;
+}
+function sayItemEvent(plan, it, st) {
+    sayPaint(plan, it.seq);
+    if (st === 'playing') {
+        plan.playSeq = it.seq;
+        sayHighlight(plan, it.seq);
+        sayWatch(plan);
+    }
+    sayInlinePaint(plan);
+}
+function sayFeed(plan, q) {
+    if (q.__fed) return q;
+    for (var i = 0; i < plan.chunks.length; i++) {
+        var text = plan.chunks[i];
+        q.push({ text: text, source: chunkSource(plan.owner, text) });
+    }
+    q.__fed = true;
+    return q;
+}
+function sayToastNoAudio() {
+    var d = D();
+    if (d) d.toast(t('uplift.chat.speak_failed',
+        'No audio could be played for this reply.'), 'error');
+}
+function sayTake(q, plan) {
+    if (_speakQ && _speakQ !== q) speakCancel();
+    _speakQ = q;
+    q.__plan = plan;
+    return q;
+}
+function sayStart(plan, seq, solo) {
+    if (!plan || !plan.chunks.length) return null;
+    var q = queueFor(plan);
+    if (!q) { sayToastNoAudio(); return null; }
+    sayTake(q, plan);
+    sayFeed(plan, q);
+    plan.playSeq = seq;
+    plan.paused = false;
+    speakEvent(true);                       // VOICE-13: the mic stops listening
+    q.seek(seq, 0, solo ? { solo: true } : null);
+    sayWatch(plan);
+    return q;
+}
+function sayToggle(plan, seq) {
+    var q = plan ? plan.q : null;
+    if (q && !q.paused()) {
+        var pos = q.position();
+        if (pos.seq === seq && pos.state === 'playing' && q.pause()) {
+            plan.paused = true;
+            sayPaint(plan, seq);
+            sayInlinePaint(plan);
+            return;
+        }
+    }
+    if (q && q.paused() && plan.playSeq === seq) {
+        q.resume();
+        plan.paused = false;
+        sayWatch(plan);
+        sayPaint(plan, seq);
+        return;
+    }
+    sayStart(plan, seq, true);              // this line, from its top
+}
+function sayReload(plan, seq) {
+    if (!plan || !plan.chunks.length) return;
+    var q = queueFor(plan);
+    if (!q) { sayToastNoAudio(); return; }
+    sayTake(q, plan);
+    sayFeed(plan, q);
+    plan.playSeq = seq;
+    speakEvent(true);
+    q.reload(seq, chunkSource(plan.owner, plan.chunks[seq]), { play: true });
+    sayWatch(plan);
+}
+
+/* one rAF loop, for the plan that holds the queue: it moves the bars and
+   follows the playhead; the row STATES come from onItem instead */
+function sayWatch(plan) {
+    _sayPlan = plan;
+    if (_sayLoop) return;
+    var raf = (W() && W().requestAnimationFrame)
+        ? function (f) { return W().requestAnimationFrame(f); }
+        : function (f) { return setTimeout(f, 16); };
+    var tick = function () {
+        var p = _sayPlan, q = p && p.q;
+        _sayLoop = null;
+        if (!p || !q) return;
+        var pos = q.position();
+        sayPaintAll(p);
+        sayInlinePaint(p);
+        if (pos.seq !== p.marked) { p.marked = pos.seq; sayHighlight(p, pos.seq); }
+        if (pos.state === 'playing' || q.paused()) {
+            _sayLoop = raf(tick);
+        } else if (pos.state !== 'loading' && p.playSeq >= 0 && q.pending() > 0) {
+            _sayLoop = raf(tick);           // bytes still arriving
+        } else {
+            p.playSeq = -1;
+            sayHighlight(p, -1);
+            sayPaintAll(p);
+            sayInlinePaint(p);
+        }
+    };
+    if (!_sayLoop) _sayLoop = raf(tick);
+}
+
+/* a read-aloud is over: the mic may hear again and a manual read toasts once
+   (the live turn keeps its own settle path in endSpeakTurn) */
+function saySettle(plan, res) {
+    if (_speakBtn) { _speakBtn.classList.remove('playing'); _speakBtn = null; }
+    speakEvent(false);
+    if (plan && plan !== _livePlan && res && !res.stopped)
+        speakToast(res, plan.chunks.length, plan.dropMark || 0,
+                   plan.playMark || 0);
+}
+
+// ---- the number links inside the bubble ------------------------------------
+/* A chunk is located by its WORDS, not by offsets: the bubble is rendered
+   markdown, so the syntax, the whitespace and the punctuation are gone on both
+   sides and the word run is the only stable handle. Blocks are walked in order
+   and the cursor only moves forward — which also makes a repeated call cheap.
+   A chunk whose words cannot be found (the sanitizer deleted a construct it
+   spans) is still NUMBERED, at the end of the bubble: a row must never be the
+   only place a chunk exists, and an unlinked number is honest. */
+function sayWords(s) {
+    return String(s || '').toLowerCase().split(/[^a-z0-9\u00c0-\uffff]+/)
+        .filter(function (w) { return w.length > 0; });
+}
+function sayBlocks(bubble) {
+    if (!bubble || !bubble.querySelectorAll) return [];
+    var found = [];
+    try {
+        found = Array.prototype.slice.call(
+            bubble.querySelectorAll('p,li,h1,h2,h3,h4,h5,h6,blockquote,pre,td,th'));
+    } catch (e) { found = []; }
+    return found.length ? found : [bubble];
+}
+function sayBlockText(block) {
+    var out = '';
+    var kids = (block && block.childNodes) || [];
+    for (var i = 0; i < kids.length; i++) {
+        var k = kids[i];
+        if (!k) continue;
+        if (k.nodeType === 3) out += k.nodeValue || '';
+        else if (k.nodeType === 1 &&
+                 String(k.className || '').indexOf('chat-native-say-ref') < 0)
+            out += k.textContent || '';
+    }
+    return out;
+}
+function sayMatch(plan, bubble) {
+    var blocks = sayBlocks(bubble), stream = [], i, j;
+    for (i = 0; i < blocks.length; i++) {
+        var toks = sayWords(sayBlockText(blocks[i]));
+        for (j = 0; j < toks.length; j++) stream.push({ b: i, w: toks[j] });
+    }
+    var marks = [], cursor = 0;
+    for (i = 0; i < plan.chunks.length; i++) {
+        var words = sayWords(plan.chunks[i]);
+        var best = { end: -1, len: 0 };
+        for (var at = cursor; at < Math.min(stream.length, cursor + 24); at++) {
+            var run = 0;
+            while (run < words.length && at + run < stream.length &&
+                   stream[at + run].w === words[run]) run++;
+            if (run > best.len) best = { end: at + run - 1, len: run };
+            if (run === words.length) break;
+        }
+        if (!words.length || best.len < Math.min(2, words.length)) {
+            marks.push({ seq: i, b: blocks.length - 1, linked: false });
+            continue;
+        }
+        cursor = best.end + 1;
+        marks.push({ seq: i, b: stream[best.end].b, linked: true });
+    }
+    return { marks: marks, blocks: blocks };
+}
+function sayAnnotate(plan, bubbleEl) {
+    var bubble = bubbleEl || plan.bubble;
+    if (!bubble || !bubble.appendChild) return;
+    plan.bubble = bubble;
+    var m = sayMatch(plan, bubble);
+    plan._match = m;
+    plan.refs = {};
+    var i, k, kids;
+    for (i = 0; i < m.blocks.length; i++) {
+        kids = m.blocks[i].querySelectorAll
+            ? Array.prototype.slice.call(m.blocks[i].querySelectorAll('.chat-native-say-ref'))
+            : [];
+        for (k = 0; k < kids.length; k++) { if (kids[k].remove) kids[k].remove(); }
+    }
+    for (i = 0; i < m.marks.length; i++) {
+        var mark = m.marks[i];
+        var ref = el('sup', 'chat-native-say-ref', String(mark.seq + 1));
+        ref.dataset.seq = String(mark.seq);
+        ref.title = tf2('uplift.chat.say_line', 'Line {n} of the spoken reply')
+            .replace('{n}', String(mark.seq + 1));
+        (function (seq) {
+            ref.addEventListener('mouseenter', function () { sayHover(plan, seq, true); });
+            ref.addEventListener('mouseleave', function () { sayHover(plan, seq, false); });
+            ref.addEventListener('click', function (ev) {
+                ev.stopPropagation();
+                sayToggle(plan, seq);
+            });
+        })(mark.seq);
+        (m.blocks[mark.b] || bubble).appendChild(ref);
+        plan.refs[mark.seq] = ref;
+    }
+    sayHighlight(plan, plan.marked != null ? plan.marked : -1);
+}
+function sayHover(plan, seq, on) {
+    if (!plan) return;
+    plan.hot = on ? seq : -1;
+    var row = plan.rows[seq];
+    if (row) {
+        var cls = String(row.className || '').replace(/\s*hot\s*/g, ' ');
+        row.className = cls + (on ? ' hot' : '');
+    }
+    if (on) sayHighlight(plan, seq);
+    else sayHighlight(plan, plan.marked != null ? plan.marked : -1);
+}
+/* one class on both sides of a pair: the row and the text it reads */
+function sayHighlight(plan, seq) {
+    if (!plan || !plan.bubble || !plan.bubble.querySelectorAll) return;
+    var m = plan._match || sayMatch(plan, plan.bubble);
+    var want = {};
+    if (seq >= 0) {
+        for (var i = 0; i < m.marks.length; i++)
+            if (m.marks[i].seq === seq) want[m.marks[i].b] = 1;
+    }
+    for (var b = 0; b < m.blocks.length; b++) {
+        var blk = m.blocks[b];
+        var cls = String(blk.className || '')
+            .replace(/\s*chat-native-say-here\s*/g, ' ').replace(/\s+$/, '');
+        blk.className = cls + (want[b] ? ' chat-native-say-here' : '');
+    }
+    var refs = m.blocks.length ? plan.bubble.querySelectorAll('.chat-native-say-ref') : [];
+    for (var r = 0; r < refs.length; r++) {
+        refs[r].className = 'chat-native-say-ref' +
+            (String(refs[r].dataset.seq) === String(seq) ? ' hot' : '');
+    }
+}
+
+// ---- the two track shapes --------------------------------------------------
+/* Ad-hoc (AUTO-SPEAK off): ONE transport row on the action line, right
+   aligned — play/pause left, progress middle, ⟳ right.
+   AUTO-SPEAK on: one row per chunk under the bubble, always visible, each with
+   its own number, bar and ⟳. */
+function sayTrackEl(idx) {
+    var box = el('div', 'chat-native-say-inline');
+    box.dataset.idx = String(idx);
+    var pp = el('button', 'chat-native-say-pp'); pp.type = 'button';
+    pp.textContent = '\u25b6';
+    pp.title = tf2('uplift.chat.say_read', 'Read the whole reply aloud');
+    pp.dataset.i18nTitle = 'uplift.chat.say_read';
+    pp.dataset.enTitle = pp.title;
+    var bar = el('div', 'chat-native-say-bar');
+    var fill = el('i');
+    bar.appendChild(fill);
+    bar.hidden = true;
+    var st = el('span', 'chat-native-say-status', '');
+    var re = el('button', 'chat-native-say-re'); re.type = 'button';
+    re.textContent = '\u27f3';
+    re.title = tf2('uplift.chat.say_reread', 'Record the whole reply again');
+    re.dataset.i18nTitle = 'uplift.chat.say_reread';
+    re.dataset.enTitle = re.title;
+    box.append(pp, bar, st, re);
+    box._pp = pp; box._fill = fill; box._bar = bar; box._st = st; box._re = re;
+    box._idx = idx;
+    pp.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        sayInlineToggle(box);
+    });
+    re.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        sayRerecord(box);
+    });
+    return box;
+}
+function sayPlanOfBox(box) {
+    var msg = messageAt(box._idx);
+    if (!msg || !String(msg.content || '').trim()) return null;
+    return planOf(msg) || planFor(msg);
+}
+function sayInlinePaint(plan) {
+    var box = plan && plan.box;
+    if (!box || !box._fill) return;
+    var q = plan.q;
+    box._st.textContent = tf2('uplift.chat.say_lines', '{n} lines')
+        .replace('{n}', String(plan.chunks.length));
+    if (!q) { box._bar.hidden = true; return; }
+    var pos = q.position();
+    var done = 0, i;
+    for (i = 0; i < plan.chunks.length; i++)
+        if (q.itemAt(i) && q.itemAt(i).state === 'played') done++;
+    var frac = plan.chunks.length
+        ? (done + (pos.seq >= 0 && pos.duration ? pos.offset / pos.duration : 0))
+          / plan.chunks.length : 0;
+    box._bar.hidden = false;
+    box._fill.style.width = Math.round(Math.min(1, frac) * 100) + '%';
+    box._pp.textContent = pos.state === 'playing' ? '\u23f8' : '\u25b6';
+}
+function sayInlineToggle(box) {
+    var plan = sayPlanOfBox(box);
+    if (!plan) return;
+    plan.box = box;
+    var q = plan.q;
+    if (q && !q.paused() && q.position().state === 'playing' && q.pause()) {
+        plan.paused = true;
+        box._pp.textContent = '\u25b6';
+        return;
+    }
+    if (q && q.paused() && q.resume()) {
+        plan.paused = false;
+        box._pp.textContent = '\u23f8';
+        sayWatch(plan);
+        return;
+    }
+    sayPlayAll(plan, box);
+}
+function sayPlayAll(plan, box) {
+    if (box) plan.box = box;
+    var q = sayStart(plan, 0, false);
+    if (!q) return;
+    if (plan.box) plan.box._pp.textContent = '\u23f8';
+    q.drain().then(function (res) {
+        if (plan.box) plan.box._pp.textContent = '\u25b6';
+        saySettle(plan, res);
+    });
+}
+function sayRerecord(box) {
+    var msg = messageAt(box._idx);
+    if (!msg || !String(msg.content || '').trim()) return;
+    unlockSpeak();
+    // a fresh rev on the same bubble: the chat save releases the old take
+    var fresh = makePlan(msg, String(msg.content || ''), speakChunkMode(), '');
+    sayPlayAll(fresh, box);
+}
+
+function sayGridEl(plan, idx) {
+    var g = el('div', 'chat-native-say-grid');
+    g.dataset.idx = String(idx);
+    g.__plan = plan;
+    plan.planEl = g;
+    for (var i = 0; i < plan.chunks.length; i++) g.appendChild(sayRow(plan, i));
+    return g;
+}
+function sayFindGrid(holder) {
+    var kids = (holder && holder.children) || [];
+    for (var i = 0; i < kids.length; i++)
+        if (kids[i] && String(kids[i].className || '').indexOf('chat-native-say-grid') >= 0)
+            return kids[i];
+    return null;
+}
+function sayGrid(holder, plan, idx, bubble) {
+    var grid = sayFindGrid(holder);
+    if (!grid || grid.__plan !== plan) {
+        if (grid) grid.remove();
+        grid = sayGridEl(plan, idx);
+        holder.appendChild(grid);
+    }
+    plan.bubble = bubble;
+    sayStructure(plan, bubble);
+    return grid;
+}
+/* per-bubble refresh (idempotent: attach runs on every render tick) */
+function sayAttach(holder, idx, role, bubble) {
+    var msg = role === 'assistant' ? messageAt(idx) : null;
+    var grid = sayFindGrid(holder);
+    if (!msg || !hasVoices() || !SIO()) {
+        if (grid) grid.remove();
+        return;
+    }
+    var plan = planOf(msg);
+    if (!plan && msg.speech && msg.speech.n) plan = planFor(msg);
+    if (!plan || !autoSpeakOn()) {
+        if (grid) grid.remove();
+        if (plan) { plan.planEl = null; }
+        return;
+    }
+    sayGrid(holder, plan, idx, bubble);
 }
 
 var _msgActions = new WeakMap();   // bubble element -> {idx, role}
 var _overlayTimer = null;
+
+function cacheReport(rep, sizeOf, say) {
+    // one honest line: what is stored, and what nothing refers to any more
+    var o = { n: rep.orphan_files || 0, bytes: rep.orphan_bytes || 0 };
+    var files = rep.files != null ? rep.files : (rep.totals || {}).files || 0;
+    var bytes = rep.bytes != null ? rep.bytes : (rep.totals || {}).bytes || 0;
+    if (!o.n) {
+        say(t('uplift.chat.cache_none',
+            'Audio cache: {files} files, {size}. Nothing to clean up.')
+            .replace('{files}', String(files)).replace('{size}', sizeOf(bytes)),
+            'ok');
+        return o;
+    }
+    say(t('uplift.chat.cache_found',
+        'Audio cache: {orphan} orphaned files, {osize} of {size}.')
+        .replace('{orphan}', String(o.n)).replace('{osize}', sizeOf(o.bytes))
+        .replace('{size}', sizeOf(bytes)), 'info');
+    return o;
+}
+function checkAudioCache(say, sizeOf, orphansOf) {
+    var d = D();
+    if (!d) return;
+    d.fetchJson(api() + '/voices/speech-cache')
+        .then(function (rep) { cacheReport(rep, sizeOf, say); },
+              function (e) { say(String((e && e.message) || e), 'error'); });
+}
+function cleanupAudioCache(say, sizeOf, orphansOf) {
+    var d = D();
+    if (!d) return;
+    d.fetchJson(api() + '/voices/speech-cache').then(function (rep) {
+        var o = cacheReport(rep, sizeOf, say);
+        if (!o.n) return;
+        if (!window.confirm(t('uplift.chat.cache_confirm',
+            'Delete {orphan} orphaned audio files ({osize})? Replies that '
+            + 'still have their message keep their audio.').replace('{orphan}',
+            String(o.n)).replace('{osize}', sizeOf(o.bytes)))) return;
+        d.postJson(api() + '/voices/speech-cache/cleanup', {}).then(function (res) {
+            say(t('uplift.chat.cache_cleaned', 'Removed {orphan} audio files ({osize}).')
+                .replace('{orphan}', String(res.removed || 0))
+                .replace('{osize}', sizeOf(res.freed || 0)), 'ok');
+        }, function (e) { say(String((e && e.message) || e), 'error'); });
+    }, function (e) { say(String((e && e.message) || e), 'error'); });
+}
 
 function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
     var box = el('div', 'chat-native-msg-actions' +
@@ -2038,18 +2804,11 @@ function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
         // opt-in uplift feature, so no voices = no affordance (not a
         // dead button that errors on click).
         if (hasVoices()) {
-            var sp = el('button', 'chat-native-msg-action speak',
-                        '🔊');
-            sp.type = 'button';
-            sp.title = tf2('uplift.chat.speak',
-                           'Read aloud with the selected voice');
-            sp.dataset.i18nTitle = 'uplift.chat.speak';
-            sp.dataset.enTitle = sp.title;
-            sp.addEventListener('click', function (ev) {
-                ev.stopPropagation();
-                msgSpeak(idx, sp);
-            });
-            box.appendChild(sp);
+            // VOICE-16: the read-aloud TRANSPORT replaces the old speaker
+            // button — play/pause left, progress middle, \u27f3 right, pushed to
+            // the right end of the action line. Its chunk list IS the bubble's
+            // plan, so the numbers under the text and these rows agree.
+            box.appendChild(sayTrackEl(idx));
         }
         act('regen', t('chat.regenerate_tooltip', 'Regenerate'),
             t('chat.regenerate_tooltip', 'Regenerate'), msgRegenerate);
@@ -2394,6 +3153,12 @@ function attachMessageActions(dc) {
         var holder = b.parentElement;      // .inner-message-container
         if (!holder || !holder.querySelector) continue;
         var storeIdx = visible[k];
+        // VOICE-16: the live stream has no store row yet — the last ai bubble
+        // is where its chunk rows and numbers have to appear.
+        if (storeIdx === undefined && _livePlan && autoSpeakOn() && _streaming
+            && k === bubbles.length - 1 && b.classList
+            && b.classList.contains('ai-message'))
+            sayGrid(holder, _livePlan, -1, b);
         // U71: this bubble's thinking block. Rule: the PERSISTED store
         // text is authoritative (classic's per-message block); while a
         // stream is still in flight, the last-ai bubble shows the live
@@ -2430,6 +3195,7 @@ function attachMessageActions(dc) {
             continue;
         }
         var role = (ms[storeIdx] || {}).role;
+        sayAttach(holder, storeIdx, role, b);
         // U74: Edited / 'Edited — used on next reply' mark. Claim rule:
         // the LAST visible row conditions the next reply, and the claim
         // holds only while that row is an edited ASSISTANT turn (the next
@@ -3697,6 +4463,55 @@ function applyShadowTheme(dc) {
         '  cursor: pointer; border-radius: var(--radius); }',
         '.chat-native-msg-action:hover { color: var(--ink, #e6edf3);',
         '  background: var(--panel, #10151d); }',
+        // VOICE-16: the bubble audio player. Ad-hoc transport sits on the
+        // action line and is pushed right; the auto-speak stack is a 3-column
+        // grid capped at five visible rows, then it scrolls inside.
+        '.chat-native-say-inline { display: flex; align-items: center;',
+        '  gap: 6px; margin-left: auto; min-width: 130px; }',
+        '.chat-native-say-inline .chat-native-say-bar { flex: 1 1 auto; }',
+        '.chat-native-say-inline[hidden], .chat-native-say-grid[hidden] {',
+        '  display: none; }',
+        '.chat-native-say-grid { display: grid; gap: 2px 10px; width: 100%;',
+        '  grid-template-columns: repeat(3, minmax(0, 1fr));',
+        '  align-content: start; max-height: 118px; overflow-y: auto;',
+        '  margin-top: 4px; }',
+        '.chat-native-say-row { display: flex; align-items: center; gap: 4px;',
+        '  min-width: 0; padding: 1px 3px; border-radius: var(--radius);',
+        '  font-size: 11px; color: var(--dim, #8b98ab); }',
+        '.chat-native-say-row.hot {',
+        '  background: color-mix(in srgb, var(--accent, #4c8dff) 14%, transparent); }',
+        '.chat-native-say-pp, .chat-native-say-re { background: none; border: 0;',
+        '  color: inherit; cursor: pointer; padding: 0 2px; font: inherit;',
+        '  line-height: 1; border-radius: var(--radius); }',
+        '.chat-native-say-pp:hover, .chat-native-say-re:hover {',
+        '  color: var(--ink, #e6edf3); }',
+        '.chat-native-say-row.playing .chat-native-say-pp,',
+        '.chat-native-say-row.paused .chat-native-say-pp {',
+        '  color: var(--accent, #4c8dff); }',
+        '.chat-native-say-row.loading .chat-native-say-re,',
+        '.chat-native-say-row.synthesizing .chat-native-say-re { opacity: .45; }',
+        '.chat-native-say-n { min-width: 13px; text-align: right;',
+        '  font-size: 10px; color: var(--dim, #8b98ab); }',
+        '.chat-native-say-wave { position: relative; flex: 1 1 0;',
+        '  min-width: 34px; height: 16px; }',
+        '.chat-native-say-cv { position: absolute; inset: 0;',
+        '  width: 100%; height: 100%; }',
+        '.chat-native-say-bar { position: relative; height: 6px; flex: 1 1 0;',
+        '  min-width: 24px; border-radius: 999px; overflow: hidden;',
+        '  background: color-mix(in srgb, var(--dim, #8b98ab) 26%, transparent); }',
+        '.chat-native-say-row .chat-native-say-bar { position: absolute;',
+        '  left: 0; right: 0; bottom: 0; height: 2px; }',
+        '.chat-native-say-bar i { display: block; height: 100%; width: 0;',
+        '  background: var(--accent, #4c8dff); }',
+        '.chat-native-say-status { font-size: 10px; color: var(--dim);',
+        '  white-space: nowrap; }',
+        '.chat-native-say-ref { font-size: 9px; line-height: 1; cursor: pointer;',
+        '  color: var(--dim, #8b98ab); margin-left: 3px; padding: 0 2px;',
+        '  border-radius: var(--radius); }',
+        '.chat-native-say-ref.hot { color: var(--accent, #4c8dff);',
+        '  background: color-mix(in srgb, var(--accent, #4c8dff) 16%, transparent); }',
+        '.chat-native-say-here {',
+        '  background: color-mix(in srgb, var(--accent, #4c8dff) 15%, transparent); }',
         // U43: bundle-hardened leftovers — gray scrollbars and the
         // streaming dots. The bundle sets --loading-message-color INLINE
         // per message container, so an ancestor var() override loses;
@@ -3885,6 +4700,22 @@ function mount() {
                 // store (backend _clean_message filters + caps it)
                 if (role === 'assistant' && _turnParams) {
                     row.params = Object.assign({}, _turnParams);
+                }
+                if (role === 'assistant' && _turnMid) {
+                    // VOICE-16: bind the plan (and therefore the audio files)
+                    // to this bubble before it reaches the store
+                    row.mid = _turnMid;
+                    var lp = _plans[_turnMid];
+                    if (lp) {
+                        lp.text = row.content;
+                        lp.live = false;
+                        row.speech = { mode: lp.mode, n: lp.chunks.length,
+                                       rev: lp.rev, voice: lp.voice };
+                    }
+                    _livePlan = null;
+                    _turnMid = '';
+                } else if (role === 'assistant') {
+                    row.mid = row.mid || newMid();
                 }
                 _conv.messages.push(row);
                 if (role === 'user' && _conv.messages.filter(function (x) {

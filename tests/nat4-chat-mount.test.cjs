@@ -1005,8 +1005,13 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
     const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
     assert.ok(/layout\.append\(hist, mainCol, side\)/.test(src),
         'hist LEFT | chat column | control rail RIGHT');
-    assert.ok(/hist\.append\(histTitle, newBtn, rowIO, list, del\)/.test(src),
-        'history rail: caption, new, export+import row, the list, DELETE in-region');
+    // VOICE-16: the audio-cache pair joins the rail BELOW Delete chat —
+    // the user asked for exactly that spot, and both are chat-store hygiene.
+    assert.ok(/hist\.append\(histTitle, newBtn, rowIO, list, del,\s*cacheChk, cacheClr\)/.test(src),
+        'history rail: caption, new, export+import row, the list, DELETE, cache check+cleanup in-region');
+    assert.ok(/cacheChk\.id = 'chat-native-cache-check'/.test(src)
+        && /cacheClr\.id = 'chat-native-cache-cleanup'/.test(src),
+        'cache buttons are addressable (ids) and never automatic');
     assert.ok(/secModel\.append\(thinkGroup, budGroup\)/.test(src),
         'Model Settings = thinking + budget (round 13)');
     assert.ok(/secVoice\.append\(\s*sttGroup, mic, speakHead, speakRow,/.test(src)
