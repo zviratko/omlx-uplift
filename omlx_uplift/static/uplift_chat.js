@@ -159,6 +159,12 @@ function applyChatSettings(s) {
     // profile — the page's settings stay the user's own, unmanaged)
     if (!s || typeof s !== 'object') return false;
     var n = JSON.parse(normSettings(s));    // sanitize once, use everywhere
+    // ROUND 14 follow-up (live QA): a settings blob captured while the
+    // voice store was EMPTY carries voice '' — applying it BLANKED the
+    // picker even though voices exist now. '' with entries means "no
+    // explicit pick": resolve to the default (first) voice, same rule
+    // chatVoiceId uses everywhere else.
+    if (!n.voice && hasVoices()) n.voice = chatVoiceId();
     var think = gid('chat-native-think-mode');
     var bud = gid('chat-native-think-budget');
     if (think) think.value = n.thinking;
