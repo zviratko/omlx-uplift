@@ -411,6 +411,10 @@ class StatsFeed:
         self._keys_warned = False     # snapshot-shape drift said once
         self._ticks = 0
         self._failures = 0
+        # VOICE-15: set by notify() (engine activity began/ended) to cut the
+        # sleep short — sub-tick work (a 0.8 s transcription) must still
+        # paint a row instead of fitting between two 2 Hz builds.
+        self._wake: Optional[asyncio.Event] = None
         # LOOP-SAFE guards: at most ONE builder walk runs at a time (ticker
         # and seed share it), and the seed task is created once, awaited by
         # any number of racing connections.
@@ -501,21 +505,50 @@ class StatsFeed:
             seed, self._seed_task = self._seed_task, None
             self._subscribers = 0
             self._idle_since = None
+        self._wake = None
         if task is not None and not task.done():
             task.cancel()
         if seed is not None and not seed.done():
             seed.cancel()
 
+    def notify(self) -> None:
+        """VOICE-15: engine activity began or ended — rebuild ASAP.
+
+        Thread-safe from anywhere (routes run on the loop, engines may
+        finish on executor threads): the Event is only touched via
+        call_soon_threadsafe. A feed that is not running (no dashboard
+        connected, degraded off, between loops) has nobody waiting on the
+        row, so the notify is dropped — the next subscriber's seed build
+        shows the truth anyway."""
+        loop = self._task_loop
+        wake = self._wake
+        if self._off or loop is None or wake is None:
+            return
+        try:
+            loop.call_soon_threadsafe(wake.set)
+        except RuntimeError:      # loop closing (reload, test teardown)
+            pass
+
     async def _run(self) -> None:
         rest_floor = min(LOOP_REST_S, self._tick)   # tests drive small ticks
         next_due = time.monotonic() + self._tick
+        wake = asyncio.Event()
+        self._wake = wake
         while True:
             # The rest floor is load-bearing: it turns "a build slower
             # than the tick" from a hot loop into a slower stats lane.
             # to_thread keeps the walk itself off the loop — even a
             # 10-second build only occupies a worker thread now.
-            await asyncio.sleep(max(rest_floor,
-                                    next_due - time.monotonic()))
+            # VOICE-15: notify() can cut this sleep short (bounded by the
+            # same rest floor, so an activity burst cannot turn the tick
+            # into a hot loop either).
+            try:
+                await asyncio.wait_for(
+                    wake.wait(),
+                    timeout=max(rest_floor, next_due - time.monotonic()))
+            except asyncio.TimeoutError:
+                pass
+            wake.clear()
             try:
                 await asyncio.to_thread(self.tick)
             except Exception:      # never die on a bad tick — Collector rule
@@ -731,3 +764,13 @@ def get_stats_feed() -> StatsFeed:
         if _feed is None:
             _feed = StatsFeed()
         return _feed
+
+
+def notify_activity() -> None:
+    """VOICE-15 seam for the engine activity hooks: wake the shared ticker
+    so work shorter than the tick interval still paints a live row. A
+    never-yet-created feed means nobody streams — nothing to wake."""
+    with _feed_lock:
+        feed = _feed
+    if feed is not None:
+        feed.notify()

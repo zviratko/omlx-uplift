@@ -62,6 +62,18 @@ def register(app) -> None:
 
         logging.getLogger("omlx_uplift").exception(
             "instrument install failed (tick-based capture only)")
+    # VOICE-15: wake the stats feed on engine activity begin/end so
+    # sub-tick work (short transcriptions, quick embeddings) is visible.
+    # Independent of the LLM instrument paths.
+    try:
+        from . import activity_hooks
+
+        activity_hooks.install()
+    except Exception:
+        import logging
+
+        logging.getLogger("omlx_uplift").exception(
+            "activity hooks install failed (status rows stay on the 2 Hz tick)")
     app._omlx_uplift_mounted = True
 
 

@@ -215,3 +215,87 @@ def test_feed_calls_refresh_on_both_tiers(pool, monkeypatch):
     feed.tick_once(full=False)
     assert feed.snapshot_now()["s"]["refreshed"] == 2   # the fast tier too
     feed.stop()
+
+
+# --------------------------------------------------------------------------
+# VOICE-15: activity hooks — engine work wakes the ticker (sub-tick calls
+# like a 0.8 s transcription must still paint a row)
+# --------------------------------------------------------------------------
+
+def test_hooks_notify_begin_and_end(monkeypatch):
+    import sys
+    import types as t
+
+    from omlx_uplift import activity_hooks
+
+    calls = []
+    monkeypatch.setattr(stats_feed, "notify_activity", lambda: calls.append(1))
+
+    class BaseEngine:
+        def _begin_activity(self, kind, detail=None, **kw):
+            return "act-1"
+
+        def _end_activity(self, activity_id):
+            if activity_id != "act-1":
+                raise RuntimeError("ended twice")
+
+    mod = t.ModuleType("omlx.engine.base")
+    mod.BaseEngine = BaseEngine
+    fake_base = t.ModuleType("omlx.engine")
+    fake_omlx = t.ModuleType("omlx")
+    monkeypatch.setitem(sys.modules, "omlx", fake_omlx)
+    monkeypatch.setitem(sys.modules, "omlx.engine", fake_base)
+    monkeypatch.setitem(sys.modules, "omlx.engine.base", mod)
+    activity_hooks.reset_for_tests()
+    try:
+        activity_hooks.install()
+        eng = BaseEngine()
+        assert eng._begin_activity("transcribing") == "act-1"   # value passes
+        assert eng._end_activity("act-1") is None
+        assert calls == [1, 1]
+
+        with pytest.raises(RuntimeError):
+            eng._end_activity("nope")        # original error semantics intact
+        assert len(calls) == 2               # a raise does NOT notify
+
+        activity_hooks.install()             # idempotent: no double-wrap
+        eng._begin_activity("transcribing")
+        assert calls == [1, 1, 1]
+    finally:
+        activity_hooks.reset_for_tests()
+
+
+def test_notify_wakes_a_sleeping_ticker():
+    """A feed parked on a 30 s tick must rebuild within a second of a
+    notify — that is the difference between 'visible' and 'missed'."""
+    import asyncio
+
+    async def scenario():
+        built = asyncio.Event()
+
+        def builder():
+            built.set()
+            return {"active_models": {"models": []}}
+
+        feed = stats_feed.StatsFeed(
+            stats_builder=builder, stats_fast_builder=builder,
+            alltime_builder=lambda: 0, tick_s=30.0)
+        feed.subscribe()                     # starts the ticker on this loop
+        await asyncio.sleep(0.05)            # let _run park on the wait_for
+        feed.notify()                        # the hooks' call, direct
+        woke = True
+        try:
+            await asyncio.wait_for(built.wait(), timeout=1.5)
+        except asyncio.TimeoutError:
+            woke = False
+        finally:
+            feed.stop()
+        return woke
+
+    assert asyncio.run(scenario())
+
+
+def test_notify_without_running_feed_is_noop():
+    feed = stats_feed.StatsFeed()
+    feed.notify()                            # never started: no loop, no wake
+    stats_feed.notify_activity()             # singleton may or may not exist
