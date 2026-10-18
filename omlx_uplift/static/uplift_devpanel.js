@@ -134,6 +134,13 @@ function renderDev() {
         // built from the newest fetched sources yet (user 2026-10-18).
         bits.push(ptMsg('uplift.patches.dev_base_stale',
             'built from older sources — next Build/upgrade refreshes them'));
+    // BUILD-ZONE honesty: the server says WHAT it measured and WHAT it
+    // means (d.build_reason) — shown as its own line, not a hover-only
+    // tooltip (user: "have explanation what it means"). Server-authored
+    // English like the card's state detail, deliberately visible.
+    const bstate = d.build_state;
+    if (d.build_reason && bstate && bstate !== 'current')
+        bits.push(d.build_reason);
     statusEl.hidden = false;
     statusEl.textContent = bits.join(' · ');
 
@@ -147,12 +154,12 @@ function renderDev() {
         if (warn) {
             state.append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
                 'NEEDS REBUILD'), 'pt-st-warn',
-                ptMsg('uplift.patches.dev_stale_hint',
+                d.build_reason || ptMsg('uplift.patches.dev_stale_hint',
                     'the installed omlx-dev build no longer matches the enabled patches — press Build')));
         } else if (d.build_ahead) {
             state.append(ptChip(ptMsg('uplift.patches.dev_cleanup_build',
                 'OLD CONTENT'), 'pt-st-dim',
-                ptMsg('uplift.patches.dev_cleanup_build_hint',
+                d.build_reason || ptMsg('uplift.patches.dev_cleanup_build_hint',
                     'the build still carries patch content that left the build set — press Build to drop it (nothing is missing)')));
         }
     }

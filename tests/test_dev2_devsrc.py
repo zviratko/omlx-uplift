@@ -271,6 +271,7 @@ class DevsrcFixture(unittest.TestCase):
         self.assertEqual(r2["build_state"], "ahead")
         self.assertFalse(r2["needs_rebuild"])
         self.assertTrue(r2["build_ahead"])
+        assert "retired patch content" in r2["reason"]
         # enabled set grew beyond the installed build -> genuine rebuild
         r3 = devsrc.classify_build(src, m_one["tip"], m_one["base"],
                                    exp_both, both)

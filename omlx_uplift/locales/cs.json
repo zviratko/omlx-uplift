@@ -564,7 +564,7 @@
  "uplift.patches.safeguard_problems": "Pojistky na tento patch upozornily:",
  "uplift.patches.safeguard_rebuild": "Rebuild nativního kernelu (vyžadován pro reálný efekt):",
  "uplift.patches.scope_auto": "auto",
- "uplift.patches.scope_both": "Runtime + Build",
+ "uplift.patches.scope_both": "Runtime i Build",
  "uplift.patches.scope_build": "build (omlx-dev)",
  "uplift.patches.scope_dev": "Build — sestaveno do omlx-dev",
  "uplift.patches.scope_omlx": "Runtime — živé po restartu",

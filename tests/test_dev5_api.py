@@ -112,6 +112,49 @@ def test_status_stale_flag_matches_expected_tip(tmp_path, monkeypatch):
     assert st["needs_rebuild"] is True
     assert st["build_ahead"] is False
     assert st["base_stale"] is False
+    # the verdict explains itself (shown as a visible line + logged)
+    assert st["build_reason"]
+
+
+def test_build_state_transitions_log_once_not_per_poll(tmp_path, monkeypatch, caplog):
+    # the dashboard polls every few seconds; a standing problem must log its
+    # WARNING once on the transition (user: "this should be a warning in
+    # there" — but a 5s flood would bury every other log line)
+    import logging
+    from omlx_uplift import devsrc, router
+    cfg = {"src_dir": str(tmp_path / "nope"), "branch": "uplift-dev",
+           "sync_ref": "origin/main", "base_sha": "a" * 40,
+           "built_sha": "b" * 40}
+    monkeypatch.setattr(devsrc, "load_config", lambda: cfg)
+    monkeypatch.setattr(patches_mod, "patch_store", lambda: None)
+    monkeypatch.setattr("omlx_uplift.patchsource.enabled_build_patches",
+                        lambda store, with_bytes=True: [])
+    monkeypatch.setattr("omlx_uplift.patchsource.build_residue_pool",
+                        lambda store, enabled: [])
+    monkeypatch.setattr(devsrc, "src_path", lambda c: str(tmp_path / "nope"))
+    (tmp_path / "nope" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(devsrc, "status",
+                        lambda c, p, **kw: {"installed": True, "branch": "x",
+                                            "tip": "c" * 40,
+                                            "drift": {"drift": False},
+                                            "ahead": 0, "behind": 0})
+    monkeypatch.setattr(devsrc, "expected_tip",
+                        lambda p, c: {"ok": True, "tip": "c" * 40})
+    monkeypatch.setattr(devsrc, "runtime_config",
+                        lambda c: {"port": 8001, "base_path": str(tmp_path)})
+    monkeypatch.setattr(devsrc, "vanilla_port", lambda: 8000)
+    monkeypatch.setattr(devsrc, "share_map", lambda c: {})
+    monkeypatch.setattr(dev_mod, "_dev_share_realized", lambda c: {})
+    import omlx_uplift.cli as cli
+    monkeypatch.setattr(cli, "_service_state", lambda f: "stopped")
+    dev_mod._LAST_BUILD_STATE.clear()
+
+    with caplog.at_level(logging.DEBUG, logger="omlx_uplift.dev"):
+        for _ in range(3):
+            dev_mod._dev_status_sync()
+    warns = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warns) == 1, "transition must log exactly once"
+    assert "build [" in warns[0].getMessage()
 
 
 # --------------------------------------------------------------------------

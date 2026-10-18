@@ -696,36 +696,57 @@ def classify_build(path: str, built_sha: str | None, built_base: str | None,
                      advancing alone (base_stale covers it informationally).
 
     A failed replay (exp.ok False) changes nothing here: the build-time
-    ladder/failure path reports that honestly when Build is pressed."""
+    ladder/failure path reports that honestly when Build is pressed.
+
+    Every return carries a plain-language `reason` (what was measured and
+    what it means) so the dashboard can show it WITHOUT a hover and the
+    router can log a warning when the build first stops being current."""
     if not exp.get("ok"):
         return {"needs_rebuild": False, "build_ahead": False,
-                "build_state": "replay-failed"}
+                "build_state": "replay-failed",
+                "reason": "the enabled patches do not apply onto the current "
+                          "sources — a Build would stop and explain"}
     if not built_sha:
         return {"needs_rebuild": True, "build_ahead": False,
-                "build_state": "never-built"}
+                "build_state": "never-built",
+                "reason": "omlx-dev has not been built on this machine yet"}
     bt = tree_of(path, built_sha)
     et = tree_of(path, exp.get("tip") or "")
     if bt and et and bt == et:
         return {"needs_rebuild": False, "build_ahead": False,
-                "build_state": "current"}
+                "build_state": "current",
+                "reason": "the installed build carries exactly the enabled "
+                          "build patches"}
     if not built_base:
         # unknown built base: stay strict on the sha (pre-BUILD-ZONE cfg)
         return {"needs_rebuild": built_sha != exp.get("tip"),
-                "build_ahead": False, "build_state": "unknown-base"}
+                "build_ahead": False, "build_state": "unknown-base",
+                "reason": "this build predates build tracking — press Build "
+                          "once to re-cut it from the current patches"}
     verdict = drift_check(path, built_base, built_sha,
                           patches_to_apply, residue_patches)
     if not verdict.get("complete"):
         return {"needs_rebuild": True, "build_ahead": False,
-                "build_state": "missing-content"}
+                "build_state": "missing-content",
+                "reason": verdict.get("detail")
+                          or "an enabled build patch is not fully in the "
+                             "installed build — press Build"}
     if verdict.get("hand"):
         return {"needs_rebuild": True, "build_ahead": False,
-                "build_state": "hand-content"}
+                "build_state": "hand-content",
+                "reason": "the branch carries changes no patch accounts for "
+                          "(a hand edit?) — press Build to re-cut it clean"}
     if verdict.get("residue"):
         return {"needs_rebuild": False, "build_ahead": True,
-                "build_state": "ahead"}
+                "build_state": "ahead",
+                "reason": verdict.get("detail")
+                          or "the build still carries a patch that left the "
+                             "build set — harmless, the next Build drops it"}
     # trees differ but no patch-relevant content moved: base advanced
     return {"needs_rebuild": False, "build_ahead": False,
-            "build_state": "base-moved"}
+            "build_state": "base-moved",
+            "reason": "the sources advanced since this build; the enabled "
+                      "patches are all present"}
 
 
 def status(cfg: dict, patches_to_apply: list[dict] | None = None,

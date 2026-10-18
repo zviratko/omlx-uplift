@@ -675,6 +675,7 @@ def _kill_switch(store, action: str) -> dict:
     'is omlx installed for this python?' must never stand between an operator
     and it. Split out of cmd_patches so that gate can stay where the tree-
     bound actions need it."""
+    from . import patchsource  # store-only helper (applies_phrase); no tree
     if action == "disable-all":
         manifest = store.load()
         for patch in manifest.get("patches", []):

@@ -267,7 +267,10 @@ class Ver1Fixture(unittest.TestCase):
         self.assertNotIn("dev_applied", v2)   # the branch does NOT carry v2
         self.assertEqual(entry["state"], "applied")
         self.assertIn("as v1", entry["state_detail"])
-        self.assertIn("desired v2", entry["state_detail"])
+        # BUILD-ZONE wording: the old '· desired v2 …' fragment was
+        # human-incomprehensible; state now names the effect. Same fact —
+        # the applied build version is behind the desired one.
+        self.assertIn("v2 did not fit", entry["state_detail"])
 
 
 if __name__ == "__main__":

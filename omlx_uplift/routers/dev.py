@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import os
 import threading
@@ -45,6 +46,11 @@ _DEV_BOOT = {"running": False, "log": [], "result": None}
 
 
 _DEV_BUILD_LOCK = threading.Lock()
+
+# BUILD-ZONE transition log (see _dev_status_sync): remembers the last
+# build_state reported so the poll loop logs once per change, not per poll.
+_LOG = logging.getLogger("omlx_uplift.dev")
+_LAST_BUILD_STATE: dict = {}
 
 
 def _dev_share_realized(cfg: dict) -> dict:
@@ -164,15 +170,40 @@ def _dev_status_sync() -> dict:
     # build — residue from a rescope gets a quiet cleanup hint, and the
     # base advancing gets only the informational base_stale note.
     try:
-        out.update(devsrc.classify_build(devsrc.src_path(cfg), built,
-                                         cfg.get("built_base"), exp,
-                                         build_patches, residue_pool))
+        _cls = devsrc.classify_build(devsrc.src_path(cfg), built,
+                                     cfg.get("built_base"), exp,
+                                     build_patches, residue_pool)
     except Exception:
-        out.update({"needs_rebuild": bool(out["stale"]),
-                    "build_ahead": False, "build_state": "classify-error"})
+        _cls = {"needs_rebuild": bool(out["stale"]),
+                "build_ahead": False, "build_state": "classify-error",
+                "reason": "could not verify the installed build against "
+                          "the patch set"}
+    _build_reason = _cls.pop("reason", "")
+    out.update(_cls)
+    out["build_reason"] = _build_reason
     out["base_stale"] = bool(built and cfg.get("built_base")
                              and out.get("base")
                              and cfg["built_base"] != out.get("base"))
+    # Log what was measured, once per transition — the dashboard poll runs
+    # every few seconds, so an unconditional warning would flood the omlx
+    # log. state+reason is the same pair the card shows: an operator grepping
+    # the server log gets the concrete verdict, not just 'stale' (user ask:
+    # "this should be a warning in there"). needs_rebuild/hand/missing are
+    # real -> WARNING; the harmless cleanup/base states -> INFO.
+    _state = out.get("build_state")
+    if _state != _LAST_BUILD_STATE.get("state"):
+        _LAST_BUILD_STATE["state"] = _state
+        _msg = ("omlx-dev build [%s]: %s"
+                % (_state, _build_reason))
+        if out.get("needs_rebuild") or _state in ("hand-content",
+                                                  "missing-content",
+                                                  "never-built",
+                                                  "classify-error"):
+            _LOG.warning(_msg)
+        elif _state != "current":
+            _LOG.info(_msg)
+        else:
+            _LOG.debug(_msg)
     # DEV-11: AUTO UPDATE — TRACK HEAD. The tip probe is LOCAL-only (rev-parse
     # of the already-fetched sync ref) — the boot hook fetches first, the
     # dashboard poll must never pay for network.
