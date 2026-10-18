@@ -231,35 +231,44 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                     if not p.get("description") and e.get("description"):
                         p["description"] = e["description"]
                     store.save(manifest)
-                # scope migration (user ask 2026-09-27: bundled patches
-                # apply to BOTH the runtime keg and omlx-dev). Scope is
-                # fixed per patch inside patchsource (stored bytes differ:
+                # scope migration — the catalog's declared scope is the
+                # TRUTH and sync follows it in BOTH directions (RUNTIME-
+                # MOUNT doctrine 2026-10-18: runtime overlays mount every
+                # keg, so 'both' is reserved for diffs the keg cannot
+                # carry; a curated patch narrowed back to 'omlx' must
+                # rescope too — the mruu stuck-both case). Scope is fixed
+                # per patch inside patchsource (stored bytes differ:
                 # omlx keeps the pruned diff, both stores the FULL diff),
                 # so a rescope re-materializes: remove restores vanilla
-                # bytes NOW, the re-add gates the full diff and reconcile
-                # re-applies at next boot. Only ever widen omlx -> both;
-                # never touch a scope the user chose for themselves.
+                # bytes NOW, the re-add gates the catalog bytes and
+                # reconcile re-applies at next boot. Never touch a scope
+                # on a patch the user adopted.
                 cur = patches.patch_scope(p)
                 was_enabled = bool(p.get("enabled"))
-                if (e.get("scope") == patches.SCOPE_BOTH
-                        and cur == patches.SCOPE_OMLX
-                        and build_root
-                        # catalog OWNERSHIP is the curated tier tag — the
-                        # store id may differ (installed under a legacy slug
-                        # before source dedupe); an adopted patch left the
-                        # catalog's scope decisions to the user
-                        and p.get("curated") and not p.get("curated_adopted")
-                        # a refused full diff is not retried every sync —
-                        # only once the patch content changed again (the
-                        # stamp rides version numbers, which bump per new
-                        # stored version; same-sha re-syncs stay quiet)
-                        and p.get("both_refused_v") != p.get("desired_version")):
+                owned = (p.get("curated") and not p.get("curated_adopted"))
+                want = e.get("scope")
+                widen = (owned and want == patches.SCOPE_BOTH
+                         and cur == patches.SCOPE_OMLX
+                         # widening needs a dev carrier to gate the FULL
+                         # diff; a refused full diff is not retried every
+                         # sync — only once the patch content changed
+                         # again (the stamp rides version numbers, which
+                         # bump per new stored version; same-sha re-syncs
+                         # stay quiet)
+                         and build_root
+                         and p.get("both_refused_v")
+                         != p.get("desired_version"))
+                # narrowing is safe on any machine and converges after one
+                # pass (cur becomes omlx, the condition goes false)
+                narrow = (owned and want == patches.SCOPE_OMLX
+                          and cur == patches.SCOPE_BOTH)
+                if widen or narrow:
                     res = patchsource.remove_patch(store, p["id"], tree_root)
                     if not res.get("ok"):
                         report[pid] = {"sync": "already_present",
                                        "under_id": p["id"],
                                        "rescope_failed": res.get("reason")}
-                        notes.append(f"{pid}: rescope to both failed "
+                        notes.append(f"{pid}: rescope to {want} failed "
                                      f"({res.get('reason')}) — kept {cur}")
                         continue
                     # remove_patch saved its own reload — the loop's

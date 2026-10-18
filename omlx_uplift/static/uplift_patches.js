@@ -187,6 +187,20 @@ function ptChip(text, cls, title) {
     return s;
 }
 
+// Does the omlx-dev build zone carry this machine's build patches right
+// now? The devpanel answers from the live /dev/status read (installed()
+// is false until that first poll lands) — 'both' cards then ride the
+// runtime zone as fallback so they are never invisible.
+function ptBuildCarried() {
+    const DP = window.Uplift.devpanel;
+    return !!(DP && DP.installed && DP.installed());
+}
+
+function ptRuntimeList(patches) {
+    return patches.filter(p => p.scope === 'omlx'
+        || (p.scope === 'both' && !ptBuildCarried()));
+}
+
 function renderPatches() {
     const d = S.PT_DATA;
     if (!d) return;
@@ -207,13 +221,21 @@ function renderPatches() {
             'Patch engine disabled (kill switch) — booting pristine vanilla, manifest untouched.');
     }
 
+    // PATCH-ZONES (user layout ask 2026-10-18): the two zones are
+    // EXCLUSIVE — one card per patch, under the surface that owns it.
+    // 'dev'/'both' belong to the omlx-dev build zone below; a 'both'
+    // patch falls back here only while the build zone cannot show it
+    // (no dev carrier: old bundle, dead /dev/status, or dev-src never
+    // bootstrapped) so a card can never vanish from the page.
+    const runtimeOnly = ptRuntimeList(d.patches);
+
     // plain status line: patches loaded vs active (enabled). Patches can
     // touch any part of the package, not just /admin/ — no claims about
     // which files diverge from vanilla.
     $('pt-sub').textContent = ptMsg('uplift.patches.counts',
         '{loaded} loaded · {active} active')
-        .replace('{loaded}', d.patches.filter(p => p.scope !== 'dev').length)
-        .replace('{active}', d.patches.filter(p => p.enabled && p.scope !== 'dev').length);
+        .replace('{loaded}', runtimeOnly.length)
+        .replace('{active}', runtimeOnly.filter(p => p.enabled).length);
 
     const auto = $('pt-auto-check');
     auto.checked = !!(d.config && d.config.auto_update_check);
@@ -224,9 +246,6 @@ function renderPatches() {
         } catch (e) { PG.toast(String(e), 4000); }
     };
 
-    // DEV-6: omlx section shows keg-targeted scopes (omlx+both); dev+both
-    // live in the omlx-dev section below (same cards, /patches/* API)
-    const runtimeOnly = d.patches.filter(p => p.scope !== 'dev');
     if (!runtimeOnly.length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
@@ -818,6 +837,10 @@ function initPatchesPage() {
 window.Uplift = window.Uplift || {};
 window.Uplift.patches = {
     pollPatches, initPatchesPage, patchCard,
+    // PATCH-ZONES: the devpanel calls this once its first /dev/status
+    // lands — 'both' cards move between the zones when carrier truth
+    // arrives after the initial paint.
+    refill() { if (S.PT_DATA) renderPatches(); },
     // FE-5: pollDev moved to uplift_devpanel.js; keep the old accessor alive
     // for uplift.js's tab dispatcher (lazy, order-free).
     get pollDev() { return window.Uplift.devpanel && window.Uplift.devpanel.pollDev; },

@@ -305,6 +305,47 @@ class CuratedSyncTests(unittest.TestCase):
         ids = [x["id"] for x in self.store.load()["patches"]]
         self.assertEqual(ids.count("live-apply"), 1)
 
+    def test_rescope_narrows_stale_both_back_to_omlx(self):
+        # the mruu stuck shape (RUNTIME-MOUNT doctrine): the catalog
+        # flipped its mind and declared the patch runtime-only again —
+        # sync follows the catalog's scope in BOTH directions for
+        # catalog-owned entries. Enabled flag, store id and the single
+        # copy all survive the rescope.
+        br = self._build_root()
+        curated.sync(self.store, self.root, fetch=make_fetch(
+                         self._files_scope_both()),
+                     build_root=br)
+        p = self.store.find(self.store.load(), "live-apply")
+        self.assertEqual(patches.patch_scope(p), "both")
+        r = curated.sync(self.store, self.root, fetch=make_fetch(FILES),
+                         build_root=br)
+        p = self.store.find(self.store.load(), "live-apply")
+        self.assertEqual(patches.patch_scope(p), "omlx")
+        self.assertTrue(p["enabled"])
+        self.assertEqual(r["report"]["live-apply"]["sync"], "added_enabled")
+        ids = [x["id"] for x in self.store.load()["patches"]]
+        self.assertEqual(ids.count("live-apply"), 1)
+        # converges: a second sync changes nothing (no churn)
+        r2 = curated.sync(self.store, self.root, fetch=make_fetch(FILES),
+                          build_root=br)
+        self.assertEqual(r2["report"]["live-apply"]["sync"],
+                         "already_present")
+
+    def test_narrow_never_touches_adopted_or_user_scopes(self):
+        # an adopted patch left the catalog's scope decisions to the
+        # user; a user-added (not catalog-owned) entry keeps its scope.
+        br = self._build_root()
+        curated.sync(self.store, self.root, fetch=make_fetch(
+                         self._files_scope_both()),
+                     build_root=br)
+        m = self.store.load()
+        self.store.find(m, "live-apply")["curated_adopted"] = True
+        self.store.save(m)
+        curated.sync(self.store, self.root, fetch=make_fetch(FILES),
+                     build_root=br)
+        p = self.store.find(self.store.load(), "live-apply")
+        self.assertEqual(patches.patch_scope(p), "both")
+
     def test_rescope_migrates_legacy_slug_under_different_id(self):
         # the real-world store: catalog patch installed BEFORE source
         # dedupe under a legacy slug (prXXXX) — dedupe recognizes it by

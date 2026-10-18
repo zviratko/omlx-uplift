@@ -49,6 +49,11 @@ async function pollDev() {
     try {
         DV_DATA = await PG.fetchJson(`${API}/uplift/api/dev/status`);
         renderDev();
+        // PATCH-ZONES: carrier truth decides which zone owns the 'both'
+        // cards — repaint the runtime zone once it lands (no cycle:
+        // renderPatches -> renderDev only, refill never re-fetches).
+        const RP = window.Uplift.patches;
+        if (RP && RP.refill) RP.refill();
     } catch (e) {
         // a vanilla-only install has the endpoint too (installed:false) —
         // a failure here is an auth/API problem, hide rather than half-render
@@ -85,7 +90,7 @@ function renderDev() {
         intro.textContent = ptMsg('uplift.patches.dev_not_installed',
             'omlx-dev is not set up on this machine. To build patches here, run: '
             + 'omlx-uplift dev bootstrap (clones the dev-src repo), add patches with '
-            + 'scope "build", then omlx-uplift dev install. Details: '
+            + 'scope "dev", then omlx-uplift dev install. Details: '
             + (d.reason || ''));
         // DEV-7(d): same bootstrap, one click — progress rides /dev/status
         const bootBox = $('dv-bootstrap');
@@ -188,7 +193,7 @@ function renderDev() {
     }
     const groups = [
         ['both', ptMsg('uplift.patches.dev_group_both',
-            'KEG + BUILD — overlays the running keg and lands in the omlx-dev build')],
+            'RUNTIME + BUILD — overlays the running server and lands in the omlx-dev build')],
         ['dev', ptMsg('uplift.patches.dev_group_dev',
             'BUILD ONLY — lands in the omlx-dev build')],
     ];
@@ -196,7 +201,10 @@ function renderDev() {
     for (const [scope, label] of groups) {
         const inGroup = buildOnDv.filter(p => p.scope === scope);
         if (!inGroup.length) continue;
-        if (multi) {
+        // PATCH-ZONES: a 'both' group must ALWAYS carry its heading —
+        // the zone title says "build only", so an unlabeled runtime-
+        // overlaying card inside it would read as a contradiction.
+        if (multi || scope === 'both') {
             const h = document.createElement('div');
             h.className = 'dv-group-title';
             h.textContent = label;
@@ -557,7 +565,10 @@ function initDevPanel() {
 
 
 /* FE-5 seam: the patches page calls renderDev/pollDev through this export
-   at click/poll time; graceful no-op when the panel file is absent. */
+   at click/poll time; graceful no-op when the panel file is absent.
+   PATCH-ZONES: installed() answers whether the build zone carries the
+   machine's build patches (both+dev cards live there when it does). */
 window.Uplift = window.Uplift || {};
-window.Uplift.devpanel = { renderDev, pollDev, initDevPanel };
+window.Uplift.devpanel = { renderDev, pollDev, initDevPanel,
+    installed: () => !!(DV_DATA && DV_DATA.installed) };
 })();

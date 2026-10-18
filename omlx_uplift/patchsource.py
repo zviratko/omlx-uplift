@@ -840,6 +840,15 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         else:
             active = (_patches.scope_touches_keg(scope)
                       and bool(p.get("enabled")))
+        # RE-APPLY honesty (mruu false alarm, 2026-10-18): the chip means
+        # 'a restart here mounts this patch'. A dev/both patch NEVER mounts
+        # on the dev keg — the uplift-dev branch carries it — so 'not
+        # applied here' on the dev board is by design, not drift, and
+        # nagging there is a permanent lie. Only a scope this tree can
+        # actually overlay may raise the chip.
+        mounts_here = (_patches.scope_touches_keg(scope)
+                       if target != "dev"
+                       else scope == _patches.SCOPE_OMLX)
         entry = {
             "id": p.get("id"), "enabled": p.get("enabled", False),
             "scope": scope,
@@ -867,7 +876,7 @@ def view(store, tree_root: str, keg: str | None) -> dict:
                                     else None),
             "applied_v": desired.get("v") if applied_here else None,
             "keg_changed": bool(applied_any and not applied_here
-                                and p.get("enabled")),
+                                and p.get("enabled") and mounts_here),
             "this_keg": (rec or {}).get("status") if rec else None,
             "this_keg_detail": (rec or {}).get("detail"),
             "advisories": url_advisories(

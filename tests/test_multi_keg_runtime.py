@@ -151,6 +151,24 @@ class ViewPerBoard(MultiKegFixture):
         self.assertTrue(d["active"])
         self.assertIsNone(d.get("inactive_reason"))
 
+    def test_dev_board_silent_for_both_scope(self):
+        # PATCH-ZONES (mruu false alarm, 2026-10-18): a 'both' patch is
+        # applied on the vanilla keg and NEVER mounts on the dev keg —
+        # the uplift-dev branch carries it there. 'not applied here' is
+        # by design, not drift: the dev board must not light
+        # NEEDS RE-APPLY for a tree the scope never touches. Only an
+        # omlx-scope overlay is mountable there (covered above).
+        m = self.manifest()
+        self.store.find(m, "pk")["scope"] = "both"
+        self.store.save(m)
+        self.reconciled(self.vroot, "omlx")   # both overlays the vanilla keg
+        d = self.view(self.droot, "dev")["patches"][0]
+        self.assertFalse(d["keg_changed"],
+                         "dev board does not nag about branch-carried scopes")
+        v = self.view(self.vroot, "omlx")["patches"][0]
+        self.assertFalse(v["keg_changed"])    # applied right here
+        self.assertEqual(v["applied_v"], 1)
+
     def test_legacy_stamp_still_reads(self):
         # pre-migration store shape: applied stamp only, no kegs map
         m = self.manifest()

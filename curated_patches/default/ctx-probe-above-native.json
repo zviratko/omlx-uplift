@@ -1,5 +1,5 @@
 {
   "description": "Context benchmark honors the operator-entered target as the search ceiling — probes beyond the model's declared native window; memory admission decides (never early 'limited by native').",
   "source": {"kind": "file"},
-  "scope": "both"
+  "scope": "omlx"
 }

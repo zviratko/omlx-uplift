@@ -224,3 +224,46 @@ test('domkit is require()able in node (dual export)', () => {
     for (const fn of ['$', 'fetchJson', 'postJson', 'putJson', 'deleteJson', 'toast', 'cell', 'emptyMsg'])
         assert.equal(typeof D[fn], 'function', `domkit.${fn} missing`);
 });
+
+/* PATCH-ZONES (user layout ask 2026-10-18): the two zones are EXCLUSIVE.
+   A 'both' card rides the omlx-dev build zone while the carrier is
+   present (devpanel.installed()), and falls back to the runtime zone
+   only when it cannot be shown there — a card must never vanish. */
+const runtimeCards = (sb) => sb.document.getElementById('pt-list').children
+    .filter(c => (c.className || '').includes('pt-card'));
+
+test('zones are exclusive: both-scope leaves the runtime zone when the build carries it', async () => {
+    const sb = loadPatchesModule();
+    sb.Uplift.devpanel = { installed: () => true, renderDev: () => {} };
+    await runPoll(sb, payload([
+        basePatch({ id: 'rt-only', scope: 'omlx' }),
+        basePatch({ id: 'baked', scope: 'both' }),
+        basePatch({ id: 'build-only', scope: 'dev' }),
+    ]));
+    const cards = runtimeCards(sb);
+    assert.equal(cards.length, 1, 'only the runtime-only card stays');
+    assert.ok(allText(cards[0]).includes('rt-only'));
+    // counts line tracks the runtime zone, not the whole manifest
+    assert.match(sb.document.getElementById('pt-sub').textContent,
+                 /1 loaded · 1 active/);
+});
+
+test('zones are exclusive: no carrier -> both-scope falls back into the runtime zone', async () => {
+    const sb = loadPatchesModule();
+    sb.Uplift.devpanel = { installed: () => false, renderDev: () => {} };
+    await runPoll(sb, payload([
+        basePatch({ id: 'rt-only', scope: 'omlx' }),
+        basePatch({ id: 'baked', scope: 'both' }),
+        basePatch({ id: 'build-only', scope: 'dev' }),
+    ]));
+    const cards = runtimeCards(sb);
+    assert.equal(cards.length, 2, 'omlx + both render here; dev never does');
+    const txt = cards.map(c => allText(c)).join(' ');
+    assert.ok(txt.includes('baked') && txt.includes('rt-only'));
+    assert.ok(!txt.includes('build-only'));
+});
+
+test('patches export refill for the devpanel carrier-truth repaint', () => {
+    const sb = loadPatchesModule();
+    assert.equal(typeof sb.Uplift.patches.refill, 'function');
+});
