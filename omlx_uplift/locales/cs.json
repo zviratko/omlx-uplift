@@ -449,7 +449,7 @@
  "uplift.patches.check_now": "Zkontrolovat aktualizace",
  "uplift.patches.checking": "Kontrola…",
  "uplift.patches.counts": "{loaded} načteno · {active} aktivní",
- "uplift.patches.dev_ahead": "{n} commitu nad zakladem",
+ "uplift.patches.dev_ahead": "před základnou o {n}",
  "uplift.patches.dev_auto_fail": "Změna auto-update se nezdařila",
  "uplift.patches.dev_auto_label": "AUTO UPDATE — SLEDOVAT HEAD PŘI „OMLX-DEV UPGRADE“ NEZÁVISLE NA VANILLA OMLX",
  "uplift.patches.dev_auto_on": "při restartu automaticky sestavit, když se HEAD posune",

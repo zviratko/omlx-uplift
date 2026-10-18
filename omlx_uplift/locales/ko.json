@@ -464,7 +464,7 @@
  "uplift.patches.check_now": "업데이트 확인",
  "uplift.patches.checking": "확인 중…",
  "uplift.patches.counts": "불러온 패치 {loaded}개 · 활성 {active}개",
- "uplift.patches.dev_ahead": "베이스보다 {n}커밋",
+ "uplift.patches.dev_ahead": "베이스보다 {n}커밋 앞",
  "uplift.patches.dev_auto_fail": "자동 업데이트 변경 실패",
  "uplift.patches.dev_auto_label": "자동 업데이트 — \"OMLX-DEV UPGRADE\" 시 HEAD 추적 (vanilla OMLX와 독립)",
  "uplift.patches.dev_auto_on": "HEAD가 이동하면 재시작 시 자동 재빌드",
