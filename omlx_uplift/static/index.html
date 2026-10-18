@@ -348,20 +348,20 @@
                  same card anatomy. -->
             <div class="pt-zone pt-zone-runtime">
                 <div class="pt-section-head"><span class="pt-id" data-i18n="uplift.patches.sec_runtime">Vanilla &amp; omlx-dev runtime only</span></div>
-                <div class="pt-detail" data-i18n="uplift.patches.sec_runtime_desc">Overlay diffs applied to the running server at every restart — the vanilla install and omlx-dev alike. They change live server behaviour and revert with the patch. No rebuild needed.</div>
+                <div class="pt-detail" data-i18n="uplift.patches.sec_runtime_desc">Applied every time the server starts — takes effect after a restart and is gone again when the patch is disabled or removed. Covers both the vanilla server and omlx-dev; no rebuild needed. Can only change files the installed server already contains.</div>
                 <div id="pt-list" class="admin-table"><div class="empty">—</div></div>
                 <div id="pt-curated-notes" class="pt-detail" hidden></div>
             </div>
             <div id="dv-section" class="pt-zone pt-zone-dev" hidden>
                 <div class="pt-section-head"><span class="pt-id" data-i18n="uplift.patches.sec_dev">omlx-dev build only</span><span id="dv-state"></span></div>
-                <div class="pt-detail" data-i18n="uplift.patches.sec_dev_desc">Landed in the omlx-dev build as commits on the uplift-dev branch — they never touch the running server code. Rebuild after every change.</div>
+                <div class="pt-detail" data-i18n="uplift.patches.sec_dev_desc">Applied to the omlx sources right before omlx-dev is compiled — can reach compiled kernels and files missing from the installed server. The previously compiled version stays on disk, so you can go back. Nothing changes until you press Build; rebuild after every change.</div>
                 <div id="dv-patches" class="admin-table" hidden></div>
                 <div class="dv-controls">
-                <div class="pt-detail" data-i18n="uplift.patches.dev_explainer">Build patches never touch the running server: omlx-uplift stacks them as one commit per patch on the uplift-dev branch of a local omlx checkout, then rebuilds the separate omlx-dev formula from that tip. Rebuild required after every change. Works only with an omlx-dev install.</div>
+                <div class="pt-detail" data-i18n="uplift.patches.dev_explainer">Each enabled build patch is applied to a working copy of the omlx sources before the compiler runs; compiling that copy produces the omlx-dev server. A patch change takes effect only on the next Build — the older compiled version stays on disk, so you can go back to it. Works only with an omlx-dev install.</div>
                 <div id="dv-intro" class="pt-src" hidden></div>
                 <!-- DEV-7(d): dashboard bootstrap when dev-src is absent -->
                 <div id="dv-bootstrap" hidden>
-                    <div class="pt-detail" data-i18n="uplift.patches.dev_boot_desc">Set up omlx-dev on this machine: clones the dev-src repo and creates the uplift-dev branch with defaults (origin from the installed omlx tap, sync origin/main, port 8001). Adjust on the command line afterwards with omlx-uplift dev reconfigure.</div>
+                    <div class="pt-detail" data-i18n="uplift.patches.dev_boot_desc">Set up omlx-dev on this machine: makes a working copy of the omlx sources with its own patch branch and server (defaults: origin from the installed omlx tap, sync origin/main, port 8001). Adjust later with omlx-uplift dev reconfigure.</div>
                     <button type="button" class="btn primary" id="dv-boot-btn" data-i18n="uplift.patches.dev_boot_btn">Bootstrap omlx-dev</button>
                     <pre id="dv-boot-log" class="pt-boot-log" hidden></pre>
                 </div>
@@ -416,9 +416,9 @@
                     <label class="pt-field"><span data-i18n="uplift.patches.lbl_scope">scope</span>
                         <select id="pt-new-scope" aria-label="Patch scope">
                             <option value="" data-i18n="uplift.patches.scope_auto">auto</option>
-                            <option value="omlx" data-i18n="uplift.patches.scope_omlx">omlx (keg only)</option>
-                            <option value="dev" data-i18n="uplift.patches.scope_dev">dev (omlx-dev only)</option>
-                            <option value="both" data-i18n="uplift.patches.scope_both">both</option>
+                            <option value="omlx" data-i18n="uplift.patches.scope_omlx">Runtime — live after restart</option>
+                            <option value="dev" data-i18n="uplift.patches.scope_dev">Build — compiled into omlx-dev</option>
+                            <option value="both" data-i18n="uplift.patches.scope_both">Runtime + Build</option>
                         </select>
                     </label>
                     <button type="button" class="btn primary" id="pt-preview-btn" data-i18n="uplift.patches.add_btn">Add patch</button>

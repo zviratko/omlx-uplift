@@ -89,8 +89,8 @@ function renderDev() {
         intro.hidden = false;
         intro.textContent = ptMsg('uplift.patches.dev_not_installed',
             'omlx-dev is not set up on this machine. To build patches here, run: '
-            + 'omlx-uplift dev bootstrap (clones the dev-src repo), add patches with '
-            + 'scope "dev", then omlx-uplift dev install. Details: '
+            + 'omlx-uplift dev bootstrap (makes the source copy), add patches with '
+            + 'scope "Build", then omlx-uplift dev install. Details: '
             + (d.reason || ''));
         // DEV-7(d): same bootstrap, one click — progress rides /dev/status
         const bootBox = $('dv-bootstrap');
@@ -126,7 +126,7 @@ function renderDev() {
     if (typeof d.behind === 'number' && d.behind > 0)
         bits.push(ptMsg('uplift.patches.dev_behind', 'behind {ref} by {n}')
             .replace('{ref}', d.sync_ref || '').replace('{n}', d.behind));
-    bits.push(ptMsg('uplift.patches.dev_built', 'built keg {s}')
+    bits.push(ptMsg('uplift.patches.dev_built', 'installed build: {s}')
         .replace('{s}', dvSha(d.built_sha)));
     statusEl.hidden = false;
     statusEl.textContent = bits.join(' · ');
@@ -135,7 +135,7 @@ function renderDev() {
         state.append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
             'NEEDS REBUILD'), 'pt-st-warn',
             ptMsg('uplift.patches.dev_stale_hint',
-                'the enabled build patch set no longer matches the built keg')));
+                'the installed omlx-dev build no longer matches the enabled patches — press Build')));
     if (d.restart_needed)
         state.append(ptChip(ptMsg('uplift.patches.dev_restart_needed',
             'RESTART NEEDED'), 'pt-st-warn',
@@ -170,9 +170,9 @@ function renderDev() {
     warn.hidden = !(d.drift && d.drift.drift);
     if (warn.hidden === false)
         warn.textContent = ptMsg('uplift.patches.dev_drift_banner',
-            'WARNING — the uplift-dev branch does not match the enabled patch '
-            + 'set (manual commits?). A rebuild re-cuts the branch and drops '
-            + 'the foreign commits.');
+            'WARNING — the omlx-dev build sources do not match the enabled '
+            + 'patches (edited by hand?). The next Build re-applies the '
+            + 'enabled patches and drops the other changes.');
 
     dvRenderBase(d);
 
@@ -188,14 +188,14 @@ function renderDev() {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = ptMsg('uplift.patches.dev_none',
-            'No build patches yet. Add one below and pick scope "dev" or "both".');
+            'No build patches yet. Add one below and choose scope "Build".');
         patchesBox.append(empty);
     }
     const groups = [
         ['both', ptMsg('uplift.patches.dev_group_both',
-            'RUNTIME + BUILD — overlays the running server and lands in the omlx-dev build')],
+            'RUNTIME + BUILD — live after a server restart, and in new omlx-dev builds')],
         ['dev', ptMsg('uplift.patches.dev_group_dev',
-            'BUILD ONLY — lands in the omlx-dev build')],
+            'BUILD ONLY — takes effect when omlx-dev is rebuilt')],
     ];
     const multi = new Set(buildOnDv.map(p => p.scope)).size > 1;
     for (const [scope, label] of groups) {
@@ -225,7 +225,7 @@ function renderDev() {
     const busy = !!(d.build && d.build.running) || DV_CLICK_BUSY;
     btn.disabled = busy || !d.stale;
     btn.title = d.stale ? '' : ptMsg('uplift.patches.dev_build_ok',
-        'built keg already matches the enabled patch set');
+        'the installed omlx-dev build already contains the enabled patches');
     const brBtn = $('dv-build-restart-btn');
     if (brBtn) {
         brBtn.disabled = btn.disabled;
@@ -409,7 +409,7 @@ function dvRenderBase(d) {
         !!(d.build && d.build.running);
     note.textContent = pinned
         ? ptMsg('uplift.patches.dev_base_pinned_note',
-            'pinned — the next rebuild re-cuts uplift-dev from this commit')
+            'pinned — the next Build uses exactly this source version')
         : '';
     dvRenderAuto(d, pinned);
     btn.onclick = async () => {

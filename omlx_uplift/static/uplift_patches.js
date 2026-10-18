@@ -136,8 +136,7 @@ async function ptEnableWithApproval(p, approve) {
         PG.toast(approve
             ? ptMsg('uplift.patches.approved_codes', 'approved: {codes}')
                   .replace('{codes}', (r.approved || []).join(', ') || approve)
-            : ptMsg('uplift.patches.enabled_toast',
-                    'Enabled — applies on next omlx restart'), 4000);
+            : enabledToast(p), 4000);
         await pollPatches();
     } catch (e) {
         PG.toast(ptMsg('uplift.patches.approve_fail', 'Approval failed') +
@@ -201,6 +200,18 @@ function ptRuntimeList(patches) {
         || (p.scope === 'both' && !ptBuildCarried()));
 }
 
+// PATCH-ZONES wording pass (user 2026-10-18): say WHAT LANDS WHERE, in
+// plain effect words — no branch/commit/keg nouns. The effect differs by
+// scope: a build-only patch lands when omlx-dev is next compiled; a
+// runtime patch lands at the next server restart.
+function enabledToast(p) {
+    return (p && p.scope === 'dev')
+        ? ptMsg('uplift.patches.enabled_toast_build',
+                'Enabled — takes effect on the next omlx-dev build')
+        : ptMsg('uplift.patches.enabled_toast',
+                'Enabled — takes effect after the next server restart');
+}
+
 function renderPatches() {
     const d = S.PT_DATA;
     if (!d) return;
@@ -212,13 +223,13 @@ function renderPatches() {
     warn.hidden = !d.warning;
     if (d.warning) {
         warn.textContent = ptMsg('uplift.patches.warn_banner',
-            'WARNING — one or more patches need review after a vanilla update or failed to apply. oMLX runs without them until resolved.');
+            'WARNING — some patches no longer fit the installed files or failed to apply. The server runs without them until they are fixed or removed.');
     }
     const ks = $('pt-killswitch');
     ks.hidden = !d.kill_switch_active;
     if (d.kill_switch_active) {
         ks.textContent = ptMsg('uplift.patches.killswitch_on',
-            'Patch engine disabled (kill switch) — booting pristine vanilla, manifest untouched.');
+            'Patch engine is OFF — the server starts from unpatched files. Nothing was deleted; re-enable with: omlx-uplift patch enable-all.');
     }
 
     // PATCH-ZONES (user layout ask 2026-10-18): the two zones are
@@ -309,13 +320,13 @@ function patchCard(p, view) {
                                failed ? 'REVIEW' : 'NEEDS RE-APPLY'), 'pt-st-warn',
             failed ? (p.this_keg_detail ||
                       ptMsg('uplift.patches.keg_failed_hint',
-                            'the patch did not apply to this server\'s files — ' +
-                            'this omlx build moved away from the patched version; ' +
-                            'restart will not fix it, a rebased patch is needed'))
+                            'the patch does not fit the files this server runs — ' +
+                            'restarting will not help; the patch must be updated ' +
+                            'to match them first'))
                    : ptMsg('uplift.patches.keg_changed_hint',
-                           'omlx was updated or reinstalled — this patch is enabled but ' +
-                           'NOT in the running code. Restart the omlx server; the patch ' +
-                           're-checks and re-applies at start.')));
+                           'the installed files changed (an update or reinstall?) — ' +
+                           'this patch is enabled but NOT in the running code. ' +
+                           'Restart the server and it will be applied again.')));
     }
     if (p.state_detail) {
         const det = document.createElement('span');
@@ -443,8 +454,7 @@ function patchCard(p, view) {
         } else {
             btn(ptMsg('uplift.patches.enable', 'Enable'), 'primary',
                 () => ptEnableWithApproval(p, null),
-                ptMsg('uplift.patches.enabled_toast',
-                      'Enabled — applies on next omlx restart'));
+                enabledToast(p));
         }
     } else {
         btn(ptMsg('uplift.patches.disable', 'Disable'), '',

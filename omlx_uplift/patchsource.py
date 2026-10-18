@@ -535,7 +535,8 @@ def _add_transition(store, manifest, patch, patch_id: str, version: dict,
         # ENABLED (pending + enabled = the next reconcile applies it — the
         # same verdict the ADOPT path gives hand-patched trees). The old
         # flow left every fresh add disabled behind a manual Enable click.
-        store.set_state(patch, "pending", f"v{v} validated, awaiting restart")
+        store.set_state(patch, "pending",
+                        f"v{v} validated, awaiting {applies_phrase(patch)}")
         patch["enabled"] = True
         patch["desired_version"] = v
     elif patch["state"] in ("disabled",) and not patch.get("enabled"):
@@ -552,7 +553,8 @@ def _add_transition(store, manifest, patch, patch_id: str, version: dict,
             store.set_state(patch, "update_available",
                             f"candidate v{v} fetched and validated")
         else:
-            store.set_state(patch, "pending", f"v{v} validated, awaiting restart")
+            store.set_state(patch, "pending",
+                            f"v{v} validated, awaiting {applies_phrase(patch)}")
             patch["enabled"] = True
             patch["desired_version"] = v
     store.save(manifest)
@@ -811,6 +813,17 @@ def _pristine_overlay(store, patch, tree_root: str) -> dict | None:
     return (overlay or None) if seen else None
 
 
+def applies_phrase(patch: dict) -> str:
+    """Plain 'when does this take effect' wording for state_detail stamps
+    (the operator reads this line on the dashboard card and in CLI
+    output): a runtime patch lands at the next server restart; a build
+    patch only when omlx-dev is next compiled (PATCH-ZONES wording pass,
+    user 2026-10-18)."""
+    if _patches.patch_scope(patch) == _patches.SCOPE_DEV:
+        return "the next omlx-dev build"
+    return "the next server restart"
+
+
 def view(store, tree_root: str, keg: str | None) -> dict:
     """Manifest view + live verification snapshot for GET /patches."""
     manifest = store.load()
@@ -959,7 +972,8 @@ def set_enabled(store, patch_id: str, enabled: bool,
         if not p.get("desired_version"):
             p["desired_version"] = target_v
         if p.get("state") in ("disabled",):
-            store.set_state(p, "pending", "enabled — applies on next restart")
+            store.set_state(p, "pending",
+                            f"enabled — applies on {applies_phrase(p)}")
     else:
         # a manual disable is a decision, not the kill switch's footprint:
         # drop any enabled_before_kill stamp so 'patch enable-all' cannot
@@ -1032,7 +1046,8 @@ def promote(store, patch_id: str, approve: str | None = None) -> dict:
     if not ok:
         return err
     p["desired_version"] = newest
-    store.set_state(p, "pending", f"promoted to v{newest} — applies on next restart")
+    store.set_state(p, "pending",
+                    f"promoted to v{newest} — applies on {applies_phrase(p)}")
     p["enabled"] = True
     store.save(manifest)
     return {"ok": True, "state": p["state"], "desired_version": newest}
@@ -1147,7 +1162,8 @@ def rollback(store, patch_id: str, to_v: int | None = None) -> dict:
     if store.get_version(p, to_v) is None:
         return {"ok": False, "reason": f"version v{to_v} not stored"}
     p["desired_version"] = to_v
-    store.set_state(p, "pending", f"rolled back to v{to_v} — applies on next restart")
+    store.set_state(p, "pending",
+                    f"rolled back to v{to_v} — applies on {applies_phrase(p)}")
     p["enabled"] = True
     store.save(manifest)
     return {"ok": True, "state": p["state"], "desired_version": to_v}
@@ -1569,11 +1585,12 @@ def mark_dev_applied(store, commits: list[dict]) -> None:
         if p.get("enabled"):
             p["state"] = "applied"
             if built is not None and desired is not None and built.get("v") != desired.get("v"):
-                p["state_detail"] = (f"materialized on uplift-dev as v{built.get('v')} "
-                                     f"(desired v{desired.get('v')} does not apply "
-                                     "onto the current base)")
+                p["state_detail"] = (f"applied to the omlx-dev build sources as "
+                                     f"v{built.get('v')} "
+                                     f"(v{desired.get('v')} did not fit the "
+                                     "current sources)")
             else:
-                p["state_detail"] = "materialized on uplift-dev"
+                p["state_detail"] = "applied to the omlx-dev build sources"
             p["state_changed_at"] = _patches.now_iso()
         changed = True
     if changed:

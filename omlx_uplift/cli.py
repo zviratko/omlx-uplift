@@ -96,9 +96,9 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                 if patchsync._files_match(tree_root, applied.get("files", [])):
                     out.append({"id": pid,
                                 "verdict": "reversed" if rev else "applied",
-                                "detail": ("already reverted on this keg — "
+                                "detail": ("already reverted on this install — "
                                            "verified" if rev else
-                                           "already applied to this keg — "
+                                           "already applied to this install — "
                                            "verified"),
                                 "reversal": rev})
                     continue
@@ -701,7 +701,8 @@ def _kill_switch(store, action: str) -> dict:
             patch["enabled"] = True
             if patch.get("state") == "disabled":
                 store.set_state(patch, "pending",
-                                "enabled — applies on next restart")
+                                f"enabled — applies on "
+                                f"{patchsource.applies_phrase(patch)}")
             restored.append(patch.get("id"))
     store.save(manifest)
     try:
@@ -782,15 +783,17 @@ def cmd_patches(argv=None) -> int:
     ap.add_argument("--file", help="local diff file (upload kind)")
     ap.add_argument("--scope", choices=["omlx", "dev", "both",
                                         "runtime", "build"],
-                    help="patch scope (DEV-6). omlx: runtime overlay, "
-                         "mounted into any board's keg (vanilla or "
-                         "omlx-dev) without a rebuild. dev: materialized on "
-                         "the "
-                         "uplift-dev branch only (full diff, incl. tests), "
-                         "gated against a source checkout (--build-root or "
-                         "the dev-src clone). both: uplift-dev gets the "
-                         "full diff AND the vanilla keg the pruned overlay. "
-                         "Omit to auto-classify (a PR with build-only "
+                    help="patch scope. omlx: lands in the running server "
+                         "at every restart — works on both the vanilla and "
+                         "the omlx-dev install, no rebuild needed; can only "
+                         "change files the installed server already has. "
+                         "dev: applied to the omlx sources just before "
+                         "omlx-dev is compiled — can also reach compiled "
+                         "kernels; takes effect on the next build "
+                         "(--build-root or the dev-src clone gates the "
+                         "full diff). both: both effects — restart lands "
+                         "the runtime half, the next build compiles the "
+                         "rest. Omit to auto-classify (a PR with build-only "
                          "sections suggests 'both'). 'runtime'/'build' are "
                          "legacy aliases of omlx/dev.")
     ap.add_argument("--build-root", help="source checkout used to gate "
