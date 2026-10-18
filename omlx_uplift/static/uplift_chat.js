@@ -300,13 +300,16 @@ function syncProfileSelect() {
         sel.appendChild(mod);
     }
     _profiles.forEach(function (p) {
+        // ROUND 12 (user: 'no way to revert back to a preset after it is
+        // modified, the original turns into modified'): a profile with an
+        // unsaved copy shows TWO rows — the saved preset (selecting it
+        // reverts, with confirm) and the working copy beside it.
+        sel.appendChild(el('option', null, p.name));
         if (variantOf(p.name)) {
             var mo = el('option', null, p.name + ' ' +
                         t('uplift.chat.preset_modified', '(modified)'));
             mo.value = '__variant:' + p.name;
             sel.appendChild(mo);
-        } else {
-            sel.appendChild(el('option', null, p.name));
         }
     });
     sel.value = active ? (variantOf(active) ? '__variant:' + active : active)
@@ -1273,19 +1276,29 @@ function toolbar() {
             syncProfileSelect();
             return;
         }
-        // ROUND 11: '__variant:Name' and 'Name' both select the profile;
-        // the variant (working copy) is applied when one exists, so the
-        // page you left is the page you come back to.
-        var pname = name.indexOf('__variant:') === 0 ? name.slice(10) : name;
+        // ROUND 11/12: '__variant:Name' selects the working copy; the
+        // plain 'Name' row selects the SAVED preset — picking it while a
+        // copy exists is an explicit REVERT (confirmed: copies are real
+        // work), and the two rows then collapse back to one.
+        var isCopy = name.indexOf('__variant:') === 0;
+        var pname = isCopy ? name.slice(10) : name;
         var base = findProfile(_profiles, pname);
         if (!base) { syncProfileSelect(); return; }
+        if (!isCopy && variantOf(base.name)) {
+            if (!window.confirm(t('uplift.chat.preset_discard_confirm',
+                                  'Discard unsaved prompt changes?'))) {
+                syncProfileSelect();   // snap the selection back to the copy
+                return;
+            }
+            setVariant(base.name, null);
+        }
         // leaving an UNBOUND draft behind: stash it (the anonymous slot
         // survives ONLY for never-saved text now)
         if (!_conv.activeProfile && (cur || _conv.customPrompt)) {
             _conv.customPrompt = cur;
             _conv.customState = { prompt: cur, settings: chatSettingsSnapshot() };
         }
-        var v = variantOf(base.name);
+        var v = isCopy ? variantOf(base.name) : null;
         var wantP = v ? String(v.prompt || '') : String(base.content || '');
         if (sysEl) sysEl.value = wantP;
         _conv.systemPrompt = sysEl ? sysEl.value : stripNL(wantP);

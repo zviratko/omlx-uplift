@@ -631,6 +631,38 @@ test('profile: round 9 — captures the WHOLE page, model excluded', async () =>
         'voice key follows the profile (unmanaged SD => defaults)');
 });
 
+test('variant: BOTH rows show while modified — the saved one REVERTS (round 12)', async () => {
+    const h = bootPreset({ systemPrompt: 'write code', activeProfile: 'Coder' },
+        [{ name: 'System Default', content: '' },
+         { name: 'Coder', content: 'write code' }]);
+    for (let i = 0; i < 12; i++) await tick();
+    const sel = h.byId['chat-native-profile'];
+    const sys = h.byId['chat-native-sys'];
+    sys.value = 'my precious edit'; sys.dispatch('input');
+    assert.equal(sel.value, '__variant:Coder');
+    assert.deepEqual(sel.children.map((o) => o.value),
+        ['System Default', 'Coder', '__variant:Coder'],
+        'T15: the saved preset stays selectable BESIDE its copy');
+    // cancelling the revert keeps everything (no silent destruction)
+    h.win.confirm = () => false;
+    sel.value = 'Coder'; sel.dispatch('change');
+    await tick();
+    assert.equal(sys.value, 'my precious edit', 'cancel keeps the edits');
+    assert.equal(sel.value, '__variant:Coder', 'selection snapped back');
+    assert.ok(sel.children.some((o) => o.value === '__variant:Coder'));
+    // confirming REVERTS to the saved preset and the rows collapse
+    h.win.confirm = () => true;
+    sel.value = 'Coder'; sel.dispatch('change');
+    await tick();
+    assert.equal(sys.value, 'write code', 'reverted to the saved base');
+    assert.equal(sel.value, 'Coder');
+    assert.deepEqual(sel.children.map((o) => o.value),
+        ['System Default', 'Coder'], 'copy dropped, one row again');
+    const posts = h.posts.filter((p) => String(p[0]).endsWith('/chat/history'));
+    assert.deepEqual(posts[posts.length - 1][1].variants, {},
+        'the revert persisted to the conversation');
+});
+
 test('variant: settings copies round-trip across switches', async () => {
     const h = bootPreset({ systemPrompt: '', activeProfile: '' },
         [{ name: 'System Default', content: '' },
