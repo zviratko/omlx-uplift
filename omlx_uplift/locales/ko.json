@@ -535,6 +535,8 @@
  "uplift.patches.insecure_tls": "SSL/TLS 오류 무시",
  "uplift.patches.keg_changed": "재적용 필요",
  "uplift.patches.keg_changed_hint": "omlx가 업데이트되거나 다시 설치되었습니다 — 이 패치는 켜져 있지만 실행 중인 코드에 없습니다. omlx 서버를 재시작하면 시작 시 패치를 다시 확인하고 적용합니다.",
+ "uplift.patches.keg_failed": "확인 필요",
+ "uplift.patches.keg_failed_hint": "이 서버의 파일에 패치를 적용할 수 없습니다 — 이 omlx 빌드가 패치된 버전에서 벗어났습니다. 재시작으로는 해결되지 않으며 리베이스된 패치가 필요합니다",
  "uplift.patches.killswitch_on": "패치 엔진 비활성화(kill switch) — 무변경 바닐라로 부팅하며 매니페스트는 변경되지 않습니다.",
  "uplift.patches.lbl_name": "이름",
  "uplift.patches.lbl_scope": "범위",

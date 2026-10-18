@@ -520,6 +520,8 @@
  "uplift.patches.insecure_tls": "ignorovat chyby SSL/TLS",
  "uplift.patches.keg_changed": "OMLX SE ZMĚNIL",
  "uplift.patches.keg_changed_hint": "omlx byl aktualizován nebo přeinstalován — patch je zapnutý, ale v běžícím kódu není. Restartujte server omlx; při startu se patch znovu ověří a aplikuje.",
+ "uplift.patches.keg_failed": "KE KONTROLE",
+ "uplift.patches.keg_failed_hint": "patch se nepodařilo aplikovat na soubory tohoto serveru — tohle sestavení omlx se vzdálilo verzí s patchem; restart to neopraví, je potřeba rebasovaný patch",
  "uplift.patches.killswitch_on": "Engine patchů zakázán (kill switch) — startuje čistá vanilla, manifest se nemění.",
  "uplift.patches.lbl_name": "název",
  "uplift.patches.lbl_scope": "rozsah",

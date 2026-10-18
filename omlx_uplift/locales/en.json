@@ -520,6 +520,8 @@
  "uplift.patches.insecure_tls": "ignore SSL/TLS errors",
  "uplift.patches.keg_changed": "NEEDS RE-APPLY",
  "uplift.patches.keg_changed_hint": "omlx was updated or reinstalled — this patch is enabled but NOT in the running code. Restart the omlx server; the patch re-checks and re-applies at start.",
+ "uplift.patches.keg_failed": "REVIEW",
+ "uplift.patches.keg_failed_hint": "the patch did not apply to this server's files — this omlx build moved away from the patched version; restart will not fix it, a rebased patch is needed",
  "uplift.patches.killswitch_on": "Patch engine disabled (kill switch) — booting pristine vanilla, manifest untouched.",
  "uplift.patches.lbl_name": "name",
  "uplift.patches.lbl_scope": "scope",

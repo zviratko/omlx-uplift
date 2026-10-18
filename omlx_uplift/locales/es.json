@@ -524,6 +524,8 @@
  "uplift.patches.insecure_tls": "ignorar errores SSL/TLS",
  "uplift.patches.keg_changed": "REQUIERE REAPLICAR",
  "uplift.patches.keg_changed_hint": "omlx se actualizó o reinstaló — este parche está activado pero NO está en el código en ejecución. Reinicie el servidor omlx; el parche se revalida y reaplica al iniciar.",
+ "uplift.patches.keg_failed": "REVISIÓN",
+ "uplift.patches.keg_failed_hint": "el parche no se aplicó a los archivos de este servidor — esta compilación de omlx se alejó de la versión parcheada; reiniciar no lo solucionará, se necesita un parche rebaseado",
  "uplift.patches.killswitch_on": "Motor de parches desactivado (kill switch) — arranque con vanilla puro, manifiesto intacto.",
  "uplift.patches.lbl_name": "nombre",
  "uplift.patches.lbl_scope": "ámbito",

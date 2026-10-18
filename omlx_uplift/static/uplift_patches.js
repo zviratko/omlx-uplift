@@ -278,12 +278,26 @@ function patchCard(p, view) {
         head.append(ptChip(ptMsg('uplift.patches.safeguard_hold', 'AUTO-APPLY HELD'),
             'pt-st-warn', p.state_detail || ''));
     }
-    if (p.keg_changed && p.enabled)
-        head.append(ptChip(ptMsg('uplift.patches.keg_changed', 'NEEDS RE-APPLY'), 'pt-st-warn',
-            ptMsg('uplift.patches.keg_changed_hint',
-                  'omlx was updated or reinstalled — this patch is enabled but ' +
-                  'NOT in the running code. Restart the omlx server; the patch ' +
-                  're-checks and re-applies at start.')));
+    if (p.keg_changed && p.enabled) {
+        // RUNTIME-MOUNT: with two boards on one store, "not live here" has
+        // two very different fixes — a restart re-mounts a pending patch,
+        // but a per-keg apply FAILURE (this board's build moved away from
+        // the patched context) needs a rebased patch version. Never tell
+        // the operator to restart when restart is proven not to help.
+        const failed = p.this_keg === 'error';
+        head.append(ptChip(ptMsg(failed ? 'uplift.patches.keg_failed'
+                                        : 'uplift.patches.keg_changed',
+                               failed ? 'REVIEW' : 'NEEDS RE-APPLY'), 'pt-st-warn',
+            failed ? (p.this_keg_detail ||
+                      ptMsg('uplift.patches.keg_failed_hint',
+                            'the patch did not apply to this server\'s files — ' +
+                            'this omlx build moved away from the patched version; ' +
+                            'restart will not fix it, a rebased patch is needed'))
+                   : ptMsg('uplift.patches.keg_changed_hint',
+                           'omlx was updated or reinstalled — this patch is enabled but ' +
+                           'NOT in the running code. Restart the omlx server; the patch ' +
+                           're-checks and re-applies at start.')));
+    }
     if (p.state_detail) {
         const det = document.createElement('span');
         det.className = 'pt-detail';

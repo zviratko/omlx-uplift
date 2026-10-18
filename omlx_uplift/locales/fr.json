@@ -524,6 +524,8 @@
  "uplift.patches.insecure_tls": "ignorer les erreurs SSL/TLS",
  "uplift.patches.keg_changed": "RE-APPLICATION REQUISE",
  "uplift.patches.keg_changed_hint": "omlx a été mis à niveau ou réinstallé — ce correctif est activé mais ABSENT du code exécuté. Redémarrez le serveur omlx ; le correctif est revérifié et réappliqué au démarrage.",
+ "uplift.patches.keg_failed": "À VÉRIFIER",
+ "uplift.patches.keg_failed_hint": "le correctif ne s'est pas appliqué aux fichiers de ce serveur — cette version d'omlx s'est éloignée de la version corrigée ; un redémarrage n'y changera rien, un correctif rebasé est nécessaire",
  "uplift.patches.killswitch_on": "Moteur de correctifs désactivé (kill switch) — démarrage en vanilla pur, manifeste intact.",
  "uplift.patches.lbl_name": "nom",
  "uplift.patches.lbl_scope": "portée",

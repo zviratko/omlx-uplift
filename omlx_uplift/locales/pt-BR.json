@@ -524,6 +524,8 @@
  "uplift.patches.insecure_tls": "ignorar erros SSL/TLS",
  "uplift.patches.keg_changed": "REQUER REAPLICAÇÃO",
  "uplift.patches.keg_changed_hint": "o omlx foi atualizado ou reinstalado — este patch está ativado mas NÃO está no código em execução. Reinicie o servidor omlx; o patch é revalidado e reaplicado na inicialização.",
+ "uplift.patches.keg_failed": "REVISAR",
+ "uplift.patches.keg_failed_hint": "o patch não foi aplicado aos arquivos deste servidor — esta compilação do omlx se afastou da versão corrigida; reiniciar não resolve, é necessário um patch rebaseado",
  "uplift.patches.killswitch_on": "Motor de patches desativado (kill switch) — inicialização com vanilla puro, manifesto intacto.",
  "uplift.patches.lbl_name": "nome",
  "uplift.patches.lbl_scope": "escopo",

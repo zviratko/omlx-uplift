@@ -520,6 +520,8 @@
  "uplift.patches.insecure_tls": "игнорировать ошибки SSL/TLS",
  "uplift.patches.keg_changed": "ТРЕБУЕТ ПОВТОРНОГО ПРИМЕНЕНИЯ",
  "uplift.patches.keg_changed_hint": "omlx был обновлён или переустановлен — этот патч включён, но его НЕТ в работающем коде. Перезапустите сервер omlx; при запуске патч будет перепроверен и применён снова.",
+ "uplift.patches.keg_failed": "ТРЕБУЕТ ПРОВЕРКИ",
+ "uplift.patches.keg_failed_hint": "патч не применился к файлам этого сервера — эта сборка omlx ушла от патчуемой версии; перезапуск не поможет, нужен перезаложенный (rebased) патч",
  "uplift.patches.killswitch_on": "Движок патчей отключён (kill switch) — загрузка чистого vanilla, манифест не изменяется.",
  "uplift.patches.lbl_name": "имя",
  "uplift.patches.lbl_scope": "область",

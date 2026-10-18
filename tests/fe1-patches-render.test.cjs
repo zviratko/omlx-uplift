@@ -167,6 +167,33 @@ test('renderPatches: INSECURE chip appears exactly when source.insecure_tls', as
     assert.match(sb.document.getElementById('pt-sub').textContent, /2 loaded · 2 active/);
 });
 
+test('renderPatches: keg_changed splits restart-fixes vs per-board failure', async () => {
+    // RUNTIME-MOUNT: two boards share one store. A patch live elsewhere but
+    // pending here is a restart away; a per-keg APPLY FAILURE must never
+    // tell the operator to restart — restart is proven not to help.
+    const sb = loadPatchesModule();
+    await runPoll(sb, payload([
+        basePatch({ id: 'pending-here', keg_changed: true }),
+        basePatch({ id: 'failed-here', keg_changed: true, this_keg: 'error',
+                    this_keg_detail: 'apply failed: context mismatch at hunk 2' }),
+    ]));
+    const cards = sb.document.getElementById('pt-list').children
+        .filter(c => (c.className || '').includes('pt-card'));
+    assert.equal(cards.length, 2);
+    const texts = cards.map(c => allText(c));
+    const allTitles = (el) => (el.title ? el.title + ' ' : '') +
+        el.children.map(allTitles).join(' ');
+    const titles = cards.map(allTitles);
+    assert.ok(texts[0].includes('NEEDS RE-APPLY'),
+              'pending on this board asks for the restart that fixes it');
+    assert.ok(!texts[0].includes('REVIEW'), '...not the failure chip');
+    assert.ok(texts[1].includes('REVIEW'), 'per-board apply failure gets REVIEW');
+    assert.ok(!texts[1].includes('NEEDS RE-APPLY'),
+              'restart copy is withheld when restart cannot help');
+    assert.ok(titles[1].includes('context mismatch'),
+              'the real per-keg reason rides the tooltip');
+});
+
 test('renderPatches: warning banner + needs_review card class', async () => {
     const sb = loadPatchesModule();
     await runPoll(sb, payload([basePatch({ state: 'needs_review', enabled: false })],

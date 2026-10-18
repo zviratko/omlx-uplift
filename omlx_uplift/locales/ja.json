@@ -520,6 +520,8 @@
  "uplift.patches.insecure_tls": "SSL/TLS エラーを無視",
  "uplift.patches.keg_changed": "再適用が必要",
  "uplift.patches.keg_changed_hint": "omlx が更新または再インストールされました。このパッチは有効ですが、実行中のコードには含まれていません。omlx サーバーを再起動すると、起動時に再検証・再適用されます。",
+ "uplift.patches.keg_failed": "確認が必要",
+ "uplift.patches.keg_failed_hint": "このサーバーのファイルにパッチを適用できませんでした — この omlx ビルドはパッチ対象のバージョンから離れています。再起動では解決せず、リベースされたパッチが必要です",
  "uplift.patches.killswitch_on": "パッチエンジン無効（キルスイッチ）— 無改造のバニラで起動、マニフェストは変更されません。",
  "uplift.patches.lbl_name": "名前",
  "uplift.patches.lbl_scope": "スコープ",

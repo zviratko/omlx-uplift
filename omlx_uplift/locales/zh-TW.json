@@ -520,6 +520,8 @@
  "uplift.patches.insecure_tls": "忽略 SSL/TLS 錯誤",
  "uplift.patches.keg_changed": "需要重新套用",
  "uplift.patches.keg_changed_hint": "omlx 已更新或重新安裝 — 此補丁已啟用，但不在執行中的程式碼裡。重新啟動 omlx 伺服器；啟動時會重新驗證並套用補丁。",
+ "uplift.patches.keg_failed": "需要檢視",
+ "uplift.patches.keg_failed_hint": "補丁無法套用至此伺服器的檔案 — 此 omlx 建置已偏離被補丁的版本；重新啟動無法解決，需要 rebase 後的補丁",
  "uplift.patches.killswitch_on": "修補引擎已停用（kill switch）— 以原始 vanilla 啟動，清單檔保持不變。",
  "uplift.patches.lbl_name": "名稱",
  "uplift.patches.lbl_scope": "範圍",
