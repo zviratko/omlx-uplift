@@ -2978,6 +2978,10 @@ var RT_WB_ID = /qwen3[-_. ]?asr/i;
 var RT_GAP_MS = 300;         // session reopen / echo-guard resume tail
 var RT_HANDSHAKE_MS = 10000; // the server's OWN handshake budget, client copy
 var RT_DONE_MS = 5000;       // bounded wait for transcript.done after stop
+var RT_DONE_WB_MS = 30000;   // whole-buffer models decode AFTER the server's
+                             // own endpoint; a streaming-tuned 5 s wait aborts
+                             // mid-decode and commits to a dead socket (mruu
+                             // field report) — cover the capped decode instead
 // segmented fallback windows (the card's numbers, client VAD over the tap)
 var RT_SEG_PREROLL_MS = 300;   // speech started before the first voiced frame
 var RT_SEG_SILENCE_MS = 800;   // silence that closes a segment
@@ -3281,7 +3285,7 @@ function rtEndpoint(s) {
         s.doneTimer = 0;
         if (_rt !== s || s.dead) return;
         rtFinish(s, s.text);      // the flush stalled: keep what we heard
-    }, RT_DONE_MS);
+    }, s.wb ? RT_DONE_WB_MS : RT_DONE_MS);
 }
 function rtRestart(s) {
     // stuck-engine escape: ~6 s of VOICED audio produced ZERO deltas. Drop

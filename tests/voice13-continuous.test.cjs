@@ -774,6 +774,51 @@ test('VOICE-14 stop-flush: a dead server cannot strand the listener', async () =
     assert.equal(h.sockets.length, 1, 'no ghost reopen');
 });
 
+test('VOICE-14 mruu: the stop-flush wait covers a whole-buffer decode', async () => {
+    // Server-side endpointing means a qwen3 answer can arrive seconds after
+    // the client's stop frame. The OLD 5 s streaming-tuned wait tore the
+    // session down mid-decode and the commit hit a dead socket (mruu field
+    // report: fans spinning, dashboard 'transcribing', nothing ever landed).
+    const h = await makeHarness({ localStorage: Object.assign({}, CONT,
+        { 'omlx-uplift-stt-model': 'mlx-community/Qwen3-ASR-0.6B-6bit' }) }).booted();
+    const ws = await h.listen();
+    ws.open(); ws.ready();
+    h.say(2, 0.2);
+    h.mic().dispatch('click');           // stop sent, server starts decoding
+    h.advance(5000);
+    assert.notEqual(h.probe(), null,
+                    'a whole-buffer session is NOT torn down at the old 5 s mark');
+    ws.done('late but landed');          // capped decode answers inside the window
+    await h.flush();
+    assert.ok(h.textInput.textContent.includes('late but landed'),
+              'the slow flush still reaches the composer');
+});
+
+test('VOICE-14 mruu: a silent 30 s stalls honestly and tears down', async () => {
+    const h = await makeHarness({ localStorage: Object.assign({}, CONT,
+        { 'omlx-uplift-stt-model': 'mlx-community/Qwen3-ASR-0.6B-6bit' }) }).booted();
+    const ws = await h.listen();
+    ws.open(); ws.ready();
+    h.say(2, 0.2);
+    h.mic().dispatch('click');
+    h.advance(29000);
+    assert.notEqual(h.probe(), null, 'still waiting at 29 s');
+    h.advance(2000);                     // the WB budget expires
+    assert.equal(h.probe(), null, 'listener stops — no ghost session, no reopen');
+    assert.equal(h.textInput.textContent, '', 'nothing fabricated on timeout');
+});
+
+test('VOICE-13: the streaming stop-flush keeps its 5 s budget', async () => {
+    const h = await makeHarness({ localStorage: Object.assign({}, CONT) }).booted();
+    const ws = await h.listen();
+    ws.open(); ws.ready();
+    ws.delta('heard before stop');
+    h.mic().dispatch('click');
+    h.advance(5000);                     // non-WB: the ORIGINAL short budget
+    assert.equal(h.probe(), null, 'streaming models do not inherit the WB wait');
+    assert.ok(h.textInput.textContent.includes('heard before stop'));
+});
+
 test('VOICE-14: whole-buffer models ride the cap, never the 6 s restart ladder', async () => {
     const h = await makeHarness({ localStorage: Object.assign({}, CONT,
         { 'omlx-uplift-stt-model': 'mlx-community/Qwen3-ASR-0.6B-6bit' }) }).booted();
