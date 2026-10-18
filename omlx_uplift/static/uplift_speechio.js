@@ -483,6 +483,7 @@
         var prefetch = opts.prefetch == null ? 4 : Math.max(1, opts.prefetch | 0);
         var onSource = opts.onSource || null;     // (item, srcNode) — visualiser
         var onDrop = opts.onDrop || null;         // (info)         — toast accounting
+        var onItem = opts.onItem || null;         // (item, state)  — VOICE-16 row repaint
         var destination = opts.destination || null;  // GainNode etc. (volume ducking)
 
         var items = [];               // FIFO; index === seq
@@ -496,6 +497,16 @@
         var waiters = [];
         var schedIdx = 0;         // next item allowed to be scheduled
         var doneMarker = 0;       // drain() snapshot of items.length
+        /* VOICE-16 playhead. A pause does NOT bump the session token — the loads
+           in flight stay valid and the buffers stay cached, only the clock moves:
+           `paused` remembers where the ear was, `startOffset` is how much of the
+           next item was already heard, `soloSeq` limits a one-chunk replay, and
+           `autoPlayFrom` restarts playback at a chunk whose ⟳ just landed. */
+        var paused = null;        // {seq, offset, solo} | null
+        var soloSeq = -1;         // schedule nothing above this seq
+        var startOffset = 0;      // seconds of the next item already heard
+        var autoPlayFrom = -1;    // seq to play when its reload finishes loading
+        var CLIP_EPS = 0.05;      // clock slop: scheduled-ahead seams
 
         function transport() {
             if (fetchLike) return fetchLike;
@@ -541,7 +552,7 @@
             return src;
         }
 
-        function runSource(src, at) {
+        function runSource(src, at, lead) {
             return new Promise(function (resolve) {
                 var done = false;
                 src.onended = function () {
@@ -553,27 +564,130 @@
                     resolve();
                 };
                 live.push(src);          // before start(): a fake ctx may end sync
-                try { src.start(at); } catch (e) { src.onended(); return; }
+                try { src.start(at, lead || 0); } catch (e) { src.onended(); return; }
             });
         }
 
-        /* schedule one clip list back-to-back on the shared clock */
-        function schedule(item, bufList) {
+        function setState(item, state) {
+            // ONE funnel for state changes so a row can never miss a transition
+            if (item.state === state) return item.state;
+            item.state = state;
+            if (onItem) { try { onItem(item, state); } catch (e) {} }
+            return state;
+        }
+
+        /* schedule one clip list back-to-back on the shared clock.
+           `from` = seconds of THIS item the listener already had (the resume
+           seam): clips under it are dropped and the containing clip starts
+           mid-buffer, so pause/resume keeps the sample-exact seam for
+           everything that follows. Every scheduled clip records its clock
+           window plus its position inside the item (`t0`), which is what
+           position() reads to report progress. */
+        function schedule(item, bufList, from) {
             var list = Array.isArray(bufList) ? bufList : [bufList];
             var ends = [];
+            var clips = [];
+            var skip = from > 0 ? from : 0;
+            var acc = 0, total = 0;
             for (var i = 0; i < list.length; i++) {
                 var buf = list[i];
                 if (!buf) continue;
+                var dur = typeof buf.duration === 'number' ? buf.duration : 0;
+                total += dur;
+                // `skip > 0` matters: a zero-length clip must still be scheduled
+                if (skip > 0 && acc + dur <= skip) { acc += dur; continue; }
+                var lead = skip > acc ? skip - acc : 0;
                 var src = makeSource(buf);
                 var at = Math.max(ctx.currentTime || 0, prevEnd);
-                prevEnd = at + (typeof buf.duration === 'number' ? buf.duration : 0);
+                var hear = dur - lead > 0 ? dur - lead : 0;
+                prevEnd = at + hear;
                 src.__seq = item.seq;
+                clips.push({ at: at, dur: hear, t0: acc + lead });
                 if (onSource) { try { onSource(item, src); } catch (e) {} }
-                ends.push(runSource(src, at));
+                ends.push(runSource(src, at, lead));
+                acc += dur;
             }
-            item.state = 'playing';
+            item.duration = total;
+            item.clips = clips;
+            item.startAt = clips.length ? clips[0].at - clips[0].t0
+                                        : (ctx.currentTime || 0);
+            setState(item, 'playing');
             item.starts = ends.length;
             return ends.length ? Promise.all(ends) : Promise.resolve();
+        }
+
+        function measure(bufs) {
+            var list = Array.isArray(bufs) ? bufs : [bufs];
+            var t = 0;
+            for (var i = 0; i < list.length; i++) {
+                var d = list[i] && list[i].duration;
+                if (typeof d === 'number') t += d;
+            }
+            return t;
+        }
+
+        /* stop what is on the clock WITHOUT touching the token: in-flight loads
+           stay valid, settled chunks stay cached, only the playhead moves. */
+        function killLive() {
+            var dying = live.slice();
+            live = [];
+            for (var i = 0; i < dying.length; i++) {
+                try { dying[i].stop && dying[i].stop(); } catch (e) {}
+                try { dying[i].disconnect(); } catch (e) {}
+            }
+        }
+
+        /* hand a scheduled/finished chunk back to the scheduler. A chunk whose
+           request is still in flight is left alone — its own completion lands it. */
+        function rewind(item) {
+            item.token = token;
+            if (item.state === 'loading') return;
+            item.regen = (item.regen || 0) + 1;
+            item.clips = null;
+            item.startAt = 0;
+            setState(item, item.buffers ? 'ready' : '');
+        }
+
+        function offsetIn(item, now) {
+            var clips = item.clips || [];
+            var soFar = 0;
+            for (var i = 0; i < clips.length; i++) {
+                var c = clips[i];
+                if (now < c.at + c.dur) return c.t0 + (now > c.at ? now - c.at : 0);
+                soFar = c.t0 + c.dur;
+            }
+            var d = item.duration || soFar;
+            return soFar > d ? soFar : d;
+        }
+
+        /* where the ear is right now: {seq, offset, duration, state} */
+        function position() {
+            if (paused) {
+                var pit = items[paused.seq];
+                return { seq: paused.seq, offset: paused.offset,
+                         duration: (pit && pit.duration) || 0,
+                         state: 'paused', paused: true };
+            }
+            var now = ctx ? (ctx.currentTime || 0) : 0;
+            var cur = null;
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i];
+                if (!it.clips || !it.clips.length) continue;
+                if (it.clips[0].at - CLIP_EPS <= now) cur = it;
+            }
+            if (!cur) {
+                var q = 0;
+                for (var j = 0; j < items.length; j++)
+                    if (!SETTLED[items[j].state]) q++;
+                return { seq: -1, offset: 0, duration: 0,
+                         state: q ? 'loading' : 'idle' };
+            }
+            var last = cur.clips[cur.clips.length - 1];
+            var until = last.at + last.dur;
+            return { seq: cur.seq,
+                     offset: offsetIn(cur, now),
+                     duration: cur.duration || 0,
+                     state: now < until ? 'playing' : cur.state };
         }
 
         function attempt(item) {
@@ -597,23 +711,31 @@
                 });
             }
             inflight++;
-            item.state = 'loading';
+            setState(item, 'loading');
             go().then(function (bufs) {
                 inflight--;
-                if (item.token !== token) { item.state = 'stale'; return; }
+                if (item.token !== token) { setState(item, 'stale'); return; }
                 item.buffers = bufs;
-                item.state = 'ready';
+                item.duration = measure(bufs);      // the row knows its length
+                                                    // before it plays (waveform)
+                setState(item, 'ready');
+                if (autoPlayFrom === item.seq) {     // ⟳ of the chunk on air
+                    autoPlayFrom = -1;
+                    seek(item.seq, 0);
+                    return;
+                }
                 dispatch();
                 advance();
             }, function (e) {
                 inflight--;
                 var info = { seq: item.seq, chunk: item.chunk, error: e,
                              token: token };
-                item.state = (item.token !== token) ? 'stale' : 'failed';
+                setState(item, (item.token !== token) ? 'stale' : 'failed');
                 if (item.state === 'failed') {
                     dropped.push(info);
                     if (onDrop) { try { onDrop(info); } catch (_) {} }
                 }
+                if (autoPlayFrom === item.seq) autoPlayFrom = -1;
                 dispatch();
                 advance();
             });
@@ -626,6 +748,26 @@
             }
         }
 
+        /* the ordered playhead handoff, shared by advance()/seek()/resume() */
+        function scheduleNext(item) {
+            var from = startOffset;
+            startOffset = 0;
+            var regen = item.regen || 0;
+            schedIdx = item.seq + 1;
+            var p = schedule(item, item.buffers, from);
+            checkDone();
+            p.then(function () {
+                if ((item.regen || 0) !== regen) return;    // paused/seeked away
+                if (item.token !== token) { setState(item, 'stale'); return; }
+                item.clips = null;
+                setState(item, 'played');
+                played++;
+                if (soloSeq === item.seq) soloSeq = -1;     // one-chunk play done
+                advance();
+                checkDone();
+            });
+        }
+
         /* the ordered half: hand out clips strictly by sequence. schedIdx is
            the next item allowed to be scheduled, so nothing plays before a
            LOWER sequence number settles (played or dropped) — a slow synth
@@ -633,25 +775,88 @@
            while the current one still plays is what makes the seam gapless,
            so a 'playing' item must NOT block the pipeline. */
         function advance() {
+            if (paused) return;                       // playhead frozen
             while (schedIdx < items.length) {
+                if (soloSeq >= 0 && schedIdx > soloSeq) break;
                 var it = items[schedIdx];
-                if (it.state === 'failed') it.state = 'stale';
+                if (it.state === 'failed') setState(it, 'stale');
                 if (SETTLED[it.state]) { schedIdx++; continue; }
                 if (it.state !== 'ready') { checkDone(); return; }  // queued/loading
-                (function (item) {
-                    schedIdx++;
-                    var p = schedule(item, item.buffers);
-                    checkDone();
-                    p.then(function () {
-                        if (item.token !== token) { item.state = 'stale'; return; }
-                        item.state = 'played';
-                        played++;
-                        advance();
-                        checkDone();
-                    });
-                })(it);
+                scheduleNext(it);
             }
             checkDone();
+        }
+
+        /* reposition: play item `seq` from `from` seconds. Rewinds that chunk and
+           everything after it (keeping their bytes), so a replay never re-synthesizes. */
+        function seek(seq, from, opts) {
+            if (seq < 0 || seq >= items.length) return false;
+            var it0 = items[seq];
+            // a chunk that died with an older session has no bytes to replay
+            if (it0.state === 'stale' && !it0.buffers) return false;
+            var solo = !!(opts && opts.solo);
+            paused = null;
+            autoPlayFrom = -1;
+            soloSeq = solo ? seq : -1;
+            killLive();
+            prevEnd = 0;
+            var upto = solo ? seq : items.length - 1;
+            for (var i = seq; i <= upto; i++) rewind(items[i]);
+            schedIdx = seq;
+            startOffset = from > 0 ? from : 0;
+            dispatch();
+            advance();
+            return true;
+        }
+
+        /* freeze the clock and remember the exact position (clips already heard
+           stay heard; the chunk under the playhead resumes mid-buffer). */
+        function pause() {
+            if (paused) return true;
+            var pos = position();
+            if (pos.seq < 0 || pos.state !== 'playing') return false;
+            killLive();
+            for (var i = pos.seq; i < items.length; i++) {
+                var it = items[i];
+                if (!it.clips && it.state !== 'playing') continue;
+                rewind(it);
+            }
+            paused = { seq: pos.seq, offset: pos.offset, solo: soloSeq };
+            soloSeq = -1;
+            schedIdx = pos.seq;
+            prevEnd = 0;
+            checkDone();
+            return true;
+        }
+
+        function resume() {
+            if (!paused) return false;
+            var p = paused;
+            paused = null;
+            prevEnd = 0;
+            startOffset = p.offset;
+            schedIdx = p.seq;
+            soloSeq = p.solo >= 0 ? p.seq : -1;
+            dispatch();
+            advance();
+            return true;
+        }
+
+        /* ⟳ on one row: drop its bytes and re-request ONLY that chunk. The
+           playhead is not hijacked unless the chunk was the one on air. */
+        function reload(seq, source, opts) {
+            var it = items[seq];
+            if (!it || it.seq !== seq) return false;
+            if (typeof source === 'function') it.source = source;
+            var onAir = it.state === 'playing';
+            killLive();
+            it.buffers = null;
+            rewind(it);
+            if (onAir || (opts && opts.play)) autoPlayFrom = seq;
+            if (onAir) { schedIdx = seq; soloSeq = -1; prevEnd = 0; }
+            dispatch();
+            advance();
+            return true;
         }
 
         function allSettled(upto) {
@@ -666,7 +871,11 @@
         }
 
         function checkDone() {
-            if (live.length || !allSettled(doneMarker)) return;
+            // A paused read is NOT settled: VOICE-13 must keep the mic closed and
+            // the turn's toast waits for the resume (or for the stop() that ends it).
+            if (paused) return;
+            var upto = soloSeq >= 0 ? Math.min(doneMarker, soloSeq + 1) : doneMarker;
+            if (live.length || !allSettled(upto)) return;
             var w = waiters; waiters = [];
             for (var i = 0; i < w.length; i++) w[i](result());
         }
@@ -681,7 +890,10 @@
                                       ? chunk.text : chunk);
                 if (!text) return -1;
                 var item = { seq: items.length, chunk: text, state: '',
-                             token: token, buffers: null, source: null };
+                             token: token, buffers: null, source: null,
+                             // VOICE-16 playhead bookkeeping (schedule() fills
+                             // clips/startAt/duration; regen ignores stale ends)
+                             clips: null, startAt: 0, duration: 0, regen: 0 };
                 if (chunk && typeof chunk === 'object' && chunk.source)
                     item.source = chunk.source;
                 items.push(item);
@@ -703,6 +915,10 @@
             stop: function () {
                 token++;
                 stopped = true;
+                paused = null;
+                soloSeq = -1;
+                startOffset = 0;
+                autoPlayFrom = -1;
                 var dying = live.slice();
                 live = [];
                 for (var i = 0; i < dying.length; i++) {
@@ -717,7 +933,15 @@
                 return token;
             },
             /* resume appending after stop() (new session, fresh clock) */
-            reset: function () { stopped = false; prevEnd = 0; return token; },
+            reset: function () {
+                stopped = false;
+                prevEnd = 0;
+                paused = null;
+                soloSeq = -1;
+                startOffset = 0;
+                autoPlayFrom = -1;
+                return token;
+            },
             token: function () { return token; },
             played: function () { return played; },
             dropped: function () { return dropped.slice(); },
@@ -728,6 +952,16 @@
             /* the clock position the next clip starts at (ms-accurate seam) */
             clock: function () { return prevEnd; },
             liveSources: function () { return live.slice(); },
+            /* --- VOICE-16 player surface ---------------------------------
+               position() is pure arithmetic on ctx.currentTime, so the UI can
+               poll it from one rAF loop for every row it owns. */
+            position: position,
+            pause: pause,
+            resume: resume,
+            paused: function () { return !!paused; },
+            seek: seek,
+            reload: reload,
+            itemAt: function (seq) { return items[seq] || null; },
         };
     }
 
