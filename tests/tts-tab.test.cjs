@@ -3,12 +3,18 @@
    vm + hand-rolled DOM, including its textContent-replacing setter, the
    append()-tolerates-strings stub and the byId registry).
 
-   Pinned:
-   - tab strip: CLONED VOICES | TEXT TO SPEECH | macOS VOICES, clone stays the
-     default, the tts tab is NOT active on mount and renders no clone form
+   Pinned (TTS-2 updated the tab-order and grouping rows):
+   - tab strip: TEXT TO SPEECH | CLONED VOICES | macOS VOICES — TTS is the
+     FIRST tab and the default; the clone form renders on it ONLY while
+     EDIT / SAVE AS is active (one form, one render path)
    - models sorted by name; ONE header row per audio_tts model with a SETTINGS
      button; built-in speaker rows ONLY where the caps probe proved them
      (qwen3 + non-empty speakers) — a foreign engine stays a bare model row
+   - TTS-2: stored (custom) voices group under their model, indented like the
+     speakers, as full voice rows; voices riding the macOS say engine get a
+     'macOS system voices' group and are ABSENT from the CLONED list
+   - openVoices(tab, modelId, editId) — the manager jump: selects the tab,
+     flashes the first row of that model once, and can arm the edit form
    - the caps probe is the exported window.Uplift.capsFor (GET
      /voices/capabilities?model=), never re-implemented client-side
    - DEFAULT is one lamp per model: lit follows tts_defaults[model].speaker
@@ -23,9 +29,11 @@
    - SETTINGS is the model manager's own editor seam
      (window.Uplift.modelmgr.openEditor(model id)); a missing seam toasts and
      must not throw
-   - no models at all -> the honest empty state, no rows
-   - the CLONED VOICES tab serializes byte-identical to the pre-TTS-1 build
-     (tab-button filtered) and keeps zero residue after visiting the tts tab
+   - no models at all -> the honest empty state (but a macOS-only store still
+     renders its group instead)
+   - the CLONED VOICES tab keeps the pre-TTS DOM byte-identical apart from
+     the two declared TTS-2 deltas (tab-button order filtered out, the new
+     data-model focus hook stripped)
 */
 'use strict';
 const test = require('node:test');
@@ -186,6 +194,7 @@ async function mount(opt) {
         console, document: doc, Promise, JSON, Math, Object, Array, String,
         Number, Boolean, RegExp, Set, Map, Error, TypeError, isFinite, isNaN,
         parseInt, parseFloat, setTimeout, clearTimeout,
+        scrollTo: () => {},       // voiceRow EDIT + SAVE AS scroll to the form
         // the self-fetch fallback path in renderVoices uses the bare API global
         API: '',
         Intl: { DisplayNames: (globalThis.Intl || {}).DisplayNames },
@@ -273,20 +282,21 @@ const rowName = (r) => String(r.children[0].textContent);
 const defBtn = (r) => classes(r, 'vc-tts-def')[0];
 const subCounter = (h) => String(h.byId['vc-sub'].textContent);
 
-test('tab strip: CLONED | TEXT TO SPEECH | macOS, clone default, tts inert', async () => {
+test('tab strip: TEXT TO SPEECH | CLONED | macOS, tts default', async () => {
     const h = await mount({});
     const btns = h.tabBtns();
     assert.deepEqual(btns.map(b => String(b.textContent)),
-        ['CLONED VOICES', 'TEXT TO SPEECH', 'macOS VOICES'],
-        'strip order is the frozen contract');
-    assert.ok(h.tClone._classes.has('on'), 'clone stays the default tab');
-    assert.ok(!h.tTts._classes.has('on'), 'tts is NOT active on mount');
+        ['TEXT TO SPEECH', 'CLONED VOICES', 'macOS VOICES'],
+        'strip order is the frozen contract (TTS-2: TTS first)');
+    assert.ok(h.tTts._classes.has('on'), 'tts is the default tab');
+    assert.ok(!h.tClone._classes.has('on'), 'clone is NOT active on mount');
     assert.ok(!h.tSay._classes.has('on'));
-    assert.ok(classes(h.host, 'vc-add').length, 'the clone form is what shows');
-    assert.equal(classes(h.host, 'vc-tts').length, 0,
-                 'no tts box may exist while another tab is on');
-    assert.equal(h.st.gets.filter(u => u.includes('/voices/tts/defaults')).length, 0,
-                 'the defaults endpoint is not touched off-tab');
+    assert.equal(classes(h.host, 'vc-tts').length, 1,
+                 'the tts box is what shows on mount');
+    assert.ok(!classes(h.host, 'vc-add').length,
+              'no voice form on the tts tab while nothing is being edited');
+    assert.equal(h.st.gets.filter(u => u.includes('/voices/tts/defaults')).length, 1,
+                 'the default tab reads its data once on mount');
 });
 
 test('tts tab: models sorted, speakers only where the probe proved them', async () => {
@@ -481,7 +491,7 @@ test('SETTINGS without the editor seam: a toast, never a throw', async () => {
     assert.equal(h.st.toasts[0].cls, 'error');
 });
 
-/* ---- the clone tab loses nothing ---------------------------------------- */
+/* ---- the clone tab keeps what it was ------------------------------------ */
 const ser = (n) => {
     const ds = Object.keys(n.dataset || {}).sort()
         .map(k => 'data-' + k + '=' + n.dataset[k]);
@@ -493,16 +503,22 @@ const ser = (n) => {
         ds.concat(at2).join(',') + '>' + (n.textContent || '') +
         (n.children || []).map(ser).join('') + '</' + n.tagName + '>';
 };
-// the whole clone tab, with ONLY the new tab button filtered out: everything
-// else must be byte-identical, so the strip itself is pinned too
+// the whole clone tab with the declared TTS-2 deltas stripped, so anything
+// else that drifts is a regression: (1) the tab strip — TTS-2 moved TEXT TO
+// SPEECH to the front, so the comparison drops that button and normalises
+// the remaining two to the old order (the strip itself is pinned by the
+// tab-strip test); (2) the data-model focus hook TTS-2 added to every voice
+// row; (3) the macOS-voice filter — this fixture store holds no say: row so
+// it is inert HERE, and pinned by its own TTS-2 test below
 const serCloneTab = (host) => host.children.map(kid => {
     if (kid._classes && kid._classes.has('vc-tabs')) {
-        return '<div class=vc-tabs>' + kid.children
+        const keep = kid.children
             .filter(b => String(b.textContent).indexOf('TEXT TO SPEECH') < 0)
-            .map(ser).join('') + '</div>';
+            .map(ser);
+        return '<div class=vc-tabs>' + keep.join('') + '</div>';
     }
     return ser(kid);
-}).join('\n');
+}).join('\n').replace(/ data-model=[^ >]*/g, '');
 
 test('CLONED VOICES tab serializes byte-identical to the pre-TTS-1 build', async (t) => {
     let oldSrc = null;
@@ -514,16 +530,21 @@ test('CLONED VOICES tab serializes byte-identical to the pre-TTS-1 build', async
               stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8');
     } catch (e) { /* no git available (installed keg) — the residue test below */ }
     const now = await mount({});
+    // TTS-2 moved the default tab to TEXT TO SPEECH — land on CLONED the way
+    // a user would before comparing (a no-op click on the old baseline)
+    now.clickTab && await now.clickTab('CLONED');
     const nowSer = serCloneTab(now.host);
     assert.ok(nowSer.length > 2000, 'the clone panel really did render');
     if (!oldSrc) { t.skip('no git baseline in this checkout'); return; }
     const before = await mount({ src: oldSrc });
+    await before.clickTab('CLONED');
     assert.equal(nowSer, serCloneTab(before.host),
-        'TTS-1 may add a tab button and nothing else to the clone panel');
+        'the clone panel changed only in the declared TTS-2 ways');
 });
 
 test('visiting the tts tab leaves ZERO residue in the clone panel', async () => {
     const fresh = await mount({});
+    await fresh.clickTab('CLONED');
     const untouched = serCloneTab(fresh.host);
     await fresh.clickTab('TEXT TO SPEECH');
     await fresh.clickTab('CLONED');
@@ -546,9 +567,10 @@ test('frozen EN copy: the tf() fallbacks are the contract strings verbatim', asy
     assert.equal(title.textContent, 'TTS MODELS');
     assert.equal(hint.textContent,
         'Every text-to-speech model installed on this server. Built-in '
-        + "voices come from the model's own metadata. SETTINGS opens the "
-        + 'same editor as in the model manager.');
-    assert.deepEqual(h.tabBtns().map(b => String(b.textContent))[1],
+        + "voices come from the model's own metadata; your custom voices "
+        + 'are grouped under their model. SETTINGS opens the same editor '
+        + 'as in the model manager.');
+    assert.deepEqual(h.tabBtns().map(b => String(b.textContent))[0],
                      'TEXT TO SPEECH');
     const set = classes(h.host, 'vc-tts-set')[0];
     assert.equal(set.textContent, 'SETTINGS');
@@ -559,8 +581,9 @@ test('frozen EN copy: the tf() fallbacks are the contract strings verbatim', asy
     await empty.clickTab('TEXT TO SPEECH');
     assert.equal(allText(classes(empty.host, 'vc-tts')[0]).trim(),
         'TTS MODELS Every text-to-speech model installed on this server. '
-        + "Built-in voices come from the model's own metadata. SETTINGS opens "
-        + 'the same editor as in the model manager. No TTS model installed — '
+        + "Built-in voices come from the model's own metadata; your custom "
+        + 'voices are grouped under their model. SETTINGS opens the same '
+        + 'editor as in the model manager. No TTS model installed — '
         + 'download one in the model manager first.');
 });
 
@@ -585,4 +608,133 @@ test('the speaker-row indent lives in uplift.css (CSS LANE closed)', () => {
     assert.ok(!/ttsSpeakerRow[\s\S]{0,400}style\.paddingLeft/.test(
         fs.readFileSync(SRC, 'utf8')),
         'no inline paddingLeft crept back into ttsSpeakerRow');
+});
+
+/* ---- TTS-2: grouped custom voices, macOS placement, manager jump --------- */
+const STORE = [
+    { id: 'jake', name: 'Jake', model: 'Qwen3-TTS-1.7B-CustomVoice',
+      ref_bytes: 200000, ref_text: 'hello there' },
+    { id: 'katka', name: 'Katka', model: 'kokoro-82m', ref_bytes: 50000 },
+    // a legacy say:<Name> entry: a SYSTEM voice the store still carries
+    { id: 'zuzana', name: 'Zuzana', model: 'say:Zuzana', language: 'cs' },
+];
+const voiceRows = (h) => classes(h.host, 'vc-tts-voice');
+
+test('tts tab: stored voices group under their model; macOS voices last', async () => {
+    const h = await mount({ store: STORE });
+    const rows = classes(h.host, 'vc-row');
+    const names = rows.map(r => String(r.children[0].textContent));
+    assert.deepEqual(names, [
+        'Kokoro-82M', 'kokoro-82m:Katka',
+        'Qwen3-TTS-1.7B-CustomVoice', 'Uncle_Fu', 'Vivian',
+        'Qwen3-TTS-1.7B-CustomVoice:Jake',
+        'macOS system voices', 'Zuzana (macOS)'],
+        'document order: model, its speakers, its custom voices — then the '
+        + 'macOS group (one store, two views: clones stay on their tab too)');
+    // only the STORE rows carry the group indent, never the headers or the
+    // built-in speakers (those keep vc-tts-sp)
+    assert.equal(voiceRows(h).length, 3, 'Katka, Jake, Zuzana are store rows');
+    for (const r of voiceRows(h))
+        assert.ok(r._classes.has('vc-row'), 'a group voice row is a voice row');
+    const mac = classes(h.host, 'vc-tts-mac');
+    assert.equal(mac.length, 1, 'one macOS header');
+    assert.ok(mac[0]._classes.has('vc-tts-model'),
+              'the header rides the model-row geometry');
+    assert.equal(classes(mac[0], 'vc-tts-set').length, 0,
+                 'the macOS group has no model editor to open');
+    // a stored voice row keeps the clone-tab action set, not the speaker one
+    const jake = voiceRows(h)[2];
+    assert.equal(classes(jake, 'vc-tts-def').length, 0,
+                 'a custom voice never lights a DEFAULT speaker lamp');
+    assert.equal(classes(jake, 'vc-play').length, 1);
+    const labels = classes(jake, 'se-btn').map(b => String(b.textContent));
+    assert.ok(labels.includes('EDIT') && labels.includes('DELETE'),
+        'edit/delete work right from the group: ' + labels);
+    assert.equal(subCounter(h), '3 ' + String.fromCharCode(215),
+        'models + the macOS group are what the tab offers');
+});
+
+test('tts tab: no macOS group when the store rides no say voice', async () => {
+    const h = await mount({ store: STORE.slice(0, 2) });
+    assert.equal(classes(h.host, 'vc-tts-mac').length, 0);
+    assert.equal(voiceRows(h).length, 2);
+    assert.equal(subCounter(h), '2 ' + String.fromCharCode(215));
+});
+
+test('CLONED VOICES lists the clones, never the macOS voice', async () => {
+    const h = await mount({ store: STORE });
+    await h.clickTab('CLONED');
+    const text = allText(h.host);
+    assert.ok(!/Zuzana/.test(text), 'the say: voice is absent from the clone list');
+    assert.ok(text.includes('Qwen3-TTS-1.7B-CustomVoice:Jake'), 'Jake kept');
+    assert.ok(text.includes('kokoro-82m:Katka'), 'Katka kept');
+    assert.equal(subCounter(h), '2 ' + String.fromCharCode(215),
+        'the counter counts what THIS tab lists');
+    assert.equal(classes(h.host, 'vc-copy').length, 2,
+                 'SAVE AS stays on the clone rows only');
+});
+
+test('EDIT from the tts tab opens the voice form above the grouped list', async () => {
+    const h = await mount({ store: STORE });
+    const jake = voiceRows(h)[2];
+    const edit = classes(jake, 'se-btn').find(b => String(b.textContent) === 'EDIT');
+    edit.click();
+    await settle(); await settle();
+    const onBtn = classes(h.host, 'vc-tab').find(b =>
+        String(b.textContent).includes('CLONED'));
+    assert.ok(!onBtn._classes.has('on'),
+              'the tab did NOT flip — the form shows in place');
+    const box = classes(h.host, 'vc-add')[0];
+    assert.ok(box, 'one shared voiceForm renders atop the tts list');
+    assert.ok(allText(box).includes('EDIT VOICE'), 'it opened in EDIT mode');
+    assert.equal(classes(h.host, 'vc-tts').length, 1, 'the grouped list survives');
+    const cancel = classes(box, 'se-btn').find(b => String(b.textContent) === 'Cancel');
+    cancel.click();
+    await settle(); await settle();
+    assert.equal(classes(h.host, 'vc-add').length, 0, 'Cancel clears the form');
+    assert.equal(classes(h.host, 'vc-tts').length, 1, 'the list stays');
+});
+
+test('openVoices: the manager jump selects the tab and flashes one row', async () => {
+    const h = await mount({ store: STORE });
+    h.V.openVoices('clone', 'Qwen3-TTS-1.7B-CustomVoice');
+    await settle(); await settle();
+    const on = classes(h.host, 'vc-tab').find(b => b._classes.has('on'));
+    assert.equal(String(on.textContent), 'CLONED VOICES',
+                 'the chip brings up the CUSTOM VOICES tab');
+    const lit = classes(h.host, 'vc-row').filter(r => r._classes.has('vc-focus'));
+    assert.equal(lit.length, 1, 'exactly the first row of the jumped model flashes');
+    assert.ok(String(lit[0].children[0].textContent).includes('Jake'));
+    // one-shot: the next repaint carries no stale flash
+    h.V.openVoices('clone', null);
+    await settle(); await settle();
+    assert.equal(classes(h.host, 'vc-row').filter(
+        r => r._classes.has('vc-focus')).length, 0);
+});
+
+test('openVoices with a voice id arms the edit form (editor EDIT jump)', async () => {
+    const h = await mount({ store: STORE });
+    h.V.openVoices('clone', 'kokoro-82m', 'katka');
+    await settle(); await settle();
+    const box = classes(h.host, 'vc-add')[0];
+    assert.ok(box, 'the voices-page form opened');
+    assert.ok(allText(box).includes('EDIT VOICE'), 'in edit mode for Katka');
+    // prefills live in .value, invisible to allText (gate doctrine): walk
+    // the inputs and read the field the form fills for an edit
+    const inputs = [];
+    (function walk(n) { (n.children || []).forEach(c => {
+        if (c.tagName === 'input') inputs.push(c); walk(c); }); })(box);
+    assert.ok(inputs.some(i => i.value === 'Katka'),
+        'the name field is prefilled from the store row');
+});
+
+test('no models installed but a macOS voice stored: the TTS tab still lists it', async () => {
+    const h = await mount({ models: [], store: [STORE[2]] });
+    const box = classes(h.host, 'vc-tts')[0];
+    assert.ok(box, 'the box renders — the store is not empty');
+    assert.ok(!allText(box).includes('No TTS model installed'),
+              'the empty message would be a lie with a row visible');
+    assert.deepEqual(classes(box, 'vc-tts-model').map(
+        r => String(r.children[0].textContent)), ['macOS system voices']);
+    assert.equal(subCounter(h), '1 ' + String.fromCharCode(215));
 });

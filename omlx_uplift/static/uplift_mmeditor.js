@@ -1764,6 +1764,65 @@ async function seTtsAttach(panel) {
     scroll.append(box);
     box.hidden = !seIsBaseTab();
 }
+/* ---- TTS-2: the editor's CUSTOM VOICES block ---------------------------
+   The manager's EDIT SETTINGS presents the stored voices cloned on THIS
+   model. Read-only list + EDIT: the click closes the editor and hands the
+   voice to the voices page's own edit form (window.Uplift.voices.openVoices
+   with the voice id) — one voice form in the app, zero duplication here.
+   Silent-absence doctrine as with seTtsAttach: no rows, no box. Base tab
+   only: voices belong to the model, not to a profile. */
+let seVoicesGen = 0;              // editor-instance token (async attach race)
+let seVoicesBox = null;
+
+async function seVoicesAttach(panel) {
+    const gen = ++seVoicesGen;
+    seVoicesBox = null;
+    const model = seModel;
+    let d = null;
+    try {
+        d = await MM_GLUE.fetchJson(`${API}/uplift/api/voices`);
+    } catch (_) { return; }        // a dead store keeps the form untouched
+    if (gen !== seVoicesGen || seModel !== model) return;   // stale editor
+    const own = ((d && d.voices) || []).filter(v =>
+        String((v && v.model) || '') === model
+        && String(v.model || '').indexOf('say:') !== 0);
+    if (!own.length) return;
+    const box = document.createElement('div');
+    box.className = 'se-box se-voices';
+    const h = document.createElement('h5');
+    h.className = 'se-section';
+    h.textContent = C.tf('uplift.voices.editor_title',
+        'Custom voices on this model');
+    const body = document.createElement('div');
+    body.className = 'se-box-body';
+    const note = document.createElement('div');
+    note.className = 'se-typenote';
+    note.textContent = C.tf('uplift.voices.editor_hint',
+        'EDIT closes this dialog and opens the voice in TTS & Voices, '
+        + 'where its reference clip, transcript and settings live.');
+    body.append(note);
+    for (const v of own) {
+        const edit = document.createElement('button');
+        edit.type = 'button'; edit.className = 'se-btn';
+        edit.textContent = C.tf('uplift.voices.edit', 'EDIT');
+        edit.onclick = () => {
+            closeEditor();
+            const go = () => window.Uplift.voices.openVoices(
+                'clone', model, v.id);
+            if (window.Uplift.voices) go();
+            else D.loadScript('./uplift_voices.js')
+                .then(go, () => MM_GLUE.toast(C.t('uplift.toast.failed',
+                    { msg: 'voices page unavailable' }), 'error'));
+        };
+        seTtsField(body, String(v.name || v.id || ''), edit);
+    }
+    box.append(h, body);
+    const scroll = panel.querySelector('.editor-scroll');
+    if (!scroll) return;
+    scroll.append(box);
+    seVoicesBox = box;
+    box.hidden = !seIsBaseTab();
+}
 /* U2: roomy grammar editing pop-out over the model editor. OK copies the
    text back into the small textarea through its own 'input' event, so the
    bound listener does dirty-marking / override bookkeeping exactly as if
@@ -1808,6 +1867,7 @@ function openGrammarPop(srcTa, btn) {
 function closeEditor() {
     if (seModel) CHIPS.clearProfileCache(seModel);   // tree must show new profiles
     seTts = null; seTtsGen++;   // TTS-1: a stale probe must not attach here
+    seVoicesBox = null; seVoicesGen++;   // TTS-2: same token rule for voices
     seModel = null; seFormModel = null;
     seActiveSect = null; SE_RAIL_HOST = null;
     renderModelAdmin(); // rows were frozen while the editor was open
@@ -1860,7 +1920,10 @@ async function openEditor(model, profileName, templateName) {
     // popup modal, not an inline accordion: stable size for long forms
     const panel = editorNode();
     renderEditorFields(panel.querySelector('#se-fields'));
-    seTtsAttach(panel);   // TTS-1: silent unless this is a probed TTS model
+    seTtsAttach(panel).then(() => seVoicesAttach(panel));
+    // TTS-1: silent unless this is a probed TTS model; TTS-2 chained AFTER
+    // it so the CUSTOM VOICES box always lands below the voice defaults —
+    // two racing async appends would shuffle with every warm cache flip
     seLoadProfiles(model, panel.querySelector('.se-profs')).then(() => {
         // item 2: existing profiles are prominent top tabs, each showing
         // that profile's merged values (item 1: values are visible)
@@ -2911,6 +2974,8 @@ function seActivateTab(panel, t) {
     // TTS-1: voice defaults are model-wide (base scope) — the block rides
     // the base tab only; its dirty state still commits from any tab
     if (seTts && seTts.host) seTts.host.hidden = t.id !== 'base';
+    // TTS-2: same base-only rule for the custom-voices block
+    if (seVoicesBox) seVoicesBox.hidden = t.id !== 'base';
     seRenderTabs(panel); seUpdateSaveBtn();
 }
 async function commitBaseTab(panel, msg) {

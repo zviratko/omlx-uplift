@@ -41,6 +41,10 @@ const CODE = [
     // LET in this same combined body, so saveEditor's dirty-check and the
     // commit resolve without any global accessor
     region('let seTts = null;', 'function seTtsField', 'tts defaults trio'),
+    // TTS-2: seActivateTab hides the CUSTOM VOICES box on profile tabs —
+    // its state pair must ride the same combined body (same LET rule)
+    region('let seVoicesGen = 0;', 'async function seVoicesAttach',
+        'editor voices-block state pair'),
 ].join('\n');
 
 function harness({ validations = {}, loaded = true,

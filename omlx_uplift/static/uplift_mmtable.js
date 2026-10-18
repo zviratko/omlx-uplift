@@ -553,6 +553,19 @@ function attachVoiceBadges(table) {
             chip.title = C.tf('uplift.voices.tts_badge_title',
                 'Voices saved on this model: {names}')
                 .replace('{names}', names.join(', '));
+            // TTS-2: the chip is a way IN — one click brings up the CLONED
+            // VOICES tab of TTS & Voices focused on this model's rows. The
+            // voices module is lazy-loaded (only the voices page pulls it
+            // in), so late-bind like ttsModelRow's SETTINGS seam does.
+            chip.onclick = () => {
+                const go = () =>
+                    window.Uplift.voices.openVoices('clone', row.dataset.mid);
+                if (window.Uplift.voices) go();
+                else D.loadScript('./uplift_voices.js')
+                    .then(go, () => MM_GLUE.toast(
+                        C.t('uplift.toast.failed',
+                            { msg: 'voices page unavailable' }), 'error'));
+            };
             host.append(chip);
         }
     });

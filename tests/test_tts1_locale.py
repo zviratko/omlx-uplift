@@ -22,6 +22,10 @@ TTS1_KEYS = (
     "uplift.voices.tts_set_default", "uplift.voices.tts_clear_default",
     "uplift.voices.tts_no_default", "uplift.voices.tts_section",
     "uplift.voices.tts_section_note", "uplift.voices.tts_badge_title",
+    # TTS-2: the macOS group header (voices page) + the editor's custom-
+    # voices block
+    "uplift.voices.tts_mac_title", "uplift.voices.editor_title",
+    "uplift.voices.editor_hint",
 )
 RENAMED = ("uplift.tab.voices", "uplift.page.voices_full")
 _PH_RE = re.compile(r"\{\w+\}")
@@ -135,7 +139,8 @@ def test_tts1_js_fallbacks_match_en(js):
         # every tab-family key must actually be reached from the page
         missing = set(TTS1_KEYS) - used - {
             "uplift.voices.tts_section", "uplift.voices.tts_section_note",
-            "uplift.voices.tts_badge_title"}   # editor/table family lives elsewhere
+            "uplift.voices.tts_badge_title",   # editor/table family lives elsewhere
+            "uplift.voices.editor_title", "uplift.voices.editor_hint"}
         assert not missing, "tts_* keys unused in the page: " + str(missing)
 
 

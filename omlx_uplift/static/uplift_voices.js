@@ -64,6 +64,14 @@ function voiceLabel(v) {
     return (v.model ? v.model + ':' : '') + v.name;
 }
 
+/* TTS-2 (user 2026-10-18): a store voice riding the macOS say engine is a
+   SYSTEM voice in the user's eyes — it lives in the TEXT TO SPEECH tab's
+   macOS group, never in the CLONED VOICES list. One predicate, both sides
+   read it (the group and the filtered list can never disagree). */
+function isSayVoice(v) {
+    return String((v && v.model) || '').indexOf('say:') === 0;
+}
+
 function stopPlayback() {
     if (_player) { _player.pause(); _player = null; }
     if (_playerUrl) { URL.revokeObjectURL(_playerUrl); _playerUrl = null; }
@@ -411,9 +419,13 @@ function recStopTracks(stream) {
 }
 function recErrText(e) { return String((e && e.message) || (e && e.name) || e || ''); }
 
-function voiceRow(v) {
+function voiceRow(v, extraClass) {
     const row = document.createElement('div');
-    row.className = 'urow vc-row';
+    row.className = 'urow vc-row' + (extraClass ? ' ' + extraClass : '');
+    // TTS-2: a manager jump (VOICES chip / editor EDIT) focuses this model's
+    // rows — the row carries its model so the clone list can find it without
+    // re-deriving the mapping
+    row.dataset.model = String(v.model || '');
     const lab = document.createElement('div');
     lab.className = 'vc-name';
     lab.textContent = voiceLabel(v);
@@ -1577,6 +1589,28 @@ async function _ttsRows(rowsBox, models) {
             for (const spk of caps.speakers)
                 rowsBox.append(ttsSpeakerRow(m.id, spk, repaint));
         }
+        // TTS-2 (user): the custom voices cloned ON this model group under
+        // it — store rows, so PLAY/EDIT/DELETE work right here; the CLONED
+        // VOICES tab keeps the full list as well (one store, two views).
+        for (const v of _voices.filter(x => x.model === m.id))
+            rowsBox.append(voiceRow(v, 'vc-tts-voice'));
+    }
+    // The macOS say engine gets its own group when the store holds voices
+    // riding it (legacy 'say:<Name>' entries) — TTS-2: those SYSTEM voices
+    // belong here, not among the clones. No header without rows: the full
+    // catalog stays on the macOS VOICES tab.
+    const sayV = _voices.filter(isSayVoice);
+    if (sayV.length) {
+        const head = document.createElement('div');
+        head.className = 'vc-row vc-tts-model vc-tts-mac';
+        const lab = document.createElement('div');
+        lab.className = 'vc-name';
+        lab.textContent = tf('uplift.voices.tts_mac_title',
+            'macOS system voices');
+        head.append(lab);
+        rowsBox.append(head);
+        for (const v of sayV)
+            rowsBox.append(voiceRow(v, 'vc-tts-voice'));
     }
 }
 
@@ -1590,11 +1624,12 @@ async function ttsPanel(host, models) {
     hint.className = 'mk-desc';
     hint.textContent = tf('uplift.voices.tts_hint',
         'Every text-to-speech model installed on this server. Built-in '
-        + 'voices come from the model\'s own metadata. SETTINGS opens the '
-        + 'same editor as in the model manager.');
+        + 'voices come from the model\'s own metadata; your custom voices '
+        + 'are grouped under their model. SETTINGS opens the same editor '
+        + 'as in the model manager.');
     box.append(title, hint);
     host.append(box);
-    if (!models || !models.length) {
+    if ((!models || !models.length) && !_voices.some(isSayVoice)) {
         const none = document.createElement('div');
         D.emptyMsg(none, tf('uplift.voices.tts_none',
             'No TTS model installed — download one in the model manager '
@@ -1606,10 +1641,11 @@ async function ttsPanel(host, models) {
     const rows = document.createElement('div');
     rows.className = 'vc-list';
     box.append(rows);
-    await _ttsRows(rows, models);
+    await _ttsRows(rows, models || []);
 }
 
-let _vcTab = 'clone';
+let _vcTab = 'tts';       // TTS-2: TEXT TO SPEECH is the first/default tab
+let _focusModel = null;   // model id to flash after a manager jump
 
 function vcTabBtn(key, en, id) {
     const b = document.createElement('button');
@@ -1621,11 +1657,27 @@ function vcTabBtn(key, en, id) {
     return b;
 }
 
+function openVoices(tab, modelId, editId) {
+    // TTS-2 entry from the model manager: the VOICES chip opens the CLONED
+    // VOICES tab focused on that model's rows; the editor's EDIT button also
+    // carries a voice id — the existing edit flow (_editing + form atop the
+    // list) is reused, nothing is duplicated. Same module state a tab click
+    // sets, so both pages share ONE render path.
+    if (tab) _vcTab = tab;
+    _focusModel = modelId || null;
+    if (editId) { _editing = editId; _saveAs = null; }
+    const hash = '#models/voices';
+    if (location.hash === hash) renderVoices();
+    else location.hash = hash;      // applyTab renders with this state set
+}
+
 async function renderVoices() {
     const host = $('vc-body');
     if (!host) return;
     await loadVoices();
     stopPlayback();
+    const focus = _focusModel;
+    _focusModel = null;             // one-shot: never haunt a later repaint
     host.textContent = '';
     let models = ttsModels();
     if (!models.length && !_modelsSelf) {
@@ -1647,16 +1699,20 @@ async function renderVoices() {
     }
     const tabs = document.createElement('div');
     tabs.className = 'vc-tabs';
-    tabs.append(vcTabBtn('uplift.voices.tab_clone', 'CLONED VOICES', 'clone'),
-                vcTabBtn('uplift.voices.tab_tts', 'TEXT TO SPEECH', 'tts'),
+    tabs.append(vcTabBtn('uplift.voices.tab_tts', 'TEXT TO SPEECH', 'tts'),
+                vcTabBtn('uplift.voices.tab_clone', 'CLONED VOICES', 'clone'),
                 vcTabBtn('uplift.voices.tab_say', 'macOS VOICES', 'say'));
     host.append(tabs);
     if (_vcTab === 'tts') {
         // models is resolved ABOVE the branch (the same catalog the clone
         // form feeds its select with — one fetch, one truth)
+        // TTS-2: EDIT / SAVE AS from a grouped row opens the SAME voice form
+        // here, above the list — the store row stays visible in its group
+        if (_editing || _saveAs) host.append(voiceForm(models, _sttSelf));
         await ttsPanel(host, models);
         const sub = $('vc-sub');
-        if (sub) sub.textContent = models.length + ' ×';
+        if (sub) sub.textContent = (models.length
+            + (_voices.some(isSayVoice) ? 1 : 0)) + ' ×';
         return;
     }
     if (_vcTab === 'say') {
@@ -1669,12 +1725,19 @@ async function renderVoices() {
     host.append(voiceForm(models, _sttSelf));
     const list = document.createElement('div');
     list.className = 'vc-list';
-    if (_voices.length) {
-        for (const v of _voices) {
-            if (_saveAs && _saveAs === v.id) { list.append(voiceRow(v)); continue; }
+    // TTS-2 (user): voices riding the macOS say engine are SYSTEM voices —
+    // they live in the TEXT TO SPEECH tab's macOS group, not among clones
+    const clones = _voices.filter(v => !isSayVoice(v));
+    let focusHit = null;
+    if (clones.length) {
+        for (const v of clones) {
+            const row = voiceRow(v);
+            if (focus && !focusHit && String(v.model || '') === focus)
+                focusHit = row;
+            if (_saveAs && _saveAs === v.id) { list.append(row); continue; }
             const holder = document.createElement('div');
             holder.className = 'vc-rowwrap';
-            holder.append(voiceRow(v));
+            holder.append(row);
             // 'save it onto a DIFFERENT model' = a NEW voice reusing this
             // clip (from_voice server-side); the original stays untouched
             const cp = document.createElement('button');
@@ -1692,15 +1755,20 @@ async function renderVoices() {
         list.append(none);
     }
     host.append(list);
+    if (focusHit) {
+        focusHit.classList.add('vc-focus');
+        if (focusHit.scrollIntoView)
+            focusHit.scrollIntoView({ block: 'center' });
+    }
     const sub = $('vc-sub');
-    if (sub) sub.textContent = _voices.length + ' ×';
+    if (sub) sub.textContent = clones.length + ' ×';
 }
 
 window.Uplift = window.Uplift || {};
 window.Uplift.voices = { renderVoices, voices: () => _voices,
                         loadVoices, ttsModels, speechJson, playBlob,
                         stopPlayback, newPlayer, playInto, voiceFetch, transcribeClip,
-                        voiceLabel,
+                        voiceLabel, openVoices,
                         // VOICE-9 test seam: the recorder's pure half (the
                         // WAV container, the language resolver) — no
                         // AudioContext, no DOM, node-drivable.

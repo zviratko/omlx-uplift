@@ -1829,9 +1829,11 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
     border: 1px solid var(--edge); color: var(--dim); background: transparent;
     border-radius: var(--radius);
 }
-/* TTS-1: the VOICES chip is a fact, not a control — same lamp geometry,
-   never pointer feedback (attached async by attachVoiceBadges) */
-.admin-table .lamp.voices-lamp { cursor: default; }
+/* TTS-2 (user): the VOICES chip became a way IN — one click opens the
+   CLONED VOICES tab focused on this model's rows; same lamp geometry,
+   pointer feedback like every other clickable lamp (attached async by
+   attachVoiceBadges) */
+.admin-table .lamp.voices-lamp { cursor: pointer; }
 /* unlit = grey outline; LIT = solid green fill with dark text — a lit
    cockpit lamp, max contrast on any ground (green outlines on grey were
    unreadable). Glow marks powered instruments on dark themes. */
@@ -2091,6 +2093,12 @@ label.se-row.pending-restart > .se-ctl > select {
    built-in voices read as children of their model everywhere. */
 .vc-tts { margin-bottom: 12px; }   /* same footer as .vc-add */
 .vc-tts-sp { padding-left: 38px; }
+/* TTS-2: stored voices grouped under their model take the SAME indent as
+   the built-in speakers (one truth: children of the model row line up) */
+.vc-tts-voice { padding-left: 38px; }
+/* manager-jump focus: the row the VOICES chip / editor EDIT aimed at,
+   flagged until the next repaint (no timer, no animation to chase) */
+.vc-row.vc-focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 .vc-tts-set { min-width: 0; flex: 0 0 auto; white-space: nowrap; }
 .vc-tts-def { min-width: 0; flex: 0 0 auto; white-space: nowrap; }
 .vc-tts-def.on { color: var(--accent); border-color: var(--accent); }

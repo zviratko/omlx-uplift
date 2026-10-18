@@ -57,6 +57,9 @@ function mkDom() {
                 c.parentNode = this; this.children.push(c); }); },
             querySelector() { return null; },
             querySelectorAll() { return []; },
+            // TTS-2: chip / EDIT buttons are clicked in tests now — the same
+            // contract the tts-tab harness uses
+            click() { if (el.onclick) el.onclick({ stopPropagation() {} }); },
         };
         // control text can live in .value (textarea/input) — a serializer
         // that only reads _text hides prefills (live catch: an app-side
@@ -71,7 +74,7 @@ function mkDom() {
 }
 
 function editorHarness({ caps = null, defaults = {}, entry = null,
-                         capsFail = false } = {}) {
+                         capsFail = false, store = null, storeFail = false } = {}) {
     const { doc } = mkDom();
     const scroll = doc.createElement('div');
     const calls = [];
@@ -85,24 +88,34 @@ function editorHarness({ caps = null, defaults = {}, entry = null,
         fetchJson: async (p) => { calls.push(['GET', p]);
             if (p.includes('capabilities')) { if (capsFail) throw new Error('down'); return caps; }
             if (p.includes('tts/defaults')) return { defaults };
+            if (p.includes('/uplift/api/voices')) {
+                if (storeFail) throw new Error('store down');
+                return { voices: store || [] };
+            }
             throw new Error('unstubbed ' + p); },
     };
     const MM_GLUE = { fetchJson: D.fetchJson, toast: () => {} };
     const C = { t: k => k, tf: (k, d) => d };
     const touch = [];
+    const jumps = [];         // openVoices calls the EDIT buttons make
+    let closed = 0;           // closeEditor calls
     const FN = new Function('D', 'MM_GLUE', 'C', 'API', 'window', 'document',
         'seModel', 'seFormModel', 'seUpdateSaveBtn', 'seIsBaseTab',
-        TTS_CODE + '\nreturn { attach: seTtsAttach, isDirty: seTtsIsDirty,'
-            + ' commit: seCommitTts };');
+        'closeEditor',
+        TTS_CODE + '\nreturn { attach: seTtsAttach, attachVoices: seVoicesAttach,'
+            + ' isDirty: seTtsIsDirty, commit: seCommitTts };');
     const form = entry || { id: 'M1', engine_type: 'audio_tts' };
     const api = FN(D, MM_GLUE, C, '', {
-        Uplift: { capsFor: async () => { if (capsFail) throw new Error('down'); return caps; } },
+        Uplift: { capsFor: async () => { if (capsFail) throw new Error('down'); return caps; },
+                  voices: { openVoices: (...a) => jumps.push(a) } },
+        UpliftDom: D,
     }, doc,
     // plain VALUES: the sliced code compares seModel against a captured
     // string; a getter function would never equal it (live catch)
     'M1', form,
-    () => touch.push(1), () => true);
-    return { api, doc, scroll, calls, touch };
+    () => touch.push(1), () => true, () => { closed++; });
+    return { api, doc, scroll, calls, touch, jumps,
+             closed: () => closed };
 }
 
 const CAPS_CV = { qwen3: true, type: 'custom_voice', size: '1b7',
@@ -175,7 +188,8 @@ test('dirty + commit: POST carries the model and the full 3-key entry', async ()
 /* ---------------- manager VOICES chip ---------------- */
 const BADGE_CODE = region(TABLE, 'const VOICE_BADGE_TTL_S', 'function confirmDialog',
     'voice badge helpers');
-function badgeHarness({ voices = null, fail = false } = {}) {
+function badgeHarness({ voices = null, fail = false, preload = true,
+                        loadFail = false } = {}) {
     const { doc } = mkDom();
     const rows = {};
     const table = {
@@ -198,12 +212,24 @@ function badgeHarness({ voices = null, fail = false } = {}) {
     const MM_GLUE = { fetchJson: async () => {
         if (fail) throw new Error('store down');
         return { voices };
+    }, toast: (m, c) => toasts.push([String(m), c]) };
+    const C = { tf: (k, d) => d, t: (k) => k };
+    const toasts = [];
+    const jumps = [];
+    const loads = [];
+    const win = { Uplift: {} };
+    if (preload) win.Uplift.voices = { openVoices: (...a) => jumps.push(a) };
+    const D = { loadScript: (src) => {
+        loads.push(src);
+        if (loadFail) return Promise.reject(new Error('script load failed'));
+        // the loaded script is what registers window.Uplift.voices IRL
+        win.Uplift.voices = win.Uplift.voices || { openVoices: (...a) => jumps.push(a) };
+        return Promise.resolve();
     } };
-    const C = { tf: (k, d) => d };
-    const FN = new Function('MM_GLUE', 'API', 'C', 'document',
+    const FN = new Function('MM_GLUE', 'API', 'C', 'document', 'window', 'D',
         BADGE_CODE + '\nreturn { attach: attachVoiceBadges };');
-    const api = FN(MM_GLUE, '', C, doc);
-    return { api, table, row };
+    const api = FN(MM_GLUE, '', C, doc, win, D);
+    return { api, table, row, jumps, loads, toasts };
 }
 
 test('VOICES chip: condensed names, only on rows with stored voices', async () => {
@@ -231,4 +257,96 @@ test('VOICES chip survives a dead voice store', async () => {
     h.api.attach(h.table);
     await new Promise(res => setImmediate(() => setImmediate(res)));
     assert.equal(r.querySelectorAll('.lampstack')[0].children.length, 0);
+});
+
+/* ---- TTS-2: the chip is a way IN + the editor's CUSTOM VOICES block ---- */
+test('VOICES chip click opens the CLONED VOICES tab for that model', async () => {
+    const h = badgeHarness({ voices: [{ name: 'Jake', model: 'Qwen3-TTS' }] });
+    const r = h.row('Qwen3-TTS');
+    h.api.attach(h.table);
+    await new Promise(res => setImmediate(() => setImmediate(res)));
+    const chip = r.querySelectorAll('.lampstack')[0].children[0];
+    chip.click();
+    assert.deepEqual(h.jumps, [['clone', 'Qwen3-TTS']],
+        'one openVoices call: clone tab, this row\'s model');
+    assert.deepEqual(h.loads, [], 'a loaded voices page is used directly');
+});
+
+test('VOICES chip lazy-loads the voices module when the page never opened', async () => {
+    const h = badgeHarness({ voices: [{ name: 'Jake', model: 'Qwen3-TTS' }],
+                             preload: false });
+    const r = h.row('Qwen3-TTS');
+    h.api.attach(h.table);
+    await new Promise(res => setImmediate(() => setImmediate(res)));
+    r.querySelectorAll('.lampstack')[0].children[0].click();
+    assert.deepEqual(h.loads, ['./uplift_voices.js'], 'the SAME lazy path applyTab uses');
+    await new Promise(res => setImmediate(() => setImmediate(res)));
+    assert.deepEqual(h.jumps, [['clone', 'Qwen3-TTS']],
+        'the jump lands once the script is in');
+});
+
+test('VOICES chip survives a failed voices-module load (toast, never a throw)', async () => {
+    const h = badgeHarness({ voices: [{ name: 'Jake', model: 'Qwen3-TTS' }],
+                             preload: false, loadFail: true });
+    const r = h.row('Qwen3-TTS');
+    h.api.attach(h.table);
+    await new Promise(res => setImmediate(() => setImmediate(res)));
+    const chip = r.querySelectorAll('.lampstack')[0].children[0];
+    let err = null;
+    try { chip.click(); await new Promise(res => setImmediate(() => setImmediate(res))); }
+    catch (e) { err = e; }
+    assert.equal(err && err.message, null, 'the dead seam must not break the table');
+    assert.equal(h.jumps.length, 0, 'nothing was called on the missing module');
+});
+
+/* the editor block: silent-absence, filtering, base-tab gate, EDIT handoff */
+const voicesBox = (h) => h.scroll.children.find(c => c._classes.has('se-voices'));
+const findBtns = (el, out) => {
+    out = out || [];
+    if (el.tagName === 'button') out.push(el);
+    for (const c of el.children || []) findBtns(c, out);
+    return out;
+};
+
+test('editor CUSTOM VOICES block: this model\'s rows only', async () => {
+    const h = editorHarness({ store: [
+        { id: 'v1', name: 'Jake', model: 'M1' },
+        { id: 'v2', name: 'Katka', model: 'M1' },
+        { id: 'v3', name: 'Other', model: 'M2' },
+        { id: 'v4', name: 'Zuzana', model: 'say:Zuzana' },
+    ] });
+    await h.api.attachVoices({ querySelector: () => h.scroll });
+    const box = voicesBox(h);
+    assert.ok(box, 'the block renders when the store has rows for this model');
+    const text = box.selectedText();
+    assert.ok(text.includes('Jake') && text.includes('Katka'), text);
+    assert.ok(!text.includes('Other'), 'a foreign model\'s voice stays out');
+    assert.ok(!text.includes('Zuzana'),
+        'the say: system voice is not a custom clone — TTS tab owns it');
+    assert.ok(text.includes('EDIT'), 'the only action is the handoff');
+});
+
+test('editor block EDIT: close the editor, hand the voice to the form', async () => {
+    const h = editorHarness({ store: [{ id: 'v1', name: 'Jake', model: 'M1' }] });
+    await h.api.attachVoices({ querySelector: () => h.scroll });
+    const edit = findBtns(voicesBox(h))[0];
+    edit.click();
+    assert.equal(h.closed(), 1, 'the editor closed first — no modal behind the jump');
+    assert.deepEqual(h.jumps, [['clone', 'M1', 'v1']],
+        'openVoices(tab, model, editId): the existing form edits in place');
+});
+
+test('editor block is silent when nothing applies (no rows, dead store)', async () => {
+    let h = editorHarness({ store: [] });
+    await h.api.attachVoices({ querySelector: () => h.scroll });
+    assert.equal(h.scroll.children.length, 0, 'no voices — no box (silent absence)');
+    h = editorHarness({ store: [{ id: 'v', name: 'Other', model: 'M2' }] });
+    await h.api.attachVoices({ querySelector: () => h.scroll });
+    assert.equal(h.scroll.children.length, 0, 'only THIS model\'s voices frame a box');
+    h = editorHarness({ store: null, storeFail: true });
+    let err = null;
+    try { await h.api.attachVoices({ querySelector: () => h.scroll }); }
+    catch (e) { err = e; }
+    assert.equal(err && err.message, null, 'a dead store must not throw from the editor');
+    assert.equal(h.scroll.children.length, 0);
 });

@@ -4,8 +4,8 @@
    needs no MediaDevices at all).
 
    Pinned:
-   - the tab strip renders above the existing ADD form; clone is the
-     default tab and keeps the old panel byte-identical in content
+   - the tab strip renders above the existing ADD form; TTS-2 made TEXT TO
+     SPEECH the default — the clone tab opens on click and keeps its panel
    - GET /voices/say powers the list; supported:false answers with the
      honest note and NOTHING else (no filter box, no rows)
    - grouping: languages sorted by language NAME (Czech before English),
@@ -238,12 +238,21 @@ async function mount(opt) {
              sayClick, byId, doc };
 }
 
-test('tab strip defaults to CLONED and keeps the add form', async () => {
+test('tab strip defaults to TEXT TO SPEECH; clone keeps the add form', async () => {
+    // TTS-2 (user): TEXT TO SPEECH became the first/default tab — the clone
+    // panel is one click away and unchanged
     const h = await mount({});
-    assert.ok(h.tClone._classes.has('on'), 'clone tab active by default');
+    assert.ok(h.tTts._classes.has('on'), 'tts tab active by default');
+    assert.ok(!h.tClone._classes.has('on'), 'clone is no longer the default');
     assert.ok(!h.tSay._classes.has('on'));
+    assert.ok(!classes(h.host, 'vc-say').length, 'no say panel on the tts tab');
+    h.tClone.click();
+    await settle(); await settle();
+    // the click RE-RENDERS the strip — assert on the fresh buttons
+    const fresh = classes(h.host, 'vc-tab');
+    const onClone = fresh.find(b => String(b.textContent).includes('CLONED'));
+    assert.ok(onClone._classes.has('on'), 'clone opens on its click');
     assert.ok(classes(h.host, 'vc-add').length, 'existing ADD box untouched');
-    assert.ok(!classes(h.host, 'vc-say').length, 'no say panel on clone tab');
 });
 
 test('say tab lists groups by language name, quality inside', async () => {

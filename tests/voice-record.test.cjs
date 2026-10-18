@@ -330,6 +330,13 @@ async function mount(opt) {
     await settle();
     const host = byId['vc-body'];
     assert.ok(host && host.children.length, 'the voices panel rendered');
+    // TTS-2 moved the default tab to TEXT TO SPEECH — the recorder lives in
+    // the voice form, so land on CLONED VOICES the way a user now would
+    const cloneTab = classes(host, 'vc-tab').find(b =>
+        String(b.textContent).includes('CLONED'));
+    assert.ok(cloneTab, 'the CLONED VOICES tab exists to be clicked');
+    cloneTab.click();
+    await settle(); await settle();
     const form = classes(host, 'vc-add')[0];
     const clipF = classes(form, 'vc-field').find(f =>
         (f.children || []).some(c => c.tagName === 'input' && c.type === 'file'));
