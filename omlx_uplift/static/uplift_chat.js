@@ -2967,7 +2967,11 @@ var RT_PATH = '/v1/audio/transcriptions/realtime';
 var RT_RATE = 16000;                         // the wire rate
 var RT_FRAME_MS = 100;                       // ~100 ms binary frames
 var RT_FRAME_SAMPLES = RT_RATE * RT_FRAME_MS / 1000;   // 1600 smp = 3200 B
-var RT_SILENCE_RMS = 0.01;   // endpoint gate: below this = silence
+var RT_SILENCE_RMS = 0.01;   // endpoint gate DEFAULT until the room is measured
+var RT_CAL_MS = 500;         // VOICE-13a(c): first ~500 ms estimate the noise floor
+var RT_CAL_FACTOR = 3;       //   gate = 3x floor
+var RT_GATE_MIN = 0.004;     //   clamped: a dead-quiet room still gets a real gate
+var RT_GATE_MAX = 0.03;      //   a loud room must not deafen the endpointer
 var RT_SILENCE_MS = 1200;    // endpoint: >=1 delta AND this much silence
 var RT_STUCK_MS = 6000;      // escape: voiced audio, ZERO deltas -> restart
 var RT_MAX_RESTARTS = 3;     // ...and after that the engine is not coming back
@@ -3049,6 +3053,10 @@ function rtNew() {
              model: sttModel(), lang: sttLang(), rate: 48000, tap: null,
              text: '', got: false, frames: 0, voiced: 0, silent: 0,
              restarts: 0, seg: null, segMs: 0, segSilent: 0,
+             // VOICE-13a(c): noise-floor calibration, ONCE per listener run
+             // (the room does not change between utterances; recalibrating
+             // after a mid-speech reopen would take shouting for the floor)
+             silenceRms: RT_SILENCE_RMS, floorMs: 0, floor: 0, floorN: 0,
              preroll: [], prerollMs: 0, provEl: null, cancel: null,
              hsTimer: 0, doneTimer: 0, reopenTimer: 0, resumeTimer: 0 };
 }
@@ -3071,6 +3079,7 @@ function sttListenerStart() {
             var s = _rt; if (!s) return;
             s.rate = rate || 48000;
             s.tap = rtTap(s.rate, RT_RATE, RT_FRAME_SAMPLES);
+            if (rtDiscouraged(s.model)) { rtFallback(s, ''); return; }
             rtOpen(s);
         },
         onFail: function () { sttListenerStop(false); },
@@ -3107,6 +3116,18 @@ function rtUrl() {
     if (!loc || !loc.host) return '';
     var secure = String(loc.protocol || 'http:').indexOf('s') > 0;
     return (secure ? 'wss://' : 'ws://') + loc.host + RT_PATH;
+}
+// VOICE-13a(a0): UP-9 MEASURED that whisper large-v3-class checkpoints ACCEPT
+// the realtime handshake and then commit ~one token per ~20 s window
+// (AlignAtt cannot keep the 1 s cadence on 1280-dim decoders) — worse than
+// segmented, and the stuck-escape ladder may never fire because a late delta
+// keeps resetting it. The engine still reports these models SUPPORTED, so the
+// client declines the known-broken transport up front: no handshake, no
+// ladder, straight to segments. tiny-class and unknown models keep realtime.
+// REMOVE THIS WHEN UP-9 IS FIXED UPSTREAM — do not let it rot.
+function rtDiscouraged(id) {
+    var m = String(id || '').toLowerCase();
+    return /whisper[-_ ]?large|large[-_ ]?v[23]/.test(m);
 }
 function rtSendText(s, obj) {
     if (!s || !s.ws) return;
@@ -3202,6 +3223,20 @@ function rtFrame(floats) {
         return;
     }
     if (speakBusy()) { rtPause(s); return; }
+    if (s.floorMs < RT_CAL_MS) {
+        // VOICE-13a(c): estimate the room floor from the first ~500 ms of
+        // live frames and set the session's endpoint gate to 3x it (clamped
+        // 0.004..0.03). The old fixed 0.01 never sees silence in a room that
+        // hisses above it — the whole session then lands as one blob
+        // (observed). Runs for BOTH transports; frames still flow while the
+        // estimate collects.
+        s.floor += rtRms(floats); s.floorN++;
+        s.floorMs += floats.length / (s.rate || 48000) * 1000;
+        if (s.floorMs >= RT_CAL_MS) {
+            s.silenceRms = Math.min(RT_GATE_MAX,
+                Math.max(RT_GATE_MIN, s.floor / s.floorN * RT_CAL_FACTOR));
+        }
+    }
     if (s.transport === 'segmented') { rtSegment(s, floats); return; }
     if (!s.tap) return;
     var fr = s.tap.push(floats);
@@ -3209,7 +3244,7 @@ function rtFrame(floats) {
 }
 function rtFeed(s, f16) {
     if (s.phase !== 'up') return;   // stop sent: the utterance is already closed
-    var silent = rtRms(f16) < RT_SILENCE_RMS;
+    var silent = rtRms(f16) < s.silenceRms;   // VOICE-13a(c): calibrated gate
     s.frames++;
     s.silent = silent ? s.silent + 1 : 0;
     if (!silent) s.voiced++;
@@ -3357,7 +3392,7 @@ function rtSegment(s, floats) {
     if (_sttXfer) return;    // one transcribe in flight (VOICE-12 doctrine):
                              // drop, do not grow an unbounded queue
     var ms = floats.length / rate * 1000;
-    var voiced = rtRms(floats) >= RT_SILENCE_RMS;
+    var voiced = rtRms(floats) >= s.silenceRms;   // calibrated gate (both paths)
     if (voiced) {
         s.segSilent = 0;
         if (!s.seg) {
@@ -3959,7 +3994,7 @@ return { mount: mount, isMounted: function () { return _mounted; },
                 // there is no microphone in a vm sandbox, so the seam IS the
                 // ScriptProcessor callback.
                 listen: { start: sttListenerStart, stop: sttListenerStop,
-                          url: rtUrl, feed: rtFrame,
+                          url: rtUrl, feed: rtFrame, discouraged: rtDiscouraged,
                           state: function () { return _rt ? {
                               state: _rt.state, transport: _rt.transport,
                               phase: _rt.phase, paused: _rt.paused,
@@ -3967,6 +4002,7 @@ return { mount: mount, isMounted: function () { return _mounted; },
                               voiced: _rt.voiced, silent: _rt.silent,
                               restarts: _rt.restarts,
                               segMs: _rt.segMs, wsOpen: _rt.wsOpen,
+                              silenceRms: _rt.silenceRms,
                               prov: _rt.provEl ? _rt.provEl.textContent : '' }
                                                    : null; } },
                 // pure conversion helpers, unit-tested without any audio API

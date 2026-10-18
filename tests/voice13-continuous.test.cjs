@@ -21,6 +21,10 @@
    - the stuck-engine escape (6 s voiced, zero deltas) restarts, then gives up
      into the segmented fallback instead of looping
    - the 120 s utterance cap forces stop + deliver
+   - VOICE-13a(a0): whisper large-class ids NEVER open the realtime socket —
+     straight to segmented, one notice
+   - VOICE-13a(c): the first ~500 ms calibrate the endpoint gate
+     (3x floor, clamped 0.004..0.03); a room above the old fixed 0.01 endpoints
    - PTT (VOICE-12) stop semantics untouched — same suite, same button
    Stub traps honoured: no cross-realm instanceof on binary parts (bytes are
    read with Array.from), and the composer is asserted through the vendor
@@ -32,7 +36,11 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { STATIC_DIR } = require('./static-src.cjs');
 
-const STT_ID = 'whisper-large-v3-turbo-oQ8';
+// VOICE-13a(a0): realtime tests must run on a tiny-class fixture — the
+// client now (correctly!) declines the socket for large-v3-class models,
+// exactly the id the pre-13a suite used. LARGE_ID stays for the a0 test.
+const STT_ID = 'mlx-community/whisper-tiny-mlx';
+const LARGE_ID = 'mlx-community/whisper-large-v3-turbo-4bit';
 const CONT = { 'omlx-uplift-stt-model': STT_ID, 'omlx-uplift-stt-mode': 'continuous' };
 
 const CAT = {
@@ -234,7 +242,7 @@ function makeHarness(opts) {
                     { id: 'SmolLM2-360M-Instruct-oQ4',
                       engine_type: 'batched', model_type: 'llm' },
                     { id: STT_ID, engine_type: 'audio_stt', model_type: 'audio_stt',
-                      name: 'Whisper Large v3 Turbo' }] };
+                      name: 'Whisper Tiny' }] };
                 if (u.endsWith('/chat/key')) return { api_key: 'KEY' };
                 if (u.endsWith('/chat/history'))
                     return [{ id: 'c1', title: 'One', model: 'SmolLM2',
@@ -756,4 +764,69 @@ test('VOICE-12 REGRESSION: PTT stop semantics unchanged (continuous OFF)', async
     h.stream.push(sseDone('ptt text')); h.stream.end();
     await h.flush(10);
     assert.equal(h.textInput.textContent, 'ptt text', 'PTT delivers as before');
+});
+
+// ---- (9) VOICE-13a: known-broken transport declined + calibrated gate -------
+test('VOICE-13a(a0): the transport heuristic names the UP-9 class, nothing else', () => {
+    const d = makeHarness({}).M().stt.listen.discouraged;
+    assert.equal(d(LARGE_ID), true, 'the measured v3-turbo row');
+    assert.equal(d('mlx-community/whisper-large-v3-mlx-4bit'), true, 'the measured v3 row');
+    assert.equal(d('whisper-large-v2-8bit'), true, 'same 1280-dim decoder class');
+    assert.equal(d('mlx-community/whisper-tiny-mlx'), false, 'tiny streams fine (UP-9)');
+    assert.equal(d('Qwen3-ASR-0.6B-MLX-6bit'), false, 'unknown models keep realtime');
+    assert.equal(d(''), false); assert.equal(d(undefined), false);
+});
+
+test('VOICE-13a(a0): large-class model goes straight to SEGMENTED — no socket, no ladder', async () => {
+    const h = await makeHarness({ localStorage: Object.assign({}, CONT,
+        { 'omlx-uplift-stt-model': LARGE_ID }) }).booted();
+    h.M().stt.listen.start();
+    await h.flush();
+    assert.equal(h.sockets.length, 0,
+        'UP-9: the handshake succeeds and then commits nothing — never ask');
+    assert.equal(h.stt().transport, 'segmented');
+    assert.equal(h.gumCalls, 1, 'the mic still armed: only the transport changed');
+    assert.equal(h.toasts.length, 1, 'one honest notice');
+    assert.ok(h.toasts[0].includes('SEGMENTED'), h.toasts[0]);
+    h.advance(60000);
+    assert.equal(h.sockets.length, 0, 'no realtime retry for a discouraged model');
+    h.say(1, 0.2); h.say(1, 0);
+    assert.equal(h.forms.length, 1, 'the utterance is captured as a segment');
+    assert.equal(formFields(h.forms[0]).model.value, LARGE_ID, 'on the chosen model');
+});
+
+test('VOICE-13a(c): the room floor calibrates the endpoint gate (3x, clamped)', async () => {
+    const mk = async () => {
+        const h = await makeHarness({ localStorage: Object.assign({}, CONT) }).booted();
+        const ws = await h.listen();
+        ws.open(); ws.ready();
+        return h;
+    };
+    let h = await mk();
+    assert.equal(h.probe().silenceRms, 0.01, 'fixed default until the room is measured');
+    h.say(1, 0.005);
+    assert.ok(Math.abs(h.probe().silenceRms - 0.015) < 1e-9, '3x the floor');
+    h = await mk();
+    h.say(1, 0.02);                       // 3x = 0.06 -> clamp
+    assert.ok(Math.abs(h.probe().silenceRms - 0.03) < 1e-9, 'gate clamped to 0.03');
+    h = await mk();
+    h.say(1, 0);                          // dead-quiet room still gets a real gate
+    assert.ok(Math.abs(h.probe().silenceRms - 0.004) < 1e-9, 'gate clamped to 0.004');
+    h = await mk();
+    h.say(0.2, 0.005);                    // sub-window blocks accumulate
+    assert.equal(h.probe().silenceRms, 0.01, 'gate unchanged before 500 ms');
+    h.say(0.4, 0.005);
+    assert.ok(Math.abs(h.probe().silenceRms - 0.015) < 1e-9, 'calibrated once past 500 ms');
+});
+
+test('VOICE-13a(c): a room hissing above the old fixed 0.01 gate still endpoints', async () => {
+    const h = await makeHarness({ localStorage: Object.assign({}, CONT) }).booted();
+    const ws = await h.listen();
+    ws.open(); ws.ready();
+    h.say(1, 0.015);                      // floor 0.015 -> gate 0.045 -> clamped 0.03
+    h.say(1, 0.2);                        // real speech: voiced against 0.03
+    ws.delta('hello');
+    h.say(2, 0.015);                      // back to ROOM level: silence now —
+    assert.equal(ws.count({ type: 'stop' }), 1,  // at the fixed 0.01 gate this was
+        'the blob killer: room hiss no longer reads as endless speech');
 });
