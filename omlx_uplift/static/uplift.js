@@ -2099,9 +2099,10 @@ function ifGroup(model) {
     // for non-DFlash engines. Rendered by ifDflash() below renderLive.
     const df = document.createElement('div');
     df.className = 'if-dflash'; df.style.display = 'none';
-    // VOICE-15: audio work sub-row (transcribing / realtime / synthesizing).
-    const au = document.createElement('div');
-    au.className = 'if-audio'; au.style.display = 'none';
+    // VOICE-15: engine activity sub-row (transcribing / realtime /
+    // synthesizing / embedding / …).
+    const act = document.createElement('div');
+    act.className = 'if-act'; act.style.display = 'none';
     // QUEUED requests are ordinary slot rows now (see renderLive): one line
     // per request with #position · in · wait, exactly like the classic
     // active-models card. The old "QUEUED ×N (+)" summary collapsed them
@@ -2111,11 +2112,11 @@ function ifGroup(model) {
     const idle = document.createElement('div');
     idle.className = 'if-idle'; idle.style.display = 'none';
     idle.textContent = C.t('uplift.empty.idle');
-    el.append(h, wrap, idle, df, au);
+    el.append(h, wrap, idle, df, act);
     const list = $('live-list');
     const ph = list.querySelector('.empty'); if (ph) ph.remove();
     list.append(el);
-    g = { model, el, wrap, mm, df, au, idle, un };
+    g = { model, el, wrap, mm, df, act, idle, un };
     S.ifModels.push(g);
     return g;
 }
@@ -2123,32 +2124,59 @@ function ifGroup(model) {
 /* Classic dashboard.js formatDFlashSessionStats verbatim (issue #2398),
    strings resolved through the merged catalog (classic keys are served by
    /uplift/api/locale; tf() carries the English fallback for viewer mode). */
-/* VOICE-15: audio work sub-row — one line while the model has live
-   STT/TTS/STS calls or an open realtime session (server-merged rows ride
-   m.audio; text models never get the field). Elapsed reads from the OLDEST
-   live call; ×N when calls overlap. Realtime has no per-call elapsed — the
-   session is the work, not one request. */
-const IF_AUDIO_LABELS = {
-    stt: ['uplift.audio.transcribing', 'transcribing'],
-    realtime: ['uplift.audio.realtime', 'realtime transcription'],
-    tts: ['uplift.audio.synthesizing', 'synthesizing'],
-    sts: ['uplift.audio.processing', 'audio processing'],
+/* VOICE-15: engine activity sub-row. Vanilla tracks every non-scheduler
+   operation (STT files/streams/realtime sessions, TTS, audio processing,
+   embedding, reranking, deciding) as activities with elapsed time; the
+   server feed keeps them live at 2 Hz. Same detail labels group into one
+   line with ×N and the OLDEST elapsed. Unknown details (an engine added
+   upstream since) print the server string verbatim — honest, never blank.
+   Realtime sessions get the steady accent (the session is the work). */
+const IF_ACTIVITY_LABELS = {
+    'Transcribing': 'uplift.audio.transcribing',
+    'Streaming transcription': 'uplift.audio.transcribing',
+    'Realtime transcription': 'uplift.audio.realtime',
+    'Synthesizing speech': 'uplift.audio.synthesizing',
+    'Streaming speech': 'uplift.audio.synthesizing',
+    'Processing audio': 'uplift.audio.processing',
+    'Embedding': 'uplift.audio.embedding',
+    'Reranking': 'uplift.audio.reranking',
+    'Deciding': 'uplift.audio.deciding',
 };
-function ifAudio(g, m) {
-    if (!g.au) return;
-    const a = m.audio || [];
-    if (!a.length) { g.au.style.display = 'none'; g.au.textContent = ''; return; }
+const IF_ACTIVITY_FALLBACK = {
+    'uplift.audio.transcribing': 'Transcribing',
+    'uplift.audio.realtime': 'Realtime transcription',
+    'uplift.audio.synthesizing': 'Synthesizing',
+    'uplift.audio.processing': 'Processing audio',
+    'uplift.audio.embedding': 'Embedding',
+    'uplift.audio.reranking': 'Reranking',
+    'uplift.audio.deciding': 'Deciding',
+};
+function ifActivity(g, m) {
+    if (!g.act) return;
+    const acts = m.activities || [];
+    if (!acts.length) { g.act.style.display = 'none'; g.act.textContent = ''; return; }
+    const byDetail = new Map();
+    for (const a of acts) {
+        const d = a.detail || a.kind;
+        const cur = byDetail.get(d) || { n: 0, elapsed: null };
+        cur.n += 1;
+        if (a.elapsed != null && (cur.elapsed == null || a.elapsed > cur.elapsed))
+            cur.elapsed = a.elapsed;
+        byDetail.set(d, cur);
+    }
     const parts = [];
-    for (const x of a) {
-        const lb = IF_AUDIO_LABELS[x.kind] || ['uplift.audio.busy', 'audio work'];
-        let s = C.tf(lb[0], lb[1]);
-        if (x.count > 1) s += ' \u00d7' + x.count;
-        if (x.elapsed != null) s += ' \u00b7 ' + C.fmtDuration(Math.round(x.elapsed));
+    for (const [d, cur] of byDetail) {
+        const key = IF_ACTIVITY_LABELS[d];
+        let s = key ? C.tf(key, IF_ACTIVITY_FALLBACK[key] || d) : d;
+        if (cur.n > 1) s += ' \u00d7' + cur.n;
+        if (cur.elapsed != null) s += ' \u00b7 ' + C.fmtDuration(Math.round(cur.elapsed));
         parts.push(s);
     }
-    g.au.textContent = parts.join(' \u00b7 ');
-    g.au.className = 'if-audio' + (a.some(x => x.kind === 'realtime') ? ' live' : '');
-    g.au.style.display = '';
+    g.act.textContent = parts.join(' \u00b7 ');
+    g.act.className = 'if-act'
+        + (acts.some(a => (a.detail || a.kind).toLowerCase().includes('realtime'))
+            ? ' live' : '');
+    g.act.style.display = '';
 }
 
 function ifDflash(g, m) {
@@ -2344,7 +2372,7 @@ function renderLive(s) {
         // U16-rework: DFlash speculation sub-row (classic mirror; the
         // engine only offers this per model, not per request).
         ifDflash(g, m);
-        ifAudio(g, m);
+        ifActivity(g, m);
         waitingBy.set(m.id, m.waiting || []);
         for (const p of m.prefilling) {
             seen.add(p.rid);
@@ -2501,10 +2529,11 @@ function renderLive(s) {
         // Label re-resolved each tick: the locale catalog can load after
         // the group was created (same reason the card placeholder relabels).
         g.idle.textContent = C.t('uplift.empty.idle');
-        // VOICE-15: an audio call is work — the Idle line must not sit next
-        // to a live transcribing row (no request slots exist for audio).
+        // VOICE-15: tracked engine work (audio, embedding, …) is work —
+        // the Idle line must not sit next to a live activity row (those
+        // engines own no request slots).
         g.idle.style.display =
-            (g.wrap.children.length || (g.au && g.au.style.display !== 'none'))
+            (g.wrap.children.length || (g.act && g.act.style.display !== 'none'))
                 ? 'none' : '';
         // UNLOAD button relabels too (C.t literal = locale-sync gate coverage).
         g.un.textContent = C.t('uplift.inflight.unload');

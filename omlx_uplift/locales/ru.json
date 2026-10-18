@@ -1076,5 +1076,7 @@
  "uplift.audio.realtime": "Транскрипция в реальном времени",
  "uplift.audio.synthesizing": "Синтез речи",
  "uplift.audio.processing": "Обработка аудио",
- "uplift.audio.busy": "Аудиозадача"
+ "uplift.audio.embedding": "Эмбеддинг",
+ "uplift.audio.reranking": "Переранжирование",
+ "uplift.audio.deciding": "Принятие решения"
 }

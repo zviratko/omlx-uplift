@@ -204,15 +204,78 @@ def _build_stats_raw() -> Optional[dict]:
     return payload
 
 
-def _merge_audio(payload):
-    """VOICE-15 seam: attach audio-engine activity to the stats payload.
+def _refresh_activities(stats):
+    """VOICE-15: keep engine activities live on the FAST tier.
 
-    Soft import INSIDE (same rule as the other seams: this module must
-    import cleanly where omlx is absent). The merge itself never raises —
-    audio_activity.merge_stats guards and returns the payload unchanged."""
-    from . import audio_activity
+    Vanilla already tracks every non-scheduler operation — transcribing,
+    realtime sessions, speech synthesis, audio processing, embedding,
+    reranking, deciding — through ``BaseEngine._begin_activity`` and
+    exposes it via ``get_activity_snapshot()``. The slow half of this feed
+    carries it, but the slow rebuild runs at most once per SLOW_EVERY_S
+    and audio work completes in seconds — a transcription could go from
+    Idle to Idle without the row ever lighting up. This refreshes the
+    activity lists straight off the pool every fast tick.
 
-    return audio_activity.merge_stats(payload)
+    Cheap by construction: ``pool._entries`` walk + per-engine lock + a
+    couple of small dicts — NOT ``engine_pool.get_status()`` (that is the
+    multi-second cluster/path walk the duty split exists to avoid).
+    Rows that changed are replaced with fresh dicts (the feed caches the
+    slow composite and reuses it between full rebuilds — never mutate).
+    ``active_requests`` is delta-adjusted so scheduler counts on batched
+    rows stay intact. Any failure returns the payload unchanged."""
+    try:
+        from omlx.admin import routes as admin_routes
+
+        get_pool = getattr(admin_routes, "_get_engine_pool", None)
+        pool = get_pool() if callable(get_pool) else None
+        if pool is None or not isinstance(stats, dict):
+            return stats
+        am = stats.get("active_models")
+        if not isinstance(am, dict) or not isinstance(am.get("models"), list):
+            return stats
+        entries = getattr(pool, "_entries", {})
+
+        def shape(acts):
+            return [(a.get("request_id"),
+                     round(float(a.get("elapsed_seconds") or 0), 1))
+                    for a in acts]
+
+        models = am["models"]
+        out = None
+        total_delta = 0
+        for idx, row in enumerate(models):
+            entry = entries.get(str(row.get("id") or ""))
+            engine = getattr(entry, "engine", None) if entry else None
+            snap = getattr(engine, "get_activity_snapshot", None)
+            if not callable(snap):
+                continue
+            try:
+                fresh = (snap() or {}).get("activities") or []
+            except Exception:
+                continue
+            old = row.get("activities") or []
+            if shape(fresh) == shape(old):
+                continue
+            total_delta += len(fresh) - len(old)
+            m2 = dict(row)
+            m2["activities"] = [dict(a) for a in fresh]
+            m2["active_requests"] = max(
+                0, int(row.get("active_requests") or 0) + len(fresh) - len(old))
+            if out is None:
+                out = list(models)
+            out[idx] = m2
+        if out is None:
+            return stats
+        am2 = dict(am)
+        am2["models"] = out
+        am2["total_active_requests"] = max(
+            0, int(am.get("total_active_requests") or 0) + total_delta)
+        s2 = dict(stats)
+        s2["active_models"] = am2
+        return s2
+    except Exception:
+        log.debug("activity refresh failed", exc_info=True)
+        return stats
 
 
 def _build_alltime_raw() -> Optional[int]:
@@ -520,12 +583,11 @@ class StatsFeed:
             if fast is not None:
                 stats = {**(self._slow or {}), **fast}
         if stats is not None:
-            # VOICE-15: audio-engine activity rides BOTH tiers — the fast
-            # rebuild reuses the cached slow composite, and a 3-second
-            # transcription must not wait up to SLOW_EVERY_S for the next
-            # engine walk. merge_stats replaces rows, never mutates the
-            # cache. Failures return the payload untouched.
-            stats = _merge_audio(stats)
+            # VOICE-15: audio/embedding-class work moves at request speed —
+            # vanilla's activity lists ride BOTH tiers so a 3-second
+            # transcription is visible WHILE it runs, not on whichever
+            # 15-second slow rebuild happens to catch it.
+            stats = _refresh_activities(stats)
         alltime = self._attempt(alltime_b, "alltime")
 
         with self._lock:

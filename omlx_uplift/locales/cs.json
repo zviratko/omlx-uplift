@@ -1076,5 +1076,7 @@
  "uplift.audio.realtime": "Přepis realtime",
  "uplift.audio.synthesizing": "Syntéza řeči",
  "uplift.audio.processing": "Zpracování zvuku",
- "uplift.audio.busy": "Zvuková úloha"
+ "uplift.audio.embedding": "Vlokování",
+ "uplift.audio.reranking": "Řazení výsledků",
+ "uplift.audio.deciding": "Rozhodování"
 }

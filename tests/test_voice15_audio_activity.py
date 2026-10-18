@@ -1,185 +1,40 @@
-"""VOICE-15 acceptance: audio-engine activity on the dashboard.
+"""VOICE-15 acceptance: engine activity visible on the dashboard.
 
-The bug: the status card's busy signal exists only for batched LLM/VLM
-schedulers — STT/TTS/STS engines take no pool lease and own no scheduler,
-so transcribing or synthesizing looked Idle (the classic web page's
-"realtime transcription" text is a client-side label, never server truth).
+The gap was NOT missing data — vanilla tracks every non-scheduler
+operation (transcribing, streaming, realtime sessions, speech synthesis,
+audio processing, embedding, reranking, deciding) through
+BaseEngine._begin_activity, and admin's active-models rows carry it as
+`activities` with active_requests bumps. Two things made it invisible:
 
-The fix (audio_activity.py): in-memory wraps of the engines' work methods
-(same doctrine as instrument.py), a busy registry keyed by ENGINE IDENTITY,
-a peek of vanilla's STTEngine._realtime_active for sessions, and a
-merge_stats pass wired into BOTH stats tiers.
+1. uplift's stats feed rebuilds the active_models composite at most once
+   per SLOW_EVERY_S (15 s) — a seconds-long transcription could start and
+   finish between rebuilds, or only flash on whichever rebuild caught it;
+2. the client mapped only prefilling/generating/waiting rows, so a model
+   with activities but no scheduler rows rendered the literal "Idle" line.
+
+Fix: stats_feed._refresh_activities() re-reads each engine's activity
+snapshot from the pool on EVERY tier (the fast 2 Hz path included), and
+uplift.js paints an .if-act sub-row (i18n labels for the known nine
+details, raw server string otherwise), suppressing the Idle line.
 """
-import asyncio
-import sys
 import types
 
 import pytest
 
-from omlx_uplift import audio_activity
-from omlx_uplift.audio_activity import AudioRegistry
+from omlx_uplift import stats_feed
 
 
-# --------------------------------------------------------------------------
-# stub the audio engines (sys.modules injection: the test also runs on
-# machines without omlx, and never wraps the REAL classes here)
-# --------------------------------------------------------------------------
+class _Engine:
+    def __init__(self, acts):
+        self._acts = acts
 
-def _mk_stt(reg_events):
-    class STTEngine:
-        def __init__(self, model_name):
-            self.model_name = model_name
-            self._realtime_active = False
-
-        async def transcribe(self, path):
-            reg_events.append(("stt-in", self.registry.count()))
-            await asyncio.sleep(0)
-            return {"text": "ok"}
-
-        async def transcribe_stream(self, path):
-            reg_events.append(("stream-in", self.registry.count()))
-            for i in range(3):
-                await asyncio.sleep(0)
-                yield f"chunk{i}"
-
-        async def create_realtime_session(self):
-            self._realtime_active = True
-
-        registry = None      # bound by the fixture
-
-    return STTEngine
+    def get_activity_snapshot(self):
+        return {"active_requests": len(self._acts), "activities": self._acts}
 
 
-def _mk_tts(reg_events):
-    class TTSEngine:
-        def __init__(self, model_name):
-            self.model_name = model_name
+class _PlainEngine:                  # no snapshot method at all (LLM-ish)
+    pass
 
-        async def synthesize(self, text):
-            reg_events.append(("tts-in", self.registry.count()))
-            await asyncio.sleep(0)
-            return b"RIFF"
-
-        registry = None
-
-    return TTSEngine
-
-
-def _mk_sts(reg_events):
-    class STSEngine:
-        def __init__(self, model_name):
-            self.model_name = model_name
-
-        async def process(self, path):
-            reg_events.append(("sts-in", self.registry.count()))
-            return b"pcm"
-
-        registry = None
-
-    return STSEngine
-
-
-@pytest.fixture()
-def stubs(monkeypatch):
-    events = []
-    reg = AudioRegistry()
-    monkeypatch.setattr(audio_activity, "_registry", reg)
-    audio_activity.reset_for_tests()
-
-    stt, tts, sts = _mk_stt(events), _mk_tts(events), _mk_sts(events)
-    stt.registry, tts.registry = reg, reg
-    sts.registry = reg
-    pkgs = {}
-    for name in ("omlx", "omlx.engine", "omlx.engine.stt", "omlx.engine.tts",
-                 "omlx.engine.sts"):
-        pkgs[name] = types.ModuleType(name)
-    pkgs["omlx.engine.stt"].STTEngine = stt
-    pkgs["omlx.engine.tts"].TTSEngine = tts
-    pkgs["omlx.engine.sts"].STSEngine = sts
-    for name, mod in pkgs.items():
-        monkeypatch.setitem(sys.modules, name, mod)
-    audio_activity.install()
-    yield types.SimpleNamespace(reg=reg, events=events, STTEngine=stt,
-                                TTSEngine=tts, STSEngine=sts)
-    audio_activity.reset_for_tests()
-
-
-# --------------------------------------------------------------------------
-# wraps: the registry lights for exactly the call's lifetime
-# --------------------------------------------------------------------------
-
-def test_transcribe_counts_busy_for_the_call_and_clears(stubs):
-    eng = stubs.STTEngine("whisper-x")
-    assert stubs.reg.count() == 0
-    asyncio.run(eng.transcribe("a.wav"))
-    # the stub samples the registry WHILE executing (stt-in event):
-    assert stubs.events == [("stt-in", 1)]      # counted mid-call
-    assert stubs.reg.count() == 0               # cleared on return
-
-
-def test_exception_still_clears(stubs):
-    """The finally in the wrap must end the entry even when the engine
-    raises — a leaked row would pin Idle=false forever."""
-    eng = stubs.STTEngine("whisper-x")
-
-    async def boom(self, path):
-        raise RuntimeError("decode died")
-
-    wrapped = audio_activity._wrap_async(boom, "stt")
-
-    async def run():
-        with pytest.raises(RuntimeError):
-            await wrapped(eng, "a.wav")
-
-    asyncio.run(run())
-    assert stubs.reg.count() == 0
-
-
-def test_stream_abort_clears(stubs):
-    eng = stubs.STTEngine("whisper-x")
-
-    async def run():
-        agen = eng.transcribe_stream("a.wav")
-        first = await agen.__anext__()
-        mid = stubs.reg.count()
-        await agen.aclose()            # client abort = GeneratorExit
-        return first, mid, stubs.reg.count()
-
-    first, mid, after = asyncio.run(run())
-    assert first == "chunk0"
-    assert mid == 1 and after == 0     # abort must not leak a phantom row
-
-
-def test_tts_and_sts_wrap(stubs):
-    t = stubs.TTSEngine("kokoro")
-    s = stubs.STSEngine("deepf")
-
-    async def run():
-        await t.synthesize("hi")
-        seen_t = stubs.events[-1]
-        await s.process("a.wav")
-        return seen_t, stubs.events[-1]
-
-    tt, st = asyncio.run(run())
-    assert tt == ("tts-in", 1)         # counted during synthesize
-    assert st == ("sts-in", 1)
-
-
-def test_install_is_idempotent(stubs):
-    audio_activity.install()
-    eng = stubs.STTEngine("whisper-x")
-
-    async def run():
-        await eng.transcribe("a.wav")
-        return len(stubs.events)
-
-    n = asyncio.run(run())
-    # one wrapped call = ONE event; a double-wrap would report count 2
-    assert n == 1 and stubs.events == [("stt-in", 1)]
-
-# --------------------------------------------------------------------------
-# merge_stats: attribution, bumps, copy discipline
-# --------------------------------------------------------------------------
 
 class _Entry:
     def __init__(self, engine):
@@ -191,139 +46,172 @@ class _Pool:
         self._entries = entries
 
 
-def _payload(*rows):
+def _payload(rows):
     return {"active_models": {
         "models": [dict(r) for r in rows],
         "total_active_requests": sum(r.get("active_requests", 0) for r in rows),
     }}
 
 
-def _row(mid, active=0):
-    return {"id": mid, "active_requests": active, "loaded": True}
+def _act(rid, detail, elapsed):
+    return {"request_id": rid, "kind": detail.split()[0].lower(),
+            "detail": detail, "elapsed_seconds": elapsed}
 
 
-def _merge_with(monkeypatch, reg, pool):
-    monkeypatch.setattr(audio_activity, "_registry", reg)
-    monkeypatch.setattr(audio_activity, "_pool", lambda: pool)
-    return lambda p: audio_activity.merge_stats(p)
+@pytest.fixture()
+def pool(monkeypatch):
+    routes = types.ModuleType("omlx.admin.routes")
+    omlx = types.ModuleType("omlx")
+    admin = types.ModuleType("omlx.admin")
+    routes._get_engine_pool = lambda: _pool_holder["pool"]
+    omlx.admin = admin
+    admin.routes = routes
+    monkeypatch.setitem(sys_modules, "omlx", omlx)
+    monkeypatch.setitem(sys_modules, "omlx.admin", admin)
+    monkeypatch.setitem(sys_modules, "omlx.admin.routes", routes)
+    return _pool_holder
 
 
-def test_busy_engine_lands_on_its_own_row(monkeypatch, stubs):
-    whisper = stubs.STTEngine("whisper-x")
-    other = _row("qwen-llm")
-    pool = _Pool({"whisper-large-q4": _Entry(whisper), "qwen-llm": _Entry(None)})
-    reg = AudioRegistry()
-    merge = _merge_with(monkeypatch, reg, pool)
-
-    tok = reg.begin("stt", whisper)
-    out = merge(_payload(_row("whisper-large-q4"), other))
-    reg.end(tok)
-
-    row = out["active_models"]["models"][0]
-    assert row["audio"] == [{"kind": "stt", "count": 1,
-                             "elapsed": pytest.approx(0.0, abs=1.0)}]
-    assert row["active_requests"] == 1          # header 'Active' state rides it
-    assert out["active_models"]["total_active_requests"] == 1
-    assert out["active_models"]["models"][1].get("audio") is None
-    assert "audio" not in out["active_models"]["models"][1]
+_pool_holder = {"pool": None}
+sys_modules = __import__("sys").modules
 
 
-def test_input_payload_never_mutated(monkeypatch, stubs):
-    whisper = stubs.STTEngine("whisper-x")
-    pool = _Pool({"whisper-x": _Entry(whisper)})
-    reg = AudioRegistry()
-    payload = _payload(_row("whisper-x"))
-    row0 = payload["active_models"]["models"][0]
-    tok = reg.begin("stt", whisper)
-    out = _merge_with(monkeypatch, reg, pool)(payload)
-    reg.end(tok)
-    assert "audio" not in row0                  # original row untouched
-    assert payload["active_models"]["models"][0] is row0
-    assert out["active_models"] is not payload["active_models"]
-
-
-def test_realtime_flag_merges_without_wrap(monkeypatch, stubs):
-    eng = stubs.STTEngine("whisper-x")
-    eng._realtime_active = True
-    pool = _Pool({"whisper-x": _Entry(eng)})
-    reg = AudioRegistry()                       # empty: sessions are NOT wrapped
-    out = _merge_with(monkeypatch, reg, pool)(_payload(_row("whisper-x")))
-    row = out["active_models"]["models"][0]
-    assert row["audio"] == [{"kind": "realtime", "count": 1, "elapsed": None}]
-
-
-def test_single_row_fallback_for_unmatched_engine(monkeypatch, stubs):
-    eng = stubs.STTEngine("whisper-x")
-    pool = _Pool({})                            # engine not (yet) in the pool map
-    reg = AudioRegistry()
-    tok = reg.begin("stt", eng)
-    out = _merge_with(monkeypatch, reg, pool)(_payload(_row("whisper-x")))
-    reg.end(tok)
-    assert out["active_models"]["models"][0]["audio"][0]["kind"] == "stt"
-
-
-def test_unattributed_activity_stays_quiet(monkeypatch, stubs):
-    eng = stubs.STTEngine("ghost-model")
-    pool = _Pool({})
-    reg = AudioRegistry()
-    tok = reg.begin("stt", eng)
-    out = _merge_with(monkeypatch, reg, pool)(
-        _payload(_row("qwen-llm"), _row("llama")))
-    reg.end(tok)
-    for r in out["active_models"]["models"]:
-        assert "audio" not in r                 # never guess across models
-
-
-def test_merge_noop_shapes(monkeypatch):
-    reg = AudioRegistry()
-    monkeypatch.setattr(audio_activity, "_registry", reg)
-    monkeypatch.setattr(audio_activity, "_pool", lambda: None)
-    assert audio_activity.merge_stats(None) is None
-    p = {"active_models": {"models": "not-a-list"}}
-    assert audio_activity.merge_stats(p) is p
-    assert "active_models" in audio_activity.merge_stats({"active_models": None})
-
-
-def test_registry_groups_and_stale(monkeypatch):
-    reg = AudioRegistry()
-
-    class E:
-        model_name = "m"
-
-    e = E()
-    t1 = reg.begin("stt", e)
-    t2 = reg.begin("stt", e)
-    snap = reg.snapshot()
-    assert len(snap) == 1 and snap[0]["count"] == 2
-    reg.end(t1)
-    reg.end(t2)
-    assert reg.snapshot() == []
-    # stale-entry guard: a leaked token must not pin a row forever
-    t3 = reg.begin("stt", e)
-    reg._busy[0].started -= reg.STALE_S + 1
-    assert reg.snapshot() == []
+def _set_pool(pool):
+    _pool_holder["pool"] = pool
 
 
 # --------------------------------------------------------------------------
-# stats_feed wiring: BOTH tiers merge (fast tick reuses the slow cache)
+
+def test_new_activity_lights_the_row_on_a_fast_tick(pool):
+    eng = _Engine([_act("a1", "Transcribing", 0.4)])
+    _set_pool(_Pool({"whisper": _Entry(eng)}))
+    try:
+        out = stats_feed._refresh_activities(_payload(
+            [{"id": "whisper", "active_requests": 0, "activities": []}]))
+        row = out["active_models"]["models"][0]
+        assert [a["detail"] for a in row["activities"]] == ["Transcribing"]
+        assert row["active_requests"] == 1
+        assert out["active_models"]["total_active_requests"] == 1
+    finally:
+        _set_pool(None)
+
+
+def test_elapsed_moves_every_tick(pool):
+    eng = _Engine([_act("a1", "Realtime transcription", 1.0)])
+    _set_pool(_Pool({"tiny": _Entry(eng)}))
+    try:
+        p1 = stats_feed._refresh_activities(_payload(
+            [{"id": "tiny", "active_requests": 0, "activities": []}]))
+        eng._acts[0]["elapsed_seconds"] = 3.0
+        p2 = stats_feed._refresh_activities(p1)
+        assert p2["active_models"]["models"][0]["activities"][0][
+            "elapsed_seconds"] == 3.0
+        assert p2["active_models"]["models"][0]["active_requests"] == 1  # no drift
+    finally:
+        _set_pool(None)
+
+
+def test_gone_activity_clears_the_row(pool):
+    eng = _Engine([])
+    _set_pool(_Pool({"whisper": _Entry(eng)}))
+    try:
+        out = stats_feed._refresh_activities(_payload(
+            [{"id": "whisper", "active_requests": 1,
+              "activities": [_act("a1", "Synthesizing speech", 2.0)]}]))
+        row = out["active_models"]["models"][0]
+        assert row["activities"] == []
+        assert row["active_requests"] == 0
+        assert out["active_models"]["total_active_requests"] == 0
+    finally:
+        _set_pool(None)
+
+
+def test_input_rows_never_mutated(pool):
+    eng = _Engine([_act("a1", "Embedding", 0.2)])
+    _set_pool(_Pool({"embed": _Entry(eng)}))
+    try:
+        payload = _payload([{"id": "embed", "active_requests": 0,
+                             "activities": []}])
+        row0 = payload["active_models"]["models"][0]
+        out = stats_feed._refresh_activities(payload)
+        assert "activities" in row0 and row0["activities"] == []  # list same, empty
+        assert row0["active_requests"] == 0
+        assert out["active_models"] is not payload["active_models"]
+        assert out["active_models"]["models"][0] is not row0
+    finally:
+        _set_pool(None)
+
+
+def test_unchanged_shape_is_a_noop_same_object(pool):
+    acts = [_act("a1", "Transcribing", 5.0)]
+    eng = _Engine(acts)
+    _set_pool(_Pool({"w": _Entry(eng)}))
+    try:
+        payload = _payload([{"id": "w", "active_requests": 1,
+                             "activities": [dict(a) for a in acts]}])
+        assert stats_feed._refresh_activities(payload) is payload
+    finally:
+        _set_pool(None)
+
+
+def test_batched_rows_keep_scheduler_counts(pool):
+    """Delta-adjust only: a text model with 3 scheduler requests and no
+    activities must come back untouched, and its activities (none) must
+    not resurrect an empty-list rebuild."""
+    eng = _PlainEngine()
+    _set_pool(_Pool({"llm": _Entry(eng)}))
+    try:
+        payload = _payload([{"id": "llm", "active_requests": 3,
+                             "activities": []}])
+        assert stats_feed._refresh_activities(payload) is payload
+    finally:
+        _set_pool(None)
+
+
+def test_engine_without_entry_or_snapshot_skipped(pool):
+    _set_pool(_Pool({}))
+    try:
+        payload = _payload([{"id": "ghost", "active_requests": 0}])
+        assert stats_feed._refresh_activities(payload) is payload
+    finally:
+        _set_pool(None)
+
+
+def test_fails_open(pool):
+    class Boom(_Engine):
+        def get_activity_snapshot(self):
+            raise RuntimeError("engine vanished mid-walk")
+
+    _set_pool(_Pool({"w": _Entry(Boom([_act('a', 'x', 1)]))}))
+    try:
+        payload = _payload([{"id": "w", "active_requests": 1,
+                             "activities": [_act('a', 'x', 1)]}])
+        # the raising snapshot is skipped; the row stands as built
+        assert stats_feed._refresh_activities(payload) is payload
+    finally:
+        _set_pool(None)
+
+    _set_pool(None)                        # pool getter returns None
+    assert stats_feed._refresh_activities(payload) is payload
+    assert stats_feed._refresh_activities(None) is None
+
+
 # --------------------------------------------------------------------------
 
-def test_stats_feed_merges_on_fast_and_full_ticks(monkeypatch):
-    from omlx_uplift import stats_feed
-
+def test_feed_calls_refresh_on_both_tiers(pool, monkeypatch):
     calls = []
 
-    def fake_merge(p):
+    def fake_refresh(stats):
         calls.append(1)
-        return {**p, "merged": len(calls)}
+        return {**stats, "refreshed": len(calls)}
 
-    monkeypatch.setattr(stats_feed, "_merge_audio", fake_merge)
+    monkeypatch.setattr(stats_feed, "_refresh_activities", fake_refresh)
     feed = stats_feed.StatsFeed(
         stats_builder=lambda: {"x": 1, "active_models": {"models": []}},
-        stats_fast_builder=lambda: {"y": 2, "active_models": {"models": []}},
+        stats_fast_builder=lambda: {"y": 2},
         alltime_builder=lambda: 0, tick_s=0.01)
-    assert feed.tick_once(full=True) is True
-    assert feed.snapshot_now()["s"]["merged"] == 1
-    assert feed.tick_once(full=False) is True    # audio moves on the fast tier
-    assert feed.snapshot_now()["s"]["merged"] == 2
+    feed.tick_once(full=True)
+    assert feed.snapshot_now()["s"]["refreshed"] == 1
+    feed.tick_once(full=False)
+    assert feed.snapshot_now()["s"]["refreshed"] == 2   # the fast tier too
     feed.stop()

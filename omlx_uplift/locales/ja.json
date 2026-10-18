@@ -1079,5 +1079,7 @@
  "uplift.audio.realtime": "リアルタイム文字起こし",
  "uplift.audio.synthesizing": "音声合成中",
  "uplift.audio.processing": "音声処理中",
- "uplift.audio.busy": "音声処理"
+ "uplift.audio.embedding": "埋め込み中",
+ "uplift.audio.reranking": "再ランク付け中",
+ "uplift.audio.deciding": "判断中"
 }

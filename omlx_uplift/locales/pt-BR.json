@@ -1080,5 +1080,7 @@
  "uplift.audio.realtime": "Transcrição em tempo real",
  "uplift.audio.synthesizing": "Sintetizando voz",
  "uplift.audio.processing": "Processando áudio",
- "uplift.audio.busy": "Tarefa de áudio"
+ "uplift.audio.embedding": "Embedding",
+ "uplift.audio.reranking": "Reclassificando",
+ "uplift.audio.deciding": "Decidindo"
 }

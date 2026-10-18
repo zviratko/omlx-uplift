@@ -763,12 +763,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
    level stats line, mirrored (upstream has no per-request DFlash row). */
 .if-dflash { font: 400 10px/1.5 var(--mono); color: var(--dim);
     padding: 2px 2px 0 20px; }
-/* VOICE-15: audio work sub-row — amber + pulse reads as "the engine is
-   busy now", .live marks an open realtime session (steady attention). */
-.if-audio { font: 400 10px/1.5 var(--mono); color: var(--amber-text);
+/* VOICE-15: engine activity sub-row — amber + pulse reads as "the engine
+   is busy now", .live marks an open realtime session (steady accent). */
+.if-act { font: 400 10px/1.5 var(--mono); color: var(--amber-text);
     padding: 2px 2px 0 20px;
     animation: pulse 1.8s ease-in-out infinite; }
-.if-audio.live { color: var(--accent); }
+.if-act.live { color: var(--accent); }
 /* Idle line under a loaded model with no request rows (Activity card always
    lists loaded models). */
 .if-idle { font: 400 10px/1.5 var(--mono); color: var(--dim);

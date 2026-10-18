@@ -1076,5 +1076,7 @@
  "uplift.audio.realtime": "Realtime transcription",
  "uplift.audio.synthesizing": "Synthesizing",
  "uplift.audio.processing": "Processing audio",
- "uplift.audio.busy": "Audio work"
+ "uplift.audio.embedding": "Embedding",
+ "uplift.audio.reranking": "Reranking",
+ "uplift.audio.deciding": "Deciding"
 }

@@ -1076,5 +1076,7 @@
  "uplift.audio.realtime": "实时转录",
  "uplift.audio.synthesizing": "语音合成中",
  "uplift.audio.processing": "音频处理中",
- "uplift.audio.busy": "音频任务"
+ "uplift.audio.embedding": "嵌入计算中",
+ "uplift.audio.reranking": "重排序中",
+ "uplift.audio.deciding": "决策中"
 }
