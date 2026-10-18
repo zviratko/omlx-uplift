@@ -5120,9 +5120,6 @@ return { mount: mount, isMounted: function () { return _mounted; },
                         // VOICE-11: manual SPEAK seam (the overlay binds it
                         // to the per-bubble 🔊 button; tests drive directly)
                         speak: msgSpeak,
-                        plans: function () { return Object.keys(_plans); },
-                        release: saySilence,
-                        sweep: saySweepPlans,
                         attach: attachMessageActions },
          // _state returns LIVE references (conv/convs are the module's
          // own objects) — the browser drills and node tests set conv
@@ -5144,6 +5141,11 @@ return { mount: mount, isMounted: function () { return _mounted; },
                                         profiles: _profiles,
                                         readability: _readability }; },
          // VOICE-11 test/drill probe: live auto-speak session state
+         // VOICE-16k drill seams: the plan map, silence, orphan sweep — the
+         // delete/regenerate paths are only provable through them
+         plans: function () { return Object.keys(_plans); },
+         release: saySilence,
+         sweep: saySweepPlans,
          _speak: function () { return { gen: _speakGen, q: _speakQ,
                                         mode: _speakZ && _speakZ.mode,
                                         on: autoSpeakOn(),
