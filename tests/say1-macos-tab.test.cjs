@@ -422,6 +422,16 @@ test('hidden-state CSS guard exists (a display rule could outspec [hidden])', ()
     const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
     assert.ok(/\.vc-say-grp\[hidden\]\s*\{\s*display:\s*none/.test(css),
               '.vc-say-grp[hidden]{display:none} must ride alongside the fold');
+    // rows indent under their language header (user: 'add some
+    // indentation after the language is expanded')
+    assert.ok(/\.vc-say-grp \.vc-row \{ padding-left: 24px; \}/.test(css),
+              'voice rows indent inside the expanded group');
+    // the header speaks at the same size as the voices below it
+    const head = css.match(/\.vc-say-head \{[^}]*font: ([^;]+);/);
+    const name = css.match(/^\.vc-name \{[^}]*font: ([^;]+);/m);
+    assert.ok(head && name && head[1] === name[1],
+              'language header font == voice name font ('
+              + (head && head[1]) + ' vs ' + (name && name[1]) + ')');
 });
 
 test('voiceLabel hides the marker behind a macOS tag', async () => {
