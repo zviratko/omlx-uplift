@@ -2080,7 +2080,7 @@ label.se-row.pending-restart > .se-ctl > select {
     padding: 2px 6px; vertical-align: 1px; white-space: nowrap; }
 .vc-chip-tier { color: var(--accent); border-color: var(--accent); }
 /* SAY-2: the preferred-for-language star + its row chip */
-.vc-pref { min-width: 34px; }
+.vc-pref { min-width: 0; flex: 0 0 auto; white-space: nowrap; }
 .vc-pref.on { color: var(--accent); border-color: var(--accent); }
 .vc-chip-pref { color: var(--accent); border-color: var(--accent); }
 .vc-say-head { display: flex; align-items: center; gap: 8px; width: 100%;

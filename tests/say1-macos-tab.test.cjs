@@ -11,11 +11,16 @@
    - grouping: languages sorted by language NAME (Czech before English),
      inside a language Premium > Enhanced > standard, then alphabetical
    - chips: tier labels, ADDITIONAL only when the server proved a bundle
-   - STAR (SAY-2 replaced USE): exact POST /voices/say/preferred payload
-     {locale, identifier}; a preferred_for row shows the PREFERRED FOR
-     chip + lit star, its click posts the CLEAR (empty identifier);
+   - BUTTON (SAY-2 replaced USE with a star; SAY-2c the star with TEXT):
+     exact POST /voices/say/preferred payload {locale, identifier}; a
+     preferred_for row shows the PREFERRED FOR chip + lit button reading
+     'Clear preferred', its click posts the CLEAR (empty identifier);
      marking repaints from a fresh GET — the client never patches
      preferred_for locally; no pseudo-model voice is ever posted
+   - OVERRIDE label (SAY-2c): rows the server flags answers_default get
+     'Override macOS default ({locale})'; a marked one 'Clear override';
+     the panel names the detected default (system_voice/system_language)
+     and shows NOTHING of the sort when the server could not detect one
    - PLAY: hits /voices/say/speech with only {name} (the greeting text is
      the server's choice — the client never invents sample copy)
    - filter: matches name, raw locale AND language name; no-match message
@@ -191,7 +196,9 @@ async function mount(opt) {
             fetchJson: async (u) => {
                 u = String(u); st.gets.push(u);
                 if (u.includes('/voices/say')) return { supported: o.supported,
-                                                        voices: o.voices };
+                                                        voices: o.voices,
+                                                        system_language: o.sysl || '',
+                                                        system_voice: o.sysv || '' };
                 return { voices: o.store };
             },
             postJson: async (u, b) => { st.posts.push({ url: String(u), body: b });
@@ -264,7 +271,7 @@ test('catalog rows: greyed, no buttons, NOT DOWNLOADED, split counts', async () 
     assert.ok(ab._classes.has('vc-say-off'), 'rendered dimmed');
     assert.ok(allText(ab).includes('NOT DOWNLOADED'), allText(ab));
     assert.equal(classes(ab, 'se-btn').length, 0,
-                 'no PLAY/star on a voice this Mac cannot speak yet');
+                 'no PLAY/mark button on a voice this Mac cannot speak yet');
     const heads = classes(h.host, 'vc-say-head');
     const counts = heads.map(n => n.children[2].textContent);
     assert.deepEqual(counts, ['1', '4/5', '1'], counts);
@@ -288,7 +295,7 @@ test('chips: tier labels and ADDITIONAL only when proven', async () => {
               'unproven -> NO badge at all (never claim System)');
 });
 
-test('STAR posts the preferred mark; PREFERRED FOR chip reflects the server', async () => {
+test('BUTTON posts the preferred mark; label text, PREFERRED FOR chip reflect the server', async () => {
     const voices = ROSTER.map(v => Object.assign({}, v));
     voices[0].preferred_for = 'cs_CZ';      // Zuzana answers say+cs-CZ
     voices[0].identifier = 'com.apple.voice.compact.cs-CZ.Zuzana';
@@ -298,12 +305,18 @@ test('STAR posts the preferred mark; PREFERRED FOR chip reflects the server', as
     const find = (name) => rows.find(r => String(r.children[0].textContent) === name);
     const zu = find('Zuzana');
     assert.ok(allText(zu).includes('PREFERRED FOR cs_CZ'), allText(zu));
-    const zuStar = classes(zu, 'vc-pref')[0];
-    assert.ok(zuStar._classes.has('on'), 'marked row shows the lit star');
+    const zuBtn = classes(zu, 'vc-pref')[0];
+    assert.ok(zuBtn._classes.has('on'), 'marked row shows the lit button');
+    assert.equal(zuBtn.textContent, 'Clear preferred',
+                 'SAY-2c: the star is a TEXT button now');
     const al = find('Albert');
-    assert.ok(!classes(al, 'vc-pref')[0]._classes.has('on'));
+    const alBtn = classes(al, 'vc-pref')[0];
+    assert.ok(!alBtn._classes.has('on'));
+    assert.equal(alBtn.textContent, 'Mark preferred');
+    assert.ok(!('i18n' in alBtn.dataset),
+              'placeholder label: no dataset.i18n (applyI18n could not repaint it)');
     // marking Albert for English: exact payload, routed to the map endpoint
-    classes(al, 'vc-pref')[0].click();
+    alBtn.click();
     await settle(); await settle();
     const post = h.st.posts.find(p => p.url.includes('/voices/say/preferred'));
     assert.deepEqual(post.body, { locale: 'en_US', identifier: 'Albert' });
@@ -314,27 +327,69 @@ test('STAR posts the preferred mark; PREFERRED FOR chip reflects the server', as
     assert.ok(h.st.gets.filter(u => u.includes('/voices/say')).length >= 2,
               'the catalogue was re-read after the mark');
     assert.ok(classes(h.host, 'vc-say').length, 'still on the say tab');
-    // clicking the lit star CLEARS the mark for its language
+    // clicking the lit button CLEARS the mark for its language
     const rows2 = classes(h.host, 'vc-row');
-    const zuStar2 = classes(rows2.find(r =>
+    const zuBtn2 = classes(rows2.find(r =>
         String(r.children[0].textContent) === 'Zuzana'), 'vc-pref')[0];
-    zuStar2.click();
+    zuBtn2.click();
     await settle(); await settle();
     const clr = h.st.posts.filter(p => p.url.includes('/voices/say/preferred'))[1];
     assert.deepEqual(clr.body,
         { locale: 'cs_CZ', identifier: '' });
 });
 
-test('star rows survive the clone-store: stored voices are irrelevant', async () => {
-    // SAY-1 stored say voices must NOT dim or disable anything: the star
-    // is the language map, independent of the voice store
+test('OVERRIDE label (SAY-2c): default-language rows say what they override', async () => {
+    const voices = ROSTER.map(v => Object.assign({}, v));
+    for (const v of voices) {
+        if (v.locale === 'en_US') v.answers_default = true;
+    }
+    voices[1].preferred_for = 'en_US';      // Albert already overrides
+    const h = await mount({ voices, sysl: 'en_US', sysv: 'Samantha' });
+    await h.sayClick();
+    // the panel names the default it speaks of
+    const sys = classes(h.host, 'vc-say-sys')[0];
+    assert.ok(sys, 'the system-default line renders when the server detected one');
+    assert.ok(String(sys.textContent).includes('Samantha (en_US)'),
+              sys.textContent);
+    const rows = classes(h.host, 'vc-row');
+    const find = (name) => rows.find(r => String(r.children[0].textContent) === name);
+    const alBtn = classes(find('Albert'), 'vc-pref')[0];
+    assert.ok(alBtn._classes.has('on'));
+    assert.equal(alBtn.textContent, 'Clear override (en_US)');
+    const saBtn = classes(find('Samantha'), 'vc-pref')[0];
+    assert.equal(saBtn.textContent, 'Override macOS default (en_US)');
+    // the Czech rows stay plain favourites
+    assert.equal(classes(find('Zuzana'), 'vc-pref')[0].textContent,
+                 'Mark preferred');
+    // marking the override row posts the SAME payload (one endpoint, one map)
+    saBtn.click();
+    await settle(); await settle();
+    const post = h.st.posts.find(p => p.url.includes('/voices/say/preferred'));
+    assert.deepEqual(post.body,
+        { locale: 'en_US', identifier: 'Samantha' });
+});
+
+test('undetected system language: no default line, no override promise', async () => {
+    const voices = ROSTER.map(v => Object.assign({}, v));
+    const h = await mount({ voices });        // sysl '' — Linux/unknown
+    await h.sayClick();
+    assert.equal(classes(h.host, 'vc-say-sys').length, 0);
+    for (const b of classes(h.host, 'vc-pref')) {
+        assert.ok(String(b.textContent).indexOf('Override') < 0,
+                  'no button may promise an override without a detected default');
+    }
+});
+
+test('mark buttons survive the clone-store: stored voices are irrelevant', async () => {
+    // SAY-1 stored say voices must NOT dim or disable anything: the mark
+    // button is the language map, independent of the voice store
     const store = [{ id: 'zuzana', name: 'Zuzana', model: 'say:Zuzana' }];
     const h = await mount({ store });
     await h.sayClick();
     const rows = classes(h.host, 'vc-row');
     const zu = rows.find(r => String(r.children[0].textContent) === 'Zuzana');
-    const star = classes(zu, 'vc-pref')[0];
-    assert.equal(star.disabled, false);
+    const btn = classes(zu, 'vc-pref')[0];
+    assert.equal(btn.disabled, false);
     assert.ok(!allText(zu).includes('IN USE'), 'IN USE is gone with USE');
 });
 

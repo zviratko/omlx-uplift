@@ -22,9 +22,21 @@ Pins the contract added on top of SAY-1:
 - validation: a stored voice may carry model 'say' (routes per request),
   'say:<installed>' or 'say:<routable locale>' — junk and unspappable
   languages are refused at the door.
+
+SAY-2c (Override macOS default) adds:
+- system_language(): parsed from `defaults` AppleLanguages, AppleLocale
+  fallback, honest '' without the binary; cached, never shells out in
+  the other tests (on_mac patches it to '');
+- a preferred mark answering the Mac's own language carries
+  language-less requests; without it (or without a detected language)
+  the pre-SAY-2c system default answers untouched;
+- default_voice() prefers the flagged row of the system language;
+- GET /voices/say advertises system_language / system_voice and the
+  per-row answers_default flag the tab's text button labels from.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -65,6 +77,9 @@ def on_mac(monkeypatch):
     monkeypatch.setattr(SE, "_say_rows", lambda: [])
     monkeypatch.setattr(SE, "_cache",
                         {"ts": 9e15, "voices": SE.parse_av(AV2)})
+    # SAY-2c: the system-language probe never runs for real in tests —
+    # '' keeps every legacy expectation (no override, first flagged row)
+    monkeypatch.setattr(SE, "system_language", lambda force=False: "")
     return SE
 
 
@@ -202,6 +217,7 @@ def test_synth_omits_voice_flag_for_system_default(monkeypatch):
     monkeypatch.setattr(SE, "_av_rows", lambda: [])
     monkeypatch.setattr(SE, "_say_rows", lambda: [])
     monkeypatch.setattr(SE, "detect_language", lambda t: "")
+    monkeypatch.setattr(SE, "system_language", lambda force=False: "")
     seen = {}
 
     class P:
@@ -215,6 +231,105 @@ def test_synth_omits_voice_flag_for_system_default(monkeypatch):
     monkeypatch.setattr(SE.subprocess, "run", fake_run)
     SE.synth_bytes("", "hello")        # no roster at all
     assert "-v" not in seen["cmd"]     # `say` answers with its own default
+
+
+# ------------------------------------------------- system language (2c)
+
+class _Defaults:
+    """stand-in for the `defaults read -g KEY` pair; '' rc!=0"""
+
+    def __init__(self, languages=None, locale=None):
+        self.languages, self.locale = languages, locale
+        self.calls = []
+
+    def __call__(self, cmd, **kw):
+        self.calls.append(list(cmd))
+
+        class P:
+            pass
+        P.returncode, P.stderr = 0, ""
+        key = cmd[-1]
+        if key == "AppleLanguages" and self.languages is not None:
+            P.stdout = self.languages
+        elif key == "AppleLocale" and self.locale is not None:
+            P.stdout = self.locale
+        else:
+            P.returncode = 1
+            P.stdout = ""
+        return P()
+
+
+def _no_syslang_cache(monkeypatch):
+    monkeypatch.setattr(SE, "_sys_lang_cache", {"ts": 0.0, "lang": None})
+
+
+def test_system_language_parses_applelanguages(monkeypatch):
+    _no_syslang_cache(monkeypatch)
+    monkeypatch.setattr(SE.shutil, "which", lambda x: "/usr/bin/defaults")
+    run = _Defaults(languages='(\n    "en-US"\n)\n',
+                    locale="en_US@rg=czzzzz\n")
+    monkeypatch.setattr(SE.subprocess, "run", run)
+    assert SE.system_language() == "en-US"
+    # cached: the second read must not spend another subprocess
+    n = len(run.calls)
+    assert SE.system_language() == "en-US" and len(run.calls) == n
+
+
+def test_system_language_falls_back_to_applelocale(monkeypatch):
+    _no_syslang_cache(monkeypatch)
+    monkeypatch.setattr(SE.shutil, "which", lambda x: "/usr/bin/defaults")
+    run = _Defaults(locale="de_AT\n")     # AppleLanguages unreadable
+    monkeypatch.setattr(SE.subprocess, "run", run)
+    assert SE.system_language() == "de-AT"
+
+
+def test_system_language_silent_without_defaults(monkeypatch):
+    _no_syslang_cache(monkeypatch)
+    monkeypatch.setattr(SE.shutil, "which", lambda x: None)
+    assert SE.system_language() == ""
+    # an unreadable pair is honestly '' — every caller keeps the
+    # pre-SAY-2c behaviour
+    _no_syslang_cache(monkeypatch)
+    monkeypatch.setattr(SE.shutil, "which", lambda x: "/usr/bin/defaults")
+    monkeypatch.setattr(SE.subprocess, "run", _Defaults())
+    assert SE.system_language() == ""
+
+
+def test_override_mark_answers_language_less_request(on_mac, monkeypatch):
+    monkeypatch.setattr(SE, "system_language", lambda force=False: "cs-CZ")
+    pref = {"cs-CZ": "com.apple.ttsbundle.siri_cs-CZ_compact"}
+    # bare, no text the detector could answer: the override speaks
+    assert SE.route("", None, pref) == "com.apple.ttsbundle.siri_cs-CZ_compact"
+
+
+def test_mark_for_other_language_leaves_system_default(on_mac, monkeypatch):
+    monkeypatch.setattr(SE, "system_language", lambda force=False: "en-US")
+    pref = {"cs-CZ": "com.apple.ttsbundle.siri_cs-CZ_compact"}
+    assert SE.route("", None, pref) == \
+        "com.apple.speech.synthesis.voice.Samantha"
+
+
+def test_override_needs_the_system_language(on_mac):
+    # fixture sysl is '': a mark answering cs-CZ stays a language route
+    # and does NOT hijack language-less requests (legacy behaviour)
+    pref = {"cs-CZ": "com.apple.ttsbundle.siri_cs-CZ_compact"}
+    assert SE.route("", None, pref) == \
+        "com.apple.speech.synthesis.voice.Samantha"
+
+
+def test_default_voice_prefers_the_system_language(on_mac, monkeypatch):
+    # AV's isDefault marks EVERY language's own default — a Slovak Mac
+    # must hear Laura, not whichever flagged row the roster lists first
+    tab = chr(9)   # the probe line's real TAB separators
+    av3 = AV2.replace("com.apple.voice.compact.sk-SK.Laura]" + tab + "0",
+                      "com.apple.voice.compact.sk-SK.Laura]" + tab + "1")
+    SE._cache.update(ts=9e15, voices=SE.parse_av(av3))
+    monkeypatch.setattr(SE, "system_language", lambda force=False: "sk")
+    assert SE.default_voice()["name"] == "Laura"
+    monkeypatch.setattr(SE, "system_language", lambda force=False: "en-US")
+    assert SE.default_voice()["name"] == "Samantha"
+    # unknown language (fixture ''): legacy first flagged row
+    assert SE.default_voice()["name"] == "Samantha"
 
 
 # --------------------------------------------------- auto-detection (A)
@@ -352,6 +467,24 @@ def test_preferred_endpoints_roundtrip(client, on_mac):
     assert client.get("/uplift/api/voices").json()["voices"] == []
 
 
+def test_say_list_advertises_the_system_default(client, on_mac, monkeypatch):
+    # SAY-2c payload: the tab needs the detected language, the voice it
+    # answers with, and which rows a mark on would override
+    monkeypatch.setattr(SE, "system_language", lambda force=False: "cs-CZ")
+    d = client.get("/uplift/api/voices/say").json()
+    assert d["system_language"] == "cs-CZ"
+    assert d["system_voice"] == "Samantha"   # nothing cs-CZ is AV-flagged
+    by = {v["identifier"]: v for v in d["voices"]}
+    assert by["com.apple.voice.compact.cs-CZ.Zuzana"]["answers_default"] is True
+    assert by["com.apple.speech.synthesis.voice.Samantha"]["answers_default"] is False
+    assert by["com.apple.voice.compact.sk-SK.Laura"]["answers_default"] is False
+    # unknown system language: the tab promises nothing
+    monkeypatch.setattr(SE, "system_language", lambda force=False: "")
+    d = client.get("/uplift/api/voices/say").json()
+    assert d["system_language"] == ""
+    assert not any(v.get("answers_default") for v in d["voices"])
+
+
 def test_preferred_rejects_junk(client, on_mac):
     r = client.post("/uplift/api/voices/say/preferred", json={})
     assert r.status_code == 400
@@ -440,16 +573,25 @@ def test_stored_locale_voice_speaks(client, on_mac, monkeypatch):
 
 
 # --------------------------------------------------------------- locales
-# The three new tab strings are assembled through tf(key, fallback) with
-# a {locale} placeholder — invisible to the C.t literal gate, so they
-# self-pin here (uplift-static-ui-gate doctrine: every family has exactly
-# one owner file; this is that owner for say_mark/say_unmark/
-# say_preferred_for).
+# The tab strings are assembled through tf(key, fallback) with
+# {locale}/{voice} placeholders — invisible to the C.t literal gate, so
+# they self-pin here (uplift-static-ui-gate doctrine: every family has
+# exactly one owner file; this is that owner for say_mark/say_unmark/
+# say_preferred_for and the SAY-2c button labels).
 
 SAY2_KEYS = ("uplift.voices.say_mark", "uplift.voices.say_unmark",
-             "uplift.voices.say_preferred_for")
+             "uplift.voices.say_preferred_for",
+             "uplift.voices.say_btn_mark", "uplift.voices.say_btn_clear",
+             "uplift.voices.say_btn_override",
+             "uplift.voices.say_btn_override_clear",
+             "uplift.voices.say_system_default")
 SAY2_DROPPED = ("uplift.voices.say_use", "uplift.voices.say_in_use",
                 "uplift.voices.say_added_ok")
+_PH_RE = re.compile(r"\{\w+\}")
+
+
+def _phs(value):
+    return sorted(_PH_RE.findall(value))
 
 
 @pytest.mark.parametrize("loc", ["en", "cs", "es", "fr", "ja", "ko",
@@ -463,12 +605,11 @@ def test_say2_locale_keys(loc):
         (path.parent / "en.json").read_text())
     for k in SAY2_KEYS:
         assert k in d and d[k].strip(), "%s missing in %s" % (k, loc)
-        assert d[k].count("{locale}") == en[k].count("{locale}") == 1, \
-            "%s placeholder drift in %s" % (k, loc)
+        assert _phs(d[k]) == _phs(en[k]), "%s placeholder drift in %s" % (k, loc)
         if loc != "en":
             assert d[k] != en[k], "%s untranslated in %s" % (k, loc)
     for k in SAY2_DROPPED:
         assert k not in d, "%s is dead copy in %s" % (k, loc)
-    # the hint must teach the new model, not the removed USE button
+    # the hint must teach the button, not the removed star or USE copy
     hint = d["uplift.voices.say_hint"]
-    assert "★" in hint and "USE" not in hint and "say:<locale>" in hint
+    assert "★" not in hint and "USE" not in hint and "say:<locale>" in hint

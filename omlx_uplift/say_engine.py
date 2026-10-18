@@ -37,9 +37,11 @@ Contract of this module:
   (identifier or display name) wins; a bare request routes by language
   through the caller-supplied preferred map (the tab's "mark preferred
   for cs-CZ" favourites), then the language's AV default, then its best
-  installed voice; with no language at all the Mac's own default voice
-  answers (and if even that is unknown, `say` runs without -v and picks
-  it itself). Routing lives here; the marks live in the voice store.
+  installed voice; with no language at all a mark answering the Mac's
+  own language (SAY-2c 'Override macOS default') wins, else the Mac's
+  default voice answers (and if even that is unknown, `say` runs
+  without -v and picks it itself). Routing lives here; the marks live
+  in the voice store.
 """
 from __future__ import annotations
 
@@ -454,6 +456,25 @@ def _installed_rows() -> list:
     return [v for v in list_voices() if v.get("installed") is not False]
 
 
+def _marked_voice(lang, preferred=None) -> Optional[dict]:
+    """SAY-2c (shared with language_voice): the installed row a preferred
+    mark points at for this language — exact locale beats primary-language
+    match; a mark pointing at a voice this Mac no longer holds is skipped.
+    None when no mark answers the language."""
+    by_addr = {}
+    for v in _installed_rows():
+        by_addr[v.get("identifier") or v["name"]] = v
+    best, best_score = None, 0
+    for loc, addr in (preferred or {}).items():
+        v = by_addr.get(str(addr or ""))
+        if v is None:
+            continue            # stale mark (voice deleted/downloaded away)
+        score = _locale_score(lang, loc)
+        if score > best_score:
+            best, best_score = v, score
+    return best
+
+
 def language_voice(lang, preferred=None) -> Optional[dict]:
     """SAY-2: the row that answers a language-carrying `say` request.
     Chain: the voice marked preferred for that language (exact locale
@@ -465,20 +486,10 @@ def language_voice(lang, preferred=None) -> Optional[dict]:
     honestly instead of speaking the text in a random language."""
     if not lang:
         return None
-    rows = _installed_rows()
-    by_addr = {}
-    for v in rows:
-        by_addr[v.get("identifier") or v["name"]] = v
-    best, best_score = None, 0
-    for loc, addr in (preferred or {}).items():
-        v = by_addr.get(str(addr or ""))
-        if v is None:
-            continue            # stale mark (voice deleted/downloaded away)
-        score = _locale_score(lang, loc)
-        if score > best_score:
-            best, best_score = v, score
+    best = _marked_voice(lang, preferred)
     if best is not None:
         return best
+    rows = _installed_rows()
     in_lang = [v for v in rows if _locale_score(lang, v.get("locale"))]
     if not in_lang:
         return None
@@ -488,11 +499,74 @@ def language_voice(lang, preferred=None) -> Optional[dict]:
     return in_lang[0]
 
 
+_SYS_LANG_TTL_S = 300              # the language rarely changes; but it can
+_sys_lang_cache: dict = {"ts": 0.0, "lang": None}
+_TAGGED_RE = re.compile(r'"([A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*)"')
+
+
+def _read_global_default(key: str) -> str:
+    """One NSGlobalDomain value via the `defaults` CLI ('' on any
+    failure). The global domain is user-readable without elevation;
+    the binary is guarded on PATH like every other optional probe."""
+    if shutil.which("defaults") is None:
+        return ""
+    try:
+        p = subprocess.run(["defaults", "read", "-g", key],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError) as e:
+        log.info("say system language probe failed (%s): %s", key, e)
+        return ""
+    return p.stdout if p.returncode == 0 else ""
+
+
+def system_language(force: bool = False) -> str:
+    """SAY-2c: the Mac's own LANGUAGE default as a BCP-47 tag ('en-US').
+    The first AppleLanguages entry is the system language the Spoken
+    Content default voice follows; AppleLocale ('en_US@rg=czzzzz') is
+    the fallback spelling. '' when unknown (non-Mac, probe failure) —
+    every caller then keeps the pre-SAY-2c behaviour. Cached; a wrong
+    answer only changes which rows the tab labels 'macOS default'."""
+    now = time.time()
+    if not force and _sys_lang_cache["lang"] is not None \
+            and now - _sys_lang_cache["ts"] < _SYS_LANG_TTL_S:
+        return _sys_lang_cache["lang"]
+    lang = ""
+    m = _TAGGED_RE.search(_read_global_default("AppleLanguages"))
+    if m:
+        lang = m.group(1)
+    else:
+        loc = _read_global_default("AppleLocale").split("@")[0]
+        lang = loc.strip().strip('"')
+    lang = _norm_locale(lang)
+    _sys_lang_cache.update(ts=now, lang=lang)
+    return lang
+
+
+def default_answered(locale) -> bool:
+    """True when a preferred mark for this row's language also answers
+    language-less requests — i.e. what the tab labels 'override the
+    macOS default'. Same matching the router and route() use."""
+    sysl = system_language()
+    return bool(sysl) and _locale_score(sysl, locale) > 0
+
+
 def default_voice() -> Optional[dict]:
     """The Mac's own system default voice (the one `say` speaks when no
-    -v is given). None when the AV probe could not tell us — the caller
-    then addresses `say` with no voice and lets the system choose."""
-    for v in _installed_rows():
+    -v is given). SAY-2c: the flagged row for the Mac's own language
+    wins — `say`'s System Voice follows the system language, while the
+    AV isDefault flag alone marks every language's default. None when
+    the AV probe could not tell us — the caller then addresses `say`
+    with no voice and lets the system choose."""
+    rows = _installed_rows()
+    sysl = system_language()
+    if sysl:
+        hits = [(v, _locale_score(sysl, v.get("locale")))
+                for v in rows if v.get("default")]
+        hits = [h for h in hits if h[1]]
+        if hits:
+            hits.sort(key=lambda h: -h[1])
+            return hits[0][0]
+    for v in rows:
         if v.get("default"):
             return v
     return None
@@ -564,7 +638,13 @@ def route(name: str, language=None, preferred=None, text=None) -> str:
             # nothing installed for the detected language we fall
             # through to the system default below
             return v.get("identifier") or v["name"]
-    v = default_voice()
+    # SAY-2c: a preferred mark answering the Mac's OWN language overrides
+    # the system default voice even for language-less requests — that is
+    # what the tab's 'Override macOS default' button promises. Without
+    # such a mark (or without knowing the system language) the untouched
+    # system default answers, exactly as before.
+    sysl = system_language()
+    v = (_marked_voice(sysl, preferred) if sysl else None) or default_voice()
     return (v.get("identifier") or v["name"]) if v else ""
 
 

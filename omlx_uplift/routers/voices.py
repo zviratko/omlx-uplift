@@ -584,10 +584,16 @@ async def voices_say_list(_auth=Depends(require_admin)):
     voices already saved into the named-voice store so the tab can show
     them as in use instead of offering a duplicate.
     SAY-2: 'preferred' is the language→voice map, and each marked row
-    carries 'preferred_for' with the locale it answers — the tab's star."""
+    carries 'preferred_for' with the locale it answers — the tab's
+    preferred button.
+    SAY-2c: 'system_language' + 'system_voice' tell the tab what THIS
+    Mac answers by default; every row whose language would override it
+    carries 'answers_default' so its button can read honestly instead
+    of showing a star."""
     if not say_engine.available():
         return {"supported": False, "voices": []}
     voices = await asyncio.to_thread(say_engine.list_voices)
+    sysl = await asyncio.to_thread(say_engine.system_language)
     store = _load()
     saved = set()
     for v in store["voices"]:
@@ -599,12 +605,16 @@ async def voices_say_list(_auth=Depends(require_admin)):
     for loc, addr in pref.items():
         if addr:
             addr2loc[addr] = loc
+    dv = say_engine.default_voice() or {}
     return {"supported": True, "preferred": pref,
+            "system_language": sysl, "system_voice": dv.get("name") or "",
             "voices": [dict(
                 v, added=v["name"] in saved
                 or v.get("identifier") in saved,
                 preferred_for=addr2loc.get(v.get("identifier"))
-                or addr2loc.get(v["name"]) or "")
+                or addr2loc.get(v["name"]) or "",
+                answers_default=bool(sysl)
+                and say_engine._locale_score(sysl, v.get("locale")) > 0)
                        for v in voices]}
 
 

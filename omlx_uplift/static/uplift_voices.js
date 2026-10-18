@@ -1135,18 +1135,22 @@ let _sttSelf = null;
 /* ---- SAY-1: the macOS system-voice tab ----------------------------------
    Catalog of the voices the server's `say` binary can actually speak
    (GET /voices/say). SAY-2 replaced the 'USE' button with a per-voice
-   star: "Mark preferred for: cs-CZ" records the voice that answers a
-   `say` request carrying that language (POST /voices/say/preferred ->
-   the store's language map). No pseudo-model voice is created — the
-   tab only marks favourites. Explicit selection keeps working at the
-   API: 'say:<identifier>' (or the display name) addresses that exact
-   voice, 'say:<locale>' routes like a language-carrying request. The
-   star rides the row's own language; one voice per language, marking
-   a second replaces the first, marking again clears. Ordering is a
-   quality promise: within a language the better recordings first
-   (Premium > Enhanced > Personal > standard); languages sorted by
-   name. The ADDITIONAL chip appears only for voices whose bundle sits
-   in the download folders — shown when proven, never guessed. */
+   star; SAY-2c turned that star into a TEXT button and taught it the
+   Mac's own language: rows answering the system default (the server's
+   'answers_default') read "Override macOS default (en-US)" — marking
+   one replaces what language-less `say` requests speak (the system
+   voice, named in the panel hint); every other row reads "Mark
+   preferred" (POST /voices/say/preferred -> the store's language map).
+   No pseudo-model voice is created — the tab only marks favourites.
+   Explicit selection keeps working at the API: 'say:<identifier>' (or
+   the display name) addresses that exact voice, 'say:<locale>' routes
+   like a language-carrying request. One voice per language, marking a
+   second replaces the first, clicking a marked button clears it.
+   Ordering is a quality promise: within a language the better
+   recordings first (Premium > Enhanced > Personal > standard);
+   languages sorted by name. The ADDITIONAL chip appears only for
+   voices whose bundle sits in the download folders — shown when
+   proven, never guessed. */
 const SAY_TIERS = { premium: ['uplift.voices.say_tier_premium', 'PREMIUM', 0],
                     enhanced: ['uplift.voices.say_tier_enhanced', 'ENHANCED', 1],
                     personal: ['uplift.voices.say_tier_personal', 'PERSONAL', 2] };
@@ -1249,17 +1253,30 @@ function sayRow(v, repaint) {
             D.toast(String(e && e.message || e), 'error');
         }
     };
-    // SAY-2 star: the row's favourite marker for ITS language. Marking
-    // replaces the previous voice for that language (one per language);
-    // clicking the lit star clears it and the language falls back to its
-    // default voice. No stored pseudo-model is created — ever.
+    // SAY-2c text button (was the star): honest about its target. A row
+    // answering the Mac's OWN language overrides the system default
+    // voice named in the panel hint; every other row marks a favourite
+    // for its language. Clicking a marked button clears it again; no
+    // stored pseudo-model is created — ever. The label carries a
+    // {locale} placeholder, so it gets NO dataset.i18n (applyI18n
+    // would repaint the raw placeholder back in); the panel re-renders
+    // on a locale change anyway.
+    const ansDef = !!v.answers_default;
+    const sysl = (_sayData && _sayData.system_language) || '';
     const pref = document.createElement('button');
     pref.type = 'button';
     pref.className = 'se-btn vc-pref' + (marked ? ' on' : '');
-    pref.textContent = '★';
-    pref.dataset.i18n = marked ? 'uplift.voices.say_unmark'
-                               : 'uplift.voices.say_mark';
-    pref.title = tf(pref.dataset.i18n,
+    pref.textContent = tf(
+        ansDef ? (marked ? 'uplift.voices.say_btn_override_clear'
+                         : 'uplift.voices.say_btn_override')
+               : (marked ? 'uplift.voices.say_btn_clear'
+                         : 'uplift.voices.say_btn_mark'),
+        ansDef ? (marked ? 'Clear override ({locale})'
+                         : 'Override macOS default ({locale})')
+               : (marked ? 'Clear preferred' : 'Mark preferred'))
+        .replace('{locale}', sysl || v.preferred_for || v.locale);
+    pref.title = tf(marked ? 'uplift.voices.say_unmark'
+                           : 'uplift.voices.say_mark',
                     marked ? 'Not preferred for: {locale}'
                            : 'Mark preferred for: {locale}')
                    .replace('{locale}', marked ? v.preferred_for : v.locale);
@@ -1363,11 +1380,11 @@ async function sayPanel(host) {
     hint.className = 'mk-desc';
     hint.textContent = tf('uplift.voices.say_hint',
         'Every voice this macOS offers. Installed voices speak instantly '
-        + '— no model to load; greyed rows need a download '
-        + 'first in System Settings under Accessibility > Spoken Content '
-        + '> Voices. ★ marks the voice that answers `say` requests in '
-        + 'that language; requests can also name a voice (say:<voice>) '
-        + 'or a language (say:<locale>) explicitly.');
+        + '— no model to load; greyed rows need a download first in System '
+        + 'Settings under Accessibility > Spoken Content > Voices. The '
+        + 'button on a voice marks it preferred for its language; requests '
+        + 'can also name a voice (say:<voice>) or a language '
+        + '(say:<locale>) explicitly.');
     box.append(title, hint);
     host.append(box);
     if (!_sayData) {
@@ -1389,6 +1406,19 @@ async function sayPanel(host) {
             'The macOS say engine is not available on this server.');
         box.append(off);
         return;
+    }
+    // SAY-2c: name the Mac's own default out loud — the override button
+    // is only honest if the user can see WHAT it overrides. Shown only
+    // when the server actually detected the system language.
+    if (_sayData.system_language) {
+        const sys = document.createElement('div');
+        sys.className = 'mk-desc vc-say-sys';
+        sys.textContent = tf('uplift.voices.say_system_default',
+            'macOS default: {voice} ({locale}) — a preferred mark for '
+            + 'this language overrides it too')
+            .replace('{voice}', _sayData.system_voice || '?')
+            .replace('{locale}', _sayData.system_language);
+        box.append(sys);
     }
     const filter = document.createElement('input');
     filter.type = 'text'; filter.className = 'vc-say-filter';
