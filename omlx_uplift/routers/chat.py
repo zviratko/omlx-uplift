@@ -33,6 +33,7 @@ from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
 
+from .. import tts_cache
 from .base import api_router, require_admin
 
 MAX_MESSAGES = 200
@@ -167,7 +168,32 @@ def _clean_message(m: dict) -> dict:
     # U74: an Edited mark survives reloads. Timestamp only — honest,
     # no per-field bookkeeping (editing reasoning or content sets it).
     if m.get("edited"):
-        out["edited"] = str(m["edited"])[:40]
+        out["edited"] = str(m.get("edited"))[:40]
+    # VOICE-16b: a bubble owns its synthesized audio, so it needs an identity
+    # that survives reloads and re-ordering (indices do not). Client-minted,
+    # opaque, and only ever a JSON key on the cache side.
+    mid = tts_cache.token(m.get("mid"))
+    if mid:
+        out["mid"] = mid
+    # VOICE-16b: the read-aloud plan (how this bubble was split into chunks),
+    # so the player rows come back after a reload and load from the cache
+    # instead of waking the TTS model. Rev = client digest of the text that
+    # was spoken: when the text (or the mode) changes, the rev moves and the
+    # old audio becomes unreachable — the prune below deletes it.
+    speech = m.get("speech")
+    if isinstance(speech, dict):
+        mode = str(speech.get("mode") or "")
+        n = speech.get("n")
+        clean_s = {}
+        if mode in ("sentence", "line", "paragraph"):
+            clean_s["mode"] = mode
+        if isinstance(n, int) and not isinstance(n, bool) and 0 < n <= 5000:
+            clean_s["n"] = n
+        rev = tts_cache.token(speech.get("rev"))
+        if rev:
+            clean_s["rev"] = rev
+        if clean_s:
+            out["speech"] = clean_s
     # U78: what the reply was actually sampled with (per-TURN provenance;
     # the per-chat generation object is the CURRENT knob state, which
     # rewording mid-chat would falsify for older replies). Sanitized
@@ -295,7 +321,16 @@ async def chat_history_save(request: Request,
     if len(convs) > MAX_CONVOS:
         for old in sorted(convs, key=lambda k: convs[k]["updated"])[:len(convs) - MAX_CONVOS]:
             del convs[old]
+            tts_cache.drop_conversation(old)     # VOICE-16b: its audio too
     _save(store)
+    # VOICE-16b: a bubble the save no longer carries takes its audio with it,
+    # and so does one whose plan revision moved (edited text, new voice,
+    # re-chunked after an upgrade). Runs after the write so a rejected save
+    # can never delete live audio.
+    tts_cache.prune_conversation(
+        cid, [m.get("mid") for m in conv["messages"] if m.get("mid")],
+        revs={m["mid"]: (m.get("speech") or {}).get("rev") or "0"
+              for m in conv["messages"] if m.get("mid")})
     kb = len(json.dumps(conv, ensure_ascii=False).encode()) // 1024
     return {"status": "saved", "id": cid, "messages": len(conv["messages"]),
             "kb": kb}
@@ -309,4 +344,5 @@ async def chat_history_delete(conv_id: str,
         raise HTTPException(status_code=404, detail="conversation not found")
     del store["conversations"][conv_id]
     _save(store)
-    return {"status": "deleted", "id": conv_id}
+    freed = tts_cache.drop_conversation(conv_id)      # VOICE-16b
+    return {"status": "deleted", "id": conv_id, "audio_freed": freed}

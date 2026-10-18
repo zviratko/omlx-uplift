@@ -113,6 +113,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from .. import say_engine
+from .. import tts_cache
 from .base import api_router, page_router, require_admin
 
 _log = logging.getLogger("omlx_uplift.voices")
@@ -1030,6 +1031,25 @@ async def voices_delete(vid: str, _auth=Depends(require_admin)):
     return {"ok": True, "deleted": v["id"]}
 
 
+def _cache_owner(raw: dict):
+    """VOICE-16b: the chat player sends {conv, msg, rev} with a chunk so the
+    result can outlive this page — the bubble owns its audio. A request
+    without that block (or a progressive stream) synthesizes uncached.
+
+    `rev` is the bubble's plan revision: an edited bubble re-plans with a new
+    one, and the previous chunks of that bubble stop being reachable (the chat
+    save prunes them, and the next synth of the bubble replaces them here)."""
+    c = raw.get("cache")
+    if not isinstance(c, dict) or raw.get("stream"):
+        return None
+    conv = tts_cache.token(c.get("conv"), "conv")
+    msg = tts_cache.token(c.get("msg"), "msg")
+    if not conv or not msg:
+        return None
+    return {"conv": conv, "msg": msg,
+            "rev": tts_cache.token(c.get("rev"), "rev") or "0"}
+
+
 @api_router.post("/voices/speech")
 async def voices_speech(request: Request, _auth=Depends(require_admin)):
     raw = await request.json()
@@ -1041,6 +1061,20 @@ async def voices_speech(request: Request, _auth=Depends(require_admin)):
     voice_raw = str(raw.get("voice") or "")
     v, model_override, _ = _alias_lookup(voice_raw,
                                          str(raw.get("model") or ""))
+    owner = _cache_owner(raw)
+    # identity of the SPEECH, not of the bubble: the same sentence in the same
+    # voice with the same settings is one file, wherever it is quoted from
+    cache_key = ""
+    if owner:
+        cache_key = tts_cache.key_for(
+            (v or {}).get("id") or voice_raw, text, speed=raw.get("speed"),
+            language=raw.get("language"), model=model_override or raw.get("model"),
+            instructions=raw.get("instructions"), ref_text=raw.get("ref_text"))
+        hit = tts_cache.get(cache_key)
+        if hit:
+            body, media = hit
+            return Response(content=body, media_type=media,
+                            headers={"X-Uplift-TTS-Cache": "hit"})
     if not v:
         # SAY-2: the native UI (chat read-aloud included) can address a
         # system voice directly — voice 'say:<identifier>' speaks that
@@ -1049,20 +1083,72 @@ async def voices_speech(request: Request, _auth=Depends(require_admin)):
         # lookup above; this leg is only the store miss.
         is_say, say_tail = say_engine.say_split(voice_raw)
         if is_say:
-            return await _say_response(
+            return _store_cache(await _say_response(
                 say_tail, text, speed=raw.get("speed") or None,
-                language=raw.get("language") or None)
+                language=raw.get("language") or None), cache_key, owner,
+                voice_raw)
         names = ", ".join(x["name"] for x in _load()["voices"]) or "(none yet)"
         raise HTTPException(status_code=404,
                             detail="unknown voice; available: %s" % names)
-    return await _synth(v, str(raw.get("input") or ""),
-                        stream=bool(raw.get("stream")), model=model_override,
-                        language=raw.get("language") or None,
-                        speed=raw.get("speed") or None,
-                        instructions=raw.get("instructions")
-                        if "instructions" in raw else None,
-                        ref_text=raw.get("ref_text") if "ref_text" in raw
-                        else None)
+    return _store_cache(await _synth(v, str(raw.get("input") or ""),
+                                     stream=bool(raw.get("stream")),
+                                     model=model_override,
+                                     language=raw.get("language") or None,
+                                     speed=raw.get("speed") or None,
+                                     instructions=raw.get("instructions")
+                                     if "instructions" in raw else None,
+                                     ref_text=raw.get("ref_text")
+                                     if "ref_text" in raw else None),
+                        cache_key, owner, (v or {}).get("id") or voice_raw)
+
+
+def _store_cache(resp, key: str, owner, voice: str):
+    """Write-through for a synthesized chunk. A streamed (progressive) reply
+    has no single body to store, and anything over the entry cap is passed
+    through uncached rather than rejected — audio must keep working."""
+    if not key or not owner:
+        return resp
+    body = getattr(resp, "body", None)
+    try:
+        if body and tts_cache.put(key, body,
+                                  getattr(resp, "media_type", None) or "audio/wav",
+                                  dict(owner, voice=voice)):
+            resp.headers["X-Uplift-TTS-Cache"] = "stored"
+        elif body:
+            resp.headers["X-Uplift-TTS-Cache"] = "too-big"
+    except Exception:
+        # a cache that cannot be written must never eat the audio
+        pass
+    return resp
+
+
+@api_router.get("/voices/speech-cache")
+async def speech_cache_stats(is_admin: bool = Depends(require_admin)):
+    """What the cache holds and what it should not (Check audio cache)."""
+    out = tts_cache.check(_live_owners())
+    out["totals"] = tts_cache.totals()
+    return out
+
+
+@api_router.post("/voices/speech-cache/cleanup")
+async def speech_cache_cleanup(is_admin: bool = Depends(require_admin)):
+    """Delete exactly what the check reported. Never touches a chat."""
+    out = tts_cache.cleanup(_live_owners())
+    out["totals"] = tts_cache.totals()
+    return out
+
+
+def _live_owners() -> dict:
+    """conv id -> the message ids the chat store still holds. Read here (not
+    inside tts_cache) so the cache module stays free of the router graph."""
+    from .chat import _load as _history
+    convs = (_history() or {}).get("conversations") or {}
+    live = {}
+    for cid, conv in convs.items():
+        msgs = (conv or {}).get("messages") or []
+        live[str(cid)] = [str((m or {}).get("mid") or "")
+                          for m in msgs if isinstance(m, dict)]
+    return live
 
 
 @api_router.post("/voices/transcribe")
