@@ -1948,10 +1948,10 @@ function syncVoiceSelect() {
     }
 }
 function msgSpeak(idx, btn) {
-    // VOICE-11: manual SPEAK = one whole-reply push through the SAME queue
-    // (replaces VOICE-1's single-blob path — and it keeps working with
-    // AUTO-SPEAK off, exactly as before). Busy click on the same bubble is
-    // a stop; one read-aloud at a time across the page.
+    // VOICE-11: manual SPEAK = the SAME queue as auto-read (replaces
+    // VOICE-1's single-blob path — and it keeps working with AUTO-SPEAK
+    // off, exactly as before). Busy click on the same bubble is a stop;
+    // one read-aloud at a time across the page.
     var m = messageAt(idx);
     if (!m || !m.content) return;
     var text = String(stripMarkdown(m.content)).trim();
@@ -1969,7 +1969,16 @@ function msgSpeak(idx, btn) {
     }
     q.reset();
     var dropMark = q.dropped().length, playMark = q.played();
-    if (q.push(text) < 0) return;       // sanitised to nothing
+    // the VOICE-10 chunker joins the manual path: bubble SPEAK follows the
+    // configured chunk strategy (sentence/line/paragraph) exactly like the
+    // auto-read of the same reply — first sentences synthesize while the
+    // rest is still queued instead of one whole-reply blob
+    var z = SIO().createSpeechSplitter({ mode: speakChunkMode() });
+    var chunks = z.push(text).concat(z.flush());
+    var fed = 0;
+    for (var ci = 0; ci < chunks.length; ci++)
+        if (q.push(chunks[ci]) >= 0) fed++;
+    if (!fed) return;                   // sanitised to nothing
     _speakBtn = btn || null;
     if (btn) btn.classList.add('playing');
     speakEvent(true);    // VOICE-13 echo guard: manual read = mic paused

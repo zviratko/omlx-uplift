@@ -399,17 +399,31 @@ test('VOICE-11d: AUTO-SPEAK off streams silently, manual SPEAK reads the reply',
     await flush(10);
     assert.equal(h.speechCalls.length, 0, 'no TTS requests while off');
     assert.equal(h.ctxInstances.length, 0, 'no AudioContext is even built while off');
-    // the per-message SPEAK bubble button keeps working (whole-reply push)
+    // the per-message SPEAK bubble button follows the chunk strategy too:
+    // default sentence mode cuts the reply like the auto-read does
     const M = h.win.UpliftNativeChat;
     const st = M._state();
     st.conv.messages.push({ role: 'assistant', content: REPLY });
     const btn = { classList: { add() {}, remove() {} } };
     M._msgActions.speak(st.conv.messages.length - 1, btn);
-    assert.equal(h.speechCalls.length, 1, 'manual SPEAK pushes the whole reply');
-    assert.equal(h.speechCalls[0].body.input, REPLY.replace(/\s+/g, ' '),
-                 'one push, the full normalised text');
+    assert.deepEqual(h.speechCalls.map((c) => c.body.input), [S1, S2, S3],
+                     'manual SPEAK follows the configured sentence chunking');
     assert.equal(h.ctxInstances.length, 1, 'the queue built its context on the click');
     assert.equal(h.ctxInstances[0].resumes, 1, 'resume ran inside the gesture');
+});
+
+test('VOICE-14: manual SPEAK honours the paragraph strategy (was one blob)', async () => {
+    const h = await makeHarness({
+        localStorage: { 'omlx-uplift-speak-chunk': 'paragraph' } }).booted();
+    const M = h.win.UpliftNativeChat;
+    const st = M._state();
+    st.conv.messages.push({ role: 'assistant', content: REPLY });
+    const btn = { classList: { add() {}, remove() {} } };
+    M._msgActions.speak(st.conv.messages.length - 1, btn);
+    assert.equal(h.speechCalls.length, 2, 'two paragraphs, two synthesize steps');
+    assert.equal(h.speechCalls[0].body.input, S1 + ' ' + S2,
+                 'first paragraph is POSTed while the second still queues');
+    assert.equal(h.speechCalls[1].body.input, S3);
 });
 
 // ---- (d2) failed chunks: one retry, skip, the single toast --------------------
