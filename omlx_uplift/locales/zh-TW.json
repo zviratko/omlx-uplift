@@ -1098,6 +1098,7 @@
  "uplift.bench.queue_failed": "失敗",
  "uplift.inflight.unload": "卸載",
  "uplift.inflight.unload_tip": "卸載此模型",
+ "uplift.inflight.loading": "載入中",
  "uplift.chat.speak_header": "朗讀",
  "uplift.chat.say_read": "朗讀整則回覆",
  "uplift.chat.say_reread": "重新錄製整則回覆",

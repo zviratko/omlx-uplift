@@ -1102,6 +1102,7 @@
  "uplift.bench.queue_failed": "Falhou",
  "uplift.inflight.unload": "DESCARREGAR",
  "uplift.inflight.unload_tip": "Descarregar este modelo",
+ "uplift.inflight.loading": "Carregando",
  "uplift.chat.speak_header": "Leitura",
  "uplift.chat.say_read": "Ler a resposta inteira em voz alta",
  "uplift.chat.say_reread": "Gravar a resposta inteira de novo",

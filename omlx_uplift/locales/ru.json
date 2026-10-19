@@ -1098,6 +1098,7 @@
  "uplift.bench.queue_failed": "Ошибка",
  "uplift.inflight.unload": "ВЫГРУЗИТЬ",
  "uplift.inflight.unload_tip": "Выгрузить эту модель",
+ "uplift.inflight.loading": "Загрузка",
  "uplift.chat.speak_header": "Озвучка",
  "uplift.chat.say_read": "Озвучить весь ответ",
  "uplift.chat.say_reread": "Записать весь ответ заново",

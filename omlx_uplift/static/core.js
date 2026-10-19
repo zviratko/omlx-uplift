@@ -383,7 +383,16 @@ function eventsBetween(prev, next) {
     const old = new Map(prev.models.map(m => [m.id, m]));
     for (const m of next.models) {
         const before = old.get(m.id);
-        if (!before) events.push({ kind: 'model-add', text: `${m.id} loaded`, model: m.id });
+        // ACT-SLEEP-2: a row appearing with is_loading is NOT a load — the
+        // praise belongs to the Loading -> ready flip. A model that appears
+        // already loaded (fast load between rebuilds) still gets model-add.
+        if (!before && m.state === 'Loading')
+            events.push({ kind: 'model-loading', text: `${m.id} loading`,
+                          model: m.id, state: 'Loading' });
+        else if (!before)
+            events.push({ kind: 'model-add', text: `${m.id} loaded`, model: m.id });
+        else if (before.state === 'Loading' && m.state !== 'Loading')
+            events.push({ kind: 'model-add', text: `${m.id} loaded`, model: m.id });
         else if (before.state !== m.state)
             events.push({ kind: 'model-state', text: `${m.id}: ${m.state}`, model: m.id, state: m.state });
         old.delete(m.id);

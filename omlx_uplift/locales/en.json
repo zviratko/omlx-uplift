@@ -1098,6 +1098,7 @@
  "uplift.voices.tts_badge_title": "Voices saved on this model: {names}",
  "uplift.inflight.unload": "UNLOAD",
  "uplift.inflight.unload_tip": "Unload this model",
+ "uplift.inflight.loading": "Loading",
  "uplift.chat.speak_header": "Speak",
  "uplift.chat.say_read": "Read the whole reply aloud",
  "uplift.chat.say_reread": "Record the whole reply again",

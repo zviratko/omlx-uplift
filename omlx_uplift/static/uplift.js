@@ -2363,6 +2363,9 @@ function renderLive(s) {
     const cacheBy = new Map((s.cacheModels || []).map(cm => [cm.id, cm]));
     for (const m of s.models) {
         const g = ifGroup(m.id);             // item 1: every loaded model, always
+        // ACT-SLEEP-2: the group's state feeds the idle-line label below
+        // (a loading model must not read 'Idle' while it is loading).
+        g.state = m.state;
         // U12: per-model memory meta — hot cache only (user 2026-09-29:
         // weights and SSD-cache display removed; hot cache kept).
         const cm = cacheBy.get(m.id);
@@ -2528,7 +2531,10 @@ function renderLive(s) {
     for (const g of S.ifModels) {
         // Label re-resolved each tick: the locale catalog can load after
         // the group was created (same reason the card placeholder relabels).
-        g.idle.textContent = C.t('uplift.empty.idle');
+        // ACT-SLEEP-2: a still-loading model labels its line 'Loading' —
+        // the idle wording was a lie for exactly the window the user watches.
+        g.idle.textContent = g.state === 'Loading'
+            ? C.t('uplift.inflight.loading') : C.t('uplift.empty.idle');
         // VOICE-15: tracked engine work (audio, embedding, …) is work —
         // the Idle line must not sit next to a live activity row (those
         // engines own no request slots).

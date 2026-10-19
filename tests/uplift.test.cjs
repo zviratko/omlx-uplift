@@ -70,6 +70,23 @@ test('eventsBetween: model appear / state change / disappear', () => {
     const kinds = evs.map(e => e.kind).sort();
     assert.deepStrictEqual(kinds, ['model-add', 'model-remove']);
 });
+test('eventsBetween (ACT-SLEEP-2): Loading appear is quiet; praise lands on ready', () => {
+    // a row appearing while still loading: feed notice, NOT a model-add
+    const a = snap(raw({})), b = m('x', 'Loading');
+    assert.deepStrictEqual(C.eventsBetween(a, b).map(e => e.kind), ['model-loading']);
+    // Loading -> ready flip: the real 'loaded' moment
+    const c = m('x', 'Idle');
+    assert.deepStrictEqual(C.eventsBetween(b, c).map(e => e.kind), ['model-add']);
+    // Loading -> Generating (request starts straight away) also counts as loaded
+    assert.deepStrictEqual(C.eventsBetween(b, m('x', 'Generating')).map(e => e.kind),
+        ['model-add']);
+    // a fast load that never shows Loading still praises once on appearance
+    assert.deepStrictEqual(C.eventsBetween(a, m('x', 'Idle')).map(e => e.kind),
+        ['model-add']);
+    // ready -> gone stays the honest unload signal
+    assert.deepStrictEqual(C.eventsBetween(c, snap(raw({}))).map(e => e.kind),
+        ['model-remove']);
+});
 test('eventsBetween: request delta', () => {
     const a = snap(raw({ total_requests: 5 })), b = snap(raw({ total_requests: 8 }));
     const evs = C.eventsBetween(a, b);

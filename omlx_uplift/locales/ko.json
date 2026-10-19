@@ -1113,6 +1113,7 @@
  "uplift.bench.queue_failed": "실패",
  "uplift.inflight.unload": "언로드",
  "uplift.inflight.unload_tip": "이 모델 언로드",
+ "uplift.inflight.loading": "로드 중",
  "uplift.chat.speak_header": "읽기",
  "uplift.chat.say_read": "답변 전체 소리 내어 읽기",
  "uplift.chat.say_reread": "답변 전체 다시 합성",

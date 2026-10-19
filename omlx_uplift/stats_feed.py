@@ -93,6 +93,12 @@ SLOW_EVERY_S = 15.0
 # Payload keys owned by the slow half; cached and merged under every fast
 # rebuild so the frame shape is identical either way.
 COMPOSITE_KEYS = ("active_models", "runtime_cache")
+# ACT-SLEEP-2: floor between shape-forced FULL rebuilds. A pool whose shape
+# differs from the cached composites (a model appeared/vanished/flipped its
+# loading flag) upgrades the next tick to a full build — but never more
+# often than this, so a pathological flapping entry cannot turn the
+# multi-second walk into a hot loop (the LOOP-SAFE lesson, guarded).
+FULL_FLOOR_S = 3.0
 # ``uptime_seconds`` is excluded from the signature at this granularity
 # (floored to whole minutes) — see the module docstring.
 UPTIME_BUCKET_S = 60
@@ -204,6 +210,39 @@ def _build_stats_raw() -> Optional[dict]:
     return payload
 
 
+def _get_admin_pool():
+    """The vanilla engine pool via the admin seam (same source the vanilla
+    stats routes use). None when omlx/admin layout moved — callers degrade."""
+    try:
+        from omlx.admin import routes as admin_routes
+
+        get_pool = getattr(admin_routes, "_get_engine_pool", None)
+        return get_pool() if callable(get_pool) else None
+    except Exception:
+        return None
+
+
+def _pool_live_shape(pool):
+    """ACT-SLEEP-2: cheap identity of what the active-models payload SHOULD
+    contain: one tuple per loaded-or-loading pool entry. Matches the admin
+    route's row filter (``loaded or is_loading``); a mismatch against the
+    shape captured at the last FULL build means a model appeared, vanished
+    or flipped its loading flag — facts the fast tier cannot express in the
+    cached composites, so the tick upgrades itself to a full rebuild.
+    RuntimeError (concurrent dict resize on the executor) returns None:
+    this tick keeps its cadence, the next one re-checks."""
+    if pool is None:
+        return None
+    try:
+        return tuple(sorted(
+            (mid, 1 if e.engine is not None else 0,
+             1 if getattr(e, "is_loading", False) else 0)
+            for mid, e in pool._entries.items()
+            if e.engine is not None or getattr(e, "is_loading", False)))
+    except (RuntimeError, AttributeError, TypeError):
+        return None
+
+
 def _refresh_activities(stats):
     """VOICE-15: keep engine activities live on the FAST tier.
 
@@ -275,6 +314,165 @@ def _refresh_activities(stats):
         return s2
     except Exception:
         log.debug("activity refresh failed", exc_info=True)
+        return stats
+
+
+def _lists_sig(row):
+    """Cheap identity of a row's live-list content (ACT-SLEEP-2): ids and
+    the counters the card prints. Equal signature = nothing the client
+    would notice changed; skip the copy."""
+    def g(row, key, *fields):
+        return tuple(tuple(it.get(f) for f in fields)
+                     for it in (row.get(key) or []))
+    return (g(row, "prefilling", "request_id"),
+            g(row, "waiting", "request_id", "queue_position",
+              "elapsed_seconds", "prompt_tokens"),
+            g(row, "generating", "request_id", "generated_tokens",
+              "prompt_tokens"),
+            int(row.get("active_requests") or 0),
+            int(row.get("waiting_requests") or 0))
+
+
+def _refresh_live_lists(stats):
+    """ACT-SLEEP-2 (user report 2026-10-19): the scheduler half of each
+    model row — queued/prefilling/generating arrays + their counts — used
+    to move ONLY with the 15 s slow rebuild. Consequences measured live: a
+    finished request kept rendering 'Generating' for up to ~15 s (the card
+    row resurrects itself from the stale list as long as the snapshot
+    carries it), and a model load/unload was invisible for the same window
+    (membership half: loading rows never entered the cached composite at
+    all — the membership case is fixed by the shape-forced FULL build, see
+    StatsFeed.tick). This refreshes the scheduler lists on EVERY tick from
+    the same cheap per-engine seams the vanilla route uses
+    (``sched.snapshot_for_admin()``, the output-collector dict, the shared
+    prefill tracker, and Splash-style ``get_live_requests``) — NOT
+    ``engine_pool.get_status()`` (the multi-second walk LOOP-SAFE exists
+    to avoid).
+
+    Rows this function must not touch, left exactly as the slow build made
+    them: entries gone / engine not up yet / is_loading (the full-build
+    trigger owns those transitions), and cluster rows (their live view is
+    rank-zero telemetry the slow half synthesizes). Per-row failures skip
+    the row, never clear it — an exception must not erase live rows.
+    Runs BEFORE _refresh_activities; the activity delta then lands on top
+    of the scheduler-side counts computed here."""
+    try:
+        pool = _get_admin_pool()
+        if pool is None or not isinstance(stats, dict):
+            return stats
+        am = stats.get("active_models")
+        if not isinstance(am, dict) or not isinstance(am.get("models"), list):
+            return stats
+        try:
+            from omlx.prefill_progress import get_prefill_tracker
+            tracker = get_prefill_tracker()
+        except Exception:
+            tracker = None
+        entries = getattr(pool, "_entries", {})
+        now = time.time()
+        models = am["models"]
+        out = None
+        for idx, row in enumerate(models):
+            mid = str(row.get("id") or "")
+            entry = entries.get(mid)
+            engine = getattr(entry, "engine", None) if entry else None
+            if engine is None or getattr(entry, "is_loading", False) \
+                    or row.get("cluster"):
+                continue
+            try:
+                # ---- vanilla parity (admin/routes.py _build_active_models_data)
+                async_core = getattr(engine, "_engine", None)
+                core = getattr(async_core, "engine", None) \
+                    if async_core is not None else None
+                sched = (getattr(core, "scheduler", None) if core is not None
+                         else getattr(engine, "scheduler", None))
+                collector_ids = set()
+                if core is not None:
+                    try:
+                        collector_ids = set(
+                            (getattr(core, "_output_collectors", {}) or {}).keys())
+                    except RuntimeError:      # executor mutates while we read
+                        collector_ids = set()
+                prefilling = []
+                if tracker is not None:
+                    try:
+                        prefilling = list(tracker.get_model_progress(mid) or [])
+                    except Exception:
+                        prefilling = []
+                prefilling_ids = {p.get("request_id") for p in prefilling}
+                running_by_id: dict = {}
+                waiting: list = []
+                if sched is not None and hasattr(sched, "snapshot_for_admin"):
+                    snap = sched.snapshot_for_admin() or {}
+                    running_by_id = snap.get("running_by_id") or {}
+                    waiting_queue = snap.get("waiting") or []
+                    waiting = [
+                        {"request_id": req.request_id,
+                         "queue_position": pos,
+                         "elapsed_seconds": max(
+                             0.0, now - (getattr(req, "arrival_time", now) or now)),
+                         "prompt_tokens": getattr(req, "num_prompt_tokens", 0)}
+                        for pos, req in enumerate(waiting_queue, start=1)]
+                    waiting_ids = {req.request_id for req in waiting_queue}
+                    active_ids = set(running_by_id) | prefilling_ids
+                else:
+                    waiting_ids = {w["request_id"] for w in waiting}
+                    active_ids = collector_ids - waiting_ids
+                active_requests = len(active_ids)
+                generating = []
+                for rid in sorted(active_ids - prefilling_ids - waiting_ids):
+                    req = running_by_id.get(rid)
+                    generated = getattr(req, "num_output_tokens", 0) if req else 0
+                    started = getattr(req, "generation_started_at", None) if req else None
+                    last_act = getattr(req, "last_activity_at", None) if req else None
+                    elapsed = max(0.0, now - started) if started else None
+                    generating.append({
+                        "request_id": rid,
+                        "elapsed_seconds": elapsed,
+                        "generated_tokens": generated,
+                        "tokens_per_second": (generated / elapsed
+                                              if elapsed else 0.0),
+                        "last_activity_age_seconds": (
+                            max(0.0, now - last_act) if last_act else None),
+                        "prompt_tokens": getattr(req, "num_prompt_tokens", 0) if req else 0,
+                        "max_tokens": getattr(req, "max_tokens", None) if req else None,
+                    })
+                get_live_requests = getattr(engine, "get_live_requests", None)
+                if callable(get_live_requests):
+                    live = get_live_requests() or {}
+                    lp, lg = live.get("prefilling") or [], live.get("generating") or []
+                    prefilling = prefilling + list(lp)
+                    generating = generating + list(lg)
+                    active_requests += len(lp) + len(lg)
+                # the cached activity half: _refresh_activities deltas on top
+                cached_acts = row.get("activities") or []
+                m2 = dict(row)
+                m2["prefilling"] = [dict(p) for p in prefilling]
+                m2["generating"] = generating
+                m2["waiting"] = waiting
+                m2["active_requests"] = active_requests + len(cached_acts)
+                m2["waiting_requests"] = len(waiting)
+            except Exception:
+                continue                       # keep this row's cached lists
+            if _lists_sig(m2) == _lists_sig(row):
+                continue
+            if out is None:
+                out = list(models)
+            out[idx] = m2
+        if out is None:
+            return stats
+        am2 = dict(am)
+        am2["models"] = out
+        # route semantics: the totals are the sum of the per-model halves
+        am2["total_active_requests"] = sum(
+            int(r.get("active_requests") or 0) for r in out)
+        am2["total_waiting_requests"] = sum(
+            int(r.get("waiting_requests") or 0) for r in out)
+        s2 = dict(stats)
+        s2["active_models"] = am2
+        return s2
+    except Exception:
+        log.debug("live-list refresh failed", exc_info=True)
         return stats
 
 
@@ -424,6 +622,11 @@ class StatsFeed:
         # FULL build, merged under every fast rebuild in between.
         self._slow: Optional[dict] = None
         self._slow_at = 0.0
+        # ACT-SLEEP-2: the pool shape (loaded/loading membership + flags)
+        # as of the last FULL build. A mismatch upgrades the next tick to
+        # full (bounded by FULL_FLOOR_S) so model load/unload is visible in
+        # ~one tick instead of up to SLOW_EVERY_S.
+        self._shape: Optional[tuple] = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -577,10 +780,20 @@ class StatsFeed:
         (microseconds) and merged over the cached composites. Injected
         builders (tests, standalone viewer) always take the full path: the
         split exists for the real vanilla seams only.
+
+        ACT-SLEEP-2 exception: a pool shape different from the one the last
+        FULL build saw (a model appeared, vanished, or flipped its loading
+        flag) means the cached composites are structurally wrong — no fast
+        refresh can add or drop a row — so the tick upgrades itself to a
+        full rebuild, floored at FULL_FLOOR_S apart.
         """
         full = (self._stats_builder is not None
                 or self._slow is None
                 or time.monotonic() - self._slow_at >= SLOW_EVERY_S)
+        if not full and time.monotonic() - self._slow_at >= FULL_FLOOR_S:
+            shape = _pool_live_shape(_get_admin_pool())
+            if shape is not None and shape != self._shape:
+                full = True
         return self.tick_once(full=full)
 
     def tick_once(self, *, full: bool = True) -> bool:
@@ -610,16 +823,23 @@ class StatsFeed:
                 self._slow_at = time.monotonic()
                 self._slow = {k: stats[k] for k in COMPOSITE_KEYS
                               if k in stats}
+                # ACT-SLEEP-2: the shape AFTER the walk — entries that moved
+                # during it re-trigger on the next floor, converging.
+                self._shape = _pool_live_shape(_get_admin_pool())
         else:
             fast = self._attempt(self._stats_fast_builder or _build_stats_fast,
                                  "stats")
             if fast is not None:
                 stats = {**(self._slow or {}), **fast}
         if stats is not None:
-            # VOICE-15: audio/embedding-class work moves at request speed —
-            # vanilla's activity lists ride BOTH tiers so a 3-second
-            # transcription is visible WHILE it runs, not on whichever
-            # 15-second slow rebuild happens to catch it.
+            # VOICE-15 + ACT-SLEEP-2: audio/embedding-class work AND
+            # scheduler-side live rows move at request speed — vanilla's
+            # activity lists ride BOTH tiers so a 3-second transcription is
+            # visible WHILE it runs, a finished generation stops claiming
+            # 'generating' on the next tick, and neither waits for a
+            # 15-second slow rebuild. Scheduler lists first; the activity
+            # delta lands on top of the counts computed there.
+            stats = _refresh_live_lists(stats)
             stats = _refresh_activities(stats)
         alltime = self._attempt(alltime_b, "alltime")
 

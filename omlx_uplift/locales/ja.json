@@ -1101,6 +1101,7 @@
  "uplift.bench.queue_failed": "失敗",
  "uplift.inflight.unload": "アンロード",
  "uplift.inflight.unload_tip": "このモデルをアンロード",
+ "uplift.inflight.loading": "読み込み中",
  "uplift.chat.speak_header": "読み上げ",
  "uplift.chat.say_read": "返信全体を読み上げる",
  "uplift.chat.say_reread": "返信全体をやり直す",
