@@ -2484,8 +2484,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-table { border: 1px solid var(--line); margin: 8px 0 4px;
     overflow-x: auto; }
 .pt-row { display: grid;
-    grid-template-columns: 26px 150px minmax(150px, 1.3fr)
-        minmax(150px, 1.2fr) 84px 128px 96px;
+    grid-template-columns: 26px 132px minmax(140px, 1.2fr)
+        minmax(140px, 1.1fr) 82px 168px 96px;
     gap: 10px; align-items: center; padding: 6px 10px;
     font-size: var(--fs-meta); min-width: 820px; }
 .pt-thead { border-bottom: 1px solid var(--line); color: var(--dim);
@@ -2547,10 +2547,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .dv-base-head { display: flex; flex-direction: column; align-items: center;
     gap: 2px; text-transform: none; letter-spacing: 0; font-weight: 400;
     color: var(--dim); margin-bottom: 2px; }
-.dv-base-head select { width: 116px; min-width: 0; max-width: 100%;
+.dv-base-head select { width: 156px; min-width: 0; max-width: 100%;
     font-size: var(--fs-meta); text-overflow: ellipsis; }
 .dv-base-head .dv-base-apply { padding: 1px 8px; font-size: var(--fs-meta); }
-#dv-base-note { max-width: 116px; overflow: hidden; text-overflow: ellipsis;
+#dv-base-note { max-width: 156px; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; }
 /* patch zone: the dev strip below the table */
 .pt-zone { border: 1px solid var(--line); padding: 10px 12px 12px; margin: 14px 0; }

@@ -375,8 +375,11 @@ function dvRenderBase(d) {
     }
     sel.value = pinned || '';
     const btn = $('dv-base-btn');
-    btn.disabled = sel.value === (pinned || '') ||
-        !!(d.build && d.build.running);
+    const dirty = sel.value !== (pinned || '');
+    btn.disabled = !dirty || !!(d.build && d.build.running);
+    // PAT-TABLE QA: the header cell is precious space — the Apply button
+    // appears exactly when the picker holds a different choice
+    btn.hidden = !dirty;
     note.textContent = pinned
         ? ptMsg('uplift.patches.dev_base_pinned_note',
             'pinned — the next Build uses exactly this source version')
