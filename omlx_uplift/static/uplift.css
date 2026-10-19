@@ -1623,7 +1623,11 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
     background: var(--card); border: 1px solid var(--ink); color: var(--ink);
     width: min(640px, 100%); max-height: 80vh; display: flex; flex-direction: column;
     padding: 20px; gap: 12px;
+    position: relative;   /* anchor for the corner-mounted close button */
 }
+/* a close button inside a dialog heading parks in the box corner — after
+   the title text it read as part of the sentence (user 2026-10-20) */
+.modal.nasa h3 > .icon-btn { position: absolute; top: 12px; right: 12px; }
 /* U2 grammar pop-out: MUST stay after .modal.nasa — same 0,2,0 specificity,
    so source order decides */
 .modal.grammar-pop { width: min(1100px, 96vw); max-height: 92vh; }
@@ -1661,7 +1665,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    selector; .card-handle stays a pure drag affordance in edit mode). */
 [data-block="chart-tps"] h2 > span[data-i18n], [data-block="chart-mem"] h2 > span[data-i18n],
 section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
-.modal.nasa h3 { font: 500 13px/1.2 var(--sans); text-transform: uppercase; letter-spacing: 0.1em; }
+.modal.nasa h3 { font: 500 13px/1.2 var(--sans); text-transform: uppercase; letter-spacing: 0.1em; padding-right: 34px; }
 .prune-list { overflow: auto; scrollbar-gutter: stable; padding-right: 6px;
     border-top: 1px solid var(--ink); border-bottom: 1px solid var(--edge); }
 .prune-list label.row {
