@@ -13,6 +13,11 @@ users never see.
 
 ## Unreleased
 
+- **Chat renders math.** Formulas written as `$x$` or `$$…$$` now draw as
+  real equations in the reply bubbles instead of literal text. The renderer
+  (KaTeX, MathML output) ships inside the dashboard — no network needed.
+  `\( … \)` and `\[ … \]` spellings are recognized too; the stored markdown
+  stays exactly as the model wrote it.
 - **Memory & cache now reports the server's real memory.** The omlx memory
   figure was the sum of model-file sizes, so it stayed flat around 1 GiB
   while the server was actually using more. It now tracks the memory the

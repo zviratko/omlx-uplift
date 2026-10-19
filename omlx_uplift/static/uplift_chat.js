@@ -462,7 +462,9 @@ function renderHistory() {
     _dc.history = (_conv.messages || []).filter(function (m) { return m.content; })
         .map(function (m) {
             return { role: m.role === 'assistant' ? 'ai' : (m.role || 'user'),
-                     text: String(m.content) };
+                     // MATH: display-layer delimiter normalization; the
+                     // stored content stays RAW.
+                     text: normMath(String(m.content)) };
         });
     scheduleMessageActions(_dc);   // U45: bubbles re-rendered -> re-attach
 }
@@ -1016,7 +1018,11 @@ function nativeHandler(_componentBody, signals) {
                         if (c.reasoning) { _thinkLive += c.reasoning; paintThinking(); }
                         c.toolCalls.forEach(function (tc) { accumulateToolCall(toolMap, tc); });
                         if (c.finish) finish = c.finish;
-                        if (c.text) { text += c.text; signals.onResponse({ text: c.text });
+                        if (c.text) { text += c.text;
+                                      // MATH: stream leg gets the same display
+                                      // normalization as renderHistory; the
+                                      // store keeps the raw text in `text`.
+                                      signals.onResponse({ text: normMath(c.text) });
                                       speakFeed(c.text, speakGen); }
                     });
                     return pump();
@@ -1168,6 +1174,53 @@ function ensureVendor() {
         setTimeout(function () { rej(new Error('deep-chat load timeout')); }, 10000);
     });
     return _vendorPromise;
+}
+
+// MATH: deep-chat renders $..$ / $$..$$ through window.katex (MathML
+// output — no fonts, no CSS, native browser rendering), but it reads the
+// `remarkable` option ONLY when the message engine is constructed, i.e.
+// when the element is created. So the library must be in the page BEFORE
+// the element exists — which is why boot awaits this alongside the
+// vendor import. A failed load is not fatal: math stays literal text.
+function ensureKatex() {
+    if (W() && W().katex) return Promise.resolve(true);
+    var head = document && document.head;
+    if (!head || typeof head.appendChild !== 'function' ||
+        typeof head.querySelector !== 'function') return Promise.resolve(false);
+    if (head.querySelector('script[data-uplift-katex]'))
+        return Promise.resolve(false);      // a load is already in flight
+    return new Promise(function (res) {
+        var s = document.createElement('script');
+        s.src = base() + '/vendor/katex/katex.min.js';
+        s.async = false;
+        if (s.dataset) s.dataset.upliftKatex = '1';
+        var settled = false;
+        function done(ok) {
+            if (settled) return;
+            settled = true;
+            res(!!(ok && W() && W().katex));
+        }
+        s.onload = function () { done(true); };
+        s.onerror = function () { done(false); };
+        head.appendChild(s);
+        setTimeout(function () { done(false); }, 8000);
+    });
+}
+
+// MATH: many models emit \\( .. \\) and \\[ .. \\] instead of the $
+// family deep-chat's hook speaks. This is a DISPLAY-LAYER rewrite only —
+// the store keeps the raw markdown (copy-markdown doctrine), so the
+// reload path (renderHistory) normalizes the same text to the same
+// result. A \\[ marker split across two stream chunks stays literal in
+// that one bubble until the next render; rare and cosmetic.
+function normMath(s) {
+    if (typeof s !== 'string' ||
+        (s.indexOf('\\(') < 0 && s.indexOf('\\[') < 0)) return s;
+    s = s.replace(/\\\[([\s\S]+?)\\\]/g,
+                  function (_, g) { return '$$' + g + '$$'; });
+    s = s.replace(/\\\(([\s\S]+?)\\\)/g,
+                  function (_, g) { return '$' + g + '$'; });
+    return s;
 }
 
 // ---- UI -------------------------------------------------------------------
@@ -4931,6 +4984,9 @@ function mount() {
         D().fetchJson(api() + '/models'),
         D().fetchJson(api() + '/chat/key').then(function (k) { _key = k.api_key; }),
         D().fetchJson(api() + '/chat/history'),
+        // MATH: must settle before the element is made; LAST on purpose —
+        // the unpack below reads res[1]/res[3] positionally.
+        ensureKatex(),
     ]).then(function (res) {
         // CHAT-FILTER (user bug 2026-10-17): rows carry TWO type fields
         // with DIFFERENT vocabularies (vanilla model_discovery):
@@ -5023,6 +5079,13 @@ function mount() {
             else dc.messages = { maxWidth: '80%' };
         } catch (e) { /* the CSS rule above carries it if the prop is frozen */ }
         dc.images = true;           // card feature 3 base (vision drill 4/6)
+        // MATH: arm the KaTeX hook only when the library actually arrived —
+        // the engine registers the math rule at construction, and rendering
+        // math with window.katex missing yields an EMPTY string (silently
+        // losing the formula), which is worse than literal text.
+        if (W() && W().katex) {
+            try { dc.remarkable = { math: true }; } catch (e) { /* frozen prop */ }
+        }
         dc.onMessage = function (body) {
             var m = body.message;
             if (!m || body.isHistory) return;
@@ -5186,6 +5249,8 @@ return { mount: mount, isMounted: function () { return _mounted; },
                         // to the per-bubble 🔊 button; tests drive directly)
                         speak: msgSpeak,
                         attach: attachMessageActions },
+         // MATH: pure display-normalizer seam for the node gates
+         _normMath: normMath,
          // _state returns LIVE references (conv/convs are the module's
          // own objects) — the browser drills and node tests set conv
          // fields through it; shapeRequest reads _conv, same identity

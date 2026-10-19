@@ -145,6 +145,11 @@ function makeHarness(opts = {}) {
         clearTimeout: (id) => clearTimeout(id),
     };
     win.window = win; win.self = win;
+    // MATH: fake a preloaded KaTeX (mount arms dc.remarkable only when
+    // window.katex exists at element-creation time; the loader itself is
+    // a no-op in this stub — head has no querySelector)
+    if (opts.katexPresent)
+        win.katex = { version: '0.19.0-test', renderToString: () => '<math/>' };
     const store = Object.assign({}, opts.localStorage || {});
     win.localStorage = { getItem: (k) => (k in store ? store[k] : null),
                          setItem: (k, v) => { store[k] = v; },
@@ -1194,4 +1199,61 @@ test('NEW-CHAT-1: a new chat inherits the model on screen, not row one', () => {
     assert.ok(/sel && sel\.value/.test(body[0]), 'the picker value wins');
     assert.ok(/_conv && known\[_conv\.model\]/.test(body[0]),
         'then the model of the chat being replaced');
+});
+
+/* ---- MATH (KaTeX vendored 2026-10-19): $ / $$ formulas render through
+   deep-chat's built-in hook (window.katex, MathML output); \( \) and
+   \[ \] normalize at the DISPLAY layer, the store keeps raw markdown. -- */
+
+test('MATH: the vendored KaTeX ships and renders MathML', () => {
+    const f = `${STATIC_DIR}/vendor/katex/katex.min.js`;
+    assert.ok(fs.existsSync(f), 'katex.min.js is vendored');
+    const k = require(f);   // UMD under node; repo's own checked-in vendor file
+    assert.equal(typeof k.renderToString, 'function', 'renderToString present');
+    const out = k.renderToString('x^2', { displayMode: false,
+                                          throwOnError: false, output: 'mathml' });
+    assert.ok(out.includes('<math'), 'mathml output renders');
+    // the exact formula class that produced the user bug report
+    const doom = k.renderToString('B\\left(P(\\text{doom}) = 1.0\\right)',
+        { displayMode: true, throwOnError: false, output: 'mathml' });
+    assert.ok(doom.includes('display="block"'), 'block form gets display=block');
+});
+
+test('MATH: katex present arms the element; absent leaves literal text', async () => {
+    const h = await booted(makeHarness({ katexPresent: true }));
+    const M = h.win.UpliftNativeChat;
+    M.mount(); await booted(h);
+    assert.deepEqual(M._state().dc.remarkable, { math: true },
+        'remarkable.math armed at creation (before append)');
+    // failure path: no library -> the option must NOT be set, because the
+    // hook renders math as the EMPTY string when window.katex is missing —
+    // worse than today's literal text
+    const h2 = await booted(makeHarness());
+    const M2 = h2.win.UpliftNativeChat;
+    M2.mount(); await booted(h2);
+    assert.equal(M2._state().dc.remarkable, undefined,
+        'no katex -> no arming; boot never stalls on the loader');
+});
+
+test('MATH: normMath rewrites only the alt delimiters', () => {
+    const M = makeHarness().win.UpliftNativeChat;
+    const N = M._normMath;
+    assert.equal(N('solve \\[x^2\\] now'), 'solve $$x^2$$ now');
+    assert.equal(N('so \\(a+b\\) holds'), 'so $a+b$ holds');
+    assert.equal(N('$x$ and $$y$$ stay'), '$x$ and $$y$$ stay');
+    assert.equal(N('no math \\[ here'), 'no math \\[ here');  // unclosed untouched
+    assert.equal(N('a \\+ b'), 'a \\+ b');
+    assert.equal(N(null), null);
+});
+
+test('MATH: both render paths normalize, the store stays raw', () => {
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    assert.ok(/signals\.onResponse\(\{ text: normMath\(c\.text\) \}\)/.test(src),
+        'stream leg normalizes before the bubble sees it');
+    assert.ok(/text \+= c\.text;/.test(src),
+        'accumulated (stored) text remains the RAW chunk');
+    assert.ok(/text: normMath\(String\(m\.content\)\)/.test(src),
+        'reload path normalizes at render time');
+    assert.ok(!/speakFeed\(normMath/.test(src),
+        'voice feed keeps its own sanitizer path untouched');
 });
