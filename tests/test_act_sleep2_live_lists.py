@@ -40,7 +40,10 @@ class _WaitReq:
     def __init__(self, rid, prompt=10, waited=1.0):
         self.request_id = rid
         self.num_prompt_tokens = prompt
-        self.arrival_time = time.time() - waited
+        # THE REAL CLOCK: omlx/request.py stamps arrival_time with
+        # time.monotonic(), not wall time. A fixture on time.time() hides
+        # any code that mixes the two (the 'wait 20742d' bug, 2026-10-19).
+        self.arrival_time = time.monotonic() - waited
 
 
 class _Sched:
@@ -161,7 +164,7 @@ def test_completed_generation_clears_the_stale_row(pool):
 
 
 def test_running_request_rows_refresh_with_live_counters(pool):
-    now = time.time()
+    now = time.monotonic()      # scheduler clock, see _WaitReq
     core = _Core(_Sched(running={"r9": _RunReq("r9", out=42, started=now - 3)}))
     _pool_holder["pool"] = _Pool({"llm": _Entry(_Engine(core=core))})
     _tracker_holder["tracker"] = _Tracker({"llm": [
@@ -179,7 +182,7 @@ def test_running_request_rows_refresh_with_live_counters(pool):
 
 
 def test_waiting_rows_get_positions_and_wait(pool):
-    core = _Core(_Sched(running={}, waiting=[_WaitReq("w1"), _WaitReq("w2")]))
+    core = _Core(_Sched(running={}, waiting=[_WaitReq("w1"), _WaitReq("w2", waited=7.0)]))
     _pool_holder["pool"] = _Pool({"llm": _Entry(_Engine(core=core))})
     stale = {"id": "llm", "active_requests": 0, "waiting_requests": 0,
              "generating": [], "prefilling": [], "waiting": []}
@@ -187,8 +190,28 @@ def test_waiting_rows_get_positions_and_wait(pool):
     row = out["active_models"]["models"][0]
     assert [w["request_id"] for w in row["waiting"]] == ["w1", "w2"]
     assert row["waiting"][0]["queue_position"] == 1
+    assert 5 < row["waiting"][1]["elapsed_seconds"] < 9     # waited=7 s reads 7 s
     assert row["waiting_requests"] == 2
     assert out["active_models"]["total_waiting_requests"] == 2
+
+
+def test_elapsed_never_mixes_wall_and_scheduler_clock(pool):
+    """The 'wait 20742d 9h 33m' report (user 2026-10-19): the refresh
+    computed elapsed_seconds as time.time() - arrival_time while the
+    scheduler stamps arrivals with time.monotonic() (~macOS uptime).
+    Epoch-minus-boot is ~1.79e9 s: seconds-old rows rendered 56-year
+    waits. Any elapsed diff must stay on the scheduler's clock, so a
+    ONE-DAY wait reads as a day — never as a wall-clock epoch delta."""
+    core = _Core(_Sched(
+        running={"r1": _RunReq("r1", out=1, started=time.monotonic() - 86400)},
+        waiting=[_WaitReq("w1", waited=86400.0)]))
+    _pool_holder["pool"] = _Pool({"llm": _Entry(_Engine(core=core))})
+    stale = {"id": "llm", "active_requests": 0, "waiting_requests": 0,
+             "generating": [], "prefilling": [], "waiting": []}
+    row = stats_feed._refresh_live_lists(
+        _payload([stale]))["active_models"]["models"][0]
+    assert 86390 < row["waiting"][0]["elapsed_seconds"] < 86410
+    assert 86390 < row["generating"][0]["elapsed_seconds"] < 86410
 
 
 def test_collector_only_engine_counts_rids(pool):

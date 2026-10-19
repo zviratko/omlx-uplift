@@ -369,7 +369,11 @@ def _refresh_live_lists(stats):
         except Exception:
             tracker = None
         entries = getattr(pool, "_entries", {})
-        now = time.time()
+        # CLOCK: the scheduler stamps arrival_time / generation_started_at /
+        # last_activity_at with time.monotonic() (omlx/request.py — vanilla
+        # routes use the same clock here). Wall time would subtract epoch
+        # from boot-time and paint ~56-year "waits" (user report 2026-10-19).
+        now = time.monotonic()
         models = am["models"]
         out = None
         for idx, row in enumerate(models):
