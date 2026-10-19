@@ -2522,6 +2522,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-origin-tag { flex: none; padding: 0 5px; border: 1px solid var(--edge);
     border-radius: calc(var(--radius) / 2); font-size: .85em;
     letter-spacing: .05em; text-transform: uppercase; }
+.pt-edit-diff { width: 100%; font-family: var(--mono, monospace);
+    font-size: var(--fs-meta); }
 .pt-origin-src a:hover { color: var(--accent, #e0662e); }
 .pt-caret { font-size: 1.15em; margin-left: 7px; opacity: .75; }
 .pt-dirty { box-shadow: inset 0 0 0 1px var(--warn, #b8860b);

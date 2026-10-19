@@ -998,20 +998,18 @@ function ptEditSource(p) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
-    box.className = 'modal pt-modal';
-    const h = document.createElement('div');
-    h.className = 'pt-mgr-head';
-    const tid = document.createElement('span');
-    tid.className = 'pt-id';
-    tid.textContent = ptMsg('uplift.patches.edit', 'Edit source')
+    box.className = 'modal nasa';        // same chrome as the MANAGE dialog
+    const h = document.createElement('h3');
+    h.textContent = ptMsg('uplift.patches.edit', 'Edit source')
         + ' — ' + p.id;
     const close = document.createElement('button');
+    close.type = 'button';
     close.className = 'icon-btn';
     close.setAttribute('aria-label', 'Close');
     close.textContent = '×';
     close.onclick = () => overlay.remove();
     h.append(close);
-    box.append(h, tid);
+    box.append(h);
     const hint = document.createElement('div');
     hint.className = 'pt-detail';
     hint.textContent = ptMsg('uplift.patches.edit_hint',
