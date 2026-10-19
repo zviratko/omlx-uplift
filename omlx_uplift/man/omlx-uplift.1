@@ -52,6 +52,7 @@ serves the same UI and talks plain HTTP to a running omlx.
 .Op Fl -python Ar PATH
 .Op Fl -yes | -keep-skins
 .Op Fl -formula Ar NAME
+.Op Fl -default-target Ar omlx|dev
 .Xc
 Drop the autopatch .pth into a target environment's site-packages
 (default target: the Homebrew omlx keg;
@@ -63,6 +64,12 @@ A manual step for tricky venvs;
 after every fresh install and after every
 .Ic brew
 upgrade omlx .
+The first interactive install also asks which install plain
+.Ic patch
+commands should work on by default;
+.Fl -default-target
+sets that choice directly (see
+.Sx PATCHES ) .
 .Pp
 Prints a colour per-patch preview first
 .Dq OMLX-UPLIFT PATCHES TO APPLY: Aq ids
@@ -89,6 +96,7 @@ would 404 after the next start.
 Remove the .pth again.
 .It Xo Ic patch
 .Ic status Op Fl -json | apply | check | disable-all
+.Op Fl -target Ar omlx|dev|both
 .Xc
 .It Xo Ic patch
 .Ic add Ar id
@@ -489,6 +497,34 @@ or resolving outside the keg are HELD until you approve per reason code;
 .Ic omlx-uplift
 kernel rebuild
 handles the compiled-artifact side.
+.Pp
+Two installs can share one patch store: the vanilla
+.Em omlx
+keg and the
+.Em omlx-dev
+keg.
+Tree-facing verbs take
+.Fl -target Ar omlx|dev|both
+to select which one they read or act on
+.Po
+.Em dev
+resolves through the
+.Pa opt omlx-dev
+keg, so it needs a bootstrapped dev install
+.Pc ;
+.Fl -target both
+runs status / apply / check / update-all once per tree, and
+.Ic status
+headers are colour-coded per target with the concrete keg named.
+Without the flag the choice persisted by
+.Ic "install --default-target"
+applies, else
+.Em omlx .
+Store-only verbs
+.Po enable , disable , promote , rollback , approve , adopt , remove ,
+kill switch
+.Pc
+act on the shared manifest and ignore the target.
 .Sh "DEV PATCHES AND OMLX-DEV"
 Patch scopes (manifest
 .Va scope :

@@ -281,6 +281,18 @@ class OrchestrationTests(unittest.TestCase):
         m = self.store.load()
         self.assertTrue(m["config"]["auto_update_check"])
 
+    def test_config_default_target(self):
+        # CLI per-target default (persisted by install --default-target)
+        r = patchsource.set_config(self.store, default_target="dev")
+        self.assertEqual(r["config"]["default_target"], "dev")
+        self.assertEqual(self.store.load()["config"]["default_target"],
+                         "dev")
+        bad = patchsource.set_config(self.store, default_target="nope")
+        self.assertFalse(bad["ok"])
+        # rejected write saves nothing
+        self.assertEqual(self.store.load()["config"]["default_target"],
+                         "dev")
+
     def test_upload_all_already_adopts_as_applied(self):
         # user patched by hand (or omlx merged it), then wants it persisted:
         # uploading that same diff must STORE it as APPLIED, enabled, with

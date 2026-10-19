@@ -50,9 +50,10 @@ COMMAND_USAGE = {
               "         real settings (port replaced); never touches ~/.omlx"),
     "view": "omlx-uplift view [--api URL] [--port N]",
     "install": ("omlx-uplift install [--python PATH] [--yes|--keep-skins]"
-                " [--formula NAME]"),
+                " [--formula NAME] [--default-target omlx|dev]"),
     "uninstall": "omlx-uplift uninstall [--python PATH]",
-    "patch": ("omlx-uplift patch status|apply|check\n"
+    "patch": ("omlx-uplift patch status|apply|check"
+              " [--target omlx|dev|both]\n"
               "                 patch disable-all | enable-all\n"
               "                 patch add ID (--pr R/N | --url U | --file F)"
               " [--scope omlx|dev|both]\n"

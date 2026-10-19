@@ -212,8 +212,12 @@ def _print_patch_status(out: dict, stream=None) -> None:
     import sys
     stream = stream or sys.stdout
     cols = shutil.get_terminal_size((100, 24)).columns
-    print(_paint(stream, "OMLX-UPLIFT PATCHES", "1;36")
-          + "   omlx: " + str(out.get("keg_id") or "?"), file=stream)
+    target = str(out.get("target") or "omlx")
+    label, tcode = _TARGET_LABELS.get(target, (target, "1;36"))
+    tail = _keg_tail(out.get("tree") or "")
+    print(_paint(stream, "OMLX-UPLIFT PATCHES · " + label, tcode)
+          + ("   " + tail if tail else "")
+          + "   " + str(out.get("keg_id") or "?"), file=stream)
     if out.get("kill_switch_active"):
         print(_paint(stream,
                      "KILL SWITCH ACTIVE — boot runs UNPATCHED "
@@ -299,8 +303,8 @@ def _print_patch_status(out: dict, stream=None) -> None:
                   "90"), file=stream)
         note = ""
         if word == "RE-APPLY":
-            note = ("omlx was updated — the patch is NOT in the running "
-                    "code; restart the server to re-apply")
+            note = (f"{label} was updated — the patch is NOT in the "
+                    "running code; restart the server to re-apply")
         elif word not in ("APPLIED", "OFF") and p.get("state_detail"):
             note = str(p["state_detail"])
         if note:
@@ -517,6 +521,12 @@ def cmd_install(argv=None) -> int:
                     help="deprecated no-op (see --yes)")
     ap.add_argument("--formula", help="target a Homebrew formula's keg "
                     "instead of omlx (e.g. omlx-dev); ignored with --python")
+    ap.add_argument("--default-target", choices=["omlx", "dev"],
+                    dest="default_target", default=None,
+                    help="which install plain 'omlx-uplift patch ...' "
+                         "commands work on by default (persisted in the "
+                         "store; a first interactive install also asks). "
+                         "dev requires an omlx-dev keg to bootstrap first.")
     args = ap.parse_args(argv)
     target = args.python or _default_target_python(args.formula)
     sp = _resolve_site_packages(target)
@@ -544,7 +554,64 @@ def cmd_install(argv=None) -> int:
               f"is fixed:\n  {detail}", file=sys.stderr)
         return 1
     print_patch_preview(None)
+    _install_default_target(args)
     return 0
+
+
+def _install_default_target(args) -> None:
+    """Persist the CLI default target (install --default-target, or one
+    first-run question on a TTY — the choice is implied once, never asked
+    again, and stays editable through the flag). Install is re-run after
+    every uplift upgrade, so the prompt must fire only when nothing was
+    ever chosen, and NOTHING here may ever fail the install."""
+    try:
+        from . import brewutil, patchsource
+        from . import patches as _patches
+
+        if not args.default_target and not sys.stdin.isatty():
+            return   # scripted install without a choice: never nag, no store
+        store = _patches.PatchStore()
+        cfg = store.load().get("config") or {}
+        if args.default_target:
+            r = patchsource.set_config(store,
+                                       default_target=args.default_target)
+            if r.get("ok") is False:
+                print("WARNING: default target not stored: "
+                      + str(r.get("reason")), file=sys.stderr)
+                return
+            label = _TARGET_LABELS[args.default_target][0]
+            if (args.default_target == "dev"
+                    and not brewutil.keg_site_packages("omlx-dev")):
+                print("  note: no omlx-dev keg yet — the choice applies "
+                      "after 'omlx-uplift dev bootstrap'")
+            print(f"default CLI target: {label} (change: omlx-uplift "
+                  "install --default-target omlx|dev)")
+            return
+        if cfg.get("default_target") or not sys.stdin.isatty():
+            return   # chosen once before, or scripted: never nag, never hang
+        dev_here = bool(brewutil.keg_site_packages("omlx-dev"))
+        print("\nWhich install should omlx-uplift commands work on by "
+              "default?")
+        print("  [1] omlx       vanilla keg (runtime overlays only)")
+        print("  [2] omlx-dev   dev keg (build + runtime)"
+              + ("" if dev_here else " — not installed yet, applies after "
+                                     "'omlx-uplift dev bootstrap'"))
+        try:
+            ans = input("Choice [1]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        choice = {"": "omlx", "1": "omlx", "2": "dev"}.get(ans)
+        if choice is None:
+            print("  (not a choice — keeping default: omlx)")
+            return
+        r = patchsource.set_config(store, default_target=choice)
+        if r.get("ok") is not False:
+            print("default CLI target: " + _TARGET_LABELS[choice][0]
+                  + " (change: omlx-uplift install "
+                  "--default-target omlx|dev)")
+    except Exception as exc:                            # noqa: BLE001
+        print(f"note: default-target step skipped ({exc})", file=sys.stderr)
 
 
 def cmd_uninstall(argv=None) -> int:
@@ -767,7 +834,14 @@ def cmd_patches(argv=None) -> int:
     this docstring with no code behind it — the only way out of the kill
     switch was rm(1) on a path the user had to find. Command name:
     'omlx-uplift patch' (singular); legacy 'patches' still dispatches
-    here for compatibility."""
+    here for compatibility.
+
+    --target omlx|dev|both selects WHICH install the verb works on (the
+    vanilla keg or the omlx-dev keg; 'both' runs status/apply/check/
+    update-all once per tree). Default: the choice persisted by
+    'omlx-uplift install --default-target', else omlx. Store-only verbs
+    (enable/disable/promote/rollback/approve/adopt/remove, kill switch)
+    ignore it — the store is shared by both trees."""
     import json as _json
 
     ap = argparse.ArgumentParser(prog="omlx-uplift patch")
@@ -813,6 +887,15 @@ def cmd_patches(argv=None) -> int:
                     help="status: machine-readable JSON dump (the pre-2026 "
                          "default); without it status prints one colour-"
                          "coded line per patch")
+    ap.add_argument("--target", choices=["omlx", "dev", "both"],
+                    default=None,
+                    help="which install the command works on: omlx (vanilla "
+                         "keg), dev (omlx-dev keg) or both (status/apply/"
+                         "check/update-all run per tree). Default: the "
+                         "choice saved by 'omlx-uplift install "
+                         "--default-target', else omlx. Store-only verbs "
+                         "(enable/disable/promote/rollback/approve/adopt/"
+                         "remove, kill switch) ignore it.")
     args = ap.parse_args(argv)
 
     from . import patchsource, patches as _patches, patchsync
@@ -829,12 +912,15 @@ def cmd_patches(argv=None) -> int:
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 
-    root = _patches._omlx_root()
-    if not root:
-        print("omlx package tree not found — is omlx installed for this python?",
-              file=sys.stderr)
+    want, rows, missing = _patch_targets(store, args.target)
+    if missing:
+        _missing_target_error(missing)
         return 2
-    tree_root = os.path.dirname(root)
+    if want == "both" and args.action in ("add", "update", "curated"):
+        ap.error("--target both covers status/apply/check/update-all; "
+                 "add/update/curated gate one tree (--target omlx|dev)")
+    root = rows[0][2]
+    tree_root = rows[0][1]
 
     if args.action in ("add", "update"):
         import re as _re
@@ -933,26 +1019,99 @@ def cmd_patches(argv=None) -> int:
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 
-    if args.action == "status":
-        out = patchsource.view(store, tree_root, _patches.keg_id(root))
-        # DEV-6: show ALL patches by default; --scope filters
-        if args.scope:
-            want = _patches._LEGACY_SCOPE_NAMES.get(args.scope, args.scope)
-            out["patches"] = [p for p in out["patches"] if p["scope"] == want]
-    elif args.action == "apply":
-        out = patchsync.reconcile(store, tree_root, allow_reexec=False)
-        out["kill_switch_active"] = store.patches_disabled()
-    elif args.action == "check":
-        out = patchsource.check_all(store, tree_root)
-    elif args.action == "update-all":
-        out = patchsource.update_all(
-            store, tree_root,
-            build_root=args.build_root or patchsource.dev_build_root())
-    if args.action == "status" and not args.json:
-        _print_patch_status(out)
-        return 0
-    print(_json.dumps(out, indent=2))
-    return 0 if out.get("ok", True) else 1
+    if args.action in ("status", "apply", "check", "update-all"):
+        # PER-TARGET lane: one pass per selected tree. 'both' shows/acts on
+        # vanilla AND dev — each section/entry carries its own target, tree
+        # and keg id, mirroring what the two dashboards show.
+        outs = []
+        for t, tr, troot in rows:
+            if args.action == "status":
+                out = patchsource.view(store, tr, _patches.keg_id(troot))
+                # DEV-6: show ALL patches by default; --scope filters
+                if args.scope:
+                    want_scope = _patches._LEGACY_SCOPE_NAMES.get(
+                        args.scope, args.scope)
+                    out["patches"] = [p for p in out["patches"]
+                                      if p["scope"] == want_scope]
+            elif args.action == "apply":
+                out = patchsync.reconcile(store, tr, allow_reexec=False)
+                out["kill_switch_active"] = store.patches_disabled()
+            elif args.action == "check":
+                out = patchsource.check_all(store, tr)
+            else:
+                out = patchsource.update_all(
+                    store, tr,
+                    build_root=args.build_root or patchsource.dev_build_root())
+            out.setdefault("target", t)
+            out.setdefault("tree", tr)
+            outs.append(out)
+        ok = all(o.get("ok", True) for o in outs)
+        if args.action == "status" and not args.json:
+            for out in outs:
+                _print_patch_status(out)
+            return 0
+        payload = outs[0] if len(outs) == 1 else {"targets": outs}
+        print(_json.dumps(payload, indent=2))
+        return 0 if ok else 1
+
+
+# ------------------------------------------------------------- patch targets
+# Two installs can share one uplift store: the vanilla omlx keg and the
+# omlx-dev keg. Every tree-facing CLI verb must say WHICH one it acted on
+# (user report 2026-10-19, mruu: a dev-only box saw four RE-APPLY lines for
+# a vanilla keg it never runs). 'omlx' resolves the way the process always
+# has; 'dev' resolves through the keg's own python without importing it.
+_TARGET_LABELS = {"omlx": ("omlx", "1;36"), "dev": ("omlx-dev", "1;33")}
+
+
+def _keg_tail(tree_root: str) -> str:
+    """Compact keg identity for headers: the Cellar/<formula>/<rev> part of
+    a brew path, else the path verbatim."""
+    if not tree_root:
+        return ""
+    parts = os.path.normpath(tree_root).split(os.sep)
+    if "Cellar" in parts:
+        i = parts.index("Cellar")
+        return "/".join(parts[i:i + 3])
+    return tree_root
+
+
+def _patch_targets(store, requested):
+    """Resolve a --target value (or the stored default, else 'omlx') to
+    (want, rows, missing): rows are (target, tree_root, omlx_root) for every
+    selected tree that exists; missing lists the targets whose tree was not
+    found."""
+    from . import brewutil
+    from . import patches as _patches
+
+    cfg = store.load().get("config") or {}
+    want = requested or cfg.get("default_target") or "omlx"
+    rows, missing = [], []
+    for t in (["omlx", "dev"] if want == "both" else [want]):
+        if t == "omlx":
+            root = _patches._omlx_root()
+        else:
+            sp = brewutil.keg_site_packages("omlx-dev")
+            root = (os.path.join(sp, "omlx")
+                    if sp and os.path.isdir(os.path.join(sp, "omlx"))
+                    else None)
+        if root:
+            rows.append((t, os.path.dirname(root), root))
+        else:
+            missing.append(t)
+    return want, rows, missing
+
+
+def _missing_target_error(missing) -> None:
+    for t in missing:
+        if t == "dev":
+            print("omlx-dev keg not found — run 'omlx-uplift dev "
+                  "bootstrap' then 'omlx-uplift install', or work on the "
+                  "vanilla tree (--target omlx; make that the default with "
+                  "install --default-target omlx)", file=sys.stderr)
+        else:
+            print("omlx package tree not found — is omlx installed for "
+                  "this python?", file=sys.stderr)
 
 
 def _dev11_disable_auto_update(via: str) -> bool:

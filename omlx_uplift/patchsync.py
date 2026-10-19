@@ -238,7 +238,12 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
     try:
         ordered = sorted(plist, key=lambda p: (p.get("order", 100), p.get("id", "")))
         deferred = False
-        on_dev_keg = _patches.detect_patch_target() == "dev"
+        # TARGET FROM THE TREE, not the process: the boot pass is unchanged
+        # (tree_root IS the process tree there), but the CLI may now drive
+        # reconcile against the OTHER board's keg (patch apply --target dev)
+        # and the RUNTIME-MOUNT gate must follow the tree being mounted.
+        on_dev_keg = (_patches.detect_patch_target(
+            os.path.join(tree_root, "omlx")) == "dev")
         for patch in ordered:
             scope = _patches.patch_scope(patch)
             if on_dev_keg and scope != _patches.SCOPE_OMLX:

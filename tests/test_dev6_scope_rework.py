@@ -171,6 +171,32 @@ class DevKegRuntimeMountTests(unittest.TestCase):
             self.assertEqual(store.find(store.load(), "pk")["state"],
                              "applied")
 
+    def test_target_derives_from_the_tree_not_the_process(self):
+        # PER-TARGET CLI (user ask 2026-10-19): the CLI can now hand
+        # reconcile the OTHER board's keg. The RUNTIME-MOUNT gate must
+        # follow the tree argument (a brew-shaped omlx-dev path), not the
+        # process — no mocks here, that IS the test.
+        for leaf, mounted in (("omlx-dev", False), ("omlx", True)):
+            with tempfile.TemporaryDirectory() as tmp:
+                base = os.path.join(tmp, "Cellar", leaf, "HEAD-1", "libexec")
+                store, target = self._setup(base, "both")
+                patchsync.reconcile(store, target, allow_reexec=False)
+                with open(os.path.join(target, "omlx", "kernels.py")) as fh:
+                    self.assertEqual("OVERLAID" in fh.read(), mounted, leaf)
+
+    def test_view_target_follows_the_tree(self):
+        # view() answers per-target facts (zone silencing, branch truth)
+        # for whichever tree it was handed; an empty root keeps the
+        # historic process answer.
+        with tempfile.TemporaryDirectory() as tmp:
+            store, target = self._setup(tmp, "omlx")
+            dev_sp = os.path.join(tmp, "Cellar", "omlx-dev", "H",
+                                  "site-packages")
+            self.assertEqual(patchsource.view(store, dev_sp, "k")["target"],
+                             "dev")
+            self.assertEqual(patchsource.view(store, target, "k")["target"],
+                             "omlx")
+
     def test_reconcile_skips_both_scope_on_dev_keg(self):
         # the dev build carries the full diff: no overlay mount, no state mix
         with tempfile.TemporaryDirectory() as tmp:

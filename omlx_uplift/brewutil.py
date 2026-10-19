@@ -112,6 +112,20 @@ def mount_into_dev_keg() -> bool:
     return True
 
 
+def keg_site_packages(formula: str) -> str | None:
+    """site-packages of a formula keg's libexec python, or None when the
+    keg/python is absent. Pure path resolution through the keg's own
+    interpreter probe — never imports that keg in this process."""
+    py = default_target_python(formula)
+    if not py:
+        return None
+    try:
+        sp = resolve_site_packages(py)
+    except Exception:                       # broken keg python: honest None
+        return None
+    return str(sp) if sp.is_dir() else None
+
+
 def formula_keg_exists(formula: str) -> bool:
     import glob
 

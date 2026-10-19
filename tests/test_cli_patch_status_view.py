@@ -301,5 +301,214 @@ class DevBuildPatchTable(unittest.TestCase):
         self.assertIn("built WITHOUT this patch (tried v1)", t)
 
 
+class TargetHeader(unittest.TestCase):
+    """Per-target CLI (user ask 2026-10-19, mruu dev-only box): the header
+    names the target AND the concrete keg, in a per-target colour; the
+    RE-APPLY note speaks of the tree it describes."""
+
+    def render(self, out, tty=False):
+        stream = TtyStringIO() if tty else io.StringIO()
+        cli._print_patch_status(out, stream=stream)
+        return stream.getvalue()
+
+    def test_dev_header_names_target_and_keg(self):
+        out = dict(OUT, target="dev",
+                   tree="/opt/hb/Cellar/omlx-dev/HEAD-abc/libexec"
+                        "/lib/python3.11/site-packages")
+        t = self.render(out)
+        self.assertIn("OMLX-UPLIFT PATCHES · omlx-dev", t)
+        self.assertIn("Cellar/omlx-dev/HEAD-abc", t)
+
+    def test_vanilla_header_stays_omlx(self):
+        t = self.render(dict(OUT,
+                             tree="/opt/hb/Cellar/omlx/HEAD-165/libexec"
+                                  "/lib/python3.11/site-packages"))
+        self.assertIn("OMLX-UPLIFT PATCHES · omlx   Cellar/omlx/HEAD-165", t)
+        self.assertIn("Cellar/omlx/HEAD-165", t)
+
+    def test_re_apply_note_names_the_target_tree(self):
+        out = {"patches": [_p("mv", keg_changed=True)],
+               "target": "dev", "keg_id": "k"}
+        self.assertIn("omlx-dev was updated", self.render(out))
+
+    def test_unknown_tree_path_prints_verbatim(self):
+        out = dict(OUT, tree="/weird/venv/lib/site-packages")
+        self.assertIn("/weird/venv/lib/site-packages", self.render(out))
+
+
+class TargetWiring(unittest.TestCase):
+    """cmd_patches --target resolution: flag > stored default > omlx;
+    both = one pass per tree; honest error when a target keg is absent."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="tgt-wire-")
+        self._old = os.environ.get("UPLIFT_HOME")
+        os.environ["UPLIFT_HOME"] = self.home
+        # a real brew-shaped dev keg tree (the resolver checks it exists)
+        self.DEV_SP = os.path.join(self.home, "hb", "Cellar", "omlx-dev",
+                                   "HEAD-abc", "libexec", "lib",
+                                   "python3.11", "site-packages")
+        os.makedirs(os.path.join(self.DEV_SP, "omlx"))
+
+    def tearDown(self):
+        if self._old is None:
+            os.environ.pop("UPLIFT_HOME", None)
+        else:
+            os.environ["UPLIFT_HOME"] = self._old
+
+    def _seed_default(self, value):
+        from omlx_uplift import patches as _p
+        _p.PatchStore().save({"version": 2,
+                              "config": {"default_target": value},
+                              "patches": []})
+
+    def _run(self, argv, dev=True, vanilla="/x/site-packages/omlx"):
+        seen = []
+
+        def fake_view(store, tr, keg):
+            seen.append(tr)
+            return json.loads(json.dumps(OUT))
+
+        import contextlib
+        err = io.StringIO()
+        with mock.patch("omlx_uplift.patches._omlx_root",
+                        return_value=vanilla), \
+                mock.patch("omlx_uplift.patches.keg_id",
+                           return_value="keg-x"), \
+                mock.patch("omlx_uplift.brewutil.keg_site_packages",
+                           return_value=self.DEV_SP if dev else None), \
+                mock.patch("omlx_uplift.patchsource.view",
+                           side_effect=fake_view):
+            out = io.StringIO()
+            with redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = cli.cmd_patches(argv)
+        return rc, out.getvalue(), err.getvalue(), seen
+
+    def test_explicit_dev_targets_the_dev_keg(self):
+        rc, t, e, seen = self._run(["status", "--target", "dev", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, [self.DEV_SP])
+        self.assertEqual(json.loads(t)["target"], "dev")
+
+    def test_stored_default_follows_without_flag(self):
+        self._seed_default("dev")
+        rc, t, e, seen = self._run(["status", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, [self.DEV_SP])
+
+    def test_flag_beats_stored_default(self):
+        self._seed_default("dev")
+        rc, t, e, seen = self._run(["status", "--target", "omlx"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, ["/x/site-packages"])
+
+    def test_nothing_chosen_stays_vanilla(self):
+        rc, t, e, seen = self._run(["status", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, ["/x/site-packages"])
+        self.assertEqual(json.loads(t)["target"], "omlx")
+
+    def test_both_passes_status_once_per_tree(self):
+        rc, t, e, seen = self._run(["status", "--target", "both"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, ["/x/site-packages", self.DEV_SP])
+        # human view: one header per target, each naming its keg
+        self.assertIn("OMLX-UPLIFT PATCHES · omlx   /x/site-packages", t)
+        self.assertIn("OMLX-UPLIFT PATCHES · omlx-dev", t)
+        self.assertIn("Cellar/omlx-dev/HEAD-abc", t)
+        self.assertEqual(t.count("OMLX-UPLIFT PATCHES"), 2)
+
+    def test_both_json_groups_by_target(self):
+        rc, t, e, seen = self._run(["status", "--target", "both", "--json"])
+        self.assertEqual(rc, 0)
+        d = json.loads(t)
+        self.assertEqual([x["target"] for x in d["targets"]],
+                         ["omlx", "dev"])
+
+    def test_missing_dev_keg_errors_honestly(self):
+        rc, t, e, seen = self._run(["status", "--target", "dev"], dev=False)
+        self.assertEqual(rc, 2)
+        self.assertIn("omlx-dev keg not found", e)
+        self.assertEqual(seen, [])
+
+    def test_missing_vanilla_keeps_historic_message(self):
+        rc, t, e, seen = self._run(["status"], vanilla=None)
+        self.assertEqual(rc, 2)
+        self.assertIn("omlx package tree not found", e)
+
+    def test_add_rejects_both_with_a_hint(self):
+        with self.assertRaises(SystemExit) as sx:
+            self._run(["add", "x", "--pr", "a/b/1", "--target", "both"])
+        self.assertEqual(sx.exception.code, 2)
+
+
+class InstallDefaultTarget(unittest.TestCase):
+    """install persists the choice; scripted runs never prompt or write."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="tgt-inst-")
+        self._old = os.environ.get("UPLIFT_HOME")
+        os.environ["UPLIFT_HOME"] = self.home
+
+    def tearDown(self):
+        if self._old is None:
+            os.environ.pop("UPLIFT_HOME", None)
+        else:
+            os.environ["UPLIFT_HOME"] = self._old
+
+    def _config(self):
+        from omlx_uplift import patches as _p
+        return _p.PatchStore().load().get("config") or {}
+
+    def test_flag_persists(self):
+        import argparse
+        with mock.patch("omlx_uplift.brewutil.keg_site_packages",
+                        return_value="/x/Cellar/omlx-dev/H/sit"):
+            cli._install_default_target(argparse.Namespace(
+                default_target="dev"))
+        self.assertEqual(self._config().get("default_target"), "dev")
+
+    def test_scripted_run_writes_nothing(self):
+        import argparse
+        stdin = io.StringIO()
+        stdin.isatty = lambda: False
+        with mock.patch.object(cli.sys, "stdin", stdin):
+            cli._install_default_target(argparse.Namespace(
+                default_target=None))
+        self.assertNotIn("default_target", self._config())
+
+    def test_first_tty_run_asks_once(self):
+        import argparse
+        stdin = io.StringIO()
+        stdin.isatty = lambda: True
+        with mock.patch.object(cli.sys, "stdin", stdin), \
+                mock.patch("builtins.input", return_value="2"), \
+                mock.patch("omlx_uplift.brewutil.keg_site_packages",
+                           return_value=None):
+            buf = io.StringIO()
+            from contextlib import redirect_stdout
+            with redirect_stdout(buf):
+                cli._install_default_target(argparse.Namespace(
+                    default_target=None))
+        self.assertEqual(self._config().get("default_target"), "dev")
+        self.assertIn("not installed yet", buf.getvalue())
+
+    def test_choice_already_made_never_asks(self):
+        import argparse
+        self._seed = None
+        from omlx_uplift import patches as _p
+        _p.PatchStore().save({"version": 2,
+                              "config": {"default_target": "omlx"},
+                              "patches": []})
+        stdin = io.StringIO()
+        stdin.isatty = lambda: True
+        with mock.patch.object(cli.sys, "stdin", stdin), \
+                mock.patch("builtins.input",
+                           side_effect=AssertionError("prompted again")):
+            cli._install_default_target(argparse.Namespace(
+                default_target=None))
+        self.assertEqual(self._config().get("default_target"), "omlx")
+
+
 if __name__ == "__main__":
     unittest.main()

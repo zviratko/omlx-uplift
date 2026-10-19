@@ -827,6 +827,14 @@ def applies_phrase(patch: dict) -> str:
 def view(store, tree_root: str, keg: str | None) -> dict:
     """Manifest view + live verification snapshot for GET /patches."""
     manifest = store.load()
+    # TARGET FROM THE TREE, not the process (per-target CLI, 2026-10-19):
+    # the server always passes its own tree, so behaviour is unchanged
+    # there; the CLI can now ask for the OTHER board's view by handing in
+    # that keg's site-packages. An empty tree_root keeps the historic
+    # process answer (tests call view(store, "", ...)).
+    target = (_patches.detect_patch_target() if not tree_root
+              else _patches.detect_patch_target(
+                  os.path.join(tree_root, "omlx")))
     out = []
     for p in manifest.get("patches", []):
         desired = _desired_version_entry(store, p) or {}
@@ -842,7 +850,6 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         # the UI can show what Enable would require
         gate_ver = desired or (p.get("versions", [])[-1] if p.get("versions") else {})
         inactive_reason = None
-        target = _patches.detect_patch_target()
         # BUILD-STAMP honesty (user report 2026-10-19, mruu): on the dev
         # board the truth for a dev/both patch is the BRANCH, and every
         # build re-cuts it. When the build ran WITHOUT an enabled patch
@@ -938,7 +945,8 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         }
         out.append(entry)
     return {"patches": out, "config": manifest.get("config", {}),
-            "keg_id": keg, "kill_switch_active": store.patches_disabled(),
+            "keg_id": keg, "target": target, "tree": tree_root,
+            "kill_switch_active": store.patches_disabled(),
             "warning": store.warning_active(manifest),
             "load_error": manifest.get("load_error")}
 
@@ -1826,10 +1834,20 @@ def build_residue_pool(store, enabled: list[dict]) -> list[dict]:
     return out
 
 
-def set_config(store, auto_update_check: bool | None = None) -> dict:
+def set_config(store, auto_update_check: bool | None = None,
+               default_target: str | None = None) -> dict:
     manifest = store.load()
     cfg = manifest.setdefault("config", {"auto_update_check": False})
     if auto_update_check is not None:
         cfg["auto_update_check"] = bool(auto_update_check)
+    if default_target is not None:
+        # CLI default target (per-target patch commands): which keg an
+        # unqualified `omlx-uplift patch ...` works on. 'omlx' = vanilla
+        # keg (historic behaviour), 'dev' = the omlx-dev keg.
+        if default_target not in ("omlx", "dev"):
+            return {"ok": False,
+                    "reason": "default_target must be 'omlx' or 'dev'",
+                    "config": cfg}
+        cfg["default_target"] = default_target
     store.save(manifest)
     return {"config": cfg}
