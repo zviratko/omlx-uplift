@@ -3977,11 +3977,19 @@ function sttDeliver(text) {
 //   server {"type":"transcript.delta","delta":..} per text commit
 //   client {"type":"stop"} -> server flushes deltas,
 //   {"type":"transcript.done","text":..}, closes 1000.
-// Capability is decided SERVER-SIDE (engine.supports_realtime_stt — whisper
-// family / voxtral_realtime; Qwen3-ASR stays UNKNOWN, we do not claim it):
-// a rejection arrives as a clean error frame and the listener drops to
-// SEGMENTED capture. ONE realtime session per engine, so a refusal or a drop
-// is surfaced ONCE and never retried in a loop.
+// Capability is decided SERVER-SIDE. Since jundot/omlx 2792f06cb363 every
+// audio_stt model claims realtime: streaming families keep their incremental
+// backends and everything else (Qwen3-ASR included) is served by the server's
+// segmented backend — whole-buffer decode per closed utterance. Before that
+// commit Qwen3-ASR was refused and we relied on our own voice14 patch, since
+// dropped. A rejection still arrives as a clean error frame and the listener
+// drops to SEGMENTED capture. ONE realtime session per engine, so a refusal
+// or a drop is surfaced ONCE and never retried in a loop.
+// Measured on omlx HEAD-c3595bc (kocour, Qwen3-ASR-1.7B-8bit, 16k s16le):
+// ready 0.1s, first commit 10.4s into a paced 16s dictation (delta arrives
+// WHILE the mic is still feeding), Czech auto-language 5.1s end-to-end, text
+// identical to POST /v1/audio/transcriptions, and a stop with no silence tail
+// flushes the unclosed utterance (the commit=true contract).
 var RT_PATH = '/v1/audio/transcriptions/realtime';
 var RT_RATE = 16000;                         // the wire rate
 var RT_FRAME_MS = 100;                       // ~100 ms binary frames
