@@ -1,0 +1,5 @@
+{
+  "description": "Model load no longer ends in a hidden freeze. The first request after a load pays once-per-process setup — chat-template compile, tokenizer first-touch, sampler and first-kernel init — inline on the event loop, stalling the whole server (~0.8 s measured) right after the load reported success. One tiny generation now absorbs those costs while the model is still in its loading state (load takes ~1-3 s longer; the Load spinner covers it), so the first real request lands on a live path. Warm failures log and never fail the load.",
+  "source": {"kind": "file"},
+  "scope": "omlx"
+}
