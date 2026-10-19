@@ -532,6 +532,7 @@
  "uplift.patches.lbl_source": "來源",
  "uplift.patches.load_auth": "需要登入 — 開啟 /admin 登入，然後重新載入",
  "uplift.patches.load_fail": "Patches API 不可用",
+ "uplift.patches.manage_auto": "自動更新",
  "uplift.patches.need_file": "請選擇 .diff 檔案",
  "uplift.patches.need_id": "請先為修補指定 id",
  "uplift.patches.need_name": "請先為補丁取名",

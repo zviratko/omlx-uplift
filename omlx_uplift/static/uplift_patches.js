@@ -666,13 +666,17 @@ function ptManage(p) {
     const autoCb = document.createElement('input');
     autoCb.type = 'checkbox';
     autoCb.checked = !!p.auto_update;
+    const autoHead = document.createElement('span');
+    autoHead.className = 'pt-mgr-auto-head';
+    autoHead.textContent = ptMsg('uplift.patches.manage_auto', 'Auto update');
     const autoNote = document.createElement('span');
     autoNote.className = 'pt-detail';
     autoNote.textContent = p.auto_update
         ? ptMsg('uplift.patches.auto_on_note',
             'auto: new validated versions apply at the next restart/build')
         : '';
-    autoLbl.append(autoCb, document.createTextNode(' '), autoNote);
+    autoLbl.append(autoCb, document.createTextNode(' '), autoHead,
+                   document.createTextNode(' '), autoNote);
     autoCb.onchange = async () => {
         if (S.PT_BUSY) { autoCb.checked = !autoCb.checked; return; }
         S.PT_BUSY = true;

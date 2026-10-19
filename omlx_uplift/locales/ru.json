@@ -532,6 +532,7 @@
  "uplift.patches.lbl_source": "источник",
  "uplift.patches.load_auth": "Требуется вход — откройте /admin, войдите и обновите страницу",
  "uplift.patches.load_fail": "API патчей недоступен",
+ "uplift.patches.manage_auto": "Автообновление",
  "uplift.patches.need_file": "Выберите файл .diff",
  "uplift.patches.need_id": "Сначала укажите id патча",
  "uplift.patches.need_name": "Сначала дайте патчу имя",

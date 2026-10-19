@@ -532,6 +532,7 @@
  "uplift.patches.lbl_source": "source",
  "uplift.patches.load_auth": "Sign in required — open /admin and log in, then reload",
  "uplift.patches.load_fail": "Patches API unavailable",
+ "uplift.patches.manage_auto": "Auto update",
  "uplift.patches.need_file": "Pick a .diff file",
  "uplift.patches.need_id": "Give the patch an id first",
  "uplift.patches.need_name": "Give the patch a name first",

@@ -532,6 +532,7 @@
  "uplift.patches.lbl_source": "ソース",
  "uplift.patches.load_auth": "ログインが必要です — /admin を開いてログインし、再読み込みしてください",
  "uplift.patches.load_fail": "Patches API を利用できません",
+ "uplift.patches.manage_auto": "自動更新",
  "uplift.patches.need_file": ".diff ファイルを選択してください",
  "uplift.patches.need_id": "最初にパッチの id を指定してください",
  "uplift.patches.need_name": "先にパッチに名前を付けてください",

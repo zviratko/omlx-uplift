@@ -532,6 +532,7 @@
  "uplift.patches.lbl_source": "zdroj",
  "uplift.patches.load_auth": "Vyžaduje přihlášení — otevřete /admin, přihlaste se a znovu načtěte",
  "uplift.patches.load_fail": "API patchů nedostupné",
+ "uplift.patches.manage_auto": "Automatická aktualizace",
  "uplift.patches.need_file": "Vyberte soubor .diff",
  "uplift.patches.need_id": "Nejprve zadejte id patche",
  "uplift.patches.need_name": "Nejprve zadejte název patche",

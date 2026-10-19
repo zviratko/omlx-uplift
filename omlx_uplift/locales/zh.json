@@ -532,6 +532,7 @@
  "uplift.patches.lbl_source": "来源",
  "uplift.patches.load_auth": "需要登录 — 打开 /admin 登录，然后重新加载",
  "uplift.patches.load_fail": "Patches API 不可用",
+ "uplift.patches.manage_auto": "自动更新",
  "uplift.patches.need_file": "请选择 .diff 文件",
  "uplift.patches.need_id": "请先为补丁指定 id",
  "uplift.patches.need_name": "请先为补丁命名",

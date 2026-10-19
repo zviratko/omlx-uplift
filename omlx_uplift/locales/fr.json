@@ -536,6 +536,7 @@
  "uplift.patches.lbl_source": "source",
  "uplift.patches.load_auth": "Connexion requise — ouvrez /admin, connectez-vous, puis rechargez",
  "uplift.patches.load_fail": "API correctifs indisponible",
+ "uplift.patches.manage_auto": "Mise à jour automatique",
  "uplift.patches.need_file": "Choisissez un fichier .diff",
  "uplift.patches.need_id": "Donnez d'abord un id au correctif",
  "uplift.patches.need_name": "Donnez d'abord un nom au correctif",
