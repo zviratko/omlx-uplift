@@ -1,11 +1,11 @@
 diff --git a/omlx/engine/base.py b/omlx/engine/base.py
-index 9058744..085d530 100644
+index 9058744..859a0be 100644
 --- a/omlx/engine/base.py
 +++ b/omlx/engine/base.py
-@@ -368,6 +368,58 @@ class BaseEngine(ABC):
+@@ -367,6 +367,58 @@ class BaseEngine(ABC):
+         """
          pass
  
-     @abstractmethod
 +    async def _warm_before_ready(self, engine_label: str) -> None:
 +        """Run one tiny generation through the core before the engine is
 +        exposed as loaded.
@@ -58,9 +58,9 @@ index 9058744..085d530 100644
 +                "first request may carry the one-time costs instead"
 +            )
 +
+     @abstractmethod
      async def stream_generate(
          self,
-         prompt: str | list[int],
 diff --git a/omlx/engine/batched.py b/omlx/engine/batched.py
 index 9f5bb96..8fba51c 100644
 --- a/omlx/engine/batched.py
@@ -75,14 +75,17 @@ index 9f5bb96..8fba51c 100644
          logger.info(f"BatchedEngine loaded: {self._model_name}")
  
 diff --git a/omlx/engine/vlm.py b/omlx/engine/vlm.py
-index 04f2481..c15c4d3 100644
+index 04f2481..b653274 100644
 --- a/omlx/engine/vlm.py
 +++ b/omlx/engine/vlm.py
-@@ -2913,6 +2913,8 @@ class VLMBatchedEngine(BaseEngine):
+@@ -2913,6 +2913,11 @@ class VLMBatchedEngine(BaseEngine):
          # Inject mlx-lm tool calling support into VLM tokenizer
          self._inject_tool_calling(self._tokenizer)
  
 +        await self._warm_before_ready("VLMBatchedEngine")
++
++        # Inject mlx-lm tool calling support into VLM tokenizer
++        self._inject_tool_calling(self._tokenizer)
 +
          self._loaded = True
          logger.info(f"VLMBatchedEngine loaded: {self._model_name}")
