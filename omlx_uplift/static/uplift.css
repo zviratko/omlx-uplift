@@ -2490,10 +2490,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     /* round 3 (user 2026-10-20): the single filler track piled ALL the
        slack right of STATUS — spread it over ORIGIN/PATCH/STATUS instead
        (chips right-align into the control group), keep a thin breather */
-    grid-template-columns: 26px minmax(190px, 1.3fr) minmax(170px, 1.4fr)
-        minmax(160px, 1.2fr) minmax(24px, 0.25fr) 128px 82px 60px 92px;
+    grid-template-columns: 26px minmax(220px, 1.9fr) minmax(170px, 340px)
+        minmax(160px, 1.1fr) minmax(24px, 0.25fr) 128px 82px 60px 92px;
     gap: 10px; align-items: center; padding: 6px 10px;
-    font-size: var(--fs-meta); min-width: 1040px; }
+    font-size: var(--fs-meta); min-width: 1090px; }
 .pt-thead { border-bottom: 1px solid var(--line); color: var(--dim);
     text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
     align-items: end; }
