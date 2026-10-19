@@ -2484,10 +2484,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-table { border: 1px solid var(--line); margin: 8px 0 4px;
     overflow-x: auto; }
 .pt-row { display: grid;
-    grid-template-columns: 26px 132px minmax(140px, 1.2fr)
-        minmax(140px, 1.1fr) 82px 168px 96px;
+    /* PAT-TABLE wide-viewport fix (user screenshot 2026-10-20): content
+       columns CAP at 420/520 and the slack rides a filler BEFORE the
+       checkbox group — no dead hole between name and state at 2560px,
+       controls keep their right-side home */
+    grid-template-columns: 26px 120px minmax(140px, 420px)
+        minmax(150px, 520px) 1fr 82px 172px 96px;
     gap: 10px; align-items: center; padding: 6px 10px;
-    font-size: var(--fs-meta); min-width: 820px; }
+    font-size: var(--fs-meta); min-width: 900px; }
 .pt-thead { border-bottom: 1px solid var(--line); color: var(--dim);
     text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
     align-items: end; }
@@ -2520,6 +2524,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-c-vanilla, .pt-c-dev { display: flex; justify-content: center;
     align-items: center; }
 .pt-c-vanilla input, .pt-c-dev input { margin: 0; }
+.pt-c-fill { min-width: 0; }   /* rides the 1fr slack track */
+/* header cell: the base picker STACKS above the DEV label (was a row:
+   the 156px select spilled over the label and the MANAGE header) */
+.pt-thead .pt-c-dev { flex-direction: column; align-items: center;
+    gap: 3px; }
 .pt-manage-btn { justify-self: center; padding: 2px 10px;
     font-size: var(--fs-meta); }
 /* details block: description + full origin + safeguards + approvals.
@@ -2549,7 +2558,6 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     color: var(--dim); margin-bottom: 2px; }
 .dv-base-head select { width: 156px; min-width: 0; max-width: 100%;
     font-size: var(--fs-meta); text-overflow: ellipsis; }
-.dv-base-head .dv-base-apply { padding: 1px 8px; font-size: var(--fs-meta); }
 #dv-base-note { max-width: 156px; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; }
 /* patch zone: the dev strip below the table */
@@ -2557,7 +2565,6 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-zone-dev { background: color-mix(in srgb, var(--accent, #e0662e) 5%, var(--card)); }
 .pt-zone .pt-section-head { margin-top: 0; }
 .dv-controls { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); color: var(--dim); font-size: var(--fs-meta); }
-#dv-base-btn { align-self: center; }
 .pt-vers { display: flex; flex-wrap: wrap; gap: 6px; }
 .pt-acts { display: flex; flex-wrap: wrap; gap: 6px; }
 /* Two adjacent .btn.primary fill edge-to-edge with border==background==--ink

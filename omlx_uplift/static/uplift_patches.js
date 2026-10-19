@@ -473,13 +473,15 @@ function patchRow(p, view) {
     dcb.onchange = () => {
         ptSetTargets(p, vcb.checked, dcb.checked);
     };
+    const fill = document.createElement('span');   // rides the 1fr track:
+    fill.className = 'pt-c-fill';                  // grid items shift one
     const vcell = document.createElement('label');
     vcell.className = 'pt-c-vanilla';
     vcell.append(vcb);
     const dcell = document.createElement('label');
     dcell.className = 'pt-c-dev';
     dcell.append(dcb);
-    row.append(vcell, dcell);
+    row.append(fill, vcell, dcell);
 
     // 7) MANAGE dialog
     const mg = document.createElement('button');

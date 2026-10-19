@@ -374,21 +374,17 @@ function dvRenderBase(d) {
         sel.append(opt);
     }
     sel.value = pinned || '';
-    const btn = $('dv-base-btn');
-    const dirty = sel.value !== (pinned || '');
-    btn.disabled = !dirty || !!(d.build && d.build.running);
-    // PAT-TABLE QA: the header cell is precious space — the Apply button
-    // appears exactly when the picker holds a different choice
-    btn.hidden = !dirty;
     note.textContent = pinned
         ? ptMsg('uplift.patches.dev_base_pinned_note',
             'pinned — the next Build uses exactly this source version')
         : '';
     note.hidden = !pinned;
     dvRenderAuto(d, pinned);
-    btn.onclick = async () => {
+    // PAT-TABLE: the header cell is one compact stack — picking a base IS
+    // the intent (no separate Apply button; the click-on-change is the act)
+    sel.onchange = async () => {
         const pin = sel.value;
-        btn.disabled = true;
+        sel.disabled = true;
         try {
             const r = await dvApi('base', { pin: pin || null });
             DV_DATA = r.status || DV_DATA;
@@ -398,7 +394,7 @@ function dvRenderBase(d) {
             renderDev();
         } catch (e) {
             PG.toast(ptMsg('uplift.patches.dev_base_fail', 'Base change failed') + ': ' + e, 5000);
-            btn.disabled = false;
+            sel.disabled = false;
         }
     };
 }
