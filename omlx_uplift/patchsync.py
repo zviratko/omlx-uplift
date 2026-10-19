@@ -381,6 +381,23 @@ def sync_at_startup(store=None, tree_root: str | None = None,
         tree_root = os.path.dirname(root)
 
     report = reconcile(store, tree_root, allow_reexec=allow_reexec)
+    # BUILD-STAMP self-heal (user report 2026-10-19): on the dev board the
+    # branch is the apply target, so a stamp whose commit a later build cut
+    # away has no reconcile lane to clear it. Verify the stamps against the
+    # branch here — store-only, never a file write, never a rebuild.
+    if _patches.detect_patch_target() == "dev":
+        try:
+            from . import devsrc
+
+            healed = devsrc.prune_stale_build_stamps(store)
+            stale = [k for k, v in healed.items() if v == "stale"]
+            if stale:
+                _log.warning(
+                    "uplift: omlx-dev build stamps pruned — %s is/are not on "
+                    "the branch anymore (the running build does not contain "
+                    "them)", ", ".join(stale))
+        except Exception as exc:                    # noqa: BLE001 — repair
+            _log.debug("devsrc stamp check skipped: %s", exc)
     report["sync_seconds"] = round(time.monotonic() - started, 3)
     _log.info("uplift boot sync: %.3fs, %d report(s), changed=%s",
               report["sync_seconds"], len(report.get("reports", [])),

@@ -755,6 +755,70 @@ def classify_build(path: str, built_sha: str | None, built_base: str | None,
                       "patches are all present"}
 
 
+def prune_stale_build_stamps(store=None, cfg: dict | None = None) -> dict:
+    """BUILD-STAMP self-heal (user report 2026-10-19): the stamp an earlier
+    build left in the store names a commit ON the uplift-dev branch, and a
+    later build that cut the branch without that patch destroys the commit —
+    but nothing rewrote the store until the next build ran, so the dashboard
+    kept claiming 'applied to the omlx-dev build sources' for content the
+    installed keg does not have. Verify every stamp against the branch at
+    boot and record the honest absence, so a restart alone corrects the card
+    (no rebuild, and never a rebuild started from here).
+
+    Fail-safe in every unknown case: no dev.json, no clone, no branch, a git
+    error it cannot classify -> change nothing. Returns {patch_id: action}.
+    """
+    if cfg is None:
+        cfg = load_config()
+    if not cfg:
+        return {}
+    path = src_path(cfg)
+    if not os.path.isdir(os.path.join(path, ".git")):
+        return {}
+    branch = cfg.get("formula_branch") or DEV_BRANCH_DEFAULT
+    tip = _rev_parse(branch, path)
+    if not tip:
+        return {}
+    store = store or _patches.PatchStore()
+    manifest = store.load()
+    out: dict[str, str] = {}
+    changed = False
+    for p in manifest.get("patches", []):
+        if not _patches.scope_touches_dev(_patches.patch_scope(p)):
+            continue
+        for ver in p.get("versions", []):
+            rec = ver.get("dev_applied")
+            sha = (rec or {}).get("sha")
+            if not rec or not sha or sha == tip:
+                continue     # never built here, or base-carried (no commit)
+            if _git(["cat-file", "-e", f"{sha}^{{commit}}"], cwd=path,
+                    check=False).returncode != 0:
+                gone = True                       # object pruned: not on it
+            else:
+                rc = _git(["merge-base", "--is-ancestor", sha, tip],
+                          cwd=path, check=False).returncode
+                if rc == 0:
+                    continue                      # the branch still carries it
+                if rc != 1:
+                    out[p.get("id", "?")] = "unknown"
+                    continue                      # cannot prove — leave alone
+                gone = True
+            ver.pop("dev_applied", None)
+            p["dev_absent"] = {
+                "at": _patches.now_iso(), "kind": "stale",
+                "reason": ("NOT in the current omlx-dev build — commit "
+                           f"{sha[:12]} of the last recorded build is no "
+                           "longer on this branch (a later build was cut "
+                           "without this patch); the running server does "
+                           "not contain it")}
+            out[p.get("id", "?")] = "stale"
+            changed = True
+            break
+    if changed:
+        store.save(manifest)
+    return out
+
+
 def status(cfg: dict, patches_to_apply: list[dict] | None = None,
            residue_patches: list[dict] | None = None) -> dict:
     """Branch, tip, ahead/behind vs sync_ref, patch-commit list, and (when

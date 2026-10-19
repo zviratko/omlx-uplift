@@ -8,11 +8,12 @@ Byte-identical legacy behaviour is proven by the DEV-1 suite (legacy
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 import unittest.mock
 
-from omlx_uplift import patchsource, patches, patchsync
+from omlx_uplift import devsrc, patchsource, patches, patchsync
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIX = os.path.join(HERE, "fixtures")
@@ -350,6 +351,110 @@ class BuildStampHonestyTests(unittest.TestCase):
                 rows = {r["id"]: r for r in
                         patchsource.view(store, "", "devkeg")["patches"]}
             self.assertEqual(rows["left-out"]["state"], "obsolete")
+
+
+class BuildStampSelfHealTests(unittest.TestCase):
+    """The card must correct itself after a restart, without waiting for the
+    next build (user report 2026-10-19: the build that skipped the patch had
+    already happened, and only a rebuild rewrote the stamp)."""
+
+    def _git(self, args, cwd):
+        p = subprocess.run(["git"] + args, cwd=cwd, capture_output=True,
+                           text=True)
+        self.assertEqual(p.returncode, 0, f"git {args}: {p.stderr}")
+        return p.stdout.strip()
+
+    def _repo(self, tmp):
+        repo = os.path.join(tmp, "dev-src")
+        os.makedirs(repo)
+        self._git(["init", "-q", "-b", "main"], repo)
+        self._git(["-c", "user.name=t", "-c", "user.email=t@t", "commit",
+                   "-q", "--allow-empty", "-m", "base"], repo)
+        base = self._git(["rev-parse", "HEAD"], repo)
+        self._git(["checkout", "-q", "-B", "uplift-dev"], repo)
+        self._git(["-c", "user.name=t", "-c", "user.email=t@t", "commit",
+                   "-q", "--allow-empty", "-m", "patch(voice14): v1"], repo)
+        patch_commit = self._git(["rev-parse", "HEAD"], repo)
+        self._git(["-c", "user.name=t", "-c", "user.email=t@t", "commit",
+                   "-q", "--allow-empty", "-m", "patch(ctx): v1"], repo)
+        other_commit = self._git(["rev-parse", "HEAD"], repo)
+        # the later build re-cut the branch WITHOUT voice14
+        self._git(["checkout", "-q", "-B", "uplift-dev", base], repo)
+        self._git(["-c", "user.name=t", "-c", "user.email=t@t", "commit",
+                   "-q", "--allow-empty", "-m", "patch(ctx): v1 again"], repo)
+        tip = self._git(["rev-parse", "HEAD"], repo)
+        return repo, {"left-out": patch_commit, "carried": tip,
+                      "other": other_commit}
+
+    def test_stale_stamp_is_pruned_at_boot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, shas = self._repo(tmp)
+            store = patches.PatchStore(os.path.join(tmp, "uplift"))
+            store.save({"version": 2, "config": {}, "patches": [
+                {"id": "carried", "enabled": True, "scope": "both",
+                 "desired_version": 1, "state": "applied",
+                 "versions": [{"v": 1,
+                               "dev_applied": {"at": "old",
+                                               "sha": shas["carried"]}}]},
+                {"id": "left-out", "enabled": True, "scope": "both",
+                 "desired_version": 1, "state": "applied",
+                 "state_detail": "applied to the omlx-dev build sources",
+                 "versions": [{"v": 1,
+                               "dev_applied": {"at": "old",
+                                               "sha": shas["left-out"]}}]},
+                {"id": "pruned-object", "enabled": True, "scope": "dev",
+                 "desired_version": 1, "state": "applied",
+                 "versions": [{"v": 1, "dev_applied":
+                               {"at": "old", "sha": "f" * 40}}]},
+                {"id": "base-carried", "enabled": True, "scope": "both",
+                 "desired_version": 1, "state": "applied",
+                 "versions": [{"v": 1, "dev_applied":
+                               {"at": "old", "sha": None, "base": True}}]},
+            ]})
+            cfg = {"src_path": repo, "formula_branch": "uplift-dev"}
+            out = devsrc.prune_stale_build_stamps(store, cfg)
+            self.assertEqual(out.get("left-out"), "stale")
+            self.assertEqual(out.get("pruned-object"), "stale")
+            self.assertNotIn("carried", out)
+            man = store.load()
+            gone = store.find(man, "left-out")
+            self.assertNotIn("dev_applied", gone["versions"][0])
+            self.assertEqual(gone["dev_absent"]["kind"], "stale")
+            self.assertIn("no longer on this branch",
+                          gone["dev_absent"]["reason"])
+            # the shared state is not rewritten by a read-only repair
+            self.assertEqual(gone["state"], "applied")
+            self.assertIn("dev_applied", store.find(man, "carried")["versions"][0])
+            # a base-carried patch has no commit to test — leave it alone
+            self.assertIn("dev_applied",
+                          store.find(man, "base-carried")["versions"][0])
+
+    def test_idempotent_and_fail_safe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, shas = self._repo(tmp)
+            store = patches.PatchStore(os.path.join(tmp, "uplift"))
+            store.save({"version": 2, "config": {}, "patches": [
+                {"id": "left-out", "enabled": True, "scope": "both",
+                 "desired_version": 1, "state": "applied",
+                 "versions": [{"v": 1,
+                               "dev_applied": {"at": "old",
+                                               "sha": shas["left-out"]}}]}]})
+            cfg = {"src_path": repo, "formula_branch": "uplift-dev"}
+            self.assertEqual(devsrc.prune_stale_build_stamps(store, cfg),
+                             {"left-out": "stale"})
+            # second boot: nothing to prune, no note churn
+            self.assertEqual(devsrc.prune_stale_build_stamps(store, cfg), {})
+            # no clone at all -> change nothing, no exception
+            self.assertEqual(devsrc.prune_stale_build_stamps(
+                store, {"src_path": os.path.join(tmp, "nowhere")}), {})
+            self.assertEqual(devsrc.prune_stale_build_stamps(store, {}), {})
+            self.assertEqual(devsrc.prune_stale_build_stamps(
+                store, {"src_path": repo, "formula_branch": "no-such-branch"}),
+                {})
+            # the repair already landed; the fail-safe lanes add nothing
+            man = store.load()
+            self.assertNotIn("dev_applied", man["patches"][0]["versions"][0])
+            self.assertEqual(man["patches"][0]["dev_absent"]["kind"], "stale")
 
 
 class ViewScopeFilterTests(unittest.TestCase):
