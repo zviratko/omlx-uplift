@@ -80,7 +80,10 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                 _patches_mod.patch_scope(patch)):
             continue  # dev-scope: never applied to a keg (DEV-1)
         rev = bool(patch.get("reversal"))
-        ver = store.get_version(patch, patch.get("desired_version"))
+        # PAT-TABLE: preview what THIS keg will actually mount — a pinned
+        # runtime surface re-checks its pinned copy, not the shared desired
+        ver = store.get_version(
+            patch, _patches_mod.version_target(patch, "runtime"))
         if ver is None:
             out.append({"id": pid, "verdict": "failure",
                         "detail": "no stored desired version",
