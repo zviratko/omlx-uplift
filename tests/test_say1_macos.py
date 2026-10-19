@@ -51,6 +51,10 @@ def on_mac(monkeypatch):
     monkeypatch.setattr(SE, "_catalog_rows", lambda: [])
     monkeypatch.setattr(SE, "selected_voice_identifier",
                         lambda force=False: "")
+    # SAY-5: the System Settings per-language selection probe stays
+    # silent too — a live box has its own picks the tests must not read
+    monkeypatch.setattr(SE, "spoken_selections", lambda force=False: {})
+    monkeypatch.setattr(SE, "_os_sel_cache", {"ts": 9e15, "map": {}})
     return SE
 
 

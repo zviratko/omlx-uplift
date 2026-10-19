@@ -36,8 +36,9 @@ Contract of this module:
   route(name, language, preferred) picks the address: an explicit voice
   (identifier or display name) wins; a bare request routes by language
   through the caller-supplied preferred map (the tab's "mark preferred
-  for cs-CZ" favourites), then the language's AV default, then its best
-  installed voice; with no language at all a mark answering the Mac's
+  for cs-CZ" favourites), then the owner's per-language System Voice
+  from System Settings (SAY-5), then the language's AV default, then
+  its best installed voice; with no language at all a mark answering the Mac's
   own language (SAY-2c 'Override macOS default') wins, else the Mac's
   default voice answers (and if even that is unknown, `say` runs
   without -v and picks it itself). Routing lives here; the marks live
@@ -495,18 +496,22 @@ def _marked_voice(lang, preferred=None) -> Optional[dict]:
 
 def language_voice(lang, preferred=None) -> Optional[dict]:
     """SAY-2: the row that answers a language-carrying `say` request.
-    Chain (TTS-4b, System Settings as truth):
+    Chain (TTS-4b + SAY-5, System Settings as truth):
       1. the voice marked preferred for that language (exact locale beats
          primary-language match; a mark pointing at a voice this Mac no
          longer holds is skipped);
-      2. the Mac's SELECTED system voice (System Settings ▸ Read & Speak)
+      2. the voice the owner picked for that language in System Settings
+         ▸ Spoken Content ▸ Voices (SAY-5: a real per-language user
+         selection, read from the accessibility domain — it outranks a
+         global pick that belongs to a different language);
+      3. the Mac's SELECTED system voice (System Settings ▸ Read & Speak)
          when its own language answers this request — that is what `say`
          and macOS itself speak with;
-      3. the language's AVFoundation-flagged default row (the factory
+      4. the language's AVFoundation-flagged default row (the factory
          default for languages the selection does not cover);
-      4. the best installed tier (Premium > Enhanced > Personal >
+      5. the best installed tier (Premium > Enhanced > Personal >
          standard) when the language has no flagged row;
-      5. None when the language has nothing installed — the caller fails
+      6. None when the language has nothing installed — the caller fails
          honestly instead of speaking the text in a random language."""
     if not lang:
         return None
@@ -517,6 +522,9 @@ def language_voice(lang, preferred=None) -> Optional[dict]:
     in_lang = [v for v in rows if _locale_score(lang, v.get("locale"))]
     if not in_lang:
         return None
+    picked = system_selected_voice(lang)
+    if picked is not None:
+        return picked
     sel = selected_row()
     if sel is not None and _locale_score(lang, sel.get("locale")):
         return sel
@@ -582,6 +590,109 @@ def selected_row() -> Optional[dict]:
     tail = sel.rsplit(".", 1)[-1].lower()
     for v in rows:
         if _root_name(v["name"]) == tail:
+            return v
+    return None
+
+
+# SAY-5 (user 2026-10-19): System Settings ▸ Accessibility ▸ Spoken
+# Content ▸ Voices lets the owner pick a System Voice PER LANGUAGE (the
+# list groups them by primary language — 'English' covers every en-*
+# variant, exactly what macOS itself answers with). macOS 26+ stores
+# those picks in the com.apple.Accessibility domain as an alternating
+# array of language key + record dict; older macOS has no such key and
+# an untouched Spoken Content never writes one. Absence is honest
+# silence: {} leaves every language on the pre-SAY-5 chain.
+_OS_SEL_DOMAIN = "com.apple.Accessibility"
+_OS_SEL_KEY = "SpokenContentDefaultVoiceSelectionsByLanguage"
+_OS_SEL_TTL_S = 300
+_os_sel_cache: dict = {"ts": 0.0, "map": None}
+
+
+def _parse_spoken_selections(text) -> dict:
+    """`defaults read` output for the selection array -> {language:
+    voiceId}. Each record is a flat {...} block carrying boundLanguage
+    and voiceId; keys arrive in whatever order the OS wrote them, so
+    both are read per block. A record without boundLanguage pairs with
+    the scalar that precedes its block (the array's alternating
+    spelling). Junk blocks are skipped, never fatal."""
+    out = {}
+    frags = re.split(r"\{", text or "")
+    for i, block in enumerate(frags[1:], 1):
+        block = block.split("}", 1)[0]
+        m_vid = re.search(r'voiceId\s*=\s*"([^"]+)"', block)
+        if not m_vid:
+            continue
+        addr = m_vid.group(1)
+        m_lang = re.search(r'boundLanguage\s*=\s*"?([^";]+?)"?\s*;', block)
+        lang = ""
+        if m_lang:
+            lang = m_lang.group(1)
+        else:
+            m_prev = re.search(r'"?([A-Za-z][A-Za-z0-9-]*)"?\s*,\s*$',
+                               frags[i - 1].rstrip()[-200:])
+            if m_prev:
+                lang = m_prev.group(1)
+        lang = _norm_locale(lang).lower()
+        if lang and addr:
+            out[lang] = addr
+    return out
+
+
+def spoken_selections(force: bool = False) -> dict:
+    """{primary language: voiceId} as set in System Settings — user
+    picks only, never a factory default claim. Cached like the other
+    probes; {} on non-Mac, older macOS, or probe failure."""
+    if not available():
+        return {}
+    now = time.time()
+    if not force and _os_sel_cache["map"] is not None \
+            and now - _os_sel_cache["ts"] < _OS_SEL_TTL_S:
+        return _os_sel_cache["map"]
+    mapping: dict = {}
+    if shutil.which("defaults") is not None:
+        try:
+            p = subprocess.run(
+                ["defaults", "read", _OS_SEL_DOMAIN, _OS_SEL_KEY],
+                capture_output=True, text=True, timeout=5)
+            if p.returncode == 0:
+                mapping = _parse_spoken_selections(p.stdout)
+        except (OSError, subprocess.SubprocessError) as e:
+            log.info("say spoken-selection probe failed: %s", e)
+    _os_sel_cache.update(ts=now, map=mapping)
+    return mapping
+
+
+def system_selected_voice(lang) -> Optional[dict]:
+    """The installed row the owner's per-language System Voice points
+    at: 'cs-CZ' answers the 'cs' selection because that is how Spoken
+    Content groups them. None when no selection answers the language
+    or the chosen voice is not on this Mac anymore — macOS falls back
+    to its own default there and so do we; a voice that cannot speak
+    is never addressed."""
+    if not lang:
+        return None
+    sel = spoken_selections()
+    if not sel:
+        return None
+    by_addr = {}
+    for v in _installed_rows():
+        by_addr[v.get("identifier") or v["name"]] = v
+    # most specific answering key first: an 'en-US' selection beats an
+    # 'en' one when both exist (macOS writes primaries today; forward
+    # compatible and deterministic either way)
+    order = sorted(sel.items(),
+                   key=lambda kv: -_locale_score(lang, str(kv[0] or "")))
+    for key, addr in order:
+        k = str(key or "").lower()
+        # a region-less key answers every variant of that language
+        # (Spoken Content groups them that way); a key WITH a region
+        # answers only its exact locale — 'en-US' never claims en-GB
+        if not k or _locale_score(lang, k) <= 0:
+            continue
+        if "-" in k and k != _norm_locale(lang).lower():
+            continue
+        v = by_addr.get(str(addr or ""))
+        if v is not None:
             return v
     return None
 

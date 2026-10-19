@@ -33,6 +33,14 @@ SAY-2c (Override macOS default) adds:
 - default_voice() prefers the flagged row of the system language;
 - GET /voices/say advertises system_language / system_voice and the
   per-row answers_default flag the tab's text button labels from.
+
+SAY-5 (System Settings per-language selection) adds:
+- spoken_selections(): the user's Spoken Content ▸ Voices picks read
+  from the com.apple.Accessibility domain ({language: voiceId}); {} on
+  older macOS (no such key) keeps every pre-SAY-5 expectation intact;
+- chain step 2: a per-language OS pick outranks the global selection,
+  the factory flag and the quality tiers — but never a preferred mark,
+  and never a voice this Mac no longer holds.
 """
 from __future__ import annotations
 
@@ -85,6 +93,11 @@ def on_mac(monkeypatch):
     monkeypatch.setattr(SE, "selected_voice_identifier",
                         lambda force=False: "")
     monkeypatch.setattr(SE, "_sel_cache", {"ts": 9e15, "id": ""})
+    # SAY-5: the System Settings per-language selection probe never runs
+    # for real either (a live box has its own picks); {} keeps every
+    # expectation on the pre-SAY-5 chain unless a test sets picks itself.
+    monkeypatch.setattr(SE, "spoken_selections", lambda force=False: {})
+    monkeypatch.setattr(SE, "_os_sel_cache", {"ts": 9e15, "map": {}})
     return SE
 
 
@@ -719,3 +732,108 @@ def test_say2_locale_keys(loc):
     # the hint must teach the button, not the removed star or USE copy
     hint = d["uplift.voices.say_hint"]
     assert "★" not in hint and "USE" not in hint and "say:<locale>" in hint
+
+
+# ---------------------------------------------------------------- SAY-5
+# System Settings ▸ Spoken Content ▸ Voices per-language System Voice
+# picks (macOS 26+ store in com.apple.Accessibility). User picks only —
+# the engine claims nothing it cannot read.
+
+OS_SEL_TEXT = '''(
+        cs,
+                {
+            "_type" = "Speech.VoiceSelection";
+            "_version" = 0;
+            boundLanguage = cs;
+            voiceId = "com.apple.voice.premium.cs-CZ.Zuzana";
+        },
+        en,
+        {
+            "_type" = "Speech.VoiceSelection";
+            "_version" = 0;
+            boundLanguage = en;
+            voiceId = "com.apple.speech.synthesis.voice.GoodNews";
+        }
+)'''
+
+
+def test_parse_spoken_selections_real_output():
+    sel = SE._parse_spoken_selections(OS_SEL_TEXT)
+    assert sel == {"cs": "com.apple.voice.premium.cs-CZ.Zuzana",
+                   "en": "com.apple.speech.synthesis.voice.GoodNews"}
+
+
+def test_parse_spoken_selections_pairing_and_junk():
+    # no boundLanguage: the scalar BEFORE the block pairs with it
+    sel = SE._parse_spoken_selections('(de, {\nvoiceId = "x.y.Z";\n})')
+    assert sel == {"de": "x.y.Z"}
+    # records missing either half, junk and empty input never raise
+    assert SE._parse_spoken_selections('({\n"_type" = "junk";\n})') == {}
+    assert SE._parse_spoken_selections("") == {}
+    assert SE._parse_spoken_selections(None) == {}
+
+
+def test_os_selection_beats_factory_flag(on_mac, monkeypatch):
+    # the user's Czech pick is Zuzana (Premium): that row answers cs-CZ
+    # and the badge set moves with it — routing and chip share the chain
+    monkeypatch.setattr(SE, "spoken_selections", lambda force=False:
+                        {"cs": "com.apple.voice.premium.cs-CZ.Zuzana"})
+    on_mac._cache.update(ts=9e15, voices=[dict(r) for r in ZUZ_PAIR])
+    assert SE.language_voice("cs-CZ", {})["identifier"] == \
+        "com.apple.voice.premium.cs-CZ.Zuzana"
+    assert SE.effective_default_addrs() == \
+        {"com.apple.voice.premium.cs-CZ.Zuzana"}
+    assert SE.route("", "cs-CZ") == "com.apple.voice.premium.cs-CZ.Zuzana"
+
+
+def test_preferred_mark_still_outranks_the_os_selection(on_mac, monkeypatch):
+    # uplift's own mark is the operator's explicit word; System Settings
+    # answers only where uplift has not spoken
+    monkeypatch.setattr(SE, "spoken_selections", lambda force=False:
+                        {"cs": "com.apple.voice.premium.cs-CZ.Zuzana"})
+    on_mac._cache.update(ts=9e15, voices=[dict(r) for r in ZUZ_PAIR])
+    marked = SE.language_voice(
+        "cs-CZ", {"cs-CZ": "com.apple.voice.super-compact.cs-CZ.Zuzana"})
+    assert marked["identifier"] == \
+        "com.apple.voice.super-compact.cs-CZ.Zuzana"
+
+
+def test_uninstalled_selection_falls_back_honestly(on_mac, monkeypatch):
+    # the picked voice was deleted from this Mac: we must not address a
+    # voice that cannot speak — the pre-SAY-5 chain answers untouched
+    monkeypatch.setattr(SE, "spoken_selections", lambda force=False:
+                        {"cs": "com.apple.voice.premium.cs-CZ.Nonexistent"})
+    on_mac._cache.update(ts=9e15, voices=[dict(r) for r in ZUZ_PAIR])
+    assert SE.system_selected_voice("cs-CZ") is None
+    assert SE.language_voice("cs-CZ", {})["identifier"] == \
+        "com.apple.voice.super-compact.cs-CZ.Zuzana"
+
+
+def test_primary_key_answers_the_whole_language_family(on_mac, monkeypatch):
+    # Spoken Content lists 'English' once; the en pick answers en-US...
+    rows = [dict(r) for r in ZUZ_PAIR] + [
+        {"name": "Ava", "locale": "en-GB", "quality": "standard",
+         "identifier": "com.apple.voice.compact.en-GB.Ava",
+         "installed": True, "default": True}]
+    on_mac._cache.update(ts=9e15, voices=rows)
+    monkeypatch.setattr(SE, "spoken_selections", lambda force=False:
+                        {"en": "com.apple.voice.compact.en-GB.Ava"})
+    assert SE.language_voice("en-GB", {})["name"] == "Ava"
+    # ...and never leaks into another language family
+    assert SE.language_voice("cs-CZ", {})["name"].startswith("Zuzana")
+
+
+def test_say_list_badges_the_os_selection(client, monkeypatch, on_mac):
+    rows = [dict(r) for r in ZUZ_PAIR]
+    for r in rows:
+        r.update(sample="", downloaded=r["quality"] != "standard")
+    on_mac._cache.update(ts=9e15, voices=rows)
+    vs = {v["identifier"]: v for v in
+          client.get("/uplift/api/voices/say").json()["voices"]}
+    assert vs["com.apple.voice.super-compact.cs-CZ.Zuzana"]["default"] is True
+    monkeypatch.setattr(SE, "spoken_selections", lambda force=False:
+                        {"cs": "com.apple.voice.premium.cs-CZ.Zuzana"})
+    vs = {v["identifier"]: v for v in
+          client.get("/uplift/api/voices/say").json()["voices"]}
+    assert vs["com.apple.voice.premium.cs-CZ.Zuzana"]["default"] is True
+    assert vs["com.apple.voice.super-compact.cs-CZ.Zuzana"]["default"] is False
