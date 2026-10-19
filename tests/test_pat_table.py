@@ -401,7 +401,14 @@ class RouterContractTest(unittest.TestCase):
 
         store = object()
         req = pmod.PatchTargetsRequest(id="p1", runtime=True, dev=True)
-        with unittest.mock.patch.object(pmod, "patch_store",
+        # CI runs without the omlx package: _patch_tree_root() 503s before
+        # the mocked set_targets is reached. The endpoint's honest answer
+        # with no tree IS 503 — stub the tree so this test drives the
+        # 409/422/200 mapping it claims to pin.
+        tree = unittest.mock.patch.object(pmod, "_patch_tree_root",
+                                          return_value="/tmp/fake-tree")
+        with tree, \
+             unittest.mock.patch.object(pmod, "patch_store",
                                         return_value=store), \
              unittest.mock.patch.object(patchsource, "set_targets",
                                         return_value={"ok": False,
@@ -411,14 +418,16 @@ class RouterContractTest(unittest.TestCase):
             with self.assertRaises(HTTPException) as cm:
                 self._run(pmod.patches_targets(req, is_admin=True))
             self.assertEqual(cm.exception.status_code, 409)
-        with unittest.mock.patch.object(pmod, "patch_store",
+        with tree, \
+             unittest.mock.patch.object(pmod, "patch_store",
                                         return_value=store), \
              unittest.mock.patch.object(patchsource, "set_targets",
                                         return_value={"ok": True,
                                                       "scope": "both"}):
             out = self._run(pmod.patches_targets(req, is_admin=True))
             self.assertEqual(out["scope"], "both")
-        with unittest.mock.patch.object(pmod, "patch_store",
+        with tree, \
+             unittest.mock.patch.object(pmod, "patch_store",
                                         return_value=store), \
              unittest.mock.patch.object(patchsource, "set_targets",
                                         return_value={"ok": False,
