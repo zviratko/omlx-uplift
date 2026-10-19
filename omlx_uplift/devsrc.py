@@ -1447,6 +1447,11 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     # looked like two patches vanished — they did not: runtime-scope patches
     # mount on the live install at server start and never belong to the
     # branch. The log must answer that without a phone call.
+    # UPSTREAMED honesty (user report 2026-10-19): an enabled build patch
+    # that dropped out because upstream now carries it vanished WITHOUT a
+    # console line — the note was stream 'detail' (file + dashboard only)
+    # and covered just the 'both' scope. Every enabled patch the build set
+    # left out now gets a visible line naming the reason.
     try:
         _store = _patches_mod.PatchStore()
         _build_ids = {p["id"] for p in build_patches}
@@ -1458,9 +1463,20 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                 _emit(res, "out", f"{_e['id']} [omlx]: runtime patch — "
                                   "mounts onto the running install at server "
                                   "start, NOT part of the omlx-dev build")
-            elif _sc == _patches_mod.SCOPE_BOTH:
-                _emit(res, "detail", f"{_e['id']} [both]: enabled but absent "
-                                     "from the build patch set this pass")
+                continue
+            if not _patches_mod.scope_touches_dev(_sc):
+                continue
+            if _e.get("state") == "obsolete":
+                _emit(res, "out", f"{_e['id']} [{_sc}]: UPSTREAMED — "
+                                  "upstream now carries this patch, it is "
+                                  "marked obsolete and is deliberately NOT "
+                                  "rebuilt into this branch (disable/remove "
+                                  "to retire it)")
+            else:
+                _why = str((_e.get("dev_absent") or {}).get("reason")
+                           or "no usable stored version")
+                _emit(res, "out", f"{_e['id']} [{_sc}]: enabled build patch "
+                                  f"absent from this build — {_why}")
     except Exception as exc:                    # noqa: BLE001 — note only
         _log.debug("devsrc: runtime-scope note skipped: %s", exc)
 
@@ -1528,7 +1544,8 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     res.upstreamed = patchsource.mark_upstreamed_if_merged(store, commits)
     # the branch IS the apply step for dev/both scopes — record it so the
     # dashboard stops showing 'pending' forever (reconcile never sees these)
-    patchsource.mark_dev_applied(store, commits)
+    patchsource.mark_dev_applied(store, commits,
+                                 skipped=mres.get("skipped_patches") or [])
 
     # re-gate BEFORE the rebuild (DEV-context decision 9) — failures mark
     # needs_review per patch, never silently skipped. VER-1: re-gate what

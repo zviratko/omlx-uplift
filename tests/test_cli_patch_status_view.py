@@ -65,6 +65,21 @@ class Renderer(unittest.TestCase):
         self.assertIn("[omlx]", t)
         self.assertIn("--json", t)  # discoverability footer
 
+    def test_not_in_build_word_and_note(self):
+        # BUILD-STAMP honesty: the omlx-dev branch was re-cut without this
+        # enabled patch — the row must say so in words, not dim the card
+        out = {"patches": [_p("voice14", scope="both",
+                              state="not_in_build",
+                              state_detail="NOT in the current omlx-dev "
+                                           "build — no stored version "
+                                           "applies onto these sources "
+                                           "(tried v1)")],
+               "keg_id": "HEAD-devkeg", "kill_switch_active": False,
+               "warning": "", "load_error": ""}
+        t = self.render(out)
+        self.assertIn("NOT IN BUILD", t)
+        self.assertIn("no stored version applies", t)
+
     def test_words_mirror_the_dashboard_and_precedence(self):
         # keg_changed outranks the stale applied stamp; disabled is OFF
         # regardless; requires_approval (enabled) is HELD
@@ -210,6 +225,80 @@ class CliWiring(unittest.TestCase):
         rc, t = self._run(["status", "--json", "--scope", "dev"])
         d = json.loads(t)
         self.assertEqual(len(d["patches"]), 1)
+
+
+class DevBuildPatchTable(unittest.TestCase):
+    """`dev install` per-patch table: EVERY enabled build-scope patch the
+    store knows about must appear, with the reason when the branch does not
+    carry it (user report 2026-10-19: a patch upstream now carries vanished
+    from the table without a word)."""
+
+    def setUp(self):
+        from omlx_uplift import patches as _p
+
+        self._home = os.environ.get("UPLIFT_HOME")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        os.environ["UPLIFT_HOME"] = os.path.join(self.tmp.name, "uplift")
+        store = _p.PatchStore()
+        store.save({"version": 2, "config": {}, "patches": [
+            {"id": "built-ok", "enabled": True, "scope": "both",
+             "state": "applied", "desired_version": 1,
+             "versions": [{"v": 1}]},
+            {"id": "resolver-skip", "enabled": True, "scope": "both",
+             "state": "applied", "desired_version": 1,
+             "versions": [{"v": 1}]},
+            {"id": "qwen4-mtpfix", "enabled": True, "scope": "both",
+             "state": "obsolete", "desired_version": 1,
+             "versions": [{"v": 1}],
+             "dev_absent": {"kind": "obsolete",
+                            "reason": "upstream now carries this patch"}},
+            {"id": "ghost", "enabled": True, "scope": "dev",
+             "state": "pending", "desired_version": 1,
+             "versions": [{"v": 1}]},
+            {"id": "switched-off", "enabled": False, "scope": "both",
+             "state": "disabled", "desired_version": 1,
+             "versions": [{"v": 1}]},
+            {"id": "runtime-only", "enabled": True, "scope": "omlx",
+             "state": "applied", "desired_version": 1,
+             "versions": [{"v": 1}]},
+        ]})
+
+    def tearDown(self):
+        if self._home is None:
+            os.environ.pop("UPLIFT_HOME", None)
+        else:
+            os.environ["UPLIFT_HOME"] = self._home
+
+    def _render(self):
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            cli._dev_patch_table(
+                [{"id": "built-ok", "v": 1, "sha": "a" * 40, "files": 2}],
+                {},
+                [{"id": "resolver-skip", "reason": "no apply", "tried": [1]}])
+        return stream.getvalue()
+
+    def test_every_enabled_build_patch_has_a_row(self):
+        t = self._render()
+        self.assertIn("APPLIED", t)
+        self.assertIn("built-ok", t)
+        # upstreamed before the build: an UPSTREAMED row, not silence
+        self.assertIn("qwen4-mtpfix", t)
+        self.assertIn("marked obsolete", t)
+        # enabled, in the store, nothing materialized: a SKIPPED row naming it
+        self.assertIn("ghost", t)
+        self.assertIn("enabled but NOT in this build", t)
+        # a disabled patch is still listed (pre-existing pin)
+        self.assertIn("switched-off", t)
+        self.assertIn("DISABLED", t)
+        # runtime scope never belongs to the branch — no row, no confusion
+        self.assertNotIn("runtime-only", t)
+
+    def test_no_duplicate_row_for_a_resolver_skip(self):
+        t = self._render()
+        self.assertEqual(t.count("resolver-skip"), 1)
+        self.assertIn("built WITHOUT this patch (tried v1)", t)
 
 
 if __name__ == "__main__":

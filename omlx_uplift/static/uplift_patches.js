@@ -29,6 +29,9 @@ const PT_STATE_CLASS = {
     applied: 'pt-st-applied', pending: 'pt-st-pending',
     update_available: 'pt-st-update', needs_review: 'pt-st-warn',
     failed: 'pt-st-warn', obsolete: 'pt-st-dim', disabled: 'pt-st-dim',
+    // the omlx-dev branch was re-cut WITHOUT this enabled patch (the
+    // build's own verdict — dev board only, see mark_dev_applied)
+    not_in_build: 'pt-st-warn',
 };
 /* ============================================================================
    PAT-4: PATCHES — declarative patch carrier UI (settings/patches).
@@ -274,7 +277,7 @@ function renderPatches() {
 function patchCard(p, view) {
     const card = document.createElement('div');
     card.className = 'pt-card' + (p.state === 'needs_review' || p.state === 'failed'
-        ? ' pt-card-warn' : '');
+        || p.state === 'not_in_build' ? ' pt-card-warn' : '');
 
     const head = document.createElement('div');
     head.className = 'pt-card-head';
@@ -283,7 +286,8 @@ function patchCard(p, view) {
     title.textContent = p.id;
     head.append(title);
     const cls = PT_STATE_CLASS[p.state] || 'pt-st-dim';
-    head.append(ptChip((p.state || '').toUpperCase(), cls, p.state_detail || ''));
+    head.append(ptChip((p.state || '').replace(/_/g, ' ').toUpperCase(),
+        cls, p.state_detail || ''));
     if (p.curated && !p.curated_adopted) {
         head.append(ptChip(ptMsg('uplift.patches.bundled_chip', 'BUNDLED'),
             'pt-st-bundled',

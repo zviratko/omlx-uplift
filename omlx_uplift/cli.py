@@ -251,6 +251,9 @@ def _print_patch_status(out: dict, stream=None) -> None:
             return "GONE", "90"
         if st == "pending":
             return "PENDING", "33"
+        # the omlx-dev branch was re-cut WITHOUT this patch
+        if st == "not_in_build":
+            return "NOT IN BUILD", "31"
         return (st or "?").upper(), "36"
 
     idw = min(30, max(len(str(p.get("id", ""))) for p in patches) + 1)
@@ -301,8 +304,14 @@ def _print_patch_status(out: dict, stream=None) -> None:
         elif word not in ("APPLIED", "OFF") and p.get("state_detail"):
             note = str(p["state_detail"])
         if note:
-            print("  " + " " * 13 + _paint(stream, note[:cols - 16], "90"),
-                  file=stream)
+            # wrap, never truncate: the note is the WHOLE reason (why a
+            # build skipped a patch, what a context mismatch means) and an
+            # ellipsis mid-sentence left the operator guessing
+            import textwrap as _tw
+
+            for _ln in (_tw.wrap(note, width=max(20, cols - 16)) or [note]):
+                print("  " + " " * 13 + _paint(stream, _ln, "90"),
+                      file=stream)
     print(_paint(stream,
                  "details: omlx-uplift patch status --json", "90"),
           file=stream)
@@ -1531,8 +1540,15 @@ def _dev_patch_table(commits: list[dict], upstreamed: dict,
         "UPSTREAMED": ("UPSTREAMED", "31",
                        "PR merged upstream — no commit, patch no longer "
                        "needed (disabled candidates: re-enable or remove)"),
+        # an enabled build patch that dropped out BEFORE materialize: the
+        # drift check proved the base carries it (user report 2026-10-19 —
+        # this patch used to vanish from the table without a word)
+        "OBSOLETE": ("UPSTREAMED", "31",
+                     "upstream now carries the patch — marked obsolete, not "
+                     "rebuilt into this branch (disable/remove to retire it)"),
         "ALREADY PRESENT": ("SKIPPED", "33",
-                            "base already contains the hunks — no commit"),
+                            "the current sources already carry it 1:1 — "
+                            "no commit needed"),
         "DISABLED": ("DISABLED", "35", "not in this build"),
         # VER-1: built, but not the version you asked for
         "FALLBACK": ("FALLBACK", "33",
@@ -1542,6 +1558,9 @@ def _dev_patch_table(commits: list[dict], upstreamed: dict,
         "RESOLVER SKIP": ("SKIPPED", "31",
                           "no stored version applies — built WITHOUT this "
                           "patch (tried {tried})"),
+        # enabled, dev/both scope, and nothing of it landed on the branch
+        "UNBUILT": ("SKIPPED", "31",
+                    "enabled but NOT in this build — {why}"),
     }
     rows = []
     for c in commits:
@@ -1564,17 +1583,33 @@ def _dev_patch_table(commits: list[dict], upstreamed: dict,
         rows.append((sk["id"], "RESOLVER SKIP", style["RESOLVER SKIP"][2].format(
             tried=", ".join(f"v{t}" for t in sk.get("tried", [])))))
 
-    def _disabled_dev_rows():
+    def _store_dev_rows(present):
+        """Rows for dev/both patches the materialize report says nothing
+        about: disabled (an omission used to read as a lost patch) and
+        enabled-but-absent (obsolete upstreamed / never materialized)."""
         try:
             man = _patches_store().load()
         except Exception:                           # noqa: BLE001 — display
             return []
-        return [(p.get("id", "?"), "DISABLED", style["DISABLED"][2])
-                for p in man.get("patches", [])
-                if _patches.scope_touches_dev(_patches.patch_scope(p))
-                and not p.get("enabled")]
+        extra_rows = []
+        for p in man.get("patches", []):
+            if not _patches.scope_touches_dev(_patches.patch_scope(p)):
+                continue
+            pid = p.get("id", "?")
+            if pid in present:
+                continue
+            if not p.get("enabled"):
+                extra_rows.append((pid, "DISABLED", style["DISABLED"][2]))
+            elif p.get("state") == "obsolete":
+                extra_rows.append((pid, "OBSOLETE", style["OBSOLETE"][2]))
+            else:
+                why = str((p.get("dev_absent") or {}).get("reason")
+                          or "no usable stored version")
+                extra_rows.append((pid, "UNBUILT",
+                                   style["UNBUILT"][2].format(why=why)))
+        return extra_rows
 
-    rows += _disabled_dev_rows()
+    rows += _store_dev_rows({r[0] for r in rows})
     if not rows:
         return
     width = max(len(r[0]) for r in rows)

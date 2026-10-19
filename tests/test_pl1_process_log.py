@@ -48,7 +48,7 @@ def _pipeline(home, monkeypatch, commits=None, manifest=None):
     monkeypatch.setattr(patchsource, "mark_upstreamed_if_merged",
                         lambda store, c: {})
     monkeypatch.setattr(patchsource, "mark_dev_applied",
-                        lambda store, commits: None)
+                        lambda store, commits, **kw: None)
     # regate reads stored diffs — out of scope for a log test
     monkeypatch.setattr(devsrc, "_build_patches_from_commits",
                         lambda commits, ps: [])
@@ -101,6 +101,28 @@ def test_runtime_scope_absence_is_explained(home, monkeypatch):
     assert any(s == "out" and "runtime patch — mounts" in t
                for s, t in r.lines)
     assert "quiet-disabled" not in text
+
+
+def test_upstreamed_build_patch_is_announced(home, monkeypatch):
+    # user report 2026-10-19: a patch the drift check proved upstream now
+    # carries (state obsolete) left the build set BEFORE materialize and the
+    # console said nothing — the '+1 commit' header looked like a lost patch.
+    manifest = {"patches": [
+        {"id": "qwen4-mtpfix", "enabled": True, "scope": "both",
+         "state": "obsolete"},
+        {"id": "no-version", "enabled": True, "scope": "dev",
+         "state": "pending"},
+    ]}
+    _pipeline(home, monkeypatch, commits=[], manifest=manifest)
+    r = devsrc.run_dev_build(dry_run=True)
+    text = open(r.log_path).read()
+    out_lines = [t for s, t in r.lines if s == "out"]
+    assert any("qwen4-mtpfix [both]: UPSTREAMED" in t
+               and "NOT rebuilt into this branch" in t
+               and "marked obsolete" in t for t in out_lines), out_lines
+    assert any("no-version [dev]: enabled build patch absent" in t
+               for t in out_lines), out_lines
+    assert "UPSTREAMED" in text and "no-version" in text
 
 
 def test_previous_build_rotates_out_of_the_way(home, monkeypatch):

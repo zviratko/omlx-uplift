@@ -843,13 +843,38 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         gate_ver = desired or (p.get("versions", [])[-1] if p.get("versions") else {})
         inactive_reason = None
         target = _patches.detect_patch_target()
+        # BUILD-STAMP honesty (user report 2026-10-19, mruu): on the dev
+        # board the truth for a dev/both patch is the BRANCH, and every
+        # build re-cuts it. When the build ran WITHOUT an enabled patch
+        # (the resolver's 'continue without it'), the stored global state
+        # still says 'applied' — legitimately so for a 'both' patch on the
+        # vanilla keg, a lie if the dev card repeats it. mark_dev_applied
+        # leaves a dev_absent note for exactly that case; show it here as a
+        # per-board verdict instead of rewriting shared state (the two
+        # boards would otherwise fight over one field every restart).
+        shown_state = p.get("state")
+        shown_detail = p.get("state_detail", "")
+        absent = p.get("dev_absent") or {}
+        if (target == "dev" and p.get("enabled")
+                and shown_state == "applied" and absent.get("reason")
+                and _patches.scope_touches_dev(scope)):
+            shown_state = "not_in_build"
+            shown_detail = str(absent["reason"])
+        # The store carries ONE state_detail, written by whichever lane ran
+        # last — the dev build's wording must not follow the patch onto the
+        # vanilla card, where the fact is a runtime mount.
+        if (target != "dev" and applied_here
+                and str(shown_detail).startswith(
+                        "applied to the omlx-dev build sources")):
+            shown_detail = ("applied to the running server (a restart "
+                            "re-mounts it)")
         if not _patches.scope_touches_keg(scope) and target != "dev":
             # dev-scope patches are inert on a vanilla keg by design
             # (DEV-context 1): the dev-src materializer owns them
             inactive_reason = ("dev scope — applied to the omlx-dev build "
                                "sources, not to the running server")
         if target == "dev" and _patches.scope_touches_dev(scope):
-            active = bool(p.get("enabled")) and p.get("state") == "applied"
+            active = bool(p.get("enabled")) and shown_state == "applied"
         else:
             active = (_patches.scope_touches_keg(scope)
                       and bool(p.get("enabled")))
@@ -862,14 +887,26 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         mounts_here = (_patches.scope_touches_keg(scope)
                        if target != "dev"
                        else scope == _patches.SCOPE_OMLX)
+        # On the dev board the version dot must name the copy the BRANCH
+        # carries (mark_dev_applied stamps exactly one version; a build that
+        # skipped the patch leaves none), never the keg record — a dev/both
+        # patch has no dev-keg record by design.
+        applied_v = desired.get("v") if applied_here else None
+        if (applied_v is None and target == "dev"
+                and _patches.scope_touches_dev(scope)
+                and shown_state != "not_in_build"):
+            for _ver in p.get("versions", []):
+                if _ver.get("dev_applied"):
+                    applied_v = _ver.get("v")
+                    break
         entry = {
             "id": p.get("id"), "enabled": p.get("enabled", False),
             "scope": scope,
             "active": active,
             "inactive_reason": inactive_reason,
             "reversal": bool(p.get("reversal")),
-            "order": p.get("order", 100), "state": p.get("state"),
-            "state_detail": p.get("state_detail", ""),
+            "order": p.get("order", 100), "state": shown_state,
+            "state_detail": shown_detail,
             "source": p.get("source", {}),
             "desired_version": p.get("desired_version"),
             "versions": [{k: v.get(k) for k in
@@ -887,7 +924,7 @@ def view(store, tree_root: str, keg: str | None) -> dict:
                                     if "kernel_source" in
                                     (gate_ver.get("safeguards") or {}).get("codes", [])
                                     else None),
-            "applied_v": desired.get("v") if applied_here else None,
+            "applied_v": applied_v,
             "keg_changed": bool(applied_any and not applied_here
                                 and p.get("enabled") and mounts_here),
             "this_keg": (rec or {}).get("status") if rec else None,
@@ -1559,40 +1596,130 @@ def get_diff(store, patch_id: str, v: int) -> bytes | None:
     return _read_patch_file(store, ver)
 
 
-def mark_dev_applied(store, commits: list[dict]) -> None:
+def _dev_stamp(p: dict, target: dict | None, rec: dict) -> None:
+    """Record ONE branch truth per patch: the branch is re-cut whole on
+    every build, so at most one stored version can be the copy that is
+    actually on it. Clears stamps left on other versions and any absence
+    note."""
+    for ver in p.get("versions", []):
+        ver.pop("dev_applied", None)
+    p.pop("dev_absent", None)
+    if target is not None:
+        target["dev_applied"] = rec
+
+
+def _dev_absent(p: dict, reason: str, kind: str) -> bool:
+    """Record that THIS build cut the branch without the patch. Returns
+    True when anything changed (so a first-ever build on a fresh store
+    does not write notes nobody asked for)."""
+    had = any(v.pop("dev_applied", None) is not None
+              for v in p.get("versions", []))
+    stale = p.pop("dev_absent", None)
+    if not had and not stale and kind != "skipped":
+        return False
+    p["dev_absent"] = {"at": _patches.now_iso(), "reason": reason,
+                       "kind": kind}
+    return True
+
+
+def mark_dev_applied(store, commits: list[dict],
+                     skipped: list[dict] | None = None) -> None:
     """DEV-6: the uplift-dev branch IS the apply target for dev/both
     scopes — after a successful materialize, record each committed patch's
     desired version as applied on the branch so dashboards show 'applied'
     instead of a pending state that reconcile (which ignores these) will
-    never clear."""
+    never clear.
+
+    BUILD-STAMP honesty (user report 2026-10-19, mruu): a build RE-CUTS the
+    branch from the base, so a stamp left over from an earlier build names a
+    commit that no longer exists. A patch the VER-1 resolver skipped
+    ('continue without it') kept its 'APPLIED — applied to the omlx-dev
+    build sources' card while the installed keg did NOT carry it. So the
+    build now stamps what it carries and records an honest `dev_absent`
+    note on every build-scope entry it left out.
+
+    Per-tree truth: the store's global `state` is shared by both boards (a
+    'both' patch also lives on the vanilla keg — RUNTIME-MOUNT), and the
+    skip was the operator's own choice, so this function never flips state
+    backwards (the same rule that keeps a skipped patch out of
+    needs_review). view() / the CLI render the absence verdict ON the dev
+    board."""
     manifest = store.load()
-    by_id = {c["id"]: c for c in commits if c.get("sha")}
+    stamped = {c["id"]: c for c in commits if c.get("sha")}
+    carried = {c["id"] for c in commits
+               if c.get("sha") or c.get("skipped")}
+    left_out = {s["id"]: s for s in (skipped or [])}
+    now = _patches.now_iso()
     changed = False
     for p in manifest.get("patches", []):
-        c = by_id.get(p.get("id"))
-        if c is None or not _patches.scope_touches_dev(_patches.patch_scope(p)):
+        if not _patches.scope_touches_dev(_patches.patch_scope(p)):
             continue
-        # VER-1: the ladder may have built an OLDER stored version than
-        # desired — stamp the version that IS on the branch, and say so in
-        # the state detail (a silent 'applied' on the desired v would make
-        # the dashboard claim bytes the keg does not carry).
-        built = store.get_version(p, c.get("v")) if c.get("v") is not None else None
-        desired = store.get_version(p, p.get("desired_version"))
-        target = built if built is not None else desired
-        if target is None:
+        pid = p.get("id")
+        c = stamped.get(pid)
+        # an OBSOLETE entry never gets a build stamp: upstream carries its
+        # content, so the branch is deliberately cut without it and the old
+        # commit stamp must not keep claiming a dot on the version chip
+        obsolete = p.get("state") == "obsolete"
+        if c is not None and not obsolete:
+            # VER-1: the ladder may have built an OLDER stored version than
+            # desired — stamp the version that IS on the branch, and say so
+            # in the state detail (a silent 'applied' on the desired v would
+            # make the dashboard claim bytes the keg does not carry).
+            built = (store.get_version(p, c.get("v"))
+                     if c.get("v") is not None else None)
+            desired = store.get_version(p, p.get("desired_version"))
+            target = built if built is not None else desired
+            if target is None:
+                continue
+            _dev_stamp(p, target, {"at": now, "sha": c["sha"]})
+            if p.get("enabled"):
+                p["state"] = "applied"
+                if (built is not None and desired is not None
+                        and built.get("v") != desired.get("v")):
+                    p["state_detail"] = (f"applied to the omlx-dev build "
+                                         f"sources as v{built.get('v')} "
+                                         f"(v{desired.get('v')} did not fit "
+                                         "the current sources)")
+                else:
+                    p["state_detail"] = "applied to the omlx-dev build sources"
+                p["state_changed_at"] = now
+            changed = True
             continue
-        target["dev_applied"] = {"at": _patches.now_iso(), "sha": c["sha"]}
-        if p.get("enabled"):
-            p["state"] = "applied"
-            if built is not None and desired is not None and built.get("v") != desired.get("v"):
-                p["state_detail"] = (f"applied to the omlx-dev build sources as "
-                                     f"v{built.get('v')} "
-                                     f"(v{desired.get('v')} did not fit the "
-                                     "current sources)")
-            else:
-                p["state_detail"] = "applied to the omlx-dev build sources"
-            p["state_changed_at"] = _patches.now_iso()
-        changed = True
+        if pid in carried and not obsolete:
+            # materialize found the hunks already on the base: the branch
+            # carries the patch without a commit of its own
+            target = (store.get_version(p, p.get("desired_version"))
+                      or (p.get("versions") or [None])[-1])
+            _dev_stamp(p, target, {"at": now, "sha": None, "base": True})
+            if p.get("enabled"):
+                p["state"] = "applied"
+                p["state_detail"] = ("applied to the omlx-dev build sources "
+                                     "(the current sources already carry the "
+                                     "content — no separate commit)")
+                p["state_changed_at"] = now
+            changed = True
+            continue
+        sk = left_out.get(pid)
+        if sk is not None:
+            tried = ", ".join(f"v{t}" for t in sk.get("tried") or []) or "none"
+            reason = ("NOT in the current omlx-dev build — no stored version "
+                      f"applies onto these sources (tried {tried}); the "
+                      "running server does not contain this patch")
+            changed = _dev_absent(p, reason, "skipped") or changed
+        elif obsolete:
+            reason = ("upstream now carries this patch — marked obsolete, "
+                      "not rebuilt into this branch (disable/remove to "
+                      "retire it)")
+            changed = _dev_absent(p, reason, "obsolete") or changed
+        elif p.get("enabled"):
+            reason = ("NOT in the current omlx-dev build — the patch was "
+                      "enabled but nothing of it was materialized into this "
+                      "branch")
+            changed = _dev_absent(p, reason, "unbuilt") or changed
+        else:
+            changed = _dev_absent(
+                p, "disabled — not in the current omlx-dev build",
+                "disabled") or changed
     if changed:
         store.save(manifest)
 

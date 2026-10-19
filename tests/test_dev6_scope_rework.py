@@ -198,6 +198,160 @@ class DevKegRuntimeMountTests(unittest.TestCase):
             self.assertEqual(p["versions"][0]["dev_applied"]["sha"], "abc123")
 
 
+class BuildStampHonestyTests(unittest.TestCase):
+    """USER REPORT 2026-10-19 (mruu): `dev upgrade` SKIPPED
+    voice14-qwen3-realtime at the operator's choice, yet the dashboard
+    card still read 'APPLIED — applied to the omlx-dev build sources'.
+    The branch is re-cut on every build, so a stamp left from the previous
+    build names a commit that no longer exists. The build must therefore
+    stamp what it CARRIED and record an honest absence for what it left
+    out — per board, without flipping the shared state the vanilla keg
+    legitimately owns."""
+
+    def _store(self, tmp, patches_in):
+        store = patches.PatchStore(os.path.join(tmp, "uplift"))
+        store.save({"version": 2, "config": {}, "patches": patches_in})
+        return store
+
+    def _entries(self):
+        return [
+            {"id": "carried", "enabled": True, "scope": "both",
+             "desired_version": 1, "state": "applied",
+             "state_detail": "applied to the omlx-dev build sources",
+             "versions": [{"v": 1, "content_sha256": "a",
+                           "dev_applied": {"at": "old", "sha": "1" * 40}}]},
+            {"id": "left-out", "enabled": True, "scope": "both",
+             "desired_version": 1, "state": "applied",
+             "state_detail": "applied to the omlx-dev build sources",
+             "versions": [{"v": 1, "content_sha256": "b",
+                           "dev_applied": {"at": "old", "sha": "2" * 40}}]},
+        ]
+
+    def test_skipped_patch_loses_the_stale_stamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp, self._entries())
+            patchsource.mark_dev_applied(
+                store, [{"id": "carried", "v": 1, "sha": "3" * 40,
+                         "files": 1}],
+                skipped=[{"id": "left-out", "reason": "no apply",
+                          "tried": [1]}])
+            man = store.load()
+            carried = store.find(man, "carried")
+            out = store.find(man, "left-out")
+            # the build's own commit is recorded
+            self.assertEqual(carried["versions"][0]["dev_applied"]["sha"],
+                             "3" * 40)
+            self.assertNotIn("dev_absent", carried)
+            # the skipped one: dead commit gone, absence recorded
+            self.assertNotIn("dev_applied", out["versions"][0])
+            self.assertEqual(out["dev_absent"]["kind"], "skipped")
+            self.assertIn("NOT in the current omlx-dev build",
+                          out["dev_absent"]["reason"])
+            self.assertIn("tried v1", out["dev_absent"]["reason"])
+            # the SHARED state is not flipped — the vanilla keg still
+            # carries this 'both' overlay (RUNTIME-MOUNT), and the skip was
+            # the operator's own choice (no needs_review nag)
+            self.assertEqual(out["state"], "applied")
+            self.assertEqual(out["state_detail"],
+                             "applied to the omlx-dev build sources")
+
+    def test_dev_board_shows_the_build_verdict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp, self._entries())
+            patchsource.mark_dev_applied(
+                store, [{"id": "carried", "v": 1, "sha": "3" * 40}],
+                skipped=[{"id": "left-out", "reason": "no apply",
+                          "tried": [1]}])
+            with unittest.mock.patch.object(patches, "detect_patch_target",
+                                            return_value="dev"):
+                rows = {r["id"]: r for r in
+                        patchsource.view(store, "", "devkeg")["patches"]}
+            self.assertEqual(rows["carried"]["state"], "applied")
+            self.assertTrue(rows["carried"]["active"])
+            self.assertEqual(rows["carried"]["applied_v"], 1)
+            self.assertEqual(rows["left-out"]["state"], "not_in_build")
+            self.assertFalse(rows["left-out"]["active"])
+            self.assertIsNone(rows["left-out"]["applied_v"])
+            self.assertIn("NOT in the current omlx-dev build",
+                          rows["left-out"]["state_detail"])
+            # the vanilla board keeps the shared truth: the overlay IS there
+            with unittest.mock.patch.object(patches, "detect_patch_target",
+                                            return_value="omlx"):
+                vrows = {r["id"]: r for r in
+                         patchsource.view(store, "", "vanillakeg")["patches"]}
+            self.assertEqual(vrows["left-out"]["state"], "applied")
+
+    def test_build_wording_does_not_follow_the_patch_to_the_vanilla_card(self):
+        # 'applied to the omlx-dev build sources' is a BUILD fact; on the
+        # vanilla board the same patch is a runtime mount (RUNTIME-MOUNT)
+        with tempfile.TemporaryDirectory() as tmp:
+            entries = self._entries()
+            for e in entries:
+                e["versions"][0].pop("dev_applied", None)
+                e["versions"][0]["kegs"] = {"vanillakeg": {
+                    "status": "applied", "at": "now",
+                    "tree_root": "/opt/homebrew/lib/python3.11/site-packages"}}
+            store = self._store(tmp, entries)
+            with unittest.mock.patch.object(patches, "detect_patch_target",
+                                            return_value="omlx"):
+                rows = {r["id"]: r for r in
+                        patchsource.view(store, "", "vanillakeg")["patches"]}
+            self.assertEqual(rows["carried"]["state"], "applied")
+            self.assertIn("applied to the running server",
+                          rows["carried"]["state_detail"])
+            self.assertNotIn("omlx-dev build sources",
+                             rows["carried"]["state_detail"])
+            with unittest.mock.patch.object(patches, "detect_patch_target",
+                                            return_value="dev"):
+                drows = {r["id"]: r for r in
+                         patchsource.view(store, "", "devkeg")["patches"]}
+            self.assertIn("omlx-dev build sources",
+                          drows["carried"]["state_detail"])
+
+    def test_base_carried_patch_is_stamped_without_a_commit(self):
+        # materialize skips the commit when the base already has the hunks:
+        # the branch still CARRIES the patch, so the card must stay applied
+        with tempfile.TemporaryDirectory() as tmp:
+            entries = self._entries()
+            for e in entries:
+                e["versions"][0].pop("dev_applied", None)
+            store = self._store(tmp, entries)
+            patchsource.mark_dev_applied(
+                store, [{"id": "carried", "v": 1, "sha": None,
+                         "skipped": "already-present"}])
+            man = store.load()
+            carried = store.find(man, "carried")
+            rec = carried["versions"][0]["dev_applied"]
+            self.assertIsNone(rec["sha"])
+            self.assertTrue(rec["base"])
+            self.assertIn("already carry", carried["state_detail"])
+            with unittest.mock.patch.object(patches, "detect_patch_target",
+                                            return_value="dev"):
+                rows = {r["id"]: r for r in
+                        patchsource.view(store, "", "devkeg")["patches"]}
+            self.assertEqual(rows["carried"]["state"], "applied")
+
+    def test_obsolete_entry_keeps_its_own_verdict(self):
+        # an upstreamed patch is retired, not missing: clear the dead commit
+        # stamp but never present it as a skipped build patch
+        with tempfile.TemporaryDirectory() as tmp:
+            entries = self._entries()
+            entries[1]["state"] = "obsolete"
+            store = self._store(tmp, entries)
+            patchsource.mark_dev_applied(
+                store, [{"id": "carried", "v": 1, "sha": "3" * 40}])
+            man = store.load()
+            out = store.find(man, "left-out")
+            self.assertEqual(out["state"], "obsolete")
+            self.assertNotIn("dev_applied", out["versions"][0])
+            self.assertEqual(out["dev_absent"]["kind"], "obsolete")
+            with unittest.mock.patch.object(patches, "detect_patch_target",
+                                            return_value="dev"):
+                rows = {r["id"]: r for r in
+                        patchsource.view(store, "", "devkeg")["patches"]}
+            self.assertEqual(rows["left-out"]["state"], "obsolete")
+
+
 class ViewScopeFilterTests(unittest.TestCase):
     def test_cli_status_shows_all_by_default(self):
         # 'patches status' must list every scope (item 5e); 'dev patches'
