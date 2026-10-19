@@ -194,6 +194,41 @@ def _restore_patch(store, tree_root, keg, patch, version) -> dict:
     return {"id": pid, "action": "restored"}
 
 
+def _restore_dropped_surface(store, tree_root, keg, patch) -> list[dict]:
+    """PAT-TABLE: restore vanilla bytes when this tree no longer mounts the
+    patch — the VANILLA box was unchecked (scope narrowed to dev), the entry
+    was widened so the dev keg copy belongs on the branch now, or a dev/
+    scoped patch carries a legacy applied record on this keg. No-op when
+    nothing is applied HERE, so the historic 'dev-scope is invisible to
+    reconcile' behaviour stays byte-identical (no extra writes, no spam).
+    Unlike _restore_patch (the disable path) this must NOT stamp the patch
+    'disabled' while it is still enabled for the other surface — the honest
+    shared state then is 'pending', pointing at the next build."""
+    pid = patch.get("id")
+    applied_here = [v for v in patch.get("versions", [])
+                    if (_patches.keg_record(v, keg) or {}).get("status")
+                    == "applied"]
+    if not applied_here:
+        return []
+    if not _unwind_applied(store, tree_root, keg, patch):
+        return [{"id": pid, "action": "needs_review",
+                 "reason": patch.get("state_detail")}]
+    at = _patches.now_iso()
+    if patch.get("enabled"):
+        patch["state"] = "pending"
+        patch["state_detail"] = ("vanilla bytes restored here — the "
+                                 "omlx-dev branch carries it at the next "
+                                 "build")
+    else:
+        patch["state"] = "disabled"
+        patch["state_detail"] = "disabled — files restored"
+    patch["state_changed_at"] = at
+    _log.info("patch %s: surface unselected — restored vanilla bytes on "
+              "keg %s", pid, keg)
+    return [{"id": pid, "action": "restored",
+             "reason": "surface no longer selected here"}]
+
+
 def reconcile(store, tree_root: str, allow_reexec: bool = True,
               deadline: float | None = None) -> dict:
     """Core pass over the manifest against a concrete tree root.
@@ -246,20 +281,32 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
             os.path.join(tree_root, "omlx")) == "dev")
         for patch in ordered:
             scope = _patches.patch_scope(patch)
-            if on_dev_keg and scope != _patches.SCOPE_OMLX:
+            enabled = bool(patch.get("enabled"))
+            if (on_dev_keg and scope != _patches.SCOPE_OMLX) \
+                    or not _patches.scope_touches_keg(scope):
                 # RUNTIME-MOUNT doctrine (2026-10-18): a dev keg mounts the
                 # runtime (omlx) overlays just like the vanilla keg — patching
                 # without a rebuild. dev/both diffs ride the uplift-dev branch
                 # instead; their keg halves would collide with the branch-
                 # baked hunks or carry files the keg does not own.
+                # PAT-TABLE: 'invisible to reconcile' must not mean 'frozen
+                # patched'. When the VANILLA box is unchecked (or the entry
+                # was just widened so its keg copy belongs on the branch
+                # now), the still-applied bytes here restore THIS restart —
+                # otherwise the unchecked box lies until remove. No record
+                # here (the historic dev-scope case): stays a pure skip.
+                for rep in _restore_dropped_surface(
+                        store, tree_root, keg, patch):
+                    report["reports"].append(rep)
+                    if rep.get("action") in ("restored", "needs_review"):
+                        report["changed"] = True
                 continue
-            if not _patches.scope_touches_keg(scope):
-                # dev-scope patches never touch a keg (DEV-context 1): the
-                # dev-src materializer owns them. Invisible to reconcile.
-                continue
-            enabled = bool(patch.get("enabled"))
-            desired = store.get_version(patch, patch.get("desired_version")) \
-                if patch.get("desired_version") else None
+            desired = None
+            target_v = _patches.version_target(patch, "runtime")
+            if target_v:
+                # PAT-TABLE: the pin (Manage) wins over the shared desired
+                # version — two surfaces can sit on different copies.
+                desired = store.get_version(patch, target_v)
             state = patch.get("state")
 
             if enabled and desired is not None:

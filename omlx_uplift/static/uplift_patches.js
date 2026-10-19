@@ -1,16 +1,28 @@
 /* ============================================================================
-   PAT-4: PATCHES — declarative patch carrier UI (settings/patches).
-   PH2-1 stage 8: extracted from uplift.js. Every button hits a PAT-2
-   endpoint; nothing here writes the keg directly — enable/disable/promote/
-   rollback/reconcile land at the NEXT omlx restart (the .pth engine, PAT-3).
-   State chips reuse the cockpit-lamp vocabulary; the WARNING banner lights
-   for needs_review/failed like an instrument flag. PT_DATA/PT_BUSY live in
-   window.Uplift.state (declared before boot can reach pollPatches via
-   applyTab — PAT-4 TDZ property preserved by load order). Plain script;
-   loads AFTER uplift_state.js + domkit.js, BEFORE uplift.js; FE-1 takes
-   toast/fetchJson from window.UpliftDom, currentTab/currentSub late-bind
-   via window.Uplift._patchesGlue (live hash readers).
-   Exports window.Uplift.patches {pollPatches, initPatchesPage}.
+   PAT-TABLE: PATCHES — one row per patch (user ask 2026-10-19).
+   Row anatomy: status lamp | ORIGIN (version + HEAD commit) | patch name
+   (+details row: description, full origin, safeguards, per-version diffs) |
+   status text | VANILLA checkbox (runs in the server at restart) | DEV
+   checkbox (compiled into omlx-dev) | MANAGE dialog (version per surface:
+   latest/auto-update or pinned; test; edit source; remove).
+   The checkbox pair IS the scope+enable act (POST /patches/targets —
+   (0,0) disables, keeping the last scope); the build-base picker rides the
+   DEV column header (native select: compact closed, expands to the full
+   line when opened); AUTO UPDATE is per patch, stored in the manifest so
+   CLI, boot and every browser honour the same remembered choice.
+   Every button hits a PAT-2 endpoint; nothing here writes the keg
+   directly — changes land at the next restart (the .pth engine, PAT-3) or
+   the next Build (the dev carrier). State chips reuse the cockpit-lamp
+   vocabulary; the WARNING banner lights for needs_review/failed like an
+   instrument flag. PT_DATA/PT_BUSY live in window.Uplift.state (declared
+   before boot can reach pollPatches via applyTab — PAT-4 TDZ property
+   preserved by load order). Plain script; loads AFTER uplift_state.js +
+   domkit.js, BEFORE uplift.js; FE-1 takes toast/fetchJson from
+   window.UpliftDom, currentTab/currentSub late-bind via
+   window.Uplift._patchesGlue (live hash readers). Escape closes the
+   dialog through the global frontmost-first handler (uplift_state.js) —
+   this file never owns an Escape listener (modal-escape pin).
+   Exports window.Uplift.patches {pollPatches, initPatchesPage, patchRow}.
    ========================================================================== */
 (function () {
 'use strict';
@@ -33,13 +45,6 @@ const PT_STATE_CLASS = {
     // build's own verdict — dev board only, see mark_dev_applied)
     not_in_build: 'pt-st-warn',
 };
-/* ============================================================================
-   PAT-4: PATCHES — declarative patch carrier UI (settings/patches).
-   Every button hits a PAT-2 endpoint; nothing here writes the keg directly —
-   enable/disable/promote/rollback/reconcile land at the NEXT omlx restart
-   (the .pth engine, PAT-3). State chips reuse the cockpit-lamp vocabulary;
-   the WARNING banner lights for needs_review/failed like an instrument flag.
-   ========================================================================== */
 
 function ptMsg(key, fb) { return C.tf(key, fb); }
 
@@ -49,7 +54,7 @@ async function pollPatches() {
         renderPatches();
     } catch (e) {
         const list = $('pt-list');
-        if (list) list.innerHTML = '';   // plain clear, no markup — safe
+        if (list) list.innerHTML = '';   // clear-only assignment — safe
         if (list) {
             const d = document.createElement('div');
             d.className = 'empty';
@@ -72,13 +77,18 @@ async function pollPatches() {
 /* ---- curated catalog: no separate section (user ask 2026-09-30). ----
    The catalog is reconciled into the store automatically — default tier
    enabled, optional tier disabled — and every catalog patch then shows up
-   as an ordinary patch card in its scope zone, BUNDLED chip included.
-   There is no "install" step to press; the sync runs once per page load
-   and again when the user presses Check for updates. A dead network or a
-   catalog hiccup is silent: the store we already have is authoritative
-   for rendering. */
+   as an ordinary row in the table, BUNDLED chip included. There is no
+   "install" step to press; the sync runs once per page load and again
+   when the user presses Check for updates. A dead network or a catalog
+   hiccup is silent: the store we already have is authoritative for
+   rendering. */
 let PT_CURATED_SYNCED = false;
 let PT_CURATED_BUSY = false;
+// one details row open at a time (id); renderPatches re-opens exactly it
+// so the open state survives re-renders until the user folds it
+let PT_OPEN_DETAILS = null;
+// the surface selection a held safeguard is waiting on ({id, runtime, dev})
+let PT_PENDING_TARGETS = null;
 
 async function ptAutoSyncCurated(force) {
     if (PT_CURATED_BUSY) return;
@@ -97,8 +107,8 @@ async function ptAutoSyncCurated(force) {
             notesEl.textContent = notes.join(' · ');
         }
         if (changed) {
-            await pollPatches();   // bring the new cards in
-            await ptRefreshCarrier();   // a widened scope moves build cards
+            await pollPatches();   // bring the new rows in
+            await ptRefreshCarrier();   // a widened scope may need a build
         }
     } catch (e) {
         // sync failed: keep rendering from the local store (silent by design)
@@ -115,17 +125,17 @@ function ptApi(path, body) {
 }
 
 async function ptRefreshCarrier() {
-    // Build-zone truth (DRIFT / NEEDS REBUILD chips, which zone owns a
-    // 'both' card) rides /dev/status, NOT the patches view. Every store
-    // mutation that can move the enabled build set (remove, enable, sync,
-    // check→obsolete/promote) must re-read the carrier the moment it
-    // lands — a Remove that emptied the drift set otherwise kept its
-    // stale DRIFT chip until a full page refresh (user report 2026-10-19).
-    // pollDev repaints the panel AND refills the cards (no cycle: the
-    // refill renders cached data, it never re-fetches through here).
-    // Guard pollDev itself, not just devpanel: an older panel bundle can
-    // load without it, and a missing carrier read must never fail the
-    // action it follows (FE-5 graceful-no-op contract).
+    // Build-strip truth (DRIFT / NEEDS REBUILD chips) rides /dev/status,
+    // NOT the patches view. Every store mutation that can move the enabled
+    // build set (targets, remove, sync, check→obsolete/promote) must
+    // re-read the carrier the moment it lands — a Remove that emptied the
+    // drift set otherwise kept its stale DRIFT chip until a full page
+    // refresh (user report 2026-10-19). pollDev repaints the strip AND
+    // refills the rows (no cycle: the refill renders cached data, it
+    // never re-fetches through here). Guard pollDev itself, not just
+    // devpanel: an older panel bundle can load without it, and a missing
+    // carrier read must never fail the action it follows (FE-5
+    // graceful-no-op contract).
     const DP = window.Uplift.devpanel;
     if (DP && DP.pollDev) await DP.pollDev();
 }
@@ -170,12 +180,70 @@ async function ptEnableWithApproval(p, approve) {
     }
 }
 
+/* ---- the checkbox pair: scope AND enable in one act (PAT-TABLE). ----
+   (0,0) disables keeping the last scope; a widening re-gates the newly
+   used tree server-side; a held safeguard comes back 409 (err.status from
+   the fetchJson kit) — the checkbox visibly reverts (re-render from the
+   server truth) and the row's details OPEN with the approval buttons:
+   the operator never hunts for where to approve. */
+async function ptSetTargets(p, runtime, dev, approve) {
+    if (S.PT_BUSY) { renderPatches(); return; }
+    S.PT_BUSY = true;
+    try {
+        const body = { id: p.id, runtime: !!runtime, dev: !!dev };
+        if (approve) body.approve = approve;
+        const r = await ptApi('targets', body);
+        PT_PENDING_TARGETS = null;
+        if (r && r.ok && !(r.unchanged && !r.scope)) {
+            PG.toast(r.note ? r.note : targetsToast(r.scope, runtime, dev), 4500);
+        }
+        await pollPatches();
+        await ptRefreshCarrier();
+    } catch (e) {
+        const held = (e && e.status === 409)
+            || /needs approval/i.test(String(e && e.message || e));
+        if (held) {
+            PT_PENDING_TARGETS = { id: p.id, runtime: !!runtime,
+                                   dev: !!dev };
+            PT_OPEN_DETAILS = p.id;   // approvals must land in front of the eyes
+            PG.toast(ptMsg('uplift.patches.targets_hold',
+                'Safeguards flagged this change — approve it in the opened '
+                + 'details row'), 6000);
+        } else {
+            PG.toast(ptMsg('uplift.patches.targets_fail',
+                'Surface change failed') + ': '
+                + (e && e.message ? e.message : e), 6000);
+        }
+        renderPatches();   // checkboxes revert to the server's truth
+    } finally {
+        S.PT_BUSY = false;
+    }
+}
+
+function targetsToast(scope, runtime, dev) {
+    if (!runtime && !dev) {
+        return ptMsg('uplift.patches.targets_off',
+            'Cleared — files return to vanilla on the next restart');
+    }
+    if (runtime && dev) {
+        return ptMsg('uplift.patches.targets_both',
+            'Selected for both: the server mounts it at the next restart, '
+            + 'omlx-dev compiles it at the next Build');
+    }
+    if (runtime) {
+        return ptMsg('uplift.patches.targets_runtime',
+            'Selected for the server — takes effect after the next restart');
+    }
+    return ptMsg('uplift.patches.targets_build',
+        'Selected for omlx-dev — lands at the next Build');
+}
+
 // One display line per safeguard GROUP (mirrors the backend grouping):
 // one line per code, then the advisory lines. One line per problem used to
 // mean eight copies of the same 500-char rebuild hint.
 // SIMPLIFY (user 2026-10-10): the line says WHAT the patch targets (kernels,
 // files off the keg) — it must NOT list the affected paths. The per-file
-// detail already lives in the diff view the card links to, and repeating it
+// detail already lives in the diff view the row links to, and repeating it
 // here buried the actual warning. Group size stays as a bare count prefix
 // ('7 files: ...') so a big patch still reads bigger than a one-path flag.
 function ptSafeguardLines(p) {
@@ -183,11 +251,8 @@ function ptSafeguardLines(p) {
     const ver = (p.versions || []).find(v => v.v === (p.desired_version ||
         Math.max(...(p.versions || []).map(x => x.v)))) || {};
     const sg = ver.safeguards || {};
-    for (const grp of (sg.problems || [])) {
+    for (const grp of (sg.problems || []).concat(sg.advisories || [])) {
         out.push({ text: ptGroupLine(grp), code: grp.code });
-    }
-    for (const grp of (sg.advisories || [])) {
-        out.push({ text: ptGroupLine(grp), code: grp.code, advisory: true });
     }
     if (ver.root_note) out.push({ text: ptMsg('uplift.patches.safeguard_note',
         'Root autodetected: {n}').replace('{n}', ver.root_note), code: null });
@@ -210,21 +275,7 @@ function ptChip(text, cls, title) {
     return s;
 }
 
-// Does the omlx-dev build zone carry this machine's build patches right
-// now? The devpanel answers from the live /dev/status read (installed()
-// is false until that first poll lands) — 'both' cards then ride the
-// runtime zone as fallback so they are never invisible.
-function ptBuildCarried() {
-    const DP = window.Uplift.devpanel;
-    return !!(DP && DP.installed && DP.installed());
-}
-
-function ptRuntimeList(patches) {
-    return patches.filter(p => p.scope === 'omlx'
-        || (p.scope === 'both' && !ptBuildCarried()));
-}
-
-// PATCH-ZONES wording pass (user 2026-10-18): say WHAT LANDS WHERE, in
+// PATCH-ZONE wording pass (user 2026-10-18): say WHAT LANDS WHERE, in
 // plain effect words — no branch/commit/keg nouns. The effect differs by
 // scope: a build-only patch lands when omlx-dev is next compiled; a
 // runtime patch lands at the next server restart.
@@ -240,7 +291,7 @@ function renderPatches() {
     const d = S.PT_DATA;
     if (!d) return;
     const list = $('pt-list');
-    list.innerHTML = '';
+    list.innerHTML = '';   // clear-only assignment — safe
 
     // WARNING banner: any needs_review/failed patch (PAT-0 badge rule)
     const warn = $('pt-warn');
@@ -256,21 +307,12 @@ function renderPatches() {
             'Patch engine is OFF — the server starts from unpatched files. Nothing was deleted; re-enable with: omlx-uplift patch enable-all.');
     }
 
-    // PATCH-ZONES (user layout ask 2026-10-18): the two zones are
-    // EXCLUSIVE — one card per patch, under the surface that owns it.
-    // 'dev'/'both' belong to the omlx-dev build zone below; a 'both'
-    // patch falls back here only while the build zone cannot show it
-    // (no dev carrier: old bundle, dead /dev/status, or dev-src never
-    // bootstrapped) so a card can never vanish from the page.
-    const runtimeOnly = ptRuntimeList(d.patches);
-
-    // plain status line: patches loaded vs active (enabled). Patches can
-    // touch any part of the package, not just /admin/ — no claims about
-    // which files diverge from vanilla.
+    // plain status line: patches loaded vs active (enabled) — the table
+    // shows every patch once (PAT-TABLE; the two-zone split is retired).
     $('pt-sub').textContent = ptMsg('uplift.patches.counts',
         '{loaded} loaded · {active} active')
-        .replace('{loaded}', runtimeOnly.length)
-        .replace('{active}', runtimeOnly.filter(p => p.enabled).length);
+        .replace('{loaded}', d.patches.length)
+        .replace('{active}', d.patches.filter(p => p.enabled).length);
 
     const auto = $('pt-auto-check');
     auto.checked = !!(d.config && d.config.auto_update_check);
@@ -281,57 +323,97 @@ function renderPatches() {
         } catch (e) { PG.toast(String(e), 4000); }
     };
 
-    if (!runtimeOnly.length) {
+    if (!d.patches.length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = ptMsg('uplift.patches.none',
-            'No runtime patches yet. Add a GitHub PR, URL, or upload a .diff below.');
+            'No patches yet. Add a GitHub PR, URL, or upload a .diff below.');
         list.append(empty);
     }
-    for (const p of runtimeOnly) list.append(patchCard(p, d));
+    for (const p of d.patches) list.append(patchRow(p, d));
     // FE-5 seam: dev panel lives in uplift_devpanel.js; lazy lookup so this
     // file works with the panel absent (graceful) and load order is free.
     const DP = window.Uplift.devpanel;
     if (DP) DP.renderDev();
 }
 
-function patchCard(p, view) {
-    const card = document.createElement('div');
-    card.className = 'pt-card' + (p.state === 'needs_review' || p.state === 'failed'
-        || p.state === 'not_in_build' ? ' pt-card-warn' : '');
+/* ---- PAT-TABLE row: lamp | origin | name(+details) | status |           */
+/*             VANILLA | DEV | MANAGE                                        */
+function patchRow(p, view) {
+    const entry = document.createElement('div');
+    const bad = p.state === 'needs_review' || p.state === 'failed'
+        || p.state === 'not_in_build';
+    entry.className = 'pt-entry' + (bad ? ' pt-entry-warn' : '');
+    entry.dataset.pid = p.id;
 
-    const head = document.createElement('div');
-    head.className = 'pt-card-head';
-    const title = document.createElement('span');
-    title.className = 'pt-id';
-    title.textContent = p.id;
-    head.append(title);
-    const cls = PT_STATE_CLASS[p.state] || 'pt-st-dim';
-    head.append(ptChip((p.state || '').replace(/_/g, ' ').toUpperCase(),
-        cls, p.state_detail || ''));
+    const row = document.createElement('div');
+    row.className = 'pt-row';
+
+    // 1) status lamp — lit per the ONE state this board must show
+    const lamp = document.createElement('span');
+    lamp.className = 'pt-c-lamp pt-lamp '
+        + (PT_STATE_CLASS[p.state] || 'pt-st-dim');
+    lamp.title = (p.state || '').replace(/_/g, ' ').toUpperCase()
+        + (p.state_detail ? ' — ' + p.state_detail : '');
+    row.append(lamp);
+
+    // 2) ORIGIN: the version this patch runs + the HEAD commit it was
+    //    fetched at; a newer candidate shows as a dim '→ vN' arrow
+    const origin = document.createElement('button');
+    origin.type = 'button';
+    origin.className = 'pt-c-origin pt-origin';
+    const effV = p.desired_version || p.latest_v || 0;
+    const ent = (p.versions || []).find(v => v.v === effV)
+        || (p.versions || []).slice(-1)[0] || {};
+    let oTxt = 'v' + (ent.v || effV || '—');
+    const head = String(ent.source_head_sha || '').slice(0, 12);
+    if (head) oTxt += ' · ' + head;
+    origin.textContent = oTxt;
+    if ((p.latest_v || 0) > (ent.v || effV)) {
+        const nx = document.createElement('span');
+        nx.className = 'pt-origin-next';
+        nx.textContent = ' → v' + p.latest_v;
+        origin.append(nx);
+    }
+    origin.title = ptMsg('uplift.patches.show_diff', 'show stored diff');
+    origin.onclick = () => ptShowDiff(p.id, ent.v || effV);
+    row.append(origin);
+
+    // 3) PATCH: name; the details block (one open at a time) carries the
+    //    description, full origin, per-version diffs, safeguards + approvals
+    const pcell = document.createElement('span');
+    pcell.className = 'pt-c-patch pt-name-cell';
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'pt-name';
+    name.textContent = p.id + ' ▾';
+    pcell.append(name);
+    row.append(pcell);
+
+    // 4) STATUS: state chip + honest extras; stays CLEAN while the patch
+    //    simply tracks the latest (user: pins are named, not implied)
+    const scell = document.createElement('span');
+    scell.className = 'pt-c-status';
+    scell.append(ptChip((p.state || '').replace(/_/g, ' ').toUpperCase(),
+        PT_STATE_CLASS[p.state] || 'pt-st-dim', p.state_detail || ''));
     if (p.curated && !p.curated_adopted) {
-        head.append(ptChip(ptMsg('uplift.patches.bundled_chip', 'BUNDLED'),
+        scell.append(ptChip(ptMsg('uplift.patches.bundled_chip', 'BUNDLED'),
             'pt-st-bundled',
             ptMsg('uplift.patches.bundled_hint',
                   'part of the curated catalog — kept current by curated sync')));
     }
     if (p.reversal) {
-        head.append(ptChip(ptMsg('uplift.patches.reversal_chip', 'REVERSAL'),
+        scell.append(ptChip(ptMsg('uplift.patches.reversal_chip', 'REVERSAL'),
             'pt-st-reversal',
             ptMsg('uplift.patches.reversal_hint',
                   'reverts an already merged change — applied in the un-apply direction')));
     }
     if (p.source && p.source.insecure_tls) {   // UX-1 (SWEEP183 K): sticky
-        head.append(ptChip(ptMsg('uplift.patches.insecure_chip', 'INSECURE'),
+        scell.append(ptChip(ptMsg('uplift.patches.insecure_chip', 'INSECURE'),
             'pt-st-insecure',
             ptMsg('uplift.patches.insecure_hint',
                   'TLS verification is disabled when fetching this patch — ' +
                   'set at add time, it also applies to every later re-check')));
-    }
-    const heldCodes = p.requires_approval || [];
-    if (heldCodes.length) {
-        head.append(ptChip(ptMsg('uplift.patches.safeguard_hold', 'AUTO-APPLY HELD'),
-            'pt-st-warn', p.state_detail || ''));
     }
     if (p.keg_changed && p.enabled) {
         // RUNTIME-MOUNT: with two boards on one store, "not live here" has
@@ -340,7 +422,7 @@ function patchCard(p, view) {
         // the patched context) needs a rebased patch version. Never tell
         // the operator to restart when restart is proven not to help.
         const failed = p.this_keg === 'error';
-        head.append(ptChip(ptMsg(failed ? 'uplift.patches.keg_failed'
+        scell.append(ptChip(ptMsg(failed ? 'uplift.patches.keg_failed'
                                         : 'uplift.patches.keg_changed',
                                failed ? 'REVIEW' : 'NEEDS RE-APPLY'), 'pt-st-warn',
             failed ? (p.this_keg_detail ||
@@ -353,15 +435,73 @@ function patchCard(p, view) {
                            'this patch is enabled but NOT in the running code. ' +
                            'Restart the server and it will be applied again.')));
     }
-    if (p.state_detail) {
-        const det = document.createElement('span');
-        det.className = 'pt-detail';
-        det.textContent = p.state_detail;
-        head.append(det);
+    const sf = p.surfaces || {};
+    if (sf.runtime && sf.runtime.pinned) {
+        scell.append(ptChip(ptMsg('uplift.patches.pin_vanilla',
+            'VANILLA v{v} pinned').replace('{v}', sf.runtime.version),
+            'pt-st-dim',
+            ptMsg('uplift.patches.pin_hint',
+                'this surface is frozen at this version — an update will '
+                + 'not move it until you release the pin')));
     }
-    card.append(head);
+    if (sf.build && sf.build.pinned) {
+        scell.append(ptChip(ptMsg('uplift.patches.pin_dev',
+            'DEV v{v} pinned').replace('{v}', sf.build.version),
+            'pt-st-dim',
+            ptMsg('uplift.patches.pin_hint',
+                'this surface is frozen at this version — an update will '
+                + 'not move it until you release the pin')));
+    }
+    row.append(scell);
 
-    // source line + advisory warnings (plaintext/credentials policy)
+    // 5+6) VANILLA / DEV checkboxes — scope AND enable in one act
+    const vcb = document.createElement('input');
+    vcb.type = 'checkbox';
+    vcb.checked = !!(sf.runtime && sf.runtime.checked);
+    vcb.title = ptMsg('uplift.patches.box_vanilla_title',
+        'runs in the server (vanilla + omlx-dev) — mounts at the next '
+        + 'restart; unchecking restores the vanilla bytes there');
+    const dcb = document.createElement('input');
+    dcb.type = 'checkbox';
+    dcb.checked = !!(sf.build && sf.build.checked);
+    dcb.title = ptMsg('uplift.patches.box_dev_title',
+        'compiled into omlx-dev — lands at the next Build');
+    vcb.onchange = () => {
+        // the pair posts together so (0,0) can disable in ONE act
+        ptSetTargets(p, vcb.checked, dcb.checked);
+    };
+    dcb.onchange = () => {
+        ptSetTargets(p, vcb.checked, dcb.checked);
+    };
+    const vcell = document.createElement('label');
+    vcell.className = 'pt-c-vanilla';
+    vcell.append(vcb);
+    const dcell = document.createElement('label');
+    dcell.className = 'pt-c-dev';
+    dcell.append(dcb);
+    row.append(vcell, dcell);
+
+    // 7) MANAGE dialog
+    const mg = document.createElement('button');
+    mg.type = 'button';
+    mg.className = 'btn pt-manage-btn';
+    mg.textContent = ptMsg('uplift.patches.manage', 'MANAGE');
+    mg.onclick = () => ptManage(p);
+    row.append(mg);
+
+    entry.append(row);
+
+    // ---- details block (hidden unless this id is the open one) ----
+    const det = document.createElement('div');
+    det.className = 'pt-det';
+    det.hidden = PT_OPEN_DETAILS !== p.id;
+    if (p.description) {
+        const dsc = document.createElement('div');
+        dsc.className = 'pt-det-desc';
+        dsc.textContent = p.description;
+        det.append(dsc);
+    }
+    // full origin: source line + per-version chips (click = diff)
     const src = document.createElement('div');
     src.className = 'pt-src';
     const s = p.source || {};
@@ -376,44 +516,43 @@ function patchCard(p, view) {
         a.textContent = ' ↗';
         src.append(a);
     }
-    card.append(src);
-    // curated patches carry the manifest summary (why they exist)
-    if (p.description) {
-        const det = document.createElement('div');
-        det.className = 'pt-detail';
-        det.textContent = p.description;
-        card.append(det);
-    }
-    for (const adv of (p.advisories || [])) {
-        const w = document.createElement('div');
-        w.className = 'pt-advisories';
-        w.textContent = '⚠ ' + adv;
-        card.append(w);
-    }
-
-    // versions row: v<n> chips, applied one marked
+    det.append(src);
     const vers = document.createElement('div');
     vers.className = 'pt-vers';
     for (const v of (p.versions || []).slice().sort((a, b) => a.v - b.v)) {
         const isApplied = p.applied_v === v.v;
+        const isDevApplied = p.dev_applied_v === v.v;
         const isDesired = p.desired_version === v.v;
-        const isCandidate = !isDesired && v.v === Math.max(...(p.versions || []).map(x => x.v));
-        const chip = ptChip('v' + v.v + (isApplied ? ' ●' : isDesired ? ' ◐' : ''),
-            isApplied ? 'pt-st-applied' : (isCandidate && p.state === 'update_available') ? 'pt-st-update' : 'pt-st-dim',
-            (v.fetched_at || '') + (v.source_head_sha ? ' · ' + v.source_head_sha.slice(0, 12) : ''));
+        const isCandidate = !isDesired && v.v === (p.latest_v || 0);
+        const chip = ptChip('v' + v.v + (isApplied ? ' ●'
+            : isDevApplied ? ' ▲' : isDesired ? ' ◐' : ''),
+            isApplied ? 'pt-st-applied'
+                : (isCandidate && p.state === 'update_available')
+                    ? 'pt-st-update' : 'pt-st-dim',
+            (v.fetched_at || '') + (v.source_head_sha
+                ? ' · ' + v.source_head_sha.slice(0, 12) : ''));
         chip.style.cursor = 'pointer';
-        chip.title = ptMsg('uplift.patches.show_diff', 'show stored diff') + ' — ' + chip.title;
+        chip.title = ptMsg('uplift.patches.show_diff', 'show stored diff')
+            + ' — ' + chip.title;
         chip.onclick = () => ptShowDiff(p.id, v.v);
         vers.append(chip);
     }
-    card.append(vers);
-
+    det.append(vers);
+    if (p.inactive_reason) {
+        const ir = document.createElement('div');
+        ir.className = 'pt-detail';
+        ir.textContent = p.inactive_reason;
+        det.append(ir);
+    }
     // safeguards: grouped problem lines, advisory lines, autodetected
     // root, rebuild command, per-code approvals (the note names the
-    // EXCEPTIONS, not a blanket off)
+    // EXCEPTIONS, not a blanket off). The approval box renders whenever
+    // codes are HELD too — hiding the means while demanding it is not an
+    // option (fixture-tested: requires_approval without stored lines).
     const sgLines = ptSafeguardLines(p);
     const approved = p.safeguard_always || [];
-    if (sgLines.length || approved.length) {
+    const heldCodes = p.requires_approval || [];
+    if (sgLines.length || approved.length || heldCodes.length) {
         const box = document.createElement('div');
         box.className = 'pt-safeguards';
         if (sgLines.length) {
@@ -423,15 +562,15 @@ function patchCard(p, view) {
                 'Safeguards flagged this patch:');
             box.append(t);
             for (const l of sgLines) {
-                const row = document.createElement('div');
-                row.className = 'pt-advisories';
-                row.textContent = '⚠ ' + l.text;
-                box.append(row);
+                const w = document.createElement('div');
+                w.className = 'pt-advisories';
+                w.textContent = '⚠ ' + l.text;
+                box.append(w);
             }
         }
         if (p.kernel_rebuild_hint) {
-            const row = document.createElement('div');
-            row.className = 'pt-sg-rebuild';
+            const rr = document.createElement('div');
+            rr.className = 'pt-sg-rebuild';
             const lbl = document.createElement('span');
             lbl.textContent = ptMsg('uplift.patches.safeguard_rebuild',
                 'Native kernel rebuild (required for real effect):');
@@ -439,8 +578,8 @@ function patchCard(p, view) {
             cmd.textContent = p.kernel_rebuild_hint;
             cmd.title = 'click to copy';
             cmd.onclick = () => { navigator.clipboard.writeText(cmd.textContent); };
-            row.append(lbl, document.createTextNode(' '), cmd);
-            box.append(row);
+            rr.append(lbl, document.createTextNode(' '), cmd);
+            box.append(rr);
         }
         if (approved.length) {
             const a = document.createElement('div');
@@ -449,83 +588,281 @@ function patchCard(p, view) {
                 'approved: {codes}').replace('{codes}', approved.join(', '));
             box.append(a);
         }
-        card.append(box);
+        const acts = document.createElement('div');
+        if (heldCodes.length) {
+            acts.className = 'pt-acts pt-sg-acts';   // flex gap — two adjacent
+            const once = document.createElement('button');
+            once.type = 'button';
+            once.className = 'btn primary';
+            once.textContent = ptMsg('uplift.patches.approve_once',
+                'Apply once anyway');
+            once.onclick = () => {
+                const pend = PT_PENDING_TARGETS
+                    && PT_PENDING_TARGETS.id === p.id
+                    ? PT_PENDING_TARGETS : null;
+                if (pend) ptSetTargets(p, pend.runtime, pend.dev, 'once');
+                else ptEnableWithApproval(p, 'once');
+            };
+            const al = document.createElement('button');
+            al.type = 'button';
+            al.className = 'btn primary';
+            al.textContent = ptMsg('uplift.patches.approve_always',
+                'Always allow ({codes})')
+                .replace('{codes}', heldCodes.join(', '));
+            al.onclick = () => {
+                const pend = PT_PENDING_TARGETS
+                    && PT_PENDING_TARGETS.id === p.id
+                    ? PT_PENDING_TARGETS : null;
+                if (pend) ptSetTargets(p, pend.runtime, pend.dev, 'always');
+                else ptEnableWithApproval(p, 'always');
+            };
+            acts.append(once, al);
+            box.append(acts);
+        }
+        det.append(box);
     }
-
-    // action row: buttons wired to PAT-2 endpoints
-    const acts = document.createElement('div');
-    acts.className = 'pt-acts';
-    const btn = (label, cls, fn, title) => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'btn' + (cls ? ' ' + cls : '');
-        b.textContent = label;
-        if (title) b.title = title;
-        b.onclick = fn;
-        acts.append(b);
-        return b;
+    // name toggle: fold the others, open THIS one (direct DOM, no flood)
+    name.onclick = () => {
+        if (det.hidden) {
+            for (const el of $('pt-list').querySelectorAll('.pt-det'))
+                el.hidden = true;
+            det.hidden = false;
+            PT_OPEN_DETAILS = p.id;
+            det.scrollIntoView({ block: 'nearest' });
+        } else {
+            det.hidden = true;
+            PT_OPEN_DETAILS = null;
+        }
     };
-    if (!p.enabled) {
-        if (heldCodes.length) {
-            btn(ptMsg('uplift.patches.approve_once', 'Apply once anyway'), 'primary',
-                () => ptEnableWithApproval(p, 'once'),
-                ptMsg('uplift.patches.approve_once_title',
-                      'Approve the flagged safeguards for this version only'));
-            btn(ptMsg('uplift.patches.approve_always', 'Always allow ({codes})')
-                    .replace('{codes}', heldCodes.join(', ')), 'primary',
-                () => ptEnableWithApproval(p, 'always'),
-                ptMsg('uplift.patches.approve_always_title',
-                      'Remember these safeguard codes for future versions of this patch'));
-        } else {
-            btn(ptMsg('uplift.patches.enable', 'Enable'), 'primary',
-                () => ptEnableWithApproval(p, null),
-                enabledToast(p));
-        }
-    } else {
-        btn(ptMsg('uplift.patches.disable', 'Disable'), '',
-            () => ptAction('disable', { id: p.id },
-                ptMsg('uplift.patches.disabled_toast', 'Disabled — files restored on next omlx restart')));
-    }
-    if (p.state === 'update_available') {
-        const doPromote = (approve) => ptAction('promote',
-            approve ? { id: p.id, approve } : { id: p.id },
-            ptMsg('uplift.patches.promoted', 'Promoted — applies on next omlx restart'));
-        if (heldCodes.length) {
-            btn(ptMsg('uplift.patches.approve_once', 'Apply once anyway'), 'primary',
-                () => doPromote('once'),
-                ptMsg('uplift.patches.approve_once_title',
-                      'Approve the flagged safeguards for this version only'));
-            btn(ptMsg('uplift.patches.approve_always', 'Always allow ({codes})')
-                    .replace('{codes}', heldCodes.join(', ')), 'primary',
-                () => doPromote('always'),
-                ptMsg('uplift.patches.approve_always_title',
-                      'Remember these safeguard codes for future versions of this patch'));
-        } else {
-            btn(ptMsg('uplift.patches.promote', 'Promote update'), 'primary',
-                () => doPromote(null));
-        }
-    }
-    const vs = (p.versions || []).map(v => v.v).sort((a, b) => a - b);
-    if (p.desired_version && vs.length > 1 && p.state !== 'disabled') {
-        btn(ptMsg('uplift.patches.rollback', 'Rollback'), '',
-            () => ptAction('rollback', { id: p.id },
-                ptMsg('uplift.patches.rolledback', 'Rollback queued for next omlx restart')));
-    }
-    btn(ptMsg('uplift.patches.test', 'Test dry-run'), '', async () => {
-        if (S.PT_BUSY) return;
+    entry.append(det);
+    return entry;
+}
+
+/* ---- MANAGE dialog: per-surface version (latest/auto or pinned),       */
+/* test, edit source, remove. Native selects; compact closed controls.     */
+/* Escape rides the global handler (modal-escape pin: no listener here).   */
+function ptManage(p) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal nasa';
+    const h = document.createElement('h3');
+    h.textContent = p.id;
+    h.append(ptChip((p.state || '').replace(/_/g, ' ').toUpperCase(),
+        PT_STATE_CLASS[p.state] || 'pt-st-dim', p.state_detail || ''));
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'icon-btn';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+    close.onclick = () => overlay.remove();
+    h.append(close);
+    box.append(h);
+
+    // AUTO UPDATE — per patch, remembered in the manifest (every board and
+    // the CLI honour it); new validated versions apply WITHOUT a click.
+    const autoLbl = document.createElement('label');
+    autoLbl.className = 'row';
+    const autoCb = document.createElement('input');
+    autoCb.type = 'checkbox';
+    autoCb.checked = !!p.auto_update;
+    const autoNote = document.createElement('span');
+    autoNote.className = 'pt-detail';
+    autoNote.textContent = p.auto_update
+        ? ptMsg('uplift.patches.auto_on_note',
+            'auto: new validated versions apply at the next restart/build')
+        : '';
+    autoLbl.append(autoCb, document.createTextNode(' '), autoNote);
+    autoCb.onchange = async () => {
+        if (S.PT_BUSY) { autoCb.checked = !autoCb.checked; return; }
         S.PT_BUSY = true;
         try {
-            const r = await ptApi('test', { id: p.id });
+            const r = await ptApi('auto', { id: p.id, enabled: autoCb.checked });
+            if (r && r.promoted) {
+                PG.toast(ptMsg('uplift.patches.auto_promoted',
+                    'Auto update ON — the waiting v{v} is now queued')
+                    .replace('{v}', r.desired_version || ''), 5000);
+            } else if (autoCb.checked) {
+                PG.toast(ptMsg('uplift.patches.auto_on',
+                    'Auto update ON — future versions apply without a click'), 4500);
+            } else {
+                PG.toast(ptMsg('uplift.patches.auto_off',
+                    'Auto update OFF — updates wait for you'), 4500);
+            }
+            await pollPatches();
+            await ptRefreshCarrier();
+        } catch (e) {
+            PG.toast(ptMsg('uplift.patches.auto_fail',
+                'Auto-update change failed') + ': '
+                + (e && e.message ? e.message : e), 5000);
+            autoCb.checked = !autoCb.checked;
+        } finally {
+            S.PT_BUSY = false;
+        }
+    };
+    box.append(autoLbl);
+
+    // per-surface version target: latest (auto) or pinned vN
+    const SURFACES = [
+        ['runtime', 'VANILLA',
+         ptMsg('uplift.patches.surf_vanilla', 'VANILLA — the running server'),
+         ptMsg('uplift.patches.surf_vanilla_hint',
+             'pruned overlay; mounts at the next restart')],
+        ['build', 'DEV',
+         ptMsg('uplift.patches.surf_dev', 'DEV — the omlx-dev build'),
+         ptMsg('uplift.patches.surf_dev_hint',
+             'materialized on the uplift-dev branch at the next Build')],
+    ];
+    for (const [target, short, title, hint] of SURFACES) {
+        const sec = document.createElement('div');
+        sec.className = 'pt-mgr-surf';
+        const lbl = document.createElement('div');
+        lbl.className = 'pt-mgr-surf-head';
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = !!(p.surfaces && p.surfaces[target]
+            && p.surfaces[target].checked);
+        check.disabled = true;   // the table columns are the checkbox home
+        const t = document.createElement('span');
+        t.textContent = title;
+        t.title = hint;
+        lbl.append(check, document.createTextNode(' '), t);
+        sec.append(lbl);
+        const row2 = document.createElement('label');
+        row2.className = 'pt-field';
+        const nm = document.createElement('span');
+        nm.textContent = ptMsg('uplift.patches.manage_version', 'version');
+        const sel = document.createElement('select');
+        const optLat = document.createElement('option');
+        optLat.value = '';
+        optLat.textContent = ptMsg('uplift.patches.pin_latest',
+            'latest (auto update)');
+        sel.append(optLat);
+        for (const v of (p.versions || []).slice().sort((a, b) => b.v - a.v)) {
+            const o = document.createElement('option');
+            o.value = String(v.v);
+            o.textContent = 'v' + v.v + ' — '
+                + String(v.fetched_at || '').slice(0, 10)
+                + (v.v === p.applied_v ? ' ●' : v.v === p.dev_applied_v ? ' ▲' : '');
+            sel.append(o);
+        }
+        const pin = p.pins ? p.pins[target] : null;
+        sel.value = pin ? String(pin) : '';
+        const note = document.createElement('span');
+        note.className = 'pt-detail';
+        const eff = pin || p.desired_version || 0;
+        if (!check.checked) {
+            note.textContent = ptMsg('uplift.patches.surf_off',
+                'not selected');
+        } else if (target === 'runtime') {
+            note.textContent = (p.applied_v === eff && p.enabled)
+                ? ptMsg('uplift.patches.surf_runtime_live',
+                    'v{v} is in the running files').replace('{v}', eff)
+                : ptMsg('uplift.patches.surf_runtime_pending',
+                    'v{v} lands at the next server restart')
+                    .replace('{v}', eff);
+        } else {
+            note.textContent = (p.dev_applied_v === eff && p.enabled)
+                ? ptMsg('uplift.patches.surf_build_live',
+                    'v{v} is on the branch').replace('{v}', eff)
+                : ptMsg('uplift.patches.surf_build_pending',
+                    'v{v} lands at the next Build').replace('{v}', eff);
+        }
+        sel.onchange = async () => {
+            if (S.PT_BUSY) return;
+            S.PT_BUSY = true;
+            try {
+                const r = await ptApi('pin', { id: p.id, target,
+                    version: sel.value ? parseInt(sel.value, 10) : null });
+                if (r && r.ok) {
+                    PG.toast(sel.value
+                        ? ptMsg('uplift.patches.pin_set',
+                            'Pinned v{v} on {t} — lands on the next restart/build')
+                              .replace('{v}', sel.value).replace('{t}', short)
+                        : ptMsg('uplift.patches.pin_released',
+                            '{t} follows the latest again')
+                            .replace('{t}', short), 4500);
+                    await pollPatches();
+                    await ptRefreshCarrier();
+                }
+            } catch (e) {
+                PG.toast(ptMsg('uplift.patches.pin_fail',
+                    'Version pin failed') + ': '
+                    + (e && e.message ? e.message : e), 5000);
+            } finally {
+                S.PT_BUSY = false;
+            }
+        };
+        row2.append(nm, sel, note);
+        sec.append(row2);
+        box.append(sec);
+    }
+
+    // candidate waiting -> one honest Apply button (auto does it for you)
+    if (p.state === 'update_available') {
+        const c = document.createElement('div');
+        c.className = 'pt-mgr-cand';
+        const cs = document.createElement('span');
+        cs.textContent = ptMsg('uplift.patches.cand_note',
+            'v{v} fetched and validated from the source')
+            .replace('{v}', p.latest_v);
+        const ap = document.createElement('button');
+        ap.type = 'button';
+        ap.className = 'btn primary';
+        ap.textContent = ptMsg('uplift.patches.apply_now',
+            'Apply v{v} now').replace('{v}', p.latest_v);
+        ap.onclick = async () => {
+            overlay.remove();
+            await ptAction('promote', { id: p.id },
+                ptMsg('uplift.patches.promoted',
+                    'Promoted — applies on next omlx restart'));
+        };
+        c.append(cs, ap);
+        box.append(c);
+    }
+
+    const acts = document.createElement('div');
+    acts.className = 'pt-acts';
+    const testBtn = document.createElement('button');
+    testBtn.type = 'button';
+    testBtn.className = 'btn';
+    testBtn.textContent = ptMsg('uplift.patches.test', 'Test dry-run');
+    testBtn.onclick = async () => {
+        if (S.PT_BUSY) return;
+        S.PT_BUSY = true;
+        testBtn.disabled = true;
+        const old = testBtn.textContent;
+        testBtn.textContent = ptMsg('uplift.patches.testing', 'Testing…');
+        try {
+            const sms = p.surfaces || {};
+            const t = sms.runtime && sms.runtime.checked ? 'runtime' : 'build';
+            const r = await ptApi('test', { id: p.id,
+                v: (sms[t] && sms[t].version) || undefined });
             const bad = (r.files || []).filter(f => f.status === 'fail')
                 .map(f => f.path + ': ' + (f.reason || 'fail'));
             PG.toast(bad.length
-                ? ptMsg('uplift.patches.test_fail', 'Dry-run FAILED') + ': ' + bad.join('; ')
-                : ptMsg('uplift.patches.test_ok', 'Dry-run OK — patch applies cleanly now'),
+                ? ptMsg('uplift.patches.test_fail', 'Dry-run FAILED')
+                    + ': ' + bad.join('; ')
+                : ptMsg('uplift.patches.test_ok',
+                    'Dry-run OK — patch applies cleanly now'),
                 bad.length ? 7000 : 4000);
             await pollPatches();
-        } catch (e) { PG.toast(String(e), 5000); } finally { S.PT_BUSY = false; }
-    });
-    btn(ptMsg('uplift.patches.remove', 'Remove'), '', async () => {
+        } catch (e) { PG.toast(String(e), 5000); }
+        finally { testBtn.textContent = old; testBtn.disabled = false; }
+    };
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn';
+    editBtn.textContent = ptMsg('uplift.patches.edit', 'Edit source');
+    editBtn.onclick = () => {
+        overlay.remove();
+        ptEditSource(p);
+    };
+    const rmBtn = document.createElement('button');
+    rmBtn.type = 'button';
+    rmBtn.className = 'btn danger';
+    rmBtn.textContent = ptMsg('uplift.patches.remove', 'Remove');
+    rmBtn.onclick = async () => {
         if (p.curated && !p.curated_adopted) {
             // catalog patch: removing it restores vanilla bytes AND drops
             // it from the local store. The graceful path is adoption —
@@ -541,6 +878,7 @@ function patchCard(p, view) {
                         'Patch adopted as local'), 4000);
                     await pollPatches();
                 }).catch(e => PG.toast(String(e), 5000));
+                overlay.remove();
                 return;
             }
         }
@@ -548,33 +886,40 @@ function patchCard(p, view) {
             'Remove this patch? Applied files are restored to vanilla bytes now.'))) return;
         await ptAction('remove', { id: p.id },
             ptMsg('uplift.patches.removed', 'Patch removed'));
+        overlay.remove();
+    };
+    acts.append(testBtn, editBtn, rmBtn);
+    box.append(acts);
+    overlay.append(box);
+    // backdrop click closes (same contract as every other dialog here)
+    overlay.addEventListener('click', ev => {
+        if (ev.target === overlay) overlay.remove();
     });
-    card.append(acts);
-    return card;
+    document.body.append(overlay);
 }
 
-async function ptShowDiff(id, v) {
-    try {
-        // domkit-exempt: binary — plain-text diff body, not a JSON envelope
-        const res = await fetch(`${API}/uplift/api/patches/diff/${id}/${v}`, { cache: 'no-store' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const txt = await res.text();
-        $('pt-diff-title').textContent = `${id} · v${v}`;
-        const body = $('pt-diff-body');
-        body.innerHTML = '';
-        for (const line of txt.split('\n')) {
-            const s = document.createElement('span');
-            s.className = line.startsWith('+') && !line.startsWith('+++') ? 'pt-diff-add'
-                : line.startsWith('-') && !line.startsWith('---') ? 'pt-diff-del'
-                : line.startsWith('@@') ? 'pt-diff-hunk' : '';
-            s.textContent = line + '\n';
-            body.append(s);
-        }
-        $('pt-diff').hidden = false;
-        $('pt-diff').scrollIntoView({ block: 'nearest' });
-    } catch (e) {
-        PG.toast(ptMsg('uplift.patches.diff_fail', 'Could not load diff') + ': ' + e, 5000);
+/* ---- edit = prefill the add form (one flow, no parallel editor) ------- */
+function ptEditSource(p) {
+    $('pt-new-id').value = p.id;
+    const s = p.source || {};
+    $('pt-src-kind').value = s.kind || 'github_pr';
+    ptSyncKindUI();
+    if (s.kind === 'github_pr') {
+        $('pt-src-repo').value = s.repo || '';
+        $('pt-src-pr').value = s.pr ? String(s.pr) : '';
+    } else if (s.kind === 'url') {
+        $('pt-src-url').value = s.url || '';
     }
+    if ($('pt-reversal')) $('pt-reversal').checked = !!p.reversal;
+    const bx = $('pt-preview');
+    if (bx) { bx.hidden = true; bx.innerHTML = ''; }   // clear-only — safe
+    const adv = $('pt-advisories');
+    if (adv) { adv.hidden = true; adv.innerHTML = ''; } // clear-only — safe
+    PG.toast(ptMsg('uplift.patches.edit_prefilled',
+        'Source filled in — press "Check for updates" to fetch, then '
+        + 'Preview to store a new version'), 6000);
+    const kb = $('pt-src-kind');
+    if (kb) kb.focus();
 }
 
 /* ---- add flow: kind-aware inputs -> preview (per-file gate table) -> enable */
@@ -607,7 +952,7 @@ async function ptPreview() {
     const src = ptReadSource();
     const scope = $('pt-new-scope') ? $('pt-new-scope').value : '';
     const wasStored = (S.PT_DATA && S.PT_DATA.patches || [])
-        .some(p => p.id === id);
+        .some(x => x.id === id);
     const body = { id, reversal: $('pt-reversal').checked, ...src };
     if (scope) body.scope = scope;
     if (src.kind === 'upload') {
@@ -621,29 +966,28 @@ async function ptPreview() {
         const r = await ptApi('add', body);
         if (r.ok && !wasStored) {
             // DEV-6: a NEW stored patch must appear immediately — same page
-            // state a refresh would produce (enable/disable/remove usable)
+            // state a refresh would produce (checkboxes/dialog usable)
             await pollPatches();
             await ptRefreshCarrier();
         }
         adv.hidden = !(r.advisories && r.advisories.length);
-        adv.innerHTML = '';
+        adv.innerHTML = '';   // clear-only — safe
         for (const a of (r.advisories || [])) {
             const w = document.createElement('div');
             w.textContent = '⚠ ' + a;
             adv.append(w);
         }
         box.hidden = false;
-        box.innerHTML = '';   // clear-only (existing pattern); all content below goes through DOM builders + textContent
-        // The PATCH CARD renders grouped safeguards for a NEW stored/
-        // adopted patch (pollPatches above redraws it, in both scope
-        // zones). The old flow rendered the stored verdict here TOO —
-        // the double flood. Keep the box lines for every verdict with no
-        // fresh card behind it: a REJECTED add (no card at all),
-        // 'obsolete-held' (ok=true, nothing stored) and an UPDATE re-add
-        // of an existing patch (pollPatches is skipped there, so the
-        // card still shows the OLD version's flags).
-        const cardShowsIt = r.ok && !r.obsolete && !wasStored;
-        if (!cardShowsIt && r.safeguards && (r.safeguards.problems || []).length) {
+        box.innerHTML = '';   // clear-only — safe; content goes DOM-builders
+        // PAT-TABLE: the row renders safeguards for a NEW stored/adopted
+        // patch (pollPatches above redraws it). The old flow rendered the
+        // stored verdict here TOO — the double flood. Keep the box lines
+        // for every verdict with no fresh row behind it: a REJECTED add
+        // (no row at all), 'obsolete-held' (ok=true, nothing stored) and
+        // an UPDATE re-add of an existing patch (pollPatches is skipped
+        // there, so the row still shows the OLD version's flags).
+        const rowShowsIt = r.ok && !r.obsolete && !wasStored;
+        if (!rowShowsIt && r.safeguards && (r.safeguards.problems || []).length) {
             const sgt = document.createElement('div');
             sgt.className = 'pt-sg-title';
             sgt.textContent = ptMsg('uplift.patches.safeguard_problems',
@@ -655,11 +999,11 @@ async function ptPreview() {
                 w.className = 'pt-advisories';
                 w.textContent = '⚠ ' + ptGroupLine(grp);
                 box.append(w);
-                if (grp.hint) hint = grp.hint;   // card absent -> hint lives here
+                if (grp.hint) hint = grp.hint;   // row absent -> hint lives here
             }
             if (hint) {
-                const row = document.createElement('div');
-                row.className = 'pt-sg-rebuild';
+                const rr = document.createElement('div');
+                rr.className = 'pt-sg-rebuild';
                 const lbl = document.createElement('span');
                 lbl.textContent = ptMsg('uplift.patches.safeguard_rebuild',
                     'Native kernel rebuild (required for real effect):');
@@ -667,11 +1011,11 @@ async function ptPreview() {
                 cmd.textContent = hint;
                 cmd.title = 'click to copy';
                 cmd.onclick = () => { navigator.clipboard.writeText(cmd.textContent); };
-                row.append(lbl, document.createTextNode(' '), cmd);
-                box.append(row);
+                rr.append(lbl, document.createTextNode(' '), cmd);
+                box.append(rr);
             }
         }
-        if (!cardShowsIt && r.note) {
+        if (!rowShowsIt && r.note) {
             const w = document.createElement('div');
             w.className = 'pt-advisories';
             w.textContent = '⚠ ' + ptMsg('uplift.patches.safeguard_note',
@@ -739,21 +1083,32 @@ async function ptPreview() {
         }
         box.append(tbl);
         if (r.ok && !r.unchanged && !r.adopted) {
-            const row = document.createElement('div');
-            row.className = 'pt-acts pt-sg-acts';   // flex gap — two adjacent
+            const act = document.createElement('div');
+            act.className = 'pt-acts pt-sg-acts';   // flex gap — two adjacent
             const held = r.requires_approval || [];  // filled .btn.primary
             const en = document.createElement('button');
             en.type = 'button';
             en.className = 'btn primary';
+            // wasStored = an update of an existing row: the act is
+            // 'apply this version' (promote), not 'enable' (already is)
             en.textContent = held.length
                 ? ptMsg('uplift.patches.approve_once', 'Apply once anyway')
-                : ptMsg('uplift.patches.enable_now', 'Enable patch');
+                : (wasStored
+                    ? ptMsg('uplift.patches.apply_now', 'Apply v{v} now')
+                          .replace('{v}', r.v)
+                    : ptMsg('uplift.patches.enable_now', 'Enable patch'));
             en.onclick = async () => {
-                await ptEnableWithApproval({ id }, held.length ? 'once' : null);
+                if (wasStored && !held.length) {
+                    await ptAction('promote', { id },
+                        ptMsg('uplift.patches.promoted',
+                            'Promoted — applies on next omlx restart'));
+                } else {
+                    await ptEnableWithApproval({ id }, held.length ? 'once' : null);
+                }
                 box.hidden = true;
                 $('pt-new-id').value = '';
             };
-            row.append(en);
+            act.append(en);
             if (held.length) {
                 const al = document.createElement('button');
                 al.type = 'button';
@@ -765,13 +1120,13 @@ async function ptPreview() {
                     box.hidden = true;
                     $('pt-new-id').value = '';
                 };
-                row.append(al);
+                act.append(al);
             }
-            box.append(row);
+            box.append(act);
         }
     } catch (e) {
         adv.hidden = false;
-        adv.innerHTML = '';
+        adv.innerHTML = '';   // clear-only — safe
         const w = document.createElement('div');
         w.textContent = '✕ ' + (e && e.message ? e.message : e);
         adv.append(w);
@@ -806,7 +1161,12 @@ async function ptCheckNow(quiet) {
         const reports = r.reports || {};
         const notes = Object.entries(reports).map(([id, rep]) => {
             if (rep.check === 'update_available')
-                return id + ': ' + ptMsg('uplift.patches.update_avail_toast', 'update available (v{v})').replace('{v}', rep.v);
+                return id + ': ' + (rep.promoted
+                    ? ptMsg('uplift.patches.auto_applied',
+                        'auto-applied v{v} — takes effect at the next restart/build')
+                          .replace('{v}', rep.v)
+                    : ptMsg('uplift.patches.update_avail_toast',
+                        'update available (v{v})').replace('{v}', rep.v));
             if (rep.check === 'obsolete') return id + ': ' + ptMsg('uplift.patches.obsolete', 'obsolete');
             if (rep.check === 'error') return id + ': ' + ptMsg('uplift.patches.check_error', 'check failed') + ' — ' + rep.reason;
             return null;
@@ -871,10 +1231,9 @@ function initPatchesPage() {
 
 window.Uplift = window.Uplift || {};
 window.Uplift.patches = {
-    pollPatches, initPatchesPage, patchCard,
-    // PATCH-ZONES: the devpanel calls this once its first /dev/status
-    // lands — 'both' cards move between the zones when carrier truth
-    // arrives after the initial paint.
+    pollPatches, initPatchesPage, patchRow,
+    // PATCH-ZONES: kept as an alias so an older devpanel bundle calling
+    // refill() keeps working (it redraws from cached data, never fetches).
     refill() { if (S.PT_DATA) renderPatches(); },
     // FE-5: pollDev moved to uplift_devpanel.js; keep the old accessor alive
     // for uplift.js's tab dispatcher (lazy, order-free).

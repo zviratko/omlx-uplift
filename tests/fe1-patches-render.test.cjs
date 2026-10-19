@@ -48,6 +48,9 @@ function loadPatchesModule({ patchesPayload, fetchImpl } = {}) {
     const document = {
         getElementById(id) { return byId[id] || (byId[id] = makeEl('div')); },
         createElement(tag) { return makeEl(tag); },
+        createTextNode(t) {
+            return { textContent: String(t), children: [], className: '' };
+        },
         querySelector() { return makeEl('div'); },
         querySelectorAll() { return []; },
         addEventListener() {}, hidden: false,
@@ -158,8 +161,8 @@ test('renderPatches: INSECURE chip appears exactly when source.insecure_tls', as
         basePatch({ id: 'risky-patch', source: { kind: 'url', url: 'https://x/y.diff', insecure_tls: true } }),
     ]));
     const list = sb.document.getElementById('pt-list');
-    const cards = list.children.filter(c => (c.className || '').includes('pt-card'));
-    assert.equal(cards.length, 2, 'two runtime cards rendered');
+    const cards = list.children.filter(c => (c.className || '').includes('pt-entry'));
+    assert.equal(cards.length, 2, 'two patch rows rendered');
     const texts = cards.map(c => allText(c));
     assert.ok(!texts[0].includes('INSECURE'), 'clean card has no INSECURE chip');
     assert.ok(texts[1].includes('INSECURE'), 'insecure card carries the chip');
@@ -178,7 +181,7 @@ test('renderPatches: keg_changed splits restart-fixes vs per-board failure', asy
                     this_keg_detail: 'apply failed: context mismatch at hunk 2' }),
     ]));
     const cards = sb.document.getElementById('pt-list').children
-        .filter(c => (c.className || '').includes('pt-card'));
+        .filter(c => (c.className || '').includes('pt-entry'));
     assert.equal(cards.length, 2);
     const texts = cards.map(c => allText(c));
     const allTitles = (el) => (el.title ? el.title + ' ' : '') +
@@ -200,8 +203,8 @@ test('renderPatches: warning banner + needs_review card class', async () => {
                               { warning: true }));
     assert.equal(sb.document.getElementById('pt-warn').hidden, false, 'banner shown');
     const card = sb.document.getElementById('pt-list').children
-        .find(c => (c.className || '').includes('pt-card'));
-    assert.ok((card.className || '').includes('pt-card-warn'), 'warn class on card');
+        .find(c => (c.className || '').includes('pt-entry'));
+    assert.ok((card.className || '').includes('pt-entry-warn'), 'warn class on row');
     assert.match(sb.document.getElementById('pt-sub').textContent, /1 loaded · 0 active/);
 });
 
@@ -225,14 +228,14 @@ test('domkit is require()able in node (dual export)', () => {
         assert.equal(typeof D[fn], 'function', `domkit.${fn} missing`);
 });
 
-/* PATCH-ZONES (user layout ask 2026-10-18): the two zones are EXCLUSIVE.
-   A 'both' card rides the omlx-dev build zone while the carrier is
-   present (devpanel.installed()), and falls back to the runtime zone
-   only when it cannot be shown there — a card must never vanish. */
-const runtimeCards = (sb) => sb.document.getElementById('pt-list').children
-    .filter(c => (c.className || '').includes('pt-card'));
+/* PAT-TABLE (user ask 2026-10-19): ONE table, one row per patch,
+   regardless of whether the omlx-dev carrier is present — the retired
+   two-zone split could hide a 'both' card behind zone ownership; a row
+   must never vanish or double. */
+const rowsOf = (sb) => sb.document.getElementById('pt-list').children
+    .filter(c => (c.className || '').includes('pt-entry'));
 
-test('zones are exclusive: both-scope leaves the runtime zone when the build carries it', async () => {
+test('PAT-TABLE: one row per patch when the build carrier is present', async () => {
     const sb = loadPatchesModule();
     sb.Uplift.devpanel = { installed: () => true, renderDev: () => {} };
     await runPoll(sb, payload([
@@ -240,15 +243,17 @@ test('zones are exclusive: both-scope leaves the runtime zone when the build car
         basePatch({ id: 'baked', scope: 'both' }),
         basePatch({ id: 'build-only', scope: 'dev' }),
     ]));
-    const cards = runtimeCards(sb);
-    assert.equal(cards.length, 1, 'only the runtime-only card stays');
-    assert.ok(allText(cards[0]).includes('rt-only'));
-    // counts line tracks the runtime zone, not the whole manifest
+    const rows = rowsOf(sb);
+    assert.equal(rows.length, 3, 'every patch gets exactly one row');
+    const t = rows.map(c => allText(c));
+    assert.ok(t.every(x => !/RUNTIME|BUILD ONLY/.test(x)),
+              'no zone headings left in the table');
+    // counts line tracks the whole manifest now, not one zone
     assert.match(sb.document.getElementById('pt-sub').textContent,
-                 /1 loaded · 1 active/);
+                 /3 loaded · 3 active/);
 });
 
-test('zones are exclusive: no carrier -> both-scope falls back into the runtime zone', async () => {
+test('PAT-TABLE: no carrier -> still one row per patch', async () => {
     const sb = loadPatchesModule();
     sb.Uplift.devpanel = { installed: () => false, renderDev: () => {} };
     await runPoll(sb, payload([
@@ -256,11 +261,8 @@ test('zones are exclusive: no carrier -> both-scope falls back into the runtime 
         basePatch({ id: 'baked', scope: 'both' }),
         basePatch({ id: 'build-only', scope: 'dev' }),
     ]));
-    const cards = runtimeCards(sb);
-    assert.equal(cards.length, 2, 'omlx + both render here; dev never does');
-    const txt = cards.map(c => allText(c)).join(' ');
-    assert.ok(txt.includes('baked') && txt.includes('rt-only'));
-    assert.ok(!txt.includes('build-only'));
+    const rows = rowsOf(sb);
+    assert.equal(rows.length, 3, 'all three render here; none vanishes');
 });
 
 test('patches export refill for the devpanel carrier-truth repaint', () => {
@@ -269,7 +271,7 @@ test('patches export refill for the devpanel carrier-truth repaint', () => {
 });
 
 /* CARRIER-REFRESH (user report 2026-10-19): the DRIFT / NEEDS REBUILD
-   chips and the zone ownership of 'both' cards ride /dev/status, which
+   chips (DRIFT / NEEDS REBUILD) ride /dev/status, which
    the patches page read ONLY at page load (DV_POLL runs just during a
    build). A Remove that emptied the drift set left the stale DRIFT chip
    lit until a full page refresh. Every store mutation must re-read the
@@ -300,9 +302,15 @@ async function removeFlow(sb) {
                  text: async () => '', clone() { return this; } };
     };
     const card = sb.document.getElementById('pt-list').children
-        .find(c => (c.className || '').includes('pt-card'));
-    assert.ok(card, 'a patch card is on screen to remove');
-    await btnIn(card, 'Remove').onclick();
+        .find(c => (c.className || '').includes('pt-entry'));
+    assert.ok(card, 'a patch row is on screen to remove');
+    // PAT-TABLE: Remove lives in the MANAGE dialog — open it first,
+    // confirm() is auto-accepted by the harness
+    await btnIn(card, 'MANAGE').onclick();
+    const overlay = sb.document.body.children
+        .filter(c => String(c.className || '').includes('modal-overlay')).slice(-1)[0];
+    assert.ok(overlay, 'MANAGE opens a dialog');
+    await btnIn(overlay, 'Remove').onclick();
     await new Promise(r => setImmediate(r));
     for (const t of sb.document.getElementById('toasts').children || [])
         if (/failed/i.test(t.textContent)) calls.failedToast = t.textContent;

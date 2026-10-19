@@ -194,6 +194,71 @@ async def patches_disable(req: PatchIdRequest, is_admin: bool = Depends(require_
     return res
 
 
+class PatchTargetsRequest(BaseModel):
+    id: str
+    runtime: bool                  # VANILLA checkbox (keg overlay)
+    dev: bool                      # DEV checkbox (uplift-dev branch)
+    approve: Optional[str] = None  # "once" | "always" (safeguard codes)
+
+
+@api_router.post("/patches/targets")
+async def patches_targets(req: PatchTargetsRequest,
+                          is_admin: bool = Depends(require_admin)):
+    """PAT-TABLE: the VANILLA/DEV checkbox pair in one act — scope AND
+    enable together ((0,0) disables, keeping the last scope). A widening
+    re-gates the newly used tree first; a held safeguard answers 409 with
+    the codes, exactly like enable."""
+    from .. import patchsource
+
+    res = await asyncio.to_thread(
+        patchsource.set_targets, patch_store(), req.id,
+        req.runtime, req.dev, req.approve, _patch_tree_root())
+    if not res.get("ok"):
+        raise HTTPException(status_code=409 if res.get("requires_approval")
+                            else 422, detail=res.get("reason"))
+    return res
+
+
+class PatchPinRequest(BaseModel):
+    id: str
+    target: str                    # "runtime" | "build"
+    version: Optional[int] = None  # None = latest (follow desired/auto)
+
+
+@api_router.post("/patches/pin")
+async def patches_pin(req: PatchPinRequest,
+                      is_admin: bool = Depends(require_admin)):
+    """PAT-TABLE: Manage dialog's per-surface version choice — pin this
+    surface at vN or release it back to latest. Lands at the next restart
+    (runtime) / Build (dev), two-phase doctrine unchanged."""
+    from .. import patchsource
+
+    res = patchsource.set_pin(patch_store(), req.id, req.target,
+                              req.version)
+    if not res.get("ok"):
+        raise HTTPException(status_code=422, detail=res.get("reason"))
+    return res
+
+
+class PatchAutoRequest(BaseModel):
+    id: str
+    enabled: bool
+
+
+@api_router.post("/patches/auto")
+async def patches_auto(req: PatchAutoRequest,
+                       is_admin: bool = Depends(require_admin)):
+    """PAT-TABLE: per-patch AUTO UPDATE — validated candidates promote
+    without a Promote click; the choice lives in the manifest so CLI, boot
+    and every browser honour it. Pinned surfaces keep their pin."""
+    from .. import patchsource
+
+    res = patchsource.set_auto_update(patch_store(), req.id, req.enabled)
+    if not res.get("ok"):
+        raise HTTPException(status_code=422, detail=res.get("reason"))
+    return res
+
+
 @api_router.post("/patches/promote")
 async def patches_promote(req: PatchApproveRequest,
                           is_admin: bool = Depends(require_admin)):
@@ -228,10 +293,14 @@ async def patches_remove(req: PatchIdRequest, is_admin: bool = Depends(require_a
 
 
 @api_router.post("/patches/test")
-async def patches_test(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
+async def patches_test(req: PatchVersionRequest, is_admin: bool = Depends(require_admin)):
     from .. import patchsource
 
-    res = patchsource.test_dry_run(patch_store(), req.id, _patch_tree_root())
+    # PAT-TABLE: optional v lets the Manage dialog dry-run the version a
+    # surface actually tracks (a pin) — absent v keeps the old contract
+    # (test the desired version).
+    res = patchsource.test_dry_run(patch_store(), req.id, _patch_tree_root(),
+                                   v=req.v)
     if not res.get("ok") and not res.get("files"):
         raise HTTPException(status_code=422, detail=res.get("reason"))
     return res

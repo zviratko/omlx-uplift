@@ -125,7 +125,7 @@ test('card renders ONE grouped problem line for 7 kernel paths', async () => {
         requires_approval: ['kernel_source'], kernel_rebuild_hint: HINT,
     })]));
     const list = sb.document.getElementById('pt-list');
-    const cards = list.children.filter(c => (c.className || '').includes('pt-card'));
+    const cards = list.children.filter(c => (c.className || '').includes('pt-entry'));
     assert.equal(cards.length, 1);
     const adv = texts(cards[0], 'pt-advisories');
     assert.equal(adv.length, 1, `one grouped line, got ${adv.length}: ${JSON.stringify(adv)}`);
@@ -150,24 +150,24 @@ test('legacy single-path problem rows still render (message only)', async () => 
         requires_approval: ['kernel_source'], kernel_rebuild_hint: null,
     })]));
     const cards = sb.document.getElementById('pt-list').children
-        .filter(c => (c.className || '').includes('pt-card'));
+        .filter(c => (c.className || '').includes('pt-entry'));
     const adv = texts(cards[0], 'pt-advisories');
     assert.equal(adv.length, 1);
     // SIMPLIFY: one path = the plain message, no path prefix either
     assert.match(adv[0], /^⚠ legacy row$/);
 });
 
-test('advisory-only dev card: one line, no approval buttons, no rebuild row', async () => {
+test('advisory-only dev row: one line, no approval buttons, no rebuild row', async () => {
     const sb = loadPatchesModule();
-    await runPoll(sb, payload([]));   // boot the module; dev cards render
-    const p = basePatch({            // via patchCard directly (runtimeOnly
-        id: 'dev', state: 'pending', enabled: false, scope: 'dev',  // filter hides them)
+    await runPoll(sb, payload([]));   // boot the module
+    const p = basePatch({            // via patchRow directly (the table
+        id: 'dev', state: 'pending', enabled: false, scope: 'dev',  // renders here now)
         versions: [{ v: 1, safeguards: { problems: [], codes: [],
             advisories: [{ code: 'kernel_source', paths: kernelPaths,
                           message: 'native kernel sources — built by the dev rebuild' }] } }],
         requires_approval: [], kernel_rebuild_hint: null,
     });
-    const card = vm.runInContext('window.Uplift.patches.patchCard', sb)(
+    const card = vm.runInContext('window.Uplift.patches.patchRow', sb)(
         JSON.parse(JSON.stringify(p)), payload([p]));
     const adv = texts(card, 'pt-advisories');
     assert.equal(adv.length, 1, 'the grouped advisory renders as one line');
@@ -175,7 +175,7 @@ test('advisory-only dev card: one line, no approval buttons, no rebuild row', as
     const acts = texts(card, 'pt-acts').join(' ');
     assert.ok(!/Always allow/.test(acts), 'no approval buttons without held codes');
     assert.equal(texts(card, 'pt-sg-rebuild').length, 0,
-                 'no keg rebuild-hint row on a dev-carrier card');
+                 'no keg rebuild-hint row on a dev-carrier row');
 });
 
 test('approval action row carries the pt-acts class (flex gap + border rule)', async () => {

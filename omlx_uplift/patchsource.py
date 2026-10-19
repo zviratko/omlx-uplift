@@ -932,6 +932,13 @@ def view(store, tree_root: str, keg: str | None) -> dict:
                                     (gate_ver.get("safeguards") or {}).get("codes", [])
                                     else None),
             "applied_v": applied_v,
+            # PAT-TABLE: the branch truth is the same fact on EVERY board
+            # (applied_v is per-target by design; the Manage dialog's build
+            # note must know what the uplift-dev branch carries even when
+            # it is served by the vanilla board). Single stamp per patch —
+            # mark_dev_applied guarantees at most one version holds one.
+            "dev_applied_v": next((v.get("v") for v in p.get("versions", [])
+                                   if v.get("dev_applied")), None),
             "keg_changed": bool(applied_any and not applied_here
                                 and p.get("enabled") and mounts_here),
             "this_keg": (rec or {}).get("status") if rec else None,
@@ -942,6 +949,29 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             "description": p.get("description") or "",
             "curated": p.get("curated"),
             "curated_adopted": bool(p.get("curated_adopted")),
+            # PAT-TABLE: checkbox + Manage state, computed server-side so
+            # every surface (both boards, CLI view) reads one truth.
+            # surfaces.*.checked = what the VANILLA / DEV boxes show;
+            # version = the effective stored version for that surface
+            # (pin or desired); pinned drives the status-text note.
+            "auto_update": bool(p.get("auto_update")),
+            "pins": _patches.patch_pins(p),
+            "latest_v": max((v.get("v", 0)
+                             for v in p.get("versions", [])), default=0),
+            "surfaces": {
+                "runtime": {
+                    "checked": bool(p.get("enabled"))
+                    and _patches.scope_touches_keg(scope),
+                    "version": _patches.version_target(p, "runtime"),
+                    "pinned": _patches.patch_pins(p)["runtime"] is not None,
+                },
+                "build": {
+                    "checked": bool(p.get("enabled"))
+                    and _patches.scope_touches_dev(scope),
+                    "version": _patches.version_target(p, "build"),
+                    "pinned": _patches.patch_pins(p)["build"] is not None,
+                },
+            },
         }
         out.append(entry)
     return {"patches": out, "config": manifest.get("config", {}),
@@ -1070,6 +1100,199 @@ def approve(store, patch_id: str, mode: str = "once") -> dict:
            "approved": approved, "version": target_v}
     if not held:
         out["note"] = "no safeguards were held for this version"
+    return out
+
+
+def set_targets(store, patch_id: str, runtime: bool, dev: bool,
+                approve: str | None = None, tree_root: str = "") -> dict:
+    """PAT-TABLE: the VANILLA / DEV checkboxes — scope AND enable in one act.
+    (runtime, dev) maps onto the scope model: (1,0)->omlx (0,1)->dev
+    (1,1)->both; (0,0) disables and KEEPS the last scope so re-checking the
+    same box re-lands the same context.
+
+    The historical 'scope is fixed per patch' rule (add_patch) stays: a
+    re-add cannot silently move a patch between surfaces, but THIS call is
+    the explicit human decision the old rule could not express. A surface
+    that starts being used now re-gates the selected version against that
+    tree first (an omlx patch widening to dev must still fit the dev
+    sources; a dev patch adding runtime must fit the keg overlay) — the
+    same gates add_patch runs, never a blind flip. Newly surfaced
+    safeguard problems merge into the stored version so approval and card
+    display see the union, and unapproved codes answer exactly like
+    enable: requires_approval, nothing written."""
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None:
+        return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
+    cur = _patches.patch_scope(p)
+    if not runtime and not dev:
+        # nothing selected: disable (the last scope stays recorded so
+        # re-checking the same box returns the same context)
+        res = set_enabled(store, patch_id, False)
+        res["scope"] = cur
+        return res
+    new = (_patches.SCOPE_BOTH if (runtime and dev)
+           else _patches.SCOPE_DEV if dev else _patches.SCOPE_OMLX)
+    target_v = p.get("desired_version") or max(
+        (v.get("v", 0) for v in p.get("versions", [])), default=0)
+    ver = store.get_version(p, target_v) if target_v else None
+    if not p.get("enabled") or new != cur:
+        if not ver:
+            return {"ok": False,
+                    "reason": "no validated version — add a source first"}
+    data = _read_patch_file(store, ver) if ver else None
+    if (not p.get("enabled") or new != cur) and data is None:
+        return {"ok": False, "reason": "stored patch file missing"}
+    # Re-gate the half that is NEWLY used. 'both' gated both roots at store
+    # time, so any narrowing needs no gate; omlx->dev/both gates the dev
+    # root, dev->omlx gates the pruned keg overlay.
+    acting = new != cur or not p.get("enabled")
+    merged_new_codes = False
+    if acting and new != cur and data is not None:
+        newly_dev = (_patches.scope_touches_dev(new)
+                     and not _patches.scope_touches_dev(cur))
+        newly_keg = (_patches.scope_touches_keg(new)
+                     and not _patches.scope_touches_keg(cur))
+        gates = []
+        if newly_dev:
+            root = dev_build_root()
+            if not root:
+                return {"ok": False,
+                        "reason": "omlx-dev is not set up on this machine — "
+                                  "bootstrap it first (Manage shows how) "
+                                  "before selecting the build surface"}
+            gates.append(("the omlx-dev sources",
+                          lambda: fetch_and_gate(
+                              {"kind": "upload", "data": data}, root,
+                              reverse=bool(p.get("reversal")),
+                              tree_kind="src")))
+        if newly_keg:
+            if not tree_root or not os.path.isdir(tree_root):
+                return {"ok": False,
+                        "reason": "no omlx tree found — cannot re-gate the "
+                                  "runtime surface"}
+            gates.append(("the installed server",
+                          lambda: fetch_and_gate(
+                              {"kind": "upload", "data": data}, tree_root,
+                              overrides=_pristine_overlay(store, p, tree_root),
+                              reverse=bool(p.get("reversal")),
+                              skip_patterns=_patches.skip_patterns(manifest),
+                              tree_kind="keg")))
+        for what, run in gates:
+            res = run()
+            if not res.get("ok"):
+                return {"ok": False,
+                        "reason": f"does not fit {what}: "
+                                  f"{res.get('reason') or 'gate rejected'}"}
+            sg = res.get("safeguards") or {}
+            if sg.get("problems") or sg.get("codes") or sg.get("advisories"):
+                cur_sg = ver.setdefault("safeguards", {})
+                codes = sorted(set(cur_sg.get("codes") or [])
+                               | set(sg.get("codes") or []))
+                problems = list(cur_sg.get("problems") or [])
+                seen = {g.get("code") for g in problems}
+                for g in sg.get("problems") or []:
+                    if g.get("code") not in seen:
+                        problems.append(g)
+                        seen.add(g.get("code"))
+                advisories = list(cur_sg.get("advisories") or [])
+                seen_a = {(g.get("code"), tuple(g.get("paths") or ()))
+                          for g in advisories}
+                for g in sg.get("advisories") or []:
+                    if (g.get("code"), tuple(g.get("paths") or ())) \
+                            not in seen_a:
+                        advisories.append(g)
+                cur_sg.update({"problems": problems, "codes": codes,
+                               "advisories": advisories})
+                merged_new_codes = bool(problems or codes)
+    # approval first (in memory) — a held enable (plain or via widening)
+    # must leave scope AND safeguards untouched so the checkbox can
+    # honestly revert
+    if acting:
+        ok, _approved, err = _apply_approval(p, ver, approve)
+        if not ok:
+            return err
+    if new != cur:
+        if new == _patches.SCOPE_OMLX:
+            p.pop("scope", None)   # default scope: keep the historical shape
+        else:
+            p["scope"] = new
+        if p.get("enabled"):
+            # a newly selected surface is work NOT yet on disk — 'applied'
+            # would freeze mid-transition; reconcile/Build clear the pending
+            store.set_state(p, "pending",
+                            f"surface selection changed — applies on "
+                            f"{applies_phrase(p)}")
+    store.save(manifest)
+    res = set_enabled(store, patch_id, True,
+                      approve=None)  # already recorded above
+    res["scope"] = new
+    if merged_new_codes:
+        res["note"] = ("the newly selected surface raised safeguards — "
+                       "approved codes now cover both surfaces")
+    return res
+
+
+def set_pin(store, patch_id: str, target: str,
+            version: int | None) -> dict:
+    """PAT-TABLE: Manage dialog's per-surface version choice. version=None
+    means 'latest' (follow desired_version, auto update applies); an int
+    freezes THIS surface at that stored version while the other follows on.
+    The pin changes what the NEXT restart (runtime) or Build (dev) lands —
+    same two-phase doctrine as every other patch mutation."""
+    if target not in _patches.TARGET_SURFACES:
+        return {"ok": False,
+                "reason": f"target must be one of "
+                          f"{list(_patches.TARGET_SURFACES)}"}
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None:
+        return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
+    if version is not None:
+        version = int(version)
+        if store.get_version(p, version) is None:
+            return {"ok": False,
+                    "reason": f"no stored version v{version} for this patch"}
+    pins = _patches.patch_pins(p)
+    if pins[target] == version:
+        return {"ok": True, "unchanged": True, "pins": pins}
+    pins[target] = version
+    stored = {k: v for k, v in pins.items() if v is not None}
+    if stored:
+        p["pins"] = stored
+    else:
+        p.pop("pins", None)
+    if p.get("enabled"):
+        store.set_state(
+            p, "pending",
+            f"version target changed — applies on {applies_phrase(p)}")
+    store.save(manifest)
+    return {"ok": True, "pins": pins, "state": p.get("state")}
+
+
+def set_auto_update(store, patch_id: str, enabled: bool) -> dict:
+    """PAT-TABLE: per-patch AUTO UPDATE. On, a validated candidate from the
+    source is promoted without a Promote click (check_all owns that), and
+    the choice rides the manifest — CLI, boot and every browser see it.
+    Turning it ON with a candidate already waiting adopts it right now;
+    held safeguards still refuse (fail-safe rule: auto never approves)."""
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None:
+        return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
+    enabled = bool(enabled)
+    if bool(p.get("auto_update")) == enabled:
+        return {"ok": True, "unchanged": True, "auto_update": enabled}
+    p["auto_update"] = enabled
+    store.save(manifest)
+    out: dict = {"ok": True, "auto_update": enabled}
+    if enabled and p.get("enabled") and p.get("state") == "update_available":
+        pr = promote(store, patch_id)
+        out["promoted"] = bool(pr.get("ok"))
+        if not pr.get("ok"):
+            out["promote_reason"] = pr.get("reason")
+        else:
+            out["desired_version"] = pr.get("desired_version")
     return out
 
 
@@ -1292,17 +1515,22 @@ def remove_patch(store, patch_id: str, tree_root: str) -> dict:
     return {"ok": True, "restored": restore_report}
 
 
-def test_dry_run(store, patch_id: str, tree_root: str) -> dict:
+def test_dry_run(store, patch_id: str, tree_root: str,
+                 v: int | None = None) -> dict:
     """Re-validate stored desired version against the live keg, no writes.
     Build-scope patches re-validate against the dev-src checkout UNPRUNED
-    (their gate tree by contract — the same bytes, sha-consistency rule)."""
+    (their gate tree by contract — the same bytes, sha-consistency rule).
+    PAT-TABLE: v overrides the tested version (a pinned surface's copy)."""
     manifest = store.load()
     p = store.find(manifest, patch_id)
     if p is None:
         return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
-    desired = _desired_version_entry(store, p)
+    desired = store.get_version(p, v) if v else \
+        _desired_version_entry(store, p)
     if desired is None:
-        return {"ok": False, "reason": "no desired version stored"}
+        return {"ok": False,
+                "reason": f"no stored version v{v}" if v
+                          else "no desired version stored"}
     data = _read_patch_file(store, desired)
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
@@ -1569,21 +1797,27 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
         v = version["v"]
         store.set_state(p, "update_available", f"v{v} available from source")
         promoted = False
-        if (p.get("enabled") and p.get("curated")
-                and not p.get("curated_adopted")):
-            # user policy 2026-10-09: a BUNDLED (catalog-owned, not adopted)
-            # patch tracks its catalog version. A validated candidate that
-            # raises no NEW safeguard hold is promoted automatically —
-            # the catalog selected the patch and its upgrade, the human
-            # decision was made at publish time. Adopted and user patches
-            # still wait for the manual Promote.
+        if p.get("enabled") and (
+                p.get("auto_update")
+                or (p.get("curated") and not p.get("curated_adopted"))):
+            # PAT-TABLE: per-patch AUTO UPDATE rides the same rule the
+            # curated catalog tracks (validated candidate with no NEW
+            # safeguard hold is adopted without a Promote click — the
+            # operator's standing yes lives in the manifest, so CLI and
+            # boot honour it too). A surface PINNED in Manage keeps its
+            # pin: the promote moves desired_version, the pin wins at
+            # apply time — auto update can never walk over a remembered
+            # choice. User policy 2026-10-09: a BUNDLED (catalog-owned,
+            # not adopted) patch tracks its catalog version — the catalog
+            # selected the patch and its upgrade, the human decision was
+            # made at publish time.
             codes = (version.get("safeguards") or {}).get("codes") or []
             if not _safeguards.held(codes, p.get("safeguard_always"),
                                     p.get("safeguard_once"), sha):
                 p["desired_version"] = v
                 store.set_state(p, "pending",
-                                f"curated v{v} auto-promoted — applies on "
-                                "next restart")
+                                f"v{v} auto-promoted — applies on "
+                                f"{applies_phrase(p)}")
                 promoted = True
         reports[pid] = {"check": "update_available", "v": v,
                         "promoted": promoted}
@@ -1796,7 +2030,7 @@ def enabled_build_patches(store, with_bytes: bool = True) -> list[dict]:
             continue
         if p.get("state") == "obsolete":
             continue
-        ver = _desired_version_entry(store, p)
+        ver = store.get_version(p, _patches.version_target(p, "build"))
         if ver is None:
             continue
         if not with_bytes:

@@ -1,0 +1,423 @@
+"""PAT-TABLE tests: the merged patch table's server contract.
+
+- set_targets: VANILLA/DEV checkboxes — scope AND enable in one act,
+  widening re-gates the newly used tree, held safeguards answer
+  requires_approval without writing anything.
+- set_pin: per-surface version targets — reconcile (runtime) and
+  enabled_build_patches (materialize input) resolve their own version.
+- set_auto_update + check_all: per-patch AUTO UPDATE auto-promotes a
+  validated candidate; a pinned surface keeps its pin anyway.
+- patchsync: unchecking VANILLA restores the vanilla bytes on the next
+  reconcile instead of freezing the tree patched.
+- view(): surfaces/auto_update/pins fields the table renders from.
+"""
+
+import difflib
+import hashlib
+import os
+import shutil
+import tempfile
+import unittest
+import unittest.mock
+
+from omlx_uplift import patchsource, patches, patchsync
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+FIX = os.path.join(HERE, "fixtures")
+
+REL = "omlx/admin/routes.py"
+
+
+def _diff_adding_line(orig_text, marker):
+    """A minimal unified diff prepending one comment line to the fixture
+    file — two calls with different markers give two distinct versions."""
+    lines = orig_text.splitlines(keepends=True)
+    new = [f"# uplift-test {marker}\n"] + lines
+    d = difflib.unified_diff(lines, new, fromfile="a/" + REL,
+                             tofile="b/" + REL, lineterm="\n")
+    return "".join(d).encode("utf-8")
+
+
+class _Base(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="uplift-pattable-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.keg = os.path.join(self.tmp, "site-packages")
+        shutil.copytree(os.path.join(FIX, "base3764", "omlx"),
+                        os.path.join(self.keg, "omlx"))
+        # source checkout: same installable paths (the dev gate must see
+        # the same diff bytes; csrc/ only exists here)
+        self.src = os.path.join(self.tmp, "src")
+        shutil.copytree(os.path.join(FIX, "base3764", "omlx"),
+                        os.path.join(self.src, "omlx"))
+        with open(os.path.join(self.keg, REL), "r", encoding="utf-8") as fh:
+            self.orig = fh.read()
+        self.store = patches.PatchStore(os.path.join(self.tmp, "data"))
+        # add_patch for an online-kind is overkill here: upload diffs
+        self.diff_a = _diff_adding_line(self.orig, "A")
+        self.diff_b = _diff_adding_line(self.orig, "B")
+        self.diff_c = _diff_adding_line(self.orig, "C")
+
+    def add(self, pid="p1", scope=None, diff=None):
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=self.src):
+            res = patchsource.add_patch(
+                self.store, pid,
+                {"kind": "upload", "data": diff or self.diff_a},
+                self.keg, scope=scope, build_root=self.src)
+        self.assertTrue(res.get("ok"), res)
+        return res
+
+    def manifest_patch(self, pid="p1"):
+        return self.store.find(self.store.load(), pid)
+
+    def targets(self, runtime, dev, pid="p1", approve=None):
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=self.src):
+            return patchsource.set_targets(self.store, pid, runtime, dev,
+                                           approve=approve,
+                                           tree_root=self.keg)
+
+    def reconcile(self):
+        return patchsync.reconcile(self.store, self.keg, allow_reexec=False)
+
+    def live(self):
+        with open(os.path.join(self.keg, REL), "r", encoding="utf-8") as fh:
+            return fh.read()
+
+
+class SetTargetsTest(_Base):
+    def test_checkbox_pair_maps_onto_scope_and_enable(self):
+        self.add(scope="omlx")
+        r = self.targets(True, False)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["scope"], "omlx")
+        self.assertTrue(self.manifest_patch()["enabled"])
+        r = self.targets(True, True)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.manifest_patch()["scope"], "both")
+        r = self.targets(False, True)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.manifest_patch()["scope"], "dev")
+        # unchecked both: disable, LAST SCOPE kept for re-check parity
+        r = self.targets(False, False)
+        self.assertTrue(r["ok"], r)
+        p = self.manifest_patch()
+        self.assertFalse(p["enabled"])
+        self.assertEqual(p["scope"], "dev")
+        r = self.targets(False, True)   # re-check the same box
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(self.manifest_patch()["enabled"])
+        self.assertEqual(self.manifest_patch()["scope"], "dev")
+
+    def test_widening_rejects_diff_that_does_not_fit_src(self):
+        self.add(scope="omlx")
+        os.remove(os.path.join(self.src, REL))   # the dev tree lost the file
+        r = self.targets(True, True)
+        self.assertFalse(r["ok"])
+        self.assertIn("does not fit", r["reason"])
+        p = self.manifest_patch()
+        self.assertNotEqual(p.get("scope"), "both")  # nothing written
+        self.assertTrue(p["enabled"])                # stayed as it was
+
+    def test_missing_dev_root_refuses_build_surface(self):
+        self.add(scope="omlx")
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=""):
+            r = patchsource.set_targets(self.store, "p1", True, True,
+                                        tree_root=self.keg)
+        self.assertFalse(r["ok"])
+        self.assertIn("bootstrap", r["reason"])
+        self.assertNotEqual(self.manifest_patch().get("scope"), "both")
+
+    def test_held_safeguards_answer_requires_approval(self):
+        # kernel .py under omlx/custom_kernels/: on the SRC carrier that is
+        # an advisory (the rebuild IS the pipeline), on the KEG carrier it
+        # HOLDS. So: add dev-clean, then widen to VANILLA — the freshly
+        # gated keg half raises kernel_source and the checkbox must get
+        # requires_approval with NOTHING written, then pass on approve.
+        kerel = "omlx/custom_kernels/fastattn/probe.py"
+        for root in (self.src, self.keg):
+            f = os.path.join(root, kerel)
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            with open(f, "w") as fh:
+                fh.write("x = 1\n")
+        d = difflib.unified_diff(["x = 1\n"], ["x = 1\n", "y = 2\n"],
+                                 fromfile="a/" + kerel, tofile="b/" + kerel,
+                                 lineterm="\n")
+        kdiff = "".join(d).encode("utf-8")
+        self.add(scope="dev", diff=kdiff)     # src carrier: advisory only
+        p = self.manifest_patch()
+        self.assertTrue(p["enabled"])         # dev gate clean -> auto-landed
+        r = self.targets(True, True)          # VANILLA on -> keg kernel hold
+        self.assertFalse(r["ok"])
+        self.assertTrue(r.get("requires_approval"), r)
+        p = self.manifest_patch()
+        self.assertEqual(p.get("scope"), "dev")   # nothing written
+        r = self.targets(True, True, approve="always")
+        self.assertTrue(r["ok"], r)
+        p = self.manifest_patch()
+        self.assertEqual(p["scope"], "both")
+        self.assertTrue(p.get("safeguard_always"))
+
+    def test_scope_change_flips_pending(self):
+        self.add(scope="omlx")
+        self.reconcile()                          # applied on the keg
+        self.assertEqual(self.manifest_patch()["state"], "applied")
+        r = self.targets(True, True)              # widen to the branch
+        self.assertTrue(r["ok"], r)
+        p = self.manifest_patch()
+        self.assertEqual(p["scope"], "both")
+        self.assertEqual(p["state"], "pending")
+
+
+class PinFlowTest(_Base):
+    def _two_versions(self):
+        self.add(scope="omlx", diff=self.diff_a)   # v1, enabled pending
+        self.reconcile()
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=self.src):
+            res = patchsource.add_patch(
+                self.store, "p1",
+                {"kind": "upload", "data": self.diff_b}, self.keg)
+        self.assertTrue(res.get("ok"), res)         # v2 candidate
+
+    def test_pin_swaps_the_applied_runtime_copy(self):
+        self._two_versions()
+        patchsource.promote(self.store, "p1")       # desired -> v2
+        self.reconcile()
+        self.assertIn("uplift-test B", self.live())
+        r = patchsource.set_pin(self.store, "p1", "runtime", 1)
+        self.assertTrue(r["ok"], r)
+        self.reconcile()
+        live = self.live()
+        self.assertIn("uplift-test A", live)        # back on the pinned copy
+        self.assertNotIn("uplift-test B", live)
+        r = patchsource.set_pin(self.store, "p1", "runtime", None)
+        self.assertTrue(r["ok"], r)
+        self.reconcile()
+        self.assertIn("uplift-test B", self.live())  # follow desired again
+
+    def test_unknown_pin_version_rejected(self):
+        self.add(scope="omlx")
+        r = patchsource.set_pin(self.store, "p1", "runtime", 9)
+        self.assertFalse(r["ok"])
+        self.assertIn("v9", r["reason"])
+
+    def test_materialize_input_follows_build_pin(self):
+        self._two_versions()
+        patchsource.promote(self.store, "p1")       # desired 2
+        self.targets(True, True)                    # scope both
+        patchsource.set_pin(self.store, "p1", "build", 1)
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=self.src):
+            items = patchsource.enabled_build_patches(self.store,
+                                                      with_bytes=False)
+        self.assertEqual([i["version"] for i in items], [1])
+
+
+class AutoUpdateTest(_Base):
+    def test_turning_on_adopts_a_waiting_candidate(self):
+        self.add(scope="omlx", diff=self.diff_a)
+        self.reconcile()
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=self.src):
+            patchsource.add_patch(self.store, "p1",
+                                  {"kind": "upload", "data": self.diff_b},
+                                  self.keg)
+        self.assertEqual(self.manifest_patch()["state"], "update_available")
+        r = patchsource.set_auto_update(self.store, "p1", True)
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(r.get("promoted"))
+        p = self.manifest_patch()
+        self.assertTrue(p["auto_update"])
+        self.assertEqual(p["desired_version"], 2)
+        self.assertEqual(p["state"], "pending")
+
+    def test_check_all_promotes_flagged_patch_only(self):
+        self.add(scope="omlx", diff=self.diff_a)
+        self.reconcile()
+        m = self.store.load()
+        p = self.store.find(m, "p1")
+        # a fresh url source + auto flag; fake a drifted gate result
+        p["source"] = {"kind": "url", "url": "http://127.0.0.1:9/x.diff"}
+        p["auto_update"] = True
+        self.store.save(m)
+        new_diff = self.diff_b
+        gate = {
+            "ok": True, "diff": new_diff,
+            "content_sha256": hashlib.sha256(new_diff).hexdigest(),
+            "source_head_sha": "0123456789abcdef0123456789abcdef01234567",
+            "fetched_at": "", "files": [{"path": REL, "status": "applied"}],
+            "safeguards": {}, "advisories": [],
+        }
+        with unittest.mock.patch.object(patchsource, "fetch_and_gate",
+                                        return_value=dict(gate)):
+            rep = patchsource.check_all(self.store, self.keg)
+        r = rep["reports"]["p1"]
+        self.assertEqual(r["check"], "update_available")
+        self.assertTrue(r["promoted"])
+        p = self.manifest_patch()
+        self.assertEqual(p["desired_version"], r["v"])
+        # control: flag OFF -> a NEW drifted candidate waits for a click
+        patchsource.set_auto_update(self.store, "p1", False)
+        gate_c = dict(gate)
+        gate_c["diff"] = self.diff_c
+        gate_c["content_sha256"] = hashlib.sha256(self.diff_c).hexdigest()
+        with unittest.mock.patch.object(patchsource, "fetch_and_gate",
+                                        return_value=dict(gate_c)):
+            rep2 = patchsource.check_all(self.store, self.keg)
+        r2 = rep2["reports"]["p1"]
+        self.assertEqual(r2["check"], "update_available")
+        self.assertFalse(r2.get("promoted"))
+        self.assertEqual(self.manifest_patch()["desired_version"], r["v"])
+
+    def test_auto_never_walks_over_a_pin(self):
+        self.add(scope="omlx", diff=self.diff_a)
+        self.reconcile()
+        patchsource.set_auto_update(self.store, "p1", True)
+        patchsource.set_pin(self.store, "p1", "build", 1)
+        m = self.store.load()   # check_all only re-fetches online sources
+        pp = self.store.find(m, "p1")
+        pp["source"] = {"kind": "url", "url": "http://127.0.0.1:9/x.diff"}
+        self.store.save(m)
+        new_diff = self.diff_b
+        gate = {
+            "ok": True, "diff": new_diff,
+            "content_sha256": hashlib.sha256(new_diff).hexdigest(),
+            "source_head_sha": "abc", "fetched_at": "",
+            "files": [{"path": REL, "status": "applied"}],
+            "safeguards": {}, "advisories": [],
+        }
+        with unittest.mock.patch.object(patchsource, "fetch_and_gate",
+                                        return_value=dict(gate)):
+            patchsource.check_all(self.store, self.keg)
+        p = self.manifest_patch()
+        self.assertEqual(p["desired_version"], 2)     # shared target moved
+        self.assertEqual(patches.patch_pins(p)["build"], 1)  # pin held
+
+
+class ReconcileSurfaceTest(_Base):
+    def test_unchecking_vanilla_restores_keg_bytes(self):
+        self.add(scope="omlx", diff=self.diff_a)
+        self.reconcile()
+        self.assertIn("uplift-test A", self.live())
+        r = self.targets(False, True)                  # VANILLA off
+        self.assertTrue(r["ok"], r)
+        rep = self.reconcile()
+        self.assertEqual(self.live(), self.orig)       # vanilla bytes back
+        self.assertIn("restored", [x.get("action")
+                                   for x in rep["reports"]])
+        p = self.manifest_patch()
+        self.assertTrue(p["enabled"])                  # still on the branch
+        self.assertEqual(p["state"], "pending")
+        self.assertEqual(p.get("scope"), "dev")
+
+    def test_dev_scope_never_mounts_the_keg(self):
+        self.add(scope="dev", diff=self.diff_a)
+        self.reconcile()
+        self.assertEqual(self.live(), self.orig)
+
+
+class ViewSurfacesTest(_Base):
+    def test_view_reports_table_fields(self):
+        self.add(scope="omlx", diff=self.diff_a)
+        self.reconcile()
+        patchsource.set_pin(self.store, "p1", "build", 1)
+        patchsource.set_auto_update(self.store, "p1", True)
+        v = patchsource.view(self.store, self.keg, "test-keg")
+        e = [x for x in v["patches"] if x["id"] == "p1"][0]
+        self.assertTrue(e["surfaces"]["runtime"]["checked"])
+        self.assertFalse(e["surfaces"]["runtime"]["pinned"])
+        self.assertEqual(e["surfaces"]["runtime"]["version"], 1)
+        self.assertFalse(e["surfaces"]["build"]["checked"])  # scope omlx
+        self.assertTrue(e["surfaces"]["build"]["pinned"])
+        self.assertEqual(e["pins"], {"runtime": None, "build": 1})
+        self.assertTrue(e["auto_update"])
+        self.assertEqual(e["latest_v"], 1)
+        self.assertIsNone(e["dev_applied_v"])   # never materialized
+
+
+class DryRunVersionTest(_Base):
+    def test_dry_run_can_target_a_pinned_version(self):
+        self.add(scope="omlx", diff=self.diff_a)
+        self.reconcile()
+        r = patchsource.test_dry_run(self.store, "p1", self.keg, v=1)
+        self.assertTrue(r["ok"], r)
+        r = patchsource.test_dry_run(self.store, "p1", self.keg, v=9)
+        self.assertFalse(r["ok"])
+        self.assertIn("v9", r["reason"])
+
+
+class RouterContractTest(unittest.TestCase):
+    """The three new endpoint wrappers: a held safeguard must surface as
+    HTTP 409 (the checkbox revert branches on err.status === 409), plain
+    failures 422, successes the patchsource dict verbatim."""
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    def test_targets_status_codes(self):
+        from fastapi import HTTPException
+
+        from omlx_uplift.routers import patches as pmod
+
+        store = object()
+        req = pmod.PatchTargetsRequest(id="p1", runtime=True, dev=True)
+        with unittest.mock.patch.object(pmod, "patch_store",
+                                        return_value=store), \
+             unittest.mock.patch.object(patchsource, "set_targets",
+                                        return_value={"ok": False,
+                                                      "requires_approval":
+                                                          ["kernel_source"],
+                                                      "reason": "hold"}):
+            with self.assertRaises(HTTPException) as cm:
+                self._run(pmod.patches_targets(req, is_admin=True))
+            self.assertEqual(cm.exception.status_code, 409)
+        with unittest.mock.patch.object(pmod, "patch_store",
+                                        return_value=store), \
+             unittest.mock.patch.object(patchsource, "set_targets",
+                                        return_value={"ok": True,
+                                                      "scope": "both"}):
+            out = self._run(pmod.patches_targets(req, is_admin=True))
+            self.assertEqual(out["scope"], "both")
+        with unittest.mock.patch.object(pmod, "patch_store",
+                                        return_value=store), \
+             unittest.mock.patch.object(patchsource, "set_targets",
+                                        return_value={"ok": False,
+                                                      "reason": "does not fit"}):
+            with self.assertRaises(HTTPException) as cm:
+                self._run(pmod.patches_targets(req, is_admin=True))
+            self.assertEqual(cm.exception.status_code, 422)
+
+    def test_pin_and_auto_status_codes(self):
+        from fastapi import HTTPException
+
+        from omlx_uplift.routers import patches as pmod
+
+        store = object()
+        with unittest.mock.patch.object(pmod, "patch_store",
+                                        return_value=store), \
+             unittest.mock.patch.object(
+                 patchsource, "set_pin",
+                 return_value={"ok": False, "reason": "no stored version"}):
+            with self.assertRaises(HTTPException) as cm:
+                self._run(pmod.patches_pin(
+                    pmod.PatchPinRequest(id="p1", target="build",
+                                         version=9), is_admin=True))
+            self.assertEqual(cm.exception.status_code, 422)
+        with unittest.mock.patch.object(pmod, "patch_store",
+                                        return_value=store), \
+             unittest.mock.patch.object(
+                 patchsource, "set_auto_update",
+                 return_value={"ok": True, "auto_update": True,
+                               "promoted": True}):
+            out = self._run(pmod.patches_auto(
+                pmod.PatchAutoRequest(id="p1", enabled=True),
+                is_admin=True))
+            self.assertTrue(out["promoted"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -3,10 +3,11 @@
    and render path; the patches page reaches it through
    window.Uplift.devpanel at CALL time (load-order rule: uplift.js may
    load this file before or after uplift_patches.js — never capture at
-   IIFE top). patchCard is the one shared anatomy piece: late-bound via
-   window.Uplift.patches, which exports it. ptMsg/ptChip are three-line
-   pure helpers, duplicated here on purpose so the panel stays
-   self-contained. */
+   IIFE top). PAT-TABLE (user 2026-10-19): the patch rows all live in the
+   single table (uplift_patches.js); this panel keeps the build-level
+   strip AND the build-base picker, whose element now sits in the table's
+   DEV column header (ids unchanged). ptMsg/ptChip are three-line pure
+   helpers, duplicated here on purpose so the panel stays self-contained. */
 (function () {
 'use strict';
 const C = window.UpliftCore;
@@ -23,14 +24,14 @@ function ptChip(text, cls, title) {
     if (title) s.title = title;
     return s;
 }
-const patchCard = (p, view) => window.Uplift.patches.patchCard(p, view);
 
 /* ============================================================================
-   DEV-5: "Build patches (omlx-dev)" section. Every state claim comes from
-   /dev/status (never client guesses): staleness = built_sha vs expected_tip,
-   drift = branch content vs enabled set, sharing = realized vs configured.
-   Build-scope patch cards REUSE the runtime card anatomy; enable/disable
-   ride the existing /patches/* endpoints (DEV-1 made them scope-aware).
+   DEV-5 strip: omlx-dev build controls under the patch table. Every state
+   claim comes from /dev/status (never client guesses): staleness =
+   built_sha vs expected_tip, drift = branch content vs enabled set,
+   sharing = realized vs configured. The DEV checkbox on each row decides
+   what the build set contains (PAT-TABLE /patches/targets); this strip
+   only acts on the branch/build itself.
    ========================================================================== */
 
 let DV_DATA = null;
@@ -41,7 +42,6 @@ let DV_POLL = null;
 let DV_CLICK_BUSY = false;
 let DV_BOOT_POLL = null;
 let DV_COMMITS = null;   // DEV-7(c): /dev/commits cache, loaded on demand
-let DV_PIN_OPEN = false; // build-base pin row: collapsed until opened/pinned
 
 async function pollDev() {
     const sec = $('dv-section');
@@ -49,11 +49,6 @@ async function pollDev() {
     try {
         DV_DATA = await PG.fetchJson(`${API}/uplift/api/dev/status`);
         renderDev();
-        // PATCH-ZONES: carrier truth decides which zone owns the 'both'
-        // cards — repaint the runtime zone once it lands (no cycle:
-        // renderPatches -> renderDev only, refill never re-fetches).
-        const RP = window.Uplift.patches;
-        if (RP && RP.refill) RP.refill();
     } catch (e) {
         // a vanilla-only install has the endpoint too (installed:false) —
         // a failure here is an auth/API problem, hide rather than half-render
@@ -78,12 +73,13 @@ function renderDev() {
     const state = $('dv-state');
     state.innerHTML = '';
     const intro = $('dv-intro'), statusEl = $('dv-status');
-    const patchesBox = $('dv-patches'), actions = $('dv-actions');
+    const actions = $('dv-actions');
     const shareBox = $('dv-share'), warn = $('dv-warn');
 
     if (!d.installed) {
-        statusEl.hidden = true; patchesBox.hidden = true;
+        statusEl.hidden = true;
         actions.hidden = true; shareBox.hidden = true; warn.hidden = true;
+        // no carrier -> the header's build-base picker stays hidden too
         const baseBox = $('dv-base');
         if (baseBox) baseBox.hidden = true;
         intro.hidden = false;
@@ -201,51 +197,11 @@ function renderDev() {
             + 'patches (edited by hand?). The next Build re-applies the '
             + 'enabled patches and drops the other changes.');
 
+    // PAT-TABLE (user 2026-10-19): the build-zone patch cards are retired
+    // — one row per patch lives in the single table above; this strip only
+    // answers build-level truth (chips, status, logs) and owns the
+    // build-base picker which sits in the table's DEV column header.
     dvRenderBase(d);
-
-    // build patch cards: same anatomy as runtime, fed by the /patches view.
-    // Grouped by scope under headings so dev-only and both-scope patches —
-    // which behave differently (one only lands on the rebuild, the other
-    // also overlays the keg) — never blur into one undifferentiated stack.
-    const buildOnDv = (S.PT_DATA && S.PT_DATA.patches || [])
-        .filter(p => p.scope === 'dev' || p.scope === 'both');
-    patchesBox.hidden = false;
-    patchesBox.innerHTML = '';
-    if (!buildOnDv.length) {
-        const empty = document.createElement('div');
-        empty.className = 'empty';
-        empty.textContent = ptMsg('uplift.patches.dev_none',
-            'No build patches yet. Add one below and choose scope "Build".');
-        patchesBox.append(empty);
-    }
-    const groups = [
-        ['both', ptMsg('uplift.patches.dev_group_both',
-            'RUNTIME + BUILD — live after a server restart, and in new omlx-dev builds')],
-        ['dev', ptMsg('uplift.patches.dev_group_dev',
-            'BUILD ONLY — takes effect when omlx-dev is rebuilt')],
-    ];
-    const multi = new Set(buildOnDv.map(p => p.scope)).size > 1;
-    for (const [scope, label] of groups) {
-        const inGroup = buildOnDv.filter(p => p.scope === scope);
-        if (!inGroup.length) continue;
-        // PATCH-ZONES: a 'both' group must ALWAYS carry its heading —
-        // the zone title says "build only", so an unlabeled runtime-
-        // overlaying card inside it would read as a contradiction.
-        if (multi || scope === 'both') {
-            const h = document.createElement('div');
-            h.className = 'dv-group-title';
-            h.textContent = label;
-            patchesBox.append(h);
-        }
-        for (const p of inGroup) {
-            const card = patchCard(p, S.PT_DATA);
-            if (d.stale && p.enabled)
-                card.querySelector('.pt-card-head')
-                    .append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
-                        'NEEDS REBUILD'), 'pt-st-warn'));
-            patchesBox.append(card);
-        }
-    }
 
     actions.hidden = false;
     const btn = $('dv-build-btn');
@@ -364,10 +320,12 @@ function renderDev() {
     }
 }
 
-/* --- DEV-7(c): base-root chooser -----------------------------------------
+/* --- build-base picker (PAT-TABLE: it rides the table's DEV header) ----
    What uplift-dev re-cuts from: default = follow the vanilla omlx keg pin
    (today's behaviour); a commit from the sync-ref log pins the base. A pin
-   changes nothing until the next rebuild (materialize re-cuts the branch). */
+   changes nothing until the next rebuild (materialize re-cuts the branch).
+   Native select: compact closed control, the open popup expands to the
+   full option line on its own (user question answered: yes). */
 
 async function dvLoadCommits() {
     if (DV_COMMITS) return DV_COMMITS;
@@ -383,32 +341,17 @@ async function dvLoadCommits() {
 function dvRenderBase(d) {
     const box = $('dv-base');
     if (!box) return;
-    box.hidden = false;
+    // header cell: only lit while the dev carrier exists (installed)
+    box.hidden = !(d && d.installed);
+    if (box.hidden) return;
     const sel = $('dv-base-select'), note = $('dv-base-note');
     // build patches rebuild every poll — never stomp a selection in flight
     if (document.activeElement === sel) return;
     const pinned = d.base_pin || '';
     const following = ptMsg('uplift.patches.dev_base_follow',
         'follow vanilla omlx keg');
-    // the pin row is expert-only: collapsed unless something is pinned (a
-    // hidden pin would be an invisible override silently beating AUTO UPDATE)
-    const pinRow = $('dv-pin-row'), toggle = $('dv-pin-toggle');
-    if (pinRow && !pinned && document.activeElement !== sel)
-        pinRow.hidden = !DV_PIN_OPEN;
-    if (toggle) {
-        // hidden once opened (the row itself is visible) or pinned (the row
-        // is mandatory then) or while a build runs (no re-pin mid-flight)
-        toggle.hidden = !!pinned || DV_PIN_OPEN || !!(d.build && d.build.running);
-        toggle.onclick = () => {
-            DV_PIN_OPEN = true;
-            pinRow.hidden = false;
-            toggle.hidden = true;
-        };
-    }
-    if (pinned && pinRow) pinRow.hidden = false;
-    if (toggle && pinned) toggle.hidden = true;
     // rebuild options fresh each render — commit list is fetch-once, cache
-    sel.innerHTML = '';   // plain clear, no markup — safe
+    sel.innerHTML = '';   // clear-only — safe
     const def = document.createElement('option');
     def.value = '';
     def.textContent = following + (pinned ? '' : ` (${dvSha(d.base)})`);
@@ -427,7 +370,7 @@ function dvRenderBase(d) {
     for (const c of commits) {
         const opt = document.createElement('option');
         opt.value = c.sha;
-        opt.textContent = `${c.short} ${c.subject}`.slice(0, 90);
+        opt.textContent = `${c.short} ${c.subject}`;
         sel.append(opt);
     }
     sel.value = pinned || '';
@@ -438,6 +381,7 @@ function dvRenderBase(d) {
         ? ptMsg('uplift.patches.dev_base_pinned_note',
             'pinned — the next Build uses exactly this source version')
         : '';
+    note.hidden = !pinned;
     dvRenderAuto(d, pinned);
     btn.onclick = async () => {
         const pin = sel.value;
@@ -445,7 +389,6 @@ function dvRenderBase(d) {
         try {
             const r = await dvApi('base', { pin: pin || null });
             DV_DATA = r.status || DV_DATA;
-            if (!pin) DV_PIN_OPEN = false;   // back to follow: collapse again
             PG.toast(pin
                 ? ptMsg('uplift.patches.dev_base_set', 'Base pinned — rebuild to apply')
                 : ptMsg('uplift.patches.dev_base_cleared', 'Back to following the sync ref'), 5000);

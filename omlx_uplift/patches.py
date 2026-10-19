@@ -77,6 +77,39 @@ def scope_touches_dev(scope: str) -> bool:
     return scope in (SCOPE_DEV, SCOPE_BOTH)
 
 
+# --- PAT-TABLE: per-surface version targets --------------------------------
+# The patches table shows ONE row per patch with a VANILLA and a DEV checkbox
+# (scope + enabled in one act) and a Manage dialog that picks which stored
+# version each surface tracks:
+#   pins[target] = None  -> follow desired_version (latest, auto-promoted
+#                           when the patch opted into auto update)
+#   pins[target] = vN    -> frozen at vN; an auto-promote moves desired but
+#                           can NEVER move a pinned surface (the pin IS the
+#                           remembered user choice)
+# Stored sparsely (all-None deletes the key) so pre-PAT-TABLE manifests keep
+# their exact historical shape.
+TARGET_SURFACES = ("runtime", "build")
+
+
+def patch_pins(patch: dict) -> dict:
+    """Normalized {'runtime': v|None, 'build': v|None} from a manifest entry."""
+    pins = patch.get("pins") or {}
+    out = {}
+    for t in TARGET_SURFACES:
+        v = pins.get(t)
+        out[t] = v if isinstance(v, int) and not isinstance(v, bool) and v > 0 \
+            else None
+    return out
+
+
+def version_target(patch: dict, target: str):
+    """The stored version THIS surface must carry: its pin when pinned,
+    else desired_version. Every apply/materialize path resolves its version
+    through here so the two surfaces can sit on different copies."""
+    pin = patch_pins(patch).get(target)
+    return pin or patch.get("desired_version")
+
+
 # --- per-keg apply records (RUNTIME-MOUNT doctrine, 2026-10-18) -----------
 # An omlx-scope (runtime) overlay now mounts into EVERY keg it lands in —
 # vanilla and omlx-dev alike — so one patch version can be live on two
