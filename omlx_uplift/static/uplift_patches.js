@@ -428,26 +428,11 @@ function patchRow(p, view) {
         oline.title = pSrc.url || '';
     }
     ocell.append(oline);
-    const origin = document.createElement('button');
-    origin.type = 'button';
-    origin.className = 'pt-origin';
+    row.append(ocell);
+    // version lives with the state now ('v1 APPLIED', user 2026-10-20)
     const effV = p.desired_version || p.latest_v || 0;
     const ent = (p.versions || []).find(v => v.v === effV)
         || (p.versions || []).slice(-1)[0] || {};
-    let oTxt = 'v' + (ent.v || effV || '—');
-    const head = String(ent.source_head_sha || '').slice(0, 12);
-    if (head) oTxt += ' · ' + head;
-    origin.textContent = oTxt;
-    if ((p.latest_v || 0) > (ent.v || effV)) {
-        const nx = document.createElement('span');
-        nx.className = 'pt-origin-next';
-        nx.textContent = ' → v' + p.latest_v;
-        origin.append(nx);
-    }
-    origin.title = ptMsg('uplift.patches.show_diff', 'show stored diff');
-    origin.onclick = () => ptShowDiff(p.id, ent.v || effV);
-    ocell.append(origin);
-    row.append(ocell);
 
     // 3) PATCH: name; the details block (one open at a time) carries the
     //    description, full origin, per-version diffs, safeguards + approvals
@@ -471,6 +456,21 @@ function patchRow(p, view) {
     //    simply tracks the latest (user: pins are named, not implied)
     const scell = document.createElement('span');
     scell.className = 'pt-c-status';
+    const origin = document.createElement('button');
+    origin.type = 'button';
+    origin.className = 'pt-origin';
+    origin.textContent = 'v' + (ent.v || effV || '—');
+    if ((p.latest_v || 0) > (ent.v || effV)) {
+        const nx = document.createElement('span');
+        nx.className = 'pt-origin-next';
+        nx.textContent = ' → v' + p.latest_v;
+        origin.append(nx);
+    }
+    origin.title = (ent.source_head_sha
+        ? String(ent.source_head_sha).slice(0, 12) + ' — ' : '')
+        + ptMsg('uplift.patches.show_diff', 'show stored diff');
+    origin.onclick = () => ptShowDiff(p.id, ent.v || effV);
+    scell.append(origin);
     scell.append(ptChip((p.state || '').replace(/_/g, ' ').toUpperCase(),
         PT_STATE_CLASS[p.state] || 'pt-st-dim', p.state_detail || ''));
     if (p.reversal) {
@@ -989,36 +989,123 @@ function ptManage(p) {
     document.body.append(overlay);
 }
 
-/* ---- edit = prefill the add form (one flow, no parallel editor) ------- */
+/* ---- edit source: a dialog over the SAME add endpoint — prefill the
+   current source, Fetch & store gates it and records a candidate.
+   (The old flow silently prefilled the far add form below the table;
+   the user read it as 'nothing happened' — 2026-10-20.)             */
 function ptEditSource(p) {
-    $('pt-new-id').value = p.id;
-    const s = p.source || {};
-    $('pt-src-kind').value = s.kind || 'github_pr';
-    ptSyncKindUI();
-    if (s.kind === 'github_pr') {
-        $('pt-src-repo').value = s.repo || '';
-        $('pt-src-pr').value = s.pr ? String(s.pr) : '';
-    } else if (s.kind === 'url') {
-        $('pt-src-url').value = s.url || '';
+    const s0 = p.source || {};
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal pt-modal';
+    const h = document.createElement('div');
+    h.className = 'pt-mgr-head';
+    const tid = document.createElement('span');
+    tid.className = 'pt-id';
+    tid.textContent = ptMsg('uplift.patches.edit', 'Edit source')
+        + ' — ' + p.id;
+    const close = document.createElement('button');
+    close.className = 'icon-btn';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+    close.onclick = () => overlay.remove();
+    h.append(close);
+    box.append(h, tid);
+    const hint = document.createElement('div');
+    hint.className = 'pt-detail';
+    hint.textContent = ptMsg('uplift.patches.edit_hint',
+        'fetches this source and validates it against the running files — '
+        + 'a new candidate version is stored; nothing changes on disk '
+        + 'until you apply it');
+    box.append(hint);
+
+    const row1 = document.createElement('div');
+    row1.className = 'pt-field';
+    const kindLbl = document.createElement('span');
+    kindLbl.textContent = ptMsg('uplift.patches.lbl_source', 'source');
+    const kind = document.createElement('select');
+    for (const [val, key, fb] of [['github_pr', 'src_pr', 'GitHub PR'],
+                                  ['url', 'src_url', 'URL'],
+                                  ['upload', 'src_upload', 'Upload']]) {
+        const o = document.createElement('option');
+        o.value = val;
+        o.textContent = ptMsg('uplift.patches.' + key, fb);
+        kind.append(o);
     }
-    if ($('pt-reversal')) $('pt-reversal').checked = !!p.reversal;
-    const bx = $('pt-preview');
-    if (bx) { bx.hidden = true; bx.innerHTML = ''; }   // clear-only — safe
-    const adv = $('pt-advisories');
-    if (adv) { adv.hidden = true; adv.innerHTML = ''; } // clear-only — safe
-    PG.toast(ptMsg('uplift.patches.edit_prefilled',
-        'Source filled in — press "Check for updates" to fetch, then '
-        + 'Preview to store a new version'), 6000);
-    // the form sits below the table — on a tall page a silent prefill read
-    // as 'nothing happened' (user 2026-10-20): bring it to the eyes
-    const form = document.querySelector('.pt-addform');
-    if (form && form.scrollIntoView) {
-        form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        form.classList.add('pt-addform-flash');
-        setTimeout(() => form.classList.remove('pt-addform-flash'), 2200);
-    }
-    const kb = $('pt-src-kind');
-    if (kb) kb.focus();
+    kind.value = s0.kind || 'github_pr';
+    const repo = document.createElement('input');
+    repo.type = 'text'; repo.size = 18;
+    repo.placeholder = ptMsg('uplift.patches.ph_repo', 'owner/repo');
+    repo.value = s0.repo || '';
+    const pr = document.createElement('input');
+    pr.type = 'text'; pr.size = 7;
+    pr.placeholder = ptMsg('uplift.patches.ph_pr', '1234');
+    pr.value = s0.pr ? String(s0.pr) : '';
+    const url = document.createElement('input');
+    url.type = 'text';
+    url.placeholder = 'https://…/patch.diff';
+    url.value = s0.url || '';
+    url.className = 'grow';
+    const diffTa = document.createElement('textarea');
+    diffTa.rows = 6;
+    diffTa.placeholder = ptMsg('uplift.patches.source_upload',
+        'paste the .diff text');
+    diffTa.className = 'pt-edit-diff grow';
+    row1.append(kindLbl, kind, repo, pr, url);
+    box.append(row1, diffTa);
+    const sync = () => {
+        repo.hidden = kind.value !== 'github_pr';
+        pr.hidden = kind.value !== 'github_pr';
+        url.hidden = kind.value !== 'url';
+        diffTa.hidden = kind.value !== 'upload';
+    };
+    kind.onchange = sync;
+    sync();
+
+    const acts = document.createElement('div');
+    acts.className = 'pt-acts';
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'btn primary';
+    go.textContent = ptMsg('uplift.patches.edit_fetch', 'Fetch & store');
+    go.onclick = async () => {
+        if (S.PT_BUSY) return;
+        const body = { id: p.id, kind: kind.value,
+                       reversal: !!p.reversal, insecure_tls: !!s0.insecure_tls };
+        if (kind.value === 'github_pr') {
+            body.repo = repo.value.trim();
+            body.pr = parseInt(pr.value, 10) || null;
+            if (!body.repo || !body.pr) return;
+        } else if (kind.value === 'url') {
+            body.url = url.value.trim();
+            if (!body.url) return;
+        } else {
+            body.data = diffTa.value;
+            if (!body.data.trim()) return;
+        }
+        S.PT_BUSY = true; go.disabled = true;
+        try {
+            const r = await ptApi('add', body);
+            overlay.remove();
+            PG.toast(ptMsg('uplift.patches.edit_stored',
+                'v{v} fetched and validated — open MANAGE to apply it')
+                .replace('{v}', r.v || ''), 6000);
+            await pollPatches();
+            await ptRefreshCarrier();
+        } catch (e) {
+            PG.toast(String(e && e.message ? e.message : e), 7000);
+        } finally {
+            S.PT_BUSY = false; go.disabled = false;
+        }
+    };
+    acts.append(go);
+    box.append(acts);
+    overlay.append(box);
+    overlay.addEventListener('click', ev => {
+        if (ev.target === overlay) overlay.remove();
+    });
+    document.body.append(overlay);
 }
 
 /* ---- add flow: kind-aware inputs -> preview (per-file gate table) -> enable */

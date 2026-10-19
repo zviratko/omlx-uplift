@@ -632,15 +632,6 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') for (const [, menuId] of DD_PAIRS) $(menuId).hidden = true;
 });
 
-// Keyboard: 1–8 jump to tabs (ignored while typing in inputs).
-document.addEventListener('keydown', e => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    const tag = document.activeElement?.tagName;
-    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    const i = ['1', '2', '3', '4', '5', '6', '7', '8'].indexOf(e.key);
-    if (i >= 0) location.hash = '#' + TABS[i];
-});
-
 /* ---------------- theme & motion ---------------- */
 function applyPrefs() {
     const t = prefs.theme;

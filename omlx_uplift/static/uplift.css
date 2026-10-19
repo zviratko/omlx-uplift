@@ -2490,10 +2490,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     /* round 3 (user 2026-10-20): the single filler track piled ALL the
        slack right of STATUS — spread it over ORIGIN/PATCH/STATUS instead
        (chips right-align into the control group), keep a thin breather */
-    grid-template-columns: 26px minmax(220px, 1.9fr) minmax(170px, 340px)
-        minmax(160px, 1.1fr) minmax(24px, 0.25fr) 128px 82px 60px 92px;
+    grid-template-columns: 26px minmax(240px, 2.4fr) minmax(170px, 340px)
+        minmax(210px, 1.1fr) minmax(24px, 0.25fr) 128px 82px 60px 92px;
     gap: 10px; align-items: center; padding: 6px 10px;
-    font-size: var(--fs-meta); min-width: 1090px; }
+    font-size: var(--fs-meta); min-width: 1150px; }
 .pt-thead { border-bottom: 1px solid var(--line); color: var(--dim);
     text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
     align-items: end; }
@@ -2524,8 +2524,6 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     letter-spacing: .05em; text-transform: uppercase; }
 .pt-origin-src a:hover { color: var(--accent, #e0662e); }
 .pt-caret { font-size: 1.15em; margin-left: 7px; opacity: .75; }
-.pt-addform.pt-addform-flash { box-shadow: 0 0 0 2px var(--warn, #b8860b);
-    border-radius: var(--radius); transition: box-shadow .4s; }
 .pt-dirty { box-shadow: inset 0 0 0 1px var(--warn, #b8860b);
     padding: 2px 6px; border-radius: calc(var(--radius) / 2); }
 .pt-origin { display: block; background: none; border: none; color: var(--ink);
@@ -2538,7 +2536,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     padding: 0; text-align: left; word-break: break-all; }
 .pt-name:hover { color: var(--accent, #e0662e); }
 .pt-c-status { display: flex; flex-wrap: wrap; gap: 6px;
-    align-items: center; justify-content: flex-end; min-width: 0; }
+    align-items: center; justify-content: center; min-width: 0; }
 .pt-c-vanilla, .pt-c-dev { display: flex; justify-content: center;
     align-items: center; }
 .pt-c-vanilla input, .pt-c-dev input { margin: 0; }

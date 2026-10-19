@@ -360,15 +360,68 @@ test('MANAGE: AUTO UPDATE posts /patches/auto; candidate shows Apply', async () 
                  'a waiting candidate keeps one honest Apply button');
 });
 
-test('ORIGIN cell names version + HEAD sha; a candidate adds an arrow', async () => {
+test('ORIGIN names the source; the version rides the STATUS cell', async () => {
     const sb = loadModule();
     await boot(sb, payload([basePatch({
+        source: { kind: 'github_pr', repo: 'jundot/omlx', pr: 1234 },
         versions: [{ v: 1, source_head_sha: '0123456789abcdef0123456789abcdef' }],
         latest_v: 4, desired_version: 1,
     })]));
-    const t = allText(entry(sb, 'demo'));
-    assert.match(t, /v1 · 0123456789ab/, 'origin = version + 12-char HEAD');
-    assert.match(t, /→ v4/, 'the newer candidate is visible');
+    const e = entry(sb, 'demo');
+    const ocell = find(e, el => el.className === 'pt-c-origin')[0];
+    assert.match(allText(ocell), /jundot\/omlx PR#1234/,
+                 'ORIGIN cell names WHERE the patch comes from');
+    assert.ok(!/v1/.test(allText(ocell)),
+              'no version line left in ORIGIN');
+    const scell = find(e, el => el.className === 'pt-c-status')[0];
+    const ver = find(scell, el => el.className === 'pt-origin')[0];
+    assert.ok(ver, 'the version button leads the STATUS cell');
+    assert.match(allText(ver), /v1.*→ v4/,
+                 'tracked version + waiting candidate in one place');
+    assert.match(ver.title, /0123456789ab/, 'HEAD sha readable in the tip');
+});
+
+test('Edit source opens a dialog that posts the add endpoint for the id', async () => {
+    const sb = loadModule();
+    const p = basePatch({
+        source: { kind: 'github_pr', repo: 'jundot/omlx', pr: 3764 },
+    });
+    const posts = router(sb, {
+        '/uplift/api/patches': () => ({ json: payload([p]) }),
+        '/uplift/api/patches/curated/sync': () => ({ json: { report: {}, notes: [] } }),
+        '/uplift/api/doctor': () => ({ json: { ok: true, unexpected: [] } }),
+        '/uplift/api/patches/add': () => ({ json: { ok: true, v: 2 } }),
+    });
+    await vm.runInContext('window.Uplift.patches.pollPatches()', sb);
+    await new Promise(r => setImmediate(r));
+    const manage = find(entry(sb, 'demo'),
+        el => String(el.textContent).includes('MANAGE'))[0];
+    await manage.onclick();
+    const overlay = sb.document.body.children
+        .filter(c => String(c.className).includes('modal-overlay')).slice(-1)[0];
+    const edit = find(overlay, el => /Edit source/.test(String(el.textContent)))[0];
+    await edit.onclick();
+    const ov2 = sb.document.body.children
+        .filter(c => String(c.className).includes('modal-overlay')).slice(-1)[0];
+    assert.ok(ov2 && ov2 !== overlay, 'EDIT SOURCE opens a real dialog');
+    const inputs = find(ov2, el => el.tagName === 'input');
+    assert.ok(inputs.some(i => String(i.value) === 'jundot/omlx')
+              && inputs.some(i => String(i.value) === '3764'),
+              'prefilled with the CURRENT source — visible, not below the fold');
+    const go = find(ov2, el => /Fetch & store/.test(String(el.textContent)))[0];
+    assert.ok(go, 'one clear action');
+    await go.onclick();
+    await new Promise(r => setImmediate(r));
+    const add = posts.filter(x => x.url.endsWith('/patches/add')).pop();
+    assert.ok(add, 'Fetch & store posts the SAME add endpoint the gate lives on');
+    assert.equal(add.body.id, 'demo');
+    assert.equal(add.body.kind, 'github_pr');
+    assert.equal(add.body.pr, 3764);
+    assert.equal(add.body.scope, undefined,
+                 'scope is fixed per patch — the update never resends it');
+    assert.ok(!sb.document.body.children.some(
+        c => String(c.className).includes('modal-overlay')),
+        'dialog closes after the store');
 });
 
 test('status stays clean while tracking latest; pins are NAMED', async () => {
