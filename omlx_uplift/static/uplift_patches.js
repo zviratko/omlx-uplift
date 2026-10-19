@@ -96,7 +96,10 @@ async function ptAutoSyncCurated(force) {
             notesEl.hidden = !notes.length;
             notesEl.textContent = notes.join(' · ');
         }
-        if (changed) await pollPatches();   // bring the new cards in
+        if (changed) {
+            await pollPatches();   // bring the new cards in
+            await ptRefreshCarrier();   // a widened scope moves build cards
+        }
     } catch (e) {
         // sync failed: keep rendering from the local store (silent by design)
     } finally {
@@ -111,6 +114,22 @@ function ptApi(path, body) {
     });
 }
 
+async function ptRefreshCarrier() {
+    // Build-zone truth (DRIFT / NEEDS REBUILD chips, which zone owns a
+    // 'both' card) rides /dev/status, NOT the patches view. Every store
+    // mutation that can move the enabled build set (remove, enable, sync,
+    // check→obsolete/promote) must re-read the carrier the moment it
+    // lands — a Remove that emptied the drift set otherwise kept its
+    // stale DRIFT chip until a full page refresh (user report 2026-10-19).
+    // pollDev repaints the panel AND refills the cards (no cycle: the
+    // refill renders cached data, it never re-fetches through here).
+    // Guard pollDev itself, not just devpanel: an older panel bundle can
+    // load without it, and a missing carrier read must never fail the
+    // action it follows (FE-5 graceful-no-op contract).
+    const DP = window.Uplift.devpanel;
+    if (DP && DP.pollDev) await DP.pollDev();
+}
+
 async function ptAction(path, body, okMsg) {
     if (S.PT_BUSY) return;
     S.PT_BUSY = true;
@@ -119,7 +138,8 @@ async function ptAction(path, body, okMsg) {
         if (okMsg) PG.toast(okMsg, 4000);
         if (r && r.reason) PG.toast(r.reason, 5000);
         await pollPatches();
-    } catch (e) {
+        await ptRefreshCarrier();   // DRIFT/NEEDS REBUILD must not outlive
+    } catch (e) {                  // the action that resolved them
         PG.toast(ptMsg('uplift.patches.action_fail', 'Patch action failed') +
               ': ' + (e && e.message ? e.message : e), 6000);
     } finally {
@@ -141,7 +161,8 @@ async function ptEnableWithApproval(p, approve) {
                   .replace('{codes}', (r.approved || []).join(', ') || approve)
             : enabledToast(p), 4000);
         await pollPatches();
-    } catch (e) {
+        await ptRefreshCarrier();   // an enabled build patch changes what the
+    } catch (e) {                  // branch must carry — re-judge drift now
         PG.toast(ptMsg('uplift.patches.approve_fail', 'Approval failed') +
               ': ' + (e && e.message ? e.message : e), 6000);
     } finally {
@@ -602,8 +623,7 @@ async function ptPreview() {
             // DEV-6: a NEW stored patch must appear immediately — same page
             // state a refresh would produce (enable/disable/remove usable)
             await pollPatches();
-            const DP = window.Uplift.devpanel;
-            if (DP) await DP.pollDev();
+            await ptRefreshCarrier();
         }
         adv.hidden = !(r.advisories && r.advisories.length);
         adv.innerHTML = '';
@@ -795,7 +815,8 @@ async function ptCheckNow(quiet) {
             PG.toast(notes.length ? notes.join(' · ')
                 : ptMsg('uplift.patches.all_current', 'All patch sources current'), 6000);
         await pollPatches();
-    } catch (e) {
+        await ptRefreshCarrier();   // a promoted/obsolete verdict can
+    } catch (e) {                  // empty or grow the build set right now
         PG.toast(ptMsg('uplift.patches.check_fail', 'Check failed') + ': ' + e, 5000);
     } finally {
         b.textContent = old;

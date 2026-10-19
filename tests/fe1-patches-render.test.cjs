@@ -267,3 +267,76 @@ test('patches export refill for the devpanel carrier-truth repaint', () => {
     const sb = loadPatchesModule();
     assert.equal(typeof sb.Uplift.patches.refill, 'function');
 });
+
+/* CARRIER-REFRESH (user report 2026-10-19): the DRIFT / NEEDS REBUILD
+   chips and the zone ownership of 'both' cards ride /dev/status, which
+   the patches page read ONLY at page load (DV_POLL runs just during a
+   build). A Remove that emptied the drift set left the stale DRIFT chip
+   lit until a full page refresh. Every store mutation must re-read the
+   carrier the moment it lands. */
+const btnIn = (el, label) => {
+    for (const c of el.children || []) {
+        if (typeof c.onclick === 'function'
+            && String(c.textContent).includes(label)) return c;
+        const hit = btnIn(c, label);
+        if (hit) return hit;
+    }
+    return null;
+};
+
+async function removeFlow(sb) {
+    const calls = { remove: 0, failedToast: '' };
+    sb.confirm = () => true;
+    sb.fetch = async (url) => {
+        const u = String(url);
+        let body = {};
+        if (u.endsWith('/uplift/api/patches/remove')) { calls.remove++; body = { ok: true }; }
+        else if (u.endsWith('/uplift/api/patches/curated/sync')) body = { report: {}, notes: [] };
+        else if (u.endsWith('/uplift/api/patches')) body = payload([]);
+        else if (u.endsWith('/uplift/api/dev/status')) body = { installed: true };
+        else if (u.endsWith('/uplift/api/doctor')) body = { ok: true, skipped_reason: null, n_checked: 1, unexpected: [] };
+        return { ok: true, status: 200,
+                 json: async () => JSON.parse(JSON.stringify(body)),
+                 text: async () => '', clone() { return this; } };
+    };
+    const card = sb.document.getElementById('pt-list').children
+        .find(c => (c.className || '').includes('pt-card'));
+    assert.ok(card, 'a patch card is on screen to remove');
+    await btnIn(card, 'Remove').onclick();
+    await new Promise(r => setImmediate(r));
+    for (const t of sb.document.getElementById('toasts').children || [])
+        if (/failed/i.test(t.textContent)) calls.failedToast = t.textContent;
+    return calls;
+}
+
+test('remove re-reads /dev/status the moment it lands (stale DRIFT dies with the action)', async () => {
+    const sb = loadPatchesModule();
+    await runPoll(sb, payload([basePatch()]));
+    let devReads = 0;
+    sb.Uplift.devpanel = { installed: () => true, renderDev: () => {},
+                           pollDev: async () => { devReads++; } };
+    const calls = await removeFlow(sb);
+    assert.equal(calls.remove, 1, 'the Remove POST landed');
+    assert.equal(devReads, 1, 'the carrier was re-read exactly once for the action');
+    assert.equal(calls.failedToast, '');
+});
+
+test('an older devpanel bundle without pollDev never fails the action', async () => {
+    const sb = loadPatchesModule();
+    await runPoll(sb, payload([basePatch()]));
+    sb.Uplift.devpanel = { installed: () => true };   // pre-carrier-refresh seam
+    const calls = await removeFlow(sb);
+    assert.equal(calls.remove, 1, 'the remove still lands');
+    assert.equal(calls.failedToast, '',
+                 'a missing carrier read must not fail the action: '
+                 + calls.failedToast);
+});
+
+test('a vanilla-only page (no devpanel file at all) removes cleanly', async () => {
+    const sb = loadPatchesModule();
+    await runPoll(sb, payload([basePatch()]));
+    assert.equal(sb.Uplift.devpanel, undefined, 'harness ships without the panel');
+    const calls = await removeFlow(sb);
+    assert.equal(calls.remove, 1);
+    assert.equal(calls.failedToast, '');
+});
