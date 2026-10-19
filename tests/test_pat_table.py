@@ -319,6 +319,42 @@ class ReconcileSurfaceTest(_Base):
         self.assertEqual(self.live(), self.orig)
 
 
+class RemoveSweepTest(_Base):
+    def test_remove_after_disable_restart_sweeps_backups(self):
+        # live QA (2026-10-20): disable -> restart restores AND clears the
+        # keg records; the later Remove found no unwind chain and left the
+        # backups/<id>.vN/ leaf behind forever. The leaf must go with the
+        # entry when no tree holds a record for that version.
+        self.add(scope="omlx")
+        self.reconcile()
+        self.assertIn("uplift-test A", self.live())
+        r = self.targets(False, False)                   # both boxes off
+        self.assertTrue(r["ok"], r)
+        self.reconcile()                                 # boot restores
+        self.assertEqual(self.live(), self.orig)
+        p = self.manifest_patch()
+        self.assertFalse(p.get("enabled"))
+        bdir = os.path.join(self.store.base_dir, "backups", "p1.v1")
+        # The live defect shape: some earlier cycle cleared the records but
+        # left the pristine leaf behind. Reproduce it directly — Remove must
+        # sweep a record-free version's backups even with nothing to unwind.
+        os.makedirs(bdir, exist_ok=True)
+        with open(os.path.join(bdir, "orphan.txt"), "w") as fh:
+            fh.write("pristine bytes holder")
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=self.src):
+            res = patchsource.remove_patch(self.store, "p1", self.keg)
+        self.assertTrue(res.get("ok"), res)
+        self.assertFalse(os.path.isdir(bdir),
+                         "remove must sweep backups of a record-free version")
+        # a never-mounted removal still must not crash
+        self.add(scope="dev")
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=self.src):
+            res = patchsource.remove_patch(self.store, "p1", self.keg)
+        self.assertTrue(res.get("ok"), res)
+
+
 class ViewSurfacesTest(_Base):
     def test_view_reports_table_fields(self):
         self.add(scope="omlx", diff=self.diff_a)

@@ -1490,18 +1490,25 @@ def remove_patch(store, patch_id: str, tree_root: str) -> dict:
             diffapply.restore_backup(bd_full, other_root)
             _sweep(v, bd)
             _patches.clear_keg_record(v, other_keg)
-    if chain or swept:
-        import shutil
+    import shutil
 
-        for v in p.get("versions", []):
-            if v.get("kegs"):
-                continue  # another tree still needs these backups
-            for bd in swept.get(id(v), []):
-                bd_full = (bd if os.path.isabs(bd)
-                           else os.path.join(store.base_dir, bd))
-                # sweep every keg's leaf under backups/<id>.v<N>/
-                shutil.rmtree(os.path.dirname(bd_full), ignore_errors=True)
-            v.pop("kegs", None)
+    for v in p.get("versions", []):
+        if v.get("kegs"):
+            continue  # another tree still needs these backups
+        for bd in swept.get(id(v), []):
+            bd_full = (bd if os.path.isabs(bd)
+                       else os.path.join(store.base_dir, bd))
+            # sweep every keg's leaf under backups/<id>.v<N>/
+            shutil.rmtree(os.path.dirname(bd_full), ignore_errors=True)
+        # PAT-TABLE QA (2026-10-20): a disable+restart cycle restores and
+        # clears the records BEFORE the remove, so `swept` is empty and the
+        # dirs used to survive the entry. With no keg record left anywhere
+        # nothing needs the pristine copies — sweep the whole leaf.
+        if not swept.get(id(v)):
+            shutil.rmtree(os.path.join(store.base_dir, "backups",
+                                       f"{p['id']}.v{v.get('v')}"),
+                          ignore_errors=True)
+        v.pop("kegs", None)
     for ver in p.get("versions", []):
         pf = ver.get("patch_file")
         if pf:
