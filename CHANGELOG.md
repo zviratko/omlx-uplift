@@ -13,17 +13,14 @@ users never see.
 
 ## Unreleased
 
-- **Chat renders math.** Formulas written as `$x$` or `$$…$$` now draw as
-  real equations in the reply bubbles instead of literal text. The renderer
-  (KaTeX, MathML output) ships inside the dashboard — no network needed.
-  `\( … \)` and `\[ … \]` spellings are recognized too; the stored markdown
-  stays exactly as the model wrote it.
-- **Memory & cache now reports the server's real memory.** The omlx memory
-  figure was the sum of model-file sizes, so it stayed flat around 1 GiB
-  while the server was actually using more. It now tracks the memory the
-  guard itself evicts on, matching the classic stats bar. The card's two
-  limit figures also expire on their own: a limit the server stopped
-  reporting shows `—` instead of a days-old number.
+## [2.4] — 2026-10-20
+
+- **The Patches page is one table.** One row per patch, with checkboxes for the vanilla server and the dev build, and an AUTO column for auto-update. The MANAGE dialog covers versions, pins, test, source edit and removal.
+- **Chat renders math.** Formulas written as `$x$` or `$$…$$` display as real equations. The renderer ships inside the dashboard; no network is needed.
+- **The Memory & cache card shows real memory use.** The figure used to be the sum of model-file sizes, so it stayed flat while the server actually grew.
+- **The Activity card no longer sleeps.** Clicking into Chat, Bench or Cluster used to stop its live stream; loads took up to 15 seconds to appear. Both are fixed.
+
+*P.S. Two new curated patches wait on the Patches page. They remove two server stalls around model loads: the ~19 s freeze while a vision model loads, and the ~0.8 s pause on the first request after a load.*
 
 ## [2.3] — 2026-10-19
 
