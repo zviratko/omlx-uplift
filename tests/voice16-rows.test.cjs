@@ -7,7 +7,12 @@
    (3) the i18n family self-pin (tf2 keys are invisible to test_locale_sync.py);
    (4) CSS/structure pins: the old speaker button is gone, the grid is a
        3-column stack capped at five visible rows, and every foldable class
-       carries its [hidden] guard.
+       carries its [hidden] guard;
+   (5) VOICE-17 gates that need no browser: the chunk stack is built only
+       while AUTO-SPEAK is on (with Auto off the bubble keeps its single
+       whole-reply play row), a row paints from its OWN plan's queue, and the
+       inline editor scrolls its own Save row into view instead of leaving it
+       under the composer.
    Justification for the vm slices: the bodies concatenate ONLY the
    repository's own checked-in source, no external input. */
 'use strict';
@@ -201,6 +206,62 @@ test('structure: the speaker button is replaced by the transport row', () => {
               'rows refresh on every attach pass');
     assert.ok(/row\.mid = _turnMid/.test(SRC),
               'the streamed turn binds its plan to the assistant row');
+});
+
+/* ---- VOICE-17: what the bubble shows when AUTO-SPEAK is off -------------- */
+
+test('attach: the chunk stack belongs to AUTO-SPEAK, not to every bubble', () => {
+    const body = slice('sayAttach');
+    assert.match(body, /if \(!autoSpeakOn\(\)\) \{ sayDetach\(holder, bubble, msg\); return; \}/,
+                 'with Auto off the stack is never built (user: no clutter in the chat)');
+    const det = slice('sayDetach');
+    assert.match(det, /grid\.remove\(\)/, 'and a stack left over from Auto on comes off');
+    assert.match(det, /sayClean\(bubble\)/, 'including the numbers inside the reply text');
+    // the ONE control that stays is the whole-reply row on the action line
+    assert.match(slice('msgActionsEl'), /role === 'assistant' && hasVoices\(\)/,
+                 'the play row rides the action line whether Auto is on or off');
+    // toggling re-attaches, so the change is visible without a reload
+    const toggle = SRC.slice(SRC.indexOf("autoBtn.addEventListener('click'"));
+    assert.ok(toggle.length > 100, 'the AUTO-SPEAK handler was found');
+    assert.match(toggle.slice(0, 900), /scheduleMessageActions\(_dc\)/,
+                 'toggling Auto repaints every bubble\'s audio affordance');
+});
+
+test('editor: its own controls are brought into view, a blocked save says why', () => {
+    // user bug: 'editing a bubble does nothing' — the Save row of the
+    // bottom-most message fell under the composer and swallowed the click
+    const body = slice('openEditor');
+    assert.match(body, /scrollIntoChatView\(bar\)/, 'the Save/Cancel row is scrolled in');
+    assert.match(body, /requestAnimationFrame/, 'and re-checked after the bubble is hidden');
+    assert.match(body, /if \(_streaming\) \{ editWaitToast\(\); return; \}/,
+                 'a save blocked by an in-flight reply keeps its text and explains');
+    const sc = slice('scrollIntoChatView');
+    assert.match(sc, /block: 'end'/, 'the BOTTOM edge is what must be visible');
+});
+
+test('i18n: the editor wait key exists in all locales, translated', () => {
+    const full = 'uplift.chat.edit_wait_reply';
+    const en = JSON.parse(fs.readFileSync(path.join(LOCALE_DIR, 'en.json')));
+    assert.ok(en[full], 'en carries ' + full);
+    assert.ok(SRC.includes("'" + full + "'"), full + ' is declared but never used');
+    for (const f of FILES) {
+        const d = JSON.parse(fs.readFileSync(path.join(LOCALE_DIR, f)));
+        assert.ok(d[full], full + ' missing from ' + f);
+        assert.deepEqual((String(d[full]).match(/\{\w+\}/g) || []).sort(),
+                         (String(en[full]).match(/\{\w+\}/g) || []).sort(),
+                         'placeholder set differs in ' + f);
+        if (f !== 'en.json')
+            assert.notEqual(d[full], en[full], full + ' untranslated in ' + f);
+    }
+});
+
+test('paint: a row reports on its OWN bubble, never on the queue that is playing', () => {
+    // VOICE-17: reading the shared _speakQ here made the rows of every other
+    // reply light up as loading/playing while ONE reply read out — the bubbles
+    // looked like they were generating audio nobody asked for.
+    const body = slice('sayPaint');
+    assert.ok(!/_speakQ/.test(body), 'sayPaint must not read the shared queue');
+    assert.match(body, /var q = plan\.q/, 'it reads the queue its own plan owns');
 });
 
 // the shadow-DOM theme is a JS array of quoted lines: rejoin them into CSS text

@@ -2,6 +2,9 @@
    states for the row UI, position() arithmetic off the AudioContext clock,
    true pause/resume mid-buffer, replay from cached bytes without a new
    synthesis request, solo (one-chunk) play, and ⟳ reload of a single chunk.
+   VOICE-17 adds the byte window: what a read is ALLOWED to synthesize, so a
+   one-line play buys one line and nothing else (user: pressing play on a
+   fragment must generate only that fragment).
    Pure logic — the module is `require`d directly (UMD tail) against a
    hand-rolled fake AudioContext that records (start, lead) per source, so no
    Web Audio and no server. The gapless/order/fuzz invariants of this same
@@ -256,6 +259,51 @@ test('queue: solo seek plays ONE chunk and settles without dragging the tail', a
     const tags = ctx.heard().slice(replayFrom).map(s => s.buffer.tag);
     assert.deepEqual(tags, ['C0', 'C1', 'C2', 'C3'],
                      'a full replay after a solo plays the whole read: ' + tags);
+});
+
+/* ---- 5b. VOICE-17: the byte window — a fragment costs a fragment -------- */
+
+test('queue: a COLD one-line play synthesizes exactly that line', async () => {
+    // this is the UI order in sayStart: declare the window, THEN feed the
+    // whole plan (the plan's list must stay complete or the row numbers move)
+    const { q, ctx, calls } = rig([2, 2, 2, 2]);
+    q.loadWindow(2, 2);
+    q.push('a'); q.push('b'); q.push('c'); q.push('d');
+    await settle(6);
+    assert.deepEqual(calls, [2], 'only the pressed line was bought');
+    assert.equal(q.seek(2, 0, { solo: true }), true, 'the solo play starts');
+    await settle(4);
+    assert.deepEqual(calls, [2], 'starting the read costs nothing extra');
+    const done = q.drain();
+    ctx.live().forEach(s => s.__end());
+    const res = await orTimeout(done, 2000, 'cold solo drain');
+    assert.equal(res.stopped, false);
+    assert.equal(res.played, 1, 'one line played');
+    assert.equal(q.pending(), 0,
+                 'three never-requested lines must not hold the settle');
+    assert.deepEqual(calls, [2], 'and they stayed unbought through the whole read');
+    // the window is a property of the READ, not of the bubble: a whole read
+    // after a one-line play buys what it always bought
+    q.loadWindow(0, -1);
+    await settle(4);
+    assert.deepEqual(calls.slice(1).sort(), [0, 1, 3],
+                     'opening the window fetches the rest, once each');
+});
+
+test('queue: ⟳ of one line re-records THAT line and buys no other', async () => {
+    const { q, calls } = rig([2, 2, 2]);
+    q.loadWindow(1, 1);                 // sayReload narrows before it feeds
+    q.push('a'); q.push('b'); q.push('c');
+    await settle(6);
+    assert.deepEqual(calls, [1], 'the feed bought only the line inside the window');
+    calls.length = 0;
+    let fresh = 0;
+    assert.equal(q.reload(1, () => { fresh++; return b(3, 'NEW1'); },
+                          { play: true, solo: true }), true);
+    await settle(6);
+    assert.equal(fresh, 1, 'the pressed row re-recorded itself');
+    assert.equal(calls.length, 0, 'no other row was requested');
+    assert.equal(q.itemAt(1).duration, 3, 'the fresh bytes are the ones that landed');
 });
 
 /* ---- 6. ⟳ reload one chunk --------------------------------------------- */

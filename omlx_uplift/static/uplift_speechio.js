@@ -507,7 +507,31 @@
         var startOffset = 0;      // seconds of the next item already heard
         var autoPlayFrom = -1;    // seq to play when its reload finishes loading
         var autoPlaySolo = false; // ...and whether that play is one line only
+        /* VOICE-17 byte window — what THIS read is allowed to buy. A one-line
+           play windows to that line, a whole read windows from the playhead to
+           the end (-1 = open). Chunks outside it are never requested, so the
+           audio for a reply is only ever generated for what the listener asked
+           for; their rows stay idle with an empty waveform, which is honest. */
+        var loadFrom = 0, loadTo = -1;
         var CLIP_EPS = 0.05;      // clock slop: scheduled-ahead seams
+
+        function inWindow(i) {
+            return i >= loadFrom && (loadTo < 0 || i <= loadTo);
+        }
+        function owed(it) {
+            // Does this read still have to deliver `it`? Bytes sitting outside
+            // the window were never asked for and must not hold the settle
+            // (or a one-line play would keep the echo guard alive forever).
+            if (SETTLED[it.state]) return false;
+            if (it.clips && it.clips.length) return true;    // already on air
+            return inWindow(it.seq);
+        }
+        /* set what may be synthesized: [from, to], to < 0 = to the end */
+        function loadWindow(from, to) {
+            loadFrom = Math.max(0, from | 0);
+            loadTo = (to == null || (to | 0) < 0) ? -1 : (to | 0);
+            return dispatch();
+        }
 
         function transport() {
             if (fetchLike) return fetchLike;
@@ -744,9 +768,12 @@
             });
         }
 
-        /* start loads for the oldest not-yet-loaded chunks, capped */
+        /* start loads for the not-yet-loaded chunks INSIDE the byte window,
+           capped by prefetch. Outside the window nothing is bought: a one-line
+           play synthesizes one line (VOICE-17). */
         function dispatch() {
-            for (var i = 0; i < items.length && inflight < prefetch; i++) {
+            for (var i = loadFrom; i < items.length && inflight < prefetch; i++) {
+                if (loadTo >= 0 && i > loadTo) break;
                 if (items[i].state === '') load(items[i]);
             }
         }
@@ -806,6 +833,8 @@
             paused = null;
             autoPlayFrom = -1;
             soloSeq = solo ? seq : -1;
+            loadFrom = seq;
+            loadTo = solo ? seq : -1;      // one line, or everything after here
             killLive();
             prevEnd = 0;
             var upto = solo ? seq : items.length - 1;
@@ -845,6 +874,8 @@
             startOffset = p.offset;
             schedIdx = p.seq;
             soloSeq = p.solo >= 0 ? p.seq : -1;
+            loadFrom = p.seq;
+            loadTo = p.solo >= 0 ? p.seq : -1;   // the frozen read keeps its own window
             dispatch();
             advance();
             return true;
@@ -863,6 +894,9 @@
             if (onAir || (opts && opts.play)) autoPlayFrom = seq;
             autoPlaySolo = !!(opts && opts.solo);
             if (onAir) { schedIdx = seq; soloSeq = -1; prevEnd = 0; }
+            // the ONE line the operator pressed ⟳ on: buy it even when the
+            // current byte window does not cover it, and nothing else
+            if (it.state === '' && !inWindow(seq)) load(it);
             dispatch();
             advance();
             return true;
@@ -870,7 +904,7 @@
 
         function allSettled(upto) {
             for (var i = 0; i < upto && i < items.length; i++)
-                if (!SETTLED[items[i].state]) return false;
+                if (owed(items[i])) return false;
             return true;
         }
 
@@ -916,6 +950,8 @@
                 // whole plan and then seeks restarts the first chunk mid-air.
                 if (soloSeq >= 0 && SETTLED[items[soloSeq].state]) {
                     soloSeq = -1;
+                    loadFrom = 0; loadTo = -1;   // that read is over: the byte
+                    dispatch();                  // window opens up again
                     advance();
                 }
                 return item.seq;
@@ -936,6 +972,7 @@
                 stopped = true;
                 paused = null;
                 soloSeq = -1;
+                loadFrom = 0; loadTo = -1;
                 startOffset = 0;
                 autoPlayFrom = -1;
                 autoPlaySolo = false;
@@ -958,6 +995,7 @@
                 prevEnd = 0;
                 paused = null;
                 soloSeq = -1;
+                loadFrom = 0; loadTo = -1;
                 startOffset = 0;
                 autoPlayFrom = -1;
                 autoPlaySolo = false;
@@ -968,14 +1006,16 @@
             dropped: function () { return dropped.slice(); },
             queued: function () { return items.slice(); },
             pending: function () {
-                // past the solo cap nothing is owed, or a one-line play would
-                // keep the echo guard (and the progress loop) alive forever
-                var cap = soloSeq;
-                return items.filter(function (it) {
-                    if (SETTLED[it.state]) return false;
-                    return cap < 0 || it.seq <= cap;
-                }).length;
+                // past the solo cap / outside the byte window nothing is owed,
+                // or a one-line play would keep the echo guard (and the
+                // progress loop) alive forever
+                return items.filter(owed).length;
             },
+            /* VOICE-17: the caller declares what this read may synthesize
+               BEFORE it feeds the chunk list, so pressing play on one line
+               costs one line and not the whole reply. */
+            loadWindow: loadWindow,
+            window: function () { return { from: loadFrom, to: loadTo }; },
             /* the clock position the next clip starts at (ms-accurate seam) */
             clock: function () { return prevEnd; },
             liveSources: function () { return live.slice(); },

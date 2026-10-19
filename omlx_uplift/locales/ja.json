@@ -968,6 +968,7 @@
  "uplift.chat.stt_listening": "聞いています…",
  "uplift.chat.stt_transcribing": "文字起こし中…",
  "uplift.chat.stt_wait_reply": "録音は返信の生成が完了してから行ってください。",
+ "uplift.chat.edit_wait_reply": "この編集を保存するには、返信の生成が終わるまで待ってください。",
  "uplift.chat.stt_connecting": "接続中…",
  "uplift.chat.stt_paused_echo": "アシスタントの発話中は一時停止しています",
  "uplift.chat.stt_segmented": "リアルタイム認識を使えないため、区切りで録音します。",

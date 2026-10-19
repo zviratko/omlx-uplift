@@ -965,6 +965,7 @@
  "uplift.chat.stt_listening": "Poslouchám…",
  "uplift.chat.stt_transcribing": "Přepisuji…",
  "uplift.chat.stt_wait_reply": "S nahráváním počkejte, až odpověď doběhne.",
+ "uplift.chat.edit_wait_reply": "S uložením úpravy počkejte, až odpověď doběhne.",
  "uplift.chat.stt_connecting": "Připojování…",
  "uplift.chat.stt_paused_echo": "Pozastaveno, zatímco asistent mluví",
  "uplift.chat.stt_segmented": "Realtimeový poslech není dostupný — audio se snímá po úsecích.",

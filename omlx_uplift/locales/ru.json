@@ -965,6 +965,7 @@
  "uplift.chat.stt_listening": "Слушаю…",
  "uplift.chat.stt_transcribing": "Идёт расшифровка…",
  "uplift.chat.stt_wait_reply": "Записывайте только после ответа модели — дождитесь его окончания.",
+ "uplift.chat.edit_wait_reply": "Дождитесь окончания ответа, прежде чем сохранять эту правку.",
  "uplift.chat.stt_connecting": "Подключение…",
  "uplift.chat.stt_paused_echo": "Пауза, пока ассистент говорит",
  "uplift.chat.stt_segmented": "Непрерывное распознавание недоступно — запись идёт участками.",

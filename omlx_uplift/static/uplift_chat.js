@@ -1644,6 +1644,10 @@ function toolbar() {
         // VOICE-11 cancel rule: toggled OFF cuts the live read; toggled
         // ON spends this gesture unlocking the shared AudioContext
         if (on) unlockSpeak(); else speakCancel();
+        // VOICE-17 (user: 'those bubbles should NOT be there cluttering the
+        // chat'): the chunk stack belongs to the auto-read, so toggling
+        // re-attaches every bubble — rows appear with Auto, vanish without it.
+        if (_dc) scheduleMessageActions(_dc);
         onPageEdited();        // ROUND 11
     });
     var chunkSel = el('select'); chunkSel.id = 'chat-native-speak-chunk';
@@ -2293,11 +2297,15 @@ function sayRow(plan, seq) {
     return row;
 }
 
-/* paint one row from what the queue knows about that chunk */
+/* paint one row from what the queue knows about that chunk.
+   VOICE-17: a row reports on ITS OWN bubble's queue. This used to read the
+   shared _speakQ (the single-queue days of VOICE-11), so playing one reply
+   made the rows of every other reply paint 'loading'/'playing' — bubbles
+   appeared to be generating audio that nobody asked for. */
 function sayPaint(plan, seq) {
     var row = plan.rows[seq];
     if (!row) return;
-    var q = _speakQ, it = q && q.itemAt ? q.itemAt(seq) : null;
+    var q = plan.q, it = q && q.itemAt ? q.itemAt(seq) : null;
     var state = 'idle';
     if (it) state = it.state || 'idle';
     if (plan.playSeq === seq && (state === 'playing' || plan.paused)) state =
@@ -2462,6 +2470,11 @@ function sayStart(plan, seq, solo) {
     var q = queueFor(plan);
     if (!q) { sayToastNoAudio(); return null; }
     sayTake(q, plan);
+    // VOICE-17 (user: 'a fragment play should only generate the fragment'):
+    // declare the byte window BEFORE the chunk list is fed, so pushing the
+    // other lines costs nothing. One line = one synthesis; the whole read =
+    // everything from here on.
+    if (q.loadWindow) q.loadWindow(seq, solo ? seq : -1);
     sayFeed(plan, q);
     plan.playSeq = seq;
     plan.paused = false;
@@ -2495,6 +2508,10 @@ function sayReload(plan, seq) {
     var q = queueFor(plan);
     if (!q) { sayToastNoAudio(); return; }
     sayTake(q, plan);
+    // VOICE-17: ⟳ on one line re-records THAT line — the rest of the bubble
+    // stays untouched (and unsynthesized) even though the queue owns its whole
+    // chunk list for the row numbering.
+    if (q.loadWindow) q.loadWindow(seq, seq);
     sayFeed(plan, q);
     plan.playSeq = seq;
     speakEvent(true);
@@ -2932,6 +2949,17 @@ function sayFitGrid(plan, bubble) {
     }
 }
 /* per-bubble refresh (idempotent: attach runs on every render tick) */
+function sayDetach(holder, bubble, msg) {
+    // VOICE-17: with AUTO-SPEAK off a bubble keeps NOTHING of the player but
+    // its one whole-reply play row on the action line. Drop the chunk stack and
+    // the numbers inside the text, and forget the DOM the plan was painting, so
+    // a later toggle rebuilds both from scratch.
+    var grid = sayFindGrid(holder);
+    if (grid) grid.remove();
+    var p = msg && planOf(msg);
+    if (p) { p.planEl = null; p.rows = []; p.seqs = {}; p.bubble = null; }
+    sayClean(bubble);
+}
 function sayAttach(holder, idx, role, bubble) {
     var msg = role === 'assistant' ? messageAt(idx) : null;
     var grid = sayFindGrid(holder);
@@ -2939,6 +2967,7 @@ function sayAttach(holder, idx, role, bubble) {
         if (grid) grid.remove();
         return;
     }
+    if (!autoSpeakOn()) { sayDetach(holder, bubble, msg); return; }
     // planned on sight: the chunk lines come from the text, so they exist
     // before a single byte of audio does
     var plan = planOf(msg) || planFor(msg);
@@ -3284,6 +3313,10 @@ function openEditor(idx) {
     }
     saveB.addEventListener('click', function () {
         if (!taC.value.trim()) return;        // empty reply = refuse (editor stays)
+        // Both save paths refuse to act while a reply is in flight. Say so and
+        // KEEP the editor with its typed text — silently returning here was
+        // half of 'editing a bubble does nothing'.
+        if (_streaming) { editWaitToast(); return; }
         if (ai) {
             // in-place; a fully-unchanged save commits nothing and marks
             // nothing — close quietly
@@ -3306,6 +3339,14 @@ function openEditor(idx) {
     if (taR) holder.insertBefore(taR, bar);
     holder.insertBefore(taC, bar);
     focusEnd(taR || taC);
+    // BUG (user: 'editing a bubble does nothing'): on the bottom-most message
+    // the Save/Cancel row fell outside the message scroller, under the composer
+    // — a real click hit the composer and the save never ran. Bring the editor's
+    // own controls into view, and again next frame (hiding the bubble moves the
+    // scroll height after this pass has laid out).
+    scrollIntoChatView(bar);
+    var raf = W() && W().requestAnimationFrame;
+    if (raf) { try { raf(function () { scrollIntoChatView(bar); }); } catch (e) {} }
 }
 
 function msgEdit(idx) { openEditor(idx); }
@@ -3353,6 +3394,19 @@ function wireKeys(ta, saveB, done) {
 function focusEnd(ta) {
     ta.focus();
     try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {}
+}
+
+function scrollIntoChatView(node) {
+    // Why openEditor calls this: see the note at its call site. The BOTTOM of
+    // the injected editor is the part the composer covers, so block:'end'.
+    if (!node || !node.scrollIntoView) return;
+    try { node.scrollIntoView({ block: 'end', behavior: 'auto' }); } catch (e) {}
+}
+
+function editWaitToast() {
+    var d = D();
+    if (d && d.toast) d.toast(t('uplift.chat.edit_wait_reply',
+        'Wait for the reply to finish before saving this edit.'), 'error');
 }
 
 // U74: what does the Edited mark claim? 'next' = this row conditions the

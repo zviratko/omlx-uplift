@@ -965,6 +965,7 @@
  "uplift.chat.stt_listening": "正在聆听…",
  "uplift.chat.stt_transcribing": "正在转写…",
  "uplift.chat.stt_wait_reply": "请等回复结束后再录音。",
+ "uplift.chat.edit_wait_reply": "请等回复结束后再保存此编辑。",
  "uplift.chat.stt_connecting": "连接中…",
  "uplift.chat.stt_paused_echo": "助手说话时已暂停",
  "uplift.chat.stt_segmented": "无法实时聆听——改为分段采集。",

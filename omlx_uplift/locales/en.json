@@ -965,6 +965,7 @@
  "uplift.chat.stt_listening": "Listening…",
  "uplift.chat.stt_transcribing": "Transcribing…",
  "uplift.chat.stt_wait_reply": "Wait for the reply to finish before recording.",
+ "uplift.chat.edit_wait_reply": "Wait for the reply to finish before saving this edit.",
  "uplift.chat.stt_connecting": "Connecting…",
  "uplift.chat.stt_paused_echo": "Paused while the assistant speaks",
  "uplift.chat.stt_segmented": "Realtime listening unavailable — capturing in segments instead.",

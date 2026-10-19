@@ -980,6 +980,7 @@
  "uplift.chat.stt_listening": "듣는 중…",
  "uplift.chat.stt_transcribing": "전사 중…",
  "uplift.chat.stt_wait_reply": "녹음은 답변이 끝난 뒤에 시작하세요.",
+ "uplift.chat.edit_wait_reply": "이 편집을 저장하려면 답변이 끝날 때까지 기다리세요.",
  "uplift.chat.stt_connecting": "연결 중…",
  "uplift.chat.stt_paused_echo": "어시스턴트가 말하는 동안 일시 멍초됨",
  "uplift.chat.stt_segmented": "실시간 인식을 사용할 수 없얰 부분으로 나누어 녹음합니다.",

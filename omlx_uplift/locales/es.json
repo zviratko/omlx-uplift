@@ -969,6 +969,7 @@
  "uplift.chat.stt_listening": "Escuchando…",
  "uplift.chat.stt_transcribing": "Transcribiendo…",
  "uplift.chat.stt_wait_reply": "Espera a que termine la respuesta antes de grabar.",
+ "uplift.chat.edit_wait_reply": "Espera a que termine la respuesta antes de guardar esta edición.",
  "uplift.chat.stt_connecting": "Conectando…",
  "uplift.chat.stt_paused_echo": "En pausa mientras el asistente habla",
  "uplift.chat.stt_segmented": "El dictado en tiempo real no está disponible: se captura por segmentos.",
