@@ -1,0 +1,33 @@
+diff --git a/omlx/engine/vlm.py b/omlx/engine/vlm.py
+index b3cf00b..04f2481 100644
+--- a/omlx/engine/vlm.py
++++ b/omlx/engine/vlm.py
+@@ -2539,10 +2539,24 @@ class VLMBatchedEngine(BaseEngine):
+         # Without separate Rust tokenizer backends, concurrent access causes
+         # "RuntimeError: Already borrowed".
+         # See: https://github.com/huggingface/tokenizers/issues/537
+-        if hasattr(self._processor, "tokenizer"):
+-            self._tokenizer = copy.deepcopy(self._processor.tokenizer)
+-        else:
+-            self._tokenizer = copy.deepcopy(self._processor)
++        #
++        # The copy runs on the MLX executor thread, not the event loop.
++        # Deep-copying a fast tokenizer serializes and re-parses the whole
++        # vocabulary through tokenizers.__getstate__/__setstate__ (Rust
++        # serde_json), which can take seconds on large vocabs; inline, it
++        # froze every event-loop task until it finished — HTTP handlers,
++        # streaming responses and the admin dashboard included. Nothing
++        # touches the processor around this point, so the executor round-trip
++        # stays strictly serial and the "Already borrowed" separation above
++        # is unchanged.
++        def _clone_loop_tokenizer():
++            if hasattr(self._processor, "tokenizer"):
++                return copy.deepcopy(self._processor.tokenizer)
++            return copy.deepcopy(self._processor)
++
++        self._tokenizer = await loop.run_in_executor(
++            get_mlx_executor(), _clone_loop_tokenizer
++        )
+         if self._tokenizer is None or not callable(
+             getattr(self._tokenizer, "encode", None)
+         ):
