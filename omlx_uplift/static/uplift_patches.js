@@ -1004,6 +1004,14 @@ function ptEditSource(p) {
     PG.toast(ptMsg('uplift.patches.edit_prefilled',
         'Source filled in — press "Check for updates" to fetch, then '
         + 'Preview to store a new version'), 6000);
+    // the form sits below the table — on a tall page a silent prefill read
+    // as 'nothing happened' (user 2026-10-20): bring it to the eyes
+    const form = document.querySelector('.pt-addform');
+    if (form && form.scrollIntoView) {
+        form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        form.classList.add('pt-addform-flash');
+        setTimeout(() => form.classList.remove('pt-addform-flash'), 2200);
+    }
     const kb = $('pt-src-kind');
     if (kb) kb.focus();
 }
