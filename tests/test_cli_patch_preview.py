@@ -57,6 +57,28 @@ class PreviewTests(unittest.TestCase):
         self.store.save(m)
         self.assertEqual(self._preview("keg-new"), {"demo": "warning"})
 
+    def test_stale_hash_with_record_is_ours_not_upstream(self):
+        # mruu 2026-10-20: two enabled patches share one file (vlm-load +
+        # warm-before-ready on vlm.py); the later apply legitimately
+        # invalidates the first patch's recorded bytes. The byte verify
+        # cannot pass, the dry-run sees 'already' — and the kegs record
+        # proves the state is OURS. The preview must report APPLIED with
+        # the honest reason, not accuse upstream of our own work.
+        patchsync.reconcile(self.store, self.root, allow_reexec=False)
+        keg = patches.keg_id(os.path.join(self.root, "omlx"))
+        m = self.store.load()
+        p = self.store.find(m, "demo")
+        v = self.store.get_version(p, p["desired_version"])
+        rec = patches.keg_record(v, keg)
+        self.assertTrue(rec and rec["files"])
+        for f in rec["files"]:
+            f["sha256"] = "0" * 64    # an intermediate state, exactly what
+        self.store.save(m)            # a co-edited file leaves behind
+        row = {r["id"]: r for r in
+               cli.patch_preview(self.store, self.root, keg)}["demo"]
+        self.assertEqual(row["verdict"], "applied")
+        self.assertIn("content verified in place", row["detail"])
+
     def test_drifted_target_reports_failure(self):
         target = os.path.join(self.root, "omlx", "admin", "routes.py")
         data = open(target, "rb").read()

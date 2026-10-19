@@ -137,6 +137,21 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                                    f"boot) — {why}"),
                         "reversal": rev})
         elif alrdy:
+            if not rev and applied.get("status") == "applied":
+                # The byte-hash check above could not pass, yet the
+                # content is fully present and uplift recorded applying
+                # it on THIS keg: another enabled patch applied AFTER
+                # this one edits the same file (vlm-load +
+                # warm-before-ready both touch vlm.py), so the recorded
+                # bytes are a legitimate intermediate state. The tree
+                # state is ours, verified — saying 'upstream likely
+                # picked it up' here accused upstream of our own work
+                # (user report 2026-10-20, mruu install preview).
+                out.append({"id": pid, "verdict": "applied",
+                            "detail": ("already applied to this install — "
+                                       "content verified in place"),
+                            "reversal": rev})
+                continue
             out.append({"id": pid,
                         "verdict": "reversed" if rev else "warning",
                         "detail": ("tree is already at the reverted state — "
