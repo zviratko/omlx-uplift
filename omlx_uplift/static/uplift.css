@@ -2560,7 +2560,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* TARGET: the build-base link in the DEV header (word only, expands on
    click into a full-line menu — long commits read fully, no truncation
    in a 150px box) */
-.dv-target-wrap { display: inline; }
+.dv-target-wrap { display: inline; margin-left: 3px; }
 .pt-target-link { background: none; border: none; padding: 0; cursor: pointer;
     font: inherit; color: var(--ink); text-decoration: underline;
     text-underline-offset: 2px; text-transform: uppercase;
