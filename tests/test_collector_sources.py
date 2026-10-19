@@ -385,24 +385,153 @@ def test_cached_tokens_rate_and_disk_max(monkeypatch):
     assert "rate.cached_tokens_s" not in store.pairs, "reset tick must not lie"
 
 
+class UpstreamEnforcer:
+    """The real shape of omlx.process_memory_enforcer.ProcessMemoryEnforcer
+    (verified against the installed keg): the guard state is the
+    ``is_running`` PROPERTY and the ``enabled`` KEY of ``get_status()`` —
+    there is NO ``enabled()`` method.
+
+    MEM-TRUE regression pin (user 2026-10-19, "memory & cache doesn't show
+    actual memory usage"): the collector probed ``getattr(enf, "enabled",
+    lambda: False)()``, i.e. an attribute upstream never had. The default
+    answered False on every box, so the series silently rode the pool's
+    model-FILE estimate (kocour: 0.76 GiB shown against 1.31 GiB real).
+    A fake that carries the same invented method hides the same bug in the
+    fixture — this class deliberately has none."""
+
+    def __init__(self, usage=1_406_142_720, ceiling=27_425_917_184,
+                 custom_ceiling=0, running=True, broken=False,
+                 no_private=False):
+        self._usage = usage
+        self._ceiling = ceiling
+        self._running = running
+        self._broken = broken
+        self.memory_guard_custom_ceiling_bytes = custom_ceiling
+        if no_private:
+            self._current_usage_bytes = None      # seam renamed upstream
+
+    @property
+    def is_running(self):
+        return self._running
+
+    def _current_usage_bytes(self):
+        if self._broken:
+            raise RuntimeError("jetsam ledger unavailable")
+        return self._usage
+
+    def get_final_ceiling(self):
+        return self._ceiling
+
+    def get_status(self):
+        if self._broken:
+            raise RuntimeError("status unavailable")
+        return {"enabled": self._running,
+                "current_bytes": self._usage if self._running else 0,
+                "ceiling_bytes": self._ceiling}
+
+
+class EstimatePool(FakePool):
+    """Pool whose model-size estimate is DELIBERATELY different from the
+    footprint, so a mix-up of the two accountings cannot pass silently."""
+
+    current_model_memory = 819_918_159        # 0.76 GiB (kocour 2026-10-19)
+
+    def _get_final_ceiling(self):
+        return 27_425_917_184                 # 25.5 GiB
+
+
+def _guard_on(monkeypatch, enf):
+    import omlx.server as srv
+    import omlx_uplift.router as rt
+
+    monkeypatch.setattr(srv._server_state, "process_memory_enforcer", enf,
+                        raising=False)
+    monkeypatch.setattr(rt, "engine_pool", lambda: EstimatePool())
+
+
+def test_memory_used_follows_the_enforcer_footprint(monkeypatch):
+    """MEM-TRUE: with the guard running, mem.used_bytes is the footprint the
+    guard evicts on — never the model-file estimate, even though the pool
+    still reports one."""
+    _guard_on(monkeypatch, UpstreamEnforcer())
+    store = CapturingStore()
+    Collector(store=store).sample_once()
+    assert store.pairs["mem.used_bytes"] == 1_406_142_720.0
+    assert store.pairs["mem.used_bytes"] != float(EstimatePool.current_model_memory)
+    assert store.pairs["mem.percent"] == 100.0 * 1_406_142_720 / 27_425_917_184
+
+
+def test_memory_used_falls_back_to_the_estimate_only_when_the_guard_is_off(
+        monkeypatch):
+    """Classic's own else-branch: guard stopped -> pool estimate + pool
+    ceiling. The fallback must not become the normal path again."""
+    _guard_on(monkeypatch, UpstreamEnforcer(running=False))
+    store = CapturingStore()
+    Collector(store=store).sample_once()
+    assert store.pairs["mem.used_bytes"] == float(EstimatePool.current_model_memory)
+
+
+def test_memory_used_uses_public_status_when_the_private_seam_is_gone(
+        monkeypatch):
+    """Old/new upstream shape: no ``_current_usage_bytes`` -> read the same
+    figure out of the public status dict."""
+    _guard_on(monkeypatch, UpstreamEnforcer(no_private=True))
+    store = CapturingStore()
+    Collector(store=store).sample_once()
+    assert store.pairs["mem.used_bytes"] == 1_406_142_720.0
+
+
+def test_memory_used_is_absent_when_every_enforcer_seam_fails(monkeypatch):
+    """Both reads broken while the guard runs: NO key this tick. Writing the
+    estimate or a fake zero would put a memory figure on the chart that is
+    not one (the old code wrote 0)."""
+    _guard_on(monkeypatch, UpstreamEnforcer(broken=True))
+    store = CapturingStore()
+    Collector(store=store).sample_once()
+    assert "mem.used_bytes" not in store.pairs
+    assert "mem.percent" not in store.pairs
+
+
+def test_collector_seams_match_the_installed_enforcer_shape():
+    """DRIFT GUARD (the check whose absence let MEM-TRUE ship): the fakes
+    above only prove the collector agrees with itself. This reads the REAL
+    class in the installed keg and pins every seam the collector touches —
+    including the fact that upstream has no ``enabled()`` method, which is
+    the attribute the shipped probe used for months and that made the memory
+    figure silently read the model-size estimate on every box."""
+    import inspect
+
+    import pytest
+
+    pme = pytest.importorskip("omlx.process_memory_enforcer")
+    cls = pme.ProcessMemoryEnforcer
+
+    assert isinstance(cls.__dict__.get("is_running"), property), \
+        "guard gate moved: is_running is no longer a property"
+    assert callable(cls._current_usage_bytes), "usage seam renamed upstream"
+    assert callable(cls.get_final_ceiling), "ceiling seam renamed upstream"
+    assert "memory_guard_custom_ceiling_bytes" in cls.__dict__, \
+        "custom-ceiling property moved; mem.custom_ceiling_bytes needs work"
+    assert not callable(getattr(cls, "enabled", None)), \
+        "upstream gained enabled(); the collector gate may now prefer it"
+    # get_status() must keep the two keys classic's stats builder (and the
+    # public fallback here) read.
+    src = inspect.getsource(cls.get_status)
+    for field in ('"enabled"', '"current_bytes"', '"ceiling_bytes"'):
+        assert field in src, f"get_status() no longer publishes {field}"
+
+
 def test_u38_memory_budget_lines(monkeypatch):
     """U38: the chart's limits are the SETTINGS custom ceiling (enforcer
     property) and the kernel iogpu.wired_limit_mb (upstream helper). Both
     keys ABSENT when unset (0) — never a fake zero ceiling; the footprint
     line rides the enforcer's current_bytes (mem.used_bytes)."""
-    import types
-    import omlx_uplift.router as rt
     import omlx.server as srv
     import omlx.process_memory_enforcer as pme
 
-    enf = types.SimpleNamespace(
-        enabled=lambda: True,
-        get_status=lambda: {"current_bytes": 70_000_000_000},
-        get_final_ceiling=lambda: 129_922_760_704,
-        memory_guard_custom_ceiling_bytes=129_922_760_704,   # 121 GiB
-    )
-    srv._server_state.process_memory_enforcer = enf
-    monkeypatch.setattr(rt, "engine_pool", lambda: FakePool())
+    enf = UpstreamEnforcer(usage=70_000_000_000, ceiling=129_922_760_704,
+                           custom_ceiling=129_922_760_704)   # 121 GiB
+    _guard_on(monkeypatch, enf)
     monkeypatch.setattr(pme, "get_iogpu_wired_limit_bytes",
                         lambda: 124_640 * 1024**2)            # 118.75 GiB
     import omlx_uplift.collectors as ucl
@@ -423,6 +552,7 @@ def test_u38_memory_budget_lines(monkeypatch):
     assert "mem.custom_ceiling_bytes" not in store.pairs
     assert "mem.iogpu_limit_bytes" not in store.pairs
     assert store.pairs["mem.used_bytes"] == 70_000_000_000.0
+    assert srv._server_state.process_memory_enforcer is enf
 
 
 class HitsOnlySched:

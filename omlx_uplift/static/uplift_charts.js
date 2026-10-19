@@ -1743,7 +1743,23 @@ function markHistoryDirty() { historyDirty = true; loadChartHistory(); }
    U30: the same latest-fetch carries rate.cached_tokens_s — the throughput
    chart's live dotted prefill-colour line (no stats field for it either). */
 let sysFetching = false, sysAt = 0;
-let sysLive = { usedGB: null, ceilGB: null, iogpuGB: null, ts: 0 };
+// MEM-TRUE-2 (2026-10-19): each of the three memory figures carries its OWN
+// sample timestamp now. The old shape kept ONE timestamp (the used line's)
+// and stamped the two ceilings with it, so a ceiling the collector stopped
+// writing kept a fresh-looking value forever — measured on kocour: the
+// header showed "iogpu wired limit 28" off a row from 6 days ago (kernel
+// sysctl is unset now, so the key has no current sample). /metrics/latest
+// answers the newest row of every key regardless of age, so freshness must
+// be judged per key against that row's own ts.
+let sysLive = {};                       // key -> {v: GiB, ts: ms of the sample}
+const SYS_STALE_MS = 120_000;
+const SYS_LIVE_KEYS = ['mem.used_bytes', 'mem.custom_ceiling_bytes',
+                       'mem.iogpu_limit_bytes'];
+function sysGiB(key) {
+    const p = sysLive[key];
+    return (p && typeof p.v === 'number' && Date.now() - p.ts < SYS_STALE_MS)
+        ? p.v : null;
+}
 let cachedTps = null, cachedTpsTs = 0;
 // BE-prefill: live per-tick computed-prefill rate (the chart's prefill
 // line). /admin/api/stats only carries the session AVERAGE (avg_prefill_tps)
@@ -1776,14 +1792,15 @@ async function refreshSysPct() {
         const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
             encodeURIComponent('mem.used_bytes,mem.custom_ceiling_bytes,mem.iogpu_limit_bytes,rate.cached_tokens_s,prefill.tokens_s,generation.tokens_s,mtp.accepted_tokens_s,embedding.tokens_s'));
         const lat = (r && r.latest) || {};
-        const gb = k => (lat[k] && typeof lat[k].v === 'number') ? +(lat[k].v * GIB).toFixed(3) : null;
-        const u = lat['mem.used_bytes'];
-        if (u && typeof u.v === 'number') {
-            sysLive = { usedGB: +(u.v * GIB).toFixed(3),
-                        ceilGB: gb('mem.custom_ceiling_bytes'),
-                        iogpuGB: gb('mem.iogpu_limit_bytes'),
-                        ts: u.ts * 1000 };
+        // Rebuild wholesale: a key the collector stopped writing must drop
+        // out of the header on the next poll, not ride the previous map.
+        const next = {};
+        for (const k of SYS_LIVE_KEYS) {
+            const p = lat[k];
+            if (p && typeof p.v === 'number')
+                next[k] = { v: +(p.v * GIB).toFixed(3), ts: (p.ts || 0) * 1000 };
         }
+        sysLive = next;
         const c = lat['rate.cached_tokens_s'];
         if (c && typeof c.v === 'number') { cachedTps = c.v; cachedTpsTs = c.ts * 1000; }
         const pl = lat['prefill.tokens_s'];
@@ -1803,25 +1820,26 @@ async function refreshSysPct() {
    replaces the old "XX% ok" memory-pressure readout, which compared
    /admin/api stats against a budget the chart no longer draws). Values are
    unit-less by request; the GiB axis says the unit. Absent series (unset
-   ceiling, no macmon iogpu sample) show '—', never a stale number. */
+   ceiling, no macmon iogpu sample) show '—', never a stale number — and
+   MEM-TRUE-2 made "absent" mean per key: each figure expires on its OWN
+   sample time, so a ceiling the collector stopped writing cannot ride the
+   footprint's fresh timestamp in as if it were live. */
 function renderMemLabel() {
     const el = $('mem-label');
     if (!el) return;
-    const fresh = sysLive.ts && Date.now() - sysLive.ts < 120_000;
-    const v = n => (fresh && typeof n === 'number')
-        ? String(Math.round(n * 10) / 10) : '—';
-    if (!fresh && sysLive.usedGB === null) { el.textContent = ''; return; }
+    const parts = [['omlx memory', sysGiB('mem.used_bytes')],
+                   ['settings ceiling', sysGiB('mem.custom_ceiling_bytes')],
+                   ['iogpu wired limit', sysGiB('mem.iogpu_limit_bytes')]];
+    if (!parts.some(p => p[1] !== null)) { el.textContent = ''; return; }
     // DOM construction, not innerHTML (project rule); b styling exists in
     // .card h2 .right b.
     el.textContent = '';
-    const parts = [['omlx memory', sysLive.usedGB],
-                   ['settings ceiling', sysLive.ceilGB],
-                   ['iogpu wired limit', sysLive.iogpuGB]];
     parts.forEach(([name, val], i) => {
         if (i) el.append(' / ');
         el.append(name + ' ');
         const b = document.createElement('b');
-        b.textContent = v(val);
+        b.textContent = (typeof val === 'number')
+            ? String(Math.round(val * 10) / 10) : '—';
         el.append(b);
     });
 }
@@ -1930,11 +1948,11 @@ function pushStatusSample(s) {
     while (hotLive.ts.length > MAX_POINTS) { hotLive.ts.shift(); hotLive.v.shift(); }
     // U38: omlx footprint GiB + the two absolute limit lines (collector
     // mem.* via metrics/latest). Limits absent -> null (flat line hidden).
-    const fresh = sysLive.ts && Date.now() - sysLive.ts < 120_000;
+    // MEM-TRUE-2: each column ages on its own sample stamp (sysGiB).
     memData[0].push(s.time);
-    memData[1].push(fresh ? sysLive.usedGB : null);
-    memData[2].push(fresh ? sysLive.ceilGB : null);
-    memData[3].push(fresh ? sysLive.iogpuGB : null);
+    memData[1].push(sysGiB('mem.used_bytes'));
+    memData[2].push(sysGiB('mem.custom_ceiling_bytes'));
+    memData[3].push(sysGiB('mem.iogpu_limit_bytes'));
     while (memData[0].length > MAX_POINTS) for (const col of memData) col.shift();
     redrawCharts();
 }

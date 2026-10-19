@@ -289,22 +289,79 @@ def collect_iogpu_limit_bytes(*, force: bool = False) -> int:
     return wired
 
 
+def _memory_guard_running(enf: Any) -> bool:
+    """Classic's own gate (admin/routes.py stats builder): the enforcer
+    exists and its loop runs. Upstream exposes this as the ``is_running``
+    PROPERTY and as the ``"enabled"`` KEY of ``get_status()`` — there has
+    never been an ``enabled()`` method.
+
+    MEM-TRUE (2026-10-19, user report "memory & cache doesn't show actual
+    memory usage"): the old probe was ``getattr(enf, "enabled",
+    lambda: False)()``, so it silently answered False on EVERY box and the
+    series always fell to the model-file estimate below."""
+    if enf is None:
+        return False
+    running = getattr(enf, "is_running", None)
+    if running is not None:
+        return bool(running)
+    try:                      # older/newer shape: the public status dict
+        return bool(enf.get_status().get("enabled"))
+    except Exception:
+        log.debug("memory guard state probe failed", exc_info=True)
+        return False
+
+
+def _enforcer_usage_bytes(enf: Any) -> int | None:
+    """The footprint the guard actually evicts on — identical to what
+    /admin/api/stats publishes as ``memory_pressure.current_bytes``:
+    ``max(MLX active memory, jetsam phys_footprint ledger)`` plus models
+    served from their own processes. None = every seam failed (the caller
+    then writes NO key for this tick — an estimate or a fake zero would
+    read as a memory figure).
+
+    ``_current_usage_bytes`` is the exact seam ``get_status()`` itself
+    calls; reading it directly keeps the sysctl-free ceiling recompute out
+    of the 2 Hz fast sampler. The public dict is the fallback if upstream
+    renames the private one."""
+    read = getattr(enf, "_current_usage_bytes", None)
+    if callable(read):
+        try:
+            return int(read())
+        except Exception:
+            log.debug("enforcer usage read failed; trying get_status",
+                      exc_info=True)
+    try:
+        status = enf.get_status()
+        if status.get("enabled"):
+            return int(status.get("current_bytes", 0))
+    except Exception:
+        log.debug("enforcer status read failed", exc_info=True)
+    return None
+
+
 def collect_memory_used(pool: Any) -> dict:
     """FAST-1 fast-path slice of collect_memory: the two values that
-    actually MOVE (used + percent). No sysctl fork, no settings reads —
-    same sources, same accounting as the 5 s path."""
+    actually MOVE (used + percent). No sysctl fork — same source, same
+    accounting as the 5 s path and as classic's memory-pressure bar.
+
+    Two accountings, chosen exactly like classic does:
+      guard running  -> the real process footprint + the enforced ceiling
+      guard off      -> the pool's model-size estimate + the pool ceiling
+    The estimate is NOT a memory figure (it ignores KV cache, hot cache and
+    the rest of the process), so it may never be shown while the guard runs."""
     pairs: dict[str, float] = {}
     from omlx.server import _server_state
 
     enf = getattr(_server_state, "process_memory_enforcer", None)
-    if enf is not None and getattr(enf, "enabled", lambda: False)():
+    if _memory_guard_running(enf):
+        used = _enforcer_usage_bytes(enf)
+        if used is None:
+            return pairs        # both seams broken: honest gap, logged above
         try:
-            used = int(enf.get_status().get("current_bytes", 0))
             maxb = int(enf.get_final_ceiling())
         except Exception:
-            used, maxb = 0, 0     # pre-FAST-1 behavior kept: write 0, do
-                                  # NOT drop the key (skipping zeros
-                                  # truncates the series mid-probe-failure)
+            log.debug("enforcer ceiling read failed", exc_info=True)
+            maxb = 0
     else:
         used = int(getattr(pool, "current_model_memory", 0) or 0)
         cb = getattr(pool, "_get_final_ceiling", None)

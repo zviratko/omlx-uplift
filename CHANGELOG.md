@@ -13,6 +13,13 @@ users never see.
 
 ## Unreleased
 
+- **Memory & cache now reports the server's real memory.** The omlx memory
+  figure was the sum of model-file sizes, so it stayed flat around 1 GiB
+  while the server was actually using more. It now tracks the memory the
+  guard itself evicts on, matching the classic stats bar. The card's two
+  limit figures also expire on their own: a limit the server stopped
+  reporting shows `—` instead of a days-old number.
+
 ## [2.3] — 2026-10-19
 
 - **macOS `say` is now a TTS engine.** A VOICES tab lists every
