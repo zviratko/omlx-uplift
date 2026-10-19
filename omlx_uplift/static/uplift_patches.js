@@ -267,6 +267,44 @@ function ptGroupLine(grp) {
     return msg;
 }
 
+// PAT-TABLE (user 2026-10-20): the ORIGIN cell names WHERE the patch
+// comes from, condensed; the version line stays underneath.
+function ptOriginText(src, p) {
+    if (src.kind === 'github_pr' && src.repo) {
+        return src.repo + (src.pr ? ' PR#' + src.pr : '');
+    }
+    const url = src.url || '';
+    let m = url.match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+\/[^/]+)\/[^/]+\/(.+)$/);
+    if (m) return m[1] + ' · ' + m[2].split('/').pop();
+    m = url.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+    if (m) return m[1] + ' PR#' + m[2];
+    if (url) {
+        const host = url.replace(/^https?:\/\//, '').split('/')[0];
+        const tail = url.split('/').filter(Boolean).pop() || '';
+        return host + (tail ? ' · ' + tail : '');
+    }
+    if (src.kind === 'upload' || (!url && p && p.versions)) {
+        return ptMsg('uplift.patches.origin_upload', 'uploaded diff');
+    }
+    return src.kind || '—';
+}
+function ptCondensedOrigin(src, p) {
+    if (src.kind === 'github_pr' && src.repo && src.pr) {
+        return 'https://github.com/' + src.repo + '/pull/' + src.pr;
+    }
+    return src.url || null;
+}
+
+// the caret is the expand affordance — flip it with the details block
+function ptPaintCarets() {
+    const list = $('pt-list');
+    if (!list) return;
+    for (const e of list.querySelectorAll('.pt-entry'))
+        if (e._ptCaret)
+            e._ptCaret.textContent =
+                (PT_OPEN_DETAILS === e.dataset.pid) ? '▴' : '▾';
+}
+
 function ptChip(text, cls, title) {
     const s = document.createElement('span');
     s.className = 'pt-chip ' + (cls || '');
@@ -331,6 +369,7 @@ function renderPatches() {
         list.append(empty);
     }
     for (const p of d.patches) list.append(patchRow(p, d));
+    ptPaintCarets();
     // FE-5 seam: dev panel lives in uplift_devpanel.js; lazy lookup so this
     // file works with the panel absent (graceful) and load order is free.
     const DP = window.Uplift.devpanel;
@@ -357,11 +396,30 @@ function patchRow(p, view) {
         + (p.state_detail ? ' — ' + p.state_detail : '');
     row.append(lamp);
 
-    // 2) ORIGIN: the version this patch runs + the HEAD commit it was
-    //    fetched at; a newer candidate shows as a dim '→ vN' arrow
+    // 2) ORIGIN: WHO the patch came from, condensed (repo PR# / host · file
+    //    / upload) with the tracked version + HEAD sha underneath — user
+    //    2026-10-20: a column titled ORIGIN that only shows 'v1' is not
+    //    telling where anything came from
+    const ocell = document.createElement('span');
+    ocell.className = 'pt-c-origin';
+    const pSrc = p.source || {};
+    const oline = document.createElement('span');
+    oline.className = 'pt-origin-src';
+    const srcHref = ptCondensedOrigin(pSrc, p);
+    if (srcHref) {
+        const a = document.createElement('a');
+        a.href = srcHref; a.target = '_blank'; a.rel = 'noopener';
+        a.textContent = ptOriginText(pSrc, p);
+        a.title = pSrc.url || srcHref;
+        oline.append(a);
+    } else {
+        oline.textContent = ptOriginText(pSrc, p);
+        oline.title = pSrc.url || '';
+    }
+    ocell.append(oline);
     const origin = document.createElement('button');
     origin.type = 'button';
-    origin.className = 'pt-c-origin pt-origin';
+    origin.className = 'pt-origin';
     const effV = p.desired_version || p.latest_v || 0;
     const ent = (p.versions || []).find(v => v.v === effV)
         || (p.versions || []).slice(-1)[0] || {};
@@ -377,7 +435,8 @@ function patchRow(p, view) {
     }
     origin.title = ptMsg('uplift.patches.show_diff', 'show stored diff');
     origin.onclick = () => ptShowDiff(p.id, ent.v || effV);
-    row.append(origin);
+    ocell.append(origin);
+    row.append(ocell);
 
     // 3) PATCH: name; the details block (one open at a time) carries the
     //    description, full origin, per-version diffs, safeguards + approvals
@@ -386,8 +445,15 @@ function patchRow(p, view) {
     const name = document.createElement('button');
     name.type = 'button';
     name.className = 'pt-name';
-    name.textContent = p.id + ' ▾';
+    const nmTxt = document.createElement('span');
+    nmTxt.textContent = p.id;
+    const caret = document.createElement('span');
+    caret.className = 'pt-caret';
+    caret.textContent = '▾';
+    name.append(nmTxt, caret);
+    name.title = ptMsg('uplift.patches.expand_hint', 'show details');
     pcell.append(name);
+    entry._ptCaret = caret;   // the details toggle flips this (bigger, clear)
     row.append(pcell);
 
     // 4) STATUS: state chip + honest extras; stays CLEAN while the patch
@@ -454,7 +520,9 @@ function patchRow(p, view) {
     }
     row.append(scell);
 
-    // 5+6) VANILLA / DEV checkboxes — scope AND enable in one act
+    // 5+6+7) DEV / VANILLA / AUTO — the first pair is scope AND enable in
+    // one act; AUTO is the per-patch tracking choice, remembered in the
+    // manifest (was dialog-only; the user asked for it as a column)
     const vcb = document.createElement('input');
     vcb.type = 'checkbox';
     vcb.checked = !!(sf.runtime && sf.runtime.checked);
@@ -473,15 +541,51 @@ function patchRow(p, view) {
     dcb.onchange = () => {
         ptSetTargets(p, vcb.checked, dcb.checked);
     };
+    const acb = document.createElement('input');
+    acb.type = 'checkbox';
+    acb.checked = !!p.auto_update;
+    acb.title = ptMsg('uplift.patches.box_auto_title',
+        'auto update: new validated versions apply without a click — '
+        + 'remembered on the server, pinned surfaces keep their pin');
+    acb.onchange = async () => {
+        if (S.PT_BUSY) { acb.checked = !acb.checked; return; }
+        S.PT_BUSY = true;
+        try {
+            const r = await ptApi('auto', { id: p.id, enabled: acb.checked });
+            if (r && r.promoted) {
+                PG.toast(ptMsg('uplift.patches.auto_promoted',
+                    'Auto update ON — the waiting v{v} is now queued')
+                    .replace('{v}', r.desired_version || ''), 5000);
+            } else if (acb.checked) {
+                PG.toast(ptMsg('uplift.patches.auto_on',
+                    'Auto update ON — future versions apply without a click'),
+                    4500);
+            } else {
+                PG.toast(ptMsg('uplift.patches.auto_off',
+                    'Auto update OFF — updates wait for you'), 4500);
+            }
+            await pollPatches();
+        } catch (e) {
+            PG.toast(ptMsg('uplift.patches.auto_fail',
+                'Auto-update change failed') + ': '
+                + (e && e.message ? e.message : e), 5000);
+            acb.checked = !acb.checked;
+        } finally {
+            S.PT_BUSY = false;
+        }
+    };
     const fill = document.createElement('span');   // rides the 1fr track:
     fill.className = 'pt-c-fill';                  // grid items shift one
-    const vcell = document.createElement('label');
-    vcell.className = 'pt-c-vanilla';
-    vcell.append(vcb);
     const dcell = document.createElement('label');
     dcell.className = 'pt-c-dev';
     dcell.append(dcb);
-    row.append(fill, vcell, dcell);
+    const vcell = document.createElement('label');
+    vcell.className = 'pt-c-vanilla';
+    vcell.append(vcb);
+    const acell = document.createElement('label');
+    acell.className = 'pt-c-auto';
+    acell.append(acb);
+    row.append(fill, dcell, vcell, acell);
 
     // 7) MANAGE dialog
     const mg = document.createElement('button');
@@ -635,6 +739,7 @@ function patchRow(p, view) {
             det.hidden = true;
             PT_OPEN_DETAILS = null;
         }
+        ptPaintCarets();
     };
     entry.append(det);
     return entry;
@@ -661,52 +766,37 @@ function ptManage(p) {
     h.append(close);
     box.append(h);
 
-    // AUTO UPDATE — per patch, remembered in the manifest (every board and
-    // the CLI honour it); new validated versions apply WITHOUT a click.
-    const autoLbl = document.createElement('label');
-    autoLbl.className = 'row';
-    const autoCb = document.createElement('input');
-    autoCb.type = 'checkbox';
-    autoCb.checked = !!p.auto_update;
-    const autoHead = document.createElement('span');
-    autoHead.className = 'pt-mgr-auto-head';
-    autoHead.textContent = ptMsg('uplift.patches.manage_auto', 'Auto update');
-    const autoNote = document.createElement('span');
-    autoNote.className = 'pt-detail';
-    autoNote.textContent = p.auto_update
-        ? ptMsg('uplift.patches.auto_on_note',
-            'auto: new validated versions apply at the next restart/build')
-        : '';
-    autoLbl.append(autoCb, document.createTextNode(' '), autoHead,
-                   document.createTextNode(' '), autoNote);
-    autoCb.onchange = async () => {
-        if (S.PT_BUSY) { autoCb.checked = !autoCb.checked; return; }
-        S.PT_BUSY = true;
+
+    // PAT-TABLE (user 2026-10-20): the dialog STAGES choices — pins write
+    // nothing until SAVE; × / Esc / backdrop discard the draft. (AUTO
+    // update left for its own table column.)
+    const edits = {};        // target -> draft value ('' = latest)
+    const acts = document.createElement('div');
+    acts.className = 'pt-acts';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'btn primary';
+    saveBtn.textContent = ptMsg('uplift.patches.manage_save', 'Save');
+    saveBtn.disabled = true;
+    saveBtn.onclick = async () => {
+        if (S.PT_BUSY) return;
+        S.PT_BUSY = true; saveBtn.disabled = true;
         try {
-            const r = await ptApi('auto', { id: p.id, enabled: autoCb.checked });
-            if (r && r.promoted) {
-                PG.toast(ptMsg('uplift.patches.auto_promoted',
-                    'Auto update ON — the waiting v{v} is now queued')
-                    .replace('{v}', r.desired_version || ''), 5000);
-            } else if (autoCb.checked) {
-                PG.toast(ptMsg('uplift.patches.auto_on',
-                    'Auto update ON — future versions apply without a click'), 4500);
-            } else {
-                PG.toast(ptMsg('uplift.patches.auto_off',
-                    'Auto update OFF — updates wait for you'), 4500);
+            for (const [t2, val] of Object.entries(edits)) {
+                await ptApi('pin', { id: p.id, target: t2,
+                    version: val ? parseInt(val, 10) : null });
             }
+            PG.toast(ptMsg('uplift.patches.saved',
+                'Saved — lands on the next restart/build'), 4000);
+            overlay.remove();
             await pollPatches();
             await ptRefreshCarrier();
         } catch (e) {
-            PG.toast(ptMsg('uplift.patches.auto_fail',
-                'Auto-update change failed') + ': '
-                + (e && e.message ? e.message : e), 5000);
-            autoCb.checked = !autoCb.checked;
-        } finally {
-            S.PT_BUSY = false;
-        }
+            PG.toast(ptMsg('uplift.patches.pin_fail', 'Version pin failed')
+                + ': ' + (e && e.message ? e.message : e), 5000);
+            saveBtn.disabled = false;
+        } finally { S.PT_BUSY = false; }
     };
-    box.append(autoLbl);
 
     // per-surface version target: latest (auto) or pinned vN
     const SURFACES = [
@@ -753,52 +843,44 @@ function ptManage(p) {
             sel.append(o);
         }
         const pin = p.pins ? p.pins[target] : null;
-        sel.value = pin ? String(pin) : '';
+        const initial = pin ? String(pin) : '';
+        sel.value = initial;
         const note = document.createElement('span');
         note.className = 'pt-detail';
-        const eff = pin || p.desired_version || 0;
-        if (!check.checked) {
-            note.textContent = ptMsg('uplift.patches.surf_off',
-                'not selected');
-        } else if (target === 'runtime') {
-            note.textContent = (p.applied_v === eff && p.enabled)
-                ? ptMsg('uplift.patches.surf_runtime_live',
-                    'v{v} is in the running files').replace('{v}', eff)
-                : ptMsg('uplift.patches.surf_runtime_pending',
-                    'v{v} lands at the next server restart')
-                    .replace('{v}', eff);
-        } else {
-            note.textContent = (p.dev_applied_v === eff && p.enabled)
-                ? ptMsg('uplift.patches.surf_build_live',
-                    'v{v} is on the branch').replace('{v}', eff)
-                : ptMsg('uplift.patches.surf_build_pending',
-                    'v{v} lands at the next Build').replace('{v}', eff);
-        }
-        sel.onchange = async () => {
-            if (S.PT_BUSY) return;
-            S.PT_BUSY = true;
-            try {
-                const r = await ptApi('pin', { id: p.id, target,
-                    version: sel.value ? parseInt(sel.value, 10) : null });
-                if (r && r.ok) {
-                    PG.toast(sel.value
-                        ? ptMsg('uplift.patches.pin_set',
-                            'Pinned v{v} on {t} — lands on the next restart/build')
-                              .replace('{v}', sel.value).replace('{t}', short)
-                        : ptMsg('uplift.patches.pin_released',
-                            '{t} follows the latest again')
-                            .replace('{t}', short), 4500);
-                    await pollPatches();
-                    await ptRefreshCarrier();
-                }
-            } catch (e) {
-                PG.toast(ptMsg('uplift.patches.pin_fail',
-                    'Version pin failed') + ': '
-                    + (e && e.message ? e.message : e), 5000);
-            } finally {
-                S.PT_BUSY = false;
+        const paintNote = () => {
+            const eff = sel.value ? parseInt(sel.value, 10)
+                                  : (p.desired_version || 0);
+            const dirty = sel.value !== initial;
+            if (dirty) edits[target] = sel.value;
+            else delete edits[target];
+            row2.classList.toggle('pt-dirty', dirty);
+            saveBtn.disabled = !Object.keys(edits).length || S.PT_BUSY;
+            if (!check.checked) {
+                note.textContent = ptMsg('uplift.patches.surf_off',
+                    'not selected');
+            } else if (target === 'runtime') {
+                note.textContent = (p.applied_v === eff && p.enabled)
+                    ? ptMsg('uplift.patches.surf_runtime_live',
+                        'v{v} is in the running files').replace('{v}', eff)
+                    : ptMsg('uplift.patches.surf_runtime_pending',
+                        'v{v} lands at the next server restart')
+                        .replace('{v}', eff);
+            } else {
+                note.textContent = (p.dev_applied_v === eff && p.enabled)
+                    ? ptMsg('uplift.patches.surf_build_live',
+                        'v{v} is on the branch').replace('{v}', eff)
+                    : ptMsg('uplift.patches.surf_build_pending',
+                        'v{v} lands at the next Build').replace('{v}', eff);
+            }
+            if (dirty) {
+                note.append(document.createTextNode(' · '),
+                    (() => { const d = document.createElement('b');
+                        d.textContent = ptMsg('uplift.patches.unsaved',
+                            'unsaved'); return d; })());
             }
         };
+        paintNote();
+        sel.onchange = paintNote;      // stage only — SAVE writes
         row2.append(nm, sel, note);
         sec.append(row2);
         box.append(sec);
@@ -827,8 +909,6 @@ function ptManage(p) {
         box.append(c);
     }
 
-    const acts = document.createElement('div');
-    acts.className = 'pt-acts';
     const testBtn = document.createElement('button');
     testBtn.type = 'button';
     testBtn.className = 'btn';
@@ -894,7 +974,7 @@ function ptManage(p) {
             ptMsg('uplift.patches.removed', 'Patch removed'));
         overlay.remove();
     };
-    acts.append(testBtn, editBtn, rmBtn);
+    acts.append(saveBtn, testBtn, editBtn, rmBtn);
     box.append(acts);
     overlay.append(box);
     // backdrop click closes (same contract as every other dialog here)

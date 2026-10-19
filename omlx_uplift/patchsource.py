@@ -1233,6 +1233,33 @@ def set_targets(store, patch_id: str, runtime: bool, dev: bool,
     return res
 
 
+def _surfaces_current(store, p) -> bool:
+    """True when every surface the patch is selected for already holds its
+    targeted version: runtime -> an applied keg record on that exact
+    version, build -> the branch carries it (dev_applied). A surface with no
+    record means work is outstanding — the honest answer is then 'pending'.
+    """
+    scope = _patches.patch_scope(p)
+    want = (("runtime", scope in ("omlx", "both")),
+            ("build", scope in ("dev", "both")))
+    if not any(sel for _, sel in want):
+        return False
+    for target, selected in want:
+        if not selected:
+            continue
+        v = _patches.version_target(p, target)
+        ver = store.get_version(p, v) if v else None
+        if ver is None:
+            return False
+        if target == "build":
+            if not ver.get("dev_applied"):
+                return False
+        elif not any((rec or {}).get("status") == "applied"
+                     for rec in (ver.get("kegs") or {}).values()):
+            return False
+    return True
+
+
 def set_pin(store, patch_id: str, target: str,
             version: int | None) -> dict:
     """PAT-TABLE: Manage dialog's per-surface version choice. version=None
@@ -1263,9 +1290,17 @@ def set_pin(store, patch_id: str, target: str,
     else:
         p.pop("pins", None)
     if p.get("enabled"):
-        store.set_state(
-            p, "pending",
-            f"version target changed — applies on {applies_phrase(p)}")
+        # PAT-TABLE honesty (user 2026-10-20): pinning to the version that
+        # is ALREADY on disk changes nothing on disk — the row must not turn
+        # amber for a no-op, and releasing such a pin must not stay amber.
+        if _surfaces_current(store, p):
+            store.set_state(
+                p, "applied",
+                "every selected surface already carries its target")
+        else:
+            store.set_state(
+                p, "pending",
+                f"version target changed — applies on {applies_phrase(p)}")
     store.save(manifest)
     return {"ok": True, "pins": pins, "state": p.get("state")}
 

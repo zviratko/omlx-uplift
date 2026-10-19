@@ -181,17 +181,19 @@ test('rows paint checkbox state from the server surfaces map', async () => {
     const sb = loadModule();
     await boot(sb, payload([
         basePatch(),
-        basePatch({ id: 'baked', scope: 'both',
+        basePatch({ id: 'baked', scope: 'both', auto_update: true,
             surfaces: { runtime: { checked: true, version: 1, pinned: false },
                         build: { checked: true, version: 1, pinned: false } } }),
     ]));
     const [rt, both] = [entry(sb, 'demo'), entry(sb, 'baked')];
     assert.ok(rt && both, 'one row per patch, both scopes included');
-    const [v1, d1] = boxes(rt);
-    assert.equal(v1.checked, true, 'VANILLA from surfaces.runtime.checked');
+    const [d1, v1, a1] = boxes(rt);   // DEV | VANILLA | AUTO (user 2026-10-20)
     assert.equal(d1.checked, false, 'DEV from surfaces.build.checked');
-    const [, d2] = boxes(both);
+    assert.equal(v1.checked, true, 'VANILLA from surfaces.runtime.checked');
+    assert.equal(a1.checked, false, 'AUTO column from p.auto_update');
+    const [d2, , a2] = boxes(both);
     assert.equal(d2.checked, true, 'both-scope row shows DEV checked');
+    assert.equal(a2.checked, true, 'AUTO rides the manifest per patch');
 });
 
 test('checkbox flip POSTs the pair; success re-polls (instant repaint)', async () => {
@@ -214,12 +216,12 @@ test('checkbox flip POSTs the pair; success re-polls (instant repaint)', async (
     });
     await vm.runInContext('window.Uplift.patches.pollPatches()', sb);
     await new Promise(r => setImmediate(r));
-    const [, dev] = boxes(entry(sb, 'demo'));
+    const [dev] = boxes(entry(sb, 'demo'));
     dev.checked = true;
     await dev.onchange();
     await new Promise(r => setImmediate(r));
     assert.ok(views >= 2, 'the view was re-read so chips repaint without reload');
-    const [, dev2] = boxes(entry(sb, 'demo'));
+    const [dev2] = boxes(entry(sb, 'demo'));
     assert.equal(dev2.checked, true, 'the repaint shows the new server state');
 });
 
@@ -241,13 +243,13 @@ test('held 409 reverts boxes, opens details, approvals re-issue the pair', async
     });
     await vm.runInContext('window.Uplift.patches.pollPatches()', sb);
     await new Promise(r => setImmediate(r));
-    const [, dev] = boxes(entry(sb, 'demo'));
+    const [dev] = boxes(entry(sb, 'demo'));
     dev.checked = true;
     await dev.onchange();
     await new Promise(r => setImmediate(r));
     // reverted from server truth + details OPEN with the approval buttons
     const e2 = entry(sb, 'demo');
-    const [, dev2] = boxes(e2);
+    const [dev2] = boxes(e2);
     assert.equal(dev2.checked, false, 'the box reverted — nothing was written');
     const det = find(e2, el => el.className === 'pt-det')[0];
     assert.equal(det.hidden, false, 'details opened onto the hold');
@@ -274,7 +276,13 @@ test('MANAGE: pin select posts {target, version}; latest posts null', async () =
         '/uplift/api/patches': () => ({ json: payload([p]) }),
         '/uplift/api/patches/curated/sync': () => ({ json: { report: {}, notes: [] } }),
         '/uplift/api/doctor': () => ({ json: { ok: true, unexpected: [] } }),
-        '/uplift/api/patches/pin': () => ({ json: { ok: true, pins: {} } }),
+        '/uplift/api/patches/pin': (body) => {
+            // stateful fake: the reopen must see the saved pin
+            p.pins = p.pins || {};
+            if (body.version === null) delete p.pins[body.target];
+            else p.pins[body.target] = body.version;
+            return { json: { ok: true, pins: p.pins } };
+        },
     });
     await vm.runInContext('window.Uplift.patches.pollPatches()', sb);
     await new Promise(r => setImmediate(r));
@@ -286,13 +294,33 @@ test('MANAGE: pin select posts {target, version}; latest posts null', async () =
     assert.ok(overlay, 'MANAGE opens a dialog');
     const sels = find(overlay, el => el.tagName === 'select');
     assert.ok(sels.length >= 2, 'a version select per surface');
+    const save = find(overlay,
+        el => String(el.textContent).trim() === 'Save')[0];
+    assert.ok(save, 'the dialog STAGES — a Save button owns the write');
+    assert.equal(save.disabled, true, 'Save starts disabled');
+    const before = posts.filter(x => x.url.endsWith('/patches/pin')).length;
     sels[0].value = '1';
     await sels[0].onchange();
+    assert.equal(posts.filter(x => x.url.endsWith('/patches/pin')).length,
+                 before, 'choosing a version writes NOTHING yet');
+    assert.equal(save.disabled, false, 'a draft enables Save');
+    await save.onclick();
     const pinPost = posts.filter(x => x.url.endsWith('/patches/pin')).pop().body;
     assert.equal(pinPost.target, 'runtime');
-    assert.equal(pinPost.version, 1, 'choosing v1 pins the runtime surface');
-    sels[0].value = '';
-    await sels[0].onchange();
+    assert.equal(pinPost.version, 1, 'SAVE writes the drafted pin');
+    // reopen FRESH (the save re-rendered the table; the old button is a
+    // detached node holding the pre-pin snapshot)
+    const manage2 = find(entry(sb, 'demo'),
+        el => String(el.textContent).includes('MANAGE'))[0];
+    await manage2.onclick();
+    const ov2 = sb.document.body.children
+        .filter(c => String(c.className).includes('modal-overlay')).slice(-1)[0];
+    const s2 = find(ov2, el => el.tagName === 'select')[0];
+    assert.equal(s2.value, '1', 'reopen shows the SAVED pin');
+    const sv2 = find(ov2, el => String(el.textContent).trim() === 'Save')[0];
+    s2.value = '';
+    await s2.onchange();
+    await sv2.onclick();
     const rel = posts.filter(x => x.url.endsWith('/patches/pin')).pop().body;
     assert.equal(rel.version, null, 'latest releases the pin (null)');
     // escape contract: this file builds the overlay but owns NO keydown
@@ -314,16 +342,20 @@ test('MANAGE: AUTO UPDATE posts /patches/auto; candidate shows Apply', async () 
     });
     await vm.runInContext('window.Uplift.patches.pollPatches()', sb);
     await new Promise(r => setImmediate(r));
+    // AUTO UPDATE is a ROW column now (the dialog does not own it)
+    const autoBox = boxes(entry(sb, 'demo'))[2];
+    assert.ok(autoBox, 'the row carries the AUTO checkbox');
+    autoBox.checked = true;
+    await autoBox.onchange();
+    const a = posts.filter(x => x.url.endsWith('/patches/auto')).pop().body;
+    assert.equal(a.enabled, true);
     const manage = find(entry(sb, 'demo'),
         el => String(el.textContent).includes('MANAGE'))[0];
     await manage.onclick();
     const overlay = sb.document.body.children
         .filter(c => String(c.className).includes('modal-overlay')).slice(-1)[0];
-    const autoBox = find(overlay, el => el.type === 'checkbox')[0];
-    autoBox.checked = true;
-    await autoBox.onchange();
-    const a = posts.filter(x => x.url.endsWith('/patches/auto')).pop().body;
-    assert.equal(a.enabled, true);
+    assert.ok(!allText(overlay).includes('Auto update'),
+              'AUTO left the dialog — no duplicate control');
     assert.match(allText(overlay), /Apply v3 now/,
                  'a waiting candidate keeps one honest Apply button');
 });
@@ -367,7 +399,7 @@ test('unchecking both boxes posts the disabling (false,false) pair', async () =>
     });
     await vm.runInContext('window.Uplift.patches.pollPatches()', sb);
     await new Promise(r => setImmediate(r));
-    const [van, dev] = boxes(entry(sb, 'demo'));
+    const [, van] = boxes(entry(sb, 'demo'));   // DEV | VANILLA | AUTO
     van.checked = false;
     await van.onchange();
     const t = posts.filter(x => x.url.endsWith('/patches/targets')).pop().body;

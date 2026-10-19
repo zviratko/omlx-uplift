@@ -2484,14 +2484,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-table { border: 1px solid var(--line); margin: 8px 0 4px;
     overflow-x: auto; }
 .pt-row { display: grid;
-    /* PAT-TABLE wide-viewport fix (user screenshot 2026-10-20): content
-       columns CAP at 420/520 and the slack rides a filler BEFORE the
-       checkbox group — no dead hole between name and state at 2560px,
-       controls keep their right-side home */
-    grid-template-columns: 26px 120px minmax(140px, 420px)
-        minmax(150px, 520px) 1fr 82px 172px 96px;
+    /* PAT-TABLE round 2 (user 2026-10-20): ORIGIN tells WHERE the patch
+       comes from so it gets the room; the control trio DEV (TARGET) |
+       VANILLA | AUTO goes compact on the right; filler absorbs slack */
+    grid-template-columns: 26px minmax(170px, 300px) minmax(160px, 1fr)
+        minmax(150px, 420px) minmax(0px, 1fr) 128px 82px 60px 92px;
     gap: 10px; align-items: center; padding: 6px 10px;
-    font-size: var(--fs-meta); min-width: 900px; }
+    font-size: var(--fs-meta); min-width: 1000px; }
 .pt-thead { border-bottom: 1px solid var(--line); color: var(--dim);
     text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
     align-items: end; }
@@ -2510,7 +2509,17 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-lamp.pt-st-update { background: var(--pt-update); }
 .pt-lamp.pt-st-warn { background: var(--warn, #b8860b); }
 .pt-lamp.pt-st-dim { opacity: .5; }
-.pt-origin { background: none; border: none; color: var(--ink);
+.pt-c-origin { display: flex; flex-direction: column; gap: 1px;
+    min-width: 0; }
+.pt-origin-src { color: var(--dim); font-size: var(--fs-meta);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-origin-src a { color: var(--ink); text-decoration: underline;
+    text-underline-offset: 2px; }
+.pt-origin-src a:hover { color: var(--accent, #e0662e); }
+.pt-caret { font-size: 1.15em; margin-left: 7px; opacity: .75; }
+.pt-dirty { box-shadow: inset 0 0 0 1px var(--warn, #b8860b);
+    padding: 2px 6px; border-radius: calc(var(--radius) / 2); }
+.pt-origin { display: block; background: none; border: none; color: var(--ink);
     font-family: var(--mono, monospace); font-size: var(--fs-meta);
     cursor: pointer; padding: 0; text-align: left; white-space: nowrap; }
 .pt-origin:hover { text-decoration: underline dotted; }
@@ -2525,10 +2534,8 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     align-items: center; }
 .pt-c-vanilla input, .pt-c-dev input { margin: 0; }
 .pt-c-fill { min-width: 0; }   /* rides the 1fr slack track */
-/* header cell: the base picker STACKS above the DEV label (was a row:
-   the 156px select spilled over the label and the MANAGE header) */
-.pt-thead .pt-c-dev { flex-direction: column; align-items: center;
-    gap: 3px; }
+.pt-c-auto { display: flex; justify-content: center; align-items: center; }
+.pt-c-auto input { margin: 0; }
 .pt-manage-btn { justify-self: center; padding: 2px 10px;
     font-size: var(--fs-meta); }
 /* details block: description + full origin + safeguards + approvals.
@@ -2550,16 +2557,29 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-src { color: var(--dim); font-size: var(--fs-meta); word-break: break-all; }
 /* build-base row: controls sit on one baseline */
 .dv-base-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 0; }
-/* the build-base picker rides the table's DEV column header: stacked
-   above the column label, compact closed, the native popup expands to
-   the full option line on its own */
-.dv-base-head { display: flex; flex-direction: column; align-items: center;
-    gap: 2px; text-transform: none; letter-spacing: 0; font-weight: 400;
-    color: var(--dim); margin-bottom: 2px; }
-.dv-base-head select { width: 156px; min-width: 0; max-width: 100%;
-    font-size: var(--fs-meta); text-overflow: ellipsis; }
-#dv-base-note { max-width: 156px; overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; }
+/* TARGET: the build-base link in the DEV header (word only, expands on
+   click into a full-line menu — long commits read fully, no truncation
+   in a 150px box) */
+.dv-target-wrap { display: inline; }
+.pt-target-link { background: none; border: none; padding: 0; cursor: pointer;
+    font: inherit; color: var(--ink); text-decoration: underline;
+    text-underline-offset: 2px; text-transform: uppercase;
+    letter-spacing: .08em; font-weight: 700; }
+.pt-target-link:hover:not(:disabled) { color: var(--accent, #e0662e); }
+.pt-target-link:disabled { opacity: .5; cursor: default; }
+.pt-target-menu { position: fixed; z-index: 1200; max-width: min(620px, 92vw);
+    max-height: 60vh; overflow-y: auto; background: var(--card);
+    border: 1px solid var(--edge); border-radius: var(--radius);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .35); padding: 4px;
+    display: flex; flex-direction: column; }
+.pt-target-item { display: block; width: 100%; text-align: left;
+    background: none; border: none; color: var(--ink); cursor: pointer;
+    font-family: var(--mono, monospace); font-size: var(--fs-meta);
+    padding: 5px 9px; border-radius: calc(var(--radius) / 2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-target-item:hover { background: var(--field); }
+.pt-target-sel { font-weight: 700; }
+.pt-target-load { padding: 4px 9px; }
 /* patch zone: the dev strip below the table */
 .pt-zone { border: 1px solid var(--line); padding: 10px 12px 12px; margin: 14px 0; }
 .pt-zone-dev { background: color-mix(in srgb, var(--accent, #e0662e) 5%, var(--card)); }

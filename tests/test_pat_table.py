@@ -385,6 +385,57 @@ class DryRunVersionTest(_Base):
         self.assertIn("v9", r["reason"])
 
 
+class PinStateHonestyTest(_Base):
+    """User 2026-10-20: pinning to the version that is ALREADY on disk
+    turned the row amber (and releasing it kept it amber). A state change
+    needs an actual outstanding change behind it."""
+
+    def test_pin_to_applied_version_stays_applied(self):
+        self.add(scope="omlx")
+        self.reconcile()
+        self.assertEqual(self.manifest_patch()["state"], "applied")
+        r = patchsource.set_pin(self.store, "p1", "runtime", 1)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.manifest_patch()["state"], "applied",
+                         "a no-op pin must not claim outstanding work")
+
+    def test_release_of_a_noop_pin_returns_to_applied(self):
+        self.add(scope="omlx")
+        self.reconcile()
+        patchsource.set_pin(self.store, "p1", "runtime", 1)
+        r = patchsource.set_pin(self.store, "p1", "runtime", None)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.manifest_patch()["state"], "applied")
+
+    def test_other_selected_surface_outstanding_keeps_pending(self):
+        self.add(scope="omlx")
+        self.reconcile()
+        # widen WITHOUT the set_targets ceremony: DEV is selected but the
+        # branch carries nothing -> the pin write must say 'work pending',
+        # even though the runtime target itself is already on disk
+        m = self.store.load()
+        self.store.find(m, "p1")["scope"] = "both"
+        self.store.save(m)
+        r = patchsource.set_pin(self.store, "p1", "runtime", 1)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.manifest_patch()["state"], "pending")
+        r = patchsource.set_pin(self.store, "p1", "runtime", None)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.manifest_patch()["state"], "pending",
+                         "release cannot outrun the branch")
+
+    def test_disabled_patch_pin_writes_no_state_stamp(self):
+        self.add(scope="omlx")
+        r = self.targets(False, False)
+        self.assertTrue(r["ok"], r)
+        before = self.manifest_patch()["state_changed_at"]
+        out = patchsource.set_pin(self.store, "p1", "runtime", 1)
+        self.assertTrue(out["ok"], out)
+        p = self.manifest_patch()
+        self.assertEqual(p["state"], "disabled")
+        self.assertEqual(p["state_changed_at"], before)
+
+
 class RouterContractTest(unittest.TestCase):
     """The three new endpoint wrappers: a held safeguard must surface as
     HTTP 409 (the checkbox revert branches on err.status === 409), plain

@@ -338,65 +338,120 @@ async function dvLoadCommits() {
     return DV_COMMITS;
 }
 
+/* TARGET (was the build-base select, user 2026-10-20): the DEV header shows
+   the word as a hyperlink; clicking expands a full-line menu of the omlx-dev
+   build sources. Nothing renders until the dev carrier exists. */
+let DV_MENU = null;    // {pop, out, esc} while the menu is open
+
+function dvCloseMenu() {
+    if (!DV_MENU) return;
+    DV_MENU.pop.remove();
+    document.removeEventListener('click', DV_MENU.out, true);
+    document.removeEventListener('keydown', DV_MENU.esc);
+    DV_MENU = null;
+}
+
+function dvTargetMenu(btn, d) {
+    const pinned = d.base_pin || '';
+    const pop = document.createElement('div');
+    pop.className = 'pt-target-menu';
+    const mk = (text, active, pick, title) => {
+        const it = document.createElement('button');
+        it.type = 'button';
+        it.className = 'pt-target-item' + (active ? ' pt-target-sel' : '');
+        it.textContent = (active ? '\u2713 ' : '') + text;
+        if (title) it.title = title;
+        it.onclick = async () => {
+            dvCloseMenu();
+            if (active) return;
+            try {
+                const r = await dvApi('base', { pin: pick || null });
+                DV_DATA = r.status || DV_DATA;
+                PG.toast(pick
+                    ? ptMsg('uplift.patches.dev_base_set',
+                        'Base pinned — rebuild to apply')
+                    : ptMsg('uplift.patches.dev_base_cleared',
+                        'Back to following the sync ref'), 5000);
+                renderDev();
+            } catch (e) {
+                PG.toast(ptMsg('uplift.patches.dev_base_fail',
+                    'Base change failed') + ': ' + e, 5000);
+            }
+        };
+        return it;
+    };
+    pop.append(mk(ptMsg('uplift.patches.dev_base_follow',
+        'follow vanilla omlx keg') + ' (' + dvSha(d.base) + ')',
+        !pinned, ''));
+    if (pinned) pop.append(mk(`${dvSha(pinned)} — `
+        + ptMsg('uplift.patches.dev_base_pinned', 'pinned commit'),
+        true, pinned));
+    const head = document.createElement('div');
+    head.className = 'pt-target-load pt-detail';
+    head.textContent = '…';
+    pop.append(head);
+    const finish = (commits) => {
+        if (!DV_MENU || DV_MENU.pop !== pop) return;   // closed meanwhile
+        head.remove();
+        if (!commits) {
+            head.textContent = ptMsg('uplift.patches.dev_commits_fail',
+                'commit list unavailable');
+            pop.append(head);
+            return;
+        }
+        for (const c of commits) {
+            if (pinned && c.sha === pinned) continue;  // listed above
+            pop.append(mk(`${c.short} — ${c.subject}`, false, c.sha,
+                c.sha));
+        }
+    };
+    document.body.append(pop);
+    const br = btn.getBoundingClientRect();
+    const r = pop.getBoundingClientRect();
+    let left = Math.max(8, Math.min(br.left, innerWidth - r.width - 8));
+    let top = br.bottom + 4;
+    if (top + r.height > innerHeight - 8) {
+        top = Math.max(8, br.top - r.height - 4);      // flip up
+    }
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+    DV_MENU = {
+        pop,
+        out: ev => { if (!pop.contains(ev.target)) dvCloseMenu(); },
+        esc: ev => { if (ev.key === 'Escape') dvCloseMenu(); },
+    };
+    setTimeout(() => {
+        if (DV_MENU && DV_MENU.pop === pop) {
+            document.addEventListener('click', DV_MENU.out, true);
+            document.addEventListener('keydown', DV_MENU.esc);
+        }
+    }, 0);
+    dvLoadCommits().then(finish);
+}
+
 function dvRenderBase(d) {
     const box = $('dv-base');
     if (!box) return;
-    // header cell: only lit while the dev carrier exists (installed)
+    // the ( TARGET ) slot: only lit while the dev carrier exists
     box.hidden = !(d && d.installed);
-    if (box.hidden) return;
-    const sel = $('dv-base-select'), note = $('dv-base-note');
-    // build patches rebuild every poll — never stomp a selection in flight
-    if (document.activeElement === sel) return;
+    const btn = $('dv-target-btn');
+    if (!btn || box.hidden) return;
     const pinned = d.base_pin || '';
-    const following = ptMsg('uplift.patches.dev_base_follow',
-        'follow vanilla omlx keg');
-    // rebuild options fresh each render — commit list is fetch-once, cache
-    sel.innerHTML = '';   // clear-only — safe
-    const def = document.createElement('option');
-    def.value = '';
-    def.textContent = following + (pinned ? '' : ` (${dvSha(d.base)})`);
-    sel.append(def);
-    const commits = DV_COMMITS || [];
-    if (!commits.length && !DV_COMMITS) dvLoadCommits().then(c => {
-        if (c && DV_DATA === d) dvRenderBase(DV_DATA);
-    });
-    // pin may point outside the visible window — keep it selectable
-    if (pinned && !commits.some(c => c.sha === pinned)) {
-        const orp = document.createElement('option');
-        orp.value = pinned;
-        orp.textContent = `${dvSha(pinned)} — ${ptMsg('uplift.patches.dev_base_pinned', 'pinned commit')}`;
-        sel.append(orp);
-    }
-    for (const c of commits) {
-        const opt = document.createElement('option');
-        opt.value = c.sha;
-        opt.textContent = `${c.short} ${c.subject}`;
-        sel.append(opt);
-    }
-    sel.value = pinned || '';
-    note.textContent = pinned
-        ? ptMsg('uplift.patches.dev_base_pinned_note',
+    btn.title = pinned
+        ? `${dvSha(pinned)} — ` + ptMsg('uplift.patches.dev_base_pinned_note',
             'pinned — the next Build uses exactly this source version')
-        : '';
-    note.hidden = !pinned;
+        : ptMsg('uplift.patches.dev_base_follow',
+            'follow vanilla omlx keg') + ' (' + dvSha(d.base) + ')';
+    btn.disabled = !!(d.build && d.build.running);
+    if (btn.dataset.wired !== '1') {
+        btn.dataset.wired = '1';
+        btn.onclick = ev => {
+            ev.stopPropagation();
+            if (DV_MENU) { dvCloseMenu(); return; }
+            dvTargetMenu(btn, DV_DATA || d);
+        };
+    }
     dvRenderAuto(d, pinned);
-    // PAT-TABLE: the header cell is one compact stack — picking a base IS
-    // the intent (no separate Apply button; the click-on-change is the act)
-    sel.onchange = async () => {
-        const pin = sel.value;
-        sel.disabled = true;
-        try {
-            const r = await dvApi('base', { pin: pin || null });
-            DV_DATA = r.status || DV_DATA;
-            PG.toast(pin
-                ? ptMsg('uplift.patches.dev_base_set', 'Base pinned — rebuild to apply')
-                : ptMsg('uplift.patches.dev_base_cleared', 'Back to following the sync ref'), 5000);
-            renderDev();
-        } catch (e) {
-            PG.toast(ptMsg('uplift.patches.dev_base_fail', 'Base change failed') + ': ' + e, 5000);
-            sel.disabled = false;
-        }
-    };
 }
 
 function dvRenderAuto(d, pinned) {
