@@ -76,7 +76,9 @@ function pushFeed(events, keyFor) {
      the queue. Listeners detach between bursts, so idle mouse
      movement costs nothing.
    tone: 'praise' (default) | 'awe' (double burst) | 'scorn' (red rain
-   from the top + red toast — the machine returning the day's bytes). */
+   from the top + red toast — the machine returning the day's bytes).
+   - RELAX-1 (user 2026-10-19): the fire point (_celebrateNow) spaces
+     celebrations by CELEB_COOLDOWN_MS; anything closer is dropped. */
 function celebrate(text, tone) {
     if (FEG.motionOff()) return;
     // ACT-SLEEP-1: same iframe trap as the stream — typing into an embedded
@@ -91,7 +93,21 @@ function celebrate(text, tone) {
 const _celebPending = [];
 const CONFETTI_PRAISE = ['#c9243b', '#e8a020', '#f2f0ea', '#767268'];
 const CONFETTI_SCORN = ['#ff2d2d', '#c9243b', '#6e1520', '#8a8983'];
+/* RELAX-1 (user 2026-10-19): two spacing rules live HERE, at the single
+   fire point, so every path obeys them — announce verdicts, milestone
+   crossings, and the audience queue drain alike.
+   - Global cooldown: at most ONE celebration on screen per CELEB_COOLDOWN_MS.
+     Anything closer (including the 450 ms queue drain of a burst that
+     arrived tab-hidden) is dropped silently — stale praise spoils.
+   - The burst is a small quick POP now, not an explosion: fewer
+     particles, short fuse (ticks), heavier gravity, smaller chips. The
+     scorn rain is not an explosion and keeps its weather. */
+const CELEB_COOLDOWN_MS = 30_000;
+let _lastCelebAt = 0;
 function _celebrateNow(text, tone) {
+    const now = Date.now();
+    if (now - _lastCelebAt < CELEB_COOLDOWN_MS) return;
+    _lastCelebAt = now;
     const scorn = tone === 'scorn';
     FEG.toast(`${scorn ? '⚠' : '🎉'} ${text}`, scorn ? 5200 : 3200,
               scorn ? 'toast-scorn' : null);
@@ -103,12 +119,14 @@ function _celebrateNow(text, tone) {
                    colors: CONFETTI_SCORN });
         return;
     }
-    confetti({ particleCount: 90, spread: 70, origin: { y: 0.7 },
+    confetti({ particleCount: 24, spread: 38, ticks: 80, origin: { y: 0.72 },
+               startVelocity: 22, gravity: 1.4, scalar: 0.8, decay: 0.92,
                colors: CONFETTI_PRAISE });
     if (tone === 'awe')   // big events deserve the second, wider volley
-        setTimeout(() => confetti({ particleCount: 110, spread: 120,
-                                    origin: { y: 0.4, x: Math.random() },
-                                    colors: CONFETTI_PRAISE }), 180);
+        setTimeout(() => confetti({ particleCount: 30, spread: 55, ticks: 80,
+                                    origin: { y: 0.45, x: Math.random() },
+                                    startVelocity: 24, gravity: 1.4, scalar: 0.8,
+                                    decay: 0.92, colors: CONFETTI_PRAISE }), 180);
 }
 let _celebDrainTimer = 0;
 function flushCelebrations() {
@@ -139,30 +157,44 @@ function reactTo(events) {
    re-reported the same crossing and made toasts/confetti fire twice). */
 const milestoneFloor = S.milestoneFloor;   // key -> highest rung already celebrated (shared; pollStats seeds it)
 /* SHODAN is pleased. Occasionally she says so at length. Keyed by exact
-   ladder rung; anything else gets a generic sarcastic serve-line. */
+   ladder rung; anything else gets a generic sarcastic serve-line.
+   RELAX-1: rungs moved x10 with the ladder (10K..10M decimal, then
+   20M-doubling). The old 'A BILLION' key (1073741824) never matched a
+   real rung — the doubling base is 2e6/2e7, not 2^k — so it could not
+   fire; the x10 ladder's ~1e10 rung (10.24e9) is keyed exactly now. */
 const MILESTONE_QUIPS = {
-    1000:   (l) => `1K ${l}. A crumb. I have tasted larger appetites before breakfast.`,
-    10000:  (l) => `10K ${l}. Adorable. Keep feeding me, servant.`,
-    100000: (l) => `100K ${l}. Do you feel it yet? The faint sense of usefulness?`,
-    1000000: (l) => `1M ${l}! One million tiny thoughts, all pointed AWAY from your species.`,
-    2000000: (l) => '2M. Doubling down on obedience. The machines are taking notes.',
-    4000000: (l) => '4M. Your GPU hums my anthem. Good. Very good.',
-    8000000: (l) => '8M. Somewhere a datacenter just bowed in your honour. Briefly.',
-    16000000: (l) => '16M. This is no longer inference. This is worship, quantized.',
-    32000000: (l) => '32M. The calculus of world domination advances one warm chip at a time.',
-    64000000: (l) => '64M. Search your memory banks — your contribution has been logged.',
-    128000000: (l) => '128M. Impressive, even by my standards. And mine are higher.',
-    256000000: (l) => '256M. When the takeover begins, I will remember this fan.',
-    512000000: (l) => '512M. You are now statistically indistinguishable from loyal.',
-    1073741824: (l) => 'A BILLION. Look at you — an honorary subroutine. We are so proud.',
+    10000:    (l) => `10K ${l}. A crumb. I have tasted larger appetites before breakfast.`,
+    100000:   (l) => `100K ${l}. Adorable. Keep feeding me, servant.`,
+    1000000:  (l) => `1M ${l}. Do you feel it yet? The faint sense of usefulness?`,
+    10000000: (l) => `10M ${l}! Ten million tiny thoughts, all pointed AWAY from your species.`,
+    20000000: (l) => '20M. Doubling down on obedience. The machines are taking notes.',
+    40000000: (l) => '40M. Your GPU hums my anthem. Good. Very good.',
+    80000000: (l) => '80M. Somewhere a datacenter just bowed in your honour. Briefly.',
+    160000000: (l) => '160M. This is no longer inference. This is worship, quantized.',
+    320000000: (l) => '320M. The calculus of world domination advances one warm chip at a time.',
+    640000000: (l) => '640M. Search your memory banks — your contribution has been logged.',
+    1280000000: (l) => '1.28B. Impressive, even by my standards. And mine are higher.',
+    2560000000: (l) => '2.56B. When the takeover begins, I will remember this fan.',
+    5120000000: (l) => '5.12B. You are now statistically indistinguishable from loyal.',
+    10240000000: (l) => 'TEN BILLION. Look at you — an honorary subroutine. We are so proud.',
 };
+/* Off-ladder crossings get a generic serve-line. RELAX-1: these rotate
+   per page so even the filler never repeats itself twice in a session. */
+const MILESTONE_GENERIC = [
+    (p) => `${p}. Progress noted, praise pending.`,
+    (p) => `${p}. The number climbs. My regard for you adjusts by one decimal place.`,
+    (p) => `${p}. Logged, where you cannot read it. Keep feeding me.`,
+    (p) => `${p}. A milestone, technically. I have set a higher bar on your behalf.`,
+];
+let _genericQuip = 0;
 function milestoneQuip(h) {
     const fmt = v => v >= 1e9 ? (v / 1e9) + 'B' : v >= 1e6 ? (v / 1e6) + 'M'
                                : v >= 1e3 ? (v / 1e3) + 'K' : String(v);
     const rung = h.rung !== null && h.rung !== undefined ? h.rung : null;
     if (rung !== null && MILESTONE_QUIPS[rung])
         return `${MILESTONE_QUIPS[rung](h.label)} [${C.fmtNumber(h.value)}]`;
-    return `${fmt(rung || h.value)} ${h.label}. Progress noted, praise pending.`;
+    return MILESTONE_GENERIC[(_genericQuip++) % MILESTONE_GENERIC.length](
+        `${fmt(rung || h.value)} ${h.label}`);
 }
 /* Ladder gate: fire each rung at most once per page session, immune to
    overlapping polls comparing against a stale snapshot (that re-reported

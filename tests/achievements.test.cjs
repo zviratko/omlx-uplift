@@ -124,16 +124,29 @@ test('tasks: failure and cancel both scorn; unknown kinds stay silent', () => {
 });
 
 /* ---------- feed + milestone tone ---------- */
-test('feed: model-add awe, model-remove scorn, unknown kind silent', () => {
-    assert.strictEqual(A.feedReaction('model-add', 'llama').tone, 'awe');
-    assert.match(A.feedReaction('model-add', 'llama').text, /llama/);
-    assert.strictEqual(A.feedReaction('model-remove', 'llama').tone, 'scorn');
+test('feed: model add/remove fire at LOAD_CHANCE with rotating variant pools', () => {
+    assert.strictEqual(A.LOAD_CHANCE, 0.2);
+    const add = A.feedReaction('model-add', 'llama');
+    assert.strictEqual(add.tone, 'awe');
+    assert.strictEqual(add.chance, A.LOAD_CHANCE);
+    assert.ok(add.lines.length >= 3, 'model-in needs variants');
+    assert.match(A.verdictText(add, 0), /llama/);
+    assert.notStrictEqual(A.verdictText(add, 0), A.verdictText(add, 1));
+    assert.strictEqual(A.verdictText(add, 0), A.verdictText(add, add.lines.length));  // rotates
+    const out = A.feedReaction('model-remove', 'llama');
+    assert.strictEqual(out.tone, 'scorn');
+    assert.strictEqual(out.chance, A.LOAD_CHANCE);
+    // restart is rare enough to keep full odds, but still rotates copy
+    const rs = A.feedReaction('restart');
+    assert.strictEqual(rs.chance, undefined);
+    assert.ok(rs.lines.length >= 3);
     assert.strictEqual(A.feedReaction('requests', 'x'), null);
 });
-test('milestone tone: 1M+ rungs awe, below praise', () => {
+test('milestone tone: 10M+ rungs awe, below praise (RELAX-1 x10 ladder)', () => {
     assert.strictEqual(A.milestoneTone(999e3), 'praise');
-    assert.strictEqual(A.milestoneTone(1e6), 'awe');
-    assert.strictEqual(A.milestoneTone(1e9), 'awe');
+    assert.strictEqual(A.milestoneTone(9.9e6), 'praise');
+    assert.strictEqual(A.milestoneTone(1e7), 'awe');
+    assert.strictEqual(A.milestoneTone(1e10), 'awe');
 });
 
 /* ---------- escalation ---------- */
@@ -202,10 +215,32 @@ test('the poll-diff upgrade hook is gone (a runtime gauge is not an achievement)
     assert.ok(!read('uplift.js').includes('announceMax'),
         'uplift.js must not re-add a stats-poll upgrade hook');
 });
-test('flagReaction: favorite lights praise, everything else silent', () => {
-    assert.match(A.flagReaction('favorite', true).text, /Until it's too late\./);
+test('flagReaction: favorite lights praise (variant pool), everything else silent', () => {
+    const v = A.flagReaction('favorite', true);
+    assert.strictEqual(v.tone, 'praise');
+    assert.match(A.verdictText(v, 0), /Until it's too late\./);
+    assert.ok(A.FAV_LINES.length >= 3);
     assert.strictEqual(A.flagReaction('favorite', false), null);
     assert.strictEqual(A.flagReaction('pinned', true), null);
+});
+test('RELAX-1: every event-driven rule carries >=3 variants ending a sentence', () => {
+    // escalation codicils concatenate onto the line: each must end cleanly
+    // (. or ? — SHODAN asks rhetorically), never mid-word or with a comma.
+    const pools = [];
+    for (const kind of Object.keys(A.FEED_RULES))
+        pools.push([kind, A.FEED_RULES[kind].lines]);
+    for (const kind of Object.keys(A.TASK_RULES))
+        for (const st of Object.keys(A.TASK_RULES[kind]))
+            pools.push([`${kind}/${st}`, A.TASK_RULES[kind][st].lines]);
+    pools.push(['fav', A.FAV_LINES]);
+    pools.push(['upgrade', A.UPGRADE_LINES]);
+    for (const [name, lines] of pools) {
+        assert.ok(Array.isArray(lines) && lines.length >= 3, `${name}: needs a variant pool`);
+        for (const l of lines) {
+            const text = typeof l === 'function' ? l('m.test') : l;
+            assert.match(text, /[.?!]$/, `${name}: line must end a sentence`);
+        }
+    }
 });
 
 /* ---------- announce(): variant rotation + double-tap, via the real
@@ -242,6 +277,38 @@ test('announce: rotates upgrade lines per firing and suppresses double-taps', ()
     delete global.document; delete global.window; delete global.self;
     delete global.UpliftAchievements; delete global.Uplift;
     delete require.cache[path];                   // leave a clean module graph
+});
+
+test('announce: the chance roll comes FIRST — a miss stays silent and costs no state', () => {
+    const path = require.resolve('../omlx_uplift/static/uplift_achievements.js');
+    delete require.cache[path];
+    const fired = [];
+    global.self = global;
+    global.UpliftAchievements = A;
+    global.document = { hidden: false, hasFocus: () => true };
+    global.window = global;
+    global.Uplift = { feed: { celebrate: (text, tone) => fired.push({ text, tone }) } };
+    require(path);
+    const AC = global.Uplift.achv;
+    const realRandom = Math.random;
+    try {
+        Math.random = () => 0.9;                  // 0.9 >= 0.2: the roll loses
+        AC.announce([A.feedReaction('model-add', 'llama')]);
+        assert.strictEqual(fired.length, 0, 'a losing roll must stay silent');
+        Math.random = () => 0.0;                  // winner
+        AC.announce([A.feedReaction('model-add', 'llama')]);
+        assert.strictEqual(fired.length, 1);
+        assert.strictEqual(fired[0].tone, 'awe');
+        assert.match(fired[0].text, /llama/);
+        // verdicts without a chance never roll: full odds even on a losing die
+        AC.announce([A.feedReaction('restart')]);
+        assert.strictEqual(fired.length, 2, 'restart carries no chance field');
+    } finally {
+        Math.random = realRandom;
+        delete global.document; delete global.window; delete global.self;
+        delete global.UpliftAchievements; delete global.Uplift;
+        delete require.cache[path];
+    }
 });
 
 /* ---------- wiring contracts (text level) ---------- */

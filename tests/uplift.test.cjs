@@ -105,32 +105,32 @@ test('eventsBetween: pressure change', () => {
 });
 
 test('milestonesBetween: crossings only', () => {
-    const a = snap(raw({ total_requests: 999 })), b = snap(raw({ total_requests: 1001 }));
+    const a = snap(raw({ total_requests: 9999 })), b = snap(raw({ total_requests: 10001 }));
     assert.strictEqual(C.milestonesBetween(a, b).length, 1);
-    const c = snap(raw({ total_requests: 1002 }));
+    const c = snap(raw({ total_requests: 10002 }));
     assert.strictEqual(C.milestonesBetween(b, c).length, 0);
     assert.strictEqual(C.milestonesBetween(null, b).length, 0);
 });
 
-test('milestone ladder: 1K..1M then powers of 2', () => {
+test('milestone ladder: 10K..10M then powers of 2 (RELAX-1 x10)', () => {
     const L = C.MILESTONE_LADDER;
-    assert.strictEqual(L[0], 1000);
-    assert.ok(L.includes(10000) && L.includes(100000) && L.includes(1e6));
-    assert.ok(L.includes(2e6) && L.includes(4e6) && L.includes(8e6) && L.includes(16e6));
-    assert.ok(!L.includes(1500000) && !L.includes(3e6));   // no odd rungs
+    assert.strictEqual(L[0], 10000);
+    assert.ok(L.includes(100000) && L.includes(1e6) && L.includes(1e7));
+    assert.ok(L.includes(2e7) && L.includes(4e7) && L.includes(8e7) && L.includes(1.6e8));
+    assert.ok(!L.includes(15000) && !L.includes(3e7));   // no odd rungs
     // sorted, unique
     for (let i = 1; i < L.length; i++) assert.ok(L[i] > L[i - 1]);
-    assert.strictEqual(C.nextMilestone(999), 1000);
-    assert.strictEqual(C.nextMilestone(1000), 10000);
-    assert.strictEqual(C.nextMilestone(1e6), 2e6);
-    assert.strictEqual(C.nextMilestone(3e6), 4e6);
-    assert.strictEqual(C.milestoneFloorOf(1500000), 1e6);
-    assert.strictEqual(C.milestoneFloorOf(999), 0);
+    assert.strictEqual(C.nextMilestone(9999), 10000);
+    assert.strictEqual(C.nextMilestone(10000), 1e5);
+    assert.strictEqual(C.nextMilestone(1e7), 2e7);
+    assert.strictEqual(C.nextMilestone(3e7), 4e7);
+    assert.strictEqual(C.milestoneFloorOf(1.5e7), 1e7);
+    assert.strictEqual(C.milestoneFloorOf(9999), 0);
 });
 
 test('milestonesBetween: skipped rungs fire once at the top rung', () => {
     const a = snap(raw({ total_tokens_served: 500 }));
-    const b = snap(raw({ total_tokens_served: 1500000 }));   // blew past 1K..1M
+    const b = snap(raw({ total_tokens_served: 1500000 }));   // blew past 10K..1M
     const hits = C.milestonesBetween(a, b);
     assert.strictEqual(hits.length, 1);
     assert.strictEqual(hits[0].rung, 1e6);   // highest rung actually reached

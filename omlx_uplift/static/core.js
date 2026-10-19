@@ -407,13 +407,15 @@ function eventsBetween(prev, next) {
 }
 
 /* ---- achievements ladder (confetti candidates) --------------------
-   1K -> 10K -> 100K -> 1M, then powers of 2 (2M, 4M, 8M, 16M...).
-   Same shape for both counters; the ladder is precomputed to 2^31 so
+   RELAX-1 (user 2026-10-19): thresholds x10 — 10K -> 100K -> 1M -> 10M,
+   then powers of 2 (20M, 40M, 80M...). The old 1K base meant a working
+   server celebrated before the operator had noticed the day started.
+   Same shape for both counters; the ladder is precomputed to 1e11 so
    nextMilestone() is a cheap binary search. */
 const MILESTONE_LADDER = (() => {
     const l = [];
-    for (let e = 3; e <= 6; e++) l.push(Math.pow(10, e));
-    for (let n = 2e6; n <= 1e10; n *= 2) l.push(n);   // 2M, 4M, 8M... on the decimal 1M base
+    for (let e = 4; e <= 7; e++) l.push(Math.pow(10, e));
+    for (let n = 2e7; n <= 1e11; n *= 2) l.push(n);   // 20M, 40M, 80M... on the decimal 10M base
     return [...new Set(l)].sort((a, b) => a - b);
 })();
 /* Smallest ladder value strictly greater than v, or null past the end. */
