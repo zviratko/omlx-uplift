@@ -2514,10 +2514,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-lamp.pt-st-dim { opacity: .5; }
 .pt-c-origin { display: flex; flex-direction: column; gap: 1px;
     min-width: 0; }
-.pt-origin-src { color: var(--dim); font-size: var(--fs-meta);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-origin-src { display: flex; align-items: center; gap: 5px;
+    min-width: 0; color: var(--dim); font-size: var(--fs-meta); }
 .pt-origin-src a { color: var(--ink); text-decoration: underline;
-    text-underline-offset: 2px; }
+    text-underline-offset: 2px; min-width: 0; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+.pt-origin-tag { flex: none; padding: 0 5px; border: 1px solid var(--edge);
+    border-radius: calc(var(--radius) / 2); font-size: .85em;
+    letter-spacing: .05em; text-transform: uppercase; }
 .pt-origin-src a:hover { color: var(--accent, #e0662e); }
 .pt-caret { font-size: 1.15em; margin-left: 7px; opacity: .75; }
 .pt-addform.pt-addform-flash { box-shadow: 0 0 0 2px var(--warn, #b8860b);

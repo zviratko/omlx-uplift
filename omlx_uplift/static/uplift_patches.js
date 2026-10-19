@@ -405,6 +405,17 @@ function patchRow(p, view) {
     const pSrc = p.source || {};
     const oline = document.createElement('span');
     oline.className = 'pt-origin-src';
+    if (p.curated && !p.curated_adopted) {
+        // BUNDLED names the ORIGIN (the curated catalog ships it), not the
+        // state — it reads wrong among the status chips (user 2026-10-20)
+        const tag = document.createElement('span');
+        tag.className = 'pt-origin-tag pt-st-bundled';
+        tag.textContent = ptMsg('uplift.patches.bundled_chip', 'BUNDLED');
+        tag.title = ptMsg('uplift.patches.bundled_hint',
+                          'part of the curated catalog — kept current by '
+                          + 'curated sync');
+        oline.append(tag);
+    }
     const srcHref = ptCondensedOrigin(pSrc, p);
     if (srcHref) {
         const a = document.createElement('a');
@@ -462,12 +473,6 @@ function patchRow(p, view) {
     scell.className = 'pt-c-status';
     scell.append(ptChip((p.state || '').replace(/_/g, ' ').toUpperCase(),
         PT_STATE_CLASS[p.state] || 'pt-st-dim', p.state_detail || ''));
-    if (p.curated && !p.curated_adopted) {
-        scell.append(ptChip(ptMsg('uplift.patches.bundled_chip', 'BUNDLED'),
-            'pt-st-bundled',
-            ptMsg('uplift.patches.bundled_hint',
-                  'part of the curated catalog — kept current by curated sync')));
-    }
     if (p.reversal) {
         scell.append(ptChip(ptMsg('uplift.patches.reversal_chip', 'REVERSAL'),
             'pt-st-reversal',
