@@ -3995,9 +3995,10 @@ var RT_SILENCE_MS = 1200;    // endpoint: >=1 delta AND this much silence
 var RT_STUCK_MS = 6000;      // escape: voiced audio, ZERO deltas -> restart
 var RT_MAX_RESTARTS = 3;     // ...and after that the engine is not coming back
 var RT_MAX_MS = 120000;      // hard utterance cap -> force stop + deliver
-// VOICE-14: whole-buffer backends (Qwen3-ASR via the voice14 patch) cannot
-// commit before a real pause — their first delta arrives only after the
-// server's 0.7 s endpoint + decode. The 6 s zero-delta stuck-escape assumes
+// VOICE-14: whole-buffer backends (Qwen3-ASR via the server's segmented
+// realtime backend) cannot commit before a real pause — their first delta
+// arrives only after the server's 0.7 s endpoint + decode. The 6 s
+// zero-delta stuck-escape assumes
 // true-streaming cadence and would restart-loop mid-sentence, discarding
 // every uncommitted buffer each time (mruu report: nothing transcribed,
 // engine forever busy). Such models ride the 120 s cap instead.
@@ -4122,9 +4123,10 @@ function sttListenerStop(commit) {
     // conversation switch / New Chat / unload ALL close the socket, or the
     // engine keeps a session no browser owns (an engine leak is worse than a
     // UI leak). commit=true (the user's own click) FIRST FLUSHES the tail:
-    // the server only closes uncommitted audio over a LIVE socket (voice14
-    // commits whole utterances after a pause), so halting straight away
-    // silently ate the words spoken since the last pause (mruu report).
+    // the server only closes uncommitted audio over a LIVE socket (the
+    // segmented backend commits whole utterances after a pause), so halting
+    // straight away silently ate the words spoken since the last pause
+    // (mruu report).
     // commit=false (context switched under the user) drops the provisional
     // line instead — never flush what the user no longer owns.
     var s = _rt;

@@ -68,7 +68,7 @@ class Renderer(unittest.TestCase):
     def test_not_in_build_word_and_note(self):
         # BUILD-STAMP honesty: the omlx-dev branch was re-cut without this
         # enabled patch — the row must say so in words, not dim the card
-        out = {"patches": [_p("voice14", scope="both",
+        out = {"patches": [_p("left-out-build", scope="both",
                               state="not_in_build",
                               state_detail="NOT in the current omlx-dev "
                                            "build — no stored version "
