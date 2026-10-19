@@ -243,6 +243,31 @@ async def test_sse_every_consumer_sees_every_transition():
                 pass
 
 
+async def test_sse_idle_tick_keeps_links_alive():
+    """ACT-SLEEP-1: an idle connection must emit {"type":"tick"} frames on
+    the _SSE_TICK_S budget. The stream used to be silent while idle, so a
+    half-open TCP link was indistinguishable from a quiet server: the
+    browser kept readyState OPEN, the client's stream-gated poll stayed
+    suppressed, and Activity slept. Silence past a few budgets now proves
+    death; within budget a tick re-stamps client liveness."""
+    import asyncio
+    tracker = _FakeTracker()          # empty ring: nothing ever transitions
+    with patch.object(up_r, "get_request_tracker", return_value=tracker), \
+         patch.object(up_r, "_SSE_TICK_S", 1.0):
+        resp = await up.stream_requests(is_admin=True)
+        it = resp.body_iterator
+        frame = await _pull(it, timeout=4.0)
+        ev = json.loads(frame.split("data: ", 1)[1])
+        assert ev == {"type": "tick"}, f"idle stream must tick, got {ev}"
+        # a transition frame still takes the lane first when present
+        tracker.add("r9", state="complete", completion_tokens=1)
+        frame = await _pull(it, timeout=4.0)
+        # next frame is either a later tick or r9 — both keep the link honest
+        ev2 = json.loads(frame.split("data: ", 1)[1])
+        assert ev2.get("type") == "tick" or ev2.get("id") == "r9", ev2
+        await it.aclose()
+
+
 # ---------------------------------------------------------------------------
 # CACHE-1: static revalidation — ETag/If-None-Match and
 # If-Modified-Since must produce 304 with no body, while a plain GET

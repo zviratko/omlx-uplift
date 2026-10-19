@@ -27,6 +27,11 @@ from .base import (api_router, page_router, require_admin, _RedirectToLogin,
 from ..request_log import RING_LIMIT, get_request_tracker
 from ..collector import get_collector
 
+# ACT-SLEEP-1: idle SSE liveness frame budget for /requests/stream (the
+# generator's loop step is 1 s). The client watchdog treats silence past
+# a few budgets as a dead link; tests patch this module attribute.
+_SSE_TICK_S = 15.0
+
 
 @api_router.get("/requests")
 async def list_requests(
@@ -45,7 +50,17 @@ async def list_requests(
 
 @api_router.get("/requests/stream")
 async def stream_requests(is_admin: bool = Depends(require_admin)):
-    """SSE feed of request lifecycle transitions (1 s sampling tick)."""
+    """SSE feed of request lifecycle transitions (1 s sampling tick).
+
+    ACT-SLEEP-1: idle connections emit a ``{"type": "tick"}`` frame every
+    ~``_SSE_TICK_S`` seconds. The stream used to be silent while nothing
+    transitioned, so a half-open TCP link (client sleep/wake, board killed
+    hard) was indistinguishable from a quiet server: the browser kept
+    readyState OPEN, the client's stream-gated poll stayed suppressed, and
+    the Activity card slept for the rest of the session. Silence past a few
+    tick budgets now means a dead link the client may drop and re-open.
+    Unknown event types are ignored by every consumer; clients too old for
+    the tick see nothing but an idle stream, exactly as before."""
     import asyncio
 
     tracker = get_request_tracker()
@@ -64,6 +79,7 @@ async def stream_requests(is_admin: bool = Depends(require_admin)):
                                    row.get("prompt_tokens"),
                                    row.get("completion_tokens"),
                                    bool(row.get("loop_hint")))
+        idle_s = 0.0
         try:
             while True:
                 pool = engine_pool()
@@ -109,6 +125,13 @@ async def stream_requests(is_admin: bool = Depends(require_admin)):
                         "ended_at": row.get("ended_at"),
                     }
                     yield f"data: {json.dumps(ev)}\n\n"
+                if rows:
+                    idle_s = 0.0
+                else:
+                    idle_s += 1.0   # one loop == one asyncio.sleep(1.0)
+                    if idle_s >= _SSE_TICK_S:
+                        idle_s = 0.0
+                        yield 'data: {"type": "tick"}\n\n'
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             pass

@@ -79,7 +79,9 @@ function pushFeed(events, keyFor) {
    from the top + red toast — the machine returning the day's bytes). */
 function celebrate(text, tone) {
     if (FEG.motionOff()) return;
-    if (document.hidden || !document.hasFocus()) {
+    // ACT-SLEEP-1: same iframe trap as the stream — typing into an embedded
+    // classic page is an audience; hasFocus() alone reads it as nobody home.
+    if (!audienceHere()) {
         _celebPending.push({ text, tone });
         if (_celebPending.length > 5) _celebPending.shift();   // stale praise spoils
         return;
@@ -188,6 +190,7 @@ function gateMilestones(hits) {
 const MAX_REQFEED = 30;
 const reqFeedRows = S.reqFeedRows;   // shared Map (uplift_state.js): live panel + reqsearch read it
 let sseSource = null;
+let lastFrameAt = 0;   // ACT-SLEEP-1: stamp of the last SSE frame received (any type)
 
 /* Item 5 (user 2026-10-10): the feed is a POPUP opened from the Activity
    card header, not a board card — its rows render on demand. Data keeps
@@ -425,23 +428,50 @@ function pushServerEvent(ev) {
         pushFeed([{ kind: 'requests', text: C.t('uplift.feed.gw_reset') }]);
     }
 }
+/* ACT-SLEEP-1 (user report 2026-10-19: "Activity looks like it sleeps even
+   when the tab is focused"): the HANG-1 gate read focus wrong. Clicking
+   into an embedded classic page (Chat/Bench/Cluster iframe) fires a window
+   BLUR for the parent (measured live in Chrome: blur fired, activeElement
+   became IFRAME) — and some browsers ALSO flip document.hasFocus() to false
+   while a nested frame holds focus. The user is unmistakably IN the tab in
+   that moment, yet the old gate called it audience-less, closed the stream,
+   and left the Activity card on the slow FEED-1 poll. So presence is now
+   one named question with iframe tolerance, used by every gate here. */
+function audienceHere() {
+    if (document.hidden) return false;
+    if (document.hasFocus()) return true;
+    const ae = document.activeElement;
+    return !!(ae && ae.tagName === 'IFRAME');   // focus inside an embed = still watching
+}
 function connectEventStream() {
     if (sseSource || !window.EventSource) return;
-    // HANG-1: the live stream belongs to the tab the user is WORKING IN.
-    // hidden stays closed (SSE-PAUSE-1); visible-but-UNFOCUSED tabs now
-    // close too — a browser allows ~6 concurrent connections PER ORIGIN
-    // over HTTP/1.1 (uvicorn serves h11; no multiplexing), and every open
-    // dashboard holds TWO forever streams (requests + metrics feed), so
-    // three visible tabs already starve the fourth's page load (measured:
-    // 4th tab load stalls >25 s while the first three stream happily).
-    // FEED-1's 2 s poll covers unfocused tabs; a focus-reopen replays from
-    // the ring + pollRequests() catch-up, so no transition is lost.
-    if (document.hidden || !document.hasFocus()) return;
+    // HANG-1 (budget, unchanged): the live stream belongs to the tab the
+    // user is WORKING IN. Hidden stays closed (SSE-PAUSE-1); tabs without
+    // an audience close too — a browser allows ~6 concurrent connections
+    // PER ORIGIN over HTTP/1.1 (uvicorn serves h11; no multiplexing), and
+    // every open dashboard holds TWO forever streams (requests + metrics
+    // feed), so three fully-streaming tabs already starve the fourth's
+    // page load (measured: 4th tab load stalls >25 s). FEED-1's 10 s poll
+    // covers audience-less tabs; a reopen replays from the ring and
+    // catch-up-polls, so no transition is lost. ACT-SLEEP-1 fixed WHO
+    // counts as the audience (iframe focus included), not the budget.
+    if (!audienceHere()) return;
     // R12-3: native oMLX now serves /admin/api/requests/stream (sampled
     // from scheduler snapshots); the gateway keeps its own SSE unchanged.
     try {
         sseSource = new EventSource(`${API}/admin/api/requests/stream`);
-        sseSource.onmessage = e => { try { pushServerEvent(JSON.parse(e.data)); } catch (_) {} };
+        // ACT-SLEEP-1 (frame liveness): the stream used to be silent while
+        // idle, so a half-open socket (sleep/wake, Wi-Fi change, board
+        // killed hard) kept readyState OPEN forever, sseOpen() kept saying
+        // "streamed", the FEED-1 poll stayed suppressed — and Activity
+        // slept with a healthy-looking tab. The server now pushes a small
+        // tick frame every ~15 s; every received frame stamps lastFrameAt,
+        // and feedWatchdog() treats long silence as a dead link.
+        sseSource.onopen = () => { lastFrameAt = Date.now(); pollRequests(); };
+        sseSource.onmessage = e => {
+            lastFrameAt = Date.now();
+            try { pushServerEvent(JSON.parse(e.data)); } catch (_) {}
+        };
         sseSource.onerror = () => { /* EventSource retries on its own */ };
     } catch (_) { sseSource = null; }
 }
@@ -461,21 +491,61 @@ addEventListener('visibilitychange', () => {
         pollRequests();
     }
 });
-/* HANG-1: focus decides who owns the slot — blur frees it for whatever tab
-   the user opened next, focus takes it back and catches up (ring replays on
-   connect + explicit poll, same contract as the visibility resume). */
+/* HANG-1 (kept for the request stream): the audience decides who owns the
+   slot — a window leaving frees it for whatever tab the user opened next,
+   arrival takes it back and catches up (ring replay on connect + onopen
+   poll, same contract as the visibility resume). ACT-SLEEP-1: blur checks
+   the audience BEFORE releasing — the same blur event fires for "user left
+   the window" AND for "user clicked into an embedded classic page", and
+   only the first is a real departure. The check is deferred one task so
+   activeElement has settled by then. */
 addEventListener('focus', () => {
     connectEventStream();
     if (!sseOpen()) pollRequests();
 });
 addEventListener('blur', () => {
-    if (sseSource) { sseSource.close(); sseSource = null; }
+    setTimeout(() => {
+        if (!audienceHere() && sseSource) { sseSource.close(); sseSource = null; }
+    }, 0);
 });
 /* FEED-1: the periodic fallback poll (uplift_boot) asks this before
    firing. Direct pollRequests() calls (cancel action, resume catch-up)
    stay unconditional — an OPEN stream already replays the gap. */
 const sseOpen = () => !!(window.EventSource && sseSource
     && sseSource.readyState === EventSource.OPEN);
+
+/* ACT-SLEEP-1 (watchdog): one tick every FEED-1 interval, replacing the
+   bare poll. Three jobs the old chain could not do:
+   - repair the half-open socket: an OPEN stream silent for SILENCE_MS
+     (3x the server's ~15 s tick budget) is a dead link the browser still
+     believes — close it, let the reconnect below (or the poll) take over;
+   - RE-CREATE a stream EventSource gave up on permanently (a 401/500 on
+     its internal retry closes it for good; nothing else re-opened it
+     except a blur/focus cycle — that was the second 'sleeps even when
+     focused' path);
+   - poll exactly when no live stream carries the data (audience-less tab,
+     refused connect, broken connect), preserving the FEED-1 cadence. */
+const SSE_SILENCE_MS = 60_000;
+let lastPollAt = 0;   // POLL-BATCH-2: the fallback poll stays on a 10 s cadence
+                      // even though the watchdog chain itself ticks faster (repair
+                      // is cheap; the traffic-generating poll is not).
+function feedWatchdog() {
+    if (document.hidden) return;
+    if (sseOpen() && Date.now() - lastFrameAt > SSE_SILENCE_MS) {
+        sseSource.close(); sseSource = null;
+    }
+    // a permanently-closed source must be detached FIRST — connectEventStream
+    // treats any surviving reference (even CLOSED) as "already connected".
+    if (sseSource && sseSource.readyState === EventSource.CLOSED) sseSource = null;
+    if (!sseSource) {
+        lastFrameAt = 0;   // a fresh connect re-stamps via onopen
+        connectEventStream();
+    }
+    if (!sseOpen() && Date.now() - lastPollAt >= 10_000) {
+        lastPollAt = Date.now();
+        pollRequests();
+    }
+}
 
 async function pollRequests() {
     if (document.hidden) return;   // R12-3: native route now exists
@@ -496,7 +566,9 @@ window.Uplift.feed = {
     pushFeed, reactTo, gateMilestones, celebrate, milestoneQuip,
     milestoneFloor: S.milestoneFloor,
     renderReqFeed, pollRequests, connectEventStream, pushServerEvent, upsertReq,
-    sseOpen, openFeed, closeFeed,
+    sseOpen, feedWatchdog, openFeed, closeFeed,
+    get audienceHere() { return audienceHere(); },   // ACT-SLEEP-1 live probe
+    get lastFrameAt() { return lastFrameAt; },
     get feedOpen() { return feedOpen; },
 };
 })();

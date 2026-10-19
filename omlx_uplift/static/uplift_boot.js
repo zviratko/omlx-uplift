@@ -199,13 +199,18 @@ if (layout.liveFeed) {
     if (window.EventSource) LF.connect();
 }
 setInterval(pollGatewayInfo, 10000);
-/* FEED-1 fallback, slowed by POLL-BATCH-2 (user: "polling of requests"
-   seen while a tab was unfocused): the requests stream is focus-owned
-   (HANG-1), and this chain fed unfocused tabs every 2 s. Events for an
-   UNFOCUSED tab are not watched live anyway — toasts and the feed panel
-   catch up from the server ring on focus-reopen, so 10 s is the honest
-   background cadence. Focused tabs never take this path. */
-setInterval(() => { if (!document.hidden && !FE.sseOpen()) FE.pollRequests(); }, 10000);  // FEED-1
+/* FEED-1 fallback + ACT-SLEEP-1 watchdog, slowed by POLL-BATCH-2 (user:
+   "polling of requests" seen while a tab was unfocused): the requests
+   stream is audience-owned (HANG-1), and this chain fed audience-less tabs
+   every 2 s. Events for a tab WITHOUT an audience are not watched live
+   anyway — toasts and the feed panel catch up from the server ring on
+   reopen, so 10 s is the honest background poll cadence. The watchdog runs
+   at 5 s though: its cheap path is a boolean check while the stream is
+   healthy, and its jobs are REPAIR (reopen a stream EventSource gave up
+   on; drop a half-open socket that stays silent past the server's tick
+   budget — the router pushes a ~15 s tick frame for exactly this) — a
+   dead link should be caught fast, not once a minute. */
+setInterval(() => FE.feedWatchdog(), 5000);  // FEED-1 / ACT-SLEEP-1
 /* MODELS POLL REMOVED (user 2026-10-14: "I don't see a reason to poll
    /models — if something changes it's likely the user who did that and
    they will refresh the window"): the table refreshes on tab ENTRY
