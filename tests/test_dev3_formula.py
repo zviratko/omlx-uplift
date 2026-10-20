@@ -165,14 +165,15 @@ class BrewBuildCmd(unittest.TestCase):
 
     def test_first_build_is_plain_install(self):
         cmd = cli._brew_build_cmd({"--with-grammar"})
-        self.assertEqual(cmd, ["brew", "install", "--force",
+        self.assertEqual(cmd, ["brew", "install", "--skip-link",
                                "--with-grammar", "omlx-dev"])
 
     def test_rebuild_never_reinstalls(self):
         os.makedirs(os.path.join(self.prefix, "Cellar", "omlx-dev",
                                  "20261019.075500.060846c"))
         cmd = cli._brew_build_cmd(set())
-        self.assertEqual(cmd, ["brew", "install", "--force", "omlx-dev"])
+        self.assertEqual(cmd, ["brew", "install", "--skip-link",
+                               "omlx-dev"])
         self.assertNotIn("reinstall", cmd)
         self.assertNotIn("--HEAD", cmd)
 

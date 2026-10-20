@@ -1792,6 +1792,21 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
         _emit(res, "err", f"  investigation: {res.log_path}")
         res.ok, res.returncode, res.stage = False, rc or 1, "verify"
         return res
+    # LINK SWITCH: brew ran --skip-link, so the live keg is still linked.
+    # Flip opt/, brew's link record and the bin symlinks through our own
+    # activate (same tested path as `dev use`). force=True is legitimate
+    # here: the dev board by design still runs from the OLD keg.
+    try:
+        sw = kegstash.activate(build_version, force=True)
+        _emit(res, "out", f"active keg switched to {sw['cellar_name']} "
+                          "(the running server keeps the old code until "
+                          "restart)")
+    except Exception as exc:
+        _emit(res, "err", f"build OK but the link switch FAILED: {exc} — "
+                          "the live keg is UNCHANGED; retry the switch "
+                          f"with: omlx-uplift dev use {build_version}")
+        res.ok, res.returncode, res.stage = False, 1, "switch"
+        return res
     cfg = load_config() or cfg
     cfg["built_sha"] = tip
     cfg["built_version"] = build_version
