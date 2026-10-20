@@ -46,17 +46,55 @@ def test_no_config_is_not_installed(monkeypatch):
 
 def test_receipt_base_and_patch_ids(monkeypatch):
     cfg = {"built_base": "0b07e88" + "0" * 33, "built_sha": "fbf19d2" + "0" * 33,
-           "sync_ref": "upstream/main"}
+           "sync_ref": "upstream/main",
+           "built_at": "2026-10-20T13:30:19+00:00"}
     patches = [{"id": "pr4206-personal", "version": 2}, {"id": "other", "version": 1}]
     seen = _stub(monkeypatch, cfg, patches)
+    from omlx_uplift import kegstash
+
+    monkeypatch.setattr(kegstash, "active_keg",
+                        lambda *a, **k: "20261020.133019.7240c46")
     out = dev_mod._dev_build_info_sync()
     assert out["installed"] is True
     assert out["base_sha"] == cfg["built_base"]
     assert out["built_sha"] == cfg["built_sha"]
+    # KEG-VERSIONED: the badge names the ACTIVE KEG (build stamp + commit)
+    # and when it was built — the header line users read to answer
+    # 'which binary is this board running?'
+    assert out["keg"] == "20261020.133019.7240c46"
+    assert out["built_at"] == "2026-10-20T13:30:19+00:00"
     assert out["omlx_version"] == "0.7.0"
     assert [p["id"] for p in out["patches"]] == ["pr4206-personal", "other"]
     # THE cheap contract: enumerate without reading any diff file
     assert seen["with_bytes"] is False
+
+
+def test_badge_js_prefers_the_keg_name():
+    import os
+
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "omlx_uplift", "static", "uplift_boot.js")
+    src = open(p, encoding="utf-8").read()
+    assert "d.keg || d.base_sha" in src.replace("\n", " ").replace("  ", " ") \
+        or "!(d.keg || d.base_sha)" in src
+    assert "main.textContent = d.keg" in src
+
+
+def test_auto_update_label_no_vanilla_tail():
+    # the DEV (target) dropdown owns the what-tracks-what story now; the
+    # flag label says cause + effect only (user 2026-10-20)
+    import glob
+    import json as _json
+    import os
+
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "omlx_uplift", "locales", "*.json")
+    key = "uplift.patches.dev_auto_label"
+    for f in glob.glob(base):
+        v = _json.load(open(f, encoding="utf-8"))[key]
+        assert v and "anilla" not in v, f
+    en = _json.load(open(os.path.join(os.path.dirname(base.replace('*.json', '')), "en.json"), encoding="utf-8"))
+    assert en[key] == "AUTO UPDATE — REBUILD OMLX-DEV WHEN UPSTREAM MOVES"
 
 
 def test_pin_beats_sync_ref_when_no_receipt(monkeypatch):

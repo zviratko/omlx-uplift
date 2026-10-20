@@ -95,12 +95,32 @@ def test_runtime_scope_absence_is_explained(home, monkeypatch):
     r = devsrc.run_dev_build(dry_run=True)
     text = open(r.log_path).read()
     assert ("ctx-probe-above-native [omlx]: runtime patch" in text
-            and "NOT part of the omlx-dev build" in text)
-    # the note is also a console line (stream 'out') — the user sees the
-    # answer to 'where are my other patches' without opening the file
-    assert any(s == "out" and "runtime patch — mounts" in t
+            and "never part of the omlx-dev build" in text)
+    # KEG-VERSIONED visibility (user 2026-10-20): the note names the LIVE
+    # state — an entry with no applied record on the active tree must say
+    # so instead of the vague 'mounts at server start'.
+    assert any(s == "out"
+               and "runtime patch — not yet mounted; lands at the next "
+                   "server start" in t
                for s, t in r.lines)
     assert "quiet-disabled" not in text
+
+
+def test_runtime_patch_applied_in_active_keg_says_so(home, monkeypatch):
+    from omlx_uplift import brewutil, patches as patches_mod
+
+    kid = "site-packages:cafebabe00000000"
+    monkeypatch.setattr(brewutil, "keg_site_packages", lambda f: "/tmp/sp")
+    monkeypatch.setattr(patches_mod, "keg_id", lambda p: kid)
+    manifest = {"patches": [{
+        "id": "bench-force-tg", "enabled": True, "scope": "omlx",
+        "versions": [{"v": 1, "kegs": {kid: {"status": "applied"}}}],
+    }]}
+    _pipeline(home, monkeypatch, commits=[], manifest=manifest)
+    r = devsrc.run_dev_build(dry_run=True)
+    assert any(s == "out" and "bench-force-tg [omlx]: runtime patch — "
+                              "APPLIED in the active keg" in t
+               for s, t in r.lines), r.lines
 
 
 def test_upstreamed_build_patch_is_announced(home, monkeypatch):

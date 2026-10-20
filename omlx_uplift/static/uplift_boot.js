@@ -53,13 +53,18 @@ fetchJson(`${API}/admin/api/identity`).then(d => {
    (like 'DEV' itself) and stay untranslated; only the labels go through i18n. */
 function renderDevBuild() {
     fetchJson(`${API}/admin/api/dev/build-info`).then(d => {
-        if (!d || !d.installed || !d.base_sha) return;
+        if (!d || !d.installed || !(d.keg || d.base_sha)) return;
         const patches = d.patches || [];
         const el = $('logo-build');
         el.textContent = '';
         const main = document.createElement('span'); main.className = 'lb-main';
-        main.textContent = d.base_sha.slice(0, 7)
-            + (d.omlx_version ? ' · omlx v' + d.omlx_version : '');
+        // KEG-VERSIONED: the active keg name IS the build identity —
+        // '<utc-stamp>.<commit7>' (when it was built, what it was built
+        // from). Legacy HEAD-<sha> kegs show their name too; a keg predating
+        // both schemes falls back to the base commit line.
+        main.textContent = d.keg
+            || (d.base_sha.slice(0, 7)
+                + (d.omlx_version ? ' · omlx v' + d.omlx_version : ''));
         el.append(main);
         if (patches.length) {
             const ids = patches.map(p => p.id + ' v' + p.version).join(', ');
@@ -69,9 +74,11 @@ function renderDevBuild() {
             el.append(pl);
         }
         el.title = C.tf('uplift.ui.dev_build_info', 'DEV build')
-            + ': omlx ' + (d.omlx_version || '?')
-            + ' @ ' + d.base_sha.slice(0, 12)
+            + (d.keg ? ': keg ' + d.keg : '')
+            + '\nomlx ' + (d.omlx_version || '?')
+            + ' @ ' + (d.base_sha ? d.base_sha.slice(0, 12) : '?')
             + ' (' + (d.sync_ref || '') + ')'
+            + (d.built_at ? '\nbuilt ' + d.built_at : '')
             + (d.built_sha ? '\nuplift-dev @ ' + d.built_sha.slice(0, 12) : '')
             + (patches.length ? '\n' + patches.map(p => p.id + ' v' + p.version).join('\n') : '');
         el.hidden = false;

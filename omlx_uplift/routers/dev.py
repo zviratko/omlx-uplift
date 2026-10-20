@@ -408,9 +408,18 @@ def _dev_build_info_sync() -> dict:
         patches = [{"id": p.get("id"), "version": p.get("version")}
                    for p in patchsource.enabled_build_patches(
                        _patches_mod.patch_store(), with_bytes=False)]
+        keg = None
+        try:
+            from .. import kegstash
+
+            keg = kegstash.active_keg() or None
+        except Exception:
+            pass
         return {"installed": True,
                 "base_sha": base or None,
+                "keg": keg,
                 "built_sha": (cfg.get("built_sha") or "").strip() or None,
+                "built_at": cfg.get("built_at"),
                 "sync_ref": cfg.get("sync_ref"),
                 "omlx_version": _omlx_running_version(),
                 "patches": patches}

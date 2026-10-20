@@ -1581,9 +1581,33 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                 continue
             _sc = _patches_mod.patch_scope(_e)
             if _sc == _patches_mod.SCOPE_OMLX:
-                _emit(res, "out", f"{_e['id']} [omlx]: runtime patch — "
-                                  "mounts onto the running install at server "
-                                  "start, NOT part of the omlx-dev build")
+                # KEG-VERSIONED visibility (user 2026-10-20): the runtime
+                # note must answer 'is it actually in the running code',
+                # not just 'it mounts at some start'. The active tree's
+                # content-hash id is the witness.
+                _live = ""
+                try:
+                    from . import brewutil as _bu
+
+                    _sp = _bu.keg_site_packages("omlx-dev")
+                    _kid = (_patches_mod.keg_id(
+                        os.path.join(_sp, "omlx")) if _sp else None)
+                    if _kid and any(
+                            (_v.get("kegs") or {}).get(_kid, {}).get("status")
+                            == "applied"
+                            for _v in (_e.get("versions") or [])):
+                        _live = (" — APPLIED in the active keg "
+                                 "(never part of the omlx-dev build)")
+                    else:
+                        _live = (" — not yet mounted; lands at the next "
+                                 "server start (never part of the "
+                                 "omlx-dev build)")
+                except Exception:
+                    pass
+                if not _live:
+                    _live = (" — mounts onto the running install at server "
+                             "start, NOT part of the omlx-dev build")
+                _emit(res, "out", f"{_e['id']} [omlx]: runtime patch{_live}")
                 continue
             if not _patches_mod.scope_touches_dev(_sc):
                 continue
