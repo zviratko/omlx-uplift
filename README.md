@@ -7,7 +7,14 @@ keg: one `.pth` file (`omlx_uplift.pth`) bootstraps `sys.path` and imports
 the autopatch hook at interpreter start. The classic `/admin/` dashboard
 stays byte-identical and fully working.
 
+Uplift rides whichever oMLX server you run — the classic `omlx` keg, the
+HEAD-tracking `omlx-dev` keg, or both. Neither keg is a prerequisite:
+`omlx-uplift install` targets the one that exists.
+
+Classic install:
+
 ```bash
+brew tap jundot/omlx
 brew tap zviratko/uplift https://github.com/zviratko/omlx-uplift
 brew install omlx-uplift
 omlx-uplift install                      # writes the ONE .pth into the omlx keg
@@ -15,9 +22,24 @@ launchctl kickstart -k gui/$(id -u)/sh.brew.omlx
 # open http://127.0.0.1:<omlx-port>/uplift/
 ```
 
-After `brew upgrade omlx` (fresh keg), re-run `omlx-uplift install` and
-kickstart again. Removing uplift: `omlx-uplift uninstall` (removes the
-`.pth`), then `brew uninstall omlx-uplift`.
+Dev-lane install (builds omlx from upstream HEAD plus your enabled patch
+commits; needs no classic keg — only the jundot tap for its build recipe):
+
+```bash
+brew tap jundot/omlx
+brew tap zviratko/uplift https://github.com/zviratko/omlx-uplift
+brew install omlx-uplift
+omlx-uplift dev bootstrap                # one-time questionnaire
+omlx-uplift dev install                  # builds the omlx-dev keg (~20 min first time)
+omlx-uplift install                      # mounts into the dev keg
+brew services start omlx-dev
+# open http://127.0.0.1:8001/uplift/
+```
+
+After `brew upgrade` of either keg (fresh keg = fresh python), re-run
+`omlx-uplift install` and kickstart the service again. Removing uplift:
+`omlx-uplift uninstall` (removes the `.pth`), then `brew uninstall
+omlx-uplift`.
 
 ## Releases
 
@@ -46,8 +68,8 @@ control, add-patch form.*
 
 ## Patch carrier (PATCHES page)
 
-Uplift can carry small local patches on top of vanilla oMLX so fixes you
-need today (for example open PRs of oMLX) survive vanilla upgrades, with
+Uplift can carry small local patches on top of oMLX so fixes you
+need today (for example open PRs of oMLX) survive keg upgrades, with
 per-patch version history and rollback. **Rollback never rolls back omlx
 itself.**
 
@@ -78,7 +100,7 @@ State meanings (PATCHES page chips):
 | `applied` | desired version is live in the keg (verified byte-exact) |
 | `pending` | will apply at the next omlx start |
 | `update_available` | source drifted; a validated candidate awaits Promote |
-| `needs_review` | apply failed (usually after a vanilla upgrade) and oMLX runs WITHOUT the patch until you resolve it |
+| `needs_review` | apply failed (usually after a keg upgrade) and oMLX runs WITHOUT the patch until you resolve it |
 | `obsolete` | upstream now contains the change; consider Remove |
 | `disabled` | files are restored to vanilla bytes |
 
@@ -88,7 +110,7 @@ Rollback semantics:
   byte-exact to what they were before (vanilla or the other version) at
   the next omlx restart. Disable and Remove likewise restore pristine
   vanilla bytes, unwinding every applied version's backups newest-first.
-- Does NOT: install, downgrade or pin omlx. If a vanilla upgrade moved
+- Does NOT: install, downgrade or pin omlx. If a keg upgrade moved
   the code under your patch, the patch is marked `needs_review`, never
   forced.
 
@@ -172,8 +194,10 @@ omlx-uplift man                        # full man page
 
 ## Development kegs (`omlx-dev`): when the patch carrier is not enough
 
-The hook mode above (vanilla `omlx` + the `.pth` carrier) is the right
-default. Its limits: a diff cannot carry new files, generated code,
+The hook mode above (classic `omlx` keg + the `.pth` carrier) is the
+simplest setup; the dev lane above it works standalone with no classic
+keg installed. The hook mode's limits: a diff cannot carry new files,
+generated code,
 custom Metal kernels, or work-in-progress commits that are not a clean
 patch yet. Then use the companion formula. `dev install` drives brew for
 you (first build `brew install --HEAD zviratko/uplift/omlx-dev`, rebuilds
@@ -189,7 +213,9 @@ Uplift composites it with the enabled patch set into the `uplift-dev`
 branch and builds a separate keg from that, so you always know which
 bytes are running and rollback never touches your checkout. The dev keg
 runs as its own service (`sh.brew.omlx-dev`) with its own port and base
-path; the stable `omlx` keeps serving alongside it.
+path; it tracks upstream HEAD by default — each rebuild re-cuts the
+branch from the newest upstream commit. Alongside a classic install the
+two are independent services; you can run both.
 
 What you get over hook mode:
 
@@ -231,7 +257,8 @@ printed per test). The full run needs the macOS dev box and the keg
 interpreter (the only python with fastapi + omlx):
 
 ```bash
-# one-time helper libs (system python3 lacks pytest)
+# one-time helper libs (system python3 lacks pytest); the interpreter is
+# the omlx keg's libexec python — classic keg if installed, else omlx-dev
 /opt/homebrew/opt/omlx/libexec/bin/pip install -q --target ~/hermes/TMP/pylibs \
     pytest pytest-asyncio
 
