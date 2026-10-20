@@ -764,7 +764,7 @@
  "uplift.se.specprefill_keep_pct": "유지율",
  "uplift.se.trust_remote_code": "원격 코드 신뢰",
  "uplift.se.ttl_seconds": "TTL (초)",
- "uplift.se.turboquant_kv_enabled": "TurboQuant KV 캐시",
+ "uplift.se.turboquant_kv_enabled": "KV 캐시 압축",
  "uplift.se.vlm_mtp_draft_model": "드래프터 모델",
  "uplift.se.vlm_mtp_enabled": "VLM MTP",
  "uplift.smooth.light": "약함",
@@ -1193,5 +1193,12 @@
  "uplift.audio.processing": "오디오 처리 중",
  "uplift.audio.embedding": "임베딩 중",
  "uplift.audio.reranking": "재순위 매기기 중",
- "uplift.audio.deciding": "판정 중"
+ "uplift.audio.deciding": "판정 중",
+ "uplift.gs.cc.desktop": "Claude Desktop",
+ "uplift.gs.cc.desktop_hint": "claude-opus / claude-sonnet / claude-haiku을 위 티어 모델의 별칭으로 노출합니다",
+ "uplift.se.turboquant_kv_enabled.hint": "선택한 형식으로 KV 캐시 메모리 사용량을 줄입니다. TurboQuant는 2~8비트를 지원하며, Affine4와 Affine8은 각각 4비트와 8비트 아핀 양자화를 사용합니다.",
+ "uplift.se.turboquant_kv_scheme": "형식",
+ "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
+ "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4 (4비트)",
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8비트)"
 }

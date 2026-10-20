@@ -749,7 +749,7 @@
  "uplift.se.specprefill_keep_pct": "Доля сохранения",
  "uplift.se.trust_remote_code": "Доверять удаленному коду",
  "uplift.se.ttl_seconds": "TTL (секунды)",
- "uplift.se.turboquant_kv_enabled": "TurboQuant KV-кэш",
+ "uplift.se.turboquant_kv_enabled": "Сжатие KV-кэша",
  "uplift.se.vlm_mtp_draft_model": "Модель-драфтер",
  "uplift.se.vlm_mtp_enabled": "VLM MTP",
  "uplift.smooth.light": "слабое",
@@ -1178,5 +1178,12 @@
  "uplift.audio.processing": "Обработка аудио",
  "uplift.audio.embedding": "Эмбеддинг",
  "uplift.audio.reranking": "Переранжирование",
- "uplift.audio.deciding": "Принятие решения"
+ "uplift.audio.deciding": "Принятие решения",
+ "uplift.gs.cc.desktop": "Claude Desktop",
+ "uplift.gs.cc.desktop_hint": "Предоставляет claude-opus / claude-sonnet / claude-haiku как псевдонимы моделей уровней выше",
+ "uplift.se.turboquant_kv_enabled.hint": "Уменьшает память KV-кэша с помощью выбранного формата. TurboQuant поддерживает от 2 до 8 бит; Affine4 и Affine8 используют 4- и 8-битное аффинное квантование.",
+ "uplift.se.turboquant_kv_scheme": "Формат",
+ "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
+ "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4 (4 бита)",
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8 бит)"
 }

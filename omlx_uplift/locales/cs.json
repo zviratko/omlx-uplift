@@ -749,7 +749,7 @@
  "uplift.se.specprefill_keep_pct": "Míra zachování",
  "uplift.se.trust_remote_code": "Věřit vzdálenému kódu",
  "uplift.se.ttl_seconds": "TTL (sekundy)",
- "uplift.se.turboquant_kv_enabled": "TurboQuant KV cache",
+ "uplift.se.turboquant_kv_enabled": "Komprese KV cache",
  "uplift.se.vlm_mtp_draft_model": "Model drafteru",
  "uplift.se.vlm_mtp_enabled": "VLM MTP",
  "uplift.smooth.light": "mírné",
@@ -1178,5 +1178,12 @@
  "uplift.audio.processing": "Zpracování zvuku",
  "uplift.audio.embedding": "Vlokování",
  "uplift.audio.reranking": "Řazení výsledků",
- "uplift.audio.deciding": "Rozhodování"
+ "uplift.audio.deciding": "Rozhodování",
+ "uplift.gs.cc.desktop": "Claude Desktop",
+ "uplift.gs.cc.desktop_hint": "Zobrazit claude-opus / claude-sonnet / claude-haiku jako aliasy výše uvedených modelů úrovní",
+ "uplift.se.turboquant_kv_enabled.hint": "Snižuje využití paměti KV cache pomocí vybraného formátu. TurboQuant podporuje 2 až 8 bitů; Affine4 a Affine8 používají 4bitovou a 8bitovou afinní kvantizaci.",
+ "uplift.se.turboquant_kv_scheme": "Formát",
+ "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
+ "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4 (4 bity)",
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8 bitů)"
 }

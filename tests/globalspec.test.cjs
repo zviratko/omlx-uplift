@@ -104,7 +104,13 @@ test('GS_MAP + integration keys cover the full GlobalSettingsRequest schema', { 
     // model_dir is deprecated (model_dirs supersedes it) and
     // gdn_ssd_split_enabled is legacy — upstream 400s when it arrives
     // together with gdn_snapshot_storage, which is always sent.
-    const LEGACY = new Set(['model_dir', 'gdn_ssd_split_enabled']);
+    // restart_desktop (SYNC-1, upstream f27ba3d) is a REQUEST-SCOPED
+    // action flag: never persisted, never round-tripped — classic's
+    // saveClaudeCodeSettings() omits it and the server only reads it on
+    // the claude_code_desktop_enabled edge / the dedicated
+    // /admin/api/claude-desktop/* endpoints (default False = never
+    // restart the app unattended).
+    const LEGACY = new Set(['model_dir', 'gdn_ssd_split_enabled', 'restart_desktop']);
     assert.deepStrictEqual(missing.filter(k => !LEGACY.has(k)), [],
         `schema keys missing from Uplift save payload: ${missing.join(', ')}`);
 });

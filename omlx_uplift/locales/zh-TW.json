@@ -749,7 +749,7 @@
  "uplift.se.specprefill_keep_pct": "保留率",
  "uplift.se.trust_remote_code": "信任遠程代碼",
  "uplift.se.ttl_seconds": "TTL（秒）",
- "uplift.se.turboquant_kv_enabled": "TurboQuant KV 快取",
+ "uplift.se.turboquant_kv_enabled": "KV 快取壓縮",
  "uplift.se.vlm_mtp_draft_model": "Drafter 模型",
  "uplift.se.vlm_mtp_enabled": "VLM MTP",
  "uplift.smooth.light": "弱",
@@ -1178,5 +1178,12 @@
  "uplift.audio.processing": "音訊處理中",
  "uplift.audio.embedding": "嵌入計算中",
  "uplift.audio.reranking": "重排序中",
- "uplift.audio.deciding": "決策中"
+ "uplift.audio.deciding": "決策中",
+ "uplift.gs.cc.desktop": "Claude Desktop",
+ "uplift.gs.cc.desktop_hint": "將 claude-opus / claude-sonnet / claude-haiku 公開為上述層級模型的別名",
+ "uplift.se.turboquant_kv_enabled.hint": "使用所選格式減少 KV 快取的記憶體用量。TurboQuant 支援 2 到 8 位元；Affine4 與 Affine8 分別使用 4 位元與 8 位元仿射量化。",
+ "uplift.se.turboquant_kv_scheme": "格式",
+ "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
+ "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4（4 位元）",
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8（8 位元）"
 }

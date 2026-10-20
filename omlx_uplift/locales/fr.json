@@ -753,7 +753,7 @@
  "uplift.se.specprefill_keep_pct": "Taux de conservation",
  "uplift.se.trust_remote_code": "Faire confiance au code distant",
  "uplift.se.ttl_seconds": "TTL (secondes)",
- "uplift.se.turboquant_kv_enabled": "Cache KV TurboQuant",
+ "uplift.se.turboquant_kv_enabled": "Compression du cache KV",
  "uplift.se.vlm_mtp_draft_model": "Modèle drafter",
  "uplift.se.vlm_mtp_enabled": "VLM MTP",
  "uplift.smooth.light": "léger",
@@ -1182,5 +1182,12 @@
  "uplift.audio.processing": "Traitement audio",
  "uplift.audio.embedding": "Embedding",
  "uplift.audio.reranking": "Reclassement",
- "uplift.audio.deciding": "Décision"
+ "uplift.audio.deciding": "Décision",
+ "uplift.gs.cc.desktop": "Claude Desktop",
+ "uplift.gs.cc.desktop_hint": "Expose claude-opus / claude-sonnet / claude-haiku comme alias des modèles de niveau ci-dessus",
+ "uplift.se.turboquant_kv_enabled.hint": "Réduit la mémoire du cache KV avec le format sélectionné. TurboQuant prend en charge 2 à 8 bits ; Affine4 et Affine8 utilisent une quantification affine sur 4 et 8 bits.",
+ "uplift.se.turboquant_kv_scheme": "Format",
+ "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
+ "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4 (4 bits)",
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8 bits)"
 }

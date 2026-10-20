@@ -22,7 +22,8 @@
         'cache_reasoning_output',
         'thinking_budget_enabled', 'thinking_budget_tokens', 'reasoning_parser',
         'guided_grammar_enabled', 'guided_grammar', 'max_tool_result_tokens',
-        'index_cache_freq', 'turboquant_kv_enabled', 'turboquant_kv_bits',
+        'index_cache_freq', 'turboquant_kv_enabled', 'turboquant_kv_scheme',
+        'turboquant_kv_bits',
         'turboquant_skip_last', 'qwen35_ane_prefill_enabled',
         'qwen35_ane_prefill_sequence_length',
         'qwen35_ane_prefill_tail_padding_min_tokens', 'qwen35_ane_prefill_fraction',
@@ -84,7 +85,7 @@
         'guided_grammar_enabled', 'guided_grammar',
         'max_tool_result_tokens', 'chat_template_kwargs', 'forced_ct_kwargs',
         'trust_remote_code', 'index_cache_freq', 'turboquant_kv_enabled',
-        'turboquant_kv_bits', 'moe_expert_offload_enabled',
+        'turboquant_kv_scheme', 'turboquant_kv_bits', 'moe_expert_offload_enabled',
         'moe_expert_offload_resident_fraction', 'qwen4_ple_ssd_offload',
         // SYNC-1 (upstream 3c39990): model-level, not server-level
         'qwen4_gdn_decode_wide_proj',
@@ -270,6 +271,9 @@
             enableIndexCache: !!s.index_cache_freq,
             index_cache_freq: s.index_cache_freq || null,
             turboquant_kv_enabled: s.turboquant_kv_enabled || false,
+            // SYNC-1 (upstream 7ffa8d4 #4659): KV compression format;
+            // server default when the field is absent is 'turboquant'.
+            turboquant_kv_scheme: s.turboquant_kv_scheme || 'turboquant',
             turboquant_kv_bits: s.turboquant_kv_bits || 4,
             moe_expert_offload_enabled: !diffusion && !!(model && model.moe_expert_offload_supported === true) && !!s.moe_expert_offload_enabled,
             moe_expert_offload_resident_fraction: s.moe_expert_offload_resident_fraction ?? 0.25,
@@ -372,7 +376,7 @@
             errors.push('Lightning MTP and DFlash cannot both be enabled; choose one speculative-decoding path.');
         if (ms.vlm_mtp_enabled) {
             for (const [label, on] of [['DFlash', ms.dflash_enabled], ['SpecPrefill', ms.specprefill_enabled],
-                                       ['Lightning MTP', ms.mtp_enabled], ['TurboQuant KV', ms.turboquant_kv_enabled]])
+                                       ['Lightning MTP', ms.mtp_enabled], ['KV cache compression', ms.turboquant_kv_enabled]])
                 if (on) errors.push(`VLM MTP and ${label} cannot both be enabled; choose one speculative path per model.`);
             if (ms.guided_grammar_enabled || ms.repetition_penalty != null || ms.presence_penalty != null)
                 errors.push('VLM MTP cannot be combined with guided grammar or repetition/presence penalties (per-request logits processors).');
@@ -464,6 +468,7 @@
             chat_template_kwargs: Object.keys(chatTemplateKwargs).length > 0 ? chatTemplateKwargs : null,
             forced_ct_kwargs: forcedCtKwargs.length > 0 ? forcedCtKwargs : null,
             turboquant_kv_enabled: !!ms.turboquant_kv_enabled,
+            turboquant_kv_scheme: ms.turboquant_kv_scheme || 'turboquant',
             turboquant_kv_bits: ms.turboquant_kv_enabled ? (parseFloat(ms.turboquant_kv_bits) || 4) : 4,
             moe_expert_offload_enabled: !diffusion && !!(model && model.moe_expert_offload_supported === true) && !!ms.moe_expert_offload_enabled,
             moe_expert_offload_resident_fraction: ms.moe_expert_offload_resident_fraction ?? 0.25,
@@ -555,6 +560,7 @@
                 cache_reasoning_output: null,
                 guided_grammar_enabled: false, guided_grammar: null,
                 max_tool_result_tokens: 0, turboquant_kv_enabled: false,
+                turboquant_kv_scheme: 'turboquant',
                 turboquant_kv_bits: 4, qwen35_ane_prefill_enabled: false,
                 qwen35_ane_prefill_sequence_length: 2048,
                 qwen35_ane_prefill_tail_padding_min_tokens: 0,
@@ -604,7 +610,16 @@
         }
         const tqOn = !!d.turboquant_kv_enabled;
         add('turboquant_kv_enabled', tqOn);
-        if (tqOn) add('turboquant_kv_bits', d.turboquant_kv_bits ?? 4);
+        if (tqOn) {
+            // SYNC-1 (upstream 7ffa8d4 #4659): mirror
+            // validate_kv_compression_settings — affine4/affine8 pin the
+            // bit ladder to 4/8; a mismatched pair 400s at tip. Clamp here
+            // so a stale editor state can never send one.
+            const kvScheme = d.turboquant_kv_scheme || 'turboquant';
+            const kvPin = kvScheme === 'affine4' ? 4 : kvScheme === 'affine8' ? 8 : null;
+            add('turboquant_kv_scheme', kvScheme);
+            add('turboquant_kv_bits', kvPin !== null ? kvPin : (d.turboquant_kv_bits ?? 4));
+        }
         const oqOn = !!d.qwen35_oq_a8_enabled;
         add('qwen35_oq_a8_enabled', oqOn);
         if (oqOn) add('qwen35_oq_a8_min_tokens', d.qwen35_oq_a8_min_tokens ?? 128);
@@ -688,7 +703,7 @@
         // material (engine_pool.py add('embedding_audio_enabled', …))
         'embedding_audio_enabled', 'embedding_audio_max_seconds',
         'mtp_enabled', 'mtp_adaptive_max_depth', 'mtp_fixed_depth',
-        'turboquant_kv_enabled', 'turboquant_kv_bits',
+        'turboquant_kv_enabled', 'turboquant_kv_scheme', 'turboquant_kv_bits',
         'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
         'qwen35_ane_prefill_enabled', 'qwen35_ane_prefill_sequence_length',
         'qwen35_ane_prefill_tail_padding_min_tokens', 'qwen35_ane_prefill_fraction',
@@ -756,6 +771,7 @@
             mtp_adaptive_max_depth: 'mtp_enabled', mtp_fixed_depth: 'mtp_enabled',
             embedding_audio_max_seconds: 'embedding_audio_enabled',
             turboquant_kv_bits: 'turboquant_kv_enabled',
+            turboquant_kv_scheme: 'turboquant_kv_enabled',
             qwen35_oq_a8_min_tokens: 'qwen35_oq_a8_enabled',
             moe_expert_offload_resident_fraction: 'moe_expert_offload_enabled',
             specprefill_draft_model: 'specprefill_enabled',

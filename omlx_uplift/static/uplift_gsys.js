@@ -1404,6 +1404,16 @@ const GS_SPEC = [
                        { placeholder: L.cc.ph, list: 'cc-models' }),
                 { flat: 'claude_code_' + lab }));
         }
+        // SYNC-1 (upstream f27ba3d #3592): Claude Desktop toggle — classic
+        // nests it INSIDE the local-mode branch (blocks/_claude_code.html
+        // x-show mode==='local'), hence it lives in this gated builder.
+        // No confirm: classic warns inline (desktop_side_effect) instead.
+        // The Reapply/Restore command buttons are a dedicated endpoint
+        // surface (/admin/api/claude-desktop/*) — not mirrored yet (finding
+        // recorded in the SYNC-1 Run log).
+        body.append(gsRow('claude_code', L.cc.desktop, L.cc.desktop_hint,
+            gsToggle('claude_code_desktop_enabled', !!gsGet('claude_code', 'desktop_enabled')),
+            { flat: 'claude_code_desktop_enabled' }));
     }},
 
     {sec: 'mcp', lab: 'mcp.path', ctl: {k: 'text', field: 'config_path', flat: 'mcp_config', ph: 'mcp.ph'},

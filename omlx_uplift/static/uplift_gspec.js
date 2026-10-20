@@ -79,6 +79,10 @@ const GS_MAP = {
     claude_code_opus_model: ['claude_code','opus_model'],
     claude_code_sonnet_model: ['claude_code','sonnet_model'],
     claude_code_haiku_model: ['claude_code','haiku_model'],
+    // SYNC-1 (upstream f27ba3d #3592): Claude Desktop tier aliases — live-
+    // applied like the rest of claude_code; the server auto-configures /
+    // restores the Desktop JSON on the OFF->ON / ON->OFF edge.
+    claude_code_desktop_enabled: ['claude_code','desktop_enabled'],
 };
 /* Keys the classic saveGlobalSettings() includes in its full payload.
    base_path is launch-time only (read-only row); api_key is sent masked and

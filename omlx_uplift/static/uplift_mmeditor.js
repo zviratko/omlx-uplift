@@ -1165,14 +1165,41 @@ function renderEditorFields(container) {
         // (parity, user: "turboquant toggle is missing in model settings")
         // U41: classic's fixed ladder, not a 0.25-step free number
         // (user: bits can't be quarters)
-        // UX-5 (user): ONE band [toggle | bits] — grouped, on the shared
-        // column tracks, bits greyed + disabled until the toggle is on
-        seFam(g, 'turboquant_kv_enabled',
-            seBind('bool', 'turboquant_kv_enabled', { label: 'TurboQuant KV Cache',
-                hint: 'Compress KV cache using vector quantization. Lower bits = more compression.' }),
-            [seBind('select', 'turboquant_kv_bits',
-                { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
-                  options: [2, 2.5, 3, 3.5, 4, 6, 8].map(v => ({ value: String(v), label: v + '-bit' })) })]);
+        // UX-5 (user): ONE band [toggle | scheme | bits] — grouped, on the
+        // shared column tracks, bits greyed + disabled until the toggle is on
+        // SYNC-1 (upstream 7ffa8d4 #4659): classic renamed the family to
+        // 'KV cache compression' and added a Format select; affine4/affine8
+        // pin bits to 4/8 (the server 400s on any other pair). data-gate
+        // only speaks bool, so the scheme->bits pin is wired by hand below.
+        const tqSchemeRow = seBind('select', 'turboquant_kv_scheme', {
+            label: 'Format',
+            options: ['turboquant', 'affine4', 'affine8'].map(v => ({
+                value: v, label: v === 'turboquant' ? 'TurboQuant'
+                    : (v === 'affine4' ? 'Affine4 (4-bit)' : 'Affine8 (8-bit)') })) });
+        const tqBitsRow = seBind('select', 'turboquant_kv_bits',
+            { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
+              options: [2, 2.5, 3, 3.5, 4, 6, 8].map(v => ({ value: String(v), label: v + '-bit' })) });
+        const tqFam = seFam(g, 'turboquant_kv_enabled',
+            seBind('bool', 'turboquant_kv_enabled', { label: 'KV cache compression',
+                hint: 'Reduce KV cache memory using the selected format. TurboQuant supports 2 to 8 bits; Affine4 and Affine8 use 4-bit and 8-bit affine quantization.' }),
+            [tqSchemeRow, tqBitsRow]);
+        const tqBitsCtl = tqBitsRow.querySelector('select');
+        const kvSchemeSync = () => {
+            const s = seValues.turboquant_kv_scheme || 'turboquant';
+            const pin = s === 'affine4' ? 4 : s === 'affine8' ? 8 : null;
+            if (pin !== null && Number(seValues.turboquant_kv_bits) !== pin) {
+                tqBitsCtl.value = String(pin);
+                tqBitsCtl.dispatchEvent(new Event('change'));   // normal write path (dirty + save state)
+            }
+            // re-assert AFTER the dispatch: the bits change runs
+            // seRefreshGates, which re-enables every active-gate control
+            tqBitsCtl.disabled = pin !== null || seValues.turboquant_kv_enabled !== true;
+        };
+        // bubble listener on the band: covers scheme changes, master
+        // re-enables and bits edits alike (seRefreshGates from unrelated
+        // fields re-enables bits; the next edit or save re-pins it)
+        tqFam.addEventListener('change', kvSchemeSync);
+        kvSchemeSync();   // an already-affine stored state renders pinned
     }
 
     /* ---- advanced (classic ms-advanced): security, reasoning, limits,

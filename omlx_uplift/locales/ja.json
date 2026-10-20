@@ -752,7 +752,7 @@
  "uplift.se.top_p": "Top-P",
  "uplift.se.trust_remote_code": "リモートコードを信頼",
  "uplift.se.ttl_seconds": "TTL（秒）",
- "uplift.se.turboquant_kv_enabled": "TurboQuant KVを有効化",
+ "uplift.se.turboquant_kv_enabled": "KV キャッシュ圧縮",
  "uplift.se.vlm_mtp_draft_model": "VLM MTPドラーフトモデル",
  "uplift.se.vlm_mtp_enabled": "VLM MTPを有効化",
  "uplift.smooth.light": "弱",
@@ -1181,5 +1181,12 @@
  "uplift.audio.processing": "音声処理中",
  "uplift.audio.embedding": "埋め込み中",
  "uplift.audio.reranking": "再ランク付け中",
- "uplift.audio.deciding": "判断中"
+ "uplift.audio.deciding": "判断中",
+ "uplift.gs.cc.desktop": "Claude Desktop",
+ "uplift.gs.cc.desktop_hint": "claude-opus / claude-sonnet / claude-haiku を上記ティアモデルのエイリアスとして公開する",
+ "uplift.se.turboquant_kv_enabled.hint": "選択した形式で KV キャッシュのメモリ使用量を削減します。TurboQuant は 2～8 ビットに対応し、Affine4 と Affine8 はそれぞれ 4 ビットと 8 ビットのアフィン量子化を使用します。",
+ "uplift.se.turboquant_kv_scheme": "形式",
+ "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
+ "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4（4 ビット）",
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8（8 ビット）"
 }
