@@ -1187,6 +1187,11 @@ function renderEditorFields(container) {
         const kvSchemeSync = () => {
             const s = seValues.turboquant_kv_scheme || 'turboquant';
             const pin = s === 'affine4' ? 4 : s === 'affine8' ? 8 : null;
+            // UX-Z (user 2026-10-20): an affine format IS its bit depth —
+            // classic hides the ladder under affine (x-show scheme ===
+            // 'turboquant'); a greyed but visible Bits row read as a second
+            // setting ('Affine8 turns into two settings').
+            tqBitsRow.hidden = pin !== null;
             if (pin !== null && Number(seValues.turboquant_kv_bits) !== pin) {
                 tqBitsCtl.value = String(pin);
                 tqBitsCtl.dispatchEvent(new Event('change'));   // normal write path (dirty + save state)

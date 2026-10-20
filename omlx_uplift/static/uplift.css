@@ -659,6 +659,18 @@ main.grid-stack .grid-stack-placeholder .placeholder-preview {
 @supports not (grid-template-columns: subgrid) {
     .se-fam { display: flex; flex-wrap: wrap; }
     .se-fam > .se-row { flex: 1 1 42%; min-width: 240px; } }
+/* UX-Z (user 2026-10-20): alternate a background shade over the model
+   editor's setting tiles so a label + its description + its control read
+   as ONE unit in the two-column pair flow (the same house language the
+   GS page uses on .urow.settings:nth-of-type(even)). The stripe is PER
+   TILE, not per visual line: full-span bands break any row arithmetic
+   CSS could express, and tile-alternating keeps every adjacent pair
+   distinct at both column counts. `>` scopes it out of the bands — a
+   .se-fam already carries its own --row2 tint + accent trunk. */
+.modal.editor .pair > .se-row:nth-of-type(odd) {
+    background: color-mix(in srgb, var(--ink) 5%, transparent);
+    border-radius: var(--radius);
+    margin-left: -8px; margin-right: -8px; padding: 6px 8px; }
 /* UX-5: gated grammar well — greyed + disabled while the master is off.
    Spans the sub-grid: the textarea + presets are the well's full width,
    not a shrunken control column. */
@@ -806,6 +818,10 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-row { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(120px,220px);
     align-items: center; gap: 8px;
     font: 300 12px/1.4 var(--mono); margin-bottom: 6px; }
+/* UX-Z (user 2026-10-20): .se-row's own display:grid would beat the UA
+   [hidden] rule — a folded row (bits under an affine KV format) must be
+   explicitly killed, or it keeps its slot and renders anyway. */
+.se-row[hidden] { display: none; }
 /* the pair grid takes EXACTLY two columns whenever a cell can hold a
    control (220px) plus a short label, one column below that. UX-5c: fixed
    tracks, not auto-fit — auto-fit produced 3-column rows at mid widths
