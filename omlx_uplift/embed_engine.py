@@ -385,11 +385,11 @@ async def _run_one(run: EmbedRun, task: str, i: int, n: int, pool: Any) -> None:
         def _reader() -> None:
             try:
                 for raw in proc.stdout:
-                    lines.put_nowait(raw)
+                    loop.call_soon_threadsafe(lines.put_nowait, raw)
             except Exception:
                 pass
             finally:
-                lines.put_nowait(None)
+                loop.call_soon_threadsafe(lines.put_nowait, None)
 
         reader = loop.run_in_executor(None, _reader)
         while True:

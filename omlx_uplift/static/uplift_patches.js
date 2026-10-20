@@ -939,7 +939,7 @@ function ptManage(p) {
                 bad.length ? 7000 : 4000);
             await pollPatches();
         } catch (e) { PG.toast(String(e), 5000); }
-        finally { testBtn.textContent = old; testBtn.disabled = false; }
+        finally { testBtn.textContent = old; testBtn.disabled = false; S.PT_BUSY = false; }
     };
     const editBtn = document.createElement('button');
     editBtn.type = 'button';

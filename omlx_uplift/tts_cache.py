@@ -281,7 +281,7 @@ def _evict(store: dict, cap: int) -> int:
                    key=lambda kv: (kv[0] in refs, kv[1].get("at") or 0))
     freed = 0
     for key, _entry in order:
-        if total + freed <= cap:
+        if total - freed <= cap:
             break
         freed += _drop_file(store, key)
     _prune_owner_refs(store)

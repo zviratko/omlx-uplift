@@ -547,8 +547,7 @@ async function dvStartBuild(restartAfter) {
             DV_CLICK_BUSY = false;
             clearInterval(DV_POLL);
             renderDev();
-            PG.toast(DV_DATA && DV_DATA.build && DV_DATA.build.result &&
-                     DV_DATA.build.result.ok === false
+            PG.toast(DV_DATA && DV_DATA.build && DV_DATA.build.result
                 ? ptMsg('uplift.patches.dev_build_failed_btn',
                         'omlx-dev build FAILED — see build log')
                 : ptMsg('uplift.patches.dev_build_done_btn',

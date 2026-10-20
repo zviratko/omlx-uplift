@@ -348,3 +348,26 @@ test('a vanilla-only page (no devpanel file at all) removes cleanly', async () =
     assert.equal(calls.remove, 1);
     assert.equal(calls.failedToast, '');
 });
+
+test('MANAGE Test dry-run releases PT_BUSY in finally so later actions still fire', async () => {
+    const sb = loadPatchesModule();
+    await runPoll(sb, payload([basePatch()]));
+    let tested = 0;
+    sb.fetch = async (url) => {
+        const u = String(url);
+        let body = { ok: true, files: [] };
+        if (u.endsWith('/uplift/api/patches/test')) tested++;
+        else if (u.endsWith('/uplift/api/patches')) body = payload([basePatch()]);
+        return { ok: true, status: 200,
+                 json: async () => JSON.parse(JSON.stringify(body)),
+                 text: async () => '', clone() { return this; } };
+    };
+    const card = sb.document.getElementById('pt-list').children
+        .find(c => (c.className || '').includes('pt-entry'));
+    await btnIn(card, 'MANAGE').onclick();
+    const overlay = sb.document.body.children
+        .filter(c => String(c.className || '').includes('modal-overlay')).slice(-1)[0];
+    await btnIn(overlay, 'Test dry-run').onclick();
+    assert.equal(tested, 1);
+    assert.equal(sb.Uplift.state.PT_BUSY, false, 'PT_BUSY cleared after dry-run completes');
+});

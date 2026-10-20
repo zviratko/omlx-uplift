@@ -812,11 +812,11 @@ async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
     def _reader() -> None:
         try:
             for line in proc.stdout:
-                lines.put_nowait(line)
+                loop.call_soon_threadsafe(lines.put_nowait, line)
         except Exception:
             pass
         finally:
-            lines.put_nowait(None)
+            loop.call_soon_threadsafe(lines.put_nowait, None)
 
     reader = loop.run_in_executor(None, _reader)
     # U83 (user report: 'stuck on Preparing mmlu (Generating dev split

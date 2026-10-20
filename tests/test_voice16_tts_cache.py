@@ -129,9 +129,17 @@ def test_lru_eviction_frees_the_oldest_when_the_cache_grows(store, monkeypatch):
         keys.append(k)
         TC.put(k, b"z" * 10, "audio/wav",
                {"conv": "c1", "msg": "m%d" % i, "rev": "r1"})
+        if i == 2:
+            # 3rd chunk (30 B > 25 B cap) must evict only the oldest (chunk a),
+            # keeping chunk b and the just-written chunk c (20 B total).
+            assert TC.totals()["bytes"] == 20
+            assert TC.get(keys[0]) is None
+            assert TC.get(keys[1]) is not None
+            assert TC.get(keys[2]) is not None
     total = TC.totals()["bytes"]
     assert total <= 25, total
     assert TC.get(keys[-1]) is not None, "the newest chunk stays"
+    assert TC.get(keys[-2]) is not None, "second-newest chunk stays too"
     assert TC.get(keys[0]) is None, "the oldest gave way"
 
 
