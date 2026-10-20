@@ -104,7 +104,7 @@ class OmlxDev < Omlx
     sha = "" unless sha.match?(/\A[0-9a-f]{40}\z/)
     opts = { using: :git, branch: br }
     opts[:commit] = sha unless sha.empty?
-    ["file://#{src_path(cfg)}", opts]
+    ["file://#{OmlxDevConstants.src_path(cfg)}", opts]
   end
 
   def self.dev_src
