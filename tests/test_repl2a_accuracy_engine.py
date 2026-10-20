@@ -263,6 +263,41 @@ async def test_results_and_cancel_passthrough(fake_acc):
     assert await ae.cancel() == {"status": "cancelled"}
 
 
+# ---- item-4: queue_status event_count (missed-event detection seam) --------
+
+def test_queue_status_event_count_while_running(fake_acc):
+    """While a run is live, the classic run object's event count rides the
+    status (UI compares it with what it received; mismatch -> restart SSE)."""
+    ae = _mod()
+    fake_acc.running = True
+    fake_acc.current_model = "m1"
+    fake_acc.current_bench_id = "acc-live9"
+    fake_acc.runs["acc-live9"] = types.SimpleNamespace(
+        bench_id="acc-live9",
+        request=FakeAccRequest(model_id="m1", benchmarks={"mmlu": 5}),
+        events=[{"type": "progress"}] * 7,
+        terminal=False, status="running")
+    st = ae.queue_status()
+    assert st["event_count"] == 7
+    assert st["running_entry"]["model_id"] == "m1"   # decoration unchanged
+    fake_acc.runs["acc-live9"].events.append({"type": "result"})
+    assert ae.queue_status()["event_count"] == 8     # live read, not a copy
+
+
+def test_queue_status_event_count_absent_when_not_running(fake_acc):
+    ae = _mod()
+    st = ae.queue_status()                            # idle fake
+    assert st["running"] is False
+    assert "event_count" not in st
+    # running flag but the run object is gone: behaves exactly as before
+    # (no key, no raise) — the decoration try swallows it
+    fake_acc.running = True
+    fake_acc.current_bench_id = "acc-gone"
+    st2 = ae.queue_status()
+    assert "event_count" not in st2
+    assert "running_entry" not in st2
+
+
 def test_task_list_from_server(fake_acc):
     ae = _mod()
     assert ae.valid_benchmarks() == sorted(FakeAccRequest.VALID)

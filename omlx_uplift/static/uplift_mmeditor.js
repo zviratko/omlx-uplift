@@ -156,8 +156,11 @@ function seEffHint(key) {
     const val = String(d.value);
     const tag = d.kind === 'model_config'
         ? C.tf('uplift.se.eff.model_config', 'model config')
-        : d.kind === 'policy_clamp'   // CW-1: value bound by the global policy
-        ? C.tf('uplift.se.eff.policy_clamp', 'server cap')
+        : d.kind === 'policy_clamp'   // CW-1: value bound by the global policy.
+        // NOT a cap here: a per-model value (THIS very field) wins over the
+        // policy upstream (tier 1 in get_max_context_window), so what the
+        // policy decides is the DEFAULT applied when the field stays empty.
+        ? C.tf('uplift.se.eff.policy_clamp', 'policy default')
         : C.tf('uplift.se.eff.global_default', 'global default');
     return val + ' \u00b7 ' + tag;
 }

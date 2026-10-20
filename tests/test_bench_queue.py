@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import types
 
 import pytest
 
@@ -483,3 +484,81 @@ def test_ane_tune_start_still_conflicts(world, pool):
     finally:
         bench_mod.context_engine.ane_start = orig
     assert bq._entries == []
+
+
+# ---- throughput cache-off flags through the queue ---------------------------
+
+def test_throughput_start_route_queued_keeps_cache_flags(world, pool):
+    """The queued path stores the flags in the body exactly like upload:
+    the click's cache-off choice survives until the pump dispatches."""
+    world.busy["accuracy"] = True
+    with _client() as client:
+        r = client.post("/uplift/api/bench/start",
+                        json={"model_id": "m", "prompt_lengths": [1024],
+                              "upload": True, "no_hot_cache": True})
+        assert r.status_code == 200, r.text
+        assert r.json()["queued"] is True
+    entry = bq._entries[0]
+    assert entry["kind"] == "throughput"
+    assert entry["body"] == {"model_id": "m", "prompt_lengths": [1024],
+                             "upload": True, "no_hot_cache": True,
+                             "no_ssd_cache": False}
+
+
+async def test_throughput_dispatch_pops_cache_flags(monkeypatch):
+    """The REAL _start_throughput re-pops upload AND both flags at its own
+    boundary and hands them back as kwargs — the engine body carries only
+    classic fields (round-trip of the stored flags above)."""
+    calls = []
+
+    async def _start(body, pool, *, upload=False, no_hot_cache=False,
+                     no_ssd_cache=False):
+        calls.append((dict(body), upload, no_hot_cache, no_ssd_cache))
+        return {"bench_id": "b1", "status": "started"}
+
+    fake_m = types.SimpleNamespace(start=_start)
+    monkeypatch.setattr(bq, "_mod", lambda name: fake_m)
+    monkeypatch.setattr(bq, "POOL", lambda: object())
+    entry = {"kind": "throughput",
+             "body": {"model_id": "m", "prompt_lengths": [1024],
+                      "upload": True, "no_hot_cache": True,
+                      "no_ssd_cache": False}}
+    out = await bq._start_throughput(entry)
+    assert out["status"] == "started"
+    body, upload, hot, ssd = calls[0]
+    assert upload is True and hot is True and ssd is False
+    assert "upload" not in body and "no_hot_cache" not in body \
+        and "no_ssd_cache" not in body
+    assert body == {"model_id": "m", "prompt_lengths": [1024]}
+
+
+async def test_throughput_validator_is_blind_to_cache_flags(monkeypatch):
+    """_validate_throughput's `clean` filter pre-validates the queued body
+    against the CLASSIC pydantic model; with a strict (extra-forbid style)
+    stand-in, uplift-only keys must be stripped — flags never 400 a valid
+    queued body and never reach classic's schema."""
+    seen = []
+
+    class StrictReq:
+        CLASSIC = {"model_id", "prompt_lengths", "generation_length",
+                   "batch_sizes", "context_profile", "warmup_mode",
+                   "align_prompt_to_ane", "force_lm_engine", "external"}
+
+        def __init__(self, **kw):
+            seen.append(sorted(kw))
+            if not {"model_id", "prompt_lengths"} <= set(kw):
+                raise ValueError("field required")
+            extra = set(kw) - self.CLASSIC
+            if extra:
+                raise ValueError(f"extra fields not permitted: {extra}")
+
+    fake_m = types.SimpleNamespace(request_model=lambda: StrictReq)
+    monkeypatch.setattr(bq, "_mod", lambda name: fake_m)
+    # real function, not the world fixture's permissive table entry
+    bq._validate_throughput({"model_id": "m", "prompt_lengths": [1024],
+                             "upload": True, "no_hot_cache": True,
+                             "no_ssd_cache": True})
+    assert seen and "no_hot_cache" not in seen[0] and "upload" not in seen[0]
+    # and a genuinely invalid classic body still fails
+    with pytest.raises(bq.BadInput):
+        bq._validate_throughput({"model_id": "m", "no_hot_cache": True})

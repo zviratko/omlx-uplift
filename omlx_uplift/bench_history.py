@@ -118,6 +118,10 @@ def capture_run(run: Any) -> None:
             eid = str(run.bench_id)
             meta = {"context_profile": run.request.context_profile.value,
                     "external": run.request.external is not None}
+            if getattr(run, "_uplift_cache_off", None):
+                # cache-off flags active for this run (statics render
+                # meta.cache_off; absent when nothing was toggled)
+                meta["cache_off"] = list(run._uplift_cache_off)
             rows = list(getattr(run, "results", None) or [])
         entry = {"id": eid, "surface": surface, "kind": "run",
                  "model_id": run.request.model_id,

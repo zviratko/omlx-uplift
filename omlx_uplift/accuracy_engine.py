@@ -358,6 +358,12 @@ def queue_status() -> dict:
                     "engine": getattr(req, "_uplift_engine", "classic"),
                     "external": req.external is not None,
                 }
+            # item-4: classic's run object appends EVERY SSE event to
+            # run.events (append-only, read-only here). The UI compares
+            # this count against what it actually received to detect a
+            # missed-event stream and restart the SSE. Additive key; any
+            # exception above/below leaves it absent, as before.
+            st["event_count"] = len(run.events)
         except Exception:
             pass
     # drain management: once the queue idles, restore classic behavior

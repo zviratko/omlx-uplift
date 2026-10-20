@@ -39,7 +39,21 @@ function makeHarness() {
             replaceChildren(...kids) { this.children = kids; },
             append(...kids) { this.children.push(...kids); },
             appendChild(k) { this.children.push(k); return k; },
-            addEventListener() {}, removeEventListener() {},
+            // CACHE-OFF/TP-TABLES: registry-backed listeners, so a test can
+            // actually fire the change events the panel wires (a no-op stub
+            // proves nothing about the handler)
+            _lis: {},
+            addEventListener(ty, fn) { (this._lis[ty] = this._lis[ty] || []).push(fn); },
+            removeEventListener(ty, fn) {
+                const a = this._lis[ty] || [];
+                const i = a.indexOf(fn);
+                if (i >= 0) a.splice(i, 1);
+            },
+            fire(ty, ev) {
+                (this._lis[ty] || []).slice().forEach(fn => fn(ev || {
+                    target: this, stopPropagation() {}, preventDefault() {},
+                }));
+            },
             querySelector() { return makeEl('div'); },
             querySelectorAll() { return []; },
             remove() {}, focus() {}, blur() {},
@@ -423,4 +437,284 @@ test('second mount is a no-op (no double paint)', () => {
     const first = byId['bench-native'].children.length;
     win.UpliftNativeBench.mount();
     assert.equal(byId['bench-native'].children.length, first);
+});
+
+/* ==========================================================================
+   TP-CLASSIC + CACHE-OFF (user items 2, 3, 5) through the real mount path:
+   the throughput panel paints classic's TWO tables, the history card carries
+   the cache-off note, and the Advanced section's two new checkboxes are
+   unchecked by default and reach the start body only when checked.
+   The stub is the mount-test one plus the pieces these pins need: a REAL
+   classic catalog (values copied verbatim from omlx_web/i18n/en.json), an
+   EventSource recorder, controllable timers, and a fetchJson that answers
+   /bench/history. Inputs also expose .checked/.value the way the panel reads
+   them (fill_input is not involved — this is the DOM, not a browser). */
+const CLS = {
+    'bench.results.single.section_label': 'Single Request Results',
+    'bench.results.single.test': 'Test',
+    'bench.results.single.ttft': 'TTFT (ms)',
+    'bench.results.single.tpot': 'TPOT (ms/tok)',
+    'bench.results.single.pp_tps': 'PP TPS',
+    'bench.results.single.tg_tps': 'TG TPS',
+    'bench.results.single.e2e_latency': 'E2E Latency',
+    'bench.results.single.throughput': 'Throughput',
+    'bench.results.single.peak_mem': 'Peak MLX',
+    'bench.results.batch.section_label': 'Continuous Batching',
+    'bench.results.batch.batch_size': 'Batch Size',
+    'bench.results.batch.tg_tps': 'TG TPS',
+    'bench.results.batch.speedup': 'Speedup',
+    'bench.results.batch.pp_tps': 'PP TPS',
+    'bench.results.batch.pp_tps_req': 'PP TPS/req',
+    'bench.results.batch.avg_ttft': 'Avg TTFT (ms)',
+    'bench.results.batch.e2e_latency': 'E2E Latency',
+    'bench.results.batch.baseline': '1x (baseline)',
+    'bench.results.text_export.not_available': 'N/A',
+    'bench.metrics.ttft.tooltip': 'Time to First Token.',
+    'bench.metrics.peak_mem.tooltip': 'Peak active MLX allocations during this test.',
+    'bench.metrics.batch_size.tooltip': 'Batch Size — requests at once.',
+};
+
+function mountLoad(history) {
+    const { byId, document, makeEl } = makeHarness();
+    const es = [];
+    const win = {
+        UpliftCore: { t: (k) => (CLS[k] == null ? k : CLS[k]) },
+        UpliftDom: {
+            fetchJson: async (u) => {
+                u = String(u);
+                if (u.endsWith('/bench/history?surface=throughput'))
+                    return { entries: history || [] };
+                if (u.endsWith('/models')) return { models: [{ id: 'M1', model_type: 'llm' }] };
+                if (u.endsWith('/bench/active')) return { running: false };
+                throw new Error('no net: ' + u);
+            },
+            postJson: async () => { throw new Error('no net'); },
+            toast: () => {},
+        },
+        Uplift: { state: { API: '' } },
+        document,
+        requestAnimationFrame: (fn) => { fn(); return 1; },   // wire the form now
+        EventSource: function (url) { const s = this; this.url = url;
+            this.close = () => { s.closed = true; }; es.push(this); },
+        setInterval: () => 1, clearInterval: () => {},
+    };
+    win.window = win; win.self = win;
+    win.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+    const ctx = vm.createContext(win);
+    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8'))
+        .runInContext(ctx);
+    return { win, byId, es, B: win.UpliftNativeBench };
+}
+
+const ROWS = [
+    { test_type: 'single', pp: 1024, requested_pp: 1024, tg: 128,
+      ttft_ms: 100, tpot_ms: 10, processing_tps: 8000, gen_tps: 100,
+      total_throughput: 700, e2e_latency_s: 1.5,
+      peak_memory_bytes: 2147483648, completion_tokens: 128 },
+    { test_type: 'batch', batch_size: 2, tg: 128, tg_tps: 170, pp_tps: 12000,
+      avg_ttft_ms: 200, e2e_latency_s: 2, total_gen_tokens: 256,
+      requested_pp: 1024, prompt_tokens_min: 1024, prompt_tokens_max: 1024 },
+];
+const tables = (node, out) => {
+    out = out || [];
+    if (node && node.tagName === 'table') out.push(node);
+    for (const k of (node && node.children) || []) tables(k, out);
+    return out;
+};
+const heads = (t) => t.children[0].children.map(th => th.textContent);
+const cells = (t, i) => t.children[i].children.map(td => td.textContent);
+
+test('CACHE-OFF: the Advanced section carries both boxes, unchecked', () => {
+    const { win, byId } = mountLoad();
+    win.UpliftNativeBench.mount();
+    const hot = byId['bench-tp-no-hot'], ssd = byId['bench-tp-no-ssd'];
+    assert.equal(hot.type, 'checkbox', 'hot cache box is a real checkbox');
+    assert.equal(ssd.type, 'checkbox');
+    assert.equal(hot.checked, false, 'off by default — the run must not touch my settings');
+    assert.equal(ssd.checked, false);
+    // reached THROUGH THE PARENT: a control built but never appended would
+    // pass a byId lookup and show nothing in the browser
+    const panel = byId['bench-subpanel'];
+    const adv = [];
+    (function walk(n) {
+        if (n && n._classes && n._classes.has('bench-adv-body')) adv.push(n);
+        for (const k of (n && n.children) || []) walk(k);
+    })(panel);
+    assert.equal(adv.length, 1, 'one Advanced body');
+    const rows = (adv[0].children || []).filter(b => b._classes
+        && b._classes.has('bench-check'));
+    const labels = rows.map(r => allText(r));
+    assert.ok(labels.some(l => l.includes('Hot cache off for this run')),
+        'hot label rendered inside Advanced: ' + JSON.stringify(labels));
+    assert.ok(labels.some(l => l.includes('SSD cache off for this run')),
+        'ssd label rendered inside Advanced');
+    // the hints are title attributes on the row, and re-resolvable
+    const row = rows.find(b => allText(b).includes('Hot cache off'));
+    assert.ok(row.title.startsWith('Sets the in-memory Hot Cache limit to 0'),
+        row.title);
+    assert.equal(row.dataset.i18nTitle, 'uplift.bench.tp.no_hot_cache_hint');
+    assert.equal(row.dataset.enTitle,
+        'Sets the in-memory Hot Cache limit to 0 while this benchmark runs, '
+        + 'then restores your setting. Loaded models are reloaded at run '
+        + 'start and finish.');
+    assert.ok(row.children.some(c => c.dataset
+        && c.dataset.i18n === 'uplift.bench.tp.no_hot_cache'),
+        'the label text node carries its key (applyI18n cannot wipe the input)');
+    const ssdRow = rows.find(b => allText(b).includes('SSD cache off'));
+    assert.ok(ssdRow.title.startsWith('Enables Hot Cache Only'), ssdRow.title);
+    assert.equal(ssdRow.dataset.i18nTitle, 'uplift.bench.tp.no_ssd_cache_hint');
+});
+
+test('CACHE-OFF: the start body carries the flags only when checked', () => {
+    const { win, byId } = mountLoad();
+    win.UpliftNativeBench.mount();
+    const TP = win.UpliftNativeBench.tp;
+    byId['bench-tp-model'].value = 'M1';
+    assert.deepEqual(
+        Object.keys(TP.collect()).filter(k => k.indexOf('no_') === 0), [],
+        'neither key exists while both boxes are off (absent = leave my setting)');
+    byId['bench-tp-no-hot'].checked = true;
+    let body = TP.collect();
+    assert.equal(body.no_hot_cache, true);
+    assert.equal('no_ssd_cache' in body, false, 'only the checked one rides');
+    byId['bench-tp-no-ssd'].checked = true;
+    body = TP.collect();
+    assert.equal(body.no_hot_cache, true);
+    assert.equal(body.no_ssd_cache, true);
+});
+
+test('CACHE-OFF: an external endpoint kills both knobs and says why', () => {
+    const { win, byId } = mountLoad();
+    win.UpliftNativeBench.mount();
+    const panel = byId['bench-subpanel'];
+    const hot = byId['bench-tp-no-hot'], ssd = byId['bench-tp-no-ssd'];
+    // the ROW a checkbox lives in, found by identity (the stub has no
+    // parentNode bookkeeping, and byId alone cannot prove the append)
+    const rows = [];
+    (function walk(n) {
+        if (n && n._classes && n._classes.has('bench-check')) rows.push(n);
+        for (const k of (n && n.children) || []) walk(k);
+    })(panel);
+    const rowOf = (input) => rows.find(r => (r.children || []).indexOf(input) >= 0);
+    const hotRow = rowOf(hot), ssdRow = rowOf(ssd);
+    assert.ok(hotRow && ssdRow, 'both inputs are inside their labels');
+    assert.equal(hot.disabled, false, 'local: usable');
+    hot.checked = true;
+    const ext = byId['bench-tp-ext'];
+    ext.checked = true;
+    ext.fire('change', { target: ext });      // the panel's own wiring
+    assert.equal(hot.disabled, true, 'an external endpoint has no local cache');
+    assert.equal(ssd.disabled, true);
+    assert.equal(hot.checked, false, 'a dead knob is cleared, never sent');
+    assert.equal(hotRow.dataset.i18nTitle, 'uplift.bench.tp.cache_off_local');
+    assert.equal(hotRow.dataset.enTitle, 'Applies to local models only.');
+    assert.equal(hotRow.title, 'Applies to local models only.',
+        'the title says WHY the box is dead');
+    assert.equal(ssdRow.title, 'Applies to local models only.');
+    ext.checked = false;
+    ext.fire('change', { target: ext });
+    assert.equal(hot.disabled, false, 'local again: usable');
+    assert.equal(hotRow.dataset.i18nTitle, 'uplift.bench.tp.no_hot_cache_hint',
+        'the hint comes back when the mode does');
+    assert.ok(hotRow.title.startsWith('Sets the in-memory Hot Cache limit'));
+});
+
+test('TP-TABLES: the live panel paints classic two tables', () => {
+    const { win, byId, B } = mountLoad();
+    win.UpliftNativeBench.mount();
+    const TP = B.tp;
+    TP.state.results = ROWS;
+    TP.state.ctx = { model: 'M1', profile: 'code_python', forceLm: false,
+                     external: null };
+    TP.renderTable();
+    const tbl = tables(byId['bench-tp-results']);
+    assert.equal(tbl.length, 2, 'single + batch, like classic');
+    assert.deepEqual(heads(tbl[0]),
+        ['Test', 'TTFT (ms)', 'TPOT (ms/tok)', 'PP TPS', 'TG TPS',
+         'E2E Latency', 'Throughput', 'Peak MLX', 'out']);
+    assert.deepEqual(heads(tbl[1]),
+        ['Batch Size', 'TG TPS', 'Speedup', 'PP TPS', 'PP TPS/req',
+         'Avg TTFT (ms)', 'E2E Latency', 'out']);
+    assert.deepEqual(cells(tbl[0], 1),
+        ['pp1024/tg128', '100.0', '10.00', '8000.0 tok/s', '100.0 tok/s',
+         '1.500s', '700.0 tok/s', '2.00 GB', '128']);
+    // the batch row no longer misreads the single-only keys
+    assert.deepEqual(cells(tbl[1], 2),
+        ['2x', '170.0 tok/s', '1.70x', '12000.0 tok/s', '6000.0 tok/s',
+         '200.0', '2.000s', '128']);
+    assert.equal(cells(tbl[1], 1)[0], '1x (baseline)', 'classic baseline first');
+    assert.equal(tbl[0].children[0].children[7].title,
+        CLS['bench.metrics.peak_mem.tooltip'], 'th tooltip rides through');
+    const sections = allText(byId['bench-tp-results']);
+    assert.ok(sections.includes('Single Request Results'), sections);
+    assert.ok(sections.includes('Continuous Batching'), sections);
+    // Copy text is still classic's whole-set format
+    assert.ok(TP.state.results.length === 2);
+});
+
+test('TP-TABLES: history renders the same tables plus the cache-off note', async () => {
+    const hist = [
+        { id: 'h1', ts: 1760000000, model_id: 'M1', rows: ROWS,
+          meta: { cache_off: ['hot', 'ssd'] } },
+        { id: 'h2', ts: 1760000001, model_id: 'M1', rows: ROWS, meta: {} },
+    ];
+    const { win, byId } = mountLoad(hist);
+    win.UpliftNativeBench.mount();
+    await new Promise(r => setTimeout(r, 5));
+    const host = byId['bench-tp-history'];
+    const items = [];
+    (function walk(n) {
+        if (n && n._classes && n._classes.has('bench-result')) items.push(n);
+        for (const k of (n && n.children) || []) walk(k);
+    })(host);
+    assert.equal(items.length, 2, 'both history runs rendered');
+    // loadHistory lists NEWEST FIRST: items[0] = h2 (no cache_off),
+    // items[1] = h1 (cache_off: ['hot','ssd'])
+    const findCls = (n, cls, out) => {
+        out = out || [];
+        if (n && n._classes && n._classes.has(cls)) out.push(n);
+        for (const k of (n && n.children) || []) findCls(k, cls, out);
+        return out;
+    };
+    assert.equal(findCls(items[1], 'bench-tp-note').length, 1,
+        'the cache_off run says so');
+    const note = findCls(items[1], 'bench-tp-note')[0];
+    assert.equal(note.textContent, 'Cache disabled during this run');
+    assert.equal(note.dataset.i18n, 'uplift.bench.tp.cache_off');
+    assert.equal(note.dataset.en, 'Cache disabled during this run');
+    assert.equal(findCls(items[0], 'bench-tp-note').length, 0,
+        'a normal run says nothing');
+    assert.equal(tables(items[1]).length, 2, 'history = the same classic tables');
+    assert.deepEqual(heads(tables(items[1])[0]),
+        ['Test', 'TTFT (ms)', 'TPOT (ms/tok)', 'PP TPS', 'TG TPS',
+         'E2E Latency', 'Throughput', 'Peak MLX', 'out'],
+        'live and history cannot drift: one painter');
+});
+
+test('TP-TABLES: the results head still offers Copy + Download for both tables', () => {
+    const { win, byId, B } = mountLoad();
+    win.UpliftNativeBench.mount();
+    const TP = B.tp;
+    TP.state.results = ROWS;
+    TP.state.ctx = { model: 'M1', profile: 'code_python', forceLm: false,
+                     external: null };
+    TP.renderTable();
+    const headsEl = [];
+    (function walk(n) {
+        if (n && n._classes && n._classes.has('bench-results-head')) headsEl.push(n);
+        for (const k of (n && n.children) || []) walk(k);
+    })(byId['bench-tp-results']);
+    assert.equal(headsEl.length, 1, 'one Copy/Download head per result set');
+    const btns = [];
+    (function walk(n) {
+        if (n && n.tagName === 'button') btns.push(n.textContent);
+        for (const k of (n && n.children) || []) walk(k);
+    })(headsEl[0]);
+    assert.ok(btns.includes('Copy'), JSON.stringify(btns));
+    assert.ok(btns.includes('Download'), JSON.stringify(btns));
+    // the CSV column list covers BOTH tables (classic header names)
+    const cols = B._benchText.tpDlCols(ROWS);
+    assert.equal(cols.length, 16, '8 single + 7 batch + shared out');
+    assert.ok(cols.some(c => c.head === 'Peak MLX'), 'memory column exported');
+    assert.ok(cols.some(c => c.head === 'PP TPS/req'), 'batch column exported');
 });

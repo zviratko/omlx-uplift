@@ -337,7 +337,13 @@ async def _start_throughput(entry: dict) -> Any:
     m = _mod("bench_engine")
     body = dict(entry["body"] or {})
     upload = bool(body.pop("upload", False))
-    return await m.start(body, _live_pool(), upload=upload)
+    # uplift-only cache-off flags: re-popped at the same boundary as
+    # upload and handed back as kwargs — classic's request model never
+    # sees them (identical rule to the start route).
+    no_hot_cache = bool(body.pop("no_hot_cache", False))
+    no_ssd_cache = bool(body.pop("no_ssd_cache", False))
+    return await m.start(body, _live_pool(), upload=upload,
+                         no_hot_cache=no_hot_cache, no_ssd_cache=no_ssd_cache)
 
 
 async def _start_context(entry: dict) -> Any:
@@ -438,7 +444,13 @@ def _validate_throughput(body: dict) -> None:
         Req = m.request_model()
     except Exception:
         return                        # no omlx: the engine re-checks later
-    clean = {k: v for k, v in (body or {}).items() if k != "upload"}
+    # NOT a fingerprint: this filter feeds the classic pydantic model for
+    # PRE-DISPATCH body validation, and it must stay blind to exactly the
+    # uplift-only keys the start route pops (upload, and the cache-off
+    # flags that ride the stored body). Nothing in classic's schema cares
+    # about them; a queued run's flags must never 400 its own submit.
+    clean = {k: v for k, v in (body or {}).items()
+             if k not in ("upload", "no_hot_cache", "no_ssd_cache")}
     try:
         Req(**clean)
     except Exception as e:

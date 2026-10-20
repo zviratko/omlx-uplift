@@ -27,6 +27,7 @@ import pytest
 
 class FakeRequest:
     def __init__(self, **kw):
+        self.kw = dict(kw)  # the exact kwargs the CLASSIC model received
         self.model_id = kw.get("model_id", "m1")
         self.prompt_lengths = sorted(kw.get("prompt_lengths", [1024]))
         self.batch_sizes = sorted(kw.get("batch_sizes", []))
@@ -256,6 +257,388 @@ async def test_sse_replay_after_disconnect(fake_bench):
 def out_task(out, fake_bench):
     run = fake_bench.get_run(out["bench_id"])
     return run.task
+
+
+# ---------------------------------------------------------------------------
+# cache-off flags: fake seam (omlx.admin.routes) + fake live server state
+# ---------------------------------------------------------------------------
+
+class SeamRecorder:
+    """Fake omlx.admin.routes._apply_cache_settings_runtime. Same keyword
+    surface as the vanilla function; records every call, can be pinned to
+    fail ((ok=False, msg) or an exception) or to hang from a call index on
+    (cancel-survival proof). context() is a test-supplied probe of engine
+    state AT CALL TIME (proves apply-after-claim / before-task ordering)."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+        self.result = (True, "ok")     # Exception instance => raise instead
+        self.hang = None               # asyncio.Event the seam waits on...
+        self.hang_from = None          # ... once this many calls happened
+        self.context = lambda: None
+
+    async def __call__(self, *, enabled, ssd_cache_dir, ssd_cache_max_size,
+                       global_settings, hot_cache_max_size):
+        self.calls.append({
+            "enabled": enabled, "ssd_cache_dir": ssd_cache_dir,
+            "ssd_cache_max_size": ssd_cache_max_size,
+            "hot_cache_max_size": hot_cache_max_size,
+            "hot_cache_only": global_settings.cache.hot_cache_only,
+            "cache_enabled": global_settings.cache.enabled,
+            "context": self.context(),
+        })
+        if isinstance(self.result, Exception):
+            raise self.result
+        if self.hang is not None and (self.hang_from is None
+                                      or len(self.calls) > self.hang_from):
+            await self.hang.wait()
+        return self.result
+
+
+@pytest.fixture()
+def cache_env(fake_bench):
+    """Layer the seam + _server_state fakes on fake_bench, with the SAME
+    snapshot/restore doctrine (no fake omlx modules leak out; works both
+    on CI without omlx and on the dev box where the real package exists —
+    sys.modules lookups win over the disk import either way)."""
+    names = ["omlx.admin.routes", "omlx.server"]
+    saved = {n: sys.modules.get(n) for n in names}
+    seam = SeamRecorder()
+    seam.context = lambda: len(fake_bench.runs)   # runs created at call time
+    routes = types.ModuleType("omlx.admin.routes")
+    routes._apply_cache_settings_runtime = seam
+    server = types.ModuleType("omlx.server")
+    gs = types.SimpleNamespace(cache=types.SimpleNamespace(
+        enabled=True, hot_cache_only=False, hot_cache_max_size="8GB"))
+    server._server_state = types.SimpleNamespace(global_settings=gs)
+    prev = [(sys.modules["omlx.admin"], "routes",
+             getattr(sys.modules["omlx.admin"], "routes", None)),
+            (sys.modules["omlx"], "server",
+             getattr(sys.modules["omlx"], "server", None))]
+    sys.modules["omlx.admin.routes"] = routes
+    setattr(sys.modules["omlx.admin"], "routes", routes)
+    sys.modules["omlx.server"] = server
+    setattr(sys.modules["omlx"], "server", server)
+    try:
+        yield types.SimpleNamespace(seam=seam, gs=gs)
+    finally:
+        for holder, attr, old in prev:
+            if old is None:
+                try:
+                    delattr(holder, attr)
+                except AttributeError:
+                    pass
+            else:
+                setattr(holder, attr, old)
+        for n in reversed(names):
+            v = saved[n]
+            if v is None:
+                sys.modules.pop(n, None)
+            else:
+                sys.modules[n] = v
+
+
+async def _tick(n=3):
+    """Let scheduled task steps run (cancel delivery, done callbacks)."""
+    for _ in range(n):
+        await asyncio.sleep(0)
+
+
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_cache_off_ssd_applied_before_task_and_restored_on_success(
+        fake_bench, cache_env):
+    be = _engine_mod()
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                         FakePool(), no_ssd_cache=True)
+    seam = cache_env.seam
+    # CLAIM-then-apply: create_run registers the run (status 'running' =
+    # the active claim) BEFORE the await-heavy seam runs, so a concurrent
+    # start can never slip past the active checks during the apply.
+    assert len(seam.calls) == 1
+    c0 = seam.calls[0]
+    assert c0["hot_cache_only"] is True              # temp: vanilla 'Hot Cache Only'
+    assert c0["hot_cache_max_size"] == "8GB"         # untouched field rides the live string
+    assert c0["enabled"] is None and c0["ssd_cache_dir"] is None \
+        and c0["ssd_cache_max_size"] is None         # admin-route cache_changed call shape
+    assert c0["cache_enabled"] is True               # cache.enabled never touched
+    assert c0["context"] == 1                        # applied AFTER the create_run claim
+    assert fake_bench.get_active_run() is not None   # claim held across the apply
+    assert fake_bench.run_benchmark_calls == 0       # ... and before the task ran
+    run = fake_bench.get_run(out["bench_id"])
+    assert run._uplift_cache_off == ["ssd"]
+    await asyncio.wait_for(run.task, 2)
+    # restore ran: live settings back to the snapshot, seam re-applied it
+    assert cache_env.gs.cache.hot_cache_only is False
+    assert seam.calls[-1]["hot_cache_only"] is False
+    assert seam.calls[-1]["hot_cache_max_size"] == "8GB"
+
+
+@pytest.mark.asyncio
+async def test_cache_off_hot_flag_zeroes_max_size(fake_bench, cache_env):
+    be = _engine_mod()
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                         FakePool(), no_hot_cache=True)
+    c0 = cache_env.seam.calls[0]
+    assert c0["hot_cache_max_size"] == "0"           # vanilla: '0' = hot off
+    assert c0["hot_cache_only"] is False             # other field untouched
+    run = fake_bench.get_run(out["bench_id"])
+    assert run._uplift_cache_off == ["hot"]
+    await asyncio.wait_for(run.task, 2)
+    assert cache_env.gs.cache.hot_cache_max_size == "8GB"
+
+
+@pytest.mark.asyncio
+async def test_cache_off_both_flags(fake_bench, cache_env):
+    be = _engine_mod()
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                         FakePool(), no_hot_cache=True, no_ssd_cache=True)
+    c0 = cache_env.seam.calls[0]
+    assert c0["hot_cache_max_size"] == "0" and c0["hot_cache_only"] is True
+    run = fake_bench.get_run(out["bench_id"])
+    assert run._uplift_cache_off == ["hot", "ssd"]
+    await asyncio.wait_for(run.task, 2)
+    assert (cache_env.gs.cache.hot_cache_only,
+            cache_env.gs.cache.hot_cache_max_size) == (False, "8GB")
+    assert len(cache_env.seam.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_cache_apply_failure_abandons_claim(fake_bench, cache_env):
+    """CLAIM-then-apply makes failures leak-proof: a seam that refuses
+    ((False,msg)) must rewind the live settings (no temp config leaks),
+    leave NO active claim behind (an orphaned status='running' run would
+    block every later bench forever), raise Conflict, spawn no task and
+    not re-apply a restore for a toggle that never went live."""
+    be = _engine_mod()
+    cache_env.seam.result = (False, "engine pool busy")
+    with pytest.raises(be.Conflict):
+        await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                       FakePool(), no_ssd_cache=True)
+    assert cache_env.gs.cache.hot_cache_only is False   # rewound
+    assert fake_bench.get_active_run() is None          # claim abandoned
+    runs = list(fake_bench.runs.values())
+    assert len(runs) == 1 and runs[0].status == "error" and runs[0].task is None
+    assert len(cache_env.seam.calls) == 1               # no second (restore) call
+    # the abandoned claim must not block the NEXT start
+    cache_env.seam.result = (True, "ok")
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]}, FakePool())
+    assert out["status"] == "started"
+    await asyncio.wait_for(fake_bench.get_run(out["bench_id"]).task, 2)
+
+
+@pytest.mark.asyncio
+async def test_no_flags_never_probe_and_never_tag(fake_bench, cache_env):
+    """Without flags NOTHING is imported/probed and no restore happens:
+    with a seam that would raise on call, the plain run still starts and
+    the attribute is absent (active_summary then reports cache_off [])."""
+    be = _engine_mod()
+    cache_env.seam.result = AssertionError("seam must not be called")
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]}, FakePool())
+    summ = be.active_summary()
+    assert summ["running"] and summ["cache_off"] == []
+    run = fake_bench.get_run(out["bench_id"])
+    assert not hasattr(run, "_uplift_cache_off")
+    await asyncio.wait_for(run.task, 2)
+    assert cache_env.seam.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cache_off_summary_reports_active_flags(fake_bench, cache_env):
+    be = _engine_mod()
+    gate = asyncio.Event()
+
+    async def hang(run, pool):
+        await gate.wait()
+
+    fake_bench.run_benchmark = hang
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                         FakePool(), no_ssd_cache=True)
+    assert be.active_summary()["cache_off"] == ["ssd"]
+    gate.set()
+    await asyncio.wait_for(fake_bench.get_run(out["bench_id"]).task, 2)
+
+
+@pytest.mark.asyncio
+async def test_route_pops_cache_flags_before_classic_request(
+        fake_bench, cache_env, monkeypatch):
+    """Full-chain pin: the route pops both keys (like upload) so the body
+    reaching the classic BenchmarkRequest is flag-free, and the engine
+    receives them as kwargs."""
+    from omlx_uplift.routers import bench as bench_mod
+    be = _engine_mod()
+    calls = []
+    real_start = be.start
+
+    async def spy(body, pool, **kw):
+        calls.append((dict(body), dict(kw)))
+        return await real_start(body, pool, **kw)
+
+    shim = types.SimpleNamespace(start=spy, Conflict=be.Conflict,
+                                 NotFound=be.NotFound, BadInput=be.BadInput)
+    monkeypatch.setattr(bench_mod, "bench_engine", shim)
+    monkeypatch.setattr(bench_mod, "engine_pool", lambda: FakePool())
+
+    async def _idle(kind):
+        return None
+
+    monkeypatch.setattr(bench_mod.bench_queue, "busy_check", _idle)
+
+    async def _json():
+        return {"model_id": "m1", "prompt_lengths": [1024],
+                "no_hot_cache": True, "no_ssd_cache": True}
+
+    out = await bench_mod.bench_start(types.SimpleNamespace(json=_json),
+                                      is_admin=True)
+    body, kw = calls[0]
+    assert "upload" not in body and "no_hot_cache" not in body \
+        and "no_ssd_cache" not in body
+    assert kw == {"upload": False, "no_hot_cache": True, "no_ssd_cache": True}
+    run = fake_bench.get_run(out["bench_id"])
+    # the CLASSIC model never saw the uplift-only keys:
+    assert set(run.request.kw) == {"model_id", "prompt_lengths"}
+    assert run._uplift_cache_off == ["hot", "ssd"]
+    await asyncio.wait_for(run.task, 2)
+
+
+@pytest.mark.asyncio
+async def test_cache_off_external_is_bad_input(fake_bench, cache_env):
+    be = _engine_mod()
+    body = {"model_id": "remote-1", "prompt_lengths": [1024],
+            "external": {"base_url": "http://x/v1", "api_key": "",
+                         "model": "r"}}
+    with pytest.raises(be.BadInput, match="local models only"):
+        await be.start(body, FakePool(), no_hot_cache=True)
+    assert cache_env.seam.calls == []        # refused before probing/applying
+    with pytest.raises(be.BadInput, match="local models only"):
+        await be.start(body, FakePool(), no_ssd_cache=True)
+    assert cache_env.seam.calls == []
+    assert fake_bench.runs == {}
+
+
+@pytest.mark.asyncio
+async def test_cache_off_missing_seam_is_bad_input(fake_bench, monkeypatch):
+    """CI/old-keg shape: the seam import fails -> clear 400, and WITHOUT
+    flags nothing is probed at all (plain start still works)."""
+    # a routes module WITHOUT the attribute: 'from ... import' raises
+    # ImportError regardless of whether real omlx is installed here
+    empty = types.ModuleType("omlx.admin.routes")
+    monkeypatch.setitem(sys.modules, "omlx.admin.routes", empty)
+    be = _engine_mod()
+    with pytest.raises(be.BadInput, match="cannot toggle"):
+        await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                       FakePool(), no_ssd_cache=True)
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                         FakePool())
+    await asyncio.wait_for(fake_bench.get_run(out["bench_id"]).task, 2)
+
+
+@pytest.mark.asyncio
+async def test_cache_apply_failure_restores_and_conflicts(fake_bench, cache_env):
+    """(False, msg) AND a raising seam both pin to Conflict after the
+    snapshot was rewound. CLAIM-then-apply: the registered run exists but
+    is abandoned terminal ('error', no task, no active claim) — never a
+    live 'running' orphan."""
+    be = _engine_mod()
+    cache_env.seam.result = (False, "Engine pool not initialized")
+    with pytest.raises(be.Conflict, match="Could not toggle caches"):
+        await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                       FakePool(), no_hot_cache=True)
+    assert cache_env.gs.cache.hot_cache_max_size == "8GB"
+    assert fake_bench.get_active_run() is None
+    assert [r.status for r in fake_bench.runs.values()] == ["error"]
+
+    cache_env.seam.result = RuntimeError("seam exploded")
+    n_before = len(fake_bench.runs)
+    with pytest.raises(be.Conflict, match="Could not toggle caches"):
+        await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                       FakePool(), no_ssd_cache=True)
+    assert cache_env.gs.cache.hot_cache_only is False
+    assert fake_bench.get_active_run() is None
+    assert len(fake_bench.runs) == n_before + 1
+    assert list(fake_bench.runs.values())[-1].status == "error"
+
+
+@pytest.mark.asyncio
+async def test_cache_off_restored_on_cancel(fake_bench, cache_env):
+    """The common early exit: cancel() kills the run task; the restore
+    still runs and the seam receives the ORIGINAL values."""
+    be = _engine_mod()
+    gate = asyncio.Event()
+
+    async def hang(run, pool):
+        try:
+            await gate.wait()
+        finally:
+            run.status = "cancelled"
+
+    fake_bench.run_benchmark = hang
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                         FakePool(), no_ssd_cache=True)
+    run = fake_bench.get_run(out["bench_id"])
+    await _tick()
+    await be.cancel(run)
+    with pytest.raises(asyncio.CancelledError):
+        await run.task
+    assert cache_env.gs.cache.hot_cache_only is False       # restored
+    assert cache_env.seam.calls[-1]["hot_cache_only"] is False
+    assert run._uplift_cache_off == ["ssd"]                 # history sees it
+
+
+@pytest.mark.asyncio
+async def test_cache_restore_survives_second_cancel(fake_bench, cache_env):
+    """Provably await-safe: a SECOND cancel() landing while the restore
+    seam call is mid-await does not abort it — the shielded pattern keeps
+    waiting until the restore settles, then the task ends cancelled."""
+    be = _engine_mod()
+    gate = asyncio.Event()
+
+    async def hang(run, pool):
+        await gate.wait()
+
+    fake_bench.run_benchmark = hang
+    release = asyncio.Event()
+    cache_env.seam.hang = release       # the restore (call index 1) blocks
+    cache_env.seam.hang_from = 1
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                         FakePool(), no_hot_cache=True)
+    run = fake_bench.get_run(out["bench_id"])
+    await _tick()
+    run.task.cancel()                   # cancel #1: lands in gate.wait
+    await _tick()
+    assert len(cache_env.seam.calls) == 2       # restore call is in flight
+    assert not run.task.done()                  # ... and still awaited
+    run.task.cancel()                   # cancel #2: lands in the shielded await
+    await _tick()
+    assert not run.task.done()          # absorbed; restore not abandoned
+    assert cache_env.gs.cache.hot_cache_max_size == "8GB"  # fields rewound
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await run.task
+    assert cache_env.seam.calls[-1]["hot_cache_max_size"] == "8GB"
+
+
+@pytest.mark.asyncio
+async def test_history_meta_carries_cache_off(fake_bench, cache_env):
+    """capture_run (via the run-task done callback) persists
+    meta.cache_off only for flagged runs — the statics lane reads that."""
+    from omlx_uplift import bench_history as bh
+    be = _engine_mod()
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                         FakePool(), no_hot_cache=True, no_ssd_cache=True)
+    await asyncio.wait_for(fake_bench.get_run(out["bench_id"]).task, 2)
+    await _tick()                        # let the done callback write
+    entries = bh.load("throughput")
+    assert len(entries) == 1 and entries[0]["id"] == out["bench_id"]
+    assert entries[0]["meta"]["cache_off"] == ["hot", "ssd"]
+
+    out2 = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                          FakePool())
+    await asyncio.wait_for(fake_bench.get_run(out2["bench_id"]).task, 2)
+    await _tick()
+    e2 = next(e for e in bh.load("throughput") if e["id"] == out2["bench_id"])
+    assert "cache_off" not in e2["meta"]
 
 
 # ---------------------------------------------------------------------------

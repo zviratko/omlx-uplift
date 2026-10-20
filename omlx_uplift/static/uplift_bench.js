@@ -113,6 +113,23 @@ function check(id, label, on) {
     var lb = el('label', 'bench-check');
     var cb = el('input'); cb.type = 'checkbox'; cb.id = id; cb.checked = !!on;
     lb.append(cb, document.createTextNode(' ' + label));
+    lb.input = cb;      // CACHE-OFF: the handle, so a caller never needs gid
+    return lb;
+}
+/* A checkbox whose LABEL text is re-resolvable (U59 contract): the text
+   lives in its own span carrying dataset.i18n/dataset.en, because
+   applyI18n repaints with textContent= and a dataset on the label itself
+   would DELETE the input on a late catalog load. The input is also hung
+   off lb.input so the panel can reach it without a getElementById.
+   (.bench-check is inline-flex with a gap — no leading space node needed) */
+function checkI18n(id, key, fb, on) {
+    var lb = el('label', 'bench-check');
+    var cb = el('input'); cb.type = 'checkbox'; cb.id = id; cb.checked = !!on;
+    var txt = el('span', 'bench-check-text', t(key, fb));
+    txt.dataset.i18n = key;
+    txt.dataset.en = fb;                         // the EN baseline, verbatim
+    lb.append(cb, txt);
+    lb.input = cb;
     return lb;
 }
 function gid(id) { return document.getElementById(id); }
@@ -1002,10 +1019,28 @@ function copyPlainText(text, okMsg) {
    them below the live result, collapsed per run, each with its own Copy.
    Accuracy/Embeddings/Decision already accumulate rows across runs — they
    needed storage, not UI. */
-function simpleTable(cols, rows) {
-    var tbl = el('table', 'bench-table');
+/* U64: result tables for every persistent panel.
+   cols = [rowKey, head, getter?, tooltip?, i18n?]; the 4th element is the
+   classic bench_th() hover text (th title), the 5th carries the catalog keys
+   so applyI18n re-resolves head and title when the locale arrives late.
+   cls adds a modifier class (tp-table) without touching the shared one. */
+function simpleTable(cols, rows, cls) {
+    var tbl = el('table', cls ? 'bench-table ' + cls : 'bench-table');
     var head = el('tr');
-    cols.forEach(function (c) { head.appendChild(el('th', null, c[1])); });
+    cols.forEach(function (c) {
+        var th = el('th', null, c[1]);
+        if (c[3]) th.title = c[3];
+        var i18n = c[4];
+        if (i18n && i18n.k) {
+            th.dataset.i18n = i18n.k;
+            th.dataset.en = i18n.en != null ? i18n.en : c[1];
+        }
+        if (i18n && i18n.tk) {
+            th.dataset.i18nTitle = i18n.tk;
+            th.dataset.enTitle = i18n.ten || c[3] || '';
+        }
+        head.appendChild(th);
+    });
     tbl.appendChild(head);
     rows.forEach(function (r) {
         var tr = el('tr');
@@ -1440,31 +1475,233 @@ function dlCols(defs) {
     });
 }
 
-// Shared row-formatter for the [key, head, getter?] tuples in TP_COLS_DEF.
-function tpCols(cols) {
-    return cols.map(function (c) {
-        if (c[2]) return [c[0], c[1], function (v, r) { return c[2](r); }];
-        return [c[0], c[1], function (v) {
-            return v == null ? '—'
-                : (typeof v === 'number' ? TP.fmt(c[0], v) : String(v));
-        }];
-    });
+/* ---------------------------------------------------------------------------
+   TP-TABLES (user items 2 + 5): the throughput result set is the SAME two
+   tables classic shows — 'Single Request Results' and 'Continuous Batching' —
+   in classic's column order, with classic's header names (bench.results.*)
+   and classic's header tooltips (bench.metrics.*.tooltip, the info icon's
+   hover text). The merged single-table this replaced read single-only keys
+   off batch rows, so TTFT/TPOT/Throughput printed dashes for every batch
+   line, and it had no memory column at all.
+   The specs are PURE data (rows in, column descriptors out) so node tests can
+   pin the header order/keys/tooltips DOM-free; buildTpTables only paints them
+   and is the single path BOTH the live panel and the history cards use —
+   live and history can no longer drift from each other or from classic.
+   Native addition kept: the measured 'out' column, as the LAST extra column
+   of both tables (rows predating token accounting keep outCell's dash).
+   --------------------------------------------------------------------------- */
+function tpIsBatch(r) { return !!(r && r.test_type === 'batch'); }
+function tpSingles(rows) {
+    return (rows || []).filter(function (r) { return !tpIsBatch(r); });
 }
-
-// U64: one column definition for the live table AND history snapshots
-function TP_COLS_DEF() {
+function tpBatch(rows) { return (rows || []).filter(tpIsBatch); }
+function tpBaseline(singles) {
+    // classic benchFindSingle(1024): the REQUESTED prompt length, not the
+    // clamped one the runner actually measured
+    for (var i = 0; i < (singles || []).length; i++) {
+        var r = singles[i];
+        var pp = r.requested_pp != null ? r.requested_pp : r.pp;
+        if (pp === 1024) return r;
+    }
+    return null;
+}
+function tpPpPerReq(r) {
+    // classic benchPpPerReq: null when the aggregate itself is unmeasured
+    if (r.pp_tps == null) return null;
+    return r.pp_tps / (r.batch_size || 1);
+}
+/* Catalog-only tooltip: the classic bench.metrics.*.tooltip strings ship in
+   every locale, so a missing key renders NO tooltip rather than leaking the
+   raw key into the title attribute. New uplift keys pass an English fallback
+   (repo doctrine) and are the only ones carrying one. */
+function tpTip(key, en) {
+    var c = C();
+    var v = (c && c.t) ? c.t(key) : null;
+    if (v && v !== key) return v;
+    return en || '';
+}
+// One column: row key, catalog head [+tooltip], the cell formatter, and the
+// table it belongs to (kind: null = shared by both, e.g. the native 'out').
+function tpCol(kind, rowKey, headKey, headEn, tipKey, tipEn, get) {
+    return {
+        kind: kind, key: rowKey,
+        headKey: headKey, headEn: headEn,
+        head: headKey ? t(headKey, headEn) : headEn,
+        tipKey: tipKey, tipEn: tipEn || '',
+        tip: tipKey ? tpTip(tipKey, tipEn) : '',
+        get: get,
+    };
+}
+// classic benchFmtNum/benchFormatMemory mirroring — the same cell texts the
+// text export (buildThroughputText) prints, so table and Copy agree.
+function tpSingleDefs(base) {
     return [
-        ['pp', 'PP'], ['tg', 'TG'], ['out', 'out', outCell],
-        ['ttft_ms', t('bench.metrics.ttft.name', 'TTFT')],
-        ['processing_tps', t('bench.metrics.pp_tps.name', 'pp TPS')],
-        ['gen_tps', t('bench.metrics.tg_tps.name', 'tg TPS')],
-        ['total_throughput', t('bench.metrics.throughput.name', 'Throughput')],
-        ['tpot_ms', t('bench.metrics.tpot.name', 'TPOT')],
-        ['e2e_latency_s', t('bench.metrics.e2e.name', 'E2E')],
-        ['batch_size', t('bench.metrics.batch_size.name', 'Batch Size')],
+        tpCol('single', 'test', 'bench.results.single.test', 'Test',
+              'bench.metrics.test.tooltip', '',
+              function (r) { return singleTestLabel(r); }),
+        tpCol('single', 'ttft_ms', 'bench.results.single.ttft', 'TTFT (ms)',
+              'bench.metrics.ttft.tooltip', '',
+              function (r) { return fmtNum(r.ttft_ms, 1); }),
+        tpCol('single', 'tpot_ms', 'bench.results.single.tpot', 'TPOT (ms/tok)',
+              'bench.metrics.tpot.tooltip', '',
+              function (r) { return fmtNum(r.tpot_ms, 2); }),
+        tpCol('single', 'processing_tps', 'bench.results.single.pp_tps', 'PP TPS',
+              'bench.metrics.pp_tps.tooltip', '',
+              function (r) { return fmtNum(r.processing_tps, 1, ' tok/s'); }),
+        tpCol('single', 'gen_tps', 'bench.results.single.tg_tps', 'TG TPS',
+              'bench.metrics.tg_tps.tooltip', '',
+              function (r) { return fmtNum(r.gen_tps, 1, ' tok/s'); }),
+        tpCol('single', 'e2e_latency_s', 'bench.results.single.e2e_latency',
+              'E2E Latency', 'bench.metrics.e2e.tooltip', '',
+              function (r) { return fmtNum(r.e2e_latency_s, 3, 's'); }),
+        tpCol('single', 'total_throughput', 'bench.results.single.throughput',
+              'Throughput', 'bench.metrics.throughput.tooltip', '',
+              function (r) { return fmtNum(r.total_throughput, 1, ' tok/s'); }),
+        tpCol('single', 'peak_memory_bytes', 'bench.results.single.peak_mem',
+              'Peak MLX', 'bench.metrics.peak_mem.tooltip', '',
+              function (r) { return fmtMemory(r.peak_memory_bytes); }),
     ];
 }
-var TP_COLS = null;   // resolved on first render (catalog may load later)
+function tpBatchDefs(base) {
+    return [
+        tpCol('batch', 'batch_size', 'bench.results.batch.batch_size',
+              'Batch Size', 'bench.metrics.batch_size.tooltip', '',
+              function (r) {
+                  return r.__baseline
+                      ? t('bench.results.batch.baseline', '1x (baseline)')
+                      : r.batch_size + 'x';
+              }),
+        tpCol('batch', 'tg_tps', 'bench.results.batch.tg_tps', 'TG TPS',
+              'bench.metrics.tg_tps.tooltip', '',
+              function (r) { return fmtNum(r.tg_tps, 1, ' tok/s'); }),
+        tpCol('batch', 'speedup', 'bench.results.batch.speedup', 'Speedup',
+              'bench.metrics.speedup.tooltip', '',
+              function (r) {
+                  if (r.__baseline) return '1.00x';
+                  var sp = (base && base.gen_tps > 0 && r.tg_tps != null)
+                      ? r.tg_tps / base.gen_tps : null;
+                  return sp == null
+                      ? t('bench.results.text_export.not_available', 'N/A')
+                      : sp.toFixed(2) + 'x';
+              }),
+        tpCol('batch', 'pp_tps', 'bench.results.batch.pp_tps', 'PP TPS',
+              'bench.metrics.pp_tps.tooltip', '',
+              function (r) { return fmtNum(r.pp_tps, 1, ' tok/s'); }),
+        tpCol('batch', 'pp_tps_req', 'bench.results.batch.pp_tps_req',
+              'PP TPS/req', 'bench.metrics.pp_tps_req.tooltip', '',
+              function (r) {
+                  // classic prints the baseline's own PP TPS in this cell
+                  return fmtNum(r.__baseline ? r.processing_tps : tpPpPerReq(r),
+                      1, ' tok/s');
+              }),
+        tpCol('batch', 'avg_ttft_ms', 'bench.results.batch.avg_ttft',
+              'Avg TTFT (ms)', 'bench.metrics.avg_ttft.tooltip', '',
+              function (r) { return fmtNum(r.avg_ttft_ms, 1); }),
+        tpCol('batch', 'e2e_latency_s', 'bench.results.batch.e2e_latency',
+              'E2E Latency', 'bench.metrics.e2e.tooltip', '',
+              function (r) { return fmtNum(r.e2e_latency_s, 3, 's'); }),
+    ];
+}
+function tpOutDef() {
+    // uplift-native measured-decode column: 'tg1024' says what was REQUESTED,
+    // this says what the model GENERATED (fraction on an early stop)
+    return tpCol(null, 'out', null, 'out', 'uplift.bench.tp.out_hint',
+        'Measured output tokens vs the requested tg length.',
+        function (r) { return outCell(r); });
+}
+function tpBatchBody(base, batch) {
+    // classic's first body row IS the single pp1024 run, relabelled. A copy
+    // with batch-shaped keys: every getter reads one row shape, and the
+    // __baseline marker is what the label/speedup cells print classic's
+    // fixed texts from. completion_tokens/tg ride along, so the native 'out'
+    // cell stays honest on that row too.
+    if (!base) return batch.slice();
+    return [Object.assign({}, base, {
+        __baseline: true, batch_size: 1,
+        tg_tps: base.gen_tps, pp_tps: base.processing_tps,
+        avg_ttft_ms: base.ttft_ms, e2e_latency_s: base.e2e_latency_s,
+    })].concat(batch);
+}
+function tpTableSpecs(rows) {
+    var singles = tpSingles(rows), batch = tpBatch(rows);
+    var base = tpBaseline(singles);
+    var out = [];
+    if (singles.length) {
+        out.push({
+            kind: 'single', key: 'bench.results.single.section_label',
+            en: 'Single Request Results', sub: '',
+            defs: tpSingleDefs(base).concat([tpOutDef()]),
+            rows: singles,
+        });
+    }
+    if (batch.length) {
+        out.push({
+            kind: 'batch', key: 'bench.results.batch.section_label',
+            en: 'Continuous Batching', sub: batchPromptSummary(batch),
+            defs: tpBatchDefs(base).concat([tpOutDef()]),
+            rows: tpBatchBody(base, batch),
+        });
+    }
+    return out;
+}
+// simpleTable column tuples: [rowKey, head, getter(v, r), tooltip, i18n bag]
+function tpCols(defs) {
+    return defs.map(function (d) {
+        return [d.key, d.head, function (v, r) { return d.get(r); }, d.tip,
+                { k: d.headKey, en: d.headEn, tk: d.tipKey, ten: d.tipEn }];
+    });
+}
+// CSV/Markdown export: BOTH tables' columns concatenated under classic's
+// header names, the shared 'out' column once at the end. A row leaves the
+// other table's cells empty — one flat sheet, honest about what each row is.
+function tpDlCols(rows) {
+    var specs = tpTableSpecs(rows);
+    var defs = [], outDef = null;
+    specs.forEach(function (s) {
+        s.defs.forEach(function (d) {
+            if (d.kind === null) { outDef = outDef || d; return; }
+            defs.push(d);
+        });
+    });
+    if (outDef) defs.push(outDef);
+    return defs.map(function (d) {
+        return {
+            head: d.head,
+            get: function (r) {
+                if (d.kind && (tpIsBatch(r) ? 'batch' : 'single') !== d.kind)
+                    return '';
+                return d.get(r);
+            },
+        };
+    });
+}
+function buildTpTables(rows) {
+    var nodes = [];
+    tpTableSpecs(rows).forEach(function (s) {
+        var head = el('div', 'bench-tp-section');
+        var lab = el('span', 'bench-label', t(s.key, s.en));
+        lab.dataset.i18n = s.key;
+        lab.dataset.en = s.en;                   // U59: late catalog repair
+        head.appendChild(lab);
+        // classic shows the batch prompt summary beside its section title; it
+        // carries substituted placeholders, so NO dataset.i18n (SAY-2c)
+        if (s.sub) head.appendChild(el('span', 'bench-tp-section-note', s.sub));
+        nodes.push(head);
+        nodes.push(simpleTable(tpCols(s.defs), s.rows, 'tp-table'));
+    });
+    return nodes;
+}
+// Client half of the cache-off run option (user item 3): the snapshot says
+// which caches the run disabled, the card says so under its title.
+function tpCacheOffNote(e) {
+    var off = e && e.meta && e.meta.cache_off;
+    if (!off || !off.length) return null;
+    var p = el('p', 'bench-tp-note',
+        t('uplift.bench.tp.cache_off', 'Cache disabled during this run'));
+    p.dataset.i18n = 'uplift.bench.tp.cache_off';
+    p.dataset.en = p.textContent;
+    return p;
+}
 
 function tpHistoryBody(e) {
     var card = el('div', 'bench-result card');
@@ -1473,15 +1710,19 @@ function tpHistoryBody(e) {
                 forceLm: false,
                 external: (e.meta && e.meta.external) ? { model: e.model_id } : null };
     var rows = e.rows || [];
-    if (!TP_COLS) TP_COLS = TP_COLS_DEF();
+    // head first, then the cache-off note, then classic's two tables (the
+    // old code prepended the head; appendChild keeps one paint order and
+    // works in every harness — 'prepend' is not in the DOM stubs)
+    card.appendChild(resultsHead(function () {
+        return buildThroughputText(ctx, rows);
+    }));
+    var note = tpCacheOffNote(e);
+    if (note) card.appendChild(note);
     if (!rows.length) {
         card.appendChild(historyEmptyNote());
         return card;
     }
-    card.appendChild(simpleTable(tpCols(TP_COLS), rows));
-    card.prepend(resultsHead(function () {
-        return buildThroughputText(ctx, rows);
-    }));
+    buildTpTables(rows).forEach(function (n) { card.appendChild(n); });
     return card;
 }
 
@@ -1575,10 +1816,66 @@ var TP = {
         // locales carry the 'tg128' token in this string — replace is a
         // no-op if a future locale does not.
         var batchHint = el('p', 'native-stub-note', t('bench.config.batch_hint', 'Batch tests use pp1024 / tg128'));
+        // CACHE-OFF (user item 3, client half): per-run cache overrides, off
+        // by default and rebuilt unchecked on every panel render. The hints
+        // are title attributes (the row is a chip-sized label, no room for a
+        // second line), and the pair is DEAD for external endpoints — the
+        // caches being disabled live in this process, so an external run has
+        // nothing to turn off.
+        var noHot = checkI18n('bench-tp-no-hot',
+            'uplift.bench.tp.no_hot_cache', 'Hot cache off for this run');
+        var noSsd = checkI18n('bench-tp-no-ssd',
+            'uplift.bench.tp.no_ssd_cache', 'SSD cache off for this run');
+        var HINTS = [
+            ['uplift.bench.tp.no_hot_cache_hint',
+             'Sets the in-memory Hot Cache limit to 0 while this benchmark '
+             + 'runs, then restores your setting. Loaded models are reloaded '
+             + 'at run start and finish.'],
+            ['uplift.bench.tp.no_ssd_cache_hint',
+             'Enables Hot Cache Only (no SSD reads, writes or background '
+             + 'writer) while this benchmark runs, then restores your '
+             + 'setting. Loaded models are reloaded at run start and finish.'],
+        ];
+        var LOCAL_TIP = ['uplift.bench.tp.cache_off_local',
+                         'Applies to local models only.'];
+        var cacheRows = [[noHot, HINTS[0]], [noSsd, HINTS[1]]];
+        cacheRows.forEach(function (row) {
+            row[0].title = tpTip(row[1][0], row[1][1]);
+            row[0].dataset.i18nTitle = row[1][0];
+            row[0].dataset.enTitle = row[1][1];
+        });
+        // The hint and the 'local only' note share ONE slot: whatever the
+        // row says right now is what its title carries, and the datasets
+        // follow so a late catalog load repaints the CURRENT meaning.
+        function syncCacheOff() {
+            var extOn = self.isExternal();
+            for (var i = 0; i < cacheRows.length; i++) {
+                var lb = cacheRows[i][0], hint = cacheRows[i][1];
+                var key = extOn ? LOCAL_TIP[0] : hint[0];
+                var en = extOn ? LOCAL_TIP[1] : hint[1];
+                lb.input.disabled = extOn;
+                if (extOn) lb.input.checked = false;    // a dead knob is off
+                lb.title = extOn ? t(key, en) : tpTip(key, en);
+                lb.dataset.i18nTitle = key;
+                lb.dataset.enTitle = en;
+            }
+        }
+        syncCacheOff();
         var adv = advancedSection([
             check('bench-tp-ane', t('bench.config.ane_aligned_prompt', 'ANE-aligned prompts (+1 token)'), false),
             check('bench-tp-lm', t('bench.config.force_lm_engine', 'Force mlx-lm engine'), false),
-            check('bench-tp-ext', t('bench.config.external', 'Use external OpenAI API endpoint'), false),
+            noHot, noSsd,
+            (function () {
+                // CACHE-OFF: the toggle must react the moment it flips, and
+                // the rAF block below wires the SAME checkbox for its own
+                // row reveal — the listener here is attached to the element
+                // reference, so a harness without requestAnimationFrame
+                // still gets the working pair.
+                var lb = check('bench-tp-ext',
+                    t('bench.config.external', 'Use external OpenAI API endpoint'), false);
+                lb.input.addEventListener('change', syncCacheOff);
+                return lb;
+            })(),
             extRow,
             check('bench-tp-upload', t('uplift.bench.upload_results', 'Upload results to community leaderboard'), false),
             el('p', 'native-stub-note', t('uplift.bench.upload_hint',
@@ -1601,6 +1898,7 @@ var TP = {
             if (ext) ext.addEventListener('change', function () {
                 var er = gid('bench-tp-ext-row');
                 if (er) er.hidden = !ext.checked;
+                syncCacheOff();     // CACHE-OFF: the knobs die with the mode
             });
             var gen = gid('bench-tp-gen');
             if (gen) gen.addEventListener('change', function (ev) {
@@ -1609,8 +1907,19 @@ var TP = {
                         'Batch tests use pp1024 / tg128')
                         .replace('tg128', 'tg' + Number(ev.target.value).toLocaleString());
             });
+            var mod = gid('bench-tp-model');
+            if (mod) mod.addEventListener('change', syncCacheOff);
         });
         return f;
+    },
+
+    // CACHE-OFF (user item 3): an external endpoint has no local cache to
+    // turn off, so the pair is for local models only. The ext checkbox IS
+    // the panel's external-endpoint mode (the classic mirror — there is no
+    // endpoint row inside the model picker).
+    isExternal: function () {
+        var ext = gid('bench-tp-ext');
+        return !!(ext && ext.checked);
     },
 
     loadModels: async function () {
@@ -1676,6 +1985,16 @@ var TP = {
                 api_key: (gid('bench-tp-ext-key') || {}).value || '',
                 model: (gid('bench-tp-ext-model') || {}).value || '',
             };
+        }
+        // CACHE-OFF (server lane contract): the keys exist ONLY when the box
+        // is on — an absent field is 'leave my setting alone', a false one
+        // would be a command. External runs never carry them (the knobs are
+        // disabled+cleared, and the caches are process-local).
+        if (!body.external) {
+            if (gid('bench-tp-no-hot') && gid('bench-tp-no-hot').checked)
+                body.no_hot_cache = true;
+            if (gid('bench-tp-no-ssd') && gid('bench-tp-no-ssd').checked)
+                body.no_ssd_cache = true;
         }
         return body;
     },
@@ -1811,33 +2130,29 @@ var TP = {
     },
 
     renderTable: function () {
-        TP_COLS = TP_COLS_DEF();   // U64: labels track the catalog
         var wrap = gid('bench-tp-results');
         if (!wrap) return;
         var rows = this.state.results;
         if (!rows.length) { wrap.replaceChildren(); return; }
         var self = this;
-        var tbl = simpleTable(tpCols(TP_COLS), rows);
-        // U47: classic has a Copy of the whole result set as plain text
-        // ("Benchmark Results (Text — Copy & Paste)"); mirror it above the
-        // table with the classic format (buildThroughputText).
-        wrap.replaceChildren(
-            resultsHead(function () {
-                return buildThroughputText(self.state.ctx, self.state.results);
-            }, null, null, {
-                name: function () { return 'uplift_throughput_'
-                    + String((self.state.ctx && self.state.ctx.model) || 'run'); },
-                rows: function () { return self.state.results; },
-                cols: function () { return dlCols(TP_COLS || TP_COLS_DEF()); },
-            }), tbl);
+        // U47/classic parity: the same Copy head, then classic's TWO tables
+        // (buildTpTables is also what the history cards paint, so live and
+        // history can never disagree)
+        var kids = [resultsHead(function () {
+            return buildThroughputText(self.state.ctx, self.state.results);
+        }, null, null, {
+            name: function () { return 'uplift_throughput_'
+                + String((self.state.ctx && self.state.ctx.model) || 'run'); },
+            rows: function () { return self.state.results; },
+            cols: function () { return tpDlCols(self.state.results); },
+        })];
+        buildTpTables(rows).forEach(function (n) { kids.push(n); });
+        wrap.replaceChildren.apply(wrap, kids);
     },
 
-    fmt: function (key, v) {
-        if (key === 'ttft_ms' || key === 'tpot_ms') return Math.round(v * 10) / 10 + ' ms';
-        if (key === 'e2e_latency_s') return Math.round(v * 100) / 100 + ' s';
-        if (key === 'pp') return v.toLocaleString();
-        return (Math.round(v * 10) / 10).toLocaleString();
-    },
+    // TP.fmt is gone with the merged table: every cell now formats through
+    // the classic helpers (fmtNum / fmtMemory / outCell), so a table value
+    // and its Copy-text twin can never disagree again.
 
     finish: function () {
         stopStream();
@@ -2885,6 +3200,50 @@ var EXTRAS = {
    renders in the 'Additional suites' fold above, and never mixes in here.
    ========================================================================== */
 
+/* ACC-STALL (user item 4): a half-open SSE socket (proxy blip) keeps the
+   EventSource technically OPEN while the server stops talking — the board
+   froze on the last painted event (the user saw 1/164 for minutes). Two
+   defences, both driven from the 4s queue poll:
+     1. restart the stream when the server has events we never consumed
+        (needsStreamRestart hysteresis below);
+     2. forward-seed the board from the poll's own last_progress, so the
+        boxes move even against a server that does not report event_count.
+   Both are FORWARD-ONLY by construction: harness leaf-restart events (cur
+   lower than the live bar) are never seeded — a real leaf boundary only
+   arrives through the stream or a full replay. */
+var ACC_POLL_MS = 4000;
+var ACC_STALL_MS = 90000;
+function needsStreamRestart(eventCount, seen, prevEventCount) {
+    // The fetch and the stream race each other, so ONE poll that shows a
+    // backlog proves nothing: restart only when the miss REPEATS, i.e. the
+    // previous poll already reported more events than we have consumed NOW
+    // (seen has not caught up to what the last poll saw). A stream that is
+    // merely a moment behind has consumed the previous count by now, so this
+    // also survives a backlog that keeps climbing while the socket is dead.
+    if (typeof eventCount !== 'number') return false;
+    if (eventCount <= (seen | 0)) return false;         // stream is current
+    return typeof prevEventCount === 'number' && prevEventCount > (seen | 0);
+}
+function resetBoardEntry(entry, harnessSizes, groups) {
+    // A reconnect REPLAYS the whole log from index 0. The harness leaf bank
+    // lives in entry.bar (a bar that restarts below its previous cur banks
+    // the old total) — replaying into a non-empty bar would bank twice, so
+    // the accumulator is cleared first and the rebuild is exact.
+    if (!entry) return entry;
+    entry.bar = {};
+    entry.suiteDone = {};
+    entry.suiteQuiet = {};
+    entry.qper = boardQuestions(entry.sizes || {}, entry.engine || 'classic',
+                                harnessSizes, groups).per;
+    var first = true;
+    entry.suiteState = {};
+    Object.keys(entry.sizes || {}).forEach(function (k) {
+        entry.suiteState[k] = (entry.running && first) ? 'running' : 'queued';
+        first = false;
+    });
+    return entry;
+}
+
 var ACC = {
     state: null,
 
@@ -2892,6 +3251,9 @@ var ACC = {
         this.state = { running: false, benchId: null, queue: [],
                        progress: null, groups: null,
                        selected: {}, sizes: {}, results: [],
+                       // ACC-STALL: stream bookkeeping (consumed events, the
+                       // previous poll's event_count, last visible activity)
+                       seenN: 0, pollN: null, lastAct: 0, lastMsg: '',
                        // U68: {suite: leaf subtask count}; harness --limit
                        // applies PER subtask, the labels must say so
                        harnessSizes: ACC._sizesCache || null,
@@ -2904,6 +3266,9 @@ var ACC = {
                        engine: 'classic' };
         panel.appendChild(this.form());
         var queue = el('div', 'acc-queue'); queue.id = 'bench-acc-queue';
+        // ACC-STALL: this is a FRESH wrap — the in-place repaint guard must
+        // forget the previous mount's shape or the first poll would skip it
+        this._qSig = null;
         var status = statusLine('bench-acc-status');
         var results = el('div', 'bench-results'); results.id = 'bench-acc-results';
         panel.append(queue, status, results);
@@ -3404,10 +3769,85 @@ var ACC = {
             this.state.benchId = st.current_bench_id || null;
             this.state.boardPhase = st.phase || null;
             this.syncBoard(st);
+            if (st.running) this.pollCatchup(st);
             this.renderQueue(st);
             if (st.running && !wasRunning && st.current_bench_id) this.startStream(st.current_bench_id);
             if (!st.running && wasRunning) { stopStream(); this.refreshResults(); }
         } catch (e) { /* board offline */ }
+    },
+
+    /* ACC-STALL: everything the 4s poll does while a run is live. Called
+       right after syncBoard (so the entries exist) and before renderQueue
+       (so a seed is visible in the same frame). */
+    pollCatchup: function (st) {
+        this.seedFromPoll(st);
+        this.pollStatus(st);
+        if (typeof st.event_count !== 'number') return;
+        var restart = needsStreamRestart(st.event_count, this.state.seenN,
+                                         this.state.pollN);
+        this.state.pollN = st.event_count;
+        if (restart) this.restartStream(st);
+    },
+
+    seedFromPoll: function (st) {
+        // Forward-only seeding: a poll progress that is NEWER than the live
+        // bar of that suite is fed through the normal event path. Harness
+        // leaf restarts (cur below the live bar) are NOT seeded — banking a
+        // leaf boundary belongs to the stream or to a full replay, never to
+        // a single out-of-order snapshot.
+        var lp = st && st.last_progress;
+        if (!lp || lp.type !== 'progress' || lp.phase !== 'eval') return false;
+        if (lp.bench_current == null) return false;
+        var b = lp.benchmark || (lp.data && lp.data.benchmark) || '';
+        if (!b) return false;
+        var run = null;
+        var entries = this.state.board || [];
+        for (var i = 0; i < entries.length; i++)
+            if (entries[i].running) run = entries[i];
+        if (!run) return false;
+        var bar = (run.bar || {})[b];
+        if (bar && !(lp.bench_current > bar.cur)) return false;
+        this.boardEvent(lp);
+        return true;
+    },
+
+    restartStream: function (st) {
+        var id = st.current_bench_id || this.state.benchId;
+        if (!id) return;
+        var entries = this.state.board || [];
+        for (var i = 0; i < entries.length; i++)
+            if (entries[i].running) resetBoardEntry(entries[i],
+                this.state.harnessSizes, this.state.groups);
+        this.startStream(id);
+    },
+
+    pollStatus: function (st) {
+        // The stream paints message + counters off events; a silent stream
+        // paints the very same shape off the poll (both read one event
+        // source, so the line can only move forward).
+        var lp = st && st.last_progress;
+        if (!lp) return;
+        var node = gid('bench-acc-status');
+        if (!node || node.classList.contains('bench-status-error')) return;
+        var msg = String(lp.message || lp.phase || '');
+        if (msg !== this.state.lastMsg) {
+            this.state.lastMsg = msg;
+            this.state.lastAct = Date.now();      // the board IS moving
+        }
+        node.textContent = msg + this.statusCounterText(lp) + this.stallSuffix();
+    },
+
+    stallSuffix: function () {
+        // Honesty, not decoration: polls keep answering but nothing has
+        // changed for >90s, so the frozen line says so instead of lying.
+        var s = this.state;
+        if (!s.running || !s.lastAct) return '';
+        var idle = Date.now() - s.lastAct;
+        if (idle <= ACC_STALL_MS) return '';
+        return ' — ' + t('uplift.bench.board_stalled',
+                         'No progress events for {n}s')
+            .replace('{n}', String(Math.round(idle / 1000)));
+        // NO dataset.i18n here: a {placeholder} node would repaint raw (SAY-2c)
     },
 
     /* U83: board entries = the RUNNING entry (new queue_status field) +
@@ -3524,8 +3964,24 @@ var ACC = {
         if (!wrap) return;
         var self = this;
         var entries = this.state.board || [];
+        var empty = !st.running && !(st.queue || []).length;
+        /* ACC-STALL: the queue poll now runs every 4s while a run is live.
+           The SHAPE (which entries, which suite boxes, the phase chip) only
+           changes at transitions, so an unchanged shape repaints the numbers
+           IN PLACE (boardPaint) instead of rebuilding — rebuilding under the
+           pointer killed hover, and the board was built to survive 1 Hz
+           events exactly for that reason. */
+        var sig = (st.phase || '') + '|' + entries.map(function (e) {
+            return (e.running ? '>' : '') + e.key + '[' +
+                   Object.keys(e.sizes || {}).join(',') + ']';
+        }).join(';');
+        if (sig === this._qSig && !(empty && !wrap.hidden)) {
+            if (!empty) this.boardPaint();
+            return;
+        }
+        this._qSig = sig;
         wrap.replaceChildren();
-        if (!st.running && !(st.queue || []).length) { wrap.hidden = true; return; }
+        if (empty) { wrap.hidden = true; return; }
         wrap.hidden = false;
         wrap.appendChild(el('div', 'bench-label',
             t('acc_bench.config.queue_label', 'Queue')));
@@ -3648,11 +4104,16 @@ var ACC = {
     startStream: function (benchId) {
         var self = this;
         stopStream();
-        if (!W().EventSource) {
+        // ACC-STALL: a replay restarts the consumed counter — events are
+        // counted from index 0 again, which is exactly what the server sends
+        var arm = function () {
             if (_poll) clearInterval(_poll);
-            _poll = setInterval(function () { self.refreshQueue(); }, 4000);
-            return;
-        }
+            _poll = setInterval(function () { self.refreshQueue(); },
+                                 ACC_POLL_MS);
+        };
+        this.state.seenN = 0;
+        this.state.pollN = null;
+        if (!W().EventSource) { arm(); return; }
         try {
             _es = new EventSource(api() + '/bench/accuracy/' + encodeURIComponent(benchId) + '/stream');
             _es.onmessage = function (ev) {
@@ -3667,17 +4128,23 @@ var ACC = {
             // reappears or marks the board done when it does not.
             _es.onerror = function () {
                 streamInterrupted('bench-acc-status');
-                if (_poll) clearInterval(_poll);
-                _poll = setInterval(function () { self.refreshQueue(); }, 4000);
+                arm();
             };
-        } catch (e) {
-            if (_poll) clearInterval(_poll);
-            _poll = setInterval(function () { self.refreshQueue(); }, 4000);
-        }
+            // ACC-STALL: the socket can also die SILENTLY (half-open after a
+            // proxy blip: no error event, no data, EventSource thinks it is
+            // connected). The stream is never the only source of truth — the
+            // 4s queue poll runs alongside it whenever it is open, and
+            // pollCatchup decides whether the stream has to be rebuilt.
+            arm();
+        } catch (e) { arm(); }
     },
 
     onEvent: function (ev) {
         var st = gid('bench-acc-status');
+        // ACC-STALL: the poll compares this counter against the server's
+        // event_count to spot a stream that stopped delivering
+        this.state.seenN = (this.state.seenN | 0) + 1;
+        this.state.lastAct = Date.now();
         // U83: every event first mutates the board data, then the widgets
         // paint from it — counters and boxes can never disagree with each
         // other because they read the same source
@@ -3685,6 +4152,7 @@ var ACC = {
         if (ev.type === 'progress') {
             if (st) st.textContent = (ev.message || ev.phase || '') +
                 this.statusCounterText(ev);
+            this.state.lastMsg = String(ev.message || ev.phase || '');
             // U-PROG: the queue box fills per suite; the top bar tracks the
             // whole board (same counters the text reads from)
             var c = boardCounters(this.state.board || []);
@@ -4719,7 +5187,11 @@ return { mount: mount, isMounted: function () { return _mounted; },
          // U83 test seams: the queue board model (pure) + ACC methods so
          // a node harness can replay status payloads + event sequences
          _board: { boardSuiteMeta: boardSuiteMeta, boardQuestions: boardQuestions,
-                   boardSuiteBoxes: boardSuiteBoxes, boardCounters: boardCounters },
+                   boardSuiteBoxes: boardSuiteBoxes, boardCounters: boardCounters,
+                   // ACC-STALL: the two pure helpers behind the stall-proof
+                   // poll (restart decision + replay-safe accumulator reset)
+                   needsStreamRestart: needsStreamRestart,
+                   resetBoardEntry: resetBoardEntry },
          // U49 structural test seams: panel modules + the shared export
          // builders, so a DOM-free harness can prove every panel wires
          // resultsHead/advancedSection (card's Verify: 'import graph or
@@ -4737,12 +5209,23 @@ return { mount: mount, isMounted: function () { return _mounted; },
                  ctxResultPairs: ctxResultPairs,
                  // U-CPY clipboard/export generators
                  toMarkdown: toMarkdown, csvText: csvText, dropMenu: dropMenu,
-                 advancedSection: advancedSection },
+                 advancedSection: advancedSection,
+                 // TP-TABLES: the painter both the live panel and the
+                 // history cards use (needs the harness DOM)
+                 buildTpTables: buildTpTables, simpleTable: simpleTable },
          // U47 test seams (pure text-export plumbing; U49 reuses)
          _benchText: { buildThroughputText: buildThroughputText,
                        fmtNum: fmtNum, fmtMemory: fmtMemory,
                        singleTestLabel: singleTestLabel,
                        batchPromptSummary: batchPromptSummary,
                        outTokens: outTokens, outCell: outCell,
-                       ctxTargetOptions: ctxTargetOptions } };
+                       ctxTargetOptions: ctxTargetOptions,
+                       // TP-TABLES: the classic two-table spec (pure data —
+                       // heads, catalog keys, tooltips, cell formatters) the
+                       // live panel and the history cards both paint from,
+                       // plus the concatenated export column list
+                       tpTableSpecs: tpTableSpecs, tpDlCols: tpDlCols,
+                       tpSingles: tpSingles, tpBatch: tpBatch,
+                       tpBaseline: tpBaseline, tpPpPerReq: tpPpPerReq,
+                       tpCacheOffNote: tpCacheOffNote } };
 });

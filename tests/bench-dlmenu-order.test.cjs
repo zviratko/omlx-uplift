@@ -50,3 +50,18 @@ test('U-DL: results-head menus anchor to the head, right-aligned', () => {
     assert.ok(/\.bench-results-head \.bench-dl-menu \{[^}]*left:\s*auto;[^}]*right:\s*0/.test(CSS),
         'menu must open under the (right-aligned) buttons, not at left:0 of the page');
 });
+
+/* TP-TABLES: the new throughput section caption + cache-off note rules must
+   not disturb the menu anchoring contract this file exists to guard. */
+test('U-DL: the classic two-table paint keeps the positioned results head', () => {
+    const headRule = CSS.match(/\.bench-results-head \{[^}]*\}/);
+    assert.ok(headRule && /position:\s*relative/.test(headRule[0]),
+        'still positioned after the TP table restructure');
+    // additive rules only: the caption block must not re-open a shared one
+    const opens = (CSS.match(/\.bench-table th, \.bench-table td \{/g) || []).length;
+    assert.equal(opens, 1, '.bench-table cell rule stays single-sourced');
+    assert.ok(/\.bench-table\.tp-table td \{[^}]*font-variant-numeric:\s*tabular-nums/.test(CSS),
+        'the TP tables pin tabular digits (classic tabular-nums parity)');
+    assert.ok(/\.bench-tp-section \{/.test(CSS) && /\.bench-tp-note \{/.test(CSS),
+        'section caption + cache-off note classes are styled, not naked');
+});

@@ -285,3 +285,41 @@ test('U-CPY: decision dl spec carries the Time (s) column', () => {
     assert.ok(/uplift\.bench\.dec_time/.test(src),
         'decision table header uses the dec_time key');
 });
+
+/* TP-TABLES (user items 2 + 5): the throughput card painted ONE merged table
+   and NOTHING in this suite pinned that shape (no HEAD test touched
+   bench-tp-results or the column spec), so the classic TWO-table contract
+   would have gone unproven. This pin earns it on the new shape: the results
+   head (Copy + Download) still rides above the result set, and the set is two
+   tp-table-classed tables in classic's section order. */
+test('TP: results head + classic two tables (the merged table was never pinned)', () => {
+    const { win, byId } = load();
+    const TP = win.UpliftNativeBench.tp;
+    TP.state = { running: false, results: [
+        { test_type: 'single', pp: 1024, requested_pp: 1024, tg: 128,
+          ttft_ms: 100, tpot_ms: 10, processing_tps: 8000, gen_tps: 100,
+          total_throughput: 700, e2e_latency_s: 1.5, peak_memory_bytes: 0 },
+        { test_type: 'batch', batch_size: 4, tg: 128, tg_tps: 300,
+          pp_tps: 9000, avg_ttft_ms: 400, e2e_latency_s: 3 },
+    ], ctx: { model: 'M', profile: 'code_python', forceLm: false,
+             external: null } };
+    TP.renderTable();
+    const wrap = byId['bench-tp-results'];
+    assert.equal(findAll(wrap, 'bench-results-head').length, 1,
+        'one Copy/Download head above the result set');
+    assert.ok(allText(wrap).includes('COPYBTN'), 'Copy label via classic key');
+    assert.equal(findAll(wrap, 'tp-table').length, 2, 'classic TWO tables');
+    // section captions (no catalog entry here -> the frozen English fallbacks)
+    const text = allText(wrap);
+    assert.ok(text.includes('Single Request Results'), text.slice(0, 200));
+    assert.ok(text.includes('Continuous Batching'));
+    // the retired merged-table spec must not come back
+    const src = fs.readFileSync(require('path').join(STATIC_DIR,
+        'uplift_bench.js'), 'utf8');
+    assert.ok(!/function TP_COLS_DEF/.test(src),
+        'the single merged TP table definition is gone');
+    assert.ok(/'bench\.results\.single\.peak_mem'/.test(src),
+        'the Peak MLX column (classic) is part of the spec');
+    assert.ok(/buildTpTables\(rows\)/.test(src),
+        'live and history share one painter');
+});

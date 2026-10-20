@@ -463,13 +463,22 @@ async def bench_start(request: Request, is_admin: bool = Depends(require_admin))
         raise HTTPException(status_code=503, detail="Engine pool not initialized")
     body = await request.json()
     upload = bool((body or {}).pop("upload", False))
+    # cache-off flags: uplift-only keys, popped before the classic
+    # BenchmarkRequest is ever built (the engine receives them as kwargs)
+    no_hot_cache = bool((body or {}).pop("no_hot_cache", False))
+    no_ssd_cache = bool((body or {}).pop("no_ssd_cache", False))
     if await bench_queue.busy_check("throughput"):
         # upload rides the stored body: the pump re-pops it at dispatch,
         # so a queued run keeps the opt-in the click made (or didn't).
+        # The cache-off flags ride the same way for the same reason.
         return await _queued_start("throughput", {**(body or {}),
-                                                  "upload": upload})
+                                                  "upload": upload,
+                                                  "no_hot_cache": no_hot_cache,
+                                                  "no_ssd_cache": no_ssd_cache})
     try:
-        return await bench_engine.start(body or {}, pool, upload=upload)
+        return await bench_engine.start(body or {}, pool, upload=upload,
+                                        no_hot_cache=no_hot_cache,
+                                        no_ssd_cache=no_ssd_cache)
     except bench_engine.Conflict as e:
         raise HTTPException(status_code=409, detail=str(e))
     except bench_engine.BadInput as e:

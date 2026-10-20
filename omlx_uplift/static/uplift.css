@@ -2825,6 +2825,19 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
   padding: 3px 8px; text-align: right; }
 .bench-table th { color: var(--dim); text-transform: uppercase; letter-spacing: 1px; font-size: 10px; }
 .bench-table td:first-child, .bench-table th:first-child { text-align: left; }
+/* TP-TABLES: classic prints its two throughput tables with a section caption
+   above each ('Single Request Results' / 'Continuous Batching', the prompt
+   summary beside the batch one) and tabular digits so the columns read down.
+   Horizontal alignment is already classic's (right, first column left) via
+   the shared rule above — only the digit glyphs needed pinning. */
+.bench-table.tp-table td { font-variant-numeric: tabular-nums; }
+.bench-tp-section { display: flex; align-items: baseline; gap: 8px;
+  margin: 9px 0 3px; }
+.bench-tp-section:first-child { margin-top: 0; }
+.bench-tp-section-note { color: var(--dim); font-size: 10px; }
+/* The run snapshot says the caches were off; the note must not compete with
+   the numbers for attention. */
+.bench-tp-note { margin: 0 0 4px; color: var(--dim); font-size: 11px; }
 .bench-result { padding: 10px 14px; border: 1px solid var(--edge); }
 .bench-result-row { display: flex; justify-content: space-between; gap: 18px;
   font-size: 11px; padding: 2px 0; border-bottom: 1px dotted var(--edge); }
