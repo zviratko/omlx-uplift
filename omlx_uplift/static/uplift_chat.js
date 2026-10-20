@@ -152,6 +152,20 @@ function normSettings(s) {
     });
 }
 function settingsDiffer(a, b) { return normSettings(a) !== normSettings(b); }
+function syncThinkInputs(c) {
+    var mode = (c && /^(auto|off|on|limit)$/.test(c.thinking)) ? c.thinking : 'auto';
+    var budVal = (c && typeof c.thinkingBudget === 'number' && c.thinkingBudget >= 0)
+        ? c.thinkingBudget : null;
+    var think = gid('chat-native-think-mode');
+    var bud = gid('chat-native-think-budget');
+    if (think) think.value = mode;
+    if (bud) {
+        bud.value = budVal == null ? '' : String(budVal);
+        var lim = mode === 'limit';
+        bud.hidden = !lim;
+        if (bud.parentNode) bud.parentNode.hidden = !lim;
+    }
+}
 function applyChatSettings(s) {
     // false = nothing to apply (classic/pre-round-9 entry: PROMPT-only
     // profile — the page's settings stay the user's own, unmanaged)
@@ -163,15 +177,12 @@ function applyChatSettings(s) {
     // explicit pick": resolve to the default (first) voice, same rule
     // chatVoiceId uses everywhere else.
     if (!n.voice && hasVoices()) n.voice = chatVoiceId();
-    var think = gid('chat-native-think-mode');
-    var bud = gid('chat-native-think-budget');
-    if (think) think.value = n.thinking;
-    if (bud) bud.value = n.thinkingBudget == null ? '' : String(n.thinkingBudget);
     if (_conv) {
         _conv.thinking = n.thinking;
         _conv.thinkingBudget = n.thinkingBudget;
         _conv.generation = n.generation;
     }
+    syncThinkInputs(n);
     fillGenerationInputs(_conv || {});
     var web = gid('chat-native-web');
     _webSearch = n.webSearch;
@@ -340,6 +351,9 @@ function hydrateConv() {
     // variant re-provisions the whole page after reload.
     if (!_conv) return;
     if (!_conv.variants) _conv.variants = {};
+    if (!/^(auto|off|on|limit)$/.test(_conv.thinking)) _conv.thinking = 'auto';
+    if (!(typeof _conv.thinkingBudget === 'number' && _conv.thinkingBudget >= 0))
+        _conv.thinkingBudget = null;
     if (_conv.activeProfile && (_conv.customPrompt || _conv.customState)) {
         var bp = findProfile(_profiles, _conv.activeProfile);
         var lp = String(_conv.customPrompt ||
@@ -361,6 +375,11 @@ function hydrateConv() {
     if (v) {
         _conv.systemPrompt = sys ? sys.value : '';
         applyChatSettings(v.settings || {});
+    } else {
+        var base = _conv.activeProfile
+            ? findProfile(_profiles, _conv.activeProfile) : null;
+        if (base && base.settings) applyChatSettings(base.settings);
+        else syncThinkInputs(_conv);
     }
     fillGenerationInputs(_conv);
     syncProfileSelect();
@@ -401,9 +420,7 @@ function newConv() {
              variants: {},
              // thinking: 'auto'|'off'|'on'|'limit' — classic's select, same
              // wire semantics (openai_models.py: enable_thinking,
-             // thinking_budget). Live-only: the history store keeps
-             // model/systemPrompt/messages; thinking settings re-default
-             // to auto on reload (stated on the NAT-4 card, 4/6).
+             // thinking_budget), persisted per conversation (BUG-7).
              thinking: 'auto', thinkingBudget: null,
              // U46: per-chat sampling overrides (classic session settings);
              // server persists the numeric subset (routers/chat.py).
@@ -1563,7 +1580,7 @@ function toolbar() {
         var b = parseInt(budget.value, 10);
         _conv.thinkingBudget = (isFinite(b) && b >= 0) ? b : null;
         showBudget(think.value === 'limit');   // U79+U80: group + input together
-        saveConv();   // fields themselves are live-only (store drops them)
+        saveConv();   // BUG-7: persisted per conversation
         onPageEdited();        // ROUND 11: settings divergence -> variant
     }
     think.addEventListener('change', saveThinking);

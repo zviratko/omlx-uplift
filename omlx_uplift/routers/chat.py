@@ -310,9 +310,14 @@ async def chat_history_save(request: Request,
         # ROUND 11: per-profile unsaved working copies (the stash's
         # successor — divergence belongs to the profile, not to a slot)
         "variants": _clean_variants(body.get("variants")),
-        "thinking": bool(body.get("thinking")),
+        "thinking": body.get("thinking")
+        if isinstance(body.get("thinking"), str)
+        and body.get("thinking") in ("auto", "off", "on", "limit")
+        else "auto",
         "thinkingBudget": body.get("thinkingBudget")
-        if isinstance(body.get("thinkingBudget"), int) else None,
+        if isinstance(body.get("thinkingBudget"), int)
+        and not isinstance(body.get("thinkingBudget"), bool)
+        and body.get("thinkingBudget") >= 0 else None,
         # U46: classic persists the sidebar sampling fields per session
         # (schedulePersistModelSettings -> syncSessionModelSettingsFromUi);
         # native mirrors the same scope. None = nothing set = engine default.

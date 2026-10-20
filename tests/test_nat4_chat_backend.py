@@ -249,3 +249,23 @@ def test_generation_overrides_persist_with_zero(client):
     # absent -> None as well
     client.post("/uplift/api/chat/history", json=_conv())
     assert client.get("/uplift/api/chat/history/c1").json()["generation"] is None
+
+
+def test_thinking_mode_and_budget_roundtrip_sanitized(client):
+    """BUG-7: thinking mode string ('auto'|'off'|'on'|'limit') and
+    thinkingBudget persist per conversation instead of coercing thinking to
+    bool True or accepting bool as thinkingBudget."""
+    for mode in ("auto", "off", "on", "limit"):
+        r = client.post("/uplift/api/chat/history",
+                        json=_conv(thinking=mode, thinkingBudget=4096))
+        assert r.status_code == 200
+        got = client.get("/uplift/api/chat/history/c1").json()
+        assert got["thinking"] == mode
+        assert got["thinkingBudget"] == 4096
+    # invalid / boolean / missing thinking -> 'auto'; boolean / negative budget -> None
+    for bad_t, bad_b in ((True, True), (False, -1), ("invalid", "400"), (None, None)):
+        client.post("/uplift/api/chat/history",
+                    json=_conv(thinking=bad_t, thinkingBudget=bad_b))
+        got = client.get("/uplift/api/chat/history/c1").json()
+        assert got["thinking"] == "auto"
+        assert got["thinkingBudget"] is None

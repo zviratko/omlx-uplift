@@ -1257,3 +1257,60 @@ test('MATH: both render paths normalize, the store stays raw', () => {
     assert.ok(!/speakFeed\(normMath/.test(src),
         'voice feed keeps its own sanitizer path untouched');
 });
+
+test('BUG-7: switching conversations restores thinking mode, budget and clean preset settings', async () => {
+    const h = makeHarness({
+        localStorage: { [PROFILE_LS]: JSON.stringify([
+            { name: 'System Default', content: '' },
+            { name: 'Fast', content: 'be fast',
+              settings: { thinking: 'off', thinkingBudget: null, webSearch: false } },
+            { name: 'Deep', content: 'think hard',
+              settings: { thinking: 'limit', thinkingBudget: 2048, webSearch: true } },
+        ]) },
+        convs: [
+            { id: 'c1', title: 'One', model: 'SmolLM2-360M-Instruct-oQ4',
+              systemPrompt: 'be fast', activeProfile: 'Fast',
+              thinking: 'off', thinkingBudget: null, messages: [{ role: 'user', content: 'hi' }] },
+            { id: 'c2', title: 'Two', model: 'SmolLM2-360M-Instruct-oQ4',
+              systemPrompt: 'think hard', activeProfile: 'Deep',
+              thinking: 'limit', thinkingBudget: 2048, messages: [{ role: 'user', content: 'yo' }] },
+            { id: 'c3', title: 'LegacyBool', model: 'SmolLM2-360M-Instruct-oQ4',
+              systemPrompt: '', activeProfile: '',
+              thinking: true, thinkingBudget: null, messages: [{ role: 'user', content: 'old' }] },
+        ],
+    });
+    const M = h.win.UpliftNativeChat;
+    M.mount();
+    for (let i = 0; i < 12; i++) await tick();
+    const think = h.byId['chat-native-think-mode'];
+    const bud = h.byId['chat-native-think-budget'];
+    const list = h.byId['chat-native-convs'];
+    const btnFor = (id) => list.children.find((b) => b.dataset.id === id);
+
+    // Switch to c1 (clean preset 'Fast' -> thinking 'off')
+    btnFor('c1').dispatch('click');
+    for (let i = 0; i < 6; i++) await tick();
+    assert.equal(think.value, 'off', 'c1 restores Fast preset thinking=off');
+    assert.equal(M._state().conv.thinking, 'off');
+    let req = (await M.shapeRequest({
+        body: { messages: [{ role: 'user', text: 'q' }] }, headers: {} })).body;
+    assert.equal(req.enable_thinking, false, 'shapeRequest honours restored off mode');
+
+    // Switch to c2 (clean preset 'Deep' -> thinking 'limit', budget 2048)
+    btnFor('c2').dispatch('click');
+    for (let i = 0; i < 6; i++) await tick();
+    assert.equal(think.value, 'limit', 'c2 restores Deep preset thinking=limit');
+    assert.equal(bud.value, '2048', 'c2 restores budget input');
+    assert.equal(bud.hidden, false, 'budget input unhidden on limit');
+    req = (await M.shapeRequest({
+        body: { messages: [{ role: 'user', text: 'q' }] }, headers: {} })).body;
+    assert.equal(req.enable_thinking, true);
+    assert.equal(req.thinking_budget, 2048);
+
+    // Switch to c3 (legacy boolean thinking:true in store -> coerced to 'auto')
+    btnFor('c3').dispatch('click');
+    for (let i = 0; i < 6; i++) await tick();
+    assert.equal(M._state().conv.thinking, 'auto', 'legacy boolean thinking coerced to auto');
+    assert.equal(think.value, 'auto', 'select synced back to auto');
+    assert.equal(bud.hidden, true, 'budget hidden again when leaving limit');
+});
