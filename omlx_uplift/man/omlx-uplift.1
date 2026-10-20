@@ -201,7 +201,7 @@ Extract a skin crate into
 .Aq name - Ns Aq mtime Ns / .
 Never overwrites an existing directory — that one may carry hand edits.
 .It Xo Ic dev
-.Ic bootstrap | status | patches | install | reconfigure
+.Ic bootstrap | status | patches | install | upgrade | reconfigure
 .Xc
 Manage the
 .Em omlx-dev
@@ -248,17 +248,30 @@ the omlx-dev service shares it .
 .Op Fl -with-custom-kernel
 .Op Fl -with-grammar
 .Op Fl -dry-run
+.Op Fl -restart
 Materialize enabled build patches as one commit per patch on the
 .Em uplift-dev
 branch, re-gate them against the new base, then build the
 .Em omlx-dev
-formula from that tip
-.Pq Ic "brew install" Ap0 Ar first No build , Ic reinstall No afterwards .
+formula from that tip: always a full rebuild.
+Each build installs a fresh per-build versioned keg beside the live one,
+which switches over when the build finishes.
 Kernel/grammar flags default to the flags recorded in your existing build
 receipt.
 .Ic dev
 .Ic upgrade
-is accepted as a legacy alias.
+runs the same pipeline but rebuilds only when the synced omlx tip or the
+patch set has moved; if the current keg already matches the cut tip it
+reports up to date and builds nothing.
+Pass
+.Fl -force
+to rebuild anyway.
+Both verbs accept
+.Fl -restart
+to kickstart the
+.Em omlx-dev
+service after a successful run (a skipped rebuild included, so the
+running server always matches the current keg).
 .It Ic dev
 .Ic reconfigure
 .Op Fl -port Ar N

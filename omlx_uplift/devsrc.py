@@ -1274,12 +1274,21 @@ def _stream_build(res: BuildResult, cmd: list, env: dict | None = None) -> int:
 
 def run_dev_build(*, with_custom_kernel: bool = False,
                   with_grammar: bool = False, dry_run: bool = False,
+                  conditional: bool = False,
                   warn=None, on_line=None, on_patch_failure=None,
                   trigger: str = "cli") -> BuildResult:
     """One rebuild path (DEV-context decision 3): re-cut uplift-dev from
-    the synced base with one commit per enabled build patch, then
-    `brew install` (first build) or `brew reinstall` (rebuild). Both always
-    re-stage the branch tip (`brew upgrade` would no-op on a head).
+    the synced base with one commit per enabled build patch, then the
+    KEG-VERSIONED brew build (plain `install` of a freshly stamped fake
+    version — never reinstall/--HEAD). Both always re-stage the branch
+    tip (`brew upgrade` would no-op on a head).
+
+    conditional: 'dev upgrade' semantics (user 2026-10-20) — after the
+    deterministic materialize, skip the brew build entirely when the cut
+    tip equals the last BUILT sha and that keg is still installed: omlx
+    HEAD and the patch set both moved nothing, so the current keg IS
+    this build. `dev install` (and --force on upgrade) stays the
+    unconditional rebuild path.
 
     warn: optional callable printing the DEV-context-7 coexistence warning
     just before the brew subprocess (CLI passes its printer; the dashboard
@@ -1380,7 +1389,7 @@ def run_dev_build(*, with_custom_kernel: bool = False,
         return _run_dev_build_body(res, cfg, build_patches, patchsource,
                                    brewutil, with_custom_kernel,
                                    with_grammar, dry_run, warn,
-                                   on_patch_failure)
+                                   on_patch_failure, conditional=conditional)
     finally:
         _root.removeHandler(_ph)
         _ph.close()
@@ -1556,7 +1565,7 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
 
 def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                         with_custom_kernel, with_grammar, dry_run, warn,
-                        on_patch_failure=None):
+                        on_patch_failure=None, conditional=False):
     import subprocess
 
     from . import patches as _patches_mod
@@ -1679,6 +1688,32 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     res.n_applied = len([c for c in commits if c.get("sha")])
     res.n_skipped = len([c for c in commits
                          if c.get("skipped") == "already-present"])
+
+    # CONDITIONAL UPGRADE (user 2026-10-20): materialize is deterministic —
+    # the same base + the same patch set cut the SAME tip. If that tip is
+    # what the last successful build already produced AND its keg is still
+    # on disk, neither omlx HEAD nor the patches moved: nothing to rebuild.
+    # Only 'dev upgrade' reaches this (install/--force/dry-run are always
+    # full paths); the marks and re-gate below already ran for that tip at
+    # its last real build, so skipping them is safe here.
+    if conditional and not dry_run:
+        built_sha = (cfg.get("built_sha") or "").strip()
+        bver = (cfg.get("built_version") or "").strip()
+        from . import kegstash as _ks
+        if built_sha and tip == built_sha and bver and os.path.isdir(
+                os.path.join(_ks.cellar_dir(), bver)):
+            res.ok, res.returncode, res.stage = True, 0, "up-to-date"
+            _emit(res, "out", "up to date — neither omlx HEAD nor the patch "
+                              f"set moved; keg {bver} IS this build "
+                              "(dev install or dev upgrade --force rebuilds "
+                              "anyway)")
+            active = _ks.active_keg()
+            if active and active != bver:
+                _emit(res, "out", f"note: the ACTIVE keg is '{active}' "
+                                  "(a rollback) — 'omlx-uplift dev use "
+                                  f"{bver}' switches back")
+            return res
+
     # a materialize skip means the base already carries the patch — when
     # the patch is a since-MERGED PR that means it is no longer needed, so
     # stamp it obsolete NOW (best-effort network). Must run BEFORE

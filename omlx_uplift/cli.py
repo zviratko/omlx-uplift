@@ -1164,9 +1164,13 @@ def cmd_dev(argv=None) -> int:
     """omlx-dev management (DEV queue). Subcommands:
       bootstrap   questionnaire + dev-src clone + dev.json + uplift-dev branch
       status      dev-src state as JSON (branch/tip/drift)
-      install     materialize build patches + brew install/reinstall (DEV-3)
-      reconfigure port/base-path/sharing (DEV-4)
-      ('upgrade' is accepted as a legacy alias of 'install')"""
+      install     materialize build patches + rebuild the keg — ALWAYS
+                  rebuilds (DEV-3)
+      upgrade     same pipeline, but CONDITIONAL (user 2026-10-20): rebuilds
+                  only when omlx HEAD or the patch set moved; --force
+                  rebuilds anyway
+      both accept --restart (kickstart omlx-dev after a successful run)
+      reconfigure port/base-path/sharing (DEV-4)"""
     import json as _json
 
     ap = argparse.ArgumentParser(prog="omlx-uplift dev")
@@ -1181,7 +1185,8 @@ def cmd_dev(argv=None) -> int:
                          "keg_stash_keep, else 5)")
     ap.add_argument("--force", action="store_true",
                     help="use: activate even with a live dev server / "
-                         "unverified shebang")
+                         "unverified shebang; upgrade: rebuild even if "
+                         "already up to date")
     ap.add_argument("--scope", choices=["omlx", "dev", "both",
                                         "runtime", "build"],
                     help="scope filter for 'dev patches' (DEV-6; default: "
@@ -1202,6 +1207,11 @@ def cmd_dev(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="install: materialize check + print the brew "
                          "command, build nothing")
+    ap.add_argument("--restart", action="store_true",
+                    help="install/upgrade: kickstart the omlx-dev service "
+                         "after a successful run (skipped builds too, so "
+                         "the running server always matches the current "
+                         "keg)")
     ap.add_argument("--port", type=int,
                     help="reconfigure: dev server port (default 8001)")
     ap.add_argument("--base-path", help="reconfigure: dev data root "
@@ -1423,7 +1433,7 @@ def cmd_dev(argv=None) -> int:
         rc = cmd_dev_install(types.SimpleNamespace(
             with_custom_kernel=False, with_grammar=False, dry_run=False))
         if rc == 0:
-            subprocess.run(["brew", "services", "restart", "omlx-dev"])
+            rc = _dev_restart()
         return rc
 
     if args.action == "status":
@@ -1646,10 +1656,34 @@ def _patch_failure_prompt(pid: str, reason: str, tried: list) -> str:
     return "abort"
 
 
+def _dev_restart() -> int:
+    """--restart: kickstart the omlx-dev launchd service in place. The
+    KEG-VERSIONED switch only reaches the RUNNING server after a restart —
+    until then the old process keeps the old code (every build note says
+    so). launchd restarts it from the same plist, new keg picked up via the
+    opt symlink. Falls back to a hint if the label isn't loaded."""
+    import subprocess
+    r = subprocess.run(["launchctl", "kickstart", "-k",
+                        f"gui/{os.getuid()}/sh.brew.omlx-dev"],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        print("omlx-dev restarted — the board now runs the current keg",
+              flush=True)
+        return 0
+    last = (r.stderr or r.stdout or "").strip().splitlines()
+    print(f"kickstart failed: {last[-1] if last else r.returncode}",
+          file=sys.stderr)
+    print("is the service installed? try: brew services restart omlx-dev",
+          file=sys.stderr)
+    return r.returncode or 1
+
+
 def cmd_dev_install(args) -> int:
-    """`omlx-uplift dev install`: thin CLI skin over devsrc.run_dev_build
-    (BE-1). The engine is pure data in/out; this function only decides what
-    to print — the patch table, the colored header, the next-step hints."""
+    """`omlx-uplift dev install|upgrade`: thin CLI skin over
+    devsrc.run_dev_build (BE-1). The engine is pure data in/out; this
+    function only decides what to print — the patch table, the colored
+    header, the next-step hints — and (upgrade) whether a rebuild is even
+    due. --restart kickstarts the service when the run ends ok."""
     from . import devsrc
 
     def _print(stream, text):
@@ -1680,7 +1714,7 @@ def cmd_dev_install(args) -> int:
         # so seeing one is the boundary signal; print the header first.
         if (not state["header"]
                 and (text.startswith(("running: ", "dry-run: would run",
-                                      "previous keg stashed"))
+                                      "previous keg stashed", "up to date"))
                      or "RE-GATE FAILED" in text)):
             state["header"] = True
             _header(res)
@@ -1691,22 +1725,35 @@ def cmd_dev_install(args) -> int:
     # onto the current base, a terminal asks what to do; scripted/
     # non-tty runs keep the pre-VER-1 behavior (abort, change nothing).
     resolver = _patch_failure_prompt if sys.stdin.isatty() else None
+    # 'dev upgrade' = conditional rebuild (user 2026-10-20): engine skips
+    # the brew build when the cut tip equals the last built sha and its keg
+    # exists. 'dev install' (and the auto-build hook's SimpleNamespace,
+    # which carries no action) stays unconditional; --force overrides.
+    conditional = (getattr(args, "action", "install") == "upgrade"
+                   and not getattr(args, "force", False))
     res = devsrc.run_dev_build(
         with_custom_kernel=bool(getattr(args, 'with_custom_kernel', False)),
         with_grammar=bool(getattr(args, 'with_grammar', False)),
         dry_run=bool(getattr(args, 'dry_run', False)),
+        conditional=conditional,
         warn=_coexistence_warnings, on_line=_on_line,
         on_patch_failure=resolver)
     # fallback: materialize succeeded but no trigger line came
     if (not state["header"] and res.materialize
             and res.materialize.get("ok")):
         _header(res)
-    if res.ok and res.stage == 'ok':
-        _dev_next_steps(res.cfg or {}, fresh=False)
-        # VERY LAST: the one command that matters now (brew's own 'after an
-        # upgrade' caveat is skipped — the build runs with --quiet)
-        print("\nTo restart omlx-dev now run:\n"
-              "  brew services restart omlx-dev", flush=True)
+    if res.ok and res.stage in ('ok', 'up-to-date'):
+        if res.stage == 'ok':
+            _dev_next_steps(res.cfg or {}, fresh=False)
+        if getattr(args, "restart", False):
+            return _dev_restart()
+        if res.stage == 'ok':
+            # VERY LAST: the one command that matters now (brew's own
+            # 'after an upgrade' caveat is skipped — the build runs
+            # with --quiet)
+            print("\nTo restart omlx-dev now run:\n"
+                  "  brew services restart omlx-dev"
+                  "\n(or re-run with --restart)", flush=True)
     return res.returncode
 
 

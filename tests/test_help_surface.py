@@ -114,26 +114,29 @@ class TestHelpSurface(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
     def test_dev_rename_is_consistent(self):
-        """dev install/upgrade rename (2026-09-24): no surface may still
-        advertise 'dev upgrade' as the build command."""
+        """dev verb contract (renamed 2026-09-24; UPGRADE RE-PROMOTED
+        2026-10-20): 'dev install' is the unconditional rebuild,
+        'dev upgrade' the CONDITIONAL one (rebuild only when omlx HEAD or
+        the patch set moved). Both are documented on every surface; the
+        old 'legacy alias' wording must be gone everywhere."""
         rc, out = _main_argv(["help", "dev"])
         self.assertEqual(rc, 0)
         self.assertIn("dev bootstrap", out)
         self.assertIn("dev install", out)
-        self.assertNotIn("dev upgrade", out)
+        self.assertIn("dev upgrade", out)
+        self.assertIn("--restart", out)
         text = Path(helpmod.man_path()).read_text(encoding="utf-8")
-        # the man SYNOPSIS list must lead with bootstrap (the one mention of
-        # upgrade allowed is the legacy-alias note)
-        self.assertIn("Ic bootstrap | status | patches | install | reconfigure",
-                      text)
+        self.assertIn(
+            "Ic bootstrap | status | patches | install | upgrade | reconfigure",
+            text)
+        self.assertNotIn("legacy alias", text)
         self.assertEqual(text.count(".Ic upgrade"), 1,
-                         "man page documents dev upgrade beyond the "
-                         "legacy-alias note")
-        for bad in ("cmd_dev_upgrade", '"dev upgrade"'):
+                         "man page documents dev upgrade in exactly one "
+                         "body paragraph (the SYNOPSIS list is shared)")
+        self.assertIn("rebuilds only when", text,
+                      "man page must document the conditional semantics")
+        for bad in ("cmd_dev_upgrade",):
             self.assertNotIn(bad, (PKG / "cli.py").read_text(encoding="utf-8"))
-        for loc in (PKG / "locales").glob("*.json"):
-            if "dev upgrade" in loc.read_text(encoding="utf-8"):
-                self.fail(f"{loc.name} still says 'dev upgrade'")
 
     def test_show_man_pipe_does_not_crash(self):
         # non-tty path (our redirect_stdout is not a tty)
