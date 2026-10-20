@@ -13,6 +13,12 @@ users never see.
 
 ## Unreleased
 
+## [2.5] — 2026-10-20
+
+- **The dev lane stands alone.** omlx-dev and Uplift no longer require the classic oMLX keg: a machine that runs only the HEAD build installs, mounts and patch-checks without it. The build base follows upstream HEAD by default, and the dev panel says so.
+- **Loads faster, redraws less.** Heavy pages — voice chat, the patches and dev panels, download tools — load only when you first open them. Theme switches no longer rebuild every chart, and the server batches duplicate sampling work behind the meters.
+- **Chat settings stick.** Thinking mode and your preset selection survive switching between conversations.
+
 ## [2.4] — 2026-10-20
 
 - **The Patches page is one table.** One row per patch, with checkboxes for the vanilla server and the dev build, and an AUTO column for auto-update. The MANAGE dialog covers versions, pins, test, source edit and removal.
