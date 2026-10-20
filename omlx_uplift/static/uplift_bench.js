@@ -694,6 +694,26 @@ function fmtMemory(bytes) {
     if (gb >= 1) return gb.toFixed(2) + ' GB';
     return (bytes / (1024 * 1024)).toFixed(0) + ' MB';
 }
+function outTokens(r) {
+    // Measured decode length of a throughput row. Single tests report
+    // completion_tokens; batch reports total_gen_tokens (sum over the
+    // batch). TG is only ever a ceiling in the row — this is the truth.
+    if (r.completion_tokens != null) return r.completion_tokens;
+    if (r.total_gen_tokens != null) {
+        var bs = r.batch_size || 1;
+        return Math.round(r.total_gen_tokens / bs);
+    }
+    return null;
+}
+function outCell(r) {
+    // 'tg1024' labels what was REQUESTED. Show what the model GENERATED;
+    // when the run ended early (external endpoints, spec-decode engines)
+    // the fraction says so instead of the row silently lying.
+    var out = outTokens(r);
+    if (out == null) return '\u2014';
+    if (r.tg != null && out < r.tg) return out + '/' + r.tg;
+    return String(out);
+}
 function contextLabel(profile) {
     var keys = { code_python: 'Code (Python)', code_mixed: 'Code (Mixed)',
         novel_ko: 'Novel (Korean)', novel_en: 'Novel (English)',
@@ -1416,14 +1436,25 @@ function resultsHead(buildText, titleKey, titleFb, dl) {
 // U70: standard cols from the shared [key, label] tables
 function dlCols(defs) {
     return defs.map(function (c) {
-        return { head: c[1], get: function (r) { return r[c[0]]; } };
+        return { head: c[1], get: function (r) { return c[2] ? c[2](r) : r[c[0]]; } };
+    });
+}
+
+// Shared row-formatter for the [key, head, getter?] tuples in TP_COLS_DEF.
+function tpCols(cols) {
+    return cols.map(function (c) {
+        if (c[2]) return [c[0], c[1], function (v, r) { return c[2](r); }];
+        return [c[0], c[1], function (v) {
+            return v == null ? '—'
+                : (typeof v === 'number' ? TP.fmt(c[0], v) : String(v));
+        }];
     });
 }
 
 // U64: one column definition for the live table AND history snapshots
 function TP_COLS_DEF() {
     return [
-        ['pp', 'PP'], ['tg', 'TG'],
+        ['pp', 'PP'], ['tg', 'TG'], ['out', 'out', outCell],
         ['ttft_ms', t('bench.metrics.ttft.name', 'TTFT')],
         ['processing_tps', t('bench.metrics.pp_tps.name', 'pp TPS')],
         ['gen_tps', t('bench.metrics.tg_tps.name', 'tg TPS')],
@@ -1447,12 +1478,7 @@ function tpHistoryBody(e) {
         card.appendChild(historyEmptyNote());
         return card;
     }
-    card.appendChild(simpleTable(TP_COLS.map(function (c) {
-        return [c[0], c[1], function (v) {
-            return v == null ? '\u2014'
-                : (typeof v === 'number' ? TP.fmt(c[0], v) : String(v));
-        }];
-    }), rows));
+    card.appendChild(simpleTable(tpCols(TP_COLS), rows));
     card.prepend(resultsHead(function () {
         return buildThroughputText(ctx, rows);
     }));
@@ -1791,12 +1817,7 @@ var TP = {
         var rows = this.state.results;
         if (!rows.length) { wrap.replaceChildren(); return; }
         var self = this;
-        var tbl = simpleTable(TP_COLS.map(function (c) {
-            return [c[0], c[1], function (v) {
-                return v == null ? '\u2014'
-                    : (typeof v === 'number' ? self.fmt(c[0], v) : String(v));
-            }];
-        }), rows);
+        var tbl = simpleTable(tpCols(TP_COLS), rows);
         // U47: classic has a Copy of the whole result set as plain text
         // ("Benchmark Results (Text — Copy & Paste)"); mirror it above the
         // table with the classic format (buildThroughputText).
@@ -4722,5 +4743,6 @@ return { mount: mount, isMounted: function () { return _mounted; },
                        fmtNum: fmtNum, fmtMemory: fmtMemory,
                        singleTestLabel: singleTestLabel,
                        batchPromptSummary: batchPromptSummary,
+                       outTokens: outTokens, outCell: outCell,
                        ctxTargetOptions: ctxTargetOptions } };
 });

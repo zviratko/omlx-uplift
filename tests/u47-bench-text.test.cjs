@@ -12,7 +12,8 @@ const assert = require('node:assert');
 const { STATIC_DIR } = require('./static-src.cjs');
 
 const B = require(`${STATIC_DIR}/uplift_bench.js`);
-const { buildThroughputText, fmtNum, fmtMemory, singleTestLabel } = B._benchText;
+const { buildThroughputText, fmtNum, fmtMemory, singleTestLabel,
+        outTokens, outCell } = B._benchText;
 
 const single = { test_type: 'single', pp: 1024, requested_pp: 1024, tg: 128,
     ttft_ms: 123.456, tpot_ms: 7.891, processing_tps: 8304.12, gen_tps: 126.78,
@@ -109,6 +110,27 @@ test('U47: helpers match classic edge cases', () => {
     assert.equal(singleTestLabel({ pp: 1024, tg: 128 }), 'pp1024/tg128');
     assert.ok(buildThroughputText({ model: 'M', profile: 'code_python' }, [])
         .endsWith('='.repeat(80)), 'no results -> header block only (button is hidden anyway)');
+});
+
+/* TG-BENCH: the tg label is what was REQUESTED; the out column reports
+   what was GENERATED (completion_tokens; batch total_gen_tokens/size).
+   Early-stopping rows (external endpoints, spec-decode engines — paths
+   the force-tg patch cannot cover) print the fraction instead of letting
+   a tg1024 row hide a 21-token decode. The classic byte-format text
+   export above stays untouched on purpose (side-by-side paste contract). */
+test('TG-BENCH: outTokens reads measured decode from single and batch rows', () => {
+    assert.equal(outTokens({ completion_tokens: 128 }), 128);
+    assert.equal(outTokens({ total_gen_tokens: 63, batch_size: 3 }), 21);
+    assert.equal(outTokens({ total_gen_tokens: 63 }), 63, 'bs missing -> per-request as-is');
+    assert.equal(outTokens({}), null);
+});
+test('TG-BENCH: outCell shows truth, fraction on shortfall, dash on unknown', () => {
+    assert.equal(outCell({ tg: 128, completion_tokens: 128 }), '128');
+    assert.equal(outCell({ tg: 1024, completion_tokens: 21 }), '21/1024');
+    assert.equal(outCell({ tg: 1024, total_gen_tokens: 3072, batch_size: 3 }), '1024');
+    assert.equal(outCell({ tg: 1024, total_gen_tokens: 63, batch_size: 3 }), '21/1024');
+    assert.equal(outCell({ tg: 1024 }), '\u2014',
+        'row without measured counts (older history) stays honest-empty');
 });
 
 /* U50: context-target option builder (native window default, hide-above-

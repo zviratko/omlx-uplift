@@ -13,6 +13,8 @@ users never see.
 
 ## Unreleased
 
+- **tg benchmarks now decode what they claim.** The generation length you pick on the Throughput bench (tg128–1024) was only a ceiling: models that end their turn early (gemma stops ~25 tokens in) measured a short decode under a tg1024 label. A new bundled patch (`bench-force-tg`, on the Patches page) makes the benchmark ignore the model's own end-of-turn stops — bench requests only, normal serving is untouched. The results table gained an `out` column with the real generated-token count, showing `21/1024` when a run still ends early (external endpoints, speculative-decode engines).
+
 ## [2.5] — 2026-10-20
 
 - **The dev lane stands alone.** omlx-dev and Uplift no longer require the classic oMLX keg: a machine that runs only the HEAD build installs, mounts and patch-checks without it. The build base follows upstream HEAD by default, and the dev panel says so.
