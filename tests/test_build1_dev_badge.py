@@ -72,12 +72,19 @@ def test_receipt_base_and_patch_ids(monkeypatch):
 def test_badge_js_prefers_the_keg_name():
     import os
 
-    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "omlx_uplift", "static", "uplift_boot.js")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(root, "omlx_uplift", "static", "uplift_boot.js")
     src = open(p, encoding="utf-8").read()
     assert "d.keg || d.base_sha" in src.replace("\n", " ").replace("  ", " ") \
         or "!(d.keg || d.base_sha)" in src
     assert "main.textContent = d.keg" in src
+    # line 2 (user 2026-10-20): the vanilla base rides below the logo —
+    # built in JS, positioned by the absolute .logo-base rule in CSS
+    assert "bl.className = 'logo-base'" in src
+    css = open(os.path.join(root, "omlx_uplift", "static", "uplift.css"),
+               encoding="utf-8").read()
+    assert ".logo .logo-base {" in css
+    assert "header.top.has-tagline .logo .logo-base { top: calc(100% + 34px); }" in css
 
 
 def test_auto_update_label_no_vanilla_tail():

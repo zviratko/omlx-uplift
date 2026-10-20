@@ -82,6 +82,24 @@ function renderDevBuild() {
             + (d.built_sha ? '\nuplift-dev @ ' + d.built_sha.slice(0, 12) : '')
             + (patches.length ? '\n' + patches.map(p => p.id + ' v' + p.version).join('\n') : '');
         el.hidden = false;
+        // line 2, aligned to the logo's left edge: the vanilla base this
+        // dev keg tracks (user 2026-10-20 — the keg stamp alone dropped
+        // it from the header). Absolute sub-line: never grows the header.
+        const baseTxt = d.omlx_version
+            ? 'omlx v' + d.omlx_version
+              + (d.base_sha ? ' \u00b7 ' + d.base_sha.slice(0, 7) : '')
+            : (d.base_sha ? 'omlx @ ' + d.base_sha.slice(0, 7) : '');
+        if (baseTxt) {
+            const logo = document.querySelector('.logo');
+            if (logo) {
+                logo.querySelector('.logo-base')?.remove();
+                const bl = document.createElement('span');
+                bl.className = 'logo-base';
+                bl.textContent = baseTxt;
+                bl.title = el.title;
+                logo.append(bl);
+            }
+        }
     }).catch(() => {});
 }
 

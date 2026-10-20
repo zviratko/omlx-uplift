@@ -269,6 +269,22 @@ header.top.has-tagline .logo .logo-below {
     white-space: nowrap; color: var(--dim); opacity: .9;
 }
 header.top.has-tagline .logo .logo-build .lb-patches { display: none; }
+/* KEG-VERSIONED badge line 2 (user 2026-10-20): the vanilla base the dev
+   keg tracks — 'omlx v<ver> · <base7>'. Anchored to the LOGO (not the
+   superscript column) so it reads left-aligned with the wordmark; it is
+   absolute like every logo sub-line, so the header never moves. Under a
+   skin tagline it lands BELOW the tagline block (the reserved 36px strip
+   has room: tagline ends ~y125, this sits ~y128, header bottom 146);
+   without a tagline it is the first line under the logo. */
+.logo .logo-base {
+    position: absolute; top: calc(100% + 3px); left: 2px;
+    font: 400 8px/1 var(--mono); letter-spacing: 0.02em;
+    color: var(--dim); opacity: .85; white-space: nowrap;
+    max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+    cursor: default;
+}
+header.top.has-tagline .logo .logo-base { top: calc(100% + 34px); }
+@media (max-width: 1140px) { .logo .logo-base { display: none; } }
 @media (max-width: 1140px) { .logo .logo-build { display: none; } }
 header.top .spacer { flex: 1; }
 /* chip + tab text may never break: when the window narrows the tabs strip
