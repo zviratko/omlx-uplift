@@ -1,5 +1,5 @@
 {
   "description": "Loading a vision model no longer freezes the dashboard mid-load. The loop-side tokenizer copy — a full Rust vocabulary re-parse that takes seconds — moves from the event loop onto the load executor thread, so HTTP, streaming and the admin UI keep answering while it runs.",
   "source": {"kind": "file"},
-  "scope": "omlx"
+  "scope": "both"
 }
