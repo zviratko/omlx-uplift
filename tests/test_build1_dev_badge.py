@@ -83,7 +83,7 @@ def test_badge_js_prefers_the_keg_name():
     assert "bl.className = 'logo-base'" in src
     css = open(os.path.join(root, "omlx_uplift", "static", "uplift.css"),
                encoding="utf-8").read()
-    assert ".logo .logo-base {" in css
+    assert ".logo .logo-base {" in css and "top: calc(100% + 13px)" in css
     assert "header.top.has-tagline .logo .logo-base { top: calc(100% + 34px); }" in css
 
 

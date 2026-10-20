@@ -275,9 +275,10 @@ header.top.has-tagline .logo .logo-build .lb-patches { display: none; }
    absolute like every logo sub-line, so the header never moves. Under a
    skin tagline it lands BELOW the tagline block (the reserved 36px strip
    has room: tagline ends ~y125, this sits ~y128, header bottom 146);
-   without a tagline it is the first line under the logo. */
+   without a tagline it sits one step under the patch-id line so the two
+   sub-lines can never graze each other. */
 .logo .logo-base {
-    position: absolute; top: calc(100% + 3px); left: 2px;
+    position: absolute; top: calc(100% + 13px); left: 2px;
     font: 400 8px/1 var(--mono); letter-spacing: 0.02em;
     color: var(--dim); opacity: .85; white-space: nowrap;
     max-width: 240px; overflow: hidden; text-overflow: ellipsis;
