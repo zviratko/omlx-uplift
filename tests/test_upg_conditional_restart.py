@@ -57,6 +57,21 @@ def _stubs(home, monkeypatch, *, tip=TIP, built_sha=TIP, keg_exists=True,
     monkeypatch.setattr(kegstash, "active_keg", lambda: BVER)
     if keg_exists:
         os.makedirs(os.path.join(cellar, BVER), exist_ok=True)
+    # CI (ubuntu, no Homebrew): the legs that REACH the brew step would die
+    # two taps earlier — _ensure_versioned_formula errors on the missing
+    # zviratko/uplift checkout (dev-only filesystem fact), and the pin/
+    # unpin shells out to a 'brew' binary that is not there. Stub both so
+    # "it builds when something moved" proves the same thing on every box;
+    # _stream_build itself is stubbed per-test (raise/call-spy).
+    monkeypatch.setattr(devsrc, "_ensure_versioned_formula", lambda: None)
+    import subprocess as _sp
+    _real_run = _sp.run
+
+    def _quiet_run(cmd, *a, **k):
+        if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "brew":
+            return _sp.CompletedProcess(list(cmd), 0, "", "")
+        return _real_run(cmd, *a, **k)
+    monkeypatch.setattr(_sp, "run", _quiet_run)
     return cellar
 
 
