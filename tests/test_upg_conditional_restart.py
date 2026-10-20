@@ -151,17 +151,19 @@ def test_cli_upgrade_is_conditional_and_install_is_not(monkeypatch):
     assert seen["conditional"] is False
 
 
-def test_cli_restart_kickstarts_after_ok_and_after_skip(monkeypatch):
+def test_cli_restart_only_after_a_real_rebuild(monkeypatch, capsys):
     seen, restarts = _cli_capture(monkeypatch)
     assert cli.cmd_dev(["install", "--restart"]) == 0
     assert restarts == [1]
-    # a SKIPPED build with --restart still kickstarts: the running server
-    # is pointed at the current keg either way
+    # a SKIPPED upgrade with --restart does NOT bounce the server: nothing
+    # new was built, the running process is already current (user
+    # 2026-10-20 refinement)
     skip = devsrc.BuildResult(ok=True, stage="up-to-date", returncode=0,
                               lines=[("out", "up to date —")])
     seen, restarts = _cli_capture(monkeypatch, result=skip)
     assert cli.cmd_dev(["upgrade", "--restart"]) == 0
-    assert restarts == [1]
+    assert restarts == []
+    assert "no restart — nothing was rebuilt" in capsys.readouterr().out
     # failure never restarts
     bad = devsrc.BuildResult(ok=False, stage="brew", returncode=1, lines=[])
     seen, restarts = _cli_capture(monkeypatch, result=bad)

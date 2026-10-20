@@ -1169,7 +1169,7 @@ def cmd_dev(argv=None) -> int:
       upgrade     same pipeline, but CONDITIONAL (user 2026-10-20): rebuilds
                   only when omlx HEAD or the patch set moved; --force
                   rebuilds anyway
-      both accept --restart (kickstart omlx-dev after a successful run)
+      both accept --restart (kickstart omlx-dev after an actual rebuild)
       reconfigure port/base-path/sharing (DEV-4)"""
     import json as _json
 
@@ -1209,9 +1209,8 @@ def cmd_dev(argv=None) -> int:
                          "command, build nothing")
     ap.add_argument("--restart", action="store_true",
                     help="install/upgrade: kickstart the omlx-dev service "
-                         "after a successful run (skipped builds too, so "
-                         "the running server always matches the current "
-                         "keg)")
+                         "after a REBUILD (a skipped upgrade does not "
+                         "restart — the running server is already current)")
     ap.add_argument("--port", type=int,
                     help="reconfigure: dev server port (default 8001)")
     ap.add_argument("--base-path", help="reconfigure: dev data root "
@@ -1683,7 +1682,8 @@ def cmd_dev_install(args) -> int:
     devsrc.run_dev_build (BE-1). The engine is pure data in/out; this
     function only decides what to print — the patch table, the colored
     header, the next-step hints — and (upgrade) whether a rebuild is even
-    due. --restart kickstarts the service when the run ends ok."""
+    due. --restart kickstarts the service after an actual rebuild; a
+    skipped upgrade leaves the running server alone."""
     from . import devsrc
 
     def _print(stream, text):
@@ -1745,8 +1745,12 @@ def cmd_dev_install(args) -> int:
     if res.ok and res.stage in ('ok', 'up-to-date'):
         if res.stage == 'ok':
             _dev_next_steps(res.cfg or {}, fresh=False)
-        if getattr(args, "restart", False):
-            return _dev_restart()
+            if getattr(args, "restart", False):
+                return _dev_restart()
+        elif getattr(args, "restart", False):
+            # (user 2026-10-20) no rebuild -> nothing new to load -> the
+            # running server is already right; do NOT bounce it.
+            print("no restart — nothing was rebuilt", flush=True)
         if res.stage == 'ok':
             # VERY LAST: the one command that matters now (brew's own
             # 'after an upgrade' caveat is skipped — the build runs

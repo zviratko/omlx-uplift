@@ -270,8 +270,8 @@ Both verbs accept
 .Fl -restart
 to kickstart the
 .Em omlx-dev
-service after a successful run (a skipped rebuild included, so the
-running server always matches the current keg).
+service after an actual rebuild; an upgrade that skips the rebuild
+leaves the running server alone.
 .It Ic dev
 .Ic reconfigure
 .Op Fl -port Ar N
