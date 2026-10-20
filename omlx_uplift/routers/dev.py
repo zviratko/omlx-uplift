@@ -591,8 +591,9 @@ def _dev11_evaluate(cfg: dict) -> dict:
 def dev11_boot_check() -> None:
     """DEV-11 boot hook — runs in a daemon thread from the lifespan wrap.
     Flag ON + tracking HEAD + tip moved → runs the SAME manual build path
-    (run_dev_build: stash → materialize → brew reinstall, DEV-10 keep-
-    old-keg guarantees) in a detached subprocess. Never blocks or crashes
+    (run_dev_build: materialize → stamp build_version → brew install
+    --skip-link → activate switch, KEG-VERSIONED: live keg untouched the
+    whole build) in a detached subprocess. Never blocks or crashes
     serving; any surprise logs at debug and vanishes (a dev-box nicety,
     not a serving dependency)."""
     import logging
