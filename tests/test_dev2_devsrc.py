@@ -167,6 +167,9 @@ class DevsrcFixture(unittest.TestCase):
         exp = devsrc.expected_tip(patches, self.cfg)
         self.assertTrue(exp["ok"], exp)
         self.assertEqual(exp["tip"], r["tip"])
+        branches = devsrc._git(["branch", "--list", "uplift-dev-exp*"],
+                               cwd=devsrc.src_path(self.cfg)).stdout.strip()
+        self.assertEqual(branches, "", "throwaway exp branch must be cleaned up")
 
     def test_disable_patch_then_rematerialize_drops_commit(self):
         devsrc.ensure_clone(self.cfg)

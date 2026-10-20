@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -657,16 +658,19 @@ def expected_tip(patches_to_apply: list[dict], cfg: dict) -> dict:
     so shas match a real materialize: {ok, tip} or {ok: False, reason}."""
     path = src_path(cfg)
     tmp = tempfile.mkdtemp(prefix="uplift-devsrc-exp-")
+    exp_branch = f"{DEV_BRANCH_DEFAULT}-exp-{os.path.basename(tmp)}"
     try:
         _git(["worktree", "add", "--detach", "-q", tmp], cwd=path)
-        # distinct branch name + worktree path: the real branch may be
-        # checked out in the main clone, git forbids a double checkout
-        cfg2 = dict(cfg, src_path=tmp,
-                    formula_branch=DEV_BRANCH_DEFAULT + "-exp")
+        # distinct branch name + worktree path per invocation: the real
+        # branch may be checked out in the main clone and concurrent
+        # status polls must not collide on a shared temp branch name
+        cfg2 = dict(cfg, src_path=tmp, formula_branch=exp_branch)
         r = materialize(patches_to_apply, cfg2)
         return r
     finally:
         _git(["worktree", "remove", "--force", tmp], cwd=path, check=False)
+        _git(["branch", "-D", exp_branch], cwd=path, check=False)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

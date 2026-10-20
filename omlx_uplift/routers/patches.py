@@ -50,9 +50,12 @@ def _patch_tree_root() -> str:
 async def patches_view(is_admin: bool = Depends(require_admin)):
     from .. import patchsource, patches as _patches
 
-    store = patch_store()
-    keg = _patches.keg_id()
-    return patchsource.view(store, _patch_tree_root(), keg)
+    def _sync():
+        store = patch_store()
+        keg = _patches.keg_id()
+        return patchsource.view(store, _patch_tree_root(), keg)
+
+    return await asyncio.to_thread(_sync)
 
 
 @api_router.get("/doctor")
@@ -155,7 +158,7 @@ async def patches_curated_adopt(req: PatchIdRequest,
     The patch keeps id/state/files; future syncs ignore it."""
     from .. import curated
 
-    res = curated.adopt(patch_store(), req.id)
+    res = await asyncio.to_thread(curated.adopt, patch_store(), req.id)
     if not res.get("ok"):
         raise HTTPException(status_code=404, detail=res.get("reason"))
     return res
@@ -176,8 +179,9 @@ async def patches_enable(req: PatchApproveRequest,
                          is_admin: bool = Depends(require_admin)):
     from .. import patchsource
 
-    res = patchsource.set_enabled(patch_store(), req.id, True,
-                                  approve=req.approve)
+    res = await asyncio.to_thread(
+        patchsource.set_enabled, patch_store(), req.id, True,
+        approve=req.approve)
     if not res.get("ok"):
         raise HTTPException(status_code=409 if res.get("requires_approval")
                             else 422, detail=res.get("reason"))
@@ -188,7 +192,8 @@ async def patches_enable(req: PatchApproveRequest,
 async def patches_disable(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
     from .. import patchsource
 
-    res = patchsource.set_enabled(patch_store(), req.id, False)
+    res = await asyncio.to_thread(
+        patchsource.set_enabled, patch_store(), req.id, False)
     if not res.get("ok"):
         raise HTTPException(status_code=422, detail=res.get("reason"))
     return res
@@ -233,8 +238,8 @@ async def patches_pin(req: PatchPinRequest,
     (runtime) / Build (dev), two-phase doctrine unchanged."""
     from .. import patchsource
 
-    res = patchsource.set_pin(patch_store(), req.id, req.target,
-                              req.version)
+    res = await asyncio.to_thread(
+        patchsource.set_pin, patch_store(), req.id, req.target, req.version)
     if not res.get("ok"):
         raise HTTPException(status_code=422, detail=res.get("reason"))
     return res
@@ -253,7 +258,8 @@ async def patches_auto(req: PatchAutoRequest,
     and every browser honour it. Pinned surfaces keep their pin."""
     from .. import patchsource
 
-    res = patchsource.set_auto_update(patch_store(), req.id, req.enabled)
+    res = await asyncio.to_thread(
+        patchsource.set_auto_update, patch_store(), req.id, req.enabled)
     if not res.get("ok"):
         raise HTTPException(status_code=422, detail=res.get("reason"))
     return res
@@ -264,7 +270,8 @@ async def patches_promote(req: PatchApproveRequest,
                           is_admin: bool = Depends(require_admin)):
     from .. import patchsource
 
-    res = patchsource.promote(patch_store(), req.id, approve=req.approve)
+    res = await asyncio.to_thread(
+        patchsource.promote, patch_store(), req.id, approve=req.approve)
     if not res.get("ok"):
         raise HTTPException(status_code=409 if res.get("requires_approval")
                             else 422, detail=res.get("reason"))
@@ -276,7 +283,8 @@ async def patches_rollback(req: PatchVersionRequest,
                            is_admin: bool = Depends(require_admin)):
     from .. import patchsource
 
-    res = patchsource.rollback(patch_store(), req.id, to_v=req.v)
+    res = await asyncio.to_thread(
+        patchsource.rollback, patch_store(), req.id, to_v=req.v)
     if not res.get("ok"):
         raise HTTPException(status_code=422, detail=res.get("reason"))
     return res
@@ -286,7 +294,8 @@ async def patches_rollback(req: PatchVersionRequest,
 async def patches_remove(req: PatchIdRequest, is_admin: bool = Depends(require_admin)):
     from .. import patchsource
 
-    res = patchsource.remove_patch(patch_store(), req.id, _patch_tree_root())
+    res = await asyncio.to_thread(
+        patchsource.remove_patch, patch_store(), req.id, _patch_tree_root())
     if not res.get("ok"):
         raise HTTPException(status_code=404, detail=res.get("reason"))
     return res
@@ -299,8 +308,9 @@ async def patches_test(req: PatchVersionRequest, is_admin: bool = Depends(requir
     # PAT-TABLE: optional v lets the Manage dialog dry-run the version a
     # surface actually tracks (a pin) — absent v keeps the old contract
     # (test the desired version).
-    res = patchsource.test_dry_run(patch_store(), req.id, _patch_tree_root(),
-                                   v=req.v)
+    res = await asyncio.to_thread(
+        patchsource.test_dry_run, patch_store(), req.id, _patch_tree_root(),
+        v=req.v)
     if not res.get("ok") and not res.get("files"):
         raise HTTPException(status_code=422, detail=res.get("reason"))
     return res
@@ -311,7 +321,8 @@ async def patches_diff(patch_id: str, version: int,
                        is_admin: bool = Depends(require_admin)):
     from .. import patchsource
 
-    data = patchsource.get_diff(patch_store(), patch_id, version)
+    data = await asyncio.to_thread(
+        patchsource.get_diff, patch_store(), patch_id, version)
     if data is None:
         raise HTTPException(status_code=404, detail="patch version not found")
     return Response(content=data.decode("utf-8", "replace"),
@@ -327,4 +338,5 @@ async def patches_config(req: PatchConfigRequest,
                          is_admin: bool = Depends(require_admin)):
     from .. import patchsource
 
-    return patchsource.set_config(patch_store(), req.auto_update_check)
+    return await asyncio.to_thread(
+        patchsource.set_config, patch_store(), req.auto_update_check)

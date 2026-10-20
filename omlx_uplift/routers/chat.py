@@ -27,6 +27,7 @@ keeps showing the image in the live view).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -247,15 +248,18 @@ async def chat_key(is_admin: bool = Depends(require_admin)):
 async def chat_history_list(is_admin: bool = Depends(require_admin)):
     """Summaries only (id/title/model/message_count/updated) — the full
     store can be megabytes; open one conversation to fetch its messages."""
-    store = _load()
-    out = []
-    for cid, c in store["conversations"].items():
-        out.append({"id": cid, "title": c.get("title", ""),
-                    "model": c.get("model"),
-                    "message_count": len(c.get("messages") or []),
-                    "updated": c.get("updated", 0)})
-    out.sort(key=lambda x: x["updated"])
-    return out
+    def _sync():
+        store = _load()
+        out = []
+        for cid, c in store["conversations"].items():
+            out.append({"id": cid, "title": c.get("title", ""),
+                        "model": c.get("model"),
+                        "message_count": len(c.get("messages") or []),
+                        "updated": c.get("updated", 0)})
+        out.sort(key=lambda x: x["updated"])
+        return out
+
+    return await asyncio.to_thread(_sync)
 
 
 @api_router.get("/chat/history/export")
@@ -264,18 +268,24 @@ async def chat_history_export(is_admin: bool = Depends(require_admin)):
     Download Chats counterpart; its format is the same array-of-chats).
     LITERAL path — must stay registered BEFORE /chat/history/{conv_id}
     or FastAPI shadows it (the bench route-order lesson, golden-tested)."""
-    store = _load()
-    convs = list(store["conversations"].values())
-    convs.sort(key=lambda c: c.get("updated", 0))
-    return convs
+    def _sync():
+        store = _load()
+        convs = list(store["conversations"].values())
+        convs.sort(key=lambda c: c.get("updated", 0))
+        return convs
+
+    return await asyncio.to_thread(_sync)
 
 
 @api_router.get("/chat/history/{conv_id}")
 async def chat_history_get(conv_id: str, is_admin: bool = Depends(require_admin)):
-    c = _load()["conversations"].get(conv_id)
-    if c is None:
-        raise HTTPException(status_code=404, detail="conversation not found")
-    return c
+    def _sync():
+        c = _load()["conversations"].get(conv_id)
+        if c is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        return c
+
+    return await asyncio.to_thread(_sync)
 
 
 @api_router.post("/chat/history")
@@ -290,70 +300,77 @@ async def chat_history_save(request: Request,
         raise HTTPException(status_code=400, detail="messages required")
     if not isinstance(msgs, list):
         raise HTTPException(status_code=400, detail="messages must be a list")
-    store = _load()
-    existing = store["conversations"].get(cid) or {}
-    conv = {
-        "id": cid,
-        "title": str(body.get("title") or existing.get("title") or "")[:TITLE_CHARS],
-        "model": str(body.get("model") or "")[:120] or None,
-        "systemPrompt": str(body.get("systemPrompt") or "")[:8000],
-        # 6/6c: active prompt-profile NAME only (content stays in the
-        # shared localStorage store). Sanitized like title: a stored
-        # string must never reach innerHTML — UI renders it textContent.
-        "activeProfile": str(body.get("activeProfile") or "")[:48] or None,
-        # CHAT-3R (user: changing a preset must keep custom text so the
-        # user can go back safely): the stashed unbound/edited prompt.
-        # Same textContent-only rule as activeProfile.
-        "customPrompt": str(body.get("customPrompt") or "")[:8000],
-        # ROUND 9: full-page stash twin ({prompt, settings}) — see _clean_state
-        "customState": _clean_state(body.get("customState")),
-        # ROUND 11: per-profile unsaved working copies (the stash's
-        # successor — divergence belongs to the profile, not to a slot)
-        "variants": _clean_variants(body.get("variants")),
-        "thinking": body.get("thinking")
-        if isinstance(body.get("thinking"), str)
-        and body.get("thinking") in ("auto", "off", "on", "limit")
-        else "auto",
-        "thinkingBudget": body.get("thinkingBudget")
-        if isinstance(body.get("thinkingBudget"), int)
-        and not isinstance(body.get("thinkingBudget"), bool)
-        and body.get("thinkingBudget") >= 0 else None,
-        # U46: classic persists the sidebar sampling fields per session
-        # (schedulePersistModelSettings -> syncSessionModelSettingsFromUi);
-        # native mirrors the same scope. None = nothing set = engine default.
-        "generation": _clean_generation(body.get("generation")),
-        "messages": [_clean_message(m) for m in msgs[-MAX_MESSAGES:]
-                     if isinstance(m, dict)],
-        "updated": int(time.time() * 1000),
-    }
-    store["conversations"][cid] = conv
-    # cap conversation count (oldest updated first out)
-    convs = store["conversations"]
-    if len(convs) > MAX_CONVOS:
-        for old in sorted(convs, key=lambda k: convs[k]["updated"])[:len(convs) - MAX_CONVOS]:
-            del convs[old]
-            tts_cache.drop_conversation(old)     # VOICE-16b: its audio too
-    _save(store)
-    # VOICE-16b: a bubble the save no longer carries takes its audio with it,
-    # and so does one whose plan revision moved (edited text, new voice,
-    # re-chunked after an upgrade). Runs after the write so a rejected save
-    # can never delete live audio.
-    tts_cache.prune_conversation(
-        cid, [m.get("mid") for m in conv["messages"] if m.get("mid")],
-        revs={m["mid"]: (m.get("speech") or {}).get("rev") or "0"
-              for m in conv["messages"] if m.get("mid")})
-    kb = len(json.dumps(conv, ensure_ascii=False).encode()) // 1024
-    return {"status": "saved", "id": cid, "messages": len(conv["messages"]),
-            "kb": kb}
+
+    def _sync():
+        store = _load()
+        existing = store["conversations"].get(cid) or {}
+        conv = {
+            "id": cid,
+            "title": str(body.get("title") or existing.get("title") or "")[:TITLE_CHARS],
+            "model": str(body.get("model") or "")[:120] or None,
+            "systemPrompt": str(body.get("systemPrompt") or "")[:8000],
+            # 6/6c: active prompt-profile NAME only (content stays in the
+            # shared localStorage store). Sanitized like title: a stored
+            # string must never reach innerHTML — UI renders it textContent.
+            "activeProfile": str(body.get("activeProfile") or "")[:48] or None,
+            # CHAT-3R (user: changing a preset must keep custom text so the
+            # user can go back safely): the stashed unbound/edited prompt.
+            # Same textContent-only rule as activeProfile.
+            "customPrompt": str(body.get("customPrompt") or "")[:8000],
+            # ROUND 9: full-page stash twin ({prompt, settings}) — see _clean_state
+            "customState": _clean_state(body.get("customState")),
+            # ROUND 11: per-profile unsaved working copies (the stash's
+            # successor — divergence belongs to the profile, not to a slot)
+            "variants": _clean_variants(body.get("variants")),
+            "thinking": body.get("thinking")
+            if isinstance(body.get("thinking"), str)
+            and body.get("thinking") in ("auto", "off", "on", "limit")
+            else "auto",
+            "thinkingBudget": body.get("thinkingBudget")
+            if isinstance(body.get("thinkingBudget"), int)
+            and not isinstance(body.get("thinkingBudget"), bool)
+            and body.get("thinkingBudget") >= 0 else None,
+            # U46: classic persists the sidebar sampling fields per session
+            # (schedulePersistModelSettings -> syncSessionModelSettingsFromUi);
+            # native mirrors the same scope. None = nothing set = engine default.
+            "generation": _clean_generation(body.get("generation")),
+            "messages": [_clean_message(m) for m in msgs[-MAX_MESSAGES:]
+                         if isinstance(m, dict)],
+            "updated": int(time.time() * 1000),
+        }
+        store["conversations"][cid] = conv
+        # cap conversation count (oldest updated first out)
+        convs = store["conversations"]
+        if len(convs) > MAX_CONVOS:
+            for old in sorted(convs, key=lambda k: convs[k]["updated"])[:len(convs) - MAX_CONVOS]:
+                del convs[old]
+                tts_cache.drop_conversation(old)     # VOICE-16b: its audio too
+        _save(store)
+        # VOICE-16b: a bubble the save no longer carries takes its audio with it,
+        # and so does one whose plan revision moved (edited text, new voice,
+        # re-chunked after an upgrade). Runs after the write so a rejected save
+        # can never delete live audio.
+        tts_cache.prune_conversation(
+            cid, [m.get("mid") for m in conv["messages"] if m.get("mid")],
+            revs={m["mid"]: (m.get("speech") or {}).get("rev") or "0"
+                  for m in conv["messages"] if m.get("mid")})
+        kb = len(json.dumps(conv, ensure_ascii=False).encode()) // 1024
+        return {"status": "saved", "id": cid, "messages": len(conv["messages"]),
+                "kb": kb}
+
+    return await asyncio.to_thread(_sync)
 
 
 @api_router.delete("/chat/history/{conv_id}")
 async def chat_history_delete(conv_id: str,
                               is_admin: bool = Depends(require_admin)):
-    store = _load()
-    if conv_id not in store["conversations"]:
-        raise HTTPException(status_code=404, detail="conversation not found")
-    del store["conversations"][conv_id]
-    _save(store)
-    freed = tts_cache.drop_conversation(conv_id)      # VOICE-16b
-    return {"status": "deleted", "id": conv_id, "audio_freed": freed}
+    def _sync():
+        store = _load()
+        if conv_id not in store["conversations"]:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        del store["conversations"][conv_id]
+        _save(store)
+        freed = tts_cache.drop_conversation(conv_id)      # VOICE-16b
+        return {"status": "deleted", "id": conv_id, "audio_freed": freed}
+
+    return await asyncio.to_thread(_sync)

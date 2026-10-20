@@ -95,3 +95,73 @@ async def test_patches_add_offloads_to_thread(monkeypatch, _store):
                                  url="http://127.0.0.1:9/x.diff")
     await _assert_loop_alive(
         lambda: patches_mod.patches_add(req, is_admin=True))
+
+
+@pytest.mark.asyncio
+async def test_patches_view_offloads_to_thread(monkeypatch, _store):
+    from omlx_uplift import patchsource
+    _block(monkeypatch, patchsource, "view", {"patches": []})
+    await _assert_loop_alive(lambda: patches_mod.patches_view(is_admin=True))
+
+
+@pytest.mark.asyncio
+async def test_patches_test_offloads_to_thread(monkeypatch, _store):
+    from omlx_uplift import patchsource
+    _block(monkeypatch, patchsource, "test_dry_run", {"ok": True, "files": []})
+    req = patches_mod.PatchVersionRequest(id="perf2")
+    await _assert_loop_alive(
+        lambda: patches_mod.patches_test(req, is_admin=True))
+
+
+@pytest.mark.asyncio
+async def test_patches_remove_offloads_to_thread(monkeypatch, _store):
+    from omlx_uplift import patchsource
+    _block(monkeypatch, patchsource, "remove_patch", {"ok": True})
+    req = patches_mod.PatchIdRequest(id="perf2")
+    await _assert_loop_alive(
+        lambda: patches_mod.patches_remove(req, is_admin=True))
+
+
+@pytest.mark.asyncio
+async def test_patches_enable_and_promote_offload_to_thread(monkeypatch, _store):
+    from omlx_uplift import patchsource
+    _block(monkeypatch, patchsource, "set_enabled", {"ok": True})
+    req = patches_mod.PatchApproveRequest(id="perf2")
+    await _assert_loop_alive(
+        lambda: patches_mod.patches_enable(req, is_admin=True))
+    _block(monkeypatch, patchsource, "promote", {"ok": True})
+    await _assert_loop_alive(
+        lambda: patches_mod.patches_promote(req, is_admin=True))
+
+
+@pytest.mark.asyncio
+async def test_voices_say_list_offloads_default_voice_probes(monkeypatch):
+    from omlx_uplift import say_engine
+    from omlx_uplift.routers import voices as voices_mod
+    monkeypatch.setattr(say_engine, "available", lambda: True)
+    monkeypatch.setattr(say_engine, "list_voices", lambda: [])
+    monkeypatch.setattr(say_engine, "system_language", lambda: "en-US")
+    monkeypatch.setattr(voices_mod, "_load", lambda: {"voices": []})
+    _block(monkeypatch, say_engine, "default_voice", {})
+    await _assert_loop_alive(lambda: voices_mod.voices_say_list(_auth=True))
+
+
+@pytest.mark.asyncio
+async def test_chat_history_list_offloads_to_thread(monkeypatch):
+    from omlx_uplift.routers import chat as chat_mod
+    _block(monkeypatch, chat_mod, "_load", {"conversations": {}})
+    await _assert_loop_alive(lambda: chat_mod.chat_history_list(is_admin=True))
+
+
+@pytest.mark.asyncio
+async def test_dev_restart_computes_status_before_spawning_kill(monkeypatch):
+    import subprocess
+    events = []
+    monkeypatch.setattr(dev_mod, "_dev_status_sync",
+                        lambda: (events.append("status"), {"installed": True})[1])
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda *a, **k: events.append("popen"))
+    res = await dev_mod.dev_restart(is_admin=True)
+    assert res["ok"] is True and res["restarting"] is True
+    assert events == ["status", "popen"], (
+        "status must complete BEFORE the 2 s restart countdown starts")

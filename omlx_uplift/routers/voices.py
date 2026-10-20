@@ -698,6 +698,13 @@ async def voices_say_list(_auth=Depends(require_admin)):
         return {"supported": False, "voices": []}
     voices = await asyncio.to_thread(say_engine.list_voices)
     sysl = await asyncio.to_thread(say_engine.system_language)
+    dv = (await asyncio.to_thread(say_engine.default_voice)) or {}
+    # TTS-4: 'default' answers "does THIS row speak its language by
+    # default" — computed through the routing chain (best installed tier;
+    # a downloaded Premium outranks the factory isDefault compact row),
+    # never the raw AVFoundation flag, so the badge and the voice that
+    # actually answers can never disagree
+    eff = await asyncio.to_thread(say_engine.effective_default_addrs)
     store = _load()
     saved = set()
     for v in store["voices"]:
@@ -709,13 +716,6 @@ async def voices_say_list(_auth=Depends(require_admin)):
     for loc, addr in pref.items():
         if addr:
             addr2loc[addr] = loc
-    dv = say_engine.default_voice() or {}
-    # TTS-4: 'default' answers "does THIS row speak its language by
-    # default" — computed through the routing chain (best installed tier;
-    # a downloaded Premium outranks the factory isDefault compact row),
-    # never the raw AVFoundation flag, so the badge and the voice that
-    # actually answers can never disagree
-    eff = say_engine.effective_default_addrs()
     return {"supported": True, "preferred": pref,
             "system_language": sysl, "system_voice": dv.get("name") or "",
             "voices": [dict(
@@ -941,7 +941,7 @@ async def voices_create(request: Request, _auth=Depends(require_admin)):
     # otherwise poison the voice exactly like an mp3 named honestly.
     # (speaker-only voices carry no clip — nothing to normalize.)
     if data:
-        data = _to_wav(data, _sniff_kind(data, ext))
+        data = await asyncio.to_thread(_to_wav, data, _sniff_kind(data, ext))
         ext = ".wav"
     taken = {v["id"] for v in store["voices"]}
     v = _sanitize(raw)
@@ -1004,7 +1004,7 @@ async def voices_update(vid: str, request: Request,
             raise HTTPException(status_code=400, detail="invalid base64")
         if len(data) > MAX_VOICE_AUDIO_BYTES:
             raise HTTPException(status_code=413, detail="reference audio too large")
-        data = _to_wav(data, _sniff_kind(data, ext))
+        data = await asyncio.to_thread(_to_wav, data, _sniff_kind(data, ext))
         old = _audio_dir() / Path(v.get("ref_file", "")).name
         merged["ref_file"] = v["id"] + ".wav"
         (_audio_dir() / merged["ref_file"]).write_bytes(data)
@@ -1070,7 +1070,7 @@ async def voices_speech(request: Request, _auth=Depends(require_admin)):
             (v or {}).get("id") or voice_raw, text, speed=raw.get("speed"),
             language=raw.get("language"), model=model_override or raw.get("model"),
             instructions=raw.get("instructions"), ref_text=raw.get("ref_text"))
-        hit = tts_cache.get(cache_key)
+        hit = await asyncio.to_thread(tts_cache.get, cache_key)
         if hit:
             body, media = hit
             return Response(content=body, media_type=media,
@@ -1083,23 +1083,25 @@ async def voices_speech(request: Request, _auth=Depends(require_admin)):
         # lookup above; this leg is only the store miss.
         is_say, say_tail = say_engine.say_split(voice_raw)
         if is_say:
-            return _store_cache(await _say_response(
+            resp = await _say_response(
                 say_tail, text, speed=raw.get("speed") or None,
-                language=raw.get("language") or None), cache_key, owner,
-                voice_raw)
+                language=raw.get("language") or None)
+            return await asyncio.to_thread(
+                _store_cache, resp, cache_key, owner, voice_raw)
         names = ", ".join(x["name"] for x in _load()["voices"]) or "(none yet)"
         raise HTTPException(status_code=404,
                             detail="unknown voice; available: %s" % names)
-    return _store_cache(await _synth(v, str(raw.get("input") or ""),
-                                     stream=bool(raw.get("stream")),
-                                     model=model_override,
-                                     language=raw.get("language") or None,
-                                     speed=raw.get("speed") or None,
-                                     instructions=raw.get("instructions")
-                                     if "instructions" in raw else None,
-                                     ref_text=raw.get("ref_text")
-                                     if "ref_text" in raw else None),
-                        cache_key, owner, (v or {}).get("id") or voice_raw)
+    resp = await _synth(v, str(raw.get("input") or ""),
+                        stream=bool(raw.get("stream")),
+                        model=model_override,
+                        language=raw.get("language") or None,
+                        speed=raw.get("speed") or None,
+                        instructions=raw.get("instructions")
+                        if "instructions" in raw else None,
+                        ref_text=raw.get("ref_text")
+                        if "ref_text" in raw else None)
+    return await asyncio.to_thread(
+        _store_cache, resp, cache_key, owner, (v or {}).get("id") or voice_raw)
 
 
 def _store_cache(resp, key: str, owner, voice: str):
@@ -1125,17 +1127,23 @@ def _store_cache(resp, key: str, owner, voice: str):
 @api_router.get("/voices/speech-cache")
 async def speech_cache_stats(is_admin: bool = Depends(require_admin)):
     """What the cache holds and what it should not (Check audio cache)."""
-    out = tts_cache.check(_live_owners())
-    out["totals"] = tts_cache.totals()
-    return out
+    def _sync():
+        out = tts_cache.check(_live_owners())
+        out["totals"] = tts_cache.totals()
+        return out
+
+    return await asyncio.to_thread(_sync)
 
 
 @api_router.post("/voices/speech-cache/cleanup")
 async def speech_cache_cleanup(is_admin: bool = Depends(require_admin)):
     """Delete exactly what the check reported. Never touches a chat."""
-    out = tts_cache.cleanup(_live_owners())
-    out["totals"] = tts_cache.totals()
-    return out
+    def _sync():
+        out = tts_cache.cleanup(_live_owners())
+        out["totals"] = tts_cache.totals()
+        return out
+
+    return await asyncio.to_thread(_sync)
 
 
 def _live_owners() -> dict:
