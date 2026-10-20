@@ -967,8 +967,11 @@ test('client-perf: lazy tab scripts, cached DateTimeFormat, binary-search mergeH
     const fs = require('fs');
     const path = require('path');
     const html = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'index.html'), 'utf8');
-    // 2A: heavy non-Status tab scripts are loaded on demand via D.loadScript
-    for (const lazy of ['uplift_bench.js', 'uplift_chat.js', 'uplift_mmeditor.js', 'uplift_voices.js']) {
+    // 2A + FE-8: heavy non-Status tab scripts are loaded on demand via D.loadScript
+    for (const lazy of ['uplift_bench.js', 'uplift_chat.js', 'uplift_mmeditor.js',
+                        'uplift_voices.js', 'uplift_speechio.js',
+                        'uplift_patches.js', 'uplift_devpanel.js',
+                        'uplift_downloader.js', 'uplift_modelsops.js']) {
         assert.ok(!html.includes(`src="./${lazy}"`), `${lazy} must not load synchronously in index.html`);
     }
     const D = require('../omlx_uplift/static/domkit.js');

@@ -778,13 +778,15 @@ test('queue: no decode seam at all -> the chunk drops with a clear error', async
 
 /* ---- the module in a browser-shaped sandbox ---------------------------- */
 
-test('index.html loads uplift_speechio.js before its consumers', () => {
+test('uplift_speechio.js is lazy-loaded on demand by uplift.js (FE-8)', () => {
     const files = staticFiles();
-    const i = files.indexOf('uplift_speechio.js');
-    assert.ok(i >= 0, 'registered in index.html');
-    assert.ok(i < files.indexOf('uplift.js'), 'before the app monolith');
+    assert.ok(files.indexOf('uplift_speechio.js') >= 0, 'present in static surface');
     const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
-    assert.match(html, /<script src="\.\/uplift_speechio\.js"><\/script>/);
+    assert.ok(!html.includes('src="./uplift_speechio.js"'),
+        'uplift_speechio.js must not load synchronously at boot');
+    const up = fs.readFileSync(path.join(STATIC_DIR, 'uplift.js'), 'utf8');
+    assert.match(up, /D\.loadScript\('\.\/uplift_speechio\.js'\)/,
+        'uplift.js lazy-loads uplift_speechio.js for voices and chat');
 });
 
 test('browser shape: window.Uplift.speechio is the same surface node sees', () => {

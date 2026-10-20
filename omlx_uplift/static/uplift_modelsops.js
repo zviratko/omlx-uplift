@@ -15,7 +15,7 @@ const D = window.UpliftDom;
 const S = window.Uplift.state;
 const $ = D.$;
 const API = S.API;
-const MO = { tasks: window.Uplift.downloader.renderTasks };
+const MO = { get tasks() { return window.Uplift.downloader.renderTasks; } };
 const QG = {
     fetchJson: D.fetchJson,
     postJson: D.postJson,

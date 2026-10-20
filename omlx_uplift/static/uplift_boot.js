@@ -23,7 +23,6 @@ const UUP = window.Uplift.usage;
 const FE = window.Uplift.feed;
 const LF = window.Uplift.livefeed;   // FAST-1 live display feed
 const layout = window.Uplift.state.layout;
-const PT = window.Uplift.patches;
 const { fetchJson, applyPrefs, loadLocale, applyTab, restartPolling,
         pollStats, pollGatewayInfo, renderTasks, loadSkins, renderSkinsMenu,
         currentTab, currentSub } = window.Uplift._bootGlue;
@@ -154,10 +153,9 @@ CH.probeGatedCards();
 setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.probeGatedCards(); }, 60000);
 CH.refreshPowerChips();
 setInterval(() => { if (!document.hidden) CH.refreshPowerChips(); }, 30000);
-/* ---- PAT-4 patches page: extracted to uplift_patches.js (PH2-1 stage 8);
-   window.Uplift.patches aliases live at the top. initPatchesPage() boots
-   its own listeners; pollPatches runs via applyTab. ---- */
-PT.initPatchesPage();
+/* ---- PAT-4 patches page: extracted to uplift_patches.js (PH2-1 stage 8) and
+   lazy-loaded on #settings/patches entry (FE-8); runPatches() in uplift.js
+   calls initPatchesPage() once on load. ---- */
 
 CH.renderCardTsRows();
 CH.drawAllMetricCharts();

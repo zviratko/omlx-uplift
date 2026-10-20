@@ -108,25 +108,46 @@ window.Uplift._feedGlue = {
 };
 const FE = window.Uplift.feed;
 
-/* PH2-1 stage 8: PAT-4 patches UI lives in uplift_patches.js. FE-1:
-   toast/fetchJson from domkit there; this glue keeps the live-hash
+/* PH2-1 stage 8: PAT-4 patches UI lives in uplift_patches.js (+ uplift_devpanel.js),
+   loaded on demand via D.loadScript when #settings/patches opens (FE-8).
+   FE-1: toast/fetchJson from domkit there; this glue keeps the live-hash
    readers currentTab/currentSub. */
 window.Uplift._patchesGlue = {
     get currentTab() { return currentTab; },
     get currentSub() { return currentSub; },
 };
-const PT = window.Uplift.patches;
+let _patchesInited = false;
+function runPatches() {
+    const go = () => {
+        const PT = window.Uplift.patches;
+        if (!_patchesInited) { _patchesInited = true; PT.initPatchesPage(); }
+        PT.pollPatches();
+        if (PT.pollDev) PT.pollDev();
+    };
+    if (window.Uplift.patches && window.Uplift.devpanel) go();
+    else Promise.all([
+        window.Uplift.patches ? Promise.resolve() : D.loadScript('./uplift_patches.js'),
+        window.Uplift.devpanel ? Promise.resolve() : D.loadScript('./uplift_devpanel.js'),
+    ]).then(go);
+}
 
-/* PH2-1 stage 9a: downloader page + task helpers live in
-   uplift_downloader.js; FE-1: its glue went empty (all five members were
-   primitives) — domkit covers it, the glue object is gone. */
-const DLR = window.Uplift.downloader;
-
-/* PH2-1 stage 9b: quantizer/uploader pages live in uplift_modelsops.js. */
+/* PH2-1 stage 9a/9b: downloader + quantizer/uploader pages live in
+   uplift_downloader.js and uplift_modelsops.js, loaded on demand (FE-8). */
 window.Uplift._modelsopsGlue = {
     get GW_LIVE() { return GW_LIVE; },
 };
-const MOs = window.Uplift.modelsops;
+function runDownloader() {
+    if (window.Uplift.downloader) window.Uplift.downloader.initDownloader();
+    else D.loadScript('./uplift_downloader.js').then(() => window.Uplift.downloader.initDownloader());
+}
+function runModelsOps(fnName) {
+    const go = () => window.Uplift.modelsops[fnName]();
+    if (window.Uplift.downloader && window.Uplift.modelsops) go();
+    else Promise.all([
+        window.Uplift.downloader ? Promise.resolve() : D.loadScript('./uplift_downloader.js'),
+        window.Uplift.modelsops ? Promise.resolve() : D.loadScript('./uplift_modelsops.js'),
+    ]).then(go);
+}
 
 /* PH2-1 stage 9c: helper page + prune dialog live in uplift_helper.js. */
 window.Uplift._helperGlue = {
@@ -322,19 +343,23 @@ function applyTab() {
     if (tab === 'models') {
         MM.render(true);   // POLL-BATCH: entry = full fresh side-loads;
                            // the 8 s tick while staying here stays soft
-        if (sub === 'downloader') DLR.initDownloader();
-        if (sub === 'quantizer') MOs.renderQuantizer();
-        if (sub === 'uploader') MOs.renderUploader();
+        if (sub === 'downloader') runDownloader();
+        if (sub === 'quantizer') runModelsOps('renderQuantizer');
+        if (sub === 'uploader') runModelsOps('renderUploader');
         if (sub === 'helper') HLP.renderHelperModels();
         if (sub === 'voices') {
-            if (window.Uplift.voices) window.Uplift.voices.renderVoices();
-            else D.loadScript('./uplift_voices.js').then(() => window.Uplift.voices.renderVoices());
+            const runVoices = () => window.Uplift.voices.renderVoices();
+            if (window.Uplift.speechio && window.Uplift.voices) runVoices();
+            else Promise.all([
+                window.Uplift.speechio ? Promise.resolve() : D.loadScript('./uplift_speechio.js'),
+                window.Uplift.voices ? Promise.resolve() : D.loadScript('./uplift_voices.js'),
+            ]).then(runVoices);
         }
         if (sub === 'manager') MM.renderTemplates();
     }
     if (tab === 'settings') {
         GSY.pollGlobalSettings(); GSY.pollEnvTunables();
-        if (sub === 'patches') { PT.pollPatches(); PT.pollDev && PT.pollDev(); }
+        if (sub === 'patches') runPatches();
     }
     if (tab === 'bench' || tab === 'chat' || tab === 'cluster') showEmbedPage(tab, sub);
     // NAT-6: keep the URL's classic leg + the embed-card badges honest for
@@ -446,10 +471,11 @@ function showEmbedPage(tab, sub) {
                 else D.loadScript('./uplift_bench.js').then(runBench);
             } else {
                 const runChat = () => UpliftNativeChat.mount();
-                if (typeof UpliftNativeChat !== 'undefined') runChat();
+                if (typeof UpliftNativeChat !== 'undefined' && window.Uplift.speechio && window.Uplift.voices) runChat();
                 else Promise.all([
+                    window.Uplift.speechio ? Promise.resolve() : D.loadScript('./uplift_speechio.js'),
                     window.Uplift.voices ? Promise.resolve() : D.loadScript('./uplift_voices.js'),
-                    D.loadScript('./uplift_chat.js'),
+                    typeof UpliftNativeChat !== 'undefined' ? Promise.resolve() : D.loadScript('./uplift_chat.js'),
                 ]).then(runChat);
             }
         }
@@ -2892,6 +2918,10 @@ window.Uplift._bootGlue = {
     fetchJson, applyPrefs, loadLocale, applyTab, restartPolling,
     pollStats, pollGatewayInfo, currentTab, currentSub, loadSkins,
     renderSkinsMenu,
-    renderTasks: function () { return window.Uplift.downloader.renderTasks.apply(null, arguments); },
+    renderTasks: function () {
+        return window.Uplift.downloader
+            ? window.Uplift.downloader.renderTasks.apply(null, arguments)
+            : undefined;
+    },
 };
 })();
