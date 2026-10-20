@@ -254,6 +254,7 @@ class RequestTracker:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._sample_lock = threading.Lock()
         self._active: dict[str, dict[str, Any]] = {}
         self._done: deque[dict[str, Any]] = deque(maxlen=RING_LIMIT)
         # ids finalized by the event hook (late birth events must not
@@ -266,15 +267,29 @@ class RequestTracker:
         self._miss_counts: dict[str, int] = {}
         self._sampled_at = 0.0
 
+    def sample_coalesced(self, engine_pool: Any,
+                         min_interval_s: float = 0.4) -> None:
+        """PERF-3: coalesced sample for concurrent HTTP/SSE callers so
+        overlapping 1 Hz streams and modal polls do not re-walk the pool or
+        double-increment _miss_counts within the same tick."""
+        self.sample(engine_pool, min_interval_s=min_interval_s)
+
     # ------------------------------------------------------------------
-    def sample(self, engine_pool: Any) -> None:
+    def sample(self, engine_pool: Any, *, min_interval_s: float = 0.0) -> None:
         """Merge one snapshot pass across every loaded engine.
 
         ``engine_pool`` is the live EnginePool (or None / a stub in tests).
         Any per-model failure is contained: the feed must never take the
         dashboard down.
         """
-        now = time.time()
+        with self._sample_lock:
+            now = time.time()
+            if (min_interval_s > 0.0 and self._sampled_at
+                    and (now - self._sampled_at) < min_interval_s):
+                return
+            self._sample_unlocked(engine_pool, now)
+
+    def _sample_unlocked(self, engine_pool: Any, now: float) -> None:
         seen: set[str] = set()
         rows: list[tuple[str, dict[str, Any]]] = []
         sampled_models: set[str] = set()

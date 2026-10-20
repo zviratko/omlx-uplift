@@ -518,3 +518,29 @@ def test_capture_payload_keeps_token_id_sample():
     import json
     assert json.loads(out["prompt_ids"]) == [1, 2, 3]
     assert out["prompt_ids_trunc"] is False
+
+
+def test_sample_coalesced_protects_misses_grace_from_concurrent_callers():
+    """PERF-3: overlapping HTTP/SSE callers within min_interval_s reuse the
+    just-taken sample instead of double-incrementing _miss_counts on a single
+    snapshot gap, while bare sample() keeps immediate execution for unit tests."""
+    sched = FakeScheduler(running={"r1": _req("r1", gen_at=time.monotonic(), out=2)})
+    t = RequestTracker()
+    pool = _pool({"m1": sched})
+    t.sample(pool)
+    assert t.is_live("r1") is True
+
+    # Simulate a transient 1-tick absence where two SSE tabs + modal poll
+    # all call sample_coalesced within the same sub-second window:
+    sched.running = {}
+    t._sampled_at = 0.0   # allow the first coalesced pass of this tick
+    t.sample_coalesced(pool, min_interval_s=0.4)   # absence 1
+    t.sample_coalesced(pool, min_interval_s=0.4)   # coalesced no-op!
+    t.sample_coalesced(pool, min_interval_s=0.4)   # coalesced no-op!
+    assert t.is_live("r1") is True, (
+        "concurrent callers in one tick must not burn both MISSES-GRACE slots")
+    # Next tick (after interval elapsed): second genuine absence finalizes
+    t._sampled_at -= 1.0
+    t.sample_coalesced(pool, min_interval_s=0.4)
+    assert t.is_live("r1") is False
+    assert t.lookup("r1")["state"] == "complete"

@@ -31,6 +31,15 @@ from ..collector import get_collector
 # generator's loop step is 1 s). The client watchdog treats silence past
 # a few budgets as a dead link; tests patch this module attribute.
 _SSE_TICK_S = 15.0
+_SAMPLE_MIN_INTERVAL_S = 0.4
+
+
+def _sample_tracker(tracker, pool) -> None:
+    fn = getattr(tracker, "sample_coalesced", None)
+    if callable(fn):
+        fn(pool, _SAMPLE_MIN_INTERVAL_S)
+    else:
+        tracker.sample(pool)
 
 
 @api_router.get("/requests")
@@ -44,7 +53,7 @@ async def list_requests(
     if pool is None:
         raise HTTPException(status_code=503, detail="Server not initialized")
     tracker = get_request_tracker()
-    await asyncio.to_thread(tracker.sample, pool)
+    await asyncio.to_thread(_sample_tracker, tracker, pool)
     return {"requests": tracker.list_rows(limit=limit), "enabled": True}
 
 
@@ -84,7 +93,7 @@ async def stream_requests(is_admin: bool = Depends(require_admin)):
             while True:
                 pool = engine_pool()
                 if pool is not None:
-                    await asyncio.to_thread(tracker.sample, pool)
+                    await asyncio.to_thread(_sample_tracker, tracker, pool)
                 rows = []
                 for row in tracker.list_rows(limit=RING_LIMIT):
                     mark = (row.get("state"), row.get("prompt_tokens"),
@@ -262,7 +271,7 @@ async def request_detail(
     pool = engine_pool()
     if pool is not None:
         # refresh so an open modal sees state/payload move without a poll storm
-        await asyncio.to_thread(tracker.sample, pool)
+        await asyncio.to_thread(_sample_tracker, tracker, pool)
     live_row = tracker.lookup(request_id)
     is_live = live_row is not None and tracker.is_live(request_id)
     source = "active" if is_live else "stored"
