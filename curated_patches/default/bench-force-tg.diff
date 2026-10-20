@@ -1,0 +1,102 @@
+diff --git a/omlx/admin/benchmark.py b/omlx/admin/benchmark.py
+index 88d0901..100b7cb 100644
+--- a/omlx/admin/benchmark.py
++++ b/omlx/admin/benchmark.py
+@@ -764,6 +764,7 @@ async def _run_single_test(
+             max_tokens=max_tokens,
+             temperature=0.0,
+             top_p=1.0,
++            ignore_eos=True,
+             skip_cache_store=True,
+             benchmark_trace=True,
+             benchmark_ane_sequence_length=int(
+@@ -1095,6 +1096,7 @@ async def _run_batch_test(
+         max_tokens=max_tokens,
+         temperature=0.0,
+         top_p=1.0,
++        ignore_eos=True,
+     )
+ 
+     async def _single_request(prompt: list[int]) -> dict:
+diff --git a/omlx/engine/batched.py b/omlx/engine/batched.py
+index 938e97c..ea278e9 100644
+--- a/omlx/engine/batched.py
++++ b/omlx/engine/batched.py
+@@ -1266,6 +1266,7 @@ class BatchedEngine(BaseEngine):
+             presence_penalty=presence_penalty,
+             frequency_penalty=kwargs.get("frequency_penalty", 0.0),
+             stop=stop or [],
++            ignore_eos=bool(kwargs.get("ignore_eos", False)),
+             thinking_budget=kwargs.get("thinking_budget", None),
+             compiled_grammar=kwargs.get("compiled_grammar", None),
+             seed=kwargs.get("seed", None),
+diff --git a/omlx/engine/vlm.py b/omlx/engine/vlm.py
+index 0e6ae6f..cb294ef 100644
+--- a/omlx/engine/vlm.py
++++ b/omlx/engine/vlm.py
+@@ -5018,6 +5018,7 @@ class VLMBatchedEngine(BaseEngine):
+             presence_penalty=presence_penalty,
+             frequency_penalty=kwargs.get("frequency_penalty", 0.0),
+             stop=stop or [],
++            ignore_eos=bool(kwargs.get("ignore_eos", False)),
+             stop_token_ids=extra_stop_ids or None,
+             thinking_budget=kwargs.get("thinking_budget", None),
+             compiled_grammar=kwargs.get("compiled_grammar", None),
+diff --git a/omlx/request.py b/omlx/request.py
+index 4db3fbf..34b42f8 100644
+--- a/omlx/request.py
++++ b/omlx/request.py
+@@ -73,6 +73,11 @@ class SamplingParams:
+     frequency_penalty: float = 0.0
+     stop: Optional[List[str]] = None
+     stop_token_ids: Optional[List[int]] = None
++    # Forced-length generation (benchmark use): when True the model's own
++    # EOS/EOT/generation_config stop tokens do not end generation — only
++    # max_tokens does. Request-level stop strings / stop_token_ids still
++    # stop as usual.
++    ignore_eos: bool = False
+ 
+     # Logprobs settings (memory optimization: disabled by default)
+     logprobs: bool = False  # Whether to return logprobs
+diff --git a/omlx/scheduler.py b/omlx/scheduler.py
+index 6aa2049..2279bd9 100644
+--- a/omlx/scheduler.py
++++ b/omlx/scheduler.py
+@@ -3608,7 +3608,12 @@ class Scheduler:
+ 
+         # Convert stop tokens from Set[int] to Sequence[Sequence[int]]
+         # for the new BatchGenerator API (each stop token is a sequence).
+-        stop_tokens_set = self._get_stop_tokens()
++        # ignore_eos (forced-length bench): drop the model's own stop set;
++        # request-level stop_token_ids still apply.
++        stop_tokens_set = (
++            set() if getattr(sampling_params, "ignore_eos", False)
++            else self._get_stop_tokens()
++        )
+         if sampling_params.stop_token_ids:
+             stop_tokens_set.update(sampling_params.stop_token_ids)
+         stop_tokens_seq = [[t] for t in stop_tokens_set] if stop_tokens_set else None
+@@ -7532,7 +7537,10 @@ class Scheduler:
+         machine that tells BatchGenerator when to stop generating for
+         this request.
+         """
+-        stop_tokens_set = self._get_stop_tokens()
++        stop_tokens_set = (
++            set() if getattr(request.sampling_params, "ignore_eos", False)
++            else self._get_stop_tokens()
++        )
+         if request.sampling_params.stop_token_ids:
+             stop_tokens_set.update(request.sampling_params.stop_token_ids)
+ 
+@@ -11044,7 +11052,10 @@ class Scheduler:
+ 
+         # Combine base stop tokens (EOS, Harmony, generation_config) with
+         # request-specific stop_token_ids — same shape as _build_state_machine.
+-        eos_ids: set[int] = self._get_stop_tokens()
++        eos_ids: set[int] = (
++            set() if getattr(request.sampling_params, "ignore_eos", False)
++            else self._get_stop_tokens()
++        )
+         if request.sampling_params.stop_token_ids:
+             eos_ids.update(request.sampling_params.stop_token_ids)
+ 

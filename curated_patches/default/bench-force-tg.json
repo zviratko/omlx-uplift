@@ -1,0 +1,5 @@
+{
+  "description": "Throughput bench tg rows now decode the length they claim. The requested generation length was only a ceiling: models that emit their end-of-turn token early (gemma stops ~25 tokens in) measured a short decode under a tg256/512/1024 label. Inside the benchmark only, the model's own EOS/turn-end stops are ignored so every tg variant generates exactly that many tokens, matching how vLLM/llama.cpp benches force length. Normal serving is untouched; external endpoints and the chat-only engine still answer on their own terms — the bench panel now shows measured output tokens per row.",
+  "source": {"kind": "file"},
+  "scope": "omlx"
+}
