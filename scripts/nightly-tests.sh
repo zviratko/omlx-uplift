@@ -16,7 +16,12 @@ REPORT_DIR="$HOME/.omlx/uplift/reports"
 JSONL="$REPORT_DIR/nightly.jsonl"
 FAILLOG="$REPORT_DIR/nightly-last-failure.log"
 PYLIBS="$HOME/hermes/TMP/pylibs"
+# DEC-1 (vanilla decoupling): the gate interpreter is whichever omlx-family
+# keg exists — vanilla first (historic), else the omlx-dev keg. Both are the
+# same libexec venv shape with fastapi/uvicorn + all omlx transitive deps,
+# because omlx-dev builds from jundot's install logic.
 KEG_PY="/opt/homebrew/opt/omlx/libexec/bin/python"
+[ -x "$KEG_PY" ] || KEG_PY="/opt/homebrew/opt/omlx-dev/libexec/bin/python"
 LOG=$(mktemp /tmp/uplift-nightly.XXXXXX)
 
 mkdir -p "$REPORT_DIR"
@@ -38,7 +43,7 @@ fi
 # one-time helper libs (system python3 lacks pytest); keg pip if missing
 if ! "$KEG_PY" -c "import pytest" 2>/dev/null; then
     PYTHONPATH="$PYLIBS" "$KEG_PY" -c "import pytest" 2>/dev/null || \
-        /opt/homebrew/opt/omlx/libexec/bin/pip install -q --target "$PYLIBS" \
+        "${KEG_PY%/*}/pip" install -q --target "$PYLIBS" \
         pytest pytest-asyncio >>"$LOG" 2>&1
 fi
 

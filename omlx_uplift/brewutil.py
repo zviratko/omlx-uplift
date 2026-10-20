@@ -94,8 +94,17 @@ def pth_content(target: Path | None) -> str:
 def default_target_python(formula: str | None = None) -> str | None:
     """No --python given: prefer a Homebrew keg (the common case for tap
     users), else stay in the current interpreter. `formula` selects which
-    keg (DEV-3: 'omlx-dev' mounts the dev keg too)."""
-    keg = brew_formula_python(formula or "omlx")
+    keg (DEV-3: 'omlx-dev' mounts the dev keg too).
+
+    DEC-1 (vanilla decoupling): with no explicit formula, the target is
+    whichever omlx-family keg exists — vanilla first (historic default),
+    else the omlx-dev keg. A dev-only machine mounts into dev; a machine
+    with both keeps vanilla as primary and the DEV-9 co-mount still
+    reaches dev right after."""
+    if formula:
+        keg = brew_formula_python(formula)
+    else:
+        keg = brew_formula_python("omlx") or brew_formula_python("omlx-dev")
     return str(keg) if keg else None
 
 

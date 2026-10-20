@@ -34,7 +34,7 @@ fetchJson(`${API}/admin/api/device-info`).then(d => {
 }).catch(() => {});
 /* U10: header shows which keg is serving. Identity comes from the server
    (GET identity) — never inferred from files on disk, which exist even when
-   the vanilla keg answers. 'DEV' is brand text (like 'Uplift'): untranslated,
+   the other keg answers. 'DEV' is brand text (like 'Uplift'): untranslated,
    colour via --dev-accent so skins can restyle it. */
 fetchJson(`${API}/admin/api/identity`).then(d => {
     if (!d || !d.dev) return;

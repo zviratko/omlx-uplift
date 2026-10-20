@@ -18,7 +18,9 @@ REPO="${QA2_REPO:-$HOME/git/omlx-uplift-repo}"
 PORT="${QA2_PORT:-8099}"
 STAGE_PORT="${QA2_STAGE_PORT:-8797}"
 STAGE="$HOME/hermes/TMP/qa2-staging"
+# DEC-1: keg python with the full dep set — vanilla if installed, else dev.
 QA_PY="/opt/homebrew/opt/omlx/libexec/bin/python"
+[ -x "$QA_PY" ] || QA_PY="/opt/homebrew/opt/omlx-dev/libexec/bin/python"
 LOG="$HOME/hermes/TMP/qa2-serve.log"
 PIDF="$HOME/hermes/TMP/qa2.pids"
 

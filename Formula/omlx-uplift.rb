@@ -8,12 +8,14 @@ class OmlxUplift < Formula
   url "https://github.com/zviratko/omlx-uplift.git", tag: "v2.4"
   head "https://github.com/zviratko/omlx-uplift.git", branch: "main", using: :git
 
-  # Depends on the omlx formula from the upstream tap; brew resolves
-  # cross-tap deps by full name. We do NOT patch omlx's keg files — the
-  # package mounts itself at python level; a vanilla `brew upgrade omlx`
-  # stays byte-identical (re-run `brew reinstall omlx-uplift` afterwards
-  # to re-inject into the fresh keg).
-  depends_on "jundot/omlx/omlx"
+  # NO depends_on omlx (DEC-1, user 2026-10-20): uplift targets any
+  # omlx-family keg that exists — vanilla (jundot/omlx) and/or omlx-dev.
+  # A dev-only machine must install WITHOUT brew pulling a vanilla keg it
+  # never asked for; `omlx-uplift install` resolves the target keg at
+  # runtime (vanilla first when present, else omlx-dev). We never patch
+  # keg files — the package mounts itself at python level, so upgrading
+  # either keg stays byte-identical (re-run `omlx-uplift install` after a
+  # keg upgrade to re-inject the mount).
   depends_on "python@3.11"
 
   def omlx_python
@@ -68,10 +70,12 @@ class OmlxUplift < Formula
       EOS
     else
       <<~EOS
-        Finish the mount (one command, writes one .pth into omlx's python):
+        Finish the mount (one command, writes one .pth into the omlx keg's
+        python — vanilla when installed, else omlx-dev):
           omlx-uplift install
-        then restart omlx:
-          launchctl kickstart -k gui/$(id -u)/sh.brew.omlx
+        then restart the service you run:
+          launchctl kickstart -k gui/$(id -u)/sh.brew.omlx      (vanilla)
+          launchctl kickstart -k gui/$(id -u)/sh.brew.omlx-dev  (omlx-dev)
         Open: http://127.0.0.1:<omlx-port>/uplift/
       EOS
     end

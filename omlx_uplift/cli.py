@@ -610,7 +610,8 @@ def _install_default_target(args) -> None:
         dev_here = bool(brewutil.keg_site_packages("omlx-dev"))
         print("\nWhich install should omlx-uplift commands work on by "
               "default?")
-        print("  [1] omlx       vanilla keg (runtime overlays only)")
+        print("  [1] omlx       omlx server keg — vanilla or omlx-dev "
+              "(runtime overlays only)")
         print("  [2] omlx-dev   dev keg (build + runtime)"
               + ("" if dev_here else " — not installed yet, applies after "
                                      "'omlx-uplift dev bootstrap'"))
@@ -855,7 +856,8 @@ def cmd_patches(argv=None) -> int:
     here for compatibility.
 
     --target omlx|dev|both selects WHICH install the verb works on (the
-    vanilla keg or the omlx-dev keg; 'both' runs status/apply/check/
+    omlx server keg — vanilla or omlx-dev — or the omlx-dev build tree;
+    'both' runs status/apply/check/
     update-all once per tree). Default: the choice persisted by
     'omlx-uplift install --default-target', else omlx. Store-only verbs
     (enable/disable/promote/rollback/approve/adopt/remove, kill switch)
@@ -907,8 +909,9 @@ def cmd_patches(argv=None) -> int:
                          "coded line per patch")
     ap.add_argument("--target", choices=["omlx", "dev", "both"],
                     default=None,
-                    help="which install the command works on: omlx (vanilla "
-                         "keg), dev (omlx-dev keg) or both (status/apply/"
+                    help="which install the command works on: omlx (omlx "
+                         "server keg — vanilla or omlx-dev), dev (omlx-dev "
+                         "keg) or both (status/apply/"
                          "check/update-all run per tree). Default: the "
                          "choice saved by 'omlx-uplift install "
                          "--default-target', else omlx. Store-only verbs "
@@ -1125,8 +1128,8 @@ def _missing_target_error(missing) -> None:
         if t == "dev":
             print("omlx-dev keg not found — run 'omlx-uplift dev "
                   "bootstrap' then 'omlx-uplift install', or work on the "
-                  "vanilla tree (--target omlx; make that the default with "
-                  "install --default-target omlx)", file=sys.stderr)
+                  "server keg tree (--target omlx; make that the default "
+                  "with install --default-target omlx)", file=sys.stderr)
         else:
             print("omlx package tree not found — is omlx installed for "
                   "this python?", file=sys.stderr)

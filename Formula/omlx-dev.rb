@@ -22,6 +22,11 @@
 # build-logic fixes land here for free; if jundot ever changes the DSL in a
 # way that breaks this subclass, the fallback is vendoring the class body
 # (documented in ~/hermes/uplift/in/DEV-context.md decision 4).
+#
+# DEC-1 (2026-10-20): this needs only the jundot/omlx TAP CHECKOUT (a git
+# clone of the formula file) — never an installed vanilla omlx keg. The
+# uplift formula likewise dropped its depends_on omlx; a dev-only machine
+# installs and mounts entirely without vanilla.
 require "json"
 
 module OmlxDevConstants

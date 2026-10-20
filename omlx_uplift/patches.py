@@ -573,7 +573,15 @@ def _omlx_root() -> str | None:
     layouts = (("opt", "omlx", "libexec", "lib", "python3.*",
                 "site-packages", "omlx"),      # brew formula with libexec venv
                ("opt", "omlx", "lib", "python3.*",
-                "site-packages", "omlx"))      # plain site-packages formula
+                "site-packages", "omlx"),      # plain site-packages formula
+               # DEC-1 (vanilla decoupling): a dev-only machine has no
+               # vanilla keg — the live tree is the omlx-dev keg (identical
+               # layout, it builds from jundot's install logic). Vanilla
+               # stays first so both-keg machines resolve exactly as before.
+               ("opt", "omlx-dev", "libexec", "lib", "python3.*",
+                "site-packages", "omlx"),
+               ("opt", "omlx-dev", "lib", "python3.*",
+                "site-packages", "omlx"))
     for pref in prefixes:
         for layout in layouts:
             hits = sorted(glob.glob(os.path.join(pref, *layout)))

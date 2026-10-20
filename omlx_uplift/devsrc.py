@@ -323,9 +323,9 @@ def fetch_sync_ref(cfg: dict) -> None:
 
 def base_sha_of(cfg: dict) -> str | None:
     """The commit the materializer must use as base. Default (no pin):
-    tip of the sync ref — 'follow vanilla omlx keg' in dashboard wording
-    (the keg is built from that same upstream line; when the pin is unset
-    a sync-ref fetch refreshes it). With cfg['base_pin'] set, that exact
+    tip of the sync ref — 'follow upstream HEAD' (DEC-1: this never
+    consulted the vanilla keg and does not; a sync-ref fetch refreshes
+    it). With cfg['base_pin'] set, that exact
     commit is the base until the pin is cleared."""
     pin = (cfg.get("base_pin") or "").strip()
     path = src_path(cfg)

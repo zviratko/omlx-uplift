@@ -577,6 +577,11 @@ separate data root (default
 via
 .Dv OMLX_BASE_PATH ) ,
 separate service.
+Neither keg is a prerequisite of the other (DEC-1): with only omlx-dev
+installed,
+.Ic "omlx-uplift install"
+mounts into the dev keg automatically, and patch commands resolve the
+server tree there.
 Shareable knobs (models directory, model settings, model profiles) are a
 per-knob symlink decision; refusing to hide real dev-side data behind a
 symlink is deliberate.

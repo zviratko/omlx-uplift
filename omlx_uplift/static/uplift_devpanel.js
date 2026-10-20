@@ -381,7 +381,7 @@ function dvTargetMenu(btn, d) {
         return it;
     };
     pop.append(mk(ptMsg('uplift.patches.dev_base_follow',
-        'follow vanilla omlx keg') + ' (' + dvSha(d.base) + ')',
+        'follow upstream HEAD') + ' (' + dvSha(d.base) + ')',
         !pinned, ''));
     if (pinned) pop.append(mk(`${dvSha(pinned)} — `
         + ptMsg('uplift.patches.dev_base_pinned', 'pinned commit'),
@@ -441,7 +441,7 @@ function dvRenderBase(d) {
         ? `${dvSha(pinned)} — ` + ptMsg('uplift.patches.dev_base_pinned_note',
             'pinned — the next Build uses exactly this source version')
         : ptMsg('uplift.patches.dev_base_follow',
-            'follow vanilla omlx keg') + ' (' + dvSha(d.base) + ')';
+            'follow upstream HEAD') + ' (' + dvSha(d.base) + ')';
     btn.disabled = !!(d.build && d.build.running);
     if (btn.dataset.wired !== '1') {
         btn.dataset.wired = '1';
