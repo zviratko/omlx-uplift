@@ -3930,13 +3930,21 @@ var ACC = {
                     // Harness suites replay 'Requesting API' once PER LEAF
                     // subtask (mmlu: 57 bars of N). A bar that restarts
                     // (cur < last cur) closed the previous leaf — bank its
-                    // total. Classic suites have ONE bar per suite, so the
-                    // accumulator just rides it. (Interleaved same-suite
-                    // bars do not occur in either engine's eval phase.)
+                    // total. CLASSIC suites have ONE bar per suite, and a
+                    // drop there is a RE-RUN, not a boundary: the runner's
+                    // thinking auto-switch clears partial results and
+                    // re-answers from 1 (eval/base.py run loop), and a
+                    // poll-seeded snapshot followed by a stream/replay
+                    // restart is the same shape data-wise. Banking would
+                    // double-count the fixed dataset total (32/30 seen
+                    // live) — reset the accumulator instead. (Interleaved
+                    // same-suite bars do not occur in either engine's
+                    // eval phase.)
                     run.bar = run.bar || {};
                     var prev = run.bar[b];
                     var acc = prev ? prev.acc : 0;
-                    if (prev && ev.bench_current < prev.cur) acc += prev.tot;
+                    if (prev && ev.bench_current < prev.cur)
+                        acc = run.engine === 'harness' ? acc + prev.tot : 0;
                     run.bar[b] = { cur: ev.bench_current, tot: ev.bench_total || prev && prev.tot || 0, acc: acc };
                     run.suiteDone[b] = acc + ev.bench_current;
                     run.suiteState[b] = 'running';

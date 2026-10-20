@@ -337,6 +337,45 @@ test('ACC-STALL: without the reset the same replay would bank the old total twic
         'this is the corruption resetBoardEntry exists to stop');
 });
 
+test('ACC-STALL: a CLASSIC bar drop is a re-run (reset), never a bank', () => {
+    // Live corruption this pins: the board was poll-SEEDED at cur=2, then the
+    // attach replay restarted the same suite at cur 0/1/2. Treating that as a
+    // harness leaf boundary banked the FULL dataset total: 'HumanEval 32/30'.
+    // Classic runners re-start a suite the same way when the thinking
+    // auto-switch clears partial results (eval/base.py), so a drop VOIDs the
+    // partial pass — the fixed dataset total must never be double-counted.
+    const { B } = load();
+    const ACC = B._panels.acc;
+    ACC.state = { groups: GROUPS, harnessSizes: HSIZE, running: true,
+                  queue: [], board: [], seenN: 0, pollN: null, lastAct: 0,
+                  lastMsg: '' };
+    ACC.syncBoard(running({
+        running_entry: { model_id: 'M', engine: 'classic',
+                         sizes: { humaneval: 30 }, external: false } }));
+    const done = () => ACC.state.board[0].suiteDone.humaneval;
+    ACC.seedFromPoll({ last_progress: EV(2, 30, 'humaneval') });
+    assert.equal(done(), 2, 'the seed paints current progress');
+    [0, 1, 2].forEach(c => ACC.boardEvent(EV(c, 30, 'humaneval')));
+    assert.equal(done(), 2, 'replay restart RESETS — never banks the 30 (was 32)');
+    // mid-stream re-run (thinking auto-switch): partial pass voids
+    [3, 4, 5, 6, 7, 8, 9, 10, 11, 12].forEach(c => ACC.boardEvent(EV(c, 30, 'humaneval')));
+    assert.equal(done(), 12);
+    ACC.boardEvent(EV(1, 30, 'humaneval'));
+    assert.equal(done(), 1, 'the re-run starts the count over');
+    [2, 3].forEach(c => ACC.boardEvent(EV(c, 30, 'humaneval')));
+    assert.equal(done(), 3);
+    // harness entries keep the leaf-bank behaviour untouched
+    ACC.syncBoard(running({
+        running_entry: { model_id: 'M', engine: 'harness',
+                         sizes: { mmlu: 1 }, external: false } }));
+    assert.equal(ACC.state.board[0].engine, 'harness');
+    ACC.boardEvent(EV(1, 30, 'mmlu'));
+    ACC.boardEvent(EV(30, 30, 'mmlu'));
+    ACC.boardEvent(EV(1, 30, 'mmlu'));   // leaf boundary still BANKS on harness
+    assert.equal(ACC.state.board[0].suiteDone.mmlu, 31,
+        'harness leaf banking unchanged');
+});
+
 test('ACC-STALL: startStream ALWAYS arms the 4s queue poll beside the stream', () => {
     const { B, timers, esList } = loadPoll({ queue: [running()] });
     const ACC = B._panels.acc;
