@@ -1526,6 +1526,11 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
             elif rep.get("check") == "obsolete":
                 _emit(res, "out", f"{pid}: upstream now carries the patch "
                                   "(marked obsolete)")
+            elif rep.get("check") == "obsolete_reversed":
+                _emit(res, "out", f"{pid}: obsolete verdict REVERSED — the "
+                                  "clean base re-gate still applies the "
+                                  "diff, upstream does NOT carry it "
+                                  "(restored to applied)")
             elif rep.get("check") == "error":
                 # LOG-2: the drift gate's failure used to vanish here while
                 # fetch_and_gate printed an unattributed 'gate REJECTED' —

@@ -1597,6 +1597,19 @@ def _gate_all_already(result: dict) -> bool:
     return gate_all_already(result)
 
 
+def _has_applied_record(patch: dict) -> bool:
+    """True when this patch's store records claim it applied to ANY keg
+    (any version, any keg id). The FALSE-OBSOLETE guard's witness: if the
+    patch has ever been mounted, a live tree may still carry its hunks
+    under a keg id the pristine overlay can no longer match — an 'already'
+    read from that tree is the patch reading itself, not upstream."""
+    for v in patch.get("versions") or []:
+        for rec in (v.get("kegs") or {}).values():
+            if rec.get("status") == "applied":
+                return True
+    return False
+
+
 def _pr_merged_into_base(src: dict, diff_bytes: bytes | None,
                          reverse: bool = False) -> bool | None:
     """For a github_pr source with state='applied' but no content drift:
@@ -1742,6 +1755,22 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
             latest.get("content_sha256") != sha or
             (head and latest.get("source_head_sha") and
              latest.get("source_head_sha") != head)))
+        # FALSE-OBSOLETE guard (user report 2026-10-20, mruu + kocour):
+        # all-'already' read from a tree that still carries the PATCH'S
+        # OWN hunks is self-confirmation, never evidence of upstream. The
+        # pristine strip is keyed by the tree's content-hash keg id and
+        # that id churns on every rebuild/mount — when it no longer
+        # matches the applied records the strip silently degrades to
+        # None and the gate reads our own mounted code. Two witnesses:
+        # base_lacks — the stored diff still APPLIES to the tree the
+        # first gate ran on (for dev-scope that is the clean base
+        # worktree: content absent upstream cannot be 'upstreamed');
+        # tree_clean — the gate provably ran without this patch (strip
+        # found, or the patch never applied anywhere).
+        base_lacks = (not p.get("reversal") and bool(result.get("files"))
+                      and any(f.get("status") == "ok"
+                              for f in result["files"]))
+        tree_clean = overrides is not None or not _has_applied_record(p)
         if not drifted:
             # An upstream-MERGED PR stops drifting but also stops being
             # needed: the code is in upstream now. Detect that here — the
@@ -1750,43 +1779,90 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
             if p.get("state") == "applied":
                 scope = _patches.patch_scope(p)
                 if _patches.scope_touches_dev(scope):
-                    # the dev gate ran against the uplift worktree which
-                    # carries uplift's OWN commits — 'already' there means
-                    # nothing; ask GitHub merged_at + content-gate the
-                    # stored diff against a clean base checkout instead
-                    newest0 = max((v.get("v", 0) for v in p["versions"]),
-                                  default=0)
-                    cur_v = store.get_version(p, newest0) if newest0 else None
-                    diff_b = _read_patch_file(store, cur_v) if cur_v else None
-                    verdict = _pr_merged_into_base(
-                        src, diff_b, reverse=bool(p.get("reversal")))
-                    if verdict is None and _patches.scope_touches_keg(scope):
-                        # ancestry inconclusive: all-'already' across the
-                        # pruned KEG gate is a strong signal too
-                        keg_res = fetch_and_gate(
-                            src, tree_root,
-                            overrides=_pristine_overlay(store, p, tree_root),
-                            reverse=bool(p.get("reversal")),
-                            skip_patterns=_patches.skip_patterns(manifest),
-                            quiet=True)
-                        upstreamed = (keg_res.get("ok")
-                                      and _gate_all_already(keg_res))
+                    if dev_root is not _DEV_ROOT_DEFAULT \
+                            and _gate_all_already(result):
+                        # the caller (dev build drift path) handed us a
+                        # PRISTINE base worktree — 'already' across it is
+                        # DECISIVE: upstream itself carries the content.
+                        # (The default root is the MATERIALIZED branch,
+                        # where 'already' reads uplift's own commits — the
+                        # very trap this whole block exists to avoid.)
+                        upstreamed = True
                     else:
-                        upstreamed = verdict is True
+                        # the dev gate ran against the uplift worktree which
+                        # carries uplift's OWN commits — 'already' there means
+                        # nothing; ask GitHub merged_at + content-gate the
+                        # stored diff against a clean base checkout instead
+                        newest0 = max((v.get("v", 0)
+                                       for v in p["versions"]), default=0)
+                        cur_v = (store.get_version(p, newest0)
+                                 if newest0 else None)
+                        diff_b = (_read_patch_file(store, cur_v)
+                                  if cur_v else None)
+                        verdict = _pr_merged_into_base(
+                            src, diff_b, reverse=bool(p.get("reversal")))
+                        if (verdict is None and not base_lacks
+                                and _patches.scope_touches_keg(scope)):
+                            # ancestry inconclusive: all-'already' across
+                            # the pruned KEG gate is a strong signal too —
+                            # but only when the gate provably ran WITHOUT
+                            # this patch's own hunks (working strip, or
+                            # never applied): a stale-id strip that found
+                            # nothing reads our mounted code back at us
+                            # (the exact shape that falsely retired three
+                            # patches 2026-10-20).
+                            _ov = _pristine_overlay(store, p, tree_root)
+                            if _ov is None and _has_applied_record(p):
+                                upstreamed = False
+                            else:
+                                keg_res = fetch_and_gate(
+                                    src, tree_root,
+                                    overrides=_ov,
+                                    reverse=bool(p.get("reversal")),
+                                    skip_patterns=_patches.skip_patterns(
+                                        manifest),
+                                    quiet=True)
+                                upstreamed = (keg_res.get("ok")
+                                              and _gate_all_already(keg_res))
+                        else:
+                            upstreamed = verdict is True
                 else:
-                    # runtime gate against the real tree already ran above
-                    upstreamed = _gate_all_already(result)
+                    # runtime gate against the real tree already ran
+                    # above — trust 'already' only from a tree that
+                    # provably lacks this patch (see tree_clean witness)
+                    upstreamed = _gate_all_already(result) if tree_clean \
+                        else False
                 if upstreamed and store.set_state(
                         p, "obsolete",
                         "upstream now contains the patch — consider removing"):
                     reports[pid] = {"check": "obsolete"}
                     changed_any = True
                     continue
+            elif (p.get("state") == "obsolete"
+                    and "upstream now contains"
+                    in (p.get("state_detail") or "")
+                    and base_lacks):
+                # SELF-HEAL of the false-obsolete class (2026-10-20): the
+                # re-gate proves the stored diff still APPLIES to the
+                # tree it was gated on — upstream cannot carry what it
+                # demonstrably lacks; the old verdict read a tree's own
+                # mounted hunks (stale keg-id strip). Walk the state back;
+                # 'enabled' was never touched, the next materialize or
+                # boot mount restores the code for real.
+                if store.set_state(
+                        p, "applied",
+                        "revalidated — upstream does NOT carry the patch "
+                        "(former obsolete verdict read the tree's own "
+                        "mounted hunks)"):
+                    reports[pid] = {"check": "obsolete_reversed"}
+                    changed_any = True
+                    continue
             reports[pid] = {"check": "up_to_date"}
             continue
         obsolete = [f for f in result["files"] if f["status"] == "already"]
         if obsolete and len(obsolete) == len(result["files"]) \
-                and not _patches.scope_touches_dev(_patches.patch_scope(p)):
+                and not _patches.scope_touches_dev(_patches.patch_scope(p)) \
+                and tree_clean:
             store.set_state(p, "obsolete",
                             "upstream now contains the patch — consider removing")
             reports[pid] = {"check": "obsolete"}

@@ -190,7 +190,10 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     "update_available": frozenset({"applied", "pending", "disabled",
                                    "needs_review", "obsolete"}),
     "needs_review": frozenset({"pending", "applied", "disabled", "obsolete"}),
-    "obsolete": frozenset({"pending", "disabled"}),
+    # 'applied' back: a false-obsolete verdict (clean-base re-gate proves
+    # upstream does NOT carry it) must be reversible without faking an
+    # intermediate pending state (self-heal class, 2026-10-20).
+    "obsolete": frozenset({"pending", "disabled", "applied"}),
     "failed": frozenset({"pending", "needs_review", "disabled"}),
     # disabled stays informational-visible: a drift check re-fetches the
     # source even while disabled (user disabled a broken patch; an upstream

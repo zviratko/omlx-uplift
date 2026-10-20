@@ -475,13 +475,18 @@ class TestManifest(TempTree):
         self.assertTrue(self.store.set_state(p, "applied"))
         # applied -> pending is legal (rollback re-arm); applied->obsolete ok
         self.assertTrue(self.store.set_state(p, "obsolete"))
-        # STATE-GATE-1: the ignored-return class of bug — a rejected
-        # transition must be LOUD at the choke point, not a silent no-op
-        # while the caller reports the new state anyway.
+        # FALSE-OBSOLETE guard (2026-10-20): obsolete -> applied is legal —
+        # the drift check's self-heal walks a falsely-retired patch back
+        # when a re-gate proves upstream does NOT carry it (the verified
+        # call sites enforce honesty; the table only permits the edge).
+        self.assertTrue(self.store.set_state(p, "applied", "healed"))
+        self.assertEqual(p["state"], "applied")
+        # STATE-GATE-1: a rejected transition must be LOUD at the choke
+        # point, not a silent no-op while the caller reports anyway.
+        q = self._patch(state="failed")
         with self.assertLogs("omlx_uplift.patches", level="WARNING") as lg:
-            # obsolete -> applied is NOT legal (must re-enable through pending)
-            self.assertFalse(self.store.set_state(p, "applied"))
-        self.assertEqual(p["state"], "obsolete")
+            self.assertFalse(self.store.set_state(q, "obsolete"))
+        self.assertEqual(q["state"], "failed")
         self.assertTrue(any("illegal transition" in m for m in lg.output))
         # unknown state
         with self.assertLogs("omlx_uplift.patches", level="WARNING"):
