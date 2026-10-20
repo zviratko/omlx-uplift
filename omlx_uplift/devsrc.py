@@ -1237,7 +1237,7 @@ def _sanitize(line: str) -> str:
     return _ANSI_RE.sub("", line)
 
 
-def _stream_build(res: BuildResult, cmd: list) -> int:
+def _stream_build(res: BuildResult, cmd: list, env: dict | None = None) -> int:
     """BUILD-PROGRESS-1 (user 2026-10-10: "omlx-dev (re)build from the
     dashboard should log the progress"): run brew with its output piped
     and merged, forwarding every line through _emit as it arrives. The
@@ -1256,7 +1256,7 @@ def _stream_build(res: BuildResult, cmd: list) -> int:
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True,
-                                errors="replace", bufsize=1)
+                                errors="replace", bufsize=1, env=env)
     except OSError as exc:
         _emit(res, "err", f"brew could not start: {exc}")
         return 127
@@ -1422,6 +1422,43 @@ def _vanilla_keg_site_packages() -> str | None:
     return cand if out.returncode == 0 and _os.path.isdir(cand) else None
 
 
+def _ensure_versioned_formula() -> str | None:
+    """KEG-VERSIONED guard: the per-build version is read by brew from the
+    TAP CHECKOUT's omlx-dev.rb. A checkout older than the scheme would keep
+    naming kegs HEAD-* and this build's plain `brew install` (no --HEAD)
+    would fail cryptically. One tap pull is attempted (it is the same git
+    repo the uplift formula ships from; --ff-only like `brew update` does);
+    returns a human error when the tap still predates the scheme, None ok."""
+    import subprocess
+
+    from . import paths as _paths
+
+    tap_root = os.path.join(_paths.brew_prefix(), "Library", "Taps",
+                            "zviratko", "homebrew-uplift")
+    formula = os.path.join(tap_root, "Formula", "omlx-dev.rb")
+
+    def versioned() -> bool:
+        try:
+            with open(formula, encoding="utf-8") as fh:
+                return "build_version" in fh.read()
+        except OSError:
+            return False
+
+    if versioned():
+        return None
+    try:
+        subprocess.run(["git", "-C", tap_root, "pull", "--ff-only"],
+                       capture_output=True, timeout=90)
+    except Exception:
+        pass
+    if versioned():
+        return None
+    return (f"the tap's omlx-dev formula at {formula} predates versioned "
+            "kegs — update it (brew update, or git -C "
+            f"{tap_root} pull --ff-only) and re-run; refusing a build "
+            "brew would install under 'HEAD' again")
+
+
 def _refresh_patch_sources(cfg: dict, res) -> dict:
     """One source refresh before a dev build (user policy 2026-10-09):
 
@@ -1435,10 +1472,10 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
        candidate with no new safeguard hold auto-promotes inside
        check_all; user patches only light the update_available chip.
 
-    Without a vanilla keg on this machine even step 1 runs: add_patch
-    falls back to the dev carrier when a keg gate errors (tree_root=''
-    fails the gate, not the add — a scope=omlx catalog entry then reports
-    a gate failure and the store is untouched)."""
+    Without a vanilla keg the dev keg stands in as the gate tree (DEC-1):
+    the omlx-scope mount lands on it at boot, so it is the honest target
+    (an empty tree_root silently skipped every new catalog entry — mruu
+    live bug: `dev upgrade` never installed bench-force-tg)."""
     import tempfile
 
     from . import patchsource
@@ -1447,6 +1484,17 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
     summary = {"catalog": None, "drift": None}
     store = _patches_mod.PatchStore()
     keg_sp = _vanilla_keg_site_packages() or ""
+    if not keg_sp:
+        # DEC-1 (2026-10-20): a machine may have NO vanilla keg — then the
+        # DEV keg is the runtime tree the omlx-scope mount lands on
+        # (RUNTIME-MOUNT), and gating catalog entries against '' could never
+        # install one (mruu live: `dev upgrade` silently skipped
+        # bench-force-tg while the dashboard, gating against the serving
+        # tree, installed it fine). Resolve the dev keg through its OWN
+        # interpreter probe (brewutil) — never by importing omlx here.
+        from . import brewutil
+
+        keg_sp = brewutil.keg_site_packages("omlx-dev") or ""
     try:
         from . import curated as _curated
 
@@ -1644,16 +1692,41 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
         res.ok, res.returncode, res.stage = True, 0, "dry-run"
         _emit(res, "out", "dry-run: would run: " + " ".join(cmd))
         return res
+
+    # KEG-VERSIONED (user 2026-10-20): a unique fake version per build,
+    # stamped right before brew runs so the formula (which reads dev.json)
+    # and this build can never disagree. brew installs it into its OWN
+    # Cellar directory while the live keg keeps serving — no `reinstall`,
+    # no unlink/backup window, and the previous binaries stay in Cellar
+    # as the rollback artifact ('same sha, different bytes' impossible).
+    import datetime as _dtv
+
+    build_version = (_dtv.datetime.now(_dtv.timezone.utc)
+                     .strftime("%Y%m%d.%H%M%S") + "." + tip[:7])
+    stale = _ensure_versioned_formula()
+    if stale:
+        _emit(res, "err", stale)
+        _emit(res, "err", f"  investigation: {res.log_path}")
+        res.ok, res.returncode, res.stage = False, 2, "formula"
+        return res
+    cfg = load_config() or cfg
+    cfg["build_version"] = build_version
+    cfg["build_commit"] = tip
+    save_config(cfg)
+    res.build_version = build_version
+
     if warn:
         warn()
     res.stage = "build"
-    # U19: brew reinstall DESTROYS the outgoing keg — clone it into the
-    # stash first so `dev use <old-sha>` stays possible. Best-effort: a
-    # failed stash must never block the rebuild.
+    # U19: the legacy flow needed a stash because brew reinstall DESTROYS
+    # the outgoing keg. KEG-VERSIONED: a versioned live keg is already an
+    # immutable rollback artifact — stashing it would duplicate GiB for
+    # nothing. Legacy HEAD-* live kegs (pre-scheme installs) still stash.
     try:
         from . import kegstash
 
-        if kegstash.active_keg():
+        live = kegstash.active_keg()
+        if live and not kegstash.is_versioned(live):
             r = kegstash.stash()
             _emit(res, "out", f"previous keg stashed: {r['name']} "
                               f"({r['method']}) — rollback: omlx-uplift "
@@ -1661,8 +1734,8 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
             # DEV-13: retention is a policy, not a chore — best-effort
             # prune right after the build-path stash (dev.json
             # keg_stash_keep, default 5 builds; never prunes the slot
-            # the active keg occupies). Failure here must never block
-            # the rebuild.
+            # the active keg occupies). Failure here must never block the
+            # rebuild.
             try:
                 gone = kegstash.prune()
                 if gone:
@@ -1689,22 +1762,28 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
         _emit(res, "err", f"link-record repair skipped: {exc}")
     _emit(res, "out", "running: " + " ".join(cmd))
     # --quiet skips brew's caveats entirely (formula_installer: return if
-    # quiet?) — the restart hint we print after RESULT replaces them
+    # quiet?) — the restart hint we print after RESULT replaces them.
+    # KEG-VERSIONED: brew's install-time cleanup would prune the PREVIOUS
+    # Cellar versions we keep as rollback artifacts — retention is ours
+    # (prune_cellar below, keg_stash_keep), never brew's.
+    import os as _os
     import time as _t
+    _env = dict(_os.environ, HOMEBREW_NO_INSTALL_CLEANUP="1")
     _t0 = _t.monotonic()
-    rc = _stream_build(res, [*cmd, "--quiet"])
+    rc = _stream_build(res, [*cmd, "--quiet"], env=_env)
     _emit(res, "detail", "brew exited rc=%d after %ds (cwd %s)"
           % (rc, int(_t.monotonic() - _t0), os.getcwd()))
     if rc != 0:
         subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
-        _emit(res, "err", "brew build FAILED — dev keg untouched "
-                          "(pin restored)")
+        _emit(res, "err", "brew build FAILED — the live keg was never "
+                          "touched (pin restored)")
         _emit(res, "err", f"  investigation: {res.log_path}")
         res.ok, res.returncode = False, rc
         return res
     subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
     cfg = load_config() or cfg
     cfg["built_sha"] = tip
+    cfg["built_version"] = build_version
     # DEV-11: the base commit this keg was cut from — the boot hook
     # compares the CURRENT sync-ref tip against it to decide "HEAD moved"
     # without re-running materialize.
@@ -1717,6 +1796,19 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     brewutil.mount_into_dev_keg()
     _emit(res, "out", f"omlx-dev built from {tip[:12]}; .pth mount "
                       "refreshed")
+    # KEG-VERSIONED retention: newest keg_stash_keep build dirs plus the
+    # active keg survive; older Cellar directories (and the legacy HEAD-*
+    # one this scheme replaces) are dropped here, deliberately — brew's
+    # own cleanup is disabled for our builds and knows no policy.
+    # Best-effort: retention must never fail a good build.
+    try:
+        from . import kegstash as _ks
+
+        gone = _ks.prune_cellar()
+        if gone:
+            _emit(res, "out", "cellar retention: removed " + ", ".join(gone))
+    except Exception:
+        pass
     res.ok, res.returncode, res.stage = True, 0, "ok"
     return res
 

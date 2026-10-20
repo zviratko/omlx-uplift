@@ -21,6 +21,10 @@ import unittest
 from omlx_uplift import cli, devsrc
 
 FORMULA_CANDIDATES = [
+    # the repo clone's copy FIRST — it is the source of truth that ships
+    # into the tap; a stale legacy clone must never satisfy the contract
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "Formula", "omlx-dev.rb"),
     os.path.expanduser("~/git/homebrew-uplift/Formula/omlx-dev.rb"),
     "/opt/homebrew/Library/Taps/zviratko/homebrew-uplift/Formula/omlx-dev.rb",
 ]
@@ -41,12 +45,20 @@ class FormulaContract(unittest.TestCase):
     def test_extends_omlx_inherits_methods(self):
         self.assertRegex(self.src, r"class\s+OmlxDev\s*<\s*Omlx\b")
 
-    def test_head_only_no_stable(self):
-        # no stable `url` line outside comments
+    def test_versioned_stable_source_spec(self):
+        # KEG-VERSIONED (2026-10-20): a per-build FAKE version + a git
+        # stable url — a plain `brew install` builds the stamped commit
+        # into its own Cellar dir beside the live keg (verified against
+        # brew: newer formula version + existing keg = side-by-side
+        # install + relink). The `head` line stays as the manual
+        # `install --HEAD` escape hatch.
         body = "\n".join(l for l in self.src.splitlines()
                          if not l.strip().startswith("#"))
-        self.assertNotIn("\n  url ", body)
-        self.assertRegex(self.src, r'using:\s+:git')
+        self.assertRegex(self.src, r"def self\.build_version\(cfg\)")
+        self.assertRegex(body, r"version\s+OmlxDevConstants\.build_version")
+        self.assertIn("url _dev_url", body)
+        self.assertIn("using: :git", self.src)
+        self.assertRegex(body, r'head\s+"file://')
         self.assertIn("uplift-dev", self.src)
 
     def test_head_url_is_local_devsrc(self):
@@ -131,8 +143,13 @@ class ReceiptInheritance(unittest.TestCase):
 
 
 class BrewBuildCmd(unittest.TestCase):
-    """brew 7.0.6 --HEAD asymmetry (both errors hit 2026-09-24): install
-    needs --HEAD for a head-only formula, reinstall rejects it."""
+    """KEG-VERSIONED (2026-10-20): every build carries its own fake
+    version, so a rebuild is ALWAYS a plain `brew install` of a new
+    version — never `reinstall` (which unlinks and moves the LIVE keg to
+    a backup BEFORE the multi-minute build: downtime window, no rollback
+    if the build dies) and never `--HEAD` (would name the keg HEAD-*
+    again). History: brew 7.0.6 --HEAD asymmetry, both errors 2026-09-24,
+    superseded by the versioned scheme."""
 
     def setUp(self):
         self.prefix = tempfile.mkdtemp(prefix="uplift-dev3-cmd-")
@@ -146,16 +163,51 @@ class BrewBuildCmd(unittest.TestCase):
         else:
             os.environ["HOMEBREW_PREFIX"] = self._env
 
-    def test_first_build_installs_with_head(self):
+    def test_first_build_is_plain_install(self):
         cmd = cli._brew_build_cmd({"--with-grammar"})
-        self.assertEqual(cmd, ["brew", "install", "--HEAD",
-                               "--with-grammar", "omlx-dev"])
+        self.assertEqual(cmd, ["brew", "install", "--with-grammar",
+                               "omlx-dev"])
 
-    def test_rebuild_reinstalls_without_head(self):
+    def test_rebuild_never_reinstalls(self):
         os.makedirs(os.path.join(self.prefix, "Cellar", "omlx-dev",
-                                 "HEAD-abc"))
+                                 "20261019.075500.060846c"))
         cmd = cli._brew_build_cmd(set())
-        self.assertEqual(cmd, ["brew", "reinstall", "omlx-dev"])
+        self.assertEqual(cmd, ["brew", "install", "omlx-dev"])
+        self.assertNotIn("reinstall", cmd)
+        self.assertNotIn("--HEAD", cmd)
+
+
+class VersionedFormulaGuard(unittest.TestCase):
+    """KEG-VERSIONED pre-build guard: a tap checkout older than the
+    scheme must abort the build with a clear message, not cryptically."""
+
+    def setUp(self):
+        self.prefix = tempfile.mkdtemp(prefix="uplift-dev3-guard-")
+        self.addCleanup(shutil.rmtree, self.prefix, ignore_errors=True)
+        self._env = os.environ.get("HOMEBREW_PREFIX")
+        os.environ["HOMEBREW_PREFIX"] = self.prefix
+        self.formula = os.path.join(
+            self.prefix, "Library", "Taps", "zviratko", "homebrew-uplift",
+            "Formula", "omlx-dev.rb")
+        os.makedirs(os.path.dirname(self.formula), exist_ok=True)
+
+    def tearDown(self):
+        if self._env is None:
+            os.environ.pop("HOMEBREW_PREFIX", None)
+        else:
+            os.environ["HOMEBREW_PREFIX"] = self._env
+
+    def test_old_formula_is_reported(self):
+        with open(self.formula, "w") as fh:
+            fh.write('class OmlxDev < Omlx\n  head "file://x", '
+                     'branch: "uplift-dev", using: :git\nend\n')
+        msg = devsrc._ensure_versioned_formula()
+        self.assertIsNotNone(msg)
+
+    def test_versioned_formula_passes(self):
+        with open(self.formula, "w") as fh:
+            fh.write("def self.build_version(cfg)\nend\n")
+        self.assertIsNone(devsrc._ensure_versioned_formula())
 
 
 class MountIntoDevKeg(unittest.TestCase):

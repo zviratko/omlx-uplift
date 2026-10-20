@@ -9,9 +9,11 @@
 #
 #     omlx-uplift dev install
 #
-# which re-materializes first, then `brew reinstall omlx-dev` (head-only
-# formula: HEAD is always the build target; this brew has no --HEAD flag
-# on reinstall).
+# which re-materializes first, stamps a unique build_version + build_commit
+# into dev.json, then runs `brew install omlx-dev` (KEG-VERSIONED, see
+# build_version below: every build is a NEW fake version, so brew installs
+# it beside the live keg instead of `reinstall`, which moves the running
+# keg out of the way BEFORE the multi-minute build).
 #
 # WHY `class OmlxDev < Omlx` needs re-declarations: Homebrew resets the
 # stable/head SoftwareSpecs on subclassing (formula.rb `inherited`), so the
@@ -44,6 +46,35 @@ module OmlxDevConstants
   def self.src_path(cfg)
     File.expand_path(cfg["src_path"] || "~/.omlx/uplift/dev-src")
   end
+
+  # KEG-VERSIONED (user 2026-10-20): a FAKE per-build version instead of a
+  # HEAD keg. `brew reinstall` unlinks and renames the LIVE keg away BEFORE
+  # the multi-minute source build (reinstall/reinstall.rb `backup keg`) —
+  # for that whole window opt/omlx-dev dangles and a crash cannot restart.
+  # With a unique version per build, uplift runs a plain `brew install`:
+  # brew builds the new keg while the old one keeps serving, installs it at
+  # its own Cellar/<version> directory, and switches links at the end (ms).
+  # Previous binaries simply stay in Cellar — rollback is a symlink switch
+  # (omlx-uplift dev use), and two builds of ONE commit are two distinct
+  # versions (recompiles and patch-set changes never share bytes).
+  # `omlx-uplift dev install` stamps build_version into dev.json right
+  # before running brew. A manual bare `brew install` (bootstrap path)
+  # derives a stable version from the branch tip instead.
+  def self.build_version(cfg)
+    v = cfg["build_version"].to_s.strip
+    return v unless v.empty?
+
+    src = src_path(cfg)
+    br = cfg["formula_branch"] || "uplift-dev"
+    stamp = begin
+      Utils.popen_read("git", "-C", src, "log", "-1",
+                       "--date=format:%Y%m%d.%H%M%S",
+                       "--format=%cd.%h", br).strip
+    rescue StandardError
+      ""
+    end
+    stamp.empty? ? "0.manual" : stamp
+  end
 end
 
 # Load jundot's formula by PATH — plain `brew` may resolve formulas via the
@@ -61,7 +92,21 @@ class OmlxDev < Omlx
   homepage "https://github.com/zviratko/omlx"
   license "Apache-2.0"
 
-  # Head-only: the source is the local clone, there is no stable artifact.
+  # KEG-VERSIONED source spec (see OmlxDevConstants.build_version): the
+  # per-build fake version + a git STABLE url at the local clone. This is
+  # what makes a plain `brew install omlx-dev` build the branch tip into
+  # its own Cellar directory — the old head-only shape forced
+  # `install --HEAD`/`reinstall`, and reinstall moves the LIVE keg away
+  # before the build even starts. `head` stays as the manual escape hatch.
+  def self.dev_source(cfg)
+    br = cfg["formula_branch"] || "uplift-dev"
+    sha = cfg["build_commit"].to_s.strip
+    sha = "" unless sha.match?(/\A[0-9a-f]{40}\z/)
+    opts = { using: :git, branch: br }
+    opts[:commit] = sha unless sha.empty?
+    ["file://#{src_path(cfg)}", opts]
+  end
+
   def self.dev_src
     OmlxDevConstants.src_path(OmlxDevConstants.dev_config)
   end
@@ -69,6 +114,11 @@ class OmlxDev < Omlx
   def self.dev_branch
     OmlxDevConstants.dev_config["formula_branch"] || "uplift-dev"
   end
+
+  _dev_cfg = OmlxDevConstants.dev_config
+  _dev_url, _dev_opts = dev_source(_dev_cfg)
+  version OmlxDevConstants.build_version(_dev_cfg)
+  url _dev_url, **_dev_opts
 
   head "file://#{OmlxDevConstants.src_path(OmlxDevConstants.dev_config)}",
        branch: OmlxDevConstants.dev_config["formula_branch"] || "uplift-dev",

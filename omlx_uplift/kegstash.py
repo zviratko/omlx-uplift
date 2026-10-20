@@ -212,7 +212,7 @@ def repair_link_record(formula: str = FORMULA) -> str | None:
     rec_target = os.path.realpath(record)
     cellar_root = os.path.realpath(cellar_dir(formula)) + os.sep
     name = os.path.basename(rec_target)
-    if (os.path.isdir(rec_target) and name.startswith("HEAD-")
+    if (os.path.isdir(rec_target) and is_keg_dir(name)
             and rec_target.startswith(cellar_root)):
         link = opt_link(formula)
         try:
@@ -254,14 +254,71 @@ def active_keg(formula: str = FORMULA) -> str | None:
     except OSError:
         return None
     name = os.path.basename(target)
-    return name if os.path.isdir(target) and name.startswith("HEAD-") else None
+    return name if os.path.isdir(target) and is_keg_dir(name) else None
 
 
-def installed_kegs(formula: str = FORMULA) -> list[str]:
+# ---------------------------------------------------------------------------
+# KEG-VERSIONED (user 2026-10-20): brew `reinstall` unlinks and renames the
+# LIVE keg away BEFORE the multi-minute source build, so opt/omlx-dev dangles
+# for the whole window (a board crash in it cannot restart). The dev formula
+# now declares a FAKE per-build version — "<utc-date>.<utc-time>.<sha7>" — so
+# every build lands in its own immutable Cellar directory: `brew install`
+# builds the new keg while the old one serves, switches opt/ at link time
+# (milliseconds), and the previous binaries simply stay in Cellar. Rollback
+# becomes a pure symlink switch (activate() fast path) and 'same sha,
+# different bytes' (DEV-13's second hole) is impossible: the timestamp makes
+# two builds of one commit two directories. HEAD-* names keep working —
+# they are the pre-scheme installs and the legacy stash addresses.
+# ---------------------------------------------------------------------------
+
+_VERSIONED_RE = re.compile(r"\d{8}\.\d{6}\.[0-9A-Za-z]+")
+
+
+def is_versioned(name: str) -> bool:
+    """True for a KEG-VERSIONED Cellar directory name (per-build fake
+    version). Lexicographic order == chronological build order."""
+    return bool(_VERSIONED_RE.fullmatch(name))
+
+
+def is_keg_dir(name: str) -> bool:
+    """Any Cellar entry that is a keg of ours: KEG-VERSIONED dir, legacy
+    HEAD-* keg. brew's live reinstall backups (<name>.reinstall) and
+    temp moves (<name>.tmp) are NOT kegs."""
+    if name.endswith(".reinstall") or ".reinstall." in name \
+            or name.endswith(".tmp"):
+        return False
+    return name.startswith("HEAD-") or is_versioned(name)
+
+
+def sha_of(name: str) -> str:
+    """The source commit a keg dir was built from. KEG-VERSIONED names
+    carry the short sha as their last dot-segment; legacy HEAD-* keep the
+    old arithmetic."""
+    if is_versioned(name):
+        return name.rsplit(".", 1)[-1]
+    return name[len("HEAD-"):].split("_")[0] if name.startswith("HEAD-") \
+        else name
+
+
+def _build_sort_key(name: str):
+    """Oldest-first ordering for retention: legacy HEAD-* predate the
+    versioned scheme ('H' sorts after digits, so force them first)."""
+    return ("0" * 15 if not is_versioned(name) else name, name)
+
+
+def cellar_versions(formula: str = FORMULA) -> list[str]:
+    """Cellar keg directories present, oldest build first (KEG-VERSIONED
+    and legacy HEAD-* together)."""
     d = cellar_dir(formula)
     if not os.path.isdir(d):
         return []
-    return sorted(n for n in os.listdir(d) if n.startswith("HEAD-"))
+    return sorted((n for n in os.listdir(d)
+                   if is_keg_dir(n) and os.path.isdir(os.path.join(d, n))),
+                  key=_build_sort_key)
+
+
+def installed_kegs(formula: str = FORMULA) -> list[str]:
+    return cellar_versions(formula)
 
 
 def _clone(src: str, dst: str) -> str:
@@ -340,7 +397,7 @@ def stash(name: str | None = None, root: str | None = None,
         # return to (shebang anchor). stash name == cellar_name only for
         # legacy pre-DEV-13 entries.
         "cellar_name": name,
-        "sha": name[len("HEAD-"):].split("_")[0],
+        "sha": sha_of(name),
         "stashed_at": _dt.datetime.now(_dt.timezone.utc)
                       .isoformat(timespec="seconds"),
         "method": method,
@@ -418,26 +475,152 @@ def _shebang_ok(cellar_path: str, formula: str = FORMULA) -> bool:
     return first.startswith("#!") and cellar_path in first
 
 
+def prune_cellar(keep=None, formula: str = FORMULA,
+                 protect=()) -> list[str]:
+    """KEG-VERSIONED retention for the Cellar itself: keep the newest
+    `keep` build directories (the active keg ALWAYS survives — the count
+    is 'keep' ON TOP of active). Legacy HEAD-* dirs sort oldest-first;
+    stash-directory copies are kept by prune()."""
+    if keep is None:
+        keep = stash_keep()
+    keep = max(1, int(keep))
+    act = active_keg(formula)
+    ordered = cellar_versions(formula)          # oldest first
+    survivors = [n for n in ordered if n == act or n in protect]
+    rest = [n for n in ordered if n not in survivors]
+    removed = []
+    for victim in rest[:max(0, len(rest) - keep)]:
+        if victim == act:                        # paranoia, act never in rest
+            continue
+        shutil.rmtree(os.path.join(cellar_dir(formula), victim),
+                      ignore_errors=True)
+        removed.append(victim)
+    return removed
+
+
+def list_builds(root: str | None = None,
+                formula: str = FORMULA) -> list[dict]:
+    """Every rollback artifact newest-first: KEG-VERSIONED Cellar dirs
+    (source 'cellar', immutable per-build binaries) then legacy stash
+    entries (source 'stash')."""
+    rows: list[dict] = []
+    for name in reversed(cellar_versions(formula)):
+        p = os.path.join(cellar_dir(formula), name)
+        at = ""
+        try:
+            with open(os.path.join(p, "INSTALL_RECEIPT.json"),
+                      encoding="utf-8") as fh:
+                ts = json.load(fh).get("time") or 0
+            at = _dt.datetime.fromtimestamp(
+                ts, _dt.timezone.utc).isoformat(timespec="seconds")
+        except (OSError, ValueError):
+            pass
+        rows.append({"name": name, "cellar_name": name, "sha": sha_of(name),
+                     "stashed_at": at, "bytes": _dir_size(p),
+                     "method": "keg", "source": "cellar", "path": p})
+    for s in list_stashes(root, formula):
+        s.setdefault("source", "stash")
+        rows.append(s)
+    return rows
+
+
+def _switch_to(cellar_path: str, name: str, cellar_name: str,
+               formula: str, force: bool) -> dict:
+    """Point opt/, brew's linked record and the prefix bin/ symlinks at a
+    keg directory that already exists at its Cellar address (shebangs
+    intact), refresh the uplift .pth mount, and report."""
+    if not force and running_pids(formula):
+        raise RuntimeError(
+            f"a {formula} server is running from this keg family — stop it "
+            "first (brew services stop omlx-dev), or pass --force")
+    if not _shebang_ok(cellar_path, formula):
+        raise RuntimeError(
+            f"{name}: bin/{formula} shebang does not point inside "
+            f"{cellar_path} — refusing to activate a keg that cannot start "
+            "(pass --force only if you know why)")
+    link = opt_link(formula)
+    os.makedirs(os.path.dirname(link), exist_ok=True)
+    rel = os.path.join("..", "Cellar", formula, cellar_name)
+    if os.path.islink(link):
+        os.unlink(link)
+    elif os.path.isdir(link):
+        raise RuntimeError(f"{link} is a real directory, not a symlink")
+    os.symlink(rel, link)
+    # LINK-RECORD: opt/ alone is NOT brew's link state — the linked keg
+    # record and the prefix bin/ symlinks must follow the keg, or the
+    # next brew build dies in AlreadyLinkedError and `brew unlink`
+    # cannot clear it. Advisory: the switch already worked.
+    link_sync = sync_brew_link_state(cellar_path, formula)
+    remounted = False
+    try:
+        from . import cli
+
+        remounted = cli._mount_into_dev_keg()
+    except Exception:
+        remounted = False
+    return {"name": name, "cellar_name": cellar_name,
+            "cellar": cellar_path, "link": link,
+            "shebang_ok": True, "pth": remounted,
+            "link_sync_problems": link_sync}
+
+
 def activate(name: str, root: str | None = None,
              formula: str = FORMULA, force: bool = False) -> dict:
-    """Re-point the active keg at a stashed build.
+    """Re-point the active keg at a previous build.
 
-    DEV-13 name resolution: an exact stash entry name (`HEAD-<sha>`
-    legacy or `HEAD-<sha>_<ts>`) activates exactly it; a bare/HEAD sha
-    activates the NEWEST stashed build of that commit (several builds
-    can share one sha now). The clone is installed at its recorded
-    `cellar_name` address, REPLACING whatever is in that Cellar slot —
-    silently keeping a stale different build of the same sha was the
-    second half of the DEV-13 hole. Then the opt symlink moves and the
-    uplift .pth mount refreshes. The service restart itself stays with
-    the user (server_restart_control)."""
-    d = os.path.join(kegs_root(root), formula)
-    m = re.fullmatch(r"(?:HEAD-)?([0-9a-f]{7,40})", name.strip())
-    if m and not os.path.isdir(os.path.join(d, name.strip())):
+    KEG-VERSIONED (2026-10-20) resolution order:
+      1. an exact KEG-VERSIONED Cellar directory (per-build fake version)
+         → pure symlink switch, no copy;
+      2. a bare/HEAD sha → the newest VERSIONED Cellar build of that commit
+         when one exists; else the U19 legacy path (newest STASH build,
+         cloned back at its address — a bare HEAD-<sha> cellar slot can hold
+         ANY build of that sha, DEV-13);
+      3. an exact legacy Cellar name (HEAD-<sha>, no stashes of it) →
+         symlink switch as-is;
+      4. a stash entry name (`HEAD-<sha>_<ts>` legacy keys) → the U19
+         path: clone the stashed bytes back at their recorded cellar
+         address (REPLACING that slot — two builds once shared one
+         address and silently keeping a stale different build was the
+         second half of the DEV-13 hole), then switch.
+    The service restart itself stays with the user
+    (server_restart_control)."""
+    name = name.strip()
+    cellar_root = cellar_dir(formula)
+
+    # 1. exact KEG-VERSIONED artifact — immutable per-build directory
+    if is_versioned(name) and os.path.isdir(os.path.join(cellar_root, name)):
+        return _switch_to(os.path.join(cellar_root, name), name, name,
+                          formula, force)
+
+    m = re.fullmatch(r"(?:HEAD-)?([0-9a-f]{7,40})", name)
+    has_stash_rows = False
+    if m:
         sha = m.group(1)
+        # 2. versioned builds win over anything legacy for the same sha
+        vcands = [n for n in cellar_versions(formula)
+                  if is_versioned(n)
+                  and (sha_of(n).startswith(sha) or sha.startswith(sha_of(n)))]
+        if vcands:
+            pick = sorted(vcands, key=_build_sort_key)[-1]
+            return _switch_to(os.path.join(cellar_root, pick), pick, pick,
+                              formula, force)
+        d = os.path.join(kegs_root(root), formula)
         rows = [s for s in list_stashes(root, formula)
                 if (s.get("cellar_name") or s.get("name") or "")
                     .startswith("HEAD-" + sha)]
+        has_stash_rows = bool(rows)
+        # 3. legacy cellar dir as-is only when nothing stashed competes
+        if (not has_stash_rows and name.startswith("HEAD-")
+                and os.path.isdir(os.path.join(cellar_root, name))):
+            return _switch_to(os.path.join(cellar_root, name), name, name,
+                              formula, force)
+
+    # 4. legacy stash-entry path
+    d = os.path.join(kegs_root(root), formula)
+    if m and not os.path.isdir(os.path.join(d, name)) and has_stash_rows:
+        rows = [s for s in list_stashes(root, formula)
+                if (s.get("cellar_name") or s.get("name") or "")
+                    .startswith("HEAD-" + m.group(1))]
         if rows:
             # list_stashes is newest-first: bare sha = newest build of it
             name = rows[0].get("name")
@@ -463,32 +646,4 @@ def activate(name: str, root: str | None = None,
         # above means no process is serving from it).
         shutil.rmtree(cellar)
     _clone(stashed, cellar)
-    if not _shebang_ok(cellar, formula):
-        raise RuntimeError(
-            f"{name}: bin/{formula} shebang does not point inside "
-            f"{cellar} — refusing to activate a keg that cannot start "
-            "(pass --force only if you know why)")
-    link = opt_link(formula)
-    os.makedirs(os.path.dirname(link), exist_ok=True)
-    rel = os.path.join("..", "Cellar", formula, cellar_name)
-    if os.path.islink(link):
-        os.unlink(link)
-    elif os.path.isdir(link):
-        raise RuntimeError(f"{link} is a real directory, not a symlink")
-    os.symlink(rel, link)
-    # LINK-RECORD: opt/ alone is NOT brew's link state — the linked keg
-    # record and the prefix bin/ symlinks must follow the keg, or the
-    # next `brew reinstall` dies in AlreadyLinkedError and `brew unlink`
-    # cannot clear it. Advisory: the switch already worked.
-    link_sync = sync_brew_link_state(cellar, formula)
-    remounted = False
-    try:
-        from . import cli
-
-        remounted = cli._mount_into_dev_keg()
-    except Exception:
-        remounted = False
-    return {"name": name, "cellar_name": cellar_name,
-            "cellar": cellar, "link": link,
-            "shebang_ok": True, "pth": remounted,
-            "link_sync_problems": link_sync}
+    return _switch_to(cellar, name, cellar_name, formula, force)

@@ -444,5 +444,86 @@ class TestCliSurface(unittest.TestCase):
             self.assertIn(verb, usage)
 
 
+class TestKegVersioned(KegstashTestCase):
+    """KEG-VERSIONED (2026-10-20): per-build fake-version Cellar dirs are
+    the rollback artifacts — listing, resolution order, activation and
+    retention."""
+
+    V_NEW = "20261020.090000.bbb2222"
+    V_OLD = "20261019.100000.aaa1111"
+
+    def setUp(self):
+        super().setUp()
+        # same isolation as TestActivate: never mount into the real keg,
+        # never trip over the real board running on this box
+        from omlx_uplift import cli
+
+        self._old_mount = cli._mount_into_dev_keg
+        cli._mount_into_dev_keg = lambda: True
+        self.addCleanup(setattr, cli, "_mount_into_dev_keg", self._old_mount)
+        old = kegstash.running_pids
+        kegstash.running_pids = lambda formula="omlx-dev": []
+        self.addCleanup(setattr, kegstash, "running_pids", old)
+
+    def test_parsing_helpers(self):
+        self.assertTrue(kegstash.is_versioned(self.V_NEW))
+        self.assertFalse(kegstash.is_versioned("HEAD-060846c"))
+        self.assertFalse(kegstash.is_versioned("1.2.3"))
+        self.assertFalse(kegstash.is_versioned("20261020.090000.bbb2222.tmp"))
+        self.assertEqual(kegstash.sha_of(self.V_NEW), "bbb2222")
+        self.assertEqual(kegstash.sha_of("HEAD-060846c"), "060846c")
+        self.assertEqual(kegstash.sha_of("HEAD-9999999_20260901T000000Z"),
+                         "9999999")
+        self.assertTrue(kegstash.is_keg_dir(self.V_NEW))
+        self.assertTrue(kegstash.is_keg_dir("HEAD-060846c"))
+        self.assertFalse(kegstash.is_keg_dir("HEAD-060846c.reinstall"))
+
+    def test_list_builds_cellar_newest_first_legacy_last(self):
+        _make_keg(self.prefix, "HEAD-ccc3333", "ccc3333")
+        _make_keg(self.prefix, self.V_OLD, "aaa1111")
+        _make_keg(self.prefix, self.V_NEW, "bbb2222")
+        rows = kegstash.list_builds(root=self.root)
+        self.assertEqual([r["name"] for r in rows],
+                         [self.V_NEW, self.V_OLD, "HEAD-ccc3333"])
+        self.assertEqual(rows[0]["source"], "cellar")
+        self.assertEqual(rows[0]["sha"], "bbb2222")
+
+    def test_activate_versioned_is_symlink_switch(self):
+        _make_keg(self.prefix, self.V_NEW, "bbb2222")
+        self._link_opt("HEAD-ccc3333")
+        r = kegstash.activate(self.V_NEW, root=self.root)
+        self.assertTrue(r["shebang_ok"], r)
+        self.assertEqual(os.readlink(kegstash.opt_link()),
+                         os.path.join("..", "Cellar", "omlx-dev",
+                                      self.V_NEW))
+        self.assertEqual(kegstash.active_keg(), self.V_NEW)
+
+    def test_activate_bare_sha_prefers_versioned_over_legacy_slot(self):
+        # the DEV-13 hole in its KEG-VERSIONED form: HEAD-<sha> slot bytes
+        # are arbitrary — a versioned dir of the same commit is the honest
+        # named artifact and must win
+        _make_keg(self.prefix, "HEAD-9999999", "9999999")
+        self._link_opt("HEAD-9999999")
+        v = "20261020.090000.9999999"
+        _make_keg(self.prefix, v, "9999999")
+        r = kegstash.activate("9999999", root=self.root)
+        self.assertEqual(r["name"], v)
+        self.assertEqual(os.readlink(kegstash.opt_link()),
+                         os.path.join("..", "Cellar", "omlx-dev", v))
+
+    def test_prune_cellar_active_survives_beyond_keep(self):
+        for name in ("20261017.080000.1111111", self.V_OLD,
+                     "20261019.200000.ccc3333", self.V_NEW):
+            _make_keg(self.prefix, name, name.rsplit(".", 1)[-1])
+        active = "20261017.080000.1111111"     # deliberately the OLDEST
+        self._link_opt(active)
+        gone = kegstash.prune_cellar(keep=1)
+        self.assertEqual(sorted(gone),
+                         [self.V_OLD, "20261019.200000.ccc3333"])
+        cellar = os.path.join(self.prefix, "Cellar", "omlx-dev")
+        self.assertTrue(os.path.isdir(os.path.join(cellar, active)))
+        self.assertTrue(os.path.isdir(os.path.join(cellar, self.V_NEW)))
+
+
 if __name__ == "__main__":
     unittest.main()

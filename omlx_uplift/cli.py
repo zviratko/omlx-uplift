@@ -1311,32 +1311,38 @@ def cmd_dev(argv=None) -> int:
             print(f"stashed {r['name']} -> {r['path']} ({r['method']})")
             return 0
         if args.action == "kegs":
-            rows = kegstash.list_stashes()
+            rows = kegstash.list_builds()
             act = kegstash.active_keg()
             if not rows:
-                print("no stashed kegs — a stash is taken automatically on "
-                      "'dev install' (or run: omlx-uplift dev stash-keg)")
+                print("no kegs to switch between — every 'dev install' "
+                      "build keeps its own Cellar directory "
+                      "(KEG-VERSIONED); legacy stash entries show here too")
                 return 0
             for m in rows:
                 size = m.get("bytes") or 0
                 # DEV-13: the ACTIVE guard is the Cellar address — several
                 # stash builds can share one address; only the installed
-                # one is active.
+                # one is active. KEG-VERSIONED: cellar rows are the address.
                 mark = ("  <- active"
                         if (m.get("cellar_name") or m.get("name")) == act
                         else "")
                 print(f"{m.get('name')}  {m.get('stashed_at', '?')}  "
-                      f"{size / 2**30:.1f} GiB  {m.get('method', '?')}{mark}")
+                      f"{size / 2**30:.1f} GiB  {m.get('source', 'stash')}"
+                      f"{mark}")
             return 0
         if args.action == "prune":
+            # KEG-VERSIONED: retention covers the Cellar build dirs; the
+            # legacy stash root is pruned by the same keep count.
             removed = kegstash.prune(keep=args.keep)
+            removed += kegstash.prune_cellar(keep=args.keep)
             kept = args.keep if args.keep is not None else kegstash.stash_keep()
             print("removed: " + (", ".join(removed) if removed else "nothing")
                   + f" (kept newest {kept})")
             return 0
         # use
         if not args.name:
-            print("usage: omlx-uplift dev use <sha|HEAD-sha>",
+            print("usage: omlx-uplift dev use "
+                  "<sha|build-version|HEAD-sha>  (see: dev kegs)",
                   file=sys.stderr)
             return 2
         try:
@@ -1356,20 +1362,22 @@ def cmd_dev(argv=None) -> int:
         return 0
 
     if args.action == "rollback":
-        # DEV-11 add-on: one-command "back to manual" — most recent stashed
-        # keg + flag OFF. Restore itself is pure kegstash.activate (existing
-        # machinery), so the budget gate in the ticket is met.
+        # DEV-11 add-on: one-command "back to manual" — the most recent
+        # build that is not the active one + flag OFF. KEG-VERSIONED: the
+        # newest Cellar build dir is the normal target (pure symlink
+        # switch); legacy stash entries still resolve.
         from . import kegstash
 
-        rows = kegstash.list_stashes()
+        rows = kegstash.list_builds()
         act = kegstash.active_keg()
         # DEV-13: compare the CELLAR address — the active build's stash
         # name now carries a time suffix and would never equal `act`.
         rows = [m for m in rows
                 if (m.get("cellar_name") or m.get("name")) != act]
         if not rows:
-            print("nothing to roll back to — no stashed keg other than the "
-                  "active one (see: omlx-uplift dev kegs)", file=sys.stderr)
+            print("nothing to roll back to — no previous keg other than "
+                  "the active one (see: omlx-uplift dev kegs)",
+                  file=sys.stderr)
             return 1
         target = rows[0]
         try:

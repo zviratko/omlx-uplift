@@ -213,7 +213,8 @@ def test_dev_parser_accepts_new_actions():
 def test_rollback_no_stash_reports_cleanly(monkeypatch):
     from omlx_uplift import cli, kegstash
 
-    monkeypatch.setattr(kegstash, "list_stashes", lambda: [])
+    # KEG-VERSIONED: rollback reads list_builds (Cellar dirs + stashes)
+    monkeypatch.setattr(kegstash, "list_builds", lambda *a: [])
     monkeypatch.setattr(kegstash, "active_keg", lambda: "HEAD-abc1234")
     rc = cli.cmd_dev(["rollback"])
     assert rc == 1
@@ -223,8 +224,9 @@ def test_rollback_activates_latest_then_disables(monkeypatch):
     from omlx_uplift import cli, devsrc, kegstash
 
     acts = []
-    monkeypatch.setattr(kegstash, "list_stashes", lambda: [
-        {"name": "HEAD-newer0"}, {"name": "HEAD-older1"}])
+    monkeypatch.setattr(kegstash, "list_builds", lambda *a: [
+        {"name": "HEAD-newer0", "cellar_name": "HEAD-newer0"},
+        {"name": "HEAD-older1", "cellar_name": "HEAD-older1"}])
     monkeypatch.setattr(kegstash, "active_keg", lambda: "HEAD-newer0")
 
     def activate(name, root=None, formula="omlx-dev", force=False):

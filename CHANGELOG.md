@@ -14,6 +14,7 @@ users never see.
 ## Unreleased
 
 - **tg benchmarks now decode what they claim.** The generation length you pick on the Throughput bench (tg128–1024) was only a ceiling: models that end their turn early (gemma stops ~25 tokens in) measured a short decode under a tg1024 label. A new bundled patch (`bench-force-tg`, on the Patches page) makes the benchmark ignore the model's own end-of-turn stops — bench requests only, normal serving is untouched. The results table gained an `out` column with the real generated-token count, showing `21/1024` when a run still ends early (external endpoints, speculative-decode engines).
+- **`dev install` never breaks the running board.** Every `omlx-uplift dev install` now stamps a unique build version (UTC timestamp + commit) into its own Cellar directory, so brew builds the new omlx-dev beside the live one and flips the links at the end — instead of `brew reinstall` moving the running keg away before a multi-minute build. Previous builds stay in the Cellar: `omlx-uplift dev kegs` lists them, `dev use <version|sha>` rolls back with a symlink switch, retention prunes the oldest (`dev prune`). A rebuild on a machine without the classic oMLX keg now syncs curated patches too.
 
 ## [2.5] — 2026-10-20
 

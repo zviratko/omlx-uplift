@@ -145,16 +145,20 @@ def formula_keg_exists(formula: str) -> bool:
 
 
 def brew_build_cmd(flags) -> list:
-    """The brew command that builds omlx-dev (head-only formula).
+    """The brew command that builds omlx-dev.
 
-    This brew version is inconsistent about --HEAD and both error paths
-    are real (hit 2026-09-24): `install` REFUSES a head-only formula
-    without --HEAD, `reinstall` REJECTS --HEAD outright. So: first build
-    installs with the flag, every rebuild reinstalls without it. Neither
-    is ever `brew upgrade` — it no-ops on branch heads."""
-    if formula_keg_exists("omlx-dev"):
-        return ["brew", "reinstall", *sorted(flags), "omlx-dev"]
-    return ["brew", "install", "--HEAD", *sorted(flags), "omlx-dev"]
+    KEG-VERSIONED (user 2026-10-20): the dev formula now declares a FAKE
+    per-build version ("<utc date>.<utc time>.<sha7>" from dev.json
+    build_version), so every rebuild is an `install` of a NEWER version:
+    brew builds the new keg while the OLD one keeps serving, installs it
+    into its own Cellar directory and switches the links at the end. The
+    old `brew reinstall` path is gone — brew's reinstall unlinks and
+    renames the LIVE keg away BEFORE the multi-minute build, dangling
+    /opt/homebrew/opt/omlx-dev for the whole window (a crash in it could
+    not restart). `install --HEAD` is also gone: the version spec IS the
+    moving part now, HEAD would name the keg 'HEAD-...' again. Never
+    `brew upgrade` — pinned, and the stamp only exists inside dev install."""
+    return ["brew", "install", *sorted(flags), "omlx-dev"]
 
 
 def receipt_used_options(formula: str) -> set:
