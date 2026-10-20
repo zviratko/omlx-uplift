@@ -1854,6 +1854,7 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
                         "revalidated — upstream does NOT carry the patch "
                         "(former obsolete verdict read the tree's own "
                         "mounted hunks)"):
+                    p.pop("dev_absent", None)  # stale note from the build
                     reports[pid] = {"check": "obsolete_reversed"}
                     changed_any = True
                     continue
