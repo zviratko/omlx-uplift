@@ -3213,6 +3213,12 @@ var EXTRAS = {
    arrives through the stream or a full replay. */
 var ACC_POLL_MS = 4000;
 var ACC_STALL_MS = 90000;
+// A restart RESETS the accumulators and REPLAYS the whole log. While that
+// replay lands, the consumed counter is legitimately behind the server's
+// event_count — a second restart racing in here would interleave TWO
+// replays and double-bank the leaf totals (proven live in QA). Restart
+// decisions only run outside this quiet window after an attach.
+var ACC_RESTART_COOLDOWN_MS = 12000;
 function needsStreamRestart(eventCount, seen, prevEventCount) {
     // The fetch and the stream race each other, so ONE poll that shows a
     // backlog proves nothing: restart only when the miss REPEATS, i.e. the
@@ -3783,6 +3789,10 @@ var ACC = {
         this.seedFromPoll(st);
         this.pollStatus(st);
         if (typeof st.event_count !== 'number') return;
+        if (Date.now() - (this.state.armedAt || 0) < ACC_RESTART_COOLDOWN_MS) {
+            this.state.pollN = st.event_count;   // observe, do not decide
+            return;                               // (replay may still land)
+        }
         var restart = needsStreamRestart(st.event_count, this.state.seenN,
                                          this.state.pollN);
         this.state.pollN = st.event_count;
@@ -4113,6 +4123,7 @@ var ACC = {
         };
         this.state.seenN = 0;
         this.state.pollN = null;
+        this.state.armedAt = Date.now();    // replay quiet window (pollCatchup)
         if (!W().EventSource) { arm(); return; }
         try {
             _es = new EventSource(api() + '/bench/accuracy/' + encodeURIComponent(benchId) + '/stream');

@@ -438,6 +438,7 @@ test('ACC-STALL: event_count backlog twice -> reset + stream rebuild', async () 
                   results: [] };
     await ACC.refreshQueue();                  // first poll: arms stream + watchdog
     assert.equal(esList.length, 1);
+    ACC.state.armedAt = Date.now() - 13000;    // replay window elapsed
     ACC.state.seenN = 0;                       // the stream never delivered
     await ACC.refreshQueue();                  // miss #1 -> NO restart yet
     assert.equal(esList.length, 1, 'one miss is not proof');
@@ -446,6 +447,35 @@ test('ACC-STALL: event_count backlog twice -> reset + stream rebuild', async () 
     assert.equal(esList.length, 2, 'the dead stream was rebuilt');
     assert.equal(ACC.state.board[0].bar && Object.keys(ACC.state.board[0].bar).length, 0,
         'the accumulator was reset BEFORE the replay');
+});
+
+test('ACC-STALL: repeated misses inside the replay cooldown do NOT restart', async () => {
+    // A restart REPLAYS the whole log; while it lands the consumed counter is
+    // legitimately behind. A second restart here interleaves two replays and
+    // double-banks leaf totals (the exact corruption the reset prevents).
+    // The QA drill proved the race; this pins the quiet window.
+    const lp = EV(10, 300);
+    const { B, esList } = loadPoll({
+        queue: [running({ event_count: 12, last_progress: lp })],
+    });
+    const ACC = B._panels.acc;
+    ACC.state = { groups: GROUPS, harnessSizes: HSIZE, running: false, queue: [],
+                  board: [], seenN: 0, pollN: null, armedAt: 0,
+                  lastAct: 0, lastMsg: '', results: [] };
+    await ACC.refreshQueue();                  // attach -> armedAt = NOW
+    assert.equal(esList.length, 1);
+    for (let i = 0; i < 4; i++) {              // four polls deep in cooldown
+        ACC.state.seenN = 0;
+        await ACC.refreshQueue();
+    }
+    assert.equal(esList.length, 1, 'no second stream while the first replay may land');
+    // once the window passes, the same miss DOES rebuild
+    ACC.state.armedAt = Date.now() - 13000;
+    ACC.state.seenN = 0;
+    await ACC.refreshQueue();
+    ACC.state.seenN = 0;
+    await ACC.refreshQueue();
+    assert.equal(esList.length, 2, 'restart resumes after the cooldown');
 });
 
 test('ACC-STALL: a caught-up stream is left alone (no restart storm)', async () => {
