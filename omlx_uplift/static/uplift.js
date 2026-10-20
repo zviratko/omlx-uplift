@@ -915,22 +915,42 @@ function skinSheetLive(dir) {
    must NEVER repaint — that is the stale bake this ticket exists for.
    A failed load DOES repaint: the error event means the page is showing
    base tokens, and the charts must match what the user actually sees. */
+let _skinWaitAbort = null;
+let _lastLiveTheme = null;
 function whenSkinLive(dir, fn) {
-    if (skinSheetLive(dir)) { fn(); return; }
+    if (_skinWaitAbort) { _skinWaitAbort(); _skinWaitAbort = null; }
+    const themeKey = (dir || '') + '|' + (document.documentElement.dataset.theme || '');
+    let done = false;
+    const fire = () => {
+        if (done) return;
+        done = true;
+        _skinWaitAbort = null;
+        if (_lastLiveTheme === themeKey) return;
+        _lastLiveTheme = themeKey;
+        fn();
+    };
+    if (skinSheetLive(dir)) { fire(); return; }
     const link = document.getElementById('uplift-skin-css');
-    if (!link) { fn(); return; }
+    if (!link) { fire(); return; }
     const want = skinHref(dir);
-    const still = () => link.getAttribute('href') === want;
-    link.addEventListener('load', () => { if (still() && skinSheetLive(dir)) fn(); },
-        { once: true });
-    link.addEventListener('error', () => { if (still()) fn(); }, { once: true });
+    const still = () => !done && link.getAttribute('href') === want;
+    const onLoad = () => { if (still() && skinSheetLive(dir)) fire(); };
+    const onErr = () => { if (still()) fire(); };
+    link.addEventListener('load', onLoad, { once: true });
+    link.addEventListener('error', onErr, { once: true });
     // backstop for a load event that fired before the listener attached or
     // never fired at all: POLL for the live sheet, never repaint a stale one
     let tries = 0;
     const iv = setInterval(() => {
         if (!still() || ++tries > 10) { clearInterval(iv); return; }
-        if (skinSheetLive(dir)) { clearInterval(iv); fn(); }
+        if (skinSheetLive(dir)) { clearInterval(iv); fire(); }
     }, 120);
+    _skinWaitAbort = () => {
+        done = true;
+        clearInterval(iv);
+        link.removeEventListener('load', onLoad);
+        link.removeEventListener('error', onErr);
+    };
 }
 
 function committedSkinDir() {
@@ -1006,7 +1026,7 @@ function previewCommit() {
 }
 function applySkinCss(dir) {
     let link = document.getElementById('uplift-skin-css');
-    if (!dir) { if (link) link.remove(); return; }
+    if (!dir) { if (link) link.remove(); layoutTaglineBand(); return; }
     const href = `${API}/uplift/api/skins/${encodeURIComponent(dir)}/theme.css`;
     if (!link) {
         link = document.createElement('link');
@@ -1017,19 +1037,15 @@ function applySkinCss(dir) {
     if (link.getAttribute('href') !== href) {
         link.addEventListener('load', layoutTaglineBand, { once: true });
         link.setAttribute('href', href);
+    } else if (link.sheet) {
+        layoutTaglineBand();   // already live: paint once now
     } else {
-        // same href (boot script pre-added the link). Whether the sheet is
-        // live is only knowable by READING link.sheet inside the callback —
-        // one bare rAF loses the race in a hidden tab (rAF doesn't run
-        // until visible, and the load event fired long ago: U23 cold-load
-        // defect). The sheet property is the sync truth; the load listener
-        // stays as backup if it's still pending.
+        // same href (boot script pre-added the link, still in flight).
         const measure = () => {
             if (link.sheet) layoutTaglineBand();
         };
         link.addEventListener('load', layoutTaglineBand, { once: true });
         requestAnimationFrame(() => { measure(); });
-        if (link.sheet) layoutTaglineBand();   // already live: paint now
     }
 }
 
@@ -1383,7 +1399,7 @@ function _rowAlign() {
         dashApplying = false;
     }
     if (changed) CH.resizeCharts();
-    CH.fitAllMetricPlots();   // row grew/shrank: hand the delta to the charts
+    else CH.fitAllMetricPlots();   // row grew/shrank: hand the delta to the charts
     // Rows are only measurable once cards are placed (parked rows have
     // clientWidth 0): re-evaluate chip fit after every settle pass (the
     // render is idempotent — rows that already fit or stay collapsed are

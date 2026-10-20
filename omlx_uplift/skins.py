@@ -743,10 +743,81 @@ _META_CACHE: dict[str, tuple, dict] = {}
 
 _CSS_CACHE: dict[str, tuple[tuple, tuple[bytes, str]]] = {}
 
+_WARN_CACHE: dict[str, tuple[tuple, list[str]]] = {}
+
+_LIST_CACHE: dict[str, tuple[tuple, list[dict]]] = {}
+
+_RES_CACHE: dict[str, tuple[tuple[int, int], tuple[bytes, str, float]]] = {}
+
 
 def invalidate_caches() -> None:
     _META_CACHE.clear()
     _CSS_CACHE.clear()
+    _WARN_CACHE.clear()
+    _LIST_CACHE.clear()
+    _RES_CACHE.clear()
+
+
+def _stat_sig(p: Path) -> tuple[int, int]:
+    try:
+        st = p.stat()
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (0, -1)
+
+
+def _root_scan_sig(root: Path) -> tuple | None:
+    """Fast stat-only signature of the skins root. Returns None when any
+    recognised top-level .yml crate has no matching working directory yet,
+    so the first scan still extracts (or records the broken-crate reason)."""
+    try:
+        items = sorted(os.scandir(root), key=lambda e: e.name)
+    except OSError:
+        return None
+    dir_names = {
+        e.name for e in items
+        if e.is_dir(follow_symlinks=False) and DIR_RE.match(e.name)
+    }
+    sig: list[tuple] = []
+    for e in items:
+        name = e.name
+        if name.endswith(".yml") and e.is_file(follow_symlinks=True):
+            stem = name[:-4]
+            if not NAME_RE.match(stem):
+                continue
+            try:
+                st = e.stat()
+            except OSError:
+                return None
+            want = f"{stem}-{int(st.st_mtime)}"
+            if want not in dir_names:
+                return None
+            sig.append(("y", name, st.st_mtime_ns, st.st_size))
+        elif name in dir_names:
+            d = root / name
+            try:
+                dst = e.stat(follow_symlinks=False)
+            except OSError:
+                return None
+            sig.append((
+                "d", name, dst.st_mtime_ns,
+                _stat_sig(d / "skin.yml"),
+                _stat_sig(d / "overlay.css"),
+                _stat_sig(d / ".extract-warnings"),
+            ))
+    return tuple(sig)
+
+
+def _clone_entries(entries: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for e in entries:
+        c = dict(e)
+        if "classic" in c and isinstance(c["classic"], dict):
+            c["classic"] = dict(c["classic"])
+        if "warnings" in c and isinstance(c["warnings"], list):
+            c["warnings"] = list(c["warnings"])
+        out.append(c)
+    return out
 
 
 def classic_mapping(crate: dict) -> dict:
@@ -818,6 +889,12 @@ def list_skins(root: Path | None = None) -> list[dict]:
     root = skins_root() if root is None else Path(root)
     if not root.is_dir():
         return []
+    root_key = str(root)
+    sig = _root_scan_sig(root)
+    if sig is not None:
+        hit = _LIST_CACHE.get(root_key)
+        if hit and hit[0] == sig:
+            return _clone_entries(hit[1])
     warnings_seen: dict[str, list[str]] = {}
 
     # 1. crates: parse, extract missing working copies, remember failures
@@ -876,24 +953,34 @@ def list_skins(root: Path | None = None) -> list[dict]:
         base = _dir_base(d.name[len(BUNDLED_PREFIX):] if bundled else d.name)
         meta = _load_dir_meta(d / "skin.yml")
         label = meta.get("label") or base
-        warns = warnings_seen.get(d.name)
-        if warns is None:
-            sidecar = d / ".extract-warnings"
-            warns = sidecar.read_text(encoding="utf-8").splitlines() \
-                if sidecar.is_file() else []
-        # motion governance re-checked against what ACTUALLY SERVES: a
-        # hand-edited overlay.css never re-extracts, and bundled dirs get
-        # no sidecar (sync_bundled only logs). Dedup keeps the sidecar copy.
+        sidecar = d / ".extract-warnings"
         overlay = d / "overlay.css"
-        try:
-            served_css = overlay.read_text(encoding="utf-8",
-                                            errors="replace") \
-                if overlay.is_file() else (meta.get("css") or "")
-        except OSError:
-            served_css = ""
-        for w in motion_warnings(served_css):
-            if w not in warns:
-                warns = warns + [w]
+        wkey = (
+            _stat_sig(d / "skin.yml"),
+            _stat_sig(overlay),
+            _stat_sig(sidecar),
+        )
+        whit = _WARN_CACHE.get(str(d))
+        if d.name not in warnings_seen and whit and whit[0] == wkey:
+            warns = list(whit[1])
+        else:
+            warns = warnings_seen.get(d.name)
+            if warns is None:
+                warns = sidecar.read_text(encoding="utf-8").splitlines() \
+                    if sidecar.is_file() else []
+            # motion governance re-checked against what ACTUALLY SERVES: a
+            # hand-edited overlay.css never re-extracts, and bundled dirs get
+            # no sidecar (sync_bundled only logs). Dedup keeps the sidecar copy.
+            try:
+                served_css = overlay.read_text(encoding="utf-8",
+                                                errors="replace") \
+                    if overlay.is_file() else (meta.get("css") or "")
+            except OSError:
+                served_css = ""
+            for w in motion_warnings(served_css):
+                if w not in warns:
+                    warns = warns + [w]
+            _WARN_CACHE[str(d)] = (wkey, list(warns))
         groups.setdefault(base, []).append({
             "name": None,  # assigned below (base name vs suffixed)
             "dir": d.name,
@@ -931,6 +1018,9 @@ def list_skins(root: Path | None = None) -> list[dict]:
         if b["name"] not in listed_bases:
             entries.append(b)
     entries.sort(key=lambda e: (e["name"]))
+    post_sig = _root_scan_sig(root) if not broken else None
+    if post_sig is not None:
+        _LIST_CACHE[root_key] = (post_sig, _clone_entries(entries))
     return entries
 
 
@@ -959,6 +1049,20 @@ _RES_MEDIA = {".png": "image/png", ".svg": "image/svg+xml",
 def res_media_type(rel: str) -> str:
     ext = os.path.splitext(rel)[1].lower()
     return _RES_MEDIA.get(ext, "application/octet-stream")
+
+
+def read_res(path: Path) -> tuple[bytes, os.stat_result]:
+    """Read a whitelisted skin resource file with an mtime+size in-process
+    cache so icon/font bursts on skin switch do not re-read disk."""
+    st = path.stat()
+    sig = (st.st_mtime_ns, st.st_size)
+    key = str(path)
+    hit = _RES_CACHE.get(key)
+    if hit and hit[0] == sig:
+        return hit[1][0], st
+    blob = path.read_bytes()
+    _RES_CACHE[key] = (sig, (blob, "", st.st_mtime))
+    return blob, st
 
 
 def _file_mtime_ns(p: Path) -> int:

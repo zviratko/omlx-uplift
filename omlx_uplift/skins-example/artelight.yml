@@ -76,15 +76,12 @@ css: |-
               rgba(140, 112, 68, .035) 0 1px, transparent 1px 5px),
           radial-gradient(115% 70% at 50% -8%,
               #fffdf6 0%, var(--bg) 46%, #ede1cc 100%);
-      background-attachment: fixed, fixed, fixed;
   }
   /* the base 4px strip is body::before; make it the warm brick, not red */
   body::before { background: var(--red); }
   /* The sticky header is OPAQUE, so on a graded ground it would punch a flat
-     rectangle into the page. Re-declaring the SAME layers with
-     background-attachment: fixed pins them to the viewport, so the header
-     samples exactly the strip of ground behind it and the band disappears.
-     (The texture must be repeated here; it is not inherited.) */
+     rectangle into the page. Re-declaring the SAME layers keeps the ground
+     continuous across the header band. */
   header.top {
       background:
           repeating-linear-gradient(90deg,
@@ -93,7 +90,6 @@ css: |-
               rgba(140, 112, 68, .035) 0 1px, transparent 1px 5px),
           radial-gradient(115% 70% at 50% -8%,
               #fffdf6 0%, var(--bg) 46%, #ede1cc 100%);
-      background-attachment: fixed, fixed, fixed;
   }
 
   /* ---- cards: glass shade with a highlight along the top edge ---- */

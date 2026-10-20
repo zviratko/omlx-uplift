@@ -87,7 +87,6 @@ css: |-
               rgba(176, 73, 46, .1) 0%, rgba(0, 0, 0, 0) 60%);
       background-size: cover, cover;
       background-repeat: no-repeat, no-repeat;
-      background-attachment: fixed, fixed;
   }
   body::before { background: var(--warn); }
   header.top {
@@ -99,7 +98,6 @@ css: |-
               rgba(176, 73, 46, .1) 0%, rgba(0, 0, 0, 0) 60%);
       background-size: cover, cover;
       background-repeat: no-repeat, no-repeat;
-      background-attachment: fixed, fixed;
   }
 
   /* ---- cards: lantern-lit paper with a leaf field drifting INSIDE it ---- */
@@ -132,22 +130,13 @@ css: |-
   /* Travel is exactly one tile, so the last frame is pixel-identical to the
      first: the loop cannot show a jump. Only layer 1 moves; the light falloff
      keeps 0 0 in the second position of every keyframe. */
-  :root:not([data-motion="off"]) .card {
+  :root:not([data-motion="off"]) .card:hover {
       animation: lampion-fall 26s linear infinite;
   }
   @keyframes lampion-fall {
       from { background-position: 0 0, 0 0; }
       to   { background-position: 0 128px, 0 0; }
   }
-  /* Desynchronisation: NEGATIVE delays start each card mid-cycle, so nothing
-     is ever seen to "begin". The 6 offsets are all distinct mod 26, so no two
-     neighbouring cards are ever in phase. Per-element timing is legal here
-     because the animation lives in the page document, not inside the SVG. */
-  :root:not([data-motion="off"]) .card:nth-child(6n+2) { animation-delay: -4s; }
-  :root:not([data-motion="off"]) .card:nth-child(6n+3) { animation-delay: -9s; }
-  :root:not([data-motion="off"]) .card:nth-child(6n+4) { animation-delay: -14s; }
-  :root:not([data-motion="off"]) .card:nth-child(6n+5) { animation-delay: -19s; }
-  :root:not([data-motion="off"]) .card:nth-child(6n)   { animation-delay: -23s; }
   /* Flame flicker: 3 s against the 26 s fall — coprime, never in step. */
   :root:not([data-motion="off"]) .logo .dot {
       animation: lampion-flicker 3s ease-in-out infinite;

@@ -713,6 +713,7 @@ function redrawCharts() {
     $('chart-tps-window').textContent = label;
 }
 function rerenderChartsTheme() {
+    if (!tpsChart) return;
     // POPOUT-1: its uPlot holds old-theme colors and the card plot it
     // mirrored is gone — close it, the next titlebar click rebuilds.
     if (popHooks.ref) popHooks.ref.close();
@@ -720,15 +721,16 @@ function rerenderChartsTheme() {
     // ISSUE-2: rebuild each metric plot IN ITS HOST — createMetricCard's
     // exists-guard makes re-calling it a no-op once the card is in the grid,
     // which left every small metric card blank after the first rerender.
-    for (const id of [...metricCharts.keys()]) reinitMetricPlot(id);
+    const col = chartColors();
+    for (const id of [...metricCharts.keys()]) reinitMetricPlot(id, col);
     // Rebuilt uPlots start at their default 300×100; the host ResizeObserver
     // does NOT fire (same box size), so fit them explicitly or they overflow.
     fitAllMetricPlots();
     drawAllMetricCharts();
 }
-function resizeCharts() {
-    fitAllMetricPlots();
-    if (!tpsChart) return;
+function _measureSharedCharts() {
+    if (!tpsChart) return [];
+    const out = [];
     // Box-driven clamp (same rule as the metric plots): available height
     // comes from the GRID BOX, never the body's clientHeight — a flex body
     // reports its own drawn height and a flex body + auto-size chart would
@@ -748,11 +750,26 @@ function resizeCharts() {
         const lg = box.querySelector('.u-legend');
         const lgH = lg ? Math.max(lg.getBoundingClientRect().height, 20) : 0;
         h = Math.max(floor, h - lgH);
+        out.push({ ch, box, wrap: box.querySelector('.uplot'), w: box.clientWidth, h });
+    }
+    return out;
+}
+function resizeCharts() {
+    // Batch all DOM geometry reads (metric cards + shared charts) BEFORE any
+    // style/setSize writes so the browser computes layout once instead of
+    // forcing a synchronous reflow per card.
+    const metricFits = [];
+    for (const id of metricCharts.keys()) {
+        const m = _measureMetricPlot(id);
+        if (m) metricFits.push(m);
+    }
+    const sharedFits = _measureSharedCharts();
+    for (const m of metricFits) _applyMetricFit(m);
+    for (const { ch, box, wrap, w, h } of sharedFits) {
         box.style.height = h + 'px';
-        ch.setSize({ width: box.clientWidth, height: h });
+        ch.setSize({ width: w, height: h });
         // uPlot.setSize grows its .uplot wrapper but never shrinks it —
         // pin it, or stale height bleeds past the clamped box.
-        const wrap = box.querySelector('.uplot');
         if (wrap) wrap.style.height = h + 'px';
     }
 }
@@ -1247,7 +1264,7 @@ function createMetricCard(def, park) {
    exists-guard returned immediately and the host stayed empty forever.
    Rebuild the plot inside the existing host instead (colors re-read). */
 /* reinit path (theme/skin): rebuild opts the same way create does. */
-function reinitMetricPlot(id) {
+function reinitMetricPlot(id, col) {
     const e = metricCharts.get(id);
     if (!e) return;
     if (_cardParked(id, e)) {
@@ -1257,8 +1274,8 @@ function reinitMetricPlot(id) {
     const prevData = e.chart && e.chart.data && e.chart.data.length ? e.chart.data : (e.lastCols || multInitData(e.def));
     if (e.chart) { try { e.chart.destroy(); } catch (_) {} }
     e.host.textContent = '';
-    const col = chartColors();
-    e.chart = new uPlot(metricOpts(id, e.def, col), prevData, e.host);
+    const c = col || chartColors();
+    e.chart = new uPlot(metricOpts(id, e.def, c), prevData, e.host);
     bindCursorTip(e.chart);
     applyCardLegendCompact(e.chart, e.def);   // LEGEND-COMPACT survives theme/skin rebuilds
     if (e.def.series && e.def.series.length) bindCursorUpdater(e.chart);
@@ -1267,9 +1284,9 @@ function reinitMetricPlot(id) {
         e.host._ro.observe(e.host);
     }
 }
-function fitMetricPlot(id) {
+function _measureMetricPlot(id) {
     const e = metricCharts.get(id);
-    if (!e || !e.chart || _cardParked(id, e)) return;
+    if (!e || !e.chart || _cardParked(id, e)) return null;
     // The card grows/shrinks via the row-height engine; the plot takes the
     // space left after title + timespan row. The floor keeps a bare card
     // readable; CH_GLUE._neededUnits() treats the .metric-plot floor as the
@@ -1306,11 +1323,16 @@ function fitMetricPlot(id) {
     const lgH = (lg && lg.childElementCount)
         ? Math.ceil(lg.getBoundingClientRect().height) || 0 : 0;
     h = Math.max(64, h - lgH);
-    host.style.height = (h + lgH) + 'px';
-    const wrap = host.querySelector('.uplot');
-    if (wrap) wrap.style.height = (h + lgH) + 'px';   // setSize only ever grows it
-    if (host.clientWidth > 0) e.chart.setSize({ width: host.clientWidth, height: h });
+    return { e, host, wrap: host.querySelector('.uplot'), w: host.clientWidth, h, lgH };
 }
+function _applyMetricFit(m) {
+    if (!m) return;
+    const { e, host, wrap, w, h, lgH } = m;
+    host.style.height = (h + lgH) + 'px';
+    if (wrap) wrap.style.height = (h + lgH) + 'px';   // setSize only ever grows it
+    if (w > 0) e.chart.setSize({ width: w, height: h });
+}
+function fitMetricPlot(id) { _applyMetricFit(_measureMetricPlot(id)); }
 /* LEGEND-COMPACT (user 2026-10-10): s.legendHide drops a series row from
    the CARD legend. The vendored uPlot has no per-series legend toggle —
    the rows exist 1:1 with series (after an optional Time row, same probe
@@ -1330,7 +1352,14 @@ function applyCardLegendCompact(chart, def) {
     for (const i of hidden)
         if (seriesRows[i]) seriesRows[i].style.display = 'none';
 }
-function fitAllMetricPlots() { for (const id of metricCharts.keys()) fitMetricPlot(id); }
+function fitAllMetricPlots() {
+    const fits = [];
+    for (const id of metricCharts.keys()) {
+        const m = _measureMetricPlot(id);
+        if (m) fits.push(m);
+    }
+    for (const m of fits) _applyMetricFit(m);
+}
 function metricXAxis(win, col) {
     const fmt = win >= 86400 ? FMT_MD : FMT_TIME_HM;
     // Sparkline cards: uPlot never fitted readable time labels into the short
@@ -1557,7 +1586,9 @@ function metricUnionCols(def, data, winMs) {
     }
     return cols;
 }
+let _drewSync = false;
 function drawMetricChart(id) {
+    _drewSync = true;
     const e = metricCharts.get(id);
     if (!e || _gateHidden(e.def) || _cardParked(id, e)) return;   // U24: hidden/parked card = no work
     if (!e.chart) ensureMetricPlot(id);
@@ -1677,7 +1708,11 @@ function fmtLast(fmt, v) {
 }
 function fmtNumberPrecise(v) { return C.fmtNumber(v); }
 function drawAllMetricCharts() {
-    for (const id of [...metricCharts.keys()]) { metricFetch(id, false); drawMetricChart(id); }
+    for (const id of [...metricCharts.keys()]) {
+        _drewSync = false;
+        metricFetch(id, false);
+        if (!_drewSync) drawMetricChart(id);
+    }
 }
 function relabelExplore() {
     // JS-built dynamic bits (window chips + per-card readouts); i18n-named

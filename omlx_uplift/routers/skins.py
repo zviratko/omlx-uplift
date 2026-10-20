@@ -71,12 +71,12 @@ async def skin_res(sel: str, rel: str, request: Request,
     if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="resource not found")
     media_type = skins.res_media_type(rel)
-    st = path.stat()
+    blob, st = await asyncio.to_thread(skins.read_res, path)
     etag = _static_etag(st)
     if _not_modified(request, etag, st.st_mtime):
         return Response(status_code=304, headers={"ETag": etag})
     # nosniff always; a hand-dropped file outside the extension whitelist
     # downloads as octet-stream, its type is never inferred from content
-    return FileResponse(path, media_type=media_type,
-                        headers={"Cache-Control": "no-cache",
-                                 "X-Content-Type-Options": "nosniff"})
+    return Response(content=blob, media_type=media_type,
+                    headers={"ETag": etag, "Cache-Control": "no-cache",
+                             "X-Content-Type-Options": "nosniff"})

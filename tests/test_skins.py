@@ -690,3 +690,38 @@ def test_crate_size_cap_skips(root):
     entries = skins.list_skins(root)
     assert entries[0]["dir"] is None
     assert "larger" in entries[0]["reason"]
+
+
+def test_list_skins_and_read_res_use_in_process_caches(root, monkeypatch):
+    drop(root, "night", mtime=1_700_000_000)
+    entries1 = skins.list_skins(root)
+    assert len(entries1) == 1
+    mw_calls = []
+    real_mw = skins.motion_warnings
+    monkeypatch.setattr(skins, "motion_warnings",
+                        lambda css: (mw_calls.append(css), real_mw(css))[1])
+    entries2 = skins.list_skins(root)
+    assert entries2 == entries1
+    assert mw_calls == [], "cached list_skins must not re-run motion_warnings"
+    # Mutating returned list/dicts must not corrupt the in-process cache
+    entries2[0]["label"] = "Mutated"
+    assert skins.list_skins(root)[0]["label"] == "Night Watch"
+    # read_res serves from in-process cache on second call
+    icon_path = root / "night-1700000000" / "icons" / "caret.png"
+    blob1, _ = skins.read_res(icon_path)
+    blob2, _ = skins.read_res(icon_path)
+    assert blob1 == PNG_1PX and blob2 == PNG_1PX
+
+
+def test_bundled_crates_avoid_feturbulence_and_fixed_backgrounds():
+    offenders = {}
+    for p in sorted(skins.bundled_package_dir().glob("*.yml")):
+        raw = p.read_text(encoding="utf-8")
+        crate, reason = skins.parse_crate(raw)
+        assert crate is not None, f"{p.name}: {reason}"
+        if any("<feTurbulence" in v for v in crate["icons"].values()):
+            offenders[p.name] = "uses <feTurbulence>"
+        css_no_comments = skins._strip_css_comments(crate["css"])
+        if "background-attachment" in css_no_comments and "fixed" in css_no_comments:
+            offenders[p.name] = "uses background-attachment: fixed"
+    assert not offenders, offenders

@@ -90,10 +90,6 @@ css: |-
               rgba(120, 130, 124, .05) 0 1px, transparent 1px 9px);
       background-size: 48px 48px, auto;
       background-repeat: repeat, repeat;
-      /* Pinned to the viewport so scrolling does not crawl the facets under
-         the reading position — the ground should feel like the page's material,
-         not like a decal sliding over it. */
-      background-attachment: fixed, fixed;
   }
   body::before { background: var(--ink); }
   /* The sticky header is OPAQUE: unless it repeats the SAME pinned ground it
@@ -106,7 +102,6 @@ css: |-
               rgba(120, 130, 124, .05) 0 1px, transparent 1px 9px);
       background-size: 48px 48px, auto;
       background-repeat: repeat, repeat;
-      background-attachment: fixed, fixed;
   }
 
   /* ---- cards: folded planes. Hard offset shadow, no blur. ---- */
@@ -125,7 +120,7 @@ css: |-
   }
 
   /* ---- motion: a rare fold, and the prism turning. Both gated. ---- */
-  :root:not([data-motion="off"]) .card {
+  :root:not([data-motion="off"]) .card:hover {
       animation: kubus-fold 11s ease-in-out infinite;
   }
   @keyframes kubus-fold {

@@ -303,7 +303,6 @@ css: |-
   :root:not([data-motion="off"]) .feed-item::before { background-image: url('res/icons/paw-motion.svg'); }
   :root:not([data-motion="off"]) .badge::after { background-image: url('res/icons/nap-motion.svg'); }
   :root:not([data-motion="off"]) .card:has(.chart-box)::after { background-image: url('res/icons/beg-motion.svg'); }
-  :root:not([data-motion="off"]) .u-legend .u-label::before { background-image: url('res/icons/paw-motion.svg'); }
 
   /* hover is a state change, not decoration: gated, and short */
   :root:not([data-motion="off"]) .card { transition: border-color .18s linear; }
@@ -380,51 +379,6 @@ css: |-
   }
   #grid .card[data-block="met-rate-completion-tokens-s"] h2::before {
       background-image: url('res/icons/face-green.svg');
-  }
-
-  /* Twelve designs, chosen so two visually adjacent cards (which
-     are consecutive in DOM order, the grid being row-major) never
-     carry the same face. Ears, eye colour, mouth and marks are the
-     only channels used: at a 15x12 render box nothing else survives.
-     A block with no assignment keeps the plain green cat. */
-  :root:not([data-motion="off"]) #grid .card h2::before {
-      background-image: url('res/icons/face-green-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="met-pfx-token-hit-pct"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="cache"] h2::before {
-      background-image: url('res/icons/face-pink-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="met-pfx-lookup-hit-pct"] h2::before {
-      background-image: url('res/icons/face-blaze-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="met-spec-saved-tokens-min"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="tokens"] h2::before {
-      background-image: url('res/icons/face-sleepy-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="met-queue-waiting"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="met-avg-generation-tps"] h2::before {
-      background-image: url('res/icons/face-cool-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="met-pwr-total-w"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="met-rate-prompt-tokens-s"] h2::before {
-      background-image: url('res/icons/face-amber-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="met-therm-cpu-temp-c"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="chart-tps"] h2::before {
-      background-image: url('res/icons/face-stripey-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="live"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="reqfeed"] h2::before {
-      background-image: url('res/icons/face-torn-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="chart-mem"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="reqstats"] h2::before {
-      background-image: url('res/icons/face-alert-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="prefill"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="met-cache-efficiency"] h2::before {
-      background-image: url('res/icons/face-chill-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="gen"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="met-sys-used-bytes"] h2::before {
-      background-image: url('res/icons/face-smudge-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="requests"] h2::before, :root:not([data-motion="off"]) #grid .card[data-block="met-rate-requests-s"] h2::before {
-      background-image: url('res/icons/face-wideye-motion.svg');
-  }
-  :root:not([data-motion="off"]) #grid .card[data-block="met-rate-completion-tokens-s"] h2::before {
-      background-image: url('res/icons/face-green-motion.svg');
   }
 
   /* THE CAST: ledge cats. The 16x12 window hangs ABOVE the card, its bottom

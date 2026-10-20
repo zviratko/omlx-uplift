@@ -7,10 +7,8 @@
 # the deliberate stress test for SPARK-1's seriesPalette() de-dupe: the palette
 # must fall back to a tint, not draw two invisible coincident strokes.
 #
-# Texture: real procedural grain. icons/grain.svg is an <feTurbulence> mask
-# (RGB-constant, signal carried in ALPHA) tiled at 96px over the tube ground.
-# Verified by composite measurement in Chromium (sd 2.90, 69 luminance levels);
-# it is standard SVG but NOT yet pixel-proven in Safari/Firefox.
+# Texture: lightweight static phosphor-dust stipple. icons/grain.svg is a
+# filter-free SVG dot mask tiled at 96px over the tube ground.
 #
 # Glitch (2026-10-02): the tube is alive. Two grain seeds boil at ~8 fps like
 # static, a vertical-hold band rolls down the phosphor, the raster creeps, and
@@ -54,54 +52,22 @@ icons:
   # seam. feColorMatrix collapses RGB to black and copies RED into ALPHA, so
   # the art is a pure opacity mask — it tints to whatever ground it lands on.
   grain.svg: |-
-    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96">
-      <filter id="g" x="0" y="0" width="100%" height="100%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="4"
-                      seed="7" stitchTiles="stitch" result="n"/>
-        <feColorMatrix in="n" type="matrix"
-          values="0 0 0 0 0
-                  0 0 0 0 0
-                  0 0 0 0 0
-                  1 0 0 0 0"/>
-      </filter>
-      <rect width="96" height="96" filter="url(#g)" opacity="0.5"/>
+    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+      <g fill="#000" fill-opacity="0.22">
+        <path d="M5 7h1v1H5zm18 4h1v1h-1zm27 2h1v1h-1zm21 6h1v1h-1zm16 3h1v1h-1zM11 19h1v1h-1zm24 5h1v1h-1zm19-2h1v1h-1zm28 4h1v1h-1zM7 33h1v1H7zm31 3h1v1h-1zm22-4h1v1h-1zm25 6h1v1h-1zM14 47h1v1h-1zm29 2h1v1h-1zm18 5h1v1h-1zm23-3h1v1h-1zM9 61h1v1H9zm25 4h1v1h-1zm27-2h1v1h-1zm21 5h1v1h-1zM16 76h1v1h-1zm22 3h1v1h-1zm26-4h1v1h-1zm19 6h1v1h-1zM6 88h1v1H6zm28 3h1v1h-1zm23-2h1v1h-1zm27 4h1v1h-1z"/>
+      </g>
+      <g fill="#33ff66" fill-opacity="0.045">
+        <path d="M13 11h1v1h-1zm29 7h1v1h-1zm24-3h1v1h-1zm21 8h1v1h-1zM8 27h1v1H8zm26 4h1v1h-1zm31-2h1v1h-1zm17 6h1v1h-1zM19 41h1v1h-1zm23 5h1v1h-1zm28-3h1v1h-1zm18 7h1v1h-1zM12 56h1v1h-1zm32 3h1v1h-1zm19 5h1v1h-1zm25-4h1v1h-1zM7 71h1v1H7zm27 4h1v1h-1zm22-2h1v1h-1zm29 5h1v1h-1zM21 85h1v1h-1zm25 4h1v1h-1zm23-3h1v1h-1zm18 6h1v1h-1z"/>
+      </g>
     </svg>
-  # The boiling cut: same mask, TWO seeds stacked, alternating at ~7 fps with
-  # step-end — static that crackles instead of sitting still. Declarative
-  # animation inside a background-image SVG runs (only <script> is blocked),
-  # and one URL = one clock, so every ground using it boils in phase, like a
-  # real tube. The STILL cut above stays mounted when motion is off: a
-  # background SVG cannot see the host's data-motion attribute, so the crate
-  # ships both cuts and swaps the url() under the gate. Each rect carries its
-  # own opacity attribute so a renderer that ignores the CSS still shows seed A.
   grain-boil.svg: |-
-    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96">
-      <style>
-        .a, .b { animation: ph-fl .28s step-end infinite; }
-        .b { animation-delay: .14s; }
-        @keyframes ph-fl { 0%, 49.9% { opacity: .5 }
-                           50%, 100% { opacity: 0 } }
-      </style>
-      <filter id="ga" x="0" y="0" width="100%" height="100%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="4"
-                      seed="7" stitchTiles="stitch" result="n"/>
-        <feColorMatrix in="n" type="matrix"
-          values="0 0 0 0 0
-                  0 0 0 0 0
-                  0 0 0 0 0
-                  1 0 0 0 0"/>
-      </filter>
-      <filter id="gb" x="0" y="0" width="100%" height="100%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="4"
-                      seed="31" stitchTiles="stitch" result="n"/>
-        <feColorMatrix in="n" type="matrix"
-          values="0 0 0 0 0
-                  0 0 0 0 0
-                  0 0 0 0 0
-                  1 0 0 0 0"/>
-      </filter>
-      <rect class="a" width="96" height="96" filter="url(#ga)" opacity="0.5"/>
-      <rect class="b" width="96" height="96" filter="url(#gb)" opacity="0"/>
+    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+      <g fill="#000" fill-opacity="0.24">
+        <path d="M9 5h1v1H9zm22 6h1v1h-1zm25-2h1v1h-1zm23 7h1v1h-1zM15 21h1v1h-1zm26 4h1v1h-1zm21-3h1v1h-1zm24 6h1v1h-1zM6 35h1v1H6zm29 3h1v1h-1zm24-2h1v1h-1zm26 5h1v1h-1zM18 49h1v1h-1zm25 4h1v1h-1zm22-3h1v1h-1zm21 6h1v1h-1zM11 63h1v1h-1zm27 5h1v1h-1zm25-3h1v1h-1zm22 4h1v1h-1zM14 78h1v1h-1zm24 3h1v1h-1zm28-2h1v1h-1zm19 5h1v1h-1zM8 90h1v1H8zm26 2h1v1h-1zm25-3h1v1h-1zm24 4h1v1h-1z"/>
+      </g>
+      <g fill="#33ff66" fill-opacity="0.05">
+        <path d="M17 9h1v1h-1zm27 6h1v1h-1zm22-2h1v1h-1zm21 7h1v1h-1zM10 25h1v1h-1zm28 5h1v1h-1zm26-3h1v1h-1zm19 6h1v1h-1zM21 39h1v1h-1zm24 4h1v1h-1zm25-2h1v1h-1zm18 6h1v1h-1zM14 54h1v1h-1zm29 4h1v1h-1zm21 4h1v1h-1zm24-3h1v1h-1zM9 69h1v1H9zm25 5h1v1h-1zm24-3h1v1h-1zm27 4h1v1h-1zM19 83h1v1h-1zm27 4h1v1h-1zm21-2h1v1h-1zm20 5h1v1h-1z"/>
+      </g>
     </svg>
   logo-dot.svg: |-
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
@@ -139,7 +105,6 @@ css: |-
               #0a160c 0%, var(--bg) 62%, #010301 100%);
       background-size: 96px 96px, auto, cover;
       background-repeat: repeat, repeat, no-repeat;
-      background-attachment: fixed, fixed, fixed;
   }
   body::before { background: var(--edge); }
   header.top {
@@ -152,7 +117,6 @@ css: |-
               #0a160c 0%, var(--bg) 62%, #010301 100%);
       background-size: 96px 96px, auto, cover;
       background-repeat: repeat, repeat, no-repeat;
-      background-attachment: fixed, fixed, fixed;
   }
 
   /* ---- cards: the well is lit from inside, so the glow is inset ----
@@ -190,35 +154,8 @@ css: |-
      (<=9 cards) gives every card a unique speed AND phase; lane doubles
      start at card 10 and still sit in different phases. Consecutive cards
      always land in different lanes, so no row marches. */
-  :root:not([data-motion="off"]) .card {
+  :root:not([data-motion="off"]) #grid .card:hover {
       animation: ph-roll 9.7s linear infinite;
-  }
-  :root:not([data-motion="off"]) .card:nth-child(9n+1) {
-      animation-duration: 8.9s; animation-delay: -5.4s;
-  }
-  :root:not([data-motion="off"]) .card:nth-child(9n+2) {
-      animation-duration: 10.1s; animation-delay: -5.1s;
-  }
-  :root:not([data-motion="off"]) .card:nth-child(9n+3) {
-      animation-duration: 9.1s; animation-delay: -6.3s;
-  }
-  :root:not([data-motion="off"]) .card:nth-child(9n+4) {
-      animation-duration: 10.3s; animation-delay: -2.2s;
-  }
-  :root:not([data-motion="off"]) .card:nth-child(9n+5) {
-      animation-duration: 9.7s; animation-delay: -0.7s;
-  }
-  :root:not([data-motion="off"]) .card:nth-child(9n+6) {
-      animation-duration: 10.7s; animation-delay: -4.3s;
-  }
-  :root:not([data-motion="off"]) .card:nth-child(9n+7) {
-      animation-duration: 8.3s; animation-delay: -2.5s;
-  }
-  :root:not([data-motion="off"]) .card:nth-child(9n+8) {
-      animation-duration: 8.7s; animation-delay: -8.6s;
-  }
-  :root:not([data-motion="off"]) .card:nth-child(9n) {
-      animation-duration: 9.5s; animation-delay: -8.6s;
   }
   @keyframes ph-roll {
       from { background-position: 0 -60px, 0 0; }
@@ -232,13 +169,7 @@ css: |-
   }
   :root:not([data-motion="off"]) #pages .card { animation: none; }
 
-  /* ---- boiling static + raster creep ----
-     Motion-on swaps the STILL grain for the two-seed boiling cut (a
-     background SVG cannot see data-motion, hence two files — the swap rule
-     is what the gate controls). The scanline raster also creeps one period
-     (3px) every 2.3 s: below conscious notice, exactly like a tube whose
-     vertical hold is a hair off. Grain and scanlines travel together; the
-     vignette stays. */
+  /* ---- static swap on motion-on (without full-page background-position crawl) ---- */
   :root:not([data-motion="off"]) body {
       background-image:
           url('res/icons/grain-boil.svg'),
@@ -246,11 +177,6 @@ css: |-
               rgba(0, 0, 0, .34) 0 1px, transparent 1px 3px),
           radial-gradient(125% 95% at 50% 40%,
               #0a160c 0%, var(--bg) 62%, #010301 100%);
-      animation: ph-crawl 2.3s linear infinite;
-  }
-  @keyframes ph-crawl {
-      from { background-position: 0 0, 0 0, 0 0; }
-      to   { background-position: 0 3px, 0 3px, 0 0; }
   }
 
   /* ---- horizontal tear across the header ground, 17.3 s clock ----

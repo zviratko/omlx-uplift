@@ -273,3 +273,29 @@ test('the commit path gates its re-tint on the same live-sheet test', () => {
     assert.ok(!/(^|[^w])CH\.rerenderChartsTheme\(\);/m.test(ap.replace(/whenSkinLive\([\s\S]*?\}\)/g, '')),
         'no synchronous un-gated rerender may survive in applyPrefs');
 });
+
+test('whenSkinLive fires at most once and deduplicates identical live theme commits', async () => {
+    const h = harness('nerv');
+    h.htmlEl.dataset.theme = 'nerv-1700000001';
+    h.link.getAttribute = () => '/uplift/api/skins/nerv-1700000001/theme.css';
+    h.link.sheet = { href: '/uplift/api/skins/nerv-1700000001/theme.css' };
+    h.ctx.applySkinCss = dir => {
+        h.calls.skinCss.push(dir || null);
+        h.link.getAttribute = () => `/uplift/api/skins/${dir}/theme.css`;
+    };
+    h.ctx.previewShow('lain');
+    h.link.sheet = { href: '/uplift/api/skins/lain-1700000002/theme.css' };
+    h.link.fire('load');
+    await sleep(260);   // let the 120ms backstop tick after load
+    assert.equal(h.calls.rerender, 1, 'load + backstop must never double-rerender');
+    // Repeating whenSkinLive for the already-live skin is a no-op
+    h.ctx.previewShow('nerv');
+    h.link.sheet = { href: '/uplift/api/skins/nerv-1700000001/theme.css' };
+    h.ctx.previewShow('lain');
+    h.link.sheet = { href: '/uplift/api/skins/lain-1700000002/theme.css' };
+    h.link.fire('load');
+    const afterLain = h.calls.rerender;
+    // Re-invoking previewShow after commit/same themeKey must not rebuild again
+    h.ctx.previewShow('lain');
+    assert.equal(h.calls.rerender, afterLain, 'already-live theme does not rebuild twice');
+});

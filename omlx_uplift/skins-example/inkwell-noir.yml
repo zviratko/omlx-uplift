@@ -77,7 +77,6 @@ css: |-
               #1c1c1f 0%, var(--bg) 55%, #0e0e10 100%);
       background-size: auto, auto, cover;
       background-repeat: repeat, repeat, no-repeat;
-      background-attachment: fixed, fixed, fixed;
   }
   /* The institution strip takes the bone on the dark proof stock. */
   body::before { background: var(--ink); }
@@ -93,7 +92,6 @@ css: |-
               #1c1c1f 0%, var(--bg) 55%, #0e0e10 100%);
       background-size: auto, auto, cover;
       background-repeat: repeat, repeat, no-repeat;
-      background-attachment: fixed, fixed, fixed;
   }
   .card {
       background: var(--card);

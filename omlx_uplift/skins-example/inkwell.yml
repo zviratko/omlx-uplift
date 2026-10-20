@@ -86,7 +86,6 @@ css: |-
               #ffffff 0%, var(--bg) 55%, #ececea 100%);
       background-size: auto, auto, cover;
       background-repeat: repeat, repeat, no-repeat;
-      background-attachment: fixed, fixed, fixed;
   }
   /* The 4px institution strip is the loudest object on a duotone page, so it
      takes the ink. No hue is allowed to shout here. */
@@ -103,7 +102,6 @@ css: |-
               #ffffff 0%, var(--bg) 55%, #ececea 100%);
       background-size: auto, auto, cover;
       background-repeat: repeat, repeat, no-repeat;
-      background-attachment: fixed, fixed, fixed;
   }
   .card {
       background: var(--card);
