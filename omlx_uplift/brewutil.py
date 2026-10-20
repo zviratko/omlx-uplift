@@ -155,10 +155,13 @@ def brew_build_cmd(flags) -> list:
     old `brew reinstall` path is gone — brew's reinstall unlinks and
     renames the LIVE keg away BEFORE the multi-minute build, dangling
     /opt/homebrew/opt/omlx-dev for the whole window (a crash in it could
-    not restart). `install --HEAD` is also gone: the version spec IS the
-    moving part now, HEAD would name the keg 'HEAD-...' again. Never
+    not start). `--force` because brew REFUSES an install while ANY keg
+    of the formula exists (verified 2026-10-20: existing HEAD-060846c vs
+    new version → "already installed... first run brew unlink", exit 0!)
+    — --force skips that check, never removes a keg, and the link flip to
+    the new version is brew's normal upgrade-style relink. Never
     `brew upgrade` — pinned, and the stamp only exists inside dev install."""
-    return ["brew", "install", *sorted(flags), "omlx-dev"]
+    return ["brew", "install", "--force", *sorted(flags), "omlx-dev"]
 
 
 def receipt_used_options(formula: str) -> set:

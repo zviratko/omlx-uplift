@@ -1781,6 +1781,17 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
         res.ok, res.returncode = False, rc
         return res
     subprocess.run(["brew", "pin", "omlx-dev"], capture_output=True)
+    # HARD VERIFICATION: brew can print Error and still exit 0 (observed
+    # 2026-10-20 with the already-installed refusal) — the ONLY proof a
+    # build happened is the keg directory our stamped version names.
+    _expected_keg = os.path.join(kegstash.cellar_dir(), build_version)
+    if not os.path.isdir(_expected_keg):
+        _emit(res, "err", f"brew exited {rc} but no keg was installed at "
+                          f"Cellar/omlx-dev/{build_version} — the build did "
+                          "NOT happen (live keg untouched)")
+        _emit(res, "err", f"  investigation: {res.log_path}")
+        res.ok, res.returncode, res.stage = False, rc or 1, "verify"
+        return res
     cfg = load_config() or cfg
     cfg["built_sha"] = tip
     cfg["built_version"] = build_version
