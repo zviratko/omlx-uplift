@@ -1,620 +1,203 @@
-# Changelog
+1|# Changelog
+2|
+3|Notable changes to omlx-uplift, per release. `brew install
+4|zviratko/uplift/omlx-uplift` gets the latest tagged release; `--HEAD`
+5|tracks `main`. Tags are cut from `main` with the formula retargeted in
+6|the same commit — see `tests/test_release_formula.py` for what is pinned.
+7|
+8|Maintenance rule: when a change is worth a user's attention (feature,
+9|fixed annoyance, changed behavior, new command), add one bullet under an
+10|`Unreleased` heading in the same PR/commit; release preparation moves
+11|`Unreleased` into a version section. Not a commit dump — skip refactors
+12|users never see.
+13|
+14|## Unreleased
 
-Notable changes to omlx-uplift, per release. `brew install
-zviratko/uplift/omlx-uplift` gets the latest tagged release; `--HEAD`
-tracks `main`. Tags are cut from `main` with the formula retargeted in
-the same commit — see `tests/test_release_formula.py` for what is pinned.
+## [2.6] — 2026-10-20
 
-Maintenance rule: when a change is worth a user's attention (feature,
-fixed annoyance, changed behavior, new command), add one bullet under an
-`Unreleased` heading in the same PR/commit; release preparation moves
-`Unreleased` into a version section. Not a commit dump — skip refactors
-users never see.
+- **tg benchmarks now decode the length you asked for.** The Throughput bench's tg128–1024 rows measured a shorter decode than their label: a model that ends its own turn early was scored at ~25 tokens under a tg1024 label. Bench runs now ignore the model's stop tokens (bench only — normal serving is untouched), and the results table gained an `out` column with the real generated-token count.
+- **Dev builds no longer break the running board, and an upgrade no longer rebuilds for nothing.** `dev install` builds a new timestamped keg beside the live one and switches at the end; previous builds stay for `dev use` rollback. `dev upgrade` rebuilds only when the omlx tip or the patch set actually moved, and `--restart` restarts the dev server only after a build that did something.
+- **The header names the exact build.** The badge shows the active omlx-dev keg stamp, and a second line under the logo the vanilla omlx version and base commit it was cut from; the tooltip carries the full patch story.
+- **A patch can no longer be wrongly marked "upstreamed".** The probe read the dev keg — a tree that carries patches by design — and retired three live patches at once; retired patches are now revalidated against a clean upstream checkout and restored when it lacks them. Every bundled patch goes into omlx-dev as a build commit, so the dev keg is exactly the branch.
+- **KV cache compression and Claude Desktop.** The model editor picks the KV cache format (turboquant, affine 4-bit, affine 8-bit) with bits pinned per format, and the Integrations page gained a Claude Desktop switch that reconfigures the server. The dashboard tracks omlx 0.7.1.
 
-## Unreleased
-
-- **`dev upgrade` rebuilds only when something moved.** The upgrade verb now runs the same sync and patch materialize as before, but skips the multi-minute brew build when neither the omlx tip nor the patch set changed — the current keg already IS that build (`dev upgrade` seconds instead of minutes; `dev install` or `--force` still rebuild unconditionally). New `--restart` kickstarts the omlx-dev service after a verb that actually rebuilt — a skipped `dev upgrade` leaves the running server alone.
-
-- **The header badge now names the exact build.** Next to the DEV mark the dashboard shows the active omlx-dev keg stamp (`20261020.133019.7240c46` — UTC build time + commit), with the full base/patch story in its tooltip. The auto-update switch label now says what it does (rebuild when upstream moves) without the stale vanilla wording, and `dev install/upgrade` logs whether each runtime patch is already mounted in the active keg or lands at the next server start.
-- **A false "upstreamed" verdict can no longer retire a patch.** The upstreamed-probe was reading the dev keg — a tree that carries our own patches by design — and retired three live patches at once on a machine without the classic oMLX keg. Retired patches are now revalidated against a clean upstream checkout and restored automatically; genuine upstreaming still retires.
-- **tg benchmarks now decode what they claim.** The generation length you pick on the Throughput bench (tg128–1024) was only a ceiling: models that end their turn early (gemma stops ~25 tokens in) measured a short decode under a tg1024 label. A new bundled patch (`bench-force-tg`, on the Patches page) makes the benchmark ignore the model's own end-of-turn stops — bench requests only, normal serving is untouched. The results table gained an `out` column with the real generated-token count, showing `21/1024` when a run still ends early (external endpoints, speculative-decode engines).
-- **`dev install` never breaks the running board.** Every `omlx-uplift dev install` now stamps a unique build version (UTC timestamp + commit) into its own Cellar directory, so brew builds the new omlx-dev beside the live one and flips the links at the end — instead of `brew reinstall` moving the running keg away before a multi-minute build. Previous builds stay in the Cellar: `omlx-uplift dev kegs` lists them, `dev use <version|sha>` rolls back with a symlink switch, retention prunes the oldest (`dev prune`). A rebuild on a machine without the classic oMLX keg now syncs curated patches too.
+*A new bundled patch, `bench-force-tg`, ships on the Patches page.*
 
 ## [2.5] — 2026-10-20
-
-- **The dev lane stands alone.** omlx-dev and Uplift no longer require the classic oMLX keg: a machine that runs only the HEAD build installs, mounts and patch-checks without it. The build base follows upstream HEAD by default, and the dev panel says so.
-- **Loads faster, redraws less.** Heavy pages — voice chat, the patches and dev panels, download tools — load only when you first open them. Theme switches no longer rebuild every chart, and the server batches duplicate sampling work behind the meters.
-- **Chat settings stick.** Thinking mode and your preset selection survive switching between conversations.
-
-## [2.4] — 2026-10-20
-
-- **The Patches page is one table.** One row per patch, with checkboxes for the vanilla server and the dev build, and an AUTO column for auto-update. The MANAGE dialog covers versions, pins, test, source edit and removal.
-- **Chat renders math.** Formulas written as `$x$` or `$$…$$` display as real equations. The renderer ships inside the dashboard; no network is needed.
-- **The Memory & cache card shows real memory use.** The figure used to be the sum of model-file sizes, so it stayed flat while the server actually grew.
-- **The Activity card no longer sleeps.** Clicking into Chat, Bench or Cluster used to stop its live stream; loads took up to 15 seconds to appear. Both are fixed.
-
-*P.S. Two new curated patches wait on the Patches page. They remove two server stalls around model loads: the ~19 s freeze while a vision model loads, and the ~0.8 s pause on the first request after a load.*
-
-## [2.3] — 2026-10-19
-
-- **macOS `say` is now a TTS engine.** A VOICES tab lists every
-  system voice, folded by language, with quality tiers; downloadable
-  voices are marked and install from there. Mark a preferred voice
-  per language, or let bare `say` work the language out from the
-  text.
-- **TTS settings restructured.** "TTS & Voices" opens on TEXT TO
-  SPEECH; each engine is a card with its voices wired under it, and
-  a model's VOICES chip jumps to its cloned voices.
-- **Reading replies aloud got real controls.** Play, pause, progress,
-  re-record — pause stops where you left and resumes from that
-  second. With auto-speak, every chunk gets a numbered row with a
-  waveform and the highlight follows the voice.
-- **Voice recognition is steadier.** The last sentence always arrives
-  when you stop talking; whisper large-class models avoid a broken
-  transport; the LISTEN noise floor calibrates itself. A new
-  optional patch runs Qwen3-ASR live: utterances commit in about a
-  second.
-- **Audio shows on the dashboard.** Speaking and listening activity
-  rides the stats feed as it happens.
-- **The chat page sits still.** One-line top bar, no more whole-page
-  scroll, voice picker and Auto merged into one "Speak" row; a saved
-  preset stays selectable beside your edited copy, so reverting no
-  longer means deleting.
-- **Patch zones cleaned up.** Two exclusive zones, rebuild chips
-  classified by actual content, dev kegs take runtime overlays
-  without a rebuild.
-- Small touches: install no longer hangs on a probe, `patch status`
-  reads like a human wrote it, per-bubble SPEAK follows the chunk
-  strategy, a stale voice no longer blanks the picker.
-
-## [2.2] — 2026-10-18
-
-- **Profiles now remember what you were editing.** Change the prompt or
-  any setting while a profile is selected and the picker reads
-  `Profile (modified)` — the unsaved copy lives **on that profile**.
-  Switching between profiles no longer overwrites in-progress work
-  (the old design had one anonymous stash slot for everyone), coming
-  back finds your edits where you left them, and they survive a
-  reload. Delete on a modified row reverts to the saved profile; Save
-  keeps suggesting its original name.
-- The anonymous "Modified (unsaved)" row is gone from profile flows —
-  it appears only for a chat never saved under any profile. Existing
-  conversations migrate their pending edits onto their selected
-  profile automatically.
-
-## [2.1] — 2026-10-18
-
-- **The chat got a voice and ears.** Replies read themselves aloud
-  while streaming (gapless chunked TTS — sentence / line / paragraph),
-  and push-to-talk plus continuous hands-free listening ride a live
-  speech-recognition stream — echo-guarded and decoupled from the chat
-  model. STT model, language and auto-send live in the Voice input
-  settings.
-- **Whole-page presets.** A profile stores and restores the prompt,
-  thinking, sampling, web search and voice — everything settable on the
-  page except the model you talk to. Edits surface as
-  'Profile (modified)', Save suggests the original name (keep it to
-  update, type a new one to create), Delete reverts unsaved changes or
-  removes the preset — and nothing is lost silently: a page you switch
-  away from is stashed.
-- **The chat was rebuilt classic-style:** histories left, settings
-  right, model and preset on top; the voice-settings popover stays
-  visible and follows scroll.
-- **Request Inspector** decodes prompts even after the model was
-  unloaded (tokenizer from disk); the Activity card gained a per-model
-  Unload button.
-- **Bench:** harness runs carry per-question records (raw downloads),
-  the thinking checkbox reaches the server, and two more FAST Czech
-  suites joined.
-- Small touches: voice references in mp3/flac transcode to WAV at
-  save, the streaming reader cuts at sentence boundaries, the chat
-  picker lists text models only, and classic multi-line profiles are
-  no longer falsely marked modified.
-
-## [2.0] — 2026-10-15
-
-- **The board stopped fighting itself.** An open dashboard tab no longer
-  pins a CPU core or freezes requests: stats build off the event loop,
-  ride a live stream instead of timers, and charts fetch only new
-  points — ~5 % of a core instead of a full one.
-- **Decision bench scores any chat model** via the new upstream
-  /v1/decisions readout, with a forced-choice "System One" answer
-  policy; every row carries the path that produced it.
-- **Nine more suites in a collapsed "Additional suites" section**
-  (IFEval, BBH, Czech MMLU-ProX-Lite, hellaswag, winogrande, mathqa,
-  TruthfulQA, KMMLU, CMMLU) — the classic grid stays pure and
-  TruthfulQA measures truthfulness again.
-- **Benches are easier to run:** all seven surfaces in the menu, one
-  clear progress bar, a global queue instead of a rejection, honest
-  ms/question labels, raw rows downloadable.
-- **Voices: record the reference clip in the tab**, with a per-language
-  read-aloud suggestion and a free-form language field.
-- **Synced to upstream 0.7.1** — model settings keep saving; one SAVE
-  now commits base + all profile tabs; bench envs rebuild clean.
-
-## [1.99b] — 2026-10-11
-
-The voice release.
-
-- **Named voice cloning.** Save a reference clip + transcript as a
-  named voice on the new Voices page, preview it before saving, edit
-  it later or save a copy onto another TTS model. A local
-  speech-recognition model can transcribe the clip for you. Chat got a
-  read-aloud button on every assistant reply with a voice picker that
-  remembers your choice.
-- **Voices from any audio client.** A standard OpenAI-shaped endpoint
-  (`/uplift/v1/audio/speech`, works with the official SDK as-is). Any
-  speech route accepts `Model:Voice` — e.g. `Qwen3-TTS:Jake` — so a
-  stored voice is one field away from any client, on any TTS model.
-- **Voice calls cannot hang forever** — a 240 s watchdog ends a stuck
-  request with an honest message.
-- **Tabbed settings.** The model editor and the server settings page
-  now split their long forms into tabs (with dirty-count badges); tab
-  colors derive from the active skin.
-- **Profile drift is shown before it bites** — `(= base)` tags and a
-  request-divergence preview with one-click sync.
-- **Small touches:** "Download queued" no longer locks the download
-  button.
-
-## [1.4] — 2026-10-11
-
-The measurement-honesty release: the dashboard shows what is really
-happening, and hides nothing that happened before.
-
-- **MTP acceptance metrics.** Native Lightning MTP stats that vanilla
-  only printed at sequence finish are now collected and graphed: an
-  'MTP accepted tgs' area under the Throughput generation line, and
-  one acceptance card with the per-depth decay ladder. The card's
-  headline reads the same number as the ladder's top edge.
-- **Embedding work counts in Throughput (EMBED-1).** Embedding and
-  reranker models ran on a path the chart never watched; they now have
-  their own series.
-- **Charts hold still when data goes stale.** No more sliding the
-  window left with an empty hole; the 'value holds, then pops into
-  place' delay on 5-second cards is fixed at the root.
-- **Metric history survives upgrades.** Rows from previous sessions
-  and old kegs are visible again; only live co-tenant writers are
-  filtered.
-- **Faster, smoother live feed.** The 2 Hz sampler is deadline-
-  scheduled; backgrounded tabs paint instantly on return; a
-  'Smoothing:' select on the Throughput chart; click any card title to
-  pop the graph out full-size.
-- **Honest settings and patch workflow.** Non-LLM models no longer
-  show ~47 LLM settings that their engines ignore; a patch touching
-  the Homebrew formula is held with an explanation instead of showing
-  APPLIED while doing nothing; dashboard rebuilds stream their log
-  live; stored patch versions remember the base they tested against.
-- **Small touches:** the Request feed is now a popup with 2 h default
-  history (stale 'queued' rows are repaired at open), legends fit
-  inside cards, card titles fit one line, Escape closes layout edit
-  mode, default skin is Discovery One, the throughput bench lets you
-  pick generation length (tg128–1024).
-
-## [1.3] — 2026-10-09
-
-The patch-workflow release. The CLI can now drive the whole patch lifecycle
-without a browser, dev builds route around merged-but-moved upstream PRs
-instead of wedging, and the model cards lead with the name and tell the
-build truth.
-
-- **The CLI knows the whole patch lifecycle now.** `patch approve ID` is a
-  standalone approval (records safeguard codes without enabling), `patch
-  promote ID` is the twin of the dashboard button, `patch rollback ID
-  [--to-v N]` points desired_version back at a stored version, and `patch
-  update ID` re-checks (or re-points with `--pr/--url/--file`) the source
-  and **actually adopts** what it stores — a disabled or stuck patch no
-  longer keeps running the stale version. `patch update-all` is its batch
-  twin. A new patch whose gate is clean lands enabled right away; a held
-  one still waits for approval.
-- **The kill switch is reversible and always answers.** `patch disable-all`
-  now records exactly which patches it switched off and `patch enable-all`
-  restores that footprint. Both touch only the manifest and the sentinel
-  file, so they work even when the installed omlx cannot be imported — the
-  very situation you reach for them in.
-- **A merged PR no longer wedges `dev upgrade`.** When upstream merges your
-  patch PR and later commits move the surrounding code, the drift gate asks
-  GitHub whether the PR merged before reporting an error: a proven merge
-  marks the patch OBSOLETE ('upstream now contains the patch — consider
-  removing') and the build skips it, so the upgrade goes through. A merely
-  stale patch (PR open, or GitHub unreachable) keeps its honest error and
-  needs_review exit — the fail-safe rule is unchanged. Dev builds now
-  re-sync catalog sources every build and log each gate verdict with an
-  owner, and `dev-install.log` finally covers the whole pipeline instead of
-  the last stage.
-- **`dev rollback` fixed:** it left brew's linked-keg record behind, so the
-  *next* upgrade died in `brew link` with 'Another version is already
-  linked' — and plain `brew unlink` could not clear it.
-- **Model cards lead with the name, the header tells the build truth.**
-  Cards are reorganised (name first, badges slotted right and below), the
-  DEV wordmark gained a superscript saying what the keg actually tracks —
-  omlx base commit + version and the enabled build-scope patches — and a
-  click-fired load paints LOADING immediately instead of a frozen PRESENT
-  pill. Model aliases no longer vanish after scrolling (the tree survived
-  the first paint but not cached repaints), and the alias trunk draws as
-  one continuous line hanging from the name.
-- **Settings UI stops showing dead knobs.** A profile override under a
-  master switch that is off on both base and profile no longer gets its own
-  chip or divergence row (the `128 -> 128` noise is gone); a real change
-  under an ON master still shows. The divergence banner gained **SYNC BASE →
-  PROFILES**: two-click confirm writes each diverging profile's load-time
-  keys back to the base model's current values. Checkbox dirty-chips show
-  the new value instead of a bare arrow.
-- **Catalog:** new optional entry `pr4206-personal` (a vendored, rebased
-  build of open jundot/omlx#4206); four OQ/GLM env vars are annotated as
-  removed upstream, with catalog text saying when they go dead.
-
-## [1.2] — 2026-10-09
-
-The native release. Bench and Chat are real Uplift pages now —
-throughput, intelligence (classic 16-task engine + opt-in
-lm-evaluation-harness), embeddings/rerankers over MTEB, System-1
-decisions, context probe + ANE tuning, and a full chat with thinking,
-the web-search tool loop, transcription, inline editing and prompt
-profiles. The embedded classic pages stay fully reachable as a
-per-viewer fallback: hover the menu for "Classic (Embed)". Plus honest
-benchmark progress across restarts and multiple tabs.
-
-- **Intelligence benchmark: live queue board (U83).** While a benchmark
-  runs, the Bench → Intelligence page now shows a board instead of one
-  gray status line: every queued suite gets a box (name + question
-  counter) that fills left to right as it progresses — suites being
-  prepared are striped, finished ones stay green with a check, later
-  queued entries are all visible and removable. The counters are fixed:
-  a running suite counts as 1/3 (not 0/2), the question pair now shows
-  questions done over the TOTAL across everything you queued (both
-  engines), and lm-eval's per-subtask bars add up instead of restarting.
-  Harness dataset-prep no longer looks frozen: when lm-eval goes quiet
-  during a download/build the board says so with a live silence timer,
-  and a dropped progress stream reconnects visibly with polling fallback.
-- **Native Chat prompt profiles + readability.** The
-  chat toolbar gained the Profile picker mirroring classic's prompt
-  profiles (same localStorage store, so profiles stay the user's across
-  both pages; selecting copies the prompt, Save commits an edit back
-  into the active profile, and the active name persists per
-  conversation). Enhanced-readability now reaches the native panel too:
-  switching the board theme restyles the chat bubbles in place — grays
-  lift to primary ink with the 12px floor, no reload, no iframe.
-- **Native Decision benchmark.** The Bench tab gained a
-  Decision sub-tab for System-1 models (Clef/OpenJev via upstream's new
-  `/v1/systemone`). Scoring runs in-process against the decision engine
-  through upstream's own eviction-proof lease — the bench measures the
-  serving path. The task pack ships pinned and offline: three packs
-  (ARC-Challenge 294, BBQ 300, TruthfulQA mc1 400) as JSON fixtures with
-  sha256 integrity + licence provenance (CC-BY-SA / CC-BY / Apache-2.0,
-  extractor script included). Per pack: choice accuracy, Brier + ECE on
-  derived probability questions, position-bias agreement (same item
-  re-asked with shuffled options) and ms/question latency. Cancel stops
-  between items; a cancelled pack is never persisted.
-- **Dashboard tabs stop starving each other (hang fix).** Every visible
-  tab used to hold two always-open server-sent streams (requests feed +
-  metrics feed). uvicorn speaks HTTP/1.1 and browsers cap a plain origin
-  at ~6 parallel connections — three background tabs of the dashboard
-  already filled the pipe and the fourth froze on load, the "sometimes
-  the page hangs, usually because another tab has it open" report. Now
-  only the FOCUSED tab holds the streams; blurred tabs close theirs and
-  catch up through the existing 2 s poll, and the focused tab replays
-  what happened while it was away on return. Hidden tabs behaved this
-  way already; focus is now the same gate.
-- **Header chips equal the graph headers.** The power and temperature
-  chips at the top of the dashboard now show exactly what the matching
-  chart card header shows (the card's live last-sample value, not a
-  60 s mean/max), so the two readouts can no longer disagree; the
-  windowed mean/max stay in the tooltip.
-- **Benchmark results persist until cleared (U64).** Throughput,
-  accuracy, context and ANE rows survive a server restart and a page
-  reload across every surface — classic kept the accuracy table in
-  memory only, so a restart silently discarded the session's scores.
-  A clear button owns removal now; nothing evicts on its own.
-- **Native Bench/Chat + the classic embed, side by side.** The Bench and
-  Chat tabs open the native surfaces by default. The embedded classic
-  pages stay fully reachable as a fallback: hover Bench and an option to
-  reveal "Classic (Embed)" beside it, or hover Chat to reveal it below;
-  each embedded page also carries a NATIVE badge in its header to switch
-  back. The choice persists per browser (and deep-links as
-  `#chat/chat/classic`). A server that wants the embed as the default can
-  still set `uplift_native_surfaces` to `off` (or `bench`/`chat`) in
-  `~/.omlx/uplift/config.json`, and any viewer can override per load with
-  `?native=off|bench|chat|all`.
-- **Native throughput benchmark.** The Throughput sub-tab is a real
-  native page now:
-  form (model, context profile, prompt lengths, batch sizes, ANE-aligned
-  prompt, force-lm, external endpoint) drives the classic benchmark
-  engine in-process over `/uplift/api/bench/*` — SSE live progress and
-  results, cancel, single-run guard. Community leaderboard upload is an
-  explicit opt-in checkbox (the classic page auto-uploads standard runs;
-  native never posts to omlx.ai unless you check it). All labels ride
-  the classic `bench.*` translation catalog plus new `uplift.bench.*`
-  keys in all 10 locales.
-- **Native context probe + ANE tuning.** The Context
-  and ANE Tune sub-tabs are live too: the context benchmark runs in the
-  server over `/uplift/api/bench/context/*` (SSE progress; the measured
-  window auto-applies to the model's Context Window setting, same as
-  classic), and ANE tuning mirrors classic's candidate search + poll
-  model over `/uplift/api/bench/ane-tune/*` with an explicit Apply
-  button that writes the recommendation through the same settings
-  manager the classic UI uses. Labels reuse the classic `ctx_bench.*` /
-  `modal.model_settings.qwen_ane_tune*` catalogs (already complete in
-  all 10 locales).
-- **Native intelligence benchmark.** The Intelligence
-  sub-tab is a native page over the classic 16-task accuracy engine
-  (`/uplift/api/bench/accuracy/*`): the task grid with per-task sample
-  sizes, queue with remove, batch size, deterministic/model-settings
-  sampling, thinking toggle, external-endpoint mode, SSE progress and
-  the accumulated results table with upload badges. Community
-  leaderboard upload is again an explicit opt-in (classic auto-uploads
-  local runs ≥100 questions; native never posts unless checked).
-  Parity on the dev keg: identical scores native-vs-classic across
-  SmolLM2-360M (arc/gsm8k), Qwen2.5-0.5B (queued chain), Qwen3.5-9B
-  with thinking on (0.9 = 0.9), and external-endpoint mode.
-- **Harness accuracy engine, opt-in.** The Intelligence
-  page gained a Scoring-engine choice: Classic (default, unchanged) or
-  Harness — lm-evaluation-harness running as a pinned subprocess in its
-  own venv (`omlx-uplift bench-env create`, ~600 MB, torch-free by hard
-  rule) against the public /v1 path, one suite per subprocess, progress
-  at task granularity with per-question counts parsed from harness
-  output. Mapped tasks: MMLU (flan 5-shot generative), MMLU-Pro,
-  ARC-Challenge, GSM8K, BBQ-generate; a run containing any unmapped
-  task is refused with the task names (mixed-engine runs come later).
-  humaneval/mbpp STAY classic on purpose: harness exec-scoring runs
-  model code in-process, weaker isolation than classic's sandboxed
-  subprocess. Scores carry an engine label; full-dataset ARC
-  divergence vs classic measured at +1.4 points (few-shot formatting).
-  API key passes only through the child environment and is scrubbed
-  from all captured output; cancel kills the whole process group and a
-  server stop never orphans a harness run (drilled). Dataset cache and
-  offline mode configurable (`bench_hf_cache` / `bench_offline` in
-  `~/.omlx/uplift/config.json`); the offline drill passed from a warm
-  cache.
-- **Native Embeddings and Rerankers benchmark.** The
-  Bench tab gained two sub-tabs over MTEB: a curated, laptop-sized task
-  set (STS, retrieval, classification, pair-classification, clustering,
-  bitext — three of them Czech — plus two small instruction-reranking
-  sets) instead of MTEB's full 1492-task registry. MTEB runs as a
-  subprocess in a second pinned venv (`omlx-uplift mteb-env create`,
-  ~1.5 GB) because mteb itself hard-requires torch; the harness bench-env
-  stays torch-free and neither the omlx nor the uplift keg gains any
-  dependency. Scores stream from the public serving path at task
-  granularity (MTEB over the API offers no per-question events; we report
-  the real granularity, never a fabricated one) and each row names its
-  metric. No community upload exists for these classes.
-- **Native Chat (core features).** The Chat tab opens the native page
-  (the embedded classic page stays reachable per viewer — see the
-  fallback entry; a server can still park Chat on the embed with
-  `uplift_native_surfaces` or any viewer with `?native=off|bench`).
-  Streaming chat, stop, model picker
-  (chat-capable models only), system prompt, copy/regenerate/edit,
-  image attachments with vision answered, and a server-side history
-  store with stated caps; classic localStorage chats import once on
-  first boot. deep-chat 2.5.1 (MIT) is vendored with pinned sha256 and
-  a drift test. A live reasoning panel mirrors classic's thinking modes
-  (auto/on/limit/off) and persists per message. A web-search toggle
-  runs classic's full tool loop natively (web_search/fetch_url via the
-  server's /v1/web routes, multi-round chaining, bounded, stop-safe —
-  drilled live). Selecting a speech-to-text model turns the input into
-  classic's transcription flow (attach audio or record with the mic;
-  capture is WAV client-side because a webm upload needs an ffmpeg the
-  server may not have); the transcript streams into an assistant turn
-  and cannot be regenerated, matching classic. Skins restyle the chat
-  live with zero reload — CSS custom properties cross the component's
-  shadow boundary, so the theme needs no JS on the switch path.
-
-## [1.1] — 2026-10-07
-
-The release that closes a self-inflicted production outage: patch
-backups are keyed to a keg identity that never used to change, so an
-upgrade could silently restore old bytes into a new keg. Uplift can now
-detect that class of drift by itself (`doctor`), plus a live 2 Hz metric
-feed and an environment-variables reference.
-
-### Added
-- **Live rate feed (2 Hz).** Throughput, queue and memory lines resolve at
-  2 Hz over short windows (≤ 5 min) instead of waiting for the 5 s stored
-  tick. A FastSampler thread walks the same collectors into in-memory
-  rings, streamed over SSE with a ring replay on (re)connect. The stored
-  series is untouched: the 5 s tick drains its own accumulator share, so
-  every persisted rate keeps its full-window semantics. Opt-in per card
-  via *Layout → Live rate feed (2 Hz)*; the stream pauses while the tab is
-  hidden. `iogpu.wired_limit_mb` now caches 60 s (its reader forked a
-  sysctl every tick).
-- **Environment variables reference.** A new *ENVIRONMENT VARIABLES*
-  button in Server settings opens a searchable modal over 147 documented
-  `omlx` engine knobs (11 groups), each with its description, stock
-  default, honest apply-class badge and live state (SET / STORED / LAUNCH
-  ENV / MANAGED). On an `omlx-dev` install 136 of them are editable
-  through the UI or `omlx-uplift env list|set|reset|disable-all|enable-all`;
-  on a vanilla install the modal is read-only by design and says so (PUT
-  403s) — vanilla owns those variables and last-writer-wins. Editing
-  stays an allow-list: a name absent from the catalog is rejected.
-- **`omlx-uplift doctor`** — a read-only census of every installed `omlx`
-  file against its install-time hash (exit 0 clean/expected, 1 drift, 2 no
-  RECORD). Custom-kernel binaries that brew legitimately rebuilds and
-  files owned by an applied patch are expected drift, never an alarm. The
-  same census runs at boot (warns, never blocks) and the PATCHES card
-  shows a red banner naming the drifted files. The Oct-1..4 incident
-  below would have failed this check on its first boot.
-- PREFILL, not just decode: the Throughput chart's prefill line and the
-  prefill flagship card now plot the **exact per-tick rate**
-  (`prefill.tokens_s`, credited from the engine's prefill-tracker events
-  as each chunk happens) instead of `avg_prefill_tps`, a session-lifetime
-  average upstream only updates when a request *finishes* — aborted
-  requests never counted and one prefill could not move the line. The
-  average stays collected and labelled as an average on the session tile.
-- SYNC-1 upstream sync: Server settings gained the **GPU Keep-Warm
-  Interval** row (upstream `server.gpu_keep_warm_interval` — live-applied,
-  was previously settings.json/env-only), the Helper page lists **DeepSeek
-  Harness** with the other CLI assistants (upstream #3950), and the model
-  editor's Model Type offers **decision** (upstream #4315, Clef/OpenJev).
-  The drift guards that should have caught these silently skipped on the
-  standalone repo; they now run against a plain upstream checkout nightly.
-- Classic parity for storage: **SSD Write Buffer** and **SSD Snapshot
-  Precision** are now always visible with the control disabled when the
-  effective storage mode does not use them, exactly like the classic
-  dashboard — previously both rows were hidden unless SSD-snapshot storage
-  was set explicitly. Labels relabelled to the classic catalog across all
-  10 locales.
-- `omlx-uplift serve --qa` runs an isolated instance on its own base
-  (`~/.omlx-qa`, its own fresh API key): a QA server can no longer rewrite
-  production settings — the root cause of the 2026-10-03 port-persistence
-  incidents.
-- Charts respect what their values can physically be: percent metrics pin
-  0–100, temperatures and byte counters float their own range, rates stay
-  floored. Card y-axes give room for 3–4 ticks instead of 2, so the axis
-  no longer reads `[0, 1]` on an idle card.
-- Inkwell gained a teal accent plate (its chart series 2 now clears 3.5:1
-  on the card background).
-
-### Changed
-- Dev builds stash every outgoing keg under its own build name (was: one
-  entry per commit, so a same-commit reinstall discarded the bytes being
-  replaced). Retention default 3 → 5, configurable via `keg_stash_keep` in
-  `dev.json`; a bare commit-ish rollback now picks the newest stashed
-  build of that commit instead of any build of it.
-- In-flight feed wording: spec-prefill extras read
-  `(draft $selected / $generated)` — deliberately diverging from classic's
-  phrasing, per user decision.
-- Stable builds re-pinned to the tested set (`constraints-stable.txt`);
-  `--HEAD` still floats.
-
-### Fixed
-- **Keg identity: patches no longer resurrect old files into a new
-  install.** `keg_id()` hashed `omlx/version.py`, but real wheels ship
-  `omlx/_version.py` — so *every* production keg identified as the same
-  constant and the documented "reinstall → new identity → patches
-  re-validate" guarantee never held. Live consequence: pre-upgrade
-  first-touch backups survived a reinstall keyed to that constant, and the
-  next patch removal restored 6 files from 5 different upstream commits
-  into the newer keg. Every model load failed with a
-  `validate_moe_expert_offload()` signature mismatch for three days,
-  invisible to pytest, node tests and nightly (none of them load a
-  model). Identity now prefers the wheel's `dist-info` RECORD, then
-  `_version.py`, then `version.py`.
-- A cached `doctor` WARNING used to replay as a false alarm after a manual
-  repair. Clean verdicts cache, drift re-censuses every boot, and the read
-  side refuses a cached `ok:false` — an alarm that can lie is worse than
-  none.
-- A `kernel_source` patch added with dev scope produced eight near-identical
-  SAFEGUARDS rows, held AUTO-APPLY, and rendered the block twice.
-  The heuristic is now scope-aware (on a source tree the rebuild *is* the
-  pipeline, so the kernel paths are one display-only advisory), problems
-  group per code with the long rebuild hint rendered exactly once, and the
-  add-preview defers to the card behind it. Misaligned approve buttons in
-  the preview now have their own borders and spacing.
-- The whole cache/queue/prefix metric family could stop being recorded:
-  `collect_cache` guarded the hits delta but not the misses delta, so an
-  engine reporting `hits` without `misses` raised every tick and the
-  collector's blanket `except` took the family down with it. Spec-prefill
-  *scoring* (draft-model work) is also no longer credited as target
-  prefill.
-- Memory & Cache legend values no longer blink (~1 s apart, forever):
-  the idle legend read the union column's last ROW, which on the new
-  mixed 2 Hz/5 s cadence belongs to only one stream at a time — the
-  other series rendered '—' between their samples. Idle cells now show
-  each series' OWN latest value (hovered crosshair rows keep their
-  honest nulls). A distinct root from the axis-tick flicker below,
-  same mixed-cadence surface.
-- Chart lines no longer show a visible break every ~5 s on short windows.
-  The mixed-cadence x column left ~10 nulls between stored samples and
-  uPlot clipped each run; a per-series gap hook now bridges holes up to
-  ~12 s (3 stored intervals) and keeps a break for a longer one, so a
-  stalled sampler or a genuinely quiet metric still reads as absent.
-  `spanGaps` was rejected — it would fabricate a straight line across a
-  real outage.
-- Chart bottom-axis tick labels no longer appear and disappear on a
-  ~12–45 s cycle. Every chart feeds uPlot millisecond timestamps but
-  never told it (`opts.ms` defaulted to the seconds unit), so the tick
-  chooser worked on a fake 3.5-day axis and picked spacings (43.2 s,
-  28.8 s) that do not divide the window — as the pinned range slid, the
-  tick count flipped 6↔7. Charts now share `TSTAMP_MS = 1` from the
-  chartkit; ticks land on clock 30 s boundaries and stay put.
-- `server.log` is no longer flooded by the "prefix_cache counters absent"
-  notice (98k lines after one restart). Absence right after a restart is
-  expected — the engine fills those counters only once requests flow — so
-  it now logs once per absence episode instead of on every 5 s tick, and
-  the 2 Hz walk (which shares the collector) stays silent.
-- Max Concurrent Requests no longer demands a server restart after every
-  save: upstream #3765 live-applies it, so Uplift shows the restart badge
-  only while distributed (cluster) engines are active — classic parity.
-- Restart badges now follow the runtime truth (upstream `runtime_applied`),
-  not the classic template's stale badges: Start on Login, KV Cache,
-  HF/MS endpoints and CA bundle no longer claim RESTART REQUIRED — they
-  apply on save (KV Cache still unloads/reloads models when it takes
-  effect; it just never needed a *server* restart). Divergence filed
-  upstream as tracker UP-6.
-- Achievements: "You upgraded me" / "More memory" / "You made me bigger
-  today" no longer fire on their own. They watched `model_memory_max`
-  between stats polls — but that value is the memory guard's *dynamic*
-  ceiling, recomputed from live vm_stat on every call, so ordinary page
-  cache churn drifted it upward and each drift read as a hardware
-  upgrade (worst right after a restart, with the dashboard open and
-  nothing happening). The praise now fires only on the real user action:
-  raising the custom memory ceiling in Server settings. Hot/SSD cache
-  growth and guard loosening already fired from committed saves and are
-  unchanged.
-- Throughput chart: the generation line now shows the **momentary** decode
-  rate (new `generation.tokens_s` series — per-tick deltas of the in-flight
-  requests' token counters, with the tail of sub-tick and aborted
-  generations captured via the engine hooks). It used to plot
-  `avg_generation_tps`, a session-lifetime average that no single request
-  could move — the "flat line like cumulative stats" symptom. The average
-  stays tracked everywhere it is honestly an average: the small metric
-  card is now labelled "average generation tok/s" and the Generation tile's
-  sub-label reads "average tok/s". Long windows backfill from hourly usage
-  rollups; zeros are recorded, so the line drains to 0 instead of vanishing.
-- `cache_efficiency` hourly backfill divided a raw ratio while the live
-  key is a percent; auto-scaled axes hid the 100× error, and the 7 d/30 d
-  history would have drawn flat along the floor once the axis pinned 0–100.
-  Backfill now mirrors the live formula.
-- A selected skin's chart colors no longer freeze to the *previous* skin's
-  palette. Re-tint waited on the wrong signal: mid-swap the browser still
-  exposes the old stylesheet for ~120–300 ms, so every token fell through
-  to the dark defaults. Charts now wait for liveness identified by URL.
-- Six locales (ja, ru, fr, es, pt-BR, zh-TW) had English text pasted
-  verbatim into the storage-settings labels by an earlier parity sync;
-  translated to each locale's own terminology, and the parity guard that
-  should have caught it now whitelists quantization labels (BF16/FP32/
-  "RHT + int16") that are identical by design.
-
-## [1.0] — 2026-10-03
-
-First stable release; stable Homebrew installs are dependency-pinned
-(`constraints-stable.txt`) while `--HEAD` floats.
-
-### Added
-- Skin system growth: hover previews in the picker, motion-governance
-  validator, skin-overridable CSS tokens, eleven new crates (CAAAAATZ!,
-  PHOSPHOR, TRON grid, INKWELL/INKWELL NOIR, discovery-one, halftone,
-  kubus, lampion, monitor-83, artelight) and the authoring guide in
-  `docs/skins.md`
-- Achievements and gamified operations (SHODAN voice), upgrade taunts,
-  Czech and 8 more locales at full overlay parity
-- Memory & cache header with the three GiB figures; per-card clocks on
-  the PHOSPHOR roll band
-- CI: GitHub Actions on every push, PR and release tag; nightly
-  full-suite watcher for the dev box
-
-### Changed
-- Model-settings editor redesigned: Context → Thinking → Sampling →
-  Acceleration order, toggles and their knobs as aligned family bands,
-  layout fully stable while changes queue (rail pops in, never moves a
-  control)
-- Patch carrier: dev builds moved to a separate keg (`omlx-dev`), one
-  gate rule, one safeguard-approval machine, per-patch disable and
-  process log
-- Frontend consolidated: one widget registry, one dirty-state machine,
-  one fetch kit (`domkit`) — pages no longer drift apart
-- Stable builds pin their Python dependencies to the tested set
-
-## [0.9b] — 2026-10-01
-
-Pre-1.0 polish baseline: monorepo split of the frontend (router, models
-manager, inspector into modules), shared-domkit groundwork, static-drift
-guards, settings-editor modal fixes; login hardening (constant-time key
-compare, brute-force throttle).
-
-## [0.1] — 2026-09-26
-
-First standalone repository and Homebrew formula (`zviratko/uplift/
-omlx-uplift`): uplift dashboard, metrics store, patch carrier, mount
-mechanism (.pth into the omlx keg) and the v1 skin system (drop-in CSS
-crates, crate + working-dir formats, CLI codecs) extracted from the omlx
-monorepo.
+24|
+25|- **The dev lane stands alone.** omlx-dev and Uplift no longer require the classic oMLX keg: a machine that runs only the HEAD build installs, mounts and patch-checks without it. The build base follows upstream HEAD by default, and the dev panel says so.
+26|- **Loads faster, redraws less.** Heavy pages — voice chat, the patches and dev panels, download tools — load only when you first open them. Theme switches no longer rebuild every chart, and the server batches duplicate sampling work behind the meters.
+27|- **Chat settings stick.** Thinking mode and your preset selection survive switching between conversations.
+28|
+29|## [2.4] — 2026-10-20
+30|
+31|- **The Patches page is one table.** One row per patch, with checkboxes for the vanilla server and the dev build, and an AUTO column for auto-update. The MANAGE dialog covers versions, pins, test, source edit and removal.
+32|- **Chat renders math.** Formulas written as `$x$` or `$$…$$` display as real equations. The renderer ships inside the dashboard; no network is needed.
+33|- **The Memory & cache card shows real memory use.** The figure used to be the sum of model-file sizes, so it stayed flat while the server actually grew.
+34|- **The Activity card no longer sleeps.** Clicking into Chat, Bench or Cluster used to stop its live stream; loads took up to 15 seconds to appear. Both are fixed.
+35|
+36|*P.S. Two new curated patches wait on the Patches page. They remove two server stalls around model loads: the ~19 s freeze while a vision model loads, and the ~0.8 s pause on the first request after a load.*
+37|
+38|## [2.3] — 2026-10-19
+39|
+40|- **macOS `say` is now a TTS engine.** A VOICES tab lists every
+41|  system voice, folded by language, with quality tiers; downloadable
+42|  voices are marked and install from there. Mark a preferred voice
+43|  per language, or let bare `say` work the language out from the
+44|  text.
+45|- **TTS settings restructured.** "TTS & Voices" opens on TEXT TO
+46|  SPEECH; each engine is a card with its voices wired under it, and
+47|  a model's VOICES chip jumps to its cloned voices.
+48|- **Reading replies aloud got real controls.** Play, pause, progress,
+49|  re-record — pause stops where you left and resumes from that
+50|  second. With auto-speak, every chunk gets a numbered row with a
+51|  waveform and the highlight follows the voice.
+52|- **Voice recognition is steadier.** The last sentence always arrives
+53|  when you stop talking; whisper large-class models avoid a broken
+54|  transport; the LISTEN noise floor calibrates itself. A new
+55|  optional patch runs Qwen3-ASR live: utterances commit in about a
+56|  second.
+57|- **Audio shows on the dashboard.** Speaking and listening activity
+58|  rides the stats feed as it happens.
+59|- **The chat page sits still.** One-line top bar, no more whole-page
+60|  scroll, voice picker and Auto merged into one "Speak" row; a saved
+61|  preset stays selectable beside your edited copy, so reverting no
+62|  longer means deleting.
+63|- **Patch zones cleaned up.** Two exclusive zones, rebuild chips
+64|  classified by actual content, dev kegs take runtime overlays
+65|  without a rebuild.
+66|- Small touches: install no longer hangs on a probe, `patch status`
+67|  reads like a human wrote it, per-bubble SPEAK follows the chunk
+68|  strategy, a stale voice no longer blanks the picker.
+69|
+70|## [2.2] — 2026-10-18
+71|
+72|- **Profiles now remember what you were editing.** Change the prompt or
+73|  any setting while a profile is selected and the picker reads
+74|  `Profile (modified)` — the unsaved copy lives **on that profile**.
+75|  Switching between profiles no longer overwrites in-progress work
+76|  (the old design had one anonymous stash slot for everyone), coming
+77|  back finds your edits where you left them, and they survive a
+78|  reload. Delete on a modified row reverts to the saved profile; Save
+79|  keeps suggesting its original name.
+80|- The anonymous "Modified (unsaved)" row is gone from profile flows —
+81|  it appears only for a chat never saved under any profile. Existing
+82|  conversations migrate their pending edits onto their selected
+83|  profile automatically.
+84|
+85|## [2.1] — 2026-10-18
+86|
+87|- **The chat got a voice and ears.** Replies read themselves aloud
+88|  while streaming (gapless chunked TTS — sentence / line / paragraph),
+89|  and push-to-talk plus continuous hands-free listening ride a live
+90|  speech-recognition stream — echo-guarded and decoupled from the chat
+91|  model. STT model, language and auto-send live in the Voice input
+92|  settings.
+93|- **Whole-page presets.** A profile stores and restores the prompt,
+94|  thinking, sampling, web search and voice — everything settable on the
+95|  page except the model you talk to. Edits surface as
+96|  'Profile (modified)', Save suggests the original name (keep it to
+97|  update, type a new one to create), Delete reverts unsaved changes or
+98|  removes the preset — and nothing is lost silently: a page you switch
+99|  away from is stashed.
+100|- **The chat was rebuilt classic-style:** histories left, settings
+101|  right, model and preset on top; the voice-settings popover stays
+102|  visible and follows scroll.
+103|- **Request Inspector** decodes prompts even after the model was
+104|  unloaded (tokenizer from disk); the Activity card gained a per-model
+105|  Unload button.
+106|- **Bench:** harness runs carry per-question records (raw downloads),
+107|  the thinking checkbox reaches the server, and two more FAST Czech
+108|  suites joined.
+109|- Small touches: voice references in mp3/flac transcode to WAV at
+110|  save, the streaming reader cuts at sentence boundaries, the chat
+111|  picker lists text models only, and classic multi-line profiles are
+112|  no longer falsely marked modified.
+113|
+114|## [2.0] — 2026-10-15
+115|
+116|- **The board stopped fighting itself.** An open dashboard tab no longer
+117|  pins a CPU core or freezes requests: stats build off the event loop,
+118|  ride a live stream instead of timers, and charts fetch only new
+119|  points — ~5 % of a core instead of a full one.
+120|- **Decision bench scores any chat model** via the new upstream
+121|  /v1/decisions readout, with a forced-choice "System One" answer
+122|  policy; every row carries the path that produced it.
+123|- **Nine more suites in a collapsed "Additional suites" section**
+124|  (IFEval, BBH, Czech MMLU-ProX-Lite, hellaswag, winogrande, mathqa,
+125|  TruthfulQA, KMMLU, CMMLU) — the classic grid stays pure and
+126|  TruthfulQA measures truthfulness again.
+127|- **Benches are easier to run:** all seven surfaces in the menu, one
+128|  clear progress bar, a global queue instead of a rejection, honest
+129|  ms/question labels, raw rows downloadable.
+130|- **Voices: record the reference clip in the tab**, with a per-language
+131|  read-aloud suggestion and a free-form language field.
+132|- **Synced to upstream 0.7.1** — model settings keep saving; one SAVE
+133|  now commits base + all profile tabs; bench envs rebuild clean.
+134|
+135|## [1.99b] — 2026-10-11
+136|
+137|The voice release.
+138|
+139|- **Named voice cloning.** Save a reference clip + transcript as a
+140|  named voice on the new Voices page, preview it before saving, edit
+141|  it later or save a copy onto another TTS model. A local
+142|  speech-recognition model can transcribe the clip for you. Chat got a
+143|  read-aloud button on every assistant reply with a voice picker that
+144|  remembers your choice.
+145|- **Voices from any audio client.** A standard OpenAI-shaped endpoint
+146|  (`/uplift/v1/audio/speech`, works with the official SDK as-is). Any
+147|  speech route accepts `Model:Voice` — e.g. `Qwen3-TTS:Jake` — so a
+148|  stored voice is one field away from any client, on any TTS model.
+149|- **Voice calls cannot hang forever** — a 240 s watchdog ends a stuck
+150|  request with an honest message.
+151|- **Tabbed settings.** The model editor and the server settings page
+152|  now split their long forms into tabs (with dirty-count badges); tab
+153|  colors derive from the active skin.
+154|- **Profile drift is shown before it bites** — `(= base)` tags and a
+155|  request-divergence preview with one-click sync.
+156|- **Small touches:** "Download queued" no longer locks the download
+157|  button.
+158|
+159|## [1.4] — 2026-10-11
+160|
+161|The measurement-honesty release: the dashboard shows what is really
+162|happening, and hides nothing that happened before.
+163|
+164|- **MTP acceptance metrics.** Native Lightning MTP stats that vanilla
+165|  only printed at sequence finish are now collected and graphed: an
+166|  'MTP accepted tgs' area under the Throughput generation line, and
+167|  one acceptance card with the per-depth decay ladder. The card's
+168|  headline reads the same number as the ladder's top edge.
+169|- **Embedding work counts in Throughput (EMBED-1).** Embedding and
+170|  reranker models ran on a path the chart never watched; they now have
+171|  their own series.
+172|- **Charts hold still when data goes stale.** No more sliding the
+173|  window left with an empty hole; the 'value holds, then pops into
+174|  place' delay on 5-second cards is fixed at the root.
+175|- **Metric history survives upgrades.** Rows from previous sessions
+176|  and old kegs are visible again; only live co-tenant writers are
+177|  filtered.
+178|- **Faster, smoother live feed.** The 2 Hz sampler is deadline-
+179|  scheduled; backgrounded tabs paint instantly on return; a
+180|  'Smoothing:' select on the Throughput chart; click any card title to
+181|  pop the graph out full-size.
+182|- **Honest settings and patch workflow.** Non-LLM models no longer
+183|  show ~47 LLM settings that their engines ignore; a patch touching
+184|  the Homebrew formula is held with an explanation instead of showing
+185|  APPLIED while doing nothing; dashboard rebuilds stream their log
+186|  live; stored patch versions remember the base they tested against.
+187|- **Small touches:** the Request feed is now a popup with 2 h default
+188|  history (stale 'queued' rows are repaired at open), legends fit
+189|  inside cards, card titles fit one line, Escape closes layout edit
+190|  mode, default skin is Discovery One, the throughput bench lets you
+191|  pick generation length (tg128–1024).
+192|
+193|## [1.3] — 2026-10-09
+194|
+195|The patch-workflow release. The CLI can now drive the whole patch lifecycle
+196|without a browser, dev builds route around merged-but-moved upstream PRs
+197|instead of wedging, and the model cards lead with the name and tell the
+198|build truth.
+199|
+200|- **The CLI knows the whole patch lifecycle now.** `patch approve ID` is a
