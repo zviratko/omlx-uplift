@@ -2,6 +2,7 @@
 """Tests for the metrics series endpoint: downsampling of long windows and
 the multi-key (explorer) fetch shape. Bare async tests, asyncio_mode=auto."""
 
+import json
 import time
 from unittest.mock import MagicMock, patch
 
@@ -127,9 +128,42 @@ class _FakeStore:
             pts = [p for p in pts if p["ts"] >= since]
         return pts
 
+    def series_binned(self, key, window_s, bucket_s, instance=None,
+                     since=None):
+        # mirrors the SQL bucketing: epoch-aligned AVG per bucket
+        t0 = time.time() - window_s
+        if since is not None and since > t0:
+            t0 = since
+        buckets = {}
+        for p in self._data.get(key, []):
+            if p["ts"] < t0:
+                continue
+            buckets.setdefault(int(p["ts"] // bucket_s), []).append(p["v"])
+        return [{"ts": float(b * bucket_s), "v": sum(vs) / len(vs)}
+                for b, vs in sorted(buckets.items())]
 
-async def _call(**kw):
-    return await up.metrics_series(is_admin=True, **kw)
+
+def _req(ae: str = ""):
+    """Minimal stub Request for direct handler calls (PERF-1: the gzip
+    routes take Request; headers is the only surface they read)."""
+    from types import SimpleNamespace
+    headers = {}
+    if ae:
+        headers["accept-encoding"] = ae
+    return SimpleNamespace(headers=headers, query_params={})
+
+
+def _payload(res):
+    """Decode the handler's Response (gzip or plain) back to a dict."""
+    import gzip as _gz
+    body = res.body
+    if res.headers.get("content-encoding") == "gzip":
+        body = _gz.decompress(body)
+    return json.loads(body)
+
+
+async def _call(ae: str = "", **kw):
+    return await up.metrics_series(request=_req(ae), is_admin=True, **kw)
 
 
 async def test_single_key_backcompat_shape():
@@ -138,7 +172,7 @@ async def test_single_key_backcompat_shape():
     collector = MagicMock(store=store)
     with patch.object(up_m, "get_collector", return_value=collector), \
          patch.object(up_m, "_hourly_points", return_value=[]):
-        d = await _call(key="avg_generation_tps", window="1h")
+        d = _payload(await _call(key="avg_generation_tps", window="1h"))
     assert d["key"] == "avg_generation_tps"
     assert d["bucket_s"] == 0
     assert len(d["series"]) == 10
@@ -152,19 +186,75 @@ async def test_multi_keys_returns_series_map():
     collector = MagicMock(store=store)
     with patch.object(up_m, "get_collector", return_value=collector), \
          patch.object(up_m, "_hourly_points", return_value=[]):
-        d = await _call(keys="avg_generation_tps,rate.requests_s", window="1h")
+        d = _payload(await _call(keys="avg_generation_tps,rate.requests_s",
+                                  window="1h"))
     assert set(d["series_map"]) == {"avg_generation_tps", "rate.requests_s"}
     assert len(d["series_map"]["rate.requests_s"]) == 3
 
 
-async def test_long_window_gets_downsampled_and_advertises_bucket():
+async def test_long_window_gets_binned_and_advertises_bucket():
+    # PERF-1: 7 d is bucketed in SQL (600 s), not re-aggregated from
+    # 120k raw rows in Python anymore.
     store = _FakeStore({"avg_generation_tps": _fine("a", up.MAX_SERIES_POINTS * 3)})
     collector = MagicMock(store=store)
     with patch.object(up_m, "get_collector", return_value=collector), \
          patch.object(up_m, "_hourly_points", return_value=[]):
-        d = await _call(key="avg_generation_tps", window="7d")
-    assert len(d["series"]) <= up.MAX_SERIES_POINTS + 1
-    assert d["bucket_s"] >= 60
+        d = _payload(await _call(key="avg_generation_tps", window="7d"))
+    assert d["bucket_s"] == 600
+    assert len(d["series"]) <= 7 * 86400 // 600
+    assert all(p["res"] == "avg" for p in d["series"])
+    # bucket timestamps are epoch-aligned multiples of the bucket
+    assert all(float(p["ts"]).is_integer() and p["ts"] % 600 == 0
+               for p in d["series"])
+    # SQUEEZE parity: wire values carry 6 significant digits at most
+    assert all(len(repr(p["v"]).replace(".", "").replace("-", "").lstrip("0")) <= 7
+               for p in d["series"])
+
+
+async def test_binned_long_window_backfills_hourly_for_uncovered_hours():
+    now = time.time()
+    h0 = int(now // 3600)
+    fine = [{"ts": now - 36_000 + 5.0 * i, "v": float(i)} for i in range(7200)]
+    # fine spans the last 10 h; hourly answers for the 3 d before that
+    hourlies = [{"ts": float(3600 * (h0 - 24 * 7 + hh)), "v": 5.0, "res": "hourly"}
+                for hh in range(0, 24 * 3)]
+    store = _FakeStore({"a": fine})
+    collector = MagicMock(store=store)
+    with patch.object(up_m, "get_collector", return_value=collector), \
+         patch.object(up_m, "_hourly_points", return_value=hourlies):
+        d = _payload(await _call(key="a", window="7d"))
+    pts = d["series"]
+    covered = {int(p["ts"] // 3600) for p in pts if p["res"] == "avg"}
+    # every 'hourly' point sits in an hour the binned layer did not cover
+    for p in pts:
+        if p["res"] == "hourly":
+            assert int(p["ts"] // 3600) not in covered
+    # ascending, no duplicate timestamps across the merged layers
+    ts = [p["ts"] for p in pts]
+    assert ts == sorted(ts) and len(ts) == len(set(ts))
+
+
+async def test_gzip_answer_when_accepted_plain_when_not():
+    """PERF-1: multi-KB+ bodies ride gzip when the client accepts it; a
+    client without gzip in Accept-Encoding gets the exact plain JSON it
+    always got, and small bodies are never gzipped (framing overhead)."""
+    store = _FakeStore({"a": _fine("a", 3000)})
+    collector = MagicMock(store=store)
+    with patch.object(up_m, "get_collector", return_value=collector), \
+         patch.object(up_m, "_hourly_points", return_value=[]):
+        plain = await _call(keys="a", window="5m")          # no ae -> identity
+        assert plain.headers.get("content-encoding") is None
+        gz = await _call(keys="a", window="5m", ae="gzip, deflate, br")
+        assert gz.headers.get("content-encoding") == "gzip"
+        assert gz.headers.get("cache-control") == "no-store"
+        assert len(gz.body) < len(plain.body)
+        # both answers decode to the same payload
+        assert _payload(gz) == _payload(plain)
+
+    # gzip floor: a tiny answer stays plain even when gzip is accepted
+    from omlx_uplift.routers.base import gzip_or_json
+    r = gzip_or_json({"ok": True}, _req("gzip"))
+    assert r.headers.get("content-encoding") is None
 
 
 async def test_tail_fetch_after_returns_only_newer_points():
@@ -179,19 +269,19 @@ async def test_tail_fetch_after_returns_only_newer_points():
     with patch.object(up_m, "get_collector", return_value=collector), \
          patch.object(up_m, "_hourly_points",
                       side_effect=AssertionError("hourly must not run on a tail")):
-        d = await _call(keys="a", window="5m", after=cut)
+        d = _payload(await _call(keys="a", window="5m", after=cut))
     assert d["after"] == cut
     assert len(d["series_map"]["a"]) == 2
     assert d["bucket_s"] == 0
     assert all(p["res"] == "fine" for p in d["series_map"]["a"])
     # single-key backcompat shape carries the marker too
     with patch.object(up_m, "get_collector", return_value=collector):
-        d1 = await _call(key="a", window="5m", after=cut)
+        d1 = _payload(await _call(key="a", window="5m", after=cut))
     assert d1["after"] == cut and len(d1["series"]) == 2
     # after=0 (default) = full fetch, no marker
     with patch.object(up_m, "get_collector", return_value=collector), \
          patch.object(up_m, "_hourly_points", return_value=[]):
-        d2 = await _call(keys="a", window="5m")
+        d2 = _payload(await _call(keys="a", window="5m"))
     assert "after" not in d2 and len(d2["series_map"]["a"]) == 5
 
 
@@ -212,11 +302,77 @@ async def test_metrics_hot_discovers_per_model_keys():
         {"ts": 100.0, "v": 5.0}, {"ts": 105.0, "v": 0.0}]
     collector = MagicMock(store=store)
     with patch.object(up_m, "get_collector", return_value=collector):
-        d = await up.metrics_hot(window="1h", is_admin=True)
+        d = _payload(await up.metrics_hot(request=_req(), window="1h",
+                                           is_admin=True))
     assert d["keys"] == ["hot.m1", "hot.m2"]
     # drained model keeps its trailing ZERO — that point is the whole point
     assert d["series_map"]["hot.m2"][-1]["v"] == 0.0
     assert store.keys_with_prefix.call_args[0][0] == "hot."
+
+
+async def test_metrics_hot_binned_for_long_windows():
+    from unittest.mock import MagicMock
+
+    store = MagicMock()
+    store.keys_with_prefix.return_value = ["hot.m1"]
+    store.series_binned.return_value = [{"ts": 1000.0, "v": 3.5}]
+    collector = MagicMock(store=store)
+    with patch.object(up_m, "get_collector", return_value=collector):
+        d = _payload(await up.metrics_hot(request=_req("gzip"), window="24h",
+                                           is_admin=True))
+    assert d["bucket_s"] == 60        # NOT 1200 — the ladder is per-window
+    assert d["series_map"]["hot.m1"] == [{"ts": 1000.0, "v": 3.5,
+                                            "res": "avg"}]
+    store.series_binned.assert_called_once()
+    store.series.assert_not_called()
+
+
+def test_bucket_for_ladder():
+    bf = up.bucket_for
+    assert bf(300) == 0 and bf(6 * 3600) == 0      # <=6 h: raw 5 s (ISSUE-7)
+    assert bf(6 * 3600 + 1) == 60 and bf(86400) == 60
+    assert bf(86400 + 1) == 600 and bf(7 * 86400) == 600
+    assert bf(7 * 86400 + 1) == 1800 and bf(30 * 86400) == 1800
+    # every long window lands at <= ~1440 points/key
+    for w in (7 * 3600, 24 * 3600, 30 * 86400):
+        b = bf(w)
+        assert w // b <= 1500
+
+
+def test_store_series_binned(tmp_path):
+    """The SQL aggregation itself: epoch-aligned buckets, AVG per bucket,
+    window floor respected, co-tenant rows filtered like series()."""
+    from omlx_uplift import store as st
+
+    s = st.MetricsStore(path=tmp_path / "m.sqlite3")
+    try:
+        now = time.time()
+        base = int(now // 60) * 60
+        # two samples inside the same minute -> one AVG point; next bucket
+        # holds the minute that is already closed
+        s.write_samples({"k": 10.0}, ts=base + 5)
+        s.write_samples({"k": 20.0}, ts=base + 40)
+        s.write_samples({"k": 100.0}, ts=base + 65)
+        # an old sample two hours back (outside a one-hour window)
+        s.write_samples({"k": 3.0}, ts=base - 7200 + 10)
+
+        pts = s.series_binned("k", 3600, 60)
+        assert all(p["ts"] >= base - 1 for p in pts)          # floor honored
+        assert {"ts": float(base), "v": 15.0} in pts
+        assert {"ts": float(base + 60), "v": 100.0} in pts
+        assert all(float(p["ts"]).is_integer() and p["ts"] % 60 == 0
+                   for p in pts)                              # epoch-aligned
+
+        # a live co-tenant minute stays out under the visible policy
+        s._conn.execute(
+            "INSERT INTO samples(ts,key,value,instance) VALUES(?,?,?,'alien')",
+            (base + 70, "k", 77.0))
+        s._conn.commit()
+        s._alien_cache = None        # force fresh probe (tiny DB, inline)
+        vis = s.series_binned("k", 3600, 60, instance=st.VISIBLE_INSTANCES)
+        assert all(p["v"] != 77.0 for p in vis)
+    finally:
+        s.close()
 
 
 def test_keys_with_prefix_filters_window_instance_and_underscores(tmp_path):

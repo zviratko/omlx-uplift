@@ -83,6 +83,26 @@ _USAGE_COLS = ("requests", "prompt_tokens", "completion_tokens",
 MAX_SERIES_POINTS = 20000
 
 
+# PERF-1 (user 2026-10-21): the bucket ladder the SQL aggregation uses
+# (store.series_binned). ISSUE-7's fidelity rule stands — everyday windows
+# (<= 6 h) keep the raw 5 s collector resolution; the long windows were the
+# ones the browser paid for 17k-120k points/key on every redraw AND on
+# every revalidation (multi-MB per fetch, no gzip — the 'keeping up'
+# problem). A chart ~700 px wide never renders more than ~2 samples per
+# pixel, so: 24 h -> 60 s (1440/key), 7 d -> 600 s (1008/key),
+# 30 d -> 1800 s (800/key). Every long window now lands at <= ~1440
+# points/key — 12-85x less SQLite work, parse work and draw work.
+# 0 means 'no binning' (serve the raw rows).
+def bucket_for(window_s: float) -> int:
+    if window_s <= 6 * 3600:
+        return 0
+    if window_s <= 24 * 3600:
+        return 60
+    if window_s <= 7 * 86400:
+        return 600
+    return 1800
+
+
 def _wire_v(x):
     """Compact wire form of a series value (SQUEEZE): float64 full repr
     (0.36000000000000004) tripled payload bytes for a precision no chart,

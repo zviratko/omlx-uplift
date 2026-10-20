@@ -219,6 +219,11 @@ VISIBLE_INSTANCES = "visible"
 # same bound a dead writer already had.
 _VISIBLE_TTL_S = 30.0
 
+# PERF-1 (user 2026-10-21): shared TTL for key discovery — see
+# keys_with_prefix. The walk is window-scoped now (index-backed), the cache
+# makes it once-per-TTL across all tabs instead of once-per-request.
+_KEYS_TTL_S = 30.0
+
 
 def _distinct_tags(conn) -> list[str]:
     """All distinct non-NULL sample instance tags (one index-backed scan)."""
@@ -254,6 +259,11 @@ class MetricsStore:
         # (tag_list_snapshot, monotonic_deadline, hidden_tags) for the
         # visible-instances policy — see _hidden_tags().
         self._alien_cache: tuple[frozenset[str], float, tuple[str, ...]] | None = None
+        # PERF-1: shared TTL cache for key discovery (keys_with_prefix) —
+        # (prefix, window) -> (monotonic_deadline, keys). One walk per TTL
+        # serves every tab.
+        self._keys_lock = threading.Lock()
+        self._keys_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
         if read_only:
             if not self.path.exists():
                 raise FileNotFoundError(self.path)
@@ -374,6 +384,17 @@ class MetricsStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS ix_samples_instance "
                 "ON samples(instance)")
+            # PERF-1 (user 2026-10-21): key discovery over a time window
+            # (keys_with_prefix: 'hot.<model>' / 'uplift.*' names the client
+            # cannot know) must never walk the whole table: covering index
+            # (ts, key, instance) lets the window-scoped DISTINCT answer
+            # from the index alone. Built AFTER the instance ALTER (a
+            # fresh DB starts v1-shape, same rule as ix_samples_latest).
+            # Creation on a live 15 M-row table is a one-time ~20-40 s
+            # boot cost; every later open is IF-EXISTS instant.
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_samples_ts_key "
+                "ON samples(ts, key, instance)")
             # ZOMBIE-1 boot repair (see request_log stale-drop): rows the
             # OLD tracker code abandoned mid-flight were persisted without
             # a terminal update — a 42-h 'queued' row survived in the live
@@ -874,6 +895,30 @@ class MetricsStore:
             )
             return [{"ts": r[0], "v": r[1]} for r in cur.fetchall()]
 
+    def series_binned(self, key: str, window_s: float, bucket_s: int,
+                      instance: str | None = None,
+                      since: float | None = None) -> list[dict]:
+        """KEY over the window aggregated into equal-width, epoch-aligned
+        buckets (PERF-1): AVG computed INSIDE SQLite, one row per bucket
+        back. The raw fetch this replaces paid the whole fine layer twice
+        — once as SQLite rows into Python, once as JSON bytes onto the
+        wire (24 h = 17,280 points/key) — for a chart that is ~700 px
+        wide. Values carry the bucket START (same convention as
+        _downsample); res labeling / wire rounding stay at the route."""
+        t0 = time.time() - window_s
+        if since is not None and since > t0:
+            t0 = since
+        with self._rlock:      # SPLIT-READ: ro conn, never behind a writer
+            frag, args = self._instance_sql(instance)
+            cur = self._rconn.execute(
+                "SELECT CAST(ts / ? AS INTEGER) * ? AS b, AVG(value)"
+                " FROM samples WHERE key=? AND ts>=?" + frag +
+                " GROUP BY b ORDER BY b",
+                [bucket_s, bucket_s, key, t0] + args,
+            )
+            return [{"ts": float(r[0]), "v": float(r[1])}
+                    for r in cur.fetchall() if r[1] is not None]
+
     def latest(self, key: str, instance: str | None = None) -> dict | None:
         """Newest stored point for KEY (U11: live chart pushes read the
         collector's sample instead of re-deriving it client-side).
@@ -939,17 +984,39 @@ class MetricsStore:
         window. Discovery for series whose key names the client cannot know
         (per-model hot-cache keys carry the model id). INSTANCE filtering as
         in series(): under VISIBLE_INSTANCES a co-tenant's model list stays
-        out but drained models from dead sessions backfill (HIST-1)."""
+        out but drained models from dead sessions backfill (HIST-1).
+
+        PERF-1 (user 2026-10-21): the old `key LIKE 'prefix%' AND ts>=?`
+        had no index path — LIKE with a free-form prefix cannot use
+        (key, ts) as a range, so every call walked the whole covering
+        index (15.7 M rows, ~1.1 s measured) just to answer a question
+        whose honest answer changes at most as often as the collector
+        discovers a new model. Now: window-first scan on the new covering
+        index ix_samples_ts_key (ts, key, instance) with a prefix RANGE
+        predicate (key >= p AND key < p_upper), and a small shared TTL
+        cache so N tabs polling the same window pay the walk ONCE per
+        TTL. A just-loaded model appears within one TTL+tick, same bound
+        the HIST-1 alien cache already carries."""
         t0 = time.time() - window_s
-        q = "SELECT DISTINCT key FROM samples WHERE key LIKE ? ESCAPE '\\' AND ts >= ?"
-        args = [prefix.replace("\\", "\\\\").replace("%", "\\%")
-                      .replace("_", "\\_") + "%", t0]
+        ck = (prefix, round(window_s))
+        now = time.monotonic()
+        with self._keys_lock:
+            ent = self._keys_cache.get(ck)
+            if ent and ent[0] > now:
+                return ent[1]
+        upper = prefix[:-1] + chr(ord(prefix[-1]) + 1) if prefix else prefix
+        q = ("SELECT DISTINCT key FROM samples"
+             " WHERE ts >= ? AND key >= ? AND key < ?")
+        args = [t0, prefix, upper]
         with self._rlock:      # SPLIT-READ
             frag, extra = self._instance_sql(instance)
             q += frag
             args += extra
             q += " ORDER BY key"
-            return [r[0] for r in self._rconn.execute(q, args).fetchall()]
+            keys = [r[0] for r in self._rconn.execute(q, args).fetchall()]
+        with self._keys_lock:
+            self._keys_cache[ck] = (now + _KEYS_TTL_S, keys)
+        return keys
 
     def request_by_id(self, request_id: str) -> dict | None:
         with self._rlock:      # SPLIT-READ

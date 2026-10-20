@@ -7,6 +7,7 @@ router's dynamic routes in FastAPI>=0.141 candidate matching."""
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hashlib
 import json
 import math
@@ -27,7 +28,8 @@ from pydantic import BaseModel
 
 from .base import (api_router, page_router, require_admin, _RedirectToLogin,
                    engine_pool, settings_manager, global_settings,
-                   _require_settings_manager, STATIC_DIR, _no_api_cache)
+                   _require_settings_manager, STATIC_DIR, _no_api_cache,
+                   GZIP_MIN_BYTES)
 from ..request_log import RING_LIMIT, get_request_tracker
 from ..collector import get_collector
 
@@ -76,6 +78,27 @@ def _not_modified(request: Request, etag: str, mtime: float) -> bool:
     return False
 
 
+# GZIP-1 (PERF-1, user 2026-10-21): text assets ship gzipped when the
+# client accepts it (a ~150 KB CSS bundle and the monolith JS load
+# 6-8x smaller; first paint and every ?v= refetch stop saturating the
+# browser's ~6-per-origin pool). Compressed once per (path, mtime,
+# size): revalidations and repeat loads cost a dict hit, never a
+# re-compress. Binary types (woff2/png/…) are already compressed —
+# gzipping them wastes CPU and gains nothing. index.html is NOT in the
+# set: it is served post-substitution (NAT-3 token + VSTAMP) and gzips
+# itself in _serve_index_flagged — a pre-compressed answer here would
+# strand the unsubstituted placeholders.
+_GZIPABLE = {".css", ".js", ".json", ".svg"}
+_GZIP_CACHE: dict[tuple[str, int, int], bytes] = {}
+
+
+def _gzip_ok(request: Request, path: Path, st) -> bool:
+    if path.suffix not in _GZIPABLE or st.st_size < GZIP_MIN_BYTES:
+        return False
+    ae = request.headers.get("accept-encoding", "")
+    return "gzip" in (ae or "").lower()
+
+
 def _static_file(request: Request, path: str) -> Response:
     file_path = STATIC_DIR / path
     if not file_path.is_file() or not file_path.resolve().is_relative_to(
@@ -107,6 +130,28 @@ def _static_file(request: Request, path: str) -> Response:
                 "ETag": etag,
                 "Last-Modified": formatdate(st.st_mtime, usegmt=True),
             },
+        )
+    # GZIP-1 (PERF-1, user 2026-10-21): text assets ship gzipped when the
+    # client accepts it (a ~150 KB CSS bundle and the monolith JS load
+    # 6-8x smaller; first paint and every ?v= refetch stop saturating the
+    # browser's ~6-per-origin pool). Compressed once per (path, mtime,
+    # size): revalidations and repeat loads cost a dict hit, never a
+    # re-compress.
+    if _gzip_ok(request, file_path, st):
+        key = (path, st.st_mtime_ns, st.st_size)
+        gz = _GZIP_CACHE.get(key)
+        if gz is None:
+            if len(_GZIP_CACHE) >= 48:      # bounded (~few MB)
+                _GZIP_CACHE.clear()
+            gz = gzip.compress(file_path.read_bytes(), 6)
+            _GZIP_CACHE[key] = gz
+        return Response(
+            gz, media_type=media_type, status_code=200,
+            headers={"Content-Encoding": "gzip",
+                    "Cache-Control": cache_control,
+                    "ETag": etag,
+                    "Last-Modified": formatdate(st.st_mtime, usegmt=True),
+                    "Vary": "Accept-Encoding"},
         )
     return FileResponse(
         file_path, media_type=media_type,
@@ -350,10 +395,13 @@ def _serve_index_flagged(request: Request) -> Response:
     that loads the page AFTER a deploy physically cannot execute the
     PREVIOUS bundle — the failure this kills for good: a reinstall moved
     the Cellar dir under a live board, its asset route 404'd all afternoon,
-    and the browsers quietly kept serving the stale cached JS (a 'fixed'
+    and the browsers quietly kept executing the stale cached JS (a 'fixed'
     client that never fixes, not even after a hard reload). 304
     revalidation of a dead URL falls back to cache; a NEW URL cannot.
-    """
+
+    GZIP-1: the substituted index is gzipped when accepted, cached by
+    (stamp, mode, if-none-match result) — one entry per live combination,
+    ~12 KB answers instead of ~57 KB on every tab load."""
     resp = _static_file(request, "index.html")
     from .. import native_surfaces
 
@@ -373,6 +421,19 @@ def _serve_index_flagged(request: Request) -> Response:
         )
         headers = dict(resp.headers)
         headers.pop("content-length", None)
+        if "gzip" in (request.headers.get("accept-encoding", "") or "").lower():
+            key = (stamp, mode)
+            gz = _GZIP_CACHE.get(("idx",) + key)
+            if gz is None:
+                gz = gzip.compress(body, 6)
+                if len(_GZIP_CACHE) >= 48:
+                    _GZIP_CACHE.clear()
+                _GZIP_CACHE[("idx",) + key] = gz
+            headers["Content-Encoding"] = "gzip"
+            headers["Content-Length"] = str(len(gz))
+            headers["Vary"] = "Accept-Encoding"
+            return Response(gz, media_type="text/html", status_code=200,
+                            headers=headers)
         return HTMLResponse(content=body, status_code=resp.status_code,
                             headers=headers)
     return resp  # 304 etc.

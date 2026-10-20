@@ -22,7 +22,8 @@ from pydantic import BaseModel
 
 from .base import (api_router, page_router, require_admin, _RedirectToLogin,
                    engine_pool, settings_manager, global_settings,
-                   _require_settings_manager, STATIC_DIR, _no_api_cache)
+                   _require_settings_manager, STATIC_DIR, _no_api_cache,
+                   gzip_or_json)
 from ..request_log import RING_LIMIT, get_request_tracker
 from ..collector import get_collector
 
@@ -102,6 +103,28 @@ def load_locale(lang: str) -> dict:
     return {**base, **merged_overlay}
 
 
+# PERF-1 (user 2026-10-21): process-local catalog cache. The merged catalog
+# is ~250 KB parsed per request per board tab and its contents cannot
+# change under a running process (files ship with the package; config edits
+# to ui.language only change WHICH cached dict answers, never their bytes).
+# A 5-minute TTL keeps the answer honest even for someone hot-editing the
+# overlay files; the gzip answer makes the re-pull cheap on the wire.
+_CATALOG_TTL_S = 300.0
+_catalog_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _load_locale_cached(lang: str) -> dict:
+    now = time.monotonic()
+    ent = _catalog_cache.get(lang)
+    if ent and ent[0] > now:
+        return ent[1]
+    d = load_locale(lang)
+    if len(_catalog_cache) > 32:      # bounded: langs are finite
+        _catalog_cache.clear()
+    _catalog_cache[lang] = (now + _CATALOG_TTL_S, d)
+    return d
+
+
 @api_router.get("/identity")
 async def serving_identity():
     """Which keg is serving this dashboard (U10). The answer MUST come from
@@ -126,11 +149,16 @@ async def serving_identity():
 
 
 @api_router.get("/locale")
-async def locale_catalog(lang: Optional[str] = None):
+async def locale_catalog(request: Request, lang: Optional[str] = None):
     """Merged i18n catalog for the uplift UI (classic keys + uplift
     overlay). No lang given -> the server's configured ui.language, same
     source classic templates use. Public: mirrors classic, whose login
-    page renders locale strings before authentication."""
+    page renders locale strings before authentication.
+
+    PERF-1: the merged catalog is ~250 KB uncompressed per fetch and every
+    board tab pulls it at boot — gzipped when accepted (one-time, it is
+    cacheable by the browser under no-cache + ETag-less validators: keep
+    no-store here, the gzip path just makes the re-pull cheap)."""
     if not lang:
         try:
             lang = global_settings().ui.language
@@ -149,4 +177,7 @@ async def locale_catalog(lang: Optional[str] = None):
             shipped = (_dir / f"{lang}.json").exists()
     if not shipped:
         lang = "en"
-    return {"lang": lang, "strings": await asyncio.to_thread(load_locale, lang)}
+    strings = await asyncio.to_thread(_load_locale_cached, lang)
+    # gzip when accepted (same doctrine as the metrics payloads)
+    return await asyncio.to_thread(
+        gzip_or_json, {"lang": lang, "strings": strings}, request)

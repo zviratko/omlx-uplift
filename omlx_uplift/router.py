@@ -36,7 +36,8 @@ from .routers.settings import (
     model_settings_index, models_overlay, prune_model_settings, put_deferred_settings_route, upsert_model_profile, upsert_model_settings,
 )
 from .routers.derive import (
-    MAX_SERIES_POINTS, _HOURLY_DERIVE, _USAGE_COLS, _downsample, _hourly_points, _parse_window,
+    MAX_SERIES_POINTS, _HOURLY_DERIVE, _USAGE_COLS, _downsample, _hourly_points,
+    _parse_window, bucket_for,
 )
 from .routers.metrics import (
     metrics_hot, metrics_latest, metrics_series, metrics_live, metrics_stream, requests_stats,

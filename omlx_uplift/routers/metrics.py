@@ -21,10 +21,12 @@ from pydantic import BaseModel
 
 from .base import (api_router, page_router, require_admin, _RedirectToLogin,
                    engine_pool, settings_manager, global_settings,
-                   _require_settings_manager, STATIC_DIR, _no_api_cache)
+                   _require_settings_manager, STATIC_DIR, _no_api_cache,
+                   gzip_or_json)
 from ..request_log import RING_LIMIT, get_request_tracker
 from ..collector import get_collector
-from .derive import _HOURLY_DERIVE, _downsample, _hourly_points, _parse_window
+from .derive import (_HOURLY_DERIVE, _downsample, _hourly_points,
+                     _parse_window, _wire_v, bucket_for)
 
 
 @api_router.get("/metrics/latest")
@@ -48,6 +50,7 @@ async def metrics_latest(keys: str = "", is_admin: bool = Depends(require_admin)
 
 @api_router.get("/metrics/series")
 async def metrics_series(
+    request: Request,
     key: str = "",
     keys: str = "",
     window: str = "1h",
@@ -56,11 +59,17 @@ async def metrics_series(
 ):
     """Series over WINDOW (5m..30d) for KEY, or for every key in
     comma-separated KEYS (multi-metric explorer: one request, one merged
-    per-key response in `series_map`). Long windows are averaged down to
-    ~MAX_SERIES_POINTS points and say so (res='avg', bucket_s).
+    per-key response in `series_map`). Long windows (7h..30d) are averaged
+    down to <=~1440 points/key in SQL bucket aggregation (res='avg',
+    bucket_s advertised; see bucket_for + store.series_binned) — the raw
+    path paid 17k-120k rows/key through Python and onto the wire for a
+    ~700 px chart. Everyday windows (<=6 h) keep the raw 5 s collector
+    resolution (ISSUE-7). Answers are gzipped when the client accepts it
+    (PERF-1: multi-MB uncompressed bodies saturated the browser's
+    ~6-per-origin HTTP/1.1 pool and starved the SSE streams).
 
     TAIL-1: AFTER (epoch seconds) returns ONLY points newer than AFTER —
-    the raw fine tail, no downsample, no history. The dashboard refetches
+    the raw fine tail, no binning, no history. The dashboard refetches
     every ~4.5 s per window (POP-PIN: one collector sample per fetch max);
     before TAIL-1 each of those re-paid the FULL window payload (measured:
     74 KB x ~12/min per open tab). With AFTER the steady-state response is
@@ -77,14 +86,38 @@ async def metrics_series(
     inst = store.visible_instances()
 
     tail = after if after and after > 0 else None
+    bucket = 0 if tail is not None else bucket_for(window_s)
 
     async def one(k: str):
+        if tail is not None:
+            fine = await asyncio.to_thread(
+                lambda: store.series(k, window_s, None, inst, since=tail))
+            for p in fine:
+                p["res"] = "fine"
+            return fine, 0          # TAIL-1: raw new points only
+        if bucket:
+            # PERF-1: long window — bucket means computed in SQLite;
+            # hourly rollups backfill the hours with no fine coverage.
+            rows = await asyncio.to_thread(
+                lambda: store.series_binned(k, window_s, bucket, inst))
+            for p in rows:
+                p["res"] = "avg"
+            derive = _HOURLY_DERIVE.get(k)
+            if derive is not None:
+                hourly = await asyncio.to_thread(_hourly_points, derive, window_s)
+                covered = {int(p["ts"] // 3600) for p in rows}
+                extra = [p for p in hourly
+                       if int(p["ts"] // 3600) not in covered]
+                if extra:
+                    rows += extra        # keep the 'hourly' res label
+                    rows.sort(key=lambda p: p["ts"])
+            for p in rows:             # SQUEEZE parity (wire 6 sig digits)
+                p["v"] = _wire_v(p["v"])
+            return rows, bucket
         fine = await asyncio.to_thread(
-            lambda: store.series(k, window_s, None, inst, since=tail))
+            lambda: store.series(k, window_s, None, inst))
         for p in fine:
             p["res"] = "fine"
-        if tail is not None:
-            return fine, 0          # TAIL-1: raw new points only
         hourly = []
         derive = _HOURLY_DERIVE.get(k)
         if derive is not None:
@@ -109,7 +142,8 @@ async def metrics_series(
                "bucket_s": bucket, "series_map": series_map}
     if tail is not None:
         out["after"] = tail         # client: merge-append, never replace
-    return out
+    # PERF-1: gzip the answer (serialize + compress off the event loop).
+    return await asyncio.to_thread(gzip_or_json, out, request)
 
 
 @api_router.get("/metrics/live")
@@ -228,35 +262,43 @@ async def metrics_stream(is_admin: bool = Depends(require_admin)):
 
 
 @api_router.get("/metrics/hot")
-async def metrics_hot(window: str = "1h",
+async def metrics_hot(request: Request,
+                      window: str = "1h",
                       is_admin: bool = Depends(require_admin)):
     """All per-model hot-cache series ('hot.<model>') over WINDOW.
     Discovery endpoint: the key names carry model ids the client cannot
     know up front (a drained model must still backfill after a page
     refresh — 'hot.<model>' keys are stable per model since 2026-09-30).
-    Same point shape / downsampling as /metrics/series (multi-key form)."""
-    import asyncio
-
+    PERF-1: discovery is a window-scoped index walk with a shared TTL
+    cache (no more full LIKE scan per call); the series answer uses the
+    same bucket ladder as /metrics/series (long windows averaged in SQL,
+    bucket_s advertised); response gzipped when the client accepts it."""
     window_s = _parse_window(window)
     store = get_collector().store
     # HIST-1: same visible-history policy as /metrics/series.
     inst = store.visible_instances()
 
     keys = await asyncio.to_thread(store.keys_with_prefix, "hot.", window_s, inst)
+    bucket = bucket_for(window_s)
 
     async def one(k: str):
+        if bucket:
+            rows = await asyncio.to_thread(
+                lambda: store.series_binned(k, window_s, bucket, inst))
+            for p in rows:
+                p["res"] = "avg"
+                p["v"] = _wire_v(p["v"])
+            return rows
         fine = await asyncio.to_thread(store.series, k, window_s, None, inst)
         for p in fine:
             p["res"] = "fine"
-        return _downsample(fine)
+        return fine
 
     results = await asyncio.gather(*(one(k) for k in keys))
-    series_map, bucket = {}, 0
-    for k, (pts, b) in zip(keys, results):
-        series_map[k] = pts
-        bucket = max(bucket, b)
-    return {"keys": keys, "window": window, "window_s": window_s,
-            "bucket_s": bucket, "series_map": series_map}
+    series_map = {k: pts for k, pts in zip(keys, results)}
+    out = {"keys": keys, "window": window, "window_s": window_s,
+           "bucket_s": bucket, "series_map": series_map}
+    return await asyncio.to_thread(gzip_or_json, out, request)
 
 
 @api_router.get("/requests/stats")
