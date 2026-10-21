@@ -16,6 +16,7 @@ Classic install:
 ```bash
 brew tap jundot/omlx
 brew tap zviratko/uplift https://github.com/zviratko/omlx-uplift
+brew trust zviratko/uplift             # Homebrew asks you to trust a third-party tap
 brew install omlx-uplift
 omlx-uplift install                      # writes the ONE .pth into the omlx keg
 launchctl kickstart -k gui/$(id -u)/sh.brew.omlx
@@ -28,6 +29,7 @@ commits; needs no classic keg — only the jundot tap for its build recipe):
 ```bash
 brew tap jundot/omlx
 brew tap zviratko/uplift https://github.com/zviratko/omlx-uplift
+brew trust zviratko/uplift             # covers both omlx-uplift and omlx-dev
 brew install omlx-uplift
 omlx-uplift dev bootstrap                # one-time questionnaire
 omlx-uplift dev install                  # builds the omlx-dev keg (~20 min first time)
