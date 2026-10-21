@@ -1054,11 +1054,36 @@ function renderEditorFields(container) {
             if (seValues.mtp_enabled !== undefined) {
                 // UX-5: one band [toggle | depth] (both keys share reload
                 // semantics); no re-render, no reflow
-                seFam(g, 'mtp_enabled',
-                    seBind('bool', 'mtp_enabled', { label: 'Lightning MTP',
-                        hint: m.mtp_compatible
-                            ? "Drafts several tokens per step with the model's built-in MTP head."
-                            : (m.mtp_compatibility_reason || 'Not compatible with this model') }),
+                // MTP-HEAD (user 2026-10-21): a model WITHOUT an MTP head
+                // cannot turn Lightning MTP on — classic's modal disables
+                // the toggle under exactly (!mtp_compatible && !mtp_enabled),
+                // so the hint no longer contradicts a clickable control.
+                // A stored enable stays togglable TO OFF (legacy/removed-head
+                // escape). The lock fires on the EXPLICIT server verdict
+                // (mtp_compatible === false): a row without the field (an
+                // older keg that still renders the row) stays clickable —
+                // absent data is never treated as a refusal.
+                const mtpNoHead = m && !m._template && !m._missing
+                    && m.mtp_compatible === false;
+                const mtpCompat = !(m && m.mtp_compatible === false);
+                const mtpLock = mtpNoHead && seValues.mtp_enabled !== true;
+                const mtpWhy = m.mtp_compatibility_reason
+                    || 'Not compatible with this model';
+                const mtpRow = seBind('bool', 'mtp_enabled', {
+                    label: 'Lightning MTP',
+                    disabled: mtpLock,
+                    hint: mtpCompat
+                        ? "Drafts several tokens per step with the model's built-in MTP head."
+                        : mtpWhy });
+                if (mtpLock) {
+                    // a disabled input swallows hover tooltips in some
+                    // engines — title the WHOLE row, like classic titles
+                    // the toggle wrapper
+                    mtpRow.title = mtpWhy;
+                    const mi = mtpRow.querySelector('input');
+                    if (mi) mi.title = mtpWhy;
+                }
+                seFam(g, 'mtp_enabled', mtpRow,
                     [seBind('select', 'mtp_adaptive_max_depth', {
                         label: C.tf('uplift.se.mtp_depth', 'Adaptive max depth'),
                         hint: C.tf('uplift.se.mtp_depth.hint',

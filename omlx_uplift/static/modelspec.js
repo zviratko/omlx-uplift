@@ -374,6 +374,16 @@
         }
         if (ms.mtp_enabled && ms.dflash_enabled)
             errors.push('Lightning MTP and DFlash cannot both be enabled; choose one speculative-decoding path.');
+        // MTP-HEAD (user 2026-10-21): the editor locks the toggle when the
+        // DTO says the model has no MTP head; this mirror stops a stale/
+        // hand-crafted state from ever PUTting it. Only the EXPLICIT false
+        // verdict errors (absent field on an older DTO is not a refusal);
+        // synthetic entries (global templates, unknown models) carry no
+        // server verdict — exempt.
+        if (ms.mtp_enabled && model && !model._template && !model._missing
+                && model.mtp_compatible === false)
+            errors.push(model.mtp_compatibility_reason
+                || 'Lightning MTP is not compatible with this model — it has no built-in MTP head.');
         if (ms.vlm_mtp_enabled) {
             for (const [label, on] of [['DFlash', ms.dflash_enabled], ['SpecPrefill', ms.specprefill_enabled],
                                        ['Lightning MTP', ms.mtp_enabled], ['KV cache compression', ms.turboquant_kv_enabled]])
