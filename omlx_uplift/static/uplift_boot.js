@@ -66,13 +66,9 @@ function renderDevBuild() {
             || (d.base_sha.slice(0, 7)
                 + (d.omlx_version ? ' · omlx v' + d.omlx_version : ''));
         el.append(main);
-        if (patches.length) {
-            const ids = patches.map(p => p.id + ' v' + p.version).join(', ');
-            const pl = document.createElement('span'); pl.className = 'lb-patches';
-            pl.textContent = ids.length <= 30 ? ids
-                : C.tf('uplift.ui.dev_n_patches', '{n} patches', { n: patches.length });
-            el.append(pl);
-        }
+        // the enabled-patch ids are NOT a header line (user 2026-10-21:
+        // the '4 patches' row between the two version lines was dropped)
+        // — they ride the tooltip below and live on the patches page.
         el.title = C.tf('uplift.ui.dev_build_info', 'DEV build')
             + (d.keg ? ': keg ' + d.keg : '')
             + '\nomlx ' + (d.omlx_version || '?')

@@ -86,7 +86,6 @@ def test_badge_js_prefers_the_keg_name():
     css = open(os.path.join(root, "omlx_uplift", "static", "uplift.css"),
                encoding="utf-8").read()
     assert ".logo .logo-build .logo-base {" in css and "top: calc(100% + 2px)" in css
-    assert "header.top:not(.has-tagline) .logo .logo-build .logo-base { top: calc(100% + 12px); }" in css
     # the column's single vertical knob: the whole stamp+version pair is
     # centred on the wordmark line (user 2026-10-21) — moving the box
     # moves both sub-lines with it
@@ -97,6 +96,13 @@ def test_badge_js_prefers_the_keg_name():
     # skin's own .logo::after shorthand)
     assert "classList.add('has-build-lines')" in src
     assert ".logo.has-build-lines::after { line-height: 16px; }" in css
+    # DEAD CONTRACTS (user 2026-10-21): the 'N patches' header row and the
+    # U23 reserved 36px tagline strip must not come back — the tagline is
+    # a single nowrap line, patch ids live in the tooltip/patches page
+    assert "lb-patches" not in src and "lb-patches" not in css
+    assert "has-tagline" not in css
+    assert "layoutTaglineBand" not in open(os.path.join(
+        root, "omlx_uplift", "static", "uplift.js"), encoding="utf-8").read()
 
 
 def test_auto_update_label_no_vanilla_tail():

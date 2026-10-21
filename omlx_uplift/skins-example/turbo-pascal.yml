@@ -58,9 +58,11 @@ css: |-
   .card { border-top-color: var(--frame); }
   .card:hover { border-color: var(--edge); }
   .card h2 { color: var(--dim); letter-spacing: .08em; }
-  /* compiler status under the logo, inline verdict (24ch cap) */
+  /* compiler status under the logo, ONE line (the 640K quote tail was
+     dropped 2026-10-21 — it wrapped into the reserved strip that skins
+     no longer reserve; the ellipsis would have eaten it anyway) */
   .logo .logo-below::after {
-      content: "Borland International  1992  640K ought to be enough";
+      content: "Borland International  1992";
       color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .06em;
   }
   .logo::after {

@@ -1047,7 +1047,7 @@ function previewCommit() {
 }
 function applySkinCss(dir) {
     let link = document.getElementById('uplift-skin-css');
-    if (!dir) { if (link) link.remove(); layoutTaglineBand(); return; }
+    if (!dir) { if (link) link.remove(); return; }
     const href = `${API}/uplift/api/skins/${encodeURIComponent(dir)}/theme.css`;
     if (!link) {
         link = document.createElement('link');
@@ -1055,46 +1055,8 @@ function applySkinCss(dir) {
         link.rel = 'stylesheet';
         document.head.appendChild(link);
     }
-    if (link.getAttribute('href') !== href) {
-        link.addEventListener('load', layoutTaglineBand, { once: true });
-        link.setAttribute('href', href);
-    } else if (link.sheet) {
-        layoutTaglineBand();   // already live: paint once now
-    } else {
-        // same href (boot script pre-added the link, still in flight).
-        const measure = () => {
-            if (link.sheet) layoutTaglineBand();
-        };
-        link.addEventListener('load', layoutTaglineBand, { once: true });
-        requestAnimationFrame(() => { measure(); });
-    }
+    if (link.getAttribute('href') !== href) link.setAttribute('href', href);
 }
-
-/* U23: the header reserves the under-logo strip ONLY when the active skin
-   actually fills the .logo-below slot (computed ::after content), so a
-   no-skin header keeps its exact old geometry. --tagline-w clamps the
-   tagline block to the free space left of the menu — it can never paint
-   behind the tabs, at any window width. */
-function layoutTaglineBand() {
-    const h = document.querySelector('header.top');
-    const b = h && h.querySelector('.logo-below');
-    if (!h || !b) return;
-    const filled = getComputedStyle(b, '::after').content !== 'none';
-    h.classList.toggle('has-tagline', filled);
-    if (!filled) return;
-    const tabs = h.querySelector('nav.tabs');
-    const bb = b.getBoundingClientRect(), tb = tabs.getBoundingClientRect();
-    // dy>0: menu in row 2 (narrow wrap, or the U23 tall-tagline row) —
-    // the tagline may span the FULL header width, and clamping it to the
-    // menu's edge would clamp itself to ~0 (chicken-and-egg). The row is
-    // reserved and the 2-line clamp + ellipsis stays as safeguard.
-    // Same row: band ends at the menu's left edge (it can never paint
-    // behind the tabs).
-    const free = tb.top > bb.bottom - 4 ? innerWidth - bb.left - 24
-                                       : tb.left - bb.left - 10;
-    if (free > 80) h.style.setProperty('--tagline-w', Math.floor(free) + 'px');
-}
-addEventListener('resize', layoutTaglineBand, { passive: true });
 
 /* ---------------- layout engine (GridStack, classic #3694 parity) -------- */
 /* Same mechanism as the classic dashboard: GridStack 13 in 24-column,
