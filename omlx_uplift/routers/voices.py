@@ -105,6 +105,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -350,6 +351,60 @@ def _say_preferred() -> dict:
     return {str(k): str(v) for k, v in p.items()} if isinstance(p, dict) else {}
 
 
+# ---- SAY-CHAT (user 2026-10-21): macOS `say` voices in the Uplift web chat.
+# Availability IS a store voice carrying model 'say:<identifier>': the chat
+# picker lists store voices and every speech route already dispatches that
+# marker to the say engine (SAY-1/2), so marking a system voice available
+# needs no parallel plumbing. The first GET /voices on a Mac seeds the
+# default answer of each SAY_CHAT_DEFAULT_LANGS once per store (key
+# 'say_chat_seed') — deleting a seeded voice afterwards is a permanent
+# user choice, never silently re-added.
+SAY_CHAT_DEFAULT_LANGS = ("en", "cs")
+_say_chat_lock = threading.Lock()
+
+
+def _say_chat_tail(v: dict) -> str:
+    """The say engine tail of a store voice, '' when it is not a say row."""
+    is_say, tail = say_engine.say_split(v.get("model") or "")
+    return tail if is_say else ""
+
+
+def _say_chat_row(v: dict, taken: set) -> dict:
+    """Catalog row -> store voice: model addresses by IDENTIFIER (display
+    names collide — two system Samanthas), no clip, no speaker."""
+    addr = v.get("identifier") or v["name"]
+    return {"id": _slug(v["name"], taken), "name": v["name"],
+            "model": say_engine.SAY_PREFIX + addr,
+            "created": int(time.time())}
+
+
+def _seed_say_chat(store: dict) -> None:
+    """Mutate the store: append the web-chat default voices, set the seed
+    flag. Runs on the SAME routing chain the speech engine uses
+    (language_voice), so a seeded row is exactly what a `say` request in
+    that language speaks. Never duplicates a covered tail (identifier or
+    legacy display name), never fights the store cap; a language the Mac
+    cannot speak is simply skipped. The caller owns error handling: an
+    exception here must leave the flag unset so the next GET retries."""
+    pref = store.get("say_preferred")
+    if not isinstance(pref, dict):
+        pref = {}
+    covered = {_say_chat_tail(v) for v in store["voices"]} - {""}
+    for lang in SAY_CHAT_DEFAULT_LANGS:
+        v = say_engine.language_voice(lang, pref)
+        if not v:
+            continue
+        addr = v.get("identifier") or v["name"]
+        if addr in covered or v.get("name") in covered:
+            continue
+        if len(store["voices"]) >= MAX_VOICES:
+            break
+        store["voices"].append(
+            _say_chat_row(v, {x["id"] for x in store["voices"]}))
+        covered.add(addr)
+    store["say_chat_seed"] = True
+
+
 def _tts_defaults() -> dict:
     """TTS-1: the {model: {speaker, instructions, language}} map from the
     voice store — the model-level DEFAULT tier of synth resolution, same
@@ -566,6 +621,24 @@ def _alias_lookup(name: str, model: str):
 @api_router.get("/voices")
 async def voices_list(_auth=Depends(require_admin)):
     store = _load()
+    if not store.get("say_chat_seed") and say_engine.available():
+        # SAY-CHAT: one-time seed of the default web-chat voices. The say
+        # probes take seconds cold, so the seed runs on a worker thread;
+        # the lock makes a double-seed from racing GETs impossible.
+        def _seed_once():
+            with _say_chat_lock:
+                s = _load()                    # the winner may have seeded
+                if s.get("say_chat_seed"):
+                    return None
+                _seed_say_chat(s)
+                _save(s)
+                return s
+        try:
+            seeded = await asyncio.to_thread(_seed_once)
+            if seeded is not None:
+                store = seeded
+        except Exception:
+            _log.warning("say chat seed skipped", exc_info=True)
     out = []
     for v in store["voices"]:
         row = {k: v.get(k) for k in ("id", "name", "model", "ref_text",
@@ -763,6 +836,60 @@ async def voices_say_preferred(request: Request, _auth=Depends(require_admin)):
     store["say_preferred"] = pref
     _save(store)
     return {"ok": True, "preferred": pref}
+
+
+@api_router.post("/voices/say/chat")
+async def voices_say_chat(request: Request, _auth=Depends(require_admin)):
+    """SAY-CHAT (user 2026-10-21): the per-voice 'make available for Uplift
+    web chat' switch. Body {identifier, on}. on=true stores the voice as
+    model 'say:<identifier>' — that store row IS the availability: the chat
+    picker lists store voices and every speech route already dispatches the
+    marker to the say engine, so no parallel plumbing exists to drift.
+    on=false removes that store entry; the system voice itself is
+    untouched. Idempotent both ways; validation mirrors POST /voices (the
+    voice must be installed on THIS Mac)."""
+    raw = await request.json()
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    addr = str(raw.get("identifier") or "").strip()
+    on = bool(raw.get("on"))
+    if not addr:
+        raise HTTPException(status_code=400, detail="'identifier' is required")
+    if not say_engine.available():
+        raise HTTPException(status_code=400, detail=(
+            "macOS say is not available on this server"))
+    v = await asyncio.to_thread(say_engine.resolve, addr)
+    if v is None:
+        raise HTTPException(status_code=404, detail=(
+            "'%s' is not an installed macOS voice" % addr[:64]))
+    ident = v.get("identifier") or v["name"]
+    # every spelling of THIS row: an identifier address, the display name
+    # the tab may have sent, and the resolved identifier. A legacy store
+    # voice pointing at another tier of the same root ('say:Zuzana' vs
+    # 'Zuzana (Premium)') matches neither and stays untouched.
+    tails = {ident, addr, v.get("name")} - {""}
+    store = _load()
+    if on:
+        for x in store["voices"]:
+            if _say_chat_tail(x) in tails:
+                return {"ok": True, "chat": True, "id": x["id"]}
+        if len(store["voices"]) >= MAX_VOICES:
+            raise HTTPException(status_code=507,
+                                detail="voice store is full (%d)" % MAX_VOICES)
+        row = _say_chat_row(v, {x["id"] for x in store["voices"]})
+        store["voices"].append(row)
+        _save(store)
+        return {"ok": True, "chat": True, "id": row["id"]}
+    kept, removed = [], None
+    for x in store["voices"]:
+        if removed is None and _say_chat_tail(x) in tails:
+            removed = x["id"]
+            continue
+        kept.append(x)
+    if removed is not None:
+        store["voices"] = kept
+        _save(store)
+    return {"ok": True, "chat": False, "removed": removed}
 
 
 @api_router.post("/voices/say/speech")

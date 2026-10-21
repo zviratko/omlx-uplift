@@ -26,6 +26,9 @@ from omlx_uplift.routers import voices as V
 def client(monkeypatch, tmp_path):
     from omlx_uplift.routers import base as up_base
     monkeypatch.setattr(V, "_store_dir", lambda: tmp_path)
+    # SAY-CHAT: pre-arm the one-time web-chat seed flag — a real Mac answers
+    # available() True and GET /voices would otherwise probe the live roster
+    V._save({"version": 1, "voices": [], "say_chat_seed": True})
     app = FastAPI()
     app.include_router(_up.api_router, prefix="/uplift/api")
     app.dependency_overrides[up_base.require_admin] = lambda: True
@@ -193,7 +196,9 @@ def test_preview_uses_ad_hoc_fields_and_leaves_no_file(client, fake_speech):
     assert r.status_code == 200 and r.content == b"OFAKEAUDIO"
     assert fake_speech["model"] == "some-tts"
     assert base64.b64decode(fake_speech["ref_audio"]) == WAV
-    assert V._load() == {"version": 1, "voices": []}      # nothing stored
+    # nothing stored: no voice rows added by the preview (the fixture's
+    # pre-armed say_chat_seed marker rides the store, that is not a row)
+    assert V._load()["voices"] == []
     tmp = V._store_dir() / "tmp"
     assert not tmp.exists() or list(tmp.iterdir()) == []  # temp cleaned
     # bad format rejected before any synth

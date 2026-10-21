@@ -855,8 +855,12 @@ test('TTS-3b: an override merged with a store row manages itself once', async ()
     assert.deepEqual(kids.map(r => String(r.children[0].textContent)),
         ['Novak · fr-FR'], 'covered store row does NOT duplicate below');
     const novak = kids[0];
+    // SAY-CHAT added the web-chat switch to every installed row; the
+    // merged line still manages itself ONCE: play, the (lit) preferred
+    // clear, the chat availability toggle, then the store EDIT/DELETE
     assert.deepEqual(classes(novak, 'se-btn').map(b => String(b.textContent)),
-        ['▶', 'Clear preferred', 'EDIT', 'DELETE'],
+        ['▶', 'Clear preferred', 'Make available for Uplift web chat',
+         'EDIT', 'DELETE'],
         'mark button (lit) plus the store management on ONE line');
     classes(novak, 'se-btn').find(b => String(b.textContent) === 'EDIT').click();
     await settle(); await settle();

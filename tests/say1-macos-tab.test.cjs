@@ -576,3 +576,80 @@ test('voiceLabel hides the marker behind a macOS tag', async () => {
                  'Qwen3-TTS:Jake');
     assert.equal(label({ name: 'Solo', model: '' }), 'Solo');
 });
+
+/* ---- SAY-CHAT (user 2026-10-21): 'make available for Uplift web chat' ----
+   Every installed macOS row carries a vc-chat switch; the POST names the
+   row's exact address. The store row that lands (model 'say:<addr>') IS
+   the availability — the chat picker lists the store and the speech routes
+   already dispatch the marker (SAY-1/2), so the tab must only ever speak
+   through /voices/say/chat, never invent a parallel path. Marking repaints
+   from a fresh GET (no local patch); a not-installed row offers nothing.
+   The four labels ride tf keys — invisible to the locale gates — so this
+   file is their whole-catalog self-pin. */
+const CHAT_KEYS = ['uplift.voices.say_btn_chat',
+                   'uplift.voices.say_btn_chat_on',
+                   'uplift.voices.say_btn_chat_hint',
+                   'uplift.voices.say_btn_chat_on_hint'];
+
+test('SAY-CHAT: installed rows offer the web-chat switch; POST flips it', async () => {
+    const h = await mount({});
+    await h.sayClick();
+    const rows = classes(h.host, 'vc-row');
+    const zu = rows.find(r => String(r.children[0].textContent) === 'Zuzana');
+    assert.ok(zu, 'Zuzana row present');
+    const chat = classes(zu, 'vc-chat');
+    assert.equal(chat.length, 1, 'one web-chat switch on an installed row');
+    assert.ok(chat[0].textContent.includes('Make available for Uplift web chat'),
+              chat[0].textContent);
+    assert.ok(!chat[0]._classes.has('on'), 'starts OFF here (store empty)');
+    assert.ok(chat[0].title.includes('Speak chat replies'), chat[0].title);
+    // the NOT-installed row offers nothing (cannot speak, cannot be picked)
+    const ab = rows.find(r => String(r.children[0].textContent)
+        === 'Allison (Enhanced)');
+    assert.ok(ab && classes(ab, 'vc-chat').length === 0,
+              'no switch on a voice this Mac cannot speak');
+    // click: exact {identifier, on} POST, then the server-truth repaint
+    chat[0].click();
+    await settle(); await settle();
+    const posts = h.st.posts.filter(p => p.url.includes('/voices/say/chat'));
+    assert.equal(posts.length, 1, JSON.stringify(h.st.posts));
+    assert.deepEqual(posts[0].body, { identifier: 'Zuzana', on: true });
+    // repaint re-fetched the catalog (the client never patches added)
+    assert.ok(h.st.gets.filter(u => u.includes('/voices/say')).length >= 2,
+              'repaint comes from a fresh GET');
+});
+
+test('SAY-CHAT: an in-use row reads ON and its click removes it', async () => {
+    const voices = ROSTER.map(v => v.name === 'Zuzana'
+        ? Object.assign({}, v, { added: true }) : v);
+    const h = await mount({ voices });
+    await h.sayClick();
+    const rows = classes(h.host, 'vc-row');
+    const zu = rows.find(r => String(r.children[0].textContent) === 'Zuzana');
+    const chat = classes(zu, 'vc-chat');
+    assert.equal(chat.length, 1);
+    assert.ok(chat[0]._classes.has('on'), 'in-use row is lit');
+    assert.ok(chat[0].textContent.includes('Available in Uplift web chat'),
+              chat[0].textContent);
+    assert.ok(chat[0].title.includes('remove'), chat[0].title);
+    chat[0].click();
+    await settle(); await settle();
+    const posts = h.st.posts.filter(p => p.url.includes('/voices/say/chat'));
+    assert.deepEqual(posts[posts.length - 1].body,
+                     { identifier: 'Zuzana', on: false });
+});
+
+test('SAY-CHAT labels: all four keys exist in every locale (tf is gate-blind)', () => {
+    const dir = path.join(STATIC_DIR, '..', 'locales');
+    for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.json'))) {
+        const d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+        for (const k of CHAT_KEYS) {
+            assert.ok(typeof d[k] === 'string' && d[k].length > 0,
+                    k + ' missing in ' + f);
+        }
+        // the chat pair must not be the same string in EN (state is
+        // legible), and the {n}-free labels stay placeholder-free
+        assert.notEqual(d['uplift.voices.say_btn_chat'],
+                        d['uplift.voices.say_btn_chat_on'], f);
+    }
+});

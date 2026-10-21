@@ -105,6 +105,9 @@ def on_mac(monkeypatch):
 def client(monkeypatch, tmp_path):
     from omlx_uplift.routers import base as up_base
     monkeypatch.setattr(V, "_store_dir", lambda: tmp_path)
+    # SAY-CHAT: pre-arm the one-time web-chat seed flag — a real Mac answers
+    # available() True and GET /voices would otherwise probe the live roster
+    V._save({"version": 1, "voices": [], "say_chat_seed": True})
     app = FastAPI()
     app.include_router(_up.api_router, prefix="/uplift/api")
     app.include_router(_up.page_router)

@@ -2119,6 +2119,9 @@ label.se-row.pending-restart > .se-ctl > select {
 /* SAY-2: the preferred-for-language star + its row chip */
 .vc-pref { min-width: 0; flex: 0 0 auto; white-space: nowrap; }
 .vc-pref.on { color: var(--accent); border-color: var(--accent); }
+/* SAY-CHAT: same lit reading as the preferred mark (in-use is in-use) */
+.vc-chat { min-width: 0; flex: 0 0 auto; white-space: nowrap; }
+.vc-chat.on { color: var(--accent); border-color: var(--accent); }
 .vc-chip-pref { color: var(--accent); border-color: var(--accent); }
 /* TTS-1: the TEXT TO SPEECH tab rows (model + built-in voice entries) and
    the DEFAULT lamp. (TTS-3 moved the child indent from a flat 38px pad to

@@ -62,6 +62,9 @@ def on_mac(monkeypatch):
 def client(monkeypatch, tmp_path):
     from omlx_uplift.routers import base as up_base
     monkeypatch.setattr(V, "_store_dir", lambda: tmp_path)
+    # SAY-CHAT: pre-arm the one-time web-chat seed flag — a real Mac answers
+    # available() True and GET /voices would otherwise probe the live roster
+    V._save({"version": 1, "voices": [], "say_chat_seed": True})
     app = FastAPI()
     app.include_router(_up.api_router, prefix="/uplift/api")
     app.include_router(_up.page_router)
@@ -536,3 +539,122 @@ def test_say_dispatch_works_without_omlx(client, on_mac, monkeypatch):
     r = client.post("/uplift/api/voices/speech",
                     json={"voice": "Zu", "input": "hi"})
     assert r.status_code == 200 and r.content.startswith(b"RIFF")
+
+
+# ---------------------------------------------------------------- SAY-CHAT
+# (user 2026-10-21): the per-voice 'make available for Uplift web chat'
+# switch. The store row carrying model 'say:<identifier>' IS the
+# availability — the chat picker lists the store and every speech route
+# already dispatches the marker — so these tests pin the store mutation
+# (POST /voices/say/chat), the once-per-store default seed on the first
+# GET /voices (en + cs), and that the seeded row really speaks.
+
+def test_say_chat_toggle_roundtrip(client, on_mac):
+    _as_say(on_mac)
+    r = client.post("/uplift/api/voices/say/chat",
+                    json={"identifier": "Zuzana", "on": True})
+    assert r.status_code == 200
+    assert r.json()["chat"] is True
+    vid = r.json()["id"]
+    store = client.get("/uplift/api/voices").json()["voices"]
+    assert [v["id"] for v in store] == [vid]
+    assert store[0]["model"] == "say:Zuzana"
+    assert "ref_file" not in store[0] and store[0]["ref_bytes"] is None
+    # ON again: idempotent, no duplicate row
+    r2 = client.post("/uplift/api/voices/say/chat",
+                     json={"identifier": "Zuzana", "on": True})
+    assert r2.json()["id"] == vid
+    assert len(client.get("/uplift/api/voices").json()["voices"]) == 1
+    # OFF removes; a second OFF is an honest no-op
+    r3 = client.post("/uplift/api/voices/say/chat",
+                     json={"identifier": "Zuzana", "on": False})
+    assert r3.json() == {"ok": True, "chat": False, "removed": vid}
+    assert client.get("/uplift/api/voices").json()["voices"] == []
+    r4 = client.post("/uplift/api/voices/say/chat",
+                     json={"identifier": "Zuzana", "on": False})
+    assert r4.json() == {"ok": True, "chat": False, "removed": None}
+
+
+def test_say_chat_validation(client, on_mac, monkeypatch):
+    _as_say(on_mac)
+    assert client.post("/uplift/api/voices/say/chat",
+                       json={"on": True}).status_code == 400
+    assert client.post("/uplift/api/voices/say/chat",
+                       json={"identifier": "", "on": True}).status_code == 400
+    r = client.post("/uplift/api/voices/say/chat",
+                    json={"identifier": "Nobody", "on": True})
+    assert r.status_code == 404
+    # off a Mac even a real name is refused, and nothing lands in the store
+    monkeypatch.setattr(SE, "available", lambda: False)
+    r = client.post("/uplift/api/voices/say/chat",
+                    json={"identifier": "Zuzana", "on": True})
+    assert r.status_code == 400 and "not available" in r.text
+    assert client.get("/uplift/api/voices").json()["voices"] == []
+
+
+def test_seed_fires_once_on_first_get_voices(client, on_mac, monkeypatch):
+    # the client fixture pre-armed the flag; drop it to exercise the path
+    store = V._load()
+    store.pop("say_chat_seed", None)
+    V._save(store)
+    rows = {"en": {"name": "Samantha", "identifier": "com.x.Samantha",
+                   "locale": "en-US", "quality": "standard",
+                   "downloaded": False, "installed": True},
+            "cs": {"name": "Zuzana (Premium)",
+                  "identifier": "com.x.Zuzana.Premium", "locale": "cs-CZ",
+                  "quality": "premium", "downloaded": False,
+                  "installed": True}}
+    monkeypatch.setattr(SE, "language_voice",
+                        lambda lang, preferred=None: rows.get(lang))
+    out = client.get("/uplift/api/voices").json()["voices"]
+    assert [(v["name"], v["model"]) for v in out] == [
+        ("Samantha", "say:com.x.Samantha"),
+        ("Zuzana (Premium)", "say:com.x.Zuzana.Premium")]
+    assert all(v["id"] and v["created"] for v in out)
+    # deleting a seeded voice must NOT resurrect it (seed is once-per-store)
+    client.delete("/uplift/api/voices/%s" % out[0]["id"])
+    out2 = client.get("/uplift/api/voices").json()["voices"]
+    assert [v["name"] for v in out2] == ["Zuzana (Premium)"]
+
+
+def test_seed_skips_covered_language(client, on_mac, monkeypatch):
+    store = V._load()
+    store.pop("say_chat_seed", None)
+    store["voices"] = [{"id": "zu", "name": "Zu", "model": "say:Zuzana",
+                        "created": 1}]
+    V._save(store)
+    # cs is answered by the legacy row (its tail names the same voice);
+    # en answers nothing -> the seed adds exactly zero rows but marks done
+    monkeypatch.setattr(SE, "language_voice",
+                        lambda lang, preferred=None: {
+                            "cs": {"name": "Zuzana",
+                                   "identifier": "com.x.Zuzana",
+                                   "locale": "cs-CZ"}}.get(lang))
+    out = client.get("/uplift/api/voices").json()["voices"]
+    assert [v["id"] for v in out] == ["zu"]
+    assert V._load().get("say_chat_seed") is True
+
+
+def test_seed_never_fires_off_mac(client, monkeypatch):
+    store = V._load()
+    store.pop("say_chat_seed", None)
+    V._save(store)
+    monkeypatch.setattr(SE, "available", lambda: False)
+    out = client.get("/uplift/api/voices").json()["voices"]
+    assert out == []
+    # flag stays unset so a Mac appearing later still seeds (retryable)
+    assert V._load().get("say_chat_seed") is None
+
+
+def test_marked_chat_voice_speaks_through_the_store_row(client, on_mac,
+                                                          monkeypatch):
+    _as_say(on_mac)
+    monkeypatch.setattr(SE, "synth_bytes",
+                        lambda n, t, speed=None, language=None,
+                               preferred=None: b"RIFF" + b"\0" * 50)
+    r = client.post("/uplift/api/voices/say/chat",
+                    json={"identifier": "Zuzana", "on": True})
+    vid = r.json()["id"]
+    sp = client.post("/uplift/api/voices/speech",
+                     json={"voice": vid, "input": "ahoj"})
+    assert sp.status_code == 200 and sp.content.startswith(b"RIFF")

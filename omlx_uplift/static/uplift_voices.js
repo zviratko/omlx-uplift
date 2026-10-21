@@ -1340,6 +1340,33 @@ function sayRow(v, repaint, opt) {
     } else {
         act.append(play);
     }
+    // SAY-CHAT (user 2026-10-21): 'make available for Uplift web chat' —
+    // the store row carrying 'say:<addr>' IS the availability: the chat
+    // picker lists the store and the speech routes already dispatch the
+    // marker to the say engine. v.added says THIS exact voice is stored.
+    const chat = document.createElement('button');
+    chat.type = 'button';
+    chat.className = 'se-btn vc-chat' + (v.added ? ' on' : '');
+    chat.textContent = tf(v.added ? 'uplift.voices.say_btn_chat_on'
+                                  : 'uplift.voices.say_btn_chat',
+                          v.added ? 'Available in Uplift web chat'
+                                  : 'Make available for Uplift web chat');
+    chat.title = tf(v.added ? 'uplift.voices.say_btn_chat_on_hint'
+                            : 'uplift.voices.say_btn_chat_hint',
+                    v.added ? 'Click to remove it from the chat voice list'
+                            : 'Speak chat replies with this macOS voice');
+    chat.onclick = async () => {
+        chat.disabled = true;
+        try {
+            await D.postJson(`${VAPI}/voices/say/chat`,
+                { identifier: addr, on: !v.added });
+            await repaint();   // the store changed — server truth repaint
+        } catch (e) {
+            chat.disabled = false;
+            D.toast(String(e && e.message || e), 'error');
+        }
+    };
+    act.append(chat);
     if (opt.storeVoice) {
         // the SAME row is also a stored voice (legacy 'say:<Name>'): the
         // voiceRow management, not a duplicate line — EDIT opens the
