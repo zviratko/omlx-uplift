@@ -252,7 +252,10 @@ header.top.has-tagline .logo .logo-below {
     display: inline-block; position: relative; vertical-align: baseline;
     font: 400 8px/1 var(--mono); letter-spacing: 0.02em;
     color: var(--dev-accent, var(--warn, #e8a020)); opacity: .75;
-    margin-left: 3px; top: -0.5em;
+    /* the stamp+version pair (18px tall) sits CENTRED on the wordmark line:
+       the extra -5px puts the pair's middle at the ink middle of 'OMLX DEV'
+       (measured y86 on the default skin; user 2026-10-21). */
+    margin-left: 3px; top: calc(-0.5em - 5px);
     white-space: nowrap; cursor: default;
 }
 /* line 1 clips itself: overflow on the PARENT would cut off the absolute

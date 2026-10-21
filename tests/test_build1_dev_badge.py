@@ -87,6 +87,10 @@ def test_badge_js_prefers_the_keg_name():
                encoding="utf-8").read()
     assert ".logo .logo-build .logo-base {" in css and "top: calc(100% + 2px)" in css
     assert "header.top:not(.has-tagline) .logo .logo-build .logo-base { top: calc(100% + 12px); }" in css
+    # the column's single vertical knob: the whole stamp+version pair is
+    # centred on the wordmark line (user 2026-10-21) — moving the box
+    # moves both sub-lines with it
+    assert "top: calc(-0.5em - 5px)" in css
 
 
 def test_auto_update_label_no_vanilla_tail():
