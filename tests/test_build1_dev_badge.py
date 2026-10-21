@@ -78,13 +78,15 @@ def test_badge_js_prefers_the_keg_name():
     assert "d.keg || d.base_sha" in src.replace("\n", " ").replace("  ", " ") \
         or "!(d.keg || d.base_sha)" in src
     assert "main.textContent = d.keg" in src
-    # line 2 (user 2026-10-20): the vanilla base rides below the logo —
-    # built in JS, positioned by the absolute .logo-base rule in CSS
+    # line 2 of the build column (user 2026-10-20 added it, 2026-10-21 put
+    # it right under the keg stamp): built in JS, anchored to the
+    # superscript box by the absolute .logo-base rule in CSS
     assert "bl.className = 'logo-base'" in src
+    assert "el.append(bl)" in src  # rides the build column, not the logo
     css = open(os.path.join(root, "omlx_uplift", "static", "uplift.css"),
                encoding="utf-8").read()
-    assert ".logo .logo-base {" in css and "top: calc(100% + 13px)" in css
-    assert "header.top.has-tagline .logo .logo-base { top: calc(100% + 34px); }" in css
+    assert ".logo .logo-build .logo-base {" in css and "top: calc(100% + 2px)" in css
+    assert "header.top:not(.has-tagline) .logo .logo-build .logo-base { top: calc(100% + 12px); }" in css
 
 
 def test_auto_update_label_no_vanilla_tail():

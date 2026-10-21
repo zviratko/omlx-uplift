@@ -269,22 +269,24 @@ header.top.has-tagline .logo .logo-below {
     white-space: nowrap; color: var(--dim); opacity: .9;
 }
 header.top.has-tagline .logo .logo-build .lb-patches { display: none; }
-/* KEG-VERSIONED badge line 2 (user 2026-10-20): the vanilla base the dev
-   keg tracks — 'omlx v<ver> · <base7>'. Anchored to the LOGO (not the
-   superscript column) so it reads left-aligned with the wordmark; it is
-   absolute like every logo sub-line, so the header never moves. Under a
-   skin tagline it lands BELOW the tagline block (the reserved 36px strip
-   has room: tagline ends ~y125, this sits ~y128, header bottom 146);
-   without a tagline it sits one step under the patch-id line so the two
-   sub-lines can never graze each other. */
-.logo .logo-base {
-    position: absolute; top: calc(100% + 13px); left: 2px;
+/* KEG-VERSIONED badge line 2 (user 2026-10-20 added it; 2026-10-21 moved
+   it): the vanilla base the dev keg tracks — 'omlx v<ver> · <base7>' on
+   the line RIGHT BELOW the keg stamp, in the free strip alongside the
+   OMLX DEV banner (it used to hang under the skin tagline). Anchored to
+   the superscript BOX like .lb-patches, so it auto-aligns to the stamp
+   wherever the wordmark ends; absolute, so it can never grow the header.
+   On skins without a tagline the patch-id line owns that slot, so there
+   it drops one step under the patches line — the sub-lines can never
+   graze. 200px cap keeps it clear of the tabs strip (measured: the
+   column starts x≈126, tabs x≈348). */
+.logo .logo-build .logo-base {
+    position: absolute; top: calc(100% + 2px); left: 0;
     font: 400 8px/1 var(--mono); letter-spacing: 0.02em;
     color: var(--dim); opacity: .85; white-space: nowrap;
-    max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+    max-width: 200px; overflow: hidden; text-overflow: ellipsis;
     cursor: default;
 }
-header.top.has-tagline .logo .logo-base { top: calc(100% + 34px); }
+header.top:not(.has-tagline) .logo .logo-build .logo-base { top: calc(100% + 12px); }
 @media (max-width: 1140px) { .logo .logo-base { display: none; } }
 @media (max-width: 1140px) { .logo .logo-build { display: none; } }
 header.top .spacer { flex: 1; }
