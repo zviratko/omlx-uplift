@@ -1370,7 +1370,8 @@ const GS_SPEC = [
         opts: 'res.tiers'}},
     {sec: 'res', lab: 'res.custom', show: (ctx) => ctx.tier === 'custom', ctl: {
         k: 'num', sec: 'memory', field: 'memory_guard_custom_ceiling_gb',
-        flat: 'memory_guard_custom_ceiling_gb', min: 1, step: 1, ph: 'res.custom_ph'}},
+        flat: 'memory_guard_custom_ceiling_gb', min: 1, step: 1, ph: 'res.custom_ph',
+        attach: gsCeilingSeed}},
     {env: ['scheduler', 'memory']},
 
     {sec: 'cache', lab: 'cache.enabled', hint: 'cache.enabled_hint', ctl: {
@@ -1520,13 +1521,42 @@ function gsDisabledSync() {
     }
 }
 function gsCtxNow() {
+    // MGC-1 (user 2026-10-21): gated rows follow the QUEUED edit, not the
+    // server baseline — picking a tier is the moment its child row must
+    // appear. (The ceiling used to read the saved value only, so Custom +
+    // ceiling was unreachable: the row stayed hidden until save, and the
+    // save itself 400s because the ceiling cannot be sent unset.)
     return {
-        ccLocal: (gsGet('claude_code', 'mode') || 'local') !== 'cloud',
-        tier: gsGet('memory', 'memory_guard_tier'),
-        gdn: gsGet('cache', 'gdn_snapshot_storage'),
+        ccLocal: (gsEffFlat('claude_code_mode') || 'local') !== 'cloud',
+        tier: gsEffFlat('memory_guard_tier'),
+        gdn: gsEffFlat('gdn_snapshot_storage'),
         gdnEff: gsGdnEff(),
-        prec: gsGet('cache', 'gdn_sidecar_precision'),
+        prec: gsEffFlat('gdn_sidecar_precision'),
     };
+}
+/* MGC-1: the Custom ceiling starts at the server's own auto policy —
+   80% of physical RAM (system.total_memory_bytes rides this same payload;
+   vanilla derives auto_limit_bytes exactly this way). Returns GiB, or null
+   when the box reports no memory size (stay honest-empty, never guess). */
+function gsCeilingDefault() {
+    const total = Number((GS.system || {}).total_memory_bytes);
+    if (!(total > 0)) return null;
+    return Math.max(1, Math.floor(total * 0.8 / (1024 * 1024 * 1024)));
+}
+/* Seed an UNSET ceiling the moment the row materializes: queued as an
+   ordinary staged edit (dirty chip '0 → N', revert stays reachable), so
+   the first SAVE after picking Custom carries a real number and the
+   custom-with-zero 400 cannot happen. A value the user typed or the server
+   stored is never overwritten. */
+function gsCeilingSeed(ctl) {
+    const f = 'memory_guard_custom_ceiling_gb';
+    if (f in gsDirty) return;
+    const cur = gsEffFlat(f);
+    if (cur !== null && cur !== undefined && cur !== '' && Number(cur) > 0) return;
+    const d = gsCeilingDefault();
+    if (d === null) return;
+    if (ctl) ctl.value = String(d);
+    gsQueueSave(f, d);
 }
 function gsVisibilitySync(changedFlat) {
     const ctx = gsCtxNow();
@@ -1582,13 +1612,10 @@ function renderGlobalSettings() {
     const body = document.createElement('div');   // staged; grouped into boxes below
     body.textContent = '';
     const L = GS_LABELS;
-    const ctx = {
-        ccLocal: (gsGet('claude_code', 'mode') || 'local') !== 'cloud',
-        tier: gsGet('memory', 'memory_guard_tier'),
-        gdn: gsGet('cache', 'gdn_snapshot_storage'),
-        gdnEff: gsGdnEff(),
-        prec: gsGet('cache', 'gdn_sidecar_precision'),
-    };
+    // MGC-1: ONE context source — the surgical path (gsVisibilitySync) and
+    // this full rebuild must gate rows on the identical effective values,
+    // or a queued tier flips the row in one path and not the other.
+    const ctx = gsCtxNow();
     // (the old "Global" restart-notice box was removed; the RESTART chip,
     //  red field marks and the RESTART SERVER button carry that meaning now)
     let pendingWarnRow = null;
