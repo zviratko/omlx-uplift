@@ -91,6 +91,12 @@ def test_badge_js_prefers_the_keg_name():
     # centred on the wordmark line (user 2026-10-21) — moving the box
     # moves both sub-lines with it
     assert "top: calc(-0.5em - 5px)" in css
+    # the skin suffix (::after, e.g. artelight's ': WARM') centres on that
+    # pair once BOTH lines are painted: JS arms the trigger, CSS lifts the
+    # pseudo to the full 16px wordmark line box (specificity 0-2-1 beats a
+    # skin's own .logo::after shorthand)
+    assert "classList.add('has-build-lines')" in src
+    assert ".logo.has-build-lines::after { line-height: 16px; }" in css
 
 
 def test_auto_update_label_no_vanilla_tail():

@@ -99,6 +99,10 @@ function renderDevBuild() {
             bl.textContent = baseTxt;
             bl.title = el.title;
             el.append(bl);
+            // the skin's ::after suffix (e.g. artelight's ': WARM') centres
+            // itself on the stamp+version pair only once BOTH lines are
+            // actually painted (user 2026-10-21)
+            el.parentElement?.classList.add('has-build-lines');
         }
     }).catch(() => {});
 }
