@@ -2617,10 +2617,16 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     background: none; border: none; color: var(--ink); cursor: pointer;
     font-family: var(--mono, monospace); font-size: var(--fs-meta);
     padding: 5px 9px; border-radius: calc(var(--radius) / 2);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    /* overflow:hidden above collapses the flexbox auto-min-size to 0, so a
+       long roster SHRANK every row to ~10px instead of scrolling the menu
+       (the garbled TARGET dropdown, user 2026-10-21): keep the natural
+       height — the menu's max-height + overflow-y owns the scrolling. */
+    flex: 0 0 auto; }
 .pt-target-item:hover { background: var(--field); }
 .pt-target-sel { font-weight: 700; }
 .pt-target-load { padding: 4px 9px; }
+.pt-target-more { color: var(--dim, #888); }
 /* patch zone: the dev strip below the table */
 .pt-zone { border: 1px solid var(--line); padding: 10px 12px 12px; margin: 14px 0; }
 .pt-zone-dev { background: color-mix(in srgb, var(--accent, #e0662e) 5%, var(--card)); }

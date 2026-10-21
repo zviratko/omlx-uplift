@@ -390,6 +390,12 @@ function dvTargetMenu(btn, d) {
     head.className = 'pt-target-load pt-detail';
     head.textContent = '…';
     pop.append(head);
+    // PAT-CAP (user 2026-10-21): the menu opens under a table header; the
+    // whole 50-commit log read as a garbled wall — list the recent rows
+    // and offer the rest behind one honest expander.
+    const CAP = 15;
+    const drawRow = (c) => pop.append(mk(`${c.short} — ${c.subject}`,
+                                          false, c.sha, c.sha));
     const finish = (commits) => {
         if (!DV_MENU || DV_MENU.pop !== pop) return;   // closed meanwhile
         head.remove();
@@ -399,10 +405,20 @@ function dvTargetMenu(btn, d) {
             pop.append(head);
             return;
         }
-        for (const c of commits) {
-            if (pinned && c.sha === pinned) continue;  // listed above
-            pop.append(mk(`${c.short} — ${c.subject}`, false, c.sha,
-                c.sha));
+        const rest = commits.filter(c => !(pinned && c.sha === pinned));
+        rest.slice(0, CAP).forEach(drawRow);
+        const hidden = rest.slice(CAP);
+        if (hidden.length) {
+            const more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'pt-target-item pt-target-more';
+            more.textContent = ptMsg('uplift.patches.dev_base_show_all',
+                'show all {n} commits').replace('{n}', rest.length);
+            more.onclick = () => {
+                more.remove();
+                hidden.forEach(drawRow);
+            };
+            pop.append(more);
         }
     };
     document.body.append(pop);
