@@ -76,15 +76,16 @@ function titleFor(id) {
 function renderPopTs(row, id) {
     const pg = PG();
     const win = pg.cardWindow(id);
+    const zoomed = !!(pg.isZoomed && pg.isZoomed(id));
     row.textContent = '';
     for (const sec of C.LAYOUT_WINDOWS) {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'ts-chip chart-pop-ts-chip' + (sec === win ? ' on' : '');
+        b.className = 'ts-chip chart-pop-ts-chip' + (!zoomed && sec === win ? ' on' : '');
         b.textContent = glue().windowLabel(sec);
         b.title = glue().windowLabel(sec);
         b.onclick = () => {
-            if (sec === pg.cardWindow(id)) return;
+            if (sec === pg.cardWindow(id) && !(pg.isZoomed && pg.isZoomed(id))) return;
             pg.setCardWindow(id, sec);
             if (!pg.hasMetric(id)) {
                 // shared-history cards: the pinned x-range and the axis

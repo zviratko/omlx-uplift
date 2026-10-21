@@ -112,6 +112,21 @@ function windowToParam() {
         if (CH_GLUE._blockEl(id)) w = Math.max(w, cardWindow(id));
     return windowParam(w);
 }
+/* COL-1 (user 2026-10-21): /metrics/series and /metrics/hot send columnar
+   arrays [ts[], v[], res[]?] on the wire instead of [{ts, v, res}, ...]
+   objects (~60% smaller JSON, no repeated key names). Unpack into the
+   in-memory point list at the fetch boundary; legacy/viewer object arrays
+   pass through unchanged. */
+function unpackCols(c, bucketS) {
+    if (!Array.isArray(c) || !c.length) return [];
+    if (!Array.isArray(c[0])) return c;
+    const ts = c[0], vs = c[1] || [], rs = c[2];
+    const defRes = bucketS > 0 ? 'avg' : 'fine';
+    const n = ts.length, out = new Array(n);
+    for (let i = 0; i < n; i++)
+        out[i] = { ts: ts[i], v: vs[i], res: (rs && rs[i]) || defRes };
+    return out;
+}
 async function loadChartHistory() {
     if (historyLoading) return;
     historyLoading = true;
@@ -141,9 +156,9 @@ async function loadChartHistory() {
             CH_GLUE.fetchJson(`${API}/uplift/api/metrics/hot?window=${w}`).catch(() => null),
         ]);
         const conv = a => (a && a.series
-            ? a.series.map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })).sort((x, y) => x.ts - y.ts) : []);
+            ? unpackCols(a.series, a.bucket_s).map(x => ({ ts: x.ts * 1000, v: x.v, res: x.res })).sort((x, y) => x.ts - y.ts) : []);
         const convMap = (o, k, scale) => (o && o.series_map && o.series_map[k]
-            ? o.series_map[k].map(x => ({ ts: x.ts * 1000, v: scale ? x.v * scale : x.v, res: x.res })).sort((x, y) => x.ts - y.ts) : []);
+            ? unpackCols(o.series_map[k], o.bucket_s).map(x => ({ ts: x.ts * 1000, v: scale ? x.v * scale : x.v, res: x.res })).sort((x, y) => x.ts - y.ts) : []);
         // U40: sum every per-model 'hot.<model>' series into ONE aggregate
         // history column. A timestamp missing a model still sums the present
         // ones (the collector writes every loaded model each tick, so gaps
@@ -151,7 +166,7 @@ async function loadChartHistory() {
         const sumSeriesMap = (o, scale) => {
             const byTs = new Map(), resByTs = new Map();
             for (const pts of Object.values((o && o.series_map) || {}))
-                for (const x of pts) {
+                for (const x of unpackCols(pts, o && o.bucket_s)) {
                     const ts = x.ts * 1000;
                     byTs.set(ts, (byTs.get(ts) || 0) + x.v * scale);
                     if (x.res === 'hourly') resByTs.set(ts, 'hourly');
@@ -347,6 +362,18 @@ function yAxis(col, opts) {
    points, 60 s history refetches (new bucket boundaries) and window slides
    each re-anchor the ticks: the chart "stretches, then jumps". Pinning the
    range to [now-window, now] makes the window scroll smoothly instead. */
+const cardZoom = {};   // ZOOM-1: cardId -> [minMs, maxMs] from click-and-drag X selection
+function zoomHook(cardId) {
+    return u => {
+        if (!u.select || !(u.select.width >= 8)) return;
+        const min = u.posToVal(u.select.left, 'x');
+        const max = u.posToVal(u.select.left + u.select.width, 'x');
+        if (Number.isFinite(min) && Number.isFinite(max) && max > min) {
+            cardZoom[cardId] = [min, max];
+            renderCardTsRows(true);
+        }
+    };
+}
 function pinnedXRange(cardId) {
     // STALL-FREEZE (user 2026-10-10: "it would be better for the graphs
     // not to move if they don't have data"): the right edge anchors to
@@ -356,7 +383,10 @@ function pinnedXRange(cardId) {
     // nothing arriving on the right — motion only ever means "new data".
     // uPlot passes the live instance to range callbacks, so u.data is
     // exactly what this draw will show. No columns yet -> now-fallback.
+    // ZOOM-1 (user 2026-10-21): click-and-drag X zoom pins [min, max]
+    // until any timeframe control is clicked.
     return (u) => {
+        if (cardZoom[cardId]) return cardZoom[cardId];
         const w = cardWindow(cardId) * 1000;
         let edge = Date.now();
         const d = u && u.data && u.data[0];
@@ -369,7 +399,7 @@ function baseOpts(specs, axes, legendHook) {
     return {
         width: 0, height: 240, padding: [4, 0, 0, 0],
         ms: KIT.TSTAMP_MS,   // x columns are ms-epoch (TSTAMP_MS in chartkit)
-        cursor: { drag: { x: false, y: false }, points: { show: true, size: 6, fill: col.dim } },
+        cursor: { drag: { x: true, y: false, dist: 10 }, points: { show: true, size: 6, fill: col.dim } },
         // Vendored uPlot 1.6.32 has no legend.labels option (DOM legend is
         // styled by .u-legend in uplift.css) — nothing to skin here.
         legend: { show: true, top: true, live: false },
@@ -627,6 +657,7 @@ function tpsBaseOpts(col, popout, boundWin) {
           yAxes: [Object.assign(yAxis(col, { grid: false, label: 'gen tok/s', stroke: col.blue }), { scale: 'y' }),
                   Object.assign(yAxis(col, { side: 1, grid: false, label: 'prefill tok/s', stroke: col.gold, size: 36 }), { scale: 'y2' })] },
         legendUpdater());
+    o.hooks = Object.assign({}, o.hooks, { setSelect: [zoomHook('chart-tps')] });
     if (popout) {
         o.width = 0; o.height = 0;   // setSize by the modal host
         o.axes[0] = Object.assign(xAxis(col, boundWin, 'chart-tps'), { size: 30, grid: true });
@@ -657,6 +688,7 @@ function memBaseOpts(col, popout, boundWin) {
         { scales: { y: { auto: true } },
           yAxes: [Object.assign(yAxis(col, { label: 'GiB', stroke: col.blue }), { scale: 'y' })] },
         legendUpdater());
+    o.hooks = Object.assign({}, o.hooks, { setSelect: [zoomHook('chart-mem')] });
     if (popout) {
         o.width = 0; o.height = 0;
         o.axes[0] = Object.assign(xAxis(col, boundWin, 'chart-mem'), { size: 30, grid: true });
@@ -806,7 +838,8 @@ function cardWindow(id) {
 }
 function setGlobalWindow(sec) {
     if (!(sec > 0)) return;        // NaN/0 (bad select value) must not poison layout
-    if (sec === layout.chartWindowSec) return;
+    for (const k of Object.keys(cardZoom)) if (layout.metricWin[k] === undefined) delete cardZoom[k];
+    if (sec === layout.chartWindowSec) { renderCardTsRows(true); redrawCharts(); drawAllMetricCharts(); return; }
     layout.chartWindowSec = sec;
     C.saveLayout(localStorage, layout);
     renderCardTsRows(true);
@@ -829,6 +862,7 @@ function setTpsSmooth(k) {
     redrawCharts();
 }
 function setCardWindow(id, sec) {
+    delete cardZoom[id];
     if (sec === layout.chartWindowSec) delete layout.metricWin[id];
     else layout.metricWin[id] = sec;
     C.saveLayout(localStorage, layout);
@@ -857,7 +891,7 @@ function openTsPop(row, id) {
     for (const sec of C.LAYOUT_WINDOWS) {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'ts-pop-item' + (sec === cardWindow(id) ? ' on' : '');
+        b.className = 'ts-pop-item' + (!cardZoom[id] && sec === cardWindow(id) ? ' on' : '');
         b.textContent = windowLabel(sec);
         b.onclick = () => { closeTsPop(); setCardWindow(id, sec); };
         tsPop.append(b);
@@ -933,7 +967,7 @@ function renderCardTsRows(force) {
         row.classList.remove('ts-collapsed');
         for (const sec of C.LAYOUT_WINDOWS) {
             const b = document.createElement('button');
-            b.type = 'button'; b.className = 'ts-chip' + (sec === win ? ' on' : '');
+            b.type = 'button'; b.className = 'ts-chip' + (!cardZoom[id] && sec === win ? ' on' : '');
             b.textContent = windowLabel(sec);
             b.title = windowLabel(sec);
             b.onclick = () => setCardWindow(id, sec);
@@ -1158,12 +1192,13 @@ function metricOpts(id, def, col, opts) {
         width: pop ? 600 : 300, height: pop ? 420 : 100,
         padding: pop ? [10, 8, 4, 0] : [8, 4, 6, 0],   // top: label-centred ticks clip without it; bottom: 0-line gap (2026-09-26)
         ms: KIT.TSTAMP_MS,   // x columns are ms-epoch (TSTAMP_MS in chartkit)
-        cursor: { drag: { x: false, y: false }, points: { show: true, size: pop ? 6 : 5, fill: col.dim } },
+        cursor: { drag: { x: true, y: false, dist: 10 }, points: { show: true, size: pop ? 6 : 5, fill: col.dim } },
         // SWEEP178: live:false like the shared charts. With live:true the
         // vendored build re-paints the value cells on its own deferred draw
         // pass and stamps '—' (null through series.value) right after our
         // legendUpdater painted the real values; the updater owns the cells.
         legend: { show: mult, live: false },
+        hooks: { setSelect: [zoomHook(id)] },
         scales, axes, series,
     };
     if (nStack > 1) {
@@ -1254,6 +1289,7 @@ function createMetricCard(def, park) {
     pad.append(h2, body);
     frame.append(chrome, pad); content.append(frame); sec.append(content);
     $('grid').append(sec);
+    if (CH_GLUE.applyI18n) CH_GLUE.applyI18n(sec);
     const fmt = metricFormat(def);
     metricCharts.set(id, { chart: null, sec, host, fmt, def, nameEl: title, nowEl: now, noteEl: note });
     if (!park) ensureMetricPlot(id);
@@ -1500,7 +1536,9 @@ function metricFetch(id, force) {
     CH_GLUE.fetchJson(url)
         .then(d => {
             cache.fails = 0;
-            const map = d.series_map || {};
+            const rawMap = d.series_map || {};
+            const map = {};
+            for (const [k, raw] of Object.entries(rawMap)) map[k] = unpackCols(raw, d.bucket_s);
             if (d.after !== undefined) {
                 // TAIL-1 incremental: merge-append only points past what we
                 // hold; a hole (missed ticks — sleep, lease race) trips
@@ -1924,7 +1962,7 @@ async function refreshPowerChips() {
             encodeURIComponent('pwr.total_w,therm.cpu_temp_c,therm.gpu_temp_c') +
             '&window=5m');
         const map = (d && d.series_map) || {};
-        const fresh = k => (map[k] || []).filter(p => p.v != null && now - p.ts * 1000 < 5 * 60_000 + 15_000);
+        const fresh = k => unpackCols(map[k], d && d.bucket_s).filter(p => p.v != null && now - p.ts * 1000 < 5 * 60_000 + 15_000);
         const freshMap = { 'pwr.total_w': fresh('pwr.total_w'),
                            'therm.cpu_temp_c': fresh('therm.cpu_temp_c'),
                            'therm.gpu_temp_c': fresh('therm.gpu_temp_c') };
@@ -2042,6 +2080,7 @@ window.Uplift.charts = {
     get usageChart() { return usageChart; },
     // NAT-6 chip fix: node tests slice/verify the chip aggregation rule
     chipReadout: chipReadout,
+    unpackCols: unpackCols,
     /* POPOUT-1: registration + the read/build surface the pop-out module
        needs (it must never reach into this IIFE's internals any other
        way; getters keep the values live across theme re-inits). */
@@ -2053,6 +2092,7 @@ window.Uplift.charts = {
         bindCursorUpdater: c => bindCursorUpdater(c),
         pinnedXRange: id => pinnedXRange(id),
         cardWindow: id => cardWindow(id),
+        isZoomed: id => Boolean(cardZoom[id]),
         // POP-TS-1 (user 2026-10-10): the pop-out owns a timeframe row;
         // changing it goes through the SAME setter the card chips use, so
         // the shared window state never forks (card behind follows too).

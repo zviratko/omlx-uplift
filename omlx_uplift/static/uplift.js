@@ -190,11 +190,10 @@ function applyI18n(root) {
         el.setAttribute('placeholder', s === key ? el.dataset.enPh : s);
     });
 }
+const LOCALE_CACHE_KEY = 'omlx-uplift-locale-v1';
 async function loadLocale(lang) {
-    try {
-        const url = API + '/uplift/api/locale' + (lang ? '?lang=' + encodeURIComponent(lang) : '');
-        const j = await fetchJson(url);   // FE-2: same-origin cookies are fetch's default anyway
-        C.setLocale(j.lang, j.strings);
+    const applyCatalog = (lg, strs) => {
+        C.setLocale(lg, strs);
         GSY.gsLocalize();
         applyI18n(document);
         // UP-5: JS-built labels the static applyI18n pass cannot reach.
@@ -205,7 +204,29 @@ async function loadLocale(lang) {
         if (typeof renderSkinsMenu === 'function' && SKIN_BASES.size) renderSkinsMenu();
         CH.relabelExplore();   // JS-built labels (chips, cell titles) too
         updateModeLabels(); // UPLOADER-1: mode badges are JS-built, same re-label need
-        document.documentElement.lang = j.lang;
+        document.documentElement.lang = lg;
+    };
+    const vstamp = document.documentElement.dataset.vstamp || '';
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(LOCALE_CACHE_KEY)); } catch (_) {}
+    if (cached && cached.lang && cached.strings && (!lang || cached.lang === lang)) {
+        // I18N-CACHE-1 (user 2026-10-21): apply cached dictionary synchronously
+        // before awaiting the server so labels resolve in 0 ms even when the
+        // Python event loop is saturated under heavy inference load.
+        applyCatalog(cached.lang, cached.strings);
+        if (vstamp && cached.v === vstamp && lang && cached.lang === lang) return;
+    }
+    try {
+        const url = API + '/uplift/api/locale' + (lang ? '?lang=' + encodeURIComponent(lang) : '');
+        const j = await fetchJson(url);   // FE-2: same-origin cookies are fetch's default anyway
+        try {
+            localStorage.setItem(LOCALE_CACHE_KEY, JSON.stringify({
+                v: vstamp, lang: j.lang, strings: j.strings,
+            }));
+        } catch (_) {}
+        if (!cached || cached.lang !== j.lang || cached.v !== vstamp || (lang && cached.lang !== lang)) {
+            applyCatalog(j.lang, j.strings);
+        }
     } catch (e) {
         /* key-fallback keeps the UI fully English; not worth a toast */
         console.warn('uplift locale load failed:', e);

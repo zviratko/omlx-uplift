@@ -142,6 +142,24 @@ class _FakeStore:
         return [{"ts": float(b * bucket_s), "v": sum(vs) / len(vs)}
                 for b, vs in sorted(buckets.items())]
 
+    def series_multi(self, keys, window_s, now=None, instance=None, since=None):
+        return {k: self.series(k, window_s, now, instance, since) for k in keys}
+
+    def series_binned_multi(self, keys, window_s, bucket_s, instance=None,
+                            since=None):
+        return {k: self.series_binned(k, window_s, bucket_s, instance, since)
+                for k in keys}
+
+
+def _unpack(cols, bucket_s=0):
+    """Unpack wire columnar [ts[], v[], res[]?] into [{'ts', 'v', 'res'}]."""
+    assert isinstance(cols, list) and len(cols) in (2, 3)
+    ts, vs = cols[0], cols[1]
+    rs = cols[2] if len(cols) == 3 else None
+    def_res = "avg" if bucket_s > 0 else "fine"
+    return [{"ts": ts[i], "v": vs[i], "res": rs[i] if rs else def_res}
+            for i in range(len(ts))]
+
 
 def _req(ae: str = ""):
     """Minimal stub Request for direct handler calls (PERF-1: the gzip
@@ -175,7 +193,8 @@ async def test_single_key_backcompat_shape():
         d = _payload(await _call(key="avg_generation_tps", window="1h"))
     assert d["key"] == "avg_generation_tps"
     assert d["bucket_s"] == 0
-    assert len(d["series"]) == 10
+    assert len(d["series"]) == 2
+    assert len(d["series"][0]) == 10 and len(d["series"][1]) == 10
 
 
 async def test_multi_keys_returns_series_map():
@@ -189,7 +208,7 @@ async def test_multi_keys_returns_series_map():
         d = _payload(await _call(keys="avg_generation_tps,rate.requests_s",
                                   window="1h"))
     assert set(d["series_map"]) == {"avg_generation_tps", "rate.requests_s"}
-    assert len(d["series_map"]["rate.requests_s"]) == 3
+    assert len(d["series_map"]["rate.requests_s"][0]) == 3
 
 
 async def test_long_window_gets_binned_and_advertises_bucket():
@@ -201,14 +220,16 @@ async def test_long_window_gets_binned_and_advertises_bucket():
          patch.object(up_m, "_hourly_points", return_value=[]):
         d = _payload(await _call(key="avg_generation_tps", window="7d"))
     assert d["bucket_s"] == 600
-    assert len(d["series"]) <= 7 * 86400 // 600
-    assert all(p["res"] == "avg" for p in d["series"])
+    assert len(d["series"]) == 2   # pure avg -> no 3rd res column needed
+    pts = _unpack(d["series"], d["bucket_s"])
+    assert len(pts) <= 7 * 86400 // 600
+    assert all(p["res"] == "avg" for p in pts)
     # bucket timestamps are epoch-aligned multiples of the bucket
     assert all(float(p["ts"]).is_integer() and p["ts"] % 600 == 0
-               for p in d["series"])
+               for p in pts)
     # SQUEEZE parity: wire values carry 6 significant digits at most
     assert all(len(repr(p["v"]).replace(".", "").replace("-", "").lstrip("0")) <= 7
-               for p in d["series"])
+               for p in pts)
 
 
 async def test_binned_long_window_backfills_hourly_for_uncovered_hours():
@@ -218,12 +239,13 @@ async def test_binned_long_window_backfills_hourly_for_uncovered_hours():
     # fine spans the last 10 h; hourly answers for the 3 d before that
     hourlies = [{"ts": float(3600 * (h0 - 24 * 7 + hh)), "v": 5.0, "res": "hourly"}
                 for hh in range(0, 24 * 3)]
-    store = _FakeStore({"a": fine})
+    store = _FakeStore({"avg_generation_tps": fine})
     collector = MagicMock(store=store)
     with patch.object(up_m, "get_collector", return_value=collector), \
          patch.object(up_m, "_hourly_points", return_value=hourlies):
-        d = _payload(await _call(key="a", window="7d"))
-    pts = d["series"]
+        d = _payload(await _call(key="avg_generation_tps", window="7d"))
+    assert len(d["series"]) == 3   # mixed avg + hourly carries 3rd res column
+    pts = _unpack(d["series"], d["bucket_s"])
     covered = {int(p["ts"] // 3600) for p in pts if p["res"] == "avg"}
     # every 'hourly' point sits in an hour the binned layer did not cover
     for p in pts:
@@ -271,18 +293,19 @@ async def test_tail_fetch_after_returns_only_newer_points():
                       side_effect=AssertionError("hourly must not run on a tail")):
         d = _payload(await _call(keys="a", window="5m", after=cut))
     assert d["after"] == cut
-    assert len(d["series_map"]["a"]) == 2
+    pts_a = _unpack(d["series_map"]["a"], d["bucket_s"])
+    assert len(pts_a) == 2
     assert d["bucket_s"] == 0
-    assert all(p["res"] == "fine" for p in d["series_map"]["a"])
+    assert all(p["res"] == "fine" for p in pts_a)
     # single-key backcompat shape carries the marker too
     with patch.object(up_m, "get_collector", return_value=collector):
         d1 = _payload(await _call(key="a", window="5m", after=cut))
-    assert d1["after"] == cut and len(d1["series"]) == 2
+    assert d1["after"] == cut and len(d1["series"][0]) == 2
     # after=0 (default) = full fetch, no marker
     with patch.object(up_m, "get_collector", return_value=collector), \
          patch.object(up_m, "_hourly_points", return_value=[]):
         d2 = _payload(await _call(keys="a", window="5m"))
-    assert "after" not in d2 and len(d2["series_map"]["a"]) == 5
+    assert "after" not in d2 and len(d2["series_map"]["a"][0]) == 5
 
 
 async def test_no_keys_is_400():
@@ -306,7 +329,7 @@ async def test_metrics_hot_discovers_per_model_keys():
                                            is_admin=True))
     assert d["keys"] == ["hot.m1", "hot.m2"]
     # drained model keeps its trailing ZERO — that point is the whole point
-    assert d["series_map"]["hot.m2"][-1]["v"] == 0.0
+    assert d["series_map"]["hot.m2"] == [[100.0, 105.0], [5.0, 0.0]]
     assert store.keys_with_prefix.call_args[0][0] == "hot."
 
 
@@ -321,8 +344,7 @@ async def test_metrics_hot_binned_for_long_windows():
         d = _payload(await up.metrics_hot(request=_req("gzip"), window="24h",
                                            is_admin=True))
     assert d["bucket_s"] == 60        # NOT 1200 — the ladder is per-window
-    assert d["series_map"]["hot.m1"] == [{"ts": 1000.0, "v": 3.5,
-                                            "res": "avg"}]
+    assert d["series_map"]["hot.m1"] == [[1000.0], [3.5]]
     store.series_binned.assert_called_once()
     store.series.assert_not_called()
 
@@ -609,3 +631,57 @@ def test_hourly_cache_efficiency_is_a_percent():
 def test_hourly_cache_efficiency_guards():
     assert up._HOURLY_DERIVE["cache_efficiency"]({"prompt_tokens": 0, "cached_tokens": 0}) is None
     assert up._HOURLY_DERIVE["cache_efficiency"]({"prompt_tokens": 100, "cached_tokens": 100}) == 100.0
+
+
+def test_samples_1m_rollup_and_multi_key_batch(tmp_path):
+    """ROLLUP-1 + MULTI-1 + THREAD-1:
+    - AFTER INSERT trigger populates samples_1m with running mean + count;
+    - series_binned / series_binned_multi read from samples_1m (60 s and
+      600 s buckets) with exact count-weighted averages;
+    - series_multi and series_binned_multi answer multiple keys in one SQL
+      query;
+    - worker threads each get their own read-only SQLite handle via
+      threading.local() without lock contention."""
+    import concurrent.futures
+    from omlx_uplift import store as st
+
+    s = st.MetricsStore(path=tmp_path / "m.sqlite3")
+    try:
+        assert s._1m_ready is True
+        now = time.time()
+        b0 = int(now // 600) * 600 - 600
+        # Minute 0: two samples (10, 20 -> mean 15, n=2)
+        s.write_samples({"k1": 10.0, "k2": 1.0}, ts=b0 + 5)
+        s.write_samples({"k1": 20.0, "k2": 3.0}, ts=b0 + 35)
+        # Minute 1: one sample (45 -> mean 45, n=1); 10-min weighted mean
+        # across minute 0 (n=2, sum=30) + minute 1 (n=1, sum=45) = 75/3 = 25.0
+        s.write_samples({"k1": 45.0, "k2": 5.0}, ts=b0 + 65)
+
+        row_1m = s._conn.execute(
+            "SELECT value, n FROM samples_1m WHERE key='k1' AND ts=?",
+            (float(b0),),
+        ).fetchone()
+        assert row_1m == (15.0, 2)
+
+        m60 = s.series_binned_multi(["k1", "k2"], 3600, 60)
+        assert {"ts": float(b0), "v": 15.0} in m60["k1"]
+        assert {"ts": float(b0 + 60), "v": 45.0} in m60["k1"]
+        assert {"ts": float(b0), "v": 2.0} in m60["k2"]
+
+        m600 = s.series_binned_multi(["k1", "k2"], 3600, 600)
+        assert {"ts": float(b0), "v": 25.0} in m600["k1"]
+        assert {"ts": float(b0), "v": 3.0} in m600["k2"]
+
+        raw_multi = s.series_multi(["k1", "k2"], 3600)
+        assert [p["v"] for p in raw_multi["k1"]] == [10.0, 20.0, 45.0]
+        assert [p["v"] for p in raw_multi["k2"]] == [1.0, 3.0, 5.0]
+
+        # Concurrent reads across 4 worker threads open distinct ro handles
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+            futs = [ex.submit(lambda: (id(s._get_rconn()),
+                                       s.series_multi(["k1", "k2"], 3600)["k1"]))
+                    for _ in range(8)]
+            res = [f.result() for f in futs]
+        assert all(len(pts) == 3 for _, pts in res)
+    finally:
+        s.close()

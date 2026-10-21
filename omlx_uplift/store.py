@@ -264,20 +264,27 @@ class MetricsStore:
         # serves every tab.
         self._keys_lock = threading.Lock()
         self._keys_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
+        self._rlocal = threading.local()
+        self._rconns_lock = threading.Lock()
+        self._rconns: list[sqlite3.Connection] = []
+        self._1m_ready = False
         if read_only:
             if not self.path.exists():
                 raise FileNotFoundError(self.path)
             self._conn = sqlite3.connect(
                 f"file:{self.path}?mode=ro", uri=True, check_same_thread=False
             )
-            self._rconn = self._conn     # SPLIT-READ: viewer reads rw conn
             self._rlock = self._lock
             self._alien_refreshing = False
-            # read-only viewer: FTS is usable iff the table already exists
+            # read-only viewer: FTS and 1m rollups are usable iff already built
             try:
                 self._has_fts = bool(self._conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE name='request_fts'"
                 ).fetchone())
+                r1m = self._conn.execute(
+                    "SELECT value FROM meta WHERE key='samples_1m_backfilled'"
+                ).fetchone()
+                self._1m_ready = bool(r1m and r1m[0] == "1")
             except sqlite3.Error:
                 pass
         else:
@@ -296,21 +303,33 @@ class MetricsStore:
             self._conn.execute("PRAGMA journal_size_limit=4194304")
             self._conn.execute("PRAGMA busy_timeout=5000")
             self._init_schema()
-            # SPLIT-READ (starvation fix, 2026-10-14): request-path reads
-            # used to take the SAME lock + connection as the collector's
-            # writes — every chart read queued behind whatever the 5 s tick
-            # held the lock for (measured: /metrics/latest 0.44-1.24 s,
-            # the FIRST read of each request paying the convoy). A separate
-            # read-only connection lets WAL do its job: readers never block
-            # on the writer and vice versa. The rlock only serialises
-            # readers against each other (sqlite connections are not
-            # thread-safe); every hold is a microsecond query.
-            self._rconn = sqlite3.connect(
+            # SPLIT-READ + THREAD-LOCAL (user 2026-10-21): WAL gives each
+            # read-only connection lock-free snapshot isolation (readers
+            # never block the writer or each other, and never see an
+            # uncommitted tick because write_tick commits atomically). The
+            # old single _rconn + _rlock serialized parallel worker threads
+            # one-by-one; _get_rconn() gives each thread its own ro handle
+            # via threading.local(), so reads need no Python lock at all.
+            self._rlock = threading.RLock()
+            self._alien_refreshing = False
+
+    def _get_rconn(self) -> sqlite3.Connection:
+        if str(self.path) == ":memory:":
+            return self._conn
+        conn = getattr(self._rlocal, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(
                 f"file:{self.path}?mode=ro", uri=True,
                 check_same_thread=False, timeout=2.0,
             )
-            self._rlock = threading.RLock()
-            self._alien_refreshing = False
+            self._rlocal.conn = conn
+            with self._rconns_lock:
+                self._rconns.append(conn)
+        return conn
+
+    @property
+    def _rconn(self) -> sqlite3.Connection:
+        return self._get_rconn()
 
     def _init_schema(self):
         with self._lock, self._conn:
@@ -395,6 +414,70 @@ class MetricsStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS ix_samples_ts_key "
                 "ON samples(ts, key, instance)")
+            # ROLLUP-1 (user 2026-10-21): 1-minute rollup table so long
+            # windows (24h, 7d, 30d) scan 12x fewer rows than raw 5 s
+            # samples. Maintained in-transaction via an AFTER INSERT
+            # trigger on `samples` (zero extra Python round-trips or
+            # commits; raw INSERTs in tests stay in sync too). instance
+            # stores '' for NULL so ON CONFLICT(key, ts, instance) always
+            # matches (SQLite treats NULL != NULL in UNIQUE indexes).
+            self._conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS samples_1m (
+                    ts REAL NOT NULL,
+                    key TEXT NOT NULL,
+                    value REAL NOT NULL,
+                    n INTEGER NOT NULL DEFAULT 1,
+                    instance TEXT NOT NULL DEFAULT ''
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_samples_1m_pk
+                    ON samples_1m(key, ts, instance);
+                CREATE TRIGGER IF NOT EXISTS tr_samples_1m
+                AFTER INSERT ON samples
+                BEGIN
+                    INSERT INTO samples_1m(ts, key, value, n, instance)
+                    VALUES (CAST(NEW.ts / 60 AS INTEGER) * 60, NEW.key,
+                            NEW.value, 1, COALESCE(NEW.instance, ''))
+                    ON CONFLICT(key, ts, instance) DO UPDATE SET
+                        value = (samples_1m.value * samples_1m.n + excluded.value)
+                                / (samples_1m.n + 1),
+                        n = samples_1m.n + 1;
+                END;
+                """
+            )
+            done_1m = self._conn.execute(
+                "SELECT value FROM meta WHERE key='samples_1m_backfilled'"
+            ).fetchone()
+            if done_1m and done_1m[0] == "1":
+                self._1m_ready = True
+            else:
+                bounds = self._conn.execute(
+                    "SELECT MIN(ts), MAX(ts) FROM samples"
+                ).fetchone()
+                lo, hi = (bounds[0], bounds[1]) if bounds else (None, None)
+                if lo is None or hi is None:
+                    self._conn.execute(
+                        "INSERT INTO meta(key, value) VALUES"
+                        "('samples_1m_backfilled','1') "
+                        "ON CONFLICT(key) DO UPDATE SET value='1'"
+                    )
+                    self._1m_ready = True
+                elif hi - lo <= 7200:
+                    self._backfill_1m_range(float(lo), float(hi) + 60.0)
+                    self._conn.execute(
+                        "INSERT INTO meta(key, value) VALUES"
+                        "('samples_1m_backfilled','1') "
+                        "ON CONFLICT(key) DO UPDATE SET value='1'"
+                    )
+                    self._1m_ready = True
+                else:
+                    self._1m_ready = False
+                    threading.Thread(
+                        target=self._backfill_1m_bg,
+                        args=(float(lo), float(hi)),
+                        daemon=True,
+                        name="uplift-1m-backfill",
+                    ).start()
             # ZOMBIE-1 boot repair (see request_log stale-drop): rows the
             # OLD tracker code abandoned mid-flight were persisted without
             # a terminal update — a 42-h 'queued' row survived in the live
@@ -684,6 +767,43 @@ class MetricsStore:
             for row in request_rows:
                 self.upsert_request(row, in_tx=True)
 
+    def _backfill_1m_range(self, t_from: float, t_to: float):
+        b_from = int(t_from // 60) * 60
+        b_to = int(t_to // 60) * 60 + 60
+        self._conn.execute(
+            """INSERT INTO samples_1m(ts, key, value, n, instance)
+               SELECT CAST(ts / 60 AS INTEGER) * 60 AS b,
+                      key, AVG(value), COUNT(*), COALESCE(instance, '')
+                 FROM samples
+                WHERE ts >= ? AND ts < ?
+                GROUP BY key, b, COALESCE(instance, '')
+               ON CONFLICT(key, ts, instance) DO UPDATE SET
+                   value = excluded.value,
+                   n = excluded.n""",
+            (b_from, b_to),
+        )
+
+    def _backfill_1m_bg(self, lo: float, hi: float):
+        step = 6 * 3600.0
+        cur = float(int(lo // 60) * 60)
+        end = float(int(hi // 60) * 60 + 60)
+        try:
+            while cur < end:
+                nxt = min(cur + step, end)
+                with self._lock, self._conn:
+                    self._backfill_1m_range(cur, nxt)
+                cur = nxt
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT INTO meta(key, value) VALUES"
+                    "('samples_1m_backfilled','1') "
+                    "ON CONFLICT(key) DO UPDATE SET value='1'"
+                )
+            self._1m_ready = True
+            log.info("uplift store: samples_1m backfill complete")
+        except sqlite3.Error as exc:
+            log.warning("uplift store: samples_1m backfill stopped: %s", exc)
+
     def purge(self, metrics_days: int | None = None,
               log_days: int | None = None):
         """Split retention: samples age out at metrics_days, request rows
@@ -714,6 +834,7 @@ class MetricsStore:
         cutoff_l = time.time() - ldays * 86400
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff_m,))
+            self._conn.execute("DELETE FROM samples_1m WHERE ts < ?", (cutoff_m,))
             gone = self._conn.execute(
                 "SELECT id FROM requests "
                 "WHERE COALESCE(ts_end, ts_start) < ?",
@@ -805,8 +926,6 @@ class MetricsStore:
         (stale is fine: it only decides which FOREIGN tags to hide, and a
         just-started co-tenant is filtered within one TTL+scan of its
         first write), while a daemon thread refreshes an expired cache.
-        Called with _rlock held by the read path; the refresh thread takes
-        the lock itself.
         """
         now = time.monotonic()
         cached = self._alien_cache
@@ -856,9 +975,7 @@ class MetricsStore:
         """(sql fragment, args) restricting a `samples` read to INSTANCE.
         None: no filter (viewer/CLI browse — everything by design).
         VISIBLE_INSTANCES: exclude live-alien writers (HIST-1).
-        Anything else: legacy exact match plus untagged rows, unchanged.
-        Read-path callers must hold _rlock; the visible branch consults the
-        (never-request-blocking) hidden-tags cache — see _hidden_tags."""
+        Anything else: legacy exact match plus untagged rows, unchanged."""
         if instance is None:
             return "", []
         if instance == VISIBLE_INSTANCES:
@@ -870,7 +987,20 @@ class MetricsStore:
             return f" AND (instance IS NULL OR instance NOT IN ({ph}))", list(hidden)
         return " AND (instance IS NULL OR instance=?)", [instance]
 
-    # -- read side (API/viewer) -------------------------------------------
+    def _instance_sql_1m(self, instance: str | None) -> tuple[str, list]:
+        """Instance filter for `samples_1m` (untagged legacy rows store ''
+        instead of NULL so the unique PK works)."""
+        if instance is None:
+            return "", []
+        if instance == VISIBLE_INSTANCES:
+            hidden = self._hidden_tags()
+            if not hidden:
+                return "", []
+            ph = ",".join("?" * len(hidden))
+            return f" AND instance NOT IN ({ph})", list(hidden)
+        return " AND instance IN ('', ?)", [instance]
+
+    # -- read side (API/viewer, lock-free via per-thread ro WAL handles) ---
 
     def series(self, key: str, window_s: float, now: float | None = None,
                instance: str | None = None,
@@ -886,38 +1016,127 @@ class MetricsStore:
         # (key, ts) index prefix turns it into a seek, not a filter.
         if since is not None and since > t0:
             t0 = since
-        with self._rlock:      # SPLIT-READ: ro conn, never behind a writer
-            frag, args = self._instance_sql(instance)
-            cur = self._rconn.execute(
-                "SELECT ts, value FROM samples WHERE key=? AND ts>=?" + frag
-                + " ORDER BY ts",
-                [key, t0] + args,
-            )
-            return [{"ts": r[0], "v": r[1]} for r in cur.fetchall()]
+        frag, args = self._instance_sql(instance)
+        cur = self._get_rconn().execute(
+            "SELECT ts, value FROM samples WHERE key=? AND ts>=?" + frag
+            + " ORDER BY ts",
+            [key, t0] + args,
+        )
+        return [{"ts": r[0], "v": r[1]} for r in cur.fetchall()]
+
+    def series_multi(self, keys: list[str], window_s: float,
+                     now: float | None = None,
+                     instance: str | None = None,
+                     since: float | None = None) -> dict[str, list[dict]]:
+        """Batch read for multiple KEYS in a single SQL statement."""
+        if not keys:
+            return {}
+        if len(keys) == 1:
+            k = keys[0]
+            return {k: self.series(k, window_s, now, instance, since)}
+        t0 = (now or time.time()) - window_s
+        if since is not None and since > t0:
+            t0 = since
+        ph = ",".join("?" * len(keys))
+        frag, args = self._instance_sql(instance)
+        cur = self._get_rconn().execute(
+            f"SELECT key, ts, value FROM samples"
+            f" WHERE key IN ({ph}) AND ts>=?{frag}"
+            f" ORDER BY key, ts",
+            list(keys) + [t0] + args,
+        )
+        out: dict[str, list[dict]] = {k: [] for k in keys}
+        for k, ts, v in cur.fetchall():
+            out[k].append({"ts": ts, "v": v})
+        return out
 
     def series_binned(self, key: str, window_s: float, bucket_s: int,
                       instance: str | None = None,
                       since: float | None = None) -> list[dict]:
         """KEY over the window aggregated into equal-width, epoch-aligned
         buckets (PERF-1): AVG computed INSIDE SQLite, one row per bucket
-        back. The raw fetch this replaces paid the whole fine layer twice
-        — once as SQLite rows into Python, once as JSON bytes onto the
-        wire (24 h = 17,280 points/key) — for a chart that is ~700 px
-        wide. Values carry the bucket START (same convention as
-        _downsample); res labeling / wire rounding stay at the route."""
+        back. ROLLUP-1 reads from `samples_1m` (12x fewer rows than 5 s
+        samples) whenever the 1-minute rollup table is ready and the
+        bucket is a whole multiple of 60 s."""
         t0 = time.time() - window_s
         if since is not None and since > t0:
             t0 = since
-        with self._rlock:      # SPLIT-READ: ro conn, never behind a writer
-            frag, args = self._instance_sql(instance)
-            cur = self._rconn.execute(
-                "SELECT CAST(ts / ? AS INTEGER) * ? AS b, AVG(value)"
-                " FROM samples WHERE key=? AND ts>=?" + frag +
-                " GROUP BY b ORDER BY b",
-                [bucket_s, bucket_s, key, t0] + args,
-            )
+        conn = self._get_rconn()
+        if self._1m_ready and since is None and bucket_s >= 60 and bucket_s % 60 == 0:
+            t0_m = int(t0 // 60) * 60
+            frag, args = self._instance_sql_1m(instance)
+            if bucket_s == 60:
+                cur = conn.execute(
+                    "SELECT ts, SUM(value * n) / SUM(n)"
+                    " FROM samples_1m WHERE key=? AND ts>=?" + frag +
+                    " GROUP BY ts ORDER BY ts",
+                    [key, t0_m] + args,
+                )
+            else:
+                cur = conn.execute(
+                    "SELECT CAST(ts / ? AS INTEGER) * ? AS b,"
+                    " SUM(value * n) / SUM(n)"
+                    " FROM samples_1m WHERE key=? AND ts>=?" + frag +
+                    " GROUP BY b ORDER BY b",
+                    [bucket_s, bucket_s, key, t0_m] + args,
+                )
             return [{"ts": float(r[0]), "v": float(r[1])}
                     for r in cur.fetchall() if r[1] is not None]
+        frag, args = self._instance_sql(instance)
+        cur = conn.execute(
+            "SELECT CAST(ts / ? AS INTEGER) * ? AS b, AVG(value)"
+            " FROM samples WHERE key=? AND ts>=?" + frag +
+            " GROUP BY b ORDER BY b",
+            [bucket_s, bucket_s, key, t0] + args,
+        )
+        return [{"ts": float(r[0]), "v": float(r[1])}
+                for r in cur.fetchall() if r[1] is not None]
+
+    def series_binned_multi(self, keys: list[str], window_s: float,
+                            bucket_s: int, instance: str | None = None,
+                            since: float | None = None) -> dict[str, list[dict]]:
+        """Batch bucketed read for multiple KEYS in a single SQL statement."""
+        if not keys:
+            return {}
+        if len(keys) == 1:
+            k = keys[0]
+            return {k: self.series_binned(k, window_s, bucket_s, instance, since)}
+        t0 = time.time() - window_s
+        if since is not None and since > t0:
+            t0 = since
+        ph = ",".join("?" * len(keys))
+        conn = self._get_rconn()
+        out: dict[str, list[dict]] = {k: [] for k in keys}
+        if self._1m_ready and since is None and bucket_s >= 60 and bucket_s % 60 == 0:
+            t0_m = int(t0 // 60) * 60
+            frag, args = self._instance_sql_1m(instance)
+            if bucket_s == 60:
+                cur = conn.execute(
+                    f"SELECT key, ts, SUM(value * n) / SUM(n)"
+                    f" FROM samples_1m WHERE key IN ({ph}) AND ts>=?{frag}"
+                    f" GROUP BY key, ts ORDER BY key, ts",
+                    list(keys) + [t0_m] + args,
+                )
+            else:
+                cur = conn.execute(
+                    f"SELECT key, CAST(ts / ? AS INTEGER) * ? AS b,"
+                    f" SUM(value * n) / SUM(n)"
+                    f" FROM samples_1m WHERE key IN ({ph}) AND ts>=?{frag}"
+                    f" GROUP BY key, b ORDER BY key, b",
+                    [bucket_s, bucket_s] + list(keys) + [t0_m] + args,
+                )
+        else:
+            frag, args = self._instance_sql(instance)
+            cur = conn.execute(
+                f"SELECT key, CAST(ts / ? AS INTEGER) * ? AS b, AVG(value)"
+                f" FROM samples WHERE key IN ({ph}) AND ts>=?{frag}"
+                f" GROUP BY key, b ORDER BY key, b",
+                [bucket_s, bucket_s] + list(keys) + [t0] + args,
+            )
+        for k, b, v in cur.fetchall():
+            if v is not None:
+                out[k].append({"ts": float(b), "v": float(v)})
+        return out
 
     def latest(self, key: str, instance: str | None = None) -> dict | None:
         """Newest stored point for KEY (U11: live chart pushes read the
@@ -926,44 +1145,43 @@ class MetricsStore:
         hidden live co-tenant's newer point must never drive our live line,
         so own-tag rows sort first and history only fills gaps (own writer
         stops on restart; the newest own point then wins)."""
-        with self._rlock:      # SPLIT-READ
-            frag, args = self._instance_sql(instance)
-            if instance == VISIBLE_INSTANCES:
-                # SQUEEZE-LATEST: the original single query ordered by the
-                # COMPUTED key (instance=own) DESC, ts DESC — which defeats
-                # the (key, ts) index and scanned every row of the key
-                # (468 K on a bench day => 0.49 s per call, measured). Same
-                # semantics from two index-fast queries: own-tag newest
-                # first (the live line follows OUR collector whenever its
-                # rows exist), then any visible newest as history backfill
-                # (own writer stopped after a restart; the newest foreign/
-                # legacy point then fills the gap).
-                cur = self._rconn.execute(
-                    "SELECT ts, value FROM samples WHERE key=?" + frag
-                    + " AND instance=? ORDER BY ts DESC LIMIT 1",
-                    [key] + args + [self._own_instance])
-                row = cur.fetchone()
-                if row is None:
-                    cur = self._rconn.execute(
-                        "SELECT ts, value FROM samples WHERE key=?" + frag
-                        + " ORDER BY ts DESC LIMIT 1",
-                        [key] + args)
-                    row = cur.fetchone()
-            else:
-                cur = self._rconn.execute(
+        conn = self._get_rconn()
+        frag, args = self._instance_sql(instance)
+        if instance == VISIBLE_INSTANCES:
+            # SQUEEZE-LATEST: the original single query ordered by the
+            # COMPUTED key (instance=own) DESC, ts DESC — which defeats
+            # the (key, ts) index and scanned every row of the key
+            # (468 K on a bench day => 0.49 s per call, measured). Same
+            # semantics from two index-fast queries: own-tag newest
+            # first (the live line follows OUR collector whenever its
+            # rows exist), then any visible newest as history backfill
+            # (own writer stopped after a restart; the newest foreign/
+            # legacy point then fills the gap).
+            cur = conn.execute(
+                "SELECT ts, value FROM samples WHERE key=?" + frag
+                + " AND instance=? ORDER BY ts DESC LIMIT 1",
+                [key] + args + [self._own_instance])
+            row = cur.fetchone()
+            if row is None:
+                cur = conn.execute(
                     "SELECT ts, value FROM samples WHERE key=?" + frag
                     + " ORDER BY ts DESC LIMIT 1",
                     [key] + args)
                 row = cur.fetchone()
+        else:
+            cur = conn.execute(
+                "SELECT ts, value FROM samples WHERE key=?" + frag
+                + " ORDER BY ts DESC LIMIT 1",
+                [key] + args)
+            row = cur.fetchone()
         return {"ts": row[0], "v": row[1]} if row else None
 
     def recent_requests(self, limit: int = 200) -> list[dict]:
-        with self._rlock:      # SPLIT-READ
-            cur = self._rconn.execute(
-                "SELECT * FROM requests ORDER BY ts_start DESC LIMIT ?", (limit,)
-            )
-            cols = [d[0] for d in cur.description]
-            return [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur = self._get_rconn().execute(
+            "SELECT * FROM requests ORDER BY ts_start DESC LIMIT ?", (limit,)
+        )
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
 
     def distinct_models(self, ts_from: float | None = None) -> list[str]:
         """Models that have stored request history (issue 4: the search
@@ -975,8 +1193,7 @@ class MetricsStore:
             q += " AND ts_start >= ?"
             args.append(float(ts_from))
         q += " ORDER BY model"
-        with self._rlock:      # SPLIT-READ
-            return [r[0] for r in self._rconn.execute(q, args).fetchall()]
+        return [r[0] for r in self._get_rconn().execute(q, args).fetchall()]
 
     def keys_with_prefix(self, prefix: str, window_s: float,
                          instance: str | None = None) -> list[str]:
@@ -1008,25 +1225,23 @@ class MetricsStore:
         q = ("SELECT DISTINCT key FROM samples"
              " WHERE ts >= ? AND key >= ? AND key < ?")
         args = [t0, prefix, upper]
-        with self._rlock:      # SPLIT-READ
-            frag, extra = self._instance_sql(instance)
-            q += frag
-            args += extra
-            q += " ORDER BY key"
-            keys = [r[0] for r in self._rconn.execute(q, args).fetchall()]
+        frag, extra = self._instance_sql(instance)
+        q += frag
+        args += extra
+        q += " ORDER BY key"
+        keys = [r[0] for r in self._get_rconn().execute(q, args).fetchall()]
         with self._keys_lock:
             self._keys_cache[ck] = (now + _KEYS_TTL_S, keys)
         return keys
 
     def request_by_id(self, request_id: str) -> dict | None:
-        with self._rlock:      # SPLIT-READ
-            cur = self._rconn.execute(
-                "SELECT * FROM requests WHERE id = ?", (request_id,)
-            )
-            row = cur.fetchone()
-            if row is None:
-                return None
-            return dict(zip((d[0] for d in cur.description), row))
+        cur = self._get_rconn().execute(
+            "SELECT * FROM requests WHERE id = ?", (request_id,)
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return dict(zip((d[0] for d in cur.description), row))
 
     # -- RL-3 fulltext + timespan search ------------------------------------
 
@@ -1062,63 +1277,69 @@ class MetricsStore:
         cols = ["id", "model", "state", "prompt_tokens", "completion_tokens",
                 "tps", "error", "finish", "ts_start", "ts_end"]
 
-        with self._rlock:      # SPLIT-READ (FTS queries are read-only)
-            match_expr = fts_query(q) if use_fts else None
-            if use_fts and match_expr is None:
-                # PUNCT-1: only punctuation tokens — MATCH can never hit;
-                # answer via LIKE (escaped substring handles them fine)
-                use_fts = False
+        conn = self._get_rconn()
+        match_expr = fts_query(q) if use_fts else None
+        if use_fts and match_expr is None:
+            # PUNCT-1: only punctuation tokens — MATCH can never hit;
+            # answer via LIKE (escaped substring handles them fine)
+            use_fts = False
+            mode = "like"
+        if use_fts:
+            try:
+                cur = conn.execute(
+                    f"""SELECT {sel},
+                               snippet(request_fts, 1, '[', ']', '...', 24) AS ex
+                        FROM request_fts f JOIN requests r ON r.id = f.id
+                        WHERE request_fts MATCH ? {_and(where)}
+                        ORDER BY r.ts_start DESC LIMIT ?""",
+                    [match_expr] + args + [limit])
+                results = []
+                for row in cur.fetchall():
+                    d = dict(zip(cols + ["excerpt"], row))
+                    results.append(d)
+                return {"results": results, "mode": "fts", "q": q}
+            except sqlite3.OperationalError:
+                # MATCH syntax/index hiccup: answer THIS query with
+                # LIKE; do not flip _has_fts (a probe error would
+                # degrade every later search — _fts_sync owns that).
                 mode = "like"
-            if use_fts:
-                try:
-                    cur = self._rconn.execute(
-                        f"""SELECT {sel},
-                                   snippet(request_fts, 1, '[', ']', '...', 24) AS ex
-                            FROM request_fts f JOIN requests r ON r.id = f.id
-                            WHERE request_fts MATCH ? {_and(where)}
-                            ORDER BY r.ts_start DESC LIMIT ?""",
-                        [match_expr] + args + [limit])
-                    results = []
-                    for row in cur.fetchall():
-                        d = dict(zip(cols + ["excerpt"], row))
-                        results.append(d)
-                    return {"results": results, "mode": "fts", "q": q}
-                except sqlite3.OperationalError:
-                    # MATCH syntax/index hiccup: answer THIS query with
-                    # LIKE; do not flip _has_fts (a probe error would
-                    # degrade every later search — _fts_sync owns that).
-                    mode = "like"
 
-            if q:
-                # token-AND like the FTS path: every whitespace-separated
-                # token must appear (in prompt or output). Whole-query
-                # LIKE fails mixed scripts / word order (CJK-1 tests).
-                for tok in re.findall(r"\S+", q):
-                    pat = ("%" + tok.replace("\\", "\\\\").replace("%", "\\%")
-                           .replace("_", "\\_") + "%")
-                    where.append("(r.prompt LIKE ? ESCAPE '\\' "
-                                 "OR r.output LIKE ? ESCAPE '\\')")
-                    args += [pat, pat]
+        if q:
+            # token-AND like the FTS path: every whitespace-separated
+            # token must appear (in prompt or output). Whole-query
+            # LIKE fails mixed scripts / word order (CJK-1 tests).
+            for tok in re.findall(r"\S+", q):
+                pat = ("%" + tok.replace("\\", "\\\\").replace("%", "\\%")
+                       .replace("_", "\\_") + "%")
+                where.append("(r.prompt LIKE ? ESCAPE '\\' "
+                             "OR r.output LIKE ? ESCAPE '\\')")
+                args += [pat, pat]
 
-            cur = self._rconn.execute(
-                f"""SELECT {sel}, r.prompt, r.output
-                    FROM requests r {_where_clause(where)}
-                    ORDER BY r.ts_start DESC LIMIT ?""",
-                args + [limit])
-            results = []
-            for row in cur.fetchall():
-                d = dict(zip(cols + ["_prompt", "_output"], row))
-                d["excerpt"] = _excerpt(d.pop("_prompt"), d.pop("_output"), q)
-                results.append(d)
-            return {"results": results, "mode": mode, "q": q}
+        cur = conn.execute(
+            f"""SELECT {sel}, r.prompt, r.output
+                FROM requests r {_where_clause(where)}
+                ORDER BY r.ts_start DESC LIMIT ?""",
+            args + [limit])
+        results = []
+        for row in cur.fetchall():
+            d = dict(zip(cols + ["_prompt", "_output"], row))
+            d["excerpt"] = _excerpt(d.pop("_prompt"), d.pop("_output"), q)
+            results.append(d)
+        return {"results": results, "mode": mode, "q": q}
 
     def close(self):
+        with self._rconns_lock:
+            conns = list(self._rconns)
+            self._rconns.clear()
+        for c in conns:
+            if c is not self._conn:
+                try:
+                    c.close()
+                except sqlite3.Error:
+                    pass
+        self._rlocal = threading.local()
         with self._lock:
             self._conn.close()
-        rconn = getattr(self, "_rconn", None)
-        if rconn is not None and rconn is not self._conn:
-            with self._rlock:
-                rconn.close()
 
 
 _store: MetricsStore | None = None

@@ -37,7 +37,7 @@ from .routers.settings import (
 )
 from .routers.derive import (
     MAX_SERIES_POINTS, _HOURLY_DERIVE, _USAGE_COLS, _downsample, _hourly_points,
-    _parse_window, bucket_for,
+    _pack_cols, _parse_window, bucket_for,
 )
 from .routers.metrics import (
     metrics_hot, metrics_latest, metrics_series, metrics_live, metrics_stream, requests_stats,

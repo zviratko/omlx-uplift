@@ -745,6 +745,8 @@ main.grid-stack .grid-stack-placeholder .placeholder-preview {
 .u-legend .u-series { display: inline-flex; }
 .u-legend th, .u-legend .u-label { font: 400 9px/1 var(--mono) !important; }
 .u-cursor-x, .u-cursor-y { border-color: var(--dim) !important; }
+.uplot .u-select { background: color-mix(in srgb, var(--accent, #58a6ff) 22%, transparent);
+    border-left: 1px solid var(--accent, #58a6ff); border-right: 1px solid var(--accent, #58a6ff); }
 
 /* List cards in a row band (user 2026-09-19 r3: 'align the contents
    centered vertically — no gap to the header, dead space at the

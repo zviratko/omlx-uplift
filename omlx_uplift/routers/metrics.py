@@ -26,7 +26,7 @@ from .base import (api_router, page_router, require_admin, _RedirectToLogin,
 from ..request_log import RING_LIMIT, get_request_tracker
 from ..collector import get_collector
 from .derive import (_HOURLY_DERIVE, _downsample, _hourly_points,
-                     _parse_window, _wire_v, bucket_for)
+                     _pack_cols, _parse_window, _wire_v, bucket_for)
 
 
 @api_router.get("/metrics/latest")
@@ -87,19 +87,33 @@ async def metrics_series(
 
     tail = after if after and after > 0 else None
     bucket = 0 if tail is not None else bucket_for(window_s)
+    has_multi = callable(getattr(type(store), "series_multi", None))
+    raw_map: dict[str, list[dict]] | None = None
+    if has_multi and len(wanted) > 1:
+        if tail is not None:
+            raw_map = await asyncio.to_thread(
+                store.series_multi, wanted, window_s, None, inst, tail)
+        elif bucket:
+            raw_map = await asyncio.to_thread(
+                store.series_binned_multi, wanted, window_s, bucket, inst)
+        else:
+            raw_map = await asyncio.to_thread(
+                store.series_multi, wanted, window_s, None, inst)
 
     async def one(k: str):
         if tail is not None:
-            fine = await asyncio.to_thread(
-                lambda: store.series(k, window_s, None, inst, since=tail))
+            fine = (raw_map[k] if raw_map is not None
+                    else await asyncio.to_thread(
+                        lambda: store.series(k, window_s, None, inst, since=tail)))
             for p in fine:
                 p["res"] = "fine"
-            return fine, 0          # TAIL-1: raw new points only
+            return _pack_cols(fine, "fine"), 0          # TAIL-1: raw new points only
         if bucket:
             # PERF-1: long window — bucket means computed in SQLite;
             # hourly rollups backfill the hours with no fine coverage.
-            rows = await asyncio.to_thread(
-                lambda: store.series_binned(k, window_s, bucket, inst))
+            rows = (raw_map[k] if raw_map is not None
+                    else await asyncio.to_thread(
+                        lambda: store.series_binned(k, window_s, bucket, inst)))
             for p in rows:
                 p["res"] = "avg"
             derive = _HOURLY_DERIVE.get(k)
@@ -113,9 +127,10 @@ async def metrics_series(
                     rows.sort(key=lambda p: p["ts"])
             for p in rows:             # SQUEEZE parity (wire 6 sig digits)
                 p["v"] = _wire_v(p["v"])
-            return rows, bucket
-        fine = await asyncio.to_thread(
-            lambda: store.series(k, window_s, None, inst))
+            return _pack_cols(rows, "avg"), bucket
+        fine = (raw_map[k] if raw_map is not None
+                else await asyncio.to_thread(
+                    lambda: store.series(k, window_s, None, inst)))
         for p in fine:
             p["res"] = "fine"
         hourly = []
@@ -126,7 +141,8 @@ async def metrics_series(
         fine_hours = {int(p["ts"] // 3600) for p in fine}
         merged = fine + [p for p in hourly if int(p["ts"] // 3600) not in fine_hours]
         merged.sort(key=lambda p: p["ts"])
-        return _downsample(merged)
+        pts, b = _downsample(merged)
+        return _pack_cols(pts, "avg" if b else "fine"), b
 
     results = await asyncio.gather(*(one(k) for k in wanted))
     series_map, bucket = {}, 0
@@ -134,7 +150,7 @@ async def metrics_series(
         series_map[k] = pts
         bucket = max(bucket, b)
     if key and not keys:
-        pts = series_map.get(key, [])
+        pts = series_map.get(key, [[], []])
         out = {"key": key, "window": window, "window_s": window_s,
                "bucket_s": bucket, "series": pts}
     else:
@@ -280,19 +296,31 @@ async def metrics_hot(request: Request,
 
     keys = await asyncio.to_thread(store.keys_with_prefix, "hot.", window_s, inst)
     bucket = bucket_for(window_s)
+    has_multi = callable(getattr(type(store), "series_multi", None))
+    raw_map: dict[str, list[dict]] | None = None
+    if has_multi and len(keys) > 1:
+        if bucket:
+            raw_map = await asyncio.to_thread(
+                store.series_binned_multi, keys, window_s, bucket, inst)
+        else:
+            raw_map = await asyncio.to_thread(
+                store.series_multi, keys, window_s, None, inst)
 
     async def one(k: str):
         if bucket:
-            rows = await asyncio.to_thread(
-                lambda: store.series_binned(k, window_s, bucket, inst))
+            rows = (raw_map[k] if raw_map is not None
+                    else await asyncio.to_thread(
+                        lambda: store.series_binned(k, window_s, bucket, inst)))
             for p in rows:
                 p["res"] = "avg"
                 p["v"] = _wire_v(p["v"])
-            return rows
-        fine = await asyncio.to_thread(store.series, k, window_s, None, inst)
+            return _pack_cols(rows, "avg")
+        fine = (raw_map[k] if raw_map is not None
+                else await asyncio.to_thread(store.series, k, window_s, None, inst))
         for p in fine:
             p["res"] = "fine"
-        return fine
+            p["v"] = _wire_v(p["v"])
+        return _pack_cols(fine, "fine")
 
     results = await asyncio.gather(*(one(k) for k in keys))
     series_map = {k: pts for k, pts in zip(keys, results)}

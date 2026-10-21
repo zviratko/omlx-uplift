@@ -113,6 +113,20 @@ def _wire_v(x):
     return x
 
 
+def _pack_cols(pts: list[dict], default_res: str = "fine") -> list[list]:
+    """COL-1: pack [{'ts', 'v', 'res'}, ...] into columnar wire arrays
+    [ts_list, v_list] (plus a third res_list only when points carry mixed
+    resolutions such as 'hourly' backfill). Eliminates repeated 'ts'/'v'/
+    'res' object keys across thousands of JSON points."""
+    if not pts:
+        return [[], []]
+    ts = [p["ts"] for p in pts]
+    vs = [p["v"] for p in pts]
+    if any(p.get("res", default_res) != default_res for p in pts):
+        return [ts, vs, [p.get("res", default_res) for p in pts]]
+    return [ts, vs]
+
+
 def _downsample(points: list[dict], max_pts: int = MAX_SERIES_POINTS):
     """Average into equal-width buckets so a 30d pull is ~thousands of
     points, not hundreds of thousands. Buckets align to wall-clock

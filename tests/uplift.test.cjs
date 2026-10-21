@@ -1004,4 +1004,11 @@ test('client-perf: lazy tab scripts, cached DateTimeFormat, binary-search mergeH
     assert.match(charts, /function _cardParked\(id, e\)/, '_cardParked helper exists');
     assert.match(charts, /function ensureMetricPlot\(id\)/, 'ensureMetricPlot helper exists');
     assert.match(charts, /if \(!park\) ensureMetricPlot\(id\);/, 'createMetricCard skips uPlot init when parked');
+
+    // F: COL-1 columnar wire unpack + ZOOM-1 click-and-drag zoom + I18N-CACHE-1 localStorage locale cache
+    assert.match(charts, /function unpackCols\(c, bucketS\)/, 'unpackCols helper exists');
+    assert.match(charts, /cursor: \{ drag: \{ x: true, y: false, dist: 10 \}/, 'drag-to-zoom enabled on x-axis');
+    assert.match(charts, /function zoomHook\(cardId\)/, 'zoomHook wired for drag selection');
+    const upliftJs = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.js'), 'utf8');
+    assert.match(upliftJs, /LOCALE_CACHE_KEY = 'omlx-uplift-locale-v1'/, 'locale cached in localStorage');
 });
