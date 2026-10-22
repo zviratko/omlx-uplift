@@ -51,3 +51,17 @@ test('level change re-applies the oQ4 sensitivity rule', () => {
     assert.match(src,
         /if \(m && m\.model_type === 'deepseek_v41' && selLevel\.value === '4'\)\s*selSens\.value = '';/);
 });
+
+/* Live-browser catch 2026-10-22: the fold rows set el.hidden but
+   .qz-form .field { display:flex } and .qz-enh-only { display:grid }
+   override the UA [hidden] rule, so sensitivity/combine/Engram/oQe
+   blocks rendered even when folded (the same trap the CSS already
+   documents for .se-row and .dd-menu). Guards must stay. */
+const css = fs.readFileSync(
+    path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.css'),
+    'utf8');
+
+test('quantizer fold rows have [hidden] guards', () => {
+    assert.match(css, /\.qz-form \.field\[hidden\]\s*\{\s*display:\s*none;/);
+    assert.match(css, /\.qz-enh-only\[hidden\]\s*\{\s*display:\s*none;/);
+});
