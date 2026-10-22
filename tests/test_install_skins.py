@@ -170,3 +170,19 @@ def test_install_does_not_copy_skins_anymore(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "_mount_into_dev_keg", lambda: (False))
     assert cli.cmd_install([]) == 0
     assert calls == [], "install must not touch bundled skins at all"
+
+
+def test_install_without_any_keg_names_the_fix(tmp_path, monkeypatch, capsys):
+    """E2E-1 (2026-10-22): with no omlx-family keg the old path wrote the
+    .pth into uplift's OWN venv and failed verify as a cryptic
+    ModuleNotFoundError. It must stop early and print the two real fixes."""
+    monkeypatch.setattr(cli, "_default_target_python",
+                        lambda formula=None: None)
+    site = tmp_path / "untouched"
+    monkeypatch.setattr(cli, "_resolve_site_packages", lambda t: site)
+    rc = cli.cmd_install([])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "brew install omlx" in err, err
+    assert "dev install" in err, err
+    assert not site.exists(), "no-keg path must not write anything"

@@ -13,6 +13,23 @@ users never see.
 
 ## Unreleased
 
+- **First-run installs got honest errors.** Fresh-machine E2E (both README
+  lanes) found three walls: `omlx-uplift install` with no server anywhere
+  self-mounted into uplift's own venv and died as a cryptic
+  `ModuleNotFoundError` — it now stops before writing anything and names the
+  fix (`brew install omlx` or the dev lane); the `omlx-dev` formula's
+  "tap jundot/omlx first" guard used `odie` at file top level, which Homebrew
+  7 does not provide during formula load — every affected command
+  (`brew unpin`, `brew options`) showed a Ruby stack trace instead of the
+  message, now a plain `raise`; and the README quick-starts were wrong on
+  step one (`brew tap jundot/omlx` has no default repo — the explicit
+  `https://github.com/jundot/omlx` URL is required), skipped `brew install
+  omlx` in the classic lane, missed `brew trust` for the jundot tap, the
+  first-run API-key setup step (a fresh server has no key for the /uplift/
+  login), a documented LAN-bind warning, and the correct full-removal order
+  (unpin before uninstall, trust before unpin).
+
+
 - **The labelless row under "Skip API key verification" is now the keyless-inference switch you were looking for.** The "Allow inference without API key" row shipped in a drift sync without its label text — it rendered as a bare toggle and, worse, its enable-confirmation dialog silently did nothing. Both fixed, and a new guard test fails whenever any settings row references a label that does not exist (the same drift would have been caught at review).
 
 - **Quantizer rows now hide when they have nothing to offer.** The sensitivity-model, combine-MTP, Engram-tables rows and the enhanced (oQe) block stayed visible even when folded — the form's own CSS beat the browser's hidden rule. They now appear only when they apply (candidates exist / oQe checked / V4.1 model selected).

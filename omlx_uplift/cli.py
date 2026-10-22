@@ -547,6 +547,18 @@ def cmd_install(argv=None) -> int:
                          "dev requires an omlx-dev keg to bootstrap first.")
     args = ap.parse_args(argv)
     target = args.python or _default_target_python(args.formula)
+    # E2E-1 (first-run test 2026-10-22): with no omlx-family keg the old path
+    # self-mounted into our own venv and died on verify as a cryptic
+    # ModuleNotFoundError. Name the fix instead — this is the exact spot a
+    # README-skipping newcomer lands.
+    if not target:
+        print("ERROR: no omlx keg found to mount into — uplift rides an "
+              "existing server, it is not one.\n"
+              "  classic lane:  brew install omlx\n"
+              "  dev lane:      omlx-uplift dev bootstrap && "
+              "omlx-uplift dev install\n"
+              "then re-run: omlx-uplift install", file=sys.stderr)
+        return 1
     sp = _resolve_site_packages(target)
     pth = sp / PTH_NAME
     body = _pth_content(Path(target) if target else None)

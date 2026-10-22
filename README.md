@@ -9,39 +9,57 @@ stays byte-identical and fully working.
 
 Uplift rides whichever oMLX server you run — the classic `omlx` keg, the
 HEAD-tracking `omlx-dev` keg, or both. Neither keg is a prerequisite:
-`omlx-uplift install` targets the one that exists.
+`omlx-uplift install` targets the one that exists (and says so, with the
+fix, when none does).
 
-Classic install:
+Classic install (vanilla omlx + uplift):
 
 ```bash
-brew tap jundot/omlx
+brew tap jundot/omlx https://github.com/jundot/omlx   # no homebrew-omlx repo; the formula lives in the app repo (~226 MB clone)
 brew tap zviratko/uplift https://github.com/zviratko/omlx-uplift
-brew trust zviratko/uplift             # Homebrew asks you to trust a third-party tap
-brew install omlx-uplift
+brew trust jundot/omlx zviratko/uplift   # Homebrew 7 refuses to install from untrusted third-party taps
+brew install omlx omlx-uplift            # uplift is not the server — install both
 omlx-uplift install                      # writes the ONE .pth into the omlx keg
-launchctl kickstart -k gui/$(id -u)/sh.brew.omlx
-# open http://127.0.0.1:<omlx-port>/uplift/
+brew services start omlx
+# first start: open http://127.0.0.1:8000/admin/ and set an API key —
+# a fresh server has none, and /uplift/ needs it to log in
+# open http://127.0.0.1:8000/uplift/
 ```
 
 Dev-lane install (builds omlx from upstream HEAD plus your enabled patch
 commits; needs no classic keg — only the jundot tap for its build recipe):
 
 ```bash
-brew tap jundot/omlx
+brew tap jundot/omlx https://github.com/jundot/omlx
 brew tap zviratko/uplift https://github.com/zviratko/omlx-uplift
-brew trust zviratko/uplift             # covers both omlx-uplift and omlx-dev
+brew trust jundot/omlx zviratko/uplift   # tap trust covers both omlx-uplift and omlx-dev
 brew install omlx-uplift
-omlx-uplift dev bootstrap                # one-time questionnaire
+omlx-uplift dev bootstrap                # one-time questionnaire (--yes for defaults)
 omlx-uplift dev install                  # builds the omlx-dev keg (~20 min first time)
 omlx-uplift install                      # mounts into the dev keg
 brew services start omlx-dev
-# open http://127.0.0.1:8001/uplift/
+# first start: open http://127.0.0.1:8001/admin/ and set an API key, then
+# open http://127.0.0.1:8001/uplift/ and log in with it
 ```
 
+Serving the dashboard on your LAN: set an API key FIRST. omlx refuses an
+unauthenticated LAN bind and falls back to 127.0.0.1; under `brew services`
+that safety prompt cancels the start (check `~/.omlx*/logs/server.log`).
+
 After `brew upgrade` of either keg (fresh keg = fresh python), re-run
-`omlx-uplift install` and kickstart the service again. Removing uplift:
+`omlx-uplift install` and restart the service again. Removing uplift only:
 `omlx-uplift uninstall` (removes the `.pth`), then `brew uninstall
-omlx-uplift`.
+omlx-uplift`. Removing everything — order matters (the dev keg is pinned
+against accidental removal, and an untrusted tap refuses to load the
+formula that tells you it is pinned):
+
+```bash
+brew services stop omlx-dev omlx
+omlx-uplift uninstall
+brew unpin omlx-dev                    # only if it was pinned
+brew uninstall omlx-dev omlx-uplift omlx
+brew untap zviratko/uplift jundot/omlx
+```
 
 ## Releases
 

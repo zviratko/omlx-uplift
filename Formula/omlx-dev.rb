@@ -79,10 +79,16 @@ end
 
 # Load jundot's formula by PATH — plain `brew` may resolve formulas via the
 # API without ever loading the file, so the class may not be defined yet.
+# E2E-2 (first-run test 2026-10-22): this guard used top-level `odie`, which
+# does not exist inside Formulary's module_eval — any load of this file with
+# the jundot tap missing (brew unpin, brew options, …) printed a Ruby stack
+# trace instead of the fix below. `raise` always works; brew shows it as
+# "Error: <message>".
 unless defined?(Omlx)
   unless File.exist?(OmlxDevConstants::OMLX_FORMULA_PATH)
-    odie "omlx-dev needs the jundot/omlx tap checked out at " \
-         "#{OmlxDevConstants::OMLX_FORMULA_PATH}; run: brew tap jundot/omlx"
+    raise "omlx-dev needs the jundot/omlx tap checked out at " \
+          "#{OmlxDevConstants::OMLX_FORMULA_PATH}; run: brew tap jundot/omlx " \
+          "https://github.com/jundot/omlx && brew trust jundot/omlx"
   end
   require OmlxDevConstants::OMLX_FORMULA_PATH
 end
