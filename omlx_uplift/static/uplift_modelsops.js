@@ -31,6 +31,12 @@ const QG = {
    preserve_mtp param) including the client-side sensitivity-model memory
    approximation (size x 1.5 + 5 GB). Labels from models.oq.* in i18n. -- */
 const OQ_LEVELS = [2, 2.5, 2.7, 3, 3.5, 4, 5, 6, 8];
+// DeepSeek V4.1 is a dedicated calibrated scheme: the SERVER rejects every
+// other level (_validate_v41_oq_settings), plus non-bfloat16 dtype. The
+// classic form mirrors that policy (oqAvailableLevels/oqApplyModelPolicy) —
+// the uplift port must too, or users hit a server error that reads as a bug.
+const V41_LEVELS = [2, 2.5, 2.7, 3, 4];
+const oqLevelsFor = t => (t === 'deepseek_v41' ? V41_LEVELS : OQ_LEVELS);
 function oqMtpFamily(t) {
     if (!t) return null;
     if (t.startsWith('qwen3_6')) return 'qwen3_6';
@@ -222,6 +228,30 @@ function renderQuantizer() {
             }
             fill(selCombine, comb, x => `${x.name} (${x.size_formatted})`);
             rowCombine.hidden = comb.length === 0;
+            // V4.1 policy (mirror classic oqApplyModelPolicy +
+            // oqAvailableLevels): level list per model type, forced
+            // bfloat16 output, text-only off, no sensitivity model at oQ4
+            const levels = oqLevelsFor(m && m.model_type);
+            if ([...selLevel.options].map(o => o.value).join(',') !==
+                    levels.map(String).join(',')) {
+                const keep = selLevel.value;
+                for (const o of [...selLevel.options]) o.remove();
+                for (const l of levels) {
+                    const o = document.createElement('option');
+                    o.value = l; selLevel.append(o);
+                }
+                // never assign a value matching no option (browser blanks
+                // the select); classic snaps an unsupported pick to oQ4
+                selLevel.value = levels.map(String).includes(keep) ? keep : '4';
+                refreshLevelLabels();
+            }
+            if (m && m.model_type === 'deepseek_v41') {
+                dtype.v = 'bfloat16';
+                for (const x of dtypes.children)
+                    x.classList.toggle('on', x.textContent === 'bfloat16');
+                cbText.checked = false;
+                if (selLevel.value === '4') selSens.value = '';
+            }
             // VLM text-only warning
             vlmWarn.hidden = !(m && m.is_vlm && cbText.checked);
             refreshEst();
@@ -239,7 +269,14 @@ function renderQuantizer() {
 
         selModel.onchange = updateConditional;
         selSens.onchange = refreshEst;
-        selLevel.onchange = refreshEst;
+        selLevel.onchange = () => {
+            // classic re-arms its policy effect on every level change:
+            // oQ4 has no use for a sensitivity model on V4.1
+            const m = st.models.find(x => x.path === selModel.value);
+            if (m && m.model_type === 'deepseek_v41' && selLevel.value === '4')
+                selSens.value = '';
+            refreshEst();
+        };
         cbMtp.onchange = () => { updateConditional(); };
         cbNgram.onchange = refreshEst;   // classic arms oqRefreshEstimate on this toggle
         cbText.onchange = updateConditional;
