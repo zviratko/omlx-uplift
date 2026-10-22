@@ -13,6 +13,9 @@
 13|
 14|## Unreleased
 
+- **First run no longer dead-ends at the login card.** On a server without an API key yet, `/uplift/login` now shows a create-key form (with a random-key button) and completes the same one-time loopback setup the classic page uses — instead of answering every attempt with "Invalid API key".
+- **`dev bootstrap` asks how to build.** Custom Metal kernels are the recommended default (the question names the Xcode + `xcodebuild -downloadComponent MetalToolchain` requirement), xgrammar is offered, and free formula flags can be typed in. The answer is stored in `dev.json` and used by every `dev install`; explicit `--with-*` flags override it and are remembered. No vanilla omlx install is needed anywhere in this path.
+
 ## [2.6] — 2026-10-20
 
 - **tg benchmarks now decode the length you asked for.** The Throughput bench's tg128–1024 rows measured a shorter decode than their label: a model that ends its own turn early was scored at ~25 tokens under a tg1024 label. Bench runs now ignore the model's stop tokens (bench only — normal serving is untouched), and the results table gained an `out` column with the real generated-token count.

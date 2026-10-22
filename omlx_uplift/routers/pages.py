@@ -182,13 +182,7 @@ async def _gate(request: Request, back_base: str) -> Optional[RedirectResponse]:
     return None
 
 
-_LOGIN_HTML = """<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Login - Uplift</title>
-<link rel="icon" href="/admin/static/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="./uplift.css?v=BUILD">
-<style>
+_LOGIN_STYLE = """
 body { display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
 .login-card { width:min(360px, 90vw); border:1px solid var(--ink); background:var(--card); padding:28px; }
 .login-card h1 { font:500 13px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; margin:0 0 20px; }
@@ -199,17 +193,37 @@ body { display:flex; align-items:center; justify-content:center; min-height:100v
 .login-card button:hover { background:transparent; color:var(--ink); }
 .err { color:var(--red); font:400 11px/1.4 var(--mono); min-height:14px; margin-top:10px; }
 .hint { color:var(--dim); font:300 10px/1.5 var(--sans); margin-top:14px; }
-</style></head>
-<body class="top-glyphs"><div class="login-card">
-<h1>Uplift &mdash; Admin Login</h1>
-<form id="f"><input id="k" type="password" placeholder="API key" autocomplete="current-password">
-<button type="submit">LOG IN</button></form>
-<div class="err" id="e"></div>
-<div class="hint">Same API key as the classic dashboard; the session is shared.</div>
-</div><script>
+"""
+
+# shared redirect/query handling; the body differs between the two modes
+_LOGIN_NEXT_JS = """
 const qp = new URLSearchParams(location.search);
 let next = qp.get('next') || '/uplift/';
 if (!next.startsWith('/') || next.startsWith('//')) next = '/uplift/';
+"""
+
+
+def _login_doc(title: str, body: str, script: str) -> str:
+    return ("<!doctype html>\n<html lang=\"en\"><head>\n"
+            "<meta charset=\"utf-8\"><meta name=\"viewport\" "
+            "content=\"width=device-width, initial-scale=1\">\n"
+            f"<title>{title} - Uplift</title>\n"
+            "<link rel=\"icon\" href=\"/admin/static/favicon.svg\" "
+            "type=\"image/svg+xml\">\n"
+            "<link rel=\"stylesheet\" href=\"./uplift.css?v=BUILD\">\n"
+            f"<style>{_LOGIN_STYLE}</style></head>\n"
+            f"<body class=\"top-glyphs\"><div class=\"login-card\">{body}</div>"
+            f"<script>{_LOGIN_NEXT_JS}{script}</script></body></html>")
+
+
+_LOGIN_HTML = _login_doc(
+    "Login",
+    """<h1>Uplift &mdash; Admin Login</h1>
+<form id="f"><input id="k" type="password" placeholder="API key" autocomplete="current-password">
+<button type="submit">LOG IN</button></form>
+<div class="err" id="e"></div>
+<div class="hint">Same API key as the classic dashboard; the session is shared.</div>""",
+    """
 document.getElementById('f').onsubmit = async (ev) => {
   ev.preventDefault();
   const e = document.getElementById('e'); e.textContent = '';
@@ -222,11 +236,68 @@ document.getElementById('f').onsubmit = async (ev) => {
     location.href = next;
   } catch (err) { e.textContent = String(err.message || err); }
 };
-</script></body></html>"""
+""")
+
+# AUTH-SETUP (SYNC-1 2026-10-22): fresh server with no key configured —
+# the login card would answer 'Invalid API key' to everything forever.
+# Mirror the classic first-run flow instead: the form posts straight to
+# vanilla's /admin/api/setup-api-key (loopback-only, one-time; it
+# validates, persists and mints the SHARED session cookie), then walks
+# on to ?next= already logged in. No uplift-side key storage.
+_SETUP_HTML = _login_doc(
+    "Set up",
+    """<h1>Uplift &mdash; Set Up API Key</h1>
+<form id="f">
+<input id="k" type="password" placeholder="New API key" autocomplete="new-password">
+<input id="kc" type="password" placeholder="Enter API key again" autocomplete="new-password" style="margin-top:10px">
+<button id="g" type="button">GENERATE RANDOM KEY</button>
+<button type="submit">SET API KEY</button></form>
+<div class="err" id="e"></div>
+<div class="hint">Min 4 characters, no spaces. This same key logs you in to the
+classic dashboard and authorizes API calls. Initial setup works from this
+machine only (loopback).</div>""",
+    """
+document.getElementById('g').onclick = () => {
+  const a = new Uint8Array(16); crypto.getRandomValues(a);
+  const hex = [...a].map(b => b.toString(16).padStart(2, '0')).join('');
+  document.getElementById('k').value = hex;
+  document.getElementById('kc').value = hex;
+};
+document.getElementById('f').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const e = document.getElementById('e'); e.textContent = '';
+  try {
+    const r = await fetch('/admin/api/setup-api-key', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({api_key: document.getElementById('k').value,
+                           api_key_confirm: document.getElementById('kc').value})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.success !== true) throw new Error(d.detail || ('http ' + r.status));
+    location.href = next;
+  } catch (err) { e.textContent = String(err.message || err); }
+};
+""")
 
 
-def _login_page() -> HTMLResponse:
-    return HTMLResponse(_LOGIN_HTML, headers={"Cache-Control": "no-store"})
+def _admin_key_configured() -> bool:
+    """False only when the server is up and NO admin API key exists yet.
+    Any uncertainty (no vanilla settings in viewer mode, broken getter)
+    keeps the normal login card."""
+    try:
+        gs = global_settings()
+        if gs is None:
+            return True     # no vanilla state to read — not our call to make
+    except Exception:
+        return True
+    try:
+        return bool(gs is not None and gs.auth.api_key)
+    except Exception:
+        return True
+
+
+def _login_page(setup: bool = False) -> HTMLResponse:
+    html = _SETUP_HTML if setup else _LOGIN_HTML
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 class LoginRequest(BaseModel):
@@ -302,13 +373,6 @@ async def uplift_login(request: Request):
     NOTE: served at /uplift/login (NOT /uplift/api/login) — a literal
     page route under /uplift/api/ outranks the API router's dynamic
     routes in FastAPI>=0.141 candidate matching and swallows them."""
-    from omlx.admin.auth import (
-        SESSION_COOKIE_NAME,
-        SESSION_MAX_AGE,
-        REMEMBER_ME_MAX_AGE,
-        create_session_token,
-    )
-
     body = await request.json()
     api_key = str((body or {}).get("api_key", ""))
     ip = request.client.host if request.client else "?"
@@ -319,10 +383,25 @@ async def uplift_login(request: Request):
             detail=f"too many failed logins — retry in {int(wait_s) + 1}s")
     gs = global_settings()
     expected = gs.auth.api_key if gs and gs.auth.api_key else None
-    if not expected or not _compare_keys(api_key, expected):
+    if not expected:
+        # Fresh server: there is no key to match — the GET now renders the
+        # setup card, so say that instead of a false 'Invalid API key' and
+        # do NOT feed the brute-force throttle for a state error.
+        raise HTTPException(
+            status_code=400,
+            detail="no API key configured yet — reload this page to create one")
+    if not _compare_keys(api_key, expected):
         _login_failed(ip)
         raise HTTPException(status_code=401, detail="Invalid API key")
     _login_ok(ip)
+    # vanilla imports happen only on the SUCCESS path: a box without omlx
+    # must still be able to answer the state errors above
+    from omlx.admin.auth import (
+        SESSION_COOKIE_NAME,
+        SESSION_MAX_AGE,
+        REMEMBER_ME_MAX_AGE,
+        create_session_token,
+    )
     remember = bool((body or {}).get("remember", False))
     token = create_session_token(remember=remember)
     response = {"success": True}
@@ -352,7 +431,9 @@ async def uplift_root_legacy():
 
 @page_router.get("/uplift/login", include_in_schema=False)
 async def uplift_login_page():
-    return _login_page()
+    # first-run parity with classic: with no key configured the card asks
+    # to CREATE one (posts to vanilla's /admin/api/setup-api-key)
+    return _login_page(setup=not _admin_key_configured())
 
 
 _ASSET_URL_RE = re.compile(rb'((?:src|href)="\./[^"?]+)(")')

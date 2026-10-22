@@ -1008,6 +1008,47 @@ def _added_lines(filepatch: dict) -> set[str]:
 # install questionnaire (DEV-2 CLI) — repo part only; DEV-4 owns runtime
 # ---------------------------------------------------------------------------
 
+def _ask_build_options() -> list:
+    """Build-options questionnaire (SYNC-1 2026-10-22). The formula
+    compiles WITHOUT extras unless asked; on a box with no vanilla omlx
+    there is no receipt to inherit from, so the bootstrap answer saved
+    into dev.json ('build_options') is the fresh-machine path. Returns the
+    flag list to store (possibly empty = explicit plain build)."""
+    print("What should the omlx-dev engine build include? "
+          "(numbers combine, e.g. 1,2)")
+    print("  1  custom Metal kernels  — recommended, fastest engine; needs "
+          "full\n     Xcode plus the Metal compiler component:\n"
+          "         xcodebuild -downloadComponent MetalToolchain")
+    print("  2  xgrammar              — structured output; installs torch "
+          "(~2 GB)")
+    print("  0  plain build           — no extra formula options")
+    print("     (other --with-* options of the formula can be typed too)")
+    ans = input("Build options [1]: ").strip().lower() or "1"
+    flags, unknown = [], []
+    for tok in ans.replace(",", " ").split():
+        if tok in ("0", "none"):
+            flags = []
+            break
+        if tok == "1":
+            flags.append("--with-custom-kernel")
+        elif tok == "2":
+            flags.append("--with-grammar")
+        elif tok.startswith("--"):
+            flags.append(tok)      # pass-through; brew validates at build
+        else:
+            unknown.append(tok)
+    for tok in unknown:
+        print(f"  ignoring '{tok}' — not an option number and not a --with-* "
+              "flag")
+    flags = sorted(set(flags))
+    if "--with-custom-kernel" in flags:
+        print("note: custom kernels compile with the Metal toolchain. If "
+              "Xcode is not\ninstalled yet the build will stop and tell you "
+              "to install it; the toolchain\nitself is a separate download: "
+              "xcodebuild -downloadComponent MetalToolchain")
+    return flags
+
+
 def install_config(src_hint: str | None = None, yes: bool = False,
                    origin: str | None = None, sync_ref: str | None = None,
                    base_dir: str | None = None) -> dict:
@@ -1016,6 +1057,7 @@ def install_config(src_hint: str | None = None, yes: bool = False,
     detected = detect_origin(src_hint=src_hint)
     chosen_origin = origin or detected["origin"]
     chosen_sync = sync_ref or "origin/main"
+    build_options = None
     if not yes and origin is None:
         print(f"Detected omlx origin: {detected['origin']} "
               f"(from: {detected['source']})")
@@ -1025,6 +1067,7 @@ def install_config(src_hint: str | None = None, yes: bool = False,
         if sync_ref is None:
             chosen_sync = (input("Sync ref to track [origin/main]: ").strip()
                            or "origin/main")
+        build_options = _ask_build_options()
     base = base_dir or _patches.default_base_dir()
     cfg = {
         "origin": _normalize_git_url(chosen_origin),
@@ -1035,6 +1078,11 @@ def install_config(src_hint: str | None = None, yes: bool = False,
         "formula_branch": DEV_BRANCH_DEFAULT,
         "src_path": os.path.join(base, "dev-src"),
     }
+    if build_options is not None:
+        # stored even when empty: [] = the user chose a plain build, which
+        # is NOT the same as never being asked (that path keeps the pre-
+        # 2026-10-22 receipt inheritance)
+        cfg["build_options"] = build_options
     save_config(cfg, base_dir=base)
     return cfg
 
@@ -1270,6 +1318,28 @@ def _stream_build(res: BuildResult, cmd: list, env: dict | None = None) -> int:
     except Exception as exc:                    # noqa: BLE001 — progress only
         _emit(res, "err", f"build output reader stopped: {exc}")
     return proc.wait()
+
+
+def _explicit_flags(with_custom_kernel: bool, with_grammar: bool) -> set:
+    return ({"--with-custom-kernel"} if with_custom_kernel else set()) | \
+           ({"--with-grammar"} if with_grammar else set())
+
+
+def _effective_build_flags(cfg: dict | None, explicit: set,
+                           brewutil) -> set:
+    """Formula options for one build (SYNC-1 2026-10-22 resolution):
+    explicit CLI/dashboard flag > saved bootstrap answer (dev.json
+    'build_options'; [] means the user chose a plain build) > brew receipt
+    inheritance (user decision 2026-09-24 — kept for configs that predate
+    build_options: dev receipt first, else the vanilla omlx one, which is
+    simply empty on a dev-only box)."""
+    if explicit:
+        return set(explicit)
+    saved = (cfg or {}).get("build_options")
+    if saved is not None:
+        return set(saved)
+    return (brewutil.receipt_used_options("omlx-dev")
+            or brewutil.receipt_used_options("omlx"))
 
 
 def run_dev_build(*, with_custom_kernel: bool = False,
@@ -1741,16 +1811,9 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
         _emit(res, "err", "    omlx-uplift patch disable " + pid)
         _emit(res, "err", f"  investigation: {res.log_path}")
 
-    flags = set()
-    if with_custom_kernel:
-        flags.add("--with-custom-kernel")
-    if with_grammar:
-        flags.add("--with-grammar")
-    if not flags:
-        # user decision 2026-09-24: preserve custom-kernel + grammar from
-        # the user's build — dev receipt first, else the vanilla omlx one
-        flags = (brewutil.receipt_used_options("omlx-dev")
-                 or brewutil.receipt_used_options("omlx"))
+    flags = _effective_build_flags(cfg, _explicit_flags(
+        with_custom_kernel, with_grammar), brewutil)
+    explicit = bool(with_custom_kernel or with_grammar)
     cmd = brewutil.brew_build_cmd(flags)
     if dry_run:
         res.ok, res.returncode, res.stage = True, 0, "dry-run"
@@ -1776,6 +1839,10 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     cfg = load_config() or cfg
     cfg["build_version"] = build_version
     cfg["build_commit"] = tip
+    if explicit and sorted(flags) != sorted(cfg.get("build_options") or []):
+        # an explicit CLI flag is STICKY: 'dev install --with-grammar' on a
+        # box without vanilla must not undo itself on the next build
+        cfg["build_options"] = sorted(flags)
     save_config(cfg)
     res.build_version = build_version
 

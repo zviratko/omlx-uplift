@@ -239,8 +239,19 @@ What you get over hook mode:
   last-known-good; `dev prune` trims old stashes (newest 5 kept by
   default; set `keg_stash_keep` in `~/.omlx/uplift/dev.json`, 1..20,
   or pass `--keep N`).
-- **Build options** the formula ships without: `dev install
-  --with-custom-kernel --with-grammar`.
+- **Build options.** Custom Metal kernels and xgrammar are formula options
+  the build does not assume. `dev bootstrap` asks once — custom kernels
+  are the recommended default (they need full Xcode plus the Metal
+  compiler component: `xcodebuild -downloadComponent MetalToolchain`;
+  without it the build stops with the same hint). The answer is stored as
+  `build_options` in `~/.omlx/uplift/dev.json` and used by every
+  `dev install`. Change it later with `dev install
+  --with-custom-kernel --with-grammar` — explicit flags override and
+  re-save the stored answer, so the choice sticks across rebuilds — or
+  edit `build_options` in `dev.json` directly. None of this needs a
+  vanilla `omlx` install: without a stored answer and with no vanilla
+  receipt, the build only inherits options from an existing `omlx-dev`
+  receipt, and plain flags otherwise.
 
 Rules of thumb: stable driver plus a few upstream-PR diffs stays on
 `omlx` + hook mode. Reading, testing or developing omlx source, kernel

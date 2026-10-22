@@ -1200,10 +1200,14 @@ def cmd_dev(argv=None) -> int:
     ap.add_argument("--fetch", action="store_true",
                     help="status: fetch the sync ref first")
     ap.add_argument("--with-custom-kernel", action="store_true",
-                    help="install: build custom kernels (default: inherit "
-                         "from the existing omlx-dev/omlx receipt)")
+                    help="install: build custom kernels (needs Xcode + "
+                         "Metal toolchain component). Overrides and "
+                         "re-saves the dev.json build_options answer; "
+                         "without flags the saved answer is used, else "
+                         "the existing omlx-dev/omlx receipt")
     ap.add_argument("--with-grammar", action="store_true",
-                    help="install: install xgrammar (default: inherit)")
+                    help="install: install xgrammar (sticky like "
+                         "--with-custom-kernel)")
     ap.add_argument("--dry-run", action="store_true",
                     help="install: materialize check + print the brew "
                          "command, build nothing")
