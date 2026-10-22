@@ -7,7 +7,7 @@ class OmlxUplift < Formula
   # commit; tests/test_release_formula.py pins that they agree.
   url "https://github.com/zviratko/omlx-uplift.git",
       tag:      "v2.7",
-      revision: "cfb9934175378d7c31442e36662ec44c4bf46d59"
+      revision: "0353087586788f08d1683fc897e128ccc15a9a5a"
   head "https://github.com/zviratko/omlx-uplift.git", branch: "main", using: :git
 
   # NO depends_on omlx (DEC-1, user 2026-10-20): uplift targets any
