@@ -13,51 +13,11 @@ users never see.
 
 ## Unreleased
 
-- **The dev-lane questionnaire keeps your lane.** Re-running
-  `omlx-uplift dev bootstrap` used to silently overwrite a hand-tuned
-  `dev.json` (origin, sync ref, port, build stamps all reset or dropped —
-  twice during one restore). An existing config is now kept as-is:
-  bootstrap prints it and only re-questions if you agree to reconfigure;
-  `--yes` never touches the values again; keys bootstrap does not own
-  survive.
-- **No more tracebacks without a terminal.** Prompts (`dev bootstrap`,
-  build options, Metal-toolchain offer, share questions) hitting a
-  closed/piped stdin dumped raw `EOFError` stack traces; they now exit
-  with one line: run in a terminal or use `--yes`.
-- **The dev service can no longer wedge on the LAN-bind safety gate.**
-  Saving `0.0.0.0` as the server address with no API key made omlx ask
-  interactively to fall back to loopback — under launchd nobody can
-  press Enter, so the board just stayed down. The dev service now sets
-  `OMLX_STARTUP_NOTICE_PATH`: omlx applies the loopback fallback itself
-  and writes the explanation (incl. the fix) to
-  `$(brew --prefix)/var/startup-notice.txt`.
+## [2.7] — 2026-10-22
 
-
-- **First-run installs got honest errors.** Fresh-machine E2E (both README
-  lanes) found three walls: `omlx-uplift install` with no server anywhere
-  self-mounted into uplift's own venv and died as a cryptic
-  `ModuleNotFoundError` — it now stops before writing anything and names the
-  fix (`brew install omlx` or the dev lane); the `omlx-dev` formula's
-  "tap jundot/omlx first" guard used `odie` at file top level, which Homebrew
-  7 does not provide during formula load — every affected command
-  (`brew unpin`, `brew options`) showed a Ruby stack trace instead of the
-  message, now a plain `raise`; and the README quick-starts were wrong on
-  step one (`brew tap jundot/omlx` has no default repo — the explicit
-  `https://github.com/jundot/omlx` URL is required), skipped `brew install
-  omlx` in the classic lane, missed `brew trust` for the jundot tap, the
-  first-run API-key setup step (a fresh server has no key for the /uplift/
-  login), a documented LAN-bind warning, and the correct full-removal order
-  (unpin before uninstall, trust before unpin).
-
-
-- **The labelless row under "Skip API key verification" is now the keyless-inference switch you were looking for.** The "Allow inference without API key" row shipped in a drift sync without its label text — it rendered as a bare toggle and, worse, its enable-confirmation dialog silently did nothing. Both fixed, and a new guard test fails whenever any settings row references a label that does not exist (the same drift would have been caught at review).
-
-- **Quantizer rows now hide when they have nothing to offer.** The sensitivity-model, combine-MTP, Engram-tables rows and the enhanced (oQe) block stayed visible even when folded — the form's own CSS beat the browser's hidden rule. They now appear only when they apply (candidates exist / oQe checked / V4.1 model selected).
-
-- **The quantizer tells the truth about DeepSeek V4.1.** The engine only supports oQ2–oQ4 (five calibrated levels, bfloat16 output) for V4.1 models and rejects the rest; the quantizer form now hides the unsupported levels and applies the same policy as the classic page (dtype pinned to bfloat16, text-only off, sensitivity model cleared at oQ4) instead of letting you pick a level that can only fail at start.
-
-- **First run no longer dead-ends at the login card.** On a server without an API key yet, `/uplift/login` now shows a create-key form (with a random-key button) and completes the same one-time loopback setup the classic page uses — instead of answering every attempt with "Invalid API key".
-- **`dev bootstrap` asks how to build.** Custom Metal kernels are presented as the answer you almost certainly want (fastest engine; skip only if this Mac cannot run Xcode); xgrammar is offered, and free formula flags can be typed in. If the Metal compiler is missing, the flow offers to install it: it runs `xcodebuild -downloadComponent MetalToolchain` when Xcode is present, or opens Xcode's App Store page when it is not. The answer is stored in `dev.json` and used by every `dev install`; explicit `--with-*` flags override it and are remembered; a terminal build with kernels on now checks the toolchain before brew starts instead of failing deep inside the compile. No vanilla omlx install is needed anywhere in this path.
+- Several fixes based on clean-slate E2E tests — new users get a better experience.
+- Board panels got fast: heavy chart queries that took seconds now return in milliseconds, long windows arrive bucketed, and answers are compressed. Drag a range on any time-series chart to zoom.
+- Voices gained a per-voice switch that makes one available to the Uplift web chat.
 
 ## [2.6] — 2026-10-20
 
