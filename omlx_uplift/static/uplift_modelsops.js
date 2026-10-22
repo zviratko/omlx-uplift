@@ -127,6 +127,11 @@ function renderQuantizer() {
         const mtpNa = document.createElement('small');
         mtpNa.className = 'warn-text'; mtpNa.textContent = 'Source model has no MTP heads.';
         mtpNa.hidden = true; rowMtp.append(mtpNa);
+        // DeepSeek V4.1 only: keep Engram tables at source FP8 (-ngram suffix)
+        const cbNgram = document.createElement('input'); cbNgram.type = 'checkbox';
+        const rowNgram = qzField(adv, 'Keep original Engram tables', cbNgram,
+            "Copy the Engram tables in their original FP8 storage instead of quantizing them to 4 bits. The output takes more disk space, but memory use stays the same with SSD N-gram Offload. Output name gets a -ngram suffix.");
+        rowNgram.hidden = true;
         const selCombine = qzSelect('None');
         const rowCombine = qzField(adv, 'Combine other model\u2019s MTP head', selCombine,
             'Graft the MTP head from a same-architecture donor checkpoint (e.g. the base model of a fine-tune).');
@@ -156,6 +161,7 @@ function renderQuantizer() {
                 const params = new URLSearchParams({
                     model_path: m.path, oq_level: selLevel.value,
                     preserve_mtp: (m.has_mtp_heads && cbMtp.checked) ? 'true' : 'false',
+                    preserve_ngram_table: (m.model_type === 'deepseek_v41' && cbNgram.checked) ? 'true' : 'false',
                 });
                 QG.fetchJson(`${API}/admin/api/oq/estimate?${params}`).then(e => {
                     let mem = e.memory_streaming_formatted || '';
@@ -195,6 +201,10 @@ function renderQuantizer() {
             cbMtp.disabled = !hasMtp;
             if (!hasMtp) cbMtp.checked = false;
             mtpNa.hidden = hasMtp || !m;
+            // Engram-tables switch: deepseek_v41 only (mirror classic x-show)
+            const isV41 = !!(m && m.model_type === 'deepseek_v41');
+            rowNgram.hidden = !isV41;
+            if (!isV41) cbNgram.checked = false;
             // MTP donor / gemma4 assistant candidates (mirror the classic filter)
             let comb = [];
             if (m && m.model_type === 'gemma4') {
@@ -231,6 +241,7 @@ function renderQuantizer() {
         selSens.onchange = refreshEst;
         selLevel.onchange = refreshEst;
         cbMtp.onchange = () => { updateConditional(); };
+        cbNgram.onchange = refreshEst;   // classic arms oqRefreshEstimate on this toggle
         cbText.onchange = updateConditional;
         cbEnh.onchange = () => {
             rowEnhOnly.hidden = !cbEnh.checked;
@@ -251,6 +262,7 @@ function renderQuantizer() {
                 text_only: cbText.checked,
                 dtype: dtype.v,
                 preserve_mtp: m.has_mtp_heads ? cbMtp.checked : false,
+                preserve_ngram_table: m.model_type === 'deepseek_v41' && cbNgram.checked,
                 mtp_assistant_model_path: donor ? donor.path : '',
             };
             if (cbEnh.checked) {
