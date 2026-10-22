@@ -13,6 +13,8 @@
 13|
 14|## Unreleased
 
+- **The labelless row under "Skip API key verification" is now the keyless-inference switch you were looking for.** The "Allow inference without API key" row shipped in a drift sync without its label text — it rendered as a bare toggle and, worse, its enable-confirmation dialog silently did nothing. Both fixed, and a new guard test fails whenever any settings row references a label that does not exist (the same drift would have been caught at review).
+
 - **Quantizer rows now hide when they have nothing to offer.** The sensitivity-model, combine-MTP, Engram-tables rows and the enhanced (oQe) block stayed visible even when folded — the form's own CSS beat the browser's hidden rule. They now appear only when they apply (candidates exist / oQe checked / V4.1 model selected).
 
 - **The quantizer tells the truth about DeepSeek V4.1.** The engine only supports oQ2–oQ4 (five calibrated levels, bfloat16 output) for V4.1 models and rejects the rest; the quantizer form now hides the unsupported levels and applies the same policy as the classic page (dtype pinned to bfloat16, text-only off, sensitivity model cleared at oQ4) instead of letting you pick a level that can only fail at start.

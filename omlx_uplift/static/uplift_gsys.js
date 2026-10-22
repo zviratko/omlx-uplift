@@ -72,7 +72,14 @@ const GS_LABELS = {
         base_path_hint: 'URL prefix when served behind a reverse proxy (e.g. /omlx).',
         skip: 'Skip API key verification',
         skip_hint: 'Disable authentication for local development.',
-        skip_warning: 'Anyone on the network can call this server.' },
+        skip_warning: 'Anyone on the network can call this server.',
+        // SYNC-1 keyless-inference row (classic settings.auth.keyless_inference*):
+        // GS_LABELS is the label source for the spec rows — a missing entry
+        // renders a labelless row AND turns the enable-confirmation into a
+        // silent no-op (gsToggle skips empty confirmMsg).
+        keyless: 'Allow inference without API key',
+        keyless_hint: 'Anyone who can reach this server can use inference, MCP tools, and web search without a key. Admin still requires authentication.',
+        keyless_confirm: 'Anyone who can reach this server will be able to use inference APIs, MCP tools, and web search without an API key.\n\nBy turning this on, you acknowledge that the server will be exposed to attacks from the network, that you understand you are removing this security protection, and that you have put appropriate security measures in place.\n\nSelect OK only if you understand and accept this.' },
     server: { host: 'Host', host_placeholder: '127.0.0.1',
         port: 'Port', log_level: 'Log level',
         auto_start: 'Start on Login', auto_start_hint: 'Launch oMLX automatically when this Mac signs in.',
