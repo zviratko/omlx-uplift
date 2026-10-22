@@ -1046,7 +1046,7 @@ def _offer_metal_toolchain() -> bool:
               "build.")
         return True
     print("      The compiler is NOT working on this Mac yet.")
-    ans = input("      set it up now? [Y/n] ").strip().lower()
+    ans = ask("      set it up now? [Y/n] ").strip().lower()
     if ans.startswith("n"):
         print("      OK — until the toolchain is in, the kernel build "
               "cannot succeed\n      (it needs several GB of Xcode "
@@ -1076,7 +1076,7 @@ def _offer_metal_toolchain() -> bool:
     print("      Xcode itself must be installed first (free, large "
           "download) from\n      the App Store — the command line "
           "cannot fetch it.")
-    ans = input("      open the Xcode App Store page now? [Y/n] ") \
+    ans = ask("      open the Xcode App Store page now? [Y/n] ") \
         .strip().lower()
     if not ans.startswith("n"):
         try:
@@ -1108,7 +1108,7 @@ def _ask_build_options() -> list:
           "(~2 GB)")
     print("  0  plain build           — no extra formula options")
     print("     (other --with-* options of the formula can be typed too)")
-    ans = input("Build options [1]: ").strip().lower() or "1"
+    ans = ask("Build options [1]: ").strip().lower() or "1"
     flags, unknown = [], []
     for tok in ans.replace(",", " ").split():
         if tok in ("0", "none"):
@@ -1131,27 +1131,60 @@ def _ask_build_options() -> list:
     return flags
 
 
+def ask(prompt: str) -> str:
+    """input() that fails like a CLI, not like a crash (E2E-3, first-run
+    test 2026-10-22): with piped/closed stdin the bare input() dumped a
+    full EOFError traceback. One actionable line instead."""
+    try:
+        return input(prompt)
+    except EOFError:
+        raise SystemExit(
+            "\nno terminal to read answers from (stdin closed) — run this "
+            "in a terminal, or use --yes / the flags for non-interactive "
+            "use") from None
+    except KeyboardInterrupt:
+        raise SystemExit("\ncancelled") from None
+
+
 def install_config(src_hint: str | None = None, yes: bool = False,
                    origin: str | None = None, sync_ref: str | None = None,
                    base_dir: str | None = None) -> dict:
     """Interactive repo questionnaire + dev.json write (clone itself is
-    ensure_clone's job). Plain stdin Q&A; --yes takes the defaults."""
+    ensure_clone's job). Plain stdin Q&A; --yes takes the defaults.
+
+    E2E-4 (user decision 2026-10-22): an EXISTING dev.json is PRESERVED.
+    Its origin/sync_ref are the defaults (re-running bootstrap after a
+    hand-tuned lane config must not silently reset it to the detected
+    formula origin — it cost two surprise resets during the restore),
+    the questionnaire only runs when the user agrees to reconfigure, and
+    keys bootstrap does not own (port, base_path, auto_update, build
+    stamps, …) pass through untouched — the old full-replace dropped them
+    and forced pointless rebuilds."""
+    existing = load_config(base_dir=base_dir) or {}
     detected = detect_origin(src_hint=src_hint)
-    chosen_origin = origin or detected["origin"]
-    chosen_sync = sync_ref or "origin/main"
+    chosen_origin = origin or existing.get("origin") or detected["origin"]
+    chosen_sync = sync_ref or existing.get("sync_ref") or "origin/main"
     build_options = None
     if not yes and origin is None:
-        print(f"Detected omlx origin: {detected['origin']} "
-              f"(from: {detected['source']})")
-        answer = input("Use this as dev-src origin? [Y/n] ").strip().lower()
-        if answer and not answer.startswith("y"):
-            chosen_origin = input("Origin URL: ").strip() or chosen_origin
-        if sync_ref is None:
-            chosen_sync = (input("Sync ref to track [origin/main]: ").strip()
-                           or "origin/main")
-        build_options = _ask_build_options()
+        keep = bool(existing.get("origin"))
+        if keep:
+            print(f"Existing dev lane: origin={existing['origin']} "
+                  f"(sync ref: {existing.get('sync_ref', 'origin/main')})")
+            keep = not ask("Reconfigure this lane instead? [y/N] ") \
+                .strip().lower().startswith("y")
+        if not keep:
+            print(f"Detected omlx origin: {detected['origin']} "
+                  f"(from: {detected['source']})")
+            answer = ask("Use this as dev-src origin? [Y/n] ").strip().lower()
+            if answer and not answer.startswith("y"):
+                chosen_origin = ask("Origin URL: ").strip() or chosen_origin
+            if sync_ref is None:
+                chosen_sync = (ask("Sync ref to track [origin/main]: ").strip()
+                               or "origin/main")
+            build_options = _ask_build_options()
     base = base_dir or _patches.default_base_dir()
-    cfg = {
+    cfg = dict(existing)
+    cfg.update({
         "origin": _normalize_git_url(chosen_origin),
         "upstream": (UPSTREAM_CANONICAL if not _same_url(chosen_origin,
                                                          UPSTREAM_CANONICAL)
@@ -1159,7 +1192,7 @@ def install_config(src_hint: str | None = None, yes: bool = False,
         "sync_ref": chosen_sync,
         "formula_branch": DEV_BRANCH_DEFAULT,
         "src_path": os.path.join(base, "dev-src"),
-    }
+    })
     if build_options is not None:
         # stored even when empty: [] = the user chose a plain build, which
         # is NOT the same as never being asked (that path keeps the pre-

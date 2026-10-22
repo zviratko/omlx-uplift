@@ -1560,7 +1560,7 @@ def _share_answers(args, cfg: dict, devsrc) -> dict:
             else:
                 hint = ("recommended no while BOTH servers run — mutable, "
                         "concurrent writes race")
-            ans = input(f"  share {name}? [{rec}] ({hint}): ").strip().lower()
+            ans = devsrc.ask(f"  share {name}? [{rec}] ({hint}): ").strip().lower()
             share[name] = (ans.startswith("y") if ans
                            else devsrc.SHARE_DEFAULTS[name])
     share.update({n: True for n in on if n in names})

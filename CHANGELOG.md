@@ -13,6 +13,26 @@ users never see.
 
 ## Unreleased
 
+- **The dev-lane questionnaire keeps your lane.** Re-running
+  `omlx-uplift dev bootstrap` used to silently overwrite a hand-tuned
+  `dev.json` (origin, sync ref, port, build stamps all reset or dropped —
+  twice during one restore). An existing config is now kept as-is:
+  bootstrap prints it and only re-questions if you agree to reconfigure;
+  `--yes` never touches the values again; keys bootstrap does not own
+  survive.
+- **No more tracebacks without a terminal.** Prompts (`dev bootstrap`,
+  build options, Metal-toolchain offer, share questions) hitting a
+  closed/piped stdin dumped raw `EOFError` stack traces; they now exit
+  with one line: run in a terminal or use `--yes`.
+- **The dev service can no longer wedge on the LAN-bind safety gate.**
+  Saving `0.0.0.0` as the server address with no API key made omlx ask
+  interactively to fall back to loopback — under launchd nobody can
+  press Enter, so the board just stayed down. The dev service now sets
+  `OMLX_STARTUP_NOTICE_PATH`: omlx applies the loopback fallback itself
+  and writes the explanation (incl. the fix) to
+  `$(brew --prefix)/var/startup-notice.txt`.
+
+
 - **First-run installs got honest errors.** Fresh-machine E2E (both README
   lanes) found three walls: `omlx-uplift install` with no server anywhere
   self-mounted into uplift's own venv and died as a cryptic

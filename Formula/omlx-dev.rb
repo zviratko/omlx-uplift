@@ -174,7 +174,15 @@ class OmlxDev < Omlx
     error_log_path var/"log/omlx-dev.log"
     environment_variables PATH:           std_service_path_env,
                           OMLX_PORT:      port.to_s,
-                          OMLX_BASE_PATH: File.expand_path(base)
+                          OMLX_BASE_PATH: File.expand_path(base),
+                          # E2E-3 (2026-10-22): with a saved 0.0.0.0 host but
+                          # no API key, omlx asks interactively to fall back
+                          # to loopback — under launchd that prompt can never
+                          # be answered and the service wedges ("Startup
+                          # canceled", exit 1). The notice-path env makes omlx
+                          # apply the fallback itself and write the why to
+                          # this file instead of blocking.
+                          OMLX_STARTUP_NOTICE_PATH: var/"startup-notice.txt"
   end
 
   def install

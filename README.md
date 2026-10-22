@@ -43,8 +43,10 @@ brew services start omlx-dev
 ```
 
 Serving the dashboard on your LAN: set an API key FIRST. omlx refuses an
-unauthenticated LAN bind and falls back to 127.0.0.1; under `brew services`
-that safety prompt cancels the start (check `~/.omlx*/logs/server.log`).
+unauthenticated LAN bind and falls back to 127.0.0.1 (the reason is written
+to `$(brew --prefix)/var/startup-notice.txt` on the dev lane); classic
+launchd starts of that state used to cancel silently — check
+`~/.omlx*/logs/server.log` if the board will not come up.
 
 After `brew upgrade` of either keg (fresh keg = fresh python), re-run
 `omlx-uplift install` and restart the service again. Removing uplift only:

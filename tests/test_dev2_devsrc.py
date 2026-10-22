@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from omlx_uplift import devsrc
 
@@ -339,6 +340,47 @@ class DevsrcFixture(unittest.TestCase):
         self.assertEqual(loaded["origin"], "file://" + self.remote)
         path = devsrc.ensure_clone(loaded)
         self.assertTrue(os.path.isdir(path))
+
+    # -- E2E-4: bootstrap preserves an existing lane config ------------------
+    def _seed_lane(self):
+        devsrc.save_config({
+            "origin": "file://" + self.remote,
+            "sync_ref": "upstream/main",
+            "formula_branch": "uplift-dev",
+            "src_path": os.path.join(self.base_dir, "dev-src"),
+            "port": 9001, "auto_update": False, "built_sha": "deadbeef",
+        }, base_dir=self.base_dir)
+
+    def test_install_config_yes_preserves_lane_and_foreign_keys(self):
+        self._seed_lane()
+        cfg = devsrc.install_config(yes=True, base_dir=self.base_dir)
+        self.assertEqual(cfg["origin"], "file://" + self.remote)
+        self.assertEqual(cfg["sync_ref"], "upstream/main")
+        self.assertEqual(cfg["port"], 9001)
+        self.assertIs(cfg["auto_update"], False)
+        self.assertEqual(cfg["built_sha"], "deadbeef",
+                         "bootstrap must not drop build stamps")
+
+    def test_install_config_interactive_keep_asks_once(self):
+        self._seed_lane()
+        prompts = []
+
+        def fake_ask(p):
+            prompts.append(p)
+            return "\n"  # default answer: keep
+
+        with mock.patch.object(devsrc, "ask", fake_ask):
+            cfg = devsrc.install_config(base_dir=self.base_dir)
+        self.assertEqual(prompts, ["Reconfigure this lane instead? [y/N] "])
+        self.assertEqual(cfg["origin"], "file://" + self.remote)
+
+    def test_ask_fails_friendly_on_eof(self):
+        # E2E-3: closed stdin must exit with an actionable line, never an
+        # EOFError traceback.
+        with mock.patch("builtins.input", side_effect=EOFError):
+            with self.assertRaises(SystemExit) as cm:
+                devsrc.ask("anything? ")
+        self.assertIn("terminal", str(cm.exception))
 
 
     # -- DEV-7 base pin -------------------------------------------------------
