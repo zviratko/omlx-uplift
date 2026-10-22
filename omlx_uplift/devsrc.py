@@ -1008,6 +1008,89 @@ def _added_lines(filepatch: dict) -> set[str]:
 # install questionnaire (DEV-2 CLI) — repo part only; DEV-4 owns runtime
 # ---------------------------------------------------------------------------
 
+def _metal_compiler_ok() -> bool:
+    """Only RUNNING the compiler agrees with whether the build will work:
+    since Xcode 26 `xcrun -f metal` finds a shim that lies (the tap
+    formula says the same). Non-macOS boxes (CI) have nothing to check."""
+    import subprocess
+    import sys
+
+    if sys.platform != "darwin":
+        return True
+    try:
+        return subprocess.run(["/usr/bin/xcrun", "metal", "--version"],
+                              capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+def _xcode_usable() -> bool:
+    import subprocess
+
+    try:
+        return subprocess.run(["xcodebuild", "-version"],
+                              capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+def _offer_metal_toolchain() -> bool:
+    """Custom kernels need the Metal compiler. When it is missing, help
+    the user install it now instead of letting the build die on it minutes
+    later. True = toolchain is ready (or nothing to do)."""
+    print("note: custom kernels compile with the Metal toolchain: full "
+          "Xcode plus the\nseparate component download "
+          "'xcodebuild -downloadComponent MetalToolchain'.")
+    if _metal_compiler_ok():
+        print("      Metal compiler found on this Mac — kernels will "
+              "build.")
+        return True
+    print("      The compiler is NOT working on this Mac yet.")
+    ans = input("      set it up now? [Y/n] ").strip().lower()
+    if ans.startswith("n"):
+        print("      OK — until the toolchain is in, the kernel build "
+              "cannot succeed\n      (it needs several GB of Xcode "
+              "download first).")
+        return False
+    import subprocess
+
+    if _xcode_usable():
+        print("      running: xcodebuild -downloadComponent "
+              "MetalToolchain  (large download)")
+        try:
+            subprocess.run(["xcodebuild", "-downloadComponent",
+                            "MetalToolchain"])
+        except KeyboardInterrupt:
+            print("      download interrupted — re-run the command or "
+                  "answer here again later.")
+            return False
+        ready = _metal_compiler_ok()
+        print("      Metal toolchain installed — kernels will build."
+              if ready else
+              "      toolchain still not answering 'xcrun metal "
+              "--version' — clear a\n      stale lookup cache "
+              "('rm -f \"${TMPDIR:-/tmp}/xcrun_db\"') or re-run the "
+              "download.")
+        return ready
+    # no Xcode at all: it comes from the App Store, not from the CLI
+    print("      Xcode itself must be installed first (free, large "
+          "download) from\n      the App Store — the command line "
+          "cannot fetch it.")
+    ans = input("      open the Xcode App Store page now? [Y/n] ") \
+        .strip().lower()
+    if not ans.startswith("n"):
+        try:
+            subprocess.run(["open", "macappstore://apps.apple.com/app/"
+                            "xcode/id497799835"])
+        except OSError:
+            pass
+    print("      after Xcode is installed: run 'xcodebuild "
+          "-downloadComponent\n      MetalToolchain' (or re-answer this "
+          "question) — then 'omlx-uplift\n      dev install' builds the "
+          "kernels.")
+    return False
+
+
 def _ask_build_options() -> list:
     """Build-options questionnaire (SYNC-1 2026-10-22). The formula
     compiles WITHOUT extras unless asked; on a box with no vanilla omlx
@@ -1016,9 +1099,11 @@ def _ask_build_options() -> list:
     flag list to store (possibly empty = explicit plain build)."""
     print("What should the omlx-dev engine build include? "
           "(numbers combine, e.g. 1,2)")
-    print("  1  custom Metal kernels  — recommended, fastest engine; needs "
-          "full\n     Xcode plus the Metal compiler component:\n"
-          "         xcodebuild -downloadComponent MetalToolchain")
+    print("  1  custom Metal kernels — RECOMMENDED, you almost certainly\n"
+          "     want these: this is the fastest engine build. Skip them "
+          "only if\n     this Mac cannot run Xcode (it needs Xcode plus "
+          "the separate\n     'MetalToolchain' component download, "
+          "several GB).")
     print("  2  xgrammar              — structured output; installs torch "
           "(~2 GB)")
     print("  0  plain build           — no extra formula options")
@@ -1042,10 +1127,7 @@ def _ask_build_options() -> list:
               "flag")
     flags = sorted(set(flags))
     if "--with-custom-kernel" in flags:
-        print("note: custom kernels compile with the Metal toolchain. If "
-              "Xcode is not\ninstalled yet the build will stop and tell you "
-              "to install it; the toolchain\nitself is a separate download: "
-              "xcodebuild -downloadComponent MetalToolchain")
+        _offer_metal_toolchain()
     return flags
 
 
@@ -1819,6 +1901,26 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
         res.ok, res.returncode, res.stage = True, 0, "dry-run"
         _emit(res, "out", "dry-run: would run: " + " ".join(cmd))
         return res
+
+    # PREFLIGHT (user 2026-10-22): a custom-kernel build on a Mac without
+    # the Metal toolchain dies minutes INTO brew (the formula guard is the
+    # backstop). Ask interactively up front and offer the setup; a
+    # non-interactive run (service, dashboard trigger) falls through to
+    # the formula guard with the same message, just later.
+    if "--with-custom-kernel" in flags:
+        import sys as _sys
+
+        if _sys.stdin is not None and _sys.stdin.isatty():
+            if not _offer_metal_toolchain():
+                _emit(res, "err", "Metal toolchain missing — stopped "
+                                  "BEFORE the build: a kernel build "
+                                  "cannot succeed without it. Install "
+                                  "Xcode + MetalToolchain and re-run, or "
+                                  "build plain: remove "
+                                  "'--with-custom-kernel' from "
+                                  "build_options in dev.json")
+                res.ok, res.returncode, res.stage = False, 2, "toolchain"
+                return res
 
     # KEG-VERSIONED (user 2026-10-20): a unique fake version per build,
     # stamped right before brew runs so the formula (which reads dev.json)

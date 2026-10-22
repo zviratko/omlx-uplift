@@ -7,6 +7,7 @@ explicit flag > saved answer > receipt inheritance, and an explicit flag
 re-saves (sticky).
 """
 import pytest
+from types import SimpleNamespace
 
 from omlx_uplift import devsrc
 
@@ -15,6 +16,10 @@ from omlx_uplift import devsrc
 
 @pytest.fixture()
 def answers(monkeypatch):
+    # the kernel branch now offers toolchain setup — silent unless the
+    # offer itself is under test
+    monkeypatch.setattr(devsrc, "_offer_metal_toolchain", lambda: True)
+
     def _feed(text):
         monkeypatch.setattr("builtins.input", lambda prompt="": text)
     return _feed
@@ -24,6 +29,8 @@ def test_ask_build_options_default_is_custom_kernel(answers, capsys):
     answers("")
     assert devsrc._ask_build_options() == ["--with-custom-kernel"]
     out = capsys.readouterr().out
+    assert "RECOMMENDED, you almost certainly" in out, \
+        "kernels must be worded as the choice the user wants"
     assert "MetalToolchain" in out, "the Xcode download must be named up front"
 
 
@@ -58,7 +65,6 @@ def test_install_config_saves_answer(tmp_path, monkeypatch, answers):
     monkeypatch.setattr(devsrc, "detect_origin",
                         lambda src_hint=None: {"origin": "https://x/omlx.git",
                                                "source": "test"})
-    answers("1")
     # origin question: default Y; sync ref: default; options: fed above
     seq = iter(["", "", "1"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(seq))
@@ -147,3 +153,124 @@ def home_cfg_dry(tmp_path, monkeypatch):
                                                     "commits": []})
     monkeypatch.setattr(devsrc, "recheck_build_patches", lambda gated: {})
     return devsrc, devsrc.run_dev_build(dry_run=True)
+
+
+# ---- toolchain offer --------------------------------------------------------
+
+def _no_compiler(monkeypatch):
+    monkeypatch.setattr(devsrc, "_metal_compiler_ok", lambda: False)
+
+
+def test_offer_ready_compiler_is_quiet_yes(monkeypatch, capsys):
+    monkeypatch.setattr(devsrc, "_metal_compiler_ok", lambda: True)
+    assert devsrc._offer_metal_toolchain() is True
+    assert "found on this Mac" in capsys.readouterr().out
+
+
+def test_offer_declined(monkeypatch, capsys):
+    _no_compiler(monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    assert devsrc._offer_metal_toolchain() is False
+    assert "cannot succeed" in capsys.readouterr().out
+
+
+def test_offer_with_xcode_downloads_component(monkeypatch, capsys):
+    _no_compiler(monkeypatch)
+    monkeypatch.setattr(devsrc, "_xcode_usable", lambda: True)
+    calls = []
+    inputs = iter(["y"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+    import subprocess as sp
+    monkeypatch.setattr(sp, "run", lambda cmd, **kw: calls.append(cmd) or 0)
+    # re-check after the download now passes
+    monkeypatch.setattr(devsrc, "_metal_compiler_ok",
+                        lambda: len(calls) > 0)
+    assert devsrc._offer_metal_toolchain() is True
+    assert ["xcodebuild", "-downloadComponent", "MetalToolchain"] in calls
+    assert "kernels will build" in capsys.readouterr().out
+
+
+def test_offer_without_xcode_opens_app_store(monkeypatch, capsys):
+    _no_compiler(monkeypatch)
+    monkeypatch.setattr(devsrc, "_xcode_usable", lambda: False)
+    calls = []
+    inputs = iter(["y", "y"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+    import subprocess as sp
+    monkeypatch.setattr(sp, "run",
+                        lambda cmd, **kw: calls.append(cmd) or 0)
+    assert devsrc._offer_metal_toolchain() is False
+    assert any(c[0] == "open" and "macappstore" in c[1] for c in calls), \
+        "must offer the App Store page — Xcode cannot be fetched via CLI"
+    out = capsys.readouterr().out
+    assert "downloadComponent" in out, "the follow-up command must be printed"
+
+
+# ---- build-start preflight --------------------------------------------------
+
+def test_build_stops_before_brew_when_toolchain_missing(home_cfg_plain,
+                                                        monkeypatch):
+    """The preflight must fire on the SAVED kernel answer too (not only
+    the explicit flag) and return the 'toolchain' stage without ever
+    reaching the brew subprocess / version stamping."""
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(devsrc, "_offer_metal_toolchain", lambda: False)
+    res = home_cfg_plain()
+    assert (res.ok, res.returncode, res.stage) == (False, 2, "toolchain")
+    assert any("stopped BEFORE the build" in t for _, t in res.lines)
+
+
+def test_build_preflight_skipped_when_not_a_tty(home_cfg_plain, monkeypatch):
+    """Non-interactive runs must not block on the offer: they fall through
+    to the formula guard instead (the fixture detonates at the stamp step
+    right after the gate to prove flow continued without touching brew)."""
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "stdin", SimpleNamespace(isatty=lambda: False))
+    called = []
+    monkeypatch.setattr(devsrc, "_offer_metal_toolchain",
+                        lambda: called.append(1) or True)
+
+    with pytest.raises(AssertionError, match="reached the stamp step"):
+        home_cfg_plain(break_after_preflight=True)
+    assert not called, "the tty offer must not run headless"
+
+
+@pytest.fixture()
+def home_cfg_plain(tmp_path, monkeypatch):
+    """run_dev_build harness (be1 pattern) with build_options = kernels,
+    reaching the real build path unless a stage stops it first."""
+    monkeypatch.setenv("UPLIFT_HOME", str(tmp_path / "uplift"))
+    cfg = {"src_path": str(tmp_path / "dev-src"), "sync_ref": "origin/main",
+           "formula_branch": "uplift-dev",
+           "build_options": ["--with-custom-kernel"]}
+
+    def _factory(break_after_preflight=False):
+        monkeypatch.setattr(devsrc, "load_config",
+                            lambda *a, **k: dict(cfg))
+        (tmp_path / "dev-src" / ".git").mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(devsrc, "ensure_clone", lambda cfg: None)
+        monkeypatch.setattr(devsrc, "worktree_clean", lambda p: True)
+        monkeypatch.setattr(devsrc, "fetch_sync_ref", lambda cfg: None)
+        from omlx_uplift import patchsource, curated
+        monkeypatch.setattr(curated, "sync", lambda *a, **k: {"report": {}})
+        monkeypatch.setattr(patchsource, "enabled_build_patches",
+                            lambda store: [])
+        monkeypatch.setattr(devsrc, "materialize",
+                            lambda patches, cfg, **kw: {"ok": True,
+                                                        "tip": "t" * 40,
+                                                        "base": "b" * 40,
+                                                        "commits": []})
+        monkeypatch.setattr(devsrc, "recheck_build_patches",
+                            lambda gated: {})
+        if break_after_preflight:
+            # stop at the stamp step: never let the test touch brew/git
+            monkeypatch.setattr(
+                devsrc, "_ensure_versioned_formula",
+                lambda: (_ for _ in ()).throw(
+                    AssertionError("reached the stamp step")))
+        return devsrc.run_dev_build()
+
+    return _factory
