@@ -457,9 +457,20 @@ function voiceRow(v, extraClass) {
         if (play.classList.contains('playing')) return stopPlayback();
         play.disabled = true;
         try {
-            const r = await speechJson('/voices/speech', { voice: v.id,
-                input: tf('uplift.voices.sample_text',
-                          'Hello! This is how I sound.') });
+            // SAY-CHAT: a macOS voice auditions EXACTLY like on the
+            // catalog tab — no input, the server speaks the voice's OWN
+            // native-language greeting from the roster. The generic
+            // sample_text follows the board's UI language, which made
+            // every say voice read English ('Hello!' from Zuzana — user
+            // report 2026-10-23). The tail addresses an identifier or a
+            // locale; the server routes both.
+            const sayAddr = isSayVoice(v)
+                ? String(v.model).slice(4).trim() : '';
+            const r = sayAddr
+                ? await speechJson('/voices/say/speech', { name: sayAddr })
+                : await speechJson('/voices/speech', { voice: v.id,
+                    input: tf('uplift.voices.sample_text',
+                              'Hello! This is how I sound.') });
             play.disabled = false;
             await playBlob(r, play);
         } catch (e) {

@@ -461,6 +461,12 @@ def test_audition_endpoint_defaults_to_the_voice_greeting(client, on_mac,
     r = client.post("/uplift/api/voices/say/speech", json={"name": "Zuzana"})
     assert r.status_code == 200
     assert got["args"] == ("Zuzana", "Ahoj! Já jsem Zuzana.")
+    # SAY-CHAT: a stored-row tail that is a LOCALE ('say:cs-CZ' legacy
+    # shape, posted by the TTS tab audition) routes to the voice that
+    # ANSWERS the language — its own greeting, not a UI-language sample
+    r = client.post("/uplift/api/voices/say/speech", json={"name": "cs-CZ"})
+    assert r.status_code == 200
+    assert got["args"] == ("Zuzana", "Ahoj! Já jsem Zuzana.")
     r = client.post("/uplift/api/voices/say/speech", json={"name": "Nobody"})
     assert r.status_code == 404
 

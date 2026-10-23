@@ -902,6 +902,19 @@ async def voices_say_speech(request: Request, _auth=Depends(require_admin)):
         raise HTTPException(status_code=400, detail="JSON object required")
     name = str(raw.get("name") or "").strip()
     v = await asyncio.to_thread(say_engine.resolve, name)
+    if v is None and name:
+        # SAY-CHAT: the TTS tab auditions stored rows by their model
+        # tail — an IDENTIFIER (the chat toggle's shape) or, on legacy
+        # rows, a LOCALE ('say:cs-CZ'). resolve cannot find a locale;
+        # the router can — the voice answering that language owns the
+        # greeting. An unresolvable name still 404s honestly.
+        try:
+            addr = await asyncio.to_thread(say_engine.route, name, None,
+                                           _say_preferred())
+        except LookupError:
+            addr = ""
+        if addr:
+            v = await asyncio.to_thread(say_engine.resolve, addr)
     if v is None:
         raise HTTPException(status_code=404,
                             detail="'%s' is not an installed macOS voice"

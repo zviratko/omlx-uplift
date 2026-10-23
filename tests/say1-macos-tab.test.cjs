@@ -469,6 +469,39 @@ test('PLAY auditions with the roster greeting chosen by the SERVER', async () =>
     assert.equal(body.name, 'Zuzana');
 });
 
+test('SAY-CHAT: stored say rows on the TTS tab audition in their OWN language', async () => {
+    // user report 2026-10-23: a say voice made available for web chat read
+    // the UI-language sample_text on the TEXT TO SPEECH tab ('Hello!' from
+    // Zuzana) while the macOS tab spoke its native greeting. Both tabs now
+    // share one audition contract: POST /voices/say/speech with {name}
+    // only — the server owns the text. Clone rows keep the store route.
+    const h = await mount({ store: [
+        { id: 'zuzana', name: 'Zuzana', model: 'say:Zuzana' },
+        { id: 'clone1', name: 'MyClone', model: 'qwen3-tts' },
+    ] });
+    // default tab is TEXT TO SPEECH — no sayClick
+    const rows = classes(h.host, 'vc-row');
+    const zu = rows.find(r =>
+        String(r.children[0].textContent).startsWith('Zuzana (macOS)'));
+    assert.ok(zu, 'the stored say row renders in the macOS card');
+    classes(zu, 'vc-play')[0].click();
+    await settle(); await settle();
+    const f = h.st.fetches.find(x => x.url.includes('/voices/say/speech'));
+    assert.ok(f, 'audition rode the say engine, not the store speech route');
+    assert.deepEqual(JSON.parse(f.body), { name: 'Zuzana' });
+    assert.ok(!h.st.fetches.some(x => x.url.includes('/voices/speech')),
+              'no sample_text is invented for a macOS voice');
+    // the model-clone row keeps the UI-language sample on the store route
+    const cl = rows.find(r =>
+        String(r.children[0].textContent).startsWith('qwen3-tts:MyClone'));
+    assert.ok(cl, 'clone row renders under its model card');
+    classes(cl, 'vc-play')[0].click();
+    await settle(); await settle();
+    const g = h.st.fetches.find(x => x.url.includes('/voices/speech'));
+    assert.ok(g, 'the clone still auditions through the store route');
+    assert.ok(JSON.parse(g.body).input.includes('Hello'), 'sample_text kept');
+});
+
 test('unsupported server: the honest note, nothing else', async () => {
     const h = await mount({ supported: false, voices: [] });
     await h.sayClick();
