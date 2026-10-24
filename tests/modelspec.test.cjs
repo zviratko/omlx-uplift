@@ -96,10 +96,10 @@ test('validate: ANE prompt block multiple of 64', () => {
     st.qwen35_ane_prefill_sequence_length = 1056;   // 16.5*64 -> invalid
     assert.match(ok(st).join('|'), /multiple of 64/);
 });
-test('validate: MoE fraction bounds', () => {
+test('validate: MoE fraction bounds (UP-18: classic 5..95 percent band)', () => {
     const st = S.buildState(base({ moe_expert_offload_supported: true }),
         { moe_expert_offload_enabled: true, moe_expert_offload_resident_fraction: 1.5 });
-    assert.match(ok(st).join('|'), /resident fraction/);
+    assert.match(ok(st).join('|'), /resident experts must be between 5% and 95%/);
 });
 test('validate: specprefill keep range', () => {
     const st = S.buildState(base(), { specprefill_enabled: true, specprefill_keep_pct: '0.9' });
@@ -563,3 +563,57 @@ test('dflash: surviving family keeps its payload + signature semantics', () => {
 });
 
 
+
+/* ---- UP-18: capability gating + validation depth (classic parity) ---- */
+test('UP-18(1): MoE offload x MTP follows the server verdict moe_offload_allows_mtp', () => {
+    const mk = (allows) => S.buildState(
+        base({ moe_expert_offload_supported: true, moe_offload_allows_mtp: allows }),
+        { moe_expert_offload_enabled: true, mtp_enabled: true });
+    const stYes = mk(true);
+    assert.strictEqual(stYes.moe_offload_allows_mtp, true);
+    assert.ok(!S.validate(stYes, base({ moe_offload_allows_mtp: true }))
+        .some(e => /Lightning MTP/i.test(e)), 'allowed pairing must not error');
+    const stNo = mk(false);
+    assert.ok(S.validate(stNo, base()).some(e => /Lightning MTP on this model/i.test(e)),
+        'disallowed pairing still errors');
+    // VLM MTP / DFlash stay blocked with offload regardless of the flag
+    const stVlm = S.buildState(base({ moe_expert_offload_supported: true,
+        moe_offload_allows_mtp: true }),
+        { moe_expert_offload_enabled: true, vlm_mtp_enabled: true });
+    assert.ok(S.validate(stVlm, base()).some(e => /VLM MTP or DFlash/.test(e)));
+});
+test('UP-18(2): paroquant zeroes KV compression at load and blocks the family in validate', () => {
+    const st = S.buildState(base({ is_paroquant: true, paroquant_reason: 'pq packed format' }),
+        { turboquant_kv_enabled: true, turboquant_kv_scheme: 'affine4', turboquant_kv_bits: 8 });
+    assert.strictEqual(st.turboquant_kv_enabled, false);
+    assert.strictEqual(st.turboquant_kv_scheme, 'turboquant');
+    assert.strictEqual(st.turboquant_kv_bits, 4);
+    st.specprefill_enabled = true;
+    const errs = S.validate(st, base({ is_paroquant: true }));
+    assert.ok(errs.some(e => e === 'pq packed format'), 'server reason surfaces verbatim: ' + errs);
+});
+test('UP-18(4): index-cache frequency rides the classic 2..16 ladder', () => {
+    const st = S.buildState(base(), { index_cache_freq: 40 });
+    assert.ok(S.validate(st, base()).some(e => /between 2 and 16/.test(e)));
+    const ok = S.buildState(base(), { index_cache_freq: 4 });
+    assert.strictEqual(S.validate(ok, base()).length, 0);
+});
+test('UP-18(7): resident experts keep the classic 5..95 percent band', () => {
+    const st = S.buildState(base({ moe_expert_offload_supported: true }),
+        { moe_expert_offload_enabled: true, moe_expert_offload_resident_fraction: 0.02 });
+    assert.ok(S.validate(st, base()).some(e => /between 5% and 95%/.test(e)));
+});
+test('UP-18(5): oQ A8 family includes qwen4_exp; the row honors the server verdict', () => {
+    assert.ok(S.isQwenOqA8(base({ config_model_type: 'qwen4_exp' })));
+    assert.ok(S.isQwenOqA8(base({ config_model_type: 'qwen3_6_moe' })));
+    assert.ok(!S.isQwenOqA8(base({ config_model_type: 'llama' })));
+    assert.ok(!S.showsQwenOqA8(base({ config_model_type: 'qwen4_exp' })),
+        'family alone does NOT show the row (pre-M5 hardware)');
+    assert.ok(S.showsQwenOqA8(base({ config_model_type: 'qwen4_exp',
+        qwen35_oq_a8_supported: true })));
+    assert.ok(S.showsQwenOqA8(base({ config_model_type: 'qwen3_5',
+        settings: { qwen35_oq_a8_enabled: true } })), 'a saved-on keeps the row to allow off');
+});
+test('UP-18(4): DSA_MODEL_TYPES exported exactly like classic', () => {
+    assert.deepStrictEqual([...S.DSA_MODEL_TYPES].sort(), ['deepseek_v32', 'glm_moe_dsa']);
+});

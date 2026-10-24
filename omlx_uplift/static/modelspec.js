@@ -144,7 +144,22 @@
 
     const normType = t => String(t || '').toLowerCase().replace(/-/g, '_');
     const isDiffusion = m => DIFFUSION_CONFIG_MODEL_TYPES.has(normType(m && m.config_model_type));
-    const isQwenOqA8 = m => ['qwen3_5', 'qwen3_6', 'qwen3_8'].some(p => normType(m && m.config_model_type).startsWith(p));
+    // UP-18 (5): the classic family (dashboard.js isQwenOqA8Model) — routed-
+    // expert A8 lives on qwen4_exp too, not only the qwen3_5/6/8 prefixes.
+    const isQwenOqA8 = m => {
+        const t = normType(m && m.config_model_type);
+        return t === 'qwen4_exp'
+            || ['qwen3_5', 'qwen3_6', 'qwen3_8'].some(p => t.startsWith(p));
+    };
+    // UP-18 (5): classic showsQwenOqA8 — the kernels need native INT8
+    // tensor ops (M5-series or newer, server verdict qwen35_oq_a8_supported);
+    // a saved "on" keeps the row so it can be turned off.
+    const showsQwenOqA8 = m => isQwenOqA8(m)
+        && (m && m.qwen35_oq_a8_supported === true
+            || !!((m && m.settings) && m.settings.qwen35_oq_a8_enabled === true));
+    // UP-18 (4): classic DSA_MODEL_TYPES — the Index Cache row exists only
+    // for sparse-attention models (DeepSeek V3.2 / GLM DSA).
+    const DSA_MODEL_TYPES = new Set(['deepseek_v32', 'glm_moe_dsa']);
 
     /* ---- form state (mirrors buildModelSettingsState) ---- */
     function coerceKwargValue(v) {
@@ -270,11 +285,17 @@
             ttl_seconds: s.ttl_seconds ?? null,
             enableIndexCache: !!s.index_cache_freq,
             index_cache_freq: s.index_cache_freq || null,
-            turboquant_kv_enabled: s.turboquant_kv_enabled || false,
+            // UP-18 (2): classic zeroes the KV-compression family on a
+            // PAROQUANT checkpoint at load (dashboard.js:2172-2177) — the
+            // packed format cannot carry a quantized KV cache.
+            turboquant_kv_enabled: !diffusion && !(model && model.is_paroquant === true)
+                && (s.turboquant_kv_enabled || false),
             // SYNC-1 (upstream 7ffa8d4 #4659): KV compression format;
             // server default when the field is absent is 'turboquant'.
-            turboquant_kv_scheme: s.turboquant_kv_scheme || 'turboquant',
-            turboquant_kv_bits: s.turboquant_kv_bits || 4,
+            turboquant_kv_scheme: diffusion || (model && model.is_paroquant === true)
+                ? 'turboquant' : (s.turboquant_kv_scheme || 'turboquant'),
+            turboquant_kv_bits: diffusion || (model && model.is_paroquant === true)
+                ? 4 : (s.turboquant_kv_bits || 4),
             moe_expert_offload_enabled: !diffusion && !!(model && model.moe_expert_offload_supported === true) && !!s.moe_expert_offload_enabled,
             moe_expert_offload_resident_fraction: s.moe_expert_offload_resident_fraction ?? 0.25,
             qwen35_oq_a8_enabled: s.qwen35_oq_a8_enabled || false,
@@ -320,6 +341,11 @@
             mtp_compatibility_reason: (model && model.mtp_compatibility_reason) || '',
             is_paroquant: !!(model && model.is_paroquant === true),
             paroquant_reason: (model && model.paroquant_reason) || '',
+            // UP-18 (1): server verdict — deepseek_v41/glm5_next/qwen4_exp
+            // run MTP heads alongside expert offload (model_settings.py
+            // MOE_OFFLOAD_MTP_MODEL_TYPES); classic consumes this flag
+            // (dashboard.js:2182) instead of the old blanket block.
+            moe_offload_allows_mtp: !!(model && model.moe_offload_allows_mtp === true),
             vlm_mtp_enabled: s.vlm_mtp_enabled || false,
             vlm_mtp_draft_model: s.vlm_mtp_draft_model || '',
             vlm_mtp_draft_block_size: s.vlm_mtp_draft_block_size ?? null,
@@ -391,10 +417,30 @@
             if (ms.guided_grammar_enabled || ms.repetition_penalty != null || ms.presence_penalty != null)
                 errors.push('VLM MTP cannot be combined with guided grammar or repetition/presence penalties (per-request logits processors).');
         }
-        if (ms.moe_expert_offload_enabled && (ms.mtp_enabled || ms.vlm_mtp_enabled || ms.dflash_enabled))
-            errors.push('MoE expert offload cannot be combined with Lightning MTP, VLM MTP, or DFlash; disable speculative decoding first.');
+        if (ms.moe_expert_offload_enabled && (ms.vlm_mtp_enabled || ms.dflash_enabled))
+            errors.push('MoE expert offload cannot be combined with VLM MTP or DFlash; disable speculative decoding first.');
+        // UP-18 (1): Lightning MTP rides MoE offload on models the server
+        // vouches for (moe_offload_allows_mtp — deepseek_v41/glm5_next/
+        // qwen4_exp). The old blanket block falsely denied those.
+        if (ms.moe_expert_offload_enabled && ms.mtp_enabled && !ms.moe_offload_allows_mtp)
+            errors.push('MoE expert offload cannot be combined with Lightning MTP on this model; disable one of them.');
+        // UP-18 (2): a PAROQUANT checkpoint cannot carry KV compression,
+        // VLM MTP, SpecPrefill or Index Cache (classic disables the rows).
+        if (ms.is_paroquant && (ms.turboquant_kv_enabled || ms.vlm_mtp_enabled
+                || ms.specprefill_enabled || ms.enableIndexCache))
+            errors.push(ms.paroquant_reason
+                || 'Paroquant checkpoint: KV compression, VLM MTP, SpecPrefill and Index Cache are unavailable.');
+        // UP-18 (7): classic keeps resident experts in 5..95 % (the API
+        // accepts fractions outside; the UI ladder does not ship them)
         const frac = num(ms.moe_expert_offload_resident_fraction);
-        if (!(frac > 0 && frac <= 1)) errors.push('MoE resident fraction must be in (0, 1].');
+        if (!(frac >= 0.05 && frac <= 0.95))
+            errors.push('MoE resident experts must be between 5% and 95%.');
+        // UP-18 (4): classic's index-cache frequency ladder (min 2, max 16)
+        if (ms.enableIndexCache) {
+            const f = num(ms.index_cache_freq);
+            if (!Number.isInteger(f) || f < 2 || f > 16)
+                errors.push('Index Cache frequency must be an integer between 2 and 16.');
+        }
         if (ms.qwen35_ane_prefill_enabled) {
             const seq = num(ms.qwen35_ane_prefill_sequence_length);
             if (!Number.isInteger(seq) || seq < 1024) errors.push('ANE prompt block must be an integer of at least 1024.');
@@ -1074,7 +1120,8 @@
              DFLASH_DRAFTER_CONFIG_MODEL_TYPES,
              llmLike, TYPE_ONLY_KEYS, stickyForType,
              normType,
-             isDiffusion, isQwenOqA8, coerceKwargValue, buildCtKwargEntries,
+             isDiffusion, isQwenOqA8, showsQwenOqA8, DSA_MODEL_TYPES,
+             coerceKwargValue, buildCtKwargEntries,
              kwargIdentity, mergeRawKwargs,
              buildState, validate, buildPayload, adaptToServerPayload,
              adaptToServerSettings,

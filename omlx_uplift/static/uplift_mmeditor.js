@@ -901,6 +901,14 @@ function renderEditorFields(container) {
     // is API-routable (engine_pool resolves model_id_or_alias), so calling
     // it 'Display Name' suggested a cosmetic rename; the earlier rename was
     // reverted. Locales carry classic's own translations verbatim.
+    // UP-18 (3): classic isGgufModel — the server 400s a type override on a
+    // GGUF (routes.py:2853), so classic hides the Model Type row there.
+    const gguf = !!(m && m.model_format === 'gguf');
+    // UP-18 (3): classic effectiveExternalEngine — a GGUF runs on an
+    // external engine even when its setting picks none (dashboard.js:4358).
+    const eeEngines = (m && m.external_engines) || [];
+    const extEngActive = () => !!seValues.external_engine
+        || (gguf && eeEngines.length > 0);
     const aliasRow = () => seBind('text', 'model_alias', { label: 'Model Alias' });
     const typeRow = () => seBind('select', 'model_type_override', {
         label: 'Model Type',
@@ -946,7 +954,7 @@ function renderEditorFields(container) {
         section('Basic Settings');
         g = grid();
         if (seIsBaseTab() || !seTab().template) g.append(aliasRow());
-        g.append(typeRow());
+        if (!gguf) g.append(typeRow());   // UP-18 (3): GGUF hides Model Type
         if (seValues.reasoning_parser !== undefined || m.reasoning_parsers) {
             const seen = new Set();
             const rp = [{ value: '', label: 'None' }];
@@ -960,7 +968,8 @@ function renderEditorFields(container) {
             addp(seValues.reasoning_parser || '');
             g.append(seBind('select', 'reasoning_parser', { label: 'Reasoning Parser', options: rp }));
         }
-        g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1,
+        g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)',
+            min: 0, step: 60, disabled: !!(m && m.pinned),   // UP-18 (6)
             effHint: seEffHint('ttl_seconds') }));
         if (m.embedding_audio_supported) {
             seFam(g, 'embedding_audio_enabled',
@@ -990,7 +999,7 @@ function renderEditorFields(container) {
     g = grid();
     if (seIsBaseTab() || !seTab().template)
         g.append(aliasRow());
-    g.append(typeRow());
+    if (!gguf) g.append(typeRow());   // UP-18 (3): GGUF hides Model Type
     if (!S.isDiffusion(m))
             if (m.thinking_default !== undefined && m.thinking_default !== null || seValues.enable_thinking != null) {
                 const tv = seValues.enable_thinking;
@@ -1007,7 +1016,8 @@ function renderEditorFields(container) {
                 sel.addEventListener('change', () => {
                     seValues.enable_thinking = sel.value === '' ? null : sel.value === 'true'; });
             }
-    g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)', step: 1,
+    g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)',
+        min: 0, step: 60, disabled: !!(m && m.pinned),   // UP-18 (6): classic MO:385
         effHint: seEffHint('ttl_seconds'),
         hint: 'Unloads the model automatically after it stays idle this long.' }));
 
@@ -1017,7 +1027,7 @@ function renderEditorFields(container) {
     g.append(seBind('number', 'max_context_window', { label: 'Context Window', step: 1,
         effHint: seEffHint('max_context_window'),
         hint: 'Sets the total context size the model can handle. Longer prompts are rejected.' }));
-    g.append(seBind('number', 'max_tokens', { label: 'Max Tokens', step: 1,
+    g.append(seBind('number', 'max_tokens', { label: 'Max Tokens', min: 1, step: 1,
         effHint: seEffHint('max_tokens'),
         hint: 'Limits how many tokens the model generates in one turn when the request does not set max_tokens.' }));
     const sampling = [
@@ -1044,6 +1054,7 @@ function renderEditorFields(container) {
        engines (classic ms-acceleration; absorbs the old Speculative
        Decoding and DFlash sections) ---- */
     section('Acceleration');
+    if (extEngActive()) sect.__body.append(eeNote());   // UP-18 (3), classic MO:515
     g = grid();
     const models = MM_STATE.adminModels.length ? MM_STATE.adminModels : [];
     const S_ = window.UpliftModelSpec;
@@ -1066,9 +1077,14 @@ function renderEditorFields(container) {
                 const mtpNoHead = m && !m._template && !m._missing
                     && m.mtp_compatible === false;
                 const mtpCompat = !(m && m.mtp_compatible === false);
-                const mtpLock = mtpNoHead && seValues.mtp_enabled !== true;
-                const mtpWhy = m.mtp_compatibility_reason
-                    || 'Not compatible with this model';
+                // UP-18 (1): classic MO:538 — expert offload locks MTP only
+                // when the server says this model cannot pair them.
+                const mtpOffloadLock = !!seValues.moe_expert_offload_enabled
+                    && !(m && m.moe_offload_allows_mtp === true);
+                const mtpLock = (mtpNoHead || mtpOffloadLock) && seValues.mtp_enabled !== true;
+                const mtpWhy = mtpNoHead
+                    ? (m.mtp_compatibility_reason || 'Not compatible with this model')
+                    : 'MoE expert offload is on — this model cannot pair it with Lightning MTP.';
                 const mtpRow = seBind('bool', 'mtp_enabled', {
                     label: 'Lightning MTP',
                     disabled: mtpLock,
@@ -1096,8 +1112,18 @@ function renderEditorFields(container) {
             const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
             if (seValues.vlm_mtp_enabled !== undefined &&
                 S_.VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES.has(drafterType)) {
-                g.append(seBind('bool', 'vlm_mtp_enabled', { label: 'VLM MTP',
-                    hint: 'Uses an external drafter from mlx-vlm (Gemma 4 assistant or Qwen MTP) instead of the built-in Lightning MTP drafter.' }));
+                // UP-18 (2): classic MO:692-697 — VLM MTP is locked for a
+                // PAROQUANT checkpoint (reason tooltip) and while offload,
+                // DFlash or SpecPrefill occupy the spec slot.
+                const pq = !!seValues.is_paroquant;
+                const vlmLock = pq || !!seValues.moe_expert_offload_enabled
+                    || !!seValues.dflash_enabled || !!seValues.specprefill_enabled;
+                const vlmRow = seBind('bool', 'vlm_mtp_enabled', { label: 'VLM MTP',
+                    disabled: vlmLock,
+                    hint: 'Uses an external drafter from mlx-vlm (Gemma 4 assistant or Qwen MTP) instead of the built-in Lightning MTP drafter.' });
+                if (vlmLock) vlmRow.title = pq ? (seValues.paroquant_reason || 'Paroquant checkpoint')
+                    : 'Another offload or speculative path is enabled.';
+                g.append(vlmRow);
                 const sb = seGate(sub(g), 'vlm_mtp_enabled');
                 const pool = S_.vlmMtpDrafters(models, m.id).map(x => ({ value: x.id }));
                 sb.append(seBind('select', 'vlm_mtp_draft_model', { label: 'Drafter model', options: [
@@ -1155,7 +1181,7 @@ function renderEditorFields(container) {
             { label: C.tf('uplift.gs.adv.wide_proj', 'Qwen4 Wide-Proj GDN Decode'),
               hint: C.tf('uplift.gs.adv.wide_proj_hint',
                   'Wider projection in fused Qwen4 GDN decode (experimental).') }));
-    if (S.isQwenOqA8(m)) {
+    if (S.showsQwenOqA8(m)) {
         seFam(g, 'qwen35_oq_a8_enabled',
             seBind('bool', 'qwen35_oq_a8_enabled', { label: 'Qwen INT8 Activation Prefill',
                 hint: 'Experimental GPU INT8 activation quantization for supported Q4/Q5/Q8 prefill.' }),
@@ -1165,6 +1191,7 @@ function renderEditorFields(container) {
 
     /* ---- memory saving (classic ms-memory): offload + KV quantization ---- */
     section('Memory Saving');
+    if (extEngActive()) sect.__body.append(eeNote());   // UP-18 (3), classic MO:803
     g = grid();
     if (m.qwen4_ple_ssd_offload_supported || m.deepseek_v41_engram_ssd_offload_supported
             || seValues.qwen4_ple_ssd_offload || seValues.deepseek_v41_engram_ssd_offload) {
@@ -1182,11 +1209,25 @@ function renderEditorFields(container) {
             disabled: !!forced }));
     }
     if (m.moe_expert_offload_supported && !S.isDiffusion(m)) {
-        seFam(g, 'moe_expert_offload_enabled',
-            seBind('bool', 'moe_expert_offload_enabled', { label: 'MoE Expert Offload',
-                hint: 'Stream Mixture-of-Experts weights from the checkpoint on demand, keeping only part resident.' }),
+        // UP-18 (1): classic MO:845 — the OFFLOAD toggle is locked while an
+        // incompatible spec path is on (MTP only when the model disallows).
+        const offLock = (!!seValues.mtp_enabled && !(m.moe_offload_allows_mtp === true))
+            || !!seValues.vlm_mtp_enabled || !!seValues.dflash_enabled;
+        const offRow = seBind('bool', 'moe_expert_offload_enabled', {
+            label: 'MoE Expert Offload',
+            disabled: offLock,
+            hint: C.tf(m.moe_offload_allows_mtp === true
+                    ? 'modal.model_settings.moe_expert_offload_speculative_hint_v41'
+                    : 'modal.model_settings.moe_expert_offload_speculative_hint',
+                m.moe_offload_allows_mtp === true
+                    ? 'This model pairs expert offload with Lightning MTP.'
+                    : 'Speculative decoding (MTP/DFlash) needs the experts resident.') });
+        if (offLock) offRow.title = 'Disable the active speculative-decoding path first.';
+        seFam(g, 'moe_expert_offload_enabled', offRow,
+            // UP-18 (7): classic's 5..95 % ladder (MOE_EXPERT_OFFLOAD_MIN/
+            // MAX_PERCENT, dashboard.js:12-13) on the fraction mirror
             [seBind('number', 'moe_expert_offload_resident_fraction',
-                { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.01, max: 1, step: 0.01 })]);
+                { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.05, max: 0.95, step: 0.05 })]);
     }
     if (seValues.turboquant_kv_enabled !== undefined) {
         // U41: no diffusion gate — classic shows TurboQuant for every model
@@ -1207,9 +1248,17 @@ function renderEditorFields(container) {
         const tqBitsRow = seBind('select', 'turboquant_kv_bits',
             { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
               options: [2, 2.5, 3, 3.5, 4, 6, 8].map(v => ({ value: String(v), label: v + '-bit' })) });
-        const tqFam = seFam(g, 'turboquant_kv_enabled',
-            seBind('bool', 'turboquant_kv_enabled', { label: 'KV cache compression',
-                hint: 'Reduce KV cache memory using the selected format. TurboQuant supports 2 to 8 bits; Affine4 and Affine8 use 4-bit and 8-bit affine quantization.' }),
+        const tqBoolRow = seBind('bool', 'turboquant_kv_enabled', { label: 'KV cache compression',
+            // UP-18 (2): classic MO:881-886 — a PAROQUANT checkpoint
+            // cannot carry a quantized KV cache (reason tooltip); VLM
+            // MTP also owns the memory/spec slot.
+            disabled: !!seValues.is_paroquant || !!seValues.vlm_mtp_enabled,
+            hint: 'Reduce KV cache memory using the selected format. TurboQuant supports 2 to 8 bits; Affine4 and Affine8 use 4-bit and 8-bit affine quantization.' });
+        if (seValues.is_paroquant || seValues.vlm_mtp_enabled)
+            tqBoolRow.title = seValues.is_paroquant
+                ? (seValues.paroquant_reason || 'Paroquant checkpoint')
+                : 'VLM MTP cannot be combined with KV cache compression.';
+        const tqFam = seFam(g, 'turboquant_kv_enabled', tqBoolRow,
             [tqSchemeRow, tqBitsRow]);
         const tqBitsCtl = tqBitsRow.querySelector('select');
         const kvSchemeSync = () => {
@@ -1238,6 +1287,7 @@ function renderEditorFields(container) {
     /* ---- advanced (classic ms-advanced): security, reasoning, limits,
        grammar, parser, chat-template kwargs ---- */
     section('Advanced Settings');
+    if (extEngActive()) sect.__body.append(eeNote());   // UP-18 (3), classic MO:1230
     g = grid();
     g.append(seBind('bool', 'trust_remote_code', { label: 'Trust Remote Code',
         hint: 'Lets the model repo run arbitrary Python at load. Only enable for trusted repos.' }));
@@ -1256,7 +1306,13 @@ function renderEditorFields(container) {
                     label: e.compatible ? e.label : (e.label + ' — unavailable') })));
         g.append(seBind('select', 'external_engine', {
             label: 'External Engine',
-            hint: (eeList.some(e => e.compatible)
+            // UP-18 (3): a GGUF carries no native engine — an empty pick
+            // still runs externally (classic effectiveExternalEngine +
+            // external_engine_gguf hint, MO:938)
+            hint: gguf
+                ? C.tf('modal.model_settings.external_engine_gguf',
+                    'GGUF models always run through an external engine.')
+                : (eeList.some(e => e.compatible)
                 ? 'Run this model inside another installed engine (takes effect on model reload).'
                 : (eeList[0].reason || 'No external engine available.')),
             options: eeOpts, picker: true }));
@@ -1401,12 +1457,22 @@ function renderEditorFields(container) {
     /* ---- experimental (classic ms-experimental): ANE + index cache + SpecPrefill ---- */
     section('Experimental Features');
     g = grid();
-    if (!S.isDiffusion(m))
+    // UP-18 (4): classic MO:1538 — the Index Cache row exists only for the
+    // DSA families (deepseek_v32 / glm_moe_dsa); its frequency rides the
+    // 2..16 ladder and clears on disable (buildPayload sends 0).
+    if (!S.isDiffusion(m) &&
+            S.DSA_MODEL_TYPES.has(S.normType(m && m.config_model_type)))
             seFam(g, 'enableIndexCache',
-                seBind('bool', 'enableIndexCache', { label: 'Index Cache',
-                    hint: 'Skip redundant indexer computation in DSA layers (DeepSeek V3/GLM-5).' }),
+                (() => {
+                    const icBool = seBind('bool', 'enableIndexCache', { label: 'Index Cache',
+                        disabled: !!seValues.is_paroquant,   // UP-18 (2), MO:1546-1551
+                        hint: 'Skip redundant indexer computation in DSA layers (DeepSeek V3/GLM-5).' });
+                    if (seValues.is_paroquant)
+                        icBool.title = seValues.paroquant_reason || 'Paroquant checkpoint';
+                    return icBool;
+                })(),
                 [seBind('number', 'index_cache_freq',
-                    { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 1, step: 1 })]);
+                    { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 2, max: 16, step: 1 })]);
     // ANE prompt processing lives in the same section as classic
     const gAne = document.createElement('div');
     gAne.className = 'pair'; sect.__body.append(gAne);
@@ -1420,8 +1486,15 @@ function renderEditorFields(container) {
                 const pool = S_.specprefillCandidates(models, m.id).map(x => ({ value: x.id }));
                 // UX-5 (user): ONE band, four cells, TWO balanced lines —
                 // [toggle | draft model] then [keep rate | threshold]
-                seFam(g, 'specprefill_enabled',
-                    seBind('bool', 'specprefill_enabled', { label: 'SpecPrefill' }),
+                // UP-18 (2): classic MO:1576-1581 — SpecPrefill is off
+                // limits for PAROQUANT checkpoints; VLM MTP takes the slot.
+                const spBool = seBind('bool', 'specprefill_enabled', { label: 'SpecPrefill',
+                    disabled: !!seValues.is_paroquant || !!seValues.vlm_mtp_enabled });
+                if (seValues.is_paroquant || seValues.vlm_mtp_enabled)
+                    spBool.title = seValues.is_paroquant
+                        ? (seValues.paroquant_reason || 'Paroquant checkpoint')
+                        : 'VLM MTP cannot be combined with SpecPrefill.';
+                seFam(g, 'specprefill_enabled', spBool,
                     [seBind('select', 'specprefill_draft_model',
                         { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }),
                      seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
@@ -3065,6 +3138,24 @@ async function commitBaseTab(panel, msg) {
             if (AC && achvOld) AC.announce(AC.modelSavedReaction(achvOld, seValues));
         } catch (_) { /* a verdict must never break the save */ }
     };
+    // UP-18 (10): classic reads the PUT verdict (dashboard.js:3388-3398) —
+    // the server knows whether the engine auto-reloaded, unloaded, deferred,
+    // or still needs a manual restart. Uplift's own reload guess stays for
+    // the deferred-store flow; this surfaces the SERVER truth when it answers.
+    const seReloadVerdict = (data) => {
+        if (!data || !data.requires_reload) return;
+        MM_GLUE.toast(data.auto_reloaded
+            ? C.tf('js.info.model_settings_auto_reloaded',
+                   'Model reloaded automatically to apply the new settings.')
+            : data.auto_unloaded
+            ? C.tf('js.info.model_settings_auto_unloaded',
+                   'Model was unloaded to apply the new settings; it loads with them next time.')
+            : data.reload_deferred
+            ? C.tf('js.info.model_settings_reload_deferred',
+                   'Reload deferred — the new settings apply when the model restarts.')
+            : C.tf('js.info.model_type_reload_required',
+                   'Restart the model to apply the new settings.'), 'info');
+    };
     let payload = full, reloadStep = false;
     if (loaded) {
         const plain = sePlainDirtyKeys();
@@ -3101,7 +3192,7 @@ async function commitBaseTab(panel, msg) {
         // live keys ride the sparse classic PUT (empty payload = nothing
         // live changed; skip it so we never touch the engine path)
         if (Object.keys(payload).length)
-            await MM_GLUE.putModelSettings(seModel, payload);
+            seReloadVerdict(await MM_GLUE.putModelSettings(seModel, payload));
         if (Object.keys(deferAdd).length) await sePersistDeferred(seModel, deferred);
         else seDeferred = deferred;
         // the classic store now holds the live keys: keep the raw base
@@ -3123,7 +3214,7 @@ async function commitBaseTab(panel, msg) {
     }
     // no engine running: the full PUT stores everything classic-side —
     // a leftover deferred record is redundant, drop it
-    await MM_GLUE.putModelSettings(seModel, payload);
+    seReloadVerdict(await MM_GLUE.putModelSettings(seModel, payload));
     await seClearDeferred(seModel);
     seCommitSaved(t0, []);
     msg.textContent = 'saved ✓';

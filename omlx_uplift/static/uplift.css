@@ -914,6 +914,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-subhead { margin: 14px 0 8px; padding-bottom: 4px; font-size: 11px;
     text-transform: uppercase; letter-spacing: .18em; color: var(--dim);
     border-bottom: 1px solid var(--edge); }
+/* UP-18 (3): classic's amber 'managed by the external engine' section note */
+.se-ee-note { margin: 0 0 10px; font-size: 12px; color: #b45309; }
+[data-theme="light"] .se-ee-note { color: #92400e; }
 .se-subhead:first-child { margin-top: 0; }
 /* section boxes are paged by the rail: hidden must beat any display rule */
 .modal.editor .se-box[hidden] { display: none; }
