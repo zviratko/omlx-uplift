@@ -3361,3 +3361,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-conv-stop { opacity: .9; color: var(--red); }
 .chat-conv-search { width: 100%; margin: 4px 0; }
 .chat-conv-rename { flex: 1 1 auto; min-width: 0; }
+
+/* UP-40(2): jump-to-latest pill over the native chat */
+.chat-jump { position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: 84px; z-index: 5; border-radius: 999px; padding: 4px 12px; }

@@ -5459,6 +5459,36 @@ function mount() {
     }).then(function () {
         var dc = document.createElement('deep-chat');
         _dc = dc;
+        // UP-40(2+3): 'jump to latest' pill + Esc-as-stop while not typing
+        // (classic showScrollButton + handleGlobalKeydown :7896). Scroll
+        // events do not bubble out of the shadow root, but capture does.
+        try {
+            var pill = el('button', 'chat-jump', '\u2193 ' + t('uplift.chat.jump_latest', 'Jump to latest'));
+            pill.type = 'button'; pill.hidden = true;
+            dc.parentNode && dc.parentNode.style && (dc.parentNode.style.position = 'relative');
+            dc.parentNode && dc.parentNode.appendChild(pill);
+            var scrollerOf = function () {
+                var r = dc.shadowRoot;
+                return r && (r.getElementById('messages') || r.querySelector('.chat-view'));
+            };
+            pill.addEventListener('click', function () {
+                var s = scrollerOf();
+                if (s) s.scrollTop = s.scrollHeight;
+                pill.hidden = true;
+            });
+            dc.addEventListener('scroll', function (ev) {
+                var s = ev.target;
+                if (!s || s.scrollHeight === undefined) return;
+                var away = s.scrollHeight - s.scrollTop - s.clientHeight > 160;
+                if (away !== pill.hidden) pill.hidden = !away;
+            }, true);
+            W().addEventListener('keydown', function (ev) {
+                if (ev.key !== 'Escape' || !_streaming) return;
+                var tag = (ev.target && (ev.target.tagName || '')).toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || (ev.target && ev.target.isContentEditable)) return;
+                stopAndSettle();
+            });
+        } catch (e) { /* pills are progressive enhancement */ }
         // U44: width comes from CSS (deep-chat :host is 320px).
         // U54: height was a fixed calc(100vh - 246px) budget — it broke
         // the moment the toolbar wrapped (4 rows here) or the thinking
