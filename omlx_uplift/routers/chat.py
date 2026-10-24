@@ -219,6 +219,14 @@ def _clean_message(m: dict) -> dict:
             clean_p["thinking_budget"] = tb
         if clean_p:
             out["params"] = clean_p
+    # UP-43: attachment META (names + kinds) survives reloads; bytes never
+    # do — the store stays text-only by design (client sanitizes at save,
+    # this whitelist is the second gate). Capped hard: 8 entries, 120 chars.
+    att = m.get("att")
+    if isinstance(att, list):
+        out["att"] = [{"n": str(a.get("n") or "")[:120],
+                       "k": a.get("k") if a.get("k") in ("image", "file", "audio") else "file"}
+                      for a in att[:8] if isinstance(a, dict) and a.get("n")]
     return out
 
 

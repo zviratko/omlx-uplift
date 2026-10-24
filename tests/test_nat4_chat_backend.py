@@ -287,3 +287,26 @@ def test_pinned_roundtrip_and_summary(client):
     client.post("/uplift/api/chat/history", json=_conv(pinned=True))
     client.post("/uplift/api/chat/history", json=_conv(pinned="yes"))
     assert client.get("/uplift/api/chat/history/c1").json()["pinned"] is False
+
+
+def test_attachment_meta_roundtrips_capped(client):
+    """UP-43: attachment meta (names+kinds) persists; bytes never do;
+    kinds whitelist, 8-entry cap, non-list garbage dropped."""
+    big = "x" * 200
+    conv = _conv(messages=[
+        {"role": "user",
+         "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                     {"type": "text", "text": "look"}],
+         "att": [{"n": "a.png", "k": "image"}, {"n": big + ".pdf", "k": "weird"}]
+                 + [{"n": f"f{i}", "k": "file"} for i in range(12)]},
+        {"role": "assistant", "content": "ok", "att": "garbage"},
+    ])
+    assert client.post("/uplift/api/chat/history", json=conv).status_code == 200
+    got = client.get("/uplift/api/chat/history/c1").json()["messages"]
+    assert got[0]["content"] == "look", "array collapses to text — bytes out"
+    assert "data:image" not in json.dumps(got), "no bytes anywhere"
+    att = got[0]["att"]
+    assert len(att) == 8, "capped at 8"
+    assert att[0] == {"n": "a.png", "k": "image"}
+    assert len(att[1]["n"]) == 120 and att[1]["k"] == "file", "name cap + kind normalize"
+    assert "att" not in got[1], "non-list att dropped"

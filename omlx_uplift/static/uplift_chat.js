@@ -59,6 +59,12 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
     _lastBody = null,                  // resolved request stashed by shapeRequest
     _lastFiles = null,                 // 6/6b: raw audio Files for the STT path
+    // UP-43: attachment meta of the in-flight send ({name,kind} list + the
+    // live File refs). The STASH is only the fallback claim path — the
+    // interceptor usually runs AFTER onMessage pushed the user row (deep-chat
+    // records the bubble first, builds the request second), so shapeRequest
+    // patches the tail row directly; the stash serves the reverse order.
+    _turnAtt = null, _turnAttFiles = null,
     _mic = null,                       // 6/6b: live mic recording session
     _profiles = [],                    // 6/6c: prompt profiles (localStorage mirror)
     _readability = false,              // 6/6c: enhanced-readability live mirror
@@ -459,7 +465,13 @@ function saveConv() {
         if (ms[mi] && !ms[mi].mid) ms[mi].mid = newMid();
     }
     var d = D();
-    d.postJson(api() + '/chat/history', _conv).then(function (r) {
+    // UP-43: only shapes and text leave the browser. A classic-exported
+    // chat imported with content ARRAYS keeps its part shapes but NEVER
+    // its base64 bytes (classic's messageForStorage rule); the frequent
+    // all-string case maps to identity objects, zero churn.
+    d.postJson(api() + '/chat/history',
+        Object.assign({}, _conv,
+                      { messages: ms.map(sanitizeMsgForStore) })).then(function (r) {
         var warn = gid('chat-native-warn');
         if (warn) warn.hidden = !(r && r.kb && r.kb > 512);
     }).catch(function (e) {
@@ -475,7 +487,7 @@ function lastAiVisible() {
     var ms = (_conv && _conv.messages) || [];
     var ord = -1, k = 0;
     for (var i = 0; i < ms.length; i++) {
-        if (!ms[i] || !ms[i].content) continue;
+        if (!isVisibleRow(ms[i])) continue;   // UP-43: shared predicate
         if (ms[i].role === 'assistant') ord = k;
         k++;
     }
@@ -490,12 +502,16 @@ function renderHistory() {
     // in-flight turn streams into the last assistant bubble's block
     // (classic has the same affordance for its stream).
     if (!_dc) return;
-    _dc.history = (_conv.messages || []).filter(function (m) { return m.content; })
+    // UP-43: the filter is isVisibleRow — content OR attachment meta. An
+    // attachment-only turn stays VISIBLE (placeholder text, chips under the
+    // bubble) or the bubble<->store ordinal mapping would shift.
+    _dc.history = (_conv.messages || []).filter(isVisibleRow)
         .map(function (m) {
             return { role: m.role === 'assistant' ? 'ai' : (m.role || 'user'),
                      // MATH: display-layer delimiter normalization; the
                      // stored content stays RAW.
-                     text: normMath(String(m.content)) };
+                     text: m.content ? normMath(String(m.content))
+                                     : attViewText(m) };
         });
     scheduleMessageActions(_dc);   // U45: bubbles re-rendered -> re-attach
 }
@@ -561,7 +577,13 @@ async function importChats(input) {
         if (local[c.id] !== undefined && (c.updated || 0) <= local[c.id])
             continue;                                               // stale
         try {
-            await d.postJson(api() + '/chat/history', c);
+            // UP-43: strip bytes from imported classic content arrays too
+            // (a media-heavy classic export would otherwise POST megabytes
+            // the server is going to flatten anyway — and may reject)
+            await d.postJson(api() + '/chat/history',
+                Object.assign({}, c, {
+                    messages: (c.messages || []).map(sanitizeMsgForStore)
+                }));
             done++;
         } catch (e) { /* server-side save failure: not counted */ }
     }
@@ -839,6 +861,295 @@ function isDocumentFile(f) {
         || type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         || type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
         || type === 'text/plain' || type === 'text/markdown' || type === 'text/x-markdown';
+}
+
+/* ---- UP-43: attachment persistence (phase 2) -----------------------------
+   Classic keeps FULL content arrays (bytes) in the session and strips the
+   bytes only at save time (chat.html messageForStorage ~:5906: image_url.url
+   -> '', file data -> '', the SHAPE survives so a reloaded chat still knows
+   an image was there). Uplift's server store is text-only BY DESIGN
+   (routers/chat.py _clean_message collapses list content to joined text), so
+   the sibling meta is the row-local mirror of that idea: row.att =
+   [{n: name, k: kind}] — names and kinds, NEVER bytes. The backend
+   whitelist currently drops 'att' on reload; the owner lands the one-line
+   server addition with this change (see u43 test header for the exact line).
+   ------------------------------------------------------------------------- */
+var ATT_MAX = 8;           // per-row cap for the meta list (classic: 5 docs + a few images)
+var ATT_NAME_MAX = 120;    // persisted name cap (a filename is not a payload)
+var ATT_KINDS = ['image', 'file', 'audio'];
+function attKindOf(f) {
+    var name = String((f && f.name) || '').toLowerCase();
+    var type = String((f && f.type) || '').toLowerCase();
+    if (type.indexOf('image/') === 0 || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(name))
+        return 'image';
+    if (type.indexOf('audio/') === 0 || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/.test(name))
+        return 'audio';
+    return 'file';
+}
+// File-like[] -> capped [{n,k}] meta, or null when nothing to carry.
+function attMeta(files) {
+    var out = [];
+    (files || []).forEach(function (f) {
+        if (!f || out.length >= ATT_MAX) return;
+        out.push({ n: String(f.name || 'file').slice(0, ATT_NAME_MAX),
+                   k: attKindOf(f) });
+    });
+    return out.length ? out : null;
+}
+function attIsClean(att) {
+    // already exactly the persisted shape? (skip churn on every saveConv)
+    if (!Array.isArray(att) || !att.length || att.length > ATT_MAX) return false;
+    for (var i = 0; i < att.length; i++) {
+        var a = att[i];
+        if (!a || typeof a !== 'object' || typeof a.n !== 'string' || !a.n
+            || a.n.length > ATT_NAME_MAX
+            || ATT_KINDS.indexOf(a.k) < 0
+            || Object.keys(a).length !== 2) return false;
+    }
+    return true;
+}
+// The store-visible bubble predicate: content OR attachment meta. EVERY
+// view<->store ordinal mapping (renderHistory, lastAiVisible, visibleOrdinal,
+// editedClaim, attachMessageActions) MUST agree on this or action indices
+// shift — one rule, five call sites.
+function isVisibleRow(m) {
+    return !!(m && (m.content || (m.att && m.att.length)));
+}
+// Classic messageForStorage parity for ONE content part: shape survives,
+// bytes NEVER do. Unknown part types pass through minus any data/base64.
+function partShapeForStore(p) {
+    if (!p || typeof p !== 'object') return null;
+    if (p.type === 'image_url')
+        return { type: 'image_url', image_url: { url: '' } };
+    if (p.type === 'file') {
+        var f = p.file || {};
+        return { type: 'file',
+                 file: { filename: String(f.filename || '').slice(0, ATT_NAME_MAX),
+                         data: '' } };
+    }
+    if (p.type === 'text') return { type: 'text', text: String(p.text || '') };
+    var copy = Object.assign({}, p);
+    if ('data' in copy) copy.data = '';
+    if ('base64' in copy) copy.base64 = '';
+    return copy;
+}
+// saveConv/import sanitizer: bytes out, shapes and text in. Rows that
+// already hold only strings + clean meta are returned UNCHANGED (identity)
+// so the frequent save path allocates nothing.
+function sanitizeMsgForStore(m) {
+    if (!m || typeof m !== 'object') return m;
+    var out = m;
+    if (Array.isArray(m.content)) {
+        var parts = [];
+        m.content.forEach(function (p) {
+            var q = partShapeForStore(p);
+            if (q) parts.push(q);
+        });
+        out = Object.assign({}, out,
+            { content: parts.length ? parts : '' });
+    }
+    if (m.att !== undefined && !attIsClean(m.att)) {
+        var clean = [];
+        (Array.isArray(m.att) ? m.att : []).forEach(function (a) {
+            if (!a || typeof a !== 'object' || clean.length >= ATT_MAX) return;
+            var n = String(a.n == null ? '' : a.n).slice(0, ATT_NAME_MAX);
+            if (!n) return;
+            clean.push({ n: n,
+                         k: ATT_KINDS.indexOf(a.k) >= 0 ? a.k : 'file' });
+        });
+        if (clean.length) out = Object.assign({}, out, { att: clean });
+        else { out = Object.assign({}, out); delete out.att; }
+    }
+    return out;
+}
+// Session-side previews: the ROW is the key, the raw File objects the key's
+// only reference. A live turn's chips can open a real preview; after reload
+// the rows are fresh objects with no preview and the chips are informational
+// (ticket rule: click-to-preview only for what still exists live). Nothing
+// here ever reaches saveConv — the WeakMap holds no serializable bytes.
+var _attPreviews = (typeof WeakMap === 'function') ? new WeakMap() : null;
+function attKeepPreview(row, files) {
+    if (_attPreviews && row && files && files.length) {
+        try { _attPreviews.set(row, Array.prototype.slice.call(files)); }
+        catch (e) { /* non-extensible row (never today) */ }
+    }
+}
+function attPreviewOf(row) {
+    return (_attPreviews && row && _attPreviews.get(row)) || null;
+}
+function attPreviewFile(row, name) {
+    var files = attPreviewOf(row);
+    if (!files) return null;
+    for (var i = 0; i < files.length; i++)
+        if (files[i] && files[i].name === name) return files[i];
+    return null;
+}
+// Bubble text for an attachment-only turn (content '' but meta exists): the
+// view must show SOMETHING or the row vanishes and every ordinal shifts.
+function attViewText(m) {
+    var names = (m && m.att || []).map(function (a) { return a.n; });
+    return t('uplift.chat.attachments_sent', '\uD83D\uDCCE {files}')
+        .replace('{files}', names.join(', '));
+}
+// one-turn lightbox for chip previews (image kinds only; documents stay
+// text-meta). Own tiny overlay on purpose: lightboxWire (UP-32) pins its
+// internals in the u32 gate and is not refactored here.
+function attLightbox(uri) {
+    var w = W();
+    if (!w || !w.document || !uri) return;
+    var ov = w.document.createElement('div');
+    ov.className = 'chat-lightbox';
+    var big = w.document.createElement('img');
+    big.src = uri;
+    ov.append(big);
+    var bye = function () { ov.remove(); w.removeEventListener('keydown', esc); };
+    var esc = function (e) { if (e.key === 'Escape') bye(); };
+    ov.onclick = bye;
+    w.addEventListener('keydown', esc);
+    w.document.body.append(ov);
+}
+function attChipEl(a, row) {
+    var chip = el('span', 'chat-native-att');
+    chip.dataset.k = a.k;
+    chip.title = a.n;
+    chip.appendChild(el('span', 'chat-native-att-n', a.n));
+    var live = a.k === 'image' && attPreviewFile(row, a.n);
+    if (live) {
+        // click-to-preview ONLY while the File still exists (live turn)
+        chip.classList.add('live');
+        chip.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            var URLC = W() && W().URL;
+            if (!URLC || !URLC.createObjectURL) return;
+            try {
+                var uri = URLC.createObjectURL(live);
+                attLightbox(uri);
+                setTimeout(function () {
+                    try { URLC.revokeObjectURL(uri); } catch (e) {}
+                }, 60000);
+            } catch (e) { /* preview is progressive enhancement */ }
+        });
+    }
+    return chip;
+}
+function attChipsRender(holder, m) {
+    // idempotent per signature — the sweep runs after EVERY render pass
+    if (!holder || typeof holder.querySelector !== 'function') return;
+    var existing = holder.querySelector(':scope > .chat-native-atts');
+    var att = (m && m.att) || [];
+    var sig = att.map(function (a) { return a.k + ':' + a.n; }).join('|');
+    if (!att.length) { if (existing) existing.remove(); return; }
+    if (existing && existing.getAttribute('data-sig') === sig) return;
+    if (existing) existing.remove();
+    var row = el('div', 'chat-native-atts');
+    row.setAttribute('data-sig', sig);
+    att.forEach(function (a) { row.appendChild(attChipEl(a, m)); });
+    if (typeof holder.appendChild === 'function') holder.appendChild(row);
+}
+// Composer mirror (pre-send chips): deep-chat's OWN #file-attachment-
+// container is the source of truth — documents already render name+remove
+// there (classic uploadDocuments parity); this adds what deep-chat cannot
+// know from DOM alone: a FILE NAME TOOLTIP on queued image chips (they
+// render as thumbnails). Files are tracked per add path (paperclip input
+// change, drop, paste — all captured on the shadow root BEFORE the
+// bundle's own handlers run) and kept honest by a count-resync against the
+// chip row, so a rejected format, a FIFO eviction or the post-send clear
+// can never desync a name onto the wrong thumbnail. References only — no
+// copy, no bytes leave the component.
+function attComposerWire(dc) {
+    var root = dc && dc.shadowRoot;
+    if (!root || typeof root.addEventListener !== 'function'
+        || typeof root.querySelector !== 'function') return false;
+    var imgs = [];
+    var lastChips = 0;   // chip count at the previous sync (shrink detector)
+    function kindOfChipImg(chip) { return chip && chip.querySelector
+        ? chip.querySelector('img.image-attachment') : null; }
+    function container() { return root.querySelector('#file-attachment-container'); }
+    function note(filesLike) {
+        Array.prototype.forEach.call(filesLike || [], function (f) {
+            if (f && attKindOf(f) === 'image') imgs.push(f);
+        });
+        sync();
+    }
+    function sync() {
+        var c = container();
+        if (!c) return;
+        var chips = c.querySelectorAll('.file-attachment');
+        var imgChips = [];
+        Array.prototype.forEach.call(chips, function (ch) {
+            if (kindOfChipImg(ch)) imgChips.push(ch);
+        });
+        // A count SHRINK is a real removal (x-click, FIFO eviction, the
+        // post-send clear) — the mirror follows it. A mirror still AHEAD
+        // of the DOM is a pending add (the bundle renders the chip after
+        // its FileReader resolves): never trim then, or the name lands
+        // before the chip exists and the trim would eat it.
+        if (imgChips.length < lastChips && imgs.length > imgChips.length)
+            imgs.length = imgChips.length;
+        lastChips = imgChips.length;
+        imgChips.forEach(function (ch, i) {
+            var f = imgs[i];
+            // assign AND re-assign: after a removal the surviving chips
+            // shift toward the front of the mirror, and a stale name is
+            // worse than no name
+            if (f && ch.title !== String(f.name || '')) {
+                ch.title = String(f.name || '');
+                var im = kindOfChipImg(ch);
+                if (im) { im.alt = String(f.name || ''); im.title = ch.title; }
+            }
+        });
+    }
+    root.addEventListener('change', function (ev) {
+        var tg = ev.target;
+        if (tg && tg.tagName === 'INPUT' && tg.type === 'file' && tg.files)
+            note(tg.files);
+    }, true);
+    root.addEventListener('drop', function (ev) {
+        if (ev.dataTransfer && ev.dataTransfer.files) note(ev.dataTransfer.files);
+    }, true);
+    root.addEventListener('paste', function (ev) {
+        if (ev.clipboardData && ev.clipboardData.files) note(ev.clipboardData.files);
+    }, true);
+    root.addEventListener('click', function (ev) {
+        // × removal (also fires for the bundle's programmatic .click() on
+        // FIFO overflow and the post-send hideFiles clear): splice the
+        // mirror at the chip's position among the image chips
+        var tg = ev.target;
+        var btn = tg && tg.closest
+            ? tg.closest('.remove-file-attachment-button') : null;
+        if (!btn) return;
+        var chip = btn.closest('.file-attachment');
+        if (!chip || !kindOfChipImg(chip)) return;
+        var c = container();
+        if (!c) return;
+        // the chip's position = how many IMAGE chips sit BEFORE it (the
+        // mirror is append-order == image chip DOM order). The capture
+        // listener runs BEFORE the bundle's own handler removes the chip;
+        // if it is somehow already gone, let the next sync's shrink-trim
+        // handle it rather than guessing a wrong position.
+        var i = 0, seen = false;
+        Array.prototype.forEach.call(c.querySelectorAll('.file-attachment'),
+            function (ch) {
+                if (!kindOfChipImg(ch)) return;
+                if (ch === chip) { seen = true; return; }
+                if (!seen) i++;
+            });
+        if (seen) imgs.splice(i, 1);
+        setTimeout(sync, 0);
+    }, true);
+    if (typeof MutationObserver === 'function') {
+        var pending = 0;
+        var obs = new MutationObserver(function () {
+            if (pending) return;
+            pending = setTimeout(function () { pending = 0; sync(); }, 0);
+        });
+        // observe the WHOLE shadow root: config re-assignment re-renders
+        // the component and the container node is recreated (a per-node
+        // observer would silently die on the next syncAudioMode flip)
+        try { obs.observe(root, { childList: true, subtree: true }); }
+        catch (e) { /* annotations stay best-effort */ }
+    }
+    return true;
 }
 
 // route+payload mapping (pure, unit-tested)
@@ -1124,6 +1435,8 @@ async function shapeRequest(d) {
     _thinkMark = 0;      // UP-35: round thinking restarts at 0
     _toolStatus = '';    // UP-35: no live status at turn start
     _roundsDone = [];    // UP-35: sealed-round buffer starts empty
+    _turnAtt = null;     // UP-43: attachment stash starts per send
+    _turnAttFiles = null;
     // U71: paintThinking's steal rule re-anchors the live block onto the
     // NEW in-flight bubble as soon as the first reasoning delta lands;
     // until then the previous turn's live block was already wiped by the
@@ -1181,22 +1494,59 @@ async function shapeRequest(d) {
         // UP-32: documents ride {type:'file'} (server markitdown converts);
         // everything else keeps the image_url lane. Before this, a PDF went
         // out as an IMAGE data-URL and the model silently received junk.
-        var docs = 0, warn = '';
+        var docs = 0, warn = '', sentFiles = [];
         for (var i = 0; i < files.length; i++) {
             var f = files[i];
             if (_docCfg.enabled && isDocumentFile(f)) {
                 if (docs >= _docCfg.maxFiles) { warn = warn || t('chat.error.too_many_documents', 'Too many documents in one request.'); continue; }
                 if (f.size > _docCfg.maxMb * 1048576) { warn = warn || t('chat.error.document_too_large', 'Document exceeds the size limit.'); continue; }
                 docs++;
+                sentFiles.push(f);
                 parts.push({ type: 'file',
                              file: { filename: f.name, file_data: await fileToDataURL(f) } });
-            } else {
+            } else if (attKindOf(f) === 'image') {
+                sentFiles.push(f);
                 parts.push({ type: 'image_url',
                              image_url: { url: await fileToDataURL(f) } });
+            } else {
+                // UP-43 (classic handleDrop routes by kind): a queue may
+                // carry what its acceptedFormats allowed — anything neither
+                // image nor document (a programmatic submit can bypass the
+                // queue validation) must NOT go out as a fake image part.
+                warn = warn || t('uplift.chat.unsupported_files_skipped',
+                    'Some attachments were skipped — unsupported file types.');
             }
         }
         if (warn) W().alert(warn);   // classic alerts before the send, too
         cur.content = parts;
+    }
+    // UP-43: names+kind meta rides the store ROW (never bytes — classic
+    // strips image_url.url at save time ~chat.html :5906; here bytes never
+    // ENTER the row, the sanitizer keeps shapes honest for imports). Only
+    // files that ACTUALLY entered the wire are recorded (sentFiles), so a
+    // skipped/capped file never shows up as a chip for a turn that did not
+    // carry it. The component records the user bubble (onMessage) BEFORE
+    // the interceptor builds the request, so claim the tail row directly;
+    // content equality is the guard that keeps an orphan of an older failed
+    // send from being tagged with THIS turn's files. The stash covers the
+    // reverse order.
+    var claimFiles = (typeof sentFiles !== 'undefined' && sentFiles.length)
+        ? sentFiles
+        : (_lastFiles && _lastFiles === files ? files : null);
+    if (claimFiles && _conv && _conv.messages) {
+        var att = attMeta(claimFiles);
+        if (att) {
+            var tail = _conv.messages[_conv.messages.length - 1];
+            if (tail && tail.role === 'user' && !tail.att
+                && String(tail.content || '') === String(lastUser)) {
+                tail.att = att;
+                attKeepPreview(tail, claimFiles);
+                saveConv();
+            } else {
+                _turnAtt = att;
+                _turnAttFiles = claimFiles;
+            }
+        }
     }
     msgs.push(cur);
     var body = { model: (_conv && _conv.model) || '', messages: msgs, stream: true };
@@ -3911,7 +4261,15 @@ function msgRegenerate(idx) {
     renderHistory();
     saySweepPlans();
     saveConv();
-    _dc.submitUserMessage({ text: String(prev.content) });
+    // UP-43: a LIVE prompt replays its own files (session previews hold the
+    // File refs — classic re-sends content arrays from the session, so the
+    // regenerated turn goes out with the same parts as the original). A
+    // reloaded row has no bytes BY DESIGN, only meta: text-only replay, the
+    // chips under the deleted turn's bubble were informational anyway.
+    var replay = attPreviewOf(prev);
+    var submit = { text: String(prev.content) };
+    if (replay && replay.length) submit.files = replay;
+    _dc.submitUserMessage(submit);
 }
 
 function commitEditedInPlace(idx, contentVal, reasoningVal) {
@@ -3947,17 +4305,21 @@ function commitEdit(idx, text) {
     // U45 semantics unchanged (pinned by its test): truncate the store at
     // the edited user row, persist, replay the edited text as a new turn
     if (_streaming || !_conv) return;
+    // UP-43: the edited row's live files ride the replay (see msgRegenerate)
+    var replay = attPreviewOf(_conv.messages[idx]);
     _conv.messages = _conv.messages.slice(0, idx);
     renderHistory();
     saveConv();
-    _dc.submitUserMessage({ text: text });
+    var submit = { text: text };
+    if (replay && replay.length) submit.files = replay;
+    _dc.submitUserMessage(submit);
 }
 
 function visibleOrdinal(msgs, idx) {
     // store idx -> bubble ordinal under renderHistory's content filter
     var ord = -1;
     for (var i = 0; i < msgs.length; i++) {
-        if (!msgs[i] || !msgs[i].content) continue;
+        if (!isVisibleRow(msgs[i])) continue;  // UP-43: shared predicate
         ord++;
         if (i === idx) return ord;
     }
@@ -4138,7 +4500,7 @@ function editWaitToast() {
 function editedClaim() {
     var ms = (_conv && _conv.messages) || [];
     for (var i = ms.length - 1; i >= 0; i--) {
-        if (!ms[i] || !ms[i].content) continue;
+        if (!isVisibleRow(ms[i])) continue;   // UP-43: shared predicate
         return ms[i].role === 'assistant' && ms[i].edited ? 'next' : '';
     }
     return '';
@@ -4222,7 +4584,7 @@ function attachMessageActions(dc) {
     var ms = (_conv && _conv.messages) || [];
     var visible = [];
     for (var i = 0; i < ms.length; i++) {
-        if (ms[i] && ms[i].content) visible.push(i);
+        if (isVisibleRow(ms[i])) visible.push(i);   // UP-43: shared predicate
     }
     var liveOrd = lastAiVisible();   // bubble ordinal the live stream owns
     // U74: mark context — which row the 'used on next reply' claim belongs
@@ -4285,6 +4647,9 @@ function attachMessageActions(dc) {
         }
         var role = (ms[storeIdx] || {}).role;
         sayAttach(holder, storeIdx, role, b);
+        // UP-43: attachment chips under the bubble (names+kind only — the
+        // store row never carries bytes). Idempotent per content signature.
+        attChipsRender(holder, ms[storeIdx]);
         // U74: Edited / 'Edited — used on next reply' mark. Claim rule:
         // the LAST visible row conditions the next reply, and the claim
         // holds only while that row is an edited ASSISTANT turn (the next
@@ -5702,6 +6067,43 @@ function applyShadowTheme(dc) {
         '  background: color-mix(in srgb, var(--accent, #4c8dff) 16%, transparent); }',
         '.chat-native-say-here {',
         '  background: color-mix(in srgb, var(--accent, #4c8dff) 15%, transparent); }',
+        // UP-43: attachment chips under bubbles (names+kind; .live image
+        // chips preview while the File lives in the session). Shadow DOM —
+        // light DOM cannot reach (U43 doctrine), ships here.
+        '.chat-native-atts { display: flex; flex-wrap: wrap; gap: 4px;',
+        '  align-self: flex-end; margin: 2px 0 0; max-width: 80%; }',
+        '.chat-native-atts .chat-native-att { display: inline-flex;',
+        '  align-items: center; gap: 4px; font-size: 10px;',
+        '  color: var(--dim, #8b98ab); border: 1px solid var(--edge);',
+        '  border-radius: 999px; padding: 1px 8px; max-width: 220px;',
+        '  min-width: 0; background: color-mix(in srgb, var(--panel)',
+        '  60%, transparent); }',
+        '.chat-native-att-n { overflow: hidden; text-overflow: ellipsis;',
+        '  white-space: nowrap; }',
+        '.chat-native-att::before { content: "\\1F4C4"; flex-shrink: 0; }',
+        '.chat-native-att[data-k="image"]::before { content: "\\1F5BC"; }',
+        '.chat-native-att[data-k="audio"]::before { content: "\\1F3B5"; }',
+        '.chat-native-att.live { cursor: zoom-in; }',
+        '.chat-native-att.live:hover { color: var(--ink, #e6edf3);',
+        '  border-color: var(--accent, #4c8dff); }',
+        // UP-43: the pre-send queue row and the drop gate. deep-chat's own
+        // #file-attachment-container is the source of truth (mirrored, not
+        // fought) — it paints light-theme chrome, so the skin rides here.
+        '#file-attachment-container { background: color-mix(in srgb,',
+        '  var(--panel) 80%, transparent); border-radius: var(--radius); }',
+        '.file-attachment { background: var(--field, #1b2330);',
+        '  border: 1px solid var(--edge); }',
+        '.image-attachment, .border-bound-attachment { border-radius: 4px; }',
+        '.any-file-attachment-text { color: var(--ink, #e6edf3); }',
+        '.remove-file-attachment-button { background: var(--panel);',
+        '  border-color: var(--edge); }',
+        '.remove-file-attachment-button:hover { background: color-mix(in',
+        '  srgb, var(--dim) 25%, transparent); }',
+        '.x-icon { color: var(--ink, #e6edf3); }',
+        '#drag-and-drop { background: color-mix(in srgb,',
+        '  var(--accent, #4c8dff) 12%, transparent);',
+        '  border: 3px dashed var(--accent, #4c8dff);',
+        '  border-radius: var(--radius, 8px); }',
         // U43: bundle-hardened leftovers — gray scrollbars and the
         // streaming dots. The bundle sets --loading-message-color INLINE
         // per message container, so an ancestor var() override loses;
@@ -5924,6 +6326,24 @@ function mount() {
                                   maxNumberOfFiles: _docCfg.maxFiles };
             } catch (e) { /* frozen prop: image attach still works */ }
         }
+        // UP-43 (4d): classic's drop gate, explicitly. deep-chat already
+        // arms the #drag-and-drop overlay for any queue (bundle: isEnabled
+        // = config !== false && (config || numberOfTypes > 0)) and routes
+        // dropped files by kind through attemptAddFile's acceptedFormats
+        // check (images queue = image/*, mixedFiles = the document list);
+        // pinning true keeps that gate deterministic against bundle-default
+        // drift. The overlay itself is themed in applyShadowTheme.
+        try { dc.dragAndDrop = true; } catch (e) { /* frozen prop */ }
+        // UP-43 (4b/4c): composer chip mirror — deep-chat's own
+        // #file-attachment-container is the pre-send source of truth
+        // (documents already render name+remove; post-send the bundle
+        // clears it via hideFiles). The mirror only adds what the DOM
+        // cannot know: a name tooltip on queued IMAGE chips. Paste and
+        // drop reach the composer through the same validated queue
+        // (bundle: paste/drop listeners -> addFilesToAnyType ->
+        // attemptAddFile), so no separate interceptor is needed here.
+        try { attComposerWire(dc); }
+        catch (e) { /* chip names are progressive enhancement */ }
         // MATH: arm the KaTeX hook only when the library actually arrived —
         // the engine registers the math rule at construction, and rendering
         // math with window.katex missing yields an EMPTY string (silently
@@ -5946,6 +6366,15 @@ function mount() {
             if (_conv) {
                 var row = { role: role,
                     content: typeof m.text === 'string' ? m.text : '' };
+                if (role === 'user' && _turnAtt) {
+                    // UP-43: fallback claim for the reversed order (row
+                    // pushed before the interceptor stashed the meta); the
+                    // common path claims the tail row from shapeRequest
+                    row.att = _turnAtt;
+                    attKeepPreview(row, _turnAttFiles);
+                    _turnAtt = null;
+                    _turnAttFiles = null;
+                }
                 if (role === 'assistant' && _thinkLive.slice(_thinkMark)) {
                     // UP-35: per-round thinking — the sealed rounds carry
                     // their own slices (pushRoundRows below); this row owns

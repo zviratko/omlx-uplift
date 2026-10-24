@@ -1277,7 +1277,10 @@ test('MATH: both render paths normalize, the store stays raw', () => {
         'stream leg normalizes before the bubble sees it');
     assert.ok(/text \+= c\.text;/.test(src),
         'accumulated (stored) text remains the RAW chunk');
-    assert.ok(/text: normMath\(String\(m\.content\)\)/.test(src),
+    // UP-43 forced edit (intent preserved, mechanism adapted): the reload
+    // path still normalizes STRING content at render time — the pin now
+    // matches the ternary that added the attachment-only placeholder arm.
+    assert.ok(/text: m\.content \? normMath\(String\(m\.content\)\)\s*\n?\s*: attViewText\(m\)/.test(src),
         'reload path normalizes at render time');
     assert.ok(!/speakFeed\(normMath/.test(src),
         'voice feed keeps its own sanitizer path untouched');
