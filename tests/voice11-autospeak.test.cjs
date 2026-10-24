@@ -348,10 +348,14 @@ const CANCEL_RULES = {
         const item = (h.byId['chat-native-convs'].children || [])
             .find(c => c.dataset && c.dataset.id === 'c1');
         item.dispatch('click');
+        // UP-34: switch settles the live stream (80ms) before the cancel body
+        await new Promise((r) => setTimeout(r, 150));
         await flush();
     },
     'new chat button': async (h) => {
         h.byId['chat-native-new'].dispatch('click');   // CHAT-3R: stable id
+        await new Promise((r) => setTimeout(r, 150));   // UP-34 settle
+        await flush();
     },
     'voice picker change': async (h) => {
         const sel = h.byId['chat-native-voice'];

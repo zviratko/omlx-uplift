@@ -861,7 +861,7 @@ test('U45: transcription turns refuse regenerate without touching the store', as
     assert.equal(st.conv.messages.length, 2, 'store untouched');
 });
 
-test('U45: edit truncates at the user index; delete removes exactly one row', async () => {
+test('U45: edit truncates at the user index; delete truncates classic turn-pair style', async () => {
     const convs = [{ id: 'c1', title: 'T', model: 'M', messages: [
         { role: 'user', content: 'one' },
         { role: 'assistant', content: 'A' },
@@ -878,9 +878,20 @@ test('U45: edit truncates at the user index; delete removes exactly one row', as
     h.win.UpliftNativeChat._msgActions.editCommit(2, 'two edited');
     assert.deepEqual(sent, ['two edited'], 'edited text replays from that index');
     st.conv.messages = convs[0].messages.slice();
+    // UP-34 (1d): classic sliceBeforeMessage — deleting an assistant row
+    // cuts back to just before ITS user row (the whole turn goes); deleting
+    // a user row truncates everything from it on; emptying deletes the chat
+    h.win.UpliftNativeChat._msgActions.delete(3);
+    assert.deepEqual(st.conv.messages.map(m => m.content), ['one', 'A', 'two'],
+        'assistant delete drops its reply and everything after');
     h.win.UpliftNativeChat._msgActions.delete(1);
-    assert.deepEqual(st.conv.messages.map(m => m.content), ['one', 'two', 'B'],
-        'delete removes exactly the row under the button');
+    assert.deepEqual(st.conv.messages.map(m => m.content), ['one'],
+        'cut keeps the question, drops answer onward');
+    h.win.UpliftNativeChat._msgActions.delete(0);
+    await new Promise(r => setTimeout(r, 10));
+    assert.deepEqual(st.conv.messages, [], 'user delete truncates from its index');
+    assert.deepEqual(h.dels.map(u => u.split('/').pop()), ['c1'],
+        'emptied chat auto-deletes server-side (classic skipConfirm)');
 });
 
 test('U45: copy splits plain vs markdown; stripMarkdown keeps code content', () => {
@@ -1298,6 +1309,9 @@ test('BUG-7: switching conversations restores thinking mode, budget and clean pr
 
     // Switch to c2 (clean preset 'Deep' -> thinking 'limit', budget 2048)
     btnFor('c2').dispatch('click');
+    // UP-34: the shapeRequest above left _streaming set (no turn completion in
+    // this harness), so openConv now settles it (80ms) before swapping
+    await new Promise(r => setTimeout(r, 150));
     for (let i = 0; i < 6; i++) await tick();
     assert.equal(think.value, 'limit', 'c2 restores Deep preset thinking=limit');
     assert.equal(bud.value, '2048', 'c2 restores budget input');
@@ -1309,6 +1323,7 @@ test('BUG-7: switching conversations restores thinking mode, budget and clean pr
 
     // Switch to c3 (legacy boolean thinking:true in store -> coerced to 'auto')
     btnFor('c3').dispatch('click');
+    await new Promise(r => setTimeout(r, 150));   // UP-34 settle (see c2 note)
     for (let i = 0; i < 6; i++) await tick();
     assert.equal(M._state().conv.thinking, 'auto', 'legacy boolean thinking coerced to auto');
     assert.equal(think.value, 'auto', 'select synced back to auto');

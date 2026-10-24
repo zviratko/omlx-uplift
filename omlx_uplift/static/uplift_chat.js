@@ -560,8 +560,27 @@ async function importChats(input) {
         .replace('{count}', String(done)));
 }
 
+// UP-34 (live repro 2026-10-24): switching conversations (New Chat or
+// openConv) while a stream was in flight ORPHANED it — deep-chat drops the
+// loading bubble without onMessage when history is replaced, so the partial
+// reply reached no store and no view: silent data loss. The component's OWN
+// stop button finalizes + persists the partial correctly (live-proven the
+// same drill), so every conversation change stops the stream first and
+// waits one settle tick for the commit to land.
+function stopAndSettle() {
+    if (!_streaming || !_dc) return Promise.resolve();
+    try {
+        var sr = _dc.shadowRoot;
+        var btns = sr ? Array.prototype.slice.call(sr.querySelectorAll('.input-button')) : [];
+        var stop = btns[btns.length - 1];   // outside-end submit doubles as stop (live-proven)
+        if (stop) stop.click();
+    } catch (e) { /* the settle wait still applies */ }
+    return new Promise(function (res) { setTimeout(res, 80); });
+}
+
 async function openConv(id) {
     if (id === (_conv && _conv.id)) return;
+    await stopAndSettle();   // UP-34: never abandon a live stream to a void
     speakCancel();   // VOICE-11 cancel rule: conversation switch cuts speech
     sttListenerStop(false);   // VOICE-13 teardown: the socket follows the
                               // conversation it was dictating into
@@ -707,7 +726,7 @@ var WEB_TOOLS = [
         }, required: ['url'] } } }
 ];
 var MAX_TOOL_ROUNDS = 10;        // classic chatSettings.maxToolRounds default
-var TOOL_TIMEOUT_MS = 60000;     // classic TOOL_TIMEOUT_MS
+var TOOL_TIMEOUT_MS = 30000;     // classic chat.html TOOL_TIMEOUT_MS (UP-34/5e)
 
 // route+payload mapping (pure, unit-tested)
 function toolRequest(tc) {
@@ -966,6 +985,7 @@ function nativeHandler(_componentBody, signals) {
     var req = _lastBody; _lastBody = null;
     var files = _lastFiles; _lastFiles = null;
     var closed = false;
+    var liveReader = null;   // UP-34 (9d): newest round's body reader, for stop-cancel
     var speakGen = null;   // VOICE-11 session id (begin assigns below)
     function close() { if (closed) return; closed = true;
         endSpeakTurn(speakGen);   // VOICE-11: flush + settle at EVERY turn end
@@ -995,6 +1015,14 @@ function nativeHandler(_componentBody, signals) {
         if (signals.stopClicked && typeof signals.stopClicked.listener === 'function')
             signals.stopClicked.listener(function () {
                 speakCancel();       // VOICE-11 cancel rule: Stop kills audio
+                // UP-34 (9d): classic cancelStreamTransport — an AbortController
+                // stops pending fetch work, but WebKit can retain an already-open
+                // response body until its reader is explicitly cancelled. That
+                // leaves distributed inference decoding after the UI stopped.
+                if (liveReader && typeof liveReader.cancel === 'function') {
+                    Promise.resolve(liveReader.cancel('Stopped by user')).catch(function () {});
+                    liveReader = null;
+                }
                 controller.abort();  // instantly (token bump, stale drops)
             });
     } catch (e) { /* stop wiring optional; rounds still bounded */ }
@@ -1019,6 +1047,7 @@ function nativeHandler(_componentBody, signals) {
                 });
             }
             var reader = resp.body.getReader(), dec = new TextDecoder();
+            liveReader = reader;   // UP-34 (9d): stop must be able to cancel THIS round
             var buf = '', finish = null;
             function pump() {
                 return reader.read().then(function (res) {
@@ -1299,6 +1328,7 @@ function toolbar() {
     var newBtn = el('button', 'btn', t('chat.new_chat', 'New Chat'));
     newBtn.type = 'button'; newBtn.id = 'chat-native-new';
     newBtn.addEventListener('click', function () {
+        stopAndSettle().then(function () {   // UP-34: settle the live stream first
         speakCancel();   // VOICE-11 cancel rule: New Chat cuts the live read
         sttListenerStop(false);   // VOICE-13 teardown: same rule for the mic
         _conv = newConv();
@@ -1311,6 +1341,7 @@ function toolbar() {
         fillGenerationInputs(_conv);   // U46: sampling row is per-conv too
         syncProfileSelect();
         refreshConvList();
+        });
     });
     var top = el('div', 'chat-native-bar chat-native-toprow');
     top.id = 'chat-native-bar';   // observeChatChrome watches THIS row
@@ -3492,12 +3523,37 @@ function editedClaim() {
 
 function msgDelete(idx) {
     if (!_conv) return;
+    if (_streaming) return;      // classic deleteMessage guard: never during a stream
     var m = messageAt(idx);
     if (!m) return;
     saySilence(m.mid);                 // (user) deleting a bubble silences it
-    _conv.messages.splice(idx, 1);
+    // UP-34 (1d): classic deleteMessage/sliceBeforeMessage TRUNCATES —
+    // deleting a user row drops it and everything after; deleting an
+    // assistant row drops back to just before its user row. The old
+    // single-row splice orphaned pairs and shifted role alignment.
+    var ms = _conv.messages, from = idx;
+    if (m.role !== 'user') {
+        // classic sliceToUserTurn: keep through the question, cut the answer
+        // and everything after it
+        for (var i = Math.min(idx, ms.length) - 1; i >= 0; i--) {
+            if (ms[i].role === 'user') { from = i + 1; break; }
+        }
+    }
+    ms.splice(from);
     renderHistory();
     saySweepPlans();                   // nothing left behind that can speak
+    if (!ms.length) {
+        // classic: an emptied chat is auto-deleted (skipConfirm)
+        var d = D();
+        d.deleteJson(api() + '/chat/history/' + encodeURIComponent(_conv.id))
+         .then(function () {
+            _convs = _convs.filter(function (c) { return c.id !== _conv.id; });
+            _conv = newConv();
+            if (_dc) _dc.history = [];
+            refreshConvList();
+         }).catch(function (e) { d.toast(String((e && e.message) || e), 'error'); });
+        return;
+    }
     saveConv();
 }
 
