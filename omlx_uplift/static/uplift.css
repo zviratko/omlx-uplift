@@ -3332,3 +3332,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .dl-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .dl-tag { border: 1px solid var(--line); padding: 1px 8px;
     font-size: var(--fs-meta); color: var(--dim); }
+
+/* UP-16: classic context ring in the chat model rail */
+.chat-ctx { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.chat-ctx svg { flex: none; }
+.chat-ctx-num { font-size: 11px; color: var(--text-secondary, inherit); }
+.chat-ctx-pending { font-size: 11px; color: var(--text-tertiary, inherit); margin: 2px 0 4px; }

@@ -42,6 +42,7 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _vendorPromise = null, _streaming = false,
     _turnParams = null,   // U78: EFFECTIVE sampling snapshot of the in-flight turn
     _turnUsage = null,    // UP-38: accumulated token usage of the in-flight turn
+    _ctxRender = null,    // UP-16: mount-time handle to the ctx ring renderer
     _thinkLive = '',   // reasoning deltas of the in-flight turn (live-only)
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
     _lastBody = null,                  // resolved request stashed by shapeRequest
@@ -589,6 +590,7 @@ async function openConv(id) {
     var full = await d.fetchJson(api() + '/chat/history/' + encodeURIComponent(id));
     _conv = Object.assign(newConv(), full);
     renderHistory();
+    if (_ctxRender) _ctxRender();   // UP-16: the ring follows the conversation
     var sel = gid('chat-native-model');
     if (sel) sel.value = _conv.model || '';
     hydrateConv();   // round 11: sys fill + variant apply + legacy migration
@@ -1868,9 +1870,71 @@ function toolbar() {
     // bottom owning web search.
     var secSamp = section('uplift.chat.sampling', 'Sampling');
     secSamp.append(genRow);
+    // UP-16(a): classic's context ring (chat.html :2004 block + the
+    // 515ff99 effective-window fix): SVG arc over the model's EFFECTIVE
+    // window (server-reported max_context_window/max_model_len, else
+    // 32768), numerator = last turn's usage (prompt+completion) cached in
+    // memory per conversation — 'Context updates after the next reply'
+    // covers the cold state, same as classic's context_pending.
+    var ctxWrap = el('div', 'chat-ctx');
+    ctxWrap.innerHTML = '<svg viewBox="0 0 36 36" width="28" height="28">'
+        + '<circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--border-normal)" stroke-width="5"></circle>'
+        + '<circle class="ctx-arc" cx="18" cy="18" r="15.5" fill="none" stroke-width="5" stroke-linecap="round" stroke="var(--timeline-accent)" stroke-dasharray="97.39" stroke-dashoffset="97.39"></circle>'
+        + '</svg>';
+    // domkit-exempt: static SVG scaffold, no data ever interpolated
+    var ctxNum = el('span', 'chat-ctx-num', 'ctx');
+    var ctxPend = el('div', 'chat-ctx-pending',
+        t('chat.context_pending', 'Context updates after the next reply'));
+    ctxWrap.appendChild(ctxNum);
+    function ctxWin() {
+        var id = _conv && _conv.model;
+        if (!id) return 0;
+        var rows = _models || [];
+        for (var i = 0; i < rows.length; i++) {
+            var m = rows[i];
+            if ((m.id || m.name) === id || m.name === id)
+                return m.max_context_window || m.max_model_len || 32768;
+        }
+        return 32768;
+    }
+    function ctxUsed() {
+        if (!_conv) return 0;
+        if (_conv.contextCache) return _conv.contextCache;
+        var ms = _conv.messages || [];
+        for (var i = ms.length - 1; i >= 0; i--) {
+            var u = ms[i] && ms[i].usage;
+            if (u && u.completion_tokens) {
+                _conv.contextCache = (u.prompt_tokens || 0) + u.completion_tokens;
+                return _conv.contextCache;
+            }
+        }
+        return 0;
+    }
+    function ctxRender() {
+        var win = ctxWin(), used = ctxUsed();
+        var pct = win && used ? Math.min(100, Math.round(used / win * 100)) : 0;
+        var arc = ctxWrap.querySelector('.ctx-arc');
+        arc.setAttribute('stroke-dashoffset', (97.39 * (1 - pct / 100)).toFixed(2));
+        arc.setAttribute('stroke', pct >= 85 ? 'var(--text-danger)' : 'var(--timeline-accent)');
+        ctxWrap.title = win ? used.toLocaleString() + ' / ' + win.toLocaleString()
+            + ' ' + t('chat.context_abbr', 'ctx') + ' (' + pct + '%)' : '';
+        ctxPend.hidden = !!(win && used) || _streaming || !(_conv && _conv.model);
+        ctxNum.textContent = (win && used)
+            ? t('chat.context_abbr', 'ctx') + ' ' + pct + '%'
+            : t('chat.context_abbr', 'ctx');
+    }
     var secTools = section('uplift.chat.tools', 'Tools');
     secTools.append(web);
     secModel.append(thinkGroup, budGroup);
+    // UP-16: the ring belongs by the MODEL it prices — classic
+    // put it in the chat header next to the selector (top region,
+    // CHAT-3R pins secModel to thinking+budget).
+    var modelSel = gid('chat-native-model');
+    if (modelSel && modelSel.parentNode) {
+        modelSel.parentNode.append(ctxWrap, ctxPend);
+        ctxRender();
+        _ctxRender = ctxRender;   // openConv/newChat hook (module scope)
+    }
     var side = el('aside', 'chat-native-bar chat-native-side');
     side.append(secModel, secSys, secSamp, secVoice, secTools);
     var histTitle = el('span', 'chat-native-sec-title',
@@ -5305,6 +5369,9 @@ function mount() {
                 // key on reload (classic keeps it session-side too).
                 if (role === 'assistant' && _turnUsage) {
                     row.usage = Object.assign({}, _turnUsage);
+                    if (_conv) _conv.contextCache = (_turnUsage.prompt_tokens || 0)
+                        + (_turnUsage.completion_tokens || 0);
+                    ctxRender();      // UP-16: ring refreshes at turn end (mount scope)
                 }
                 if (role === 'assistant' && _turnMid) {
                     // VOICE-16: bind the plan (and therefore the audio files)
