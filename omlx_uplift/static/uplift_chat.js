@@ -953,13 +953,29 @@ async function shapeRequest(d) {
         var gk = GEN_FIELDS[gi][0];
         if (g[gk] != null) body[gk] = g[gk];
     }
+    // UP-37(2): classic's thinking WIRE rules (chat.html:194728) — the
+    // server-reported capability decides: a forced model never gets an
+    // override, a saved 'off' is meaningless without an 'off' stop,
+    // enable_thinking travels in chat_template_kwargs, and the budget
+    // clamps to >=1 (0 asked the engine to think nothing while claiming
+    // limit mode — classic's normalizeThinkingBudgetTokens does the same).
     var mode = (_conv && _conv.thinking) || 'auto';
-    if (mode === 'off') body.enable_thinking = false;
-    else if (mode === 'on') body.enable_thinking = true;
-    else if (mode === 'limit') {
-        body.enable_thinking = true;
+    var mid = (_conv && _conv.model) || '';
+    var minfo = {};
+    for (var mi = 0; mi < (_models || []).length; mi++) {
+        var r0 = _models[mi];
+        if ((r0.id || r0.name) === mid || r0.name === mid) { minfo = r0; break; }
+    }
+    var forced = minfo.thinking_forced || '';
+    var levels = Array.isArray(minfo.reasoning_levels) ? minfo.reasoning_levels : [];
+    if (!forced && !levels.length) mode = 'auto';
+    if (mode === 'off' && !forced && levels.length && levels.indexOf('off') < 0) mode = 'auto';
+    if (mode !== 'auto' && !forced) {
+        body.chat_template_kwargs = { enable_thinking: mode !== 'off' };
+    }
+    if (mode === 'limit') {
         var b = parseInt(_conv.thinkingBudget, 10);
-        if (isFinite(b) && b >= 0) body.thinking_budget = b;
+        body.thinking_budget = (isFinite(b) && b >= 1) ? b : 1024;
     }
     // U78 (user: 'does the history carry the sampling parameters used?'):
     // snapshot what THIS request actually carries — the per-chat generation
@@ -3733,9 +3749,11 @@ function paramsLabel(pp) {
     Object.keys(short).forEach(function (k) {
         if (pp[k] != null) bits.push(short[k] + ' ' + pp[k]);
     });
+    var et = pp.chat_template_kwargs && typeof pp.chat_template_kwargs.enable_thinking === 'boolean'
+        ? pp.chat_template_kwargs.enable_thinking : pp.enable_thinking;
     if (pp.thinking_budget != null) bits.push('think ' + pp.thinking_budget);
-    else if (pp.enable_thinking === true) bits.push('think on');
-    else if (pp.enable_thinking === false) bits.push('think off');
+    else if (et === true) bits.push('think on');
+    else if (et === false) bits.push('think off');
     return bits.join(' \u00b7 ');
 }
 

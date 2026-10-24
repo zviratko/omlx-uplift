@@ -106,6 +106,11 @@ function makeHarness(opts = {}) {
                     // never 'llm' — the old stub hid the filter bug
                     { id: 'SmolLM2-360M-Instruct-oQ4',
                       engine_type: 'batched', model_type: 'llm' },
+                    // UP-37(2): the chat's test conv model — with the
+                    // thinking capability the server declares for it
+                    { id: 'M1', engine_type: 'batched', model_type: 'llm',
+                      reasoning_levels: ['off', 'on'] },
+                    { id: 'M2', engine_type: 'batched', model_type: 'llm' },
                     { id: 'Qwen3.5-9B-mtp',
                       engine_type: 'vlm', model_type: 'vlm' },
                     { id: 'Qwen3-Embedding-0.6B-4bit-DWQ',
@@ -266,7 +271,7 @@ test('shapeRequest strips an orphan user turn left by a failed send', async () =
                      'orphan dropped, exactly one user turn ships');
 });
 
-test('thinking modes map to classic wire fields (enable_thinking / thinking_budget)',
+test('thinking modes map to classic wire fields (chat_template_kwargs, UP-37(2))',
      async () => {
     const convs = [{ id: 'c1', title: 'T', model: 'M1', systemPrompt: '',
                      messages: [] }];
@@ -280,20 +285,29 @@ test('thinking modes map to classic wire fields (enable_thinking / thinking_budg
         const d = await M.shapeRequest({ body: { messages: [] }, headers: {} });
         return (typeof d.body === 'string' ? JSON.parse(d.body) : d.body);
     }
+    const ctk = (b) => b.chat_template_kwargs && b.chat_template_kwargs.enable_thinking;
     let b = await bodyFor('auto', null);
-    assert.ok(!('enable_thinking' in b) && !('thinking_budget' in b),
+    assert.ok(!ctk(b) && !('thinking_budget' in b) && !('enable_thinking' in b),
               'auto ships nothing — model/template default (classic parity)');
     b = await bodyFor('off', null);
-    assert.equal(b.enable_thinking, false);
+    assert.equal(ctk(b), false, 'off rides chat_template_kwargs (classic :194728)');
     assert.ok(!('thinking_budget' in b));
     b = await bodyFor('on', null);
-    assert.equal(b.enable_thinking, true);
+    assert.equal(ctk(b), true);
     b = await bodyFor('limit', 2048);
-    assert.equal(b.enable_thinking, true);
+    assert.equal(ctk(b), true);
     assert.equal(b.thinking_budget, 2048);
     b = await bodyFor('limit', null);
-    assert.equal(b.enable_thinking, true);
-    assert.ok(!('thinking_budget' in b), 'no budget -> unlimited thinking');
+    assert.equal(ctk(b), true);
+    assert.equal(b.thinking_budget, 1024, 'limit without budget clamps to the classic default');
+    b = await bodyFor('limit', 0);
+    assert.equal(b.thinking_budget, 1024, 'budget < 1 never ships (classic normalize)');
+    // a model without a reasoning control drops every override (classic:
+    // levels [] -> mode auto; forced models are decided server-side)
+    st.conv.model = 'M2';
+    b = await bodyFor('off', null);
+    assert.ok(!('chat_template_kwargs' in b) && !('enable_thinking' in b),
+              'no declared levels -> no thinking wire');
 });
 
 test('migrateLegacy imports classic store and consumes key only on full success',
@@ -1279,13 +1293,13 @@ test('BUG-7: switching conversations restores thinking mode, budget and clean pr
               settings: { thinking: 'limit', thinkingBudget: 2048, webSearch: true } },
         ]) },
         convs: [
-            { id: 'c1', title: 'One', model: 'SmolLM2-360M-Instruct-oQ4',
+            { id: 'c1', title: 'One', model: 'M1',
               systemPrompt: 'be fast', activeProfile: 'Fast',
               thinking: 'off', thinkingBudget: null, messages: [{ role: 'user', content: 'hi' }] },
-            { id: 'c2', title: 'Two', model: 'SmolLM2-360M-Instruct-oQ4',
+            { id: 'c2', title: 'Two', model: 'M1',
               systemPrompt: 'think hard', activeProfile: 'Deep',
               thinking: 'limit', thinkingBudget: 2048, messages: [{ role: 'user', content: 'yo' }] },
-            { id: 'c3', title: 'LegacyBool', model: 'SmolLM2-360M-Instruct-oQ4',
+            { id: 'c3', title: 'LegacyBool', model: 'M1',
               systemPrompt: '', activeProfile: '',
               thinking: true, thinkingBudget: null, messages: [{ role: 'user', content: 'old' }] },
         ],
@@ -1307,7 +1321,8 @@ test('BUG-7: switching conversations restores thinking mode, budget and clean pr
     assert.equal(M._state().conv.thinking, 'off');
     let req = (await M.shapeRequest({
         body: { messages: [{ role: 'user', text: 'q' }] }, headers: {} })).body;
-    assert.equal(req.enable_thinking, false, 'shapeRequest honours restored off mode');
+    assert.equal(req.chat_template_kwargs.enable_thinking, false,
+                 'shapeRequest honours restored off mode (chat_template_kwargs, classic spelling)');
 
     // Switch to c2 (clean preset 'Deep' -> thinking 'limit', budget 2048)
     btnFor('c2').dispatch('click');
@@ -1320,7 +1335,7 @@ test('BUG-7: switching conversations restores thinking mode, budget and clean pr
     assert.equal(bud.hidden, false, 'budget input unhidden on limit');
     req = (await M.shapeRequest({
         body: { messages: [{ role: 'user', text: 'q' }] }, headers: {} })).body;
-    assert.equal(req.enable_thinking, true);
+    assert.equal(req.chat_template_kwargs.enable_thinking, true);
     assert.equal(req.thinking_budget, 2048);
 
     // Switch to c3 (legacy boolean thinking:true in store -> coerced to 'auto')
