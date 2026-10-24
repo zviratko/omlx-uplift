@@ -70,13 +70,28 @@ function renderTasks(hostId, kind) {
                 mkAct('CANCEL', 'Stop this task', () => DG.postJson(`${API}/admin/api/${kind}/cancel/${tid}`, {})
                     .then(() => renderTasks(hostId, kind)).catch(e => DG.toast(C.tf('uplift.dl.cancel_fail', 'cancel: ') + e.message)));
                 r.classList.add('with-acts'); r.append(acts);
-            } else if (kind === 'hf' && ['failed', 'cancelled', 'canceled', 'error'].includes((t.status || '').toLowerCase())) {
-                // U11 parity: classic offers retry (resumes partial files)
-                mkAct('RETRY', 'Resume this download from existing files', () =>
-                    DG.postJson(`${API}/admin/api/hf/retry/${tid}`,
-                        { hf_token: ($('dl-token') ? $('dl-token').value.trim() : '') })
-                        .then(() => renderTasks(hostId, kind)).catch(e => DG.toast(C.tf('uplift.dl.retry_fail', 'retry: ') + e.message)));
-                r.classList.add('with-acts'); r.append(acts);
+            } else {
+                const failed = ['failed', 'cancelled', 'canceled', 'error'].includes((t.status || '').toLowerCase());
+                const done = ['completed', 'complete', 'done', 'finished'].includes((t.status || '').toLowerCase());
+                // UP-24: classic removes terminal rows (files untouched, no
+                // confirm — dashboard.js removeHFTask/oq/upload/ms DELETE
+                // /admin/api/{kind}/task/{id}); the ms board inherits this
+                // render when UP-22 lands.
+                if (done || failed) {
+                    mkAct('REMOVE', C.tf('uplift.dl.remove_task_tip',
+                            'Remove this finished task from the list (files are kept)'),
+                        () => DG.deleteJson(`${API}/admin/api/${kind}/task/${tid}`)
+                            .then(() => renderTasks(hostId, kind))
+                            .catch(e => DG.toast(C.tf('uplift.dl.remove_fail', 'remove: ') + e.message)));
+                }
+                if (kind === 'hf' && failed) {
+                    // U11 parity: classic offers retry (resumes partial files)
+                    mkAct('RETRY', 'Resume this download from existing files', () =>
+                        DG.postJson(`${API}/admin/api/hf/retry/${tid}`,
+                            { hf_token: ($('dl-token') ? $('dl-token').value.trim() : '') })
+                            .then(() => renderTasks(hostId, kind)).catch(e => DG.toast(C.tf('uplift.dl.retry_fail', 'retry: ') + e.message)));
+                }
+                if (acts.childNodes.length) { r.classList.add('with-acts'); r.append(acts); }
             }
             host.append(r);
         }

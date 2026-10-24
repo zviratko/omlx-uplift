@@ -160,8 +160,24 @@ window.Uplift._usageGlue = {
     get fillSelect() { return fillSelect; },
     get currentTab() { return currentTab; },
     get renderRequestStats() { return renderRequestStats; },
+    get pollStats() { return pollStats; },   // UP-25: refresh after clear/purge
     get stats() { return stats; },
 };
+
+/* UP-27: sign-out from the shell (classic navbar.logout -> POST
+   /admin/api/logout, dashboard.js:4854). Routed back to /uplift/ so the
+   uplift login wall (routers/pages.py) re-arms immediately. The classic
+   destination /admin is only correct for the classic dashboard. */
+(function () {
+    document.addEventListener('click', function (e) {
+        const a = e.target && e.target.closest ? e.target.closest('#nav-logout') : null;
+        if (!a) return;
+        e.preventDefault();
+        fetchJson(`${API}/admin/api/logout`, { method: 'POST' })
+            .catch(() => {})                      // a dead session logs out too
+            .finally(() => { window.location.href = '/uplift/'; });
+    });
+})();
 
 /* ---------------- i18n bootstrap (classic pattern) ---------------------
    GET /uplift/api/locale -> {lang, strings}: classic's catalog merged

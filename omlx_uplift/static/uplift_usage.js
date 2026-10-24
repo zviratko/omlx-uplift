@@ -182,6 +182,41 @@ $('logs-dl').onclick = () => {
     URL.revokeObjectURL(a.href);
 };
 
+/* UP-25 (classic parity): confirm-gated clear buttons — session/all-time
+   usage stats (dashboard.js:4546-4566) and the hot/SSD cache purges
+   (:4568-4590). Labels + confirms reuse classic's own catalog keys.
+   Built in JS so no new uplift locale keys are minted. */
+(function () {
+    const mk = (host, label, title, confirmKey, confirmDef, url) => {
+        if (!host) return;
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'se-btn act'; b.textContent = label;
+        b.title = title;
+        b.onclick = () => {
+            if (!window.confirm(C.tf(confirmKey, confirmDef))) return;
+            D.postJson(`${API}/admin/api/` + url, {})
+             .catch(e => D.toast(String((e && e.message) || e), 'error'))
+             .then(() => { try { window.Uplift._usageGlue.pollStats(); } catch (_) {} });
+        };
+        host.append(b);
+    };
+    const ua = $('usage-actions'), ca = $('cache-actions');
+    mk(ua, C.tf('status.clear', 'Clear'),
+       C.tf('status.clear_tooltip', 'Clear session metrics'),
+       'status.clear_confirm', 'Are you sure?', 'stats/clear');
+    mk(ua, C.tf('status.clear_alltime', 'Clear'),
+       C.tf('status.clear_alltime_tooltip', 'Clear all-time metrics'),
+       'status.clear_confirm', 'Are you sure?', 'stats/clear-alltime');
+    mk(ca, 'SSD purge',
+       C.tf('status.clear_ssd_cache_tooltip', 'Delete all SSD cache'),
+       'status.clear_ssd_cache_confirm', 'Delete all SSD cache?',
+       'ssd-cache/clear');
+    mk(ca, 'Hot purge',
+       C.tf('status.runtime_cache.clear_memory_tooltip', 'Clear memory cache'),
+       'status.runtime_cache.clear_memory_confirm', 'Clear memory cache?',
+       'hot-cache/clear');
+})();
+
 window.Uplift.usage = {
     pollUsage: pollUsage, pollLogs: pollLogs, initUsageRange: initUsageRange,
     relabelUsageRange: relabelUsageRange, renderUsageSub: renderUsageSub,
