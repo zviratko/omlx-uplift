@@ -42,6 +42,7 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _vendorPromise = null, _streaming = false,
     _turnParams = null,   // U78: EFFECTIVE sampling snapshot of the in-flight turn
     _turnUsage = null,    // UP-38: accumulated token usage of the in-flight turn
+    _turnT0 = 0, _turnFirstTok = 0,   // UP-38: wall clocks for gen t/s
     _ctxRender = null,    // UP-16: mount-time handle to the ctx ring renderer
     _thinkLive = '',   // reasoning deltas of the in-flight turn (live-only)
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
@@ -853,6 +854,7 @@ async function shapeRequest(d) {
     // UP-38 (classic chat.html :7170): last SSE chunk carries the real
     // token counts; they ride the footer chip, never the settings row.
     body.stream_options = { include_usage: true };
+    _turnT0 = Date.now(); _turnFirstTok = 0;   // UP-38: clocks
     if (_webSearch) body.tools = WEB_TOOLS;   // 5/6 toggle-gated
     // U46: classic spreads the per-session sampling snapshot into the body
     // (buildChatCompletionBody ...generation); thinking fields keep
@@ -1109,7 +1111,8 @@ function nativeHandler(_componentBody, signals) {
                             u.completion_tokens = (u.completion_tokens || 0) + (c.usage.completion_tokens || 0);
                             u.total_tokens = (u.total_tokens || 0) + (c.usage.total_tokens || 0);
                         }
-                        if (c.text) { text += c.text;
+                        if (c.text) { if (!_turnFirstTok) _turnFirstTok = Date.now();
+                                      text += c.text;
                                       // MATH: stream leg gets the same display
                                       // normalization as renderHistory; the
                                       // store keeps the raw text in `text`.
@@ -3562,7 +3565,8 @@ function msgEdit(idx) { openEditor(idx); }
 function usageLabel(u) {
     // UP-38: compact token strip — ' 128→64 tok'; '' when absent.
     if (!u || !u.completion_tokens) return '';
-    return ' \u00b7 ' + (u.prompt_tokens || 0) + '\u2192' + u.completion_tokens + ' tok';
+    return ' \u00b7 ' + (u.prompt_tokens || 0) + '\u2192' + u.completion_tokens + ' tok'
+        + (u.tps ? ' \u00b7 ' + u.tps + ' t/s' : '');
 }
 
 function paramsLabel(pp) {
@@ -5369,6 +5373,14 @@ function mount() {
                 // key on reload (classic keeps it session-side too).
                 if (role === 'assistant' && _turnUsage) {
                     row.usage = Object.assign({}, _turnUsage);
+                    // UP-38: generation TPS between first and last token —
+                    // classic's gen TPS (prefill TPS + thinking time need
+                    // the 200ms live stats poll, deferred on the card).
+                    if (_turnFirstTok && _turnUsage.completion_tokens) {
+                        var secs = (Date.now() - _turnFirstTok) / 1000;
+                        if (secs > 0.05) row.usage.tps =
+                            Math.round(_turnUsage.completion_tokens / secs * 10) / 10;
+                    }
                     if (_conv) _conv.contextCache = (_turnUsage.prompt_tokens || 0)
                         + (_turnUsage.completion_tokens || 0);
                     ctxRender();      // UP-16: ring refreshes at turn end (mount scope)
