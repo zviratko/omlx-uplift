@@ -1382,6 +1382,95 @@ const GS_SPEC = [
     {sec: 'auth', lab: 'auth.keyless', hint: 'auth.keyless_hint', ctl: {
         k: 'tog', field: 'allow_unauthenticated_inference', flat: 'allow_unauthenticated_inference',
         confirm: 'auth.keyless_confirm'}},
+    // UP-21: classic sub-API-key management (_settings.html:213-288,
+    // dashboard.js generateSubKey/createSubKey/deleteSubKey). Named
+    // inference-only keys on top of the master key; POST/DELETE
+    // /admin/api/sub-keys persist server-side immediately, so this block
+    // bypasses the dirty-queue and edits GS.auth.sub_keys in place.
+    {x: (body, L) => {
+        const t = k => C.tf(k, k.split('.').pop().replace(/_/g, ' '));
+        const mk = (label, cls, fn, title) => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'se-btn ' + (cls || ''); b.textContent = label;
+            if (title) b.title = title;
+            if (fn) b.onclick = fn; return b; };
+        const list = document.createElement('div'); list.className = 'gs-subkeys';
+        const form = document.createElement('div');
+        form.className = 'gs-subkey-form'; form.hidden = true;
+        const nameIn = document.createElement('input');
+        nameIn.type = 'text'; nameIn.placeholder = t('settings.auth.sub_keys_name_placeholder');
+        const keyIn = document.createElement('input');
+        keyIn.type = 'text'; keyIn.placeholder = t('settings.auth.sub_keys_key_placeholder');
+        const err = document.createElement('span'); err.className = 'gs-err';
+        const genB = mk('\u2684', 'act', () => {
+            const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+            keyIn.value = 'omlx-' + Array.from(crypto.getRandomValues(new Uint8Array(16)))
+                .map(b => chars[b % chars.length]).join('');
+        }, t('settings.auth.sub_keys_generate_tooltip'));
+        const closeForm = () => { form.hidden = true; keyIn.value = nameIn.value = ''; err.textContent = ''; };
+        const createB = mk(t('settings.auth.sub_keys_create'), 'act', () => {
+            err.textContent = '';
+            const v = keyIn.value || '';
+            if (v.length < 4) { err.textContent = t('js.error.api_key_min_length'); return; }
+            if (/\s/.test(v)) { err.textContent = t('js.error.api_key_no_whitespace'); return; }
+            GLUE.postJson(`${API}/admin/api/sub-keys`, { key: v, name: nameIn.value.trim() })
+                .then(d => {
+                    const arr = (GS.auth && GS.auth.sub_keys) || (GS.auth.sub_keys = []);
+                    if (d && d.sub_key) arr.push(d.sub_key);
+                    closeForm(); render();
+                })
+                .catch(e => { err.textContent = String((e && e.message) || e); });
+        });
+        const cancelB = mk(t('settings.auth.sub_keys_cancel'), '', closeForm);
+        form.append(nameIn, keyIn, genB, createB, cancelB, err);
+        const addB = mk(t('settings.auth.sub_keys_add'), 'act', () => { form.hidden = false; keyIn.focus(); });
+        const mask = k => { const s = String(k || '');
+            return s.length <= 8 ? s : s.slice(0, 4) + '\u2022'.repeat(s.length - 8) + s.slice(-4); };
+        function render() {
+            list.replaceChildren();
+            const keys = (GS.auth && GS.auth.sub_keys) || [];
+            if (!keys.length) {
+                const e2 = document.createElement('div'); e2.className = 'dim';
+                e2.textContent = t('settings.auth.sub_keys_empty');
+                list.append(e2);
+            }
+            for (const sk of keys) {
+                const row = document.createElement('div'); row.className = 'urow settings';
+                const nm = GLUE.cell(sk.name || t('settings.auth.sub_keys_unnamed'));
+                nm.className = 'uname';
+                const when = GLUE.cell(sk.created_at
+                    ? new Date(sk.created_at).toLocaleDateString() : '');
+                when.className = 'diffslot';
+                const ctl = GLUE.cell(''); ctl.className = 'gctl';
+                const val = document.createElement('code'); val.textContent = mask(sk.key);
+                let shown = false;
+                const eye = mk('\uD83D\uDC41', '', () => {
+                    shown = !shown; val.textContent = shown ? sk.key : mask(sk.key); });
+                const del = mk(t('settings.auth.sub_keys_delete'), 'warn', () => {
+                    if (!window.confirm(t('settings.auth.sub_keys_delete_confirm'))) return;
+                    // DELETE with a JSON body - classic's deleteSubKey
+                    // payload; GLUE.deleteJson takes no body.
+                    fetch(`${API}/admin/api/sub-keys`, { // domkit-exempt
+                        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ key: sk.key }) })
+                        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+                        .then(() => {
+                            const arr = (GS.auth && GS.auth.sub_keys) || [];
+                            const i = arr.indexOf(sk); if (i >= 0) arr.splice(i, 1);
+                            render();
+                        })
+                        .catch(e => GLUE.toast(String((e && e.message) || e), 'error'));
+                });
+                ctl.append(val, eye, del);
+                row.append(nm, when, ctl);
+                list.append(row);
+            }
+        }
+        body.append(gsRow('auth', t('settings.auth.sub_keys_label'),
+            t('settings.auth.sub_keys_hint'), addB));
+        render();
+        body.append(list, form);
+    }},
 
     {t: 'Models'},
     {x: (body, L) => {

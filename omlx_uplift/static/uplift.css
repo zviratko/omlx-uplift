@@ -2023,6 +2023,10 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
 }
 
 .gs-dirs { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.gs-subkeys { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.gs-subkey-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; width: 100%; margin-top: 6px; }
+.gs-subkey-form input { flex: 1 1 160px; min-width: 0; }
+.gs-err { color: var(--red); font-size: 12px; width: 100%; }
 .gs-dir { display: flex; gap: 6px; }
 .gs-dir input { flex: 1; min-width: 0; }
 
