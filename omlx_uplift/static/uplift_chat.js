@@ -6870,7 +6870,12 @@ function mount() {
                     }
                     if (_conv) _conv.contextCache = (_turnUsage.prompt_tokens || 0)
                         + (_turnUsage.completion_tokens || 0);
-                    ctxRender();      // UP-16: ring refreshes at turn end (mount scope)
+                    // UP-16 live fix: this handler lives in a DIFFERENT
+                    // closure than the rail builder that defines ctxRender
+                    // — a direct call threw here, and the throw killed the
+                    // assistant row push (found on the live board; the
+                    // harness fixtures never set _turnUsage, so it hid).
+                    if (_ctxRender) _ctxRender();
                 }
                 if (role === 'assistant' && _turnMid) {
                     // VOICE-16: bind the plan (and therefore the audio files)
