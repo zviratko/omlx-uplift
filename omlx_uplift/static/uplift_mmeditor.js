@@ -1098,6 +1098,32 @@ function renderEditorFields(container) {
                     mtpRow.title = mtpWhy;
                     const mi = mtpRow.querySelector('input');
                     if (mi) mi.title = mtpWhy;
+                    // UP-20 (4): classic's one-click fix when the refusal IS
+                    // a missing side-car import — the button appears exactly
+                    // when the server reason names the MTPLX side-car (same
+                    // condition as classic modal :526); POST import-mtplx,
+                    // then reopen the editor so mtp_compatible refreshes.
+                    if (mtpNoHead && /MTPLX side-car/.test(m.mtp_compatibility_reason || '')) {
+                        const ib = document.createElement('button');
+                        ib.type = 'button'; ib.className = 'se-btn act';
+                        ib.textContent = C.tf('modal.model_settings.mtplx_import', 'Import MTP side-car');
+                        ib.onclick = () => {
+                            ib.disabled = true;
+                            ib.textContent = C.tf('modal.model_settings.mtplx_importing', 'Importing...');
+                            MM_GLUE.postJson(`${API}/admin/api/models/${encodeURIComponent(seModel)}/import-mtplx`, null)
+                                .then(d => {
+                                    if (d && d.message) MM_GLUE.toast(d.message);
+                                    return openEditor(seModel, seWantProfile);
+                                })
+                                .catch(e => {
+                                    MM_GLUE.toast(String((e && e.detail) || (e && e.message) || e) ||
+                                        C.tf('js.error.mtplx_import_failed', 'MTPLX side-car import failed'), 'error');
+                                    ib.disabled = false;
+                                    ib.textContent = C.tf('modal.model_settings.mtplx_import', 'Import MTP side-car');
+                                });
+                        };
+                        mtpRow.append(ib);
+                    }
                 }
                 seFam(g, 'mtp_enabled', mtpRow,
                     [seBind('select', 'mtp_adaptive_max_depth', {
@@ -2310,7 +2336,28 @@ function seRenderTabs(panel) {
                 .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + e.message));
         }
     };
-    strip.append(drop);
+    // UP-20 (5): classic refreshPresets (dashboard.js:94690) — POST the
+    // admin refresh, repopulate the preset group and the 1-day cache.
+    const rfb = document.createElement('button');
+    rfb.type = 'button'; rfb.className = 'se-btn'; rfb.textContent = '\u21bb';
+    rfb.title = C.tf('uplift.se.refresh_presets', 'Fetch latest presets');
+    rfb.onclick = () => {
+        rfb.disabled = true;
+        MM_GLUE.postJson(`${API}/admin/api/presets/refresh`, null)
+            .then(d => {
+                MM_DATA.presets = (d && d.presets) || [];
+                try { localStorage.setItem('omlx_preset_cache', JSON.stringify(d)); } catch (_) {}
+                g1.replaceChildren();
+                for (const p2 of MM_DATA.presets) {
+                    const o2 = document.createElement('option'); o2.value = 'pre:' + p2.name;
+                    o2.textContent = '\u25A7 ' + (p2.display_name || p2.name); g1.append(o2);
+                }
+                if (g1.children.length && !g1.parentElement) drop.append(g1);
+            })
+            .catch(e => MM_GLUE.toast(String((e && e.message) || e), 'error'))
+            .finally(() => { rfb.disabled = false; });
+    };
+    strip.append(drop, rfb);
 }
 /* U4: merge a settings blob INTO the active tab as unsaved edits —
    profile tabs receive overrides (empty-able via inherit), the base tab
