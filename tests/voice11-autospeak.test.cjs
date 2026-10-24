@@ -345,8 +345,9 @@ const CANCEL_RULES = {
     'conversation switch': async (h) => {
         // CHAT-3R: the picker became the left history LIST — switching is a
         // click on the conversation row (dataset.id), not a select change.
-        const item = (h.byId['chat-native-convs'].children || [])
-            .find(c => c.dataset && c.dataset.id === 'c1');
+        const kids = h.byId['chat-native-convs'].children || [];
+        const flat = kids.flatMap(k => (k.dataset && k.dataset.id !== undefined) ? [k] : (k.children || []));
+        const item = flat.find(c => c.dataset && c.dataset.id === 'c1');
         item.dispatch('click');
         // UP-34: switch settles the live stream (80ms) before the cancel body
         await new Promise((r) => setTimeout(r, 150));

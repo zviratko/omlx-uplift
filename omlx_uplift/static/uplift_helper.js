@@ -168,11 +168,17 @@ async function renderHelperModels() {
     // helper model list.
     const box = $('hm-markitdown');
     box.textContent = '';
-    let integ = {};
+    let integ = {}, ccSec = {}, stats = {};
     let modelList = [];
     try {
-        integ = (await HG.fetchJson(`${API}/admin/api/global-settings`)).integrations || {};
+        const gs = await HG.fetchJson(`${API}/admin/api/global-settings`);
+        integ = gs.integrations || {};
+        ccSec = gs.claude_code || {};     // UP-26(2): the env-command half
     } catch (_) {}
+    // UP-26(2): classic renders launch commands from stats (cli_prefix,
+    // host, port, api_key — dashboard.js:4231/3832/3838, /admin/api/stats
+    // carries all four); one extra GET, honest degradation on a miss.
+    try { stats = await HG.fetchJson(`${API}/admin/api/stats`) || {}; } catch (_) {}
     modelList = models;
 
     // save exactly like classic saveIntegrationSettings(): flat body where
@@ -335,6 +341,73 @@ async function renderHelperModels() {
         const o2 = document.createElement('option'); o2.value = m.id || m.name || ''; cliDl.append(o2);
     }
     cliCard.append(cliHead, cliDl, cliGrid);
+    /* UP-26(2): classic's Applications block (_applications.html +
+       dashboard.js:3826/4230-4281): ready-to-paste launch commands built
+       from the CLI prefix, host/port and the assigned models above, one
+       copy button per row. Pure templating lives in uplift_gspec.js
+       (launchCommand / claudeCodeCommand); the row shape mirrors classic
+       (app name | <code>command</code> | copy). */
+    const GSPEC = window.UpliftGSpec;
+    const cmdRows = [
+        [C.tf('status.integrations.claude_code', 'Claude Code'),
+         GSPEC.claudeCodeCommand(ccSec, { host: stats.host, port: stats.port,
+                                          apiKey: stats.api_key })],
+        [C.tf('status.integrations.claude_code', 'Claude Code') + ' (launch)',
+         GSPEC.launchCommand('claude', { cliPrefix: stats.cli_prefix })],
+        ['Codex CLI', GSPEC.launchCommand('codex', { cliPrefix: stats.cli_prefix })],
+        [C.tf('status.integrations.app', 'App') + ' (Codex)',
+         GSPEC.launchCommand('codex_app', { cliPrefix: stats.cli_prefix })],
+        [C.tf('status.integrations.opencode', 'OpenCode'),
+         GSPEC.launchCommand('opencode', { cliPrefix: stats.cli_prefix })],
+        [C.tf('status.integrations.openclaw', 'OpenClaw'),
+         GSPEC.launchCommand('openclaw', { cliPrefix: stats.cli_prefix,
+             toolsProfile: integ.openclaw_tools_profile })],
+        [C.tf('status.integrations.hermes_agent', 'Hermes Agent'),
+         GSPEC.launchCommand('hermes', { cliPrefix: stats.cli_prefix })],
+        [C.tf('status.integrations.pi', 'Pi'),
+         GSPEC.launchCommand('pi', { cliPrefix: stats.cli_prefix })],
+        [C.tf('status.integrations.vibe', 'Mistral Vibe'),
+         GSPEC.launchCommand('vibe', { cliPrefix: stats.cli_prefix,
+             model: integ.vibe_model })],
+        [C.tf('status.integrations.copilot_cli', 'Copilot CLI'),
+         GSPEC.launchCommand('copilot', { cliPrefix: stats.cli_prefix })],
+        [C.tf('status.integrations.dsh', 'DeepSeek Harness'),
+         GSPEC.launchCommand('dsh', { cliPrefix: stats.cli_prefix })],
+    ];
+    const cmds = document.createElement('div');
+    cmds.className = 'up-appcmds';
+    const cHead = document.createElement('div');
+    cHead.className = 'mk-head';
+    const cTitle = document.createElement('div');
+    cTitle.className = 'mk-title';
+    cTitle.textContent = C.tf('status.integrations.section_label', 'Applications');
+    const cHint = document.createElement('small');
+    cHint.className = 'dim';
+    cHint.textContent = C.tf('uplift.helper.launch_hint',
+        'Ready-to-paste commands (classic parity): env-prefix form points Claude Code at this server; the launch form loads the assistant with its assigned model.');
+    cHead.append(cTitle, cHint);
+    cmds.append(cHead);
+    for (const [name, cmd] of cmdRows) {
+        const row = document.createElement('div'); row.className = 'up-appcmd';
+        const nm = document.createElement('span'); nm.className = 'up-appcmd-name';
+        nm.textContent = name;
+        const code = document.createElement('code'); code.textContent = cmd;
+        code.title = cmd;
+        const cp = document.createElement('button');
+        cp.type = 'button'; cp.className = 'se-btn act';
+        cp.textContent = '\u29C9';   // ⧉, same idiom as the API-endpoints card
+        cp.title = C.tf('status.integrations.copy_command_tooltip', 'Copy command');
+        cp.onclick = () => {
+            const flash = () => { cp.textContent = '\u2713';
+                setTimeout(() => { cp.textContent = '\u29C9'; }, 2000); };
+            if (navigator.clipboard && navigator.clipboard.writeText)
+                navigator.clipboard.writeText(cmd).then(flash).catch(flash);
+            else flash();
+        };
+        row.append(nm, code, cp);
+        cmds.append(row);
+    }
+    cliCard.append(cmds);
     box.append(cliCard);
 
     /* ---- Web Search ---- */
@@ -518,6 +591,48 @@ async function renderHelperModels() {
         host.append(row);
     }
 }
+
+
+/* UP-26(3): new-omlx-release nudge. Classic checks GET
+   /admin/api/update-check at boot + hourly (dashboard.js:1163 checkForUpdate,
+   1177 startUpdateCheckTimer) and badges the version link in _navbar.html
+   (green dot + navbar.update_available tooltip + release_url href).
+   Uplift's own build chip (#logo-build, uplift_boot.js) reports THIS
+   deployment's build and stays untouched — the upstream release feed is a
+   deliberately separate signal (card: do not conflate with the dev-keg
+   auto-rebuild flag). Rendered next to the header status chips; hidden on
+   any error (older server without the route, network, no update). */
+function upUpdateCheck() {
+    const anchor = document.getElementById('chip-uptime');
+    const host = anchor && anchor.parentElement;
+    if (!host) return;   // no header chips (frame/embed): nothing to badge
+    let chip = document.getElementById('up-update-chip');
+    if (!chip) {
+        chip = document.createElement('a');
+        chip.id = 'up-update-chip';
+        chip.className = 'chip up-update-chip';
+        chip.target = '_blank';
+        chip.rel = 'noopener noreferrer';
+        chip.hidden = true;
+        anchor.insertAdjacentElement('afterend', chip);
+    }
+    HG.fetchJson(`${API}/admin/api/update-check`).then(d => {
+        // classic fetches with no referrer and silently ignores failures
+        // (dashboard.js:1172); updateNudge maps the payload honestly
+        const n = window.UpliftGSpec.updateNudge(d);
+        if (!n) { chip.hidden = true; return; }
+        const txt = C.tf('navbar.update_available',
+            'Update available: v{version}').replace('{version}', n.version);
+        chip.textContent = txt;
+        chip.title = txt + ' \u2014 ' + n.url;
+        chip.href = n.url;
+        chip.hidden = false;
+    }).catch(() => { chip.hidden = true; });
+}
+try {
+    upUpdateCheck();
+    setInterval(upUpdateCheck, 3600000);   // classic's hourly recheck
+} catch (_) { /* nudge is decoration; never break boot */ }
 
 
 window.Uplift = window.Uplift || {};

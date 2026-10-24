@@ -709,7 +709,8 @@ test('VOICE-13: conversation switch closes the socket and clears the chip', asyn
     const ws = await h.listen();
     ws.open(); ws.ready();
     ws.delta('still talking when I left');
-    const c1 = (h.byId['chat-native-convs'].children || [])
+    const kids = h.byId['chat-native-convs'].children || [];
+    const c1 = kids.flatMap(k => (k.dataset && k.dataset.id !== undefined) ? [k] : (k.children || []))
         .find(c => c.dataset && c.dataset.id === 'c1');
     c1.dispatch('click');   // CHAT-3R: history rows are buttons now
     await h.flush(10);

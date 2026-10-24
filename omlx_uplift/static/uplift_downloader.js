@@ -7,7 +7,12 @@
    window.UpliftDom (FE-1: no glue needed — all five were primitives). Exports
    window.Uplift.downloader {renderTasks, initDownloader}. UP-14 (2026-10-24):
    every download entry opens the classic-parity FILE-PICK DIALOG first and
-   HF/mirror URLs normalize to owner/repo — see the UP-14 section. */
+   HF/mirror URLs normalize to owner/repo — see the UP-14 section.
+   UP-22 (2026-10-24): the DOWNLOAD surface got its second provider — a
+   HF | ModelScope toggle drives the same tabs/pager/task board through
+   /admin/api/ms/* (see the UP-22 section). UP-23: 'Recommended for this
+   Mac' is the first tab — per-Mac oQ picks from /admin/api/hf/
+   recommendations, priced against this machine's RAM and disk. */
 (function () {
 'use strict';
 const C = window.UpliftCore;
@@ -239,7 +244,20 @@ const HFS = {
         return 'safe';
     },
     // classic isModelDownloaded — a cancelled or failed download keeps its
-    // finished files for resume, so only the LATEST task can veto.
+    // finished files for resume, so only the LATEST match per list can veto.
+    // UP-22: classic walks [hfTasks, msTasks] (dashboard.js:7775-7785), so a
+    // queued ModelScope download vetoes the HF board's badge too.
+    downloadedAny(repoId, models, lists) {
+        if (!repoId) return false;
+        const wanted = String(repoId).toLowerCase();
+        const matches = it => String((it && it.repo_id) || '').toLowerCase() === wanted;
+        for (const tasks of lists || []) {
+            let latest = null;
+            for (const t of tasks || []) if (matches(t)) latest = t;
+            if (latest && latest.status !== 'completed') return false;
+        }
+        return (models || []).some(matches);
+    },
     downloaded(repoId, models, tasks) {
         if (!repoId) return false;
         const wanted = repoId.toLowerCase();

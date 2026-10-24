@@ -1023,7 +1023,7 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'hist LEFT | chat column | control rail RIGHT');
     // VOICE-16: the audio-cache pair joins the rail BELOW Delete chat —
     // the user asked for exactly that spot, and both are chat-store hygiene.
-    assert.ok(/hist\.append\(histTitle, newBtn, rowIO, list, del,\s*cacheChk, cacheClr\)/.test(src),
+    assert.ok(/hist\.append\(histTitle, newBtn, rowIO, sch, list, del,\s*cacheChk, cacheClr\)/.test(src),
         'history rail: caption, new, export+import row, the list, DELETE, cache check+cleanup in-region');
     assert.ok(/cacheChk\.id = 'chat-native-cache-check'/.test(src)
         && /cacheClr\.id = 'chat-native-cache-cleanup'/.test(src),
@@ -1296,7 +1296,9 @@ test('BUG-7: switching conversations restores thinking mode, budget and clean pr
     const think = h.byId['chat-native-think-mode'];
     const bud = h.byId['chat-native-think-budget'];
     const list = h.byId['chat-native-convs'];
-    const btnFor = (id) => list.children.find((b) => b.dataset.id === id);
+    const btnFor = (id) => [...list.children].flatMap((n) =>
+        (n.dataset && n.dataset.id !== undefined) || String(n.tagName).toLowerCase() === 'button'
+            ? [n] : [...(n.children || [])]).find((x) => x.dataset && x.dataset.id === id);
 
     // Switch to c1 (clean preset 'Fast' -> thinking 'off')
     btnFor('c1').dispatch('click');

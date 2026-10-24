@@ -43,6 +43,7 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _turnParams = null,   // U78: EFFECTIVE sampling snapshot of the in-flight turn
     _turnUsage = null,    // UP-38: accumulated token usage of the in-flight turn
     _turnT0 = 0, _turnFirstTok = 0,   // UP-38: wall clocks for gen t/s
+    _convSearch = '',   // UP-39: history title filter
     _mcpTools = [],   // UP-15: classic fetchMcpTools (chat.html:4443) — offered
                       // alongside web tools exactly like activeTools() :4418
     _ctxRender = null,    // UP-16: mount-time handle to the ctx ring renderer
@@ -604,12 +605,27 @@ function refreshConvList() {
     // conversations as rows, not a <select>). Same contract as before:
     // one entry per summary, newest first, click switches (openConv keeps
     // the VOICE-11/13 cancel + teardown rules).
+    // UP-39 (classic parity): pinned-first sort (sortChatHistory :7960),
+    // pin toggle per row (togglePinChat :7967), inline rename
+    // (saveRenamedChat, dblclick), a stop button on the streaming row
+    // (chat.html :1308), and the title filter box (filteredChatHistory
+    // :8024 — classic also searches opened sessions; uplift keeps
+    // summaries only, so the filter matches titles).
     var list = gid('chat-native-convs');
     if (!list) return;
     list.replaceChildren();
-    _convs.slice().reverse().forEach(function (s) {
+    var q = (_convSearch || '').trim().toLowerCase();
+    var all = _convs.slice().reverse();
+    var shown = q ? all.filter(function (s) {
+        return String(s.title || s.id).toLowerCase().indexOf(q) >= 0;
+    }) : all;
+    shown = shown.filter(function (s) { return s.pinned; })
+        .concat(shown.filter(function (s) { return !s.pinned; }));
+    shown.forEach(function (s) {
+        var row = el('div', 'chat-native-convrow');
         var b = el('button', 'chat-native-conv',
-                   (s.title || s.id).slice(0, 48));
+                   (s.pinned ? '\uD83D\uDCCC ' : '')
+                   + (s.title || s.id).slice(0, 44));
         b.type = 'button';
         b.title = s.title || s.id;
         b.dataset.id = s.id;
@@ -619,8 +635,76 @@ function refreshConvList() {
             openConv(s.id).catch(function (e) {
                 D().toast(String((e && e.message) || e), 'error'); });
         });
-        list.appendChild(b);
+        b.addEventListener('dblclick', function () { convRename(s, b); });
+        // pin toggle — partial save path: summaries carry no messages,
+        // fetch the full conversation, flip the flag, save it back
+        var pin = el('button', 'chat-conv-pin', s.pinned ? '\u2691' : '\u2690');
+        pin.type = 'button';
+        pin.title = t('uplift.chat.pin', s.pinned ? 'Unpin' : 'Pin chat');
+        pin.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            var flip = function (full) {
+                full.pinned = !full.pinned;
+                D().postJson(api() + '/chat/history', full).then(function () {
+                    s.pinned = full.pinned;
+                    if (_conv && _conv.id === s.id) _conv.pinned = full.pinned;
+                    refreshConvList();
+                }).catch(function (e) {
+                    D().toast(String((e && e.message) || e), 'error'); });
+            };
+            if (_conv && _conv.id === s.id) { _conv.pinned = !s.pinned;
+                saveConv(); refreshConvList(); return; }
+            D().fetchJson(api() + '/chat/history/' + encodeURIComponent(s.id))
+                .then(flip)
+                .catch(function (e) { D().toast(String((e && e.message) || e), 'error'); });
+        });
+        row.appendChild(b);
+        if (_conv && s.id === _conv.id && _streaming) {
+            // per-row stop while THIS chat streams (classic :1308)
+            var stop = el('button', 'chat-conv-stop', '\u25A0');
+            stop.type = 'button';
+            stop.title = t('chat.stop', 'Stop');
+            stop.addEventListener('click', function (ev) {
+                ev.stopPropagation(); stopAndSettle(); });
+            row.appendChild(stop);
+        }
+        row.appendChild(pin);
+        list.appendChild(row);
     });
+}
+
+function convRename(s, btn) {
+    // classic saveRenamedChat: inline input replaces the label, Enter
+    // saves, Escape cancels
+    var inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'chat-conv-rename';
+    inp.value = s.title || s.id; inp.maxLength = 120;
+    btn.style.display = 'none';
+    btn.parentNode.insertBefore(inp, btn.nextSibling);
+    inp.focus(); inp.select();
+    var done = function (ok) {
+        inp.remove(); btn.style.display = '';
+        if (!ok) return;
+        var v = String(inp.value || '').trim().slice(0, 120);
+        if (!v || v === s.title) return;
+        var apply = function (full) {
+            full.title = v;
+            return D().postJson(api() + '/chat/history', full).then(function () {
+                s.title = v;
+                if (_conv && _conv.id === s.id) { _conv.title = v; saveConv(); }
+                refreshConvList();
+            });
+        };
+        if (_conv && _conv.id === s.id) { _conv.title = v; saveConv(); refreshConvList(); return; }
+        D().fetchJson(api() + '/chat/history/' + encodeURIComponent(s.id))
+            .then(apply)
+            .catch(function (e) { D().toast(String((e && e.message) || e), 'error'); });
+    };
+    inp.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); done(true); }
+        else if (ev.key === 'Escape') done(false);
+    });
+    inp.addEventListener('blur', function () { done(true); });
 }
 
 async function migrateLegacy() {
@@ -2040,7 +2124,13 @@ function toolbar() {
     cacheClr.id = 'chat-native-cache-cleanup';
     cacheClr.dataset.i18n = 'uplift.chat.cache_cleanup';
     cacheClr.dataset.en = 'Cleanup audio cache';
-    hist.append(histTitle, newBtn, rowIO, list, del, cacheChk, cacheClr);
+    // UP-39: title filter over the history rows (classic chatSearchQuery)
+    var sch = document.createElement('input');
+    sch.type = 'search'; sch.className = 'chat-conv-search';
+    sch.placeholder = t('uplift.chat.search_ph', 'Search chats\u2026');
+    sch.addEventListener('input', function () {
+        _convSearch = sch.value || ''; refreshConvList(); });
+    hist.append(histTitle, newBtn, rowIO, sch, list, del, cacheChk, cacheClr);
     // CHAT-3R round 5/6 (user): Model | Preset | Save | Delete in the
     // top row; the naming MODAL rides in the bar's DOM but is fixed —
     // it covers the page instead of expanding the bar.

@@ -254,6 +254,9 @@ async def chat_history_list(is_admin: bool = Depends(require_admin)):
         for cid, c in store["conversations"].items():
             out.append({"id": cid, "title": c.get("title", ""),
                         "model": c.get("model"),
+                        # UP-39: pinned rides the summary so the list can
+                        # sort pinned-first without opening every chat
+                        "pinned": bool(c.get("pinned", False)),
                         "message_count": len(c.get("messages") or []),
                         "updated": c.get("updated", 0)})
         out.sort(key=lambda x: x["updated"])
@@ -334,6 +337,11 @@ async def chat_history_save(request: Request,
             # (schedulePersistModelSettings -> syncSessionModelSettingsFromUi);
             # native mirrors the same scope. None = nothing set = engine default.
             "generation": _clean_generation(body.get("generation")),
+            # UP-39: pin flag (classic togglePinChat :7967). Strictly a
+            # boolean; absent in the body keeps the stored value (partial
+            # savers like migrateLegacy must not silently unpin).
+            "pinned": (body.get("pinned") is True if "pinned" in body
+                       else bool(existing.get("pinned", False))),
             "messages": [_clean_message(m) for m in msgs[-MAX_MESSAGES:]
                          if isinstance(m, dict)],
             "updated": int(time.time() * 1000),

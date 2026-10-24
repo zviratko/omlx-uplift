@@ -269,3 +269,21 @@ def test_thinking_mode_and_budget_roundtrip_sanitized(client):
         got = client.get("/uplift/api/chat/history/c1").json()
         assert got["thinking"] == "auto"
         assert got["thinkingBudget"] is None
+
+
+def test_pinned_roundtrip_and_summary(client):
+    """UP-39: the pin flag persists per conversation, rides the list
+    summary for pinned-first sorting, is kept when absent from a partial
+    save (migrateLegacy shape), and only JSON true pins."""
+    assert client.post("/uplift/api/chat/history", json=_conv(pinned=True)).status_code == 200
+    assert client.get("/uplift/api/chat/history/c1").json()["pinned"] is True
+    assert client.get("/uplift/api/chat/history").json()[0]["pinned"] is True
+    # a save without the key keeps the stored value
+    assert client.post("/uplift/api/chat/history", json=_conv()).status_code == 200
+    assert client.get("/uplift/api/chat/history/c1").json()["pinned"] is True
+    # explicit false unpins; non-bool never pins
+    client.post("/uplift/api/chat/history", json=_conv(pinned=False))
+    assert client.get("/uplift/api/chat/history/c1").json()["pinned"] is False
+    client.post("/uplift/api/chat/history", json=_conv(pinned=True))
+    client.post("/uplift/api/chat/history", json=_conv(pinned="yes"))
+    assert client.get("/uplift/api/chat/history/c1").json()["pinned"] is False

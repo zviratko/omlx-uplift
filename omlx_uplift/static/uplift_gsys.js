@@ -281,6 +281,7 @@ function markFieldDirty(flat, val) {
         || flat === 'gdn_snapshot_storage'
         || flat === 'host')                    // UP-19 (7): skip row follows the bind
         gsDisabledSync();                    // SSD rows follow the effective mode
+    gsGuardSync();                           // UP-41(10): tier/ceiling edits refresh live
     gsUpdateSaveBtn();
     gsMarkSections();
     renderDirtyList();
@@ -300,6 +301,10 @@ function revertField(flat) {                // click on |original| chip
 }
 function gsSetControlValue(flat, val) {
     const row = document.querySelector('#gs-body [data-flat="' + flat + '"]');
+    // UP-41 composite rows (host preset, cache sliders) own their controls:
+    // one repaint call beats picking a first-input child that only shows
+    // part of the state.
+    if (row && row.__gsApply) { row.__gsApply(val); return true; }
     const ctl = row && (row.querySelector('input[type=checkbox]') || row.querySelector('select')
         || row.querySelector('textarea') || row.querySelector('input'));
     if (!ctl) return false;
@@ -741,6 +746,9 @@ const GS_TAB_LS = 'uplift.gs.tab';
 let gsTab = 'all';
 try { gsTab = localStorage.getItem(GS_TAB_LS) || 'all'; } catch (e) { /* private mode */ }
 function gsTabSet(slug) {
+    // UP-41(12): entering Advanced (tab strip OR deep link) opens it —
+    // classic's settings-open-section event (_settings.html:1002)
+    if (slug === 'advanced') gsAdvSetOpen(true);
     if (gsTab === slug) return;
     gsTab = slug;
     try { localStorage.setItem(GS_TAB_LS, slug); } catch (e) { /* ignore */ }
@@ -815,6 +823,461 @@ function gsTabBadges() {
             ? C.tf('uplift.gs.tab.badge_restart',
                    'Includes changes that need a server restart') : '';
     }
+}
+
+/* ---------------- UP-41(11/12): section deep-links + Advanced disclosure.
+   Classic routes settings by #settings-<id> anchors (_settings.html:31-42
+   rail + copy-link, dashboard.js settingsGoToSection:1026 /
+   settingsCopyAnchor:1125 / settings-open-section:1030, Advanced collapsed
+   by default at _settings.html:999-1017 and auto-opened by that event).
+   Uplift keeps the localStorage section-tab strip, so a deep link SELECTS
+   the strip tab; the hash form stays classic-compatible (#settings-x) and
+   is normalized to the uplift two-segment route BEFORE uplift.js's applyTab
+   reads it (gsys loads first, so our listener runs first; replaceState does
+   not re-fire hashchange). The second segment is not in SUBS.settings, so
+   applyTab lands on tab=settings sub=global exactly like a plain link. */
+const GS_NUMSCALE_LS = 'omlx-number-scale';   // shared with classic count_format.js:8
+const GS_ADV_SS = 'uplift.gs.advOpen';        // session-scoped: reload re-collapses (classic x-data)
+function gsAdvOpen() {
+    try { return sessionStorage.getItem(GS_ADV_SS) === '1'; } catch (_) { return false; }
+}
+function gsAdvSetOpen(v) {
+    try { sessionStorage.setItem(GS_ADV_SS, v ? '1' : ''); } catch (_) {}
+}
+function gsSpecSlugs() {
+    const out = [];
+    for (const it of GS_SPEC) {
+        if (!it.t) continue;
+        out.push(it.t.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+    }
+    return out;
+}
+function gsDeepApply(slug) {
+    if (!slug) return;
+    if (slug === 'advanced') gsAdvSetOpen(true);   // classic settings-open-section (1030)
+    if (!gsSpecSlugs().includes(slug)) return;     // unknown section: strip stays
+    if (gsTab !== slug) {
+        gsTab = slug;
+        try { localStorage.setItem(GS_TAB_LS, slug); } catch (_) {}
+        if (GS) renderGlobalSettings();
+    }
+}
+function gsDeepNormalize() {
+    const slug = window.UpliftGSpec.parseGsDeepLink(location.hash);
+    if (slug && /^#settings-/i.test(location.hash)) {
+        // classic anchor shape -> uplift route, without firing hashchange
+        try {
+            history.replaceState(null, '', location.pathname + location.search +
+                '#settings/' + slug);
+        } catch (_) {}
+    }
+    return slug;
+}
+// boot: normalize + apply a link present BEFORE the first render. Kept
+// GS_SPEC-free on purpose (this runs while the module is still evaluating
+// — gsSpecSlugs() would hit the const TDZ): an unknown slug is sanitized
+// later by gsTabValid() inside renderGlobalSettings, and GS is null here
+// so nothing re-renders yet. The hashchange listener is registered at
+// eval time = BEFORE uplift.js's hashchange->applyTab, which is what the
+// normalization above depends on.
+const gsDeepBoot = gsDeepNormalize();
+if (gsDeepBoot) {
+    if (gsDeepBoot === 'advanced') gsAdvSetOpen(true);
+    gsTab = gsDeepBoot;
+    try { localStorage.setItem(GS_TAB_LS, gsDeepBoot); } catch (_) {}
+}
+addEventListener('hashchange', () => {
+    try { gsDeepApply(gsDeepNormalize()); } catch (_) {}
+});
+// classic settingsCopyAnchor (dashboard.js:1125): copy origin+path+#settings-x
+function gsCopySectionLink(btn, slug) {
+    const url = window.location.origin + window.location.pathname +
+        window.UpliftGSpec.gsSectionAnchor(slug);
+    const flash = () => {
+        btn.textContent = '\u2713';
+        btn.title = C.tf('cluster.v2.common.copied', 'Copied!');
+        setTimeout(() => {
+            btn.textContent = '\u29C9';
+            btn.title = C.tf('settings.sections.copy_link',
+                'Copy link to this section');
+        }, 2000);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(url).then(flash).catch(flash);
+    else flash();
+}
+
+/* ---------------- UP-41(8): classic host-preset row (_settings.html:305-342).
+   Localhost/Public/Custom selector over the raw host field: presets write
+   127.0.0.1 / 0.0.0.0, Custom blanks the value and reveals the text input
+   with classic's multi-host hint. The row keeps data-flat='host', so the
+   UP-19(7) loopback forcing (markFieldDirty -> gsDisabledSync) and the
+   restart badge ride it unchanged. */
+function gsHostRow(body, L) {
+    const GSPEC = window.UpliftGSpec;
+    const wrap = document.createElement('span');
+    wrap.className = 'gs-hostrow';
+    const sel = document.createElement('select');
+    sel.className = 'gs-hostpreset';
+    for (const [v, k, d] of [
+        ['localhost', 'settings.server.host_localhost', 'Localhost only (127.0.0.1)'],
+        ['public', 'settings.server.host_public', 'Open to all (0.0.0.0)'],
+        ['custom', 'settings.server.host_custom', 'Custom (caution)']]) {
+        const o = document.createElement('option');
+        o.value = v; o.textContent = C.tf(k, d);
+        sel.append(o);
+    }
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.placeholder = L.server.host_placeholder;
+    inp.spellcheck = false; inp.autocomplete = 'off';
+    const hint = document.createElement('small');
+    hint.className = 'dim gs-hosthint';
+    hint.textContent = C.tf('settings.server.host_multi_hint',
+        'Separate multiple addresses with commas');
+    wrap.append(sel, inp, hint);
+    const cur = () => {
+        const v = gsEffFlat('host');
+        return v == null ? '' : String(v);
+    };
+    const paint = () => {
+        const v = cur();
+        const mode = GSPEC.hostPresetOf(v);
+        sel.value = mode;
+        inp.value = v;
+        const custom = mode === 'custom';
+        inp.style.display = custom ? '' : 'none';
+        hint.style.display = custom ? '' : 'none';
+    };
+    sel.onchange = () => {
+        // classic _setHostMode (_settings.html:318-321): presets write their
+        // bind, Custom starts from blank (the user types the list)
+        gsQueueSave('host', GSPEC.hostPresetValue(sel.value));
+        paint();
+    };
+    const queue = () => {
+        // NO full repaint here: writing inp.value on every keystroke moves
+        // the caret. Only the preset select follows the typed value live
+        // (classic's reactive hostMode getter did exactly that).
+        gsQueueSave('host', inp.value.trim());
+        sel.value = GSPEC.hostPresetOf(inp.value);
+    };
+    inp.addEventListener('input', queue);
+    inp.addEventListener('change', queue);
+    const row = gsRow('server', L.server.host, '', wrap,
+        { badge: true, flat: 'host' });
+    row.__gsApply = paint;   // dirty-revert/re-render plumbing feeds the composite
+    paint();
+    body.append(row);
+}
+
+/* ---------------- UP-41(10): cache-limit % sliders over size strings
+   (classic _settings.html:543-615 + dashboard.js 6499-6772, pure halves in
+   uplift_gspec.js). SEMANTICS (card CAUTION — aligned deliberately):
+   uplift used to leave these fields blank ('= OS default' per the old
+   hint); classic normalizes blank/'auto' hot-cache to '0' (= DISABLED) on
+   load and persists explicit strings ('auto', '0', '<n>GB'). We adopt the
+   classic model: the controls below always queue an explicit string, and
+   a legacy blank renders as classic renders it (cold -> Auto, hot -> Off).
+   Missing system sizes (old payload) hide the % half honestly — the GB
+   number input keeps working. */
+function gsSizeRow(opts) {
+    // shared shell for the cold/hot rows: label + seg buttons | slider +
+    // readout | GB number input; opts.{flat,label,hint} + pure callbacks
+    const wrap = document.createElement('span');
+    wrap.className = 'gs-sizerow';
+    const left = document.createElement('span'); left.className = 'gs-sizeseg';
+    const mid = document.createElement('span'); mid.className = 'gs-sizeslider';
+    const range = document.createElement('input');
+    range.type = 'range'; range.min = 0; range.max = opts.maxPct; range.step = 1;
+    range.className = 'gs-sizepct';
+    const read = document.createElement('span'); read.className = 'gs-sizeread dim';
+    const gb = document.createElement('input');
+    gb.type = 'number'; gb.min = 0; gb.step = 1; gb.className = 'gs-sizegb';
+    const gbl = document.createElement('span'); gbl.textContent = 'GB';
+    mid.append(range, read);
+    const right = document.createElement('span'); right.className = 'gs-sizegbcell';
+    right.append(gb, gbl);
+    wrap.append(left, mid, right);
+    const row = gsRow('cache', opts.label, opts.hint, wrap, { flat: opts.flat });
+    row.__gsComposite = true;
+    return { row, wrap, left, mid, range, read, gb,
+             // 1 GiB readout helper: bytes -> whole-GB string
+             gbOf: b => Math.round((b || 0) / (1024 ** 3)) };
+}
+function gsColdCacheRow(body, L) {
+    const GSPEC = window.UpliftGSpec;
+    const sys = () => (GS && GS.system) || {};
+    const ui = gsSizeRow({
+        flat: 'ssd_cache_max_size',
+        label: C.tf('settings.resource.cold_cache_limit', L.cache.ssd_max),
+        hint: L.cache.ssd_max_hint + ' \u2014 ' +
+            C.tf('settings.resource.cold_cache_description',
+                 'Persistent SSD storage for evicted KV cache blocks.'),
+        maxPct: 100,
+    });
+    const seg = (label, on, fn) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'se-btn gs-seg' + (on ? ' on' : '');
+        b.textContent = label; b.onclick = fn;
+        return b;
+    };
+    const eff = () => {
+        const v = gsEffFlat('ssd_cache_max_size');
+        return v == null ? '' : String(v).trim();
+    };
+    const autoGB = () => Math.round(
+        Number((GS && GS.cache && GS.cache.ssd_cache_auto_size_bytes) || 0) / (1024 ** 3));
+    const paint = () => {
+        const v = eff();
+        const mode = (v === '' || v === 'auto') ? 'auto' : 'fixed';
+        const total = Number(sys().ssd_total_bytes) || 0;
+        ui.left.replaceChildren(
+            seg(C.tf('settings.resource.cold_cache_auto', 'Auto'), mode === 'auto',
+                () => { gsQueueSave('ssd_cache_max_size', 'auto'); paint(); }),
+            seg(C.tf('settings.resource.cold_cache_fixed', 'Fixed'), mode === 'fixed',
+                () => {
+                    if (mode === 'auto') {
+                        // classic _settings.html:591 — Fixed starts from the
+                        // auto size (floor 1 GB), not from 0
+                        gsQueueSave('ssd_cache_max_size',
+                            `${Math.max(1, autoGB() || GSPEC.parseSettingsGB(v) || 1)}GB`);
+                        paint();
+                    }
+                }));
+        ui.mid.style.display = total ? '' : 'none';
+        if (total) {
+            ui.range.value = GSPEC.cachePercentOf(mode === 'auto' ? '' : v, total);
+            const gbv = mode === 'auto' ? autoGB()
+                : (GSPEC.parseSettingsGB(v) ?? ui.gbOf(ui.range.value / 100 * total));
+            ui.read.textContent = ui.range.value + '% \u00b7 ' +
+                gbv + ' / ' + ui.gbOf(total) + ' GB' +
+                (mode === 'auto' ? ' \u2014 ' + C.tf(
+                    'settings.resource.cold_cache_auto_description',
+                    'Current limit is 50% of the sum of free disk space and existing SSD cache. Edit the GB value to set a fixed limit.') : '');
+        }
+        ui.gb.value = mode === 'auto' ? (autoGB() || '')
+            : (GSPEC.parseSettingsGB(v) ?? 0);
+    };
+    ui.range.oninput = () => {
+        gsQueueSave('ssd_cache_max_size',
+            GSPEC.percentToCacheString(Number(ui.range.value), Number(sys().ssd_total_bytes) || 0));
+        paint();
+    };
+    ui.gb.onchange = () => {
+        gsQueueSave('ssd_cache_max_size', `${parseInt(ui.gb.value, 10) || 0}GB`);
+        paint();
+    };
+    ui.row.__gsApply = paint;
+    paint();
+    body.append(ui.row);
+}
+function gsHotCacheRow(body, L) {
+    const GSPEC = window.UpliftGSpec;
+    const total = () => Number(((GS && GS.system) || {}).total_memory_bytes) || 0;
+    const ui = gsSizeRow({
+        flat: 'hot_cache_max_size',
+        label: C.tf('settings.resource.hot_cache_limit', L.cache.hot_max),
+        // classic words the zero semantics (_settings.html:547-549)
+        hint: L.cache.hot_max_hint + ' ' +
+            C.tf('settings.resource.hot_cache_zero_note',
+                 'Reduces SSD I/O latency for repeated prompts.') + ' ' +
+            C.tf('settings.resource.hot_cache_disabled', '0') + ' ' +
+            C.tf('settings.resource.hot_cache_disabled_label', '= disabled.'),
+        maxPct: 50,
+    });
+    const eff = () => {
+        // ALIGNMENT: blank/'auto' normalize to '0' exactly like classic
+        // normalizeHotCacheMaxSize (dashboard.js:6730) — legacy uplift
+        // blanks therefore render OFF, same as classic shows them.
+        const v = String(gsEffFlat('hot_cache_max_size') ?? '').trim();
+        return (!v || v.toLowerCase() === 'auto') ? '0' : v;
+    };
+    const paint = () => {
+        const v = eff();
+        const t = total();
+        ui.mid.style.display = t ? '' : 'none';
+        const pct = GSPEC.hotCachePercentOf(v, t);
+        if (t) ui.range.value = pct;
+        const gbv = v === '0' ? 0 : (GSPEC.parseSettingsGB(v) ?? 0);
+        ui.read.textContent = (pct === 0
+            ? C.tf('settings.resource.off', 'Off') : pct + '%') +
+            ' \u00b7 ' + gbv + ' GB';
+        ui.gb.value = gbv;
+    };
+    ui.range.oninput = () => {
+        gsQueueSave('hot_cache_max_size',
+            GSPEC.hotCacheStringFromPercent(Number(ui.range.value), total()));
+        paint();
+    };
+    ui.gb.onchange = () => {
+        // classic updateHotCacheFromInput (6679): 0 -> '0' (disabled)
+        const g = parseInt(ui.gb.value, 10) || 0;
+        gsQueueSave('hot_cache_max_size', g === 0 ? '0' : `${g}GB`);
+        paint();
+    };
+    ui.row.__gsApply = paint;
+    paint();
+    body.append(ui.row);
+}
+
+/* ---------------- UP-41(10): memory-guard readout block (classic
+   _settings.html:485-510 + dashboard.js 6553-6663). The GS payload already
+   carries system.memory_guard_preview; this renders tier description,
+   ceiling breakdown and the wired-limit red warning + copyable sysctl fix.
+   Always in the DOM, synced (visibility + contents) by gsGuardSync after
+   every render / queued edit — the classic x-show bindings as imperative
+   updates, so tier picking shows the new ceiling without a SAVE. */
+function gsGuardBlock(body) {
+    const box = document.createElement('div');
+    box.className = 'gs-guardinfo'; box.id = 'gs-guardinfo';
+    body.append(box);
+}
+function gsGuardSync() {
+    const GSPEC = window.UpliftGSpec;
+    const box = document.getElementById('gs-guardinfo');
+    if (!box || !GS) return;
+    box.replaceChildren();
+    const sys = GS.system || {};
+    const guardOn = !!gsEffFlat('memory_prefill_memory_guard');
+    const tier = gsEffFlat('memory_guard_tier') || 'balanced';
+    const preview = (sys.memory_guard_preview || {})[tier];
+    const add = (cls, segs) => {
+        const p = document.createElement('div');
+        p.className = cls;
+        for (const s of segs) {
+            if (typeof s === 'string') { p.append(document.createTextNode(s)); continue; }
+            const b = document.createElement('strong');
+            b.textContent = s.t; p.append(b);
+        }
+        box.append(p);
+    };
+    let any = false;
+    if (guardOn) {
+        if (preview || tier === 'custom') {
+            // tier description (classic memoryGuardTierDescription 6605)
+            const tpl = tier === 'custom'
+                ? C.tf('settings.resource.guard_tier.description_custom',
+                       'Custom: oMLX uses your specified ceiling of {custom_gb} GB.')
+                : C.tf('settings.resource.guard_tier.description.' + tier,
+                       tier + ' keeps {reserve} free for other apps.');
+            add('gs-guard-desc dim', [GSPEC.guardTierText(tpl, tier, preview,
+                gsEffFlat('memory_guard_custom_ceiling_gb'))]);
+            any = true;
+        }
+        if (preview && preview.ceiling_bytes != null) {
+            // ceiling breakdown (classic memoryGuardBreakdownHTML 6626);
+            // classic ships <strong> fields via x-html — templateSegments
+            // gives the same emphasis through JS-built DOM
+            const GB = 1024 ** 3;
+            const b = v => ({ t: Number((v || 0) / GB).toFixed(1) + ' GB' });
+            let segs = [];
+            if (tier === 'custom') {
+                const custom = Number(gsEffFlat('memory_guard_custom_ceiling_gb') || 0);
+                const ceiling = GSPEC.customGuardCeilingGB(custom, preview);
+                const kernelBinds = ceiling !== null &&
+                    preview.metal_cap_bytes > 0 &&
+                    Math.abs(ceiling * GB - preview.metal_cap_bytes) < 1 &&
+                    ceiling < custom;
+                const tpl = C.tf(kernelBinds
+                    ? 'settings.resource.guard_tier.breakdown_custom_kernel_limit'
+                    : 'settings.resource.guard_tier.breakdown_custom',
+                    kernelBinds
+                    ? '* Custom ceiling {custom_gb} GB / effective ceiling {ceiling} (kernel limit)'
+                    : '* Custom ceiling {custom_gb} GB \u2192 effective ceiling {ceiling}');
+                segs = GSPEC.templateSegments(tpl, {
+                    custom_gb: custom.toFixed(1),
+                    ceiling: ceiling === null ? '?' : ceiling.toFixed(1),
+                });
+            } else {
+                const kernelBinds = preview.binding === 'metal_cap';
+                const tpl = C.tf(kernelBinds
+                    ? 'settings.resource.guard_tier.breakdown_kernel_limit'
+                    : 'settings.resource.guard_tier.breakdown',
+                    kernelBinds
+                    ? '* Free {free} + inactive {inactive} + other apps\u2019 compressible {other} / effective ceiling {ceiling} (kernel limit)'
+                    : '* Free {free} + inactive {inactive} + other apps\u2019 compressible {other} \u2212 reserve {reserve} \u2192 ceiling {ceiling}');
+                segs = GSPEC.templateSegments(tpl, {
+                    free: b(preview.free_bytes).t, inactive: b(preview.inactive_bytes).t,
+                    other: b(preview.other_apps_bytes).t,
+                    reserve: b(preview.reserve_bytes).t, ceiling: b(preview.ceiling_bytes).t,
+                });
+            }
+            add('gs-guard-break dim', segs);
+            any = true;
+        }
+        if (GSPEC.wiredLimitWarned(sys)) {
+            // red warning + copyable sysctl fix (classic 6561-6600): the
+            // kernel iogpu.wired_limit_mb caps oMLX below its request
+            const warn = document.createElement('div');
+            warn.className = 'gs-guard-wired';
+            const tpl = C.tf('settings.resource.guard_tier.wired_limit_warning',
+                'Kernel iogpu.wired_limit_mb is only {kernel}; oMLX can only allocate up to {kernel}. Raise it in Terminal:');
+            const ktxt = (sys.iogpu_wired_limit_bytes / (1024 ** 3)).toFixed(1) + ' GB';
+            const pieces = String(tpl).split('{kernel}');
+            pieces.forEach((piece, i) => {
+                if (piece) warn.append(document.createTextNode(piece));
+                // classic bolds EVERY {kernel} occurrence — strong between
+                // pieces, never trailing
+                if (i < pieces.length - 1) warn.append(
+                    Object.assign(document.createElement('strong'), { textContent: ktxt }));
+            });
+            const cmd = GSPEC.wiredLimitCommand(sys);
+            const code = document.createElement('code');
+            code.className = 'gs-guard-sysctl'; code.textContent = cmd;
+            const cp = document.createElement('button');
+            cp.type = 'button'; cp.className = 'se-btn act';
+            cp.textContent = '\u29C9';
+            cp.title = C.tf('status.integrations.copy_command_tooltip', 'Copy command');
+            cp.onclick = () => {
+                const flash = () => { cp.textContent = '\u2713';
+                    setTimeout(() => { cp.textContent = '\u29C9'; }, 2000); };
+                if (navigator.clipboard && navigator.clipboard.writeText)
+                    navigator.clipboard.writeText(cmd).then(flash).catch(flash);
+                else flash();
+            };
+            warn.append(code, cp);
+            box.append(warn);
+            any = true;
+        }
+    }
+    box.hidden = !any;
+}
+
+/* ---------------- UP-41(13): compact-vs-exact number scale switch
+   (classic _settings.html:112-118 + omlxCount setScale, count_format.js).
+   Classic persists it client-side in localStorage 'omlx-number-scale' —
+   NOT a server setting — so this row keeps the exact same key (a browser
+   shared between the dashboards carries one truth). It writes through to
+   window.omlxCount when the classic count lib is present and fires
+   'uplift-number-scale' so uplift renderers can adopt it live; the compact
+   formatter itself lives in UpliftCore. */
+function gsNumberScaleRow(body) {
+    const cur = (() => {
+        try { return localStorage.getItem(GS_NUMSCALE_LS) === 'exact' ? 'exact' : 'compact'; }
+        catch (_) { return 'compact'; }
+    })();
+    const sel = document.createElement('select');
+    for (const [v, k, d] of [['compact', 'settings.appearance.number_scale_compact', 'Higher units'],
+                             ['exact', 'settings.appearance.number_scale_exact', 'Exact digits']]) {
+        const o = document.createElement('option');
+        o.value = v; o.textContent = C.tf(k, d);
+        sel.append(o);
+    }
+    sel.value = cur;
+    sel.onchange = () => {
+        const v = sel.value === 'exact' ? 'exact' : 'compact';
+        try { localStorage.setItem(GS_NUMSCALE_LS, v); } catch (_) {}
+        // classic setStatsNumberScale (dashboard.js:4615) -> omlxCount.setScale
+        try { window.omlxCount && window.omlxCount.setScale && window.omlxCount.setScale(v); } catch (_) {}
+        try {
+            window.dispatchEvent(new CustomEvent('uplift-number-scale',
+                { detail: { scale: v } }));
+        } catch (_) {}
+    };
+    body.append(gsRow('ui', C.tf('settings.appearance.number_scale', 'Number scale'),
+        C.tf('uplift.gs.appearance.number_scale_hint',
+             'Per-browser display choice: compact rounds to higher units, exact shows every digit.'),
+        sel));
 }
 
 async function pollGlobalSettings() {
@@ -1344,10 +1807,15 @@ const GS_SPEC = [
     {t: 'Server'},
     {sec: 'ui', lab: () => C.tf('uplift.gs.ui.interface_language', 'Interface language'), ctl: {
         k: 'sel', sec: 'ui', field: 'language', flat: 'ui_language', opts: () => Object.entries(GS_LABELS.lang)}},
+    // UP-41(13): classic Appearance section's compact/exact number-scale
+    // switch (_settings.html:112-118). Client-side preference, lives beside
+    // the language row — uplift folds appearance into Server.
+    {x: gsNumberScaleRow},
 
-    {sec: 'server', lab: 'server.host', ctl: {
-        k: 'text', field: 'host', flat: 'host', ph: 'server.host_placeholder'},
-     opts: {badge: true, flat: 'host'}},
+    // UP-41(8): classic's Localhost/Public/Custom preset over the raw host
+    // field (_settings.html:305-342); composite row keeps data-flat='host'
+    // so the restart badge + UP-19(7) loopback forcing ride it unchanged.
+    {x: gsHostRow},
     {sec: 'server', lab: 'server.port', ctl: {k: 'num', field: 'port', flat: 'port'},
      opts: {badge: true, flat: 'port'}},
     {sec: 'server', lab: 'server.log_level', ctl: {
@@ -1567,6 +2035,10 @@ const GS_SPEC = [
     {sec: 'res', lab: 'res.tier', ctl: {
         k: 'sel', sec: 'memory', field: 'memory_guard_tier', flat: 'memory_guard_tier',
         opts: 'res.tiers'}},
+    // UP-41(10): tier description / ceiling breakdown / wired-limit warning
+    // over system.memory_guard_preview (classic _settings.html:485-510);
+    // contents + visibility refresh via gsGuardSync on every edit.
+    {x: gsGuardBlock},
     {sec: 'res', lab: 'res.custom', show: (ctx) => ctx.tier === 'custom', ctl: {
         k: 'num', sec: 'memory', field: 'memory_guard_custom_ceiling_gb',
         flat: 'memory_guard_custom_ceiling_gb', min: 1, step: 1, ph: 'res.custom_ph',
@@ -1578,10 +2050,12 @@ const GS_SPEC = [
     {sec: 'cache', lab: 'cache.hot_only', hint: 'cache.hot_only_hint', ctl: {
         k: 'tog', field: 'hot_cache_only', flat: 'hot_cache_only'}},
     {sec: 'cache', lab: 'cache.ssd_dir', ctl: {k: 'text', field: 'ssd_cache_dir', flat: 'ssd_cache_dir'}},
-    {sec: 'cache', lab: 'cache.ssd_max', hint: 'cache.ssd_max_hint', ctl: {
-        k: 'text', field: 'ssd_cache_max_size', flat: 'ssd_cache_max_size', ph: '64GB'}},
-    {sec: 'cache', lab: 'cache.hot_max', hint: 'cache.hot_max_hint', ctl: {
-        k: 'text', field: 'hot_cache_max_size', flat: 'hot_cache_max_size', ph: '8GB'}},
+    // UP-41(10): classic's % sliders with Auto|Fixed cold-cache modes and
+    // the '0 = disabled' hot semantics (see the ALIGNMENT comments in the
+    // builders — blank inputs are normalized, every edit writes an
+    // explicit 'auto' / '0' / '<n>GB' string).
+    {x: gsColdCacheRow},
+    {x: gsHotCacheRow},
 
     {t: 'Integrations'},
     {sec: 'claude_code', lab: 'cc.mode', hint: 'cc.mode_hint', ctl: {
@@ -1958,14 +2432,53 @@ function renderGlobalSettings() {
     // re-applied, so dirty edits survive a tab switch)
     gsBuildTabs(wrap);
     // section header click scrolls to the SAVE bar (item 10); header also
-    // carries the section dirty/restart state color (item 8)
+    // carries the section dirty/restart state color (item 8).
+    // UP-41(11): every header gets classic's copy-link button
+    // (_settings.html:61-66 settingsCopyAnchor -> #settings-x anchor).
+    // UP-41(12): the Advanced header is a disclosure instead of a scroll
+    // target — collapsed by default, chevron flips, rows stay in the DOM
+    // (dirty queue untouched; same doctrine as the hidden GS-TAB boxes).
     for (const h of wrap.querySelectorAll('.gs-box-title')) {
         h.classList.add('clickable');
-        h.onclick = () => {
-            const bar = document.getElementById('gs-savebar');
-            if (bar) { bar.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                       const b = gsSaveBtn(); if (b) b.focus(); }
-        };
+        const box = h.parentElement;
+        const slug = box.dataset.slug || '';
+        const cp = document.createElement('button');
+        cp.type = 'button'; cp.className = 'se-btn gs-copylink';
+        cp.textContent = '\u29C9';   // ⧉
+        cp.title = C.tf('settings.sections.copy_link', 'Copy link to this section');
+        cp.setAttribute('aria-label', cp.title);
+        cp.onclick = (e) => { e.stopPropagation(); gsCopySectionLink(cp, slug); };
+        h.append(cp);
+        if (slug === 'advanced') {
+            const chev = document.createElement('span');
+            chev.className = 'gs-advchev';
+            h.append(chev);
+            const bbody = box.querySelector('.gs-box-body');
+            const paintAdv = () => {
+                const collapsed = gsTab === 'all' && !gsAdvOpen();
+                if (bbody) bbody.hidden = collapsed;
+                h.classList.toggle('gs-adv-closed', collapsed);
+                chev.textContent = collapsed ? '\u25B8' : '\u25BE';   // ▸ / ▾
+                h.title = collapsed
+                    ? C.tf('uplift.gs.adv.open', 'Expand Advanced settings')
+                    : C.tf('uplift.gs.adv.close', 'Collapse Advanced settings');
+            };
+            h.onclick = () => {
+                gsAdvSetOpen(!gsAdvOpen());
+                paintAdv();
+                if (gsAdvOpen()) {
+                    const bar = document.getElementById('gs-savebar');
+                    if (bar) bar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            };
+            paintAdv();
+        } else {
+            h.onclick = () => {
+                const bar = document.getElementById('gs-savebar');
+                if (bar) { bar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                           const b = gsSaveBtn(); if (b) b.focus(); }
+            };
+        }
     }
     // persistent SAVE / RESTART SERVER bar below the form (item 9/10)
     let bar = document.getElementById('gs-savebar');
@@ -2004,6 +2517,7 @@ function renderGlobalSettings() {
         // re-render rebuilds inputs from the server baseline; put the
         // queued (unsaved) value back so the edit stays visible while typing
         const row = document.querySelector('#gs-body [data-flat="' + flat + '"]');
+        if (row && row.__gsApply) { row.__gsApply(wasDirty[flat]); continue; }
         const ctl = row && (row.querySelector('input[type=checkbox]') || row.querySelector('select')
             || row.querySelector('textarea') || row.querySelector('input'));
         if (ctl) {
@@ -2013,6 +2527,7 @@ function renderGlobalSettings() {
     }
     gsDisabledSync();   // classic-parity :disabled on the two SSD rows
     gsBodySanitize();   // UP-19 (6): password rows get the classic eye toggle
+    gsGuardSync();      // UP-41(10): memory-guard readout over the new DOM
     gsMarkSections();
     gsUpdateSaveBtn();
     renderDirtyList();

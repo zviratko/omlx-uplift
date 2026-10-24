@@ -3350,3 +3350,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     -webkit-box-orient: vertical; overflow: hidden; }
 .logrow .lgv { flex: none; color: var(--warn, #e8a020); font-size: 11px; }
 .logrow.lg-mem { border-left: 2px solid var(--warn, #e8a020); padding-left: 6px; }
+
+/* UP-39: history rows gain pin/rename/stop affordances */
+.chat-native-convrow { display: flex; align-items: center; gap: 2px; }
+.chat-native-convrow .chat-native-conv { flex: 1 1 auto; min-width: 0;
+    text-align: left; }
+.chat-conv-pin, .chat-conv-stop { flex: none; background: none; border: 0;
+    cursor: pointer; opacity: .45; font-size: 12px; padding: 2px 4px; }
+.chat-native-convrow:hover .chat-conv-pin { opacity: .9; }
+.chat-conv-stop { opacity: .9; color: var(--red); }
+.chat-conv-search { width: 100%; margin: 4px 0; }
+.chat-conv-rename { flex: 1 1 auto; min-width: 0; }
