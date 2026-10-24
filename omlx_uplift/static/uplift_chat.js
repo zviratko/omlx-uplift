@@ -41,6 +41,7 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _models = [], _sttIds = {},   // picker rows (chat types only) + STT id set
     _vendorPromise = null, _streaming = false,
     _turnParams = null,   // U78: EFFECTIVE sampling snapshot of the in-flight turn
+    _turnUsage = null,    // UP-38: accumulated token usage of the in-flight turn
     _thinkLive = '',   // reasoning deltas of the in-flight turn (live-only)
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
     _lastBody = null,                  // resolved request stashed by shapeRequest
@@ -847,6 +848,9 @@ async function shapeRequest(d) {
     }
     msgs.push(cur);
     var body = { model: (_conv && _conv.model) || '', messages: msgs, stream: true };
+    // UP-38 (classic chat.html :7170): last SSE chunk carries the real
+    // token counts; they ride the footer chip, never the settings row.
+    body.stream_options = { include_usage: true };
     if (_webSearch) body.tools = WEB_TOOLS;   // 5/6 toggle-gated
     // U46: classic spreads the per-session sampling snapshot into the body
     // (buildChatCompletionBody ...generation); thinking fields keep
@@ -870,9 +874,10 @@ async function shapeRequest(d) {
     // would falsify older replies. null = pure-default turn, nothing to log.
     _turnParams = (Object.keys(body).some(function (k) {
         return k !== 'model' && k !== 'messages' && k !== 'stream'
-            && k !== 'tools';
+            && k !== 'tools' && k !== 'stream_options';
     })) ? Object.keys(body).reduce(function (o, k) {
-        if (k !== 'model' && k !== 'messages' && k !== 'stream' && k !== 'tools')
+        if (k !== 'model' && k !== 'messages' && k !== 'stream' && k !== 'tools'
+            && k !== 'stream_options')
             o[k] = body[k];
         return o;
     }, {}) : null;
@@ -907,6 +912,7 @@ function parseChunk(r) {
     if (typeof delta.reasoning_content === 'string') out.reasoning = delta.reasoning_content;
     if (Array.isArray(delta.tool_calls)) out.toolCalls = delta.tool_calls;
     if (ch.finish_reason) out.finish = ch.finish_reason;
+    if (r.usage) out.usage = r.usage;     // UP-38: usage-only final chunk
     return out;
 }
 
@@ -916,7 +922,8 @@ function accumulateToolCall(map, d) {
     var i = d.index || 0;
     var tc = map[i] || (map[i] = { id: '', type: 'function',
                                    function: { name: '', arguments: '' } });
-    if (d.id) tc.id = d.id;
+
+    _turnUsage = null;    if (d.id) tc.id = d.id;
     if (d.function && d.function.name) tc.function.name += d.function.name;
     if (d.function && d.function.arguments)
         tc.function.arguments += d.function.arguments;
@@ -1093,6 +1100,13 @@ function nativeHandler(_componentBody, signals) {
                         if (c.reasoning) { _thinkLive += c.reasoning; paintThinking(); }
                         c.toolCalls.forEach(function (tc) { accumulateToolCall(toolMap, tc); });
                         if (c.finish) finish = c.finish;
+                        if (c.usage) {
+                            // multi-round tool turns: sum across rounds
+                            var u = _turnUsage || (_turnUsage = {});
+                            u.prompt_tokens = (u.prompt_tokens || 0) + (c.usage.prompt_tokens || 0);
+                            u.completion_tokens = (u.completion_tokens || 0) + (c.usage.completion_tokens || 0);
+                            u.total_tokens = (u.total_tokens || 0) + (c.usage.total_tokens || 0);
+                        }
                         if (c.text) { text += c.text;
                                       // MATH: stream leg gets the same display
                                       // normalization as renderHistory; the
@@ -3481,6 +3495,12 @@ function openEditor(idx) {
 
 function msgEdit(idx) { openEditor(idx); }
 
+function usageLabel(u) {
+    // UP-38: compact token strip — ' 128→64 tok'; '' when absent.
+    if (!u || !u.completion_tokens) return '';
+    return ' \u00b7 ' + (u.prompt_tokens || 0) + '\u2192' + u.completion_tokens + ' tok';
+}
+
 function paramsLabel(pp) {
     // U78: compact provenance chip text — 'temp 0.6 · top_p 0.9 · think 64';
     // enable_thinking true alone -> 'think on'; budget implies enable.
@@ -3706,7 +3726,7 @@ function attachMessageActions(dc) {
             }
         }
         var ptxt = role === 'assistant'
-            ? paramsLabel(ms[storeIdx].params) : '';
+            ? paramsLabel(ms[storeIdx].params) + usageLabel(ms[storeIdx].usage) : '';
         var prev = _msgActions.get(b);
         if (existing && prev && prev.idx === storeIdx && prev.role === role
             && prev.edited === want && prev.params === ptxt)
@@ -5279,6 +5299,12 @@ function mount() {
                 // store (backend _clean_message filters + caps it)
                 if (role === 'assistant' && _turnParams) {
                     row.params = Object.assign({}, _turnParams);
+                }
+                // UP-38: token counts ride the row for the footer chip.
+                // Display-only: the backend _clean_message filter drops the
+                // key on reload (classic keeps it session-side too).
+                if (role === 'assistant' && _turnUsage) {
+                    row.usage = Object.assign({}, _turnUsage);
                 }
                 if (role === 'assistant' && _turnMid) {
                     // VOICE-16: bind the plan (and therefore the audio files)
