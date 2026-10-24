@@ -3504,6 +3504,7 @@ function msgDelete(idx) {
 function attachMessageActions(dc) {
     var root = dc && dc.shadowRoot;
     if (!root || typeof root.querySelectorAll !== 'function') return;
+    schemeGuard(root);
     var bubbles = root.querySelectorAll('.message-bubble');
     if (!bubbles.length) { _msgActions = new WeakMap(); return; }
     // filtered view order == store order for NON-empty messages (see
@@ -3599,6 +3600,26 @@ function attachMessageActions(dc) {
         _msgActions.set(b, { idx: storeIdx, role: role, edited: want,
                              params: ptxt });
     }
+}
+
+// UP-33 (FEAT-1 sweep, live-verified 2026-10-24): the vendored markdown
+// engine escapes RAW HTML — <img onerror>/<script> arrive as text — but it
+// renders link and image URLs UNFILTERED: a poisoned model reply or a
+// web-tool-fetched page can offer javascript: or data:text/html. Classic
+// neutralizes this whole class with DOMPurify; at our seam the surgical
+// filter is enough and cannot break KaTeX/mathml: allowed schemes keep,
+// everything else loses the href/src — never the visible text. Runs in the
+// same sweep the action overlay already performs after every render pass.
+function schemeGuard(root) {
+    var LINK_OK = /^(https?:|mailto:|#)/i, IMG_OK = /^(https?:|data:image\/)/i;
+    root.querySelectorAll('a[href]').forEach(function (a) {
+        var h = (a.getAttribute('href') || '').trim();
+        if (!LINK_OK.test(h)) { a.removeAttribute('href'); a.removeAttribute('target'); }
+    });
+    root.querySelectorAll('img[src]').forEach(function (im) {
+        var s = (im.getAttribute('src') || '').trim();
+        if (!IMG_OK.test(s)) im.removeAttribute('src');
+    });
 }
 
 function scheduleMessageActions(dc) {
