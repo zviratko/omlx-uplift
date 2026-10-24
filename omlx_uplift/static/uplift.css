@@ -3365,3 +3365,342 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* UP-40(2): jump-to-latest pill over the native chat */
 .chat-jump { position: absolute; left: 50%; transform: translateX(-50%);
     bottom: 84px; z-index: 5; border-radius: 999px; padding: 4px 12px; }
+
+/* ===== UP-22/UP-23 lane (ModelScope + hardware recommendations) ===== */
+/* UP-22 + UP-23 (FEAT-1 parity, 2026-10-24) — lane CSS for the Download
+   surface. The owner merges this into omlx_uplift/static/uplift.css (the
+   downloader lane does not edit that file). NEW class names only: nothing
+   here restyles an existing rule, so the merge is append-at-EOF safe.
+   Doctrine: tokens only (no hex), one radius var(--radius) (nat U82), and
+   the house 12px/300 sans + 11px mono scale used by .filterbar / .urow. */
+
+/* ---- UP-22: the HF | ModelScope source pair --------------------------
+   Injected by uplift_downloader.js (ensureDlChrome) ahead of the tab strip;
+   it is a segmented control, so it inherits the .se-btn.seg joining rules
+   and only needs to stop the tab strip's -10px overlap leaking in from the
+   left and to keep a gutter before the tabs it switches. */
+.filterbar .dl-src { display: inline-flex; margin-right: 10px; }
+.filterbar .dl-src .se-btn.seg:first-child { margin-left: 0; }
+/* the ModelScope token field rides the existing entry row (.tok-w240 gives
+   the width); hidden per source by JS, so give it the row's own gap */
+#dl-ms-token[hidden], #dl-ms-token[style*="display: none"] { display: none; }
+/* recent searches (classic msSearchHistory dropdown, uplift chips row) */
+.dl-hist { display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    margin: 6px 0 2px; }
+.dl-hist-lab { color: var(--dim); font: 300 11px/1 var(--sans);
+    text-transform: uppercase; letter-spacing: .08em; margin-right: 2px; }
+.dl-hist .se-btn.act { font-size: 11px; }
+
+/* ---- UP-23: 'Recommended for this Mac' -------------------------------
+   Rendered INSIDE #dl-results (the tab host), so every rule is scoped under
+   .recos — the flat HF/MS table keeps its own .urow grid untouched. */
+#dl-results.recos { display: block; }
+#dl-results.recos .rec-sec + .rec-sec { margin-top: 22px; }
+
+/* the shared 'badge' family gains the info tone classic paints sky/violet */
+.badge.dl-b.info { color: var(--accent); border-color: var(--accent); }
+
+/* the Mac card */
+.rec-mac { border: 1px solid var(--edge); background: var(--card);
+    padding: 12px 14px; }
+.rec-mac-head { display: flex; flex-wrap: wrap; gap: 14px;
+    justify-content: space-between; align-items: flex-start; }
+/* the chip/RAM/bandwidth block; min-width:0 so a long chip name truncates
+   inside the flex row instead of pushing the usable-RAM figure out */
+.rec-mac-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rec-kicker { color: var(--dim); font: 300 10px/1.4 var(--sans);
+    text-transform: uppercase; letter-spacing: .1em; }
+.rec-chip { font: 500 15px/1.3 var(--sans); color: var(--ink); }
+.rec-dim { color: var(--dim); font: 300 11px/1.5 var(--sans); }
+.rec-mac-usable { text-align: right; }
+.rec-bignum { font: 500 22px/1.1 var(--mono); color: var(--ink);
+    font-variant-numeric: tabular-nums; }
+/* the budget breakdown bar: one track, five honest segments */
+.rec-segbar { display: flex; height: 10px; margin-top: 12px; overflow: hidden;
+    background: var(--field); border: 1px solid var(--edge);
+    border-radius: var(--radius); }
+.rec-seg { height: 100%; }
+.rec-seg.ok, .rec-leg-swatch.ok { background: var(--ink); }
+.rec-seg.soft, .rec-leg-swatch.soft { background: var(--edge); }
+.rec-seg.warn, .rec-leg-swatch.warn { background: var(--warn); }
+.rec-seg.dim, .rec-leg-swatch.dim { background: var(--panel); }
+.rec-seg.edge, .rec-leg-swatch.edge { background: var(--card); }
+.rec-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; }
+.rec-leg { display: inline-flex; align-items: center; gap: 5px;
+    color: var(--dim); font: 300 11px/1.4 var(--sans); }
+.rec-leg b { color: var(--ink); font-weight: 500; font-family: var(--mono); }
+.rec-leg-swatch { width: 8px; height: 8px; border: 1px solid var(--edge);
+    flex: none; }
+.rec-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--edge); }
+
+/* section heads */
+.rec-head { display: flex; align-items: center; gap: 8px; }
+.rec-ico { display: grid; place-items: center; width: 20px; height: 20px;
+    background: var(--ink); color: var(--bg); font-size: 11px; flex: none;
+    border-radius: var(--radius); }
+.rec-h3 { margin: 0; font: 500 14px/1.3 var(--sans); color: var(--ink); }
+.rec-sub { margin: 2px 0 8px 28px; color: var(--dim);
+    font: 300 11px/1.5 var(--sans); }
+
+/* best-match cards */
+.rec-cards { display: grid; gap: 10px; margin-top: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.rec-card { position: relative; display: flex; flex-direction: column; gap: 10px;
+    border: 1px solid var(--edge); background: var(--card); padding: 12px;
+    border-radius: var(--radius); }
+.rec-card.first { border-color: var(--ink); }
+.rec-best { position: absolute; top: -8px; left: 10px; }
+.rec-card-head { display: flex; flex-direction: column; gap: 4px; }
+.rec-card-mem { display: flex; flex-direction: column; gap: 4px; }
+.rec-card-foot { display: flex; align-items: center; justify-content:
+    space-between; gap: 8px; margin-top: auto; padding-top: 8px;
+    border-top: 1px solid var(--edge); }
+.rec-dl-size { color: var(--dim); font: 300 11px/1 var(--mono); }
+
+/* the trade-off rows (bigger / precise / faster / unlock) */
+.rec-rows { display: flex; flex-direction: column; gap: 6px; }
+.rec-group { margin: 10px 0 2px; color: var(--ink);
+    font: 500 11px/1.4 var(--sans); text-transform: uppercase;
+    letter-spacing: .08em; }
+.rec-row { display: grid; gap: 12px; align-items: center;
+    grid-template-columns: minmax(0, 5fr) minmax(0, max-content)
+    minmax(0, 3fr) minmax(0, max-content);
+    border: 1px solid var(--edge); background: var(--card);
+    padding: 8px 10px; border-radius: var(--radius); }
+.rec-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rec-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rec-name { font: 500 12px/1.4 var(--sans); color: var(--ink); }
+.rec-note { margin: 0; color: var(--dim); font: 300 11px/1.5 var(--sans); }
+.rec-badges { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+/* dot meters (classic recDots: full / half / empty) */
+.rec-meters { display: flex; gap: 14px; }
+.rec-meter { display: flex; flex-direction: column; gap: 4px; }
+.rec-meter-lab { color: var(--dim); font: 300 10px/1 var(--sans);
+    text-transform: uppercase; letter-spacing: .08em; }
+.rec-meter-word { color: var(--ink); text-transform: none; letter-spacing: 0;
+    margin-left: 4px; }
+.rec-dots { display: flex; gap: 3px; }
+.rec-dot { width: 7px; height: 7px; border-radius: 50%;
+    border: 1px solid var(--dim); background: transparent; }
+.rec-dot.full { background: var(--ink); border-color: var(--ink); }
+.rec-dot.half { background: linear-gradient(90deg, var(--ink) 50%,
+    transparent 50%); border-color: var(--ink); }
+.rec-dot.empty { border-color: var(--edge); }
+
+/* memory share bars (row + card) */
+.rec-mem { min-width: 120px; }
+.rec-mem-top { display: flex; justify-content: space-between; gap: 8px;
+    color: var(--dim); font: 300 10px/1.4 var(--mono);
+    font-variant-numeric: tabular-nums; margin-bottom: 3px; }
+.rec-track { height: 4px; background: var(--field); overflow: hidden;
+    border-radius: var(--radius); }
+.rec-fill { height: 100%; width: 0%; background: var(--ink);
+    transition: width .3s ease; }
+.rec-fill.warn { background: var(--warn); }
+.rec-fill.bad { background: var(--bad); }
+.rec-act { display: flex; justify-content: flex-end; min-width: 128px; }
+.rec-prog { width: 128px; }
+.rec-prog-top { color: var(--dim); font: 300 10px/1.4 var(--mono);
+    margin-bottom: 3px; }
+
+/* banners + text tones */
+.rec-banner { display: block; margin-bottom: 10px; padding: 6px 10px;
+    border: 1px solid var(--warn); color: var(--warn);
+    font: 300 11px/1.5 var(--sans); }
+.rec-warn-text { margin: 6px 0 0; color: var(--warn);
+    font: 300 11px/1.5 var(--sans); }
+.rec-bad-text { margin: 6px 0; color: var(--bad); font: 300 11px/1.5 var(--sans); }
+.rec-good { color: var(--lamp-on, var(--ink)); font: 500 11px/1.4 var(--mono); }
+.rec-footer { margin-top: 14px; }
+
+/* unlock bigger models */
+.rec-unlock { margin-top: 22px; border: 1px dashed var(--edge);
+    background: var(--card); padding: 10px 12px; border-radius: var(--radius); }
+.rec-unlock-head { display: flex; align-items: center; gap: 8px;
+    width: 100%; text-align: left; background: none; border: 0;
+    color: var(--ink); font: 500 13px/1.3 var(--sans); cursor: pointer;
+    padding: 0; }
+.rec-unlock-head:hover { color: var(--accent); }
+.rec-badge-adv { border-color: var(--warn); color: var(--warn); }
+.rec-unlock-toggle { margin-left: auto; color: var(--dim);
+    font: 300 11px/1 var(--sans); }
+.rec-unlock-grid { display: grid; gap: 10px; margin-top: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.rec-ucard { border: 1px solid var(--edge); background: var(--panel);
+    padding: 10px; border-radius: var(--radius); }
+.rec-uhead { display: flex; align-items: baseline; justify-content:
+    space-between; gap: 8px; }
+.rec-uhead b { font: 500 12px/1.4 var(--sans); color: var(--ink); }
+.rec-cmdline { display: flex; align-items: center; gap: 6px; margin-top: 8px;
+    min-width: 0; }
+.rec-cmd { flex: 1 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; background: var(--field);
+    color: var(--ink); border: 1px solid var(--edge); padding: 3px 6px;
+    font: 400 11px/1.4 var(--mono); border-radius: var(--radius); }
+
+/* narrow boards: the row grid collapses, the meters keep their dots */
+@media (max-width: 900px) {
+    .rec-row { grid-template-columns: minmax(0, 1fr) minmax(0, max-content); }
+    .rec-mem, .rec-act { grid-column: 1 / -1; }
+    .rec-act { justify-content: flex-start; }
+}
+
+/* ===== UP-41/UP-26 lane (settings polish, launch commands, update nudge) ===== */
+/* UP-41 / UP-26 lane scratch: styles the new global-settings + helper
+   surfaces need. Owner applies into uplift.css (this lane must not edit
+   it). Selectors reuse the theme vars already in :root/[data-theme] —
+   nothing hardcoded, so cockpit / day / skin themes keep working.
+   Proposed anchor: after the existing .gs-* settings block. */
+
+/* --- UP-41(8): host row — preset select + (custom) raw bind entry ------ */
+.urow .gctl .gs-hostrow {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+}
+.gs-hostpreset { width: 100%; }
+.gs-hostrow input[type=text] { width: 100%; }
+.gs-hosthint { color: var(--dim); }
+
+/* --- UP-41(10): cache-limit rows: segmented | slider | GB entry --------- */
+.urow .gctl .gs-sizerow {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
+}
+.gs-sizeseg { display: flex; gap: 4px; }
+.gs-seg { flex: 0 0 auto; }
+.gs-seg.on {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--field);
+}
+.gs-sizeslider { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.gs-sizepct { flex: 1 1 auto; min-width: 70px; accent-color: var(--accent); }
+.gs-sizeread {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    text-align: right;
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.gs-sizegbcell { display: flex; align-items: center; gap: 4px; }
+.gs-sizegb { width: 72px; flex: 0 0 auto; }
+
+/* --- UP-41(10): memory-guard readout + wired-limit warning ------------- */
+.gs-guardinfo {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px 10px 8px;
+    margin: -2px 0 8px;
+    border-left: 2px solid var(--edge);
+    background: var(--panel);
+    font-size: 11px;
+}
+/* uplift.css trap #1247: an author display beats the UA [hidden] rule */
+.gs-guardinfo[hidden] { display: none; }
+.gs-guardinfo strong { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+.gs-guard-wired {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    color: var(--bad);
+    font-weight: 600;
+}
+.gs-guard-wired strong { color: var(--bad); }
+.gs-guard-sysctl {
+    flex: 1 1 180px;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 6px;
+    color: var(--ink);
+    background: var(--field);
+    border: 1px solid var(--edge);
+    overflow-wrap: anywhere;
+}
+
+/* --- UP-41(11): per-section copy-link button on every header ----------- */
+.gs-box-title .gs-copylink {
+    flex: 0 0 auto;
+    margin-left: 6px;
+    padding: 0 5px;
+    font-size: 11px;
+    line-height: 1.5;
+    opacity: .45;
+    color: var(--dim);
+}
+.gs-box-title:hover .gs-copylink { opacity: 1; color: var(--ink); }
+
+/* --- UP-41(12): Advanced disclosure chevron ---------------------------- */
+.gs-box-title .gs-advchev {
+    flex: 0 0 auto;
+    margin-left: 6px;
+    font-size: 11px;
+    color: var(--dim);
+}
+.gs-box-title.gs-adv-closed { border-bottom-color: transparent; }
+
+/* --- UP-26(2): Applications launch-command rows (helper page) ---------- */
+.up-appcmds {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--edge);
+}
+.up-appcmd {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.up-appcmd-name {
+    flex: 0 0 128px;
+    font-size: 11px;
+    color: var(--dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.up-appcmd code {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 6px;
+    color: var(--ink);
+    background: var(--field);
+    border: 1px solid var(--edge);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.up-appcmd .se-btn {
+    flex: 0 0 auto;
+    opacity: .5;
+}
+.up-appcmd:hover .se-btn { opacity: 1; }
+
+/* --- UP-26(3): upstream release nudge chip (header) -------------------- */
+.chip.up-update-chip {
+    color: var(--accent);
+    border-color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+}
+.chip.up-update-chip::before {
+    content: "\\2191";      /* upward arrow: a release to pull in, not a lamp */
+    margin-right: 4px;
+}
+.chip.up-update-chip[hidden] { display: none; }
