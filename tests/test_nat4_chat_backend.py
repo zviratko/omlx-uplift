@@ -263,7 +263,11 @@ def test_thinking_mode_and_budget_roundtrip_sanitized(client):
         assert got["thinking"] == mode
         assert got["thinkingBudget"] == 4096
     # invalid / boolean / missing thinking -> 'auto'; boolean / negative budget -> None
-    for bad_t, bad_b in ((True, True), (False, -1), ("invalid", "400"), (None, None)):
+    # UP-37 relaxed the vocabulary to a stop SHAPE (effort levels like
+    # 'medium' are legitimate; the picker decides legality), so the
+    # invalid examples are now shape violations, not unknown words.
+    for bad_t, bad_b in ((True, True), (False, -1), ("Invalid CAPS", "400"),
+                         ("a b", None), ("z" * 20, None), (None, None)):
         client.post("/uplift/api/chat/history",
                     json=_conv(thinking=bad_t, thinkingBudget=bad_b))
         got = client.get("/uplift/api/chat/history/c1").json()
@@ -332,3 +336,36 @@ def test_u29_variant_markers_roundtrip(client):
         "oversized opaque ids are dropped whole, never truncated"
     assert "vsel" not in got[2], "vsel only 0/1"
     assert len(got[2]["rmodel"]) == 120, "rmodel capped"
+
+
+def test_u37_effort_stops_and_per_model_settings(client):
+    """UP-37: an effort-level thinking stop persists (not just the fixed
+    four), the per-model knob set survives with caps, junk collapses to
+    defaults instead of a 500, and params carry reasoning_effort."""
+    junk = {"M" + str(i): {"thinking": "high"} for i in range(40)}
+    junk["x" * 200] = {"thinking": "low"}
+    conv = _conv(thinking="medium", modelSettingsByModel={
+        "ModelA": {"thinking": "high", "thinkingBudget": 2048,
+                   "generation": {"temperature": 0.3}},
+        "ModelB": {"thinking": "bogus!!", "thinkingBudget": -5},
+    }, messages=[
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "a",
+         "params": {"reasoning_effort": "low", "temperature": 0.5}},
+    ])
+    assert client.post("/uplift/api/chat/history", json=conv).status_code == 200
+    got = client.get("/uplift/api/chat/history/c1").json()
+    assert got["thinking"] == "medium", "effort stop persists"
+    ms = got["modelSettingsByModel"]
+    assert ms["ModelA"] == {"thinking": "high", "thinkingBudget": 2048,
+                            "generation": {"temperature": 0.3}}
+    assert ms["ModelB"] == {"thinking": "auto", "thinkingBudget": None,
+                            "generation": None}, "illegal values default"
+    assert len(ms) <= 16, "entry cap"
+    assert " " not in ms
+    m = got["messages"][1]
+    assert m["params"]["reasoning_effort"] == "low"
+    bad = _conv(cid="c9", thinking="'; DROP", modelSettingsByModel="junk")
+    assert client.post("/uplift/api/chat/history", json=bad).status_code == 200
+    g2 = client.get("/uplift/api/chat/history/c9").json()
+    assert g2["thinking"] == "auto" and g2["modelSettingsByModel"] == {}

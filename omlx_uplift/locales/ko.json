@@ -1212,5 +1212,15 @@
  "uplift.se.turboquant_kv_scheme": "형식",
  "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
  "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4 (4비트)",
- "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8비트)"
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8비트)",
+ "uplift.chat.regen_creative": "창의적 (+0.4)",
+ "uplift.chat.regen_go": "실행",
+ "uplift.chat.regen_with": "다른 모델로 재생성…",
+ "uplift.chat.variant_delete": "이 답변 삭제",
+ "uplift.chat.variant_delete_confirm": "한 번 더 누르면 삭제",
+ "uplift.chat.variant_show": "이 답변 보기",
+ "uplift.chat.help_gesture_dblclick": "제목 더블클릭",
+ "uplift.chat.help_gesture_drop": "파일을 채팅으로 드래그",
+ "uplift.chat.help_gesture_paste": "이미지 붙여넣기",
+ "uplift.chat.help_variants": "재생성은 모든 답변을 보관 — 탭으로 전환"
 }

@@ -166,7 +166,10 @@ function normSettings(s) {
         });
     }
     return JSON.stringify({
-        thinking: /^(auto|off|on|limit)$/.test(s.thinking) ? s.thinking : 'auto',
+        // UP-37(1): the stop is whatever the model's picker offers (auto /
+        // off / on / limit / an effort level) — the shape check is the
+        // normaliser's job, per-model legality is decided at paint time.
+        thinking: normThinkValue(s.thinking),
         thinkingBudget: (typeof s.thinkingBudget === 'number' && s.thinkingBudget >= 0)
             ? s.thinkingBudget : null,
         generation: g,
@@ -180,12 +183,193 @@ function normSettings(s) {
     });
 }
 function settingsDiffer(a, b) { return normSettings(a) !== normSettings(b); }
+
+// ---- UP-37(1): per-model reasoning stops (classic chat.html:3062-3095) ----
+// Classic's thinking control is not a fixed list: its STOPS come from the
+// server row's reasoning_levels — 'off' only when the template carries a
+// thinking switch, then 'auto' (the model's own default), then 'on' or the
+// effort levels (low/medium/high/…). A model that declares NOTHING shows no
+// control at all (chat.html:2177 x-show="… reasoningStops().length > 0").
+// Uplift keeps its merged <select>: the same stop list, plus 'limit' (the
+// thinking budget) wherever classic would offer its on_limit switch — the
+// budget rides in the same stop value it always did, so BUG-7 persistence
+// semantics are untouched: conv.thinking stores the CHOSEN STOP.
+function _modelRow(id) {
+    var rows = _models || [];
+    for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        if ((r.id || r.name) === id || r.name === id) return r;
+    }
+    return null;
+}
+function reasoningLevels(minfo) {                 // classic :3063
+    var l = minfo && minfo.reasoning_levels;
+    return Array.isArray(l) ? l : [];
+}
+function reasoningStops(minfo) {                  // classic :3068-3073
+    var levels = reasoningLevels(minfo);
+    if (!levels.length) return [];
+    var off = levels.indexOf('off') >= 0 ? ['off'] : [];
+    return off.concat(['auto'], levels.filter(function (l) { return l !== 'off'; }));
+}
+function thinkingStops(minfo) {
+    var stops = reasoningStops(minfo);
+    if (!stops.length) return [];                 // no control, no stops
+    var modes = minfo && minfo.thinking_modes;
+    // Rows that predate thinking_modes always had the budget; a row that
+    // DOES list modes gates it exactly like classic's budget switch
+    // (chat.html:2224 disabled unless thinking_modes has 'on_limit').
+    var limitOk = !Array.isArray(modes) || !modes.length ||
+        modes.indexOf('on_limit') >= 0;
+    if (limitOk && stops.indexOf('limit') < 0) {
+        var at = stops.indexOf('on');             // budget sits beside On
+        if (at >= 0) stops.splice(at + 1, 0, 'limit');
+        else stops.push('limit');
+    }
+    return stops;
+}
+function thinkStopLabel(stop) {
+    var legacy = {
+        auto: ['chat.thinking_mode.auto', 'Auto'],
+        off: ['chat.thinking_mode.off', 'Off'],
+        on: ['chat.thinking_mode.on_unlimited', 'On (Unlimited)'],
+        limit: ['chat.thinking_mode.on_limited', 'On (Limit)']
+    };
+    if (legacy[stop]) return t(legacy[stop][0], legacy[stop][1]);
+    // classic's pill labels (chat.html:3085): chat.reasoning.level.<stop>
+    return t('chat.reasoning.level.' + stop,
+             stop.charAt(0).toUpperCase() + stop.slice(1));
+}
+// A stop is any well-formed token; which ones are LEGAL for the current
+// model is decided at paint time (classic derives the shown level from the
+// settings the same way, :3075-3082). Profiles are model-agnostic BY DESIGN
+// ('Exception - the model used'), so the normaliser never consults the row.
+function normThinkValue(v) {
+    return (typeof v === 'string' && /^[a-z][a-z0-9_-]{0,15}$/.test(v)) ? v : 'auto';
+}
+function syncThinkOptions(node) {
+    // Rebuild the picker for the conversation's model and clamp a stored
+    // stop the model does not offer back to 'auto'. The toolbar calls this
+    // with its OWN element (a detached node is invisible to getElementById);
+    // every other caller goes through the id, post-mount.
+    var think = node || gid('chat-native-think-mode');
+    if (!think || typeof think.replaceChildren !== 'function') return null;
+    var stops = thinkingStops(_modelRow(_conv && _conv.model));
+    var sig = stops.join(',');
+    if (think.__stops !== sig) {
+        think.__stops = sig;
+        think.replaceChildren();
+        stops.forEach(function (s) {
+            var o = el('option', null, thinkStopLabel(s));
+            o.value = s;
+            think.appendChild(o);
+        });
+    }
+    if (think.parentNode) think.parentNode.hidden = !stops.length;
+    var cur = normThinkValue(_conv && _conv.thinking);
+    if (stops.indexOf(cur) < 0) {
+        // Also the no-control case: a stop parked for another model must not
+        // survive the switch hidden — the wire ignores it, the state says so.
+        cur = 'auto';
+        if (_conv) _conv.thinking = 'auto';
+    }
+    if (stops.length) think.value = cur;
+    return stops;
+}
+
+// ---- UP-37(3): per-model settings memory (classic modelSettingsByModel) ----
+// classic keeps ONE knob set per (conversation, model): leaving a model
+// captures its snapshot, coming back restores it (selectModel :5660-5683).
+// Uplift's knob set is the trio the page owns — thinking stop, budget and
+// the sampling overrides; the speculative pair is not on this surface
+// (UP-37 item 4, still open).
+function captureModelSettings() {
+    // classic captureSessionModelSettings :3146-3158
+    var c = _conv || {};
+    return {
+        thinking: normThinkValue(c.thinking),
+        thinkingBudget: (typeof c.thinkingBudget === 'number' && c.thinkingBudget >= 0)
+            ? c.thinkingBudget : null,
+        generation: c.generation ? JSON.parse(JSON.stringify(c.generation)) : null
+    };
+}
+function saveModelSettingsForModel(session, modelId) {
+    // classic :3160-3165
+    if (!session || !modelId) return;
+    if (!session.modelSettingsByModel) session.modelSettingsByModel = {};
+    session.modelSettingsByModel[modelId] = captureModelSettings();
+}
+function loadModelSettingsForModel(session, modelId) {
+    // classic :3167-3177. A FIRST visit has no snapshot: classic seeds that
+    // model's admin defaults through ensureSessionModelSettings (:5326, an
+    // /api/models/<id>/settings fetch this lane does not own). Blanking the
+    // user's overrides without that fetch would be strictly worse than
+    // classic — data loss instead of defaults — so the page's current knobs
+    // become the model's initial set and are remembered as such. What the
+    // card asks for is kept exactly: every model gets and KEEPS its own set.
+    if (!session || !modelId) return false;
+    if (!session.modelSettingsByModel) session.modelSettingsByModel = {};
+    var saved = session.modelSettingsByModel[modelId];
+    if (!saved) {
+        session.modelSettingsByModel[modelId] = captureModelSettings();
+        return false;
+    }
+    session.thinking = normThinkValue(saved.thinking);
+    session.thinkingBudget = (typeof saved.thinkingBudget === 'number'
+                              && saved.thinkingBudget >= 0) ? saved.thinkingBudget : null;
+    session.generation = saved.generation
+        ? JSON.parse(JSON.stringify(saved.generation)) : null;
+    return true;
+}
+function seedModelSettings(session) {
+    // classic loadChatSession :5876-5883: the flat (pre-map) knob state
+    // becomes the current model's entry instead of vanishing.
+    if (!session) return;
+    if (!session.modelSettingsByModel) session.modelSettingsByModel = {};
+    var id = session.model;
+    if (id && !session.modelSettingsByModel[id]) {
+        session.modelSettingsByModel[id] = {
+            thinking: normThinkValue(session.thinking),
+            thinkingBudget: (typeof session.thinkingBudget === 'number'
+                             && session.thinkingBudget >= 0) ? session.thinkingBudget : null,
+            generation: session.generation
+                ? JSON.parse(JSON.stringify(session.generation)) : null
+        };
+    }
+}
+function switchChatModel(nextId) {
+    // classic selectModel :5656-5687, the SETTINGS half of it (attachments
+    // and audio modes are uplift's own concerns, handled by syncAudioMode).
+    if (!_conv) return false;
+    var prev = _conv.model;
+    nextId = nextId == null ? '' : String(nextId);
+    // the placeholder row ('Select Model') still clears, like before this
+    // card: only a REAL model id can own a knob snapshot
+    if (prev === nextId) { syncThinkOptions(); return false; }
+    if (prev) saveModelSettingsForModel(_conv, prev);
+    _conv.model = nextId;
+    if (nextId) loadModelSettingsForModel(_conv, nextId);
+    syncThinkOptions();
+    syncThinkInputs(_conv);
+    fillGenerationInputs(_conv);
+    if (_ctxRender) _ctxRender();   // UP-16 holder — never the closure itself
+    return true;
+}
+
 function syncThinkInputs(c) {
-    var mode = (c && /^(auto|off|on|limit)$/.test(c.thinking)) ? c.thinking : 'auto';
+    var mode = normThinkValue(c && c.thinking);
     var budVal = (c && typeof c.thinkingBudget === 'number' && c.thinkingBudget >= 0)
         ? c.thinkingBudget : null;
     var think = gid('chat-native-think-mode');
     var bud = gid('chat-native-think-budget');
+    // The model owns the stop list (UP-37(1)): a value it does not offer —
+    // restored conv, profile blob, per-model snapshot from another era —
+    // paints Auto, the one stop every model has.
+    if (think && think.children && think.children.length &&
+        !think.children.some(function (o) { return o.value === mode; })) {
+        mode = 'auto';
+        if (_conv) _conv.thinking = 'auto';
+    }
     if (think) think.value = mode;
     if (bud) {
         bud.value = budVal == null ? '' : String(budVal);
@@ -379,7 +563,14 @@ function hydrateConv() {
     // variant re-provisions the whole page after reload.
     if (!_conv) return;
     if (!_conv.variants) _conv.variants = {};
-    if (!/^(auto|off|on|limit)$/.test(_conv.thinking)) _conv.thinking = 'auto';
+    // UP-37(1): the stop comes from the MODEL's list, so the picker is
+    // rebuilt before the value is painted; a stored stop the model does not
+    // offer clamps to 'auto' (classic reasons the same way at :3075-3082).
+    _conv.thinking = normThinkValue(_conv.thinking);
+    syncThinkOptions();
+    // UP-37(3): the flat knob state becomes this model's entry (classic
+    // loadChatSession :5876-5883), so the first switch away cannot lose it.
+    seedModelSettings(_conv);
     if (!(typeof _conv.thinkingBudget === 'number' && _conv.thinkingBudget >= 0))
         _conv.thinkingBudget = null;
     if (_conv.activeProfile && (_conv.customPrompt || _conv.customState)) {
@@ -446,10 +637,20 @@ function newConv() {
              // ROUND 11: per-profile unsaved working copies —
              // { <profileName>: {prompt, settings} } (server-persisted)
              variants: {},
-             // thinking: 'auto'|'off'|'on'|'limit' — classic's select, same
-             // wire semantics (openai_models.py: enable_thinking,
-             // thinking_budget), persisted per conversation (BUG-7).
+             // thinking: the CHOSEN REASONING STOP for the conversation's
+             // model — classic's vocabulary (chat.html:3068-3073): 'auto',
+             // 'off', 'on', uplift's 'limit' budget stop, or an effort level
+             // ('low'/'medium'/'high'/…) the model declares in
+             // reasoning_levels. Wire: chat_template_kwargs.enable_thinking +
+             // thinking_budget (UP-37(2)) and top-level reasoning_effort
+             // (UP-37(1)); persisted per conversation (BUG-7).
              thinking: 'auto', thinkingBudget: null,
+             // UP-37(3): classic modelSettingsByModel (:3160) — one knob set
+             // PER MODEL inside this conversation. Session-lifetime: the
+             // server whitelist (routers/chat.py) drops unknown conv keys, so
+             // a reload starts clean; the exact chat.py addition is pinned in
+             // tests/u37b-model-memory.test.cjs for the owner.
+             modelSettingsByModel: {},
              // U46: per-chat sampling overrides (classic session settings);
              // server persists the numeric subset (routers/chat.py).
              generation: null, messages: [] };
@@ -1613,6 +1814,17 @@ async function shapeRequest(d) {
     }
     var forced = minfo.thinking_forced || '';
     var levels = Array.isArray(minfo.reasoning_levels) ? minfo.reasoning_levels : [];
+    // UP-37(1): an EFFORT stop is not a thinking MODE — classic keeps the
+    // level in modelSettings.reasoning_effort and derives enable_thinking
+    // from it (setReasoningLevel :3113-3116: the template switch goes ON
+    // only where an 'off' stop proves the switch exists; a forced model
+    // gets no switch at all). Same split mirrored here: the level ships
+    // top-level, the mode below stays auto/on/off/limit.
+    var effort = (mode !== 'auto' && mode !== 'off' && mode !== 'on'
+                  && mode !== 'limit' && levels.indexOf(mode) >= 0) ? mode : '';
+    if (effort) mode = levels.indexOf('off') >= 0 ? 'on' : 'auto';
+    else if (mode !== 'auto' && mode !== 'off' && mode !== 'on'
+             && mode !== 'limit') mode = 'auto';   // a stop this model lacks
     if (!forced && !levels.length) mode = 'auto';
     if (mode === 'off' && !forced && levels.length && levels.indexOf('off') < 0) mode = 'auto';
     if (mode !== 'auto' && !forced) {
@@ -1622,6 +1834,10 @@ async function shapeRequest(d) {
         var b = parseInt(_conv.thinkingBudget, 10);
         body.thinking_budget = (isFinite(b) && b >= 1) ? b : 1024;
     }
+    // classic :3780-3782 — top-level reasoning_effort, gated by the model's
+    // OWN levels. paramsLabel prints only known keys, so the provenance
+    // object carrying it stays clean (U78 chip: nothing new prints).
+    if (effort) body.reasoning_effort = effort;
     // U78 (user: 'does the history carry the sampling parameters used?'):
     // snapshot what THIS request actually carries — the per-chat generation
     // object is only the CURRENT knob state and rewording it mid-chat
@@ -2277,7 +2493,15 @@ function toolbar() {
         var o = el('option', null, m.id); o.value = m.id; sel.appendChild(o);
     });
     sel.addEventListener('change', function () {
-        if (_conv) { _conv.model = sel.value; saveConv(); }
+        if (_conv) {
+            // UP-37(3): classic selectModel :5660-5683 — the model being
+            // LEFT keeps its knob set, the model being ENTERED gets ITS OWN
+            // back (first visit: that model's defaults). Uplift keys the map
+            // by the picker id directly: /uplift/api/models rows ARE the
+            // gateway ids (no classic-style alias table on this surface).
+            switchChatModel(sel.value);
+            saveConv();
+        }
         syncAudioMode();
     });
     var sys = el('textarea'); sys.id = 'chat-native-sys'; sys.rows = 3;
@@ -2516,14 +2740,11 @@ function toolbar() {
         return b;
     }
     var think = el('select'); think.id = 'chat-native-think-mode';
-    [['auto', 'chat.thinking_mode.auto', 'Auto'],
-     ['on', 'chat.thinking_mode.on_unlimited', 'On (Unlimited)'],
-     ['limit', 'chat.thinking_mode.on_limited', 'On (Limit)'],
-     ['off', 'chat.thinking_mode.off', 'Off']].forEach(function (o) {
-        var e2 = el('option', null, t(o[1], o[2])); e2.value = o[0];
-        think.appendChild(e2);
-    });
-    think.value = (_conv && _conv.thinking) || 'auto';
+    // UP-37(1): NO static option list. The stops come from the selected
+    // model's server-declared reasoning_levels (classic reasoningStops
+    // :3068-3073); syncThinkOptions() fills the picker and re-paints it on
+    // every model change / conversation open.
+    syncThinkOptions(think);
     var budget = el('input'); budget.id = 'chat-native-think-budget';
     budget.type = 'number'; budget.min = '0'; budget.step = '1024';
     budget.placeholder = t('modal.model_settings.thinking_budget_placeholder',
@@ -2804,7 +3025,9 @@ function toolbar() {
             : t('chat.context_abbr', 'ctx');
     }
     var secTools = section('uplift.chat.tools', 'Tools');
-    secTools.append(web);
+    // UP-40(4): classic's settings entry (:2514) — the shortcut sheet is
+    // discoverable, not a secret.
+    secTools.append(web, helpButtonEl());
     secModel.append(thinkGroup, budGroup);
     // UP-16: the ring belongs by the MODEL it prices — classic
     // put it in the chat header next to the selector (top region,
@@ -4448,7 +4671,9 @@ function msgRegenerate(idx, opts) {
         // 'Regenerate with…' SWITCHES the conversation's model — sticky,
         // exactly like classic's selectModel(opts.model) at :7226, and the
         // header picker follows so the UI never lies about the selection.
-        _conv.model = String(opts.model);
+        // UP-37(3): the SAME path the picker uses, so the per-model knob map
+        // is honoured here too (leave-and-return keeps each model's set).
+        switchChatModel(String(opts.model));
         var sel = gid('chat-native-model');
         if (sel) sel.value = _conv.model;
     }
@@ -4681,6 +4906,10 @@ async function msgBranch(idx) {
         ? JSON.parse(JSON.stringify(src.variants)) : {};
     b.thinking = src.thinking;
     b.thinkingBudget = src.thinkingBudget;
+    // UP-37(3): classic branchChat :7406 carries the per-model knob map into
+    // the branch (deep copy — a shared object would tie the two chats).
+    b.modelSettingsByModel = src.modelSettingsByModel
+        ? JSON.parse(JSON.stringify(src.modelSettingsByModel)) : {};
     b.generation = src.generation
         ? JSON.parse(JSON.stringify(src.generation)) : null;
     b.pinned = false;
@@ -4884,6 +5113,11 @@ function paramsLabel(pp) {
     if (pp.thinking_budget != null) bits.push('think ' + pp.thinking_budget);
     else if (et === true) bits.push('think on');
     else if (et === false) bits.push('think off');
+    // UP-37(1): classic's provenance summary carries the effort level too
+    // (chat.html:7144 `effort=${gen.reasoning_effort}`) — the stop is real
+    // sampling state, not junk, so it earns its slot in the chip.
+    if (typeof pp.reasoning_effort === 'string' && pp.reasoning_effort)
+        bits.push('effort ' + pp.reasoning_effort);
     return bits.join(' \u00b7 ');
 }
 
@@ -4926,6 +5160,137 @@ function editWaitToast() {
     var d = D();
     if (d && d.toast) d.toast(t('uplift.chat.edit_wait_reply',
         'Wait for the reply to finish before saving this edit.'), 'error');
+}
+
+// ---- UP-40(4): the '?' keyboard-shortcut sheet ----------------------------
+// classic shows a fixed modal (chat.html:2728-2757), opened by '?' in
+// handleGlobalKeydown (:7906 — never while typing, :7884) or by the settings
+// entry (:2514 'View shortcuts'). Same affordance here with UPLIFT's list:
+// the composer keys, Esc-as-stop (UP-40 3), the dblclick rename (UP-39), the
+// regenerate hub (UP-29) and the attachment paths (UP-43). Built with the
+// house pattern (grammar-pop / helper prune): .modal-overlay + .modal.nasa,
+// dismissed by the ONE global Escape handler (uplift_state.js), which calls
+// the overlay's __upliftModalClose for teardown. Labels are classic's
+// catalog keys where they exist (chat.shortcut_*), uplift.chat.* elsewhere.
+var _helpOverlay = null;
+// Propagation is the trap: the app-wide Escape handler lives on DOCUMENT,
+// and in the bubble phase document is reached BEFORE window — so by the time
+// chatGlobalKey sees the key, the sheet is already gone and a plain
+// "was it open?" test would fall through to the stop rule and CUT A STREAM
+// the user never meant to stop. The teardown therefore hands this Escape to
+// the sheet exactly once (cleared on the next tick, so a later Escape stops
+// normally again).
+var _helpEscapeTaken = false;
+// [what-key, what-fallback, key-key, key-fallback]
+var HELP_ROWS = [
+    ['chat.shortcut_send', 'Send message', 'chat.shortcut_key_enter', 'Enter'],
+    ['chat.shortcut_newline', 'Newline in message', 'chat.shortcut_shift_enter', 'Shift + Enter'],
+    ['chat.shortcut_stop', 'Stop generating', 'chat.shortcut_key_esc', 'Esc'],
+    ['chat.rename_tooltip', 'Rename chat', 'uplift.chat.help_gesture_dblclick', 'Double-click'],
+    ['uplift.chat.help_variants', 'Regenerate options', 'chat.regenerate_tooltip', 'Regenerate'],
+    ['chat.attachments', 'Attachments', 'uplift.chat.help_gesture_drop', 'Drop'],
+    ['chat.attachments', 'Attachments', 'uplift.chat.help_gesture_paste', 'Paste image'],
+    ['chat.shortcut_help', 'Show this help', null, '?'],
+];
+function _typingNode(n) {
+    if (!n || !n.tagName) return false;
+    var tag = String(n.tagName).toLowerCase();
+    return tag === 'input' || tag === 'textarea' || n.isContentEditable === true;
+}
+function isTypingTarget(ev, throughShadow) {
+    // classic _isTypingTarget (chat.html:7884): INPUT / TEXTAREA /
+    // contentEditable.
+    //
+    // The `throughShadow` flag is the one place uplift MUST differ from
+    // classic, and the difference is the KEY, not the taste: deep-chat's
+    // composer lives in a SHADOW ROOT, so a window-level listener sees the
+    // RETARGETED host (<deep-chat>) as ev.target and the textarea is
+    // invisible. For a PRINTABLE key that matters — '?' is a character the
+    // user is typing, so asking "am I typing?" without composedPath() pops
+    // the sheet on every question mark. Escape is not a character: typing
+    // cannot be interrupted by it, and the landed UP-40(3) rule (Esc stops
+    // the stream, exactly where the operator is mid-message) is kept
+    // byte-for-byte. So: '?' passes true, Escape passes false.
+    if (_typingNode(ev && ev.target)) return true;
+    if (!throughShadow) return false;
+    var path = (ev && typeof ev.composedPath === 'function') ? ev.composedPath() : null;
+    if (!path) return false;
+    for (var i = 0; i < path.length; i++) if (_typingNode(path[i])) return true;
+    return false;
+}
+function shortcutsHelpEl() { return _helpOverlay; }
+function closeShortcutsHelp() {
+    // true = a sheet was open (the caller swallows the key: classic's Escape
+    // rule :2894 closes the sheet INSTEAD of stopping the stream).
+    if (!_helpOverlay) return false;
+    var ov = _helpOverlay;
+    _helpOverlay = null;
+    ov.__upliftModalClose = null;
+    try { ov.remove(); } catch (e) { /* already gone */ }
+    return true;
+}
+function openShortcutsHelp() {
+    if (_helpOverlay) return _helpOverlay;        // '?' twice is not a stack
+    var doc = W() && W().document;
+    if (!doc || !doc.body || typeof doc.createElement !== 'function') return null;
+    var ov = el('div', 'modal-overlay chat-help-overlay');
+    var box = el('div', 'modal nasa chat-help');
+    var h = el('h3', null, t('chat.keyboard_shortcuts', 'Keyboard shortcuts'));
+    var list = el('div', 'chat-help-list');
+    HELP_ROWS.forEach(function (r) {
+        var row = el('div', 'chat-help-row');
+        row.appendChild(el('span', 'chat-help-what', t(r[0], r[1])));
+        // classic translates the caps too (chat.shortcut_key_enter/…); the
+        // gesture rows carry uplift keys with the literal as the fallback
+        row.appendChild(el('kbd', 'chat-help-kbd',
+                           r[2] ? t(r[2], r[3]) : r[3]));
+        list.appendChild(row);
+    });
+    var closeB = mkBtn('btn', t('modal.model_settings.actions.close', 'Close'));
+    closeB.addEventListener('click', function () { closeShortcutsHelp(); });
+    box.append(h, list, closeB);
+    ov.append(box);
+    // backdrop click closes (classic :2730 @click on the backdrop, .stop on
+    // the card); Escape belongs to the ONE global handler in uplift_state.js
+    ov.addEventListener('click', function (ev) {
+        if (ev.target === ov) closeShortcutsHelp();
+    });
+    ov.__upliftModalClose = function () {
+        _helpEscapeTaken = true;     // the document handler got here first
+        closeShortcutsHelp();
+        var w = W();
+        if (w && w.setTimeout) w.setTimeout(function () { _helpEscapeTaken = false; }, 0);
+    };
+    _helpOverlay = ov;
+    doc.body.appendChild(ov);
+    return ov;
+}
+function helpButtonEl() {
+    // classic's settings entry (chat.html:2514) — the sheet must be findable
+    // without knowing the key exists.
+    var b = el('button', 'btn', '? ' + t('chat.shortcuts', 'Shortcuts'));
+    b.type = 'button'; b.id = 'chat-native-help';
+    b.title = t('chat.view_shortcuts', 'View keyboard shortcuts');
+    b.addEventListener('click', function () { openShortcutsHelp(); });
+    return b;
+}
+function chatGlobalKey(ev) {
+    // ONE window listener, classic's handleGlobalKeydown shape (:2891-2910):
+    // Escape closes the sheet first, stops the stream only when the user is
+    // not typing; '?' opens the sheet, never while typing.
+    if (!ev) return;
+    if (ev.key === 'Escape') {
+        if (_helpEscapeTaken) { _helpEscapeTaken = false; return; }
+        if (closeShortcutsHelp()) return;
+        if (!_streaming || isTypingTarget(ev, false)) return;
+        stopAndSettle();   // UP-34/40: settle through the component's stop
+        return;
+    }
+    if (ev.key === '?' && !(ev.metaKey || ev.ctrlKey || ev.altKey)
+        && !isTypingTarget(ev, true)) {
+        ev.preventDefault();
+        openShortcutsHelp();
+    }
 }
 
 // U74: what does the Edited mark claim? 'next' = this row conditions the
@@ -6749,12 +7114,11 @@ function mount() {
                 var away = s.scrollHeight - s.scrollTop - s.clientHeight > 160;
                 if (away !== pill.hidden) pill.hidden = !away;
             }, true);
-            W().addEventListener('keydown', function (ev) {
-                if (ev.key !== 'Escape' || !_streaming) return;
-                var tag = (ev.target && (ev.target.tagName || '')).toLowerCase();
-                if (tag === 'input' || tag === 'textarea' || (ev.target && ev.target.isContentEditable)) return;
-                stopAndSettle();
-            });
+            // UP-40(4): '?' opens the shortcut sheet, Escape closes it /
+            // stops the stream — one handler, classic's handleGlobalKeydown
+            // shape (:2891-2910). Moved out of this closure (chatGlobalKey)
+            // so the node gate can drive it without a browser.
+            W().addEventListener('keydown', chatGlobalKey);
         } catch (e) { /* pills are progressive enhancement */ }
         // U44: width comes from CSS (deep-chat :host is 320px).
         // U54: height was a fixed calc(100vh - 246px) budget — it broke
@@ -7045,6 +7409,24 @@ return { mount: mount, isMounted: function () { return _mounted; },
                  mergeVariantChain: mergeVariantChain,
                  variantStripEl: variantStripEl,
                  closeRegenMenu: closeRegenMenu },
+         // UP-37(1)/(3) test seams: classic's stop math, the picker rebuild
+         // and the per-model knob memory (node gates drive these directly)
+         _u37b: { reasoningLevels: reasoningLevels,
+                  reasoningStops: reasoningStops,
+                  thinkingStops: thinkingStops,
+                  thinkStopLabel: thinkStopLabel,
+                  normThinkValue: normThinkValue,
+                  syncThinkOptions: syncThinkOptions,
+                  switchChatModel: switchChatModel,
+                  captureModelSettings: captureModelSettings,
+                  saveModelSettingsForModel: saveModelSettingsForModel,
+                  loadModelSettingsForModel: loadModelSettingsForModel,
+                  seedModelSettings: seedModelSettings },
+         // UP-40(4) test seams: the '?' sheet + the global key router
+         _u40b: { open: openShortcutsHelp, close: closeShortcutsHelp,
+                  el: shortcutsHelpEl, rows: HELP_ROWS,
+                  isTypingTarget: isTypingTarget, globalKey: chatGlobalKey,
+                  button: helpButtonEl },
          // MATH: pure display-normalizer seam for the node gates
          _normMath: normMath,
          // UP-35 test seams: pure card/status builders + the round flush

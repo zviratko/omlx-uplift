@@ -1197,5 +1197,15 @@
  "uplift.se.turboquant_kv_scheme": "Formát",
  "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
  "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4 (4 bity)",
- "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8 bitů)"
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8 bitů)",
+ "uplift.chat.regen_creative": "Kreativní (+0.4 temp)",
+ "uplift.chat.regen_go": "Spustit",
+ "uplift.chat.regen_with": "Regenerovat s…",
+ "uplift.chat.variant_delete": "Smazat tuto odpověď",
+ "uplift.chat.variant_delete_confirm": "Klepnutím znovu smažete",
+ "uplift.chat.variant_show": "Zobrazit tuto odpověď",
+ "uplift.chat.help_gesture_dblclick": "Dvojklik na název",
+ "uplift.chat.help_gesture_drop": "Přetáhněte soubory do chatu",
+ "uplift.chat.help_gesture_paste": "Vložte obrázek (Ctrl+V)",
+ "uplift.chat.help_variants": "Regenerace ponechá každou odpověď — přepínejte záložkami"
 }

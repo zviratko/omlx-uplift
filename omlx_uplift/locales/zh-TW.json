@@ -1197,5 +1197,15 @@
  "uplift.se.turboquant_kv_scheme": "格式",
  "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
  "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4（4 位元）",
- "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8（8 位元）"
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8（8 位元）",
+ "uplift.chat.regen_creative": "創意（+0.4 溫度）",
+ "uplift.chat.regen_go": "執行",
+ "uplift.chat.regen_with": "重新生成（使用…）",
+ "uplift.chat.variant_delete": "刪除此回答",
+ "uplift.chat.variant_delete_confirm": "再次點擊刪除",
+ "uplift.chat.variant_show": "顯示此回答",
+ "uplift.chat.help_gesture_dblclick": "雙擊標題",
+ "uplift.chat.help_gesture_drop": "將檔案拖入聊天",
+ "uplift.chat.help_gesture_paste": "貼上圖片",
+ "uplift.chat.help_variants": "重新生成會保留每個回答——用標籤切換"
 }

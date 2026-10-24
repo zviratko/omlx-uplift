@@ -1201,5 +1201,15 @@
  "uplift.se.turboquant_kv_scheme": "Format",
  "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
  "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4 (4 bits)",
- "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8 bits)"
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8 (8 bits)",
+ "uplift.chat.regen_creative": "Créatif (+0,4 temp)",
+ "uplift.chat.regen_go": "Lancer",
+ "uplift.chat.regen_with": "Régénérer avec…",
+ "uplift.chat.variant_delete": "Supprimer cette réponse",
+ "uplift.chat.variant_delete_confirm": "Recliquer pour supprimer",
+ "uplift.chat.variant_show": "Afficher cette réponse",
+ "uplift.chat.help_gesture_dblclick": "Double-clic sur un titre",
+ "uplift.chat.help_gesture_drop": "Déposer des fichiers dans le chat",
+ "uplift.chat.help_gesture_paste": "Coller une image",
+ "uplift.chat.help_variants": "Régénérer conserve chaque réponse — basculez par onglets"
 }

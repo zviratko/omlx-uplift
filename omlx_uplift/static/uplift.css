@@ -3351,6 +3351,41 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .logrow .lgv { flex: none; color: var(--warn, #e8a020); font-size: 11px; }
 .logrow.lg-mem { border-left: 2px solid var(--warn, #e8a020); padding-left: 6px; }
 
+/* UP-37(1) + UP-40(4) (FEAT-1 final batch, lane-u37b): thinking picker width
+   stability across stop-list rebuilds + the '?' shortcuts sheet (house
+   .modal.nasa frame; rows only). */
+/* ---- UP-37(1): the thinking picker keeps its width when the stop list
+   changes (Auto/On/Off vs Auto/Low/Medium/High/Max). Without this the rail
+   jounces on every model switch, and a long effort label can push the ctx
+   ring out of the top row. */
+#chat-native-think-mode { max-width: 100%; }
+.chat-native-group:has(#chat-native-think-mode) { min-width: 0; }
+#chat-native-think-mode option { color: var(--ink); background: var(--card); }
+
+/* ---- UP-40(4): the '?' shortcut sheet. House dialog (.modal.nasa) already
+   gives the frame, backdrop and Escape ownership; these rules only lay the
+   rows out — label left, key right, monospace key caps. */
+.chat-help { width: min(420px, 92vw); }
+.chat-help h3 { margin: 0; font-size: 13px; letter-spacing: .04em; }
+.chat-help .chat-help-list {
+    display: flex; flex-direction: column; gap: 6px;
+    margin: 4px 0 2px;
+}
+.chat-help .chat-help-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; font-size: 12px; color: var(--ink);
+}
+.chat-help .chat-help-what { min-width: 0; }
+.chat-help .chat-help-kbd {
+    flex: 0 0 auto; font: 500 11px/1.6 var(--mono);
+    padding: 2px 8px; border: 1px solid var(--edge);
+    /* U82 doctrine: rectangular radii derive from --radius */
+    border-radius: calc(var(--radius) * 0.5);
+    background: var(--panel, var(--bg)); color: var(--ink);
+    white-space: nowrap;
+}
+.chat-help .btn { align-self: flex-end; }
+
 /* UP-39: history rows gain pin/rename/stop affordances */
 .chat-native-convrow { display: flex; align-items: center; gap: 2px; }
 .chat-native-convrow .chat-native-conv { flex: 1 1 auto; min-width: 0;

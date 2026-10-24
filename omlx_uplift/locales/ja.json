@@ -1200,5 +1200,15 @@
  "uplift.se.turboquant_kv_scheme": "形式",
  "uplift.se.turboquant_kv_scheme.opt.turboquant": "TurboQuant",
  "uplift.se.turboquant_kv_scheme.opt.affine4": "Affine4（4 ビット）",
- "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8（8 ビット）"
+ "uplift.se.turboquant_kv_scheme.opt.affine8": "Affine8（8 ビット）",
+ "uplift.chat.regen_creative": "クリエイティブ (+0.4)",
+ "uplift.chat.regen_go": "実行",
+ "uplift.chat.regen_with": "次で再生成…",
+ "uplift.chat.variant_delete": "この回答を削除",
+ "uplift.chat.variant_delete_confirm": "もう一度クリックで削除",
+ "uplift.chat.variant_show": "この回答を表示",
+ "uplift.chat.help_gesture_dblclick": "タイトルをダブルクリック",
+ "uplift.chat.help_gesture_drop": "ファイルをチャットにドロップ",
+ "uplift.chat.help_gesture_paste": "画像をペースト",
+ "uplift.chat.help_variants": "再生成はすべての回答を保持 — タブで切替"
 }

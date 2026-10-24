@@ -1048,8 +1048,9 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         && /speakRow\.append\(voiceSel, autoBtn\)/.test(src),
         'ROUND 14: one Speak line under the Voice caption — picker + Auto');
     assert.ok(/secSamp\.append\(genRow\)/.test(src)
-        && /secTools\.append\(web\)/.test(src),
-        'Sampling owns the grid; Tools owns web search at the bottom');
+        && /secTools\.append\(web, helpButtonEl\(\)\)/.test(src),
+        'Sampling owns the grid; Tools owns web search + the UP-40 shortcut '
+        + 'entry at the bottom (helpButtonEl joins web, nothing moves)');
     assert.ok(/top\.append\(\s*group\(t\('chat\.active_model'[\s\S]*?group\(t\('uplift\.chat\.preset_title'[\s\S]*?profSave, presetDel, nameRow\);/.test(src),
         'top row: Model | Preset | Save | Delete, name row folds below (round 5)');
     assert.ok(!/secPreset|presetActions/.test(src),

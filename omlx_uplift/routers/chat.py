@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 
@@ -91,7 +92,7 @@ def _clean_state(raw):
     if isinstance(s, dict):
         keep = {}
         th = s.get("thinking")
-        if isinstance(th, str) and th in ("auto", "off", "on", "limit"):
+        if isinstance(th, str) and _STOP_RE.fullmatch(th):
             keep["thinking"] = th
         tb = s.get("thinkingBudget")
         if isinstance(tb, int) and not isinstance(tb, bool) and tb >= 0:
@@ -130,6 +131,36 @@ def _clean_variants(raw):
             out[k] = cv
     if len(json.dumps(out, ensure_ascii=False)) > 20000:
         return {}
+    return out
+
+
+# UP-37: a reasoning stop is the model's own vocabulary (classic
+# reasoningStops): auto/off/on/limit plus an effort level like 'low' or
+# 'medium'. Shape-checked here; the picker decides legality.
+_STOP_RE = re.compile(r"[a-z][a-z0-9_-]{0,15}")
+
+
+def _clean_by_model(raw):
+    """UP-37: per-model knob sets {model: {thinking, thinkingBudget,
+    generation}} — classic modelSettingsByModel (chat.html:3146). One
+    entry per model, count and key length capped hard."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for k, v in list(raw.items())[:16]:
+        key = str(k or "")[:120]
+        if not key or not isinstance(v, dict):
+            continue
+        th = v.get("thinking")
+        gen = _clean_generation(v.get("generation"))
+        tb = v.get("thinkingBudget")
+        out[key] = {
+            "thinking": th if isinstance(th, str) and _STOP_RE.fullmatch(th)
+                        else "auto",
+            "thinkingBudget": tb if isinstance(tb, int)
+                              and not isinstance(tb, bool) and tb >= 0 else None,
+            "generation": gen,
+        }
     return out
 
 
@@ -217,6 +248,9 @@ def _clean_message(m: dict) -> dict:
         tb = raw_p.get("thinking_budget")
         if isinstance(tb, int) and not isinstance(tb, bool):
             clean_p["thinking_budget"] = tb
+        rv = raw_p.get("reasoning_effort")
+        if isinstance(rv, str) and _STOP_RE.fullmatch(rv):
+            clean_p["reasoning_effort"] = rv
         if clean_p:
             out["params"] = clean_p
     # UP-43: attachment META (names + kinds) survives reloads; bytes never
@@ -349,10 +383,14 @@ async def chat_history_save(request: Request,
             # ROUND 11: per-profile unsaved working copies (the stash's
             # successor — divergence belongs to the profile, not to a slot)
             "variants": _clean_variants(body.get("variants")),
+            # UP-37: effort stops widen the old fixed four (see _STOP_RE)
             "thinking": body.get("thinking")
             if isinstance(body.get("thinking"), str)
-            and body.get("thinking") in ("auto", "off", "on", "limit")
+            and _STOP_RE.fullmatch(body.get("thinking") or "")
             else "auto",
+            # UP-37(3): classic's per-model knob sets ride the session
+            "modelSettingsByModel": _clean_by_model(
+                body.get("modelSettingsByModel")),
             "thinkingBudget": body.get("thinkingBudget")
             if isinstance(body.get("thinkingBudget"), int)
             and not isinstance(body.get("thinkingBudget"), bool)
