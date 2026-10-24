@@ -3747,7 +3747,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .sa-box .sa-cand-url { font: 400 11px/1.4 var(--mono); }
 .sa-box .sa-cand-stats { font-size: 11px; color: var(--dim); }
 /* classic amber skipped-features box */
-.sa-box .sa-skipped { border: 1px solid var(--warn); color: var(--amber);
+.sa-box .sa-skipped { border: 1px solid var(--warn); color: var(--warn);
     background: color-mix(in srgb, var(--warn) 12%, var(--bg));
     border-radius: var(--radius); padding: 8px 10px; font-size: 11px; }
 .sa-box .sa-skipped-title { font-weight: 700; margin-bottom: 4px; }
@@ -3770,7 +3770,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     font-weight: 700; letter-spacing: .05em; border: 1px solid currentColor;
     border-radius: var(--radius); vertical-align: 1px; }
 .se-tab .se-tab-api.api-ok { color: var(--ok); }
-.se-tab .se-tab-api.api-eng { color: var(--amber); }
+.se-tab .se-tab-api.api-eng { color: var(--warn); }
 /* the classic pencil-dialog, inline under the picker row */
 .se-pedit { border: 1px solid var(--edge); border-radius: var(--radius);
     background: var(--bg); margin: 6px 0; padding: 8px 10px;
