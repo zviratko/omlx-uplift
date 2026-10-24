@@ -1525,6 +1525,52 @@ const GS_SPEC = [
         body.append(gsRow('claude_code', L.cc.desktop, L.cc.desktop_hint,
             gsToggle('claude_code_desktop_enabled', !!gsGet('claude_code', 'desktop_enabled')),
             { flat: 'claude_code_desktop_enabled' }));
+        // UP-28: classic's Claude Desktop command surface
+        // (dashboard.js:4167-4210) — configured-status line + Re-apply
+        // (configure while enabled, restore otherwise) + explicit Restore,
+        // with classic's working labels and no confirm dialogs (parity).
+        const cdRow = document.createElement('div');
+        cdRow.className = 'urow settings';
+        const cdLab = GLUE.cell(C.tf('status.claude_code.desktop', 'Claude Desktop'));
+        cdLab.className = 'uname';
+        const cdSlot = document.createElement('span'); cdSlot.className = 'diffslot';
+        const cdCtl = GLUE.cell(''); cdCtl.className = 'gctl';
+        const cdStatus = document.createElement('span');
+        cdStatus.className = 'dim'; cdStatus.style.marginRight = '8px';
+        const cdBtn = (label, title) => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'se-btn act';
+            b.textContent = label; b.title = title; return b;
+        };
+        const busy = (btn, txt) => { btn.disabled = !txt; if (txt) btn.dataset.was = btn.textContent, btn.textContent = txt; else if (btn.dataset.was) btn.textContent = btn.dataset.was; };
+        const reapply = cdBtn(C.tf('status.claude_code.desktop_reapply', 'Re-apply configuration'), '');
+        const restore = cdBtn(C.tf('status.claude_code.desktop_restore', 'Restore configuration'), '');
+        const setStat = ok => { cdStatus.textContent = ok
+            ? C.tf('status.claude_code.desktop_configured', 'Configured')
+            : C.tf('status.claude_code.desktop_not_configured', 'Not configured'); };
+        // classic updates the status silently on re-apply (no toast);
+        // only the explicit Restore carries success/failure messages.
+        reapply.onclick = () => {
+            busy(reapply, C.tf('status.claude_code.desktop_working', 'Applying...'));
+            GLUE.postJson(`${API}/admin/api/claude-desktop/` +
+                (gsGet('claude_code', 'desktop_enabled') ? 'configure' : 'restore'), {})
+                .then(d => setStat(!!(d && d.configured)))
+                .catch(e => GLUE.toast(String((e && e.message) || e), 'error'))
+                .finally(() => busy(reapply, ''));
+        };
+        restore.onclick = () => {
+            busy(restore, C.tf('status.claude_code.desktop_restoring', 'Restoring...'));
+            GLUE.postJson(`${API}/admin/api/claude-desktop/restore`, {})
+                .then(d => { setStat(!!(d && d.configured));
+                    GLUE.toast(C.tf('status.claude_code.desktop_restore_success', 'Configuration restored')); })
+                .catch(() => GLUE.toast(C.tf('status.claude_code.desktop_restore_error', 'Restore failed'), 'error'))
+                .finally(() => busy(restore, ''));
+        };
+        cdCtl.append(cdStatus, reapply, restore);
+        cdRow.append(cdLab, cdSlot, cdCtl);
+        body.append(cdRow);
+        GLUE.fetchJson(`${API}/admin/api/claude-desktop/status`)
+            .then(d => setStat(!!(d && d.configured))).catch(() => {});
     }},
 
     {sec: 'mcp', lab: 'mcp.path', ctl: {k: 'text', field: 'config_path', flat: 'mcp_config', ph: 'mcp.ph'},
