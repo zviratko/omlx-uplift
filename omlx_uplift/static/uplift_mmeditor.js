@@ -16,6 +16,14 @@ const API = S.API;
 const MM_GLUE = {
     toast: D.toast,
     fetchJson: D.fetchJson,
+    // UP-20 fix: the landed MTPLX-import and preset-refresh call sites already
+    // call MM_GLUE.postJson but the kit members were never wired here — every
+    // click threw "MM_GLUE.postJson is not a function". postJson/putJson/
+    // deleteJson join fetchJson straight from domkit (pinned by
+    // tests/u20-snapshot-actions.test.cjs).
+    postJson: D.postJson,
+    putJson: D.putJson,
+    deleteJson: D.deleteJson,
     get stats() { return window.Uplift._modelGlue.stats; },
     get SECRET_KEYS() { return window.Uplift._modelGlue.SECRET_KEYS; },
     get gsDisplay() { return window.Uplift._modelGlue.gsDisplay; },
@@ -37,6 +45,15 @@ const MM_TPL = window.Uplift.mmTemplates;
    refreshes while the editor is open. */
 let seModel = null, seValues = {};   // seValues = live form state (modelspec shape)
 let seWantProfile = null;            // openEditor(model, name): land on this profile's tab
+/* UP-20 (1,2): snapshot-apply modal state — one at a time; the machine is
+   pure (SETTINGS_APPLY), the modal keeps the state object + node refs here.
+   seApplyBusy = the editor-head action buttons (greyed during 'loading').
+   seReloadAfterApply = editor-reload seam shared by the snapshot-apply flow
+   and the UP-30 RESYNC verb (a recorder replaces it headless; the default
+   is a full openEditor). */
+let seApplyOverlay = null;
+let seApplyBusy = [];
+let seReloadAfterApply = null;
 let GRAMMAR_PARSERS = null;          // R10-7: cached /admin/api/grammar/parsers payload
 async function loadGrammarParsers() {
     if (GRAMMAR_PARSERS) return;
@@ -541,7 +558,14 @@ function seSection(title) {
     h.className = 'se-section';
     const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
     box.dataset.sect = slug;
-    h.textContent = C.tf('uplift.se.section.' + slug, title);
+    // UP-20 (3): the label lives in its own span so header-side buttons
+    // (Load Defaults) can ride the h5 without leaking into the rail nav
+    // label (seRailBuild reads .se-section-t).
+    const lab = document.createElement('span');
+    lab.className = 'se-section-t';
+    lab.textContent = C.tf('uplift.se.section.' + slug, title);
+    h.append(lab);
+    box.__head = h;
     const body = document.createElement('div');
     body.className = 'se-box-body';
     box.append(h, body);
@@ -589,7 +613,12 @@ function seRailBuild(container) {
         it.dataset.sect = slug;
         const t = document.createElement('span');
         t.className = 'se-rail-t';
-        t.textContent = title ? title.textContent : slug;
+        // UP-20 (3): prefer the label span (header buttons no longer pollute
+        // h5.textContent); fall back to the raw header for any box built
+        // without the span.
+        const lab = title && title.querySelector
+            ? title.querySelector('.se-section-t') : null;
+        t.textContent = lab ? lab.textContent : (title ? title.textContent : slug);
         const badge = document.createElement('span');
         badge.className = 'se-rail-badge'; badge.hidden = true;
         it.append(t, badge);
@@ -1023,6 +1052,10 @@ function renderEditorFields(container) {
 
     /* ---- generation defaults: context, length, sampling (classic ms-generation) ---- */
     section('Generation Defaults');
+    // UP-20 (3): classic's Load Defaults button on the section header
+    // (_modal_model_settings.html:429-433, dashboard.js:3571). Model-scoped
+    // only: the template editor has no generation config to read.
+    if (seModel && !m._template) seGenDefaultsBtn(sect);
     g = grid();
     g.append(seBind('number', 'max_context_window', { label: 'Context Window', step: 1,
         effHint: seEffHint('max_context_window'),
@@ -2078,6 +2111,10 @@ async function openEditor(model, profileName, templateName) {
     // (classic _models.html), never in the settings modal — parity: not here.
     // popup modal, not an inline accordion: stable size for long forms
     const panel = editorNode();
+    // UP-20 (1,2): classic's title-bar snapshot actions
+    // (_modal_model_settings.html:24-30): reset / optimal / recipe. Model
+    // rows only — openTemplateEditor never reaches this line.
+    panel.querySelector('.editor-head').append(seSnapshotActions());
     renderEditorFields(panel.querySelector('#se-fields'));
     seTtsAttach(panel).then(() => seVoicesAttach(panel));
     // TTS-1: silent unless this is a probed TTS model; TTS-2 chained AFTER
@@ -2200,10 +2237,25 @@ function seRenderTabs(panel) {
                 .some(d => d.name === t.profileId))
             mark += ' ⚠';
         const nm = t.id === 'base' ? 'BASE'
-            : (t.template ? '◱ ' : '') + (t.display_name || t.name || t.id);
+            : (t.template ? '\u25f1 ' : '') + (t.display_name || t.name || t.id);
         b.textContent = nm + mark;
         b.title = t.id === 'base' ? 'Model settings (base)'
             : (t.template ? 'Global template (copy, unsaved)' : 'Profile: ' + (t.name || ''));
+        // UP-30 (classic pill :276-332): an exposed profile carries the API
+        // badge on its pill — AMBER when the profile also holds engine-
+        // (load-time) fields, green for a request-time-only one. The server
+        // answers has_engine_fields per row (model_settings.py:1389).
+        const sp = t.profileId
+            && (MM_DATA.profiles || []).find(x => x.name === t.profileId);
+        if (sp && sp.expose_as_model) {
+            const badge = document.createElement('span');
+            badge.className = 'se-tab-api ' + (sp.has_engine_fields ? 'api-eng' : 'api-ok');
+            badge.textContent = 'API';
+            if (sp.has_engine_fields)
+                badge.title = C.tf('modal.model_settings.profiles.expose_engine_fields_hint',
+                    "Engine-level settings in this profile only take effect when it is applied to the base model \u2014 they don't change the exposed model.");
+            b.append(badge);
+        }
         b.onclick = () => {
             seCaptureTab();                 // save edits of the tab we leave
             seActiveTab = t.id;
@@ -2358,6 +2410,11 @@ function seRenderTabs(panel) {
             .finally(() => { rfb.disabled = false; });
     };
     strip.append(drop, rfb);
+    // UP-30: the picker-row drift dot (classic active-profile dot, :276-332)
+    // rides the same dirty truth the tab badges just recomputed — refresh it
+    // here so it stays live while the user types on the profile's tab.
+    const profHost = panel.querySelector && panel.querySelector('.se-profs');
+    if (profHost && profHost._syncDrift) profHost._syncDrift();
 }
 /* U4: merge a settings blob INTO the active tab as unsaved edits —
    profile tabs receive overrides (empty-able via inherit), the base tab
@@ -2906,11 +2963,81 @@ async function seLoadProfiles(model, host) {
     row.className = 'se-prof-row';
     const sel = document.createElement('select');
     const none = document.createElement('option'); none.value = ''; none.textContent = 'profiles…';
-    sel.append(none, ...profs.map(p => { const o = document.createElement('option');
-        o.value = p.name; o.textContent = p.display_name || p.name; return o; }));
+    // UP-30 (classic pill :276-332): exposed profiles read as API pills, an
+    // engine-field one carrying the amber ⚠ warning instead of the green
+    // plain-API — the server computes has_engine_fields on every row
+    // (omlx/model_settings.py:1389), so no client diff is needed.
+    const optsByName = new Map();
+    const mkOpt = p => {
+        const o = document.createElement('option');
+        o.value = p.name;
+        optsByName.set(p.name, o);
+        return o;
+    };
+    sel.append(none, ...profs.map(mkOpt));
+    function paintPicker() {
+        // UP-30: re-label the classic pills from the store — ⚠ once the
+        // runtime-divergence pass ran, API⚠ amber per has_engine_fields
+        const div = new Set((MM_DATA.divergence || []).map(d => d.name));
+        for (const p of profs) {
+            const o = optsByName.get(p.name);
+            if (!o) continue;
+            o.textContent = profileOptionLabel(p, div.has(p.name))
+                + (p.expose_as_model
+                    ? (p.has_engine_fields ? ' (API\u26a0)' : ' (API)') : '');
+            o.title = profileOptionTitle(p);
+        }
+        syncDriftDot();
+    }
     // U4: no Apply button here — applying values lives in the 'apply from…'
     // dropdown (client-side, into the active tab). This row manages profiles.
+    // UP-30: management = EDIT (classic pencil dialog :202-235) + two-step
+    // delete (never window.confirm) + the classic drift dot for the profile
+    // whose tab is open with unsaved changes.
+    const editB = document.createElement('button');
+    editB.className = 'se-btn'; editB.textContent = 'Edit';
     const delB = document.createElement('button'); delB.className = 'se-btn'; delB.textContent = 'Delete';
+    const noB = document.createElement('button'); noB.className = 'se-btn';
+    noB.textContent = C.tf('models.manager.delete_no', 'No'); noB.hidden = true;
+    const driftDot = document.createElement('span');
+    driftDot.className = 'se-drift-dot'; driftDot.hidden = true;
+    driftDot.title = C.tf('modal.model_settings.profiles.drift_hint',
+        'Form has unsaved changes vs. profile');
+    let armed = null;                                   // classic profileDeleteConfirm
+    function paintArm() {
+        delB.textContent = armed
+            ? C.tf('models.manager.delete_yes', 'Yes')
+            : 'Delete';
+        delB.classList.toggle('danger', !!armed);
+        noB.hidden = !armed;
+    }
+    delB.onclick = async () => {
+        if (!sel.value) return;
+        const next = nextDeleteState(armed, sel.value, armed ? 'yes' : 'ask');
+        if (next !== 'FIRE') { armed = next; paintArm(); return; }
+        armed = null; paintArm();
+        try {
+            await D.deleteJson(`${API}/admin/api/models/${encodeURIComponent(model)}/profiles/${encodeURIComponent(sel.value)}`);
+            MM_GLUE.toast(C.t('uplift.toast.deleted_profile', {name: sel.value}));
+            seLoadProfiles(model, host);
+        } catch (e) { MM_GLUE.toast(C.t('uplift.toast.delete_failed', {msg: e.message})); }
+    };
+    noB.onclick = () => { armed = null; paintArm(); };
+    // classic drift dot: the SELECTED profile owns unsaved edits in its tab
+    function syncDriftDot() {
+        let drift = false;
+        if (sel.value) {
+            const t = seTabs.find(z => z.profileId === sel.value);
+            drift = !!t && seTabChangeCount(t) > 0;
+        }
+        driftDot.hidden = !drift;
+    }
+    host._syncDrift = paintPicker;
+    sel.onchange = syncDriftDot;
+    paintPicker();
+    const dlg = document.createElement('div');
+    dlg.className = 'se-pedit'; dlg.hidden = true;
+    editB.onclick = () => seProfileEditDialog(dlg, model, host, sel.value);
     const saveAs = document.createElement('input');
     saveAs.type = 'text'; saveAs.placeholder = 'save current as…'; saveAs.className = 'se-prof-name';
     const saveB = document.createElement('button'); saveB.className = 'se-btn'; saveB.textContent = 'Save';
@@ -2918,15 +3045,6 @@ async function seLoadProfiles(model, host) {
     // with worse error messages (no url, no err.status). All five call
     // sites pass explicit method/headers/body opts straight to fetchJson.
     const write = D.fetchJson;
-    delB.onclick = async () => {
-        if (!sel.value) return;
-        try {
-            await write(`${API}/admin/api/models/${encodeURIComponent(model)}/profiles/${encodeURIComponent(sel.value)}`,
-                { method: 'DELETE' });
-            MM_GLUE.toast(C.t('uplift.toast.deleted_profile', {name: sel.value}));
-            seLoadProfiles(model, host);
-        } catch (e) { MM_GLUE.toast(C.t('uplift.toast.delete_failed', {msg: e.message})); }
-    };
     saveB.onclick = async () => {
         const name = saveAs.value.trim();
         if (!name) { MM_GLUE.toast(C.t('uplift.toast.profile_name_required')); return; }
@@ -2941,8 +3059,9 @@ async function seLoadProfiles(model, host) {
             seLoadProfiles(model, host);
         } catch (e) { MM_GLUE.toast(C.t('uplift.toast.profile_error', {msg: e.message})); }
     };
-    row.append(sel, delB, saveAs, saveB);
-    host.append(row);
+    row.append(sel, driftDot, editB, delB, noB, saveAs, saveB);
+    host.append(row, dlg);
+    syncDriftDot();
     // keep the 'apply from…' strip in sync: own-profile options were just
     // (re)loaded or changed
     const stripPanel = document.querySelector('.modal.editor');
@@ -2998,15 +3117,11 @@ async function seLoadProfiles(model, host) {
             try {
                 // Classic applyTemplateToForm: template is source of truth —
                 // upsert the model profile from it, then apply the profile.
+                // UP-30: the two writes moved into seApplyTemplateUpsert so
+                // the RESYNC verb shares this exact path.
                 const tpl = tpls.find(t => t.name === tsel.value) || {};
-                const prof = `${API}/admin/api/models/${encodeURIComponent(model)}/profiles`;
-                let pname = tpl.name;
-                await write(prof, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: pname, display_name: tpl.display_name || tpl.name,
-                                           description: tpl.description || null,
-                                           settings: tpl.settings || {}, source_template: tpl.name }) });
-                await write(`${prof}/${encodeURIComponent(pname)}/apply`, { method: 'POST' });
-                MM_GLUE.toast(C.t('uplift.toast.applied_template', {name: pname}));
+                await seApplyTemplateUpsert(model, tpl);
+                MM_GLUE.toast(C.t('uplift.toast.applied_template', {name: tpl.name}));
                 openEditor(model);
             } catch (e) { MM_GLUE.toast(C.t('uplift.toast.template_apply_failed', {msg: e.message})); }
         };
@@ -3040,6 +3155,660 @@ async function seLoadProfiles(model, host) {
         host.append(trow);
     }
 }
+
+/* ---- UP-20 (1,2,3): snapshot actions + Load Generation Defaults --------
+   Classic's three title-bar buttons (_modal_model_settings.html:24-30) and
+   the Load Defaults header button (:429). The phase machine is extracted
+   PURE (classic: dashboard.js:3416-3547 settingsApply + _modal_settings_
+   apply.html), so tests/u20-snapshot-actions.test.cjs drives every phase
+   over server-shaped fixtures without a DOM; the modal below is only its
+   render shell. Verified classic routes (omlx/admin/routes.py):
+     POST /admin/api/models/{id}/settings/reset     (:4122, no body)
+     POST /admin/api/models/{id}/settings/recipe    (:4132, {recipe})
+     GET  /admin/api/models/{id}/settings/optimal   (:4147, candidates)
+     POST /admin/api/models/{id}/settings/optimal   (:4205, {benchmark_id})
+     GET  /admin/api/models/{id}/generation_config  (:4337)                */
+const SETTINGS_APPLY = {
+    /* Pure machine — every method takes (and returns) the state object;
+       the DOM shell and the tests drive the SAME transitions. */
+    open(mode) {
+        // classic openSettingsApply (dashboard.js:3416): recipe starts at
+        // the paste box, reset at the confirmation, optimal fetches at once
+        return { mode, phase: mode === 'recipe' ? 'input'
+                       : (mode === 'reset' ? 'confirm' : 'loading'),
+                 recipeText: '', result: null, candidates: null, error: '' };
+    },
+    canClose(st) { return st.phase !== 'loading'; },
+    beginLoading(st) { st.phase = 'loading'; st.error = ''; return st; },
+    recipeBody(st) { return { recipe: (st.recipeText || '').trim() }; },
+    onCandidates(st, data) {
+        st.result = data;
+        if (!data || !data.found) { st.phase = 'none'; return st; }
+        st.candidates = data;
+        st.phase = 'choose';
+        return st;
+    },
+    onApplied(st, data) { st.result = data; st.phase = 'done'; return st; },
+    onError(st, msg) { st.error = msg || C.tf('js.error.settings_apply_failed',
+        'Failed to apply settings'); st.phase = 'error'; return st; },
+    canBack(st) {
+        // classic error phase: BACK only when there is somewhere to go
+        return st.mode === 'recipe' || (st.mode === 'optimal' && !!st.candidates);
+    },
+    back(st) { st.phase = st.mode === 'recipe' ? 'input' : 'choose'; return st; },
+    title(st) {
+        return st.mode === 'reset'
+            ? C.tf('modal.model_settings.actions.reset', 'Reset defaults')
+            : st.mode === 'recipe'
+                ? C.tf('modal.model_settings.actions.apply_title_recipe',
+                       'Apply custom recipe')
+                : C.tf('modal.model_settings.actions.apply_title_optimal',
+                       'Optimal settings from omlx.ai');
+    },
+    loadingText(st) {
+        if (st.mode === 'reset')
+            return C.tf('modal.model_settings.actions.loading_reset',
+                        'Resetting settings...');
+        if (st.mode === 'recipe')
+            return C.tf('modal.model_settings.actions.loading_recipe',
+                        'Applying the recipe...');
+        return st.candidates
+            ? C.tf('modal.model_settings.actions.loading_apply',
+                   'Applying the benchmark settings...')
+            : C.tf('modal.model_settings.actions.loading_optimal',
+                   'Fetching the best benchmark results from omlx.ai...');
+    },
+    doneText(st) {
+        if (st.mode === 'reset')
+            return C.tf('modal.model_settings.actions.done_reset',
+                'All settings were reset to their defaults.');
+        if (st.result && st.result.changed === false)
+            return C.tf('modal.model_settings.actions.no_change',
+                'Settings already matched; nothing changed.');
+        return st.mode === 'recipe'
+            ? C.tf('modal.model_settings.actions.done_recipe',
+                   'The settings below were applied from the recipe!')
+            : C.tf('modal.model_settings.actions.done_optimal',
+                   'The settings below were applied from the selected benchmark!');
+    },
+    groups(st) {
+        const c = st.candidates;
+        if (!c) return [];
+        return [
+            { key: 'pp', label: C.tf('modal.model_settings.actions.group_pp',
+                                      'Best prompt processing (PP)'),
+              items: c.by_pp || [] },
+            { key: 'tg', label: C.tf('modal.model_settings.actions.group_tg',
+                                      'Best token generation (TG)'),
+              items: c.by_tg || [] },
+        ].filter(g => g.items.length);
+    },
+    appliedJson(st) {
+        const r = st.result;
+        return r && r.applied ? JSON.stringify(r.applied, null, 2) : '';
+    },
+    stats(item) {
+        // classic settingsApplyStats (dashboard.js:3536): PP/TG tok/s,
+        // memory GB, quantization, oMLX version, date
+        if (!item || item.pp_tps == null) return '';
+        const parts = ['PP ' + Number(item.pp_tps).toFixed(1) + ' tok/s'];
+        if (item.tg_tps != null) parts.push('TG ' + Number(item.tg_tps).toFixed(1) + ' tok/s');
+        if (item.memory_gb != null) parts.push(item.memory_gb + ' GB');
+        if (item.quantization) parts.push(item.quantization);
+        if (item.omlx_version) parts.push('oMLX ' + item.omlx_version);
+        if (item.created_at) parts.push(String(item.created_at).slice(0, 10));
+        return parts.join(' \u00b7 ');
+    },
+};
+
+/* classic loadGenerationDefaults (dashboard.js:3571-3646): five keys are
+   SET from the model's own /generation_config answer (a missing one falls
+   back to null), every other key in the list below is HARD-CLEARED to the
+   literal classic default. The list is copied key-for-key and order-for-
+   order; completeness is pinned against this classic fixture by
+   tests/u20-snapshot-actions.test.cjs. */
+const SE_GEN_SET_KEYS = ['max_context_window', 'temperature', 'top_p',
+    'top_k', 'repetition_penalty'];
+const SE_GEN_CLEAR = [
+    ['max_tokens', null], ['min_p', null], ['presence_penalty', null],
+    ['force_sampling', false], ['reasoning_parser', null],
+    ['guided_grammar_enabled', false], ['guided_grammar', ''],
+    ['ttl_seconds', null], ['enableIndexCache', false], ['index_cache_freq', 0],
+    ['enable_thinking', false], ['enableThinkingBudget', false],
+    ['thinking_budget_tokens', 0], ['enableToolResultLimit', false],
+    ['max_tool_result_tokens', 0], ['ctKwargEntries', []],
+    ['turboquant_kv_enabled', false], ['turboquant_kv_scheme', 'turboquant'],
+    ['turboquant_kv_bits', 4],
+    ['qwen35_ane_prefill_enabled', false],
+    ['qwen35_ane_prefill_sequence_length', 2048],
+    ['qwen35_ane_prefill_tail_padding_min_tokens', 0],
+    ['qwen35_ane_prefill_fraction', 0.53],      // model row may override
+    ['qwen35_ane_prefill_max_layers', 64],
+    ['qwen35_ane_prefill_dual_ane', true],
+    ['qwen35_ane_prefill_gdn', true],
+    ['qwen35_ane_prefill_gdn_fraction', 0.5],
+    ['qwen35_ane_prefill_gdn_max_layers', 48],
+    ['qwen35_ane_prefill_cpu_enabled', false],
+    ['qwen35_ane_prefill_cpu_fraction', 0.135],
+    ['qwen35_ane_prefill_cpu_down_fraction', 0],
+    ['qwen35_ane_prefill_cpu_gdn_fraction', 0],
+    ['qwen35_ane_prefill_cpu_threads', 8],
+    ['qwen35_ane_prefill_cpu_shared_resource', true],
+    ['specprefill_enabled', false], ['specprefill_draft_model', null],
+    ['specprefill_keep_pct', 0.2], ['specprefill_threshold', null],
+    ['dflash_enabled', false], ['dflash_draft_model', null],
+    ['dflash_draft_quant_enabled', false],
+    ['dflash_draft_quant_weight_bits', null],
+    ['dflash_draft_quant_group_size', null],
+    ['dflash_draft_window_size', null], ['dflash_block_size', null],
+    ['dflash_verify_mode', 'adaptive'],
+    ['mtp_enabled', false], ['mtp_adaptive_max_depth', '3'],
+    ['trust_remote_code', false],
+];
+function genDefaultsPatch(data, modelRow, state) {
+    /* Pure core. `state` (the live seValues) filters the write: a key the
+       uplift modelspec does not carry is skipped, so clearing can never
+       inject foreign keys into the save payload. */
+    const out = {};
+    const has = k => !state || Object.prototype.hasOwnProperty.call(state, k);
+    for (const k of SE_GEN_SET_KEYS)
+        if (has(k)) out[k] = (data && data[k] != null) ? data[k] : null;
+    for (const [k, v] of SE_GEN_CLEAR) {
+        if (!has(k)) continue;
+        if (k === 'qwen35_ane_prefill_fraction')
+            out[k] = (modelRow && modelRow.ane_prefill_default_fraction != null)
+                ? modelRow.ane_prefill_default_fraction : v;
+        else out[k] = Array.isArray(v) ? v.slice() : v;
+    }
+    return out;
+}
+
+function seGenDefaultsBtn(sect) {
+    // classic header row: the button sits at the section-header right edge
+    if (!sect || !sect.__head) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'se-btn se-gen-load';
+    b.textContent = C.tf('modal.model_settings.load_defaults', 'Load Defaults');
+    b.onclick = () => seGenDefaultsLoad(b);
+    sect.__head.append(b);
+}
+function seGenDefaultsLoad(b) {
+    if (!seModel) return;
+    b.disabled = true;
+    b.textContent = C.tf('modal.model_settings.loading_defaults', 'Loading...');
+    MM_GLUE.fetchJson(
+        `${API}/admin/api/models/${encodeURIComponent(seModel)}/generation_config`)
+        .then(data => { seApplyGenDefaults(data || {}); })
+        .catch(e => {
+            // classic: 404 -> no_config_defaults, anything else -> the
+            // generic load_generation_config_failed (dashboard.js:3632-3644)
+            MM_GLUE.toast(e && e.status === 404
+                ? C.tf('js.error.no_config_defaults',
+                       'No config defaults found for this model')
+                : String((e && e.message)
+                          || C.tf('js.error.load_generation_config_failed',
+                                  'Failed to load generation config')), 'error');
+            b.disabled = false;
+            b.textContent = C.tf('modal.model_settings.load_defaults', 'Load Defaults');
+        });
+}
+function seApplyGenDefaults(data) {
+    /* Form-side only, classic parity: the patch lands on the base model's
+       form as queued edits — classic drops its profile link (activeProfile-
+       Name=null, dashboard.js:3646), so the edit always targets the base
+       tab; nothing is written to the server until SAVE. */
+    seCaptureTab();
+    const t0 = seTabs.find(z => z.id === 'base');
+    if (!t0) return;
+    if (seActiveTab !== 'base') {
+        seActiveTab = 'base';
+        seValues = Object.assign({}, t0.workVals || seBaseVals);
+        seOrig = t0.origVals || seOrig;
+    }
+    const patch = genDefaultsPatch(data, seFormModel || {}, seValues);
+    for (const [k, v] of Object.entries(patch)) {
+        seValues[k] = v;
+        const orig = (t0.origVals || seOrig)[k];
+        if (JSON.stringify(orig) === JSON.stringify(v)) t0.dirty.delete(k);
+        else t0.dirty.add(k);
+    }
+    t0.workVals = Object.assign({}, seValues);
+    const root = document.getElementById('se-fields');
+    if (root) renderEditorFields(root);
+    const panel = document.querySelector('.modal.editor');
+    if (panel) seRenderTabs(panel);
+    seUpdateSaveBtn();
+}
+
+function seSnapshotActions() {
+    const wrap = document.createElement('span');
+    wrap.className = 'se-snap-actions';
+    seApplyBusy = [];                     // a reopened editor owns fresh refs
+    for (const [mode, key, en] of [
+        ['reset', 'modal.model_settings.actions.reset', 'Reset defaults'],
+        ['optimal', 'modal.model_settings.actions.optimal', 'Apply optimal settings'],
+        ['recipe', 'modal.model_settings.actions.recipe', 'Apply custom recipe'],
+    ]) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'se-btn sa-head-btn';
+        b.textContent = C.tf(key, en);
+        b.onclick = () => openSettingsApply(mode);
+        seApplyBusy.push(b);
+        wrap.append(b);
+    }
+    return wrap;
+}
+function _saMk(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+}
+function openSettingsApply(mode) {
+    if (!seModel || seApplyOverlay) return;
+    const model = seModel;      // the editor reloads behind us; stay bound
+    const st = SETTINGS_APPLY.open(mode);
+    const overlay = _saMk('div', 'modal-overlay sa-overlay');
+    overlay.style.zIndex = '80';            // above the editor modal (70), below a grammar pop (90)
+    const box = _saMk('div', 'modal nasa sa-box');
+    const head = _saMk('h3', 'sa-head');
+    const titleSp = _saMk('span', 'sa-title', SETTINGS_APPLY.title(st));
+    const closeB = _saMk('button', 'icon-btn sa-x', '\u00d7');
+    closeB.type = 'button';
+    closeB.onclick = () => closeSettingsApply();
+    head.append(titleSp, closeB);
+    const body = _saMk('div', 'sa-body');
+    box.append(head, body);
+    overlay.append(box);
+    document.body.append(overlay);
+    seApplyOverlay = { overlay, titleSp, closeB, body, st, model };
+    overlay.__upliftModalClose = () => closeSettingsApply();
+    overlay.onclick = (e) => { if (e.target === overlay) closeSettingsApply(); };
+    renderSettingsApply();
+    if (mode === 'optimal') loadOptimalCandidates();
+}
+function closeSettingsApply() {
+    const A = seApplyOverlay;
+    if (!A || !SETTINGS_APPLY.canClose(A.st)) return;   // classic: no close mid-flight
+    seApplyOverlay = null;
+    A.overlay.remove();
+}
+function _saUrl(path) {
+    const model = (seApplyOverlay && seApplyOverlay.model) || seModel;
+    return `${API}/admin/api/models/${encodeURIComponent(model)}/settings/${path}`;
+}
+function renderSettingsApply() {
+    const A = seApplyOverlay; if (!A) return;
+    const st = A.st;
+    A.titleSp.textContent = SETTINGS_APPLY.title(st);
+    A.closeB.disabled = st.phase === 'loading';
+    for (const b of seApplyBusy) b.disabled = st.phase === 'loading';
+    const b = A.body;
+    b.textContent = '';    // container-clear only; every string enters via textContent
+    const actRow = () => { const r = _saMk('div', 'sa-actions'); b.append(r); return r; };
+    const btn = (cls, key, en, fn) => {
+        const n = _saMk('button', cls, C.tf(key, en));
+        n.type = 'button'; n.onclick = fn; return n;
+    };
+    if (st.phase === 'confirm') {
+        // classic reset-confirm copy verbatim (_modal_settings_apply.html)
+        b.append(_saMk('p', 'sa-msg', C.tf('modal.model_settings.actions.reset_confirm',
+            'Reset every setting of this model? Sampling, acceleration, pinned/default flags, aliases and the display name all return to their defaults.')));
+        actRow().append(
+            btn('se-btn', 'models.manager.delete_no', 'No', () => closeSettingsApply()),
+            btn('se-btn danger sa-yes', 'models.manager.delete_yes', 'Yes', () => runSettingsApply()));
+    } else if (st.phase === 'input') {
+        b.append(_saMk('p', 'sa-msg', C.tf('modal.model_settings.actions.recipe_hint',
+            'Paste a recipe copied from the Recipe row of a benchmark detail page on omlx.ai.')));
+        const link = _saMk('a', 'sa-link', C.tf('modal.model_settings.actions.none_link',
+            'Open community benchmarks'));
+        link.href = 'https://omlx.ai/benchmarks/performance';
+        link.target = '_blank'; link.rel = 'noopener';
+        b.append(link);
+        const ta = _saMk('textarea', 'sa-recipe');
+        ta.rows = 5; ta.spellcheck = false;
+        ta.placeholder = C.tf('modal.model_settings.actions.recipe_placeholder', 'omlx-recipe:1:...');
+        ta.value = st.recipeText || '';
+        b.append(ta);
+        const row = actRow();
+        const ap = btn('se-btn sa-apply', 'modal.model_settings.actions.apply', 'Apply', () => runSettingsApply());
+        ta.oninput = () => { st.recipeText = ta.value; ap.disabled = !ta.value.trim(); };
+        ap.disabled = !String(st.recipeText || '').trim();
+        row.append(
+            btn('se-btn', 'modal.model_settings.cancel', 'Cancel', () => closeSettingsApply()),
+            ap);
+    } else if (st.phase === 'loading') {
+        b.append(_saMk('p', 'sa-msg sa-loading', '\u27f3 ' + SETTINGS_APPLY.loadingText(st)));
+    } else if (st.phase === 'choose') {
+        b.append(_saMk('p', 'sa-msg', C.tf('modal.model_settings.actions.choose_hint',
+            'Pick a benchmark result to apply its settings. Rows are the best matches for this chip and model with the same or less memory, at a 4k prompt.')));
+        for (const g of SETTINGS_APPLY.groups(st)) {
+            b.append(_saMk('div', 'sa-group-label', g.label));
+            for (const item of g.items) {
+                const cand = _saMk('div', 'sa-cand');
+                const info = _saMk('div', 'sa-cand-info');
+                const a = _saMk('a', 'sa-link sa-cand-url', item.benchmark_url || item.benchmark_id);
+                if (item.benchmark_url) { a.href = item.benchmark_url; a.target = '_blank'; a.rel = 'noopener'; }
+                info.append(a, _saMk('div', 'sa-cand-stats', SETTINGS_APPLY.stats(item)));
+                cand.append(info, btn('se-btn sa-apply', 'modal.model_settings.actions.apply',
+                    'Apply', () => applyOptimalCandidate(item.benchmark_id)));
+                b.append(cand);
+            }
+        }
+        actRow().append(btn('se-btn', 'modal.model_settings.actions.close', 'Close',
+            () => closeSettingsApply()));
+    } else if (st.phase === 'done') {
+        b.append(_saMk('p', 'sa-msg sa-done', SETTINGS_APPLY.doneText(st)));
+        if (st.result && st.result.benchmark_url) {
+            const p = _saMk('p', 'sa-cand-done');
+            const a = _saMk('a', 'sa-link', st.result.benchmark_url);
+            a.href = st.result.benchmark_url; a.target = '_blank'; a.rel = 'noopener';
+            p.append(a, _saMk('div', 'sa-cand-stats', SETTINGS_APPLY.stats(st.result)));
+            b.append(p);
+        }
+        const skipped = (st.result && st.result.skipped) || [];
+        if (skipped.length) {
+            // classic amber box: features this install cannot run, dropped
+            const box2 = _saMk('div', 'sa-skipped');
+            box2.append(_saMk('div', 'sa-skipped-title',
+                C.tf('modal.model_settings.actions.skipped_title', 'Skipped on this machine')));
+            const ul = _saMk('ul', 'sa-skipped-list');
+            for (const s of skipped) ul.append(_saMk('li', null, s.feature + ': ' + s.reason));
+            box2.append(ul);
+            b.append(box2);
+        }
+        if (st.mode !== 'reset') {
+            // readonly applied-JSON preview (classic skips it for reset —
+            // there is nothing interesting to show for 'back to defaults')
+            b.append(_saMk('label', 'sa-applied-label',
+                C.tf('modal.model_settings.actions.applied_settings', 'Applied settings')));
+            const ta = _saMk('textarea', 'sa-applied');
+            ta.readOnly = true; ta.rows = 10; ta.spellcheck = false;
+            ta.value = SETTINGS_APPLY.appliedJson(st);
+            b.append(ta);
+        }
+        actRow().append(btn('se-btn', 'modal.model_settings.actions.close', 'Close',
+            () => closeSettingsApply()));
+    } else if (st.phase === 'none') {
+        b.append(_saMk('p', 'sa-msg', C.tf('modal.model_settings.actions.none_title',
+            'No benchmark result matches this device and model.')));
+        b.append(_saMk('p', 'sa-sub', C.tf('modal.model_settings.actions.none_body',
+            'Find a similar model on the community benchmarks and apply its recipe with Apply custom recipe.')));
+        const link = _saMk('a', 'sa-link', C.tf('modal.model_settings.actions.none_link',
+            'Open community benchmarks'));
+        link.href = (st.result && st.result.search_url)
+            || 'https://omlx.ai/benchmarks/performance';
+        link.target = '_blank'; link.rel = 'noopener';
+        b.append(link);
+        actRow().append(btn('se-btn', 'modal.model_settings.actions.close', 'Close',
+            () => closeSettingsApply()));
+    } else if (st.phase === 'error') {
+        b.append(_saMk('p', 'sa-msg', C.tf('modal.model_settings.actions.error_title',
+            'Could not apply settings')));
+        b.append(_saMk('p', 'sa-error', st.error));
+        const row = actRow();
+        if (SETTINGS_APPLY.canBack(st))
+            row.append(btn('se-btn', 'modal.model_settings.actions.back', 'Back',
+                () => { SETTINGS_APPLY.back(st); renderSettingsApply(); }));
+        row.append(btn('se-btn', 'modal.model_settings.actions.close', 'Close',
+            () => closeSettingsApply()));
+    }
+}
+async function loadOptimalCandidates() {
+    const A = seApplyOverlay; if (!A) return;
+    try {
+        const data = await MM_GLUE.fetchJson(_saUrl('optimal'));
+        if (seApplyOverlay !== A) return;                 // closed mid-flight
+        SETTINGS_APPLY.onCandidates(A.st, data);
+    } catch (e) {
+        if (seApplyOverlay !== A) return;
+        SETTINGS_APPLY.onError(A.st, String((e && e.message) || e));
+    }
+    if (seApplyOverlay === A) renderSettingsApply();
+}
+async function applyOptimalCandidate(benchmarkId) {
+    const A = seApplyOverlay; if (!A) return;
+    SETTINGS_APPLY.beginLoading(A.st); renderSettingsApply();
+    try {
+        const data = await MM_GLUE.postJson(_saUrl('optimal'), { benchmark_id: benchmarkId });
+        SETTINGS_APPLY.onApplied(A.st, data);
+        renderSettingsApply();
+        await seOnSettingsApplied(data);
+    } catch (e) {
+        SETTINGS_APPLY.onError(A.st, String((e && e.message) || e));
+        renderSettingsApply();
+    }
+}
+async function runSettingsApply() {
+    const A = seApplyOverlay; if (!A) return;
+    SETTINGS_APPLY.beginLoading(A.st); renderSettingsApply();
+    try {
+        const data = A.st.mode === 'recipe'
+            ? await MM_GLUE.postJson(_saUrl('recipe'), SETTINGS_APPLY.recipeBody(A.st))
+            : await MM_GLUE.postJson(_saUrl('reset'), null);   // classic sends a bodyless POST
+        SETTINGS_APPLY.onApplied(A.st, data);
+        renderSettingsApply();
+        await seOnSettingsApplied(data);
+    } catch (e) {
+        SETTINGS_APPLY.onError(A.st, String((e && e.message) || e));
+        renderSettingsApply();
+    }
+}
+async function seOnSettingsApplied(data) {
+    /* classic _applySettingsResponse (dashboard.js:3548): rebuild the form
+       from the server answer, refresh the model rows, then name the reload
+       consequence. Uplift rebuild = a full openEditor (settings + deferred
+       + profiles + divergence all moved server-side); alerts become toasts. */
+    const A = seApplyOverlay;
+    const model = (A && A.model) || seModel;
+    try {
+        if (seReloadAfterApply) await seReloadAfterApply(model);
+        else if (model) await openEditor(model, seWantProfile);
+    } catch (_) { /* the toast below still tells the truth about the write */ }
+    if (data && data.requires_reload) {
+        if (data.auto_reloaded)
+            MM_GLUE.toast(C.tf('js.info.model_settings_auto_reloaded',
+                'Settings saved. The pinned model was reloaded with the new settings.'));
+        else if (data.auto_unloaded)
+            MM_GLUE.toast(C.tf('js.info.model_settings_auto_unloaded',
+                'Settings saved. The model was unloaded and will reload with the new settings on next use.'));
+        else if (data.reload_deferred)
+            MM_GLUE.toast(C.tf('js.info.model_settings_reload_deferred',
+                'Settings saved. The model is busy, so it will unload after its current work finishes and reload with the new settings on next use.'));
+        else
+            MM_GLUE.toast(C.tf('js.info.model_type_reload_required',
+                'Model type changed. Unload and reload the model for the change to take effect.'));
+    }
+}
+
+/* ---- UP-30: profile-management depth (classic modal :202-235, :276-332) --
+   Pure helpers first (tests/u30-profile-management.test.cjs drives them over
+   classic-shaped rows), then the picker-row wiring that replaces the old
+   unconfirmed one-click delete.                                            ---- */
+const SE_PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;  // classic isValidProfileName (dashboard.js:2338)
+function isValidProfileName(name) {
+    return SE_PROFILE_NAME_RE.test((name || '').trim());
+}
+function profileFieldsPatch(f) {
+    /* classic updateProfileFromEdit (dashboard.js:2472): the internal name
+       stays stable, the PUT carries exactly these four fields (a server PUT
+       keeps None-valued siblings, so '' for description really clears it). */
+    const displayName = String(f.display_name == null ? '' : f.display_name).trim();
+    const apiName = String((f.api_name == null || f.api_name === '')
+        ? (f.name || '') : f.api_name).trim();
+    const description = String(f.description == null ? '' : f.description).trim();
+    const exposeAsModel = !!f.expose_as_model;
+    if (!displayName)
+        return { error: C.tf('js.error.name_required', 'Name required') };
+    if (!isValidProfileName(apiName))
+        return { error: C.tf('modal.model_settings.profiles.invalid_name',
+            'API name must be lowercase letters, digits, underscore, or dash (1-32 chars)') };
+    return { patch: { display_name: displayName, api_name: apiName,
+                      description: description, expose_as_model: exposeAsModel } };
+}
+function nextDeleteState(cur, name, ev) {
+    /* Two-step inline delete (classic profileDeleteConfirm + delete_yes/
+       delete_no buttons, never window.confirm): 'ask' arms one row, 'no'
+       disarms, 'yes' fires ONLY while that same row is armed. */
+    if (ev === 'ask') return name;
+    if (ev === 'no') return null;
+    if (ev === 'yes') return cur === name ? 'FIRE' : null;
+    return cur;
+}
+function resyncTargetTemplate(p, templates) {
+    /* classic RESYNC button (:276-332) renders only for a profile that
+       names a source_template; a template the store lost is a no-op. */
+    if (!p || !p.source_template) return null;
+    return (templates || []).find(t => t.name === p.source_template) || null;
+}
+function profileOptionLabel(p, diverging) {
+    return (p.display_name || p.name) + (diverging ? ' \u26a0' : '');
+}
+function profileOptionTitle(p) {
+    /* classic pill tooltip (profileTooltip dashboard.js:1822) + the amber
+       engine-field warning (:276-332 API badge: has_engine_fields reads as
+       a warning, plain expose reads green). */
+    const lines = [];
+    if (p.expose_as_model && p.model_id) lines.push(p.model_id);
+    const d = (p.description || '').trim();
+    if (d) lines.push(d);
+    if (p.expose_as_model)
+        lines.push(C.tf('modal.model_settings.profiles.'
+            + (p.has_engine_fields ? 'expose_engine_fields_hint' : 'expose_as_model'),
+            p.has_engine_fields
+                ? "Engine-level settings in this profile only take effect when it is applied to the base model \u2014 they don't change the exposed model."
+                : 'Use as API model'));
+    return lines.join('\n');
+}
+async function seApplyTemplateUpsert(model, tpl) {
+    // Classic applyTemplateToForm: template is source of truth — upsert the
+    // model profile from it, then apply the profile. Shared by the
+    // templates row and the UP-30 RESYNC FROM TEMPLATE verb.
+    const prof = `${API}/admin/api/models/${encodeURIComponent(model)}/profiles`;
+    await MM_GLUE.postJson(prof,
+        { name: tpl.name, display_name: tpl.display_name || tpl.name,
+          description: tpl.description || null,
+          settings: tpl.settings || {}, source_template: tpl.name });
+    await MM_GLUE.postJson(`${prof}/${encodeURIComponent(tpl.name)}/apply`, null);
+}
+function seProfileEditDialog(dlg, model, host, name) {
+    /* classic 'Edit profile inline dialog' (_modal_model_settings.html:202-235):
+       display_name / api_name + expose / description, and the three verbs —
+       SAVE fields (updateProfileFromEdit), UPDATE SETTINGS FROM FORM
+       (updateProfileSettingsFromForm, dashboard.js:2496), RESYNC FROM
+       TEMPLATE (only while p.source_template names a live template).
+       The internal profile name stays stable — api_name is the exposed
+       suffix, classic comment dashboard.js:2473. */
+    const p = (MM_DATA.profiles || []).find(x => x.name === name);
+    if (!p) { MM_GLUE.toast(C.tf('uplift.mm.profile_missing', 'profile not found: ') + name); return; }
+    dlg.hidden = false;
+    dlg.textContent = '';   // container-clear only; every string enters via textContent
+    const cap = document.createElement('div');
+    cap.className = 'se-pedit-cap dim';
+    cap.textContent = p.name;                 // the stable internal id
+    dlg.append(cap);
+    const mkRow = (key, en, val) => {
+        const lab = document.createElement('label'); lab.className = 'se-row pedit-row';
+        const cp = document.createElement('span'); cp.textContent = C.tf(key, en);
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.value = val == null ? '' : val;
+        lab.append(cp, inp); dlg.append(lab);
+        return inp;
+    };
+    const dIn = mkRow('modal.model_settings.profiles.display_name_label',
+        'Display name', p.display_name || p.name);
+    const aIn = mkRow('modal.model_settings.profiles.name_placeholder',
+        'API name e.g. coding-v1', p.api_name || p.name);
+    const expLab = document.createElement('label'); expLab.className = 'se-row pedit-row';
+    const expBox = document.createElement('input');
+    expBox.type = 'checkbox'; expBox.checked = !!p.expose_as_model;
+    const expTxt = document.createElement('span');
+    expTxt.textContent = ' ' + C.tf('modal.model_settings.profiles.expose_as_model',
+        'Use as API model');
+    expLab.append(expBox, expTxt); dlg.append(expLab);
+    const descIn = mkRow('modal.model_settings.profiles.description_label',
+        'Description (optional)', p.description || '');
+    const err = document.createElement('div');
+    err.className = 'se-pedit-err'; err.hidden = true;
+    dlg.append(err);
+    const showErr = msg => { err.textContent = msg || ''; err.hidden = !msg; };
+    const row = document.createElement('div'); row.className = 'se-pedit-actions';
+    const btn = (key, en, fn) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'se-btn'; b.textContent = C.tf(key, en);
+        b.onclick = fn; row.append(b); return b;
+    };
+    btn('modal.model_settings.profiles.save', 'Save', saveFields);
+    btn('modal.model_settings.profiles.update_from_form',
+        'Update to current form values', saveSettingsFromForm);
+    if (resyncTargetTemplate(p, MM_DATA.templates))
+        btn('modal.model_settings.profiles.resync_template',
+            'Re-sync from template', resync);
+    btn('modal.model_settings.profiles.cancel', 'Cancel',
+        () => { dlg.hidden = true; dlg.textContent = ''; });
+    dlg.append(row);
+    async function saveFields() {
+        const res = profileFieldsPatch({ display_name: dIn.value,
+            api_name: aIn.value, description: descIn.value,
+            expose_as_model: expBox.checked, name: p.name });
+        if (res.error) { showErr(res.error); return; }
+        showErr('');
+        try {
+            await MM_GLUE.putJson(`${API}/admin/api/models/${encodeURIComponent(model)}/profiles/${encodeURIComponent(p.name)}`, res.patch);
+            MM_GLUE.toast(C.t('uplift.toast.saved_profile',
+                { name: res.patch.display_name }));
+            // the tab owning this profile mirrors the stored truth (its
+            // label/badges repaint from the store on the reload below)
+            const t = seTabs.find(z => z.profileId === p.name);
+            if (t) {
+                t.display_name = res.patch.display_name;
+                t.api_name = res.patch.api_name;
+                t.expose_as_model = res.patch.expose_as_model;
+            }
+            dlg.hidden = true;
+            seLoadProfiles(model, host);
+        } catch (e) { showErr(String((e && e.message) || e)); }
+    }
+    async function saveSettingsFromForm() {
+        showErr('');
+        try {
+            seCaptureTab();
+            const t = seTab();
+            let vals = (t && (t.workVals || seValues)) || seValues;
+            if (vals.ctKwargEntries) {   // kwargs ride the payload shape (same rule as saveProfileCommit)
+                const kw = window.UpliftModelSpec.buildPayload(vals, seFormModel);
+                vals = Object.assign({}, vals, { chat_template_kwargs: kw.chat_template_kwargs,
+                                                 forced_ct_kwargs: kw.forced_ct_kwargs });
+            }
+            let ov = seProfileSettingsFrom(vals);
+            ov = window.UpliftModelSpec.adaptToServerSettings(
+                ov, await MM_GLUE.modelSettingsFields());
+            await MM_GLUE.putJson(`${API}/admin/api/models/${encodeURIComponent(model)}/profiles/${encodeURIComponent(p.name)}`,
+                { settings: ov });
+            MM_GLUE.toast(C.t('uplift.toast.saved_profile',
+                { name: p.display_name || p.name }));
+            dlg.hidden = true;
+            seLoadProfiles(model, host);
+        } catch (e) { showErr(String((e && e.message) || e)); }
+    }
+    async function resync() {
+        const tpl = resyncTargetTemplate(p, MM_DATA.templates);
+        if (!tpl) return;
+        showErr('');
+        try {
+            await seApplyTemplateUpsert(model, tpl);
+            MM_GLUE.toast(C.t('uplift.toast.applied_template',
+                { name: tpl.display_name || tpl.name }));
+            dlg.hidden = true;
+            // the server moved active_profile_name — full refresh (the same
+            // injectable reload seam the snapshot-apply flow uses)
+            if (seReloadAfterApply) await seReloadAfterApply(model);
+            else openEditor(model);
+        } catch (e) { showErr(String((e && e.message) || e)); }
+    }
+}
+
 
 /* After a successful phase-1 save every dirty key is persisted (live keys
    in the classic store, runtime keys in the deferred store), so the tab's
@@ -3407,6 +4176,21 @@ async function saveProfileTab(panel) {
         if (btn) btn.disabled = seDirtyKeys().length === 0;
     }
 }
+function seProfileSettingsFrom(vals) {
+    // only keys that differ from base persist (inheritance semantics) —
+    // the same diff saveProfileCommit runs, shared so the UP-30
+    // 'update to current form values' verb cannot drift from the save path.
+    // Lives INSIDE the saveProfileTab..exports region: the sliced harnesses
+    // (bug6-profile-save, u84-save-all-tabs) run that block in their own
+    // sandbox and must find this helper in scope.
+    const ov = {};
+    for (const [k, v] of Object.entries(vals || {})) {
+        if (k === 'ctKwargEntries' || k === 'model_alias') continue;
+        if (v === undefined) continue;
+        if (JSON.stringify(v) !== JSON.stringify(seBaseVals[k])) ov[k] = v;
+    }
+    return ov;
+}
 async function saveProfileCommit(panel, t, name, msg) {
     // full modelspec-shaped settings + inheritable validation via base merge
     const mergedForValidate = Object.assign({}, seBaseVals,
@@ -3421,13 +4205,11 @@ async function saveProfileCommit(panel, t, name, msg) {
         t.workVals.chat_template_kwargs = kw.chat_template_kwargs;
         t.workVals.forced_ct_kwargs = kw.forced_ct_kwargs;
     }
-    // only keys that differ from base persist (inheritance semantics)
-    let ov = {};
-    for (const [k, v] of Object.entries(t.workVals || {})) {
-        if (k === 'ctKwargEntries' || k === 'model_alias') continue;
-        if (v === undefined) continue;
-        if (JSON.stringify(v) !== JSON.stringify(seBaseVals[k])) ov[k] = v;
-    }
+    // only keys that differ from base persist (inheritance semantics) —
+    // UP-30: the diff loop now lives in seProfileSettingsFrom, shared with
+    // the 'Update to current form values' verb (same semantics, one code
+    // path; pinned by tests/u30-profile-management.test.cjs)
+    let ov = seProfileSettingsFrom(t.workVals);
     // version adaptation: an older server drops unknown keys from profile
     // settings (silent mis-save) — translate renamed fields first.
     // BUG-6 root cause: `ov` used to be const and reassigned here — a
@@ -3472,6 +4254,44 @@ window.Uplift.mmEditor = {
     closeEditor: closeEditor,
     get seModel() { return seModel; },
     data: MM_DATA,          // FE-6: shared store (was window.__se*)
+    /* UP-20/UP-30 test seams (the _dl14/_up22 pattern from the downloader):
+       the vm harnesses drive the pure machine + the modal/picker shells;
+       no runtime consumer outside this file. */
+    _u20: {
+        SETTINGS_APPLY, genDefaultsPatch, SE_GEN_SET_KEYS, SE_GEN_CLEAR,
+        seApplyGenDefaults, openSettingsApply, closeSettingsApply,
+        renderSettingsApply, runSettingsApply, applyOptimalCandidate,
+        loadOptimalCandidates, seOnSettingsApplied, seSnapshotActions,
+        // install/inspect editor state headless (openEditor is a full page
+        // fetch chain a vm cannot drive); assignment only — no logic here
+        inject(o) {
+            if ('seModel' in o) seModel = o.seModel;
+            if ('seValues' in o) seValues = o.seValues;
+            if ('seOrig' in o) seOrig = o.seOrig;
+            if ('seBaseVals' in o) seBaseVals = o.seBaseVals;
+            if ('seTabs' in o) seTabs = o.seTabs;
+            if ('seActiveTab' in o) seActiveTab = o.seActiveTab;
+            if ('seFormModel' in o) seFormModel = o.seFormModel;
+        },
+        get live() {
+            return { seModel, seValues, seOrig, seBaseVals,
+                     seTabs, seActiveTab };
+        },
+        get state() { return seApplyOverlay && seApplyOverlay.st; },
+        // a full openEditor is un-driveable headless; tests install a
+        // recorder here and assert the post-apply reload fires on it
+        get reloadHook() { return seReloadAfterApply; },
+        set reloadHook(fn) { seReloadAfterApply = fn; },
+        get MM_GLUE_kit() {   // proves the MM_GLUE.postJson wiring fix
+            return { postJson: MM_GLUE.postJson, putJson: MM_GLUE.putJson,
+                     deleteJson: MM_GLUE.deleteJson }; },
+    },
+    _u30: {
+        isValidProfileName, profileFieldsPatch, nextDeleteState,
+        resyncTargetTemplate, profileOptionLabel, profileOptionTitle,
+        seProfileSettingsFrom, seApplyTemplateUpsert, seProfileEditDialog,
+        seLoadProfiles,
+    },
 };
 window.Uplift.mmData = MM_DATA;   // loaded early; mmtemplates fills .templates
 })();

@@ -27,6 +27,17 @@ const MMF = {
    (caught on tab entry, which renders force). The soft 8 s Manager tick
    repaints from cache instead of refetching. */
 const TPL_TTL_MS = 60000;
+/* UP-30 two-step delete state machine — same shape as uplift_mmeditor.js
+   nextDeleteState (classic templateDeleteConfirm + delete_yes/no pills,
+   _modal_model_settings.html:139-154): 'ask' arms, 'no' disarms, 'yes'
+   fires ONLY while armed. Kept per-row (cur boolean), one row per
+   template. Pinned by tests/u30-profile-management.test.cjs. */
+function u30DelState(cur, ev) {
+    if (ev === 'ask') return true;
+    if (ev === 'no') return false;
+    if (ev === 'yes') return cur ? 'FIRE' : false;
+    return !!cur;
+}
 let _tpl = null, _tplAt = 0;
 function renderTemplatesBox(force) {
     const host = $('ms-templates');
@@ -59,13 +70,39 @@ function renderTemplatesBox(force) {
             del.className = 'se-btn act danger'; del.textContent = 'DELETE SETTINGS';
             del.title = C.tf('uplift.ui.delete_global_template',
                 'Delete this global template (stored settings bundle)');
-            del.onclick = () => MMF.confirmDialog('Delete template',
-                `Delete the global template "${t.display_name || t.name}"? Models and profiles already created from it keep their own settings.`,
-                async () => {
+            // UP-30 (classic template pills :139-154): TWO-STEP inline
+            // delete — the trash arms a Yes/No pair right on the row
+            // (models.manager.delete_yes/no), a click elsewhere on No
+            // re-arms. No dialog, no window.confirm; one armed row at a
+            // time is per-row state, matching classic's templateDeleteConfirm.
+            const yes = document.createElement('button');
+            yes.className = 'se-btn act danger';
+            yes.textContent = C.tf('models.manager.delete_yes', 'Yes');
+            yes.hidden = true;
+            const no = document.createElement('button');
+            no.className = 'se-btn act';
+            no.textContent = C.tf('models.manager.delete_no', 'No');
+            no.hidden = true;
+            let armed = false;
+            const paintDel = () => {
+                del.hidden = armed; yes.hidden = !armed; no.hidden = !armed;
+            };
+            del.onclick = () => { armed = u30DelState(false, 'ask'); paintDel(); };
+            no.onclick = () => { armed = u30DelState(armed, 'no'); paintDel(); };
+            yes.onclick = async () => {
+                if (u30DelState(armed, 'yes') !== 'FIRE') {
+                    armed = false; paintDel(); return;
+                }
+                armed = false; paintDel();
+                try {
                     await D.deleteJson(`${API}/admin/api/profile-templates/${encodeURIComponent(t.name)}`);
                     _tpl = null;   // POLL-BATCH: a delete IS a write — invalidate
-                }, `Deleted template: ${t.display_name || t.name}`);
-            aDel.append(del);
+                    renderTemplatesBox(true);
+                } catch (e) {
+                    D.toast((e && e.message) || String(e), 'error');
+                }
+            };
+            aDel.append(del, yes, no);
             const aEdit = document.createElement('span'); aEdit.className = 'act-col right';
             const ed = document.createElement('button');
             ed.className = 'se-btn act edit'; ed.textContent = 'EDIT';
@@ -99,5 +136,7 @@ function init() {
 window.Uplift.mmTemplates = { render: renderTemplatesBox, init: init,
     // POLL-BATCH: write paths that create templates OUTSIDE the box (the
     // editor's snapshot-to-template POST) must invalidate the cache too.
-    invalidate: () => { _tpl = null; } };
+    invalidate: () => { _tpl = null; },
+    // UP-30 test seam (no runtime consumer): the two-step delete machine
+    _u30: { u30DelState } };
 })();

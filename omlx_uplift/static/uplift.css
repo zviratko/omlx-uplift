@@ -3704,3 +3704,87 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     margin-right: 4px;
 }
 .chip.up-update-chip[hidden] { display: none; }
+
+/* ===== UP-20/UP-30 lane (snapshot actions, profile depth) ===== */
+/* lane-mmeditor.css — UP-20 (1,2,3) + UP-30 editor-lane additions.
+   Merge into uplift.css (owner: orchestrator). EVERY selector here is NEW
+   (css2-no-dup-safe: no existing rule is re-opened; .editor-head / .se-box /
+   h5.se-section are targeted only through the new descendants). Rectangular
+   radii derive from var(--radius) (nat4/U82 rule); the drift dot is a 50 %
+   circle, an accepted exception. */
+
+/* ---- UP-20 (1,2): title-bar snapshot actions + apply modal ---- */
+.editor-head .se-snap-actions { float: right; display: inline-flex; gap: 6px;
+    margin: -2px 0 -2px 10px; }
+.editor-head .sa-head-btn { font-size: 11px; padding: 3px 10px;
+    border-radius: var(--radius); }
+.sa-overlay { z-index: 80; }              /* above the editor modal (70) */
+.modal.sa-box { max-width: 620px; width: min(620px, 92vw); }
+.modal.sa-box .sa-head { display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; margin: 0 0 10px; }
+.modal.sa-box .sa-head .sa-title { min-width: 0; overflow-wrap: anywhere; }
+.modal.sa-box .sa-body { display: flex; flex-direction: column; gap: 10px; }
+.sa-box .sa-msg { margin: 0; font-size: 12px; line-height: 1.5; }
+.sa-box .sa-sub { margin: 0; font-size: 12px; color: var(--dim); }
+.sa-box .sa-link { font-size: 12px; color: var(--accent); overflow-wrap: anywhere; }
+.sa-box .sa-error { margin: 0; font-size: 12px; color: var(--red);
+    overflow-wrap: anywhere; }
+.sa-box .sa-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.sa-box .sa-recipe, .sa-box .sa-applied { font: 400 11px/1.45 var(--mono);
+    border: 1px solid var(--edge); border-radius: var(--radius);
+    padding: 8px 10px; background: var(--bg); resize: vertical; }
+.sa-box .sa-applied[readonly] { color: var(--dim); background: var(--row2); }
+.sa-box .sa-applied-label { font-size: 11px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--dim); }
+.sa-box .sa-group-label { font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
+    margin-top: 4px; }
+.sa-box .sa-cand { display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--edge); border-radius: var(--radius);
+    padding: 8px 10px; background: var(--bg); }
+.sa-box .sa-cand-info { min-width: 0; flex: 1 1 auto;
+    display: flex; flex-direction: column; gap: 3px; }
+.sa-box .sa-cand-url { font: 400 11px/1.4 var(--mono); }
+.sa-box .sa-cand-stats { font-size: 11px; color: var(--dim); }
+/* classic amber skipped-features box */
+.sa-box .sa-skipped { border: 1px solid var(--warn); color: var(--amber);
+    background: color-mix(in srgb, var(--warn) 12%, var(--bg));
+    border-radius: var(--radius); padding: 8px 10px; font-size: 11px; }
+.sa-box .sa-skipped-title { font-weight: 700; margin-bottom: 4px; }
+.sa-box .sa-skipped-list { margin: 0; padding-left: 18px;
+    display: flex; flex-direction: column; gap: 2px; }
+
+/* ---- UP-20 (3): Load Defaults rides the generation section header ---- */
+.se-box h5.se-section .se-gen-load { float: right; font-size: 11px;
+    padding: 2px 10px; margin: -2px 0 -2px 10px; border-radius: var(--radius);
+    text-transform: none; }
+
+/* ---- UP-30: profile picker row, edit dialog, API pills, drift dot ---- */
+.se-prof-row .se-drift-dot { width: 8px; height: 8px; flex: 0 0 auto;
+    border-radius: 50%; background: var(--warn);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 30%, transparent); }
+.se-prof-row .se-drift-dot[hidden] { display: none; }
+/* classic pill vocabulary on the tab strip: green = request-time only,
+   amber = the profile carries engine (load-time) fields */
+.se-tab .se-tab-api { margin-left: 6px; padding: 0 5px; font-size: 9px;
+    font-weight: 700; letter-spacing: .05em; border: 1px solid currentColor;
+    border-radius: var(--radius); vertical-align: 1px; }
+.se-tab .se-tab-api.api-ok { color: var(--ok); }
+.se-tab .se-tab-api.api-eng { color: var(--amber); }
+/* the classic pencil-dialog, inline under the picker row */
+.se-pedit { border: 1px solid var(--edge); border-radius: var(--radius);
+    background: var(--bg); margin: 6px 0; padding: 8px 10px;
+    display: flex; flex-direction: column; gap: 6px; }
+.se-pedit[hidden] { display: none; }
+.se-pedit .se-pedit-cap { font: 400 10px/1 var(--mono); }
+.se-pedit .pedit-row { display: flex; align-items: center; gap: 8px;
+    font-size: 11px; }
+.se-pedit .pedit-row > span { flex: 0 0 150px; color: var(--dim); }
+.se-pedit .pedit-row > input[type="text"] { flex: 1 1 auto; min-width: 0;
+    font-size: 12px; padding: 4px 8px; border: 1px solid var(--edge);
+    border-radius: var(--radius); background: var(--bg); color: inherit; }
+.se-pedit .pedit-row > input[type="checkbox"] { flex: 0 0 auto; }
+.se-pedit .se-pedit-err { color: var(--red); font-size: 11px; }
+.se-pedit .se-pedit-err[hidden] { display: none; }
+.se-pedit .se-pedit-actions { display: flex; flex-wrap: wrap; gap: 8px;
+    justify-content: flex-end; }
