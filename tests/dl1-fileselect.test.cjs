@@ -268,6 +268,10 @@ test('UP-17: dialog tabs mirror classic (Model Card | Files (n) | Tags)', () => 
     assert.match(SRC, /s\.className = 'dl-tag';\s*s\.textContent = t;/);
     assert.ok(SRC.includes("className = 'dl-meta'") && SRC.includes("'\\u2b07 '"),
         'meta chips (size, downloads, likes, params, pipeline)');
+    // small files never read '0 MiB' (classic formatFileSize tiers)
+    assert.match(SRC, /function dlSize\(bytes\)/);
+    assert.match(SRC, /return \(bytes \/ 1024\)\.toFixed\(1\) \+ ' KiB';/);
+    assert.match(SRC, /sz\.textContent = dlSize\(f\.size\);/);
 });
 test('house chrome: dialog reuses modal-overlay + modal nasa + icon-btn close', () => {
     assert.ok(SRC.includes("overlay.className = 'modal-overlay'"));

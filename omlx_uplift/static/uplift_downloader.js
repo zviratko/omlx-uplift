@@ -238,6 +238,15 @@ const HFS = {
 
 function dlToken() { return (D.$('dl-token') || {}).value?.trim() || ''; }
 
+// classic formatFileSize tiers (rows never read '0 MiB' for a 200-byte
+// file); large sizes keep the house binary-unit fmtBytes (GiB doctrine)
+function dlSize(bytes) {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KiB';
+    return C.fmtBytes(bytes);
+}
+
 let DLGS = null;   // global-settings in-flight cache (mirror endpoint + total RAM)
 function dlGlobalSettings() {
     if (!DLGS) DLGS = DG.fetchJson(`${API}/admin/api/global-settings`)
@@ -370,7 +379,7 @@ function openModelFiles(repoId) {
             }
             const sz = document.createElement('span');
             sz.className = 'dl-fsize';
-            sz.textContent = f.size ? C.fmtBytes(f.size) : '';
+            sz.textContent = dlSize(f.size);
             lb.append(sz);
             list.append(lb);
         }
@@ -466,11 +475,11 @@ function openModelFiles(repoId) {
             const allSz = HFS.allSize(detail);
             const all = mkBtn('btn', 'models.detail.download_all', 'Download all',
                 () => submit(null), sending || !HFS.fits(detail, allSz));
-            if (allSz) all.append(document.createTextNode(' ' + C.fmtBytes(allSz)));
+            if (allSz) all.append(document.createTextNode(' ' + dlSize(allSz)));
             const names = HFS.names(detail, picked);
             const sel = mkBtn('btn primary', 'models.detail.download_selected', 'Download selected',
                 () => submit(names), sending || !names.length || !HFS.fits(detail, bytes));
-            if (bytes) sel.append(document.createTextNode(' ' + C.fmtBytes(bytes)));
+            if (bytes) sel.append(document.createTextNode(' ' + dlSize(bytes)));
             foot.append(all, sel);
         } else {
             foot.append(dlBadge('ok', C.tf('models.browse.downloaded', 'Downloaded')));

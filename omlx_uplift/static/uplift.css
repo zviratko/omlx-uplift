@@ -3273,7 +3273,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* ---- UP-14 (2026-10-24): model-download dialog — file pick list ------ */
 /* Classic-parity file selection (modal-overlay + modal nasa house chrome).
    New class names only; every radius derives from var(--radius) (nat U82). */
-.dl-modal { width: min(760px, 100%); }
+.dl-modal { width: min(800px, 100%); }   /* classic's dialog width */
 .dl-body { flex: 1 1 auto; min-height: 0; overflow-y: auto;
     display: flex; flex-direction: column; gap: 8px; }
 .dl-files { border: 1px solid var(--line); }
