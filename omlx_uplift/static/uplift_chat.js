@@ -43,6 +43,8 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _turnParams = null,   // U78: EFFECTIVE sampling snapshot of the in-flight turn
     _turnUsage = null,    // UP-38: accumulated token usage of the in-flight turn
     _turnT0 = 0, _turnFirstTok = 0,   // UP-38: wall clocks for gen t/s
+    _mcpTools = [],   // UP-15: classic fetchMcpTools (chat.html:4443) — offered
+                      // alongside web tools exactly like activeTools() :4418
     _ctxRender = null,    // UP-16: mount-time handle to the ctx ring renderer
     _thinkLive = '',   // reasoning deltas of the in-flight turn (live-only)
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
@@ -855,7 +857,10 @@ async function shapeRequest(d) {
     // token counts; they ride the footer chip, never the settings row.
     body.stream_options = { include_usage: true };
     _turnT0 = Date.now(); _turnFirstTok = 0;   // UP-38: clocks
-    if (_webSearch) body.tools = WEB_TOOLS;   // 5/6 toggle-gated
+    // 5/6 toggle-gated web tools + UP-15 MCP tools — classic activeTools()
+    // (:4418) sends builtin web AND MCP together when either is available.
+    var act = (_webSearch ? WEB_TOOLS : []).concat(_mcpTools);
+    if (act.length) body.tools = act;
     // U46: classic spreads the per-session sampling snapshot into the body
     // (buildChatCompletionBody ...generation); thinking fields keep
     // priority below because the mode select is the explicit UI for them.
@@ -933,6 +938,56 @@ function accumulateToolCall(map, d) {
         tc.function.arguments += d.function.arguments;
 }
 
+function fetchMcpTools() {
+    // UP-15: classic chat.html:4443 — MCP is optional; absent config or a
+    // dead server leaves the list empty, never an error state.
+    return fetch('/v1/mcp/tools', { headers: { 'Authorization': 'Bearer ' + _key } })
+        .then(function (r) { if (!r.ok) return null; return r.json(); })
+        .then(function (d) {
+            _mcpTools = ((d && d.tools) || []).map(function (t) {
+                return { type: 'function', function: {
+                    name: t.name, description: t.description || '',
+                    parameters: t.parameters || { type: 'object', properties: {} } } };
+            });
+        }).catch(function () { /* MCP not configured — classic's own comment */ });
+}
+
+// UP-15: classic splitToolContent/toolBlobPart (chat.html :228135). One
+// 768x768 PNG is ~1MB of base64 the model cannot read and that can evict
+// the chat from a small window — images split to the USER, the model gets
+// the note. Classic's exact keys for both notes.
+function toolBlobPart(part) {
+    if (!part || typeof part !== 'object') return null;
+    var mime = part.mime_type || part.mimeType;
+    if (typeof mime !== 'string' || !mime) return null;
+    if (typeof part.data !== 'string' || !part.data) return null;
+    return { mime: mime, data: part.data };
+}
+function splitToolContent(content) {
+    var parts = Array.isArray(content) ? content : [content];
+    var images = [], text = [], blobs = 0;
+    for (var i = 0; i < parts.length; i++) {
+        var part = parts[i];
+        var blob = toolBlobPart(part);
+        if (blob && blob.mime.indexOf('image/') === 0) {
+            images.push('data:' + blob.mime + ';base64,' + blob.data);
+        } else if (blob) {
+            blobs++;
+        } else if (typeof part === 'string') {
+            text.push(part);
+        } else if (part !== null && part !== undefined) {
+            text.push(JSON.stringify(part));
+        }
+    }
+    if (blobs) text.unshift(t('chat.tool_binary_note',
+        '[{count} binary attachment(s) returned by the tool]')
+        .replace('{count}', blobs));
+    if (images.length) text.unshift(t('chat.tool_images_note',
+        '[{count} image(s) returned by the tool and shown to the user]')
+        .replace('{count}', images.length));
+    return { content: text.join('\n'), images: images };
+}
+
 function executeTool(tc, signal) {
     // classic semantics (chat.html:6376-6420): web routes get the raw
     // args object; MCP gets {tool_name, arguments}; failures feed an
@@ -950,11 +1005,10 @@ function executeTool(tc, signal) {
         })
         .then(function (data) {
             if (req.url === '/v1/mcp/execute')
-                return typeof data.content === 'string' ? data.content
-                        : JSON.stringify(data.content == null ? data : data.content);
-            return JSON.stringify(data);
+                return splitToolContent(data.content == null ? data : data.content);
+            return { content: JSON.stringify(data), images: [] };
         })
-        .catch(function (e) { return 'Error: ' + (e.message || e); });
+        .catch(function (e) { return { content: 'Error: ' + (e.message || e), images: [] }; });
 }
 
 function transcribeAudio(file, model, signals, signal) {
@@ -1146,12 +1200,18 @@ function nativeHandler(_componentBody, signals) {
                 'Tool calls') + ' (' + args.map(function (tc) {
                     return tc.function.name; }).join(', ') + '):\n' });
             return Promise.all(args.map(function (tc) {
-                return executeTool(tc, controller.signal).then(function (content) {
+                return executeTool(tc, controller.signal).then(function (res) {
+                    var content = (res && res.content) || '';
                     msgs.push({ role: 'tool', tool_call_id: tc.id,
                                 content: content });
                     var preview = content.slice(0, 160).replace(/\s+/g, ' ');
                     signals.onResponse({ text: '  -> ' + tc.function.name +
                         ': ' + preview + (content.length > 160 ? '\u2026' : '') + '\n' });
+                    // UP-15: tool images land in the transcript as markdown
+                    // data-URLs (schemeGuard already whitelists data:image/;
+                    // the UP-32 lightbox makes them zoomable).
+                    for (var im = 0; im < ((res && res.images) || []).length; im++)
+                        signals.onResponse({ text: '\n![tool image](' + res.images[im] + ')\n' });
                 });
             })).then(once);   // next round with tool results appended
         });
@@ -1938,6 +1998,9 @@ function toolbar() {
         ctxRender();
         _ctxRender = ctxRender;   // openConv/newChat hook (module scope)
     }
+    if (typeof fetch === 'function') fetchMcpTools().catch(function () {});
+    // UP-15: classic's init-time MCP tool fetch (guarded: headless test
+    // harnesses stub fetch only after mount)
     var side = el('aside', 'chat-native-bar chat-native-side');
     side.append(secModel, secSys, secSamp, secVoice, secTools);
     var histTitle = el('span', 'chat-native-sec-title',
