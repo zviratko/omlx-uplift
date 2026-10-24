@@ -3338,3 +3338,15 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-ctx svg { flex: none; }
 .chat-ctx-num { font-size: 11px; color: var(--text-secondary, inherit); }
 .chat-ctx-pending { font-size: 11px; color: var(--text-tertiary, inherit); margin: 2px 0 4px; }
+
+/* UP-31: structured log rows (classic logs.js core over uplift's tail) */
+.logrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
+    cursor: pointer; white-space: pre-wrap; }
+.logrow .lt { color: var(--dim); flex: none; }
+.logrow .ll { flex: none; font-weight: 600; }
+.logrow .lm { flex: none; opacity: .7; }
+.logrow .lx { flex: 1 1 auto; min-width: 0; }
+.logrow:not(.open) .lx { display: -webkit-box; -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical; overflow: hidden; }
+.logrow .lgv { flex: none; color: var(--warn, #e8a020); font-size: 11px; }
+.logrow.lg-mem { border-left: 2px solid var(--warn, #e8a020); padding-left: 6px; }

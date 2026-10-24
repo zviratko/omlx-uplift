@@ -130,6 +130,89 @@ function relabelUsageRange() {
 $('opt-usage-range').onchange = e => { S.usageRange = e.target.value; pollUsage(); };
 
 /* ---------------- logs (Logs tab) ---------------- */
+/* UP-31: the classic viewer's pure core (admin logs.js:17-175) ported
+   verbatim — header-line records with continuation joins (tracebacks),
+   consecutive WARNING-or-above collapses into one counted row, and the
+   memory-guard advisories detected by the server's own number shapes.
+   Classic parses FIRST and level-filters during aggregation, so
+   continuation lines survive the filter; uplift's old flat filter did
+   not, this now matches classic exactly. */
+const LOG_LEVELS = ['TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
+const LOG_AGG_FROM = LOG_LEVELS.indexOf('WARNING');
+const LOG_HEADER = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - (.*?) - (TRACE|DEBUG|INFO|WARNING|ERROR|CRITICAL) - (?:\[.*?\] - )?([\s\S]*)$/;
+const LOG_MEMORY_GUARD = [
+    /process memory limit exceeded/,
+    /Prefill would require/,
+    /Hard memory pressure/,
+    /Aborted \d+ requests? due to memory pressure/,
+    /raise memory_guard_tier/,
+];
+function logLevelRank(level) {
+    return LOG_LEVELS.indexOf(String(level == null ? '' : level).toUpperCase());
+}
+function parseLogText(text, totalLines) {
+    const lines = String(text == null ? '' : text).split('\n');
+    if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    const first = Math.max(0, (totalLines || 0) - lines.length);
+    const records = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].replace(/\r$/, '');
+        const match = LOG_HEADER.exec(line);
+        const open = records[records.length - 1];
+        if (!match && open) { open.message += '\n' + line; open.lines += 1; continue; }
+        records.push({
+            key: 'L' + (first + i),
+            time: match ? match[1] : '',
+            module: match ? match[2] : '',
+            level: match ? match[3] : '',
+            message: match ? match[4] : line,
+            lines: 1,
+            continuation: !match,
+        });
+    }
+    return records;
+}
+function logNumberField(text, pattern) {
+    const match = text.match(pattern);
+    return match ? { value: parseFloat(match[1]), text: match[1] } : null;
+}
+function memoryGuardFor(message) {
+    const text = String(message == null ? '' : message);
+    if (!LOG_MEMORY_GUARD.some(p => p.test(text))) return null;
+    const current = logNumberField(text, /\(current ([\d.]+) GB/);
+    const ceiling = text.match(/\b[a-z_/]+ ceiling (?:is )?([\d.]+) GB/);
+    return {
+        usage: logNumberField(text, /\(usage ([\d.]+) GB/) || current,
+        watermark: logNumberField(text, /abort threshold \(hard watermark\) ([\d.]+) GB/),
+        ceiling: ceiling ? { value: parseFloat(ceiling[1]), text: ceiling[1] } : null,
+        peak: logNumberField(text, /require ~?([\d.]+) GB peak/),
+    };
+}
+function aggregateLogRows(records, minLevel) {
+    const minimum = logLevelRank(minLevel);
+    const rows = [];
+    let run = null, times = null;
+    const closeRun = () => {
+        if (!run) return;
+        if (run.count !== times.length) run.count = times.length;
+    };
+    for (const record of records || []) {
+        const rank = logLevelRank(record.level);
+        if (minimum > 0 && rank >= 0 && rank < minimum) { closeRun(); run = null; continue; }
+        if (run && rank >= LOG_AGG_FROM && run.rank === rank
+            && record.module === run.module && record.message === run.message) {
+            times.push(record.time);
+            continue;
+        }
+        closeRun();
+        run = Object.assign({}, record, { rank, count: 1,
+            memory: memoryGuardFor(record.message) });
+        times = [record.time];
+        rows.push(run);
+    }
+    closeRun();
+    return rows;
+}
 let logsFilesLoaded = false, logsFollow = true;
 async function pollLogs() {
     if (document.hidden && !logsFollow) return;
@@ -143,29 +226,39 @@ async function pollLogs() {
             window.Uplift._usageGlue.fillSelect($('logs-file'), d.available_files.map(f => [f, f]), d.log_file || d.available_files[0]);
             logsFilesLoaded = true;
         }
-        let rows = String(d.logs || '').split('\n').filter(Boolean);
         const level = $('logs-level').value;
         const grep = ($('logs-grep').value || '').toLowerCase();
-        rows = rows.filter(l => {
-            if (level && !l.includes(` - ${level} - `)) return false;
-            if (!level && layout.logsHideDebug && / - (DEBUG|TRACE) - /.test(l)) return false;
-            if (grep && !l.toLowerCase().includes(grep)) return false;
-            return true;
-        });
+        const minLevel = level || (layout.logsHideDebug ? 'INFO' : '');
+        let rows = aggregateLogRows(parseLogText(String(d.logs || ''), lines), minLevel);
+        if (grep) rows = rows.filter(r => String(r.message).toLowerCase().includes(grep));
         const pre = $('logs');
         const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
         pre.innerHTML = '';
         const frag = document.createDocumentFragment();
-        for (const line of rows.slice(-800)) {
-            const span = document.createElement('span');
-            const lv = / - (ERROR|WARNING|TRACE|DEBUG) - /.exec(line);
-            if (lv) span.className = `lv-${lv[1]}`;
-            span.textContent = line + '\n';
-            frag.append(span);
+        for (const row of rows.slice(-800)) {
+            const el = document.createElement('div');
+            el.className = 'logrow' + (row.level ? ` lv-${row.level}` : '')
+                + (row.memory ? ' lg-mem' : '');
+            el.textContent = '';
+            const f = (cls, txt) => { const s = document.createElement('span');
+                s.className = cls; s.textContent = txt; el.append(s); };
+            f('lt', row.time ? row.time.slice(11, 19) : '');
+            f('ll', row.level || '');
+            f('lm', row.module || '');
+            f('lx', row.message + (row.count > 1
+                ? ` \u00d7${row.count} (${row.time ? row.time.slice(11, 19) : ''}\u2026)` : ''));
+            if (row.memory) {
+                const chips = ['usage', 'watermark', 'ceiling', 'peak']
+                    .filter(n => row.memory[n])
+                    .map(n => `${n} ${row.memory[n].text} GB`);
+                if (chips.length) f('lgv', chips.join(' \u00b7 '));
+            }
+            el.onclick = () => el.classList.toggle('open');
+            frag.append(el);
         }
         pre.append(frag);
         if (logsFollow || atBottom) pre.scrollTop = pre.scrollHeight;
-        $('logs-sub').textContent = `${rows.length} lines${d.log_file ? ' · ' + d.log_file : ''}`;
+        $('logs-sub').textContent = `${rows.length} records${d.log_file ? ' \u00b7 ' + d.log_file : ''}`;
     } catch (_) { /* keep tail */ }
 }
 $('logs-level').onchange = () => pollLogs();
