@@ -941,7 +941,7 @@ function accumulateToolCall(map, d) {
 function fetchMcpTools() {
     // UP-15: classic chat.html:4443 — MCP is optional; absent config or a
     // dead server leaves the list empty, never an error state.
-    return fetch('/v1/mcp/tools', { headers: { 'Authorization': 'Bearer ' + _key } })
+    return fetch('/v1/mcp/tools', { headers: { 'Authorization': 'Bearer ' + _key } })  // domkit-exempt: /v1 Bearer call, classic parity
         .then(function (r) { if (!r.ok) return null; return r.json(); })
         .then(function (d) {
             _mcpTools = ((d && d.tools) || []).map(function (t) {
@@ -1999,8 +1999,8 @@ function toolbar() {
         _ctxRender = ctxRender;   // openConv/newChat hook (module scope)
     }
     if (typeof fetch === 'function') fetchMcpTools().catch(function () {});
-    // UP-15: classic's init-time MCP tool fetch (guarded: headless test
-    // harnesses stub fetch only after mount)
+    // UP-15: classic's init-time MCP tool load; guarded because headless
+    // harnesses stub the transport only after mount
     var side = el('aside', 'chat-native-bar chat-native-side');
     side.append(secModel, secSys, secSamp, secVoice, secTools);
     var histTitle = el('span', 'chat-native-sec-title',
