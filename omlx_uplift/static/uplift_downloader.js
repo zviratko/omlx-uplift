@@ -276,6 +276,7 @@ function openModelFiles(repoId) {
     const foot = document.createElement('div'); foot.className = 'dl-foot';
     const meta = document.createElement('div'); meta.className = 'dl-meta';
     box.append(h, meta, body, foot);
+    overlay.append(box);
     // Backdrop click is the mouse twin of Esc — Escape itself rides the
     // GLOBAL .modal-overlay handler in uplift_state.js (modal-escape pin:
     // NO keydown listener here).

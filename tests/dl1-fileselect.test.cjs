@@ -273,6 +273,11 @@ test('house chrome: dialog reuses modal-overlay + modal nasa + icon-btn close', 
     assert.ok(SRC.includes("overlay.className = 'modal-overlay'"));
     assert.ok(SRC.includes("box.className = 'modal nasa dl-modal'"));
     assert.ok(SRC.includes("close.className = 'icon-btn'"));
-    // backdrop click = mouse twin of Esc
+    // THE PARENT EDGE (live catch 2026-10-24): class pins stay green while a
+    // built-but-never-appended box renders an empty overlay — assert the box
+    // rides the overlay AND the overlay reaches body, in that order
+    assert.match(SRC, /box\.append\(h, meta, body, foot\);\s*overlay\.append\(box\);/);
+    assert.match(SRC, /overlay\.append\(box\);[\s\S]*?document\.body\.append\(overlay\);/);
+    // backdrop click is the mouse twin of Esc
     assert.match(SRC, /overlay\.onclick = e => \{ if \(e\.target === overlay\) overlay\.remove\(\); \}/);
 });
