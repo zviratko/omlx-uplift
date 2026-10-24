@@ -48,6 +48,14 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
                       // alongside web tools exactly like activeTools() :4418
     _ctxRender = null,    // UP-16: mount-time handle to the ctx ring renderer
     _thinkLive = '',   // reasoning deltas of the in-flight turn (live-only)
+    // UP-35 (classic 5c/5d): per-round transcript + live status line.
+    // _thinkMark is the _thinkLive length at the START of the current
+    // tool round, so every round owns its own reasoning slice instead of
+    // the joined bubble letting later rounds overwrite earlier reasoning.
+    _thinkMark = 0,
+    _roundsDone = [],  // sealed rounds of the in-flight turn:
+                       // {text, think, toolLines, _toolsEl, _statusEl}
+    _toolStatus = '',  // live status label while tools execute
     _webSearch = false, _tools = [],   // 5/6: web tools + live tool log
     _lastBody = null,                  // resolved request stashed by shapeRequest
     _lastFiles = null,                 // 6/6b: raw audio Files for the STT path
@@ -843,6 +851,258 @@ function toolRequest(tc) {
                             : { tool_name: name, arguments: tc._args || {} } };
 }
 
+// ---- UP-35: classic's web-tool source cards (chat.html :4545/:4576) ------
+// The web tools answer with rich payloads from /v1/web/*; classic renders
+// them as an inline ACTIVITY CARD ("Searched <query>" + result rows with
+// title + hostname links; "Read page" + URL; error state) instead of the
+// raw JSON preview the first native cut printed. Only http(s) becomes a
+// clickable link — the exact webCardSafeUrl gate, never innerHTML with
+// data: every string below lands through textContent / setAttribute.
+
+// Only http(s) URLs may become clickable links in the transcript.
+function webCardSafeUrl(url) {
+    return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : '';
+}
+function webCardHost(url) {
+    try { return new URL(url).hostname.replace(/^www\./, ''); }
+    catch (e) { return ''; }
+}
+// Parsed summary of a built-in web tool result (classic buildWebCard).
+// payload is the RAW /v1/web/* JSON; a transport failure arrives as
+// {ok:false, error:{message}} synthesized by executeTool's catch.
+function buildWebCard(toolName, args, payload) {
+    args = args || {}; payload = payload || {};
+    var card = { tool: toolName, ok: payload.ok === true,
+                 query: typeof args.query === 'string' ? args.query : '',
+                 url: webCardSafeUrl(args.url),
+                 results: [], error: '' };
+    if (card.ok && toolName === 'web_search') {
+        (Array.isArray(payload.results) ? payload.results : [])
+            .forEach(function (r) {
+                var u = webCardSafeUrl(r && r.url);
+                if (u) card.results.push({ title: (r && r.title) || '', url: u });
+            });
+    }
+    if (card.ok && toolName === 'fetch_url')
+        card.url = webCardSafeUrl(payload.url) || card.url;
+    if (!card.ok)
+        card.error = (payload.error && payload.error.message) || 'failed';
+    return card;
+}
+// Friendlier status text when the round is a single built-in web tool
+// (classic builtinToolStatusLabel :4586 + the calling_tools[_more] pair).
+function toolStatusText(names) {
+    var uniq = [], seen = {};
+    (names || []).forEach(function (n) {
+        if (n && !seen[n]) { seen[n] = 1; uniq.push(n); }
+    });
+    if (!uniq.length) return '';
+    if (uniq.length === 1 && uniq[0] === 'web_search')
+        return t('chat.status.searching_web', 'Searching the web');
+    if (uniq.length === 1 && uniq[0] === 'fetch_url')
+        return t('chat.status.fetching_page', 'Fetching page');
+    if (uniq.length > 3)
+        return t('chat.status.calling_tools_more', 'Calling {tools} +{count} more')
+            .replace('{tools}', uniq.slice(0, 2).join(', '))
+            .replace('{count}', String(uniq.length - 2));
+    return t('chat.status.calling_tools', 'Calling {tools}')
+        .replace('{tools}', (names || []).join(', '));
+}
+function cardIconSvg(kind) {
+    // classic's three card icons (globe / page / error), built with
+    // createElementNS — string SVG would tempt innerHTML, which the card
+    // rule forbids. No createElementNS (node stubs) => no icon.
+    if (!document.createElementNS) return null;
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('width', '14'); svg.setAttribute('height', '14');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '2');
+    var paths = kind === 'fetch' ? ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z',
+                                    'M14 2v4a2 2 0 0 0 2 2h4', 'M16 13H8M16 17H8']
+                : kind === 'error' ? ['M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20',
+                                      'M15 9l-6 6M9 9l6 6']
+                : ['M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20',
+                   'M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20', 'M2 12h20'];
+    paths.forEach(function (d) {
+        var p = document.createElementNS(NS, 'path');
+        p.setAttribute('d', d); svg.appendChild(p);
+    });
+    return svg;
+}
+function cardLink(url, titleText) {
+    // classic's result row: <a target=_blank rel=noopener noreferrer>
+    // title + hostname; the http(s) gate already ran in buildWebCard.
+    var a = el('a', 'chat-native-web-card-link');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.appendChild(el('span', 'chat-native-web-card-title',
+                     titleText || webCardHost(url)));
+    if (titleText) a.appendChild(el('span', 'chat-native-web-card-host',
+                                    webCardHost(url)));
+    return a;
+}
+function webCardEl(card) {
+    var d = el('div', 'chat-native-web-card');
+    d.dataset.ok = card.ok ? '1' : '0';
+    d.dataset.tool = card.tool || '';
+    var head = el('div', 'chat-native-web-card-head');
+    var icon = el('span', 'chat-native-web-card-icon');
+    var ic = cardIconSvg(!card.ok ? 'error'
+                         : card.tool === 'fetch_url' ? 'fetch' : 'search');
+    if (ic) icon.appendChild(ic);
+    var labKey = card.tool === 'fetch_url'
+        ? 'chat.web_card.read_page' : 'chat.web_card.searched';
+    var labFb = card.tool === 'fetch_url' ? 'Read page' : 'Searched the web';
+    var lab = el('span', 'chat-native-web-card-label', t(labKey, labFb));
+    lab.dataset.i18n = labKey; lab.dataset.en = labFb;   // U59 marker
+    head.append ? head.append(icon, lab) : (head.appendChild(icon), head.appendChild(lab));
+    if (card.query) {
+        head.appendChild(el('span', 'chat-native-web-card-query',
+                            '\u201c' + card.query + '\u201d'));
+    }
+    d.appendChild(head);
+    if (card.results.length) {
+        var rows = el('div', 'chat-native-web-card-results');
+        card.results.forEach(function (r) {
+            rows.appendChild(cardLink(r.url, r.title));
+        });
+        d.appendChild(rows);
+    }
+    if (card.ok && card.tool === 'fetch_url' && card.url) {
+        var u = el('div', 'chat-native-web-card-url');
+        u.appendChild(cardLink(card.url, ''));
+        d.appendChild(u);
+    }
+    if (!card.ok)
+        d.appendChild(el('div', 'chat-native-web-card-error', card.error));
+    return d;
+}
+// The card's persisted form: _clean_message whitelists row keys, so card
+// data survives reloads ONLY inside content (UP-15's image markdown set
+// the precedent). Source rows stay clickable after a reload — schemeGuard
+// already whitelists http(s) links; the gate ran before this string.
+function cardMarkdown(card) {
+    var head = card.tool === 'fetch_url'
+        ? t('chat.web_card.read_page', 'Read page')
+        : t('chat.web_card.searched', 'Searched the web');
+    if (card.query) head += ' \u201c' + card.query + '\u201d';
+    var lines = [head];
+    card.results.forEach(function (r) {
+        lines.push('- [' + String(r.title || webCardHost(r.url))
+            .replace(/[[\]]/g, '') + '](' + r.url + ')');
+    });
+    if (card.ok && card.tool === 'fetch_url' && card.url)
+        lines.push('- [' + card.url + '](' + card.url + ')');
+    if (!card.ok) lines.push('- ' + (card.error || 'failed'));
+    return lines.join('\n');
+}
+
+// ---- UP-35: per-round transcript segments + live status line --------------
+
+function liveBubble() {
+    // the in-flight assistant bubble = the LAST bubble (deep-chat appends
+    // it at submit; the store row only lands when the stream closes)
+    var root = _dc && _dc.shadowRoot;
+    if (!root || typeof root.querySelectorAll !== 'function') return null;
+    var b = root.querySelectorAll('.message-bubble');
+    return (b && b.length) ? b[b.length - 1] : null;
+}
+
+// Seal the finished round (its intermediate text + its own thinking slice)
+// into a visible segment above the now-reset streaming bubble — classic's
+// _toolRound row (chat.html :6897-6909). Returns the round RECORD; the
+// record becomes a plain assistant row when the turn's rows flush (below),
+// so mid-stream the store/bubble ordinal correspondence U45 relies on
+// stays untouched.
+function sealRoundSegment(roundText, signals) {
+    var rec = { text: String(roundText || ''),
+                think: _thinkLive.slice(_thinkMark),
+                toolLines: [], _toolsEl: null, _statusEl: null };
+    _roundsDone.push(rec);
+    _thinkMark = _thinkLive.length;    // next round's thinking starts here
+    var b = liveBubble();
+    var holder = b && b.parentElement;          // .inner-message-container
+    var outer = holder && holder.parentElement; // .outer-message-container
+    if (outer && outer.parentNode && typeof outer.parentNode.insertBefore === 'function') {
+        var seg = el('div', 'chat-native-round');
+        try {
+            var th = holder.querySelector(':scope > .chat-native-thinking');
+            if (th) {   // freeze the live thinking block INTO the segment:
+                th.dataset.live = '';  // un-hook it from paintThinking's
+                th.open = false;       // reuse/steal rules (per-round block)
+                seg.appendChild(th);
+            }
+        } catch (e) { /* :scope unsupported: the block just stays live */ }
+        var tx = el('div', 'chat-native-round-text');
+        if (typeof b.cloneNode === 'function') {
+            // the bubble's rendered markdown, MOVED for the user's eye:
+            // the clone lands in the segment and the reset below empties
+            // the bubble itself, so the text never appears twice
+            var clone = b.cloneNode(true);
+            Array.prototype.slice.call(clone.childNodes || [])
+                .forEach(function (k) { tx.appendChild(k); });
+        }
+        if (!tx.childNodes.length && rec.text) tx.textContent = rec.text;
+        seg.appendChild(tx);
+        rec._toolsEl = el('div', 'chat-native-round-tools');
+        seg.appendChild(rec._toolsEl);
+        outer.parentNode.insertBefore(seg, outer);
+    }
+    // Reset the streaming bubble (deep-chat 2.5.1 honours overwrite:
+    // updateText sets _message.text = t instead of appending; the next
+    // round streams into a FRESH segment instead of joining this one).
+    signals.onResponse({ text: '', overwrite: true });
+    return rec;
+}
+
+function paintToolStatus(text) {
+    _toolStatus = text || '';
+    if (!_toolStatus) return;
+    var rec = _roundsDone[_roundsDone.length - 1];
+    if (!rec || !rec._toolsEl || typeof rec._toolsEl.appendChild !== 'function') return;
+    rec._statusEl = el('div', 'chat-native-tool-status', _toolStatus);
+    try { rec._toolsEl.appendChild(rec._statusEl); } catch (e) { /* DOM gone */ }
+}
+function clearToolStatus() {
+    _toolStatus = '';
+    _roundsDone.forEach(function (rec) {
+        if (rec._statusEl && typeof rec._statusEl.remove === 'function') {
+            try { rec._statusEl.remove(); } catch (e) {}
+        }
+        rec._statusEl = null;
+    });
+}
+function addToolOutcome(rec, node, line) {
+    if (line) rec.toolLines.push(line);
+    if (rec._toolsEl && node && typeof rec._toolsEl.appendChild === 'function') {
+        try { rec._toolsEl.appendChild(node); } catch (e) { /* DOM gone */ }
+    }
+}
+
+// The sealed records as store rows: round text + the tool-outcome block
+// (cards / previews / tool images) that used to live inside the joined
+// bubble's content. First caller drains the buffer — onMessage (normal
+// close, rows land BEFORE the final answer) or the close() fallback
+// (deep-chat dropped the empty final bubble: stop, error, text-less last
+// round) — never both.
+function pushRoundRows() {
+    if (!_roundsDone.length || !_conv || !_conv.messages) return 0;
+    var rows = [];
+    _roundsDone.splice(0).forEach(function (rec) {
+        var content = String(rec.text || '');
+        var extras = (rec.toolLines || []).filter(Boolean);
+        if (extras.length)
+            content = (content ? content + '\n\n' : '') + extras.join('\n\n');
+        if (!content) return;   // U45 invariant: empty rows never enter the store
+        var row = { role: 'assistant', content: content, mid: newMid() };
+        if (rec.think && rec.think.trim()) row.reasoning_content = rec.think;
+        rows.push(row);
+    });
+    if (rows.length) Array.prototype.push.apply(_conv.messages, rows);
+    return rows.length;
+}
+
+
 // ---- request/response shaping (proven S1 interceptor path) ---------------
 
 function fileToDataURL(f) {
@@ -861,6 +1121,9 @@ async function shapeRequest(d) {
                          // programmatic) — the reliable streaming start
     _thinkLive = '';     // new turn: reasoning restarts empty
     _tools = [];         // 5/6: per-turn tool log
+    _thinkMark = 0;      // UP-35: round thinking restarts at 0
+    _toolStatus = '';    // UP-35: no live status at turn start
+    _roundsDone = [];    // UP-35: sealed-round buffer starts empty
     // U71: paintThinking's steal rule re-anchors the live block onto the
     // NEW in-flight bubble as soon as the first reasoning delta lands;
     // until then the previous turn's live block was already wiped by the
@@ -1106,9 +1369,16 @@ function executeTool(tc, signal) {
         .then(function (data) {
             if (req.url === '/v1/mcp/execute')
                 return splitToolContent(data.content == null ? data : data.content);
-            return { content: JSON.stringify(data), images: [] };
+            // UP-35: the PARSED payload rides along for the source card
+            // (classic buildWebCard input); the model still gets the raw
+            // JSON, exactly as before.
+            return { content: JSON.stringify(data), images: [],
+                     web: true, payload: data };
         })
-        .catch(function (e) { return { content: 'Error: ' + (e.message || e), images: [] }; });
+        .catch(function (e) { return { content: 'Error: ' + (e.message || e),
+                                       images: [], web: req.url !== '/v1/mcp/execute',
+                                       payload: { ok: false,
+                                                  error: { message: String((e && e.message) || e) } } }; });
 }
 
 function transcribeAudio(file, model, signals, signal) {
@@ -1172,10 +1442,11 @@ function transcribeAudio(file, model, signals, signal) {
 function nativeHandler(_componentBody, signals) {
     // 5/6 unified path (spike-proven live 2026-10-08): the interceptor
     // runs BEFORE the handler and stashed the resolved body in _lastBody;
-    // onResponse APPENDS (multi-round output joins into one bubble,
-    // spike sp4); onMessage still fires so persistence is untouched
-    // (spike sp3); stopClicked carries a .listener sink — register the
-    // abort there (bundle: streamHandlers.stopClicked).
+    // onResponse APPENDS (UP-35: each tool round now ENDS with an
+    // overwrite-reset, so rounds paint as separate transcript segments
+    // instead of joining one bubble, spike sp4); onMessage still fires so
+    // persistence is untouched (spike sp3); stopClicked carries a .listener
+    // sink — register the abort there (bundle: streamHandlers.stopClicked).
     var req = _lastBody; _lastBody = null;
     var files = _lastFiles; _lastFiles = null;
     var closed = false;
@@ -1183,7 +1454,20 @@ function nativeHandler(_componentBody, signals) {
     var speakGen = null;   // VOICE-11 session id (begin assigns below)
     function close() { if (closed) return; closed = true;
         endSpeakTurn(speakGen);   // VOICE-11: flush + settle at EVERY turn end
-        try { signals.onClose(); } catch (e) {} }
+        try { signals.onClose(); } catch (e) {}
+        // UP-35: sealed rounds normally enter the store through onMessage
+        // (rows land before the final answer). If deep-chat drops the final
+        // bubble instead — stop mid-round, error, or a text-less last round
+        // after the round reset — the buffered rounds must not evaporate:
+        // a first caller drains _roundsDone, so this can never double-insert.
+        var cid = (_conv || {}).id;
+        setTimeout(function () {
+            clearToolStatus();
+            if (_roundsDone.length && _conv && _conv.id === cid) {
+                if (pushRoundRows()) saveConv();
+            }
+        }, 50);
+    }
     if (!req || !req.model) { close(); return Promise.resolve(); }
     var controller = new AbortController();
     // 6/6b: STT model selected -> transcription leg, not a chat request
@@ -1294,26 +1578,66 @@ function nativeHandler(_componentBody, signals) {
             });
             msgs.push({ role: 'assistant', content: st.text || null,
                         tool_calls: args });
-            _tools.push({ round: depth, calls: args.map(function (tc) {
-                return tc.function.name; }) });
-            signals.onResponse({ text: '\n' + t('uplift.chat.tools_used',
-                'Tool calls') + ' (' + args.map(function (tc) {
-                    return tc.function.name; }).join(', ') + '):\n' });
+            var names = args.map(function (tc) { return tc.function.name; });
+            _tools.push({ round: depth, calls: names });
+            // UP-35 (classic 5c/5d): the round's text + thinking get SEALED
+            // into their own visible segment and the streaming bubble resets,
+            // so the next round writes a FRESH segment instead of joining —
+            // classic keeps each _toolRound as a separate transcript part.
+            var rec = sealRoundSegment(st.text, signals);
+            // Live status line while the tools run; results replace it
+            // (classic setEngineStatus + builtinToolStatusLabel).
+            paintToolStatus(toolStatusText(names));
+            var anyMcp = args.some(function (tc) {
+                return toolRequest(tc).url === '/v1/mcp/execute'; });
+            if (anyMcp) {   // the old header stays — for MCP calls only,
+                var hdr = t('uplift.chat.tools_used', 'Tool calls') +
+                    ' (' + names.join(', ') + '):';
+                addToolOutcome(rec, el('div', 'chat-native-tool-preview', hdr), hdr);
+            }
             return Promise.all(args.map(function (tc) {
                 return executeTool(tc, controller.signal).then(function (res) {
                     var content = (res && res.content) || '';
                     msgs.push({ role: 'tool', tool_call_id: tc.id,
                                 content: content });
-                    var preview = content.slice(0, 160).replace(/\s+/g, ' ');
-                    signals.onResponse({ text: '  -> ' + tc.function.name +
-                        ': ' + preview + (content.length > 160 ? '\u2026' : '') + '\n' });
+                    if (res && res.web) {
+                        // UP-35: WEB tools get classic's activity card, not
+                        // a raw-JSON preview: "Searched <query>" + result
+                        // rows (title + hostname links) / "Read page" + URL
+                        // / error state. Links: http(s)-only gate (the
+                        // exact webCardSafeUrl rule) + rel=noopener.
+                        var card = buildWebCard(tc.function.name, tc._args,
+                                                res.payload);
+                        addToolOutcome(rec, webCardEl(card), cardMarkdown(card));
+                    } else {
+                        var preview = '  -> ' + tc.function.name + ': ' +
+                            content.slice(0, 160).replace(/\s+/g, ' ') +
+                            (content.length > 160 ? '…' : '');
+                        addToolOutcome(rec,
+                            el('div', 'chat-native-tool-preview', preview),
+                            preview);
+                    }
                     // UP-15: tool images land in the transcript as markdown
                     // data-URLs (schemeGuard already whitelists data:image/;
-                    // the UP-32 lightbox makes them zoomable).
-                    for (var im = 0; im < ((res && res.images) || []).length; im++)
-                        signals.onResponse({ text: '\n![tool image](' + res.images[im] + ')\n' });
+                    // the UP-32 lightbox makes them zoomable). UP-35 moves
+                    // them from the joined bubble into THEIR round: the
+                    // record persists the markdown (survives reload inside
+                    // content — the only key _clean_message lets through),
+                    // the segment shows a real <img> while streaming.
+                    for (var im = 0; im < ((res && res.images) || []).length; im++) {
+                        var url = res.images[im];
+                        var md = '![tool image](' + url + ')';
+                        var img = null;
+                        try { img = el('img', 'chat-native-tool-image');
+                              img.src = url; img.alt = 'tool image'; }
+                        catch (e) { img = null; }
+                        addToolOutcome(rec, img, md);
+                    }
                 });
-            })).then(once);   // next round with tool results appended
+            })).then(function () {
+                clearToolStatus();   // results landed: the status line is gone
+                return once();       // next round with tool results appended
+            });
         });
     }
 
@@ -1360,7 +1684,11 @@ function paintThinking() {
     if (!root || typeof root.querySelectorAll !== 'function') return;
     var bubbles = root.querySelectorAll('.message-bubble');
     var t0 = null;
-    if (bubbles.length && _thinkLive) {
+    // UP-35: the live block shows the CURRENT round's thinking only — the
+    // rounds before it own frozen blocks inside their sealed segments
+    // (classic paints each round's reasoning with its own part).
+    var liveThink = _thinkLive.slice(_thinkMark);
+    if (bubbles.length && liveThink) {
         if (_streaming) {
             // deep-chat creates the assistant bubble at submit (loading
             // dots) — during the stream THAT bubble is the reply the
@@ -1380,14 +1708,14 @@ function paintThinking() {
     root.querySelectorAll('.chat-native-thinking[data-live="1"]')
         .forEach(function (e) { if (e !== target) e.remove(); });
     if (!target && h0) {
-        target = thinkingBlockEl(_thinkLive, true);
+        target = thinkingBlockEl(liveThink, true);
         if (target) { h0.insertBefore(target, t0); target.dataset.live = '1'; }
     }
     if (target) {
         target.dataset.live = '1';
         var body = target.querySelector('.chat-native-think-body');
-        if (body) body.textContent = _thinkLive;
-        target.hidden = !_thinkLive || !_thinkLive.trim();
+        if (body) body.textContent = liveThink;
+        target.hidden = !liveThink || !liveThink.trim();
     }
 }
 
@@ -3562,7 +3890,14 @@ function msgRegenerate(idx) {
     var ms = _conv.messages;
     var m = messageAt(idx);
     if (!m || m.role !== 'assistant') return;
-    var prev = idx > 0 ? ms[idx - 1] : null;
+    // UP-35: a tool turn is several assistant rows (the sealed rounds are
+    // ordinary rows now) — regen rewinds over that run to the turn's USER
+    // row, the same prompt the original turn started from. Pre-UP-35 the
+    // last answer directly followed its user row and this walk stops
+    // immediately: behavior for every alternating transcript is unchanged.
+    var j = idx - 1;
+    while (j > 0 && ms[j] && ms[j].role === 'assistant') j--;
+    var prev = j >= 0 ? ms[j] : null;
     if (!prev || prev.role !== 'user') return;   // no prompt to replay
     // classic (chat.html:6656): transcription turns cannot be regenerated
     // — the audio file is not persisted; the label would go out as prose.
@@ -3570,9 +3905,9 @@ function msgRegenerate(idx) {
     // slice BEFORE the prompt: the resend re-enters the user row through
     // onMessage (same as the old last-turn toolbar function did — slicing
     // at the assistant index would store the prompt twice)
-    for (var k = idx; k < ms.length; k++)
+    for (var k = j + 1; k < ms.length; k++)
         if (ms[k] && ms[k].role === 'assistant') saySilence(ms[k].mid);
-    _conv.messages = ms.slice(0, idx - 1);
+    _conv.messages = ms.slice(0, j);
     renderHistory();
     saySweepPlans();
     saveConv();
@@ -3923,7 +4258,9 @@ function attachMessageActions(dc) {
         }
         if (!txt && _streaming && k === bubbles.length - 1
             && b.classList && b.classList.contains('ai-message')) {
-            txt = _thinkLive; isLive = !!txt;   // in-flight ai bubble ONLY
+            // UP-35: live paint is the CURRENT round's slice — the sealed
+            // rounds' blocks travel inside their .chat-native-round segment
+            txt = _thinkLive.slice(_thinkMark); isLive = !!txt;   // in-flight ai bubble ONLY
         }
         if (txt) {
             if (!thinkEl) {
@@ -5205,6 +5542,54 @@ function applyShadowTheme(dc) {
         '  background: color-mix(in srgb, var(--panel) 55%, transparent);',
         '  color: var(--dim, #8b98ab); font-size: 12px; line-height: 1.55;',
         '  max-height: 240px; overflow: auto; }',
+        // UP-35 (classic 5c/5d): per-round transcript segment + web-tool
+        // source card + live status line. The light DOM cannot reach the
+        // shadow root (U43 doctrine), so the CSS ships here.
+        '.chat-native-round { align-self: flex-start; max-width: 80%;',
+        '  box-sizing: border-box; margin: 2px 0 0; }',
+        '.chat-native-round .chat-native-thinking { max-width: 100%; }',
+        '.chat-native-round-text { color: var(--ink, #e6edf3);',
+        '  word-wrap: break-word; }',
+        '.chat-native-round-tools { display: flex; flex-direction: column;',
+        '  gap: 2px; margin-top: 4px; }',
+        '.chat-native-tool-preview { font-size: 11px; color: var(--dim);',
+        '  white-space: pre-wrap; }',
+        '.chat-native-tool-image { max-width: 192px; max-height: 192px;',
+        '  border-radius: var(--radius, 8px); margin: 4px 4px 0 0;',
+        '  object-fit: cover; cursor: zoom-in; }',
+        '.chat-native-tool-status { font-size: 12px; color: var(--dim);',
+        '  padding: 3px 0; display: inline-flex; align-items: center;',
+        '  gap: 6px; }',
+        '.chat-native-tool-status::before { content: ""; width: 7px;',
+        '  height: 7px; border-radius: 50%; background: var(--accent, #4c8dff);',
+        '  animation: chat-native-pulse 1.2s ease-in-out infinite; }',
+        '@keyframes chat-native-pulse { 50% { opacity: .35; } }',
+        '.chat-native-web-card { margin: 4px 0; padding: 8px 12px;',
+        '  border: 1px solid var(--edge); border-radius: var(--radius, 8px);',
+        '  background: color-mix(in srgb, var(--panel) 60%, transparent);',
+        '  max-width: 560px; box-sizing: border-box; }',
+        '.chat-native-web-card-head { display: flex; align-items: center;',
+        '  gap: 8px; font-size: 12px; color: var(--dim, #8b98ab);',
+        '  min-width: 0; }',
+        '.chat-native-web-card-icon { display: inline-flex;',
+        '  flex-shrink: 0; }',
+        '.chat-native-web-card-label { font-weight: 500; flex-shrink: 0; }',
+        '.chat-native-web-card-query { overflow: hidden;',
+        '  text-overflow: ellipsis; white-space: nowrap; }',
+        '.chat-native-web-card-results { display: flex;',
+        '  flex-direction: column; gap: 4px; margin-top: 8px; }',
+        '.chat-native-web-card-link { display: flex; align-items: baseline;',
+        '  gap: 8px; font-size: 13px; color: var(--ink, #e6edf3);',
+        '  text-decoration: none; min-width: 0; }',
+        '.chat-native-web-card-link:hover { text-decoration: underline; }',
+        '.chat-native-web-card-title { overflow: hidden;',
+        '  text-overflow: ellipsis; white-space: nowrap; }',
+        '.chat-native-web-card-host { font-size: 11px; color: var(--dim);',
+        '  flex-shrink: 0; }',
+        '.chat-native-web-card-url { margin-top: 6px; font-size: 13px;',
+        '  word-break: break-all; }',
+        '.chat-native-web-card-error, .chat-native-web-card[data-ok="0"]',
+        '  .chat-native-web-card-icon { color: #e5534b; }',
         // U73: inline message editor — replaces the prompt() dialog. Styled as
         // the user bubble it edits (field ground, own side of the thread).
         // U74: assistant replies edit on THEIR side; reasoning editors sit
@@ -5561,8 +5946,12 @@ function mount() {
             if (_conv) {
                 var row = { role: role,
                     content: typeof m.text === 'string' ? m.text : '' };
-                if (role === 'assistant' && _thinkLive) {
-                    row.reasoning_content = _thinkLive;  // persisted (4/6)
+                if (role === 'assistant' && _thinkLive.slice(_thinkMark)) {
+                    // UP-35: per-round thinking — the sealed rounds carry
+                    // their own slices (pushRoundRows below); this row owns
+                    // the LAST round's (the joined-turn behaviour of 4/6 is
+                    // what made later rounds overwrite earlier reasoning)
+                    row.reasoning_content = _thinkLive.slice(_thinkMark);
                 }
                 // U78: per-turn sampling provenance rides the row into the
                 // store (backend _clean_message filters + caps it)
@@ -5602,14 +5991,26 @@ function mount() {
                         sayRelease(_turnMid);
                     }
                 }
+                // UP-35: the sealed tool rounds land BEFORE the final
+                // answer (classic's order); the close() fallback can also
+                // drain, first caller wins — never a double insert.
+                var roundRows = (role === 'assistant') ? pushRoundRows() : 0;
                 if (role === 'assistant' && _turnMid) {
                     row.mid = _turnMid;
                     var lp = _plans[_turnMid];
-                    if (lp) {
+                    if (lp && !roundRows) {
                         lp.text = row.content;
                         lp.live = false;
                         row.speech = { mode: lp.mode, n: lp.chunks.length,
                                        rev: lp.rev, voice: lp.voice };
+                    } else if (lp) {
+                        // UP-35: a tool turn spoke EVERY round, but this
+                        // bubble shows only the final one — the whole-turn
+                        // plan does not identify this row, so it must not
+                        // stamp its rev (a rev is what keeps audio alive).
+                        // planFor re-plans the displayed text on demand;
+                        // the memory cache answers the identical chunks.
+                        lp.live = false;
                     }
                     _livePlan = null;
                     _turnMid = '';
@@ -5728,6 +6129,11 @@ return { mount: mount, isMounted: function () { return _mounted; },
                         attach: attachMessageActions },
          // MATH: pure display-normalizer seam for the node gates
          _normMath: normMath,
+         // UP-35 test seams: pure card/status builders + the round flush
+         _u35: { webCardSafeUrl: webCardSafeUrl, webCardHost: webCardHost,
+                 buildWebCard: buildWebCard, toolStatusText: toolStatusText,
+                 webCardEl: webCardEl, cardMarkdown: cardMarkdown,
+                 pushRoundRows: pushRoundRows },
          // _state returns LIVE references (conv/convs are the module's
          // own objects) — the browser drills and node tests set conv
          // fields through it; shapeRequest reads _conv, same identity
@@ -5740,6 +6146,11 @@ return { mount: mount, isMounted: function () { return _mounted; },
                                         thinkingLive: _thinkLive,
                                         webSearch: _webSearch,
                                         toolsUsed: _tools,
+                                        // UP-35 probes: live status label +
+                                        // the sealed-round buffer (by ref)
+                                        get toolStatus() { return _toolStatus; },
+                                        get rounds() { return _roundsDone; },
+                                        get thinkMark() { return _thinkMark; },
                                         // U45: mounted element (drills/tests
                                         // stub submitUserMessage through it)
                                         get dc() { return _dc; },
