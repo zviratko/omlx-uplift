@@ -290,7 +290,15 @@
             <div id="up-form" class="admin-table"><div class="empty">—</div></div>
             <h3 class="h3-spaced" data-i18n="uplift.label.tasks">Tasks</h3>
             <div id="up-tasks" class="admin-table"><div class="empty">No tasks</div></div>
-        </div></div></div></div></section><section class="card wide page-card" data-id="usage-page" data-tab="usage" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.usage">Usage</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.usage">Usage</span>
+        </div></div></div></div></section><section class="card wide page-card" data-id="api-page" data-tab="status" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="status.api.section_label">API Endpoints</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="status.api.section_label">API Endpoints</span>
+            <span class="right"><label for="api-alias" data-i18n="status.api.host" hidden>Host</label> <select id="api-alias" hidden></select></span></h2>
+        <div class="card-body">
+            <div class="urow settings"><span class="uname"><span data-i18n="status.api.openai">OpenAI API</span></span><span class="diffslot"></span><span class="gctl"><code id="api-openai">—</code> <button type="button" class="se-btn act" id="api-copy-openai" data-i18n-title="status.api.copy_tooltip" title="Copy">⧉</button></span></div>
+            <div class="urow settings"><span class="uname"><span data-i18n="status.api.claude">Claude API</span></span><span class="diffslot"></span><span class="gctl"><code id="api-claude">—</code> <button type="button" class="se-btn act" id="api-copy-claude" data-i18n-title="status.api.copy_tooltip" title="Copy">⧉</button></span></div>
+            <h3 class="h3-spaced" data-i18n="status.engines.section_label">Engine Versions</h3>
+            <div id="api-engines" class="admin-table"><div class="empty">—</div></div>
+        </div></div></div></div></section>
+<section class="card wide page-card" data-id="usage-page" data-tab="usage" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.usage">Usage</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.usage">Usage</span>
             <span class="right"><select id="opt-usage-range" title="Range" data-i18n-title="uplift.usage.range"></select> <span id="usage-actions"></span><span id="usage-sub"></span></span></h2>
         <div class="card-body">
             <div class="pair" id="usage-tiles">

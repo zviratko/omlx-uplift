@@ -179,6 +179,78 @@ window.Uplift._usageGlue = {
     });
 })();
 
+/* UP-26 (1+4): API Endpoints card — classic loadServerInfo
+   (dashboard.js:3686) + the per-alias OpenAI/Claude URL rows with copy,
+   and the Engine Versions inventory over stats.engines (classic
+   _engine_versions.html, Jinja-rendered there — same data, client-side
+   here). Labels reuse classic catalog keys; URLs are built exactly like
+   classic: http://<displayHost>:<port>[/v1]. */
+(function () {
+    let info = null, alias = '';
+    const dispHost = () => alias && info && (info.aliases || []).includes(alias)
+        ? alias : ((info && (info.aliases || [])[0]) || (info && info.host) || '127.0.0.1');
+    function paint() {
+        if (!info) return;
+        const base = 'http://' + dispHost() + ':' + (info.port || '');
+        const open = $('api-openai'), cl = $('api-claude');
+        if (open) open.textContent = base + '/v1';
+        if (cl) cl.textContent = base;
+        const sel = $('api-alias'), lab = sel && sel.previousElementSibling;
+        const list = info.aliases || [];
+        if (sel) {
+            sel.replaceChildren();
+            for (const a of list) {
+                const o = document.createElement('option');
+                o.value = o.textContent = a; sel.append(o);
+            }
+            sel.hidden = list.length < 2;
+            if (lab) lab.hidden = sel.hidden;
+        }
+    }
+    fetchJson(`${API}/admin/api/server-info`).then(d => {
+        info = d || {}; alias = '';
+        const sel = $('api-alias');
+        if (sel && !sel.__wired) {
+            sel.__wired = true;
+            sel.onchange = () => { alias = sel.value; paint(); };
+        }
+        paint();
+    }).catch(() => {});
+    const cp = (id, codeId) => { const b = $(id); if (!b) return;
+        b.onclick = () => {
+            const txt = ($(codeId) || {}).textContent || '';
+            if (navigator.clipboard && navigator.clipboard.writeText)
+                navigator.clipboard.writeText(txt).catch(() => {});
+            b.textContent = '\u2713'; setTimeout(() => { b.textContent = '\u29C9'; }, 1200);
+        }; };
+    cp('api-copy-openai', 'api-openai'); cp('api-copy-claude', 'api-claude');
+    fetchJson(`${API}/admin/api/stats`).then(d => {
+        const host = $('api-engines'); if (!host) return;
+        const eng = (d && d.engines) || {};
+        const keys = Object.keys(eng);
+        if (!keys.length) { D.emptyMsg(host, C.tf('uplift.status.no_engines', 'No engines loaded')); return; }
+        host.replaceChildren();
+        for (const k of keys) {
+            const e = eng[k] || {};
+            const row = document.createElement('div'); row.className = 'urow';
+            const nm = D.cell(e.name || k);
+            const val = document.createElement('span');
+            if (e.commit && e.url) {
+                const a = document.createElement('a');
+                a.href = e.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+                a.textContent = String(e.commit).slice(0, 7);
+                val.append(a);
+            } else {
+                const c = document.createElement('code');
+                c.textContent = e.version || C.tf('status.engines.unknown_version', 'unknown');
+                val.append(c);
+            }
+            row.append(nm, D.cell(''), val);
+            host.append(row);
+        }
+    }).catch(() => {});
+})();
+
 /* ---------------- i18n bootstrap (classic pattern) ---------------------
    GET /uplift/api/locale -> {lang, strings}: classic's catalog merged
    with uplift's overlay (package locales/*.json). Until the fetch lands
