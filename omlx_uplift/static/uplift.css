@@ -911,6 +911,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
 .se-rail-badge.restart { background: var(--diverge); color: var(--ink-on-red); }
 /* band header inside a section box (DFlash/SpecPrefill/kwargs join the
    classic parent section instead of being their own tab) */
+/* UP-32 (4e): chat image lightbox overlay (click-to-zoom, classic parity) */
+.chat-lightbox { position: fixed; inset: 0; z-index: 9999;
+    background: rgba(0, 0, 0, .78); display: flex;
+    align-items: center; justify-content: center; cursor: zoom-out; }
+.chat-lightbox img { max-width: 92vw; max-height: 92vh;
+    border-radius: var(--radius); box-shadow: 0 10px 40px rgba(0, 0, 0, .6); }
 .se-subhead { margin: 14px 0 8px; padding-bottom: 4px; font-size: 11px;
     text-transform: uppercase; letter-spacing: .18em; color: var(--dim);
     border-bottom: 1px solid var(--edge); }

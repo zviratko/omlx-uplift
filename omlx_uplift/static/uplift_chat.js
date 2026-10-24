@@ -728,6 +728,21 @@ var WEB_TOOLS = [
 var MAX_TOOL_ROUNDS = 10;        // classic chatSettings.maxToolRounds default
 var TOOL_TIMEOUT_MS = 30000;     // classic chat.html TOOL_TIMEOUT_MS (UP-34/5e)
 
+/* UP-32: classic's markitdown document lane (chat.html
+   isSupportedDocumentFile/loadDocumentFile) — PDF/DOCX/PPTX/TXT/MD ride the
+   request as {type:'file'} parts the SERVER converts; the caps come from the
+   integrations block of global settings (classic :5206 defaults). */
+var _docCfg = { enabled: true, maxMb: 25, maxFiles: 5 };
+function isDocumentFile(f) {
+    var name = String((f && f.name) || '').toLowerCase();
+    var type = String((f && f.type) || '').toLowerCase();
+    return /\.(pdf|docx|pptx|txt|md)$/.test(name)
+        || type === 'application/pdf'
+        || type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        || type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        || type === 'text/plain' || type === 'text/markdown' || type === 'text/x-markdown';
+}
+
 // route+payload mapping (pure, unit-tested)
 function toolRequest(tc) {
     var name = (tc && tc.function && tc.function.name) || '';
@@ -810,10 +825,24 @@ async function shapeRequest(d) {
         _lastFiles = files;
     } else if (files.length) {
         var parts = lastUser ? [{ type: 'text', text: lastUser }] : [];
+        // UP-32: documents ride {type:'file'} (server markitdown converts);
+        // everything else keeps the image_url lane. Before this, a PDF went
+        // out as an IMAGE data-URL and the model silently received junk.
+        var docs = 0, warn = '';
         for (var i = 0; i < files.length; i++) {
-            parts.push({ type: 'image_url',
-                         image_url: { url: await fileToDataURL(files[i]) } });
+            var f = files[i];
+            if (_docCfg.enabled && isDocumentFile(f)) {
+                if (docs >= _docCfg.maxFiles) { warn = warn || t('chat.error.too_many_documents', 'Too many documents in one request.'); continue; }
+                if (f.size > _docCfg.maxMb * 1048576) { warn = warn || t('chat.error.document_too_large', 'Document exceeds the size limit.'); continue; }
+                docs++;
+                parts.push({ type: 'file',
+                             file: { filename: f.name, file_data: await fileToDataURL(f) } });
+            } else {
+                parts.push({ type: 'image_url',
+                             image_url: { url: await fileToDataURL(f) } });
+            }
         }
+        if (warn) W().alert(warn);   // classic alerts before the send, too
         cur.content = parts;
     }
     msgs.push(cur);
@@ -3557,10 +3586,41 @@ function msgDelete(idx) {
     saveConv();
 }
 
+// UP-32 (4e): classic's click-to-zoom — one shared overlay, dismissed by a
+// click anywhere or Escape. Runs inside the same post-render sweep that
+// already rewrites link/image schemes, so it sees exactly the live bubbles.
+function lightboxWire(root) {
+    var imgs = root.querySelectorAll('.message-bubble img');
+    for (var i = 0; i < imgs.length; i++) {
+        var im = imgs[i];
+        if (im.__lb) continue;
+        im.__lb = true;
+        im.style.cursor = 'zoom-in';
+        im.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            var uri = this.getAttribute('src');
+            if (!uri || /^(javascript|data:text)/i.test(uri)) return;
+            var doc = W().document;
+            var ov = doc.createElement('div');
+            ov.className = 'chat-lightbox';
+            var big = doc.createElement('img');
+            big.src = uri;
+            ov.append(big);
+            var bye = function () { ov.remove();
+                W().removeEventListener('keydown', esc); };
+            var esc = function (e) { if (e.key === 'Escape') bye(); };
+            ov.onclick = bye;
+            W().addEventListener('keydown', esc);
+            doc.body.append(ov);
+        });
+    }
+}
+
 function attachMessageActions(dc) {
     var root = dc && dc.shadowRoot;
     if (!root || typeof root.querySelectorAll !== 'function') return;
     schemeGuard(root);
+    lightboxWire(root);   // UP-32 (4e): classic's click-to-zoom on chat images
     var bubbles = root.querySelectorAll('.message-bubble');
     if (!bubbles.length) { _msgActions = new WeakMap(); return; }
     // filtered view order == store order for NON-empty messages (see
@@ -5081,7 +5141,15 @@ function mount() {
         // MATH: must settle before the element is made; LAST on purpose —
         // the unpack below reads res[1]/res[3] positionally.
         ensureKatex(),
+        // UP-32: markitdown kill-switch + caps (classic read at :5206).
+        // Failure keeps classic's own defaults (enabled unless false).
+        D().fetchJson('/admin/api/global-settings')
+            .catch(function () { return {}; }),
     ]).then(function (res) {
+        var integ = (res[5] && res[5].integrations) || {};
+        _docCfg = { enabled: integ.markitdown_enabled !== false,
+            maxMb: integ.markitdown_max_file_size_mb || 25,
+            maxFiles: integ.markitdown_max_files_per_request || 5 };
         // CHAT-FILTER (user bug 2026-10-17): rows carry TWO type fields
         // with DIFFERENT vocabularies (vanilla model_discovery):
         // model_type is the capability ('llm'|'vlm'|'embedding'|
@@ -5173,6 +5241,15 @@ function mount() {
             else dc.messages = { maxWidth: '80%' };
         } catch (e) { /* the CSS rule above carries it if the prop is frozen */ }
         dc.images = true;           // card feature 3 base (vision drill 4/6)
+        if (_docCfg.enabled) {
+            // UP-32 (4a): classic's document paperclip. deep-chat's
+            // mixedFiles type feeds the SAME FormData channel shapeRequest
+            // already reads, so the wire change stays inside shapeRequest.
+            try {
+                dc.mixedFiles = { acceptedFormats: '.pdf,.docx,.pptx,.txt,.md',
+                                  maxNumberOfFiles: _docCfg.maxFiles };
+            } catch (e) { /* frozen prop: image attach still works */ }
+        }
         // MATH: arm the KaTeX hook only when the library actually arrived —
         // the engine registers the math rule at construction, and rendering
         // math with window.katex missing yields an EMPTY string (silently
