@@ -242,6 +242,33 @@ test('DL-FLASH retired: dead shape stays dead (negative pins)', () => {
         assert.ok(!SRC.includes(dead), `uplift_downloader.js must not keep ${dead}`);
     assert.ok(!CSS.includes('.dl-flash'), 'uplift.css must not keep .dl-flash');
 });
+test('UP-17: dialog tabs mirror classic (Model Card | Files (n) | Tags)', () => {
+    for (const key of ['models.detail.tab.model_card', 'models.detail.tab.files',
+        'models.detail.tab.tags', 'models.detail.no_model_card', 'models.detail.no_tags',
+        'models.browse.params_suffix'])
+        assert.ok(SRC.includes(`'${key}'`), 'classic key used: ' + key);
+    // opens straight on Files like classic's openModelDetail(repoId,'files')
+    assert.match(SRC, /let detail = null, picked = \{\}, sending = false, tab = 'files';/);
+    // card is the ONE HTML sink and it is sanitizer-guarded (classic parity):
+    // strip container-clears and comments — what remains must be the
+    // DOMPurify call and nothing else
+    const sinks = SRC.split(/\r?\n/).map(l => l.trim())
+        .filter(l => l.includes('.innerHTML') && !l.startsWith('//') && !/= ''/.test(l));
+    assert.strictEqual(sinks.length, 1, 'single innerHTML sink: ' + JSON.stringify(sinks));
+    assert.ok(sinks[0].includes('window.DOMPurify.sanitize('),
+        'the sole innerHTML sink is sanitizer-guarded');
+    assert.match(SRC, /catch\(\(\) => \{ holder\.classList\.add\('dl-card-raw'\); \}/);
+    // vendor libs load lazily (same bundles classic ships)
+    assert.match(SRC, /loadScript\('\.\/vendor\/marked\.umd\.js'\)/);
+    assert.match(SRC, /loadScript\('\.\/vendor\/purify\.min\.js'\)/);
+    const fs = require('fs');
+    for (const v of ['marked.umd.js', 'purify.min.js'])
+        assert.ok(fs.existsSync(path.join(STATIC, 'vendor', v)), 'vendored: ' + v);
+    // tags are textContent chips; header meta line carries the classic stats
+    assert.match(SRC, /s\.className = 'dl-tag';\s*s\.textContent = t;/);
+    assert.ok(SRC.includes("className = 'dl-meta'") && SRC.includes("'\\u2b07 '"),
+        'meta chips (size, downloads, likes, params, pipeline)');
+});
 test('house chrome: dialog reuses modal-overlay + modal nasa + icon-btn close', () => {
     assert.ok(SRC.includes("overlay.className = 'modal-overlay'"));
     assert.ok(SRC.includes("box.className = 'modal nasa dl-modal'"));

@@ -274,7 +274,8 @@ function openModelFiles(repoId) {
     h.append(close);
     const body = document.createElement('div'); body.className = 'dl-body';
     const foot = document.createElement('div'); foot.className = 'dl-foot';
-    box.append(h, body, foot);
+    const meta = document.createElement('div'); meta.className = 'dl-meta';
+    box.append(h, meta, body, foot);
     // Backdrop click is the mouse twin of Esc — Escape itself rides the
     // GLOBAL .modal-overlay handler in uplift_state.js (modal-escape pin:
     // NO keydown listener here).
@@ -282,7 +283,7 @@ function openModelFiles(repoId) {
     document.body.append(overlay);
     body.textContent = C.tf('models.detail.loading', 'Loading model info...');
 
-    let detail = null, picked = {}, sending = false;
+    let detail = null, picked = {}, sending = false, tab = 'files';
 
     DG.fetchJson(`${API}/admin/api/hf/model-info?${new URLSearchParams({ repo_id: repoId })}`,
         token ? { headers: { 'X-HF-Token': token } } : undefined)
@@ -290,6 +291,7 @@ function openModelFiles(repoId) {
             detail = d || {};
             h.textContent = detail.repo_id || repoId;
             picked = HFS.initial(detail);
+            renderMeta();
             refresh();
             // the DOWNLOADED badge reads the fresh repo list + latest tasks
             DG.fetchJson(`${API}/admin/api/hf/models`)
@@ -313,52 +315,132 @@ function openModelFiles(repoId) {
         return b;
     }
 
-    function refresh() {
-        if (!detail) return;
-        // innerHTML='' is the house CONTAINER-CLEAR (text-only rebuild below;
-        // every string enters via textContent — no HTML is ever assigned)
-        body.innerHTML = ''; foot.innerHTML = '';
+    function renderMeta() {
+        meta.innerHTML = '';   // house container-clear (see refresh)
+        const chip = txt => {
+            const s = document.createElement('span'); s.className = 'dl-mchip';
+            s.textContent = txt; meta.append(s);
+        };
+        if (detail.size > 0 && detail.size_formatted) chip(detail.size_formatted);
+        chip('\u2b07 ' + (detail.downloads != null ? C.fmtNumber(detail.downloads) : '0'));
+        chip('\u2665 ' + (detail.likes != null ? detail.likes : 0));
+        if (detail.params && detail.params_formatted)
+            chip(detail.params_formatted + ' ' + C.tf('models.browse.params_suffix', 'params'));
+        if (detail.pipeline_tag) {
+            const b = document.createElement('span'); b.className = 'badge dl-b dim';
+            b.textContent = detail.pipeline_tag; meta.append(b);
+        }
+    }
+
+    function filesPanel(host) {
         const files = detail.files || [];
         if (!files.length) {
             const p = document.createElement('div'); p.className = 'empty';
             p.textContent = detail.unavailable
                 || C.tf('models.detail.no_files', 'No file information available.');
-            body.append(p);
-        } else {
-            if (!detail.is_adapter && !detail.unsupported_reason && detail.layout !== 'other') {
-                const note = document.createElement('div'); note.className = 'se-hint';
-                note.textContent = detail.layout === 'safetensors'
-                    ? C.tf('models.detail.pick_files_checkpoint', 'Files the model needs stay checked. Uncheck the extras you do not want.')
-                    : C.tf('models.detail.pick_files_gguf', 'Check the GGUF files to download. A GGUF brings its vision projector with it.');
-                body.append(note);
-            }
-            const ram = (DL.gs && DL.gs.system && DL.gs.system.total_memory_bytes) || 0;
-            const list = document.createElement('div'); list.className = 'dl-files';
-            for (const f of files) {
-                const lb = document.createElement('label'); lb.className = 'dl-file';
-                const cb = document.createElement('input');
-                cb.type = 'checkbox';
-                cb.checked = !!f.local || HFS.selected(f, picked);
-                cb.disabled = HFS.locked(f) || sending;
-                cb.onchange = () => { picked = HFS.toggle(detail, picked, f); refresh(); };
-                const nm = document.createElement('span');
-                nm.className = 'dl-fname'; nm.textContent = f.name; nm.title = f.name;
-                lb.append(cb, nm);
-                if (f.local) lb.append(dlBadge('ok', C.tf('models.detail.file_downloaded', 'Downloaded')));
-                else if (f.required) lb.append(dlBadge('dim', C.tf('models.detail.required_file', 'Required')));
-                if (f.kind === 'gguf' && !f.local) {
-                    const fit = HFS.memFit(ram, HFS.rowSize(detail, f));
-                    if (fit === 'warning') lb.append(dlBadge('warn', C.tf('models.browse.tight_fit', 'Tight fit')));
-                    else if (fit === 'danger') lb.append(dlBadge('bad', C.tf('models.browse.high_oom_risk', 'High OOM risk')));
-                }
-                const sz = document.createElement('span');
-                sz.className = 'dl-fsize';
-                sz.textContent = f.size ? C.fmtBytes(f.size) : '';
-                lb.append(sz);
-                list.append(lb);
-            }
-            body.append(list);
+            host.append(p);
+            return;
         }
+        if (!detail.is_adapter && !detail.unsupported_reason && detail.layout !== 'other') {
+            const note = document.createElement('div'); note.className = 'se-hint';
+            note.textContent = detail.layout === 'safetensors'
+                ? C.tf('models.detail.pick_files_checkpoint', 'Files the model needs stay checked. Uncheck the extras you do not want.')
+                : C.tf('models.detail.pick_files_gguf', 'Check the GGUF files to download. A GGUF brings its vision projector with it.');
+            host.append(note);
+        }
+        const ram = (DL.gs && DL.gs.system && DL.gs.system.total_memory_bytes) || 0;
+        const list = document.createElement('div'); list.className = 'dl-files';
+        for (const f of files) {
+            const lb = document.createElement('label'); lb.className = 'dl-file';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = !!f.local || HFS.selected(f, picked);
+            cb.disabled = HFS.locked(f) || sending;
+            cb.onchange = () => { picked = HFS.toggle(detail, picked, f); refresh(); };
+            const nm = document.createElement('span');
+            nm.className = 'dl-fname'; nm.textContent = f.name; nm.title = f.name;
+            lb.append(cb, nm);
+            if (f.local) lb.append(dlBadge('ok', C.tf('models.detail.file_downloaded', 'Downloaded')));
+            else if (f.required) lb.append(dlBadge('dim', C.tf('models.detail.required_file', 'Required')));
+            if (f.kind === 'gguf' && !f.local) {
+                const fit = HFS.memFit(ram, HFS.rowSize(detail, f));
+                if (fit === 'warning') lb.append(dlBadge('warn', C.tf('models.browse.tight_fit', 'Tight fit')));
+                else if (fit === 'danger') lb.append(dlBadge('bad', C.tf('models.browse.high_oom_risk', 'High OOM risk')));
+            }
+            const sz = document.createElement('span');
+            sz.className = 'dl-fsize';
+            sz.textContent = f.size ? C.fmtBytes(f.size) : '';
+            lb.append(sz);
+            list.append(lb);
+        }
+        host.append(list);
+    }
+
+    function cardPanel(host) {
+        if (!detail.model_card) {
+            const p = document.createElement('div'); p.className = 'empty';
+            p.textContent = C.tf('models.detail.no_model_card', 'No model card available.');
+            host.append(p);
+            return;
+        }
+        const holder = document.createElement('div'); holder.className = 'dl-card';
+        holder.textContent = detail.model_card;      // raw markdown until libs arrive
+        host.append(holder);
+        Promise.all([D.loadScript('./vendor/marked.umd.js'),
+                     D.loadScript('./vendor/purify.min.js')])
+            .then(() => {
+                // The ONE sanctioned innerHTML sink: sanitized exactly like
+                // classic — DOMPurify.sanitize(marked.parse(card)) over
+                // untrusted remote markdown. Loader failure keeps the raw-text
+                // fallback visible (never an unsanitized parse).
+                try {
+                    holder.innerHTML = window.DOMPurify.sanitize(
+                        window.marked.parse(detail.model_card));
+                } catch (_) { /* keep raw text */ }
+            })
+            .catch(() => { holder.classList.add('dl-card-raw'); });
+    }
+
+    function tagsPanel(host) {
+        const tags = detail.tags || [];
+        if (!tags.length) {
+            const p = document.createElement('div'); p.className = 'empty';
+            p.textContent = C.tf('models.detail.no_tags', 'No tags available.');
+            host.append(p);
+            return;
+        }
+        const wrap = document.createElement('div'); wrap.className = 'dl-tags';
+        for (const t of tags) {
+            const s = document.createElement('span'); s.className = 'dl-tag';
+            s.textContent = t; wrap.append(s);
+        }
+        host.append(wrap);
+    }
+
+    function refresh() {
+        if (!detail) return;
+        // innerHTML='' is the house CONTAINER-CLEAR (text-only rebuild below;
+        // every string enters via textContent — the sole HTML sink is the
+        // DOMPurify-sanitized card in cardPanel, classic-identical)
+        body.innerHTML = ''; foot.innerHTML = '';
+        // Tabs mirror classic's dialog (Model Card | Files (n) | Tags); the
+        // house segmented control is the .se-btn.seg + .on pattern.
+        const n = (detail.files || []).length;
+        const tabs = [['card', 'models.detail.tab.model_card', 'Model Card', ''],
+                      ['files', 'models.detail.tab.files', 'Files', n ? ' (' + n + ')' : ''],
+                      ['tags', 'models.detail.tab.tags', 'Tags', '']];
+        const bar = document.createElement('div'); bar.className = 'dl-tabs';
+        for (const [t, key, en, extra] of tabs) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'se-btn seg' + (tab === t ? ' on' : '');
+            b.textContent = C.tf(key, en) + extra;
+            b.onclick = () => { tab = t; refresh(); };
+            bar.append(b);
+        }
+        body.append(bar);
+        if (tab === 'files') filesPanel(body);
+        else if (tab === 'card') cardPanel(body);
+        else tagsPanel(body);
         // Footer gating mirrors classic: adapter / unsupported_reason swap
         // the action buttons for a warning chip; a fully-downloaded
         // non-GGUF repo shows the DOWNLOADED badge instead of buttons.

@@ -3294,3 +3294,28 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .dl-b.ok { background: var(--ink); border-color: var(--ink); color: var(--bg); }
 .dl-b.warn { color: var(--warn); border-color: var(--warn); }
 .dl-b.bad { color: var(--bad); border-color: var(--bad); }
+
+/* UP-17 (FEAT-1): dialog tabs, meta chips, model card and tag rail. */
+.dl-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    font-size: var(--fs-meta); color: var(--dim); }
+.dl-mchip { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dl-tabs { display: flex; gap: 6px; flex: none; }
+.dl-card { font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: break-word; }
+.dl-card h1, .dl-card h2, .dl-card h3, .dl-card h4 { margin: 10px 0 6px; }
+.dl-card h1 { font-size: 1.25em; }
+.dl-card h2 { font-size: 1.12em; }
+.dl-card p { margin: 6px 0; }
+.dl-card ul, .dl-card ol { margin: 6px 0; padding-left: 20px; }
+.dl-card code { font-family: var(--mono); font-size: .92em;
+    background: var(--field); padding: 1px 4px; }
+.dl-card pre { background: var(--field); padding: 8px 10px;
+    overflow-x: auto; }
+.dl-card pre code { padding: 0; background: none; }
+.dl-card table { border-collapse: collapse; margin: 8px 0; font-size: .95em; }
+.dl-card th, .dl-card td { border: 1px solid var(--line); padding: 3px 8px; }
+.dl-card img { max-width: 100%; }
+.dl-card a { color: var(--ink); text-decoration: underline; }
+.dl-card-raw { white-space: pre-wrap; font-family: var(--mono); }
+.dl-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.dl-tag { border: 1px solid var(--line); padding: 1px 8px;
+    font-size: var(--fs-meta); color: var(--dim); }
