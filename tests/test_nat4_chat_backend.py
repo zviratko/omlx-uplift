@@ -310,3 +310,25 @@ def test_attachment_meta_roundtrips_capped(client):
     assert att[0] == {"n": "a.png", "k": "image"}
     assert len(att[1]["n"]) == 120 and att[1]["k"] == "file", "name cap + kind normalize"
     assert "att" not in got[1], "non-list att dropped"
+
+
+def test_u29_variant_markers_roundtrip(client):
+    """UP-29: variant markers persist on assistant rows, never on user
+    rows; caps and value whitelists hold; parked vs shown distinguishable."""
+    long = "z" * 60
+    conv = _conv(messages=[
+        {"role": "user", "content": "q", "vg": "g1", "vid": "v1", "vsel": 1},
+        {"role": "assistant", "content": "old", "vg": "g1", "vid": "v1", "vsel": 0,
+         "rmodel": "M-A"},
+        {"role": "assistant", "content": "new", "vg": long, "vid": long, "vsel": 2,
+         "rmodel": "M" * 200},
+    ])
+    assert client.post("/uplift/api/chat/history", json=conv).status_code == 200
+    got = client.get("/uplift/api/chat/history/c1").json()["messages"]
+    assert "vg" not in got[0] and "vsel" not in got[0], "user rows carry no markers"
+    assert got[1]["vg"] == "g1" and got[1]["vid"] == "v1" and got[1]["vsel"] == 0
+    assert got[1]["rmodel"] == "M-A"
+    assert "vg" not in got[2] and "vid" not in got[2], \
+        "oversized opaque ids are dropped whole, never truncated"
+    assert "vsel" not in got[2], "vsel only 0/1"
+    assert len(got[2]["rmodel"]) == 120, "rmodel capped"

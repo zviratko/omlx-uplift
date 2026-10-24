@@ -227,6 +227,22 @@ def _clean_message(m: dict) -> dict:
         out["att"] = [{"n": str(a.get("n") or "")[:120],
                        "k": a.get("k") if a.get("k") in ("image", "file", "audio") else "file"}
                       for a in att[:8] if isinstance(a, dict) and a.get("n")]
+    # UP-29: regenerate-variant markers (assistant rows only). A variant
+    # chain self-describes on each row: vg=group, vid=chain, vsel marks
+    # the shown sibling (0 = parked/hidden, absent = plain row). rmodel is
+    # display-only provenance for the variant tab tooltip. Capped hard.
+    if role == "assistant":
+        vg = m.get("vg")
+        if isinstance(vg, str) and 0 < len(vg) <= 40:
+            out["vg"] = vg
+            vid = m.get("vid")
+            if isinstance(vid, str) and 0 < len(vid) <= 40:
+                out["vid"] = vid
+            if m.get("vsel") in (0, 1):
+                out["vsel"] = int(m.get("vsel"))
+        rm = m.get("rmodel")
+        if isinstance(rm, str) and rm:
+            out["rmodel"] = rm[:120]
     return out
 
 

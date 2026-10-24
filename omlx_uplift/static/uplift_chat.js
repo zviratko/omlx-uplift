@@ -65,6 +65,14 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     // records the bubble first, builds the request second), so shapeRequest
     // patches the tail row directly; the stash serves the reverse order.
     _turnAtt = null, _turnAttFiles = null,
+    // UP-29: regenerate variants + options + branch. _variantStash parks
+    // the previous reply chain(s) WHILE a regenerate stream runs (the
+    // resend truncates the store; mergeVariantChain puts the parked rows
+    // back as hidden sibling variants when the new chain lands — or
+    // restores them when it dies). _oneShotGen is the 'Creative' option's
+    // ONE-request sampling override (classic :7216); _turnModel remembers
+    // which model produced the in-flight turn (variant tab labels).
+    _variantStash = null, _oneShotGen = null, _turnModel = '',
     _mic = null,                       // 6/6b: live mic recording session
     _profiles = [],                    // 6/6c: prompt profiles (localStorage mirror)
     _readability = false,              // 6/6c: enhanced-readability live mirror
@@ -913,7 +921,17 @@ function attIsClean(att) {
 // editedClaim, attachMessageActions) MUST agree on this or action indices
 // shift — one rule, five call sites.
 function isVisibleRow(m) {
-    return !!(m && (m.content || (m.att && m.att.length)));
+    // UP-29: rows of a NOT-active regenerate variant (vg marker + vsel 0)
+    // are parking, not transcript-view: hidden exactly like a content-empty
+    // row was, so ALL five ordinal call sites keep working off this ONE
+    // predicate (self-describing per-row markers — the predicate stays
+    // (m)-ary, no signature churn). The chat.py whitelist does not persist
+    // vg/vid/vsel yet: a reload drops the markers and every sibling
+    // renders as an ordinary consecutive assistant bubble (newest last) —
+    // graceful degradation, never a silent loss (u29 gate header carries
+    // the exact server-side addition).
+    return !!(m && (m.content || (m.att && m.att.length)) &&
+              !(m.vg && m.vsel === 0));
 }
 // Classic messageForStorage parity for ONE content part: shape survives,
 // bytes NEVER do. Unknown part types pass through minus any data/base64.
@@ -1461,6 +1479,11 @@ async function shapeRequest(d) {
     if (sp) msgs.push({ role: 'system', content: sp });
     (_conv ? _conv.messages : []).forEach(function (m) {
         if (m.role === 'system') return;
+        // UP-29: hidden variant siblings are DISPLAY history, not model
+        // context — classic builds the API transcript from the ACTIVE
+        // variant chain only (getApiTurnMessages :3440). isVisibleRow
+        // keeps the view aligned; this keeps the wire aligned.
+        if (m.vg && m.vsel === 0) return;
         var wire = { role: m.role, content: m.content };
         // U74: reasoning normally does NOT travel back (classic parity).
         // An EDITED row is an explicit experiment: the user changed the
@@ -1566,6 +1589,15 @@ async function shapeRequest(d) {
         var gk = GEN_FIELDS[gi][0];
         if (g[gk] != null) body[gk] = g[gk];
     }
+    // UP-29: the 'Creative' regenerate option — ONE request, warmer
+    // sampling (classic :7216: "the creative temperature applies to this
+    // call only"). Consumed before the U78 snapshot below so the params
+    // chip honestly shows the temperature this reply was sampled with.
+    if (_oneShotGen) {
+        for (var oi in _oneShotGen) body[oi] = _oneShotGen[oi];
+        _oneShotGen = null;
+    }
+    _turnModel = body.model;   // UP-29: variant tab labels ask WHAT answered
     // UP-37(2): classic's thinking WIRE rules (chat.html:194728) — the
     // server-reported capability decides: a forced model never gets an
     // override, a saved 'off' is meaningless without an 'off' stop,
@@ -1816,6 +1848,13 @@ function nativeHandler(_componentBody, signals) {
             if (_roundsDone.length && _conv && _conv.id === cid) {
                 if (pushRoundRows()) saveConv();
             }
+            // UP-29: the parked regenerate chains come back whether or not
+            // the new chain produced rows (stop before the first round,
+            // error, text-less last round). In the normal case onMessage
+            // already merged and cleared the stash — this is a no-op then;
+            // the cid guard is the same abandoned-view doctrine as the
+            // round drain right above.
+            if (_variantStash && _conv && _conv.id === cid) mergeVariantChain();
         }, 50);
     }
     if (!req || !req.model) { close(); return Promise.resolve(); }
@@ -4116,10 +4155,19 @@ function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
         b.type = 'button'; b.title = title;
         b.addEventListener('click', function (ev) {
             ev.stopPropagation();
-            fn(idx);
+            fn(idx, b);   // UP-29: the regenerate hub needs its own anchor
+                          // button; every older handler takes (idx) only
         });
         box.appendChild(b);
         return b;
+    }
+    if (role === 'assistant') {
+        // UP-29: the variant tab strip reads FIRST in the track (classic
+        // renders its response-tab group above the reply; this row's state
+        // comes before this row's actions). null unless this is the last
+        // row of an active multi-variant chain.
+        var vstrip = variantStripEl(idx);
+        if (vstrip) box.appendChild(vstrip);
     }
     act('copy', t('chat.copy_tooltip', 'Copy'),
         t('chat.copy_tooltip', 'Copy'), msgCopy);
@@ -4132,8 +4180,17 @@ function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
         // button exists only while a voice is selected; voices are an
         // opt-in uplift feature, so no voices = no affordance (not a
         // dead button that errors on click).
+        // UP-29: the button is now the regenerate OPTIONS hub (classic's
+        // plain/creative/with-model menu) — the plain regenerate is the
+        // hub's first entry and every entry writes a new variant chain.
         act('regen', t('chat.regenerate_tooltip', 'Regenerate'),
-            t('chat.regenerate_tooltip', 'Regenerate'), msgRegenerate);
+            t('chat.regenerate_tooltip', 'Regenerate'), openRegenMenu);
+    }
+    if (role === 'user') {
+        // UP-29 (classic context menu :1435/:1710 'Branch here'): user-row
+        // action; uplift has no context menu — the action bar IS its menu.
+        act('branch', t('chat.branch_here', 'Branch from here'),
+            t('chat.branch_here', 'Branch from here'), msgBranch);
     }
     // U75 (user: 'can we have just one Edit button for both the reply and
     // thinking?'): one affordance per row; assistant rows open the
@@ -4235,8 +4292,114 @@ function stripMarkdown(src) {
     return s.trim();
 }
 
-function msgRegenerate(idx) {
+// ---- UP-29: regenerate variants + options + branch ------------------------
+// Classic parity map (chat.html): branchChat :7365-7410, regenerateMessage
+// :7199 with the creative / 'Regenerate with…' options :7218-7233, and the
+// variant tab strip machinery :3440-3510 (switch, per-variant labels,
+// delete-one). Uplift keeps its IN-PLACE assistant EDIT (commitEditedInPlace
+// — a superset classic lacks) and lands the rest as ONE regenerate rework
+// on _conv storage.
+//
+// Storage model (the ticket's "minimal honest" pick, refined): a variant
+// chain is an ordinary CONSECUTIVE RUN of assistant rows; every row of a
+// grouped turn carries vg (group id) + vid (chain id) + vsel (1 shown /
+// 0 hidden). Because the markers are self-describing per row, the ONE
+// shared visibility predicate (isVisibleRow, UP-43) does the hiding and
+// all five ordinal call sites keep working untouched; deletes and
+// truncations splice whole rows, so meta can never orphan. vg/vid/vsel/
+// rmodel are NOT yet in the server message whitelist — the exact chat.py
+// addition + pytest is pinned in tests/u29-branch-variants.test.cjs; until
+// it lands a reload drops the markers and the siblings render as plain
+// consecutive bubbles, newest last, with no tab strip (documented
+// degradation, never a loss).
+
+function creativeTemp() {
+    // classic :7218-7223 math, mirrored: base + 0.4 capped at 2 when a
+    // positive finite base exists, 1.2 when nothing sane is set. The base
+    // walks the same defensive chain classic does: the conversation's
+    // sampling snapshot first, then the model row's own default if the
+    // serving DTO carries one.
+    var base = NaN;
+    var g = _conv && _conv.generation;
+    if (g && g.temperature != null) base = Number(g.temperature);
+    if (!Number.isFinite(base)) {
+        var minfo = null, mid = (_conv && _conv.model) || '';
+        for (var i = 0; i < (_models || []).length; i++) {
+            if ((_models[i].id || _models[i].name) === mid) {
+                minfo = _models[i]; break;
+            }
+        }
+        base = Number(minfo && minfo.settings && minfo.settings.temperature);
+    }
+    return (Number.isFinite(base) && base > 0) ? Math.min(2, base + 0.4) : 1.2;
+}
+
+function variantGroup(ms, gid0) {
+    // {gid, vids in first-appearance order, activeVid, labels{vid:rmodel}}
+    // — null when there is no group (plain turn, or markers dropped by a
+    // reload before the server whitelist lands).
+    if (!gid0) return null;
+    var vids = [], active = null, labels = {};
+    for (var i = 0; i < ms.length; i++) {
+        var r = ms[i];
+        if (!r || r.vg !== gid0) continue;
+        if (vids.indexOf(r.vid) < 0) vids.push(r.vid);
+        if (r.vsel === 1) active = r.vid;
+        if (r.rmodel && !labels[r.vid]) labels[r.vid] = r.rmodel;
+    }
+    if (!vids.length) return null;
+    return { gid: gid0, vids: vids,
+             activeVid: active || vids[vids.length - 1], labels: labels };
+}
+
+function mergeVariantChain() {
+    // UP-29: return the parked chains around the regenerate's result.
+    // Three callers, first wins (the stash clears itself): onMessage's
+    // final assistant row (normal close), the close() fallback drain
+    // (stop / error / text-less last round — same one-shot discipline as
+    // the UP-35 round drain beside it), and msgRegenerate itself as
+    // watchdog-unwedge recovery. Post-merge order: user, [older chains
+    // hidden], [new chain shown]. When the stream produced NOTHING the
+    // parked chains return exactly as they were parked — the abort cost
+    // the user nothing.
+    var s = _variantStash;
+    if (!s) return false;
+    _variantStash = null;
+    if (!_conv || _conv.id !== s.cid) return false;   // abandoned view
+    var ms = _conv.messages;
+    var produced = 0;
+    while (ms[s.cut + 1 + produced] && ms[s.cut + 1 + produced].role === 'assistant')
+        produced++;
+    var newVid = null;
+    if (produced) {
+        newVid = newMid();
+        for (var k = s.cut + 1; k < s.cut + 1 + produced; k++) {
+            ms[k].vg = s.gid; ms[k].vid = newVid; ms[k].vsel = 1;
+        }
+    }
+    for (var p = 0; p < s.rows.length; p++) {
+        var r = s.rows[p];
+        // hidden only while a newer chain exists; a failed regen restores
+        // the previous selection (never silently flips the shown reply)
+        r.vsel = newVid ? 0 : (r.vsel === 0 ? 0 : 1);
+    }
+    Array.prototype.splice.apply(ms, [s.cut + 1, 0].concat(s.rows));
+    renderHistory();
+    saveConv();
+    return true;
+}
+
+function msgRegenerate(idx, opts) {
+    // UP-29: the regenerate OPTIONS hub (classic regenerateMessage :7199
+    // + options :7218-7233). The plain action stays the primitive — the
+    // U45 seam and the u29 gate drive it directly, opts {creative, model}
+    // are the menu's choices. Every run writes a NEW VARIANT CHAIN; the
+    // previous reply is parked, never destroyed.
     if (_streaming || !_conv) return;
+    opts = opts || {};
+    // dangling stash = the previous regen stream died without ANY settle
+    // hook (watchdog un-wedge only): restore it before touching the store
+    if (_variantStash && !_streaming) mergeVariantChain();
     var ms = _conv.messages;
     var m = messageAt(idx);
     if (!m || m.role !== 'assistant') return;
@@ -4252,6 +4415,23 @@ function msgRegenerate(idx) {
     // classic (chat.html:6656): transcription turns cannot be regenerated
     // — the audio file is not persisted; the label would go out as prose.
     if (/^\[audio\] /.test(String(prev.content))) return;
+    // UP-29: park this turn's assistant run (sealed rounds + every chain
+    // that already exists) before the truncate-and-resend. The send path
+    // ALWAYS re-enters the user row (one prompt bubble, never a duplicate),
+    // so the whole turn — hidden siblings included — lives in the stash
+    // until mergeVariantChain puts it back.
+    var gEnd = j + 1;
+    while (gEnd < ms.length && ms[gEnd] && ms[gEnd].role === 'assistant') gEnd++;
+    var gid0 = m.vg || newMid();
+    var firstVid = newMid();
+    var parked = [];
+    for (var p = j + 1; p < gEnd; p++) {
+        var r = ms[p];
+        if (!r) continue;
+        if (!r.vg) { r.vg = gid0; r.vid = firstVid; }
+        parked.push(r);
+    }
+    _variantStash = { cid: _conv.id, cut: j, rows: parked, gid: gid0 };
     // slice BEFORE the prompt: the resend re-enters the user row through
     // onMessage (same as the old last-turn toolbar function did — slicing
     // at the assistant index would store the prompt twice)
@@ -4260,7 +4440,19 @@ function msgRegenerate(idx) {
     _conv.messages = ms.slice(0, j);
     renderHistory();
     saySweepPlans();
-    saveConv();
+    // UP-29: NO saveConv() at the provisional truncation — the onMessage
+    // commits on both sides (replayed prompt row, final answer) persist the
+    // merged pair; a reload before the merge still shows the OLD answer.
+    // Regenerate OPTIONS (classic :7216-7233 mirrored, not invented):
+    if (opts.model) {
+        // 'Regenerate with…' SWITCHES the conversation's model — sticky,
+        // exactly like classic's selectModel(opts.model) at :7226, and the
+        // header picker follows so the UI never lies about the selection.
+        _conv.model = String(opts.model);
+        var sel = gid('chat-native-model');
+        if (sel) sel.value = _conv.model;
+    }
+    if (opts.creative) _oneShotGen = { temperature: creativeTemp() };
     // UP-43: a LIVE prompt replays its own files (session previews hold the
     // File refs — classic re-sends content arrays from the session, so the
     // regenerated turn goes out with the same parts as the original). A
@@ -4270,6 +4462,247 @@ function msgRegenerate(idx) {
     var submit = { text: String(prev.content) };
     if (replay && replay.length) submit.files = replay;
     _dc.submitUserMessage(submit);
+}
+
+function selectVariantAt(idx, vid) {
+    // Variant tab switch (classic selectVariant :3581). Content, thinking
+    // and usage already RIDE the rows, so flipping vsel + one renderHistory
+    // moves the whole view — no per-widget bookkeeping.
+    var ms = (_conv && _conv.messages) || [];
+    var m = ms[idx];
+    if (!m || !m.vg || _streaming) return false;
+    var g = variantGroup(ms, m.vg);
+    if (!g || g.vids.indexOf(vid) < 0) return false;
+    for (var i = 0; i < ms.length; i++)
+        if (ms[i] && ms[i].vg === m.vg)
+            ms[i].vsel = ms[i].vid === vid ? 1 : 0;
+    renderHistory();
+    saveConv();
+    return true;
+}
+
+function deleteVariantAt(idx, vid) {
+    // Delete ONE variant (classic's per-tab trash, :1550). The two-step
+    // ARM lives in the strip UI; this is the guarded primitive: the last
+    // remaining chain can never be deleted, and deleting down to one
+    // leaves a PLAIN assistant turn (markers cleared — no vestigial tab
+    // machinery).
+    if (_streaming || !_conv || _variantStash) return false;
+    var ms = _conv.messages;
+    var m = ms[idx];
+    if (!m || !m.vg) return false;
+    var g = variantGroup(ms, m.vg);
+    if (!g || g.vids.length < 2 || g.vids.indexOf(vid) < 0) return false;
+    var wasActive = vid === g.activeVid;
+    var kept = [], gone = [];
+    for (var i = 0; i < ms.length; i++)
+        (ms[i] && ms[i].vg === m.vg && ms[i].vid === vid ? gone : kept).push(ms[i]);
+    for (var gi = 0; gi < gone.length; gi++) saySilence(gone[gi].mid);
+    _conv.messages = kept;
+    var left = variantGroup(kept, m.vg);
+    if (!left || left.vids.length < 2) {
+        // down to ONE survivor: it is a plain assistant turn again —
+        // strip the markers so no vestigial tab machinery can fire
+        for (var k = 0; k < kept.length; k++)
+            if (kept[k] && kept[k].vg === m.vg) {
+                delete kept[k].vg; delete kept[k].vid; delete kept[k].vsel;
+            }
+    } else if (wasActive) {
+        var lastVid = left.vids[left.vids.length - 1];
+        for (var q = 0; q < kept.length; q++)
+            if (kept[q] && kept[q].vg === m.vg)
+                kept[q].vsel = kept[q].vid === lastVid ? 1 : 0;
+    }
+    saySweepPlans();                   // nothing left behind that can speak
+    renderHistory();
+    saveConv();
+    return true;
+}
+
+function variantStripEl(idx) {
+    // The compact tab strip on the LAST row of the active chain (classic's
+    // response-tab group :1534-1551 — uplift's action bar is its own track,
+    // no new overlay machinery). Renders only when the group exists (2+
+    // chains, markers alive): no markers after a pre-whitelist reload means
+    // no strip, exactly as documented.
+    var ms = (_conv && _conv.messages) || [];
+    var m = ms[idx];
+    if (!m || m.role !== 'assistant' || !m.vg || m.vsel === 0) return null;
+    var next = ms[idx + 1];
+    if (next && next.vg === m.vg && next.vid === m.vid) return null; // mid-chain
+    var g = variantGroup(ms, m.vg);
+    if (!g || g.vids.length < 2) return null;
+    var wrap = el('span', 'chat-native-variants');
+    g.vids.forEach(function (vid, vi) {
+        var tab = el('button', 'chat-native-vartab' +
+                   (vid === g.activeVid ? ' active' : ''), String(vi + 1));
+        tab.type = 'button';
+        tab.dataset.vid = String(vid);
+        tab.title = t('uplift.chat.variant_show', 'Show reply {n}')
+            .replace('{n}', String(vi + 1)) +
+            (g.labels[vid] ? ' \u00b7 ' + g.labels[vid] : '');
+        tab.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            selectVariantAt(idx, vid);
+        });
+        wrap.appendChild(tab);
+        var x = el('button', 'chat-native-vardel', '\u00d7');
+        x.type = 'button';
+        x.title = t('uplift.chat.variant_delete', 'Delete reply {n}')
+            .replace('{n}', String(vi + 1));
+        var armed = false;
+        x.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            if (!armed) {
+                // two-step, in place — the file's own doctrine (msgDelete
+                // guards, cache cleanup confirms inline); a hover bar that
+                // vanishes on mouseout must never lean on window.confirm
+                armed = true;
+                x.textContent = '?';
+                x.title = t('uplift.chat.variant_delete_confirm',
+                            'Click again to delete this reply');
+                setTimeout(function () {
+                    if (!armed) return;
+                    armed = false; x.textContent = '\u00d7';
+                }, 3000);
+                return;
+            }
+            deleteVariantAt(idx, vid);
+        });
+        wrap.appendChild(x);
+    });
+    return wrap;
+}
+
+var _regenMenu = null;
+function closeRegenMenu() {
+    if (!_regenMenu) return;
+    var menu = _regenMenu;
+    _regenMenu = null;
+    var doc = W() && W().document;
+    if (menu.__away && doc && doc.removeEventListener) {
+        try { doc.removeEventListener('click', menu.__away, true); } catch (e) {}
+    }
+    try { menu.remove(); } catch (e) { /* box already re-rendered away */ }
+}
+function openRegenMenu(idx, btn) {
+    // The regenerate options hub (classic :7218-7233: plain / creative /
+    // 'Regenerate with…'). Built like this file's other inline overlays
+    // (openEditor): createElement + textContent, mounted ON the owning
+    // action bar so any re-render retires it with the bar itself.
+    if (_streaming || !_conv) return;
+    var anchor = btn && btn.parentElement;
+    if (!anchor) return;
+    if (_regenMenu && _regenMenu.__idx === idx) { closeRegenMenu(); return; }
+    closeRegenMenu();
+    var menu = el('div', 'chat-native-regen-menu');
+    menu.__idx = idx;
+    function item(key, fb, fn) {
+        var b = mkBtn('chat-native-regen-item', t(key, fb));
+        b.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            closeRegenMenu();
+            fn();
+        });
+        menu.appendChild(b);
+        return b;
+    }
+    item('chat.regenerate_tooltip', 'Regenerate',
+         function () { msgRegenerate(idx); });
+    item('uplift.chat.regen_creative', 'Creative (+0.4 temp)',
+         function () { msgRegenerate(idx, { creative: true }); });
+    // 'Regenerate with…' — a chat-capable model picker. Parity by SOURCE,
+    // not by re-filtering: _models IS the header picker's list (CHAT-FILTER
+    // at boot), so the menu and the select can never disagree — the u29
+    // gate pins both against the picker DOM.
+    var sel = el('select');
+    sel.className = 'chat-native-regen-model';
+    var ph = el('option', null,
+                t('uplift.chat.regen_with', 'Regenerate with\u2026'));
+    ph.value = '';
+    sel.appendChild(ph);
+    (_models || []).forEach(function (mo) {
+        var o = el('option', null, mo.id); o.value = mo.id;
+        sel.appendChild(o);
+    });
+    menu.appendChild(sel);
+    var go = mkBtn('chat-native-regen-go', '\u21bb');
+    go.title = t('uplift.chat.regen_go',
+                 'Regenerate with the selected model');
+    go.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var v = sel.value;
+        closeRegenMenu();
+        if (v) msgRegenerate(idx, { model: v });
+    });
+    menu.appendChild(go);
+    anchor.appendChild(menu);
+    _regenMenu = menu;
+    var doc = W() && W().document;
+    menu.__away = function (ev) {
+        if (_regenMenu !== menu) return;
+        var tgt = ev && (ev.composedPath && ev.composedPath().length
+            ? ev.composedPath()[0] : ev && ev.target);
+        if (menu.contains && tgt && (menu.contains(tgt) || tgt === btn)) return;
+        closeRegenMenu();
+    };
+    if (doc && doc.addEventListener) {
+        try { doc.addEventListener('click', menu.__away, true); } catch (e) {}
+    }
+}
+
+async function msgBranch(idx) {
+    // UP-29 (classic branchChat :7365-7410): duplicate the transcript up to
+    // and INCLUDING the user message at idx into a NEW conversation that
+    // inherits model / systemPrompt / activeProfile / customPrompt /
+    // thinking / generation — then switch to it. The branch is just a new
+    // server-stored conversation (POST /chat/history — no route needed),
+    // and the rows are DEEP copies: shared row objects would make an edit
+    // in one chat silently rewrite the other. Session-only file previews
+    // stay with the original rows, exactly like classic's storage clones.
+    if (!_conv) return;
+    var m = messageAt(idx);
+    if (!m || m.role !== 'user') return;
+    if (_variantStash) return;                 // mid-regenerate: nothing settled
+    if (_streaming) await stopAndSettle();     // UP-34 doctrine: settle first
+    if (_streaming) return;                    // classic's refuse-while-streaming
+    if (_conv.messages[idx] !== m) return;     // the settle commit moved the store
+    var src = _conv;
+    var b = newConv();
+    b.title = (t('uplift.chat.branch_prefix', 'Branch of ') +
+               (src.title || t('chat.untitled_title', 'Untitled'))).slice(0, 48);
+    b.model = src.model;
+    b.systemPrompt = src.systemPrompt;
+    b.activeProfile = src.activeProfile;
+    b.customPrompt = src.customPrompt;
+    b.customState = src.customState
+        ? JSON.parse(JSON.stringify(src.customState)) : null;
+    b.variants = src.variants
+        ? JSON.parse(JSON.stringify(src.variants)) : {};
+    b.thinking = src.thinking;
+    b.thinkingBudget = src.thinkingBudget;
+    b.generation = src.generation
+        ? JSON.parse(JSON.stringify(src.generation)) : null;
+    b.pinned = false;
+    b.messages = src.messages.slice(0, idx + 1).map(function (r) {
+        return JSON.parse(JSON.stringify(sanitizeMsgForStore(r)));
+    });
+    if (!b.messages.length) return;
+    var d = D();
+    try {
+        await d.postJson(api() + '/chat/history', b);
+    } catch (e) {
+        d.toast(String((e && e.message) || e), 'error');
+        return;
+    }
+    _convs.push({ id: b.id, title: b.title, model: b.model,
+                  message_count: b.messages.length, updated: Date.now() });
+    try {
+        await openConv(b.id);   // full switch: fetch + render + model select +
+                                // hydrate + VOICE-11/13 teardown rules
+    } catch (e) {
+        d.toast(String((e && e.message) || e), 'error');
+    }
 }
 
 function commitEditedInPlace(idx, contentVal, reasoningVal) {
@@ -5929,6 +6362,35 @@ function applyShadowTheme(dc) {
         '  height: 7px; border-radius: 50%; background: var(--accent, #4c8dff);',
         '  animation: chat-native-pulse 1.2s ease-in-out infinite; }',
         '@keyframes chat-native-pulse { 50% { opacity: .35; } }',
+        /* UP-29: regenerate options hub + variant tab strip (lane css,
+           folded into the shadow sheet like the UP-35/43 surfaces) */
+        '.chat-native-msg-actions { position: relative; }',
+        '.chat-native-regen-menu { position: absolute; right: 0;',
+        '  top: 100%; z-index: 40; display: flex; flex-direction: column;',
+        '  min-width: 170px; padding: 4px; background: var(--field, #fff);',
+        '  border: 1px solid var(--edge); border-radius: var(--radius, 8px);',
+        '  box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }',
+        '.chat-native-regen-item { text-align: left; border: 0;',
+        '  background: none; padding: 5px 8px; font-size: 12px;',
+        '  cursor: pointer; border-radius: 6px; }',
+        '.chat-native-regen-item:hover { background: color-mix(in srgb,',
+        '  var(--accent, #3b82f6) 12%, transparent); }',
+        '.chat-native-regen-model { margin: 4px; font-size: 12px;',
+        '  max-width: 150px; }',
+        '.chat-native-regen-go { margin: 0 4px 2px; font-size: 12px;',
+        '  cursor: pointer; }',
+        '.chat-native-variants { display: inline-flex; align-items: center;',
+        '  gap: 2px; margin-right: 6px; }',
+        '.chat-native-vartab { min-width: 20px; padding: 1px 5px;',
+        '  font-size: 11px; border: 1px solid var(--edge);',
+        '  border-radius: 6px; background: none; color: var(--dim, #777);',
+        '  cursor: pointer; }',
+        '.chat-native-vartab.active { border-color: var(--accent, #3b82f6);',
+        '  color: inherit; font-weight: 600; }',
+        '.chat-native-vardel { border: 0; background: none;',
+        '  color: var(--dim, #777); cursor: pointer; font-size: 12px;',
+        '  padding: 0 3px; margin-right: 4px; }',
+        '.chat-native-vardel:hover { color: var(--warn, #b45309); }',
         '.chat-native-web-card { margin: 4px 0; padding: 8px 12px;',
         '  border: 1px solid var(--edge); border-radius: var(--radius, 8px);',
         '  background: color-mix(in srgb, var(--panel) 60%, transparent);',
@@ -6387,6 +6849,12 @@ function mount() {
                 if (role === 'assistant' && _turnParams) {
                     row.params = Object.assign({}, _turnParams);
                 }
+                // UP-29: which model produced this reply — the variant tab
+                // label's tooltip (classic keeps meta.modelId per variant;
+                // display-only, dropped by the server whitelist, like usage)
+                if (role === 'assistant' && _turnModel) {
+                    row.rmodel = _turnModel;
+                }
                 // UP-38: token counts ride the row for the footer chip.
                 // Display-only: the backend _clean_message filter drops the
                 // key on reload (classic keeps it session-side too).
@@ -6447,6 +6915,11 @@ function mount() {
                     row.mid = row.mid || newMid();
                 }
                 _conv.messages.push(row);
+                // UP-29: a regenerate's final answer landed — park the
+                // previous chain(s) back around it as hidden older
+                // variants (first caller wins; the close() drain sees a
+                // cleared stash and skips).
+                if (role === 'assistant' && _variantStash) mergeVariantChain();
                 if (role === 'user' && _conv.messages.filter(function (x) {
                         return x.role === 'user'; }).length === 1) {
                     _conv.title = String(m.text || '').slice(0, 48)
@@ -6555,7 +7028,18 @@ return { mount: mount, isMounted: function () { return _mounted; },
                         // VOICE-11: manual SPEAK seam (the overlay binds it
                         // to the per-bubble 🔊 button; tests drive directly)
                         speak: msgSpeak,
+                        // UP-29: branch + regenerate hub + variant tabs
+                        // (the overlay binds these to per-bubble buttons;
+                        // the node tests drive them directly)
+                        branch: msgBranch, regenMenu: openRegenMenu,
+                        variantSelect: selectVariantAt,
+                        variantDelete: deleteVariantAt,
                         attach: attachMessageActions },
+         // UP-29 test seams: the pure-ish variant helpers + the merge hook
+         _u29: { creativeTemp: creativeTemp, variantGroup: variantGroup,
+                 mergeVariantChain: mergeVariantChain,
+                 variantStripEl: variantStripEl,
+                 closeRegenMenu: closeRegenMenu },
          // MATH: pure display-normalizer seam for the node gates
          _normMath: normMath,
          // UP-35 test seams: pure card/status builders + the round flush
@@ -6580,6 +7064,9 @@ return { mount: mount, isMounted: function () { return _mounted; },
                                         get toolStatus() { return _toolStatus; },
                                         get rounds() { return _roundsDone; },
                                         get thinkMark() { return _thinkMark; },
+                                        // UP-29 probe: the parked chains of
+                                        // the in-flight regenerate (by ref)
+                                        get variantStash() { return _variantStash; },
                                         // U45: mounted element (drills/tests
                                         // stub submitUserMessage through it)
                                         get dc() { return _dc; },
