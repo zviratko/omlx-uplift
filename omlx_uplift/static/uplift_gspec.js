@@ -108,5 +108,50 @@ const INTEG_PREFIXED = new Set(['copilot_model', 'codex_model', 'opencode_model'
     'openclaw_model', 'hermes_model', 'pi_model', 'vibe_model', 'dsh_model',
     'openclaw_tools_profile']);
 
-return { GS_MAP, GS_PAYLOAD_SKIP, INTEG_PREFIXED };
+/* UP-19 (2): classic's host-loopback verdict (dashboard.js
+   isLoopbackBindHost) — comma-separated multi-host bind lists count as
+   loopback only when EVERY entry is localhost/127.x/::1 (incl. IPv4-mapped
+   ::ffff:7f..). Drives the auth-skip force-off + key-required guard. */
+function isLoopbackBindHost(value) {
+    const hosts = String(value || '').split(',')
+        .map(h => h.trim().toLowerCase()).filter(Boolean);
+    if (hosts.length === 0) return false;
+    return hosts.every(host => {
+        if (host.replace(/\.+$/, '') === 'localhost') return true;
+        if (!host.includes(':')) {
+            const parts = host.split('.');
+            return parts.length === 4 && parts[0] === '127'
+                && parts.every(p => /^(0|[1-9]\d{0,2})$/.test(p) && Number(p) <= 255);
+        }
+        const [address, scope, extra] = host.split('%');
+        if (extra !== undefined || scope === '') return false;
+        if (!/^[0-9a-f:.]+$/.test(address)) return false;
+        try {
+            const normalized = new URL(`http://[${address}]/`).hostname;
+            return normalized === '[::1]'
+                || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(normalized);
+        } catch { return false; }
+    });
+}
+
+/* UP-19 (2): classic saveGlobalSettings required-fields block
+   (dashboard.js:1376-1390) — next-state aware (queued edits count).
+   get(flat) resolves the value the save WOULD send; label(flat) renders
+   the localized field name. Returns the classic joined error or null. */
+const GS_REQUIRED_FLATS = ['host', 'port', 'max_audio_upload_size',
+    'max_concurrent_requests', 'embedding_batch_size', 'ssd_cache_max_size',
+    'sampling_max_context_window', 'sampling_max_tokens'];
+function requiredFieldsError(get, label) {
+    const missing = GS_REQUIRED_FLATS.filter(f => !get(f)).map(label);
+    const dirs = get('model_dirs') || [];
+    if (!dirs.length || !dirs.some(d => String(d).trim()))
+        missing.push(label('model_dirs'));
+    if (get('gdn_snapshot_storage') === 'ssd_sidecar' && get('hot_cache_only'))
+        missing.push(label('gdn_hot_conflict'));
+    if (!missing.length) return null;
+    return { missing, joined: missing.join(', ') };
+}
+
+return { GS_MAP, GS_PAYLOAD_SKIP, INTEG_PREFIXED,
+         isLoopbackBindHost, requiredFieldsError, GS_REQUIRED_FLATS };
 });

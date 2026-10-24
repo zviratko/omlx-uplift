@@ -278,7 +278,8 @@ function markFieldDirty(flat, val) {
     if (changed) gsDirty[flat] = cur;
     else delete gsDirty[flat];               // edited back = no longer queued
     if (flat === 'cache_enabled' || flat === 'hot_cache_only'
-        || flat === 'gdn_snapshot_storage')
+        || flat === 'gdn_snapshot_storage'
+        || flat === 'host')                    // UP-19 (7): skip row follows the bind
         gsDisabledSync();                    // SSD rows follow the effective mode
     gsUpdateSaveBtn();
     gsMarkSections();
@@ -355,21 +356,66 @@ function gsUpdateSaveBtn() {
             ? 'No supervisor was detected — this shuts omlx down and relies on your watchdog (launchd/menubar) to bring it back.'
             : 'No queued changes');
 }
+let gsSaving = false;      // UP-19 (5): one save in flight; classic disables SAVE
 async function gsCommit() {
+    if (gsSaving) return;
     const fields = Object.assign({}, gsDirty);
     // env tunables ride a different endpoint; classic fields keep the
     // full-payload global-settings save (P1A-6 semantics unchanged)
     const envFields = {}, classicFields = {};
     for (const [k, v] of Object.entries(fields))
         (isEnvFlat(k) ? envFields : classicFields)[k] = v;
+    // UP-19 (2): classic validates BEFORE posting (required-fields block,
+    // dashboard.js:1376-1418). next(flat) reads the value the save sends.
+    const next = f => (f in gsDirty) ? gsDirty[f] : gsValFlat(f);
+    const label = f => f === 'model_dirs'
+        ? C.tf('js.error.model_directory', 'model directory')
+        : f === 'gdn_hot_conflict'
+        ? C.tf('js.error.gdn_sidecar_hot_cache_conflict',
+               'GDN sidecar storage cannot be combined with hot-cache-only mode')
+        : C.tf('settings.' + f.replace(/_/g, '.'), f);
+    const req = window.UpliftGSpec.requiredFieldsError(next, label);
+    const errs = [];
+    if (req) errs.push(C.tf('js.error.required_fields', 'Please fill in: {fields}')
+        .replace('{fields}', req.joined));
+    // UP-19 (7): non-loopback bind forces key verification OFF the table and
+    // requires a key — classic mutates then refuses (auth lockout guard).
+    if (!window.UpliftGSpec.isLoopbackBindHost(next('host') || '')) {
+        classicFields.skip_api_key_verification = false;   // classic forces it
+        delete gsDirty.skip_api_key_verification;
+        if (!next('api_key') && !(GS.auth && GS.auth.api_key_set))
+            errs.push(C.tf('js.error.api_key_required_network',
+                'An API key is required when the server is reachable beyond localhost.'));
+    }
+    const key = next('api_key');
+    if (key) {
+        if (String(key).length < 4) errs.push(C.tf('js.error.api_key_min_length',
+            'API key must be at least 4 characters.'));
+        if (/\s/.test(String(key))) errs.push(C.tf('js.error.api_key_no_whitespace',
+            'API key must not contain whitespace.'));
+    }
+    if (errs.length) {
+        errs.forEach(e => GLUE.toast(e, 'error'));
+        const sub = $('gs-sub'); if (sub) sub.textContent = errs[0];
+        return;
+    }
+    gsSaving = true;
+    const sb = gsSaveBtn(); if (sb) sb.disabled = true;
     let okAll = true;
-    if (Object.keys(classicFields).length) okAll = await gsSaveNow(classicFields);
-    if (okAll && Object.keys(envFields).length) okAll = await envSave(envFields);
+    try {
+        if (Object.keys(classicFields).length) okAll = await gsSaveNow(classicFields);
+        if (okAll && Object.keys(envFields).length) okAll = await envSave(envFields);
+    } finally {
+        gsSaving = false;
+        if (sb) sb.disabled = false;
+    }
     if (okAll) {
         Object.keys(gsDirty).forEach(k => delete gsDirty[k]);
         // a save that touched restart-requiring fields leaves the server
         // owing a restart: arm the red RESTART SERVER button (user flow)
         if (Object.keys(fields).some(k => gsRestartField(k))) gsRestartPending = true;
+        try { sessionStorage.setItem('uplift.gs.restartPending',
+            gsRestartPending ? '1' : ''); } catch (_) {}   // UP-19 (4)
     }
     // re-render inputs from the new baseline; keeps still-queued edits shown
     renderGlobalSettings();
@@ -378,6 +424,11 @@ async function gsCommit() {
 }
 async function gsRestartServer(forced) {
     const b = gsSaveBtn(); if (!b) return;
+    // UP-19 (4): classic confirms before killing the server
+    // (restart_confirm) — a running chat/bench dies with it.
+    if (!window.confirm(C.tf('settings.server.restart_confirm',
+            'Restart the oMLX server? Running requests and benchmarks will be interrupted.')))
+        return;
     b.disabled = true;
     try {
         // uplift's own endpoint (not vanilla's /server/restart, which only
@@ -393,7 +444,11 @@ async function gsRestartServer(forced) {
         } else {
             gsRestartPending = false;   // restart requested; button goes back to SAVE
             gsForceArmed = false;
+            try { sessionStorage.setItem('uplift.gs.restartPending', ''); } catch (_) {}
             GLUE.toast(C.tf('uplift.toast.restart_requested', 'Restart requested — server respawns in ~5 s'));
+            // UP-19 (4): classic polls /health down-then-up before declaring
+            // success, so a slow supervisor cannot fake an instant OK.
+            gsRestartWatch();
         }
         $('banner').classList.add('show');
         $('banner-text').textContent = C.tf('uplift.ui.server_restarting_dashboard_reconnecting', 'Server restarting — dashboard reconnecting…');
@@ -403,6 +458,44 @@ async function gsRestartServer(forced) {
     }
     b.disabled = false;
     gsUpdateSaveBtn();
+}
+function gsRestartWatch() {
+    const deadline = Date.now() + 60000;    // classic's 60 s ceiling
+    let sawDownAt = 0;
+    const tick = async () => {
+        if (Date.now() > deadline) {
+            const bn = $('banner');
+            if (bn) bn.classList.add('show');
+            const bt = $('banner-text');
+            if (bt) bt.textContent = C.tf('settings.server.restart_status_timeout',
+                'Restart timed out — check the server process.');
+            return;
+        }
+        let alive = false;
+        try {
+            // domkit-exempt: unauthenticated liveness probe, no kit error mapping
+            alive = (await fetch('/health', { cache: 'no-store' })).ok; // domkit-exempt
+        }
+        catch (_) { alive = false; }
+        if (!alive) {
+            if (!sawDownAt) sawDownAt = Date.now();
+            setTimeout(tick, 1000);
+            return;
+        }
+        // classic requires down-then-up; if the supervisor was fast we may
+        // never catch the down — after 3 consecutive alives past 5 s, call
+        // it done rather than hang for the full deadline.
+        if (!sawDownAt && Date.now() - started < 5000) { setTimeout(tick, 800); return; }
+        if (sawDownAt && Date.now() - sawDownAt < 1500) { setTimeout(tick, 800); return; }
+        const bn = $('banner');
+        if (bn) bn.classList.remove('show');
+        gsRestartPending = false;
+        try { sessionStorage.setItem('uplift.gs.restartPending', ''); } catch (_) {}
+        pollGlobalSettings();
+        gsUpdateSaveBtn();
+    };
+    const started = Date.now();
+    setTimeout(tick, 1200);
 }
 function gsSaveOrRestart() {                 // one button, three states
     const b = gsSaveBtn(); if (!b) return;
@@ -434,9 +527,12 @@ async function gsSaveNow(fields) {
         try {
             await GLUE.postJson(`${API}/admin/api/global-settings`, body);
         } catch (e) {
-            // FE-2: keep the status-only copy on an HTTP failure; network
-            // errors (no status) still fall through to the generic catch.
-            if (e.status) { GLUE.toast(C.t('uplift.toast.save_failed_http', {status: e.status})); return false; }
+            // UP-19 (1): FE-2 used to swallow the body here ('save failed:
+            // HTTP 422'); domkit's kitError already flattens the server's
+            // detail into e.message — show it, like the model editor does.
+            if (e.status) { GLUE.toast(e.message
+                || C.t('uplift.toast.save_failed_http', {status: e.status}), 'error');
+                return false; }
             throw e;
         }
         GS._shadow = body;
@@ -562,12 +658,16 @@ function gsText(sec, field, flat, L, extra) {
         inp.onchange = queueRange;
         return inp;
     }
-    // v1 DOM truth: a gsys 'number' field is a TEXT input whose value is
-    // Number()-converted on queue (one holds '100MB' — an HTML number
-    // input would eat it). Only extra.range becomes a real number input.
-    const kind = extra.bool ? 'bool' : 'text';
+    // v1 DOM truth: a gsys 'number' field WAS a text input — but only
+    // because k:'text' rows like ssd_cache_max_size legitimately hold
+    // '64GB'-shaped values. UP-19 (3): rows the spec declares k:'num' get
+    // REAL number inputs so their min/max/step actually bind (classic does).
+    const kind = extra.bool ? 'bool' : extra.number ? 'number' : 'text';
     const inp = window.UpliftWidgets.build(kind, {
         value: v, checked: !!v, type: extra.type, placeholder: extra.placeholder,
+        min: kind === 'number' ? extra.min : undefined,
+        max: kind === 'number' ? extra.max : undefined,
+        step: kind === 'number' ? (extra.step !== undefined ? extra.step : 1) : undefined,
     }).el;
     // v1 set these unconditionally (inert on a text input, real on range)
     if (extra.min !== undefined) inp.min = extra.min;
@@ -611,6 +711,9 @@ function gsSelect(flat, options, cur) {
         let v = sel.value === '' ? null : sel.value;
         if (v !== null && typeof cur === 'number') v = Number(v);
         gsQueueSave(flat, v);
+        // UP-19 (9): language and idle-timeout commit live, classic-style
+        // (no SAVE round-trip); everything else stays queue-based.
+        if (flat === 'ui_language' || flat === 'idle_timeout_seconds') gsCommit();
         // FE-6 step 3: conditional visibility updated SURGICALLY (below);
         // structural cases (Claude-Code mode flip: 3 rows + a datalist, or
         // a box left without its header) keep the honest full rebuild.
@@ -1296,11 +1399,11 @@ const GS_SPEC = [
             rm.style.display = dirs.length > 1 ? '' : 'none';
             rm.onclick = async () => {
                 const nd = dirs.filter((_, j) => j !== i);
-                if (await gsSaveNow({ model_dirs: nd })) renderGlobalSettings();
+                gsQueueSave('model_dirs', nd);
             };
             inp.onchange = async () => {
                 const nd = dirs.slice(); nd[i] = inp.value;
-                if (await gsSaveNow({ model_dirs: nd })) renderGlobalSettings();
+                gsQueueSave('model_dirs', nd);
             };
             one.append(inp, rm);
             dl.append(one);
@@ -1308,7 +1411,7 @@ const GS_SPEC = [
         const add = document.createElement('button');
         add.className = 'se-btn act'; add.textContent = C.tf('uplift.gs.model.add_directory', '+ add directory');
         add.onclick = async () => {
-            if (await gsSaveNow({ model_dirs: dirs.concat('') })) renderGlobalSettings();
+            gsQueueSave('model_dirs', dirs.concat(''));
         };
         dl.append(add);
         body.append(gsRow('model', L.model.dirs, '', dl));
@@ -1526,6 +1629,32 @@ function gsDisabledSync() {
         const ctl = row && row.querySelector('input,select');
         if (ctl) ctl.disabled = dis;
     }
+    // UP-19 (7): classic refuses skip-api-key-verification whenever the bind
+    // leaves localhost — lock the row (with the reason) instead of shipping
+    // a guaranteed-400/ignored edit.
+    const srow = document.querySelector('#gs-body [data-flat="skip_api_key_verification"]');
+    const sctl = srow && srow.querySelector('input');
+    if (sctl) {
+        const loop = window.UpliftGSpec.isLoopbackBindHost(gsValFlat('host') || '');
+        sctl.disabled = !loop;
+        srow.title = loop ? '' : C.tf('js.error.api_key_required_network',
+            'An API key is required when the server is reachable beyond localhost.');
+    }
+}
+function gsBodySanitize() {
+    // UP-19 (6): classic gives the API-key row an eye button. Uplift keeps
+    // its stricter diff-masking (the CHANGES rail never prints the value);
+    // this only reveals the field the user is typing into.
+    for (const inp of document.querySelectorAll('#gs-body input[type=password]')) {
+        if (inp.__revealDone) continue;
+        inp.__revealDone = true;
+        const eye = document.createElement('button');
+        eye.type = 'button'; eye.className = 'se-btn gs-eye'; eye.textContent = '👁';
+        eye.title = 'Show / hide the value';
+        eye.onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; };
+        const cell = inp.closest('.gctl') || inp.parentElement;
+        if (cell) cell.append(eye);
+    }
 }
 function gsCtxNow() {
     // MGC-1 (user 2026-10-21): gated rows follow the QUEUED edit, not the
@@ -1615,6 +1744,12 @@ function rowHostBox(title) {
 }
 
 function renderGlobalSettings() {
+    // UP-19 (4): a restart still owed survives a page reload (classic loses
+    // it too; uplift's button flow depends on it)
+    try {
+        if (!gsRestartPending && sessionStorage.getItem('uplift.gs.restartPending') === '1')
+            gsRestartPending = true;
+    } catch (_) {}
     gsTabValid();
     const body = document.createElement('div');   // staged; grouped into boxes below
     body.textContent = '';
@@ -1742,6 +1877,7 @@ function renderGlobalSettings() {
         }
     }
     gsDisabledSync();   // classic-parity :disabled on the two SSD rows
+    gsBodySanitize();   // UP-19 (6): password rows get the classic eye toggle
     gsMarkSections();
     gsUpdateSaveBtn();
     renderDirtyList();
