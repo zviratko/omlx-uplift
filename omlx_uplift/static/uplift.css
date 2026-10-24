@@ -1285,17 +1285,9 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
    cancel/retry appeared as nameless text under the repo, not as buttons).
    Long error text must not starve the name: all tracks shrink fractionally */
 .admin-table .urow.usage.with-acts { grid-template-columns: minmax(0,4fr) minmax(0,2fr) 120px minmax(0,3fr) 96px; }
-/* DL-FLASH: transient confirmation riding to the right of the download
-   button — the button itself never changes (a disabled 'queued…' button
-   locked the row after one click). Accent text + auto-fade; .err is the
-   honest failure tint (var(--bad): readable red on dark grounds). */
-.dl-flash { font: 500 10px/1 var(--mono); letter-spacing: .06em;
-    color: var(--accent); white-space: nowrap; align-self: center;
-    opacity: 0; transform: translateY(2px); transition: opacity .25s ease,
-    transform .25s ease; }
-.dl-flash.in { opacity: 1; transform: none; }
-.dl-flash.out { opacity: 0; }
-.dl-flash.err { color: var(--bad); }
+/* DL-FLASH retired by UP-14 (2026-10-24): download rows no longer queue on
+   click — they open the file-pick dialog, and confirmation is the dialog's
+   own toast. Negative pin: tests/dl1-fileselect.test.cjs. */
 .admin-table .urow.usage .rowacts { display: flex; gap: 6px; justify-content: flex-end;
     text-align: right; overflow: visible; }
 .admin-table .urow.head { color: var(--dim); border-top: 1px solid var(--ink); }
@@ -3277,3 +3269,28 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* U71: the light-DOM thinking panel is GONE — thinking renders per reply
    INSIDE deep-chat's shadow root (.chat-native-thinking, styled in
    uplift_chat.js's shadow theme tag; light DOM cannot reach across). */
+
+/* ---- UP-14 (2026-10-24): model-download dialog — file pick list ------ */
+/* Classic-parity file selection (modal-overlay + modal nasa house chrome).
+   New class names only; every radius derives from var(--radius) (nat U82). */
+.dl-modal { width: min(760px, 100%); }
+.dl-body { flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 8px; }
+.dl-files { border: 1px solid var(--line); }
+.dl-file { display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+    border-bottom: 1px solid var(--line); font-size: var(--fs-meta);
+    cursor: pointer; }
+.dl-file:last-child { border-bottom: none; }
+.dl-file:has(input:disabled) { cursor: default; }
+.dl-file input[type="checkbox"] { flex: none; }
+.dl-fname { flex: 1 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.dl-fsize { flex: none; color: var(--dim); font-variant-numeric: tabular-nums; }
+.dl-foot { display: flex; align-items: center; justify-content: flex-end;
+    gap: 8px; flex-wrap: wrap; }
+.dl-hf { margin-right: auto; font-size: var(--fs-meta); color: var(--ink); }
+.dl-space { color: var(--bad); font-size: var(--fs-meta); }
+.dl-b.dim { color: var(--dim); border-color: var(--line); }
+.dl-b.ok { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.dl-b.warn { color: var(--warn); border-color: var(--warn); }
+.dl-b.bad { color: var(--bad); border-color: var(--bad); }

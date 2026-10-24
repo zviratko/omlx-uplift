@@ -1,10 +1,13 @@
 /* Uplift DOWNLOADER page + shared task-list helpers (PH2-1 stage 9a
    extraction from uplift.js): HF downloader tabs (trending/popular/search,
-   paging, sort), queueDownload, and the task-row renderer the quantizer/
+   paging, sort), the UP-14 file-pick download dialog, and the task-row
+   renderer the quantizer/
    uploader pages share. Plain script; loads AFTER uplift_state.js, BEFORE
    uplift.js, which late-binds fetchJson/postJson/toast/emptyMsg/cell via
    window.UpliftDom (FE-1: no glue needed — all five were primitives). Exports
-   window.Uplift.downloader {renderTasks, initDownloader}. */
+   window.Uplift.downloader {renderTasks, initDownloader}. UP-14 (2026-10-24):
+   every download entry opens the classic-parity FILE-PICK DIALOG first and
+   HF/mirror URLs normalize to owner/repo — see the UP-14 section. */
 (function () {
 'use strict';
 const C = window.UpliftCore;
@@ -37,6 +40,9 @@ function renderTasks(hostId, kind) {
         const host = $(hostId);
         host.innerHTML = '';
         const tasks = d.tasks || [];
+        // UP-14: the dialog's DOWNLOADED badge wants the newest task list —
+        // classic isModelDownloaded keys on the LATEST match per repo
+        if (kind === 'hf') DL.hfTasks = tasks;
         // ACHIEVEMENTS: seed silently on first sight, then judge transitions
         try {
             const AC = window.Uplift && window.Uplift.achv;
@@ -94,6 +100,9 @@ const DL = {
     sort: { key: 'rank', dir: 1 },   // client column sort (classic parity)
     q: '',
     busy: false,
+    gs: null,                    // global-settings cache (mirror endpoint, RAM size)
+    hfModels: [],                // /admin/api/hf/models — DOWNLOADED badge
+    hfTasks: [],                 // latest /admin/api/hf/tasks read (UP-14)
 };
 function dlPageSize() {
     // classic parity: fit ~10..30 rows in the available window height
@@ -117,47 +126,298 @@ function dlSortModels(list, key, dir, fallbackKey) {
     });
     return rows;
 }
-function initDownloader() {
-    const token = () => (D.$('dl-token') || {}).value?.trim() || '';
-    /* DL-FLASH (user 2026-10-11): the download button used to flip to a
-       disabled 'queued…' — and on SUCCESS it never came back, so one click
-       locked the row forever and no second model could be queued. The
-       button is now IMMUTABLE: confirmation is a small flash to its right
-       ('Download queued ✓', fades on its own). A brief cooldown absorbs
-       double-clicks without ever changing the button's look or state. */
-    const FLASH_MS = 2600;
-    function flashQueued(btn, ok) {
-        if (!btn || !btn.parentNode) return;
-        let f = btn.parentNode.querySelector('.dl-flash');
-        if (!f) { f = document.createElement('span');
-                  f.className = 'dl-flash'; btn.after(f); }
-        f.textContent = ok
-            ? C.tf('uplift.dl.queued_flash', 'Download queued ✓')
-            : C.tf('uplift.dl.queue_fail', 'queue failed');
-        f.classList.toggle('err', !ok);
-        f.classList.remove('out'); void f.offsetWidth;   // restart fade
-        f.classList.add('in');
-        clearTimeout(f._t);
-        f._t = setTimeout(() => { f.classList.remove('in'); f.classList.add('out'); },
-                          FLASH_MS - 600);
-        f._t2 = setTimeout(() => f.remove(), FLASH_MS);
+/* ---- UP-14 (FEAT-1 adoption, 2026-10-24): classic model-download dialog ----
+   Every download entry opens this dialog first — the operator picks files
+   (classic: "Every download picks its files in the detail modal first",
+   dashboard.js:7770). The URL parse, the selection machine and the footer
+   gating are ported from classic dashboard.js — hfRepoIdFromInput ~7045,
+   resetHfSelection..hfFitsDisk ~8288-8360, isModelDownloaded ~7775,
+   submitHFDownload ~7079 — keep them line-adjacent so drift syncs diff as
+   parity. Labels are classic catalog keys: t() resolves the mounted classic
+   catalog live, so this adds ZERO uplift locale churn. */
+
+// Convert Hugging Face and configured mirror model URLs to owner/repo ids.
+// Leave plain repository IDs and other input unchanged for model lookup.
+function hfRepoIdFromInput(value, endpoint) {
+    const raw = String(value ?? '').trim();
+    const officialLink = /^(?:(?:https?:)?\/\/)?(?:www\.)?(?:huggingface\.co|hf\.co)\/([^/?#\s]+\/[^/?#\s]+)/i;
+    const officialMatch = raw.match(officialLink);
+    if (officialMatch) return officialMatch[1];
+    const ep = String(endpoint ?? '').trim();
+    if (ep) {
+        try {
+            const mirror = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(ep) ? ep : `https://${ep}`);
+            const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const prefix = mirror.pathname.split('/').filter(Boolean).map(escape).join('/');
+            const pathPrefix = prefix ? `(?:${prefix}/)?` : '';
+            const mirrorLink = new RegExp(
+                `^(?:(?:https?:)?//)?(?:www\\.)?${escape(mirror.host)}/${pathPrefix}([^/?#\\s]+/[^/?#\\s]+)`,
+                'i');
+            const mirrorMatch = raw.match(mirrorLink);
+            if (mirrorMatch) return mirrorMatch[1];
+        } catch {
+            // Ignore invalid mirror settings and keep the official hosts.
+        }
     }
-    const queueDownload = (repoId, fromBtn) => {
-        if (!repoId) { DG.toast(C.t('uplift.toast.repo_id_required')); return; }
-        if (fromBtn && fromBtn._cool) return;      // silent double-click guard
-        if (fromBtn) { fromBtn._cool = true;
-                       setTimeout(() => { fromBtn._cool = false; }, FLASH_MS); }
+    return raw;
+}
+
+// Pure selection state machine over a /admin/api/hf/model-info payload
+// (rows: name,size,local,required,preselected,group,mmproj,kind — the shape
+// omlx/admin/hf_downloader.py ~700-760 builds). Tests drive this directly.
+const HFS = {
+    // A selection starts from what "download all" fetches; GGUF repos start empty.
+    initial(detail) {
+        const picked = {};
+        for (const file of (detail && detail.files) || []) {
+            if (file.preselected && !file.local) picked[file.name] = true;
+        }
+        return picked;
+    },
+    locked(file) { return !!file.required || !!file.local; },
+    selected(file, picked) { return !file.local && (!!file.required || !!picked[file.name]); },
+    // A split GGUF's parts toggle together; a GGUF brings its vision projector.
+    toggle(detail, picked, file) {
+        if (HFS.locked(file)) return picked;
+        const files = detail.files || [];
+        const on = !picked[file.name];
+        const next = { ...picked };
+        const members = file.group ? files.filter(f => f.group === file.group) : [file];
+        for (const m of members) if (!m.local) next[m.name] = on;
+        const projector = on && file.mmproj && files.find(f => f.name === file.mmproj);
+        if (projector && !projector.local) next[projector.name] = true;
+        return next;
+    },
+    names(detail, picked) {
+        return ((detail && detail.files) || [])
+            .filter(f => HFS.selected(f, picked)).map(f => f.name);
+    },
+    selSize(detail, picked) {
+        return ((detail && detail.files) || [])
+            .filter(f => HFS.selected(f, picked))
+            .reduce((total, f) => total + (f.size || 0), 0);
+    },
+    // A split GGUF loads as one model: size the whole set.
+    rowSize(detail, file) {
+        if (!file.group) return file.size || 0;
+        return (detail.files || []).filter(f => f.group === file.group)
+            .reduce((total, f) => total + (f.size || 0), 0);
+    },
+    // What "download all" still has to fetch: its files not downloaded yet.
+    allSize(detail) {
+        const files = (detail && detail.files) || [];
+        if (!files.length) return (detail && detail.download_all_size) || 0;
+        const fetched = detail.layout === 'safetensors' ? (f => f.preselected) : (() => true);
+        return files.filter(f => fetched(f) && !f.local)
+            .reduce((total, f) => total + (f.size || 0), 0);
+    },
+    fits(detail, bytes) {
+        const free = detail && detail.disk_free;
+        return !free || bytes <= free;
+    },
+    // classic getMemoryFitStatus: GGUF size against installed RAM
+    memFit(totalBytes, sizeBytes) {
+        if (!totalBytes || !sizeBytes) return 'safe';
+        const ratio = sizeBytes / totalBytes;
+        if (ratio > 0.95) return 'danger';
+        if (ratio > 0.80) return 'warning';
+        return 'safe';
+    },
+    // classic isModelDownloaded — a cancelled or failed download keeps its
+    // finished files for resume, so only the LATEST task can veto.
+    downloaded(repoId, models, tasks) {
+        if (!repoId) return false;
+        const wanted = repoId.toLowerCase();
+        const matches = it => String((it && it.repo_id) || '').toLowerCase() === wanted;
+        let latest = null;
+        for (const t of tasks || []) if (matches(t)) latest = t;
+        const unfinished = !!latest && latest.status !== 'completed';
+        return !unfinished && (models || []).some(matches);
+    },
+};
+
+function dlToken() { return (D.$('dl-token') || {}).value?.trim() || ''; }
+
+let DLGS = null;   // global-settings in-flight cache (mirror endpoint + total RAM)
+function dlGlobalSettings() {
+    if (!DLGS) DLGS = DG.fetchJson(`${API}/admin/api/global-settings`)
+        .then(gs => gs || {})
+        .catch(() => { DLGS = null; return {}; });
+    return DLGS;
+}
+
+function directDownload() {
+    const inp = D.$('dl-repo'); if (!inp) return;
+    const ep = (DL.gs && DL.gs.huggingface && DL.gs.huggingface.endpoint) || '';
+    const id = hfRepoIdFromInput(inp.value, ep);
+    if (!id) { DG.toast(C.t('uplift.toast.repo_id_required')); return; }
+    inp.value = id;                 // normalized id stays visible (classic)
+    openModelFiles(id);
+}
+
+function dlBadge(kind, text) {
+    const s = document.createElement('span');
+    s.className = 'badge dl-b ' + kind; s.textContent = text;
+    return s;
+}
+
+function openModelFiles(repoId) {
+    if (!repoId) return;
+    const token = dlToken();
+    const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
+    const box = document.createElement('div'); box.className = 'modal nasa dl-modal';
+    const h = document.createElement('h3'); h.textContent = repoId;
+    const close = document.createElement('button');
+    close.type = 'button'; close.className = 'icon-btn';
+    close.setAttribute('aria-label', 'Close'); close.textContent = '×';
+    close.onclick = () => overlay.remove();
+    h.append(close);
+    const body = document.createElement('div'); body.className = 'dl-body';
+    const foot = document.createElement('div'); foot.className = 'dl-foot';
+    box.append(h, body, foot);
+    // Backdrop click is the mouse twin of Esc — Escape itself rides the
+    // GLOBAL .modal-overlay handler in uplift_state.js (modal-escape pin:
+    // NO keydown listener here).
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+    document.body.append(overlay);
+    body.textContent = C.tf('models.detail.loading', 'Loading model info...');
+
+    let detail = null, picked = {}, sending = false;
+
+    DG.fetchJson(`${API}/admin/api/hf/model-info?${new URLSearchParams({ repo_id: repoId })}`,
+        token ? { headers: { 'X-HF-Token': token } } : undefined)
+        .then(d => {
+            detail = d || {};
+            h.textContent = detail.repo_id || repoId;
+            picked = HFS.initial(detail);
+            refresh();
+            // the DOWNLOADED badge reads the fresh repo list + latest tasks
+            DG.fetchJson(`${API}/admin/api/hf/models`)
+                .then(s => { DL.hfModels = (s && s.models) || []; if (detail) refresh(); })
+                .catch(() => {});
+        })
+        .catch(e => {
+            body.textContent = C.tf('uplift.dl.download_fail', 'download: ')
+                + (e && e.message ? e.message : e);
+        });
+    dlGlobalSettings().then(gs => {
+        if (!DL.gs && gs && Object.keys(gs).length) { DL.gs = gs; if (detail) refresh(); }
+    });
+
+    function mkBtn(cls, key, en, fn, dis) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = cls;
+        b.textContent = C.tf(key, en);
+        b.disabled = !!dis;
+        if (fn) b.onclick = fn;
+        return b;
+    }
+
+    function refresh() {
+        if (!detail) return;
+        // innerHTML='' is the house CONTAINER-CLEAR (text-only rebuild below;
+        // every string enters via textContent — no HTML is ever assigned)
+        body.innerHTML = ''; foot.innerHTML = '';
+        const files = detail.files || [];
+        if (!files.length) {
+            const p = document.createElement('div'); p.className = 'empty';
+            p.textContent = detail.unavailable
+                || C.tf('models.detail.no_files', 'No file information available.');
+            body.append(p);
+        } else {
+            if (!detail.is_adapter && !detail.unsupported_reason && detail.layout !== 'other') {
+                const note = document.createElement('div'); note.className = 'se-hint';
+                note.textContent = detail.layout === 'safetensors'
+                    ? C.tf('models.detail.pick_files_checkpoint', 'Files the model needs stay checked. Uncheck the extras you do not want.')
+                    : C.tf('models.detail.pick_files_gguf', 'Check the GGUF files to download. A GGUF brings its vision projector with it.');
+                body.append(note);
+            }
+            const ram = (DL.gs && DL.gs.system && DL.gs.system.total_memory_bytes) || 0;
+            const list = document.createElement('div'); list.className = 'dl-files';
+            for (const f of files) {
+                const lb = document.createElement('label'); lb.className = 'dl-file';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = !!f.local || HFS.selected(f, picked);
+                cb.disabled = HFS.locked(f) || sending;
+                cb.onchange = () => { picked = HFS.toggle(detail, picked, f); refresh(); };
+                const nm = document.createElement('span');
+                nm.className = 'dl-fname'; nm.textContent = f.name; nm.title = f.name;
+                lb.append(cb, nm);
+                if (f.local) lb.append(dlBadge('ok', C.tf('models.detail.file_downloaded', 'Downloaded')));
+                else if (f.required) lb.append(dlBadge('dim', C.tf('models.detail.required_file', 'Required')));
+                if (f.kind === 'gguf' && !f.local) {
+                    const fit = HFS.memFit(ram, HFS.rowSize(detail, f));
+                    if (fit === 'warning') lb.append(dlBadge('warn', C.tf('models.browse.tight_fit', 'Tight fit')));
+                    else if (fit === 'danger') lb.append(dlBadge('bad', C.tf('models.browse.high_oom_risk', 'High OOM risk')));
+                }
+                const sz = document.createElement('span');
+                sz.className = 'dl-fsize';
+                sz.textContent = f.size ? C.fmtBytes(f.size) : '';
+                lb.append(sz);
+                list.append(lb);
+            }
+            body.append(list);
+        }
+        // Footer gating mirrors classic: adapter / unsupported_reason swap
+        // the action buttons for a warning chip; a fully-downloaded
+        // non-GGUF repo shows the DOWNLOADED badge instead of buttons.
+        const hf = document.createElement('a');
+        hf.className = 'dl-hf'; hf.target = '_blank'; hf.rel = 'noopener noreferrer';
+        hf.href = `https://huggingface.co/${detail.repo_id || repoId}`;
+        hf.textContent = C.tf('models.detail.view_on_hf', 'View on HuggingFace');
+        foot.append(hf);
+        const bytes = HFS.selSize(detail, picked);
+        if (!detail.is_adapter && !HFS.fits(detail, bytes)) {
+            const w = document.createElement('span'); w.className = 'dl-space';
+            w.textContent = C.tf('models.recommend.not_enough_space', 'Not enough free space in the model folder');
+            foot.append(w);
+        }
+        foot.append(mkBtn('btn', 'models.detail.cancel', 'Cancel', () => overlay.remove()));
+        if (detail.is_adapter) {
+            foot.append(dlBadge('warn', C.tf('models.detail.lora_warning', 'LoRA adapter — not supported')));
+        } else if (detail.unsupported_reason) {
+            foot.append(dlBadge('warn', String(detail.unsupported_reason)));
+        } else if (detail.layout === 'gguf'
+                || !HFS.downloaded(detail.repo_id || repoId, DL.hfModels, DL.hfTasks)) {
+            const allSz = HFS.allSize(detail);
+            const all = mkBtn('btn', 'models.detail.download_all', 'Download all',
+                () => submit(null), sending || !HFS.fits(detail, allSz));
+            if (allSz) all.append(document.createTextNode(' ' + C.fmtBytes(allSz)));
+            const names = HFS.names(detail, picked);
+            const sel = mkBtn('btn primary', 'models.detail.download_selected', 'Download selected',
+                () => submit(names), sending || !names.length || !HFS.fits(detail, bytes));
+            if (bytes) sel.append(document.createTextNode(' ' + C.fmtBytes(bytes)));
+            foot.append(all, sel);
+        } else {
+            foot.append(dlBadge('ok', C.tf('models.browse.downloaded', 'Downloaded')));
+        }
+    }
+
+    function submit(files) {
+        if (sending) return;
+        const repo = detail.repo_id || repoId;
+        sending = true; refresh();
+        // files:null = classic 'download all' — the server default layout
         DG.postJson(`${API}/admin/api/hf/download`,
-            { repo_id: repoId, hf_token: token() }).then(r => {
+            { repo_id: repo, hf_token: token, files })
+            .then(r => {
                 // live: {success, task:{task_id}} · shadow: {task_id}
                 const tid = (r.task && r.task.task_id) || r.task_id || r.id || '';
-                DG.toast(C.t('uplift.toast.download_queued', {repo: repoId}) + (tid ? ` #${String(tid).slice(0, 8)}` : ''));
-                flashQueued(fromBtn, true);
+                DG.toast(C.t('uplift.toast.download_queued', { repo })
+                    + (tid ? ` #${String(tid).slice(0, 8)}` : ''));
+                overlay.remove();
                 renderTasks('dl-tasks', 'hf');
-            }).catch(e => { DG.toast(C.tf('uplift.dl.download_fail', 'download: ') + e.message);
-                flashQueued(fromBtn, false);
-                if (fromBtn) fromBtn._cool = false; });
-    };
+            })
+            .catch(e => {
+                sending = false; refresh();
+                DG.toast(C.tf('uplift.dl.download_fail', 'download: ')
+                    + (e && e.message ? e.message : e));
+            });
+    }
+}
+
+function initDownloader() {
     function setTab(tab) {
         DL.tab = tab;
         for (const t of ['trending', 'popular', 'search']) {
@@ -213,7 +473,7 @@ function initDownloader() {
             const act = document.createElement('span'); act.className = 'rowacts';
             const b = document.createElement('button');
             b.className = 'se-btn act'; b.textContent = 'download';
-            b.onclick = () => queueDownload(m.repo_id, b);
+            b.onclick = () => openModelFiles(m.repo_id);   // UP-14: pick files first (classic)
             act.append(b); row.append(act);
             host.append(row);
         }
@@ -311,9 +571,10 @@ function initDownloader() {
                 setTab(t);
             };
         }
-        D.$('dl-direct').onclick = () => queueDownload(D.$('dl-repo').value.trim(), D.$('dl-direct'));
+        D.$('dl-direct').onclick = directDownload;   // UP-14: URL-aware, dialog-first
         D.$('dl-repo').addEventListener('keydown', e => {
-            if (e.key === 'Enter') queueDownload(D.$('dl-repo').value.trim()); });
+            if (e.key === 'Enter') directDownload(); });
+        dlGlobalSettings().then(gs => { if (!DL.gs) DL.gs = gs; });
     }
     if (DL.tab === 'search' && DL.search.length) renderDlPage();
     else loadRecommended();
@@ -321,5 +582,6 @@ function initDownloader() {
 }
 
 window.Uplift = window.Uplift || {};
-window.Uplift.downloader = { renderTasks, initDownloader };
+window.Uplift.downloader = { renderTasks, initDownloader,
+    _dl14: { hfRepoIdFromInput, HFS, directDownload } };
 })();
