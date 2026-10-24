@@ -331,12 +331,14 @@ test('the stop rule keeps UP-34/40 semantics (settle, not silent abandon)', () =
     assert.match(SRC, /typeof ev\.composedPath === 'function'/);
 });
 
-test('CSS the lane owes: the sheet rows are styled by the lane file', () => {
-    // no uplift.css edit in this lane — the classes the JS emits must be the
-    // ones the scratch CSS defines (owner folds them into applyShadowTheme)
+test('CSS: the sheet rows are styled by uplift.css (lane folded by owner)', () => {
+    // Was reading ~/hermes/TMP/lane-u37b.css pre-fold — not in the repo, so
+    // CI had no such file. Post-fold the assertion belongs on uplift.css.
     assert.match(SRC, /'chat-help-row'/);
     assert.match(SRC, /'chat-help-kbd'/);
-    const css = fs.readFileSync(path.join(process.env.HOME, 'hermes/TMP/lane-u37b.css'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.css'), 'utf8');
     ['.chat-help .chat-help-list', '.chat-help-row', '.chat-help-kbd'].forEach((sel) =>
-        assert.ok(css.includes(sel), 'lane CSS defines ' + sel));
+        assert.ok(css.includes(sel), 'uplift.css defines ' + sel));
+    // U82 doctrine survived the fold: no literal px radius on the key caps
+    assert.match(css, /\.chat-help-kbd \{[^}]*border-radius: calc\(var\(--radius\)/);
 });
