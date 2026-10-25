@@ -459,7 +459,7 @@
  "uplift.patches.approve_once": "Применить один раз",
  "uplift.patches.approve_once_title": "Одобрить отмеченные защиты только для этой версии",
  "uplift.patches.approved_codes": "одобрено: {codes}",
- "uplift.patches.auto_check": "Автоматически проверять обновления",
+ "uplift.patches.auto_check": "Автоматически обновлять патчи из origin",
  "uplift.patches.bundled_chip": "В КОМПЛЕКТЕ",
  "uplift.patches.bundled_hint": "из курируемого каталога — обновляется синхронизацией каталога",
  "uplift.patches.check_error": "ошибка проверки",

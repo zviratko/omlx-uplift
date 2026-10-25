@@ -428,7 +428,10 @@ function patchRow(p, view) {
         oline.title = pSrc.url || '';
     }
     ocell.append(oline);
-    row.append(ocell);
+    // 3) PATCH then 2) ORIGIN on screen: the user asked for the two columns
+    //    exchanged (2026-10-25) — the patch name is what he scans for, the
+    //    origin is supporting detail. Track widths travelled with the columns
+    //    (see .pt-row), so ORIGIN keeps the wide track and PATCH the capped one.
     // version lives with the state now ('v1 APPLIED', user 2026-10-20)
     const effV = p.desired_version || p.latest_v || 0;
     const ent = (p.versions || []).find(v => v.v === effV)
@@ -451,6 +454,7 @@ function patchRow(p, view) {
     pcell.append(name);
     entry._ptCaret = caret;   // the details toggle flips this (bigger, clear)
     row.append(pcell);
+    row.append(ocell);        // ORIGIN follows PATCH here (see note above)
 
     // 4) STATUS: state chip + honest extras; stays CLEAN while the patch
     //    simply tracks the latest (user: pins are named, not implied)

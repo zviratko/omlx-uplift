@@ -459,7 +459,7 @@
  "uplift.patches.approve_once": "この1回だけ適用",
  "uplift.patches.approve_once_title": "フラグ付きのセーフガードをこのバージョンのみ承認",
  "uplift.patches.approved_codes": "承認済み: {codes}",
- "uplift.patches.auto_check": "更新を自動的に確認",
+ "uplift.patches.auto_check": "origin からパッチを自動更新",
  "uplift.patches.bundled_chip": "バンドル済み",
  "uplift.patches.bundled_hint": "キュレーションカタログの一部 — カタログ同期で最新に保たれます",
  "uplift.patches.check_error": "確認失敗",

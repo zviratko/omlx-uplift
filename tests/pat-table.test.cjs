@@ -460,3 +460,60 @@ test('unchecking both boxes posts the disabling (false,false) pair', async () =>
                      { runtime: false, dev: false },
                      '(0,0) disables in ONE act');
 });
+
+/* PAT-TABLE round 4 (user, 2026-10-25): PATCH and ORIGIN exchanged places —
+ * the patch name is what he scans the table for, origin is supporting detail.
+ * Three files had to move together (header markup, cell append order, grid
+ * tracks) or the columns misalign against their headers, so the ORDER is
+ * pinned, not just presence. Plus the renamed opt-in: the label said 'Check for
+ * updates automatically' while the hourly check also promotes new versions
+ * ('auto-applied vN — takes effect at the next restart/build'), so it now says
+ * what it does; the English literal must equal the catalog value or a late
+ * catalog load repaints a different sentence.
+ */
+test('column order: PATCH precedes ORIGIN in header, cells and tracks', () => {
+    const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
+    const js = fs.readFileSync(path.join(STATIC_DIR, 'uplift_patches.js'), 'utf8');
+    const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+
+    const head = /<div class="pt-row pt-thead">([\s\S]*?)<\/div>\s*<!--|<div class="pt-row pt-thead">([\s\S]*?)pt-c-status/.exec(html);
+    const headTxt = head ? head[0] : html;
+    assert.ok(headTxt.indexOf('pt-c-patch') > -1 && headTxt.indexOf('pt-c-origin') > -1,
+        'the thead lost one of the two column labels');
+    assert.ok(headTxt.indexOf('pt-c-patch') < headTxt.indexOf('pt-c-origin'),
+        'header must read PATCH then ORIGIN');
+
+    const aP = js.indexOf('row.append(pcell)'), aO = js.indexOf('row.append(ocell)');
+    assert.ok(aP > 0 && aO > 0, 'a cell append disappeared — rows would drop a column');
+    assert.ok(aP < aO, 'row cells must be appended PATCH then ORIGIN to match the header');
+
+    const t = /\.pt-row\s*\{[\s\S]*?grid-template-columns:([^;]*);/.exec(css);
+    assert.ok(t, 'no .pt-row grid template found');
+    // a track is `minmax(a, b)` (which contains a comma+space!) or a bare
+    // length/fraction — a naive whitespace split tears minmax() in half
+    const tracks = t[1].replace(/\s+/g, ' ').match(/minmax\([^)]*\)|[^\s]+/g) || [];
+    assert.ok(tracks.length >= 9, `expected 9 tracks, parsed ${tracks.length}: ${tracks}`);
+    assert.ok(tracks[1].startsWith('minmax(170px'),
+        `track 2 should be PATCH's capped column, got ${tracks[1]}`);
+    assert.ok(tracks[2].startsWith('minmax(240px') && tracks[2].includes('2.4fr'),
+        `track 3 should be ORIGIN's wide column, got ${tracks[2]}`);
+});
+
+test('patch auto-update label: says what it does, catalog agrees', () => {
+    const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
+    const m = /data-i18n="uplift\.patches\.auto_check">([^<]*)</.exec(html);
+    assert.ok(m, 'the auto_check label lost its data-i18n registration');
+    const en = JSON.parse(fs.readFileSync(
+        path.join(STATIC_DIR, '..', 'locales', 'en.json'), 'utf8'));
+    assert.equal(m[1].trim(), en['uplift.patches.auto_check'],
+        'index.html literal and en.json drifted — applyI18n repaints this node');
+    assert.ok(!/check for updates/i.test(m[1]),
+        'this box also promotes updates, not only checks: say so');
+    for (const loc of ['cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+        const d = JSON.parse(fs.readFileSync(
+            path.join(STATIC_DIR, '..', 'locales', `${loc}.json`), 'utf8'));
+        assert.ok(d['uplift.patches.auto_check'], `${loc} lost the label`);
+        assert.notEqual(d['uplift.patches.auto_check'], m[1],
+            `${loc} still carries the English label`);
+    }
+});

@@ -459,7 +459,7 @@
  "uplift.patches.approve_once": "Přesto jednou použít",
  "uplift.patches.approve_once_title": "Schválit označené pojistky pouze pro tuto verzi",
  "uplift.patches.approved_codes": "schváleno: {codes}",
- "uplift.patches.auto_check": "Kontrolovat aktualizace automaticky",
+ "uplift.patches.auto_check": "Automaticky aktualizovat patche ze zdroje",
  "uplift.patches.bundled_chip": "SOUČÁST BALÍČKU",
  "uplift.patches.bundled_hint": "součást kurátorského katalogu — aktualizuje ho synchronizace katalogu",
  "uplift.patches.check_error": "kontrola selhala",

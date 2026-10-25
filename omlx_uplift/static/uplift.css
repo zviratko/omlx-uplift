@@ -2578,7 +2578,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     /* round 3 (user 2026-10-20): the single filler track piled ALL the
        slack right of STATUS — spread it over ORIGIN/PATCH/STATUS instead
        (chips right-align into the control group), keep a thin breather */
-    grid-template-columns: 26px minmax(240px, 2.4fr) minmax(170px, 340px)
+    /* round 4 (user 2026-10-25): PATCH and ORIGIN exchanged places — the name
+       is what he scans, origin is supporting detail. The two tracks swapped
+       WITH their columns, so ORIGIN still gets the room (2.4fr) and PATCH the
+       capped 340px; nothing else in the template moved */
+    grid-template-columns: 26px minmax(170px, 340px) minmax(240px, 2.4fr)
         minmax(210px, 1.1fr) minmax(24px, 0.25fr) 128px 82px 60px 92px;
     gap: 10px; align-items: center; padding: 6px 10px;
     font-size: var(--fs-meta); min-width: 1150px; }

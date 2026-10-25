@@ -459,7 +459,7 @@
  "uplift.patches.approve_once": "仍套用一次",
  "uplift.patches.approve_once_title": "僅為此版本批准被標記的防護措施",
  "uplift.patches.approved_codes": "已批准：{codes}",
- "uplift.patches.auto_check": "自動檢查更新",
+ "uplift.patches.auto_check": "自動從 origin 更新修補程式",
  "uplift.patches.bundled_chip": "隨附",
  "uplift.patches.bundled_hint": "來自精選補丁目錄 — 由目錄同步保持最新",
  "uplift.patches.check_error": "檢查失敗",

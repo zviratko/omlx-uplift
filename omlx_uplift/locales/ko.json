@@ -474,7 +474,7 @@
  "uplift.patches.approve_once": "그래도 한 번 적용",
  "uplift.patches.approve_once_title": "표시된 세이프가드를 이 버전에서만 승인합니다",
  "uplift.patches.approved_codes": "승인됨: {codes}",
- "uplift.patches.auto_check": "업데이트 자동 확인",
+ "uplift.patches.auto_check": "origin에서 패치 자동 업데이트",
  "uplift.patches.bundled_chip": "번들 포함",
  "uplift.patches.bundled_hint": "큐레이션 카탈로그의 일부 — 카탈로그 동기화로 최신 상태를 유지합니다",
  "uplift.patches.check_error": "확인 실패",

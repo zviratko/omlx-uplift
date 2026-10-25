@@ -459,7 +459,7 @@
  "uplift.patches.approve_once": "Apply once anyway",
  "uplift.patches.approve_once_title": "Approve the flagged safeguards for this version only",
  "uplift.patches.approved_codes": "approved: {codes}",
- "uplift.patches.auto_check": "Check for updates automatically",
+ "uplift.patches.auto_check": "Auto-update patches from origin",
  "uplift.patches.bundled_chip": "BUNDLED",
  "uplift.patches.bundled_hint": "part of the curated catalog — kept current by curated sync",
  "uplift.patches.check_error": "check failed",

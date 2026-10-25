@@ -459,7 +459,7 @@
  "uplift.patches.approve_once": "仍应用一次",
  "uplift.patches.approve_once_title": "仅为此版本批准被标记的防护措施",
  "uplift.patches.approved_codes": "已批准：{codes}",
- "uplift.patches.auto_check": "自动检查更新",
+ "uplift.patches.auto_check": "自动从 origin 更新补丁",
  "uplift.patches.bundled_chip": "随附",
  "uplift.patches.bundled_hint": "来自精选补丁目录 — 由目录同步保持最新",
  "uplift.patches.check_error": "检查失败",

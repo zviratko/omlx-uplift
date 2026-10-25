@@ -463,7 +463,7 @@
  "uplift.patches.approve_once": "Appliquer une fois quand même",
  "uplift.patches.approve_once_title": "Approuver les garde-fous signalés pour cette version uniquement",
  "uplift.patches.approved_codes": "approuvés : {codes}",
- "uplift.patches.auto_check": "Vérifier les mises à jour automatiquement",
+ "uplift.patches.auto_check": "Mettre à jour les correctifs automatiquement depuis origin",
  "uplift.patches.bundled_chip": "INCLUS",
  "uplift.patches.bundled_hint": "issu du catalogue organisé — maintenu à jour par la synchronisation du catalogue",
  "uplift.patches.check_error": "échec de vérification",

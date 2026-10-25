@@ -463,7 +463,7 @@
  "uplift.patches.approve_once": "Aplicar una vez de todos modos",
  "uplift.patches.approve_once_title": "Aprueba las salvaguardas marcadas solo para esta versión",
  "uplift.patches.approved_codes": "aprobadas: {codes}",
- "uplift.patches.auto_check": "Comprobar actualizaciones automáticamente",
+ "uplift.patches.auto_check": "Actualizar parches automáticamente desde origin",
  "uplift.patches.bundled_chip": "INCLUIDO",
  "uplift.patches.bundled_hint": "parte del catálogo curado — se mantiene al día con la sincronización del catálogo",
  "uplift.patches.check_error": "comprobación fallida",
