@@ -113,3 +113,27 @@ test('CSS-3: the context ring paints through CSS, not through its markup', () =>
     assert.ok(/classList\.toggle\('ctx-hot'/.test(js),
         'ctxRender must switch that class, not set a stroke attribute');
 });
+
+/* LOGO-BAND contract (measured 2026-10-25). The header row is 16px tall and
+ * holds three claimants: the wordmark + a skin's `.logo::after` suffix (in
+ * flow), and the DEV stamp + version pair (`.logo-build` / `.logo-base`,
+ * raised absolutely alongside). The suffix rule uses `vertical-align: bottom`,
+ * which drops a 9px skin tagline's ink to y93..102 — the same band the second
+ * version line paints (y95..103). With the DEV pair present that collided:
+ * ' // H-A-L 9000' over 'omlx v0.7.3.dev2 · 78fa08b', 9x7px of ink on ink.
+ * The `.has-build-lines` hook must therefore lift the suffix onto the wordmark
+ * row. Clip or reflow alternatives were rejected: they cost information or
+ * move the header, both of which the geometry contract forbids.
+ */
+test('logo-band: skin suffix rides the wordmark row when the DEV pair paints', () => {
+    const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+    const rule = /\.logo\.has-build-lines::after\s*\{([^}]*)\}/.exec(css);
+    assert.ok(rule, '.logo.has-build-lines::after rule is gone — the skin '
+        + 'suffix will drop into the DEV version line and overlap it');
+    const va = /vertical-align:\s*([a-z-]+)/.exec(rule[1]);
+    assert.ok(va, 'the pair rule must pin vertical-align; without it the base '
+        + '.logo::after bottom alignment puts skin ink on the version band');
+    assert.equal(va[1], 'top',
+        `logo suffix vertical-align is '${va[1]}'; only 'top' keeps a 9px skin `
+        + 'suffix out of the y95..103 version band (measured, discovery-one skin)');
+});
