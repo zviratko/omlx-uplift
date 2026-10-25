@@ -22,6 +22,20 @@
     --good: #f2f0ea;
     --warn: #e8a020;
     --bad: #c9243b;
+    /* --ok = the "healthy / applied / request-time-only" green. It is used in
+       13 places but was never defined: 10 carried an inline var(--ok, #2e8b57)
+       fallback and looked right by accident, while 3 uses in 2 rules
+       (.envcat-chip.ok color+border, .se-tab-api.api-ok color) had none, so
+       they resolved to nothing and inherited the surrounding ink — the green
+       pill read as plain text. Same value as those fallbacks on purpose: this
+       defines the token, it does not restyle anything that already worked.
+       Contrast on the dark ground is 3.9:1, which is what the house already
+       shipped for these small bold labels; tuning it per theme is a separate
+       call. tests/css3-dead-tokens.test.cjs now holds the line: --ok may
+       never go back to being used-but-undefined, and the 6 tokens that
+       genuinely are still unknown to uplift's own surface are frozen there
+       as a ratchet (tracker D8). */
+    --ok: #2e8b57;
     --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
     --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
     /* CSS-2: state inks + type/lamp colors as tokens so skin overrides
