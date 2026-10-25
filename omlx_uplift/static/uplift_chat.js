@@ -879,7 +879,11 @@ function refreshConvList() {
         // fetch the full conversation, flip the flag, save it back
         var pin = el('button', 'chat-conv-pin', s.pinned ? '\u2691' : '\u2690');
         pin.type = 'button';
-        pin.title = t('uplift.chat.pin', s.pinned ? 'Unpin' : 'Pin chat');
+        // Two states need two keys: this used to pass both 'Unpin' and 'Pin
+        // chat' through uplift.chat.pin, so any translation would have been
+        // wrong for one of them by construction.
+        pin.title = s.pinned ? t('uplift.chat.unpin', 'Unpin chat')
+                             : t('uplift.chat.pin', 'Pin chat');
         pin.addEventListener('click', function (ev) {
             ev.stopPropagation();
             var flip = function (full) {

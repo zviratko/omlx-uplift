@@ -41,7 +41,29 @@ def _referenced_keys():
     js = "\n".join(sorted(p.read_text(encoding="utf-8")
                           for p in STATIC.glob("*.js")))
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    keys = set(re.findall(r"C\.t\(\s*['\"]([A-Za-z0-9_.]+)['\"]", js))
+    # D5 (live QA 2026-10-25): this gate used to know ONE call shape,
+    # C.t('key'). The chat/bench/editor surfaces grew three more — the
+    # fallback-taking t('key', 'English'), its aliases (tf/tf2/ta/tr, with or
+    # without the C. namespace) and el.dataset.i18n = 'key' — and every key
+    # reaching the UI that way was INVISIBLE here. 31 strings shipped with no
+    # catalog entry at all and rendered their English fallback in every locale,
+    # which looks like "translation missing" to the user and like "green" here.
+    keys = set()
+    CALL = re.compile(
+        r"""\b(?:C\.|D\.|U\.|G\.)?t(?:f2?|a|r)?\(\s*['"]([A-Za-z0-9_.]+)['"]""")
+    for m in CALL.finditer(js):
+        k = m.group(1)
+        # 'uplift.bench.extras_family_' + f  /  'uplift.metric.' + tk: the
+        # literal is a PREFIX of a runtime-assembled key, so it is not a key
+        # and must not be demanded of the catalog. Detected by what follows
+        # the literal (a +), because such a prefix can end in '.' OR '_' —
+        # the old endswith('.') guess missed the underscore one.
+        if re.match(r"\s*\+", js[m.end():m.end() + 40]):
+            continue
+        keys.add(k)
+    keys |= set(re.findall(
+        r"""dataset\.i18n(?:Title|Ph|Html|Aria|Placeholder)?\s*=\s*['"]"""
+        r"""([A-Za-z0-9_.]+)['"]""", js))
     keys |= set(re.findall(r'data-i18n="([A-Za-z0-9_.]+)"', js + html))
     keys |= set(re.findall(r'data-i18n-title="([A-Za-z0-9_.]+)"', js + html))
     keys |= set(re.findall(r'data-i18n-ph="([A-Za-z0-9_.]+)"', js + html))
@@ -69,15 +91,46 @@ def test_referenced_keys_exist_in_en_fallback():
 
 
 def test_owned_key_sets_match_across_locales():
+    """D5: parity is now derived from en.json itself, not from a hand-grown
+    tuple of prefixes. OWNED_PREFIXES is exactly the kind of list that goes
+    stale: batches landed under uplift.se., uplift.gs., uplift.ui.,
+    uplift.status. and uplift.action., none of which were ever added, so the
+    gate silently covered a fraction of the catalog while claiming to police
+    batches. en.json is the source of truth for what exists (Invariant 1
+    already forces every referenced key into it), so 'in en => in all locales'
+    needs no maintenance to be complete."""
     en = _locale("en")
-    owned_en = {k for k in en if k.startswith(OWNED_PREFIXES)}
-    assert owned_en, "owned-prefix list stale?"
+    owned_en = {k for k in en if k.startswith("uplift.")}
+    assert owned_en, "en.json overlay empty?"
+    # the prefix tuple still earns its keep as a floor: if someone shrinks the
+    # owned set below what it documents, that is a decision, not a slip
+    documented = {k for k in owned_en if k.startswith(OWNED_PREFIXES)}
+    assert documented, "owned-prefix list stale?"
     for lang in LOCALES_EXPECTED:
         if lang == "en":
             continue
         other = _locale(lang)
-        missing = owned_en - {k for k in other if k.startswith(OWNED_PREFIXES)}
-        assert not missing, f"{lang}.json missing: {sorted(missing)}"
+        missing = owned_en - set(other)
+        assert not missing, f"{lang}.json missing {len(missing)} en.json keys: {sorted(missing)}"
+
+
+_PH = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
+
+
+def test_placeholder_sets_survive_translation():
+    """A translation that loses or renames {type} silently prints the raw
+    brace token into the UI, and .replace() leaves the sentence with a hole.
+    Placeholder multisets must match en.json key for key."""
+    en = _locale("en")
+    for lang in LOCALES_EXPECTED:
+        if lang == "en":
+            continue
+        for k, v in _locale(lang).items():
+            if k not in en or not isinstance(v, str):
+                continue
+            assert sorted(_PH.findall(v)) == sorted(_PH.findall(en[k])), (
+                f"{lang}.json {k}: {sorted(_PH.findall(v))} vs "
+                f"en {sorted(_PH.findall(en[k]))}")
 
 
 # I18N-1 (SWEEP183 D1): the same gate in the OTHER direction, over the
