@@ -568,6 +568,10 @@ async function dvStartBuild(restartAfter) {
                         'omlx-dev build FAILED — see build log')
                 : ptMsg('uplift.patches.dev_build_done_btn',
                         'omlx-dev build finished'), 6000);
+            // RESTART WATCH: 'Rebuild & restart' restarts the service the moment
+            // the build lands, so the page is about to lose its backend. Take
+            // over here instead of letting the operator discover it.
+            if (restartAfter) dvWatchRestart();
         }, 5000);
     } catch (e) {
         PG.toast(ptMsg('uplift.patches.dev_build_fail',
@@ -577,6 +581,102 @@ async function dvStartBuild(restartAfter) {
                                      b.disabled = prev[i][1]; });
         busyBtns.forEach(b => delete b.dataset.busy);
     }
+}
+
+/* RESTART WATCH (user, 2026-10-25): on this machine the dashboard IS the dev
+   server, so pressing Restart — and the restart that follows a Rebuild &
+   restart — tears the backend out from under the open page. Before this the
+   whole plan was a toast plus a blind location.reload() after 6 s; when the
+   service took longer the browser landed on a dead socket and the operator had
+   to guess whether it was coming back. Now a dialog watches the round trip and
+   reloads only once the board answers again.
+
+   Probe: GET /uplift/api/dev/status through the kit (no raw fetch — the FE-2
+   gate owns that). The kit stamps `.status` onto its error, which is what tells
+   'the port answered' (any HTTP code, 401 included — a login page is a live
+   server) apart from 'nothing is listening'. Two phases on purpose: a restart
+   that has not begun yet answers perfectly normally, and reloading then would
+   only drop the page mid-restart. So it waits for a DOWN edge first; if nothing
+   ever drops it says so instead of pretending to have watched something.
+   Dismissible (×, backdrop, or leaving it): the poll stops with the dialog. No
+   Escape handler here — uplift_state.js closes the frontmost .modal-overlay
+   globally and a second listener on the same key fires twice. */
+let DV_RS = null;
+
+function dvWatchRestart() {
+    if (DV_RS) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal nasa';    // house dialog chrome (ptManage is the reference)
+    const h = document.createElement('h3');
+    h.textContent = ptMsg('uplift.patches.dev_restarting', 'omlx-dev restarting…');
+    const close = document.createElement('button');
+    close.type = 'button'; close.className = 'icon-btn';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+    h.append(close);
+    const line = document.createElement('p');
+    line.className = 'pt-rs-line';
+    const acts = document.createElement('div');
+    acts.className = 'pt-acts';      // existing action-row styling
+    const reloadBtn = document.createElement('button');
+    reloadBtn.type = 'button'; reloadBtn.className = 'btn primary';
+    reloadBtn.textContent = ptMsg('uplift.patches.dev_restart_reload', 'Reload now');
+    acts.append(reloadBtn);
+    box.append(h, line, acts);
+    overlay.append(box);
+    document.body.append(overlay);
+
+    box.style.width = 'min(480px, 92vw)';
+    const WAITING = ptMsg('uplift.ui.server_restarting_dashboard_reconnecting',
+        'Server restarting — dashboard reconnecting…');
+    line.textContent = WAITING;
+
+    const t0 = Date.now();
+    let sawDown = false, timer = null, done = false;
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const shut = () => { stop(); done = true; DV_RS = null; overlay.remove(); };
+    close.onclick = shut;
+    overlay.onclick = (e) => { if (e.target === overlay) shut(); };
+    reloadBtn.onclick = () => location.reload();
+
+    const tick = async () => {
+        if (done) return;
+        const secs = Math.round((Date.now() - t0) / 1000);
+        let answered = false;
+        try {
+            await PG.fetchJson(`${API}/uplift/api/dev/status?_=${Date.now()}`);
+            answered = true;
+        } catch (e) {
+            answered = !!(e && e.status);      // any HTTP reply = it is alive
+            if (!answered) sawDown = true;     // refused / no route = it is down
+        }
+        if (answered && sawDown) {
+            stop(); done = true;
+            line.textContent = ptMsg('uplift.patches.dev_restart_back',
+                'Server is back — reloading…');
+            setTimeout(() => location.reload(), 400);
+            return;
+        }
+        if (secs > 300) {
+            stop();
+            line.textContent = ptMsg('uplift.patches.dev_restart_timeout',
+                'The server has not answered again after {n}s. Check that '
+                + 'omlx-dev is running, then reload this page.')
+                .replace('{n}', String(secs));
+            return;
+        }
+        line.textContent = (answered && !sawDown && secs > 25)
+            ? ptMsg('uplift.patches.dev_restart_held',
+                'Still answering — the restart has not started yet. This dialog '
+                + 'stays open and reloads as soon as the service drops and '
+                + 'comes back.')
+            : WAITING + ' (' + secs + 's)';
+    };
+    timer = setInterval(tick, 1500);
+    DV_RS = { overlay, shut };
+    tick();
 }
 
 function initDevPanel() {
@@ -589,15 +689,14 @@ function initDevPanel() {
     const dvRsBtn = $('dv-restart-btn');
     if (dvRsBtn) dvRsBtn.onclick = async () => {
         // THIS dashboard may BE the dev server — the page dies with it.
-        // The endpoint restarts detached after answering; reload shortly.
+        // The endpoint restarts detached after answering, so hand over to the
+        // watcher: it reloads when the port answers again, not on a timer.
         try {
             await dvApi('restart', {});
-            PG.toast(ptMsg('uplift.patches.dev_restarting',
-                'omlx-dev restarting…'), 8000);
-            setTimeout(() => location.reload(), 6000);
+            dvWatchRestart();
         } catch (e) {
             PG.toast(ptMsg('uplift.patches.dev_restart_fail',
-                'Restart failed') + ': ' + e, 5000);
+                'Restart failed') + ': ' + D.errText(e), 5000);
         }
     };
 }
@@ -608,6 +707,6 @@ function initDevPanel() {
    PATCH-ZONES: installed() answers whether the build zone carries the
    machine's build patches (both+dev cards live there when it does). */
 window.Uplift = window.Uplift || {};
-window.Uplift.devpanel = { renderDev, pollDev, initDevPanel,
+window.Uplift.devpanel = { renderDev, pollDev, initDevPanel, dvWatchRestart,
     installed: () => !!(DV_DATA && DV_DATA.installed) };
 })();

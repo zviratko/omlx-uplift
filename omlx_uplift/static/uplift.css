@@ -2499,7 +2499,20 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 @media (max-width: 720px) { .envcat-legend-item { white-space: normal; } }
 
 /* PAT-4: PATCH CARRIER — settings/patches page */
-.pt-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 10px; }
+.pt-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin: 6px 0 10px; }
+/* PAT-TABLE round 4 (user 2026-10-25): the ADD PATCH card moved up into this
+   line, so the toolbar top-aligns (a ~100px card beside a 16px checkbox would
+   otherwise leave the controls floating mid-card). The card takes what is left
+   after the auto-update group: `1 1 560px` rather than a bare fraction, so it
+   wraps to its own line only when there is genuinely no room, and the label and
+   button stay content-sized instead of shrinking into ellipses. */
+.pt-toolbar .pt-addform { flex: 1 1 560px; min-width: 0; margin: 0; }
+.pt-toolbar > .pt-auto, .pt-toolbar > #pt-check-btn { flex: none; }
+/* RESTART WATCH (user 2026-10-25): the one line of the reconnect dialog that
+   rewrites itself as the service drops and answers again — 'Server restarting —
+   dashboard reconnecting… (12s)', then the reload notice. Box chrome is
+   .modal.nasa and the button row .pt-acts, both already styled. */
+.pt-rs-line { margin: 4px 0 12px; font: 400 12px/1.5 var(--sans); color: var(--ink); }
 /* ADD PATCH — own block, clearly an ADD form: bordered, labelled, accent
    header. The old inline .pt-add strip hid every control in one row. */
 .pt-addform { border: 1px solid var(--accent, #e0662e); margin: 8px 0 12px;

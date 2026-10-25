@@ -344,6 +344,42 @@
             <div class="pt-toolbar">
                 <label class="pt-auto"><input type="checkbox" id="pt-auto-check"> <span data-i18n="uplift.patches.auto_check">Auto-update patches from origin</span></label>
                 <button type="button" class="btn" id="pt-check-btn" data-i18n="uplift.patches.check_now">Check for updates</button>
+            <!-- PAT-TABLE round 4 (user 2026-10-25): the ADD PATCH card moved UP out of the area below
+                 the table and into the toolbar, so the way to add a patch sits with the way to
+                 refresh them. It shares the line and takes the remaining width (see .pt-toolbar
+                 .pt-addform); its own field row wraps.-->
+                <div class="pt-addform">
+                <div class="pt-addform-title"><span data-i18n="uplift.patches.add_title">+ ADD PATCH</span>
+                    <span class="pt-addform-hint" data-i18n="uplift.patches.add_hint">fetch or upload a diff, validate it against the live tree, then enable</span>
+                </div>
+                <div class="pt-addform-row">
+                    <label class="pt-field"><span data-i18n="uplift.patches.lbl_name">name</span>
+                        <input type="text" id="pt-new-id" placeholder="patch name" size="14" data-i18n-ph="uplift.patches.ph_name">
+                    </label>
+                    <label class="pt-field"><span data-i18n="uplift.patches.lbl_source">source</span>
+                        <select id="pt-src-kind" aria-label="Source kind">
+                            <option value="github_pr" data-i18n="uplift.patches.src_pr">GitHub PR</option>
+                            <option value="url" data-i18n="uplift.patches.src_url">URL</option>
+                            <option value="upload" data-i18n="uplift.patches.src_upload">Upload</option>
+                        </select>
+                    </label>
+                    <input type="text" id="pt-src-repo" value="jundot/omlx" placeholder="owner/repo" size="14" data-i18n-ph="uplift.patches.ph_repo">
+                    <input type="text" id="pt-src-pr" placeholder="1234" size="6" inputmode="numeric" data-i18n-ph="uplift.patches.ph_pr">
+                    <input type="text" id="pt-src-url" class="grow" placeholder="https://…/patch.diff" data-i18n-ph="uplift.patches.ph_url">
+                    <input type="file" id="pt-src-file" accept=".diff,.patch,text/plain" hidden>
+                    <label class="pt-auto"><input type="checkbox" id="pt-insecure-tls"> <span data-i18n="uplift.patches.insecure_tls">ignore SSL/TLS errors</span></label>
+                    <label class="pt-auto pt-reversal"><input type="checkbox" id="pt-reversal"> <span data-i18n="uplift.patches.reversal">reverse a merged change (undo)</span></label>
+                    <label class="pt-field"><span data-i18n="uplift.patches.lbl_scope">scope</span>
+                        <select id="pt-new-scope" aria-label="Patch scope">
+                            <option value="" data-i18n="uplift.patches.scope_auto">auto</option>
+                            <option value="omlx" data-i18n="uplift.patches.scope_omlx">Runtime — live after restart</option>
+                            <option value="dev" data-i18n="uplift.patches.scope_dev">Build — compiled into omlx-dev</option>
+                            <option value="both" data-i18n="uplift.patches.scope_both">Runtime + Build</option>
+                        </select>
+                    </label>
+                    <button type="button" class="btn primary" id="pt-preview-btn" data-i18n="uplift.patches.add_btn">Add patch</button>
+                </div>
+            </div>
             </div>
             <!-- PAT-TABLE (user ask 2026-10-19): ONE table, one row per
                  patch — the two exclusive zone stacks are retired. Row =
@@ -395,7 +431,7 @@
                      MANAGE dialog (PAT-TABLE). -->
                 <div class="dv-base-row">
                     <label class="row" id="dv-auto-row" hidden><input type="checkbox" id="dv-auto">
-                        <span data-i18n="uplift.patches.dev_auto_label">AUTO UPDATE &#8212; REBUILD OMLX-DEV WHEN UPSTREAM MOVES</span></label>
+                        <span data-i18n="uplift.patches.dev_auto_label">Auto-update and rebuild omlx-dev on restart</span></label>
                     <span id="dv-auto-note" class="pt-detail"></span>
                 </div>
                 <div id="dv-warn" class="pt-banner" hidden></div>
@@ -405,38 +441,6 @@
                 <div id="dv-share" class="pt-gate" hidden></div>
             </div>
             <div id="pt-diff" class="pt-diff" hidden><div class="pt-diff-head"><span id="pt-diff-title"></span><button type="button" class="icon-btn" id="pt-diff-close" aria-label="Close">×</button></div><pre id="pt-diff-body"></pre></div>
-            <div class="pt-addform">
-                <div class="pt-addform-title"><span data-i18n="uplift.patches.add_title">+ ADD PATCH</span>
-                    <span class="pt-addform-hint" data-i18n="uplift.patches.add_hint">fetch or upload a diff, validate it against the live tree, then enable</span>
-                </div>
-                <div class="pt-addform-row">
-                    <label class="pt-field"><span data-i18n="uplift.patches.lbl_name">name</span>
-                        <input type="text" id="pt-new-id" placeholder="patch name" size="14" data-i18n-ph="uplift.patches.ph_name">
-                    </label>
-                    <label class="pt-field"><span data-i18n="uplift.patches.lbl_source">source</span>
-                        <select id="pt-src-kind" aria-label="Source kind">
-                            <option value="github_pr" data-i18n="uplift.patches.src_pr">GitHub PR</option>
-                            <option value="url" data-i18n="uplift.patches.src_url">URL</option>
-                            <option value="upload" data-i18n="uplift.patches.src_upload">Upload</option>
-                        </select>
-                    </label>
-                    <input type="text" id="pt-src-repo" value="jundot/omlx" placeholder="owner/repo" size="14" data-i18n-ph="uplift.patches.ph_repo">
-                    <input type="text" id="pt-src-pr" placeholder="1234" size="6" inputmode="numeric" data-i18n-ph="uplift.patches.ph_pr">
-                    <input type="text" id="pt-src-url" class="grow" placeholder="https://…/patch.diff" data-i18n-ph="uplift.patches.ph_url">
-                    <input type="file" id="pt-src-file" accept=".diff,.patch,text/plain" hidden>
-                    <label class="pt-auto"><input type="checkbox" id="pt-insecure-tls"> <span data-i18n="uplift.patches.insecure_tls">ignore SSL/TLS errors</span></label>
-                    <label class="pt-auto pt-reversal"><input type="checkbox" id="pt-reversal"> <span data-i18n="uplift.patches.reversal">reverse a merged change (undo)</span></label>
-                    <label class="pt-field"><span data-i18n="uplift.patches.lbl_scope">scope</span>
-                        <select id="pt-new-scope" aria-label="Patch scope">
-                            <option value="" data-i18n="uplift.patches.scope_auto">auto</option>
-                            <option value="omlx" data-i18n="uplift.patches.scope_omlx">Runtime — live after restart</option>
-                            <option value="dev" data-i18n="uplift.patches.scope_dev">Build — compiled into omlx-dev</option>
-                            <option value="both" data-i18n="uplift.patches.scope_both">Runtime + Build</option>
-                        </select>
-                    </label>
-                    <button type="button" class="btn primary" id="pt-preview-btn" data-i18n="uplift.patches.add_btn">Add patch</button>
-                </div>
-            </div>
             <div id="pt-advisories" class="pt-advisories" hidden></div>
             <div id="pt-preview" hidden></div>
         </div></div></div></div></section><section class="card wide page-card" data-id="helper-page" data-tab="models" data-sub="helper" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.helper_models_full">Helper models</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.helper_models_full">Helper models</span> <span class="right" id="hm-sub"></span></h2>

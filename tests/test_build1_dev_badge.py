@@ -127,14 +127,22 @@ def test_auto_update_label_no_vanilla_tail():
     import json as _json
     import os
 
-    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "omlx_uplift", "locales", "*.json")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base = os.path.join(root, "omlx_uplift", "locales", "*.json")
     key = "uplift.patches.dev_auto_label"
     for f in glob.glob(base):
         v = _json.load(open(f, encoding="utf-8"))[key]
         assert v and "anilla" not in v, f
-    en = _json.load(open(os.path.join(os.path.dirname(base.replace('*.json', '')), "en.json"), encoding="utf-8"))
-    assert en[key] == "AUTO UPDATE — REBUILD OMLX-DEV WHEN UPSTREAM MOVES"
+    en = _json.load(open(os.path.join(os.path.dirname(base), "en.json"), encoding="utf-8"))
+    # reworded 2026-10-25 (user): the old caption led with the same two words as
+    # the patches auto-update checkbox and named a condition ("when upstream
+    # moves") instead of WHEN the work happens — the rebuild runs at restart.
+    assert en[key] == "Auto-update and rebuild omlx-dev on restart", en[key]
+    # index.html carries the pre-catalog literal; a drift repaints the node
+    html = open(os.path.join(root, "omlx_uplift", "static", "index.html"),
+                encoding="utf-8").read()
+    assert f'data-i18n="{key}">{en[key]}</span>' in html, \
+        "index.html literal and en.json drifted for the auto-update label"
 
 
 def test_pin_beats_sync_ref_when_no_receipt(monkeypatch):
