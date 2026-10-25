@@ -3015,6 +3015,12 @@ function toolbar() {
         var win = ctxWin(), used = ctxUsed();
         var pct = win && used ? Math.min(100, Math.round(used / win * 100)) : 0;
         var arc = ctxWrap.querySelector('.ctx-arc');
+        // The <svg> rides in via innerHTML, so a renderer that assumes the arc
+        // exists throws when it does not — and this runs INSIDE the bar build
+        // and inside onMessage, where a throw costs the whole toolbar or the
+        // assistant row (that is exactly how U16-B lost replies live). A gauge
+        // is decoration: if its markup is not there, say nothing and go home.
+        if (!arc) return;
         arc.setAttribute('stroke-dashoffset', (97.39 * (1 - pct / 100)).toFixed(2));
         arc.setAttribute('stroke', pct >= 85 ? 'var(--text-danger)' : 'var(--timeline-accent)');
         ctxWrap.title = win ? used.toLocaleString() + ' / ' + win.toLocaleString()
@@ -3029,15 +3035,13 @@ function toolbar() {
     // discoverable, not a secret.
     secTools.append(web, helpButtonEl());
     secModel.append(thinkGroup, budGroup);
-    // UP-16: the ring belongs by the MODEL it prices — classic
-    // put it in the chat header next to the selector (top region,
-    // CHAT-3R pins secModel to thinking+budget).
-    var modelSel = gid('chat-native-model');
-    if (modelSel && modelSel.parentNode) {
-        modelSel.parentNode.append(ctxWrap, ctxPend);
-        ctxRender();
-        _ctxRender = ctxRender;   // openConv/newChat hook (module scope)
-    }
+    // UP-16: the ring belongs by the MODEL it prices — classic puts it in the
+    // chat header next to the selector (CHAT-3R pins secModel to thinking +
+    // budget). The MOUNT is below, at bar-assembly time: right here the picker
+    // is still detached, and the original by-id lookup returned null in a real
+    // browser, the guard skipped silently, and the gauge NEVER rendered
+    // (QA 2026-10-25). A node harness cannot see that class of bug — its
+    // getElementById hands out a node for any id, attached or not.
     if (typeof fetch === 'function') fetchMcpTools().catch(function () {});
     // UP-15: classic's init-time MCP tool load; guarded because headless
     // harnesses stub the transport only after mount
@@ -3090,11 +3094,20 @@ function toolbar() {
     // CHAT-3R round 5/6 (user): Model | Preset | Save | Delete in the
     // top row; the naming MODAL rides in the bar's DOM but is fixed —
     // it covers the page instead of expanding the bar.
+    var modelGroup = group(t('chat.active_model', 'Active Model'), sel,
+                           'chat.active_model');
     top.append(
-        group(t('chat.active_model', 'Active Model'), sel, 'chat.active_model'),
+        modelGroup,
         group(t('uplift.chat.preset_title', 'Active preset'), prof,
               'uplift.chat.preset_title'),
         profSave, presetDel, nameRow);
+    // UP-16 mount: the ring belongs with the picker it prices. No lookup and no
+    // guard this time — the node is the one that was just assembled, so there
+    // is no "not attached yet" state left to silently skip the mount (that
+    // guard is what hid the ring for its whole life: QA 2026-10-25).
+    modelGroup.append(ctxWrap, ctxPend);
+    ctxRender();
+    _ctxRender = ctxRender;   // openConv/newChat hook (module scope)
     var dcHost = el('div'); dcHost.id = 'chat-native-dc';
     var mainCol = el('div', 'chat-native-main');
     mainCol.append(top, dcHost);
@@ -4530,11 +4543,11 @@ function stripMarkdown(src) {
 // shared visibility predicate (isVisibleRow, UP-43) does the hiding and
 // all five ordinal call sites keep working untouched; deletes and
 // truncations splice whole rows, so meta can never orphan. vg/vid/vsel/
-// rmodel are NOT yet in the server message whitelist — the exact chat.py
-// addition + pytest is pinned in tests/u29-branch-variants.test.cjs; until
-// it lands a reload drops the markers and the siblings render as plain
-// consecutive bubbles, newest last, with no tab strip (documented
-// degradation, never a loss).
+// rmodel ARE in the server message whitelist (chat.py _clean_message, capped;
+// pinned by test_u29_variant_markers_roundtrip), so a chain survives a reload.
+// The pre-whitelist degradation this note used to describe — markers lost,
+// siblings rendering as plain consecutive bubbles with no tab strip — no
+// longer happens; kept here so the history of the shape stays readable.
 
 function creativeTemp() {
     // classic :7218-7223 math, mirrored: base + 0.4 capped at 2 when a
@@ -7215,13 +7228,14 @@ function mount() {
                 }
                 // UP-29: which model produced this reply — the variant tab
                 // label's tooltip (classic keeps meta.modelId per variant;
-                // display-only, dropped by the server whitelist, like usage)
+                // persists with the variant markers, capped server-side)
                 if (role === 'assistant' && _turnModel) {
                     row.rmodel = _turnModel;
                 }
-                // UP-38: token counts ride the row for the footer chip.
-                // Display-only: the backend _clean_message filter drops the
-                // key on reload (classic keeps it session-side too).
+                // UP-38: token counts ride the row for the footer chip AND for
+                // the UP-16 context ring, which rebuilds its number from these
+                // rows on load — so they persist now (server keeps the
+                // whitelisted numeric keys; see USAGE_KEYS in routers/chat.py).
                 if (role === 'assistant' && _turnUsage) {
                     row.usage = Object.assign({}, _turnUsage);
                     // UP-38: generation TPS between first and last token —

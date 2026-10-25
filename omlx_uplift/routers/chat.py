@@ -75,6 +75,11 @@ def _save(store: dict) -> None:
 
 GEN_KEYS = ("temperature", "max_tokens", "top_p", "top_k",
             "min_p", "repetition_penalty", "presence_penalty")
+# UP-38: token counts + measured TPS. Whitelist, not passthrough: this store is
+# user-visible JSON that export feeds to other tools, so a runaway client must
+# not be able to grow it per message.
+USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens",
+              "cached_tokens", "reasoning_tokens", "tps")
 
 
 def _clean_state(raw):
@@ -253,6 +258,22 @@ def _clean_message(m: dict) -> dict:
             clean_p["reasoning_effort"] = rv
         if clean_p:
             out["params"] = clean_p
+    # UP-16 live fix (QA 2026-10-25): usage used to be DROPPED here, which made
+    # the client's own recovery dead code — toolbar ctxUsed() walks the last
+    # rows for .usage to rebuild the context ring, and the footer chip reads it
+    # for the token/TPS line. After any reload the ring sat at 0% and the line
+    # was gone until the next live turn. (rmodel already persists with the
+    # variant markers below — checked, not assumed.)
+    raw_u = m.get("usage")
+    if role == "assistant" and isinstance(raw_u, dict):
+        clean_u = {}
+        for k in USAGE_KEYS:
+            v = raw_u.get(k)
+            if (isinstance(v, (int, float)) and not isinstance(v, bool)
+                    and 0 <= v < 1e12):
+                clean_u[k] = v
+        if clean_u:
+            out["usage"] = clean_u
     # UP-43: attachment META (names + kinds) survives reloads; bytes never
     # do — the store stays text-only by design (client sanitizes at save,
     # this whitelist is the second gate). Capped hard: 8 entries, 120 chars.

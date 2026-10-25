@@ -32,9 +32,49 @@ test('openConv uses the holder too', () => {
     assert.match(seg, /if \(_ctxRender\) _ctxRender\(\);/);
 });
 
-test('the rail builder publishes the holder where it defines ctxRender', () => {
+test('the rail builder publishes the holder in the closure that defines ctxRender', () => {
     const def = SRC.indexOf('function ctxRender()');
-    assert.ok(def > 0);
-    const after = SRC.slice(def, def + 4000);
-    assert.match(after, /_ctxRender = ctxRender;/);
+    assert.ok(def > 0, 'ctxRender defined');
+    // The invariant U16-B needs is SAME-CLOSURE, not "within N characters":
+    // a fixed slice was stale the moment the mount moved (QA 2026-10-25), so
+    // walk the enclosing builder body by braces and check inside it instead.
+    const head = SRC.lastIndexOf('\nfunction toolbar(');
+    assert.ok(head > 0 && head < def, 'ctxRender lives in toolbar()');
+    let depth = 0, end = SRC.indexOf('{', head);
+    for (let k = end; k < SRC.length; k++) {
+        if (SRC[k] === '{') depth++;
+        else if (SRC[k] === '}') { depth--; if (!depth) { end = k; break; } }
+    }
+    assert.match(SRC.slice(head, end), /_ctxRender = ctxRender;/,
+        'holder published in the defining closure (never cross-closure)');
+});
+
+test('UP-16: the ring mounts on the assembled node, never on a document lookup', () => {
+    // WHY: the ring was built and then mounted through
+    // gid('chat-native-model') — looked up while the whole top bar was still a
+    // DETACHED tree. The lookup found nothing, the guard skipped it quietly and
+    // the gauge never appeared in a live browser for its entire life. The mount
+    // must therefore use the local group node and have no skip path at all.
+    const mount = SRC.indexOf('modelGroup.append(ctxWrap, ctxPend)');
+    assert.ok(mount > 0, 'ring mounts onto the model group node');
+    assert.ok(SRC.indexOf('var modelGroup = group(') < mount,
+        'the group node exists before the mount uses it');
+    assert.ok(SRC.indexOf('top.append(') < mount,
+        'mount happens during bar assembly, after the group is built');
+    // the OLD shape must be gone for good: re-lookup, then append through the
+    // parent. (gid() itself stays legal elsewhere — after mount(), the bar IS
+    // attached and four later call sites read the picker by id.)
+    assert.ok(!/modelSel/.test(SRC), 'the detached-lookup intermediary is gone');
+    assert.ok(!/parentNode\.append\(ctxWrap/.test(SRC),
+        'the ring is never mounted through a re-found parent');
+});
+
+test('UP-16: a missing arc cannot throw through the bar build', () => {
+    // ctxWrap fills its <svg> via innerHTML, so a renderer that trusts the arc
+    // to exist dies on it — and ctxRender runs inside the toolbar build AND
+    // inside onMessage, where a throw costs the assistant row (the U16-B loss).
+    const i = SRC.indexOf('function ctxRender()');
+    const body = SRC.slice(i, SRC.indexOf('\n    }', i));
+    assert.match(body, /if \(!arc\) return;/,
+        'the gauge bails instead of throwing when its markup is absent');
 });

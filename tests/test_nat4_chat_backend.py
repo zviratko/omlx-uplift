@@ -338,6 +338,35 @@ def test_u29_variant_markers_roundtrip(client):
     assert len(got[2]["rmodel"]) == 120, "rmodel capped"
 
 
+def test_up38_usage_roundtrips_capped(client):
+    """UP-16/UP-38: token counts + measured TPS persist on assistant rows — the
+    context ring and the footer chip rebuild from them after a reload, so a
+    dropped key made the ring read 0% until the next live turn. Unknown keys,
+    bools, negatives, non-numbers and absurd magnitudes never enter the store;
+    user rows carry no usage at all."""
+    conv = _conv(messages=[
+        {"role": "user", "content": "q", "usage": {"prompt_tokens": 5}},
+        {"role": "assistant", "content": "a",
+         "usage": {"prompt_tokens": 1200, "completion_tokens": 80,
+                   "total_tokens": 1280, "cached_tokens": 900,
+                   "reasoning_tokens": 12, "tps": 254.8}},
+        {"role": "assistant", "content": "b",
+         "usage": {"prompt_tokens": True, "completion_tokens": -5,
+                   "tps": "fast", "total_tokens": 10 ** 13,
+                   "secret": "x", "blob": {"a": 1}}},
+        {"role": "assistant", "content": "c", "usage": "nope"},
+    ])
+    assert client.post("/uplift/api/chat/history", json=conv).status_code == 200
+    got = client.get("/uplift/api/chat/history/c1").json()["messages"]
+    assert "usage" not in got[0], "user rows carry no usage"
+    assert got[1]["usage"] == {
+        "prompt_tokens": 1200, "completion_tokens": 80, "total_tokens": 1280,
+        "cached_tokens": 900, "reasoning_tokens": 12, "tps": 254.8}
+    assert "usage" not in got[2], \
+        "all-junk usage is dropped whole, never a partial dict of garbage"
+    assert "usage" not in got[3], "non-dict usage dropped"
+
+
 def test_u37_effort_stops_and_per_model_settings(client):
     """UP-37: an effort-level thinking stop persists (not just the fixed
     four), the per-model knob set survives with caps, junk collapses to

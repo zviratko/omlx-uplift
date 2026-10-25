@@ -204,6 +204,36 @@ test('module exports + mount paints toolbar through the catalog', async () => {
     assert.ok(!selTexts.includes('whisper-large-v3-turbo-oQ8'), 'audio_stt filtered');
 });
 
+test('UP-16: the context ring is genuinely IN the mounted bar', async () => {
+    // Found on the live board 2026-10-25: the gauge existed in source, was
+    // priced correctly, and never appeared — the mount looked the model picker
+    // up by id while the whole top bar was still detached, so the guard saw
+    // nothing and skipped. Static greps and this file's own stub both waved it
+    // through (the stub hands out a node for ANY id), so the only honest guard
+    // is to build the bar and find the ring inside the tree.
+    const h = makeHarness();
+    h.win.UpliftNativeChat.mount();
+    await booted(h);
+    const host = h.byId['chat-native'];
+    const inTree = (root, pred) => {
+        let found = false;
+        (function w(e) { if (pred(e)) found = true; (e.children || []).forEach(w); })(root);
+        return found;
+    };
+    const groups = [];
+    (function w(e) {
+        if (String(e.className).includes('chat-native-group')) groups.push(e);
+        (e.children || []).forEach(w);
+    })(host);
+    const modelGroup = groups.find((g) => inTree(
+        g, (e) => e.tagName === 'select' && e.id === 'chat-native-model'));
+    assert.ok(modelGroup, 'the model picker sits in a group of the mounted bar');
+    assert.ok(inTree(modelGroup, (e) => String(e.className) === 'chat-ctx'),
+        'the ring rendered beside the model it prices');
+    assert.ok(inTree(modelGroup, (e) => String(e.className) === 'chat-ctx-pending'),
+        'and its "waiting for the first turn" note with it');
+});
+
 test('shapeRequest: system prompt, full history, dedup, auth header', async () => {
     const convs = [{ id: 'c1', title: 'T', model: 'M1', systemPrompt: 'BE NICE',
                      messages: [{ role: 'user', content: 'old' },
@@ -1051,7 +1081,12 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         && /secTools\.append\(web, helpButtonEl\(\)\)/.test(src),
         'Sampling owns the grid; Tools owns web search + the UP-40 shortcut '
         + 'entry at the bottom (helpButtonEl joins web, nothing moves)');
-    assert.ok(/top\.append\(\s*group\(t\('chat\.active_model'[\s\S]*?group\(t\('uplift\.chat\.preset_title'[\s\S]*?profSave, presetDel, nameRow\);/.test(src),
+    // round 5 order still pinned; UP-16 (QA 2026-10-25) extracted the Model
+    // group into a named node so the context ring can mount onto it, so the
+    // picker's group() call is no longer inline inside top.append — the ORDER
+    // is what this guard means, and it is unchanged.
+    assert.ok(/var modelGroup = group\(t\('chat\.active_model'/.test(src)
+        && /top\.append\(\s*modelGroup,\s*group\(t\('uplift\.chat\.preset_title'[\s\S]*?profSave, presetDel, nameRow\);/.test(src),
         'top row: Model | Preset | Save | Delete, name row folds below (round 5)');
     assert.ok(!/secPreset|presetActions/.test(src),
         'the rail preset section is gone — nothing left behind');
