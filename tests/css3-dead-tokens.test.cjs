@@ -115,25 +115,35 @@ test('CSS-3: the context ring paints through CSS, not through its markup', () =>
 });
 
 /* LOGO-BAND contract (measured 2026-10-25). The header row is 16px tall and
- * holds three claimants: the wordmark + a skin's `.logo::after` suffix (in
- * flow), and the DEV stamp + version pair (`.logo-build` / `.logo-base`,
- * raised absolutely alongside). The suffix rule uses `vertical-align: bottom`,
- * which drops a 9px skin tagline's ink to y93..102 — the same band the second
- * version line paints (y95..103). With the DEV pair present that collided:
- * ' // H-A-L 9000' over 'omlx v0.7.3.dev2 · 78fa08b', 9x7px of ink on ink.
- * The `.has-build-lines` hook must therefore lift the suffix onto the wordmark
- * row. Clip or reflow alternatives were rejected: they cost information or
- * move the header, both of which the geometry contract forbids.
+ * carries three claimants: the wordmark plus a skin's `.logo::after` tagline
+ * (INLINE, so it starts right of the stamp), and the DEV stamp + version pair
+ * (`.logo-build` / `.logo-base`, absolutely positioned in the same band).
+ * With the pair present and a skin painting a tagline, the version line's
+ * 200px allowance reached under the suffix and the two overlapped by 9x7px
+ * (' // H-A-L 9000' over 'omlx v0.7.3.dev2 · 78fa08b').
+ * The bound lives in uplift_boot.js, where the stamp's real width is
+ * measurable; a `vertical-align` change here was tried first and is a NO-OP,
+ * because `.logo.has-build-lines::after` sets a 16px line-height equal to the
+ * wordmark's line box, so top and bottom alignment coincide. These assertions
+ * keep both facts honest.
  */
-test('logo-band: skin suffix rides the wordmark row when the DEV pair paints', () => {
+test('logo-band: version line is bounded when a skin paints a tagline', () => {
     const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
-    const rule = /\.logo\.has-build-lines::after\s*\{([^}]*)\}/.exec(css);
-    assert.ok(rule, '.logo.has-build-lines::after rule is gone — the skin '
-        + 'suffix will drop into the DEV version line and overlap it');
-    const va = /vertical-align:\s*([a-z-]+)/.exec(rule[1]);
-    assert.ok(va, 'the pair rule must pin vertical-align; without it the base '
-        + '.logo::after bottom alignment puts skin ink on the version band');
-    assert.equal(va[1], 'top',
-        `logo suffix vertical-align is '${va[1]}'; only 'top' keeps a 9px skin `
-        + 'suffix out of the y95..103 version band (measured, discovery-one skin)');
+    const boot = fs.readFileSync(path.join(STATIC_DIR, 'uplift_boot.js'), 'utf8');
+
+    // the pair paints a suffix hook; the version line must stay clip-capable
+    const baseRule = /\.logo\.logo-build \.logo-base\s*\{([^}]*)\}/.exec(css)
+        || /\.logo-base\s*\{([^}]*)\}/.exec(css);
+    assert.ok(baseRule && /max-width:/.test(baseRule[1]),
+        '.logo-base lost its max-width — without a cap nothing can absorb the '
+        + 'tagline collision and the strings overlap again');
+    assert.ok(/text-overflow:\s*ellipsis/.test(css),
+        'the version line must truncate with an ellipsis, not spill ink');
+
+    // and the runtime bound must exist: read ::after content, narrow line 2
+    assert.ok(/getComputedStyle\([^)]*'::after'\)/.test(boot),
+        'uplift_boot.js no longer inspects the skin tagline (.logo::after) — '
+        + 'the version line will run under it again');
+    assert.ok(/maxWidth/.test(boot) && /getBoundingClientRect\(\)/.test(boot),
+        'uplift_boot.js no longer bounds the version line to the stamp column');
 });

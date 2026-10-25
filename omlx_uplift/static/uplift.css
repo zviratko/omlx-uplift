@@ -239,14 +239,18 @@ body::before {
    same middle the pair was centred on. Can never grow the line box
    (height == the row's own 16px) and never touches skins without the
    pair (user 2026-10-21). Outranks a skin's own shorthand line-height.
-   MEASURED 2026-10-25, skin 'discovery-one' (suffix ' // H-A-L 9000'):
-   `vertical-align: bottom` (the base rule above) drops a 9px suffix's
-   ink to y93..102 — the exact band the SECOND version line paints
-   (y95..103) — so the skin's tagline collided with 'omlx v0.7.3.dev2 ·
-   78fa08b' by 9x7px. The suffix belongs to the wordmark row, not to the
-   version band: riding the line-box top keeps its ink at y86..95, clear
-   of the pair, with nothing clipped and the header unmoved. */
-.logo.has-build-lines::after { line-height: 16px; vertical-align: top; }
+   NOT the collision fix: `vertical-align` was tried on 2026-10-25 and is a
+   no-op here, because this rule's own 16px line-height makes the suffix box
+   exactly as tall as the wordmark's line box — top and bottom then coincide
+   and the ink does not move. The real clash is horizontal, inside one shared
+   band, and is bounded in uplift_boot.js where the widths are measurable
+   (see .logo-base). */
+/* Gutter between the DEV build column and a skin's tagline. The ::after box
+   carries no author-level margin (the 6px seen before was Chrome's default
+   after an inline-block), which put a 130px version line 9px under a
+   91px tagline. 16px buys the version line the room it needs without
+   truncating it, and the whole cluster still ends ~100px before the tabs. */
+.logo.has-build-lines::after { line-height: 16px; margin-left: 16px; }
 .logo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
 .logo .dot.bad { background: var(--red); }
 /* U10: keg flavor wordmark. 'Uplift' keeps the old inline look; when the
@@ -294,7 +298,12 @@ body::before {
    wordmark ends; absolute, so it can never grow the header. The patch
    count that once sat here was dropped (user 2026-10-21) — the ids stay
    in the tooltip and on the patches page. 200px cap keeps it clear of
-   the tabs strip (measured: the column starts x≈126, tabs x≈348). */
+   the tabs strip (measured: the column starts x≈126, tabs x≈348).
+   When a skin paints a tagline into .logo::after, 200px reaches into that
+   suffix's inline box and the two strings overlap (measured 9x7px on
+   'discovery-one', 2026-10-25) — uplift_boot.js therefore narrows THIS
+   element inline to the stamp's own column, so the ellipsis absorbs it and
+   never the header. See .logo.has-build-lines::after. */
 .logo .logo-build .logo-base {
     position: absolute; top: calc(100% + 2px); left: 0;
     font: 400 8px/1 var(--mono); letter-spacing: 0.02em;

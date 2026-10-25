@@ -99,6 +99,27 @@ function renderDevBuild() {
             // itself on the stamp+version pair only once BOTH lines are
             // actually painted (user 2026-10-21)
             el.parentElement?.classList.add('has-build-lines');
+            /* A skin can paint its own tagline into .logo::after, and that box
+               is INLINE — it starts just right of the stamp. The version line
+               hangs from the stamp's left edge and is allowed 200px, so with a
+               long-enough tagline the two collide: measured 2026-10-25 on the
+               'discovery-one' skin (' // H-A-L 9000', suffix starting x327)
+               over 'omlx v0.7.3.dev2 · 78fa08b' (ending x336) — 9x7px of ink on
+               ink. Bound line 2 to the stamp's own column plus the suffix's
+               6px gutter: the two version lines then form one aligned column,
+               the ellipsis takes any tail, and the untouched full string stays
+               in this element's tooltip and on the patches page. No-op for
+               skins that paint nothing (content is 'normal'). */
+            const suffixCs = getComputedStyle(el.parentElement, '::after');
+            const tagline = suffixCs.content;
+            if (tagline && tagline !== 'none' && tagline !== 'normal') {
+                // the tagline begins one margin after the stamp's right edge,
+                // so that is exactly how wide line 2 may be (a skin that sets
+                // its own margin widens the allowance to match)
+                const gutter = Math.round(el.getBoundingClientRect().width)
+                    + (parseFloat(suffixCs.marginLeft) || 0);
+                if (gutter < 200) bl.style.maxWidth = gutter + 'px';
+            }
         }
     }).catch(() => {});
 }
