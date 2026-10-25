@@ -234,6 +234,35 @@ test('UP-16: the context ring is genuinely IN the mounted bar', async () => {
         'and its "waiting for the first turn" note with it');
 });
 
+test('UP-16: the ring restores the STORED number on boot and clears on New Chat', async () => {
+    // The second half of the QA 2026-10-25 finding. usage now survives the
+    // store, but the boot path that reads it back (_conv = Object.assign(_conv,
+    // full)) was the only conversation swap WITHOUT a repaint: the toolbar had
+    // already painted 0 against the summary-only _conv, so a refreshed board
+    // showed 0% for a chat whose token count was sitting right there in the
+    // client object. New Chat and both delete paths had the same omission in
+    // the opposite direction — they kept showing the PREVIOUS chat's number,
+    // which is worse than zero because it is a plausible lie.
+    const h = makeHarness({ convs: [{
+        id: 'c1', title: 'Stored', model: 'M1', systemPrompt: '',
+        messages: [{ role: 'user', content: 'q' },
+                   { role: 'assistant', content: 'a',
+                     usage: { prompt_tokens: 1200, completion_tokens: 80,
+                              total_tokens: 1280 } }] }] });
+    h.win.UpliftNativeChat.mount();
+    await booted(h);
+    const ring = h.byId['chat-native-ctx'];
+    assert.ok(ring && ring.id === 'chat-native-ctx',
+        'the ring is addressable (id), not only reachable by class');
+    assert.match(String(ring.title || ''), /^(1,280|1280) \/ /,
+        `boot must paint the restored token count, got: ${JSON.stringify(ring.title)}`);
+
+    h.byId['chat-native-new'].dispatch('click');
+    await booted(h);
+    assert.match(String(ring.title || ''), /^0 \/ /,
+        `New Chat clears the number, got: ${JSON.stringify(ring.title)}`);
+});
+
 test('shapeRequest: system prompt, full history, dedup, auth header', async () => {
     const convs = [{ id: 'c1', title: 'T', model: 'M1', systemPrompt: 'BE NICE',
                      messages: [{ role: 'user', content: 'old' },

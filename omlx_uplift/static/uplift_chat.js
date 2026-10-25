@@ -2478,6 +2478,7 @@ function toolbar() {
         sttListenerStop(false);   // VOICE-13 teardown: same rule for the mic
         _conv = newConv();
         if (_dc) _dc.history = [];
+        if (_ctxRender) _ctxRender();   // UP-16: an empty chat shows no number
         // the prompt field is per-conversation (classic: sessions carry
         // their own systemPrompt): clear it or the picker would show no
         // profile while a stale prompt is still visibly sent
@@ -2797,6 +2798,7 @@ function toolbar() {
             _convs = _convs.filter(function (c) { return c.id !== _conv.id; });
             _conv = newConv();
             if (_dc) _dc.history = [];
+            if (_ctxRender) _ctxRender();   // UP-16: deleted chat, zero gauge
             refreshConvList();
         } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
     });
@@ -2982,6 +2984,7 @@ function toolbar() {
     // memory per conversation — 'Context updates after the next reply'
     // covers the cold state, same as classic's context_pending.
     var ctxWrap = el('div', 'chat-ctx');
+    ctxWrap.id = 'chat-native-ctx';   // addressable: boot repaint + tests
     ctxWrap.innerHTML = '<svg viewBox="0 0 36 36" width="28" height="28">'
         + '<circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--border-normal)" stroke-width="5"></circle>'
         + '<circle class="ctx-arc" cx="18" cy="18" r="15.5" fill="none" stroke-width="5" stroke-linecap="round" stroke="var(--timeline-accent)" stroke-dasharray="97.39" stroke-dashoffset="97.39"></circle>'
@@ -5350,6 +5353,7 @@ function msgDelete(idx) {
             _convs = _convs.filter(function (c) { return c.id !== _conv.id; });
             _conv = newConv();
             if (_dc) _dc.history = [];
+            if (_ctxRender) _ctxRender();   // UP-16: deleted chat, zero gauge
             refreshConvList();
          }).catch(function (e) { d.toast(String((e && e.message) || e), 'error'); });
         return;
@@ -7102,6 +7106,14 @@ function mount() {
                 .then(function (full) {
                     if (full && Array.isArray(full.messages)) {
                         _conv = Object.assign(_conv, full);
+                        // UP-16 live fix 2 (QA 2026-10-25): this is the path
+                        // that brings the SAVED usage back after a reload, and
+                        // it was the only conversation swap with no repaint —
+                        // the toolbar had already painted 0 against the
+                        // summary-only _conv, so the ring sat at 0% on a chat
+                        // whose number the store did have. openConv got this
+                        // call from the start; the boot path was missed.
+                        if (_ctxRender) _ctxRender();
                     }
                 }).catch(function () { /* empty conv is fine */ })
             : null;
