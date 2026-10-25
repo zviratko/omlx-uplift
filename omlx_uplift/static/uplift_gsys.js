@@ -1856,25 +1856,66 @@ const GS_SPEC = [
     // /admin/api/sub-keys persist server-side immediately, so this block
     // bypasses the dirty-queue and edits GS.auth.sub_keys in place.
     {x: (body, L) => {
-        const t = k => C.tf(k, k.split('.').pop().replace(/_/g, ' '));
-        const mk = (label, cls, fn, title) => {
+        // FIRST-PAINT SAFETY (live QA 2026-10-25): this block used to build its
+        // labels with `k.split('.').pop().replace(/_/g,' ')`, so whenever the
+        // merged locale catalog had not resolved yet the panel printed the
+        // fallback — i.e. developer scaffolding ('sub keys add', 'sub keys name
+        // placeholder'). Every key below IS in the catalog; the strings were
+        // only painted too early and the nodes were never registered, so
+        // applyI18n could not repair them. Real English + the data-i18n hooks
+        // (uplift.js repairs textContent, title and placeholder) fix both.
+        // NEVER derive a fallback from a key name.
+        const EN = {
+            'settings.auth.sub_keys_label': 'Additional API Keys',
+            'settings.auth.sub_keys_hint':
+                'API-only keys. Cannot be used for admin login.',
+            'settings.auth.sub_keys_add': 'Add',
+            'settings.auth.sub_keys_create': 'Create',
+            'settings.auth.sub_keys_cancel': 'Cancel',
+            'settings.auth.sub_keys_delete': 'Delete',
+            'settings.auth.sub_keys_delete_confirm':
+                'Are you sure you want to delete this sub key?',
+            'settings.auth.sub_keys_empty': 'No sub keys configured',
+            'settings.auth.sub_keys_unnamed': 'Unnamed',
+            'settings.auth.sub_keys_name_placeholder': 'Name (optional)',
+            'settings.auth.sub_keys_key_placeholder': 'API key value',
+            'settings.auth.sub_keys_generate_tooltip': 'Generate random key',
+            'js.error.api_key_min_length': 'API key must be at least 4 characters.',
+            'js.error.api_key_no_whitespace': 'API key must not contain whitespace.',
+        };
+        const t = k => C.tf(k, EN[k] || k);
+        // register a node for late catalog/locale re-resolution
+        const reg = (node, key, kind) => {
+            if (!node || !key) return node;
+            if (kind === 'title') { node.dataset.i18nTitle = key; node.dataset.enTitle = EN[key] || ''; }
+            else if (kind === 'ph') { node.dataset.i18nPh = key; node.dataset.enPh = EN[key] || ''; }
+            else { node.dataset.i18n = key; node.dataset.en = EN[key] || ''; }
+            return node;
+        };
+        const mk = (label, cls, fn, title, key) => {
             const b = document.createElement('button');
             b.type = 'button'; b.className = 'se-btn ' + (cls || ''); b.textContent = label;
+            if (key) reg(b, key, 'text');
             if (title) b.title = title;
             if (fn) b.onclick = fn; return b; };
         const list = document.createElement('div'); list.className = 'gs-subkeys';
         const form = document.createElement('div');
         form.className = 'gs-subkey-form'; form.hidden = true;
         const nameIn = document.createElement('input');
-        nameIn.type = 'text'; nameIn.placeholder = t('settings.auth.sub_keys_name_placeholder');
+        nameIn.type = 'text';
+        nameIn.placeholder = t('settings.auth.sub_keys_name_placeholder');
+        reg(nameIn, 'settings.auth.sub_keys_name_placeholder', 'ph');
         const keyIn = document.createElement('input');
-        keyIn.type = 'text'; keyIn.placeholder = t('settings.auth.sub_keys_key_placeholder');
+        keyIn.type = 'text';
+        keyIn.placeholder = t('settings.auth.sub_keys_key_placeholder');
+        reg(keyIn, 'settings.auth.sub_keys_key_placeholder', 'ph');
         const err = document.createElement('span'); err.className = 'gs-err';
         const genB = mk('\u2684', 'act', () => {
             const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
             keyIn.value = 'omlx-' + Array.from(crypto.getRandomValues(new Uint8Array(16)))
                 .map(b => chars[b % chars.length]).join('');
         }, t('settings.auth.sub_keys_generate_tooltip'));
+        reg(genB, 'settings.auth.sub_keys_generate_tooltip', 'title');
         const closeForm = () => { form.hidden = true; keyIn.value = nameIn.value = ''; err.textContent = ''; };
         const createB = mk(t('settings.auth.sub_keys_create'), 'act', () => {
             err.textContent = '';
@@ -1889,9 +1930,13 @@ const GS_SPEC = [
                 })
                 .catch(e => { err.textContent = String((e && e.message) || e); });
         });
-        const cancelB = mk(t('settings.auth.sub_keys_cancel'), '', closeForm);
+        const cancelB = mk(t('settings.auth.sub_keys_cancel'), '', closeForm,
+            null, 'settings.auth.sub_keys_cancel');
+        createB.dataset.i18n = 'settings.auth.sub_keys_create';
+        createB.dataset.en = EN['settings.auth.sub_keys_create'];
         form.append(nameIn, keyIn, genB, createB, cancelB, err);
-        const addB = mk(t('settings.auth.sub_keys_add'), 'act', () => { form.hidden = false; keyIn.focus(); });
+        const addB = mk(t('settings.auth.sub_keys_add'), 'act', () => { form.hidden = false; keyIn.focus(); },
+            null, 'settings.auth.sub_keys_add');
         const mask = k => { const s = String(k || '');
             return s.length <= 8 ? s : s.slice(0, 4) + '\u2022'.repeat(s.length - 8) + s.slice(-4); };
         function render() {
@@ -1900,6 +1945,7 @@ const GS_SPEC = [
             if (!keys.length) {
                 const e2 = document.createElement('div'); e2.className = 'dim';
                 e2.textContent = t('settings.auth.sub_keys_empty');
+                reg(e2, 'settings.auth.sub_keys_empty', 'text');
                 list.append(e2);
             }
             for (const sk of keys) {
@@ -1929,13 +1975,18 @@ const GS_SPEC = [
                         })
                         .catch(e => GLUE.toast(String((e && e.message) || e), 'error'));
                 });
-                ctl.append(val, eye, del);
+                ctl.append(val, eye, reg(del, 'settings.auth.sub_keys_delete', 'text'));
                 row.append(nm, when, ctl);
                 list.append(row);
             }
         }
-        body.append(gsRow('auth', t('settings.auth.sub_keys_label'),
-            t('settings.auth.sub_keys_hint'), addB));
+        const skRow = gsRow('auth', t('settings.auth.sub_keys_label'),
+            t('settings.auth.sub_keys_hint'), addB);
+        // no key on the 'Unnamed' cell: a real name would be overwritten by
+        // the re-resolution pass, and that cell shows data, not chrome
+        reg(skRow.querySelector('.uname'), 'settings.auth.sub_keys_label', 'text');
+        reg(skRow.querySelector('small'), 'settings.auth.sub_keys_hint', 'text');
+        body.append(skRow);
         render();
         body.append(list, form);
     }},
