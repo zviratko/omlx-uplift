@@ -232,7 +232,12 @@ window.Uplift._usageGlue = {
         host.replaceChildren();
         for (const k of keys) {
             const e = eng[k] || {};
-            const row = document.createElement('div'); row.className = 'urow';
+            const row = document.createElement('div');
+            // 'settings' anatomy (name | diff slot | control) is what the
+            // endpoint rows above use; a bare .urow in a full-width card
+            // stretched each engine into a three-line band (STATUS-SPLIT QA
+            // 2026-10-25, caught when this list moved onto the About page).
+            row.className = 'urow settings';
             const nm = D.cell(e.name || k);
             const val = document.createElement('span');
             if (e.commit && e.url) {
@@ -1243,6 +1248,11 @@ function currentBlockLayout(saved, view) {
     return UPL.normalizeLayout(board && Array.isArray(board.blocks)
         ? { width: board.width, blocks: board.blocks } : null);
 }
+// The saved blob must be reshaped BEFORE the first view is resolved: a user
+// upgrading from the single-board layout has to land on the view that still
+// holds their board (migrateBoards decides that from what was saved).
+UPL.migrateSavedLayout(layout);
+UPL.migrateBoards(layout);
 let appliedBoardView = statusBoardView(currentSub('status'));
 let upLayout = currentBlockLayout(layout, appliedBoardView);
 window.__upLayout = () => upLayout;   // debug handle (same pattern as __upliftGrid)

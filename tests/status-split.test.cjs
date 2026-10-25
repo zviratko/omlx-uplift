@@ -173,3 +173,16 @@ test('bare #status normalises to the resolved view (shareable link, live row hig
     assert.match(upSrc, /split\('\/'\)\.length < 2\)\s*history\.replaceState\(null, '', location\.pathname \+ location\.search \+ '#status\/' \+ sub\);/,
         'replaceState, never location.hash (that re-fires hashchange -> applyTab twice)');
 });
+
+test('boot order: the blob migrates BEFORE the first view is resolved', () => {
+    // LIVE DEFECT caught in QA (2026-10-25): appliedBoardView was computed
+    // while layout.lastStatusView was still undefined, so an upgrading user —
+    // whose saved board migrateBoards moves into 'extended' — landed on the
+    // compact view instead of the arrangement they built.
+    const mig = upSrc.indexOf('UPL.migrateBoards(layout)');
+    const init = upSrc.indexOf('let appliedBoardView =');
+    assert.ok(mig > 0 && init > 0, 'both statements must exist');
+    assert.ok(mig < init, 'migrateBoards must run before the initial view is resolved');
+    assert.ok(upSrc.indexOf('UPL.migrateSavedLayout(layout)') < mig,
+        'the pre-boards swap runs first: it edits the top-level blocks migrateBoards carries over');
+});
