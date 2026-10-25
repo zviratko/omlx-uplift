@@ -14,6 +14,7 @@ Contract this test pins:
                               (enabled_build_patches, with_bytes=False)
 """
 import pytest
+import re
 
 from omlx_uplift.routers import dev as dev_mod
 from omlx_uplift.routers import patches as patches_mod
@@ -93,9 +94,23 @@ def test_badge_js_prefers_the_keg_name():
     # the skin suffix (::after, e.g. artelight's ': WARM') centres on that
     # pair once BOTH lines are painted: JS arms the trigger, CSS lifts the
     # pseudo to the full 16px wordmark line box (specificity 0-2-1 beats a
-    # skin's own .logo::after shorthand)
+    # skin's own .logo::after shorthand) and opens a gutter so the tagline
+    # cannot sit on the version line (measured 9x7px overlap, 2026-10-25).
+    # Pinned by selector + declarations, not the whole line: the pair of
+    # declarations is expected to grow, the geometry contract is not.
     assert "classList.add('has-build-lines')" in src
-    assert ".logo.has-build-lines::after { line-height: 16px; }" in css
+    pair_rule = re.search(r"\.logo\.has-build-lines::after\s*\{([^}]*)\}", css)
+    assert pair_rule, "the DEV-pair suffix rule is gone — a skin tagline will " \
+        "sit on top of the version line again"
+    assert "line-height: 16px" in pair_rule.group(1)
+    assert re.search(r"margin-left:\s*(1[0-9]|2[0-9])px", pair_rule.group(1)), \
+        "suffix gutter must be >=10px; Chrome's 6px default put the tagline " \
+        "9px under the version line"
+    # the version line stays clip-capable and JS bounds it to the gutter
+    assert "max-width" in re.search(
+        r"\.logo \.logo-build \.logo-base\s*\{([^}]*)\}", css).group(1)
+    assert "getComputedStyle(el.parentElement, '::after')" in src \
+        and "bl.style.maxWidth" in src
     # DEAD CONTRACTS (user 2026-10-21): the 'N patches' header row and the
     # U23 reserved 36px tagline strip must not come back — the tagline is
     # a single nowrap line, patch ids live in the tooltip/patches page
