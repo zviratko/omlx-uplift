@@ -3350,6 +3350,16 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* UP-16: classic context ring in the chat model rail */
 .chat-ctx { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .chat-ctx svg { flex: none; }
+/* Ring paint. These three rules exist because the strokes used to be written
+   into the SVG markup as presentation attributes (stroke="var(--x)") — and a
+   presentation attribute never resolves var(), so the gauge computed
+   stroke: none and the whole control was invisible in every theme. State
+   (near the limit) rides a class for the same reason. --ok is the declared
+   token; --edge and --bad are declared in every theme block, so no skin can
+   leave the ring unpainted. */
+.chat-ctx .ctx-track { stroke: var(--edge); }
+.chat-ctx .ctx-arc { stroke: var(--ok); }
+.chat-ctx.ctx-hot .ctx-arc { stroke: var(--bad); }
 .chat-ctx-num { font-size: 11px; color: var(--text-secondary, inherit); }
 .chat-ctx-pending { font-size: 11px; color: var(--text-tertiary, inherit); margin: 2px 0 4px; }
 

@@ -2985,9 +2985,14 @@ function toolbar() {
     // covers the cold state, same as classic's context_pending.
     var ctxWrap = el('div', 'chat-ctx');
     ctxWrap.id = 'chat-native-ctx';   // addressable: boot repaint + tests
+    // Paint comes from CSS (.ctx-track / .ctx-arc in uplift.css). Strokes set
+    // as SVG PRESENTATION ATTRIBUTES do not resolve var() at all, so the
+    // original markup computed to stroke: none and the gauge was invisible in
+    // every theme even once it mounted (measured live 2026-10-25:
+    // getComputedStyle(arc).stroke === "none").
     ctxWrap.innerHTML = '<svg viewBox="0 0 36 36" width="28" height="28">'
-        + '<circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--border-normal)" stroke-width="5"></circle>'
-        + '<circle class="ctx-arc" cx="18" cy="18" r="15.5" fill="none" stroke-width="5" stroke-linecap="round" stroke="var(--timeline-accent)" stroke-dasharray="97.39" stroke-dashoffset="97.39"></circle>'
+        + '<circle class="ctx-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="5"></circle>'
+        + '<circle class="ctx-arc" cx="18" cy="18" r="15.5" fill="none" stroke-width="5" stroke-linecap="round" stroke-dasharray="97.39" stroke-dashoffset="97.39"></circle>'
         + '</svg>';
     // domkit-exempt: static SVG scaffold, no data ever interpolated
     var ctxNum = el('span', 'chat-ctx-num', 'ctx');
@@ -3029,7 +3034,9 @@ function toolbar() {
         // is decoration: if its markup is not there, say nothing and go home.
         if (!arc) return;
         arc.setAttribute('stroke-dashoffset', (97.39 * (1 - pct / 100)).toFixed(2));
-        arc.setAttribute('stroke', pct >= 85 ? 'var(--text-danger)' : 'var(--timeline-accent)');
+        // same reason as the scaffold: state goes through a class, never
+        // through a var() in an attribute
+        ctxWrap.classList.toggle('ctx-hot', pct >= 85);
         ctxWrap.title = win ? used.toLocaleString() + ' / ' + win.toLocaleString()
             + ' ' + t('chat.context_abbr', 'ctx') + ' (' + pct + '%)' : '';
         ctxPend.hidden = !!(win && used) || _streaming || !(_conv && _conv.model);

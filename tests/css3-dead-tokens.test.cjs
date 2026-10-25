@@ -24,14 +24,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { STATIC_DIR } = require('./static-src.cjs');
 
-// frozen 2026-10-25, see the header: may only SHRINK
+// frozen 2026-10-25, see the header: may only SHRINK.
+// Three of the original six were the context ring's strokes; they were dead in
+// a way this scan could see but nobody could — see the attribute test below.
 const BASELINE = [
-    '--border-normal',
     '--fs-meta',
     '--line',
     '--rule',
-    '--text-danger',
-    '--timeline-accent',
 ];
 
 function scan() {
@@ -77,4 +76,40 @@ test('CSS-3: --ok is declared (it was borrowed by 13 rules and defined by none)'
         + '.se-tab-api.api-ok paint plain ink instead of green');
     assert.ok(!/--ok\s*:\s*var\(/.test(css),
         '--ok must not be defined in terms of another token that may itself be missing');
+});
+
+test('CSS-3: var() is never used in an SVG presentation attribute', () => {
+    // Different trap from the undeclared-token check: a presentation attribute
+    // is parsed as an SVG paint value, NOT as a CSS declaration, so var() is
+    // not substituted there even when the token IS defined — stroke="var(--x)"
+    // computes to `none` and the shape is simply invisible. That is what hid
+    // the context ring after it finally mounted (live 2026-10-25:
+    // getComputedStyle(arc).stroke === 'none'); the token scan above could see
+    // the three names were undeclared but not that the mechanism itself never
+    // worked. Paint goes in a rule or in element.style, never in the markup.
+    const offenders = [];
+    for (const f of fs.readdirSync(STATIC_DIR)) {
+        if (!/\.(js|html)$/.test(f)) continue;
+        const s = fs.readFileSync(path.join(STATIC_DIR, f), 'utf8');
+        const rx = /(?:stroke|fill|stop-color)\s*(?:=\s*["']var\(|,\s*['"]var\()/g;
+        for (const m of s.matchAll(rx)) {
+            const line = s.slice(0, m.index).split('\n').length;
+            offenders.push(`${f}:${line} ${s.slice(m.index, m.index + 40).split('\n')[0].trim()}`);
+        }
+    }
+    assert.deepEqual(offenders, [], 'var() in a presentation attribute never '
+        + `resolves: ${offenders.join(' | ')}`);
+});
+
+test('CSS-3: the context ring paints through CSS, not through its markup', () => {
+    // Guards the fix as a contract: if someone moves the stroke back into the
+    // scaffold or into setAttribute, the ring goes invisible again.
+    const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+    const js = fs.readFileSync(path.join(STATIC_DIR, 'uplift_chat.js'), 'utf8');
+    assert.ok(/\.chat-ctx \.ctx-arc\s*{\s*stroke:\s*var\(--ok\)/.test(css),
+        'the arc stroke must be a CSS rule on a declared token');
+    assert.ok(/\.chat-ctx\.ctx-hot \.ctx-arc\s*{\s*stroke:\s*var\(--bad\)/.test(css),
+        'the near-limit state must be a class rule too');
+    assert.ok(/classList\.toggle\('ctx-hot'/.test(js),
+        'ctxRender must switch that class, not set a stroke attribute');
 });
