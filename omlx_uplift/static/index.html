@@ -48,7 +48,14 @@
         <a class="icon-btn link-none" href="/admin/dashboard" title="Classic dashboard" data-i18n-title="uplift.btn.classic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-8 9 8M6 9.5V21h12V9.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></a>
     </span>
     <nav class="tabs" id="tabs">
-        <a href="#status" data-tab="status" data-i18n="uplift.tab.status">Status</a>
+        <span class="dd" id="dd-status">
+            <button class="dd-btn" data-tab="status" id="dd-status-btn"><span data-i18n="uplift.tab.status">Status</span> <span class="dd-caret" data-icon="caret">▾</span></button>
+            <span class="dd-menu" id="dd-status-menu" hidden>
+                <a href="#status" data-sub="status" data-i18n="uplift.tab.status">Status</a>
+                <a href="#status" data-sub="extended" data-i18n="uplift.tab.status_extended">Status extended</a>
+                <a href="#status" data-sub="about" data-i18n="uplift.tab.about">About</a>
+            </span>
+        </span>
         <a href="#cluster" data-tab="cluster" id="nav-cluster" hidden data-i18n="navbar.tab.cluster">Cluster</a>
         <span class="dd" id="dd-models">
             <button class="dd-btn" data-tab="models" id="dd-models-btn"><span data-i18n="uplift.tab.models">Models</span> <span class="dd-caret" data-icon="caret">▾</span></button>
@@ -290,13 +297,19 @@
             <div id="up-form" class="admin-table"><div class="empty">—</div></div>
             <h3 class="h3-spaced" data-i18n="uplift.label.tasks">Tasks</h3>
             <div id="up-tasks" class="admin-table"><div class="empty">No tasks</div></div>
-        </div></div></div></div></section><section class="card wide page-card" data-id="api-page" data-tab="status" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="status.api.section_label">API Endpoints</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="status.api.section_label">API Endpoints</span>
-            <span class="right"><label for="api-alias" data-i18n="status.api.host" hidden>Host</label> <select id="api-alias" hidden></select></span></h2>
+        </div></div></div></div></section><section class="card wide page-card" data-id="about-page" data-tab="status" data-sub="about" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.about">About</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.about">About</span> <span class="right"><label for="api-alias" data-i18n="status.api.host" hidden>Host</label> <select id="api-alias" hidden></select></span></h2>
         <div class="card-body">
+            <h3 class="h3-spaced" data-i18n="status.api.section_label">API Endpoints</h3>
             <div class="urow settings"><span class="uname"><span data-i18n="status.api.openai">OpenAI API</span></span><span class="diffslot"></span><span class="gctl"><code id="api-openai">—</code> <button type="button" class="se-btn act" id="api-copy-openai" data-i18n-title="status.api.copy_tooltip" title="Copy">⧉</button></span></div>
             <div class="urow settings"><span class="uname"><span data-i18n="status.api.claude">Claude API</span></span><span class="diffslot"></span><span class="gctl"><code id="api-claude">—</code> <button type="button" class="se-btn act" id="api-copy-claude" data-i18n-title="status.api.copy_tooltip" title="Copy">⧉</button></span></div>
             <h3 class="h3-spaced" data-i18n="status.engines.section_label">Engine Versions</h3>
             <div id="api-engines" class="admin-table"><div class="empty">—</div></div>
+            <h3 class="h3-spaced" data-i18n="uplift.about.software">Software</h3>
+            <div id="about-software" class="admin-table"><div class="empty">—</div></div>
+            <h3 class="h3-spaced" data-i18n="uplift.about.host">Host</h3>
+            <div id="about-host" class="admin-table"><div class="empty">—</div></div>
+            <h3 class="h3-spaced" data-i18n="uplift.about.credits">Built with</h3>
+            <div id="about-credits" class="admin-table"></div>
         </div></div></div></div></section>
 <section class="card wide page-card" data-id="usage-page" data-tab="usage" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.tab.usage">Usage</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.tab.usage">Usage</span>
             <span class="right"><select id="opt-usage-range" title="Range" data-i18n-title="uplift.usage.range"></select> <span id="usage-actions"></span><span id="usage-sub"></span></span></h2>
@@ -487,6 +500,7 @@
 <script src="./uplift_helper.js"></script>
 <script src="./uplift_usage.js"></script>
 <script src="./uplift_reqsearch.js"></script>
+<script src="./uplift_about.js"></script>
 <script src="./modelspec.js"></script>
 <script src="./uplift.js"></script>
 <script src="./uplift_boot.js"></script>

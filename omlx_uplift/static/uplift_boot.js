@@ -185,7 +185,9 @@ CH.loadChartHistory();
    off-Status it painted hidden canvases every minute. Re-entry catch-up
    (age > 60 s) lives in applyTab's status branch (uplift.js), which the
    historyAge() hook in uplift_charts.js gates. */
-setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.loadChartHistory(); }, 60000);
+// STATUS-SPLIT: About lives under the Status tab but shows no charts, so the
+// history refresh belongs to the two board views only.
+setInterval(() => { if (!document.hidden && currentTab() === 'status' && currentSub('status') !== 'about') CH.loadChartHistory(); }, 60000);
 // Metric cards: generate DOM from the catalogue BEFORE grid init so the
 // board places them like any static block; boot fetch + keep-alive (the
 // per-window cache TTL gates refetches: 4.5 s short (just under the 5 s
@@ -206,7 +208,7 @@ CH.probeGatedCards();
    revealed by new data appears the next time you LOOK at the board);
    the header chips slow 12 s -> 30 s (user: "even that does not need to
    update as fast as if we were in stats"). */
-setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.probeGatedCards(); }, 60000);
+setInterval(() => { if (!document.hidden && currentTab() === 'status' && currentSub('status') !== 'about') CH.probeGatedCards(); }, 60000);
 CH.refreshPowerChips();
 setInterval(() => { if (!document.hidden) CH.refreshPowerChips(); }, 30000);
 /* ---- PAT-4 patches page: extracted to uplift_patches.js (PH2-1 stage 8) and

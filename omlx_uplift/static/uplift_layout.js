@@ -122,7 +122,7 @@
     // day one: in float mode a card that grows past its h pushes whatever
     // is below it down, which looked like "snapping to weird places".
     // refitUpliftBlocks shrinks/grows them to live content afterwards.
-    const DEFAULT_BLOCKS = [
+    const EXTENDED_BLOCKS = [
         { id: 'live', x: 0, y: 0, w: 12, h: 30 },
         { id: 'chart-mem', x: 12, y: 0, w: 12, h: 34 },
         // U24: the gated macmon row. Placed as real slots so a presence
@@ -166,12 +166,30 @@
         // Events card ('feed') before it.
     ];
 
+    // STATUS-SPLIT (user 2026-10-25): the Status tab carries two independently
+    // editable boards. 'extended' is the shipped full board above; 'status' is
+    // the compact one — Activity, Memory & cache, the (gated) macmon row and the
+    // stat-tile row, i.e. rows 1-3. Deriving it by id filter instead of a second
+    // hand-written list guarantees the shared cards keep EXACTLY the same x/y/w/h
+    // in both views, so a card never changes size when the user switches views.
+    const BOARD_VIEWS = ['status', 'extended'];
+    const STATUS_BLOCK_IDS = [
+        'live', 'chart-mem',
+        'met-pwr-total-w', 'met-therm-cpu-temp-c',
+        'prefill', 'gen', 'requests', 'tokens', 'cache',
+    ];
+    const STATUS_BLOCKS = EXTENDED_BLOCKS.filter(b => STATUS_BLOCK_IDS.includes(b.id));
+
+    function defaultLayoutFor(view) {
+        const blocks = view === 'status' ? STATUS_BLOCKS : EXTENDED_BLOCKS;
+        return { version: 1, width: 'default', blocks: blocks.map(b => ({ ...b })) };
+    }
+
+    // Back-compat: the extended board is the historical single default, and
+    // callers that ask for "the" default (tray pill geometry, normalizeLayout
+    // fallback) mean the full board.
     function defaultLayout() {
-        return {
-            version: 1,
-            width: 'default',
-            blocks: DEFAULT_BLOCKS.map(b => ({ ...b })),
-        };
+        return defaultLayoutFor('extended');
     }
 
     /* One-shot saved-board migration (user 2026-10-10, items 3 + 5):
@@ -198,6 +216,54 @@
                 saved.mergedBlocks = saved.mergedBlocks.filter(id => id !== 'met-mtp-accept-pct');
         }
         return saved;
+    }
+
+    /* STATUS-SPLIT one-shot blob migration (user 2026-10-25): the layout used
+       to hold ONE board at the top level (blocks/mergedBlocks/width). That
+       board IS the extended view — it becomes boards.extended untouched, so a
+       hand-tuned board survives the upgrade exactly as it was. The compact
+       view gets the shipped compact default. boardsV1 makes it idempotent.
+       Mutates `saved`; the caller persists it. */
+    function migrateBoards(saved) {
+        if (!saved || saved.boardsV1) return saved;
+        saved.boardsV1 = 1;
+        const hadBoard = Array.isArray(saved.blocks) && saved.blocks.length > 0;
+        const legacy = {
+            version: 1,
+            width: WIDTH_IDS.includes(saved.width) ? saved.width : 'default',
+            // A board that was never saved stays null: currentBlockLayout then
+            // answers with this view's shipped default, and mergedBlocks = null
+            // keeps the auto-append path alive for cards a later release adds.
+            blocks: hadBoard ? saved.blocks : null,
+            mergedBlocks: Array.isArray(saved.mergedBlocks) ? saved.mergedBlocks.slice() : null,
+        };
+        saved.boards = {
+            extended: legacy,
+            status: { version: 1, width: legacy.width,
+                      blocks: STATUS_BLOCKS.map(b => ({ ...b })),
+                      mergedBlocks: STATUS_BLOCK_IDS.slice() },
+        };
+        delete saved.blocks; delete saved.mergedBlocks; delete saved.width;
+        // A user who had a board lands on the view that still holds it; a
+        // blank board (no saved blocks at all) starts on the compact view.
+        if (!legacy.blocks || !legacy.blocks.length) saved.lastStatusView = 'status';
+        else saved.lastStatusView = 'extended';
+        return saved;
+    }
+
+    /* The board blob for VIEW, created from its default when absent. The
+       returned object is the LIVE storage record — callers write blocks/
+       mergedBlocks/width into it and persist the whole layout. */
+    function boardBlob(saved, view) {
+        if (!saved || !saved.boards) return null;
+        const v = BOARD_VIEWS.includes(view) ? view : 'extended';
+        if (!saved.boards[v] || typeof saved.boards[v] !== 'object')
+            saved.boards[v] = defaultLayoutFor(v);
+        const b = saved.boards[v];
+        if (!Array.isArray(b.blocks)) b.blocks = null;
+        if (!Array.isArray(b.mergedBlocks)) b.mergedBlocks = null;
+        if (!WIDTH_IDS.includes(b.width)) b.width = defaultLayoutFor(v).width;
+        return b;
     }
 
     function toInt(value, fallback) {
@@ -357,6 +423,9 @@
         BLOCK_IDS,
         TRAY_ONLY_IDS,
         GATED_IDS,
+        BOARD_VIEWS,
+        STATUS_BLOCK_IDS,
+        STATUS_BLOCKS,
         COLUMNS,
         MIN_W,
         MIN_W_SMALL,
@@ -365,6 +434,9 @@
         WIDTH_CLASSES,
         WIDTH_IDS,
         defaultLayout,
+        defaultLayoutFor,
+        migrateBoards,
+        boardBlob,
         migrateSavedLayout,
         normalizeLayout,
         resolveOverlaps,

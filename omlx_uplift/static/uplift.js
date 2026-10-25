@@ -349,6 +349,11 @@ D.setUnauthorizedHandler(() => {
 /* ---------------- tabs (hash routing, like the classic dashboard) --------- */
 const TABS = ['status', 'cluster', 'models', 'usage', 'logs', 'bench', 'chat', 'settings'];
 const SUBS = {
+    // STATUS-SPLIT (user 2026-10-25): Status owns three views. The two board
+    // views ('status' = compact, 'extended' = the full board) share one set of
+    // cards and differ only in which board geometry is applied; 'about' is a
+    // page card, not a board.
+    status: ['status', 'extended', 'about'],
     models: ['manager', 'helper', 'voices', 'downloader', 'uploader', 'quantizer'],
     bench: ['throughput', 'accuracy', 'context'],
     settings: ['global', 'patches'],
@@ -367,10 +372,34 @@ function currentTab() {
     const t = (location.hash || '').replace('#', '').split('/')[0];
     return TABS.includes(t) ? t : 'status';
 }
+const UPL_BOARD_VIEWS = (window.UpliftLayout && window.UpliftLayout.BOARD_VIEWS) || ['status', 'extended'];
 function currentSub(tab) {
     const parts = (location.hash || '').replace('#', '').split('/');
     const list = SUBS[tab] || [];
+    // STATUS-SPLIT: a bare #status (bookmark, keyboard shortcut, first visit)
+    // lands on the LAST BOARD VIEW the user showed (user decision 2026-10-25).
+    // An explicit leg always wins, and About is never remembered as a landing
+    // target — it is a destination, not a home.
+    if (tab === 'status' && !list.includes(parts[1])) {
+        const rem = layout.lastStatusView;
+        return UPL_BOARD_VIEWS.includes(rem) ? rem : 'status';
+    }
     return list.includes(parts[1]) ? parts[1] : list[0];
+}
+/* The board geometry to apply for the current Status sub: 'about' keeps the
+   board the user came from, so leaving to About and back restores it. */
+function statusBoardView(sub) {
+    const s = sub === undefined ? currentSub('status') : sub;
+    if (UPL_BOARD_VIEWS.includes(s)) return s;
+    const rem = layout.lastStatusView;
+    return UPL_BOARD_VIEWS.includes(rem) ? rem : 'extended';
+}
+function rememberStatusView(sub) {
+    if (!UPL_BOARD_VIEWS.includes(sub)) return false;
+    if (layout.lastStatusView === sub) return false;
+    layout.lastStatusView = sub;
+    C.saveLayout(localStorage, layout);
+    return true;
 }
 function applyTab() {
     // classic parity: Cluster exists only while distributed inference is
@@ -382,6 +411,12 @@ function applyTab() {
         tab = 'status';
     }
     const sub = currentSub(tab);
+    // STATUS-SPLIT: a bare #status resolves to the remembered view above; make
+    // the URL say so (replaceState — location.hash would re-fire hashchange and
+    // run applyTab twice, the documented trap). The menu can then highlight the
+    // live row and a copied link lands the same view anywhere.
+    if (tab === 'status' && (location.hash || '').replace('#', '').split('/').length < 2)
+        history.replaceState(null, '', location.pathname + location.search + '#status/' + sub);
     document.documentElement.dataset.tab = tab;
     document.documentElement.dataset.sub = sub;
     for (const a of $('tabs').querySelectorAll('[data-tab]')) {
@@ -389,7 +424,8 @@ function applyTab() {
         a.classList.toggle('active', hit);
     }
     // dropdown button labels get rebuilt (the toggle above may wipe them)
-    for (const dd of [['dd-models-btn', 'uplift.tab.models', 'Models'],
+    for (const dd of [['dd-status-btn', 'uplift.tab.status', 'Status'],
+                      ['dd-models-btn', 'uplift.tab.models', 'Models'],
                       ['dd-bench-btn', 'navbar.tab.bench', 'Bench'],
                       ['dd-settings-btn', 'uplift.tab.settings', 'Server Settings']]) {
         const btn = $(dd[0]);
@@ -419,9 +455,20 @@ function applyTab() {
         card.style.display = visible ? '' : 'none';
     }
     // Status = the GridStack board; page cards live in #pages (outside it).
-    $('grid').style.display = tab === 'status' ? '' : 'none';
-    $('btn-customize').hidden = tab !== 'status' || dashEditing;
-    if (tab !== 'status' && dashEditing) cancelDashEdit();
+    // STATUS-SPLIT: About is a page card under the same tab, so the board (and
+    // its Customize affordance) belongs to the two board views only.
+    const onBoard = tab === 'status' && sub !== 'about';
+    $('grid').style.display = onBoard ? '' : 'none';
+    $('btn-customize').hidden = !onBoard || dashEditing;
+    if (!onBoard && dashEditing) cancelDashEdit();
+    if (onBoard) {
+        rememberStatusView(sub);
+        applyStatusBoard(sub);
+    }
+    if (tab === 'status' && sub === 'about') {
+        const AB = window.Uplift.about;      // uplift_about.js (self-contained)
+        if (AB) AB.render();
+    }
     // navigation (deep link, keyboard, submenu item) closes any open menu
     for (const [, m] of DD_PAIRS) $(m).hidden = true;
     requestAnimationFrame(CH.resizeCharts);   // charts may have become visible
@@ -435,7 +482,7 @@ function applyTab() {
         pollStats();
         scheduleStats();
     }
-    if (tab === 'status') {
+    if (onBoard) {
         requestAnimationFrame(ensureUpliftGrid);
         // STATS-SSE: the 60 s chart-history interval now runs on Status
         // only — on re-entry, refresh history once it is older than that.
@@ -747,8 +794,10 @@ document.addEventListener('click', e => {
     const hash = '#' + tab + '/' + sub;
     if (location.hash === hash) applyTab(); else location.hash = hash;
 });
-const DD_PAIRS = [['dd-models-btn', 'dd-models-menu'], ['dd-bench-btn', 'dd-bench-menu'],
+const DD_PAIRS = [['dd-status-btn', 'dd-status-menu'],
+                  ['dd-models-btn', 'dd-models-menu'], ['dd-bench-btn', 'dd-bench-menu'],
                   ['dd-chat-btn', 'dd-chat-menu'], ['dd-settings-btn', 'dd-settings-menu']];
+bindDropdown('dd-status-btn', 'dd-status-menu');
 bindDropdown('dd-models-btn', 'dd-models-menu');
 bindDropdown('dd-bench-btn', 'dd-bench-menu');
 // NAT-6 (user's model, verbatim): "clicking on 'Chat' menu would open the
@@ -1157,18 +1206,22 @@ const cards = [...document.querySelectorAll('#grid .card')];
 const pageCards = [...document.querySelectorAll('#pages .card')];
 const UPL = window.UpliftLayout;
 
-// Effective block layout (normalised): stored blocks or shipped default.
+// Effective block layout (normalised) for ONE board view: stored blocks or
+// that view's shipped default.
 // Blocks introduced by a later release are appended once at the bottom of
 // an existing saved layout (ids already merged are remembered, so a block
 // the user then removes stays removed).
-function currentBlockLayout(saved) {
+function currentBlockLayout(saved, view) {
     UPL.migrateSavedLayout(saved);   // items 3+5 one-shot swap (reqfeed→popup, cache→MTP)
-    if (saved && Array.isArray(saved.blocks)) {
-        const blocks = saved.blocks.slice();
-        const merged = Array.isArray(saved.mergedBlocks) ? saved.mergedBlocks : [];
+    UPL.migrateBoards(saved);        // STATUS-SPLIT: single board -> boards{status,extended}
+    const board = UPL.boardBlob(saved, view);
+    const viewDefault = UPL.defaultLayoutFor(UPL.BOARD_VIEWS.includes(view) ? view : 'extended');
+    if (board && Array.isArray(board.blocks)) {
+        const blocks = board.blocks.slice();
+        const merged = Array.isArray(board.mergedBlocks) ? board.mergedBlocks : [];
         const have = new Set([...blocks.map(b => b && b.id), ...merged]);
         const present = new Set(blocks.map(b => b && b.id));
-        for (const def of UPL.defaultLayout().blocks) {
+        for (const def of viewDefault.blocks) {
             if (have.has(def.id)) { merged.includes(def.id) || merged.push(def.id); continue; }
             merged.push(def.id);
             // Do NOT auto-append at (def.x, 0): every appended block shared
@@ -1176,22 +1229,49 @@ function currentBlockLayout(saved) {
             // ORIGIN and GridStack resolved it by shoving whatever was
             // already there (user 2026-09-29: "the graphs disappear after
             // reload"). TRAY_ONLY cards start parked — the user drops them
-            // where they want (U19 rule: adding a card never moves
-            // existing ones). A genuinely new non-tray block keeps the old
+            // where they want (U19 rule: adding one never rewrites saved
+            // geometry). A genuinely new non-tray block keeps the old
             // append below the board bottom.
             if (UPL.TRAY_ONLY_IDS.includes(def.id)) continue;
             const bottom = blocks.reduce((m, b) => Math.max(m, (b.y || 0) + (b.h || 0)), 0);
             blocks.push({ ...def, y: bottom + 1 });
         }
-        saved.mergedBlocks = merged;
-        if (!present.size) return UPL.normalizeLayout({ width: saved.width, blocks: saved.blocks });
-        return UPL.normalizeLayout({ width: saved.width, blocks });
+        board.mergedBlocks = merged;
+        if (!present.size) return UPL.normalizeLayout({ width: board.width, blocks: board.blocks });
+        return UPL.normalizeLayout({ width: board.width, blocks });
     }
-    return UPL.normalizeLayout(saved && saved.blocks
-        ? { width: saved.width, blocks: saved.blocks } : null);
+    return UPL.normalizeLayout(board && Array.isArray(board.blocks)
+        ? { width: board.width, blocks: board.blocks } : null);
 }
-let upLayout = currentBlockLayout(layout);
+let appliedBoardView = statusBoardView(currentSub('status'));
+let upLayout = currentBlockLayout(layout, appliedBoardView);
 window.__upLayout = () => upLayout;   // debug handle (same pattern as __upliftGrid)
+/* STATUS-SPLIT: the active board's geometry lives in layout.boards[view], so a
+   save on one view can never rewrite the other. boardBlob returns the live
+   record, which is why currentBlockLayout's mergedBlocks memo already persists
+   through it. */
+function persistBoardLayout(next) {
+    // The view must be known: boardBlob falls back to 'extended', and writing
+    // compact-board edits into the other board is the one failure this must
+    // never allow, so resolve it explicitly instead.
+    const board = UPL.boardBlob(layout, appliedBoardView || statusBoardView());
+    if (!board) { layout.blocks = next.blocks; layout.width = next.width; return; }
+    board.blocks = next.blocks; board.width = next.width;
+}
+/* Swap the board geometry for a Status view. Cards are a single set in the
+   DOM: applyUpliftLayout parks every one of them and places only this view's
+   blocks, and renderTray derives its pill list from what got placed — so the
+   compact view's tray offers the chart cards for free. uPlot instances ride
+   along on the parked element (removeWidget keeps the DOM node), which is the
+   same mechanism that already survives a trip to another tab. */
+function applyStatusBoard(view) {
+    if (!UPL || !UPL.BOARD_VIEWS.includes(view) || appliedBoardView === view) return;
+    // An unsaved edit draft never travels to the other board.
+    if (dashEditing && dashGrid) cancelDashEdit();
+    appliedBoardView = view;
+    upLayout = currentBlockLayout(layout, view);
+    if (dashGrid) applyUpliftLayout(upLayout);
+}
 C.saveLayout(localStorage, layout);   // persist mergedBlocks so merge is one-shot
 applyWidthEarly();   // page width must be right before first paint/tab switch
 function applyWidthEarly() {
@@ -1847,7 +1927,9 @@ function cancelDashEdit() {
 function resetDashLayout() {
     if (!dashEditing || !UPL) return;
     dashDraft.width = 'default';
-    applyUpliftLayout(UPL.defaultLayout());
+    // STATUS-SPLIT: Reset restores the board of the VIEW the user is editing,
+    // never the other one.
+    applyUpliftLayout(UPL.defaultLayoutFor(appliedBoardView));
     renderWidthSeg();
     _afterLayoutChange();
 }
@@ -1857,8 +1939,7 @@ function saveDashLayout() {
     dashSaving = true;
     $('lt-error').hidden = true;
     try {
-        layout.blocks = next.blocks;
-        layout.width = next.width;
+        persistBoardLayout(next);
         C.saveLayout(localStorage, layout);
         upLayout = next;
         dashEditing = false; dashDraft = null;
@@ -1935,9 +2016,18 @@ $('opt-retention-metrics').onchange = () => saveRetention('m');
 $('opt-retention-log').onchange = () => saveRetention('l');
 loadRetention();
 $('btn-layout-reset').onclick = () => {
+    // STATUS-SPLIT: this button is global (window, interval, smoothing AND the
+    // board), and there are now two boards. A reset that silently cleared the
+    // view the user is NOT looking at would eat work, so it says what goes.
+    const ask = C.tf('uplift.layout.reset_both_confirm',
+        'Reset layout: both Status and Status extended boards go back to their shipped arrangement, together with the chart window and poll interval. Continue?');
+    if (window.confirm && !window.confirm(ask)) return;
     Object.assign(layout, C.LAYOUT_DEFAULTS);
-    upLayout = UPL.defaultLayout();
-    layout.blocks = upLayout.blocks; layout.width = upLayout.width;
+    delete layout.boards; delete layout.boardsV1;
+    appliedBoardView = statusBoardView(currentSub('status'));
+    upLayout = currentBlockLayout(layout, appliedBoardView);
+    persistBoardLayout(upLayout);
+    layout.lastStatusView = appliedBoardView;
     C.saveLayout(localStorage, layout);
     if (dashGrid) applyUpliftLayout(upLayout);
     renderTray();

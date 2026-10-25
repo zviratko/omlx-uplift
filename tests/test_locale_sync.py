@@ -28,7 +28,11 @@ OWNED_PREFIXES = ("uplift.req.", "uplift.layout.retention_", "uplift.env.",
                   # NAT-3: native surface skeleton keys (bench stubs + chat)
                   "uplift.chat.",
                   # NAT-6: native/classic surface switch nav labels
-                  "uplift.nav.")
+                  "uplift.nav.",
+                  # STATUS-SPLIT (2026-10-25): the three-view nav labels and
+                  # the About page. Both batches shipped in all 10 overlays,
+                  # so they are cross-locale enforced from now on.
+                  "uplift.tab.", "uplift.about.", "uplift.layout.")
 
 
 def _locale(lang):

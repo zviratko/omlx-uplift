@@ -352,6 +352,14 @@ function loadLayout(storage) {
         // uplift_layout.js normalizeLayout; here just shape-guard.
         ...(typeof l.width === 'string' ? { width: l.width } : {}),
         ...(Array.isArray(l.blocks) ? { blocks: l.blocks } : {}),
+        // STATUS-SPLIT: the per-view boards map ({ status, extended }, plus the
+        // one-shot boardsV1 flag and the remembered bare-#status view). These
+        // MUST pass through the whitelist — a dropped key here silently deletes
+        // the user's boards on the next save, because saveLayout writes only
+        // what loadLayout returned.
+        ...(l.boards && typeof l.boards === 'object' ? { boards: l.boards } : {}),
+        ...(l.boardsV1 ? { boardsV1: l.boardsV1 } : {}),
+        ...(typeof l.lastStatusView === 'string' ? { lastStatusView: l.lastStatusView } : {}),
         // One-shot merge memo (uplift.js currentBlockLayout). Without this
         // pass-through every boot re-appends default blocks the user has
         // removed (F-032: removed cards resurrect on reload).

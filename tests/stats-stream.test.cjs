@@ -420,8 +420,12 @@ test('applyTab: tab-change retunes the stats chain; Status entry refreshes stale
         'any tab change: clear + immediate catch-up poll + reschedule');
     assert.ok(body.indexOf('appliedTab') < body.indexOf("if (tab === 'usage')"),
         'the retune sits at the tab-switch core, next to resizeCharts');
-    assert.match(body, /if \(tab === 'status'\) \{[\s\S]*?CH\.historyAge\(\) > 60_000\) CH\.loadChartHistory\(\);/,
-        'Status entry refreshes chart history when older than 60 s');
+    // STATUS-SPLIT (2026-10-25): 'status' became three views, so the chart
+    // chain is bound to onBoard — the two BOARD views. The guard's intent is
+    // unchanged: chart history is never refreshed while a page without charts
+    // (any other tab, or the About view) is showing.
+    assert.match(body, /const onBoard = tab === 'status' && sub !== 'about';[\s\S]*?if \(onBoard\) \{[\s\S]*?CH\.historyAge\(\) > 60_000\) CH\.loadChartHistory\(\);/,
+        'Status board entry refreshes chart history when older than 60 s');
 });
 
 test('(d) boot: NO model-table poll at all; history/gated probes are Status-only', () => {
