@@ -424,8 +424,8 @@ test('applyTab: tab-change retunes the stats chain; Status entry refreshes stale
     // chain is bound to onBoard — the two BOARD views. The guard's intent is
     // unchanged: chart history is never refreshed while a page without charts
     // (any other tab, or the About view) is showing.
-    assert.match(body, /const onBoard = tab === 'status' && sub !== 'about';[\s\S]*?if \(onBoard\) \{[\s\S]*?CH\.historyAge\(\) > 60_000\) CH\.loadChartHistory\(\);/,
-        'Status board entry refreshes chart history when older than 60 s');
+    assert.match(body, /const onBoard = boardVisible\(\);[\s\S]*?if \(onBoard\) \{[\s\S]*?CH\.historyAge\(\) > 60_000\) CH\.loadChartHistory\(\);/,
+        'Status BOARD entry (not the About view, which shares the tab) refreshes chart history when older than 60 s');
 });
 
 test('(d) boot: NO model-table poll at all; history/gated probes are Status-only', () => {
@@ -439,11 +439,11 @@ test('(d) boot: NO model-table poll at all; history/gated probes are Status-only
         'the removal carries its reason in-place');
     const hist = /setInterval\(\(\) => \{[^\n]*CH\.loadChartHistory\(\); \}, 60000\);/.exec(bootSrc);
     assert.ok(hist, 'the 60 s history interval still exists');
-    assert.ok(hist[0].includes("currentTab() === 'status'"),
-        'gated to Status — the only consumer is the Status chart pair');
+    assert.ok(hist[0].includes('boardVisible()'),
+        'gated to the Status BOARD — the only consumer is the Status chart pair');
     const gate = /setInterval\(\(\) => \{[^\n]*CH\.probeGatedCards\(\); \}, 60000\);/.exec(bootSrc);
-    assert.ok(gate && gate[0].includes("currentTab() === 'status'"),
-        'the macmon probe is Status-only too');
+    assert.ok(gate && gate[0].includes('boardVisible()'),
+        'the macmon probe is board-only too (it must not reveal cards onto a hidden board)');
     const pwr = /setInterval\(\(\) => \{ if \(!document\.hidden\) CH\.refreshPowerChips\(\); \}, 30000\);/.test(bootSrc);
     assert.ok(pwr, 'header chips survive but at 30 s, not 12 s');
 });

@@ -25,7 +25,7 @@ const LF = window.Uplift.livefeed;   // FAST-1 live display feed
 const layout = window.Uplift.state.layout;
 const { fetchJson, applyPrefs, loadLocale, applyTab, restartPolling,
         pollStats, pollGatewayInfo, renderTasks, loadSkins, renderSkinsMenu,
-        currentTab, currentSub } = window.Uplift._bootGlue;
+        currentTab, currentSub, boardVisible } = window.Uplift._bootGlue;
 fetchJson(`${API}/admin/api/device-info`).then(d => {
     // RAM is sold decimal but reported by the OS in binary; Apple's own
     // instruments say GiB (32 GB modules = 32 GiB on Apple Silicon).
@@ -187,7 +187,7 @@ CH.loadChartHistory();
    historyAge() hook in uplift_charts.js gates. */
 // STATUS-SPLIT: About lives under the Status tab but shows no charts, so the
 // history refresh belongs to the two board views only.
-setInterval(() => { if (!document.hidden && currentTab() === 'status' && currentSub('status') !== 'about') CH.loadChartHistory(); }, 60000);
+setInterval(() => { if (!document.hidden && boardVisible()) CH.loadChartHistory(); }, 60000);
 // Metric cards: generate DOM from the catalogue BEFORE grid init so the
 // board places them like any static block; boot fetch + keep-alive (the
 // per-window cache TTL gates refetches: 4.5 s short (just under the 5 s
@@ -208,7 +208,7 @@ CH.probeGatedCards();
    revealed by new data appears the next time you LOOK at the board);
    the header chips slow 12 s -> 30 s (user: "even that does not need to
    update as fast as if we were in stats"). */
-setInterval(() => { if (!document.hidden && currentTab() === 'status' && currentSub('status') !== 'about') CH.probeGatedCards(); }, 60000);
+setInterval(() => { if (!document.hidden && boardVisible()) CH.probeGatedCards(); }, 60000);
 CH.refreshPowerChips();
 setInterval(() => { if (!document.hidden) CH.refreshPowerChips(); }, 30000);
 /* ---- PAT-4 patches page: extracted to uplift_patches.js (PH2-1 stage 8) and

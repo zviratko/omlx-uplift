@@ -17,6 +17,7 @@ const C = require('../omlx_uplift/static/core.js');
 
 const read = f => fs.readFileSync(path.join(STATIC_DIR, f), 'utf8');
 const html = read('index.html');
+const bootSrc = read('uplift_boot.js');
 const upSrc = read('uplift.js');
 
 const COMPACT_SET = ['live', 'chart-mem', 'met-pwr-total-w', 'met-therm-cpu-temp-c',
@@ -144,7 +145,9 @@ test('nav: Status is a dropdown with three rows and About is a page card', () =>
 test('applyTab keeps the board and Customize off About, and remembers the view', () => {
     const body = upSrc.slice(upSrc.indexOf('function applyTab()'),
                              upSrc.indexOf("addEventListener('hashchange', applyTab)"));
-    assert.match(body, /const onBoard = tab === 'status' && sub !== 'about';/);
+    assert.match(upSrc, /function boardVisible\(\) \{\s*return currentTab\(\) === 'status' && currentSub\('status'\) !== 'about';/,
+        'ONE definition of the board-visible predicate');
+    assert.match(body, /const onBoard = boardVisible\(\);/);
     assert.match(body, /\$\('grid'\)\.style\.display = onBoard \? '' : 'none';/);
     assert.match(body, /\$\('btn-customize'\)\.hidden = !onBoard \|\| dashEditing;/);
     assert.match(body, /if \(!onBoard && dashEditing\) cancelDashEdit\(\);/,
@@ -185,4 +188,26 @@ test('boot order: the blob migrates BEFORE the first view is resolved', () => {
     assert.ok(mig < init, 'migrateBoards must run before the initial view is resolved');
     assert.ok(upSrc.indexOf('UPL.migrateSavedLayout(layout)') < mig,
         'the pre-boards swap runs first: it edits the top-level blocks migrateBoards carries over');
+});
+
+test('the row-height engine never measures a hidden board', () => {
+    // LIVE DEFECT 2026-10-25: About keeps tab === 'status' while #grid is
+    // display:none. The refit pass then reads zero rects, floors every band
+    // and writes the collapsed heights into upLayout (measured h39 -> h4), so
+    // cards jump back when the user returns. All three layout passes plus the
+    // two boot intervals must ask boardVisible(), not the tab.
+    for (const [fn, re_] of [
+        ['refitUpliftBlocks', /function refitUpliftBlocks\(\) \{\s*if \(!dashGrid \|\| !boardVisible\(\) \|\| dashApplying\) return;/],
+        ['_rowAlign', /function _rowAlign\(\) \{\s*if \(!dashGrid \|\| dashApplying \|\| dashEditing \|\| !boardVisible\(\)\) return;/],
+        ['ensureUpliftGrid', /function ensureUpliftGrid\(\) \{[\s\S]{0,120}!boardVisible\(\)/],
+    ])
+        assert.match(upSrc, re_, fn + ' still runs while the board is hidden');
+    assert.match(bootSrc, /boardVisible\(\)\) CH\.loadChartHistory\(\);/,
+        'the 60 s chart-history interval is board-only');
+    assert.match(bootSrc, /boardVisible\(\)\) CH\.probeGatedCards\(\);/,
+        'the macmon probe must not reveal cards onto a hidden board');
+    assert.ok(!/currentTab\(\) === 'status'\) CH\.(loadChartHistory|probeGatedCards)/.test(bootSrc),
+        'no tab-only gate may come back for these two');
+    assert.match(upSrc, /currentTab, currentSub, boardVisible, loadSkins/,
+        'boot reaches the predicate through _bootGlue');
 });

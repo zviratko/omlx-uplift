@@ -406,6 +406,15 @@ function rememberStatusView(sub) {
     C.saveLayout(localStorage, layout);
     return true;
 }
+/* True ONLY while a Status BOARD view is actually on screen. About lives under
+   the same tab with #grid display:none, so every layout/refit pass must ask
+   this and never `currentTab() === 'status'`: measuring a hidden board reads
+   zero rects, _neededUnits floors every band and _rowAlign WRITES the
+   collapsed heights into upLayout (live defect 2026-10-25: h39 -> h31 -> h4
+   while About was showing, cards then jumping back on return). */
+function boardVisible() {
+    return currentTab() === 'status' && currentSub('status') !== 'about';
+}
 function applyTab() {
     // classic parity: Cluster exists only while distributed inference is
     // active; deep-links/shortcuts to a dormant Cluster fall back to
@@ -462,7 +471,7 @@ function applyTab() {
     // Status = the GridStack board; page cards live in #pages (outside it).
     // STATUS-SPLIT: About is a page card under the same tab, so the board (and
     // its Customize affordance) belongs to the two board views only.
-    const onBoard = tab === 'status' && sub !== 'about';
+    const onBoard = boardVisible();   // 'about' shares the tab; the board is hidden there
     $('grid').style.display = onBoard ? '' : 'none';
     $('btn-customize').hidden = !onBoard || dashEditing;
     if (!onBoard && dashEditing) cancelDashEdit();
@@ -1303,7 +1312,7 @@ function _blockEl(id) {
 /* Creates the grid the first time the status tab is visible; GridStack
    needs a measurable width. Later calls only refit block heights. */
 function ensureUpliftGrid() {
-    if (!UPL || typeof GridStack === 'undefined' || currentTab() !== 'status') return;
+    if (!UPL || typeof GridStack === 'undefined' || !boardVisible()) return;
     if (dashGrid) { refitUpliftBlocks(); return; }
     const el = $grid();
     if (!el || !el.offsetWidth) return;
@@ -1459,7 +1468,7 @@ function _neededUnits(el) {
     return Math.min(60, Math.max(4, Math.ceil(px / 8)));
 }
 function _rowAlign() {
-    if (!dashGrid || dashApplying || dashEditing || currentTab() !== 'status') return;
+    if (!dashGrid || dashApplying || dashEditing || !boardVisible()) return;
     // BANDS = connected components of (|Δy| ≤ ROW_TOLERANCE AND horizontal
     // overlap), not exact-y groups. Exact-y grouping broke with 2D packing:
     // two INDEPENDENT columns (stat tiles left, chart-mem right) land on
@@ -1571,7 +1580,7 @@ function _rowAlign() {
 /* Card content grows after first paint (charts render, feeds fill).
    Debounced so a burst of polling updates triggers one align pass. */
 function refitUpliftBlocks() {
-    if (!dashGrid || currentTab() !== 'status' || dashApplying) return;
+    if (!dashGrid || !boardVisible() || dashApplying) return;
     if (!dashRefitFrame) {
         dashRefitFrame = requestAnimationFrame(() => { dashRefitFrame = 0; _rowAlign(); });
     }
@@ -3103,7 +3112,7 @@ async function pollGatewayInfo() {
    hoisted internals + the tab readers. Function declarations — stable. */
 window.Uplift._bootGlue = {
     fetchJson, applyPrefs, loadLocale, applyTab, restartPolling,
-    pollStats, pollGatewayInfo, currentTab, currentSub, loadSkins,
+    pollStats, pollGatewayInfo, currentTab, currentSub, boardVisible, loadSkins,
     renderSkinsMenu,
     renderTasks: function () {
         return window.Uplift.downloader
