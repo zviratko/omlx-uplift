@@ -430,7 +430,7 @@
  "uplift.nav.native_hint": "このタブをネイティブサーフェスに戻す",
  "uplift.opt.percentile": "パーセンタイル",
  "uplift.opt.smoothing": "平滑化",
- "uplift.page.downloader_full": "Hugging Face ダウンローダー",
+ "uplift.page.downloader_full": "モデルダウンローダー",
  "uplift.page.global_templates": "グローバルテンプレート",
  "uplift.page.helper_models_full": "ヘルパーモデル",
  "uplift.page.quantizer_full": "oQ 量子化",
@@ -1241,5 +1241,12 @@
  "uplift.se.typenote.template": "グローバルテンプレートはすべての設定を持てます。各モデルは型に合うキーのみ適用します。",
  "uplift.status.no_engines": "エンジンが読み込まれていません",
  "uplift.ui.delete_global_template": "このグローバルテンプレートを削除（保存設定のまとまり）",
- "uplift.ui.edit_global_template": "このテンプレートを編集"
+ "uplift.ui.edit_global_template": "このテンプレートを編集",
+ "uplift.dl.results_for": "「{q}」に一致する結果 {n} 件",
+ "uplift.dl.results_suggested": "{provider} おすすめの結果 {n} 件",
+ "uplift.dl.token_rejected": "HF トークンが拒否されました — 匿名で一覧表示",
+ "uplift.dl.no_results": "結果がありません — 他の検索語をお試しください。",
+ "uplift.dl.hf_unavailable": "Hugging Face のおすすめモデルは利用できません。",
+ "uplift.dl.suggestions_failed": "提案の取得に失敗: {err}",
+ "uplift.dl.search_failed": "検索に失敗: {err}"
 }

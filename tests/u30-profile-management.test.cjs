@@ -231,6 +231,8 @@ test('template-row machine (uplift_mmtemplates._u30): same shape — ask/no/FIRE
     const win = { Uplift: { state: { API: '' } }, UpliftCore: { tf: (k, en) => en },
         UpliftDom: { $: () => dom.el('div'), fetchJson: async () => ({}),
             deleteJson: async () => ({}), toast() {}, cell: () => dom.el('span'),
+            // kit seam added by UP-49 (mirrors domkit.errText)
+            errText(e) { if (e == null) return ''; if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e; if (e.userMessage) return e.userMessage; const m = e.message || String(e); return m.includes(' -> ') ? m.split(' -> ')[1] : m; },
             emptyMsg() {} } };
     vm.runInNewContext(TPL_SRC, { window: win, document: dom.document, console,
         setTimeout: f => setTimeout(f, 0), clearTimeout });

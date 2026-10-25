@@ -126,6 +126,15 @@ function load(opts) {
         postJson: async (url, body) => { posts.push([String(url), body]); return {}; },
         deleteJson: async url => { dels.push(String(url)); return {}; },
         toast: m => toasts.push(m),
+        // mirrors domkit.errText — the kit seam gained it in UP-49 so banners
+        // show 'reason (status)' instead of our internal '<url> -> <status>'
+        errText(e) {
+            if (e == null) return '';
+            if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e;
+            if (e.userMessage) return e.userMessage;
+            const m = e.message || String(e);
+            return m.includes(' -> ') ? m.split(' -> ')[1] : m;
+        },
         emptyMsg(host, msg) {
             host.children.length = 0;
             const d = doc.createElement('div'); d.className = 'empty';

@@ -430,7 +430,7 @@
  "uplift.nav.native_hint": "Přepnout tuto kartu zpět na nativní povrch",
  "uplift.opt.percentile": "Percentil",
  "uplift.opt.smoothing": "Vyhlazení",
- "uplift.page.downloader_full": "Stahování z Hugging Face",
+ "uplift.page.downloader_full": "Stahovač modelů",
  "uplift.page.global_templates": "Globální šablony",
  "uplift.page.helper_models_full": "Pomocné modely",
  "uplift.page.quantizer_full": "Kvantizace oQ",
@@ -1238,5 +1238,12 @@
  "uplift.se.typenote.template": "Globální šablony mohou nést veškerá nastavení; každý model uplatní jen klíče, které odpovídají jeho typu.",
  "uplift.status.no_engines": "Žádné načtené enginy",
  "uplift.ui.delete_global_template": "Smazat tuto globální šablonu (sada uložených nastavení)",
- "uplift.ui.edit_global_template": "Upravit tuto šablonu"
+ "uplift.ui.edit_global_template": "Upravit tuto šablonu",
+ "uplift.dl.results_for": "{n} výsledků pro „{q}“",
+ "uplift.dl.results_suggested": "{n} výsledků navržených službou {provider}",
+ "uplift.dl.token_rejected": "HF token zamítnut — seznam bez přihlášení",
+ "uplift.dl.no_results": "Žádné výsledky — zkuste jiný dotaz.",
+ "uplift.dl.hf_unavailable": "Navržené modely Hugging Face nejsou dostupné.",
+ "uplift.dl.suggestions_failed": "Návrhy se nezdařily: {err}",
+ "uplift.dl.search_failed": "Hledání se nezdařilo: {err}"
 }

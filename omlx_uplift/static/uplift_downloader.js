@@ -82,7 +82,7 @@ function renderTasks(hostId, kind) {
             if (['downloading', 'quantizing', 'uploading', 'queued', 'pending'].includes(t.status)) {
                 active = true;
                 mkAct('CANCEL', 'Stop this task', () => DG.postJson(`${API}/admin/api/${kind}/cancel/${tid}`, {})
-                    .then(() => renderTasks(hostId, kind)).catch(e => DG.toast(C.tf('uplift.dl.cancel_fail', 'cancel: ') + e.message)));
+                    .then(() => renderTasks(hostId, kind)).catch(e => DG.toast(C.tf('uplift.dl.cancel_fail', 'cancel: ') + D.errText(e))));
                 r.classList.add('with-acts'); r.append(acts);
             } else {
                 const failed = ['failed', 'cancelled', 'canceled', 'error'].includes((t.status || '').toLowerCase());
@@ -96,7 +96,7 @@ function renderTasks(hostId, kind) {
                             'Remove this finished task from the list (files are kept)'),
                         () => DG.deleteJson(`${API}/admin/api/${kind}/task/${tid}`)
                             .then(() => renderTasks(hostId, kind))
-                            .catch(e => DG.toast(C.tf('uplift.dl.remove_fail', 'remove: ') + e.message)));
+                            .catch(e => DG.toast(C.tf('uplift.dl.remove_fail', 'remove: ') + D.errText(e))));
                 }
                 if ((kind === 'hf' || kind === 'ms') && failed) {
                     // U11 parity: classic offers retry (resumes partial
@@ -109,7 +109,7 @@ function renderTasks(hostId, kind) {
                             ? { ms_token: dlMsToken() || null }
                             : { hf_token: ($('dl-token') ? $('dl-token').value.trim() : '') };
                         return DG.postJson(`${API}/admin/api/${kind}/retry/${tid}`, body)
-                            .then(() => renderTasks(hostId, kind)).catch(e => DG.toast(C.tf('uplift.dl.retry_fail', 'retry: ') + e.message));
+                            .then(() => renderTasks(hostId, kind)).catch(e => DG.toast(C.tf('uplift.dl.retry_fail', 'retry: ') + D.errText(e)));
                     });
                 }
                 if (acts.childNodes.length) { r.classList.add('with-acts'); r.append(acts); }
@@ -123,7 +123,7 @@ function renderTasks(hostId, kind) {
                     renderTasks(hostId, kind);
             }, 2000);
         }
-    }).catch(e => DG.emptyMsg($(hostId), e.message));
+    }).catch(e => DG.emptyMsg($(hostId), D.errText(e)));
 }
 
 let dlInit = false;
@@ -397,7 +397,7 @@ function openModelFiles(repoId) {
         })
         .catch(e => {
             body.textContent = C.tf('uplift.dl.download_fail', 'download: ')
-                + (e && e.message ? e.message : e);
+                + D.errText(e);
         });
     dlGlobalSettings().then(gs => {
         if (!DL.gs && gs && Object.keys(gs).length) { DL.gs = gs; if (detail) refresh(); }
@@ -591,7 +591,7 @@ function openModelFiles(repoId) {
             .catch(e => {
                 sending = false; refresh();
                 DG.toast(C.tf('uplift.dl.download_fail', 'download: ')
-                    + (e && e.message ? e.message : e));
+                    + D.errText(e));
             });
     }
 }
@@ -697,7 +697,7 @@ function msDownload(repoId) {
         .catch(e => {
             MS.downloading = false;
             DG.toast(C.tf('js.error.start_download_failed', 'Failed to start download')
-                + ': ' + (e && e.message ? e.message : e));
+                + ': ' + D.errText(e));
             return false;
         });
 }
@@ -721,7 +721,7 @@ function loadMsRecommended(force) {
         MS.rec = { trending: MS.rec.trending || [], popular: MS.rec.popular || [] };
         if (DLX.empty)
             DLX.empty(C.tf('js.error.ms_connect_failed', 'Failed to connect to ModelScope.')
-                + ' ' + (e && e.message ? e.message : e));
+                + ' ' + D.errText(e));
     });
 }
 
@@ -745,7 +745,7 @@ function doMsSearch() {
         MS.busy = false; MS.search = [];
         if (DLX.empty)
             DLX.empty(C.tf('js.error.search_failed', 'Search failed') + ': '
-                + (e && e.message ? e.message : e));
+                + D.errText(e));
     });
 }
 
@@ -1417,7 +1417,7 @@ function recSetAggressive(rec) {
         .then(() => loadRecommendations(true))
         .catch(e => {
             DG.toast(C.tf('models.recommend.error', 'Could not load recommendations.')
-                + ' ' + (e && e.message ? e.message : e));
+                + ' ' + D.errText(e));
         })
         .then(() => { REC.applying = false; paintRecos(); return true; });
 }
@@ -1439,7 +1439,7 @@ function loadRecommendations(force) {
         return ensureHfModels(true).then(() => { paintRecos(); });
     }, e => {
         REC.loading = false;
-        REC.error = e && e.message ? e.message : String(e);
+        REC.error = D.errText(e);
         paintRecos();
     });
 }
@@ -1567,10 +1567,12 @@ function initDownloader() {
             return;
         }
         if (!list.length) {
-            D.emptyMsg(host, DL.tab === 'search' ? 'No results — try another query.'
+            D.emptyMsg(host, DL.tab === 'search'
+                ? C.tf('uplift.dl.no_results', 'No results — try another query.')
                 : DL.provider === 'ms'
                     ? C.tf('models.browse.no_trending', 'No trending models found for your system.')
-                    : 'HF suggested models unavailable.');
+                    : C.tf('uplift.dl.hf_unavailable',
+                        'Hugging Face suggested models unavailable.'));
             if (pg) pg.innerHTML = '';
             renderMsHistory();
             return;
@@ -1639,12 +1641,23 @@ function initDownloader() {
             host.append(row);
         }
         if (sub) {
-            const extra = DL.tab === 'search' ? `“${s.q || DL.q}”`
-                : DL.provider === 'ms'
-                    ? 'suggested by ' + C.tf('models.downloader.source.ms', 'ModelScope')
-                    : (DL.rec.trending && true ? 'suggested by HF' : '');
-            const inv = (DL._invalid || DL.rec._invalid) ? ' · HF token rejected — listed anonymously' : '';
-            sub.textContent = `${rows.length} results ${extra}${inv}`;
+            /* One keyed sentence per case. The old shape was
+               `${rows.length} results ${extra}${inv}` with two English
+               literals spliced in, which no locale can reorder or decline —
+               'suggested by HF' shipped untranslated in every language.
+               Provider names stay literal (product names, per the helper-page
+               precedent). */
+            const prov = DL.provider === 'ms' ? 'ModelScope' : 'Hugging Face';
+            const bits = [DL.tab === 'search'
+                ? C.tf('uplift.dl.results_for', '{n} results matching “{q}”',
+                    { n: rows.length, q: s.q || DL.q })
+                : C.tf('uplift.dl.results_suggested',
+                    '{n} results suggested by {provider}',
+                    { n: rows.length, provider: prov })];
+            if (DL._invalid || DL.rec._invalid)
+                bits.push(C.tf('uplift.dl.token_rejected',
+                    'HF token rejected — listed anonymously'));
+            sub.textContent = bits.join(' · ');
         }
         // pager
         if (!pg) { renderMsHistory(); return; }
@@ -1694,7 +1707,8 @@ function initDownloader() {
             DL.rec.trending = DL.rec.trending || [];
             DL.rec.popular = DL.rec.popular || [];
             const host = D.$('dl-results');
-            if (host && DL.tab !== 'search') setEmpty('Suggestions failed: ' + e.message);
+            if (host && DL.tab !== 'search')
+                setEmpty(C.tf('uplift.dl.suggestions_failed', 'Suggestions failed: {err}', { err: D.errText(e) }));
         });
     }
     function doSearch() {
@@ -1715,7 +1729,7 @@ function initDownloader() {
         }).catch(e => {
             DL.busy = false; DL.search = [];
             if (sub) sub.textContent = '';
-            setEmpty('Search failed: ' + e.message);
+            setEmpty(C.tf('uplift.dl.search_failed', 'Search failed: {err}', { err: D.errText(e) }));
         });
     }
     // UP-22: the source switch. Entry row, tabs, grid, pager AND the task

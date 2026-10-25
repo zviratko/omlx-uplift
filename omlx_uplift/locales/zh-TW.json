@@ -430,7 +430,7 @@
  "uplift.nav.native_hint": "將此索引標籤切換回原生介面",
  "uplift.opt.percentile": "百分位",
  "uplift.opt.smoothing": "平滑",
- "uplift.page.downloader_full": "Hugging Face 下載器",
+ "uplift.page.downloader_full": "模型下載器",
  "uplift.page.global_templates": "全域範本",
  "uplift.page.helper_models_full": "輔助模型",
  "uplift.page.quantizer_full": "oQ 量化",
@@ -1238,5 +1238,12 @@
  "uplift.se.typenote.template": "全域範本可以包含所有設定；每個模型只套用與其類型相符的機碼。",
  "uplift.status.no_engines": "未載入引擎",
  "uplift.ui.delete_global_template": "刪除此全域範本（已儲存設定組合）",
- "uplift.ui.edit_global_template": "編輯此範本"
+ "uplift.ui.edit_global_template": "編輯此範本",
+ "uplift.dl.results_for": "符合「{q}」的結果 {n} 個",
+ "uplift.dl.results_suggested": "{provider} 推薦的 {n} 個結果",
+ "uplift.dl.token_rejected": "HF 權杖遭拒 — 以匿名方式列出",
+ "uplift.dl.no_results": "沒有結果 — 請嘗試其他查詢。",
+ "uplift.dl.hf_unavailable": "Hugging Face 推薦模型無法使用。",
+ "uplift.dl.suggestions_failed": "建議擷取失敗：{err}",
+ "uplift.dl.search_failed": "搜尋失敗：{err}"
 }

@@ -434,7 +434,7 @@
  "uplift.nav.native_hint": "Volta esta aba para a superfície nativa",
  "uplift.opt.percentile": "Percentil",
  "uplift.opt.smoothing": "Suavização",
- "uplift.page.downloader_full": "Baixador da Hugging Face",
+ "uplift.page.downloader_full": "Baixador de modelos",
  "uplift.page.global_templates": "Modelos globais",
  "uplift.page.helper_models_full": "Modelos auxiliares",
  "uplift.page.quantizer_full": "Quantização oQ",
@@ -1242,5 +1242,12 @@
  "uplift.se.typenote.template": "Modelos globais podem trazer todas as configurações; cada modelo aplica apenas as chaves que cabem no seu tipo.",
  "uplift.status.no_engines": "Nenhum motor carregado",
  "uplift.ui.delete_global_template": "Excluir este modelo global (pacote de configurações salvas)",
- "uplift.ui.edit_global_template": "Editar este modelo"
+ "uplift.ui.edit_global_template": "Editar este modelo",
+ "uplift.dl.results_for": "{n} resultados correspondentes a “{q}”",
+ "uplift.dl.results_suggested": "{n} resultados sugeridos por {provider}",
+ "uplift.dl.token_rejected": "Token HF rejeitado — lista exibida anonimamente",
+ "uplift.dl.no_results": "Nenhum resultado — tente outra consulta.",
+ "uplift.dl.hf_unavailable": "Modelos sugeridos do Hugging Face indisponíveis.",
+ "uplift.dl.suggestions_failed": "Falha nas sugestões: {err}",
+ "uplift.dl.search_failed": "Falha na pesquisa: {err}"
 }

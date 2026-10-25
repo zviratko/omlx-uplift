@@ -60,6 +60,15 @@ function load(opts) {
             return f(url);
         },
         postJson: async (url, body) => { posts.push([url, body]); return (opts && opts.postResult) || {}; },
+        // mirrors domkit.errText — the kit seam gained it in UP-49 so banners
+        // show 'reason (status)' instead of our internal '<url> -> <status>'
+        errText(e) {
+            if (e == null) return '';
+            if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e;
+            if (e.userMessage) return e.userMessage;
+            const m = e.message || String(e);
+            return m.includes(' -> ') ? m.split(' -> ')[1] : m;
+        },
         toast() {}, emptyMsg() {}, cell() { return document.createElement('span'); },
     };
     win.Uplift.state = { API: '' };

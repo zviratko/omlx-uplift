@@ -207,6 +207,8 @@ async function mount(opt) {
             putJson: async () => ({}), deleteJson: async () => ({}),
             toast: (msg, ms, cls) => st.toasts.push(
                 { msg: String(msg), cls: typeof ms === 'string' ? ms : cls }),
+            // kit seam added by UP-49 (mirrors domkit.errText)
+            errText(e) { if (e == null) return ''; if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e; if (e.userMessage) return e.userMessage; const m = e.message || String(e); return m.includes(' -> ') ? m.split(' -> ')[1] : m; },
             emptyMsg: (el, msg) => { el.textContent = msg; },
         },
         Uplift: {

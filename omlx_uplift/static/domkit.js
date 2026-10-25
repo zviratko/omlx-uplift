@@ -61,7 +61,28 @@ function kitError(url, res, reason) {
     if (res && res.status === 401 && _on401) { try { _on401(); } catch (_) {} }
     const e = new Error(reason ? `${url} -> ${res.status}: ${reason}` : `${url} -> ${res.status}`);
     e.status = res.status;
+    /* Two messages on purpose. `.message` keeps the full internal shape
+       (route + query + status) for the console, the dev panel and any test
+       that pins it. `.userMessage` is the same failure WITHOUT our URL shape,
+       for anything a human reads: measured on the live board, an unreachable
+       ModelScope printed '/admin/api/ms/recommended?mlx_only=true -> 503
+       Service Unavailable' into a banner — our routing, spelled out to the
+       operator. Show sites use errText(e); nothing should paste `.message`
+       into visible text any more. */
+    e.userMessage = reason ? `${reason} (${res.status})` : `(${res.status})`;
     return e;
+}
+
+/* Text for a human, from anything a catch clause receives. Kit errors carry a
+   pre-sanitized userMessage; other seams (TypeError 'Failed to fetch', a bare
+   string) fall back to their message with a leading route cut off, so the
+   '<url> -> <status>' shape cannot leak through a stray call site either. */
+function errText(e) {
+    if (e == null) return '';
+    if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e;
+    if (e.userMessage) return e.userMessage;
+    const m = e.message || String(e);
+    return m.includes(' -> ') ? m.split(' -> ')[1] : m;
 }
 
 async function postJson(url, body) {
@@ -133,5 +154,5 @@ function loadScript(src) {
 }
 
 return { $, fetchJson, postJson, putJson, deleteJson, toast, cell, emptyMsg,
-         setUnauthorizedHandler, loadScript };
+         errText, setUnauthorizedHandler, loadScript };
 });

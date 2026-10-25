@@ -430,7 +430,7 @@
  "uplift.nav.native_hint": "Switch this tab back to the native surface",
  "uplift.opt.percentile": "Percentile",
  "uplift.opt.smoothing": "Smoothing",
- "uplift.page.downloader_full": "Hugging Face downloader",
+ "uplift.page.downloader_full": "Model downloader",
  "uplift.page.global_templates": "Global templates",
  "uplift.page.helper_models_full": "Helper models",
  "uplift.page.quantizer_full": "oQ quantization",
@@ -1238,5 +1238,12 @@
  "uplift.se.typenote.template": "Global templates can carry every setting; each model applies only the keys that fit its type.",
  "uplift.status.no_engines": "No engines loaded",
  "uplift.ui.delete_global_template": "Delete this global template (stored settings bundle)",
- "uplift.ui.edit_global_template": "Edit this template"
+ "uplift.ui.edit_global_template": "Edit this template",
+ "uplift.dl.results_for": "{n} results matching “{q}”",
+ "uplift.dl.results_suggested": "{n} results suggested by {provider}",
+ "uplift.dl.token_rejected": "HF token rejected — listed anonymously",
+ "uplift.dl.no_results": "No results — try another query.",
+ "uplift.dl.hf_unavailable": "Hugging Face suggested models unavailable.",
+ "uplift.dl.suggestions_failed": "Suggestions failed: {err}",
+ "uplift.dl.search_failed": "Search failed: {err}"
 }

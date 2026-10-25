@@ -430,7 +430,7 @@
  "uplift.nav.native_hint": "Вернуть эту вкладку к нативной поверхности",
  "uplift.opt.percentile": "Персентиль",
  "uplift.opt.smoothing": "Сглаживание",
- "uplift.page.downloader_full": "Загрузчик Hugging Face",
+ "uplift.page.downloader_full": "Загрузчик моделей",
  "uplift.page.global_templates": "Глобальные шаблоны",
  "uplift.page.helper_models_full": "Вспомогательные модели",
  "uplift.page.quantizer_full": "Квантование oQ",
@@ -1238,5 +1238,12 @@
  "uplift.se.typenote.template": "Глобальные шаблоны могут содержать любые настройки; каждая модель применяет только ключи, подходящие её типу.",
  "uplift.status.no_engines": "Ни один движок не загружен",
  "uplift.ui.delete_global_template": "Удалить этот глобальный шаблон (набор сохранённых настроек)",
- "uplift.ui.edit_global_template": "Изменить этот шаблон"
+ "uplift.ui.edit_global_template": "Изменить этот шаблон",
+ "uplift.dl.results_for": "Результатов по «{q}»: {n}",
+ "uplift.dl.results_suggested": "{n} результатов, предложенных {provider}",
+ "uplift.dl.token_rejected": "Токен HF отклонён — список показан анонимно",
+ "uplift.dl.no_results": "Нет результатов — измените запрос.",
+ "uplift.dl.hf_unavailable": "Рекомендованные модели Hugging Face недоступны.",
+ "uplift.dl.suggestions_failed": "Сбой рекомендаций: {err}",
+ "uplift.dl.search_failed": "Сбой поиска: {err}"
 }

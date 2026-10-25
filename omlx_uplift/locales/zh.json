@@ -430,7 +430,7 @@
  "uplift.nav.native_hint": "将此标签页切换回原生界面",
  "uplift.opt.percentile": "百分位",
  "uplift.opt.smoothing": "平滑",
- "uplift.page.downloader_full": "Hugging Face 下载器",
+ "uplift.page.downloader_full": "模型下载器",
  "uplift.page.global_templates": "全局模板",
  "uplift.page.helper_models_full": "辅助模型",
  "uplift.page.quantizer_full": "oQ 量化",
@@ -1238,5 +1238,12 @@
  "uplift.se.typenote.template": "全局模板可以包含所有设置；每个模型只应用与其类型相符的键。",
  "uplift.status.no_engines": "尚未加载引擎",
  "uplift.ui.delete_global_template": "删除此全局模板（已存设置组合）",
- "uplift.ui.edit_global_template": "编辑此模板"
+ "uplift.ui.edit_global_template": "编辑此模板",
+ "uplift.dl.results_for": "匹配“{q}”的结果 {n} 个",
+ "uplift.dl.results_suggested": "{provider} 推荐的 {n} 个结果",
+ "uplift.dl.token_rejected": "HF 令牌被拒绝 — 以匿名方式列出",
+ "uplift.dl.no_results": "没有结果 — 请尝试其他查询。",
+ "uplift.dl.hf_unavailable": "Hugging Face 推荐模型不可用。",
+ "uplift.dl.suggestions_failed": "建议获取失败：{err}",
+ "uplift.dl.search_failed": "搜索失败：{err}"
 }

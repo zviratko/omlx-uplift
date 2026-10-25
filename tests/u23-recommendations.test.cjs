@@ -178,6 +178,8 @@ function load(opts) {
         postJson: async (url, body) => { posts.push([String(url), body]); return {}; },
         deleteJson: async () => ({}),
         toast: m => toasts.push(m),
+        // kit seam added by UP-49 (mirrors domkit.errText)
+        errText(e) { if (e == null) return ''; if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e; if (e.userMessage) return e.userMessage; const m = e.message || String(e); return m.includes(' -> ') ? m.split(' -> ')[1] : m; },
         emptyMsg(host, msg) {
             host.children.length = 0;
             const d = doc.createElement('div'); d.className = 'empty';

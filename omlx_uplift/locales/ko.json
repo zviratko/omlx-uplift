@@ -445,7 +445,7 @@
  "uplift.nav.native_hint": "이 탭을 네이티브 표면으로 되돌리기",
  "uplift.opt.percentile": "백분위",
  "uplift.opt.smoothing": "스무딩",
- "uplift.page.downloader_full": "Hugging Face 다운로더",
+ "uplift.page.downloader_full": "모델 다운로더",
  "uplift.page.global_templates": "전역 템플릿",
  "uplift.page.helper_models_full": "도우미 모델",
  "uplift.page.quantizer_full": "oQ 양자화",
@@ -1253,5 +1253,12 @@
  "uplift.se.typenote.template": "전역 템플릿은 모든 설정을 담을 수 있고, 각 모델은 자기 타입에 맞는 키만 적용해요.",
  "uplift.status.no_engines": "엔진이 로드되지 않았어요",
  "uplift.ui.delete_global_template": "이 전역 템플릿 삭제 (저장된 설정 묶음)",
- "uplift.ui.edit_global_template": "이 템플릿 편집"
+ "uplift.ui.edit_global_template": "이 템플릿 편집",
+ "uplift.dl.results_for": "“{q}”와 일치하는 결과 {n}개",
+ "uplift.dl.results_suggested": "{provider} 추천 결과 {n}개",
+ "uplift.dl.token_rejected": "HF 토큰 거부됨 — 익명으로 목록 표시",
+ "uplift.dl.no_results": "결과 없음 — 다른 검색어를 시도해 보세요.",
+ "uplift.dl.hf_unavailable": "Hugging Face 추천 모델을 사용할 수 없습니다.",
+ "uplift.dl.suggestions_failed": "추천 가져오기 실패: {err}",
+ "uplift.dl.search_failed": "검색 실패: {err}"
 }
