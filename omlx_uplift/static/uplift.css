@@ -311,8 +311,19 @@ body::before {
     max-width: 200px; overflow: hidden; text-overflow: ellipsis;
     cursor: default;
 }
-@media (max-width: 1140px) { .logo .logo-base { display: none; } }
-@media (max-width: 1140px) { .logo .logo-build { display: none; } }
+/* The build column used to hide below 1141px because that is where the header
+   stops reserving its 240px band. But at that same width the tabs strip wraps to
+   its own row (see `header.top .tabs { order: 2; flex-basis: 100% }` below), so
+   the row the stamp and version line live in is FREE — there is nothing left to
+   collide with. Hiding them there cost the operator the only on-screen proof of
+   which keg and which upstream base is serving the board, which is exactly what
+   is read when something looks off (user, 2026-10-25: "there are no version
+   strings and timestamps visible at all now — not good"). Kept visible down to
+   the next real squeeze at 930px, where the tabs shrink; the max-width caps plus
+   ellipsis absorb the tight middle, and the patches page still carries the
+   unclipped truth. */
+@media (max-width: 930px) { .logo .logo-base { display: none; } }
+@media (max-width: 930px) { .logo .logo-build { display: none; } }
 header.top .spacer { flex: 1; }
 /* chip + tab text may never break: when the window narrows the tabs strip
    shrinks first (min-width:0), but the chips are flex items with the

@@ -147,3 +147,36 @@ test('logo-band: version line is bounded when a skin paints a tagline', () => {
     assert.ok(/maxWidth/.test(boot) && /getBoundingClientRect\(\)/.test(boot),
         'uplift_boot.js no longer bounds the version line to the stamp column');
 });
+
+/* THE COLUMN MUST EXIST (user, 2026-10-25: "there are no version strings and
+ * timestamps visible at all now — not good"). Two separate causes hid them:
+ *   1. the runtime width cap was computed before layout existed, so it set
+ *      max-width to the bare gutter (16px) and clipped line 2 to a stub;
+ *   2. `@media (max-width: 1140px)` hid the WHOLE column, which was over-cautious:
+ *      measured across 931..1600px the column keeps a constant 27px clearance to
+ *      the tabs strip, clips no tab label and never grows the header.
+ * Both are cheap to reintroduce, so both are pinned.
+ */
+test('logo-band: build column stays visible at ordinary window widths', () => {
+    const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+    const boot = fs.readFileSync(path.join(STATIC_DIR, 'uplift_boot.js'), 'utf8');
+
+    let worst = 0;
+    for (const m of css.matchAll(/@media[^{]*\(max-width:\s*(\d+)px\)\s*\{([^}]*)\}/g)) {
+        if (/\.logo-(build|base)\b[^;]*\{?[^}]*display:\s*none/.test(m[2])
+            || (/\.logo-(build|base)/.test(m[2]) && /display:\s*none/.test(m[2]))) {
+            worst = Math.max(worst, parseInt(m[1], 10));
+        }
+    }
+    assert.ok(worst <= 930,
+        `the build column is hidden up to ${worst}px — a 1280px laptop with a `
+        + 'side panel is under 1141px and loses its only version readout');
+
+    // the cap may only be applied from a real measurement
+    assert.ok(/getBoundingClientRect\(\)\.width/.test(boot)
+        && /if \(w < /.test(boot),
+        'the version-line cap no longer checks the measured width — a pre-layout '
+        + 'read of 0 collapses the line to an invisible stub');
+    assert.ok(/requestAnimationFrame\(cap\)|fonts\.ready/.test(boot),
+        'the cap should be applied after layout, not synchronously at build time');
+});

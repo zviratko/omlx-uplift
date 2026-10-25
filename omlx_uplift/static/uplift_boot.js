@@ -106,19 +106,29 @@ function renderDevBuild() {
                'discovery-one' skin (' // H-A-L 9000', suffix starting x327)
                over 'omlx v0.7.3.dev2 · 78fa08b' (ending x336) — 9x7px of ink on
                ink. Bound line 2 to the stamp's own column plus the suffix's
-               6px gutter: the two version lines then form one aligned column,
-               the ellipsis takes any tail, and the untouched full string stays
-               in this element's tooltip and on the patches page. No-op for
-               skins that paint nothing (content is 'normal'). */
+               gutter, so the ellipsis takes any tail and the full string stays
+               in this element's tooltip. No-op for skins that paint nothing.
+               THE MEASUREMENT IS THE DANGER: this runs the moment the build
+               info arrives, and if the header has no layout yet (page not
+               mounted, tab hidden, or a narrow window where the CSS hides this
+               whole column) the width reads 0 — which set max-width to the
+               gutter alone and clipped the version line down to an invisible
+               stub. Reported by the user on 2026-10-25 as "no version strings
+               visible at all". So: measure after layout, and apply the cap
+               ONLY when the measured column is credibly wide. */
             const suffixCs = getComputedStyle(el.parentElement, '::after');
             const tagline = suffixCs.content;
             if (tagline && tagline !== 'none' && tagline !== 'normal') {
-                // the tagline begins one margin after the stamp's right edge,
-                // so that is exactly how wide line 2 may be (a skin that sets
-                // its own margin widens the allowance to match)
-                const gutter = Math.round(el.getBoundingClientRect().width)
-                    + (parseFloat(suffixCs.marginLeft) || 0);
-                if (gutter < 200) bl.style.maxWidth = gutter + 'px';
+                const cap = () => {
+                    const w = el.getBoundingClientRect().width;
+                    if (w < 40) return;          // no layout yet — leave it alone
+                    const gutter = Math.round(w) + (parseFloat(suffixCs.marginLeft) || 0);
+                    if (gutter > 60 && gutter < 200) bl.style.maxWidth = gutter + 'px';
+                };
+                if (document.fonts && document.fonts.ready) {
+                    document.fonts.ready.then(cap).catch(() => {});
+                }
+                requestAnimationFrame(cap);
             }
         }
     }).catch(() => {});
