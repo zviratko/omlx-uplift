@@ -62,23 +62,9 @@ test('uplift_downloader.js reads no raw error message', () => {
 // Frozen 2026-10-25. Lower these as surfaces get cleaned; never raise one.
 const ERR_READ = /(?:^|[^\w.])(?:e|err|error|exc)\.message\b/g;
 const BASELINE = {
-    'uplift_mmeditor.js': 29,
-    'uplift_chat.js': 22,
-    'uplift_bench.js': 21,
     'uplift_patches.js': 18,
     'uplift_voices.js': 16,
-    'uplift_gsys.js': 10,
-    'uplift_modelsops.js': 6,
-    'uplift_helper.js': 5,
-    'uplift.js': 4,
     'domkit.js': 1,               // the kit builds the dev-side message itself
-    'uplift_inspector.js': 2,
-    'uplift_mmtable.js': 2,
-    'uplift_mmchips.js': 1,
-    'uplift_mmtemplates.js': 1,
-    'uplift_feed.js': 1,
-    'uplift_usage.js': 1,
-    'uplift_reqsearch.js': 1,
 };
 
 test('raw .message reads are ratcheted per file (UP-52 lowers these)', () => {

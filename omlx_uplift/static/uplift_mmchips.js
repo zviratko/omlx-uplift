@@ -27,7 +27,7 @@ function tapBtn(b, fn, noRerender) {
     b.onclick = async () => {
         b.disabled = true;    // no double-toggle while the write is in flight
         try { await fn(); } catch (err) {
-            MM_GLUE.toast(C.t('uplift.toast.action_failed', {action: b.textContent || 'action', msg: err.message}));
+            MM_GLUE.toast(C.t('uplift.toast.action_failed', {action: b.textContent || 'action', msg: D.errText(err)}));
             b.disabled = false; return;
         }
         if (!noRerender) MMF.render(true); else b.disabled = false;

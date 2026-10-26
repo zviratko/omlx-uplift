@@ -99,7 +99,7 @@ function renderTemplatesBox(force) {
                     _tpl = null;   // POLL-BATCH: a delete IS a write — invalidate
                     renderTemplatesBox(true);
                 } catch (e) {
-                    D.toast((e && e.message) || String(e), 'error');
+                    D.toast(D.errText(e), 'error');
                 }
             };
             aDel.append(del, yes, no);

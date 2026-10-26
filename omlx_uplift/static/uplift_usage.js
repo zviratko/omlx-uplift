@@ -288,7 +288,7 @@ $('logs-dl').onclick = () => {
         b.onclick = () => {
             if (!window.confirm(C.tf(confirmKey, confirmDef))) return;
             D.postJson(`${API}/admin/api/` + url, {})
-             .catch(e => D.toast(String((e && e.message) || e), 'error'))
+             .catch(e => D.toast(D.errText(e), 'error'))
              .then(() => { try { window.Uplift._usageGlue.pollStats(); } catch (_) {} });
         };
         host.append(b);

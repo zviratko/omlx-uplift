@@ -66,7 +66,7 @@ test('UP-19(2): validation runs BEFORE any POST and can veto', () => {
 test('UP-19(1): HTTP-failure toast surfaces the server detail', () => {
     const i = gsys.indexOf('async function gsSaveNow');
     const seg = gsys.slice(i, i + 1400);
-    assert.match(seg, /GLUE\.toast\(e\.message\n?\s*\|\| C\.t\('uplift\.toast\.save_failed_http'/);
+    assert.match(seg, /GLUE\.toast\(D\.errText\(e\)\n?\s*\|\| C\.t\('uplift\.toast\.save_failed_http'/);
 });
 
 test('UP-19(4): restart confirms, watches health down-then-up, persists pending', () => {

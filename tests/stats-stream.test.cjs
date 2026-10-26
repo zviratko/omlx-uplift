@@ -207,6 +207,7 @@ function loadStatsLane(opts) {
         document: { hidden: false, body: el('body') },
         location: { origin: 'http://test' },
         $: el,
+        D: { errText: (e) => { if (e == null) return ''; if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e; if (e.userMessage) return e.userMessage; const m = e.message || String(e); return m.includes(' -> ') ? m.split(' -> ')[1] : m; }, },
         API: '',
         C,                                        // the REAL core.js normalize/events
         S: { milestoneFloor: {} },

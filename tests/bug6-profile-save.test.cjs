@@ -44,6 +44,7 @@ function harness({ dirtyKeys = ['max_context_window'], putFails = null,
     const D = {
         putJson: async (p, b) => { if (putFails) throw putFails; log.put.push([p, b]); return {}; },
         postJson: async (p, b) => { if (putFails) throw putFails; log.post.push([p, b]); return {}; },
+        errText: (e) => { if (e == null) return ''; if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e; if (e.userMessage) return e.userMessage; const m = e.message || String(e); return m.includes(' -> ') ? m.split(' -> ')[1] : m; },
     };
     const MM_GLUE = {
         toast: t => log.toasts.push(t),

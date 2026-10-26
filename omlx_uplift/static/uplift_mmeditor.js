@@ -1175,7 +1175,7 @@ function renderEditorFields(container) {
                                     return openEditor(seModel, seWantProfile);
                                 })
                                 .catch(e => {
-                                    MM_GLUE.toast(String((e && e.detail) || (e && e.message) || e) ||
+                                    MM_GLUE.toast(String((e && e.detail) || D.errText(e)) ||
                                         C.tf('js.error.mtplx_import_failed', 'MTPLX side-car import failed'), 'error');
                                     ib.disabled = false;
                                     ib.textContent = C.tf('modal.model_settings.mtplx_import', 'Import MTP side-car');
@@ -2417,8 +2417,8 @@ async function saveTemplateEditor(tpl, panel) {
         MM_TPL.render(true);
         setTimeout(closeEditor, 1000);
     } catch (err) {
-        msg.textContent = 'error: ' + err.message;
-        MM_GLUE.toast(C.tf('uplift.mm.tpl_save_fail', 'Template save failed: ') + err.message);
+        msg.textContent = 'error: ' + D.errText(err);
+        MM_GLUE.toast(C.tf('uplift.mm.tpl_save_fail', 'Template save failed: ') + D.errText(err));
         if (sb) sb.disabled = false;   // reactivates for a retry
     }
 }
@@ -2557,7 +2557,7 @@ function seRenderTabs(panel) {
         if (kind === 'msm') {
             MM_GLUE.fetchJson(`${API}/admin/api/models/${encodeURIComponent(id)}/settings`)
                 .then(d => seApplyIntoActiveTab(d.settings || {}, id + ' (missing)'))
-                .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + e.message));
+                .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + D.errText(e)));
         } else if (kind === 'msp') {
             const mid = decodeURIComponent(id.slice(0, id.indexOf('|')));
             const pname = id.slice(id.indexOf('|') + 1);
@@ -2567,7 +2567,7 @@ function seRenderTabs(panel) {
                     if (p) seApplyIntoActiveTab(p.settings || {}, mid + ':' + pname + ' (missing)');
                     else MM_GLUE.toast(C.tf('uplift.mm.profile_missing', 'profile not found: ') + pname);
                 })
-                .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + e.message));
+                .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + D.errText(e)));
         } else if (kind === 'own') {
             const p = (MM_DATA.profiles || []).find(x => x.name === id);
             if (p) seApplyIntoActiveTab(p.settings || {}, p.display_name || p.name);
@@ -2589,7 +2589,7 @@ function seRenderTabs(panel) {
             MM_GLUE.toast(C.t('uplift.toast.loading_settings', {id: id}));
             MM_GLUE.fetchJson(`${API}/admin/api/models/${encodeURIComponent(id)}/settings`)
                 .then(d => seApplyIntoActiveTab(d.settings || {}, id))
-                .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + e.message));
+                .catch(e => MM_GLUE.toast(C.tf('uplift.mm.load_fail', 'Load failed: ') + D.errText(e)));
         }
     };
     // UP-20 (5): classic refreshPresets (dashboard.js:94690) — POST the
@@ -2610,7 +2610,7 @@ function seRenderTabs(panel) {
                 }
                 if (g1.children.length && !g1.parentElement) drop.append(g1);
             })
-            .catch(e => MM_GLUE.toast(String((e && e.message) || e), 'error'))
+            .catch(e => MM_GLUE.toast(D.errText(e), 'error'))
             .finally(() => { rfb.disabled = false; });
     };
     strip.append(drop, rfb);
@@ -2859,7 +2859,7 @@ function seDivergenceSyncBtn(diverging, panel, isReq) {
                 'Nothing to sync — profiles already match the base'));
         } catch (err) {
             MM_GLUE.toast(C.tf('uplift.toast.action_failed',
-                { action: 'sync profiles', msg: err.message }));
+                { action: 'sync profiles', msg: D.errText(err) }));
         }
         btn.disabled = false;
         refreshDivergence();
@@ -3022,7 +3022,7 @@ function seDivergenceEditApplyBtn(panel) {
                     + ' \u00b7 ' + keyList);
             } catch (err) {
                 MM_GLUE.toast(C.tf('uplift.toast.action_failed',
-                    { action: 'apply base edits to profiles', msg: err.message }));
+                    { action: 'apply base edits to profiles', msg: D.errText(err) }));
             }
             refreshDivergence();
             seRenderTabs(panel);
@@ -3224,7 +3224,7 @@ async function seLoadProfiles(model, host) {
             await D.deleteJson(`${API}/admin/api/models/${encodeURIComponent(model)}/profiles/${encodeURIComponent(sel.value)}`);
             MM_GLUE.toast(C.t('uplift.toast.deleted_profile', {name: sel.value}));
             seLoadProfiles(model, host);
-        } catch (e) { MM_GLUE.toast(C.t('uplift.toast.delete_failed', {msg: e.message})); }
+        } catch (e) { MM_GLUE.toast(C.t('uplift.toast.delete_failed', {msg: D.errText(e)})); }
     };
     noB.onclick = () => { armed = null; paintArm(); };
     // classic drift dot: the SELECTED profile owns unsaved edits in its tab
@@ -3261,7 +3261,7 @@ async function seLoadProfiles(model, host) {
                   body: JSON.stringify({ name, display_name: name, settings: payload }) });
             MM_GLUE.toast(C.t('uplift.toast.saved_profile', {name: name}));
             seLoadProfiles(model, host);
-        } catch (e) { MM_GLUE.toast(C.t('uplift.toast.profile_error', {msg: e.message})); }
+        } catch (e) { MM_GLUE.toast(C.t('uplift.toast.profile_error', {msg: D.errText(e)})); }
     };
     row.append(sel, driftDot, editB, delB, noB, saveAs, saveB);
     host.append(row, dlg);
@@ -3327,7 +3327,7 @@ async function seLoadProfiles(model, host) {
                 await seApplyTemplateUpsert(model, tpl);
                 MM_GLUE.toast(C.t('uplift.toast.applied_template', {name: tpl.name}));
                 openEditor(model);
-            } catch (e) { MM_GLUE.toast(C.t('uplift.toast.template_apply_failed', {msg: e.message})); }
+            } catch (e) { MM_GLUE.toast(C.t('uplift.toast.template_apply_failed', {msg: D.errText(e)})); }
         };
         tSnap.onclick = async () => {
             const typed = saveAs.value.trim() || tsel.value;
@@ -3350,7 +3350,7 @@ async function seLoadProfiles(model, host) {
                 const _tp = window.Uplift.mmTemplates;
                 if (_tp && _tp.invalidate) _tp.invalidate();   // POLL-BATCH
                 seLoadProfiles(model, host);
-            } catch (e) { MM_GLUE.toast(C.t('uplift.toast.template_error', {msg: e.message})); }
+            } catch (e) { MM_GLUE.toast(C.t('uplift.toast.template_error', {msg: D.errText(e)})); }
         };
         const tt = document.createElement('div');
         tt.className = 'se-hint'; tt.textContent = 'Templates (global)';
@@ -3556,9 +3556,9 @@ function seGenDefaultsLoad(b) {
             MM_GLUE.toast(e && e.status === 404
                 ? C.tf('js.error.no_config_defaults',
                        'No config defaults found for this model')
-                : String((e && e.message)
+                : D.errText(e)
                           || C.tf('js.error.load_generation_config_failed',
-                                  'Failed to load generation config')), 'error');
+                                  'Failed to load generation config'), 'error');
             b.disabled = false;
             b.textContent = C.tf('modal.model_settings.load_defaults', 'Load Defaults');
         });
@@ -3773,7 +3773,7 @@ async function loadOptimalCandidates() {
         SETTINGS_APPLY.onCandidates(A.st, data);
     } catch (e) {
         if (seApplyOverlay !== A) return;
-        SETTINGS_APPLY.onError(A.st, String((e && e.message) || e));
+        SETTINGS_APPLY.onError(A.st, D.errText(e));
     }
     if (seApplyOverlay === A) renderSettingsApply();
 }
@@ -3786,7 +3786,7 @@ async function applyOptimalCandidate(benchmarkId) {
         renderSettingsApply();
         await seOnSettingsApplied(data);
     } catch (e) {
-        SETTINGS_APPLY.onError(A.st, String((e && e.message) || e));
+        SETTINGS_APPLY.onError(A.st, D.errText(e));
         renderSettingsApply();
     }
 }
@@ -3801,7 +3801,7 @@ async function runSettingsApply() {
         renderSettingsApply();
         await seOnSettingsApplied(data);
     } catch (e) {
-        SETTINGS_APPLY.onError(A.st, String((e && e.message) || e));
+        SETTINGS_APPLY.onError(A.st, D.errText(e));
         renderSettingsApply();
     }
 }
@@ -3978,7 +3978,7 @@ function seProfileEditDialog(dlg, model, host, name) {
             }
             dlg.hidden = true;
             seLoadProfiles(model, host);
-        } catch (e) { showErr(String((e && e.message) || e)); }
+        } catch (e) { showErr(D.errText(e)); }
     }
     async function saveSettingsFromForm() {
         showErr('');
@@ -4000,7 +4000,7 @@ function seProfileEditDialog(dlg, model, host, name) {
                 { name: p.display_name || p.name }));
             dlg.hidden = true;
             seLoadProfiles(model, host);
-        } catch (e) { showErr(String((e && e.message) || e)); }
+        } catch (e) { showErr(D.errText(e)); }
     }
     async function resync() {
         const tpl = resyncTargetTemplate(p, MM_DATA.templates);
@@ -4015,7 +4015,7 @@ function seProfileEditDialog(dlg, model, host, name) {
             // injectable reload seam the snapshot-apply flow uses)
             if (seReloadAfterApply) await seReloadAfterApply(model);
             else openEditor(model);
-        } catch (e) { showErr(String((e && e.message) || e)); }
+        } catch (e) { showErr(D.errText(e)); }
     }
 }
 
@@ -4295,10 +4295,10 @@ async function saveEditor() {
                     else failed.push([label, msg.textContent || 'invalid']);
                 }
             } catch (e) {
-                failed.push([label, e.message]);
+                failed.push([label, D.errText(e)]);
                 MM_GLUE.toast(t.id === 'base'
-                    ? C.t('uplift.toast.save_failed', {msg: e.message})
-                    : C.t('uplift.toast.profile_save_failed', {msg: e.message}));
+                    ? C.t('uplift.toast.save_failed', {msg: D.errText(e)})
+                    : C.t('uplift.toast.profile_save_failed', {msg: D.errText(e)}));
             }
         }
         // TTS-1: commit the voice-defaults block through the same SAVE press
@@ -4307,7 +4307,7 @@ async function saveEditor() {
             ttsAttempted = true;
             const lab = C.tf('uplift.voices.tts_section', 'TTS voice defaults');
             try { await seCommitTts(); saved.push(lab); }
-            catch (e) { failed.push([lab, e.message]); MM_GLUE.toast(e.message); }
+            catch (e) { failed.push([lab, D.errText(e)]); MM_GLUE.toast(D.errText(e)); }
         }
         if (targets.length > 1 || (ttsAttempted && (targets.length >= 1 || failed.length))) {
             // per-tab honest summary (BUG-6 doctrine: final state only)
@@ -4360,8 +4360,8 @@ async function restartModel(msg) {
         MM_GLUE.toast(C.t('uplift.toast.reloaded_with_settings', {model: seModel}));
         closeEditor();
     } catch (e) {
-        msg.textContent = 'error: ' + e.message;
-        MM_GLUE.toast(C.t('uplift.toast.reload_failed', {msg: e.message}));
+        msg.textContent = 'error: ' + D.errText(e);
+        MM_GLUE.toast(C.t('uplift.toast.reload_failed', {msg: D.errText(e)}));
         if (b) b.disabled = false;
     }
 }
@@ -4380,8 +4380,8 @@ async function saveProfileTab(panel) {
     try {
         await saveProfileCommit(panel, t, name, msg);
     } catch (e) {
-        msg.textContent = 'error: ' + e.message;
-        MM_GLUE.toast(C.t('uplift.toast.profile_save_failed', {msg: e.message}));
+        msg.textContent = 'error: ' + D.errText(e);
+        MM_GLUE.toast(C.t('uplift.toast.profile_save_failed', {msg: D.errText(e)}));
     } finally {
         if (btn) btn.disabled = seDirtyKeys().length === 0;
     }

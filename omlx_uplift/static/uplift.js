@@ -2029,7 +2029,7 @@ async function saveRetention(which) {
         const r = await postJson(`${API}/uplift/api/retention`, body);
         m.value = r.metrics_days; l.value = r.log_days;
         m.dataset.prev = r.metrics_days; l.dataset.prev = r.log_days;
-    } catch (e) { toast(C.tf('uplift.retention.fail', 'retention: ') + e.message, 4000); loadRetention(); }
+    } catch (e) { toast(C.tf('uplift.retention.fail', 'retention: ') + D.errText(e), 4000); loadRetention(); }
 }
 $('opt-retention-metrics').onchange = () => saveRetention('m');
 $('opt-retention-log').onchange = () => saveRetention('l');
@@ -2300,7 +2300,7 @@ function ifGroup(model) {
         try {
             await postModelAction(model, 'unload');
         } catch (err) {
-            toast(C.t('uplift.toast.action_failed', { action: un.textContent, msg: err.message }));
+            toast(C.t('uplift.toast.action_failed', { action: un.textContent, msg: D.errText(err) }));
             un.disabled = false;      // failure: the model stays, the button returns
         }
         // success needs no re-enable: renderLive evicts the group on the next
@@ -2505,7 +2505,7 @@ function ifAbort(rid, sl) {
         .then(() => { toast(C.t('uplift.toast.cancelled', { id: rid.slice(0, 6) })); })
         .catch(err => {
             if (err.status === 501) { toast(C.t('uplift.toast.no_cancel_route')); return; }
-            toast(C.t('uplift.toast.cancel_failed', { msg: err.message }));
+            toast(C.t('uplift.toast.cancel_failed', { msg: D.errText(err) }));
         })
         .finally(() => { sl.abort.disabled = false; });
 }
@@ -2960,7 +2960,7 @@ async function pollStats() {
     } catch (err) {
         if (++failCount >= 2) {
             document.body.classList.add('stale');
-            $('banner-text').textContent = `Cannot reach API at ${API || location.origin}: ${err.message}`;
+            $('banner-text').textContent = `Cannot reach API at ${API || location.origin}: ${D.errText(err)}`;
             $('banner').classList.add('show');
         }
     } finally { statsBusy = false; }

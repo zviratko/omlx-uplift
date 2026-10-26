@@ -67,6 +67,7 @@ function harness({ validations = {}, loaded = true,
         putJson: async (p, b) => { log.calls.push([p, JSON.parse(JSON.stringify(b))]); if (D.fail === p) throw Object.assign(new Error('boom'), { status: 500 }); return {}; },
         postJson: async (p, b) => { log.calls.push([p, JSON.parse(JSON.stringify(b))]); return {}; },
         deleteJson: async () => ({}),
+        errText: (e) => { if (e == null) return ''; if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e; if (e.userMessage) return e.userMessage; const m = e.message || String(e); return m.includes(' -> ') ? m.split(' -> ')[1] : m; },
     };
     const MM_GLUE = {
         toast: t => log.toasts.push(t),

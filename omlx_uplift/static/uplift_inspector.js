@@ -85,7 +85,7 @@ async function openInspector(reqId) {
         try {
             await D.postJson(`${API}/admin/api/requests/${encodeURIComponent(reqId)}/cancel`, {});
             MM_GLUE.toast(C.t('uplift.toast.cancelled', { id: reqId.slice(0, 6) }));
-        } catch (err) { MM_GLUE.toast(C.t('uplift.toast.cancel_failed', { msg: err.message })); }
+        } catch (err) { MM_GLUE.toast(C.t('uplift.toast.cancel_failed', { msg: D.errText(err) })); }
         cancelBtn.disabled = false;
         refresh();
     };
@@ -147,7 +147,7 @@ async function openInspector(reqId) {
         let d;
         try {
             d = await MM_GLUE.fetchJson(`${API}/admin/api/requests/${encodeURIComponent(reqId)}`);
-        } catch (err) { head.textContent = C.t('uplift.req.load_failed', { msg: err.message }); return; }
+        } catch (err) { head.textContent = C.t('uplift.req.load_failed', { msg: D.errText(err) }); return; }
         if (closed) return;
         if (!d.found) {
             head.textContent = C.t('uplift.req.not_found');

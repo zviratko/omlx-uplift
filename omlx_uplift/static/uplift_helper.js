@@ -39,7 +39,7 @@ async function openPruneDialog() {
         const known = new Set(MM.adminModels.map(m => m.id));
         profs = (idx.profiles || []).filter(p => !known.has(p.base)
             || orphans.includes(p.base));
-    } catch (err) { HG.toast(C.tf('uplift.helper.prune_check_fail', 'prune check failed: ') + err.message); return; }
+    } catch (err) { HG.toast(C.tf('uplift.helper.prune_check_fail', 'prune check failed: ') + D.errText(err)); return; }
     if (!orphans.length && !profs.length) { HG.toast(C.t('uplift.toast.nothing_to_prune')); return; }
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -111,7 +111,7 @@ async function openPruneDialog() {
                     ? ', ' + C.tf('uplift.helper.pruned_profiles', '{n} profile(s)', { n: r.removed_profiles.length }) : ''));
             overlay.remove();
             MM.render(true);
-        } catch (err) { HG.toast(C.tf('uplift.helper.prune_fail', 'prune failed: ') + err.message); }
+        } catch (err) { HG.toast(C.tf('uplift.helper.prune_fail', 'prune failed: ') + D.errText(err)); }
     };
     bar.append(all, none, document.createElement('span'), cancel, doIt);
     box.append(h, sub, list, bar);
@@ -154,7 +154,7 @@ async function renderHelperModels() {
     try { models = (await HG.fetchJson(`${API}/uplift/api/models`)).models; }
     catch (_) {
         try { models = (await HG.fetchJson(`${API}/admin/api/models`)).models; }
-        catch (e) { HG.emptyMsg($('hm-list'), e.message); return; }
+        catch (e) { HG.emptyMsg($('hm-list'), D.errText(e)); return; }
     }
     const mk = models.filter(m => m.engine_type === 'markitdown' || m.model_type === 'markitdown');
     const helpers = models.filter(m => !mk.includes(m) && (m.is_helper ||
@@ -195,7 +195,7 @@ async function renderHelperModels() {
             if (res.success === false) throw new Error(res.message || 'rejected');
             HG.toast(C.t('uplift.toast.integration_saved'));
             return true;
-        } catch (err) { HG.toast(C.t('uplift.toast.save_failed', {msg: err.message})); return false; }
+        } catch (err) { HG.toast(C.t('uplift.toast.save_failed', {msg: D.errText(err)})); return false; }
     }
     function integField(label, hint, control) {
         const f = document.createElement('label');
@@ -523,11 +523,12 @@ async function renderHelperModels() {
             const r = await HG.fetchJson(`${API}/admin/api/web-search/test`,
                 { method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(body) });
+            const errBody = r.error || {};
             testOut.textContent = r.ok
                 ? `Search OK: ${(r.results || []).length} results`
-                : ('Search test failed: ' + ((r.error && r.error.message) || 'unknown'));
+                : ('Search test failed: ' + (D.errText(errBody.message || '') || 'unknown'));
         } catch (err) {
-            testOut.textContent = C.tf('uplift.ui.search_test_failed', 'Search test failed: ') + err.message;
+            testOut.textContent = C.tf('uplift.ui.search_test_failed', 'Search test failed: ') + D.errText(err);
         }
         testBtn.disabled = false; testBtn.textContent = C.tf('uplift.ui.test_search', 'Test search');
     };

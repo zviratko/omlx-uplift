@@ -180,7 +180,7 @@ function renderQuantizer() {
                     }
                     est.textContent = `est: ${e.output_size_formatted || C.fmtBytes(e.output_size_bytes)}` +
                         ` \u00b7 ${e.effective_bpw} bpw \u00b7 stream ${mem}`;
-                }).catch(err => { est.textContent = 'estimate: ' + err.message; });
+                }).catch(err => { est.textContent = 'estimate: ' + D.errText(err); });
             }, 300);
         }
 
@@ -265,7 +265,7 @@ function renderQuantizer() {
             $('qz-sub').textContent = `${st.models.length} quantizable models`;
             refreshLevelLabels();
             updateConditional();
-        }).catch(e => QG.emptyMsg(host, e.message));
+        }).catch(e => QG.emptyMsg(host, D.errText(e)));
 
         selModel.onchange = updateConditional;
         selSens.onchange = refreshEst;
@@ -311,7 +311,7 @@ function renderQuantizer() {
             QG.postJson(`${API}/admin/api/oq/start`, payload).then(() => {
                 QG.toast(`quantize queued${QG.GW_LIVE ? '' : ' (shadow)'}: ` + m.name);
                 MO.tasks('qz-tasks', 'oq');
-            }).catch(e => QG.toast(C.tf('uplift.mo.quantize_fail', 'quantize: ') + e.message))
+            }).catch(e => QG.toast(C.tf('uplift.mo.quantize_fail', 'quantize: ') + D.errText(e)))
               .finally(() => { start.disabled = false; });
         };
     }
@@ -377,7 +377,7 @@ function renderUploader() {
                 list.append(row);
             }
             vbtn.disabledMsg = null;
-        }).catch(e => QG.emptyMsg(list, e.message));
+        }).catch(e => QG.emptyMsg(list, D.errText(e)));
     }
 
     vbtn.onclick = () => {
@@ -390,7 +390,7 @@ function renderUploader() {
                 tok.value = tok.value;   // stays in the browser only
                 loadModels();
             })
-            .catch(e => { st.validated = false; vmsg.textContent = e.message; })
+            .catch(e => { st.validated = false; vmsg.textContent = D.errText(e); })
             .finally(() => { vbtn.disabled = false; });
     };
     tok.addEventListener('keydown', e => { if (e.key === 'Enter') vbtn.onclick(); });
@@ -422,7 +422,7 @@ function renderUploader() {
                 QG.toast(`upload queued${QG.GW_LIVE ? '' : ' (shadow)'}: ` + repo.value.trim());
                 overlay.remove();
                 MO.tasks('up-tasks', 'upload');
-            }).catch(e => QG.toast(C.tf('uplift.mo.upload_fail', 'upload: ') + e.message))
+            }).catch(e => QG.toast(C.tf('uplift.mo.upload_fail', 'upload: ') + D.errText(e)))
               .finally(() => { bGo.disabled = false; });
         };
         const bar = document.createElement('div');

@@ -383,7 +383,7 @@ function renderReqFeed() {
                     FEG.toast(C.t('uplift.toast.cancelled', {id: r.id.slice(0, 6)}));
                 } catch (err) {
                     if (err.status === 501) { FEG.toast(C.t('uplift.toast.no_cancel_route')); return; }
-                    FEG.toast(C.t('uplift.toast.cancel_failed', {msg: err.message}));
+                    FEG.toast(C.t('uplift.toast.cancel_failed', {msg: D.errText(err)}));
                 }
                 pollRequests();
             };

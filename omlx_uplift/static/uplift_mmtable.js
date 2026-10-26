@@ -389,7 +389,7 @@ async function renderModelAdmin(force) {
                 b.disabled = true;    // no double-toggle while the write is in flight
                 try { await fn(); } catch (err) {
                     console.error(`${label} failed:`, err);   // stack in devtools
-                    MM_GLUE.toast(C.t('uplift.toast.action_failed', {action: label, msg: err.message})); b.disabled = false; return; }
+                    MM_GLUE.toast(C.t('uplift.toast.action_failed', {action: label, msg: D.errText(err)})); b.disabled = false; return; }
                 if (!noRerender) renderModelAdmin(true); else b.disabled = false;
             };
             return b;
@@ -592,7 +592,7 @@ function confirmDialog(title, msg, act, okMsg) {
             if (MMF.seModel) MMF.closeEditor();
             renderModelAdmin(true);
         }
-        catch (err) { ok.disabled = false; cancel.disabled = false; MM_GLUE.toast(C.t('uplift.toast.failed', {msg: err.message})); }
+        catch (err) { ok.disabled = false; cancel.disabled = false; MM_GLUE.toast(C.t('uplift.toast.failed', {msg: D.errText(err)})); }
     };
     bar.append(document.createElement('span'), cancel, ok);
     box.append(h, sub, bar);

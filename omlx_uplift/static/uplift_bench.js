@@ -27,6 +27,26 @@ var _curPanel = null;    // BENCHQ: the panel instance showSub() painted
 function W() { return (typeof window !== 'undefined') ? window : null; }
 function C() { return W() && W().UpliftCore ? W().UpliftCore : null; }
 function dom() { return W() && W().UpliftDom ? W().UpliftDom : null; }
+/* UP-52 (ratchet closed for this file): anything a human reads from a caught
+   error goes through the kit's errText. domkit keeps the internal
+   '<route> -> <status>: reason' shape on the error for console/tests and
+   publishes `.userMessage` route-free (UP-49), so a bench toast or status line
+   can no longer spell our URL layout to the operator. The no-kit branch covers
+   headless harnesses that stub UpliftDom without the UP-49 seam; it applies the
+   SAME leading-route cut, so the test path cannot leak the shape either. */
+function errText(e) {
+    var d = dom();
+    if (d && d.errText) return d.errText(e);
+    if (e == null) return '';
+    if (e.userMessage) return e.userMessage;
+    // No kit seam (headless harness): String(err) carries a 'TypeError: ' style
+    // constructor prefix the show sites never had — drop it so the text matches
+    // what the kit would have returned, then cut the leading route the same way.
+    var s = (typeof e === 'string') ? e
+        : String(e).replace(/^[A-Za-z][\w$]*(?:Error|Exception): /, '');
+    var i = s.indexOf(' -> ');
+    return i >= 0 ? s.slice(i + 4) : s;
+}
 function api() {
     var st = W() && W().Uplift && W().Uplift.state;
     return ((st && st.API) || '') + '/uplift/api';
@@ -625,7 +645,7 @@ var BENCHQ = {
                     await d.deleteJson(api() + '/bench/queue/'
                         + encodeURIComponent(String(e.qid)));
             } catch (err) {
-                if (d) d.toast(String((err && err.message) || err), 'error');
+                if (d) d.toast(errText(err), 'error');
             }
             self.refresh();
         });
@@ -1104,7 +1124,7 @@ function loadHistory(surface, hostId, buildBody, excludeId) {
                         d.toast(t('uplift.bench.history.cleared', 'History cleared'));
                         loadHistory(surface, hostId, buildBody, excludeId);
                     })
-                    .catch(function (e) { d.toast(String((e && e.message) || e), 'error'); });
+                    .catch(function (e) { d.toast(errText(e), 'error'); });
             });
             head.appendChild(clear);
             host.appendChild(head);
@@ -2076,7 +2096,7 @@ var TP = {
             rel();
             this.state.running = false;
             this.setButtons();
-            d.toast(String((e && e.message) || e), 'error');
+            d.toast(errText(e), 'error');
         }
     },
 
@@ -2085,7 +2105,7 @@ var TP = {
         var d = dom();
         try {
             await d.postJson(api() + '/bench/' + encodeURIComponent(this.state.benchId) + '/cancel', {});
-        } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        } catch (e) { d.toast(errText(e), 'error'); }
     },
 
     setButtons: function () {
@@ -2428,7 +2448,7 @@ var CTX = {
             rel();
             this.state.running = false;
             this.setButtons();
-            d.toast(String((e && e.message) || e), 'error');
+            d.toast(errText(e), 'error');
         }
     },
 
@@ -2438,7 +2458,7 @@ var CTX = {
         try {
             await d.postJson(api() + '/bench/context/' +
                 encodeURIComponent(this.state.benchId) + '/cancel', {});
-        } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        } catch (e) { d.toast(errText(e), 'error'); }
     },
 
     setButtons: function () {
@@ -2716,7 +2736,7 @@ var ANE = {
             rel();
             this.state.running = false;
             this.setButtons();
-            d.toast(String((e && e.message) || e), 'error');
+            d.toast(errText(e), 'error');
         }
     },
 
@@ -2745,7 +2765,7 @@ var ANE = {
         try {
             await d.postJson(api() + '/bench/ane-tune/' +
                 encodeURIComponent(this.state.tuningId) + '/cancel', {});
-        } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        } catch (e) { d.toast(errText(e), 'error'); }
     },
 
     apply: async function () {
@@ -2761,7 +2781,7 @@ var ANE = {
             if (btn) btn.textContent = t('modal.model_settings.qwen_ane_tune_applied', 'Applied');
         } catch (e) {
             if (btn) btn.disabled = false;
-            d.toast(String((e && e.message) || e), 'error');
+            d.toast(errText(e), 'error');
         }
     },
 
@@ -3763,7 +3783,7 @@ var ACC = {
         var d = dom();
         var body;
         try { body = this.collect(); }
-        catch (e) { d.toast(String((e && e.message) || e), 'error'); return; }
+        catch (e) { d.toast(errText(e), 'error'); return; }
         if (!body.external && !body.model_id) {
             d.toast(t('acc_bench.config.model_placeholder', 'Select a model...'), 'error');
             return;
@@ -3792,7 +3812,7 @@ var ACC = {
                 await d.postJson(api() + '/bench/accuracy/add', extras);
                 posted++;
             }
-        } catch (e) { err = String((e && e.message) || e); }
+        } catch (e) { err = errText(e); }
         rel();
         if (posted) d.toast(t('uplift.bench.queued', 'Added to queue'));
         if (err) d.toast(err, 'error');
@@ -3805,13 +3825,13 @@ var ACC = {
     cancelAll: async function () {
         var d = dom();
         try { await d.postJson(api() + '/bench/accuracy/cancel', {}); this.refreshQueue(); }
-        catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        catch (e) { d.toast(errText(e), 'error'); }
     },
 
     clearResults: async function () {
         var d = dom();
         try { await d.postJson(api() + '/bench/accuracy/results/reset', {}); this.refreshResults(); }
-        catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        catch (e) { d.toast(errText(e), 'error'); }
     },
 
     refreshQueue: async function () {
@@ -4074,7 +4094,7 @@ var ACC = {
                 rm.title = t('models.queue.remove_tooltip', 'Remove');
                 rm.addEventListener('click', async function () {
                     try { await d.deleteJson(api() + '/bench/accuracy/queue/' + (idx - skip)); self.refreshQueue(); }
-                    catch (err) { d.toast(String((err && err.message) || err), 'error'); }
+                    catch (err) { d.toast(errText(err), 'error'); }
                 });
                 head.appendChild(rm);
             }
@@ -4515,7 +4535,7 @@ function MTEB(kind) {
                 this.startStream(r.run_id);
             } catch (e) {
                 rel();
-                d.toast(String((e && e.message) || e), 'error');
+                d.toast(errText(e), 'error');
             }
         },
 
@@ -4524,7 +4544,7 @@ function MTEB(kind) {
             if (!this.state.runId) return;
             try { await d.postJson(api() + '/bench/embed/'
                 + encodeURIComponent(this.state.runId) + '/cancel', {}); }
-            catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+            catch (e) { d.toast(errText(e), 'error'); }
         },
 
         clearResults: async function () {
@@ -4532,7 +4552,7 @@ function MTEB(kind) {
             try {
                 await d.postJson(api() + '/bench/embed/results/reset', {});
                 this.refreshResults();
-            } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+            } catch (e) { d.toast(errText(e), 'error'); }
         },
 
         discover: async function () {
@@ -4971,7 +4991,7 @@ var DEC = {
                 grid.appendChild(card);
             });
         } catch (e) {
-            self.renderStatus('⚠ ' + String((e && e.message) || e));
+            self.renderStatus('⚠ ' + errText(e));
         }
     },
 
@@ -5016,7 +5036,7 @@ var DEC = {
             this.startStream(r.run_id);
         } catch (e) {
             rel();
-            d.toast(String((e && e.message) || e), 'error');
+            d.toast(errText(e), 'error');
         }
     },
 
@@ -5025,7 +5045,7 @@ var DEC = {
         if (!this.state.runId) return;
         try { await d.postJson(api() + '/bench/decision/'
             + encodeURIComponent(this.state.runId) + '/cancel', {}); }
-        catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        catch (e) { d.toast(errText(e), 'error'); }
     },
 
     clearResults: async function () {
@@ -5033,7 +5053,7 @@ var DEC = {
         try {
             await d.postJson(api() + '/bench/decision/results/reset', {});
             this.refreshResults();
-        } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        } catch (e) { d.toast(errText(e), 'error'); }
     },
 
     discover: async function () {

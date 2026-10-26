@@ -139,7 +139,7 @@ async function runReqSearch() {
             { q, model, frm: from, limit: 50 }));
     } catch (err) {
         note.style.display = ''; note.style.flex = '0 0 100%';
-        note.textContent = C.tf('uplift.req.load_failed', 'load failed: {msg}', { msg: err.message });
+        note.textContent = C.tf('uplift.req.load_failed', 'load failed: {msg}', { msg: D.errText(err) });
         return;
     }
     const list = $('reqfeed');

@@ -147,6 +147,7 @@ function load(routes) {
         deleteJson: async (url) => { calls.del.push([url]); return route(url, { method: 'DELETE' }); },
         toast: (m, kind) => calls.toasts.push([m, kind]),
         cell: () => dom.el('span'), emptyMsg: () => {},
+        errText: (e) => { if (e == null) return ''; if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e; if (e.userMessage) return e.userMessage; const m = e.message || String(e); return m.includes(' -> ') ? m.split(' -> ')[1] : m; },
     };
     win.Uplift._modelGlue = {
         stats: () => 0, SECRET_KEYS: new Set(), gsDisplay: v => String(v),

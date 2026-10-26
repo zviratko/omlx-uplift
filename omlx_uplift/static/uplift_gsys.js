@@ -459,7 +459,7 @@ async function gsRestartServer(forced) {
         $('banner-text').textContent = C.tf('uplift.ui.server_restarting_dashboard_reconnecting', 'Server restarting — dashboard reconnecting…');
     } catch (e) {
         gsForceArmed = !!forced;   // a failed FORCE stays armed for retry; a failed plain restart falls back to RESTART SERVER
-        GLUE.toast(C.t('uplift.toast.restart_failed', {msg: e.message}));
+        GLUE.toast(C.t('uplift.toast.restart_failed', {msg: D.errText(e)}));
     }
     b.disabled = false;
     gsUpdateSaveBtn();
@@ -534,8 +534,9 @@ async function gsSaveNow(fields) {
         } catch (e) {
             // UP-19 (1): FE-2 used to swallow the body here ('save failed:
             // HTTP 422'); domkit's kitError already flattens the server's
-            // detail into e.message — show it, like the model editor does.
-            if (e.status) { GLUE.toast(e.message
+            // detail into the text we show — render it through D.errText, like
+            // the model editor does.
+            if (e.status) { GLUE.toast(D.errText(e)
                 || C.t('uplift.toast.save_failed_http', {status: e.status}), 'error');
                 return false; }
             throw e;
@@ -573,7 +574,7 @@ async function gsSaveNow(fields) {
             : 'saved ✓ (shadow — real oMLX untouched)';
         GLUE.toast(C.t('uplift.toast.settings_saved_n', {n: Object.keys(fields).length}));
         return true;
-    } catch (err) { GLUE.toast(C.t('uplift.toast.save_failed', {msg: err.message})); return false; }
+    } catch (err) { GLUE.toast(C.t('uplift.toast.save_failed', {msg: D.errText(err)})); return false; }
 }
 
 function gsGet(sec, field) {
@@ -1283,7 +1284,7 @@ function gsNumberScaleRow(body) {
 async function pollGlobalSettings() {
     let d;
     try { d = await GLUE.fetchJson(`${API}/admin/api/global-settings`); }
-    catch (err) { GLUE.emptyMsg($('gs-body'), C.tf('uplift.gsys.not_served', 'global-settings not served (') + err.message + ')'); return; }
+    catch (err) { GLUE.emptyMsg($('gs-body'), C.tf('uplift.gsys.not_served', 'global-settings not served (') + D.errText(err) + ')'); return; }
     // never clobber queued edits with a background poll; merge server state
     // under the dirty overrides so inputs stay put until SAVE
     if (Object.keys(gsDirty).length) {
@@ -1429,7 +1430,7 @@ async function envSave(fields) {
         for (const s of (r.shadowed || [])) ENV_SHADOW[s.name] = s.value_masked;
         return true;
     } catch (err) {
-        GLUE.toast(C.tf('uplift.gsys.env_fail', 'env tunables: ') + err.message, 5000);
+        GLUE.toast(C.tf('uplift.gsys.env_fail', 'env tunables: ') + D.errText(err), 5000);
         return false;
     }
 }
@@ -1640,7 +1641,7 @@ async function openEnvCatalog(reopen) {
         try {
             ENV_CAT = await GLUE.fetchJson(`${API}/uplift/api/env-catalog`);
         } catch (err) {
-            GLUE.toast(C.tf('uplift.envcat.load_fail', 'environment catalog: ') + err.message, 5000);
+            GLUE.toast(C.tf('uplift.envcat.load_fail', 'environment catalog: ') + D.errText(err), 5000);
             return;
         }
     }
@@ -1928,7 +1929,7 @@ const GS_SPEC = [
                     if (d && d.sub_key) arr.push(d.sub_key);
                     closeForm(); render();
                 })
-                .catch(e => { err.textContent = String((e && e.message) || e); });
+                .catch(e => { err.textContent = D.errText(e); });
         });
         const cancelB = mk(t('settings.auth.sub_keys_cancel'), '', closeForm,
             null, 'settings.auth.sub_keys_cancel');
@@ -1973,7 +1974,7 @@ const GS_SPEC = [
                             const i = arr.indexOf(sk); if (i >= 0) arr.splice(i, 1);
                             render();
                         })
-                        .catch(e => GLUE.toast(String((e && e.message) || e), 'error'));
+                        .catch(e => GLUE.toast(D.errText(e), 'error'));
                 });
                 ctl.append(val, eye, reg(del, 'settings.auth.sub_keys_delete', 'text'));
                 row.append(nm, when, ctl);
@@ -2169,7 +2170,7 @@ const GS_SPEC = [
             GLUE.postJson(`${API}/admin/api/claude-desktop/` +
                 (gsGet('claude_code', 'desktop_enabled') ? 'configure' : 'restore'), {})
                 .then(d => setStat(!!(d && d.configured)))
-                .catch(e => GLUE.toast(String((e && e.message) || e), 'error'))
+                .catch(e => GLUE.toast(D.errText(e), 'error'))
                 .finally(() => busy(reapply, ''));
         };
         restore.onclick = () => {
