@@ -1441,13 +1441,18 @@ function renderEditorFields(container) {
                 // classic: the switch is clickable only when this Mac can
                 // cap — or to turn OFF a limit a newer server stored
                 disabled: !gpuSup && !gpuOn,
-                // classic's click seeds 10 W when enabling an empty input
+                // classic's click seeds 10 W when enabling an empty input.
+                // NOTE: seBind's listener does onChange OR seRefreshGates —
+                // carrying onChange means we must run the gate refresh
+                // ourselves or the watts input stays disabled (live-caught
+                // on the board, fire 9).
                 onChange: vals => {
                     if (vals.enableGpuPowerLimit && !vals.gpu_power_limit_w) {
                         vals.gpu_power_limit_w = 10;
                         const wi = gpuWattsRow.querySelector('input');
                         if (wi) wi.value = '10';
                     }
+                    seRefreshGates(document.getElementById('se-fields') || document);
                 } }),
             [gpuWattsRow]);
         if (!gpuSup) {
