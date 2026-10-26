@@ -68,6 +68,9 @@ test('UP-56 shape: both bench panels carry the note, tp honors the external gate
     assert.match(src, /f\.append\(row1, tpGpuNote, row2, row3, adv, actions\)/);
     assert.match(src, /self\.isExternal\(\) \? 0\s*\n\s*: benchGpuWatts\(self\.state && self\.state\.modelRows/);
     assert.match(src, /this\.state\.modelRows = usable;/);
+    // model-change binding is on the ELEMENT REF (gid+rAF misses the async
+    // view mount — UP-57); live catch 2026-10-26
+    assert.match(src, /modelSel\.addEventListener\('change', syncGpuNote\)/);
     // ctx panel: change wiring + loadModels re-sync (no external condition)
     assert.match(src, /modelSel\.addEventListener\('change', syncCtxGpuNote\)/);
     assert.match(src, /if \(this\._syncCtxGpuNote\) this\._syncCtxGpuNote\(\)/);

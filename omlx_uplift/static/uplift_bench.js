@@ -1795,6 +1795,11 @@ var TP = {
             if (w) tpGpuNote.textContent = gpuNoteText(w);
         }
         self._syncGpuNote = syncGpuNote;
+        // bind to the element reference, NOT gid+rAF: this panel's legacy
+        // rAF callback can fire BEFORE f lands in the DOM (async view
+        // mount), so gid misses and the listener is never attached —
+        // pre-existing dead-wiring bug, ticketed as UP-57, not widened here
+        modelSel.addEventListener('change', syncGpuNote);
 
         var row2 = el('div', 'bench-row');
         var ppBox = el('div', 'bench-chips'); ppBox.id = 'bench-tp-pp';
