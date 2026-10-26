@@ -82,6 +82,11 @@
         'repetition_penalty', 'min_p', 'presence_penalty', 'force_sampling',
         'enable_thinking', 'thinking_budget_enabled',
         'thinking_budget_tokens', 'cache_reasoning_output',
+        // SYNC-1 (upstream d59d797 #4855 + 95e0fd6 #4819): GPU power cap and
+        // the fp16 recast rows join the classic Advanced column — the whole
+        // column sits behind the llm/vlm gate, so the type flip must strip
+        // them like its neighbours.
+        'gpu_power_limit_w', 'activation_fp16_enabled',
         'guided_grammar_enabled', 'guided_grammar',
         'max_tool_result_tokens', 'chat_template_kwargs', 'forced_ct_kwargs',
         'trust_remote_code', 'index_cache_freq', 'turboquant_kv_enabled',
@@ -276,6 +281,18 @@
             deepseek_v41_engram_ssd_offload_forced: !!(model && model.deepseek_v41_engram_ssd_offload_forced === true),
             enableThinkingBudget: !!s.thinking_budget_tokens,
             thinking_budget_tokens: s.thinking_budget_tokens || null,
+            // SYNC-1 (upstream d59d797 #4855 + 95e0fd6 #4819): classic's
+            // enableGpuPowerLimit is a UI helper — on = stored cap > 0
+            // (dashboard.js:2174). The supported verdicts ride the model
+            // DTO: gpu_power_limit_supported via _model_options (machine
+            // capability), activation_fp16_supported per checkpoint + M1/M2
+            // GPU (routes.py:2437). Absent on an older keg = both false =
+            // rows hidden, keys omitted client-side AND by adaptToServer.
+            enableGpuPowerLimit: !!s.gpu_power_limit_w,
+            gpu_power_limit_w: s.gpu_power_limit_w || null,
+            gpu_power_limit_supported: !!(model && model.gpu_power_limit_supported === true),
+            activation_fp16_enabled: s.activation_fp16_enabled === true,
+            activation_fp16_supported: !!(model && model.activation_fp16_supported === true),
             guided_grammar_enabled: s.guided_grammar_enabled || false,
             guided_grammar: s.guided_grammar || '',
             enableToolResultLimit: !!s.max_tool_result_tokens,
@@ -424,6 +441,19 @@
         // qwen4_exp). The old blanket block falsely denied those.
         if (ms.moe_expert_offload_enabled && ms.mtp_enabled && !ms.moe_offload_allows_mtp)
             errors.push('MoE expert offload cannot be combined with Lightning MTP on this model; disable one of them.');
+        // SYNC-1 (upstream 95e0fd6 #4819): offload slots live outside the
+        // module tree, so the recast leaves them bf16 — the server refuses
+        // the pair outright (model_settings.py validate_moe_expert_offload).
+        if (ms.moe_expert_offload_enabled && ms.activation_fp16_enabled)
+            errors.push('MoE expert offload cannot be combined with the float16 activation recast; disable one of them first.');
+        // SYNC-1 (upstream d59d797 #4855): classic's save-time range check
+        // (validateGpuPowerLimit) — the server clamps <=0 to None, and the
+        // 2..1000 W ladder is the UI contract.
+        if (ms.enableGpuPowerLimit) {
+            const gw = num(ms.gpu_power_limit_w);
+            if (!Number.isInteger(gw) || gw < 2 || gw > 1000)
+                errors.push('GPU power limit must be a whole number from 2 to 1000 W.');
+        }
         // UP-18 (2): a PAROQUANT checkpoint cannot carry KV compression,
         // VLM MTP, SpecPrefill or Index Cache (classic disables the rows).
         if (ms.is_paroquant && (ms.turboquant_kv_enabled || ms.vlm_mtp_enabled
@@ -517,6 +547,10 @@
                 : !!ms.deepseek_v41_engram_ssd_offload,
             thinking_budget_enabled: !!ms.enableThinkingBudget,
             thinking_budget_tokens: ms.enableThinkingBudget ? (ms.thinking_budget_tokens || null) : 0,
+            // SYNC-1: classic sends both keys unconditionally
+            // (dashboard.js:3241/3250); the server folds <=0/None to no-cap.
+            gpu_power_limit_w: ms.enableGpuPowerLimit ? (Number(ms.gpu_power_limit_w) || 0) : 0,
+            activation_fp16_enabled: !!ms.activation_fp16_enabled,
             cache_reasoning_output: ms.cache_reasoning_output ?? null,
             guided_grammar_enabled: !!ms.guided_grammar_enabled,
             guided_grammar: ms.guided_grammar_enabled ? (ms.guided_grammar || null) : null,

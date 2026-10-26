@@ -919,6 +919,7 @@
  "uplift.ui.stored_configuration_for_models_that_no_longer_e": "Configuration stockée de modèles qui n'existent plus sur disque. ",
  "uplift.ui.test_search": "Tester la recherche",
  "uplift.ui.thinking_budget_tokens": "Budget de réflexion (jetons)",
+ "uplift.ui.gpu_power_limit_watts": "Limite de puissance (W)",
  "uplift.ui.threshold_tokens": "Seuil (jetons)",
  "uplift.ui.tool_result_token_limit": "Limite de jetons du résultat d'outil",
  "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Décharge un modèle après cette durée sans utilisation.",

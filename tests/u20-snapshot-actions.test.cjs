@@ -306,7 +306,11 @@ const CLASSIC_CLEAR = [
     ['guided_grammar_enabled', false], ['guided_grammar', ''],
     ['ttl_seconds', null], ['enableIndexCache', false], ['index_cache_freq', 0],
     ['enable_thinking', false], ['enableThinkingBudget', false],
-    ['thinking_budget_tokens', 0], ['enableToolResultLimit', false],
+    ['thinking_budget_tokens', 0],
+    // SYNC-1 (upstream d59d797 #4855): classic dashboard.js:3674-3675 added
+    // the power-cap pair between the thinking and tool-result pairs
+    ['enableGpuPowerLimit', false], ['gpu_power_limit_w', null],
+    ['enableToolResultLimit', false],
     ['max_tool_result_tokens', 0], ['ctKwargEntries', []],
     ['turboquant_kv_enabled', false], ['turboquant_kv_scheme', 'turboquant'],
     ['turboquant_kv_bits', 4],

@@ -915,6 +915,7 @@
  "uplift.ui.stored_configuration_for_models_that_no_longer_e": "为磁盘上已不存在的模型保存的配置。",
  "uplift.ui.test_search": "测试搜索",
  "uplift.ui.thinking_budget_tokens": "思考预算（词元）",
+ "uplift.ui.gpu_power_limit_watts": "功耗上限（W）",
  "uplift.ui.threshold_tokens": "阈值（词元）",
  "uplift.ui.tool_result_token_limit": "工具结果词元限制",
  "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "模型闲置超过此时长后卸载。",

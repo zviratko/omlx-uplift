@@ -915,6 +915,7 @@
  "uplift.ui.stored_configuration_for_models_that_no_longer_e": "Сохранённые настройки моделей, которых больше нет на диске. ",
  "uplift.ui.test_search": "Проверить поиск",
  "uplift.ui.thinking_budget_tokens": "Бюджет размышлений (токенов)",
+ "uplift.ui.gpu_power_limit_watts": "Лимит мощности (Вт)",
  "uplift.ui.threshold_tokens": "Порог (токенов)",
  "uplift.ui.tool_result_token_limit": "Лимит токенов результата инструмента",
  "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Выгрузить модель, если она не использовалась столько времени.",

@@ -105,6 +105,45 @@ test('validate: specprefill keep range', () => {
     const st = S.buildState(base(), { specprefill_enabled: true, specprefill_keep_pct: '0.9' });
     assert.match(ok(st).join('|'), /between 0.1 and 0.5/);
 });
+// SYNC-1 (upstream d59d797 #4855 + 95e0fd6 #4819): GPU power cap + fp16 recast
+test('state: enableGpuPowerLimit mirrors classic helper semantics (stored cap > 0)', () => {
+    const st = S.buildState(base({ gpu_power_limit_supported: true }), { gpu_power_limit_w: 10 });
+    assert.strictEqual(st.enableGpuPowerLimit, true);
+    assert.strictEqual(S.buildState(base(), {}).gpu_power_limit_supported, false);
+    const off = S.buildState(base({ activation_fp16_supported: true }), {});
+    assert.strictEqual(off.activation_fp16_enabled, false);
+    assert.strictEqual(off.activation_fp16_supported, true);
+});
+test('payload: gpu_power_limit_w carries 0 when off, watts when on; fp16 always', () => {
+    const p = S.buildPayload(S.buildState(base(), {}), base());
+    assert.strictEqual(p.gpu_power_limit_w, 0);
+    assert.strictEqual(p.activation_fp16_enabled, false);
+    const on = S.buildPayload(S.buildState(base({ gpu_power_limit_supported: true }),
+        { gpu_power_limit_w: 25 }), base());
+    assert.strictEqual(on.gpu_power_limit_w, 25);
+    assert.strictEqual(on.activation_fp16_enabled, false);
+    const fp = S.buildPayload(S.buildState(base({ activation_fp16_supported: true }),
+        { activation_fp16_enabled: true }), base({ activation_fp16_supported: true }));
+    assert.strictEqual(fp.activation_fp16_enabled, true);
+});
+test('payload: non-llm type flip strips the Advanced-column keys (SYNC-1)', () => {
+    const emb = base({ model_type: 'embedding', config_model_type: 'embedding' });
+    const p = S.buildPayload(S.buildState(emb, { gpu_power_limit_w: 30,
+        activation_fp16_enabled: true }), emb);
+    assert.ok(!('gpu_power_limit_w' in p), 'gpu key survived non-llm strip');
+    assert.ok(!('activation_fp16_enabled' in p), 'fp16 key survived non-llm strip');
+});
+test('validate: offload x recast pair 400s server-side, watts ladder 2..1000', () => {
+    const pair = S.buildState(base({ moe_expert_offload_supported: true,
+        activation_fp16_supported: true }),
+        { moe_expert_offload_enabled: true, activation_fp16_enabled: true });
+    assert.match(ok(pair).join('|'), /float16 activation recast/);
+    const bad = S.buildState(base({ gpu_power_limit_supported: true }),
+        { enableGpuPowerLimit: true, gpu_power_limit_w: 1 });
+    assert.match(ok(bad).join('|'), /whole number from 2 to 1000 W/);
+    assert.deepStrictEqual(ok(S.buildState(base({ gpu_power_limit_supported: true }),
+        { enableGpuPowerLimit: true, gpu_power_limit_w: 10 })), []);
+});
 test('validate: clean state passes', () => {
     assert.deepStrictEqual(ok(S.buildState(base(), {})), []);
 });

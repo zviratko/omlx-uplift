@@ -918,6 +918,7 @@
  "uplift.ui.stored_configuration_for_models_that_no_longer_e": "ディスク上に存在しないモデルの保存済み設定。",
  "uplift.ui.test_search": "検索をテスト",
  "uplift.ui.thinking_budget_tokens": "思考バジェット(トークン)",
+ "uplift.ui.gpu_power_limit_watts": "電力制限 (W)",
  "uplift.ui.threshold_tokens": "しきい値トークン",
  "uplift.ui.tool_result_token_limit": "ツール結果のトークン上限",
  "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "この時間未使用のモデルをアンロードします。",

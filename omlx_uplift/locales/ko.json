@@ -930,6 +930,7 @@
  "uplift.ui.stored_configuration_for_models_that_no_longer_e": "디스크에 더 이상 없는 모델의 저장된 설정. ",
  "uplift.ui.test_search": "검색 테스트",
  "uplift.ui.thinking_budget_tokens": "생각 토큰 제한 (토큰)",
+ "uplift.ui.gpu_power_limit_watts": "전력 제한 (W)",
  "uplift.ui.threshold_tokens": "임계값 (토큰)",
  "uplift.ui.tool_result_token_limit": "도구 결과 토큰 제한",
  "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "이 시간 동안 사용되지 않은 모델을 언로드합니다.",

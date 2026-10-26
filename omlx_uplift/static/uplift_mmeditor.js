@@ -110,6 +110,8 @@ const SE_KEY_MAP = {
     enableThinkingBudget: ['thinking_budget_enabled', 'thinking_budget_tokens'],
     enableIndexCache: ['index_cache_freq'],
     enableToolResultLimit: ['max_tool_result_tokens'],
+    // SYNC-1 (upstream d59d797): classic's UI helper owns the watts payload
+    enableGpuPowerLimit: ['gpu_power_limit_w'],
 };
 // the runtimeDiff keys speak the payload shape; old servers store the
 // legacy twin name in the profile (adaptToServerSettings renames)
@@ -792,7 +794,8 @@ function seTypeNote(container) {
    it at request time. Server-key -> editor-state-key twins for the few
    renamed fields; everything else is name-identical. */
 const SE_REQ_TWINS = { thinking_budget_enabled: 'enableThinkingBudget',
-                       max_tool_result_tokens: 'enableToolResultLimit' };
+                       max_tool_result_tokens: 'enableToolResultLimit',
+                       gpu_power_limit_w: 'enableGpuPowerLimit' };
 function seReqBaseVals() {
     // base tab's CURRENT state: frozen snapshot + queued (dirty) edits
     const t0 = seTabs.find(z => z.id === 'base');
@@ -1114,10 +1117,17 @@ function renderEditorFields(container) {
                 // when the server says this model cannot pair them.
                 const mtpOffloadLock = !!seValues.moe_expert_offload_enabled
                     && !(m && m.moe_offload_allows_mtp === true);
-                const mtpLock = (mtpNoHead || mtpOffloadLock) && seValues.mtp_enabled !== true;
+                // SYNC-1 (upstream 95e0fd6 #4819): classic MO:854 adds the
+                // fp16 recast to the MTP lock — the recast owns the
+                // activation path this model drafts through.
+                const mtpFp16Lock = seValues.activation_fp16_enabled === true;
+                const mtpLock = (mtpNoHead || mtpOffloadLock || mtpFp16Lock)
+                    && seValues.mtp_enabled !== true;
                 const mtpWhy = mtpNoHead
                     ? (m.mtp_compatibility_reason || 'Not compatible with this model')
-                    : 'MoE expert offload is on — this model cannot pair it with Lightning MTP.';
+                    : mtpFp16Lock
+                        ? 'Float16 activations are on — Lightning MTP cannot pair with the recast.'
+                        : 'MoE expert offload is on — this model cannot pair it with Lightning MTP.';
                 const mtpRow = seBind('bool', 'mtp_enabled', {
                     label: 'Lightning MTP',
                     disabled: mtpLock,
@@ -1271,7 +1281,10 @@ function renderEditorFields(container) {
         // UP-18 (1): classic MO:845 — the OFFLOAD toggle is locked while an
         // incompatible spec path is on (MTP only when the model disallows).
         const offLock = (!!seValues.mtp_enabled && !(m.moe_offload_allows_mtp === true))
-            || !!seValues.vlm_mtp_enabled || !!seValues.dflash_enabled;
+            || !!seValues.vlm_mtp_enabled || !!seValues.dflash_enabled
+            // SYNC-1 (upstream 95e0fd6 #4819, MO:857): mutual lock with the
+            // fp16 recast — the server 400s the pair (validate mirrors it).
+            || seValues.activation_fp16_enabled === true;
         const offRow = seBind('bool', 'moe_expert_offload_enabled', {
             label: 'MoE Expert Offload',
             disabled: offLock,
@@ -1405,11 +1418,110 @@ function renderEditorFields(container) {
                         sel.value === '' ? null : sel.value === 'true'; });
             }
 
-            seFam(g, 'enableToolResultLimit',
-                seBind('bool', 'enableToolResultLimit', { label: 'Limit Tool Result Tokens',
-                    hint: 'Truncate large tool results (e.g. file reads) to a token limit.' }),
-                [seBind('number', 'max_tool_result_tokens',
-                    { label: C.tf('uplift.ui.tool_result_token_limit', 'Tool result token limit'), min: 1, step: 1 })]);
+    }
+
+    /* ---- SYNC-1 (upstream d59d797 #4855 + 95e0fd6 #4819): GPU Power
+       Limit and Float16 Activations join the Advanced column after the
+       thinking rows, matching classic's template order (Thinking 1005 →
+       GPU 1028 → FP16 1083 → Tool Result 1105). Classic gates the whole
+       column on llm/vlm — the uplift non-llm branch never reaches this
+       code — and puts NO diffusion gate on these two rows, so they live
+       BETWEEN the diffusion-gated blocks. ---- */
+    {
+        const gpuSup = seValues.gpu_power_limit_supported === true;
+        const gpuOn = seValues.enableGpuPowerLimit === true;
+        const gpuWattsRow = seBind('number', 'gpu_power_limit_w', {
+            label: C.tf('uplift.ui.gpu_power_limit_watts', 'Power limit (W)'),
+            min: 2, max: 1000, step: 1 });
+        const gpuFam = seFam(g, 'enableGpuPowerLimit',
+            seBind('bool', 'enableGpuPowerLimit', {
+                label: C.tf('modal.model_settings.gpu_power_limit', 'GPU Power Limit'),
+                hint: C.tf('modal.model_settings.gpu_power_limit_hint',
+                    'Caps GPU power for the whole Mac while this model generates, from 2 to 1000 W. It only helps below the usual draw. For example, an M5 Max uses about 25 W to generate an answer: 10 W saves about 40% energy per token and 5 W about half.'),
+                // classic: the switch is clickable only when this Mac can
+                // cap — or to turn OFF a limit a newer server stored
+                disabled: !gpuSup && !gpuOn,
+                // classic's click seeds 10 W when enabling an empty input
+                onChange: vals => {
+                    if (vals.enableGpuPowerLimit && !vals.gpu_power_limit_w) {
+                        vals.gpu_power_limit_w = 10;
+                        const wi = gpuWattsRow.querySelector('input');
+                        if (wi) wi.value = '10';
+                    }
+                } }),
+            [gpuWattsRow]);
+        if (!gpuSup) {
+            const warn = document.createElement('p');
+            warn.className = 'se-hint';
+            warn.textContent = C.tf('modal.model_settings.gpu_power_limit_unsupported',
+                "This Mac's GPU does not support a power limit.");
+            gpuFam.append(warn);
+        }
+        // classic's measured-cost guide (MO:1060-1080) — same static table
+        const det = document.createElement('details');
+        det.className = 'se-sub';
+        const sum = document.createElement('summary');
+        sum.textContent = C.tf('modal.model_settings.gpu_power_limit_guide_title',
+            'Measured on M5 Max (other chips differ)');
+        det.append(sum);
+        const gt = document.createElement('table');
+        const ghead = document.createElement('tr');
+        [['Limit', 'gpu_power_limit_guide_limit'],
+         ['Answer speed', 'gpu_power_limit_guide_answer'],
+         ['Energy per token', 'gpu_power_limit_guide_energy'],
+         ['Prompt speed', 'gpu_power_limit_guide_prompt']].forEach(([en, k]) => {
+            const th = document.createElement('th');
+            th.textContent = C.tf('modal.model_settings.' + k, en);
+            ghead.append(th);
+        });
+        gt.append(ghead);
+        [[C.tf('modal.model_settings.gpu_power_limit_guide_none', 'No limit'),
+          'GPU 23-27 W', '-', 'GPU 67-76 W'],
+        ['30-40 W', '0%', '0%', '-14 ~ -30%'],
+        ['20 W', '-3 ~ -4%', '-11 ~ -12%', '-38 ~ -44%'],
+        ['15 W', '-6 ~ -7%', '-25 ~ -29%', '-49 ~ -53%'],
+        ['10 W', '-14 ~ -18%', '-37 ~ -43%', '-59 ~ -64%'],
+        ['5 W', '-36 ~ -48%', '-49 ~ -52%', '-75 ~ -78%'],
+        ['2 W', '-67 ~ -78%', '-47 ~ -52%', '-90 ~ -91%'],
+        ].forEach(cells => {
+            const tr = document.createElement('tr');
+            cells.forEach(c => {
+                const td = document.createElement('td');
+                td.textContent = c;
+                tr.append(td);
+            });
+            gt.append(tr);
+        });
+        det.append(gt);
+        const gnote = document.createElement('p');
+        gnote.textContent = C.tf('modal.model_settings.gpu_power_limit_guide_note',
+            '30 W or more barely changes answer speed. Below 5 W, energy per token stops falling and answers only get slower. The minimum is 2 W. Other requests and apps also slow down while the limit is active. Benchmarks run without it.');
+        det.append(gnote);
+        gpuFam.append(det);
+    }
+    if (seValues.activation_fp16_supported) {
+        // classic MO:1095: offload locks the recast (and the recast locks
+        // offload); the row renders only when the server says this GPU
+        // generation + checkpoint bf16 leaves can take it
+        const fpLock = seValues.moe_expert_offload_enabled === true;
+        const fpRow = seBind('bool', 'activation_fp16_enabled', {
+            label: C.tf('modal.model_settings.activation_fp16', 'Float16 Activations'),
+            hint: C.tf('modal.model_settings.activation_fp16_hint',
+                "Converts the bfloat16 scales, norms and embeddings of this model to float16 at load. M1 and M2 GPUs emulate bfloat16, so prefill and decode run faster. Output can differ slightly from bfloat16. Not available with MoE expert offload."),
+            disabled: fpLock && !seValues.activation_fp16_enabled });
+        if (fpLock) {
+            fpRow.title = 'MoE expert offload is on — disable it before the float16 recast.';
+            const fi = fpRow.querySelector('input');
+            if (fi) fi.title = fpRow.title;
+        }
+        g.append(fpRow);
+    }
+    if (!S.isDiffusion(m)) {
+        seFam(g, 'enableToolResultLimit',
+            seBind('bool', 'enableToolResultLimit', { label: 'Limit Tool Result Tokens',
+                hint: 'Truncate large tool results (e.g. file reads) to a token limit.' }),
+            [seBind('number', 'max_tool_result_tokens',
+                { label: C.tf('uplift.ui.tool_result_token_limit', 'Tool result token limit'), min: 1, step: 1 })]);
     }
     if (!S.isDiffusion(m)) {
         const ggWrap = seBind('textarea', 'guided_grammar', {
@@ -3275,7 +3387,13 @@ const SE_GEN_CLEAR = [
     ['guided_grammar_enabled', false], ['guided_grammar', ''],
     ['ttl_seconds', null], ['enableIndexCache', false], ['index_cache_freq', 0],
     ['enable_thinking', false], ['enableThinkingBudget', false],
-    ['thinking_budget_tokens', 0], ['enableToolResultLimit', false],
+    ['thinking_budget_tokens', 0],
+    // SYNC-1 (upstream d59d797): classic's clear-generation also drops the
+    // power cap (dashboard.js:3674-3675), between the thinking pair and the
+    // tool-result pair; the fp16 recast is NOT in that list — classic leaves
+    // it alone.
+    ['enableGpuPowerLimit', false], ['gpu_power_limit_w', null],
+    ['enableToolResultLimit', false],
     ['max_tool_result_tokens', 0], ['ctKwargEntries', []],
     ['turboquant_kv_enabled', false], ['turboquant_kv_scheme', 'turboquant'],
     ['turboquant_kv_bits', 4],

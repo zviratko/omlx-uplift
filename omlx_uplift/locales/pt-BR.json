@@ -919,6 +919,7 @@
  "uplift.ui.stored_configuration_for_models_that_no_longer_e": "Configuração salva de modelos que não existem mais no disco. ",
  "uplift.ui.test_search": "Testar busca",
  "uplift.ui.thinking_budget_tokens": "Orçamento de pensamento (tokens)",
+ "uplift.ui.gpu_power_limit_watts": "Limite de potência (W)",
  "uplift.ui.threshold_tokens": "Limiar (tokens)",
  "uplift.ui.tool_result_token_limit": "Limite de tokens do resultado da ferramenta",
  "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Descarrega um modelo após esse tempo sem uso.",

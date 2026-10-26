@@ -915,6 +915,7 @@
  "uplift.ui.stored_configuration_for_models_that_no_longer_e": "Uložená konfigurace modelů, které již nejsou na disku. ",
  "uplift.ui.test_search": "Otestovat hledání",
  "uplift.ui.thinking_budget_tokens": "Rozpočet přemýšlení (tokeny)",
+ "uplift.ui.gpu_power_limit_watts": "Limit výkonu (W)",
  "uplift.ui.threshold_tokens": "Prahová hodnota (tokeny)",
  "uplift.ui.tool_result_token_limit": "Limit tokenů výsledku nástroje",
  "uplift.ui.unload_a_model_after_it_has_been_unused_for_this": "Uvolnit model, pokud nebyl takto dlouho používán.",
