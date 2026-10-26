@@ -502,13 +502,35 @@ test('VOICE-13: a 120 s utterance is force-closed and delivered', async () => {
     const ws = await h.listen();
     ws.open(); ws.ready();
     ws.delta('word');                     // got=true: the stuck escape is off
-    for (let i = 0; i < 15 && ws.count({ type: 'stop' }) === 0; i++)
+    for (let i = 0; i < 15 && ws.count({ type: 'stop' }) === 0; i++) {
         h.say(10, 0.2);                   // 150 s of unbroken speech
+        ws.delta('looooooong-ish word!!');// healthy commit rate (>1 char/s)
+    }
     assert.equal(ws.count({ type: 'stop' }), 1, 'the cap forced stop');
     assert.equal(h.probe().frames >= 1200, true, 'capped at ~120 s');
+    assert.equal(h.stt().transport, 'realtime',
+        'a fast-committing session never sees the UP-9 rate guard');
     ws.done('word');
     await h.flush();
     assert.ok(h.textInput.textContent.includes('word'), 'capped utterance landed');
+});
+
+test('UP-9: a committing-but-slowed session is demoted to segmented once', async () => {
+    // measured large-v3 cadence ("The" after ~20 s) behind a name the a0
+    // regex cannot match: the rate guard must land what was heard and move
+    // the whole LISTEN run to segmented — no restart loop, no silence tax
+    const h = await makeHarness({ localStorage: Object.assign({}, CONT) }).booted();
+    const ws = await h.listen();
+    ws.open(); ws.ready();
+    ws.delta('The');
+    h.say(11, 0.2);
+    assert.equal(h.stt().transport, 'realtime', '11 s voiced is still under the window');
+    h.say(2, 0.2);                        // 13 s voiced, 3 chars: 0.23 cps
+    assert.equal(h.stt().transport, 'segmented', 'the slow-commit guard demotes');
+    assert.equal(ws.closed, true, 'the stalled realtime socket is gone for good');
+    assert.equal(h.textInput.textContent.includes('The'), true,
+        'what was heard is not thrown away on demotion');
+    assert.equal(h.probe().restarts, 0, 'a demotion is not a restart');
 });
 
 test('VOICE-13: the socket dying mid-session is honest and never retried', async () => {

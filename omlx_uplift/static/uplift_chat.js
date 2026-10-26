@@ -83,6 +83,26 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
 function W() { return (typeof window !== 'undefined') ? window : null; }
 function C() { return W() && W().UpliftCore ? W().UpliftCore : null; }
 function D() { return W() && W().UpliftDom ? W().UpliftDom : null; }
+/* UP-52 (ratchet closed for this file): every string a human reads from a
+   caught error comes through the kit's errText. domkit keeps the internal
+   '<route> -> <status>: reason' shape on the error for the console/tests and
+   publishes `.userMessage` route-free (UP-49), so a toast can no longer spell
+   our URL layout to the operator. The no-kit branch covers headless harnesses
+   that stub UpliftDom without the UP-49 seam; it applies the SAME leading-route
+   cut, so the test path cannot leak the shape either. */
+function errText(e) {
+    var d = D();
+    if (d && d.errText) return d.errText(e);
+    if (e == null) return '';
+    if (e.userMessage) return e.userMessage;
+    // No kit seam (headless harness): String(err) carries a 'TypeError: ' style
+    // constructor prefix the show sites never had — drop it so the text matches
+    // what the kit would have returned, then cut the leading route the same way.
+    var s = (typeof e === 'string') ? e
+        : String(e).replace(/^[A-Za-z][\w$]*(?:Error|Exception): /, '');
+    var i = s.indexOf(' -> ');
+    return i >= 0 ? s.slice(i + 4) : s;
+}
 function api() {
     var st = W() && W().Uplift && W().Uplift.state;
     return ((st && st.API) || '') + '/uplift/api';
@@ -684,7 +704,7 @@ function saveConv() {
         var warn = gid('chat-native-warn');
         if (warn) warn.hidden = !(r && r.kb && r.kb > 512);
     }).catch(function (e) {
-        d.toast(String((e && e.message) || e), 'error');
+        d.toast(errText(e), 'error');
     });
     refreshConvList();
 }
@@ -746,7 +766,7 @@ function exportChats() {
         a.href = url; a.download = name + '.json';
         w.document.body.appendChild(a); a.click(); a.remove();
         w.URL.revokeObjectURL(url);
-    }).catch(function (e) { d.toast(String((e && e.message) || e), 'error'); });
+    }).catch(function (e) { d.toast(errText(e), 'error'); });
 }
 
 async function importChats(input) {
@@ -872,7 +892,7 @@ function refreshConvList() {
         b.addEventListener('click', function () {
             if (_conv && s.id === _conv.id) return;
             openConv(s.id).catch(function (e) {
-                D().toast(String((e && e.message) || e), 'error'); });
+                D().toast(errText(e), 'error'); });
         });
         b.addEventListener('dblclick', function () { convRename(s, b); });
         // pin toggle — partial save path: summaries carry no messages,
@@ -893,13 +913,13 @@ function refreshConvList() {
                     if (_conv && _conv.id === s.id) _conv.pinned = full.pinned;
                     refreshConvList();
                 }).catch(function (e) {
-                    D().toast(String((e && e.message) || e), 'error'); });
+                    D().toast(errText(e), 'error'); });
             };
             if (_conv && _conv.id === s.id) { _conv.pinned = !s.pinned;
                 saveConv(); refreshConvList(); return; }
             D().fetchJson(api() + '/chat/history/' + encodeURIComponent(s.id))
                 .then(flip)
-                .catch(function (e) { D().toast(String((e && e.message) || e), 'error'); });
+                .catch(function (e) { D().toast(errText(e), 'error'); });
         });
         row.appendChild(b);
         if (_conv && s.id === _conv.id && _streaming) {
@@ -941,7 +961,7 @@ function convRename(s, btn) {
         if (_conv && _conv.id === s.id) { _conv.title = v; saveConv(); refreshConvList(); return; }
         D().fetchJson(api() + '/chat/history/' + encodeURIComponent(s.id))
             .then(apply)
-            .catch(function (e) { D().toast(String((e && e.message) || e), 'error'); });
+            .catch(function (e) { D().toast(errText(e), 'error'); });
     };
     inp.addEventListener('keydown', function (ev) {
         if (ev.key === 'Enter') { ev.preventDefault(); done(true); }
@@ -1977,10 +1997,10 @@ function executeTool(tc, signal) {
             return { content: JSON.stringify(data), images: [],
                      web: true, payload: data };
         })
-        .catch(function (e) { return { content: 'Error: ' + (e.message || e),
+        .catch(function (e) { return { content: 'Error: ' + errText(e),
                                        images: [], web: req.url !== '/v1/mcp/execute',
                                        payload: { ok: false,
-                                                  error: { message: String((e && e.message) || e) } } }; });
+                                                  error: { message: errText(e) } } }; });
 }
 
 function transcribeAudio(file, model, signals, signal) {
@@ -2255,7 +2275,7 @@ function nativeHandler(_componentBody, signals) {
         close();
     }).catch(function (e) {
         if (e && e.name === 'AbortError') { close(); return; }
-        signals.onResponse({ error: String((e && e.message) || e) });
+        signals.onResponse({ error: errText(e) });
         close();
     });
 }
@@ -2800,7 +2820,7 @@ function toolbar() {
             if (_dc) _dc.history = [];
             if (_ctxRender) _ctxRender();   // UP-16: deleted chat, zero gauge
             refreshConvList();
-        } catch (e) { d.toast(String((e && e.message) || e), 'error'); }
+        } catch (e) { d.toast(errText(e), 'error'); }
     });
     // U45: classic's right-sidebar sections mirror — EVERY control gets
     // a caption; the picker's own title was the only label before.
@@ -4357,7 +4377,7 @@ function checkAudioCache(say, sizeOf, orphansOf) {
     if (!d) return;
     d.fetchJson(api() + '/voices/speech-cache')
         .then(function (rep) { cacheReport(rep, sizeOf, say); },
-              function (e) { say(String((e && e.message) || e), 'error'); });
+              function (e) { say(errText(e), 'error'); });
 }
 function cleanupAudioCache(say, sizeOf, orphansOf) {
     var d = D();
@@ -4373,8 +4393,8 @@ function cleanupAudioCache(say, sizeOf, orphansOf) {
             say(t('uplift.chat.cache_cleaned', 'Removed {orphan} audio files ({osize}).')
                 .replace('{orphan}', String(res.removed || 0))
                 .replace('{osize}', sizeOf(res.freed || 0)), 'ok');
-        }, function (e) { say(String((e && e.message) || e), 'error'); });
-    }, function (e) { say(String((e && e.message) || e), 'error'); });
+        }, function (e) { say(errText(e), 'error'); });
+    }, function (e) { say(errText(e), 'error'); });
 }
 
 function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
@@ -4477,7 +4497,7 @@ function msgCopy(idx) {
     copyText(stripMarkdown(m.content)).then(function () {
         D().toast(t('chat.copy_tooltip', 'Copy'), 'ok');
     }, function (e) {
-        D().toast(String((e && e.message) || e), 'error');
+        D().toast(errText(e), 'error');
     });
 }
 
@@ -4492,7 +4512,7 @@ function msgCopyMarkdown(idx) {
     copyText(String(m.content || '')).then(function () {
         D().toast(t('chat.copy_markdown', 'Copy markdown'), 'ok');
     }, function (e) {
-        D().toast(String((e && e.message) || e), 'error');
+        D().toast(errText(e), 'error');
     });
 }
 
@@ -4948,7 +4968,7 @@ async function msgBranch(idx) {
     try {
         await d.postJson(api() + '/chat/history', b);
     } catch (e) {
-        d.toast(String((e && e.message) || e), 'error');
+        d.toast(errText(e), 'error');
         return;
     }
     _convs.push({ id: b.id, title: b.title, model: b.model,
@@ -4957,7 +4977,7 @@ async function msgBranch(idx) {
         await openConv(b.id);   // full switch: fetch + render + model select +
                                 // hydrate + VOICE-11/13 teardown rules
     } catch (e) {
-        d.toast(String((e && e.message) || e), 'error');
+        d.toast(errText(e), 'error');
     }
 }
 
@@ -5362,7 +5382,7 @@ function msgDelete(idx) {
             if (_dc) _dc.history = [];
             if (_ctxRender) _ctxRender();   // UP-16: deleted chat, zero gauge
             refreshConvList();
-         }).catch(function (e) { d.toast(String((e && e.message) || e), 'error'); });
+         }).catch(function (e) { d.toast(errText(e), 'error'); });
         return;
     }
     saveConv();
@@ -5867,7 +5887,7 @@ function sttCaptureStop() {
         },
         onErr: function (err) {
             sttSetBusy(false);
-            D().toast(String((err && err.message) || err), 'error');
+            D().toast(errText(err), 'error');
         } });
 }
 
@@ -6050,6 +6070,8 @@ var RT_GATE_MAX = 0.03;      //   a loud room must not deafen the endpointer
 var RT_SILENCE_MS = 1200;    // endpoint: >=1 delta AND this much silence
 var RT_STUCK_MS = 6000;      // escape: voiced audio, ZERO deltas -> restart
 var RT_MAX_RESTARTS = 3;     // ...and after that the engine is not coming back
+var RT_SLOW_VOICED_MS = 12000;  // guard: the UP-9 large-model cadence behind a
+var RT_SLOW_CPS = 0.5;          // name a0's heuristic cannot see -> demote once
 var RT_MAX_MS = 120000;      // hard utterance cap -> force stop + deliver
 // VOICE-14: whole-buffer backends (Qwen3-ASR via the server's segmented
 // realtime backend) cannot commit before a real pause — their first delta
@@ -6226,7 +6248,9 @@ function rtUrl() {
 // keeps resetting it. The engine still reports these models SUPPORTED, so the
 // client declines the known-broken transport up front: no handshake, no
 // ladder, straight to segments. tiny-class and unknown models keep realtime.
-// REMOVE THIS WHEN UP-9 IS FIXED UPSTREAM — do not let it rot.
+// REMOVE THIS WHEN UP-9 IS FIXED UPSTREAM — do not let it rot. Models under
+// custom names that slip past this regex are caught later by the commit-rate
+// guard (RT_SLOW_*): same destination, measured instead of guessed.
 function rtDiscouraged(id) {
     var m = String(id || '').toLowerCase();
     return /whisper[-_ ]?large|large[-_ ]?v[23]/.test(m);
@@ -6253,7 +6277,7 @@ function rtOpen(s) {
     s.state = 'connecting'; s.phase = 'up'; s.wsOpen = false;
     rtChip();
     var ws = null;
-    try { ws = new WS(url); } catch (e) { rtFallback(s, String(e && e.message || e)); return; }
+    try { ws = new WS(url); } catch (e) { rtFallback(s, errText(e)); return; }
     s.ws = ws;
     try { ws.binaryType = 'arraybuffer'; } catch (e) {}
     ws.onopen = function () {
@@ -6357,6 +6381,14 @@ function rtFeed(s, f16) {
     // identical to what the engine actually received
     if (s.got && s.silent * RT_FRAME_MS >= RT_SILENCE_MS) { rtEndpoint(s); return; }
     if (!s.got && !s.wb && s.voiced * RT_FRAME_MS >= RT_STUCK_MS) { rtRestart(s); return; }
+    // UP-9 hardening: a session that is technically alive but commits under
+    // half a character per voiced second is losing every word to the
+    // AlignAtt lag (measured on large-v3-class: "The" in 20 s). The name
+    // heuristic above cannot see custom model ids; the rate can.
+    if (s.got && !s.wb && s.voiced * RT_FRAME_MS >= RT_SLOW_VOICED_MS &&
+        s.text.length < s.voiced * RT_FRAME_MS / 1000 * RT_SLOW_CPS) {
+        rtSlowDemote(s); return;
+    }
     if (s.frames * RT_FRAME_MS >= RT_MAX_MS) rtEndpoint(s);
 }
 function rtEndpoint(s) {
@@ -6384,6 +6416,20 @@ function rtRestart(s) {
     s.state = 'connecting';
     rtChip();
     rtReopenLater(s);
+}
+function rtSlowDemote(s) {
+    // UP-9: restarts do not help a session that IS committing, just far
+    // slower than speech — that is the transport losing to the decoder.
+    // What was heard is the user's words: land it, then demote the whole
+    // LISTEN run to segmented for good (same terminal move the restart
+    // ladder makes, one rung earlier).
+    if (s.closing) { sttListenerStop(false); return; }
+    clearTimeout(s.doneTimer); s.doneTimer = 0;
+    s.phase = 'idle';
+    rtHaltSocket(s);
+    rtCommit(s);
+    rtFallback(s, tf2('uplift.chat.stt_slow',
+        'Realtime transcription is too slow — switched to segmented capture.'));
 }
 function rtFinish(s, text) {
     clearTimeout(s.doneTimer); s.doneTimer = 0;
@@ -6548,7 +6594,7 @@ function rtSegmentClose(s, keepAlive) {
             sttSetBusy(false); rtChip();
             if (keepAlive ? !!(_rt && _rt !== s) : (s.dead || _rt !== s)) return;
             var d = D();
-            if (d) d.toast(String((err && err.message) || err), 'error');
+            if (d) d.toast(errText(err), 'error');
         } });
     if (!keepAlive) s.cancel = handle;
 }
@@ -7408,7 +7454,7 @@ function mount() {
         }
     }).catch(function (e) {
         var b = gid('chat-native-boot');
-        if (b) b.textContent = 'chat: ' + String((e && e.message) || e);
+        if (b) b.textContent = 'chat: ' + errText(e);
     });
 }
 

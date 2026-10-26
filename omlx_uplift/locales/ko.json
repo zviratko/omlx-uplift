@@ -1072,6 +1072,7 @@
  "uplift.chat.stt_connecting": "연결 중…",
  "uplift.chat.stt_paused_echo": "어시스턴트가 말하는 동안 일시 멍초됨",
  "uplift.chat.stt_segmented": "실시간 인식을 사용할 수 없얰 부분으로 나누어 녹음합니다.",
+ "uplift.chat.stt_slow": "실시간 음성 인식이 너무 느려 분할 캡처로 전환했습니다.",
  "uplift.chat.stt_lost": "듣기 세션이 끝났습니다.",
  "uplift.page.voices_full": "TTS 및 목소리",
  "uplift.tab.voices": "TTS 및 목소리",

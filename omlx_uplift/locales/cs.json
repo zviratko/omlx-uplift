@@ -1057,6 +1057,7 @@
  "uplift.chat.stt_connecting": "Připojování…",
  "uplift.chat.stt_paused_echo": "Pozastaveno, zatímco asistent mluví",
  "uplift.chat.stt_segmented": "Realtimeový poslech není dostupný — audio se snímá po úsecích.",
+ "uplift.chat.stt_slow": "Realtimeový přepis je příliš pomalý — přepnuto na snímání po úsecích.",
  "uplift.chat.stt_lost": "Relace poslechu byla ukončena.",
  "uplift.page.voices_full": "TTS a hlasy",
  "uplift.tab.voices": "TTS a hlasy",

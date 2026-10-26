@@ -1057,6 +1057,7 @@
  "uplift.chat.stt_connecting": "連線中…",
  "uplift.chat.stt_paused_echo": "助理說話時已暫停",
  "uplift.chat.stt_segmented": "無法即時聽取——改為分段擷取。",
+ "uplift.chat.stt_slow": "即時轉錄速度過慢——已切換為分段擷取。",
  "uplift.chat.stt_lost": "聽取工作會已結束。",
  "uplift.page.voices_full": "TTS 與語音",
  "uplift.tab.voices": "TTS 與語音",

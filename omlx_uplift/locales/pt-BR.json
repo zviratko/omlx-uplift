@@ -1061,6 +1061,7 @@
  "uplift.chat.stt_connecting": "Conectando…",
  "uplift.chat.stt_paused_echo": "Pausado enquanto o assistente fala",
  "uplift.chat.stt_segmented": "Escuta em tempo real indisponível — captura em segmentos.",
+ "uplift.chat.stt_slow": "A transcrição em tempo real é lenta demais — alternando para captura em segmentos.",
  "uplift.chat.stt_lost": "A sessão de escuta foi encerrada.",
  "uplift.page.voices_full": "TTS e vozes",
  "uplift.tab.voices": "TTS e vozes",

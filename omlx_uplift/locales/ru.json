@@ -1057,6 +1057,7 @@
  "uplift.chat.stt_connecting": "Подключение…",
  "uplift.chat.stt_paused_echo": "Пауза, пока ассистент говорит",
  "uplift.chat.stt_segmented": "Непрерывное распознавание недоступно — запись идёт участками.",
+ "uplift.chat.stt_slow": "Распознавание в реальном времени слишком медленное — переключено на сегментную запись.",
  "uplift.chat.stt_lost": "Сессия прослушивания закрыта.",
  "uplift.page.voices_full": "TTS и голоса",
  "uplift.tab.voices": "TTS и голоса",
