@@ -56,6 +56,14 @@ class PreviewTests(unittest.TestCase):
             v.pop("applied", None)          # fresh keg: nothing recorded
         self.store.save(m)
         self.assertEqual(self._preview("keg-new"), {"demo": "warning"})
+        # UP-50: the warning names the TESTED surface (this tree) and the
+        # only real proof (pristine-mirror reverse-apply); it must never
+        # again read as 'upstream picked it up'.
+        row = {r["id"]: r for r in
+               cli.patch_preview(self.store, self.root, "keg-new")}["demo"]
+        self.assertIn("present in THIS tree", row["detail"])
+        self.assertIn("pristine", row["detail"])
+        self.assertNotIn("upstream likely picked it up", row["detail"])
 
     def test_stale_hash_with_record_is_ours_not_upstream(self):
         # mruu 2026-10-20: two enabled patches share one file (vlm-load +

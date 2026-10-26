@@ -1899,14 +1899,18 @@ var TP = {
             check('bench-tp-lm', t('bench.config.force_lm_engine', 'Force mlx-lm engine'), false),
             noHot, noSsd,
             (function () {
-                // CACHE-OFF: the toggle must react the moment it flips, and
-                // the rAF block below wires the SAME checkbox for its own
-                // row reveal — the listener here is attached to the element
-                // reference, so a harness without requestAnimationFrame
-                // still gets the working pair.
+                // CACHE-OFF: the toggle must react the moment it flips.
+                // UP-57: BOTH behaviours (row reveal + knob sync) bind to
+                // the element reference — the legacy gid()+rAF block
+                // attached nothing when the rAF fired before this panel
+                // landed in the DOM (async view mount), leaving external
+                // mode unable to reveal its inputs.
                 var lb = check('bench-tp-ext',
                     t('bench.config.external', 'Use external OpenAI API endpoint'), false);
-                lb.input.addEventListener('change', syncCacheOff);
+                lb.input.addEventListener('change', function () {
+                    extRow.hidden = !lb.input.checked;
+                    syncCacheOff();     // CACHE-OFF: the knobs die with the mode
+                });
                 return lb;
             })(),
             extRow,
@@ -1926,23 +1930,17 @@ var TP = {
         actions.append(runBtn, cancelBtn);
 
         f.append(row1, tpGpuNote, row2, row3, adv, actions);
-        requestAnimationFrame(function () {
-            var ext = gid('bench-tp-ext');
-            if (ext) ext.addEventListener('change', function () {
-                var er = gid('bench-tp-ext-row');
-                if (er) er.hidden = !ext.checked;
-                syncCacheOff();     // CACHE-OFF: the knobs die with the mode
-            });
-            var gen = gid('bench-tp-gen');
-            if (gen) gen.addEventListener('change', function (ev) {
-                if (ev.target && ev.target.checked && batchHint)
-                    batchHint.textContent = t('bench.config.batch_hint',
-                        'Batch tests use pp1024 / tg128')
-                        .replace('tg128', 'tg' + Number(ev.target.value).toLocaleString());
-            });
-            var mod = gid('bench-tp-model');
-            if (mod) mod.addEventListener('change', syncCacheOff);
+        // UP-57: gen-hint and model→cache-off sync bind to the elements
+        // directly; the ext-row reveal moved into the checkbox's own
+        // reference-bound listener above. The whole gid()+rAF block died
+        // silently whenever the rAF beat the async mount.
+        genBox.addEventListener('change', function (ev) {
+            if (ev.target && ev.target.checked && batchHint)
+                batchHint.textContent = t('bench.config.batch_hint',
+                    'Batch tests use pp1024 / tg128')
+                    .replace('tg128', 'tg' + Number(ev.target.value).toLocaleString());
         });
+        modelSel.addEventListener('change', syncCacheOff);
         return f;
     },
 
@@ -3408,13 +3406,20 @@ var ACC = {
         o1.value = 'deterministic'; sampSel.appendChild(o1);
         var o2 = el('option', null, t('acc_bench.config.sampling_model', 'Model settings (temperature)'));
         o2.value = 'model_settings'; sampSel.appendChild(o2);
+        var accExtLb = check('bench-acc-ext', t('bench.config.external', 'Use external OpenAI API endpoint'), false);
+        // UP-57: reference-bound reveal (the old gid()+rAF block attached
+        // nothing when the rAF beat the async view mount — external
+        // accuracy-mode inputs could never appear)
+        accExtLb.input.addEventListener('change', function () {
+            extRow.hidden = !accExtLb.input.checked;
+        });
         var adv = advancedSection([
             labeled(t('acc_bench.config.batch_size', 'Batch size'), bsSel),
             labeled(t('acc_bench.config.sampling', 'Sampling'), sampSel),
             el('p', 'native-stub-note', t('acc_bench.config.batch_size_hint', 'Larger batches are faster but use more memory.')),
             check('bench-acc-think', t('acc_bench.config.thinking', 'Enable thinking mode'), false),
             el('p', 'native-stub-note', t('acc_bench.config.thinking_hint', 'Applies to models whose template supports thinking toggles.')),
-            check('bench-acc-ext', t('bench.config.external', 'Use external OpenAI API endpoint'), false),
+            accExtLb,
             extRow,
             check('bench-acc-upload', t('uplift.bench.upload_results', 'Upload results to community leaderboard'), false),
             el('p', 'native-stub-note', t('uplift.bench.upload_hint',
@@ -3435,13 +3440,6 @@ var ACC = {
         actions.append(addBtn, cancelBtn, clearBtn);
         f.appendChild(actions);
 
-        requestAnimationFrame(function () {
-            var ext = gid('bench-acc-ext');
-            if (ext) ext.addEventListener('change', function () {
-                var er = gid('bench-acc-ext-row');
-                if (er) er.hidden = !ext.checked;
-            });
-        });
         return f;
     },
 

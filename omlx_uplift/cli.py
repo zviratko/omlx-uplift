@@ -159,8 +159,19 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                         "verdict": "reversed" if rev else "warning",
                         "detail": ("tree is already at the reverted state — "
                                    "nothing left to undo" if rev else
-                                   "already applied and reverts cleanly — "
-                                   "upstream likely picked it up"),
+                                   # UP-50: 'already applied and reverts
+                                   # cleanly' read as 'upstream contains
+                                   # this' — but this tree may hold OUR
+                                   # earlier sync's copy. The wording now
+                                   # names the tested surface and the only
+                                   # real proof (pristine-mirror reverse
+                                   # apply). Behaviour unchanged.
+                                   "content already present in THIS tree "
+                                   "and reverts cleanly — NOT proof "
+                                   "upstream carries it; prove with "
+                                   "`git apply -R --check <id>.diff` on "
+                                   "the pristine omlx mirror before "
+                                   "retiring"),
                         "reversal": rev})
         else:
             out.append({"id": pid,

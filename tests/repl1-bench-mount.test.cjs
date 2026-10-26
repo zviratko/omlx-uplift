@@ -718,3 +718,63 @@ test('TP-TABLES: the results head still offers Copy + Download for both tables',
     assert.ok(cols.some(c => c.head === 'Peak MLX'), 'memory column exported');
     assert.ok(cols.some(c => c.head === 'PP TPS/req'), 'batch column exported');
 });
+
+/* UP-57: the three late listeners (external-row reveal, batch-hint
+   relabel, model-change cache sync) moved from gid()+requestAnimationFrame
+   to direct element references. This harness stubs rAF as a NO-OP —
+   exactly the dead-wiring condition that broke external mode on the live
+   board when the rAF beat the async view mount. Every assertion below can
+   only pass through reference-bound listeners. */
+test('UP-57: tp external row reveals without any rAF, knobs follow', () => {
+    const { win, byId } = mountLoad();
+    win.UpliftNativeBench.mount();
+    const ext = byId['bench-tp-ext'], row = byId['bench-tp-ext-row'];
+    const hot = byId['bench-tp-no-hot'], ssd = byId['bench-tp-no-ssd'];
+    assert.equal(row.hidden, true, 'external inputs start hidden');
+    ext.checked = true;
+    ext.fire('change', { target: ext });
+    assert.equal(row.hidden, false, 'reveal rides the element reference');
+    assert.equal(hot.disabled, true, 'the same event synced the knobs');
+    assert.equal(ssd.disabled, true);
+    ext.checked = false;
+    ext.fire('change', { target: ext });
+    assert.equal(row.hidden, true, 'toggling back re-hides');
+    assert.equal(hot.disabled, false);
+});
+test('UP-57: batch hint relabels from the genBox reference listener', () => {
+    const { win, byId } = mountLoad();
+    win.UpliftNativeBench.mount();
+    const gen = byId['bench-tp-gen'];
+    const radios = [];
+    (function walk(n) {
+        if (!n) return;
+        if (n.tagName === 'input') radios.push(n);
+        for (const k of n.children || []) walk(k);
+    })(gen);
+    assert.ok(radios.length >= 2, 'gen radios exist');
+    const r = radios.find(x => String(x.value) === '256') || radios[1];
+    r.checked = true;
+    gen.fire('change', { target: r });
+    // find the batch-hint p by identity: the ONLY panel text carrying tg<N>
+    let hit = null;
+    (function walk(n) {
+        if (!n || hit) return;
+        const s = String(n.textContent || '');
+        if (/Batch tests use pp1024\/? \/ tg\d+/.test(s) || /tg\d+/.test(s) && /Batch tests/.test(s)) hit = s;
+        for (const k of n.children || []) walk(k);
+    })(byId['bench-subpanel']);
+    assert.ok(hit && hit.includes('tg' + Number(r.value)),
+        'hint followed the selected length, got: ' + hit);
+});
+test('UP-57: model change reaches syncCacheOff on the select reference', () => {
+    const { win, byId } = mountLoad();
+    win.UpliftNativeBench.mount();
+    const ext = byId['bench-tp-ext'];
+    ext.checked = true;                       // flip state WITHOUT an event
+    const hot = byId['bench-tp-no-hot'];
+    assert.equal(hot.disabled, false, 'nothing synced yet');
+    const sel = byId['bench-tp-model'];
+    sel.fire('change', { target: sel });      // model change → cache sync
+    assert.equal(hot.disabled, true,
+        'the dead gid+rAF path could never deliver this');
+});

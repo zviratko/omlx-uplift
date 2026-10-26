@@ -10,6 +10,14 @@
     --field: #1b1c1f;           /* recessed input well, below card ground */
     --panel: #222327;           /* header band shade, below card ground */
     --edge: #3a3b40;            /* uniform stroke width everywhere */
+    /* UP-48: the 2025-09 design-system imports used three names nobody ever
+       declared — 53 declarations (22 borders, 12 separators, 29 meta sizes)
+       silently dropped. Declared here as house aliases so every theme block
+       that restyles --edge themes them too; the css3 ratchet baseline is
+       empty from this commit on. */
+    --line: var(--edge);        /* hairline border colour (frames, rules) */
+    --rule: var(--edge);        /* row separator colour */
+    --fs-meta: 11px;            /* dense secondary/meta text */
     --ink: #f2f0ea;             /* content on dark goes near-white */
     --dim: #a5a096;             /* warm gray, AA on dark grey */
     --accent: #e8a020;          /* signal amber = chart secondary on dark */

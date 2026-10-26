@@ -27,11 +27,11 @@ const { STATIC_DIR } = require('./static-src.cjs');
 // frozen 2026-10-25, see the header: may only SHRINK.
 // Three of the original six were the context ring's strokes; they were dead in
 // a way this scan could see but nobody could — see the attribute test below.
-const BASELINE = [
-    '--fs-meta',
-    '--line',
-    '--rule',
-];
+// UP-48 (2026-10-26): --fs-meta/--line/--rule are now declared in :root as
+// house aliases (user delegated the visual call to the designer; feedback
+// route = look for the patches-table frame, row separators and 11px meta
+// text). The ratchet holds a genuinely clean sheet from here.
+const BASELINE = [];
 
 function scan() {
     const declared = new Set();

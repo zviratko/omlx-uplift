@@ -1810,7 +1810,9 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                                   "upstream now carries this patch, it is "
                                   "marked obsolete and is deliberately NOT "
                                   "rebuilt into this branch (disable/remove "
-                                  "to retire it)")
+                                  "to retire it; proof: `git apply -R "
+                                  "--check <id>.diff` on the pristine "
+                                  "upstream mirror)")
             else:
                 _why = str((_e.get("dev_absent") or {}).get("reason")
                            or "no usable stored version")
