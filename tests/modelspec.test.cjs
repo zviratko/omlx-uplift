@@ -411,9 +411,14 @@ test('buildPayload: non-LLM type strips every type-only key', () => {
         max_context_window: 4096, enable_thinking: true });
     const p = S.buildPayload(st, emb());
     for (const k of S.TYPE_ONLY_KEYS)
-        assert.ok(!(k in p), 'stripped key leaked into payload: ' + k);
+        if (k !== 'max_context_window')                 // UP-54 carve-out below
+            assert.ok(!(k in p), 'stripped key leaked into payload: ' + k);
+    // UP-54 (upstream 153aaee #4826): classic's ms-basic rows the context
+    // window for embedding/reranker too — the ONE type-only key that
+    // survives for exactly those families (audio/decision strip it, pinned
+    // in sync1-fire9-adoption.test.cjs).
+    assert.strictEqual(p.max_context_window, 4096);
     // universal keys classic keeps for every type survive
-    assert.strictEqual(p.max_context_window, undefined);
     assert.strictEqual(p.ttl_seconds, null);
     assert.strictEqual(p.model_type_override, null);
 });

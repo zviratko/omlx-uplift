@@ -115,6 +115,11 @@
         'qwen35_ane_prefill_cpu_gdn_fraction', 'qwen35_ane_prefill_cpu_threads',
         'qwen35_ane_prefill_cpu_shared_resource',
     ]);
+    /* UP-54 (upstream 153aaee #4826; the embedding twin predates it):
+       classic's ms-basic rows the context window for EMBEDDING and
+       RERANKER engines too (outside the llm/vlm gate) — for those two
+       families the key is legitimate on the PUT, not a stale LLM remnant. */
+    const CTX_WINDOW_TYPES = new Set(['embedding', 'reranker']);
     /* Hidden-family masters whose non-default stored values survive a flip
        to a non-LLM type (the classic PUT merges — omitted fields are not
        cleared). stickyForType lists the ones actually ON; the editor warns. */
@@ -638,8 +643,15 @@
             ? Object.assign({}, model, { model_type_override: ms.model_type_override })
             : { model_type_override: ms.model_type_override };
         if (!llmLike(effective)) {
+            // UP-54: classic keeps max_context_window editable for the
+            // embedding/reranker engines (their own ms-basic row) — the
+            // strip only speaks for the truly llm/vlm-only fields.
+            const effType = normType(String((effective &&
+                (effective.model_type_override || effective.model_type)) || ''));
             for (const k of Object.keys(payload))
-                if (TYPE_ONLY_KEYS.has(k)) delete payload[k];
+                if (TYPE_ONLY_KEYS.has(k) &&
+                    !(k === 'max_context_window' && CTX_WINDOW_TYPES.has(effType)))
+                    delete payload[k];
         }
         if (diffusion) {
             Object.assign(payload, {

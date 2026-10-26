@@ -1000,6 +1000,22 @@ function renderEditorFields(container) {
             addp(seValues.reasoning_parser || '');
             g.append(seBind('select', 'reasoning_parser', { label: 'Reasoning Parser', options: rp }));
         }
+        // UP-54 (upstream 153aaee #4826 + its older embedding twin): classic's
+        // ms-basic rows the per-model context window for embedding AND
+        // reranker engines between Model Type and TTL — each with its own
+        // hint. modelspec's CTX_WINDOW_TYPES carve-out keeps the key alive
+        // in the payload for exactly these two families.
+        const effT = String(m.model_type_override || m.model_type || '');
+        if (effT === 'embedding' || effT === 'reranker')
+            g.append(seBind('number', 'max_context_window', {
+                label: C.tf('modal.model_settings.max_context_window', 'Context Window'),
+                hint: C.tf(effT === 'embedding'
+                        ? 'modal.model_settings.embedding_context_window_hint'
+                        : 'modal.model_settings.reranker_context_window_hint',
+                    effT === 'embedding'
+                        ? 'Longer inputs are truncated to this length when a request does not set max_length.'
+                        : 'Used when a request does not set max_length. Jina rerankers read documents together up to this many tokens, other rerankers cut each query-document pair to this length.'),
+                min: 1, step: 1, effHint: seEffHint('max_context_window') }));
         g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)',
             min: 0, step: 60, disabled: !!(m && m.pinned),   // UP-18 (6)
             effHint: seEffHint('ttl_seconds') }));
@@ -1295,11 +1311,82 @@ function renderEditorFields(container) {
                     ? 'This model pairs expert offload with Lightning MTP.'
                     : 'Speculative decoding (MTP/DFlash) needs the experts resident.') });
         if (offLock) offRow.title = 'Disable the active speculative-decoding path first.';
-        seFam(g, 'moe_expert_offload_enabled', offRow,
-            // UP-18 (7): classic's 5..95 % ladder (MOE_EXPERT_OFFLOAD_MIN/
-            // MAX_PERCENT, dashboard.js:12-13) on the fraction mirror
-            [seBind('number', 'moe_expert_offload_resident_fraction',
-                { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.05, max: 0.95, step: 0.05 })]);
+        // UP-18 (7): classic's 5..95 % ladder (MOE_EXPERT_OFFLOAD_MIN/
+        // MAX_PERCENT, dashboard.js:12-13) on the fraction mirror
+        const fracRow = seBind('number', 'moe_expert_offload_resident_fraction',
+            { label: C.tf('uplift.ui.resident_experts_fraction', 'Resident experts (fraction)'), min: 0.05, max: 0.95, step: 0.05 });
+        const offFam = seFam(g, 'moe_expert_offload_enabled', offRow, [fracRow]);
+        // UP-55 (upstream d520df3 #4858): classic sizes the residency
+        // against this Mac's prompt reserve and offers a one-click apply —
+        // GET models/<id>/moe-offload-fit, re-queried only when a flag that
+        // changes the estimate moves (mtp / the two ssd offloads).
+        {
+            const fitP = document.createElement('p');
+            fitP.className = 'se-hint';
+            fitP.hidden = true;
+            offFam.append(fitP);
+            const fmtB = n => C.fmtBytes ? C.fmtBytes(n) : String(n);
+            const fitTxt = (key, en, fit) => C.tf(key, en)
+                .replace('{percent}', fit.max_percent)
+                .replace('{size}', fmtB(fit.bytes))
+                .replace('{reserve}', fmtB(fit.reserve_bytes));
+            let fitUrl = null;
+            const loadFit = () => {
+                const p = S.buildPayload(seValues, seModelEntry());
+                const q = new URLSearchParams();
+                for (const k of ['mtp_enabled', 'qwen4_ple_ssd_offload',
+                                 'deepseek_v41_engram_ssd_offload'])
+                    q.set(k, String(!!p[k]));
+                const url = `${API}/admin/api/models/${encodeURIComponent(m.id)}/moe-offload-fit?${q}`;
+                if (url === fitUrl) return;
+                fitUrl = url;
+                MM_GLUE.fetchJson(url).then(fit => {
+                    // a late answer for a superseded request or a closed
+                    // editor writes nothing (classic's url-guard, mirrored)
+                    if (fitUrl !== url || !fitP.isConnected) return;
+                    const st = fit && fit.status;
+                    fitP.textContent = '';
+                    if (st === 'fit') {
+                        const b = document.createElement('button');
+                        b.type = 'button'; b.className = 'se-btn act';
+                        b.textContent = fitTxt('modal.model_settings.moe_expert_offload_fit',
+                            'Fit to memory: {percent}% resident (~{size}) leaves about {reserve} for prompts',
+                            fit);
+                        // classic writes the percent ladder then re-clamps
+                        // through its own handler — we drive the SAME input
+                        // event the user would, so dirty/save stay honest
+                        b.onclick = () => {
+                            const wi = fracRow.querySelector('input');
+                            if (!wi) return;
+                            wi.value = String(Math.max(0.05,
+                                Math.min(0.95, (fit.max_percent || 5) / 100)));
+                            wi.dispatchEvent(new Event('input', { bubbles: true }));
+                        };
+                        fitP.append(b);
+                        fitP.hidden = false;
+                    } else if (st === 'no_fit') {
+                        fitP.textContent = fitTxt('modal.model_settings.moe_expert_offload_no_fit',
+                            "Even 5% resident leaves less than {reserve} for prompts under this Mac's memory limit.",
+                            fit);
+                        fitP.hidden = false;
+                    }
+                    // 'unknown' / 'resident' stay silent, like classic
+                }).catch(() => { /* older keg without the endpoint: silent */ });
+            };
+            const fitKeys = new Set(['mtp_enabled', 'qwen4_ple_ssd_offload',
+                                     'deepseek_v41_engram_ssd_offload']);
+            const fitHost = document.getElementById('se-fields') || g;
+            if (fitHost.__fitLis) fitHost.removeEventListener('change', fitHost.__fitLis);
+            fitHost.__fitLis = ev => {
+                const r = ev.target && ev.target.closest && ev.target.closest('[data-key]');
+                if (r && fitKeys.has(r.dataset.key)) {
+                    clearTimeout(fitHost.__fitTid);
+                    fitHost.__fitTid = setTimeout(loadFit, 250);
+                }
+            };
+            fitHost.addEventListener('change', fitHost.__fitLis);
+            loadFit();
+        }
     }
     if (seValues.turboquant_kv_enabled !== undefined) {
         // U41: no diffusion gate — classic shows TurboQuant for every model

@@ -81,6 +81,22 @@ var PROFILES = ['code_python', 'code_mixed', 'novel_en', 'novel_ja', 'novel_ko']
 var PROFILE_FALLBACK = { code_python: 'Code (Python)', code_mixed: 'Code (Mixed)',
     novel_en: 'Novel (English)', novel_ja: 'Novel (Japanese)', novel_ko: 'Novel (Korean)' };
 
+    /* SYNC-1 fire9 (upstream d59d797 #4855): classic warns on both bench
+       forms that a model's stored GPU power cap does not apply while the
+       benchmark runs (bench.config.gpu_power_limit_note, _bench.html +
+       _bench_context.html). Placeholder-substituted text → paint with
+       tf().replace, never data-i18n (SAY-2c). */
+    function benchGpuWatts(rows, id) {
+        if (!id) return 0;
+        var m = (rows || []).filter(function (r) {
+            return (r.id || r.model_id) === id; })[0];
+        return (m && m.settings && m.settings.gpu_power_limit_w) || 0;
+    }
+    function gpuNoteText(w) {
+        return t('bench.config.gpu_power_limit_note',
+            "This model's {watts} W GPU power limit does not apply to benchmarks.")
+            .replace('{watts}', String(w));
+    }
 function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -1768,6 +1784,17 @@ var TP = {
         });
         row1.append(labeled(t('bench.config.model', 'Model'), modelSel),
                     labeled(t('bench.config.context_profile', 'Benchmark Context'), profSel));
+        // UP-56 (classic _bench.html): a stored GPU cap on the picked model
+        // does not apply while the bench runs — amber-line note, hidden for
+        // the external endpoint (classic's !benchExternalEnabled condition)
+        var tpGpuNote = el('p', 'native-stub-note'); tpGpuNote.hidden = true;
+        function syncGpuNote() {
+            var w = self.isExternal() ? 0
+                : benchGpuWatts(self.state && self.state.modelRows, modelSel.value);
+            tpGpuNote.hidden = !w;
+            if (w) tpGpuNote.textContent = gpuNoteText(w);
+        }
+        self._syncGpuNote = syncGpuNote;
 
         var row2 = el('div', 'bench-row');
         var ppBox = el('div', 'bench-chips'); ppBox.id = 'bench-tp-pp';
@@ -1859,6 +1886,7 @@ var TP = {
                 lb.dataset.i18nTitle = key;
                 lb.dataset.enTitle = en;
             }
+            syncGpuNote();   // UP-56: the note rides the same model/ext moves
         }
         syncCacheOff();
         var adv = advancedSection([
@@ -1892,7 +1920,7 @@ var TP = {
         cancelBtn.addEventListener('click', function () { self.cancel(); });
         actions.append(runBtn, cancelBtn);
 
-        f.append(row1, row2, row3, adv, actions);
+        f.append(row1, tpGpuNote, row2, row3, adv, actions);
         requestAnimationFrame(function () {
             var ext = gid('bench-tp-ext');
             if (ext) ext.addEventListener('change', function () {
@@ -1939,6 +1967,11 @@ var TP = {
             usable.forEach(function (m) {
                 sel.appendChild(el('option', null, m.id || m.model_id));
             });
+            // UP-56: the cap note reads the model rows, like classic's
+            // benchGpuPowerLimit(this.models.find(...))
+            if (!this.state) this.state = {};
+            this.state.modelRows = usable;
+            if (this._syncGpuNote) this._syncGpuNote();
         } catch (e) { /* list stays placeholder; start() will surface errors */ }
     },
 
@@ -2244,6 +2277,18 @@ var CTX = {
                    labeled(t('ctx_bench.config.target', 'Maximum context to test'), targetSel),
                    customWrap);
         f.appendChild(row);
+        // UP-56 (classic _bench_context.html): stored GPU cap does not
+        // apply to the context bench either — no external condition here
+        var ctxGpuNote = el('p', 'native-stub-note'); ctxGpuNote.hidden = true;
+        function syncCtxGpuNote() {
+            var w = benchGpuWatts(self.state && self.state.models, modelSel.value);
+            ctxGpuNote.hidden = !w;
+            if (w) ctxGpuNote.textContent = gpuNoteText(w);
+        }
+        self._syncCtxGpuNote = syncCtxGpuNote;
+        modelSel.addEventListener('change', syncCtxGpuNote);
+        syncCtxGpuNote();
+        f.appendChild(ctxGpuNote);
         f.appendChild(el('p', 'native-stub-note', t('ctx_bench.config.target_hint',
             'The benchmark searches up to this size. Larger targets take longer to verify.')));
         f.appendChild(el('p', 'native-stub-note', t('ctx_bench.warning.autoapply',
@@ -2319,6 +2364,7 @@ var CTX = {
             // U50: stash rows for the target builder (model_context_length
             // is classic's native window from config.json, served verbatim)
             this.state.models = usable;
+            if (this._syncCtxGpuNote) this._syncCtxGpuNote();   // UP-56
             var ph2 = el('option', null, t('ctx_bench.config.model_placeholder', 'Select a model...'));
             ph2.value = '';
             sel.replaceChildren(ph2);
