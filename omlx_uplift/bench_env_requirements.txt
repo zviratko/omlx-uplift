@@ -54,7 +54,7 @@ more-itertools==11.1.0
 multidict==6.9.1
 multiprocess==0.70.19
 narwhals==2.26.0
-nltk==3.10.3
+nltk==3.10.4
 numpy==2.4.6
 packaging==26.3
 pandas==3.0.6
