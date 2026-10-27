@@ -11,9 +11,12 @@
  *   * kitError keeps the full `${url} -> ${status}: reason` on `.message`
  *     (console, dev panel, tests) and adds `.userMessage` = 'reason (status)'.
  *   * anything a human reads goes through D.errText(e).
- *   * uplift_downloader.js may not touch `.message` at all — it is clean.
- *   * every other file is RATCHETED at its current count: a new raw read fails,
- *     cleaning one up only lowers the number. Tracker UP-52 holds the rest.
+ * uplift_downloader.js may not touch `.message` at all — it is clean.
+ * every other file is RATCHETED at its current count: a new raw read fails,
+   cleaning one up only lowers the number. Tracker UP-52 holds the rest.
+ * TRACEABILITY (user 2026-10-27, closing UP-52): errText logs the RAW Error
+   to console.error once per distinct message, so prettifying visible text
+   never swallows the diagnosis. Pinned below by behavior.
  */
 'use strict';
 const test = require('node:test');
@@ -49,6 +52,25 @@ test('errText never returns our internal route shape', () => {
         'errText leaked an internal route: ' + D.errText(leaky));
 });
 
+test('errText logs the RAW error once per distinct message (UP-52 traceability)', () => {
+    const logged = [];
+    const real = console.error;
+    console.error = (...a) => logged.push(a);
+    try {
+        D.errText(new Error('/x/y -> 500: boom'));
+        D.errText(new Error('/x/y -> 500: boom'));       // a render loop re-call
+        D.errText(new Error('/a/b -> 503: different'));
+        D.errText('plain string');                        // nothing to trace
+        D.errText(null);
+    } finally { console.error = real; }
+    assert.strictEqual(logged.length, 2,
+        'raw errors must reach the console exactly once per message: '
+        + logged.map(x => String(x[1])).join(' | '));
+    assert.strictEqual(logged[0][0], '[uplift]');
+    assert.ok(logged[0][1] instanceof Error && /500: boom/.test(String(logged[0][1])),
+        'the console entry must carry the RAW Error (route + status), not the pretty text');
+});
+
 test('uplift_downloader.js reads no raw error message', () => {
     const src = fs.readFileSync(path.join(STATIC_DIR, 'uplift_downloader.js'), 'utf8');
     const needle = /(?:^|[^\w.])(?:e|err|error|exc)\.message\b/;
@@ -59,11 +81,11 @@ test('uplift_downloader.js reads no raw error message', () => {
         + hits.map(([n, l]) => n + ': ' + l.trim()).join(' | '));
 });
 
-// Frozen 2026-10-25. Lower these as surfaces get cleaned; never raise one.
+// Lower these as surfaces get cleaned; never raise one.
+// UP-52 wave 2 (2026-10-27): uplift_patches.js and uplift_voices.js reached
+// zero and LEFT the baseline — only domkit's sanctioned read remains.
 const ERR_READ = /(?:^|[^\w.])(?:e|err|error|exc)\.message\b/g;
 const BASELINE = {
-    'uplift_patches.js': 18,
-    'uplift_voices.js': 16,
     'domkit.js': 1,               // the kit builds the dev-side message itself
 };
 

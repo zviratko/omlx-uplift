@@ -60,11 +60,11 @@ async function pollPatches() {
             d.className = 'empty';
             // a 401 means the admin session cookie is missing/expired for
             // THIS origin — 'API unavailable' sent people hunting servers
-            const denied = /-> 401/.test(String(e && e.message || e));
+            const denied = !!(e && e.status === 401);
             d.textContent = (denied
                 ? ptMsg('uplift.patches.load_auth', 'Sign in required — open /admin and log in, then reload')
                 : ptMsg('uplift.patches.load_fail', 'Patches API unavailable'))
-                + (denied ? '' : ' — ' + (e && e.message ? e.message : e));
+                + (denied ? '' : ' — ' + D.errText(e));
             list.append(d);
         }
     }
@@ -151,7 +151,7 @@ async function ptAction(path, body, okMsg) {
         await ptRefreshCarrier();   // DRIFT/NEEDS REBUILD must not outlive
     } catch (e) {                  // the action that resolved them
         PG.toast(ptMsg('uplift.patches.action_fail', 'Patch action failed') +
-              ': ' + (e && e.message ? e.message : e), 6000);
+              ': ' + D.errText(e), 6000);
     } finally {
         S.PT_BUSY = false;
     }
@@ -174,7 +174,7 @@ async function ptEnableWithApproval(p, approve) {
         await ptRefreshCarrier();   // an enabled build patch changes what the
     } catch (e) {                  // branch must carry — re-judge drift now
         PG.toast(ptMsg('uplift.patches.approve_fail', 'Approval failed') +
-              ': ' + (e && e.message ? e.message : e), 6000);
+              ': ' + D.errText(e), 6000);
     } finally {
         S.PT_BUSY = false;
     }
@@ -201,7 +201,7 @@ async function ptSetTargets(p, runtime, dev, approve) {
         await ptRefreshCarrier();
     } catch (e) {
         const held = (e && e.status === 409)
-            || /needs approval/i.test(String(e && e.message || e));
+            || /needs approval/i.test(D.errText(e));
         if (held) {
             PT_PENDING_TARGETS = { id: p.id, runtime: !!runtime,
                                    dev: !!dev };
@@ -212,7 +212,7 @@ async function ptSetTargets(p, runtime, dev, approve) {
         } else {
             PG.toast(ptMsg('uplift.patches.targets_fail',
                 'Surface change failed') + ': '
-                + (e && e.message ? e.message : e), 6000);
+                + D.errText(e), 6000);
         }
         renderPatches();   // checkboxes revert to the server's truth
     } finally {
@@ -579,7 +579,7 @@ function patchRow(p, view) {
         } catch (e) {
             PG.toast(ptMsg('uplift.patches.auto_fail',
                 'Auto-update change failed') + ': '
-                + (e && e.message ? e.message : e), 5000);
+                + D.errText(e), 5000);
             acb.checked = !acb.checked;
         } finally {
             S.PT_BUSY = false;
@@ -804,7 +804,7 @@ function ptManage(p) {
             await ptRefreshCarrier();
         } catch (e) {
             PG.toast(ptMsg('uplift.patches.pin_fail', 'Version pin failed')
-                + ': ' + (e && e.message ? e.message : e), 5000);
+                + ': ' + D.errText(e), 5000);
             saveBtn.disabled = false;
         } finally { S.PT_BUSY = false; }
     };
@@ -1098,7 +1098,7 @@ function ptEditSource(p) {
             await pollPatches();
             await ptRefreshCarrier();
         } catch (e) {
-            PG.toast(String(e && e.message ? e.message : e), 7000);
+            PG.toast(D.errText(e), 7000);
         } finally {
             S.PT_BUSY = false; go.disabled = false;
         }
@@ -1318,7 +1318,7 @@ async function ptPreview() {
         adv.hidden = false;
         adv.innerHTML = '';   // clear-only — safe
         const w = document.createElement('div');
-        w.textContent = '✕ ' + (e && e.message ? e.message : e);
+        w.textContent = '✕ ' + D.errText(e);
         adv.append(w);
         box.hidden = true;
     }

@@ -76,9 +76,22 @@ function kitError(url, res, reason) {
 /* Text for a human, from anything a catch clause receives. Kit errors carry a
    pre-sanitized userMessage; other seams (TypeError 'Failed to fetch', a bare
    string) fall back to their message with a leading route cut off, so the
-   '<url> -> <status>' shape cannot leak through a stray call site either. */
+   '<url> -> <status>' shape cannot leak through a stray call site either.
+   TRACEABILITY (user 2026-10-27): prettifying must not swallow the diagnosis —
+   every Error shown through here is also logged RAW (full internal shape).
+   Once per distinct message, because render loops re-call this every poll. */
+const _errLogged = new Set();
 function errText(e) {
     if (e == null) return '';
+    if (typeof e !== 'string' && e instanceof Error) {
+        const raw = e.toString();   // 'Name: message' — dedup key without a raw
+                                    // .message read (domkit keeps its ONE)
+        if (!_errLogged.has(raw)) {
+            if (_errLogged.size > 99) _errLogged.clear();
+            _errLogged.add(raw);
+            try { console.error('[uplift]', e); } catch (_) { /* stub hosts */ }
+        }
+    }
     if (typeof e === 'string') return e.includes(' -> ') ? e.split(' -> ')[1] : e;
     if (e.userMessage) return e.userMessage;
     const m = e.message || String(e);

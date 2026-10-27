@@ -109,7 +109,7 @@ function playInto(player, blob) {
     const btn = player._vcBtn;
     if (btn) btn.classList.add('playing');
     const p = player.play();
-    if (p && p.catch) p.catch(e => D.toast(String(e && e.message || e), 'error'));
+    if (p && p.catch) p.catch(e => D.toast(D.errText(e), 'error'));
     return player;
 }
 async function playBlob(resp, btn) {
@@ -139,14 +139,15 @@ function voiceSignal() {
 }
 function voiceErrText(e) {
     // fetch rejects a timeout with DOMException TimeoutError (name) —
-    // translate it, pass anything else through unchanged
-    const nm = String((e && (e.name || e.message)) || e);
+    // translate it, pass anything else through the kit's human text (UP-52:
+    // the raw internal shape stays out of visible text; errText logs it)
+    const nm = String((e && e.name) || D.errText(e) || e);
     return /TimeoutError/.test(nm)
         ? tf('uplift.voices.timeout',
             'the server did not answer in {n}s — model load may be stuck; '
             + 'request abandoned (restart the server to clear it)',
             { n: VOICE_TIMEOUT_S })
-        : String((e && e.message) || e);
+        : D.errText(e);
 }
 async function voiceFetch(path, body) {
     // the ONLY voice POST path (binary + JSON responses share the watchdog)
@@ -417,7 +418,7 @@ function recStopTracks(stream) {
     try { stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); }
     catch (e) {}
 }
-function recErrText(e) { return String((e && e.message) || (e && e.name) || e || ''); }
+function recErrText(e) { return D.errText(e) || String((e && e.name) || e || ''); }
 
 function voiceRow(v, extraClass) {
     const row = document.createElement('div');
@@ -475,7 +476,7 @@ function voiceRow(v, extraClass) {
             await playBlob(r, play);
         } catch (e) {
             play.disabled = false;
-            D.toast(String(e && e.message || e), 'error');
+            D.toast(D.errText(e), 'error');
         }
     };
     const edit = document.createElement('button');
@@ -499,7 +500,7 @@ function voiceRow(v, extraClass) {
             await D.deleteJson(`${VAPI}/voices/${encodeURIComponent(v.id)}`);
             D.toast(tf('uplift.voices.deleted', 'Voice deleted') + ': ' + v.name);
             renderVoices();
-        } catch (e) { D.toast(String(e && e.message || e), 'error'); }
+        } catch (e) { D.toast(D.errText(e), 'error'); }
     };
     act.append(play, edit, del);
     row.append(lab, act);
@@ -619,7 +620,7 @@ function voiceForm(models, sttSelf) {
             file = null; fileI.value = ''; return;
         }
         try { b64 = await readFileB64(file); }
-        catch (e) { D.toast(String(e && e.message || e), 'error');
+        catch (e) { D.toast(D.errText(e), 'error');
                     file = null; fileI.value = ''; }
         // a fresh clip invalidates a previous auto-transcription guess
         trB.disabled = !b64 || !sttS.value;
@@ -640,7 +641,7 @@ function voiceForm(models, sttSelf) {
                 'the model heard no speech'));
             refT.value = txt;
             D.toast(tf('uplift.voices.transcribed', 'Transcript filled — review it') );
-        } catch (e) { D.toast(String(e && e.message || e), 'error'); }
+        } catch (e) { D.toast(D.errText(e), 'error'); }
         trB.textContent = old;
         trB.disabled = !b64 || !sttS.value;
     };
@@ -1042,7 +1043,7 @@ function voiceForm(models, sttSelf) {
                               'Hello! This is how I sound.') }, extras));
             }
             await playBlob(r, prevB);
-        } catch (e) { D.toast(String(e && e.message || e), 'error'); }
+        } catch (e) { D.toast(D.errText(e), 'error'); }
         prevB.disabled = false;
     };
     const addB = document.createElement('button');
@@ -1136,7 +1137,7 @@ function voiceForm(models, sttSelf) {
             }
             _editing = null; _saveAs = null;
             renderVoices();
-        } catch (e) { D.toast(String(e && e.message || e), 'error'); }
+        } catch (e) { D.toast(D.errText(e), 'error'); }
         addB.disabled = false;
     };
     acts.append(prevB, addB);
@@ -1296,7 +1297,7 @@ function sayRow(v, repaint, opt) {
             await playBlob(r, play);
         } catch (e) {
             play.disabled = false;
-            D.toast(String(e && e.message || e), 'error');
+            D.toast(D.errText(e), 'error');
         }
     };
     // SAY-2c text button (was the star): honest about its target. A row
@@ -1344,7 +1345,7 @@ function sayRow(v, repaint, opt) {
                 await repaint();
             } catch (e) {
                 pref.disabled = false;
-                D.toast(String(e && e.message || e), 'error');
+                D.toast(D.errText(e), 'error');
             }
         };
         act.append(play, pref);
@@ -1374,7 +1375,7 @@ function sayRow(v, repaint, opt) {
             await repaint();   // the store changed — server truth repaint
         } catch (e) {
             chat.disabled = false;
-            D.toast(String(e && e.message || e), 'error');
+            D.toast(D.errText(e), 'error');
         }
     };
     act.append(chat);
@@ -1403,7 +1404,7 @@ function sayRow(v, repaint, opt) {
                 D.toast(tf('uplift.voices.deleted', 'Voice deleted')
                         + ': ' + sv.name);
                 renderVoices();
-            } catch (e) { D.toast(String(e && e.message || e), 'error'); }
+            } catch (e) { D.toast(D.errText(e), 'error'); }
         };
         act.append(edit, del);
     }
@@ -1648,7 +1649,7 @@ function ttsSpeakerRow(model, spk, repaint) {
             await playBlob(r, play);
         } catch (e) {
             play.disabled = false;
-            D.toast(String(e && e.message || e), 'error');
+            D.toast(D.errText(e), 'error');
         }
     };
     const def = document.createElement('button');
@@ -1675,7 +1676,7 @@ function ttsSpeakerRow(model, spk, repaint) {
             await repaint();
         } catch (e) {
             def.disabled = false;
-            D.toast(String(e && e.message || e), 'error');
+            D.toast(D.errText(e), 'error');
         }
     };
     act.append(play, def);
