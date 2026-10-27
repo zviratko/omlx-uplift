@@ -422,16 +422,18 @@
                     <span class="pt-c-status" data-i18n="uplift.patches.col_status">STATUS</span>
                     <span class="pt-c-fill" aria-hidden="true"></span>
                     <span class="pt-c-dev"><span class="pt-head-l1"><span data-i18n="uplift.patches.col_dev">OMLX-DEV BUILD</span
-                        ><sup id="pt-help-dev" class="pt-head-help" title="Checked patches are compiled into the omlx-dev app — they take effect at the next Build."
-                            data-i18n-title="uplift.patches.col_dev_help">?</sup></span
+                        ><button type="button" class="pt-head-help" id="pt-help-dev"
+                            data-help-key="uplift.patches.col_dev_help"
+                            data-en-help="Checked patches are compiled into the omlx-dev app — they take effect at the next Build.">?</button></span
                         ><span id="dv-base" class="dv-target-wrap" hidden>(<button type="button"
                             id="dv-target-btn" class="pt-target-link"
                             data-i18n="uplift.patches.dev_target"
                             data-i18n-title="uplift.patches.dev_target_title"
                             title="omlx-dev build source">TARGET</button>)</span></span>
                     <span class="pt-c-vanilla"><span class="pt-head-l1"><span data-i18n="uplift.patches.col_vanilla">RUNTIME PATCH</span
-                        ><sup id="pt-help-vanilla" class="pt-head-help" title="Checked patches are applied to the code the server runs — they take effect at the next server restart."
-                            data-i18n-title="uplift.patches.col_vanilla_help">?</sup></span></span>
+                        ><button type="button" class="pt-head-help" id="pt-help-vanilla"
+                            data-help-key="uplift.patches.col_vanilla_help"
+                            data-en-help="Checked patches are applied to the code the server runs — they take effect at the next server restart.">?</button></span></span>
                     <span class="pt-c-auto"><span data-i18n="uplift.patches.col_auto">AUTO-UPDATE</span
                         ><button type="button" id="pt-auto-all" class="pt-target-link pt-head-sub"
                             data-i18n="uplift.patches.auto_all"

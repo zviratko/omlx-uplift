@@ -3986,12 +3986,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    AUTO-UPDATE column as "(all)". tests/pat-table.test.cjs negative-pins
    that .pt-head-auto / #pt-auto-check never come back. */
 
-/* 5(b) TARGETS existing `.pt-toolbar .pt-addform` — REPLACE. It was
-   `flex: 1 1 560px`: the card ate every pixel left on the line and then wrapped
-   its own field row. Now it asks for what its controls need, may shrink, stops
-   at 560px. (.pt-toolbar > .pt-auto in the same rule is dead now the label is
-   gone; leaving it costs nothing, #pt-check-btn keeps flex: none.) */
-.pt-toolbar div.pt-addform { flex: 0 1 460px; min-width: 0; max-width: 560px; margin: 0; }
+/* 5(b) + ROUND 3 (user 2026-10-27): "spread to one line above the table,
+   not a small box". Round 2 had it capped at 560px, which wrapped its own
+   field row into a three-line block. The card now takes the full width
+   above the table and the stretchy fields (name, repo, url) share the
+   spare line, so every control sits on ONE row; it still wraps as a
+   fallback on narrow pop-outs. */
+.pt-toolbar div.pt-addform { flex: 1 1 100%; min-width: 0; margin: 0; }
 /* TARGETS existing `.pt-addform-title` — REPLACE: thinner band, one size down. */
 .pt-addform div.pt-addform-title { padding: 3px 8px; gap: 6px; font-size: 10px; }
 /* TARGETS existing `.pt-addform-hint` — REPLACE: the hint is one short clause
@@ -4020,9 +4021,15 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .pt-addform label.pt-auto { height: 26px; gap: 3px; font-size: 10px; }
 .pt-addform label.pt-auto input[type="checkbox"] { width: 12px; height: 12px; }
 .pt-addform label.pt-reversal { padding: 2px 6px; }
-/* TARGETS `#pt-src-url` (.grow) — NEW hook: it stretched to every spare pixel;
-   now it shares the line at a modest basis. */
-.pt-addform #pt-src-url { flex: 1 1 120px; min-width: 0; }
+/* TARGETS `#pt-src-url` (.grow) + ROUND 3: with the card spread across the
+   full line, the three text fields share the spare width — url the most (it
+   holds the longest value), name and repo a step back. The name field is a
+   .pt-field column, so the wrapper grows and its input fills it. */
+.pt-addform #pt-src-url { flex: 2.5 1 160px; min-width: 0; }
+.pt-addform #pt-src-repo { flex: 1 1 110px; min-width: 0; }
+.pt-addform div.pt-addform-row > .pt-field:has(#pt-new-id) {
+    flex: 1 1 110px; min-width: 0; }
+.pt-addform .pt-field:has(#pt-new-id) > input[type="text"] { width: 100%; }
 
 /* 5(c) + ROUND 2 (user 2026-10-27): the tick columns carry a quiet second
    header line ((TARGET), (all), the check-for-updates link), so the names
@@ -4039,8 +4046,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    columns; the checkbox columns center so the header sits on the same axis
    as the ticks below, ORIGIN stays flush-left like its cells. */
 .pt-thead > span { white-space: nowrap; }
+/* the pop anchors to its header cell (position:relative below): it sits
+   under the column name, right-aligned to the cell edge, never the page */
 .pt-thead .pt-c-dev, .pt-thead .pt-c-vanilla, .pt-thead .pt-c-auto {
-    display: flex; flex-direction: column; align-items: center; gap: 2px; }
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    position: relative; }
 .pt-thead .pt-c-origin {
     display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 /* the action line: same link affordance as TARGET, one step quieter */
@@ -4048,10 +4058,25 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     font: 400 9px/1.3 var(--sans); letter-spacing: .06em;
     text-transform: none; opacity: .8; }
 .pt-thead .pt-head-sub.lit { opacity: 1; color: var(--accent, #e0662e); }
-/* superscript "?" on OMLX-DEV BUILD / RUNTIME PATCH: what the tick does */
-.pt-head-help { font-size: .65em; margin-left: 2px; cursor: help; opacity: .65;
-    border-bottom: 1px dotted currentColor; }
-.pt-head-help:hover { opacity: 1; }
+/* THIRD ROUND (user 2026-10-27): the "?" on OMLX-DEV BUILD / RUNTIME PATCH
+   was a dotted sup with a native title — it did nothing on click and the
+   hover tooltip was easy to miss. Now a small round button (bench column-help
+   language) that opens .pt-help-pop on hover, pins on click; no title
+   attribute remains on the buttons, so there is no double tooltip. */
+.pt-thead button.pt-head-help { margin-left: 3px; flex: none; width: 13px;
+    height: 13px; padding: 0; border: 1px solid var(--edge); border-radius: 50%;
+    background: none; color: var(--dim); font: 700 9px/1 var(--sans);
+    letter-spacing: 0; text-transform: none; cursor: pointer; }
+.pt-thead button.pt-head-help:hover, .pt-thead button.pt-head-help.lit {
+    color: var(--accent, #e0662e); border-color: var(--accent, #e0662e); }
+.pt-thead button.pt-head-help:focus-visible { outline: 2px solid var(--accent, #e0662e);
+    outline-offset: 1px; }   /* U51 focus-ring language */
+.pt-help-pop { position: absolute; top: calc(100% + 2px); right: 0; z-index: 31;
+    width: 250px; padding: 7px 9px; background: var(--panel);
+    border: 1px solid var(--edge); border-radius: var(--radius);
+    box-shadow: 0 4px 14px rgba(0,0,0,.25); color: var(--ink); font-size: 11px;
+    font-weight: 400; letter-spacing: normal; line-height: 1.45;
+    text-align: left; text-transform: none; white-space: normal; }
 
 /* 6(b) TARGETS NEW `#dv-share` (carries .pt-gate) — the block decides which
    files the dev build touches and read as a grey afterthought at .pt-gate

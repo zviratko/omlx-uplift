@@ -153,6 +153,66 @@ function loadScript(src) {
     return _scripts[src];
 }
 
+/* HELP POP (PAT-TABLE round 3, user 2026-10-27): the anchored explanation
+   bubble behind a small "?" marker on a table header. Same contract as the
+   bench column help (thHelp): hover opens, click pins, Escape or a click
+   anywhere else closes. It lives HERE because the page modules that build
+   dialogs (uplift_patches creates .modal-overlay) may own no keydown
+   listener — the modal-escape gate; the pop is a tooltip, not a dialog, and
+   exactly one is open at a time, app-wide. open/hoverOut take the anchor
+   button plus { cellSel, popClass, text, pin }; pinning arms the document
+   listeners (a pop that is merely hovered closed itself with the pointer). */
+let _hp = null, _hpBtn = null, _hpTimer = 0;
+function hpClose() {
+    if (!_hp) return;
+    const p = _hp, b = _hpBtn;
+    _hp = null; _hpBtn = null;
+    p.remove();
+    if (b) { b.classList.remove('lit'); b.setAttribute('aria-expanded', 'false'); }
+    document.removeEventListener('click', hpClose);
+    document.removeEventListener('keydown', hpKey);
+}
+function hpKey(ev) { if (ev.key === 'Escape') hpClose(); }
+function hpOpen(btn, opts) {
+    clearTimeout(_hpTimer);
+    if (_hp && _hpBtn === btn) {
+        if (opts.pin) _hp.dataset.pinned = '1';   // hover-open becomes pinned
+        return;
+    }
+    hpClose();
+    const cell = btn.closest(opts.cellSel);
+    if (!cell) return;
+    const pop = document.createElement('div');
+    pop.className = opts.popClass;
+    pop.setAttribute('role', 'tooltip');
+    pop.textContent = opts.text || '';
+    if (opts.pin) pop.dataset.pinned = '1';
+    cell.appendChild(pop);
+    _hp = pop; _hpBtn = btn;
+    btn.classList.add('lit');
+    btn.setAttribute('aria-expanded', 'true');
+    if (opts.pin) {
+        setTimeout(() => {
+            // the deferred arm must re-check: a fast click-away can close
+            // this pop before the timer runs, and stale document listeners
+            // would then outlive it
+            if (_hp !== pop) return;
+            document.addEventListener('click', hpClose);
+            document.addEventListener('keydown', hpKey);
+        }, 0);
+    }
+}
+function hpHoverOut(btn) {
+    clearTimeout(_hpTimer);
+    _hpTimer = setTimeout(() => {
+        // an unpinned (hover) pop fades when the pointer leaves; a pinned
+        // one lives until Escape or the next click
+        if (_hp && _hpBtn === btn && !_hp.dataset.pinned) hpClose();
+    }, 300);
+}
+
 return { $, fetchJson, postJson, putJson, deleteJson, toast, cell, emptyMsg,
-         errText, setUnauthorizedHandler, loadScript };
+         errText, setUnauthorizedHandler, loadScript,
+         helpPop: { open: hpOpen, close: hpClose, hoverOut: hpHoverOut,
+                    isPinned: b => !!(_hp && _hpBtn === b && _hp.dataset.pinned) } };
 });

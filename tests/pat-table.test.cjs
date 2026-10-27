@@ -560,11 +560,32 @@ test('table header carries the sub-actions, help marks, and no MANAGE title', ()
         'the check link lives INSIDE the ORIGIN cell');
     assert.ok(th.includes('id="pt-auto-all"') && th.includes('pt-c-auto'),
         'the (all) toggle must sit under AUTO-UPDATE');
-    // help marks: plain-language tooltip on each tick column
-    for (const id of ['pt-help-dev', 'pt-help-vanilla']) {
-        assert.ok(th.includes(`id="${id}"`), `${id} lost its help mark`);
-        assert.ok(new RegExp(`id="${id}"[\\s\\S]*?data-i18n-title="uplift\\.patches\\.col_(dev|vanilla)_help"`).test(th),
-            `${id} tooltip is not i18n-registered`);
+    // help marks: real buttons wired by wirePtHeadHelp — hover opens the
+    // pop, click pins it. The text is the catalog entry for data-help-key;
+    // data-en-help carries the English literal as fallback and MUST equal
+    // en.json (drift pin below). No native title attribute: with the pop
+    // wired, a leftover title would double up as a slow browser tooltip.
+    const enHelp = {
+        'pt-help-dev': ['uplift.patches.col_dev_help',
+            'Checked patches are compiled into the omlx-dev app — '
+            + 'they take effect at the next Build.'],
+        'pt-help-vanilla': ['uplift.patches.col_vanilla_help',
+            'Checked patches are applied to the code the server runs — '
+            + 'they take effect at the next server restart.'],
+    };
+    const enCat = JSON.parse(fs.readFileSync(
+        path.join(STATIC_DIR, '..', 'locales', 'en.json'), 'utf8'));
+    for (const [id, [key, enText]] of Object.entries(enHelp)) {
+        const btn = new RegExp(`<button[^>]*id="${id}"[^>]*>`).exec(th);
+        assert.ok(btn, `${id} lost its help button`);
+        assert.ok(btn[0].includes(`data-help-key="${key}"`),
+            `${id} is not registered with the catalog key`);
+        assert.ok(btn[0].includes(`data-en-help="${enText.replace(/"/g, '&quot;')}"`)
+            || th.includes(`data-en-help="${enText}"`),
+            `${id} English fallback drifted from the ask`);
+        assert.ok(!btn[0].includes('title='),
+            `${id} must not carry a native title next to the help pop`);
+        assert.equal(enCat[key], enText, `en.json drifted from ${id} fallback`);
     }
     // the MANAGE heading is dropped; the grid track stays (buttons align)
     assert.match(th, /<span class="pt-c-manage"><\/span>/,
@@ -591,4 +612,70 @@ test('table header carries the sub-actions, help marks, and no MANAGE title', ()
             assert.notEqual(d[key], en[key], `${loc}:${key} still English`);
         }
     }
+});
+
+/* PAT-TABLE round 3 (user 2026-10-27): the header "?" must DO something —
+   hover opens a small explanation pop under the column, click pins it,
+   Escape / any other click closes. The old dotted <sup> with a native
+   title was invisible as an action ("does nothing on neither hover or
+   click"). And the ADD PATCH box spreads over the full line above the
+   table instead of hiding in a 560px box that wrapped its own fields. */
+test('help marks are wired pop buttons, not dead tooltips', () => {
+    const js = fs.readFileSync(path.join(STATIC_DIR, 'uplift_patches.js'), 'utf8');
+    assert.match(js, /function wirePtHeadHelp/, 'pop wiring lost');
+    assert.match(js, /initPatchesPage\(\)[\s\S]*wirePtHeadHelp\(\)/,
+        'initPatchesPage must wire the help buttons');
+    assert.match(js, /D\.helpPop/, 'wiring must use the shared domkit pop');
+    assert.match(js, /'mouseenter'[\s\S]*HP\.open\(btn, opts\(false\)\)/,
+        'hover-open lost');
+    assert.match(js, /'click'[\s\S]*HP\.open\(btn, opts\(true\)\)/,
+        'click-pin lost');
+    assert.match(js, /HP\.isPinned\(btn\)[\s\S]*HP\.close\(\)/,
+        'clicking the same mark again must close the pop');
+    // the bubble factory itself lives in domkit: the modal-escape gate
+    // forbids this page (it builds .modal-overlay dialogs) from owning any
+    // keydown listener, and the kit is where a shared tooltip belongs
+    assert.ok(!/addEventListener\('keydown'/.test(js),
+        'uplift_patches.js must stay keydown-free (modal-escape pin)');
+    const kit = fs.readFileSync(path.join(STATIC_DIR, 'domkit.js'), 'utf8');
+    assert.match(kit, /function hpKey\(ev\) \{ if \(ev\.key === 'Escape'\)/,
+        'Escape-close lost from the kit (named fn keeps it off the dialog gate)');
+    assert.match(kit, /document\.addEventListener\('keydown', hpKey\)/,
+        'kit must arm the Escape listener when a pop pins');
+    assert.match(kit, /document\.addEventListener\('click', hpClose\)/,
+        'click-anywhere close lost');
+    assert.match(kit, /helpPop: \{ open: hpOpen, close: hpClose/,
+        'the pop is not exported from domkit');
+    // the pop text is catalog-first with the literal as fallback
+    assert.match(js, /ptMsg\(btn\.dataset\.helpKey, btn\.dataset\.enHelp/,
+        'pop must read data-help-key through ptMsg with data-en-help fallback');
+    // the pop anchors to the header cell, and the cell is its positioning
+    // parent — top:100% of the page would paint it over unrelated chrome
+    const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+    assert.match(css, /\.pt-help-pop \{ position: absolute/, '.pt-help-pop lost');
+    assert.match(css, /\.pt-thead \.pt-c-dev,[\s\S]*?position: relative/,
+        'the dev/vanilla/auto header cells must anchor the pop');
+    assert.match(css, /\.pt-thead button\.pt-head-help/,
+        'the "?" must look like the button it is (round marker, cursor)');
+    // a dead native tooltip beside a live pop is the double-paint we removed
+    assert.ok(!/data-i18n-title="uplift\.patches\.col_(dev|vanilla)_help"/
+        .test(fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8')),
+        'the help buttons must not carry data-i18n-title tooltips again');
+});
+
+test('ADD PATCH spans one full line above the table (no small box)', () => {
+    const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+    const m = /\.pt-toolbar div\.pt-addform \{([^}]*)\}/.exec(css);
+    assert.ok(m, 'the add-form toolbar rule lost');
+    assert.match(m[1], /flex: 1 1 100%/,
+        'the card must take the full line (round 2 capped it at 460/560px '
+        + 'and the fields wrapped into a small box)');
+    assert.ok(!/max-width: 5\d\dpx/.test(m[1]), 'the 560px cap must not return');
+    // the stretchy fields share the spare width so one row is enough
+    assert.match(css, /\.pt-addform #pt-src-url \{ flex: 2\.5 1 160px/,
+        'the url field is the main stretcher');
+    assert.match(css, /\.pt-addform #pt-src-repo \{ flex: 1 1 110px/,
+        'repo must grow too');
+    assert.match(css, /\.pt-addform div\.pt-addform-row > \.pt-field:has\(#pt-new-id\)/,
+        'the name field wrapper must grow (label+input column)');
 });

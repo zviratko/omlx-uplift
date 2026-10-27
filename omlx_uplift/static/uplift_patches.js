@@ -1406,8 +1406,42 @@ async function pollDoctor() {
     } catch (e) { S.PT_DOCTOR = null; renderDriftBanner(null); }
 }
 
+/* HEADER HELP "?" (user 2026-10-27, third round): the marks on OMLX-DEV
+   BUILD / RUNTIME PATCH were dotted sups with a native title — nothing
+   happened on click and the hover tooltip was easy to miss entirely. They
+   are real buttons now. The bubble itself lives in domkit (UpliftDom
+   .helpPop — hover opens, click pins, Escape or a click anywhere else
+   closes): this file builds .modal-overlay dialogs, and the modal-escape
+   gate forbids it from owning keydown listeners, so a tooltip factory has
+   to sit in the shared layer. All the wiring here adds is the anchor, the
+   catalog text (data-help-key, English literal in data-en-help as the
+   fallback — no title attribute remains, so the pop never doubles into a
+   native tooltip) and the per-button aria-label. */
+function wirePtHeadHelp() {
+    if (!document.querySelectorAll) return;
+    const HP = D.helpPop;
+    if (!HP) return;                              // sandboxed render paths
+    document.querySelectorAll('.pt-head-help').forEach(btn => {
+        if (btn.__ptHelp) return;                 // initPatchesPage re-runs
+        btn.__ptHelp = true;
+        const opts = pin => ({ cellSel: '.pt-c-dev, .pt-c-vanilla',
+            popClass: 'pt-help-pop', pin,
+            text: ptMsg(btn.dataset.helpKey, btn.dataset.enHelp || '') });
+        btn.setAttribute('aria-label', opts(false).text);
+        btn.addEventListener('mouseenter', () => HP.open(btn, opts(false)));
+        btn.addEventListener('mouseleave', () => HP.hoverOut(btn));
+        btn.addEventListener('click', ev => {
+            ev.stopPropagation();                 // the opening click must
+                                                  // not reach doc listeners
+            if (HP.isPinned(btn)) { HP.close(); return; }   // click again out
+            HP.open(btn, opts(true));
+        });
+    });
+}
+
 function initPatchesPage() {
     ptSyncKindUI();
+    wirePtHeadHelp();
     pollDoctor();
     $('pt-src-kind').onchange = ptSyncKindUI;
     $('pt-preview-btn').onclick = ptPreview;
