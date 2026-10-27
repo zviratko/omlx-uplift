@@ -352,14 +352,16 @@ function renderPatches() {
         .replace('{loaded}', d.patches.length)
         .replace('{active}', d.patches.filter(p => p.enabled).length);
 
-    const auto = $('pt-auto-check');
-    auto.checked = !!(d.config && d.config.auto_update_check);
-    auto.onchange = async () => {
-        try {
-            await ptApi('config', { auto_update_check: auto.checked });
-            await pollPatches();
-        } catch (e) { PG.toast(String(e), 4000); }
-    };
+    // SUB-ACTIONS (user 2026-10-27, second round): the standalone
+    // auto-update checkbox is gone; the AUTO-UPDATE column's "(all)" link
+    // (painted here, wired in initPatchesPage) toggles every patch's
+    // per-row AUTO flag in one click. 'lit' = every patch auto-updates.
+    const allB = $('pt-auto-all');
+    if (allB) {
+        const on = d.patches.length > 0 && d.patches.every(p => p.auto_update);
+        allB.classList.toggle('lit', on);
+        allB.disabled = d.patches.length === 0;
+    }
 
     if (!d.patches.length) {
         const empty = document.createElement('div');
@@ -1410,6 +1412,41 @@ function initPatchesPage() {
     $('pt-src-kind').onchange = ptSyncKindUI;
     $('pt-preview-btn').onclick = ptPreview;
     $('pt-check-btn').onclick = () => { ptCheckNow(false); ptAutoSyncCurated(true); };
+    // "(all)" under the AUTO-UPDATE header (user 2026-10-27, second round):
+    // one click drives every patch's per-row AUTO flag to the opposite of
+    // "all on". Posts per patch (no bulk endpoint) and reports honestly:
+    // all done = one short toast; a failure names the ids, never a blanket
+    // success over a partial write.
+    $('pt-auto-all').onclick = async () => {
+        if (S.PT_BUSY || !S.PT_DATA) return;
+        const list = S.PT_DATA.patches || [];
+        if (!list.length) return;
+        const target = !list.every(p => p.auto_update);
+        S.PT_BUSY = true;
+        const b = $('pt-auto-all');
+        b.disabled = true;
+        let done = 0;
+        const failed = [];
+        try {
+            for (const p of list) {
+                if (!!p.auto_update === target) { done++; continue; }
+                try { await ptApi('auto', { id: p.id, enabled: target }); done++; }
+                catch (e) { failed.push(p.id); }
+            }
+        } finally { S.PT_BUSY = false; b.disabled = false; }
+        const word = target
+            ? ptMsg('uplift.patches.auto_all_on', 'Auto-update ON')
+            : ptMsg('uplift.patches.auto_all_off', 'Auto-update OFF');
+        if (failed.length) {
+            PG.toast(word + ' ' + done + '/' + list.length + ' — '
+                + ptMsg('uplift.patches.auto_all_failed', 'failed')
+                + ': ' + failed.join(', '), 6000);
+        } else {
+            PG.toast(word + ' — ' + ptMsg('uplift.patches.auto_all_all',
+                'every patch'), 4000);
+        }
+        await pollPatches();
+    };
     $('pt-diff-close').onclick = () => { $('pt-diff').hidden = true; };
     // FE-5: dev-panel button wiring lives with the panel (uplift_devpanel.js)
     if (window.Uplift.devpanel) window.Uplift.devpanel.initDevPanel();

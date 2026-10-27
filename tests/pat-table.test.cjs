@@ -499,62 +499,96 @@ test('column order: PATCH precedes ORIGIN in header, cells and tracks', () => {
         `track 3 should be ORIGIN's wide column, got ${tracks[2]}`);
 });
 
-test('patch auto-update label: says what it does, catalog agrees', () => {
+test('auto-update checkbox and check-for-updates button are GONE from chrome', () => {
+    // ROUND 2 (user 2026-10-27): both controls left the card chrome — the
+    // checkbox set the server-wide background check (config.auto_update_check
+    // stays a server/CLI setting) and the check action moved into the table
+    // header. Negative pins keep the dead shapes dead.
     const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
-    const m = /data-i18n="uplift\.patches\.auto_check">([^<]*)</.exec(html);
-    assert.ok(m, 'the auto_check label lost its data-i18n registration');
-    const en = JSON.parse(fs.readFileSync(
-        path.join(STATIC_DIR, '..', 'locales', 'en.json'), 'utf8'));
-    assert.equal(m[1].trim(), en['uplift.patches.auto_check'],
-        'index.html literal and en.json drifted — applyI18n repaints this node');
-    assert.ok(!/check for updates/i.test(m[1]),
-        'this box also promotes updates, not only checks: say so');
-    for (const loc of ['cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+    assert.ok(!html.includes('pt-auto-check'),
+        'the auto-update checkbox must not come back');
+    assert.ok(!html.includes('pt-head-auto'),
+        'the header auto-label CSS hook must not come back');
+    assert.ok(!/<button[^>]*class="btn"[^>]*id="pt-check-btn"/.test(html),
+        'Check-for-updates lives under the ORIGIN column, not as a toolbar btn');
+    for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
         const d = JSON.parse(fs.readFileSync(
             path.join(STATIC_DIR, '..', 'locales', `${loc}.json`), 'utf8'));
-        assert.ok(d['uplift.patches.auto_check'], `${loc} lost the label`);
-        assert.notEqual(d['uplift.patches.auto_check'], m[1],
-            `${loc} still carries the English label`);
+        assert.ok(!('uplift.patches.auto_check' in d),
+            `${loc} still carries the deleted auto_check key`);
+        assert.ok(!('uplift.patches.col_manage' in d),
+            `${loc} still carries the deleted col_manage key`);
     }
 });
 
-/* PAT-TABLE round 4, part 2 (user 2026-10-25): the ADD PATCH card moved OUT of
- * the stack below the table and INTO the toolbar, so the two ways a patch
- * arrives (pull from origin / add one) share one line above the list. Pinned by
- * document order — the ids are wired by getElementById, so nothing else would
- * notice if it slid back down.
+/* PAT-TABLE round 4 (user 2026-10-25): the ADD PATCH card moved OUT of the
+ * stack below the table and INTO the toolbar, so the way a patch arrives
+ * (pull from origin / add one) sits above the list. Pinned by document
+ * order — the ids are wired by getElementById, so nothing else would notice
+ * if it slid back down.
  *
- * HEAD-MOVE (user 2026-10-27): the auto-update SWITCH left the toolbar for the
- * card header — it is a standing setting, not an action, and the toolbar line
- * was crowded. The switch is pinned in the h2 (before the right-aligned
- * counts) and pinned OUT of the toolbar here.
+ * ROUND 2 (user 2026-10-27): the toolbar lost the check-for-updates button
+ * too (it lives under the ORIGIN column now) — the ADD PATCH card is the
+ * toolbar's only occupant.
  */
 test('ADD PATCH card sits in the toolbar, above the patch list', () => {
     const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
-    const tb = /<div class="pt-toolbar">([\s\S]*?)<\/div>\s*<!--/.exec(html)
-        || /<div class="pt-toolbar">([\s\S]*?)(<div class="pt-table")/.exec(html);
+    const tb = /<div class="pt-toolbar">([\s\S]*?)<\/div>\s*<!--/
+        .exec(html) || /<div class="pt-toolbar">([\s\S]*?)(<div class="pt-table")/.exec(html);
     assert.ok(tb, 'no .pt-toolbar block found');
-    assert.ok(tb[1].includes('pt-check-btn'), 'the toolbar lost its check button');
-    assert.ok(!tb[1].includes('pt-auto-check'),
-        'the auto-update switch belongs in the card header now — keep it out '
-        + 'of the toolbar (it crowded the ADD PATCH card)');
-    assert.ok(tb[1].includes('class="pt-addform"'),
+    const tbHtml = tb[1].replace(/<!--[\s\S]*?-->/g, '');   // prose may name ids
+    assert.ok(!tbHtml.includes('pt-check-btn'),
+        'check-for-updates belongs under the ORIGIN header, not the toolbar');
+    assert.ok(!tbHtml.includes('pt-auto-check'),
+        'the removed auto-update checkbox must not return to the toolbar');
+    assert.ok(tbHtml.includes('class="pt-addform"'),
         'the ADD PATCH card is not inside the toolbar (it belongs above the list)');
-    assert.ok(tb[1].indexOf('pt-check-btn') < tb[1].indexOf('pt-addform'),
-        'order: check button first, ADD PATCH card to its right');
     assert.ok(html.indexOf('class="pt-addform"') < html.indexOf('<div class="pt-table">'),
         'the card must sit before the table in the document');
 });
 
-test('auto-update switch lives in the Patches card header', () => {
+test('table header carries the sub-actions, help marks, and no MANAGE title', () => {
     const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
+    const head = /<div class="pt-row pt-thead">([\s\S]*?)<\/div>\s*<div id="pt-list"/.exec(html);
+    assert.ok(head, 'the table header row shape changed (pt-thead -> pt-list)');
+    const th = head[1];
+    // the two actions live in their own column, on a second line
+    assert.ok(th.includes('id="pt-check-btn"') && th.includes('pt-c-origin'),
+        'check-for-updates must sit under ORIGIN');
+    assert.ok(th.indexOf('pt-c-origin') < th.indexOf('id="pt-check-btn"')
+        && th.indexOf('id="pt-check-btn"') < th.indexOf('pt-c-status'),
+        'the check link lives INSIDE the ORIGIN cell');
+    assert.ok(th.includes('id="pt-auto-all"') && th.includes('pt-c-auto'),
+        'the (all) toggle must sit under AUTO-UPDATE');
+    // help marks: plain-language tooltip on each tick column
+    for (const id of ['pt-help-dev', 'pt-help-vanilla']) {
+        assert.ok(th.includes(`id="${id}"`), `${id} lost its help mark`);
+        assert.ok(new RegExp(`id="${id}"[\\s\\S]*?data-i18n-title="uplift\\.patches\\.col_(dev|vanilla)_help"`).test(th),
+            `${id} tooltip is not i18n-registered`);
+    }
+    // the MANAGE heading is dropped; the grid track stays (buttons align)
+    assert.match(th, /<span class="pt-c-manage"><\/span>/,
+        'pt-c-manage must stay as an EMPTY track — the column is unlabeled');
+    // the card header is plain again
     const h2 = /<h2><span data-i18n="uplift\.patches\.title">[\s\S]*?<\/h2>/.exec(html);
-    assert.ok(h2, 'the Patches card header row is gone');
-    assert.ok(h2[0].includes('id="pt-auto-check"'),
-        'the header lost the auto-update switch');
-    assert.ok(h2[0].indexOf('pt-auto-check') < h2[0].indexOf('id="pt-sub"'),
-        'order: title, switch, then the right-aligned counts (pt-sub keeps '
-        + 'margin-left: auto and needs to stay last)');
-    // the repaint contract: the span still carries its data-i18n registration
-    assert.match(h2[0], /data-i18n="uplift\.patches\.auto_check">[^<]*</);
+    assert.ok(h2 && !h2[0].includes('pt-auto-check') && !h2[0].includes('checkbox'),
+        'the Patches header must carry only title + counts');
+    // locale self-pin: the header keys are data-i18n literals (test_locale_sync
+    // sees the first), but the toast strings are dynamic — cover all of them.
+    const keys = ['auto_all', 'auto_all_title', 'auto_all_on', 'auto_all_off',
+        'auto_all_failed', 'auto_all_all', 'check_now_title',
+        'col_dev_help', 'col_vanilla_help'];
+    const en = JSON.parse(fs.readFileSync(
+        path.join(STATIC_DIR, '..', 'locales', 'en.json'), 'utf8'));
+    for (const k of keys) assert.ok(en['uplift.patches.' + k], `en lost ${k}`);
+    for (const loc of ['cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+        const d = JSON.parse(fs.readFileSync(
+            path.join(STATIC_DIR, '..', 'locales', `${loc}.json`), 'utf8'));
+        for (const k of keys) {
+            const key = 'uplift.patches.' + k;
+            assert.ok(d[key], `${loc} lost ${key}`);
+            if (k.endsWith('_all') && key.endsWith('auto_all')) continue; // 'all' short
+            assert.notEqual(d[key], en[key], `${loc}:${key} still English`);
+        }
+    }
 });
