@@ -41,7 +41,7 @@ pyarrow==26.0.0
 pydantic==2.14.1
 pydantic_core==2.50.1
 Pygments==2.21.0
-python-dateutil==2.9.0.post0
+python-dateutil==3.0.0
 pytrec_eval-terrier==0.5.11
 PyYAML==6.0.3
 regex==2026.9.29
