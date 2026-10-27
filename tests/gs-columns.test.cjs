@@ -204,6 +204,26 @@ test('expanding Advanced scrolls the box into view; collapsing does not', () => 
     assert.match(helper, /Math\.max\(0,/);   // never scroll above the document
 });
 
+/* ---- the disclosure STATE is a per-browser choice (user 2026-10-27:
+   'advanced session should remember the state'). Storage area is the whole
+   point, so it is pinned on the two accessor bodies; sessionStorage here
+   would silently re-collapse on every reload. restartPending elsewhere in
+   this file STAYS session-scoped on purpose — that flag is about a pending
+   server restart, not a display choice. ------------------------------- */
+test('Advanced remembers open/closed across reloads (localStorage)', () => {
+    const acc = sliceFn(gsys, 'gsAdvOpen');
+    const mut = sliceFn(gsys, 'gsAdvSetOpen');
+    assert.ok(gsys.includes("const GS_ADV_LS = 'uplift.gs.advOpen'"), 'one stable key');
+    assert.match(acc, /localStorage\.getItem\(GS_ADV_LS\) === '1'/);
+    assert.match(mut, /localStorage\.setItem\(GS_ADV_LS, v \? '1' : ''\)/);
+    assert.ok(!/sessionStorage/.test(acc + mut),
+        'the fold state must not go back to session scope');
+    for (const body of [acc, mut])
+        assert.ok(/try \{[\s\S]*\} catch \(_\) \{/.test(body), 'private-mode safe both ways');
+    // default with nothing stored stays collapsed (first visit = short page)
+    assert.match(acc, /catch \(_\) \{ return false; \}/);
+});
+
 /* ---------------- 3. the sub-key value chip ---------------------------- */
 /* standalone rule body by literal selector (the indexOf form is deliberate:
    a regex 'first match' can land inside a bigger selector list) */

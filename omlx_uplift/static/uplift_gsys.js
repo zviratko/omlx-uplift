@@ -838,12 +838,15 @@ function gsTabBadges() {
    not re-fire hashchange). The second segment is not in SUBS.settings, so
    applyTab lands on tab=settings sub=global exactly like a plain link. */
 const GS_NUMSCALE_LS = 'omlx-number-scale';   // shared with classic count_format.js:8
-const GS_ADV_SS = 'uplift.gs.advOpen';        // session-scoped: reload re-collapses (classic x-data)
+const GS_ADV_LS = 'uplift.gs.advOpen';       // PER-BROWSER choice, survives a
+//   reload (user 2026-10-27: 'advanced session should remember the state').
+//   Same home as the number-scale switch; the DEFAULT when nothing is stored
+//   stays collapsed, so a first visit still sees the short page.
 function gsAdvOpen() {
-    try { return sessionStorage.getItem(GS_ADV_SS) === '1'; } catch (_) { return false; }
+    try { return localStorage.getItem(GS_ADV_LS) === '1'; } catch (_) { return false; }
 }
 function gsAdvSetOpen(v) {
-    try { sessionStorage.setItem(GS_ADV_SS, v ? '1' : ''); } catch (_) {}
+    try { localStorage.setItem(GS_ADV_LS, v ? '1' : ''); } catch (_) {}
 }
 /* Land a section just BELOW the sticky board header. A plain
    scrollIntoView({block:'start'}) parks the section title under
