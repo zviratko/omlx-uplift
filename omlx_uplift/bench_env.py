@@ -206,18 +206,28 @@ def size_facts(venv: Path, cache: Optional[Path] = None, *,
 
 def _python_for_venv() -> str:
     """Prefer the interpreter that has the MLX stack? NO — the venv must
-    stay independent. Use whichever python3 >= 3.10 is available:
-    the keg python first (guaranteed present with omlx, exact 3.11),
-    then PATH python3. lm-eval itself pulls no mlx dependency."""
+    stay independent, and the envs track the SCORER ecosystem, not the
+    engine. The engine keg is pinned to python@3.11 by jundot's formula
+    (their pyproject caps requires-python <3.14); these venvs answer to
+    torch/mteb instead: newest first, floor 3.10, hard cap 3.14 —
+    torch ships no cp315 wheels yet and mteb declares <3.15, so 3.15+
+    candidates are skipped here rather than failing at install time.
+    PATH 3.14/3.13 beat the keg python: the 3.14 line lifts the
+    py3.11 ceilings (numpy 2.5.x, scipy 1.18, networkx 3.7 all need
+    >=3.12); the keg stays the guaranteed fallback."""
     candidates = []
+    for name in ("python3.14", "python3.13"):
+        p = shutil.which(name)
+        if p:
+            candidates.append(p)
     try:
         import omlx  # noqa: F401
         candidates.append(sys.executable)
     except Exception:
         pass
-    for name in ("python3.11", "python3.12", "python3"):
+    for name in ("python3.12", "python3.11", "python3"):
         p = shutil.which(name)
-        if p:
+        if p and p not in candidates:
             candidates.append(p)
     for c in candidates:
         try:
@@ -226,11 +236,13 @@ def _python_for_venv() -> str:
                           "sys.version_info[1])"],
                 capture_output=True, text=True, timeout=15)
             major, minor = (int(x) for x in out.stdout.split())
+            if (major, minor) == (3, 15) or (major, minor) > (3, 15):
+                continue  # torch cp315 wheels + mteb <3.15 — cap held
             if (major, minor) >= (3, 10):
                 return c
         except Exception:
             continue
-    raise RuntimeError("no python >= 3.10 found for the bench venv")
+    raise RuntimeError("no python 3.10-3.14 found for the bench venv")
 
 
 def status(*, dirname: str = VENV_DIRNAME, req: Path = REQUIREMENTS,
