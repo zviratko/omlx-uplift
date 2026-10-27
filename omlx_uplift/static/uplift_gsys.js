@@ -1984,8 +1984,10 @@ const GS_SPEC = [
         form.append(nameIn, keyIn, genB, createB, cancelB, err);
         const addB = mk(t('settings.auth.sub_keys_add'), 'act', () => { form.hidden = false; keyIn.focus(); },
             null, 'settings.auth.sub_keys_add');
-        const mask = k => { const s = String(k || '');
-            return s.length <= 8 ? s : s.slice(0, 4) + '\u2022'.repeat(s.length - 8) + s.slice(-4); };
+        const mask = () => '*****';   // fixed-width mask (user 2026-10-27):
+        // the old per-key-length mask wrapped long omlx- keys onto 3 lines
+        // and printed SHORT keys (<=8) in FULL. Always five bullets, whatever
+        // the value; the eye still reveals the real key on demand.
         function render() {
             list.replaceChildren();
             const keys = (GS.auth && GS.auth.sub_keys) || [];

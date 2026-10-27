@@ -302,3 +302,15 @@ test('section-header icons survive the dark signage strip and hover', () => {
     assert.ok(!gsys.includes('chev.textContent'),
         'glyph must stay CSS-side so it cannot desync from the fold state');
 });
+
+/* ---------------- 5. sub-key mask is FIXED width (user 2026-10-27) ------ */
+test('the sub-key mask never leaks by length — always *****', () => {
+    // the old mask echoed short keys (<=8) in FULL and printed a bullet per
+    // character for long ones (three-line wraps); the shape that failed is
+    // negative-pinned here so it cannot come back.
+    assert.match(gsys, /const mask = \(\) => '\*{5}'/);
+    assert.ok(!gsys.includes('.repeat('), 'no per-character mask math remains');
+    assert.ok(!gsys.includes("slice(0, 4) + '"), 'no head+tail echo remains');
+    // the eye still reveals the REAL key on demand (the mask must not eat it)
+    assert.match(gsys, /shown \? sk\.key : mask\(/);
+});
