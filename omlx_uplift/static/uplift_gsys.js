@@ -845,6 +845,20 @@ function gsAdvOpen() {
 function gsAdvSetOpen(v) {
     try { sessionStorage.setItem(GS_ADV_SS, v ? '1' : ''); } catch (_) {}
 }
+/* Land a section just BELOW the sticky board header. A plain
+   scrollIntoView({block:'start'}) parks the section title under
+   header.top (position:sticky) — measured: the first expanded row was cut
+   off and the header itself never appeared, which reads as 'nothing
+   happened'. */
+function gsScrollBoxIntoView(box) {
+    if (!box || !box.getBoundingClientRect) return;
+    const hdr = document.querySelector('header.top');
+    const off = (hdr ? hdr.getBoundingClientRect().height : 0) + 10;
+    window.scrollTo({
+        top: Math.max(0, window.scrollY + box.getBoundingClientRect().top - off),
+        behavior: 'smooth',
+    });
+}
 function gsSpecSlugs() {
     const out = [];
     for (const it of GS_SPEC) {
@@ -2053,7 +2067,9 @@ const GS_SPEC = [
         k: 'tog', sec: 'huggingface', field: 'hf_cache_enabled', flat: 'hf_cache_enabled'}},
     {x: (body, L) => {
         const hfp = GLUE.cell((GS.huggingface || {}).hf_cache_path || '\u2014');
-        hfp.className = 'dim';
+        hfp.className = 'dim gs-roval';
+        // gs-roval = read-only value: the cell right-justifies and clips, so a
+        // long cache path lost its BEGINNING; the rule lets it wrap instead
         body.append(gsRow('model', C.tf('uplift.gs.model.hf_path_label', 'HF cache path'), '', hfp));
     }},
     {sec: 'model', lab: 'model.idle', hint: 'model.idle_desc', ctl: {
@@ -2534,11 +2550,17 @@ function renderGlobalSettings() {
                     : C.tf('uplift.gs.adv.close', 'Collapse Advanced settings');
             };
             h.onclick = () => {
-                gsAdvSetOpen(!gsAdvOpen());
+                const opening = !gsAdvOpen();
+                gsAdvSetOpen(opening);
                 paintAdv();
-                if (gsAdvOpen()) {
-                    const bar = document.getElementById('gs-savebar');
-                    if (bar) bar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (opening) {
+                    // The rows materialise at the bottom of the last column,
+                    // off-screen: an expand that does not move the view reads
+                    // as a dead button (user 2026-10-27). Bring the ADVANCED
+                    // BOX under the sticky header — the savebar is further
+                    // down the page and centering it still left the header and
+                    // the first rows above the fold. Collapsing moves nothing.
+                    gsScrollBoxIntoView(box);
                 }
             };
             paintAdv();
@@ -2622,10 +2644,15 @@ function gsLayoutColumns(forced) {
     // alternate box shading by GLOBAL index (nth-of-type restarts per column)
     items.forEach((it, i) => it.classList.toggle('alt', i % 2 === 1));
     for (const c of wrap.querySelectorAll('.gs-col')) c.remove();
-    const gap = 14, cw = 380;
+    // TWO columns at most (user 2026-10-27). The old 380px target packed
+    // three columns into the 1342px wrap, but a settings row is
+    // name+hint | diff chip | value box: at 358px the value cell fell to its
+    // 150px floor, so selects clipped their own text and long readouts
+    // overflowed into the neighbour column. 520px keeps a row on one line.
+    const gap = 14, cw = 520, MAX_COLS = 2;
     const avail = wrap.clientWidth || (document.documentElement.clientWidth - 48);
     let nCols = Math.max(1, Math.floor((avail + gap) / (cw + gap)));
-    nCols = Math.min(nCols, items.length);
+    nCols = Math.min(nCols, items.length, MAX_COLS);
     const colW = Math.floor((Math.min(avail, 1500) - gap * (nCols - 1)) / nCols);
     const cols = [];
     for (let i = 0; i < nCols; i++) {
@@ -2641,9 +2668,17 @@ function gsLayoutColumns(forced) {
     const target = hs.reduce((a, b) => a + b, 0) / nCols;
     let ci = 0, acc = 0;
     for (let i = 0; i < items.length; i++) {
+        // Balance point is the MIDDLE of the box: start the next column when
+        // this box would carry the current one past the target by more than it
+        // closes the gap. The old order (append, then test) had to place a
+        // 1480px 'Resource Management' box before switching, which left one
+        // column 3593px tall against 1642px next to it.
+        const enoughLeft = items.length - 1 - i >= nCols - 1 - ci;
+        if (ci < nCols - 1 && acc > 0 && acc + hs[i] / 2 > target && enoughLeft) {
+            ci++; acc = 0;
+        }
         cols[ci].append(items[i]);
         acc += hs[i];
-        if (acc >= target && ci < nCols - 1 && i < items.length - (nCols - 1 - ci)) { ci++; acc = 0; }
     }
     if (!window.__gsResizeHooked) {
         window.__gsResizeHooked = true;

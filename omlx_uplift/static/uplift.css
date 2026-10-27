@@ -1899,9 +1899,16 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
 /* alternating row shade: instrument panel readout lines */
 .urow.settings:nth-of-type(even) { background: var(--row2); }
 .urow.settings:last-child { border-bottom: 0; }
-/* description sits next to the setting name (wraps below only when tight) */
-.urow.settings .uname small { display: inline; color: var(--dim);
-    font: 300 10px/1.35 var(--sans); margin-left: 8px; }
+/* description sits next to the setting name (wraps below only when tight).
+   .uname is a flex row whose wrapped line starts 8px in, and the hint's
+   automatic flex minimum added another 8 — the text then ran 13-16px PAST
+   the label cell and touched the value box (measured live: 9 rows in the
+   ALL view, the whole Resource Management tab). min-width:0 + a 16px cap
+   keeps the hint inside its own column and still beside the name whenever
+   the name is short. */
+.urow.settings .uname small { display: inline; color: var(--dim); min-width: 0;
+    max-width: calc(100% - 16px);
+    font: 300 10px/1.35 var(--sans); margin-left: 8px; overflow-wrap: anywhere; }
 /* On settings rows the RESTART chip sits BELOW the name and stays SMALL
    (user: full-size chip dominated the label cell and broke the
    description flow) — 13px tall, 7.5px caps. */
@@ -2070,9 +2077,34 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
     justify-content: flex-end;
     width: 100%;
 }
+/* a read-only value shown in the control column (HF cache path): the cell is
+   nowrap + overflow:hidden and right-justified, so a long path was cut at the
+   FRONT — the part that identifies it. Wrap inside the column instead. */
+.urow.settings .gctl .gs-roval {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: right;
+}
 
 .gs-dirs { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .gs-subkeys { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+/* the masked key is ONE unbreakable token, and a flex item may not shrink
+   below its content (min-width:auto) — so in the value cell it overflowed
+   its track, and because .gctl right-justifies, the surplus painted LEFT
+   over the name and the date (user report 2026-10-27: 'the textbox showing
+   the keys is not vertically aligned and overflows'). Let it take the cell
+   and wrap instead; the buttons keep their own width and the chip centres
+   against them. */
+.gs-subkeys .gctl { align-items: center; gap: 6px; }
+/* white-space: normal is load-bearing, not decoration: the settings grid
+   lives inside #gs-body.admin-table, and '.admin-table .urow
+   span:not(:first-child)' hands every control cell nowrap + overflow:hidden.
+   A nowrap chip that flex-shrank to 153px still PAINTED 195px of key —
+   straight through the eye button (measured live). Letting it wrap keeps the
+   value inside its own box at any column width. */
+.gs-subkeys .gctl code { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.gs-subkeys .gctl .se-btn { flex: 0 0 auto; }
 .gs-subkey-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; width: 100%; margin-top: 6px; }
 .gs-subkey-form input { flex: 1 1 160px; min-width: 0; }
 .gs-err { color: var(--red); font-size: 12px; width: 100%; }
