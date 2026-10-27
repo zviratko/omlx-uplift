@@ -415,7 +415,7 @@
                     <span class="pt-c-lamp"></span>
                     <span class="pt-c-patch" data-i18n="uplift.patches.col_patch">PATCH</span>
                     <span class="pt-c-origin"><span data-i18n="uplift.patches.col_origin">ORIGIN</span
-                        ><button type="button" id="pt-check-btn" class="pt-target-link pt-head-sub"
+                        ><button type="button" id="pt-check-btn" class="pt-target-link"
                             data-i18n="uplift.patches.check_now"
                             data-i18n-title="uplift.patches.check_now_title"
                             title="Check every tracked patch for a new version now">Check for updates</button></span>
@@ -429,16 +429,15 @@
                             id="dv-target-btn" class="pt-target-link"
                             data-i18n="uplift.patches.dev_target"
                             data-i18n-title="uplift.patches.dev_target_title"
-                            title="omlx-dev build source">TARGET</button>)</span></span>
+                            title="omlx-dev build source">SELECT SOURCE</button>)</span></span>
                     <span class="pt-c-vanilla"><span class="pt-head-l1"><span data-i18n="uplift.patches.col_vanilla">RUNTIME PATCH</span
                         ><button type="button" class="pt-head-help" id="pt-help-vanilla"
                             data-help-key="uplift.patches.col_vanilla_help"
                             data-en-help="Checked patches are applied to the code the server runs — they take effect at the next server restart.">?</button></span></span>
                     <span class="pt-c-auto"><span data-i18n="uplift.patches.col_auto">AUTO-UPDATE</span
-                        ><button type="button" id="pt-auto-all" class="pt-target-link pt-head-sub"
-                            data-i18n="uplift.patches.auto_all"
+                        ><input type="checkbox" id="pt-auto-all"
                             data-i18n-title="uplift.patches.auto_all_title"
-                            title="Turn auto-update on for every patch — click again to turn it off for all">all</button></span>
+                            title="Turn auto-update on for every patch — click again to turn it off for all"></span>
                     <span class="pt-c-manage"></span>
                 </div>
                 <div id="pt-list" class="pt-rows"><div class="empty">&#8212;</div></div>

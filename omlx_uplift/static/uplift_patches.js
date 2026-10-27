@@ -352,15 +352,18 @@ function renderPatches() {
         .replace('{loaded}', d.patches.length)
         .replace('{active}', d.patches.filter(p => p.enabled).length);
 
-    // SUB-ACTIONS (user 2026-10-27, second round): the standalone
-    // auto-update checkbox is gone; the AUTO-UPDATE column's "(all)" link
-    // (painted here, wired in initPatchesPage) toggles every patch's
-    // per-row AUTO flag in one click. 'lit' = every patch auto-updates.
+    // SUB-ACTIONS (user 2026-10-27, third round): the AUTO-UPDATE header's
+    // second line is a real checkbox — the SAME control as the per-row AUTO
+    // ticks. checked = every patch auto-updates; mixed = indeterminate
+    // (honest half-state the old "all" link could not show); no patches =
+    // disabled. Clicking drives every row to the state the box shows.
     const allB = $('pt-auto-all');
     if (allB) {
-        const on = d.patches.length > 0 && d.patches.every(p => p.auto_update);
-        allB.classList.toggle('lit', on);
-        allB.disabled = d.patches.length === 0;
+        const n = d.patches.length;
+        const on = d.patches.filter(p => p.auto_update).length;
+        allB.checked = n > 0 && on === n;
+        allB.indeterminate = on > 0 && on < n;
+        allB.disabled = n === 0;
     }
 
     if (!d.patches.length) {
@@ -1446,16 +1449,17 @@ function initPatchesPage() {
     $('pt-src-kind').onchange = ptSyncKindUI;
     $('pt-preview-btn').onclick = ptPreview;
     $('pt-check-btn').onclick = () => { ptCheckNow(false); ptAutoSyncCurated(true); };
-    // "(all)" under the AUTO-UPDATE header (user 2026-10-27, second round):
-    // one click drives every patch's per-row AUTO flag to the opposite of
-    // "all on". Posts per patch (no bulk endpoint) and reports honestly:
+    // The AUTO-UPDATE header checkbox (user 2026-10-27, third round): one
+    // click drives every patch's per-row AUTO flag to the state the box now
+    // shows (an indeterminate box click arrives as checked = the bulk ON).
+    // Posts per patch (no bulk endpoint) and reports honestly:
     // all done = one short toast; a failure names the ids, never a blanket
     // success over a partial write.
-    $('pt-auto-all').onclick = async () => {
+    $('pt-auto-all').onchange = async () => {
         if (S.PT_BUSY || !S.PT_DATA) return;
         const list = S.PT_DATA.patches || [];
         if (!list.length) return;
-        const target = !list.every(p => p.auto_update);
+        const target = $('pt-auto-all').checked;
         S.PT_BUSY = true;
         const b = $('pt-auto-all');
         b.disabled = true;

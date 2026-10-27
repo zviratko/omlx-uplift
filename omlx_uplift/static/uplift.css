@@ -4049,10 +4049,15 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     min-width: 1180px;
 }
 /* ROUND 2 (user 2026-10-27): every header cell keeps its name on ONE line
-   (no mid-word breaks) and may carry a second, quieter line: an action link
-   ((check for updates), (TARGET), (all)) or a help mark. Two-line cells are
-   columns; the checkbox columns center so the header sits on the same axis
-   as the ticks below, ORIGIN stays flush-left like its cells. */
+   (no mid-word breaks) and may carry a second line: an action link or a
+   help mark. Two-line cells are columns; the checkbox columns center so
+   the header sits on the same axis as the ticks below, ORIGIN stays
+   flush-left like its cells.
+   ROUND 4 (user 2026-10-27): the action line is NOT quieter any more —
+   "make the buttons consistent and larger (like TARGET)". Every sub-action
+   link shares the TARGET affordance; the AUTO-UPDATE second line became a
+   real checkbox like the row ticks. The old .pt-head-sub muting rules are
+   gone and negative-pinned in tests/pat-table.test.cjs. */
 .pt-thead > span { white-space: nowrap; }
 /* the pop anchors to its header cell (position:relative below): it sits
    under the column name, right-aligned to the cell edge, never the page */
@@ -4061,11 +4066,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     position: relative; }
 .pt-thead .pt-c-origin {
     display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-/* the action line: same link affordance as TARGET, one step quieter */
-.pt-thead .pt-head-sub {
-    font: 400 9px/1.3 var(--sans); letter-spacing: .06em;
-    text-transform: none; opacity: .8; }
-.pt-thead .pt-head-sub.lit { opacity: 1; color: var(--accent, #e0662e); }
+
 /* THIRD ROUND (user 2026-10-27): the "?" on OMLX-DEV BUILD / RUNTIME PATCH
    was a dotted sup with a native title — it did nothing on click and the
    hover tooltip was easy to miss. Now a small round button (bench column-help

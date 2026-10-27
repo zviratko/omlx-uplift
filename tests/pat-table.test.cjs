@@ -596,7 +596,10 @@ test('table header carries the sub-actions, help marks, and no MANAGE title', ()
         'the Patches header must carry only title + counts');
     // locale self-pin: the header keys are data-i18n literals (test_locale_sync
     // sees the first), but the toast strings are dynamic — cover all of them.
-    const keys = ['auto_all', 'auto_all_title', 'auto_all_on', 'auto_all_off',
+    // ROUND 4 (user 2026-10-27): the 'all' LABEL is gone — the AUTO-UPDATE
+    // second line is a checkbox — so 'auto_all' dropped from the catalog;
+    // negative-pinned below that it never comes back as a label.
+    const keys = ['auto_all_title', 'auto_all_on', 'auto_all_off',
         'auto_all_failed', 'auto_all_all', 'check_now_title',
         'col_dev_help', 'col_vanilla_help'];
     const en = JSON.parse(fs.readFileSync(
@@ -608,7 +611,6 @@ test('table header carries the sub-actions, help marks, and no MANAGE title', ()
         for (const k of keys) {
             const key = 'uplift.patches.' + k;
             assert.ok(d[key], `${loc} lost ${key}`);
-            if (k.endsWith('_all') && key.endsWith('auto_all')) continue; // 'all' short
             assert.notEqual(d[key], en[key], `${loc}:${key} still English`);
         }
     }
@@ -678,6 +680,42 @@ test('ADD PATCH spans one full line above the table (no small box)', () => {
         'repo must grow too');
     assert.match(css, /\.pt-addform div\.pt-addform-row > \.pt-field:has\(#pt-new-id\)/,
         'the name field wrapper must grow (label+input column)');
+});
+
+/* ROUND 4 (user 2026-10-27): 'make the button on the second line consistent
+   and larger (like TARGET). Rename TARGET to SELECT SOURCE. Change "all"
+   under AUTO-UPDATE to a checkbox (same as the one in the columns)'. */
+test('header second line: uniform TARGET-style actions, checkbox for auto-all', () => {
+    const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
+    const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+    const js = fs.readFileSync(path.join(STATIC_DIR, 'uplift_patches.js'), 'utf8');
+    // the quieter .pt-head-sub muting is DEAD — every sub-action link is one
+    // affordance at the header's own size (the .pt-target-link rule)
+    assert.ok(!html.includes('pt-head-sub') && !css.includes('.pt-head-sub {'),
+        'pt-head-sub muting must not come back — the second line is uniform now');
+    assert.match(html, /id="pt-check-btn" class="pt-target-link"/,
+        'CHECK FOR UPDATES shares the TARGET affordance');
+    // TARGET is renamed SELECT SOURCE: fallback text + every catalog
+    assert.match(html, /id="dv-target-btn"[\s\S]{0,300}>SELECT SOURCE<\/button>/,
+        'the dev column reads SELECT SOURCE');
+    const enCat = JSON.parse(fs.readFileSync(
+        path.join(STATIC_DIR, '..', 'locales', 'en.json'), 'utf8'));
+    assert.equal(enCat['uplift.patches.dev_target'], 'SELECT SOURCE');
+    // 'all' as a LABEL is gone — and it must not return
+    assert.ok(!('uplift.patches.auto_all' in enCat),
+        'the auto_all label key was retired with the button');
+    // AUTO-UPDATE's second line is a real checkbox, house-style like the rows
+    assert.match(html, /<input type="checkbox" id="pt-auto-all"/,
+        'pt-auto-all is a checkbox now (same control as the per-row AUTO ticks)');
+    assert.ok(!/<button[^>]*id="pt-auto-all"/.test(html),
+        'the old "all" button must not come back');
+    // paint drives the three honest states; click reads the box, and the
+    // post-loop re-poll re-lands the truth over any partial failure
+    assert.match(js, /allB\.checked = n > 0 && on === n;/);
+    assert.match(js, /allB\.indeterminate = on > 0 && on < n;/,
+        'mixed auto-states must show as indeterminate, never as unchecked');
+    assert.match(js, /\$\('pt-auto-all'\)\.onchange = async \(\) => \{/);
+    assert.match(js, /const target = \$\('pt-auto-all'\)\.checked;/);
 });
 
 test('ADD PATCH strip: one control height, one caption size (user 2026-10-27)', () => {
