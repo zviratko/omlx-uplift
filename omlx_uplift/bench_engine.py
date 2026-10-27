@@ -58,6 +58,48 @@ def _restore_snapshot(gs, snap) -> None:
     gs.cache.hot_cache_only, gs.cache.hot_cache_max_size = snap
 
 
+def _seam_kwargs(seam, gs) -> dict:
+    """Keywords for one seam call, cut to the signature THIS server ships.
+
+    Upstream 28f50bb dropped the ssd_cache_dir / ssd_cache_max_size
+    parameters: the runtime cache switch now reads the directory and the
+    limit out of global_settings itself, so the only arguments left are
+    enabled / global_settings / hot_cache_max_size. Sending a dropped
+    keyword is not ignored — it raises TypeError and the whole benchmark
+    start fails with 409, which is what this adapter exists to prevent.
+
+    Signature probe, never a version string (same doctrine as
+    decision_engine.forced_capability): one adapter covers the old keg and
+    the new one, and the optional keys join the call only while the seam
+    still asks for them.
+    """
+    import inspect
+
+    try:
+        params = inspect.signature(seam).parameters
+    except (TypeError, ValueError) as e:      # builtins, C functions
+        raise Conflict(
+            "Could not toggle caches for the benchmark: the server's cache "
+            f"switch has an unreadable signature ({e.__class__.__name__}).") from e
+    var_kw = any(p.kind is p.VAR_KEYWORD for p in params.values())
+    wanted = {"enabled": None, "global_settings": gs,
+              "hot_cache_max_size": gs.cache.hot_cache_max_size}
+    for legacy in ("ssd_cache_dir", "ssd_cache_max_size"):
+        if legacy in params:                  # pre-28f50bb keg
+            wanted[legacy] = None
+    sent = {k: v for k, v in wanted.items() if var_kw or k in params}
+    required = [p.name for p in params.values()
+                if p.default is p.empty and p.kind in
+                (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)]
+    missing = [n for n in required if n not in sent]
+    if missing:
+        raise Conflict(
+            "Could not toggle caches for the benchmark: this server's cache "
+            f"switch needs {', '.join(missing)}, which this build cannot "
+            "supply — the cache-off options need an uplift update.")
+    return sent
+
+
 async def _enable_cache_off(no_hot_cache: bool, no_ssd_cache: bool):
     """Write the temporary cache config and return (restore, flags).
 
@@ -71,8 +113,10 @@ async def _enable_cache_off(no_hot_cache: bool, no_ssd_cache: bool):
     every model loaded AFTER this point (the bench's) uses the temp
     config. IN-MEMORY ONLY: settings.json is never written — we mutate
     the live global_settings object and restore it in _runner's finally.
-    The call shape mirrors the admin route's cache_changed branch
-    verbatim: enabled/ssd_* stay None, hot size rides the live string."""
+    The call mirrors the admin route's cache_changed branch: enabled stays
+    None (cache.enabled is never ours to change), the hot size rides the
+    live string, and _seam_kwargs trims the argument list to what the
+    installed seam actually accepts."""
     try:
         seam = _cache_seam()
     except ImportError as e:
@@ -93,9 +137,7 @@ async def _enable_cache_off(no_hot_cache: bool, no_ssd_cache: bool):
         gs.cache.hot_cache_max_size = "0"
 
     async def _apply():
-        return await seam(enabled=None, ssd_cache_dir=None,
-                          ssd_cache_max_size=None, global_settings=gs,
-                          hot_cache_max_size=gs.cache.hot_cache_max_size)
+        return await seam(**_seam_kwargs(seam, gs))
 
     try:
         ok, msg = await _apply()

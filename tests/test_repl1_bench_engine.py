@@ -264,11 +264,22 @@ def out_task(out, fake_bench):
 # ---------------------------------------------------------------------------
 
 class SeamRecorder:
-    """Fake omlx.admin.routes._apply_cache_settings_runtime. Same keyword
-    surface as the vanilla function; records every call, can be pinned to
-    fail ((ok=False, msg) or an exception) or to hang from a call index on
+    """Fake omlx.admin.routes._apply_cache_settings_runtime in the shape
+    upstream ships SINCE 28f50bb: (enabled, global_settings,
+    hot_cache_max_size) — the ssd_cache_dir / ssd_cache_max_size keywords
+    came OUT of the signature and the seam reads them from settings now.
+
+    The parameter list is REAL on purpose, not **kwargs: bench_engine must
+    send exactly what the installed seam accepts. The pre-28f50bb fake kept
+    the old keyword surface, so the suite stayed green while a live keg 409'd
+    with 'unexpected keyword argument ssd_cache_dir' — this class is what
+    keeps that from happening again (see also the installed-signature guard
+    further down). Records every call, can be pinned to fail
+    ((ok=False, msg) or an exception) or to hang from a call index on
     (cancel-survival proof). context() is a test-supplied probe of engine
     state AT CALL TIME (proves apply-after-claim / before-task ordering)."""
+
+    SHAPE = ("enabled", "global_settings", "hot_cache_max_size")
 
     def __init__(self):
         self.calls: list[dict] = []
@@ -277,16 +288,17 @@ class SeamRecorder:
         self.hang_from = None          # ... once this many calls happened
         self.context = lambda: None
 
-    async def __call__(self, *, enabled, ssd_cache_dir, ssd_cache_max_size,
-                       global_settings, hot_cache_max_size):
-        self.calls.append({
-            "enabled": enabled, "ssd_cache_dir": ssd_cache_dir,
-            "ssd_cache_max_size": ssd_cache_max_size,
-            "hot_cache_max_size": hot_cache_max_size,
-            "hot_cache_only": global_settings.cache.hot_cache_only,
-            "cache_enabled": global_settings.cache.enabled,
-            "context": self.context(),
-        })
+    async def __call__(self, *, enabled, global_settings,
+                       hot_cache_max_size=None):
+        return await self._record(
+            {"enabled": enabled, "global_settings": global_settings,
+             "hot_cache_max_size": hot_cache_max_size}, global_settings)
+
+    async def _record(self, sent, gs):
+        self.calls.append({**sent,
+                           "hot_cache_only": gs.cache.hot_cache_only,
+                           "cache_enabled": gs.cache.enabled,
+                           "context": self.context()})
         if isinstance(self.result, Exception):
             raise self.result
         if self.hang is not None and (self.hang_from is None
@@ -295,15 +307,37 @@ class SeamRecorder:
         return self.result
 
 
-@pytest.fixture()
-def cache_env(fake_bench):
+def sent_keys(call):
+    """Only the keywords the adapter actually passed (probes excluded)."""
+    return {k for k in call} - {"hot_cache_only", "cache_enabled", "context"}
+
+
+class LegacySeamRecorder(SeamRecorder):
+    """The same seam as it was BEFORE upstream 28f50bb — it still demanded
+    ssd_cache_dir / ssd_cache_max_size. Exists so an older keg stays provably
+    working: the adapter must send those two keywords here and NOT send them
+    to the modern shape above."""
+
+    SHAPE = ("enabled", "ssd_cache_dir", "ssd_cache_max_size",
+             "global_settings", "hot_cache_max_size")
+
+    async def __call__(self, *, enabled, ssd_cache_dir, ssd_cache_max_size,
+                       global_settings, hot_cache_max_size):
+        return await self._record(
+            {"enabled": enabled, "ssd_cache_dir": ssd_cache_dir,
+             "ssd_cache_max_size": ssd_cache_max_size,
+             "global_settings": global_settings,
+             "hot_cache_max_size": hot_cache_max_size}, global_settings)
+
+
+def _cache_env_gen(fake_bench, seam_cls):
     """Layer the seam + _server_state fakes on fake_bench, with the SAME
     snapshot/restore doctrine (no fake omlx modules leak out; works both
     on CI without omlx and on the dev box where the real package exists —
     sys.modules lookups win over the disk import either way)."""
     names = ["omlx.admin.routes", "omlx.server"]
     saved = {n: sys.modules.get(n) for n in names}
-    seam = SeamRecorder()
+    seam = seam_cls()
     seam.context = lambda: len(fake_bench.runs)   # runs created at call time
     routes = types.ModuleType("omlx.admin.routes")
     routes._apply_cache_settings_runtime = seam
@@ -338,6 +372,17 @@ def cache_env(fake_bench):
                 sys.modules[n] = v
 
 
+@pytest.fixture()
+def cache_env(fake_bench):
+    yield from _cache_env_gen(fake_bench, SeamRecorder)
+
+
+@pytest.fixture()
+def legacy_cache_env(fake_bench):
+    """Bench against a pre-28f50bb keg (the seam still wants ssd_*)."""
+    yield from _cache_env_gen(fake_bench, LegacySeamRecorder)
+
+
 async def _tick(n=3):
     """Let scheduled task steps run (cancel delivery, done callbacks)."""
     for _ in range(n):
@@ -360,8 +405,12 @@ async def test_cache_off_ssd_applied_before_task_and_restored_on_success(
     c0 = seam.calls[0]
     assert c0["hot_cache_only"] is True              # temp: vanilla 'Hot Cache Only'
     assert c0["hot_cache_max_size"] == "8GB"         # untouched field rides the live string
-    assert c0["enabled"] is None and c0["ssd_cache_dir"] is None \
-        and c0["ssd_cache_max_size"] is None         # admin-route cache_changed call shape
+    assert c0["enabled"] is None                     # cache.enabled stays the server's
+    # THE CALL SURFACE: exactly what this keg shape accepts. Upstream 28f50bb
+    # dropped ssd_cache_dir / ssd_cache_max_size and sending them anyway is
+    # what made a live bench start answer 409 with a TypeError.
+    assert sent_keys(c0) == set(SeamRecorder.SHAPE)
+    assert "ssd_cache_dir" not in c0 and "ssd_cache_max_size" not in c0
     assert c0["cache_enabled"] is True               # cache.enabled never touched
     assert c0["context"] == 1                        # applied AFTER the create_run claim
     assert fake_bench.get_active_run() is not None   # claim held across the apply
@@ -373,6 +422,86 @@ async def test_cache_off_ssd_applied_before_task_and_restored_on_success(
     assert cache_env.gs.cache.hot_cache_only is False
     assert seam.calls[-1]["hot_cache_only"] is False
     assert seam.calls[-1]["hot_cache_max_size"] == "8GB"
+
+
+@pytest.mark.asyncio
+async def test_cache_off_legacy_seam_still_gets_ssd_keywords(fake_bench,
+                                                             legacy_cache_env):
+    """A pre-28f50bb keg still DEMANDS ssd_cache_dir / ssd_cache_max_size, so
+    the adapter has to send them there — trimming must follow the signature,
+    not a hardcoded list, or the same drift breaks the older build the other
+    way ('missing required keyword')."""
+    be = _engine_mod()
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                         FakePool(), no_ssd_cache=True)
+    seam = legacy_cache_env.seam
+    c0 = seam.calls[0]
+    assert sent_keys(c0) == set(LegacySeamRecorder.SHAPE)
+    assert c0["ssd_cache_dir"] is None and c0["ssd_cache_max_size"] is None
+    run = fake_bench.get_run(out["bench_id"])
+    await asyncio.wait_for(run.task, 2)
+    assert len(seam.calls) == 2                    # apply + restore
+    assert sent_keys(seam.calls[-1]) == set(LegacySeamRecorder.SHAPE)
+
+
+def _gs_stub(hot="8GB"):
+    return types.SimpleNamespace(cache=types.SimpleNamespace(
+        enabled=True, hot_cache_only=False, hot_cache_max_size=hot))
+
+
+def test_cache_seam_kwargs_match_the_installed_seam_signature():
+    """DRIFT GUARD against the real package (the fakes above can only prove
+    the shape they themselves declare). Reads the parameters of the
+    _apply_cache_settings_runtime this box actually ships and proves our call
+    sends nothing it rejects and everything it requires. Signature probe only:
+    no engine pool, no model load, no settings write. Skips on CI (no omlx).
+
+    Why it exists: upstream 28f50bb dropped ssd_cache_dir/ssd_cache_max_size
+    and every mocked test stayed green while a live bench start 409'd."""
+    import inspect
+
+    routes = pytest.importorskip("omlx.admin.routes")
+    seam = getattr(routes, "_apply_cache_settings_runtime", None)
+    if seam is None:
+        pytest.skip("this omlx build has no runtime cache switch")
+    be = _engine_mod()
+    gs = _gs_stub()
+    sent = be._seam_kwargs(seam, gs)
+    params = inspect.signature(seam).parameters
+    assert set(sent) <= set(params), f"sending keywords the seam drops: {set(sent) - set(params)}"
+    assert {"enabled", "global_settings"} <= set(sent)
+    for name, p in params.items():
+        if (p.default is p.empty
+                and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)):
+            assert name in sent, f"installed seam requires '{name}' we do not send"
+    assert sent["enabled"] is None
+    assert sent["hot_cache_max_size"] == "8GB"
+
+
+def test_cache_seam_kwargs_refuse_an_unmatchable_seam():
+    """A seam whose required arguments this build cannot supply must fail as
+    the honest Conflict the UI shows — not as a raw TypeError mid-start."""
+    be = _engine_mod()
+
+    async def odd_seam(enabled, global_settings, hot_cache_max_size,
+                       brand_new_required):
+        return True, "ok"
+
+    with pytest.raises(be.Conflict) as e:
+        be._seam_kwargs(odd_seam, _gs_stub())
+    assert "brand_new_required" in str(e.value)
+
+
+def test_cache_seam_kwargs_do_not_invent_names_for_a_var_keyword_seam():
+    """**kwargs seams get the modern trio only — passing the retired ssd_*
+    keys through a forwarder would hand them to something that never asked."""
+    be = _engine_mod()
+
+    async def open_seam(*args, **kwargs):
+        return True, "ok"
+
+    assert set(be._seam_kwargs(open_seam, _gs_stub())) == \
+        {"enabled", "global_settings", "hot_cache_max_size"}
 
 
 @pytest.mark.asyncio
