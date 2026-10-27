@@ -37,6 +37,32 @@ uplift -> omlx, never the reverse; classic's file stays byte-identical):
   is reproduced on our run object, so the shared generator replays it
   verbatim (same contract classic pins in test_benchmark_sse_replay.py).
 
+WAVE PINS (user fix 2026-10-27: 'make sure they run in parallel, really' +
+'ignore concurrency limits set in server for the benchmarks') — two vanilla
+behaviours serialised the wave no matter what the panel promised:
+
+* the server's `max_concurrent_requests` setting lands on the scheduler as
+  `max_num_seqs` (admission cap) + `completion_batch_size` (decode cap), so a
+  wave wider than the cap queues requests instead of overlapping them;
+* with `chunked_prefill=False` (the default) a lone long prompt is prefilled
+  in ONE executor step, and `add_request` rides the SAME single MLX executor
+  (engine_core.py, `run_in_executor`) — so while request 1 prefills, the
+  staggered submissions of requests 2..N cannot even reach the scheduler.
+  The user sees exactly that: nothing, then request 2 'arrives' when
+  request 1's prefill ends, everything else queued.
+
+`_pin_wave` raises the caps and forces the chunked, unthrottled, fairness-free
+scheduling mode for the duration of the probe — on the BENCHED ENGINE'S OWN
+scheduler only. Every write goes through the same attributes vanilla's live
+apply paths use (admin routes write `scheduler._decode_fairness` /
+`._prefill_speed_priority` plus the config mirror; engine_pool applies
+concurrency as the config pair plus the live BatchGenerator cap), the values
+are restored by `_unpin_wave` in the run's finally, the server settings
+themselves are never touched, and other engines never see any of it.
+What pins CANNOT lift: the preflight memory guard (physical limits) and a
+model class that forces serial decode inside `_effective_max_num_seqs`
+(llama4 / overflow recovery) — those still shape the wave honestly.
+
 NO-CEILING DOCTRINE (U50: when lifting a bound, hunt every clamp so the UI
 never promises more than the runner does): `prefill_tokens` accepts ANY
 whole number >= 1024 and `parallel` any whole number >= 1; the UI inputs
@@ -268,6 +294,8 @@ class PrefillRun:
     phase: str = "prepare"
     progress: float = 0.0
     message: str = ""
+    submitted: int = 0             # requests that reached the engine (wave bar
+                                   # counts FINISHES; this counts SUBMITS)
     results: list = field(default_factory=list)
     aggregate: Optional[dict] = None
     error_message: str = ""
@@ -356,7 +384,7 @@ def _claim_checks() -> None:
     nothing may await between these reads and create_run()."""
     own = get_active_run()
     if own is not None:
-        raise Conflict("A prefill probe is already running "
+        raise Conflict("A custom benchmark is already running "
                        f"(bench_id={own.bench_id}, "
                        f"model_id={own.request.model_id}).")
     B = _engine()
@@ -385,7 +413,7 @@ async def start(body: dict, pool: Any) -> dict:
     _claim_checks()
     reason = await _other_bench_busy()
     if reason:
-        raise Conflict(f"Cannot start the prefill probe: {reason}.")
+        raise Conflict(f"Cannot start the custom benchmark: {reason}.")
     _claim_checks()
 
     entry = pool.get_entry(req.model_id)
@@ -426,20 +454,142 @@ def _sampling_params(B: Any, generation_tokens: int) -> Any:
                           top_p=1.0, ignore_eos=True)
 
 
+# ---------------------------------------------------------------------------
+# wave pins — see the WAVE PINS block of the module docstring
+# ---------------------------------------------------------------------------
+
+def _pin_targets(core: Any):
+    """(scheduler, config, executor) behind the batch-benchmark core seam.
+
+    The core is the AsyncEngineCore wrapper: scheduler lives on its EngineCore
+    (`core.engine.scheduler`), the executor on the wrapper property. A test
+    fake may hang `scheduler` straight off the core — both shapes are read."""
+    inner = getattr(core, "engine", None) or core
+    sched = getattr(inner, "scheduler", None)
+    if sched is None:
+        return None, None, None
+    return sched, getattr(sched, "config", None), getattr(core, "_mlx_executor", None)
+
+
+def _pin_wave(core: Any, parallel: int) -> Optional[dict]:
+    """Pin the benched engine for the wave: caps raised to `parallel`, chunked
+    prefill on (bounded executor steps so staggered submissions land), memory
+    throttle off (classic's own bench rule: throttled chunks are not
+    comparable), decode fairness off (sibling bench traffic must not repay
+    fairness debt to each other). Returns the undo map, or None when the core
+    exposes no scheduler (fakes, exotic engines) — measurement then simply
+    runs under the server's own limits."""
+    sched, cfg, executor = _pin_targets(core)
+    if sched is None:
+        return None
+    saved: dict = {}
+    if cfg is not None:
+        # RAISE only: a wave of 4 on a server capped at 8 keeps the 8.
+        for name in ("max_num_seqs", "completion_batch_size"):
+            cur = getattr(cfg, name, None)
+            if isinstance(cur, int) and not isinstance(cur, bool) \
+                    and cur < parallel:
+                saved[name] = cur
+                setattr(cfg, name, parallel)
+        for name, value in (("chunked_prefill", True),
+                            ("prefill_speed_priority", True),
+                            ("decode_fairness", False)):
+            if hasattr(cfg, name):
+                saved[name] = getattr(cfg, name)
+                setattr(cfg, name, value)
+    # cached mirrors: the hot paths read these scheduler attributes, not the
+    # config (the scheduler copies them at init; vanilla's live toggles write
+    # both — so do we)
+    for attr, value in (("_prefill_speed_priority", True),
+                        ("_decode_fairness", False)):
+        if hasattr(sched, attr):
+            saved[attr] = getattr(sched, attr)
+            setattr(sched, attr, value)
+    if "_decode_fairness" in saved:
+        saved["_decode_time_owed_s"] = getattr(sched, "_decode_time_owed_s", 0.0)
+        sched._decode_time_owed_s = 0.0     # vanilla's toggle pattern
+    # The shared BatchGenerator is created once with the config as it was
+    # THEN, so the config write above misses an already-built one (fresh
+    # engines are fine — their generator is built after the pin).
+    gen = getattr(sched, "batch_generator", None)
+    if gen is not None:
+        cur = getattr(gen, "completion_batch_size", None)
+        if isinstance(cur, int) and not isinstance(cur, bool) and cur < parallel:
+            saved["gen_cap"] = cur
+            floor = max(parallel, int(getattr(gen, "prefill_batch_size", 1) or 1))
+            try:
+                if executor is not None:
+                    executor.submit(setattr, gen, "completion_batch_size", floor)
+                else:
+                    gen.completion_batch_size = floor
+            except Exception:      # shutting-down executor: the config carries
+                logger.debug("prefill probe: live decode cap bump skipped",
+                             exc_info=True)
+    return saved
+
+
+def _unpin_wave(core: Any, saved: Optional[dict]) -> None:
+    """Restore everything _pin_wave touched (idempotent, never raises out —
+    a failed restore would leave the USER's server running the bench's
+    settings)."""
+    if not saved:
+        return
+    try:
+        sched, cfg, executor = _pin_targets(core)
+        for name in ("max_num_seqs", "completion_batch_size", "chunked_prefill",
+                     "prefill_speed_priority", "decode_fairness"):
+            if name in saved and cfg is not None:
+                setattr(cfg, name, saved[name])
+        for attr in ("_prefill_speed_priority", "_decode_fairness",
+                     "_decode_time_owed_s"):
+            if attr in saved and sched is not None:
+                setattr(sched, attr, saved[attr])
+        if "gen_cap" in saved and sched is not None:
+            gen = getattr(sched, "batch_generator", None)
+            if gen is not None:
+                try:
+                    if executor is not None:
+                        executor.submit(setattr, gen, "completion_batch_size",
+                                        saved["gen_cap"])
+                    else:
+                        gen.completion_batch_size = saved["gen_cap"]
+                except Exception:
+                    logger.debug("prefill probe: decode cap restore skipped",
+                                 exc_info=True)
+    except Exception:
+        logger.warning("prefill probe: wave-pin restore failed", exc_info=True)
+
+
 async def _one_request(run: PrefillRun, B: Any, core: Any, prompt: list,
                        params: Any, *, index: int, offset: float,
-                       record: bool = True) -> dict:
+                       record: bool = True,
+                       wave_t0: Optional[float] = None) -> dict:
     """One measured request of the wave: wait its stagger slot, submit,
     stream, hand the timing to classic's own metric math.
 
     `record=False` is the warm-up call: same code path, same engine, but no
     result row and no progress event, so a JIT-compile pass never lands in
-    the probe's numbers or its table."""
+    the probe's numbers or its table.
+
+    The SUBMIT event is what makes the stagger visible while the wave is in
+    flight (user fix 1: 'nothing seems to happen until the first request
+    prefills'): the panel shows the wave ENTERING the engine request by
+    request, long before any of them finishes, and `submit_s` in the row is
+    the REAL leave-time, not the scheduled one."""
     if offset > 0:
         await asyncio.sleep(offset)
     submit = time.perf_counter()
     request_id = await core.add_request(prompt=prompt, sampling_params=params,
                                         skip_cache_store=True)
+    if record:
+        run.submitted += 1
+        await _send_event(run, {
+            "type": "progress", "phase": "probe",
+            "message": (f"Request {index + 1}/{run.request.parallel} "
+                        f"submitted (+{(submit - (wave_t0 or submit)):.1f}s)"),
+            # the bar keeps counting FINISHES: a submit must not move it
+            "current": len(run.results),
+            "total": max(1, run.request.parallel)})
     first: Optional[float] = None
     prev = 0
     completion = 0
@@ -481,6 +631,10 @@ async def _one_request(run: PrefillRun, B: Any, core: Any, prompt: list,
     row.update({
         "index": index,
         "start_offset_s": round(offset, 3),
+        # the REAL leave-time against the wave clock (submit_s is what the
+        # panel's Start (s) column prints; start_offset_s stays the scheduled
+        # slot, so a pin failure is visible as a gap between the two)
+        "submit_s": round(submit - wave_t0, 3) if wave_t0 else None,
         "first_token_abs": first,
         "end_abs": end,
     })
@@ -505,6 +659,8 @@ def _public_row(row: dict) -> dict:
 async def _probe(run: PrefillRun, pool: Any) -> None:
     B = _engine()
     req = run.request
+    core: Any = None
+    pins: Optional[dict] = None
     try:
         total = max(1, req.parallel)   # the bar is the wave: 1 per request
         await _progress(run, "load", f"Loading {req.model_id}...", 0, total)
@@ -520,6 +676,9 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
         tokenizer = getattr(engine, "tokenizer", None)
         if tokenizer is None:
             raise BadInput(f"Model {req.model_id} exposes no tokenizer.")
+        # user fix 2: the wave ignores the server's concurrency limit while
+        # it runs; _unpin_wave in the finally puts it back (see WAVE PINS).
+        pins = _pin_wave(core, req.parallel)
 
         await _progress(run, "prompt", f"Building {req.parallel} prompt(s) of "
                         f"{req.prefill_tokens} tokens...", 0, total)
@@ -558,7 +717,7 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
         # whatever bench starts next).
         outcomes = await asyncio.gather(*[
             _one_request(run, B, core, prompts[i], params,
-                         index=i, offset=offsets[i])
+                         index=i, offset=offsets[i], wave_t0=wall_start)
             for i in range(req.parallel)], return_exceptions=True)
         wall_end = time.perf_counter()
         failures = [o for o in outcomes if isinstance(o, BaseException)]
@@ -572,7 +731,7 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
         run.status = "completed"
         run.phase = "done"
         run.progress = 1.0
-        run.message = "Probe complete."
+        run.message = "Benchmark complete."
         await _send_event(run, {"type": "aggregate", "data": run.aggregate})
         await _send_event(run, {"type": "done", "bench_id": run.bench_id})
     except asyncio.CancelledError:
@@ -580,7 +739,7 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
         run.phase = "cancelled"
         run.message = "Cancelled."
         await _send_event(run, {"type": "error",
-                                "message": "Prefill probe cancelled."})
+                                "message": "Custom benchmark cancelled."})
         raise
     except Exception as e:
         run.status = "error"
@@ -589,6 +748,9 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
         logger.warning(f"uplift prefill probe failed: {e}", exc_info=True)
         await _send_event(run, {"type": "error", "message": str(e)})
     finally:
+        # the server's OWN limits come back before anything else runs —
+        # a cancelled or failed wave must not leave the engine pinned
+        _unpin_wave(core, pins)
         if not run.terminal:
             run.terminal = True
         if run.status == "running":

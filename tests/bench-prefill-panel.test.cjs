@@ -31,16 +31,17 @@ const EN = {
     'uplift.bench.prefill.parallel': 'Parallel requests',
     'uplift.bench.prefill.stagger': 'Stagger between starts (s)',
     'uplift.bench.prefill.generation': 'Generation tokens',
-    'uplift.bench.prefill.run': 'Run prefill probe',
+    'uplift.bench.prefill.run': 'Start custom benchmark',
     'uplift.bench.prefill.hint': 'Custom prompt sizes, request counts and start '
-        + 'timing, measured outside the standard benchmark. It refuses to start '
-        + 'while another benchmark holds the engine; a benchmark started from '
-        + 'the classic admin page during a probe is not blocked, and both '
-        + 'results would be wrong.',
-    'uplift.bench.prefill.local_only': 'Local models only: this probe measures '
-        + 'the engine running in this server, not a remote endpoint.',
+        + 'timing, measured outside the standard benchmark. The run ignores '
+        + 'the server\'s concurrency limit while it is in flight and restores '
+        + 'it when it ends. It refuses to start while another benchmark holds '
+        + 'the engine; a benchmark started from the classic admin page during '
+        + 'a custom benchmark is not blocked, and both results would be wrong.',
+    'uplift.bench.prefill.local_only': 'Local models only: this benchmark '
+        + 'measures the engine running in this server, not a remote endpoint.',
     'uplift.bench.prefill.tokens_ph': 'at least 1,024',
-    'uplift.bench.prefill.summary': 'Probe result',
+    'uplift.bench.prefill.summary': 'Benchmark result',
     'uplift.bench.prefill.per_request': 'Per request',
     'uplift.bench.prefill.col_start': 'Start (s)',
     'uplift.bench.prefill.col_ttft': 'TTFT (ms)',
@@ -62,9 +63,9 @@ const EN = {
         + '0 or more.',
     'uplift.bench.prefill.bad_generation': 'Generation tokens must be a whole '
         + 'number of at least 1.',
-    'uplift.bench.prefill.preparing': 'Preparing probe\u2026',
+    'uplift.bench.prefill.preparing': 'Preparing benchmark\u2026',
     'uplift.bench.prefill.panel_busy': 'The standard benchmark is running in this panel.',
-    'uplift.bench.prefill.already_running': 'A prefill probe is already running in this server.',
+    'uplift.bench.prefill.already_running': 'A custom benchmark is already running in this server.',
 };
 
 function makeHarness() {
@@ -244,7 +245,7 @@ test('the probe block is painted inside the throughput form, through the parent'
     assert.equal(byId['bench-tp-pf-stagger'].min, '0');
     assert.equal(byId['bench-tp-pf-tg'].min, '1');
     // own run button, and the classic one is still there, untouched
-    assert.equal(byId['bench-tp-pf-run'].textContent, 'Run prefill probe');
+    assert.equal(byId['bench-tp-pf-run'].textContent, 'Start custom benchmark');
     assert.equal(byId['bench-tp-run'].textContent, 'BTNRUN',
         'the classic Run Benchmark button is unchanged');
     // labels through the catalog, no raw keys
@@ -399,6 +400,10 @@ test('external mode disables every probe control and says why', () => {
     assert.equal(byId['bench-tp-pf-run'].disabled, false);
     assert.equal(hint.dataset.i18n, 'uplift.bench.prefill.hint',
         'the hint comes back when the mode does');
+    // the JS EN fallback must be BYTE-IDENTICAL to the catalog value — the
+    // concatenated hint is exactly the string test_locale_sync can never see
+    assert.equal(hint.dataset.en, EN['uplift.bench.prefill.hint']);
+    assert.equal(hint.textContent, EN['uplift.bench.prefill.hint']);
 });
 
 test('a probe start against an unselected model never reaches the server', async () => {
@@ -466,7 +471,16 @@ test('SSE events paint the aggregate first, then one row per request', async () 
     feed(es, { type: 'progress', phase: 'probe', message: 'Loading M1...',
                current: 0, total: 3 });
     assert.ok(byId['bench-tp-status'].textContent.includes('Loading M1'));
+    // SUBMIT events keep the status box alive while long prefills run
+    // (user fix 1: 'nothing seems to happen until the first request prefills')
+    feed(es, { type: 'progress', phase: 'probe', total: 3, current: 0,
+               message: 'Request 1/3 submitted (+0.0s)' });
+    assert.ok(byId['bench-tp-status'].textContent.includes('submitted'),
+        'the wave visibly ENTERS the engine request by request');
+    feed(es, { type: 'progress', phase: 'probe', total: 3, current: 0,
+               message: 'Request 2/3 submitted (+1.0s)' });
     feed(es, { type: 'result', data: { index: 0, start_offset_s: 0.0,
+        submit_s: 1.25,
         ttft_ms: 1200.5, processing_tps: 2200.1, gen_tps: 41.2,
         completion_tokens: 256, prompt_tokens: 32768, e2e_latency_s: 17.5 } });
     feed(es, { type: 'result', data: { index: 1, start_offset_s: 0.5,
@@ -474,6 +488,7 @@ test('SSE events paint the aggregate first, then one row per request', async () 
         completion_tokens: 4, prompt_tokens: 32768, e2e_latency_s: 18.5 } });
     // replay-after-reconnect: the same index must not double the row
     feed(es, { type: 'result', data: { index: 0, start_offset_s: 0.0,
+        submit_s: 1.25,
         ttft_ms: 1200.5, processing_tps: 2200.1, gen_tps: 41.2,
         completion_tokens: 256, prompt_tokens: 32768, e2e_latency_s: 17.5 } });
     assert.equal(PF.state.rows.length, 2, 'idempotent by index');
@@ -486,7 +501,7 @@ test('SSE events paint the aggregate first, then one row per request', async () 
 
     const host = byId['bench-tp-pf-results'];
     const text = allText(host);
-    for (const m of ['Probe result', 'Per request', 'Combined prefill (tok/s)',
+    for (const m of ['Benchmark result', 'Per request', 'Combined prefill (tok/s)',
                      'Slowest TTFT (ms)', '27306.7', '20.250', '1550.4',
                      '1200.5', '1900.3'])
         assert.ok(text.includes(m), 'rendered: ' + m + ' — got ' + text);
@@ -497,6 +512,12 @@ test('SSE events paint the aggregate first, then one row per request', async () 
     const heads = tables[0].children[0].children.map(th => th.textContent);
     assert.deepEqual(heads, ['#', 'Start (s)', 'TTFT (ms)', 'Prefill (tok/s)',
                              'Decode (tok/s)', 'Generated', 'Total (s)']);
+    // Start (s) prints the REAL submit offset (1.25), not the scheduled one
+    // (0.00); a row without submit_s falls back to start_offset_s (0.50)
+    const startCells = tables[0].children.slice(1)
+        .map(tr => tr.children[1].textContent);
+    assert.ok(startCells.includes('1.25'), 'submit_s leads: ' + startCells);
+    assert.ok(startCells.includes('0.50'), 'fallback to start_offset_s');
     // headers carry the catalog datasets so a late locale repaints them
     tables[0].children[0].children.slice(1).forEach(th => {
         assert.ok(String(th.dataset.i18n).startsWith('uplift.bench.prefill.'),
@@ -504,9 +525,10 @@ test('SSE events paint the aggregate first, then one row per request', async () 
     });
     const rows = tables[0].children.slice(1).map(tr => tr.children.map(td => td.textContent));
     assert.equal(rows.length, 2);
-    assert.deepEqual(rows[0].slice(0, 3), ['1', '0.00', '1200.5']);
+    assert.deepEqual(rows[0].slice(0, 3), ['1', '1.25', '1200.5'],
+        'Start (s) prints the REAL submit, not the scheduled slot');
     assert.deepEqual(rows[1].slice(0, 3), ['2', '0.50', '1900.4'],
-        'the stagger offset is shown per request');
+        'a row without submit_s still shows its stagger slot');
     // the run is over: controls live again, the classic button too
     assert.equal(PF.state.running, false);
     assert.equal(byId['bench-tp-run'].disabled, false);

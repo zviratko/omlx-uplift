@@ -450,8 +450,116 @@ async def test_stagger_offsets_actually_shift_the_submits(fake_world):
             f"request {i} left at {delta:.3f}s, expected {i * stagger:.3f}s"
     assert [r["start_offset_s"] for r in run.results] == \
         PF.start_offsets(4, stagger)
+    # the REAL leave-times ride along (submit_s), and every request announced
+    # itself with a SUBMIT event while the wave was still in flight
+    submits = [r["submit_s"] for r in run.results]
+    assert all(s is not None for s in submits)
+    assert submits == sorted(submits)
+    for i, s in enumerate(submits):
+        assert s == pytest.approx(i * stagger, abs=stagger * 0.6)
+    sub_evs = [e for e in run.events if e.get("type") == "progress"
+               and " submitted " in e.get("message", "")]
+    assert len(sub_evs) == 4
+    assert [e["total"] for e in sub_evs] == [4, 4, 4, 4]
+    assert "Request 3/4 submitted" in sub_evs[2]["message"]
+    # public rows carry submit_s (the panel's Start (s) column reads it)
+    pub = PF.results_payload(run)["results"]
+    assert all("submit_s" in r and not r["submit_s"] is None for r in pub)
     # simultaneous stays simultaneous (classic's batch behaviour)
     assert PF.start_offsets(4, 0.0) == [0.0] * 4
+
+
+# ---------------------------------------------------------------------------
+# WAVE PINS (user fix 2026-10-27: overlap for real + ignore the server limit)
+# ---------------------------------------------------------------------------
+
+def _sched_stub(*, max_num_seqs=2, completion_batch_size=2):
+    """A scheduler-shaped object exposing exactly the attributes _pin_wave
+    writes: the config copy the live scheduler reads every step, the cached
+    mirrors, and the once-built BatchGenerator cap."""
+    cfg = types.SimpleNamespace(
+        max_num_seqs=max_num_seqs,
+        completion_batch_size=completion_batch_size,
+        chunked_prefill=False,
+        prefill_speed_priority=False,
+        decode_fairness=True)
+    gen = types.SimpleNamespace(completion_batch_size=completion_batch_size,
+                                prefill_batch_size=1)
+    return types.SimpleNamespace(
+        config=cfg, batch_generator=gen,
+        _prefill_speed_priority=False, _decode_fairness=True,
+        _decode_time_owed_s=1.5)
+
+
+class PinCore(FakeCore):
+    """FakeCore behind the REAL wrapper shape (core.engine.scheduler), with
+    an add_request that snapshots the live caps — the only way to prove the
+    wave ran PINNED, not just that the restore worked."""
+
+    def __init__(self, sched, **kw):
+        super().__init__(**kw)
+        self.engine = types.SimpleNamespace(scheduler=sched)
+        self.captured: list[tuple] = []
+
+    async def add_request(self, *, prompt, sampling_params, skip_cache_store):
+        cfg = self.engine.scheduler.config
+        self.captured.append((cfg.max_num_seqs, cfg.chunked_prefill))
+        return await super().add_request(prompt=prompt,
+                                         sampling_params=sampling_params,
+                                         skip_cache_store=skip_cache_store)
+
+
+async def test_the_wave_runs_pinned_and_restores(fake_world):
+    sched = _sched_stub()                      # server cap 2, wave 4
+    core = PinCore(sched, tokens=8, step_s=0.001)
+    pool = FakePool(core)
+    out = await PF.start(_body(prefill_tokens=1024, parallel=4,
+                               stagger_seconds=0.02, generation_tokens=8),
+                         pool)
+    run = await _finish(PF.get_run(out["bench_id"]))
+    cfg = sched.config
+    # every submit (warm-up included) happened while the caps were raised
+    assert core.captured and all(c == (4, True) for c in core.captured)
+    # ...and the server's own numbers are back the moment the wave ends
+    assert cfg.max_num_seqs == 2 and cfg.completion_batch_size == 2
+    assert cfg.chunked_prefill is False
+    assert cfg.prefill_speed_priority is False
+    assert cfg.decode_fairness is True
+    assert sched._prefill_speed_priority is False
+    assert sched._decode_fairness is True
+    assert sched._decode_time_owed_s == 1.5
+    assert sched.batch_generator.completion_batch_size == 2
+
+
+async def test_a_failed_wave_still_unpins(fake_world):
+    sched = _sched_stub()
+    core = PinCore(sched, tokens=8, step_s=0.001, truncate_at=512)
+    pool = FakePool(core)
+    out = await PF.start(_body(prefill_tokens=4096, parallel=1,
+                               generation_tokens=8), pool)
+    run = await _finish(PF.get_run(out["bench_id"]))
+    assert run.status == "error"               # the loud truncation rule
+    assert sched.config.max_num_seqs == 2      # ...and the engine is clean
+    assert sched.config.decode_fairness is True
+
+
+def test_pins_raise_never_lower_and_survive_a_bare_core():
+    sched = _sched_stub(max_num_seqs=8, completion_batch_size=32)
+    core = types.SimpleNamespace(
+        engine=types.SimpleNamespace(scheduler=sched), _mlx_executor=None)
+    saved = PF._pin_wave(core, 4)              # server ALREADY allows 4+
+    assert "max_num_seqs" not in saved and "completion_batch_size" not in saved
+    assert sched.config.max_num_seqs == 8      # untouched, not lowered
+    assert sched.config.completion_batch_size == 32
+    assert saved["chunked_prefill"] is False and \
+        sched.config.chunked_prefill is True   # mode pins still land
+    # the once-built generator gets the wave-sized floor
+    assert sched.batch_generator.completion_batch_size == 32
+    PF._unpin_wave(core, saved)
+    assert sched.config.chunked_prefill is False
+    # a core without any scheduler (CI fakes) pins nothing and says so
+    assert PF._pin_wave(FakeCore(), 4) is None
+    PF._unpin_wave(FakeCore(), None)           # idempotent, never raises
 
 
 async def test_probe_errors_are_reported_not_swallowed(fake_world):
@@ -518,7 +626,7 @@ async def test_refuses_a_second_probe(fake_world):
     out = await PF.start(_body(parallel=2, generation_tokens=64), pool)
     with pytest.raises(Conflict) as e:
         await PF.start(_body(parallel=1), pool)
-    assert "prefill probe is already running" in str(e.value)
+    assert "custom benchmark is already running" in str(e.value)
     await _finish(PF.get_run(out["bench_id"]))
 
 
@@ -632,11 +740,11 @@ def test_routes_gated_and_literals_resolve(monkeypatch, fake_world):
                        json=_body()).status_code == 503
     # a dynamic id must NOT be swallowed by /bench/{run_id}/results:
     # the throughput handler answers 'Benchmark not found', ours says
-    # 'Probe not found' — the detail string IS the routing proof.
+    # 'Custom benchmark not found' — the detail string IS the routing proof.
     r = client.get("/uplift/api/bench/prefill/nope/results")
-    assert r.status_code == 404 and "Probe not found" in r.text, r.text
+    assert r.status_code == 404 and "Custom benchmark not found" in r.text, r.text
     r = client.post("/uplift/api/bench/prefill/nope/cancel", json={})
-    assert r.status_code == 404 and "Probe not found" in r.text, r.text
+    assert r.status_code == 404 and "Custom benchmark not found" in r.text, r.text
     s = client.get("/uplift/api/bench/prefill/active").json()
     assert s == {"running": False, "bench_id": None, "model_id": None}
 
@@ -729,3 +837,18 @@ def test_reused_vanilla_seams_really_exist():
     # scheduler core only exists on the mlx-lm engine)
     from omlx.engine_pool import EnginePool
     assert "force_lm" in inspect.signature(EnginePool.get_engine).parameters
+    # WAVE PIN drift guard (user fix 2026-10-27): _pin_wave writes these
+    # exact fields on the live SchedulerConfig and these cached mirrors on
+    # the Scheduler — if vanilla renames one, the pins must go red HERE,
+    # not silently no-op inside a live benchmark.
+    SC = pytest.importorskip("omlx.scheduler")
+    fields = set(SC.SchedulerConfig.__dataclass_fields__)
+    for name in ("max_num_seqs", "completion_batch_size", "chunked_prefill",
+                 "prefill_speed_priority", "decode_fairness"):
+        assert name in fields, f"SchedulerConfig lost {name}"
+    src = inspect.getsource(SC.Scheduler.__init__)
+    for attr in ("self._decode_fairness", "self._prefill_speed_priority",
+                 "self.batch_generator"):
+        assert attr in src, f"Scheduler.__init__ no longer defines {attr}"
+    assert "_mlx_executor" in dir(ec.AsyncEngineCore), \
+        "AsyncEngineCore stopped exposing the MLX executor"

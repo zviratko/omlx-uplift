@@ -267,7 +267,7 @@ _REASONS = {
     "throughput": "a throughput benchmark is running",
     "context": "a context probe is running",
     "ane": "an ANE tuning is running",
-    "prefill": "an uplift prefill/parallel probe is running",
+    "prefill": "a custom benchmark is running",
     "accuracy": "the accuracy benchmark queue is busy",
 }
 

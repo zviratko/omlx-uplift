@@ -610,7 +610,7 @@ async def bench_context_results(bench_id: str, is_admin: bool = Depends(require_
 async def bench_prefill_stream(run_id: str, is_admin: bool = Depends(require_admin)):
     run = bench_prefill.get_run(run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail=f"Probe not found: {run_id}")
+        raise HTTPException(status_code=404, detail=f"Custom benchmark not found: {run_id}")
     return StreamingResponse(
         # our run object carries classic's events/cond/terminal model, so
         # the ONE shared SSE generator serves this surface too.
@@ -625,19 +625,19 @@ async def bench_prefill_stream(run_id: str, is_admin: bool = Depends(require_adm
 async def bench_prefill_cancel(run_id: str, is_admin: bool = Depends(require_admin)):
     run = bench_prefill.get_run(run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail=f"Probe not found: {run_id}")
+        raise HTTPException(status_code=404, detail=f"Custom benchmark not found: {run_id}")
     try:
         return await bench_prefill.cancel(run)
     except bench_prefill.NotRunning as e:
         raise HTTPException(status_code=400,
-                            detail=f"Probe is not running (status: {e.status})")
+                            detail=f"Benchmark is not running (status: {e.status})")
 
 
 @api_router.get("/bench/prefill/{run_id}/results")
 async def bench_prefill_results(run_id: str, is_admin: bool = Depends(require_admin)):
     run = bench_prefill.get_run(run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail=f"Probe not found: {run_id}")
+        raise HTTPException(status_code=404, detail=f"Custom benchmark not found: {run_id}")
     return bench_prefill.results_payload(run)
 
 

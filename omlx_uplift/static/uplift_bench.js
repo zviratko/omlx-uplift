@@ -1908,7 +1908,7 @@ var PF = {
 
         var acts = el('div', 'bench-actions');
         var runBtn = el('button', 'btn',
-            t('uplift.bench.prefill.run', 'Run prefill probe'));
+            t('uplift.bench.prefill.run', 'Start custom benchmark'));
         runBtn.type = 'button'; runBtn.id = 'bench-tp-pf-run';
         runBtn.addEventListener('click', function () { self.start(); });
         var cancelBtn = el('button', 'btn', t('bench.progress.cancel', 'Cancel'));
@@ -1956,24 +1956,28 @@ var PF = {
         if (!hint) return;
         if (extOn) {
             hint.textContent = t('uplift.bench.prefill.local_only',
-                'Local models only: this probe measures the engine running '
-                + 'in this server, not a remote endpoint.');
+                'Local models only: this benchmark measures the engine '
+                + 'running in this server, not a remote endpoint.');
             hint.dataset.i18n = 'uplift.bench.prefill.local_only';
-            hint.dataset.en = 'Local models only: this probe measures the '
-                + 'engine running in this server, not a remote endpoint.';
+            hint.dataset.en = 'Local models only: this benchmark measures '
+                + 'the engine running in this server, not a remote endpoint.';
         } else {
             hint.textContent = t('uplift.bench.prefill.hint',
                 'Custom prompt sizes, request counts and start timing, '
-                + 'measured outside the standard benchmark. It refuses to '
-                + 'start while another benchmark holds the engine; a '
-                + 'benchmark started from the classic admin page during a '
-                + 'probe is not blocked, and both results would be wrong.');
+                + 'measured outside the standard benchmark. The run ignores '
+                + 'the server\'s concurrency limit while it is in flight and '
+                + 'restores it when it ends. It refuses to start while '
+                + 'another benchmark holds the engine; a benchmark started '
+                + 'from the classic admin page during a custom benchmark is '
+                + 'not blocked, and both results would be wrong.');
             hint.dataset.i18n = 'uplift.bench.prefill.hint';
             hint.dataset.en = 'Custom prompt sizes, request counts and start '
-                + 'timing, measured outside the standard benchmark. It '
-                + 'refuses to start while another benchmark holds the '
-                + 'engine; a benchmark started from the classic admin page '
-                + 'during a probe is not blocked, and both results would be '
+                + 'timing, measured outside the standard benchmark. The run '
+                + 'ignores the server\'s concurrency limit while it is in '
+                + 'flight and restores it when it ends. It refuses to start '
+                + 'while another benchmark holds the engine; a benchmark '
+                + 'started from the classic admin page during a custom '
+                + 'benchmark is not blocked, and both results would be '
                 + 'wrong.';
         }
     },
@@ -2017,7 +2021,7 @@ var PF = {
             this.stream(out.bench_id);
             setBar('bench-tp-status', 0);
             this.status(t('uplift.bench.prefill.preparing',
-                'Preparing probe\u2026'));
+                'Preparing benchmark\u2026'));
         } catch (e) {
             rel();
             s.running = false;
@@ -2127,8 +2131,12 @@ var PF = {
             kids.push(head);
             kids.push(simpleTable([
                 ['index', '#', function (v) { return String(Number(v) + 1); }],
-                ['start_offset_s', t('uplift.bench.prefill.col_start', 'Start (s)'),
-                    function (v) { return fmtNum(v, 2); }, null,
+                ['submit_s', t('uplift.bench.prefill.col_start', 'Start (s)'),
+                    // REAL leave-time (proves the stagger ran); older rows
+                    // only carry the scheduled slot — print that instead
+                    function (v, r) {
+                        return fmtNum(v != null ? v : r.start_offset_s, 2);
+                    }, null,
                     { k: 'uplift.bench.prefill.col_start', en: 'Start (s)' }],
                 ['ttft_ms', t('uplift.bench.prefill.col_ttft', 'TTFT (ms)'),
                     function (v) { return fmtNum(v, 1); }, null,
@@ -2172,9 +2180,9 @@ var PF = {
         var out = [];
         var head = el('div', 'bench-tp-section');
         var lab = el('span', 'bench-label',
-            t('uplift.bench.prefill.summary', 'Probe result'));
+            t('uplift.bench.prefill.summary', 'Benchmark result'));
         lab.dataset.i18n = 'uplift.bench.prefill.summary';
-        lab.dataset.en = 'Probe result';
+        lab.dataset.en = 'Benchmark result';
         head.appendChild(lab);
         out.push(head);
         pairs.forEach(function (p) {
@@ -2228,7 +2236,7 @@ var PF = {
             this.setButtons();
             this.stream(a.bench_id);
             this.status(t('uplift.bench.prefill.already_running',
-                'A prefill probe is already running in this server.')
+                'A custom benchmark is already running in this server.')
                 + ' (' + a.model_id + ')');
         } catch (e) { /* idle is fine */ }
     },
