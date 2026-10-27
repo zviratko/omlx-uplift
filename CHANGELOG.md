@@ -13,6 +13,12 @@ users never see.
 
 ## Unreleased
 
+## [2.8] — 2026-10-27
+
+- **Chat catches up with the classic web page.** Attach files (drag, paste, or pick), pin, rename and search conversations, see token use and a live context ring per reply, branch a new variant from any earlier answer, and hear replies in macOS voices spoken in their own language.
+- **Status splits into Status, Status extended and About** — clicking STATUS opens the view you last used, and after a restart the board waits for the server to answer instead of reloading blind. The Cache card shows SSD usage beside RAM.
+- **Server Settings reworked.** Two readable columns, extra API keys managed in the Auth card, and the Advanced fold remembers how you left it.
+
 ## [2.7] — 2026-10-22
 
 - Several fixes based on clean-slate E2E tests — new users get a better experience.
