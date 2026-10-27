@@ -458,7 +458,7 @@ async def test_stagger_offsets_actually_shift_the_submits(fake_world):
     for i, s in enumerate(submits):
         assert s == pytest.approx(i * stagger, abs=stagger * 0.6)
     sub_evs = [e for e in run.events if e.get("type") == "progress"
-               and " submitted " in e.get("message", "")]
+               and "submitted (+" in e.get("message", "")]
     assert len(sub_evs) == 4
     assert [e["total"] for e in sub_evs] == [4, 4, 4, 4]
     assert "Request 3/4 submitted" in sub_evs[2]["message"]
@@ -610,6 +610,12 @@ async def test_request_lines_walk_the_phases(fake_world, monkeypatch):
            and e["data"]["phase"] == "prefilling"]
     assert pre and pre[0]["processed"] == 4096 and pre[0]["total"] == 8192
 
+    # the aggregated progress line moves with the phases (old tabs and the
+    # poll fallback read the wave through it, not only the request events)
+    prog = [e for e in run.events if e.get("type") == "progress"
+            and "prefilling 4,096/8,192" in e.get("message", "")]
+    assert prog, "watcher announced the live prefill counts"
+
     pub = PF.results_payload(run)["requests"]
     assert [q["index"] for q in pub] == [0, 1]
     assert all(q["phase"] == "done" and "rid" not in q for q in pub)
@@ -619,14 +625,22 @@ async def test_request_lines_walk_the_phases(fake_world, monkeypatch):
 
 
 def test_steady_decode_math_is_a_window_measurement():
-    samples = [(0.0, 0), (1.0, 10), (2.0, 25), (3.0, 25), (4.0, 40)]
-    # window [1.0, 3.0]: interval midpoints 1.5 (+15 tok/1 s) and 2.5 (+0/1 s)
-    got = PF.steady_decode_tps(samples, 1.0, 3.0, min_tokens=8)
-    assert got == {"steady_decode_tps": 7.5, "steady_window_s": 2.0}
+    # samples are (t, total_completion, generating_streams, prefilling_now);
+    # clean intervals: BOTH ends no-prefill AND avg streams >= 2
+    samples = [(0.0, 0, 1, True),      # still prefilling: skipped
+               (1.0, 10, 2, False),    # 1->2: +15 tok over 1 s, 2 streams
+               (2.0, 25, 2, False),    # 2->3: +0 over 1 s, 2.5 streams
+               (3.0, 25, 3, False),    # 3->4: +15 over 1 s, 2 streams
+               (4.0, 40, 1, False)]    # 4th stream done: n<2 -> skipped
+    got = PF.steady_decode_tps(samples, min_tokens=8)
+    assert got == {"steady_decode_tps": 10.0, "steady_streams_avg": 2.2,
+                   "steady_window_s": 3.0}, got
     # classic's honesty floor, applied to the measurement itself
-    assert PF.steady_decode_tps(samples, 1.0, 3.0, min_tokens=16) is None
-    assert PF.steady_decode_tps([], 0.0, 1.0) is None
-    assert PF.steady_decode_tps(samples, 5.0, 6.0, min_tokens=1) is None
+    assert PF.steady_decode_tps(samples, min_tokens=31) is None
+    assert PF.steady_decode_tps([], min_tokens=8) is None
+    # never a clean window (prefill throughout) -> absent, not zero
+    busy = [(0.0, 0, 2, True), (1.0, 50, 2, True)]
+    assert PF.steady_decode_tps(busy, min_tokens=8) is None
 
 
 def test_memory_guard_reads_the_schedulers_own_numbers():
@@ -669,6 +683,23 @@ async def test_the_wave_publishes_memory_and_steady_fields(fake_world,
     if "steady_decode_tps" in agg:
         assert agg["steady_decode_tps"] > 0
         assert agg["steady_window_s"] > 0
+
+
+def test_live_tps_reports_the_recent_rate_not_the_since_first_token_avg():
+    from omlx_uplift import request_log as RL
+    RL._LIVE_RATE.clear()
+    base = 1000.0
+    # first sighting has no window yet: the caller's average stands
+    assert RL._live_tps("r1", 10, 22.0, base) == pytest.approx(22.0)
+    # fast phase: +20 tok/s
+    for k in range(1, 5):
+        RL._live_tps("r1", 10 + 20 * k, 22.0, base + k)
+    # slow phase: +2 tok/s — after the window turns over the card shows it
+    got = 0.0
+    for k in range(5, 11):
+        got = RL._live_tps("r1", 90 + 2 * (k - 4), 22.0, base + k)
+    assert got == pytest.approx(2.0, abs=0.3), got
+    RL._LIVE_RATE.clear()
 
 
 async def test_probe_errors_are_reported_not_swallowed(fake_world):

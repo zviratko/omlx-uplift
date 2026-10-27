@@ -648,7 +648,8 @@ test('the summary adds steady decode and memory lines when measured', async () =
         total_prompt_tokens: 65536, total_completion_tokens: 512,
         wall_time_s: 10, prefill_wall_s: 8, generation_wall_s: 2,
         combined_prefill_tps: 8000, combined_decode_tps: 250,
-        steady_decode_tps: 312.5, steady_window_s: 1.5,
+        steady_decode_tps: 312.5, steady_streams_avg: 3.8,
+        steady_window_s: 1.5,
         avg_ttft_ms: 100, max_ttft_ms: 200, min_ttft_ms: 50,
         memory: { peak_gpu_bytes: 17179869184, peak_process_bytes: 21474836480,
             guard_limit_bytes: 22000000000, guard_usage_bytes: 10000000000,
@@ -656,6 +657,8 @@ test('the summary adds steady decode and memory lines when measured', async () =
     const text = allText(byId['bench-tp-pf-results']);
     assert.ok(text.includes('Steady decode (tok/s)') && text.includes('312.5'),
         'steady row: ' + text);
+    assert.ok(text.includes('3.8 streams'),
+        'the window says how many streams it averaged');
     assert.ok(text.includes('Peak GPU memory') && text.includes('16.00 GB'));
     assert.ok(text.includes('Peak process memory') && text.includes('20.00 GB'));
     assert.ok(text.includes('Guard headroom at start') && text.includes('11.18 GB'));
@@ -669,4 +672,17 @@ test('the poll fallback merges requests[] into the activity state', () => {
     assert.match(src,
         /if \(r\.requests\) \{[\s\S]{0,200}reqState\[q\.index\] = q;/,
         'poll rebuilds the live list from the payload');
+    // user report 2026-10-28: a dropped SSE must never freeze the panel —
+    // the error handler arms the REST fallback, and poll keeps the bar and
+    // the status line moving exactly like the event stream does
+    assert.match(src,
+        /_pfEs\.onerror = function \(\) \{[\s\S]{0,400}?self\.poll\(runId\);/,
+        'SSE failure falls through to the REST poll');
+    assert.match(src,
+        /var done = \(r\.results \|\| \[\]\)\.length;\s*setBar\('bench-tp-status', \(r\.progress \|\| 0\) \* 100,/,
+        'poll mode drives the same bar as the SSE mode');
+    // and a recovered stream retires the emergency poll
+    assert.match(src,
+        /if \(_pfPoll\) \{ clearInterval\(_pfPoll\); _pfPoll = null; \}\s*self\.onEvent\(data\);/,
+        'a live event retires the fallback poll');
 });

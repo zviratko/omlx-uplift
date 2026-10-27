@@ -726,6 +726,38 @@ def _find_scheduler(entry: Any) -> Any:
     return scheduler_for(entry)
 
 
+# Live in-flight rate (user report 2026-10-28): the card's tps was the
+# average SINCE THE FIRST TOKEN, so a request that spent most of its life
+# starved by a sibling benchmark prefill reads ~5 t/s long after the engine
+# really decodes at 20+. The number a live card must show is what the
+# request is doing NOW: a rate over the last _LIVE_RATE_S seconds,
+# falling back to the whole-decode average until the window has enough
+# spread to mean anything. The finished row's tps (finalize path) stays
+# the full-span average — history must not silently change meaning.
+_LIVE_RATE_S = 5.0
+_LIVE_RATE: "dict[str, deque]" = {}
+
+
+def _live_tps(rid: str, generated: int, avg_tps: float, mono: float) -> float:
+    dq = _LIVE_RATE.get(rid)
+    if dq is None:
+        if len(_LIVE_RATE) > 512:      # bound the cache even across models
+            dead = [k for k, v in _LIVE_RATE.items() if mono - v[-1][0] > 60]
+            for k in dead:
+                _LIVE_RATE.pop(k, None)
+        dq = _LIVE_RATE[rid] = deque(maxlen=32)
+    if not dq or dq[-1][0] != mono or dq[-1][1] != generated:
+        dq.append((mono, generated))
+    while len(dq) > 2 and mono - dq[1][0] > _LIVE_RATE_S:
+        dq.popleft()
+    if len(dq) >= 2:
+        t0, g0 = dq[0]
+        dt, dg = mono - t0, generated - g0
+        if dt >= 1.0 and dg > 0:       # window has real spread: report it
+            return dg / dt
+    return avg_tps
+
+
 def _rows_from_snapshot(snap: dict[str, Any], model_id: str, now: float):
     """Yield (request_id, row) for every request visible in one snapshot.
 
@@ -750,12 +782,12 @@ def _rows_from_snapshot(snap: dict[str, Any], model_id: str, now: float):
         state = "generating" if gen_start else "prefilling"
         generated = getattr(req, "num_output_tokens", 0) or 0
         elapsed = (mono - gen_start) if gen_start else None
-        tps = generated / elapsed if elapsed and elapsed > 0 else 0.0
+        avg_tps = generated / elapsed if elapsed and elapsed > 0 else 0.0
         row = {
             "id": rid, "state": state, "model": model_id, "origin": "real",
             "prompt_tokens": getattr(req, "num_prompt_tokens", 0) or 0,
             "completion_tokens": generated,
-            "tps": round(tps, 1),
+            "tps": round(_live_tps(rid, generated, avg_tps, mono), 1),
             "ts": now,
         }
         # U17: queue->first-token ms, from the scheduler's own monotonic

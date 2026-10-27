@@ -2042,10 +2042,18 @@ var PF = {
             _pfEs.onmessage = function (ev) {
                 var data;
                 try { data = JSON.parse(ev.data); } catch (_) { return; }
+                // a live event means the stream recovered: retire the
+                // emergency poll the error handler may have armed
+                if (_pfPoll) { clearInterval(_pfPoll); _pfPoll = null; }
                 self.onEvent(data);
             };
             _pfEs.onerror = function () {
+                // user report 2026-10-28: a dropped SSE (board restart,
+                // network blip, laptop sleep) used to leave the panel frozen
+                // at its last event while the wave ran on. Arm the 3 s REST
+                // fallback instead - the wave keeps reporting.
                 streamInterrupted('bench-tp-status');
+                self.poll(runId);
             };
         } catch (e) { this.poll(runId); }
     },
@@ -2066,6 +2074,12 @@ var PF = {
                     self.state.reqState = {};
                     r.requests.forEach(function (q) { self.state.reqState[q.index] = q; });
                 }
+                // poll mode drives the SAME bar and status line the SSE
+                // mode gets from events, so a fallback run never looks dead
+                var done = (r.results || []).length;
+                setBar('bench-tp-status', (r.progress || 0) * 100,
+                    done + '/' + (self.state.total || done));
+                if (r.message) self.status(r.message);
                 self.render();
                 if (r.status !== 'running') self.finish(r.status === 'error'
                     ? r.error : null);
@@ -2243,7 +2257,10 @@ var PF = {
         if (agg.steady_decode_tps != null) pairs.push(
             [ta('uplift.bench.prefill.sum_decode_steady',
                 'Steady decode (tok/s)'),
-                fmtNum(agg.steady_decode_tps, 1)]);
+                fmtNum(agg.steady_decode_tps, 1)
+                + (agg.steady_streams_avg
+                    ? ' \u00b7 ' + fmtNum(agg.steady_streams_avg, 1)
+                      + ' streams' : '')]);
         var mem = agg.memory || {};
         if (mem.peak_gpu_bytes) pairs.push(
             [ta('uplift.bench.prefill.mem_gpu', 'Peak GPU memory'),

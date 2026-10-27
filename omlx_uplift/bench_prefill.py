@@ -69,12 +69,15 @@ LIVE REPORT (user follow-ups 2-4, 2026-10-27):
   PrefillProgressTracker, which the scheduler updates per chunk) ->
   generating (token counts from our own stream) -> done.
 - a MEASURED steady-state decode rate (`steady_decode_tps`): the watcher
-  samples total completion every WATCH_S, and the rate is computed over the
-  window where every request decodes together. classic's combined figure is
-  kept byte-for-byte comparable — but at long prefills with a stagger it is
-  an approximation, and reading it against classic's pp1024 batch rows is
-  comparing different physics (short context + clean decode vs long context
-  + sibling-prefill contention), which is the ~4x gap the user saw.
+  samples total completion (with the generating-stream count and whether
+  ANY request was prefilling that tick), and the rate is measured over the
+  CLEAN windows only — no prefill in flight, at least two streams decoding.
+  classic's combined figure is kept byte-for-byte comparable — but at long
+  prefills with a stagger it is an approximation, and reading it against
+  classic's pp1024 batch rows is comparing different physics (short context
+  + clean decode vs long context + sibling-prefill contention), which is
+  the ~4x gap the user saw. `steady_streams_avg` says how many streams the
+  window averaged, so combined is never mistaken for per-stream.
 - a `memory` block in the aggregate: peak device memory over the wave
   (classic's own reset/get peak method), peak process footprint, and the
   scheduler's guard limit/usage/headroom at wave start — what was used AND
@@ -434,14 +437,20 @@ async def _watch_wave(run: PrefillRun) -> None:
     tracker into the per-request states, sample the decode total (the
     steady-state rate is MEASURED from these, not inferred from classic's
     window arithmetic), and track the process footprint peak. Emits a
-    'request' event only when a line actually changes."""
+    'request' event only when a line actually changes, and one aggregated
+    'progress' line per tick when it moves — the status box and any
+    message-only client (old tab, poll fallback) then keep changing during
+    the long prefills too (user report: 'progress bar 0% and nothing
+    changed while the dashboard showed one generating')."""
     tracker = _tracker()
     peak = {"process": _footprint()}
+    last_msg = ""
     try:
         while True:
             states = list(run.req_state.values())
             if states and all(s["phase"] == "done" for s in states):
                 break
+            prefill_now = False
             if tracker is not None:
                 for s in list(run.req_state.values()):
                     if s["phase"] not in ("submitted", "prefilling"):
@@ -457,14 +466,28 @@ async def _watch_wave(run: PrefillRun) -> None:
                         s["phase"] = "prefilling"
                         s["processed"] = int(entry.get("processed") or 0)
                         s["total"] = int(entry.get("total") or 0)
+                        prefill_now = True
                         if before != (s["phase"], s["processed"]):
                             await _emit_state(run, s["index"])
+            if any(s["phase"] == "prefilling" for s in run.req_state.values()):
+                prefill_now = True      # last chunk: tracker already cleared
+            n_gen = sum(1 for s in run.req_state.values()
+                        if s["phase"] == "generating")
             total_completion = sum(s["completion"]
                                    for s in run.req_state.values())
-            run.dec_samples.append((time.perf_counter(), total_completion))
+            run.dec_samples.append((time.perf_counter(), total_completion,
+                                    n_gen, prefill_now))
             fp = _footprint()
             if fp > peak["process"]:
                 peak["process"] = fp
+            msg = _wave_message(run)
+            if msg != last_msg:
+                last_msg = msg
+                run.message = msg
+                await _send_event(run, {"type": "progress", "phase": "probe",
+                                        "message": msg,
+                                        "current": len(run.results),
+                                        "total": max(1, run.request.parallel)})
             await asyncio.sleep(WATCH_S)
     except asyncio.CancelledError:
         pass
@@ -472,27 +495,70 @@ async def _watch_wave(run: PrefillRun) -> None:
         run.peak_process_bytes = peak["process"]
 
 
-def steady_decode_tps(samples: list, lo: float, hi: float,
-                      min_tokens: int = 16):
-    """Combined decode tok/s MEASURED over [lo, hi] (perf_counter seconds):
-    every watcher interval whose midpoint falls in the window contributes its
-    real token delta / its real seconds. The window the caller passes is the
-    interval where ALL requests decode together (after the last first-token,
-    before the first finish), so unlike classic's combined figure this is
-    neither inflated by tokens decoded before the window nor diluted by
-    sibling prefill inside it. None when the window is too short or too
-    empty to state a rate (classic's _MIN_TG_TOKENS honesty, applied to the
-    measurement itself)."""
+def _fmt_tokens(n: int) -> str:
+    return f"{n:,}"
+
+
+def _wave_message(run: PrefillRun) -> str:
+    """One honest summary line of the wave: '#k prefilling 12,288/32,768'
+    style details while they fit, phase counts when they don't."""
+    states = sorted(run.req_state.values(), key=lambda s: s["index"])
+    if not states:
+        return run.message
+    groups: "dict[str, list]" = {}
+    for s in states:
+        groups.setdefault(s["phase"], []).append(s)
+    if len(states) <= 6:
+        parts = []
+        for s in states:
+            if s["phase"] == "pending":
+                parts.append(f"#{s['index'] + 1} queued")
+            elif s["phase"] == "submitted":
+                parts.append(f"#{s['index'] + 1} submitted")
+            elif s["phase"] == "prefilling":
+                parts.append(f"#{s['index'] + 1} prefilling "
+                             f"{_fmt_tokens(s['processed'])}/"
+                             f"{_fmt_tokens(s['total'])}")
+            elif s["phase"] == "generating":
+                parts.append(f"#{s['index'] + 1} generating "
+                             f"{s['completion']} tok")
+            else:
+                parts.append(f"#{s['index'] + 1} done")
+        return " · ".join(parts)
+    words = {"pending": "queued", "submitted": "submitted",
+             "prefilling": "prefilling", "generating": "generating",
+             "done": "done"}
+    return " · ".join(f"{len(groups[p])} {words.get(p, p)}"
+                      for p in ("prefilling", "generating", "submitted",
+                                "pending", "done") if p in groups)
+
+
+def steady_decode_tps(samples: list, min_tokens: int = 16):
+    """Combined decode tok/s MEASURED over the CLEAN windows of the wave:
+    watcher intervals where NO request of the wave was prefilling and at
+    least TWO streams were generating. That is the regime the in-flight
+    dashboard shows and the user counts as 'reality' — classic's combined
+    figure (all tokens / after-the-last-first-token) blurs it with the
+    contention phase, which is exactly why it read ~40 against a real ~100.
+    Also reports how many streams the window averaged, so the number is
+    never mistaken for a per-stream rate. None when no clean window
+    produced at least `min_tokens` — reported absent, never guessed."""
     tok = 0.0
     secs = 0.0
-    for (t0, c0), (t1, c1) in zip(samples, samples[1:]):
-        mid = (t0 + t1) / 2.0
-        if lo <= mid <= hi and t1 > t0:
-            tok += max(0.0, c1 - c0)
-            secs += t1 - t0
+    wstreams = 0.0
+    for (t0, c0, n0, p0), (t1, c1, n1, p1) in zip(samples, samples[1:]):
+        if p0 or p1 or t1 <= t0:
+            continue
+        n = (n0 + n1) / 2.0
+        if n < 2:
+            continue
+        tok += max(0.0, c1 - c0)
+        secs += t1 - t0
+        wstreams += n * (t1 - t0)
     if secs <= 0 or tok < max(1, min_tokens):
         return None
     return {"steady_decode_tps": round(tok / secs, 1),
+            "steady_streams_avg": round(wstreams / secs, 1),
             "steady_window_s": round(secs, 3)}
 
 
@@ -948,13 +1014,9 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
         run.aggregate = aggregate_metrics(
             rows, wall_start=wall_start, wall_end=wall_end,
             prompt_tokens=req.prefill_tokens, min_decode_tokens=min_tg)
-        # steady-state decode: the window where EVERY request decodes (from
-        # the last first-token to the earliest finish), measured off the
-        # watcher's samples — the number classic's batch window approximates
-        last_prefill = max(r["first_token_abs"] for r in rows)
-        first_finish = min(r["end_abs"] for r in rows)
-        steady = steady_decode_tps(list(run.dec_samples), last_prefill,
-                                   first_finish, min_tokens=min_tg)
+        # steady-state decode: measured over the CLEAN windows — no request
+        # prefilling and at least two streams generating (see the helper)
+        steady = steady_decode_tps(list(run.dec_samples), min_tokens=min_tg)
         if steady:
             run.aggregate.update(steady)
         run.aggregate["memory"] = _memory_summary(peak_gpu, guard, run)
