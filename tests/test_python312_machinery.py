@@ -86,11 +86,39 @@ def test_carry_needed_only_on_known_mismatch(monkeypatch):
 
 
 def test_carry_steps_shape():
-    steps = devsrc._carry_steps()
+    def no_brew(cmd, **kw):
+        return _R(1, "", "brew: not found")
+    steps = devsrc._carry_steps(runner=no_brew)
     flat = [" ".join(c) for c, _ in steps]
     assert flat[0].startswith("brew fetch --HEAD")           # stale-clone trap
     assert "uninstall" in flat[1] and "install --HEAD" in flat[2]
-    assert flat[3] == "omlx-uplift install"                  # remount
+    assert flat[3] == "omlx-uplift install"                  # PATH fallback
+
+
+def test_remount_prefers_keg_interpreter_over_path(tmp_path):
+    import os
+    import time
+    old = tmp_path / "HEAD-aaa" / "libexec" / "bin"
+    new = tmp_path / "HEAD-bbb" / "libexec" / "bin"
+    old.mkdir(parents=True)
+    new.mkdir(parents=True)
+    (old / "python").write_text("")
+    (new / "python").write_text("")
+    os.utime(old / "python", (time.time() - 500, time.time() - 500))
+    # a dangling symlink (uninstalled keg, stale cellar remnant) is skipped
+    (tmp_path / "HEAD-ddd" / "libexec" / "bin").mkdir(parents=True)
+    os.symlink(str(tmp_path / "gone"), tmp_path / "HEAD-ddd" / "libexec" / "bin" / "python")
+
+    def runner(cmd, **kw):
+        return _R(0, str(tmp_path) + "\n")
+
+    assert devsrc._remount_cmd(runner=runner) == \
+        [str(new / "python"), "-m", "omlx_uplift.cli", "install"]
+
+
+def test_remount_falls_back_when_cellar_unreadable():
+    assert devsrc._remount_cmd(
+        runner=lambda cmd, **kw: _R(1, "", "err")) == ["omlx-uplift", "install"]
 
 
 def test_carry_worker_ok_and_tolerates_not_installed():
@@ -103,7 +131,8 @@ def test_carry_worker_ok_and_tolerates_not_installed():
         return _R(0, "ok")
 
     assert devsrc._do_carry_uplift_keg(runner=runner) is True
-    assert len(seen) == 4  # uninstall failure with 'not installed' continues
+    # 4 steps + the brew --cellar probe used to resolve the remount cmd
+    assert len(seen) == 5  # uninstall failure with 'not installed' continues
 
 
 def test_carry_worker_fails_loud_on_real_error():

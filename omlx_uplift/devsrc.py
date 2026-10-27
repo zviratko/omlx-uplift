@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import patches as _patches
 
@@ -1495,16 +1496,37 @@ def _brewutil_ref():
     return _bu
 
 
-def _carry_steps() -> list:
+def _remount_cmd(runner=subprocess.run) -> list:
+    """The remount must NOT go through PATH: the swap just unlinked and
+    re-linked the bin shim, and brew re-installing the SAME HEAD sha can
+    leave a dangling symlink (exec -> ENOENT, seen on mruu 2026-10-27).
+    Newest keg's own interpreter is the ground truth; fall back to PATH
+    only if the cellar cannot be read."""
+    try:
+        r = runner(["brew", "--cellar", "omlx-uplift"],
+                   capture_output=True, text=True, timeout=60)
+        cellar = Path(r.stdout.strip()) if r.returncode == 0 else None
+        if cellar and cellar.is_dir():
+            cands = [p for p in cellar.glob("*/libexec/bin/python")
+                     if p.exists()]
+            if cands:
+                newest = max(cands, key=lambda p: p.stat().st_mtime)
+                return [str(newest), "-m", "omlx_uplift.cli", "install"]
+    except Exception:
+        pass
+    return ["omlx-uplift", "install"]
+
+
+def _carry_steps(runner=subprocess.run) -> list:
     """The documented HEAD-lane uplift swap, in order. fetch first (stale
     cache-clone trap), uninstall before install (a same-sha HEAD install
-    is a silent no-op), remount via the NEW CLI."""
+    is a silent no-op), remount via the fresh keg (see _remount_cmd)."""
     return [
         (["brew", "fetch", "--HEAD", "omlx-uplift"], "refresh tap clone"),
         (["brew", "uninstall", "omlx-uplift"], "remove old keg"),
         (["brew", "install", "--HEAD", "--quiet", "omlx-uplift"],
          "rebuild following the engine"),
-        (["omlx-uplift", "install"], "remount .pth (minor guard applies)"),
+        (_remount_cmd(runner), "remount .pth (minor guard applies)"),
     ]
 
 
@@ -1517,7 +1539,7 @@ def _do_carry_uplift_keg(runner=subprocess.run) -> bool:
     import os
 
     env = dict(os.environ, HOMEBREW_NO_INSTALL_CLEANUP="1")
-    for cmd, why in _carry_steps():
+    for cmd, why in _carry_steps(runner):
         print(f"uplift carry: {' '.join(cmd[:3])} ({why})", flush=True)
         try:
             r = runner(cmd, capture_output=True, text=True, env=env,
