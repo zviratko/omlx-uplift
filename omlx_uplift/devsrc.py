@@ -1473,6 +1473,92 @@ def _effective_build_flags(cfg: dict | None, explicit: set,
             or brewutil.receipt_used_options("omlx"))
 
 
+def _uplift_carry_needed(brewutil=None) -> tuple | None:
+    """(engine_minor, uplift_minor) when BOTH are known and differ — the
+    signal that a dev build just moved the engine python out from under
+    the deployed uplift keg. None (skip) when either keg or its probe is
+    absent: fresh machines install uplift after the engine anyway."""
+    bu = brewutil or _brewutil_ref()
+    eng_py = bu.default_target_python("omlx-dev")
+    up_py = bu.brew_formula_python("omlx-uplift")
+    if not eng_py or not up_py:
+        return None
+    eng = bu.python_minor(str(eng_py))
+    up = bu.python_minor(str(up_py))
+    if eng and up and eng != up:
+        return (eng, up)
+    return None
+
+
+def _brewutil_ref():
+    from . import brewutil as _bu
+    return _bu
+
+
+def _carry_steps() -> list:
+    """The documented HEAD-lane uplift swap, in order. fetch first (stale
+    cache-clone trap), uninstall before install (a same-sha HEAD install
+    is a silent no-op), remount via the NEW CLI."""
+    return [
+        (["brew", "fetch", "--HEAD", "omlx-uplift"], "refresh tap clone"),
+        (["brew", "uninstall", "omlx-uplift"], "remove old keg"),
+        (["brew", "install", "--HEAD", "--quiet", "omlx-uplift"],
+         "rebuild following the engine"),
+        (["omlx-uplift", "install"], "remount .pth (minor guard applies)"),
+    ]
+
+
+def _do_carry_uplift_keg(runner=subprocess.run) -> bool:
+    """Worker: runs the swap sequentially; prints progress for the
+    parent. THIS RUNS IN A CHILD INTERPRETER (see _carry_uplift_keg): the
+    venv it lives in is the very keg being deleted mid-flight — imports
+    must be complete before brew starts unlinking, and they are (this
+    function's module graph loaded at child startup)."""
+    import os
+
+    env = dict(os.environ, HOMEBREW_NO_INSTALL_CLEANUP="1")
+    for cmd, why in _carry_steps():
+        print(f"uplift carry: {' '.join(cmd[:3])} ({why})", flush=True)
+        try:
+            r = runner(cmd, capture_output=True, text=True, env=env,
+                       timeout=900)
+        except Exception as exc:
+            print(f"uplift carry FAILED ({why}): {exc}", flush=True)
+            return False
+        if r.returncode != 0:
+            blob = (getattr(r, "stdout", "") or "") + \
+                   (getattr(r, "stderr", "") or "")
+            # a never-installed uplift keg must not break the carry
+            if cmd[1] == "uninstall" and "not installed" in blob:
+                continue
+            tail = blob.strip().splitlines()
+            print("uplift carry FAILED: " + (tail[-1][:200] if tail
+                                             else f"rc={r.returncode}"),
+                  flush=True)
+            return False
+    print("uplift carry: done", flush=True)
+    return True
+
+
+def _carry_uplift_keg(emit, *, runner=subprocess.run) -> bool:
+    """Parent: delegate the swap to a child interpreter so the running
+    CLI (installed IN the keg brew is about to delete) never lazy-imports
+    from under its own feet."""
+    code = ("import sys; from omlx_uplift import devsrc; "
+            "sys.exit(0 if devsrc._do_carry_uplift_keg() else 1)")
+    try:
+        r = runner([sys.executable, "-c", code], capture_output=True,
+                   text=True, timeout=1800)
+    except Exception as exc:
+        emit("err", f"uplift carry: child failed: {exc}")
+        return False
+    for ln in (r.stdout or "").splitlines():
+        emit("out", ln)
+    for ln in (r.stderr or "").splitlines():
+        emit("err", ln)
+    return r.returncode == 0
+
+
 def run_dev_build(*, with_custom_kernel: bool = False,
                   with_grammar: bool = False, dry_run: bool = False,
                   with_python312: bool = False,
@@ -2122,6 +2208,29 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
             _emit(res, "out", "cellar retention: removed " + ", ".join(gone))
     except Exception:
         pass
+    # UPLIFT CARRY (user 2026-10-27): one command must leave the BOARD
+    # consistent. If the engine python minor just moved out from under
+    # the deployed uplift keg (the .pth shares site-packages, minors must
+    # match), rebuild the uplift HEAD keg now — its formula auto-follows
+    # the engine. Runs in a child (the swap deletes THIS CLI's keg
+    # mid-flight). Failure is loud but never fails the engine build: the
+    # keg switch already happened; the emitted lines name the manual fix.
+    try:
+        need = _uplift_carry_needed(brewutil)
+        if need:
+            _emit(res, "out", f"engine python {need[0][0]}.{need[0][1]} != "
+                              f"uplift keg {need[1][0]}.{need[1][1]} — "
+                              "carrying the uplift keg over")
+            if not _carry_uplift_keg(
+                    lambda s, t: _emit(res, s, t)):
+                _emit(res, "err", "uplift carry incomplete — finish by "
+                                  "hand: brew uninstall omlx-uplift && "
+                                  "HOMEBREW_NO_INSTALL_CLEANUP=1 brew "
+                                  "install --HEAD omlx-uplift && "
+                                  "omlx-uplift install")
+    except Exception as exc:
+        _emit(res, "err", f"uplift carry probe failed (engine build "
+                          f"unaffected): {exc}")
     res.ok, res.returncode, res.stage = True, 0, "ok"
     return res
 

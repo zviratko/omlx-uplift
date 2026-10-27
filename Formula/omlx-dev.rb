@@ -145,13 +145,13 @@ class OmlxDev < Omlx
   depends_on arch: :arm64
   depends_on macos: :sequoia
   depends_on "python@3.11"
-  # --with-python312: REQUIRED to be a declared depends_on, not just a
-  # PATH pick — Homebrew superenv strips -I include paths of UNDECLARED
-  # formulae, and omlx's nanobind C++ wheel then dies on 'Python.h not
-  # found' (proven the hard way in the 2026-10-27 trial). The bottle is
-  # also pulled on option-off builds (~10MB); accepted for having the
-  # switch live at all.
-  depends_on "python@3.12"
+  # --with-python312: REQUIRED to be a DECLARED depends_on (conditional:
+  # build.with? works in the class body — verified on brew 7.0.11), not
+  # just a PATH pick — Homebrew superenv strips -I include paths of
+  # UNDECLARED formulae, and omlx's nanobind C++ wheel then dies on
+  # 'Python.h not found' (proven the hard way, 2026-10-27 trial).
+  # Conditional so option-off / vanilla-only machines pull NOTHING new.
+  depends_on "python@3.12" if build.with?("python312")
 
   on_macos do
     skip_clean "libexec" if MacOS.version >= "27"

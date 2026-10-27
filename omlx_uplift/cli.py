@@ -1254,9 +1254,10 @@ def cmd_dev(argv=None) -> int:
                          "python 3.12 instead of the upstream-pinned 3.11 "
                          "(inside upstream's supported range; 3.13+ is "
                          "impossible for the engine: mlx-audio[all] -> "
-                         "misaki requires python <3.13). Sticky like the "
-                         "other flags; drop it from dev.json build_options "
-                         "to go back to 3.11")
+                         "misaki requires python <3.13). The deployed "
+                         "uplift keg is carried over automatically when "
+                         "this moves the minor; omit the flag (with the "
+                         "other wanted flags) to go back to 3.11")
     ap.add_argument("--dry-run", action="store_true",
                     help="install: materialize check + print the brew "
                          "command, build nothing")

@@ -20,11 +20,13 @@ class OmlxUplift < Formula
   # keg upgrade to re-inject the mount).
   # AUTO-FOLLOW (python312 trial 2026-10-27): the .pth mount joins THIS
   # keg's libexec site-packages to the ENGINE interpreter's sys.path, so
-  # this venv must be built on the engine keg's python minor. Both known
-  # engine minors are declared (only the detected one is used; the other
-  # is a ~10MB pull) — extend the pair when the engine move lands.
+  # this venv is built on the engine keg's python minor (see
+  # engine_python_minor). Only 3.11 is a hard dep: a 3.12 engine implies
+  # --with-python312 was used, and the dev formula's CONDITIONAL
+  # depends_on pulled python@3.12 already — machines staying on 3.11
+  # never see it. Missing python at probe time = engine never built with
+  # the option; the venv step below names the fix.
   depends_on "python@3.11"
-  depends_on "python@3.12"
 
   def omlx_python
     (formula_opt_prefix("omlx")/"libexec/bin/python")
@@ -58,7 +60,12 @@ class OmlxUplift < Formula
     # imports the autopatch. Nothing is copied into the omlx keg.
     minor = engine_python_minor
     venv_py = Formula["python@#{minor}"].opt_bin/"python#{minor}"
-    odie "no brew python@#{minor} for engine auto-follow" unless venv_py.exist?
+    unless venv_py.exist?
+      odie "engine keg runs python #{minor} but brew python@#{minor} is " \
+        "absent — build the engine with it first: omlx-uplift dev install " \
+        "--with-python312 (pulls python@3.12), or brew install " \
+        "python@#{minor}"
+    end
     system venv_py, "-m", "venv", libexec
     # REL-1: STABLE builds pin the exact dependency set the release was
     # tested with (constraints-stable.txt, shipped in the repo); --HEAD
