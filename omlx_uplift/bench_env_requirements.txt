@@ -63,7 +63,7 @@ portalocker==4.4.1
 propcache==0.5.4
 pyarrow==26.0.0
 pytablewriter==1.2.1
-python-dateutil==2.9.0.post0
+python-dateutil==3.0.0
 pytz==2026.5
 PyYAML==6.0.3
 regex==2026.9.29
