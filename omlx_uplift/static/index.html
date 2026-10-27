@@ -349,25 +349,25 @@
             </div>
             <pre class="logs logs-page" id="logs">—</pre>
         </div></div></div></div></section><section class="card wide page-card" data-id="voices-page" data-tab="models" data-sub="voices" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.voices_full">TTS &amp; Voices</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.voices_full">TTS &amp; Voices</span> <span class="right" id="vc-sub"></span></h2><div class="card-body"><div id="vc-body" class="admin-table"><div class="empty">—</div></div></div></div></div></div></section><section class="card wide page-card" data-id="settings-page" data-tab="settings" data-sub="global" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.page.server_settings_full">Server settings</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.page.server_settings_full">Server settings</span> <span class="right" id="gs-sub"></span></h2>
-        <div class="card-body"><div id="gs-body" class="admin-table"><div class="empty">—</div></div></div></div></div></div></section><section class="card wide page-card" data-id="patches-page" data-tab="settings" data-sub="patches" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.patches.title">Patches</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.patches.title">Patches</span> <span class="right" id="pt-sub"></span></h2>
+        <div class="card-body"><div id="gs-body" class="admin-table"><div class="empty">—</div></div></div></div></div></div></section><section class="card wide page-card" data-id="patches-page" data-tab="settings" data-sub="patches" data-full="1"><div class="card-inner"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.patches.title">Patches</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.patches.title">Patches</span> <!-- HEAD-MOVE (user 2026-10-27): the auto-update switch is a standing setting, not an action — it sits with the title now (id + data-i18n unchanged, so uplift.js applyI18n and uplift_patches.js $('pt-auto-check') keep working). It goes BEFORE span.right so pt-sub stays right-aligned. --><label class="pt-auto pt-head-auto"><input type="checkbox" id="pt-auto-check"> <span data-i18n="uplift.patches.auto_check">Auto-update patches from origin</span></label> <span class="right" id="pt-sub"></span></h2>
         <div class="card-body">
             <div id="pt-warn" class="pt-banner" hidden></div>
             <div id="pt-killswitch" class="pt-banner pt-kill" hidden></div>
             <div id="pt-drift" class="pt-banner pt-drift" hidden></div>
             <div class="pt-toolbar">
-                <label class="pt-auto"><input type="checkbox" id="pt-auto-check"> <span data-i18n="uplift.patches.auto_check">Auto-update patches from origin</span></label>
                 <button type="button" class="btn" id="pt-check-btn" data-i18n="uplift.patches.check_now">Check for updates</button>
             <!-- PAT-TABLE round 4 (user 2026-10-25): the ADD PATCH card moved UP out of the area below
                  the table and into the toolbar, so the way to add a patch sits with the way to
-                 refresh them. It shares the line and takes the remaining width (see .pt-toolbar
-                 .pt-addform); its own field row wraps.-->
+                 refresh them. HEAD-MOVE (user 2026-10-27): the auto-update switch left this line for
+                 the card header, so the toolbar is Check + Add only, and the card is compact (lane P):
+                 it no longer stretches to fill the line, and its controls shrink to one tight row.-->
                 <div class="pt-addform">
                 <div class="pt-addform-title"><span data-i18n="uplift.patches.add_title">+ ADD PATCH</span>
-                    <span class="pt-addform-hint" data-i18n="uplift.patches.add_hint">fetch or upload a diff, validate it against the live tree, then enable</span>
+                    <span class="pt-addform-hint" data-i18n="uplift.patches.add_hint">fetch or upload a diff, then enable</span>
                 </div>
                 <div class="pt-addform-row">
                     <label class="pt-field"><span data-i18n="uplift.patches.lbl_name">name</span>
-                        <input type="text" id="pt-new-id" placeholder="patch name" size="14" data-i18n-ph="uplift.patches.ph_name">
+                        <input type="text" id="pt-new-id" placeholder="patch name" size="10" data-i18n-ph="uplift.patches.ph_name">
                     </label>
                     <label class="pt-field"><span data-i18n="uplift.patches.lbl_source">source</span>
                         <select id="pt-src-kind" aria-label="Source kind">
@@ -376,8 +376,8 @@
                             <option value="upload" data-i18n="uplift.patches.src_upload">Upload</option>
                         </select>
                     </label>
-                    <input type="text" id="pt-src-repo" value="jundot/omlx" placeholder="owner/repo" size="14" data-i18n-ph="uplift.patches.ph_repo">
-                    <input type="text" id="pt-src-pr" placeholder="1234" size="6" inputmode="numeric" data-i18n-ph="uplift.patches.ph_pr">
+                    <input type="text" id="pt-src-repo" value="jundot/omlx" placeholder="owner/repo" size="11" data-i18n-ph="uplift.patches.ph_repo">
+                    <input type="text" id="pt-src-pr" placeholder="1234" size="5" inputmode="numeric" data-i18n-ph="uplift.patches.ph_pr">
                     <input type="text" id="pt-src-url" class="grow" placeholder="https://…/patch.diff" data-i18n-ph="uplift.patches.ph_url">
                     <input type="file" id="pt-src-file" accept=".diff,.patch,text/plain" hidden>
                     <label class="pt-auto"><input type="checkbox" id="pt-insecure-tls"> <span data-i18n="uplift.patches.insecure_tls">ignore SSL/TLS errors</span></label>
@@ -415,21 +415,21 @@
                     <span class="pt-c-origin" data-i18n="uplift.patches.col_origin">ORIGIN</span>
                     <span class="pt-c-status" data-i18n="uplift.patches.col_status">STATUS</span>
                     <span class="pt-c-fill" aria-hidden="true"></span>
-                    <span class="pt-c-dev"><span data-i18n="uplift.patches.col_dev">DEV</span
+                    <span class="pt-c-dev"><span data-i18n="uplift.patches.col_dev">OMLX-DEV BUILD</span
                         ><span id="dv-base" class="dv-target-wrap" hidden> (<button type="button"
                             id="dv-target-btn" class="pt-target-link"
                             data-i18n="uplift.patches.dev_target"
                             data-i18n-title="uplift.patches.dev_target_title"
                             title="omlx-dev build source">TARGET</button>)</span></span>
-                    <span class="pt-c-vanilla"><span data-i18n="uplift.patches.col_vanilla">VANILLA</span></span>
-                    <span class="pt-c-auto"><span data-i18n="uplift.patches.col_auto">AUTO</span></span>
+                    <span class="pt-c-vanilla"><span data-i18n="uplift.patches.col_vanilla">RUNTIME PATCH</span></span>
+                    <span class="pt-c-auto"><span data-i18n="uplift.patches.col_auto">AUTO-UPDATE</span></span>
                     <span class="pt-c-manage" data-i18n="uplift.patches.col_manage">MANAGE</span>
                 </div>
                 <div id="pt-list" class="pt-rows"><div class="empty">&#8212;</div></div>
                 <div id="pt-curated-notes" class="pt-detail" hidden></div>
             </div>
             <div id="dv-section" class="pt-zone pt-zone-dev" hidden>
-                <div class="pt-section-head"><span class="pt-id" data-i18n="uplift.patches.sec_dev">omlx-dev build</span><span id="dv-state"></span></div>
+                <div class="pt-section-head"><span class="pt-id" data-i18n="uplift.patches.sec_dev">OMLX-DEV BUILD</span><span id="dv-state"></span></div>
                 <div class="dv-controls">
                 <div id="dv-intro" class="pt-src" hidden></div>
                 <!-- DEV-7(d): dashboard bootstrap when dev-src is absent -->

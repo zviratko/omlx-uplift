@@ -1899,6 +1899,13 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
 /* alternating row shade: instrument panel readout lines */
 .urow.settings:nth-of-type(even) { background: var(--row2); }
 .urow.settings:last-child { border-bottom: 0; }
+/* USER 2026-10-27 (item 2): the Server Aliases box — the shared 46% value
+   track was too narrow to scan a host list. The alias row gets its own
+   wider value track (no px floor so the 900px stacked media query still
+   rules) and a taller, horizontally-filling textarea. */
+.urow.settings.gs-alias-row { grid-template-columns: minmax(0,1fr) auto minmax(0,62%); }
+.urow.settings .gs-alias-ta { width: 100%; min-width: 0; min-height: 54px;
+    resize: vertical; }
 /* description sits next to the setting name (wraps below only when tight).
    .uname is a flex row whose wrapped line starts 8px in, and the hint's
    automatic flex minimum added another 8 — the text then ran 13-16px PAST
@@ -3787,25 +3794,41 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     color: var(--dim);
 }
 
-/* --- UP-41(11): per-section copy-link button on every header ----------- */
+/* --- UP-41(11): per-section copy-link button on every header -----------
+   USER 2026-10-27 (item 3): these controls live on the INVERTED signage
+   strip (background: var(--ink), text: var(--bg)). --dim was barely
+   readable there and the old :hover rule painted them var(--ink) — ink on
+   ink, i.e. the icon vanished exactly when you reached for it. Both states
+   now inherit the header's own foreground; :hover underlines the link. */
 .gs-box-title .gs-copylink {
     flex: 0 0 auto;
     margin-left: 6px;
     padding: 0 5px;
     font-size: 11px;
     line-height: 1.5;
-    opacity: .45;
-    color: var(--dim);
+    opacity: .55;
+    color: inherit;
 }
-.gs-box-title:hover .gs-copylink { opacity: 1; color: var(--ink); }
+.gs-box-title:hover .gs-copylink { opacity: 1; color: inherit; text-decoration: underline; }
 
-/* --- UP-41(12): Advanced disclosure chevron ---------------------------- */
+/* --- UP-41(12): Advanced disclosure chevron ----------------------------
+   USER 2026-10-27 (item 3): the bare ▸/▾ characters did not read as an
+   expand control. It is now a bordered round chip whose triangle ROTATES
+   (right = collapsed, down = open); the glyph itself is ::before content
+   so it can never desync from the fold class the JS toggles. */
 .gs-box-title .gs-advchev {
     flex: 0 0 auto;
-    margin-left: 6px;
-    font-size: 11px;
-    color: var(--dim);
+    margin-left: 8px;
+    width: 16px; height: 16px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid currentColor; border-radius: 50%;
+    font-size: 9px; line-height: 1;
+    color: inherit; opacity: .8;
+    transition: transform 120ms ease, opacity 120ms ease;
 }
+.gs-box-title .gs-advchev::before { content: '\25BE'; }
+.gs-box-title:hover .gs-advchev { opacity: 1; }
+.gs-box-title.gs-adv-closed .gs-advchev { transform: rotate(-90deg); }
 .gs-box-title.gs-adv-closed { border-bottom-color: transparent; }
 
 /* --- UP-26(2): Applications launch-command rows (helper page) ---------- */
@@ -3946,3 +3969,206 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .se-pedit .se-pedit-err[hidden] { display: none; }
 .se-pedit .se-pedit-actions { display: flex; flex-wrap: wrap; gap: 8px;
     justify-content: flex-end; }
+
+/* ==========================================================================
+   UX BATCH 2026-10-27 (user items 5+6, patches page / omlx-dev strip; lane P)
+   Folded from the lane handoff. All selectors are specificity-distinct from
+   the base rules they refine (css2-no-dup gate), so they append rather than
+   merge in place; each block above names the base rule it targets.
+   ========================================================================== */
+/* 5(a) TARGETS NEW `.pt-head-auto` — #pt-auto-check moved out of .pt-toolbar
+   into the Patches <h2>. .pt-auto is form-row sized (32px); the header band is
+   12px uppercase nowrap, so shrink the switch to the band and ellipsise its
+   caption rather than pushing span.right (#pt-sub) out of the row. The header's
+   text-transform would shout a whole sentence — undo it for this control. */
+.card h2 label.pt-auto.pt-head-auto {
+    flex: 0 1 auto; min-width: 0; height: auto; gap: 5px;
+    font: 400 11px/1.3 var(--sans); letter-spacing: 0; text-transform: none;
+    color: var(--dim); cursor: pointer;
+}
+.card h2 label.pt-auto.pt-head-auto > span {
+    display: inline-block; min-width: 0; max-width: 32ch; vertical-align: bottom;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.card h2 label.pt-auto.pt-head-auto input[type="checkbox"] { width: 12px; height: 12px; margin: 0; }
+.card h2 label.pt-auto.pt-head-auto:hover { color: var(--ink); }
+
+/* 5(b) TARGETS existing `.pt-toolbar .pt-addform` — REPLACE. It was
+   `flex: 1 1 560px`: the card ate every pixel left on the line and then wrapped
+   its own field row. Now it asks for what its controls need, may shrink, stops
+   at 560px. (.pt-toolbar > .pt-auto in the same rule is dead now the label is
+   gone; leaving it costs nothing, #pt-check-btn keeps flex: none.) */
+.pt-toolbar div.pt-addform { flex: 0 1 460px; min-width: 0; max-width: 560px; margin: 0; }
+/* TARGETS existing `.pt-addform-title` — REPLACE: thinner band, one size down. */
+.pt-addform div.pt-addform-title { padding: 3px 8px; gap: 6px; font-size: 10px; }
+/* TARGETS existing `.pt-addform-hint` — REPLACE: the hint is one short clause
+   (see the add_hint EN change); it ellipsises instead of widening the card. */
+.pt-addform-title .pt-addform-hint {
+    font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dim);
+    font-size: 10px; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+/* TARGETS existing `.pt-addform-row` — REPLACE: tighter gutter. */
+.pt-addform div.pt-addform-row { gap: 5px; padding: 5px 8px; }
+/* TARGETS `.pt-field` inside the add row — NEW hook, scoped so other pages'
+   field labels are untouched. */
+.pt-addform .pt-field { gap: 1px; font-size: 9px; letter-spacing: .04em; }
+/* TARGETS existing `.pt-addform-row input[type=text], …file, …select` —
+   REPLACE: 32px is the convention for a STANDALONE form; inside a toolbar card
+   it is what made the block tall. */
+.pt-addform div.pt-addform-row input[type="text"],
+.pt-addform div.pt-addform-row input[type="file"],
+.pt-addform div.pt-addform-row select { height: 26px; padding: 0 6px; font-size: 11px; }
+/* TARGETS `.btn` inside the add row (#pt-preview-btn) — NEW hook; the toolbar's
+   own #pt-check-btn keeps the global 32px. */
+.pt-addform .btn { height: 26px; padding: 0 9px; font-size: 11px; }
+/* TARGETS `.pt-auto` / `.pt-reversal` inside the add row — NEW hooks: the two
+   opt-in boxes are part of the form again, not blocks of their own. */
+.pt-addform label.pt-auto { height: 26px; gap: 3px; font-size: 10px; }
+.pt-addform label.pt-auto input[type="checkbox"] { width: 12px; height: 12px; }
+.pt-addform label.pt-reversal { padding: 2px 6px; }
+/* TARGETS `#pt-src-url` (.grow) — NEW hook: it stretched to every spare pixel;
+   now it shares the line at a modest basis. */
+.pt-addform #pt-src-url { flex: 1 1 120px; min-width: 0; }
+
+/* 5(c) TARGETS existing `.pt-row` grid-template-columns + min-width — REPLACE
+   those two declarations: DEV -> OMLX-DEV BUILD, VANILLA -> RUNTIME PATCH,
+   AUTO -> AUTO-UPDATE do not fit 128/82/60px. Tracks 2-3 are pinned by
+   tests/pat-table.test.cjs (PATCH minmax(170px,340px), ORIGIN
+   minmax(240px,2.4fr)) — untouched; DEV keeps the most room because it also
+   carries the (TARGET) picker. min-width follows the +64px of tracks:
+   1150 -> 1240, so the table scrolls instead of crushing a label. Written
+   `.pt-table div.pt-row` (0,2,1): wins on specificity, and the base rule stays
+   readable to the pin test. */
+.pt-table div.pt-row {
+    grid-template-columns: 26px minmax(170px, 340px) minmax(240px, 2.4fr)
+        minmax(210px, 1.1fr) minmax(24px, 0.25fr) 156px 112px 96px 92px;
+    min-width: 1240px;
+}
+/* TARGETS NEW `.pt-thead > span` — a two-word header must not break across
+   lines inside its track (it would misalign the column pair). */
+.pt-thead > span { white-space: nowrap; }
+
+/* 6(b) TARGETS NEW `#dv-share` (carries .pt-gate) — the block decides which
+   files the dev build touches and read as a grey afterthought at .pt-gate
+   weight. The id beats the class rule, so no ordering dependency. */
+#dv-share {
+    border-color: color-mix(in srgb, var(--accent, #e0662e) 45%, var(--line));
+    background: color-mix(in srgb, var(--accent, #e0662e) 4%, transparent);
+    margin: 10px 0 8px;
+}
+/* TARGETS NEW `.dv-iso-head`, added by renderDev to `pt-gate-row pt-gate-head`
+   — the block's title band: uppercase, tracked, accent on its reading edge.
+   Keyed off .pt-gate-head too so it beats `font-weight: 700` by specificity. */
+.pt-gate-head.dv-iso-head {
+    border-top: 0; padding: 7px 10px; gap: 8px;
+    font: 700 11px/1.3 var(--sans); letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink, #f2f0ea);
+    background: color-mix(in srgb, var(--accent, #e0662e) 12%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--accent, #e0662e) 45%, var(--line));
+    box-shadow: inset 3px 0 0 var(--accent, #e0662e);
+}
+/* TARGETS NEW `.dv-iso-grid` — wraps the per-file toggle rows (was one
+   .pt-gate-row per file in a ladder; each row also carries .dv-iso-item). Two
+   equal columns; minmax(0, 1fr) is what stops a long absolute path from forcing
+   the grid wider than the card. */
+.dv-iso-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 14px; padding: 2px 0 4px;
+}
+.dv-iso-grid > .dv-iso-item { align-items: flex-start; }
+.dv-iso-grid > .dv-iso-item > input[type="checkbox"] { flex: none; margin-top: 2px; }
+.dv-iso-grid > .dv-iso-item > span { min-width: 0; overflow-wrap: anywhere; }
+/* narrow card / pop-out: one column rather than two unreadable slivers */
+@media (max-width: 900px) {
+    .dv-iso-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 6(c) TARGETS NEW `.dv-runtime`, added by renderDev to the existing
+   `pt-gate-row` — replaces the single grey sentence the panel printed. Segments
+   are separate elements built with textContent; the row supplies its own gutter
+   so the JS never pads translated strings with spaces. Keyed with .pt-gate-row
+   (0,2,0) so it beats the base row rule wherever the merge lands it. */
+.pt-gate-row.dv-runtime {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 6px;
+    padding: 6px 10px; font: 400 var(--fs-meta, 11px)/1.5 var(--mono);
+    color: var(--dim);
+}
+/* TARGETS NEW `.dv-meta-em` — the emphasis the ask names: each service's state
+   word, and every port number. */
+.dv-runtime b.dv-meta-em {
+    font-weight: 700; font-family: var(--mono); letter-spacing: .02em;
+    color: var(--ink, #f2f0ea);
+}
+.dv-runtime .dv-meta-on { color: var(--ok, #2e8b57); }
+.dv-runtime .dv-meta-off { color: var(--dim); font-weight: 700; }
+/* TARGETS NEW `.dv-meta-label` / `.dv-meta-sep` / `.dv-meta-path` — the quiet
+   furniture between the emphasised values. */
+.dv-runtime .dv-meta-label {
+    color: var(--dim); text-transform: uppercase; letter-spacing: .1em;
+    font-size: .9em;
+}
+.dv-runtime .dv-meta-sep { color: color-mix(in srgb, var(--dim) 55%, transparent); }
+.dv-runtime .dv-meta-path { color: var(--ink, #f2f0ea); overflow-wrap: anywhere; }
+/* TARGETS NEW `.dv-meta-clash` — SAME-PORT-AS-VANILLA keeps its alarm treatment
+   now that it is its own segment, not a suffix of the port string. */
+.dv-runtime .dv-meta-clash {
+    color: var(--red, #c9243b); font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+/* ==========================================================================
+   UX BATCH 2026-10-27 (user item 4, prefill probe block; lane B) — folded
+   from lane-B.css; merge note in the file's own band comment.
+   ========================================================================== */
+/* target selector: .bench-prefill
+   A visible own frame inside the bench form: it is a DIFFERENT measurement
+   lane from the classic chips above it, and the user must be able to tell
+   where 'standard benchmark' stops and 'uplift probe' starts. */
+.bench-prefill {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 14px 0 4px;
+    padding: 10px 12px 12px;
+    border: 1px dashed var(--edge);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--card) 55%, transparent);
+}
+
+/* target selector: .bench-prefill > .bench-tp-section
+   The block's own h3 heading: .card h2 sizing must not leak in, and the
+   shared .bench-tp-section top margin would push it off the frame edge. */
+.bench-prefill > .bench-tp-section {
+    margin: 0;
+    font: 600 12px/1.4 var(--mono);
+    letter-spacing: 0.02em;
+}
+
+/* target selector: .bench-prefill .bench-field input:disabled
+   External-endpoint mode (and a live run) disables every control in the
+   block; say so visually instead of presenting a form that eats clicks. */
+.bench-prefill .bench-field input:disabled,
+.bench-prefill .bench-field {
+    color: var(--dim);
+    opacity: 0.55;
+}
+
+/* target selector: #bench-tp-pf-results
+   The probe's own result area — it must not sit flush against the actions
+   row, and its summary column stays readable on wide boards. */
+#bench-tp-pf-results {
+    margin-top: 8px;
+    max-width: 72ch;
+}
+
+/* target selector: #bench-tp-prefill .native-stub-note
+   The hint carries the honest contention limitation, so it must be legible
+   as a sentence (the default note style is a 10px caption). */
+#bench-tp-prefill > .native-stub-note {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--dim);
+    max-width: 72ch;
+}

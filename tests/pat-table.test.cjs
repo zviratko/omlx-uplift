@@ -519,21 +519,42 @@ test('patch auto-update label: says what it does, catalog agrees', () => {
 });
 
 /* PAT-TABLE round 4, part 2 (user 2026-10-25): the ADD PATCH card moved OUT of
- * the stack below the table and INTO the toolbar, right of the auto-update
- * group, so the two ways a patch arrives (pull from origin / add one) share one
- * line above the list. Pinned by document order — the ids are wired by
- * getElementById, so nothing else would notice if it slid back down.
+ * the stack below the table and INTO the toolbar, so the two ways a patch
+ * arrives (pull from origin / add one) share one line above the list. Pinned by
+ * document order — the ids are wired by getElementById, so nothing else would
+ * notice if it slid back down.
+ *
+ * HEAD-MOVE (user 2026-10-27): the auto-update SWITCH left the toolbar for the
+ * card header — it is a standing setting, not an action, and the toolbar line
+ * was crowded. The switch is pinned in the h2 (before the right-aligned
+ * counts) and pinned OUT of the toolbar here.
  */
 test('ADD PATCH card sits in the toolbar, above the patch list', () => {
     const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
     const tb = /<div class="pt-toolbar">([\s\S]*?)<\/div>\s*<!--/.exec(html)
         || /<div class="pt-toolbar">([\s\S]*?)(<div class="pt-table")/.exec(html);
     assert.ok(tb, 'no .pt-toolbar block found');
-    assert.ok(tb[1].includes('pt-auto-check'), 'the toolbar lost its auto-update control');
+    assert.ok(tb[1].includes('pt-check-btn'), 'the toolbar lost its check button');
+    assert.ok(!tb[1].includes('pt-auto-check'),
+        'the auto-update switch belongs in the card header now — keep it out '
+        + 'of the toolbar (it crowded the ADD PATCH card)');
     assert.ok(tb[1].includes('class="pt-addform"'),
         'the ADD PATCH card is not inside the toolbar (it belongs above the list)');
-    assert.ok(tb[1].indexOf('pt-auto-check') < tb[1].indexOf('pt-addform'),
-        'order: auto-update group first, ADD PATCH card to its right');
+    assert.ok(tb[1].indexOf('pt-check-btn') < tb[1].indexOf('pt-addform'),
+        'order: check button first, ADD PATCH card to its right');
     assert.ok(html.indexOf('class="pt-addform"') < html.indexOf('<div class="pt-table">'),
         'the card must sit before the table in the document');
+});
+
+test('auto-update switch lives in the Patches card header', () => {
+    const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
+    const h2 = /<h2><span data-i18n="uplift\.patches\.title">[\s\S]*?<\/h2>/.exec(html);
+    assert.ok(h2, 'the Patches card header row is gone');
+    assert.ok(h2[0].includes('id="pt-auto-check"'),
+        'the header lost the auto-update switch');
+    assert.ok(h2[0].indexOf('pt-auto-check') < h2[0].indexOf('id="pt-sub"'),
+        'order: title, switch, then the right-aligned counts (pt-sub keeps '
+        + 'margin-left: auto and needs to stay last)');
+    // the repaint contract: the span still carries its data-i18n registration
+    assert.match(h2[0], /data-i18n="uplift\.patches\.auto_check">[^<]*</);
 });

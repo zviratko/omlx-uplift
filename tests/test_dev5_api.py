@@ -314,3 +314,86 @@ def test_successful_build_log_stays_quiet(monkeypatch):
         log = list(dev_mod._DEV_BUILD["log"])
         assert dev_mod._DEV_BUILD["result"] == 0
     assert log == [], log   # success adds nothing
+
+
+def _stub_dev_tree(tmp_path, monkeypatch, devsrc):
+    """LANE P helper: the smallest /dev/status that reaches the runtime line
+    (the shape test_status_stale_flag_matches_expected_tip builds)."""
+    cfg = {"src_dir": str(tmp_path / "nope"), "branch": "uplift-dev",
+           "sync_ref": "origin/main", "base_sha": "a" * 40,
+           "built_sha": "c" * 40}
+    monkeypatch.setattr(devsrc, "load_config", lambda: cfg)
+    monkeypatch.setattr(patches_mod, "patch_store", lambda: None)
+    monkeypatch.setattr("omlx_uplift.patchsource.enabled_build_patches",
+                        lambda store: [])
+    monkeypatch.setattr("omlx_uplift.patchsource.build_residue_pool",
+                        lambda store, enabled: [])
+    monkeypatch.setattr(devsrc, "src_path", lambda c: str(tmp_path / "nope"))
+    (tmp_path / "nope" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(devsrc, "status",
+                        lambda c, p, residue_patches=None:
+                        {"installed": True, "branch": "uplift-dev",
+                         "tip": "c" * 40, "drift": {"drift": False},
+                         "ahead": 0, "behind": 0})
+    monkeypatch.setattr(devsrc, "expected_tip",
+                        lambda p, c: {"ok": True, "tip": "c" * 40})
+    monkeypatch.setattr(devsrc, "runtime_config",
+                        lambda c: {"port": 8001, "base_path": str(tmp_path)})
+    monkeypatch.setattr(devsrc, "vanilla_port", lambda: 8000)
+    monkeypatch.setattr(devsrc, "share_map", lambda c: {})
+    monkeypatch.setattr(dev_mod, "_dev_share_realized", lambda c: {})
+    return cfg
+
+
+def test_status_reports_the_vanilla_service_state(tmp_path, monkeypatch):
+    # LANE P (item 6c): the isolation strip prints BOTH services on one line,
+    # so /dev/status answers for the vanilla `omlx` service as well as for
+    # omlx-dev — and it must ask the SAME helper, by name, not guess.
+    from omlx_uplift import cli, devsrc
+    _stub_dev_tree(tmp_path, monkeypatch, devsrc)
+
+    asked = []
+
+    def fake_state(formula):
+        asked.append(formula)
+        return "started" if formula == "omlx" else "stopped"
+
+    monkeypatch.setattr(cli, "_service_state", fake_state)
+    st = dev_mod._dev_status_sync()
+    assert asked.count("omlx") == 1, "the vanilla probe must name omlx"
+    assert asked.count("omlx-dev") == 1, "the dev probe lost its own question"
+    assert st["service_running"] is False
+    assert st["vanilla_service_running"] is True
+
+    def fake_down(formula):
+        return "stopped"
+
+    monkeypatch.setattr(cli, "_service_state", fake_down)
+    assert dev_mod._dev_status_sync()["vanilla_service_running"] is False
+
+
+def test_vanilla_service_probe_never_raises(monkeypatch):
+    # LANE P: this feeds a POLL. brew missing, a timeout, junk json — 'cannot
+    # tell' must land as False (not running), never as an exception that takes
+    # the whole /dev/status response down with it.
+    from omlx_uplift import cli
+
+    def seam_looks_real(formula):        # module label of the real helper
+        raise AssertionError("must not be reached")
+    seam_looks_real.__module__ = "omlx_uplift.cli"
+    monkeypatch.setattr(cli, "_service_state", seam_looks_real)
+
+    def boom(formula="omlx-dev"):
+        raise RuntimeError("brew exploded")
+    monkeypatch.setattr(dev_mod, "_dev_service_info", boom)
+    assert dev_mod._dev_service_up("omlx") is False
+
+    def junk(formula="omlx-dev"):
+        return {"status": None, "running": None}
+    monkeypatch.setattr(dev_mod, "_dev_service_info", junk)
+    assert dev_mod._dev_service_up("omlx") is False
+
+    def up(formula="omlx-dev"):
+        return {"status": "started", "pid": 42}
+    monkeypatch.setattr(dev_mod, "_dev_service_info", up)
+    assert dev_mod._dev_service_up("omlx") is True

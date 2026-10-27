@@ -59,6 +59,14 @@ function t(key, fb) {
     return v === key ? (fb || key) : v;
 }
 
+/* ta(): a RE-PAINTABLE label in one call — the catalog key, the English it
+   was painted from, and the resolved text. Call sites write the literals
+   through ta() on purpose: the locale-sync gate (tests/test_locale_sync.py
+   D5) only sees `t('key'…)`/`tf`/`ta`/`tr` calls and
+   `dataset.i18n = 'key'` assignments, so a label assembled from variables
+   is invisible to it and can ship with no catalog entry at all. */
+function ta(key, en) { return { k: key, en: en, s: t(key, en) }; }
+
 var PROMPT_LENGTHS = [1024, 4096, 8192, 16384, 32768, 65536, 131072, 200000];
 var BATCH_SIZES = [2, 4, 8];
 // TG-OPT: generation length is selectable (classic fixes it at 128). The
@@ -1762,6 +1770,470 @@ function tpHistoryBody(e) {
     return card;
 }
 
+/* ==========================================================================
+   PREFILL PROBE (user item 4) — 'longer or custom prefill length, custom
+   parallelism with longer prefills (with an option to stagger their
+   starts)'. An UPLIFT-NATIVE lane, by necessity: classic's BenchmarkRequest
+   validates prompt lengths against VALID_PROMPT_LENGTHS and batch sizes
+   against [2,4,8], its batch test pins pp1024 and submits every request at
+   once — so none of the three asks can go through /bench/start without
+   editing vanilla. The server side is omlx_uplift/bench_prefill.py, which
+   reuses classic's prompt builder, engine seam (add_request/stream_outputs)
+   and metric math but owns its own run registry, and the routes are the
+   /bench/prefill/* pair. Nothing here touches the vanilla chips, the
+   classic payload or /bench/start: a standard run stays byte-identical.
+   ========================================================================== */
+
+// Mirrors of the server's bounds (omlx_uplift/bench_prefill.py). The UI
+// must never offer what the runner rejects, so these two numbers are one
+// contract read from both ends — change them together.
+var PF_MIN_TOKENS = 1024;       // MIN_PREFILL_TOKENS — floor, NO ceiling
+var PF_MAX_PARALLEL = 256;      // MAX_PARALLEL (typo guard, not a product cap)
+var _pfEs = null, _pfPoll = null;
+
+function gid0(field) { return field ? field.children[1] : null; }
+
+function pfStop() {
+    if (_pfEs) { try { _pfEs.close(); } catch (_) {} _pfEs = null; }
+    if (_pfPoll) { clearInterval(_pfPoll); _pfPoll = null; }
+}
+
+// One numbered input of the probe form. No `max` on the length field: the
+// server has no ceiling there (only the model's own context window, and the
+// probe fails loudly when the engine cuts a prompt short).
+function pfNum(id, label, value, min, max, step, ph) {
+    var inp = el('input');
+    inp.type = 'number'; inp.id = id;
+    inp.value = String(value);
+    if (min != null) inp.min = String(min);
+    if (max != null) inp.max = String(max);
+    inp.step = String(step == null ? 1 : step);
+    if (ph) {
+        inp.placeholder = ph.s;
+        inp.dataset.i18nPh = ph.k;
+        inp.dataset.enPh = ph.en;
+    }
+    var w = labeled(label.s, inp);
+    var lab = w.children[0];
+    lab.dataset.i18n = label.k;            // painted once, re-resolved when
+    lab.dataset.en = label.en;             // the catalog lands late (U59)
+    return w;
+}
+
+/* Pure collector/validator: raw form strings in, request body or an i18n
+   error out. Separate from PF.start so a node harness can prove the client
+   bounds match the server's WITHOUT a DOM round-trip. */
+function pfBody(raw) {
+    raw = raw || {};
+    var pp = Number(raw.prefill_tokens), par = Number(raw.parallel);
+    var st = (raw.stagger_seconds === '' || raw.stagger_seconds == null)
+        ? 0 : Number(raw.stagger_seconds);
+    var tg = Number(raw.generation_tokens);
+    function bad(label) { return { ok: false, key: label.k, en: label.en,
+                                   msg: label.s }; }
+    if (!raw.model_id)
+        return bad(ta('bench.config.model_placeholder', 'Select model\u2026'));
+    if (!Number.isInteger(pp) || pp < PF_MIN_TOKENS)
+        return bad(ta('uplift.bench.prefill.bad_tokens',
+            'Prefill length must be a whole number of at least 1,024 tokens.'));
+    if (!Number.isInteger(par) || par < 1 || par > PF_MAX_PARALLEL)
+        return bad(ta('uplift.bench.prefill.bad_parallel',
+            'Parallel requests must be a whole number between 1 and 256.'));
+    if (!(st >= 0))     // NaN-safe: a blank or garbage stagger is refused
+        return bad(ta('uplift.bench.prefill.bad_stagger',
+            'Stagger must be a number of seconds, 0 or more.'));
+    if (!Number.isInteger(tg) || tg < 1)
+        return bad(ta('uplift.bench.prefill.bad_generation',
+            'Generation tokens must be a whole number of at least 1.'));
+    return { ok: true, body: {
+        model_id: raw.model_id,
+        prefill_tokens: pp,
+        parallel: par,
+        stagger_seconds: st,
+        generation_tokens: tg,
+        context_profile: raw.context_profile || 'code_python',
+    } };
+}
+
+var PF = {
+    state: null,
+    tp: null,                 // the panel this block lives in (set by block())
+    refs: null,               // the block's own elements (UP-57: no gid race)
+
+    ensure: function () {
+        if (!this.state) this.state = { running: false, runId: null,
+                                        rows: [], aggregate: null, total: 0,
+                                        error: false };
+        return this.state;
+    },
+
+    // ---- paint ----------------------------------------------------------
+    block: function (tp) {
+        this.tp = tp;
+        var self = this;
+        this.ensure();
+        var wrap = el('div', 'bench-prefill card'); wrap.id = 'bench-tp-prefill';
+
+        var h = el('h3', 'bench-tp-section');
+        var hl = el('span', 'bench-label',
+            t('uplift.bench.prefill.section', 'Advanced prefill and parallelism'));
+        hl.dataset.i18n = 'uplift.bench.prefill.section';
+        hl.dataset.en = 'Advanced prefill and parallelism';
+        h.appendChild(hl);
+        wrap.appendChild(h);
+
+        // The honest scope line — see PF.sync for the external-mode relabel.
+        var hint = el('p', 'native-stub-note'); hint.id = 'bench-tp-pf-hint';
+        wrap.appendChild(hint);
+        this._hint = hint;
+
+        var row = el('div', 'bench-row');
+        var f1 = pfNum('bench-tp-pf-pp',
+            ta('uplift.bench.prefill.tokens', 'Prefill tokens'),
+            8192, PF_MIN_TOKENS, null, 1,
+            ta('uplift.bench.prefill.tokens_ph', 'at least 1,024'));
+        var f2 = pfNum('bench-tp-pf-parallel',
+            ta('uplift.bench.prefill.parallel', 'Parallel requests'),
+            4, 1, PF_MAX_PARALLEL, 1);
+        row.append(f1, f2);
+        var row2 = el('div', 'bench-row');
+        var f3 = pfNum('bench-tp-pf-stagger',
+            ta('uplift.bench.prefill.stagger', 'Stagger between starts (s)'),
+            0, 0, null, 0.05);
+        var f4 = pfNum('bench-tp-pf-tg',
+            ta('uplift.bench.prefill.generation', 'Generation tokens'),
+            32, 1, null, 1);
+        row2.append(f3, f4);
+        wrap.append(row, row2);
+
+        var acts = el('div', 'bench-actions');
+        var runBtn = el('button', 'btn',
+            t('uplift.bench.prefill.run', 'Run prefill probe'));
+        runBtn.type = 'button'; runBtn.id = 'bench-tp-pf-run';
+        runBtn.addEventListener('click', function () { self.start(); });
+        var cancelBtn = el('button', 'btn', t('bench.progress.cancel', 'Cancel'));
+        cancelBtn.type = 'button'; cancelBtn.id = 'bench-tp-pf-cancel';
+        cancelBtn.hidden = true;
+        cancelBtn.addEventListener('click', function () { self.cancel(); });
+        acts.append(runBtn, cancelBtn);
+        wrap.appendChild(acts);
+
+        // OWN results host: probe rows never mix into classic's two tables,
+        // and the panel keeps exactly ONE progress bar (the shared
+        // bench-tp-status box) for whichever run is live.
+        var results = el('div', 'bench-results'); results.id = 'bench-tp-pf-results';
+        wrap.appendChild(results);
+
+        // UP-57 doctrine: the form is NOT in the document yet while it is
+        // being built, so every wiring point here holds ELEMENT REFERENCES —
+        // a gid() lookup at this moment returns nothing in a real browser
+        // (and auto-creates a stray node in the test stub).
+        this.refs = { pp: gid0(f1), parallel: gid0(f2), stagger: gid0(f3),
+                      tg: gid0(f4), hint: hint, run: runBtn, cancel: cancelBtn,
+                      results: results };
+        // paint state, don't assume idle: a panel re-render while a probe
+        // runs must come back with the controls already dead (setButtons
+        // runs sync() internally)
+        this.setButtons();
+        return wrap;
+    },
+
+    // External-endpoint mode: this probe measures THIS machine's engine, so
+    // the whole block dies with the cache-off knobs (same syncCacheOff path,
+    // same 'local only' relabel contract).
+    sync: function (extOn) {
+        var s = this.ensure();
+        var r = this.refs || {};
+        var ids = ['pp', 'parallel', 'stagger', 'tg'];
+        for (var i = 0; i < ids.length; i++) {
+            // reference first, gid as the panel-rebuilt fallback
+            var e = r[ids[i]] || gid('bench-tp-pf-' + ids[i]);
+            if (e) e.disabled = !!extOn || s.running;
+        }
+        var btn = r.run || gid('bench-tp-pf-run');
+        if (btn && !s.running) btn.disabled = !!extOn;
+        var hint = r.hint || this._hint || gid('bench-tp-pf-hint');
+        if (!hint) return;
+        if (extOn) {
+            hint.textContent = t('uplift.bench.prefill.local_only',
+                'Local models only: this probe measures the engine running '
+                + 'in this server, not a remote endpoint.');
+            hint.dataset.i18n = 'uplift.bench.prefill.local_only';
+            hint.dataset.en = 'Local models only: this probe measures the '
+                + 'engine running in this server, not a remote endpoint.';
+        } else {
+            hint.textContent = t('uplift.bench.prefill.hint',
+                'Custom prompt sizes, request counts and start timing, '
+                + 'measured outside the standard benchmark. It refuses to '
+                + 'start while another benchmark holds the engine; a '
+                + 'benchmark started from the classic admin page during a '
+                + 'probe is not blocked, and both results would be wrong.');
+            hint.dataset.i18n = 'uplift.bench.prefill.hint';
+            hint.dataset.en = 'Custom prompt sizes, request counts and start '
+                + 'timing, measured outside the standard benchmark. It '
+                + 'refuses to start while another benchmark holds the '
+                + 'engine; a benchmark started from the classic admin page '
+                + 'during a probe is not blocked, and both results would be '
+                + 'wrong.';
+        }
+    },
+
+    collect: function () {
+        var r = this.refs || {};
+        function val(key, id) {
+            var e = r[key] || gid(id);
+            return e ? e.value : '';
+        }
+        return {
+            model_id: val(null, 'bench-tp-model'),
+            context_profile: (gid('bench-tp-profile') || {}).value || 'code_python',
+            prefill_tokens: val('pp', 'bench-tp-pf-pp'),
+            parallel: val('parallel', 'bench-tp-pf-parallel'),
+            stagger_seconds: val('stagger', 'bench-tp-pf-stagger'),
+            generation_tokens: val('tg', 'bench-tp-pf-tg'),
+        };
+    },
+
+    start: async function () {
+        var d = dom();
+        var s = this.ensure();
+        var r = pfBody(this.collect());
+        if (!r.ok) { d.toast(r.msg, 'error'); return; }   // pfBody resolved it
+        if (this.tp && this.tp.state && this.tp.state.running) {
+            d.toast(t('uplift.bench.prefill.panel_busy',
+                'The standard benchmark is running in this panel.'), 'error');
+            return;
+        }
+        s.running = true; s.rows = []; s.aggregate = null; s.error = false;
+        s.total = r.body.parallel;
+        this.setButtons();
+        var host = gid('bench-tp-pf-results');
+        if (host) host.replaceChildren();
+        var rel = busyLabel(gid('bench-tp-pf-run'));
+        try {
+            var out = await d.postJson(api() + '/bench/prefill/start', r.body);
+            rel();
+            s.runId = out.bench_id;
+            this.stream(out.bench_id);
+            setBar('bench-tp-status', 0);
+            this.status(t('uplift.bench.prefill.preparing',
+                'Preparing probe\u2026'));
+        } catch (e) {
+            rel();
+            s.running = false;
+            this.setButtons();
+            d.toast(errText(e), 'error');
+        }
+    },
+
+    stream: function (runId) {
+        var self = this;
+        pfStop();
+        if (!W().EventSource) { this.poll(runId); return; }
+        try {
+            _pfEs = new EventSource(api() + '/bench/prefill/'
+                + encodeURIComponent(runId) + '/stream');
+            _pfEs.onmessage = function (ev) {
+                var data;
+                try { data = JSON.parse(ev.data); } catch (_) { return; }
+                self.onEvent(data);
+            };
+            _pfEs.onerror = function () {
+                streamInterrupted('bench-tp-status');
+            };
+        } catch (e) { this.poll(runId); }
+    },
+
+    // Same 3s REST fallback the throughput panel uses when EventSource is
+    // unavailable (and the path every node harness exercises).
+    poll: function (runId) {
+        var self = this;
+        var d = dom();
+        if (_pfPoll) clearInterval(_pfPoll);
+        _pfPoll = setInterval(async function () {
+            try {
+                var r = await d.fetchJson(api() + '/bench/prefill/'
+                    + encodeURIComponent(runId) + '/results');
+                self.state.rows = r.results || [];
+                self.state.aggregate = r.aggregate || self.state.aggregate;
+                self.render();
+                if (r.status !== 'running') self.finish(r.status === 'error'
+                    ? r.error : null);
+            } catch (e) { /* keep polling */ }
+        }, 3000);
+    },
+
+    onEvent: function (ev) {
+        var s = this.ensure();
+        if (ev.type === 'progress') {
+            var pct = (ev.total ? (ev.current || 0) / ev.total : 0) * 100;
+            setBar('bench-tp-status', pct,
+                (ev.current || 0) + '/' + (ev.total || s.total));
+            this.status(ev.message || ev.phase || '');
+        } else if (ev.type === 'result') {
+            // SSE replays the log after a reconnect: replace by identity
+            var rows = s.rows, seen = false;
+            for (var i = 0; i < rows.length; i++) {
+                if (rows[i].index === ev.data.index) { rows[i] = ev.data; seen = true; break; }
+            }
+            if (!seen) rows.push(ev.data);
+            this.render();
+        } else if (ev.type === 'aggregate') {
+            s.aggregate = ev.data;
+            this.render();
+        } else if (ev.type === 'error') {
+            this.finish(String(ev.message || 'error'));
+        } else if (ev.type === 'done') {
+            this.finish();
+        }
+    },
+
+    status: function (msg, isError) {
+        var st = gid('bench-tp-status');     // the panel's ONE status box
+        if (!st) return;
+        st.textContent = msg || '';
+        st.classList.toggle('bench-status-error', !!isError);
+    },
+
+    setButtons: function () {
+        var s = this.ensure();
+        var r = this.refs || {};
+        var runBtn = r.run || gid('bench-tp-pf-run');
+        var cancelBtn = r.cancel || gid('bench-tp-pf-cancel');
+        if (cancelBtn) cancelBtn.hidden = !s.running;
+        if (runBtn) runBtn.disabled = s.running;
+        this.sync(this.tp ? this.tp.isExternal() : false);
+        // the classic Run button is disabled while a probe owns the engine —
+        // but only when the vanilla run is not driving it itself
+        var tpRun = gid('bench-tp-run');
+        if (tpRun && !(this.tp && this.tp.state && this.tp.state.running))
+            tpRun.disabled = s.running;
+    },
+
+    render: function () {
+        var host = (this.refs && this.refs.results) || gid('bench-tp-pf-results');
+        if (!host) return;
+        var s = this.ensure();
+        if (!s.rows.length && !s.aggregate) { host.replaceChildren(); return; }
+        var kids = [];
+        if (s.aggregate) kids = kids.concat(this.summaryNodes(s.aggregate));
+        if (s.rows.length) {
+            var head = el('div', 'bench-tp-section');
+            var lab = el('span', 'bench-label',
+                t('uplift.bench.prefill.per_request', 'Per request'));
+            lab.dataset.i18n = 'uplift.bench.prefill.per_request';
+            lab.dataset.en = 'Per request';
+            head.appendChild(lab);
+            kids.push(head);
+            kids.push(simpleTable([
+                ['index', '#', function (v) { return String(Number(v) + 1); }],
+                ['start_offset_s', t('uplift.bench.prefill.col_start', 'Start (s)'),
+                    function (v) { return fmtNum(v, 2); }, null,
+                    { k: 'uplift.bench.prefill.col_start', en: 'Start (s)' }],
+                ['ttft_ms', t('uplift.bench.prefill.col_ttft', 'TTFT (ms)'),
+                    function (v) { return fmtNum(v, 1); }, null,
+                    { k: 'uplift.bench.prefill.col_ttft', en: 'TTFT (ms)' }],
+                ['processing_tps', t('uplift.bench.prefill.col_prefill', 'Prefill (tok/s)'),
+                    function (v) { return fmtNum(v, 1); }, null,
+                    { k: 'uplift.bench.prefill.col_prefill', en: 'Prefill (tok/s)' }],
+                ['gen_tps', t('uplift.bench.prefill.col_decode', 'Decode (tok/s)'),
+                    function (v) { return fmtNum(v, 1); }, null,
+                    { k: 'uplift.bench.prefill.col_decode', en: 'Decode (tok/s)' }],
+                ['completion_tokens', t('uplift.bench.prefill.col_generated', 'Generated'),
+                    function (v) { return v == null ? '\u2014' : String(v); }, null,
+                    { k: 'uplift.bench.prefill.col_generated', en: 'Generated' }],
+                ['e2e_latency_s', t('uplift.bench.prefill.col_e2e', 'Total (s)'),
+                    function (v) { return fmtNum(v, 3); }, null,
+                    { k: 'uplift.bench.prefill.col_e2e', en: 'Total (s)' }],
+            ], s.rows.slice().sort(function (a, b) { return a.index - b.index; }),
+                'tp-table'));
+        }
+        host.replaceChildren.apply(host, kids);
+    },
+
+    // The wave is what the user asked for (parallel + stagger), so it leads.
+    // kv rows, not a table: one column of numbers with labels reads better
+    // and reuses the context panel's row markup.
+    summaryNodes: function (agg) {
+        var pairs = [
+            [ta('uplift.bench.prefill.sum_requests', 'Requests'),
+                String(agg.requests)],
+            [ta('uplift.bench.prefill.sum_prefill', 'Combined prefill (tok/s)'),
+                fmtNum(agg.combined_prefill_tps, 1)],
+            [ta('uplift.bench.prefill.sum_decode', 'Combined decode (tok/s)'),
+                fmtNum(agg.combined_decode_tps, 1)],
+            [ta('uplift.bench.prefill.sum_wall', 'Total wall time (s)'),
+                fmtNum(agg.wall_time_s, 3)],
+            [ta('uplift.bench.prefill.sum_ttft_avg', 'Average TTFT (ms)'),
+                fmtNum(agg.avg_ttft_ms, 1)],
+            [ta('uplift.bench.prefill.sum_ttft_max', 'Slowest TTFT (ms)'),
+                fmtNum(agg.max_ttft_ms, 1)],
+        ];
+        var out = [];
+        var head = el('div', 'bench-tp-section');
+        var lab = el('span', 'bench-label',
+            t('uplift.bench.prefill.summary', 'Probe result'));
+        lab.dataset.i18n = 'uplift.bench.prefill.summary';
+        lab.dataset.en = 'Probe result';
+        head.appendChild(lab);
+        out.push(head);
+        pairs.forEach(function (p) {
+            var tr = el('div', 'bench-result-row');
+            var l = el('span', 'bench-label', p[0].s);
+            l.dataset.i18n = p[0].k;
+            l.dataset.en = p[0].en;           // U59: late catalog repair
+            tr.append(l, el('span', null, p[1]));
+            out.push(tr);
+        });
+        return out;
+    },
+
+    finish: function (errorMessage) {
+        pfStop();
+        var s = this.ensure();
+        s.running = false;
+        this.setButtons();
+        if (errorMessage) {
+            s.error = true;
+            this.status(String(errorMessage), true);
+            return;
+        }
+        setBar('bench-tp-status', 100);
+        var st = gid('bench-tp-status');
+        if (st) {
+            st.textContent = (st.textContent ? st.textContent + ' \u2014 ' : '')
+                + t('uplift.bench.run_finished', 'finished');
+        }
+    },
+
+    cancel: async function () {
+        var s = this.ensure();
+        if (!s.runId) return;
+        var d = dom();
+        try {
+            await d.postJson(api() + '/bench/prefill/'
+                + encodeURIComponent(s.runId) + '/cancel', {});
+        } catch (e) { d.toast(errText(e), 'error'); }
+    },
+
+    // Reattach after a reload: the panel shows a running probe the same way
+    // it shows a running benchmark (TP.discover calls this).
+    discover: async function () {
+        var d = dom();
+        try {
+            var a = await d.fetchJson(api() + '/bench/prefill/active');
+            if (!a || !a.running) return;
+            var s = this.ensure();
+            s.running = true; s.runId = a.bench_id; s.total = a.parallel || 0;
+            this.setButtons();
+            this.stream(a.bench_id);
+            this.status(t('uplift.bench.prefill.already_running',
+                'A prefill probe is already running in this server.')
+                + ' (' + a.model_id + ')');
+        } catch (e) { /* idle is fine */ }
+    },
+};
+
 var TP = {
     state: null,
 
@@ -1779,6 +2251,7 @@ var TP = {
         panel.append(status, results, history);
         this.loadModels();
         this.discover();
+        PF.discover();   // the prefill lane has its own registry to reattach to
         this.loadHist();
     },
 
@@ -1911,6 +2384,10 @@ var TP = {
                 lb.dataset.i18nTitle = key;
                 lb.dataset.enTitle = en;
             }
+            // PREFILL (user item 4): the probe measures THIS engine, so the
+            // external toggle kills the whole block — same rule, same sync
+            // path, same 'local only' relabel contract.
+            PF.sync(extOn);
             syncGpuNote();   // UP-56: the note rides the same model/ext moves
         }
         syncCacheOff();
@@ -1949,7 +2426,10 @@ var TP = {
         cancelBtn.addEventListener('click', function () { self.cancel(); });
         actions.append(runBtn, cancelBtn);
 
-        f.append(row1, tpGpuNote, row2, row3, adv, actions);
+        // PREFILL (user item 4): a clearly separated sub-block BETWEEN the
+        // classic options and the actions row — the standard controls above
+        // are untouched and still post the classic payload.
+        f.append(row1, tpGpuNote, row2, row3, adv, PF.block(self), actions);
         // UP-57: gen-hint and model→cache-off sync bind to the elements
         // directly; the ext-row reveal moved into the checkbox's own
         // reference-bound listener above. The whole gid()+rAF block died
@@ -5269,6 +5749,12 @@ function stopStream() {
 
 return { mount: mount, isMounted: function () { return _mounted; },
          showSub: showSub, tp: TP,
+         // PREFILL (user item 4) test seams: the probe panel object + its
+         // pure body collector/validator (bounds mirrored from
+         // bench_prefill.py, so a node test can pin both ends of that
+         // contract without a DOM)
+         prefill: PF, _prefillBody: pfBody,
+         _prefillBounds: { MIN_TOKENS: PF_MIN_TOKENS, MAX_PARALLEL: PF_MAX_PARALLEL },
          // BENCHQ test seam: the global queue box (mount/render/remove are
          // pure DOM + one GET, so a node harness can replay payloads)
          BENCHQ: BENCHQ,

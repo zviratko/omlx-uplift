@@ -87,14 +87,14 @@ def _iso_to_epoch(s: str) -> float:
     return dt.timestamp()
 
 
-def _dev_service_info() -> dict:
-    """Single `brew services info omlx-dev --json` probe returning the raw
+def _dev_service_info(formula: str = "omlx-dev") -> dict:
+    """Single `brew services info <formula> --json` probe returning the raw
     service dict (or {} on failure). Replaces the back-to-back `brew
     services list` + `brew services info` pair in _dev_status_sync."""
     import subprocess
 
     try:
-        info = subprocess.run(["brew", "services", "info", "omlx-dev",
+        info = subprocess.run(["brew", "services", "info", formula,
                                "--json"], capture_output=True, text=True,
                               timeout=30)
         data = json.loads(info.stdout or "[]")
@@ -103,6 +103,26 @@ def _dev_service_info() -> dict:
     except (OSError, ValueError, subprocess.TimeoutExpired):
         pass
     return {}
+
+
+def _dev_service_up(formula: str) -> bool:
+    """Is this brew service up? Same verdict the omlx-dev line uses in
+    _dev_status_sync (test seam on cli._service_state first, otherwise the
+    brew `services info` probe) — spelled for any formula so the vanilla
+    `omlx` service can be reported next to the dev one.
+
+    Defensive by contract: this feeds a status POLL, so anything that goes
+    wrong (brew missing, timeout, unexpected output) reports False — 'we
+    cannot tell' must never read as 'running', and never as a 500."""
+    from .. import cli          # function-local: cli -> viewer -> router cycle
+    try:
+        if getattr(cli._service_state, "__module__", "") != "omlx_uplift.cli":
+            return cli._service_state(formula) in ("started", "running")
+        info = _dev_service_info(formula)
+        return bool(info.get("running")) or info.get("status") in (
+            "started", "running")
+    except Exception:
+        return False
 
 
 def _dev_service_age(cfg: dict, pid: Optional[int] = None):
@@ -258,6 +278,11 @@ def _dev_status_sync() -> dict:
     out["port"] = rt["port"]
     out["base_path"] = rt["base_path"]
     out["vanilla_port"] = devsrc.vanilla_port()
+    # The isolation strip names BOTH services on one line, so the vanilla
+    # service's own state rides along — same verdict helper as the dev
+    # service above, spelled for the `omlx` formula. Never raises: an
+    # unknown state prints as 'not running' (see _dev_service_up).
+    out["vanilla_service_running"] = _dev_service_up("omlx")
     out["vanilla_base_path"] = devsrc.vanilla_base()
     out["share_configured"] = devsrc.share_map(cfg)
     out["share_filenames"] = dict(devsrc.SHARE_FILENAMES)

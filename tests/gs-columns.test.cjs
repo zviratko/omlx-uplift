@@ -254,3 +254,51 @@ test('hint text and read-only values stay inside their own column', () => {
     assert.ok(gsys.includes("hfp.className = 'dim gs-roval'"),
         'the HF path readout carries the class the rule styles');
 });
+
+/* ---------------- 4. UX batch 2026-10-27 items 1-3 --------------------- */
+test('the sub-key GENERATE button is labelled, never an icon speck', () => {
+    // user item 1: '\u2684' (die face) at se-btn size was small and
+    // incomprehensible; classic's own affordance is a labelled control here.
+    assert.match(gsys, /mk\(t\('uplift\.gs\.sub_keys_generate'\), 'act gs-genkey'/);
+    assert.ok(!gsys.includes("'\\u2684'"), 'the die-face icon must not come back');
+    // UP-21 first-paint doctrine: the EN map carries the fallback AND reg()
+    // registers the node so a late catalog still repaints it.
+    assert.match(gsys, /'uplift\.gs\.sub_keys_generate': 'Generate'/);
+    assert.match(gsys, /reg\(genB, 'uplift\.gs\.sub_keys_generate', 'text'\)/);
+    // t()-style keys are invisible to test_locale_sync — self-pin catalogs.
+    const fs2 = require('fs'), path2 = require('path');
+    for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+        const d = JSON.parse(fs2.readFileSync(
+            path2.join(__dirname, '..', 'omlx_uplift', 'locales', loc + '.json'), 'utf8'));
+        const v = d['uplift.gs.sub_keys_generate'];
+        assert.ok(typeof v === 'string' && v.length, loc + ' lost uplift.gs.sub_keys_generate');
+        if (loc !== 'en') assert.notEqual(v, 'Generate', loc + ' untranslated');
+    }
+});
+test('Server Aliases accepts whitespace AND gets its own wider track', () => {
+    // user item 2: hostnames are whitespace-free, so spaces or new lines
+    // both separate list entries; prefill joins with spaces.
+    assert.match(gsys, /split\(\/\\s\+\/\)/);
+    assert.match(gsys, /'server_aliases'\) \|\| \[\]\)\.join\(' '\)/);
+    assert.match(gsys, /classList\.add\('gs-alias-row'\)/);
+    const row = cssRule('.urow.settings.gs-alias-row');
+    assert.ok(row.includes('minmax(0,62%)'), 'the alias row widens its value track');
+    const ta = cssRule('.urow.settings .gs-alias-ta');
+    for (const need of ['width: 100%', 'min-width: 0', 'min-height: 54px'])
+        assert.ok(ta.includes(need), 'alias textarea rule carries ' + need);
+});
+test('section-header icons survive the dark signage strip and hover', () => {
+    // user item 3: the header is background:var(--ink) with color:var(--bg);
+    // the old hover rule painted the icons var(--ink) — invisible on hover.
+    const hov = cssRule('.gs-box-title:hover .gs-copylink');
+    assert.ok(!hov.includes('var(--ink)'), 'ink-on-ink hover must not return');
+    assert.ok(hov.includes('color: inherit'), 'hover keeps the header foreground');
+    assert.ok(!cssRule('.gs-box-title .gs-copylink').includes('var(--dim)'));
+    // the disclosure is a rotating chip; JS only toggles the fold class now
+    assert.match(css, /content: '\\25BE'/);
+    assert.ok(cssRule('.gs-box-title .gs-advchev').includes('border-radius: 50%'),
+        'chevron is a bordered chip, not a floating glyph');
+    assert.match(css, /\.gs-box-title\.gs-adv-closed \.gs-advchev \{ transform: rotate\(-90deg\)/);
+    assert.ok(!gsys.includes('chev.textContent'),
+        'glyph must stay CSS-side so it cannot desync from the fold state');
+});

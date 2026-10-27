@@ -25,8 +25,8 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .base import api_router, engine_pool, require_admin
-from .. import (accuracy_engine, bench_engine, bench_history, bench_queue,
-                context_engine, decision_engine, embed_engine)
+from .. import (accuracy_engine, bench_engine, bench_history, bench_prefill,
+                bench_queue, context_engine, decision_engine, embed_engine)
 
 
 async def _queued_start(kind: str, body: dict, label: str = "") -> dict:
@@ -218,6 +218,46 @@ async def bench_context_start(request: Request, is_admin: bool = Depends(require
 @api_router.get("/bench/context/active")
 async def bench_context_active(is_admin: bool = Depends(require_admin)):
     return context_engine.context_active()
+
+
+# ---- uplift-native prefill / parallel probe (user item 4) -----------------
+# WHY THESE EXIST: classic's BenchmarkRequest validators pin the option sets
+# (VALID_PROMPT_LENGTHS / VALID_BATCH_SIZES) and its batch test hard-codes
+# pp1024 with an un-staggered asyncio.gather, so custom prefill length,
+# custom parallelism and staggered starts cannot ride /bench/start without
+# editing vanilla. bench_prefill.py owns that lane and reuses classic's
+# prompt builder, engine seam and metric math instead (reuse verdict in its
+# docstring). These are LITERALS and stay above the /bench/{run_id}/...
+# dynamics at the bottom of this file; they deliberately do NOT enter the
+# global bench queue — a probe is short, interactive and 409s when the
+# engine slot is taken (the ANE precedent: refuse, never auto-start).
+
+@api_router.post("/bench/prefill/start")
+async def bench_prefill_start(request: Request,
+                              is_admin: bool = Depends(require_admin)):
+    pool = engine_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Engine pool not initialized")
+    body = await request.json()
+    try:
+        # pure shape check FIRST: garbage is a 400, never a claim on the
+        # engine (embed_engine / decision_engine precedent)
+        bench_prefill.validate_body(body or {})
+    except bench_prefill.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
+        return await bench_prefill.start(body or {}, pool)
+    except bench_prefill.Conflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except bench_prefill.BadInput as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except bench_prefill.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@api_router.get("/bench/prefill/active")
+async def bench_prefill_active(is_admin: bool = Depends(require_admin)):
+    return bench_prefill.active_summary()
 
 
 # ---- ANE tuning (REPL-3) — LIVE; poll model (classic has no ANE SSE) ------
@@ -561,6 +601,44 @@ async def bench_context_results(bench_id: str, is_admin: bool = Depends(require_
     if run is None:
         raise HTTPException(status_code=404, detail=f"Benchmark not found: {bench_id}")
     return context_engine.context_results_payload(run)
+
+
+# ---- dynamic prefill probe shapes (user item 4; 4-segment, like the
+# context/ANE dynamics — their literals live up in the literal band) --------
+
+@api_router.get("/bench/prefill/{run_id}/stream")
+async def bench_prefill_stream(run_id: str, is_admin: bool = Depends(require_admin)):
+    run = bench_prefill.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Probe not found: {run_id}")
+    return StreamingResponse(
+        # our run object carries classic's events/cond/terminal model, so
+        # the ONE shared SSE generator serves this surface too.
+        bench_engine.event_stream(run),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"},
+    )
+
+
+@api_router.post("/bench/prefill/{run_id}/cancel")
+async def bench_prefill_cancel(run_id: str, is_admin: bool = Depends(require_admin)):
+    run = bench_prefill.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Probe not found: {run_id}")
+    try:
+        return await bench_prefill.cancel(run)
+    except bench_prefill.NotRunning as e:
+        raise HTTPException(status_code=400,
+                            detail=f"Probe is not running (status: {e.status})")
+
+
+@api_router.get("/bench/prefill/{run_id}/results")
+async def bench_prefill_results(run_id: str, is_admin: bool = Depends(require_admin)):
+    run = bench_prefill.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Probe not found: {run_id}")
+    return bench_prefill.results_payload(run)
 
 
 # ---- dynamic ANE tuning shapes (REPL-3; poll, no stream — classic parity) --

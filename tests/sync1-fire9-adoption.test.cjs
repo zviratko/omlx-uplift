@@ -65,7 +65,10 @@ test('UP-56 shape: both bench panels carry the note, tp honors the external gate
     assert.match(src, /\.replace\('\{watts\}', String\(w\)\)/);
     assert.match(src, /m\.settings && m\.settings\.gpu_power_limit_w/);
     // throughput panel: row position + external gating + loadModels stash
-    assert.match(src, /f\.append\(row1, tpGpuNote, row2, row3, adv, actions\)/);
+    // (PREFILL-4: the append list grew the probe block between `adv` and the
+    // actions row — the note's position between row1 and row2 is still what
+    // this pins, the added entry is deliberately in the pattern now)
+    assert.match(src, /f\.append\(row1, tpGpuNote, row2, row3, adv, PF\.block\(self\), actions\)/);
     assert.match(src, /self\.isExternal\(\) \? 0\s*\n\s*: benchGpuWatts\(self\.state && self\.state\.modelRows/);
     assert.match(src, /this\.state\.modelRows = usable;/);
     // model-change binding is on the ELEMENT REF (gid+rAF misses the async

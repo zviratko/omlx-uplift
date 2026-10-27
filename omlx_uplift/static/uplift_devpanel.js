@@ -24,6 +24,22 @@ function ptChip(text, cls, title) {
     if (title) s.title = title;
     return s;
 }
+/* LANE P (runtime line): one segment builder for the isolation meta row.
+   Every value it prints comes from /dev/status, so it goes in through
+   textContent — the row is never assembled as an HTML string. `—` keeps an
+   absent number from reading as a blank hole in the middle of a sentence. */
+function dvMeta(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    e.textContent = (text === null || text === undefined || text === '')
+        ? '—' : String(text);
+    return e;
+}
+/* HOME is a directory: exactly one trailing slash whatever the server sent
+   ('~/.omlx-dev' and '~/.omlx-dev/' both land as '~/.omlx-dev/'). */
+function dvHomePath(p) {
+    return String(p || '').replace(/\/+$/, '') + '/';
+}
 
 /* ============================================================================
    DEV-5 strip: omlx-dev build controls under the patch table. Every state
@@ -247,7 +263,7 @@ function renderDev() {
     shareBox.hidden = false;
     shareBox.innerHTML = '';
     const head = document.createElement('div');
-    head.className = 'pt-gate-row pt-gate-head';
+    head.className = 'pt-gate-row pt-gate-head dv-iso-head';
     const hs = document.createElement('span');
     hs.textContent = ptMsg('uplift.patches.dev_isolation', 'Isolation');
     head.append(hs);
@@ -261,24 +277,55 @@ function renderDev() {
         + 'the vanilla {v}/ file').replace('{v}', d.vanilla_base_path || '~/.omlx');
     isoIntro.append(isoIntroEl);
     shareBox.append(isoIntro);
+    // RUNTIME LINE (lane P, user 2026-10-27): the old single translated
+    // sentence ('port {p} · base {b} · vanilla port {v}…') buried the two
+    // facts an operator actually scans — WHICH service is up and ON WHICH
+    // PORT — inside one grey string. Each fact is now its own element with
+    // its own key, and the state words + port numbers carry .dv-meta-em so
+    // CSS can embolden them. Built with createElement/textContent only:
+    // every value here comes from /dev/status and must never be parsed as
+    // markup.
     const meta = document.createElement('div');
-    meta.className = 'pt-gate-row';
-    const m = document.createElement('span');
-    m.className = 'pt-detail';
+    meta.className = 'pt-gate-row dv-runtime';
+    const devUp = !!d.service_running;
+    const vanillaUp = !!d.vanilla_service_running;
     const clash = d.port === d.vanilla_port;
-    m.textContent = ptMsg('uplift.patches.dev_runtime',
-        'port {p} · base {b} · vanilla port {v}{c}{r}')
-        .replace('{p}', d.port).replace('{b}', d.base_path)
-        .replace('{v}', d.vanilla_port)
-        .replace('{c}', clash ? ptMsg('uplift.patches.dev_port_clash',
-            ' — SAME PORT AS VANILLA') : '')
-        .replace('{r}', d.service_running
-            ? ptMsg('uplift.patches.dev_service_on', ' · service running') : '');
-    meta.append(m);
+    meta.append(
+        dvMeta('b', 'dv-meta-em ' + (devUp ? 'dv-meta-on' : 'dv-meta-off'),
+               devUp ? ptMsg('uplift.patches.dev_state_running', 'RUNNING')
+                     : ptMsg('uplift.patches.dev_state_stopped', 'STOPPED')),
+        dvMeta('span', '', ptMsg('uplift.patches.dev_runtime_on_port', 'on port')),
+        dvMeta('b', 'dv-meta-em', d.port),
+        dvMeta('span', 'dv-meta-sep', '·'),                      // i18n-exempt
+        dvMeta('span', 'dv-meta-label',
+               ptMsg('uplift.patches.dev_runtime_home', 'HOME:')),
+        dvMeta('span', 'dv-meta-path', dvHomePath(d.base_path)),
+        dvMeta('span', 'dv-meta-sep', '·'),                      // i18n-exempt
+        dvMeta('span', 'dv-meta-label',
+               ptMsg('uplift.patches.dev_vanilla_label', 'VANILLA OMLX:')),
+        dvMeta('b', 'dv-meta-em ' + (vanillaUp ? 'dv-meta-on' : 'dv-meta-off'),
+               vanillaUp ? ptMsg('uplift.patches.dev_vanilla_running', 'running')
+                         : ptMsg('uplift.patches.dev_vanilla_stopped', 'not running')),
+        dvMeta('span', '', ptMsg('uplift.patches.dev_runtime_on_port', 'on port')),
+        dvMeta('b', 'dv-meta-em', d.vanilla_port));
+    if (clash) {
+        // the one case where sharing a port is a fault, kept as its own
+        // loud segment (leading '—'/spaces come from the catalog: trim)
+        meta.append(dvMeta('span', 'dv-meta-sep', '·'),           // i18n-exempt
+                    dvMeta('b', 'dv-meta-clash',
+                           ptMsg('uplift.patches.dev_port_clash',
+                                 ' — SAME PORT AS VANILLA')
+                           .replace(/^[\s—–-]+/, '')));
+    }
     shareBox.append(meta);
+    // LANE P: the per-file toggles read as a list of settings, not as
+    // gate rows; two columns so a machine with 6 isolated files stays
+    // scannable instead of a 6-row ladder.
+    const isoGrid = document.createElement('div');
+    isoGrid.className = 'dv-iso-grid';
     for (const [name, info] of Object.entries(d.share_realized || {})) {
         const row = document.createElement('div');
-        row.className = 'pt-gate-row';
+        row.className = 'pt-gate-row dv-iso-item';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         // ISOLATION polarity: checked = private copy under the dev base.
@@ -316,8 +363,9 @@ function renderDev() {
                 ptMsg('uplift.patches.dev_share_mismatch_hint',
                     'the file on disk does not match the setting — run '
                     + 'omlx-uplift dev reconfigure')));
-        shareBox.append(row);
+        isoGrid.append(row);
     }
+    if (isoGrid.children.length) shareBox.append(isoGrid);
 }
 
 /* --- build-base picker (PAT-TABLE: it rides the table's DEV header) ----

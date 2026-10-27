@@ -230,6 +230,19 @@ def _busy_accuracy() -> Optional[bool]:
     return bool(st.get("running")) or bool(st.get("queue"))
 
 
+def _busy_prefill() -> Optional[bool]:
+    """The uplift-native prefill probe (bench_prefill) holds the same engine
+    slot as every other bench and has NO classic-side registry. Lazy module
+    lookup like the other probes: without omlx nothing can be running."""
+    m = _mod("bench_prefill")
+    if m is None:
+        return None
+    try:
+        return m.get_active_run() is not None
+    except Exception:
+        return None
+
+
 BUSY: dict[str, Callable[[], Optional[bool]]] = {
     "decision": _busy_decision,
     "embed": _busy_embed,
@@ -237,6 +250,13 @@ BUSY: dict[str, Callable[[], Optional[bool]]] = {
     "context": _busy_context,
     "ane": _busy_ane,
     "accuracy": _busy_accuracy,
+    # PREFILL-4 (user item 4): the uplift-native prefill probe owns the
+    # same single engine slot but lives in NO classic registry, so classic
+    # cannot be told about it without editing vanilla. Registering it HERE
+    # is the uplift-side half: while a probe runs, every native bench start
+    # goes into the FIFO instead of onto the engine. (Probe-only, like
+    # 'ane' — it is never itself a queue member.)
+    "prefill": _busy_prefill,
 }
 
 # qid-independent kind -> probe key (ane is probe-only, never queued)
@@ -247,6 +267,7 @@ _REASONS = {
     "throughput": "a throughput benchmark is running",
     "context": "a context probe is running",
     "ane": "an ANE tuning is running",
+    "prefill": "an uplift prefill/parallel probe is running",
     "accuracy": "the accuracy benchmark queue is busy",
 }
 

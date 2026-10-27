@@ -84,7 +84,7 @@ const GS_LABELS = {
         port: 'Port', log_level: 'Log level',
         auto_start: 'Start on Login', auto_start_hint: 'Launch oMLX automatically when this Mac signs in.',
         aliases: 'Server Aliases',
-        aliases_hint: 'Names this server answers to (one per line).',
+        aliases_hint: 'Names this server answers to, separated by spaces or new lines.',
         levels: [['error','Error'],['warning','Warning'],['info','Info'],
                  ['debug','Debug'],['trace','Trace']] },
     model: { dirs: 'Model Directories', ph_primary: '/path/to/models',
@@ -1858,14 +1858,19 @@ const GS_SPEC = [
         k: 'sel', field: 'log_level', flat: 'log_level', opts: 'server.levels'}},
     {sec: 'server', lab: 'server.auto_start', hint: 'server.auto_start_hint', ctl: {
         k: 'tog', field: 'auto_start_on_launch', flat: 'auto_start_on_launch'}},
-    {x: (body, L) => {   // one alias per line (classic editor keeps a list; same payload)
+    {x: (body, L) => {   // classic editor keeps a list; same payload. Aliases are
+        // hostnames, so ANY whitespace separates them (user 2026-10-27: the box
+        // was narrow and 'one per line' read as the only way in).
         const aliasInp = document.createElement('textarea');
         aliasInp.rows = 2; aliasInp.spellcheck = false;
-        aliasInp.value = (gsGet('server', 'server_aliases') || []).join('\n');
+        aliasInp.classList.add('gs-alias-ta');
+        aliasInp.value = (gsGet('server', 'server_aliases') || []).join(' ');
         aliasInp.onchange = () => gsQueueSave('server_aliases',
-            aliasInp.value.split('\n').map(s => s.trim()).filter(Boolean));
-        body.append(gsRow('server', L.server.aliases, L.server.aliases_hint, aliasInp,
-            { flat: 'server_aliases' }));
+            aliasInp.value.split(/\s+/).map(s => s.trim()).filter(Boolean));
+        const aliasRow = gsRow('server', L.server.aliases, L.server.aliases_hint, aliasInp,
+            { flat: 'server_aliases' });
+        aliasRow.classList.add('gs-alias-row');
+        body.append(aliasRow);
     }},
 
     {t: 'Auth'},
@@ -1916,6 +1921,7 @@ const GS_SPEC = [
             'settings.auth.sub_keys_name_placeholder': 'Name (optional)',
             'settings.auth.sub_keys_key_placeholder': 'API key value',
             'settings.auth.sub_keys_generate_tooltip': 'Generate random key',
+            'uplift.gs.sub_keys_generate': 'Generate',
             'js.error.api_key_min_length': 'API key must be at least 4 characters.',
             'js.error.api_key_no_whitespace': 'API key must not contain whitespace.',
         };
@@ -1946,12 +1952,17 @@ const GS_SPEC = [
         keyIn.placeholder = t('settings.auth.sub_keys_key_placeholder');
         reg(keyIn, 'settings.auth.sub_keys_key_placeholder', 'ph');
         const err = document.createElement('span'); err.className = 'gs-err';
-        const genB = mk('\u2684', 'act', () => {
+        // USER 2026-10-27 (item 1): the die-face glyph ('⚄') at se-btn size
+        // read as a speck — an unreadable icon where classic uses a labelled
+        // affordance. A plain text button is the honest fix; the tooltip
+        // keeps the classic string.
+        const genB = mk(t('uplift.gs.sub_keys_generate'), 'act gs-genkey', () => {
             const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
             keyIn.value = 'omlx-' + Array.from(crypto.getRandomValues(new Uint8Array(16)))
                 .map(b => chars[b % chars.length]).join('');
         }, t('settings.auth.sub_keys_generate_tooltip'));
         reg(genB, 'settings.auth.sub_keys_generate_tooltip', 'title');
+        reg(genB, 'uplift.gs.sub_keys_generate', 'text');
         const closeForm = () => { form.hidden = true; keyIn.value = nameIn.value = ''; err.textContent = ''; };
         const createB = mk(t('settings.auth.sub_keys_create'), 'act', () => {
             err.textContent = '';
@@ -2547,7 +2558,10 @@ function renderGlobalSettings() {
                 const collapsed = gsTab === 'all' && !gsAdvOpen();
                 if (bbody) bbody.hidden = collapsed;
                 h.classList.toggle('gs-adv-closed', collapsed);
-                chev.textContent = collapsed ? '\u25B8' : '\u25BE';   // ▸ / ▾
+                // USER 2026-10-27 (item 3): the glyph + its flip moved to CSS
+                // (::before content + .gs-adv-closed rotation) so the chevron
+                // reads as a disclosure control and cannot desync from the
+                // fold state; JS only toggles the class now.
                 h.title = collapsed
                     ? C.tf('uplift.gs.adv.open', 'Expand Advanced settings')
                     : C.tf('uplift.gs.adv.close', 'Collapse Advanced settings');

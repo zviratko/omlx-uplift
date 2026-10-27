@@ -37,6 +37,15 @@ TECH_WORDS = {
     # SYNC-1 (upstream f27ba3d): 'Claude Desktop' is the app's product name —
     # upstream carries it verbatim in all 10 locales (status.claude_code.desktop)
     "Desktop",
+    # UX BATCH 2026-10-27 (user-dictated signage on the Patches card):
+    # 'OMLX-DEV BUILD', 'RUNTIME PATCH', 'AUTO-UPDATE', 'VANILLA OMLX:' and
+    # 'HOME:' are header labels the user named himself — carried verbatim in
+    # every locale like the DEV/VANILLA/AUTO acronyms they replace.
+    "OMLX", "OMLX-DEV", "BUILD", "RUNTIME", "PATCH", "VANILLA", "AUTO-UPDATE",
+    "HOME",
+    # bench column headers: metric acronyms/units carry no prose (the classic
+    # bench tables show 'TTFT'/'pp'/'tg' untranslated)
+    "TTFT", "Prefill", "Decode", "Total", "Start", "ms", "s",
 }
 
 

@@ -121,6 +121,11 @@ NAT3_ROUTES = [
     ("POST", "/bench/accuracy/cancel"),
     ("POST", "/bench/context/start"),
     ("GET", "/bench/context/active"),
+    # PREFILL-4 (user item 4): the uplift-native prefill/parallel probe's
+    # literals sit with the other /bench/ literals — a 3-segment dynamic
+    # must never resolve them.
+    ("POST", "/bench/prefill/start"),
+    ("GET", "/bench/prefill/active"),
     ("POST", "/bench/ane-tune/start"),
     ("GET", "/bench/ane-tune/results"),
     ("POST", "/bench/ane-tune/{tuning_id}/apply"),
@@ -158,6 +163,10 @@ NAT3_ROUTES = [
     ("GET", "/bench/context/{bench_id}/stream"),
     ("POST", "/bench/context/{bench_id}/cancel"),
     ("GET", "/bench/context/{bench_id}/results"),
+    # PREFILL-4 dynamics: 4-segment, same band and same immunity argument.
+    ("GET", "/bench/prefill/{run_id}/stream"),
+    ("POST", "/bench/prefill/{run_id}/cancel"),
+    ("GET", "/bench/prefill/{run_id}/results"),
     ("GET", "/bench/ane-tune/{tuning_id}/results"),
     ("POST", "/bench/ane-tune/{tuning_id}/cancel"),
     ("GET", "/bench/accuracy/{bench_id}/stream"),
