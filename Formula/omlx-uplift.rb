@@ -41,7 +41,7 @@ class OmlxUplift < Formula
       begin
         out = Utils.safe_popen_read(py, "-c",
           "import sys; print('%d.%d' % sys.version_info[:2])").strip
-        return Regexp.last_match(1) if out =~ /\A3\.(1[0-9])\z/
+        return out if out =~ /\A3\.1[0-9]\z/
       rescue ErrorReadingError
       end
     end
@@ -57,8 +57,8 @@ class OmlxUplift < Formula
     # ONE file — a .pth that bootstraps sys.path to this keg's venv and
     # imports the autopatch. Nothing is copied into the omlx keg.
     minor = engine_python_minor
-    venv_py = Formula['python@' + minor].opt_bin/'python' + minor
-    odie 'no brew python@' + minor + ' for engine auto-follow' unless venv_py.exist?
+    venv_py = Formula["python@#{minor}"].opt_bin/"python#{minor}"
+    odie "no brew python@#{minor} for engine auto-follow" unless venv_py.exist?
     system venv_py, "-m", "venv", libexec
     # REL-1: STABLE builds pin the exact dependency set the release was
     # tested with (constraints-stable.txt, shipped in the repo); --HEAD
