@@ -1863,7 +1863,8 @@ var PF = {
     ensure: function () {
         if (!this.state) this.state = { running: false, runId: null,
                                         rows: [], aggregate: null, total: 0,
-                                        error: false };
+                                        reqState: {}, error: false };
+        if (!this.state.reqState) this.state.reqState = {};
         return this.state;
     },
 
@@ -2009,6 +2010,7 @@ var PF = {
             return;
         }
         s.running = true; s.rows = []; s.aggregate = null; s.error = false;
+        s.reqState = {};
         s.total = r.body.parallel;
         this.setButtons();
         var host = gid('bench-tp-pf-results');
@@ -2060,6 +2062,10 @@ var PF = {
                     + encodeURIComponent(runId) + '/results');
                 self.state.rows = r.results || [];
                 self.state.aggregate = r.aggregate || self.state.aggregate;
+                if (r.requests) {
+                    self.state.reqState = {};
+                    r.requests.forEach(function (q) { self.state.reqState[q.index] = q; });
+                }
                 self.render();
                 if (r.status !== 'running') self.finish(r.status === 'error'
                     ? r.error : null);
@@ -2081,6 +2087,10 @@ var PF = {
                 if (rows[i].index === ev.data.index) { rows[i] = ev.data; seen = true; break; }
             }
             if (!seen) rows.push(ev.data);
+            this.render();
+        } else if (ev.type === 'request') {
+            // live per-request line (user Q3)
+            s.reqState[ev.data.index] = ev.data;
             this.render();
         } else if (ev.type === 'aggregate') {
             s.aggregate = ev.data;
@@ -2118,7 +2128,11 @@ var PF = {
         var host = (this.refs && this.refs.results) || gid('bench-tp-pf-results');
         if (!host) return;
         var s = this.ensure();
-        if (!s.rows.length && !s.aggregate) { host.replaceChildren(); return; }
+        var live = this.reqNodes();          // one line per request, from t=0
+        if (!s.rows.length && !s.aggregate) {
+            host.replaceChildren.apply(host, live);   // container-clear only;
+            return;                                   // strings via textContent
+        }
         var kids = [];
         if (s.aggregate) kids = kids.concat(this.summaryNodes(s.aggregate));
         if (s.rows.length) {
@@ -2156,7 +2170,54 @@ var PF = {
             ], s.rows.slice().sort(function (a, b) { return a.index - b.index; }),
                 'tp-table'));
         }
+        // while the wave is live the activity list rides under the table:
+        // finished rows above, still-running requests in plain sight below
+        if (s.running) kids = kids.concat(live);
         host.replaceChildren.apply(host, kids);
+    },
+
+    // One line per request (user Q3): '#k - phase - live detail'. Lines
+    // exist from the moment START is pressed - the queue is visible while
+    // the model loads, the prefill counts stream while it prefills.
+    reqNodes: function () {
+        var s = this.ensure();
+        var n = s.total || 0;
+        for (var k in s.reqState) {
+            if (Number(k) + 1 > n) n = Number(k) + 1;
+        }
+        if (!n) return [];
+        var out = [];
+        var head = el('div', 'bench-tp-section');
+        var lab = el('span', 'bench-label',
+            t('uplift.bench.prefill.req_lines', 'Request activity'));
+        lab.dataset.i18n = 'uplift.bench.prefill.req_lines';
+        lab.dataset.en = 'Request activity';
+        head.appendChild(lab);
+        out.push(head);
+        for (var i = 0; i < n; i++) {
+            var q = s.reqState[i] || { phase: 'pending' };
+            var word, detail = '';
+            if (q.phase === 'pending') {
+                word = t('uplift.bench.prefill.req_queued', 'Queued');
+            } else if (q.phase === 'submitted') {
+                word = t('uplift.bench.prefill.req_submitted', 'Submitted');
+                if (q.submit_s != null) detail = ' +' + Number(q.submit_s).toFixed(2) + ' s';
+            } else if (q.phase === 'prefilling') {
+                word = t('uplift.bench.prefill.req_prefilling', 'Prefilling');
+                detail = ' ' + Number(q.processed || 0).toLocaleString()
+                    + '/' + Number(q.total || 0).toLocaleString();
+            } else if (q.phase === 'generating') {
+                word = t('uplift.bench.prefill.req_generating', 'Generating');
+                detail = ' ' + Number(q.completion || 0) + ' tok';
+            } else {
+                word = t('uplift.bench.prefill.req_done', 'Done');
+                detail = ' ' + Number(q.completion || 0) + ' tok';
+            }
+            var row = el('div', 'bench-pf-req');
+            row.textContent = '#' + (i + 1) + ' \u00b7 ' + word + detail;
+            out.push(row);
+        }
+        return out;
     },
 
     // The wave is what the user asked for (parallel + stagger), so it leads.
@@ -2177,6 +2238,23 @@ var PF = {
             [ta('uplift.bench.prefill.sum_ttft_max', 'Slowest TTFT (ms)'),
                 fmtNum(agg.max_ttft_ms, 1)],
         ];
+        // measured all-decoding rate (user Q2: the classic-style combined
+        // number is comparable with classic; THIS is the wave's real decode)
+        if (agg.steady_decode_tps != null) pairs.push(
+            [ta('uplift.bench.prefill.sum_decode_steady',
+                'Steady decode (tok/s)'),
+                fmtNum(agg.steady_decode_tps, 1)]);
+        var mem = agg.memory || {};
+        if (mem.peak_gpu_bytes) pairs.push(
+            [ta('uplift.bench.prefill.mem_gpu', 'Peak GPU memory'),
+                fmtMemory(mem.peak_gpu_bytes)]);
+        if (mem.peak_process_bytes) pairs.push(
+            [ta('uplift.bench.prefill.mem_proc', 'Peak process memory'),
+                fmtMemory(mem.peak_process_bytes)]);
+        if (mem.guard_headroom_bytes) pairs.push(
+            [ta('uplift.bench.prefill.mem_headroom',
+                'Guard headroom at start'),
+                fmtMemory(mem.guard_headroom_bytes)]);
         var out = [];
         var head = el('div', 'bench-tp-section');
         var lab = el('span', 'bench-label',

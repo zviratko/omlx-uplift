@@ -63,6 +63,23 @@ What pins CANNOT lift: the preflight memory guard (physical limits) and a
 model class that forces serial decode inside `_effective_max_num_seqs`
 (llama4 / overflow recovery) — those still shape the wave honestly.
 
+LIVE REPORT (user follow-ups 2-4, 2026-10-27):
+- one line per request, as a 'request' event and in the results payload:
+  pending -> submitted -> prefilling (processed/total read from the engine's
+  PrefillProgressTracker, which the scheduler updates per chunk) ->
+  generating (token counts from our own stream) -> done.
+- a MEASURED steady-state decode rate (`steady_decode_tps`): the watcher
+  samples total completion every WATCH_S, and the rate is computed over the
+  window where every request decodes together. classic's combined figure is
+  kept byte-for-byte comparable — but at long prefills with a stagger it is
+  an approximation, and reading it against classic's pp1024 batch rows is
+  comparing different physics (short context + clean decode vs long context
+  + sibling-prefill contention), which is the ~4x gap the user saw.
+- a `memory` block in the aggregate: peak device memory over the wave
+  (classic's own reset/get peak method), peak process footprint, and the
+  scheduler's guard limit/usage/headroom at wave start — what was used AND
+  what was available. Anything unmeasurable stays ABSENT, never zero.
+
 NO-CEILING DOCTRINE (U50: when lifting a bound, hunt every clamp so the UI
 never promises more than the runner does): `prefill_tokens` accepts ANY
 whole number >= 1024 and `parallel` any whole number >= 1; the UI inputs
@@ -116,6 +133,10 @@ MIN_PREFILL_TOKENS = 1024   # classic's own smallest ladder rung: below it a
 MIN_PARALLEL = 1
 MIN_GENERATION_TOKENS = 1
 MAX_RUNS_KEPT = 10
+# Watcher cadence for the live per-request report (user Q3 2026-10-27): the
+# engine's prefill tracker updates once per chunk, so 1 s reads everything it
+# knows without spamming the SSE. Tests shrink this constant, never the code.
+WATCH_S = 1.0
 # Absolute cap on ONE wave's requests. Not a product bound on 'longer
 # prefill with custom parallelism' — it exists so a typo cannot open 100k
 # concurrent add_request calls on a live server. 256 is already 32x the
@@ -296,9 +317,18 @@ class PrefillRun:
     message: str = ""
     submitted: int = 0             # requests that reached the engine (wave bar
                                    # counts FINISHES; this counts SUBMITS)
+    # Live per-request report (user Q3): index -> public state dict
+    # {index, phase, submit_s, processed, total, completion}. The watcher
+    # owns prefill-side updates (the engine's tracker), the request consumer
+    # owns phase changes it can see in its own stream.
+    req_state: "dict[int, dict]" = field(default_factory=dict)
+    # (perf_counter, summed completion tokens) samples taken by the watcher —
+    # what the steady-state decode rate is MEASURED from (user Q2).
+    dec_samples: list = field(default_factory=list)
     results: list = field(default_factory=list)
     aggregate: Optional[dict] = None
     error_message: str = ""
+    peak_process_bytes: int = 0
     created_at: float = field(default_factory=time.time)
 
 
@@ -357,6 +387,113 @@ async def _progress(run: PrefillRun, phase: str, message: str,
     run.progress = round(done / total, 4) if total else 0.0
     await _send_event(run, {"type": "progress", "phase": phase,
                             "message": message, "current": done, "total": total})
+
+
+# ---------------------------------------------------------------------------
+# live per-request report (user Q3: 'each request startup on a new line,
+# maybe the state of it, phase (prefill/generation)')
+# ---------------------------------------------------------------------------
+
+def _state(run: PrefillRun, index: int) -> dict:
+    return run.req_state.setdefault(index, {"index": index, "phase": "pending",
+                                            "submit_s": None,
+                                            "processed": 0, "total": 0,
+                                            "completion": 0})
+
+
+async def _emit_state(run: PrefillRun, index: int) -> None:
+    await _send_event(run, {"type": "request",
+                            "data": _public_state(run.req_state[index])})
+
+
+def _public_state(state: dict) -> dict:
+    """Wire shape: the scheduler request id is bookkeeping, not UI."""
+    return {k: v for k, v in state.items() if k != "rid"}
+
+
+def _tracker():
+    """The engine's process-wide prefill tracker, or None (CI, or vanilla
+    without the module). Read-only here: the scheduler owns its writes."""
+    try:
+        from omlx.prefill_progress import get_prefill_tracker
+        return get_prefill_tracker()
+    except Exception:
+        return None
+
+
+def _footprint():
+    try:
+        from omlx.utils.proc_memory import get_phys_footprint
+        return int(get_phys_footprint())
+    except Exception:
+        return 0
+
+
+async def _watch_wave(run: PrefillRun) -> None:
+    """Tick every WATCH_S while the wave lives: fold the engine's prefill
+    tracker into the per-request states, sample the decode total (the
+    steady-state rate is MEASURED from these, not inferred from classic's
+    window arithmetic), and track the process footprint peak. Emits a
+    'request' event only when a line actually changes."""
+    tracker = _tracker()
+    peak = {"process": _footprint()}
+    try:
+        while True:
+            states = list(run.req_state.values())
+            if states and all(s["phase"] == "done" for s in states):
+                break
+            if tracker is not None:
+                for s in list(run.req_state.values()):
+                    if s["phase"] not in ("submitted", "prefilling"):
+                        continue
+                    try:
+                        entry = tracker.get(s.get("rid") or "")
+                    except Exception:
+                        entry = None
+                    if entry:
+                        # entries auto-remove at prefill end: presence here
+                        # means the engine is still working through the prompt
+                        before = (s["phase"], s["processed"])
+                        s["phase"] = "prefilling"
+                        s["processed"] = int(entry.get("processed") or 0)
+                        s["total"] = int(entry.get("total") or 0)
+                        if before != (s["phase"], s["processed"]):
+                            await _emit_state(run, s["index"])
+            total_completion = sum(s["completion"]
+                                   for s in run.req_state.values())
+            run.dec_samples.append((time.perf_counter(), total_completion))
+            fp = _footprint()
+            if fp > peak["process"]:
+                peak["process"] = fp
+            await asyncio.sleep(WATCH_S)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        run.peak_process_bytes = peak["process"]
+
+
+def steady_decode_tps(samples: list, lo: float, hi: float,
+                      min_tokens: int = 16):
+    """Combined decode tok/s MEASURED over [lo, hi] (perf_counter seconds):
+    every watcher interval whose midpoint falls in the window contributes its
+    real token delta / its real seconds. The window the caller passes is the
+    interval where ALL requests decode together (after the last first-token,
+    before the first finish), so unlike classic's combined figure this is
+    neither inflated by tokens decoded before the window nor diluted by
+    sibling prefill inside it. None when the window is too short or too
+    empty to state a rate (classic's _MIN_TG_TOKENS honesty, applied to the
+    measurement itself)."""
+    tok = 0.0
+    secs = 0.0
+    for (t0, c0), (t1, c1) in zip(samples, samples[1:]):
+        mid = (t0 + t1) / 2.0
+        if lo <= mid <= hi and t1 > t0:
+            tok += max(0.0, c1 - c0)
+            secs += t1 - t0
+    if secs <= 0 or tok < max(1, min_tokens):
+        return None
+    return {"steady_decode_tps": round(tok / secs, 1),
+            "steady_window_s": round(secs, 3)}
 
 
 # ---------------------------------------------------------------------------
@@ -583,6 +720,10 @@ async def _one_request(run: PrefillRun, B: Any, core: Any, prompt: list,
                                         skip_cache_store=True)
     if record:
         run.submitted += 1
+        st = _state(run, index)
+        st.update(phase="submitted", rid=request_id,
+                  submit_s=round(submit - wave_t0, 3) if wave_t0 else None)
+        await _emit_state(run, index)
         await _send_event(run, {
             "type": "progress", "phase": "probe",
             "message": (f"Request {index + 1}/{run.request.parallel} "
@@ -596,8 +737,18 @@ async def _one_request(run: PrefillRun, B: Any, core: Any, prompt: list,
     reported_prompt = 0
     async for output in core.stream_outputs(request_id):
         comp = int(getattr(output, "completion_tokens", 0) or 0)
+        if record:
+            run.req_state[index]["completion"] = comp
         if first is None and comp > prev:
             first = time.perf_counter()
+            if record:
+                # the tracker drops its entry at prefill end; say so loudly
+                # from our own stream, where we SEE the first token
+                st = run.req_state[index]
+                if st["phase"] != "generating":
+                    st["phase"] = "generating"
+                    st["processed"] = st["total"]
+                    await _emit_state(run, index)
         prev = comp
         if getattr(output, "finished", False):
             completion = comp
@@ -640,6 +791,11 @@ async def _one_request(run: PrefillRun, B: Any, core: Any, prompt: list,
     })
     if not record:
         return row
+    st = run.req_state[index]
+    st["phase"] = "done"
+    st["completion"] = completion
+    st["processed"] = st["total"] = row.get("prompt_tokens") or st["total"]
+    await _emit_state(run, index)
     run.results.append(row)
     done = len(run.results)
     await _progress(run, "probe",
@@ -656,11 +812,50 @@ def _public_row(row: dict) -> dict:
     return {k: v for k, v in row.items() if not k.endswith("_abs")}
 
 
+def _memory_guard(core: Any) -> dict:
+    """The scheduler's OWN memory-guard view at wave start: the soft limit
+    and the cached current usage (event-loop-safe: no mx refresh). This is
+    the pair that decides whether an N x pp wave fits, so the panel can say
+    what was AVAILABLE, not only what was used."""
+    sched, _cfg, _ex = _pin_targets(core)
+    out = {}
+    if sched is None:
+        return out
+    try:
+        limit = int(getattr(sched, "_memory_limit_bytes", 0) or 0)
+        if limit > 0:
+            out["guard_limit_bytes"] = limit
+    except Exception:
+        pass
+    try:
+        used = int(sched._current_usage_bytes(refresh_mlx_active=False))
+        if used > 0:
+            out["guard_usage_bytes"] = used
+    except Exception:
+        pass
+    if "guard_limit_bytes" in out and "guard_usage_bytes" in out:
+        out["guard_headroom_bytes"] = max(
+            0, out["guard_limit_bytes"] - out["guard_usage_bytes"])
+    return out
+
+
+def _memory_summary(peak_gpu: int, guard: dict, run: PrefillRun) -> Optional[dict]:
+    """Merge the wave's memory facts; keys that could not be measured are
+    ABSENT, never zero (the same honesty rule as the decode floors)."""
+    mem = dict(guard or {})
+    if peak_gpu:
+        mem["peak_gpu_bytes"] = int(peak_gpu)
+    if run.peak_process_bytes:
+        mem["peak_process_bytes"] = int(run.peak_process_bytes)
+    return mem or None
+
+
 async def _probe(run: PrefillRun, pool: Any) -> None:
     B = _engine()
     req = run.request
     core: Any = None
     pins: Optional[dict] = None
+    watcher: Optional[Any] = None
     try:
         total = max(1, req.parallel)   # the bar is the wave: 1 per request
         await _progress(run, "load", f"Loading {req.model_id}...", 0, total)
@@ -711,6 +906,19 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
                            if req.stagger_seconds else ", simultaneous"),
                         0, total)
         wall_start = time.perf_counter()
+        for i in range(req.parallel):
+            _state(run, i)                  # every line visible from t=0
+        # classic's own peak-memory method (benchmark.py:1145-1156): reset the
+        # device counter at the wave edge, read it at the far edge. Guarded:
+        # without mlx (CI) the memory block simply stays absent.
+        try:
+            import mlx.core as mx
+            mx.reset_peak_memory()
+            have_mx = True
+        except Exception:
+            have_mx = False
+        guard = _memory_guard(core)
+        watcher = asyncio.create_task(_watch_wave(run))
         # return_exceptions, NOT a bare gather: a sibling must never be left
         # streaming after this run went terminal (its late 'result' event
         # would land after 'done' and its engine work would collide with
@@ -720,6 +928,18 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
                          index=i, offset=offsets[i], wave_t0=wall_start)
             for i in range(req.parallel)], return_exceptions=True)
         wall_end = time.perf_counter()
+        watcher.cancel()
+        try:
+            await watcher
+        except BaseException:
+            pass
+        peak_gpu = 0
+        if have_mx:
+            try:
+                import mlx.core as mx
+                peak_gpu = int(mx.get_peak_memory())
+            except Exception:
+                peak_gpu = 0
         failures = [o for o in outcomes if isinstance(o, BaseException)]
         if failures:
             raise failures[0]
@@ -728,6 +948,16 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
         run.aggregate = aggregate_metrics(
             rows, wall_start=wall_start, wall_end=wall_end,
             prompt_tokens=req.prefill_tokens, min_decode_tokens=min_tg)
+        # steady-state decode: the window where EVERY request decodes (from
+        # the last first-token to the earliest finish), measured off the
+        # watcher's samples — the number classic's batch window approximates
+        last_prefill = max(r["first_token_abs"] for r in rows)
+        first_finish = min(r["end_abs"] for r in rows)
+        steady = steady_decode_tps(list(run.dec_samples), last_prefill,
+                                   first_finish, min_tokens=min_tg)
+        if steady:
+            run.aggregate.update(steady)
+        run.aggregate["memory"] = _memory_summary(peak_gpu, guard, run)
         run.status = "completed"
         run.phase = "done"
         run.progress = 1.0
@@ -748,6 +978,10 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
         logger.warning(f"uplift prefill probe failed: {e}", exc_info=True)
         await _send_event(run, {"type": "error", "message": str(e)})
     finally:
+        # the watcher must die with the wave on EVERY path (cancel/error
+        # included) — an orphan would keep ticking the engine's tracker
+        if watcher is not None and not watcher.done():
+            watcher.cancel()
         # the server's OWN limits come back before anything else runs —
         # a cancelled or failed wave must not leave the engine pinned
         _unpin_wave(core, pins)
@@ -782,6 +1016,10 @@ def results_payload(run: PrefillRun) -> dict:
         "message": run.message,
         "request": run.request.public(),
         "results": [_public_row(r) for r in run.results],
+        # the live per-request report, for the REST-poll fallback (SSE
+        # consumers get the same shapes as 'request' events)
+        "requests": [_public_state(s)
+                     for _, s in sorted(run.req_state.items())],
         "aggregate": run.aggregate,
         "error": run.error_message or None,
     }

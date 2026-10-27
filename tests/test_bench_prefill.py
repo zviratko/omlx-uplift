@@ -562,6 +562,115 @@ def test_pins_raise_never_lower_and_survive_a_bare_core():
     PF._unpin_wave(FakeCore(), None)           # idempotent, never raises
 
 
+# ---------------------------------------------------------------------------
+# LIVE REPORT (user Q2-Q4 2026-10-27): per-request lines, steady decode,
+# memory facts
+# ---------------------------------------------------------------------------
+
+async def test_request_lines_walk_the_phases(fake_world, monkeypatch):
+    """submitted -> prefilling (engine tracker) -> generating (own stream)
+    -> done, as 'request' events AND in the results payload."""
+    seed: dict = {}
+    pp = types.ModuleType("omlx.prefill_progress")
+    pp.get_prefill_tracker = lambda: types.SimpleNamespace(
+        get=lambda rid: seed.get(rid))
+    saved = sys.modules.get("omlx.prefill_progress")
+    sys.modules["omlx.prefill_progress"] = pp
+    monkeypatch.setattr(PF, "WATCH_S", 0.01)
+    try:
+        core = FakeCore(tokens=16, step_s=0.02)
+        pool = FakePool(core)
+        out = await PF.start(_body(prefill_tokens=1024, parallel=2,
+                                   stagger_seconds=0.05,
+                                   generation_tokens=16), pool)
+        run = PF.get_run(out["bench_id"])
+        # warm-up consumed req-1; the wave owns req-2/req-3 in add order
+        seed["req-2"] = {"processed": 4096, "total": 8192}
+        seed["req-3"] = {"processed": 2048, "total": 8192}
+        await _finish(run)
+    finally:
+        if saved is None:
+            sys.modules.pop("omlx.prefill_progress", None)
+        else:
+            sys.modules["omlx.prefill_progress"] = saved
+
+    seq: dict = {}
+    for e in run.events:
+        if e.get("type") != "request":
+            continue
+        d = e["data"]
+        assert "rid" not in d, "the scheduler request id is not UI data"
+        phases = seq.setdefault(d["index"], [])
+        if not phases or phases[-1] != d["phase"]:
+            phases.append(d["phase"])
+    for idx in (0, 1):
+        assert seq[idx] == ["submitted", "prefilling", "generating", "done"], \
+            f"request {idx}: {seq[idx]}"
+    pre = [e["data"] for e in run.events if e.get("type") == "request"
+           and e["data"]["phase"] == "prefilling"]
+    assert pre and pre[0]["processed"] == 4096 and pre[0]["total"] == 8192
+
+    pub = PF.results_payload(run)["requests"]
+    assert [q["index"] for q in pub] == [0, 1]
+    assert all(q["phase"] == "done" and "rid" not in q for q in pub)
+    assert pub[0]["completion"] == 16 and pub[0]["submit_s"] is not None
+    # the decode sampler really sampled (steady-state math reads these)
+    assert len(run.dec_samples) >= 2
+
+
+def test_steady_decode_math_is_a_window_measurement():
+    samples = [(0.0, 0), (1.0, 10), (2.0, 25), (3.0, 25), (4.0, 40)]
+    # window [1.0, 3.0]: interval midpoints 1.5 (+15 tok/1 s) and 2.5 (+0/1 s)
+    got = PF.steady_decode_tps(samples, 1.0, 3.0, min_tokens=8)
+    assert got == {"steady_decode_tps": 7.5, "steady_window_s": 2.0}
+    # classic's honesty floor, applied to the measurement itself
+    assert PF.steady_decode_tps(samples, 1.0, 3.0, min_tokens=16) is None
+    assert PF.steady_decode_tps([], 0.0, 1.0) is None
+    assert PF.steady_decode_tps(samples, 5.0, 6.0, min_tokens=1) is None
+
+
+def test_memory_guard_reads_the_schedulers_own_numbers():
+    sched = _sched_stub()
+    sched._memory_limit_bytes = 20 * 2**30
+    sched._current_usage_bytes = lambda refresh_mlx_active=True: 8 * 2**30
+    core = types.SimpleNamespace(
+        engine=types.SimpleNamespace(scheduler=sched), _mlx_executor=None)
+    guard = PF._memory_guard(core)
+    assert guard["guard_limit_bytes"] == 20 * 2**30
+    assert guard["guard_usage_bytes"] == 8 * 2**30
+    assert guard["guard_headroom_bytes"] == 12 * 2**30
+    # an engine without the guard's numbers reports NOTHING, not zeros
+    assert PF._memory_guard(types.SimpleNamespace()) == {}
+    run = PF.create_run(PF.validate_body(_body()))
+    assert PF._memory_summary(0, {}, run) is None
+    assert PF._memory_summary(5, {"guard_limit_bytes": 9}, run) == \
+        {"guard_limit_bytes": 9, "peak_gpu_bytes": 5}
+
+
+async def test_the_wave_publishes_memory_and_steady_fields(fake_world,
+                                                           monkeypatch):
+    sched = _sched_stub()
+    sched._memory_limit_bytes = 20 * 2**30
+    sched._current_usage_bytes = lambda refresh_mlx_active=True: 8 * 2**30
+    core = PinCore(sched, tokens=24, step_s=0.01)
+    pool = FakePool(core)
+    monkeypatch.setattr(PF, "WATCH_S", 0.01)
+    out = await PF.start(_body(prefill_tokens=1024, parallel=2,
+                               stagger_seconds=0.0, generation_tokens=24),
+                         pool)
+    run = await _finish(PF.get_run(out["bench_id"]))
+    agg = run.aggregate
+    assert agg["memory"]["guard_limit_bytes"] == 20 * 2**30
+    assert agg["memory"]["guard_headroom_bytes"] == 12 * 2**30
+    # peak_gpu may be absent (no mlx on CI) but must never be a fake 0
+    assert agg["memory"].get("peak_gpu_bytes", 1) > 0
+    # steady decode rides the window [last first-token, earliest finish]; with
+    # a simultaneous short wave it either measures or honestly stays absent
+    if "steady_decode_tps" in agg:
+        assert agg["steady_decode_tps"] > 0
+        assert agg["steady_window_s"] > 0
+
+
 async def test_probe_errors_are_reported_not_swallowed(fake_world):
     # the loud no-ceiling rule: the engine cut the prompt -> error, and the
     # error names both numbers

@@ -2967,6 +2967,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .bench-result-row { display: flex; justify-content: space-between; gap: 18px;
   font-size: 11px; padding: 2px 0; border-bottom: 1px dotted var(--edge); }
 .bench-result-row:last-of-type { border-bottom: none; }
+/* custom benchmark live activity list: one quiet line per request */
+.bench-pf-req { font-size: 11px; color: var(--dim); padding: 1px 0;
+  font-variant-numeric: tabular-nums; }
 /* REPL-2a: accuracy task grid + queue */
 .acc-taskgrid { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 /* U51: task cards are keyboard-operable now (role=button); give them the

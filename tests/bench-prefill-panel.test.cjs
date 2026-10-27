@@ -66,6 +66,16 @@ const EN = {
     'uplift.bench.prefill.preparing': 'Preparing benchmark\u2026',
     'uplift.bench.prefill.panel_busy': 'The standard benchmark is running in this panel.',
     'uplift.bench.prefill.already_running': 'A custom benchmark is already running in this server.',
+    'uplift.bench.prefill.req_lines': 'Request activity',
+    'uplift.bench.prefill.req_queued': 'Queued',
+    'uplift.bench.prefill.req_submitted': 'Submitted',
+    'uplift.bench.prefill.req_prefilling': 'Prefilling',
+    'uplift.bench.prefill.req_generating': 'Generating',
+    'uplift.bench.prefill.req_done': 'Done',
+    'uplift.bench.prefill.sum_decode_steady': 'Steady decode (tok/s)',
+    'uplift.bench.prefill.mem_gpu': 'Peak GPU memory',
+    'uplift.bench.prefill.mem_proc': 'Peak process memory',
+    'uplift.bench.prefill.mem_headroom': 'Guard headroom at start',
 };
 
 function makeHarness() {
@@ -507,6 +517,9 @@ test('SSE events paint the aggregate first, then one row per request', async () 
         assert.ok(text.includes(m), 'rendered: ' + m + ' — got ' + text);
     // an unmeasured decode rate stays N/A (classic's rule, not a fake 0.0)
     assert.ok(text.includes('N/A'), 'null gen_tps renders N/A');
+    // and steady/memory rows are ABSENT, never zero, when unmeasured
+    assert.ok(!text.includes('Steady decode'), 'unmeasured steady stays hidden');
+    assert.ok(!text.includes('Peak GPU memory'), 'unmeasured memory stays hidden');
     const tables = walkTag(host, 'table');
     assert.equal(tables.length, 1, 'one per-request table');
     const heads = tables[0].children[0].children.map(th => th.textContent);
@@ -595,4 +608,65 @@ test('a reload reattaches to a probe that is already running', async () => {
     assert.ok(byId['bench-tp-status'].textContent.includes('already running'));
     assert.ok(byId['bench-tp-status'].textContent.includes('M1'));
     B.prefill.state.running = false;
+});
+
+
+// ---------------------------------------------------------------------------
+// LIVE REPORT (user Q2-Q4 2026-10-27): activity lines, steady decode, memory
+// ---------------------------------------------------------------------------
+
+test('the activity list paints one line per request, phase by phase', async () => {
+    const { byId, B, es } = mountLoad();
+    const PF = B.prefill;
+    byId['bench-tp-model'].value = 'M1';
+    await PF.start();                        // default form: parallel 4
+    feed(es, { type: 'request', data: { index: 0, phase: 'submitted',
+        submit_s: 1.5, processed: 0, total: 0, completion: 0 } });
+    feed(es, { type: 'request', data: { index: 1, phase: 'prefilling',
+        submit_s: 1.0, processed: 6144, total: 16384, completion: 0 } });
+    feed(es, { type: 'request', data: { index: 1, phase: 'generating',
+        submit_s: 1.0, processed: 16384, total: 16384, completion: 42 } });
+    feed(es, { type: 'request', data: { index: 2, phase: 'done',
+        submit_s: 2.0, processed: 16384, total: 16384, completion: 128 } });
+    const text = allText(byId['bench-tp-pf-results']);
+    assert.ok(text.includes('Request activity'), 'the section names itself');
+    assert.ok(text.includes('#1 \u00b7 Submitted +1.50 s'),
+        'submitted line carries the REAL start: ' + text);
+    assert.ok(text.includes('#2 \u00b7 Generating 42 tok'), 'latest phase wins');
+    assert.ok(text.includes('#3 \u00b7 Done 128 tok'));
+    assert.ok(text.includes('#4 \u00b7 Queued'), 'unsent slots are visible too');
+    // no request event may ever carry the scheduler request id
+    assert.ok(!String(text).includes('rid'), 'rid stays server-side');
+});
+
+test('the summary adds steady decode and memory lines when measured', async () => {
+    const { byId, B, es } = mountLoad();
+    const PF = B.prefill;
+    byId['bench-tp-model'].value = 'M1';
+    await PF.start();
+    feed(es, { type: 'aggregate', data: { requests: 4, prompt_tokens_each: 16384,
+        total_prompt_tokens: 65536, total_completion_tokens: 512,
+        wall_time_s: 10, prefill_wall_s: 8, generation_wall_s: 2,
+        combined_prefill_tps: 8000, combined_decode_tps: 250,
+        steady_decode_tps: 312.5, steady_window_s: 1.5,
+        avg_ttft_ms: 100, max_ttft_ms: 200, min_ttft_ms: 50,
+        memory: { peak_gpu_bytes: 17179869184, peak_process_bytes: 21474836480,
+            guard_limit_bytes: 22000000000, guard_usage_bytes: 10000000000,
+            guard_headroom_bytes: 12000000000 } } });
+    const text = allText(byId['bench-tp-pf-results']);
+    assert.ok(text.includes('Steady decode (tok/s)') && text.includes('312.5'),
+        'steady row: ' + text);
+    assert.ok(text.includes('Peak GPU memory') && text.includes('16.00 GB'));
+    assert.ok(text.includes('Peak process memory') && text.includes('20.00 GB'));
+    assert.ok(text.includes('Guard headroom at start') && text.includes('11.18 GB'));
+});
+
+test('the poll fallback merges requests[] into the activity state', () => {
+    // poll() runs on an interval the stub never fires (house harness limit),
+    // so this path — and ONLY this path — is pinned by shape: the merge the
+    // SSE mode gets from events must exist verbatim for the REST mode too.
+    const src = fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8');
+    assert.match(src,
+        /if \(r\.requests\) \{[\s\S]{0,200}reqState\[q\.index\] = q;/,
+        'poll rebuilds the live list from the payload');
 });
