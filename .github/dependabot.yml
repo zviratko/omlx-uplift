@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # ONLY the two env requirement files live in this directory. The repo
+  # root stays deliberately OUT of scope: constraints-stable.txt is a
+  # release-cut freeze record (regenerated only at release commits) and
+  # pyproject.toml carries server deps as ranges. Any bump merged here
+  # moves the env requirements digest -> next use wipes and rebuilds
+  # that venv; scorer-lib bumps (nltk, rouge_score, sacrebleu, mteb)
+  # shift metric numbers vs stored bench history, so majors arrive as
+  # individual PRs for a human call and never ride along in the group.
+  - package-ecosystem: pip
+    directory: /omlx_uplift
+    schedule:
+      interval: weekly
+      day: sunday
+      time: "02:00"
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types:
+          - minor
+          - patch
