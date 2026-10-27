@@ -1208,27 +1208,44 @@ function gsGuardSync() {
         }
         if (GSPEC.wiredLimitWarned(sys)) {
             // red warning + copyable sysctl fix (classic 6561-6600): the
-            // kernel iogpu.wired_limit_mb caps oMLX below its request
+            // kernel iogpu.wired_limit_mb caps oMLX below its request.
+            // CLASSIC'S STRUCTURE IS THE POINT: the sentence is a BLOCK line
+            // and only the command + its copy button share a flex row. Mixed
+            // text runs inside a flex container each become a flex ITEM — the
+            // sentence then shatters across lines with hard gaps and a line
+            // that starts with ';' (the defect this shape removes, and no
+            // node stub geometry can see it).
             const warn = document.createElement('div');
             warn.className = 'gs-guard-wired';
+            const line = document.createElement('div');
+            line.className = 'gs-guard-wired-line';
+            warn.append(line);
             const tpl = C.tf('settings.resource.guard_tier.wired_limit_warning',
                 'Kernel iogpu.wired_limit_mb is only {kernel}; oMLX can only allocate up to {kernel}. Raise it in Terminal:');
             const ktxt = (sys.iogpu_wired_limit_bytes / (1024 ** 3)).toFixed(1) + ' GB';
             const pieces = String(tpl).split('{kernel}');
             pieces.forEach((piece, i) => {
-                if (piece) warn.append(document.createTextNode(piece));
+                if (piece) line.append(document.createTextNode(piece));
                 // classic bolds EVERY {kernel} occurrence — strong between
                 // pieces, never trailing
-                if (i < pieces.length - 1) warn.append(
+                if (i < pieces.length - 1) line.append(
                     Object.assign(document.createElement('strong'), { textContent: ktxt }));
             });
             const cmd = GSPEC.wiredLimitCommand(sys);
+            // the command + copy button are ONE row (classic's
+            // flex items-center div); the sentence above stays a block
+            const fix = document.createElement('div');
+            fix.className = 'gs-guard-fix';
             const code = document.createElement('code');
             code.className = 'gs-guard-sysctl'; code.textContent = cmd;
             const cp = document.createElement('button');
-            cp.type = 'button'; cp.className = 'se-btn act';
+            // NOT 'act' — that is the admin-table action-column class and it
+            // carries a 74px min-width meant for WORDS ('RETRY'). This is an
+            // icon button, shaped like the section copy-link.
+            cp.type = 'button'; cp.className = 'se-btn gs-guard-copy';
             cp.textContent = '\u29C9';
             cp.title = C.tf('status.integrations.copy_command_tooltip', 'Copy command');
+            cp.setAttribute('aria-label', cp.title);
             cp.onclick = () => {
                 const flash = () => { cp.textContent = '\u2713';
                     setTimeout(() => { cp.textContent = '\u29C9'; }, 2000); };
@@ -1236,7 +1253,8 @@ function gsGuardSync() {
                     navigator.clipboard.writeText(cmd).then(flash).catch(flash);
                 else flash();
             };
-            warn.append(code, cp);
+            fix.append(code, cp);
+            warn.append(fix);
             box.append(warn);
             any = true;
         }

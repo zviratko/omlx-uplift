@@ -3719,17 +3719,24 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* uplift.css trap #1247: an author display beats the UA [hidden] rule */
 .gs-guardinfo[hidden] { display: none; }
 .gs-guardinfo strong { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+/* Deliberately NOT a flex container: its first child is a SENTENCE. Flex
+   turns every text run and every <strong> into an ITEM, so the warning
+   shattered across three lines with hard gaps (user report 2026-10-27).
+   The flex belongs on .gs-guard-fix below — around the two boxes. */
 .gs-guard-wired {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
     color: var(--bad);
     font-weight: 600;
+    overflow-wrap: anywhere;
 }
 .gs-guard-wired strong { color: var(--bad); }
+.gs-guard-fix {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 4px;
+}
 .gs-guard-sysctl {
-    flex: 1 1 180px;
+    flex: 1 1 auto;
     min-width: 0;
     font-family: var(--mono);
     font-size: 10px;
@@ -3738,6 +3745,14 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     background: var(--field);
     border: 1px solid var(--edge);
     overflow-wrap: anywhere;
+}
+/* icon button only: the admin-table .act class would give it the 74px
+   min-width meant for action-column WORDS */
+.gs-guard-copy {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    font-size: 11px;
+    color: var(--dim);
 }
 
 /* --- UP-41(11): per-section copy-link button on every header ----------- */

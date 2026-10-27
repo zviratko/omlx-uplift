@@ -15,6 +15,7 @@ const { STATIC_DIR } = require('./static-src.cjs');
 
 const G = require(path.join(STATIC_DIR, 'uplift_gspec.js'));
 const gsys = fs.readFileSync(path.join(STATIC_DIR, 'uplift_gsys.js'), 'utf8');
+const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
 const GB = 1024 ** 3;
 
 /* ---- item 8: host preset (classic _settings.html:311-321) ------------- */
@@ -168,6 +169,55 @@ test('GS_SPEC carries the new builders (host preset, sliders, guard, scale)', ()
 test('composite rows hook the dirty plumbing (gsSetControlValue + re-apply)', () => {
     assert.match(gsys, /if \(row && row\.__gsApply\) \{ row\.__gsApply\(val\); return true; \}/);
     assert.match(gsys, /if \(row && row\.__gsApply\) \{ row\.__gsApply\(wasDirty\[flat\]\); continue; \}/);
+});
+
+/* ---- UP-41(10) follow-up (user report 2026-10-27): the wired-limit
+   warning used to be ONE flex row holding the sentence, the command chip
+   and the copy button. Flex makes every text run AND every <strong> an
+   ITEM, so the sentence shattered over three lines with hard gaps and a
+   line that began with ';'. Classic keeps the sentence a block line and
+   flexes only command + button. Node gates cannot measure geometry, so the
+   chain (with order) plus the two containers' CSS display are pinned here,
+   and the dead shape gets a negative pin. ------------------------------ */
+function guardWarnBlock() {
+    const start = gsys.indexOf('if (GSPEC.wiredLimitWarned(sys)) {');
+    assert.ok(start > 0, 'the wired-limit builder exists');
+    const end = gsys.indexOf('box.append(warn);', start);
+    assert.ok(end > start, 'the warning rides the guard box');
+    return gsys.slice(start, end);
+}
+test('memory-guard warning: sentence is a block line, command + button flex', () => {
+    const b = guardWarnBlock();
+    // warn > line (created and attached BEFORE any text is built) …
+    assert.match(b, /warn\.className = 'gs-guard-wired';\s*const line = document\.createElement\('div'\);\s*line\.className = 'gs-guard-wired-line';\s*warn\.append\(line\);/);
+    // … the sentence runs + bolds live IN the line …
+    assert.match(b, /if \(piece\) line\.append\(document\.createTextNode\(piece\)\);/);
+    assert.match(b, /if \(i < pieces\.length - 1\) line\.append\(\s*Object\.assign\(document\.createElement\('strong'\)/);
+    // … and only the command row is a flex pair, appended after it
+    assert.match(b, /fix\.className = 'gs-guard-fix';/);
+    assert.match(b, /fix\.append\(code, cp\);\s*warn\.append\(fix\);/);
+    // DEAD SHAPES (negative pins): text or boxes as direct flex children
+    assert.ok(!/warn\.append\(document\.createTextNode/.test(b),
+        'sentence text must not be a direct child of the flex-warning box');
+    assert.ok(!/warn\.append\(code, cp\)/.test(b),
+        'command + button belong to .gs-guard-fix, not the warning');
+    // the copy control is an ICON button: '.act' is the admin-table action
+    // column and carries a 74px min-width meant for words
+    assert.match(b, /cp\.className = 'se-btn gs-guard-copy';/);
+    assert.ok(!/cp\.className = 'se-btn act'/.test(b));
+    assert.match(b, /cp\.setAttribute\('aria-label', cp\.title\);/);
+});
+test('uplift.css keeps .gs-guard-wired a block and .gs-guard-fix the flex row', () => {
+    const rule = (sel) => {
+        const i = css.indexOf('\n' + sel + ' {');
+        assert.ok(i >= 0, 'rule ' + sel + ' exists as a standalone block');
+        return css.slice(i, css.indexOf('}', i));
+    };
+    assert.ok(!/display:\s*flex/.test(rule('.gs-guard-wired')),
+        '.gs-guard-wired must not be a flex container (it holds a sentence)');
+    assert.match(rule('.gs-guard-fix'), /display:\s*flex/);
+    assert.match(rule('.gs-guard-sysctl'), /flex:\s*1 1 auto/);
+    assert.match(rule('.gs-guard-copy'), /flex:\s*0 0 auto/);
 });
 test('UP-19 pins survive: host loopback trigger + eye toggle + queue line', () => {
     assert.match(gsys, /\|\| flat === 'host'\)/);          // UP-19(7) re-sync
