@@ -525,7 +525,7 @@
  "uplift.patches.dev_none": "Pas encore de correctifs de compilation. Ajoutez-en un ci-dessous et choisissez la portée « Build ».",
  "uplift.patches.dev_not_installed": "omlx-dev n'est pas configuré sur cette machine. Pour compiler des correctifs ici, lancez : omlx-uplift dev bootstrap (crée la copie des sources), ajoutez des correctifs de portée « Build », puis omlx-uplift dev install.",
  "uplift.patches.dev_pin_show": "épingler un commit…",
- "uplift.patches.dev_port_clash": " - MÊME PORT QUE VANILLA",
+ "uplift.patches.dev_port_clash": " - CONFLIT DE PORT POTENTIEL",
  "uplift.patches.dev_reconfig_fail": "Échec de la reconfiguration",
  "uplift.patches.dev_restart": "Redémarrer omlx-dev",
  "uplift.patches.dev_restart_fail": "Échec du redémarrage",

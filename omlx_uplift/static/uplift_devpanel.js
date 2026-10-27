@@ -314,7 +314,7 @@ function renderDev() {
         meta.append(dvMeta('span', 'dv-meta-sep', '·'),           // i18n-exempt
                     dvMeta('b', 'dv-meta-clash',
                            ptMsg('uplift.patches.dev_port_clash',
-                                 ' — SAME PORT AS VANILLA')
+                                 ' — POTENTIAL PORT CONFLICT')
                            .replace(/^[\s—–-]+/, '')));
     }
     shareBox.append(meta);

@@ -521,7 +521,7 @@
  "uplift.patches.dev_none": "尚無建置修補。請在下方新增,範圍選擇 \"Build\"。",
  "uplift.patches.dev_not_installed": "此機器尚未設定 omlx-dev。要在此建置修補,請執行:omlx-uplift dev bootstrap(建立原始碼複本),新增範圍為 \"Build\" 的修補,然後執行 omlx-uplift dev install。",
  "uplift.patches.dev_pin_show": "釘選到提交…",
- "uplift.patches.dev_port_clash": " - 與 vanilla 相同通訊埠",
+ "uplift.patches.dev_port_clash": " - 可能的通訊埠衝突",
  "uplift.patches.dev_reconfig_fail": "重新設定失敗",
  "uplift.patches.dev_restart": "重新啟動 omlx-dev",
  "uplift.patches.dev_restart_fail": "重新啟動失敗",

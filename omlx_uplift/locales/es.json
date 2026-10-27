@@ -525,7 +525,7 @@
  "uplift.patches.dev_none": "Aún no hay parches de compilación. Añada uno abajo y elija el ámbito \"Build\".",
  "uplift.patches.dev_not_installed": "omlx-dev no está configurado en esta máquina. Para compilar parches aquí, ejecute: omlx-uplift dev bootstrap (crea la copia de fuentes), añada parches con ámbito \"Build\" y luego omlx-uplift dev install.",
  "uplift.patches.dev_pin_show": "fijar un commit…",
- "uplift.patches.dev_port_clash": " - MISMO PUERTO QUE VANILLA",
+ "uplift.patches.dev_port_clash": " - POSIBLE CONFLICTO DE PUERTOS",
  "uplift.patches.dev_reconfig_fail": "Error de reconfiguración",
  "uplift.patches.dev_restart": "Reiniciar omlx-dev",
  "uplift.patches.dev_restart_fail": "Fallo al reiniciar",

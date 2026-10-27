@@ -521,7 +521,7 @@
  "uplift.patches.dev_none": "Патчей сборки пока нет. Добавьте ниже и выберите область \"Build\".",
  "uplift.patches.dev_not_installed": "omlx-dev не настроен на этой машине. Чтобы собирать патчи здесь, выполните: omlx-uplift dev bootstrap (создаст копию исходников), добавьте патчи с областью \"Build\", затем omlx-uplift dev install.",
  "uplift.patches.dev_pin_show": "закрепить коммит…",
- "uplift.patches.dev_port_clash": " - ТОТ ЖЕ ПОРТ, ЧТО У VANILLA",
+ "uplift.patches.dev_port_clash": " - ВОЗМОЖНЫЙ КОНФЛИКТ ПОРТОВ",
  "uplift.patches.dev_reconfig_fail": "Ошибка перенастройки",
  "uplift.patches.dev_restart": "Перезапустить omlx-dev",
  "uplift.patches.dev_restart_fail": "Ошибка перезапуска",

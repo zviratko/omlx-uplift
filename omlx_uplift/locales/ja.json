@@ -521,7 +521,7 @@
  "uplift.patches.dev_none": "ビルド用パッチはまだありません。下から追加し、スコープ \"Build\" を選択してください。",
  "uplift.patches.dev_not_installed": "このマシンに omlx-dev が設定されていません。ビルド用パッチを使うには: omlx-uplift dev bootstrap (ソースのコピーを作成)、スコープ \"Build\" でパッチを追加、その後 omlx-uplift dev install。",
  "uplift.patches.dev_pin_show": "コミットを固定…",
- "uplift.patches.dev_port_clash": " - vanillaと同じポート",
+ "uplift.patches.dev_port_clash": " - ポートの競合の可能性",
  "uplift.patches.dev_reconfig_fail": "再設定に失敗しました",
  "uplift.patches.dev_restart": "omlx-dev を再起動",
  "uplift.patches.dev_restart_fail": "再起動に失敗",

@@ -525,7 +525,7 @@
  "uplift.patches.dev_none": "Ainda não há patches de compilação. Adicione um abaixo e escolha o escopo \"Build\".",
  "uplift.patches.dev_not_installed": "omlx-dev não está configurado nesta máquina. Para compilar patches aqui, execute: omlx-uplift dev bootstrap (cria a cópia dos fontes), adicione patches com escopo \"Build\" e depois omlx-uplift dev install.",
  "uplift.patches.dev_pin_show": "fixar um commit…",
- "uplift.patches.dev_port_clash": " - MESMA PORTA DA VANILLA",
+ "uplift.patches.dev_port_clash": " - POSSÍVEL CONFLITO DE PORTA",
  "uplift.patches.dev_reconfig_fail": "Falha na reconfiguração",
  "uplift.patches.dev_restart": "Reiniciar omlx-dev",
  "uplift.patches.dev_restart_fail": "Falha ao reiniciar",

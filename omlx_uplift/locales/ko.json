@@ -536,7 +536,7 @@
  "uplift.patches.dev_none": "빌드 패치가 아직 없습니다. 아래에서 추가하고 범위 \"Build\"를 선택하세요.",
  "uplift.patches.dev_not_installed": "이 컴퓨터에 omlx-dev가 설정되지 않았습니다. 빌드 패치를 사용하려면: omlx-uplift dev bootstrap (소스 사본 생성), 범위 \"Build\"로 패치 추가, 그 다음 omlx-uplift dev install.",
  "uplift.patches.dev_pin_show": "커밋 고정…",
- "uplift.patches.dev_port_clash": " - vanilla와 동일한 포트",
+ "uplift.patches.dev_port_clash": " - 포트 충돌 가능성",
  "uplift.patches.dev_reconfig_fail": "재설정 실패",
  "uplift.patches.dev_restart": "omlx-dev 재시작",
  "uplift.patches.dev_restart_fail": "재시작 실패",

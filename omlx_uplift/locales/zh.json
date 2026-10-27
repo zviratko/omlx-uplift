@@ -521,7 +521,7 @@
  "uplift.patches.dev_none": "尚无构建补丁。请在下方添加,范围选择 \"Build\"。",
  "uplift.patches.dev_not_installed": "此机器尚未设置 omlx-dev。要在此构建补丁,请运行:omlx-uplift dev bootstrap(创建源码副本),添加范围为 \"Build\" 的补丁,然后运行 omlx-uplift dev install。",
  "uplift.patches.dev_pin_show": "固定到提交…",
- "uplift.patches.dev_port_clash": " - 与 vanilla 端口相同",
+ "uplift.patches.dev_port_clash": " - 可能的端口冲突",
  "uplift.patches.dev_reconfig_fail": "重新配置失败",
  "uplift.patches.dev_restart": "重启 omlx-dev",
  "uplift.patches.dev_restart_fail": "重启失败",

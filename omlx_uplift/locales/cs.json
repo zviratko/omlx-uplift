@@ -521,7 +521,7 @@
  "uplift.patches.dev_none": "Zatím žádné build patche. Přidejte níže a zvolte rozsah \"Build\".",
  "uplift.patches.dev_not_installed": "omlx-dev na tomto počítači není nastaven. Pro sestavování patchů zde spusťte: omlx-uplift dev bootstrap (vytvoří kopii zdrojů), přidejte patche s rozsahem \"Build\" a poté omlx-uplift dev install.",
  "uplift.patches.dev_pin_show": "připnout commit…",
- "uplift.patches.dev_port_clash": " - STEJNY PORT JAKO VANILLA",
+ "uplift.patches.dev_port_clash": " - POTENCIÁLNÍ KONFLIKT PORTŮ",
  "uplift.patches.dev_reconfig_fail": "Prekonfigurace selhala",
  "uplift.patches.dev_restart": "Restartovat omlx-dev",
  "uplift.patches.dev_restart_fail": "Restart selhal",
