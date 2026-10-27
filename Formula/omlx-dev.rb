@@ -135,11 +135,23 @@ class OmlxDev < Omlx
   option "with-custom-kernel",
          "Build native custom kernels for Bonsai, GLM-5.2, MiniMax M3 and Qwen3.5/3.6/4 acceleration"
   option "with-grammar", "Install xgrammar for structured output (requires torch, ~2GB)"
+  option "with-python312", "EXPERIMENT: build the libexec venv on python " \
+    "3.12 (inside upstream's own >=3.11,<3.14 support) instead of the " \
+    "hardcoded python3.11. 3.13+ is NOT possible for the engine: " \
+    "mlx-audio[all] -> misaki requires python <3.13. Opt-in trial until " \
+    "upstream moves (jundot/omlx#3074, PR #3075 closed unmerged)."
 
   depends_on "rust" => :build
   depends_on arch: :arm64
   depends_on macos: :sequoia
   depends_on "python@3.11"
+  # --with-python312: REQUIRED to be a declared depends_on, not just a
+  # PATH pick — Homebrew superenv strips -I include paths of UNDECLARED
+  # formulae, and omlx's nanobind C++ wheel then dies on 'Python.h not
+  # found' (proven the hard way in the 2026-10-27 trial). The bottle is
+  # also pulled on option-off builds (~10MB); accepted for having the
+  # switch live at all.
+  depends_on "python@3.12"
 
   on_macos do
     skip_clean "libexec" if MacOS.version >= "27"
@@ -205,6 +217,26 @@ class OmlxDev < Omlx
     # Kept at the exact version the working kegs resolved (2026-10-24 17:19).
     (buildpath/"uplift-pip-constraints.txt").write("preshed==3.0.13\n")
     ENV["PIP_CONSTRAINT"] = (buildpath/"uplift-pip-constraints.txt").to_s
+    # --with-python312 (EXPERIMENT; option OFF = byte-identical upstream
+    # build): jundot's parent creates the venv with a literal
+    # `system "python3.11", "-m", "venv", libexec`; a PATH shim named
+    # python3.11 pointing at 3.12 retargets it WITHOUT forking their
+    # build code. 3.12 sits INSIDE upstream's own >=3.11,<3.14 support —
+    # no source patch. 3.13+ is impossible for the ENGINE: mlx-audio[all]
+    # -> misaki requires python <3.13 (the 3.14 trial died exactly there).
+    # The declared depends_on "python@3.12" is LOAD-BEARING: superenv
+    # strips -I paths of undeclared formulae and omlx's nanobind wheel
+    # then fails on 'Python.h not found' (include pins kept as belt).
+    if build.with?("python312")
+      shim = buildpath/"uplift-py-shim"
+      shim.mkpath
+      File.symlink("/opt/homebrew/opt/python@3.12/bin/python3.12",
+                   shim/"python3.11")
+      ENV.prepend_path "PATH", shim.to_s
+      py312_inc = Formula["python@3.12"].opt_libexec/"include/python3.12"
+      ENV.append "CFLAGS", "-I#{py312_inc}"
+      ENV.append "CXXFLAGS", "-I#{py312_inc}"
+    end
     super
     ENV.delete("PIP_CONSTRAINT")
     # The parent links bin/omlx; this keg must NOT, or linking both formulas

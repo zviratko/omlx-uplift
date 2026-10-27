@@ -18,10 +18,34 @@ class OmlxUplift < Formula
   # keg files — the package mounts itself at python level, so upgrading
   # either keg stays byte-identical (re-run `omlx-uplift install` after a
   # keg upgrade to re-inject the mount).
+  # AUTO-FOLLOW (python312 trial 2026-10-27): the .pth mount joins THIS
+  # keg's libexec site-packages to the ENGINE interpreter's sys.path, so
+  # this venv must be built on the engine keg's python minor. Both known
+  # engine minors are declared (only the detected one is used; the other
+  # is a ~10MB pull) — extend the pair when the engine move lands.
   depends_on "python@3.11"
+  depends_on "python@3.12"
 
   def omlx_python
     (formula_opt_prefix("omlx")/"libexec/bin/python")
+  end
+
+  # Probe the live omlx-family engine keg (vanilla first, else dev — the
+  # same target order as `omlx-uplift install`); plain users with no keg
+  # yet keep the historic 3.11 build. Falls back rather than dying: the
+  # engine may be installed AFTER uplift.
+  def engine_python_minor
+    ["omlx", "omlx-dev"].each do |name|
+      py = formula_opt_prefix(name)/"libexec/bin/python"
+      next unless py.exist?
+      begin
+        out = Utils.safe_popen_read(py, "-c",
+          "import sys; print('%d.%d' % sys.version_info[:2])").strip
+        return Regexp.last_match(1) if out =~ /\A3\.(1[0-9])\z/
+      rescue ErrorReadingError
+      end
+    end
+    "3.11"
   end
 
   def install
@@ -32,7 +56,10 @@ class OmlxUplift < Formula
     # command, `omlx-uplift install`, runs unsandboxed and drops exactly
     # ONE file — a .pth that bootstraps sys.path to this keg's venv and
     # imports the autopatch. Nothing is copied into the omlx keg.
-    system "python3.11", "-m", "venv", libexec
+    minor = engine_python_minor
+    venv_py = Formula['python@' + minor].opt_bin/'python' + minor
+    odie 'no brew python@' + minor + ' for engine auto-follow' unless venv_py.exist?
+    system venv_py, "-m", "venv", libexec
     # REL-1: STABLE builds pin the exact dependency set the release was
     # tested with (constraints-stable.txt, shipped in the repo); --HEAD
     # builds float fastapi/uvicorn so main always rides the newest.

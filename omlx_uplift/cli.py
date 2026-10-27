@@ -571,6 +571,24 @@ def cmd_install(argv=None) -> int:
               "then re-run: omlx-uplift install", file=sys.stderr)
         return 1
     sp = _resolve_site_packages(target)
+    # python312-trial guard: uplift's libexec site-packages joins the
+    # TARGET interpreter's sys.path via the .pth. Differing python minors
+    # mean compiled deps can resolve across trees (cpXY .so in a cpZW
+    # interpreter) — refuse instead of half-mounting.
+    eng = _brewutil.python_minor(str(target))
+    ours = (sys.version_info[0], sys.version_info[1])
+    if eng and eng != ours:
+        print(f"ERROR: python minor mismatch — this uplift CLI runs on "
+              f"python {ours[0]}.{ours[1]}, the target keg's python is "
+              f"{eng[0]}.{eng[1]}. The .pth mount shares site-packages, "
+              f"so the minors must match.\n"
+              f"  fix: rebuild uplift against the engine (it auto-follows "
+              f"the engine keg's python):\n"
+              f"    brew uninstall omlx-uplift && "
+              f"HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --HEAD "
+              f"omlx-uplift && omlx-uplift install",
+              file=sys.stderr)
+        return 1
     pth = sp / PTH_NAME
     body = _pth_content(Path(target) if target else None)
     pth.write_text(body)
@@ -1231,6 +1249,14 @@ def cmd_dev(argv=None) -> int:
     ap.add_argument("--with-grammar", action="store_true",
                     help="install: install xgrammar (sticky like "
                          "--with-custom-kernel)")
+    ap.add_argument("--with-python312", action="store_true",
+                    help="install: EXPERIMENT — build the engine venv on "
+                         "python 3.12 instead of the upstream-pinned 3.11 "
+                         "(inside upstream's supported range; 3.13+ is "
+                         "impossible for the engine: mlx-audio[all] -> "
+                         "misaki requires python <3.13). Sticky like the "
+                         "other flags; drop it from dev.json build_options "
+                         "to go back to 3.11")
     ap.add_argument("--dry-run", action="store_true",
                     help="install: materialize check + print the brew "
                          "command, build nothing")
@@ -1757,6 +1783,7 @@ def cmd_dev_install(args) -> int:
     res = devsrc.run_dev_build(
         with_custom_kernel=bool(getattr(args, 'with_custom_kernel', False)),
         with_grammar=bool(getattr(args, 'with_grammar', False)),
+        with_python312=bool(getattr(args, 'with_python312', False)),
         dry_run=bool(getattr(args, 'dry_run', False)),
         conditional=conditional,
         warn=_coexistence_warnings, on_line=_on_line,

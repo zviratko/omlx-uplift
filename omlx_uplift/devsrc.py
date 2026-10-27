@@ -1449,9 +1449,11 @@ def _stream_build(res: BuildResult, cmd: list, env: dict | None = None) -> int:
     return proc.wait()
 
 
-def _explicit_flags(with_custom_kernel: bool, with_grammar: bool) -> set:
+def _explicit_flags(with_custom_kernel: bool, with_grammar: bool,
+                    with_python312: bool = False) -> set:
     return ({"--with-custom-kernel"} if with_custom_kernel else set()) | \
-           ({"--with-grammar"} if with_grammar else set())
+           ({"--with-grammar"} if with_grammar else set()) | \
+           ({"--with-python312"} if with_python312 else set())
 
 
 def _effective_build_flags(cfg: dict | None, explicit: set,
@@ -1473,6 +1475,7 @@ def _effective_build_flags(cfg: dict | None, explicit: set,
 
 def run_dev_build(*, with_custom_kernel: bool = False,
                   with_grammar: bool = False, dry_run: bool = False,
+                  with_python312: bool = False,
                   conditional: bool = False,
                   warn=None, on_line=None, on_patch_failure=None,
                   trigger: str = "cli") -> BuildResult:
@@ -1588,7 +1591,8 @@ def run_dev_build(*, with_custom_kernel: bool = False,
         return _run_dev_build_body(res, cfg, build_patches, patchsource,
                                    brewutil, with_custom_kernel,
                                    with_grammar, dry_run, warn,
-                                   on_patch_failure, conditional=conditional)
+                                   on_patch_failure, conditional=conditional,
+                                   with_python312=with_python312)
     finally:
         _root.removeHandler(_ph)
         _ph.close()
@@ -1764,7 +1768,8 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
 
 def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                         with_custom_kernel, with_grammar, dry_run, warn,
-                        on_patch_failure=None, conditional=False):
+                        on_patch_failure=None, conditional=False,
+                        with_python312=False):
     import subprocess
 
     from . import patches as _patches_mod
@@ -1943,8 +1948,8 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
         _emit(res, "err", f"  investigation: {res.log_path}")
 
     flags = _effective_build_flags(cfg, _explicit_flags(
-        with_custom_kernel, with_grammar), brewutil)
-    explicit = bool(with_custom_kernel or with_grammar)
+        with_custom_kernel, with_grammar, with_python312), brewutil)
+    explicit = bool(with_custom_kernel or with_grammar or with_python312)
     cmd = brewutil.brew_build_cmd(flags)
     if dry_run:
         res.ok, res.returncode, res.stage = True, 0, "dry-run"

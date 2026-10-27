@@ -108,12 +108,41 @@ def default_target_python(formula: str | None = None) -> str | None:
     return str(keg) if keg else None
 
 
+def python_minor(python: str) -> tuple | None:
+    """(major, minor) of an interpreter PATH via a subprocess probe —
+    never imports it in this process, never raises. The .pth mount shares
+    site-packages with the target interpreter, so a differing minor means
+    ABI-loaded deps (pydantic_core et al) can cross between trees; CLI
+    and co-mount guard on this (2026-10-27, python312 trial)."""
+    try:
+        r = subprocess.run(
+            [python, "-c", "import sys;print(sys.version_info[0],"
+                           "sys.version_info[1])"],
+            capture_output=True, text=True, timeout=15)
+        if r.returncode:
+            return None
+        a, b = r.stdout.split()[:2]
+        return (int(a), int(b))
+    except Exception:
+        return None
+
+
 def mount_into_dev_keg() -> bool:
     """Drop the uplift .pth into the omlx-dev keg's python (own keg, so
     unsandboxed; same single-file contract as
-    `omlx-uplift install --formula omlx-dev`)."""
+    `omlx-uplift install --formula omlx-dev`). Skips with a warning when
+    the dev keg runs a different python minor than THIS uplift install —
+    mounting across minors risks ABI-crossed imports (python312 trial)."""
     target = default_target_python("omlx-dev")
     if not target:
+        return False
+    eng = python_minor(str(target))
+    ours = (sys.version_info[0], sys.version_info[1])
+    if eng and eng != ours:
+        print(f"  note: dev keg python {eng[0]}.{eng[1]} != uplift "
+              f"{ours[0]}.{ours[1]} — DEV-9 co-mount skipped; rebuild "
+              f"omlx-uplift against the dev keg or mount explicitly",
+              file=sys.stderr)
         return False
     sp = resolve_site_packages(target)
     sp.mkdir(parents=True, exist_ok=True)
