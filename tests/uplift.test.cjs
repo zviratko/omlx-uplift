@@ -21,7 +21,8 @@ test('normalize: happy path', () => {
     assert.strictEqual(s.requests, 10);
     assert.strictEqual(s.memPercent, 50);
     assert.strictEqual(s.pressure, 'ok');
-    // U39: disk-cache fields dropped from normalize entirely
+    // U39: the OLD disk field name stays dead — the SSD figure returned
+    // (2026-10-27) as ssdCache*, fed by classic's runtime_cache totals
     assert.strictEqual(s.cacheBytes, undefined);
 });
 test('normalize: U25/U28 promptTokens + U29 global hot-cache totals', () => {
@@ -31,7 +32,12 @@ test('normalize: U25/U28 promptTokens + U29 global hot-cache totals', () => {
     assert.strictEqual(s.promptTokens, 400);
     assert.strictEqual(s.hotCacheBytes, 5e8);
     assert.strictEqual(s.hotCacheMaxBytes, 2e9);
-    // absent = null, never 0 (honest absence on old payloads)
+    // cache card SSD segment: the disk totals ride the SAME payload
+    assert.strictEqual(s.ssdCacheBytes, 1e9);
+    assert.strictEqual(s.ssdCacheMaxBytes, 1e10);
+    // absent = null, never 0 (honest absence on old payloads). The
+    // runtime_cache fixture always carries total_size_bytes/disk_max_bytes,
+    // so null-absence for the SSD pair is proven by the empty-payload test.
     const bare = snap(raw());
     assert.strictEqual(bare.promptTokens, null);
     assert.strictEqual(bare.hotCacheBytes, null);
@@ -41,6 +47,8 @@ test('normalize: garbage in, nulls out', () => {
     assert.strictEqual(s.genTps, null);
     assert.strictEqual(s.requests, null);
     assert.strictEqual(s.memPercent, null);
+    assert.strictEqual(s.ssdCacheBytes, null);
+    assert.strictEqual(s.ssdCacheMaxBytes, null);
     assert.deepStrictEqual(s.models, []);
 });
 test('normalize: undefined payload does not throw', () => {

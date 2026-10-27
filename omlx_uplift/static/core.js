@@ -51,6 +51,16 @@ function normalize(raw) {
         // summed, hot_cache_max_bytes = the single process-wide budget).
         hotCacheBytes: num(c.hot_cache_size_bytes),
         hotCacheMaxBytes: num(c.hot_cache_max_bytes),
+        // SSD (disk) cache totals — the SAME runtime_cache figures classic's
+        // own cache gauge plots (dashboard.js: total_size_bytes /
+        // disk_max_bytes), so no new server work: they ride every stats
+        // poll. Semantics (the U39 caveat): the per-model scoped sums of
+        // LOADED models while serving; a full cache-directory scan while
+        // nothing is loaded; splash dirs always scanned. The card labels
+        // this truthfully (tooltip) — never re-derive it by summing
+        // cacheModels, that was the old lie.
+        ssdCacheBytes: num(c.total_size_bytes),
+        ssdCacheMaxBytes: num(c.disk_max_bytes),
         // Per-model runtime cache rows (SSD cache + hot cache sizes).
         cacheModels: (Array.isArray(c.models) ? c.models : []).map(cm => ({
             id: String(cm.id || '?'),

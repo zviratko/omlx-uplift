@@ -211,3 +211,15 @@ test('the row-height engine never measures a hidden board', () => {
     assert.match(upSrc, /currentTab, currentSub, boardVisible, loadSkins/,
         'boot reaches the predicate through _bootGlue');
 });
+
+test('STATUS-CLICK: the button opens the remembered view, hover keeps the menu (user 2026-10-27)', () => {
+    // Desktop hover already drops the menu, so a click that only toggled it
+    // closed what the user could SEE open — the button read as doing nothing.
+    assert.match(upSrc,
+        /bindDropdown\('dd-status-btn', 'dd-status-menu', \{ navigateOnClick: true \}\)/,
+        'a click navigates; the bare #status route lands on layout.lastStatusView');
+    assert.ok(!/bindDropdown\('dd-status-btn', 'dd-status-menu'\)/.test(upSrc),
+        'the old menu-only binding must not come back');
+    // the shared handler still exempts touch (menu rows stay reachable)
+    assert.match(upSrc, /if \(opts\.navigateOnClick && !ddTouchHover\(\)\)/);
+});

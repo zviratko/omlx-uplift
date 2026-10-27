@@ -679,3 +679,21 @@ test('ADD PATCH spans one full line above the table (no small box)', () => {
     assert.match(css, /\.pt-addform div\.pt-addform-row > \.pt-field:has\(#pt-new-id\)/,
         'the name field wrapper must grow (label+input column)');
 });
+
+test('ADD PATCH strip: one control height, one caption size (user 2026-10-27)', () => {
+    const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+    // The global input floor (input:not(…):not(…)…) carries eight :not()
+    // clauses; the strip override must MIRROR that weight or the text
+    // inputs silently stay 32px tall beside 26px selects and buttons.
+    assert.ok(/\.pt-addform div\.pt-addform-row input\[type="text"\](?::not\([^)]*\)){8}/
+        .test(css), 'the add-row text-input override lost its :not() chain');
+    assert.match(css, /\.pt-addform div\.pt-addform-row select \{ height: 26px/,
+        'controls share ONE height (26px) across the strip');
+    assert.ok(!/\.pt-addform div\.pt-addform-row input\[type="text"\](?!:not)[, ]/.test(css),
+        'the weak selector that lost the cascade must not come back');
+    assert.ok(!/label\.pt-auto input\[type="checkbox"\][^{]*\{[^}]*12px/.test(css),
+        'strip checkboxes keep the house 18px touch target');
+    const f = /\.pt-addform \.pt-field \{([^}]*)\}/.exec(css);
+    assert.ok(f && /font-size: 10px/.test(f[1]),
+        'field captions ride the strip 10px scale (title/hint/labels)');
+});

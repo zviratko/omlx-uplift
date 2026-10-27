@@ -4005,21 +4005,29 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* TARGETS existing `.pt-addform-row` — REPLACE: tighter gutter. */
 .pt-addform div.pt-addform-row { gap: 5px; padding: 5px 8px; }
 /* TARGETS `.pt-field` inside the add row — NEW hook, scoped so other pages'
-   field labels are untouched. */
-.pt-addform .pt-field { gap: 1px; font-size: 9px; letter-spacing: .04em; }
+   field labels are untouched. 10px = the one caption size the strip uses
+   (title, hint, checkbox labels); 9px read as a fourth font size. */
+.pt-addform .pt-field { gap: 1px; font-size: 10px; letter-spacing: .04em; }
 /* TARGETS existing `.pt-addform-row input[type=text], …file, …select` —
    REPLACE: 32px is the convention for a STANDALONE form; inside a toolbar card
-   it is what made the block tall. */
-.pt-addform div.pt-addform-row input[type="text"],
+   it is what made the block tall. The selector mirrors the global input floor
+   (input:not(…):not(…)) because that floor carries eight :not() clauses and
+   OUTWEIGHED the plain class chain — the strip then shipped 32px text inputs
+   beside 26px selects/buttons (user 2026-10-27: 'wildly different box sizes,
+   unaligned'). Keep the :not() chain: a shorter selector silently loses.
+   font is the full shorthand so the base rule's 12px/1 mono cannot leak. */
+.pt-addform div.pt-addform-row input[type="text"]:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="image"]),
 .pt-addform div.pt-addform-row input[type="file"],
-.pt-addform div.pt-addform-row select { height: 26px; padding: 0 6px; font-size: 11px; }
+.pt-addform div.pt-addform-row select { height: 26px; padding: 0 6px;
+    font: 400 11px/1 var(--mono); }
 /* TARGETS `.btn` inside the add row (#pt-preview-btn) — NEW hook; the toolbar's
    own #pt-check-btn keeps the global 32px. */
-.pt-addform .btn { height: 26px; padding: 0 9px; font-size: 11px; }
+.pt-addform .btn { height: 26px; padding: 0 9px; font: 400 11px/1 var(--mono); }
 /* TARGETS `.pt-auto` / `.pt-reversal` inside the add row — NEW hooks: the two
-   opt-in boxes are part of the form again, not blocks of their own. */
+   opt-in boxes are part of the form again, not blocks of their own. The
+   checkbox KEEPS the house 18px touch target (user: "bigger, everywhere") —
+   a 12px shrink here broke that rule and read as a stray smaller box. */
 .pt-addform label.pt-auto { height: 26px; gap: 3px; font-size: 10px; }
-.pt-addform label.pt-auto input[type="checkbox"] { width: 12px; height: 12px; }
 .pt-addform label.pt-reversal { padding: 2px 6px; }
 /* TARGETS `#pt-src-url` (.grow) + ROUND 3: with the card spread across the
    full line, the three text fields share the spare width — url the most (it

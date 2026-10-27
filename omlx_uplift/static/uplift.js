@@ -811,7 +811,14 @@ document.addEventListener('click', e => {
 const DD_PAIRS = [['dd-status-btn', 'dd-status-menu'],
                   ['dd-models-btn', 'dd-models-menu'], ['dd-bench-btn', 'dd-bench-menu'],
                   ['dd-chat-btn', 'dd-chat-menu'], ['dd-settings-btn', 'dd-settings-menu']];
-bindDropdown('dd-status-btn', 'dd-status-menu');
+// STATUS-CLICK (user 2026-10-27): "clicking the STATUS menu does nothing —
+// it should open whatever STATUS type was active last". Desktop hover
+// already reveals the menu, so a click that merely closed the hovered-open
+// menu read as doing nothing. The click now navigates, like CHAT above:
+// the bare '#status' route resolves to the remembered board view
+// (layout.lastStatusView — STATUS-SPLIT; About is deliberately never a
+// landing target). Hover still drops the menu, touch still toggles it.
+bindDropdown('dd-status-btn', 'dd-status-menu', { navigateOnClick: true });
 bindDropdown('dd-models-btn', 'dd-models-menu');
 bindDropdown('dd-bench-btn', 'dd-bench-menu');
 // NAT-6 (user's model, verbatim): "clicking on 'Chat' menu would open the
@@ -2174,13 +2181,25 @@ function render(s) {
         s.cacheEfficiency != null ? Math.max(0, Math.min(100, s.cacheEfficiency)) + '%' : '0%';
     mem.classList.toggle('warn', s.memPercent !== null && s.memPercent >= 70);
     mem.classList.toggle('bad', s.memPercent !== null && s.memPercent >= 90);
-    $('cache-sub').textContent = s.hotCacheBytes !== null
-        // U29: RAM (hot) cache size + free. U39: the disk half is gone —
-        // it counted only loaded models' SSD dirs (a lie vs what's on disk).
-        // Free = budget − used; an unlimited/absent budget honestly shows
-        // no free figure.
-        ? `RAM ${C.fmtBytes(s.hotCacheBytes)}${s.hotCacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.hotCacheMaxBytes - s.hotCacheBytes)) : ''}`
-        : '';
+    // U29: RAM (hot) cache size + free. U39: the disk half was dropped when
+    // it counted only loaded models' blocks (a lie vs what's on disk). Now
+    // re-added (user 2026-10-27) from the classic runtime_cache totals that
+    // ride every stats poll — the SAME figures classic's own cache gauge
+    // plots; the SSD note states what the number covers.
+    // Free = budget − used; an unlimited/absent budget honestly shows
+    // no free figure.
+    const cacheSegs = [];
+    if (s.hotCacheBytes !== null) {
+        cacheSegs.push(`RAM ${C.fmtBytes(s.hotCacheBytes)}${s.hotCacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.hotCacheMaxBytes - s.hotCacheBytes)) : ''}`);
+    }
+    if (s.ssdCacheBytes !== null) {
+        cacheSegs.push(`SSD ${C.fmtBytes(s.ssdCacheBytes)}${s.ssdCacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.ssdCacheMaxBytes - s.ssdCacheBytes)) : ''}`);
+    }
+    const csub = $('cache-sub');
+    csub.textContent = cacheSegs.join(' · ');
+    // disclosure stays with the figure it qualifies (the tooltip is the
+    // card's only free word budget; the RAM half needs none — it is exact)
+    csub.title = s.ssdCacheBytes !== null ? C.t('uplift.card.cache.ssd_note') : '';
     // #mem-label is owned by uplift_charts.js (renderMemLabel): the card
     // header shows the three absolute GiB figures the chart plots
     // (omlx memory / settings ceiling / iogpu wired limit), not the old

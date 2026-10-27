@@ -54,6 +54,7 @@
  "uplift.btn.motion": "애니메이션 전환",
  "uplift.btn.theme": "테마",
  "uplift.card.cache": "캐시",
+ "uplift.card.cache.ssd_note": "SSD는 서비스 중인 로드된 모델의 캐시 블록을 집계합니다. 모델이 로드되지 않으면 캐시 폴더 전체를 검사합니다.",
  "uplift.card.generation": "생성",
  "uplift.card.inflight": "Activity",
  "uplift.card.memory_cache": "메모리 및 캐시",

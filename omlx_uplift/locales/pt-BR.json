@@ -54,6 +54,7 @@
  "uplift.btn.motion": "Alternar animações",
  "uplift.btn.theme": "Tema",
  "uplift.card.cache": "Cache",
+ "uplift.card.cache.ssd_note": "SSD conta os blocos de cache dos modelos carregados durante o atendimento; quando nenhum modelo está carregado, a pasta inteira de cache é verificada.",
  "uplift.card.generation": "Geração",
  "uplift.card.inflight": "Activity",
  "uplift.card.memory_cache": "Memória e cache",

@@ -1520,18 +1520,14 @@ def _coexistence_warnings() -> None:
               "state). To switch over:\n"
               "  brew services stop omlx\n"
               "  brew services start omlx-dev", file=sys.stderr)
-    # port clash: dev port vs vanilla settings.json port
+    # port clash: dev port vs vanilla settings.json port — ONE reader
+    # (devsrc.vanilla_port knows the nested server.port shape; the inline
+    # top-level read that lived here printed 8000 for real custom ports)
     from . import devsrc
 
     cfg = devsrc.load_config() or {}
     dev_port = cfg.get("port", 8001)
-    try:
-        import json
-
-        with open(os.path.expanduser("~/.omlx/settings.json")) as fh:
-            vanilla_port = json.load(fh).get("port", 8000)
-    except (OSError, ValueError):
-        vanilla_port = 8000
+    vanilla_port = devsrc.vanilla_port()
     if int(dev_port) == int(vanilla_port):
         print(f"WARNING: dev port {dev_port} equals the vanilla omlx port — "
               "the two servers would fight. Change it: omlx-uplift dev "

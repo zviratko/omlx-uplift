@@ -470,5 +470,44 @@ class GitHardening(unittest.TestCase):
             self.assertEqual(p.returncode, 124)
 
 
+class VanillaPortTest(unittest.TestCase):
+    """DEV-panel isolation strip: the vanilla port must come from the REAL
+    settings.json shape. Classic stores it nested under "server"; reading a
+    top-level "port" silently printed the 8000 default for a server on a
+    custom port (user 2026-10-27)."""
+
+    def _run(self, payload):
+        import json
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "settings.json"), "w") as fh:
+                json.dump(payload, fh)
+            with mock.patch.object(devsrc, "vanilla_base", lambda: d):
+                return devsrc.vanilla_port()
+
+    def test_nested_server_port_is_the_truth(self):
+        self.assertEqual(self._run({"server": {"port": 11435}}), 11435)
+
+    def test_nested_beats_a_stale_top_level_key(self):
+        self.assertEqual(
+            self._run({"port": 8000, "server": {"port": 11435}}), 11435)
+
+    def test_top_level_legacy_shape_still_answers(self):
+        self.assertEqual(self._run({"port": 9999}), 9999)
+
+    def test_missing_port_is_the_classic_default(self):
+        self.assertEqual(self._run({"models": {}}), 8000)
+
+    def test_garbage_port_is_the_default_not_a_crash(self):
+        self.assertEqual(self._run({"server": {"port": "eighty"}}), 8000)
+
+    def test_absent_file_is_the_default(self):
+        import tempfile as _tf
+        from unittest import mock
+        with _tf.TemporaryDirectory() as d:
+            with mock.patch.object(devsrc, "vanilla_base", lambda: d):
+                self.assertEqual(devsrc.vanilla_port(), 8000)
+
+
 if __name__ == "__main__":
     unittest.main()

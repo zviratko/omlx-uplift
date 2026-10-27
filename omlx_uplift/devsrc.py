@@ -1325,10 +1325,24 @@ def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
 
 
 def vanilla_port() -> int:
+    """The port the vanilla server listens on, from its own settings.json.
+
+    Classic stores it NESTED ({"server": {"port": ...}}) — every writer in
+    this repo does the same (cli QA seeding, and the server itself).
+    Reading a top-level "port"
+    found nothing and printed the 8000 default for a server actually on a
+    custom port (user 2026-10-27: 'the 8000 port number is a lie'). The
+    nested key wins; a top-level "port" still answers for hand-written
+    legacy files; 8000 remains only for a file that does not exist.
+    """
     try:
         with open(os.path.join(vanilla_base(), "settings.json")) as fh:
-            return int(json.load(fh).get("port", 8000))
-    except (OSError, ValueError):
+            d = json.load(fh)
+        server = d.get("server")
+        if isinstance(server, dict) and server.get("port") is not None:
+            return int(server["port"])
+        return int(d.get("port", 8000))
+    except (OSError, ValueError, TypeError):
         return 8000
 
 

@@ -54,6 +54,7 @@
  "uplift.btn.motion": "切换动画",
  "uplift.btn.theme": "主题",
  "uplift.card.cache": "缓存",
+ "uplift.card.cache.ssd_note": "SSD 统计正在服务的已加载模型的缓存块；没有模型加载时会扫描整个缓存文件夹。",
  "uplift.card.generation": "生成",
  "uplift.card.inflight": "Activity",
  "uplift.card.memory_cache": "内存与缓存",
