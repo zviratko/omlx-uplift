@@ -149,7 +149,7 @@ var SYSTEM_DEFAULT = 'System Default';
 // settable on the page... Exception - the model used'). A preset
 // captures the WHOLE page: prompt, thinking, sampling overrides, web
 // search, voice-in (model/lang/auto-send/mode) and voice-out (voice/
-// auto-speak/chunk/speech-api). Model is excluded BY DESIGN — it is the conversation,
+// auto-speak/chunk/speech-api). Model is excluded BY DESIGN - it is the conversation,
 // not the persona. localStorage keys are page-global; applying a profile
 // re-provisions them, exactly like loading a setup sheet.
 function chatSettingsSnapshot() {
