@@ -139,11 +139,14 @@ MAX_RUNS_KEPT = 10
 # Watcher cadence for the live per-request report (user Q3 2026-10-27): the
 # engine's prefill tracker updates once per chunk, so 1 s reads everything it
 # knows without spamming the SSE. Tests shrink this constant, never the code.
-WATCH_S = 1.0
-WATCH_S_CLEAN = 0.25   # decode-only regime samples finer: the clean tail of
-                       # a wave can be shorter than one slow tick (wide8 sweep
-                       # lesson: 1.8 s of true 288 t/s decode fit between two
-                       # 1 s samples and steady came back absent)
+WATCH_S = 0.25  # the whole wave samples at 4 Hz: the clean decode tail of
+                # a fast wave can be shorter than any adaptive threshold —
+                # phase/tracker lag keeps 'prefilling' true until the very
+                # end, so 'tick finer once it looks clean' armed too late or
+                # never (two sweep finds 2026-10-28: wide8, then 3x8192/tg32
+                # whose whole clean window fit inside ONE 1 s slow tick).
+                # The tick walks a dozen dicts; cost is irrelevant next to
+                # the GPU work it observes.
 # Absolute cap on ONE wave's requests. Not a product bound on 'longer
 # prefill with custom parallelism' — it exists so a typo cannot open 100k
 # concurrent add_request calls on a live server. 256 is already 32x the
@@ -496,8 +499,7 @@ async def _watch_wave(run: PrefillRun) -> None:
                                         "message": msg,
                                         "current": len(run.results),
                                         "total": max(1, run.request.parallel)})
-            await asyncio.sleep(
-                WATCH_S_CLEAN if (not prefill_now and n_gen >= 2) else WATCH_S)
+            await asyncio.sleep(WATCH_S)
     except asyncio.CancelledError:
         pass
     finally:
@@ -1004,9 +1006,9 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
             for i in range(req.parallel)], return_exceptions=True)
         wall_end = time.perf_counter()
         # The watcher self-terminates on the all-done tick — give it a beat
-        # to land the terminal sample instead of cancelling it mid-sleep
-        # (cancelling straight away shaves the clean tail off the steady
-        # measurement exactly when the wave is shortest on generation).
+        # (grace >> WATCH_S) to land the terminal sample instead of
+        # cancelling it mid-sleep: cancelling straight away shaves the clean
+        # tail off the steady measurement exactly on short waves.
         try:
             await asyncio.wait_for(watcher, timeout=1.5)
         except BaseException:
@@ -1035,6 +1037,15 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
         steady = steady_decode_tps(list(run.dec_samples), min_tokens=min_tg)
         if steady:
             run.aggregate.update(steady)
+        elif len(run.dec_samples) >= 4:
+            # diagnosability: the absence IS the report, so show why. Compact
+            # tail: (t_rel, total_tok, streams, prefilling) per sample.
+            s0 = run.dec_samples[0][0]
+            logger.info(
+                "prefill probe %s: no clean window; samples tail %s",
+                run.bench_id,
+                [(round(t - s0, 2), c, n, p)
+                 for t, c, n, p in run.dec_samples[-14:]])
         run.aggregate["memory"] = _memory_summary(peak_gpu, guard, run)
         run.status = "completed"
         run.phase = "done"
