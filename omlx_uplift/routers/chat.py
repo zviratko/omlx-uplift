@@ -107,7 +107,7 @@ def _clean_state(raw):
             keep["generation"] = gen
         keep["webSearch"] = bool(s.get("webSearch"))
         for k, mx in (("voice", 120), ("autospeak", 1), ("chunk", 16),
-                      ("sttModel", 120), ("sttLang", 16),
+                      ("speakRoute", 8), ("sttModel", 120), ("sttLang", 16),
                       ("sttAutosend", 1), ("sttMode", 11)):
             v = s.get(k)
             if isinstance(v, str):

@@ -3272,21 +3272,40 @@ function vanillaSpeechCall(voiceId, chunk) {
     // server answers honestly instead of the chat guessing.
     var r = voiceRowById(voiceId);
     var model = r && r.model ? String(r.model) : '';
+    var ask = { input: chunk, response_format: 'wav' };
+    // WAV at both doors: it is what the browser decode path already handles,
+    // and it keeps the server out of a transcode hop per chunk
     if (model.indexOf('say:') === 0)
-        return { url: '/v1/audio/speech', body: { model: model, input: chunk } };
+        return { url: '/v1/audio/speech', body: Object.assign({ model: model }, ask) };
     if (model)
         return { url: '/v1/audio/speech',
-                 body: { model: model, voice: (r.name || ''), input: chunk } };
+                 body: Object.assign({ model: model, voice: (r.name || '') }, ask) };
     return { url: '/v1/audio/speech',
-             body: { model: String(voiceId || 'say'), input: chunk } };
+             body: Object.assign({ model: String(voiceId || 'say') }, ask) };
 }
-function vanillaSpeechFetch(url, body) {
+async function vanillaSpeechFetch(url, body) {
     // /v1 takes the Bearer key, not the board session: the same credential the
-    // chat already carries for /v1/chat/completions
-    return fetch(url, { method: 'POST',   // domkit-exempt: /v1 Bearer call, binary audio
-        headers: { 'Content-Type': 'application/json',
-                   'Authorization': 'Bearer ' + (_key || '') },
-        body: JSON.stringify(body) });
+    // chat already carries for /v1/chat/completions. Failures surface as the
+    // server's own message, because the speech queue only ever looks at the
+    // bytes - a 400 handed to it verbatim would decode as a broken clip.
+    var r;
+    try {
+        r = await fetch(url, { method: 'POST',   // domkit-exempt: /v1 Bearer call, binary audio
+            headers: { 'Content-Type': 'application/json',
+                       'Authorization': 'Bearer ' + (_key || '') },
+            body: JSON.stringify(body) });
+    } catch (e) {
+        throw new Error(errText(e) || 'request failed');
+    }
+    if (!r.ok) {
+        var msg = r.statusText || ('http ' + r.status), core = C();
+        try {
+            var j = await r.json();
+            if (core && core.errorText) msg = core.errorText(j) || msg;
+        } catch (_) { /* a non-JSON failure keeps the status text */ }
+        throw new Error(msg);
+    }
+    return r;
 }
 function speakRequestFor(chunk) {
     // ONE request builder for both queues (the live turn and a replayed
@@ -3581,7 +3600,10 @@ function saySweepPlans() {
     for (i = 0; i < orphans.length; i++) saySilence(orphans[i]);
     return orphans.length;
 }
-function memKey(text) { return chatVoiceId() + '\u001f' + text; }
+// The door is part of the identity: the same voice and text synthesized by
+// this board and by the vanilla server are different bytes, and a clip read
+// through one must not answer a request made through the other.
+function memKey(text) { return chatVoiceId() + speakRoute() + '\u001f' + text; }
 function memGet(text) {
     var k = memKey(text), v = _mem.get(k);
     if (v) { _mem.delete(k); _mem.set(k, v); }        // LRU touch
@@ -3674,6 +3696,14 @@ function chunkSource(owner, text) {
     return function () {
         var hit = memGet(text);
         if (hit) return hit;
+        // Same source contract at both doors: a promise for an audio Response.
+        // The vanilla endpoint has no cache field, so the in-page buffer cache
+        // is what keeps a replay free of a second request.
+        if (speakRoute() === 'vanilla') {
+            var spec = vanillaSpeechCall(chatVoiceId(), text);
+            return vanillaSpeechFetch(spec.url, spec.body)
+                .then(function (r) { return rememberAudio(text, r); });
+        }
         var V = VOI();
         if (!V || !V.speechJson) return Promise.reject(new Error('no voices module'));
         return Promise.resolve(V.speechJson('/voices/speech',

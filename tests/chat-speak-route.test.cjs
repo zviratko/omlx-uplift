@@ -30,9 +30,19 @@ const CODE = [
     'function chatVoiceId() { return _currentVoice; }',
     'function VOI() { return _V; }',
     'var _calls = [];',
-    'function fetch(u, o) { _calls.push([u, o]); return Promise.resolve("fetched"); }',
+    'var _fetchImpl = function (u, o) { _calls.push([u, o]);'
+        + ' return Promise.resolve("fetched"); };',
+    'function fetch(u, o) { return _fetchImpl(u, o); }',
     grab('function speakRoute()', 'function SIO()'),
     grab('function voiceRowById', 'function ensureSpeakQueue'),
+    // chunkSource's own seams, stubbed: this test is about which door it asks
+    'function memGet() { return null; }',
+    'function rememberAudio(text, r) { return r; }',
+    'function errText(e) { return (e && e.name) ? String(e.name) : ""; }',
+    'function C() { return { errorText: function (j) {'
+        + ' return (j && j.error && j.error.message) || \'\'; } }; }',
+    grab('function chunkSource', 'function rememberAudio'),
+    grab('function memKey', 'function memGet'),
 ].join('\n');
 
 const ROUTE = 'omlx-uplift-speak-route';
@@ -40,7 +50,8 @@ const sandbox = { JSON, Math, Date, String, Number, Object, Array, Promise,
     Error, exports: {} };
 vm.createContext(sandbox);
 vm.runInContext(CODE + '\nexports.api = () => ({ speakRoute, voiceRowById, '
-    + 'vanillaSpeechCall, vanillaSpeechFetch, speakRequestFor, speakTransport });',
+    + 'vanillaSpeechCall, vanillaSpeechFetch, speakRequestFor, speakTransport, '
+    + 'chunkSource, memKey });',
     sandbox);
 const api = vm.runInContext('exports.api()', sandbox);
 const _calls = () => vm.runInContext('_calls', sandbox);
@@ -94,9 +105,11 @@ test('one request builder answers for both doors', () => {
     assert.strictEqual(api.speakRequestFor('chunk A').url, '/v1/audio/speech');
 });
 
-test('the transport adds the Bearer key only on the /v1 door', () => {
+test('the transport adds the Bearer key only on the /v1 door', async () => {
     set('_key = "sk-test"; _calls = [];');
-    api.speakTransport('/v1/audio/speech', { model: 'say', input: 'x' });
+    set('_fetchImpl = function (u, o) { _calls.push([u, o]);'
+        + ' return Promise.resolve({ ok: true, status: 200 }); };');
+    await api.speakTransport('/v1/audio/speech', { model: 'say', input: 'x' });
     assert.strictEqual(_calls().length, 1);
     const [url, opts] = _calls()[0];
     assert.strictEqual(url, '/v1/audio/speech');
@@ -106,6 +119,52 @@ test('the transport adds the Bearer key only on the /v1 door', () => {
     store({});
     set('_V = { speechJson: (u) => { return "uplift:" + u; } };');
     assert.strictEqual(api.speakTransport('/voices/speech', {}), 'uplift:/voices/speech');
+});
+
+test('the primary per-chunk path honours the door too', async () => {
+    set(`_fetchImpl = function (u, o) { _calls.push([u, o]);
+        return Promise.resolve({ ok: true, status: 200 }); };`);
+    // chunkSource is what actually feeds a streamed turn (the queue legs are
+    // the fallback); a route that only moved the fallback would be a lie
+    voices([SAY_ROW]);
+    set('_calls = [];');
+    store({});
+    await api.chunkSource({ conv: 'c1', msg: 'm1' }, 'uplift chunk')();
+    assert.strictEqual(_calls().length, 0, 'uplift door never hits fetch here');
+    store({ [ROUTE]: 'vanilla' });
+    const src = api.chunkSource({ conv: 'c1', msg: 'm1' }, 'vanilla chunk');
+    const res = await src();
+    assert.strictEqual(_calls().length, 1, 'vanilla door issues the request');
+    const [url, opts] = _calls()[0];
+    assert.strictEqual(url, '/v1/audio/speech');
+    assert.strictEqual(JSON.parse(opts.body).input, 'vanilla chunk');
+    assert.strictEqual(res.ok, true, 'the source keeps the Response contract');
+});
+
+test('the vanilla call pins WAV, the format both doors already speak', () => {
+    voices([SAY_ROW]);
+    const body = api.vanillaSpeechCall('zuzana', 'x').body;
+    assert.strictEqual(body.response_format, 'wav');
+    voices([MODEL_ROW]);
+    assert.strictEqual(api.vanillaSpeechCall('aiden', 'x').body.response_format, 'wav');
+});
+
+test('a refusal at the vanilla door surfaces as the server message', async () => {
+    // the speech queue only ever looks at bytes: hand it a 400 body and the
+    // listener gets a broken clip instead of the reason
+    set(`_fetchImpl = async () => ({ ok: false, status: 400, statusText: 'Bad Request',
+        json: async () => ({ error: { message: 'macOS speech is switched off' } }) });`);
+    await assert.rejects(() => api.vanillaSpeechFetch('/v1/audio/speech', {}),
+        /macOS speech is switched off/);
+});
+
+test('the audio cache never replays across doors', () => {
+    voices([SAY_ROW]);
+    store({});
+    const up = api.memKey('same sentence');
+    store({ [ROUTE]: 'vanilla' });
+    assert.notStrictEqual(api.memKey('same sentence'), up,
+        'the same text at the other door is different bytes');
 });
 
 test('both queues share the request builder and the transport', () => {
