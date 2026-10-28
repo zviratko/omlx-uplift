@@ -3142,6 +3142,10 @@ function seNewProfile(panel) {
         workVals: JSON.parse(JSON.stringify(from)),
         origVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
         dirty: new Set(), _new: true, _origExpose: false, _origApi: '' };
+    // ALIAS-DIRTY fix: same raw-vs-normalized seed rule as seAddProfileTab —
+    // without this a brand-new profile inherits a phantom kwargs count from
+    // its origVals staying in the raw shape.
+    seNormalizeKwargs(t.origVals);
     seInitSnap(t);
     seTabs.push(t);
     seActiveTab = t.id;
@@ -3158,13 +3162,21 @@ function seAddProfileTab(p) {
     let t = seTabs.find(z => z.profileId === p.name || z.name === p.name);
     if (t) return t;
     const ov = JSON.parse(JSON.stringify(p.settings || {}));
+    // ALIAS-DIRTY fix: seed BOTH maps through the exact normalization the
+    // first render performs (R10-6 raw chat_template_kwargs -> entries).
+    // Seeding raw left origVals un-normalized, so merely VISITING a profile
+    // that stores its own kwargs re-derived workVals entries and the
+    // ctKwargEntries compare in seTabChangeCount counted a change the user
+    // never made — SAVE ALL then committed every visited profile.
+    const seedW = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov)));
+    const seedO = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov)));
+    seNormalizeKwargs(seedW); seNormalizeKwargs(seedO);
     t = seInitSnap({ id: 'prof' + Date.now() + Math.random().toString(36).slice(2, 5),
         name: p.name,
         display_name: p.display_name || p.name,
         expose_as_model: !!p.expose_as_model, api_name: p.api_name || '',
         profileId: p.name, overrides: ov,
-        workVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
-        origVals: Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(ov))),
+        workVals: seedW, origVals: seedO,
         dirty: new Set(), _origExpose: !!p.expose_as_model, _origApi: p.api_name || '' });
     seTabs.push(t);
     return t;
@@ -4484,7 +4496,11 @@ async function saveProfileCommit(panel, t, name, msg) {
     MM_GLUE.toast(C.t('uplift.toast.saved_profile', {name: name}));
     t.profileId = name; t.dirty = new Set();
     t._origExpose = !!t.expose_as_model; t._origApi = t.api_name || '';
-    t.name = name; t.display_name = name;
+    // ALIAS-DIRTY fix: name is the INTERNAL id — never let a save overwrite
+    // the human display label with it (the tab read 'QA ON' before the save
+    // and 'qa-on' after, until refresh; a second save then persisted that).
+    t.name = name;
+    if (!t.display_name) t.display_name = name;
     t.origVals = Object.assign({}, seBaseVals, JSON.parse(JSON.stringify(t.workVals || {})));
     t._ovSnap = JSON.parse(JSON.stringify(ov));   // saved overrides are the new original
     const mirror = (MM_DATA.profiles || []).find(x => x.name === name);
