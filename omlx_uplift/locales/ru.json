@@ -55,6 +55,7 @@
  "uplift.btn.theme": "Тема",
  "uplift.card.cache": "Кэш",
  "uplift.card.cache.ssd_note": "SSD считает блоки кэша загруженных моделей во время работы; когда модель не загружена, сканируется вся папка кэша.",
+ "uplift.card.cache.ssd_off": "отключён",
  "uplift.card.generation": "Генерация",
  "uplift.card.inflight": "Activity",
  "uplift.card.memory_cache": "Память и кэш",

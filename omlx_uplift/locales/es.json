@@ -55,6 +55,7 @@
  "uplift.btn.theme": "Tema",
  "uplift.card.cache": "Caché",
  "uplift.card.cache.ssd_note": "SSD cuenta los bloques de caché de los modelos cargados durante el servicio; cuando no hay ningún modelo cargado se analiza toda la carpeta de caché.",
+ "uplift.card.cache.ssd_off": "desactivada",
  "uplift.card.generation": "Generación",
  "uplift.card.inflight": "Activity",
  "uplift.card.memory_cache": "Memoria y caché",

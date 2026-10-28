@@ -2192,14 +2192,24 @@ function render(s) {
     if (s.hotCacheBytes !== null) {
         cacheSegs.push(`RAM ${C.fmtBytes(s.hotCacheBytes)}${s.hotCacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.hotCacheMaxBytes - s.hotCacheBytes)) : ''}`);
     }
-    if (s.ssdCacheBytes !== null) {
+    if (s.ssdUnavailable) {
+        // classic's ssd_cache_unavailable banner, compact form: a size of
+        // 0 is not an empty cache here, it is NO cache — say so
+        cacheSegs.push(`SSD ${C.tf('uplift.card.cache.ssd_off', 'off')}`);
+    } else if (s.ssdCacheBytes !== null) {
         cacheSegs.push(`SSD ${C.fmtBytes(s.ssdCacheBytes)}${s.ssdCacheMaxBytes ? ' · ' + C.tf('uplift.label.free', 'free') + ' ' + C.fmtBytes(Math.max(0, s.ssdCacheMaxBytes - s.ssdCacheBytes)) : ''}`);
     }
     const csub = $('cache-sub');
     csub.textContent = cacheSegs.join(' · ');
+    csub.classList.toggle('warn', s.ssdUnavailable === true);
     // disclosure stays with the figure it qualifies (the tooltip is the
     // card's only free word budget; the RAM half needs none — it is exact)
-    csub.title = s.ssdCacheBytes !== null ? C.t('uplift.card.cache.ssd_note') : '';
+    csub.title = s.ssdUnavailable
+        ? C.tf('status.runtime_cache.ssd_unavailable',
+               'SSD cache is off because {path} was not available when the '
+             + 'server started. Restart the server after reconnecting the drive.',
+               {path: s.ssdCacheDir || '—'})
+        : (s.ssdCacheBytes !== null ? C.t('uplift.card.cache.ssd_note') : '');
     // #mem-label is owned by uplift_charts.js (renderMemLabel): the card
     // header shows the three absolute GiB figures the chart plots
     // (omlx memory / settings ceiling / iogpu wired limit), not the old

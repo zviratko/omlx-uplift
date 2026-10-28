@@ -55,6 +55,7 @@
  "uplift.btn.theme": "Motiv",
  "uplift.card.cache": "Cache",
  "uplift.card.cache.ssd_note": "SSD počítá bloky cache načtených modelů během obsluhy; když není načten žádný model, prohledá se celá složka cache.",
+ "uplift.card.cache.ssd_off": "vypnut",
  "uplift.card.generation": "Generování",
  "uplift.card.inflight": "Activity",
  "uplift.card.memory_cache": "Paměť a cache",

@@ -55,6 +55,7 @@
  "uplift.btn.theme": "Thème",
  "uplift.card.cache": "Cache",
  "uplift.card.cache.ssd_note": "SSD compte les blocs de cache des modèles chargés pendant le service ; lorsqu'aucun modèle n'est chargé, tout le dossier de cache est analysé.",
+ "uplift.card.cache.ssd_off": "désactivé",
  "uplift.card.generation": "Génération",
  "uplift.card.inflight": "Activity",
  "uplift.card.memory_cache": "Mémoire et cache",

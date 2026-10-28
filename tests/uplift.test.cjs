@@ -42,6 +42,30 @@ test('normalize: U25/U28 promptTokens + U29 global hot-cache totals', () => {
     assert.strictEqual(bare.promptTokens, null);
     assert.strictEqual(bare.hotCacheBytes, null);
 });
+test('normalize: e6d5989 SSD-unavailable verdict passes through', () => {
+    const on = snap(raw({ runtime_cache: { total_size_bytes: 0,
+        disk_max_bytes: 0, ssd_cache_unavailable: true,
+        ssd_cache_dir: '/Volumes/fast/ssd-cache' } }));
+    assert.strictEqual(on.ssdUnavailable, true);
+    assert.strictEqual(on.ssdCacheDir, '/Volumes/fast/ssd-cache');
+    // an absent flag (older keg) is NOT unavailable — zero must keep
+    // meaning an empty cache, not a missing drive
+    const off = snap(raw({ runtime_cache: { total_size_bytes: 7,
+        disk_max_bytes: 8 } }));
+    assert.strictEqual(off.ssdUnavailable, false);
+    const bare = snap(raw());
+    assert.strictEqual(bare.ssdUnavailable, false);
+    assert.strictEqual(bare.ssdCacheDir, null);
+});
+test('cache card labels an unavailable SSD cache, never a fake 0 B', () => {
+    const src = allStaticJs();   // split-proof: concatenated static surface
+    assert.match(src,
+        /if \(s\.ssdUnavailable\) \{[\s\S]{0,220}SSD \$\{C\.tf\('uplift\.card\.cache\.ssd_off'/,
+        'the segment says off instead of printing 0 bytes');
+    assert.match(src,
+        /csub\.title = s\.ssdUnavailable\s*\?[\s\S]{0,220}status\.runtime_cache\.ssd_unavailable/,
+        'the tooltip reuses classic full reason (mounted catalog)');
+});
 test('normalize: garbage in, nulls out', () => {
     const s = snap({ avg_generation_tps: 'x', total_requests: -5, active_models: null });
     assert.strictEqual(s.genTps, null);

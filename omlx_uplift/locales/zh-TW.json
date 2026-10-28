@@ -55,6 +55,7 @@
  "uplift.btn.theme": "主題",
  "uplift.card.cache": "快取",
  "uplift.card.cache.ssd_note": "SSD 統計正在服務的已載入模型的快取區塊；沒有模型載入時會掃描整個快取資料夾。",
+ "uplift.card.cache.ssd_off": "已關閉",
  "uplift.card.generation": "生成",
  "uplift.card.inflight": "Activity",
  "uplift.card.memory_cache": "內存與快取",

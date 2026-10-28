@@ -61,6 +61,12 @@ function normalize(raw) {
         // cacheModels, that was the old lie.
         ssdCacheBytes: num(c.total_size_bytes),
         ssdCacheMaxBytes: num(c.disk_max_bytes),
+        // e6d5989 mirror: the server turns the SSD cache OFF itself when
+        // its directory was unavailable at start. The figure stays 0 then,
+        // which would read like an empty-but-working cache — classic shows
+        // a banner instead, so we carry the verdict and label the truth.
+        ssdUnavailable: c.ssd_cache_unavailable === true,
+        ssdCacheDir: typeof c.ssd_cache_dir === 'string' ? c.ssd_cache_dir : null,
         // Per-model runtime cache rows (SSD cache + hot cache sizes).
         cacheModels: (Array.isArray(c.models) ? c.models : []).map(cm => ({
             id: String(cm.id || '?'),

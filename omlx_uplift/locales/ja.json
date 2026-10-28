@@ -55,6 +55,7 @@
  "uplift.btn.theme": "テーマ",
  "uplift.card.cache": "キャッシュ",
  "uplift.card.cache.ssd_note": "SSD は稼働中に読み込み済みモデルのキャッシュブロックを数えます。モデルが未読み込みのときはキャッシュフォルダ全体をスキャンします。",
+ "uplift.card.cache.ssd_off": "オフ",
  "uplift.card.generation": "生成",
  "uplift.card.inflight": "Activity",
  "uplift.card.memory_cache": "メモリとキャッシュ",
