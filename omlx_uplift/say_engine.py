@@ -25,8 +25,8 @@ Contract of this module:
   truth readable without root, so voices outside them are simply NOT
   badged (we never claim 'System' for something we cannot prove);
 - synthesis writes the text to a temp file and runs
-  `say -v NAME -f FILE -o OUT --data-format=LEI16@22050`, producing a
-  plain 22.05 kHz mono RIFF WAV. argv is a list, the voice name must
+  `say -v NAME -f FILE -o OUT --data-format=LEI16@24000`, producing a
+  plain 24 kHz mono RIFF WAV. argv is a list, the voice name must
   match an installed voice exactly, and the text is capped — no shell,
   no injection surface, no unbounded work;
 - formats other than WAV are transcoded with the same optional ffmpeg
@@ -66,7 +66,9 @@ _MIN_DETECT_CHARS = 3          # below this there is nothing to recognise
 _NL_CONFIDENT = 50             # percent; 'ok' scores pl@29 — garbage stops here
 _DETECT_CHARS = 1000           # a reply's first lines decide the language
 _TIMEOUT_S = 180
-_SAMPLE_RATE = 22050
+# 24 kHz, not 22.05: libsndfile encodes Opus only at 8/12/16/24/48 kHz, so a
+# 22.05 kHz render breaks response_format=opus for this engine alone.
+_SAMPLE_RATE = 24000
 _BASE_WPM = 175                # say's default pace is ~175-190; multipliers ride on it
 _CACHE_TTL_S = 300
 

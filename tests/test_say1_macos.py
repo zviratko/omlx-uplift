@@ -306,7 +306,7 @@ def test_synth_builds_safe_argv(monkeypatch, on_mac):
     assert cmd[0] == "say" and "-v" in cmd
     assert cmd[cmd.index("-v") + 1] == "Zuzana"   # roster row: id == name
     assert "-f" in cmd and "-o" in cmd
-    assert "--data-format=LEI16@22050" in cmd
+    assert "--data-format=LEI16@24000" in cmd
     assert cmd[cmd.index("-r") + 1] == "193"    # 175*1.1
     # the shell-junk text reached the FILE verbatim, never as an argv item
     assert seen["text"] == "Ahoj; rm -rf / #`backtick`"
