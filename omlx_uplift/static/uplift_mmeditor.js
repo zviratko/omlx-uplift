@@ -1793,15 +1793,14 @@ function renderEditorFields(container) {
                     { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true });
                 const spThr = seBind('number', 'specprefill_threshold',
                     { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 });
-                // SPEC-1: the four load knobs ride the model (excluded from
-                // profile settings server-side); only the activation row is
-                // alias-selectable. Lock them visibly greyed on profile tabs.
+                // SPEC-1 v3: the master switch and drafter ride the model load
+                // (excluded from profile settings server-side); keep rate and
+                // threshold ARE alias-tunable — they left the engine signature
+                // and travel per request, so no lock and no reload badge.
                 const spWhy = C.tf('uplift.se.specprefill.load_locked',
                     'Tied to the model load — edit it on the BASE tab. An alias can only differ on activation.');
                 seLockOnProfile(spBool, 'specprefill_enabled', spWhy);
                 seLockOnProfile(spDraft, 'specprefill_draft_model', spWhy);
-                seLockOnProfile(spKeep, 'specprefill_keep_pct', spWhy);
-                seLockOnProfile(spThr, 'specprefill_threshold', spWhy);
                 seFam(g, 'specprefill_enabled', spBool, [spAuto, spDraft, spKeep, spThr]);
             }
     }

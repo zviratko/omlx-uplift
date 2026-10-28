@@ -432,13 +432,30 @@ test('SPEC-1 type flip strips the activation payload key like its family', () =>
     assert.ok(!('specprefill_auto_enabled' in S.buildPayload(st, embModel)),
         'non-LLM save must not carry the activation flag');
 });
-test('SPEC-1: SpecPrefill left the diffusion profile-unsupported set', () => {
-    // the load fields are not profile fields anymore; the activation flag
-    // is universal but inert without the master — classic lists neither.
-    for (const k of ['specprefill_enabled', 'specprefill_draft_model',
-                     'specprefill_keep_pct', 'specprefill_threshold',
-                     'specprefill_auto_enabled'])
+test('SPEC-1: SpecPrefill profile classification after v3', () => {
+    // master + drafter: not profile fields anymore (server EXCLUDED).
+    for (const k of ['specprefill_enabled', 'specprefill_draft_model'])
         assert.ok(!S.DIFFUSION_UNSUPPORTED_PROFILE_FIELDS.has(k), k + ' must be absent');
+    // keep/threshold: model-specific profile fields again — spec-decode is
+    // inert on the diffusion lane, so they stay in the unsupported set.
+    for (const k of ['specprefill_keep_pct', 'specprefill_threshold'])
+        assert.ok(S.DIFFUSION_UNSUPPORTED_PROFILE_FIELDS.has(k), k + ' must be listed');
+    // activation: universal but inert without the master — classic leaves it out.
+    assert.ok(!S.DIFFUSION_UNSUPPORTED_PROFILE_FIELDS.has('specprefill_auto_enabled'));
+});
+test('SPEC-1 v3: keep/threshold left the runtime badge and signature', () => {
+    assert.ok(!S.RUNTIME_SETTING_KEYS.has('specprefill_keep_pct'));
+    assert.ok(!S.RUNTIME_SETTING_KEYS.has('specprefill_threshold'));
+    assert.ok(S.RUNTIME_SETTING_KEYS.has('specprefill_enabled'));
+    assert.ok(S.RUNTIME_SETTING_KEYS.has('specprefill_draft_model'));
+    const a = rt({ specprefill_enabled: true, specprefill_draft_model: 'd',
+                   specprefill_keep_pct: 0.2, specprefill_threshold: 1024 });
+    const b = rt({ specprefill_enabled: true, specprefill_draft_model: 'd',
+                   specprefill_keep_pct: 0.5, specprefill_threshold: 65536 });
+    assert.deepStrictEqual(S.runtimeDiff(a, b), [],
+        'an alias tuning keep/threshold must never demand a reload');
+    const c = rt({ specprefill_enabled: true, specprefill_draft_model: 'other' });
+    assert.ok(S.runtimeDiff(a, c).length > 0, 'a different drafter still forks');
 });
 
 /* ---- MT-1: model-type family (classic's llm/vlm gate) ----------------- */

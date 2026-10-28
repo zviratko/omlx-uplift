@@ -36,10 +36,13 @@
         'moe_expert_offload_enabled', 'moe_expert_offload_resident_fraction',
         'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
         'external_engine',
-        // SPEC-1 (our specprefill split): the SpecPrefill load fields are no
-        // longer profile-eligible at all, so they cannot appear in a
-        // diffusion profile; specprefill_auto_enabled is universal but inert
-        // without the master (classic leaves it out of this set too).
+        // SPEC-1 (our specprefill split): the master switch and drafter are
+        // not profile fields at all anymore (server EXCLUDED), so they cannot
+        // appear in a diffusion profile; keep_pct/threshold stay model-specific
+        // profile fields — spec-decode is inert on the diffusion lane, so they
+        // remain in THIS set — and specprefill_auto_enabled is universal but
+        // inert without the master (classic leaves it out here too).
+        'specprefill_keep_pct', 'specprefill_threshold',
         // SYNC-1 (upstream 7a4ea39): the dflash cache/context knobs are gone
         // from ModelSettingsRequest (extra='forbid'); only these survive.
         'dflash_enabled', 'dflash_draft_model',
@@ -777,8 +780,9 @@
         add('specprefill_enabled', spOn);
         if (spOn) {
             add('specprefill_draft_model', d.specprefill_draft_model);
-            add('specprefill_keep_pct', d.specprefill_keep_pct ?? 0.2);
-            add('specprefill_threshold', d.specprefill_threshold ?? null);
+            // SPEC-1 v3: keep_pct/threshold left the engine signature
+            // server-side — the request carries the effective (profile-
+            // merged) values, so an alias may tune them without a reload.
         }
         // SYNC-1 2026-10-13: engine_pool._engine_runtime_signature adds
         // ('external_engine', value or None) UNCONDITIONALLY under its
@@ -834,8 +838,9 @@
         // SYNC-1 (3c39990): model-level + engine_pool signature material → the
         // editor must badge it RELOAD, exactly like the PLE offload row.
         'qwen4_gdn_decode_wide_proj',
-        'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
-        'specprefill_threshold',
+        'specprefill_enabled', 'specprefill_draft_model',
+        // SPEC-1 v3: keep_pct/threshold are no longer runtime material (the
+        // server dropped them from the engine signature; they ride requests).
         'external_engine',
         // SYNC-1 (7a4ea39): surviving dflash family only — the cache/context
         // knobs no longer exist server-side, so they cannot be runtime material.
@@ -1044,7 +1049,8 @@
         'reasoning_parser', 'guided_grammar_enabled', 'guided_grammar',
         'max_tool_result_tokens',
         // SPEC-1: the activation flag rides profiles as a request-time field
-        // (the load fields never do — the server excludes them from profiles).
+        // (the master switch and drafter never do — the server excludes them
+        // from profiles; keep_pct/threshold ride as MODEL-SPECIFIC fields).
         'specprefill_auto_enabled',
     ];
     const REQ_CHILD_MASTER = {

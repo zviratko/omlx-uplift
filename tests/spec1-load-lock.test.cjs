@@ -22,11 +22,13 @@ const body = (fn) => {
     assert.fail('unbalanced ' + fn);
 };
 
-test('SPEC-1: the four load rows are locked on profile tabs', () => {
-    for (const k of ['specprefill_enabled', 'specprefill_draft_model',
-                     'specprefill_keep_pct', 'specprefill_threshold'])
+test('SPEC-1: master and drafter are locked on profile tabs; knobs are not', () => {
+    for (const k of ['specprefill_enabled', 'specprefill_draft_model'])
         assert.match(SRC, new RegExp('seLockOnProfile\\([^)]*\\b' + k + '\\b'),
             k + ' must carry a profile-tab lock');
+    for (const k of ['specprefill_keep_pct', 'specprefill_threshold'])
+        assert.ok(!new RegExp('seLockOnProfile\\([^)]*\\b' + k + '\\b').test(SRC),
+            k + ' is alias-tunable (v3) and must NOT be locked');
 });
 test('SPEC-1: the activation row is NOT locked (it is THE alias field)', () => {
     assert.ok(!/seLockOnProfile\([^)]*specprefill_auto_enabled/.test(SRC));
