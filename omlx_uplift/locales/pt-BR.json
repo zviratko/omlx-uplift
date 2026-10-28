@@ -1315,6 +1315,7 @@
  "uplift.se.typenote.hidden": "As configurações de geração (amostragem, raciocínio, gramática guiada, decodificação especulativa) não se aplicam ao motor {type} e ficam ocultas aqui, exatamente como no painel clássico.",
  "uplift.se.typenote.sticky": "As configurações salvas das famílias ocultas NÃO são apagadas pelo filtro de tipo e mantêm o efeito listado: {keys}.",
  "uplift.se.typenote.template": "Modelos globais podem trazer todas as configurações; cada modelo aplica apenas as chaves que cabem no seu tipo.",
+ "uplift.se.specprefill.load_locked": "Vinculado ao carregamento do modelo — edite-o na aba BASE. Um alias só pode diferir na ativação.",
  "uplift.status.no_engines": "Nenhum motor carregado",
  "uplift.ui.delete_global_template": "Excluir este modelo global (pacote de configurações salvas)",
  "uplift.ui.edit_global_template": "Editar este modelo",

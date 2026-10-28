@@ -1326,6 +1326,7 @@
  "uplift.se.typenote.hidden": "생성 설정(샘플링, 생각 모드, 문법, 추측 디코딩)은 엔진 {type}에 적용되지 않아 클래식 대시보드와 같이 여기선 숨겨요.",
  "uplift.se.typenote.sticky": "숨긴 계열의 저장된 설정은 타입 게이트로 지워지지 않고 목록대로 계속 적용돼요: {keys}.",
  "uplift.se.typenote.template": "전역 템플릿은 모든 설정을 담을 수 있고, 각 모델은 자기 타입에 맞는 키만 적용해요.",
+ "uplift.se.specprefill.load_locked": "모델 로드와 연결됨 — BASE 탭에서 편집하세요. 별칭은 활성화에서만 다를 수 있습니다.",
  "uplift.status.no_engines": "엔진이 로드되지 않았어요",
  "uplift.ui.delete_global_template": "이 전역 템플릿 삭제 (저장된 설정 묶음)",
  "uplift.ui.edit_global_template": "이 템플릿 편집",

@@ -1311,6 +1311,7 @@
  "uplift.se.typenote.hidden": "生成设置（采样、思考、引导语法、投机解码）不适用于 {type} 引擎，因此在此隐藏，与经典仪表盘一致。",
  "uplift.se.typenote.sticky": "隐藏系列的已存设置不会被类型开关清除，仍保留所列作用：{keys}。",
  "uplift.se.typenote.template": "全局模板可以包含所有设置；每个模型只应用与其类型相符的键。",
+ "uplift.se.specprefill.load_locked": "与模型加载绑定 — 请在 BASE 页编辑。别名只能在使用开关上不同。",
  "uplift.status.no_engines": "尚未加载引擎",
  "uplift.ui.delete_global_template": "删除此全局模板（已存设置组合）",
  "uplift.ui.edit_global_template": "编辑此模板",

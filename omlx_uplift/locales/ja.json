@@ -1314,6 +1314,7 @@
  "uplift.se.typenote.hidden": "生成設定（サンプリング、思考モード、Guided Grammar、推測デコード）はエンジン {type} に適用されないため、クラシックダッシュボード同様ここでは非表示です。",
  "uplift.se.typenote.sticky": "非表示ファミリーの保存済み設定は型ゲートで削除されず、列挙された効果を維持します: {keys}。",
  "uplift.se.typenote.template": "グローバルテンプレートはすべての設定を持てます。各モデルは型に合うキーのみ適用します。",
+ "uplift.se.specprefill.load_locked": "モデルの読み込みに紐づきます — BASE タブで編集してください。エイリアスが異なることができるのは有効化のみです。",
  "uplift.status.no_engines": "エンジンが読み込まれていません",
  "uplift.ui.delete_global_template": "このグローバルテンプレートを削除（保存設定のまとまり）",
  "uplift.ui.edit_global_template": "このテンプレートを編集",

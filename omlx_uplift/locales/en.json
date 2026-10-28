@@ -1311,6 +1311,7 @@
  "uplift.se.typenote.hidden": "Generation settings (sampling, thinking, grammar, speculative decoding) do not apply to the {type} engine and are hidden here, exactly as in the classic dashboard.",
  "uplift.se.typenote.sticky": "Stored settings from the hidden families are NOT cleared by the type gate and keep their listed effect: {keys}.",
  "uplift.se.typenote.template": "Global templates can carry every setting; each model applies only the keys that fit its type.",
+ "uplift.se.specprefill.load_locked": "Tied to the model load — edit it on the BASE tab. An alias can only differ on activation.",
  "uplift.status.no_engines": "No engines loaded",
  "uplift.ui.delete_global_template": "Delete this global template (stored settings bundle)",
  "uplift.ui.edit_global_template": "Edit this template",

@@ -1311,6 +1311,7 @@
  "uplift.se.typenote.hidden": "產生設定（取樣、思考、引導語法、推論解碼）不適用於 {type} 引擎，因此在此隱藏，與經典儀表板一致。",
  "uplift.se.typenote.sticky": "隱藏系列的已儲存設定不會被類型開關清除，仍保留所列作用：{keys}。",
  "uplift.se.typenote.template": "全域範本可以包含所有設定；每個模型只套用與其類型相符的機碼。",
+ "uplift.se.specprefill.load_locked": "與模型載入綁定 — 請在 BASE 頁編輯。別名只能在使用開關上不同。",
  "uplift.status.no_engines": "未載入引擎",
  "uplift.ui.delete_global_template": "刪除此全域範本（已儲存設定組合）",
  "uplift.ui.edit_global_template": "編輯此範本",

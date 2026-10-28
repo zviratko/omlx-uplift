@@ -516,10 +516,28 @@ function seGatedDiv(cls) {
     if (cls) d.className = cls;
     return d;
 }
+/* SPEC-1 (user 2026-10-28): model-load knobs are not profile fields — the
+   server strips them from profile settings, so editing one on an alias tab
+   silently saves nothing. Keep them VISIBLE greyed (the alias reads what it
+   inherits) but LOCKED; mark the row and let seGateEnabled() honour it.
+   Locking a row never propagates to siblings or children: the activation
+   row lives under a locked master and stays editable, because family
+   gating reads seValues[masterKey], not the master's DOM input. */
+function seLockOnProfile(rowEl, key, why) {
+    if (!rowEl || seIsBaseTab()) return;
+    rowEl.dataset.lockProf = key;
+    rowEl.classList.add('se-off');
+    rowEl.title = why;
+    const i = rowEl.querySelector('input, select, textarea');
+    if (i) i.disabled = true;
+}
 function seGateEnabled(host) {
-    for (let n = host.closest('[data-gate]'); n;
-            n = n.parentElement && n.parentElement.closest('[data-gate]'))
-        if (seValues[n.dataset.gate] !== true) return false;
+    for (let n = host.closest('[data-gate]') || host.closest('[data-lock-prof]');
+            n; n = n.parentElement &&
+            (n.parentElement.closest('[data-gate]') || n.parentElement.closest('[data-lock-prof]'))) {
+        if (n.dataset.lockProf) return false;
+        if (n.dataset.gate && seValues[n.dataset.gate] !== true) return false;
+    }
     return true;
 }
 function seRefreshGates(root) {
@@ -1757,25 +1775,34 @@ function renderEditorFields(container) {
                     spBool.title = seValues.is_paroquant
                         ? (seValues.paroquant_reason || 'Paroquant checkpoint')
                         : 'VLM MTP cannot be combined with SpecPrefill.';
-                seFam(g, 'specprefill_enabled', spBool,
-                    [seBind('bool', 'specprefill_auto_enabled', {
-                        // SPEC-1: reuses classic's modal keys — translated in
-                        // every locale through the mounted catalog.
-                        label: C.tf('modal.model_settings.specprefill_auto',
-                            'Active for Every Request'),
-                        hint: C.tf('modal.model_settings.specprefill_auto_hint',
-                            'Use SpecPrefill on every request above the threshold. When off, the drafter stays loaded but idle — requests can opt in individually and model aliases can turn it on.') }),
-                     seBind('select', 'specprefill_draft_model',
-                        { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }),
-                     seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
-                        { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
-                        { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
-                        { value: '0.25', label: '25% — Conservative+ (~2.5x)' },
-                        { value: '0.3', label: '30% — Conservative (~2.2x)' },
-                        { value: '0.4', label: '40% — Mild (~1.8x)' },
-                        { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true }),
-                     seBind('number', 'specprefill_threshold',
-                        { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 })]);
+                const spAuto = seBind('bool', 'specprefill_auto_enabled', {
+                    // SPEC-1: reuses classic's modal keys — translated in
+                    // every locale through the mounted catalog.
+                    label: C.tf('modal.model_settings.specprefill_auto',
+                        'Active for Every Request'),
+                    hint: C.tf('modal.model_settings.specprefill_auto_hint',
+                        'Use SpecPrefill on every request above the threshold. When off, the drafter stays loaded but idle — requests can opt in individually and model aliases can turn it on.') });
+                const spDraft = seBind('select', 'specprefill_draft_model',
+                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true });
+                const spKeep = seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
+                    { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
+                    { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
+                    { value: '0.25', label: '25% — Conservative+ (~2.5x)' },
+                    { value: '0.3', label: '30% — Conservative (~2.2x)' },
+                    { value: '0.4', label: '40% — Mild (~1.8x)' },
+                    { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true });
+                const spThr = seBind('number', 'specprefill_threshold',
+                    { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 });
+                // SPEC-1: the four load knobs ride the model (excluded from
+                // profile settings server-side); only the activation row is
+                // alias-selectable. Lock them visibly greyed on profile tabs.
+                const spWhy = C.tf('uplift.se.specprefill.load_locked',
+                    'Tied to the model load — edit it on the BASE tab. An alias can only differ on activation.');
+                seLockOnProfile(spBool, 'specprefill_enabled', spWhy);
+                seLockOnProfile(spDraft, 'specprefill_draft_model', spWhy);
+                seLockOnProfile(spKeep, 'specprefill_keep_pct', spWhy);
+                seLockOnProfile(spThr, 'specprefill_threshold', spWhy);
+                seFam(g, 'specprefill_enabled', spBool, [spAuto, spDraft, spKeep, spThr]);
             }
     }
 

@@ -1315,6 +1315,7 @@
  "uplift.se.typenote.hidden": "Los ajustes de generación (muestreo, razonamiento, gramática guiada, decodificación especulativa) no se aplican al motor {type} y aquí quedan ocultos, igual que en el panel clásico.",
  "uplift.se.typenote.sticky": "La puerta de tipo NO borra los ajustes guardados de las familias ocultas; conservan el efecto listado: {keys}.",
  "uplift.se.typenote.template": "Las plantillas globales pueden llevar toda la configuración; cada modelo aplica solo las claves que corresponden a su tipo.",
+ "uplift.se.specprefill.load_locked": "Vinculado a la carga del modelo — edítalo en la pestaña BASE. Un alias solo puede diferir en la activación.",
  "uplift.status.no_engines": "No hay motores cargados",
  "uplift.ui.delete_global_template": "Eliminar esta plantilla global (paquete de ajustes guardados)",
  "uplift.ui.edit_global_template": "Editar esta plantilla",

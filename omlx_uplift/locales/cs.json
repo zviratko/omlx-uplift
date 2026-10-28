@@ -1311,6 +1311,7 @@
  "uplift.se.typenote.hidden": "Nastavení generování (sampling, Thinking, řízená gramatika, spekulativní dekódování) se pro engine {type} nevztahují a jsou zde skryta, přesně jako v klasickém dashboardu.",
  "uplift.se.typenote.sticky": "Uložená nastavení ze skrytých rodin typová brána NEMAŽE a zachovávají si uvedený efekt: {keys}.",
  "uplift.se.typenote.template": "Globální šablony mohou nést veškerá nastavení; každý model uplatní jen klíče, které odpovídají jeho typu.",
+ "uplift.se.specprefill.load_locked": "Spjato s načtením modelu — upravte jej na kartě BASE. Alias se může lišit jen v aktivaci.",
  "uplift.status.no_engines": "Žádné načtené enginy",
  "uplift.ui.delete_global_template": "Smazat tuto globální šablonu (sada uložených nastavení)",
  "uplift.ui.edit_global_template": "Upravit tuto šablonu",
