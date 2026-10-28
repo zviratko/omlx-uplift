@@ -38,10 +38,10 @@
         'external_engine',
         // SPEC-1 (our specprefill split): the master switch and drafter are
         // not profile fields at all anymore (server EXCLUDED), so they cannot
-        // appear in a diffusion profile; keep_pct/threshold stay model-specific
-        // profile fields — spec-decode is inert on the diffusion lane, so they
-        // remain in THIS set — and specprefill_auto_enabled is universal but
-        // inert without the master (classic leaves it out here too).
+        // appear in a diffusion profile; keep_pct/threshold are universal
+        // request-time profile fields — spec-decode is inert on the diffusion
+        // lane, so they sit in THIS set — and specprefill_auto_enabled is
+        // universal but inert without the master (classic leaves it out).
         'specprefill_keep_pct', 'specprefill_threshold',
         // SYNC-1 (upstream 7a4ea39): the dflash cache/context knobs are gone
         // from ModelSettingsRequest (extra='forbid'); only these survive.
@@ -1048,15 +1048,17 @@
         'thinking_budget_enabled', 'thinking_budget_tokens',
         'reasoning_parser', 'guided_grammar_enabled', 'guided_grammar',
         'max_tool_result_tokens',
-        // SPEC-1: the activation flag rides profiles as a request-time field
-        // (the master switch and drafter never do — the server excludes them
-        // from profiles; keep_pct/threshold ride as MODEL-SPECIFIC fields).
-        'specprefill_auto_enabled',
+        // SPEC-1: activation + keep rate + threshold are universal
+        // request-time fields (an alias may differ without touching the
+        // engine; the master switch and drafter never ride profiles).
+        'specprefill_auto_enabled', 'specprefill_keep_pct', 'specprefill_threshold',
     ];
     const REQ_CHILD_MASTER = {
         thinking_budget_tokens: 'thinking_budget_enabled',
         guided_grammar: 'guided_grammar_enabled',
         specprefill_auto_enabled: 'specprefill_enabled',
+        specprefill_keep_pct: 'specprefill_enabled',
+        specprefill_threshold: 'specprefill_enabled',
     };
     function _reqNullish(v) { return v === null || v === undefined || v === ''; }
     function _reqEq(a, b) {

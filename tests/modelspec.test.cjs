@@ -423,6 +423,17 @@ test('SPEC-1 requestDiff: idle override on an active base diverges', () => {
                                { specprefill_auto_enabled: false });
     assert.deepStrictEqual(dead, []);
 });
+test('SPEC-1 v3: knob overrides are request divergence rows', () => {
+    const d = S.requestDiff({ specprefill_enabled: true, specprefill_threshold: 1024,
+                              specprefill_keep_pct: 0.2 },
+                            { specprefill_threshold: 65536, specprefill_keep_pct: 0.4 });
+    assert.deepStrictEqual(d.map(r => r.key).sort(),
+                           ['specprefill_keep_pct', 'specprefill_threshold']);
+    // inert without the master on either side: no rows
+    const dead = S.requestDiff({ specprefill_enabled: false, specprefill_threshold: 1024 },
+                               { specprefill_threshold: 65536 });
+    assert.deepStrictEqual(dead, []);
+});
 test('SPEC-1 type flip strips the activation payload key like its family', () => {
     assert.ok(S.TYPE_ONLY_KEYS.has('specprefill_auto_enabled'));
     const embModel = base({ id: 'e1', model_type: 'embedding' });
