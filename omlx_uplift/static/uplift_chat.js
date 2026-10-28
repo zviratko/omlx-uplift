@@ -149,7 +149,7 @@ var SYSTEM_DEFAULT = 'System Default';
 // settable on the page... Exception - the model used'). A preset
 // captures the WHOLE page: prompt, thinking, sampling overrides, web
 // search, voice-in (model/lang/auto-send/mode) and voice-out (voice/
-// auto-speak/chunk). Model is excluded BY DESIGN — it is the conversation,
+// auto-speak/chunk/speech-api). Model is excluded BY DESIGN — it is the conversation,
 // not the persona. localStorage keys are page-global; applying a profile
 // re-provisions them, exactly like loading a setup sheet.
 function chatSettingsSnapshot() {
@@ -167,6 +167,7 @@ function chatSettingsSnapshot() {
             out.voice = ls.getItem('omlx-uplift-voice') || '';
             out.autospeak = ls.getItem(AUTO_KEY) || '0';
             out.chunk = ls.getItem(CHUNK_KEY) || 'sentence';
+            out.speakRoute = ls.getItem(ROUTE_KEY) === 'vanilla' ? 'vanilla' : 'uplift';
             out.sttModel = ls.getItem(STT_MODEL_KEY) || '';
             out.sttLang = ls.getItem(STT_LANG_KEY) || '';
             out.sttMode = ls.getItem(STT_MODE_KEY) || 'off';
@@ -197,6 +198,7 @@ function normSettings(s) {
         voice: String(s.voice || ''),
         autospeak: s.autospeak === '1' ? '1' : '0',
         chunk: /^(sentence|line|paragraph)$/.test(s.chunk) ? s.chunk : 'sentence',
+        speakRoute: s.speakRoute === 'vanilla' ? 'vanilla' : 'uplift',
         sttModel: String(s.sttModel || ''),
         sttLang: String(s.sttLang || ''),
         sttMode: /^(off|ptt|continuous)$/.test(s.sttMode) ? s.sttMode : 'off'
@@ -429,6 +431,7 @@ function applyChatSettings(s) {
         ls.setItem('omlx-uplift-voice', n.voice);
         lsSet(AUTO_KEY, n.autospeak);
         lsSet(CHUNK_KEY, n.chunk);
+        lsSet(ROUTE_KEY, n.speakRoute);
         lsSet(STT_MODEL_KEY, n.sttModel);
         lsSet(STT_LANG_KEY, n.sttLang);
         lsSet(STT_MODE_KEY, n.sttMode);
@@ -439,6 +442,8 @@ function applyChatSettings(s) {
     if (ab) ab.classList.toggle('on', n.autospeak === '1');
     var cs = gid('chat-native-speak-chunk');
     if (cs) cs.value = n.chunk;
+    var rs = gid('chat-native-speak-route');
+    if (rs) rs.value = n.speakRoute;
     syncAudioMode();   // mic visibility follows the applied STT model
     return true;
 }
@@ -2943,6 +2948,31 @@ function toolbar() {
         lsSet(CHUNK_KEY, chunkSel.value || 'sentence');
         onPageEdited();        // ROUND 11
     });
+    // Which server produces the audio. The picker voice is unchanged: a macOS
+    // row rides over as model 'say:<identifier>', a stored voice as
+    // {model, voice}, so the same choice answers at both doors.
+    var routeSel = el('select'); routeSel.id = 'chat-native-speak-route';
+    [['uplift', 'uplift.chat.speak_route_uplift', 'Uplift engine'],
+     ['vanilla', 'uplift.chat.speak_route_vanilla', 'Vanilla API']
+    ].forEach(function (o) {
+        var e2 = el('option', null, tf2(o[1], o[2]));
+        e2.value = o[0];
+        e2.dataset.i18n = o[1]; e2.dataset.en = e2.textContent;     // U59
+        routeSel.appendChild(e2);
+    });
+    routeSel.value = speakRoute();
+    routeSel.title = tf2('uplift.chat.speak_route_hint',
+        'Ask for the audio from this board, or from the server itself '
+        + '(POST /v1/audio/speech)');
+    routeSel.dataset.i18nTitle = 'uplift.chat.speak_route_hint';
+    routeSel.dataset.enTitle = routeSel.title;
+    routeSel.addEventListener('change', function () {
+        lsSet(ROUTE_KEY, routeSel.value === 'vanilla' ? 'vanilla' : 'uplift');
+        // VOICE-11 cancel rule, same as a voice change: a half sentence that
+        // started at one door must not finish at the other
+        speakCancel();
+        onPageEdited();        // ROUND 11
+    });
     // ROUND 13 (user): ONE 'Voice' section owns input AND output. The
     // settings button renames to 'Input settings' (the section already
     // says Voice); openSttPop positions against btn.parentElement — keep
@@ -2963,7 +2993,9 @@ function toolbar() {
     speakRow.append(voiceSel, autoBtn);
     secVoice.append(sttGroup, mic, speakHead, speakRow,
         group(tf2('uplift.chat.speak_chunk', 'Chunk'), chunkSel,
-              'uplift.chat.speak_chunk'));
+              'uplift.chat.speak_chunk'),
+        group(tf2('uplift.chat.speak_route', 'Speech API'), routeSel,
+              'uplift.chat.speak_route'));
     // CHAT-3R round 5 (user: 'move the Active preset and save/delete back
     // to the top of the chat box, right of the model name'): the preset
     // stack lives in the top row — Model | Preset | Save | Delete. The
@@ -3175,6 +3207,7 @@ var _voicesCache = null;        // null = not loaded yet
 // is replaced by the queue's own session token + stop().
 var AUTO_KEY = 'omlx-uplift-autospeak';        // '1'/'0', default OFF
 var CHUNK_KEY = 'omlx-uplift-speak-chunk';     // sentence|line|paragraph
+var ROUTE_KEY = 'omlx-uplift-speak-route';     // 'uplift' (default) | 'vanilla'
 var _speakQ = null;        // the ONE SpeechQueue (live + manual reads)
 var _speakCtx = null;      // lazy shared AudioContext (gesture-created)
 var _speakGen = 0;         // session id: cancel/end retire it, stale feeds die
@@ -3196,6 +3229,15 @@ function speakChunkMode() {
     var m = lsGet(CHUNK_KEY);
     return (m === 'line' || m === 'paragraph') ? m : 'sentence';
 }
+function speakRoute() {
+    // Which server answers read-aloud. 'uplift' (default) is this board's own
+    // voice engine: /uplift/api/voices/speech, with its audio cache, its
+    // sanitizer and cloned-voice resolution. 'vanilla' asks the inference
+    // server itself through POST /v1/audio/speech, the OpenAI-shaped API every
+    // client uses - the same picker voice, a different door.
+    var v = W() && W().localStorage;
+    return (v && v.getItem(ROUTE_KEY)) === 'vanilla' ? 'vanilla' : 'uplift';
+}
 function SIO() { return W() && W().Uplift && W().Uplift.speechio; }
 function speakCtx() {
     // queue NEVER creates/resumes a context (VOICE-10 contract): this is
@@ -3216,6 +3258,50 @@ function unlockSpeak() {
     var V = VOI();
     if (V && V.newPlayer) { try { V.newPlayer(null); } catch (_) {} }
 }
+function voiceRowById(id) {
+    var list = _voicesCache || [];
+    for (var i = 0; i < list.length; i++)
+        if (list[i].id === id) return list[i];
+    return null;
+}
+function vanillaSpeechCall(voiceId, chunk) {
+    // The picker's row -> the vanilla server's call. A macOS row carries
+    // 'say:<identifier>' in .model already, which is exactly the model token
+    // that engine addresses; a stored or model voice splits into {model,
+    // voice}. A row the catalog no longer has is sent as a model name and the
+    // server answers honestly instead of the chat guessing.
+    var r = voiceRowById(voiceId);
+    var model = r && r.model ? String(r.model) : '';
+    if (model.indexOf('say:') === 0)
+        return { url: '/v1/audio/speech', body: { model: model, input: chunk } };
+    if (model)
+        return { url: '/v1/audio/speech',
+                 body: { model: model, voice: (r.name || ''), input: chunk } };
+    return { url: '/v1/audio/speech',
+             body: { model: String(voiceId || 'say'), input: chunk } };
+}
+function vanillaSpeechFetch(url, body) {
+    // /v1 takes the Bearer key, not the board session: the same credential the
+    // chat already carries for /v1/chat/completions
+    return fetch(url, { method: 'POST',   // domkit-exempt: /v1 Bearer call, binary audio
+        headers: { 'Content-Type': 'application/json',
+                   'Authorization': 'Bearer ' + (_key || '') },
+        body: JSON.stringify(body) });
+}
+function speakRequestFor(chunk) {
+    // ONE request builder for both queues (the live turn and a replayed
+    // bubble), so a route flip can never make them disagree mid-read
+    if (speakRoute() === 'vanilla') return vanillaSpeechCall(chatVoiceId(), chunk);
+    return { url: '/voices/speech', body: { voice: chatVoiceId(), input: chunk } };
+}
+function speakTransport(url, body) {
+    // one transport seam for both doors; speechJson keeps its own watchdog and
+    // error-text handling for the uplift mount
+    if (String(url).indexOf('/v1/') === 0) return vanillaSpeechFetch(url, body);
+    var V = VOI();
+    if (!V || !V.speechJson) return Promise.reject(new Error('no voices module'));
+    return V.speechJson(url, body);
+}
 function ensureSpeakQueue() {
     if (_speakQ) return _speakQ;
     var sio = SIO(), V = VOI();
@@ -3226,11 +3312,9 @@ function ensureSpeakQueue() {
         ctx: ctx,
         // the queue's default body is {input} alone; /voices/speech 404s
         // without a stored voice — the request seam adds the picker's
-        // composite. speechJson stays the transport (no hand-rolled fetch).
-        request: function (chunk) {
-            return { url: '/voices/speech',
-                     body: { voice: chatVoiceId(), input: chunk } };
-        },
+        // composite, and routes it to the door the Speak section picked.
+        request: speakRequestFor,
+        fetchLike: speakTransport,
     });
     return _speakQ;
 }
@@ -3787,10 +3871,8 @@ function queueFor(plan) {
         ctx: ctx,
         onItem: function (it, st) { sayItemEvent(plan, it, st); },
         // the queue's own leg stays wired for a chunk with no cached source
-        request: function (chunk) {
-            return { url: '/voices/speech',
-                     body: { voice: chatVoiceId(), input: chunk } };
-        },
+        request: speakRequestFor,
+        fetchLike: speakTransport,
     });
     plan.dropMark = plan.q.dropped().length;
     plan.playMark = plan.q.played();
