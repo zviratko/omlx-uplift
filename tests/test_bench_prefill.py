@@ -685,6 +685,55 @@ async def test_the_wave_publishes_memory_and_steady_fields(fake_world,
         assert agg["steady_window_s"] > 0
 
 
+def test_watch_wave_measures_a_clean_tail_shorter_than_one_slow_tick():
+    """Sweep case wide8 (2026-10-28): every prefill landed at t=14.1 and the
+    whole wave finished 1.8 s later — on the old 1 s heartbeat with
+    break-before-sample the clean window never produced two clean adjacent
+    samples and steady_decode_tps came back absent on a wave that was
+    genuinely decoding at 288 t/s aggregate. The watcher must sample the
+    decode-only regime fine AND land a terminal sample."""
+    import asyncio
+    from types import SimpleNamespace
+    req = SimpleNamespace(parallel=2, prefill_tokens=8192,
+                          generation_tokens=64, stagger_seconds=0.0)
+    run = PF.PrefillRun(bench_id="tail", request=req)
+    for i in range(2):
+        run.req_state[i] = {"index": i, "phase": "prefilling", "rid": f"r{i}",
+                            "processed": 0, "total": 8192, "completion": 0}
+
+    async def drive():
+        w = asyncio.create_task(PF._watch_wave(run))
+        await asyncio.sleep(0.35)           # prefills finish together...
+        for i in range(2):
+            run.req_state[i]["phase"] = "generating"
+        # ...then a fast, streaming decode until the wave dies (~1.2 s of it)
+        for step in range(8):
+            await asyncio.sleep(0.15)
+            for i in range(2):
+                run.req_state[i]["completion"] = 5 + 10 * step
+        for i in range(2):
+            run.req_state[i]["completion"] = 64
+            run.req_state[i]["phase"] = "done"
+        await asyncio.sleep(0.4)            # watcher self-terminates
+        if not w.done():
+            w.cancel()
+        try:
+            await w
+        except BaseException:
+            pass
+        return run
+
+    run = asyncio.new_event_loop().run_until_complete(drive())
+    clean = [s for s in run.dec_samples if s[2] >= 2 and not s[3]]
+    # one clean sample measures nothing (that was the bug); two adjacent
+    # fine-spaced ones bound the whole lossy tail
+    assert len(clean) >= 2, f"clean regime undersampled: {run.dec_samples}"
+    gaps = [b[0] - a[0] for a, b in zip(clean, clean[1:])]
+    assert max(gaps) < 0.6, f"decode-only ticks must be fine: {gaps}"
+    steady = PF.steady_decode_tps(list(run.dec_samples), min_tokens=16)
+    assert steady and steady["steady_decode_tps"] > 40, steady
+
+
 def test_live_tps_reports_the_recent_rate_not_the_since_first_token_avg():
     from omlx_uplift import request_log as RL
     RL._LIVE_RATE.clear()

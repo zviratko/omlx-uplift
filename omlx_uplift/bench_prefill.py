@@ -140,6 +140,10 @@ MAX_RUNS_KEPT = 10
 # engine's prefill tracker updates once per chunk, so 1 s reads everything it
 # knows without spamming the SSE. Tests shrink this constant, never the code.
 WATCH_S = 1.0
+WATCH_S_CLEAN = 0.25   # decode-only regime samples finer: the clean tail of
+                       # a wave can be shorter than one slow tick (wide8 sweep
+                       # lesson: 1.8 s of true 288 t/s decode fit between two
+                       # 1 s samples and steady came back absent)
 # Absolute cap on ONE wave's requests. Not a product bound on 'longer
 # prefill with custom parallelism' — it exists so a typo cannot open 100k
 # concurrent add_request calls on a live server. 256 is already 32x the
@@ -448,8 +452,7 @@ async def _watch_wave(run: PrefillRun) -> None:
     try:
         while True:
             states = list(run.req_state.values())
-            if states and all(s["phase"] == "done" for s in states):
-                break
+            all_done = bool(states) and all(s["phase"] == "done" for s in states)
             prefill_now = False
             if tracker is not None:
                 for s in list(run.req_state.values()):
@@ -480,6 +483,11 @@ async def _watch_wave(run: PrefillRun) -> None:
             fp = _footprint()
             if fp > peak["process"]:
                 peak["process"] = fp
+            if all_done:
+                # terminal sample BEFORE the break: the interval that ends
+                # the wave still holds clean decode tokens (its stream
+                # average is honestly diluted by the completions)
+                break
             msg = _wave_message(run)
             if msg != last_msg:
                 last_msg = msg
@@ -488,7 +496,8 @@ async def _watch_wave(run: PrefillRun) -> None:
                                         "message": msg,
                                         "current": len(run.results),
                                         "total": max(1, run.request.parallel)})
-            await asyncio.sleep(WATCH_S)
+            await asyncio.sleep(
+                WATCH_S_CLEAN if (not prefill_now and n_gen >= 2) else WATCH_S)
     except asyncio.CancelledError:
         pass
     finally:
@@ -994,11 +1003,18 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
                          index=i, offset=offsets[i], wave_t0=wall_start)
             for i in range(req.parallel)], return_exceptions=True)
         wall_end = time.perf_counter()
-        watcher.cancel()
+        # The watcher self-terminates on the all-done tick — give it a beat
+        # to land the terminal sample instead of cancelling it mid-sleep
+        # (cancelling straight away shaves the clean tail off the steady
+        # measurement exactly when the wave is shortest on generation).
         try:
-            await watcher
+            await asyncio.wait_for(watcher, timeout=1.5)
         except BaseException:
-            pass
+            watcher.cancel()
+            try:
+                await watcher
+            except BaseException:
+                pass
         peak_gpu = 0
         if have_mx:
             try:
