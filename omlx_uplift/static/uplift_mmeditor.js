@@ -1758,7 +1758,14 @@ function renderEditorFields(container) {
                         ? (seValues.paroquant_reason || 'Paroquant checkpoint')
                         : 'VLM MTP cannot be combined with SpecPrefill.';
                 seFam(g, 'specprefill_enabled', spBool,
-                    [seBind('select', 'specprefill_draft_model',
+                    [seBind('bool', 'specprefill_auto_enabled', {
+                        // SPEC-1: reuses classic's modal keys — translated in
+                        // every locale through the mounted catalog.
+                        label: C.tf('modal.model_settings.specprefill_auto',
+                            'Active for Every Request'),
+                        hint: C.tf('modal.model_settings.specprefill_auto_hint',
+                            'Use SpecPrefill on every request above the threshold. When off, the drafter stays loaded but idle — requests can opt in individually and model aliases can turn it on.') }),
+                     seBind('select', 'specprefill_draft_model',
                         { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }),
                      seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
                         { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
@@ -3506,6 +3513,9 @@ const SE_GEN_CLEAR = [
     ['qwen35_ane_prefill_cpu_shared_resource', true],
     ['specprefill_enabled', false], ['specprefill_draft_model', null],
     ['specprefill_keep_pct', 0.2], ['specprefill_threshold', null],
+    // SPEC-1: classic's clear-on-master-off resets the activation flag to
+    // its form default (active) — state shape.
+    ['specprefill_auto_enabled', true],
     ['dflash_enabled', false], ['dflash_draft_model', null],
     ['dflash_draft_quant_enabled', false],
     ['dflash_draft_quant_weight_bits', null],

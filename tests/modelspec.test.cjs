@@ -383,6 +383,64 @@ test('runtimeDiff: sampling-only differences never diverge', () => {
     assert.deepStrictEqual(S.runtimeDiff(rt({ temperature: 0.2 }), rt({ temperature: 1.1 })), []);
 });
 
+/* ---- SPEC-1: SpecPrefill activation split (our omlx branch patch) ----
+   specprefill_auto_enabled is the model/alias "active for every request"
+   switch: request-time only. It must NEVER be engine material (the whole
+   point is that aliases differ on it without a reload), it sends classic's
+   fold (false = idle, anything else = null/unset), and it rides type flips
+   with its SpecPrefill siblings. */
+test('SPEC-1 buildState: unset reads active; stored false reads idle', () => {
+    assert.strictEqual(S.buildState(base(), {}).specprefill_auto_enabled, true);
+    assert.strictEqual(S.buildState(base(), { specprefill_auto_enabled: false })
+        .specprefill_auto_enabled, false);
+    assert.strictEqual(S.buildState(base(), { specprefill_auto_enabled: true })
+        .specprefill_auto_enabled, true);
+});
+test('SPEC-1 buildPayload: false persists, true sends null (= unset)', () => {
+    const st = S.buildState(base(), { specprefill_enabled: true,
+                                      specprefill_draft_model: 'd' });
+    st.specprefill_auto_enabled = false;
+    assert.strictEqual(S.buildPayload(st, base()).specprefill_auto_enabled, false);
+    st.specprefill_auto_enabled = true;
+    assert.strictEqual(S.buildPayload(st, base()).specprefill_auto_enabled, null);
+});
+test('SPEC-1: activation is never engine material', () => {
+    assert.ok(!S.RUNTIME_SETTING_KEYS.has('specprefill_auto_enabled'));
+    assert.strictEqual(S.sigMasterKey('specprefill_auto_enabled'), '');
+    const on = rt({ specprefill_enabled: true, specprefill_draft_model: 'd',
+                    specprefill_auto_enabled: true });
+    const off = rt({ specprefill_enabled: true, specprefill_draft_model: 'd',
+                     specprefill_auto_enabled: false });
+    assert.deepStrictEqual(S.runtimeDiff(on, off), [],
+        'an alias flipping activation must never demand a reload');
+});
+test('SPEC-1 requestDiff: idle override on an active base diverges', () => {
+    const d = S.requestDiff({ specprefill_enabled: true, specprefill_auto_enabled: true },
+                            { specprefill_auto_enabled: false });
+    assert.deepStrictEqual(d.map(r => r.key), ['specprefill_auto_enabled']);
+    // dead knob both sides: master off everywhere -> no row (DIV-1)
+    const dead = S.requestDiff({ specprefill_enabled: false, specprefill_auto_enabled: true },
+                               { specprefill_auto_enabled: false });
+    assert.deepStrictEqual(dead, []);
+});
+test('SPEC-1 type flip strips the activation payload key like its family', () => {
+    assert.ok(S.TYPE_ONLY_KEYS.has('specprefill_auto_enabled'));
+    const embModel = base({ id: 'e1', model_type: 'embedding' });
+    const st = S.buildState(embModel, { specprefill_enabled: true,
+                                        specprefill_draft_model: 'd' });
+    st.specprefill_auto_enabled = false;
+    assert.ok(!('specprefill_auto_enabled' in S.buildPayload(st, embModel)),
+        'non-LLM save must not carry the activation flag');
+});
+test('SPEC-1: SpecPrefill left the diffusion profile-unsupported set', () => {
+    // the load fields are not profile fields anymore; the activation flag
+    // is universal but inert without the master — classic lists neither.
+    for (const k of ['specprefill_enabled', 'specprefill_draft_model',
+                     'specprefill_keep_pct', 'specprefill_threshold',
+                     'specprefill_auto_enabled'])
+        assert.ok(!S.DIFFUSION_UNSUPPORTED_PROFILE_FIELDS.has(k), k + ' must be absent');
+});
+
 /* ---- MT-1: model-type family (classic's llm/vlm gate) ----------------- */
 const emb = (over = {}) => Object.assign({
     id: 'e1', model_type: 'embedding', config_model_type: 'qwen3',

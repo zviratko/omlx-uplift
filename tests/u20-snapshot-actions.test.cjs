@@ -332,6 +332,7 @@ const CLASSIC_CLEAR = [
     ['qwen35_ane_prefill_cpu_shared_resource', true],
     ['specprefill_enabled', false], ['specprefill_draft_model', null],
     ['specprefill_keep_pct', 0.2], ['specprefill_threshold', null],
+    ['specprefill_auto_enabled', true],
     ['dflash_enabled', false], ['dflash_draft_model', null],
     ['dflash_draft_quant_enabled', false],
     ['dflash_draft_quant_weight_bits', null],

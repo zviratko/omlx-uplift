@@ -36,10 +36,13 @@
         'moe_expert_offload_enabled', 'moe_expert_offload_resident_fraction',
         'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
         'external_engine',
-        'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
+        // SPEC-1 (our specprefill split): the SpecPrefill load fields are no
+        // longer profile-eligible at all, so they cannot appear in a
+        // diffusion profile; specprefill_auto_enabled is universal but inert
+        // without the master (classic leaves it out of this set too).
         // SYNC-1 (upstream 7a4ea39): the dflash cache/context knobs are gone
         // from ModelSettingsRequest (extra='forbid'); only these survive.
-        'specprefill_threshold', 'dflash_enabled', 'dflash_draft_model',
+        'dflash_enabled', 'dflash_draft_model',
         'dflash_draft_quant_enabled', 'dflash_draft_quant_weight_bits',
         'dflash_draft_quant_group_size', 'dflash_draft_window_size',
         'dflash_block_size', 'dflash_verify_mode', 'mtp_enabled', 'mtp_adaptive_max_depth',
@@ -99,7 +102,10 @@
         'external_engine',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
         // SYNC-1 (upstream 7a4ea39): surviving dflash family only.
-        'specprefill_threshold', 'dflash_enabled', 'dflash_draft_model',
+        // SPEC-1: specprefill_auto_enabled is LLM-family material too (the
+        // row lives behind the llm/vlm gate; strip it on a type flip).
+        'specprefill_threshold', 'specprefill_auto_enabled',
+        'dflash_enabled', 'dflash_draft_model',
         'dflash_draft_quant_enabled', 'dflash_draft_quant_weight_bits',
         'dflash_draft_quant_group_size', 'dflash_draft_window_size',
         'dflash_block_size', 'dflash_verify_mode', 'mtp_enabled',
@@ -343,6 +349,8 @@
             specprefill_draft_model: s.specprefill_draft_model || '',
             specprefill_keep_pct: s.specprefill_keep_pct ? String(s.specprefill_keep_pct) : '0.2',
             specprefill_threshold: s.specprefill_threshold || null,
+            // SPEC-1: absent/unset = active for every request (classic helper init)
+            specprefill_auto_enabled: s.specprefill_auto_enabled !== false,
             external_engine: s.external_engine || '',
             dflash_enabled: s.dflash_enabled || false,
             dflash_draft_model: s.dflash_draft_model || '',
@@ -595,6 +603,9 @@
             specprefill_draft_model: ms.specprefill_draft_model || null,
             specprefill_keep_pct: ms.specprefill_enabled ? (parseFloat(ms.specprefill_keep_pct) || 0.2) : null,
             specprefill_threshold: ms.specprefill_enabled ? (ms.specprefill_threshold || null) : null,
+            // SPEC-1 (classic send shape): false = idle drafter; anything
+            // else = null, i.e. unset (active for every request, the default).
+            specprefill_auto_enabled: ms.specprefill_auto_enabled === false ? false : null,
             external_engine: ms.external_engine || null,
             // SYNC-1 (upstream 7a4ea39): the cache/context knobs (activation
             // bits, max_ctx, in-memory cache + entries + bytes, ssd cache +
@@ -674,6 +685,7 @@
                 qwen35_ane_prefill_cpu_threads: 8, qwen35_ane_prefill_cpu_shared_resource: true,
                 specprefill_enabled: false, specprefill_draft_model: null,
                 specprefill_keep_pct: null, specprefill_threshold: null,
+                specprefill_auto_enabled: null,
                 external_engine: '',
                 dflash_enabled: false, mtp_enabled: false,
                 mtp_adaptive_max_depth: null, mtp_fixed_depth: null,
@@ -1031,10 +1043,14 @@
         'thinking_budget_enabled', 'thinking_budget_tokens',
         'reasoning_parser', 'guided_grammar_enabled', 'guided_grammar',
         'max_tool_result_tokens',
+        // SPEC-1: the activation flag rides profiles as a request-time field
+        // (the load fields never do — the server excludes them from profiles).
+        'specprefill_auto_enabled',
     ];
     const REQ_CHILD_MASTER = {
         thinking_budget_tokens: 'thinking_budget_enabled',
         guided_grammar: 'guided_grammar_enabled',
+        specprefill_auto_enabled: 'specprefill_enabled',
     };
     function _reqNullish(v) { return v === null || v === undefined || v === ''; }
     function _reqEq(a, b) {
