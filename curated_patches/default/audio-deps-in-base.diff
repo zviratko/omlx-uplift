@@ -1,0 +1,28 @@
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -116,6 +116,25 @@
+     "mlx-audio @ git+https://github.com/Blaizzy/mlx-audio@8c244a1faff44cfa69e3151c195f52a4c1c90be5",
+     "Pillow>=9.0.0",
+     "markitdown[pdf,docx,pptx]==0.1.9",
++    # uplift (curated, dev tree): this board serves audio, so the engine's
++    # audio stack is a base dependency here, not an opt-in extra. Upstream
++    # 3a5a6b2 (2026-10-29) moved these names out of mlx-audio's [all] extras
++    # (0.4.3 carried them, 0.6.3 carries none) into omlx's optional `audio`
++    # extra below - which the Homebrew formula never installs, it installs
++    # .[grammar]. A tap build from that commit died on its own last step,
++    # `import spacy; spacy.load('en_core_web_sm')` -> ModuleNotFoundError
++    # (reproduced on two Macs), and Kokoro voices would have failed at the
++    # first request even without the check. Specs mirror the `audio` extra
++    # verbatim; drop this patch if the formula installs .[grammar,audio].
++    "espeakng-loader>=0.2.4",
++    "librosa==0.11.0",
++    "misaki>=0.9.4",
++    "num2words>=0.5.14",
++    "numba>=0.60.0",
++    "phonemizer-fork>=3.3.2",
++    "pyloudnorm>=0.2.0",
++    "spacy>=3.8.4",
++    "wsproto==1.2.0",
+ ]
+ 
+ [project.optional-dependencies]

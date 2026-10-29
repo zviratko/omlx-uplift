@@ -1,0 +1,7 @@
+{
+  "description": "Audio models stop depending on a side effect. mlx-audio 0.4.3's [all] extras happened to carry the Kokoro stack (spacy, misaki, librosa, phonemizer-fork, espeakng-loader, num2words, numba, pyloudnorm, wsproto); 0.6.3 carries none of it and upstream moved those into omlx's optional `audio` extra, which the Homebrew install step never asks for. Building the tap then died on its own `import spacy` check, and text-to-speech models would have failed at the first request even if it had passed. The dev tree lists them as base dependencies, because this board serves audio. Drop when upstream's formula installs .[grammar,audio].",
+  "source": {
+    "kind": "file"
+  },
+  "scope": "both"
+}
