@@ -1318,7 +1318,9 @@ def cmd_dev(argv=None) -> int:
     ap.add_argument("--force", action="store_true",
                     help="use: activate even with a live dev server / "
                          "unverified shebang; upgrade: rebuild even if "
-                         "already up to date")
+                         "already up to date; install/upgrade: also skip the "
+                         "dependency guard (UP-60) that refuses a build whose "
+                         "tap formula and source pins disagree")
     ap.add_argument("--scope", choices=["omlx", "dev", "both",
                                         "runtime", "build"],
                     help="scope filter for 'dev patches' (DEV-6; default: "
@@ -1878,6 +1880,7 @@ def cmd_dev_install(args) -> int:
         with_python312=bool(getattr(args, 'with_python312', False)),
         dry_run=bool(getattr(args, 'dry_run', False)),
         conditional=conditional,
+        skip_guard=bool(getattr(args, "force", False)),
         warn=_coexistence_warnings, on_line=_on_line,
         on_patch_failure=resolver)
     # fallback: materialize succeeded but no trigger line came

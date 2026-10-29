@@ -1717,6 +1717,7 @@ def run_dev_build(*, with_custom_kernel: bool = False,
                   with_grammar: bool = False, dry_run: bool = False,
                   with_python312: bool = False,
                   conditional: bool = False,
+                  skip_guard: bool = False,
                   warn=None, on_line=None, on_patch_failure=None,
                   trigger: str = "cli") -> BuildResult:
     """One rebuild path (DEV-context decision 3): re-cut uplift-dev from
@@ -1819,6 +1820,18 @@ def run_dev_build(*, with_custom_kernel: bool = False,
             res.stage, res.returncode = "fetch", 1
             return res
 
+        # UP-60 (2026-10-29): the tap formula and the source tree must agree on
+        # the shared git-pinned dependencies BEFORE anything is built. The tap
+        # checkout only moves with `brew update` while the source is re-fetched
+        # every build, and the formula's pip step runs AFTER the package
+        # install - so a lagging tap silently downgrades mlx-audio/mlx-lm and
+        # the engine dies at import on a keg brew called healthy.
+        guard_err = _prebuild_dependency_guard(
+            cfg, path, res, skip_guard=skip_guard)
+        if guard_err:
+            res.stage, res.returncode = "guard", 2
+            return res
+
         # source refresh BEFORE collecting build patches (user policy
         # 2026-10-09): curated catalog (every build, not only a first
         # one) + drift check; an auto-promoted curated candidate must
@@ -1832,7 +1845,8 @@ def run_dev_build(*, with_custom_kernel: bool = False,
                                    brewutil, with_custom_kernel,
                                    with_grammar, dry_run, warn,
                                    on_patch_failure, conditional=conditional,
-                                   with_python312=with_python312)
+                                   with_python312=with_python312,
+                                   skip_guard=skip_guard)
     finally:
         _root.removeHandler(_ph)
         _ph.close()
@@ -1842,6 +1856,71 @@ def run_dev_build(*, with_custom_kernel: bool = False,
             except OSError:
                 pass
             res.fh = None
+
+
+def _base_pyproject(cfg: dict, path: str) -> tuple[str | None, str]:
+    """(pyproject.toml text, label) AT THE SYNC REF the build cuts from.
+
+    The working tree is useless here: it still sits on the previous uplift-dev
+    tip, so its pins are one base behind (UP-60)."""
+    ref = cfg.get("sync_ref") or "origin/main"
+    try:
+        pr = _git(["rev-parse", ref], cwd=path)
+        sha = pr.stdout.strip() if pr.returncode == 0 else None
+        if not sha:
+            return None, f"{ref}:pyproject.toml"
+        pr = _git(["show", f"{sha}:pyproject.toml"], cwd=path)
+        if pr.returncode == 0:
+            text = pr.stdout.decode("utf-8", "replace") if isinstance(
+                pr.stdout, bytes) else str(pr.stdout)
+            return text, f"{sha[:12]}:pyproject.toml"
+    except Exception:
+        pass
+    return None, f"{ref}:pyproject.toml"
+
+
+def _prebuild_dependency_guard(cfg: dict, path: str, res, *,
+                               skip_guard: bool = False) -> str | None:
+    """UP-60 guard #1: refuse a build whose dependency coordinates disagree.
+
+    Returns an error string when the build must stop, None to continue. Findings
+    are printed as they are found (the caller only sets the stage), and
+    `--force` downgrades them to warnings — an operator who knows better must
+    still be able to build."""
+    from . import devguard
+
+    text, label = _base_pyproject(cfg, path)
+    findings = devguard.pre_build_findings(text, source_label=label)
+    # 'unverifiable' is a finding WITHOUT a contradiction: a box with no tap
+    # checkout and no network (CI, a fresh machine) must still build — blocking
+    # there would trade a rare skew for a permanently unusable install path.
+    blockers = [fd for fd in findings if fd.kind != "unverifiable"]
+    for fd in findings:
+        if fd.kind == "unverifiable":
+            for ln in fd.render().splitlines():
+                _emit(res, "warn", ln)
+    if not blockers:
+        _emit(res, "detail",
+              ("dependency guard: tap formula, parent formula and source pins "
+               "agree") if not findings else
+              "dependency guard: nothing contradicts, but not everything "
+              "could be compared")
+        return None
+    head = ("dependency guard: SKIPPED on request (--force)" if skip_guard
+            else "dependency guard: this build would install mismatched "
+                 "dependencies - refusing")
+    _emit(res, "warn" if skip_guard else "err", head)
+    for fd in blockers:
+        for ln in fd.render().splitlines():
+            _emit(res, "warn" if skip_guard else "err", ln)
+    if skip_guard:
+        _emit(res, "detail", "dependency guard findings (forced): "
+                              + "; ".join(fd.kind for fd in blockers))
+        return None
+    _emit(res, "err", f"  investigation: {res.log_path}")
+    _emit(res, "err", "  build anyway with: omlx-uplift dev install --force")
+    return ("dependency coordinates disagree between the tap formula and the "
+            "source tree being built (UP-60)")
 
 
 def _vanilla_keg_site_packages() -> str | None:
@@ -2036,9 +2115,10 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
 def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                         with_custom_kernel, with_grammar, dry_run, warn,
                         on_patch_failure=None, conditional=False,
-                        with_python312=False):
+                        with_python312=False, skip_guard=False):
     import subprocess
 
+    from . import devguard
     from . import patches as _patches_mod
 
     _emit(res, "out", f"patch process log: {res.log_path}")
@@ -2346,6 +2426,33 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
         _emit(res, "err", f"  investigation: {res.log_path}")
         res.ok, res.returncode, res.stage = False, rc or 1, "verify"
         return res
+    # UP-60 guard #2/#3: brew can exit 0 with a keg that cannot import its own
+    # engine (observed 2026-10-29: mlx-lm downgraded to 0.31.1 by the formula's
+    # late pip step, `from mlx_lm.generate import GenerationBatch` failed at
+    # BOOT, and the build log said success). Probe the NEW keg's own interpreter
+    # BEFORE the link switch, so a bad resolution fails the install and the
+    # running board keeps the old keg instead of dying on restart.
+    probes = devguard.post_build_probes(devguard.keg_python(_expected_keg))
+    if probes and skip_guard:
+        _emit(res, "warn", "post-build import probes FAILED but --force was "
+                           "given — activating anyway; the board may not start")
+        for label, err in probes:
+            _emit(res, "warn", f"  [{label}] {err}")
+        probes = []
+    if probes:
+        _emit(res, "err", "the freshly built keg CANNOT serve omlx - refusing "
+                          "to activate it; the live keg is unchanged")
+        for label, err in probes:
+            _emit(res, "err", f"  import check failed [{label}]: {err}")
+        _emit(res, "err", f"  keg: {_expected_keg}")
+        _emit(res, "err", "  most likely a tap/source dependency skew "
+                          "(UP-60): brew update, then rebuild; "
+                          "`omlx-uplift dev install --force` skips this check")
+        _emit(res, "err", f"  investigation: {res.log_path}")
+        res.ok, res.returncode, res.stage = False, 1, "probe"
+        return res
+    _emit(res, "detail", "post-build import probes OK")
+
     # LINK SWITCH: brew ran --skip-link, so the live keg is still linked.
     # Flip opt/, brew's link record and the bin symlinks through our own
     # activate (same tested path as `dev use`). force=True is legitimate
