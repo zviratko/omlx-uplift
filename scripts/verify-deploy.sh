@@ -6,6 +6,9 @@
 #   - service running but serving stale static bytes (old process alive)
 #
 #   scripts/verify-deploy.sh [port] [expected-sha]
+#   With no port: the board whose settings.json exists (.omlx, then .omlx-dev),
+#   on the port that file declares. UPLIFT_VERIFY_SETTINGS points it at a
+#   specific file; a deploy gate names the port explicitly.
 # Default expected-sha = the INSTALLED keg's revision: the standing
 # question is "is the running service serving what is installed" (a
 # service can be alive on old bytes after a partial reinstall, and the
@@ -19,10 +22,31 @@
 # expected revision. Exit 0 = all checks passed.
 set -uo pipefail
 
-PORT="${1:-8011}"
-HOST="http://127.0.0.1:$PORT"
+# Which board to verify: the one whose settings exist. DEC-1 (2026-10) left this
+# box dev-only, and this script went on asking for a vanilla settings.json and a
+# server on 8011 that no longer exist - six nights of ok:false from a stage that
+# never actually reached the running board. Vanilla stays first (historic box),
+# the dev keg second, and an explicit path wins over both.
 REPO="${QA2_REPO:-$HOME/git/omlx-uplift-repo}"
-SETTINGS="$HOME/.omlx/settings.json"
+SETTINGS="${UPLIFT_VERIFY_SETTINGS:-}"
+if [ -z "$SETTINGS" ]; then
+    for cand in "$HOME/.omlx/settings.json" "$HOME/.omlx-dev/settings.json"; do
+        [ -f "$cand" ] && SETTINGS="$cand" && break
+    done
+fi
+if [ -z "$SETTINGS" ]; then
+    echo "FAIL no board to verify (neither ~/.omlx nor ~/.omlx-dev has a settings.json)"
+    exit 1
+fi
+# The port comes from that file unless the caller names one: a stale port written
+# into settings must not be able to hide the check behind a default.
+SETTINGS_PORT="$(python3 -c "import json;print(json.load(open('$SETTINGS'))['server']['port'])" 2>/dev/null)"
+PORT="${1:-$SETTINGS_PORT}"
+if [ -z "$PORT" ]; then
+    echo "FAIL $SETTINGS carries no server.port and no port was passed"
+    exit 1
+fi
+HOST="http://127.0.0.1:$PORT"
 INSTALLED="$(brew list --versions omlx-uplift | awk '{print $2}')"
 EXPECTED="${2:-${INSTALLED#HEAD-}}"
 fail=0
@@ -35,9 +59,13 @@ case "$INSTALLED" in
   *) bad keg-revision "$INSTALLED (want *$EXPECTED)" ;;
 esac
 
-# 2. production settings port is the port we are verifying
-p="$(python3 -c "import json;print(json.load(open('$SETTINGS'))['server']['port'])" 2>/dev/null)"
-if [ "$p" = "$PORT" ]; then ok settings-port "$p"; else bad settings-port "$p (want $PORT)"; fi
+# 2. the settings file agrees with the port being verified (the QA2 incident
+#    class: a test server's port persisted into production settings)
+if [ "$SETTINGS_PORT" = "$PORT" ]; then
+    ok settings-port "$PORT ($(basename "$(dirname "$SETTINGS")"))"
+else
+    bad settings-port "$SETTINGS_PORT in $SETTINGS, verifying $PORT"
+fi
 
 # 3. login for the byte checks (cookie jar, key never printed)
 JAR="$(mktemp)"
