@@ -545,6 +545,9 @@
  "uplift.patches.diff_fail": "無法載入 diff",
  "uplift.patches.disable": "停用",
  "uplift.patches.disabled_toast": "已停用 — 將於下次 omlx 重啟時還原檔案",
+ "uplift.patches.adopt_btn": "採納為本地補丁",
+ "uplift.patches.adopt_confirm": "採納後此補丁歸你所有:保持現狀繼續安裝,目錄不再更新或移除它,之後你可以徹底刪除。確定 = 採納,取消 = 不執行。",
+ "uplift.patches.disable_curated_confirm": "此補丁來自精選目錄,移除並非永久:被移除的條目會在下次檢查時重新加入。確定 = 停用:它停止生效,下次按 Build 或重啟後離開建置,並以停用狀態保留在清單中。取消 = 保持啟用。",
  "uplift.patches.enable": "啟用",
  "uplift.patches.enable_now": "啟用修補",
  "uplift.patches.enabled_toast": "已啟用 — 下次伺服器重啟後生效",
@@ -581,7 +584,6 @@
  "uplift.patches.promoted": "已提升 — 將於下次 omlx 重啟時套用",
  "uplift.patches.remove": "移除",
  "uplift.patches.remove_confirm": "移除此修補？已套用的檔案將立即還原為 vanilla 位元組。",
- "uplift.patches.remove_curated_choice": "此補丁來自精選目錄:被移除的條目會在下次檢查時重新加入,因此無法徹底刪除。確定 = 採納:補丁保持安裝並成為你的,之後可以移除。取消 = 停用:它停止生效,下次按 Build 或重啟後離開建置,並列為已停用。",
  "uplift.patches.removed": "修補已移除",
  "uplift.patches.reversal": "反轉已合併的變更（復原）",
  "uplift.patches.reversal_adopted": "已反轉——儲存為已套用的反轉補丁；停用會還原合併後的位元組",
@@ -1333,6 +1335,5 @@
  "uplift.dl.search_failed": "搜尋失敗：{err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "執行中",
- "uplift.patches.dev_vanilla_stopped": "未執行",
- "uplift.patches.disable_curated": "停用"
+ "uplift.patches.dev_vanilla_stopped": "未執行"
 }

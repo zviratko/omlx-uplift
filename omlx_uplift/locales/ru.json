@@ -545,6 +545,9 @@
  "uplift.patches.diff_fail": "Не удалось загрузить diff",
  "uplift.patches.disable": "Отключить",
  "uplift.patches.disabled_toast": "Отключено — файлы будут восстановлены при следующем перезапуске omlx",
+ "uplift.patches.adopt_btn": "Принять как локальный",
+ "uplift.patches.adopt_confirm": "Принятие делает этот патч вашим: он остаётся установленным как есть, каталог больше не обновляет и не удаляет его, и потом его можно удалить навсегда. OK = принять, Отмена = ничего не делать.",
+ "uplift.patches.disable_curated_confirm": "Этот патч из курируемого каталога: его удаление не навсегда — удалённая позиция вернётся при следующей проверке. OK = отключить: он перестанет применяться, уйдёт из сборки при следующем Build/перезапуске и останется в списке как отключённый. Отмена = оставить включённым.",
  "uplift.patches.enable": "Включить",
  "uplift.patches.enable_now": "Включить патч",
  "uplift.patches.enabled_toast": "Включено — подействует после ближайшего перезапуска сервера",
@@ -581,7 +584,6 @@
  "uplift.patches.promoted": "Обновление принято — применится при следующем перезапуске omlx",
  "uplift.patches.remove": "Удалить",
  "uplift.patches.remove_confirm": "Удалить этот патч? Применённые файлы сейчас же вернутся к байтам vanilla.",
- "uplift.patches.remove_curated_choice": "Этот патч из курируемого каталога: удалённая позиция вернётся при следующей проверке, поэтому удалить его навсегда нельзя. OK = принять: патч останется установленным, станет вашим, и его потом можно удалить. Отмена = отключить: он перестанет применяться, уйдёт из сборки при следующем Build/перезапуске и останется в списке как отключённый.",
  "uplift.patches.removed": "Патч удалён",
  "uplift.patches.reversal": "обратить влитое изменение (отменить)",
  "uplift.patches.reversal_adopted": "УЖЕ ОТКАЧЕНО — сохранён как применённый обратный патч; отключение вернёт влитые байты",
@@ -1333,6 +1335,5 @@
  "uplift.dl.search_failed": "Сбой поиска: {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "запущен",
- "uplift.patches.dev_vanilla_stopped": "не запущен",
- "uplift.patches.disable_curated": "Отключить"
+ "uplift.patches.dev_vanilla_stopped": "не запущен"
 }

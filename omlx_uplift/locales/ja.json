@@ -545,6 +545,9 @@
  "uplift.patches.diff_fail": "diff を読み込めません",
  "uplift.patches.disable": "無効化",
  "uplift.patches.disabled_toast": "無効化 — 次の omlx 再起動時にファイルは復元されます",
+ "uplift.patches.adopt_btn": "ローカルとして採用",
+ "uplift.patches.adopt_confirm": "採用するとこのパッチはあなたのものになります: インストールされたまま続き、カタログは更新も削除もせず、後で完全に削除できます。OK = 採用、キャンセル = 何もしない。",
+ "uplift.patches.disable_curated_confirm": "このパッチはキュレーションカタログ由来のため、削除は恒久的ではありません — 削除された項目は次のチェックで再追加されます。OK = 無効化: 適用が止まり、次の Build/再起動でビルドから外れ、「無効」としてリストに残ります。キャンセル = 有効のままにする。",
  "uplift.patches.enable": "有効化",
  "uplift.patches.enable_now": "パッチを有効化",
  "uplift.patches.enabled_toast": "有効化しました — 次のサーバー再起動後に適用されます",
@@ -581,7 +584,6 @@
  "uplift.patches.promoted": "昇格しました — 次の omlx 再起動時に適用されます",
  "uplift.patches.remove": "削除",
  "uplift.patches.remove_confirm": "このパッチを削除しますか？適用済みのファイルはただちにバニラのバイト列へ復元されます。",
- "uplift.patches.remove_curated_choice": "このパッチはキュレーションカタログ由来のため、削除しても次のチェックで再追加され、完全には消せません。OK = 採用: パッチはインストールされたままあなたのものになり、後で削除できます。キャンセル = 無効化: 適用が止まり、次の Build/再起動でビルドから外れ、リストには「無効」として残ります。",
  "uplift.patches.removed": "パッチを削除しました",
  "uplift.patches.reversal": "マージ済み変更を反転（取り消し）",
  "uplift.patches.reversal_adopted": "既に反転済み — 適用済み反転として保存。無効化でマージ後バイトを復元",
@@ -1336,6 +1338,5 @@
  "uplift.dl.search_failed": "検索に失敗: {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "稼働中",
- "uplift.patches.dev_vanilla_stopped": "停止中",
- "uplift.patches.disable_curated": "無効化"
+ "uplift.patches.dev_vanilla_stopped": "停止中"
 }

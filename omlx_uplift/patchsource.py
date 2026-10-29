@@ -1579,11 +1579,12 @@ def request_removal(store, patch_id: str, tree_root: str) -> dict:
             return res
         res["disabled_instead"] = True
         res["reason"] = ("this patch comes from the curated catalog, so it "
-                         "was disabled instead of removed — a removed "
-                         "catalog entry is added back by the next check. "
-                         f"It drops out with {applies_phrase(p)} and stays "
-                         "listed as disabled; adopt it first if you want "
-                         "to own this patch and delete it for good")
+                         "was disabled, not removed — a removed catalog "
+                         "entry is re-added by the next check; a disabled "
+                         "one stays disabled. It drops out with "
+                         f"{applies_phrase(p)} and remains listed. Use "
+                         "Adopt if you want to own this patch and delete "
+                         "it for good")
         return res
     return remove_patch(store, patch_id, tree_root)
 

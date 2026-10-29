@@ -549,6 +549,9 @@
  "uplift.patches.diff_fail": "Impossible de charger le diff",
  "uplift.patches.disable": "Désactiver",
  "uplift.patches.disabled_toast": "Désactivé — fichiers restaurés au prochain redémarrage d'omlx",
+ "uplift.patches.adopt_btn": "Adopter comme local",
+ "uplift.patches.adopt_confirm": "L'adopter vous rend ce correctif : il reste installé tel quel, le catalogue ne le met plus à jour ni ne le retire, et vous pourrez ensuite le supprimer définitivement. OK = adopter, Annuler = ne rien faire.",
+ "uplift.patches.disable_curated_confirm": "Ce correctif vient du catalogue organisé : le retirer n'est pas définitif — une entrée retirée est réajoutée à la prochaine vérification. OK = le désactiver : il cesse de s'appliquer, quitte la compilation au prochain Build/redémarrage et reste listé comme désactivé. Annuler = le laisser activé.",
  "uplift.patches.enable": "Activer",
  "uplift.patches.enable_now": "Activer le correctif",
  "uplift.patches.enabled_toast": "Activé — prend effet après le prochain redémarrage du serveur",
@@ -585,7 +588,6 @@
  "uplift.patches.promoted": "Promu — appliqué au prochain redémarrage d'omlx",
  "uplift.patches.remove": "Retirer",
  "uplift.patches.remove_confirm": "Retirer ce correctif ? Les fichiers appliqués reviennent maintenant aux octets vanilla.",
- "uplift.patches.remove_curated_choice": "Ce correctif vient du catalogue organisé : une entrée retirée est réajoutée à la prochaine vérification, il ne peut donc pas être supprimé définitivement. OK = l'adopter : le correctif reste installé, devient le vôtre et pourra être retiré plus tard. Annuler = le désactiver : il cesse de s'appliquer, quitte la compilation au prochain Build/redémarrage, et reste listé comme désactivé.",
  "uplift.patches.removed": "Correctif retiré",
  "uplift.patches.reversal": "inverser un changement fusionné (annuler)",
  "uplift.patches.reversal_adopted": "DÉJÀ INVERSÉ — enregistré comme inversion APPLIQUÉE ; désactiver restaure les octets fusionnés",
@@ -1337,6 +1339,5 @@
  "uplift.dl.search_failed": "Échec de la recherche : {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "actif",
- "uplift.patches.dev_vanilla_stopped": "inactif",
- "uplift.patches.disable_curated": "Désactiver"
+ "uplift.patches.dev_vanilla_stopped": "inactif"
 }

@@ -549,6 +549,9 @@
  "uplift.patches.diff_fail": "Não foi possível carregar o diff",
  "uplift.patches.disable": "Desativar",
  "uplift.patches.disabled_toast": "Desativado — arquivos restaurados no próximo reinício do omlx",
+ "uplift.patches.adopt_btn": "Adotar como local",
+ "uplift.patches.adopt_confirm": "Adotar torna este patch seu: ele continua instalado como está, o catálogo deixa de atualizá-lo ou removê-lo e depois você poderá apagá-lo definitivamente. OK = adotar, Cancelar = não fazer nada.",
+ "uplift.patches.disable_curated_confirm": "Este patch vem do catálogo curado, então removê-lo não é definitivo — uma entrada removida é readicionada pela próxima verificação. OK = desativá-lo: ele para de ser aplicado, sai da compilação no próximo Build/reinício e continua listado como desativado. Cancelar = mantê-lo ativado.",
  "uplift.patches.enable": "Ativar",
  "uplift.patches.enable_now": "Ativar patch",
  "uplift.patches.enabled_toast": "Ativado — vale após o próximo reinício do servidor",
@@ -585,7 +588,6 @@
  "uplift.patches.promoted": "Promovido — aplica no próximo reinício do omlx",
  "uplift.patches.remove": "Remover",
  "uplift.patches.remove_confirm": "Remover este patch? Os arquivos aplicados voltam agora aos bytes vanilla.",
- "uplift.patches.remove_curated_choice": "Este patch vem do catálogo curado, então não pode ser apagado definitivamente — uma entrada removida é readicionada pela próxima verificação. OK = adotá-lo: o patch continua instalado, passa a ser seu e poderá ser removido depois. Cancelar = desativá-lo: ele para de ser aplicado, sai da compilação no próximo Build/reinício e continua listado como desativado.",
  "uplift.patches.removed": "Patch removido",
  "uplift.patches.reversal": "reverter uma mudança incorporada (desfazer)",
  "uplift.patches.reversal_adopted": "JÁ REVERTIDO — salvo como reversão APLICADA; desativar restaura os bytes incorporados",
@@ -1337,6 +1339,5 @@
  "uplift.dl.search_failed": "Falha na pesquisa: {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "em execução",
- "uplift.patches.dev_vanilla_stopped": "não está em execução",
- "uplift.patches.disable_curated": "Desativar"
+ "uplift.patches.dev_vanilla_stopped": "não está em execução"
 }

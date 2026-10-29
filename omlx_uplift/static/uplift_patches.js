@@ -980,33 +980,23 @@ function ptManage(p) {
     // removed entry) — the honest verb for it is Disable (user report
     // 2026-10-29: remove → the patch returned as pending)
     rmBtn.textContent = (p.curated && !p.curated_adopted)
-        ? ptMsg('uplift.patches.disable_curated', 'Disable')
+        ? ptMsg('uplift.patches.disable', 'Disable')
         : ptMsg('uplift.patches.remove', 'Remove');
     rmBtn.onclick = async () => {
         if (p.curated && !p.curated_adopted) {
-            // catalog patch: the choice is adoption (keep, own, deletable
-            // later) or disable (leaves the running set, stays listed) —
-            // there is no third "delete for good" option, and the old text
-            // promised one the catalog would undo (user decision 2026-09-27
-            // stays: adoption is the graceful path)
-            const adopt = confirm(ptMsg('uplift.patches.remove_curated_choice',
-                'This patch comes from the curated catalog, so it cannot be '
-                + 'deleted for good — a removed catalog entry is added back '
-                + 'by the next check. OK = adopt it: the patch stays '
-                + 'installed, becomes yours, and can be removed later. '
-                + 'Cancel = disable it: it stops applying, leaves the build '
-                + 'at the next Build/restart, and stays listed as disabled.'));
-            if (adopt) {
-                await ptApi('curated/adopt', { id: p.id }).then(async () => {
-                    PG.toast(ptMsg('uplift.patches.adopted',
-                        'Patch adopted as local'), 4000);
-                    await pollPatches();
-                }).catch(e => PG.toast(String(e), 5000));
-                overlay.remove();
-                return;
-            }
-            // disable: the server names the real outcome (disabled, not
-            // removed) in its response — no canned 'removed' toast here
+            // one button, one verb, one truth (user 2026-10-29): the
+            // confirm says exactly what OK does — disable. Catalog rows
+            // cannot be deleted for good (a removed entry is re-added by
+            // the next check), so this action is honest as Disable;
+            // ownership got its own button next to this one.
+            if (!confirm(ptMsg('uplift.patches.disable_curated_confirm',
+                'This patch comes from the curated catalog, so removing it '
+                + 'is not permanent — a removed entry is added back by the '
+                + 'next check. OK = disable it: it stops applying, leaves '
+                + 'the build at the next Build/restart, and stays listed '
+                + 'as disabled. Cancel = keep it enabled.'))) return;
+            // the server names the real outcome in its response — no
+            // canned toast text here
             await ptAction('remove', { id: p.id }, null);
             overlay.remove();
             return;
@@ -1017,7 +1007,29 @@ function ptManage(p) {
             ptMsg('uplift.patches.removed', 'Patch removed'));
         overlay.remove();
     };
-    acts.append(saveBtn, testBtn, editBtn, rmBtn);
+    // ownership is its own verb, not a fork hidden inside the delete
+    // dialog (user 2026-10-29): adopt = keep the patch as it is and cut
+    // the catalog tie; only then does Remove really remove a catalog row
+    let adoptBtn = null;
+    if (p.curated && !p.curated_adopted) {
+        adoptBtn = document.createElement('button');
+        adoptBtn.type = 'button';
+        adoptBtn.className = 'btn';
+        adoptBtn.textContent = ptMsg('uplift.patches.adopt_btn',
+                                     'Adopt as local');
+        adoptBtn.onclick = async () => {
+            if (!confirm(ptMsg('uplift.patches.adopt_confirm',
+                'Adopting makes this patch yours: it stays installed '
+                + 'exactly as it is, the catalog no longer updates or '
+                + 'removes it, and you can remove it for good afterwards. '
+                + 'OK = adopt, Cancel = do nothing.'))) return;
+            await ptAction('curated/adopt', { id: p.id },
+                ptMsg('uplift.patches.adopted', 'Patch adopted as local'));
+            overlay.remove();
+        };
+    }
+    acts.append(saveBtn, testBtn, editBtn, ...(adoptBtn ? [adoptBtn] : []),
+                rmBtn);
     box.append(acts);
     overlay.append(box);
     // backdrop click closes (same contract as every other dialog here)

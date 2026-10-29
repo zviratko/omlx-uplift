@@ -545,6 +545,9 @@
  "uplift.patches.diff_fail": "Nepodařilo se načíst diff",
  "uplift.patches.disable": "Zakázat",
  "uplift.patches.disabled_toast": "Zakázáno — soubory se obnoví při dalším restartu omlx",
+ "uplift.patches.adopt_btn": "Převzít jako lokální",
+ "uplift.patches.adopt_confirm": "Převzetím se tato záplata stane vaší: zůstane přesně tak, jak je, katalog ji už nebude aktualizovat ani odstraňovat a vy ji později můžete úplně odstranit. OK = převzít, Zrušit = nedělat nic.",
+ "uplift.patches.disable_curated_confirm": "Tato záplata pochází z kurátorského katalogu, takže její odstranění není trvalé — odstraněná položka se při další kontrole znovu přidá. OK = zakázat: přestane se používat, po dalším stisku Build nebo restartu zmizí ze sestavení a zůstane uvedena jako zakázaná. Zrušit = ponechat povolenou.",
  "uplift.patches.enable": "Povolit",
  "uplift.patches.enable_now": "Povolit patch",
  "uplift.patches.enabled_toast": "Povoleno — projeví se po příštím restartu serveru",
@@ -581,7 +584,6 @@
  "uplift.patches.promoted": "Schváleno — použije se při dalším restartu omlx",
  "uplift.patches.remove": "Odebrat",
  "uplift.patches.remove_confirm": "Odebrat tento patch? Použité soubory se nyní obnoví na vanilla bajty.",
- "uplift.patches.remove_curated_choice": "Tato záplata pochází z kurátorského katalogu, takže nejde smazat navždy — odstraněná položka se při další kontrole přidá zpět. OK = převzít ji: záplata zůstane nainstalovaná, bude vaše a později ji lze odstranit. Zrušit = zakázat: přestane se používat, po dalším stisku Build nebo restartu zmizí ze sestavení a zůstane uvedena jako zakázaná.",
  "uplift.patches.removed": "Patch odebrán",
  "uplift.patches.reversal": "zvrátit sloučenou změnu (vrácení)",
  "uplift.patches.reversal_adopted": "JIŽ VRÁCENO — uloženo jako POUŽITÉ vrácení; zakázáním se obnoví sloučené bajty",
@@ -1333,6 +1335,5 @@
  "uplift.dl.search_failed": "Hledání se nezdařilo: {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "běží",
- "uplift.patches.dev_vanilla_stopped": "neběží",
- "uplift.patches.disable_curated": "Zakázat"
+ "uplift.patches.dev_vanilla_stopped": "neběží"
 }

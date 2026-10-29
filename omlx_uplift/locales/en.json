@@ -545,6 +545,9 @@
  "uplift.patches.diff_fail": "Could not load diff",
  "uplift.patches.disable": "Disable",
  "uplift.patches.disabled_toast": "Disabled — files restored on next omlx restart",
+ "uplift.patches.adopt_btn": "Adopt as local",
+ "uplift.patches.adopt_confirm": "Adopting makes this patch yours: it stays installed exactly as it is, the catalog no longer updates or removes it, and you can remove it for good afterwards. OK = adopt, Cancel = do nothing.",
+ "uplift.patches.disable_curated_confirm": "This patch comes from the curated catalog, so removing it is not permanent — a removed entry is added back by the next check. OK = disable it: it stops applying, leaves the build at the next Build/restart, and stays listed as disabled. Cancel = keep it enabled.",
  "uplift.patches.enable": "Enable",
  "uplift.patches.enable_now": "Enable patch",
  "uplift.patches.enabled_toast": "Enabled — takes effect after the next server restart",
@@ -581,7 +584,6 @@
  "uplift.patches.promoted": "Promoted — applies on next omlx restart",
  "uplift.patches.remove": "Remove",
  "uplift.patches.remove_confirm": "Remove this patch? Applied files are restored to vanilla bytes now.",
- "uplift.patches.remove_curated_choice": "This patch comes from the curated catalog, so it cannot be deleted for good — a removed catalog entry is added back by the next check. OK = adopt it: the patch stays installed, becomes yours, and can be removed later. Cancel = disable it: it stops applying, leaves the build at the next Build/restart, and stays listed as disabled.",
  "uplift.patches.removed": "Patch removed",
  "uplift.patches.reversal": "reverse a merged change (undo)",
  "uplift.patches.reversal_adopted": "ALREADY REVERTED — stored as APPLIED reversal; disable restores the merged bytes",
@@ -1333,6 +1335,5 @@
  "uplift.dl.search_failed": "Search failed: {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "running",
- "uplift.patches.dev_vanilla_stopped": "not running",
- "uplift.patches.disable_curated": "Disable"
+ "uplift.patches.dev_vanilla_stopped": "not running"
 }
