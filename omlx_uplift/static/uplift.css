@@ -2284,6 +2284,15 @@ label.se-row.pending-restart > .se-ctl > select {
     border: 1px solid var(--edge); color: var(--ink);
     font: 400 12px/1.3 var(--mono); }
 .vc-say-filter:focus { outline: none; border-color: var(--accent); }
+.vc-say-limits { display: flex; flex-wrap: wrap; gap: 8px 14px;
+                   align-items: flex-end; margin: 8px 0 6px; }
+.vc-say-limits .mk-desc { flex: 1 1 100%; }
+.vc-say-limit { display: flex; flex-direction: column; gap: 3px;
+                font: 400 var(--fs-meta)/1.3 var(--mono); color: var(--dim); }
+.vc-say-limit input { width: 132px; box-sizing: border-box; padding: 5px 8px;
+    background: var(--field); border: 1px solid var(--edge); color: var(--ink);
+    border-radius: var(--radius); font: 400 12px/1.3 var(--mono); }
+.vc-say-limit input:focus { outline: none; border-color: var(--accent); }
 @media (max-width: 900px) { .vc-grid { grid-template-columns: 1fr; } }
 /* VOICE-1b: chat read-aloud — playing state on the per-message button */
 .chat-native-msg-action.speak.playing { background: var(--accent);

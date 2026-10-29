@@ -46,13 +46,16 @@ Contract of this module:
 """
 from __future__ import annotations
 
+import io
 import logging
 import plistlib
 import re
+import struct
 import shutil
 import subprocess
 import sys
 import tempfile
+import wave
 import time
 from pathlib import Path
 from typing import Optional
@@ -61,7 +64,20 @@ log = logging.getLogger(__name__)
 
 SAY_PREFIX = "say:"            # voice.model marker for this engine
 SAY_ENGINE = "say"             # bare engine token (SAY-2: language routing)
-MAX_SAY_CHARS = 10000          # a whole long reply already; keep the cap honest
+MAX_SAY_CHARS = 200000         # a reply this long is a mistake, not an answer
+# A reply past one segment is rendered in pieces and stitched into one file, so
+# memory tracks the LONGEST SEGMENT, not the longest answer. That is why the
+# ceiling is in MB of audio rather than characters: 24 kHz mono 16-bit is a flat
+# 48 KB per second of speech, while characters per second belongs to the VOICE
+# (18 chars/s measured for Samantha, 5 chars/s for the novelty voice this Mac
+# ships as its English default) - the same text is 3x the bytes on a slow voice.
+DEFAULT_CHUNK_CHARS = 1200     # ~1-2 sentences; each extra call costs ~1.1 s
+DEFAULT_MAX_AUDIO_MB = 256     # ~90 minutes of speech
+MIN_CHUNK_CHARS = 200          # below this the per-call setup dominates
+MAX_CHUNK_CHARS = 20000        # `say` reads a file, so argv is not the limit
+MIN_MAX_AUDIO_MB = 1
+MAX_MAX_AUDIO_MB = 4096
+
 _MIN_DETECT_CHARS = 3          # below this there is nothing to recognise
 _NL_CONFIDENT = 50             # percent; 'ok' scores pl@29 — garbage stops here
 _DETECT_CHARS = 1000           # a reply's first lines decide the language
@@ -69,6 +85,7 @@ _TIMEOUT_S = 180
 # 24 kHz, not 22.05: libsndfile encodes Opus only at 8/12/16/24/48 kHz, so a
 # 22.05 kHz render breaks response_format=opus for this engine alone.
 _SAMPLE_RATE = 24000
+BYTES_PER_AUDIO_SECOND = _SAMPLE_RATE * 2   # mono 16-bit: 48 KB per second
 _BASE_WPM = 175                # say's default pace is ~175-190; multipliers ride on it
 _CACHE_TTL_S = 300
 
@@ -402,20 +419,74 @@ def list_voices(force: bool = False) -> list:
     return rows
 
 
-def resolve(name: str) -> Optional[dict]:
+def parse_voice_language(token) -> tuple:
+    """Split a voice address into (name, language), either order.
+
+    Display names are NOT unique on macOS: eight of them (the Eloquence
+    family - Shelley, Eddy, Sandy, Grandma, Grandpa, Reed, Rocko, Sinji)
+    exist once per language, fourteen languages each, so 'say:Shelley'
+    cannot say which Shelley is meant. Writing the language beside the name
+    does: 'Shelley:pt-BR' and 'pt-BR:Shelley' both address one row.
+    Identifiers carry dots, not colons, and come back untouched."""
+    raw = str(token or "").strip()
+    if ":" not in raw:
+        return raw, ""
+    head, _, tail = raw.partition(":")
+    head, tail = head.strip(), tail.strip()
+    if not head or not tail:
+        return raw, ""
+    if _LOCALEISH_RE.match(tail) and not _LOCALEISH_RE.match(head):
+        return head, tail
+    if _LOCALEISH_RE.match(head) and not _LOCALEISH_RE.match(tail):
+        return tail, head
+    return raw, ""
+
+
+def name_languages(name: str) -> list:
+    """Every language this Mac carries a display name in, for honest errors."""
+    return sorted({_norm_locale(v.get("locale")) for v in list_voices()
+                   if v.get("installed") is not False and v["name"] == name
+                   and v.get("locale")}, key=str.lower)
+
+
+def resolve(name: str, language=None) -> Optional[dict]:
     """Match a requested voice by IDENTIFIER first (the exact address —
     two system voices share one display name), then by display name.
+    `language` picks between the rows that share a name, so a caller who
+    named Shelley AND pt-BR gets the Brazilian one, and one who asked for
+    a language that name does not cover gets None rather than a surprise.
+    Without a language the first roster row answers, as before.
     A miss refreshes the roster once: the owner may have downloaded the
     voice in System Settings seconds ago, and waiting out a cache TTL to
     accept it would read as a bug."""
     if not name:
         return None
+    want, named = parse_voice_language(name)
+    language = language or named
     for fresh in (False, True):
-        for v in list_voices(force=fresh):
-            if v.get("installed") is False:
-                continue        # downloadable-but-absent: nothing to speak
-            if v["identifier"] == name or v["name"] == name:
+        rows = [v for v in list_voices(force=fresh)
+                if v.get("installed") is not False]   # absent: nothing to speak
+        for v in rows:
+            # A voice only `say -v ?` knows has its DISPLAY NAME as its
+            # identifier, which is exactly the string that is not unique. When
+            # the caller pinned a language, such a row only answers if it
+            # actually speaks that language; a real identifier (dotted, with
+            # the locale inside) passes the same test honestly.
+            if v["identifier"] == want and (
+                    not language or _locale_score(language, v.get("locale")) > 0):
                 return v
+        shares = [v for v in rows if v["name"] == want]
+        if not shares:
+            continue
+        if not language:
+            return shares[0]
+        ranked = sorted(shares, key=lambda v: (
+            -_locale_score(language, v.get("locale")),
+            _quality_rank(v.get("quality")),
+        ))
+        if _locale_score(language, ranked[0].get("locale")) > 0:
+            return ranked[0]
+        return None
     return None
 
 
@@ -828,7 +899,10 @@ def route(name: str, language=None, preferred=None, text=None) -> str:
     language-carrying alias: when the tail is NOT a voice but looks like
     a locale ('say:cs-CZ', 'say:cs'), it routes exactly like a bare
     request carrying that language — preferred mark, language default,
-    best installed voice. A bare request with NO language is answered
+    best installed voice. The tail may also name both at once
+    ('say:Zuzana:cs-CZ', 'say:cs-CZ:Zuzana'), which is how a voice whose
+    display name serves fourteen languages is addressed for one of them.
+    A bare request with NO language is answered from the TEXT: Apple's own
     from the TEXT: Apple's own identifier guesses the language —
     confidence-gated, and any shaky or unanswerable guess degrades to
     '' leaving the Mac's system default in place. '' means 'no -v flag
@@ -836,11 +910,25 @@ def route(name: str, language=None, preferred=None, text=None) -> str:
     reason when an EXPLICIT language has nothing installed."""
     name = (name or "").strip()
     if name:
-        v = resolve(name)
+        # A voice the caller NAMED wins over a language field beside it: they
+        # asked for that voice, and a Slovak voice reading Czech text is what
+        # `say -v` has always done. A language written INTO the address
+        # ('say:Laura:sk-SK') is a different promise - both halves were meant,
+        # so a half this Mac does not carry is refused, not dropped.
+        bare, pinned = parse_voice_language(name)
+        v = resolve(name, pinned)
         if v is not None:
             return v.get("identifier") or v["name"]
         if _LOCALEISH_RE.match(name):
             return _by_language(name, preferred)
+        if pinned and bare and not _LOCALEISH_RE.match(bare):
+            langs = name_languages(bare)
+            if langs:
+                shown = ", ".join(langs[:6]) + (", ..." if len(langs) > 6 else "")
+                raise LookupError(
+                    "voice '%s' is installed for %s, not for %s. Pick one of "
+                    "those languages, or address the voice by the identifier "
+                    "the macOS voices tab shows" % (bare[:40], shown, str(pinned)[:16]))
         raise LookupError(
             "voice '%s' is not installed on this Mac" % name[:64])
     if language:
@@ -887,27 +975,137 @@ _MEDIA = {"wav": "audio/wav", "mp3": "audio/mpeg", "flac": "audio/flac",
           "opus": "audio/ogg", "aac": "audio/aac", "pcm": "audio/L16;codec=pcm"}
 
 
-def synth_bytes(name: str, text: str, speed=None,
-                language=None, preferred=None) -> bytes:
-    """Render one utterance to plain WAV bytes. Raises RuntimeError with a
-    user-safe reason; input never reaches a shell. Addressing goes through
-    the resolved row's IDENTIFIER when it has one — display names collide
-    (the system ships two Samanthas), identifiers do not.
-    SAY-2: an empty `name` routes — the preferred mark for `language`,
-    the language's own default, the best installed voice for the
-    detected language of TEXT, or the Mac-wide default voice; when even
-    that is unknown the -v flag is dropped and `say` answers in the
-    system voice (never a silent failure)."""
-    text = (text or "").strip()
+def clean_chunk_chars(raw) -> int:
+    """Characters per `say` call. 0 means 'never split, one call whatever the
+    length'; junk means the default, because a store with null in it is not a
+    request to stop speaking."""
+    if raw is None:
+        return DEFAULT_CHUNK_CHARS
     try:
-        target = route(name, language, preferred, text)
-    except LookupError as e:
-        raise RuntimeError(str(e))
+        value = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return DEFAULT_CHUNK_CHARS
+    if value <= 0:
+        return 0
+    return max(MIN_CHUNK_CHARS, min(MAX_CHUNK_CHARS, value))
+
+
+def clean_max_audio_mb(raw) -> int:
+    """Ceiling for one reply in MB of AUDIO, the unit that means the same on
+    every Mac. 0 or junk means the default; it can never be switched off,
+    because an unbounded render is what this limit exists to prevent."""
+    if raw is None:
+        return DEFAULT_MAX_AUDIO_MB
+    try:
+        value = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_AUDIO_MB
+    if value <= 0:
+        return DEFAULT_MAX_AUDIO_MB
+    return max(MIN_MAX_AUDIO_MB, min(MAX_MAX_AUDIO_MB, value))
+
+
+def long_input_error(text_len: int, max_audio_mb: int = DEFAULT_MAX_AUDIO_MB) -> str:
+    """Why this utterance must not be rendered at all, or '' to render it.
+
+    One limit only, and it is a sanity gate rather than a policy: the byte
+    ceiling does the real work while the reply is stitched, so nothing here
+    has to guess how big a given voice will make a given text."""
+    if text_len > MAX_SAY_CHARS:
+        return ("this reply is %d characters, over the %d character limit of "
+                "one spoken answer - shorten it or read it in parts"
+                % (text_len, MAX_SAY_CHARS))
+    return ""
+
+
+_SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
+_CLAUSE_SPLIT = re.compile(r"(?<=[,;:，；：])\s*")
+
+
+def split_text(text: str, max_chars: int) -> list:
+    """Sentence-sized pieces of one utterance, none longer than `max_chars`;
+    `max_chars` 0 or one short sentence returns the text whole.
+
+    Deliberately its own splitter rather than an import of vanilla's private
+    `_split_tts_text`: uplift ships as an add-on and a rename upstream must
+    never be able to break speech here. The rules are the useful ones -
+    sentence ends first, clause ends when a single sentence overshoots, and a
+    wordless monster is cut on the length so nothing is ever dropped."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if max_chars <= 0 or len(text) <= max_chars:
+        return [text]
+
+    def pack(parts, buffer, out):
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            while len(part) > max_chars:            # nothing survives oversized
+                if buffer:
+                    out.append(buffer)
+                    buffer = ""
+                out.append(part[:max_chars].strip())
+                part = part[max_chars:].strip()
+            if not part:
+                continue
+            candidate = (buffer + " " + part).strip() if buffer else part
+            if len(candidate) <= max_chars:
+                buffer = candidate
+            else:
+                if buffer:
+                    out.append(buffer)
+                buffer = part
+        return buffer
+
+    chunks = []
+    held = ""
+    for sentence in _SENT_SPLIT.split(text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if len(sentence) > max_chars:
+            held = pack(_CLAUSE_SPLIT.split(sentence), held, chunks)
+            continue
+        candidate = (held + " " + sentence).strip() if held else sentence
+        if held and len(candidate) > max_chars:
+            chunks.append(held)
+            held = sentence
+        else:
+            held = candidate
+    if held:
+        chunks.append(held)
+    return chunks or [text]
+
+
+def wav_header(sample_rate: int, channels: int = 1, sample_width: int = 2,
+               data_bytes: int = 0) -> bytes:
+    """A canonical 44-byte PCM WAV header with the SIZES FILLED IN.
+
+    Offsets 4 (RIFF chunk) and 40 (data chunk) are where the format says they
+    are, which is what a stitched file must carry: a streamed reply cannot
+    promise a length it does not know yet, but a finished one has no excuse
+    for lying about it - players, `wave` and anything that shows a duration
+    read these two numbers."""
+    block = channels * sample_width
+    return struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", min(36 + data_bytes, 0x7FFFFFF0), b"WAVE", b"fmt ", 16,
+        1, channels, sample_rate, sample_rate * block, block, sample_width * 8,
+        b"data", data_bytes)
+
+
+def synth_wav(text: str, target: str = "", speed=None) -> bytes:
+    """Render one string with an ALREADY resolved voice address. No routing,
+    no limits: the segmentation path resolves the voice once for the whole
+    reply and calls this per piece, because re-detecting the language
+    sentence by sentence would hand one Czech answer three different voices.
+    `target` empty drops -v and lets `say` use the system voice."""
+    text = (text or "").strip()
     if not text:
         raise RuntimeError("nothing to say")
-    if len(text) > MAX_SAY_CHARS:
-        text = text[:MAX_SAY_CHARS]     # truncate, don't punish the whole reply
-    args = ["say"] + (["-v", target] if target else [])
+    args = ["say"] + (["-v", str(target)] if target else [])
     wpm = _speed_wpm(speed)
     if wpm:
         args += ["-r", wpm]
@@ -930,6 +1128,76 @@ def synth_bytes(name: str, text: str, speed=None,
         return dst.read_bytes()
 
 
+def pcm_of(wav: bytes) -> tuple:
+    """(rate, channels, sample_width, payload) of a WAV that `say` produced.
+    Read with `wave`, which walks the real chunks instead of trusting a fixed
+    offset - some macOS releases slip LIST/fact chunks between fmt and data."""
+    with wave.open(io.BytesIO(wav), "rb") as wf:
+        return (wf.getframerate(), wf.getnchannels(), wf.getsampwidth(),
+                wf.readframes(wf.getnframes()))
+
+
+def spool_wav(segments, target: str, speed, ceiling_bytes: int,
+              out_path: str) -> tuple:
+    """Render every piece into ONE WAV file, header written last.
+
+    Only one segment is ever held: the reply accumulates on disk, which is the
+    whole reason a long answer costs the server about nothing. Raises
+    RuntimeError past `ceiling_bytes` (a refusal, never a truncated file) and
+    when the voice changes format mid-reply. Returns (rate, channels, width,
+    payload_bytes)."""
+    fmt = None
+    total = 0
+    with open(out_path, "wb") as out:
+        out.write(b"\x00" * 44)          # real header lands when sizes are known
+        for segment in segments:
+            rate, channels, width, pcm = pcm_of(synth_wav(segment, target, speed))
+            if fmt is None:
+                fmt = (rate, channels, width)
+            elif (rate, channels, width) != fmt:
+                raise RuntimeError("macOS say changed format between segments: "
+                                   "%s then %s" % (fmt, (rate, channels, width)))
+            total += len(pcm)
+            if total > ceiling_bytes:
+                raise RuntimeError(
+                    "this reply passed the %d MB audio ceiling set under "
+                    "Settings > Audio > macOS voices before it finished "
+                    "speaking. Raise the ceiling, lower the segment size, or "
+                    "ask for a shorter answer" % (ceiling_bytes // 1000000))
+            if pcm:
+                out.write(pcm)
+    if fmt is None:
+        raise RuntimeError("nothing to say")
+    with open(out_path, "r+b") as fh:
+        fh.seek(0)
+        fh.write(wav_header(fmt[0], fmt[1], fmt[2], total))
+    return fmt + (total,)
+
+
+def synth_bytes(name: str, text: str, speed=None,
+                language=None, preferred=None) -> bytes:
+    """Render one utterance to plain WAV bytes. Raises RuntimeError with a
+    user-safe reason; input never reaches a shell. Addressing goes through
+    the resolved row's IDENTIFIER when it has one - display names collide
+    (the system ships two Samanthas), identifiers do not.
+    SAY-2: an empty `name` routes - the preferred mark for `language`,
+    the language's own default, the best installed voice for the
+    detected language of TEXT, or the Mac-wide default voice; when even
+    that is unknown the -v flag is dropped and `say` answers in the
+    system voice (never a silent failure)."""
+    text = (text or "").strip()
+    if not text:
+        raise RuntimeError("nothing to say")
+    refused = long_input_error(len(text))
+    if refused:
+        raise RuntimeError(refused)
+    try:
+        target = route(name, language, preferred, text)
+    except LookupError as e:
+        raise RuntimeError(str(e))
+    return synth_wav(text, target, speed)
+
+
 def convert_wav(wav: bytes, fmt: str) -> bytes:
     """WAV -> fmt with the repo's optional-ffmpeg pattern. fmt 'wav' is a
     no-op; unknown formats raise ValueError, missing ffmpeg raises
@@ -939,21 +1207,39 @@ def convert_wav(wav: bytes, fmt: str) -> bytes:
         return wav
     if fmt not in _MEDIA:
         raise ValueError("unsupported format '%s'" % fmt)
+    with tempfile.TemporaryDirectory(prefix="uplift-say-") as td:
+        src = Path(td) / "in.wav"
+        dst = Path(td) / ("out." + _EXT_SUFFIX.get(fmt, fmt))
+        src.write_bytes(wav)
+        convert_file(str(src), str(dst), fmt)
+        return dst.read_bytes()
+
+
+# ffmpeg names a few formats differently than the API does
+_EXT_SUFFIX = {"opus": "ogg"}
+
+
+def convert_file(src: str, dst: str, fmt: str) -> None:
+    """Transcode a WAV FILE to dst, in a child process: neither the input nor
+    the output is ever held here, which is what keeps a long reply cheap. The
+    extension of dst is the caller's business, so that ffmpeg's own name for
+    the format stays one lookup away from the API's."""
+    if Path(dst).suffix.lstrip(".").lower() not in (fmt, _EXT_SUFFIX.get(fmt)):
+        # Checked before the binary is even looked for: ffmpeg picks its target
+        # format from the extension, so a '.wav' destination asked to be 'mp3'
+        # would come back as WAV wearing an mp3 content-type.
+        raise ValueError("convert_file wants a .%s destination, got '%s'"
+                         % (fmt, Path(dst).name[-16:]))
     ff = shutil.which("ffmpeg")
     if not ff:
         raise RuntimeError("this server has no ffmpeg: macOS say answers WAV "
                            "only (response_format='%s' cannot be honoured)"
-                           % fmt)
-    with tempfile.TemporaryDirectory(prefix="uplift-say-") as td:
-        src = Path(td) / "in.wav"
-        dst = Path(td) / ("out." + ("ogg" if fmt == "opus" else fmt))
-        src.write_bytes(wav)
-        p = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(src),
-                            str(dst)], capture_output=True, text=True,
-                           timeout=_TIMEOUT_S)
-        if p.returncode != 0 or not dst.is_file():
-            raise RuntimeError("ffmpeg conversion to %s failed" % fmt)
-        return dst.read_bytes()
+                           % (fmt or "wav"))
+    p = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(src),
+                        str(dst)], capture_output=True, text=True,
+                       timeout=_TIMEOUT_S)
+    if p.returncode != 0 or not Path(dst).is_file() or Path(dst).stat().st_size < 1:
+        raise RuntimeError("ffmpeg conversion to %s failed" % fmt)
 
 
 def media_type(fmt: str) -> str:

@@ -101,6 +101,7 @@ import binascii
 import io
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -111,7 +112,8 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.background import BackgroundTask
 
 from .. import say_engine
 from .. import tts_cache
@@ -351,6 +353,28 @@ def _say_preferred() -> dict:
     return {str(k): str(v) for k, v in p.items()} if isinstance(p, dict) else {}
 
 
+def _cleanup(path) -> None:
+    """Delete a spool. Never loud: a temp file we could not remove must not
+    turn a delivered reply into an error."""
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _say_limits() -> tuple:
+    """(characters per `say` call, MB of audio one reply may reach) from the
+    voice store. Both are cleaned, never trusted: a store carrying null, text
+    or a wild number means the defaults rather than a broken speech path, and
+    the ceiling can never be switched off - an unbounded render is exactly what
+    it exists to prevent."""
+    store = _load()
+    return (say_engine.clean_chunk_chars(store.get("say_chunk_chars")),
+            say_engine.clean_max_audio_mb(store.get("say_max_audio_mb")))
+
+
 # ---- SAY-CHAT (user 2026-10-21): macOS `say` voices in the Uplift web chat.
 # Availability IS a store voice carrying model 'say:<identifier>': the chat
 # picker lists store voices and every speech route already dispatches that
@@ -480,7 +504,16 @@ async def _say_response(name: str, text: str, speed=None,
     if not say_engine.available():
         raise HTTPException(status_code=404,
                             detail="macOS say is not available on this server")
+    chunk_chars, max_mb = await asyncio.to_thread(_say_limits)
     try:
+        if len((text or "").strip()) <= say_engine.MAX_SAY_CHARS and \
+                chunk_chars > 0:
+            pieces = say_engine.split_text(text, chunk_chars)
+        else:
+            pieces = []
+        if len(pieces) > 1:
+            return await _say_response_spooled(
+                name, pieces, speed, response_format, language, max_mb)
         wav = await asyncio.to_thread(
             say_engine.synth_bytes, name or "", text, speed,
             language, _say_preferred())
@@ -493,6 +526,56 @@ async def _say_response(name: str, text: str, speed=None,
         raise HTTPException(status_code=502, detail=str(e))
     return Response(content=data,
                     media_type=say_engine.media_type(response_format))
+
+
+async def _say_response_spooled(name, pieces, speed, response_format,
+                                language, max_mb) -> Response:
+    """The long-reply path: render each piece, accumulate on disk, send the
+    file. One `say` render is held in memory at a time, so a ten minute answer
+    costs about what one sentence always did.
+
+    The reply leaves as a FileResponse rather than as bytes, which is why it is
+    not written through the audio cache: `tts_cache` stores bytes, the chat
+    already speaks in sentence-sized pieces so it never lands here, and a
+    caller that asks for an hour of speech in one request is not the caller the
+    cache was built for. The response says `spooled` in the cache header so a
+    reader can tell that from a silent miss."""
+    media = say_engine.media_type(response_format)
+    try:
+        target = await asyncio.to_thread(
+            say_engine.route, name or "", language, _say_preferred(),
+            " ".join(pieces))
+    except LookupError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    fd, spool = tempfile.mkstemp(prefix="uplift-say-", suffix=".wav")
+    os.close(fd)
+    out = ""                                  # the file that gets sent
+    try:
+        await asyncio.to_thread(
+            say_engine.spool_wav, pieces, target, speed,
+            max_mb * 1000000, spool)
+        if response_format in ("wav", ""):
+            out = spool
+        else:
+            suffix = say_engine._EXT_SUFFIX.get(response_format,
+                                                response_format)
+            fd2, out = tempfile.mkstemp(prefix="uplift-say-", suffix="." + suffix)
+            os.close(fd2)
+            await asyncio.to_thread(say_engine.convert_file, spool, out,
+                                    response_format)
+    except (ValueError, RuntimeError) as e:
+        _cleanup(out)
+        if out != spool:
+            _cleanup(spool)
+        if isinstance(e, ValueError):
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        _log.warning("macOS say spool failed: %s", e)
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    if out != spool:
+        _cleanup(spool)                       # the WAV served no one
+    return FileResponse(out, media_type=media,
+                        headers={"X-Uplift-TTS-Cache": "spooled"},
+                        background=BackgroundTask(_cleanup, out))
 
 
 async def _create_transcription(data: bytes, filename: str, model: str,
@@ -766,7 +849,10 @@ async def voices_say_list(_auth=Depends(require_admin)):
     SAY-2c: 'system_language' + 'system_voice' tell the tab what THIS
     Mac answers by default; every row whose language would override it
     carries 'answers_default' so its button can read honestly instead
-    of showing a star."""
+    of showing a star.
+    SAY-6: 'chunk_chars' + 'max_audio_mb' are the two limits a long reply is
+    cut and counted by, so the panel shows what the server will actually do
+    rather than what the code defaults to."""
     if not say_engine.available():
         return {"supported": False, "voices": []}
     voices = await asyncio.to_thread(say_engine.list_voices)
@@ -789,7 +875,9 @@ async def voices_say_list(_auth=Depends(require_admin)):
     for loc, addr in pref.items():
         if addr:
             addr2loc[addr] = loc
+    chunk_chars, max_mb = await asyncio.to_thread(_say_limits)
     return {"supported": True, "preferred": pref,
+            "chunk_chars": chunk_chars, "max_audio_mb": max_mb,
             "system_language": sysl, "system_voice": dv.get("name") or "",
             "voices": [dict(
                 v, added=v["name"] in saved
@@ -801,6 +889,35 @@ async def voices_say_list(_auth=Depends(require_admin)):
                 answers_default=bool(sysl)
                 and say_engine._locale_score(sysl, v.get("locale")) > 0)
                        for v in voices]}
+
+
+@api_router.post("/voices/say/limits")
+async def voices_say_limits(request: Request, _auth=Depends(require_admin)):
+    """SAY-6: the two limits for long spoken replies. Body
+    {chunk_chars, max_audio_mb}, either optional - a key that is absent keeps
+    its value, so the panel can save one field without resending the other.
+
+    chunk_chars is how many characters go into one `say` call before the reply
+    is cut at a sentence boundary and stitched back (0 = never split, one call
+    whatever the length; every extra call costs about a second of setup).
+    max_audio_mb caps the finished reply in megabytes of AUDIO, which is the
+    unit that means the same for every voice: 48 KB per second of speech, while
+    characters per second is a property of the voice. A reply over the ceiling
+    is refused, never delivered cut short. Values are cleaned, never trusted."""
+    raw = await request.json()
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    store = _load()
+    if "chunk_chars" in raw:
+        store["say_chunk_chars"] = say_engine.clean_chunk_chars(raw["chunk_chars"])
+    if "max_audio_mb" in raw:
+        store["say_max_audio_mb"] = say_engine.clean_max_audio_mb(
+            raw["max_audio_mb"])
+    _save(store)
+    chunk_chars, max_mb = _say_limits()
+    _log.info("macOS say limits: %s chars per call, %d MB per reply",
+              chunk_chars or "unsplit", max_mb)
+    return {"ok": True, "chunk_chars": chunk_chars, "max_audio_mb": max_mb}
 
 
 @api_router.post("/voices/say/preferred")

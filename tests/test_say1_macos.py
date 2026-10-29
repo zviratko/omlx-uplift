@@ -331,8 +331,16 @@ def test_synth_guards(monkeypatch, on_mac):
         Path(cmd[cmd.index("-o") + 1]).write_bytes(b"RIFF" + b"\0" * 200)
         return P()
     monkeypatch.setattr(SE.subprocess, "run", fake_run)
-    on_mac.synth_bytes("Zuzana", "x" * (on_mac.MAX_SAY_CHARS + 500))
-    assert len(captured["text"]) == on_mac.MAX_SAY_CHARS
+    # A long reply is spoken, not sliced: the router splits it into pieces and
+    # stitches them, so nothing this side of the sanity cap is ever dropped.
+    # The old contract truncated silently, which lost the end of an answer and
+    # reported it as success.
+    long_text = "word " * (on_mac.MAX_SAY_CHARS // 5)
+    on_mac.synth_bytes("Zuzana", long_text)
+    assert captured["text"].strip() == long_text.strip(), "text must reach `say` whole"
+    with pytest.raises(RuntimeError, match=str(on_mac.MAX_SAY_CHARS)):
+        on_mac.synth_bytes("Zuzana", "x" * (on_mac.MAX_SAY_CHARS + 500))
+    assert len(captured["text"]) < on_mac.MAX_SAY_CHARS, "refused before render"
 
 
 def test_synth_failure_reason_propagates(monkeypatch, on_mac):

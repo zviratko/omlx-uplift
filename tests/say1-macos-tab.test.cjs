@@ -35,6 +35,7 @@ const fs = require('node:fs');
 const { STATIC_DIR } = require('./static-src.cjs');
 
 const SRC = path.join(STATIC_DIR, 'uplift_voices.js');
+const SAY6_LOCALES = path.join(__dirname, '..', 'omlx_uplift', 'locales');
 
 function makeDom() {
     const byId = {};
@@ -196,14 +197,36 @@ async function mount(opt) {
             $: id => doc.getElementById(id),
             fetchJson: async (u) => {
                 u = String(u); st.gets.push(u);
-                if (u.includes('/voices/say')) return { supported: o.supported,
-                                                        voices: o.voices,
-                                                        system_language: o.sysl || '',
-                                                        system_voice: o.sysv || '' };
+                if (u.includes('/voices/say')) {
+                    const d = { supported: o.supported, voices: o.voices,
+                                system_language: o.sysl || '',
+                                system_voice: o.sysv || '' };
+                    // SAY-6: an engine older than this panel reports no limits
+                    // (o.noLimits) - the fields must then disappear
+                    if (!o.noLimits) {
+                        d.chunk_chars = o.chunk === undefined ? 1200 : o.chunk;
+                        d.max_audio_mb = o.mb === undefined ? 256 : o.mb;
+                    }
+                    return d;
+                }
                 return { voices: o.store };
             },
-            postJson: async (u, b) => { st.posts.push({ url: String(u), body: b });
-                                         return {}; },
+            postJson: async (u, b) => {
+                st.posts.push({ url: String(u), body: b });
+                if (String(u).includes('/voices/say/limits') && o.failLimits) {
+                    throw new Error('POST ' + u + ' -> 500 boom');
+                }
+                if (String(u).includes('/voices/say/limits')) {
+                    // the SERVER cleans the values; echo its bounds so the
+                    // test proves the field shows what was stored
+                    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+                    return { ok: true,
+                             chunk_chars: b.chunk_chars === 0 ? 0
+                                 : clamp(b.chunk_chars, 200, 20000),
+                             max_audio_mb: clamp(b.max_audio_mb, 1, 4096) };
+                }
+                return {};
+            },
             putJson: async () => ({}), deleteJson: async () => ({}),
             toast: (msg, ms, cls) => st.toasts.push(
                 { msg: String(msg), cls: typeof ms === 'string' ? ms : cls }),
@@ -625,6 +648,119 @@ const CHAT_KEYS = ['uplift.voices.say_btn_chat',
                    'uplift.voices.say_btn_chat_on',
                    'uplift.voices.say_btn_chat_hint',
                    'uplift.voices.say_btn_chat_on_hint'];
+
+/* ---- SAY-6: the two long-reply limits live on the server ----------------
+   The panel reads them from GET /voices/say and writes them back through
+   POST /voices/say/limits, then repaints from the answer: the engine owns
+   the bounds, so what the operator typed is not necessarily what is stored.
+   A field that showed an invented default would be a second truth about what
+   this Mac does with a long answer. */
+test('SAY-6: the limits row shows the server values, not invented ones', async () => {
+    const h = await mount({ chunk: 900, mb: 64 });
+    await h.sayClick();
+    const box = classes(h.host, 'vc-say-limits');
+    assert.equal(box.length, 1, 'one limits row on the macOS tab');
+    const inputs = box[0].children.filter(c => c.tagName === 'input'
+        || (c.children || []).some(x => x.tagName === 'input'));
+    const nums = [];
+    (function walk(el) {
+        for (const c of el.children || []) {
+            if (c.tagName === 'input' && c.type === 'number') nums.push(c);
+            walk(c);
+        }
+    })(box[0]);
+    assert.equal(nums.length, 2, 'two number fields');
+    assert.equal(nums[0].value, '900', 'segment size comes from the server');
+    assert.equal(nums[1].value, '64', 'ceiling comes from the server');
+    assert.ok(nums[0].min === '0' && nums[0].max === '20000',
+              'the segment field knows 0 is a real choice');
+    assert.ok(nums[1].min === '1', 'the ceiling cannot be zeroed away');
+    assert.ok(!inputs.length || inputs.length === 2);
+});
+
+test('SAY-6: a change posts both limits once and repaints from the answer', async () => {
+    const h = await mount({});
+    await h.sayClick();
+    const nums = [];
+    (function walk(el) {
+        for (const c of el.children || []) {
+            if (c.tagName === 'input' && c.type === 'number') nums.push(c);
+            walk(c);
+        }
+    })(classes(h.host, 'vc-say-limits')[0]);
+    nums[0].value = '300';
+    nums[0].onchange();
+    await settle(); await settle();
+    const posts = h.st.posts.filter(p => p.url.includes('/voices/say/limits'));
+    assert.equal(posts.length, 1, JSON.stringify(h.st.posts));
+    assert.deepEqual(posts[0].body, { chunk_chars: 300, max_audio_mb: 256 },
+                     'both limits travel together, one request');
+    assert.equal(nums[0].value, '300');
+    assert.equal(h.st.toasts.some(t => /saved/i.test(t.msg)), true,
+                 'the owner gets told it stuck');
+});
+
+test('SAY-6: a wild number lands on the bound the engine honours', async () => {
+    const h = await mount({});
+    await h.sayClick();
+    const nums = [];
+    (function walk(el) {
+        for (const c of el.children || []) {
+            if (c.tagName === 'input' && c.type === 'number') nums.push(c);
+            walk(c);
+        }
+    })(classes(h.host, 'vc-say-limits')[0]);
+    nums[0].value = '50';          // below the server's floor of 200
+    nums[0].onchange();
+    await settle(); await settle();
+    assert.equal(nums[0].value, '200',
+                 'the field shows what was STORED, not what was typed');
+});
+
+test('SAY-6: a rejected save rolls the field back and says so', async () => {
+    // The panel must not keep showing a limit the server refused to take:
+    // the number on screen is a claim about what a long reply will do.
+    const h = await mount({ chunk: 1200, mb: 256, failLimits: true });
+    await h.sayClick();
+    const nums = [];
+    (function walk(el) {
+        for (const c of el.children || []) {
+            if (c.tagName === 'input' && c.type === 'number') nums.push(c);
+            walk(c);
+        }
+    })(classes(h.host, 'vc-say-limits')[0]);
+    nums[0].value = '400';
+    nums[0].onchange();
+    await settle(); await settle();
+    assert.equal(nums[0].value, '1200', 'field back on the stored value');
+    const errs = h.st.toasts.filter(x => /boom|error/i.test(x.msg + ' ' + x.cls));
+    assert.ok(errs.length, JSON.stringify(h.st.toasts));
+});
+
+test('SAY-6: an engine that reports no limits shows no fields', async () => {
+    const h = await mount({ noLimits: true });
+    await h.sayClick();
+    assert.equal(classes(h.host, 'vc-say-limits').length, 0,
+                 'statics newer than the keg must not offer dead controls');
+    assert.ok(classes(h.host, 'vc-say-filter').length,
+              'the rest of the tab is unaffected');
+});
+
+test('SAY-6: every locale translates the limits copy', () => {
+    const locales = fs.readdirSync(SAY6_LOCALES).filter(f => f.endsWith('.json'));
+    assert.equal(locales.length, 10, 'all ten locales present');
+    for (const f of locales) {
+        const d = JSON.parse(fs.readFileSync(path.join(SAY6_LOCALES, f), 'utf8'));
+        for (const k of ['uplift.voices.say_limits_hint',
+                         'uplift.voices.say_chunk_label',
+                         'uplift.voices.say_chunk_hint',
+                         'uplift.voices.say_mb_label',
+                         'uplift.voices.say_mb_hint',
+                         'uplift.voices.say_limits_saved']) {
+            assert.ok(d[k] && d[k].length > 3, `${f} lost ${k}`);
+        }
+    }
+});
 
 test('SAY-CHAT: installed rows offer the web-chat switch; POST flips it', async () => {
     const h = await mount({});
