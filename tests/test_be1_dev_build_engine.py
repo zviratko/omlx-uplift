@@ -93,6 +93,58 @@ def test_log_handler_covers_the_source_refresh(home, monkeypatch):
         "warning logged during the source refresh never reached the log"
 
 
+def test_source_refresh_lines_always_name_their_patch(home, monkeypatch):
+    """mruu 2026-10-29: while rewording the auto-promote line I dropped its
+    patch id, so the build log printed
+
+        source update v2 auto-promoted — a stored version the source stopped changing
+        omlx-tts-say: source re-gate failed — one or more files failed
+
+    one directly above the other. It read as `omlx-tts-say` being promoted to v2
+    at the same moment it fell back to v1, and nothing on the line told the
+    reader the two were about different patches. Per-patch lines carry their id:
+    this pass prints nothing that cannot be attributed."""
+    cfg = _cfg(home, monkeypatch)
+    from omlx_uplift import brewutil, curated, patchsource, patches as _pm
+
+    (home / "dev-src").mkdir(parents=True, exist_ok=True)   # the cleanup in
+    cfg["src_path"] = str(home / "dev-src")                 # finally: runs git
+    monkeypatch.setattr(devsrc, "_vanilla_keg_site_packages", lambda: "")
+    monkeypatch.setattr(brewutil, "keg_site_packages", lambda name: "/tmp/fake-sp")
+    monkeypatch.setattr(devsrc, "detached_base_worktree",
+                        lambda cfg, tmp: str(home))
+    monkeypatch.setattr(_pm, "PatchStore", lambda *a, **k: object())
+    monkeypatch.setattr(
+        curated, "sync", lambda store, keg, build_root=None: {
+            "ok": True, "report": {}, "notes": []})
+    reports = {
+        "specprefill-alias-fix": {"check": "update_available", "v": 2,
+                                  "promoted": True, "adopted_stale": True,
+                                  "curated": False},
+        "warm-before-ready": {"check": "update_available", "v": 3,
+                              "promoted": False, "curated": True},
+        "omlx-tts-say": {"check": "error",
+                         "reason": "one or more files failed"},
+    }
+    monkeypatch.setattr(patchsource, "check_all",
+                        lambda store, keg, dev_root=None: {
+                            "ok": True, "reports": dict(reports)})
+    res = devsrc.BuildResult(ok=True, stage="refresh", returncode=0)
+    devsrc._refresh_patch_sources({"src_path": str(home / "dev-src")}, res)
+
+    assert res.lines, "the refresh pass emitted nothing"
+    for _stream, line in res.lines:
+        # a patch id, or the catalog pass naming the ids it touched — anything
+        # else is an unattributable line (the shape that started this)
+        assert any(line.startswith(pid + ":") for pid in reports) \
+            or line.startswith("curated:"), line
+    out = "\n".join(t for _, t in res.lines)
+    assert "specprefill-alias-fix: source update v2 auto-promoted" in out, out
+    assert "warm-before-ready: update v3 available" in out, out
+    assert "Promote" in out, out
+    assert "omlx-tts-say: source re-gate failed" in out, out
+
+
 def test_missing_config_stage_and_rc(home, monkeypatch):
     monkeypatch.setattr(devsrc, "load_config", lambda *a, **k: None)
     before = handler_count()

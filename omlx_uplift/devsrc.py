@@ -1928,7 +1928,8 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
             if rep.get("check") == "update_available" and rep.get("promoted"):
                 # "curated" only when it IS one of ours: a personal patch with
                 # AUTO UPDATE on used to be announced as a curated update
-                _emit(res, "out", "%s update v%s auto-promoted — %s" % (
+                _emit(res, "out", "%s: %s update v%s auto-promoted — %s" % (
+                    pid,
                     "catalog" if rep.get("curated") else "source",
                     rep["v"],
                     "materialized in this build" if not rep.get("adopted_stale")
