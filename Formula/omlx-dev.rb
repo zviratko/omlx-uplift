@@ -212,22 +212,11 @@ class OmlxDev < Omlx
     if Dir[buildpath/"omlx/*"].none?
       odie "dev-src checkout missing at #{self.class.dev_src} — run: omlx-uplift dev bootstrap"
     end
-    # TEMPORARY DEPENDENCY CEILING — remove once omlx ships its own ceiling
-    # (tracked upstream as jundot/omlx#4831; someone else already reported the
-    # symptom and isolated the same culprit, so this is a workaround, not a fix).
-    #
-    # preshed 3.0.14 (PyPI 2026-10-24 21:39) ships .pyx sources byte-identical
-    # to 3.0.13 — only the compiled extensions and the version string differ, so
-    # it is a rebuild, and that rebuild makes spaCy 3.8.16 die inside
-    # Tokenizer._flush_specials on ANY spacy.load():
-    #   OverflowError: Python int too large to convert to C ssize_t
-    # The parent install ends with `spacy.load('en_core_web_sm')` as a build
-    # check, so the whole keg build fails (and Kokoro TTS would fail at runtime
-    # too). omlx pins only `spacy>=3.8.4`, and preshed arrives transitively, so
-    # PIP_CONSTRAINT is the only lever that reaches it before that check runs.
-    # Kept at the exact version the working kegs resolved (2026-10-24 17:19).
-    (buildpath/"uplift-pip-constraints.txt").write("preshed==3.0.13\n")
-    ENV["PIP_CONSTRAINT"] = (buildpath/"uplift-pip-constraints.txt").to_s
+    # UP-51 closed 2026-10-29: this formula used to pin `preshed==3.0.13` through
+    # PIP_CONSTRAINT, because preshed 3.0.14 made every spacy.load() die inside
+    # Tokenizer._flush_specials (jundot/omlx#4831). PyPI YANKED 3.0.14 and 3.0.15
+    # loads models fine — verified on this box's interpreter, 3.0.13/14/15 side by
+    # side. No ceiling needed, upstream or here. Do not add one back.
 
     # Third trap out of upstream 3a5a6b2, and it only bites on macOS 27. mlx-audio
     # 0.6.3's `[all]` extras ask for `uvicorn[standard]`, which pulls the prebuilt
@@ -268,7 +257,6 @@ class OmlxDev < Omlx
       ENV.append "CXXFLAGS", "-I#{py312_inc}"
     end
     super
-    ENV.delete("PIP_CONSTRAINT")
     ENV.delete("PIP_NO_BINARY")
     # The parent links bin/omlx; this keg must NOT, or linking both formulas
     # at once collides. Rename inside the keg (pre-link), leave the libexec
