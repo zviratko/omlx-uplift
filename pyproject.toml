@@ -40,6 +40,7 @@ include = ["omlx_uplift*"]
 
 [tool.setuptools.package-data]
 "omlx_uplift" = ["static/**/*", "locales/*.json", "skins-example/*.yml",
+                 "curated_patches/*/*", "curated_patches/*.md",
                  "man/*.1", "bench_env_requirements.txt",
                  "mteb_env_requirements.txt",
                  "evals/systemone/data/*.json"]

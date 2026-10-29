@@ -32,12 +32,13 @@ MD_NOSRC = json.dumps({
     "description": "No usable source here.",
     "source": {"kind": "carrier-pigeon"}})
 
+# index.json per tier is the listing now; the contents API survives only as
+# the legacy fallback (mruu ask 2026-10-29: that call is capped at 60/hour
+# unauthenticated and its refusal used to empty the catalog silently). A
+# non-manifest name in the index is skipped, same as before.
 FILES = {
-    "api-listing-default": [
-        {"name": "live-apply.json"}, {"name": "stray.diff"}],
-    "api-listing-optional": [
-        {"name": "nice.json"}, {"name": "nice.diff"},
-        {"name": "broken.json"}],
+    "raw-default-index.json": ["live-apply.json", "stray.diff"],
+    "raw-optional-index.json": ["nice.json", "broken.json", "nice.diff"],
     "raw-default-live-apply.json": MD_PR,
     "raw-optional-nice.json": MD_FILE,
     "raw-optional-nice.diff": DIFF,
@@ -71,10 +72,21 @@ def make_fetch(files, pr_diff=DIFF):
     return fetch
 
 
+def _w(path, obj):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh)
+
+
 class CuratedSyncTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="uplift-curated-")
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        # These fixtures describe a SYNTHETIC catalog. Without redirecting the
+        # bundled seed, a refused listing would fall back to the catalog this
+        # repository actually ships and install real patches into the store.
+        old = curated.SEED_DIR
+        curated.SEED_DIR = os.path.join(self.tmp, "no-such-seed")
+        self.addCleanup(setattr, curated, "SEED_DIR", old)
         self.root = os.path.join(self.tmp, "site-packages")
         os.makedirs(os.path.join(self.root, "pkg"))
         with open(os.path.join(self.root, "pkg", "mod.py"), "w") as fh:
@@ -117,7 +129,7 @@ class CuratedSyncTests(unittest.TestCase):
         self.assertEqual(nice["source"], {
             "kind": "url",
             "url": ("https://raw.githubusercontent.com/zviratko/"
-                    "omlx-uplift/HEAD/curated_patches/optional/nice.diff")})
+                    "omlx-uplift/HEAD/omlx_uplift/curated_patches/optional/nice.diff")})
         # unusable source kind -> listed but not installable
         broken = [x for x in r["tiers"]["optional"]
                   if x["id"] == "broken"][0]
@@ -420,6 +432,151 @@ class CuratedSyncTests(unittest.TestCase):
         self.assertEqual(r["report"]["live-apply"]["sync"], "already_present")
         self.assertEqual(patches.patch_scope(
             self.store.find(self.store.load(), "mine")), "omlx")
+
+
+class BundledCatalogTests(unittest.TestCase):
+    """Discovery without the rate-limited contents API (mruu ask
+    2026-10-29). Order is: index.json on the raw CDN, then the copy bundled
+    inside this installed uplift, then the legacy API. A tier served from the
+    seed is DEGRADED, not failed: the operator must still be able to install
+    what their version knows about, and the card must not read a refusal as
+    'catalog empty'."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="uplift-seed-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.root = os.path.join(self.tmp, "site-packages")
+        os.makedirs(os.path.join(self.root, "pkg"))
+        with open(os.path.join(self.root, "pkg", "mod.py"), "w") as fh:
+            fh.write("line1\nline2\n")
+        self.store = patches.PatchStore(os.path.join(self.tmp, "data"))
+        # a synthetic bundled catalog
+        self.seed = os.path.join(self.tmp, "seed")
+        for tier in ("default", "optional"):
+            os.makedirs(os.path.join(self.seed, tier))
+        _w(os.path.join(self.seed, "default", "index.json"),
+           {"entries": ["bundled-one.json"]})
+        _w(os.path.join(self.seed, "default", "bundled-one.json"),
+           {"description": "Ships inside the keg.", "source": {"kind": "file"}})
+        with open(os.path.join(self.seed, "default", "bundled-one.diff"), "wb") as fh:
+            fh.write(DIFF)
+        _w(os.path.join(self.seed, "optional", "index.json"), {"entries": []})
+        self.addCleanup(setattr, curated, "SEED_DIR", curated.SEED_DIR)
+        curated.SEED_DIR = self.seed
+        from omlx_uplift import patchsource
+        saved = patchsource.fetch_url
+
+        def fake_fetch(url, *a, **kw):
+            return {"ok": True, "data": DIFF, "source_head_sha": None,
+                    "url": url}
+        patchsource.fetch_url = fake_fetch
+        self.addCleanup(setattr, patchsource, "fetch_url", saved)
+
+    def test_remote_index_answers_without_touching_the_api(self):
+        seen = []
+
+        def fetch(url):
+            seen.append(url)
+            if url.endswith("default/index.json"):
+                return {"ok": True, "data": json.dumps(
+                    {"entries": ["remote-a.json"]}).encode()}
+            if url.endswith("default/remote-a.json"):
+                return {"ok": True, "data": json.dumps(
+                    {"description": "From the repository.",
+                     "source": {"kind": "file"}}).encode()}
+            return {"ok": False, "status": 404, "reason": "HTTP 404"}
+        r = curated.list_remote(fetch)
+        self.assertTrue(r["ok"])
+        self.assertEqual([e["id"] for e in r["tiers"]["default"]],
+                         ["remote-a"])
+        self.assertEqual(r["origins"]["default"], "remote")
+        # the optional tier has no remote index here -> the seed serves it
+        self.assertEqual(r["origins"]["optional"], "bundled")
+        self.assertEqual(r["tiers"]["optional"], [])
+        self.assertFalse([u for u in seen if "api.github.com" in u],
+                         "the rate-limited API must not be consulted when "
+                         "the index answers")
+
+    def test_refused_index_falls_back_to_the_bundled_seed(self):
+        def fetch(url):
+            return {"ok": False, "status": 403,
+                    "reason": "HTTP 403 from " + url}
+        r = curated.list_remote(fetch)
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["errors"], {})
+        self.assertEqual([e["id"] for e in r["tiers"]["default"]],
+                         ["bundled-one"])
+        self.assertEqual(r["origins"]["default"], "bundled")
+        # metadata comes from the bundled manifest too, so the row is real
+        self.assertEqual(r["tiers"]["default"][0]["description"],
+                         "Ships inside the keg.")
+        rep = curated.sync(self.store, self.root, fetch=fetch)
+        self.assertEqual(rep["report"]["bundled-one"]["sync"], "added_enabled")
+        self.assertEqual(rep["tier_errors"], {})
+        notes = " ".join(rep["notes"])
+        self.assertIn("bundled with this uplift version", notes)
+        self.assertIn("update uplift to see it", notes)
+
+    def test_no_remote_and_no_seed_is_a_real_failure(self):
+        curated.SEED_DIR = os.path.join(self.tmp, "no-seed-here")
+
+        def fetch(url):
+            return {"ok": False, "status": 403,
+                    "reason": "HTTP 403 from " + url}
+        r = curated.list_remote(fetch)
+        self.assertFalse(r["ok"])
+        self.assertIn("default", r["errors"])
+        self.assertIn("bundled seed had none", r["errors"]["default"])
+        rep = curated.sync(self.store, self.root, fetch=fetch)
+        self.assertEqual(rep["tier_errors"], r["errors"])
+        self.assertEqual(self.store.load()["patches"], [])
+
+
+class ShippedCatalogIntegrity(unittest.TestCase):
+    """The bundled seed and its index must not drift apart: index.json is
+    hand-maintained next to the files it lists, and a patch added without a
+    line in the index would be invisible to every install (the old API
+    listing saw the directory, so it could not hide)."""
+
+    BASE = os.path.join(os.path.dirname(os.path.abspath(curated.__file__)),
+                        "curated_patches")
+
+    def test_index_equals_the_directory_for_every_tier(self):
+        for tier in curated.TIERS:
+            d = os.path.join(self.BASE, tier)
+            self.assertTrue(os.path.isdir(d), "tier dir missing: " + tier)
+            with open(os.path.join(d, curated.INDEX_NAME), encoding="utf-8") as fh:
+                idx = json.load(fh)
+            listed = idx.get("entries")
+            self.assertIsInstance(listed, list, tier + ": index entries list")
+            on_disk = sorted(f for f in os.listdir(d)
+                             if f.endswith(".json") and f != curated.INDEX_NAME)
+            self.assertEqual(sorted(listed), on_disk,
+                             "%s/%s does not match the directory %s"
+                             % (tier, curated.INDEX_NAME, on_disk))
+
+    def test_every_shipped_manifest_is_installable(self):
+        for tier in curated.TIERS:
+            d = os.path.join(self.BASE, tier)
+            with open(os.path.join(d, curated.INDEX_NAME), encoding="utf-8") as fh:
+                names = json.load(fh).get("entries") or []
+            for name in names:
+                path = os.path.join(d, name)
+                with open(path, encoding="utf-8") as fh:
+                    meta = json.load(fh)
+                self.assertTrue(str(meta.get("description") or "").strip(),
+                                name + ": a catalog entry needs a description")
+                src = meta.get("source") or {}
+                self.assertIn(src.get("kind"), ("file", "github_pr", "url"),
+                              name + ": unusable source kind")
+                if src.get("kind") == "file":
+                    diff = os.path.join(d, name[:-5] + ".diff")
+                    self.assertTrue(os.path.isfile(diff),
+                                    name + ": source 'file' needs the "
+                                            "sibling .diff bundled too")
+                    self.assertGreater(os.path.getsize(diff), 0,
+                                       name + ": empty diff")
+
 
 
 if __name__ == "__main__":

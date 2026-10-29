@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 
 from . import patches, patchsource
@@ -43,8 +44,16 @@ from . import patches, patchsource
 _log = logging.getLogger("omlx_uplift.curated")
 
 CURATED_REPO = "zviratko/omlx-uplift"
-CURATED_DIR = "curated_patches"
+# The catalog lives INSIDE the package (mruu ask 2026-10-29): an installed
+# uplift then carries its own seed, and the tier listing no longer needs the
+# GitHub contents API, which is capped at 60 requests/hour unauthenticated
+# and whose refusal silently emptied the catalog. The remote path follows the
+# move; raw.githubusercontent is a CDN with no such budget.
+CURATED_DIR = "omlx_uplift/curated_patches"
 TIERS = ("default", "optional")
+INDEX_NAME = "index.json"
+SEED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "curated_patches")
 
 _API = "https://api.github.com/repos/{repo}/contents/{dir}/{tier}"
 _RAW = "https://raw.githubusercontent.com/{repo}/HEAD/{dir}/{tier}/{name}"
@@ -96,10 +105,53 @@ def find_by_source(manifest: dict, src) -> dict | None:
     return None
 
 
-def _list_tier(tier: str, fetch) -> dict:
-    """Directory listing for one tier. Returns {ok, entries|reason}.
-    An absent directory (HTTP 404) is an EMPTY tier, not an error — the
-    repo may only ship defaults, or none at all yet."""
+def _index_entries(tier: str, data) -> list | None:
+    """index.json bytes -> entry list, or None when unusable. 'entries' is
+    the manifest filename list; anything that is not a patch manifest is
+    skipped rather than failing the tier."""
+    try:
+        obj = json.loads((data or b"").decode("utf-8", "replace"))
+    except (ValueError, AttributeError, UnicodeDecodeError):
+        return None
+    names = obj.get("entries") if isinstance(obj, dict) else obj
+    if not isinstance(names, list):
+        return None
+    out = []
+    for name in names:
+        if not isinstance(name, str) or not name.endswith(".json"):
+            continue
+        pid = _slug(name)
+        if pid is None or pid == "index":
+            continue
+        out.append({"tier": tier, "id": pid, "name": name})
+    return out
+
+
+def _seed_entries(tier: str) -> list | None:
+    """The index that shipped inside this installed uplift. None = no seed
+    for that tier, which is the only case where the API is still consulted."""
+    try:
+        with open(os.path.join(SEED_DIR, tier, INDEX_NAME), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    return _index_entries(tier, data)
+
+
+def _seed_manifest(entry: dict) -> dict:
+    try:
+        with open(os.path.join(SEED_DIR, entry["tier"], entry["name"]),
+                  "rb") as fh:
+            data = json.loads(fh.read().decode("utf-8", "replace"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _list_tier_api(tier: str, fetch) -> dict:
+    """LEGACY listing: the rate-limited contents API. Only reached when
+    neither the raw index nor the bundled seed answered, e.g. an uplift
+    build older than index.json."""
     url = _API.format(repo=CURATED_REPO, dir=CURATED_DIR, tier=tier)
     r = fetch(url)
     if not r.get("ok"):
@@ -122,6 +174,36 @@ def _list_tier(tier: str, fetch) -> dict:
             continue
         entries.append({"tier": tier, "id": pid, "name": name})
     return {"ok": True, "entries": entries}
+
+
+def _list_tier(tier: str, fetch) -> dict:
+    """Tier listing, cheapest and least rate-limited source first:
+    remote index.json (CDN) -> the copy bundled in this uplift -> legacy API.
+    'origin' says which one answered and 'reason' why the first choice did
+    not, so the caller can tell a degraded-but-correct listing from a
+    failure. An absent remote index (404) is not an empty tier when a seed
+    exists: the seed is what this version knows it should ship."""
+    r = fetch(_raw_url(tier, INDEX_NAME))
+    if r.get("ok"):
+        entries = _index_entries(tier, r.get("data"))
+        if entries is not None:
+            return {"ok": True, "entries": entries, "origin": "remote"}
+        why = "corrupt catalog index"
+    elif r.get("status") == 404:
+        why = "no %s in the repository for tier %s" % (INDEX_NAME, tier)
+    else:
+        why = r.get("reason") or "index fetch failed"
+    seed = _seed_entries(tier)
+    if seed is not None:
+        return {"ok": True, "entries": seed, "origin": "bundled",
+                "reason": why}
+    api = _list_tier_api(tier, fetch)
+    if api.get("ok"):
+        api["origin"] = "api"
+    else:
+        api["reason"] = "%s (and the bundled seed had none either: %s)" % (
+            api.get("reason") or "listing failed", why)
+    return api
 
 
 def _fetch_manifest(entry: dict, fetch) -> dict:
@@ -163,14 +245,27 @@ def list_remote(fetch=None) -> dict:
 
         def fetch(url):
             return _fb(url)
-    out, errors = {}, {}
+    out, errors, origins, degraded = {}, {}, {}, {}
     for tier in TIERS:
         r = _list_tier(tier, fetch)
         if not r["ok"]:
             errors[tier] = r["reason"]
             continue
+        origins[tier] = r.get("origin") or "remote"
+        if origins[tier] != "remote":
+            degraded[tier] = r.get("reason") or "remote index unavailable"
         for e in r["entries"]:
             meta = _fetch_manifest(e, fetch)
+            if not meta:
+                # Nothing came back for this manifest — either the whole
+                # listing came from the seed, or the index answered remotely
+                # and this one file did not. The copy bundled with this
+                # version is still the truth about what it ships, so use it
+                # rather than dropping the row: a listed entry without
+                # metadata is skipped as incomplete.
+                meta = _seed_manifest(e)
+                if meta:
+                    e["metadata_from"] = "bundled"
             d = str(meta.get("description") or "").strip()
             if len(d) > 300:
                 # word-boundary cut — a description ending "...fed a repetiti"
@@ -186,7 +281,8 @@ def list_remote(fetch=None) -> dict:
             e["source_ok"] = src is not None and bool(e["description"])
         out[tier] = r["entries"]
     ok = len(errors) < len(TIERS)
-    return {"ok": ok, "tiers": out, "errors": errors}
+    return {"ok": ok, "tiers": out, "errors": errors,
+            "origins": origins, "degraded": degraded}
 
 
 def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> dict:
@@ -372,6 +468,14 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                 store.save(manifest)
     for tier, reason in listing["errors"].items():
         notes.append(f"tier {tier}: {reason}")
+    for tier, reason in (listing.get("degraded") or {}).items():
+        # served, just not from the repository: the operator must be able to
+        # tell "older than upstream" from "catalog unavailable" (mruu
+        # 2026-10-29: the refusal printed like a quiet no-op)
+        notes.append("tier %s: served from the catalog bundled with this "
+                     "uplift version (%s); a patch added upstream since then "
+                     "is not listed - update uplift to see it"
+                     % (tier, reason))
     # Structured form for the card (mruu report 2026-10-29): a tier that
     # could not be listed is a FAILURE the operator must see — it used to
     # arrive in the same muted note line as the informational per-patch
