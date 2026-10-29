@@ -492,7 +492,7 @@ async def _say_tail_ok(tail: str) -> bool:
 
 async def _say_response(name: str, text: str, speed=None,
                         response_format: str = "wav",
-                        language=None) -> Response:
+                        language=None, target=None) -> Response:
     """Render one utterance with the macOS engine. The two blocking steps
     (say subprocess, optional ffmpeg) run off the event loop; every failure
     answers with the reason instead of a fake silent wav. WAV stays
@@ -513,10 +513,11 @@ async def _say_response(name: str, text: str, speed=None,
             pieces = []
         if len(pieces) > 1:
             return await _say_response_spooled(
-                name, pieces, speed, response_format, language, max_mb)
+                name, pieces, speed, response_format, language, max_mb,
+                target=target)
         wav = await asyncio.to_thread(
             say_engine.synth_bytes, name or "", text, speed,
-            language, _say_preferred())
+            language, _say_preferred(), target)
         data = await asyncio.to_thread(say_engine.convert_wav, wav,
                                        response_format)
     except ValueError as e:
@@ -529,7 +530,7 @@ async def _say_response(name: str, text: str, speed=None,
 
 
 async def _say_response_spooled(name, pieces, speed, response_format,
-                                language, max_mb) -> Response:
+                                language, max_mb, target=None) -> Response:
     """The long-reply path: render each piece, accumulate on disk, send the
     file. One `say` render is held in memory at a time, so a ten minute answer
     costs about what one sentence always did.
@@ -541,12 +542,13 @@ async def _say_response_spooled(name, pieces, speed, response_format,
     cache was built for. The response says `spooled` in the cache header so a
     reader can tell that from a silent miss."""
     media = say_engine.media_type(response_format)
-    try:
-        target = await asyncio.to_thread(
-            say_engine.route, name or "", language, _say_preferred(),
-            " ".join(pieces))
-    except LookupError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    if target is None:                 # unless the caller already chose the row
+        try:
+            target = await asyncio.to_thread(
+                say_engine.route, name or "", language, _say_preferred(),
+                " ".join(pieces))
+        except LookupError as e:
+            raise HTTPException(status_code=502, detail=str(e))
     fd, spool = tempfile.mkstemp(prefix="uplift-say-", suffix=".wav")
     os.close(fd)
     out = ""                                  # the file that gets sent
@@ -1026,10 +1028,16 @@ async def voices_say_speech(request: Request, _auth=Depends(require_admin)):
         # the router can — the voice answering that language owns the
         # greeting. An unresolvable name still 404s honestly.
         try:
+            # The token goes to route() WHOLE. Splitting it into a name plus a
+            # language field would weaken it: a voice named on its own wins
+            # over a language field (the `say -v` contract), so 'Shelley:cs-CZ'
+            # would answer with some other Shelley instead of refusing.
             addr = await asyncio.to_thread(say_engine.route, name, None,
                                            _say_preferred())
-        except LookupError:
-            addr = ""
+        except LookupError as e:
+            # 'Shelley' exists in fourteen languages; asking for one the
+            # Mac does not carry is answerable better than "not installed".
+            raise HTTPException(status_code=404, detail=str(e)) from e
         if addr:
             v = await asyncio.to_thread(say_engine.resolve, addr)
     if v is None:
@@ -1038,7 +1046,13 @@ async def voices_say_speech(request: Request, _auth=Depends(require_admin)):
                                    % name[:64])
     text = str(raw.get("input") or v.get("sample")
                or "Hello! My name is %s." % v["name"].split(" (")[0])
-    return await _say_response(v["name"], text, speed=raw.get("speed"))
+    # Say the row that was just resolved, not whatever its display name
+    # happens to route to a second time: names collide (the Eloquence family
+    # ships one 'Shelley' per language, the system two 'Samantha's), and an
+    # audition that answers a DIFFERENT voice than the row clicked is worse
+    # than no audition at all.
+    return await _say_response(v["name"], text, speed=raw.get("speed"),
+                               target=v.get("identifier") or v["name"])
 
 
 # ---------------------------------------------------------------------------

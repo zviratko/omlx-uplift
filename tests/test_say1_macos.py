@@ -438,7 +438,7 @@ def test_speech_synth_never_touches_vanilla(client, on_mac, monkeypatch):
     hit = []
 
     def fake_synth(name, text, speed=None, language=None,
-                 preferred=None):
+                 preferred=None, target=None):
         hit.append((name, text, speed))
         return b"RIFFsay" + b"\0" * 100
     monkeypatch.setattr(SE, "synth_bytes", fake_synth)
@@ -462,7 +462,7 @@ def test_audition_endpoint_defaults_to_the_voice_greeting(client, on_mac,
     got = {}
 
     def fake_synth(name, text, speed=None, language=None,
-                 preferred=None):
+                 preferred=None, target=None):
         got["args"] = (name, text)
         return b"RIFF" + b"\0" * 100
     monkeypatch.setattr(SE, "synth_bytes", fake_synth)
@@ -483,7 +483,7 @@ def test_standard_surface_named_and_anonymous(client, on_mac, monkeypatch):
     _as_say(on_mac)
 
     def fake_synth(name, text, speed=None, language=None,
-                 preferred=None):
+                 preferred=None, target=None):
         return b"RIFF" + b"\0" * 100
     monkeypatch.setattr(SE, "synth_bytes", fake_synth)
     # anonymous model:'say:...' with NO response_format: WAV answer
@@ -507,7 +507,7 @@ def test_standard_surface_named_and_anonymous(client, on_mac, monkeypatch):
     assert r.status_code == 200 and r.content.startswith(b"RIFF")
     # engine failure answers 502 with the reason, not a silent file
     def boom(name, text, speed=None, language=None,
-             preferred=None):
+             preferred=None, target=None):
         raise RuntimeError("say: could not start")
     monkeypatch.setattr(SE, "synth_bytes", boom)
     r = client.post("/uplift/v1/audio/speech",
@@ -540,7 +540,7 @@ def test_say_dispatch_works_without_omlx(client, on_mac, monkeypatch):
     is absent."""
     _as_say(on_mac)
     monkeypatch.setattr(SE, "synth_bytes",
-                        lambda n, t, speed=None, language=None, preferred=None: b"RIFF" + b"\0" * 100)
+                        lambda *a, **k: b"RIFF" + b"\0" * 100)
     import builtins
     real_import = builtins.__import__
 
@@ -665,7 +665,7 @@ def test_marked_chat_voice_speaks_through_the_store_row(client, on_mac,
     _as_say(on_mac)
     monkeypatch.setattr(SE, "synth_bytes",
                         lambda n, t, speed=None, language=None,
-                               preferred=None: b"RIFF" + b"\0" * 50)
+                               preferred=None, target=None: b"RIFF" + b"\0" * 50)
     r = client.post("/uplift/api/voices/say/chat",
                     json={"identifier": "Zuzana", "on": True})
     vid = r.json()["id"]

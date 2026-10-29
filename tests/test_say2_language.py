@@ -124,7 +124,7 @@ def _fake_synth(monkeypatch):
     running `say`; return honest-looking WAV bytes."""
     seen = []
 
-    def fake(name, text, speed=None, language=None, preferred=None):
+    def fake(name, text, speed=None, language=None, preferred=None, target=None):
         seen.append((name, text, speed, language, preferred))
         return b"RIFF" + b"\0" * 100
     monkeypatch.setattr(SE, "synth_bytes", fake)

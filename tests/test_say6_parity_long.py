@@ -428,3 +428,89 @@ def test_convert_wav_still_works_from_bytes(shared, monkeypatch):
                         lambda src, dst, fmt: Path(dst).write_bytes(b"OK"))
     assert SE.convert_wav(b"WAVVAV", "mp3") == b"OK"
     assert SE.convert_wav(b"WAVVAV", "wav") == b"WAVVAV"
+
+
+# ------------------------------------------------- the row clicked is the row
+# that speaks (found by the live QA of this same deploy, 2026-10-29)
+
+SHELVES = [
+    {"name": "Shelley", "identifier": "com.apple.eloquence.de-DE.Shelley",
+     "locale": "de-DE", "quality": "default", "sample": "Hallo!",
+     "installed": True, "downloaded": True, "default": False},
+    {"name": "Shelley", "identifier": "com.apple.eloquence.pt-BR.Shelley",
+     "locale": "pt-BR", "quality": "default", "sample": "Olá!",
+     "installed": True, "downloaded": True, "default": False},
+]
+
+
+class _Audition:
+    """The smallest thing POST /voices/say/speech reads: a JSON body."""
+
+    def __init__(self, **body):
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+
+def _two_shelvies(monkeypatch):
+    """Install the two rows and watch which address reaches `say`."""
+    monkeypatch.setattr(SE, "available", lambda: True)
+    monkeypatch.setattr(SE, "_cache",
+                        {"ts": 9e15, "voices": [dict(r) for r in SHELVES]})
+    monkeypatch.setattr(SE, "_downloaded_names", lambda: set())
+    monkeypatch.setattr(SE, "_catalog_rows", lambda: [])
+    monkeypatch.setattr(SE, "_av_rows", lambda: [])
+    monkeypatch.setattr(SE, "selected_voice_identifier", lambda force=False: "")
+    monkeypatch.setattr(SE, "spoken_selections", lambda force=False: {})
+    monkeypatch.setattr(SE, "_os_sel_cache", {"ts": 9e15, "map": {}})
+    monkeypatch.setattr(V, "_say_limits", lambda: (1200, 256))
+    monkeypatch.setattr(V, "_say_preferred", lambda: {})
+    heard = {}
+
+    def fake(text, target="", speed=None):
+        heard["target"] = target
+        heard["text"] = text
+        return b"RIFF" + b"\0" * 44 + b"\0" * 44
+    monkeypatch.setattr(SE, "synth_wav", fake)
+    return heard
+
+
+def test_the_audition_speaks_the_row_it_resolved(monkeypatch, spools):
+    """Two 'Shelley' rows, two languages: the Eloquence family on a normal Mac.
+
+    The audition resolved the addressed row and then handed the bare DISPLAY
+    NAME to the renderer, which routed it a SECOND time - and the second trip
+    through a name that collides can land on the other row. Clicking Brazilian
+    Portuguese heard German. The resolved row must reach the renderer."""
+    import asyncio
+    heard = _two_shelvies(monkeypatch)
+    asyncio.run(V.voices_say_speech(_Audition(name="Shelley:pt-BR")))
+    assert heard["target"] == "com.apple.eloquence.pt-BR.Shelley", heard
+    assert heard["text"] == "Olá!", "the greeting comes from the same row"
+
+
+def test_an_unpinned_audition_still_answers_the_best_row(monkeypatch, spools):
+    """Naming a shared voice with NO language keeps the old contract: the first
+    installed row that carries it answers, so nothing that worked before
+    starts needing the pinned form."""
+    import asyncio
+    heard = _two_shelvies(monkeypatch)
+    asyncio.run(V.voices_say_speech(_Audition(name="Shelley")))
+    assert heard["target"] == SHELVES[0]["identifier"], heard
+
+
+def test_a_pinned_language_the_name_lacks_is_answered(monkeypatch, spools):
+    """'Shelley:cs-CZ' has no row. It must not silently speak another language:
+    the answer names the languages that DO carry the name."""
+    import asyncio
+    _two_shelvies(monkeypatch)
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(V.voices_say_speech(_Audition(name="Shelley:cs-CZ")))
+    assert exc.value.status_code == 404
+    detail = str(exc.value.detail)
+    # The answer has to be actionable on its own: which voice, which languages
+    # it DOES have, which one was asked for.
+    assert "Shelley" in detail and "de-DE" in detail and "pt-BR" in detail, detail
+    assert "cs-CZ" in detail and "not for" in detail, detail

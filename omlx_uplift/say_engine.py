@@ -1175,7 +1175,7 @@ def spool_wav(segments, target: str, speed, ceiling_bytes: int,
 
 
 def synth_bytes(name: str, text: str, speed=None,
-                language=None, preferred=None) -> bytes:
+                language=None, preferred=None, target=None) -> bytes:
     """Render one utterance to plain WAV bytes. Raises RuntimeError with a
     user-safe reason; input never reaches a shell. Addressing goes through
     the resolved row's IDENTIFIER when it has one - display names collide
@@ -1191,10 +1191,11 @@ def synth_bytes(name: str, text: str, speed=None,
     refused = long_input_error(len(text))
     if refused:
         raise RuntimeError(refused)
-    try:
-        target = route(name, language, preferred, text)
-    except LookupError as e:
-        raise RuntimeError(str(e))
+    if target is None:                 # the caller may already have chosen
+        try:
+            target = route(name, language, preferred, text)
+        except LookupError as e:
+            raise RuntimeError(str(e))
     return synth_wav(text, target, speed)
 
 

@@ -271,7 +271,8 @@ def test_say_voice_routes_via_preferred_defaults_exempt(client, fake_speech,
     monkeypatch.setattr(SE, "available", lambda: True)
     seen = []
 
-    def fake(name, text, speed=None, language=None, preferred=None):
+    def fake(name, text, speed=None, language=None, preferred=None,
+             target=None):
         seen.append((name, text, speed, language, preferred))
         return b"RIFF" + b"\0" * 100
     monkeypatch.setattr(SE, "synth_bytes", fake)
