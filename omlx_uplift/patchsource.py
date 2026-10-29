@@ -1484,6 +1484,26 @@ def remove_patch(store, patch_id: str, tree_root: str) -> dict:
     p = store.find(manifest, patch_id)
     if p is None:
         return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
+    if not tree_root:
+        # No resolvable tree. The operator MUST still be able to forget a patch
+        # (that is the recovery path when a patch is what broke the build), but
+        # deleting pristine backups whose target tree is currently unreachable
+        # turns a repair into permanent data loss - those bytes exist nowhere
+        # else. Forget the entry, keep the backups, say exactly that.
+        manifest["patches"] = [x for x in manifest.get("patches", [])
+                              if x.get("id") != patch_id]
+        store.save(manifest)
+        return {"ok": True,
+                "restored": {"ok": True, "reason": None, "files": []},
+                "tree_bytes": "not restored - no resolvable tree",
+                "backups_kept": True,
+                "note": ("forgot '%s' in the manifest and LEFT its pristine "
+                         "backups and diff bytes on disk; with no tree to "
+                         "restore into, deleting them would destroy the only "
+                         "copy. Nothing re-applies it at boot: the manifest is "
+                         "what reconcile reads. To finish by hand once the keg "
+                         "resolves, compare the tree against upstream's file."
+                         % patch_id)}
     restore_report = {"ok": True, "reason": None, "files": []}
     keg = _patches.keg_id(os.path.join(tree_root, "omlx"))
     chain = [v for v in p.get("versions", [])

@@ -425,14 +425,29 @@ class TargetWiring(unittest.TestCase):
         self.assertEqual([x["target"] for x in d["targets"]],
                          ["omlx", "dev"])
 
-    def test_missing_dev_keg_errors_honestly(self):
+    def test_missing_dev_keg_still_lists_the_store(self):
+        # TREE-LESS RECOVERY (mruu 2026-10-29): the listing reads only the
+        # manifest, so a keg that cannot be resolved must not blank it - that
+        # is the moment the operator needs it. It answers, and says plainly
+        # that no disk tree was read.
         rc, t, e, seen = self._run(["status", "--target", "dev"], dev=False)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, [""])              # view ran tree-less
+        self.assertIn("no omlx install tree found", e)
+        self.assertIn("no omlx tree found", t)
+        self.assertIn("omlx-uplift dev use", t)   # the way out, on the answer
+
+    def test_missing_dev_keg_still_refuses_verbs_needing_tree_bytes(self):
+        # ...and the honesty the old pin protected moves to where a tree is
+        # genuinely required: 'apply' writes into site-packages.
+        rc, t, e, seen = self._run(["apply", "--target", "dev"], dev=False)
         self.assertEqual(rc, 2)
-        self.assertIn("omlx-dev keg not found", e)
+        self.assertIn("needs a real install tree", e)
+        self.assertIn("omlx-uplift dev use", e)
         self.assertEqual(seen, [])
 
     def test_missing_vanilla_keeps_historic_message(self):
-        rc, t, e, seen = self._run(["status"], vanilla=None)
+        rc, t, e, seen = self._run(["apply"], vanilla=None)
         self.assertEqual(rc, 2)
         self.assertIn("omlx package tree not found", e)
 

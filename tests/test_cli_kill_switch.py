@@ -148,17 +148,28 @@ class KillSwitchRoundTrip(unittest.TestCase):
                         "a patch the user had off stays off")
 
     def test_tree_bound_verbs_still_refuse_without_a_tree(self):
-        """The gate stays where it belongs: 'status' reads the live tree to
-        answer 'applied on this keg?', so it must still say it cannot."""
+        """The gate stays where it belongs — on the verbs that touch tree
+        bytes. 'apply' writes into site-packages and must refuse.
+
+        This pin used to assert the same for 'status' ("it reads the live tree
+        to answer 'applied on this keg?'"). That reasoning cost an operator the
+        listing on the exact machine where the keg could not be resolved
+        (mruu, 2026-10-29: a keg directory removed from the Cellar left
+        /opt/homebrew/opt/omlx-dev dangling), and 'status' shares that lock with
+        every store-only verb beside it. It now answers from the manifest and
+        states plainly that no tree was read — see tests/test_cli_patch_treeless.py
+        for the full contract, including the honesty banner."""
         from unittest import mock
 
         import omlx_uplift.patches as _patches
 
         err = io.StringIO()
+        out = io.StringIO()
         with mock.patch.object(_patches, "_omlx_root", return_value=None), \
-                redirect_stdout(io.StringIO()), redirect_stderr(err):
-            rc = cli.cmd_patches(["status"])
+                redirect_stdout(out), redirect_stderr(err):
+            rc = cli.cmd_patches(["apply"])
         self.assertEqual(rc, 2)
+        self.assertIn("needs a real install tree", err.getvalue())
         self.assertIn("tree not found", err.getvalue())
 
 

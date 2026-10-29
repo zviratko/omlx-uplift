@@ -975,14 +975,31 @@ def cmd_patches(argv=None) -> int:
         return 0 if out.get("ok") else 1
 
     want, rows, missing = _patch_targets(store, args.target)
-    if missing:
-        _missing_target_error(missing)
+    # A tree that cannot be resolved is a FACT about the machine, never a
+    # reason to lock the operator out of the commands that fix it. KILL-NOTREE
+    # moved the kill switch above this check for exactly that reason and then
+    # stopped one verb too early: enable, disable, promote, rollback, approve,
+    # adopt, curated and the listing itself read and write only
+    # ~/.omlx/uplift, yet every one of them refused on a box where
+    # /opt/homebrew/opt/omlx-dev named a keg directory that no longer existed
+    # (mruu, 2026-10-29) - precisely the moment an operator has to see what is
+    # applied and drop the patch that broke the build. Only verbs that touch
+    # tree bytes, or gate a candidate against a tree, may require one.
+    _NEEDS_TREE = ("apply", "check", "update-all", "add", "update")
+    if not rows and args.action in _NEEDS_TREE:
+        _missing_target_error(missing, action=args.action)
         return 2
+    if missing:
+        # Say what is absent; never fake the missing board's answer. This also
+        # unblocks '--target both' on a machine that legitimately has one tree
+        # (DEC-1 dev-only boxes), where a partial answer beats no answer.
+        _missing_target_note(missing, treeless=not rows,
+                             base_dir=getattr(store, "base_dir", None))
     if want == "both" and args.action in ("add", "update", "curated"):
         ap.error("--target both covers status/apply/check/update-all; "
                  "add/update/curated gate one tree (--target omlx|dev)")
-    root = rows[0][2]
-    tree_root = rows[0][1]
+    root = rows[0][2] if rows else None
+    tree_root = rows[0][1] if rows else ""
 
     if args.action in ("add", "update"):
         import re as _re
@@ -1085,6 +1102,26 @@ def cmd_patches(argv=None) -> int:
         # PER-TARGET lane: one pass per selected tree. 'both' shows/acts on
         # vanilla AND dev — each section/entry carries its own target, tree
         # and keg id, mirroring what the two dashboards show.
+        if args.action == "status" and not rows:
+            # Tree-less view: view(store, "", "") is the documented store
+            # answer (tests use it), and the renderer already carries a
+            # WARNING line, so the operator gets the real manifest plus an
+            # explicit statement that no disk tree was read.
+            out = patchsource.view(store, "", "")
+            out["target"] = "store"
+            out["tree"] = ""
+            out["keg_id"] = "no keg tree"
+            out["tree_missing"] = missing or ["omlx"]
+            out["warning"] = (
+                "no omlx tree found (%s) - store records only, nothing on "
+                "disk was read or changed. Heal a broken link with: "
+                "omlx-uplift dev use <version> (see 'omlx-uplift dev kegs')"
+                % ", ".join(missing or ["omlx"]))
+            if args.json:
+                print(_json.dumps(out, indent=2))
+            else:
+                _print_patch_status(out)
+            return 0
         outs = []
         for t, tr, troot in rows:
             if args.action == "status":
@@ -1164,16 +1201,68 @@ def _patch_targets(store, requested):
     return want, rows, missing
 
 
-def _missing_target_error(missing) -> None:
-    for t in missing:
-        if t == "dev":
-            print("omlx-dev keg not found — run 'omlx-uplift dev "
-                  "bootstrap' then 'omlx-uplift install', or work on the "
-                  "server keg tree (--target omlx; make that the default "
-                  "with install --default-target omlx)", file=sys.stderr)
-        else:
-            print("omlx package tree not found — is omlx installed for "
-                  "this python?", file=sys.stderr)
+def _dev_keg_versions() -> list:
+    """Cellar versions of omlx-dev, for repair advice. Best-effort: an
+    unresolvable tree is exactly the case this runs in, so the helper that
+    lists the survivors must never be the thing that raises."""
+    try:
+        from . import kegstash as _ks
+
+        return list(_ks.cellar_versions("omlx-dev") or [])
+    except Exception:
+        return []
+
+
+def _repair_advice(t: str) -> None:
+    """How to get the tree back, in the order that actually applies. The old
+    text jumped straight to 'run dev bootstrap', which is wrong - and reads as
+    an insult - on a box that IS bootstrapped and merely has a dangling
+    /opt/homebrew/opt/<keg> (a keg directory removed under the link). mruu hit
+    that on 2026-10-29 and 'dev bootstrap' correctly answered 'already
+    bootstrapped', leaving no way out of the loop."""
+    if t != "dev":
+        print("omlx package tree not found - is omlx installed for "
+              "this python?", file=sys.stderr)
+        return
+    kegs = _dev_keg_versions()
+    print("omlx-dev keg tree not found - /opt/homebrew/opt/omlx-dev does not "
+          "resolve to a keg interpreter.", file=sys.stderr)
+    if kegs:
+        print("  kegs still in the Cellar: %s" % ", ".join(kegs[-4:]),
+              file=sys.stderr)
+        print("  broken link, good keg? heal it: omlx-uplift dev use <version>"
+              "   (list: omlx-uplift dev kegs)", file=sys.stderr)
+        print("  no keg worth keeping? rebuild:  omlx-uplift dev install --yes",
+              file=sys.stderr)
+    else:
+        print("  no omlx-dev keg in the Cellar - build one: omlx-uplift dev "
+              "bootstrap && omlx-uplift install && omlx-uplift dev install",
+              file=sys.stderr)
+    print("  or work the other tree: --target omlx (make it the default with "
+          "install --default-target omlx)", file=sys.stderr)
+
+
+def _missing_target_error(missing, action=None) -> None:
+    verb = action or "this command"
+    for t in missing or ["omlx"]:
+        print("'%s' needs a real install tree to act on." % verb,
+              file=sys.stderr)
+        _repair_advice(t)
+
+
+def _missing_target_note(missing, treeless=False, base_dir=None) -> None:
+    """A tree is absent but the verb does not need one - say so on stderr and
+    let the store answer. Silence here is what made the mruu refusal look like
+    a broken install rather than a missing directory."""
+    what = ", ".join(missing or [])
+    store_dir = os.path.expanduser("~/.omlx/uplift")
+    if treeless:
+        print("note: no omlx install tree found (%s) - answering from the "
+              "store at %s; nothing on disk was read or changed"
+              % (what, base_dir or store_dir), file=sys.stderr)
+    else:
+        print("note: target '%s' has no resolvable tree - showing the trees "
+              "that do exist" % what, file=sys.stderr)
 
 
 def _dev11_disable_auto_update(via: str) -> bool:
