@@ -1947,10 +1947,33 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
         from . import brewutil
 
         keg_sp = brewutil.keg_site_packages("omlx-dev") or ""
+    # VER-1's doctrine covers NEW entries too, not just re-gates: the
+    # catalog add-gate must run against the PRISTINE sync base — the tree
+    # materialize will cut from — and not the live dev-src checkout, which
+    # sits on the uplift-dev branch at the PREVIOUS base. A fresh catalog
+    # patch whose context includes upstream commits newer than that branch
+    # was gate-rejected there (kocour 2026-10-29: the first dev-scope
+    # vendor refused 'gate refused — one or more files failed' while the
+    # same bytes gated clean at the sync ref), and the box would only
+    # converge one build after its base moved. The console path
+    # (`patch curated --sync`) still gates the live tree.
+    tmp = None
+    base_wt = None
+    try:
+        tmp = tempfile.mkdtemp(prefix="uplift-drift-")
+        base_wt = detached_base_worktree(cfg, tmp)
+    except Exception as exc:                    # noqa: BLE001 — best-effort
+        _log.info("pristine base worktree unavailable (%s) — catalog gate "
+                  "falls back to the live dev-src tree", exc)
+        if tmp:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+            tmp = None
     try:
         from . import curated as _curated
 
-        cs = _curated.sync(store, keg_sp, build_root=src_path(cfg))
+        cs = _curated.sync(store, keg_sp, build_root=base_wt or src_path(cfg))
         summary["catalog"] = cs
         changed = [k for k, v in cs["report"].items()
                    if not str(v.get("sync", "")).endswith("already_present")
@@ -1962,53 +1985,51 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
             _log.info("curated sync note: %s", note)
     except Exception as exc:                    # noqa: BLE001 — best-effort
         _emit(res, "err", f"curated sync skipped: {exc}")
-    tmp = None
-    try:
-        tmp = tempfile.mkdtemp(prefix="uplift-drift-")
-        wt = detached_base_worktree(cfg, tmp)
-        dr = patchsource.check_all(store, keg_sp, dev_root=wt)
-        summary["drift"] = dr
-        for pid, rep in (dr.get("reports") or {}).items():
-            if rep.get("check") == "update_available" and rep.get("promoted"):
-                # "curated" only when it IS one of ours: a personal patch with
-                # AUTO UPDATE on used to be announced as a curated update
-                _emit(res, "out", "%s: %s update v%s auto-promoted — %s" % (
-                    pid,
-                    "catalog" if rep.get("curated") else "source",
-                    rep["v"],
-                    "materialized in this build" if not rep.get("adopted_stale")
-                    else "a stored version the source stopped changing"))
-            elif rep.get("check") == "update_available":
-                _emit(res, "out", f"{pid}: update v{rep['v']} available "
-                                  "(Promote in the dashboard to adopt)")
-            elif rep.get("check") == "obsolete":
-                _emit(res, "out", f"{pid}: upstream now carries the patch "
-                                  "(marked obsolete)")
-            elif rep.get("check") == "obsolete_reversed":
-                _emit(res, "out", f"{pid}: obsolete verdict REVERSED — the "
-                                  "clean base re-gate still applies the "
-                                  "diff, upstream does NOT carry it "
-                                  "(restored to applied)")
-            elif rep.get("check") == "error":
-                # LOG-2: the drift gate's failure used to vanish here while
-                # fetch_and_gate printed an unattributed 'gate REJECTED' —
-                # users read it as the build failing (it was not; the
-                # candidate simply cannot be stored). Name the patch.
-                _emit(res, "out", f"{pid}: source re-gate failed — "
-                                  f"{gate_failure_detail(rep)[:200]} "
-                                  "(stored version unchanged)")
-    except Exception as exc:                    # noqa: BLE001 — best-effort
-        _emit(res, "err", f"drift check skipped: {exc}")
-    finally:
-        if tmp:
-            import shutil
+    if base_wt:
+        try:
+            dr = patchsource.check_all(store, keg_sp, dev_root=base_wt)
+            summary["drift"] = dr
+            for pid, rep in (dr.get("reports") or {}).items():
+                if rep.get("check") == "update_available" and rep.get("promoted"):
+                    # "curated" only when it IS one of ours: a personal patch with
+                    # AUTO UPDATE on used to be announced as a curated update
+                    _emit(res, "out", "%s: %s update v%s auto-promoted — %s" % (
+                        pid,
+                        "catalog" if rep.get("curated") else "source",
+                        rep["v"],
+                        "materialized in this build" if not rep.get("adopted_stale")
+                        else "a stored version the source stopped changing"))
+                elif rep.get("check") == "update_available":
+                    _emit(res, "out", f"{pid}: update v{rep['v']} available "
+                                      "(Promote in the dashboard to adopt)")
+                elif rep.get("check") == "obsolete":
+                    _emit(res, "out", f"{pid}: upstream now carries the patch "
+                                      "(marked obsolete)")
+                elif rep.get("check") == "obsolete_reversed":
+                    _emit(res, "out", f"{pid}: obsolete verdict REVERSED — the "
+                                      "clean base re-gate still applies the "
+                                      "diff, upstream does NOT carry it "
+                                      "(restored to applied)")
+                elif rep.get("check") == "error":
+                    # LOG-2: the drift gate's failure used to vanish here while
+                    # fetch_and_gate printed an unattributed 'gate REJECTED' —
+                    # users read it as the build failing (it was not; the
+                    # candidate simply cannot be stored). Name the patch.
+                    _emit(res, "out", f"{pid}: source re-gate failed — "
+                                      f"{gate_failure_detail(rep)[:200]} "
+                                      "(stored version unchanged)")
+        except Exception as exc:                    # noqa: BLE001 — best-effort
+            _emit(res, "err", f"drift check skipped: {exc}")
+        finally:
+            if tmp:
+                import shutil
 
-            try:
-                _git(["worktree", "remove", "--force", tmp],
-                     cwd=src_path(cfg), check=False)
-            except DevsrcError:
-                pass
-            shutil.rmtree(tmp, ignore_errors=True)
+                try:
+                    _git(["worktree", "remove", "--force", tmp],
+                         cwd=src_path(cfg), check=False)
+                except DevsrcError:
+                    pass
+                shutil.rmtree(tmp, ignore_errors=True)
     return summary
 
 
