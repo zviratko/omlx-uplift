@@ -1160,10 +1160,10 @@ def spool_wav(segments, target: str, speed, ceiling_bytes: int,
             total += len(pcm)
             if total > ceiling_bytes:
                 raise RuntimeError(
-                    "this reply passed the %d MB audio ceiling set under "
-                    "Settings > Audio > macOS voices before it finished "
-                    "speaking. Raise the ceiling, lower the segment size, or "
-                    "ask for a shorter answer" % (ceiling_bytes // 1000000))
+                    "this reply passed the %d MB audio ceiling set on the "
+                    "macOS voices tab before it finished speaking. Raise the "
+                    "ceiling, lower the segment size, or ask for a shorter "
+                    "answer" % (ceiling_bytes // 1000000))
             if pcm:
                 out.write(pcm)
     if fmt is None:
