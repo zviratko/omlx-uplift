@@ -4,6 +4,7 @@
  "entries": [
   "audio-deps-in-base.json",
   "ctx-probe-above-native.json",
+  "omlx-tts-say.json",
   "vlm-load-tokenizer-offloop.json",
   "warm-before-ready.json"
  ]
