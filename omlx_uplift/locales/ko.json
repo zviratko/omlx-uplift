@@ -552,7 +552,7 @@
  "uplift.patches.dev_restart_timeout": "{n}초 동안 서버가 응답하지 않았습니다. omlx-dev 실행 여부를 확인한 뒤 새로고침하세요.",
  "uplift.patches.dev_share_mismatch": "동기화 안 됨",
  "uplift.patches.dev_share_mismatch_hint": "디스크의 파일이 설정과 일치하지 않습니다 - omlx-uplift dev reconfigure 실행",
- "uplift.patches.dev_stale_hint": "설치된 omlx-dev 빌드가 활성화된 패치와 더 이상 일치하지 않습니다 — Build를 누르세요",
+ "uplift.patches.dev_stale_hint": "마지막 빌드 이후 활성화된 패치가 변경되었습니다 — Build를 눌러 적용하세요",
  "uplift.patches.dev_cleanup_build": "이전 내용",
  "uplift.patches.dev_cleanup_build_hint": "빌드에 빌드 집합을 떠난 패치 내용이 남아 있습니다 — Build를 눌러 제거하세요(누락은 없습니다)",
  "uplift.patches.dev_base_stale": "이전 소스에서 빌드됨 — 다음 Build/upgrade 시 갱신됩니다",
@@ -596,7 +596,7 @@
  "uplift.patches.promoted": "승격됨 — 다음 omlx 재시작 시 적용됩니다",
  "uplift.patches.remove": "제거",
  "uplift.patches.remove_confirm": "이 패치를 제거할까요? 적용된 파일은 즉시 바닐라 바이트로 복원됩니다.",
- "uplift.patches.remove_curated_choice": "이 패치는 큐레이션 카탈로그에서 가져왔습니다. 확인 = 패치를 로컬로 채택: 설치를 유지하며 소유자가 되고, 카탈로그가 다시는 건드리지 않습니다. 취소 = 완전 제거(적용된 파일이 바닐라 바이트로 복원됨).",
+ "uplift.patches.remove_curated_choice": "이 패치는 큐레이션 카탈로그에서 가져왔으므로 완전히 삭제할 수 없습니다. 제거된 카탈로그 항목은 다음 점검 때 다시 추가됩니다. 확인 = 채택: 패치는 설치된 채로 본인 것이 되며 나중에 제거할 수 있습니다. 취소 = 비활성화: 적용이 멈추고 다음 Build/재시작 시 빌드에서 빠지며, 목록에는 비활성으로 남습니다.",
  "uplift.patches.removed": "패치가 제거되었습니다",
  "uplift.patches.reversal": "병합된 변경 되돌리기 (실행 취소)",
  "uplift.patches.reversal_adopted": "이미 되돌려짐 — 적용된 되돌림으로 저장; 비활성화 시 병합 바이트 복원",
@@ -1348,5 +1348,6 @@
  "uplift.dl.search_failed": "검색 실패: {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "실행 중",
- "uplift.patches.dev_vanilla_stopped": "실행되지 않음"
+ "uplift.patches.dev_vanilla_stopped": "실행되지 않음",
+ "uplift.patches.disable_curated": "비활성화"
 }

@@ -541,7 +541,7 @@
  "uplift.patches.dev_restart_timeout": "Le serveur n'a pas répondu après {n} s. Vérifiez qu'omlx-dev tourne, puis rechargez la page.",
  "uplift.patches.dev_share_mismatch": "DÉSINCRONISÉ",
  "uplift.patches.dev_share_mismatch_hint": "le fichier sur disque ne correspond pas au réglage - lancez omlx-uplift dev reconfigure",
- "uplift.patches.dev_stale_hint": "la compilation omlx-dev installée ne correspond plus aux correctifs activés — lancez Build",
+ "uplift.patches.dev_stale_hint": "les correctifs activés ont changé depuis la dernière compilation — lancez Build pour appliquer",
  "uplift.patches.dev_cleanup_build": "ANCIEN CONTENU",
  "uplift.patches.dev_cleanup_build_hint": "la compilation contient encore du contenu de correctifs sortis du jeu de compilation — lancez Build pour l'éliminer (rien ne manque)",
  "uplift.patches.dev_base_stale": "compilé depuis des sources plus anciennes — le prochain Build/upgrade les actualise",
@@ -585,7 +585,7 @@
  "uplift.patches.promoted": "Promu — appliqué au prochain redémarrage d'omlx",
  "uplift.patches.remove": "Retirer",
  "uplift.patches.remove_confirm": "Retirer ce correctif ? Les fichiers appliqués reviennent maintenant aux octets vanilla.",
- "uplift.patches.remove_curated_choice": "Ce correctif vient du catalogue organisé. OK = adopter le correctif comme local : il reste installé et devient le vôtre, le catalogue n'y touchera plus. Annuler = le supprimer complètement (les fichiers appliqués reviennent à leurs octets d'origine).",
+ "uplift.patches.remove_curated_choice": "Ce correctif vient du catalogue organisé : une entrée retirée est réajoutée à la prochaine vérification, il ne peut donc pas être supprimé définitivement. OK = l'adopter : le correctif reste installé, devient le vôtre et pourra être retiré plus tard. Annuler = le désactiver : il cesse de s'appliquer, quitte la compilation au prochain Build/redémarrage, et reste listé comme désactivé.",
  "uplift.patches.removed": "Correctif retiré",
  "uplift.patches.reversal": "inverser un changement fusionné (annuler)",
  "uplift.patches.reversal_adopted": "DÉJÀ INVERSÉ — enregistré comme inversion APPLIQUÉE ; désactiver restaure les octets fusionnés",
@@ -1337,5 +1337,6 @@
  "uplift.dl.search_failed": "Échec de la recherche : {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "actif",
- "uplift.patches.dev_vanilla_stopped": "inactif"
+ "uplift.patches.dev_vanilla_stopped": "inactif",
+ "uplift.patches.disable_curated": "Désactiver"
 }

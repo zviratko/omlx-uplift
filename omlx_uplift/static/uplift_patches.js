@@ -976,17 +976,26 @@ function ptManage(p) {
     const rmBtn = document.createElement('button');
     rmBtn.type = 'button';
     rmBtn.className = 'btn danger';
-    rmBtn.textContent = ptMsg('uplift.patches.remove', 'Remove');
+    // a catalog patch cannot be deleted for good (the next check re-adds a
+    // removed entry) — the honest verb for it is Disable (user report
+    // 2026-10-29: remove → the patch returned as pending)
+    rmBtn.textContent = (p.curated && !p.curated_adopted)
+        ? ptMsg('uplift.patches.disable_curated', 'Disable')
+        : ptMsg('uplift.patches.remove', 'Remove');
     rmBtn.onclick = async () => {
         if (p.curated && !p.curated_adopted) {
-            // catalog patch: removing it restores vanilla bytes AND drops
-            // it from the local store. The graceful path is adoption —
-            // keep the patch, cut the catalog tie (user decision 2026-09-27)
+            // catalog patch: the choice is adoption (keep, own, deletable
+            // later) or disable (leaves the running set, stays listed) —
+            // there is no third "delete for good" option, and the old text
+            // promised one the catalog would undo (user decision 2026-09-27
+            // stays: adoption is the graceful path)
             const adopt = confirm(ptMsg('uplift.patches.remove_curated_choice',
-                'This patch comes from the curated catalog. OK = adopt the '
-                + 'patch as local: it stays installed and becomes yours, '
-                + 'the catalog never touches it again. Cancel = remove it '
-                + 'completely (applied files are restored to vanilla bytes).'));
+                'This patch comes from the curated catalog, so it cannot be '
+                + 'deleted for good — a removed catalog entry is added back '
+                + 'by the next check. OK = adopt it: the patch stays '
+                + 'installed, becomes yours, and can be removed later. '
+                + 'Cancel = disable it: it stops applying, leaves the build '
+                + 'at the next Build/restart, and stays listed as disabled.'));
             if (adopt) {
                 await ptApi('curated/adopt', { id: p.id }).then(async () => {
                     PG.toast(ptMsg('uplift.patches.adopted',
@@ -996,6 +1005,11 @@ function ptManage(p) {
                 overlay.remove();
                 return;
             }
+            // disable: the server names the real outcome (disabled, not
+            // removed) in its response — no canned 'removed' toast here
+            await ptAction('remove', { id: p.id }, null);
+            overlay.remove();
+            return;
         }
         if (!confirm(ptMsg('uplift.patches.remove_confirm',
             'Remove this patch? Applied files are restored to vanilla bytes now.'))) return;

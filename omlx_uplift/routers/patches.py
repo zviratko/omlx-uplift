@@ -295,7 +295,7 @@ async def patches_remove(req: PatchIdRequest, is_admin: bool = Depends(require_a
     from .. import patchsource
 
     res = await asyncio.to_thread(
-        patchsource.remove_patch, patch_store(), req.id, _patch_tree_root())
+        patchsource.request_removal, patch_store(), req.id, _patch_tree_root())
     if not res.get("ok"):
         raise HTTPException(status_code=404, detail=res.get("reason"))
     return res

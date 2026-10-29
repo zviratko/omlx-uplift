@@ -802,8 +802,8 @@ def classify_build(path: str, built_sha: str | None, built_base: str | None,
         return {"needs_rebuild": True, "build_ahead": False,
                 "build_state": "missing-content",
                 "reason": verdict.get("detail")
-                          or "an enabled build patch is not fully in the "
-                             "installed build — press Build"}
+                          or "one or more enabled patches are not in the "
+                             "installed build yet — press Build"}
     if verdict.get("hand"):
         return {"needs_rebuild": True, "build_ahead": False,
                 "build_state": "hand-content",

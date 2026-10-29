@@ -541,7 +541,7 @@
  "uplift.patches.dev_restart_timeout": "O servidor não respondeu após {n}s. Verifique se o omlx-dev está rodando e recarregue a página.",
  "uplift.patches.dev_share_mismatch": "FORA DE SYNC",
  "uplift.patches.dev_share_mismatch_hint": "o arquivo em disco não corresponde à configuração - execute omlx-uplift dev reconfigure",
- "uplift.patches.dev_stale_hint": "a compilação omlx-dev instalada não corresponde mais aos patches ativados — pressione Build",
+ "uplift.patches.dev_stale_hint": "os patches ativados mudaram desde a última compilação — pressione Build para aplicar",
  "uplift.patches.dev_cleanup_build": "CONTEÚDO ANTIGO",
  "uplift.patches.dev_cleanup_build_hint": "a compilação ainda traz conteúdo de patches que saíram do conjunto de compilação — pressione Build para removê-lo (nada está faltando)",
  "uplift.patches.dev_base_stale": "compilado a partir de fontes mais antigas — o próximo Build/upgrade as atualiza",
@@ -585,7 +585,7 @@
  "uplift.patches.promoted": "Promovido — aplica no próximo reinício do omlx",
  "uplift.patches.remove": "Remover",
  "uplift.patches.remove_confirm": "Remover este patch? Os arquivos aplicados voltam agora aos bytes vanilla.",
- "uplift.patches.remove_curated_choice": "Este patch vem do catálogo curado. OK = adotar o patch como local: ele continua instalado e passa a ser seu, o catálogo nunca mais o toca. Cancelar = removê-lo completamente (os arquivos aplicados voltam aos bytes originais).",
+ "uplift.patches.remove_curated_choice": "Este patch vem do catálogo curado, então não pode ser apagado definitivamente — uma entrada removida é readicionada pela próxima verificação. OK = adotá-lo: o patch continua instalado, passa a ser seu e poderá ser removido depois. Cancelar = desativá-lo: ele para de ser aplicado, sai da compilação no próximo Build/reinício e continua listado como desativado.",
  "uplift.patches.removed": "Patch removido",
  "uplift.patches.reversal": "reverter uma mudança incorporada (desfazer)",
  "uplift.patches.reversal_adopted": "JÁ REVERTIDO — salvo como reversão APLICADA; desativar restaura os bytes incorporados",
@@ -1337,5 +1337,6 @@
  "uplift.dl.search_failed": "Falha na pesquisa: {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "em execução",
- "uplift.patches.dev_vanilla_stopped": "não está em execução"
+ "uplift.patches.dev_vanilla_stopped": "não está em execução",
+ "uplift.patches.disable_curated": "Desativar"
 }

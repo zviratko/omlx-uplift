@@ -537,7 +537,7 @@
  "uplift.patches.dev_restart_timeout": "Сервер не ответил за {n} с. Проверьте, что omlx-dev запущен, и перезагрузите страницу.",
  "uplift.patches.dev_share_mismatch": "РАСХОЖДЕНИЕ",
  "uplift.patches.dev_share_mismatch_hint": "файл на диске не соответствует настройке - выполните omlx-uplift dev reconfigure",
- "uplift.patches.dev_stale_hint": "установленная сборка omlx-dev больше не соответствует включенным патчам — нажмите Build",
+ "uplift.patches.dev_stale_hint": "включённые патчи изменились с момента последней сборки — нажмите Build для применения",
  "uplift.patches.dev_cleanup_build": "СТАРОЕ СОДЕРЖИМОЕ",
  "uplift.patches.dev_cleanup_build_hint": "сборка всё ещё содержит патчи, вышедшие из набора сборки — нажмите Build, чтобы убрать их (ничего не отсутствует)",
  "uplift.patches.dev_base_stale": "собрано из более старых исходников — следующая сборка/обновление подтянет их",
@@ -581,7 +581,7 @@
  "uplift.patches.promoted": "Обновление принято — применится при следующем перезапуске omlx",
  "uplift.patches.remove": "Удалить",
  "uplift.patches.remove_confirm": "Удалить этот патч? Применённые файлы сейчас же вернутся к байтам vanilla.",
- "uplift.patches.remove_curated_choice": "Этот патч из курируемого каталога. OK = принять патч как локальный: он останется установленным и станет вашим, каталог его больше не тронет. Отмена = удалить полностью (изменённые файлы вернутся к ванильным байтам).",
+ "uplift.patches.remove_curated_choice": "Этот патч из курируемого каталога: удалённая позиция вернётся при следующей проверке, поэтому удалить его навсегда нельзя. OK = принять: патч останется установленным, станет вашим, и его потом можно удалить. Отмена = отключить: он перестанет применяться, уйдёт из сборки при следующем Build/перезапуске и останется в списке как отключённый.",
  "uplift.patches.removed": "Патч удалён",
  "uplift.patches.reversal": "обратить влитое изменение (отменить)",
  "uplift.patches.reversal_adopted": "УЖЕ ОТКАЧЕНО — сохранён как применённый обратный патч; отключение вернёт влитые байты",
@@ -1333,5 +1333,6 @@
  "uplift.dl.search_failed": "Сбой поиска: {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "запущен",
- "uplift.patches.dev_vanilla_stopped": "не запущен"
+ "uplift.patches.dev_vanilla_stopped": "не запущен",
+ "uplift.patches.disable_curated": "Отключить"
 }

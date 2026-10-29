@@ -175,7 +175,7 @@ function renderDev() {
             state.append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
                 'NEEDS REBUILD'), 'pt-st-warn',
                 d.build_reason || ptMsg('uplift.patches.dev_stale_hint',
-                    'the installed omlx-dev build no longer matches the enabled patches — press Build')));
+                    'the enabled patches changed since the last build — press Build to apply')));
         } else if (d.build_ahead) {
             state.append(ptChip(ptMsg('uplift.patches.dev_cleanup_build',
                 'OLD CONTENT'), 'pt-st-dim',

@@ -537,7 +537,7 @@
  "uplift.patches.dev_restart_timeout": "Server po {n}s neodpověděl. Zkontrolujte, že omlx-dev běží, a stránku znovu načtěte.",
  "uplift.patches.dev_share_mismatch": "MIMO SYNC",
  "uplift.patches.dev_share_mismatch_hint": "soubor na disku neodpovida nastaveni - spustte omlx-uplift dev reconfigure",
- "uplift.patches.dev_stale_hint": "nainstalované sestavení omlx-dev už neodpovídá povoleným patchům — stiskněte Build",
+ "uplift.patches.dev_stale_hint": "od posledního sestavení se změnily povolené záplaty — stiskněte Build pro použití",
  "uplift.patches.dev_cleanup_build": "STARÝ OBSAH",
  "uplift.patches.dev_cleanup_build_hint": "sestavení stále obsahuje obsah patchů, které odešly ze sady buildu — stisknutím Build jej odstraníte (nic nechybí)",
  "uplift.patches.dev_base_stale": "sestaveno ze starších zdrojů — příští Build/upgrade je obnoví",
@@ -581,7 +581,7 @@
  "uplift.patches.promoted": "Schváleno — použije se při dalším restartu omlx",
  "uplift.patches.remove": "Odebrat",
  "uplift.patches.remove_confirm": "Odebrat tento patch? Použité soubory se nyní obnoví na vanilla bajty.",
- "uplift.patches.remove_curated_choice": "Tato záplata pochází z kurátorského katalogu. OK = přijmout záplatu jako lokální: zůstane nainstalovaná a bude vaše, katalog se jí už nikdy nedotkne. Storno = zcela ji odstranit (aplikované soubory se vrátí na původní bajty).",
+ "uplift.patches.remove_curated_choice": "Tato záplata pochází z kurátorského katalogu, takže nejde smazat navždy — odstraněná položka se při další kontrole přidá zpět. OK = převzít ji: záplata zůstane nainstalovaná, bude vaše a později ji lze odstranit. Zrušit = zakázat: přestane se používat, po dalším stisku Build nebo restartu zmizí ze sestavení a zůstane uvedena jako zakázaná.",
  "uplift.patches.removed": "Patch odebrán",
  "uplift.patches.reversal": "zvrátit sloučenou změnu (vrácení)",
  "uplift.patches.reversal_adopted": "JIŽ VRÁCENO — uloženo jako POUŽITÉ vrácení; zakázáním se obnoví sloučené bajty",
@@ -1333,5 +1333,6 @@
  "uplift.dl.search_failed": "Hledání se nezdařilo: {err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "běží",
- "uplift.patches.dev_vanilla_stopped": "neběží"
+ "uplift.patches.dev_vanilla_stopped": "neběží",
+ "uplift.patches.disable_curated": "Zakázat"
 }

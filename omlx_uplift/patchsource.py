@@ -220,7 +220,7 @@ def _ui_files(result: dict) -> list[dict]:
 @dataclass
 class PatchOpResult:
     ok: bool
-    stage: str = ""            # config|gate|gate-both|classification|stored|adopted|unchanged|obsolete-held
+    stage: str = ""            # config|gate|gate-both|classification|stored|adopted|unchanged|obsolete-held|duplicate
     reason: str | None = None
     v: int | None = None
     state: str | None = None
@@ -262,6 +262,11 @@ class PatchOpResult:
             return {"ok": True, "unchanged": True, "v": self.v,
                     "state": self.state,
                     "advisories": e.get("advisories", [])}
+        if self.stage == "duplicate":
+            # one patch per content (see _content_twin): a REFUSAL — it
+            # must never fall through to the stored verdict's ok: True
+            return {"ok": False, "stage": "duplicate",
+                    "reason": self.reason, "twin": e.get("twin")}
         if self.stage == "obsolete-held":
             return {"ok": True, "obsolete": True, "reason": self.reason,
                     "advisories": e.get("advisories", []),
@@ -291,6 +296,56 @@ class PatchOpResult:
 
 def _add_reject(reason: str) -> PatchOpResult:
     return PatchOpResult(ok=False, stage="config", reason=reason)
+
+
+def _content_norm_sha(data: bytes) -> str:
+    """sha256 of diff bytes with the ONLY noise that separates the same
+    patch fetched through different routes normalized away: the abbreviated
+    hash width on `index` lines (GitHub's .diff spells ten digits, a local
+    `git diff` eight by default) and the function-context label GitHub
+    appends after an `@@ ... @@` range. User report 2026-10-29: the vendored
+    catalog copy of a branch and that branch's own PR sat installed side by
+    side - raw bytes differed on nothing else, and source-identity could not
+    see they were one patch."""
+    b = re.sub(rb"(?m)^index [0-9a-fA-F]+\.\.[0-9a-fA-F]+", b"index H..H",
+               data)
+    b = re.sub(rb"(?m)^(@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@).*", rb"\1", b)
+    return hashlib.sha256(b).hexdigest()
+
+
+def _content_twin(manifest: dict, patch_id: str, result: dict,
+                  store, reversal: bool = False) -> dict | None:
+    """Another installed patch whose DESIRED version is content-identical to
+    the candidate (normalized). Content, not URL, is what double-installs
+    into a build twice; the twin is reported so the add can name it.
+    DIRECTION counts as content: the same bytes installed as a reversal
+    (undo a merged change) are not a copy of the forward patch."""
+    data = result.get("diff")
+    if not data:
+        return None
+    want = _content_norm_sha(data)
+    for q in manifest.get("patches", []):
+        if q.get("id") == patch_id:
+            continue
+        if bool(q.get("reversal")) != bool(reversal):
+            continue
+        ver = store.get_version(q, q.get("desired_version")) or {}
+        if not ver.get("patch_file") and q.get("versions"):
+            # a fresh add stays 'validated, not enabled' (desired 0) — the
+            # content is still installed in the store, and adding the same
+            # bytes a second time is the duplicate we are guarding against
+            ver = max(q["versions"], key=lambda v: v.get("v", 0))
+        pf = ver.get("patch_file")
+        if not pf:
+            continue
+        try:
+            with open(os.path.join(store.base_dir, pf), "rb") as fh:
+                other = fh.read()
+        except OSError:
+            continue
+        if _content_norm_sha(other) == want:
+            return q
+    return None
 
 
 def _add_gate(store, manifest, patch, creating: bool, patch_id: str,
@@ -641,6 +696,24 @@ def add_patch(store, patch_id: str, source: dict, tree_root: str,
                              source, tree_root, effective_scope, build_root,
                              quiet=quiet)
     if fail is not None:
+        return fail.render()
+
+    # one patch per CONTENT: the twin the source identity cannot see (a
+    # catalog vendor and the PR behind it are the same bytes under two URLs
+    # — user report 2026-10-29). The gate just ran, so these bytes are
+    # real; comparing them against the installed desired versions is the
+    # cheapest proof the add would double-install.
+    twin = _content_twin(manifest, patch["id"], result, store,
+                         bool(patch.get("reversal")))
+    if twin is not None:
+        _discard_patch(store, manifest, patch, creating)
+        fail = PatchOpResult(
+            ok=False, stage="duplicate",
+            reason=(f"identical content is already installed as "
+                    f"'{twin['id']}' — a catalog copy and the PR behind it "
+                    "are one patch seen twice; keep one (adopt it to own "
+                    "it, remove the other)"),
+            extras={"twin": twin["id"]})
         return fail.render()
 
     # v1 order kept: a PASSED gate rewrites the source record + scope
@@ -1470,6 +1543,36 @@ def rollback(store, patch_id: str, to_v: int | None = None) -> dict:
     p["enabled"] = True
     store.save(manifest)
     return {"ok": True, "state": p["state"], "desired_version": to_v}
+
+
+def request_removal(store, patch_id: str, tree_root: str) -> dict:
+    """The OPERATOR-facing remove (dashboard + CLI). For a catalog
+    (curated, non-adopted) patch this verb means DISABLE, not forget:
+    every dev check re-adds catalog entries missing from the store
+    (policy 2026-10-09), so a removed catalog row reappeared as a
+    pending/enabled patch at the next check — the remove silently
+    undone is the bug (user report 2026-10-29). Disabling is the
+    closest true outcome: the patch leaves the running set, the row
+    stays listed so the sync's already_present path respects the
+    decision and never re-enables. Real deletion stays reachable:
+    adopt first (cuts the catalog tie), then remove. The kernel
+    remove_patch below stays raw — internal flows (rescope widen)
+    remove-and-re-add under the same id and must not be intercepted."""
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is not None and p.get("curated") and not p.get("curated_adopted"):
+        res = set_enabled(store, patch_id, False)
+        if not res.get("ok"):
+            return res
+        res["disabled_instead"] = True
+        res["reason"] = ("this patch comes from the curated catalog, so it "
+                         "was disabled instead of removed — a removed "
+                         "catalog entry is added back by the next check. "
+                         f"It drops out with {applies_phrase(p)} and stays "
+                         "listed as disabled; adopt it first if you want "
+                         "to own this patch and delete it for good")
+        return res
+    return remove_patch(store, patch_id, tree_root)
 
 
 def remove_patch(store, patch_id: str, tree_root: str) -> dict:

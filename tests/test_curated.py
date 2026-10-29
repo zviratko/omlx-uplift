@@ -21,6 +21,13 @@ DIFF = (
     b"+injected\n"
     b" line2\n")
 
+# DISTINCT content for the second synthetic catalog entry: since the
+# content-twin guard (user report 2026-10-29 — a catalog vendor and the
+# PR behind it installed side by side), two catalog entries carrying the
+# same bytes are a duplicate BY DESIGN, so fixtures that model two
+# different patches must ship two different diffs.
+NICE_DIFF = DIFF.replace(b"+injected\n", b"+injected-nice\n")
+
 MD_PR = json.dumps({
     "description": "Apply the cap without restart.",
     "source": {"kind": "github_pr", "repo": "jundot/omlx", "pr": 1234},
@@ -41,7 +48,7 @@ FILES = {
     "raw-optional-index.json": ["nice.json", "broken.json", "nice.diff"],
     "raw-default-live-apply.json": MD_PR,
     "raw-optional-nice.json": MD_FILE,
-    "raw-optional-nice.diff": DIFF,
+    "raw-optional-nice.diff": NICE_DIFF,
     "raw-optional-broken.json": MD_NOSRC,
 }
 

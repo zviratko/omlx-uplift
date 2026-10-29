@@ -438,6 +438,82 @@ class RemoveSweepTest(_Base):
         self.assertTrue(res.get("ok"), res)
 
 
+class ContentTwinTest(_Base):
+    """One patch per CONTENT (user report 2026-10-29): the vendored catalog
+    copy of a branch and the same branch's PR landed side by side - source
+    identity compares URLs, and GitHub's .diff differs from a local
+    `git diff` only in index-hash width and the function-label after the
+    @@ range. Both gaps close here."""
+
+    def _github_shaped(self, data: bytes) -> bytes:
+        import re
+
+        b = re.sub(rb"(?m)^index ([0-9a-f]{8})\.\.([0-9a-f]{8})",
+                   rb"index \1\1..\2\2", data)
+        b = re.sub(rb"(?m)^(@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@)$",
+                   rb"\1 def _marker():", b)
+        self.assertNotEqual(b, data)
+        return b
+
+    def test_norm_sha_blurs_only_the_routing_noise(self):
+        self.assertEqual(patchsource._content_norm_sha(
+                             self._github_shaped(self.diff_a)),
+                         patchsource._content_norm_sha(self.diff_a))
+        # and must NOT blur a real content difference
+        self.assertNotEqual(patchsource._content_norm_sha(
+                                self._github_shaped(self.diff_b)),
+                            patchsource._content_norm_sha(self.diff_a))
+
+    def test_add_refuses_the_twin_under_a_second_id(self):
+        self.add(pid="p1")
+        twin = self._github_shaped(self.diff_a)
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=self.src):
+            res = patchsource.add_patch(
+                self.store, "p2", {"kind": "upload", "data": twin},
+                self.keg, build_root=self.src)
+        self.assertFalse(res.get("ok"), res)
+        self.assertEqual(res.get("stage"), "duplicate")
+        self.assertIn("p1", res.get("reason"))
+        # a refused add leaves no trace (the same rule as a failed gate)
+        self.assertIsNone(self.manifest_patch("p2"))
+
+    def test_remove_of_a_curated_patch_disables_it_instead(self):
+        # a removed catalog entry is re-added by the next check (policy
+        # 2026-10-09) — the honest outcome of the verb is disable, and the
+        # response must say so (user report: "it went back in as pending")
+        self.add(pid="p1", scope="omlx")
+        m = self.store.load()
+        q = self.store.find(m, "p1")
+        q["curated"] = "default"
+        q["enabled"] = True
+        self.store.save(m)
+        res = patchsource.request_removal(self.store, "p1", self.keg)
+        self.assertTrue(res.get("ok"), res)
+        self.assertTrue(res.get("disabled_instead"))
+        self.assertIn("curated catalog", res.get("reason"))
+        q = self.manifest_patch("p1")
+        self.assertIsNotNone(q, "the row must stay listed (disabled)")
+        self.assertFalse(q.get("enabled"))
+        # adopted = owned = really removable
+        m = self.store.load()
+        self.store.find(m, "p1")["curated_adopted"] = True
+        self.store.save(m)
+        res2 = patchsource.request_removal(self.store, "p1", self.keg)
+        self.assertTrue(res2.get("ok"), res2)
+        self.assertIsNone(self.manifest_patch("p1"))
+        # the kernel stays raw for internal flows (rescope re-adds): a
+        # curated entry CAN still be hard-removed through remove_patch
+        self.add(pid="p3", scope="omlx")
+        m = self.store.load()
+        q3 = self.store.find(m, "p3")
+        q3["curated"] = "default"
+        self.store.save(m)
+        res3 = patchsource.remove_patch(self.store, "p3", self.keg)
+        self.assertTrue(res3.get("ok"), res3)
+        self.assertIsNone(self.manifest_patch("p3"))
+
+
 class ViewSurfacesTest(_Base):
     def test_view_reports_table_fields(self):
         self.add(scope="omlx", diff=self.diff_a)

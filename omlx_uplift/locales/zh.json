@@ -537,7 +537,7 @@
  "uplift.patches.dev_restart_timeout": "{n} 秒后服务器仍未响应。请确认 omlx-dev 正在运行，然后重新加载页面。",
  "uplift.patches.dev_share_mismatch": "不同步",
  "uplift.patches.dev_share_mismatch_hint": "磁盘上的文件与设置不一致 - 请运行 omlx-uplift dev reconfigure",
- "uplift.patches.dev_stale_hint": "已安装的 omlx-dev 构建与启用的补丁不再一致——请按下 Build",
+ "uplift.patches.dev_stale_hint": "自上次构建以来启用的补丁有变动 — 请按下 Build 以应用",
  "uplift.patches.dev_cleanup_build": "旧内容",
  "uplift.patches.dev_cleanup_build_hint": "构建仍带有已移出构建集的补丁内容——按下 Build 即可移除(并无缺失)。",
  "uplift.patches.dev_base_stale": "从较旧的源码构建——下次 Build/升级将更新到当前源码。",
@@ -581,7 +581,7 @@
  "uplift.patches.promoted": "已提升 — 将在下次 omlx 重启时应用",
  "uplift.patches.remove": "移除",
  "uplift.patches.remove_confirm": "移除此补丁？已应用的文件将立即还原为 vanilla 字节。",
- "uplift.patches.remove_curated_choice": "此补丁来自精选目录。确定 = 将补丁采纳为本地补丁：保持安装并成为你自己的，目录不会再碰它。取消 = 完全移除（已应用的文件将恢复为原始字节）。",
+ "uplift.patches.remove_curated_choice": "此补丁来自精选目录:被移除的条目会在下次检查时重新加入,因此无法彻底删除。确定 = 采纳:补丁保持安装并成为你的,之后可以移除。取消 = 停用:它停止生效,下次按 Build 或重启后离开构建,并列为已停用。",
  "uplift.patches.removed": "补丁已移除",
  "uplift.patches.reversal": "反转已合并的变更（撤销）",
  "uplift.patches.reversal_adopted": "已反转——存为已应用反转；停用将恢复合并后的字节",
@@ -1333,5 +1333,6 @@
  "uplift.dl.search_failed": "搜索失败：{err}",
  "uplift.patches.dev_vanilla_label": "VANILLA OMLX:",
  "uplift.patches.dev_vanilla_running": "运行中",
- "uplift.patches.dev_vanilla_stopped": "未运行"
+ "uplift.patches.dev_vanilla_stopped": "未运行",
+ "uplift.patches.disable_curated": "停用"
 }

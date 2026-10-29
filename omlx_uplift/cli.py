@@ -1086,7 +1086,9 @@ def cmd_patches(argv=None) -> int:
         if not args.id:
             ap.error(f"{args.action} needs a patch id")
         if args.action == "remove":
-            out = patchsource.remove_patch(store, args.id, tree_root)
+            # operator verb: a catalog patch is disabled, not
+            # forgotten (request_removal keeps the decision durable)
+            out = patchsource.request_removal(store, args.id, tree_root)
         elif args.action == "promote":
             out = patchsource.promote(store, args.id, approve=args.approve)
         elif args.action == "rollback":
