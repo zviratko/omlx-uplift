@@ -157,10 +157,21 @@ class OmlxDev < Omlx
     skip_clean "libexec" if MacOS.version >= "27"
   end
 
-  # Same resources as jundot/omlx (subclass specs start empty — re-declared).
+  # Same resources as jundot/omlx (subclass specs start empty - re-declared).
+  # THIS REVISION IS A DEPENDENCY COORDINATE, NOT A COMMENT: the inherited
+  # install() stages resource("mlx-audio") and pip-installs it LAST, so a stale
+  # revision here silently rewrites the dependency set the source just built.
+  # Upstream 3a5a6b2 (2026-10-29) moved its own resource 5175326 (0.4.3) ->
+  # 8c244a1 (0.6.3) AND deleted the `inreplace "mlx-lm==0.31.1"` patch, because
+  # 0.6.3 requires mlx-lm>=0.31.1 instead of ==0.31.1. With the patch gone from
+  # the parent and 0.4.3 staged from here, that last pip step downgraded
+  # mlx-lm 0.32.3.dev8+g0d4d3d04f -> 0.31.1, which has no GenerationBatch, and
+  # omlx/scheduler.py:33 raised at boot on a keg that built "successfully".
+  # Keep this in step with upstream's Formula/omlx.rb and with the
+  # mlx-audio pin in the source tree's pyproject.toml.
   resource "mlx-audio" do
     url "https://github.com/Blaizzy/mlx-audio.git",
-        revision: "51753266e0a4f766fd5e6fbc46652224efc23981"
+        revision: "8c244a1faff44cfa69e3151c195f52a4c1c90be5"
   end
 
   resource "en-core-web-sm" do
