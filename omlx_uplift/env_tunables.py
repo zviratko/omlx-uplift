@@ -100,6 +100,8 @@ MANUAL.update({
     "OMLX_INKLING_MTP_FINAL_NORM": {"label": "Inkling MTP final norm route"},
     "OMLX_MTP_ROW_EXACT_VERIFY": {"label": "MTP row-exact verify"},
     "OMLX_GLM53_KDA_PREFILL_FUSED": {"label": "GLM-5.3 KDA fused prefill"},
+    "OMLX_SAY_MAX_AUDIO_MB": {"label": "Speech ceiling (MB per reply)",
+                              "min": 1},
 })
 
 
@@ -757,6 +759,14 @@ CATALOG: dict[str, dict] = {
         "desc": "Override the pi coding-agent config directory."},
     "MODELSCOPE_DOMAIN": {"group": "integrations", "effect": "immediate", "default": "",
         "desc": "ModelScope endpoint domain; vanilla writes it on every ms_endpoint save.", "managed": True},
+    "OMLX_SAY_MAX_AUDIO_MB": {"group": "integrations", "effect": "immediate",
+        "default": "256",
+        "desc": "Ceiling for ONE spoken macOS reply in MB of audio (48 KB "
+                "per second: 256 MB is about 89 minutes). A reply that cannot "
+                "fit is refused before anything renders; junk or 0 keeps the "
+                "default. Read per request by the macOS speech engine "
+                "(omlx/utils/macos_say.max_audio_mb, mirrored by uplift "
+                "say_engine), so a change answers the next request."},
 }
 
 
@@ -997,6 +1007,7 @@ TYPES: dict[str, str] = {
     "OMLX_DSH_API": "str",
     "PI_CODING_AGENT_DIR": "str",
     "MODELSCOPE_DOMAIN": "str",
+    "OMLX_SAY_MAX_AUDIO_MB": "int",
 }
 
 #: flag vars whose ON value vanilla spells the word "true" (it compares
