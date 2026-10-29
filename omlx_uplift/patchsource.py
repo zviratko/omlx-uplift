@@ -1878,6 +1878,51 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
                     reports[pid] = {"check": "obsolete_reversed"}
                     changed_any = True
                     continue
+            # ADOPTION GAP (mruu report 2026-10-29): a candidate can already
+            # be stored and un-adopted when this line is reached — it drifted
+            # while the patch was disabled, or AUTO UPDATE was switched on
+            # afterwards, or a safeguard hold blocked promote() and no later
+            # fetch drifted again. Promotion otherwise rides the DRIFT EDGE
+            # alone, so the newest stored version never lands while the source
+            # sits still: desired_version 1 with versions [1, 2], auto_update
+            # true, and this loop answering 'up_to_date' forever. Adopt under
+            # the same rule the drifted path uses, or name the waiting
+            # candidate — silence is what made this invisible for a day.
+            newest_u = max((v.get("v", 0) for v in p.get("versions", [])),
+                           default=0)
+            if newest_u and newest_u != p.get("desired_version"):
+                cand = store.get_version(p, newest_u) or {}
+                codes = (cand.get("safeguards") or {}).get("codes") or []
+                adopt = bool(p.get("enabled")) and (
+                    bool(p.get("auto_update"))
+                    or (p.get("curated") and not p.get("curated_adopted")))
+                if adopt and not _safeguards.held(
+                        codes, p.get("safeguard_always"),
+                        p.get("safeguard_once"), cand.get("content_sha256")):
+                    p["desired_version"] = newest_u
+                    store.set_state(p, "pending",
+                                    "v%s auto-promoted — applies on %s"
+                                    % (newest_u, applies_phrase(p)))
+                    reports[pid] = {"check": "update_available", "v": newest_u,
+                                    "promoted": True, "adopted_stale": True,
+                                    "curated": bool(p.get("curated"))}
+                    changed_any = True
+                    continue
+                # not adopting, but not staying quiet either: the card keys
+                # its chip on the STATE, and a Build that landed the older
+                # version had already written 'applied' over the candidate —
+                # which is how a stored v2 went invisible behind an APPLIED
+                # row (mruu: 'it has auto-update enabled', showing v1)
+                store.set_state(p, "update_available",
+                                "v%s is stored but not in use — press Promote"
+                                % newest_u)
+                reports[pid] = {"check": "update_available", "v": newest_u,
+                                "promoted": False, "adopted_stale": True,
+                                "curated": bool(p.get("curated")),
+                                "reason": "v%s is stored but not in use — "
+                                          "press Promote" % newest_u}
+                changed_any = True
+                continue
             reports[pid] = {"check": "up_to_date"}
             continue
         obsolete = [f for f in result["files"] if f["status"] == "already"]
@@ -1959,7 +2004,7 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
                                 f"{applies_phrase(p)}")
                 promoted = True
         reports[pid] = {"check": "update_available", "v": v,
-                        "promoted": promoted}
+                        "promoted": promoted, "curated": bool(p.get("curated"))}
         changed_any = True
     if changed_any:
         store.save(manifest)

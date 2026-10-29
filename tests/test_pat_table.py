@@ -272,6 +272,89 @@ class AutoUpdateTest(_Base):
         self.assertFalse(r2.get("promoted"))
         self.assertEqual(self.manifest_patch()["desired_version"], r["v"])
 
+    def _url_gate(self, diff):
+        """check_all only re-fetches online sources, and it gates through
+        fetch_and_gate — the same seam the other tests in this class use."""
+        m = self.store.load()
+        q = self.store.find(m, "p1")
+        q["source"] = {"kind": "url", "url": "http://127.0.0.1:9/x.diff"}
+        self.store.save(m)
+        return {"ok": True, "diff": diff,
+                "content_sha256": hashlib.sha256(diff).hexdigest(),
+                "source_head_sha": "0" * 40, "fetched_at": "",
+                "files": [{"path": REL, "status": "applied"}],
+                "safeguards": {}, "advisories": []}
+
+    def test_candidate_stored_while_disabled_is_adopted_on_enable(self):
+        """mruu report 2026-10-29: specprefill-alias-fix sat on v1 with AUTO
+        UPDATE switched on while v2 sat stored and gated. Promotion rode the
+        DRIFT EDGE only — once the source stopped changing, nothing adopted the
+        candidate and the check answered 'up_to_date' indefinitely. A stored
+        candidate is either adopted (auto update) or named (every other case),
+        never silently ignored."""
+        self.add(scope="omlx", diff=self.diff_a)
+        self.reconcile()
+        gate = self._url_gate(self.diff_b)
+        m = self.store.load()
+        q = self.store.find(m, "p1")
+        q["auto_update"] = True
+        q["enabled"] = False      # the drift lands while the patch is OFF
+        self.store.save(m)
+        with unittest.mock.patch.object(patchsource, "fetch_and_gate",
+                                        return_value=dict(gate)):
+            rep = patchsource.check_all(self.store, self.keg)
+        self.assertFalse(rep["reports"]["p1"].get("promoted"),
+                         "a disabled patch never auto-applies")
+        self.assertEqual(self.manifest_patch()["desired_version"], 1)
+        # the operator enables it later; the source has NOT drifted since
+        m = self.store.load()
+        q = self.store.find(m, "p1")
+        q["enabled"] = True
+        q["state"] = "applied"    # a Build has since landed v1
+        self.store.save(m)
+        with unittest.mock.patch.object(patchsource, "fetch_and_gate",
+                                        return_value=dict(gate)):
+            rep2 = patchsource.check_all(self.store, self.keg)
+        r2 = rep2["reports"]["p1"]
+        self.assertEqual(r2["check"], "update_available", r2)
+        self.assertTrue(r2.get("adopted_stale"), r2)
+        self.assertTrue(r2.get("promoted"), r2)
+        q2 = self.manifest_patch()
+        self.assertEqual(q2["desired_version"], 2, q2)
+        self.assertEqual(q2["state"], "pending", q2)
+
+    def test_waiting_candidate_is_named_when_auto_update_is_off(self):
+        """The same shape with AUTO UPDATE off must not adopt (the operator's
+        choice) and must not stay silent either."""
+        self.add(scope="omlx", diff=self.diff_a)
+        self.reconcile()
+        gate = self._url_gate(self.diff_b)
+        m = self.store.load()
+        q = self.store.find(m, "p1")
+        q["auto_update"] = False
+        q["enabled"] = False
+        self.store.save(m)
+        with unittest.mock.patch.object(patchsource, "fetch_and_gate",
+                                        return_value=dict(gate)):
+            patchsource.check_all(self.store, self.keg)
+        m = self.store.load()
+        q = self.store.find(m, "p1")
+        q["enabled"] = True
+        q["state"] = "applied"
+        self.store.save(m)
+        with unittest.mock.patch.object(patchsource, "fetch_and_gate",
+                                        return_value=dict(gate)):
+            rep = patchsource.check_all(self.store, self.keg)
+        r = rep["reports"]["p1"]
+        self.assertEqual(r["check"], "update_available", r)
+        self.assertFalse(r.get("promoted"), r)
+        self.assertIn("Promote", r.get("reason", ""), r)
+        q = self.manifest_patch()
+        self.assertEqual(q["desired_version"], 1, q)
+        # the visible half: the row must stop claiming a plain 'applied'
+        self.assertEqual(q["state"], "update_available", q)
+        self.assertIn("not in use", q.get("state_detail", ""), q)
+
     def test_auto_never_walks_over_a_pin(self):
         self.add(scope="omlx", diff=self.diff_a)
         self.reconcile()

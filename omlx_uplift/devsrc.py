@@ -952,6 +952,8 @@ def drift_check(path: str, base_sha: str, tip: str,
     cut = _merge_base(base_sha, tip, path) or base_sha
     diff = _git(["diff", f"{cut}..{tip}"], cwd=path).stdout.encode()
     expected: dict[str, set[str]] = {}
+    owner: dict[str, set[str]] = {}        # path -> ids of patches adding to it
+    patch_paths: dict[str, set[str]] = {}  # patch id -> its expected paths
     for p in patches_to_apply:
         ep = diffapply.parse_diff(p["diff_bytes"])
         if not ep["ok"]:
@@ -962,9 +964,13 @@ def drift_check(path: str, base_sha: str, tip: str,
             continue
         for fp in ep["files"]:
             expected.setdefault(fp["path"], set()).update(_added_lines(fp))
+            owner.setdefault(fp["path"], set()).add(p["id"])
+            patch_paths.setdefault(p["id"], set()).add(fp["path"])
     vocab: dict[str, set[str]] = {}
     alt: dict[str, set[str]] = {}          # lines of a non-wanted VERSION
     alt_names: dict[str, str] = {}         # path -> "id (built vN, vM wanted)"
+    alt_lines: dict[str, dict[str, set[str]]] = {}   # patch id -> path -> lines
+    alt_label: dict[str, str] = {}         # patch id -> the same label
     for rp in residue_patches or []:
         try:
             ep = diffapply.parse_diff(rp.get("diff_bytes") or b"")
@@ -977,11 +983,14 @@ def drift_check(path: str, base_sha: str, tip: str,
             label = ("%s (built v%s, v%s enabled)"
                      % (rp.get("id"), rp.get("version"),
                         rp.get("wanted_version")))
+            alt_label[rp.get("id")] = label
         for fp in ep["files"]:
             (alt if is_alt else vocab).setdefault(
                 fp["path"], set()).update(_added_lines(fp))
             if is_alt:
                 alt_names.setdefault(fp["path"], label)
+                alt_lines.setdefault(rp.get("id"), {}).setdefault(
+                    fp["path"], set()).update(_added_lines(fp))
     actual = diffapply.parse_diff(diff) if diff.strip() else {"ok": True, "files": []}
     if not actual.get("ok"):
         return {"drift": True, "complete": False,
@@ -994,6 +1003,33 @@ def drift_check(path: str, base_sha: str, tip: str,
     # an unpatch commit that only DELETES adds no lines -> catch via paths too
     residue, hand, stale = [], [], []
     stale_labels: dict[str, None] = {}
+
+    # WHICH VERSION IS THE TREE ACTUALLY CARRYING? A version fallback explains
+    # the wanted version's ABSENCE, not only its surplus: v2 is enabled but only
+    # v1 applies onto these sources, so the branch carries v1 and v2's added
+    # lines are missing by the ladder's own choice. Listing those files as
+    # "branch content differs from stored patches" blames the operator for it
+    # (mruu report 2026-10-29: five i18n files appeared that way inside the very
+    # same verdict that said "built from an older saved version"). The excuse is
+    # only granted once the older version is PROVEN to be what the tree holds —
+    # every line it adds must be present — so a patch that merely has a newer
+    # candidate stored cannot hide genuinely missing content behind this.
+    fell_back: set[str] = set()
+    for pid, files in alt_lines.items():
+        if pid not in patch_paths:
+            continue
+        if any(not (lines - actual_map.get(fp_path, set()))
+               for fp_path, lines in files.items()):
+            fell_back.add(pid)
+    if fell_back:
+        fb = {q for q in missing + changed if owner.get(q, set()) & fell_back}
+        if fb:
+            missing = [q for q in missing if q not in fb]
+            changed = [q for q in changed if q not in fb]
+            stale.extend(sorted(fb))
+            for q in sorted(fb):
+                for pid in sorted(owner.get(q, set()) & fell_back):
+                    stale_labels.setdefault(alt_label.get(pid, pid), None)
 
     def _bucket(p: str, beyond: set[str]) -> None:
         """Sort content the enabled set does not explain into the three
@@ -1890,8 +1926,13 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
         summary["drift"] = dr
         for pid, rep in (dr.get("reports") or {}).items():
             if rep.get("check") == "update_available" and rep.get("promoted"):
-                _emit(res, "out", f"{pid}: curated update v{rep['v']} "
-                                  "auto-promoted — materialized in this build")
+                # "curated" only when it IS one of ours: a personal patch with
+                # AUTO UPDATE on used to be announced as a curated update
+                _emit(res, "out", "%s update v%s auto-promoted — %s" % (
+                    "catalog" if rep.get("curated") else "source",
+                    rep["v"],
+                    "materialized in this build" if not rep.get("adopted_stale")
+                    else "a stored version the source stopped changing"))
             elif rep.get("check") == "update_available":
                 _emit(res, "out", f"{pid}: update v{rep['v']} available "
                                   "(Promote in the dashboard to adopt)")

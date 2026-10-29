@@ -332,6 +332,38 @@ class DevsrcFixture(unittest.TestCase):
         r0 = devsrc.classify_build(src, m_v1["tip"], m_v1["base"], exp_v2, two)
         self.assertNotEqual(r0["build_state"], "version-fallback")
 
+    def test_fallback_files_are_not_reported_as_differing(self):
+        """The same fallback seen from the operator's side. v2 is enabled, v1 is
+        what applies, so v2's added lines are absent from the branch. The card
+        must NOT list those files as 'branch content differs from stored
+        patches' — that phrasing blames a hand edit for the ladder's own choice,
+        and it did exactly that on mruu 2026-10-29, five i18n files listed
+        straight next to the sentence that already explained the cause."""
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        src = devsrc.src_path(self.cfg)
+        one = [{"id": "p-one", "version": 1,
+                "diff_bytes": self._patch_diff("one")}]
+        m_v1 = devsrc.materialize(one, self.cfg)
+        newer = self._patch_diff("one").replace(b"EXTRA_one = 1",
+                                                b"EXTRA_one = 2")
+        two = [{"id": "p-one", "version": 2, "diff_bytes": newer}]
+        pool = [{"id": "p-one", "version": 1,
+                 "diff_bytes": one[0]["diff_bytes"],
+                 "alternate_version": "p-one", "wanted_version": 2}]
+        v = devsrc.drift_check(src, m_v1["base"], m_v1["tip"], two, pool)
+        self.assertEqual(v["changed"], [], v)
+        self.assertEqual(v["missing"], [], v)
+        self.assertFalse(v["drift"], v)
+        self.assertNotIn("differs from stored patches", v["detail"])
+        self.assertIn("older saved version", v["detail"])
+        self.assertTrue(v["stale"], v)
+        # FAIL-SAFE: with nothing proving the older version is what the tree
+        # holds, absent wanted content stays a real complaint
+        v0 = devsrc.drift_check(src, m_v1["base"], m_v1["tip"], two)
+        self.assertTrue(v0["changed"] or v0["missing"], v0)
+        self.assertTrue(v0["drift"], v0)
+
     def test_sync_ref_move_alone_is_not_drift(self):
         """The false alarm this guards: after materialize the sync ref moves
         (auto-update fetch, plain time passing). Diffing the NEW sync tip
