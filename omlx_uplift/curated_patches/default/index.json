@@ -1,0 +1,10 @@
+{
+ "version": 1,
+ "note": "Discovery list for this tier. The listing used to come from the GitHub contents API, which is rate limited to 60 requests/hour unauthenticated; a refusal there silently emptied the catalog. This file is fetched from the raw CDN and is also bundled inside the installed uplift package, so a box with no network at all still knows what its own version shipped. Keep it equal to the directory: tests/test_curated.py pins it.",
+ "entries": [
+  "audio-deps-in-base.json",
+  "ctx-probe-above-native.json",
+  "vlm-load-tokenizer-offloop.json",
+  "warm-before-ready.json"
+ ]
+}
