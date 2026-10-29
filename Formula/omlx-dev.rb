@@ -228,6 +228,25 @@ class OmlxDev < Omlx
     # Kept at the exact version the working kegs resolved (2026-10-24 17:19).
     (buildpath/"uplift-pip-constraints.txt").write("preshed==3.0.13\n")
     ENV["PIP_CONSTRAINT"] = (buildpath/"uplift-pip-constraints.txt").to_s
+
+    # Third trap out of upstream 3a5a6b2, and it only bites on macOS 27. mlx-audio
+    # 0.6.3's `[all]` extras ask for `uvicorn[standard]`, which pulls the prebuilt
+    # maturin wheel `watchfiles`. That .so has no room in its Mach-O header for
+    # Homebrew's rewritten ID, so an otherwise COMPLETE build dies in the linker fixup
+    # after the keg is installed:
+    #   Failed changing dylib ID of .../site-packages/watchfiles/_rust_notify.abi3.so
+    #   MachO::HeaderPadError ... needs to be relinked with -headerpad_max_install_names
+    #   Error: Failed to fix install linkage
+    # ...and brew exits 1 having printed its own success banner. The parent already
+    # carries a --no-binary list for exactly this class of wheel, but that list lives
+    # inside the inherited install body, and copying it here is the mistake that caused
+    # trap (a). pip's format control is append-style, so the env adds one name without
+    # forking anything: verified against this box's pip with a CLI --no-binary for a
+    # different package present - watchfiles still resolves to the sdist, which builds
+    # with the parent's own RUSTFLAGS/LDFLAGS headerpad. watchfiles is only uvicorn's
+    # dev-reload watcher; nothing here imports it, so building it from source costs
+    # Rust time and nothing else.
+    ENV["PIP_NO_BINARY"] = "watchfiles"
     # --with-python312 (EXPERIMENT; option OFF = byte-identical upstream
     # build): jundot's parent creates the venv with a literal
     # `system "python3.11", "-m", "venv", libexec`; a PATH shim named
@@ -250,6 +269,7 @@ class OmlxDev < Omlx
     end
     super
     ENV.delete("PIP_CONSTRAINT")
+    ENV.delete("PIP_NO_BINARY")
     # The parent links bin/omlx; this keg must NOT, or linking both formulas
     # at once collides. Rename inside the keg (pre-link), leave the libexec
     # venv untouched.
