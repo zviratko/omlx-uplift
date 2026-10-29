@@ -6,7 +6,7 @@ class OmlxUplift < Formula
   # (zviratko/uplift), so tag + formula + package version move in one
   # commit; tests/test_release_formula.py pins that they agree.
   url "https://github.com/zviratko/omlx-uplift.git",
-      tag:      "v2.8",
+      tag:      "v2.9",
       revision: "a723d6c1b22acf4418f6b1ffc0b1ba0e7f576832"
   head "https://github.com/zviratko/omlx-uplift.git", branch: "main", using: :git
 

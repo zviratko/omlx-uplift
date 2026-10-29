@@ -13,6 +13,16 @@ users never see.
 
 ## Unreleased
 
+## [2.9] — 2026-10-29
+
+- **The custom benchmark really runs in parallel.** Starts overlap, the wave ignores the server's concurrency limit on the benched engine (restored when the run ends), and every request gets a live line: queued, submitted, prefilling x/y tokens, generating n tokens, done. Results gain a measured steady decode rate and peak-memory facts.
+- **Read-aloud speaks the whole reply.** Long text is no longer cut at 10,000 characters, and a voice can be pinned to its language (`say:Zuzana:cs-CZ`). The chat can also speak through the server's own speech API instead of the uplift engine.
+- **The model editor tunes SpecPrefill without a reload.** Rate, threshold and keep became request-time fields that apply per request; clicking an alias no longer fakes a change.
+- **The engine can run on python 3.12.** `omlx-uplift dev install --with-python312` builds it, and uplift follows the engine's python by itself; switching the engine minor is one command.
+- **The patch catalog ships inside uplift.** The Patches page stays populated when GitHub rate-limits the listing, and a patch identical to an installed one is refused with its twin named.
+
+*A new bundled patch, `omlx-tts-say`, brings the macOS speech engine to the vanilla web dashboard.*
+
 ## [2.8] — 2026-10-27
 
 - **Chat catches up with the classic web page.** Attach files (drag, paste, or pick), pin, rename and search conversations, see token use and a live context ring per reply, branch a new variant from any earlier answer, and hear replies in macOS voices spoken in their own language.
