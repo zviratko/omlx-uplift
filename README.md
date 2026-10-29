@@ -150,7 +150,7 @@ omlx-uplift patch disable ID           # one patch off, files revert to vanilla
 omlx-uplift patch remove ID
 omlx-uplift patch apply                # reconcile now (no re-exec)
 omlx-uplift patch check                # re-fetch sources, report drift
-omlx-uplift patch curated [--sync]     # published catalog (see omlx_uplift/curated_patches/)
+omlx-uplift patch curated [--sync]     # published catalog (see curated_patches/)
 omlx-uplift patch promote ID           # accept the newest validated candidate
 omlx-uplift patch rollback ID [--to-v N]  # undo a promote: previous stored
                                        # version becomes desired again

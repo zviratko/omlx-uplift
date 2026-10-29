@@ -84,9 +84,9 @@ class CuratedSyncTests(unittest.TestCase):
         # These fixtures describe a SYNTHETIC catalog. Without redirecting the
         # bundled seed, a refused listing would fall back to the catalog this
         # repository actually ships and install real patches into the store.
-        old = curated.SEED_DIR
-        curated.SEED_DIR = os.path.join(self.tmp, "no-such-seed")
-        self.addCleanup(setattr, curated, "SEED_DIR", old)
+        old = curated.SEED_DIRS
+        curated.SEED_DIRS = [os.path.join(self.tmp, "no-such-seed")]
+        self.addCleanup(setattr, curated, "SEED_DIRS", old)
         self.root = os.path.join(self.tmp, "site-packages")
         os.makedirs(os.path.join(self.root, "pkg"))
         with open(os.path.join(self.root, "pkg", "mod.py"), "w") as fh:
@@ -129,7 +129,7 @@ class CuratedSyncTests(unittest.TestCase):
         self.assertEqual(nice["source"], {
             "kind": "url",
             "url": ("https://raw.githubusercontent.com/zviratko/"
-                    "omlx-uplift/HEAD/omlx_uplift/curated_patches/optional/nice.diff")})
+                    "omlx-uplift/HEAD/curated_patches/optional/nice.diff")})
         # unusable source kind -> listed but not installable
         broken = [x for x in r["tiers"]["optional"]
                   if x["id"] == "broken"][0]
@@ -461,8 +461,8 @@ class BundledCatalogTests(unittest.TestCase):
         with open(os.path.join(self.seed, "default", "bundled-one.diff"), "wb") as fh:
             fh.write(DIFF)
         _w(os.path.join(self.seed, "optional", "index.json"), {"entries": []})
-        self.addCleanup(setattr, curated, "SEED_DIR", curated.SEED_DIR)
-        curated.SEED_DIR = self.seed
+        self.addCleanup(setattr, curated, "SEED_DIRS", curated.SEED_DIRS)
+        curated.SEED_DIRS = [self.seed]
         from omlx_uplift import patchsource
         saved = patchsource.fetch_url
 
@@ -518,7 +518,7 @@ class BundledCatalogTests(unittest.TestCase):
         self.assertIn("update uplift to see it", notes)
 
     def test_no_remote_and_no_seed_is_a_real_failure(self):
-        curated.SEED_DIR = os.path.join(self.tmp, "no-seed-here")
+        curated.SEED_DIRS = [os.path.join(self.tmp, "no-seed-here")]
 
         def fetch(url):
             return {"ok": False, "status": 403,
@@ -538,13 +538,56 @@ class ShippedCatalogIntegrity(unittest.TestCase):
     line in the index would be invisible to every install (the old API
     listing saw the directory, so it could not hide)."""
 
-    BASE = os.path.join(os.path.dirname(os.path.abspath(curated.__file__)),
-                        "curated_patches")
+    # captured before any test in this module redirects the seed
+    SEEDS = list(curated.SEED_DIRS)
+
+    def _tier_dir(self, tier):
+        for root in self.SEEDS:
+            d = os.path.join(root, tier)
+            if os.path.isdir(d):
+                return d
+        self.fail("no catalog seed directory for tier " + tier)
+
+    def test_build_hook_bundles_the_catalog(self):
+        """The wheel copy is what makes the seed exist on an installed box.
+        It is a build-time move, so nothing else in the suite would notice if
+        the hook were dropped (mruu report: the first attempt MOVED the
+        directory instead, which broke every install that had not updated)."""
+        # the hook sits at the project root: next to the catalog directory in
+        # a checkout, one level above the installed package copy
+        found = None
+        for seed in self.SEEDS:
+            for cand in (os.path.dirname(seed),
+                         os.path.dirname(os.path.dirname(seed))):
+                path = os.path.join(cand, "setup.py")
+                if os.path.isfile(path):
+                    found = path
+                    break
+            if found:
+                break
+        self.assertTrue(found, "no setup.py reachable from the seed roots")
+        with open(found, encoding="utf-8") as fh:
+            hook = fh.read()
+        self.assertIn('CATALOG = "curated_patches"', hook)
+        self.assertIn('cmdclass={"build_py": build_py_with_catalog}', hook)
+        # and it copies per tier, so a new tier cannot be forgotten silently
+        self.assertIn("self.mkpath(out)", hook)
+        self.assertIn("shutil.copy2", hook)
+
+    def test_published_catalog_path_is_untouched(self):
+        """`curated_patches/` at the repository root is a published raw-URL
+        coordinate: it is baked into every stored catalog patch source and into
+        every uplift build older than the reader. Changing it 404s those
+        installs (it did, once), so moving it is a migration, not a rename."""
+        self.assertEqual(curated.CURATED_DIR, "curated_patches")
+        self.assertEqual(
+            curated._raw_url("default", "warm-before-ready.diff"),
+            "https://raw.githubusercontent.com/zviratko/omlx-uplift/HEAD/"
+            "curated_patches/default/warm-before-ready.diff")
 
     def test_index_equals_the_directory_for_every_tier(self):
         for tier in curated.TIERS:
-            d = os.path.join(self.BASE, tier)
-            self.assertTrue(os.path.isdir(d), "tier dir missing: " + tier)
+            d = self._tier_dir(tier)
             with open(os.path.join(d, curated.INDEX_NAME), encoding="utf-8") as fh:
                 idx = json.load(fh)
             listed = idx.get("entries")
@@ -557,7 +600,7 @@ class ShippedCatalogIntegrity(unittest.TestCase):
 
     def test_every_shipped_manifest_is_installable(self):
         for tier in curated.TIERS:
-            d = os.path.join(self.BASE, tier)
+            d = self._tier_dir(tier)
             with open(os.path.join(d, curated.INDEX_NAME), encoding="utf-8") as fh:
                 names = json.load(fh).get("entries") or []
             for name in names:

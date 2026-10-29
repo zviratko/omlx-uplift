@@ -44,16 +44,24 @@ from . import patches, patchsource
 _log = logging.getLogger("omlx_uplift.curated")
 
 CURATED_REPO = "zviratko/omlx-uplift"
-# The catalog lives INSIDE the package (mruu ask 2026-10-29): an installed
-# uplift then carries its own seed, and the tier listing no longer needs the
-# GitHub contents API, which is capped at 60 requests/hour unauthenticated
-# and whose refusal silently emptied the catalog. The remote path follows the
-# move; raw.githubusercontent is a CDN with no such budget.
-CURATED_DIR = "omlx_uplift/curated_patches"
+# The repository path is a PUBLISHED COORDINATE: every installed uplift and
+# every stored catalog patch carries raw URLs built from it. Moving the
+# directory broke re-gating on machines that had not updated yet (mruu report,
+# five HTTP 404s from `dev upgrade`), so the catalog stays where it always was
+# and the wheel gets a copy of it at build time (see setup.py). What the copy
+# buys is the seed: an installed uplift knows its own catalog without the
+# GitHub contents API, which is capped at 60 requests/hour unauthenticated and
+# whose refusal used to empty the catalog silently.
+CURATED_DIR = "curated_patches"
 TIERS = ("default", "optional")
 INDEX_NAME = "index.json"
-SEED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "curated_patches")
+
+_PKG = os.path.dirname(os.path.abspath(__file__))
+# first hit wins: the copy installed inside the package (wheel, keg), then the
+# catalog next to the source tree — the latter is what a checkout-run uses,
+# e.g. the nightly loop and `PYTHONPATH=repo python -m omlx_uplift.cli`
+SEED_DIRS = [os.path.join(_PKG, "curated_patches"),
+             os.path.join(os.path.dirname(_PKG), "curated_patches")]
 
 _API = "https://api.github.com/repos/{repo}/contents/{dir}/{tier}"
 _RAW = "https://raw.githubusercontent.com/{repo}/HEAD/{dir}/{tier}/{name}"
@@ -127,11 +135,24 @@ def _index_entries(tier: str, data) -> list | None:
     return out
 
 
+def _seed_file(rel: str) -> str | None:
+    """First bundled location that has `rel` (tier/index.json, or a
+    tier/manifest.json). None when no seed carries it."""
+    for root in SEED_DIRS:
+        path = os.path.join(root, rel)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def _seed_entries(tier: str) -> list | None:
-    """The index that shipped inside this installed uplift. None = no seed
-    for that tier, which is the only case where the API is still consulted."""
+    """The index that shipped with this uplift. None = no seed for that tier,
+    which is the only case where the API is still consulted."""
+    path = _seed_file(os.path.join(tier, INDEX_NAME))
+    if path is None:
+        return None
     try:
-        with open(os.path.join(SEED_DIR, tier, INDEX_NAME), "rb") as fh:
+        with open(path, "rb") as fh:
             data = fh.read()
     except OSError:
         return None
@@ -139,9 +160,11 @@ def _seed_entries(tier: str) -> list | None:
 
 
 def _seed_manifest(entry: dict) -> dict:
+    path = _seed_file(os.path.join(entry["tier"], entry["name"]))
+    if path is None:
+        return {}
     try:
-        with open(os.path.join(SEED_DIR, entry["tier"], entry["name"]),
-                  "rb") as fh:
+        with open(path, "rb") as fh:
             data = json.loads(fh.read().decode("utf-8", "replace"))
     except (OSError, ValueError):
         return {}

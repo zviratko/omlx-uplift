@@ -39,8 +39,10 @@ version = { attr = "omlx_uplift.__version__" }
 include = ["omlx_uplift*"]
 
 [tool.setuptools.package-data]
+# the curated catalog seed is NOT listed here on purpose: it lives at the
+# repository root (published raw-URL coordinate) and setup.py copies it into
+# the built package, so package-data would match nothing in the source tree.
 "omlx_uplift" = ["static/**/*", "locales/*.json", "skins-example/*.yml",
-                 "curated_patches/*/*", "curated_patches/*.md",
                  "man/*.1", "bench_env_requirements.txt",
                  "mteb_env_requirements.txt",
                  "evals/systemone/data/*.json"]
