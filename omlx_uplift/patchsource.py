@@ -315,15 +315,28 @@ def _content_norm_sha(data: bytes) -> str:
 
 def _content_twin(manifest: dict, patch_id: str, result: dict,
                   store, reversal: bool = False) -> dict | None:
-    """Another installed patch whose DESIRED version is content-identical to
-    the candidate (normalized). Content, not URL, is what double-installs
-    into a build twice; the twin is reported so the add can name it.
+    """Another installed patch whose stored version carries the SAME
+    INSTALLABLE CONTENT as the candidate. Content, not URL, is what
+    double-installs into a build twice; the twin is reported so the add
+    can name it. Comparison runs in the PRUNED KEG VIEW (both sides
+    through the manifest's skip patterns before hashing): the vendored
+    catalog copy stores the FULL diff (dev scope), a user-added PR twin
+    stores the keg-pruned one — the two byte strings differ by the
+    tests/apps sections while the installable change is one patch (live
+    catch 2026-10-29, the very pair the guard exists for).
     DIRECTION counts as content: the same bytes installed as a reversal
     (undo a merged change) are not a copy of the forward patch."""
+    from . import diffapply
+
     data = result.get("diff")
     if not data:
         return None
-    want = _content_norm_sha(data)
+    pats = _patches.skip_patterns(manifest)
+
+    def view(b: bytes) -> str:
+        return _content_norm_sha(diffapply.prune_sections(b, pats)[0])
+
+    want = view(data)
     for q in manifest.get("patches", []):
         if q.get("id") == patch_id:
             continue
@@ -343,7 +356,7 @@ def _content_twin(manifest: dict, patch_id: str, result: dict,
                 other = fh.read()
         except OSError:
             continue
-        if _content_norm_sha(other) == want:
+        if view(other) == want:
             return q
     return None
 

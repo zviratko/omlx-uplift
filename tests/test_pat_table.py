@@ -478,6 +478,38 @@ class ContentTwinTest(_Base):
         # a refused add leaves no trace (the same rule as a failed gate)
         self.assertIsNone(self.manifest_patch("p2"))
 
+    def test_cross_scope_twin_compares_in_the_keg_view(self):
+        # the live pair from 2026-10-29: a catalog vendor stores the FULL
+        # diff (dev scope, apps/tests sections included); the user adds
+        # the same change as a PR and the runtime gate prunes those
+        # sections — raw bytes never match, but the INSTALLABLE content is
+        # one patch. The twin check must see that.
+        newfile = (
+            b"diff --git a/apps/omlx-web/extra.js b/apps/omlx-web/extra.js\n"
+            b"new file mode 100644\n"
+            b"--- /dev/null\n"
+            b"+++ b/apps/omlx-web/extra.js\n"
+            b"@@ -0,0 +1,1 @@\n"
+            b"+// extra\n")
+        self.add(pid="vendor", scope="dev", diff=self.diff_a + newfile)
+        stored = open(os.path.join(self.store.base_dir,
+                                   "patches/vendor.v1.diff"), "rb").read()
+        self.assertIn(b"apps/omlx-web/extra.js", stored,
+                      "the dev-scope add must keep the full diff")
+        with unittest.mock.patch.object(patchsource, "dev_build_root",
+                                        return_value=self.src):
+            res = patchsource.add_patch(
+                self.store, "pr-twin",
+                {"kind": "upload", "data": self._github_shaped(
+                    self.diff_a + newfile)},
+                self.keg, build_root=self.src)
+        # auto-classification lands the candidate as a runtime patch (the
+        # keg gate prunes the apps section) — the guard must still refuse
+        self.assertFalse(res.get("ok"), res)
+        self.assertEqual(res.get("stage"), "duplicate")
+        self.assertIn("vendor", res.get("reason"))
+        self.assertIsNone(self.manifest_patch("pr-twin"))
+
     def test_remove_of_a_curated_patch_disables_it_instead(self):
         # a removed catalog entry is re-added by the next check (policy
         # 2026-10-09) — the honest outcome of the verb is disable, and the
