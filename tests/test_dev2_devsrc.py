@@ -296,6 +296,42 @@ class DevsrcFixture(unittest.TestCase):
                              "diff_bytes": newer}])
         self.assertTrue(st["drift"]["drift"], st["drift"])
 
+    def test_fallback_version_is_named_not_blamed(self):
+        # mruu report 2026-10-29: the build ladder chose an OLDER saved
+        # version of an enabled patch because the newest one stopped
+        # applying. With the pool entry present (patchsource adds it) the
+        # branch's v1-only lines are EXPLAINED, the verdict is named after
+        # the real cause, and the card must not promise that Build fixes it
+        # — a rebuild runs the same ladder and picks v1 again.
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        src = devsrc.src_path(self.cfg)
+        one = [{"id": "p-one", "version": 1,
+                "diff_bytes": self._patch_diff("one")}]
+        m_v1 = devsrc.materialize(one, self.cfg)
+        newer = self._patch_diff("one").replace(b"EXTRA_one = 1",
+                                                b"EXTRA_one = 2")
+        two = [{"id": "p-one", "version": 2, "diff_bytes": newer}]
+        exp_v2 = devsrc.expected_tip(two, self.cfg)
+        pool = [{"id": "p-one", "version": 1,
+                 "diff_bytes": one[0]["diff_bytes"],
+                 "alternate_version": "p-one", "wanted_version": 2}]
+        st = devsrc.status(self.cfg, two, residue_patches=pool)
+        self.assertTrue(st["drift"]["stale"], st["drift"])
+        self.assertEqual(st["drift"]["hand"], [])
+        self.assertIn("older saved version", st["drift"]["detail"])
+        self.assertIn("p-one (built v1, v2 enabled)", st["drift"]["detail"])
+        r = devsrc.classify_build(src, m_v1["tip"], m_v1["base"], exp_v2,
+                                  two, residue_patches=pool)
+        self.assertEqual(r["build_state"], "version-fallback")
+        self.assertFalse(r["needs_rebuild"])
+        self.assertIn("p-one", r["reason"])
+        self.assertIn("does not apply", r["reason"])
+        # without the pool the fallback is indistinguishable from a hand
+        # edit — that is the shape the card used to show (fail-safe kept)
+        r0 = devsrc.classify_build(src, m_v1["tip"], m_v1["base"], exp_v2, two)
+        self.assertNotEqual(r0["build_state"], "version-fallback")
+
     def test_sync_ref_move_alone_is_not_drift(self):
         """The false alarm this guards: after materialize the sync ref moves
         (auto-update fetch, plain time passing). Diffing the NEW sync tip

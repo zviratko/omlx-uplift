@@ -372,7 +372,15 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                 store.save(manifest)
     for tier, reason in listing["errors"].items():
         notes.append(f"tier {tier}: {reason}")
-    return {"ok": listing["ok"], "report": report, "notes": notes}
+    # Structured form for the card (mruu report 2026-10-29): a tier that
+    # could not be listed is a FAILURE the operator must see — it used to
+    # arrive in the same muted note line as the informational per-patch
+    # chatter, which read as "nothing happened".
+    return {"ok": listing["ok"], "report": report, "notes": notes,
+            "tier_errors": dict(listing["errors"]),
+            "tier_error_text": "; ".join(
+                "tier %s: %s" % (t, r)
+                for t, r in sorted(listing["errors"].items()))}
 
 
 def adopt(store, patch_id: str) -> dict:

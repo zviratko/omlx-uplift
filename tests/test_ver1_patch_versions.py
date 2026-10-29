@@ -275,3 +275,39 @@ class Ver1Fixture(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_residue_pool_carries_the_built_alternate_version(self):
+        # Drift-classifier input (mruu report 2026-10-29): an ENABLED patch
+        # whose newest version no longer applies sits on the branch as an
+        # older version. Those bytes must reach the pool, tagged, or the
+        # dashboard blames the operator for the build's own fallback.
+        v1 = self._good_diff()
+        v2 = self._good_diff().replace(b"EXTRA = 1", b"EXTRA = 2")
+        self._store_entry("p-one", {1: v1, 2: v2}, desired=2)
+        store = PatchStore(self.base_dir)
+        man = store.load()
+        man["patches"][0]["versions"][0]["dev_applied"] = {"sha": "c" * 40}
+        store.save(man)
+        enabled = [{"id": "p-one", "version": 2, "diff_bytes": v2}]
+        pool = patchsource.build_residue_pool(store, enabled)
+        self.assertEqual([e["id"] for e in pool], ["p-one"])
+        self.assertEqual((pool[0]["version"], pool[0]["wanted_version"]),
+                         (1, 2))
+        self.assertEqual(pool[0]["alternate_version"], "p-one")
+        self.assertEqual(pool[0]["diff_bytes"], v1)
+        # the wanted version is what the branch carries -> nothing to explain
+        man = store.load()
+        man["patches"][0]["versions"][0].pop("dev_applied")
+        man["patches"][0]["versions"][1]["dev_applied"] = {"sha": "d" * 40}
+        store.save(man)
+        self.assertEqual(patchsource.build_residue_pool(store, enabled), [])
+        # a patch that left the enabled set keeps the OLD behaviour: its
+        # desired bytes are residue, and no alternate version is hunted
+        man = store.load()
+        man["patches"][0]["versions"][1].pop("dev_applied")
+        man["patches"][0]["versions"][0]["dev_applied"] = {"sha": "e" * 40}
+        store.save(man)
+        pool2 = patchsource.build_residue_pool(store, [])
+        self.assertEqual([e["version"] for e in pool2], [2])
+        self.assertNotIn("alternate_version", pool2[0])
+

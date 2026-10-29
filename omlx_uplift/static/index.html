@@ -354,6 +354,13 @@
             <div id="pt-warn" class="pt-banner" hidden></div>
             <div id="pt-killswitch" class="pt-banner pt-kill" hidden></div>
             <div id="pt-drift" class="pt-banner pt-drift" hidden></div>
+            <!-- CARD-TOP WARNINGS (mruu ask 2026-10-29): these two used to
+                 render where nobody looks — the omlx-dev build drift sat at
+                 the bottom of the DEV zone, the bundled-patch check failure
+                 in a muted note line under the table. Both now sit above the
+                 ADD PATCH form with the evidence in their text. -->
+            <div id="dv-warn" class="pt-banner pt-drift pt-alert" hidden></div>
+            <div id="pt-catalog-warn" class="pt-banner pt-drift pt-alert" hidden></div>
             <div class="pt-toolbar">
             <!-- SUB-ACTIONS (user 2026-10-27, second round): the standalone
                  'Check for updates' button and the 'Auto-update patches from
@@ -462,7 +469,6 @@
                         <span data-i18n="uplift.patches.dev_auto_label">Auto-update and rebuild omlx-dev on restart</span></label>
                     <span id="dv-auto-note" class="pt-detail"></span>
                 </div>
-                <div id="dv-warn" class="pt-banner" hidden></div>
                 <pre id="dv-build-log" class="pt-boot-log" hidden></pre>
                 </div>
                 <div id="dv-actions" hidden><button type="button" class="btn primary" id="dv-build-btn" data-i18n="uplift.patches.dev_build">Rebuild omlx-dev</button><button type="button" class="btn primary" id="dv-build-restart-btn" data-i18n="uplift.patches.dev_build_restart">Rebuild &amp; restart</button><button type="button" class="btn" id="dv-restart-btn" data-i18n="uplift.patches.dev_restart">Restart omlx-dev</button></div>

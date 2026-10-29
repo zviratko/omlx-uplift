@@ -2624,6 +2624,11 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 
 .pt-banner { border: 1px solid var(--warn, #b8860b); background: color-mix(in srgb, var(--warn, #b8860b) 12%, transparent); padding: 6px 10px; margin: 4px 0; font-size: var(--fs-meta); }
 .pt-banner.pt-kill { border-color: var(--accent, #e0662e); }
+/* CARD-TOP WARNINGS (mruu ask 2026-10-29): the omlx-dev drift line and the
+   bundled-patch check failure sat in table fine print (.pt-detail is muted
+   meta text) where nobody looks. Same box as the other banners, one step up
+   so it survives a glance; the frame comes from .pt-banner.pt-drift. */
+.pt-banner.pt-alert { font-size: 13px; font-weight: 600; padding: 8px 12px; }
 /* KEGID-3: tree drift is an ALARM, not a warning. Thin --red wash keeps
    the ground card-dominant, so the theme's --ink stays the readable
    text colour (solid-red ground would need --ink-on-red instead). */

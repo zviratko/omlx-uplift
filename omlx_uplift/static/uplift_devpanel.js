@@ -84,7 +84,15 @@ function dvSha(sha) { return sha ? String(sha).slice(0, 12) : '—'; }
 function renderDev() {
     const d = DV_DATA;
     const sec = $('dv-section');
-    if (!d) { sec.hidden = true; return; }
+    if (!d) {
+        sec.hidden = true;
+        // dv-warn now sits at the TOP of the card, outside this section, so
+        // hiding the section no longer hides the warning. Fold it here or a
+        // stale drift line outlives the DEV zone it belongs to.
+        const w0 = $('dv-warn');
+        if (w0) w0.hidden = true;
+        return;
+    }
     sec.hidden = false;
     const state = $('dv-state');
     state.innerHTML = '';
@@ -206,12 +214,22 @@ function renderDev() {
         if (!blog.hidden) blog.scrollTop = blog.scrollHeight;
     }
 
-    warn.hidden = !(d.drift && d.drift.drift);
-    if (warn.hidden === false)
-        warn.textContent = ptMsg('uplift.patches.dev_drift_banner',
-            'WARNING — the omlx-dev build sources do not match the enabled '
-            + 'patches (edited by hand?). The next Build re-applies the '
-            + 'enabled patches and drops the other changes.');
+    // SAY WHAT CHANGED (mruu ask 2026-10-29): drift_check resolves the
+    // evidence down to files and versions, and that sentence used to ride a
+    // hover tooltip while this line made a generic accusation. A version
+    // fallback takes the server's own reason instead of the canned lead:
+    // pressing Build does NOT re-apply the wanted patch, it repeats the same
+    // fallback, so the old promise was a lie.
+    const _dr = d.drift || {};
+    warn.hidden = !(_dr.drift || d.build_state === 'version-fallback');
+    if (warn.hidden === false) {
+        const _lead = d.build_state === 'version-fallback'
+            ? (d.build_reason || '')
+            : ptMsg('uplift.patches.dev_drift_banner',
+                'WARNING - the omlx-dev build sources do not match the '
+                + 'patches you enabled.');
+        warn.textContent = [_lead, _dr.detail].filter(Boolean).join(' ');
+    }
 
     // PAT-TABLE (user 2026-10-19): the build-zone patch cards are retired
     // — one row per patch lives in the single table above; this strip only

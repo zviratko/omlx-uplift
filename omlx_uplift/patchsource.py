@@ -2189,7 +2189,17 @@ def build_residue_pool(store, enabled: list[dict]) -> list[dict]:
     build set — disabled, retired, or rescoped away (BUILD-ZONE honesty,
     mruu report 2026-10-18: a curated 'both' patch narrowed to runtime
     keeps its old materialized commit on the branch until the next
-    build; that residue must not light the DRIFT warning)."""
+    build; that residue must not light the DRIFT warning).
+
+    A VERSION FALLBACK rides along for the same reason (mruu report
+    2026-10-29): a patch whose newest stored version no longer applies onto
+    the current base is materialized at an OLDER stored version by the
+    ladder. The branch then legitimately carries that older version's lines
+    while the expectation is built from the wanted version — without this
+    entry those lines read as a hand edit and the card blames the operator
+    for a fallback the build itself reported. Tagged `alternate_version` so
+    drift_check can name the patch instead of folding it into residue.
+    """
     excl = {(p.get("id"), p.get("version")) for p in enabled}
     manifest = store.load()
     out: list[dict] = []
@@ -2198,12 +2208,25 @@ def build_residue_pool(store, enabled: list[dict]) -> list[dict]:
         if ver is None:
             continue
         key = (p.get("id"), ver.get("v", 0))
-        if key in excl:
+        if key not in excl:
+            data = _read_patch_file(store, ver)
+            if data is not None:
+                out.append({"id": p.get("id"), "version": key[1],
+                            "diff_bytes": data})
             continue
-        data = _read_patch_file(store, ver)
-        if data is not None:
-            out.append({"id": p.get("id"), "version": key[1],
-                        "diff_bytes": data})
+        # enabled: only the version the last build actually stamped here,
+        # when that is not the wanted one (one extra file read per fallback)
+        for bv in p.get("versions", []):
+            rec = bv.get("dev_applied") or {}
+            bkey = (p.get("id"), bv.get("v", 0))
+            if not rec.get("sha") or bkey == key or bkey in excl:
+                continue
+            data = _read_patch_file(store, bv)
+            if data is not None:
+                out.append({"id": p.get("id"), "version": bkey[1],
+                            "diff_bytes": data,
+                            "alternate_version": p.get("id"),
+                            "wanted_version": key[1]})
     return out
 
 

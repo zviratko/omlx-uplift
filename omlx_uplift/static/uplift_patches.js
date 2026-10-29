@@ -106,6 +106,21 @@ async function ptAutoSyncCurated(force) {
             notesEl.hidden = !notes.length;
             notesEl.textContent = notes.join(' · ');
         }
+        // A tier that could not be listed is NOT a note (mruu report
+        // 2026-10-29): the GitHub refusal only ever reached the muted
+        // line under the table, so an update check that never ran looked
+        // exactly like an update check that found nothing.
+        const cw = $('pt-catalog-warn');
+        if (cw) {
+            const te = r.tier_error_text || '';
+            cw.hidden = !te;
+            cw.textContent = te
+                ? ptMsg('uplift.patches.catalog_check_failed',
+                        'Could not check the bundled patches for updates - '
+                        + 'the patches you already have keep working. Press '
+                        + 'Check for updates to try again.') + ' ' + te
+                : '';
+        }
         if (changed) {
             await pollPatches();   // bring the new rows in
             await ptRefreshCarrier();   // a widened scope may need a build

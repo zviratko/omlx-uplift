@@ -703,6 +703,11 @@ def classify_build(path: str, built_sha: str | None, built_base: str | None,
                      build set (a rescope/disable). Pressing Build drops
                      the leftovers; nothing is missing. Quiet hint, no
                      warning.
+      version-fallback  an enabled patch is present as an OLDER saved
+                     version (its newest one does not apply to these
+                     sources, so Build chose the older one). Not a hand
+                     edit, and Build will not fix it — the reason names
+                     the patch and both versions (mruu report 2026-10-29).
       neither        content-current — a sha gap caused by the base
                      advancing alone (base_stale covers it informationally).
 
@@ -736,6 +741,19 @@ def classify_build(path: str, built_sha: str | None, built_base: str | None,
                           "once to re-cut it from the current patches"}
     verdict = drift_check(path, built_base, built_sha,
                           patches_to_apply, residue_patches)
+    if verdict.get("stale_patches"):
+        # The build ladder had to fall back: this patch's newest saved
+        # version does not apply onto the current sources, so an older one
+        # was used. Say so, name the patch and both versions, and do NOT
+        # promise that Build fixes it — it repeats the same choice.
+        return {"needs_rebuild": False, "build_ahead": False,
+                "build_state": "version-fallback",
+                "reason": "the installed build uses an older saved version of "
+                          + ", ".join(verdict["stale_patches"])
+                          + " — the newer version does not apply to the "
+                            "current omlx sources, so Build makes the same "
+                            "choice again. Update that patch to the current "
+                            "sources, or keep the older version on purpose"}
     if not verdict.get("complete"):
         return {"needs_rebuild": True, "build_ahead": False,
                 "build_state": "missing-content",
@@ -745,8 +763,10 @@ def classify_build(path: str, built_sha: str | None, built_base: str | None,
     if verdict.get("hand"):
         return {"needs_rebuild": True, "build_ahead": False,
                 "build_state": "hand-content",
-                "reason": "the branch carries changes no patch accounts for "
-                          "(a hand edit?) — press Build to re-cut it clean"}
+                "reason": "the omlx sources carry changes no enabled patch "
+                          "explains: "
+                          + ", ".join(verdict["hand"][:5])
+                          + " — press Build to cut them out of the build"}
     if verdict.get("residue"):
         return {"needs_rebuild": False, "build_ahead": True,
                 "build_state": "ahead",
@@ -943,6 +963,8 @@ def drift_check(path: str, base_sha: str, tip: str,
         for fp in ep["files"]:
             expected.setdefault(fp["path"], set()).update(_added_lines(fp))
     vocab: dict[str, set[str]] = {}
+    alt: dict[str, set[str]] = {}          # lines of a non-wanted VERSION
+    alt_names: dict[str, str] = {}         # path -> "id (built vN, vM wanted)"
     for rp in residue_patches or []:
         try:
             ep = diffapply.parse_diff(rp.get("diff_bytes") or b"")
@@ -950,8 +972,16 @@ def drift_check(path: str, base_sha: str, tip: str,
             continue
         if not ep.get("ok"):
             continue
+        is_alt = bool(rp.get("alternate_version"))
+        if is_alt:
+            label = ("%s (built v%s, v%s enabled)"
+                     % (rp.get("id"), rp.get("version"),
+                        rp.get("wanted_version")))
         for fp in ep["files"]:
-            vocab.setdefault(fp["path"], set()).update(_added_lines(fp))
+            (alt if is_alt else vocab).setdefault(
+                fp["path"], set()).update(_added_lines(fp))
+            if is_alt:
+                alt_names.setdefault(fp["path"], label)
     actual = diffapply.parse_diff(diff) if diff.strip() else {"ok": True, "files": []}
     if not actual.get("ok"):
         return {"drift": True, "complete": False,
@@ -962,9 +992,26 @@ def drift_check(path: str, base_sha: str, tip: str,
                      if expected[p] - actual_map[p])
     extra = sorted(p for p in set(actual_map) - set(expected))
     # an unpatch commit that only DELETES adds no lines -> catch via paths too
-    residue, hand = [], []
+    residue, hand, stale = [], [], []
+    stale_labels: dict[str, None] = {}
+
+    def _bucket(p: str, beyond: set[str]) -> None:
+        """Sort content the enabled set does not explain into the three
+        honest causes: another patch left behind (residue), an older saved
+        version of a patch that IS enabled (stale version), or nothing at
+        all (hand edit)."""
+        covered = vocab.get(p, set())
+        if not beyond - covered:
+            residue.append(p)
+        elif not beyond - covered - alt.get(p, set()):
+            stale.append(p)
+            if p in alt_names:
+                stale_labels.setdefault(alt_names[p], None)
+        else:
+            hand.append(p)
+
     for p in extra:
-        (hand if actual_map[p] - vocab.get(p, set()) else residue).append(p)
+        _bucket(p, actual_map[p])
     # SURPLUS lines on paths an enabled patch also touches: residue from a
     # rescoped patch sharing files with an enabled one must not hide behind
     # the per-path expectation (mruu shape), and anything on those files
@@ -973,9 +1020,10 @@ def drift_check(path: str, base_sha: str, tip: str,
         beyond = actual_map[p] - expected[p]
         if not beyond:
             continue
-        (hand if beyond - vocab.get(p, set()) else residue).append(p)
+        _bucket(p, beyond)
     residue.sort()
     hand.sort()
+    stale.sort()
     drift = bool(missing or changed or hand)
     complete = not missing and not changed
     detail = []
@@ -988,12 +1036,16 @@ def drift_check(path: str, base_sha: str, tip: str,
     if hand:
         detail.append("touched outside the patch set (hand commit?): "
                       + ", ".join(hand[:5]))
+    if stale_labels:
+        detail.append("built from an older saved version: "
+                      + ", ".join(list(stale_labels)[:5]))
     if residue:
         detail.append("still carries retired patch content (next Build "
                       "drops it): " + ", ".join(residue[:5]))
     return {"drift": drift, "complete": complete, "detail": "; ".join(detail) or "clean",
             "missing": missing, "changed": changed, "extra": extra,
-            "residue": residue, "hand": hand}
+            "residue": residue, "hand": hand, "stale": stale,
+            "stale_patches": sorted(stale_labels)}
 
 
 def _added_lines(filepatch: dict) -> set[str]:

@@ -169,6 +169,23 @@ class CuratedSyncTests(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["report"], {})
         self.assertEqual(self.store.load()["patches"], [])
+        # The card must be able to tell a FAILED check from a quiet one
+        # (mruu report 2026-10-29): a tier that could not be listed used to
+        # reach the dashboard only as a note line, in the same muted text
+        # as informational per-patch chatter.
+        self.assertEqual(sorted(r["tier_errors"]), ["default", "optional"])
+        self.assertIn("network down", r["tier_error_text"])
+        self.assertIn("tier default:", r["tier_error_text"])
+
+    def test_rate_limited_listing_reports_the_refusal(self):
+        # the exact shape of an unauthenticated GitHub contents call after
+        # the hourly budget is spent
+        def wall(url):
+            return {"ok": False, "reason": "HTTP 403 from " + url}
+        r = curated.sync(self.store, self.root, fetch=wall)
+        self.assertFalse(r["ok"])
+        self.assertIn("HTTP 403", r["tier_error_text"])
+        self.assertTrue(any("tier default" in n for n in r["notes"]))
 
     def test_sync_matches_user_added_patch_by_source(self):
         """User added the same PR under their own id first: sync must NOT

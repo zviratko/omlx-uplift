@@ -227,10 +227,17 @@ def _dev_status_sync() -> dict:
     _state = out.get("build_state")
     if _state != _LAST_BUILD_STATE.get("state"):
         _LAST_BUILD_STATE["state"] = _state
-        _msg = ("omlx-dev build [%s]: %s"
-                % (_state, _build_reason))
+        # name WHAT changed, not just that something did (mruu ask
+        # 2026-10-29): drift_check already resolves the evidence down to
+        # files and versions, and it used to ride a hover tooltip only.
+        # The same sentence the card shows now reaches the server log.
+        _det = (out.get("drift") or {}).get("detail") or ""
+        _msg = ("omlx-dev build [%s]: %s" % (_state, _build_reason))
+        if _det and _det != "clean" and _det not in _build_reason:
+            _msg += " | what changed: " + _det
         if out.get("needs_rebuild") or _state in ("hand-content",
                                                   "missing-content",
+                                                  "version-fallback",
                                                   "never-built",
                                                   "classify-error"):
             _LOG.warning(_msg)
