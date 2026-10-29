@@ -443,7 +443,13 @@ class TargetWiring(unittest.TestCase):
         rc, t, e, seen = self._run(["apply", "--target", "dev"], dev=False)
         self.assertEqual(rc, 2)
         self.assertIn("needs a real install tree", e)
-        self.assertIn("omlx-uplift dev use", e)
+        # The repair names itself, and WHICH repair depends on what is
+        # missing: a link left dangling over a deleted keg points at
+        # 'dev use' (pick a keg that exists), an empty Cellar points at
+        # 'dev bootstrap' (make one). Pinning the first text only made
+        # this pass on a dev box and fail on CI (8d8d5b9 red python job).
+        self.assertTrue("omlx-uplift dev use" in e
+                        or "omlx-uplift dev bootstrap" in e, e)
         self.assertEqual(seen, [])
 
     def test_missing_vanilla_keeps_historic_message(self):

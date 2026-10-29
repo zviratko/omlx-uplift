@@ -136,7 +136,13 @@ class TreelessStoreVerbs(unittest.TestCase):
         rc, out, err = _run(["patch", "apply"], *self.no_rows, self.base)
         self.assertEqual(rc, 2)
         self.assertIn("needs a real install tree", err)
-        self.assertIn("omlx-uplift dev use", err)     # the actual fix
+        # Unmocked here, so WHICH repair depends on the real machine: a
+        # dev box with kegs in the Cellar is told 'dev use', a runner with
+        # none is told 'dev bootstrap'. Both shapes are pinned strictly in
+        # the two tests below; this one demands only the invariant that a
+        # tree-bound refusal always names a way out (8d8d5b9 red on CI
+        # because it asked for the dev-box wording).
+        self.assertTrue("omlx-uplift dev" in err, err)
 
     def test_refusal_lists_the_kegs_that_survive(self):
         with mock.patch.object(cli, "_dev_keg_versions",
