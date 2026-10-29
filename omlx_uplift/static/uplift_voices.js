@@ -1486,23 +1486,21 @@ function _sayRows(rowsBox, voices) {
 }
 
 async function _sayLimitsSave(fields) {
-    /* Persist both limits and repaint from the server's answer: it cleans the
-       values (a wild number lands on the bound the engine honours), so the
-       field must show what was STORED, not what was typed. */
-    const body = { chunk_chars: Number(fields.chunk.value),
-                   max_audio_mb: Number(fields.mb.value) };
+    /* Persist the segment size and repaint from the server's answer: it
+       cleans the value (a wild number lands on the bound the engine honours),
+       so the field must show what was STORED, not what was typed. The audio
+       ceiling is not saved because it is not offered: 256 MB is about ninety
+       minutes of speech, a fixed refusal, not a knob. */
+    const body = { chunk_chars: Number(fields.chunk.value) };
     try {
         const r = await D.postJson(`${VAPI}/voices/say/limits`, body);
         fields.chunk.value = String(r.chunk_chars);
-        fields.mb.value = String(r.max_audio_mb);
         _sayData.chunk_chars = r.chunk_chars;
-        _sayData.max_audio_mb = r.max_audio_mb;
         D.toast(tf('uplift.voices.say_limits_saved', 'Speech limits saved'));
     } catch (e) {
         D.toast(D.errText(e), 'error');
         if (_sayData) {
             fields.chunk.value = String(_sayData.chunk_chars);
-            fields.mb.value = String(_sayData.max_audio_mb);
         }
     }
 }
@@ -1557,7 +1555,7 @@ async function sayPanel(host) {
             .replace('{locale}', _sayData.system_language);
         box.append(sys);
     }
-    // SAY-6: the two limits a long reply is cut and counted by. They live on
+    // SAY-6: the limit a long reply is cut by. It lives on
     // the server (the voice store) and the panel only reads and writes them:
     // a copy kept in the browser would be a second truth about what this Mac
     // will do with a long answer, and the second truth always loses.
@@ -1565,8 +1563,7 @@ async function sayPanel(host) {
     // statics outrun the keg all the time here). Showing fields that the
     // server would ignore, or fields filled with invented defaults, is worse
     // than showing none: the row appears only when the answers exist.
-    const hasLimits = Number.isFinite(_sayData.chunk_chars)
-        && Number.isFinite(_sayData.max_audio_mb);
+    const hasLimits = Number.isFinite(_sayData.chunk_chars);
     const lim = document.createElement('div');
     lim.className = 'vc-say-limits';
     const limHint = document.createElement('div');
@@ -1583,10 +1580,6 @@ async function sayPanel(host) {
       'uplift.voices.say_chunk_hint',
       '0 keeps the whole reply in one call. Each extra piece costs about a '
       + 'second of setup.', _sayData.chunk_chars, 0, 20000, 100],
-     ['mb', 'uplift.voices.say_mb_label', 'Largest reply (MB of audio)',
-      'uplift.voices.say_mb_hint',
-      '48 KB per second of speech whatever the text. A reply past this limit '
-      + 'is refused, never cut short.', _sayData.max_audio_mb, 1, 4096, 16],
     ].forEach((f) => {
         const wrap = document.createElement('label');
         wrap.className = 'vc-say-limit';
@@ -1601,7 +1594,6 @@ async function sayPanel(host) {
         fields[f[0]] = inp;
     });
     fields.chunk.onchange = () => _sayLimitsSave(fields);
-    fields.mb.onchange = () => _sayLimitsSave(fields);
     lim.append(limHint);
     if (hasLimits) box.append(lim);
 

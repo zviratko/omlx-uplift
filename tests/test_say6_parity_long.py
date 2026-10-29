@@ -281,25 +281,21 @@ def test_chunk_size_is_cleaned_not_trusted(raw, expected):
     assert SE.clean_chunk_chars(raw) == expected
 
 
-@pytest.mark.parametrize("raw,expected", [
-    (None, SE.DEFAULT_MAX_AUDIO_MB), (0, SE.DEFAULT_MAX_AUDIO_MB),
-    (-5, SE.DEFAULT_MAX_AUDIO_MB), (99999, SE.MAX_MAX_AUDIO_MB),
-    ("64", 64), (1, SE.MIN_MAX_AUDIO_MB),
-])
-def test_ceiling_is_cleaned_and_cannot_be_switched_off(raw, expected):
-    assert SE.clean_max_audio_mb(raw) == expected
-
-
-def test_the_store_supplies_both_limits(monkeypatch):
-    """A board that never set them gets the defaults; one that holds junk gets
-    the defaults too, never an unbounded render."""
-    store = {"voices": [], "say_chunk_chars": "nonsense", "say_max_audio_mb": 0}
+def test_the_store_supplies_the_segment_size_only(monkeypatch):
+    """A board that never set the segment size gets the default; one that
+    holds junk gets the default too, never an unbounded render. The ceiling
+    is not in the store any more (user 2026-10-29: ~90 minutes of speech is
+    a guardrail, not a knob): an older store may still carry the key and the
+    loader must ignore it, never honour it."""
+    store = {"voices": [], "say_chunk_chars": "nonsense", "say_max_audio_mb": 1}
     monkeypatch.setattr(V, "_load", lambda: dict(store))
-    assert V._say_limits() == (SE.DEFAULT_CHUNK_CHARS, SE.DEFAULT_MAX_AUDIO_MB)
-    store.update(say_chunk_chars=300, say_max_audio_mb=32)
-    assert V._say_limits() == (300, 32)
+    assert V._say_chunk_chars() == SE.DEFAULT_CHUNK_CHARS
+    store.update(say_chunk_chars=300)
+    assert V._say_chunk_chars() == 300
     store.update(say_chunk_chars=0)
-    assert V._say_limits() == (0, 32), "0 is a choice, not junk"
+    assert V._say_chunk_chars() == 0, "0 is a choice, not junk"
+    assert not hasattr(SE, "clean_max_audio_mb"), "the cleaner is gone"
+    assert SE.DEFAULT_MAX_AUDIO_MB == 256, "the guardrail lives as a constant"
 
 
 # --------------------------------------------------------- router contract --
@@ -340,7 +336,7 @@ def _stub_render(monkeypatch, pieces_seen, frames_per_char=1):
 def test_a_short_reply_stays_a_plain_response(shared, monkeypatch, spools):
     seen = []
     _stub_render(monkeypatch, seen)
-    monkeypatch.setattr(V, "_say_limits", lambda: (1200, 256))
+    monkeypatch.setattr(V, "_say_chunk_chars", lambda: 1200)
     import asyncio
     resp = asyncio.run(V._say_response("Zuzana", "Ahoj, jak se máš?"))
     assert resp.__class__.__name__ == "Response", "no spool for a sentence"
@@ -352,7 +348,7 @@ def test_a_long_reply_is_spooled_and_cleaned_up(shared, monkeypatch, spools):
     import asyncio
     seen = []
     _stub_render(monkeypatch, seen)
-    monkeypatch.setattr(V, "_say_limits", lambda: (300, 256))
+    monkeypatch.setattr(V, "_say_chunk_chars", lambda: 300)
     text = "One two three four five six seven. " * 40          # ~1720 chars
     resp = asyncio.run(V._say_response("Zuzana", text))
     assert resp.__class__.__name__ == "FileResponse"
@@ -370,11 +366,14 @@ def test_a_spooled_reply_reports_a_ceiling_as_an_error(shared, monkeypatch,
     import asyncio
     seen = []
     _stub_render(monkeypatch, seen, frames_per_char=2000)   # 4 KB per character
-    monkeypatch.setattr(V, "_say_limits", lambda: (300, 1))  # 1 MB ceiling
+    monkeypatch.setattr(V, "_say_chunk_chars", lambda: 300)
+    monkeypatch.setattr(SE, "DEFAULT_MAX_AUDIO_MB", 1)      # shrink the guardrail
     with pytest.raises(HTTPException) as exc:
         asyncio.run(V._say_response("Zuzana", "word " * 400))
     assert exc.value.status_code == 502
     assert "ceiling" in str(exc.value.detail)
+    assert "Settings" not in str(exc.value.detail), \
+        "the refusal may not point at a setting that no longer exists"
 
 
 def test_a_single_call_reply_under_a_tiny_ceiling_is_still_honest(
@@ -384,7 +383,7 @@ def test_a_single_call_reply_under_a_tiny_ceiling_is_still_honest(
     import asyncio
     seen = []
     _stub_render(monkeypatch, seen)
-    monkeypatch.setattr(V, "_say_limits", lambda: (0, 256))
+    monkeypatch.setattr(V, "_say_chunk_chars", lambda: 0)
     text = "One two three four five six seven. " * 40
     resp = asyncio.run(V._say_response("Zuzana", text))
     assert resp.__class__.__name__ == "Response"
@@ -464,7 +463,7 @@ def _two_shelvies(monkeypatch):
     monkeypatch.setattr(SE, "selected_voice_identifier", lambda force=False: "")
     monkeypatch.setattr(SE, "spoken_selections", lambda force=False: {})
     monkeypatch.setattr(SE, "_os_sel_cache", {"ts": 9e15, "map": {}})
-    monkeypatch.setattr(V, "_say_limits", lambda: (1200, 256))
+    monkeypatch.setattr(V, "_say_chunk_chars", lambda: 1200)
     monkeypatch.setattr(V, "_say_preferred", lambda: {})
     heard = {}
 

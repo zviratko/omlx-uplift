@@ -72,11 +72,12 @@ MAX_SAY_CHARS = 200000         # a reply this long is a mistake, not an answer
 # (18 chars/s measured for Samantha, 5 chars/s for the novelty voice this Mac
 # ships as its English default) - the same text is 3x the bytes on a slow voice.
 DEFAULT_CHUNK_CHARS = 1200     # ~1-2 sentences; each extra call costs ~1.1 s
-DEFAULT_MAX_AUDIO_MB = 256     # ~90 minutes of speech
 MIN_CHUNK_CHARS = 200          # below this the per-call setup dominates
 MAX_CHUNK_CHARS = 20000        # `say` reads a file, so argv is not the limit
-MIN_MAX_AUDIO_MB = 1
-MAX_MAX_AUDIO_MB = 4096
+# The ceiling is a guardrail, not a setting (decided 2026-10-29): 256 MB is
+# ~90 minutes of speech, past any reply a chat produces. A reply that passes
+# it is refused, never cut short.
+DEFAULT_MAX_AUDIO_MB = 256
 
 _MIN_DETECT_CHARS = 3          # below this there is nothing to recognise
 _NL_CONFIDENT = 50             # percent; 'ok' scores pl@29 — garbage stops here
@@ -990,22 +991,8 @@ def clean_chunk_chars(raw) -> int:
     return max(MIN_CHUNK_CHARS, min(MAX_CHUNK_CHARS, value))
 
 
-def clean_max_audio_mb(raw) -> int:
-    """Ceiling for one reply in MB of AUDIO, the unit that means the same on
-    every Mac. 0 or junk means the default; it can never be switched off,
-    because an unbounded render is what this limit exists to prevent."""
-    if raw is None:
-        return DEFAULT_MAX_AUDIO_MB
-    try:
-        value = int(float(str(raw).strip()))
-    except (TypeError, ValueError):
-        return DEFAULT_MAX_AUDIO_MB
-    if value <= 0:
-        return DEFAULT_MAX_AUDIO_MB
-    return max(MIN_MAX_AUDIO_MB, min(MAX_MAX_AUDIO_MB, value))
 
-
-def long_input_error(text_len: int, max_audio_mb: int = DEFAULT_MAX_AUDIO_MB) -> str:
+def long_input_error(text_len: int) -> str:
     """Why this utterance must not be rendered at all, or '' to render it.
 
     One limit only, and it is a sanity gate rather than a policy: the byte
@@ -1160,10 +1147,10 @@ def spool_wav(segments, target: str, speed, ceiling_bytes: int,
             total += len(pcm)
             if total > ceiling_bytes:
                 raise RuntimeError(
-                    "this reply passed the %d MB audio ceiling set on the "
-                    "macOS voices tab before it finished speaking. Raise the "
-                    "ceiling, lower the segment size, or ask for a shorter "
-                    "answer" % (ceiling_bytes // 1000000))
+                    "this reply passed the %d MB ceiling of one spoken "
+                    "answer - about ninety minutes of speech - before it "
+                    "finished; ask for a shorter answer or read it in parts"
+                    % (ceiling_bytes // 1000000))
             if pcm:
                 out.write(pcm)
     if fmt is None:

@@ -1190,8 +1190,6 @@
  "uplift.voices.say_limits_hint": "Dlouhou odpověď přečte po částech a spojí je do jednoho souboru, takže server drží jen jednu část, ne celou odpověď.",
  "uplift.voices.say_chunk_label": "Znaků na jednu část",
  "uplift.voices.say_chunk_hint": "0 přečte celou odpověď najednou. Každá další část stojí přibližně sekundu přípravy.",
- "uplift.voices.say_mb_label": "Nejdelší odpověď (MB zvuku)",
- "uplift.voices.say_mb_hint": "48 KB za sekundu řeči, bez ohledu na text. Odpověď nad tento limit se odmítne přečíst, nikdy se nezkrátí.",
  "uplift.voices.say_limits_saved": "Limity řeči uloženy",
  "uplift.voices.say_unsupported": "Hlasový engine say z macOS není na tomto serveru dostupný.",
  "uplift.voices.say_loading": "Načítám hlasy…",

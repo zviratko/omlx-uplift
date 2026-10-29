@@ -205,7 +205,6 @@ async function mount(opt) {
                     // (o.noLimits) - the fields must then disappear
                     if (!o.noLimits) {
                         d.chunk_chars = o.chunk === undefined ? 1200 : o.chunk;
-                        d.max_audio_mb = o.mb === undefined ? 256 : o.mb;
                     }
                     return d;
                 }
@@ -222,8 +221,7 @@ async function mount(opt) {
                     const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
                     return { ok: true,
                              chunk_chars: b.chunk_chars === 0 ? 0
-                                 : clamp(b.chunk_chars, 200, 20000),
-                             max_audio_mb: clamp(b.max_audio_mb, 1, 4096) };
+                                 : clamp(b.chunk_chars, 200, 20000) };
                 }
                 return {};
             },
@@ -649,14 +647,16 @@ const CHAT_KEYS = ['uplift.voices.say_btn_chat',
                    'uplift.voices.say_btn_chat_hint',
                    'uplift.voices.say_btn_chat_on_hint'];
 
-/* ---- SAY-6: the two long-reply limits live on the server ----------------
-   The panel reads them from GET /voices/say and writes them back through
+/* ---- SAY-6: the long-reply segment limit lives on the server ------------
+   The panel reads it from GET /voices/say and writes it back through
    POST /voices/say/limits, then repaints from the answer: the engine owns
    the bounds, so what the operator typed is not necessarily what is stored.
    A field that showed an invented default would be a second truth about what
-   this Mac does with a long answer. */
-test('SAY-6: the limits row shows the server values, not invented ones', async () => {
-    const h = await mount({ chunk: 900, mb: 64 });
+   this Mac does with a long answer. The audio ceiling is NOT a field any
+   more (user 2026-10-29): 256 MB is about ninety minutes of speech, a fixed
+   refusal rather than a knob - the tab must offer exactly one number. */
+test('SAY-6: the limits row shows the server value, not an invented one', async () => {
+    const h = await mount({ chunk: 900 });
     await h.sayClick();
     const box = classes(h.host, 'vc-say-limits');
     assert.equal(box.length, 1, 'one limits row on the macOS tab');
@@ -669,16 +669,15 @@ test('SAY-6: the limits row shows the server values, not invented ones', async (
             walk(c);
         }
     })(box[0]);
-    assert.equal(nums.length, 2, 'two number fields');
+    assert.equal(nums.length, 1,
+                 'one number field: the audio ceiling is a fixed guardrail now');
     assert.equal(nums[0].value, '900', 'segment size comes from the server');
-    assert.equal(nums[1].value, '64', 'ceiling comes from the server');
     assert.ok(nums[0].min === '0' && nums[0].max === '20000',
               'the segment field knows 0 is a real choice');
-    assert.ok(nums[1].min === '1', 'the ceiling cannot be zeroed away');
-    assert.ok(!inputs.length || inputs.length === 2);
+    assert.ok(!inputs.length || inputs.length === 1);
 });
 
-test('SAY-6: a change posts both limits once and repaints from the answer', async () => {
+test('SAY-6: a change posts the limit once and repaints from the answer', async () => {
     const h = await mount({});
     await h.sayClick();
     const nums = [];
@@ -693,8 +692,8 @@ test('SAY-6: a change posts both limits once and repaints from the answer', asyn
     await settle(); await settle();
     const posts = h.st.posts.filter(p => p.url.includes('/voices/say/limits'));
     assert.equal(posts.length, 1, JSON.stringify(h.st.posts));
-    assert.deepEqual(posts[0].body, { chunk_chars: 300, max_audio_mb: 256 },
-                     'both limits travel together, one request');
+    assert.deepEqual(posts[0].body, { chunk_chars: 300 },
+                     'one limit, one request, no dead key in the body');
     assert.equal(nums[0].value, '300');
     assert.equal(h.st.toasts.some(t => /saved/i.test(t.msg)), true,
                  'the owner gets told it stuck');
@@ -720,7 +719,7 @@ test('SAY-6: a wild number lands on the bound the engine honours', async () => {
 test('SAY-6: a rejected save rolls the field back and says so', async () => {
     // The panel must not keep showing a limit the server refused to take:
     // the number on screen is a claim about what a long reply will do.
-    const h = await mount({ chunk: 1200, mb: 256, failLimits: true });
+    const h = await mount({ chunk: 1200, failLimits: true });
     await h.sayClick();
     const nums = [];
     (function walk(el) {
@@ -754,10 +753,13 @@ test('SAY-6: every locale translates the limits copy', () => {
         for (const k of ['uplift.voices.say_limits_hint',
                          'uplift.voices.say_chunk_label',
                          'uplift.voices.say_chunk_hint',
-                         'uplift.voices.say_mb_label',
-                         'uplift.voices.say_mb_hint',
                          'uplift.voices.say_limits_saved']) {
             assert.ok(d[k] && d[k].length > 3, `${f} lost ${k}`);
+        }
+        // the ceiling field is gone: no locale may keep translating it
+        for (const k of ['uplift.voices.say_mb_label',
+                         'uplift.voices.say_mb_hint']) {
+            assert.ok(!(k in d), `${f} still translates a dead field`);
         }
     }
 });

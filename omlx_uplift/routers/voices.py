@@ -364,15 +364,12 @@ def _cleanup(path) -> None:
         pass
 
 
-def _say_limits() -> tuple:
-    """(characters per `say` call, MB of audio one reply may reach) from the
-    voice store. Both are cleaned, never trusted: a store carrying null, text
-    or a wild number means the defaults rather than a broken speech path, and
-    the ceiling can never be switched off - an unbounded render is exactly what
-    it exists to prevent."""
-    store = _load()
-    return (say_engine.clean_chunk_chars(store.get("say_chunk_chars")),
-            say_engine.clean_max_audio_mb(store.get("say_max_audio_mb")))
+def _say_chunk_chars() -> int:
+    """Characters per `say` call, from the voice store. Cleaned, never
+    trusted: a store carrying null, text or a wild number means the default
+    rather than a broken speech path. The audio ceiling is not stored at all:
+    it is say_engine.DEFAULT_MAX_AUDIO_MB, a guardrail rather than a setting."""
+    return say_engine.clean_chunk_chars(_load().get("say_chunk_chars"))
 
 
 # ---- SAY-CHAT (user 2026-10-21): macOS `say` voices in the Uplift web chat.
@@ -504,7 +501,7 @@ async def _say_response(name: str, text: str, speed=None,
     if not say_engine.available():
         raise HTTPException(status_code=404,
                             detail="macOS say is not available on this server")
-    chunk_chars, max_mb = await asyncio.to_thread(_say_limits)
+    chunk_chars = await asyncio.to_thread(_say_chunk_chars)
     try:
         if len((text or "").strip()) <= say_engine.MAX_SAY_CHARS and \
                 chunk_chars > 0:
@@ -513,7 +510,7 @@ async def _say_response(name: str, text: str, speed=None,
             pieces = []
         if len(pieces) > 1:
             return await _say_response_spooled(
-                name, pieces, speed, response_format, language, max_mb,
+                name, pieces, speed, response_format, language,
                 target=target)
         wav = await asyncio.to_thread(
             say_engine.synth_bytes, name or "", text, speed,
@@ -530,7 +527,7 @@ async def _say_response(name: str, text: str, speed=None,
 
 
 async def _say_response_spooled(name, pieces, speed, response_format,
-                                language, max_mb, target=None) -> Response:
+                                language, target=None) -> Response:
     """The long-reply path: render each piece, accumulate on disk, send the
     file. One `say` render is held in memory at a time, so a ten minute answer
     costs about what one sentence always did.
@@ -555,7 +552,7 @@ async def _say_response_spooled(name, pieces, speed, response_format,
     try:
         await asyncio.to_thread(
             say_engine.spool_wav, pieces, target, speed,
-            max_mb * 1000000, spool)
+            say_engine.DEFAULT_MAX_AUDIO_MB * 1000000, spool)
         if response_format in ("wav", ""):
             out = spool
         else:
@@ -852,9 +849,11 @@ async def voices_say_list(_auth=Depends(require_admin)):
     Mac answers by default; every row whose language would override it
     carries 'answers_default' so its button can read honestly instead
     of showing a star.
-    SAY-6: 'chunk_chars' + 'max_audio_mb' are the two limits a long reply is
-    cut and counted by, so the panel shows what the server will actually do
-    rather than what the code defaults to."""
+    SAY-6: 'chunk_chars' is the limit a long reply is cut by, so the panel
+    shows what the server will actually do rather than what the code defaults
+    to. The audio ceiling is deliberately absent: it is a fixed guardrail
+    (say_engine.DEFAULT_MAX_AUDIO_MB), not a knob - a reply past it is
+    refused, never cut."""
     if not say_engine.available():
         return {"supported": False, "voices": []}
     voices = await asyncio.to_thread(say_engine.list_voices)
@@ -877,9 +876,9 @@ async def voices_say_list(_auth=Depends(require_admin)):
     for loc, addr in pref.items():
         if addr:
             addr2loc[addr] = loc
-    chunk_chars, max_mb = await asyncio.to_thread(_say_limits)
+    chunk_chars = await asyncio.to_thread(_say_chunk_chars)
     return {"supported": True, "preferred": pref,
-            "chunk_chars": chunk_chars, "max_audio_mb": max_mb,
+            "chunk_chars": chunk_chars,
             "system_language": sysl, "system_voice": dv.get("name") or "",
             "voices": [dict(
                 v, added=v["name"] in saved
@@ -895,31 +894,27 @@ async def voices_say_list(_auth=Depends(require_admin)):
 
 @api_router.post("/voices/say/limits")
 async def voices_say_limits(request: Request, _auth=Depends(require_admin)):
-    """SAY-6: the two limits for long spoken replies. Body
-    {chunk_chars, max_audio_mb}, either optional - a key that is absent keeps
-    its value, so the panel can save one field without resending the other.
-
-    chunk_chars is how many characters go into one `say` call before the reply
-    is cut at a sentence boundary and stitched back (0 = never split, one call
-    whatever the length; every extra call costs about a second of setup).
-    max_audio_mb caps the finished reply in megabytes of AUDIO, which is the
-    unit that means the same for every voice: 48 KB per second of speech, while
-    characters per second is a property of the voice. A reply over the ceiling
-    is refused, never delivered cut short. Values are cleaned, never trusted."""
+    """SAY-6: the segment limit for long spoken replies. Body {chunk_chars} -
+    how many characters go into one `say` call before the reply is cut at a
+    sentence boundary and stitched back (0 = never split, one call whatever
+    the length; every extra call costs about a second of setup). A key that is
+    absent keeps its value. The audio ceiling is no longer offered: 256 MB is
+    about ninety minutes of speech, past any reply this panel speaks, and it
+    exists only to refuse a runaway render - a stray 'max_audio_mb' from an
+    older panel is ignored, cleaned values or not. Values are cleaned, never
+    trusted."""
     raw = await request.json()
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
     store = _load()
     if "chunk_chars" in raw:
         store["say_chunk_chars"] = say_engine.clean_chunk_chars(raw["chunk_chars"])
-    if "max_audio_mb" in raw:
-        store["say_max_audio_mb"] = say_engine.clean_max_audio_mb(
-            raw["max_audio_mb"])
+    store.pop("say_max_audio_mb", None)   # the stored knob is gone for good
     _save(store)
-    chunk_chars, max_mb = _say_limits()
-    _log.info("macOS say limits: %s chars per call, %d MB per reply",
-              chunk_chars or "unsplit", max_mb)
-    return {"ok": True, "chunk_chars": chunk_chars, "max_audio_mb": max_mb}
+    chunk_chars = _say_chunk_chars()
+    _log.info("macOS say limits: %s chars per call, %d MB ceiling",
+              chunk_chars or "unsplit", say_engine.DEFAULT_MAX_AUDIO_MB)
+    return {"ok": True, "chunk_chars": chunk_chars}
 
 
 @api_router.post("/voices/say/preferred")

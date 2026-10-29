@@ -1193,8 +1193,6 @@
  "uplift.voices.say_limits_hint": "長い返文は分割して読み、1つのファイルにまとめ直します。サーバーは全体ではなく一部だけ保持します。",
  "uplift.voices.say_chunk_label": "分割1回あたりの文字数",
  "uplift.voices.say_chunk_hint": "0なら返文全体を1回の呼び出しで処理します。分割が1増えるごとに準備へ約1秒かかります。",
- "uplift.voices.say_mb_label": "読み上げる返文の上限(音声MB)",
- "uplift.voices.say_mb_hint": "音声はテキストに関係なく毎秒48 KBです。この上限を超えた返文は拒否され、切り詰められることはありません。",
  "uplift.voices.say_limits_saved": "音声の上限を保存しました",
  "uplift.voices.say_unsupported": "このサーバーでは macOS の say エンジンを利用できません。",
  "uplift.voices.say_loading": "音声を読み込み中…",

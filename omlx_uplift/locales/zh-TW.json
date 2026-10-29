@@ -1190,8 +1190,6 @@
  "uplift.voices.say_limits_hint": "長回覆會分段朗讀再串接成單一檔案，因此伺服器只保留一段，而不是整個回覆。",
  "uplift.voices.say_chunk_label": "每段字元數",
  "uplift.voices.say_chunk_hint": "0 表示整個回覆只用一次呼叫。每多一段，準備時間約多一秒。",
- "uplift.voices.say_mb_label": "可朗讀的最大回覆（音訊 MB）",
- "uplift.voices.say_mb_hint": "不論文字，語音每秒 48 KB。超過此上限的回覆會被拒絕，絕不會被截短。",
  "uplift.voices.say_limits_saved": "已儲存語音上限",
  "uplift.voices.say_unsupported": "此伺服器不支援 macOS 的 say 引擎。",
  "uplift.voices.say_loading": "正在讀取聲音…",

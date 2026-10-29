@@ -1202,8 +1202,6 @@
  "uplift.voices.say_limits_hint": "A long reply is spoken in pieces and stitched back into one file, so the server holds a piece rather than the whole answer.",
  "uplift.voices.say_chunk_label": "Characters per piece",
  "uplift.voices.say_chunk_hint": "0 keeps the whole reply in one call. Each extra piece costs about a second of setup.",
- "uplift.voices.say_mb_label": "Largest reply (MB of audio)",
- "uplift.voices.say_mb_hint": "48 KB per second of speech whatever the text. A reply past this limit is refused, never cut short.",
  "uplift.voices.say_limits_saved": "Speech limits saved",
  "uplift.voices.say_unsupported": "The macOS say engine is not available on this server.",
  "uplift.voices.say_loading": "Reading voices…",

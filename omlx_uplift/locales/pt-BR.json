@@ -1194,8 +1194,6 @@
  "uplift.voices.say_limits_hint": "Uma resposta longa é lida em pedaços e junta de novo num único arquivo, então o servidor guarda um pedaço, não a resposta inteira.",
  "uplift.voices.say_chunk_label": "Caracteres por pedaço",
  "uplift.voices.say_chunk_hint": "0 mantém a resposta inteira numa só chamada. Cada pedaço extra custa cerca de um segundo de preparação.",
- "uplift.voices.say_mb_label": "Maior resposta (MB de áudio)",
- "uplift.voices.say_mb_hint": "48 KB por segundo de fala, qualquer que seja o texto. Uma resposta acima desse limite é recusada, nunca cortada.",
  "uplift.voices.say_limits_saved": "Limites de fala salvos",
  "uplift.voices.say_unsupported": "O mecanismo say do macOS não está disponível neste servidor.",
  "uplift.voices.say_loading": "Lendo vozes…",
