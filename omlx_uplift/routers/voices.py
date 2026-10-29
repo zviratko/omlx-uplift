@@ -368,7 +368,8 @@ def _say_chunk_chars() -> int:
     """Characters per `say` call, from the voice store. Cleaned, never
     trusted: a store carrying null, text or a wild number means the default
     rather than a broken speech path. The audio ceiling is not stored at all:
-    it is say_engine.DEFAULT_MAX_AUDIO_MB, a guardrail rather than a setting."""
+    it is the OMLX_SAY_MAX_AUDIO_MB environment
+    (say_engine.max_audio_mb), a guardrail rather than a panel setting."""
     return say_engine.clean_chunk_chars(_load().get("say_chunk_chars"))
 
 
@@ -502,6 +503,12 @@ async def _say_response(name: str, text: str, speed=None,
         raise HTTPException(status_code=404,
                             detail="macOS say is not available on this server")
     chunk_chars = await asyncio.to_thread(_say_chunk_chars)
+    refused = say_engine.ceiling_refusal(len((text or "").strip()))
+    if refused:
+        # Fail or pass up front: no render time is spent on a reply that
+        # cannot fit, and the log carries the same env hint the caller sees.
+        _log.warning("macOS say refused before rendering: %s", refused)
+        raise HTTPException(status_code=400, detail=refused)
     try:
         if len((text or "").strip()) <= say_engine.MAX_SAY_CHARS and \
                 chunk_chars > 0:
@@ -552,7 +559,7 @@ async def _say_response_spooled(name, pieces, speed, response_format,
     try:
         await asyncio.to_thread(
             say_engine.spool_wav, pieces, target, speed,
-            say_engine.DEFAULT_MAX_AUDIO_MB * 1000000, spool)
+            say_engine.max_audio_mb() * 1000000, spool)
         if response_format in ("wav", ""):
             out = spool
         else:
@@ -851,9 +858,10 @@ async def voices_say_list(_auth=Depends(require_admin)):
     of showing a star.
     SAY-6: 'chunk_chars' is the limit a long reply is cut by, so the panel
     shows what the server will actually do rather than what the code defaults
-    to. The audio ceiling is deliberately absent: it is a fixed guardrail
-    (say_engine.DEFAULT_MAX_AUDIO_MB), not a knob - a reply past it is
-    refused, never cut."""
+    to. The audio ceiling is deliberately absent: its knob is the
+    OMLX_SAY_MAX_AUDIO_MB environment (say_engine.max_audio_mb), not the
+    panel - a reply that cannot fit is refused before rendering, and one
+    past the ceiling on a slow voice is aborted, never cut."""
     if not say_engine.available():
         return {"supported": False, "voices": []}
     voices = await asyncio.to_thread(say_engine.list_voices)
@@ -898,10 +906,10 @@ async def voices_say_limits(request: Request, _auth=Depends(require_admin)):
     how many characters go into one `say` call before the reply is cut at a
     sentence boundary and stitched back (0 = never split, one call whatever
     the length; every extra call costs about a second of setup). A key that is
-    absent keeps its value. The audio ceiling is no longer offered: 256 MB is
-    about ninety minutes of speech, past any reply this panel speaks, and it
-    exists only to refuse a runaway render - a stray 'max_audio_mb' from an
-    older panel is ignored, cleaned values or not. Values are cleaned, never
+    absent keeps its value. The audio ceiling is not offered on the panel:
+    256 MB is about ninety minutes of speech, past any reply this panel
+    speaks; the one knob is the OMLX_SAY_MAX_AUDIO_MB environment. A stray
+    'max_audio_mb' from an older panel is ignored. Values are cleaned, never
     trusted."""
     raw = await request.json()
     if not isinstance(raw, dict):

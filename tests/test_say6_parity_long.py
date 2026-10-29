@@ -295,7 +295,7 @@ def test_the_store_supplies_the_segment_size_only(monkeypatch):
     store.update(say_chunk_chars=0)
     assert V._say_chunk_chars() == 0, "0 is a choice, not junk"
     assert not hasattr(SE, "clean_max_audio_mb"), "the cleaner is gone"
-    assert SE.DEFAULT_MAX_AUDIO_MB == 256, "the guardrail lives as a constant"
+    assert SE.DEFAULT_MAX_AUDIO_MB == 256, "the generous default stands"
 
 
 # --------------------------------------------------------- router contract --
@@ -361,29 +361,69 @@ def test_a_long_reply_is_spooled_and_cleaned_up(shared, monkeypatch, spools):
     assert not os.path.exists(resp.path)
 
 
-def test_a_spooled_reply_reports_a_ceiling_as_an_error(shared, monkeypatch,
-                                                       spools):
+def test_a_reply_that_cannot_fit_is_refused_before_the_first_render(
+        shared, monkeypatch, spools):
+    """Fail or pass up front. The ceiling is the environment's
+    (OMLX_SAY_MAX_AUDIO_MB), and at the fast bound one MB is about 416
+    characters, so 2000 characters is arithmetic, not a guess: the 400 must
+    arrive with NOTHING rendered and must name the env to raise."""
     import asyncio
     seen = []
-    _stub_render(monkeypatch, seen, frames_per_char=2000)   # 4 KB per character
+    _stub_render(monkeypatch, seen)
     monkeypatch.setattr(V, "_say_chunk_chars", lambda: 300)
-    monkeypatch.setattr(SE, "DEFAULT_MAX_AUDIO_MB", 1)      # shrink the guardrail
+    monkeypatch.setenv(SE.MAX_AUDIO_ENV, "1")
     with pytest.raises(HTTPException) as exc:
         asyncio.run(V._say_response("Zuzana", "word " * 400))
-    assert exc.value.status_code == 502
+    assert exc.value.status_code == 400
     assert "ceiling" in str(exc.value.detail)
+    assert SE.MAX_AUDIO_ENV in str(exc.value.detail), "the way out is named"
     assert "Settings" not in str(exc.value.detail), \
-        "the refusal may not point at a setting that no longer exists"
+        "the refusal may not point at a card setting that no longer exists"
+    assert seen == [], "refused up front: not one `say` call"
 
 
-def test_a_single_call_reply_under_a_tiny_ceiling_is_still_honest(
+def test_the_ceiling_moves_with_the_environment_and_junk_falls_back(monkeypatch):
+    """The knob left the panel but not the operator: read per request, no
+    restart. Junk, blank and 0 mean the default - the guardrail can be
+    moved, never removed. Both engines answer to the same env name."""
+    monkeypatch.delenv(SE.MAX_AUDIO_ENV, raising=False)
+    assert SE.max_audio_mb() == SE.DEFAULT_MAX_AUDIO_MB
+    monkeypatch.setenv(SE.MAX_AUDIO_ENV, "64")
+    assert SE.max_audio_mb() == 64
+    monkeypatch.setenv(SE.MAX_AUDIO_ENV, "junk")
+    assert SE.max_audio_mb() == SE.DEFAULT_MAX_AUDIO_MB
+    monkeypatch.setenv(SE.MAX_AUDIO_ENV, "0")
+    assert SE.max_audio_mb() == SE.DEFAULT_MAX_AUDIO_MB
+    assert SE.MAX_AUDIO_ENV == "OMLX_SAY_MAX_AUDIO_MB", "one env, both doors"
+
+
+def test_a_slow_voice_crossing_the_ceiling_mid_render_stops_early(
         shared, monkeypatch, spools):
-    """chunk 0 means the caller asked for one `say` call, so the byte ceiling
-    has to be checked on that path too — a refusal, never a surprise."""
+    """Under the fast bound the pre-check passes, and a voice slower than
+    the bound can still walk past the ceiling while rendering. That
+    exception to fail-up-front must stop at the crossing and name the env."""
+    import asyncio
+    seen = []
+    _stub_render(monkeypatch, seen, frames_per_char=1500)   # 3 KB per character
+    monkeypatch.setattr(V, "_say_chunk_chars", lambda: 300)
+    monkeypatch.setenv(SE.MAX_AUDIO_ENV, "1")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(V._say_response("Zuzana", "word " * 70))   # 350 chars
+    assert exc.value.status_code == 502
+    assert SE.MAX_AUDIO_ENV in str(exc.value.detail)
+    assert 0 < len(seen) < 7, "stops at the crossing, not after"
+
+
+def test_a_single_call_reply_passes_the_same_up_front_check(
+        shared, monkeypatch, spools):
+    """chunk 0 means the caller asked for one `say` call, and the up-front
+    ceiling check guards that path exactly like the spooled one: under the
+    fast bound at the default ceiling, it renders in one call."""
     import asyncio
     seen = []
     _stub_render(monkeypatch, seen)
     monkeypatch.setattr(V, "_say_chunk_chars", lambda: 0)
+    monkeypatch.delenv(SE.MAX_AUDIO_ENV, raising=False)
     text = "One two three four five six seven. " * 40
     resp = asyncio.run(V._say_response("Zuzana", text))
     assert resp.__class__.__name__ == "Response"

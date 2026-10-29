@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import plistlib
 import re
 import struct
@@ -74,10 +75,18 @@ MAX_SAY_CHARS = 200000         # a reply this long is a mistake, not an answer
 DEFAULT_CHUNK_CHARS = 1200     # ~1-2 sentences; each extra call costs ~1.1 s
 MIN_CHUNK_CHARS = 200          # below this the per-call setup dominates
 MAX_CHUNK_CHARS = 20000        # `say` reads a file, so argv is not the limit
-# The ceiling is a guardrail, not a setting (decided 2026-10-29): 256 MB is
-# ~90 minutes of speech, past any reply a chat produces. A reply that passes
-# it is refused, never cut short.
+# The ceiling is a guardrail rather than a panel field (decided 2026-10-29):
+# the default is 256 MB, ~90 minutes of speech, deliberately generous
+# because guessing what an operator needs is a losing game. The one knob is
+# the OMLX_SAY_MAX_AUDIO_MB environment - same name as the vanilla engine,
+# one Mac one truth - and a reply past it is refused, never cut short.
+MAX_AUDIO_ENV = "OMLX_SAY_MAX_AUDIO_MB"
 DEFAULT_MAX_AUDIO_MB = 256
+SPEECH_BYTES_PER_SEC = 48000     # 24 kHz mono 16-bit, fixed whatever the voice
+# Measured chars/s: 18 for Samantha, 5 for the novelty default on this Mac.
+# Rounded UP to 20: the fast bound of speech. Past the ceiling even at that
+# pace, refuse NOW - before the first `say` call - rather than mid-render.
+FAST_SPEECH_CHARS_PER_SEC = 20
 
 _MIN_DETECT_CHARS = 3          # below this there is nothing to recognise
 _NL_CONFIDENT = 50             # percent; 'ok' scores pl@29 — garbage stops here
@@ -992,17 +1001,55 @@ def clean_chunk_chars(raw) -> int:
 
 
 
-def long_input_error(text_len: int) -> str:
+def max_audio_mb() -> int:
+    """Ceiling for one reply, in MB of audio, from :data:`MAX_AUDIO_ENV`.
+    Unset, blank, junk or 0 means the default - the guardrail can be moved,
+    never removed. Read per request, so raising it costs no restart."""
+    raw = str(os.environ.get(MAX_AUDIO_ENV) or "").strip()
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return DEFAULT_MAX_AUDIO_MB
+    return value if value >= 1 else DEFAULT_MAX_AUDIO_MB
+
+
+def min_audio_bytes(text_len: int) -> int:
+    """The SMALLEST this much text can ever render to: the fastest speaking
+    pace times the fixed byte rate. Slow voices only add bytes."""
+    return text_len * SPEECH_BYTES_PER_SEC // FAST_SPEECH_CHARS_PER_SEC
+
+
+def ceiling_refusal(text_len: int, ceiling_mb=None) -> str:
+    """Why this reply cannot possibly fit, or '' if it may.
+
+    Fail-or-pass up front is the contract: past the fast bound no voice can
+    keep the audio under the ceiling, so the answer comes before any render.
+    Under the bound a slow voice may still cross it mid-render; that abort
+    stays too, but it is the exception the pre-check cannot see, not the
+    design."""
+    mb = max_audio_mb() if ceiling_mb is None else ceiling_mb
+    if min_audio_bytes(text_len) > mb * 1000000:
+        return ("this reply is %d characters: at least %d MB of audio even at "
+                "the fastest speaking pace, over the %d MB ceiling of one "
+                "spoken answer. Ask for a shorter reply, or set %s to raise "
+                "the ceiling"
+                % (text_len, min_audio_bytes(text_len) // 1000000 + 1,
+                   mb, MAX_AUDIO_ENV))
+    return ""
+
+
+def long_input_error(text_len: int, max_audio_mb_=None) -> str:
     """Why this utterance must not be rendered at all, or '' to render it.
 
-    One limit only, and it is a sanity gate rather than a policy: the byte
-    ceiling does the real work while the reply is stitched, so nothing here
-    has to guess how big a given voice will make a given text."""
+    Two gates: the character sanity bound, and the fail-fast ceiling check
+    (:func:`ceiling_refusal`) that refuses text no voice could fit under the
+    MB limit. The byte ceiling still does the real work while the reply is
+    stitched, because characters say nothing about the size of the audio."""
     if text_len > MAX_SAY_CHARS:
         return ("this reply is %d characters, over the %d character limit of "
                 "one spoken answer - shorten it or read it in parts"
                 % (text_len, MAX_SAY_CHARS))
-    return ""
+    return ceiling_refusal(text_len, max_audio_mb_)
 
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
@@ -1147,10 +1194,11 @@ def spool_wav(segments, target: str, speed, ceiling_bytes: int,
             total += len(pcm)
             if total > ceiling_bytes:
                 raise RuntimeError(
-                    "this reply passed the %d MB ceiling of one spoken "
-                    "answer - about ninety minutes of speech - before it "
-                    "finished; ask for a shorter answer or read it in parts"
-                    % (ceiling_bytes // 1000000))
+                    "this reply crossed the %d MB ceiling of one spoken "
+                    "answer while it was still rendering - this voice "
+                    "speaks slower than the pre-check promises. Ask for a "
+                    "shorter reply, or set %s to raise the ceiling"
+                    % (ceiling_bytes // 1000000, MAX_AUDIO_ENV))
             if pcm:
                 out.write(pcm)
     if fmt is None:

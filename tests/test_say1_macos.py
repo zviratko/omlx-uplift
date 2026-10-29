@@ -336,6 +336,9 @@ def test_synth_guards(monkeypatch, on_mac):
     # The old contract truncated silently, which lost the end of an answer and
     # reported it as success.
     long_text = "word " * (on_mac.MAX_SAY_CHARS // 5)
+    # 200k characters cannot fit the DEFAULT 256 MB ceiling even at the fast
+    # bound, so this raises the ceiling to test the character gate itself.
+    monkeypatch.setenv(SE.MAX_AUDIO_ENV, "512")
     on_mac.synth_bytes("Zuzana", long_text)
     assert captured["text"].strip() == long_text.strip(), "text must reach `say` whole"
     with pytest.raises(RuntimeError, match=str(on_mac.MAX_SAY_CHARS)):
