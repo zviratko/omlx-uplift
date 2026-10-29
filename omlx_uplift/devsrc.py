@@ -419,6 +419,46 @@ def base_distance(repo: str, a: str | None, b: str | None) -> int | None:
         return None
 
 
+def gate_failure_detail(res: dict | None, limit: int = 3) -> str:
+    """One line explaining a failed gate or re-gate, naming the files.
+
+    `validate` answers {reason: "one or more files failed", files: [{path,
+    status, reason}, ...]}, and every surface printed only the reason — the
+    console said "source re-gate failed — one or more files failed" while the
+    same dict already held 'omlx/api/audio_routes.py: context mismatch'
+    (mruu log 2026-10-29). UP-61 settled this rule for the dashboard: name the
+    evidence instead of pointing at a log file."""
+    if res is None:
+        return ""
+    reason = str(res.get("reason") or "").strip()
+    files = res.get("files") or []
+    fails = [f for f in files if f.get("status") == "fail"]
+    if not fails:
+        return reason or "gate failed"
+    parts = ["%s: %s" % (f.get("path") or "?",
+                         str(f.get("reason") or "mismatch").split(" — ")[0][:64])
+             for f in fails[:limit]]
+    more = "" if len(fails) <= limit else " (+%d more)" % (len(fails) - limit)
+    # the count replaces the generic reason rather than prefixing it: "one or
+    # more files failed: a.py: ..." says "one or more" twice over, and the
+    # number here is the real one
+    scope = "%d/%d files failed: " % (len(fails), len(files)) if len(files) > 1 else ""
+    return scope + "; ".join(parts) + more
+
+
+def _tested_phrase(cand: dict) -> str:
+    """Why the ladder ranked THIS stored version next. A version with no
+    tested_base stamp cannot have a distance either (base_distance needs both
+    sides), so the two halves of this line can never contradict each other —
+    which is exactly what the old inline format printed."""
+    tb, dist = (cand.get("tested_base") or ""), cand.get("distance")
+    if not tb:
+        return "no tested base recorded"
+    if dist is None:
+        return "tested on %s" % tb[:12]
+    return "tested on %s, %s commits from this base" % (tb[:12], dist)
+
+
 def _alternate_versions(store, pid: str, wanted_v: int, base_sha: str,
                         repo: str) -> list[dict]:
     """VER-1 (user 2026-10-10): the versions to TRY when the desired one
@@ -444,7 +484,13 @@ def _alternate_versions(store, pid: str, wanted_v: int, base_sha: str,
         if data is None:
             continue
         dist = base_distance(repo, base_sha, ver.get("tested_base"))
-        out.append({"v": v, "diff_bytes": data, "distance": dist})
+        # tested_base rides along for the report. VER-1 never copied it here,
+        # so the ladder's log line has printed "(tested ?)" for EVERY version
+        # since — including stamped ones (mruu log 2026-10-29: "tested ?, 11
+        # commits away": a real distance, measured from a base the same line
+        # claimed not to know)
+        out.append({"v": v, "diff_bytes": data, "distance": dist,
+                    "tested_base": ver.get("tested_base")})
     # known distances first (nearest base), then untagged versions by
     # number (the newest older one is the likeliest fit); newest-first
     # inside each band
@@ -507,10 +553,8 @@ def _apply_with_ladder(path, store, pid, wanted_v, wanted_bytes, base_sha,
             continue
         _log.warning(
             "devsrc: %s v%s does not apply onto base %s — building v%s "
-            "instead (tested %s%s)", pid, wanted_v, base_sha[:12], a["v"],
-            (a.get("tested_base") or "?")[:12],
-            "" if a.get("distance") is None
-            else f", {a['distance']} commits away")
+            "instead (%s)", pid, wanted_v, base_sha[:12], a["v"],
+            _tested_phrase(a))
         return a["v"], a["diff_bytes"], wanted_v, tried, ares
     # ladder exhausted: ask the human (CLI only), else abort the pass
     decision = None
@@ -1951,7 +1995,7 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
                 # users read it as the build failing (it was not; the
                 # candidate simply cannot be stored). Name the patch.
                 _emit(res, "out", f"{pid}: source re-gate failed — "
-                                  f"{str(rep.get('reason') or '')[:160]} "
+                                  f"{gate_failure_detail(rep)[:200]} "
                                   "(stored version unchanged)")
     except Exception as exc:                    # noqa: BLE001 — best-effort
         _emit(res, "err", f"drift check skipped: {exc}")
@@ -2412,10 +2456,9 @@ def recheck_build_patches(build_patches: list[dict]) -> dict:
                 tree_kind="src")     # detached base worktree, not a keg
             if not result["ok"]:
                 entry["state"] = "needs_review"
-                entry["state_detail"] = ("re-gate after dev install failed: "
-                                         + (result.get("reason")
-                                            or "one or more files failed"))
-                failures[p["id"]] = result.get("reason") or "gate failed"
+                why = gate_failure_detail(result)
+                entry["state_detail"] = "re-gate after dev install failed: " + why
+                failures[p["id"]] = why
                 # still apply so later patches gate against the same tree
                 # materialize actually built (materialize committed them)
             try:

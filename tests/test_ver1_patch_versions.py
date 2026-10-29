@@ -209,6 +209,42 @@ class Ver1Fixture(unittest.TestCase):
         content = open(os.path.join(path, "omlx", "k.py")).read()
         self.assertIn("EXTRA = 1", content)
 
+    def test_fallback_warning_names_the_tested_base(self):
+        """The ladder says WHICH base the older version was tested on.
+        `_alternate_versions` never carried `tested_base`, so this line has
+        printed "(tested ?)" since VER-1 landed — next to a real commit
+        distance, which reads as a form half-filled in (mruu log 2026-10-29).
+        A stamped version must name it; an unstamped one must say so in words
+        rather than with a question mark."""
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        old_base = _git(["rev-parse", "refs/remotes/origin/main"],
+                        cwd=self.cfg["src_path"]).strip()
+        store = self._store_entry("p-f", {1: self._good_diff(),
+                                          2: self._broken_diff()}, desired=2)
+        man = store.load()
+        store.find(man, "p-f")["versions"][0]["tested_base"] = old_base
+        store.save(man)
+        self._advance_base(["import Metal\n", "KERNELS = {}\n", "tail = 1\n"])
+        devsrc.fetch_sync_ref(self.cfg)
+        patches = [{"id": "p-f", "version": 2, "diff_bytes": self._broken_diff()}]
+        with self.assertLogs("omlx_uplift.devsrc", level="WARNING") as cap:
+            r = devsrc.materialize(patches, self.cfg)
+        self.assertTrue(r["ok"], r.get("reason"))
+        warn = [l for l in cap.output if "does not apply onto base" in l]
+        self.assertEqual(len(warn), 1, cap.output)
+        self.assertIn("tested on " + old_base[:12], warn[0])
+        self.assertIn("commits from this base", warn[0])
+        self.assertNotIn("?", warn[0])
+        # and unstamped: words, not a placeholder beside a number
+        self.assertNotIn("no tested base recorded", warn[0])
+        self.assertEqual(
+            devsrc._tested_phrase({"tested_base": None, "distance": None}),
+            "no tested base recorded")
+        self.assertEqual(
+            devsrc._tested_phrase({"tested_base": "z" * 40, "distance": None}),
+            "tested on " + "z" * 12)
+
     def test_materialize_no_alternates_aborts_without_resolver(self):
         devsrc.ensure_clone(self.cfg)
         devsrc.fetch_sync_ref(self.cfg)

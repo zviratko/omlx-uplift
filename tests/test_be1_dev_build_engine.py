@@ -124,7 +124,14 @@ def test_source_refresh_lines_always_name_their_patch(home, monkeypatch):
         "warm-before-ready": {"check": "update_available", "v": 3,
                               "promoted": False, "curated": True},
         "omlx-tts-say": {"check": "error",
-                         "reason": "one or more files failed"},
+                         "reason": "one or more files failed",
+                         "files": [
+                             {"path": "omlx/api/audio_routes.py",
+                              "status": "fail",
+                              "reason": "context mismatch — strict apply "
+                                        "failed (zero fuzz)"},
+                             {"path": "omlx/tts.py", "status": "ok"},
+                         ]},
     }
     monkeypatch.setattr(patchsource, "check_all",
                         lambda store, keg, dev_root=None: {
@@ -143,6 +150,41 @@ def test_source_refresh_lines_always_name_their_patch(home, monkeypatch):
     assert "warm-before-ready: update v3 available" in out, out
     assert "Promote" in out, out
     assert "omlx-tts-say: source re-gate failed" in out, out
+    # ... and it says WHICH file. `validate` answered the failing path in the
+    # same report all along; the console printed only "one or more files
+    # failed" and left the name in the log file (mruu, 2026-10-29) — the
+    # UP-61 rule applies to build output too, not just the dashboard card.
+    assert "omlx/api/audio_routes.py: context mismatch" in out, out
+    assert "one or more files failed" not in out, out
+
+
+def test_gate_failure_detail_composes_named_evidence():
+    """devsrc.gate_failure_detail — the shared composer behind those lines."""
+    from omlx_uplift import devsrc
+    # one failure out of many: the count replaces the generic reason, and the
+    # file's own trailing prose is trimmed
+    assert devsrc.gate_failure_detail(
+        {"reason": "one or more files failed",
+         "files": [{"path": "a.py", "status": "fail",
+                    "reason": "context mismatch — strict apply failed"},
+                   {"path": "b.py", "status": "ok"}]}) == \
+        "1/2 files failed: a.py: context mismatch"
+    # a single-file diff needs no count
+    assert devsrc.gate_failure_detail(
+        {"reason": "one or more files failed",
+         "files": [{"path": "a.py", "status": "fail", "reason": "hunk refused"}]}) == \
+        "a.py: hunk refused"
+    # several failures: capped at three and counted, never truncated silently
+    got = devsrc.gate_failure_detail(
+        {"reason": "", "files": [{"path": f"{c}.py", "status": "fail",
+                                  "reason": "hunk refused"} for c in "abcd"]})
+    assert got == ("4/4 files failed: a.py: hunk refused; b.py: hunk refused; "
+                   "c.py: hunk refused (+1 more)"), got
+    # no per-file answer at all (fetch or HTTP failure): the reason alone
+    assert devsrc.gate_failure_detail({"reason": "HTTP 403 from x"}) == \
+        "HTTP 403 from x"
+    assert devsrc.gate_failure_detail(None) == ""
+    assert devsrc.gate_failure_detail({}) == "gate failed"
 
 
 def test_missing_config_stage_and_rc(home, monkeypatch):
