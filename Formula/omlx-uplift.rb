@@ -23,7 +23,7 @@ class OmlxUplift < Formula
   # this venv is built on the engine keg's python minor (see
   # engine_python_minor). Only 3.11 is a hard dep: a 3.12 engine implies
   # --with-python312 was used, and the dev formula's CONDITIONAL
-  # depends_on pulled python@3.12 already — machines staying on 3.11
+  # dependency already pulled python@3.12 - machines staying on 3.11
   # never see it. Missing python at probe time = engine never built with
   # the option; the venv step below names the fix.
   depends_on "python@3.11"
@@ -32,7 +32,7 @@ class OmlxUplift < Formula
     (formula_opt_prefix("omlx")/"libexec/bin/python")
   end
 
-  # Probe the live omlx-family engine keg (vanilla first, else dev — the
+  # Probe the live omlx-family engine keg (vanilla first, else dev - the
   # same target order as `omlx-uplift install`); plain users with no keg
   # yet keep the historic 3.11 build. Falls back rather than dying: the
   # engine may be installed AFTER uplift.
@@ -40,11 +40,13 @@ class OmlxUplift < Formula
     ["omlx", "omlx-dev"].each do |name|
       py = formula_opt_prefix(name)/"libexec/bin/python"
       next unless py.exist?
+
       begin
         out = Utils.safe_popen_read(py, "-c",
-          "import sys; print('%d.%d' % sys.version_info[:2])").strip
-        return out if out =~ /\A3\.1[0-9]\z/
+                                    "import sys; print('%d.%d' % sys.version_info[:2])").strip
+        return out if /\A3\.1[0-9]\z/.match?(out)
       rescue ErrorReadingError
+        next # keg vanished mid-probe; try the next candidate
       end
     end
     "3.11"
@@ -59,12 +61,12 @@ class OmlxUplift < Formula
     # ONE file — a .pth that bootstraps sys.path to this keg's venv and
     # imports the autopatch. Nothing is copied into the omlx keg.
     minor = engine_python_minor
-    venv_py = Formula["python@#{minor}"].opt_bin/"python#{minor}"
+    venv_py = formula_opt_bin("python@#{minor}")/"python#{minor}"
     unless venv_py.exist?
       odie "engine keg runs python #{minor} but brew python@#{minor} is " \
-        "absent — build the engine with it first: omlx-uplift dev install " \
-        "--with-python312 (pulls python@3.12), or brew install " \
-        "python@#{minor}"
+           "absent - build the engine with it first: omlx-uplift dev " \
+           "install --with-python312 (pulls python@3.12), or brew " \
+           "install python@#{minor}"
     end
     system venv_py, "-m", "venv", libexec
     # REL-1: STABLE builds pin the exact dependency set the release was
