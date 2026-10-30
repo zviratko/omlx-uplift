@@ -294,3 +294,42 @@ test('house chrome: dialog reuses modal-overlay + modal nasa + icon-btn close', 
     // backdrop click is the mouse twin of Esc
     assert.match(SRC, /overlay\.onclick = e => \{ if \(e\.target === overlay\) overlay\.remove\(\); \}/);
 });
+
+/* ---- UP-64 dialog lane (classic 78f00e4 #4949): HF update check ---------- */
+test('update lane: changed files pre-pick; showsUpdate/updateSize gate classic-style', () => {
+    const { seam } = load();
+    const H = seam.HFS;
+    const detail = { layout: 'safetensors', update_files: ['b.safetensors', 'c.safetensors'],
+        files: [{ ...st('a.safetensors'), local: true },
+            { ...st('b.safetensors'), size: 100, required: true, outdated: true },
+            { ...st('c.safetensors'), size: 10, required: true }] };
+    assert.strictEqual(JSON.stringify(H.initial(detail)),
+        JSON.stringify({ 'b.safetensors': true }),
+        'initial pre-picks outdated only (classic:8430); a missing required '
+        + 'file still counts at names-time through selected()');
+    assert.ok(H.selected(detail.files[1], {}), 'an outdated file counts as selected');
+    assert.deepStrictEqual(H.names(detail, H.initial(detail)),
+        ['b.safetensors', 'c.safetensors'], 'the download-all-of-update set still carries the missing required file');
+    assert.strictEqual(H.updateSize(detail), 110);
+    assert.ok(H.showsUpdate(detail, true));
+    assert.ok(!H.showsUpdate(detail, false), 'not downloaded: plain download buttons');
+    assert.ok(!H.showsUpdate({ ...detail, layout: 'gguf' }, true), 'GGUF never updates (classic gate)');
+    assert.ok(!H.showsUpdate({ ...detail, update_files: [] }, true), 'up to date: DOWNLOADED badge');
+    assert.ok(!H.showsUpdate({ ...detail, is_adapter: true }, true));
+    assert.ok(!H.showsUpdate({ ...detail, unsupported_reason: 'x' }, true));
+});
+test('update lane: footer sends the update_files list through the download wire', () => {
+    // same settled rule as the DL-1 pins above: the footer has no DOM
+    // harness, so the WIRE is source-shape-pinned
+    assert.match(SRC, /const updating = HFS\.showsUpdate\(detail, dlDownloaded\(detail\.repo_id \|\| repoId\)\);/);
+    assert.match(SRC, /const spaceBytes = updating \? HFS\.updateSize\(detail\) : bytes;/,
+        'classic parity: the disk warning sizes the UPDATE, not the selection');
+    assert.match(SRC, /!detail\.is_adapter && !HFS\.fits\(detail, spaceBytes\)/);
+    assert.match(SRC, /\} else if \(updating\) \{[\s\S]*?submit\(detail\.update_files\)[\s\S]*?\} else if \(detail\.layout === 'gguf'/,
+        'UPDATE button sits where classic replaces the download pair');
+    assert.match(SRC, /'models\.detail\.update', 'Update'/, 'classic catalog key, EN fallback');
+    assert.match(SRC, /if \(f\.outdated\) lb\.append\(dlBadge\('warn', C\.tf\('models\.detail\.file_outdated', 'Changed'\)\)\);/,
+        'Changed badge (classic _models.html:2184)');
+    assert.match(SRC, /else if \(!f\.local && f\.required\)/,
+        'Required only when neither local nor outdated (classic x-show)');
+});

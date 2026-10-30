@@ -211,12 +211,14 @@ const HFS = {
     initial(detail) {
         const picked = {};
         for (const file of (detail && detail.files) || []) {
-            if (file.preselected && !file.local) picked[file.name] = true;
+            // classic dashboard.js:8430 (fire 13, 78f00e4): changed files
+            // re-fetch by default alongside the preselected set
+            if ((file.preselected || file.outdated) && !file.local) picked[file.name] = true;
         }
         return picked;
     },
     locked(file) { return !!file.required || !!file.local; },
-    selected(file, picked) { return !file.local && (!!file.required || !!picked[file.name]); },
+    selected(file, picked) { return !file.local && (!!file.required || !!file.outdated || !!picked[file.name]); },
     // A split GGUF's parts toggle together; a GGUF brings its vision projector.
     toggle(detail, picked, file) {
         if (HFS.locked(file)) return picked;
@@ -250,6 +252,20 @@ const HFS = {
         if (!files.length) return (detail && detail.download_all_size) || 0;
         const fetched = detail.layout === 'safetensors' ? (f => f.preselected) : (() => true);
         return files.filter(f => fetched(f) && !f.local)
+            .reduce((total, f) => total + (f.size || 0), 0);
+    },
+    // UP-64 dialog lane (classic hfShowsUpdate, 78f00e4 #4949): a downloaded
+    // non-GGUF checkpoint with Hub changes offers UPDATE instead of the
+    // download buttons; the server lists the replacing files in update_files.
+    showsUpdate(detail, downloaded) {
+        return !!(detail && !detail.is_adapter && !detail.unsupported_reason
+            && detail.layout !== 'gguf'
+            && ((detail.update_files || []).length) && downloaded);
+    },
+    updateSize(detail) {
+        const names = new Set((detail && detail.update_files) || []);
+        return ((detail && detail.files) || [])
+            .filter(f => names.has(f.name))
             .reduce((total, f) => total + (f.size || 0), 0);
     },
     fits(detail, bytes) {
@@ -458,7 +474,11 @@ function openModelFiles(repoId) {
             nm.className = 'dl-fname'; nm.textContent = f.name; nm.title = f.name;
             lb.append(cb, nm);
             if (f.local) lb.append(dlBadge('ok', C.tf('models.detail.file_downloaded', 'Downloaded')));
-            else if (f.required) lb.append(dlBadge('dim', C.tf('models.detail.required_file', 'Required')));
+            // classic _models.html:2184 (78f00e4 #4949): a changed copy is
+            // badged on its own; Required shows only for a file that is
+            // neither local nor outdated
+            if (f.outdated) lb.append(dlBadge('warn', C.tf('models.detail.file_outdated', 'Changed')));
+            else if (!f.local && f.required) lb.append(dlBadge('dim', C.tf('models.detail.required_file', 'Required')));
             if (f.kind === 'gguf' && !f.local) {
                 const fit = HFS.memFit(ram, HFS.rowSize(detail, f));
                 if (fit === 'warning') lb.append(dlBadge('warn', C.tf('models.browse.tight_fit', 'Tight fit')));
@@ -547,7 +567,9 @@ function openModelFiles(repoId) {
         hf.textContent = C.tf('models.detail.view_on_hf', 'View on HuggingFace');
         foot.append(hf);
         const bytes = HFS.selSize(detail, picked);
-        if (!detail.is_adapter && !HFS.fits(detail, bytes)) {
+        const updating = HFS.showsUpdate(detail, dlDownloaded(detail.repo_id || repoId));
+        const spaceBytes = updating ? HFS.updateSize(detail) : bytes;
+        if (!detail.is_adapter && !HFS.fits(detail, spaceBytes)) {
             const w = document.createElement('span'); w.className = 'dl-space';
             w.textContent = C.tf('models.recommend.not_enough_space', 'Not enough free space in the model folder');
             foot.append(w);
@@ -557,6 +579,12 @@ function openModelFiles(repoId) {
             foot.append(dlBadge('warn', C.tf('models.detail.lora_warning', 'LoRA adapter — not supported')));
         } else if (detail.unsupported_reason) {
             foot.append(dlBadge('warn', String(detail.unsupported_reason)));
+        } else if (updating) {
+            const upSz = HFS.updateSize(detail);
+            const up = mkBtn('btn primary', 'models.detail.update', 'Update',
+                () => submit(detail.update_files), sending || !HFS.fits(detail, upSz));
+            if (upSz) up.append(document.createTextNode(' ' + dlSize(upSz)));
+            foot.append(up);
         } else if (detail.layout === 'gguf'
                 || !dlDownloaded(detail.repo_id || repoId)) {
             const allSz = HFS.allSize(detail);
