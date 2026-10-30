@@ -34,7 +34,7 @@
         'qwen35_ane_prefill_cpu_down_fraction', 'qwen35_ane_prefill_cpu_gdn_fraction',
         'qwen35_ane_prefill_cpu_threads', 'qwen35_ane_prefill_cpu_shared_resource',
         'moe_expert_offload_enabled', 'moe_expert_offload_resident_fraction',
-        'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
+        'a8_prefill_enabled', 'a8_prefill_min_tokens',
         'external_engine',
         // SPEC-1 (our specprefill split): the master switch and drafter are
         // not profile fields at all anymore (server EXCLUDED), so they cannot
@@ -101,7 +101,7 @@
         // SYNC-1 (upstream 3c39990): model-level, not server-level
         'qwen4_gdn_decode_wide_proj',
         'deepseek_v41_ced_prefill_enabled', 'deepseek_v41_engram_ssd_offload',
-        'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
+        'a8_prefill_enabled', 'a8_prefill_min_tokens',
         'external_engine',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
         // SYNC-1 (upstream 7a4ea39): surviving dflash family only.
@@ -150,7 +150,7 @@
         if (on(s.specprefill_enabled)) out.push('specprefill_enabled');
         if (on(s.dflash_enabled)) out.push('dflash_enabled');
         if (on(s.qwen35_ane_prefill_enabled)) out.push('qwen35_ane_prefill_enabled');
-        if (on(s.qwen35_oq_a8_enabled)) out.push('qwen35_oq_a8_enabled');
+        if (on(s.a8_prefill_enabled)) out.push('a8_prefill_enabled');
         if (on(s.moe_expert_offload_enabled)) out.push('moe_expert_offload_enabled');
         if (on(s.qwen4_ple_ssd_offload)) out.push('qwen4_ple_ssd_offload');
         if (on(s.qwen4_gdn_decode_wide_proj)) out.push('qwen4_gdn_decode_wide_proj');
@@ -163,19 +163,20 @@
 
     const normType = t => String(t || '').toLowerCase().replace(/-/g, '_');
     const isDiffusion = m => DIFFUSION_CONFIG_MODEL_TYPES.has(normType(m && m.config_model_type));
-    // UP-18 (5): the classic family (dashboard.js isQwenOqA8Model) — routed-
-    // expert A8 lives on qwen4_exp too, not only the qwen3_5/6/8 prefixes.
-    const isQwenOqA8 = m => {
+    // UP-18 (5) + SYNC-1 fire 13 (upstream 18fe1c3 #4946): the classic family
+    // (dashboard.js isA8PrefillModel) — routed-expert A8 lives on qwen4_exp
+    // and deepseek_v41 (exact matches), not only the qwen3_5/6/8 prefixes.
+    const isA8PrefillModel = m => {
         const t = normType(m && m.config_model_type);
-        return t === 'qwen4_exp'
+        return t === 'qwen4_exp' || t === 'deepseek_v41'
             || ['qwen3_5', 'qwen3_6', 'qwen3_8'].some(p => t.startsWith(p));
     };
-    // UP-18 (5): classic showsQwenOqA8 — the kernels need native INT8
-    // tensor ops (M5-series or newer, server verdict qwen35_oq_a8_supported);
+    // UP-18 (5): classic showsA8Prefill — the kernels need native INT8
+    // tensor ops (M5-series or newer, server verdict a8_prefill_supported);
     // a saved "on" keeps the row so it can be turned off.
-    const showsQwenOqA8 = m => isQwenOqA8(m)
-        && (m && m.qwen35_oq_a8_supported === true
-            || !!((m && m.settings) && m.settings.qwen35_oq_a8_enabled === true));
+    const showsA8Prefill = m => isA8PrefillModel(m)
+        && (m && m.a8_prefill_supported === true
+            || !!((m && m.settings) && m.settings.a8_prefill_enabled === true));
     // UP-18 (4): classic DSA_MODEL_TYPES — the Index Cache row exists only
     // for sparse-attention models (DeepSeek V3.2 / GLM DSA).
     const DSA_MODEL_TYPES = new Set(['deepseek_v32', 'glm_moe_dsa']);
@@ -329,8 +330,8 @@
                 ? 4 : (s.turboquant_kv_bits || 4),
             moe_expert_offload_enabled: !diffusion && !!(model && model.moe_expert_offload_supported === true) && !!s.moe_expert_offload_enabled,
             moe_expert_offload_resident_fraction: s.moe_expert_offload_resident_fraction ?? 0.25,
-            qwen35_oq_a8_enabled: s.qwen35_oq_a8_enabled || false,
-            qwen35_oq_a8_min_tokens: s.qwen35_oq_a8_min_tokens ?? 128,
+            a8_prefill_enabled: s.a8_prefill_enabled || false,
+            a8_prefill_min_tokens: s.a8_prefill_min_tokens ?? 128,
             qwen35_ane_prefill_enabled: s.qwen35_ane_prefill_enabled || false,
             qwen35_ane_prefill_sequence_length: s.qwen35_ane_prefill_sequence_length || 2048,
             qwen35_ane_prefill_tail_padding_min_tokens: s.qwen35_ane_prefill_tail_padding_min_tokens ?? 0,
@@ -425,11 +426,11 @@
             if (!Number.isInteger(n) || n < 0)
                 errors.push('Top K must be an integer of at least 0.');
         }
-        if (ms.qwen35_oq_a8_enabled) {
+        if (ms.a8_prefill_enabled) {
             if (ms.qwen35_ane_prefill_enabled)
                 errors.push('ANE prefill and INT8 activation prefill cannot both be enabled; they accelerate the same projections. Turn one off.');
-            const mt = num(ms.qwen35_oq_a8_min_tokens);
-            if (!Number.isInteger(mt) || mt < 1) errors.push('oQ A8 minimum prompt tokens must be a positive integer.');
+            const mt = num(ms.a8_prefill_min_tokens);
+            if (!Number.isInteger(mt) || mt < 1) errors.push('A8 minimum prompt tokens must be a positive integer.');
         }
         if (ms.mtp_enabled && ms.dflash_enabled)
             errors.push('Lightning MTP and DFlash cannot both be enabled; choose one speculative-decoding path.');
@@ -578,8 +579,8 @@
             turboquant_kv_bits: ms.turboquant_kv_enabled ? (parseFloat(ms.turboquant_kv_bits) || 4) : 4,
             moe_expert_offload_enabled: !diffusion && !!(model && model.moe_expert_offload_supported === true) && !!ms.moe_expert_offload_enabled,
             moe_expert_offload_resident_fraction: ms.moe_expert_offload_resident_fraction ?? 0.25,
-            qwen35_oq_a8_enabled: !!ms.qwen35_oq_a8_enabled,
-            qwen35_oq_a8_min_tokens: Number(ms.qwen35_oq_a8_min_tokens) || 128,
+            a8_prefill_enabled: !!ms.a8_prefill_enabled,
+            a8_prefill_min_tokens: Number(ms.a8_prefill_min_tokens) || 128,
             qwen35_ane_prefill_enabled: !!ms.qwen35_ane_prefill_enabled,
             qwen35_ane_prefill_sequence_length: Number(ms.qwen35_ane_prefill_sequence_length) || 2048,
             qwen35_ane_prefill_tail_padding_min_tokens: Number.isFinite(Number(ms.qwen35_ane_prefill_tail_padding_min_tokens))
@@ -694,7 +695,7 @@
                 mtp_adaptive_max_depth: null, mtp_fixed_depth: null,
                 vlm_mtp_enabled: false, vlm_mtp_draft_model: null,
                 moe_expert_offload_enabled: false,
-                qwen35_oq_a8_enabled: false,
+                a8_prefill_enabled: false,
             });
         }
         return payload;
@@ -737,9 +738,9 @@
             add('turboquant_kv_scheme', kvScheme);
             add('turboquant_kv_bits', kvPin !== null ? kvPin : (d.turboquant_kv_bits ?? 4));
         }
-        const oqOn = !!d.qwen35_oq_a8_enabled;
-        add('qwen35_oq_a8_enabled', oqOn);
-        if (oqOn) add('qwen35_oq_a8_min_tokens', d.qwen35_oq_a8_min_tokens ?? 128);
+        const oqOn = !!d.a8_prefill_enabled;
+        add('a8_prefill_enabled', oqOn);
+        if (oqOn) add('a8_prefill_min_tokens', d.a8_prefill_min_tokens ?? 128);
         const aneOn = !!d.qwen35_ane_prefill_enabled;
         add('qwen35_ane_prefill_enabled', aneOn);
         if (aneOn) {
@@ -822,7 +823,7 @@
         'embedding_audio_enabled', 'embedding_audio_max_seconds',
         'mtp_enabled', 'mtp_adaptive_max_depth', 'mtp_fixed_depth',
         'turboquant_kv_enabled', 'turboquant_kv_scheme', 'turboquant_kv_bits',
-        'qwen35_oq_a8_enabled', 'qwen35_oq_a8_min_tokens',
+        'a8_prefill_enabled', 'a8_prefill_min_tokens',
         'qwen35_ane_prefill_enabled', 'qwen35_ane_prefill_sequence_length',
         'qwen35_ane_prefill_tail_padding_min_tokens', 'qwen35_ane_prefill_fraction',
         'qwen35_ane_prefill_fused_down', 'qwen35_ane_prefill_max_layers',
@@ -853,7 +854,7 @@
     /* Diff two settings payloads (payload shape) through the signature:
        returns [{key, base, other}] of settings-signature entries that differ.
        DIV-2 (user 2026-10-09): gated dependent keys whose RAW display values
-       are numerically identical ("qwen35_oq_a8_min_tokens 128 -> 128") never
+       are numerically identical ("a8_prefill_min_tokens 128 -> 128") never
        surface as their own row. buildPayload always writes a default for
        every field, but the signature only carries a dependent key while its
        master switch is ON — so a master flip (off -> on) made the signature
@@ -891,7 +892,7 @@
             embedding_audio_max_seconds: 'embedding_audio_enabled',
             turboquant_kv_bits: 'turboquant_kv_enabled',
             turboquant_kv_scheme: 'turboquant_kv_enabled',
-            qwen35_oq_a8_min_tokens: 'qwen35_oq_a8_enabled',
+            a8_prefill_min_tokens: 'a8_prefill_enabled',
             moe_expert_offload_resident_fraction: 'moe_expert_offload_enabled',
             specprefill_draft_model: 'specprefill_enabled',
             specprefill_keep_pct: 'specprefill_enabled',
@@ -1190,7 +1191,7 @@
              DFLASH_DRAFTER_CONFIG_MODEL_TYPES,
              llmLike, TYPE_ONLY_KEYS, stickyForType,
              normType,
-             isDiffusion, isQwenOqA8, showsQwenOqA8, DSA_MODEL_TYPES,
+             isDiffusion, isA8PrefillModel, showsA8Prefill, DSA_MODEL_TYPES,
              coerceKwargValue, buildCtKwargEntries,
              kwargIdentity, mergeRawKwargs,
              buildState, validate, buildPayload, adaptToServerPayload,

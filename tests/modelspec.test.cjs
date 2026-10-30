@@ -84,8 +84,8 @@ test('validate: mtp + dflash conflict', () => {
     assert.match(ok(st).join('|'), /Lightning MTP and DFlash/);
 });
 test('validate: oq A8 vs ANE conflict + min tokens', () => {
-    const st = S.buildState(base(), { qwen35_oq_a8_enabled: true,
-        qwen35_ane_prefill_enabled: true, qwen35_oq_a8_min_tokens: 0 });
+    const st = S.buildState(base(), { a8_prefill_enabled: true,
+        qwen35_ane_prefill_enabled: true, a8_prefill_min_tokens: 0 });
     const errs = ok(st);
     assert.strictEqual(errs.length, 2);
 });
@@ -734,16 +734,53 @@ test('UP-18(7): resident experts keep the classic 5..95 percent band', () => {
     assert.ok(S.validate(st, base()).some(e => /between 5% and 95%/.test(e)));
 });
 test('UP-18(5): oQ A8 family includes qwen4_exp; the row honors the server verdict', () => {
-    assert.ok(S.isQwenOqA8(base({ config_model_type: 'qwen4_exp' })));
-    assert.ok(S.isQwenOqA8(base({ config_model_type: 'qwen3_6_moe' })));
-    assert.ok(!S.isQwenOqA8(base({ config_model_type: 'llama' })));
-    assert.ok(!S.showsQwenOqA8(base({ config_model_type: 'qwen4_exp' })),
+    assert.ok(S.isA8PrefillModel(base({ config_model_type: 'qwen4_exp' })));
+    assert.ok(S.isA8PrefillModel(base({ config_model_type: 'qwen3_6_moe' })));
+    assert.ok(!S.isA8PrefillModel(base({ config_model_type: 'llama' })));
+    assert.ok(!S.showsA8Prefill(base({ config_model_type: 'qwen4_exp' })),
         'family alone does NOT show the row (pre-M5 hardware)');
-    assert.ok(S.showsQwenOqA8(base({ config_model_type: 'qwen4_exp',
-        qwen35_oq_a8_supported: true })));
-    assert.ok(S.showsQwenOqA8(base({ config_model_type: 'qwen3_5',
-        settings: { qwen35_oq_a8_enabled: true } })), 'a saved-on keeps the row to allow off');
+    assert.ok(S.showsA8Prefill(base({ config_model_type: 'qwen4_exp',
+        a8_prefill_supported: true })));
+    assert.ok(S.showsA8Prefill(base({ config_model_type: 'qwen3_5',
+        settings: { a8_prefill_enabled: true } })), 'a saved-on keeps the row to allow off');
 });
 test('UP-18(4): DSA_MODEL_TYPES exported exactly like classic', () => {
     assert.deepStrictEqual([...S.DSA_MODEL_TYPES].sort(), ['deepseek_v32', 'glm_moe_dsa']);
+});
+
+/* ---- SYNC-1 fire 13 (upstream 18fe1c3 #4946): a8_prefill rename + widening ---- */
+test('SYNC-1 f13: family is the classic exact/prefix rule incl. deepseek_v41', () => {
+    assert.ok(S.isA8PrefillModel(base({ config_model_type: 'deepseek_v41' })),
+        'DeepSeek V4.1 joined the routed-expert A8 family');
+    assert.ok(!S.isA8PrefillModel(base({ config_model_type: 'deepseek_v4' })),
+        'deepseek_v41 is an EXACT match, the prefix admits nothing else');
+    assert.ok(!S.isA8PrefillModel(base({ config_model_type: 'qwen4' })),
+        'qwen4_exp is an EXACT match (classic comment: unvalidated checkpoints)');
+});
+test('SYNC-1 f13: buildPayload speaks the new keys only — no qwen35_oq_a8 leak', () => {
+    const p = S.buildPayload(Object.assign(
+        S.buildState(base(), { a8_prefill_enabled: true, a8_prefill_min_tokens: 256 }),
+        { model_alias: 'x' }), base());
+    assert.strictEqual(p.a8_prefill_enabled, true);
+    assert.strictEqual(p.a8_prefill_min_tokens, 256);
+    assert.ok(!('qwen35_oq_a8_enabled' in p) && !('qwen35_oq_a8_min_tokens' in p),
+        'retired names would 422 at extra=forbid tip');
+});
+test('SYNC-1 f13: signature + reload keys renamed with the payload', () => {
+    const sig = S.runtimeSignature(
+        { a8_prefill_enabled: true, a8_prefill_min_tokens: 128 }, base());
+    assert.strictEqual(String(sig.a8_prefill_enabled), 'true');
+    assert.strictEqual(String(sig.a8_prefill_min_tokens), '128');
+    assert.ok(S.RUNTIME_SETTING_KEYS.has('a8_prefill_enabled')
+        && S.RUNTIME_SETTING_KEYS.has('a8_prefill_min_tokens'));
+    assert.ok(![...S.RUNTIME_SETTING_KEYS].some(k => k.startsWith('qwen35_oq_a8')));
+});
+test('SYNC-1 f13: validate mirrors the tip A8 messages', () => {
+    const errs = S.validate(base() && S.buildState(base(),
+        { a8_prefill_enabled: true, qwen35_ane_prefill_enabled: true }), base());
+    assert.ok(errs.some(e => /ANE prefill and INT8 activation prefill/.test(e)));
+    const errs2 = S.validate(S.buildState(base(),
+        { a8_prefill_enabled: true, a8_prefill_min_tokens: 0 }), base());
+    assert.ok(errs2.some(e => e === 'A8 minimum prompt tokens must be a positive integer.'),
+        'tip reworded oQ A8 -> A8 (js.error.oq_a8_min_tokens_positive EN value)');
 });

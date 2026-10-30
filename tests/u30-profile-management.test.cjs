@@ -154,7 +154,7 @@ function load(routes) {
         validate: () => [],
         adaptToServerSettings: o => o,
         runtimeDiff: () => [], requestDiff: () => [], mergeRawKwargs: () => [],
-        llmLike: () => true, isDiffusion: () => false, showsQwenOqA8: () => false,
+        llmLike: () => true, isDiffusion: () => false, showsA8Prefill: () => false,
         MODEL_TYPE_OPTIONS: [], TYPE_ONLY_KEYS: new Set(),
         VLM_MTP_DRAFTER_CONFIG_MODEL_TYPES: new Set(),
         vlmMtpDrafters: () => [], dflashCandidates: () => [],
