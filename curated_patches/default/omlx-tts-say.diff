@@ -1,8 +1,8 @@
 diff --git a/apps/omlx-web/omlx_web/i18n/cs.json b/apps/omlx-web/omlx_web/i18n/cs.json
-index d1097b2e..f049d94e 100644
+index e2fea13..cc09eb0 100644
 --- a/apps/omlx-web/omlx_web/i18n/cs.json
 +++ b/apps/omlx-web/omlx_web/i18n/cs.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "Nechat Splash spustit část dlouhých promptů na Neural Engine, když je to rychlejší.",
    "settings.integrations.splash.running": "Spuštěn",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -36,10 +36,10 @@ index d1097b2e..f049d94e 100644
    "settings.integrations.markitdown.enabled_hint": "Před požadavky na LLM zpracovat podporované přílohy.",
    "settings.integrations.markitdown.expose_model": "Zobrazit jako model",
 diff --git a/apps/omlx-web/omlx_web/i18n/en.json b/apps/omlx-web/omlx_web/i18n/en.json
-index f219f5cf..6cdc0873 100644
+index 5e16832..2fe5404 100644
 --- a/apps/omlx-web/omlx_web/i18n/en.json
 +++ b/apps/omlx-web/omlx_web/i18n/en.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "Let Splash run part of long prompts on the Neural Engine when that is faster.",
    "settings.integrations.splash.running": "Running",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -73,10 +73,10 @@ index f219f5cf..6cdc0873 100644
    "settings.integrations.markitdown.enabled_hint": "Preprocess supported file attachments before LLM requests.",
    "settings.integrations.markitdown.expose_model": "Show as model",
 diff --git a/apps/omlx-web/omlx_web/i18n/es.json b/apps/omlx-web/omlx_web/i18n/es.json
-index 67ff3010..daed315c 100644
+index 962d887..1a545a1 100644
 --- a/apps/omlx-web/omlx_web/i18n/es.json
 +++ b/apps/omlx-web/omlx_web/i18n/es.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "Let Splash run part of long prompts on the Neural Engine when that is faster.",
    "settings.integrations.splash.running": "Running",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -110,10 +110,10 @@ index 67ff3010..daed315c 100644
    "settings.integrations.markitdown.enabled_hint": "Preprocess supported file attachments before LLM requests.",
    "settings.integrations.markitdown.expose_model": "Show as model",
 diff --git a/apps/omlx-web/omlx_web/i18n/fr.json b/apps/omlx-web/omlx_web/i18n/fr.json
-index 501484d0..3ddb38d0 100644
+index b8d138e..386e540 100644
 --- a/apps/omlx-web/omlx_web/i18n/fr.json
 +++ b/apps/omlx-web/omlx_web/i18n/fr.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "Let Splash run part of long prompts on the Neural Engine when that is faster.",
    "settings.integrations.splash.running": "Running",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -147,10 +147,10 @@ index 501484d0..3ddb38d0 100644
    "settings.integrations.markitdown.enabled_hint": "Preprocess supported file attachments before LLM requests.",
    "settings.integrations.markitdown.expose_model": "Show as model",
 diff --git a/apps/omlx-web/omlx_web/i18n/ja.json b/apps/omlx-web/omlx_web/i18n/ja.json
-index ec1bca87..078759d6 100644
+index 7199764..f7d4246 100644
 --- a/apps/omlx-web/omlx_web/i18n/ja.json
 +++ b/apps/omlx-web/omlx_web/i18n/ja.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "Let Splash run part of long prompts on the Neural Engine when that is faster.",
    "settings.integrations.splash.running": "Running",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -184,10 +184,10 @@ index ec1bca87..078759d6 100644
    "settings.integrations.markitdown.enabled_hint": "Preprocess supported file attachments before LLM requests.",
    "settings.integrations.markitdown.expose_model": "Show as model",
 diff --git a/apps/omlx-web/omlx_web/i18n/ko.json b/apps/omlx-web/omlx_web/i18n/ko.json
-index f1ecec52..159fa205 100644
+index 9ed7c28..5e3fa15 100644
 --- a/apps/omlx-web/omlx_web/i18n/ko.json
 +++ b/apps/omlx-web/omlx_web/i18n/ko.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "더 빠를 때 긴 프롬프트 일부를 Neural Engine에서 처리합니다.",
    "settings.integrations.splash.running": "실행 중",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -221,10 +221,10 @@ index f1ecec52..159fa205 100644
    "settings.integrations.markitdown.enabled_hint": "지원되는 파일 첨부를 LLM 요청 전에 전처리합니다.",
    "settings.integrations.markitdown.expose_model": "모델로 표시",
 diff --git a/apps/omlx-web/omlx_web/i18n/pt-BR.json b/apps/omlx-web/omlx_web/i18n/pt-BR.json
-index 7f0cb7ff..609c4854 100644
+index 33c1c5c..0811e35 100644
 --- a/apps/omlx-web/omlx_web/i18n/pt-BR.json
 +++ b/apps/omlx-web/omlx_web/i18n/pt-BR.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "Let Splash run part of long prompts on the Neural Engine when that is faster.",
    "settings.integrations.splash.running": "Running",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -258,10 +258,10 @@ index 7f0cb7ff..609c4854 100644
    "settings.integrations.markitdown.enabled_hint": "Pré-processar anexos de arquivos suportados antes das requisições ao LLM.",
    "settings.integrations.markitdown.expose_model": "Exibir como modelo",
 diff --git a/apps/omlx-web/omlx_web/i18n/ru.json b/apps/omlx-web/omlx_web/i18n/ru.json
-index 92849d34..0c2a1e3a 100644
+index af5449f..5c869d6 100644
 --- a/apps/omlx-web/omlx_web/i18n/ru.json
 +++ b/apps/omlx-web/omlx_web/i18n/ru.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "Let Splash run part of long prompts on the Neural Engine when that is faster.",
    "settings.integrations.splash.running": "Running",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -295,10 +295,10 @@ index 92849d34..0c2a1e3a 100644
    "settings.integrations.markitdown.enabled_hint": "Предварительно обрабатывать поддерживаемые вложения перед запросами к LLM.",
    "settings.integrations.markitdown.expose_model": "Показывать как модель",
 diff --git a/apps/omlx-web/omlx_web/i18n/zh-TW.json b/apps/omlx-web/omlx_web/i18n/zh-TW.json
-index f9f48af4..f4b17c99 100644
+index e397d9d..d623f8f 100644
 --- a/apps/omlx-web/omlx_web/i18n/zh-TW.json
 +++ b/apps/omlx-web/omlx_web/i18n/zh-TW.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "Let Splash run part of long prompts on the Neural Engine when that is faster.",
    "settings.integrations.splash.running": "Running",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -332,10 +332,10 @@ index f9f48af4..f4b17c99 100644
    "settings.integrations.markitdown.enabled_hint": "在 LLM 請求前預處理支援的檔案附件。",
    "settings.integrations.markitdown.expose_model": "顯示為模型",
 diff --git a/apps/omlx-web/omlx_web/i18n/zh.json b/apps/omlx-web/omlx_web/i18n/zh.json
-index 919afef9..79e70d74 100644
+index c0ec619..fc8b11f 100644
 --- a/apps/omlx-web/omlx_web/i18n/zh.json
 +++ b/apps/omlx-web/omlx_web/i18n/zh.json
-@@ -523,6 +523,32 @@
+@@ -534,6 +534,32 @@
    "settings.integrations.splash.ane_prefill_hint": "在速度更快时，让 Splash 把长提示词的一部分放到 ANE 上运行。",
    "settings.integrations.splash.running": "运行中",
    "settings.integrations.markitdown.section_label": "MarkItDown",
@@ -369,7 +369,7 @@ index 919afef9..79e70d74 100644
    "settings.integrations.markitdown.enabled_hint": "在 LLM 请求前预处理支持的文件附件。",
    "settings.integrations.markitdown.expose_model": "作为模型显示",
 diff --git a/apps/omlx-web/omlx_web/static/js/dashboard.js b/apps/omlx-web/omlx_web/static/js/dashboard.js
-index 862fd105..2ec60d7d 100644
+index aeb4a30..87e40c7 100644
 --- a/apps/omlx-web/omlx_web/static/js/dashboard.js
 +++ b/apps/omlx-web/omlx_web/static/js/dashboard.js
 @@ -201,6 +201,11 @@
@@ -397,7 +397,7 @@ index 862fd105..2ec60d7d 100644
              // Splash launcher path row: manual entry when not detected or changed
              splashPath: { editing: false, draft: '', error: '', saving: false },
              splashOptionsError: '',
-@@ -1024,6 +1035,7 @@
+@@ -1028,6 +1039,7 @@
                  this.activeTab = tab;
                  this.mainTab = 'settings';
                  this.syncTabStateToUrl();
@@ -405,7 +405,7 @@ index 862fd105..2ec60d7d 100644
              },
  
              settingsGoToSection(id) {
-@@ -1302,6 +1314,13 @@
+@@ -1306,6 +1318,13 @@
                              ? String(this.globalSettings.idle_timeout.idle_timeout_seconds)
                              : '';
  
@@ -419,7 +419,7 @@ index 862fd105..2ec60d7d 100644
                          // Normalize memory guard tier to one of the known values.
                          const validTiers = ['safe', 'balanced', 'aggressive', 'custom'];
                          if (!validTiers.includes(this.globalSettings.memory.memory_guard_tier)) {
-@@ -4404,6 +4423,10 @@
+@@ -4408,6 +4427,10 @@
                              splash_max_memory_gb: this.globalSettings.integrations.splash_max_memory_gb,
                              splash_ssd_cache_gb: this.globalSettings.integrations.splash_ssd_cache_gb,
                              splash_ane_prefill: this.globalSettings.integrations.splash_ane_prefill,
@@ -430,7 +430,7 @@ index 862fd105..2ec60d7d 100644
                          }),
                      });
                      if (!response.ok) {
-@@ -4418,6 +4441,173 @@
+@@ -4422,6 +4445,173 @@
                  return '';
              },
  
@@ -605,7 +605,7 @@ index 862fd105..2ec60d7d 100644
              optionalNumber(value) {
                  return value === '' || value === null || value === undefined ? null : Number(value);
 diff --git a/apps/omlx-web/omlx_web/templates/dashboard/_settings.html b/apps/omlx-web/omlx_web/templates/dashboard/_settings.html
-index f5f99ecb..04602f60 100644
+index f5f99ec..04602f6 100644
 --- a/apps/omlx-web/omlx_web/templates/dashboard/_settings.html
 +++ b/apps/omlx-web/omlx_web/templates/dashboard/_settings.html
 @@ -1453,6 +1453,124 @@
@@ -735,7 +735,7 @@ index f5f99ecb..04602f60 100644
                                  <div class="flex items-center gap-3">
 diff --git a/apps/omlx-web/tests/test_admin_macos_speech_ui.py b/apps/omlx-web/tests/test_admin_macos_speech_ui.py
 new file mode 100644
-index 00000000..2edd9836
+index 0000000..2edd983
 --- /dev/null
 +++ b/apps/omlx-web/tests/test_admin_macos_speech_ui.py
 @@ -0,0 +1,234 @@
@@ -974,10 +974,10 @@ index 00000000..2edd9836
 +    assert "const previous = lang.configured" in handler
 +    assert "lang.configured = previous;" in handler
 diff --git a/omlx/admin/routes.py b/omlx/admin/routes.py
-index fd8952bd..be94f58d 100644
+index 57d607f..bf65e98 100644
 --- a/omlx/admin/routes.py
 +++ b/omlx/admin/routes.py
-@@ -88,9 +88,12 @@ from ..settings import (
+@@ -95,9 +95,12 @@ from ..settings import (
      BURST_DECODE_MODES,
      SPLASH_KV_FORMATS,
      SubKeyEntry,
@@ -990,7 +990,7 @@ index fd8952bd..be94f58d 100644
  from ..utils.fatal import is_command_buffer_error
  from ..utils.hardware import (
      compute_owner_hash,
-@@ -785,6 +788,13 @@ class GlobalSettingsRequest(BaseModel):
+@@ -792,6 +795,13 @@ class GlobalSettingsRequest(BaseModel):
      integrations_openclaw_tools_profile: (
          Literal["minimal", "coding", "messaging", "full"] | None
      ) = None
@@ -1004,7 +1004,7 @@ index fd8952bd..be94f58d 100644
      markitdown_enabled: bool | None = None
      markitdown_expose_model: bool | None = None
      markitdown_max_file_size_mb: int | None = None
-@@ -4742,6 +4752,13 @@ def _global_settings_response(global_settings):
+@@ -4766,6 +4776,13 @@ def _global_settings_response(global_settings):
              "splash_max_memory_gb": global_settings.integrations.splash_max_memory_gb,
              "splash_ssd_cache_gb": global_settings.integrations.splash_ssd_cache_gb,
              "splash_ane_prefill": global_settings.integrations.splash_ane_prefill,
@@ -1018,7 +1018,7 @@ index fd8952bd..be94f58d 100644
          },
          "external_engines": {"splash": _splash_status(global_settings)},
          "system": {
-@@ -5663,6 +5680,46 @@ async def update_global_settings(
+@@ -5687,6 +5704,46 @@ async def update_global_settings(
              request.splash_ane_prefill
          )
          integrations_changed = True
@@ -1065,7 +1065,7 @@ index fd8952bd..be94f58d 100644
      if "markitdown_enabled" in request.model_fields_set:
          global_settings.integrations.markitdown_enabled = bool(
              request.markitdown_enabled
-@@ -6090,6 +6147,35 @@ class WebSearchTestRequest(BaseModel):
+@@ -6114,6 +6171,35 @@ class WebSearchTestRequest(BaseModel):
      max_results: int = Field(default=DEFAULT_MAX_RESULTS, ge=1, le=10)
  
  
@@ -1102,33 +1102,36 @@ index fd8952bd..be94f58d 100644
  async def test_web_search(
      request: WebSearchTestRequest,
 diff --git a/omlx/api/audio_routes.py b/omlx/api/audio_routes.py
-index 80839394..8be47b8e 100644
+index 4bb8e24..491bb20 100644
 --- a/omlx/api/audio_routes.py
 +++ b/omlx/api/audio_routes.py
-@@ -17,9 +17,11 @@ import logging
+@@ -17,11 +17,13 @@ import logging
  import math
  import os
  import re
 +import struct
  import tempfile
+ import uuid
 +import wave
  from pathlib import Path
+ from types import SimpleNamespace
 -from typing import AsyncIterator, Optional
 +from typing import Any, AsyncIterator, Optional
  
  from fastapi import (
      APIRouter,
-@@ -30,7 +32,8 @@ from fastapi import (
+@@ -32,8 +34,9 @@ from fastapi import (
      WebSocket,
      WebSocketDisconnect,
  )
 -from fastapi.responses import Response, StreamingResponse
 +from fastapi.responses import FileResponse, Response, StreamingResponse
+ from PIL import Image
 +from starlette.background import BackgroundTask
  
  from ..engine.audio_utils import wav_bytes_to_pcm_frames, wav_header
  from ..engine.lfm3_speech import SPEECH_MODEL_TYPES, VOICES
-@@ -868,6 +871,354 @@ def _transcode_speech_output(wav_bytes: bytes, response_format: str) -> bytes:
+@@ -1522,6 +1525,354 @@ def _transcode_speech_output(wav_bytes: bytes, response_format: str) -> bytes:
      return buf.getvalue()
  
  
@@ -1483,7 +1486,7 @@ index 80839394..8be47b8e 100644
  @router.post("/v1/audio/speech")
  async def create_speech(request: AudioSpeechRequest):
      """OpenAI-compatible text-to-speech endpoint."""
-@@ -894,6 +1245,11 @@ async def create_speech(request: AudioSpeechRequest):
+@@ -1548,6 +1899,11 @@ async def create_speech(request: AudioSpeechRequest):
              )
          streaming_interval = _resolve_tts_streaming_interval(request)
  
@@ -1496,10 +1499,10 @@ index 80839394..8be47b8e 100644
  
      pool = _get_engine_pool()
 diff --git a/omlx/server.py b/omlx/server.py
-index ab1963ef..7cbb494d 100644
+index aaadcad..65cdda3 100644
 --- a/omlx/server.py
 +++ b/omlx/server.py
-@@ -3916,6 +3916,14 @@ async def list_models(_: bool = Depends(verify_inference_api_key)) -> JSONRespon
+@@ -3920,6 +3920,14 @@ async def list_models(_: bool = Depends(verify_inference_api_key)) -> JSONRespon
      ):
          models.append(ModelInfo(id=MARKITDOWN_MODEL_ID, owned_by="omlx"))
  
@@ -1515,7 +1518,7 @@ index ab1963ef..7cbb494d 100644
      if favorite_ids:
          models.sort(key=lambda m: m.id not in favorite_ids)
 diff --git a/omlx/settings.py b/omlx/settings.py
-index c66059df..cfc26870 100644
+index c66059d..cfc2687 100644
 --- a/omlx/settings.py
 +++ b/omlx/settings.py
 @@ -952,6 +952,64 @@ class ClaudeCodeSettings:
@@ -1633,7 +1636,7 @@ index c66059df..cfc26870 100644
              splash_max_memory_gb=data.get("splash_max_memory_gb"),
 diff --git a/omlx/utils/macos_say.py b/omlx/utils/macos_say.py
 new file mode 100644
-index 00000000..18b2e0c9
+index 0000000..18b2e0c
 --- /dev/null
 +++ b/omlx/utils/macos_say.py
 @@ -0,0 +1,1220 @@
@@ -2859,7 +2862,7 @@ index 00000000..18b2e0c9
 +        return dst.read_bytes()
 diff --git a/tests/test_tts_macos_say.py b/tests/test_tts_macos_say.py
 new file mode 100644
-index 00000000..49f27f7c
+index 0000000..49f27f7
 --- /dev/null
 +++ b/tests/test_tts_macos_say.py
 @@ -0,0 +1,1244 @@
@@ -4108,7 +4111,7 @@ index 00000000..49f27f7c
 +    assert "say_enabled" in req.model_fields_set
 +    assert req.say_voices == {"cs-CZ": "com.apple.voice.premium.cs-CZ.Zuzana"}
 diff --git a/tests/test_v1_models_visibility.py b/tests/test_v1_models_visibility.py
-index 60c03a58..1521cb80 100644
+index 60c03a5..1521cb8 100644
 --- a/tests/test_v1_models_visibility.py
 +++ b/tests/test_v1_models_visibility.py
 @@ -52,9 +52,15 @@ def _state(models: list[dict], tmp_path, *, hide_helpers: bool = False) -> Serve
